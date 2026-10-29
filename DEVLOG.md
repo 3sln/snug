@@ -704,9 +704,12 @@ reads; object storage via HTTP range requests) and a forward-only stream
 the same Program. The VM never does I/O: it suspends with `NEED(offset,
 length)` and the host resumes it with a new window (plan/fulfil, as emon
 D008). This requires an explicit-stack resumable VM: **D016 is superseded**.
-Strings are scanned incrementally; the only look-back buffering is the
-previous/current map key (key length limit, default 1 KiB) and ≤ 136 bytes of
-split scalars. D017 is amended: stream decode builds while validating and
+Strings are scanned incrementally; look-back is per active map's previous
+key and split scalars. *Amended 2026-10-29 after review (§17 revision 3):* no
+key length limit (it would change accepted language vs cbor.mjs); sessions
+declare the exact document length (unknown-length streams deferred to the
+owner); each live session owns its scratch arena; a `YIELD` quantum bounds
+uninterrupted work. D017 is amended: stream decode builds while validating and
 releases values only on success. The buffer keeps a monomorphic host fast
 path; whether the kin walk also needs a specialised recursive driver is
 decided by measurement (≤ 15% overhead → one VM), with a random-window-split
