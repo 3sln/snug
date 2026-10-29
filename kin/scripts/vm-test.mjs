@@ -27,10 +27,12 @@ import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../ge
 import { buildCases, hex } from './scan-cases.mjs';
 import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
 import { assembledCases } from './vm-cases.mjs';
-import { decode, CBORFault } from '../../bench/baseline/cbor-3sln.mjs';
+import { encode, decode } from '../../bench/baseline/cbor-3sln.mjs';
+import { compile as oracleCompile, check as oracleCheck } from '../../corpus/tools/oracle.mjs';
+import { oracleSchemas } from './vm-oracle-gen.mjs';
 
-const [rustBin, mutArg, seedArg] = process.argv.slice(2);
-const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1);
+const [rustBin, mutArg, seedArg, schemaArg] = process.argv.slice(2);
+const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 400);
 let fails = 0;
 const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); fails++; };
 const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
@@ -135,6 +137,26 @@ for (const file of ['study', 'adversarial']) {
   }
 }
 
+// ---------------------------------------------------------------- 3b. oracle differential (D022)
+const diff = { schemas: 0, compiled: 0, refused: 0, oracleRefused: 0, unknown: 0, cases: 0, refusals: {} };
+for (const { cddl, values } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
+  diff.schemas++;
+  let c;
+  try { c = compile(cddl); } catch (e) { diff.refused++; diff.refusals[e.code ?? e.message] = (diff.refusals[e.code ?? e.message] ?? 0) + 1; continue; }
+  const os = oracleCompile(cddl);
+  if (os.error) { diff.oracleRefused++; continue; }
+  diff.compiled++;
+  const pi = addProgram(c.program, c.pool, `oracle: ${cddl}`);
+  for (const v of values) {
+    let bytes; try { bytes = encode(v); } catch { continue; }
+    const want = oracleCheck(os, 'r', decode(bytes, { top: 'any' }), { steps: 200000 });
+    if (want === 'unknown') { diff.unknown++; continue; }
+    diff.cases++;
+    cases.push({ prog: pi, rule: c.rules.indexOf('r'), lim: LIM(1, 0), bytes, label: `oracle: ${cddl} [${hex(bytes).slice(0, 40)}]`, oracle: true,
+      check: o => { const ok = o.split(' ')[0] === '0'; return ok === want ? null : `VM ${ok}, oracle ${want} (out ${o})`; } });
+  }
+}
+
 // ---------------------------------------------------------------- 4. assembled
 const asmStart = cases.length;
 for (const a of assembledCases()) {
@@ -147,9 +169,9 @@ const nAsm = cases.length - asmStart;
 const t0 = performance.now();
 const js = cases.map(c => { try { return runJs(c); } catch (e) { return 'THROW ' + e.message; } });
 const tJs = performance.now() - t0;
-const stats = { identity: [0, 0], corpus: [0, 0], other: [0, 0] };
+const stats = { identity: [0, 0], corpus: [0, 0], oracle: [0, 0], other: [0, 0] };
 cases.forEach((c, i) => {
-  const which = c.identity ? 'identity' : c.corpus ? 'corpus' : 'other';
+  const which = c.identity ? 'identity' : c.corpus ? 'corpus' : c.oracle ? 'oracle' : 'other';
   stats[which][1]++;
   const r = js[i].startsWith('THROW') || js[i].startsWith('ERR') ? js[i] : c.check(js[i]);
   if (r) fail(`${c.label}: JS ${r}`); else stats[which][0]++;
@@ -158,7 +180,7 @@ cases.forEach((c, i) => {
 let guarded = 0, trapFails = 0;
 cases.forEach((c, i) => {
   if (c.bytes.length > 2048 || guarded >= 6000) return;
-  if (!(c.corpus || i >= asmStart || i % 7 === 0)) return;
+  if (!(c.corpus || c.oracle || i >= asmStart || i % 7 === 0)) return;
   guarded++;
   try { const g = runJs(c, true); if (g !== js[i]) { trapFails++; fail(`${c.label}: trapped JS ${g} vs ${js[i]}`); } }
   catch (e) { trapFails++; fail(`${c.label} [${hex(c.bytes).slice(0, 60)}]: ${e.message}`); }
@@ -192,6 +214,8 @@ line(stats.identity[0] === stats.identity[1], `profile identity: ${stats.identit
 line(stats.corpus[0] === stats.corpus[1], `conformance: ${stats.corpus[0]}/${stats.corpus[1]} cases with the expected verdict, from ${corpus.compiled} compiled suites of ${corpus.suites} (${corpus.later} phase-later skipped)`);
 console.log(`  info refusal suites: ${corpus.refusedOk} refused by the compiler as expected; ${corpus.refusedNot.length} compiled anyway (compiler's gate)`);
 if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length} suites did not compile (not VM cases):`); for (const s of corpus.notCompiled.slice(0, 40)) console.log('       ' + s); }
+line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.oracle[0]}/${stats.oracle[1]} values agree with corpus/tools/oracle.mjs on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}); ${diff.unknown} oracle-unknown skipped`);
+console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `§15 and assembled programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled)`);
 line(trapFails === 0, `JS bounds: ${guarded} cases re-run behind throwing out-of-bounds traps on P, B, input and scratch`);
 console.log(rustLine);
