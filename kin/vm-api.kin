@@ -1,0 +1,256 @@
+;; The VM's entry points (docs/program.md §13.1): scratch sizing and
+;; initialisation, rule lookup, and validation of a whole buffer or of one
+;; item's span (architecture §16.3 `validateAt`). The buffer driver of D030:
+;; a bounded recursive walk over a contiguous buffer. vm-verify is the
+;; compiler engineer's (kin/program, snug.program.verify); a Program must be
+;; verified before it is validated against.
+(ns snug.vm.api
+  (:require [kin.lang :refer [defn let local return set if while for do comment]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg rem ushr < > <= >= == != and or not
+                               u8 blen ia iset ilen]]
+            [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_COSE
+                                     O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS
+                                     O_ITEMS MAX_BIGNUM_BYTES]]
+            [snug.cbor.head :refer [fail]]
+            [snug.vm.layout :refer [MAGIC FORMAT_VERSION HEADER_WORDS H_FORMAT H_HEADER_WORDS
+                                    H_PROGRAM_WORDS H_POOL_BYTES H_N_RULES H_N_LEAVES H_LIM_DEPTH
+                                    H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS H_LIM_BIGNUM H_LIM_BUDGET
+                                    H_S_RULES H_S_CSET_INDEX H_S_CHAIN_INDEX VM_EPOCH VM_MARK_CAP
+                                    VM_BUDGET VM_BUDGET_START VM_W_STATE VM_W_REASON VM_W_SUB
+                                    VM_W_DEPTH VM_W_XKIND VM_W_XVAL VM_W_OFFSET VM_D VM_FRAMES VM_PATH
+                                    VM_REGEX VM_RULE VM_CHAIN VM_EMBED VM_BIGNUM_MAX VM_POS VM_Q1
+                                    VM_EXH VM_REGCAP VM_QIDX VM_DLIM SCRATCH_MARK R_TYPE R_BUDGET
+                                    R_INCONSISTENT]]
+            [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec wit-empty wit-set]]
+            [snug.vm.dead :refer [dead-item]]
+            [snug.vm.leaf :refer [cmp-bytes]]
+            [snug.vm.eval :refer [eval-item]]))
+
+;; ------------------------------------------------------------ scratch
+
+(defn ^:pub ^I32 chain-of [^IntsR p ^I32 rule]
+  (comment "The word offset of rule's closure-chain record.")
+  (let [rr (+ (ia p H_S_RULES) (* 5 rule))]
+    (return (ia p (+ (ia p H_S_CHAIN_INDEX) (ia p (+ rr 3)))))))
+
+(defn ^:pub ^I32 chain-cset [^IntsR p ^I32 ch ^I32 k]
+  (comment "The closure-set record of physical depth k on chain ch, or -1 (empty).")
+  (let [n (ia p ch)
+        r (ia p (+ ch 1))
+        ^:mut ci k]
+    (if (>= k n)
+      (do (if (< r 0) (return (neg 1)))
+          (set ci (+ r (rem (- k r) (- n r))))))
+    (return (ia p (+ (ia p H_S_CSET_INDEX) (ia p (+ (+ ch 2) ci)))))))
+
+(defn ^:pub ^I32 chain-regex [^IntsR p ^I32 ch ^I32 dd]
+  (comment "max over depths 0..dd of the closure set's regex_words.")
+  (let [^:mut m 0]
+    (for [^I32 k 0 (+ dd 1)]
+      (let [cr (chain-cset p ch k)]
+        (if (>= cr 0)
+          (if (> (ia p (+ cr 2)) m) (set m (ia p (+ cr 2)))))))
+    (return m)))
+
+(defn ^:pub ^I32 chain-frames [^IntsR p ^I32 ch ^I32 dd]
+  (comment "Sum over depths 0..dd of the closure set's frame_words.")
+  (let [^:mut t 0]
+    (for [^I32 k 0 (+ dd 1)]
+      (let [cr (chain-cset p ch k)]
+        (if (>= cr 0) (set t (+ t (ia p (+ cr 1)))))))
+    (return t)))
+
+(defn ^:pub ^I32 vm-scratch-words [^IntsR p ^I32 rule ^I32 mark-cap]
+  (comment "Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)"
+           "(§12.1): 48 + 2M + 2(D + 1) + regex area + frames.")
+  (let [nl (ia p H_N_LEAVES)
+        ^:mut m mark-cap
+        dd (ia p H_LIM_DEPTH)
+        ch (chain-of p rule)]
+    (if (< m nl) (set m nl))
+    (return (+ (+ (+ (+ SCRATCH_MARK (* 2 m)) (* 2 (+ dd 1))) (chain-regex p ch dd))
+               (chain-frames p ch dd)))))
+
+(defn ^:pub vm-scratch-init [^Ints s ^I32 mark-cap]
+  (comment "On a freshly zeroed S: VM_EPOCH = 1, VM_MARK_CAP = mark-cap.")
+  (iset s VM_EPOCH 1)
+  (iset s VM_MARK_CAP mark-cap))
+
+(defn ^:pub ^I32 vm-rule-index [^IntsR p ^Bytes pool ^Bytes name]
+  (comment "Binary search of RULES (sorted by UTF-8 bytes) for name; -1 if absent.")
+  (let [base (ia p H_S_RULES)
+        nl (blen name)
+        ^:mut lo 0
+        ^:mut hi (ia p H_N_RULES)]
+    (while (< lo hi)
+      (let [mid (ushr (+ lo hi) 1)
+            rr (+ base (* 5 mid))
+            c (cmp-bytes name 0 nl pool (ia p rr) (ia p (+ rr 1)))]
+        (if (== c 0) (return mid))
+        (if (< c 0) (set hi mid) (set lo (+ mid 1)))))
+    (return (neg 1))))
+
+;; ------------------------------------------------------------ validation
+
+(defn ^:pub ^I32 lim [^IntsR limits ^I32 i ^I32 compiled]
+  (comment "The effective limit i: the compiled value, lowered by a given value >= 0.")
+  (if (>= i (ilen limits)) (return compiled))
+  (let [v (ia limits i)]
+    (if (< v 0) (return compiled))
+    (if (< v compiled) (return v))
+    (return compiled)))
+
+(defn ^:pub ^I32 opt01 [^IntsR limits ^I32 i]
+  (if (>= i (ilen limits)) (return 0))
+  (if (== (ia limits i) 1) (return 1))
+  (return 0))
+
+(defn ^:pub ^I32 vm-output [^Ints s ^Ints out ^I32 code ^I32 sub ^I32 offset]
+  (comment "Fill out (§13.2) and answer the code.")
+  (let [start (ia s VM_BUDGET_START)
+        ^:mut used (- start (ia s VM_BUDGET))]
+    (if (== code R_BUDGET) (set used start))
+    (iset out 0 code)
+    (iset out 1 sub)
+    (iset out 2 offset)
+    (iset out 3 used)
+    (iset out 4 (ia s O_ITEMS))
+    (iset out 5 0)
+    (iset out 6 0)
+    (iset out 7 0)
+    (return code)))
+
+(defn ^:pub ^I32 vm-witness-output [^Ints s ^Ints out]
+  (comment "A schema failure: the witness slot and its path (§9.2, §9.3).")
+  (let [depth (ia s VM_W_DEPTH)
+        xk (ia s VM_W_XKIND)
+        pb (ia s VM_PATH)
+        ^:mut n depth
+        ^:mut k 0
+        cap (ushr (- (ilen out) 8) 1)]
+    (let [wr (ia s VM_W_REASON)
+          wsub (ia s VM_W_SUB)
+          woff (ia s VM_W_OFFSET)]
+      (vm-output s out wr wsub woff))
+    (if (>= xk 0) (set n (+ n 1)))
+    (iset out 5 n)
+    (while (and (< k depth) (< k cap))
+      (iset out (+ 8 (* 2 k)) (ia s (+ pb (* 2 (+ k 1)))))
+      (iset out (+ 9 (* 2 k)) (ia s (+ (+ pb (* 2 (+ k 1))) 1)))
+      (set k (+ k 1)))
+    (if (and (>= xk 0) (< k cap))
+      (do (iset out (+ 8 (* 2 k)) xk)
+          (iset out (+ 9 (* 2 k)) (ia s VM_W_XVAL))
+          (set k (+ k 1))))
+    (iset out 6 k)
+    (return (ia s VM_W_REASON))))
+
+(defn ^:pub ^I32 vm-run [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
+                         ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
+  (comment "Validate the single item b[start, end) against rule, its depth and item"
+           "accounting starting at depth0 / items0. See vm-validate for results.")
+  (if (< (ilen out) 8) (return (neg 4)))
+  (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
+  (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_VERSION)
+                                  (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
+    (return (neg 1)))
+  (if (or (!= (ia p H_PROGRAM_WORDS) (ilen p)) (!= (ia p H_POOL_BYTES) (blen pool))) (return (neg 1)))
+  (if (or (< rule 0) (>= rule (ia p H_N_RULES))) (return (neg 3)))
+  (if (or (< start 0) (or (< end start) (> end (blen b)))) (return (neg 1)))
+  (if (< (ilen s) SCRATCH_MARK) (return (neg 2)))
+  (let [mc (ia s VM_MARK_CAP)
+        dd (ia p H_LIM_DEPTH)
+        ch (chain-of p rule)]
+    (if (< mc (ia p H_N_LEAVES)) (return (neg 2)))
+    (if (< (ilen s) (vm-scratch-words p rule mc)) (return (neg 2)))
+    (let [path (+ SCRATCH_MARK (* 2 mc))
+          rx (+ path (* 2 (+ dd 1)))
+          rxw (chain-regex p ch dd)
+          frames (+ rx rxw)
+          ^:mut dl (- (lim limits 3 dd) depth0)
+          bmax (lim limits 6 (ia p H_LIM_BIGNUM))
+          budget (lim limits 7 (ia p H_LIM_BUDGET))
+          n (- end start)]
+      (if (< dl 0) (set dl 0))
+      (iset s O_TOP (opt01 limits 0))
+      (if (== depth0 0) (iset s O_COSE (opt01 limits 1)) (iset s O_COSE 0))
+      (iset s O_MAX_BYTES (lim limits 2 (ia p H_LIM_INPUT)))
+      (iset s O_MAX_DEPTH dl)
+      (iset s O_MAX_ENTRIES (lim limits 4 (ia p H_LIM_ENTRIES)))
+      (iset s O_MAX_ITEMS (lim limits 5 (ia p H_LIM_ITEMS)))
+      (iset s O_ERR_POS (neg 1))
+      (iset s O_ITEMS items0)
+      (iset s VM_BUDGET budget)
+      (iset s VM_BUDGET_START budget)
+      (iset s VM_W_STATE 0)
+      (iset s VM_D dd)
+      (iset s VM_FRAMES frames)
+      (iset s VM_PATH path)
+      (iset s VM_REGEX rx)
+      (iset s VM_REGCAP rxw)
+      (iset s VM_RULE rule)
+      (iset s VM_CHAIN ch)
+      (iset s VM_EMBED 0)
+      (if (> bmax MAX_BIGNUM_BYTES) (iset s VM_BIGNUM_MAX MAX_BIGNUM_BYTES) (iset s VM_BIGNUM_MAX bmax))
+      (iset s VM_POS start)
+      (iset s VM_Q1 0)
+      (iset s VM_EXH 0)
+      (iset s VM_QIDX (+ SCRATCH_MARK mc))
+      (iset s VM_DLIM dl)
+      (if (> n (ia s O_MAX_BYTES))
+        (do (let [c1 (neg (fail s start CODE_TOO_LARGE))]
+              (return (vm-output s out c1 0 start)))))
+      (if (== (ia s O_TOP) 0)
+        (if (or (== n 0) (!= (ushr (u8 b start) 5) 5))
+          (do (let [c2 (neg (fail s start CODE_NOT_MAP))]
+                (return (vm-output s out c2 0 start))))))
+      (let [rr (+ (ia p H_S_RULES) (* 5 rule))
+            ts (ia p (+ rr 2))
+            cr (cset-rec p s 0)
+            w (ia p cr)
+            e (new-epoch s)
+            nq (q-add p s frames w 0 ts e start)]
+        (if (== nq (neg R_BUDGET))
+          (do (let [at1 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at1)))))
+        (if (< nq 0) (return (neg 1)))
+        (local ^I32 r)
+        (if (> nq 0)
+          (set r (eval-item p pool b s start 0 frames 0 nq end 0))
+          (set r (dead-item b s start 0 end)))
+        (if (== r (neg R_BUDGET))
+          (do (let [at2 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at2)))))
+        (if (== r (neg R_INCONSISTENT)) (return (neg 1)))
+        (if (< r 0)
+          (do (let [at3 (ia s O_ERR_POS)] (return (vm-output s out (neg r) 0 at3)))))
+        (if (!= r end)
+          (do (let [c3 (neg (fail s r CODE_TRAILING))]
+                (return (vm-output s out c3 0 r)))))
+        (let [ev (q-stamp s frames w nq start)]
+          (if (< ev 0)
+            (do (let [at4 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at4)))))
+          (let [t (ts-test p s ts ev start)]
+            (if (< t 0)
+              (do (let [at5 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at5)))))
+            (if (== t 1) (return (vm-output s out 0 0 0)))
+            (if (wit-empty s) (wit-set s R_TYPE 0 0 (neg 1) 0 start))
+            (return (vm-witness-output s out))))))))
+
+(defn ^:pub ^I32 vm-validate [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
+                              ^Ints out]
+  (comment "Validate input against rule of the verified Program (p, pool), under"
+           "limits (8 words, -1 = compiled default; per-call values only lower the"
+           "compiled ones), with scratch s (see vm-scratch-words). Answers the reason"
+           "code (0 ok; profile 1..21; schema 32..41; 48 budget), also in out[0],"
+           "with out per program.md §13.2; or -1 Program inconsistent, -2 scratch too"
+           "small, -3 rule out of range, -4 out shorter than 8 words. Allocates"
+           "nothing; calls no host code.")
+  (return (vm-run p pool rule input 0 (blen input) 0 0 limits s out)))
+
+(defn ^:pub ^I32 vm-validate-span [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^I32 start ^I32 end
+                                   ^I32 depth0 ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
+  (comment "architecture §16.3: validate the item spanning input[start, end) as its"
+           "own document against rule (it must be exactly one item ending at end),"
+           "with depth and item accounting continuing from depth0 / items0 (the"
+           "enclosing position). Offsets in out are absolute. cose applies only at"
+           "depth0 = 0.")
+  (return (vm-run p pool rule input start end depth0 items0 limits s out)))

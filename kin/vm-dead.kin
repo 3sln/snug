@@ -1,0 +1,223 @@
+;; The DEAD walk: an item evaluated with an empty query (program.md §14: "a
+;; dead item costs 1 + its profile scans"). It is the profile scanner's walk
+;; (kin/scan.kin, docs/scanner.md) -- the same checks, order, codes, error
+;; offsets and item counting -- with the step budget charged per item visit,
+;; per 64 bytes of UTF-8 validation, per key-order comparison and per 64 bytes
+;; of typed-array NaN scan. After a schema failure everything left is walked
+;; here, which is the profile-only continuation of architecture §4.5. It is
+;; also the hot path of profile-only decode (the VM against `any`).
+;;
+;; `s` is the VM scratch; its first 16 words are the scanner's `o`.
+(ns snug.vm.dead
+  (:require [kin.lang :refer [defn let return set if while for do comment declarefn]]
+            [snug.lang :refer [I32 Bool Bytes Ints + - neg rem ushr bit-and bit-or
+                               < > <= >= == != and or not u8 ia iset hex]]
+            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_KEY_ORDER
+                                     CODE_DUPLICATE_KEY CODE_TEXT CODE_TAG CODE_DECIMAL
+                                     CODE_TYPED_ARRAY CODE_NDARRAY CODE_DEPTH CODE_TOO_MANY_ITEMS
+                                     O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
+                                     CODE_BIGNUM MAX_BIGNUM_BYTES]]
+            [snug.cbor.head :refer [fail read-arg take-len count-item enter-container bytes-content]]
+            [snug.cbor.text :refer [utf8-invalid-at]]
+            [snug.cbor.keys :refer [compare-spans]]
+            [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok]]
+            [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]
+            [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX]]
+            [snug.vm.base :refer [charge c64 c64min]]))
+
+(declarefn dead-item)
+
+(defn ^:pub ^I32 dead-text [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
+  (comment "Text: its length, then UTF-8 (charged ceil(len/64) before the scan).")
+  (let [stop (take-len s pos p hi lo end)]
+    (if (< stop 0) (return stop))
+    (if (not (charge s (c64 (- stop p)) pos)) (return (neg R_BUDGET)))
+    (let [bad (utf8-invalid-at b p stop)]
+      (if (>= bad 0) (return (fail s bad CODE_TEXT)))
+      (return stop))))
+
+(defn ^:pub ^I32 dead-array [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
+  (let [r (enter-container s pos p hi lo depth 0 end)
+        inner (+ depth 1)
+        ^:mut q p]
+    (if (< r 0) (return r))
+    (for [^I32 _i 0 lo]
+      (set q (dead-item b s q inner end))
+      (if (< q 0) (return q)))
+    (return q)))
+
+(defn ^:pub ^I32 key-order [^Bytes b ^Ints s ^I32 ps ^I32 pe ^I32 start ^I32 q]
+  (comment "The key b[start, q) against the previous key b[ps, pe) (ps < 0: none):"
+           "charged ceil(min(len)/64), at least 1; 0, or the negated refusal.")
+  (if (< ps 0) (return 0))
+  (if (not (charge s (c64min (- pe ps) (- q start)) start)) (return (neg R_BUDGET)))
+  (let [order (compare-spans b ps pe start q)]
+    (if (== order 0) (return (fail s start CODE_DUPLICATE_KEY)))
+    (if (> order 0) (return (fail s start CODE_KEY_ORDER)))
+    (return 0)))
+
+(defn ^:pub ^I32 dead-map [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
+  (let [r (enter-container s pos p hi lo depth 1 end)
+        cose (and (== depth 0) (!= (ia s O_COSE) 0))
+        inner (+ depth 1)
+        ^:mut q p
+        ^:mut ps (neg 1)
+        ^:mut pe (neg 1)]
+    (if (< r 0) (return r))
+    (for [^I32 _k 0 lo]
+      (let [start q]
+        (if (>= start end) (return (fail s start CODE_TRUNCATED)))
+        (let [km (ushr (u8 b start) 5)]
+          (if (!= km 3)
+            (if (not (and cose (<= km 1))) (return (fail s start CODE_KEY_TYPE))))
+          (set q (dead-item b s start inner end))
+          (if (< q 0) (return q))
+          (if (<= km 1)
+            (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+          (let [ko (key-order b s ps pe start q)]
+            (if (< ko 0) (return ko)))
+          (set ps start)
+          (set pe q)
+          (set q (dead-item b s q inner end))
+          (if (< q 0) (return q)))))
+    (return q)))
+
+(defn ^:pub ^I32 dead-typed [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 tag ^I32 size ^I32 end]
+  (comment "scan-typed, with the NaN scan of float arrays charged ceil(len/64)"
+           "after the length checks and before the scan.")
+  (let [stop (bytes-content b s p CODE_TYPED_ARRAY end)]
+    (if (< stop 0) (return stop))
+    (let [cs (ia s O_CSTART)
+          ^:mut i cs]
+      (if (!= (rem (- stop cs) size) 0) (return (fail s pos CODE_TYPED_ARRAY)))
+      (if (>= tag 84)
+        (if (not (charge s (c64 (- stop cs)) pos)) (return (neg R_BUDGET))))
+      (if (== tag 84)
+        (while (< i stop)
+          (let [h1 (u8 b (+ i 1))]
+            (if (== (bit-and h1 124) 124)
+              (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0)
+                (return (fail s i CODE_TYPED_ARRAY)))))
+          (set i (+ i 2))))
+      (if (== tag 85)
+        (while (< i stop)
+          (let [s3 (u8 b (+ i 3))
+                s2 (u8 b (+ i 2))]
+            (if (and (== (bit-and s3 127) 127) (>= s2 128))
+              (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0)
+                (return (fail s i CODE_TYPED_ARRAY)))))
+          (set i (+ i 4))))
+      (if (== tag 86)
+        (while (< i stop)
+          (let [t7 (u8 b (+ i 7))
+                t6 (u8 b (+ i 6))]
+            (if (and (== (bit-and t7 127) 127) (>= t6 240))
+              (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
+                                      (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
+                              (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
+                       0)
+                (return (fail s i CODE_TYPED_ARRAY)))))
+          (set i (+ i 8))))
+      (return stop))))
+
+(defn ^:pub ^I32 dead-bignum [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 bmax ^I32 end]
+  (comment "Tags 2/3 (scan-bignum): a byte string of 9..bmax bytes (bmax <= 128) with"
+           "no leading zero. The content is not an item. Its start goes in"
+           "s[O_CSTART].")
+  (let [stop (bytes-content b s p CODE_BIGNUM end)]
+    (if (< stop 0) (return stop))
+    (let [cs (ia s O_CSTART)
+          len (- stop cs)]
+      (if (or (< len 9) (== (u8 b cs) 0)) (return (fail s pos CODE_BIGNUM)))
+      (if (or (> len MAX_BIGNUM_BYTES) (> len bmax)) (return (fail s pos CODE_BIGNUM)))
+      (return stop))))
+
+(defn ^:pub ^I32 dead-pair-body [^Bytes b ^Ints s ^I32 p ^I32 depth ^I32 end]
+  (comment "The `[x, y]` content of tag 4/40 at p, after its 0x82 was checked: the"
+           "inner array is an item (visit charged, counted, a level), then both"
+           "elements, dead. The second element's start goes in s[VM_Q1].")
+  (if (not (charge s 1 p)) (return (neg R_BUDGET)))
+  (let [c (count-item s p)]
+    (if (< c 0) (return c)))
+  (let [r (enter-container s p (+ p 1) 0 2 (+ depth 1) 0 end)]
+    (if (< r 0) (return r)))
+  (let [^I32 q1 (dead-item b s (+ p 1) (+ depth 2) end)]
+    (if (< q1 0) (return q1))
+    (let [^I32 q2 (dead-item b s q1 (+ depth 2) end)]
+      (if (< q2 0) (return q2))
+      (iset s VM_Q1 q1)
+      (return q2))))
+
+(defn ^:pub ^I32 pair-check [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 shape-code ^I32 end]
+  (comment "scan-pair's first two checks: a byte is left, and it is 0x82.")
+  (if (>= p end) (return (fail s p CODE_TRUNCATED)))
+  (if (!= (u8 b p) (hex 130)) (return (fail s pos shape-code)))
+  (return 0))
+
+(defn ^:pub ^I32 decimal-check [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 stop]
+  (let [q1 (ia s VM_Q1)]
+    (if (not (exponent-ok b (+ p 1))) (return (fail s pos CODE_DECIMAL)))
+    (if (not (mantissa-ok b q1 stop)) (return (fail s pos CODE_DECIMAL)))
+    (return stop)))
+
+(defn ^:pub ^I32 ndarray-check [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 stop]
+  (let [count (data-count b (ia s VM_Q1))]
+    (if (< count 0) (return (fail s pos CODE_NDARRAY)))
+    (if (not (shape-ok b (+ p 1) count)) (return (fail s pos CODE_NDARRAY)))
+    (return stop)))
+
+(defn ^:pub ^I32 dead-tag [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
+  (if (>= depth (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
+  (if (!= hi 0) (return (fail s pos CODE_TAG)))
+  (if (or (== lo 2) (== lo 3)) (return (dead-bignum b s pos p (ia s VM_BIGNUM_MAX) end)))
+  (if (== lo 4)
+    (do (let [c4 (pair-check b s pos p CODE_DECIMAL end)]
+          (if (< c4 0) (return c4)))
+        (let [^I32 st4 (dead-pair-body b s p depth end)]
+          (if (< st4 0) (return st4))
+          (return (decimal-check b s pos p st4)))))
+  (if (== lo 40)
+    (do (let [c40 (pair-check b s pos p CODE_NDARRAY end)]
+          (if (< c40 0) (return c40)))
+        (let [^I32 st40 (dead-pair-body b s p depth end)]
+          (if (< st40 0) (return st40))
+          (return (ndarray-check b s pos p st40)))))
+  (let [size (typed-size lo)]
+    (if (== size 0) (return (fail s pos CODE_TAG)))
+    (return (dead-typed b s pos p lo size end))))
+
+(defn ^:pub ^I32 dead-item [^Bytes b ^Ints s ^I32 pos ^I32 depth ^I32 end]
+  (comment "One dead item at pos: visit charged, counted, then its head (scan.kin `item`).")
+  (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+  (let [it (+ (ia s O_ITEMS) 1)]
+    (iset s O_ITEMS it)
+    (if (> it (ia s O_MAX_ITEMS)) (return (fail s pos CODE_TOO_MANY_ITEMS))))
+  (if (>= pos end) (return (fail s pos CODE_TRUNCATED)))
+  (let [ib (u8 b pos)
+        major (ushr ib 5)
+        ai (bit-and ib 31)
+        ^:mut hi 0
+        ^:mut lo ai
+        ^:mut p (+ pos 1)]
+    (if (>= ai 24)
+      (do (if (== major 7)
+            (if (and (>= ai 25) (<= ai 27)) (return (scan-float b s pos ai end))))
+          (set p (read-arg b s pos ai end))
+          (if (< p 0) (return p))
+          (set hi (ia s O_HI))
+          (set lo (ia s O_LO))))
+    (if (<= major 1) (return p))
+    (if (== major 2) (return (take-len s pos p hi lo end)))
+    (if (== major 3) (return (dead-text b s pos p hi lo end)))
+    (if (== major 4) (return (dead-array b s pos p hi lo depth end)))
+    (if (== major 5) (return (dead-map b s pos p hi lo depth end)))
+    (if (== major 6) (return (dead-tag b s pos p hi lo depth end)))
+    (return (scan-simple s pos ai))))
+
+(defn ^:pub ^I32 dead-seq [^Bytes b ^Ints s ^I32 p ^I32 depth ^I32 end]
+  (comment "A CBOR sequence b[p, end) walked dead: items until end.")
+  (let [^:mut q p]
+    (while (< q end)
+      (set q (dead-item b s q depth end))
+      (if (< q 0) (return q)))
+    (return q)))

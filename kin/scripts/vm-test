@@ -1,0 +1,22 @@
+#!/bin/sh
+# The validator VM (P3.4) on generated JS and a DEBUG Rust build: program.md
+# §15, profile identity against the scanner, the conformance corpus through
+# the compiler, assembled programs, JS == Rust.
+#     kin/scripts/vm-test [mutations] [seed]
+#
+# The Rust crate holds only the generated cbor and vm modules and the vm test
+# binary (no compile host), so a sibling's unfinished compiler cannot break it.
+set -e
+cd "$(dirname "$0")/../.."
+./kin/scripts/emit > /dev/null
+host=.cache/vm-host
+mkdir -p "$host/bin"
+printf '//! VM test crate: the generated cbor and vm modules only.\npub mod snug;\n' > "$host/lib.rs.new"
+cmp -s "$host/lib.rs.new" "$host/lib.rs" 2>/dev/null || mv "$host/lib.rs.new" "$host/lib.rs"; rm -f "$host/lib.rs.new"
+cmp -s host/rust/src/bin/vm.rs "$host/bin/vm.rs" 2>/dev/null || cp host/rust/src/bin/vm.rs "$host/bin/vm.rs"
+crate=.cache/snug-vm
+SNUG_RS_ONLY="cbor vm" ./kin/scripts/rust-crate "$crate" "$host"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin vm 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/vm-test.mjs "$crate/target/debug/vm" "$@"

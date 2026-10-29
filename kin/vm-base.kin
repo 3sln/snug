@@ -1,0 +1,256 @@
+;; The VM's small machinery: the saturating step budget (program.md §14),
+;; epochs and marks, query lists in frames (§5, §12.1, §12.2), typeset tests,
+;; the witness slot and the path stack (§9.2, §9.3), closure chains (§10), and
+;; bit tricks (no ctz/popcount in snug.lang).
+;;
+;; Conventions shared by every VM function: P is the verified Program (IntsR),
+;; s the scratch (Ints, whose first 16 words are the scanner's `o`); a
+;; function answers a position or count (>= 0) or a NEGATED code: a profile
+;; code 1..21, R_BUDGET (48) or R_INCONSISTENT (100).
+(ns snug.vm.base
+  (:require [kin.lang :refer [defn let return set if while for do comment]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
+                               add32 sub32 mul32 < > <= >= == != and or not ia iset hex]]
+            [snug.vm.layout :refer [VM_BUDGET VM_POS VM_EPOCH VM_MARK_CAP VM_QIDX VM_CHAIN VM_PATH
+                                    VM_W_STATE VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_XKIND VM_W_XVAL
+                                    VM_W_OFFSET SCRATCH_MARK EPOCH_MAX H_S_TS_INDEX H_S_LEAVES
+                                    H_S_CSET_INDEX F_ANSWER F_ADMITTED F_MATCHED R_BUDGET
+                                    R_INCONSISTENT]]))
+
+;; ------------------------------------------------------------ arithmetic
+
+(defn ^:pub ^I32 c64 [^I32 n]
+  (comment "ceil(n / 64) for 0 <= n < 2^31, never overflowing.")
+  (if (== (bit-and n 63) 0) (return (sar n 6)))
+  (return (+ (sar n 6) 1)))
+
+(defn ^:pub ^I32 c64min [^I32 a ^I32 b]
+  (comment "A byte comparison's charge: ceil(min(a, b) / 64), at least 1.")
+  (let [^:mut m a]
+    (if (< b m) (set m b))
+    (if (<= m 64) (return 1))
+    (return (c64 m))))
+
+(defn ^:pub ^I32 c16 [^I32 n]
+  (comment "ceil(n / 16): a container block's initialisation charge.")
+  (if (== (bit-and n 15) 0) (return (sar n 4)))
+  (return (+ (sar n 4) 1)))
+
+(defn ^:pub ^I32 popcount [^I32 x0]
+  (let [x1 (sub32 x0 (bit-and (ushr x0 1) (hex 1431655765)))
+        x2 (add32 (bit-and x1 (hex 858993459)) (bit-and (ushr x1 2) (hex 858993459)))
+        x3 (bit-and (add32 x2 (ushr x2 4)) (hex 252645135))]
+    (return (ushr (mul32 x3 (hex 16843009)) 24))))
+
+(defn ^:pub ^I32 low-bit [^I32 x]
+  (comment "Index of the lowest set bit of x != 0: a five-step binary search"
+           "(program.md §8.1).")
+  (let [^:mut y (bit-and x (sub32 0 x))
+        ^:mut n 0]
+    (if (== (bit-and y (hex 65535)) 0) (do (set n (+ n 16)) (set y (ushr y 16))))
+    (if (== (bit-and y 255) 0) (do (set n (+ n 8)) (set y (ushr y 8))))
+    (if (== (bit-and y 15) 0) (do (set n (+ n 4)) (set y (ushr y 4))))
+    (if (== (bit-and y 3) 0) (do (set n (+ n 2)) (set y (ushr y 2))))
+    (if (== (bit-and y 1) 0) (set n (+ n 1)))
+    (return n)))
+
+(defn ^:pub ^I32 high-bit [^I32 x]
+  (comment "Index of the highest set bit of 0 < x < 2^31.")
+  (let [^:mut y x
+        ^:mut n 0]
+    (if (!= (ushr y 16) 0) (do (set n (+ n 16)) (set y (ushr y 16))))
+    (if (!= (ushr y 8) 0) (do (set n (+ n 8)) (set y (ushr y 8))))
+    (if (!= (ushr y 4) 0) (do (set n (+ n 4)) (set y (ushr y 4))))
+    (if (!= (ushr y 2) 0) (do (set n (+ n 2)) (set y (ushr y 2))))
+    (if (!= (ushr y 1) 0) (set n (+ n 1)))
+    (return n)))
+
+;; ------------------------------------------------------------ the budget
+
+(defn ^:pub ^Bool charge [^Ints s ^I32 n ^I32 at]
+  (comment "Charge n units BEFORE the work they pay for (program.md §14). When n"
+           "exceeds what remains the call stops with `budget`; `at` (the item being"
+           "visited) becomes the reported offset. Nothing is deducted then, and"
+           "the host reports the whole budget as used.")
+  (let [left (ia s VM_BUDGET)]
+    (if (< left n) (do (iset s VM_POS at) (return false)))
+    (iset s VM_BUDGET (- left n))
+    (return true)))
+
+;; ------------------------------------------------------------ epochs and marks
+
+(defn ^:pub ^I32 new-epoch [^Ints s]
+  (comment "A fresh epoch. Near overflow the marks are zeroed and epochs restart"
+           "at 1 (uncharged); no mark is live across this call.")
+  (let [^:mut e (+ (ia s VM_EPOCH) 1)]
+    (if (>= e EPOCH_MAX)
+      (do (let [m (ia s VM_MARK_CAP)]
+            (for [^I32 i 0 m]
+              (iset s (+ SCRATCH_MARK i) 0)))
+          (set e 1)))
+    (iset s VM_EPOCH e)
+    (return e)))
+
+(defn ^:pub ^I32 q-add [^IntsR p ^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 ts ^I32 e ^I32 at]
+  (comment "Append typeset ts's evaluation list (its answers when it has no"
+           "combinators) to the query list of the frame at fb (capacity w, nq"
+           "entries), keeping the first occurrence of each leaf (epoch e) and"
+           "OR-ing in the answer flag of a duplicate (§5). Charged 1 per element"
+           "scanned. Answers the new length or a negated code.")
+  (let [off (ia p (+ (ia p H_S_TS_INDEX) ts))
+        nans (ia p off)
+        nev (ia p (+ off 1))
+        qi (ia s VM_QIDX)
+        fl0 (+ fb w)
+        ^:mut cnt nans
+        ^:mut base (+ off 2)
+        ^:mut n nq]
+    (if (> nev 0) (do (set cnt nev) (set base (+ (+ off 2) nans))))
+    (if (not (charge s cnt at)) (return (neg R_BUDGET)))
+    (for [^I32 i 0 cnt]
+      (let [x (ia p (+ base i))
+            ^:mut l x
+            ^:mut ^I32 fl F_ANSWER]
+        (if (< x 0) (do (set l (bit-xor x (neg 1))) (set fl 0)))
+        (if (!= (ia s (+ SCRATCH_MARK l)) e)
+          (do (if (>= n w) (return (neg R_INCONSISTENT)))
+              (iset s (+ fb n) l)
+              (iset s (+ fl0 n) fl)
+              (iset s (+ SCRATCH_MARK l) e)
+              (iset s (+ qi l) n)
+              (set n (+ n 1)))
+          (do (let [j (ia s (+ qi l))
+                    old (ia s (+ fl0 j))]
+                (iset s (+ fl0 j) (bit-or old fl)))))))
+    (return n)))
+
+(defn ^:pub ^I32 q-filter [^IntsR p ^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 cls ^I32 at]
+  (comment "Mark ADMITTED the entries whose leaf mask meets the item's class;"
+           "charged |Q'|. Answers how many, or a negated code.")
+  (if (not (charge s nq at)) (return (neg R_BUDGET)))
+  (let [lv (ia p H_S_LEAVES)
+        fl0 (+ fb w)
+        ^:mut k 0]
+    (for [^I32 i 0 nq]
+      (let [l (ia s (+ fb i))
+            m (ia p (+ (+ lv (* 8 l)) 1))]
+        (if (!= (bit-and m cls) 0)
+          (do (let [f (ia s (+ fl0 i))]
+                (iset s (+ fl0 i) (bit-or f F_ADMITTED)))
+              (set k (+ k 1))))))
+    (return k)))
+
+(defn ^:pub ^I32 q-stamp [^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 at]
+  (comment "Stamp the matched entries of a returned child's query list in a fresh"
+           "epoch; charged |Q'| when it is non-empty. Answers the epoch (> 0) or a"
+           "negated code.")
+  (if (> nq 0) (if (not (charge s nq at)) (return (neg R_BUDGET))))
+  (let [e (new-epoch s)
+        fl0 (+ fb w)]
+    (for [^I32 i 0 nq]
+      (let [f (ia s (+ fl0 i))]
+        (if (!= (bit-and f F_MATCHED) 0)
+          (do (let [l (ia s (+ fb i))]
+                (iset s (+ SCRATCH_MARK l) e))))))
+    (return e)))
+
+(defn ^:pub ^I32 ts-test [^IntsR p ^Ints s ^I32 ts ^I32 e ^I32 at]
+  (comment "Did typeset ts match (an answer stamped in epoch e)? 1 or 0, charged 1"
+           "per answer examined, stopping at the first hit; or a negated code.")
+  (let [off (ia p (+ (ia p H_S_TS_INDEX) ts))
+        nans (ia p off)]
+    (for [^I32 i 0 nans]
+      (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+      (let [a (ia p (+ (+ off 2) i))]
+        (if (== (ia s (+ SCRATCH_MARK a)) e) (return 1))))
+    (return 0)))
+
+(defn ^:pub ^I32 q-flag [^IntsR s ^I32 fb ^I32 w ^I32 i]
+  (return (ia s (+ (+ fb w) i))))
+
+(defn ^:pub q-set-flag [^Ints s ^I32 fb ^I32 w ^I32 i ^I32 bits]
+  (let [f (ia s (+ (+ fb w) i))]
+    (iset s (+ (+ fb w) i) (bit-or f bits))))
+
+(defn ^:pub ^I32 q-kind [^IntsR p ^IntsR s ^I32 fb ^I32 i]
+  (comment "The leaf kind of query entry i.")
+  (let [l (ia s (+ fb i))]
+    (return (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 l))) 255))))
+
+(defn ^:pub ^I32 q-leaf-base [^IntsR p ^IntsR s ^I32 fb ^I32 i]
+  (comment "The word offset of query entry i's leaf record.")
+  (let [l (ia s (+ fb i))]
+    (return (+ (ia p H_S_LEAVES) (* 8 l)))))
+
+(defn ^:pub ^Bool q-any-match [^IntsR s ^I32 fb ^I32 w ^I32 nq ^I32 need]
+  (comment "Does some entry have every flag bit in `need` (with F_MATCHED)?")
+  (for [^I32 i 0 nq]
+    (let [f (ia s (+ (+ fb w) i))]
+      (if (== (bit-and f need) need) (return true))))
+  (return false))
+
+;; ------------------------------------------------------------ closure chains
+
+(defn ^:pub ^I32 cset-rec [^IntsR p ^IntsR s ^I32 ck]
+  (comment "The closure-set record (word offset) of chain position ck, or -1.")
+  (if (< ck 0) (return (neg 1)))
+  (let [ch (ia s VM_CHAIN)
+        id (ia p (+ (+ ch 2) ck))]
+    (return (ia p (+ (ia p H_S_CSET_INDEX) id)))))
+
+(defn ^:pub ^I32 next-ck [^IntsR p ^IntsR s ^I32 ck]
+  (comment "The chain position of the next physical depth (§10), or -1 (empty).")
+  (if (< ck 0) (return (neg 1)))
+  (let [ch (ia s VM_CHAIN)
+        n (ia p ch)]
+    (if (< (+ ck 1) n) (return (+ ck 1)))
+    (return (ia p (+ ch 1)))))
+
+(defn ^:pub ^I32 cset-width [^IntsR p ^I32 cr]
+  (if (< cr 0) (return 0))
+  (return (ia p cr)))
+
+(defn ^:pub ^I32 cset-frame [^IntsR p ^I32 cr]
+  (if (< cr 0) (return 0))
+  (return (ia p (+ cr 1))))
+
+;; ------------------------------------------------------------ witness and path
+
+(defn ^:pub ^Bool wit-empty [^IntsR s]
+  (return (== (ia s VM_W_STATE) 0)))
+
+(defn ^:pub wit-clear [^Ints s]
+  (iset s VM_W_STATE 0))
+
+(defn ^:pub wit-set [^Ints s ^I32 reason ^I32 sub ^I32 depth ^I32 xkind ^I32 xval ^I32 offset]
+  (iset s VM_W_STATE 1)
+  (iset s VM_W_REASON reason)
+  (iset s VM_W_SUB sub)
+  (iset s VM_W_DEPTH depth)
+  (iset s VM_W_XKIND xkind)
+  (iset s VM_W_XVAL xval)
+  (iset s VM_W_OFFSET offset))
+
+(defn ^:pub path-put [^Ints s ^I32 depth ^I32 kind ^I32 val]
+  (comment "The path segment of physical depth `depth` (1..D).")
+  (let [at (+ (ia s VM_PATH) (* 2 depth))]
+    (iset s at kind)
+    (iset s (+ at 1) val)))
+
+(defn ^:pub ^I32 rule1 [^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 d ^I32 pos]
+  (comment "Witness rule 1 (§9.2) for an item that ended with no answer matched and"
+           "an empty slot: the reason of the lowest-id admitted answer leaf, or"
+           "`type` when none was admitted. Charged |Q'|. 0 or a negated code.")
+  (if (not (charge s nq pos)) (return (neg R_BUDGET)))
+  (let [^:mut best (neg 1)
+        ^:mut reason 32]
+    (for [^I32 i 0 nq]
+      (let [f (ia s (+ (+ fb w) i))
+            l (ia s (+ fb i))]
+        (if (== (bit-and f (+ F_ANSWER F_ADMITTED)) (+ F_ANSWER F_ADMITTED))
+          (if (or (< best 0) (< l best))
+            (do (set best l)
+                (set reason (bit-and (sar f 8) 255)))))))
+    (if (== reason 0) (set reason 32))
+    (wit-set s reason 0 d (neg 1) 0 pos)
+    (return 0)))

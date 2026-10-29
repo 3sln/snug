@@ -1,0 +1,143 @@
+;; Array automaton state (program.md §8.1, §12.2): Glushkov position bitsets
+;; with counted positions. A block (one per admitted ARRAY leaf, in query
+;; order) is  +0 qindex  +1 alive  +2 |A|  active[W]  cand[W]  cnt[ncounters].
+;; The walk itself is snug.vm.eval's.
+(ns snug.vm.array
+  (:require [kin.lang :refer [defn let return set if while for do comment]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg shl bit-and bit-or
+                               sub32 < > <= >= == != and or not ia iset]]
+            [snug.vm.layout :refer [H_S_LEAVES H_S_ARRAY_INDEX R_BUDGET]]
+            [snug.vm.base :refer [charge c16 popcount low-bit ts-test q-add]]))
+
+(defn ^:pub ^I32 leaf-array [^IntsR p ^I32 lb]
+  (return (ia p (+ (ia p H_S_ARRAY_INDEX) (ia p (+ lb 2))))))
+
+(defn ^:pub ^I32 block-ao [^IntsR p ^IntsR s ^I32 fb ^I32 bo]
+  (comment "The automaton (word offset) of the array block at bo.")
+  (let [l (ia s (+ fb (ia s bo)))]
+    (return (leaf-array p (+ (ia p H_S_LEAVES) (* 8 l))))))
+
+(defn ^:pub ^I32 array-words [^IntsR p ^I32 ao]
+  (return (+ (+ 3 (* 2 (ia p (+ ao 1)))) (ia p (+ ao 2)))))
+
+(defn ^:pub ^I32 array-block-init [^Ints s ^I32 bo ^I32 qindex ^I32 words ^I32 at]
+  (if (not (charge s (c16 words) at)) (return (neg R_BUDGET)))
+  (for [^I32 j 0 words]
+    (iset s (+ bo j) 0))
+  (iset s bo qindex)
+  (iset s (+ bo 1) 1)
+  (return 0))
+
+(defn ^:pub ^I32 array-candidates [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 i ^I32 cfb ^I32 cw
+                                   ^I32 cnq ^I32 e ^I32 at]
+  (comment "One element of a live block (§8.1): W (|A| + 1) units, the candidate set"
+           "C (first, or the follow rows of the active positions, a counted position"
+           "contributing its follow row only once at its minimum and its self-loop"
+           "while below its maximum), then 1 unit per candidate position, whose"
+           "typeset joins the element's query. The new query length or a code.")
+  (let [npos (ia p ao)
+        aw (ia p (+ ao 1))
+        nc (ia p (+ ao 2))
+        first (+ ao 4)
+        posb (+ (+ ao 4) (* 2 aw))
+        cntp (+ posb (* 2 npos))
+        follow (+ cntp (* 2 nc))
+        act (+ bo 3)
+        cand (+ act aw)
+        cnts (+ cand aw)
+        ^:mut n cnq]
+    (if (not (charge s (* aw (+ (ia s (+ bo 2)) 1)) at)) (return (neg R_BUDGET)))
+    (if (== i 0)
+      (for [^I32 j 0 aw]
+        (iset s (+ cand j) (ia p (+ first j))))
+      (do (for [^I32 j2 0 aw]
+            (iset s (+ cand j2) 0))
+          (for [^I32 wi 0 aw]
+            (let [^:mut x (ia s (+ act wi))]
+              (while (!= x 0)
+                (let [lb (low-bit x)
+                      pp (+ (* wi 32) lb)
+                      cidx (ia p (+ (+ posb (* 2 pp)) 1))
+                      ^:mut fol true]
+                  (set x (bit-and x (sub32 x 1)))
+                  (if (>= cidx 0)
+                    (do (let [cc (ia s (+ cnts cidx))]
+                          (if (< cc (ia p (+ cntp (* 2 cidx)))) (set fol false))
+                          (if (< cc (ia p (+ (+ cntp (* 2 cidx)) 1)))
+                            (iset s (+ cand wi) (bit-or (ia s (+ cand wi)) (shl 1 lb)))))))
+                  (if fol
+                    (do (let [row (+ follow (* pp aw))]
+                          (for [^I32 j3 0 aw]
+                            (iset s (+ cand j3) (bit-or (ia s (+ cand j3)) (ia p (+ row j3))))))))))))))
+    (for [^I32 wj 0 aw]
+      (let [^:mut y (ia s (+ cand wj))]
+        (while (!= y 0)
+          (let [pq (+ (* wj 32) (low-bit y))]
+            (set y (bit-and y (sub32 y 1)))
+            (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+            (set n (q-add p s cfb cw n (ia p (+ posb (* 2 pq))) e at))
+            (if (< n 0) (return n))))))
+    (return n)))
+
+(defn ^:pub ^I32 array-advance [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 ev ^I32 at]
+  (comment "After the element: each candidate position, 1 unit + its typeset test;"
+           "A' = the candidates that matched; a counted position's count becomes"
+           "cnt + 1 if it was active, else 1. 1 alive, 0 died (C was not empty), 2"
+           "died with no candidate (the element was unexpected), or a code.")
+  (let [npos (ia p ao)
+        aw (ia p (+ ao 1))
+        posb (+ (+ ao 4) (* 2 aw))
+        act (+ bo 3)
+        cand (+ act aw)
+        cnts (+ cand aw)
+        ^:mut total 0
+        ^:mut had 0]
+    (for [^I32 wi 0 aw]
+      (let [^:mut x (ia s (+ cand wi))
+            ^:mut keep 0]
+        (if (!= x 0) (set had 1))
+        (while (!= x 0)
+          (let [lb (low-bit x)
+                bit (shl 1 lb)
+                pp (+ (* wi 32) lb)]
+            (set x (bit-and x (sub32 x 1)))
+            (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+            (let [t (ts-test p s (ia p (+ posb (* 2 pp))) ev at)]
+              (if (< t 0) (return t))
+              (if (== t 1)
+                (do (set keep (bit-or keep bit))
+                    (let [cidx (ia p (+ (+ posb (* 2 pp)) 1))]
+                      (if (>= cidx 0)
+                        (if (!= (bit-and (ia s (+ act wi)) bit) 0)
+                          (iset s (+ cnts cidx) (+ (ia s (+ cnts cidx)) 1))
+                          (iset s (+ cnts cidx) 1)))))))))
+        (iset s (+ cand wi) keep)
+        (set total (+ total (popcount keep)))))
+    (for [^I32 j 0 aw]
+      (iset s (+ act j) (ia s (+ cand j))))
+    (iset s (+ bo 2) total)
+    (if (== npos 0) (set had 0))
+    (if (> total 0) (return 1))
+    (iset s (+ bo 1) 0)
+    (if (== had 0) (return 2))
+    (return 0)))
+
+(defn ^:pub ^Bool array-accepts [^IntsR p ^IntsR s ^I32 bo ^I32 ao ^I32 n]
+  (comment "At the end: the empty array iff nullable; else some active accepting"
+           "position, uncounted or at its minimum.")
+  (if (== n 0) (return (== (ia p (+ ao 3)) 1)))
+  (let [npos (ia p ao)
+        aw (ia p (+ ao 1))
+        accept (+ (+ ao 4) aw)
+        posb (+ (+ ao 4) (* 2 aw))
+        cntp (+ posb (* 2 npos))
+        cnts (+ (+ bo 3) (* 2 aw))]
+    (for [^I32 wi 0 aw]
+      (let [^:mut x (bit-and (ia s (+ (+ bo 3) wi)) (ia p (+ accept wi)))]
+        (while (!= x 0)
+          (let [pp (+ (* wi 32) (low-bit x))
+                cidx (ia p (+ (+ posb (* 2 pp)) 1))]
+            (set x (bit-and x (sub32 x 1)))
+            (if (< cidx 0) (return true))
+            (if (>= (ia s (+ cnts cidx)) (ia p (+ cntp (* 2 cidx)))) (return true))))))
+    (return false)))

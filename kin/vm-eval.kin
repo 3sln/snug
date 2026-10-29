@@ -1,0 +1,766 @@
+;; The LIVE walk (program.md §8, §9): one item evaluated against its query list
+;; Q' in the frame of its physical depth, fused with the profile checks of
+;; kin/scan.kin in the scanner's order (docs/scanner.md). Children get their
+;; query lists in the next frame; a child whose query is empty is walked dead
+;; (snug.vm.dead), which is also the profile-only continuation after a schema
+;; failure (architecture §4.5).
+;;
+;; Every function answers a position (>= 0) or a negated code (profile code,
+;; R_BUDGET, R_INCONSISTENT). A schema failure is not a code: it is the absence
+;; of matched answers plus the witness slot.
+;;
+;; Readings of program.md recorded in DEVLOG (D040-D042): ANY and MAJOR give
+;; their children no query (children are walked dead); a container's "live
+;; candidate" for witness clearing is an alive block or an admitted scalar
+;; leaf (ANY, MAJOR, LIT, ...); leaf failure reasons for containers are
+;; `unexpected`/`value` (died at a pair or element) and `missing` (at the end).
+(ns snug.vm.eval
+  (:require [kin.lang :refer [defn let local return set if while for do comment declarefn break]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
+                               < > <= >= == != and or not u8 ia iset]]
+            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TEXT CODE_TAG CODE_DEPTH
+                                     CODE_TOO_MANY_ITEMS CODE_DECIMAL CODE_NDARRAY CODE_TRAILING
+                                     O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
+                                     O_ERR_POS]]
+            [snug.cbor.head :refer [fail read-arg take-len enter-container]]
+            [snug.cbor.text :refer [utf8-invalid-at]]
+            [snug.cbor.tags :refer [typed-size]]
+            [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]
+            [snug.vm.layout :refer [H_FLAGS H_S_LEAVES FL_EMBED FL_COMB K_TAG K_TAGSET K_EMBED
+                                    K_ARRAY K_MAP K_AND K_NOT F_ANSWER F_ADMITTED F_MATCHED F_EVAL
+                                    VM_QIDX VM_Q1 VM_BIGNUM_MAX VM_EMBED VM_D VM_DLIM VM_W_STATE
+                                    VM_W_REASON VM_W_SUB SCRATCH_MARK R_TYPE R_MISSING R_UNEXPECTED
+                                    R_VALUE R_TAG R_EMBEDDED R_BUDGET R_INCONSISTENT P_INDEX P_KEY
+                                    P_ANYKEY P_TAG P_EMBED P_EMBEDSEQ CTX_KEY]]
+            [snug.vm.base :refer [charge c64 new-epoch q-add q-filter q-stamp ts-test q-flag q-set-flag
+                                  q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
+                                  wit-empty wit-clear wit-set path-put rule1]]
+            [snug.vm.dead :refer [dead-item dead-seq key-order dead-typed dead-bignum dead-pair-body
+                                  pair-check decimal-check ndarray-check]]
+            [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64]]
+            [snug.vm.map :refer [leaf-map block-mt map-block-init key-span-end key-search map-cursor
+                                 map-key-query map-key-phase cand-vts block-named map-update
+                                 map-satisfied map-missing]]
+            [snug.vm.array :refer [leaf-array block-ao array-words array-block-init array-candidates
+                                   array-advance array-accepts]]))
+
+(declarefn eval-item eval-embed eval-array)
+
+;; ------------------------------------------------------------ item endings
+
+(defn ^:pub ^I32 finish-comb [^IntsR p ^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 pos]
+  (comment "Combinators of the item (§8.4): stamp its matched leaves in a fresh"
+           "epoch, then one pass in query order evaluates each admitted AND"
+           "(both operands) and NOT (target and not the literal), 2 units each."
+           "Answers 1 if some answer leaf matched, 0 if none, or a code.")
+  (if (!= (bit-and (ia p H_FLAGS) FL_COMB) 0)
+    (do (let [e (new-epoch s)
+              qi (ia s VM_QIDX)
+              fl0 (+ fb w)]
+          (for [^I32 i 0 nq]
+            (let [l (ia s (+ fb i))]
+              (iset s (+ qi l) i)
+              (if (!= (bit-and (ia s (+ fl0 i)) F_MATCHED) 0)
+                (iset s (+ SCRATCH_MARK l) e))))
+          (for [^I32 j 0 nq]
+            (let [kind (q-kind p s fb j)
+                  f (ia s (+ fl0 j))]
+              (if (and (or (== kind K_AND) (== kind K_NOT)) (!= (bit-and f F_ADMITTED) 0))
+                (do (if (not (charge s 2 pos)) (return (neg R_BUDGET)))
+                    (let [lb (q-leaf-base p s fb j)
+                          a (ia p (+ lb 2))
+                          c (ia p (+ lb 3))
+                          ma (== (ia s (+ SCRATCH_MARK a)) e)
+                          mc (== (ia s (+ SCRATCH_MARK c)) e)
+                          ra (bit-and (ia s (+ fl0 (ia s (+ qi a)))) (shl 255 8))
+                          rc (bit-and (ia s (+ fl0 (ia s (+ qi c)))) (shl 255 8))
+                          ok (or (and (== kind K_AND) (and ma mc))
+                                 (and (== kind K_NOT) (and ma (not mc))))
+                          ^:mut why ra]
+                      (if ma
+                        (if (== kind K_AND) (set why rc) (set why (shl R_VALUE 8))))
+                      (if (== why 0) (set why (shl R_TYPE 8)))
+                      (if ok
+                        (do (iset s (+ fl0 j) (bit-or f F_MATCHED))
+                            (let [lj (ia s (+ fb j))]
+                              (iset s (+ SCRATCH_MARK lj) e)))
+                        (iset s (+ fl0 j) (bit-or f why)))))))))))
+  (for [^I32 k 0 nq]
+    (if (== (bit-and (ia s (+ (+ fb w) k)) (+ F_ANSWER F_MATCHED)) (+ F_ANSWER F_MATCHED))
+      (return 1)))
+  (return 0))
+
+(defn ^:pub ^I32 finish-scalar [^IntsR p ^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 d ^I32 pos ^I32 ctx]
+  (comment "End of an item that is not a container: combinators, then witness rule 1"
+           "if no answer matched (never for a map key, §9.2 rule 6).")
+  (let [m (finish-comb p s fb w nq pos)]
+    (if (< m 0) (return m))
+    (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
+      (return (rule1 s fb w nq d pos)))
+    (return 0)))
+
+(defn ^:pub ^I32 count-pending [^IntsR p ^IntsR s ^I32 fb ^I32 w ^I32 nq]
+  (comment "Admitted scalar leaves (ANY, MAJOR, LIT, ...) of a container item: live"
+           "candidates until its end.")
+  (let [^:mut k 0]
+    (for [^I32 i 0 nq]
+      (if (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0)
+        (if (scalar-kind (q-kind p s fb i)) (set k (+ k 1)))))
+    (return k)))
+
+;; ------------------------------------------------------------ byte strings and EMBED
+
+(defn ^:pub ^I32 bstr-tail [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 cs ^I32 ce
+                            ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 ctx]
+  (comment "A byte string item at pos (content [cs, ce)) at depth d, after its"
+           "profile checks: filter, scalar leaves, EMBED sub-validations, end.")
+  (let [cr (cset-rec p s ck)
+        w (cset-width p cr)
+        na (q-filter p s fb w nq 4 pos)]
+    (if (< na 0) (return na))
+    (let [r1 (eval-scalars p pool b s fb w nq pos cs ce 4 0 0)]
+      (if (< r1 0) (return r1)))
+    (if (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0)
+      (do (let [^:mut ne 0]
+            (for [^I32 i 0 nq]
+              (if (and (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0) (== (q-kind p s fb i) K_EMBED))
+                (set ne (+ ne 1))))
+            (if (> ne 0)
+              (do (let [^I32 r2 (eval-embed p pool b s pos cs ce d fb ck nq)]
+                    (if (< r2 0) (return r2))))))))
+    (return (finish-scalar p s fb w nq d pos ctx))))
+
+(defn ^:pub ^I32 embed-kill [^IntsR p ^Ints s ^I32 fb ^I32 w ^I32 nq ^I32 seq]
+  (comment "Kill the live EMBED leaves of one kind (seq 1 `.cborseq`, 0 `.cbor`).")
+  (for [^I32 i 0 nq]
+    (let [f (q-flag s fb w i)]
+      (if (and (!= (bit-and f F_EVAL) 0) (== (q-kind p s fb i) K_EMBED))
+        (if (== (sar (bit-and (ia p (q-leaf-base p s fb i)) 256) 8) seq)
+          (iset s (+ (+ fb w) i) (bit-or (bit-and f (bit-xor F_EVAL (neg 1))) (shl R_EMBEDDED 8)))))))
+  (return 0))
+
+(defn ^:pub ^I32 count-matched-scalars [^IntsR p ^IntsR s ^I32 fb ^I32 w ^I32 nq]
+  (let [^:mut k 0]
+    (for [^I32 i 0 nq]
+      (let [f (q-flag s fb w i)]
+        (if (== (bit-and f (+ F_ADMITTED F_MATCHED)) (+ F_ADMITTED F_MATCHED))
+          (if (scalar-kind (q-kind p s fb i)) (set k (+ k 1))))))
+    (return k)))
+
+(defn ^:pub ^I32 embed-live [^IntsR p ^IntsR s ^I32 fb ^I32 w ^I32 nq ^I32 seq]
+  (comment "How many EMBED leaves of this kind (seq 1: `.cborseq`, 0: `.cbor`) are"
+           "still live (F_EVAL).")
+  (let [^:mut k 0]
+    (for [^I32 i 0 nq]
+      (let [f (q-flag s fb w i)]
+        (if (and (!= (bit-and f F_EVAL) 0) (== (q-kind p s fb i) K_EMBED))
+          (if (== (sar (bit-and (ia p (q-leaf-base p s fb i)) 256) 8) seq) (set k (+ k 1))))))
+    (return k)))
+
+(defn ^:pub ^I32 embed-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 cs ^I32 ce ^I32 d ^I32 fb
+                            ^I32 ck ^I32 nq ^I32 seq ^I32 pos]
+  (comment "One sub-validation of the content [cs, ce) for the live EMBED leaves of"
+           "one kind. `.cbor` (seq 0): one item at physical depth d + 1 queried with"
+           "their content typesets, which must end at ce (else inner trailing)."
+           "`.cborseq` (seq 1, D040): the sequence is the element list of a VIRTUAL"
+           "array item at depth d + 1 queried with their content typesets (the"
+           "control type is an array type), its items at depth d + 2. Own item"
+           "counter, depth limit min(limit, D - root depth), top-any, no cose,"
+           "bounded by ce, the shared budget; an inner profile or limit failure"
+           "kills these leaves only. 0, or budget / inconsistent.")
+  (let [cr (cset-rec p s ck)
+        w (cset-width p cr)
+        fw (cset-frame p cr)
+        cfb (+ fb fw)
+        cck (next-ck p s ck)
+        cw (cset-width p (cset-rec p s cck))
+        items (ia s O_ITEMS)
+        maxd (ia s O_MAX_DEPTH)
+        cose (ia s O_COSE)
+        errpos (ia s O_ERR_POS)
+        dd (ia s VM_D)
+        root (+ (+ d 1) seq)
+        ^:mut nm (+ (ia s VM_DLIM) root)
+        e (new-epoch s)
+        ^:mut cnq 0]
+    (if (> nm dd) (set nm dd))
+    (path-put s (+ d 1) P_EMBED 0)
+    (comment "No frame for the embedded root beyond the compiled depth D: an inner"
+             "`cbor/depth` (program.md §17 q6).")
+    (if (> root dd)
+      (do (wit-set s CODE_DEPTH 0 (+ d 1) (neg 1) 0 cs)
+          (embed-kill p s fb w nq seq)
+          (return 0)))
+    (for [^I32 k 0 nq]
+      (let [fk (q-flag s fb w k)
+            lbk (q-leaf-base p s fb k)]
+        (if (and (and (!= (bit-and fk F_EVAL) 0) (== (q-kind p s fb k) K_EMBED))
+                 (== (sar (bit-and (ia p lbk) 256) 8) seq))
+          (do (let [ets (ia p (+ lbk 2))]
+                (set cnq (q-add p s cfb cw cnq ets e pos)))
+              (if (< cnq 0) (return cnq))))))
+    (iset s O_ITEMS 0)
+    (iset s O_MAX_DEPTH nm)
+    (iset s O_COSE 0)
+    (iset s VM_EMBED (+ (ia s VM_EMBED) 1))
+    (local ^I32 r)
+    (if (== seq 1)
+      (if (> cnq 0)
+        (set r (eval-array p pool b s cs cs (neg 1) (+ d 1) cfb cck cnq ce 0))
+        (set r (dead-seq b s cs (+ d 2) ce)))
+      (if (> cnq 0)
+        (set r (eval-item p pool b s cs (+ d 1) cfb cck cnq ce 0))
+        (set r (dead-item b s cs (+ d 1) ce))))
+    (if (or (== r (neg R_BUDGET)) (== r (neg R_INCONSISTENT))) (return r))
+    (let [ierr (ia s O_ERR_POS)]
+      (iset s O_ITEMS items)
+      (iset s O_MAX_DEPTH maxd)
+      (iset s O_COSE cose)
+      (iset s O_ERR_POS errpos)
+      (iset s VM_EMBED (- (ia s VM_EMBED) 1))
+      (if (< r 0)
+        (do (wit-set s (neg r) 0 (+ d 1) (neg 1) 0 ierr)
+            (embed-kill p s fb w nq seq)
+            (return 0))))
+    (let [ev (q-stamp s cfb cw cnq pos)]
+      (if (< ev 0) (return ev))
+      (for [^I32 k2 0 nq]
+        (let [f2 (q-flag s fb w k2)
+              lb2 (q-leaf-base p s fb k2)]
+          (if (and (and (!= (bit-and f2 F_EVAL) 0) (== (q-kind p s fb k2) K_EMBED))
+                   (== (sar (bit-and (ia p lb2) 256) 8) seq))
+            (do (let [ets2 (ia p (+ lb2 2))
+                      t (ts-test p s ets2 ev pos)]
+                  (if (< t 0) (return t))
+                  (if (== t 0)
+                    (iset s (+ (+ fb w) k2)
+                          (bit-or (bit-and f2 (bit-xor F_EVAL (neg 1))) (shl R_EMBEDDED 8))))))))))
+    (if (and (== seq 0) (!= r ce))
+      (if (> (embed-live p s fb w nq 0) 0)
+        (do (wit-set s CODE_TRAILING 0 (+ d 1) (neg 1) 0 r)
+            (embed-kill p s fb w nq 0))))
+    (return 0)))
+
+(defn ^:pub ^I32 eval-embed [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 cs ^I32 ce
+                             ^I32 d ^I32 fb ^I32 ck ^I32 nq]
+  (comment "§8.4 EMBED on a byte string item at depth d with content [cs, ce): 1 unit"
+           "per admitted EMBED leaf, then a sub-validation for the `.cbor` leaves and"
+           "one for the `.cborseq` leaves (D040). Survivors match; with no other"
+           "candidate left the slot becomes `embedded` with the innermost"
+           "non-embedded reason (§9.2 rule 7). 0, or budget / inconsistent.")
+  (let [cr (cset-rec p s ck)
+        w (cset-width p cr)]
+    (for [^I32 j 0 nq]
+      (let [f (q-flag s fb w j)]
+        (if (and (!= (bit-and f F_ADMITTED) 0) (== (q-kind p s fb j) K_EMBED))
+          (do (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+              (q-set-flag s fb w j F_EVAL)))))
+    (if (> (embed-live p s fb w nq 0) 0)
+      (do (let [r0 (embed-run p pool b s cs ce d fb ck nq 0 pos)]
+            (if (< r0 0) (return r0)))
+          (if (or (> (embed-live p s fb w nq 0) 0) (> (count-matched-scalars p s fb w nq) 0))
+            (wit-clear s))))
+    (if (> (embed-live p s fb w nq 1) 0)
+      (do (let [r1 (embed-run p pool b s cs ce d fb ck nq 1 pos)]
+            (if (< r1 0) (return r1)))
+          (if (or (> (embed-live p s fb w nq 1) 0)
+                  (or (> (embed-live p s fb w nq 0) 0) (> (count-matched-scalars p s fb w nq) 0)))
+            (wit-clear s))))
+    (let [^:mut won 0]
+      (for [^I32 m 0 nq]
+        (let [fm (q-flag s fb w m)]
+          (if (and (!= (bit-and fm F_EVAL) 0) (== (q-kind p s fb m) K_EMBED))
+            (do (iset s (+ (+ fb w) m) (bit-or fm F_MATCHED))
+                (set won (+ won 1))))))
+      (if (and (== won 0) (== (count-matched-scalars p s fb w nq) 0))
+        (if (wit-empty s)
+          (wit-set s R_EMBEDDED 0 d (neg 1) 0 pos)
+          (if (!= (ia s VM_W_REASON) R_EMBEDDED)
+            (do (iset s VM_W_SUB (ia s VM_W_REASON))
+                (iset s VM_W_REASON R_EMBEDDED))))))
+    (return 0)))
+
+;; ------------------------------------------------------------ tags
+
+(defn ^:pub ^I32 if-code [^I32 lo]
+  (if (== lo 4) (return CODE_DECIMAL))
+  (return CODE_NDARRAY))
+
+(defn ^:pub ^I32 count-matched [^IntsR p ^IntsR s ^I32 fb ^I32 w ^I32 nq]
+  (comment "Admitted, non-combinator entries that matched: the item's live candidates"
+           "once everything but its combinators is decided.")
+  (let [^:mut k 0]
+    (for [^I32 i 0 nq]
+      (let [f (q-flag s fb w i)
+            kind (q-kind p s fb i)]
+        (if (and (== (bit-and f (+ F_ADMITTED F_MATCHED)) (+ F_ADMITTED F_MATCHED))
+                 (and (!= kind K_AND) (!= kind K_NOT)))
+          (set k (+ k 1)))))
+    (return k)))
+
+(defn ^:pub ^I32 item-cls [^I32 major ^I32 ai ^I32 hi ^I32 lo]
+  (comment "The item's class bit (§4.1).")
+  (if (< major 6) (return (shl 1 major)))
+  (if (== major 6)
+    (do (if (and (== hi 0) (or (== lo 2) (== lo 3))) (return 2048))
+        (return 64)))
+  (if (== ai 25) (return 256))
+  (if (== ai 26) (return 512))
+  (if (== ai 27) (return 1024))
+  (return 128))
+
+(defn ^:pub ^I32 eval-tag [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q ^I32 hi ^I32 lo
+                           ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
+  (comment "A tag item (§8.4): the scanner's depth and number checks, the filter,"
+           "TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried"
+           "with the content typesets of the leaves whose number matched (bignum and"
+           "typed-array content: a schema child, not an item; tag 4/40: the inner"
+           "array as an item), the scanner's tag semantics, then the leaves.")
+  (if (>= d (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
+  (if (!= hi 0) (return (fail s pos CODE_TAG)))
+  (let [big (or (== lo 2) (== lo 3))
+        tsize (typed-size lo)
+        cr (cset-rec p s ck)
+        w (cset-width p cr)
+        fw (cset-frame p cr)
+        cfb (+ fb fw)
+        cck (next-ck p s ck)
+        cw (cset-width p (cset-rec p s cck))
+        ^:mut cls 64
+        ^:mut cnq 0
+        ^:mut cs q]
+    (local ^:mut ^I32 stop)
+    (if (and (not big) (and (!= lo 4) (and (!= lo 40) (== tsize 0)))) (return (fail s pos CODE_TAG)))
+    (if big (set cls 2048))
+    (let [na (q-filter p s fb w nq cls pos)]
+      (if (< na 0) (return na)))
+    (let [e (new-epoch s)]
+      (for [^I32 i 0 nq]
+        (let [f (q-flag s fb w i)
+              kind (q-kind p s fb i)]
+          (if (and (!= (bit-and f F_ADMITTED) 0) (or (== kind K_TAG) (== kind K_TAGSET)))
+            (do (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+                (let [lb (q-leaf-base p s fb i)
+                      istag (== kind K_TAG)
+                      hit (or (and istag (and (== (ia p (+ lb 2)) 0) (== (ia p (+ lb 3)) lo)))
+                              (and (not istag)
+                                   (and (<= (cmp-u64 (ia p (+ lb 2)) (ia p (+ lb 3)) 0 lo) 0)
+                                        (>= (cmp-u64 (ia p (+ lb 4)) (ia p (+ lb 5)) 0 lo) 0))))
+                      ^:mut cts (ia p (+ lb 6))]
+                  (if istag (set cts (ia p (+ lb 4))))
+                  (if hit
+                    (do (q-set-flag s fb w i F_EVAL)
+                        (set cnq (q-add p s cfb cw cnq cts e pos))
+                        (if (< cnq 0) (return cnq)))
+                    (q-set-flag s fb w i (shl R_TAG 8)))))))))
+    (if (> cnq 0) (path-put s (+ d 1) P_TAG 0))
+    (if (or big (> tsize 0))
+      (do (if (not (charge s 1 q)) (return (neg R_BUDGET)))
+          (if big
+            (set stop (dead-bignum b s pos q (ia s VM_BIGNUM_MAX) end))
+            (set stop (dead-typed b s pos q lo tsize end)))
+          (if (< stop 0) (return stop))
+          (set cs (ia s O_CSTART))
+          (if (> cnq 0)
+            (do (let [rb (bstr-tail p pool b s q cs stop (+ d 1) cfb cck cnq 0)]
+                  (if (< rb 0) (return rb))))))
+      (do (let [pc (pair-check b s pos q (if-code lo) end)]
+            (if (< pc 0) (return pc)))
+          (if (> cnq 0)
+            (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0))
+            (set stop (dead-pair-body b s q d end)))
+          (if (< stop 0) (return stop))
+          (if (== lo 4)
+            (set stop (decimal-check b s pos q stop))
+            (set stop (ndarray-check b s pos q stop)))
+          (if (< stop 0) (return stop))))
+    (let [ec (q-stamp s cfb cw cnq pos)]
+      (if (< ec 0) (return ec))
+      (for [^I32 j 0 nq]
+        (let [fj (q-flag s fb w j)]
+          (if (!= (bit-and fj F_EVAL) 0)
+            (do (let [lbj (q-leaf-base p s fb j)
+                      ^:mut ctj (ia p (+ lbj 4))]
+                  (if (== (q-kind p s fb j) K_TAGSET) (set ctj (ia p (+ lbj 6))))
+                  (let [t (ts-test p s ctj ec pos)]
+                    (if (< t 0) (return t))
+                    (if (== t 1)
+                      (q-set-flag s fb w j F_MATCHED)
+                      (q-set-flag s fb w j (shl R_TYPE 8))))))))))
+    (let [r2 (eval-scalars p pool b s fb w nq pos cs stop cls 0 lo)]
+      (if (< r2 0) (return r2)))
+    (if (> (count-matched p s fb w nq) 0) (wit-clear s))
+    (let [r3 (finish-scalar p s fb w nq d pos ctx)]
+      (if (< r3 0) (return r3)))
+    (return stop)))
+
+;; ------------------------------------------------------------ arrays
+
+(defn ^:pub ^I32 array-alive [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
+  (let [^:mut bo area
+        ^:mut k 0]
+    (for [^I32 _bi 0 nb]
+      (if (!= (ia s (+ bo 1)) 0) (set k (+ k 1)))
+      (set bo (+ bo (array-words p (block-ao p s fb bo)))))
+    (return k)))
+
+(defn ^:pub ^I32 eval-array [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q0 ^I32 n
+                             ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
+  (comment "An array item (§8.1) after its head and container checks: a block per"
+           "admitted ARRAY leaf; per element the candidate positions of the live"
+           "blocks give the element's query; at the end, acceptance. n < 0: a"
+           "VIRTUAL array (a `.cborseq` sequence, D040) whose elements are the"
+           "items up to end.")
+  (let [cr (cset-rec p s ck)
+        w (cset-width p cr)
+        fw (cset-frame p cr)
+        area (+ fb (* 2 w))
+        cap (- fw (* 2 w))
+        cfb (+ fb fw)
+        cck (next-ck p s ck)
+        cw (cset-width p (cset-rec p s cck))
+        ^:mut nb 0
+        ^:mut used 0
+        ^:mut q q0
+        ^:mut q1 q0
+        ^:mut el 0
+        ^:mut unacc 0]
+    (let [na (q-filter p s fb w nq 16 pos)]
+      (if (< na 0) (return na)))
+    (for [^I32 i 0 nq]
+      (if (and (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0) (== (q-kind p s fb i) K_ARRAY))
+        (do (let [words (array-words p (leaf-array p (q-leaf-base p s fb i)))]
+              (if (> (+ used words) cap) (return (neg R_INCONSISTENT)))
+              (let [ri (array-block-init s (+ area used) i words pos)]
+                (if (< ri 0) (return ri)))
+              (set used (+ used words))
+              (set nb (+ nb 1))))))
+    (let [pend (count-pending p s fb w nq)]
+      (while (or (and (< n 0) (< q end)) (and (>= n 0) (< el n)))
+        (if (== (array-alive p s fb area nb) 0)
+          (do (set q (dead-item b s q (+ d 1) end))
+              (if (< q 0) (return q)))
+          (do (let [e (new-epoch s)
+                    ^:mut cnq 0
+                    ^:mut bo area
+                    ^:mut still 0]
+                (local ^I32 r)
+                (for [^I32 _bi 0 nb]
+                  (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+                  (let [ao (block-ao p s fb bo)]
+                    (if (!= (ia s (+ bo 1)) 0)
+                      (do (set cnq (array-candidates p s bo ao el cfb cw cnq e pos))
+                          (if (< cnq 0) (return cnq))))
+                    (set bo (+ bo (array-words p ao)))))
+                (path-put s (+ d 1) P_INDEX el)
+                (if (> cnq 0)
+                  (set r (eval-item p pool b s q (+ d 1) cfb cck cnq end 0))
+                  (set r (dead-item b s q (+ d 1) end)))
+                (if (< r 0) (return r))
+                (let [ev (q-stamp s cfb cw cnq pos)]
+                  (if (< ev 0) (return ev))
+                  (set bo area)
+                  (for [^I32 _bj 0 nb]
+                    (let [aoj (block-ao p s fb bo)]
+                      (if (!= (ia s (+ bo 1)) 0)
+                        (do (let [adv (array-advance p s bo aoj ev pos)]
+                              (if (< adv 0) (return adv))
+                              (if (== adv 1)
+                                (set still (+ still 1))
+                                (if (== adv 2)
+                                  (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8))
+                                  (q-set-flag s fb w (ia s bo) (shl R_TYPE 8)))))))
+                      (set bo (+ bo (array-words p aoj))))))
+                (if (or (> still 0) (> pend 0))
+                  (wit-clear s)
+                  (if (wit-empty s) (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 q)))
+                (set q r))))
+        (if (== el 0) (set q1 q))
+        (set el (+ el 1))))
+    (let [^:mut be area]
+      (for [^I32 _bk 0 nb]
+        (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+        (let [aok (block-ao p s fb be)]
+          (if (!= (ia s (+ be 1)) 0)
+            (do (if (not (charge s (ia p (+ aok 1)) pos)) (return (neg R_BUDGET)))
+                (if (array-accepts p s be aok el)
+                  (q-set-flag s fb w (ia s be) F_MATCHED)
+                  (do (q-set-flag s fb w (ia s be) (shl R_MISSING 8))
+                      (set unacc (+ unacc 1))))))
+          (set be (+ be (array-words p aok))))))
+    (if (== n 2) (iset s VM_Q1 q1))
+    (let [rs (eval-scalars p pool b s fb w nq pos q0 q 16 0 el)]
+      (if (< rs 0) (return rs)))
+    (let [m (finish-comb p s fb w nq pos)]
+      (if (< m 0) (return m))
+      (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
+        (if (> unacc 0)
+          (wit-set s R_MISSING 0 d P_INDEX el pos)
+          (do (let [r1 (rule1 s fb w nq d pos)]
+                (if (< r1 0) (return r1)))))))
+    (return q)))
+
+;; ------------------------------------------------------------ maps
+
+(defn ^:pub ^I32 map-alive [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
+  (let [^:mut bo area
+        ^:mut k 0]
+    (for [^I32 _bi 0 nb]
+      (if (!= (ia s (+ bo 1)) 0) (set k (+ k 1)))
+      (set bo (+ bo (ia p (+ (block-mt p s fb bo) 6)))))
+    (return k)))
+
+(defn ^:pub ^I32 eval-map [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q0 ^I32 n
+                           ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
+  (comment "A map item (§8.3) after its head and container checks. Per pair: the"
+           "scanner's key checks; the key search, cursors, the key's query (key"
+           "typesets of live residual pools), the key, its order; the key phase"
+           "(candidates); the value with the candidates' value typesets; the"
+           "update. At the end, satisfaction, then witness rules 3/4/1.")
+  (let [cr (cset-rec p s ck)
+        w (cset-width p cr)
+        fw (cset-frame p cr)
+        area (+ fb (* 2 w))
+        cap (- fw (* 2 w))
+        cfb (+ fb fw)
+        cck (next-ck p s ck)
+        cw (cset-width p (cset-rec p s cck))
+        cose (and (== d 0) (!= (ia s O_COSE) 0))
+        ^:mut nb 0
+        ^:mut used 0
+        ^:mut ccap 0
+        ^:mut q q0
+        ^:mut ps (neg 1)
+        ^:mut pe (neg 1)
+        ^:mut klo 0
+        ^:mut unsat 0]
+    (let [na (q-filter p s fb w nq 32 pos)]
+      (if (< na 0) (return na)))
+    (for [^I32 i 0 nq]
+      (if (and (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0) (== (q-kind p s fb i) K_MAP))
+        (do (let [mt (leaf-map p (q-leaf-base p s fb i))
+                  sw (ia p (+ mt 6))]
+              (if (> (+ used sw) cap) (return (neg R_INCONSISTENT)))
+              (let [ri (map-block-init p s (+ area used) i mt pos)]
+                (if (< ri 0) (return ri)))
+              (set used (+ used sw))
+              (set ccap (+ ccap (ia p (+ mt 7))))
+              (set nb (+ nb 1))))))
+    (if (> (+ used (* 4 ccap)) cap) (return (neg R_INCONSISTENT)))
+    (let [cl (+ area used)
+          pend (count-pending p s fb w nq)]
+      (for [^I32 _k 0 n]
+        (let [start q]
+          (if (>= start end) (return (fail s start CODE_TRUNCATED)))
+          (let [km (ushr (u8 b start) 5)]
+            (if (!= km 3)
+              (if (not (and cose (<= km 1))) (return (fail s start CODE_KEY_TYPE))))
+            (if (== (map-alive p s fb area nb) 0)
+              (do (set q (dead-item b s start (+ d 1) end))
+                  (if (< q 0) (return q))
+                  (if (<= km 1)
+                    (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+                  (let [kod (key-order b s ps pe start q)]
+                    (if (< kod 0) (return kod)))
+                  (set ps start)
+                  (set pe q)
+                  (set q (dead-item b s q (+ d 1) end))
+                  (if (< q 0) (return q)))
+              (do (let [ke (key-span-end b start end)
+                        ^:mut kid (neg 1)
+                        ^:mut bo area
+                        ^:mut cnq 0
+                        ^:mut nc 0
+                        ^:mut named false
+                        ^:mut vnq 0
+                        ^:mut still 0]
+                    (local ^I32 kq)
+                    (local ^I32 vq)
+                    (comment "The key's id in the schema-wide key table.")
+                    (if (> ke start)
+                      (do (set kid (key-search p pool b s start ke klo pos))
+                          (if (== kid (neg 2)) (return (neg R_BUDGET)))
+                          (set klo (ia s O_HI))))
+                    (comment "Cursors: 1 unit per block, 1 per cursor step.")
+                    (for [^I32 _bi 0 nb]
+                      (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+                      (let [mtc (block-mt p s fb bo)]
+                        (if (!= (ia s (+ bo 1)) 0)
+                          (do (let [rc (map-cursor p s bo mtc kid pos)]
+                                (if (< rc 0) (return rc)))))
+                        (set bo (+ bo (ia p (+ mtc 6))))))
+                    (comment "The key, queried with the live residual key typesets.")
+                    (let [e (new-epoch s)]
+                      (set bo area)
+                      (for [^I32 _bj 0 nb]
+                        (let [mtj (block-mt p s fb bo)]
+                          (if (!= (ia s (+ bo 1)) 0)
+                            (do (set cnq (map-key-query p s bo mtj cfb cw cnq e pos))
+                                (if (< cnq 0) (return cnq))))
+                          (set bo (+ bo (ia p (+ mtj 6)))))))
+                    (if (> cnq 0)
+                      (set kq (eval-item p pool b s start (+ d 1) cfb cck cnq end CTX_KEY))
+                      (set kq (dead-item b s start (+ d 1) end)))
+                    (if (< kq 0) (return kq))
+                    (if (<= km 1)
+                      (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+                    (let [ko (key-order b s ps pe start kq)]
+                      (if (< ko 0) (return ko)))
+                    (set ps start)
+                    (set pe kq)
+                    (comment "Key phase: candidates.")
+                    (let [ek (q-stamp s cfb cw cnq pos)]
+                      (if (< ek 0) (return ek))
+                      (set bo area)
+                      (for [^I32 _bk 0 nb]
+                        (let [mtk (block-mt p s fb bo)]
+                          (if (!= (ia s (+ bo 1)) 0)
+                            (do (set nc (map-key-phase p s bo mtk kid ek cl nc ccap pos))
+                                (if (< nc 0) (return nc))))
+                          (set bo (+ bo (ia p (+ mtk 6)))))))
+                    (for [^I32 c 0 nc]
+                      (if (== (bit-and (ia s (+ (+ cl (* 4 c)) 1)) 1) 0) (set named true)))
+                    (if named (path-put s (+ d 1) P_KEY kid) (path-put s (+ d 1) P_ANYKEY 0))
+                    (comment "The value, queried with the candidates' value typesets.")
+                    (let [e2 (new-epoch s)]
+                      (for [^I32 c2 0 nc]
+                        (let [vts (cand-vts p s fb cl c2)]
+                          (set vnq (q-add p s cfb cw vnq vts e2 pos)))
+                        (if (< vnq 0) (return vnq))))
+                    (if (> vnq 0)
+                      (set vq (eval-item p pool b s kq (+ d 1) cfb cck vnq end 0))
+                      (set vq (dead-item b s kq (+ d 1) end)))
+                    (if (< vq 0) (return vq))
+                    (comment "Update: each candidate (1 unit + its value test), then"
+                             "each alive block.")
+                    (let [ev (q-stamp s cfb cw vnq pos)]
+                      (if (< ev 0) (return ev))
+                      (for [^I32 c3 0 nc]
+                        (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+                        (let [vts3 (cand-vts p s fb cl c3)
+                              t (ts-test p s vts3 ev pos)]
+                          (if (< t 0) (return t))
+                          (if (== t 1)
+                            (do (let [kw (+ (+ cl (* 4 c3)) 1)]
+                                  (iset s kw (bit-or (ia s kw) 2))))))))
+                    (set bo area)
+                    (for [^I32 _bl 0 nb]
+                      (let [mtl (block-mt p s fb bo)]
+                        (if (!= (ia s (+ bo 1)) 0)
+                          (do (let [u (map-update p s bo mtl kid cl nc pos)]
+                                (if (< u 0) (return u))
+                                (if (== u 1)
+                                  (set still (+ still 1))
+                                  (if (block-named s bo cl nc)
+                                    (q-set-flag s fb w (ia s bo) (shl R_VALUE 8))
+                                    (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8)))))))
+                        (set bo (+ bo (ia p (+ mtl 6))))))
+                    (if (or (> still 0) (> pend 0))
+                      (wit-clear s)
+                      (if (wit-empty s)
+                        (if named
+                          (wit-set s R_VALUE 0 (+ d 1) (neg 1) 0 start)
+                          (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 start))))
+                    (set q vq))))))))
+    (comment "The end: 1 unit per block; alive blocks + 1 per alternative and pool.")
+    (let [^:mut be area
+          ^:mut best (neg 1)
+          ^:mut bestbo 0]
+      (for [^I32 _bm 0 nb]
+        (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+        (let [mtm (block-mt p s fb be)]
+          (if (!= (ia s (+ be 1)) 0)
+            (do (if (not (charge s (+ (ia p (+ mtm 2)) (ia p (+ mtm 1))) pos)) (return (neg R_BUDGET)))
+                (if (map-satisfied p s be mtm)
+                  (q-set-flag s fb w (ia s be) F_MATCHED)
+                  (do (q-set-flag s fb w (ia s be) (shl R_MISSING 8))
+                      (set unsat (+ unsat 1))
+                      (let [lid (ia s (+ fb (ia s be)))]
+                        (if (or (< best 0) (< lid best))
+                          (do (set best lid) (set bestbo be))))))))
+          (set be (+ be (ia p (+ mtm 6))))))
+      (let [rs (eval-scalars p pool b s fb w nq pos q0 q 32 0 n)]
+        (if (< rs 0) (return rs)))
+      (let [m (finish-comb p s fb w nq pos)]
+        (if (< m 0) (return m))
+        (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
+          (if (> unsat 0)
+            (do (let [mtb (block-mt p s fb bestbo)
+                      r4 (map-missing p s bestbo mtb d pos)]
+                  (if (< r4 0) (return r4))))
+            (do (let [r1 (rule1 s fb w nq d pos)]
+                  (if (< r1 0) (return r1))))))))
+    (return q)))
+
+;; ------------------------------------------------------------ the item
+
+(defn ^:pub ^I32 eval-item [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 d ^I32 fb ^I32 ck
+                            ^I32 nq ^I32 end ^I32 ctx]
+  (comment "One LIVE item at pos, physical depth d, query list (nq > 0 entries) in the"
+           "frame at fb: visit (1 unit), counted, then its head -- the scanner's"
+           "`item`, with the schema evaluated alongside.")
+  (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+  (let [it (+ (ia s O_ITEMS) 1)]
+    (iset s O_ITEMS it)
+    (if (> it (ia s O_MAX_ITEMS)) (return (fail s pos CODE_TOO_MANY_ITEMS))))
+  (if (>= pos end) (return (fail s pos CODE_TRUNCATED)))
+  (let [ib (u8 b pos)
+        major (ushr ib 5)
+        ai (bit-and ib 31)
+        cr (cset-rec p s ck)
+        w (cset-width p cr)
+        ^:mut hi 0
+        ^:mut lo ai
+        ^:mut q (+ pos 1)]
+    (local ^:mut ^I32 stop)
+    (if (< cr 0) (return (neg R_INCONSISTENT)))
+    (if (>= ai 24)
+      (do (if (== major 7)
+            (if (and (>= ai 25) (<= ai 27))
+              (do (set stop (scan-float b s pos ai end))
+                  (if (< stop 0) (return stop))
+                  (let [nf (q-filter p s fb w nq (item-cls 7 ai 0 0) pos)]
+                    (if (< nf 0) (return nf)))
+                  (let [rf (eval-scalars p pool b s fb w nq pos (+ pos 1) stop (item-cls 7 ai 0 0) 0 0)]
+                    (if (< rf 0) (return rf)))
+                  (let [ff (finish-scalar p s fb w nq d pos ctx)]
+                    (if (< ff 0) (return ff)))
+                  (return stop))))
+          (set q (read-arg b s pos ai end))
+          (if (< q 0) (return q))
+          (set hi (ia s O_HI))
+          (set lo (ia s O_LO))))
+    (if (== major 4)
+      (do (let [ra (enter-container s pos q hi lo d 0 end)]
+            (if (< ra 0) (return ra)))
+          (return (eval-array p pool b s pos q lo d fb ck nq end ctx))))
+    (if (== major 5)
+      (do (let [rm (enter-container s pos q hi lo d 1 end)]
+            (if (< rm 0) (return rm)))
+          (return (eval-map p pool b s pos q lo d fb ck nq end ctx))))
+    (if (== major 6) (return (eval-tag p pool b s pos q hi lo d fb ck nq end ctx)))
+    (set stop q)
+    (if (== major 2)
+      (do (set stop (take-len s pos q hi lo end))
+          (if (< stop 0) (return stop))
+          (let [rb (bstr-tail p pool b s pos q stop d fb ck nq ctx)]
+            (if (< rb 0) (return rb)))
+          (return stop)))
+    (if (== major 3)
+      (do (set stop (take-len s pos q hi lo end))
+          (if (< stop 0) (return stop))
+          (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
+          (let [bad (utf8-invalid-at b q stop)]
+            (if (>= bad 0) (return (fail s bad CODE_TEXT))))))
+    (if (== major 7)
+      (do (let [r7 (scan-simple s pos ai)]
+            (if (< r7 0) (return r7)))))
+    (let [cls (item-cls major ai hi lo)
+          nf2 (q-filter p s fb w nq cls pos)]
+      (if (< nf2 0) (return nf2))
+      (let [r2 (eval-scalars p pool b s fb w nq pos q stop cls hi lo)]
+        (if (< r2 0) (return r2)))
+      (let [f2 (finish-scalar p s fb w nq d pos ctx)]
+        (if (< f2 0) (return f2)))
+      (return stop))))
+

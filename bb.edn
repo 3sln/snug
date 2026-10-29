@@ -17,5 +17,7 @@
               :task (apply shell "kin/scripts/rscan-test" *command-line-args*)}
   compile-test {:doc "P3.2/P3.3: every corpus schema through the compiler on JS and Rust; refusals, identity, program.md §15, vm-verify."
                 :task (apply shell "kin/scripts/compile-test" *command-line-args*)}
+  vm-test    {:doc "P3.4: the VM on JS and Rust -- §15, profile identity vs the scanner, the corpus through the compiler, assembled programs, JS == Rust."
+              :task (apply shell "kin/scripts/vm-test" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

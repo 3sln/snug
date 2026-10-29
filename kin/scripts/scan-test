@@ -9,7 +9,7 @@ set -e
 cd "$(dirname "$0")/../.."
 ./kin/scripts/emit > /dev/null
 crate=.cache/snug-rs
-SNUG_RS_ONLY="cbor hello.rs" ./kin/scripts/rust-crate "$crate"
+SNUG_RS_ONLY="cbor vm compile program hello.rs" ./kin/scripts/rust-crate "$crate"
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin scan 2>&1); then
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi

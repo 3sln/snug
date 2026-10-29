@@ -374,8 +374,62 @@ slower); allocated head tuples; validating wrapper constructors in build
   leaves made at once and filled from a worklist make recursion through maps,
   arrays, tags and `.cbor` a reference, never a host recursion, and the leaf
   numbering walk is iterative, so no schema can exhaust a host stack.
-- [ ] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
+- [~] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
+
+  *Status 2026-10-29 (VM engineer): buffer driver working end to end;
+  slices continuing (witness/budget/hostile assembled cases, oracle
+  differential, hosts, benchmarks).* The validator VM is kin in
+  `kin/vm-*.kin` (`snug.vm.layout base dead leaf map array eval api`),
+  generated into `gen/{js,rust}/snug/vm/`: the D030 **recursive buffer
+  driver** (`vm-validate`, `vm-validate-span` for §16.3 `validateAt`,
+  `vm-scratch-words`, `vm-scratch-init`, `vm-rule-index` per program.md
+  §13.1; vm-verify is the compiler engineer's and is consumed, not
+  duplicated). The live walk (`snug.vm.eval`) is the scanner's walk with the
+  schema evaluated alongside: same checks, order, codes, offsets and item
+  counting (reusing `snug.cbor.*` helpers with explicit `end` offsets);
+  query lists with epochs/marks, operand-first combinators, major-mask
+  filter, every §4.2 leaf kind (INT/FLOAT intervals over sign+magnitude and
+  ordered binary64 keys with integer-only widening, LIT/LITSET by bytes,
+  TEXT size + I-Regexp bitset simulation, BYTES size/`.bits`, UINTX, SIMPLE,
+  TAG/TAGSET, EMBED sub-validation, ARRAY Glushkov with counters, MAP blocks
+  with factors/pools/alternatives/per-key index/O(1) pool rejection/cuts),
+  the witness slot and path stack (§9.2, §9.3), the §14 schedule and the
+  saturating budget, per-call limits that only lower compiled ones. A
+  dead item (empty query) is walked by `snug.vm.dead` (scanner + charges):
+  that is also the profile-only continuation of arch §4.5 and the hot path
+  of profile-only decode. JS host: `host/js/src/schema.mjs` (Program with
+  copy-on-load, per-isolate scratch lease, result rendering, Schema
+  `validate`/`validateAt`/`decode`, `compile` over the compiler's host).
+  Rust: `host/rust/src/bin/vm.rs` (`&mut` scratch per program). Test tools:
+  `kin/scripts/vm-asm.mjs` (a Program assembler computing every [D] field;
+  it reproduces program.md §15 word for word, pool included) and
+  `kin/scripts/vm-test` (`bb vm-test`).
+  Gates run 2026-10-29: `bb vm-test 2000 1`: program.md §15 worked
+  executions exact (`[0,0,0,64,6,…]`, `[33,0,0,47,3,1,1,0,1,0]`, the
+  contrast `type` at `["x"]`), and the compiler's §15 Program bit-identical
+  to the document; **profile identity 3 360/3 360** (VM against `any` = the
+  scanner's code, offset and items on every scan-test vector, fixed case and
+  2 000 seeded mutations); conformance 976/983 cases from 262 compiled suites
+  (31 refusal suites refused as expected) — the 7 misses are compiler
+  lowering, below; JS == Rust (debug) on 4 346/4 346 whole out arrays, no
+  panic; 1 464 JS cases re-run behind throwing out-of-bounds traps on P, B,
+  input and scratch; 264 Programs pass vm-verify. `bb check`, `bb scan-test
+  30000 1` (31 360/31 360 incl. wasm), `bb rscan-test 30000 2` green.
+  **For the compiler engineer (found by vm-test, not fixed here):** (1) an
+  inline container as a `.cbor`/`.cborseq` control type (`bstr .cbor [uint,
+  tstr]`, `bstr .cborseq [* uint]`, `bstr .cbor {a: int}`) lowers the EMBED
+  leaf's content typeset to the EMBED's own typeset (content `T0 = {L0}`);
+  the named-rule forms (`s = [uint, tstr]` `r = bstr .cbor s`) are right
+  and pass; (2) `uint .size n` lowers to `[256^(n-1), 256^n - 1]` (`.size 1`
+  refuses 0); arch §4.6 says `uint .size n` = `0..256^n−1` (only the range
+  form `uint .size (lo..hi)` has a lower bound). Please also confirm D040.
+  Shared-script change: `kin/scripts/{check,scan-test,rscan-test}` build
+  with `SNUG_RS_ONLY="cbor vm compile program hello.rs"` (the committed
+  `lib.rs` now declares `pub mod compile`, and `bin/vm.rs` needs `vm`; absent
+  directories are skipped). Scratch words 37–42 (program.md "reserved") are
+  the VM's per-call run state (re-initialised every call); vm-verify uses
+  37–38 only at load, so they never overlap in time.
 - [~] **P3.5 — Conformance corpus** (study probes and contracts with expected
   verdicts corrected to RFC semantics; RFC 8610 examples; adversarial cases).
 
@@ -970,6 +1024,88 @@ convert exactly for |x| < 2^53 and refuse otherwise; `.bits` masks keep at
 least one byte (an all-zero mask still constrains); `.feature` and
 `.default` return the target.
 **Why**: exact or refused, never a different meaning (R1).
+- [ ] **Signed off** (owner)
+
+### D040 — `.cborseq` is matched as a virtual array of the sequence's items (VM engineer; needs the compiler engineer's agreement)
+**Decision**: an EMBED leaf with `SEQ` treats its content typeset (the
+control type, an array type: the compiler already emits the array's typeset)
+as the query of a VIRTUAL array item at physical depth d + 1 (path segment
+`EMBED`, rendered `cbor`) whose elements are the sequence's items at d + 2
+(segments `INDEX i`, so a path renders `cbor, i` as §9.3's `EMBEDSEQ i`
+would; the VM never writes `EMBEDSEQ`). The virtual array is not an item
+(not counted, no visit charge); its filter, blocks and elements are charged
+as an array's. Inner depth limit for a sequence: min(limit, D − d − 2).
+`.cbor` and `.cborseq` leaves on one byte string run as two sub-validations.
+A byte string at a depth with no frame for the embedded root (d + 1 > D, or
+d + 2 > D for a sequence) fails its EMBED leaves with inner `cbor/depth`
+(program.md §17 q6) instead of writing past the scratch.
+**Why**: program.md §8.4 queries each sequence item with the content
+typeset, which only expresses `[* T]`; RFC 8610 §3.8.4 matches the sequence
+against an array type, so `[? uint, 2*3 uint, tstr]` (adversarial "embedded
+sequence with backtracking") needs the array automaton. The virtual array
+reuses the existing format: R_{d+1} holds the ARRAY leaf (its frame has the
+array block), R_{d+2} its position typesets. No Program byte changes.
+**Alternatives**: the compiler lowers `.cborseq [* T]` to content `{T}` and
+refuses other arrays (loses RFC cases); a format change giving `.cborseq`
+its own automaton reference (unnecessary).
+- [ ] **Signed off** (owner)
+- [ ] **Agreed** (compiler engineer)
+
+### D041 — The VM's reading of program.md §14 where the table is not exact
+**Decision**: (1) a binary-search probe that compares bytes (key table,
+LITSET) costs ceil(min(len)/64), at least 1, comparison included — the §15
+trace charges a key probe 1; a LIT costs its leaf unit + one such
+comparison; (2) interval and float-interval probes cost 1 each, the final
+upper-bound check is part of the leaf's unit; (3) "map pair, update: each
+live pool" charges every pool of every block alive at the update (§15.4
+charges a pool emptied by a cut in the same pair); (4) "map end: + 1 per
+alternative and 1 per pool" is the leaf's n_alts + n_pools; (5) stamping a
+child charges |Q′| whenever Q′ is non-empty, matched or not (§15.4), and a
+fresh epoch is taken even for an empty Q′; (6) AND/NOT cost 2 each, their
+stamping pass is covered by the item's filter charge; (7) within an item:
+visit, count, head, length / UTF-8 (charged before the scan), filter,
+blocks, children, scalar leaves, EMBED, combinators; (8) an EMBED leaf costs
+1 when admitted; a live tag's byte-string content (bignum, typed array)
+costs 1 visit even when walked dead, a dead walk charges counted items
+only; (9) on exhaustion `out[3]` is the whole budget (nothing is deducted
+for the charge that failed) and `out[2]` the item being visited when it
+failed; hosts agree on that stop point because the schedule is the same
+code.
+**Why**: §14 is normative but leaves these choices; R6 needs one answer.
+The §15 worked executions (64 and 47 units) reproduce exactly under it.
+**Alternatives**: charging a key probe 1 + its comparison (contradicts the
+§15 trace); counting only live pools after the pair's kills.
+- [ ] **Signed off** (owner)
+
+### D042 — Witness details the architecture leaves open
+**Decision**: (1) rule 2's "live candidate" is an alive MAP/ARRAY block or
+an admitted scalar leaf (ANY, MAJOR, LIT, …) of the container; for a tag
+or an embedded byte string, a matched admitted leaf after the child step;
+(2) end-of-item records happen only when the item failed overall (after
+combinators): rule 4 / rule 5 `missing` when an alive block failed at the
+end, else rule 1; (3) leaf failure reasons for containers, used by rule 1
+and by AND/NOT: a map leaf that died at a pair `value`/`unexpected`, an
+array leaf that died at an element `type` (`unexpected` when it had no
+candidate position), either at the end `missing`, a tag whose content
+failed `type`; (4) an embedded profile/limit failure (incl. `.cbor`
+trailing) sets the slot to its code, the path to the byte string plus
+`cbor`, and the inner error offset, overriding inner schema witnesses
+(profile errors win inside the sub-validation too); rule 7 then rewrites it
+to `embedded` with that subcode.
+**Why**: one deterministic answer per input (D024), consistent with §9.2's
+rules and the §15 examples.
+- [ ] **Signed off** (owner)
+
+### D043 — ANY and bare major types give their children no query
+**Decision**: the children of an item matched by ANY or `MAJOR 4/5/6` are
+walked dead (profile only) unless another candidate queries them; the
+closure still contains TS_ANY for them (it only over-sizes scratch).
+**Why**: program.md §8.1/§8.3/§8.4 build child queries from positions,
+entries and tag contents only; ANY's answer cannot depend on its children,
+and the dead walk makes profile-only decode (the VM against `any`) cost one
+unit per item plus scans instead of five.
+**Alternatives**: arch §4.1's literal "ANY gives {ANY}" (same verdicts and
+witnesses, ~5× the budget per item under `any`).
 - [ ] **Signed off** (owner)
 ---
 
