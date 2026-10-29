@@ -82,6 +82,9 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
                     rule,
                 });
             }
+            if kc::out_program_words(&h) < 64 {
+                return Err(SchemaError { code: "internal", line: 0, column: 0, rule: None });
+            }
             let p = kc::out_program_at(&h) as usize;
             let b = kc::out_pool_at(&h) as usize;
             let program = h[p..p + kc::out_program_words(&h) as usize].to_vec();

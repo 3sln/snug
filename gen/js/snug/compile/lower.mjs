@@ -6,7 +6,7 @@ import { arrFinish } from './arrays.mjs';
 import { bidByte, encIntKey, encString, headPush, intern, magOf } from './bytes.mjs';
 import { ctlAnd, ctlBits, ctlCat, ctlCbor, ctlCompare, ctlEq, ctlRegexp, ctlSize, floatPoint, intPoint, singleLeaf } from './ctl.mjs';
 import { G_ALT, G_EMPTY, G_FRAME, G_POS, G_REC, G_REP, G_SEQ, gAdd, gList, gNode, gk, gset } from './glush.mjs';
-import { K_ARRAY, K_EMBED, K_INT, K_LIT, K_MAP, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimple, mkText, pointOf, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves } from './leaf.mjs';
+import { K_ARRAY, K_EMBED, K_INT, K_LIT, K_MAP, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimple, mkText, pointOf, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
 import { TK_BYTES, TK_FLOAT, TK_INT, TK_TEXT, tkA, tkB, tkC, tkEnd, tkKind, tkStart } from './lex.mjs';
 import { altEnt, asAlen, asAoff, asN, asNone, asOccur, asProduct, asSingle, asUnion, asUnit, entNew, ew, mapFinish } from './maps.mjs';
 import { KEY_BARE, KEY_TYPE, KEY_VALUE, N_ANY, N_ARRAY, N_CTL, N_ENT, N_ENUM, N_MAJOR, N_MAP, N_MEMBER, N_NAME, N_RANGE, N_SUBGRP, N_TAG, N_TYPE, N_UNWRAP, N_VALUE, na, nb, nc, nd, ne, nk, nnext, npos, ntok } from './parse.mjs';
@@ -382,6 +382,11 @@ export function lowerRange(h, node, env) {
                 hkh = (hkh - 1) | 0;
             }
             hkl = (hkl - 1) | 0;
+        }
+        // An empty range (lo > hi, or an exclusive one with nothing in it) is
+        // the empty type.
+        if (u64Cmp(lkh, lkl, hkh, hkl) > 0) {
+            return tsOf1(h, -2);
         }
         vtrunc(h, T_TMP2, 0);
         vpush1(h, T_TMP2, lkh);
@@ -887,12 +892,36 @@ export function lowerType(h, node, env) {
     return r;
 }
 
-export function groupRef(h, ent, env) {
-    // If the keyless entry ent is a reference to a group -- a group rule (with
-    // arguments), an undefined group socket, or `~name` -- answer: >= 0 the rule
-    // (environment in h[H_R0], -2 = not generic), -3 for an unwrap (node in
-    // h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain type.
-    const ty = nc(h, ent);
+export function entType(h, ent) {
+    // The type of a keyless entry: an N_ENT's, or the node itself when a group
+    // rule's definition was parsed as a type (`g1 = (g)` is `g1 = g`, a group by
+    // usage).
+    if (nk(h, ent) === N_TYPE) {
+        return ent;
+    }
+    return nc(h, ent);
+}
+
+export function entLo(h, ent) {
+    if (nk(h, ent) === N_TYPE) {
+        return 1;
+    }
+    return na(h, ent);
+}
+
+export function entHi(h, ent) {
+    if (nk(h, ent) === N_TYPE) {
+        return 1;
+    }
+    return nb(h, ent);
+}
+
+export function groupRef(h, ty, env) {
+    // If the type ty of a keyless entry is a reference to a group -- a group
+    // rule (with arguments), an undefined group socket, or `~name` -- answer: >=
+    // 0 the rule (environment in h[H_R0], -2 = not generic), -3 for an unwrap
+    // (node in h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain
+    // type.
     if ((nk(h, ty) !== N_TYPE) || (nb(h, ty) !== 1)) {
         return -2;
     }
@@ -1155,8 +1184,8 @@ export function mEnt(h, ent, env) {
         return -1;
     }
     const k = nk(h, ent);
-    const lo = na(h, ent);
-    let hi = nb(h, ent);
+    const lo = entLo(h, ent);
+    let hi = entHi(h, ent);
     let base = -1;
     if (hi < 0) {
         hi = INF;
@@ -1169,8 +1198,8 @@ export function mEnt(h, ent, env) {
     if (k === N_SUBGRP) {
         base = mGroup(h, nc(h, ent), -1, env);
     }
-    if (k === N_ENT) {
-        const gr = groupRef(h, ent, env);
+    if ((k === N_ENT) || (k === N_TYPE)) {
+        const gr = groupRef(h, entType(h, ent), env);
         if (gr === (-1)) {
             return -1;
         }
@@ -1372,8 +1401,8 @@ export function aEnt(h, ent, env, tailfrom, last) {
     // with an index >= tailfrom may be re-entered from here (tail position).
     const pos = npos(h, ent);
     const k = nk(h, ent);
-    const lo = na(h, ent);
-    let hi = nb(h, ent);
+    const lo = entLo(h, ent);
+    let hi = entHi(h, ent);
     let tf = tailfrom;
     if (!enter(h, pos)) {
         return -1;
@@ -1398,13 +1427,13 @@ export function aEnt(h, ent, env, tailfrom, last) {
     if (k === N_SUBGRP) {
         child = aGroup(h, nc(h, ent), -1, env, tf);
     }
-    if (k === N_ENT) {
-        const gr = groupRef(h, ent, env);
+    if ((k === N_ENT) || (k === N_TYPE)) {
+        const gr = groupRef(h, entType(h, ent), env);
         if (gr === (-1)) {
             return -1;
         }
         if (gr === (-2)) {
-            const vt2 = lowerType(h, nc(h, ent), env);
+            const vt2 = lowerType(h, entType(h, ent), env);
             if (vt2 < 0) {
                 return -1;
             }
@@ -1491,13 +1520,13 @@ export function enumEnt(h, ent, env) {
             return -1;
         }
     }
-    if (k === N_ENT) {
-        const gr = groupRef(h, ent, env);
+    if ((k === N_ENT) || (k === N_TYPE)) {
+        const gr = groupRef(h, entType(h, ent), env);
         if (gr === (-1)) {
             return -1;
         }
         if (gr === (-2)) {
-            const vt2 = lowerType(h, nc(h, ent), env);
+            const vt2 = lowerType(h, entType(h, ent), env);
             if (vt2 < 0) {
                 return -1;
             }

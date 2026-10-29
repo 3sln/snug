@@ -270,6 +270,18 @@ pub(crate) fn walk_rep(h: &mut [i32], w: i32, n: i32) -> i32 {
     if hi == 0 {
         return empty_frag(h);
     }
+    // A child with no positions matches only the empty sequence (or nothing):
+    // repeating it changes nothing, so it is walked once, not once per copy.
+    if g_count(h, child) == 0 {
+        let f0: i32 = walk(h, w, child);
+        if f0 < 0 {
+            return -1;
+        }
+        if lo == 0 {
+            return opt(h, f0);
+        }
+        return f0;
+    }
     let k: i32 = rep_copies(lo, hi);
     let base: i32 = vlen(h, T_STK3);
     for _copy in 0..k {

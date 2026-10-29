@@ -44,7 +44,7 @@
             [snug.compile.bytes :refer [intern enc-string enc-int-key mag-of bid-byte bid-len head-push]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd leaf-new ts-make ts-of1 ts-push-leaves
                                        ts-n ts-leaf leaf-mask mk-any mk-major mk-simple mk-lit mk-text
-                                       mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow
+                                       mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow u64-cmp
                                        stage stage-d stage-intern
                                        K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
                                        R_NEG_INF R_NEG_BIG R_NEG R_POS R_POS_BIG R_POS_INF]]
@@ -296,6 +296,9 @@
               (if (== incl 0)
                 (do (if (== hkl 0) (set hkh (sub32 hkh 1)))
                     (set hkl (sub32 hkl 1))))
+              (comment "An empty range (lo > hi, or an exclusive one with nothing in it) is"
+                       "the empty type.")
+              (if (> (u64-cmp lkh lkl hkh hkl) 0) (return (ts-of1 h (neg 2))))
               (vtrunc h T_TMP2 0)
               (vpush1 h T_TMP2 lkh) (vpush1 h T_TMP2 lkl) (vpush1 h T_TMP2 hkh) (vpush1 h T_TMP2 hkl)
               (let [fl (mk-float-from h 7 T_TMP2 1)]
@@ -584,12 +587,28 @@
 
 ;; ------------------------------------------------------------ group references
 
-(defn ^I32 group-ref [^Ints h ^I32 ent ^I32 env]
-  (comment "If the keyless entry ent is a reference to a group -- a group rule (with"
-           "arguments), an undefined group socket, or `~name` -- answer: >= 0 the rule"
-           "(environment in h[H_R0], -2 = not generic), -3 for an unwrap (node in"
-           "h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain type.")
-  (let [ty (nc h ent)]
+(defn ^I32 ent-type [^IntsR h ^I32 ent]
+  (comment "The type of a keyless entry: an N_ENT's, or the node itself when a group"
+           "rule's definition was parsed as a type (`g1 = (g)` is `g1 = g`, a group by"
+           "usage).")
+  (if (== (nk h ent) N_TYPE) (return ent))
+  (return (nc h ent)))
+
+(defn ^I32 ent-lo [^IntsR h ^I32 ent]
+  (if (== (nk h ent) N_TYPE) (return 1))
+  (return (na h ent)))
+
+(defn ^I32 ent-hi [^IntsR h ^I32 ent]
+  (if (== (nk h ent) N_TYPE) (return 1))
+  (return (nb h ent)))
+
+(defn ^I32 group-ref [^Ints h ^I32 ty ^I32 env]
+  (comment "If the type ty of a keyless entry is a reference to a group -- a group"
+           "rule (with arguments), an undefined group socket, or `~name` -- answer: >="
+           "0 the rule (environment in h[H_R0], -2 = not generic), -3 for an unwrap"
+           "(node in h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain"
+           "type.")
+  (let []
     (if (or (!= (nk h ty) N_TYPE) (!= (nb h ty) 1)) (return (neg 2)))
     (let [c (na h ty)]
       (if (== (nk h c) N_UNWRAP) (do (hs h H_R0 c) (return (neg 3))))
@@ -752,8 +771,8 @@
   (let [pos (npos h ent)]
     (if (not (enter h pos)) (return (neg 1)))
     (let [k (nk h ent)
-          lo (na h ent)
-          ^:mut hi (nb h ent)
+          lo (ent-lo h ent)
+          ^:mut hi (ent-hi h ent)
           ^:mut base (neg 1)]
       (if (< hi 0) (set hi INF))
       (if (== k N_MEMBER)
@@ -761,8 +780,8 @@
               (leave h)
               (return mm))))
       (if (== k N_SUBGRP) (set base (m-group h (nc h ent) (neg 1) env)))
-      (if (== k N_ENT)
-        (do (let [gr (group-ref h ent env)]
+      (if (or (== k N_ENT) (== k N_TYPE))
+        (do (let [gr (group-ref h (ent-type h ent) env)]
               (if (== gr (neg 1)) (return (neg 1)))
               (if (== gr (neg 2)) (return (fail h ERR_MAP_KEY pos)))
               (if (== gr (neg 4)) (set base (as-unit h)))
@@ -894,8 +913,8 @@
            "with an index >= tailfrom may be re-entered from here (tail position).")
   (let [pos (npos h ent)
         k (nk h ent)
-        lo (na h ent)
-        ^:mut hi (nb h ent)
+        lo (ent-lo h ent)
+        ^:mut hi (ent-hi h ent)
         ^:mut tf tailfrom]
     (if (not (enter h pos)) (return (neg 1)))
     (if (< hi 0) (set hi INF))
@@ -907,11 +926,11 @@
               (if (< vt 0) (return (neg 1)))
               (set child (g-node h G_POS vt 0 0)))))
       (if (== k N_SUBGRP) (set child (a-group h (nc h ent) (neg 1) env tf)))
-      (if (== k N_ENT)
-        (do (let [gr (group-ref h ent env)]
+      (if (or (== k N_ENT) (== k N_TYPE))
+        (do (let [gr (group-ref h (ent-type h ent) env)]
               (if (== gr (neg 1)) (return (neg 1)))
               (if (== gr (neg 2))
-                (do (let [^I32 vt2 (lower-type h (nc h ent) env)]
+                (do (let [^I32 vt2 (lower-type h (ent-type h ent) env)]
                       (if (< vt2 0) (return (neg 1)))
                       (set child (g-node h G_POS vt2 0 0)))))
               (if (== gr (neg 4)) (set child (g-node h G_EMPTY 0 0 0)))
@@ -964,11 +983,11 @@
             (ts-push-leaves h vt))))
     (if (== k N_SUBGRP)
       (if (< (enum-group h (nc h ent) env) 0) (return (neg 1))))
-    (if (== k N_ENT)
-      (do (let [gr (group-ref h ent env)]
+    (if (or (== k N_ENT) (== k N_TYPE))
+      (do (let [gr (group-ref h (ent-type h ent) env)]
             (if (== gr (neg 1)) (return (neg 1)))
             (if (== gr (neg 2))
-              (do (let [^I32 vt2 (lower-type h (nc h ent) env)]
+              (do (let [^I32 vt2 (lower-type h (ent-type h ent) env)]
                     (if (< vt2 0) (return (neg 1)))
                     (ts-push-leaves h vt2))))
             (if (== gr (neg 3)) (return (fail h ERR_ENUM pos)))

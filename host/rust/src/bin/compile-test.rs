@@ -35,7 +35,9 @@ fn main() {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
-    std::panic::set_hook(Box::new(|_| {}));
+    if std::env::var_os("SNUG_LOUD").is_none() {
+        std::panic::set_hook(Box::new(|_| {}));
+    }
     for line in stdin.lock().lines() {
         let line = line.expect("stdin");
         if let Some(rest) = line.strip_prefix("V ") {

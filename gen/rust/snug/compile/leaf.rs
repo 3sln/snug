@@ -811,9 +811,15 @@ pub fn leaf_mask(h: &[i32], l: i32) -> i32 {
         if iv_meets(h, f, n, R_NEG, -1, -1, R_NEG, 0, 0) {
             msk |= 2;
         }
+        // A bignum region is met when an interval spans into it (by region:
+        // big bounds compare by magnitude, so no fixed bound stands for them).
         if (lflags(h, l) & 1) != 0 {
-            if iv_meets(h, f, n, R_NEG_INF, 0, 0, R_NEG_BIG, 0, 0) || iv_meets(h, f, n, R_POS_BIG, 0, 0, R_POS_INF, 0, 0) {
-                msk |= 2048;
+            for i in 0..n {
+                let lr: i32 = vget(h, T_IV, 6 * (f + i));
+                let hr: i32 = vget(h, T_IV, (6 * (f + i)) + 3);
+                if ((lr <= R_NEG_BIG) && (hr >= R_NEG_BIG)) || ((lr <= R_POS_BIG) && (hr >= R_POS_BIG)) {
+                    msk |= 2048;
+                }
             }
         }
         return msk;

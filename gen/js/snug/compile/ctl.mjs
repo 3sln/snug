@@ -291,7 +291,11 @@ export function ctlBits(h, target, ctl, pos) {
             if (maxbit >= INF) {
                 return fail(h, ERR_CONTROL_VALUE, pos);
             }
-            const mlen = (maxbit >> 3) + 1;
+            let mlen = (maxbit >> 3) + 1;
+            // No bit at all still constrains: a one-byte zero mask.
+            if (mlen < 1) {
+                mlen = 1;
+            }
             if (mlen > hg(h, H_LIM_POOL)) {
                 return fail(h, ERR_LIM_POOL, pos);
             }

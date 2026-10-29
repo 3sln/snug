@@ -140,26 +140,32 @@ pub fn finish_error(h: &mut [i32]) {
         hs(h, H_ERR_COL, col);
     }
 }
+pub(crate) fn bail(h: &mut [i32]) -> i32 {
+    // A phase failed: report its error (ERR_INTERNAL if it recorded none, so a
+    // silent failure can never pass for success).
+    if h[(H_ERR) as usize] == 0 {
+        fail(h, ERR_INTERNAL, -1);
+    }
+    finish_error(h);
+    return h[(H_ERR) as usize];
+}
 pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> i32 {
     // See the namespace doc. Answers 0 or an error code (also in h[H_ERR]).
     if (h.len() as i32) < (H_DATA + 1024) {
         return ERR_ARENA;
     }
     if !setup(text, opt, fl, h) {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     let n: i32 = hg(h, H_NSRC);
     let bad: i32 = check_utf8(h, 0, n);
     if bad >= 0 {
         fail(h, ERR_SYNTAX, bad);
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     let ut: i32 = lex(h, 0);
     if erred(h) {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     if vlen(h, T_STK6) > 0 {
         h[(H_ERR) as usize] = ERR_NEED_FLOATS;
@@ -168,39 +174,36 @@ pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> i3
     let pat: i32 = hg(h, H_PRELUDE_AT);
     let pt: i32 = lex(h, pat);
     if erred(h) {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     let urules: i32 = parse_rules(h, ut);
     if erred(h) {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     if urules < 0 {
         fail(h, ERR_EMPTY, 0);
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     let prules: i32 = parse_rules(h, pt);
     if erred(h) {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
     if (!bytes_init(h)) || ((!leaf_init(h)) || ((!rx_init(h)) || (!lower_init(h)))) {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+        return bail(h);
     }
-    if build_rules(h, urules, prules) < 0 {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+    if (build_rules(h, urules, prules) < 0) || erred(h) {
+        return bail(h);
     }
-    if lower_rules(h) < 0 {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+    if (lower_rules(h) < 0) || erred(h) {
+        return bail(h);
     }
-    if emit_program(h) < 0 {
-        finish_error(h);
-        return h[(H_ERR) as usize];
+    if (emit_program(h) < 0) || erred(h) {
+        return bail(h);
+    }
+    // Belt and braces: a phase that swallowed an error (an arena that
+    // ran out mid-way) must not pass for a Program.
+    if hg(h, H_OUT_PN) < 64 {
+        return bail(h);
     }
     return 0;
 }

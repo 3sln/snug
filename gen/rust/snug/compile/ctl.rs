@@ -279,7 +279,11 @@ pub fn ctl_bits(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
             if maxbit >= INF {
                 return fail(h, ERR_CONTROL_VALUE, pos);
             }
-            let mlen: i32 = (maxbit >> 3) + 1;
+            let mut mlen: i32 = (maxbit >> 3) + 1;
+            // No bit at all still constrains: a one-byte zero mask.
+            if mlen < 1 {
+                mlen = 1;
+            }
             if mlen > hg(h, H_LIM_POOL) {
                 return fail(h, ERR_LIM_POOL, pos);
             }

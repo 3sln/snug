@@ -307,6 +307,18 @@ export function walkRep(h, w, n) {
     if (hi === 0) {
         return emptyFrag(h);
     }
+    // A child with no positions matches only the empty sequence (or nothing):
+    // repeating it changes nothing, so it is walked once, not once per copy.
+    if (gCount(h, child) === 0) {
+        const f0 = walk(h, w, child);
+        if (f0 < 0) {
+            return -1;
+        }
+        if (lo === 0) {
+            return opt(h, f0);
+        }
+        return f0;
+    }
     const k = repCopies(lo, hi);
     const base = vlen(h, T_STK3);
     for (let _copy = 0; _copy < k; _copy++) {

@@ -76,6 +76,7 @@ export function compile(text, { profile = 'full', limits = {} } = {}) {
       throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule);
     }
     const p = outProgramAt(h), b = outPoolAt(h);
+    if (outProgramWords(h) < 64) throw new SchemaError('internal', 0, 0, undefined);
     const program = h.slice(p, p + outProgramWords(h));
     const pool = Uint8Array.from(h.subarray(b, b + outPoolBytes(h)));
     return { program, pool, rules: ruleNames(program, pool) };

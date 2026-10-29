@@ -22,7 +22,7 @@
                                         H_LIM_DEPTH H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS H_LIM_BIGNUM
                                         H_LIM_VBUDGET H_LIM_LEAVES H_PROFILE H_FL_GIVEN H_PRELUDE_AT
                                         H_DATA N_TABLES H_DEPTH_MAX H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
-                                        ERR_LIM_TEXT ERR_SYNTAX ERR_NEED_FLOATS ERR_EMPTY ERR_ARENA H_G1 H_G2
+                                        ERR_LIM_TEXT ERR_SYNTAX ERR_NEED_FLOATS ERR_EMPTY ERR_ARENA ERR_INTERNAL H_G1 H_G2
                                         T_SRC T_FLREQ T_STK6]]
             [snug.compile.prelude :refer [prelude-len prelude-byte]]
             [snug.compile.lex :refer [lex check-utf8 tk-start]]
@@ -139,36 +139,46 @@
           (hs h H_ERR_LINE line)
           (hs h H_ERR_COL col)))))
 
+(defn ^I32 bail [^Ints h]
+  (comment "A phase failed: report its error (ERR_INTERNAL if it recorded none, so a"
+           "silent failure can never pass for success).")
+  (if (== (ia h H_ERR) 0) (fail h ERR_INTERNAL (neg 1)))
+  (finish-error h)
+  (return (ia h H_ERR)))
+
 (defn ^:pub ^I32 compile-schema [^Bytes text ^IntsR opt ^IntsR fl ^Ints h]
   (comment "See the namespace doc. Answers 0 or an error code (also in h[H_ERR]).")
   (if (< (ilen h) (+ H_DATA 1024)) (return ERR_ARENA))
   (if (not (setup text opt fl h))
-    (do (finish-error h) (return (ia h H_ERR))))
+    (return (bail h)))
   (let [n (hg h H_NSRC)
         bad (check-utf8 h 0 n)]
     (if (>= bad 0)
-      (do (fail h ERR_SYNTAX bad) (finish-error h) (return (ia h H_ERR)))))
+      (do (fail h ERR_SYNTAX bad) (return (bail h)))))
   (let [ut (lex h 0)]
-    (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+    (if (erred h) (return (bail h)))
     (if (> (vlen h T_STK6) 0)
       (do (iset h H_ERR ERR_NEED_FLOATS) (return ERR_NEED_FLOATS)))
     (let [pat (hg h H_PRELUDE_AT)
           pt (lex h pat)]
-      (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+      (if (erred h) (return (bail h)))
       (let [urules (parse-rules h ut)]
-        (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+        (if (erred h) (return (bail h)))
         (if (< urules 0)
-          (do (fail h ERR_EMPTY 0) (finish-error h) (return (ia h H_ERR))))
+          (do (fail h ERR_EMPTY 0) (return (bail h))))
         (let [prules (parse-rules h pt)]
-          (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+          (if (erred h) (return (bail h)))
           (if (or (not (bytes-init h)) (or (not (leaf-init h)) (or (not (rx-init h)) (not (lower-init h)))))
-            (do (finish-error h) (return (ia h H_ERR))))
-          (if (< (build-rules h urules prules) 0)
-            (do (finish-error h) (return (ia h H_ERR))))
-          (if (< (lower-rules h) 0)
-            (do (finish-error h) (return (ia h H_ERR))))
-          (if (< (emit-program h) 0)
-            (do (finish-error h) (return (ia h H_ERR))))
+            (return (bail h)))
+          (if (or (< (build-rules h urules prules) 0) (erred h))
+            (return (bail h)))
+          (if (or (< (lower-rules h) 0) (erred h))
+            (return (bail h)))
+          (if (or (< (emit-program h) 0) (erred h))
+            (return (bail h)))
+          (comment "Belt and braces: a phase that swallowed an error (an arena that"
+                   "ran out mid-way) must not pass for a Program.")
+          (if (< (hg h H_OUT_PN) 64) (return (bail h)))
           (return 0))))))
 
 (defn ^:pub ^Str error-name [^I32 code]

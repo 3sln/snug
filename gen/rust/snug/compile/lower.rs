@@ -367,6 +367,11 @@ pub(crate) fn lower_range(h: &mut [i32], node: i32, env: i32) -> i32 {
             }
             hkl = i32::wrapping_sub(hkl, 1);
         }
+        // An empty range (lo > hi, or an exclusive one with nothing in it) is
+        // the empty type.
+        if u64_cmp(lkh, lkl, hkh, hkl) > 0 {
+            return ts_of1(h, -2);
+        }
         vtrunc(h, T_TMP2, 0);
         vpush1(h, T_TMP2, lkh);
         vpush1(h, T_TMP2, lkl);
@@ -859,12 +864,33 @@ pub fn lower_type(h: &mut [i32], node: i32, env: i32) -> i32 {
     }
     return r;
 }
-pub(crate) fn group_ref(h: &mut [i32], ent: i32, env: i32) -> i32 {
-    // If the keyless entry ent is a reference to a group -- a group rule (with
-    // arguments), an undefined group socket, or `~name` -- answer: >= 0 the rule
-    // (environment in h[H_R0], -2 = not generic), -3 for an unwrap (node in
-    // h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain type.
-    let ty: i32 = nc(h, ent);
+pub(crate) fn ent_type(h: &[i32], ent: i32) -> i32 {
+    // The type of a keyless entry: an N_ENT's, or the node itself when a group
+    // rule's definition was parsed as a type (`g1 = (g)` is `g1 = g`, a group by
+    // usage).
+    if nk(h, ent) == N_TYPE {
+        return ent;
+    }
+    return nc(h, ent);
+}
+pub(crate) fn ent_lo(h: &[i32], ent: i32) -> i32 {
+    if nk(h, ent) == N_TYPE {
+        return 1;
+    }
+    return na(h, ent);
+}
+pub(crate) fn ent_hi(h: &[i32], ent: i32) -> i32 {
+    if nk(h, ent) == N_TYPE {
+        return 1;
+    }
+    return nb(h, ent);
+}
+pub(crate) fn group_ref(h: &mut [i32], ty: i32, env: i32) -> i32 {
+    // If the type ty of a keyless entry is a reference to a group -- a group
+    // rule (with arguments), an undefined group socket, or `~name` -- answer: >=
+    // 0 the rule (environment in h[H_R0], -2 = not generic), -3 for an unwrap
+    // (node in h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain
+    // type.
     if (nk(h, ty) != N_TYPE) || (nb(h, ty) != 1) {
         return -2;
     }
@@ -1117,8 +1143,8 @@ pub(crate) fn m_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
         return -1;
     }
     let k: i32 = nk(h, ent);
-    let lo: i32 = na(h, ent);
-    let mut hi: i32 = nb(h, ent);
+    let lo: i32 = ent_lo(h, ent);
+    let mut hi: i32 = ent_hi(h, ent);
     let mut base: i32 = -1;
     if hi < 0 {
         hi = INF;
@@ -1131,8 +1157,8 @@ pub(crate) fn m_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
     if k == N_SUBGRP {
         base = m_group(h, nc(h, ent), -1, env);
     }
-    if k == N_ENT {
-        let gr: i32 = group_ref(h, ent, env);
+    if (k == N_ENT) || (k == N_TYPE) {
+        let gr: i32 = group_ref(h, ent_type(h, ent), env);
         if gr == (-1) {
             return -1;
         }
@@ -1325,8 +1351,8 @@ pub(crate) fn a_ent(h: &mut [i32], ent: i32, env: i32, tailfrom: i32, last: bool
     // with an index >= tailfrom may be re-entered from here (tail position).
     let pos: i32 = npos(h, ent);
     let k: i32 = nk(h, ent);
-    let lo: i32 = na(h, ent);
-    let mut hi: i32 = nb(h, ent);
+    let lo: i32 = ent_lo(h, ent);
+    let mut hi: i32 = ent_hi(h, ent);
     let mut tf: i32 = tailfrom;
     if !enter(h, pos) {
         return -1;
@@ -1351,13 +1377,13 @@ pub(crate) fn a_ent(h: &mut [i32], ent: i32, env: i32, tailfrom: i32, last: bool
     if k == N_SUBGRP {
         child = a_group(h, nc(h, ent), -1, env, tf);
     }
-    if k == N_ENT {
-        let gr: i32 = group_ref(h, ent, env);
+    if (k == N_ENT) || (k == N_TYPE) {
+        let gr: i32 = group_ref(h, ent_type(h, ent), env);
         if gr == (-1) {
             return -1;
         }
         if gr == (-2) {
-            let vt2: i32 = lower_type(h, nc(h, ent), env);
+            let vt2: i32 = lower_type(h, ent_type(h, ent), env);
             if vt2 < 0 {
                 return -1;
             }
@@ -1441,13 +1467,13 @@ pub(crate) fn enum_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
             return -1;
         }
     }
-    if k == N_ENT {
-        let gr: i32 = group_ref(h, ent, env);
+    if (k == N_ENT) || (k == N_TYPE) {
+        let gr: i32 = group_ref(h, ent_type(h, ent), env);
         if gr == (-1) {
             return -1;
         }
         if gr == (-2) {
-            let vt2: i32 = lower_type(h, nc(h, ent), env);
+            let vt2: i32 = lower_type(h, ent_type(h, ent), env);
             if vt2 < 0 {
                 return -1;
             }

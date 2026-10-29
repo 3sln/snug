@@ -578,10 +578,14 @@
                 ^:mut msk 0]
             (if (iv-meets h f n R_POS 0 0 R_POS (neg 1) (neg 1)) (set msk (bit-or msk 1)))
             (if (iv-meets h f n R_NEG (neg 1) (neg 1) R_NEG 0 0) (set msk (bit-or msk 2)))
+            (comment "A bignum region is met when an interval spans into it (by region:"
+                     "big bounds compare by magnitude, so no fixed bound stands for them).")
             (if (!= (bit-and (lflags h l) 1) 0)
-              (if (or (iv-meets h f n R_NEG_INF 0 0 R_NEG_BIG 0 0)
-                      (iv-meets h f n R_POS_BIG 0 0 R_POS_INF 0 0))
-                (set msk (bit-or msk 2048))))
+              (for [^I32 i 0 n]
+                (let [lr (vget h T_IV (* 6 (+ f i)))
+                      hr (vget h T_IV (+ (* 6 (+ f i)) 3))]
+                  (if (or (and (<= lr R_NEG_BIG) (>= hr R_NEG_BIG)) (and (<= lr R_POS_BIG) (>= hr R_POS_BIG)))
+                    (set msk (bit-or msk 2048))))))
             (return msk))))
     (if (== k K_FLOAT) (return (shl (lflags h l) 8)))
     (if (== k K_SIMPLE) (return 128))

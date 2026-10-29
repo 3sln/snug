@@ -220,6 +220,13 @@
             (if (== lo 0) (return (single h p 1)))
             (return (single h p 0)))))
     (if (== hi 0) (return (empty-frag h)))
+    (comment "A child with no positions matches only the empty sequence (or nothing):"
+             "repeating it changes nothing, so it is walked once, not once per copy.")
+    (if (== (g-count h child) 0)
+      (do (let [^I32 f0 (walk h w child)]
+            (if (< f0 0) (return (neg 1)))
+            (if (== lo 0) (return (opt h f0)))
+            (return f0))))
     (let [k (rep-copies lo hi)
           base (vlen h T_STK3)]
       (for [^I32 _copy 0 k]
