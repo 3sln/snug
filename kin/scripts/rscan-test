@@ -1,0 +1,12 @@
+#!/bin/sh
+# The resumable scanner against the recursive one, under window splits and
+# yield quanta, on JS and a debug Rust build.   kin/scripts/rscan-test [mutations] [seed]
+set -e
+cd "$(dirname "$0")/../.."
+./kin/scripts/emit > /dev/null
+crate=.cache/snug-rs
+SNUG_RS_ONLY="cbor hello.rs" ./kin/scripts/rust-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin rscan 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/rscan-test.mjs "$crate/target/debug/rscan" "$@"

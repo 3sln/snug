@@ -47,6 +47,34 @@ pub extern "C" fn snug_scan(len: usize, top_any: i32, cose: i32, max_bytes: i32,
     c
 }
 
+// P6.1: the resumable scanner over the whole buffer as one window (the §17.4
+// comparison). A static per-module session: maxDepth up to 64, keys up to
+// the 2 MiB buffer.
+const RS_WORDS: usize = 24 + 64 * 28 + (CAP >> 2) + 2;
+struct Scratch(UnsafeCell<[i32; RS_WORDS]>);
+unsafe impl Sync for Scratch {}
+static RS: Scratch = Scratch(UnsafeCell::new([0; RS_WORDS]));
+
+/// Resumable scan of the first `len` buffer bytes as ONE window: 0, a code, or
+/// -1/-2 (never, for a whole window without a quantum). maxDepth must be <= 64.
+#[no_mangle]
+pub extern "C" fn snug_rscan(len: usize, top_any: i32, cose: i32, max_bytes: i32, max_depth: i32,
+                             max_entries: i32, max_items: i32) -> i32 {
+    if len > CAP || !(0..=64).contains(&max_depth) {
+        ERR.store(0, Ordering::Relaxed);
+        return 20;
+    }
+    let bytes: &[u8] = unsafe { std::slice::from_raw_parts(BUF.0.get() as *const u8, len) };
+    // SAFETY: single-threaded; no other reference to RS exists during the call.
+    let s: &mut [i32] = unsafe { &mut *RS.0.get() };
+    let mut o = [0i32; 16];
+    snug::cbor::scan::scan_options(&mut o, top_any, cose, max_bytes, max_depth, max_entries, max_items);
+    snug::cbor::rscan::rscan_init(&mut o, s, len as i32, 0);
+    let c = snug::cbor::rscan::rscan_step(bytes, &mut o, s, 0, 0);
+    ERR.store(snug::cbor::scan::error_offset(&mut o), Ordering::Relaxed);
+    c
+}
+
 /// The error offset of the last `snug_scan` (-1 when it accepted).
 #[no_mangle]
 pub extern "C" fn snug_err() -> i32 {

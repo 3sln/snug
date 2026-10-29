@@ -140,3 +140,63 @@ Every case must give cbor.mjs's code on both targets and the same error offset
 on both; a re-run with the input behind a throwing out-of-bounds trap shows the
 JS never reads outside the input. Mutating a threshold in the kin source turns
 the gate red (DEVLOG P1.3).
+
+## Resumable scanner (P6.1, `kin/rscan.kin`)
+
+The same checks, order, codes, error offsets and item counts as the recursive
+scanner (gated by `bb rscan-test`), as a loop over an explicit frame stack in
+a **per-session** scratch arena, over windows of a message whose exact length
+is declared up front (known-length sessions only).
+
+API (`gen/js/snug/cbor/rscan.mjs`, Rust `snug::cbor::rscan`):
+`rscanScratchLen(maxDepth, min(length, maxBytes))`,
+`rscanInit(o, s, length, quantum)` (o filled by `scanOptions`; both arrays
+belong to one session), `rscanStep(window, o, s, baseHi, baseLo)` → `0` |
+code | `RS_NEED` (-1: give a window holding
+`[rscanNeedOffset(s), +rscanNeedLength(s))`) | `RS_YIELD` (-2: the work
+quantum is spent; give a window holding `rscanPosition(s)`).
+`host/js/src/sources.mjs` drives it for handles and push sources.
+
+**Never split, so no carried decoder state**: a head (with any float
+payload), a UTF-8 sequence, a typed-array element, the first byte of a
+bignum's content, a decimal mantissa's whole bignum content. Each is asked
+for whole from its first byte; the host's unconsumed tail is the carried
+state. Text and typed-array content are scanned incrementally; byte-string
+content is never read at all, so a handle need not fetch it (`scanHandle` reads from the next head on).
+
+**Scratch layout** (words): header `s[0..23]`, then `maxDepth` frames of 28
+words from `s[24]`, then the key arena (`S_ARENA`), bytes packed four to a
+word, little-endian within the word.
+
+| header | | frame (`F_*`, base `24 + 28·i`) | |
+| --- | --- | --- | --- |
+| 0 `S_PHASE` | resume point (`PH_*`) | 0 `F_KIND` | 1 array, 2 map, 3 tag-4 pair, 4 tag-40 pair |
+| 1 `S_POS` | position (absolute) | 1 `F_CDEPTH` | depth of its children |
+| 2 `S_TOTAL` | declared length | 2 `F_REM` | children (pairs) left |
+| 3 `S_CEND` | end of text / typed-array content (absolute) | 3 `F_STATE` | map: 0 key next, 1 in key, 2 in value; pair: element 0/1 |
+| 4 `S_SP` | frames in use | 4 `F_PLEN` | previous key's encoded length, -1 none |
+| 5, 6 `S_NEED_OFF`, `S_NEED_LEN` | the request | 5, 6 `F_PA`, `F_PALEN` | previous key: arena part (start, length) |
+| 7 `S_QUANTUM` | work units per step (0: none) | 7, 8 `F_PW0`, `F_PWLEN` | previous key: window part (relative; empty between steps) |
+| 8, 9, 10 `S_TPOS`, `S_TTAG`, `S_TSIZE` | the tag being read (absolute head position, number, element size) | 9, 10 `F_KSTART`, `F_KMAJ` | key being read: start (absolute), major type |
+| 11 `S_MAXF` | frames allocated (maxDepth) | 11 `F_SHAPE` | 1: this array is a tag-40 shape |
+| 12 `S_ATOP` | arena top (bytes) | 12, 13 `F_EXPOK`, `F_MANT` | tag 4: exponent / mantissa verdicts noted from heads |
+| 13–16 `S_KACT`, `S_KA`, `S_KALEN`, `S_KW0` | the key being read: active, arena start/length, window start (absolute) | 14–17 `F_NDBAD`, `F_NDK`, `F_NDSEEN`, `F_COUNT` | tag 40: shape bad, dimensions, seen, element count |
+| 17 `S_ARENA` | first arena word | 18 `F_TPOS`; 19–26 `F_DIMS` | the tag's position (absolute); up to 8 dimensions |
+
+**Previous keys**: one per ACTIVE map (nested maps each keep theirs), kept as
+a window span while the window lasts and copied into the arena only when the
+walk suspends or yields (a whole-buffer scan copies nothing). Regions are
+stacked in frame order (each open map's previous key, then the key being
+read); a key that ends becomes its map's previous key in place, and a map's
+region is freed when it closes. Keys are disjoint spans of the message, so
+the arena never holds more than `min(length, maxBytes)` bytes.
+
+**Tag 4 / tag 40** cannot re-read their elements when the pair ends (the
+bytes may be gone), so each child's verdict input is **noted from its head**
+as it starts (exponent and integer-mantissa checks, shape entries, data
+count; a bignum mantissa's remainder when its content is read) and the
+semantic check runs at the pair's end, in the recursive scanner's order.
+
+**Yields**: one unit per item and per byte of text or typed-array content
+scanned (at least one whole UTF-8 sequence per step, so any quantum
+progresses); yield points are item starts and sequence / element boundaries.

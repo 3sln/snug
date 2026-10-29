@@ -1,0 +1,693 @@
+;; The RESUMABLE profile scanner (P6.1, D027, architecture §17): the same
+;; checks, order, codes, error offsets and item counts as snug.cbor.scan, as a
+;; loop over an explicit frame stack in a per-session scratch arena instead of
+;; host recursion, consuming a WINDOW [base, base + len) of a message whose
+;; exact length was declared up front (known-length sessions only, review
+;; s17). When it needs bytes outside the window it SUSPENDS (RS_NEED, with an
+;; offset and a minimum length in the scratch); after a deterministic work
+;; quantum it YIELDS (RS_YIELD) so an async host can give back its event loop.
+;; Either way the host calls rscan-step again with a window holding the
+;; position asked for. It never calls the host.
+;;
+;; What is never split across windows, and so needs no carried decoder state:
+;; a head (<= 9 bytes), a float payload (part of its head), a UTF-8 sequence
+;; (<= 4), a typed-array element (<= 8), the first byte of a bignum's content
+;; and a decimal mantissa's whole bignum content (<= 137). Each is asked for
+;; whole from its first byte, so the host's unconsumed tail is the carried
+;; state. Text and typed-array content are scanned incrementally, suspending
+;; mid-string. What the scanner does carry, in the scratch: its phase and
+;; position, the frame stack, and the KEY ARENA -- each ACTIVE map's previous
+;; key and the key being read, copied out of the window only when the walk
+;; suspends or yields (a whole-buffer scan copies nothing). Keys are disjoint
+;; spans of the message, so the arena never needs more than maxBytes bytes.
+;;
+;; Layout: docs/scanner.md, "Resumable scanner". Offsets in the header are
+;; ABSOLUTE message offsets; inside a step they are window-relative. Messages
+;; are shorter than 2^31 bytes (the window base's high word must be 0).
+(ns snug.cbor.rscan
+  (:require [kin.lang :refer [defn let local return set if while for do comment doc forever break
+                              continue defconst]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem sar shl ushr bit-and
+                               bit-or bit-not < > <= >= == != and or not u8 blen ia iset hex]]
+            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_KEY_ORDER
+                                     CODE_DUPLICATE_KEY CODE_TEXT CODE_TAG CODE_BIGNUM
+                                     CODE_DECIMAL CODE_TYPED_ARRAY CODE_NDARRAY
+                                     CODE_TRAILING CODE_DEPTH CODE_TOO_LARGE CODE_NOT_MAP
+                                     O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH O_ERR_POS O_ITEMS
+                                     O_HI O_LO O_CSTART MAX_BIGNUM_BYTES MAX_DIMENSIONS]]
+            [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
+                                    enter-container bytes-content head-size small-arg]]
+            [snug.cbor.text :refer [utf8-window]]
+            [snug.cbor.keys :refer [compare-spans]]
+            [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok mod10]]
+            [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]))
+
+;; ------------------------------------------------------------- layout
+
+(defconst ^:pub ^I32 S_PHASE 0)
+(defconst ^:pub ^I32 S_POS 1)
+(defconst ^:pub ^I32 S_TOTAL 2)
+(defconst ^:pub ^I32 S_CEND 3)
+(defconst ^:pub ^I32 S_SP 4)
+(defconst ^:pub ^I32 S_NEED_OFF 5)
+(defconst ^:pub ^I32 S_NEED_LEN 6)
+(defconst ^:pub ^I32 S_QUANTUM 7)
+(defconst ^:pub ^I32 S_TPOS 8)
+(defconst ^:pub ^I32 S_TTAG 9)
+(defconst ^:pub ^I32 S_TSIZE 10)
+(defconst ^:pub ^I32 S_MAXF 11)
+(defconst ^:pub ^I32 S_ATOP 12)
+(defconst ^:pub ^I32 S_KACT 13)
+(defconst ^:pub ^I32 S_KA 14)
+(defconst ^:pub ^I32 S_KALEN 15)
+(defconst ^:pub ^I32 S_KW0 16)
+(defconst ^:pub ^I32 S_ARENA 17)
+(defconst ^:pub ^I32 S_FRAMES 24)
+
+(defconst ^:pub ^I32 FW 28)
+(defconst ^:pub ^I32 F_KIND 0)
+(defconst ^:pub ^I32 F_CDEPTH 1)
+(defconst ^:pub ^I32 F_REM 2)
+(defconst ^:pub ^I32 F_STATE 3)
+(defconst ^:pub ^I32 F_PLEN 4)
+(defconst ^:pub ^I32 F_PA 5)
+(defconst ^:pub ^I32 F_PALEN 6)
+(defconst ^:pub ^I32 F_PW0 7)
+(defconst ^:pub ^I32 F_PWLEN 8)
+(defconst ^:pub ^I32 F_KSTART 9)
+(defconst ^:pub ^I32 F_KMAJ 10)
+(defconst ^:pub ^I32 F_SHAPE 11)
+(defconst ^:pub ^I32 F_EXPOK 12)
+(defconst ^:pub ^I32 F_MANT 13)
+(defconst ^:pub ^I32 F_NDBAD 14)
+(defconst ^:pub ^I32 F_NDK 15)
+(defconst ^:pub ^I32 F_NDSEEN 16)
+(defconst ^:pub ^I32 F_COUNT 17)
+(defconst ^:pub ^I32 F_TPOS 18)
+(defconst ^:pub ^I32 F_DIMS 19)
+
+(defconst ^:pub ^I32 K_ARRAY 1)
+(defconst ^:pub ^I32 K_MAP 2)
+(defconst ^:pub ^I32 K_DEC 3)
+(defconst ^:pub ^I32 K_ND 4)
+
+(defconst ^:pub ^I32 PH_START 0)
+(defconst ^:pub ^I32 PH_ITEM 1)
+(defconst ^:pub ^I32 PH_DONE 2)
+(defconst ^:pub ^I32 PH_NEXT 3)
+(defconst ^:pub ^I32 PH_KEY 4)
+(defconst ^:pub ^I32 PH_TEXT 5)
+(defconst ^:pub ^I32 PH_TYPED 6)
+(defconst ^:pub ^I32 PH_BIGNUM 7)
+(defconst ^:pub ^I32 PH_TYPEDHEAD 8)
+(defconst ^:pub ^I32 PH_PAIR 9)
+(defconst ^:pub ^I32 PH_END 10)
+
+(defconst ^:pub ^I32 RS_NEED -1)
+(defconst ^:pub ^I32 RS_YIELD -2)
+
+;; ------------------------------------------------------------- API
+
+(defn ^:pub ^I32 rscan-scratch-len [^I32 max-depth ^I32 max-bytes]
+  (comment "Words of per-session scratch: header, maxDepth frames, and a key arena"
+           "of maxBytes bytes packed four to a word.")
+  (return (+ (+ S_FRAMES (* max-depth FW)) (+ (ushr max-bytes 2) 2))))
+
+(defn ^:pub rscan-init [^Ints o ^Ints s ^I32 total ^I32 quantum]
+  (comment "Start a session over a message of exactly `total` bytes under the options"
+           "in o (both arrays belong to this session alone). s holds"
+           "rscan-scratch-len(maxDepth, maxBytes) words. quantum > 0 yields after"
+           "that many work units (an item, or a byte of scanned text or typed-array"
+           "content) per rscan-step call; 0 never yields.")
+  (iset o O_ERR_POS (neg 1))
+  (iset o O_ITEMS 0)
+  (iset s S_PHASE PH_START)
+  (iset s S_POS 0)
+  (iset s S_TOTAL total)
+  (iset s S_CEND 0)
+  (iset s S_SP 0)
+  (iset s S_NEED_OFF 0)
+  (iset s S_NEED_LEN 0)
+  (iset s S_QUANTUM quantum)
+  (iset s S_MAXF (ia o O_MAX_DEPTH))
+  (iset s S_ATOP 0)
+  (iset s S_KACT 0)
+  (iset s S_KA 0)
+  (iset s S_KALEN 0)
+  (iset s S_KW0 0)
+  (iset s S_ARENA (+ S_FRAMES (* (ia o O_MAX_DEPTH) FW))))
+
+(defn ^:pub ^I32 rscan-need-offset [^IntsR s]
+  (return (ia s S_NEED_OFF)))
+
+(defn ^:pub ^I32 rscan-need-length [^IntsR s]
+  (return (ia s S_NEED_LEN)))
+
+(defn ^:pub ^I32 rscan-position [^IntsR s]
+  (comment "Where the walk stands (absolute): after RS_NEED or RS_YIELD the host may"
+           "drop every byte before min(this, the need offset).")
+  (return (ia s S_POS)))
+
+;; ------------------------------------------------------------- the key arena
+
+(defn ^I32 arena-get [^IntsR s ^I32 x]
+  (comment "Byte x of the key arena (four bytes a word, little-endian in the word).")
+  (return (bit-and (ushr (ia s (+ (ia s S_ARENA) (ushr x 2))) (shl (bit-and x 3) 3)) 255)))
+
+(defn arena-put [^Ints s ^I32 x ^I32 v]
+  (let [cell (+ (ia s S_ARENA) (ushr x 2))
+        sh (shl (bit-and x 3) 3)
+        old (ia s cell)]
+    (iset s cell (bit-or (bit-and old (bit-not (shl 255 sh))) (shl v sh)))))
+
+(defn arena-move [^Ints s ^I32 from ^I32 to ^I32 n]
+  (comment "Move n arena bytes from `from` to `to`, safe for overlap either way.")
+  (if (< to from)
+    (do (let [^:mut j 0]
+          (while (< j n)
+            (let [v (arena-get s (+ from j))]
+              (arena-put s (+ to j) v))
+            (set j (+ j 1)))))
+    (do (let [^:mut k n]
+          (while (> k 0)
+            (set k (- k 1))
+            (let [v2 (arena-get s (+ from k))]
+              (arena-put s (+ to k) v2)))))))
+
+(defn ^I32 key-byte [^Bytes b ^IntsR s ^I32 a ^I32 alen ^I32 w0 ^I32 j]
+  (comment "Byte j of a key held as alen arena bytes at a, then window bytes from w0.")
+  (if (< j alen) (return (arena-get s (+ a j))))
+  (return (u8 b (+ w0 (- j alen)))))
+
+(defn ^I32 compare-keys [^Bytes b ^IntsR s ^I32 pa ^I32 palen ^I32 pw0 ^I32 plen
+                         ^I32 ca ^I32 calen ^I32 cw0 ^I32 clen]
+  (comment "compare-spans for two keys each split as an arena part and a window part.")
+  (let [^:mut m plen
+        ^:mut j 0]
+    (if (< clen m) (set m clen))
+    (while (< j m)
+      (let [x (key-byte b s pa palen pw0 j)
+            y (key-byte b s ca calen cw0 j)]
+        (if (!= x y) (return (- x y)))
+        (set j (+ j 1))))
+    (return (- plen clen))))
+
+(defn rebuild [^Bytes b ^Ints s ^I32 base ^I32 sp ^I32 pos]
+  (comment "Before the window may go away: append every key's window part to the"
+           "arena. Regions stay stacked in frame order (each open map's previous"
+           "key, then the key being read), so the new layout is computed first and"
+           "the old arena parts move up, top region first, before the window bytes"
+           "are written in.")
+  (let [^:mut c 0
+        ^:mut grow 0]
+    (comment "1. the new layout: a region grows by its window part; regions above it shift.")
+    (for [^I32 f1 0 sp]
+      (let [fb (+ S_FRAMES (* f1 FW))]
+        (if (== (ia s (+ fb F_KIND)) K_MAP)
+          (set grow (+ grow (ia s (+ fb F_PWLEN)))))))
+    (if (== grow 0)
+      (if (== (ia s S_KACT) 0) (do (iset s S_KW0 (+ pos base)) (return))))
+    (comment "2. move old arena parts up, top first (the key being read, then maps, top down).")
+    (let [^:mut shift grow
+          kact (ia s S_KACT)]
+      (if (!= kact 0)
+        (do (let [nka (+ (ia s S_KA) shift)]
+              (arena-move s (ia s S_KA) nka (ia s S_KALEN))
+              (iset s S_KA nka))))
+      (let [^:mut f (- sp 1)]
+      (while (>= f 0)
+        (let [fb2 (+ S_FRAMES (* f FW))]
+          (if (== (ia s (+ fb2 F_KIND)) K_MAP)
+            (do (set shift (- shift (ia s (+ fb2 F_PWLEN))))
+                (let [npa (+ (ia s (+ fb2 F_PA)) shift)]
+                  (arena-move s (ia s (+ fb2 F_PA)) npa (ia s (+ fb2 F_PALEN)))
+                  (iset s (+ fb2 F_PA) npa)))))
+        (set f (- f 1)))))
+    (comment "3. write each region's window part after its arena part.")
+    (for [^I32 f3 0 sp]
+      (let [fb3 (+ S_FRAMES (* f3 FW))]
+        (if (== (ia s (+ fb3 F_KIND)) K_MAP)
+          (do (let [pa (ia s (+ fb3 F_PA))
+                    palen (ia s (+ fb3 F_PALEN))
+                    pw0 (ia s (+ fb3 F_PW0))
+                    pwlen (ia s (+ fb3 F_PWLEN))]
+                (for [^I32 j 0 pwlen]
+                  (arena-put s (+ (+ pa palen) j) (u8 b (+ pw0 j))))
+                (iset s (+ fb3 F_PALEN) (+ palen pwlen))
+                (iset s (+ fb3 F_PWLEN) 0)
+                (set c (+ (+ pa palen) pwlen)))))))
+    (if (!= (ia s S_KACT) 0)
+      (do (let [ka (ia s S_KA)
+                kalen (ia s S_KALEN)
+                kw0 (- (ia s S_KW0) base)]
+            (for [^I32 j2 0 (- pos kw0)]
+              (arena-put s (+ (+ ka kalen) j2) (u8 b (+ kw0 j2))))
+            (iset s S_KALEN (+ kalen (- pos kw0)))
+            (set c (+ ka (+ kalen (- pos kw0)))))))
+    (iset s S_ATOP c)
+    (iset s S_KW0 (+ pos base))))
+
+;; ------------------------------------------------------------- suspension
+
+(defn ^I32 pause [^Bytes b ^Ints s ^I32 base ^I32 phase ^I32 pos ^I32 cend ^I32 sp ^I32 why]
+  (comment "Save the walk (the keys out of the window first); answer why.")
+  (rebuild b s base sp pos)
+  (iset s S_PHASE phase)
+  (iset s S_POS (+ pos base))
+  (iset s S_CEND (+ cend base))
+  (iset s S_SP sp)
+  (return why))
+
+(defn ^I32 suspend [^Bytes b ^Ints s ^I32 base ^I32 phase ^I32 pos ^I32 cend ^I32 sp
+                    ^I32 off ^I32 len]
+  (comment "Ask for b[off .. off + len) (window-relative here, absolute in s), clipped"
+           "to the message's end.")
+  (iset s S_NEED_OFF (+ off base))
+  (let [room (- (ia s S_TOTAL) (+ off base))]
+    (if (< room len) (iset s S_NEED_LEN room) (iset s S_NEED_LEN len)))
+  (return (pause b s base phase pos cend sp RS_NEED)))
+
+;; ------------------------------------------------------------- parent facts
+
+(defn ^:pub ^I32 note-head [^Bytes b ^Ints s ^I32 sp ^I32 pos ^I32 p ^I32 major ^I32 ai
+                            ^I32 lo]
+  (comment "Record what a tag-4 or tag-40 parent will need of this child, from its"
+           "head (in the window), since its bytes may be gone when the pair ends."
+           "Answers 1 when the child is a tag-40 shape array of 1..8 entries.")
+  (if (== sp 0) (return 0))
+  (let [tb (+ S_FRAMES (* (- sp 1) FW))
+        kind (ia s (+ tb F_KIND))
+        elem (ia s (+ tb F_STATE))]
+    (if (== kind K_DEC)
+      (do (if (== elem 0)
+            (if (exponent-ok b pos) (iset s (+ tb F_EXPOK) 1) (iset s (+ tb F_EXPOK) 0)))
+          (if (== elem 1)
+            (if (<= major 1)
+              (if (mantissa-ok b pos p) (iset s (+ tb F_MANT) 1) (iset s (+ tb F_MANT) 0))
+              (iset s (+ tb F_MANT) 0)))
+          (return 0)))
+    (if (== kind K_ND)
+      (do (if (== elem 0)
+            (do (comment "The frame starts bad; only a 1..8-entry array clears it.")
+                (if (and (== major 4) (and (>= lo 1) (<= lo MAX_DIMENSIONS)))
+                  (do (iset s (+ tb F_NDBAD) 0)
+                      (iset s (+ tb F_NDK) lo)
+                      (return 1)))
+                (return 0)))
+          (if (== major 4) (iset s (+ tb F_COUNT) lo) (iset s (+ tb F_COUNT) (neg 1)))
+          (return 0)))
+    (if (and (== kind K_ARRAY) (== (ia s (+ tb F_SHAPE)) 1))
+      (do (let [nb (+ S_FRAMES (* (- sp 2) FW))]
+            (if (== (ia s (+ nb F_NDBAD)) 0)
+              (do (if (or (!= major 0) (== ai 27)) (do (iset s (+ nb F_NDBAD) 1) (return 0)))
+                  (if (<= lo 0) (do (iset s (+ nb F_NDBAD) 1) (return 0)))
+                  (let [seen (ia s (+ nb F_NDSEEN))]
+                    (iset s (+ (+ nb F_DIMS) seen) lo)
+                    (iset s (+ nb F_NDSEEN) (+ seen 1))))))))
+    (return 0)))
+
+(defn ^Bool nd-ok [^IntsR s ^I32 nb]
+  (comment "Tag 40's verdict from the recorded facts: shape-ok's product check, by"
+           "division, over the recorded dimensions.")
+  (let [count (ia s (+ nb F_COUNT))
+        k (ia s (+ nb F_NDK))
+        ^:mut p 1]
+    (if (< count 0) (return false))
+    (if (!= (ia s (+ nb F_NDBAD)) 0) (return false))
+    (comment "A shape entry that recorded nothing (a float) leaves seen < k.")
+    (if (!= (ia s (+ nb F_NDSEEN)) k) (return false))
+    (for [^I32 j 0 k]
+      (let [d (ia s (+ (+ nb F_DIMS) j))]
+        (if (> d (quot count p)) (return false))
+        (set p (* p d))))
+    (return (== p count))))
+
+;; ------------------------------------------------------------- the walk
+
+(defn ^I32 top-cdepth [^IntsR s ^I32 sp]
+  (comment "The depth of the top frame's children (0 at the top level).")
+  (if (== sp 0) (return 0))
+  (return (ia s (+ (+ S_FRAMES (* (- sp 1) FW)) F_CDEPTH))))
+
+(defn ^Bool top-notes [^IntsR s ^I32 sp]
+  (comment "Does the top frame want its children's heads noted (a tag-4/40 pair, a shape array)?")
+  (if (== sp 0) (return false))
+  (let [tf (+ S_FRAMES (* (- sp 1) FW))]
+    (return (or (>= (ia s (+ tf F_KIND)) K_DEC) (== (ia s (+ tf F_SHAPE)) 1)))))
+
+(defn ^:pub ^I32 rscan-step [^Bytes b ^Ints o ^Ints s ^I32 base-hi ^I32 base-lo]
+  (comment "Run the walk over the window b, whose first byte is message offset"
+           "base-hi:base-lo, until it accepts (0), refuses (a code; the error offset"
+           "is o[O_ERR_POS], absolute), needs bytes outside the window (RS_NEED:"
+           "rscan-need-offset / rscan-need-length) or has done its work quantum"
+           "(RS_YIELD: call again with a window holding rscan-position).")
+  (if (!= base-hi 0) (return (neg (fail o 0 CODE_TOO_LARGE))))
+  (let [base base-lo
+        wend (blen b)
+        tend (- (ia s S_TOTAL) base)
+        ^:mut phase (ia s S_PHASE)
+        ^:mut pos (- (ia s S_POS) base)
+        ^:mut cend (- (ia s S_CEND) base)
+        ^:mut sp (ia s S_SP)
+        ^:mut r 0
+        ^:mut work (ia s S_QUANTUM)
+        ^:mut cdep (top-cdepth s (ia s S_SP))
+        ^:mut cnotes (top-notes s (ia s S_SP))]
+    (if (<= work 0) (set work (hex 2147483647)))
+    (comment "A window that does not hold the position asked for is asked again"
+             "(a host that broke the NEED contract must not make the walk read outside b).")
+    (if (and (!= phase PH_START) (or (< pos 0) (and (> pos wend) (< pos tend))))
+      (return (suspend b s base phase pos cend sp pos (ia s S_NEED_LEN))))
+    (forever
+     (if (== phase PH_ITEM)
+       (do
+         (comment "One item at pos. Window first (no side effect before a suspension),"
+                  "then cbor.mjs's order: counted, truncated, head.")
+         (if (< pos tend)
+           (do (if (>= pos wend) (return (suspend b s base phase pos cend sp pos 1)))
+               (let [ai0 (bit-and (u8 b pos) 31)
+                     ^:mut h 1]
+                 (if (<= ai0 27) (set h (head-size ai0)))
+                 (if (and (<= (+ pos h) tend) (> (+ pos h) wend))
+                   (return (suspend b s base phase pos cend sp pos h))))))
+         (if (<= work 0) (return (pause b s base phase pos cend sp RS_YIELD)))
+         (set work (- work 1))
+         (set r (count-item o pos))
+         (if (< r 0) (break))
+         (if (>= pos tend) (do (set r (fail o pos CODE_TRUNCATED)) (break)))
+         (let [ib (u8 b pos)
+               major (ushr ib 5)
+               ai (bit-and ib 31)
+               ^:mut hi 0
+               ^:mut lo ai
+               ^:mut p (+ pos 1)
+               depth cdep
+               notes cnotes]
+           (if (and (== major 7) (and (>= ai 25) (<= ai 27)))
+             (do (set r (scan-float b o pos ai tend))
+                 (if (and notes (>= r 0)) (note-head b s sp pos (+ pos 1) major ai 0))
+                 (if (< r 0) (break))
+                 (set pos r)
+                 (set phase PH_DONE)
+                 (continue)))
+           (if (>= ai 24)
+             (do (set p (read-arg b o pos ai tend))
+                 (if (< p 0) (do (set r p) (break)))
+                 (set hi (ia o O_HI))
+                 (set lo (ia o O_LO))))
+           (let [^:mut shape 0]
+             (if notes (set shape (note-head b s sp pos p major ai lo)))
+             (if (<= major 1)
+               (do (set pos p) (set phase PH_DONE) (continue)))
+             (if (== major 2)
+               (do (set r (take-len o pos p hi lo tend))
+                   (if (< r 0) (break))
+                   (set pos r) (set phase PH_DONE) (continue)))
+             (if (== major 3)
+               (do (set r (take-len o pos p hi lo tend))
+                   (if (< r 0) (break))
+                   (set cend r) (set pos p) (set phase PH_TEXT) (continue)))
+             (if (or (== major 4) (== major 5))
+               (do (set r (enter-container o pos p hi lo depth (- major 4) tend))
+                   (if (< r 0) (break))
+                   (let [fb (+ S_FRAMES (* sp FW))]
+                     (if (== major 4) (iset s (+ fb F_KIND) K_ARRAY) (iset s (+ fb F_KIND) K_MAP))
+                     (iset s (+ fb F_CDEPTH) (+ depth 1))
+                     (iset s (+ fb F_REM) lo)
+                     (iset s (+ fb F_STATE) 0)
+                     (iset s (+ fb F_PLEN) (neg 1))
+                     (iset s (+ fb F_PA) (ia s S_ATOP))
+                     (iset s (+ fb F_PALEN) 0)
+                     (iset s (+ fb F_PWLEN) 0)
+                     (iset s (+ fb F_SHAPE) shape))
+                   (set sp (+ sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
+                   (set pos p)
+                   (set phase PH_NEXT)
+                   (continue)))
+             (if (== major 6)
+               (do (if (>= depth (ia o O_MAX_DEPTH)) (do (set r (fail o pos CODE_DEPTH)) (break)))
+                   (if (!= hi 0) (do (set r (fail o pos CODE_TAG)) (break)))
+                   (iset s S_TPOS (+ pos base))
+                   (iset s S_TTAG lo)
+                   (set pos p)
+                   (if (or (== lo 2) (== lo 3)) (do (set phase PH_BIGNUM) (continue)))
+                   (if (or (== lo 4) (== lo 40)) (do (set phase PH_PAIR) (continue)))
+                   (let [size (typed-size lo)]
+                     (if (== size 0) (do (set r (fail o (- (ia s S_TPOS) base) CODE_TAG)) (break)))
+                     (iset s S_TSIZE size))
+                   (set phase PH_TYPEDHEAD)
+                   (continue)))
+             (set r (scan-simple o pos ai))
+             (if (< r 0) (break))
+             (set pos r)
+             (set phase PH_DONE)
+             (continue))))
+       (if (== phase PH_DONE)
+         (do
+           (comment "An item ended at pos: tell its parent.")
+           (if (== sp 0) (do (set phase PH_END) (continue)))
+           (let [tb (+ S_FRAMES (* (- sp 1) FW))
+                 kind (ia s (+ tb F_KIND))]
+             (if (== kind K_ARRAY)
+               (do (let [arem (- (ia s (+ tb F_REM)) 1)]
+                     (iset s (+ tb F_REM) arem)
+                     (if (== arem 0) (do (set sp (- sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp)) (continue)))
+                     (set phase PH_ITEM) (continue))))
+             (if (== kind K_MAP)
+               (do (if (== (ia s (+ tb F_STATE)) 2)
+                     (do (let [mrem (- (ia s (+ tb F_REM)) 1)]
+                           (iset s (+ tb F_REM) mrem)
+                           (iset s (+ tb F_STATE) 0)
+                           (if (== mrem 0)
+                             (do (iset s S_ATOP (ia s (+ tb F_PA)))
+                                 (set sp (- sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
+                                 (continue)))
+                           (set phase PH_KEY) (continue))))
+                   (comment "The key ended: cose label, then order against the previous key.")
+                   (let [ka (ia s (+ tb F_KSTART))
+                         ks (- ka base)
+                         km (ia s (+ tb F_KMAJ))
+                         cka (ia s S_KA)
+                         ckalen (ia s S_KALEN)
+                         ckw0 (- (ia s S_KW0) base)
+                         cklen (+ ckalen (- pos ckw0))
+                         plen (ia s (+ tb F_PLEN))
+                         pa (ia s (+ tb F_PA))
+                         palen (ia s (+ tb F_PALEN))
+                         pw0 (ia s (+ tb F_PW0))]
+                     (if (<= km 1)
+                       (if (not (cose-label-ok b ks km)) (do (set r (fail o ks CODE_KEY_TYPE)) (break))))
+                     (if (>= plen 0)
+                       (do (local ^I32 order)
+                           (do
+                             (if (and (== palen 0) (== ckalen 0))
+                               (set order (compare-spans b pw0 (+ pw0 plen) ckw0 pos))
+                               (set order (compare-keys b s pa palen pw0 plen cka ckalen ckw0 cklen)))
+                             (if (== order 0) (do (set r (fail o ks CODE_DUPLICATE_KEY)) (break)))
+                             (if (> order 0) (do (set r (fail o ks CODE_KEY_ORDER)) (break))))))
+                     (comment "This key becomes the previous one: its arena part (if it"
+                              "was split) moves down over the old previous key.")
+                     (if (> ckalen 0) (arena-move s cka pa ckalen))
+                     (iset s (+ tb F_PLEN) cklen)
+                     (iset s (+ tb F_PALEN) ckalen)
+                     (iset s (+ tb F_PW0) ckw0)
+                     (iset s (+ tb F_PWLEN) (- pos ckw0))
+                     (iset s S_ATOP (+ pa ckalen))
+                     (iset s S_KACT 0)
+                     (iset s S_KALEN 0)
+                     (iset s (+ tb F_STATE) 2)
+                     (set phase PH_ITEM)
+                     (continue))))
+             (if (== (ia s (+ tb F_STATE)) 0)
+               (do (iset s (+ tb F_STATE) 1) (set phase PH_ITEM) (continue)))
+             (comment "Tag 4 / tag 40 pair complete: the semantics, then the tag ends.")
+             (let [tp (- (ia s (+ tb F_TPOS)) base)]
+               (if (== kind K_DEC)
+                 (do (if (== (ia s (+ tb F_EXPOK)) 0) (do (set r (fail o tp CODE_DECIMAL)) (break)))
+                     (if (== (ia s (+ tb F_MANT)) 0) (do (set r (fail o tp CODE_DECIMAL)) (break))))
+                 (if (not (nd-ok s tb)) (do (set r (fail o tp CODE_NDARRAY)) (break)))))
+             (set sp (- sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
+             (continue)))
+         (if (== phase PH_NEXT)
+           (do
+             (let [nb2 (+ S_FRAMES (* (- sp 1) FW))]
+               (if (== (ia s (+ nb2 F_REM)) 0)
+                 (do (if (== (ia s (+ nb2 F_KIND)) K_MAP) (iset s S_ATOP (ia s (+ nb2 F_PA))))
+                     (set sp (- sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp)) (set phase PH_DONE) (continue)))
+               (if (== (ia s (+ nb2 F_KIND)) K_ARRAY) (set phase PH_ITEM) (set phase PH_KEY))
+               (continue)))
+           (if (== phase PH_KEY)
+             (do
+               (comment "A map key at pos: a byte left, then its major type PEEKED.")
+               (if (>= pos tend) (do (set r (fail o pos CODE_TRUNCATED)) (break)))
+               (if (>= pos wend) (return (suspend b s base phase pos cend sp pos 1)))
+               (let [kb2 (+ S_FRAMES (* (- sp 1) FW))
+                     kmaj (ushr (u8 b pos) 5)
+                     cose (and (== (ia s (+ kb2 F_CDEPTH)) 1) (!= (ia o O_COSE) 0))]
+                 (if (!= kmaj 3)
+                   (if (not (and cose (<= kmaj 1))) (do (set r (fail o pos CODE_KEY_TYPE)) (break))))
+                 (iset s (+ kb2 F_KSTART) (+ pos base))
+                 (iset s (+ kb2 F_KMAJ) kmaj)
+                 (iset s (+ kb2 F_STATE) 1)
+                 (iset s S_KACT 1)
+                 (iset s S_KA (+ (ia s (+ kb2 F_PA)) (ia s (+ kb2 F_PALEN))))
+                 (iset s S_KALEN 0)
+                 (iset s S_KW0 (+ pos base))
+                 (set phase PH_ITEM)
+                 (continue)))
+             (if (== phase PH_TEXT)
+               (do
+                 (comment "Text content, incrementally; a sequence is never split, and the"
+                          "work quantum may stop the scan at any sequence boundary.")
+                 (let [^:mut stop cend]
+                   (if (> stop wend) (set stop wend))
+                   (comment "At least one whole sequence per step, so a tiny quantum still advances.")
+                   (if (< work 4) (set work 4))
+                   (local ^I32 qstop)
+                   (if (< work (- stop pos)) (set qstop (+ pos work)) (set qstop stop))
+                   (let [t (utf8-window b pos qstop cend)]
+                     (if (< t 0) (do (set r (fail o (- (neg 1) t) CODE_TEXT)) (break)))
+                     (set work (- work (- t pos)))
+                     (set pos t)
+                     (if (== t cend) (do (set phase PH_DONE) (continue)))
+                     (let [^:mut ll 1]
+                       (if (< t qstop)
+                         (do (let [lead (u8 b t)]
+                               (set ll 2)
+                               (if (>= lead 224) (set ll 3))
+                               (if (>= lead 240) (set ll 4)))))
+                       (if (and (< qstop stop) (<= (+ t ll) stop))
+                         (return (pause b s base phase pos cend sp RS_YIELD)))
+                       (return (suspend b s base phase pos cend sp t ll))))))
+               (if (== phase PH_TYPED)
+                 (do
+                   (let [size2 (ia s S_TSIZE)
+                         tag2 (ia s S_TTAG)
+                         ^:mut stop2 cend
+                         ^:mut i pos]
+                     (if (> stop2 wend) (set stop2 wend))
+                     (while (and (<= (+ i size2) stop2) (> work 0))
+                       (set work (- work size2))
+                       (if (== tag2 84)
+                         (do (let [h1 (u8 b (+ i 1))]
+                               (if (== (bit-and h1 124) 124)
+                                 (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0)
+                                   (do (set r (fail o i CODE_TYPED_ARRAY)) (break)))))))
+                       (if (== tag2 85)
+                         (do (let [s3 (u8 b (+ i 3))
+                                   s2 (u8 b (+ i 2))]
+                               (if (and (== (bit-and s3 127) 127) (>= s2 128))
+                                 (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0)
+                                   (do (set r (fail o i CODE_TYPED_ARRAY)) (break)))))))
+                       (if (== tag2 86)
+                         (do (let [t7 (u8 b (+ i 7))
+                                   t6 (u8 b (+ i 6))]
+                               (if (and (== (bit-and t7 127) 127) (>= t6 240))
+                                 (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
+                                                         (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
+                                                 (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
+                                          0)
+                                   (do (set r (fail o i CODE_TYPED_ARRAY)) (break)))))))
+                       (set i (+ i size2)))
+                     (if (< r 0) (break))
+                     (set pos i)
+                     (if (== i cend) (do (set phase PH_DONE) (continue)))
+                     (if (<= (+ i size2) stop2) (return (pause b s base phase pos cend sp RS_YIELD)))
+                     (return (suspend b s base phase pos cend sp i size2))))
+                 (if (or (== phase PH_BIGNUM) (== phase PH_TYPEDHEAD))
+                   (do
+                     (comment "A tag's byte-string content at pos (not an item, not a level).")
+                     (let [tpos (- (ia s S_TPOS) base)
+                           big (== phase PH_BIGNUM)]
+                       (if (< pos tend)
+                         (do (if (>= pos wend) (return (suspend b s base phase pos cend sp pos 1)))
+                             (let [bai (bit-and (u8 b pos) 31)
+                                   ^:mut bh 1]
+                               (if (<= bai 27) (set bh (head-size bai)))
+                               (if (and (<= (+ pos bh) tend) (> (+ pos bh) wend))
+                                 (return (suspend b s base phase pos cend sp pos bh))))))
+                       (if big
+                         (set r (bytes-content b o pos CODE_BIGNUM tend))
+                         (set r (bytes-content b o pos CODE_TYPED_ARRAY tend)))
+                       (if (< r 0) (break))
+                       (let [ce r
+                             cs (ia o O_CSTART)
+                             clen (- r (ia o O_CSTART))
+                             tb2 (+ S_FRAMES (* (- sp 1) FW))
+                             ^:mut parent 0
+                             ^:mut pelem (neg 1)]
+                         (if (> sp 0)
+                           (do (set parent (ia s (+ tb2 F_KIND)))
+                               (set pelem (ia s (+ tb2 F_STATE)))))
+                         (if big
+                           (do (comment "Both length bounds before any content is asked for (one code,"
+                                        "one offset, so their order is free); a mantissa's whole content.")
+                               (if (< clen 9) (do (set r (fail o tpos CODE_BIGNUM)) (break)))
+                               (if (> clen MAX_BIGNUM_BYTES) (do (set r (fail o tpos CODE_BIGNUM)) (break)))
+                               (let [^:mut want (+ cs 1)]
+                                 (if (and (== parent K_DEC) (== pelem 1)) (set want ce))
+                                 (if (> want wend) (return (suspend b s base phase pos cend sp pos (- want pos)))))
+                               (if (== (u8 b cs) 0) (do (set r (fail o tpos CODE_BIGNUM)) (break)))
+                               (if (and (== parent K_DEC) (== pelem 1))
+                                 (do (let [^:mut m10 (mod10 b cs ce)]
+                                       (if (== (ia s S_TTAG) 3) (set m10 (rem (+ m10 1) 10)))
+                                       (if (!= m10 0) (iset s (+ tb2 F_MANT) 1) (iset s (+ tb2 F_MANT) 0)))))
+                               (set pos ce)
+                               (set phase PH_DONE)
+                               (continue)))
+                         (let [esize (ia s S_TSIZE)]
+                           (if (!= (rem clen esize) 0) (do (set r (fail o tpos CODE_TYPED_ARRAY)) (break)))
+                           (if (and (== parent K_ND) (== pelem 1)) (iset s (+ tb2 F_COUNT) (quot clen esize)))
+                           (if (>= (ia s S_TTAG) 84)
+                             (do (set cend ce) (set pos cs) (set phase PH_TYPED) (continue)))
+                           (set pos ce)
+                           (set phase PH_DONE)
+                           (continue)))))
+                   (if (== phase PH_PAIR)
+                     (do
+                       (comment "Tag 4 / tag 40 content: 0x82 demanded, then the inner array is"
+                                "an item and a level; one frame stands for tag and array.")
+                       (let [ptag (ia s S_TTAG)
+                             ptpos (- (ia s S_TPOS) base)
+                             ^:mut pdepth 0]
+                         (if (> sp 0) (set pdepth (ia s (+ (+ S_FRAMES (* (- sp 1) FW)) F_CDEPTH))))
+                         (if (>= pos tend) (do (set r (fail o pos CODE_TRUNCATED)) (break)))
+                         (if (>= pos wend) (return (suspend b s base phase pos cend sp pos 1)))
+                         (if (!= (u8 b pos) (hex 130))
+                           (do (if (== ptag 4) (set r (fail o ptpos CODE_DECIMAL)) (set r (fail o ptpos CODE_NDARRAY)))
+                               (break)))
+                         (set r (count-item o pos))
+                         (if (< r 0) (break))
+                         (set r (enter-container o pos (+ pos 1) 0 2 (+ pdepth 1) 0 tend))
+                         (if (< r 0) (break))
+                         (let [pb (+ S_FRAMES (* sp FW))]
+                           (if (== ptag 4) (iset s (+ pb F_KIND) K_DEC) (iset s (+ pb F_KIND) K_ND))
+                           (iset s (+ pb F_CDEPTH) (+ pdepth 2))
+                           (iset s (+ pb F_REM) 2)
+                           (iset s (+ pb F_STATE) 0)
+                           (iset s (+ pb F_TPOS) (+ ptpos base))
+                           (iset s (+ pb F_EXPOK) 0)
+                           (iset s (+ pb F_MANT) 0)
+                           (iset s (+ pb F_NDBAD) 1)
+                           (iset s (+ pb F_NDK) 0)
+                           (iset s (+ pb F_NDSEEN) 0)
+                           (iset s (+ pb F_COUNT) (neg 1)))
+                         (set sp (+ sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
+                         (set pos (+ pos 1))
+                         (set phase PH_ITEM)
+                         (continue)))
+                     (if (== phase PH_END)
+                       (do (if (!= pos tend) (do (set r (fail o pos CODE_TRAILING)) (break)))
+                           (return 0))
+                       (do
+                         (comment "PH_START: the size bound, then the top-level map peek.")
+                         (if (> (ia s S_TOTAL) (ia o O_MAX_BYTES)) (do (set r (fail o (neg base) CODE_TOO_LARGE)) (break)))
+                         (if (== (ia o O_TOP) 0)
+                           (do (if (== (ia s S_TOTAL) 0) (do (set r (fail o (neg base) CODE_NOT_MAP)) (break)))
+                               (if (or (!= base 0) (>= 0 wend)) (return (suspend b s base phase pos cend sp (neg base) 1)))
+                               (if (!= (ushr (u8 b 0) 5) 5) (do (set r (fail o 0 CODE_NOT_MAP)) (break)))))
+                         (set phase PH_ITEM)
+                         (continue))))))))))))
+    (comment "Refused: the offset was recorded window-relative; make it absolute.")
+    (iset o O_ERR_POS (+ (ia o O_ERR_POS) base))
+    (return (neg r))))

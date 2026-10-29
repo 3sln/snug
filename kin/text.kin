@@ -57,3 +57,27 @@
                 (if (== w 0) (return i))
                 (set i (+ i w)))))))
     (return (neg 1))))
+
+(defn ^:pub ^I32 utf8-window [^Bytes b ^I32 start ^I32 stop ^I32 cend]
+  (comment "utf8-invalid-at over a WINDOW of text content ending at cend: scan"
+           "b[start..stop), stop <= cend. Answers stop when all of it is valid; the"
+           "start k < stop of a sequence that needs bytes past stop but not past cend"
+           "(the caller asks for them); or -(k + 1) for the first invalid sequence at"
+           "k -- a sequence running past cend is invalid at k, as in utf8-invalid-at.")
+  (let [^:mut i start]
+    (while (< i stop)
+      (let [c (u8 b i)]
+        (if (< c 128)
+          (set i (+ i 1))
+          (do (let [^:mut l 0]
+                (if (>= c 194) (set l 2))
+                (if (>= c 224) (set l 3))
+                (if (>= c 240) (set l 4))
+                (if (>= c 245) (set l 0))
+                (if (== l 0) (return (- (neg 1) i)))
+                (if (> (+ i l) cend) (return (- (neg 1) i)))
+                (if (> (+ i l) stop) (return i))
+                (let [w (utf8-seq b i stop c)]
+                  (if (== w 0) (return (- (neg 1) i)))
+                  (set i (+ i w))))))))
+    (return stop)))

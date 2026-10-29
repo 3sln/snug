@@ -101,3 +101,47 @@ export function utf8InvalidAt(b, start, end) {
     }
     return -1;
 }
+
+export function utf8Window(b, start, stop, cend) {
+    // utf8-invalid-at over a WINDOW of text content ending at cend: scan
+    // b[start..stop), stop <= cend. Answers stop when all of it is valid; the
+    // start k < stop of a sequence that needs bytes past stop but not past cend
+    // (the caller asks for them); or -(k + 1) for the first invalid sequence at
+    // k -- a sequence running past cend is invalid at k, as in utf8-invalid-at.
+    let i = start;
+    while (i < stop) {
+        const c = b[i];
+        if (c < 128) {
+            i += 1;
+        } else {
+            let l = 0;
+            if (c >= 194) {
+                l = 2;
+            }
+            if (c >= 224) {
+                l = 3;
+            }
+            if (c >= 240) {
+                l = 4;
+            }
+            if (c >= 245) {
+                l = 0;
+            }
+            if (l === 0) {
+                return (-1) - i;
+            }
+            if ((i + l) > cend) {
+                return (-1) - i;
+            }
+            if ((i + l) > stop) {
+                return i;
+            }
+            const w = utf8Seq(b, i, stop, c);
+            if (w === 0) {
+                return (-1) - i;
+            }
+            i += w;
+        }
+    }
+    return stop;
+}

@@ -8,6 +8,10 @@
 #                         tree, so a new module is compiled the day it is emitted.
 #
 # Copies only what changed (cargo's incremental build keys on mtimes).
+#
+# SNUG_RS_ONLY="cbor hello.rs" limits the crate to those entries of
+# gen/rust/snug (default: all), so a sibling work item's unfinished modules
+# cannot break this item's gates.
 set -e
 cd "$(dirname "$0")/../.."
 dir="$1"; host="${2:-host/rust/src}"; manifest="${3:-host/rust/Cargo.toml}"
@@ -18,16 +22,24 @@ puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$t
 put "$manifest" "$dir/Cargo.toml"
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done
 # kin's modules, and a mod file per directory.
-rm -rf "$dir/src/snug.new"; mkdir -p "$dir/src/snug.new"
-(cd gen/rust && find snug -type f -name '*.rs') | while read -r f; do put "gen/rust/$f" "$dir/src/$f"; done
+rm -rf "$dir/src/snug.new" "$dir/src/snug" "$dir/src/snug.rs"
+keep() {  # keep <path under gen/rust>: is it in SNUG_RS_ONLY?
+  [ -z "$SNUG_RS_ONLY" ] && return 0
+  top=$(printf '%s' "$1" | cut -d/ -f2)
+  for k in $SNUG_RS_ONLY; do [ "$k" = "$top" ] && return 0; done
+  return 1
+}
+(cd gen/rust && find snug -type f -name '*.rs') | while read -r f; do if keep "$f"; then put "gen/rust/$f" "$dir/src/$f"; fi; done
 modfile() {  # modfile <gen dir> -> mod lines for its children
   for e in $(ls "gen/rust/$1" | sort); do
+    if ! keep "$1/$e"; then continue; fi
     case "$e" in *.rs) echo "pub mod ${e%.rs};" ;; *) [ -d "gen/rust/$1/$e" ] && echo "pub mod $e;" ;; esac
   done
 }
 puttext "$(modfile snug)
 " "$dir/src/snug.rs"
 (cd gen/rust && find snug -mindepth 1 -type d) | while read -r d; do
+  if ! keep "$d"; then continue; fi
   puttext "$(modfile "$d")
 " "$dir/src/$d.rs"
 done

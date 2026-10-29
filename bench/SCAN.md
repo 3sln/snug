@@ -161,3 +161,59 @@ after the VM exists with the throughput gap to wasm as an explicit input — the
 current criteria compare generated JS with hand-written JS, and on this
 evidence the stronger alternative for large bodies is wasm, not hand-written
 JS. Not signed off.
+
+# P6.1 — the resumable scanner: what one walk for every source costs
+
+Recorded 2026-10-29 (`node bench/rscan-bench.mjs <wasm> 21`, also the last
+section of `bb bench-scan`). Same machine, inputs and method as P1.4 (CPU-time
+medians of 21 interleaved rounds; load average 21–33 during the run; every
+answer checked against the recursive scanner first).
+
+| variant | what |
+| --- | --- |
+| **rec** | the recursive generated scanner (P1.4's "gen") |
+| **rs-whole** | the resumable scanner (`kin/rscan.kin`) fed the whole buffer as ONE window |
+| **rs-64K / rs-16K / rs-1K** | the resumable scanner fed windows of that size by a JS host loop over an in-memory buffer (zero-copy views): the blob-handle / stream path minus I/O |
+| **wasm-rec / wasm-rs** | the two walks as Rust → wasm32, one window, copy included |
+
+| input | rec | rs-whole | rs-64K | rs-16K | rs-1K | wasm-rec | wasm-rs | rs-whole / rec | wasm-rs / wasm-rec |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| vectors (216 profile vectors, all) | 7.6 µs | 28.4 µs | 28.3 µs | 28.4 µs | 28.7 µs | 12.8 µs | 14.2 µs | 3.76× | 1.11× |
+| RPC put, 287 B | 0.8 µs | 1.6 µs | 1.5 µs | 1.5 µs | 1.5 µs | 0.3 µs | 0.6 µs | 1.98× | 1.60× |
+| RPC put with 1 MiB bstr | 0.8 µs | 1.5 µs | 1.6 µs | 1.6 µs | 1.6 µs | 21.2 µs | 21.8 µs | 1.90× | 1.03× |
+| 120,000-int array, 584 KB | 2.01 ms | 2.32 ms | 2.31 ms | 2.34 ms | 2.39 ms | 0.89 ms | 1.15 ms | 1.15× | 1.29× |
+| 1 MiB typed arrays | 178 µs | 312 µs | 312 µs | 318 µs | 372 µs | 111 µs | 211 µs | 1.75× | 1.91× |
+| nested maps, short text keys, 1.1 MB | 5.64 ms | 15.61 ms | 15.47 ms | 15.45 ms | 15.59 ms | 2.88 ms | 5.25 ms | 2.77× | 1.82× |
+
+The int-array `rec` figure is high in this run; the one other run after the
+optimisations below gave rec 1.59 ms, rs-whole 2.43 ms (1.52×), and the
+other ratios within ±0.2 of these.
+
+**Reading it.**
+
+- **The §17.4 15% rule fails on every input**: the resumable walk costs
+  1.15–2.8× the recursive one over a whole buffer in JS (3.8× on the tiny
+  refusal-heavy vectors, where its per-call setup dominates), and 1.03–1.9×
+  in wasm.
+- **Windows themselves are almost free.** 64 KiB, 16 KiB and even 1 KiB
+  windows cost within a few % of one whole window (typed arrays at 1 KiB:
+  +19%): the price is the explicit-stack walk, not the suspensions.
+- Where the cost goes (`--cpu-prof`, int array): the phase loop and the frame
+  fields in the scratch arena. Three source-level changes took it from 4.2 to
+  ~2.3 ms: calling the tag-4/40 "note" hook only under such a parent (it was
+  15% and not inlined), folding the array/map "next child" phase into
+  "child done", and caching the top frame's depth and note flag in locals.
+  Further gains are possible (per-tag typed-array loops; reading the key
+  arena fields only when a key was split) but not to within 15% — a
+  recursive walk keeps its state in registers and its frames on the machine
+  stack, and in JS the resumable `rscanStep` is one 6.5 KB-bytecode function
+  that V8 inlines little into.
+
+**Recommendation (D030, provisional):** a specialised recursive driver for
+buffers and the resumable driver for handles and streams, both kin, held
+together by the split-differential gate that already exists (`bb
+rscan-test`: identical code, offset and item count for every case under
+whole, 1-byte, random and every-offset splits and tiny yield quanta). The
+buffer keeps today's speed; the handle and stream paths pay ~1.2–2.8× on
+CPU, which is small next to any I/O they wait on. The VM (P3.4) should
+re-measure, since its per-item work is larger and the walk's share smaller.

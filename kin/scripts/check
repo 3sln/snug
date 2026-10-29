@@ -23,7 +23,7 @@ done
 echo "  ok   node --check: $(find gen/js -name '*.mjs' | wc -l | tr -d ' ') generated modules"
 
 crate=.cache/snug-rs
-./kin/scripts/rust-crate "$crate"
+SNUG_RS_ONLY="cbor hello.rs" ./kin/scripts/rust-crate "$crate"
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bins 2>&1); then
   echo "  FAIL cargo refused the generated code (warnings denied):"
   printf '%s\n' "$build" | sed 's/^/    /'; exit 1

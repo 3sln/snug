@@ -8,7 +8,7 @@ use crate::snug::cbor::keys::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
 
-pub(crate) fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
+pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
     // `non_shortest` (cbor.mjs `simple`).
     let left: i32 = end - (pos + 1);
@@ -40,7 +40,7 @@ pub(crate) fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -
     }
     return (pos + 1) + w;
 }
-pub(crate) fn scan_simple(o: &mut [i32], pos: i32, ai: i32) -> i32 {
+pub fn scan_simple(o: &mut [i32], pos: i32, ai: i32) -> i32 {
     // Major 7 other than a float: false, true and null only. ai 24 reaches
     // here only after its argument passed the shortest-form check.
     if (ai >= 20) && (ai <= 22) {
@@ -74,7 +74,7 @@ pub(crate) fn scan_array(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo:
     }
     return q;
 }
-pub(crate) fn cose_label_ok(b: &[u8], s: i32, major: i32) -> bool {
+pub fn cose_label_ok(b: &[u8], s: i32, major: i32) -> bool {
     // In cose mode a top-level integer label must be a SAFE integer (cbor.mjs
     // decodes it to a number): major 0 at most 2^53-1, major 1 with n below
     // 2^53-1. Only an 8-byte argument can break that.

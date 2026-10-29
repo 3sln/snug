@@ -33,7 +33,7 @@
 
 ;; ------------------------------------------------------------- leaves
 
-(defn ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
+(defn ^:pub ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
   (comment "A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then"
            "`non_shortest` (cbor.mjs `simple`).")
   (let [left (- end (+ pos 1))
@@ -54,7 +54,7 @@
     (if (!= c 0) (return (fail o pos c)))
     (return (+ (+ pos 1) w))))
 
-(defn ^I32 scan-simple [^Ints o ^I32 pos ^I32 ai]
+(defn ^:pub ^I32 scan-simple [^Ints o ^I32 pos ^I32 ai]
   (comment "Major 7 other than a float: false, true and null only. ai 24 reaches"
            "here only after its argument passed the shortest-form check.")
   (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
@@ -79,7 +79,7 @@
       (if (< q 0) (return q)))
     (return q)))
 
-(defn ^Bool cose-label-ok [^Bytes b ^I32 s ^I32 major]
+(defn ^:pub ^Bool cose-label-ok [^Bytes b ^I32 s ^I32 major]
   (comment "In cose mode a top-level integer label must be a SAFE integer (cbor.mjs"
            "decodes it to a number): major 0 at most 2^53-1, major 1 with n below"
            "2^53-1. Only an 8-byte argument can break that.")

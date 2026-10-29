@@ -13,5 +13,7 @@
               :task (shell "kin/scripts/check")}
   scan-test  {:doc "Every CBOR vector + seeded mutations through generated JS and Rust; codes must equal cbor.mjs's."
               :task (apply shell "kin/scripts/scan-test" *command-line-args*)}
+  rscan-test {:doc "P6.1: the resumable scanner == the recursive one under window splits and yields, JS and Rust."
+              :task (apply shell "kin/scripts/rscan-test" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

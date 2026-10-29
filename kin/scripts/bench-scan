@@ -15,3 +15,4 @@ echo; echo "## throughput"; node bench/scan-bench.mjs "$speed" "${1:-15}" | grep
 echo; echo "## size"; node bench/scan-size.mjs "$speed" "$size"
 echo; echo "## cold start, Node"; node bench/scan-cold.mjs "$speed" "${2:-31}"
 echo; echo "## cold start, workerd"; node bench/scan-cold-workerd.mjs "$speed" "${2:-15}"
+echo; echo "## resumable scanner (P6.1)"; node bench/rscan-bench.mjs "$speed" "${1:-15}"

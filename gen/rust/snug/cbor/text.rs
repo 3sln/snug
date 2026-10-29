@@ -100,3 +100,46 @@ pub fn utf8_invalid_at(b: &[u8], start: i32, end: i32) -> i32 {
     }
     return -1;
 }
+pub fn utf8_window(b: &[u8], start: i32, stop: i32, cend: i32) -> i32 {
+    // utf8-invalid-at over a WINDOW of text content ending at cend: scan
+    // b[start..stop), stop <= cend. Answers stop when all of it is valid; the
+    // start k < stop of a sequence that needs bytes past stop but not past cend
+    // (the caller asks for them); or -(k + 1) for the first invalid sequence at
+    // k -- a sequence running past cend is invalid at k, as in utf8-invalid-at.
+    let mut i: i32 = start;
+    while i < stop {
+        let c: i32 = b[(i) as usize] as i32;
+        if c < 128 {
+            i += 1;
+        } else {
+            let mut l: i32 = 0;
+            if c >= 194 {
+                l = 2;
+            }
+            if c >= 224 {
+                l = 3;
+            }
+            if c >= 240 {
+                l = 4;
+            }
+            if c >= 245 {
+                l = 0;
+            }
+            if l == 0 {
+                return (-1) - i;
+            }
+            if (i + l) > cend {
+                return (-1) - i;
+            }
+            if (i + l) > stop {
+                return i;
+            }
+            let w: i32 = utf8_seq(b, i, stop, c);
+            if w == 0 {
+                return (-1) - i;
+            }
+            i += w;
+        }
+    }
+    return stop;
+}
