@@ -1,0 +1,1534 @@
+{
+ "format": "snug conformance corpus v1. Each suite: cddl text, profile (full unless stated), cases [{rule, hex, expect: true|false, reason?, note?}]. A suite with schemaError expects compile to fail with that code. phase:\"later\" suites are not yet gated.",
+ "source": "corpus/cddl-study (3sln.me CDDL study, 2026-10-29)",
+ "suites": [
+  {
+   "name": "probe: map struct, optional, closed map",
+   "cddl": "r = { a: int, ? b: tstr }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610161626178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161626178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616302",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a161616131",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: open map via * tstr => any",
+   "cddl": "r = { a: int, * tstr => any }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2616101617a02",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1617a02",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: table type { * tstr => int }",
+   "cddl": "r = { * tstr => int }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2617801617902",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161786161",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: groups (named group, inline)",
+   "cddl": "g = ( a: int, b: int )\nr = { g, ? c: int }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a3616101616202616303",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "probe: type choice",
+   "cddl": "r = int / tstr",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: group choice in map //",
+   "cddl": "r = { kind: \"a\", x: int // kind: \"b\", y: tstr }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2617801646b696e646161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261796173646b696e646162",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261796173646b696e646161",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2617801646b696e646162",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: dependent members: optional group (token implies token_type, expires_at)",
+   "cddl": "r = { id: tstr, ? ( token: tstr, token_type: \"Bearer\" / \"DPoP\", expires_at: uint ) }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16269646161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a4626964616165746f6b656e61746a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2626964616165746f6b656e6174",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a362696461616a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: dependent members: group choice //",
+   "cddl": "r = { id: tstr, token: tstr, token_type: \"Bearer\" / \"DPoP\", expires_at: uint // id: tstr }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16269646161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a4626964616165746f6b656e61746a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2626964616165746f6b656e6174",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a362696461616a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: dependent members: named optional group",
+   "cddl": "tok = ( token: tstr, token_type: \"Bearer\" / \"DPoP\", expires_at: uint )\nr = { id: tstr, ? tok }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16269646161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a4626964616165746f6b656e61746a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2626964616165746f6b656e6174",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: unwrap ~ in array",
+   "cddl": "base = [int, int]\nr = [~base, tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8301026178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "82016178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .abnf rejects non-match",
+   "cddl": "r = tstr .abnf (\"x\" .det rules)\nrules = 'x = 1*3DIGIT'",
+   "schemaError": "unsupported_control",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "623132",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "626162",
+     "expect": false
+    }
+   ],
+   "note": "D013: .abnf refused"
+  },
+  {
+   "name": "probe: generics",
+   "cddl": "bounded<T> = [0*4 T]\nr = { tags: bounded<tstr>, nums: bounded<int> }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2646e756d738201026474616773816161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2646e756d738064746167738561616162616361646165",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2646e756d738064746167738101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: array occurrence n*m",
+   "cddl": "r = [1*3 int]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "83010203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8401020304",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: array record [a, b, ? c]",
+   "cddl": "r = [int, tstr, ? bool]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82016178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "83016178f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82617801",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: array trailing ambiguous [* int, tstr]",
+   "cddl": "r = [* int, tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8301026178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "820102",
+     "expect": false
+    }
+   ],
+   "note": "README: greedy occurrence; later entries ignored"
+  },
+  {
+   "name": "probe: enumeration &( )",
+   "cddl": "colors = ( red: 1, green: 2 )\nr = &colors",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "02",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: literal values and ranges (int)",
+   "cddl": "r = 0..150",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1896",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1897",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "20",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: range beyond 2^32 (safe-uint)",
+   "cddl": "r = 0..9007199254740991",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b0000010000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b001fffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b0020000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: range negative beyond 2^31",
+   "cddl": "r = -9007199254740991..9007199254740991",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "3b000000ffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b0000010000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "probe: float range",
+   "cddl": "r = 0.0..1.0",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: exclusive range ...",
+   "cddl": "r = 0...10",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "09",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "0a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .lt/.le/.gt/.ge/.ne/.eq",
+   "cddl": "r = int .ge 5",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "05",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "04",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .and/.within",
+   "cddl": "r = (int .ge 0) .and (int .le 9)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "0a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: uint .size (bytes)",
+   "cddl": "r = uint .size 1",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "18ff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "190100",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: tstr .size counts bytes",
+   "cddl": "r = tstr .size (1..3)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6461626364",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "64c3a9c3a9",
+     "expect": false
+    }
+   ],
+   "note": "JSON Schema maxLength counts code points; CDDL counts UTF-8 bytes"
+  },
+  {
+   "name": "probe: bstr .size",
+   "cddl": "r = bstr .size (0..4)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "4400000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "450000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6461626364",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .bits on uint",
+   "cddl": "f = &( a: 0, b: 1, c: 2 )\nr = uint .bits f",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "07",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "08",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .bits on bstr",
+   "cddl": "f = &( a: 0, b: 1 )\nr = bstr .bits f",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "4103",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "4104",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .regexp basic",
+   "cddl": "r = tstr .regexp \"[a-z]+\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63414243",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .regexp anchoring (RFC 8610: whole string)",
+   "cddl": "r = tstr .regexp \"[a-z]+\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6461626331",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6431616263",
+     "expect": false
+    }
+   ],
+   "note": "XSD regexps match the whole string"
+  },
+  {
+   "name": "probe: .regexp \\w \\s escapes",
+   "cddl": "r = tstr .regexp \"\\\\w+\"",
+   "schemaError": "regexp",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63777777",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63612d62",
+     "expect": false
+    }
+   ],
+   "note": "D014: \\w is not I-Regexp (RFC 9485)"
+  },
+  {
+   "name": "probe: .regexp counted unicode class",
+   "cddl": "r = tstr .regexp \"[^\\\\x00-\\\\x1f]{1,4}\"",
+   "schemaError": "regexp",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "626162",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "656162636465",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "62c3a9",
+     "expect": true
+    }
+   ],
+   "note": "D014: \\x00 is not I-Regexp; use CDDL \\u escapes in the string literal (see study-extra)"
+  },
+  {
+   "name": "probe: .pcre",
+   "cddl": "r = tstr .pcre \"^[a-z]+$\"",
+   "schemaError": "unsupported_control",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6141",
+     "expect": false
+    }
+   ],
+   "note": "D013: .pcre refused"
+  },
+  {
+   "name": "probe: .cbor embedded",
+   "cddl": "inner = { a: int }\nr = bstr .cbor inner",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "44a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "45a161616178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "41ff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .cborseq",
+   "cddl": "s = [* int]\nr = bstr .cborseq s",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "43010203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "426161",
+     "expect": false
+    }
+   ],
+   "note": "cborseq of items matched against array"
+  },
+  {
+   "name": "probe: .default (annotation)",
+   "cddl": "r = { ? n: uint .default 5 }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616e03",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616e6178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: .cat / .det (RFC 9165)",
+   "cddl": "r = \"a\" .cat \"b\"",
+   "phase": "later",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "626162",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6161",
+     "expect": false
+    }
+   ],
+   "note": "RFC 9165 constant folding is a later phase"
+  },
+  {
+   "name": "probe: .plus (RFC 9165)",
+   "cddl": "r = 1 .plus 2",
+   "phase": "later",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "02",
+     "expect": false
+    }
+   ],
+   "note": "RFC 9165 constant folding is a later phase"
+  },
+  {
+   "name": "probe: .abnf (RFC 9165)",
+   "cddl": "r = tstr .abnf (\"x\" .det rules)\nrules = 'x = 1*3DIGIT'",
+   "schemaError": "unsupported_control",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "623132",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6431323334",
+     "expect": false
+    }
+   ],
+   "note": "D013: .abnf refused"
+  },
+  {
+   "name": "probe: cut ^=>",
+   "cddl": "r = { \"a\" ^ => int, * tstr => any }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: unwrap ~",
+   "cddl": "base = { a: int }\nr = { ~base, b: int }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616202",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: socket/plug $",
+   "cddl": "$ext /= int\n$ext /= tstr\nr = [* $ext]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82016161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "81f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: group socket $$",
+   "cddl": "$$more //= ( ? x: int )\nr = { a: int, $$more }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101617802",
+     "expect": true
+    }
+   ],
+   "note": "empty group socket allowed"
+  },
+  {
+   "name": "probe: bignum biguint #6.2 in integer",
+   "cddl": "r = integer",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "05",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: bignum via uint (prelude: uint = #0)",
+   "cddl": "r = uint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    }
+   ],
+   "note": "RFC 8610: uint is major 0 only; bignum is not uint"
+  },
+  {
+   "name": "probe: integer range spanning bignums",
+   "cddl": "r = 0..340282366920938463463374607431768211455",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    }
+   ],
+   "note": "ranges beyond 64 bits"
+  },
+  {
+   "name": "probe: tag 2 explicit",
+   "cddl": "r = #6.2(bstr)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: decimal fraction tag 4 (prelude decfrac)",
+   "cddl": "r = decfrac",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c48222393038",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: decfrac with bignum mantissa",
+   "cddl": "r = decfrac",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c48222c24d0c9f2c9cd04674edea40000001",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "probe: decimal custom bounds (exponent range)",
+   "cddl": "r = #6.4([e: -2..-1, m: int])",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c48222190613",
+     "expect": false
+    }
+   ],
+   "note": "value bounds on decimals (x-minimum) are not expressible"
+  },
+  {
+   "name": "probe: typed array float32 LE tag 85",
+   "cddl": "r = #6.85(bstr)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d855480000803f00000040",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d85648000000000000f03f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: typed array element-count bound",
+   "cddl": "r = #6.85(bstr .size (0..16))",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d8555000000000000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d855540000000000000000000000000000000000000000",
+     "expect": false
+    }
+   ],
+   "note": "bound in bytes, not elements"
+  },
+  {
+   "name": "probe: typed array choice (any LE int typed array)",
+   "cddl": "ta = #6.69(bstr) / #6.70(bstr) / #6.71(bstr) / #6.72(bstr) / #6.77(bstr) / #6.78(bstr) / #6.79(bstr)\nr = ta",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d84e4c000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d84f480000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d8554400000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: tag 40 ndarray",
+   "cddl": "r = #6.40([dims: [+ uint], data: #6.86(bstr) / [* number]])",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d82882820202d85658200000000000000000000000000000000000000000000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d828828102820102",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8202820102",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: tag 40 shape constraint [2, *]",
+   "cddl": "r = #6.40([[2, uint], #6.85(bstr)])",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d82882820203d8555818000000000000000000000000000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d82882820302d8555818000000000000000000000000000000000000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: columnar table (map of equal-length columns)",
+   "cddl": "r = { ts: #6.79(bstr) / [* int], value: #6.86(bstr) / [* float], ? label: [* tstr] }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2627473d84f50000000000000000000000000000000006576616c7565d8565000000000000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a3627473820102656c6162656c82616161626576616c7565d8565000000000000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a262747381016576616c75656178",
+     "expect": false
+    }
+   ],
+   "note": "equal column length not expressible"
+  },
+  {
+   "name": "probe: float vs int distinction",
+   "cddl": "r = float",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: int rejects float",
+   "cddl": "r = int",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "fb4415af1d78b58c40",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "probe: number accepts int and float, not decimal",
+   "cddl": "r = number",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: float16/float32/float64 by encoding width",
+   "cddl": "r = float16",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: tstr vs bstr",
+   "cddl": "r = tstr",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "6161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "4100",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: null/bool/any",
+   "cddl": "r = { a: null, b: bool, c: any }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a36161f66162f561638101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a36161f46162f5616301",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: nested recursion",
+   "cddl": "node = { v: int, ? kids: [* node] }\nr = node",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2617601646b69647381a2617602646b69647381a1617603",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2617601646b69647381a161766178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: non-text map keys (CBOR int keys)",
+   "cddl": "r = { 1: int }",
+   "options": {
+    "cose": true
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a10105",
+     "expect": true
+    }
+   ],
+   "note": "our profile refuses int keys; validator supports them | default profile refuses int keys (key_type); cose allows them at top level"
+  },
+  {
+   "name": "probe: literal text value const",
+   "cddl": "r = { method: \"put\" }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1666d6574686f6463707574",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1666d6574686f6463676574",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "probe: \"uniqueItems\" equivalent",
+   "cddl": "r = [* tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8261616161",
+     "expect": true
+    }
+   ],
+   "note": "CDDL has no uniqueness operator: duplicates always pass"
+  },
+  {
+   "name": "contract: object-storage-v1.cddl",
+   "cddlFile": "cddl-study/contracts/object-storage-v1.cddl",
+   "cases": [
+    {
+     "rule": "request",
+     "hex": "a26461726773a3636b6579616b64646174614a0000000000000000000069636f6e646974696f6ea166616273656e74f5666d6574686f6463707574",
+     "expect": true
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a4636b6579616b64646174614a000000000000000000006565787472610169636f6e646974696f6ea166616273656e74f5666d6574686f6463707574",
+     "expect": false
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a3636b6579606464617461410069636f6e646974696f6ea166616273656e74f5666d6574686f6463707574",
+     "expect": false
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a3636b6579616b6464617461696e6f742d627974657369636f6e646974696f6ea166616273656e74f5666d6574686f6463707574",
+     "expect": false
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a2636b6579616b6572616e6765a263656e641b000001000000000065737461727400666d6574686f6463676574",
+     "expect": true
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a2636b6579616b6572616e6765a263656e641b100000000000000065737461727400666d6574686f6463676574",
+     "expect": false
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a4636b6579616b6473697a650a69636f6e646974696f6ea16776657273696f6e6176696f7065726174696f6e657772697465666d6574686f64677072657369676e",
+     "expect": true
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a5636b6579616b6473697a650a6572616e6765a263656e64016573746172740069636f6e646974696f6ea16776657273696f6e6176696f7065726174696f6e657772697465666d6574686f64677072657369676e",
+     "expect": false
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a3636b6579616b6473697a650a696f7065726174696f6e6472656164666d6574686f64677072657369676e",
+     "expect": false
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a0666d6574686f646c6361706162696c6974696573",
+     "expect": true
+    },
+    {
+     "rule": "request",
+     "hex": "a26461726773a1617801666d6574686f646c6361706162696c6974696573",
+     "expect": false
+    },
+    {
+     "rule": "presign-result",
+     "hex": "a66375726c7368747470733a2f2f782e6578616d706c652f61646d6f64656570726f7879666d6574686f646350555469657870697265734174016a7265766f636174696f6e646c6976656f726571756972656448656164657273a161616162",
+     "expect": true
+    },
+    {
+     "rule": "presign-result",
+     "hex": "a66375726c72687474703a2f2f782e6578616d706c652f61646d6f64656570726f7879666d6574686f646350555469657870697265734174016a7265766f636174696f6e646c6976656f726571756972656448656164657273a0",
+     "expect": false
+    },
+    {
+     "rule": "presign-result",
+     "hex": "a66375726c746a6176617363726970743a68747470733a2f2f78646d6f64656570726f7879666d6574686f646350555469657870697265734174016a7265766f636174696f6e646c6976656f726571756972656448656164657273a0",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "contract: item-classification-v1.cddl",
+   "cddlFile": "cddl-study/contracts/item-classification-v1.cddl",
+   "cases": [
+    {
+     "rule": "classify-args",
+     "hex": "a3646974656da4646461746143000000646b696e6464746578746473697a6503696d65646961547970656a746578742f706c61696e6664657461696c676d696e696d616c666c6162656c7381a2626964647370616d6b6465736372697074696f6e645370616d",
+     "expect": true
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a4646974656da4646461746143000000646b696e6464746578746473697a6503696d65646961547970656a746578742f706c61696e6474616773a1686c616e677561676562656e6664657461696c676d696e696d616c666c6162656c7381a2626964647370616d6b6465736372697074696f6e645370616d",
+     "expect": false
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a4646974656da4646461746143000000646b696e6464746578746473697a6503696d65646961547970656a746578742f706c61696e6474616773a1686c616e677561676562656e6664657461696c687374616e64617264666c6162656c7381a2626964647370616d6b6465736372697074696f6e645370616d",
+     "expect": true
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a4646974656da4646461746143000000646b696e6464746578746473697a6503696d65646961547970656a746578742f706c61696e6474616773a166736f7572636565656d61696c6664657461696c687374616e64617264666c6162656c7381a2626964647370616d6b6465736372697074696f6e645370616d",
+     "expect": false
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a4646974656da46375726ca264687265667368747470733a2f2f782e6578616d706c652f696965787069726573417409646b696e6465696d6167656473697a6505696d656469615479706569696d6167652f706e676474616773a266736f7572636565656d61696c67636f6e746578748163612e626664657461696c6466756c6c666c6162656c7381a2626964647370616d6b6465736372697074696f6e645370616d",
+     "expect": true
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a3646974656da56375726ca264687265667368747470733a2f2f782e6578616d706c652f6969657870697265734174096464617461450000000000646b696e6465696d6167656473697a6505696d656469615479706569696d6167652f706e676664657461696c6466756c6c666c6162656c7381a2626964647370616d6b6465736372697074696f6e645370616d",
+     "expect": false
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a3646974656da46375726ca264687265667368747470733a2f2f782e6578616d706c652f696965787069726573417409646b696e6465696d6167656473697a6505696d656469615479706569696d6167652f706e676664657461696c6466756c6c666c6162656c7380",
+     "expect": false
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a3646974656da46375726ca264687265667368747470733a2f2f782e6578616d706c652f696965787069726573417409646b696e6465696d6167656473697a6505696d656469615479706569496d6167652f504e476664657461696c6466756c6c666c6162656c7381a2626964647370616d6b6465736372697074696f6e6153",
+     "expect": false
+    },
+    {
+     "rule": "classify-args",
+     "hex": "a3646974656da46375726ca264687265667368747470733a2f2f782e6578616d706c652f696965787069726573417409646b696e6465696d6167656473697a6505696d656469615479706569696d6167652f706e676664657461696c6466756c6c666c6162656c7381a2626964655370616d216b6465736372697074696f6e6153",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "contract: event-bus-tasks.cddl",
+   "cddlFile": "cddl-study/contracts/event-bus-tasks.cddl",
+   "cases": [
+    {
+     "rule": "payload",
+     "hex": "a2647461736b627431657469746c656548656c6c6f",
+     "expect": true
+    },
+    {
+     "rule": "payload",
+     "hex": "a2647461736b627431656f776e65726178",
+     "expect": false
+    },
+    {
+     "rule": "record",
+     "hex": "a2646461746149a1647461736b62743164747970656763726561746564",
+     "expect": true
+    },
+    {
+     "rule": "record",
+     "hex": "a2646461746147a1647461736b0164747970656763726561746564",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "contract: preferences-v2.cddl",
+   "cddlFile": "cddl-study/contracts/preferences-v2.cddl",
+   "cases": [
+    {
+     "rule": "result",
+     "hex": "a36676616c756573a2616101616281a36269647368747470733a2f2f722e6578616d706c652f316673746174757369617661696c61626c6569636f6e7472616374738068667261676d656e747368747470733a2f2f662e6578616d706c652f78687265766973696f6e6131",
+     "expect": true
+    },
+    {
+     "rule": "result",
+     "hex": "a36676616c756573a1616281a66269647368747470733a2f2f722e6578616d706c652f3165746f6b656e61746673746174757369617661696c61626c6569636f6e747261637473806a657870697265735f6174056a746f6b656e5f747970656444506f5068667261676d656e747368747470733a2f2f662e6578616d706c652f78687265766973696f6e6131",
+     "expect": true
+    },
+    {
+     "rule": "result",
+     "hex": "a36676616c756573a1616281a46269647368747470733a2f2f722e6578616d706c652f3165746f6b656e61746673746174757369617661696c61626c6569636f6e7472616374738068667261676d656e747368747470733a2f2f662e6578616d706c652f78687265766973696f6e6131",
+     "expect": false
+    },
+    {
+     "rule": "result",
+     "hex": "a36676616c756573a16161c48220181968667261676d656e747368747470733a2f2f662e6578616d706c652f78687265766973696f6e6131",
+     "expect": true
+    },
+    {
+     "rule": "result",
+     "hex": "a36676616c756573a1616281a36269647368747470733a2f2f722e6578616d706c652f316673746174757364676f6e6569636f6e7472616374738068667261676d656e747368747470733a2f2f662e6578616d706c652f78687265766973696f6e6131",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "contract: ledger-numeric.cddl",
+   "cddlFile": "cddl-study/contracts/ledger-numeric.cddl",
+   "cases": [
+    {
+     "rule": "entry",
+     "hex": "a665666c61677305657072696365c482211903e766616d6f756e74c249400000000000000000666d6174726978d82882820202d8565820000000000000000000000000000000000000000000000000000000000000000066736572696573a2627473d84f50000000000000000000000000000000006576616c7565d85650000000000000000000000000000000006777656967687473d8554c000000000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "entry",
+     "hex": "a266616d6f756e74f93e0066736572696573a262747381016576616c756581f93e00",
+     "expect": false
+    },
+    {
+     "rule": "entry",
+     "hex": "a366616d6f756e7401666d6174726978d828828104d8565820000000000000000000000000000000000000000000000000000000000000000066736572696573a262747381016576616c756581f93e00",
+     "expect": false
+    },
+    {
+     "rule": "entry",
+     "hex": "a365666c6167730866616d6f756e740166736572696573a262747381016576616c756581f93e00",
+     "expect": false
+    },
+    {
+     "rule": "entry",
+     "hex": "a266616d6f756e740166736572696573a2627473830102036576616c756581f93e00",
+     "expect": true,
+     "note": "unequal columns pass: not expressible"
+    }
+   ]
+  },
+  {
+   "name": "contract: signaling-message-v1.cddl",
+   "cddlFile": "cddl-study/contracts/signaling-message-v1.cddl",
+   "note": "study validated these as JSON; here CBOR-encoded",
+   "cases": [
+    {
+     "rule": "message",
+     "hex": "ac61760162746ff6636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a064747970656663616e63656c6662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": true
+    },
+    {
+     "rule": "message",
+     "hex": "ac61760162746f782b61616161616161616161616161616161616161616161616161616161616161616161616161616161616161636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a166726561736f6e66636c6f736564647479706563656e646662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": true
+    },
+    {
+     "rule": "message",
+     "hex": "ac61760162746f782b61616161616161616161616161616161616161616161616161616161616161616161616161616161616161636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a166726561736f6e646e6f7065647479706563656e646662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": false
+    },
+    {
+     "rule": "message",
+     "hex": "ac61760162746ff6636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a166726561736f6e66636c6f736564647479706563656e646662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": false
+    },
+    {
+     "rule": "message",
+     "hex": "ac61760162746ff6636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b6161616161616161616161616161616161616161616161616161616161616161616161616161616161616163736571191000637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a064747970656663616e63656c6662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": false
+    },
+    {
+     "rule": "message",
+     "hex": "ad61760162746ff6636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a064747970656663616e63656c656578747261016662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": false
+    },
+    {
+     "rule": "message",
+     "hex": "ac61760162746ff6636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a6646b696e64a36664696765737461646776657273696f6e61316861727465666163746161656261736973f666706172616d73a067636f6e74657874a16161016770726f66696c656677656272746369616e737765725f627905647479706566696e766974656662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": true
+    },
+    {
+     "rule": "message",
+     "hex": "ac61760162746ff6636175647368747470733a2f2f712e6578616d706c652f766369617401636973737168747470733a2f2f702e6578616d706c65636c6567782b616161616161616161616161616161616161616161616161616161616161616161616161616161616161616373657100637369647662626262626262626262626262626262626262626262637375627368747470733a2f2f702e6578616d706c652f7564626f6479a6646b696e64a36664696765737461646776657273696f6e61316861727465666163746161656261736973a16872656c6174696f6e66667269656e6466706172616d73a067636f6e74657874f66770726f66696c656677656272746369616e737765725f627905647479706566696e766974656662696e646c65717369676e616c696e672d6d657373616765",
+     "expect": false
+    }
+   ]
+  }
+ ]
+}

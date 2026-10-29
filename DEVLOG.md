@@ -141,6 +141,61 @@ vectors, fuzz and limits are scripts that print `ok`/`FAIL`, not prose.
 - [ ] **P2.3 — Codec benchmarks vs cbor.mjs.**
   *Done when*: decode and encode numbers recorded (architecture §12 items 1, 2).
 
+### Phase 2 host implementation — 2026-10-29
+
+Implemented the hand-written JS host in `host/js/`: `Decimal`, `NDArray`
+and `Float16Bytes`; a trusted builder without profile checks or validating
+constructor calls; the deterministic encoder with baseline refusal codes
+and options; `SnugFault`; and the public scan-then-build decode seam.
+The adapter attempts `gen/js/snug/cbor/scan.mjs` and reports `unavailable`
+while absent or its verdict ABI is unknown. No changes to kin, generated
+sources or toolchain files. Commit: pending the manager; no commit made.
+
+P2.1 host work is implemented; scanner integration, refusal and mutation
+gates remain pending. P2.2 host checks pass. P2.3 build-only and encoder
+measurements are recorded in `bench/README.md`; full decode measurement
+requires the scanner, so D017 remains unresolved. Tracker boxes above are
+left for the manager to reconcile with the scanner work and commit.
+
+Checks actually run: `cd host/js && node --test test/` — **585 tests,
+430 passed, 155 skipped, 0 failed** (278.435959 ms final run);
+`node bench/choices.mjs` and `node bench/codec.mjs` — completed with
+answers checked. Tests cover all 74 profile accept vectors, all 315
+profile-valid oracle accepts, encoder/wrapper refusals, 1,000 seeded
+differential values/maps in both object modes with COSE cases, copied and
+aligned Buffer inputs and a separate-process float16 fallback.
+
+Learnt: the oracle's 327 cborg accepts include **12 deliberate Bindle
+refusals** (2 non_shortest, 2 key_order, 3 float, 2 bignum, 1 typed_array,
+2 text). These are individual scanner-dependent refusal tests, alongside
+142 profile refusal vectors and the mutation/truncation property (155
+skips total); none is passed to the trusted builder. The baseline only
+enforces the encoder byte cap when `maxBytes` is explicitly supplied,
+which this encoder preserves. Node 24 needs `test/index.js` to resolve
+the requested explicit `node --test test/` directory argument.
+
+On Apple M1 Pro/macOS 14.6.1/Node v24.6.0, the 287-byte put measured
+0.0019 ms build / 0.0045 ms encode (baseline 0.0049 / 0.0106 ms);
+10,000 eight-key maps 4.0060 / 17.9178 ms (baseline 28.7495 / 62.4214);
+the 1.4 MB document 10.3653 / 27.6785 ms (baseline 35.1128 / 75.6380).
+Float64Array encode measured slower (0.8751 vs 0.7177 ms). These compare
+trusted build with strict baseline decode, not full snug decode; all
+environment, limits, method and results are in `bench/README.md`.
+
+#### D018 — Host fast paths preserve the baseline value model
+**Decision**: use a String.fromCharCode ASCII builder path for at most 8
+bytes, arithmetic integer heads without per-head tuples, and ASCII text
+key sorting/writing without per-key Writers. Build wrappers through
+internal trusted factories; validating constructors remain for callers.
+**Why**: measured 8-byte ASCII 64.0 ns vs TextDecoder 89.2 ns, but 16-byte
+ASCII 116.8 vs 84.8 ns; safe uint64 arithmetic 10.8 vs BigInt conversion
+25.2 ns. Short-key maps measured 7.18x build-only and 3.48x encode speedup
+against the baseline. This implements D004/D017 without a second checker.
+**Alternatives**: always TextDecoder; a longer ASCII cutoff (measured
+slower); allocated head tuples; validating wrapper constructors in build
+(would duplicate the scanner's decisions); per-key Writer buffers.
+- [ ] **Signed off** (owner)
+
 ## Phase 3 — CDDL compiler and validator VM
 
 - [ ] **P3.1 — Program format frozen (`docs/program.md`).** (D015)

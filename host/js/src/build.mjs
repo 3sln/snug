@@ -1,0 +1,129 @@
+// Trusted second pass over scanner-approved Bindle CBOR. Invalid input is
+// outside this module's contract; all profile decisions belong to the scanner.
+import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value } from './values.mjs';
+
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+
+class Builder {
+  constructor(bytes, options) {
+    this.b = bytes;
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    this.pos = 0;
+    this.cose = options.cose === true;
+    this.plain = options.objects === 'plain';
+  }
+  argument(ai) {
+    const b = this.b, p = this.pos;
+    if (ai < 24) return ai;
+    if (ai === 24) { this.pos = p + 1; return b[p]; }
+    if (ai === 25) { this.pos = p + 2; return b[p] * 256 + b[p + 1]; }
+    if (ai === 26) {
+      this.pos = p + 4;
+      return b[p] * 16777216 + b[p + 1] * 65536 + b[p + 2] * 256 + b[p + 3];
+    }
+    this.pos = p + 8;
+    const hi = b[p] * 16777216 + b[p + 1] * 65536 + b[p + 2] * 256 + b[p + 3];
+    const lo = b[p + 4] * 16777216 + b[p + 5] * 65536 + b[p + 6] * 256 + b[p + 7];
+    return hi <= 0x1fffff ? hi * 4294967296 + lo : BigInt(hi) * 4294967296n + BigInt(lo);
+  }
+  text(n) {
+    const start = this.pos, end = start + n;
+    this.pos = end;
+    // Measured short-ASCII path; Unicode and longer strings use the native decoder.
+    if (n <= 8) {
+      let s = '';
+      for (let i = start; i < end; i++) {
+        const c = this.b[i];
+        if (c >= 128) return decoder.decode(this.b.subarray(start, end));
+        s += String.fromCharCode(c);
+      }
+      return s;
+    }
+    return decoder.decode(this.b.subarray(start, end));
+  }
+  bytes(n) {
+    // Uint8Array#slice on a Buffer would retain Buffer's view semantics.
+    const out = new Uint8Array(n);
+    out.set(this.b.subarray(this.pos, this.pos + n));
+    this.pos += n;
+    return out;
+  }
+  item(top = false) {
+    const head = this.b[this.pos++], major = head >> 5, ai = head & 31;
+    if (major === 7) {
+      if (ai === 20) return false;
+      if (ai === 21) return true;
+      if (ai === 22) return null;
+      const p = this.pos;
+      if (ai === 25) {
+        this.pos = p + 2;
+        const h = this.b[p] * 256 + this.b[p + 1], exp = (h >>> 10) & 31, frac = h & 1023;
+        return (h & 32768 ? -1 : 1) * (exp === 0 ? frac * 2 ** -24 : (1 + frac / 1024) * 2 ** (exp - 15));
+      }
+      if (ai === 26) { this.pos = p + 4; return this.view.getFloat32(p); }
+      this.pos = p + 8; return this.view.getFloat64(p);
+    }
+    const n = this.argument(ai);
+    switch (major) {
+      case 0: return n;
+      case 1: return typeof n === 'number' && n < MAX_SAFE ? -1 - n : -1n - BigInt(n);
+      case 2: return this.bytes(n);
+      case 3: return this.text(n);
+      case 4: {
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) out[i] = this.item();
+        return out;
+      }
+      case 5: {
+        const cose = top && this.cose;
+        const out = cose ? new Map() : this.plain ? {} : Object.create(null);
+        for (let i = 0; i < n; i++) {
+          const key = this.item(), value = this.item();
+          if (cose) out.set(key, value);
+          else if (this.plain && key === '__proto__') {
+            Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+          } else out[key] = value;
+        }
+        return out;
+      }
+      case 6: return this.tag(n);
+    }
+  }
+  tag(tag) {
+    if (tag === 4) {
+      this.pos++; // scanner proved the two-element array head
+      const exponent = this.item(), mantissa = this.item();
+      return decimalValue(BigInt(mantissa), exponent);
+    }
+    if (tag === 40) {
+      this.pos++;
+      const shape = this.item(), data = this.item();
+      return ndarrayValue(shape, data);
+    }
+    const n = this.argument(this.b[this.pos++] & 31);
+    if (tag === 2 || tag === 3) {
+      let value = 0n;
+      const end = this.pos + n;
+      while (this.pos < end) value = (value << 8n) | BigInt(this.b[this.pos++]);
+      return tag === 2 ? value : -1n - value;
+    }
+    const info = TYPED_BY_TAG.get(tag), bytes = this.bytes(n);
+    if (tag === 84 && !info.ctor) return float16Value(bytes);
+    if (!littleEndian && info.size > 1) {
+      for (let i = 0; i < n; i += info.size) {
+        for (let j = 0; j < info.size / 2; j++) {
+          const k = i + info.size - 1 - j, tmp = bytes[i + j];
+          bytes[i + j] = bytes[k]; bytes[k] = tmp;
+        }
+      }
+    }
+    return new info.ctor(bytes.buffer, 0, n / info.size);
+  }
+}
+
+/** Build only after a successful profile scan of these exact bytes and options. */
+export function build(bytes, options = {}) {
+  return new Builder(bytes, options).item(true);
+}
