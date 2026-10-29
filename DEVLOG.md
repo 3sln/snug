@@ -428,9 +428,52 @@ slower); allocated head tuples; validating wrapper constructors in build
   blob views need immutable snapshots); all accepted; §17 revision 3. The
   proposed key-length limit was withdrawn (it changed accepted language vs
   cbor.mjs). P6.1's brief was corrected in flight.
-- [ ] **P6.1 — Resumable scanner spike** (P1.5 in effect): explicit stack,
+- [x] **P6.1 — Resumable scanner spike** (P1.5 in effect): explicit stack,
   windows, `NEED`/resume; buffer cost vs the recursive scanner (§17.4's 15%
   rule); random-window-split equivalence gate.
+  *Done 2026-10-29* (commit `262b7e7`). D029, D030. `kin/rscan.kin`
+  (`snug.cbor.rscan`, layout in `docs/scanner.md` "Resumable scanner"):
+  known-length sessions, per-session scratch, `NEED` and `YIELD`, never
+  splitting what a check reads, a packed key arena for every active map's
+  previous key, tag-4/40 facts noted from child heads. Brief corrected in
+  flight per the s17 review: no key length limit (and no new code), known
+  length only, exclusive session state, deterministic yields, mid-string
+  suspension. Gate `bb rscan-test [mutations] [seed]`: every `scan-test` case
+  plus 600 key-arena maps (long keys, order/duplicate faults at every level),
+  each under whole, 1-byte, random 7/300/4096-byte windows and tiny quanta
+  (1–3 units), plus a split at every offset for inputs ≤ 48 bytes; each new
+  window starts exactly at the requested offset (nothing earlier is
+  available) and is a fresh copy. Run: 30,000 mutations × seeds 2 and 3 —
+  ~255,000 policy runs and ~265,000 split-at-every-offset runs each, all
+  identical to the recursive scanner (code, offset, items); Rust (debug)
+  identical to JS including step counts, no panic; JS behind an
+  out-of-bounds trap on 20% of runs. Mutants that break the arena move or
+  the region shift turn it red. `host/js/src/sources.mjs` (buffer fast path,
+  sync and async in-memory handles, push source with declared length and
+  `finalize`) with `host/js/test/sources.test.mjs`: all sources agree with
+  the buffer on every vector and a 0.2 MB nested document; async reads are
+  pulled one at a time, forward, only on `NEED`; three interleaved async
+  sessions with tiny quanta; declared-length mismatch is a `SourceError`, an
+  empty chunk is not EOF. `npm test`-equivalent run: 585/585 host tests.
+  Benchmark (`bench/SCAN.md`): the resumable walk over one whole buffer costs
+  1.15–2.8× the recursive one in JS (3.8× on the tiny vector set), 1.03–1.9×
+  in wasm; windows of 64/16/1 KiB cost within a few % of one window. **The
+  15% rule fails; recommendation D030.** Learnt: (1) asking for indivisible
+  pieces whole from their first byte removes all decoder state from the
+  scanner (the host's tail carries it); (2) previous keys are per active map,
+  so the arena is a stack of regions; copying them only at suspension keeps
+  the whole-buffer path copy-free; (3) a skipped byte string lets the walk's
+  position run AHEAD of what a push source has delivered — the source must
+  then drop arriving bytes up to it, and a verdict can arrive before the
+  last byte (finalize still checks the declared length); (4) a tiny quantum
+  must still allow one whole UTF-8 sequence per step or it never progresses;
+  (5) the explicit-stack walk's cost is the phase loop and frame fields in
+  memory, not the windows — three changes (note hook only under a pair,
+  folded next-child phase, cached top-frame fields) took the int array from
+  4.2 to ~2.3 ms. A sibling item's uncommitted `kin/compile-arena.kin`
+  generated Rust that did not compile, which broke every Rust gate:
+  `rust-crate` now takes `SNUG_RS_ONLY` and this item's gates build only
+  `snug::cbor` and `snug::hello`.
 - [ ] **P6.2 — Blob handle adapters** (JS: object `{size, read}`, `Blob`,
   `fetch` Range, `FileHandle`; Rust trait) with chunk cache and read-ahead.
 - [ ] **P6.3 — Stream source** (ReadableStream/AsyncIterable, push `feed`),
@@ -723,6 +766,40 @@ purpose).
 - [x] **Directed by the owner** (2026-10-29, via coordinator) — the design in
   §17 is provisional, pending review.
 
+### D029 — The resumable scanner: indivisible pieces asked for whole; keys in a per-session arena
+**Decision**: a resumable walk never splits what a check reads — a head (with
+any float payload), a UTF-8 sequence, a typed-array element, a bignum's first
+content byte, a decimal's bignum mantissa — and asks for each whole from its
+first byte (`NEED(offset, length)`), so it carries no decoder state. Every
+ACTIVE map's previous key stays a window span while the window lasts and is
+copied into a packed per-session key arena when the walk suspends or
+yields; the arena is a stack of regions in frame order, bounded by
+`min(declared length, maxBytes)` bytes. Tag-4/40 element facts are noted from
+each child's head. Sessions are known-length; the scratch is exclusive to a
+session; yields come after a deterministic work quantum. Layout in
+docs/scanner.md (the VM work item reuses it).
+**Why**: identical verdicts, offsets and item counts to the recursive
+scanner for every split (gated), bounded memory with no new profile code
+(the s17 review withdrew the key limit), and a buffer that never copies.
+**Alternatives**: carried UTF-8 / element remainder state (more scanner
+state, no benefit once the host keeps its tail); a key length limit with a
+new code (changed accepted language vs cbor.mjs); eager key copies (costs
+the buffer path on every key).
+- [ ] **Signed off** (owner)
+
+### D030 — Two drivers: recursive for buffers, resumable for handles and streams (recommendation)
+**Decision** (provisional, from P6.1's measurement): §17.4's 15% rule fails
+for the scanner — the resumable walk costs 1.15–2.8× the recursive one over a
+whole buffer in JS and 1.03–1.9× in wasm — so buffers keep a specialised
+recursive driver and handles/streams use the resumable one, both kin,
+sharing the leaf checks, held identical by `bb rscan-test`'s split
+differential (code, offset, items under every split and quantum).
+**Why**: the buffer is the hot path; the resumable path's extra CPU is small
+next to the I/O it waits on, and windows themselves cost almost nothing.
+**Alternatives**: one resumable walk for everything (simpler, one walk to
+review; costs the buffer 15–180% on this evidence); re-take at P3.4, where
+per-item VM work is larger and the walk's share smaller.
+- [ ] **Signed off** (owner)
 ---
 
 ## Findings
