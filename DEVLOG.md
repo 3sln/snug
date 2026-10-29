@@ -374,6 +374,39 @@ slower); allocated head tuples; validating wrapper constructors in build
   leaves made at once and filled from a worklist make recursion through maps,
   arrays, tags and `.cbor` a reference, never a host recursion, and the leaf
   numbering walk is iterative, so no schema can exhaust a host stack.
+
+  *Update 2026-10-29 (later):* `bb compile-fuzz` added (gate 5): seeded
+  texts from a random CDDL grammar, a well-formed generator (defined names,
+  so lowering is exercised), corpus mutations and hostile shapes, some under
+  tiny limits and the bindle/bus profiles; JS must throw only SchemaError,
+  the debug Rust build must never panic, no `internal`, JS == Rust (words,
+  pool, error fields), vm-verify accepts every Program, < 2 s each. Runs of
+  10 000 texts on seeds 1, 2, 3, 11–14, 21, 22, 31–34 pass. It found, and
+  the commits fix: INT masks for bignum regions computed against bogus
+  bounds; reversed/empty float ranges emitted as invalid intervals; a
+  zero-length `.bits` mask; group rules whose definition parsed as a type
+  (`g1 = (g)`) failing silently; phases that failed without an error code
+  passing as success (now `internal`, and the hosts refuse a Program under 64
+  words); a repetition of a zero-position group walked once per copy (a
+  million copies). Profiles (§5.3): bindle refuses sockets, `.cborseq`,
+  unwrap, explicit cuts, recursive generics (instantiation ancestry) and
+  non-text/integer keys; bus adds `.regexp`, unbounded strings, arrays,
+  maps and embedded byte strings, any/bare majors, recursion (a cycle in the
+  leaf graph) and a 16 KiB text cap; 27 profile cases in `bb compile-test`,
+  and every profile-accepted Program is identical to `full`'s except the
+  PROFILE word. A disassembler pass over representative Programs found the
+  `.cbor`/`.cborseq` content memo collision (the EMBED's content pointed at
+  itself in every profile): fixed. Measurements: `bench/COMPILE.md` — warm
+  JS 0.19–1.95 ms per study contract, cold first compile 8–19 ms, native Rust
+  3.5–4× faster; compiler 35.2 KB min+gzip (30.5 KB brotli), verifier 7.5
+  KB. The measurement itself found a host-stack overflow on a 10 000-rule
+  alias chain (now an iterative resolver; lowering depth capped at 512),
+  uncharged quadratic loops (literal grouping, float merging, typeset
+  sorting, interval sorting, literal-entry ordering, key indexes, rule
+  ordering: all n log n and charged now) and a pairwise map product that ran
+  out of arena on a 4 000-member map (now an n-ary product); a merge-sort
+  bug introduced by that rewrite was caught by new normaliser structure
+  checks in `bb compile-test`.
 - [~] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
 

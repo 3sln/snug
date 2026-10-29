@@ -20,11 +20,11 @@
   (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
                                < > <= >= == != and or not]]
-            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill msort-records
                                         INF ERR_LIM_ALTS ERR_MAP_OCCURRENCE ERR_MAP_OVERLAP ERR_MAP_CUT
                                         ERR_INTERNAL H_R0 H_R1 H_LIM_ALTS H_SRCPOS
                                         T_ENT T_ALTS T_GEXP T_FACT T_LSTK T_UNION T_NE T_MAP T_MAPD
-                                        T_PSTK T_STK3 T_STK4]]
+                                        T_PSTK T_STK3 T_STK4 T_ODO T_ODO2 T_MSORT]]
             [snug.compile.bytes :refer [nbids]]
             [snug.compile.leaf :refer [ts-member ts-overlap]]))
 
@@ -163,6 +163,54 @@
                     (for [^I32 q 0 l2] (vpush1 h T_LSTK (alt-ent h o2 q)))
                     (let [off (alt-commit h from)]
                       (as-add h off (+ l1 l2)))))))))
+      (if (erred h) (return (neg 1)))
+      (return (as-end h s)))))
+
+(defn ^:pub ^I32 as-product-many [^Ints h ^I32 from ^I32 n ^I32 pos]
+  (comment "The product of the n altsets T_PSTK[from, from+n), in order: every"
+           "concatenation of one alternative of each, dropping those that name a"
+           "literal key twice. The count is checked against the limit first; the work"
+           "is the count times the total length (an odometer in T_ODO), so a long"
+           "sequence of single alternatives is linear, not quadratic.")
+  (let [lim (hg h H_LIM_ALTS)
+        ^:mut count 1]
+    (for [^I32 i 0 n]
+      (let [k (as-n h (vget h T_PSTK (+ from i)))]
+        (if (== k 0) (return (as-none h)))
+        (if (> k (quot lim count)) (return (fail h ERR_LIM_ALTS pos)))
+        (set count (* count k))))
+    (vtrunc h T_ODO 0)
+    (for [^I32 _j 0 n] (vpush1 h T_ODO 0))
+    (let [s (as-begin h)]
+      (forever
+       (comment "one combination: concatenate, refusing a repeated literal key")
+       (let [lf (vlen h T_LSTK)
+             ^:mut dup false]
+         (for [^I32 q 0 n]
+           (let [a (vget h T_PSTK (+ from q))
+                 ai (vget h T_ODO q)
+                 off (as-aoff h a ai)
+                 len (as-alen h a ai)]
+             (if (not (charge h (+ 1 len))) (return (neg 1)))
+             (if (not (mark-keys h off len 1)) (set dup true))
+             (for [^I32 r 0 len] (vpush1 h T_LSTK (alt-ent h off r)))))
+         (comment "unmark (the same alternatives, the same counts)")
+         (for [^I32 q2 0 n]
+           (let [a2 (vget h T_PSTK (+ from q2))
+                 ai2 (vget h T_ODO q2)]
+             (mark-keys h (as-aoff h a2 ai2) (as-alen h a2 ai2) (neg 1))))
+         (if dup
+           (vtrunc h T_LSTK lf)
+           (do (let [len2 (- (vlen h T_LSTK) lf)
+                     noff (alt-commit h lf)]
+                 (as-add h noff len2)))))
+       (comment "next combination (the last altset varies fastest)")
+       (let [^:mut d (- n 1)]
+         (while (and (>= d 0) (== (+ (vget h T_ODO d) 1) (as-n h (vget h T_PSTK (+ from d)))))
+           (vset h T_ODO d 0)
+           (set d (- d 1)))
+         (if (< d 0) (break))
+         (vset h T_ODO d (+ (vget h T_ODO d) 1))))
       (if (erred h) (return (neg 1)))
       (return (as-end h s)))))
 
@@ -325,6 +373,7 @@
 (defn ^Bool factor-collides [^Ints h ^I32 fa ^I32 resid ^I32 me]
   (comment "Does a key of factor altset fa also appear in the residual's alternatives"
            "or in another candidate (T_NE records, 3 words: altset, mode, live)?")
+  (if (not (charge h (+ (as-n h resid) (quot (vlen h T_NE) 3)))) (return false))
   (let [nb (nbids h)]
     (if (< (vlen h T_UNION) nb)
       (do (let [old (vlen h T_UNION)] (vpush h T_UNION (- nb old)))))
@@ -394,24 +443,29 @@
 
 (defn ^Bool check-alt [^Ints h ^I32 off ^I32 len]
   (comment "The determinism rule (§4.3.2) and the cut-after-wildcard rule within one"
-           "alternative.")
-  (if (not (charge h (* len len))) (return false))
+           "alternative. Only pairs with a key-typeset entry can conflict: cost is"
+           "(typeset entries) x (all entries), not len^2.")
+  (vtrunc h T_ODO2 0)
   (for [^I32 i 0 len]
-    (let [a (alt-ent h off i)]
-      (for [^I32 j 0 len]
-        (let [b (alt-ent h off j)]
-          (if (and (!= i j) (== (ew h b 0) 1))
-            (if (== (ew h a 0) 0)
-              (do (comment "literal a vs key typeset b: b must absorb; a cut a must not follow b")
-                  (if (key-in-ent h (ew h a 1) b)
-                    (do (if (and (== (ew h a 5) 1) (< (ew h b 6) (ew h a 6)))
-                          (do (fail h ERR_MAP_CUT (ew h a 7)) (return false)))
-                        (if (not (absorbing h b))
-                          (do (fail h ERR_MAP_OVERLAP (ew h b 7)) (return false))))))
-              (if (and (< (ew h a 6) (ew h b 6)) (ts-overlap h (ew h a 1) (ew h b 1)))
-                (if (not (absorbing h b))
-                  (do (fail h ERR_MAP_OVERLAP (ew h b 7)) (return false))))))))))
-  (return true))
+    (if (== (ew h (alt-ent h off i) 0) 1) (vpush1 h T_ODO2 i)))
+  (let [nt (vlen h T_ODO2)]
+    (if (not (charge h (* nt len))) (return false))
+    (for [^I32 q 0 nt]
+      (let [b (alt-ent h off (vget h T_ODO2 q))]
+        (for [^I32 i2 0 len]
+          (let [a (alt-ent h off i2)]
+            (if (!= a b)
+              (if (== (ew h a 0) 0)
+                (do (comment "literal a vs key typeset b: b must absorb; a cut a must not follow b")
+                    (if (key-in-ent h (ew h a 1) b)
+                      (do (if (and (== (ew h a 5) 1) (< (ew h b 6) (ew h a 6)))
+                            (do (fail h ERR_MAP_CUT (ew h a 7)) (return false)))
+                          (if (not (absorbing h b))
+                            (do (fail h ERR_MAP_OVERLAP (ew h b 7)) (return false))))))
+                (if (and (< (ew h a 6) (ew h b 6)) (ts-overlap h (ew h a 1) (ew h b 1)))
+                  (if (not (absorbing h b))
+                    (do (fail h ERR_MAP_OVERLAP (ew h b 7)) (return false))))))))))
+    (return true)))
 
 (defn ^Bool check-factor-cuts [^Ints h ^I32 fa ^I32 resid]
   (comment "A cut literal entry of a separate factor must not follow (in source"
@@ -437,9 +491,10 @@
       (if (> (ew h e 3) COUNT_MAX) (return false))))
   (return true))
 
-(defn ^Bool same-group [^IntsR h ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+(defn ^Bool same-group [^Ints h ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
   (comment "Do two alternatives have the same key-typeset entries (the residual"
            "group), in order, ignoring entries with max 0?")
+  (if (not (charge h (+ l1 l2))) (return false))
   (let [^:mut i 0
         ^:mut j 0]
     (forever
@@ -455,39 +510,46 @@
 
 (defn ^I32 emit-lits [^Ints h ^I32 off ^I32 len]
   (comment "Append the alternative's literal entries to T_MAPD in source order"
-           "(key, value, min, cut); answers how many.")
-  (let [^:mut n 0
-        ^:mut last (neg 1)]
-    (forever
-     (comment "selection by srcpos: the smallest srcpos greater than last")
-     (let [^:mut best (neg 1)
-           ^:mut ^I32 bsp INF]
-       (for [^I32 i 0 len]
-         (let [e (alt-ent h off i)
-               sp (ew h e 6)]
-           (if (and (== (ew h e 0) 0) (and (> sp last) (< sp bsp)))
-             (do (set best e) (set bsp sp)))))
-       (if (< best 0) (return n))
-       (vpush1 h T_MAPD (ew h best 1))
-       (vpush1 h T_MAPD (ew h best 2))
-       (vpush1 h T_MAPD (ew h best 3))
-       (vpush1 h T_MAPD (ew h best 5))
-       (set n (+ n 1))
-       (set last bsp)))))
+           "(key, value, min, cut); answers how many. (srcpos, entry) pairs are"
+           "sorted stably in T_ODO2.")
+  (vtrunc h T_ODO2 0)
+  (for [^I32 i 0 len]
+    (let [e (alt-ent h off i)]
+      (if (== (ew h e 0) 0)
+        (do (vpush1 h T_ODO2 (ew h e 6))
+            (vpush1 h T_ODO2 e)))))
+  (let [n (quot (vlen h T_ODO2) 2)]
+    (if (not (msort-records h T_ODO2 0 n 2)) (return (neg 1)))
+    (for [^I32 k 0 n]
+      (let [best (vget h T_ODO2 (+ (* 2 k) 1))]
+        (vpush1 h T_MAPD (ew h best 1))
+        (vpush1 h T_MAPD (ew h best 2))
+        (vpush1 h T_MAPD (ew h best 3))
+        (vpush1 h T_MAPD (ew h best 5))))
+    (return n)))
 
 (defn ^:pub ^I32 map-finish [^Ints h ^I32 from ^I32 nents ^I32 pos]
   (comment "The internal map of a top-level map sequence whose entries' altsets are"
            "T_PSTK[from..] as (altset, candidate) pairs. Answers the map id, -2 when"
            "no alternative is satisfiable (the map type is empty), or -1.")
-  (let [^:mut resid (as-unit h)]
+  (let [pf (vlen h T_PSTK)
+        ^:mut nres0 0]
     (vtrunc h T_NE 0)
     (for [^I32 i 0 nents]
       (let [a (vget h T_PSTK (+ from (* 2 i)))
             cand (vget h T_PSTK (+ from (+ (* 2 i) 1)))]
         (if (== cand 1)
           (do (vpush1 h T_NE a) (vpush1 h T_NE 0) (vpush1 h T_NE 1))
-          (do (set resid (as-product h resid a pos))
-              (if (< resid 0) (return (neg 1)))))))
+          (do (vpush1 h T_PSTK a) (set nres0 (+ nres0 1))))))
+    (let [^:mut resid (as-product-many h pf nres0 pos)]
+    (vtrunc h T_PSTK pf)
+    (if (< resid 0) (return (neg 1)))
+    (comment "Prospective: however the candidates are decided, the table holds at least"
+             "the residual's alternatives plus every candidate's (merging multiplies).")
+    (let [^:mut floor (as-n h resid)]
+      (for [^I32 c0 0 (quot (vlen h T_NE) 3)]
+        (set floor (+ floor (as-n h (vget h T_NE (* c0 3))))))
+      (if (> floor (hg h H_LIM_ALTS)) (return (fail h ERR_LIM_ALTS pos))))
     (let [nf (quot (vlen h T_NE) 3)]
       (comment "Phase A: a factor sharing a key with the residual or another factor merges.")
       (let [^:mut changed true]
@@ -639,4 +701,4 @@
               (if (erred h) (return (neg 1)))
               (let [id (vlen h T_MAP)]
                 (vpush1 h T_MAP blob)
-                (return id))))))))))
+                (return id)))))))))))

@@ -8,7 +8,7 @@ import { ctlAnd, ctlBits, ctlCat, ctlCbor, ctlCompare, ctlEq, ctlRegexp, ctlSize
 import { G_ALT, G_EMPTY, G_FRAME, G_POS, G_REC, G_REP, G_SEQ, gAdd, gList, gNode, gk, gset } from './glush.mjs';
 import { K_ARRAY, K_EMBED, K_INT, K_LIT, K_MAP, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimple, mkText, pointOf, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
 import { TK_BYTES, TK_FLOAT, TK_INT, TK_TEXT, tkA, tkB, tkC, tkEnd, tkKind, tkStart } from './lex.mjs';
-import { altEnt, asAlen, asAoff, asN, asNone, asOccur, asProduct, asSingle, asUnion, asUnit, entNew, ew, mapFinish } from './maps.mjs';
+import { altEnt, asAlen, asAoff, asN, asNone, asOccur, asProductMany, asSingle, asUnion, asUnit, entNew, ew, mapFinish } from './maps.mjs';
 import { KEY_BARE, KEY_TYPE, KEY_VALUE, N_ANY, N_ARRAY, N_CTL, N_ENT, N_ENUM, N_MAJOR, N_MAP, N_MEMBER, N_NAME, N_RANGE, N_SUBGRP, N_TAG, N_TYPE, N_UNWRAP, N_VALUE, na, nb, nc, nd, ne, nk, nnext, npos, ntok } from './parse.mjs';
 import { RK_GROUP, RK_TYPE, defNext, nrules, paramIndex, rset, ruleFindTok, ruleKind, rw } from './rules.mjs';
 
@@ -1253,20 +1253,22 @@ export function mEnt(h, ent, env) {
 }
 
 export function mSeq(h, gc, env) {
-    let acc = asUnit(h);
+    // A sequence's altset: the n-ary product of its entries' altsets.
+    const from = vlen(h, T_PSTK);
+    let n = 0;
     let e = na(h, gc);
     while (e >= 0) {
         const s = mEnt(h, e, env);
         if (s < 0) {
             return -1;
         }
-        acc = asProduct(h, acc, s, npos(h, e));
-        if (acc < 0) {
-            return -1;
-        }
+        vpush1(h, T_PSTK, s);
+        n += 1;
         e = nnext(h, e);
     }
-    return acc;
+    const r = asProductMany(h, from, n, npos(h, gc));
+    vtrunc(h, T_PSTK, from);
+    return r;
 }
 
 export function mGroup(h, g, choice, env) {

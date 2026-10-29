@@ -374,50 +374,6 @@ pub(crate) fn group_intern(h: &mut [i32], blob: i32, go: i32, gn: i32) -> i32 {
     }
     return nid;
 }
-pub(crate) fn min2(a: i32, b: i32) -> i32 {
-    if a < b {
-        return a;
-    }
-    return b;
-}
-pub(crate) fn sort_bids(h: &mut [i32], t: i32, n: i32) -> bool {
-    // Sort the n bids of vector t by their bytes (bottom-up merge sort, T_TMP
-    // as scratch).
-    vtrunc(h, T_TMP, 0);
-    if vpush(h, T_TMP, n) < 0 {
-        return false;
-    }
-    let mut width: i32 = 1;
-    while width < n {
-        if !charge(h, n) {
-            return false;
-        }
-        let mut lo: i32 = 0;
-        while lo < n {
-            let mid: i32 = min2(lo + width, n);
-            let hi: i32 = min2(lo + (2 * width), n);
-            let mut i: i32 = lo;
-            let mut j: i32 = mid;
-            let mut k: i32 = lo;
-            while k < hi {
-                if (i < mid) && ((j >= hi) || (bid_cmp(h, vget(h, t, i), vget(h, t, j)) <= 0)) {
-                    vset(h, T_TMP, k, vget(h, t, i));
-                    i += 1;
-                } else {
-                    vset(h, T_TMP, k, vget(h, t, j));
-                    j += 1;
-                }
-                k += 1;
-            }
-            lo += 2 * width;
-        }
-        for c in 0..n {
-            vset(h, t, c, vget(h, T_TMP, c));
-        }
-        width *= 2;
-    }
-    return !erred(h);
-}
 pub(crate) fn pool_place(h: &mut [i32], bid: i32) -> i32 {
     // The pool offset of bid's bytes, placing them on first use.
     let cur: i32 = vget(h, T_POOLOFF, bid);
@@ -675,9 +631,8 @@ pub(crate) fn map_blob(h: &[i32], l: i32) -> i32 {
 }
 pub(crate) fn map_keys_into(h: &mut [i32], blob: i32, dst: i32) -> i32 {
     // Push the distinct key ids of the map's literal entries, ascending, onto
-    // dst; answers how many.
+    // dst; answers how many (sort, then drop repeats: n log n).
     let start: i32 = vlen(h, dst);
-    let nl: i32 = vget(h, T_MAPD, blob + 3);
     let nf: i32 = vget(h, T_MAPD, blob);
     let np: i32 = vget(h, T_MAPD, blob + 1);
     let na: i32 = vget(h, T_MAPD, blob + 2);
@@ -686,21 +641,45 @@ pub(crate) fn map_keys_into(h: &mut [i32], blob: i32, dst: i32) -> i32 {
         let lo: i32 = blob + vget(h, T_MAPD, (ab + (3 * a)) + 1);
         let ln: i32 = vget(h, T_MAPD, (ab + (3 * a)) + 2);
         for i in 0..ln {
-            let kid: i32 = vget(h, T_KEYID, vget(h, T_MAPD, lo + (4 * i)));
-            let mut seen: bool = false;
-            for j in start..vlen(h, dst) {
-                if vget(h, dst, j) == kid {
-                    seen = true;
-                }
-            }
-            if !seen {
-                vpush1(h, dst, kid);
-            }
+            vpush1(h, dst, vget(h, T_KEYID, vget(h, T_MAPD, lo + (4 * i))));
         }
     }
     let n: i32 = vlen(h, dst) - start;
-    sort_records(h, dst, start, n, 1);
-    if nl < 0 {
+    let mut w: i32 = start;
+    if !sort_records(h, dst, start, n, 1) {
+        return -1;
+    }
+    for r in start..start + n {
+        if (r == start) || (vget(h, dst, r) != vget(h, dst, r - 1)) {
+            vset(h, dst, w, vget(h, dst, r));
+            w += 1;
+        }
+    }
+    vtrunc(h, dst, w);
+    return w - start;
+}
+pub(crate) fn key_triples(h: &mut [i32], blob: i32) -> i32 {
+    // T_KEYTRI: (key id, alternative, literal index) for every literal entry of
+    // the map, sorted stably by key id: grouped by key, alternatives ascending
+    // within a key. Answers the count.
+    let nf: i32 = vget(h, T_MAPD, blob);
+    let np: i32 = vget(h, T_MAPD, blob + 1);
+    let na: i32 = vget(h, T_MAPD, blob + 2);
+    let ab: i32 = ((blob + 4) + (3 * nf)) + (5 * np);
+    let mut lidx: i32 = 0;
+    vtrunc(h, T_KEYTRI, 0);
+    for a in 0..na {
+        let lo: i32 = blob + vget(h, T_MAPD, (ab + (3 * a)) + 1);
+        let ln: i32 = vget(h, T_MAPD, (ab + (3 * a)) + 2);
+        for i in 0..ln {
+            vpush1(h, T_KEYTRI, vget(h, T_KEYID, vget(h, T_MAPD, lo + (4 * i))));
+            vpush1(h, T_KEYTRI, a);
+            vpush1(h, T_KEYTRI, lidx + i);
+        }
+        lidx += ln;
+    }
+    let n: i32 = vlen(h, T_KEYTRI) / 3;
+    if !msort_records(h, T_KEYTRI, 0, n, 3) {
         return -1;
     }
     return n;
@@ -840,10 +819,10 @@ pub fn assign_sections(h: &mut [i32]) -> i32 {
 }
 pub fn order_rules(h: &mut [i32]) -> i32 {
     // RULES: the schema's non-generic type rules, sorted by name bytes. T_RORD
-    // gets their rule ids; T_RSCR their name bids (same order).
+    // gets their rule ids, T_RSCR their name bids (same order). Names are unique,
+    // so a bid -> rule table (T_KEYTRI, reused) undoes the sort: n log n.
     vtrunc(h, T_RORD, 0);
     vtrunc(h, T_RSCR, 0);
-    vtrunc(h, T_TMP2, 0);
     let nr: i32 = nrules(h);
     for r in 0..nr {
         if ((rw(h, r, 7) == 0) && (rw(h, r, 5) == 0)) && (rw(h, r, 4) == RK_TYPE) {
@@ -852,32 +831,26 @@ pub fn order_rules(h: &mut [i32]) -> i32 {
                 return -1;
             }
             vpush1(h, T_RSCR, b);
-            vpush1(h, T_TMP2, r);
         }
     }
     let n: i32 = vlen(h, T_RSCR);
-    // Sort the bids, then put each rule at its bid's rank (names are unique).
-    vtrunc(h, T_CLS, 0);
-    for i in 0..n {
-        vpush1(h, T_CLS, vget(h, T_RSCR, i));
-    }
-    if !sort_bids(h, T_CLS, n) {
+    let nb: i32 = nbids(h);
+    vtrunc(h, T_KEYTRI, 0);
+    if vpush(h, T_KEYTRI, nb) < 0 {
         return -1;
     }
-    for j in 0..n {
-        let b2: i32 = vget(h, T_CLS, j);
-        for q in 0..n {
-            if vget(h, T_RSCR, q) == b2 {
-                vpush1(h, T_RORD, vget(h, T_TMP2, q));
-            }
+    let mut k: i32 = 0;
+    for r2 in 0..nr {
+        if ((rw(h, r2, 7) == 0) && (rw(h, r2, 5) == 0)) && (rw(h, r2, 4) == RK_TYPE) {
+            vset(h, T_KEYTRI, vget(h, T_RSCR, k), r2);
+            k += 1;
         }
     }
-    vtrunc(h, T_RSCR, 0);
-    for j2 in 0..n {
-        vpush1(h, T_RSCR, vget(h, T_CLS, j2));
-    }
-    if !charge(h, n * n) {
+    if !sort_bids(h, T_RSCR, n) {
         return -1;
+    }
+    for j2 in 0..n {
+        vpush1(h, T_RORD, vget(h, T_KEYTRI, vget(h, T_RSCR, j2)));
     }
     return n;
 }
@@ -975,23 +948,17 @@ pub fn plan_maps(h: &mut [i32]) -> i32 {
             for a in 0..na {
                 sw += 3 + ceil32(vget(h, T_MAPD, (ab + (3 * a)) + 2));
             }
-            // the most naming records of one key
-            vtrunc(h, T_TMP2, 0);
-            let nk: i32 = map_keys_into(h, blob, T_TMP2);
-            for q in 0..nk {
-                let kid: i32 = vget(h, T_TMP2, q);
-                let mut cnt: i32 = 0;
-                for a2 in 0..na {
-                    let lo: i32 = blob + vget(h, T_MAPD, (ab + (3 * a2)) + 1);
-                    let ln: i32 = vget(h, T_MAPD, (ab + (3 * a2)) + 2);
-                    for i in 0..ln {
-                        if vget(h, T_KEYID, vget(h, T_MAPD, lo + (4 * i))) == kid {
-                            cnt += 1;
-                        }
-                    }
+            // the most naming records of one key: the longest run of one key
+            let nt: i32 = key_triples(h, blob);
+            let mut run: i32 = 0;
+            for q in 0..nt {
+                if (q > 0) && (vget(h, T_KEYTRI, 3 * q) == vget(h, T_KEYTRI, 3 * (q - 1))) {
+                    run += 1;
+                } else {
+                    run = 1;
                 }
-                if cnt > maxnames {
-                    maxnames = cnt;
+                if run > maxnames {
+                    maxnames = run;
                 }
             }
             laux_set(h, f, 2, sw);
@@ -1448,44 +1415,25 @@ pub(crate) fn write_map(h: &mut [i32], f: i32) {
             out(h, vget(h, T_MAPD, e + 3));
         }
     }
-    // key index: key, owner, names run; then the naming records
-    let mut nf2: i32 = 0;
-    for q in 0..nk {
-        let kid: i32 = vget(h, T_TMP2, ks + q);
-        let mut cnt: i32 = 0;
-        let mut owner: i32 = 0;
-        for a3 in 0..na {
-            let arec3: i32 = ab + (3 * a3);
-            let lo3: i32 = blob + vget(h, T_MAPD, arec3 + 1);
-            let ln3: i32 = vget(h, T_MAPD, arec3 + 2);
-            for i4 in 0..ln3 {
-                if vget(h, T_KEYID, vget(h, T_MAPD, lo3 + (4 * i4))) == kid {
-                    cnt += 1;
-                    owner = vget(h, T_MAPD, pb + (5 * vget(h, T_MAPD, arec3)));
-                }
-            }
+    // key index (key, owner, names run) and naming records, from the key
+    // triples: grouped by key, alternatives ascending
+    let nt: i32 = key_triples(h, blob);
+    let mut q: i32 = 0;
+    while q < nt {
+        let kid: i32 = vget(h, T_KEYTRI, 3 * q);
+        let mut qe: i32 = q;
+        while (qe < nt) && (vget(h, T_KEYTRI, 3 * qe) == kid) {
+            qe += 1;
         }
         out(h, kid);
-        out(h, owner);
-        out(h, nf2);
-        out(h, cnt);
-        nf2 += cnt;
+        out(h, vget(h, T_MAPD, pb + (5 * vget(h, T_MAPD, ab + (3 * vget(h, T_KEYTRI, (3 * q) + 1))))));
+        out(h, q);
+        out(h, qe - q);
+        q = qe;
     }
-    for q2 in 0..nk {
-        let kid2: i32 = vget(h, T_TMP2, ks + q2);
-        let mut lidx: i32 = 0;
-        for a4 in 0..na {
-            let arec4: i32 = ab + (3 * a4);
-            let lo4: i32 = blob + vget(h, T_MAPD, arec4 + 1);
-            let ln4: i32 = vget(h, T_MAPD, arec4 + 2);
-            for i5 in 0..ln4 {
-                if vget(h, T_KEYID, vget(h, T_MAPD, lo4 + (4 * i5))) == kid2 {
-                    out(h, a4);
-                    out(h, lidx + i5);
-                }
-            }
-            lidx += ln4;
-        }
+    for r in 0..nt {
+        out(h, vget(h, T_KEYTRI, (3 * r) + 1));
+        out(h, vget(h, T_KEYTRI, (3 * r) + 2));
     }
     vtrunc(h, T_TMP2, ks);
 }

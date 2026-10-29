@@ -1209,20 +1209,22 @@ pub(crate) fn m_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
     return as_occur(h, base, lo, hi, pos);
 }
 pub(crate) fn m_seq(h: &mut [i32], gc: i32, env: i32) -> i32 {
-    let mut acc: i32 = as_unit(h);
+    // A sequence's altset: the n-ary product of its entries' altsets.
+    let from: i32 = vlen(h, T_PSTK);
+    let mut n: i32 = 0;
     let mut e: i32 = na(h, gc);
     while e >= 0 {
         let s: i32 = m_ent(h, e, env);
         if s < 0 {
             return -1;
         }
-        acc = as_product(h, acc, s, npos(h, e));
-        if acc < 0 {
-            return -1;
-        }
+        vpush1(h, T_PSTK, s);
+        n += 1;
         e = nnext(h, e);
     }
-    return acc;
+    let r: i32 = as_product_many(h, from, n, npos(h, gc));
+    vtrunc(h, T_PSTK, from);
+    return r;
 }
 pub(crate) fn m_group(h: &mut [i32], g: i32, choice: i32, env: i32) -> i32 {
     // The altset of group g (every choice, or only `choice` >= 0).

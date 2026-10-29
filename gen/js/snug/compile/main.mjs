@@ -67,7 +67,12 @@ export function setupLimits(h, opt) {
     // Recursion in the later phases (names, generics, groups) is bounded by
     // a depth derived from the nesting limit, so no host stack is at risk.
     const nest = hg(h, H_LIM_NEST);
-    hs(h, H_DEPTH_MAX, 4 * nest);
+    let dm = 4 * nest;
+    // ...capped, so the deepest lowering stays far inside any host stack.
+    if (dm > 512) {
+        dm = 512;
+    }
+    hs(h, H_DEPTH_MAX, dm);
 }
 
 export function setup(text, opt, fl, h) {
@@ -351,4 +356,9 @@ export function outPoolAt(h) {
 
 export function outPoolBytes(h) {
     return hg(h, H_OUT_BN);
+}
+
+export function budgetUsed(h) {
+    // Compile budget units the last call spent (for benchmarks and the fuzz gate).
+    return hg(h, H_LIM_BUDGET) - hg(h, H_BUDGET);
 }

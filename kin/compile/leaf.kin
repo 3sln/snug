@@ -27,12 +27,12 @@
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-xor bit-not
                                < > <= >= == != and or not ult add32 sub32]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vadd
-                                        mix ht-init ht-start ht-id ht-next ht-put sort-records
+                                        mix ht-init ht-start ht-id ht-next ht-put sort-records msort-records
                                         INF ERR_INTERNAL ERR_LIM_LEAVES H_R0 H_R1 H_R2 H_EPOCH
                                         T_LEAF T_HLEAF T_TS T_TSL T_HTS T_IV T_FIV T_LST T_BYTE
-                                        T_IVA T_IVB T_IVC T_IVS T_TMP T_STK T_LSTK T_TMP2]]
+                                        T_IVA T_IVB T_IVC T_IVS T_TMP T_STK T_LSTK T_TMP2 T_MSORT T_LITS]]
             [snug.compile.bytes :refer [bid-len bid-byte bid-off bid-cmp mag-cmp mag-add1 mag-hi mag-lo
-                                        mag-from64]]
+                                        mag-from64 sort-bids]]
             [snug.compile.regexp :refer [rx-match]]))
 
 (defconst ^:pub ^I32 K_ANY 1)
@@ -336,21 +336,38 @@
     (return (bound-cmp h (vget h t a) (vget h t (+ a 1)) (vget h t (+ a 2))
                        (vget h t b) (vget h t (+ b 1)) (vget h t (+ b 2))))))
 
-(defn swap-rec [^Ints h ^I32 t ^I32 i ^I32 j ^I32 w]
-  (for [^I32 k 0 w]
-    (let [x (vget h t (+ (* i w) k))
-          y (vget h t (+ (* j w) k))]
-      (vset h t (+ (* i w) k) y)
-      (vset h t (+ (* j w) k) x))))
-
 (defn ^Bool iv-sort [^Ints h ^I32 t ^I32 n]
-  (comment "Insertion sort of the n records of t by lo bound (charged).")
-  (for [^I32 i 1 n]
-    (let [^:mut j i]
-      (while (and (> j 0) (> (rec-cmp-lo h t (- j 1) j) 0))
-        (if (not (charge h 1)) (return false))
-        (swap-rec h t (- j 1) j 6)
-        (set j (- j 1)))))
+  (comment "Stable merge sort of the n records of t by lo bound (through T_MSORT,"
+           "charged n per pass).")
+  (if (< n 2) (return true))
+  (vtrunc h T_MSORT 0)
+  (if (< (vpush h T_MSORT (* 6 n)) 0) (return false))
+  (let [^:mut width 1]
+    (while (< width n)
+      (if (not (charge h n)) (return false))
+      (let [^:mut lo 0]
+        (while (< lo n)
+          (let [^:mut mid (+ lo width)
+                ^:mut hi (+ lo (* 2 width))]
+            (if (> mid n) (set mid n))
+            (if (> hi n) (set hi n))
+            (let [^:mut i lo
+                  ^:mut j mid
+                  ^:mut k lo]
+              (while (< k hi)
+                (let [^:mut left false]
+                  (comment "take from the left run (stable on ties) while it lasts")
+                  (if (and (< i mid) (or (>= j hi) (<= (rec-cmp-lo h t i j) 0))) (set left true))
+                  (let [^:mut src j]
+                    (if left (set src i))
+                    (for [^I32 w 0 6]
+                      (vset h T_MSORT (+ (* 6 k) w) (vget h t (+ (* 6 src) w)))))
+                  (if left (set i (+ i 1)) (set j (+ j 1))))
+                (set k (+ k 1)))))
+          (set lo (+ lo (* 2 width)))))
+      (for [^I32 c 0 (* 6 n)]
+        (vset h t c (vget h T_MSORT c)))
+      (set width (* width 2))))
   (return (not (erred h))))
 
 (defn ^:pub ^I32 iv-normalize [^Ints h ^I32 src ^I32 dst]
@@ -482,16 +499,44 @@
   (return (u64-cmp (vget h t (* 4 i)) (vget h t (+ (* 4 i) 1))
                    (vget h t (* 4 j)) (vget h t (+ (* 4 j) 1)))))
 
+(defn ^Bool fiv-sort [^Ints h ^I32 t ^I32 n]
+  (comment "Stable merge sort of n float intervals by lo key (through T_MSORT).")
+  (if (< n 2) (return true))
+  (vtrunc h T_MSORT 0)
+  (if (< (vpush h T_MSORT (* 4 n)) 0) (return false))
+  (let [^:mut width 1]
+    (while (< width n)
+      (if (not (charge h n)) (return false))
+      (let [^:mut lo 0]
+        (while (< lo n)
+          (let [^:mut mid (+ lo width)
+                ^:mut hi (+ lo (* 2 width))]
+            (if (> mid n) (set mid n))
+            (if (> hi n) (set hi n))
+            (let [^:mut i lo
+                  ^:mut j mid
+                  ^:mut k lo]
+              (while (< k hi)
+                (let [^:mut left false]
+                  (comment "take from the left run (stable on ties) while it lasts")
+                  (if (and (< i mid) (or (>= j hi) (<= (frec-cmp h t i j) 0))) (set left true))
+                  (let [^:mut src j]
+                    (if left (set src i))
+                    (for [^I32 w 0 4]
+                      (vset h T_MSORT (+ (* 4 k) w) (vget h t (+ (* 4 src) w)))))
+                  (if left (set i (+ i 1)) (set j (+ j 1))))
+                (set k (+ k 1)))))
+          (set lo (+ lo (* 2 width)))))
+      (for [^I32 c 0 (* 4 n)]
+        (vset h t c (vget h T_MSORT c)))
+      (set width (* width 2))))
+  (return (not (erred h))))
+
 (defn ^:pub ^I32 fiv-normalize [^Ints h ^I32 src ^I32 dst]
   (comment "Sort, drop empty, merge overlapping/adjacent float intervals into dst.")
   (let [n (quot (vlen h src) 4)]
     (vtrunc h dst 0)
-    (for [^I32 i 1 n]
-      (let [^:mut j i]
-        (while (and (> j 0) (> (frec-cmp h src (- j 1) j) 0))
-          (if (not (charge h 1)) (return (neg 1)))
-          (swap-rec h src (- j 1) j 4)
-          (set j (- j 1)))))
+    (if (not (fiv-sort h src n)) (return (neg 1)))
     (let [^:mut cnt 0]
       (for [^I32 k 0 n]
         (let [o (* 4 k)
@@ -810,8 +855,15 @@
   (return (neg 1)))
 
 (defn ^I32 merge-floats [^Ints h ^I32 from]
-  (comment "Merge FLOAT leaves pairwise where float-merge2 can.")
-  (let [n (vlen h T_STK)]
+  (comment "Merge FLOAT leaves pairwise where float-merge2 can (only when there are"
+           "two or more: a choice of many literals must not pay a quadratic scan).")
+  (let [n (vlen h T_STK)
+        ^:mut nfl 0]
+    (for [^I32 q from n]
+      (let [x (vget h T_STK q)]
+        (if (and (>= x 0) (== (lk h x) K_FLOAT)) (set nfl (+ nfl 1)))))
+    (if (< nfl 2) (return 0))
+    (if (not (charge h (* nfl nfl))) (return (neg 1)))
     (for [^I32 i from n]
       (for [^I32 j (+ i 1) n]
         (let [a (vget h T_STK i)
@@ -824,63 +876,57 @@
     (if (erred h) (return (neg 1)))
     (return 0)))
 
-(defn ^I32 lits-sorted-insert [^Ints h ^I32 from ^I32 bid]
-  (comment "Insert bid into the sorted (by bytes) unique list T_LSTK[from..].")
-  (let [n (vlen h T_LSTK)
-        ^:mut i from]
-    (while (and (< i n) (< (bid-cmp h (vget h T_LSTK i) bid) 0))
-      (set i (+ i 1)))
-    (if (and (< i n) (== (vget h T_LSTK i) bid)) (return 0))
-    (vpush1 h T_LSTK 0)
-    (let [^:mut j n]
-      (while (> j i)
-        (vset h T_LSTK j (vget h T_LSTK (- j 1)))
-        (set j (- j 1))))
-    (vset h T_LSTK i bid)
-    (return 0)))
+(defn ^I32 group-class [^Ints h ^I32 from ^I32 cls]
+  (comment "Every LIT/LITSET leaf of class cls in T_STK[from..] -> one LITSET (or one"
+           "LIT) at the first one's position; the members sorted by bytes, unique.")
+  (let [n (vlen h T_STK)
+        ^:mut first (neg 1)]
+    (vtrunc h T_LITS 0)
+    (for [^I32 k from n]
+      (let [c (vget h T_STK k)]
+        (if (and (>= c 0) (and (or (== (lk h c) K_LIT) (== (lk h c) K_LITSET)) (== (leaf-mask h c) cls)))
+          (do (if (< first 0) (set first k))
+              (if (== (lk h c) K_LIT)
+                (vpush1 h T_LITS (ld h c 0))
+                (for [^I32 q 0 (ld h c 1)]
+                  (vpush1 h T_LITS (vget h T_LST (+ (ld h c 0) q)))))
+              (vset h T_STK k (neg 1))))))
+    (let [m (vlen h T_LITS)]
+      (if (not (charge h m)) (return (neg 1)))
+      (if (not (sort-bids h T_LITS m)) (return (neg 1)))
+      (let [loff (vlen h T_LST)
+            ^:mut cnt 0]
+        (for [^I32 r 0 m]
+          (let [x (vget h T_LITS r)]
+            (if (or (== r 0) (!= x (vget h T_LITS (- r 1))))
+              (do (vpush1 h T_LST x) (set cnt (+ cnt 1))))))
+        (if (== cnt 1)
+          (do (let [nl1 (mk-lit h (vget h T_LST loff))]
+                (if (< nl1 0) (return (neg 1)))
+                (vset h T_STK first nl1)
+                (return 0))))
+        (stage h K_LITSET 0)
+        (stage-d h 0 loff)
+        (stage-d h 1 cnt)
+        (let [nl2 (stage-intern h)]
+          (if (< nl2 0) (return (neg 1)))
+          (vset h T_STK first nl2)
+          (return 0))))))
 
 (defn ^I32 group-lits [^Ints h ^I32 from]
-  (comment "LIT/LITSET leaves of one class -> one LITSET (two or more members) at"
-           "the position of the first.")
+  (comment "LIT/LITSET leaves of one class -> one LITSET, for every class (one bit"
+           "of the 12 item classes) with two or more literals: one counting pass, then"
+           "one grouping pass per such class.")
   (let [n (vlen h T_STK)]
-    (for [^I32 i from n]
-      (let [a (vget h T_STK i)]
-        (if (and (>= a 0) (or (== (lk h a) K_LIT) (== (lk h a) K_LITSET)))
-          (do (let [cls (leaf-mask h a)
-                    lf (vlen h T_LSTK)
-                    ^:mut others 0]
-                (for [^I32 j (+ i 1) n]
-                  (let [b (vget h T_STK j)]
-                    (if (and (>= b 0) (and (or (== (lk h b) K_LIT) (== (lk h b) K_LITSET))
-                                           (== (leaf-mask h b) cls)))
-                      (set others (+ others 1)))))
-                (if (> others 0)
-                  (do (for [^I32 k i n]
-                        (let [c (vget h T_STK k)]
-                          (if (and (>= c 0) (and (or (== (lk h c) K_LIT) (== (lk h c) K_LITSET))
-                                                 (== (leaf-mask h c) cls)))
-                            (do (if (== (lk h c) K_LIT)
-                                  (lits-sorted-insert h lf (ld h c 0))
-                                  (for [^I32 q 0 (ld h c 1)]
-                                    (lits-sorted-insert h lf (vget h T_LST (+ (ld h c 0) q)))))
-                                (vset h T_STK k (neg 1))))))
-                      (let [cnt (- (vlen h T_LSTK) lf)
-                            loff (vlen h T_LST)]
-                        (if (not (charge h cnt)) (return (neg 1)))
-                        (for [^I32 r 0 cnt]
-                          (let [x (vget h T_LSTK (+ lf r))]
-                            (vpush1 h T_LST x)))
-                        (vtrunc h T_LSTK lf)
-                        (if (== cnt 1)
-                          (do (let [nl1 (mk-lit h (vget h T_LST loff))]
-                                (if (< nl1 0) (return (neg 1)))
-                                (vset h T_STK i nl1)))
-                          (do (stage h K_LITSET 0)
-                              (stage-d h 0 loff)
-                              (stage-d h 1 cnt)
-                              (let [nl2 (stage-intern h)]
-                                (if (< nl2 0) (return (neg 1)))
-                                (vset h T_STK i nl2))))))))))))
+    (for [^I32 c 0 12]
+      (let [cls (shl 1 c)
+            ^:mut cnt 0]
+        (for [^I32 i from n]
+          (let [a (vget h T_STK i)]
+            (if (and (>= a 0) (and (or (== (lk h a) K_LIT) (== (lk h a) K_LITSET)) (== (leaf-mask h a) cls)))
+              (set cnt (+ cnt 1)))))
+        (if (>= cnt 2)
+          (if (< (group-class h from cls) 0) (return (neg 1))))))
     (if (erred h) (return (neg 1)))
     (return 0)))
 
@@ -914,15 +960,7 @@
           (let [x (vget h T_STK (+ order k))]
             (vpush1 h T_STK x)))
         (comment "sorted copy (by internal id) for identity")
-        (for [^I32 a 1 cnt]
-          (let [^:mut b a]
-            (while (and (> b 0) (> (vget h T_STK (+ sorted (- b 1))) (vget h T_STK (+ sorted b))))
-              (let [t1 (vget h T_STK (+ sorted (- b 1)))
-                    t2 (vget h T_STK (+ sorted b))]
-                (vset h T_STK (+ sorted (- b 1)) t2)
-                (vset h T_STK (+ sorted b) t1))
-              (set b (- b 1)))))
-        (if (not (charge h (* cnt cnt))) (return (neg 1)))
+        (if (not (sort-records h T_STK sorted cnt 1)) (return (neg 1)))
         (let [^:mut hsh (mix 5 cnt)]
           (for [^I32 q 0 cnt]
             (set hsh (mix hsh (vget h T_STK (+ sorted q)))))

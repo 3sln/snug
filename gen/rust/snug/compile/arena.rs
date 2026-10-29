@@ -206,6 +206,11 @@ pub const T_RXF: i32 = 98;
 pub const T_RSCR: i32 = 99;
 pub const T_CLS: i32 = 100;
 pub const T_CLS2: i32 = 101;
+pub const T_MSORT: i32 = 102;
+pub const T_KEYTRI: i32 = 103;
+pub const T_LITS: i32 = 104;
+pub const T_ODO: i32 = 105;
+pub const T_ODO2: i32 = 106;
 pub const H_TS_ANY: i32 = 59;
 pub const H_N_FIN: i32 = 60;
 pub const H_WORK_AT: i32 = 56;
@@ -529,6 +534,67 @@ pub fn sort_records(h: &mut [i32], t: i32, off: i32, n: i32, stride: i32) -> boo
         }
         sift(h, t, off, 0, e, stride);
         e -= 1;
+    }
+    return !erred(h);
+}
+pub fn msort_records(h: &mut [i32], t: i32, off: i32, n: i32, stride: i32) -> bool {
+    // STABLE sort of n records of `stride` words at offset off of vector t by
+    // their first word (bottom-up merge sort through T_MSORT; charged n per
+    // pass, so n log n in all).
+    if n < 2 {
+        return true;
+    }
+    vtrunc(h, T_MSORT, 0);
+    if vpush(h, T_MSORT, n * stride) < 0 {
+        return false;
+    }
+    let mut width: i32 = 1;
+    while width < n {
+        if !charge(h, n) {
+            return false;
+        }
+        let mut lo: i32 = 0;
+        while lo < n {
+            let mut mid: i32 = lo + width;
+            let mut hi: i32 = lo + (2 * width);
+            if mid > n {
+                mid = n;
+            }
+            if hi > n {
+                hi = n;
+            }
+            let mut i: i32 = lo;
+            let mut j: i32 = mid;
+            let mut k: i32 = lo;
+            while k < hi {
+                let mut take_left: bool = i < mid;
+                if take_left && (j < hi) {
+                    if vget(h, t, off + (i * stride)) > vget(h, t, off + (j * stride)) {
+                        take_left = false;
+                    }
+                }
+                let mut src: i32 = j;
+                if take_left {
+                    src = i;
+                }
+                for w in 0..stride {
+                    let x: i32 = vget(h, t, off + ((src * stride) + w));
+                    vset(h, T_MSORT, (k * stride) + w, x);
+                }
+                if take_left {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+                k += 1;
+            }
+            lo += 2 * width;
+        }
+        for c in 0..n * stride {
+            let y: i32 = vget(h, T_MSORT, c);
+            vset(h, t, off + c, y);
+        }
+        width *= 2;
     }
     return !erred(h);
 }

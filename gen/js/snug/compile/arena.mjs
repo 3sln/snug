@@ -411,6 +411,16 @@ export const T_CLS = 100;
 
 export const T_CLS2 = 101;
 
+export const T_MSORT = 102;
+
+export const T_KEYTRI = 103;
+
+export const T_LITS = 104;
+
+export const T_ODO = 105;
+
+export const T_ODO2 = 106;
+
 export const H_TS_ANY = 59;
 
 export const H_N_FIN = 60;
@@ -766,6 +776,68 @@ export function sortRecords(h, t, off, n, stride) {
         }
         sift(h, t, off, 0, e, stride);
         e -= 1;
+    }
+    return !erred(h);
+}
+
+export function msortRecords(h, t, off, n, stride) {
+    // STABLE sort of n records of `stride` words at offset off of vector t by
+    // their first word (bottom-up merge sort through T_MSORT; charged n per
+    // pass, so n log n in all).
+    if (n < 2) {
+        return true;
+    }
+    vtrunc(h, T_MSORT, 0);
+    if (vpush(h, T_MSORT, n * stride) < 0) {
+        return false;
+    }
+    let width = 1;
+    while (width < n) {
+        if (!charge(h, n)) {
+            return false;
+        }
+        let lo = 0;
+        while (lo < n) {
+            let mid = lo + width;
+            let hi = lo + (2 * width);
+            if (mid > n) {
+                mid = n;
+            }
+            if (hi > n) {
+                hi = n;
+            }
+            let i = lo;
+            let j = mid;
+            let k = lo;
+            while (k < hi) {
+                let takeLeft = i < mid;
+                if (takeLeft && (j < hi)) {
+                    if (vget(h, t, off + (i * stride)) > vget(h, t, off + (j * stride))) {
+                        takeLeft = false;
+                    }
+                }
+                let src = j;
+                if (takeLeft) {
+                    src = i;
+                }
+                for (let w = 0; w < stride; w++) {
+                    const x = vget(h, t, off + ((src * stride) + w));
+                    vset(h, T_MSORT, (k * stride) + w, x);
+                }
+                if (takeLeft) {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+                k += 1;
+            }
+            lo += 2 * width;
+        }
+        for (let c = 0; c < n * stride; c++) {
+            const y = vget(h, T_MSORT, c);
+            vset(h, t, off + c, y);
+        }
+        width *= 2;
     }
     return !erred(h);
 }

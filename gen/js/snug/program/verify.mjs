@@ -1498,16 +1498,13 @@ export function checkMap(p, s, m) {
                 return want(s, false, ao, C_MAP);
             }
         }
+        // (keys distinct within an alternative follows from the naming records:
+        // each key's records name strictly ascending alternatives, and every
+        // literal entry is named exactly once)
         for (let i = 0; i < lc; i++) {
             const le = lb + (4 * (lf + i));
             if (pw(p, le + 2) === 1) {
                 req += 1;
-            }
-            // keys distinct within the alternative
-            for (let j = 0; j < i; j++) {
-                if (pw(p, le) === pw(p, lb + (4 * (lf + j)))) {
-                    return want(s, false, le, C_MAP);
-                }
             }
         }
         if (pw(p, ao + 3) !== req) {

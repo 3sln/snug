@@ -169,35 +169,51 @@
     (if (erred h) (return (neg 1)))
     (return order)))
 
-(defn ^:pub ^I32 rule-kind [^Ints h ^I32 r]
-  (comment "Type or group, deciding `a = b` by b's kind (cycles: nonproductive)."
-           "A rule whose name-only body names a generic parameter, an undefined"
-           "name or a socket is a type.")
+(defn ^I32 alias-target [^Ints h ^I32 r]
+  (comment "For an undecided rule `r = name`: the rule the name refers to, -1 when it"
+           "is a type for certain (a generic parameter, an undefined name).")
+  (let [def (rw h r 2)
+        body (nd h def)
+        nm (na h body)
+        tok (ntok h nm)]
+    (if (names-param h def tok) (return (neg 1)))
+    (return (rule-find-tok h tok))))
+
+(defn ^I32 kind-now [^Ints h ^I32 r]
+  (comment "r's kind if it is decided without following an alias, else 0.")
   (let [k (rw h r 4)]
     (if (!= k RK_UNDECIDED) (return k))
-    (if (== (rw h r 13) 2) (do (rset h r 4 RK_GROUP) (return RK_GROUP)))
-    (if (== (rw h r 2) (neg 1))
-      (do (comment "An undefined socket: its kind is its spelling.")
-          (rset h r 4 RK_TYPE)
-          (return RK_TYPE)))
-    (if (== (rw h r 11) 1)
-      (return (fail h ERR_NONPRODUCTIVE (npos h (rw h r 2)))))
-    (rset h r 11 1)
-    (let [def (rw h r 2)
-          body (nd h def)
-          nm (na h body)
-          tok (ntok h nm)
-          ^:mut ^I32 kind RK_TYPE]
-      (comment "A generic parameter of this rule is a type.")
-      (if (not (names-param h def tok))
-        (do (let [target (rule-find-tok h tok)]
-              (if (>= target 0)
-                (do (let [tk (rule-kind h target)]
-                      (if (< tk 0) (return (neg 1)))
-                      (set kind tk)))))))
-      (rset h r 11 2)
-      (rset h r 4 kind)
-      (return kind))))
+    (if (== (rw h r 13) 2) (return RK_GROUP))
+    (if (== (rw h r 2) (neg 1)) (return RK_TYPE))
+    (return RK_UNDECIDED)))
+
+(defn ^:pub ^I32 rule-kind [^Ints h ^I32 r]
+  (comment "Type or group, deciding `a = b` by b's kind. ITERATIVE: an alias chain"
+           "is followed with a mark per rule (word 11: 1 on the chain), so a 100 000-"
+           "rule chain costs no host stack; reaching a marked rule is a cycle"
+           "(nonproductive). The second walk decides every rule on the chain.")
+  (let [k0 (kind-now h r)]
+    (if (!= k0 RK_UNDECIDED) (do (rset h r 4 k0) (return k0))))
+  (let [^:mut cur r
+        ^:mut ^I32 kind RK_UNDECIDED]
+    (while (== kind RK_UNDECIDED)
+     (if (not (charge h 1)) (return (neg 1)))
+     (let [k (kind-now h cur)]
+       (if (!= k RK_UNDECIDED)
+         (set kind k)
+         (do (if (== (rw h cur 11) 1) (return (fail h ERR_NONPRODUCTIVE (npos h (rw h cur 2)))))
+             (rset h cur 11 1)
+             (let [t (alias-target h cur)]
+               (if (< t 0) (set kind RK_TYPE) (set cur t)))))))
+    (let [^:mut c2 r]
+      (forever
+       (if (!= (kind-now h c2) RK_UNDECIDED) (break))
+       (rset h c2 4 kind)
+       (rset h c2 11 2)
+       (let [t2 (alias-target h c2)]
+         (if (< t2 0) (break))
+         (set c2 t2))))
+    (return kind)))
 
 (defn ^:pub ^Bool names-param [^IntsR h ^I32 def ^I32 tok]
   (comment "Does token tok spell one of the generic parameters of definition def?")

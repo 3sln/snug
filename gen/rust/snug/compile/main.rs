@@ -64,7 +64,12 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     // Recursion in the later phases (names, generics, groups) is bounded by
     // a depth derived from the nesting limit, so no host stack is at risk.
     let nest: i32 = hg(h, H_LIM_NEST);
-    hs(h, H_DEPTH_MAX, 4 * nest);
+    let mut dm: i32 = 4 * nest;
+    // ...capped, so the deepest lowering stays far inside any host stack.
+    if dm > 512 {
+        dm = 512;
+    }
+    hs(h, H_DEPTH_MAX, dm);
 }
 pub fn setup(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> bool {
     // Fresh header and vectors; the source vector: text, -1, prelude, -1.
@@ -292,4 +297,8 @@ pub fn out_pool_at(h: &[i32]) -> i32 {
 }
 pub fn out_pool_bytes(h: &[i32]) -> i32 {
     return hg(h, H_OUT_BN);
+}
+pub fn budget_used(h: &[i32]) -> i32 {
+    // Compile budget units the last call spent (for benchmarks and the fuzz gate).
+    return hg(h, H_LIM_BUDGET) - hg(h, H_BUDGET);
 }

@@ -76,8 +76,11 @@
       (hs h H_BUDGET b))
     (comment "Recursion in the later phases (names, generics, groups) is bounded by"
              "a depth derived from the nesting limit, so no host stack is at risk.")
-    (let [nest (hg h H_LIM_NEST)]
-      (hs h H_DEPTH_MAX (* 4 nest)))))
+    (let [nest (hg h H_LIM_NEST)
+          ^:mut dm (* 4 nest)]
+      (comment "...capped, so the deepest lowering stays far inside any host stack.")
+      (if (> dm 512) (set dm 512))
+      (hs h H_DEPTH_MAX dm))))
 
 (defn ^:pub ^Bool setup [^Bytes text ^IntsR opt ^IntsR fl ^Ints h]
   (comment "Fresh header and vectors; the source vector: text, -1, prelude, -1.")
@@ -247,3 +250,7 @@
 (defn ^:pub ^I32 out-program-words [^IntsR h] (return (hg h H_OUT_PN)))
 (defn ^:pub ^I32 out-pool-at [^IntsR h] (return (hg h H_OUT_B)))
 (defn ^:pub ^I32 out-pool-bytes [^IntsR h] (return (hg h H_OUT_BN)))
+
+(defn ^:pub ^I32 budget-used [^IntsR h]
+  (comment "Compile budget units the last call spent (for benchmarks and the fuzz gate).")
+  (return (- (hg h H_LIM_BUDGET) (hg h H_BUDGET))))

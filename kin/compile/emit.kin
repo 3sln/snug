@@ -25,7 +25,7 @@
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not
                                < > <= >= == != and or not]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
-                                        mix ht-init ht-start ht-id ht-next ht-put sort-records
+                                        mix ht-init ht-start ht-id ht-next ht-put sort-records msort-records
                                         INF ERR_INTERNAL ERR_LIM_LEAVES ERR_LIM_WIDTH ERR_LIM_POOL ERR_LIM_TOTAL ERR_PROFILE
                                         H_PROFILE H_LIM_DEPTH H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS
                                         H_LIM_BIGNUM H_LIM_VBUDGET H_LIM_TOTAL H_LIM_WIDTH H_LIM_POOL
@@ -35,8 +35,8 @@
                                         T_GRP T_GRPD T_HGRP T_POOLG T_KEYS T_KEYID T_POOL T_POOLOFF T_RORD
                                         T_LAUX T_RXF T_MAP T_MAPD T_ARR T_ARRD T_IV T_FIV T_LST T_SRC
                                         T_CSET T_CSD T_HCSET T_CHAIN T_CHD T_HCHAIN T_EPOCHS T_CLS T_CLS2
-                                        T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase]]
-            [snug.compile.bytes :refer [intern bid-len bid-byte bid-cmp nbids]]
+                                        T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI]]
+            [snug.compile.bytes :refer [intern bid-len bid-byte bid-cmp nbids sort-bids]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd nleaves ts-off ts-n ts-w ts-setw
                                        leaf-mask mk-any ts-of1 nts
                                        K_ANY K_MAJOR K_INT K_FLOAT K_SIMPLE K_LIT K_LITSET K_TEXT
@@ -326,36 +326,6 @@
 
 ;; ------------------------------------------------------------ sorting bids
 
-(defn ^I32 min2 [^I32 a ^I32 b]
-  (if (< a b) (return a))
-  (return b))
-
-(defn ^Bool sort-bids [^Ints h ^I32 t ^I32 n]
-  (comment "Sort the n bids of vector t by their bytes (bottom-up merge sort, T_TMP"
-           "as scratch).")
-  (vtrunc h T_TMP 0)
-  (if (< (vpush h T_TMP n) 0) (return false))
-  (let [^:mut width 1]
-    (while (< width n)
-      (if (not (charge h n)) (return false))
-      (let [^:mut lo 0]
-        (while (< lo n)
-          (let [mid (min2 (+ lo width) n)
-                hi (min2 (+ lo (* 2 width)) n)
-                ^:mut i lo
-                ^:mut j mid
-                ^:mut k lo]
-            (while (< k hi)
-              (if (and (< i mid) (or (>= j hi) (<= (bid-cmp h (vget h t i) (vget h t j)) 0)))
-                (do (vset h T_TMP k (vget h t i)) (set i (+ i 1)))
-                (do (vset h T_TMP k (vget h t j)) (set j (+ j 1))))
-              (set k (+ k 1))))
-          (set lo (+ lo (* 2 width)))))
-      (for [^I32 c 0 n]
-        (vset h t c (vget h T_TMP c)))
-      (set width (* width 2))))
-  (return (not (erred h))))
-
 ;; ------------------------------------------------------------ pool
 
 (defn ^I32 pool-place [^Ints h ^I32 bid]
@@ -543,9 +513,8 @@
 
 (defn ^I32 map-keys-into [^Ints h ^I32 blob ^I32 dst]
   (comment "Push the distinct key ids of the map's literal entries, ascending, onto"
-           "dst; answers how many.")
+           "dst; answers how many (sort, then drop repeats: n log n).")
   (let [start (vlen h dst)
-        nl (vget h T_MAPD (+ blob 3))
         nf (vget h T_MAPD blob)
         np (vget h T_MAPD (+ blob 1))
         na (vget h T_MAPD (+ blob 2))
@@ -554,14 +523,37 @@
       (let [lo (+ blob (vget h T_MAPD (+ (+ ab (* 3 a)) 1)))
             ln (vget h T_MAPD (+ (+ ab (* 3 a)) 2))]
         (for [^I32 i 0 ln]
-          (let [kid (vget h T_KEYID (vget h T_MAPD (+ lo (* 4 i))))
-                ^:mut seen false]
-            (for [^I32 j start (vlen h dst)]
-              (if (== (vget h dst j) kid) (set seen true)))
-            (if (not seen) (vpush1 h dst kid))))))
-    (let [n (- (vlen h dst) start)]
-      (sort-records h dst start n 1)
-      (if (< nl 0) (return (neg 1)))
+          (vpush1 h dst (vget h T_KEYID (vget h T_MAPD (+ lo (* 4 i))))))))
+    (let [n (- (vlen h dst) start)
+          ^:mut w start]
+      (if (not (sort-records h dst start n 1)) (return (neg 1)))
+      (for [^I32 r start (+ start n)]
+        (if (or (== r start) (!= (vget h dst r) (vget h dst (- r 1))))
+          (do (vset h dst w (vget h dst r))
+              (set w (+ w 1)))))
+      (vtrunc h dst w)
+      (return (- w start)))))
+
+(defn ^I32 key-triples [^Ints h ^I32 blob]
+  (comment "T_KEYTRI: (key id, alternative, literal index) for every literal entry of"
+           "the map, sorted stably by key id: grouped by key, alternatives ascending"
+           "within a key. Answers the count.")
+  (let [nf (vget h T_MAPD blob)
+        np (vget h T_MAPD (+ blob 1))
+        na (vget h T_MAPD (+ blob 2))
+        ab (+ (+ (+ blob 4) (* 3 nf)) (* 5 np))
+        ^:mut lidx 0]
+    (vtrunc h T_KEYTRI 0)
+    (for [^I32 a 0 na]
+      (let [lo (+ blob (vget h T_MAPD (+ (+ ab (* 3 a)) 1)))
+            ln (vget h T_MAPD (+ (+ ab (* 3 a)) 2))]
+        (for [^I32 i 0 ln]
+          (vpush1 h T_KEYTRI (vget h T_KEYID (vget h T_MAPD (+ lo (* 4 i)))))
+          (vpush1 h T_KEYTRI a)
+          (vpush1 h T_KEYTRI (+ lidx i)))
+        (set lidx (+ lidx ln))))
+    (let [n (quot (vlen h T_KEYTRI) 3)]
+      (if (not (msort-records h T_KEYTRI 0 n 3)) (return (neg 1)))
       (return n))))
 
 (defn ^:pub ^I32 assign-sections [^Ints h]
@@ -660,29 +652,28 @@
 
 (defn ^:pub ^I32 order-rules [^Ints h]
   (comment "RULES: the schema's non-generic type rules, sorted by name bytes. T_RORD"
-           "gets their rule ids; T_RSCR their name bids (same order).")
+           "gets their rule ids, T_RSCR their name bids (same order). Names are unique,"
+           "so a bid -> rule table (T_KEYTRI, reused) undoes the sort: n log n.")
   (vtrunc h T_RORD 0)
   (vtrunc h T_RSCR 0)
-  (vtrunc h T_TMP2 0)
   (let [nr (nrules h)]
     (for [^I32 r 0 nr]
       (if (and (and (== (rw h r 7) 0) (== (rw h r 5) 0)) (== (rw h r 4) RK_TYPE))
         (do (let [b (intern h T_SRC (rw h r 0) (rw h r 1))]
               (if (< b 0) (return (neg 1)))
-              (vpush1 h T_RSCR b)
-              (vpush1 h T_TMP2 r)))))
-    (let [n (vlen h T_RSCR)]
-      (comment "Sort the bids, then put each rule at its bid's rank (names are unique).")
-      (vtrunc h T_CLS 0)
-      (for [^I32 i 0 n] (vpush1 h T_CLS (vget h T_RSCR i)))
-      (if (not (sort-bids h T_CLS n)) (return (neg 1)))
-      (for [^I32 j 0 n]
-        (let [b2 (vget h T_CLS j)]
-          (for [^I32 q 0 n]
-            (if (== (vget h T_RSCR q) b2) (vpush1 h T_RORD (vget h T_TMP2 q))))))
-      (vtrunc h T_RSCR 0)
-      (for [^I32 j2 0 n] (vpush1 h T_RSCR (vget h T_CLS j2)))
-      (if (not (charge h (* n n))) (return (neg 1)))
+              (vpush1 h T_RSCR b)))))
+    (let [n (vlen h T_RSCR)
+          nb (nbids h)]
+      (vtrunc h T_KEYTRI 0)
+      (if (< (vpush h T_KEYTRI nb) 0) (return (neg 1)))
+      (let [^:mut k 0]
+        (for [^I32 r2 0 nr]
+          (if (and (and (== (rw h r2 7) 0) (== (rw h r2 5) 0)) (== (rw h r2 4) RK_TYPE))
+            (do (vset h T_KEYTRI (vget h T_RSCR k) r2)
+                (set k (+ k 1))))))
+      (if (not (sort-bids h T_RSCR n)) (return (neg 1)))
+      (for [^I32 j2 0 n]
+        (vpush1 h T_RORD (vget h T_KEYTRI (vget h T_RSCR j2))))
       (return n))))
 
 (defn ^:pub ^I32 build-pool [^Ints h]
@@ -747,18 +738,14 @@
                     (if (== (vget h T_MAPD (+ pb (* 5 p))) 0) (set groupsum (+ groupsum gn)))))
                 (for [^I32 a 0 na]
                   (set sw (+ sw (+ 3 (ceil32 (vget h T_MAPD (+ (+ ab (* 3 a)) 2))))))) 
-                (comment "the most naming records of one key")
-                (vtrunc h T_TMP2 0)
-                (let [nk (map-keys-into h blob T_TMP2)]
-                  (for [^I32 q 0 nk]
-                    (let [kid (vget h T_TMP2 q)
-                          ^:mut cnt 0]
-                      (for [^I32 a2 0 na]
-                        (let [lo (+ blob (vget h T_MAPD (+ (+ ab (* 3 a2)) 1)))
-                              ln (vget h T_MAPD (+ (+ ab (* 3 a2)) 2))]
-                          (for [^I32 i 0 ln]
-                            (if (== (vget h T_KEYID (vget h T_MAPD (+ lo (* 4 i)))) kid) (set cnt (+ cnt 1))))))
-                      (if (> cnt maxnames) (set maxnames cnt)))))
+                (comment "the most naming records of one key: the longest run of one key")
+                (let [nt (key-triples h blob)
+                      ^:mut run 0]
+                  (for [^I32 q 0 nt]
+                    (if (and (> q 0) (== (vget h T_KEYTRI (* 3 q)) (vget h T_KEYTRI (* 3 (- q 1)))))
+                      (set run (+ run 1))
+                      (set run 1))
+                    (if (> run maxnames) (set maxnames run))))
                 (laux-set h f 2 sw)
                 (laux-set h f 3 (+ groupsum maxnames)))))))
     (if (erred h) (return (neg 1)))
@@ -1055,33 +1042,22 @@
             (out h (fts-of h (vget h T_MAPD (+ e 1))))
             (out h (vget h T_MAPD (+ e 2)))
             (out h (vget h T_MAPD (+ e 3)))))))
-    (comment "key index: key, owner, names run; then the naming records")
-    (let [^:mut nf2 0]
-      (for [^I32 q 0 nk]
-        (let [kid (vget h T_TMP2 (+ ks q))
-              ^:mut cnt 0
-              ^:mut owner 0]
-          (for [^I32 a3 0 na]
-            (let [arec3 (+ ab (* 3 a3))
-                  lo3 (+ blob (vget h T_MAPD (+ arec3 1)))
-                  ln3 (vget h T_MAPD (+ arec3 2))]
-              (for [^I32 i4 0 ln3]
-                (if (== (vget h T_KEYID (vget h T_MAPD (+ lo3 (* 4 i4)))) kid)
-                  (do (set cnt (+ cnt 1))
-                      (set owner (vget h T_MAPD (+ pb (* 5 (vget h T_MAPD arec3))))))))))
-          (out h kid) (out h owner) (out h nf2) (out h cnt)
-          (set nf2 (+ nf2 cnt))))
-      (for [^I32 q2 0 nk]
-        (let [kid2 (vget h T_TMP2 (+ ks q2))
-              ^:mut lidx 0]
-          (for [^I32 a4 0 na]
-            (let [arec4 (+ ab (* 3 a4))
-                  lo4 (+ blob (vget h T_MAPD (+ arec4 1)))
-                  ln4 (vget h T_MAPD (+ arec4 2))]
-              (for [^I32 i5 0 ln4]
-                (if (== (vget h T_KEYID (vget h T_MAPD (+ lo4 (* 4 i5)))) kid2)
-                  (do (out h a4) (out h (+ lidx i5)))))
-              (set lidx (+ lidx ln4)))))))
+    (comment "key index (key, owner, names run) and naming records, from the key"
+             "triples: grouped by key, alternatives ascending")
+    (let [nt (key-triples h blob)
+          ^:mut q 0]
+      (while (< q nt)
+        (let [kid (vget h T_KEYTRI (* 3 q))
+              ^:mut qe q]
+          (while (and (< qe nt) (== (vget h T_KEYTRI (* 3 qe)) kid)) (set qe (+ qe 1)))
+          (out h kid)
+          (out h (vget h T_MAPD (+ pb (* 5 (vget h T_MAPD (+ ab (* 3 (vget h T_KEYTRI (+ (* 3 q) 1)))))))))
+          (out h q)
+          (out h (- qe q))
+          (set q qe)))
+      (for [^I32 r 0 nt]
+        (out h (vget h T_KEYTRI (+ (* 3 r) 1)))
+        (out h (vget h T_KEYTRI (+ (* 3 r) 2)))))
     (vtrunc h T_TMP2 ks)))
 
 (defn write-array [^Ints h ^I32 f]

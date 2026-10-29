@@ -170,6 +170,77 @@ pub fn as_product(h: &mut [i32], a: i32, b: i32, pos: i32) -> i32 {
     }
     return as_end(h, s);
 }
+pub fn as_product_many(h: &mut [i32], from: i32, n: i32, pos: i32) -> i32 {
+    // The product of the n altsets T_PSTK[from, from+n), in order: every
+    // concatenation of one alternative of each, dropping those that name a
+    // literal key twice. The count is checked against the limit first; the work
+    // is the count times the total length (an odometer in T_ODO), so a long
+    // sequence of single alternatives is linear, not quadratic.
+    let lim: i32 = hg(h, H_LIM_ALTS);
+    let mut count: i32 = 1;
+    for i in 0..n {
+        let k: i32 = as_n(h, vget(h, T_PSTK, from + i));
+        if k == 0 {
+            return as_none(h);
+        }
+        if k > (lim / count) {
+            return fail(h, ERR_LIM_ALTS, pos);
+        }
+        count *= k;
+    }
+    vtrunc(h, T_ODO, 0);
+    for _j in 0..n {
+        vpush1(h, T_ODO, 0);
+    }
+    let s: i32 = as_begin(h);
+    loop {
+        // one combination: concatenate, refusing a repeated literal key
+        let lf: i32 = vlen(h, T_LSTK);
+        let mut dup: bool = false;
+        for q in 0..n {
+            let a: i32 = vget(h, T_PSTK, from + q);
+            let ai: i32 = vget(h, T_ODO, q);
+            let off: i32 = as_aoff(h, a, ai);
+            let len: i32 = as_alen(h, a, ai);
+            if !charge(h, 1 + len) {
+                return -1;
+            }
+            if !mark_keys(h, off, len, 1) {
+                dup = true;
+            }
+            for r in 0..len {
+                vpush1(h, T_LSTK, alt_ent(h, off, r));
+            }
+        }
+        // unmark (the same alternatives, the same counts)
+        for q2 in 0..n {
+            let a2: i32 = vget(h, T_PSTK, from + q2);
+            let ai2: i32 = vget(h, T_ODO, q2);
+            mark_keys(h, as_aoff(h, a2, ai2), as_alen(h, a2, ai2), -1);
+        }
+        if dup {
+            vtrunc(h, T_LSTK, lf);
+        } else {
+            let len2: i32 = vlen(h, T_LSTK) - lf;
+            let noff: i32 = alt_commit(h, lf);
+            as_add(h, noff, len2);
+        }
+        // next combination (the last altset varies fastest)
+        let mut d: i32 = n - 1;
+        while (d >= 0) && ((vget(h, T_ODO, d) + 1) == as_n(h, vget(h, T_PSTK, from + d))) {
+            vset(h, T_ODO, d, 0);
+            d -= 1;
+        }
+        if d < 0 {
+            break;
+        }
+        vset(h, T_ODO, d, vget(h, T_ODO, d) + 1);
+    }
+    if erred(h) {
+        return -1;
+    }
+    return as_end(h, s);
+}
 pub fn as_union(h: &mut [i32], a: i32, b: i32, pos: i32) -> i32 {
     let na: i32 = as_n(h, a);
     let nb: i32 = as_n(h, b);
@@ -419,6 +490,9 @@ pub(crate) fn key_in_ent(h: &mut [i32], key: i32, e: i32) -> bool {
 pub(crate) fn factor_collides(h: &mut [i32], fa: i32, resid: i32, me: i32) -> bool {
     // Does a key of factor altset fa also appear in the residual's alternatives
     // or in another candidate (T_NE records, 3 words: altset, mode, live)?
+    if !charge(h, as_n(h, resid) + (vlen(h, T_NE) / 3)) {
+        return false;
+    }
     let nb: i32 = nbids(h);
     if vlen(h, T_UNION) < nb {
         let old: i32 = vlen(h, T_UNION);
@@ -516,15 +590,23 @@ pub(crate) fn factor_absorbable(h: &mut [i32], fa: i32, resid: i32) -> bool {
 }
 pub(crate) fn check_alt(h: &mut [i32], off: i32, len: i32) -> bool {
     // The determinism rule (§4.3.2) and the cut-after-wildcard rule within one
-    // alternative.
-    if !charge(h, len * len) {
+    // alternative. Only pairs with a key-typeset entry can conflict: cost is
+    // (typeset entries) x (all entries), not len^2.
+    vtrunc(h, T_ODO2, 0);
+    for i in 0..len {
+        if ew(h, alt_ent(h, off, i), 0) == 1 {
+            vpush1(h, T_ODO2, i);
+        }
+    }
+    let nt: i32 = vlen(h, T_ODO2);
+    if !charge(h, nt * len) {
         return false;
     }
-    for i in 0..len {
-        let a: i32 = alt_ent(h, off, i);
-        for j in 0..len {
-            let b: i32 = alt_ent(h, off, j);
-            if (i != j) && (ew(h, b, 0) == 1) {
+    for q in 0..nt {
+        let b: i32 = alt_ent(h, off, vget(h, T_ODO2, q));
+        for i2 in 0..len {
+            let a: i32 = alt_ent(h, off, i2);
+            if a != b {
                 if ew(h, a, 0) == 0 {
                     // literal a vs key typeset b: b must absorb; a cut a must not follow b
                     if key_in_ent(h, ew(h, a, 1), b) {
@@ -586,9 +668,12 @@ pub(crate) fn alt_satisfiable(h: &[i32], off: i32, len: i32) -> bool {
     }
     return true;
 }
-pub(crate) fn same_group(h: &[i32], o1: i32, l1: i32, o2: i32, l2: i32) -> bool {
+pub(crate) fn same_group(h: &mut [i32], o1: i32, l1: i32, o2: i32, l2: i32) -> bool {
     // Do two alternatives have the same key-typeset entries (the residual
     // group), in order, ignoring entries with max 0?
+    if !charge(h, l1 + l2) {
+        return false;
+    }
     let mut i: i32 = 0;
     let mut j: i32 = 0;
     loop {
@@ -614,37 +699,35 @@ pub(crate) fn same_group(h: &[i32], o1: i32, l1: i32, o2: i32, l2: i32) -> bool 
 }
 pub(crate) fn emit_lits(h: &mut [i32], off: i32, len: i32) -> i32 {
     // Append the alternative's literal entries to T_MAPD in source order
-    // (key, value, min, cut); answers how many.
-    let mut n: i32 = 0;
-    let mut last: i32 = -1;
-    loop {
-        // selection by srcpos: the smallest srcpos greater than last
-        let mut best: i32 = -1;
-        let mut bsp: i32 = INF;
-        for i in 0..len {
-            let e: i32 = alt_ent(h, off, i);
-            let sp: i32 = ew(h, e, 6);
-            if (ew(h, e, 0) == 0) && ((sp > last) && (sp < bsp)) {
-                best = e;
-                bsp = sp;
-            }
+    // (key, value, min, cut); answers how many. (srcpos, entry) pairs are
+    // sorted stably in T_ODO2.
+    vtrunc(h, T_ODO2, 0);
+    for i in 0..len {
+        let e: i32 = alt_ent(h, off, i);
+        if ew(h, e, 0) == 0 {
+            vpush1(h, T_ODO2, ew(h, e, 6));
+            vpush1(h, T_ODO2, e);
         }
-        if best < 0 {
-            return n;
-        }
+    }
+    let n: i32 = vlen(h, T_ODO2) / 2;
+    if !msort_records(h, T_ODO2, 0, n, 2) {
+        return -1;
+    }
+    for k in 0..n {
+        let best: i32 = vget(h, T_ODO2, (2 * k) + 1);
         vpush1(h, T_MAPD, ew(h, best, 1));
         vpush1(h, T_MAPD, ew(h, best, 2));
         vpush1(h, T_MAPD, ew(h, best, 3));
         vpush1(h, T_MAPD, ew(h, best, 5));
-        n += 1;
-        last = bsp;
     }
+    return n;
 }
 pub fn map_finish(h: &mut [i32], from: i32, nents: i32, pos: i32) -> i32 {
     // The internal map of a top-level map sequence whose entries' altsets are
     // T_PSTK[from..] as (altset, candidate) pairs. Answers the map id, -2 when
     // no alternative is satisfiable (the map type is empty), or -1.
-    let mut resid: i32 = as_unit(h);
+    let pf: i32 = vlen(h, T_PSTK);
+    let mut nres0: i32 = 0;
     vtrunc(h, T_NE, 0);
     for i in 0..nents {
         let a: i32 = vget(h, T_PSTK, from + (2 * i));
@@ -654,11 +737,23 @@ pub fn map_finish(h: &mut [i32], from: i32, nents: i32, pos: i32) -> i32 {
             vpush1(h, T_NE, 0);
             vpush1(h, T_NE, 1);
         } else {
-            resid = as_product(h, resid, a, pos);
-            if resid < 0 {
-                return -1;
-            }
+            vpush1(h, T_PSTK, a);
+            nres0 += 1;
         }
+    }
+    let mut resid: i32 = as_product_many(h, pf, nres0, pos);
+    vtrunc(h, T_PSTK, pf);
+    if resid < 0 {
+        return -1;
+    }
+    // Prospective: however the candidates are decided, the table holds at least
+    // the residual's alternatives plus every candidate's (merging multiplies).
+    let mut floor: i32 = as_n(h, resid);
+    for c0 in 0..vlen(h, T_NE) / 3 {
+        floor += as_n(h, vget(h, T_NE, c0 * 3));
+    }
+    if floor > hg(h, H_LIM_ALTS) {
+        return fail(h, ERR_LIM_ALTS, pos);
     }
     let nf: i32 = vlen(h, T_NE) / 3;
     // Phase A: a factor sharing a key with the residual or another factor merges.

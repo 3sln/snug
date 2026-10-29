@@ -12,7 +12,7 @@
                                < > <= >= == != and or not]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
                                         mix ht-init ht-start ht-id ht-next ht-put
-                                        H_R0 H_R1 T_BYTE T_BRUN T_HBYTE T_STK5 T_LITB]]))
+                                        H_R0 H_R1 T_BYTE T_BRUN T_HBYTE T_STK5 T_LITB T_MSORT]]))
 
 (defn ^:pub ^I32 bid-off [^IntsR h ^I32 b] (return (vget h T_BRUN (* b 3))))
 (defn ^:pub ^I32 bid-len [^IntsR h ^I32 b] (return (vget h T_BRUN (+ (* b 3) 1))))
@@ -218,3 +218,31 @@
     (let [v (mag-word h T_BYTE (bid-off h a) n 0)]
       (if (< v 0) (return (neg 1)))
       (return v))))
+
+(defn ^:pub ^Bool sort-bids [^Ints h ^I32 t ^I32 n]
+  (comment "Sort the first n bids of vector t by their bytes (stable bottom-up merge"
+           "sort through T_MSORT, charged n per pass).")
+  (vtrunc h T_MSORT 0)
+  (if (< (vpush h T_MSORT n) 0) (return false))
+  (let [^:mut width 1]
+    (while (< width n)
+      (if (not (charge h n)) (return false))
+      (let [^:mut lo 0]
+        (while (< lo n)
+          (let [^:mut mid (+ lo width)
+                ^:mut hi (+ lo (* 2 width))]
+            (if (> mid n) (set mid n))
+            (if (> hi n) (set hi n))
+            (let [^:mut i lo
+                  ^:mut j mid
+                  ^:mut k lo]
+              (while (< k hi)
+                (if (and (< i mid) (or (>= j hi) (<= (bid-cmp h (vget h t i) (vget h t j)) 0)))
+                  (do (vset h T_MSORT k (vget h t i)) (set i (+ i 1)))
+                  (do (vset h T_MSORT k (vget h t j)) (set j (+ j 1))))
+                (set k (+ k 1)))))
+          (set lo (+ lo (* 2 width)))))
+      (for [^I32 c 0 n]
+        (vset h t c (vget h T_MSORT c)))
+      (set width (* width 2))))
+  (return (not (erred h))))

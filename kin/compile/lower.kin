@@ -50,7 +50,7 @@
                                        R_NEG_INF R_NEG_BIG R_NEG R_POS R_POS_BIG R_POS_INF]]
             [snug.compile.ctl :refer [ctl-size ctl-bits ctl-compare ctl-eq ctl-and ctl-regexp ctl-cbor
                                       ctl-cat int-point float-point single-leaf]]
-            [snug.compile.maps :refer [ent-new as-single as-unit as-none as-product as-union as-occur
+            [snug.compile.maps :refer [ent-new as-single as-unit as-none as-product as-product-many as-union as-occur
                                        as-n as-aoff as-alen alt-ent ew map-finish]]
             [snug.compile.glush :refer [g-node g-list g-add gk gset G_POS G_SEQ G_ALT G_REP G_EMPTY G_REC G_FRAME]]
             [snug.compile.arrays :refer [arr-finish]]))
@@ -810,15 +810,19 @@
       (return (as-occur h base lo hi pos)))))
 
 (defn ^I32 m-seq [^Ints h ^I32 gc ^I32 env]
-  (let [^:mut acc (as-unit h)
+  (comment "A sequence's altset: the n-ary product of its entries' altsets.")
+  (let [from (vlen h T_PSTK)
+        ^:mut n 0
         ^:mut e (na h gc)]
     (while (>= e 0)
       (let [^I32 s (m-ent h e env)]
         (if (< s 0) (return (neg 1)))
-        (set acc (as-product h acc s (npos h e)))
-        (if (< acc 0) (return (neg 1))))
+        (vpush1 h T_PSTK s)
+        (set n (+ n 1)))
       (set e (nnext h e)))
-    (return acc)))
+    (let [r (as-product-many h from n (npos h gc))]
+      (vtrunc h T_PSTK from)
+      (return r))))
 
 (defn ^I32 m-group [^Ints h ^I32 g ^I32 choice ^I32 env]
   (comment "The altset of group g (every choice, or only `choice` >= 0).")

@@ -428,25 +428,60 @@ pub(crate) fn rec_cmp_lo(h: &[i32], t: i32, i: i32, j: i32) -> i32 {
     let b: i32 = 6 * j;
     return bound_cmp(h, vget(h, t, a), vget(h, t, a + 1), vget(h, t, a + 2), vget(h, t, b), vget(h, t, b + 1), vget(h, t, b + 2));
 }
-pub(crate) fn swap_rec(h: &mut [i32], t: i32, i: i32, j: i32, w: i32) {
-    for k in 0..w {
-        let x: i32 = vget(h, t, (i * w) + k);
-        let y: i32 = vget(h, t, (j * w) + k);
-        vset(h, t, (i * w) + k, y);
-        vset(h, t, (j * w) + k, x);
-    }
-}
 pub(crate) fn iv_sort(h: &mut [i32], t: i32, n: i32) -> bool {
-    // Insertion sort of the n records of t by lo bound (charged).
-    for i in 1..n {
-        let mut j: i32 = i;
-        while (j > 0) && (rec_cmp_lo(h, t, j - 1, j) > 0) {
-            if !charge(h, 1) {
-                return false;
-            }
-            swap_rec(h, t, j - 1, j, 6);
-            j -= 1;
+    // Stable merge sort of the n records of t by lo bound (through T_MSORT,
+    // charged n per pass).
+    if n < 2 {
+        return true;
+    }
+    vtrunc(h, T_MSORT, 0);
+    if vpush(h, T_MSORT, 6 * n) < 0 {
+        return false;
+    }
+    let mut width: i32 = 1;
+    while width < n {
+        if !charge(h, n) {
+            return false;
         }
+        let mut lo: i32 = 0;
+        while lo < n {
+            let mut mid: i32 = lo + width;
+            let mut hi: i32 = lo + (2 * width);
+            if mid > n {
+                mid = n;
+            }
+            if hi > n {
+                hi = n;
+            }
+            let mut i: i32 = lo;
+            let mut j: i32 = mid;
+            let mut k: i32 = lo;
+            while k < hi {
+                let mut left: bool = false;
+                // take from the left run (stable on ties) while it lasts
+                if (i < mid) && ((j >= hi) || (rec_cmp_lo(h, t, i, j) <= 0)) {
+                    left = true;
+                }
+                let mut src: i32 = j;
+                if left {
+                    src = i;
+                }
+                for w in 0..6 {
+                    vset(h, T_MSORT, (6 * k) + w, vget(h, t, (6 * src) + w));
+                }
+                if left {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+                k += 1;
+            }
+            lo += 2 * width;
+        }
+        for c in 0..6 * n {
+            vset(h, t, c, vget(h, T_MSORT, c));
+        }
+        width *= 2;
     }
     return !erred(h);
 }
@@ -649,19 +684,68 @@ pub fn fkey_lo(hi: i32, lo: i32) -> i32 {
 pub(crate) fn frec_cmp(h: &[i32], t: i32, i: i32, j: i32) -> i32 {
     return u64_cmp(vget(h, t, 4 * i), vget(h, t, (4 * i) + 1), vget(h, t, 4 * j), vget(h, t, (4 * j) + 1));
 }
+pub(crate) fn fiv_sort(h: &mut [i32], t: i32, n: i32) -> bool {
+    // Stable merge sort of n float intervals by lo key (through T_MSORT).
+    if n < 2 {
+        return true;
+    }
+    vtrunc(h, T_MSORT, 0);
+    if vpush(h, T_MSORT, 4 * n) < 0 {
+        return false;
+    }
+    let mut width: i32 = 1;
+    while width < n {
+        if !charge(h, n) {
+            return false;
+        }
+        let mut lo: i32 = 0;
+        while lo < n {
+            let mut mid: i32 = lo + width;
+            let mut hi: i32 = lo + (2 * width);
+            if mid > n {
+                mid = n;
+            }
+            if hi > n {
+                hi = n;
+            }
+            let mut i: i32 = lo;
+            let mut j: i32 = mid;
+            let mut k: i32 = lo;
+            while k < hi {
+                let mut left: bool = false;
+                // take from the left run (stable on ties) while it lasts
+                if (i < mid) && ((j >= hi) || (frec_cmp(h, t, i, j) <= 0)) {
+                    left = true;
+                }
+                let mut src: i32 = j;
+                if left {
+                    src = i;
+                }
+                for w in 0..4 {
+                    vset(h, T_MSORT, (4 * k) + w, vget(h, t, (4 * src) + w));
+                }
+                if left {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+                k += 1;
+            }
+            lo += 2 * width;
+        }
+        for c in 0..4 * n {
+            vset(h, t, c, vget(h, T_MSORT, c));
+        }
+        width *= 2;
+    }
+    return !erred(h);
+}
 pub fn fiv_normalize(h: &mut [i32], src: i32, dst: i32) -> i32 {
     // Sort, drop empty, merge overlapping/adjacent float intervals into dst.
     let n: i32 = vlen(h, src) / 4;
     vtrunc(h, dst, 0);
-    for i in 1..n {
-        let mut j: i32 = i;
-        while (j > 0) && (frec_cmp(h, src, j - 1, j) > 0) {
-            if !charge(h, 1) {
-                return -1;
-            }
-            swap_rec(h, src, j - 1, j, 4);
-            j -= 1;
-        }
+    if !fiv_sort(h, src, n) {
+        return -1;
     }
     let mut cnt: i32 = 0;
     for k in 0..n {
@@ -1174,8 +1258,22 @@ pub(crate) fn float_merge2(h: &mut [i32], a: i32, b: i32) -> i32 {
     return -1;
 }
 pub(crate) fn merge_floats(h: &mut [i32], from: i32) -> i32 {
-    // Merge FLOAT leaves pairwise where float-merge2 can.
+    // Merge FLOAT leaves pairwise where float-merge2 can (only when there are
+    // two or more: a choice of many literals must not pay a quadratic scan).
     let n: i32 = vlen(h, T_STK);
+    let mut nfl: i32 = 0;
+    for q in from..n {
+        let x: i32 = vget(h, T_STK, q);
+        if (x >= 0) && (lk(h, x) == K_FLOAT) {
+            nfl += 1;
+        }
+    }
+    if nfl < 2 {
+        return 0;
+    }
+    if !charge(h, nfl * nfl) {
+        return -1;
+    }
     for i in from..n {
         for j in i + 1..n {
             let a: i32 = vget(h, T_STK, i);
@@ -1194,81 +1292,79 @@ pub(crate) fn merge_floats(h: &mut [i32], from: i32) -> i32 {
     }
     return 0;
 }
-pub(crate) fn lits_sorted_insert(h: &mut [i32], from: i32, bid: i32) -> i32 {
-    // Insert bid into the sorted (by bytes) unique list T_LSTK[from..].
-    let n: i32 = vlen(h, T_LSTK);
-    let mut i: i32 = from;
-    while (i < n) && (bid_cmp(h, vget(h, T_LSTK, i), bid) < 0) {
-        i += 1;
+pub(crate) fn group_class(h: &mut [i32], from: i32, cls: i32) -> i32 {
+    // Every LIT/LITSET leaf of class cls in T_STK[from..] -> one LITSET (or one
+    // LIT) at the first one's position; the members sorted by bytes, unique.
+    let n: i32 = vlen(h, T_STK);
+    let mut first: i32 = -1;
+    vtrunc(h, T_LITS, 0);
+    for k in from..n {
+        let c: i32 = vget(h, T_STK, k);
+        if (c >= 0) && (((lk(h, c) == K_LIT) || (lk(h, c) == K_LITSET)) && (leaf_mask(h, c) == cls)) {
+            if first < 0 {
+                first = k;
+            }
+            if lk(h, c) == K_LIT {
+                vpush1(h, T_LITS, ld(h, c, 0));
+            } else {
+                for q in 0..ld(h, c, 1) {
+                    vpush1(h, T_LITS, vget(h, T_LST, ld(h, c, 0) + q));
+                }
+            }
+            vset(h, T_STK, k, -1);
+        }
     }
-    if (i < n) && (vget(h, T_LSTK, i) == bid) {
+    let m: i32 = vlen(h, T_LITS);
+    if !charge(h, m) {
+        return -1;
+    }
+    if !sort_bids(h, T_LITS, m) {
+        return -1;
+    }
+    let loff: i32 = vlen(h, T_LST);
+    let mut cnt: i32 = 0;
+    for r in 0..m {
+        let x: i32 = vget(h, T_LITS, r);
+        if (r == 0) || (x != vget(h, T_LITS, r - 1)) {
+            vpush1(h, T_LST, x);
+            cnt += 1;
+        }
+    }
+    if cnt == 1 {
+        let nl1: i32 = mk_lit(h, vget(h, T_LST, loff));
+        if nl1 < 0 {
+            return -1;
+        }
+        vset(h, T_STK, first, nl1);
         return 0;
     }
-    vpush1(h, T_LSTK, 0);
-    let mut j: i32 = n;
-    while j > i {
-        vset(h, T_LSTK, j, vget(h, T_LSTK, j - 1));
-        j -= 1;
+    stage(h, K_LITSET, 0);
+    stage_d(h, 0, loff);
+    stage_d(h, 1, cnt);
+    let nl2: i32 = stage_intern(h);
+    if nl2 < 0 {
+        return -1;
     }
-    vset(h, T_LSTK, i, bid);
+    vset(h, T_STK, first, nl2);
     return 0;
 }
 pub(crate) fn group_lits(h: &mut [i32], from: i32) -> i32 {
-    // LIT/LITSET leaves of one class -> one LITSET (two or more members) at
-    // the position of the first.
+    // LIT/LITSET leaves of one class -> one LITSET, for every class (one bit
+    // of the 12 item classes) with two or more literals: one counting pass, then
+    // one grouping pass per such class.
     let n: i32 = vlen(h, T_STK);
-    for i in from..n {
-        let a: i32 = vget(h, T_STK, i);
-        if (a >= 0) && ((lk(h, a) == K_LIT) || (lk(h, a) == K_LITSET)) {
-            let cls: i32 = leaf_mask(h, a);
-            let lf: i32 = vlen(h, T_LSTK);
-            let mut others: i32 = 0;
-            for j in i + 1..n {
-                let b: i32 = vget(h, T_STK, j);
-                if (b >= 0) && (((lk(h, b) == K_LIT) || (lk(h, b) == K_LITSET)) && (leaf_mask(h, b) == cls)) {
-                    others += 1;
-                }
+    for c in 0..12 {
+        let cls: i32 = 1 << c;
+        let mut cnt: i32 = 0;
+        for i in from..n {
+            let a: i32 = vget(h, T_STK, i);
+            if (a >= 0) && (((lk(h, a) == K_LIT) || (lk(h, a) == K_LITSET)) && (leaf_mask(h, a) == cls)) {
+                cnt += 1;
             }
-            if others > 0 {
-                for k in i..n {
-                    let c: i32 = vget(h, T_STK, k);
-                    if (c >= 0) && (((lk(h, c) == K_LIT) || (lk(h, c) == K_LITSET)) && (leaf_mask(h, c) == cls)) {
-                        if lk(h, c) == K_LIT {
-                            lits_sorted_insert(h, lf, ld(h, c, 0));
-                        } else {
-                            for q in 0..ld(h, c, 1) {
-                                lits_sorted_insert(h, lf, vget(h, T_LST, ld(h, c, 0) + q));
-                            }
-                        }
-                        vset(h, T_STK, k, -1);
-                    }
-                }
-                let cnt: i32 = vlen(h, T_LSTK) - lf;
-                let loff: i32 = vlen(h, T_LST);
-                if !charge(h, cnt) {
-                    return -1;
-                }
-                for r in 0..cnt {
-                    let x: i32 = vget(h, T_LSTK, lf + r);
-                    vpush1(h, T_LST, x);
-                }
-                vtrunc(h, T_LSTK, lf);
-                if cnt == 1 {
-                    let nl1: i32 = mk_lit(h, vget(h, T_LST, loff));
-                    if nl1 < 0 {
-                        return -1;
-                    }
-                    vset(h, T_STK, i, nl1);
-                } else {
-                    stage(h, K_LITSET, 0);
-                    stage_d(h, 0, loff);
-                    stage_d(h, 1, cnt);
-                    let nl2: i32 = stage_intern(h);
-                    if nl2 < 0 {
-                        return -1;
-                    }
-                    vset(h, T_STK, i, nl2);
-                }
+        }
+        if cnt >= 2 {
+            if group_class(h, from, cls) < 0 {
+                return -1;
             }
         }
     }
@@ -1320,17 +1416,7 @@ pub fn ts_make(h: &mut [i32], from: i32) -> i32 {
         vpush1(h, T_STK, x);
     }
     // sorted copy (by internal id) for identity
-    for a in 1..cnt {
-        let mut b: i32 = a;
-        while (b > 0) && (vget(h, T_STK, sorted + (b - 1)) > vget(h, T_STK, sorted + b)) {
-            let t1: i32 = vget(h, T_STK, sorted + (b - 1));
-            let t2: i32 = vget(h, T_STK, sorted + b);
-            vset(h, T_STK, sorted + (b - 1), t2);
-            vset(h, T_STK, sorted + b, t1);
-            b -= 1;
-        }
-    }
-    if !charge(h, cnt * cnt) {
+    if !sort_records(h, T_STK, sorted, cnt, 1) {
         return -1;
     }
     let mut hsh: i32 = mix(5, cnt);

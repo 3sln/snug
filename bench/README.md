@@ -128,3 +128,9 @@ decode benchmarks remain pending; `decode` currently throws
 `SnugFault('unavailable')`. The adapter has a provisional null/undefined
 success and code-string/`{code}` failure ABI and refuses unknown verdict
 shapes until the generated API is wired.
+
+## CDDL compiler (P3.2/P3.3)
+
+Compile timings (cold and warm, JS and native), hostile schemas against the
+compile budget, and the compiler's bundle size are in `bench/COMPILE.md`,
+with machine, OS, runtime versions and method (`node bench/compile-bench.mjs`).

@@ -130,6 +130,30 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
   if (!(okJs && okRust)) fails++;
 }
 
+// ---------------------------------------------------------------- normaliser structure
+// Targeted reads of the Program for policies a verdict test would not show
+// directly (D034): merged and sorted interval lists, LITSETs, the key table.
+{
+  const leafAt = (P, l) => P[43] + 8 * l;
+  const ints = (P, l) => { const o = leafAt(P, l), out = []; for (let i = 0; i < P[o + 3]; i++) { const q = P[55] + 6 * (P[o + 2] + i); out.push(`${P[q + 2]}..${P[q + 5]}`); } return out.join(' '); };
+  const litset = (P, B, l) => { const o = leafAt(P, l), out = []; for (let i = 0; i < P[o + 3]; i++) { const q = P[57] + 2 * (P[o + 2] + i); out.push(hex(B.subarray(P[q], P[q] + P[q + 1]))); } return out.join(' '); };
+  const keys = (P, B) => { const out = []; for (let i = 0; i < P[18]; i++) { const q = P[46] + 2 * i; out.push(hex(B.subarray(P[q], P[q] + P[q + 1]))); } return out.join(' '); };
+  const checks = [
+    ['r = 15 / 0 / 9 / 3 / 12 / 6', c => c.program[16] === 1 && ints(c.program, 0) === '0..0 3..3 6..6 9..9 12..12 15..15'],
+    ['r = 0..3 / 4..6 / 10 / 7', c => c.program[16] === 1 && ints(c.program, 0) === '0..7 10..10'],
+    ['r = ' + Array.from({ length: 300 }, (_, i) => String((i * 7919) % 1000 * 3)).join(' / '), c => c.program[16] === 1 && c.program[leafAt(c.program, 0) + 3] === 300],
+    ['r = "b" / "a" / "c" / "a"', c => (c.program[c.program[43]] & 255) === 7 && litset(c.program, c.pool, 0) === '6161 6162 6163'],
+    ['r = { b: int, a: int, c: int }', c => keys(c.program, c.pool) === '6161 6162 6163'],
+    ['r = float16 / float32 / float64', c => c.program[16] === 1 && (c.program[c.program[43]] & 255) === 4 && (c.program[c.program[43]] >> 8) === 7],
+  ];
+  let good = 0;
+  for (const [t, ok] of checks) {
+    let c; try { c = compile(t); } catch (e) { fail(`structure ${JSON.stringify(t.slice(0, 40))}: ${e.code ?? e}`); continue; }
+    if (ok(c)) good++; else fail(`structure ${JSON.stringify(t.slice(0, 40))}: unexpected Program shape`);
+  }
+  console.log(`  ${good === checks.length ? 'ok  ' : 'FAIL'} ${good}/${checks.length} normaliser structure checks (merged intervals, LITSETs, key order)`);
+}
+
 // ---------------------------------------------------------------- profiles (architecture §5.3)
 // [profile, schema, expected code or 'ok']. Profiles only refuse; whatever a
 // profile accepts compiles to the same Program under `full` (checked below).

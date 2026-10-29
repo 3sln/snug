@@ -829,12 +829,12 @@
             (do (let [pa (- ao 5)
                       pend (+ (pw p (+ pa 1)) (pw p (+ pa 2)))]
                   (if (and (< lf pend) (> lc 0)) (return (want s false ao C_MAP))))))
+          (comment "(keys distinct within an alternative follows from the naming records:"
+                   "each key's records name strictly ascending alternatives, and every"
+                   "literal entry is named exactly once)")
           (for [^I32 i 0 lc]
             (let [le (+ lb (* 4 (+ lf i)))]
-              (if (== (pw p (+ le 2)) 1) (set req (+ req 1)))
-              (comment "keys distinct within the alternative")
-              (for [^I32 j 0 i]
-                (if (== (pw p le) (pw p (+ lb (* 4 (+ lf j))))) (return (want s false le C_MAP))))))
+              (if (== (pw p (+ le 2)) 1) (set req (+ req 1)))))
           (if (!= (pw p (+ ao 3)) req) (return (want s false (+ ao 3) C_DERIVED)))
           (if (!= (pw p (+ ao 4)) sw) (return (want s false (+ ao 4) C_DERIVED)))
           (set sw (+ sw (+ 3 (ceil32 lc)))))))

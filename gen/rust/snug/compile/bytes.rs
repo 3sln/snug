@@ -273,3 +273,47 @@ pub fn mag_small(h: &[i32], a: i32) -> i32 {
     }
     return v;
 }
+pub fn sort_bids(h: &mut [i32], t: i32, n: i32) -> bool {
+    // Sort the first n bids of vector t by their bytes (stable bottom-up merge
+    // sort through T_MSORT, charged n per pass).
+    vtrunc(h, T_MSORT, 0);
+    if vpush(h, T_MSORT, n) < 0 {
+        return false;
+    }
+    let mut width: i32 = 1;
+    while width < n {
+        if !charge(h, n) {
+            return false;
+        }
+        let mut lo: i32 = 0;
+        while lo < n {
+            let mut mid: i32 = lo + width;
+            let mut hi: i32 = lo + (2 * width);
+            if mid > n {
+                mid = n;
+            }
+            if hi > n {
+                hi = n;
+            }
+            let mut i: i32 = lo;
+            let mut j: i32 = mid;
+            let mut k: i32 = lo;
+            while k < hi {
+                if (i < mid) && ((j >= hi) || (bid_cmp(h, vget(h, t, i), vget(h, t, j)) <= 0)) {
+                    vset(h, T_MSORT, k, vget(h, t, i));
+                    i += 1;
+                } else {
+                    vset(h, T_MSORT, k, vget(h, t, j));
+                    j += 1;
+                }
+                k += 1;
+            }
+            lo += 2 * width;
+        }
+        for c in 0..n {
+            vset(h, t, c, vget(h, T_MSORT, c));
+        }
+        width *= 2;
+    }
+    return !erred(h);
+}

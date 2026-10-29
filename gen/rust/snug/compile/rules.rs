@@ -211,45 +211,77 @@ pub fn build_rules(h: &mut [i32], urules: i32, prules: i32) -> i32 {
     }
     return order;
 }
-pub fn rule_kind(h: &mut [i32], r: i32) -> i32 {
-    // Type or group, deciding `a = b` by b's kind (cycles: nonproductive).
-    // A rule whose name-only body names a generic parameter, an undefined
-    // name or a socket is a type.
+pub(crate) fn alias_target(h: &mut [i32], r: i32) -> i32 {
+    // For an undecided rule `r = name`: the rule the name refers to, -1 when it
+    // is a type for certain (a generic parameter, an undefined name).
+    let def: i32 = rw(h, r, 2);
+    let body: i32 = nd(h, def);
+    let nm: i32 = na(h, body);
+    let tok: i32 = ntok(h, nm);
+    if names_param(h, def, tok) {
+        return -1;
+    }
+    return rule_find_tok(h, tok);
+}
+pub(crate) fn kind_now(h: &mut [i32], r: i32) -> i32 {
+    // r's kind if it is decided without following an alias, else 0.
     let k: i32 = rw(h, r, 4);
     if k != RK_UNDECIDED {
         return k;
     }
     if rw(h, r, 13) == 2 {
-        rset(h, r, 4, RK_GROUP);
         return RK_GROUP;
     }
     if rw(h, r, 2) == (-1) {
-        // An undefined socket: its kind is its spelling.
-        rset(h, r, 4, RK_TYPE);
         return RK_TYPE;
     }
-    if rw(h, r, 11) == 1 {
-        return fail(h, ERR_NONPRODUCTIVE, npos(h, rw(h, r, 2)));
+    return RK_UNDECIDED;
+}
+pub fn rule_kind(h: &mut [i32], r: i32) -> i32 {
+    // Type or group, deciding `a = b` by b's kind. ITERATIVE: an alias chain
+    // is followed with a mark per rule (word 11: 1 on the chain), so a 100 000-
+    // rule chain costs no host stack; reaching a marked rule is a cycle
+    // (nonproductive). The second walk decides every rule on the chain.
+    let k0: i32 = kind_now(h, r);
+    if k0 != RK_UNDECIDED {
+        rset(h, r, 4, k0);
+        return k0;
     }
-    rset(h, r, 11, 1);
-    let def: i32 = rw(h, r, 2);
-    let body: i32 = nd(h, def);
-    let nm: i32 = na(h, body);
-    let tok: i32 = ntok(h, nm);
-    let mut kind: i32 = RK_TYPE;
-    // A generic parameter of this rule is a type.
-    if !names_param(h, def, tok) {
-        let target: i32 = rule_find_tok(h, tok);
-        if target >= 0 {
-            let tk: i32 = rule_kind(h, target);
-            if tk < 0 {
-                return -1;
+    let mut cur: i32 = r;
+    let mut kind: i32 = RK_UNDECIDED;
+    while kind == RK_UNDECIDED {
+        if !charge(h, 1) {
+            return -1;
+        }
+        let k: i32 = kind_now(h, cur);
+        if k != RK_UNDECIDED {
+            kind = k;
+        } else {
+            if rw(h, cur, 11) == 1 {
+                return fail(h, ERR_NONPRODUCTIVE, npos(h, rw(h, cur, 2)));
             }
-            kind = tk;
+            rset(h, cur, 11, 1);
+            let t: i32 = alias_target(h, cur);
+            if t < 0 {
+                kind = RK_TYPE;
+            } else {
+                cur = t;
+            }
         }
     }
-    rset(h, r, 11, 2);
-    rset(h, r, 4, kind);
+    let mut c2: i32 = r;
+    loop {
+        if kind_now(h, c2) != RK_UNDECIDED {
+            break;
+        }
+        rset(h, c2, 4, kind);
+        rset(h, c2, 11, 2);
+        let t2: i32 = alias_target(h, c2);
+        if t2 < 0 {
+            break;
+        }
+        c2 = t2;
+    }
     return kind;
 }
 pub fn names_param(h: &[i32], def: i32, tok: i32) -> bool {

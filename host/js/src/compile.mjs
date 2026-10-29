@@ -7,7 +7,7 @@
 //   compile(text, { profile, limits }) -> { program: Int32Array, pool: Uint8Array, rules: string[] }
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
 import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn,
-  errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, OPT_WORDS }
+  errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, OPT_WORDS }
   from '../../../gen/js/snug/compile/main.mjs';
 import { ERR_ARENA, ERR_NEED_FLOATS, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 
@@ -82,6 +82,9 @@ export function compile(text, { profile = 'full', limits = {} } = {}) {
     return { program, pool, rules: ruleNames(program, pool) };
   }
 }
+
+/** Compile budget units the last compile() spent (benchmarks, the fuzz gate). */
+export function lastBudgetUsed() { return budgetUsed(arena); }
 
 /** The rule names of a Program, in RULES order (a rule's index is its position). */
 export function ruleNames(program, pool) {
