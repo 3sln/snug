@@ -35,13 +35,32 @@ export function envNargs(h, e) {
     return vget(h, T_ENV, e + 1);
 }
 
-export function envArg(h, e, i) {
-    return vget(h, T_ENV, e + (2 + i));
+export function envParent(h, e) {
+    return vget(h, T_ENV, e + 2);
 }
 
-export function envIntern(h, rule, from, pos) {
-    // The environment (rule, T_ASTK[from..]); a new one counts against the
-    // instantiation limit. T_ASTK is cut back to from.
+export function envArg(h, e, i) {
+    return vget(h, T_ENV, e + (3 + i));
+}
+
+export function genericAncestor(h, env, rule) {
+    // Is `rule` instantiated in env or any environment it was instantiated from?
+    let e = env;
+    let steps = 0;
+    while ((e >= 0) && (steps < 100000)) {
+        if (envRule(h, e) === rule) {
+            return true;
+        }
+        e = envParent(h, e);
+        steps += 1;
+    }
+    return false;
+}
+
+export function envIntern(h, rule, from, parent, pos) {
+    // The environment (rule, T_ASTK[from..]), first made from environment
+    // `parent`; a new one counts against the instantiation limit. Records are
+    // rule, nargs, parent, args. T_ASTK is cut back to from.
     const n = vlen(h, T_ASTK) - from;
     let hsh = mix(77, rule);
     for (let i = 0; i < n; i++) {
@@ -75,6 +94,7 @@ export function envIntern(h, rule, from, pos) {
     const e = vlen(h, T_ENV);
     vpush1(h, T_ENV, rule);
     vpush1(h, T_ENV, n);
+    vpush1(h, T_ENV, parent);
     for (let k = 0; k < n; k++) {
         vpush1(h, T_ENV, vget(h, T_ASTK, from + k));
     }
@@ -262,7 +282,11 @@ export function instanceEnv(h, r, args, nargs, env, pos) {
         vpush1(h, T_ASTK, ts);
         a = nnext(h, a);
     }
-    return envIntern(h, r, from, pos);
+    // bindle and bus: generics may not recurse (architecture §5.3).
+    if ((hg(h, H_PROFILE) > 0) && genericAncestor(h, env, r)) {
+        return fail(h, ERR_PROFILE, pos);
+    }
+    return envIntern(h, r, from, env, pos);
 }
 
 export function lowerName(h, node, env) {
@@ -513,16 +537,17 @@ export function lowerCtl(h, node, env) {
         if (code === 13) {
             flags = 1;
         }
-        // One EMBED leaf per (controller node, env).
-        let ets = conFind(h, cn, env);
+        // One EMBED leaf per (control node, env): keyed by the N_CTL node, not
+        // the controller, whose own container (an array, a map) has that key.
+        let ets = conFind(h, node, env);
         if (ets < 0) {
             const el = container(h, K_EMBED, flags, cn, env);
             if (el < 0) {
                 return -1;
             }
             const ts1 = tsOf1(h, el);
-            conFind(h, cn, env);
-            ets = conPut(h, cn, env, ts1);
+            conFind(h, node, env);
+            ets = conPut(h, node, env, ts1);
         }
         return ctlCbor(h, target, tsLeaf(h, ets, 0), pos);
     }
@@ -1058,6 +1083,10 @@ export function mMember(h, m, env) {
         }
         if ((tk === TK_BYTES) || (tk === TK_FLOAT)) {
             never = true;
+        }
+        // bindle and bus: text and integer keys only
+        if (never && (hg(h, H_PROFILE) > 0)) {
+            return fail(h, ERR_PROFILE, pos);
         }
     }
     if (kk === KEY_TYPE) {

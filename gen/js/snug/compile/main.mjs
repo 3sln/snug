@@ -40,6 +40,10 @@ export function setupLimits(h, opt) {
         textDefault = 16384;
     }
     hs(h, H_LIM_TEXT, optLimit(opt, 1, textDefault, 1048576));
+    // bus: schema text at most 16 KiB whatever the option says (§5.3).
+    if ((profile === 2) && (hg(h, H_LIM_TEXT) > 16384)) {
+        hs(h, H_LIM_TEXT, 16384);
+    }
     hs(h, H_LIM_NEST, optLimit(opt, 2, 64, 256));
     hs(h, H_LIM_AST, optLimit(opt, 3, 65536, 1048576));
     hs(h, H_LIM_INST, optLimit(opt, 4, 1024, 16384));

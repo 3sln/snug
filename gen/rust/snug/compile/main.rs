@@ -37,6 +37,10 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
         text_default = 16384;
     }
     hs(h, H_LIM_TEXT, opt_limit(opt, 1, text_default, 1048576));
+    // bus: schema text at most 16 KiB whatever the option says (§5.3).
+    if (profile == 2) && (hg(h, H_LIM_TEXT) > 16384) {
+        hs(h, H_LIM_TEXT, 16384);
+    }
     hs(h, H_LIM_NEST, opt_limit(opt, 2, 64, 256));
     hs(h, H_LIM_AST, opt_limit(opt, 3, 65536, 1048576));
     hs(h, H_LIM_INST, opt_limit(opt, 4, 1024, 16384));

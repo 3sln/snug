@@ -31,12 +31,29 @@ pub fn env_rule(h: &[i32], e: i32) -> i32 {
 pub fn env_nargs(h: &[i32], e: i32) -> i32 {
     return vget(h, T_ENV, e + 1);
 }
-pub fn env_arg(h: &[i32], e: i32, i: i32) -> i32 {
-    return vget(h, T_ENV, e + (2 + i));
+pub fn env_parent(h: &[i32], e: i32) -> i32 {
+    return vget(h, T_ENV, e + 2);
 }
-pub(crate) fn env_intern(h: &mut [i32], rule: i32, from: i32, pos: i32) -> i32 {
-    // The environment (rule, T_ASTK[from..]); a new one counts against the
-    // instantiation limit. T_ASTK is cut back to from.
+pub fn env_arg(h: &[i32], e: i32, i: i32) -> i32 {
+    return vget(h, T_ENV, e + (3 + i));
+}
+pub(crate) fn generic_ancestor(h: &[i32], env: i32, rule: i32) -> bool {
+    // Is `rule` instantiated in env or any environment it was instantiated from?
+    let mut e: i32 = env;
+    let mut steps: i32 = 0;
+    while (e >= 0) && (steps < 100000) {
+        if env_rule(h, e) == rule {
+            return true;
+        }
+        e = env_parent(h, e);
+        steps += 1;
+    }
+    return false;
+}
+pub(crate) fn env_intern(h: &mut [i32], rule: i32, from: i32, parent: i32, pos: i32) -> i32 {
+    // The environment (rule, T_ASTK[from..]), first made from environment
+    // `parent`; a new one counts against the instantiation limit. Records are
+    // rule, nargs, parent, args. T_ASTK is cut back to from.
     let n: i32 = vlen(h, T_ASTK) - from;
     let mut hsh: i32 = mix(77, rule);
     for i in 0..n {
@@ -70,6 +87,7 @@ pub(crate) fn env_intern(h: &mut [i32], rule: i32, from: i32, pos: i32) -> i32 {
     let e: i32 = vlen(h, T_ENV);
     vpush1(h, T_ENV, rule);
     vpush1(h, T_ENV, n);
+    vpush1(h, T_ENV, parent);
     for k in 0..n {
         vpush1(h, T_ENV, vget(h, T_ASTK, from + k));
     }
@@ -249,7 +267,11 @@ pub(crate) fn instance_env(h: &mut [i32], r: i32, args: i32, nargs: i32, env: i3
         vpush1(h, T_ASTK, ts);
         a = nnext(h, a);
     }
-    return env_intern(h, r, from, pos);
+    // bindle and bus: generics may not recurse (architecture §5.3).
+    if (hg(h, H_PROFILE) > 0) && generic_ancestor(h, env, r) {
+        return fail(h, ERR_PROFILE, pos);
+    }
+    return env_intern(h, r, from, env, pos);
 }
 pub(crate) fn lower_name(h: &mut [i32], node: i32, env: i32) -> i32 {
     // A type name: a generic parameter of env, or a type rule (with its
@@ -494,16 +516,17 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
         if code == 13 {
             flags = 1;
         }
-        // One EMBED leaf per (controller node, env).
-        let mut ets: i32 = con_find(h, cn, env);
+        // One EMBED leaf per (control node, env): keyed by the N_CTL node, not
+        // the controller, whose own container (an array, a map) has that key.
+        let mut ets: i32 = con_find(h, node, env);
         if ets < 0 {
             let el: i32 = container(h, K_EMBED, flags, cn, env);
             if el < 0 {
                 return -1;
             }
             let ts1: i32 = ts_of1(h, el);
-            con_find(h, cn, env);
-            ets = con_put(h, cn, env, ts1);
+            con_find(h, node, env);
+            ets = con_put(h, node, env, ts1);
         }
         return ctl_cbor(h, target, ts_leaf(h, ets, 0), pos);
     }
@@ -1020,6 +1043,10 @@ pub(crate) fn m_member(h: &mut [i32], m: i32, env: i32) -> i32 {
         }
         if (tk == TK_BYTES) || (tk == TK_FLOAT) {
             never = true;
+        }
+        // bindle and bus: text and integer keys only
+        if never && (hg(h, H_PROFILE) > 0) {
+            return fail(h, ERR_PROFILE, pos);
         }
     }
     if kk == KEY_TYPE {

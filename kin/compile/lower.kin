@@ -73,11 +73,23 @@
 
 (defn ^:pub ^I32 env-rule [^IntsR h ^I32 e] (return (vget h T_ENV e)))
 (defn ^:pub ^I32 env-nargs [^IntsR h ^I32 e] (return (vget h T_ENV (+ e 1))))
-(defn ^:pub ^I32 env-arg [^IntsR h ^I32 e ^I32 i] (return (vget h T_ENV (+ e (+ 2 i)))))
+(defn ^:pub ^I32 env-parent [^IntsR h ^I32 e] (return (vget h T_ENV (+ e 2))))
+(defn ^:pub ^I32 env-arg [^IntsR h ^I32 e ^I32 i] (return (vget h T_ENV (+ e (+ 3 i)))))
 
-(defn ^I32 env-intern [^Ints h ^I32 rule ^I32 from ^I32 pos]
-  (comment "The environment (rule, T_ASTK[from..]); a new one counts against the"
-           "instantiation limit. T_ASTK is cut back to from.")
+(defn ^Bool generic-ancestor [^IntsR h ^I32 env ^I32 rule]
+  (comment "Is `rule` instantiated in env or any environment it was instantiated from?")
+  (let [^:mut e env
+        ^:mut steps 0]
+    (while (and (>= e 0) (< steps 100000))
+      (if (== (env-rule h e) rule) (return true))
+      (set e (env-parent h e))
+      (set steps (+ steps 1)))
+    (return false)))
+
+(defn ^I32 env-intern [^Ints h ^I32 rule ^I32 from ^I32 parent ^I32 pos]
+  (comment "The environment (rule, T_ASTK[from..]), first made from environment"
+           "`parent`; a new one counts against the instantiation limit. Records are"
+           "rule, nargs, parent, args. T_ASTK is cut back to from.")
   (let [n (- (vlen h T_ASTK) from)
         ^:mut hsh (mix 77 rule)]
     (for [^I32 i 0 n]
@@ -98,6 +110,7 @@
       (let [e (vlen h T_ENV)]
         (vpush1 h T_ENV rule)
         (vpush1 h T_ENV n)
+        (vpush1 h T_ENV parent)
         (for [^I32 k 0 n]
           (vpush1 h T_ENV (vget h T_ASTK (+ from k))))
         (vtrunc h T_ASTK from)
@@ -223,7 +236,9 @@
         (if (< ts 0) (return (neg 1)))
         (vpush1 h T_ASTK ts))
       (set a (nnext h a)))
-    (return (env-intern h r from pos))))
+    (comment "bindle and bus: generics may not recurse (architecture §5.3).")
+    (if (and (> (hg h H_PROFILE) 0) (generic-ancestor h env r)) (return (fail h ERR_PROFILE pos)))
+    (return (env-intern h r from env pos))))
 
 (defn ^I32 lower-name [^Ints h ^I32 node ^I32 env]
   (comment "A type name: a generic parameter of env, or a type rule (with its"
@@ -361,14 +376,15 @@
             (let [cn (nb h node)
                   ^:mut flags 0]
               (if (== code 13) (set flags 1))
-              (comment "One EMBED leaf per (controller node, env).")
-              (let [^:mut ets (con-find h cn env)]
+              (comment "One EMBED leaf per (control node, env): keyed by the N_CTL node, not"
+                       "the controller, whose own container (an array, a map) has that key.")
+              (let [^:mut ets (con-find h node env)]
                 (if (< ets 0)
                   (do (let [el (container h K_EMBED flags cn env)]
                         (if (< el 0) (return (neg 1)))
                         (let [ts1 (ts-of1 h el)]
-                          (con-find h cn env)
-                          (set ets (con-put h cn env ts1))))))
+                          (con-find h node env)
+                          (set ets (con-put h node env ts1))))))
                 (return (ctl-cbor h target (ts-leaf h ets 0) pos))))))
       (let [^I32 ctl (lower-type h (nb h node) env)]
         (if (< ctl 0) (return (neg 1)))
@@ -697,7 +713,9 @@
             (if (== tk TK_INT)
               (do (set kbid (enc-int-key h (tk-a h t2) T_LITB (tk-b h t2) (tk-c h t2)))
                   (if (< kbid 0) (set never true))))
-            (if (or (== tk TK_BYTES) (== tk TK_FLOAT)) (set never true)))))
+            (if (or (== tk TK_BYTES) (== tk TK_FLOAT)) (set never true))
+            (comment "bindle and bus: text and integer keys only")
+            (if (and never (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos))))))
     (if (== kk KEY_TYPE)
       (do (if (and (== cut 1) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
           (set kts (lower-type h (nc h key) env))

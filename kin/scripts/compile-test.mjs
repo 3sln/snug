@@ -130,6 +130,61 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
   if (!(okJs && okRust)) fails++;
 }
 
+// ---------------------------------------------------------------- profiles (architecture §5.3)
+// [profile, schema, expected code or 'ok']. Profiles only refuse; whatever a
+// profile accepts compiles to the same Program under `full` (checked below).
+const PROFILE_CASES = [
+  ['bindle', '$x /= int\nr = [* $x]', 'profile'],
+  ['bindle', 'r = [* $undefined]', 'profile'],
+  ['bindle', 'r = {a: int, $$more}', 'profile'],
+  ['bindle', 'r = bstr .cborseq [* int]', 'profile'],
+  ['bindle', 'base = [int]\nr = [~base]', 'profile'],
+  ['bindle', 'r = {"a" ^ => int}', 'profile'],
+  ['bindle', 'l<T> = [* T] / [T, l<T>]\nr = l<int>', 'profile'],
+  ['bindle', 'r = {bstr => int}', 'profile'],
+  ['bindle', "r = {h'00': int}", 'profile'],
+  ['bindle', 'r = {uint => int, tstr => any}', 'ok'],
+  ['bindle', 'pair<A,B> = (A, B)\nlist<T> = [* T]\nr = [pair<uint, list<tstr>>]', 'ok'],
+  ['bindle', 'r = tstr .regexp "[a-z]+"', 'ok'],
+  ['bindle', 'n = {v: int, ? k: [* n]}\nr = n', 'ok'],
+  ['bus', 'r = tstr .regexp "a"', 'profile'],
+  ['bus', 'r = tstr', 'profile'],
+  ['bus', 'r = [* int]', 'profile'],
+  ['bus', 'r = {* tstr .size 1 => int}', 'profile'],
+  ['bus', 'n = {v: int, ? k: [0*2 n]}\nr = n', 'profile'],
+  ['bus', 'r = any', 'profile'],
+  ['bus', 'r = [#4]', 'profile'],
+  ['bus', 'r = bstr .cbor int', 'profile'],
+  ['bus', 'r = ' + '"' + 'x'.repeat(17000) + '"', 'limit_schema_bytes'],
+  ['bus', 'r = tstr .size (0..10)', 'ok'],
+  ['bus', 'r = [0*10 int, ? bool]', 'ok'],
+  ['bus', 'r = {a: int, ? b: tstr .size 3, 1*4 uint => bstr .size (0..8)}', 'ok'],
+  ['bus', 'r = (bstr .size (0..64)) .cbor [int, tstr .size 1]', 'ok'],
+  ['bus', 'r = int / float / bool / null / #6.1(int) / 0..9 / "a" / h\'00\'', 'ok'],
+];
+{
+  const pin = PROFILE_CASES.map(([p, t]) => `${{ full: 0, bindle: 1, bus: 2 }[p]} ${hex(Buffer.from(t, 'utf8'))}`).join('\n') + '\n';
+  const pr = spawnSync(rustBin, [], { input: pin, maxBuffer: 1 << 30 }).stdout.toString().trimEnd().split('\n');
+  let good = 0;
+  PROFILE_CASES.forEach(([p, t, want], i) => {
+    let got, prog;
+    try { const c = compile(t, { profile: p }); got = 'ok'; prog = c; } catch (e) { got = e instanceof SchemaError ? e.code : 'CRASH ' + e; }
+    const r = pr[i].split(' ');
+    const rgot = r[0] === 'ok' ? 'ok' : r[1];
+    let same = got === rgot && (got !== 'ok' || r[2] === wordsHex(prog.program));
+    // what a profile accepts means the same as under full (only the PROFILE header word differs)
+    if (got === 'ok') {
+      const full = compile(t, { profile: 'full' });
+      const a = Int32Array.from(prog.program), b = Int32Array.from(full.program);
+      a[5] = 0; b[5] = 0;
+      if (wordsHex(a) !== wordsHex(b) || hex(prog.pool) !== hex(full.pool)) { same = false; fail(`profile ${p} ${JSON.stringify(t.slice(0, 50))}: differs from full`); }
+    }
+    if (got === want && same) good++;
+    else fail(`profile ${p} ${JSON.stringify(t.slice(0, 50))}: want ${want}, JS ${got}, Rust ${rgot}`);
+  });
+  console.log(`  ${good === PROFILE_CASES.length ? 'ok  ' : 'FAIL'} ${good}/${PROFILE_CASES.length} profile cases (bindle, bus) on both hosts; accepted ones identical to full`);
+}
+
 // ---------------------------------------------------------------- verifier corruptions
 function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
 const rnd = rng(SEED), ri = n => Math.floor(rnd() * n);

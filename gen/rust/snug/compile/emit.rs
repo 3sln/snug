@@ -432,6 +432,182 @@ pub(crate) fn pool_place(h: &mut [i32], bid: i32) -> i32 {
     vset(h, T_POOLOFF, bid, off);
     return off;
 }
+pub(crate) fn map_blob_of(h: &[i32], l: i32) -> i32 {
+    return vget(h, T_MAP, ld(h, l, 0));
+}
+pub(crate) fn if_embed_other(h: &[i32], l: i32) -> i32 {
+    // The operand of AND leaf l that is not its EMBED.
+    if lk(h, ld(h, l, 0)) == K_EMBED {
+        return ld(h, l, 1);
+    }
+    return ld(h, l, 0);
+}
+pub(crate) fn child_leaves(h: &mut [i32], l: i32) -> i32 {
+    // Push the FINAL ids of every leaf reachable in one step from leaf l (its
+    // child typesets' answers and its operands) onto T_CHILD; answers the count.
+    let start: i32 = vlen(h, T_CHILD);
+    let tmp: i32 = vlen(h, T_CLS);
+    children(h, l, T_CLS);
+    let n: i32 = (vlen(h, T_CLS) - tmp) / 2;
+    for i in 0..n {
+        let kind: i32 = vget(h, T_CLS, tmp + (2 * i));
+        let id: i32 = vget(h, T_CLS, tmp + ((2 * i) + 1));
+        if kind == 1 {
+            if !dead(h, id) {
+                vpush1(h, T_CHILD, fin(h, id));
+            }
+        } else {
+            let ft: i32 = fts_of(h, id);
+            for j in 0..fts_w(h, ft, 1) {
+                vpush1(h, T_CHILD, vget(h, T_FTSL, fts_w(h, ft, 0) + j));
+            }
+        }
+    }
+    vtrunc(h, T_CLS, tmp);
+    return vlen(h, T_CHILD) - start;
+}
+pub(crate) fn array_bounded(h: &mut [i32], a: i32) -> bool {
+    // Does the array automaton accept only bounded lengths? (no counter with an
+    // unbounded maximum and no cycle in the follow graph: Kahn's peeling, T_TMP
+    // as the in-degree table)
+    let blob: i32 = vget(h, T_ARR, a);
+    let npos: i32 = vget(h, T_ARRD, blob);
+    let w: i32 = vget(h, T_ARRD, blob + 1);
+    let nc: i32 = vget(h, T_ARRD, blob + 2);
+    let cb: i32 = ((blob + 4) + (2 * w)) + (2 * npos);
+    let fb: i32 = cb + (2 * nc);
+    for c in 0..nc {
+        if vget(h, T_ARRD, cb + ((2 * c) + 1)) == INF {
+            return false;
+        }
+    }
+    // peel positions with no incoming edge from a live position
+    let mut removed: i32 = 0;
+    let mut progress: bool = true;
+    vtrunc(h, T_EPOCHS, 0);
+    for _i in 0..npos {
+        vpush1(h, T_EPOCHS, 0);
+    }
+    while progress {
+        progress = false;
+        for q in 0..npos {
+            if vget(h, T_EPOCHS, q) == 0 {
+                let mut incoming: bool = false;
+                for p in 0..npos {
+                    if (vget(h, T_EPOCHS, p) == 0) && (((vget(h, T_ARRD, fb + ((p * w) + (q >> 5))) >> (q & 31)) & 1) != 0) {
+                        incoming = true;
+                    }
+                }
+                if !incoming {
+                    vset(h, T_EPOCHS, q, 1);
+                    removed += 1;
+                    progress = true;
+                }
+            }
+        }
+    }
+    return removed == npos;
+}
+pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
+    // The `bus` profile (architecture §5.3): every string and container
+    // bounded, no recursion. Runs on the numbered leaves.
+    let nl: i32 = hg(h, H_N_FIN);
+    if !charge(h, nl * 4) {
+        return -1;
+    }
+    for f in 0..nl {
+        let l: i32 = fin_internal(h, f);
+        let k: i32 = lk(h, l);
+        if (k == K_ANY) || (k == K_MAJOR) {
+            return fail(h, ERR_PROFILE, -1);
+        }
+        if ((k == K_TEXT) || (k == K_BYTES)) && (ld(h, l, 1) == INF) {
+            return fail(h, ERR_PROFILE, -1);
+        }
+        if (k == K_ARRAY) && (!array_bounded(h, ld(h, l, 0))) {
+            return fail(h, ERR_PROFILE, -1);
+        }
+        if k == K_MAP {
+            let blob: i32 = map_blob_of(h, l);
+            let nf: i32 = vget(h, T_MAPD, blob);
+            let np: i32 = vget(h, T_MAPD, blob + 1);
+            let pb: i32 = (blob + 4) + (3 * nf);
+            for p in 0..np {
+                let go: i32 = vget(h, T_MAPD, (pb + (5 * p)) + 1);
+                let gn: i32 = vget(h, T_MAPD, (pb + (5 * p)) + 2);
+                if go >= 0 {
+                    for g in 0..gn {
+                        if vget(h, T_MAPD, (blob + go) + ((4 * g) + 3)) == INF {
+                            return fail(h, ERR_PROFILE, -1);
+                        }
+                    }
+                }
+            }
+        }
+        if (k == K_AND) && ((lk(h, ld(h, l, 0)) == K_EMBED) || (lk(h, ld(h, l, 1)) == K_EMBED)) {
+            // an embedded document needs a bounded byte string beside it
+            let other: i32 = if_embed_other(h, l);
+            if (lk(h, other) != K_BYTES) || (ld(h, other, 1) == INF) {
+                return fail(h, ERR_PROFILE, -1);
+            }
+        }
+    }
+    // an EMBED answering for itself is an unbounded byte string
+    for t in 0..fts_n(h) {
+        for i in 0..fts_w(h, t, 1) {
+            if lk(h, fin_internal(h, vget(h, T_FTSL, fts_w(h, t, 0) + i))) == K_EMBED {
+                return fail(h, ERR_PROFILE, -1);
+            }
+        }
+    }
+    // no recursion: no cycle through children (iterative DFS, colours in
+    // T_EPOCHS word 1: 0 new, 1 on the path, 2 done)
+    vtrunc(h, T_EPOCHS, 0);
+    if vpush(h, T_EPOCHS, 2 * nl) < 0 {
+        return -1;
+    }
+    for root in 0..nl {
+        if vget(h, T_EPOCHS, (2 * root) + 1) == 0 {
+            vtrunc(h, T_PSTK, 0);
+            vtrunc(h, T_CHILD, 0);
+            vset(h, T_EPOCHS, (2 * root) + 1, 1);
+            let co: i32 = vlen(h, T_CHILD);
+            let cn: i32 = child_leaves(h, fin_internal(h, root));
+            push_frame(h, co, cn);
+            vpush1(h, T_PSTK, root);
+            while vlen(h, T_PSTK) > 0 {
+                if !charge(h, 1) {
+                    return -1;
+                }
+                let fr: i32 = vlen(h, T_PSTK) - 5;
+                let off: i32 = vget(h, T_PSTK, fr);
+                let n: i32 = vget(h, T_PSTK, fr + 1);
+                let cur: i32 = vget(h, T_PSTK, fr + 2);
+                let me: i32 = vget(h, T_PSTK, fr + 4);
+                if cur >= n {
+                    vset(h, T_EPOCHS, (2 * me) + 1, 2);
+                    vtrunc(h, T_PSTK, fr);
+                    vtrunc(h, T_CHILD, off);
+                } else {
+                    vset(h, T_PSTK, fr + 2, cur + 1);
+                    let c: i32 = vget(h, T_CHILD, off + cur);
+                    let st: i32 = vget(h, T_EPOCHS, (2 * c) + 1);
+                    if st == 1 {
+                        return fail(h, ERR_PROFILE, -1);
+                    }
+                    if st == 0 {
+                        vset(h, T_EPOCHS, (2 * c) + 1, 1);
+                        let co2: i32 = vlen(h, T_CHILD);
+                        let cn2: i32 = child_leaves(h, fin_internal(h, c));
+                        push_frame(h, co2, cn2);
+                        vpush1(h, T_PSTK, c);
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
 pub fn plan(h: &mut [i32]) -> i32 {
     // Steps 1-2 of the namespace doc. Answers 0 or -1.
     mark_dead(h);
@@ -480,6 +656,11 @@ pub fn plan(h: &mut [i32]) -> i32 {
             return -1;
         }
         ts_setw(h, ts, 3, f);
+    }
+    if hg(h, H_PROFILE) == 2 {
+        if check_bus(h) < 0 {
+            return -1;
+        }
     }
     return 0;
 }

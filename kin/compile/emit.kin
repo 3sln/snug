@@ -26,7 +26,7 @@
                                < > <= >= == != and or not]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
                                         mix ht-init ht-start ht-id ht-next ht-put sort-records
-                                        INF ERR_INTERNAL ERR_LIM_LEAVES ERR_LIM_WIDTH ERR_LIM_POOL ERR_LIM_TOTAL
+                                        INF ERR_INTERNAL ERR_LIM_LEAVES ERR_LIM_WIDTH ERR_LIM_POOL ERR_LIM_TOTAL ERR_PROFILE
                                         H_PROFILE H_LIM_DEPTH H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS
                                         H_LIM_BIGNUM H_LIM_VBUDGET H_LIM_TOTAL H_LIM_WIDTH H_LIM_POOL
                                         H_LIM_LEAVES H_TS_ANY H_N_FIN H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
@@ -369,6 +369,131 @@
       (vset h T_POOLOFF bid off)
       (return off))))
 
+;; ------------------------------------------------------------ the bus profile
+
+(defn ^I32 map-blob-of [^IntsR h ^I32 l] (return (vget h T_MAP (ld h l 0))))
+
+(defn ^I32 if-embed-other [^IntsR h ^I32 l]
+  (comment "The operand of AND leaf l that is not its EMBED.")
+  (if (== (lk h (ld h l 0)) K_EMBED) (return (ld h l 1)))
+  (return (ld h l 0)))
+
+(defn ^I32 child-leaves [^Ints h ^I32 l]
+  (comment "Push the FINAL ids of every leaf reachable in one step from leaf l (its"
+           "child typesets' answers and its operands) onto T_CHILD; answers the count.")
+  (let [start (vlen h T_CHILD)
+        tmp (vlen h T_CLS)]
+    (children h l T_CLS)
+    (let [n (quot (- (vlen h T_CLS) tmp) 2)]
+      (for [^I32 i 0 n]
+        (let [kind (vget h T_CLS (+ tmp (* 2 i)))
+              id (vget h T_CLS (+ tmp (+ (* 2 i) 1)))]
+          (if (== kind 1)
+            (if (not (dead h id)) (vpush1 h T_CHILD (fin h id)))
+            (do (let [ft (fts-of h id)]
+                  (for [^I32 j 0 (fts-w h ft 1)]
+                    (vpush1 h T_CHILD (vget h T_FTSL (+ (fts-w h ft 0) j))))))))))
+    (vtrunc h T_CLS tmp)
+    (return (- (vlen h T_CHILD) start))))
+
+(defn ^Bool array-bounded [^Ints h ^I32 a]
+  (comment "Does the array automaton accept only bounded lengths? (no counter with an"
+           "unbounded maximum and no cycle in the follow graph: Kahn's peeling, T_TMP"
+           "as the in-degree table)")
+  (let [blob (vget h T_ARR a)
+        npos (vget h T_ARRD blob)
+        w (vget h T_ARRD (+ blob 1))
+        nc (vget h T_ARRD (+ blob 2))
+        cb (+ (+ (+ blob 4) (* 2 w)) (* 2 npos))
+        fb (+ cb (* 2 nc))]
+    (for [^I32 c 0 nc]
+      (if (== (vget h T_ARRD (+ cb (+ (* 2 c) 1))) INF) (return false)))
+    (comment "peel positions with no incoming edge from a live position")
+    (let [^:mut removed 0
+          ^:mut progress true]
+      (vtrunc h T_EPOCHS 0)
+      (for [^I32 _i 0 npos] (vpush1 h T_EPOCHS 0))
+      (while progress
+        (set progress false)
+        (for [^I32 q 0 npos]
+          (if (== (vget h T_EPOCHS q) 0)
+            (do (let [^:mut incoming false]
+                  (for [^I32 p 0 npos]
+                    (if (and (== (vget h T_EPOCHS p) 0)
+                             (!= (bit-and (sar (vget h T_ARRD (+ fb (+ (* p w) (sar q 5)))) (bit-and q 31)) 1) 0))
+                      (set incoming true)))
+                  (if (not incoming)
+                    (do (vset h T_EPOCHS q 1) (set removed (+ removed 1)) (set progress true))))))))
+      (return (== removed npos)))))
+
+(defn ^I32 check-bus [^Ints h]
+  (comment "The `bus` profile (architecture §5.3): every string and container"
+           "bounded, no recursion. Runs on the numbered leaves.")
+  (let [nl (hg h H_N_FIN)]
+    (if (not (charge h (* nl 4))) (return (neg 1)))
+    (for [^I32 f 0 nl]
+      (let [l (fin-internal h f)
+            k (lk h l)]
+        (if (or (== k K_ANY) (== k K_MAJOR)) (return (fail h ERR_PROFILE (neg 1))))
+        (if (and (or (== k K_TEXT) (== k K_BYTES)) (== (ld h l 1) INF)) (return (fail h ERR_PROFILE (neg 1))))
+        (if (and (== k K_ARRAY) (not (array-bounded h (ld h l 0)))) (return (fail h ERR_PROFILE (neg 1))))
+        (if (== k K_MAP)
+          (do (let [blob (map-blob-of h l)
+                    nf (vget h T_MAPD blob)
+                    np (vget h T_MAPD (+ blob 1))
+                    pb (+ (+ blob 4) (* 3 nf))]
+                (for [^I32 p 0 np]
+                  (let [go (vget h T_MAPD (+ (+ pb (* 5 p)) 1))
+                        gn (vget h T_MAPD (+ (+ pb (* 5 p)) 2))]
+                    (if (>= go 0)
+                      (for [^I32 g 0 gn]
+                        (if (== (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 3))) INF)
+                          (return (fail h ERR_PROFILE (neg 1)))))))))))
+        (if (and (== k K_AND) (or (== (lk h (ld h l 0)) K_EMBED) (== (lk h (ld h l 1)) K_EMBED)))
+          (do (comment "an embedded document needs a bounded byte string beside it")
+              (let [other (if-embed-other h l)]
+                (if (or (!= (lk h other) K_BYTES) (== (ld h other 1) INF)) (return (fail h ERR_PROFILE (neg 1)))))))))
+    (comment "an EMBED answering for itself is an unbounded byte string")
+    (for [^I32 t 0 (fts-n h)]
+      (for [^I32 i 0 (fts-w h t 1)]
+        (if (== (lk h (fin-internal h (vget h T_FTSL (+ (fts-w h t 0) i)))) K_EMBED)
+          (return (fail h ERR_PROFILE (neg 1))))))
+    (comment "no recursion: no cycle through children (iterative DFS, colours in"
+             "T_EPOCHS word 1: 0 new, 1 on the path, 2 done)")
+    (vtrunc h T_EPOCHS 0)
+    (if (< (vpush h T_EPOCHS (* 2 nl)) 0) (return (neg 1)))
+    (for [^I32 root 0 nl]
+      (if (== (vget h T_EPOCHS (+ (* 2 root) 1)) 0)
+        (do (vtrunc h T_PSTK 0)
+            (vtrunc h T_CHILD 0)
+            (vset h T_EPOCHS (+ (* 2 root) 1) 1)
+            (let [co (vlen h T_CHILD)
+                  cn (child-leaves h (fin-internal h root))]
+              (push-frame h co cn)
+              (vpush1 h T_PSTK root))
+            (while (> (vlen h T_PSTK) 0)
+              (if (not (charge h 1)) (return (neg 1)))
+              (let [fr (- (vlen h T_PSTK) 5)
+                    off (vget h T_PSTK fr)
+                    n (vget h T_PSTK (+ fr 1))
+                    cur (vget h T_PSTK (+ fr 2))
+                    me (vget h T_PSTK (+ fr 4))]
+                (if (>= cur n)
+                  (do (vset h T_EPOCHS (+ (* 2 me) 1) 2)
+                      (vtrunc h T_PSTK fr)
+                      (vtrunc h T_CHILD off))
+                  (do (vset h T_PSTK (+ fr 2) (+ cur 1))
+                      (let [c (vget h T_CHILD (+ off cur))
+                            st (vget h T_EPOCHS (+ (* 2 c) 1))]
+                        (if (== st 1) (return (fail h ERR_PROFILE (neg 1))))
+                        (if (== st 0)
+                          (do (vset h T_EPOCHS (+ (* 2 c) 1) 1)
+                              (let [co2 (vlen h T_CHILD)
+                                    cn2 (child-leaves h (fin-internal h c))]
+                                (push-frame h co2 cn2)
+                                (vpush1 h T_PSTK c))))))))))))
+    (return 0)))
+
 ;; ------------------------------------------------------------ the plan
 
 (defn ^:pub ^I32 plan [^Ints h]
@@ -404,6 +529,8 @@
           f (final-ts h ts)]
       (if (< f 0) (return (neg 1)))
       (ts-setw h ts 3 f)))
+  (if (== (hg h H_PROFILE) 2)
+    (if (< (check-bus h) 0) (return (neg 1))))
   (return 0))
 
 ;; ------------------------------------------------------------ sections

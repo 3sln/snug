@@ -52,6 +52,8 @@
     (hs h H_PROFILE profile)
     (if (== profile 2) (set text-default 16384))
     (hs h H_LIM_TEXT (opt-limit opt 1 text-default 1048576))
+    (comment "bus: schema text at most 16 KiB whatever the option says (§5.3).")
+    (if (and (== profile 2) (> (hg h H_LIM_TEXT) 16384)) (hs h H_LIM_TEXT 16384))
     (hs h H_LIM_NEST (opt-limit opt 2 64 256))
     (hs h H_LIM_AST (opt-limit opt 3 65536 1048576))
     (hs h H_LIM_INST (opt-limit opt 4 1024 16384))
