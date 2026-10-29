@@ -1,9 +1,11 @@
 # snug — architecture
 
-Status: **design, revision 1 (2026-10-29)**, provisional. Written before any
-code; it is the thing the independent design review (DEVLOG P0.4) reviews.
-Decisions it rests on are numbered in `DEVLOG.md` (`D###`) and cited inline.
-Nothing here is owner-approved.
+Status: **design, revision 2 (2026-10-29)**, provisional. Revision 1 was
+reviewed independently by Codex (`docs/reviews/2026-10-29-codex.md`, "C#")
+and by a Claude reviewer (`docs/reviews/2026-10-29-claude.md`, "A#"); §15
+lists every finding and what this revision did about it. Decisions are
+numbered in `DEVLOG.md` (`D###`) and cited inline. Nothing here is
+owner-approved.
 
 snug is a CDDL (RFC 8610) validator and a strict deterministic CBOR (RFC 8949
 §4.2) codec, written once in kin and generated into JavaScript and Rust. Its
@@ -20,17 +22,17 @@ profile (`3sln.me/docs/spec/cbor.md`, "the profile") and its codec
 
 | # | Property | Why (source) |
 | --- | --- | --- |
-| R1 | **Sound** CDDL matching: closed maps under group choices, optional groups, member names equal to rule names, anchored regexps, cuts. | study §0 items 1, 3; §3.1 |
-| R2 | **Linear time** in the input, with a hard, explicit **step budget**; no input can make validation super-linear or exceed the budget silently. | study §4 (323 ms, 205 ms), Worker 100 ms CPU |
-| R3 | **Bounded memory**, sized when a schema is compiled; validation allocates nothing proportional to the input. | study §4 (71 MB linear memory that never shrinks) |
+| R1 | **Sound** CDDL matching: closed maps under group choices, optional groups, member names equal to rule names, anchored regexps, cuts. What snug cannot decide exactly it refuses at compile time; it never accepts a schema with a different meaning. | study §0 items 1, 3; §3.1 |
+| R2 | **Linear time** in input bytes with a schema-bounded coefficient, and a hard, explicit **step budget** charged for every unit of work actually done. | study §4 (323 ms, 205 ms), Worker 100 ms CPU |
+| R3 | **Bounded memory**: scratch sized at compile time, capped; validation allocates nothing proportional to the input. | study §4 (71 MB linear memory that never shrinks) |
 | R4 | **No panics or traps** on any input bytes or any schema text. Every failure is a value. | study §6 (32 + 94 traps) |
-| R5 | Errors carry a **reason code and a path only**. Never a payload value, never input bytes; data map keys that the schema does not name are `*`. | study §1, §4; profile §5 |
+| R5 | Errors carry a **reason code and a path only**. Never a payload value, never input bytes, never a schema key the current map context does not name. | study §1, §4; profile §5 |
 | R6 | **Deterministic** across hosts: same verdict, same reason, same path, same budget exhaustion point in JS and Rust. | owner constraint; kin's purpose |
-| R7 | **Strict CBOR profile** at least as strict as cbor.mjs, passing `tests/vectors/cbor-*.json` (corpus copies under `corpus/cbor-vectors/`). | owner constraint |
+| R7 | **Strict CBOR profile** with cbor.mjs's refusals *and refusal precedence*, passing `tests/vectors/cbor-*.json`. | owner constraint |
 | R8 | **Single pass** over the bytes where possible; streaming-compatible structure. | owner constraint |
-| R9 | **Small**: the JS bundle (compiler + validator + codec) targets ≤ 40 KB min+gzip. | browser and Worker bundles |
-| R10 | **Untrusted schemas** (event-bus manifests) compile under explicit limits, and a profile can forbid features (regexp, sockets, unbounded containers). | study §8 |
-| R11 | Integers of any size, exact; no host floats in any decision. | profile §3; study §3.1 (wasm32 integer bug) |
+| R9 | **Small**: runtime (VM + builder + encoder) ≤ 20 KB min+gzip; compiler a separate, lazily loadable module (target to be measured). | browser and Worker bundles |
+| R10 | **Untrusted schemas** (event-bus manifests) compile under explicit limits *and a compile budget*; a profile can forbid features. | study §8 |
+| R11 | Integers of any size, exact; no host floats in any validation decision. | profile §3; study §3.1 (wasm32 integer bug) |
 
 ---
 
@@ -38,7 +40,7 @@ profile (`3sln.me/docs/spec/cbor.md`, "the profile") and its codec
 
 ```
           CDDL text ──► [compiler] ──► Program (Int32Array + byte pool)
-                          kin             │   cacheable, versioned, hashed
+                          kin             │   serialisable, keyed by SHA-256
                                           ▼
   CBOR bytes ───────────────────────► [validator VM] ──► ok | {reason, path}
                                          kin
@@ -50,283 +52,334 @@ profile (`3sln.me/docs/spec/cbor.md`, "the profile") and its codec
 
 * **Compiler** (kin): lexes and parses CDDL from UTF-8 bytes, resolves names,
   instantiates generics, folds the prelude, normalises groups, checks the
-  profile's determinism rules (§5.3, §5.4), and lowers to a **Program**: a
-  flat `Int32Array` plus a byte pool. No pointers, no host objects.
+  exactness conditions (§4.3, §4.4), and lowers to a **Program**: a flat
+  `Int32Array` plus a byte pool.
 * **Validator VM** (kin): walks CBOR bytes once, checking the strict CBOR
-  profile *and* the Program at the same time ("fused", §4). It reads bytes and
-  32-bit integers only. It never allocates during a validation: its scratch
-  arenas are sized by the compiler and owned by the compiled schema.
-* **Value builder** (host): turns already-validated bytes into host values
-  (JS objects, `bigint`, typed arrays, decimal and ndarray wrappers). Because
-  the VM has proven the bytes valid, the builder performs no checks; it is the
-  only part that allocates in proportion to the input.
+  profile and the Program in the same walk (§4.5). Bytes and 32-bit integers
+  only; no allocation during a validation.
+* **Value builder** (host): turns validated bytes into host values. It
+  performs no validity checks; it is the only part that allocates in
+  proportion to the input.
 * **Encoder** (host): host values to deterministic CBOR.
-* **Profile-only decode** is the VM run against the built-in `any` Program
-  followed by the builder, so there is exactly one implementation of the
-  profile's refusals, and it is in kin.
+* **Profile-only decode** is the VM against the built-in `any` Program
+  followed by the builder, so the profile's refusals have exactly one
+  implementation, in kin.
 
-Why this split (D003, D004): the value model is the one thing that is
-genuinely different per host (a JS object, a Rust enum), and it is also the
-part that allocates. Everything that decides *accept or refuse* is integer
-logic over bytes, which is exactly what kin is for, and is where cross-host
-determinism matters.
+**The kin/host line (D003, narrowed in revision 2).** kin decides everything
+about *bytes*: every CBOR profile refusal and every schema verdict. Hosts
+decide *host-value admissibility* in the encoder (a JS class that has no CBOR
+form, a sparse array, a cycle, a lone surrogate, NaN) because those questions
+are about host objects kin cannot see; they are pinned by shared vectors, not
+generated (C19, A10). Cross-host identity is promised for bytes and schemas,
+and for corresponding abstract values in the encoder.
 
 ---
 
 ## 3. Representation: bytes and int32, nothing else
 
 All kin code operates on `Uint8Array`/`&[u8]` input, `Int32Array`/`Vec<i32>`
-arenas and 32-bit integers. This is what makes the VM fast in JS (no
-allocation, monomorphic integer code V8 optimises well) and identical across
-hosts.
+arenas and 32-bit integers, through vocabulary forms that are **checked**
+(no out-of-range index can panic in Rust or read `undefined` in JS) and
+**explicitly wrapping** where arithmetic can overflow (`mul32` is
+`Math.imul`/`wrapping_mul`); plain `+`/`-` are used only where the source
+proves no overflow (A9).
 
 * **Integers** are never materialised. A CBOR integer is (major, argument
-  bytes); a bignum is (tag, content bytes). Range bounds in the Program are
-  stored the same way: sign plus minimal big-endian magnitude. Comparison is
-  sign, then magnitude length, then bytes (with the order flipped for major 1,
-  whose value is −1−n). Any size works, 2^53 and 2^64 are not special, and the
-  wasm32 integer bug of the study cannot exist (R11).
-* **Floats** are never converted to host floats for a decision. The profile's
-  float rules (shortest form, no NaN/±∞/−0, no integral float within
-  ±(2^53−1)) are bit tests on the 16/32/64-bit pattern. Float ranges compare
-  the pattern after widening to binary64 bits by integer operations and the
-  standard sign-magnitude-to-ordered transform, as two 32-bit halves.
-* **Text** is validated as UTF-8 (scalar values only, no noncharacters, as
-  cbor.mjs) while it is read; `.size` counts bytes (RFC 8610); a regexp runs
-  over code points decoded on the fly.
-* **Literals** (text, bytes, ints, floats, `true`/`false`/`null`) are stored
-  as their **deterministic encoding** in the byte pool. Equality with a literal
-  is a byte comparison against the item's encoded span. This is correct
-  because the profile admits exactly one encoding per value (profile §1), and
-  it is why integer `1` and float `1.0` can never be confused (the latter is
-  refused by the profile).
-* **Map keys** are compared by their encoded bytes, which is also the
-  profile's key order (RFC 8949 §4.2.1 bytewise lexicographic).
+  bytes); a bignum is (tag, content bytes). Bounds are stored the same way.
+  Comparison: sign, magnitude length, bytes (order flipped for major 1). Any
+  size works; 2^53 and 2^64 are not special (R11).
+* **Floats** are bit patterns. The profile's float rules are bit tests;
+  float ranges compare binary64 patterns (f16/f32 widened by integer
+  operations) through the sign-magnitude-to-ordered transform on two 32-bit
+  halves.
+* **Float literals in schema text** (`1.1`, `1e-3`) must become exact binary64
+  patterns. The compiler asks the host for this one conversion through a kin
+  host port (`parse-f64`), and refuses literals with more than 17 significant
+  digits or outside the binary64 range, so that JS `Number()` and Rust
+  `str::parse::<f64>`, both correctly rounded in that domain, agree bit for bit
+  (D020, A9b). This is compile time only; validation never touches a host
+  float.
+* **Text** is validated as UTF-8 while read; `.size` counts bytes; a regexp
+  runs over code points decoded on the fly.
+* **Literals** are stored as their deterministic encoding; equality with a
+  literal is a byte comparison against the item's encoded span, correct
+  because the profile admits one encoding per value.
+* **Map keys** compare by encoded bytes, which is also the profile's key
+  order.
 
 ---
 
-## 4. Validation semantics: one pass, type sets
+## 4. Validation semantics
 
-### 4.1 The core idea
+### 4.1 Type-set evaluation
 
-A CDDL schema denotes a **tree automaton** over CBOR items. The VM evaluates
-it top-down with **on-the-fly subset construction**: each data item is visited
-exactly once, against the **set** of leaf types it might still be, and returns
-the **subset** that matched.
+A schema denotes a tree automaton over CBOR items. The VM evaluates it
+top-down with on-the-fly subset construction: each item is visited once,
+against the set of **queried leaves** it might be, and returns which of them
+matched.
 
-    eval(item, S) → M ⊆ S
+    eval(item, Q) → M ⊆ Q
 
-* A type choice `A / B` contributes both `A` and `B` to the set; nothing is
-  tried "first" and nothing is retried.
-* For a container item, the VM computes from `S` the set each child might be,
-  evaluates the child **once** against that set, and uses the matched subset
-  to advance the state of every candidate in parallel.
+Type choices contribute all their leaves; containers compute each child's
+query set from the live state of every candidate, evaluate the child once, and
+advance every candidate with the result. No item is evaluated twice; nothing
+backtracks. A lazy `(state, transition) → state` cache is a later
+optimisation, not part of the semantics.
 
-Because no item is evaluated twice, there is no backtracking and no
-exponential case, and no memo table is needed: the work is
-`Σ over items of |S_item|`, bounded by `items × width`, where width is bounded
-at compile time (§7). This is the same move RE2 makes for regular expressions
-(simulate the NFA, never backtrack), lifted to trees. A lazy cache of
-`(set, transition) → set` (a lazy DFA) is an optimisation for later (P3.x), not
-part of the semantics.
+**Obligations, not just unions (C7).** A leaf whose verdict depends on other
+predicates over the *same* item (`AND`, `NOT`) contributes **dependencies**
+that are evaluated alongside `Q` but are not themselves answers: the item is
+evaluated against `Q ∪ deps(Q)`, then each `AND`/`NOT` leaf is computed from
+its operands' results, and only `M ∩ Q` is returned. So
+`([uint] .and [tstr]) / [bool]` does not accept `[1]` because `[uint]`
+matched as an internal operand.
 
-The alternative most implementations take, and which the `cddl` crate takes,
-is ordered trial with backtracking over a decoded tree. It is the root of the
-study's CPU blowups (a choice re-validates a 1 MiB child per alternative and
-formats an error each time) and, combined with greedy local decisions, of its
-unsound map matching.
+**Every leaf that accepts an item without examining children still gives the
+children a query set**: `ANY` gives `{ANY}`, `MAJOR 4` gives `{ANY}` to
+elements, an `INT` leaf admitting bignums gives the content `{BSTR}`.
+Children are always walked (the profile requires it); the query set only says
+what is being asked of them.
 
-### 4.2 Leaves and sets
+### 4.2 Leaves and typesets
 
-The compiler flattens every type expression into a **typeset**: a sorted list
-of **leaf** ids. Leaves are hash-consed, so the same leaf reached through two
-rules is one id and is evaluated once per item. Leaf kinds:
+The compiler flattens every type expression into a **typeset**: a sorted
+list of leaf ids. Leaves are hash-consed with cycle-aware canonicalisation
+(recursive rules get a fixed point), so a leaf reached twice is evaluated
+once per item. Ids are assigned in a deterministic order (first appearance in
+a depth-first walk of the rules in source order), which the error rules (§6)
+rely on.
 
 | Leaf | Matches |
 | --- | --- |
-| `ANY` | any item (still profile-checked) |
-| `MAJOR m` | any item of major type m (`#0`, `#1`, `#2`, `#3`, `#4`, `#5`) |
-| `INT lo hi` | major 0/1 (and, if the leaf allows bignums, tag 2/3) within bounds |
-| `FLOAT widths lo hi` | float of the allowed encoded widths, optional bounds |
-| `LIT k` | exactly the pool literal k (byte equality) |
-| `NOTLIT k` | `.ne` against a literal |
-| `TEXT size regexp chars` / `BYTES size bits cbor cborseq` | string with constraints |
-| `UINTX size bits` | `uint .size n`, `uint .bits b` |
-| `SIMPLE v` | `#7.v` |
-| `TAG n content` | tag n whose content matches typeset `content` |
-| `ARRAY nfa` | array accepted by an NFA (§4.4) |
+| `ANY` | any item |
+| `MAJOR m` | any item of major type m (`#0`…`#5`, bare `#6`, bare `#7`) |
+| `INT bounds bigok` | major 0/1 (and tag 2/3 if `bigok`) within an interval list |
+| `FLOAT widths bounds` | float of allowed encoded widths (`#7.25/26/27`, `float16`…), optional interval list |
+| `SIMPLE v` | `#7.v` for v < 24 (`false`, `true`, `null`, …) |
+| `LIT k` | exactly pool literal k |
+| `LITSET t` | one of a sorted set of literals of one major type (binary search); large enums count as one leaf (A8) |
+| `TEXT size regexp` / `BYTES size bits` | string with constraints |
+| `UINTX size bits` | `uint .size …`, `uint .bits …` |
+| `TAG n content` / `TAGSET range content` | tag n (or `#6.<type>` with a uint range, RFC 9682) whose content matches typeset `content` |
+| `EMBED content seq` | byte string whose content is one item (`.cbor`) or a sequence (`.cborseq`) matching `content`; a sub-validation (§4.6) |
+| `ARRAY nfa` | array accepted by an automaton (§4.4) |
 | `MAP table` | map accepted by an alternative table (§4.3) |
-| `AND a b` | `.and`/`.within`/control combinations that do not fold (§4.6) |
+| `AND a b` / `NOT a` | `.and`, `.within`, and control intersections that do not fold; `NOT` only as `target ∧ ¬literal` for `.ne` (§4.6) |
 
-Each leaf has a precomputed **major mask** (which initial-byte major types it
-can accept). On reading an item's head, the VM filters `S` by the mask in one
-pass, so an item is only ever compared with leaves of its own kind.
+Each leaf has a major mask; on reading an item's head the VM filters the query
+set by mask (charged, §7).
 
 ### 4.3 Maps
 
-**Normal form.** Each map type's group is expanded into **alternatives**
-(disjunctive normal form over `//`, optional groups `? ( … )` and group
-occurrences), each alternative being a list of **entries**
-`(key, value-typeset, min, max, cut)`. A key is either a **literal key** (a
-pool literal: `name:`, `"name" =>`, `1:`) or a **key typeset** (`tstr =>`,
-`uint =>`, `any =>`). Within one alternative, literal keys are distinct
-(duplicates are a schema error). The expansion is bounded (§7); independent
-optional groups whose key sets are disjoint are kept as separate **factors**
-rather than multiplied out (§4.3.4), so `{ ? (a, b), ? (c, d), … }` does not
-blow up.
+#### 4.3.1 Normal form
 
-**Combined evaluation.** For a map item and set `S`, the VM gathers every
-alternative of every `MAP` leaf in `S` into one live set and makes one pass
-over the pairs:
+1. A **top-level group choice** in a map, `{ A // B }`, becomes separate map
+   leaves `{A} / {B}` (A1c). Choices are already parallel, so nothing is
+   lost, and nothing below has to reason about correlated choices.
+2. Each remaining map group is a **sequence** of members. Expansion of
+   optional groups and inner choices produces **alternatives**: lists of
+   **entries** `(key, value-typeset, min, max, cut)` where a key is a
+   **literal key** (`name:`, `"name" =>`, `1:`) or a **key typeset**
+   (`tstr =>`, `uint =>`, `any =>`).
+3. **Group occurrence** (A2, C1, C2):
+   * `? G` contributes the alternatives of `G` plus the empty alternative.
+   * A group containing only literal-key entries with occurrence `n*m`
+     contributes every union of between n and m alternatives of G (empty
+     alternatives pad) whose literal key sets are pairwise disjoint. So
+     `{ + (email: tstr // phone: tstr) }` accepts either or both, and
+     `{ 2*2 (? a: int) }` accepts `{}` and `{a: 1}`. Refused above the
+     alternatives limit.
+   * A group containing only key-typeset entries is multiplied entry-wise
+     **only when exact**: every inner entry absorbing (`0*∞`), or a fixed
+     count `n*n` (copies are independent and entries are key-disjoint by the
+     determinism rule, so each entry's total is an interval `[n·min, n·max]`).
+     Otherwise refused: `{ 0*2 (2*2 tstr => int) }` has count set {0, 2, 4},
+     which no interval represents.
+   * A mixed group with maximum above one is refused.
+4. **Unsatisfiable alternatives are dropped**, not refused (A11): two
+   entries with the same literal key in one alternative (as `$$ext //=`
+   composition produces) make that alternative unsatisfiable. If every
+   alternative is dropped the map type is empty, which is a warning.
 
-1. Read the key. Look its encoded bytes up **once** in the schema-wide literal
-   key table (open addressing over a hash of the key bytes), giving a literal
-   key id or none. If any live alternative has key-typeset entries, evaluate
-   the key item once against the union of those key typesets.
-2. Collect the **value set**: the union of value typesets of every entry, in
-   any live alternative, whose key matched. Evaluate the value item once
-   against it.
-3. For each live alternative, assign the pair (§4.3.2) or kill the
-   alternative.
-4. If no alternative is live, fail here (§6).
+#### 4.3.2 Assignment inside one alternative
 
-At the end, kill alternatives with an entry below its minimum. The matched
-subset is the `MAP` leaves with a surviving alternative. Because keys arrive
-in the profile's sorted order and duplicates are refused by the profile scan,
-a literal key can be consumed at most once per alternative without a "seen"
-check beyond the entry counter.
+RFC 8610 map matching is existential. snug assigns greedily and refuses at
+compile time any alternative where greedy and existential could disagree
+(D011):
 
-#### 4.3.1 Why this is sound where the crate is not
-
-The crate decides membership with local, greedy checks against one
-alternative at a time and reuses state across alternatives, which is how
-`{ a: int, b: int // a: int }` accepts `{a: 1, b: "x"}` and how `key: key`
-loses track of a required member. Here every alternative carries its own
-counters; an alternative is closed (a pair no entry of *that* alternative takes
-kills it); and an optional group is an alternative with and without the whole
-group, never a set of independently optional members. Rule names and member
-names live in different namespaces after parsing (a member name is a pool
-literal), so `key: key` cannot collide.
-
-#### 4.3.2 Assignment: greedy priority, proven equal to RFC semantics
-
-RFC 8610 map matching is existential: some assignment of pairs to entries
-satisfies every occurrence. Searching assignments is a bipartite matching
-problem; snug instead assigns greedily and **refuses at compile time any map
-in which greedy and existential could disagree** (D011):
-
-* Priority: literal-key entries first, then key-typeset entries in source
+* **Priority**: literal-key entries first, then key-typeset entries in source
   order. A pair goes to the first entry whose key and value matched and whose
   counter is below its maximum.
-* A **cut** (`^ =>`, and every `name:`/`value:` member, which implies a cut,
-  RFC 8610 §3.5.4) on a literal-key entry whose key matched and whose value did
-  not kills the alternative. Without a cut the pair may fall through to a
-  key-typeset entry.
-* **Determinism rule.** If two entries of one alternative have overlapping key
-  domains, the lower-priority one must be *absorbing* (min 0, max unbounded).
-  Under that rule greedy succeeds whenever some assignment does: giving a pair
-  to the higher-priority entry only raises that entry's count toward its
-  minimum, and the absorbing entry has no constraint to violate. Overlap is
-  decided conservatively at compile time (literal vs literal: byte equality;
+* **Determinism rule**: if two entries of one alternative have overlapping
+  key domains, the lower-priority one must be absorbing (min 0, max
+  unbounded). Overlap is decided conservatively (literal vs literal: bytes;
   literal vs typeset: run the VM on the literal's encoding; typeset vs
-  typeset: overlapping major masks and not provably disjoint), so a schema can
-  be refused that RFC semantics would allow; it is never accepted with a
-  different meaning. Everyday maps (`{ a: int, ? b: tstr }`, open maps
-  `{ a: int, * tstr => any }`, tables `{ * tstr => T }`) all pass.
+  typeset: overlapping masks and not provably disjoint).
+* **Lemma (flat, cut-free; confirmed by both reviewers, C5, A).** Under the
+  rule, every entry with a positive minimum or finite maximum has a key
+  domain disjoint from every other constrained entry, so each pair has at most
+  one constrained candidate; taking it can only help that entry's minimum,
+  and the absorbing entries have no constraint to violate. Hence greedy
+  succeeds iff some assignment does.
+* **Priority reordering is meaning-preserving only without a cut** (A6b):
+  a cut literal entry that *follows* an overlapping key-typeset entry in
+  source order is refused (`{ * tstr => any, ? "a": int }`), because the RFC's
+  "later entries" reading would let the earlier wildcard take the pair.
+* **Cuts.** A literal entry with a cut (`^ =>`, and `name:`/`value:`, which
+  imply one, RFC 8610 §3.5.4) whose key matched and whose value did not
+  **kills that alternative**. RFC 8610 says "the entire map fails to match";
+  snug applies that per alternative, which is the only reading under which
+  `kind: "a" … // kind: "b" …` works, and is stated as a deliberate choice
+  (A6a, D021). A cut entry already at its maximum when its key matches again
+  cannot occur (keys are unique). **Cuts on key typesets** (`tstr ^ => uint`)
+  are refused in revision 2 (C4, A6c).
 
-#### 4.3.3 Occurrence on groups inside maps
+#### 4.3.3 Factors (only where provably exact)
 
-A group with occurrence inside a map: a group of only literal-key entries
-cannot repeat (keys are unique), so `*`/`+`/`n*m` on it clamps to at most one
-copy (and a minimum above one is unsatisfiable, a schema error). A group of only
-key-typeset entries multiplies the entries' occurrences. A mixed group with a
-maximum above one is refused. This is the reading under which the RFC's
-existential semantics and unique keys coincide.
+Alternatives of one sequence may be stored as a product of **factors** so
+that `k` independent optional groups cost `2k` alternatives, not `2^k`. A
+factor F (a set of literal keys and its own alternatives) is kept separate
+from the **residual** (the key-typeset entries) only when one of these holds
+(A1):
 
-#### 4.3.4 Factors
+1. F's literal keys are disjoint from every residual key typeset; then pairs
+   are routed by key and the factors do not interact; or
+2. the residual has exactly one alternative and every residual entry whose
+   key domain overlaps F's keys is absorbing. Then an alternative of F that
+   does not consume a pair keyed in F survives iff the residual's **acceptance
+   predicate** holds for that pair (some overlapping absorbing entry accepts
+   key and value). The predicate does not depend on counts, so it is computed
+   once per pair and shared by every alternative of F.
 
-Alternatives are stored as a product of **factors**. Each factor owns a set of
-literal keys disjoint from every other factor's and has its own small
-alternative list; key-typeset entries live in one residual factor. A pair is
-routed to the factor owning its literal key (or to the residual), and the map
-matches when every factor has a surviving alternative. `k` independent
-optional groups cost `2k` alternatives instead of `2^k`. Factorisation is
-exact because factors share no key, so their assignments do not interact
-(the residual is evaluated last against the pairs no factor owns).
+Otherwise F merges into the residual's alternatives (plain DNF). Both
+reviewers' counterexamples (`{ ? (a: int, b: int), * tstr => any }` with
+`{a: 1}`; `{ ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }`)
+are decided correctly: the first by condition 2, the second because its
+residual has two alternatives, so F merges.
+
+#### 4.3.4 Combined evaluation
+
+For a map item and query set Q, the VM gathers the live alternatives of every
+`MAP` leaf in Q and passes over the pairs once:
+
+1. Read the key. Find its literal key id by **binary search** in the
+   schema-wide sorted key table (bytewise order = key order; no hash table,
+   so an untrusted schema cannot cluster probes; A7). If a live alternative
+   has key-typeset entries, evaluate the key once against their union.
+2. Collect the value query set: value typesets of entries, in any live
+   alternative, whose key matched. Evaluate the value once.
+3. Update each live alternative (or factor alternative) by §4.3.2/§4.3.3.
+   Alternatives are **indexed by literal key** at compile time (per map
+   leaf, for each literal key id, the alternatives naming it), and
+   alternatives with identical residuals are grouped, so a pair whose key no
+   alternative names costs one residual check per group, not one per
+   alternative (A8: 100 open-map message types do not cost 100 per pair).
+4. If no candidate survives, the map item fails here (§6).
+
+At the end, alternatives with an entry below its minimum die; the matched map
+leaves are those with a surviving alternative. **Oracle**: a brute-force
+existential matcher over small maps (exhaustive assignment) is part of the
+fuzz corpus and must agree with the VM on every generated schema the
+compiler accepts (A2, D022).
 
 ### 4.4 Arrays
 
-Each array type's group compiles to a **Glushkov automaton** (no ε-moves):
-positions, each with a typeset, a `first` set, `follow` sets and accepting
-positions. Member names inside arrays are labels only (RFC 8610 §3.4).
+Each array type's group compiles to a **Glushkov automaton** (positions with
+typesets, `first`, `follow`, accepting). Member names in arrays are labels.
+Group recursion is allowed only where it is regular (tail position, e.g.
+`g = (int, ? g)` inside an array); other group recursion is refused (A12).
 
-**Combined evaluation.** For an array item and set `S`, the live state is the
-union of the active position sets of all `ARRAY` leaves in `S`. For each
-element: the element's candidate set is the union of the typesets of every
-position reachable in one step; the element is evaluated once; the next state
-is every reachable position whose typeset matched. At the end, a leaf matches
-if one of its accepting positions is active (or its group is nullable and the
-array is empty). This is exact regular-language semantics, not greedy: unlike
-the crate (whose README warns that occurrences beyond the first indicator are
-matched greedily), `[* int, tstr]` and `[* int, int]` mean what the RFC says.
+**Combined evaluation**: the live state is the union of active position sets
+of every `ARRAY` leaf in Q; each element's query set is the union of the
+typesets of positions reachable in one step; the next state is the reachable
+positions whose typeset matched. Exact regular semantics, no greediness.
 
-**Counters.** `[* T]` is a loop. Bounded occurrence `n*m` on a **single
-entry** compiles to one position with a counter, provided the entry's typeset
-is disjoint from every position that can follow it (so the count is never
-ambiguous; checked at compile time). Otherwise bounded repetitions are
-unrolled, up to the position limit (§7); beyond it the schema is refused
-(D012). `[0*1048576 uint]` is therefore one counted position.
+**Counters (A3, C6).** Bounded occurrence `n*m` on a single entry at position
+p becomes one counted position only if **no predecessor q ≠ p of p can match
+any value p can match**. Then p is never active at the same time as a
+predecessor (an element taken by both would be in both domains), so p is
+never re-entered while active and carries a single count. The revision-1
+condition (disjoint from followers) was wrong: `[? uint, 2*3 uint, tstr]`
+and `[* (int, int), 3*3 uint]` both fail the new condition and are unrolled.
+Otherwise bounded repetitions unroll up to the position limit; beyond it the
+schema is refused (D012). `[0*1048576 uint]`, `[1*16 T]`, `[int, 0*1000 tstr]`
+qualify for counters.
 
-### 4.5 Tags, typed arrays and the fused profile checks
+### 4.5 The fused profile walk and its precedence
 
-The profile allows tags 2, 3, 4, 40 and the RFC 8746 little-endian typed
-arrays only. The VM checks their structure whatever the schema says (bignum
-length 9..128 with no leading zero; decimal `[exp, mant]` normalised with
-`−1024 ≤ exp < 0`; tag 40 shape 1..8 positive dimensions whose product equals
-the element count, data a typed array or array; typed array length a multiple
-of the element size; no NaN in float arrays). A `TAG n` leaf then evaluates
-the content against its content typeset like any other child. Tag-40 element
-counts and typed-array lengths are checked from the bytes, without decoding
-elements.
+The VM checks the profile on every item it reads, whatever the schema says.
+
+**Profile errors always win (A5a, D023).** When a schema failure is found,
+the VM stops evaluating predicates but **continues the walk in profile-only
+mode** to the end of the input (charged at the profile rate, §7). If a
+profile refusal occurs anywhere, it is reported instead of the schema
+failure. A message that is not valid profile CBOR therefore always gets a
+profile code, exactly as decode-then-validate gives today, which keeps
+3sln.me's split between "400 malformed" and "contract violation". The extra
+walk costs only on invalid messages.
+
+**Order of checks** follows cbor.mjs exactly; the scanner specification
+(`docs/scanner.md`, owned by P1.3) is the normative table, gated by a seeded
+mutation differential against cbor.mjs that compares **codes**, not just
+verdicts, with multiply-invalid inputs (C15, C16, A5b). Highlights:
+`too_large` first; `not_map` by peeking byte 0 (empty input is `not_map`);
+the item counter is incremented before the head is read; for containers and
+tags `depth` before `truncated` (arrays need ≥ n bytes left, maps ≥ 2n)
+before `too_many_entries`; `key_type` by peeking the key's major type, then
+order/duplicate after the key; tag 4 and tag 40 demand `0x82`, decode the
+inner array with its own refusals, *then* check their semantics; bignum and
+typed-array content is peeked (`bignum`/`typed_array`), its bstr head can
+fail first, and **its content is not counted as an item**; `float` before
+`non_shortest`; `f8 xx` with xx < 24 is `non_shortest`; AI 28–30 is
+`malformed`; a stray `0xff` is `indefinite`; in `cose` mode integer labels
+must be safe integers, else `key_type`.
+
+**Profile item counting is separate from predicate visits** (C15): typed
+arrays and bignums are one item each, decimal and ndarray inner arrays count
+as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
+(§4.6).
 
 ### 4.6 Controls
 
 | Control | Lowering |
 | --- | --- |
-| `.size` | text/bytes: byte-length bounds; uint: value bound `< 256^n` |
-| `.bits` | allowed-bit mask in the pool (uint: bit positions; bstr: RFC 8610 §3.8.2 numbering) |
-| `.lt .le .gt .ge .eq .ne` | numeric literal: folded into `INT`/`FLOAT` bounds; `.eq`/`.ne` with any literal: `LIT`/`NOTLIT` |
-| `.and`, `.within` | folded when both sides are the same scalar kind (range intersection); otherwise an `AND` leaf whose operands join the item's set |
-| `.regexp` | RFC 9485 I-Regexp, anchored, compiled to a code-point NFA run bit-parallel (§4.7) |
-| `.cbor T` | content of the byte string is validated as one CBOR item against T, in the same pass, counting toward depth, items and budget |
-| `.cborseq T` | content is a sequence of items matched against array type T's automaton |
-| `.default` | annotation; no effect on validation |
-| `.cat`, `.det`, `.plus` (RFC 9165) | compile-time constant folding (later phase) |
-| `.pcre`, `.abnf`, `.abnfb`, `.feature` | refused (D013) |
+| `.size` | text/bytes: byte-length interval; `uint .size n` = `0..256^n−1`; `uint .size (lo..hi)` = values whose minimal byte length is in lo..hi (study §3.1 case) |
+| `.bits` | allowed-bit mask (uint: bit positions; bstr: RFC 8610 §3.8.2 numbering, byte n>>3, bit n&7 LSB-first); vectors across byte boundaries |
+| `.lt .le .gt .ge` | numeric literal: intersect the target's interval list (bignums included when the target admits them) |
+| `.eq` | `target ∧ LIT k`, folded to `LIT k` only if the compiler proves `k ∈ target` (C8); `(tstr .size 1) .eq "aa"` is empty |
+| `.ne` | numeric target: split interval (`(0..10) .ne 5` → `0..4, 6..10`); otherwise `target ∧ NOT LIT k` (C8) |
+| `.and`, `.within` | folded when both sides are the same scalar kind (interval intersection); otherwise `AND` |
+| `.regexp` | RFC 9485 I-Regexp, anchored (§4.7) |
+| `.cbor T` / `.cborseq T` | `EMBED`: the content is validated as a **sub-validation**. Its profile, limit and schema failures kill only the `EMBED` leaf, never the message (`bstr .cbor {a: int} / bstr .size (0..16)` accepts `h'ff'`); if it is the reported failure the reason is `embedded` with a sub-code. Depth and item limits are accounted separately for the embedded document; only the budget is global. Exact span: the content must be fully consumed (`.cbor`: exactly one item; `.cborseq`: items to the end) (A4, C7). |
+| `.default` | annotation; no effect |
+| `.feature` | accepted as a no-op annotation (RFC 9165: it always matches) (A12) |
+| `.cat`, `.det`, `.plus` | compile-time folding (P3, not gated in revision 2) |
+| `.pcre`, `.abnf`, `.abnfb` | refused (D013) |
 
 ### 4.7 Regular expressions
 
-`.regexp` is RFC 9485 I-Regexp, matched against the **whole** string (RFC
-8610 §3.8.3; the crate does not anchor). It compiles to a position automaton
-over code-point ranges and runs bit-parallel over the code points (one word
-per 32 positions), so matching is `O(length × ⌈positions/32⌉)` with no
-backtracking, independent of the host regex engine (JS `RegExp` backtracks and
-differs from Rust's `regex` at the edges). Counted repetition `{n,m}` unrolls
-up to the regexp position limit. Revision 1 refuses `\p{…}`/`\P{…}` (Unicode
-category tables would cost about 10–20 KB in every bundle); the multi-character
-escapes `\d \w \s` are not in I-Regexp either and are refused with a reason
-naming the I-Regexp rule (D014).
+`.regexp` is RFC 9485 I-Regexp, matched against the whole string. It compiles
+to a Glushkov automaton over code-point range classes, at most 256 positions
+(hard maximum 512), simulated as a bitset: per code point, the next state is
+the OR of the follow masks of active positions, ANDed with the positions
+whose class contains the code point. Cost per code point is
+`(active + 1) × ⌈P/32⌉` word operations and is **charged as such** (C11, A7);
+the worst case is `P × ⌈P/32⌉` = 2 048 word operations at P = 256. A class
+lookup is a binary search over the regexp's range table. Counted repetition
+unrolls within the position limit. `\p{…}` is refused in revision 2 (D014);
+so are `\d \w \s` and `\x..`, which are not I-Regexp (the CDDL string literal
+can carry `\u` escapes instead).
 
-### 4.8 Semantic notes that follow from the profile
+### 4.8 Semantic notes
 
-* `float16`/`float32`/`float64` mean the **encoded width**. Under shortest-form
-  encoding, `float64` matches only values that need 64 bits and `float32`
-  refuses `1.5` (encoded as float16). This is RFC-correct and surprising;
-  contracts should say `float`. The compiler warns on `float32`/`float64`.
-* `uint` is major type 0 only (RFC 8610 prelude `uint = #0`); `integer` and
-  `unsigned` include bignums. The crate accepts tag 2 for `uint`; snug does
-  not.
-* `number` is `int / float` per the prelude; decimals are not numbers.
+* `float16`/`float32`/`float64` mean the encoded width; under shortest-form
+  encoding `float32` refuses `1.5`. Contracts should say `float`; the
+  compiler warns.
+* `uint` is major 0 only; `integer`/`unsigned` include bignums.
+* `number` is `int / float`; decimals are not numbers.
+* Undefined sockets: an undefined type socket `$x` matches nothing; an
+  undefined group socket `$$x` is the empty group (so `{ a: int, $$x }`
+  accepts `{a: 1}`; crate issue #838).
 
 ---
 
@@ -334,70 +387,55 @@ naming the I-Regexp rule (D014).
 
 ### 5.1 Pipeline
 
-1. **Lex** UTF-8 bytes (RFC 8610 Appendix B, RFC 9682 updates) into tokens
-   held as integer spans.
-2. **Parse** with a hand-written recursive-descent parser into an AST arena
-   (node kind, children, span), depth-limited. Ambiguous `name = ( … )` rules
-   are parsed as type-or-group and settled by the resolver, following the
-   grammar's ordered choice.
-3. **Resolve** names (rules, sockets `$x /=`, `$$x //=`), compose `/=` and
-   `//=` additions, unwrap `~`, enumerations `&`, and instantiate generics
-   by monomorphisation memoised on `(rule, argument typesets)`, with an
-   instantiation limit.
-4. **Check productivity**: a rule that reaches itself without passing through
-   a map, array or tag is refused (`a = a / int`, `g = (x: int, g)`).
-   Recursion through structure (`node = [* node]`) is fine; its runtime depth
-   is bounded by the profile's depth limit.
-5. **Normalise**: flatten choices into typesets, fold controls, hash-cons
-   leaves, expand map groups into factors and alternatives (§4.3), build array
-   automata (§4.4), compile regexps (§4.7), and apply the determinism rules,
-   each refusal naming the rule and source line.
-6. **Lower** to the Program (§5.2) and compute the scratch sizes the VM needs
-   (§8).
+1. **Lex** UTF-8 bytes (RFC 8610 Appendix B with RFC 9682) into spans.
+2. **Parse** (recursive descent, depth-limited) into an AST arena.
+3. **Resolve** rules and sockets, unwrap `~`, enumerations `&`, generics
+   (monomorphised, memoised on `(rule, argument typesets)`).
+4. **Check productivity**: refuse a rule reaching itself without passing
+   through a map, array or tag, and non-regular group recursion (§4.4).
+5. **Normalise** (§4.2–§4.7) with every exactness condition checked.
+6. **Close**: compute, per root and per depth, the reachable leaf sets
+   `R_0 = Q_root ∪ deps`, `R_{k+1} = closure(children(R_k))` (one chain per
+   root, periodic after at most |leaves| steps) and from them the maximum
+   width, live alternatives, entries, array positions and regexp state needed
+   at each depth (A8). These are both the scratch sizes and the published
+   per-item cost bound.
+7. **Lower** to the Program.
 
-The prelude (RFC 8610 Appendix D) is CDDL text compiled with the user's text,
-so it is defined in exactly one place. Tags the profile refuses (`tdate`,
-`uri`, `bigfloat`, …) remain in the prelude and simply never match valid
-profile data.
+The prelude (RFC 8610 Appendix D) is CDDL text compiled with the schema.
 
-### 5.2 The Program (interface between compiler and VM)
+**Compile budget (C12, A7).** Every phase charges a compile budget (default
+10 M steps): AST nodes, instantiations, every alternative produced before the
+alternatives limit is checked, every Glushkov follow edge, every unrolled
+position, pool bytes. Expansions are checked **prospectively** (a product is
+computed as a count before it is materialised; multiplications saturate), so
+`g<T> = [g<[T, T]>]` or many independent choices are refused when their size
+is known, not after building it.
 
-One `Int32Array` with a header and sections, plus one `Uint8Array` pool. All
-references are section-relative integer offsets; there are no host objects.
+### 5.2 The Program
 
-| Section | Contents |
-| --- | --- |
-| header | magic `SNUG`, format version, hash of the schema text and options, section offsets, scratch sizes, limits baked in |
-| rules | exported rule names (pool spans) → root typeset |
-| typesets | length-prefixed sorted leaf id lists |
-| leaves | `kind, major-mask, operands…` fixed-width records |
-| literal keys | open-addressing table: key-bytes hash → literal key id; per id, pool span |
-| maps | per `MAP` leaf: factors → alternatives → entries `(key-lit-id or key typeset, value typeset, min, max, cut)`; per alternative a small sorted `(key-lit-id → entry)` index |
-| arrays | per `ARRAY` leaf: positions `(typeset, min, max)`, first, follow lists, accepting set |
-| regexps | per regexp: position count, code-point range classes, follow masks |
-| bits/ranges | `.bits` masks, numeric bounds (pool spans) |
-| pool | literal encodings, rule and member names, bound magnitudes |
+One `Int32Array` (header, rules, typesets, leaves, sorted key table, maps with
+factors, alternatives, entries and per-key indexes, arrays, regexps, bounds)
+plus a byte pool. Exact layout: `docs/program.md`, frozen before the compiler
+and VM are built in parallel (D015).
 
-The exact field layout is specified in `docs/program.md` (owned by the
-compiler work item, reviewed by the VM work item, frozen before either is
-implemented past a spike; D015). A Program is produced in-process by the
-compiler. If a host caches it, it is loaded through a structural verifier
-(every offset in range, every id below its count, acyclic where required) so
-that a corrupted cache can only be refused, never crash the VM.
+**Serialisation is first-class** (A9c): a runtime-only bundle can validate
+with Programs compiled elsewhere (at build time, or by a lazily loaded
+compiler). A serialised Program carries a format version, the snug version
+and the **SHA-256 of (schema text, options, snug version)**. It must come from
+a store the host trusts (a cache is not an authentication mechanism, C18);
+the loader still runs a structural verifier (offsets and ids in range,
+counts consistent, scratch sizes recomputed from the closure data rather than
+read), and every VM access is a checked access, so a corrupt Program can give
+a wrong verdict but never a crash or an out-of-bounds read.
 
 ### 5.3 Profiles
 
-The compiler takes a **profile**: a set of feature switches and limits.
-
-* `full` — everything §4 supports.
-* `bindle` — the study's §9.1 profile: no sockets, no `.cborseq`, no unwrap,
-  no cuts beyond the implied ones, non-recursive generics, text and integer
-  map keys only.
-* `bus` — `bindle` minus `.regexp`, every string and container bounded, schema
-  text ≤ 16 KiB (study §9.1 "bus manifests").
-
-Profiles only ever refuse; they never change the meaning of a schema they
-accept.
+`full` (everything §4 supports), `bindle` (study §9.1: no sockets, no
+`.cborseq`, no unwrap, no explicit cuts, non-recursive generics, text and
+integer map keys), `bus` (`bindle` minus `.regexp`, every string and
+container bounded, schema text ≤ 16 KiB, recursion refused). Profiles only
+refuse; they never change the meaning of what they accept.
 
 ---
 
@@ -405,126 +443,143 @@ accept.
 
 A failed validation returns `{reason, path}`.
 
-* **Reasons** (stable codes): `type`, `missing`, `unexpected`, `value`,
-  `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `cbor` (profile
-  refusal, with the profile sub-code: `non_shortest`, `indefinite`,
-  `key_order`, `duplicate_key`, `key_type`, `text`, `float`, `bignum`,
-  `decimal`, `typed_array`, `ndarray`, `simple`, `trailing`, `truncated`), and
-  limit codes (`depth`, `too_many_entries`, `too_many_items`, `too_large`,
-  `budget`). The CBOR sub-codes are cbor.mjs's `CBORFault` codes, so 3sln.me's
-  vectors can assert them.
-* **Path**: a list of segments, each an array index, a schema literal key
-  (named by its pool id, rendered from the schema text, never from the data),
-  `*` for a data key the schema does not name, or `#tag`.
-* **Which failure is reported.** Validation fails at the first point, in
-  document order, where the set of live possibilities becomes empty, or at the
-  first profile violation, whichever comes first; the VM stops there. A child
-  item whose own set empties reports from inside itself. If the child matched
-  something but every parent alternative died at that pair, the parent reports
-  `value` (a key some alternative named) or `unexpected` (none did) at the
-  pair's path. Missing members are reported at map end from the first
-  alternative, in compile order, among those that survived longest. All of
-  this is a function of the bytes and the Program only (R6).
-* Schema compile errors are `{code, line, column, rule}` and may quote schema
-  text (the schema is not payload).
+**Reasons.** Schema: `type`, `missing`, `unexpected`, `value`, `size`,
+`range`, `pattern`, `tag`, `bits`, `embedded`. Profile (`cbor/<code>`, the
+complete cbor.mjs `CBORFault` list): `truncated`, `non_shortest`,
+`indefinite`, `malformed`, `key_type`, `key_order`, `duplicate_key`, `text`,
+`float`, `simple`, `tag`, `bignum`, `decimal`, `typed_array`, `ndarray`,
+`trailing`, `depth`, `too_many_entries`, `too_many_items`, `too_large`,
+`not_map`. Validator: `budget` (C16, A5c).
+
+**Which failure (D024; C14, A4, A10).**
+
+1. A profile failure anywhere wins (§4.5); it is the first in walk order.
+2. Otherwise the schema failure is the **deepest point at which a query set
+   became empty such that every ancestor then also failed**. The VM keeps one
+   "pending witness" slot: when a child's matched set is empty it records the
+   child's witness; if the parent survives anyway (another candidate did not
+   need that child, as in `#6.2(bstr .size 9) / integer`), the slot is
+   cleared. When the root fails, the slot holds the witness.
+3. A witness at a scalar names the reason of the **first queried leaf in leaf
+   id order whose major mask admits the item** (`(uint .lt 3) / 9` on `5`:
+   `range`, because the `uint` leaf has the lower id), or `type` if no leaf
+   admits its major type.
+4. A witness at a map pair: `value` if some candidate alternative named the
+   key, else `unexpected`. At map end: `missing`, naming the first entry, in
+   source order, with unmet minimum, of the alternative that died **last**
+   (at the latest pair index), ties broken by lowest alternative index
+   (deterministic compile order).
+5. A witness at an array: `type` at the first element no position accepted,
+   or `missing` at the end (array too short) / `unexpected` (too long).
+
+**Paths.** Segments are array indexes; schema literal keys, rendered from the
+Program only, and **only if a live alternative in that map context names the
+key** (otherwise `*`, so the path never reveals that the payload carried a
+key some unrelated rule names; A10); `*` for unnamed data keys; `#tag` as a
+fixed marker (never the received tag number; C14); `cbor` for embedded
+content. Schema compile errors are `{code, line, column, rule}`.
 
 ---
 
-## 7. Limits
-
-Every limit is explicit, has a default and a hard maximum, and is part of the
-Program header so a Program records what it was compiled under.
+## 7. Limits and the cost model
 
 | Limit | Default | Hard max | Where |
 | --- | --- | --- | --- |
-| schema text bytes | 256 KiB (`bus`: 16 KiB) | 1 MiB | compile |
+| schema text bytes | 256 KiB (`bus` 16 KiB) | 1 MiB | compile |
+| parser nesting depth | 64 | 256 | compile |
 | AST nodes | 65 536 | 1 048 576 | compile |
 | generic instantiations | 1 024 | 16 384 | compile |
-| alternatives per map factor | 64 | 1 024 | compile |
+| alternatives per map sequence (after factoring) | 64 | 1 024 | compile |
 | array positions per array type | 256 | 4 096 | compile |
-| regexp positions | 256 | 2 048 | compile |
-| typeset width (leaves in any reachable set) | 256 | 4 096 | compile, checked conservatively |
-| Program size (int32 words) | 1 Mi | 16 Mi | compile |
-| input bytes | 1 500 000 | 2^31 − 1 | validate (profile) |
-| depth (a tag counts) | 32 | 256 | validate (profile) |
-| entries per container | 65 536 | 2^24 | validate (profile) |
-| items per message (typed array = 1) | 131 072 | 2^24 | validate (profile) |
-| bignum content bytes | 128 | 4 096 | validate (profile) |
+| regexp positions | 256 | 512 | compile |
+| reachable width per depth (closure) | 256 | 4 096 | compile |
+| pool bytes | 1 MiB | 16 MiB | compile |
+| Program + pool + scratch bytes | 8 MiB | 64 MiB | compile (refused before allocation) |
+| compile budget (steps) | 10 M | 2^31 − 1 | compile |
+| input bytes | 1 500 000 | 2^31 − 1 | validate |
+| depth (a tag counts) | 32 | 256 (≤ compiled) | validate |
+| entries per container | 65 536 | 2^24 | validate |
+| items per message | 131 072 | 2^24 | validate |
+| bignum content bytes | 128 | 4 096 | validate |
 | step budget | 4 000 000 | 2^31 − 1 | validate |
 
-**The step budget** charges one unit per (item, leaf) evaluation, one per
-(pair, live alternative) assignment, one per (element, active position)
-transition, and `⌈positions/32⌉` per code point per regexp. Exhausting it is
-the `budget` reason, reached at the same point on every host. The default is
-sized from measurement in Phase 4 so that the worst budget-bounded input stays
-under 50 ms in workerd on the reference machine (to be recorded).
+Per-call validation limits may only **lower** the compiled ones (A8): depth
+and state capacity were sized at compile time.
+
+**Charging (A7, C9, C10).** One budget unit is a bounded amount of work, and
+every loop whose trip count depends on input or schema charges per trip:
+
+| Work | Charge |
+| --- | --- |
+| item head + major-mask filter | 1 + \|Q\| |
+| leaf evaluation (scalar) | 1 per leaf |
+| content scans (UTF-8, `.bits`, typed-array NaN, literal compare) | 1 per 64 bytes per scan |
+| regexp step | `(active + 1) × ⌈P/32⌉` per code point, plus the class search |
+| key binary search | ⌈log2 keys⌉ |
+| map pair | 1 per candidate entry tested + 1 per live alternative group updated |
+| array element | 1 per follow edge traversed + 1 per active position |
+| AND / NOT / EMBED dependency | 1 per dependency |
+| profile-only continuation (§4.5) | 1 per item + 1 per 64 content bytes |
+
+Budget arithmetic saturates. The default 4 M units is calibrated in Phase 4
+so that the worst budget-bounded input stays under 50 ms in workerd on the
+reference machine (recorded).
 
 ---
 
 ## 8. Memory model
 
-* **Compiled schema** = Program + scratch arenas, sized by the compiler from
-  the limits and widths: a set stack (depth × max width), map alternative
-  counters (depth × max live alternatives × entries), array state (depth × max
-  positions), regexp state vectors, the path stack. All `Int32Array`, allocated
-  once per compiled schema, reused by every validation. JS is single-threaded
-  and validation is synchronous, so a schema's scratch is never shared by two
-  validations at once; a re-entrant call (from a host callback) is impossible
-  because the VM calls no host code.
-* **Validation** allocates nothing. Input is read in place (no copy into
-  another heap, unlike the wasm build in the study, which copies every input
-  into linear memory that never shrinks).
-* **Builder** allocates exactly the output values.
-* **Recursion.** The VM recurses on containers, bounded by the depth limit
-  (default 32, max 256) plus `.cbor` nesting (which counts toward depth), so
-  host stack use is bounded and small. An explicit-stack VM, which would allow
-  resuming on chunked input, is deferred (D016): 3sln.me receives whole bodies
-  of at most 1.5 MB, and recursion is faster in JS.
+* **Scratch** is sized from the closure data (§5.1 step 6): per depth, the
+  set, alternative counters, array state, regexp vectors and path stack that
+  can be live at once, aggregated over all leaves that can be queried
+  simultaneously, not per type (C13). The Program records the requirement;
+  compile refuses a schema whose Program + pool + scratch exceeds the cap.
+* **One scratch per isolate, not per schema** (A8): JS validation is
+  synchronous and the VM calls no host code, so a single lazily grown scratch
+  (grown to the largest compiled requirement, releasable) serves every
+  compiled schema. 1 000 cached bus manifests cost their Programs, not 1 000
+  scratch arenas. In Rust, `validate` takes a `&mut Scratch` (or a per-thread
+  pool); the JS single-thread argument is not assumed there (C13).
+* **Validation** allocates nothing and reads input in place.
+* **Builder** allocates exactly the output values. Input stability (C17): the
+  JS `decode` refuses `Uint8Array`s backed by a `SharedArrayBuffer` (or, with
+  an option, snapshots them first), because another agent could change the
+  bytes between the checking and building passes; user wrapper constructors
+  are called only after building completes.
+* **Recursion** is bounded by the compiled depth (D016).
 
 ---
 
 ## 9. The codec
 
-* **decode(bytes, opts)** = VM against `any` (profile checks), then the
-  builder. **schema.decode(bytes, rule)** = VM against the rule, then the
-  builder: one checking pass and one building pass, no allocation before the
-  message is known to be valid, so a hostile 1.5 MB message costs one scan.
-* **Value mapping** follows profile §2 and §6 exactly (numbers within
-  ±(2^53−1), otherwise `bigint`; fresh `Uint8Array` copies; null-prototype maps
-  by default or `Object.prototype` maps with members defined, never assigned;
-  `Decimal` (tag 4), `NDArray` (tag 40), native typed arrays or `Float16Bytes`).
-  snug names its wrapper classes generically; 3sln.me can adopt them or pass
-  its own constructors.
-* **encode(value, opts)** is hand-written JS mirroring cbor.mjs's rules
-  (shortest heads and floats, key sort by encoded bytes, refusals, `cose` and
-  `omitUndefined` options). Its output is checked by decoding it in tests.
-* A **fused single-pass decode** (the VM driving the builder through
-  callbacks) is the obvious next step if the two-pass design measures badly; it
-  is deferred (D017) because it puts host calls in the hot loop and gives up
-  "nothing allocated before the message is valid".
+* `decode(bytes, opts)` = VM against `any`, then the builder.
+  `schema.decode(bytes, rule)` = VM against the rule, then the builder, with
+  the **same** `top`/`cose`/`objects` options passed to both (A14).
+* Value mapping follows profile §2 and §6 exactly (see `host/js`).
+* `encode(value, opts)` is hand-written per host with cbor.mjs's rules.
+* **D017 (two-pass)** stays provisional: the measure is end-to-end
+  check-plus-build latency against cbor.mjs, and against a fused prototype if
+  the second pass dominates; invalid-input allocation behaviour and
+  text-heavy bodies are reported (C22, A14).
 
 ---
 
 ## 10. Targets
 
-* **JavaScript** through a kin JS target defined in snug's own tree (a
-  `kin.lang` extension map plus a target map), the experiment the owner
-  allowed (D005). Output: ES2022 modules, `Int32Array`/`Uint8Array`, integer
-  operations coerced with `| 0` and `>>> 0` where the vocabulary's tag says
-  so.
-* **Rust** through kin's shipped Rust target; the Rust host is used for
-  native tests, differential testing against the `cddl` crate (natively, so
-  the crate's wasm32 integer bug does not muddy the oracle), and a
-  `wasm32-unknown-unknown` build for the JS-host comparison.
-* **Go, Java, C#** are not targets in revision 1 (D006). The vocabulary is
-  written so that adding them is adding arms.
+* **JavaScript** through a kin JS target defined in snug's tree (D005).
+* **Rust** through kin's Rust target: native tests, the differential oracle
+  host, and the wasm build.
+* **Go, Java, C#**: not in revision 2 (D006).
 
-**The JS target is an experiment with an exit.** Phase 1 builds it and
-measures the generated profile scanner against a hand-written JS scanner and
-against the same kin source compiled to wasm. Criteria (D005): generated JS no
-worse than 1.25× hand-written on the scanner benchmark and smaller than the
-wasm build after gzip; otherwise JS consumers get the wasm build with a
-hand-written JS host, as emon and nome do (emon D001).
+**The JS target decision is taken twice (C21, A9d).** P1.4 is an early gate on
+the scanner (generated JS ≤ 1.25× hand-written; cold start and size reported).
+The binding decision is taken in P4.3 on representative compiled schemas and
+hostile cases, with complete artefacts: runtime and compiler sizes separately,
+cold start (import/compile + first call) in Node and workerd, steady-state
+latency, peak memory including the wasm input copy, and a zero-disagreement
+JS-vs-Rust fuzz gate as a precondition. If generated JS loses there, JS
+consumers get the wasm build (whose memory stays fixed, since validation
+allocates nothing) with the hand-written JS host.
 
 ---
 
@@ -532,44 +587,90 @@ hand-written JS host, as emon and nome do (emon D001).
 
 | Alternative | Verdict |
 | --- | --- |
-| Validate host values decoded by the strict codec (the study's §9.1 recommendation: a JS validator over decoded values) | Rejected as the core: it is host-specific (one implementation per language, no kin), it allocates the whole value before refusing, and set-based evaluation over a tree is the same algorithm either way. Value-level checks remain possible as encode-then-validate, which 3sln.me does anyway for results it sends. |
-| Ordered trial with backtracking plus memoisation of `(item, type)` | Rejected: memo tables are memory proportional to the input (R3) and still need error-shaping per alternative. |
-| Precompiled full DFA over typesets | Rejected: state explosion on choice-heavy schemas. A lazy, bounded cache is a later optimisation. |
-| Bipartite matching for maps | Rejected for revision 1: the determinism rule (§4.3.2) makes greedy exact on every map the study transcribed; matching can be added for refused schemas if one matters. |
-| Host regex engines | Rejected: backtracking (ReDoS) in JS, divergent semantics across hosts (R6). |
-| The Rust `cddl` crate, patched, compiled to wasm | Rejected per the study §9.2; kept as a native development oracle. |
-| Fused single-pass decode + validate + build | Deferred (D017); measured in Phase 4. |
-| Writing the compiler by hand in JS only, with only the VM in kin | Rejected: the compiler enforces the untrusted-schema limits and the determinism rules, which must agree across hosts; and a Rust consumer would have no compiler. |
+| Validate host values decoded by the strict codec (study §9.1) | Rejected as the core: host-specific, allocates before refusing. Encode-then-validate covers values. |
+| Ordered trial with backtracking (+ memo) | Rejected: memo memory proportional to input; error shaping per alternative. |
+| Full DFA over typesets | Rejected: state explosion; lazy bounded cache later. |
+| Bipartite matching for maps | Deferred: the determinism rule is exact on every study contract; matching can be added for refused schemas. |
+| Host regex engines | Rejected: ReDoS, divergence across hosts. |
+| The `cddl` crate, patched | Rejected per study §9.2; native oracle only. |
+| Fused single-pass decode | Deferred (D017). |
+| Compiler hand-written in JS, VM in kin | Rejected: limits and exactness rules must agree across hosts. |
+| Hash table for literal keys | Rejected in revision 2: probe clustering under untrusted schemas; sorted table + binary search instead (A7). |
+| Kin-side decimal→binary64 parsing | Rejected: a big-integer algorithm in kin for a compile-time-only conversion; a host port restricted to ≤ 17 significant digits is exact on both hosts (D020). |
 
 ---
 
-## 12. Benchmark plan (Phase 4; numbers recorded in `bench/README.md` with environment)
+## 12. Benchmark plan (Phase 4; `bench/README.md` with environment)
 
-All on one machine, Node 24 and local workerd, median of interleaved runs,
-warm and cold, answers checked:
-
-1. **Profile decode** of the 3sln.me vectors and synthetic RPC bodies (small
-   287 B put; 1 MiB `bstr` put; 120 000-item array; 1 MiB typed arrays; nested
-   maps): snug decode vs cbor.mjs decode.
-2. **Encode**: snug vs cbor.mjs on the same values.
-3. **Validate** the six study contracts with their probe values: snug (JS) vs
-   snug (wasm via Rust) vs the `cddl` crate's wasm build from the study.
-4. **Hostile**: the study's crafted inputs (invalid 1.4 MB against a six-way
-   choice; 2^32−1 declared lengths; 10^6-deep nesting) — time and memory high
-   water, must be bounded.
-5. **Compile** time for each contract and for a 16 KiB generated schema.
-6. **Size**: min+gzip and brotli of the JS bundle; wasm size after
-   `wasm-opt -Oz`.
-7. **Kin cost**: the generated JS scanner vs a hand-written JS scanner (the
-   D005 criterion).
+1. Profile decode vs cbor.mjs: vectors; 287 B put; 1 MiB bstr put; 120 000
+   integers; 1 MiB typed arrays; map-heavy and text-heavy 1.4 MB bodies.
+2. Encode vs cbor.mjs.
+3. Validate the six study contracts: snug JS vs snug wasm vs the crate's wasm
+   build.
+4. Hostile: invalid 1.4 MB vs six-way choice; declared 2^32−1 lengths; deep
+   nesting; worst budget-bounded inputs per charging row (§7): time and
+   memory high water.
+5. Compile time: each contract; a 16 KiB generated schema; worst
+   compile-budget schemas.
+6. Size: runtime and compiler, min+gzip and brotli; wasm after `wasm-opt -Oz`.
+7. Cold start: Node and workerd, JS import vs wasm compile+instantiate.
+8. Kin cost: generated vs hand-written JS scanner.
 
 ---
 
 ## 13. Open questions (not to be guessed)
 
-1. Project controls 3sln.me needs and CDDL lacks (equal-length columns,
-   uniqueness, code-point length, decimal value bounds): names and whether
-   they belong in snug or in a 3sln.me extension hook. Deferred to the owner.
-2. Whether `\p{…}` support is worth its table size.
-3. Whether a Program serialisation format should be stable across snug
-   versions (cacheable in Workers KV) or always recompiled.
+1. Project controls (equal-length columns, uniqueness — O(n log n) with
+   scratch from the entries limit — code-point length, decimal bounds): in
+   snug or a 3sln.me extension hook; names.
+2. `\p{…}` worth its table size?
+3. Program serialisation stability across snug versions (first-class within
+   a version).
+
+---
+
+## 14. What revision 2 changed (summary)
+
+Top-level map `//` split into map leaves; group occurrence exact or refused;
+factors only under proven conditions; counter condition on predecessors;
+typeset cuts refused; cut-after-wildcard refused; obligations for AND/NOT;
+`.cbor` local with its own accounting; profile errors win with a profile-only
+continuation; a defined witness rule; paths only name keys a live
+alternative names; sorted key table; a real charging model and a compile
+budget; closure-based width and scratch; one scratch per isolate; LITSET;
+`.eq`/`.ne` lowering by intersection; float literals through a host port;
+runtime/compiler split with first-class Programs; the D005 decision taken
+twice; D003 narrowed to bytes.
+
+## 15. Review disposition
+
+| Finding | Disposition |
+| --- | --- |
+| C1, A2 group occurrence | Accepted: §4.3.1 (3). |
+| C2 nullable literal groups | Accepted: §4.3.1 (3). |
+| C3, A1 factors | Accepted: §4.3.1 (1), §4.3.3. |
+| C4, A6c typeset cuts | Accepted: refused (§4.3.2). |
+| C5 flat greedy lemma holds | Recorded as the lemma (§4.3.2). |
+| C6, A3 counters | Accepted: predecessor condition (§4.4). |
+| C7 obligations, embedded locality | Accepted: §4.1, §4.6. |
+| C8 literal-control lowering | Accepted: §4.6. |
+| C9, C10, A7 cost/budget | Accepted: §7 charging table. |
+| C11 regexp complexity | Accepted: §4.7 states the simulation and its charged cost. |
+| C12 compile budget | Accepted: §5.1. |
+| C13, A8 memory | Accepted: §5.1 step 6, §8. |
+| C14, A10 error ties, path leak | Accepted: §6. |
+| C15, C16, A5 profile counting, precedence, codes | Accepted: §4.5, §6; forwarded to P1.3 with the mutation differential as its gate. |
+| C17 shared input | Accepted: §8. |
+| C18 verifier ≠ integrity | Accepted: §5.2 (trusted store + checked accesses). |
+| C19 encoder refusals vs D003 | Accepted: D003 narrowed (§2). |
+| C20 underspecified semantics | Accepted: §4.6 table; discriminating vectors required in P3.5. Project controls remain an owner question (§13). |
+| C21, A9d D005 too narrow | Accepted: §10. |
+| C22, A14 D017, size target | Accepted: §9; R9 split into runtime/compiler. |
+| A4 local failures | Accepted: §6 rule 2, §4.6. |
+| A6a, A6b cut reading, priority | Accepted: D021, §4.3.2. |
+| A9a checked access, wrapping | Accepted: §3; forwarded to P1.1. |
+| A9b float literal parsing | Accepted: host port (D020). |
+| A9c Program serialisation | Accepted: §5.2. |
+| A11 duplicate literal keys | Accepted: §4.3.1 (4). |
+| A12 coverage gaps | Accepted: `#6.<type>`, `#7.n`, bare `#6`/`#7` (§4.2), undefined sockets (§4.8), regular group recursion (§4.4), `.feature` no-op (§4.6). |
+| A13 project controls | Recorded for the owner (§13). |

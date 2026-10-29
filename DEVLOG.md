@@ -24,8 +24,8 @@ Claude and Codex subagents.
 
 ## Current milestones
 
-1. [~] **P0 — Design and skeleton.** Architecture written; independent review
-   pending.
+1. [x] **P0 — Design and skeleton.** Architecture revision 2 after two
+   independent reviews (Codex, Claude); every finding dispositioned.
 2. [ ] **P1 — kin toolchain, JS target experiment, profile scanner.**
 3. [ ] **P2 — JS host codec** (value builder, encoder) against 3sln.me's vectors.
 4. [ ] **P3 — CDDL compiler and validator VM.**
@@ -77,16 +77,31 @@ vectors, fuzz and limits are scripts that print `ok`/`FAIL`, not prose.
   *Done when*: written; decisions D001–D017 recorded.
   *Done 2026-10-29.*
 
-- [ ] **P0.4 — Independent design review.**
+- [x] **P0.4 — Independent design review.**
   *Brief*: two independent reviews of `docs/architecture.md` — one Claude
-  agent, one Codex — each asked to break the soundness arguments (§4.3.2
-  greedy = existential under the determinism rule; §4.3.4 factor exactness;
-  §4.4 counters), the linearity and budget claims, the error determinism, and
-  the JS-target exit criteria. Findings answered here; the architecture
-  revised.
-  *Files*: `docs/reviews/2026-10-29-*.md`, `docs/architecture.md`.
+  agent, one Codex — each asked to break the soundness arguments, the
+  linearity and budget claims, the error determinism, and the JS-target exit
+  criteria. Findings answered here; the architecture revised.
+  *Files*: `docs/reviews/2026-10-29-{codex,claude}.md`, `docs/architecture.md`.
   *Done when*: every finding is accepted (with a change) or rebutted (with a
-  reason) in this file.
+  reason).
+  *Done 2026-10-29.* Codex: 22 findings (5 blockers/majors on matching);
+  Claude: 14 findings (3 blockers). They converged independently on the same
+  three blockers: (1) map factors are not exact when a residual wildcard can
+  take a factor's key (`{ ? (a: int, b: int), * tstr => any }` with `{a: 1}`);
+  (2) group occurrence in maps is neither clampable nor multipliable in
+  general (`{ + (email: tstr // phone: tstr) }`, `{ 0*2 (2*2 tstr => int) }`);
+  (3) the array counter condition looked at the wrong side
+  (`[? uint, 2*3 uint, tstr]`, `[* (int, int), 3*3 uint]`). Both confirmed the
+  flat cut-free greedy lemma and the type-set core. Other accepted findings:
+  AND/`.cbor` obligations and locality, `.eq`/`.ne` lowering, a real charging
+  model and compile budget, closure-based scratch sizing, one scratch per
+  isolate, profile errors winning over schema errors, cbor.mjs check order,
+  witness rules, path leaks through unrelated schema keys, SharedArrayBuffer
+  input, Program integrity, D003's host boundary, D005 evaluated twice.
+  Every finding was accepted; none rebutted. Disposition table: architecture
+  §15. Revision 2 written; D003 narrowed, D013 amended, D018–D024 added.
+  Scanner-related findings forwarded to P1.3 while in flight.
 
 ## Phase 1 — kin toolchain, JS target experiment, profile scanner
 
@@ -244,9 +259,12 @@ architecture §11); a validator-only library (rejected: duplicate profile
 logic). Evidence to confirm: P2.3/P4.3 benchmarks against cbor.mjs.
 - [ ] **Signed off** (owner)
 
-### D003 — kin owns every accept/refuse decision
+### D003 — kin owns every accept/refuse decision about bytes
 **Decision**: the compiler, the VM and the profile scanner are kin; no host
-contains a refusal.
+contains a refusal of CBOR bytes or a schema verdict. *Amended 2026-10-29
+(review C19, A10):* host-value admissibility in the encoder (classes with no
+CBOR form, sparse arrays, cycles, lone surrogates, NaN) is the host's, pinned
+by shared vectors.
 **Why**: these must agree across hosts (SPEC §7), and they are integer logic
 over bytes, which is what kin generates well.
 **Alternatives**: compiler hand-written in JS with only the VM in kin
@@ -330,7 +348,9 @@ matters).
 the position limit, else the schema is refused.
 - [ ] **Signed off** (owner)
 
-### D013 — Refused controls: `.pcre`, `.abnf`, `.abnfb`, `.feature`
+### D013 — Refused controls: `.pcre`, `.abnf`, `.abnfb` (`.feature` amended)
+*Amended 2026-10-29 (review A12):* `.feature` is accepted as a no-op
+annotation (RFC 9165: it always matches).
 **Why**: non-portable or unbounded engines; the study found `.abnf` wrong in
 the crate and the profile excludes them.
 - [ ] **Signed off** (owner)
@@ -353,6 +373,50 @@ explicit stack.
 ### D017 — Two-pass decode (check, then build); fused single pass deferred
 **Why**: nothing is allocated before a message is known valid; no host calls
 in the hot loop. Revisit if P2.3 shows the second pass costs more than ~25%.
+- [ ] **Signed off** (owner)
+
+### D018 — (reserved for P1)
+### D019 — (reserved for P1)
+
+### D020 — Float literals in schemas through a host port, ≤ 17 significant digits
+**Decision**: the compiler converts decimal float literals with a host port
+(`Number()` / `str::parse::<f64>`), refusing more than 17 significant digits
+or out-of-range values.
+**Why**: both are correctly rounded in that domain, so hosts agree bit for
+bit; kin-side exact decimal→binary64 needs big-integer code for a
+compile-time-only step (review A9b). Validation never uses host floats.
+**Alternatives**: a kin big-integer parser (deferred unless a host disagrees).
+- [ ] **Signed off** (owner)
+
+### D021 — A cut kills the alternative, not the whole map
+**Decision**: RFC 8610's "the entire map fails" for a matched cut key with a
+failing value is applied per alternative (architecture §4.3.2).
+**Why**: otherwise `{ kind: "a", … // kind: "b", … }` cannot work, which is
+the main reason to write a group choice. Documented as a deliberate reading.
+Cut literal entries following an overlapping wildcard, and cuts on key
+typesets, are refused.
+- [ ] **Signed off** (owner)
+
+### D022 — A brute-force existential map matcher is the oracle for map semantics
+**Decision**: the fuzz corpus includes an exhaustive-assignment matcher over
+small maps; it must agree with the VM on every generated schema the compiler
+accepts.
+**Why**: three of revision 1's map/array rules were wrong in ways an oracle
+would have caught (review A2).
+- [ ] **Signed off** (owner)
+
+### D023 — Profile errors always win over schema errors
+**Decision**: after a schema failure the VM continues in profile-only mode;
+any profile refusal is reported instead.
+**Why**: reproduces decode-then-validate (3sln.me's 400-vs-contract split) at
+cost only on invalid messages (review A5a).
+- [ ] **Signed off** (owner)
+
+### D024 — Failure witness rule
+**Decision**: the reported schema failure is the deepest emptied query set on
+the chain that empties the root; ties broken by leaf id, latest-dying
+alternative, source order (architecture §6).
+**Why**: one host-identical answer without payload (reviews C14, A4, A10).
 - [ ] **Signed off** (owner)
 
 ---
