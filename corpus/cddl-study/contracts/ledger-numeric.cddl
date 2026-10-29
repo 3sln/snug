@@ -1,0 +1,5 @@
+; synthetic numeric contract: bignums, decimals, typed arrays, tag 40, columnar table.
+entry = { amount: integer, ? price: decfrac / int, ? weights: #6.85(bstr .size (0..4096)),
+          ? matrix: #6.40([[2, 2], #6.86(bstr .size 32)]), ? flags: uint .bits entry-flags, series: table }
+entry-flags = &( pending: 0, disputed: 1, reconciled: 2 )
+table = { ts: #6.79(bstr) / [* int], value: #6.86(bstr) / [* float], ? label: [* tstr] }

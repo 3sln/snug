@@ -1,0 +1,325 @@
+# snug — DEVLOG
+
+The live tracker. `SPEC.md` says what snug is and changes only when a decision
+changes; `docs/architecture.md` is the design; this file says what is being
+built, in what order, and why that order. Steps, findings and decisions are
+added here as work happens. Modelled on emon's `DEVLOG.md`.
+
+**Status keys:** `[ ]` not started · `[~]` in progress · `[x]` done ·
+`[!]` blocked (say on what) · `[?]` open question, must be answered before the
+item starts.
+
+**How to take an item.** Every item has a *Brief* (what to build), *Files*
+(where), and *Done when* (the check that goes green). An item is done when its
+check is green **and** its entry here says what was learnt, with the commit. A
+decision taken while doing it gets the next `D###` in the Decisions section —
+decisions do not block work, but they must be written down. Sign-off boxes are
+the owner's and are never pre-ticked.
+
+Origin: delegated by the 3sln.me coordinator on the owner's direction
+(2026-10-29) as an experimental side project, managed by a Claude agent with
+Claude and Codex subagents.
+
+---
+
+## Current milestones
+
+1. [~] **P0 — Design and skeleton.** Architecture written; independent review
+   pending.
+2. [ ] **P1 — kin toolchain, JS target experiment, profile scanner.**
+3. [ ] **P2 — JS host codec** (value builder, encoder) against 3sln.me's vectors.
+4. [ ] **P3 — CDDL compiler and validator VM.**
+5. [ ] **P4 — Differential, fuzz, benchmarks, recommendation.**
+
+## The ordering principle
+
+**1. The decision procedure before the host.** Everything that decides
+accept/refuse is kin, so the kin toolchain (and the JS-target question) comes
+first; hosts only build values and encode.
+
+**2. Measure the experiment before betting on it.** The JS kin target is
+built against a real hot loop (the CBOR profile scanner) and measured against
+hand-written JS and the wasm build before the compiler and VM are written in
+it (D005).
+
+**3. Interfaces before parallel work.** The Program format (`docs/program.md`)
+is frozen before the compiler and the VM are built in parallel (D015).
+
+**4. Every claim is a gate.** Conformance, cross-host identity, drift,
+vectors, fuzz and limits are scripts that print `ok`/`FAIL`, not prose.
+
+---
+
+## Phase 0 — Design and skeleton
+
+- [x] **P0.1 — Name, repository, licence.**
+  *Brief*: choose a short lower-case name, `git init`, MIT licence matching
+  emon/nome (`Copyright (c) 2026 3sln`).
+  *Files*: `LICENSE`, `.gitignore`.
+  *Done when*: repository exists with no remote.
+  *Done 2026-10-29.* Name `snug` (D001). No collision in `~/Projects/@3sln`.
+
+- [x] **P0.2 — Corpus import.**
+  *Brief*: copy the study's six transcribed contracts, 66 probes, differential
+  and fuzz scripts and the oracle binding source, and 3sln.me's CBOR vectors,
+  into `corpus/`, with provenance.
+  *Files*: `corpus/cddl-study/`, `corpus/cbor-vectors/`, `corpus/PROVENANCE.md`.
+  *Done when*: files present with source paths and the 3sln.me commit.
+  *Done 2026-10-29.* 3sln.me commit `0daa2b6f`. The oracle's built wasm,
+  the crate archive and the native CLI were preserved in the session scratch
+  (`cddlproj-oracle/`), not committed (binaries; reproducible from the crate).
+  cbor.mjs copied to `bench/baseline/cbor-3sln.mjs` as the benchmark baseline.
+
+- [x] **P0.3 — Architecture and specification.**
+  *Brief*: `docs/architecture.md` (compilation model, map/choice soundness,
+  fused profile checks, memory, errors, limits, alternatives, benchmark
+  plan), `SPEC.md`, this file.
+  *Done when*: written; decisions D001–D017 recorded.
+  *Done 2026-10-29.*
+
+- [ ] **P0.4 — Independent design review.**
+  *Brief*: two independent reviews of `docs/architecture.md` — one Claude
+  agent, one Codex — each asked to break the soundness arguments (§4.3.2
+  greedy = existential under the determinism rule; §4.3.4 factor exactness;
+  §4.4 counters), the linearity and budget claims, the error determinism, and
+  the JS-target exit criteria. Findings answered here; the architecture
+  revised.
+  *Files*: `docs/reviews/2026-10-29-*.md`, `docs/architecture.md`.
+  *Done when*: every finding is accepted (with a change) or rebutted (with a
+  reason) in this file.
+
+## Phase 1 — kin toolchain, JS target experiment, profile scanner
+
+- [ ] **P1.1 — kin wiring.**
+  *Brief*: `deps.edn`, `bb.edn` (tasks `gen emit drift check`), project,
+  targets (`:js`, `:rust`), vocabulary `snug.lang` (tags `I32 U8 Bool Bytes
+  Ints`, byte and int-arena forms, `ushr`/`sar`), `kin/hello.kin`.
+  *Files*: `kin/src/snug/*.cljc`, `kin/scripts/*`, `gen/`.
+  *Done when*: `bb emit` writes JS and Rust; `bb check` runs both and they
+  agree; `bb drift` green and red on a hand edit to `gen/`.
+
+- [ ] **P1.2 — The JS kin target.**
+  *Brief*: a `kin.lang` extension map for `:js` (every form `kin.lang` ships
+  for Go) and a `:js` target map with an `:emit` producing an ES module, in
+  snug's tree (D005). Integer semantics by tag.
+  *Files*: `kin/src/snug/js.cljc`, `kin/src/snug/targets.cljc`.
+  *Done when*: the P1.1 sources and a loop/case/defdata test source generate
+  JS that `node --check`s and agrees with Rust.
+
+- [ ] **P1.3 — Profile scanner in kin.**
+  *Brief*: the CBOR profile walk (architecture §3, §4.5, profile §5) as kin:
+  heads, lengths, UTF-8 and noncharacters, key order and duplicates, floats
+  by bit tests, tags 2/3/4/40 and typed arrays, limits. Returns a profile
+  error code and offset, or ok.
+  *Files*: `kin/cbor/*.kin`, `gen/`.
+  *Done when*: every accept vector passes and every refuse vector fails with
+  cbor.mjs's code, on JS and Rust.
+
+- [ ] **P1.4 — Measure the experiment (D005 gate).**
+  *Brief*: generated JS scanner vs a hand-written JS scanner (same algorithm)
+  vs the Rust build compiled to wasm, on the benchmark inputs of architecture
+  §12; code size gzip/brotli.
+  *Files*: `bench/`, `bench/README.md`.
+  *Done when*: numbers recorded with environment; D005 confirmed or reversed.
+
+## Phase 2 — JS host codec
+
+- [ ] **P2.1 — Value builder and decode API.**
+  *Brief*: trusted builder from validated bytes to JS values (profile §2, §6);
+  `decode(bytes, opts)` = scanner + builder; options `top`, `cose`,
+  `objects`, limits.
+  *Files*: `host/js/src/*`.
+  *Done when*: all 3sln.me CBOR vectors pass (accept values deep-equal,
+  refuse codes equal); 3sln.me's seeded round-trip/mutation properties ported
+  and green.
+
+- [ ] **P2.2 — Encoder.**
+  *Brief*: `encode(value, opts)` with cbor.mjs's semantics and refusals.
+  *Done when*: vectors re-encode byte-identically; randomized
+  decode(encode(v)) properties green; refusal codes match cbor.mjs.
+
+- [ ] **P2.3 — Codec benchmarks vs cbor.mjs.**
+  *Done when*: decode and encode numbers recorded (architecture §12 items 1, 2).
+
+## Phase 3 — CDDL compiler and validator VM
+
+- [ ] **P3.1 — Program format frozen (`docs/program.md`).** (D015)
+- [ ] **P3.2 — Compiler front end** (lexer, parser, resolver, generics,
+  sockets, prelude).
+- [ ] **P3.3 — Normaliser and lowering** (typesets, map factors and
+  alternatives, determinism rule, array automata, regexps).
+- [ ] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
+  budget).
+- [ ] **P3.5 — Conformance corpus** (study probes and contracts with expected
+  verdicts corrected to RFC semantics; RFC 8610 examples; adversarial cases).
+
+## Phase 4 — Differential, fuzz, benchmarks
+
+- [ ] **P4.1 — Differential vs the `cddl` crate (native)** on its correct subset.
+- [ ] **P4.2 — Fuzz** (schemas, values, mutated bytes; hosts agree; no crash;
+  budget respected).
+- [ ] **P4.3 — Benchmarks** (architecture §12) and the 3sln.me recommendation.
+
+---
+
+## Decisions
+
+Append-only. Each entry says what was decided, why, and what else was
+considered, so a later reader does not reopen it by accident. The sign-off
+box is the owner's.
+
+### D001 — The project is called `snug`
+**Decision**: `snug`, at `~/Projects/@3sln/snug`.
+**Why**: CDDL is pronounced "cuddle"; a value that fits its schema is snug.
+Four letters, lower case, in the style of `emon`/`nome`/`kin`; no collision
+in `~/Projects/@3sln`.
+**Alternatives**: `hug` (too generic), `dill` (no meaning), `cuddle` (long).
+- [ ] **Signed off** (owner)
+
+### D002 — The CBOR codec is part of snug
+**Decision**: snug includes the strict CBOR decoder and encoder.
+**Why**: a CDDL validator for CBOR must walk CBOR bytes under the profile
+anyway — that walk is most of a decoder. Fusing the profile checks with
+validation (one pass, architecture §4) is the main performance and
+robustness win; the study's crate re-decoded with a lenient decoder of its
+own (study §0 item 6, §8 "double decoding"). Keeping the codec separate would
+mean two implementations of the profile's refusals.
+**Alternatives**: validate values decoded by 3sln.me's cbor.mjs (rejected:
+architecture §11); a validator-only library (rejected: duplicate profile
+logic). Evidence to confirm: P2.3/P4.3 benchmarks against cbor.mjs.
+- [ ] **Signed off** (owner)
+
+### D003 — kin owns every accept/refuse decision
+**Decision**: the compiler, the VM and the profile scanner are kin; no host
+contains a refusal.
+**Why**: these must agree across hosts (SPEC §7), and they are integer logic
+over bytes, which is what kin generates well.
+**Alternatives**: compiler hand-written in JS with only the VM in kin
+(rejected: architecture §11).
+- [ ] **Signed off** (owner)
+
+### D004 — Hosts own the value model, the encoder and the API
+**Decision**: the value builder and the encoder are hand-written per host.
+**Why**: a JS object, `bigint` or typed array has no kin spelling, and this is
+the part that allocates; the builder runs only on validated bytes and so
+contains no checks.
+**Alternatives**: a kin "tape" the host consumes (kept in reserve if the
+builder measures slow).
+- [ ] **Signed off** (owner)
+
+### D005 — A JavaScript kin target, as an experiment with an exit
+**Decision**: build a `:js` target in snug's tree (a `kin.lang` extension map
+and a target map; no change to kin). Keep it if, on the P1.4 benchmark, the
+generated scanner is no worse than 1.25× a hand-written JS scanner and the
+JS output is smaller than the wasm build after gzip; otherwise ship the Rust
+build as wasm with a hand-written JS host, as emon and nome do.
+**Why**: JS is the primary consumer, and the study measured wasm's costs in
+exactly this setting: linear memory that never shrinks (71 MB after one
+hostile request), an input copy per call, instance corruption after a trap,
+async compile in browsers and a separate module type in Workers. A pure-JS
+build has none of these. emon D001 rejected a JS target because wasm is "the
+same code" — true, and the deciding question here is cost on the primary
+host, which is measurable.
+**Alternatives**: wasm only (the fallback); hand-written JS (rejected: a
+second implementation to keep identical, the problem kin exists to remove).
+- [ ] **Signed off** (owner)
+
+### D006 — Revision 1 targets: JavaScript and Rust (+ wasm)
+**Decision**: `:js` and `:rust`. Go, Java and C# are not targets yet.
+**Why**: JS is the consumer; Rust is the native oracle host and the wasm
+comparison. Each further target costs a vocabulary arm per form and a host,
+with no consumer asking.
+**Alternatives**: all four of emon/nome's targets from day one (rejected: no
+consumer; adding later is adding arms).
+- [ ] **Signed off** (owner)
+
+### D007 — Licence MIT, `Copyright (c) 2026 3sln`
+**Decision**: as emon and nome.
+- [ ] **Signed off** (owner)
+
+### D008 — Validation is over CBOR bytes, not host values
+**Decision**: the VM validates bytes; host values are validated by encoding
+them.
+**Why**: one implementation for every host; no allocation before refusal;
+3sln.me encodes what it sends anyway.
+**Alternatives**: a value walker per host (rejected: per-host logic).
+- [ ] **Signed off** (owner)
+
+### D009 — No host numbers or strings in any decision
+**Decision**: integers compare as sign + magnitude bytes, floats as bit
+patterns, literals and keys as deterministic encodings (architecture §3).
+**Why**: exactness at any size (study's wasm32 bug), cross-host identity, and
+allocation-free JS.
+- [ ] **Signed off** (owner)
+
+### D010 — Type-set evaluation, never backtracking
+**Decision**: each item is evaluated once against the set of leaf types it
+may be; containers advance all candidates in parallel (architecture §4.1).
+**Why**: linear time, no memo memory, soundness by construction.
+**Alternatives**: ordered trial with backtracking (+ memo) (rejected:
+architecture §11).
+- [ ] **Signed off** (owner)
+
+### D011 — Maps: greedy priority assignment under a compile-time determinism rule
+**Decision**: architecture §4.3.2. Overlapping key domains within one
+alternative require the lower-priority entry to be absorbing; otherwise the
+schema is refused.
+**Why**: exact RFC semantics without bipartite matching; every map in the
+study's contracts passes.
+**Alternatives**: bipartite matching (deferred until a refused schema
+matters).
+- [ ] **Signed off** (owner)
+
+### D012 — Arrays: Glushkov automata; counters only where unambiguous
+**Decision**: architecture §4.4; ambiguous bounded repetitions unroll up to
+the position limit, else the schema is refused.
+- [ ] **Signed off** (owner)
+
+### D013 — Refused controls: `.pcre`, `.abnf`, `.abnfb`, `.feature`
+**Why**: non-portable or unbounded engines; the study found `.abnf` wrong in
+the crate and the profile excludes them.
+- [ ] **Signed off** (owner)
+
+### D014 — `.regexp` is anchored I-Regexp without `\p{…}` in revision 1
+**Why**: RFC 8610 §3.8.3 anchoring; RFC 9485 for portability; category tables
+cost bundle size and no current contract needs them.
+- [ ] **Signed off** (owner)
+
+### D015 — The Program format is frozen in `docs/program.md` before parallel build
+**Why**: it is the only interface between the compiler and the VM work items.
+- [ ] **Signed off** (owner)
+
+### D016 — The VM recurses (bounded); an explicit-stack VM is deferred
+**Why**: depth is bounded (32 default, 256 max); recursion is faster in JS;
+3sln.me receives whole bodies. Resumable chunked input would need the
+explicit stack.
+- [ ] **Signed off** (owner)
+
+### D017 — Two-pass decode (check, then build); fused single pass deferred
+**Why**: nothing is allocated before a message is known valid; no host calls
+in the hot loop. Revisit if P2.3 shows the second pass costs more than ~25%.
+- [ ] **Signed off** (owner)
+
+---
+
+## Findings
+
+(Measured facts worth keeping, with dates.)
+
+## Found in kin, not ours to fix here
+
+(Bullets: issue — REAL / WRONG / ours — explanation and workaround.)
+
+## Open questions for the owner
+
+- [ ] **Project controls** (equal-length columns, uniqueness, code-point
+  length, decimal value bounds): in snug, or a 3sln.me extension hook? Names?
+- [ ] **`\p{…}` in regexps**: worth ~10–20 KB of tables?
+- [ ] **Program caching**: a stable serialised Program across snug versions?
+
+## Parking lot
+
+- Lazy DFA cache over typesets (architecture §4.1).
+- Explicit-stack, resumable VM for chunked input (D016).
+- Go/Java/C# targets (D006).
+- CDDL over JSON.

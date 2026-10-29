@@ -1,0 +1,11 @@
+; preferences/v2 read result (#/$defs/result).
+result = { fragment: uri-text, revision: tstr .size (0..80), values: { * tstr => [0*16 reference] / non-array },
+           ? requiresConsent: [0*32 tstr], ? seq: safe-uint }
+safe-uint = 0..9007199254740991
+uri-text = tstr .regexp "[a-z][a-z0-9+.-]*:.+"
+non-array = int / float / tstr / bstr / bool / null / { * tstr => any } / decfrac / biguint / bignint
+reference = { id: uri-text, ? label: tstr .size (0..800), status: "available" / "unavailable",
+              contracts: [0*16 uri-text], ? methods: { * tstr => [0*64 tstr .regexp "[A-Za-z][A-Za-z0-9_]{0,63}"] },
+              ? broker: { endpoint: uri-text, origin: uri-text, resource: uri-text },
+              token-members }
+token-members = ( token: tstr .size (0..8192), token_type: "Bearer" / "DPoP", expires_at: safe-uint // )

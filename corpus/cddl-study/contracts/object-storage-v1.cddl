@@ -1,0 +1,28 @@
+; object-storage/v1 (https://3sln.me/artefacts/contracts/object-storage/v1) transcribed from its JSON Schema.
+request = { method: "capabilities", args: {} }
+        / { method: "get", args: get-args }
+        / { method: "put", args: put-args }
+        / { method: "delete", args: delete-args }
+        / { method: "presign", args: presign-args }
+
+safe-uint = 0..9007199254740991
+key = tstr .size (1..1024)          ; NB bytes, JSON Schema counted code points
+version = tstr .size (1..65535)     ; minLength 1, no upper bound in JSON Schema
+byte-range = { start: safe-uint, end: safe-uint }
+condition = { absent: true } / { version: version }
+
+get-args = { key: key, ? ifVersion: version, ? range: byte-range }
+put-args = { key: key, data: bstr .size (0..1048576), condition: condition, ? contentType: tstr }
+delete-args = { key: key, version: version }
+; The JSON Schema if/then/else on `operation` becomes a plain choice.
+presign-args = presign-write / presign-read
+presign-write = { key: key, operation: "write", ? expiresIn: 1..300, size: 0..1048576,
+                  ? contentType: tstr .size (1..100), condition: condition }
+presign-read  = { key: key, operation: "read", ? expiresIn: 1..300, ? range: byte-range, ? ifVersion: version }
+
+object-metadata = { key: key, ? name: tstr, version: tstr, size: safe-uint, ? contentType: tstr, ? modifiedAt: tstr }
+get-result = { data: bstr .size (0..1048576), object: object-metadata }
+put-result = { object: object-metadata }
+delete-result = { deleted: bool, ? physicalRetention: bool }
+presign-result = { url: tstr .regexp "https://.*", method: "GET" / "PUT", expiresAt: safe-uint,
+                   revocation: "expires-only" / "live", requiredHeaders: { * tstr => tstr }, mode: "native" / "proxy" }

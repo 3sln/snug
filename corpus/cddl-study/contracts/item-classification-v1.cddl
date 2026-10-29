@@ -1,0 +1,14 @@
+; item-classification classify arguments (docs/spec/extensions/item-classification.md §3).
+classify-args = { detail: "minimal", item: item, labels: labels }
+              / { detail: "standard", item: item, ? tags: standard-tags, labels: labels }
+              / { detail: "full", item: item, ? tags: full-tags, labels: labels }
+kind = "text" / "image" / "audio" / "video" / "document" / "other"
+media-type = tstr .regexp "[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}"
+item = { kind: kind, mediaType: media-type, size: 0..262144, data: bstr .size (0..262144) }
+     / { kind: kind, mediaType: media-type, size: 1..104857600, url: { href: tstr .regexp "https://.+", expiresAt: uint } }
+bounded<T> = [1*16 T]
+labels = bounded<label>
+label = { id: tstr .regexp "[a-z0-9][a-z0-9._-]{0,63}", description: tstr .size (1..800) }
+standard-tags = { ? language: tstr .size (1..35) }
+full-tags = { ? language: tstr .size (1..35), ? source: tstr .regexp "[a-z][a-z0-9-]{0,31}",
+              ? origin: tstr .size (1..253), ? context: bounded<tstr .regexp "[a-z0-9][a-z0-9._:-]{0,63}"> }

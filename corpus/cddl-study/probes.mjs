@@ -1,0 +1,90 @@
+// Feature probes: each probe compiles CDDL and checks verdicts on encoded values. Values encoded by the repo's strict codec.
+import {instantiate} from './load.mjs';
+import {encode,BindleDecimal,NDArray} from '/Users/raystubbs/Projects/@3sln/3sln.me/packages/core/cbor.mjs';
+const w=instantiate();
+const hex=s=>Uint8Array.from(s.replace(/\s/g,'').match(/../g),b=>parseInt(b,16));
+const B=v=>v instanceof Uint8Array&&v.__raw?v:encode(v);
+const raw=h=>{const b=hex(h);b.__raw=true;return b;};
+const P=[];
+const probe=(feature,cddl,rule,cases,note='')=>P.push({feature,cddl,rule,cases,note});
+// [value, expected]
+probe('map struct, optional, closed map','r = { a: int, ? b: tstr }','r',[[{a:1},true],[{a:1,b:'x'},true],[{b:'x'},false],[{a:1,c:2},false],[{a:'1'},false]]);
+probe('open map via * tstr => any','r = { a: int, * tstr => any }','r',[[{a:1,z:2},true],[{z:2},false]]);
+probe('table type { * tstr => int }','r = { * tstr => int }','r',[[{},true],[{x:1,y:2},true],[{x:'a'},false]]);
+probe('groups (named group, inline)','g = ( a: int, b: int )\nr = { g, ? c: int }','r',[[{a:1,b:2},true],[{a:1},false],[{a:1,b:2,c:3},true]]);
+probe('type choice','r = int / tstr','r',[[1,true],['x',true],[null,false]]);
+probe('group choice in map //','r = { kind: "a", x: int // kind: "b", y: tstr }','r',[[{kind:'a',x:1},true],[{kind:'b',y:'s'},true],[{kind:'a',y:'s'},false],[{kind:'b',x:1},false]]);
+probe('dependent members: optional group (token implies token_type, expires_at)','r = { id: tstr, ? ( token: tstr, token_type: "Bearer" / "DPoP", expires_at: uint ) }','r',[[{id:'a'},true],[{id:'a',token:'t',token_type:'DPoP',expires_at:1},true],[{id:'a',token:'t'},false],[{id:'a',token_type:'DPoP',expires_at:1},false]]);
+probe('dependent members: group choice //','r = { id: tstr, token: tstr, token_type: "Bearer" / "DPoP", expires_at: uint // id: tstr }','r',[[{id:'a'},true],[{id:'a',token:'t',token_type:'DPoP',expires_at:1},true],[{id:'a',token:'t'},false],[{id:'a',token_type:'DPoP',expires_at:1},false]]);
+probe('dependent members: named optional group','tok = ( token: tstr, token_type: "Bearer" / "DPoP", expires_at: uint )\nr = { id: tstr, ? tok }','r',[[{id:'a'},true],[{id:'a',token:'t',token_type:'DPoP',expires_at:1},true],[{id:'a',token:'t'},false]]);
+probe('unwrap ~ in array','base = [int, int]\nr = [~base, tstr]','r',[[[1,2,'x'],true],[[1,'x'],false]]);
+probe('.abnf rejects non-match','r = tstr .abnf ("x" .det rules)\nrules = \'x = 1*3DIGIT\'','r',[['12',true],['ab',false]]);
+probe('generics','bounded<T> = [0*4 T]\nr = { tags: bounded<tstr>, nums: bounded<int> }','r',[[{tags:['a'],nums:[1,2]},true],[{tags:['a','b','c','d','e'],nums:[]},false],[{tags:[1],nums:[]},false]]);
+probe('array occurrence n*m','r = [1*3 int]','r',[[[1],true],[[1,2,3],true],[[],false],[[1,2,3,4],false]]);
+probe('array record [a, b, ? c]','r = [int, tstr, ? bool]','r',[[[1,'x'],true],[[1,'x',true],true],[[1],false],[['x',1],false]]);
+probe('array trailing ambiguous [* int, tstr]','r = [* int, tstr]','r',[[[1,2,'x'],true],[['x'],true],[[1,2],false]],'README: greedy occurrence; later entries ignored');
+probe('enumeration &( )','colors = ( red: 1, green: 2 )\nr = &colors','r',[[1,true],[2,true],[3,false]]);
+probe('literal values and ranges (int)','r = 0..150','r',[[0,true],[150,true],[151,false],[-1,false]]);
+probe('range beyond 2^32 (safe-uint)','r = 0..9007199254740991','r',[[0,true],[2**40,true],[2**53-1,true],[2n**53n,false]]);
+probe('range negative beyond 2^31','r = -9007199254740991..9007199254740991','r',[[-(2**40),true],[2**40,true],[0,true]]);
+probe('float range','r = 0.0..1.0','r',[[0.5,true],[1.5,false]]);
+probe('exclusive range ...','r = 0...10','r',[[9,true],[10,false]]);
+probe('.lt/.le/.gt/.ge/.ne/.eq','r = int .ge 5','r',[[5,true],[4,false]]);
+probe('.and/.within','r = (int .ge 0) .and (int .le 9)','r',[[3,true],[10,false]]);
+probe('uint .size (bytes)','r = uint .size 1','r',[[255,true],[256,false]]);
+probe('tstr .size counts bytes','r = tstr .size (1..3)','r',[['abc',true],['abcd',false],['éé',false]],'JSON Schema maxLength counts code points; CDDL counts UTF-8 bytes');
+probe('bstr .size','r = bstr .size (0..4)','r',[[new Uint8Array(4),true],[new Uint8Array(5),false],['abcd',false]]);
+probe('.bits on uint','f = &( a: 0, b: 1, c: 2 )\nr = uint .bits f','r',[[0b111,true],[0b1000,false]]);
+probe('.bits on bstr','f = &( a: 0, b: 1 )\nr = bstr .bits f','r',[[new Uint8Array([3]),true],[new Uint8Array([4]),false]]);
+probe('.regexp basic','r = tstr .regexp "[a-z]+"','r',[['abc',true],['ABC',false]]);
+probe('.regexp anchoring (RFC 8610: whole string)','r = tstr .regexp "[a-z]+"','r',[['abc',true],['abc1',false],['1abc',false]],'XSD regexps match the whole string');
+probe('.regexp \\w \\s escapes','r = tstr .regexp "\\\\w+"','r',[['abc',true],['www',true],['a-b',false]]);
+probe('.regexp counted unicode class','r = tstr .regexp "[^\\\\x00-\\\\x1f]{1,4}"','r',[['ab',true],['abcde',false],['é',true]]);
+probe('.pcre','r = tstr .pcre "^[a-z]+$"','r',[['abc',true],['A',false]]);
+probe('.cbor embedded','inner = { a: int }\nr = bstr .cbor inner','r',[[encode({a:1}),true],[encode({a:'x'}),false],[new Uint8Array([0xff]),false]]);
+probe('.cborseq','s = [* int]\nr = bstr .cborseq s','r',[[new Uint8Array([1,2,3]),true],[new Uint8Array([0x61,0x61]),false]],'cborseq of items matched against array');
+probe('.default (annotation)','r = { ? n: uint .default 5 }','r',[[{},true],[{n:3},true],[{n:'x'},false]]);
+probe('.cat / .det (RFC 9165)','r = "a" .cat "b"','r',[['ab',true],['a',false]]);
+probe('.plus (RFC 9165)','r = 1 .plus 2','r',[[3,true],[2,false]]);
+probe('.abnf (RFC 9165)','r = tstr .abnf ("x" .det rules)\nrules = \'x = 1*3DIGIT\'','r',[['12',true],['1234',false]]);
+probe('cut ^=>','r = { "a" ^ => int, * tstr => any }','r',[[{a:1},true],[{a:'x'},false]]);
+probe('unwrap ~','base = { a: int }\nr = { ~base, b: int }','r',[[{a:1,b:2},true],[{b:2},false]]);
+probe('socket/plug $','$ext /= int\n$ext /= tstr\nr = [* $ext]','r',[[[1,'a'],true],[[null],false]]);
+probe('group socket $$','$$more //= ( ? x: int )\nr = { a: int, $$more }','r',[[{a:1},true],[{a:1,x:2},true]],'empty group socket allowed');
+probe('bignum biguint #6.2 in integer','r = integer','r',[[2n**64n,true],[-(2n**64n)-1n,true],[5,true],[1.5,false]]);
+probe('bignum via uint (prelude: uint = #0)','r = uint','r',[[2n**64n,false],[2n**64n-1n,true]],'RFC 8610: uint is major 0 only; bignum is not uint');
+probe('integer range spanning bignums','r = 0..340282366920938463463374607431768211455','r',[[2n**64n,true]],'ranges beyond 64 bits');
+probe('tag 2 explicit','r = #6.2(bstr)','r',[[2n**64n,true],[1,false]]);
+probe('decimal fraction tag 4 (prelude decfrac)','r = decfrac','r',[[BindleDecimal.from('1.5'),true],[BindleDecimal.from('-12.345'),true],[1,false]]);
+probe('decfrac with bignum mantissa','r = decfrac','r',[[new BindleDecimal(10n**30n+1n,-3),true]]);
+probe('decimal custom bounds (exponent range)','r = #6.4([e: -2..-1, m: int])','r',[[BindleDecimal.from('1.5'),true],[BindleDecimal.from('1.555'),false]],'value bounds on decimals (x-minimum) are not expressible');
+probe('typed array float32 LE tag 85','r = #6.85(bstr)','r',[[new Float32Array([1,2]),true],[new Float64Array([1]),false]]);
+probe('typed array element-count bound','r = #6.85(bstr .size (0..16))','r',[[new Float32Array(4),true],[new Float32Array(5),false]],'bound in bytes, not elements');
+probe('typed array choice (any LE int typed array)','ta = #6.69(bstr) / #6.70(bstr) / #6.71(bstr) / #6.72(bstr) / #6.77(bstr) / #6.78(bstr) / #6.79(bstr)\nr = ta','r',[[new Int32Array(3),true],[new BigInt64Array(1),true],[new Float32Array(1),false]]);
+probe('tag 40 ndarray','r = #6.40([dims: [+ uint], data: #6.86(bstr) / [* number]])','r',[[new NDArray([2,2],new Float64Array(4)),true],[new NDArray([2],[1,2]),true],[[2,[1,2]],false]]);
+probe('tag 40 shape constraint [2, *]','r = #6.40([[2, uint], #6.85(bstr)])','r',[[new NDArray([2,3],new Float32Array(6)),true],[new NDArray([3,2],new Float32Array(6)),false]]);
+probe('columnar table (map of equal-length columns)','r = { ts: #6.79(bstr) / [* int], value: #6.86(bstr) / [* float], ? label: [* tstr] }','r',[[{ts:new BigInt64Array(2),value:new Float64Array(2)},true],[{ts:[1,2],value:new Float64Array(2),label:['a','b']},true],[{ts:[1],value:'x'},false]],'equal column length not expressible');
+probe('float vs int distinction','r = float','r',[[1.5,true],[1,false]]);
+probe('int rejects float','r = int','r',[[1.5,false],[1e20,false],[3,true]]);
+probe('number accepts int and float, not decimal','r = number','r',[[1,true],[1.5,true],[BindleDecimal.from('1.5'),false]]);
+probe('float16/float32/float64 by encoding width','r = float16','r',[[1.5,true],[1.1,false]]);
+probe('tstr vs bstr','r = tstr','r',[['a',true],[new Uint8Array(1),false]]);
+probe('null/bool/any','r = { a: null, b: bool, c: any }','r',[[{a:null,b:true,c:[1]},true],[{a:false,b:true,c:1},false]]);
+probe('nested recursion','node = { v: int, ? kids: [* node] }\nr = node','r',[[{v:1,kids:[{v:2,kids:[{v:3}]}]},true],[{v:1,kids:[{v:'x'}]},false]]);
+probe('non-text map keys (CBOR int keys)','r = { 1: int }','r',[[raw('a10105'),true]],'our profile refuses int keys; validator supports them');
+probe('literal text value const','r = { method: "put" }','r',[[{method:'put'},true],[{method:'get'},false]]);
+probe('"uniqueItems" equivalent','r = [* tstr]','r',[[['a','a'],true]],'CDDL has no uniqueness operator: duplicates always pass');
+const results=[];
+for(const p of P){
+ const h=w.compile(p.cddl);
+ if(!h){results.push({feature:p.feature,status:'compile-fail',detail:w.last_error().slice(0,160),note:p.note});continue;}
+ const bad=[];
+ for(const [i,[v,exp]] of p.cases.entries()){
+  let got;try{got=JSON.parse(w.validate_cbor(h,p.rule,B(v))).ok;}catch(e){got='trap:'+e.message;w.compile('x = 1');}
+  if(got!==exp)bad.push(`case${i}: expected ${exp} got ${got}`+(got===false||got===true?' ['+w.debug_validate_cbor_raw(h,p.rule,B(v)).slice(0,140).replace(/\n/g,' ')+']':''));
+ }
+ results.push({feature:p.feature,status:bad.length?'wrong':'works',detail:bad.join('; '),note:p.note});
+ w.free(h);
+}
+for(const r of results)console.log(`${r.status.padEnd(12)} ${r.feature}${r.detail?'\n             -> '+r.detail:''}${r.note?'\n             (note: '+r.note+')':''}`);
+console.log('\nworks',results.filter(r=>r.status==='works').length,'wrong',results.filter(r=>r.status==='wrong').length,'compile-fail',results.filter(r=>r.status==='compile-fail').length);

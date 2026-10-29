@@ -1,0 +1,7 @@
+.cache/
+.emit-stamp
+dist/
+target/
+node_modules/
+*.wasm
+!corpus/**/*.wasm

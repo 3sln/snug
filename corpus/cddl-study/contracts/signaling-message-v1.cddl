@@ -1,0 +1,13 @@
+; signaling message JWS payload (docs/spec/extensions/signaling.md §7.1-7.2); JSON, validated with validate_json.
+message = invite-msg / cancel-msg / accept-msg / decline-msg / end-msg / data-msg
+common = ( bindle: "signaling-message", v: 1, iss: tstr, sub: tstr, aud: tstr,
+           sid: tstr .regexp "[A-Za-z0-9_-]{22,43}", leg: jkt, seq: 0..4095, iat: uint )
+jkt = tstr .regexp "[A-Za-z0-9_-]{43}"
+invite-msg  = { common, to: null, type: "invite", body: { kind: { artefact: tstr, version: tstr, digest: tstr },
+                profile: tstr, answer_by: uint, basis: basis, context: null / { 0*8 tstr => any }, params: { * tstr => any } } }
+basis = null / { offer_digest: tstr } / { relation: "pairing" }
+cancel-msg  = { common, to: null, type: "cancel", body: {} }
+accept-msg  = { common, to: jkt, type: "accept", body: { params: { * tstr => any } } }
+decline-msg = { common, to: jkt, type: "decline", body: { reason: "declined" / "unsupported" } }
+end-msg     = { common, to: jkt, type: "end", body: { reason: "closed" / "failed" / "timeout" } }
+data-msg    = { common, to: jkt, type: "data", body: { payload: any } }
