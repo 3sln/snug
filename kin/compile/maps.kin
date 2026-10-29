@@ -1,0 +1,642 @@
+;; Maps (architecture §4.3; program.md §7): alternatives, group occurrence,
+;; factors, the determinism rule and cuts.
+;;
+;; ENTRIES (T_ENT, 8 words): kind (0 literal key, 1 key typeset), key (bid of
+;; the key's encoding, or a typeset), value typeset, min, max (INF unbounded),
+;; cut, srcpos (source order), pos (source offset for errors).
+;; An ALTERNATIVE is a run of entry ids in T_ALTS; an ALTSET is a record in
+;; T_FACT (start, count) over (alternative offset, length) pairs in T_GEXP.
+;;
+;; `as-occur` is §4.3.1 (3) exactly: `?` adds the empty alternative;
+;; literal-only groups repeat as unions of key-disjoint alternatives (optional
+;; members expanded first, empty alternatives pad); key-typeset-only groups
+;; multiply only when every entry is absorbing or the count is fixed; anything
+;; else repeated is ERR_MAP_OCCURRENCE. `map-finish` takes the top-level
+;; sequence (one altset per entry), separates factors only under §4.3.3's
+;; conditions, checks the determinism rule (ERR_MAP_OVERLAP) and the cut rules
+;; (ERR_MAP_CUT), drops unsatisfiable alternatives, and writes the internal
+;; map (T_MAP / T_MAPD) for snug.compile.emit.
+(ns snug.compile.maps
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
+                                        INF ERR_LIM_ALTS ERR_MAP_OCCURRENCE ERR_MAP_OVERLAP ERR_MAP_CUT
+                                        ERR_INTERNAL H_R0 H_R1 H_LIM_ALTS H_SRCPOS
+                                        T_ENT T_ALTS T_GEXP T_FACT T_LSTK T_UNION T_NE T_MAP T_MAPD
+                                        T_PSTK T_STK3 T_STK4]]
+            [snug.compile.bytes :refer [nbids]]
+            [snug.compile.leaf :refer [ts-member ts-overlap]]))
+
+(defconst ^:pub ^I32 MODE_RESIDUAL 0)
+(defconst ^:pub ^I32 MODE_DISJOINT 1)
+(defconst ^:pub ^I32 MODE_ABSORB 2)
+(defconst ^I32 COUNT_MAX 16777216)
+
+(declarefn mark-all)
+
+;; ------------------------------------------------------------ entries
+
+(defn ^:pub ^I32 ew [^IntsR h ^I32 e ^I32 w] (return (vget h T_ENT (+ (* e 8) w))))
+
+(defn ^:pub ^I32 ent-new [^Ints h ^I32 kind ^I32 key ^I32 val ^I32 lo ^I32 hi ^I32 cut ^I32 pos]
+  (comment "A new entry; srcpos is the next source-order number.")
+  (let [at (vpush h T_ENT 8)
+        sp (hg h H_SRCPOS)]
+    (if (< at 0) (return (neg 1)))
+    (hs h H_SRCPOS (+ sp 1))
+    (vset h T_ENT at kind)
+    (vset h T_ENT (+ at 1) key)
+    (vset h T_ENT (+ at 2) val)
+    (vset h T_ENT (+ at 3) lo)
+    (vset h T_ENT (+ at 4) hi)
+    (vset h T_ENT (+ at 5) cut)
+    (vset h T_ENT (+ at 6) sp)
+    (vset h T_ENT (+ at 7) pos)
+    (return (quot at 8))))
+
+(defn ^I32 ent-copy-occ [^Ints h ^I32 e ^I32 lo ^I32 hi]
+  (comment "A copy of entry e with occurrence (lo, hi) (same srcpos).")
+  (let [at (vpush h T_ENT 8)]
+    (if (< at 0) (return (neg 1)))
+    (for [^I32 i 0 8]
+      (let [w (ew h e i)]
+        (vset h T_ENT (+ at i) w)))
+    (vset h T_ENT (+ at 3) lo)
+    (vset h T_ENT (+ at 4) hi)
+    (return (quot at 8))))
+
+(defn ^:pub ^Bool absorbing [^IntsR h ^I32 e]
+  (return (and (== (ew h e 3) 0) (== (ew h e 4) INF))))
+
+;; ------------------------------------------------------------ altsets
+
+(defn ^:pub ^I32 as-n [^IntsR h ^I32 a] (return (vget h T_FACT (+ (* a 2) 1))))
+(defn ^:pub ^I32 as-aoff [^IntsR h ^I32 a ^I32 i]
+  (return (vget h T_GEXP (+ (vget h T_FACT (* a 2)) (* 2 i)))))
+(defn ^:pub ^I32 as-alen [^IntsR h ^I32 a ^I32 i]
+  (return (vget h T_GEXP (+ (+ (vget h T_FACT (* a 2)) (* 2 i)) 1))))
+(defn ^:pub ^I32 alt-ent [^IntsR h ^I32 off ^I32 i] (return (vget h T_ALTS (+ off i))))
+
+(defn ^:pub ^I32 as-begin [^IntsR h] (return (vlen h T_GEXP)))
+
+(defn ^:pub as-add [^Ints h ^I32 off ^I32 len]
+  (vpush1 h T_GEXP off)
+  (vpush1 h T_GEXP len))
+
+(defn ^:pub ^I32 as-end [^Ints h ^I32 start]
+  (let [id (quot (vlen h T_FACT) 2)]
+    (vpush1 h T_FACT start)
+    (vpush1 h T_FACT (quot (- (vlen h T_GEXP) start) 2))
+    (if (erred h) (return (neg 1)))
+    (return id)))
+
+(defn ^:pub ^I32 alt-commit [^Ints h ^I32 from]
+  (comment "Move the entry ids T_LSTK[from..] into a new alternative run; answers"
+           "its offset (length = the count moved). T_LSTK is cut back to from.")
+  (let [off (vlen h T_ALTS)
+        n (- (vlen h T_LSTK) from)]
+    (if (not (charge h (+ n 1))) (return (neg 1)))
+    (for [^I32 i 0 n]
+      (let [e (vget h T_LSTK (+ from i))]
+        (vpush1 h T_ALTS e)))
+    (vtrunc h T_LSTK from)
+    (return off)))
+
+(defn ^:pub ^I32 as-none [^Ints h]
+  (return (as-end h (as-begin h))))
+
+(defn ^:pub ^I32 as-unit [^Ints h]
+  (comment "{ [] }: one empty alternative.")
+  (let [s (as-begin h)]
+    (as-add h (vlen h T_ALTS) 0)
+    (return (as-end h s))))
+
+(defn ^:pub ^I32 as-single [^Ints h ^I32 e]
+  (let [off (vlen h T_ALTS)]
+    (vpush1 h T_ALTS e)
+    (let [s (as-begin h)]
+      (as-add h off 1)
+      (return (as-end h s)))))
+
+(defn ^Bool mark-keys [^Ints h ^I32 off ^I32 len ^I32 delta]
+  (comment "Add delta to the T_UNION mark of every literal key of the alternative;"
+           "false if (delta > 0) some key was already marked: a duplicate key.")
+  (let [nb (nbids h)]
+    (if (< (vlen h T_UNION) nb)
+      (do (let [old (vlen h T_UNION)]
+            (vpush h T_UNION (- nb old)))))
+    (let [^:mut ok true]
+      (for [^I32 i 0 len]
+        (let [e (alt-ent h off i)]
+          (if (== (ew h e 0) 0)
+            (do (let [k (ew h e 1)
+                      m (vget h T_UNION k)]
+                  (if (and (> delta 0) (> m 0)) (set ok false))
+                  (vset h T_UNION k (+ m delta)))))))
+      (return ok))))
+
+(defn ^Bool alts-disjoint [^Ints h ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+  (comment "Do two alternatives name disjoint literal keys?")
+  (mark-keys h o1 l1 1)
+  (let [ok (mark-keys h o2 l2 1)]
+    (mark-keys h o2 l2 (neg 1))
+    (mark-keys h o1 l1 (neg 1))
+    (return ok)))
+
+(defn ^:pub ^I32 as-product [^Ints h ^I32 a ^I32 b ^I32 pos]
+  (comment "Every concatenation of an alternative of a with one of b; those naming"
+           "a literal key twice are unsatisfiable and dropped (§4.3.1 (4)). The"
+           "count is checked against the alternatives limit BEFORE building.")
+  (let [na (as-n h a)
+        nb (as-n h b)]
+    (if (and (> na 0) (> nb (quot (hg h H_LIM_ALTS) na)))
+      (return (fail h ERR_LIM_ALTS pos)))
+    (let [s (as-begin h)]
+      (for [^I32 i 0 na]
+        (for [^I32 j 0 nb]
+          (let [o1 (as-aoff h a i) l1 (as-alen h a i)
+                o2 (as-aoff h b j) l2 (as-alen h b j)]
+            (if (alts-disjoint h o1 l1 o2 l2)
+              (do (let [from (vlen h T_LSTK)]
+                    (for [^I32 p 0 l1] (vpush1 h T_LSTK (alt-ent h o1 p)))
+                    (for [^I32 q 0 l2] (vpush1 h T_LSTK (alt-ent h o2 q)))
+                    (let [off (alt-commit h from)]
+                      (as-add h off (+ l1 l2)))))))))
+      (if (erred h) (return (neg 1)))
+      (return (as-end h s)))))
+
+(defn ^:pub ^I32 as-union [^Ints h ^I32 a ^I32 b ^I32 pos]
+  (let [na (as-n h a)
+        nb (as-n h b)]
+    (if (> (+ na nb) (hg h H_LIM_ALTS)) (return (fail h ERR_LIM_ALTS pos)))
+    (let [s (as-begin h)]
+      (for [^I32 i 0 na] (as-add h (as-aoff h a i) (as-alen h a i)))
+      (for [^I32 j 0 nb] (as-add h (as-aoff h b j) (as-alen h b j)))
+      (return (as-end h s)))))
+
+;; ------------------------------------------------------------ occurrence
+
+(defn ^I32 alt-flags [^IntsR h ^I32 a]
+  (comment "Bit 0: some literal entry in some alternative; bit 1: some key-typeset"
+           "entry; bit 2: some alternative is empty.")
+  (let [^:mut f 0]
+    (for [^I32 i 0 (as-n h a)]
+      (let [off (as-aoff h a i)
+            len (as-alen h a i)]
+        (if (== len 0) (set f (bit-or f 4)))
+        (for [^I32 j 0 len]
+          (if (== (ew h (alt-ent h off j) 0) 0) (set f (bit-or f 1)) (set f (bit-or f 2))))))
+    (return f)))
+
+(defn ^I32 expand-optional [^Ints h ^I32 a ^I32 pos]
+  (comment "Every alternative with its optional (min 0) literal entries expanded to"
+           "present (min 1) or absent: 2^k variants each, limit-checked.")
+  (let [s (as-begin h)
+        ^:mut total 0]
+    (for [^I32 i 0 (as-n h a)]
+      (let [off (as-aoff h a i)
+            len (as-alen h a i)
+            ^:mut k 0]
+        (for [^I32 j 0 len]
+          (if (== (ew h (alt-ent h off j) 3) 0) (set k (+ k 1))))
+        (if (> k 10) (return (fail h ERR_LIM_ALTS pos)))
+        (let [variants (shl 1 k)]
+          (set total (+ total variants))
+          (if (> total (hg h H_LIM_ALTS)) (return (fail h ERR_LIM_ALTS pos)))
+          (for [^I32 v 0 variants]
+            (let [from (vlen h T_LSTK)
+                  ^:mut bit 0]
+              (for [^I32 q 0 len]
+                (let [e (alt-ent h off q)]
+                  (if (== (ew h e 3) 0)
+                    (do (if (!= (bit-and (sar v bit) 1) 0)
+                          (do (let [e1 (ent-copy-occ h e 1 1)] (vpush1 h T_LSTK e1))))
+                        (set bit (+ bit 1)))
+                    (vpush1 h T_LSTK e))))
+              (let [n (- (vlen h T_LSTK) from)
+                    noff (alt-commit h from)]
+                (as-add h noff n)))))))
+    (if (erred h) (return (neg 1)))
+    (return (as-end h s))))
+
+(defn ^I32 as-unions [^Ints h ^I32 a ^I32 lo ^I32 hi ^I32 pos]
+  (comment "§4.3.1 (3), literal-only groups: every union of between lo and hi"
+           "alternatives (empty alternatives pad) whose key sets are pairwise"
+           "disjoint. Enumerated depth-first with an explicit stack (T_STK3: the"
+           "chosen alternative indexes), stopping past the alternatives limit.")
+  (let [x (expand-optional h a pos)]
+    (if (< x 0) (return (neg 1)))
+    (let [n (as-n h x)
+          ^:mut has-empty false
+          s (as-begin h)
+          ^:mut count 0
+          lim (hg h H_LIM_ALTS)]
+      (for [^I32 i 0 n]
+        (if (== (as-alen h x i) 0) (set has-empty true)))
+      (vtrunc h T_STK3 0)
+      (comment "The empty union first, when allowed.")
+      (if (or (== lo 0) has-empty)
+        (do (as-add h (vlen h T_ALTS) 0) (set count 1)))
+      (let [^:mut next 0]
+        (forever
+         (if (not (charge h 1)) (return (neg 1)))
+         (comment "Extend with the first usable alternative at index >= next, else pop.")
+         (let [^:mut found (neg 1)
+               depth (vlen h T_STK3)]
+           (if (< depth hi)
+             (do (let [^:mut c next]
+                   (while (and (< c n) (< found 0))
+                     (if (> (as-alen h x c) 0)
+                       (do (comment "c is usable iff none of its keys is marked by the chosen ones")
+                           (let [usable (mark-keys h (as-aoff h x c) (as-alen h x c) 1)]
+                             (mark-keys h (as-aoff h x c) (as-alen h x c) (neg 1))
+                             (if usable (set found c)))))
+                     (if (< found 0) (set c (+ c 1)))))))
+           (if (>= found 0)
+             (do (mark-keys h (as-aoff h x found) (as-alen h x found) 1)
+                 (vpush1 h T_STK3 found)
+                 (set next (+ found 1))
+                 (let [j (vlen h T_STK3)]
+                   (if (and (<= j hi) (or (>= j lo) has-empty))
+                     (do (set count (+ count 1))
+                         (if (> count lim) (return (fail h ERR_LIM_ALTS pos)))
+                         (let [from (vlen h T_LSTK)]
+                           (for [^I32 q 0 j]
+                             (let [ai (vget h T_STK3 q)]
+                               (for [^I32 r 0 (as-alen h x ai)]
+                                 (vpush1 h T_LSTK (alt-ent h (as-aoff h x ai) r)))))
+                           (let [len (- (vlen h T_LSTK) from)
+                                 off (alt-commit h from)]
+                             (as-add h off len)))))))
+             (do (if (== depth 0) (break))
+                 (let [top (vget h T_STK3 (- depth 1))]
+                   (mark-keys h (as-aoff h x top) (as-alen h x top) (neg 1))
+                   (vtrunc h T_STK3 (- depth 1))
+                   (set next (+ top 1))))))))
+      (if (erred h) (return (neg 1)))
+      (return (as-end h s)))))
+
+(defn ^I32 sat-mul [^I32 a ^I32 b]
+  (if (or (== a INF) (== b INF)) (do (if (or (== a 0) (== b 0)) (return 0)) (return INF)))
+  (if (or (== a 0) (== b 0)) (return 0))
+  (if (> a (quot COUNT_MAX b)) (return INF))
+  (return (* a b)))
+
+(defn ^:pub ^I32 as-occur [^Ints h ^I32 a ^I32 lo ^I32 hi ^I32 pos]
+  (comment "The altset of `lo*hi G` for G's altset a (hi INF unbounded).")
+  (if (== hi 0) (return (as-unit h)))
+  (if (> lo hi) (return (as-none h)))
+  (if (and (== lo 1) (== hi 1)) (return a))
+  (if (== (as-n h a) 0)
+    (do (if (== lo 0) (return (as-unit h))) (return (as-none h))))
+  (let [f (alt-flags h a)]
+    (if (and (== lo 0) (== hi 1))
+      (do (if (!= (bit-and f 4) 0) (return a))
+          (let [u (as-unit h)]
+            (return (as-union h a u pos)))))
+    (if (== (bit-and f 2) 0) (return (as-unions h a lo hi pos)))
+    (if (!= (bit-and f 1) 0) (return (fail h ERR_MAP_OCCURRENCE pos)))
+    (comment "Key-typeset entries only.")
+    (if (!= (as-n h a) 1) (return (fail h ERR_MAP_OCCURRENCE pos)))
+    (let [off (as-aoff h a 0)
+          len (as-alen h a 0)
+          ^:mut all-abs true]
+      (for [^I32 i 0 len]
+        (if (not (absorbing h (alt-ent h off i))) (set all-abs false)))
+      (if all-abs (return a))
+      (if (!= lo hi) (return (fail h ERR_MAP_OCCURRENCE pos)))
+      (let [from (vlen h T_LSTK)]
+        (for [^I32 j 0 len]
+          (let [e (alt-ent h off j)
+                ne (ent-copy-occ h e (sat-mul (ew h e 3) lo) (sat-mul (ew h e 4) lo))]
+            (vpush1 h T_LSTK ne)))
+        (let [noff (alt-commit h from)
+              s (as-begin h)]
+          (as-add h noff len)
+          (return (as-end h s)))))))
+
+;; ------------------------------------------------------------ the map
+
+(defn ^Bool key-in-ent [^Ints h ^I32 key ^I32 e]
+  (comment "Is literal key (bid) in the key domain of key-typeset entry e?")
+  (return (ts-member h (ew h e 1) key)))
+
+(defn ^Bool factor-collides [^Ints h ^I32 fa ^I32 resid ^I32 me]
+  (comment "Does a key of factor altset fa also appear in the residual's alternatives"
+           "or in another candidate (T_NE records, 3 words: altset, mode, live)?")
+  (let [nb (nbids h)]
+    (if (< (vlen h T_UNION) nb)
+      (do (let [old (vlen h T_UNION)] (vpush h T_UNION (- nb old)))))
+    (comment "Mark the keys of everything else, then probe fa's keys.")
+    (let [nf (quot (vlen h T_NE) 3)]
+      (for [^I32 r 0 (as-n h resid)]
+        (mark-all h (as-aoff h resid r) (as-alen h resid r) 1))
+      (for [^I32 c 0 nf]
+        (if (and (!= c me) (== (vget h T_NE (+ (* c 3) 2)) 1))
+          (do (let [ca (vget h T_NE (* c 3))]
+                (for [^I32 ci 0 (as-n h ca)]
+                  (mark-all h (as-aoff h ca ci) (as-alen h ca ci) 1)))))))
+    (let [^:mut hit false]
+      (for [^I32 i 0 (as-n h fa)]
+        (let [off (as-aoff h fa i)]
+          (for [^I32 j 0 (as-alen h fa i)]
+            (let [e (alt-ent h off j)]
+              (if (and (== (ew h e 0) 0) (> (vget h T_UNION (ew h e 1)) 0)) (set hit true))))))
+      (comment "Unmark.")
+      (let [nf2 (quot (vlen h T_NE) 3)]
+        (for [^I32 r2 0 (as-n h resid)]
+          (mark-all h (as-aoff h resid r2) (as-alen h resid r2) (neg 1)))
+        (for [^I32 c2 0 nf2]
+          (if (and (!= c2 me) (== (vget h T_NE (+ (* c2 3) 2)) 1))
+            (do (let [ca2 (vget h T_NE (* c2 3))]
+                  (for [^I32 cj 0 (as-n h ca2)]
+                    (mark-all h (as-aoff h ca2 cj) (as-alen h ca2 cj) (neg 1))))))))
+      (return hit))))
+
+(defn mark-all [^Ints h ^I32 off ^I32 len ^I32 delta]
+  (for [^I32 i 0 len]
+    (let [e (alt-ent h off i)]
+      (if (== (ew h e 0) 0)
+        (do (let [k (ew h e 1)
+                  m (vget h T_UNION k)]
+              (vset h T_UNION k (+ m delta))))))))
+
+(defn ^Bool factor-disjoint [^Ints h ^I32 fa ^I32 resid]
+  (comment "§4.3.3 condition 1: no key of fa is in any key typeset of the residual.")
+  (for [^I32 i 0 (as-n h fa)]
+    (let [off (as-aoff h fa i)]
+      (for [^I32 j 0 (as-alen h fa i)]
+        (let [e (alt-ent h off j)]
+          (if (== (ew h e 0) 0)
+            (for [^I32 r 0 (as-n h resid)]
+              (let [ro (as-aoff h resid r)]
+                (for [^I32 q 0 (as-alen h resid r)]
+                  (let [g (alt-ent h ro q)]
+                    (if (and (== (ew h g 0) 1) (key-in-ent h (ew h e 1) g)) (return false)))))))))))
+  (return true))
+
+(defn ^Bool factor-absorbable [^Ints h ^I32 fa ^I32 resid]
+  (comment "§4.3.3 condition 2 (the residual has one alternative, checked by the"
+           "caller): every residual entry whose domain holds a key of fa is absorbing.")
+  (let [ro (as-aoff h resid 0)
+        rl (as-alen h resid 0)]
+    (for [^I32 i 0 (as-n h fa)]
+      (let [off (as-aoff h fa i)]
+        (for [^I32 j 0 (as-alen h fa i)]
+          (let [e (alt-ent h off j)]
+            (if (== (ew h e 0) 0)
+              (for [^I32 q 0 rl]
+                (let [g (alt-ent h ro q)]
+                  (if (and (== (ew h g 0) 1) (and (key-in-ent h (ew h e 1) g) (not (absorbing h g))))
+                    (return false)))))))))
+    (return true)))
+
+(defn ^Bool check-alt [^Ints h ^I32 off ^I32 len]
+  (comment "The determinism rule (§4.3.2) and the cut-after-wildcard rule within one"
+           "alternative.")
+  (if (not (charge h (* len len))) (return false))
+  (for [^I32 i 0 len]
+    (let [a (alt-ent h off i)]
+      (for [^I32 j 0 len]
+        (let [b (alt-ent h off j)]
+          (if (and (!= i j) (== (ew h b 0) 1))
+            (if (== (ew h a 0) 0)
+              (do (comment "literal a vs key typeset b: b must absorb; a cut a must not follow b")
+                  (if (key-in-ent h (ew h a 1) b)
+                    (do (if (and (== (ew h a 5) 1) (< (ew h b 6) (ew h a 6)))
+                          (do (fail h ERR_MAP_CUT (ew h a 7)) (return false)))
+                        (if (not (absorbing h b))
+                          (do (fail h ERR_MAP_OVERLAP (ew h b 7)) (return false))))))
+              (if (and (< (ew h a 6) (ew h b 6)) (ts-overlap h (ew h a 1) (ew h b 1)))
+                (if (not (absorbing h b))
+                  (do (fail h ERR_MAP_OVERLAP (ew h b 7)) (return false))))))))))
+  (return true))
+
+(defn ^Bool check-factor-cuts [^Ints h ^I32 fa ^I32 resid]
+  (comment "A cut literal entry of a separate factor must not follow (in source"
+           "order) a residual key typeset that holds its key.")
+  (for [^I32 i 0 (as-n h fa)]
+    (let [off (as-aoff h fa i)]
+      (for [^I32 j 0 (as-alen h fa i)]
+        (let [e (alt-ent h off j)]
+          (if (and (== (ew h e 0) 0) (== (ew h e 5) 1))
+            (for [^I32 r 0 (as-n h resid)]
+              (let [ro (as-aoff h resid r)]
+                (for [^I32 q 0 (as-alen h resid r)]
+                  (let [g (alt-ent h ro q)]
+                    (if (and (and (== (ew h g 0) 1) (< (ew h g 6) (ew h e 6))) (key-in-ent h (ew h e 1) g))
+                      (do (fail h ERR_MAP_CUT (ew h e 7)) (return false))))))))))))
+  (return true))
+
+(defn ^Bool alt-satisfiable [^IntsR h ^I32 off ^I32 len]
+  (for [^I32 i 0 len]
+    (let [e (alt-ent h off i)]
+      (if (> (ew h e 3) (ew h e 4)) (return false))
+      (if (and (== (ew h e 0) 0) (> (ew h e 3) 1)) (return false))
+      (if (> (ew h e 3) COUNT_MAX) (return false))))
+  (return true))
+
+(defn ^Bool same-group [^IntsR h ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+  (comment "Do two alternatives have the same key-typeset entries (the residual"
+           "group), in order, ignoring entries with max 0?")
+  (let [^:mut i 0
+        ^:mut j 0]
+    (forever
+     (while (and (< i l1) (or (== (ew h (alt-ent h o1 i) 0) 0) (== (ew h (alt-ent h o1 i) 4) 0))) (set i (+ i 1)))
+     (while (and (< j l2) (or (== (ew h (alt-ent h o2 j) 0) 0) (== (ew h (alt-ent h o2 j) 4) 0))) (set j (+ j 1)))
+     (if (or (>= i l1) (>= j l2)) (return (and (>= i l1) (>= j l2))))
+     (let [a (alt-ent h o1 i)
+           b (alt-ent h o2 j)]
+       (for [^I32 w 1 5]
+         (if (!= (ew h a w) (ew h b w)) (return false))))
+     (set i (+ i 1))
+     (set j (+ j 1)))))
+
+(defn ^I32 emit-lits [^Ints h ^I32 off ^I32 len]
+  (comment "Append the alternative's literal entries to T_MAPD in source order"
+           "(key, value, min, cut); answers how many.")
+  (let [^:mut n 0
+        ^:mut last (neg 1)]
+    (forever
+     (comment "selection by srcpos: the smallest srcpos greater than last")
+     (let [^:mut best (neg 1)
+           ^:mut ^I32 bsp INF]
+       (for [^I32 i 0 len]
+         (let [e (alt-ent h off i)
+               sp (ew h e 6)]
+           (if (and (== (ew h e 0) 0) (and (> sp last) (< sp bsp)))
+             (do (set best e) (set bsp sp)))))
+       (if (< best 0) (return n))
+       (vpush1 h T_MAPD (ew h best 1))
+       (vpush1 h T_MAPD (ew h best 2))
+       (vpush1 h T_MAPD (ew h best 3))
+       (vpush1 h T_MAPD (ew h best 5))
+       (set n (+ n 1))
+       (set last bsp)))))
+
+(defn ^:pub ^I32 map-finish [^Ints h ^I32 from ^I32 nents ^I32 pos]
+  (comment "The internal map of a top-level map sequence whose entries' altsets are"
+           "T_PSTK[from..] as (altset, candidate) pairs. Answers the map id, -2 when"
+           "no alternative is satisfiable (the map type is empty), or -1.")
+  (let [^:mut resid (as-unit h)]
+    (vtrunc h T_NE 0)
+    (for [^I32 i 0 nents]
+      (let [a (vget h T_PSTK (+ from (* 2 i)))
+            cand (vget h T_PSTK (+ from (+ (* 2 i) 1)))]
+        (if (== cand 1)
+          (do (vpush1 h T_NE a) (vpush1 h T_NE 0) (vpush1 h T_NE 1))
+          (do (set resid (as-product h resid a pos))
+              (if (< resid 0) (return (neg 1)))))))
+    (let [nf (quot (vlen h T_NE) 3)]
+      (comment "Phase A: a factor sharing a key with the residual or another factor merges.")
+      (let [^:mut changed true]
+        (while changed
+          (set changed false)
+          (for [^I32 c 0 nf]
+            (if (== (vget h T_NE (+ (* c 3) 2)) 1)
+              (if (factor-collides h (vget h T_NE (* c 3)) resid c)
+                (do (set resid (as-product h resid (vget h T_NE (* c 3)) pos))
+                    (if (< resid 0) (return (neg 1)))
+                    (vset h T_NE (+ (* c 3) 2) 0)
+                    (set changed true)))))))
+      (comment "Phase B: disjoint from every residual key typeset.")
+      (for [^I32 c2 0 nf]
+        (if (== (vget h T_NE (+ (* c2 3) 2)) 1)
+          (if (factor-disjoint h (vget h T_NE (* c2 3)) resid)
+            (vset h T_NE (+ (* c2 3) 1) MODE_DISJOINT))))
+      (comment "Phase C: the rest are ABSORB if the residual has one alternative and"
+               "every overlapping residual entry absorbs; otherwise all merge.")
+      (let [^:mut absorb-ok (== (as-n h resid) 1)]
+        (for [^I32 c3 0 nf]
+          (if (and (== (vget h T_NE (+ (* c3 3) 2)) 1) (== (vget h T_NE (+ (* c3 3) 1)) 0))
+            (if (and absorb-ok (not (factor-absorbable h (vget h T_NE (* c3 3)) resid)))
+              (set absorb-ok false))))
+        (for [^I32 c4 0 nf]
+          (if (and (== (vget h T_NE (+ (* c4 3) 2)) 1) (== (vget h T_NE (+ (* c4 3) 1)) 0))
+            (if absorb-ok
+              (vset h T_NE (+ (* c4 3) 1) MODE_ABSORB)
+              (do (set resid (as-product h resid (vget h T_NE (* c4 3)) pos))
+                  (if (< resid 0) (return (neg 1)))
+                  (vset h T_NE (+ (* c4 3) 2) 0))))))
+      (comment "Rules within each residual alternative; cuts of separate factors.")
+      (for [^I32 r 0 (as-n h resid)]
+        (if (alt-satisfiable h (as-aoff h resid r) (as-alen h resid r))
+          (if (not (check-alt h (as-aoff h resid r) (as-alen h resid r))) (return (neg 1)))))
+      (for [^I32 c5 0 nf]
+        (if (== (vget h T_NE (+ (* c5 3) 2)) 1)
+          (if (not (check-factor-cuts h (vget h T_NE (* c5 3)) resid)) (return (neg 1)))))
+      (comment "Build the internal map: residual pools (alternatives grouped by their"
+               "key-typeset entries, in first-seen order), then the separate factors.")
+      (let [blob (vlen h T_MAPD)
+            ^:mut npools 0
+            ^:mut nfact 1]
+        (comment "satisfiable residual alternatives, in T_STK4")
+        (vtrunc h T_STK4 0)
+        (for [^I32 r2 0 (as-n h resid)]
+          (if (alt-satisfiable h (as-aoff h resid r2) (as-alen h resid r2))
+            (vpush1 h T_STK4 r2)))
+        (let [nres (vlen h T_STK4)]
+          (if (== nres 0) (return (neg 2)))
+          (for [^I32 c6 0 nf]
+            (if (== (vget h T_NE (+ (* c6 3) 2)) 1) (set nfact (+ nfact 1))))
+          (comment "Pools: assign each residual alternative a pool id (T_STK3[i]).")
+          (vtrunc h T_STK3 0)
+          (for [^I32 i2 0 nres]
+            (let [ri (vget h T_STK4 i2)
+                  ^:mut pid (neg 1)]
+              (for [^I32 j2 0 i2]
+                (if (< pid 0)
+                  (do (let [rj (vget h T_STK4 j2)]
+                        (if (same-group h (as-aoff h resid ri) (as-alen h resid ri)
+                                        (as-aoff h resid rj) (as-alen h resid rj))
+                          (set pid (vget h T_STK3 j2)))))))
+              (if (< pid 0) (do (set pid npools) (set npools (+ npools 1))))
+              (vpush1 h T_STK3 pid)))
+          (let [^:mut nalts nres]
+          (for [^I32 c7 0 nf]
+            (if (== (vget h T_NE (+ (* c7 3) 2)) 1)
+              (set nalts (+ nalts (as-n h (vget h T_NE (* c7 3)))))))
+          (if (> nalts (hg h H_LIM_ALTS)) (return (fail h ERR_LIM_ALTS pos)))
+          (comment "Header and fixed records, filled below.")
+          (let [np-total (+ npools (- nfact 1))
+                fixed (+ (+ 4 (* 3 nfact)) (+ (* 5 np-total) (* 3 nalts)))]
+            (if (< (vpush h T_MAPD fixed) 0) (return (neg 1)))
+            (vset h T_MAPD blob nfact)
+            (vset h T_MAPD (+ blob 1) np-total)
+            (vset h T_MAPD (+ blob 2) nalts)
+            (let [fbase (+ blob 4)
+                  pbase (+ fbase (* 3 nfact))
+                  abase (+ pbase (* 5 np-total))
+                  ^:mut ai 0
+                  ^:mut nlits 0]
+              (comment "factor 0: pools 0..npools-1")
+              (vset h T_MAPD fbase MODE_RESIDUAL)
+              (vset h T_MAPD (+ fbase 1) 0)
+              (vset h T_MAPD (+ fbase 2) npools)
+              (for [^I32 p 0 npools]
+                (let [prec (+ pbase (* 5 p))
+                      ^:mut first-alt (neg 1)]
+                  (vset h T_MAPD prec 0)
+                  (vset h T_MAPD (+ prec 3) ai)
+                  (for [^I32 i3 0 nres]
+                    (if (== (vget h T_STK3 i3) p)
+                      (do (let [ri3 (vget h T_STK4 i3)
+                                aoff (as-aoff h resid ri3)
+                                alen (as-alen h resid ri3)
+                                arec (+ abase (* 3 ai))]
+                            (if (< first-alt 0) (set first-alt ri3))
+                            (vset h T_MAPD arec p)
+                            (vset h T_MAPD (+ arec 1) (- (vlen h T_MAPD) blob))
+                            (let [nl (emit-lits h aoff alen)]
+                              (vset h T_MAPD (+ arec 2) nl)
+                              (set nlits (+ nlits nl)))
+                            (set ai (+ ai 1))))))
+                  (vset h T_MAPD (+ prec 4) (- ai (vget h T_MAPD (+ prec 3))))
+                  (comment "the pool's group: key-typeset entries of its first alternative")
+                  (vset h T_MAPD (+ prec 1) (- (vlen h T_MAPD) blob))
+                  (let [go (as-aoff h resid first-alt)
+                        gl (as-alen h resid first-alt)
+                        ^:mut gn 0]
+                    (for [^I32 g 0 gl]
+                      (let [e (alt-ent h go g)]
+                        (if (and (== (ew h e 0) 1) (> (ew h e 4) 0))
+                          (do (vpush1 h T_MAPD (ew h e 1))
+                              (vpush1 h T_MAPD (ew h e 2))
+                              (vpush1 h T_MAPD (ew h e 3))
+                              (let [^:mut mx (ew h e 4)]
+                                (if (> mx COUNT_MAX) (set mx INF))
+                                (vpush1 h T_MAPD mx))
+                              (set gn (+ gn 1))))))
+                    (vset h T_MAPD (+ prec 2) gn))))
+              (comment "separate factors: one pool each, no group")
+              (let [^:mut fi 1
+                    ^:mut pi npools]
+                (for [^I32 c8 0 nf]
+                  (if (== (vget h T_NE (+ (* c8 3) 2)) 1)
+                    (do (let [fa (vget h T_NE (* c8 3))
+                              frec (+ fbase (* 3 fi))
+                              prec2 (+ pbase (* 5 pi))]
+                          (vset h T_MAPD frec (vget h T_NE (+ (* c8 3) 1)))
+                          (vset h T_MAPD (+ frec 1) pi)
+                          (vset h T_MAPD (+ frec 2) 1)
+                          (vset h T_MAPD prec2 fi)
+                          (vset h T_MAPD (+ prec2 1) (neg 1))
+                          (vset h T_MAPD (+ prec2 2) 0)
+                          (vset h T_MAPD (+ prec2 3) ai)
+                          (vset h T_MAPD (+ prec2 4) (as-n h fa))
+                          (for [^I32 k 0 (as-n h fa)]
+                            (let [arec2 (+ abase (* 3 ai))]
+                              (vset h T_MAPD arec2 pi)
+                              (vset h T_MAPD (+ arec2 1) (- (vlen h T_MAPD) blob))
+                              (let [nl2 (emit-lits h (as-aoff h fa k) (as-alen h fa k))]
+                                (vset h T_MAPD (+ arec2 2) nl2)
+                                (set nlits (+ nlits nl2)))
+                              (set ai (+ ai 1))))
+                          (set fi (+ fi 1))
+                          (set pi (+ pi 1)))))))
+              (vset h T_MAPD (+ blob 3) nlits)
+              (if (erred h) (return (neg 1)))
+              (let [id (vlen h T_MAP)]
+                (vpush1 h T_MAP blob)
+                (return id))))))))))

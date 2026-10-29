@@ -1,0 +1,346 @@
+;; Glushkov automata (architecture §4.4, §4.7), shared by array types and
+;; I-Regexps. A regular expression is a tree of 6-word records in T_RXN:
+;;
+;;     kind, a, b, c, d, next
+;;
+;;   G_POS    a = payload (a typeset id for arrays, a class for regexps)
+;;   G_SEQ    a = first child, b = count (children chained through `next`)
+;;   G_ALT    a = first child, b = count
+;;   G_REP    a = child, b = min, c = max (INF unbounded), d = 1 for a COUNTED
+;;            position (child must be a G_POS), 0 to unroll
+;;   G_EMPTY  the empty sequence
+;;   G_REC    a = frame: a tail-recursive reference to the group of frame a
+;;   G_FRAME  a = child, b = frame: the expansion of a group that a G_REC in
+;;            its tail may re-enter (regular group recursion, §4.4)
+;;
+;; `g-build` walks the tree once, allocating positions in walk order (an
+;; unrolled repetition walks its child once per copy), and writes:
+;;   T_GPOS  per position: payload, counter min, counter max (min -1 when
+;;           uncounted), the G_REP node that made it counted (or -1);
+;;   T_GOUT  the follow matrix, npos rows of W words;
+;; and answers the root fragment (nullable, first, last as position lists).
+;; Positions are counted first (`g-count`, saturating), so the caller refuses
+;; a too-large automaton BEFORE it is built (§5.1 compile budget).
+(ns snug.compile.glush
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
+                                        INF ERR_INTERNAL H_R0 H_R1 H_R2
+                                        T_RXN T_GPOS T_GOUT T_GDEF T_STK7 T_STK8 T_STK3]]))
+
+(defconst ^:pub ^I32 G_POS 1)
+(defconst ^:pub ^I32 G_SEQ 2)
+(defconst ^:pub ^I32 G_ALT 3)
+(defconst ^:pub ^I32 G_REP 4)
+(defconst ^:pub ^I32 G_EMPTY 5)
+(defconst ^:pub ^I32 G_REC 6)
+(defconst ^:pub ^I32 G_FRAME 7)
+
+(defn ^:pub ^I32 gk [^IntsR h ^I32 n] (return (vget h T_RXN (* n 6))))
+(defn ^:pub ^I32 ga [^IntsR h ^I32 n] (return (vget h T_RXN (+ (* n 6) 1))))
+(defn ^:pub ^I32 gb [^IntsR h ^I32 n] (return (vget h T_RXN (+ (* n 6) 2))))
+(defn ^:pub ^I32 gc [^IntsR h ^I32 n] (return (vget h T_RXN (+ (* n 6) 3))))
+(defn ^:pub ^I32 gd [^IntsR h ^I32 n] (return (vget h T_RXN (+ (* n 6) 4))))
+(defn ^:pub ^I32 gnext [^IntsR h ^I32 n] (return (vget h T_RXN (+ (* n 6) 5))))
+(defn ^:pub gset [^Ints h ^I32 n ^I32 field ^I32 v] (vset h T_RXN (+ (* n 6) field) v))
+
+(defn ^:pub ^I32 g-node [^Ints h ^I32 kind ^I32 a ^I32 b ^I32 c]
+  (if (not (charge h 1)) (return (neg 1)))
+  (let [at (vpush h T_RXN 6)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_RXN at kind)
+    (vset h T_RXN (+ at 1) a)
+    (vset h T_RXN (+ at 2) b)
+    (vset h T_RXN (+ at 3) c)
+    (vset h T_RXN (+ at 5) (neg 1))
+    (return (quot at 6))))
+
+(defn ^:pub ^I32 g-list [^Ints h ^I32 kind]
+  (comment "An empty G_SEQ or G_ALT; children are added with g-add.")
+  (let [n (g-node h kind (neg 1) 0 0)]
+    (if (>= n 0) (gset h n 4 (neg 1)))
+    (return n)))
+
+(defn ^:pub g-add [^Ints h ^I32 list ^I32 child]
+  (comment "Append child to a G_SEQ/G_ALT (d holds the last child).")
+  (let [last (gd h list)
+        cnt (gb h list)]
+    (if (< last 0) (gset h list 1 child) (gset h last 5 child))
+    (gset h list 4 child)
+    (gset h list 2 (+ cnt 1))))
+
+(defn ^:pub ^I32 sat-add [^I32 a ^I32 b]
+  (if (> a (- INF b)) (return INF))
+  (return (+ a b)))
+
+(defn ^:pub ^I32 sat-mul [^I32 a ^I32 b]
+  (if (or (== a 0) (== b 0)) (return 0))
+  (if (> a (quot INF b)) (return INF))
+  (return (* a b)))
+
+(defn ^:pub ^I32 rep-copies [^I32 lo ^I32 hi]
+  (comment "Copies an unrolled repetition walks its child: hi if finite, else max(lo, 1).")
+  (if (== hi INF) (do (if (< lo 1) (return 1)) (return lo)))
+  (return hi))
+
+(defn ^:pub ^I32 g-count [^Ints h ^I32 n]
+  (comment "Positions the tree will have, saturating at INF.")
+  (if (not (charge h 1)) (return INF))
+  (let [k (gk h n)]
+    (if (== k G_POS) (return 1))
+    (if (or (== k G_EMPTY) (== k G_REC)) (return 0))
+    (if (== k G_FRAME) (return (g-count h (ga h n))))
+    (if (== k G_REP)
+      (do (if (== (gd h n) 1) (return 1))
+          (let [inner (g-count h (ga h n))]
+            (return (sat-mul inner (rep-copies (gb h n) (gc h n)))))))
+    (let [^:mut sum 0
+          ^:mut c (ga h n)]
+      (while (>= c 0)
+        (set sum (sat-add sum (g-count h c)))
+        (if (erred h) (return INF))
+        (set c (gnext h c)))
+      (return sum))))
+
+;; ------------------------------------------------------------ fragments
+;; A fragment is 5 words in T_STK7: nullable, first off, first len, last off,
+;; last len; the lists live in T_STK8 (positions >= 0, REC markers < 0:
+;; marker of frame f = -1 - f).
+
+(defn ^I32 frag [^Ints h ^I32 nullable ^I32 fo ^I32 fl ^I32 lo ^I32 ll]
+  (let [at (vpush h T_STK7 5)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_STK7 at nullable)
+    (vset h T_STK7 (+ at 1) fo)
+    (vset h T_STK7 (+ at 2) fl)
+    (vset h T_STK7 (+ at 3) lo)
+    (vset h T_STK7 (+ at 4) ll)
+    (return (quot at 5))))
+
+(defn ^:pub ^I32 f-null [^IntsR h ^I32 f] (return (vget h T_STK7 (* f 5))))
+(defn ^:pub ^I32 f-fo [^IntsR h ^I32 f] (return (vget h T_STK7 (+ (* f 5) 1))))
+(defn ^:pub ^I32 f-fl [^IntsR h ^I32 f] (return (vget h T_STK7 (+ (* f 5) 2))))
+(defn ^:pub ^I32 f-lo [^IntsR h ^I32 f] (return (vget h T_STK7 (+ (* f 5) 3))))
+(defn ^:pub ^I32 f-ll [^IntsR h ^I32 f] (return (vget h T_STK7 (+ (* f 5) 4))))
+
+(defn ^I32 copy-run [^Ints h ^I32 off ^I32 len]
+  (comment "Append T_STK8[off, off+len) to T_STK8; answers the new offset.")
+  (let [at (vlen h T_STK8)]
+    (for [^I32 i 0 len]
+      (let [x (vget h T_STK8 (+ off i))]
+        (vpush1 h T_STK8 x)))
+    (return at)))
+
+(defn ^I32 join-runs [^Ints h ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+  (comment "A new run: run 1 then run 2 (offset; the length is l1 + l2).")
+  (let [at (copy-run h o1 l1)]
+    (copy-run h o2 l2)
+    (return at)))
+
+(defn ^:pub g-edge [^Ints h ^I32 w ^I32 p ^I32 q]
+  (comment "Add p -> q to the follow matrix (rows of w words); a REC marker q is"
+           "deferred until its frame's first set is known.")
+  (if (>= q 0)
+    (do (let [at (+ (* p w) (sar q 5))
+              cur (vget h T_GOUT at)]
+          (vset h T_GOUT at (bit-or cur (shl 1 (bit-and q 31))))))
+    (do (vpush1 h T_GDEF p)
+        (vpush1 h T_GDEF q))))
+
+(defn ^Bool edges [^Ints h ^I32 w ^I32 lo ^I32 ll ^I32 fo ^I32 fl]
+  (comment "Every p in the list (lo, ll) to every q in the list (fo, fl).")
+  (if (not (charge h (sat-mul ll fl))) (return false))
+  (for [^I32 i 0 ll]
+    (let [p (vget h T_STK8 (+ lo i))]
+      (if (>= p 0)
+        (for [^I32 j 0 fl]
+          (let [q (vget h T_STK8 (+ fo j))]
+            (g-edge h w p q))))))
+  (return (not (erred h))))
+
+(defn ^I32 seq2 [^Ints h ^I32 w ^I32 f ^I32 g]
+  (comment "Concatenation of fragments f then g.")
+  (let [fn1 (f-null h f)
+        gn (f-null h g)]
+    (if (not (edges h w (f-lo h f) (f-ll h f) (f-fo h g) (f-fl h g))) (return (neg 1)))
+    (let [^:mut fo (f-fo h f)
+          ^:mut fl (f-fl h f)
+          ^:mut lo (f-lo h g)
+          ^:mut ll (f-ll h g)]
+      (if (!= fn1 0)
+        (do (set fo (join-runs h (f-fo h f) (f-fl h f) (f-fo h g) (f-fl h g)))
+            (set fl (+ (f-fl h f) (f-fl h g)))))
+      (if (!= gn 0)
+        (do (set lo (join-runs h (f-lo h g) (f-ll h g) (f-lo h f) (f-ll h f)))
+            (set ll (+ (f-ll h g) (f-ll h f)))))
+      (let [^:mut both 0]
+        (if (and (!= fn1 0) (!= gn 0)) (set both 1))
+        (return (frag h both fo fl lo ll))))))
+
+(defn ^I32 alt2 [^Ints h ^I32 f ^I32 g]
+  (let [fo (join-runs h (f-fo h f) (f-fl h f) (f-fo h g) (f-fl h g))
+        lo (join-runs h (f-lo h f) (f-ll h f) (f-lo h g) (f-ll h g))
+        ^:mut nl 0]
+    (if (or (!= (f-null h f) 0) (!= (f-null h g) 0)) (set nl 1))
+    (return (frag h nl fo (+ (f-fl h f) (f-fl h g)) lo (+ (f-ll h f) (f-ll h g))))))
+
+(defn ^I32 opt [^Ints h ^I32 f]
+  (return (frag h 1 (f-fo h f) (f-fl h f) (f-lo h f) (f-ll h f))))
+
+(defn ^I32 new-pos [^Ints h ^I32 payload ^I32 cmin ^I32 cmax ^I32 rep]
+  (let [at (vpush h T_GPOS 4)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_GPOS at payload)
+    (vset h T_GPOS (+ at 1) cmin)
+    (vset h T_GPOS (+ at 2) cmax)
+    (vset h T_GPOS (+ at 3) rep)
+    (return (quot at 4))))
+
+(defn ^I32 single [^Ints h ^I32 p ^I32 nullable]
+  (let [at (vlen h T_STK8)]
+    (vpush1 h T_STK8 p)
+    (return (frag h nullable at 1 at 1))))
+
+(defn ^I32 empty-frag [^Ints h]
+  (return (frag h 1 0 0 0 0)))
+
+(declarefn ^I32 walk)
+
+(defn ^I32 walk-rep [^Ints h ^I32 w ^I32 n]
+  (comment "A repetition: one counted position, or its child unrolled (copies walked"
+           "first, in position order, then composed: lo mandatory copies, then a"
+           "chain of optional ones, or a loop on the last copy when unbounded).")
+  (let [child (ga h n)
+        lo (gb h n)
+        hi (gc h n)]
+    (if (== (gd h n) 1)
+      (do (let [p (new-pos h (ga h child) lo hi n)]
+            (if (< p 0) (return (neg 1)))
+            (if (== lo 0) (return (single h p 1)))
+            (return (single h p 0)))))
+    (if (== hi 0) (return (empty-frag h)))
+    (let [k (rep-copies lo hi)
+          base (vlen h T_STK3)]
+      (for [^I32 _copy 0 k]
+        (let [^I32 fc (walk h w child)]
+          (if (< fc 0) (return (neg 1)))
+          (vpush1 h T_STK3 fc)))
+      (let [^:mut tail (empty-frag h)]
+        (if (== hi INF)
+          (do (let [lastc (vget h T_STK3 (+ base (- k 1)))]
+                (if (not (edges h w (f-lo h lastc) (f-ll h lastc) (f-fo h lastc) (f-fl h lastc)))
+                  (return (neg 1)))
+                (if (== lo 0)
+                  (set tail (opt h lastc))
+                  (set tail lastc)))
+              (let [^:mut j (- k 2)]
+                (while (>= j 0)
+                  (set tail (seq2 h w (vget h T_STK3 (+ base j)) tail))
+                  (if (< tail 0) (return (neg 1)))
+                  (set j (- j 1)))))
+          (do (let [^:mut q (- hi 1)]
+                (while (>= q lo)
+                  (let [sq (seq2 h w (vget h T_STK3 (+ base q)) tail)]
+                    (if (< sq 0) (return (neg 1)))
+                    (set tail (opt h sq)))
+                  (set q (- q 1))))
+              (let [^:mut r (- lo 1)]
+                (while (>= r 0)
+                  (set tail (seq2 h w (vget h T_STK3 (+ base r)) tail))
+                  (if (< tail 0) (return (neg 1)))
+                  (set r (- r 1))))))
+        (vtrunc h T_STK3 base)
+        (return tail)))))
+
+(defn ^I32 walk-frame [^Ints h ^I32 w ^I32 n]
+  (comment "A group expansion that tail-recursive references may re-enter: walk it,"
+           "then resolve the deferred edges to its marker against its first set.")
+  (let [^I32 g (walk h w (ga h n))
+        marker (- (neg 1) (gb h n))]
+    (if (< g 0) (return (neg 1)))
+    (let [fo (f-fo h g)
+          fl (f-fl h g)
+          nd (vlen h T_GDEF)]
+      (let [^:mut i 0]
+        (while (< i nd)
+          (let [p (vget h T_GDEF i)
+                q (vget h T_GDEF (+ i 1))]
+            (if (and (>= p 0) (== q marker))
+              (do (vset h T_GDEF i (neg 1))
+                  (if (not (charge h fl)) (return (neg 1)))
+                  (for [^I32 j 0 fl]
+                    (let [x (vget h T_STK8 (+ fo j))]
+                      (if (!= x marker) (g-edge h w p x)))))))
+          (set i (+ i 2))))
+      (comment "The fragment's first set without its own marker.")
+      (let [at (vlen h T_STK8)
+            ^:mut cnt 0]
+        (for [^I32 k 0 fl]
+          (let [y (vget h T_STK8 (+ fo k))]
+            (if (!= y marker)
+              (do (vpush1 h T_STK8 y) (set cnt (+ cnt 1))))))
+        (return (frag h (f-null h g) at cnt (f-lo h g) (f-ll h g)))))))
+
+(defn ^I32 walk [^Ints h ^I32 w ^I32 n]
+  (if (not (charge h 1)) (return (neg 1)))
+  (let [k (gk h n)]
+    (if (== k G_POS)
+      (do (let [p (new-pos h (ga h n) (neg 1) (neg 1) (neg 1))]
+            (if (< p 0) (return (neg 1)))
+            (return (single h p 0)))))
+    (if (== k G_EMPTY) (return (empty-frag h)))
+    (if (== k G_REC)
+      (do (let [at (vlen h T_STK8)]
+            (vpush1 h T_STK8 (- (neg 1) (ga h n)))
+            (return (frag h 0 at 1 at 0)))))
+    (if (== k G_REP) (return (walk-rep h w n)))
+    (if (== k G_FRAME) (return (walk-frame h w n)))
+    (if (== k G_SEQ)
+      (do (let [^:mut f (empty-frag h)
+                ^:mut c (ga h n)]
+            (while (>= c 0)
+              (let [^I32 g (walk h w c)]
+                (if (< g 0) (return (neg 1)))
+                (set f (seq2 h w f g))
+                (if (< f 0) (return (neg 1))))
+              (set c (gnext h c)))
+            (return f))))
+    (if (== k G_ALT)
+      (do (let [^:mut fa (neg 1)
+                ^:mut ca (ga h n)]
+            (while (>= ca 0)
+              (let [^I32 ga2 (walk h w ca)]
+                (if (< ga2 0) (return (neg 1)))
+                (if (< fa 0) (set fa ga2) (set fa (alt2 h fa ga2)))
+                (if (< fa 0) (return (neg 1))))
+              (set ca (gnext h ca)))
+            (if (< fa 0) (return (frag h 0 0 0 0 0)))
+            (return fa))))
+    (return (fail h ERR_INTERNAL (neg 1)))))
+
+(defn ^:pub ^I32 g-build [^Ints h ^I32 root ^I32 npos]
+  (comment "Build the automaton of the tree at root, which has npos positions"
+           "(from g-count). Answers the root fragment (its first and last lists are"
+           "position ids), or -1. T_GPOS and T_GOUT are rewritten.")
+  (let [w (sar (+ npos 31) 5)]
+    (vtrunc h T_GPOS 0)
+    (vtrunc h T_GOUT 0)
+    (vtrunc h T_GDEF 0)
+    (vtrunc h T_STK7 0)
+    (vtrunc h T_STK8 0)
+    (vtrunc h T_STK3 0)
+    (if (not (charge h (sat-mul npos w))) (return (neg 1)))
+    (if (< (vpush h T_GOUT (* npos w)) 0) (return (neg 1)))
+    (let [^I32 f (walk h w root)]
+      (if (< f 0) (return (neg 1)))
+      (if (!= (quot (vlen h T_GPOS) 4) npos) (return (fail h ERR_INTERNAL (neg 1))))
+      (return f))))
+
+(defn ^:pub ^I32 g-w [^I32 npos]
+  (return (sar (+ npos 31) 5)))
+
+(defn ^:pub ^Bool g-follows [^IntsR h ^I32 w ^I32 p ^I32 q]
+  (comment "Is q in follow(p)?")
+  (let [word (vget h T_GOUT (+ (* p w) (sar q 5)))]
+    (return (!= (bit-and (sar word (bit-and q 31)) 1) 0))))

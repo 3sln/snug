@@ -1,0 +1,16 @@
+#!/bin/sh
+# The CDDL compiler's gates on JS and Rust (kin/scripts/compile-test.mjs says
+# which):   kin/scripts/compile-test [corruptions per program] [seed]
+#
+# Emits the compiler's own sources (kin/scripts/compile-emit) so the gate runs
+# what the sources say, then builds the Rust subset crate in DEBUG (overflow
+# checks on: a broken arithmetic guarantee is a panic, which fails the gate).
+set -e
+cd "$(dirname "$0")/../.."
+bb -cp kin/src:../kin/src kin/scripts/compile-emit > /dev/null
+crate=.cache/snug-compile-gate
+kin/scripts/compile-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin compile-test 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/compile-test.mjs "$crate/target/debug/compile-test" "$@"

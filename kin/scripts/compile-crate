@@ -1,0 +1,42 @@
+#!/bin/sh
+# Assemble a Rust crate holding the compiler and verifier modules only:
+#
+#     kin/scripts/compile-crate DIR
+#
+#   DIR/Cargo.toml            host/rust/Cargo.toml
+#   DIR/src/lib.rs            `pub mod snug;` + the compile host (host/rust/src/compile.rs)
+#   DIR/src/bin/*.rs          host/rust/src/bin/compile*.rs
+#   DIR/src/snug/{compile,program}/*.rs   $SNUG_GEN/rust/snug/{compile,program}/*.rs
+#                             (SNUG_GEN defaults to gen)
+#
+# The full crate (kin/scripts/rust-crate) carries the same files; this one
+# leaves out modules other work items may have mid-edit, so the compiler gates
+# do not depend on them. Copies only what changed (cargo keys on mtimes).
+set -e
+cd "$(dirname "$0")/../.."
+dir="$1"
+[ -n "$dir" ] || { echo "usage: compile-crate DIR" >&2; exit 2; }
+mkdir -p "$dir/src/bin" "$dir/src/snug"
+put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
+puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
+put host/rust/Cargo.toml "$dir/Cargo.toml"
+puttext "//! snug compiler crate (dev subset): generated modules + the compile host.
+pub mod snug;
+pub mod compile;
+" "$dir/src/lib.rs"
+put host/rust/src/compile.rs "$dir/src/compile.rs"
+for f in host/rust/src/bin/compile*.rs; do [ -f "$f" ] && put "$f" "$dir/src/bin/$(basename "$f")"; done
+g="${SNUG_GEN:-gen}"
+mods=""
+for d in compile program; do
+  [ -d "$g/rust/snug/$d" ] || continue
+  mods="${mods}pub mod $d;
+"
+  lines=""
+  for f in $(ls "$g/rust/snug/$d" | sort); do
+    case "$f" in *.rs) put "$g/rust/snug/$d/$f" "$dir/src/snug/$d/$f"; lines="${lines}pub mod ${f%.rs};
+";; esac
+  done
+  puttext "$lines" "$dir/src/snug/$d.rs"
+done
+puttext "$mods" "$dir/src/snug.rs"

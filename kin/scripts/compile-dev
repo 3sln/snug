@@ -1,0 +1,15 @@
+#!/bin/sh
+# Dev loop: emit the compiler, node --check it, build it under cargo (debug,
+# warnings denied).   kin/scripts/compile-dev
+set -e
+cd "$(dirname "$0")/../.."
+if [ -n "$SNUG_LINT" ]; then for f in kin/compile/*.kin; do p=$(python3 "$(dirname "$SNUG_LINT")/parens.py" "$f"); [ -z "$p" ] || { echo "$p"; exit 1; }; done;  out=$(python3 "$SNUG_LINT" $(ls kin/compile/*.kin kin/program/*.kin 2>/dev/null) || echo "lint crashed"); if [ -n "$out" ]; then echo "$out"; exit 1; fi; fi
+bb -cp kin/src:../kin/src kin/scripts/compile-emit .cache/gen > /dev/null
+for f in .cache/gen/js/snug/compile/*.mjs .cache/gen/js/snug/program/*.mjs; do
+  [ -f "$f" ] || continue
+  node --check "$f" || { echo "  FAIL node --check $f"; exit 1; }
+done
+crate=.cache/snug-compile
+SNUG_GEN="${SNUG_GEN:-.cache/gen}" kin/scripts/compile-crate "$crate"
+(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet 2>&1) || { echo "  FAIL cargo"; exit 1; }
+echo "  ok   compile-dev"

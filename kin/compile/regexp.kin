@@ -1,0 +1,482 @@
+;; `.regexp`: RFC 9485 I-Regexp, anchored at both ends (architecture §4.7,
+;; D014), compiled to a Glushkov automaton over code-point classes.
+;;
+;; Refused: `\p{..}` / `\P{..}` (D014) and every escape that is not
+;; I-Regexp (`\d \w \s \x..` and the like), as ERR_REGEXP. Counted
+;; repetition unrolls within the regexp position limit (ERR_LIM_RPOS, checked
+;; before anything is built).
+;;
+;; An internal regexp (T_RX, 6 words: pattern bid, data offset, npos, W,
+;; natoms, nullable) keeps its data in T_RXD exactly in Program order:
+;; first[W], accept[W], follow[npos * W], atom_start[natoms],
+;; atom_mask[natoms * W] (program.md §8.2). Regexps are interned by pattern.
+(ns snug.compile.regexp
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
+                                        mix ht-init ht-start ht-id ht-next ht-put sort-records
+                                        INF ERR_REGEXP ERR_LIM_RPOS ERR_LIM_NESTING ERR_INTERNAL
+                                        H_R0 H_R1 H_DEPTH H_DEPTH_MAX H_LIM_RPOS H_G0 H_ERR
+                                        T_RX T_RXD T_RXA T_HRX T_STK2 T_STK4 T_STK8 T_GPOS T_GOUT T_BYTE]]
+            [snug.compile.bytes :refer [bid-off bid-len]]
+            [snug.compile.glush :refer [g-node g-list g-add g-count g-build g-w gk ga
+                                        f-null f-fo f-fl f-lo f-ll
+                                        G_POS G_SEQ G_ALT G_REP G_EMPTY]]))
+
+(defconst ^I32 CP_MAX 1114111)
+
+(defn ^:pub ^Bool rx-init [^Ints h]
+  (vtrunc h T_RX 0)
+  (vtrunc h T_RXD 0)
+  (vtrunc h T_RXA 0)
+  (return (ht-init h T_HRX 16)))
+
+(defn ^:pub ^I32 rx-npos [^IntsR h ^I32 r] (return (vget h T_RX (+ (* r 6) 2))))
+(defn ^:pub ^I32 rx-w [^IntsR h ^I32 r] (return (vget h T_RX (+ (* r 6) 3))))
+(defn ^:pub ^I32 rx-natoms [^IntsR h ^I32 r] (return (vget h T_RX (+ (* r 6) 4))))
+(defn ^:pub ^I32 rx-nullable [^IntsR h ^I32 r] (return (vget h T_RX (+ (* r 6) 5))))
+(defn ^:pub ^I32 rx-data [^IntsR h ^I32 r] (return (vget h T_RX (+ (* r 6) 1))))
+(defn ^:pub ^I32 rx-pattern [^IntsR h ^I32 r] (return (vget h T_RX (* r 6))))
+(defn ^:pub ^I32 rx-count [^IntsR h] (return (quot (vlen h T_RX) 6)))
+
+;; ------------------------------------------------------------ the pattern
+;; The pattern's code points are decoded into T_STK2 first (it is valid UTF-8:
+;; a CDDL text literal). The parse cursor is h[H_G0]... no: T_STK4[0].
+
+(defn ^I32 pc [^IntsR h ^I32 i]
+  (comment "Code point i of the pattern, or -1 past its end.")
+  (if (>= i (vlen h T_STK2)) (return (neg 1)))
+  (return (vget h T_STK2 i)))
+
+(defn ^I32 at [^IntsR h] (return (vget h T_STK4 0)))
+(defn mv [^Ints h ^I32 n]
+  (let [c (vget h T_STK4 0)]
+    (vset h T_STK4 0 (+ c n))))
+
+(defn ^Bool decode-pattern [^Ints h ^I32 bid]
+  (vtrunc h T_STK2 0)
+  (let [off (bid-off h bid)
+        len (bid-len h bid)
+        ^:mut i 0]
+    (while (< i len)
+      (let [c (vget h T_BYTE (+ off i))]
+        (if (< c 128)
+          (do (vpush1 h T_STK2 c) (set i (+ i 1)))
+          (if (< c 224)
+            (do (vpush1 h T_STK2 (bit-or (shl (bit-and c 31) 6) (bit-and (vget h T_BYTE (+ off (+ i 1))) 63)))
+                (set i (+ i 2)))
+            (if (< c 240)
+              (do (vpush1 h T_STK2 (bit-or (bit-or (shl (bit-and c 15) 12)
+                                                   (shl (bit-and (vget h T_BYTE (+ off (+ i 1))) 63) 6))
+                                           (bit-and (vget h T_BYTE (+ off (+ i 2))) 63)))
+                  (set i (+ i 3)))
+              (do (vpush1 h T_STK2 (bit-or (bit-or (shl (bit-and c 7) 18)
+                                                   (shl (bit-and (vget h T_BYTE (+ off (+ i 1))) 63) 12))
+                                           (bit-or (shl (bit-and (vget h T_BYTE (+ off (+ i 2))) 63) 6)
+                                                   (bit-and (vget h T_BYTE (+ off (+ i 3))) 63))))
+                  (set i (+ i 4))))))))
+    (return (not (erred h)))))
+
+;; ------------------------------------------------------------ classes
+;; A class is a record in T_RXA: count, then count (lo, hi) pairs, sorted,
+;; disjoint and non-adjacent. Its id is the record's offset. Ranges are
+;; gathered in T_STK8 (pairs) and normalised into the record.
+
+(defn ^I32 class-commit [^Ints h ^I32 from ^I32 negate]
+  (comment "Normalise the ranges in T_STK8[from..] (pairs), complement them if"
+           "negate, and store the class; answers its id. T_STK8 is cut back to from.")
+  (let [n (quot (- (vlen h T_STK8) from) 2)]
+    (if (not (sort-records h T_STK8 from n 2)) (return (neg 1)))
+    (let [at (vlen h T_RXA)]
+      (vpush1 h T_RXA 0)
+      (let [^:mut cnt 0
+            ^:mut clo (neg 1)
+            ^:mut chi (neg 2)]
+        (comment "Merge into a run of disjoint, non-adjacent ranges (in T_STK8 after the input).")
+        (let [mstart (vlen h T_STK8)]
+          (for [^I32 i 0 n]
+            (let [lo (vget h T_STK8 (+ from (* 2 i)))
+                  hi (vget h T_STK8 (+ from (+ (* 2 i) 1)))]
+              (if (and (>= chi (neg 1)) (<= lo (+ chi 1)))
+                (if (> hi chi) (set chi hi))
+                (do (if (>= clo 0) (do (vpush1 h T_STK8 clo) (vpush1 h T_STK8 chi)))
+                    (set clo lo)
+                    (set chi hi)))))
+          (if (>= clo 0) (do (vpush1 h T_STK8 clo) (vpush1 h T_STK8 chi)))
+          (let [m (quot (- (vlen h T_STK8) mstart) 2)]
+            (if (== negate 0)
+              (for [^I32 j 0 m]
+                (let [a (vget h T_STK8 (+ mstart (* 2 j)))
+                      b (vget h T_STK8 (+ mstart (+ (* 2 j) 1)))]
+                  (vpush1 h T_RXA a)
+                  (vpush1 h T_RXA b)
+                  (set cnt (+ cnt 1))))
+              (let [^:mut next 0]
+                (for [^I32 k 0 m]
+                  (let [a2 (vget h T_STK8 (+ mstart (* 2 k)))
+                        b2 (vget h T_STK8 (+ mstart (+ (* 2 k) 1)))]
+                    (if (> a2 next)
+                      (do (vpush1 h T_RXA next)
+                          (vpush1 h T_RXA (- a2 1))
+                          (set cnt (+ cnt 1))))
+                    (set next (+ b2 1))))
+                (if (<= next CP_MAX)
+                  (do (vpush1 h T_RXA next)
+                      (vpush1 h T_RXA CP_MAX)
+                      (set cnt (+ cnt 1))))))))
+        (vset h T_RXA at cnt)
+        (vtrunc h T_STK8 from)
+        (if (erred h) (return (neg 1)))
+        (return at)))))
+
+(defn ^Bool class-has [^IntsR h ^I32 cls ^I32 cp]
+  (comment "Does class cls contain code point cp? (binary search)")
+  (let [n (vget h T_RXA cls)
+        ^:mut lo 0
+        ^:mut hi (- n 1)]
+    (while (<= lo hi)
+      (let [mid (sar (+ lo hi) 1)
+            a (vget h T_RXA (+ cls (+ 1 (* 2 mid))))
+            b (vget h T_RXA (+ cls (+ 2 (* 2 mid))))]
+        (if (< cp a)
+          (set hi (- mid 1))
+          (if (> cp b)
+            (set lo (+ mid 1))
+            (return true)))))
+    (return false)))
+
+(defn ^I32 single-esc [^I32 c]
+  (comment "The code point a SingleCharEsc `\\c` stands for, or -1 if c is not one.")
+  (if (or (and (>= c 40) (<= c 43)) (or (== c 45) (or (== c 46) (== c 63)))) (return c))
+  (if (or (and (>= c 91) (<= c 94)) (and (>= c 123) (<= c 125))) (return c))
+  (if (== c 110) (return 10))
+  (if (== c 114) (return 13))
+  (if (== c 116) (return 9))
+  (return (neg 1)))
+
+(defn ^I32 range-push [^Ints h ^I32 lo ^I32 hi]
+  (vpush1 h T_STK8 lo)
+  (vpush1 h T_STK8 hi)
+  (return 0))
+
+(defn ^I32 parse-class-char [^Ints h]
+  (comment "A CCchar at the cursor (a plain char or a SingleCharEsc): its code"
+           "point, cursor advanced; -1 (ERR_REGEXP) otherwise.")
+  (let [c (pc h (at h))]
+    (if (== c 92)
+      (do (let [e (single-esc (pc h (+ (at h) 1)))]
+            (if (< e 0) (return (fail h ERR_REGEXP (neg 1))))
+            (mv h 2)
+            (return e))))
+    (if (or (< c 0) (or (== c 45) (or (== c 91) (== c 93)))) (return (fail h ERR_REGEXP (neg 1))))
+    (mv h 1)
+    (return c)))
+
+(defn ^I32 parse-bracket [^Ints h]
+  (comment "charClassExpr at the cursor (on `[`): `[` [`^`] (`-` / CCE1) *CCE1 [`-`] `]`.")
+  (mv h 1)
+  (let [from (vlen h T_STK8)
+        ^:mut negate 0
+        ^:mut first true]
+    (if (== (pc h (at h)) 94) (do (set negate 1) (mv h 1)))
+    (forever
+     (let [c (pc h (at h))]
+       (if (< c 0) (return (fail h ERR_REGEXP (neg 1))))
+       (if (and (== c 93) (not first)) (break))
+       (if (== c 45)
+         (do (comment "`-` only first or last")
+             (if (or first (== (pc h (+ (at h) 1)) 93))
+               (do (range-push h 45 45) (mv h 1))
+               (return (fail h ERR_REGEXP (neg 1)))))
+         (do (if (and (== c 92) (or (== (pc h (+ (at h) 1)) 112) (== (pc h (+ (at h) 1)) 80)))
+               (return (fail h ERR_REGEXP (neg 1))))
+             (let [lo (parse-class-char h)]
+               (if (< lo 0) (return (neg 1)))
+               (if (and (== (pc h (at h)) 45) (!= (pc h (+ (at h) 1)) 93))
+                 (do (mv h 1)
+                     (let [hi (parse-class-char h)]
+                       (if (< hi 0) (return (neg 1)))
+                       (if (< hi lo) (return (fail h ERR_REGEXP (neg 1))))
+                       (range-push h lo hi)))
+                 (range-push h lo lo))))))
+     (set first false))
+    (mv h 1)
+    (return (class-commit h from negate))))
+
+(defn ^I32 make-class1 [^Ints h ^I32 lo ^I32 hi]
+  (let [from (vlen h T_STK8)]
+    (range-push h lo hi)
+    (return (class-commit h from 0))))
+
+(defn ^I32 make-dot [^Ints h]
+  (comment "`.`: every code point except LF and CR.")
+  (let [from (vlen h T_STK8)]
+    (range-push h 10 10)
+    (range-push h 13 13)
+    (return (class-commit h from 1))))
+
+(declarefn ^I32 parse-alt ^I32 rx-store)
+
+(defn ^Bool normal-char [^I32 c]
+  (comment "I-Regexp NormalChar (everything but . \\ ? * + { } ( ) [ ] |).")
+  (if (< c 0) (return false))
+  (if (or (and (>= c 40) (<= c 43)) (== c 46)) (return false))
+  (if (or (== c 63) (and (>= c 91) (<= c 93))) (return false))
+  (if (and (>= c 123) (<= c 125)) (return false))
+  (return true))
+
+(defn ^I32 parse-atom [^Ints h]
+  (let [c (pc h (at h))]
+    (if (== c 40)
+      (do (mv h 1)
+          (let [^I32 inner (parse-alt h)]
+            (if (< inner 0) (return (neg 1)))
+            (if (!= (pc h (at h)) 41) (return (fail h ERR_REGEXP (neg 1))))
+            (mv h 1)
+            (return inner))))
+    (if (== c 91)
+      (do (let [cls (parse-bracket h)]
+            (if (< cls 0) (return (neg 1)))
+            (return (g-node h G_POS cls 0 0)))))
+    (if (== c 46)
+      (do (mv h 1)
+          (let [dot (make-dot h)]
+            (if (< dot 0) (return (neg 1)))
+            (return (g-node h G_POS dot 0 0)))))
+    (if (== c 92)
+      (do (let [e (single-esc (pc h (+ (at h) 1)))]
+            (if (< e 0) (return (fail h ERR_REGEXP (neg 1))))
+            (mv h 2)
+            (let [ce (make-class1 h e e)]
+              (if (< ce 0) (return (neg 1)))
+              (return (g-node h G_POS ce 0 0))))))
+    (if (normal-char c)
+      (do (mv h 1)
+          (let [cn (make-class1 h c c)]
+            (if (< cn 0) (return (neg 1)))
+            (return (g-node h G_POS cn 0 0)))))
+    (return (fail h ERR_REGEXP (neg 1)))))
+
+(defn ^I32 quant-num [^Ints h]
+  (comment "QuantExact digits at the cursor (saturating at 100000), or -1 if none.")
+  (let [^:mut v (neg 1)]
+    (while (and (>= (pc h (at h)) 48) (<= (pc h (at h)) 57))
+      (if (< v 0) (set v 0))
+      (if (< v 100000) (set v (+ (* v 10) (- (pc h (at h)) 48))))
+      (mv h 1))
+    (return v)))
+
+(defn ^I32 parse-piece [^Ints h]
+  (let [a (parse-atom h)]
+    (if (< a 0) (return (neg 1)))
+    (let [q (pc h (at h))]
+      (if (== q 42) (do (mv h 1) (return (g-node h G_REP a 0 INF))))
+      (if (== q 43) (do (mv h 1) (return (g-node h G_REP a 1 INF))))
+      (if (== q 63) (do (mv h 1) (return (g-node h G_REP a 0 1))))
+      (if (== q 123)
+        (do (mv h 1)
+            (let [lo (quant-num h)
+                  ^:mut hi lo]
+              (if (< lo 0) (return (fail h ERR_REGEXP (neg 1))))
+              (if (== (pc h (at h)) 44)
+                (do (mv h 1)
+                    (set hi (quant-num h))
+                    (if (< hi 0) (set hi INF))))
+              (if (!= (pc h (at h)) 125) (return (fail h ERR_REGEXP (neg 1))))
+              (mv h 1)
+              (if (< hi lo) (return (fail h ERR_REGEXP (neg 1))))
+              (return (g-node h G_REP a lo hi)))))
+      (return a))))
+
+(defn ^I32 parse-branch [^Ints h]
+  (let [sq (g-list h G_SEQ)]
+    (if (< sq 0) (return (neg 1)))
+    (forever
+     (let [c (pc h (at h))]
+       (if (or (or (< c 0) (== c 124)) (== c 41)) (break))
+       (let [p (parse-piece h)]
+         (if (< p 0) (return (neg 1)))
+         (g-add h sq p))))
+    (return sq)))
+
+(defn ^I32 parse-alt [^Ints h]
+  (let [d (+ (hg h H_DEPTH) 1)]
+    (hs h H_DEPTH d)
+    (if (> d (hg h H_DEPTH_MAX)) (return (fail h ERR_LIM_NESTING (neg 1)))))
+  (let [alt (g-list h G_ALT)]
+    (if (< alt 0) (return (neg 1)))
+    (forever
+     (let [b (parse-branch h)]
+       (if (< b 0) (return (neg 1)))
+       (g-add h alt b))
+     (if (== (pc h (at h)) 124) (mv h 1) (break)))
+    (let [d2 (hg h H_DEPTH)]
+      (hs h H_DEPTH (- d2 1)))
+    (return alt)))
+
+;; ------------------------------------------------------------ compile
+
+(defn ^:pub ^I32 rx-compile [^Ints h ^I32 bid ^I32 pos]
+  (comment "The internal regexp for pattern bid (interned), or -1 with ERR_REGEXP /"
+           "ERR_LIM_RPOS reported at source offset pos.")
+  (let [hsh (mix 7 bid)
+        ^:mut s (ht-start h T_HRX hsh)]
+    (forever
+     (let [id (ht-id h T_HRX s)]
+       (if (< id 0) (break))
+       (if (== (rx-pattern h id) bid) (return id))
+       (set s (ht-next h T_HRX s))))
+    (if (not (decode-pattern h bid)) (return (neg 1)))
+    (vtrunc h T_STK4 0)
+    (vpush1 h T_STK4 0)
+    (vtrunc h T_STK8 0)
+    (let [^I32 root (parse-alt h)]
+      (if (or (< root 0) (< (at h) (vlen h T_STK2)))
+        (do (comment "Report at the control's position, not inside the pattern.")
+            (hs h H_ERR 0)
+            (return (fail h ERR_REGEXP pos))))
+      (let [npos (g-count h root)]
+        (if (> npos (hg h H_LIM_RPOS)) (return (fail h ERR_LIM_RPOS pos)))
+        (let [f (g-build h root npos)]
+          (if (< f 0) (return (neg 1)))
+          (return (rx-store h bid npos f s)))))))
+
+(defn ^I32 rx-store [^Ints h ^I32 bid ^I32 npos ^I32 f ^I32 slot]
+  (comment "Copy the built automaton (T_GPOS payloads are class ids) into T_RX/T_RXD"
+           "with its atoms; answers the regexp id.")
+  (let [w (g-w npos)
+        data (vlen h T_RXD)
+        id (quot (vlen h T_RX) 6)]
+    (comment "first, accept")
+    (let [fa (vpush h T_RXD (* 2 w))]
+      (if (< fa 0) (return (neg 1)))
+      (for [^I32 i 0 (f-fl h f)]
+        (let [p (vget h T_STK8 (+ (f-fo h f) i))
+              at1 (+ data (sar p 5))
+              old (vget h T_RXD at1)]
+          (vset h T_RXD at1 (bit-or old (shl 1 (bit-and p 31))))))
+      (for [^I32 j 0 (f-ll h f)]
+        (let [q (vget h T_STK8 (+ (f-lo h f) j))
+              at2 (+ (+ data w) (sar q 5))
+              old2 (vget h T_RXD at2)]
+          (vset h T_RXD at2 (bit-or old2 (shl 1 (bit-and q 31)))))))
+    (comment "follow")
+    (for [^I32 k 0 (* npos w)]
+      (let [fw (vget h T_GOUT k)]
+        (vpush1 h T_RXD fw)))
+    (comment "atoms: every class boundary, sorted and unique (T_STK8 as scratch)")
+    (vtrunc h T_STK8 0)
+    (vpush1 h T_STK8 0)
+    (for [^I32 p2 0 npos]
+      (let [cls (vget h T_GPOS (* p2 4))
+            nr (vget h T_RXA cls)]
+        (for [^I32 r 0 nr]
+          (let [lo (vget h T_RXA (+ cls (+ 1 (* 2 r))))
+                hi (vget h T_RXA (+ cls (+ 2 (* 2 r))))]
+            (vpush1 h T_STK8 lo)
+            (if (< hi CP_MAX) (vpush1 h T_STK8 (+ hi 1)))))))
+    (let [nb (vlen h T_STK8)]
+      (if (not (sort-records h T_STK8 0 nb 1)) (return (neg 1)))
+      (let [astart (vlen h T_RXD)
+            ^:mut natoms 0
+            ^:mut prev (neg 1)]
+        (for [^I32 b 0 nb]
+          (let [x (vget h T_STK8 b)]
+            (if (!= x prev)
+              (do (vpush1 h T_RXD x)
+                  (set natoms (+ natoms 1))
+                  (set prev x)))))
+        (if (not (charge h (* natoms npos))) (return (neg 1)))
+        (let [mstart (vlen h T_RXD)]
+          (if (< (vpush h T_RXD (* natoms w)) 0) (return (neg 1)))
+          (for [^I32 a 0 natoms]
+            (let [cp (vget h T_RXD (+ astart a))]
+              (for [^I32 p3 0 npos]
+                (if (class-has h (vget h T_GPOS (* p3 4)) cp)
+                  (do (let [at3 (+ mstart (+ (* a w) (sar p3 5)))
+                            old3 (vget h T_RXD at3)]
+                        (vset h T_RXD at3 (bit-or old3 (shl 1 (bit-and p3 31))))))))))
+          (vpush1 h T_RX bid)
+          (vpush1 h T_RX data)
+          (vpush1 h T_RX npos)
+          (vpush1 h T_RX w)
+          (vpush1 h T_RX natoms)
+          (vpush1 h T_RX (f-null h f))
+          (if (erred h) (return (neg 1)))
+          (if (not (ht-put h T_HRX slot id (mix 7 bid))) (return (neg 1)))
+          (return id))))))
+
+;; ------------------------------------------------------------ matching
+
+(defn ^I32 atom-of [^IntsR h ^I32 r ^I32 cp]
+  (comment "The atom containing code point cp (binary search over atom_start).")
+  (let [w (rx-w h r)
+        npos (rx-npos h r)
+        astart (+ (rx-data h r) (+ (* 2 w) (* npos w)))
+        ^:mut lo 0
+        ^:mut hi (- (rx-natoms h r) 1)]
+    (while (< lo hi)
+      (let [mid (sar (+ (+ lo hi) 1) 1)]
+        (if (<= (vget h T_RXD (+ astart mid)) cp)
+          (set lo mid)
+          (set hi (- mid 1)))))
+    (return lo)))
+
+(defn ^:pub ^Bool rx-match [^Ints h ^I32 r ^I32 src ^I32 off ^I32 len]
+  (comment "Does the UTF-8 text src[off, off+len) match regexp r, whole? (compile"
+           "time only: map key overlap, `.eq`/`.ne` folding). Uses T_STK4 for the"
+           "two state vectors.")
+  (let [w (rx-w h r)
+        npos (rx-npos h r)
+        data (rx-data h r)
+        fol (+ data (* 2 w))
+        masks (+ (+ fol (* npos w)) (rx-natoms h r))]
+    (if (== len 0) (return (!= (rx-nullable h r) 0)))
+    (vtrunc h T_STK4 0)
+    (if (< (vpush h T_STK4 (* 2 w)) 0) (return false))
+    (let [^:mut i 0
+          ^:mut first true]
+      (while (< i len)
+        (let [c (vget h src (+ off i))
+              ^:mut cp c
+              ^:mut wdt 1]
+          (if (>= c 240)
+            (do (set cp (bit-or (bit-or (shl (bit-and c 7) 18) (shl (bit-and (vget h src (+ off (+ i 1))) 63) 12))
+                                (bit-or (shl (bit-and (vget h src (+ off (+ i 2))) 63) 6)
+                                        (bit-and (vget h src (+ off (+ i 3))) 63))))
+                (set wdt 4))
+            (if (>= c 224)
+              (do (set cp (bit-or (bit-or (shl (bit-and c 15) 12) (shl (bit-and (vget h src (+ off (+ i 1))) 63) 6))
+                                  (bit-and (vget h src (+ off (+ i 2))) 63)))
+                  (set wdt 3))
+              (if (>= c 192)
+                (do (set cp (bit-or (shl (bit-and c 31) 6) (bit-and (vget h src (+ off (+ i 1))) 63)))
+                    (set wdt 2)))))
+          (if (not (charge h (+ w 1))) (return false))
+          (let [atom (atom-of h r cp)
+                mrow (+ masks (* atom w))
+                ^:mut any 0]
+            (comment "next = (first step ? first : OR of follow rows of active) AND mask")
+            (for [^I32 k 0 w]
+              (vset h T_STK4 (+ w k) 0))
+            (if first
+              (for [^I32 k2 0 w]
+                (vset h T_STK4 (+ w k2) (vget h T_RXD (+ data k2))))
+              (for [^I32 p 0 npos]
+                (if (!= (bit-and (sar (vget h T_STK4 (sar p 5)) (bit-and p 31)) 1) 0)
+                  (for [^I32 k3 0 w]
+                    (let [cur (vget h T_STK4 (+ w k3))
+                          row (vget h T_RXD (+ fol (+ (* p w) k3)))]
+                      (vset h T_STK4 (+ w k3) (bit-or cur row)))))))
+            (for [^I32 k4 0 w]
+              (let [nx (bit-and (vget h T_STK4 (+ w k4)) (vget h T_RXD (+ mrow k4)))]
+                (vset h T_STK4 k4 nx)
+                (set any (bit-or any nx))))
+            (if (== any 0) (return false)))
+          (set first false)
+          (set i (+ i wdt))))
+      (let [^:mut hit 0]
+        (for [^I32 k5 0 w]
+          (set hit (bit-or hit (bit-and (vget h T_STK4 k5) (vget h T_RXD (+ data (+ w k5)))))))
+        (return (!= hit 0))))))

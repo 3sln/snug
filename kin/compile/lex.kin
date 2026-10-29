@@ -1,0 +1,645 @@
+;; The CDDL lexer: RFC 8610 Appendix B with the RFC 9682 updates, over the
+;; source bytes in vector T_SRC (the schema text, a -1 sentinel, the prelude,
+;; a -1 sentinel). Tokens are 6-word records in T_TOK:
+;;
+;;     kind, start, end, a, b, c
+;;
+;; Positions are byte offsets in T_SRC. The parser decides adjacency (`1*2` is
+;; an occurrence, `* 3` is `*` then the value 3; `name<T>` takes generic
+;; arguments) from `end == next start`, so the lexer keeps every token's span.
+;;
+;; Literal values are decoded HERE, into the byte vector T_LITB:
+;; * TK_INT: a = 1 if negative, b, c = offset and length of the big-endian
+;;   minimal magnitude (length 0 for zero). Any size.
+;; * TK_FLOAT: a, b = the binary64 pattern (hi, lo). Hex floats are rounded
+;;   exactly here (round half to even); decimal floats come from the host
+;;   (D020, D032): the lexer records their spans, the compile stops with
+;;   ERR_NEED_FLOATS, and the host converts each with Number()/str::parse and
+;;   calls again with the patterns.
+;; * TK_TEXT / TK_BYTES: b, c = offset and length of the decoded bytes (text
+;;   as UTF-8).
+(ns snug.compile.lex
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst case
+                              forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot rem shl sar ushr
+                               bit-and bit-or bit-xor < > <= >= == != and or not ult]]
+            [snug.compile.arena :refer [hg hs erred fail charge vbase vlen vpush vpush1
+                                        vget vset vtrunc vinit
+                                        ERR_SYNTAX ERR_FLOAT ERR_NEED_FLOATS
+                                        H_R0 H_R1 H_N_FLOATS H_FL_GIVEN
+                                        T_SRC T_TOK T_LITB T_STK T_FLREQ T_STK6]]))
+
+(defconst ^:pub ^I32 TK_EOF 0)
+(defconst ^:pub ^I32 TK_ID 1)
+(defconst ^:pub ^I32 TK_INT 2)
+(defconst ^:pub ^I32 TK_FLOAT 3)
+(defconst ^:pub ^I32 TK_TEXT 4)
+(defconst ^:pub ^I32 TK_BYTES 5)
+(defconst ^:pub ^I32 TK_ASSIGN 6)
+(defconst ^:pub ^I32 TK_TASSIGN 7)
+(defconst ^:pub ^I32 TK_GASSIGN 8)
+(defconst ^:pub ^I32 TK_SLASH 9)
+(defconst ^:pub ^I32 TK_DSLASH 10)
+(defconst ^:pub ^I32 TK_LPAREN 11)
+(defconst ^:pub ^I32 TK_RPAREN 12)
+(defconst ^:pub ^I32 TK_LBRACE 13)
+(defconst ^:pub ^I32 TK_RBRACE 14)
+(defconst ^:pub ^I32 TK_LBRACK 15)
+(defconst ^:pub ^I32 TK_RBRACK 16)
+(defconst ^:pub ^I32 TK_LT 17)
+(defconst ^:pub ^I32 TK_GT 18)
+(defconst ^:pub ^I32 TK_COMMA 19)
+(defconst ^:pub ^I32 TK_COLON 20)
+(defconst ^:pub ^I32 TK_ARROW 21)
+(defconst ^:pub ^I32 TK_CARET 22)
+(defconst ^:pub ^I32 TK_STAR 23)
+(defconst ^:pub ^I32 TK_PLUS 24)
+(defconst ^:pub ^I32 TK_QUEST 25)
+(defconst ^:pub ^I32 TK_TILDE 26)
+(defconst ^:pub ^I32 TK_AMP 27)
+(defconst ^:pub ^I32 TK_HASH 28)
+(defconst ^:pub ^I32 TK_DOT 29)
+(defconst ^:pub ^I32 TK_RANGE 30)
+(defconst ^:pub ^I32 TK_CTL 31)
+
+;; ------------------------------------------------------------ characters
+
+(defn ^:pub ^I32 sc [^IntsR h ^I32 i]
+  (comment "Source byte i, or -1 at a sentinel.")
+  (return (vget h T_SRC i)))
+
+(defn ^:pub ^Bool is-digit [^I32 c]
+  (return (and (>= c 48) (<= c 57))))
+
+(defn ^:pub ^Bool is-alpha [^I32 c]
+  (return (or (and (>= c 65) (<= c 90)) (and (>= c 97) (<= c 122)))))
+
+(defn ^:pub ^Bool is-ealpha [^I32 c]
+  (return (or (is-alpha c) (or (== c 64) (or (== c 95) (== c 36))))))
+
+(defn ^:pub ^I32 hexval [^I32 c]
+  (comment "The value of hex digit c, or -1.")
+  (if (is-digit c) (return (- c 48)))
+  (if (and (>= c 97) (<= c 102)) (return (- c 87)))
+  (if (and (>= c 65) (<= c 70)) (return (- c 55)))
+  (return (neg 1)))
+
+(defn ^:pub ^I32 cp-at [^Ints h ^I32 i]
+  (comment "Decode the UTF-8 sequence at source offset i: the code point, with its"
+           "length in h[H_R1]; -1 if it is not well-formed UTF-8 (WHATWG fatal rules:"
+           "no overlongs, no surrogates, nothing above U+10FFFF).")
+  (let [c (sc h i)]
+    (if (< c 0) (return (neg 1)))
+    (if (< c 128) (do (hs h H_R1 1) (return c)))
+    (if (< c 194) (return (neg 1)))
+    (let [c1 (sc h (+ i 1))]
+      (if (or (< c1 128) (> c1 191)) (return (neg 1)))
+      (if (< c 224)
+        (do (hs h H_R1 2)
+            (return (bit-or (shl (bit-and c 31) 6) (bit-and c1 63)))))
+      (if (and (== c 224) (< c1 160)) (return (neg 1)))
+      (if (and (== c 237) (> c1 159)) (return (neg 1)))
+      (let [c2 (sc h (+ i 2))]
+        (if (or (< c2 128) (> c2 191)) (return (neg 1)))
+        (if (< c 240)
+          (do (hs h H_R1 3)
+              (return (bit-or (bit-or (shl (bit-and c 15) 12) (shl (bit-and c1 63) 6))
+                              (bit-and c2 63)))))
+        (if (> c 244) (return (neg 1)))
+        (if (and (== c 240) (< c1 144)) (return (neg 1)))
+        (if (and (== c 244) (> c1 143)) (return (neg 1)))
+        (let [c3 (sc h (+ i 3))]
+          (if (or (< c3 128) (> c3 191)) (return (neg 1)))
+          (hs h H_R1 4)
+          (return (bit-or (bit-or (shl (bit-and c 7) 18) (shl (bit-and c1 63) 12))
+                          (bit-or (shl (bit-and c2 63) 6) (bit-and c3 63)))))))))
+
+(defn ^:pub ^I32 check-utf8 [^Ints h ^I32 from ^I32 to]
+  (comment "The offset of the first ill-formed sequence in SRC[from..to), or -1.")
+  (let [^:mut i from]
+    (while (< i to)
+      (let [c (sc h i)]
+        (if (< c 128)
+          (set i (+ i 1))
+          (do (let [cp (cp-at h i)]
+                (if (< cp 0) (return i))
+                (set i (+ i (hg h H_R1))))))))
+    (return (neg 1))))
+
+(defn ^:pub ^Bool put-utf8 [^Ints h ^I32 cp]
+  (comment "Append code point cp to T_LITB as UTF-8.")
+  (if (< cp 128) (return (>= (vpush1 h T_LITB cp) 0)))
+  (if (< cp 2048)
+    (do (vpush1 h T_LITB (bit-or 192 (sar cp 6)))
+        (return (>= (vpush1 h T_LITB (bit-or 128 (bit-and cp 63))) 0))))
+  (if (< cp 65536)
+    (do (vpush1 h T_LITB (bit-or 224 (sar cp 12)))
+        (vpush1 h T_LITB (bit-or 128 (bit-and (sar cp 6) 63)))
+        (return (>= (vpush1 h T_LITB (bit-or 128 (bit-and cp 63))) 0))))
+  (vpush1 h T_LITB (bit-or 240 (sar cp 18)))
+  (vpush1 h T_LITB (bit-or 128 (bit-and (sar cp 12) 63)))
+  (vpush1 h T_LITB (bit-or 128 (bit-and (sar cp 6) 63)))
+  (return (>= (vpush1 h T_LITB (bit-or 128 (bit-and cp 63))) 0)))
+
+;; ------------------------------------------------------------ tokens
+
+(defn ^:pub ^I32 push-tok [^Ints h ^I32 kind ^I32 s ^I32 e ^I32 a ^I32 b ^I32 c]
+  (comment "Append a token; answers its index, or -1.")
+  (if (not (charge h 1)) (return (neg 1)))
+  (let [at (vpush h T_TOK 6)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_TOK at kind)
+    (vset h T_TOK (+ at 1) s)
+    (vset h T_TOK (+ at 2) e)
+    (vset h T_TOK (+ at 3) a)
+    (vset h T_TOK (+ at 4) b)
+    (vset h T_TOK (+ at 5) c)
+    (return (quot at 6))))
+
+(defn ^:pub ^I32 tk-kind [^IntsR h ^I32 t] (return (vget h T_TOK (* t 6))))
+(defn ^:pub ^I32 tk-start [^IntsR h ^I32 t] (return (vget h T_TOK (+ (* t 6) 1))))
+(defn ^:pub ^I32 tk-end [^IntsR h ^I32 t] (return (vget h T_TOK (+ (* t 6) 2))))
+(defn ^:pub ^I32 tk-a [^IntsR h ^I32 t] (return (vget h T_TOK (+ (* t 6) 3))))
+(defn ^:pub ^I32 tk-b [^IntsR h ^I32 t] (return (vget h T_TOK (+ (* t 6) 4))))
+(defn ^:pub ^I32 tk-c [^IntsR h ^I32 t] (return (vget h T_TOK (+ (* t 6) 5))))
+
+;; ------------------------------------------------------------ numbers
+
+(defn ^Bool mag-mul-add [^Ints h ^I32 base ^I32 digit]
+  (comment "The little-endian byte magnitude in T_STK times base, plus digit.")
+  (let [n (vlen h T_STK)
+        ^:mut carry digit]
+    (if (not (charge h (+ 1 (quot n 8)))) (return false))
+    (for [^I32 i 0 n]
+      (let [x (+ (* (vget h T_STK i) base) carry)]
+        (vset h T_STK i (bit-and x 255))
+        (set carry (sar x 8))))
+    (while (> carry 0)
+      (vpush1 h T_STK (bit-and carry 255))
+      (set carry (sar carry 8)))
+    (return (not (erred h)))))
+
+(defn ^I32 mag-flush [^Ints h]
+  (comment "Move the little-endian magnitude in T_STK to T_LITB, big-endian and"
+           "minimal; answers its offset there (length in h[H_R0]).")
+  (let [^:mut n (vlen h T_STK)
+        off (vlen h T_LITB)]
+    (while (and (> n 0) (== (vget h T_STK (- n 1)) 0))
+      (set n (- n 1)))
+    (let [^:mut i (- n 1)]
+      (while (>= i 0)
+        (let [byte (vget h T_STK i)]
+          (vpush1 h T_LITB byte))
+        (set i (- i 1))))
+    (hs h H_R0 n)
+    (return off)))
+
+(defn ^I32 mag-bit [^IntsR h ^I32 off ^I32 len ^I32 i]
+  (comment "Bit i (0 = least significant) of the big-endian magnitude T_LITB[off, len).")
+  (if (or (< i 0) (>= i (* len 8))) (return 0))
+  (let [byte (vget h T_LITB (- (+ off len) (+ 1 (sar i 3))))]
+    (return (bit-and (sar byte (bit-and i 7)) 1))))
+
+(defn ^I32 mag-bitlen [^IntsR h ^I32 off ^I32 len]
+  (comment "Bits in the minimal magnitude (0 for zero).")
+  (if (== len 0) (return 0))
+  (let [^:mut top (vget h T_LITB off)
+        ^:mut k 0]
+    (while (> top 0)
+      (set k (+ k 1))
+      (set top (sar top 1)))
+    (return (+ (* (- len 1) 8) k))))
+
+(defn ^:pub ^I32 round-binary64 [^Ints h ^I32 off ^I32 len ^I32 e ^I32 negative]
+  (comment "The binary64 nearest M * 2^e (M = the magnitude T_LITB[off, len)), ties"
+           "to even: high word answered, low word in h[H_R0]. -1 in h[H_R1] when the"
+           "value overflows, or underflows to zero from a nonzero M; else 0.")
+  (hs h H_R1 0)
+  (let [l (mag-bitlen h off len)
+        ^:mut sign 0]
+    (comment "sign is the high bit as an i32 pattern (-2^31 = 0x80000000).")
+    (if (!= negative 0) (set sign (shl 1 31)))
+    (if (== l 0)
+      (do (hs h H_R0 0)
+          (if (!= negative 0) (return (- (neg 2147483647) 1)))
+          (return 0)))
+    (let [big (- l 1)
+          ex (+ big e)]
+      (comment "ex: the exponent of the leading bit. Saturate silly exponents first.")
+      (if (> ex 2000) (do (hs h H_R1 (neg 1)) (hs h H_R0 0) (return 0)))
+      (if (< ex (neg 2000)) (do (hs h H_R1 (neg 1)) (hs h H_R0 0) (return 0)))
+      (let [^:mut q (- ex 52)]
+        (if (< q (neg 1074)) (set q (neg 1074)))
+        (let [s (- q e)
+              ^:mut shi 0
+              ^:mut slo 0]
+          (comment "significand = bits [s, s + 53) of M (s may be negative: shift left).")
+          (let [^:mut j 52]
+            (while (>= j 0)
+              (let [bit (mag-bit h off len (+ s j))]
+                (set shi (bit-or (shl shi 1) (ushr slo 31)))
+                (set slo (bit-or (shl slo 1) bit)))
+              (set j (- j 1))))
+          (if (> s 0)
+            (do (let [rbit (mag-bit h off len (- s 1))
+                      ^:mut sticky 0
+                      ^:mut k 0]
+                  (while (and (< k (- s 1)) (== sticky 0))
+                    (set sticky (mag-bit h off len k))
+                    (set k (+ k 1)))
+                  (if (and (!= rbit 0) (or (!= sticky 0) (!= (bit-and slo 1) 0)))
+                    (do (set slo (+ slo 1))
+                        (if (== slo 0) (set shi (+ shi 1))))))))
+          (comment "A carry out to 2^53 renormalises.")
+          (if (>= shi 2097152)
+            (do (set slo (bit-or (ushr slo 1) (shl shi 31)))
+                (set shi (sar shi 1))
+                (set q (+ q 1))))
+          (if (and (== shi 0) (== slo 0))
+            (do (hs h H_R1 (neg 1)) (hs h H_R0 0) (return 0)))
+          (if (>= shi 1048576)
+            (do (let [biased (+ q 1075)]
+                  (if (>= biased 2047) (do (hs h H_R1 (neg 1)) (hs h H_R0 0) (return 0)))
+                  (hs h H_R0 slo)
+                  (return (bit-or sign (bit-or (shl biased 20) (bit-and shi 1048575)))))))
+          (hs h H_R0 slo)
+          (return (bit-or sign shi)))))))
+
+(defn ^I32 lex-number [^Ints h ^I32 s ^I32 p ^I32 negative]
+  (comment "A number whose first digit is at p (s is the token start, before any"
+           "'-'). Answers the offset after it, or -1.")
+  (vtrunc h T_STK 0)
+  (let [c0 (sc h p)
+        c1 (sc h (+ p 1))]
+    (comment "---- hexadecimal integer or hex float")
+    (if (and (== c0 48) (or (== c1 120) (== c1 88)))
+      (do (let [^:mut i (+ p 2)
+                ^:mut nd 0
+                ^:mut nfrac 0]
+            (while (>= (hexval (sc h i)) 0)
+              (mag-mul-add h 16 (hexval (sc h i)))
+              (set nd (+ nd 1))
+              (set i (+ i 1)))
+            (if (== nd 0) (return (fail h ERR_SYNTAX s)))
+            (if (and (== (sc h i) 46) (>= (hexval (sc h (+ i 1))) 0))
+              (do (set i (+ i 1))
+                  (while (>= (hexval (sc h i)) 0)
+                    (mag-mul-add h 16 (hexval (sc h i)))
+                    (set nfrac (+ nfrac 1))
+                    (set i (+ i 1)))
+                  (if (not (or (== (sc h i) 112) (== (sc h i) 80)))
+                    (return (fail h ERR_SYNTAX s)))))
+            (if (or (== (sc h i) 112) (== (sc h i) 80))
+              (do (comment "hexfloat: 'p' exponent (decimal, signed), exact rounding")
+                  (set i (+ i 1))
+                  (let [^:mut esign 1
+                        ^:mut ev 0
+                        ^:mut edig 0]
+                    (if (== (sc h i) 45) (do (set esign (neg 1)) (set i (+ i 1)))
+                        (if (== (sc h i) 43) (set i (+ i 1))))
+                    (while (is-digit (sc h i))
+                      (if (< ev 100000) (set ev (+ (* ev 10) (- (sc h i) 48))))
+                      (set edig (+ edig 1))
+                      (set i (+ i 1)))
+                    (if (== edig 0) (return (fail h ERR_SYNTAX s)))
+                    (let [off (mag-flush h)
+                          len (hg h H_R0)
+                          e2 (- (* esign ev) (* 4 nfrac))
+                          hi (round-binary64 h off len e2 negative)
+                          lo (hg h H_R0)]
+                      (if (!= (hg h H_R1) 0) (return (fail h ERR_FLOAT s)))
+                      (push-tok h TK_FLOAT s i hi lo 0)
+                      (return i)))))
+            (let [off2 (mag-flush h)
+                  len2 (hg h H_R0)]
+              (push-tok h TK_INT s i negative off2 len2)
+              (return i)))))
+    (comment "---- binary integer")
+    (if (and (== c0 48) (or (== c1 98) (== c1 66)))
+      (do (let [^:mut j (+ p 2)
+                ^:mut nb 0]
+            (while (or (== (sc h j) 48) (== (sc h j) 49))
+              (mag-mul-add h 2 (- (sc h j) 48))
+              (set nb (+ nb 1))
+              (set j (+ j 1)))
+            (if (== nb 0) (return (fail h ERR_SYNTAX s)))
+            (let [off3 (mag-flush h)
+                  len3 (hg h H_R0)]
+              (push-tok h TK_INT s j negative off3 len3)
+              (return j)))))
+    (comment "---- decimal integer or decimal float")
+    (if (and (== c0 48) (is-digit c1)) (return (fail h ERR_SYNTAX s)))
+    (let [^:mut k p
+          ^:mut isfloat false
+          ^:mut first-nz (neg 1)
+          ^:mut last-nz (neg 1)
+          ^:mut ndig 0]
+      (while (is-digit (sc h k))
+        (if (!= (sc h k) 48) (do (if (< first-nz 0) (set first-nz ndig)) (set last-nz ndig)))
+        (set ndig (+ ndig 1))
+        (mag-mul-add h 10 (- (sc h k) 48))
+        (set k (+ k 1)))
+      (if (and (== (sc h k) 46) (is-digit (sc h (+ k 1))))
+        (do (set isfloat true)
+            (set k (+ k 1))
+            (while (is-digit (sc h k))
+              (if (!= (sc h k) 48) (do (if (< first-nz 0) (set first-nz ndig)) (set last-nz ndig)))
+              (set ndig (+ ndig 1))
+              (set k (+ k 1)))))
+      (if (or (== (sc h k) 101) (== (sc h k) 69))
+        (do (let [n1 (sc h (+ k 1))
+                  n2 (sc h (+ k 2))]
+              (if (or (is-digit n1) (and (or (== n1 43) (== n1 45)) (is-digit n2)))
+                (do (set isfloat true)
+                    (set k (+ k 2))
+                    (while (is-digit (sc h k)) (set k (+ k 1))))))))
+      (if (not isfloat)
+        (do (let [off4 (mag-flush h)
+                  len4 (hg h H_R0)]
+              (push-tok h TK_INT s k negative off4 len4)
+              (return k))))
+      (comment "Decimal float: at most 17 significant digits (D020), converted by the host.")
+      (if (and (>= first-nz 0) (> (+ (- last-nz first-nz) 1) 17))
+        (return (fail h ERR_FLOAT s)))
+      (let [idx (hg h H_N_FLOATS)]
+        (hs h H_N_FLOATS (+ idx 1))
+        (if (< idx (hg h H_FL_GIVEN))
+          (do (let [fhi (vget h T_FLREQ (* 2 idx))
+                    flo (vget h T_FLREQ (+ (* 2 idx) 1))
+                    mag (bit-and fhi 2147483647)]
+                (if (>= mag 2146435072) (return (fail h ERR_FLOAT s)))
+                (if (and (== mag 0) (and (== flo 0) (>= first-nz 0)))
+                  (return (fail h ERR_FLOAT s)))
+                (push-tok h TK_FLOAT s k fhi flo 0)
+                (return k))))
+        (vpush1 h T_STK6 s)
+        (vpush1 h T_STK6 k)
+        (push-tok h TK_FLOAT s k 0 0 0)
+        (return k)))))
+
+;; ------------------------------------------------------------ strings
+
+(defn ^I32 hex4 [^Ints h ^I32 i]
+  (comment "The four hex digits at i as a value, or -1.")
+  (let [a (hexval (sc h i))
+        b (hexval (sc h (+ i 1)))
+        c (hexval (sc h (+ i 2)))
+        d (hexval (sc h (+ i 3)))]
+    (if (or (or (< a 0) (< b 0)) (or (< c 0) (< d 0))) (return (neg 1)))
+    (return (bit-or (bit-or (shl a 12) (shl b 8)) (bit-or (shl c 4) d)))))
+
+(defn ^I32 lex-escape [^Ints h ^I32 i ^I32 bytes-string]
+  (comment "The escape whose backslash is at i: appends its UTF-8 to T_LITB and"
+           "answers the offset after it, or -1. `\\'` only in byte strings.")
+  (let [c (sc h (+ i 1))]
+    (if (or (or (== c 34) (== c 47)) (== c 92))
+      (do (vpush1 h T_LITB c) (return (+ i 2))))
+    (if (and (== c 39) (!= bytes-string 0)) (do (vpush1 h T_LITB c) (return (+ i 2))))
+    (if (== c 98) (do (vpush1 h T_LITB 8) (return (+ i 2))))
+    (if (== c 102) (do (vpush1 h T_LITB 12) (return (+ i 2))))
+    (if (== c 110) (do (vpush1 h T_LITB 10) (return (+ i 2))))
+    (if (== c 114) (do (vpush1 h T_LITB 13) (return (+ i 2))))
+    (if (== c 116) (do (vpush1 h T_LITB 9) (return (+ i 2))))
+    (if (!= c 117) (return (fail h ERR_SYNTAX i)))
+    (if (== (sc h (+ i 2)) 123)
+      (do (comment "RFC 9682 \\u{X...}: hex digits, a scalar value")
+          (let [^:mut j (+ i 3)
+                ^:mut v 0
+                ^:mut nd 0]
+            (while (>= (hexval (sc h j)) 0)
+              (if (< v 1114112) (set v (+ (* v 16) (hexval (sc h j)))))
+              (set nd (+ nd 1))
+              (set j (+ j 1)))
+            (if (or (== nd 0) (!= (sc h j) 125)) (return (fail h ERR_SYNTAX i)))
+            (if (or (> v 1114111) (and (>= v 55296) (<= v 57343)))
+              (return (fail h ERR_SYNTAX i)))
+            (put-utf8 h v)
+            (return (+ j 1)))))
+    (let [u (hex4 h (+ i 2))]
+      (if (< u 0) (return (fail h ERR_SYNTAX i)))
+      (if (and (>= u 56320) (<= u 57343)) (return (fail h ERR_SYNTAX i)))
+      (if (and (>= u 55296) (<= u 56319))
+        (do (if (or (!= (sc h (+ i 6)) 92) (!= (sc h (+ i 7)) 117))
+              (return (fail h ERR_SYNTAX i)))
+            (let [lo (hex4 h (+ i 8))]
+              (if (or (< lo 56320) (> lo 57343)) (return (fail h ERR_SYNTAX i)))
+              (put-utf8 h (+ 65536 (+ (shl (- u 55296) 10) (- lo 56320))))
+              (return (+ i 12)))))
+      (put-utf8 h u)
+      (return (+ i 6)))))
+
+(defn ^I32 lex-quoted [^Ints h ^I32 i ^I32 quote]
+  (comment "The body of a quoted string whose opening quote is at i (34 text, 39"
+           "bytes), decoded into T_LITB. Answers the offset after the closing quote.")
+  (let [^:mut j (+ i 1)
+        ^:mut bs 0]
+    (if (== quote 39) (set bs 1))
+    (forever
+     (let [c (sc h j)]
+       (if (== c quote) (return (+ j 1)))
+       (if (== c 92)
+         (do (set j (lex-escape h j bs))
+             (if (< j 0) (return (neg 1))))
+         (if (and (== bs 1) (== c 10))
+           (do (vpush1 h T_LITB 10) (set j (+ j 1)))
+           (if (and (and (== bs 1) (== c 13)) (== (sc h (+ j 1)) 10))
+             (do (vpush1 h T_LITB 13) (vpush1 h T_LITB 10) (set j (+ j 2)))
+             (if (or (< c 32) (== c 127))
+               (return (fail h ERR_SYNTAX j))
+               (if (< c 128)
+                 (do (vpush1 h T_LITB c) (set j (+ j 1)))
+                 (do (let [cp (cp-at h j)
+                           w (hg h H_R1)]
+                       (if (or (< cp 160) (or (and (> cp 55295) (< cp 57344)) (> cp 1114109)))
+                         (return (fail h ERR_SYNTAX j)))
+                       (for [^I32 q 0 w]
+                         (let [byte (sc h (+ j q))]
+                           (vpush1 h T_LITB byte)))
+                       (set j (+ j w))))))))))
+     (if (erred h) (return (neg 1))))))
+
+(defn ^I32 b64val [^I32 c]
+  (comment "base64 / base64url digit value, or -1.")
+  (if (is-alpha c) (if (< c 97) (return (- c 65)) (return (- c 71))))
+  (if (is-digit c) (return (+ c 4)))
+  (if (or (== c 43) (== c 45)) (return 62))
+  (if (or (== c 47) (== c 95)) (return 63))
+  (return (neg 1)))
+
+(defn ^I32 lex-bytes [^Ints h ^I32 s ^I32 q ^I32 qual]
+  (comment "A byte string token starting at s whose quote is at q; qual 0 plain"
+           "(UTF-8 of the text), 1 h'' (hex), 2 b64'' (base64 or base64url). The"
+           "quoted body is decoded first; h and b64 then reinterpret it, skipping"
+           "whitespace and (h'' only, RFC 9682) ;-comments.")
+  (let [raw (vlen h T_LITB)
+        e (lex-quoted h q 39)]
+    (if (< e 0) (return (neg 1)))
+    (if (== qual 0)
+      (do (push-tok h TK_BYTES s e 0 raw (- (vlen h T_LITB) raw))
+          (return e)))
+    (let [rawlen (- (vlen h T_LITB) raw)
+          out (vlen h T_LITB)
+          ^:mut i 0
+          ^:mut acc 0
+          ^:mut nacc 0
+          ^:mut pad 0]
+      (while (< i rawlen)
+        (let [c (vget h T_LITB (+ raw i))]
+          (if (or (or (== c 32) (== c 9)) (or (== c 10) (== c 13)))
+            (set i (+ i 1))
+            (if (and (== qual 1) (== c 59))
+              (do (while (and (< i rawlen) (!= (vget h T_LITB (+ raw i)) 10)) (set i (+ i 1))))
+              (if (== qual 1)
+                (do (let [v (hexval c)]
+                      (if (< v 0) (return (fail h ERR_SYNTAX s)))
+                      (set acc (bit-or (shl acc 4) v))
+                      (set nacc (+ nacc 1))
+                      (if (== nacc 2)
+                        (do (vpush1 h T_LITB acc) (set acc 0) (set nacc 0)))
+                      (set i (+ i 1))))
+                (do (if (== c 61)
+                      (do (set pad (+ pad 1)) (set i (+ i 1)))
+                      (do (let [v6 (b64val c)]
+                            (if (or (< v6 0) (> pad 0)) (return (fail h ERR_SYNTAX s)))
+                            (set acc (bit-or (shl acc 6) v6))
+                            (set nacc (+ nacc 1))
+                            (if (== nacc 4)
+                              (do (vpush1 h T_LITB (bit-and (sar acc 16) 255))
+                                  (vpush1 h T_LITB (bit-and (sar acc 8) 255))
+                                  (vpush1 h T_LITB (bit-and acc 255))
+                                  (set acc 0) (set nacc 0)))
+                            (set i (+ i 1)))))))))))
+      (if (== qual 1)
+        (if (!= nacc 0) (return (fail h ERR_SYNTAX s))))
+      (if (== qual 2)
+        (do (if (== nacc 1) (return (fail h ERR_SYNTAX s)))
+            (if (== nacc 2) (vpush1 h T_LITB (bit-and (sar acc 4) 255)))
+            (if (== nacc 3)
+              (do (vpush1 h T_LITB (bit-and (sar acc 10) 255))
+                  (vpush1 h T_LITB (bit-and (sar acc 2) 255))))))
+      (if (erred h) (return (neg 1)))
+      (push-tok h TK_BYTES s e 0 out (- (vlen h T_LITB) out))
+      (return e))))
+
+;; ------------------------------------------------------------ the loop
+
+(defn ^I32 id-end [^IntsR h ^I32 i]
+  (comment "The end of the id starting at i (an EALPHA): EALPHA *(*(\"-\" / \".\") (EALPHA / DIGIT)).")
+  (let [^:mut j (+ i 1)]
+    (forever
+     (let [c (sc h j)]
+       (if (or (is-ealpha c) (is-digit c))
+         (set j (+ j 1))
+         (if (or (== c 45) (== c 46))
+           (do (let [^:mut k j]
+                 (while (or (== (sc h k) 45) (== (sc h k) 46)) (set k (+ k 1)))
+                 (if (or (is-ealpha (sc h k)) (is-digit (sc h k)))
+                   (set j (+ k 1))
+                   (return j))))
+           (return j)))))))
+
+(defn ^I32 skip-space [^IntsR h ^I32 i]
+  (comment "Past whitespace (SP, HT, LF, CR) and ;-comments.")
+  (let [^:mut j i]
+    (forever
+     (let [c (sc h j)]
+       (if (or (or (== c 32) (== c 9)) (or (== c 10) (== c 13)))
+         (set j (+ j 1))
+         (if (== c 59)
+           (do (set j (+ j 1))
+               (while (and (>= (sc h j) 0) (and (!= (sc h j) 10) (!= (sc h j) 13)))
+                 (set j (+ j 1))))
+           (return j)))))))
+
+(defn ^I32 punct [^Ints h ^I32 kind ^I32 i ^I32 w]
+  (push-tok h kind i (+ i w) 0 0 0)
+  (return (+ i w)))
+
+(defn ^I32 lex-punct [^Ints h ^I32 c ^I32 i]
+  (comment "Single-character punctuation, or a syntax error.")
+  (case c
+    [40] (punct h TK_LPAREN i 1)
+    [41] (punct h TK_RPAREN i 1)
+    [123] (punct h TK_LBRACE i 1)
+    [125] (punct h TK_RBRACE i 1)
+    [91] (punct h TK_LBRACK i 1)
+    [93] (punct h TK_RBRACK i 1)
+    [60] (punct h TK_LT i 1)
+    [62] (punct h TK_GT i 1)
+    [44] (punct h TK_COMMA i 1)
+    [58] (punct h TK_COLON i 1)
+    [94] (punct h TK_CARET i 1)
+    [42] (punct h TK_STAR i 1)
+    [43] (punct h TK_PLUS i 1)
+    [63] (punct h TK_QUEST i 1)
+    [126] (punct h TK_TILDE i 1)
+    [38] (punct h TK_AMP i 1)
+    :else (fail h ERR_SYNTAX i)))
+
+(defn ^I32 lex-one [^Ints h ^I32 i]
+  (comment "Lex the token at i (not a sentinel, not space); answers the offset after it, or -1.")
+  (let [c (sc h i)
+        c1 (sc h (+ i 1))]
+    (if (is-digit c) (return (lex-number h i i 0)))
+    (if (and (== c 45) (is-digit c1)) (return (lex-number h i (+ i 1) 1)))
+    (if (== c 34)
+      (do (let [off (vlen h T_LITB)
+                e (lex-quoted h i 34)]
+            (if (< e 0) (return (neg 1)))
+            (push-tok h TK_TEXT i e 0 off (- (vlen h T_LITB) off))
+            (return e))))
+    (if (== c 39) (return (lex-bytes h i i 0)))
+    (if (is-ealpha c)
+      (do (let [e1 (id-end h i)]
+            (if (and (== (sc h e1) 39) (and (== (- e1 i) 1) (== c 104)))
+              (return (lex-bytes h i e1 1)))
+            (if (and (and (== (sc h e1) 39) (== (- e1 i) 3))
+                     (and (== c 98) (and (== c1 54) (== (sc h (+ i 2)) 52))))
+              (return (lex-bytes h i e1 2)))
+            (push-tok h TK_ID i e1 0 0 0)
+            (return e1))))
+    (if (== c 61)
+      (do (if (== c1 62) (return (punct h TK_ARROW i 2)))
+          (return (punct h TK_ASSIGN i 1))))
+    (if (== c 47)
+      (do (if (== c1 47)
+            (do (if (== (sc h (+ i 2)) 61) (return (punct h TK_GASSIGN i 3)))
+                (return (punct h TK_DSLASH i 2))))
+          (if (== c1 61) (return (punct h TK_TASSIGN i 2)))
+          (return (punct h TK_SLASH i 1))))
+    (if (== c 46)
+      (do (if (== c1 46)
+            (do (if (== (sc h (+ i 2)) 46)
+                  (do (push-tok h TK_RANGE i (+ i 3) 0 0 0) (return (+ i 3))))
+                (push-tok h TK_RANGE i (+ i 2) 1 0 0)
+                (return (+ i 2))))
+          (if (is-ealpha c1)
+            (do (let [e2 (id-end h (+ i 1))]
+                  (push-tok h TK_CTL i e2 (+ i 1) 0 0)
+                  (return e2))))
+          (return (fail h ERR_SYNTAX i))))
+    (if (== c 35)
+      (do (if (is-digit c1)
+            (do (push-tok h TK_HASH i (+ i 2) (- c1 48) 0 0)
+                (let [j (+ i 2)]
+                  (if (and (== (sc h j) 46) (or (is-digit (sc h (+ j 1))) (== (sc h (+ j 1)) 60)))
+                    (return (punct h TK_DOT j 1)))
+                  (return j))))
+          (push-tok h TK_HASH i (+ i 1) (neg 1) 0 0)
+          (return (+ i 1))))
+    (return (lex-punct h c i))))
+
+(defn ^:pub ^I32 lex [^Ints h ^I32 from]
+  (comment "Every token of SRC from `from` to the next sentinel, then TK_EOF."
+           "Answers the index of the first token, or -1.")
+  (let [first (vlen h T_TOK)
+        ^:mut i from]
+    (forever
+     (if (erred h) (return (neg 1)))
+     (set i (skip-space h i))
+     (if (< (sc h i) 0)
+       (do (push-tok h TK_EOF i i 0 0 0)
+           (if (erred h) (return (neg 1)))
+           (return (quot first 6))))
+     (set i (lex-one h i))
+     (if (< i 0) (return (neg 1))))))

@@ -1,0 +1,506 @@
+;; The compiler's memory: ONE int arena `h` (an `Ints`) that the host allocates
+;; and kin carves. Nothing in the compiler allocates host memory; everything
+;; it builds -- tokens, the AST, leaves, typesets, maps, automata, and the
+;; Program itself -- lives in growable VECTORS inside `h`.
+;;
+;; * The first H_DATA words are a header: globals, limits, return registers
+;;   and one descriptor (base, len, cap) per vector.
+;; * A vector grows by RELOCATION to the top of the bump area (old space is
+;;   abandoned). So the compiler holds OFFSETS into a vector, never absolute
+;;   addresses, across any push to that vector.
+;; * When the bump area is exhausted the compile stops with ERR_ARENA and the
+;;   host retries from scratch with a larger arena (up to ARENA_MAX_WORDS).
+;;   The outcome never depends on the arena size: every limit and the compile
+;;   budget are counted, not measured (D033).
+;; * Every arena access is CHECKED (`hg`/`hs`): an index the compiler got
+;;   wrong is a sticky ERR_INTERNAL, never a panic or an `undefined`.
+;;
+;; Errors are sticky too: `fail` records the first error (code, source offset,
+;; rule) and answers -1; callers test `(erred h)` after anything that can fail.
+(ns snug.compile.arena
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-xor mul32
+                               < > <= >= == != and or not ult ia iset ilen]]))
+
+;; ------------------------------------------------------------ error codes
+;; Stable schema error codes (the host maps them to names: snug.compile.main
+;; `error-name`). 1..3 never reach a caller: the host acts on them.
+(defconst ^:pub ^I32 ERR_ARENA 1)
+(defconst ^:pub ^I32 ERR_NEED_FLOATS 2)
+(defconst ^:pub ^I32 ERR_INTERNAL 3)
+(defconst ^:pub ^I32 ERR_SYNTAX 10)
+(defconst ^:pub ^I32 ERR_LIM_TEXT 12)
+(defconst ^:pub ^I32 ERR_LIM_NESTING 13)
+(defconst ^:pub ^I32 ERR_LIM_AST 14)
+(defconst ^:pub ^I32 ERR_LIM_INST 15)
+(defconst ^:pub ^I32 ERR_LIM_ALTS 16)
+(defconst ^:pub ^I32 ERR_LIM_APOS 17)
+(defconst ^:pub ^I32 ERR_LIM_RPOS 18)
+(defconst ^:pub ^I32 ERR_LIM_WIDTH 19)
+(defconst ^:pub ^I32 ERR_LIM_POOL 20)
+(defconst ^:pub ^I32 ERR_LIM_TOTAL 21)
+(defconst ^:pub ^I32 ERR_LIM_BUDGET 22)
+(defconst ^:pub ^I32 ERR_LIM_LEAVES 23)
+(defconst ^:pub ^I32 ERR_LIM_MEMORY 24)
+(defconst ^:pub ^I32 ERR_UNDEFINED 30)
+(defconst ^:pub ^I32 ERR_DUPLICATE 31)
+(defconst ^:pub ^I32 ERR_KIND 32)
+(defconst ^:pub ^I32 ERR_GENERIC 33)
+(defconst ^:pub ^I32 ERR_NONPRODUCTIVE 34)
+(defconst ^:pub ^I32 ERR_GROUP_RECURSION 35)
+(defconst ^:pub ^I32 ERR_UNWRAP 36)
+(defconst ^:pub ^I32 ERR_ENUM 37)
+(defconst ^:pub ^I32 ERR_RANGE 38)
+(defconst ^:pub ^I32 ERR_FLOAT 39)
+(defconst ^:pub ^I32 ERR_CONTROL_TARGET 40)
+(defconst ^:pub ^I32 ERR_CONTROL_VALUE 41)
+(defconst ^:pub ^I32 ERR_UNSUPPORTED_CONTROL 42)
+(defconst ^:pub ^I32 ERR_UNKNOWN_CONTROL 43)
+(defconst ^:pub ^I32 ERR_REGEXP 44)
+(defconst ^:pub ^I32 ERR_MAP_KEY 45)
+(defconst ^:pub ^I32 ERR_MAP_OCCURRENCE 46)
+(defconst ^:pub ^I32 ERR_MAP_CUT 47)
+(defconst ^:pub ^I32 ERR_MAP_OVERLAP 48)
+(defconst ^:pub ^I32 ERR_TAG 49)
+(defconst ^:pub ^I32 ERR_MAJOR 50)
+(defconst ^:pub ^I32 ERR_PROFILE 51)
+(defconst ^:pub ^I32 ERR_EMPTY 52)
+(defconst ^:pub ^I32 ERR_ARRAY_KEY 53)
+
+;; ------------------------------------------------------------ the header
+(defconst ^:pub ^I32 H_TOP 0)
+(defconst ^:pub ^I32 H_ERR 1)
+(defconst ^:pub ^I32 H_ERR_POS 2)
+(defconst ^:pub ^I32 H_ERR_RULE 3)
+(defconst ^:pub ^I32 H_BUDGET 4)
+(defconst ^:pub ^I32 H_DEPTH 5)
+(defconst ^:pub ^I32 H_DEPTH_MAX 6)
+(defconst ^:pub ^I32 H_NSRC 7)
+(defconst ^:pub ^I32 H_CUR_RULE 8)
+(defconst ^:pub ^I32 H_ERR_LINE 9)
+(defconst ^:pub ^I32 H_R0 10)
+(defconst ^:pub ^I32 H_R1 11)
+(defconst ^:pub ^I32 H_R2 12)
+(defconst ^:pub ^I32 H_R3 13)
+(defconst ^:pub ^I32 H_R4 14)
+(defconst ^:pub ^I32 H_R5 15)
+(defconst ^:pub ^I32 H_R6 16)
+(defconst ^:pub ^I32 H_R7 17)
+(defconst ^:pub ^I32 H_ERR_COL 18)
+(defconst ^:pub ^I32 H_ERR_RNAME 19)
+;; limits, effective (defaults applied, clamped to hard maxima)
+(defconst ^:pub ^I32 H_LIM_TEXT 20)
+(defconst ^:pub ^I32 H_LIM_NEST 21)
+(defconst ^:pub ^I32 H_LIM_AST 22)
+(defconst ^:pub ^I32 H_LIM_INST 23)
+(defconst ^:pub ^I32 H_LIM_ALTS 24)
+(defconst ^:pub ^I32 H_LIM_APOS 25)
+(defconst ^:pub ^I32 H_LIM_RPOS 26)
+(defconst ^:pub ^I32 H_LIM_WIDTH 27)
+(defconst ^:pub ^I32 H_LIM_POOL 28)
+(defconst ^:pub ^I32 H_LIM_TOTAL 29)
+(defconst ^:pub ^I32 H_LIM_BUDGET 30)
+(defconst ^:pub ^I32 H_LIM_DEPTH 31)
+(defconst ^:pub ^I32 H_LIM_INPUT 32)
+(defconst ^:pub ^I32 H_LIM_ENTRIES 33)
+(defconst ^:pub ^I32 H_LIM_ITEMS 34)
+(defconst ^:pub ^I32 H_LIM_BIGNUM 35)
+(defconst ^:pub ^I32 H_LIM_VBUDGET 36)
+(defconst ^:pub ^I32 H_LIM_LEAVES 37)
+(defconst ^:pub ^I32 H_PROFILE 38)
+(defconst ^:pub ^I32 H_ERR_RNAME_LEN 39)
+;; counters and outputs
+(defconst ^:pub ^I32 H_N_AST 40)
+(defconst ^:pub ^I32 H_N_INST 41)
+(defconst ^:pub ^I32 H_N_FLOATS 42)
+(defconst ^:pub ^I32 H_FL_GIVEN 43)
+(defconst ^:pub ^I32 H_OUT_P 44)
+(defconst ^:pub ^I32 H_OUT_PN 45)
+(defconst ^:pub ^I32 H_OUT_B 46)
+(defconst ^:pub ^I32 H_OUT_BN 47)
+(defconst ^:pub ^I32 H_ANY_LEAF 48)
+(defconst ^:pub ^I32 H_EPOCH 49)
+(defconst ^:pub ^I32 H_FL_REQ 50)
+(defconst ^:pub ^I32 H_PRELUDE_AT 51)
+(defconst ^:pub ^I32 H_G0 52)
+(defconst ^:pub ^I32 H_G1 53)
+(defconst ^:pub ^I32 H_G2 54)
+(defconst ^:pub ^I32 H_G3 55)
+(defconst ^:pub ^I32 H_TAB 64)
+(defconst ^:pub ^I32 N_TABLES 128)
+(defconst ^:pub ^I32 H_DATA 512)
+
+(defconst ^:pub ^I32 INF 2147483647)
+(defconst ^:pub ^I32 ARENA_MIN_WORDS 65536)
+(defconst ^:pub ^I32 ARENA_MAX_WORDS 16777216)
+
+;; ------------------------------------------------------------ vector ids
+(defconst ^:pub ^I32 T_SRC 0)
+(defconst ^:pub ^I32 T_TOK 1)
+(defconst ^:pub ^I32 T_LITB 2)
+(defconst ^:pub ^I32 T_AST 3)
+(defconst ^:pub ^I32 T_RULE 4)
+(defconst ^:pub ^I32 T_HNAME 5)
+(defconst ^:pub ^I32 T_STK 6)
+(defconst ^:pub ^I32 T_STK2 7)
+(defconst ^:pub ^I32 T_BYTE 8)
+(defconst ^:pub ^I32 T_HBYTE 9)
+(defconst ^:pub ^I32 T_LEAF 10)
+(defconst ^:pub ^I32 T_HLEAF 11)
+(defconst ^:pub ^I32 T_TS 12)
+(defconst ^:pub ^I32 T_TSL 13)
+(defconst ^:pub ^I32 T_HTS 14)
+(defconst ^:pub ^I32 T_IV 15)
+(defconst ^:pub ^I32 T_FIV 16)
+(defconst ^:pub ^I32 T_ENV 17)
+(defconst ^:pub ^I32 T_HENV 18)
+(defconst ^:pub ^I32 T_MEMO 19)
+(defconst ^:pub ^I32 T_HMEMO 20)
+(defconst ^:pub ^I32 T_WORK 21)
+(defconst ^:pub ^I32 T_MAP 22)
+(defconst ^:pub ^I32 T_ARR 23)
+(defconst ^:pub ^I32 T_RX 24)
+(defconst ^:pub ^I32 T_RXD 25)
+(defconst ^:pub ^I32 T_ARD 26)
+(defconst ^:pub ^I32 T_MPD 27)
+(defconst ^:pub ^I32 T_ALT 28)
+(defconst ^:pub ^I32 T_ENT 29)
+(defconst ^:pub ^I32 T_STK3 30)
+(defconst ^:pub ^I32 T_STK4 31)
+(defconst ^:pub ^I32 T_GEXP 32)
+(defconst ^:pub ^I32 T_RXN 33)
+(defconst ^:pub ^I32 T_SET 34)
+(defconst ^:pub ^I32 T_OUT 35)
+(defconst ^:pub ^I32 T_POOL 36)
+(defconst ^:pub ^I32 T_HPOOL 37)
+(defconst ^:pub ^I32 T_KEYS 38)
+(defconst ^:pub ^I32 T_GRP 39)
+(defconst ^:pub ^I32 T_HGRP 40)
+(defconst ^:pub ^I32 T_CSET 41)
+(defconst ^:pub ^I32 T_HCSET 42)
+(defconst ^:pub ^I32 T_CHAIN 43)
+(defconst ^:pub ^I32 T_HCHAIN 44)
+(defconst ^:pub ^I32 T_FTS 45)
+(defconst ^:pub ^I32 T_FTSL 46)
+(defconst ^:pub ^I32 T_ORD 47)
+(defconst ^:pub ^I32 T_FLREQ 48)
+(defconst ^:pub ^I32 T_STK5 49)
+(defconst ^:pub ^I32 T_STK6 50)
+(defconst ^:pub ^I32 T_GSTACK 51)
+(defconst ^:pub ^I32 T_RXA 52)
+(defconst ^:pub ^I32 T_MARK 53)
+(defconst ^:pub ^I32 T_BRUN 54)
+(defconst ^:pub ^I32 T_LST 55)
+(defconst ^:pub ^I32 T_DEAD 56)
+(defconst ^:pub ^I32 T_STK7 57)
+(defconst ^:pub ^I32 T_STK8 58)
+(defconst ^:pub ^I32 T_HRX 59)
+(defconst ^:pub ^I32 T_FLD 60)
+(defconst ^:pub ^I32 T_GPOS 61)
+(defconst ^:pub ^I32 T_GOUT 62)
+(defconst ^:pub ^I32 T_GDEF 63)
+(defconst ^:pub ^I32 T_IVA 64)
+(defconst ^:pub ^I32 T_IVB 65)
+(defconst ^:pub ^I32 T_IVC 66)
+(defconst ^:pub ^I32 T_IVS 67)
+(defconst ^:pub ^I32 T_LSTK 68)
+(defconst ^:pub ^I32 T_TMP 69)
+(defconst ^:pub ^I32 T_TMP2 70)
+(defconst ^:pub ^I32 T_RULEX 71)
+(defconst ^:pub ^I32 T_ALTS 72)
+(defconst ^:pub ^I32 T_FACT 73)
+(defconst ^:pub ^I32 T_FIN 74)
+(defconst ^:pub ^I32 T_CHILD 75)
+(defconst ^:pub ^I32 T_EVAL 76)
+(defconst ^:pub ^I32 T_RMAP 77)
+(defconst ^:pub ^I32 T_PSTK 78)
+(defconst ^:pub ^I32 T_ASTK 79)
+(defconst ^:pub ^I32 T_CON 80)
+(defconst ^:pub ^I32 T_HCON 81)
+(defconst ^:pub ^I32 T_UNION 82)
+(defconst ^:pub ^I32 T_NE 83)
+(defconst ^:pub ^I32 T_ARRD 84)
+(defconst ^:pub ^I32 T_MAPD 85)
+(defconst ^:pub ^I32 T_HFTS 86)
+(defconst ^:pub ^I32 T_GRPD 87)
+(defconst ^:pub ^I32 T_LAUX 88)
+(defconst ^:pub ^I32 T_KEYID 89)
+(defconst ^:pub ^I32 T_POOLOFF 90)
+(defconst ^:pub ^I32 T_RXID 91)
+(defconst ^:pub ^I32 T_RORD 92)
+(defconst ^:pub ^I32 T_CSD 93)
+(defconst ^:pub ^I32 T_CHD 94)
+(defconst ^:pub ^I32 T_EPOCHS 95)
+(defconst ^:pub ^I32 T_POOLG 96)
+(defconst ^:pub ^I32 T_FTSI 97)
+(defconst ^:pub ^I32 T_RXF 98)
+(defconst ^:pub ^I32 T_RSCR 99)
+(defconst ^:pub ^I32 T_CLS 100)
+(defconst ^:pub ^I32 T_CLS2 101)
+(defconst ^:pub ^I32 H_TS_ANY 59)
+(defconst ^:pub ^I32 H_N_FIN 60)
+(defconst ^:pub ^I32 H_WORK_AT 56)
+(defconst ^:pub ^I32 H_SRCPOS 57)
+(defconst ^:pub ^I32 H_N_USER 58)
+
+;; ------------------------------------------------------------ checked access
+
+(defn ^:pub ^I32 oob [^Ints h]
+  (comment "An index the compiler computed is outside the arena: a compiler bug."
+           "Recorded as ERR_INTERNAL (sticky) and answered as 0.")
+  (if (> (ilen h) H_ERR)
+    (if (== (ia h H_ERR) 0) (iset h H_ERR ERR_INTERNAL)))
+  (return 0))
+
+(defn ^:pub ^I32 hg [^IntsR h ^I32 i]
+  (comment "h[i], checked: an out-of-range read answers 0 (a read-only arena cannot"
+           "record the fault; every write is checked and recorded, see `hs`).")
+  (if (ult i (ilen h)) (return (ia h i)))
+  (return 0))
+
+(defn ^:pub hs [^Ints h ^I32 i ^I32 v]
+  (comment "h[i] = v, checked.")
+  (if (ult i (ilen h))
+    (iset h i v)
+    (oob h)))
+
+(defn ^:pub ^Bool erred [^IntsR h]
+  (return (!= (ia h H_ERR) 0)))
+
+(defn ^:pub ^I32 fail [^Ints h ^I32 code ^I32 pos]
+  (comment "Record the first error: its code, the source offset it is about (or"
+           "-1) and the rule being compiled. Answers -1.")
+  (if (== (ia h H_ERR) 0)
+    (do (iset h H_ERR code)
+        (iset h H_ERR_POS pos)
+        (iset h H_ERR_RULE (ia h H_CUR_RULE))))
+  (return (neg 1)))
+
+(defn ^:pub ^Bool charge [^Ints h ^I32 n]
+  (comment "Spend n compile-budget units (n >= 0); false (and ERR_LIM_BUDGET) when"
+           "the budget is exhausted. Saturating: the budget never goes below -1.")
+  (let [b (ia h H_BUDGET)]
+    (if (> n b)
+      (do (iset h H_BUDGET (neg 1))
+          (fail h ERR_LIM_BUDGET (neg 1))
+          (return false)))
+    (iset h H_BUDGET (- b n))
+    (return true)))
+
+;; ------------------------------------------------------------ bump + vectors
+
+(defn ^:pub ^I32 alloc [^Ints h ^I32 n]
+  (comment "n words from the bump area (absolute address), or -1 with ERR_ARENA.")
+  (let [top (ia h H_TOP)]
+    (if (or (< n 0) (> n (- (ilen h) top)))
+      (do (if (== (ia h H_ERR) 0) (iset h H_ERR ERR_ARENA))
+          (return (neg 1))))
+    (iset h H_TOP (+ top n))
+    (return top)))
+
+(defn ^:pub ^I32 vbase [^IntsR h ^I32 t]
+  (return (hg h (+ H_TAB (* 3 t)))))
+
+(defn ^:pub ^I32 vlen [^IntsR h ^I32 t]
+  (return (hg h (+ (+ H_TAB (* 3 t)) 1))))
+
+(defn ^:pub ^I32 vcap [^IntsR h ^I32 t]
+  (return (hg h (+ (+ H_TAB (* 3 t)) 2))))
+
+(defn ^:pub vinit [^Ints h ^I32 t]
+  (comment "An empty vector with no storage.")
+  (let [d (+ H_TAB (* 3 t))]
+    (hs h d 0)
+    (hs h (+ d 1) 0)
+    (hs h (+ d 2) 0)))
+
+(defn ^:pub ^Bool vreserve [^Ints h ^I32 t ^I32 n]
+  (comment "Room for n more words in vector t (relocating it if needed).")
+  (let [d (+ H_TAB (* 3 t))
+        base (hg h d)
+        len (hg h (+ d 1))
+        cap (hg h (+ d 2))]
+    (if (or (< n 0) (> n (- INF len)))
+      (do (fail h ERR_INTERNAL (neg 1)) (return false)))
+    (if (<= (+ len n) cap) (return true))
+    (let [^:mut nc (+ cap cap)]
+      (if (< cap 0) (set nc 0))
+      (if (> cap (quot INF 2)) (set nc INF))
+      (if (< nc (+ len n)) (set nc (+ len n)))
+      (if (< nc 16) (set nc 16))
+      (let [at (alloc h nc)]
+        (if (< at 0) (return false))
+        (for [^I32 i 0 len]
+          (let [w (hg h (+ base i))]
+            (hs h (+ at i) w)))
+        (hs h d at)
+        (hs h (+ d 2) nc)
+        (return true)))))
+
+(defn ^:pub ^I32 vpush [^Ints h ^I32 t ^I32 n]
+  (comment "Append a zeroed record of n words; answers its offset, or -1.")
+  (if (not (vreserve h t n)) (return (neg 1)))
+  (let [d (+ H_TAB (* 3 t))
+        base (hg h d)
+        len (hg h (+ d 1))]
+    (for [^I32 i 0 n]
+      (hs h (+ (+ base len) i) 0))
+    (hs h (+ d 1) (+ len n))
+    (return len)))
+
+(defn ^:pub ^I32 vpush1 [^Ints h ^I32 t ^I32 v]
+  (comment "Append one word v; answers its offset, or -1.")
+  (if (not (vreserve h t 1)) (return (neg 1)))
+  (let [d (+ H_TAB (* 3 t))
+        base (hg h d)
+        len (hg h (+ d 1))]
+    (hs h (+ base len) v)
+    (hs h (+ d 1) (+ len 1))
+    (return len)))
+
+(defn ^:pub ^I32 vget [^IntsR h ^I32 t ^I32 off]
+  (comment "Word off of vector t, checked against its length (0 when outside).")
+  (let [d (+ H_TAB (* 3 t))]
+    (if (ult off (hg h (+ d 1))) (return (hg h (+ (hg h d) off))))
+    (return 0)))
+
+(defn ^:pub vset [^Ints h ^I32 t ^I32 off ^I32 v]
+  (let [d (+ H_TAB (* 3 t))
+        n (hg h (+ d 1))
+        at (+ (hg h d) off)]
+    (if (ult off n)
+      (hs h at v)
+      (oob h))))
+
+(defn ^:pub vadd [^Ints h ^I32 t ^I32 off ^I32 dv]
+  (comment "vector t word off += dv.")
+  (let [v (vget h t off)]
+    (vset h t off (+ v dv))))
+
+(defn ^:pub vtrunc [^Ints h ^I32 t ^I32 n]
+  (comment "Shorten vector t to n words (n <= length).")
+  (let [d (+ H_TAB (* 3 t))]
+    (if (and (>= n 0) (<= n (hg h (+ d 1))))
+      (hs h (+ d 1) n)
+      (oob h))))
+
+(defn ^:pub ^I32 vpop [^Ints h ^I32 t]
+  (comment "Remove and answer the last word of vector t.")
+  (let [n (vlen h t)]
+    (if (<= n 0) (return (oob h)))
+    (let [v (vget h t (- n 1))]
+      (vtrunc h t (- n 1))
+      (return v))))
+
+(defn ^:pub vfill [^Ints h ^I32 t ^I32 from ^I32 n ^I32 v]
+  (comment "Words from..from+n of vector t = v.")
+  (for [^I32 i 0 n]
+    (vset h t (+ from i) v)))
+
+;; ------------------------------------------------------------ hashing
+
+(defn ^:pub ^I32 mix [^I32 x ^I32 v]
+  (comment "One step of a 32-bit FNV-1a-like mix over words; identical on every host.")
+  (let [y (mul32 (bit-xor x v) 16777619)]
+    (return (bit-xor y (ushr y 13)))))
+
+;; An open-addressing hash table in vector t: words [count, mask] then
+;; (mask + 1) slots of [id + 1, hash]; 0 marks an empty slot. Equality is the
+;; CALLER's: it probes with `ht-start`/`ht-id`/`ht-next` and inserts at the
+;; empty slot it stopped on. Rehashing needs only the stored hashes.
+
+(defn ^:pub ^Bool ht-init [^Ints h ^I32 t ^I32 cap]
+  (comment "An empty table of cap slots (a power of two).")
+  (vtrunc h t 0)
+  (let [at (vpush h t (+ 2 (* 2 cap)))]
+    (if (< at 0) (return false))
+    (vset h t 1 (- cap 1))
+    (return true)))
+
+(defn ^:pub ^I32 ht-start [^IntsR h ^I32 t ^I32 hsh]
+  (return (bit-and hsh (vget h t 1))))
+
+(defn ^:pub ^I32 ht-id [^IntsR h ^I32 t ^I32 s]
+  (comment "The id stored in slot s, or -1 when the slot is empty.")
+  (return (- (vget h t (+ 2 (* 2 s))) 1)))
+
+(defn ^:pub ^I32 ht-next [^IntsR h ^I32 t ^I32 s]
+  (return (bit-and (+ s 1) (vget h t 1))))
+
+(defn ^:pub ^Bool ht-put [^Ints h ^I32 t ^I32 s ^I32 id ^I32 hsh]
+  (comment "Store id in the EMPTY slot s the caller's probe stopped on; grows the"
+           "table (rehashing by stored hash) past half full.")
+  (vset h t (+ 2 (* 2 s)) (+ id 1))
+  (vset h t (+ 3 (* 2 s)) hsh)
+  (let [n (+ (vget h t 0) 1)
+        cap (+ (vget h t 1) 1)]
+    (vset h t 0 n)
+    (if (<= (* n 2) cap) (return true))
+    (comment "Rehash: copy the live slots out, re-initialise at twice the size, reinsert.")
+    (vtrunc h T_MARK 0)
+    (for [^I32 i 0 cap]
+      (let [sid (vget h t (+ 2 (* 2 i)))
+            sh (vget h t (+ 3 (* 2 i)))]
+        (if (!= sid 0)
+          (do (vpush1 h T_MARK sid)
+              (vpush1 h T_MARK sh)))))
+    (if (erred h) (return false))
+    (if (not (charge h cap)) (return false))
+    (if (not (ht-init h t (* cap 2))) (return false))
+    (let [m (vlen h T_MARK)
+          mask (vget h t 1)]
+      (for [^I32 j 0 (quot m 2)]
+        (let [xid (vget h T_MARK (* 2 j))
+              xh (vget h T_MARK (+ (* 2 j) 1))
+              ^:mut s2 (bit-and xh mask)]
+          (while (!= (vget h t (+ 2 (* 2 s2))) 0)
+            (set s2 (bit-and (+ s2 1) mask)))
+          (vset h t (+ 2 (* 2 s2)) xid)
+          (vset h t (+ 3 (* 2 s2)) xh)))
+      (vset h t 0 (quot m 2)))
+    (return (not (erred h)))))
+
+;; ------------------------------------------------------------ sorting
+
+(defn sift [^Ints h ^I32 t ^I32 off ^I32 start ^I32 n ^I32 stride]
+  (comment "Heap sift-down of records (stride words, keyed by their first word)"
+           "within vector t from record `start` of the n records at off.")
+  (let [^:mut root start]
+    (forever
+     (let [child (+ (* root 2) 1)]
+       (if (>= child n) (return))
+       (let [^:mut big child]
+         (if (< (+ child 1) n)
+           (if (< (vget h t (+ off (* child stride))) (vget h t (+ off (* (+ child 1) stride))))
+             (set big (+ child 1))))
+         (if (>= (vget h t (+ off (* root stride))) (vget h t (+ off (* big stride))))
+           (return))
+         (for [^I32 k 0 stride]
+           (let [a (vget h t (+ off (+ (* root stride) k)))
+                 b (vget h t (+ off (+ (* big stride) k)))]
+             (vset h t (+ off (+ (* root stride) k)) b)
+             (vset h t (+ off (+ (* big stride) k)) a)))
+         (set root big))))))
+
+(defn ^:pub ^Bool sort-records [^Ints h ^I32 t ^I32 off ^I32 n ^I32 stride]
+  (comment "Sort n records of `stride` words at offset off of vector t, ascending by"
+           "their first word (heapsort: O(n log n), charged).")
+  (if (< n 2) (return true))
+  (let [^:mut lg 1
+        ^:mut x n]
+    (while (> x 1) (set lg (+ lg 1)) (set x (sar x 1)))
+    (if (not (charge h (* (+ n 1) (* lg stride)))) (return false)))
+  (let [^:mut i (- (quot n 2) 1)]
+    (while (>= i 0)
+      (sift h t off i n stride)
+      (set i (- i 1))))
+  (let [^:mut e (- n 1)]
+    (while (> e 0)
+      (for [^I32 k2 0 stride]
+        (let [a2 (vget h t (+ off k2))
+              b2 (vget h t (+ off (+ (* e stride) k2)))]
+          (vset h t (+ off k2) b2)
+          (vset h t (+ off (+ (* e stride) k2)) a2)))
+      (sift h t off 0 e stride)
+      (set e (- e 1))))
+  (return (not (erred h))))

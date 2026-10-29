@@ -1,0 +1,237 @@
+;; The compiler's entry point: CDDL text in, a Program (docs/program.md format
+;; 1) out, or a schema error. The host owns only the arena and the loop around
+;; this call (host/js/src/compile.mjs, host/rust/src/compile.rs):
+;;
+;;     code = compile-schema(text, opt, fl, h)
+;;     ERR_ARENA        -> retry with a larger arena (up to ARENA_MAX_WORDS)
+;;     ERR_NEED_FLOATS  -> convert the requested literal spans (D020/D029), retry
+;;     0                -> the Program: h[H_OUT_P ..] words, h[H_OUT_B ..] pool bytes
+;;     else             -> schema error: code, line, column, rule name span
+;;
+;; `opt` (OPT_WORDS words, -1 = default) is every compile option, in the order
+;; of program.md §13.3's source key, then the leaf limit.
+(ns snug.compile.main
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst case]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - * neg quot bit-and < > <= >= == != and or not
+                               u8 blen ia iset ilen]]
+            [snug.compile.arena :refer [hg hs erred fail charge vinit vlen vpush1 vget vset vtrunc vbase
+                                        INF H_TOP H_ERR H_ERR_POS H_ERR_RULE H_BUDGET H_DEPTH H_NSRC
+                                        H_CUR_RULE H_ERR_LINE H_ERR_COL H_ERR_RNAME H_ERR_RNAME_LEN
+                                        H_LIM_TEXT H_LIM_NEST H_LIM_AST H_LIM_INST H_LIM_ALTS H_LIM_APOS
+                                        H_LIM_RPOS H_LIM_WIDTH H_LIM_POOL H_LIM_TOTAL H_LIM_BUDGET
+                                        H_LIM_DEPTH H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS H_LIM_BIGNUM
+                                        H_LIM_VBUDGET H_LIM_LEAVES H_PROFILE H_FL_GIVEN H_PRELUDE_AT
+                                        H_DATA N_TABLES H_DEPTH_MAX H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
+                                        ERR_LIM_TEXT ERR_SYNTAX ERR_NEED_FLOATS ERR_EMPTY ERR_ARENA H_G1 H_G2
+                                        T_SRC T_FLREQ T_STK6]]
+            [snug.compile.prelude :refer [prelude-len prelude-byte]]
+            [snug.compile.lex :refer [lex check-utf8 tk-start]]
+            [snug.compile.parse :refer [parse-rules]]
+            [snug.compile.bytes :refer [bytes-init]]
+            [snug.compile.leaf :refer [leaf-init]]
+            [snug.compile.regexp :refer [rx-init]]
+            [snug.compile.rules :refer [build-rules nrules rw]]
+            [snug.compile.lower :refer [lower-init lower-rules]]
+            [snug.compile.emit :refer [emit-program]]))
+
+(defconst ^:pub ^I32 OPT_WORDS 19)
+(defconst ^:pub ^I32 OPT_PROFILE 0)
+
+(defn ^I32 opt-limit [^IntsR opt ^I32 i ^I32 dflt ^I32 hard]
+  (comment "Option i: the default when absent (-1 or negative), at most `hard`.")
+  (if (>= i (ilen opt)) (return dflt))
+  (let [v (ia opt i)]
+    (if (< v 0) (return dflt))
+    (if (> v hard) (return hard))
+    (return v)))
+
+(defn ^:pub setup-limits [^Ints h ^IntsR opt]
+  (comment "Effective limits (architecture §7, program.md §17 q18 for leaves).")
+  (let [profile (opt-limit opt 0 0 2)
+        ^:mut text-default 262144]
+    (hs h H_PROFILE profile)
+    (if (== profile 2) (set text-default 16384))
+    (hs h H_LIM_TEXT (opt-limit opt 1 text-default 1048576))
+    (hs h H_LIM_NEST (opt-limit opt 2 64 256))
+    (hs h H_LIM_AST (opt-limit opt 3 65536 1048576))
+    (hs h H_LIM_INST (opt-limit opt 4 1024 16384))
+    (hs h H_LIM_ALTS (opt-limit opt 5 64 1024))
+    (hs h H_LIM_APOS (opt-limit opt 6 256 4096))
+    (hs h H_LIM_RPOS (opt-limit opt 7 256 512))
+    (hs h H_LIM_WIDTH (opt-limit opt 8 256 4096))
+    (hs h H_LIM_POOL (opt-limit opt 9 1048576 16777216))
+    (hs h H_LIM_TOTAL (opt-limit opt 10 8388608 67108864))
+    (hs h H_LIM_BUDGET (opt-limit opt 11 10000000 INF))
+    (hs h H_LIM_DEPTH (opt-limit opt 12 32 256))
+    (hs h H_LIM_INPUT (opt-limit opt 13 1500000 INF))
+    (hs h H_LIM_ENTRIES (opt-limit opt 14 65536 16777216))
+    (hs h H_LIM_ITEMS (opt-limit opt 15 131072 16777216))
+    (comment "program.md §17 q22: only 128 bignum content bytes in revision 2.")
+    (hs h H_LIM_BIGNUM 128)
+    (hs h H_LIM_VBUDGET (opt-limit opt 17 4000000 INF))
+    (hs h H_LIM_LEAVES (opt-limit opt 18 65536 1048576))
+    (let [b (hg h H_LIM_BUDGET)]
+      (hs h H_BUDGET b))
+    (comment "Recursion in the later phases (names, generics, groups) is bounded by"
+             "a depth derived from the nesting limit, so no host stack is at risk.")
+    (let [nest (hg h H_LIM_NEST)]
+      (hs h H_DEPTH_MAX (* 4 nest)))))
+
+(defn ^:pub ^Bool setup [^Bytes text ^IntsR opt ^IntsR fl ^Ints h]
+  (comment "Fresh header and vectors; the source vector: text, -1, prelude, -1.")
+  (for [^I32 i 0 H_DATA]
+    (iset h i 0))
+  (iset h H_TOP H_DATA)
+  (iset h H_CUR_RULE (neg 1))
+  (iset h H_ERR_RULE (neg 1))
+  (iset h H_ERR_POS (neg 1))
+  (for [^I32 t 0 N_TABLES]
+    (vinit h t))
+  (setup-limits h opt)
+  (let [n (blen text)]
+    (if (> n (hg h H_LIM_TEXT))
+      (do (fail h ERR_LIM_TEXT (neg 1)) (return false)))
+    (hs h H_NSRC n)
+    (for [^I32 j 0 n]
+      (let [c (u8 text j)]
+        (vpush1 h T_SRC c)))
+    (vpush1 h T_SRC (neg 1))
+    (hs h H_PRELUDE_AT (+ n 1))
+    (let [pn (prelude-len)]
+      (for [^I32 k 0 pn]
+        (let [pc (prelude-byte k)]
+          (vpush1 h T_SRC pc))))
+    (vpush1 h T_SRC (neg 1)))
+  (comment "Decimal float literal patterns the host converted on a previous round.")
+  (if (> (ilen fl) 0)
+    (do (let [nf (ia fl 0)]
+          (if (and (> nf 0) (<= (+ 1 (* 2 nf)) (ilen fl)))
+            (do (hs h H_FL_GIVEN nf)
+                (for [^I32 q 0 (* 2 nf)]
+                  (let [w (ia fl (+ q 1))]
+                    (vpush1 h T_FLREQ w))))))))
+  (return (not (erred h))))
+
+(defn ^:pub ^I32 float-requests [^IntsR h]
+  (comment "After ERR_NEED_FLOATS: how many decimal literals need converting.")
+  (return (quot (vlen h T_STK6) 2)))
+
+(defn ^:pub ^I32 float-request-start [^IntsR h ^I32 i]
+  (return (vget h T_STK6 (* 2 i))))
+
+(defn ^:pub ^I32 float-request-end [^IntsR h ^I32 i]
+  (return (vget h T_STK6 (+ (* 2 i) 1))))
+
+(defn ^:pub finish-error [^Ints h]
+  (comment "Line (1-based) and column (1-based, in code points) of the error offset"
+           "when it is in the schema text; 0, 0 otherwise.")
+  (let [pos (hg h H_ERR_POS)
+        n (hg h H_NSRC)
+        ^:mut line 1
+        ^:mut col 1]
+    (if (or (< pos 0) (> pos n))
+      (do (hs h H_ERR_LINE 0) (hs h H_ERR_COL 0))
+      (do (for [^I32 i 0 pos]
+            (let [c (vget h T_SRC i)]
+              (if (== c 10)
+                (do (set line (+ line 1)) (set col 1))
+                (if (!= (bit-and c 192) 128) (set col (+ col 1))))))
+          (hs h H_ERR_LINE line)
+          (hs h H_ERR_COL col)))))
+
+(defn ^:pub ^I32 compile-schema [^Bytes text ^IntsR opt ^IntsR fl ^Ints h]
+  (comment "See the namespace doc. Answers 0 or an error code (also in h[H_ERR]).")
+  (if (< (ilen h) (+ H_DATA 1024)) (return ERR_ARENA))
+  (if (not (setup text opt fl h))
+    (do (finish-error h) (return (ia h H_ERR))))
+  (let [n (hg h H_NSRC)
+        bad (check-utf8 h 0 n)]
+    (if (>= bad 0)
+      (do (fail h ERR_SYNTAX bad) (finish-error h) (return (ia h H_ERR)))))
+  (let [ut (lex h 0)]
+    (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+    (if (> (vlen h T_STK6) 0)
+      (do (iset h H_ERR ERR_NEED_FLOATS) (return ERR_NEED_FLOATS)))
+    (let [pat (hg h H_PRELUDE_AT)
+          pt (lex h pat)]
+      (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+      (let [urules (parse-rules h ut)]
+        (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+        (if (< urules 0)
+          (do (fail h ERR_EMPTY 0) (finish-error h) (return (ia h H_ERR))))
+        (let [prules (parse-rules h pt)]
+          (if (erred h) (do (finish-error h) (return (ia h H_ERR))))
+          (if (or (not (bytes-init h)) (or (not (leaf-init h)) (or (not (rx-init h)) (not (lower-init h)))))
+            (do (finish-error h) (return (ia h H_ERR))))
+          (if (< (build-rules h urules prules) 0)
+            (do (finish-error h) (return (ia h H_ERR))))
+          (if (< (lower-rules h) 0)
+            (do (finish-error h) (return (ia h H_ERR))))
+          (if (< (emit-program h) 0)
+            (do (finish-error h) (return (ia h H_ERR))))
+          (return 0))))))
+
+(defn ^:pub ^Str error-name [^I32 code]
+  (comment "The stable name of a schema error code (the API's SchemaError.code).")
+  (case code
+    [1] "limit_memory"
+    [3] "internal"
+    [10] "syntax"
+    [12] "limit_schema_bytes"
+    [13] "limit_nesting"
+    [14] "limit_ast_nodes"
+    [15] "limit_instantiations"
+    [16] "limit_alternatives"
+    [17] "limit_array_positions"
+    [18] "limit_regexp_positions"
+    [19] "limit_width"
+    [20] "limit_pool_bytes"
+    [21] "limit_total_bytes"
+    [22] "limit_compile_budget"
+    [23] "limit_leaves"
+    [24] "limit_memory"
+    [30] "undefined_name"
+    [31] "duplicate_rule"
+    [32] "type_group_mismatch"
+    [33] "generic_arity"
+    [34] "nonproductive"
+    [35] "group_recursion"
+    [36] "unwrap"
+    [37] "enum"
+    [38] "range"
+    [39] "float_literal"
+    [40] "control_target"
+    [41] "control_value"
+    [42] "unsupported_control"
+    [43] "unknown_control"
+    [44] "regexp"
+    [45] "map_key"
+    [46] "map_group_occurrence"
+    [47] "map_cut"
+    [48] "map_overlap"
+    [49] "tag"
+    [50] "major"
+    [51] "profile"
+    [52] "empty_schema"
+    :else "internal"))
+
+(defn ^:pub ^I32 error-line [^IntsR h] (return (hg h H_ERR_LINE)))
+(defn ^:pub ^I32 error-column [^IntsR h] (return (hg h H_ERR_COL)))
+
+(defn ^:pub ^I32 error-rule-start [^IntsR h]
+  (comment "Byte offset in the schema text of the name of the rule the error is in,"
+           "or -1 (none, or a prelude rule).")
+  (let [r (hg h H_ERR_RULE)]
+    (if (or (< r 0) (>= r (nrules h))) (return (neg 1)))
+    (if (!= (rw h r 7) 0) (return (neg 1)))
+    (return (rw h r 0))))
+
+(defn ^:pub ^I32 error-rule-len [^IntsR h]
+  (let [r (hg h H_ERR_RULE)]
+    (if (or (< r 0) (>= r (nrules h))) (return 0))
+    (return (rw h r 1))))
+
+(defn ^:pub ^I32 out-program-at [^IntsR h] (return (hg h H_OUT_P)))
+(defn ^:pub ^I32 out-program-words [^IntsR h] (return (hg h H_OUT_PN)))
+(defn ^:pub ^I32 out-pool-at [^IntsR h] (return (hg h H_OUT_B)))
+(defn ^:pub ^I32 out-pool-bytes [^IntsR h] (return (hg h H_OUT_BN)))

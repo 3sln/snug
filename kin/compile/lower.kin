@@ -1,0 +1,1060 @@
+;; Lowering (architecture §5.1 steps 3-5): from the AST to internal leaves
+;; and typesets, maps and automata.
+;;
+;; * `lower-type` turns a type expression into a typeset in a generic
+;;   ENVIRONMENT (T_ENV: rule, argument typesets), memoised per (rule, env):
+;;   generics are monomorphised, and the instantiation limit counts distinct
+;;   environments (ERR_LIM_INST), so `g<T> = [g<[T, T]>]` is refused when its
+;;   instantiations run out, not after building them.
+;; * A rule reached again while it is being lowered, without a container in
+;;   between, is nonproductive (ERR_NONPRODUCTIVE, §5.1 step 4).
+;; * Containers (maps, arrays, tags, embedded CBOR) become leaves at once and
+;;   are filled from a FIFO worklist afterwards, so recursion through a
+;;   container is a reference, never a recursive call.
+;; * Groups are expanded where they are used: in a map into alternatives
+;;   (snug.compile.maps), in an array into a Glushkov tree whose group
+;;   recursion is allowed only in tail position (regular, §4.4); any other
+;;   group recursion is ERR_GROUP_RECURSION.
+;; * Undefined sockets: `$x` is the empty type, `$$x` the empty group (§4.8).
+;;
+;; Recursion depth in here is bounded by h[H_DEPTH_MAX] (ERR_LIM_NESTING).
+(ns snug.compile.lower
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not sub32
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
+                                        mix ht-init ht-start ht-id ht-next ht-put
+                                        INF ERR_INTERNAL ERR_UNDEFINED ERR_KIND ERR_GENERIC
+                                        ERR_NONPRODUCTIVE ERR_GROUP_RECURSION ERR_UNWRAP ERR_ENUM
+                                        ERR_RANGE ERR_CONTROL_VALUE ERR_UNSUPPORTED_CONTROL
+                                        ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_MAP_CUT ERR_TAG ERR_MAJOR
+                                        ERR_PROFILE ERR_LIM_INST ERR_LIM_NESTING
+                                        H_R0 H_R1 H_R2 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
+                                        H_N_INST H_PROFILE H_WORK_AT
+                                        T_ENV T_HENV T_MEMO T_HMEMO T_CON T_HCON T_WORK T_ASTK T_STK
+                                        T_LITB T_SRC T_PSTK T_GSTACK T_LSTK T_MAP T_ARR T_TMP2 T_IV]]
+            [snug.compile.lex :refer [tk-kind tk-start tk-end tk-a tk-b tk-c
+                                      TK_INT TK_FLOAT TK_TEXT TK_BYTES]]
+            [snug.compile.parse :refer [nk ntok nnext na nb nc nd ne npos
+                                        N_RULE N_TYPE N_RANGE N_CTL N_VALUE N_NAME N_MAP N_ARRAY
+                                        N_UNWRAP N_ENUM N_TAG N_MAJOR N_ANY N_GROUP N_GRPCHOICE
+                                        N_MEMBER N_ENT N_SUBGRP N_KEY KEY_BARE KEY_VALUE KEY_TYPE]]
+            [snug.compile.rules :refer [rw rset rule-find rule-find-tok rule-kind param-index def-next
+                                        nrules RK_TYPE RK_GROUP]]
+            [snug.compile.bytes :refer [intern enc-string enc-int-key mag-of bid-byte bid-len head-push]]
+            [snug.compile.leaf :refer [lk lflags ld lw lset lsetd leaf-new ts-make ts-of1 ts-push-leaves
+                                       ts-n ts-leaf leaf-mask mk-any mk-major mk-simple mk-lit mk-text
+                                       mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow
+                                       stage stage-d stage-intern
+                                       K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
+                                       R_NEG_INF R_NEG_BIG R_NEG R_POS R_POS_BIG R_POS_INF]]
+            [snug.compile.ctl :refer [ctl-size ctl-bits ctl-compare ctl-eq ctl-and ctl-regexp ctl-cbor
+                                      ctl-cat int-point float-point single-leaf]]
+            [snug.compile.maps :refer [ent-new as-single as-unit as-none as-product as-union as-occur
+                                       as-n as-aoff as-alen alt-ent ew map-finish]]
+            [snug.compile.glush :refer [g-node g-list g-add gk gset G_POS G_SEQ G_ALT G_REP G_EMPTY G_REC G_FRAME]]
+            [snug.compile.arrays :refer [arr-finish]]))
+
+(declarefn ^I32 lower-type ^I32 m-ent ^I32 m-group ^I32 a-group ^I32 a-ent ^I32 enum-group ^I32 enum-node ^I32 if-neg)
+
+;; ------------------------------------------------------------ depth
+
+(defn ^Bool enter [^Ints h ^I32 pos]
+  (let [d (+ (hg h H_DEPTH) 1)]
+    (hs h H_DEPTH d)
+    (if (> d (hg h H_DEPTH_MAX)) (do (fail h ERR_LIM_NESTING pos) (return false)))
+    (return true)))
+
+(defn leave [^Ints h]
+  (let [d (hg h H_DEPTH)]
+    (hs h H_DEPTH (- d 1))))
+
+;; ------------------------------------------------------------ environments
+
+(defn ^:pub ^I32 env-rule [^IntsR h ^I32 e] (return (vget h T_ENV e)))
+(defn ^:pub ^I32 env-nargs [^IntsR h ^I32 e] (return (vget h T_ENV (+ e 1))))
+(defn ^:pub ^I32 env-arg [^IntsR h ^I32 e ^I32 i] (return (vget h T_ENV (+ e (+ 2 i)))))
+
+(defn ^I32 env-intern [^Ints h ^I32 rule ^I32 from ^I32 pos]
+  (comment "The environment (rule, T_ASTK[from..]); a new one counts against the"
+           "instantiation limit. T_ASTK is cut back to from.")
+  (let [n (- (vlen h T_ASTK) from)
+        ^:mut hsh (mix 77 rule)]
+    (for [^I32 i 0 n]
+      (set hsh (mix hsh (vget h T_ASTK (+ from i)))))
+    (let [^:mut s (ht-start h T_HENV hsh)]
+      (forever
+       (let [id (ht-id h T_HENV s)]
+         (if (< id 0) (break))
+         (if (and (== (env-rule h id) rule) (== (env-nargs h id) n))
+           (do (let [^:mut same true]
+                 (for [^I32 j 0 n]
+                   (if (!= (env-arg h id j) (vget h T_ASTK (+ from j))) (set same false)))
+                 (if same (do (vtrunc h T_ASTK from) (return id))))))
+         (set s (ht-next h T_HENV s))))
+      (let [cnt (+ (hg h H_N_INST) 1)]
+        (hs h H_N_INST cnt)
+        (if (> cnt (hg h H_LIM_INST)) (return (fail h ERR_LIM_INST pos))))
+      (let [e (vlen h T_ENV)]
+        (vpush1 h T_ENV rule)
+        (vpush1 h T_ENV n)
+        (for [^I32 k 0 n]
+          (vpush1 h T_ENV (vget h T_ASTK (+ from k))))
+        (vtrunc h T_ASTK from)
+        (if (erred h) (return (neg 1)))
+        (if (not (ht-put h T_HENV s e hsh)) (return (neg 1)))
+        (comment "Its memo record: state, typeset.")
+        (return e)))))
+
+(defn ^I32 memo-find [^Ints h ^I32 env]
+  (comment "The memo record (T_MEMO: env, state, ts) of a generic instance, made on"
+           "first use.")
+  (let [hsh (mix 91 env)
+        ^:mut s (ht-start h T_HMEMO hsh)]
+    (forever
+     (let [id (ht-id h T_HMEMO s)]
+       (if (< id 0) (break))
+       (if (== (vget h T_MEMO (* id 3)) env) (return id))
+       (set s (ht-next h T_HMEMO s))))
+    (let [nid (quot (vlen h T_MEMO) 3)]
+      (vpush1 h T_MEMO env)
+      (vpush1 h T_MEMO 0)
+      (vpush1 h T_MEMO (neg 1))
+      (if (not (ht-put h T_HMEMO s nid hsh)) (return (neg 1)))
+      (return nid))))
+
+(defn ^I32 con-find [^Ints h ^I32 node ^I32 env]
+  (comment "The container memo (T_CON: node, env, ts) for (node, env): its typeset"
+           "or -1 when absent (h[H_R0] = the slot to insert at).")
+  (let [hsh (mix (mix 13 node) env)
+        ^:mut s (ht-start h T_HCON hsh)]
+    (forever
+     (let [id (ht-id h T_HCON s)]
+       (if (< id 0) (do (hs h H_R0 s) (hs h H_R1 hsh) (return (neg 1))))
+       (if (and (== (vget h T_CON (* id 3)) node) (== (vget h T_CON (+ (* id 3) 1)) env))
+         (return (vget h T_CON (+ (* id 3) 2))))
+       (set s (ht-next h T_HCON s))))))
+
+(defn ^I32 con-put [^Ints h ^I32 node ^I32 env ^I32 ts]
+  (let [s (hg h H_R0)
+        hsh (hg h H_R1)
+        id (quot (vlen h T_CON) 3)]
+    (vpush1 h T_CON node)
+    (vpush1 h T_CON env)
+    (vpush1 h T_CON ts)
+    (if (not (ht-put h T_HCON s id hsh)) (return (neg 1)))
+    (return ts)))
+
+(defn ^I32 container [^Ints h ^I32 kind ^I32 flags ^I32 node ^I32 env]
+  (comment "A container leaf to be filled by the worklist; remembers the rule it"
+           "belongs to (word 14) for error reports.")
+  (let [l (leaf-new h kind flags)]
+    (if (< l 0) (return (neg 1)))
+    (lset h l 12 node)
+    (lset h l 13 env)
+    (lset h l 14 (hg h H_CUR_RULE))
+    (vpush1 h T_WORK l)
+    (return l)))
+
+;; ------------------------------------------------------------ init
+
+(defn ^:pub ^Bool lower-init [^Ints h]
+  (vtrunc h T_ENV 0)
+  (vtrunc h T_MEMO 0)
+  (vtrunc h T_CON 0)
+  (vtrunc h T_WORK 0)
+  (vtrunc h T_GSTACK 0)
+  (hs h H_WORK_AT 0)
+  (if (not (ht-init h T_HENV 64)) (return false))
+  (if (not (ht-init h T_HMEMO 64)) (return false))
+  (return (ht-init h T_HCON 128)))
+
+;; ------------------------------------------------------------ rules
+
+(defn ^I32 lower-rule [^Ints h ^I32 r ^I32 env ^I32 pos]
+  (comment "The typeset of type rule r in environment env (-1: not generic):"
+           "the union of its definitions, memoised.")
+  (let [^:mut memo (neg 1)
+        ^:mut state (rw h r 8)]
+    (if (>= env 0)
+      (do (set memo (memo-find h env))
+          (if (< memo 0) (return (neg 1)))
+          (set state (vget h T_MEMO (+ (* memo 3) 1)))))
+    (if (== state 2)
+      (do (if (>= memo 0) (return (vget h T_MEMO (+ (* memo 3) 2))))
+          (return (rw h r 9))))
+    (if (== state 1) (return (fail h ERR_NONPRODUCTIVE pos)))
+    (if (>= memo 0) (vset h T_MEMO (+ (* memo 3) 1) 1) (rset h r 8 1))
+    (let [saved (hg h H_CUR_RULE)
+          from (vlen h T_STK)]
+      (if (== (rw h r 7) 0) (hs h H_CUR_RULE r))
+      (let [^:mut d (rw h r 2)]
+        (while (>= d 0)
+          (let [^I32 ts (lower-type h (nd h d) env)]
+            (if (< ts 0) (return (neg 1)))
+            (ts-push-leaves h ts))
+          (set d (def-next h d))))
+      (hs h H_CUR_RULE saved)
+      (let [res (ts-make h from)]
+        (if (< res 0) (return (neg 1)))
+        (if (>= memo 0)
+          (do (vset h T_MEMO (+ (* memo 3) 1) 2)
+              (vset h T_MEMO (+ (* memo 3) 2) res))
+          (do (rset h r 8 2)
+              (rset h r 9 res)))
+        (return res)))))
+
+(defn ^Bool socket-spelling [^IntsR h ^I32 tok ^I32 dollars]
+  (comment "Does the name token start with `$` (dollars 1) or `$$` (2)?")
+  (let [s (tk-start h tok)]
+    (if (!= (vget h T_SRC s) 36) (return false))
+    (if (== dollars 1) (return (!= (vget h T_SRC (+ s 1)) 36)))
+    (return (== (vget h T_SRC (+ s 1)) 36))))
+
+(defn ^I32 instance-env [^Ints h ^I32 r ^I32 args ^I32 nargs ^I32 env ^I32 pos]
+  (comment "The environment for rule r applied to the generic arguments (a chain"
+           "of type1 nodes lowered in env); -2 when r is not generic.")
+  (if (!= nargs (rw h r 5)) (return (fail h ERR_GENERIC pos)))
+  (if (== nargs 0) (return (neg 2)))
+  (let [from (vlen h T_ASTK)
+        ^:mut a args]
+    (while (>= a 0)
+      (let [^I32 ts (lower-type h a env)]
+        (if (< ts 0) (return (neg 1)))
+        (vpush1 h T_ASTK ts))
+      (set a (nnext h a)))
+    (return (env-intern h r from pos))))
+
+(defn ^I32 lower-name [^Ints h ^I32 node ^I32 env]
+  (comment "A type name: a generic parameter of env, or a type rule (with its"
+           "arguments), or an undefined type socket (the empty type).")
+  (let [tok (ntok h node)
+        nargs (nb h node)
+        pos (npos h node)]
+    (if (and (>= env 0) (== nargs 0))
+      (do (let [pi (param-index h (env-rule h env) tok)]
+            (if (>= pi 0) (return (env-arg h env pi))))))
+    (let [r (rule-find-tok h tok)]
+      (if (< r 0)
+        (do (if (socket-spelling h tok 1)
+              (do (if (> (hg h H_PROFILE) 0) (return (fail h ERR_PROFILE pos)))
+                  (return (ts-of1 h (neg 2)))))
+            (if (socket-spelling h tok 2) (return (fail h ERR_KIND pos)))
+            (return (fail h ERR_UNDEFINED pos))))
+      (if (and (!= (rw h r 13) 0) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
+      (let [k (rule-kind h r)]
+        (if (< k 0) (return (neg 1)))
+        (if (== k RK_GROUP) (return (fail h ERR_KIND pos))))
+      (let [e (instance-env h r (na h node) nargs env pos)]
+        (if (== e (neg 1)) (return (neg 1)))
+        (if (== e (neg 2)) (return (lower-rule h r (neg 1) pos)))
+        (return (lower-rule h r e pos))))))
+
+;; ------------------------------------------------------------ literals
+
+(defn ^I32 lower-value [^Ints h ^I32 node]
+  (let [t (ntok h node)
+        k (tk-kind h t)]
+    (if (== k TK_INT)
+      (do (let [mag (mag-of h T_LITB (tk-b h t) (tk-c h t))]
+            (point-of h (tk-a h t) mag)
+            (let [r (hg h H_R0) a (hg h H_R1) b (hg h H_R2)
+                  l (mk-int-range h r a b r a b)]
+              (return (ts-of1 h l))))))
+    (if (== k TK_FLOAT)
+      (do (let [kh (fkey-hi (tk-a h t))
+                kl (fkey-lo (tk-a h t) (tk-b h t))]
+            (vtrunc h T_TMP2 0)
+            (vpush1 h T_TMP2 kh) (vpush1 h T_TMP2 kl) (vpush1 h T_TMP2 kh) (vpush1 h T_TMP2 kl)
+            (let [fl (mk-float-from h 7 T_TMP2 1)]
+              (return (ts-of1 h fl))))))
+    (let [^:mut major 3]
+      (if (== k TK_BYTES) (set major 2))
+      (let [enc (enc-string h major T_LITB (tk-b h t) (tk-c h t))
+            lit (mk-lit h enc)]
+        (return (ts-of1 h lit))))))
+
+(defn ^I32 lower-range [^Ints h ^I32 node ^I32 env]
+  (let [^I32 lo (lower-type h (na h node) env)
+        ^I32 hi (lower-type h (nb h node) env)
+        incl (nc h node)
+        pos (npos h node)]
+    (if (or (< lo 0) (< hi 0)) (return (neg 1)))
+    (if (int-point h lo)
+      (do (let [lr (hg h H_R0) la (hg h H_R1) lb (hg h H_R2)]
+            (if (not (int-point h hi)) (return (fail h ERR_RANGE pos)))
+            (let [^:mut hr (hg h H_R0) ^:mut ha (hg h H_R1) ^:mut hb (hg h H_R2)]
+              (if (== incl 0)
+                (do (bound-pred h hr ha hb)
+                    (set hr (hg h H_R0)) (set ha (hg h H_R1)) (set hb (hg h H_R2))))
+              (let [l (mk-int-range h lr la lb hr ha hb)]
+                (return (ts-of1 h l)))))))
+    (if (float-point h lo)
+      (do (let [lkh (hg h H_R0) lkl (hg h H_R1)]
+            (if (not (float-point h hi)) (return (fail h ERR_RANGE pos)))
+            (let [^:mut hkh (hg h H_R0) ^:mut hkl (hg h H_R1)]
+              (if (== incl 0)
+                (do (if (== hkl 0) (set hkh (sub32 hkh 1)))
+                    (set hkl (sub32 hkl 1))))
+              (vtrunc h T_TMP2 0)
+              (vpush1 h T_TMP2 lkh) (vpush1 h T_TMP2 lkl) (vpush1 h T_TMP2 hkh) (vpush1 h T_TMP2 hkl)
+              (let [fl (mk-float-from h 7 T_TMP2 1)]
+                (return (ts-of1 h fl)))))))
+    (return (fail h ERR_RANGE pos))))
+
+;; ------------------------------------------------------------ controls
+
+(defn ^I32 pack-name [^IntsR h ^I32 s ^I32 len ^I32 from]
+  (comment "Bytes from..from+3 of the name at s as one little-endian word (0 past the end).")
+  (let [^:mut w 0]
+    (for [^I32 i 0 4]
+      (if (< (+ from i) len)
+        (set w (bit-or w (shl (vget h T_SRC (+ s (+ from i))) (* 8 i))))))
+    (return w)))
+
+(defn ^I32 ctl-code [^IntsR h ^I32 tok]
+  (comment "The control's code from its name (TK_CTL: a = name start), or 0."
+           "Names are matched as two packed words and the length.")
+  (let [s (tk-a h tok)
+        len (- (tk-end h tok) s)
+        w1 (pack-name h s len 0)
+        w2 (pack-name h s len 4)]
+    (if (> len 7) (return 0))
+    (if (and (== len 4) (== w1 1702521203)) (return 1))
+    (if (and (== len 4) (== w1 1937008994)) (return 2))
+    (if (and (== len 2) (== w1 29804)) (return 3))
+    (if (and (== len 2) (== w1 25964)) (return 4))
+    (if (and (== len 2) (== w1 29799)) (return 5))
+    (if (and (== len 2) (== w1 25959)) (return 6))
+    (if (and (== len 2) (== w1 29029)) (return 7))
+    (if (and (== len 2) (== w1 25966)) (return 8))
+    (if (and (== len 3) (== w1 6581857)) (return 9))
+    (if (and (== len 6) (and (== w1 1752459639) (== w2 28265))) (return 10))
+    (if (and (== len 6) (and (== w1 1701274994) (== w2 28792))) (return 11))
+    (if (and (== len 4) (== w1 1919902307)) (return 12))
+    (if (and (== len 7) (and (== w1 1919902307) (== w2 7431539))) (return 13))
+    (if (and (== len 7) (and (== w1 1634100580) (== w2 7629941))) (return 14))
+    (if (and (== len 7) (and (== w1 1952540006) (== w2 6648437))) (return 15))
+    (if (and (== len 3) (== w1 7627107)) (return 16))
+    (if (and (== len 3) (== w1 7628132)) (return 17))
+    (if (and (== len 4) (== w1 1937075312)) (return 18))
+    (if (and (== len 4) (== w1 1701995376)) (return 19))
+    (if (and (== len 4) (== w1 1718510177)) (return 20))
+    (if (and (== len 5) (and (== w1 1718510177) (== w2 98))) (return 21))
+    (return 0)))
+
+(defn ^I32 lower-ctl [^Ints h ^I32 node ^I32 env]
+  (let [tok (nc h node)
+        code (ctl-code h tok)
+        pos (npos h node)]
+    (if (== code 0) (return (fail h ERR_UNKNOWN_CONTROL pos)))
+    (comment ".det, .plus, .pcre, .abnf, .abnfb: refused before anything is lowered (D013).")
+    (if (or (== code 17) (>= code 18)) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
+    (let [^I32 target (lower-type h (na h node) env)]
+      (if (< target 0) (return (neg 1)))
+      (if (or (== code 14) (== code 15)) (return target))
+      (if (or (== code 12) (== code 13))
+        (do (if (and (== code 13) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
+            (let [cn (nb h node)
+                  ^:mut flags 0]
+              (if (== code 13) (set flags 1))
+              (comment "One EMBED leaf per (controller node, env).")
+              (let [^:mut ets (con-find h cn env)]
+                (if (< ets 0)
+                  (do (let [el (container h K_EMBED flags cn env)]
+                        (if (< el 0) (return (neg 1)))
+                        (let [ts1 (ts-of1 h el)]
+                          (con-find h cn env)
+                          (set ets (con-put h cn env ts1))))))
+                (return (ctl-cbor h target (ts-leaf h ets 0) pos))))))
+      (let [^I32 ctl (lower-type h (nb h node) env)]
+        (if (< ctl 0) (return (neg 1)))
+        (if (== code 1) (return (ctl-size h target ctl pos)))
+        (if (== code 2) (return (ctl-bits h target ctl pos)))
+        (if (and (>= code 3) (<= code 6)) (return (ctl-compare h target ctl (- code 3) pos)))
+        (if (== code 7) (return (ctl-eq h target ctl 0 pos)))
+        (if (== code 8) (return (ctl-eq h target ctl 1 pos)))
+        (if (or (== code 9) (== code 10)) (return (ctl-and h target ctl)))
+        (if (== code 11)
+          (do (if (== (hg h H_PROFILE) 2) (return (fail h ERR_PROFILE pos)))
+              (return (ctl-regexp h target ctl pos))))
+        (if (== code 16) (return (ctl-cat h target ctl pos)))
+        (return (fail h ERR_INTERNAL pos))))))
+
+;; ------------------------------------------------------------ tags, majors
+
+(defn ^Bool bstr-content [^Ints h ^I32 content ^I32 env]
+  (comment "Is the content exactly the unconstrained byte string (`bstr`, `bytes`"
+           "of the prelude, or `#2`)? Then tag 2/3 IS a bignum range.")
+  (if (or (or (< content 0) (!= (nk h content) N_TYPE)) (!= (nb h content) 1)) (return false))
+  (let [c (na h content)]
+    (if (== (nk h c) N_MAJOR) (return (and (== (na h c) 2) (== (nb h c) 2))))
+    (if (or (!= (nk h c) N_NAME) (!= (nb h c) 0)) (return false))
+    (if (and (>= env 0) (>= (param-index h (env-rule h env) (ntok h c)) 0)) (return false))
+    (let [r (rule-find-tok h (ntok h c))]
+      (if (or (< r 0) (== (rw h r 7) 0)) (return false))
+      (comment "prelude `bstr` (4 bytes) or `bytes` (5)")
+      (let [s (rw h r 0)
+            len (rw h r 1)]
+        (if (and (== len 4) (and (== (vget h T_SRC s) 98) (== (vget h T_SRC (+ s 1)) 115)))
+          (return true))
+        (if (and (== len 5) (and (== (vget h T_SRC s) 98) (== (vget h T_SRC (+ s 4)) 115)))
+          (return true))
+        (return false)))))
+
+(defn ^I32 lower-tag [^Ints h ^I32 node ^I32 env]
+  (let [mode (na h node)
+        hi (nb h node)
+        lo (nc h node)
+        content (ne h node)
+        pos (npos h node)]
+    (let [memo (con-find h node env)]
+      (if (>= memo 0) (return memo))
+      (if (== mode 0)
+        (do (if (and (== hi 0) (and (or (== lo 2) (== lo 3)) (bstr-content h content env)))
+              (do (let [two64 (mag-pow h)
+                        lp (mk-int-range h R_POS_BIG two64 9 R_POS_INF 0 0)
+                        ln (mk-int-range h R_NEG_INF 0 0 R_NEG_BIG two64 9)
+                        ^:mut l lp]
+                    (if (== lo 3) (set l ln))
+                    (let [ts (ts-of1 h l)]
+                      (con-find h node env)
+                      (return (con-put h node env ts))))))
+            (let [tl (container h K_TAG 0 content env)]
+              (if (< tl 0) (return (neg 1)))
+              (lsetd h tl 0 hi)
+              (lsetd h tl 1 lo)
+              (lsetd h tl 2 (neg 1))
+              (let [ts2 (ts-of1 h tl)]
+                (con-find h node env)
+                (return (con-put h node env ts2))))))
+      (if (== mode 2)
+        (do (if (< content 0)
+              (do (let [mj (mk-major h 6)
+                        ts3 (ts-of1 h mj)]
+                    (con-find h node env)
+                    (return (con-put h node env ts3)))))
+            (let [sl (container h K_TAGSET 0 content env)]
+              (if (< sl 0) (return (neg 1)))
+              (lsetd h sl 0 0) (lsetd h sl 1 0) (lsetd h sl 2 (neg 1)) (lsetd h sl 3 (neg 1))
+              (lsetd h sl 4 (neg 1))
+              (let [ts4 (ts-of1 h sl)]
+                (con-find h node env)
+                (return (con-put h node env ts4))))))
+      (comment "#6.<T>(C): one TAGSET per interval of T within 0..2^64-1.")
+      (let [^I32 nts (lower-type h (nd h node) env)]
+        (if (< nts 0) (return (neg 1)))
+        (let [tl2 (single-leaf h nts)
+              from (vlen h T_STK)]
+          (if (or (< tl2 0) (!= (lk h tl2) K_INT)) (return (fail h ERR_TAG pos)))
+          (for [^I32 i 0 (ld h tl2 1)]
+            (let [o (* 6 (+ (ld h tl2 0) i))
+                  ^:mut a1 (vget h T_IV (+ o 1))
+                  ^:mut a2 (vget h T_IV (+ o 2))
+                  ^:mut b1 (vget h T_IV (+ o 4))
+                  ^:mut b2 (vget h T_IV (+ o 5))
+                  lr (vget h T_IV o)
+                  hr (vget h T_IV (+ o 3))]
+              (if (and (<= lr R_POS) (>= hr R_POS))
+                (do (if (< lr R_POS) (do (set a1 0) (set a2 0)))
+                    (if (> hr R_POS) (do (set b1 (neg 1)) (set b2 (neg 1))))
+                    (let [sl2 (container h K_TAGSET 0 content env)]
+                      (if (< sl2 0) (return (neg 1)))
+                      (lsetd h sl2 0 a1) (lsetd h sl2 1 a2) (lsetd h sl2 2 b1) (lsetd h sl2 3 b2)
+                      (lsetd h sl2 4 (neg 1))
+                      (vpush1 h T_STK sl2))))))
+          (let [ts5 (ts-make h from)]
+            (con-find h node env)
+            (return (con-put h node env ts5))))))))
+
+(defn ^I32 lower-major [^Ints h ^I32 node]
+  (let [m (na h node)
+        mode (nb h node)
+        hi (nc h node)
+        lo (nd h node)
+        pos (npos h node)]
+    (if (== mode 2)
+      (do (if (== m 0)
+            (do (let [l0 (mk-int-range h R_POS 0 0 R_POS (neg 1) (neg 1))] (return (ts-of1 h l0)))))
+          (if (== m 1)
+            (do (let [l1 (mk-int-range h R_NEG (neg 1) (neg 1) R_NEG 0 0)] (return (ts-of1 h l1)))))
+          (if (== m 2) (do (let [l2 (mk-bytes h 0 INF (neg 1))] (return (ts-of1 h l2)))))
+          (if (== m 3) (do (let [l3 (mk-text h 0 INF (neg 1))] (return (ts-of1 h l3)))))
+          (let [lm (mk-major h m)] (return (ts-of1 h lm)))))
+    (if (or (!= m 7) (!= hi 0)) (return (fail h ERR_MAJOR pos)))
+    (if (or (== lo 25) (or (== lo 26) (== lo 27)))
+      (do (let [lf (mk-float-from h (shl 1 (- lo 25)) T_TMP2 0)] (return (ts-of1 h lf)))))
+    (if (and (>= lo 0) (<= lo 23))
+      (do (let [ls (mk-simple h lo)] (return (ts-of1 h ls)))))
+    (if (and (>= lo 0) (<= lo 31)) (return (ts-of1 h (neg 2))))
+    (return (fail h ERR_MAJOR pos))))
+
+;; ------------------------------------------------------------ containers
+
+(defn ^I32 content-ts [^Ints h ^I32 cn ^I32 env]
+  (comment "A tag's or embedded document's content: the type at node cn (-1: any).")
+  (if (< cn 0)
+    (do (let [any (mk-any h)] (return (ts-of1 h any)))))
+  (return (lower-type h cn env)))
+
+(defn ^I32 lower-map [^Ints h ^I32 node ^I32 env]
+  (comment "One MAP leaf per top-level group choice (§4.3.1 (1)).")
+  (let [memo (con-find h node env)]
+    (if (>= memo 0) (return memo))
+    (let [g (na h node)
+          from (vlen h T_STK)
+          ^:mut ci 0
+          ^:mut c (na h g)]
+      (while (>= c 0)
+        (let [ml (container h K_MAP 0 g env)]
+          (if (< ml 0) (return (neg 1)))
+          (lsetd h ml 0 (neg 1))
+          (lsetd h ml 1 ci)
+          (vpush1 h T_STK ml))
+        (set ci (+ ci 1))
+        (set c (nnext h c)))
+      (let [ts (ts-make h from)]
+        (con-find h node env)
+        (return (con-put h node env ts))))))
+
+(defn ^I32 lower-array [^Ints h ^I32 node ^I32 env]
+  (let [memo (con-find h node env)]
+    (if (>= memo 0) (return memo))
+    (let [al (container h K_ARRAY 0 (na h node) env)]
+      (if (< al 0) (return (neg 1)))
+      (lsetd h al 0 (neg 1))
+      (let [ts (ts-of1 h al)]
+        (con-find h node env)
+        (return (con-put h node env ts))))))
+
+(defn ^I32 lower-unwrap [^Ints h ^I32 node ^I32 env]
+  (comment "`~name` as a type: the content of the named tag type(s).")
+  (if (> (hg h H_PROFILE) 0) (return (fail h ERR_PROFILE (npos h node))))
+  (let [ts (lower-name h node env)
+        pos (npos h node)
+        from (vlen h T_STK)]
+    (if (< ts 0) (return (neg 1)))
+    (for [^I32 i 0 (ts-n h ts)]
+      (let [l (ts-leaf h ts i)
+            k (lk h l)]
+        (if (or (== k K_TAG) (== k K_TAGSET))
+          (do (let [cts (content-ts h (lw h l 12) (lw h l 13))]
+                (if (< cts 0) (return (neg 1)))
+                (ts-push-leaves h cts)))
+          (if (and (== k K_INT) (!= (lflags h l) 0))
+            (do (comment "an unconstrained bignum tag: its content is a byte string")
+                (let [bl (mk-bytes h 0 INF (neg 1))] (vpush1 h T_STK bl)))
+            (return (fail h ERR_UNWRAP pos))))))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ the dispatch
+
+(defn ^:pub ^I32 lower-type [^Ints h ^I32 node ^I32 env]
+  (let [pos (npos h node)]
+    (if (not (enter h pos)) (return (neg 1)))
+    (if (not (charge h 1)) (return (neg 1)))
+    (let [k (nk h node)
+          ^:mut r (neg 1)]
+      (if (== k N_TYPE)
+        (do (let [from (vlen h T_STK)
+                  ^:mut c (na h node)
+                  ^:mut ok true]
+              (while (and ok (>= c 0))
+                (let [^I32 ts (lower-type h c env)]
+                  (if (< ts 0) (set ok false) (ts-push-leaves h ts)))
+                (set c (nnext h c)))
+              (if ok (set r (ts-make h from)) (vtrunc h T_STK from)))))
+      (if (== k N_VALUE) (set r (lower-value h node)))
+      (if (== k N_NAME) (set r (lower-name h node env)))
+      (if (== k N_RANGE) (set r (lower-range h node env)))
+      (if (== k N_CTL) (set r (lower-ctl h node env)))
+      (if (== k N_MAP) (set r (lower-map h node env)))
+      (if (== k N_ARRAY) (set r (lower-array h node env)))
+      (if (== k N_UNWRAP) (set r (lower-unwrap h node env)))
+      (if (== k N_ENUM)
+        (do (let [from2 (vlen h T_STK)]
+              (if (>= (enum-node h node env) 0) (set r (ts-make h from2)) (vtrunc h T_STK from2)))))
+      (if (== k N_TAG) (set r (lower-tag h node env)))
+      (if (== k N_MAJOR) (set r (lower-major h node)))
+      (if (== k N_ANY) (do (let [al (mk-any h)] (set r (ts-of1 h al)))))
+      (leave h)
+      (if (erred h) (return (neg 1)))
+      (if (< r 0) (return (fail h ERR_INTERNAL pos)))
+      (return r))))
+
+;; ------------------------------------------------------------ group references
+
+(defn ^I32 group-ref [^Ints h ^I32 ent ^I32 env]
+  (comment "If the keyless entry ent is a reference to a group -- a group rule (with"
+           "arguments), an undefined group socket, or `~name` -- answer: >= 0 the rule"
+           "(environment in h[H_R0], -2 = not generic), -3 for an unwrap (node in"
+           "h[H_R0]), -4 for an undefined `$$` socket; -2 when it is a plain type.")
+  (let [ty (nc h ent)]
+    (if (or (!= (nk h ty) N_TYPE) (!= (nb h ty) 1)) (return (neg 2)))
+    (let [c (na h ty)]
+      (if (== (nk h c) N_UNWRAP) (do (hs h H_R0 c) (return (neg 3))))
+      (if (!= (nk h c) N_NAME) (return (neg 2)))
+      (let [tok (ntok h c)]
+        (if (and (>= env 0) (and (== (nb h c) 0) (>= (param-index h (env-rule h env) tok) 0)))
+          (return (neg 2)))
+        (let [r (rule-find-tok h tok)]
+          (if (< r 0)
+            (do (if (socket-spelling h tok 2)
+                  (do (if (> (hg h H_PROFILE) 0) (return (fail h ERR_PROFILE (npos h c))))
+                      (return (neg 4))))
+                (return (neg 2))))
+          (let [k (rule-kind h r)]
+            (if (< k 0) (return (neg 1)))
+            (if (!= k RK_GROUP) (return (neg 2))))
+          (if (and (!= (rw h r 13) 0) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE (npos h c))))
+          (let [e (instance-env h r (na h c) (nb h c) env (npos h c))]
+            (if (== e (neg 1)) (return (neg 1)))
+            (hs h H_R0 e)
+            (return r)))))))
+
+(defn ^I32 gstack-find [^IntsR h ^I32 r ^I32 env]
+  (comment "The index of (rule, env) on the group expansion stack, or -1.")
+  (let [n (quot (vlen h T_GSTACK) 2)]
+    (for [^I32 i 0 n]
+      (if (and (== (vget h T_GSTACK (* 2 i)) r) (== (vget h T_GSTACK (+ (* 2 i) 1)) env))
+        (return i)))
+    (return (neg 1))))
+
+(defn gstack-push [^Ints h ^I32 r ^I32 env]
+  (vpush1 h T_GSTACK r)
+  (vpush1 h T_GSTACK env))
+
+(defn gstack-pop [^Ints h]
+  (let [n (vlen h T_GSTACK)]
+    (vtrunc h T_GSTACK (- n 2))))
+
+(defn ^I32 env-of [^IntsR h]
+  (comment "h[H_R0] as an environment (-2 means none: -1).")
+  (let [e (hg h H_R0)]
+    (if (< e 0) (return (neg 1)))
+    (return e)))
+
+;; ------------------------------------------------------------ maps
+
+(defn ^I32 key-lit [^Ints h ^I32 ts]
+  (comment "If the key typeset is one text literal or one integer value of major 0/1,"
+           "answer its encoding bid (a literal key), else -1.")
+  (let [l (single-leaf h ts)]
+    (if (< l 0) (return (neg 1)))
+    (if (and (== (lk h l) K_LIT) (== (sar (bid-byte h (ld h l 0) 0) 5) 3))
+      (return (ld h l 0)))
+    (if (int-point h ts)
+      (do (let [r (hg h H_R0) a (hg h H_R1) b (hg h H_R2)]
+            (if (or (== r R_POS) (== r R_NEG))
+              (do (vtrunc h T_TMP2 0)
+                  (head-push h T_TMP2 (if-neg r) a b)
+                  (return (intern h T_TMP2 0 (vlen h T_TMP2))))))))
+    (return (neg 1))))
+
+(defn ^I32 if-neg [^I32 r]
+  (if (== r R_NEG) (return 1))
+  (return 0))
+
+(defn ^I32 m-member [^Ints h ^I32 m ^I32 env]
+  (comment "A member's altset: one entry (literal key or key typeset).")
+  (let [key (nc h m)
+        kk (na h key)
+        pos (npos h m)
+        lo (na h m)
+        ^:mut hi (nb h m)
+        ^:mut kbid (neg 1)
+        ^:mut kts (neg 1)
+        cut (nb h key)
+        ^:mut never false]
+    (if (< hi 0) (set hi INF))
+    (if (== kk KEY_BARE)
+      (do (let [t (ntok h key)
+                s (tk-start h t)]
+            (set kbid (enc-string h 3 T_SRC s (- (tk-end h t) s))))))
+    (if (== kk KEY_VALUE)
+      (do (let [t2 (ntok h key)
+                tk (tk-kind h t2)]
+            (if (== tk TK_TEXT) (set kbid (enc-string h 3 T_LITB (tk-b h t2) (tk-c h t2))))
+            (if (== tk TK_INT)
+              (do (set kbid (enc-int-key h (tk-a h t2) T_LITB (tk-b h t2) (tk-c h t2)))
+                  (if (< kbid 0) (set never true))))
+            (if (or (== tk TK_BYTES) (== tk TK_FLOAT)) (set never true)))))
+    (if (== kk KEY_TYPE)
+      (do (if (and (== cut 1) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
+          (set kts (lower-type h (nc h key) env))
+          (if (< kts 0) (return (neg 1)))
+          (set kbid (key-lit h kts))
+          (if (>= kbid 0) (set kts (neg 1)))
+          (if (and (< kbid 0) (> (hg h H_PROFILE) 0))
+            (do (comment "bindle/bus: text and integer keys only")
+                (for [^I32 i 0 (ts-n h kts)]
+                  (if (!= (bit-and (leaf-mask h (ts-leaf h kts i)) (bit-not 11)) 0)
+                    (return (fail h ERR_PROFILE pos))))))))
+    (let [^I32 val (lower-type h (nd h m) env)]
+      (if (< val 0) (return (neg 1)))
+      (if never
+        (do (comment "A key the profile cannot carry: an optional member is absent, a"
+                     "required one makes the alternative unsatisfiable.")
+            (if (== lo 0) (return (as-unit h)))
+            (return (as-none h))))
+      (if (>= kbid 0)
+        (do (if (> lo 1) (return (as-none h)))
+            (if (== hi 0) (return (as-unit h)))
+            (let [e (ent-new h 0 kbid val lo 1 cut pos)]
+              (if (< e 0) (return (neg 1)))
+              (return (as-single h e)))))
+      (if (== cut 1) (return (fail h ERR_MAP_CUT pos)))
+      (let [e2 (ent-new h 1 kts val lo hi 0 pos)]
+        (if (< e2 0) (return (neg 1)))
+        (return (as-single h e2))))))
+
+(defn ^I32 m-unwrap [^Ints h ^I32 un ^I32 env]
+  (comment "`~name` in a group: the groups of the named map/array type(s), as choices.")
+  (if (> (hg h H_PROFILE) 0) (return (fail h ERR_PROFILE (npos h un))))
+  (let [ts (lower-name h un env)
+        pos (npos h un)]
+    (if (< ts 0) (return (neg 1)))
+    (let [^:mut acc (as-none h)]
+      (for [^I32 i 0 (ts-n h ts)]
+        (let [l (ts-leaf h ts i)
+              k (lk h l)]
+          (if (== k K_MAP)
+            (do (let [^I32 g (m-group h (lw h l 12) (ld h l 1) (lw h l 13))]
+                  (if (< g 0) (return (neg 1)))
+                  (set acc (as-union h acc g pos))))
+            (if (== k K_ARRAY)
+              (do (let [^I32 g2 (m-group h (lw h l 12) (neg 1) (lw h l 13))]
+                    (if (< g2 0) (return (neg 1)))
+                    (set acc (as-union h acc g2 pos))))
+              (return (fail h ERR_UNWRAP pos))))
+          (if (< acc 0) (return (neg 1)))))
+      (return acc))))
+
+(defn ^I32 m-grouprule [^Ints h ^I32 r ^I32 env ^I32 pos]
+  (comment "A group rule's altset: the choice of its definitions' entries.")
+  (if (>= (gstack-find h r env) 0) (return (fail h ERR_GROUP_RECURSION pos)))
+  (gstack-push h r env)
+  (let [saved (hg h H_CUR_RULE)
+        ^:mut acc (as-none h)
+        ^:mut d (rw h r 2)]
+    (while (>= d 0)
+      (let [^I32 s (m-ent h (nd h d) env)]
+        (if (< s 0) (return (neg 1)))
+        (set acc (as-union h acc s pos))
+        (if (< acc 0) (return (neg 1))))
+      (set d (def-next h d)))
+    (hs h H_CUR_RULE saved)
+    (gstack-pop h)
+    (return acc)))
+
+(defn ^I32 m-ent [^Ints h ^I32 ent ^I32 env]
+  (comment "The altset of one group entry in a map context, occurrence applied.")
+  (let [pos (npos h ent)]
+    (if (not (enter h pos)) (return (neg 1)))
+    (let [k (nk h ent)
+          lo (na h ent)
+          ^:mut hi (nb h ent)
+          ^:mut base (neg 1)]
+      (if (< hi 0) (set hi INF))
+      (if (== k N_MEMBER)
+        (do (let [mm (m-member h ent env)]
+              (leave h)
+              (return mm))))
+      (if (== k N_SUBGRP) (set base (m-group h (nc h ent) (neg 1) env)))
+      (if (== k N_ENT)
+        (do (let [gr (group-ref h ent env)]
+              (if (== gr (neg 1)) (return (neg 1)))
+              (if (== gr (neg 2)) (return (fail h ERR_MAP_KEY pos)))
+              (if (== gr (neg 4)) (set base (as-unit h)))
+              (if (== gr (neg 3)) (set base (m-unwrap h (hg h H_R0) env)))
+              (if (>= gr 0) (set base (m-grouprule h gr (env-of h) pos))))))
+      (if (< base 0) (return (neg 1)))
+      (leave h)
+      (return (as-occur h base lo hi pos)))))
+
+(defn ^I32 m-seq [^Ints h ^I32 gc ^I32 env]
+  (let [^:mut acc (as-unit h)
+        ^:mut e (na h gc)]
+    (while (>= e 0)
+      (let [^I32 s (m-ent h e env)]
+        (if (< s 0) (return (neg 1)))
+        (set acc (as-product h acc s (npos h e)))
+        (if (< acc 0) (return (neg 1))))
+      (set e (nnext h e)))
+    (return acc)))
+
+(defn ^I32 m-group [^Ints h ^I32 g ^I32 choice ^I32 env]
+  (comment "The altset of group g (every choice, or only `choice` >= 0).")
+  (let [^:mut acc (as-none h)
+        ^:mut c (na h g)
+        ^:mut i 0]
+    (while (>= c 0)
+      (if (or (< choice 0) (== choice i))
+        (do (let [s (m-seq h c env)]
+              (if (< s 0) (return (neg 1)))
+              (set acc (as-union h acc s (npos h c)))
+              (if (< acc 0) (return (neg 1))))))
+      (set i (+ i 1))
+      (set c (nnext h c)))
+    (return acc)))
+
+(defn ^Bool literal-only-choice [^IntsR h ^I32 a]
+  (comment "Two or more alternatives, none with a key-typeset entry: a factor candidate.")
+  (if (< (as-n h a) 2) (return false))
+  (for [^I32 i 0 (as-n h a)]
+    (let [off (as-aoff h a i)]
+      (for [^I32 j 0 (as-alen h a i)]
+        (if (== (ew h (alt-ent h off j) 0) 1) (return false)))))
+  (return true))
+
+(defn ^I32 process-map [^Ints h ^I32 l]
+  (let [g (lw h l 12)
+        choice (ld h l 1)
+        env (lw h l 13)
+        pos (npos h g)
+        from (vlen h T_PSTK)
+        ^:mut gc (na h g)
+        ^:mut n 0]
+    (for [^I32 _i 0 choice]
+      (set gc (nnext h gc)))
+    (let [^:mut e (na h gc)]
+      (while (>= e 0)
+        (let [^I32 s (m-ent h e env)]
+          (if (< s 0) (return (neg 1)))
+          (vpush1 h T_PSTK s)
+          (if (and (!= (nk h e) N_MEMBER) (literal-only-choice h s))
+            (vpush1 h T_PSTK 1)
+            (vpush1 h T_PSTK 0))
+          (set n (+ n 1)))
+        (set e (nnext h e))))
+    (let [id (map-finish h from n pos)]
+      (vtrunc h T_PSTK from)
+      (if (== id (neg 1)) (return (neg 1)))
+      (if (== id (neg 2))
+        (do (comment "No satisfiable alternative: the map leaf is dead (dropped at lowering).")
+            (lsetd h l 2 1)
+            (return 0)))
+      (lsetd h l 0 id)
+      (return 0))))
+
+;; ------------------------------------------------------------ arrays
+
+(defn ^Bool counterable [^I32 lo ^I32 hi]
+  (return (or (>= lo 2) (and (>= hi 2) (!= hi INF)))))
+
+(defn ^I32 a-wrap [^Ints h ^I32 child ^I32 lo ^I32 hi]
+  (comment "child with occurrence lo*hi: itself, or a repetition (a tentative counter"
+           "when it is a single position, snug.compile.arrays decides).")
+  (if (or (< child 0) (and (== lo 1) (== hi 1))) (return child))
+  (let [rp (g-node h G_REP child lo hi)]
+    (if (< rp 0) (return (neg 1)))
+    (if (and (== (gk h child) G_POS) (counterable lo hi))
+      (gset h rp 4 1))
+    (return rp)))
+
+(defn ^I32 a-grouprule [^Ints h ^I32 r ^I32 env ^I32 tailfrom ^I32 pos]
+  (comment "A group rule inside an array: a frame its tail may re-enter, or a"
+           "tail-recursive reference to a frame already open (regular recursion).")
+  (let [open (gstack-find h r env)]
+    (if (>= open 0)
+      (do (if (< open tailfrom) (return (fail h ERR_GROUP_RECURSION pos)))
+          (return (g-node h G_REC open 0 0))))
+    (let [frame (quot (vlen h T_GSTACK) 2)
+          alt (g-list h G_ALT)]
+      (if (< alt 0) (return (neg 1)))
+      (gstack-push h r env)
+      (let [^:mut d (rw h r 2)]
+        (while (>= d 0)
+          (let [^I32 s (a-ent h (nd h d) env tailfrom true)]
+            (if (< s 0) (return (neg 1)))
+            (g-add h alt s))
+          (set d (def-next h d))))
+      (gstack-pop h)
+      (return (g-node h G_FRAME alt frame 0)))))
+
+(defn ^I32 a-unwrap [^Ints h ^I32 un ^I32 env ^I32 tailfrom]
+  (if (> (hg h H_PROFILE) 0) (return (fail h ERR_PROFILE (npos h un))))
+  (let [ts (lower-name h un env)
+        pos (npos h un)
+        alt (g-list h G_ALT)]
+    (if (or (< ts 0) (< alt 0)) (return (neg 1)))
+    (for [^I32 i 0 (ts-n h ts)]
+      (let [l (ts-leaf h ts i)
+            k (lk h l)
+            ^:mut choice (neg 1)]
+        (if (== k K_MAP) (set choice (ld h l 1)))
+        (if (and (!= k K_MAP) (!= k K_ARRAY)) (return (fail h ERR_UNWRAP pos)))
+        (let [^I32 g (a-group h (lw h l 12) choice (lw h l 13) tailfrom)]
+          (if (< g 0) (return (neg 1)))
+          (g-add h alt g))))
+    (return alt)))
+
+(defn ^I32 a-ent [^Ints h ^I32 ent ^I32 env ^I32 tailfrom ^Bool last]
+  (comment "One group entry in an array context. Keys are labels. tailfrom: frames"
+           "with an index >= tailfrom may be re-entered from here (tail position).")
+  (let [pos (npos h ent)
+        k (nk h ent)
+        lo (na h ent)
+        ^:mut hi (nb h ent)
+        ^:mut tf tailfrom]
+    (if (not (enter h pos)) (return (neg 1)))
+    (if (< hi 0) (set hi INF))
+    (if (not last) (set tf (quot (vlen h T_GSTACK) 2)))
+    (if (or (> hi 1) (> lo 1)) (set tf (quot (vlen h T_GSTACK) 2)))
+    (let [^:mut child (neg 1)]
+      (if (== k N_MEMBER)
+        (do (let [^I32 vt (lower-type h (nd h ent) env)]
+              (if (< vt 0) (return (neg 1)))
+              (set child (g-node h G_POS vt 0 0)))))
+      (if (== k N_SUBGRP) (set child (a-group h (nc h ent) (neg 1) env tf)))
+      (if (== k N_ENT)
+        (do (let [gr (group-ref h ent env)]
+              (if (== gr (neg 1)) (return (neg 1)))
+              (if (== gr (neg 2))
+                (do (let [^I32 vt2 (lower-type h (nc h ent) env)]
+                      (if (< vt2 0) (return (neg 1)))
+                      (set child (g-node h G_POS vt2 0 0)))))
+              (if (== gr (neg 4)) (set child (g-node h G_EMPTY 0 0 0)))
+              (if (== gr (neg 3)) (set child (a-unwrap h (hg h H_R0) env tf)))
+              (if (>= gr 0) (set child (a-grouprule h gr (env-of h) tf pos))))))
+      (leave h)
+      (if (< child 0) (return (neg 1)))
+      (return (a-wrap h child lo hi)))))
+
+(defn ^I32 a-group [^Ints h ^I32 g ^I32 choice ^I32 env ^I32 tailfrom]
+  (let [alt (g-list h G_ALT)
+        ^:mut c (na h g)
+        ^:mut i 0]
+    (if (< alt 0) (return (neg 1)))
+    (while (>= c 0)
+      (if (or (< choice 0) (== choice i))
+        (do (let [sq (g-list h G_SEQ)
+                  ^:mut e (na h c)]
+              (if (< sq 0) (return (neg 1)))
+              (while (>= e 0)
+                (let [^I32 s (a-ent h e env tailfrom (< (nnext h e) 0))]
+                  (if (< s 0) (return (neg 1)))
+                  (g-add h sq s))
+                (set e (nnext h e)))
+              (g-add h alt sq))))
+      (set i (+ i 1))
+      (set c (nnext h c)))
+    (return alt)))
+
+(defn ^I32 process-array [^Ints h ^I32 l]
+  (let [g (lw h l 12)
+        env (lw h l 13)
+        ^I32 root (a-group h g (neg 1) env 0)]
+    (if (< root 0) (return (neg 1)))
+    (let [id (arr-finish h root (npos h g))]
+      (if (< id 0) (return (neg 1)))
+      (lsetd h l 0 id)
+      (return 0))))
+
+;; ------------------------------------------------------------ enumerations
+
+(defn ^I32 enum-ent [^Ints h ^I32 ent ^I32 env]
+  (comment "Push the value types of one entry (recursively through groups).")
+  (let [k (nk h ent)
+        pos (npos h ent)]
+    (if (not (enter h pos)) (return (neg 1)))
+    (if (== k N_MEMBER)
+      (do (let [^I32 vt (lower-type h (nd h ent) env)]
+            (if (< vt 0) (return (neg 1)))
+            (ts-push-leaves h vt))))
+    (if (== k N_SUBGRP)
+      (if (< (enum-group h (nc h ent) env) 0) (return (neg 1))))
+    (if (== k N_ENT)
+      (do (let [gr (group-ref h ent env)]
+            (if (== gr (neg 1)) (return (neg 1)))
+            (if (== gr (neg 2))
+              (do (let [^I32 vt2 (lower-type h (nc h ent) env)]
+                    (if (< vt2 0) (return (neg 1)))
+                    (ts-push-leaves h vt2))))
+            (if (== gr (neg 3)) (return (fail h ERR_ENUM pos)))
+            (if (>= gr 0)
+              (do (let [e2 (env-of h)]
+                    (if (>= (gstack-find h gr e2) 0) (return (fail h ERR_GROUP_RECURSION pos)))
+                    (gstack-push h gr e2)
+                    (let [^:mut d (rw h gr 2)]
+                      (while (>= d 0)
+                        (if (< (enum-ent h (nd h d) e2) 0) (return (neg 1)))
+                        (set d (def-next h d))))
+                    (gstack-pop h)))))))
+    (leave h)
+    (return 0)))
+
+(defn ^I32 enum-group [^Ints h ^I32 g ^I32 env]
+  (let [^:mut c (na h g)]
+    (while (>= c 0)
+      (let [^:mut e (na h c)]
+        (while (>= e 0)
+          (if (< (enum-ent h e env) 0) (return (neg 1)))
+          (set e (nnext h e))))
+      (set c (nnext h c)))
+    (return 0)))
+
+(defn ^I32 enum-node [^Ints h ^I32 node ^I32 env]
+  (comment "`&(group)` or `&name<args>`: push every value type of the group.")
+  (let [g (na h node)
+        pos (npos h node)]
+    (if (>= g 0) (return (enum-group h g env)))
+    (let [tok (ntok h node)
+          r (rule-find-tok h tok)]
+      (if (< r 0) (return (fail h ERR_UNDEFINED pos)))
+      (let [k (rule-kind h r)]
+        (if (< k 0) (return (neg 1)))
+        (if (!= k RK_GROUP) (return (fail h ERR_ENUM pos))))
+      (let [e (instance-env h r (nb h node) (nc h node) env pos)
+            ^:mut e2 e]
+        (if (== e (neg 1)) (return (neg 1)))
+        (if (== e (neg 2)) (set e2 (neg 1)))
+        (if (>= (gstack-find h r e2) 0) (return (fail h ERR_GROUP_RECURSION pos)))
+        (gstack-push h r e2)
+        (let [^:mut d (rw h r 2)]
+          (while (>= d 0)
+            (if (< (enum-ent h (nd h d) e2) 0) (return (neg 1)))
+            (set d (def-next h d))))
+        (gstack-pop h)
+        (return 0)))))
+
+;; ------------------------------------------------------------ the worklist
+
+(defn ^:pub ^I32 process-work [^Ints h]
+  (comment "Fill every container leaf, in creation order, until none is left.")
+  (forever
+   (let [at (hg h H_WORK_AT)]
+     (if (>= at (vlen h T_WORK)) (return 0))
+     (hs h H_WORK_AT (+ at 1))
+     (let [l (vget h T_WORK at)
+           k (lk h l)
+           saved (hg h H_CUR_RULE)]
+       (hs h H_CUR_RULE (lw h l 14))
+       (if (or (or (== k K_TAG) (== k K_TAGSET)) (== k K_EMBED))
+         (do (let [cts (content-ts h (lw h l 12) (lw h l 13))]
+               (if (< cts 0) (return (neg 1)))
+               (if (== k K_TAG) (lsetd h l 2 cts))
+               (if (== k K_TAGSET) (lsetd h l 4 cts))
+               (if (== k K_EMBED) (lsetd h l 0 cts)))))
+       (if (== k K_ARRAY)
+         (if (< (process-array h l) 0) (return (neg 1))))
+       (if (== k K_MAP)
+         (if (< (process-map h l) 0) (return (neg 1))))
+       (hs h H_CUR_RULE saved)
+       (if (erred h) (return (neg 1)))))))
+
+(defn ^:pub ^I32 lower-rules [^Ints h]
+  (comment "Lower every schema type rule that is not generic (source order), then"
+           "the worklist. Answers 0 or -1.")
+  (let [n (nrules h)]
+    (for [^I32 r 0 n]
+      (if (and (== (rw h r 7) 0) (== (rw h r 5) 0))
+        (do (let [k (rule-kind h r)]
+              (if (< k 0) (return (neg 1)))
+              (if (== k RK_TYPE)
+                (do (hs h H_CUR_RULE r)
+                    (if (< (lower-rule h r (neg 1) (npos h (rw h r 2))) 0)
+                      (return (neg 1)))
+                    (if (< (process-work h) 0) (return (neg 1))))))))))
+  (hs h H_CUR_RULE (neg 1))
+  (return (process-work h)))

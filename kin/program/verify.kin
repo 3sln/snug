@@ -1,0 +1,1230 @@
+;; The structural verifier, program.md §11: `vm-verify` runs once per Program
+;; at load, before any validation. It checks that every offset and id is in
+;; range, every index section matches its data walk, every [V] invariant and
+;; every [D] derived field (recomputed and compared), and the closure chains'
+;; superset property, under a verify budget of 64 * (PROGRAM_WORDS +
+;; POOL_BYTES / 4 + 1) units. It does not check [S] properties or SOURCE_KEY.
+;;
+;; Every read of P is CHECKED here (`pw`): an index outside P records a
+;; refusal and reads 0, so a corrupt Program is refused and never read out of
+;; bounds. The first failure is kept: S[VM_DETAIL] = the word offset (or byte
+;; offset in B, see the check id), S[VM_DETAIL + 1] = the check id (below).
+;;
+;; Scratch use: S[16] (VM_EPOCH) and the marks S[48 .. 48 + M) and
+;; S[48 + M .. 48 + 2M) with M = S[17] (VM_MARK_CAP), as program.md §12.1; the
+;; host must pass a scratch with M >= N_LEAVES and len(S) >= 48 + 2M
+;; (vm-scratch-words gives more than that), else the answer is -2.
+(ns snug.program.verify
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not add32 sub32
+                               < > <= >= == != and or not ult u8 blen ia iset ilen]]))
+
+;; scratch words
+(defconst ^:pub ^I32 VM_EPOCH 16)
+(defconst ^:pub ^I32 VM_MARK_CAP 17)
+(defconst ^:pub ^I32 VM_DETAIL 35)
+(defconst ^I32 V_FAILED 37)
+(defconst ^I32 V_BUDGET 38)
+(defconst ^I32 MARKS 48)
+
+(defconst ^I32 INF 2147483647)
+
+;; check ids (S[VM_DETAIL + 1])
+(defconst ^:pub ^I32 C_SCRATCH 1)
+(defconst ^:pub ^I32 C_HEADER 2)
+(defconst ^:pub ^I32 C_SECTIONS 3)
+(defconst ^:pub ^I32 C_INDEX 4)
+(defconst ^:pub ^I32 C_RULE 5)
+(defconst ^:pub ^I32 C_LEAF 6)
+(defconst ^:pub ^I32 C_MASK 7)
+(defconst ^:pub ^I32 C_TYPESET 8)
+(defconst ^:pub ^I32 C_KEY 9)
+(defconst ^:pub ^I32 C_GROUP 10)
+(defconst ^:pub ^I32 C_MAP 11)
+(defconst ^:pub ^I32 C_ARRAY 12)
+(defconst ^:pub ^I32 C_REGEXP 13)
+(defconst ^:pub ^I32 C_INTERVAL 14)
+(defconst ^:pub ^I32 C_FINTERVAL 15)
+(defconst ^:pub ^I32 C_LITREF 16)
+(defconst ^:pub ^I32 C_CSET 17)
+(defconst ^:pub ^I32 C_CHAIN 18)
+(defconst ^:pub ^I32 C_DERIVED 19)
+(defconst ^:pub ^I32 C_POOL 20)
+(defconst ^:pub ^I32 C_BUDGET 21)
+(defconst ^:pub ^I32 C_TOTAL 22)
+(defconst ^:pub ^I32 C_UTF8 23)
+
+;; header words
+(defconst ^I32 W_N_RULES 15)
+(defconst ^I32 W_N_LEAVES 16)
+(defconst ^I32 W_N_TYPESETS 17)
+(defconst ^I32 W_N_KEYS 18)
+(defconst ^I32 W_N_GROUPS 19)
+(defconst ^I32 W_N_MAPS 20)
+(defconst ^I32 W_N_ARRAYS 21)
+(defconst ^I32 W_N_REGEXPS 22)
+(defconst ^I32 W_N_INTERVALS 23)
+(defconst ^I32 W_N_FINTERVALS 24)
+(defconst ^I32 W_N_LITREFS 25)
+(defconst ^I32 W_N_CSETS 26)
+(defconst ^I32 W_N_CHAINS 27)
+(defconst ^I32 W_TS_ANY 28)
+(defconst ^I32 W_G_EMPTY 29)
+(defconst ^I32 W_SEC 42)
+
+;; ------------------------------------------------------------ failure, budget
+
+(defn ^I32 bad [^Ints s ^I32 at ^I32 check]
+  (comment "Record the first refusal (word or byte offset, check id); answers 0.")
+  (if (== (ia s V_FAILED) 0)
+    (do (iset s V_FAILED 1)
+        (iset s VM_DETAIL at)
+        (iset s (+ VM_DETAIL 1) check)))
+  (return 0))
+
+(defn ^Bool failed [^IntsR s] (return (!= (ia s V_FAILED) 0)))
+
+(defn ^Bool spend [^Ints s ^I32 n]
+  (comment "Spend n verify-budget units; refuse when exhausted.")
+  (let [b (ia s V_BUDGET)]
+    (if (or (< n 0) (> n b))
+      (do (iset s V_BUDGET 0) (bad s 0 C_BUDGET) (return false)))
+    (iset s V_BUDGET (- b n))
+    (return true)))
+
+(defn ^I32 pw [^IntsR p ^I32 i]
+  (comment "P[i], checked: outside P it reads 0. The checks below establish every"
+           "section boundary and record length before they read inside, so this is"
+           "only the guarantee that a mistake can never read out of bounds.")
+  (if (ult i (ilen p)) (return (ia p i)))
+  (return 0))
+
+(defn ^I32 sec [^IntsR p ^I32 k] (return (pw p (+ W_SEC k))))
+
+(defn ^Bool in-range [^I32 v ^I32 n] (return (and (>= v 0) (< v n))))
+
+(defn ^Bool want [^Ints s ^Bool ok ^I32 at ^I32 check]
+  (if (not ok) (bad s at check))
+  (return ok))
+
+;; ------------------------------------------------------------ marks
+
+(defn ^I32 epoch [^Ints s]
+  (comment "A fresh mark epoch (program.md §12.1's discipline).")
+  (let [m (ia s VM_MARK_CAP)
+        ^:mut e (+ (ia s VM_EPOCH) 1)]
+    (if (>= e 2147483632)
+      (do (for [^I32 i 0 (* 2 m)] (iset s (+ MARKS i) 0))
+          (set e 1)))
+    (iset s VM_EPOCH e)
+    (return e)))
+
+(defn ^I32 mark-get [^IntsR s ^I32 l] (return (ia s (+ MARKS l))))
+(defn mark-set [^Ints s ^I32 l ^I32 e] (iset s (+ MARKS l) e))
+(defn ^I32 aux-get [^IntsR s ^I32 l] (return (ia s (+ (+ MARKS (ia s VM_MARK_CAP)) l))))
+(defn aux-set [^Ints s ^I32 l ^I32 v] (iset s (+ (+ MARKS (ia s VM_MARK_CAP)) l) v))
+
+;; ------------------------------------------------------------ pool helpers
+
+(defn ^Bool byte-range [^Bytes b ^I32 off ^I32 len]
+  (return (and (and (>= off 0) (>= len 0)) (<= len (- (blen b) off)))))
+
+(defn ^I32 bytes-cmp [^Bytes b ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+  (comment "Bytewise order, a proper prefix first (both ranges already checked).")
+  (let [^:mut m l1]
+    (if (< l2 m) (set m l2))
+    (for [^I32 i 0 m]
+      (let [x (u8 b (+ o1 i))
+            y (u8 b (+ o2 i))]
+        (if (!= x y) (return (- x y)))))
+    (return (- l1 l2))))
+
+(defn ^I32 enc-class [^Bytes b ^I32 off]
+  (comment "The class bit (program.md §4.1) of an item whose first byte is at off.")
+  (let [ib (u8 b off)
+        m (ushr ib 5)]
+    (if (<= m 5) (return (shl 1 m)))
+    (if (== m 7)
+      (do (let [ai (bit-and ib 31)]
+            (if (== ai 25) (return 256))
+            (if (== ai 26) (return 512))
+            (if (== ai 27) (return 1024))
+            (return 128))))
+    (comment "major 6: a bignum tag only if the number is 2 or 3 (one-byte head)")
+    (if (or (== ib 194) (== ib 195)) (return 2048))
+    (return 64)))
+
+(defn ^I32 head-end [^Bytes b ^I32 off ^I32 end]
+  (comment "The offset after a shortest-form head at off (argument < 2^31 for"
+           "lengths), or -1. Leaves the argument in the low 31 bits if it fits; -2"
+           "marks an argument >= 2^31 (fine for integers, impossible as a length).")
+  (if (>= off end) (return (neg 1)))
+  (let [ai (bit-and (u8 b off) 31)]
+    (if (< ai 24) (return (+ off 1)))
+    (if (> ai 27) (return (neg 1)))
+    (let [w (shl 1 (- ai 24))]
+      (if (> w (- end (+ off 1))) (return (neg 1)))
+      (comment "shortest form")
+      (if (== ai 24) (if (< (u8 b (+ off 1)) 24) (return (neg 1))))
+      (if (== ai 25) (if (== (u8 b (+ off 1)) 0) (return (neg 1))))
+      (if (== ai 26) (if (== (bit-or (u8 b (+ off 1)) (u8 b (+ off 2))) 0) (return (neg 1))))
+      (if (== ai 27)
+        (if (== (bit-or (bit-or (u8 b (+ off 1)) (u8 b (+ off 2))) (bit-or (u8 b (+ off 3)) (u8 b (+ off 4)))) 0)
+          (return (neg 1))))
+      (return (+ (+ off 1) w)))))
+
+(defn ^I32 head-len-arg [^Bytes b ^I32 off]
+  (comment "The argument of a (checked) head as a length, or -1 if >= 2^31.")
+  (let [ai (bit-and (u8 b off) 31)]
+    (if (< ai 24) (return ai))
+    (if (== ai 24) (return (u8 b (+ off 1))))
+    (if (== ai 25) (return (bit-or (shl (u8 b (+ off 1)) 8) (u8 b (+ off 2)))))
+    (if (== ai 26)
+      (do (if (>= (u8 b (+ off 1)) 128) (return (neg 1)))
+          (return (bit-or (bit-or (shl (u8 b (+ off 1)) 24) (shl (u8 b (+ off 2)) 16))
+                          (bit-or (shl (u8 b (+ off 3)) 8) (u8 b (+ off 4)))))))
+    (return (neg 1))))
+
+(defn ^Bool utf8-ok [^Bytes b ^I32 s ^I32 e]
+  (comment "Well-formed UTF-8 (WHATWG fatal rules).")
+  (let [^:mut i s]
+    (while (< i e)
+      (let [c (u8 b i)]
+        (if (< c 128)
+          (set i (+ i 1))
+          (do (if (< c 194) (return false))
+              (let [^:mut n 1
+                    ^:mut lo 128
+                    ^:mut hi 191]
+                (if (>= c 224) (set n 2))
+                (if (>= c 240) (set n 3))
+                (if (> c 244) (return false))
+                (if (== c 224) (set lo 160))
+                (if (== c 237) (set hi 159))
+                (if (== c 240) (set lo 144))
+                (if (== c 244) (set hi 143))
+                (if (> n (- (- e i) 1)) (return false))
+                (let [c1 (u8 b (+ i 1))]
+                  (if (or (< c1 lo) (> c1 hi)) (return false)))
+                (for [^I32 k 2 (+ n 1)]
+                  (let [ck (u8 b (+ i k))]
+                    (if (or (< ck 128) (> ck 191)) (return false))))
+                (set i (+ i (+ n 1))))))))
+    (return true)))
+
+;; ------------------------------------------------------------ header
+
+(defn ^Bool check-header [^IntsR p ^Bytes b ^Ints s]
+  (if (or (< (ilen p) 64) (> (ilen p) 16777216)) (do (bad s 0 C_HEADER) (return false)))
+  (if (> (blen b) 67108864) (do (bad s 4 C_HEADER) (return false)))
+  (if (not (want s (== (ia p 0) 1735749235) 0 C_HEADER)) (return false))
+  (if (not (want s (== (ia p 1) 1) 1 C_HEADER)) (return false))
+  (if (not (want s (== (ia p 2) 64) 2 C_HEADER)) (return false))
+  (if (not (want s (== (ia p 3) (ilen p)) 3 C_HEADER)) (return false))
+  (if (not (want s (== (ia p 4) (blen b)) 4 C_HEADER)) (return false))
+  (if (not (want s (and (>= (ia p 5) 0) (<= (ia p 5) 2)) 5 C_HEADER)) (return false))
+  (for [^I32 w 15 28]
+    (if (not (want s (and (>= (ia p w) 0) (<= (ia p w) (ilen p))) w C_HEADER)) (return false)))
+  (if (not (want s (<= (ia p W_N_LEAVES) 1048576) W_N_LEAVES C_HEADER)) (return false))
+  (if (not (want s (and (>= (ia p W_TS_ANY) (neg 1)) (< (ia p W_TS_ANY) (ia p W_N_TYPESETS))) W_TS_ANY C_HEADER))
+    (return false))
+  (if (not (want s (and (>= (ia p W_G_EMPTY) (neg 1)) (< (ia p W_G_EMPTY) (ia p W_N_GROUPS))) W_G_EMPTY C_HEADER))
+    (return false))
+  (comment "reserved words")
+  (if (not (want s (and (and (== (ia p 30) 0) (== (ia p 31) 0)) (and (and (== (ia p 39) 0) (== (ia p 41) 0)) (== (ia p 63) 0))) 30 C_HEADER))
+    (return false))
+  (comment "limits within their hard maxima")
+  (if (not (want s (and (>= (ia p 32) 0) (<= (ia p 32) 256)) 32 C_HEADER)) (return false))
+  (if (not (want s (>= (ia p 33) 0) 33 C_HEADER)) (return false))
+  (if (not (want s (and (>= (ia p 34) 0) (<= (ia p 34) 16777216)) 34 C_HEADER)) (return false))
+  (if (not (want s (and (>= (ia p 35) 0) (<= (ia p 35) 16777216)) 35 C_HEADER)) (return false))
+  (if (not (want s (and (>= (ia p 36) 0) (<= (ia p 36) 4096)) 36 C_HEADER)) (return false))
+  (if (not (want s (>= (ia p 37) 0) 37 C_HEADER)) (return false))
+  (if (not (want s (and (>= (ia p 38) 0) (<= (ia p 38) 67108864)) 38 C_HEADER)) (return false))
+  (if (not (want s (>= (ia p 40) 0) 40 C_HEADER)) (return false))
+  (comment "sections: S_RULES = 64, monotone, S_END = PROGRAM_WORDS")
+  (if (not (want s (== (ia p W_SEC) 64) W_SEC C_SECTIONS)) (return false))
+  (for [^I32 k 0 20]
+    (if (not (want s (<= (ia p (+ W_SEC k)) (ia p (+ W_SEC (+ k 1)))) (+ W_SEC k) C_SECTIONS)) (return false)))
+  (if (not (want s (== (ia p 62) (ilen p)) 62 C_SECTIONS)) (return false))
+  (comment "fixed-width sections and index sections against the counts")
+  (if (not (want s (== (- (ia p 43) (ia p 42)) (* 5 (ia p W_N_RULES))) 42 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 44) (ia p 43)) (* 8 (ia p W_N_LEAVES))) 43 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 45) (ia p 44)) (ia p W_N_TYPESETS)) 44 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 47) (ia p 46)) (* 2 (ia p W_N_KEYS))) 46 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 48) (ia p 47)) (ia p W_N_GROUPS)) 47 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 50) (ia p 49)) (ia p W_N_MAPS)) 49 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 52) (ia p 51)) (ia p W_N_ARRAYS)) 51 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 54) (ia p 53)) (ia p W_N_REGEXPS)) 53 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 56) (ia p 55)) (* 6 (ia p W_N_INTERVALS))) 55 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 57) (ia p 56)) (* 4 (ia p W_N_FINTERVALS))) 56 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 58) (ia p 57)) (* 2 (ia p W_N_LITREFS))) 57 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 59) (ia p 58)) (ia p W_N_CSETS)) 58 C_SECTIONS)) (return false))
+  (if (not (want s (== (- (ia p 61) (ia p 60)) (ia p W_N_CHAINS)) 60 C_SECTIONS)) (return false))
+  (return true))
+
+;; ------------------------------------------------------------ index sections
+
+(defn ^I32 record-len [^IntsR p ^I32 kind ^I32 at ^I32 end]
+  (comment "The length of the variable-length record at `at` (kind 0 typeset, 1"
+           "group, 2 map, 3 array, 4 regexp, 5 cset, 6 chain), or -1 if it does not"
+           "fit before `end`. Every count is bounded by the room left before it is"
+           "multiplied, so nothing overflows.")
+  (let [room (- end at)]
+    (if (< room 2) (return (neg 1)))
+    (if (== kind 0)
+      (do (let [tna (pw p at)
+                tne (pw p (+ at 1))]
+            (if (or (< tna 0) (> tna room)) (return (neg 1)))
+            (if (or (< tne 0) (> tne room)) (return (neg 1)))
+            (if (and (!= tne 0) (< tne (+ tna 1))) (return (neg 1)))
+            (if (> (+ 2 (+ tna tne)) room) (return (neg 1)))
+            (return (+ 2 (+ tna tne))))))
+    (if (== kind 1)
+      (do (let [gn (pw p at)]
+            (if (or (< gn 0) (> gn (quot room 4))) (return (neg 1)))
+            (if (> (+ 2 (* 4 gn)) room) (return (neg 1)))
+            (return (+ 2 (* 4 gn))))))
+    (if (== kind 2)
+      (do (if (< room 8) (return (neg 1)))
+          (let [nf (pw p at) np (pw p (+ at 1)) mna (pw p (+ at 2)) nl (pw p (+ at 3))
+                nk (pw p (+ at 4)) nn (pw p (+ at 5))
+                q (quot room 5)]
+            (if (or (or (< nf 1) (> nf q)) (or (< np 1) (> np q))) (return (neg 1)))
+            (if (or (or (< mna 1) (> mna q)) (or (< nl 0) (> nl q))) (return (neg 1)))
+            (if (or (or (< nk 0) (> nk q)) (or (< nn 0) (> nn q))) (return (neg 1)))
+            (let [mlen (+ (+ (+ 8 (* 4 nf)) (+ (* 5 np) (* 5 mna))) (+ (* 4 nl) (+ (* 4 nk) (* 2 nn))))]
+              (if (or (< mlen 0) (> mlen room)) (return (neg 1)))
+              (return mlen)))))
+    (if (== kind 3)
+      (do (if (< room 4) (return (neg 1)))
+          (let [anpos (pw p at) aw (pw p (+ at 1)) anc (pw p (+ at 2))]
+            (if (or (< anpos 0) (> anpos 4096)) (return (neg 1)))
+            (if (!= aw (sar (+ anpos 31) 5)) (return (neg 1)))
+            (if (or (< anc 0) (> anc anpos)) (return (neg 1)))
+            (let [alen (+ (+ 4 (* 2 aw)) (+ (* 2 anpos) (+ (* 2 anc) (* anpos aw))))]
+              (if (> alen room) (return (neg 1)))
+              (return alen)))))
+    (if (== kind 4)
+      (do (if (< room 4) (return (neg 1)))
+          (let [rnpos (pw p at) rw (pw p (+ at 1)) natoms (pw p (+ at 2))]
+            (if (or (< rnpos 0) (> rnpos 512)) (return (neg 1)))
+            (if (!= rw (sar (+ rnpos 31) 5)) (return (neg 1)))
+            (if (or (< natoms 1) (> natoms (quot room (+ 1 rw)))) (return (neg 1)))
+            (let [rlen (+ (+ 4 (* 2 rw)) (+ (* rnpos rw) (* natoms (+ 1 rw))))]
+              (if (> rlen room) (return (neg 1)))
+              (return rlen)))))
+    (if (== kind 5)
+      (do (if (< room 3) (return (neg 1)))
+          (let [cn (pw p at)]
+            (if (or (< cn 0) (> cn (- room 3))) (return (neg 1)))
+            (return (+ 3 cn)))))
+    (let [hn (pw p at)]
+      (if (or (< hn 1) (> hn (- room 2))) (return (neg 1)))
+      (return (+ 2 hn)))))
+
+(defn ^Bool check-index [^IntsR p ^Ints s ^I32 ki ^I32 kd ^I32 count ^I32 kind]
+  (comment "Index section ki (count words) against the walk of data section kd.")
+  (let [^:mut at (sec p kd)
+        end (sec p (+ kd 1))]
+    (for [^I32 i 0 count]
+      (if (not (spend s 1)) (return false))
+      (if (!= (pw p (+ (sec p ki) i)) at) (do (bad s (+ (sec p ki) i) C_INDEX) (return false)))
+      (let [len (record-len p kind at end)]
+        (if (< len 0) (do (bad s at C_INDEX) (return false)))
+        (set at (+ at len))))
+    (if (!= at end) (do (bad s at C_INDEX) (return false)))
+    (return (not (failed s)))))
+
+(defn ^I32 rec [^IntsR p ^I32 ki ^I32 id]
+  (comment "The word offset of record id of the variable section whose index is ki.")
+  (return (pw p (+ (sec p ki) id))))
+
+;; ------------------------------------------------------------ typesets
+
+(defn ^I32 leaf-at [^IntsR p ^I32 l] (return (+ (sec p 1) (* 8 l))))
+(defn ^I32 leaf-kind [^IntsR p ^I32 l] (return (bit-and (pw p (leaf-at p l)) 255)))
+(defn ^Bool combinator [^IntsR p ^I32 l]
+  (let [k (leaf-kind p l)]
+    (return (or (== k 16) (== k 17)))))
+
+(defn ^Bool check-typesets [^IntsR p ^Ints s]
+  (let [nt (pw p W_N_TYPESETS)
+        nl (pw p W_N_LEAVES)]
+    (for [^I32 t 0 nt]
+      (let [o (rec p 2 t)
+            na (pw p o)
+            ne (pw p (+ o 1))]
+        (if (not (spend s (+ 1 (+ na ne)))) (return false))
+        (comment "answers valid and strictly ascending")
+        (for [^I32 i 0 na]
+          (let [a (pw p (+ o (+ 2 i)))]
+            (if (not (in-range a nl)) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))
+            (if (and (> i 0) (<= a (pw p (+ o (+ 1 i))))) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))
+            (if (and (== ne 0) (combinator p a)) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))))
+        (if (> ne 0)
+          (do (comment "each answer once as itself, nothing twice, operands earlier")
+              (let [e (epoch s)
+                    eo (+ o (+ 2 na))]
+                (for [^I32 j 0 na]
+                  (aux-set s (pw p (+ o (+ 2 j))) e))
+                (let [^:mut seen-ans 0]
+                  (for [^I32 k 0 ne]
+                    (let [x (pw p (+ eo k))
+                          ^:mut l x
+                          is-dep (< x 0)]
+                      (if is-dep (set l (bit-not x)))
+                      (if (not (in-range l nl)) (do (bad s (+ eo k) C_TYPESET) (return false)))
+                      (if (== (mark-get s l) e) (do (bad s (+ eo k) C_TYPESET) (return false)))
+                      (if (and is-dep (== (aux-get s l) e)) (do (bad s (+ eo k) C_TYPESET) (return false)))
+                      (if (and (not is-dep) (!= (aux-get s l) e)) (do (bad s (+ eo k) C_TYPESET) (return false)))
+                      (if (not is-dep) (set seen-ans (+ seen-ans 1)))
+                      (if (combinator p l)
+                        (do (let [la (leaf-at p l)
+                                  a1 (pw p (+ la 2))
+                                  a2 (pw p (+ la 3))]
+                              (if (or (not (in-range a1 nl)) (not (in-range a2 nl)))
+                                (do (bad s la C_TYPESET) (return false)))
+                              (if (or (!= (mark-get s a1) e) (!= (mark-get s a2) e))
+                                (do (bad s (+ eo k) C_TYPESET) (return false))))))
+                      (mark-set s l e)))
+                  (if (!= seen-ans na) (do (bad s eo C_TYPESET) (return false)))))))))
+    (comment "TS_ANY is {ANY}")
+    (let [ta (pw p W_TS_ANY)]
+      (if (>= ta 0)
+        (do (let [o2 (rec p 2 ta)]
+              (if (or (!= (pw p o2) 1) (!= (pw p (+ o2 1)) 0)) (do (bad s o2 C_TYPESET) (return false)))
+              (let [al (pw p (+ o2 2))]
+                (if (or (not (in-range al nl)) (!= (leaf-kind p al) 1)) (do (bad s o2 C_TYPESET) (return false))))))))
+    (return (not (failed s)))))
+
+(defn ^I32 ts-eval-n [^IntsR p ^I32 t]
+  (comment "Length of typeset t's evaluation list (the answers when n_eval = 0).")
+  (let [o (rec p 2 t)
+        ne (pw p (+ o 1))]
+    (if (> ne 0) (return ne))
+    (return (pw p o))))
+
+(defn ^I32 ts-eval-at [^IntsR p ^I32 t ^I32 i]
+  (comment "Leaf i of typeset t's evaluation list (dependencies as their leaf id).")
+  (let [o (rec p 2 t)
+        na (pw p o)
+        ne (pw p (+ o 1))]
+    (if (> ne 0)
+      (do (let [x (pw p (+ o (+ 2 (+ na i))))]
+            (if (< x 0) (return (bit-not x)))
+            (return x))))
+    (return (pw p (+ o (+ 2 i))))))
+
+;; ------------------------------------------------------------ intervals
+
+(defn ^Bool bound-ok [^IntsR p ^Bytes b ^I32 o]
+  (comment "A bound (region, a, b) at word o: region 0..5; infinities are 0, 0; a"
+           "big magnitude is a pool range of length >= 9 without a leading zero.")
+  (let [r (pw p o)
+        a (pw p (+ o 1))
+        c (pw p (+ o 2))]
+    (if (or (< r 0) (> r 5)) (return false))
+    (if (or (== r 0) (== r 5)) (return (and (== a 0) (== c 0))))
+    (if (or (== r 1) (== r 4))
+      (return (and (and (byte-range b a c) (>= c 9)) (and (<= c 4096) (!= (u8 b a) 0)))))
+    (return true)))
+
+(defn ^I32 u64-cmp [^I32 ahi ^I32 alo ^I32 bhi ^I32 blo]
+  (if (!= ahi bhi) (do (if (ult ahi bhi) (return (neg 1))) (return 1)))
+  (if (!= alo blo) (do (if (ult alo blo) (return (neg 1))) (return 1)))
+  (return 0))
+
+(defn ^I32 mag-cmp [^Bytes b ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+  (if (!= l1 l2) (return (- l1 l2)))
+  (return (bytes-cmp b o1 l1 o2 l2)))
+
+(defn ^I32 bcmp [^IntsR p ^Bytes b ^I32 x ^I32 y]
+  (comment "Compare the (valid) bounds at words x and y.")
+  (let [rx (pw p x)
+        ry (pw p y)]
+    (if (!= rx ry) (do (if (< rx ry) (return (neg 1))) (return 1)))
+    (if (== rx 3) (return (u64-cmp (pw p (+ x 1)) (pw p (+ x 2)) (pw p (+ y 1)) (pw p (+ y 2)))))
+    (if (== rx 2) (return (u64-cmp (pw p (+ y 1)) (pw p (+ y 2)) (pw p (+ x 1)) (pw p (+ x 2)))))
+    (if (== rx 4) (return (mag-cmp b (pw p (+ x 1)) (pw p (+ x 2)) (pw p (+ y 1)) (pw p (+ y 2)))))
+    (if (== rx 1) (return (mag-cmp b (pw p (+ y 1)) (pw p (+ y 2)) (pw p (+ x 1)) (pw p (+ x 2)))))
+    (return 0)))
+
+(defn ^Bool mag-succ [^Bytes b ^I32 vo ^I32 vl ^I32 wo ^I32 wl]
+  (comment "Is magnitude w = magnitude v + 1?")
+  (if (== wl (+ vl 1))
+    (do (if (!= (u8 b wo) 1) (return false))
+        (for [^I32 k 0 vl]
+          (if (or (!= (u8 b (+ vo k)) 255) (!= (u8 b (+ wo (+ k 1))) 0)) (return false)))
+        (return true)))
+  (if (!= wl vl) (return false))
+  (let [^:mut i (- vl 1)]
+    (while (and (>= i 0) (and (== (u8 b (+ vo i)) 255) (== (u8 b (+ wo i)) 0)))
+      (set i (- i 1)))
+    (if (< i 0) (return false))
+    (if (!= (+ (u8 b (+ vo i)) 1) (u8 b (+ wo i))) (return false))
+    (for [^I32 j 0 i]
+      (if (!= (u8 b (+ vo j)) (u8 b (+ wo j))) (return false)))
+    (return true)))
+
+(defn ^Bool is-succ [^IntsR p ^Bytes b ^I32 x ^I32 y]
+  (comment "Is the bound at y exactly one more than the (finite) bound at x?")
+  (let [rx (pw p x)
+        ax (pw p (+ x 1))
+        cx (pw p (+ x 2))
+        ry (pw p y)
+        ay (pw p (+ y 1))
+        cy (pw p (+ y 2))]
+    (if (and (== rx 3) (== ry 3))
+      (do (let [lo (add32 cx 1)
+                ^:mut hi ax]
+            (if (== cx (neg 1)) (set hi (add32 ax 1)))
+            (if (== cx (neg 1)) (if (== ax (neg 1)) (return false)))
+            (return (and (== ay hi) (== cy (bit-or lo 0)))))))
+    (if (and (== rx 3) (== ry 4))
+      (return (and (and (== ax (neg 1)) (== cx (neg 1))) (and (== cy 9) (and (== (u8 b ay) 1) (and (== (bit-or (u8 b (+ ay 1)) (u8 b (+ ay 2))) 0) (and (== (bit-or (u8 b (+ ay 3)) (u8 b (+ ay 4))) 0) (and (== (bit-or (u8 b (+ ay 5)) (u8 b (+ ay 6))) 0) (== (bit-or (u8 b (+ ay 7)) (u8 b (+ ay 8))) 0)))))))))
+    (if (and (== rx 2) (== ry 3)) (return (and (and (== ax 0) (== cx 0)) (and (== ay 0) (== cy 0)))))
+    (if (and (== rx 2) (== ry 2))
+      (do (comment "value + 1 means n - 1")
+          (if (and (== ax 0) (== cx 0)) (return false))
+          (let [lo2 (sub32 cx 1)
+                ^:mut hi2 ax]
+            (if (== cx 0) (set hi2 (sub32 ax 1)))
+            (return (and (== ay hi2) (== cy lo2))))))
+    (if (and (== rx 1) (== ry 2))
+      (return (and (and (== ay (neg 1)) (== cy (neg 1))) (and (== cx 9) (and (== (u8 b ax) 1) (and (== (bit-or (u8 b (+ ax 1)) (u8 b (+ ax 2))) 0) (and (== (bit-or (u8 b (+ ax 3)) (u8 b (+ ax 4))) 0) (and (== (bit-or (u8 b (+ ax 5)) (u8 b (+ ax 6))) 0) (== (bit-or (u8 b (+ ax 7)) (u8 b (+ ax 8))) 0)))))))))
+    (if (and (== rx 1) (== ry 1)) (return (mag-succ b ay cy ax cx)))
+    (if (and (== rx 4) (== ry 4)) (return (mag-succ b ax cx ay cy)))
+    (return false)))
+
+(defn ^Bool check-iv-records [^IntsR p ^Bytes b ^Ints s]
+  (let [base (sec p 13)
+        n (pw p W_N_INTERVALS)]
+    (for [^I32 i 0 n]
+      (let [o (+ base (* 6 i))]
+        (if (not (spend s 4)) (return false))
+        (if (or (not (bound-ok p b o)) (not (bound-ok p b (+ o 3)))) (do (bad s o C_INTERVAL) (return false)))
+        (if (> (bcmp p b o (+ o 3)) 0) (do (bad s o C_INTERVAL) (return false)))))
+    (let [fb (sec p 14)
+          nf (pw p W_N_FINTERVALS)]
+      (for [^I32 j 0 nf]
+        (let [fo (+ fb (* 4 j))]
+          (if (> (u64-cmp (pw p fo) (pw p (+ fo 1)) (pw p (+ fo 2)) (pw p (+ fo 3))) 0)
+            (do (bad s fo C_FINTERVAL) (return false))))))
+    (return (not (failed s)))))
+
+(defn ^Bool iv-run-ok [^IntsR p ^Bytes b ^Ints s ^I32 first ^I32 n]
+  (comment "A leaf's interval run: in range, ascending, disjoint, non-adjacent.")
+  (if (or (< first 0) (or (< n 0) (> n (- (pw p W_N_INTERVALS) first)))) (return false))
+  (let [base (sec p 13)]
+    (for [^I32 i 1 n]
+      (let [pv (+ base (* 6 (+ first (- i 1))))
+            cu (+ base (* 6 (+ first i)))]
+        (if (not (spend s 2)) (return false))
+        (if (<= (bcmp p b cu (+ pv 3)) 0) (return false))
+        (if (== (pw p (+ pv 3)) 5) (return false))
+        (if (is-succ p b (+ pv 3) cu) (return false))))
+    (return true)))
+
+(defn ^Bool fiv-run-ok [^IntsR p ^I32 first ^I32 n]
+  (if (or (< first 0) (or (< n 0) (> n (- (pw p W_N_FINTERVALS) first)))) (return false))
+  (let [base (sec p 14)]
+    (for [^I32 i 1 n]
+      (let [pv (+ base (* 4 (+ first (- i 1))))
+            cu (+ base (* 4 (+ first i)))
+            ph (pw p (+ pv 2))
+            pl (pw p (+ pv 3))
+            nl (add32 pl 1)
+            ^:mut nh ph]
+        (if (== pl (neg 1)) (set nh (add32 ph 1)))
+        (if (and (== ph (neg 1)) (== pl (neg 1))) (return false))
+        (if (<= (u64-cmp (pw p cu) (pw p (+ cu 1)) ph pl) 0) (return false))
+        (if (and (== (pw p cu) (bit-or nh 0)) (== (pw p (+ cu 1)) (bit-or nl 0))) (return false))))
+    (return true)))
+
+;; ------------------------------------------------------------ leaves
+
+(defn ^I32 iv-mask [^IntsR p ^I32 first ^I32 n ^I32 bigok]
+  (comment "The INT class mask of a (checked) interval run.")
+  (let [base (sec p 13)
+        ^:mut m 0]
+    (for [^I32 i 0 n]
+      (let [o (+ base (* 6 (+ first i)))
+            lr (pw p o)
+            hr (pw p (+ o 3))]
+        (if (and (<= lr 3) (>= hr 3)) (set m (bit-or m 1)))
+        (if (and (<= lr 2) (>= hr 2)) (set m (bit-or m 2)))
+        (if (!= bigok 0)
+          (if (or (and (<= lr 1) (>= hr 1)) (and (<= lr 4) (>= hr 4))) (set m (bit-or m 2048))))))
+    (return m)))
+
+(defn ^Bool zero-from [^IntsR p ^I32 o ^I32 k]
+  (comment "Are leaf words d_k .. d5 (o + 2 + k .. o + 7) all zero?")
+  (for [^I32 i (+ 2 k) 8]
+    (if (!= (pw p (+ o i)) 0) (return false)))
+  (return true))
+
+(defn ^I32 leaf-mask-of [^IntsR p ^Bytes b ^I32 l]
+  (comment "The derived mask of leaf l (fields already checked), -1 if invalid.")
+  (let [o (leaf-at p l)
+        k (bit-and (pw p o) 255)
+        fl (bit-and (sar (pw p o) 8) 255)
+        d0 (pw p (+ o 2))
+        d1 (pw p (+ o 3))]
+    (if (== k 1) (return 4095))
+    (if (== k 2)
+      (do (if (== d0 6) (return 2112))
+          (if (== d0 7) (return 1920))
+          (return (shl 1 d0))))
+    (if (== k 3) (return (iv-mask p d0 d1 fl)))
+    (if (== k 4) (return (shl fl 8)))
+    (if (== k 5) (return 128))
+    (if (== k 6) (return (enc-class b d0)))
+    (if (== k 7)
+      (do (let [lr (+ (sec p 15) (* 2 d0))]
+            (return (enc-class b (pw p lr))))))
+    (if (== k 8) (return 8))
+    (if (or (== k 9) (== k 13)) (return 4))
+    (if (== k 10) (return 1))
+    (if (== k 11)
+      (do (if (and (== d0 0) (or (== d1 2) (== d1 3))) (return 2048))
+          (return 64)))
+    (if (== k 12)
+      (do (let [lohi d0 lolo d1 hihi (pw p (+ o 4)) hilo (pw p (+ o 5))
+                ^:mut m 0]
+            (if (or (or (!= lohi 0) (!= hihi 0)) (or (ult lolo 2) (ult 3 hilo))) (set m (bit-or m 64)))
+            (if (and (and (== lohi 0) (ult lolo 4)) (or (!= hihi 0) (not (ult hilo 2)))) (set m (bit-or m 2048)))
+            (return m))))
+    (if (== k 14) (return 16))
+    (if (== k 15) (return 32))
+    (return 0)))
+
+(defn ^Bool check-leaf [^IntsR p ^Bytes b ^Ints s ^I32 l]
+  (let [o (leaf-at p l)
+        w0 (pw p o)
+        k (bit-and w0 255)
+        fl (bit-and (sar w0 8) 255)
+        d0 (pw p (+ o 2))
+        d1 (pw p (+ o 3))
+        d2 (pw p (+ o 4))
+        d3 (pw p (+ o 5))
+        d4 (pw p (+ o 6))
+        nl (pw p W_N_LEAVES)
+        nt (pw p W_N_TYPESETS)]
+    (if (not (spend s 8)) (return false))
+    (if (or (or (< k 1) (> k 17)) (!= (sar w0 16) 0)) (return (want s false o C_LEAF)))
+    (if (!= (pw p (+ o 7)) 0) (return (want s false o C_LEAF)))
+    (if (and (and (!= k 3) (!= k 4)) (and (!= k 13) (!= fl 0))) (return (want s false o C_LEAF)))
+    (if (== k 1) (return (want s (zero-from p o 0) o C_LEAF)))
+    (if (== k 2) (return (want s (and (and (>= d0 0) (<= d0 7)) (zero-from p o 1)) o C_LEAF)))
+    (if (== k 3)
+      (do (let [run-ok (iv-run-ok p b s d0 d1)]
+            (return (want s (and (and (<= fl 1) (>= d1 1)) (and run-ok (zero-from p o 2))) o C_LEAF)))))
+    (if (== k 4)
+      (do (if (or (< fl 1) (> fl 7)) (return (want s false o C_LEAF)))
+          (if (== d1 0) (return (want s (zero-from p o 0) o C_LEAF)))
+          (return (want s (and (fiv-run-ok p d0 d1) (zero-from p o 2)) o C_LEAF))))
+    (if (== k 5) (return (want s (and (and (>= d0 0) (<= d0 23)) (zero-from p o 1)) o C_LEAF)))
+    (if (== k 6) (return (want s (and (and (byte-range b d0 d1) (>= d1 1)) (zero-from p o 2)) o C_LEAF)))
+    (if (== k 7)
+      (do (if (or (or (< d0 0) (< d1 2)) (> d1 (- (pw p W_N_LITREFS) d0))) (return (want s false o C_LEAF)))
+          (if (not (zero-from p o 2)) (return (want s false o C_LEAF)))
+          (let [lb (sec p 15)
+                ^:mut cls 0]
+            (for [^I32 i 0 d1]
+              (let [mo (pw p (+ lb (* 2 (+ d0 i))))
+                    ml (pw p (+ lb (+ (* 2 (+ d0 i)) 1)))]
+                (if (or (not (byte-range b mo ml)) (< ml 1)) (return (want s false o C_LITREF)))
+                (if (== i 0) (set cls (enc-class b mo)))
+                (if (!= (enc-class b mo) cls) (return (want s false o C_LITREF)))
+                (if (> i 0)
+                  (do (let [po (pw p (+ lb (* 2 (+ d0 (- i 1)))))
+                            pl (pw p (+ lb (+ (* 2 (+ d0 (- i 1))) 1)))]
+                        (if (>= (bytes-cmp b po pl mo ml) 0) (return (want s false o C_LITREF))))))))
+            (return true))))
+    (if (== k 8)
+      (return (want s (and (and (and (>= d0 0) (>= d1 d0)) (and (>= d2 (neg 1)) (< d2 (pw p W_N_REGEXPS))))
+                           (zero-from p o 3)) o C_LEAF)))
+    (if (== k 9)
+      (do (if (or (< d0 0) (< d1 d0)) (return (want s false o C_LEAF)))
+          (if (== d3 0) (return (want s (zero-from p o 2) o C_LEAF)))
+          (return (want s (and (byte-range b d2 d3) (zero-from p o 4)) o C_LEAF))))
+    (if (== k 10)
+      (do (if (== d3 0) (return (want s (and (== d2 0) (zero-from p o 4)) o C_LEAF)))
+          (let [run-ok2 (iv-run-ok p b s d2 d3)]
+            (return (want s (and run-ok2 (zero-from p o 4)) o C_LEAF)))))
+    (if (== k 11) (return (want s (and (in-range d2 nt) (zero-from p o 3)) o C_LEAF)))
+    (if (== k 12)
+      (return (want s (and (<= (u64-cmp d0 d1 d2 d3) 0) (and (in-range d4 nt) (zero-from p o 5))) o C_LEAF)))
+    (if (== k 13) (return (want s (and (<= fl 1) (and (in-range d0 nt) (zero-from p o 1))) o C_LEAF)))
+    (if (== k 14) (return (want s (and (in-range d0 (pw p W_N_ARRAYS)) (zero-from p o 1)) o C_LEAF)))
+    (if (== k 15) (return (want s (and (in-range d0 (pw p W_N_MAPS)) (zero-from p o 1)) o C_LEAF)))
+    (if (== k 16) (return (want s (and (and (in-range d0 nl) (in-range d1 nl)) (zero-from p o 2)) o C_LEAF)))
+    (if (and (in-range d0 nl) (in-range d1 nl))
+      (return (want s (and (== (leaf-kind p d1) 6) (zero-from p o 2)) o C_LEAF)))
+    (return (want s false o C_LEAF))))
+
+(defn ^Bool check-leaves [^IntsR p ^Bytes b ^Ints s]
+  (let [nl (pw p W_N_LEAVES)]
+    (for [^I32 l 0 nl]
+      (if (not (check-leaf p b s l)) (return false)))
+    (comment "masks, derived (AND/NOT need their operands' masks: computed in a second pass)")
+    (for [^I32 l2 0 nl]
+      (let [o (leaf-at p l2)
+            k (bit-and (pw p o) 255)]
+        (if (and (!= k 16) (!= k 17))
+          (if (!= (pw p (+ o 1)) (leaf-mask-of p b l2)) (return (want s false (+ o 1) C_MASK))))))
+    (for [^I32 l3 0 nl]
+      (let [o3 (leaf-at p l3)
+            k3 (bit-and (pw p o3) 255)]
+        (if (or (== k3 16) (== k3 17))
+          (do (comment "AND: mask(a) & mask(b), NOT: mask(target), over the operands' stored"
+                       "masks (each verified in turn, so the whole set is consistent).")
+              (let [ma (pw p (+ (leaf-at p (pw p (+ o3 2))) 1))
+                    mb (pw p (+ (leaf-at p (pw p (+ o3 3))) 1))
+                    ^:mut m ma]
+                (if (== k3 16) (set m (bit-and ma mb)))
+                (if (!= (pw p (+ o3 1)) m) (return (want s false (+ o3 1) C_MASK))))))))
+    (return (not (failed s)))))
+
+;; ------------------------------------------------------------ keys, rules, groups
+
+(defn ^Bool check-keys [^IntsR p ^Bytes b ^Ints s]
+  (let [base (sec p 4)
+        n (pw p W_N_KEYS)]
+    (for [^I32 i 0 n]
+      (let [o (+ base (* 2 i))
+            off (pw p o)
+            len (pw p (+ o 1))]
+        (if (not (spend s (+ 2 (quot len 8)))) (return false))
+        (if (or (not (byte-range b off len)) (< len 1)) (return (want s false o C_KEY)))
+        (let [m (ushr (u8 b off) 5)
+              he (head-end b off (+ off len))]
+          (if (< he 0) (return (want s false o C_KEY)))
+          (if (<= m 1)
+            (if (!= he (+ off len)) (return (want s false o C_KEY)))
+            (do (if (!= m 3) (return (want s false o C_KEY)))
+                (let [cl (head-len-arg b off)]
+                  (if (or (< cl 0) (!= (+ he cl) (+ off len))) (return (want s false o C_KEY)))
+                  (if (not (utf8-ok b he (+ off len))) (return (want s false o C_UTF8)))))))
+        (if (> i 0)
+          (if (>= (bytes-cmp b (pw p (- o 2)) (pw p (- o 1)) off len) 0) (return (want s false o C_KEY))))))
+    (return (not (failed s)))))
+
+(defn ^Bool check-groups [^IntsR p ^Ints s]
+  (let [ng (pw p W_N_GROUPS)
+        nt (pw p W_N_TYPESETS)
+        ^:mut empty (neg 1)]
+    (for [^I32 g 0 ng]
+      (let [o (rec p 5 g)
+            n (pw p o)
+            ^:mut nc 0]
+        (if (not (spend s (+ 1 n))) (return false))
+        (if (and (== n 0) (< empty 0)) (set empty g))
+        (for [^I32 i 0 n]
+          (let [e (+ o (+ 2 (* 4 i)))
+                mn (pw p (+ e 2))
+                mx (pw p (+ e 3))]
+            (if (or (not (in-range (pw p e) nt)) (not (in-range (pw p (+ e 1)) nt))) (return (want s false e C_GROUP)))
+            (if (or (< mn 0) (or (> mn mx) (< mx 1))) (return (want s false e C_GROUP)))
+            (if (and (!= mx INF) (>= mx 16777216)) (return (want s false e C_GROUP)))
+            (if (not (and (== mn 0) (== mx INF))) (set nc (+ nc 1)))))
+        (if (!= (pw p (+ o 1)) nc) (return (want s false (+ o 1) C_DERIVED)))))
+    (if (!= (pw p W_G_EMPTY) empty) (return (want s false W_G_EMPTY C_HEADER)))
+    (return (not (failed s)))))
+
+(defn ^Bool check-rules [^IntsR p ^Bytes b ^Ints s]
+  (let [base (sec p 0)
+        n (pw p W_N_RULES)]
+    (for [^I32 i 0 n]
+      (let [o (+ base (* 5 i))
+            off (pw p o)
+            len (pw p (+ o 1))]
+        (if (not (spend s (+ 2 (quot len 8)))) (return false))
+        (if (or (not (byte-range b off len)) (< len 1)) (return (want s false o C_RULE)))
+        (if (not (utf8-ok b off (+ off len))) (return (want s false o C_UTF8)))
+        (if (> i 0)
+          (if (>= (bytes-cmp b (pw p (- o 5)) (pw p (- o 4)) off len) 0) (return (want s false o C_RULE))))
+        (if (not (in-range (pw p (+ o 2)) (pw p W_N_TYPESETS))) (return (want s false o C_RULE)))
+        (if (not (in-range (pw p (+ o 3)) (pw p W_N_CHAINS))) (return (want s false o C_RULE)))))
+    (return (not (failed s)))))
+
+;; ------------------------------------------------------------ maps
+
+(defn ^I32 ceil32 [^I32 n] (return (sar (+ n 31) 5)))
+
+(defn ^Bool check-map [^IntsR p ^Ints s ^I32 m]
+  (let [o (rec p 7 m)
+        nf (pw p o) np (pw p (+ o 1)) na (pw p (+ o 2)) nl (pw p (+ o 3))
+        nk (pw p (+ o 4)) nn (pw p (+ o 5))
+        fb (+ o 8)
+        pb (+ fb (* 4 nf))
+        ab (+ pb (* 5 np))
+        lb (+ ab (* 5 na))
+        kb (+ lb (* 4 nl))
+        nb (+ kb (* 4 nk))
+        ng (pw p W_N_GROUPS)
+        nt (pw p W_N_TYPESETS)
+        nkeys (pw p W_N_KEYS)
+        ^:mut sw (+ 4 nf)
+        ^:mut groupsum 0
+        ^:mut maxnames 0]
+    (if (not (spend s (+ (+ nf np) (+ (* 2 na) (+ (* 2 nl) (* 2 nk)))))) (return false))
+    (comment "factors: 0 is RESIDUAL with pools from 0; the others own one pool each")
+    (let [^:mut nextpool 0]
+      (for [^I32 f 0 nf]
+        (let [fo (+ fb (* 4 f))
+              mode (pw p fo)
+              pp (pw p (+ fo 1))
+              pf (pw p (+ fo 2))
+              pc (pw p (+ fo 3))]
+          (if (== f 0)
+            (do (if (or (!= mode 0) (< pc 1)) (return (want s false fo C_MAP))))
+            (do (if (or (< mode 1) (> mode 2)) (return (want s false fo C_MAP)))
+                (if (!= pc 1) (return (want s false fo C_MAP)))))
+          (if (!= pf nextpool) (return (want s false fo C_MAP)))
+          (if (== mode 2)
+            (do (if (or (!= pp 0) (!= (pw p (+ fb 3)) 1)) (return (want s false fo C_MAP)))
+                (if (!= (pw p (+ pb 3)) 1) (return (want s false fo C_MAP))))
+            (if (!= pp (neg 1)) (return (want s false fo C_MAP))))
+          (set nextpool (+ pf pc))))
+      (if (!= nextpool np) (return (want s false fb C_MAP))))
+    (comment "pools: owners, groups, alternative runs partitioning alts; state offsets")
+    (let [^:mut nextalt 0
+          ^:mut fi 0]
+      (for [^I32 q 0 np]
+        (let [po (+ pb (* 5 q))
+              f2 (pw p po)
+              g (pw p (+ po 1))
+              af (pw p (+ po 2))
+              ac (pw p (+ po 3))]
+          (while (and (< fi nf) (>= q (+ (pw p (+ fb (+ (* 4 fi) 2))) (pw p (+ fb (+ (* 4 fi) 3))))))
+            (set fi (+ fi 1)))
+          (if (!= f2 fi) (return (want s false po C_MAP)))
+          (if (== f2 0)
+            (do (if (not (in-range g ng)) (return (want s false po C_MAP)))
+                (let [gn (pw p (rec p 5 g))]
+                  (if (!= (pw p (+ po 4)) sw) (return (want s false (+ po 4) C_DERIVED)))
+                  (set sw (+ sw (+ 4 gn)))
+                  (set groupsum (+ groupsum gn))))
+            (do (if (!= g (neg 1)) (return (want s false po C_MAP)))
+                (if (!= (pw p (+ po 4)) sw) (return (want s false (+ po 4) C_DERIVED)))
+                (set sw (+ sw 4))))
+          (if (or (!= af nextalt) (< ac 1)) (return (want s false po C_MAP)))
+          (set nextalt (+ af ac))))
+      (if (!= nextalt na) (return (want s false pb C_MAP))))
+    (comment "alternatives: owners, literal runs (in range, not overlapping), req_count")
+    (let [^:mut pi 0]
+      (for [^I32 a 0 na]
+        (let [ao (+ ab (* 5 a))
+              lf (pw p (+ ao 1))
+              lc (pw p (+ ao 2))
+              ^:mut req 0]
+          (while (and (< pi np) (>= a (+ (pw p (+ pb (+ (* 5 pi) 2))) (pw p (+ pb (+ (* 5 pi) 3))))))
+            (set pi (+ pi 1)))
+          (if (!= (pw p ao) pi) (return (want s false ao C_MAP)))
+          (if (or (or (< lf 0) (< lc 0)) (> lc (- nl lf))) (return (want s false ao C_MAP)))
+          (comment "runs do not overlap: each run starts at or after the previous one's end")
+          (if (> a 0)
+            (do (let [pa (- ao 5)
+                      pend (+ (pw p (+ pa 1)) (pw p (+ pa 2)))]
+                  (if (and (< lf pend) (> lc 0)) (return (want s false ao C_MAP))))))
+          (for [^I32 i 0 lc]
+            (let [le (+ lb (* 4 (+ lf i)))]
+              (if (== (pw p (+ le 2)) 1) (set req (+ req 1)))
+              (comment "keys distinct within the alternative")
+              (for [^I32 j 0 i]
+                (if (== (pw p le) (pw p (+ lb (* 4 (+ lf j))))) (return (want s false le C_MAP))))))
+          (if (!= (pw p (+ ao 3)) req) (return (want s false (+ ao 3) C_DERIVED)))
+          (if (!= (pw p (+ ao 4)) sw) (return (want s false (+ ao 4) C_DERIVED)))
+          (set sw (+ sw (+ 3 (ceil32 lc)))))))
+    (comment "literal entries")
+    (for [^I32 i2 0 nl]
+      (let [le2 (+ lb (* 4 i2))]
+        (if (or (not (in-range (pw p le2) nkeys)) (not (in-range (pw p (+ le2 1)) nt)))
+          (return (want s false le2 C_MAP)))
+        (if (or (or (< (pw p (+ le2 2)) 0) (> (pw p (+ le2 2)) 1)) (or (< (pw p (+ le2 3)) 0) (> (pw p (+ le2 3)) 1)))
+          (return (want s false le2 C_MAP)))))
+    (comment "key index: ascending keys, naming runs partitioning names; each naming"
+             "record names its own key, in an alternative of the owner, ascending")
+    (if (!= nn nl) (return (want s false o C_MAP)))
+    (let [^:mut nextname 0]
+      (for [^I32 kq 0 nk]
+        (let [ko (+ kb (* 4 kq))
+              key (pw p ko)
+              owner (pw p (+ ko 1))
+              nf2 (pw p (+ ko 2))
+              nc2 (pw p (+ ko 3))]
+          (if (not (in-range key nkeys)) (return (want s false ko C_MAP)))
+          (if (and (> kq 0) (<= key (pw p (- ko 4)))) (return (want s false ko C_MAP)))
+          (if (not (in-range owner nf)) (return (want s false ko C_MAP)))
+          (if (or (!= nf2 nextname) (or (< nc2 1) (> nc2 (- nn nf2)))) (return (want s false ko C_MAP)))
+          (if (> nc2 maxnames) (set maxnames nc2))
+          (for [^I32 r 0 nc2]
+            (let [no (+ nb (* 2 (+ nf2 r)))
+                  alt (pw p no)
+                  lit (pw p (+ no 1))]
+              (if (not (in-range alt na)) (return (want s false no C_MAP)))
+              (if (and (> r 0) (<= alt (pw p (- no 2)))) (return (want s false no C_MAP)))
+              (let [ao2 (+ ab (* 5 alt))
+                    lf2 (pw p (+ ao2 1))
+                    lc2 (pw p (+ ao2 2))]
+                (if (or (< lit lf2) (>= lit (+ lf2 lc2))) (return (want s false no C_MAP)))
+                (if (!= (pw p (+ lb (* 4 lit))) key) (return (want s false no C_MAP)))
+                (comment "the owner is the alternative's pool's factor")
+                (if (!= (pw p (+ pb (* 5 (pw p ao2)))) owner) (return (want s false no C_MAP))))))
+          (set nextname (+ nf2 nc2))))
+      (if (!= nextname nn) (return (want s false kb C_MAP))))
+    (comment "every key named by some literal entry is in the index: the counts agree")
+    (if (!= (pw p (+ o 6)) sw) (return (want s false (+ o 6) C_DERIVED)))
+    (if (!= (pw p (+ o 7)) (+ groupsum maxnames)) (return (want s false (+ o 7) C_DERIVED)))
+    (return (not (failed s)))))
+
+(defn ^Bool check-maps [^IntsR p ^Ints s]
+  (for [^I32 m 0 (pw p W_N_MAPS)]
+    (if (not (check-map p s m)) (return false)))
+  (return true))
+
+;; ------------------------------------------------------------ automata
+
+(defn ^Bool row-clean [^IntsR p ^I32 at ^I32 w ^I32 npos]
+  (comment "Bits >= npos of the w-word bitset at `at` are zero.")
+  (if (== w 0) (return true))
+  (let [used (- npos (* 32 (- w 1)))]
+    (if (< used 32)
+      (do (let [hi (pw p (+ at (- w 1)))]
+            (if (!= (ushr hi used) 0) (return false))))))
+  (return true))
+
+(defn ^Bool check-arrays [^IntsR p ^Ints s]
+  (let [na (pw p W_N_ARRAYS)
+        nt (pw p W_N_TYPESETS)]
+    (for [^I32 a 0 na]
+      (let [o (rec p 9 a)
+            npos (pw p o)
+            w (pw p (+ o 1))
+            nc (pw p (+ o 2))
+            nul (pw p (+ o 3))
+            fo (+ o 4)
+            po (+ fo (* 2 w))
+            co (+ po (* 2 npos))
+            fl (+ co (* 2 nc))]
+        (if (not (spend s (+ (* npos (+ w 2)) (* nc npos)))) (return false))
+        (if (or (< nul 0) (> nul 1)) (return (want s false o C_ARRAY)))
+        (if (or (not (row-clean p fo w npos)) (not (row-clean p (+ fo w) w npos))) (return (want s false fo C_ARRAY)))
+        (for [^I32 q 0 npos]
+          (let [ts (pw p (+ po (* 2 q)))
+                c (pw p (+ po (+ (* 2 q) 1)))]
+            (if (not (in-range ts nt)) (return (want s false (+ po (* 2 q)) C_ARRAY)))
+            (if (or (< c (neg 1)) (>= c nc)) (return (want s false (+ po (* 2 q)) C_ARRAY)))
+            (if (not (row-clean p (+ fl (* q w)) w npos)) (return (want s false (+ fl (* q w)) C_ARRAY)))
+            (if (>= c 0)
+              (do (comment "a counted position never has its own follow bit")
+                  (let [word (pw p (+ (+ fl (* q w)) (sar q 5)))]
+                    (if (!= (bit-and (ushr word (bit-and q 31)) 1) 0) (return (want s false (+ fl (* q w)) C_ARRAY))))))))
+        (comment "each counter is used by exactly one position; 0 <= min, 1 <= max")
+        (for [^I32 ci 0 nc]
+          (let [cmin (pw p (+ co (* 2 ci)))
+                cmax (pw p (+ co (+ (* 2 ci) 1)))
+                ^:mut users 0]
+            (if (or (< cmin 0) (< cmax 1)) (return (want s false (+ co (* 2 ci)) C_ARRAY)))
+            (for [^I32 q2 0 npos]
+              (if (== (pw p (+ po (+ (* 2 q2) 1))) ci) (set users (+ users 1))))
+            (if (!= users 1) (return (want s false (+ co (* 2 ci)) C_ARRAY)))))))
+    (return (not (failed s)))))
+
+(defn ^Bool check-regexps [^IntsR p ^Ints s]
+  (let [nr (pw p W_N_REGEXPS)]
+    (for [^I32 r 0 nr]
+      (let [o (rec p 11 r)
+            npos (pw p o)
+            w (pw p (+ o 1))
+            natoms (pw p (+ o 2))
+            nul (pw p (+ o 3))
+            fo (+ o 4)
+            fl (+ fo (* 2 w))
+            as (+ fl (* npos w))
+            am (+ as natoms)]
+        (if (not (spend s (+ npos natoms))) (return false))
+        (if (or (< nul 0) (> nul 1)) (return (want s false o C_REGEXP)))
+        (if (or (not (row-clean p fo w npos)) (not (row-clean p (+ fo w) w npos))) (return (want s false fo C_REGEXP)))
+        (for [^I32 q 0 npos]
+          (if (not (row-clean p (+ fl (* q w)) w npos)) (return (want s false (+ fl (* q w)) C_REGEXP))))
+        (if (!= (pw p as) 0) (return (want s false as C_REGEXP)))
+        (for [^I32 i 0 natoms]
+          (let [st (pw p (+ as i))]
+            (if (or (< st 0) (> st 1114111)) (return (want s false (+ as i) C_REGEXP)))
+            (if (and (> i 0) (<= st (pw p (+ as (- i 1))))) (return (want s false (+ as i) C_REGEXP)))
+            (if (not (row-clean p (+ am (* i w)) w npos)) (return (want s false (+ am (* i w)) C_REGEXP)))))))
+    (return (not (failed s)))))
+
+;; ------------------------------------------------------------ closure
+
+(defn ^Bool ts-within [^IntsR p ^Ints s ^I32 t ^I32 e]
+  (comment "Is every leaf of t's evaluation list marked e?")
+  (let [n (ts-eval-n p t)]
+    (for [^I32 i 0 n]
+      (let [l (ts-eval-at p t i)]
+        (if (or (not (in-range l (pw p W_N_LEAVES))) (!= (mark-get s l) e)) (return false))))
+    (return true)))
+
+(defn ^I32 child-ts [^IntsR p ^I32 l ^I32 i]
+  (comment "Child typeset i of leaf l (program.md §4.2's Children column), or -2 past"
+           "the last.")
+  (let [o (leaf-at p l)
+        k (bit-and (pw p o) 255)
+        d0 (pw p (+ o 2))]
+    (if (or (== k 1) (and (== k 2) (and (>= d0 4) (<= d0 6))))
+      (do (if (== i 0) (return (pw p W_TS_ANY))) (return (neg 2))))
+    (if (== k 11) (do (if (== i 0) (return (pw p (+ o 4)))) (return (neg 2))))
+    (if (== k 12) (do (if (== i 0) (return (pw p (+ o 6)))) (return (neg 2))))
+    (if (== k 13) (do (if (== i 0) (return d0)) (return (neg 2))))
+    (if (== k 14)
+      (do (let [ao (rec p 9 d0)
+                npos (pw p ao)
+                w (pw p (+ ao 1))]
+            (if (>= i npos) (return (neg 2)))
+            (return (pw p (+ (+ (+ ao 4) (* 2 w)) (* 2 i)))))))
+    (if (== k 15)
+      (do (let [mo (rec p 7 d0)
+                nf (pw p mo) np (pw p (+ mo 1)) na (pw p (+ mo 2)) nl (pw p (+ mo 3))
+                pb (+ (+ mo 8) (* 4 nf))
+                lb (+ (+ pb (* 5 np)) (* 5 na))]
+            (if (< i nl) (return (pw p (+ (+ lb (* 4 i)) 1))))
+            (comment "then every key and value typeset of every residual pool's group")
+            (let [^:mut j (- i nl)]
+              (for [^I32 q 0 np]
+                (let [g (pw p (+ (+ pb (* 5 q)) 1))]
+                  (if (>= g 0)
+                    (do (let [go (rec p 5 g)
+                              gn (pw p go)]
+                          (if (< j (* 2 gn))
+                            (return (pw p (+ (+ go 2) (+ (* 4 (sar j 1)) (bit-and j 1))))))
+                          (set j (- j (* 2 gn))))))))
+              (return (neg 2))))))
+    (return (neg 2))))
+
+(defn ^Bool children-within [^IntsR p ^Ints s ^I32 cs ^I32 e]
+  (comment "Is every child (closed) of every leaf of cset cs marked e?")
+  (let [co (rec p 16 cs)
+        n (pw p co)]
+    (for [^I32 i 0 n]
+      (let [l (pw p (+ co (+ 3 i)))
+            ^:mut j 0]
+        (forever
+         (if (not (spend s 1)) (return false))
+         (let [t (child-ts p l j)]
+           (if (== t (neg 2)) (break))
+           (if (not (in-range t (pw p W_N_TYPESETS))) (return false))
+           (if (not (ts-within p s t e)) (return false)))
+         (set j (+ j 1)))))
+    (return true)))
+
+(defn ^Bool has-children [^IntsR p ^I32 cs]
+  (let [co (rec p 16 cs)
+        n (pw p co)]
+    (for [^I32 i 0 n]
+      (let [l (pw p (+ co (+ 3 i)))]
+        (if (!= (child-ts p l 0) (neg 2))
+          (do (let [t0 (child-ts p l 0)]
+                (comment "a child typeset that is empty is no child at all")
+                (if (and (in-range t0 (pw p W_N_TYPESETS)) (> (ts-eval-n p t0) 0)) (return true))
+                (let [^:mut j 1]
+                  (forever
+                   (let [t (child-ts p l j)]
+                     (if (== t (neg 2)) (break))
+                     (if (and (in-range t (pw p W_N_TYPESETS)) (> (ts-eval-n p t) 0)) (return true)))
+                   (set j (+ j 1)))))))))
+    (return false)))
+
+(defn ^I32 cset-frame [^IntsR p ^I32 co ^I32 n]
+  (comment "frame_words of the cset at co (program.md §12.2).")
+  (let [^:mut maparea 0
+        ^:mut arrarea 0]
+    (for [^I32 i 0 n]
+      (let [l (pw p (+ co (+ 3 i)))
+            o (leaf-at p l)
+            k (bit-and (pw p o) 255)]
+        (if (== k 15)
+          (do (let [mo (rec p 7 (pw p (+ o 2)))]
+                (set maparea (+ maparea (+ (pw p (+ mo 6)) (* 4 (pw p (+ mo 7)))))))))
+        (if (== k 14)
+          (do (let [ao (rec p 9 (pw p (+ o 2)))]
+                (set arrarea (+ arrarea (+ 3 (+ (* 2 (pw p (+ ao 1))) (pw p (+ ao 2)))))))))))
+    (if (> arrarea maparea) (set maparea arrarea))
+    (return (+ (* 2 n) maparea))))
+
+(defn ^I32 cset-regex [^IntsR p ^I32 co ^I32 n]
+  (let [^:mut w 0]
+    (for [^I32 i 0 n]
+      (let [l (pw p (+ co (+ 3 i)))
+            o (leaf-at p l)]
+        (if (and (== (bit-and (pw p o) 255) 8) (>= (pw p (+ o 4)) 0))
+          (do (let [ro (rec p 11 (pw p (+ o 4)))]
+                (set w (+ w (* 2 (pw p (+ ro 1))))))))))
+    (return w)))
+
+(defn ^Bool check-csets [^IntsR p ^Ints s]
+  (let [nc (pw p W_N_CSETS)
+        nl (pw p W_N_LEAVES)]
+    (for [^I32 c 0 nc]
+      (let [co (rec p 16 c)
+            n (pw p co)
+            e (epoch s)]
+        (if (not (spend s (+ 1 n))) (return false))
+        (for [^I32 i 0 n]
+          (let [l (pw p (+ co (+ 3 i)))]
+            (if (not (in-range l nl)) (return (want s false (+ co (+ 3 i)) C_CSET)))
+            (if (and (> i 0) (<= l (pw p (+ co (+ 2 i))))) (return (want s false (+ co (+ 3 i)) C_CSET)))
+            (mark-set s l e)))
+        (comment "closed under combinator operands")
+        (for [^I32 j 0 n]
+          (let [l2 (pw p (+ co (+ 3 j)))]
+            (if (combinator p l2)
+              (do (let [lo (leaf-at p l2)]
+                    (if (or (!= (mark-get s (pw p (+ lo 2))) e) (!= (mark-get s (pw p (+ lo 3))) e))
+                      (return (want s false (+ co (+ 3 j)) C_CSET))))))))
+        (if (!= (pw p (+ co 1)) (cset-frame p co n)) (return (want s false (+ co 1) C_DERIVED)))
+        (if (!= (pw p (+ co 2)) (cset-regex p co n)) (return (want s false (+ co 2) C_DERIVED)))))
+    (return (not (failed s)))))
+
+(defn ^Bool check-chains [^IntsR p ^Ints s]
+  (let [nch (pw p W_N_CHAINS)
+        ncs (pw p W_N_CSETS)
+        d (pw p 32)]
+    (for [^I32 c 0 nch]
+      (let [o (rec p 18 c)
+            n (pw p o)
+            r (pw p (+ o 1))]
+        (if (> n (+ d 1)) (return (want s false o C_CHAIN)))
+        (if (or (< r (neg 1)) (>= r n)) (return (want s false o C_CHAIN)))
+        (for [^I32 i 0 n]
+          (if (not (in-range (pw p (+ o (+ 2 i))) ncs)) (return (want s false (+ o (+ 2 i)) C_CHAIN))))
+        (comment "cset[k+1] holds the children of cset[k]; the period closes; an"
+                 "ending chain ends with no children")
+        (for [^I32 k 0 (- n 1)]
+          (let [e (epoch s)
+                nxt (pw p (+ o (+ 3 k)))
+                no (rec p 16 nxt)]
+            (for [^I32 q 0 (pw p no)]
+              (mark-set s (pw p (+ no (+ 3 q))) e))
+            (if (not (children-within p s (pw p (+ o (+ 2 k))) e)) (return (want s false (+ o (+ 2 k)) C_CHAIN)))))
+        (if (>= r 0)
+          (do (let [e2 (epoch s)
+                    rc (pw p (+ o (+ 2 r)))
+                    ro (rec p 16 rc)]
+                (for [^I32 q2 0 (pw p ro)]
+                  (mark-set s (pw p (+ ro (+ 3 q2))) e2))
+                (if (not (children-within p s (pw p (+ o (+ 2 (- n 1)))) e2)) (return (want s false o C_CHAIN)))))
+          (if (<= n d)
+            (if (has-children p (pw p (+ o (+ 2 (- n 1))))) (return (want s false o C_CHAIN)))))))
+    (return (not (failed s)))))
+
+(defn ^I32 rule-scratch [^IntsR p ^I32 chain]
+  (comment "program.md §12.1's scratch words for a rule with this chain (MARK_CAP ="
+           "N_LEAVES).")
+  (let [o (rec p 18 chain)
+        n (pw p o)
+        r (pw p (+ o 1))
+        d (pw p 32)
+        nl (pw p W_N_LEAVES)
+        ^:mut sumf 0
+        ^:mut maxr 0]
+    (for [^I32 k 0 (+ d 1)]
+      (let [^:mut idx k]
+        (if (>= k n)
+          (if (< r 0)
+            (set idx (neg 1))
+            (set idx (+ r (- (- k r) (* (quot (- k r) (- n r)) (- n r)))))))
+        (if (>= idx 0)
+          (do (let [co (rec p 16 (pw p (+ o (+ 2 idx))))]
+                (set sumf (+ sumf (pw p (+ co 1))))
+                (if (> (pw p (+ co 2)) maxr) (set maxr (pw p (+ co 2)))))))))
+    (return (+ (+ (+ 48 (* 2 nl)) (* 2 (+ d 1))) (+ maxr sumf)))))
+
+(defn ^Bool check-rule-closure [^IntsR p ^Ints s]
+  (comment "R_0 holds the rule's evaluation list; scratch_words; SCRATCH_MAX; flags;"
+           "the total-bytes cap.")
+  (let [base (sec p 0)
+        nr (pw p W_N_RULES)
+        ^:mut smax 0]
+    (for [^I32 i 0 nr]
+      (let [o (+ base (* 5 i))
+            t (pw p (+ o 2))
+            ch (pw p (+ o 3))
+            co (rec p 18 ch)
+            c0 (pw p (+ co 2))
+            c0o (rec p 16 c0)
+            e (epoch s)]
+        (if (not (spend s (pw p c0o))) (return false))
+        (for [^I32 q 0 (pw p c0o)]
+          (mark-set s (pw p (+ c0o (+ 3 q))) e))
+        (if (not (ts-within p s t e)) (return (want s false o C_CHAIN)))
+        (let [sw (rule-scratch p ch)]
+          (if (!= (pw p (+ o 4)) sw) (return (want s false (+ o 4) C_DERIVED)))
+          (if (> sw smax) (set smax sw)))))
+    (if (!= (pw p 40) smax) (return (want s false 40 C_DERIVED)))
+    (let [total (pw p 38)
+          words (ilen p)
+          pool (pw p 4)]
+      (if (or (> smax (quot total 4)) (> words (quot (- (- total pool) (* 4 smax)) 4)))
+        (return (want s false 38 C_TOTAL))))
+    (return (not (failed s)))))
+
+(defn ^Bool check-flags [^IntsR p ^Bytes b ^Ints s]
+  (let [^:mut f 0
+        ^:mut needs-any false]
+    (for [^I32 kq 0 (pw p W_N_KEYS)]
+      (let [ko (pw p (+ (sec p 4) (* 2 kq)))]
+        (if (<= (ushr (u8 b ko) 5) 1) (set f (bit-or f 1)))))
+    (for [^I32 l 0 (pw p W_N_LEAVES)]
+      (let [o (leaf-at p l)
+            k (bit-and (pw p o) 255)]
+        (if (and (== k 8) (>= (pw p (+ o 4)) 0)) (set f (bit-or f 2)))
+        (if (== k 13) (set f (bit-or f 4)))
+        (if (or (== k 16) (== k 17)) (set f (bit-or f 8)))
+        (if (or (== k 1) (and (== k 2) (and (>= (pw p (+ o 2)) 4) (<= (pw p (+ o 2)) 6))))
+          (set needs-any true))))
+    (if (!= (pw p 6) f) (return (want s false 6 C_DERIVED)))
+    (if (and needs-any (< (pw p W_TS_ANY) 0)) (return (want s false W_TS_ANY C_HEADER)))
+    (return true)))
+
+;; ------------------------------------------------------------ the entry point
+
+(defn ^:pub ^I32 vm-verify [^IntsR p ^Bytes b ^Ints s]
+  (comment "0 valid; -1 refused (detail in S[35], S[36]); -2 the scratch is too small"
+           "for the verifier's marks (len(S) >= 48 + 2 * VM_MARK_CAP, VM_MARK_CAP >="
+           "N_LEAVES).")
+  (if (< (ilen s) 48) (return (neg 2)))
+  (iset s V_FAILED 0)
+  (iset s VM_DETAIL 0)
+  (iset s (+ VM_DETAIL 1) 0)
+  (if (not (check-header p b s)) (return (neg 1)))
+  (let [m (ia s VM_MARK_CAP)
+        nl (ia p W_N_LEAVES)]
+    (if (or (< m nl) (or (< m 0) (> (+ 48 (* 2 m)) (ilen s)))) (return (neg 2)))
+    (comment "the verify budget: 64 * (PROGRAM_WORDS + POOL_BYTES / 4 + 1)")
+    (let [units (+ (+ (ilen p) (quot (blen b) 4)) 1)]
+      (if (> units (quot INF 64)) (iset s V_BUDGET INF) (iset s V_BUDGET (* 64 units)))))
+  (if (not (check-index p s 2 3 (pw p W_N_TYPESETS) 0)) (return (neg 1)))
+  (if (not (check-index p s 5 6 (pw p W_N_GROUPS) 1)) (return (neg 1)))
+  (if (not (check-index p s 7 8 (pw p W_N_MAPS) 2)) (return (neg 1)))
+  (if (not (check-index p s 9 10 (pw p W_N_ARRAYS) 3)) (return (neg 1)))
+  (if (not (check-index p s 11 12 (pw p W_N_REGEXPS) 4)) (return (neg 1)))
+  (if (not (check-index p s 16 17 (pw p W_N_CSETS) 5)) (return (neg 1)))
+  (if (not (check-index p s 18 19 (pw p W_N_CHAINS) 6)) (return (neg 1)))
+  (if (not (check-iv-records p b s)) (return (neg 1)))
+  (if (not (check-leaves p b s)) (return (neg 1)))
+  (if (not (check-typesets p s)) (return (neg 1)))
+  (if (not (check-keys p b s)) (return (neg 1)))
+  (if (not (check-groups p s)) (return (neg 1)))
+  (if (not (check-rules p b s)) (return (neg 1)))
+  (if (not (check-maps p s)) (return (neg 1)))
+  (if (not (check-arrays p s)) (return (neg 1)))
+  (if (not (check-regexps p s)) (return (neg 1)))
+  (if (not (check-flags p b s)) (return (neg 1)))
+  (if (not (check-csets p s)) (return (neg 1)))
+  (if (not (check-chains p s)) (return (neg 1)))
+  (if (not (check-rule-closure p s)) (return (neg 1)))
+  (if (failed s) (return (neg 1)))
+  (return 0))

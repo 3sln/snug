@@ -1,0 +1,41 @@
+#!/usr/bin/env bb
+;; Emit the compiler's and verifier's sources (kin/compile/*.kin,
+;; kin/program/*.kin) into gen/, without touching any other source's output.
+;;
+;;     kin/scripts/compile-emit [ROOT]
+;;
+;; ROOT (default `gen`) is where the js/ and rust/ trees go; the dev loop
+;; (kin/scripts/compile-dev) emits into .cache/gen so that work in progress
+;; never appears under gen/ until it is committed.
+;;
+;; The project-wide `bb emit` emits these too (snug.project lists the two
+;; subdirectories); this script exists so the compiler can be regenerated
+;; while another source in kin/ is mid-edit, since `emit-all!` is all or
+;; nothing over its batch.
+(require '[kin.project :as kp] '[kin.vfs :as vfs] '[snug.targets :as targets])
+(let [roots ["kin/compile" "kin/program"]
+      sources (reify
+                vfs/Vfs
+                (-exists? [_ p] (.exists (java.io.File. (str "kin/" p))))
+                (-read [_ p] (slurp (str "kin/" p)))
+                (-write [_ _ _] (throw (ex-info "read-only" {})))
+                vfs/Listing
+                (-list [_]
+                  (vec (for [r roots
+                             :let [d (java.io.File. r)]
+                             :when (.isDirectory d)
+                             f (.listFiles d)
+                             :when (and (.isFile f) (.endsWith (.getName f) ".kin"))]
+                         (str (subs r 4) "/" (.getName f))))))
+      root (or (first *command-line-args*) "gen")
+      tgts (-> targets/targets
+               (assoc-in [:js :vfs] (vfs/disk-vfs (str root "/js")))
+               (assoc-in [:rust :vfs] (vfs/disk-vfs (str root "/rust"))))
+      prj (kp/load-project {:vocabularies '[snug.lang snug.js kin.lang]
+                            :targets tgts
+                            :target-order [:js :rust]
+                            :sources {:vfs sources :match "*"}})
+      {:keys [order emitted]} (kp/emit-all! prj)]
+  (doseq [label order
+          r (get emitted label)]
+    (println (format "  %-5s %s" (name (:target r)) (or (:path r) "(nowhere)")))))

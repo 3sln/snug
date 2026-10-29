@@ -1,0 +1,971 @@
+;; Leaves and typesets, internally (architecture §4.2; program.md §4, §5).
+;;
+;; An internal leaf is 16 words in T_LEAF:
+;;     0 kind  1 flags  2..9 d0..d7  10 hash  11 final id  12 node  13 env
+;;     14 state  15 mark
+;; with the kinds of program.md §4.2 and kind-specific data:
+;;   MAJOR d0 major | INT flags BIGOK, d0/d1 interval run | FLOAT flags widths,
+;;   d0/d1 float-interval run (count 0 = unbounded) | SIMPLE d0 v | LIT d0 bid of
+;;   the encoding | LITSET d0/d1 run of member bids in T_LST (sorted by bytes) |
+;;   TEXT d0 lo, d1 hi, d2 regexp or -1 | BYTES d0 lo, d1 hi, d2 bits-mask bid or
+;;   -1 | UINTX d0/d1 allowed bits hi/lo, d2/d3 interval run | TAG d0/d1 number,
+;;   d2 content typeset | TAGSET d0..d3 range, d4 content | EMBED flags SEQ, d0
+;;   content | ARRAY d0 array | MAP d0 map, d1 choice | AND d0, d1 | NOT d0 target,
+;;   d1 literal.
+;; Containers (TAG, TAGSET, EMBED, ARRAY, MAP) are made with their AST node and
+;; generic environment and filled in later (snug.compile.lower's worklist), so
+;; recursion through a container never recurses in the compiler. Every other
+;; leaf is hash-consed by content.
+;;
+;; Integer intervals (T_IV, 6 words) are program.md §4.3's bounds, with a bid
+;; and its length for the big regions. Float intervals (T_FIV, 4 words) are
+;; ordered keys. A typeset (T_TS, 6 words: sorted run, count, hash, final id,
+;; order run, state) is hash-consed by its sorted leaf set and remembers the
+;; order of its first creation, which the leaf numbering walk follows.
+(ns snug.compile.leaf
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-xor bit-not
+                               < > <= >= == != and or not ult add32 sub32]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vadd
+                                        mix ht-init ht-start ht-id ht-next ht-put sort-records
+                                        INF ERR_INTERNAL ERR_LIM_LEAVES H_R0 H_R1 H_R2 H_EPOCH
+                                        T_LEAF T_HLEAF T_TS T_TSL T_HTS T_IV T_FIV T_LST T_BYTE
+                                        T_IVA T_IVB T_IVC T_IVS T_TMP T_STK T_LSTK T_TMP2]]
+            [snug.compile.bytes :refer [bid-len bid-byte bid-off bid-cmp mag-cmp mag-add1 mag-hi mag-lo
+                                        mag-from64]]
+            [snug.compile.regexp :refer [rx-match]]))
+
+(defconst ^:pub ^I32 K_ANY 1)
+(defconst ^:pub ^I32 K_MAJOR 2)
+(defconst ^:pub ^I32 K_INT 3)
+(defconst ^:pub ^I32 K_FLOAT 4)
+(defconst ^:pub ^I32 K_SIMPLE 5)
+(defconst ^:pub ^I32 K_LIT 6)
+(defconst ^:pub ^I32 K_LITSET 7)
+(defconst ^:pub ^I32 K_TEXT 8)
+(defconst ^:pub ^I32 K_BYTES 9)
+(defconst ^:pub ^I32 K_UINTX 10)
+(defconst ^:pub ^I32 K_TAG 11)
+(defconst ^:pub ^I32 K_TAGSET 12)
+(defconst ^:pub ^I32 K_EMBED 13)
+(defconst ^:pub ^I32 K_ARRAY 14)
+(defconst ^:pub ^I32 K_MAP 15)
+(defconst ^:pub ^I32 K_AND 16)
+(defconst ^:pub ^I32 K_NOT 17)
+
+(defconst ^:pub ^I32 R_NEG_INF 0)
+(defconst ^:pub ^I32 R_NEG_BIG 1)
+(defconst ^:pub ^I32 R_NEG 2)
+(defconst ^:pub ^I32 R_POS 3)
+(defconst ^:pub ^I32 R_POS_BIG 4)
+(defconst ^:pub ^I32 R_POS_INF 5)
+
+(defconst ^:pub ^I32 LEAF_WORDS 16)
+
+(declarefn ^I32 mag-pow ^I32 enc-class ^I32 ts-off ^I32 ts-n)
+
+;; ------------------------------------------------------------ leaf records
+
+(defn ^:pub ^I32 lk [^IntsR h ^I32 l] (return (vget h T_LEAF (* l 16))))
+(defn ^:pub ^I32 lflags [^IntsR h ^I32 l] (return (vget h T_LEAF (+ (* l 16) 1))))
+(defn ^:pub ^I32 ld [^IntsR h ^I32 l ^I32 i] (return (vget h T_LEAF (+ (* l 16) (+ 2 i)))))
+(defn ^:pub ^I32 lw [^IntsR h ^I32 l ^I32 w] (return (vget h T_LEAF (+ (* l 16) w))))
+(defn ^:pub lset [^Ints h ^I32 l ^I32 w ^I32 v] (vset h T_LEAF (+ (* l 16) w) v))
+(defn ^:pub lsetd [^Ints h ^I32 l ^I32 i ^I32 v] (vset h T_LEAF (+ (* l 16) (+ 2 i)) v))
+(defn ^:pub ^I32 nleaves [^IntsR h] (return (quot (vlen h T_LEAF) 16)))
+
+(defn ^:pub ^Bool leaf-init [^Ints h]
+  (vtrunc h T_LEAF 0)
+  (vtrunc h T_TS 0)
+  (vtrunc h T_TSL 0)
+  (vtrunc h T_IV 0)
+  (vtrunc h T_FIV 0)
+  (vtrunc h T_LST 0)
+  (if (not (ht-init h T_HLEAF 256)) (return false))
+  (return (ht-init h T_HTS 256)))
+
+(defn ^:pub ^I32 leaf-new [^Ints h ^I32 kind ^I32 flags]
+  (comment "A new, NOT interned leaf (containers); final id -1.")
+  (if (not (charge h 4)) (return (neg 1)))
+  (let [at (vpush h T_LEAF 16)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_LEAF at kind)
+    (vset h T_LEAF (+ at 1) flags)
+    (vset h T_LEAF (+ at 11) (neg 1))
+    (vset h T_LEAF (+ at 12) (neg 1))
+    (vset h T_LEAF (+ at 14) 0)
+    (return (quot at 16))))
+
+;; Staging: a candidate scalar leaf is written into T_TMP (16 words) and then
+;; interned.
+
+(defn ^:pub stage [^Ints h ^I32 kind ^I32 flags]
+  (vtrunc h T_TMP 0)
+  (vpush h T_TMP 16)
+  (vset h T_TMP 0 kind)
+  (vset h T_TMP 1 flags)
+  (vset h T_TMP 11 (neg 1))
+  (vset h T_TMP 12 (neg 1)))
+
+(defn ^:pub stage-d [^Ints h ^I32 i ^I32 v]
+  (vset h T_TMP (+ 2 i) v))
+
+(defn ^I32 run-hash [^IntsR h ^I32 t ^I32 off ^I32 n ^I32 seed]
+  (let [^:mut x seed]
+    (for [^I32 i 0 n]
+      (set x (mix x (vget h t (+ off i)))))
+    (return x)))
+
+(defn ^Bool runs-equal [^IntsR h ^I32 t ^I32 o1 ^I32 o2 ^I32 n]
+  (for [^I32 i 0 n]
+    (if (!= (vget h t (+ o1 i)) (vget h t (+ o2 i))) (return false)))
+  (return true))
+
+(defn ^I32 staged-hash [^IntsR h]
+  (let [kind (vget h T_TMP 0)
+        ^:mut x (mix (mix 99 kind) (vget h T_TMP 1))]
+    (if (or (== kind K_INT) (== kind K_FLOAT))
+      (do (let [n (vget h T_TMP 3)]
+            (set x (mix x n))
+            (if (== kind K_INT)
+              (set x (run-hash h T_IV (* 6 (vget h T_TMP 2)) (* 6 n) x))
+              (set x (run-hash h T_FIV (* 4 (vget h T_TMP 2)) (* 4 n) x)))
+            (return x))))
+    (if (== kind K_UINTX)
+      (do (set x (mix (mix x (vget h T_TMP 2)) (vget h T_TMP 3)))
+          (let [n2 (vget h T_TMP 5)]
+            (set x (mix x n2))
+            (return (run-hash h T_IV (* 6 (vget h T_TMP 4)) (* 6 n2) x)))))
+    (if (== kind K_LITSET)
+      (do (let [n3 (vget h T_TMP 3)]
+            (set x (mix x n3))
+            (return (run-hash h T_LST (vget h T_TMP 2) n3 x)))))
+    (for [^I32 i 2 10]
+      (set x (mix x (vget h T_TMP i))))
+    (return x)))
+
+(defn ^Bool staged-equal [^IntsR h ^I32 l]
+  (let [kind (vget h T_TMP 0)
+        b (* l 16)]
+    (if (or (!= (vget h T_LEAF b) kind) (!= (vget h T_LEAF (+ b 1)) (vget h T_TMP 1))) (return false))
+    (if (or (== kind K_INT) (== kind K_FLOAT))
+      (do (let [n (vget h T_TMP 3)]
+            (if (!= (vget h T_LEAF (+ b 3)) n) (return false))
+            (if (== kind K_INT)
+              (return (runs-equal h T_IV (* 6 (vget h T_TMP 2)) (* 6 (vget h T_LEAF (+ b 2))) (* 6 n))))
+            (return (runs-equal h T_FIV (* 4 (vget h T_TMP 2)) (* 4 (vget h T_LEAF (+ b 2))) (* 4 n))))))
+    (if (== kind K_UINTX)
+      (do (if (or (!= (vget h T_LEAF (+ b 2)) (vget h T_TMP 2)) (!= (vget h T_LEAF (+ b 3)) (vget h T_TMP 3)))
+            (return false))
+          (let [n2 (vget h T_TMP 5)]
+            (if (!= (vget h T_LEAF (+ b 5)) n2) (return false))
+            (return (runs-equal h T_IV (* 6 (vget h T_TMP 4)) (* 6 (vget h T_LEAF (+ b 4))) (* 6 n2))))))
+    (if (== kind K_LITSET)
+      (do (let [n3 (vget h T_TMP 3)]
+            (if (!= (vget h T_LEAF (+ b 3)) n3) (return false))
+            (for [^I32 j 0 n3]
+              (if (!= (vget h T_LST (+ (vget h T_TMP 2) j)) (vget h T_LST (+ (vget h T_LEAF (+ b 2)) j)))
+                (return false)))
+            (return true))))
+    (for [^I32 i 2 10]
+      (if (!= (vget h T_LEAF (+ b i)) (vget h T_TMP i)) (return false)))
+    (return true)))
+
+(defn ^:pub ^I32 stage-intern [^Ints h]
+  (comment "The interned leaf equal to the staged one (a new one if none).")
+  (if (not (charge h 4)) (return (neg 1)))
+  (let [hsh (staged-hash h)
+        ^:mut s (ht-start h T_HLEAF hsh)]
+    (forever
+     (let [id (ht-id h T_HLEAF s)]
+       (if (< id 0) (break))
+       (if (and (== (lw h id 10) hsh) (staged-equal h id)) (return id))
+       (set s (ht-next h T_HLEAF s))))
+    (let [nid (quot (vlen h T_LEAF) 16)]
+      (vset h T_TMP 10 hsh)
+      (for [^I32 i 0 16]
+        (let [w (vget h T_TMP i)]
+          (vpush1 h T_LEAF w)))
+      (if (erred h) (return (neg 1)))
+      (if (not (ht-put h T_HLEAF s nid hsh)) (return (neg 1)))
+      (return nid))))
+
+;; ------------------------------------------------------------ simple leaves
+
+(defn ^:pub ^I32 mk-any [^Ints h] (stage h K_ANY 0) (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-major [^Ints h ^I32 m]
+  (stage h K_MAJOR 0) (stage-d h 0 m) (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-simple [^Ints h ^I32 v]
+  (stage h K_SIMPLE 0) (stage-d h 0 v) (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-lit [^Ints h ^I32 bid]
+  (stage h K_LIT 0) (stage-d h 0 bid) (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-text [^Ints h ^I32 lo ^I32 hi ^I32 rx]
+  (if (> lo hi) (return (neg 2)))
+  (stage h K_TEXT 0) (stage-d h 0 lo) (stage-d h 1 hi) (stage-d h 2 rx)
+  (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-bytes [^Ints h ^I32 lo ^I32 hi ^I32 bits]
+  (if (> lo hi) (return (neg 2)))
+  (stage h K_BYTES 0) (stage-d h 0 lo) (stage-d h 1 hi) (stage-d h 2 bits)
+  (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-and [^Ints h ^I32 a ^I32 b]
+  (stage h K_AND 0) (stage-d h 0 a) (stage-d h 1 b) (return (stage-intern h)))
+
+(defn ^:pub ^I32 mk-not [^Ints h ^I32 target ^I32 lit]
+  (stage h K_NOT 0) (stage-d h 0 target) (stage-d h 1 lit) (return (stage-intern h)))
+
+;; ------------------------------------------------------------ 64-bit helpers
+
+(defn ^:pub ^I32 u64-cmp [^I32 ahi ^I32 alo ^I32 bhi ^I32 blo]
+  (if (!= ahi bhi) (do (if (ult ahi bhi) (return (neg 1))) (return 1)))
+  (if (!= alo blo) (do (if (ult alo blo) (return (neg 1))) (return 1)))
+  (return 0))
+
+;; ------------------------------------------------------------ integer bounds
+;; A bound is (region, a, b). Results of succ/pred land in h[H_R0..H_R2].
+
+(defn ^:pub ^I32 bound-cmp [^IntsR h ^I32 r1 ^I32 a1 ^I32 b1 ^I32 r2 ^I32 a2 ^I32 b2]
+  (if (!= r1 r2) (do (if (< r1 r2) (return (neg 1))) (return 1)))
+  (if (== r1 R_POS) (return (u64-cmp a1 b1 a2 b2)))
+  (if (== r1 R_NEG) (return (u64-cmp a2 b2 a1 b1)))
+  (if (== r1 R_POS_BIG) (return (mag-cmp h a1 a2)))
+  (if (== r1 R_NEG_BIG) (return (mag-cmp h a2 a1)))
+  (return 0))
+
+(defn put3 [^Ints h ^I32 r ^I32 a ^I32 b]
+  (hs h H_R0 r)
+  (hs h H_R1 a)
+  (hs h H_R2 b))
+
+(defn ^:pub bound-succ [^Ints h ^I32 r ^I32 a ^I32 b]
+  (comment "The next integer after the finite bound (r, a, b).")
+  (if (== r R_POS)
+    (do (if (and (== a (neg 1)) (== b (neg 1)))
+          (do (let [^I32 m (mag-pow h)]
+                (put3 h R_POS_BIG m (bid-len h m))
+                (return))))
+        (let [lo (add32 b 1)
+              ^:mut hi a]
+          (if (== lo 0) (set hi (add32 a 1)))
+          (put3 h R_POS hi lo)
+          (return))))
+  (if (== r R_NEG)
+    (do (if (and (== a 0) (== b 0)) (do (put3 h R_POS 0 0) (return)))
+        (let [lo2 (sub32 b 1)
+              ^:mut hi2 a]
+          (if (== b 0) (set hi2 (sub32 a 1)))
+          (put3 h R_NEG hi2 lo2)
+          (return))))
+  (if (== r R_POS_BIG)
+    (do (let [m2 (mag-add1 h a 1)]
+          (put3 h R_POS_BIG m2 (bid-len h m2))
+          (return))))
+  (if (== r R_NEG_BIG)
+    (do (let [m3 (mag-add1 h a (neg 1))]
+          (if (<= (bid-len h m3) 8)
+            (put3 h R_NEG (mag-hi h m3) (mag-lo h m3))
+            (put3 h R_NEG_BIG m3 (bid-len h m3)))
+          (return))))
+  (put3 h r a b))
+
+(defn ^:pub bound-pred [^Ints h ^I32 r ^I32 a ^I32 b]
+  (comment "The integer before the finite bound (r, a, b).")
+  (if (== r R_POS)
+    (do (if (and (== a 0) (== b 0)) (do (put3 h R_NEG 0 0) (return)))
+        (let [lo (sub32 b 1)
+              ^:mut hi a]
+          (if (== b 0) (set hi (sub32 a 1)))
+          (put3 h R_POS hi lo)
+          (return))))
+  (if (== r R_NEG)
+    (do (if (and (== a (neg 1)) (== b (neg 1)))
+          (do (let [^I32 m (mag-pow h)]
+                (put3 h R_NEG_BIG m (bid-len h m))
+                (return))))
+        (let [lo2 (add32 b 1)
+              ^:mut hi2 a]
+          (if (== lo2 0) (set hi2 (add32 a 1)))
+          (put3 h R_NEG hi2 lo2)
+          (return))))
+  (if (== r R_NEG_BIG)
+    (do (let [m2 (mag-add1 h a 1)]
+          (put3 h R_NEG_BIG m2 (bid-len h m2))
+          (return))))
+  (if (== r R_POS_BIG)
+    (do (let [m3 (mag-add1 h a (neg 1))]
+          (if (<= (bid-len h m3) 8)
+            (put3 h R_POS (mag-hi h m3) (mag-lo h m3))
+            (put3 h R_POS_BIG m3 (bid-len h m3)))
+          (return))))
+  (put3 h r a b))
+
+(defn ^:pub ^I32 mag-pow [^Ints h]
+  (comment "The magnitude 2^64.")
+  (let [m (mag-from64 h (neg 1) (neg 1))]
+    (return (mag-add1 h m 1))))
+
+(defn ^:pub point-of [^Ints h ^I32 negative ^I32 mag]
+  (comment "The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2].")
+  (if (== negative 0)
+    (do (if (<= (bid-len h mag) 8)
+          (put3 h R_POS (mag-hi h mag) (mag-lo h mag))
+          (put3 h R_POS_BIG mag (bid-len h mag)))
+        (return)))
+  (comment "v = -1 - n, so n = |v| - 1 (|v| >= 1).")
+  (let [n (mag-add1 h mag (neg 1))]
+    (if (<= (bid-len h n) 8)
+      (put3 h R_NEG (mag-hi h n) (mag-lo h n))
+      (put3 h R_NEG_BIG n (bid-len h n)))))
+
+;; ------------------------------------------------------------ interval lists
+;; In a temp vector, records of 6 words: lo (r, a, b), hi (r, a, b).
+
+(defn ^:pub iv-push [^Ints h ^I32 t ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb]
+  (vpush1 h t lr) (vpush1 h t la) (vpush1 h t lb)
+  (vpush1 h t hr) (vpush1 h t ha) (vpush1 h t hb))
+
+(defn ^I32 rec-cmp-lo [^IntsR h ^I32 t ^I32 i ^I32 j]
+  (comment "Compare the lo bounds of records i and j of vector t.")
+  (let [a (* 6 i)
+        b (* 6 j)]
+    (return (bound-cmp h (vget h t a) (vget h t (+ a 1)) (vget h t (+ a 2))
+                       (vget h t b) (vget h t (+ b 1)) (vget h t (+ b 2))))))
+
+(defn swap-rec [^Ints h ^I32 t ^I32 i ^I32 j ^I32 w]
+  (for [^I32 k 0 w]
+    (let [x (vget h t (+ (* i w) k))
+          y (vget h t (+ (* j w) k))]
+      (vset h t (+ (* i w) k) y)
+      (vset h t (+ (* j w) k) x))))
+
+(defn ^Bool iv-sort [^Ints h ^I32 t ^I32 n]
+  (comment "Insertion sort of the n records of t by lo bound (charged).")
+  (for [^I32 i 1 n]
+    (let [^:mut j i]
+      (while (and (> j 0) (> (rec-cmp-lo h t (- j 1) j) 0))
+        (if (not (charge h 1)) (return false))
+        (swap-rec h t (- j 1) j 6)
+        (set j (- j 1)))))
+  (return (not (erred h))))
+
+(defn ^:pub ^I32 iv-normalize [^Ints h ^I32 src ^I32 dst]
+  (comment "Sort the records of src, drop empty ones (lo > hi), and merge"
+           "overlapping or adjacent ones into dst (cleared first). Answers the count.")
+  (let [n (quot (vlen h src) 6)]
+    (vtrunc h dst 0)
+    (if (not (iv-sort h src n)) (return (neg 1)))
+    (let [^:mut cnt 0]
+      (for [^I32 i 0 n]
+        (let [o (* 6 i)
+              lr (vget h src o) la (vget h src (+ o 1)) lb (vget h src (+ o 2))
+              hr (vget h src (+ o 3)) ha (vget h src (+ o 4)) hb (vget h src (+ o 5))]
+          (if (<= (bound-cmp h lr la lb hr ha hb) 0)
+            (if (== cnt 0)
+              (do (iv-push h dst lr la lb hr ha hb) (set cnt 1))
+              (do (let [p (* 6 (- cnt 1))
+                        pr (vget h dst (+ p 3)) pa (vget h dst (+ p 4)) pb (vget h dst (+ p 5))]
+                    (comment "Merge when lo <= prev hi + 1.")
+                    (let [^:mut merge false]
+                      (if (or (== pr R_POS_INF) (<= (bound-cmp h lr la lb pr pa pb) 0))
+                        (set merge true)
+                        (do (bound-succ h pr pa pb)
+                            (let [sr (hg h H_R0) sa (hg h H_R1) sb (hg h H_R2)]
+                              (if (== (bound-cmp h lr la lb sr sa sb) 0) (set merge true)))))
+                      (if merge
+                        (do (if (> (bound-cmp h hr ha hb pr pa pb) 0)
+                              (do (vset h dst (+ p 3) hr) (vset h dst (+ p 4) ha) (vset h dst (+ p 5) hb))))
+                        (do (iv-push h dst lr la lb hr ha hb) (set cnt (+ cnt 1)))))))))))
+      (if (erred h) (return (neg 1)))
+      (return cnt))))
+
+(defn ^:pub ^I32 iv-intersect [^Ints h ^I32 ta ^I32 tb ^I32 dst]
+  (comment "Intersection of two normalised lists (records in ta, tb) into dst"
+           "(cleared). Answers the count.")
+  (vtrunc h dst 0)
+  (let [na (quot (vlen h ta) 6)
+        nb (quot (vlen h tb) 6)
+        ^:mut i 0
+        ^:mut j 0
+        ^:mut cnt 0]
+    (while (and (< i na) (< j nb))
+      (if (not (charge h 1)) (return (neg 1)))
+      (let [a (* 6 i)
+            b (* 6 j)
+            alr (vget h ta a) ala (vget h ta (+ a 1)) alb (vget h ta (+ a 2))
+            ahr (vget h ta (+ a 3)) aha (vget h ta (+ a 4)) ahb (vget h ta (+ a 5))
+            blr (vget h tb b) bla (vget h tb (+ b 1)) blb (vget h tb (+ b 2))
+            bhr (vget h tb (+ b 3)) bha (vget h tb (+ b 4)) bhb (vget h tb (+ b 5))
+            ^:mut lr alr ^:mut la ala ^:mut lb alb
+            ^:mut hr ahr ^:mut ha aha ^:mut hb ahb]
+        (if (< (bound-cmp h alr ala alb blr bla blb) 0) (do (set lr blr) (set la bla) (set lb blb)))
+        (if (> (bound-cmp h ahr aha ahb bhr bha bhb) 0) (do (set hr bhr) (set ha bha) (set hb bhb)))
+        (if (<= (bound-cmp h lr la lb hr ha hb) 0)
+          (do (iv-push h dst lr la lb hr ha hb) (set cnt (+ cnt 1))))
+        (if (< (bound-cmp h ahr aha ahb bhr bha bhb) 0) (set i (+ i 1)) (set j (+ j 1)))))
+    (if (erred h) (return (neg 1)))
+    (return cnt)))
+
+(defn ^:pub ^I32 iv-commit [^Ints h ^I32 t]
+  (comment "Copy the records of temp vector t to T_IV; answers the first record index.")
+  (let [first (quot (vlen h T_IV) 6)
+        n (vlen h t)]
+    (for [^I32 i 0 n]
+      (let [x (vget h t i)]
+        (vpush1 h T_IV x)))
+    (return first)))
+
+(defn ^:pub iv-load [^Ints h ^I32 t ^I32 first ^I32 n]
+  (comment "Append the committed run (first, n) of T_IV to temp vector t.")
+  (for [^I32 i 0 (* 6 n)]
+    (let [x (vget h T_IV (+ (* 6 first) i))]
+      (vpush1 h t x))))
+
+(defn ^:pub ^I32 mk-int-from [^Ints h ^I32 t ^I32 _bigok]
+  (comment "An INT leaf from the normalised records in temp vector t (-2 if empty)."
+           "Canonical: BIGOK exactly when an interval reaches a bignum region (the"
+           "argument is ignored), since a value beyond 64 bits IS a bignum.")
+  (let [n (quot (vlen h t) 6)
+        ^:mut big 0]
+    (if (== n 0) (return (neg 2)))
+    (if (or (<= (vget h t 0) R_NEG_BIG) (>= (vget h t (- (* 6 n) 3)) R_POS_BIG)) (set big 1))
+    (let [first (iv-commit h t)]
+      (stage h K_INT big)
+      (stage-d h 0 first)
+      (stage-d h 1 n)
+      (return (stage-intern h)))))
+
+(defn ^:pub ^I32 mk-int-range [^Ints h ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb]
+  (comment "An INT leaf for one interval; BIGOK when it reaches a bignum region.")
+  (vtrunc h T_IVS 0)
+  (iv-push h T_IVS lr la lb hr ha hb)
+  (if (> (bound-cmp h lr la lb hr ha hb) 0) (return (neg 2)))
+  (let [^:mut big 0]
+    (if (or (<= lr R_NEG_BIG) (>= hr R_POS_BIG)) (set big 1))
+    (return (mk-int-from h T_IVS big))))
+
+(defn ^:pub ^Bool iv-contains [^IntsR h ^I32 first ^I32 n ^I32 r ^I32 a ^I32 b]
+  (comment "Is the point (r, a, b) in the committed run (first, n)?")
+  (for [^I32 i 0 n]
+    (let [o (* 6 (+ first i))]
+      (if (and (>= (bound-cmp h r a b (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2))) 0)
+               (<= (bound-cmp h r a b (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5))) 0))
+        (return true))))
+  (return false))
+
+(defn ^:pub ^Bool iv-meets [^IntsR h ^I32 first ^I32 n ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb]
+  (comment "Does some interval of the run intersect [lo, hi]?")
+  (for [^I32 i 0 n]
+    (let [o (* 6 (+ first i))]
+      (if (and (<= (bound-cmp h (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2)) hr ha hb) 0)
+               (>= (bound-cmp h (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5)) lr la lb) 0))
+        (return true))))
+  (return false))
+
+;; ------------------------------------------------------------ float intervals
+;; Records of 4 words: lo key (hi, lo), hi key (hi, lo); unsigned 64-bit order.
+
+(defn ^:pub ^I32 fkey-hi [^I32 hi]
+  (comment "High word of the ordered key of the binary64 pattern hi:lo.")
+  (if (>= hi 0) (return (bit-or hi (shl 1 31))))
+  (return (bit-not hi)))
+
+(defn ^:pub ^I32 fkey-lo [^I32 hi ^I32 lo]
+  (if (>= hi 0) (return lo))
+  (return (bit-not lo)))
+
+(defn ^I32 frec-cmp [^IntsR h ^I32 t ^I32 i ^I32 j]
+  (return (u64-cmp (vget h t (* 4 i)) (vget h t (+ (* 4 i) 1))
+                   (vget h t (* 4 j)) (vget h t (+ (* 4 j) 1)))))
+
+(defn ^:pub ^I32 fiv-normalize [^Ints h ^I32 src ^I32 dst]
+  (comment "Sort, drop empty, merge overlapping/adjacent float intervals into dst.")
+  (let [n (quot (vlen h src) 4)]
+    (vtrunc h dst 0)
+    (for [^I32 i 1 n]
+      (let [^:mut j i]
+        (while (and (> j 0) (> (frec-cmp h src (- j 1) j) 0))
+          (if (not (charge h 1)) (return (neg 1)))
+          (swap-rec h src (- j 1) j 4)
+          (set j (- j 1)))))
+    (let [^:mut cnt 0]
+      (for [^I32 k 0 n]
+        (let [o (* 4 k)
+              lh (vget h src o) ll (vget h src (+ o 1))
+              hh (vget h src (+ o 2)) hl (vget h src (+ o 3))]
+          (if (<= (u64-cmp lh ll hh hl) 0)
+            (if (== cnt 0)
+              (do (vpush1 h dst lh) (vpush1 h dst ll) (vpush1 h dst hh) (vpush1 h dst hl) (set cnt 1))
+              (do (let [p (* 4 (- cnt 1))
+                        ph (vget h dst (+ p 2))
+                        pl (vget h dst (+ p 3))
+                        nl (add32 pl 1)
+                        ^:mut nh ph]
+                    (if (== nl 0) (set nh (add32 ph 1)))
+                    (if (or (<= (u64-cmp lh ll ph pl) 0) (and (== lh nh) (== ll nl)))
+                      (do (if (> (u64-cmp hh hl ph pl) 0)
+                            (do (vset h dst (+ p 2) hh) (vset h dst (+ p 3) hl))))
+                      (do (vpush1 h dst lh) (vpush1 h dst ll) (vpush1 h dst hh) (vpush1 h dst hl)
+                          (set cnt (+ cnt 1))))))))))
+      (if (erred h) (return (neg 1)))
+      (return cnt))))
+
+(defn ^:pub ^I32 fiv-intersect [^Ints h ^I32 ta ^I32 tb ^I32 dst]
+  (vtrunc h dst 0)
+  (let [na (quot (vlen h ta) 4)
+        nb (quot (vlen h tb) 4)
+        ^:mut i 0
+        ^:mut j 0
+        ^:mut cnt 0]
+    (while (and (< i na) (< j nb))
+      (if (not (charge h 1)) (return (neg 1)))
+      (let [a (* 4 i)
+            b (* 4 j)
+            ^:mut lh (vget h ta a) ^:mut ll (vget h ta (+ a 1))
+            ^:mut hh (vget h ta (+ a 2)) ^:mut hl (vget h ta (+ a 3))
+            bh (vget h tb (+ b 2)) bl (vget h tb (+ b 3))
+            ah (vget h ta (+ a 2)) al (vget h ta (+ a 3))]
+        (if (< (u64-cmp lh ll (vget h tb b) (vget h tb (+ b 1))) 0)
+          (do (set lh (vget h tb b)) (set ll (vget h tb (+ b 1)))))
+        (if (> (u64-cmp hh hl bh bl) 0) (do (set hh bh) (set hl bl)))
+        (if (<= (u64-cmp lh ll hh hl) 0)
+          (do (vpush1 h dst lh) (vpush1 h dst ll) (vpush1 h dst hh) (vpush1 h dst hl) (set cnt (+ cnt 1))))
+        (if (< (u64-cmp ah al bh bl) 0) (set i (+ i 1)) (set j (+ j 1)))))
+    (if (erred h) (return (neg 1)))
+    (return cnt)))
+
+(defn ^:pub ^I32 mk-float-from [^Ints h ^I32 widths ^I32 t ^I32 bounded]
+  (comment "A FLOAT leaf of the given widths (bits 0..2) over the normalised records"
+           "in t when bounded = 1 (-2 if that leaves nothing), unbounded otherwise.")
+  (if (== widths 0) (return (neg 2)))
+  (stage h K_FLOAT widths)
+  (if (== bounded 0)
+    (do (stage-d h 0 0) (stage-d h 1 0) (return (stage-intern h))))
+  (let [n (quot (vlen h t) 4)]
+    (if (== n 0) (return (neg 2)))
+    (let [first (quot (vlen h T_FIV) 4)]
+      (for [^I32 i 0 (* 4 n)]
+        (let [x (vget h t i)]
+          (vpush1 h T_FIV x)))
+      (stage h K_FLOAT widths)
+      (stage-d h 0 first)
+      (stage-d h 1 n)
+      (return (stage-intern h)))))
+
+(defn ^:pub fiv-load [^Ints h ^I32 t ^I32 first ^I32 n]
+  (for [^I32 i 0 (* 4 n)]
+    (let [x (vget h T_FIV (+ (* 4 first) i))]
+      (vpush1 h t x))))
+
+;; ------------------------------------------------------------ masks
+
+(defn ^:pub ^I32 leaf-mask [^IntsR h ^I32 l]
+  (comment "program.md §4.2's derived class mask of a leaf.")
+  (let [k (lk h l)]
+    (if (== k K_ANY) (return 4095))
+    (if (== k K_MAJOR)
+      (do (let [m (ld h l 0)]
+            (if (== m 6) (return 2112))
+            (if (== m 7) (return 1920))
+            (return (shl 1 m)))))
+    (if (== k K_INT)
+      (do (let [f (ld h l 0)
+                n (ld h l 1)
+                ^:mut msk 0]
+            (if (iv-meets h f n R_POS 0 0 R_POS (neg 1) (neg 1)) (set msk (bit-or msk 1)))
+            (if (iv-meets h f n R_NEG (neg 1) (neg 1) R_NEG 0 0) (set msk (bit-or msk 2)))
+            (if (!= (bit-and (lflags h l) 1) 0)
+              (if (or (iv-meets h f n R_NEG_INF 0 0 R_NEG_BIG 0 0)
+                      (iv-meets h f n R_POS_BIG 0 0 R_POS_INF 0 0))
+                (set msk (bit-or msk 2048))))
+            (return msk))))
+    (if (== k K_FLOAT) (return (shl (lflags h l) 8)))
+    (if (== k K_SIMPLE) (return 128))
+    (if (== k K_LIT) (return (enc-class h (ld h l 0))))
+    (if (== k K_LITSET) (return (enc-class h (vget h T_LST (ld h l 0)))))
+    (if (== k K_TEXT) (return 8))
+    (if (== k K_BYTES) (return 4))
+    (if (== k K_UINTX) (return 1))
+    (if (== k K_TAG)
+      (do (if (and (== (ld h l 0) 0) (or (== (ld h l 1) 2) (== (ld h l 1) 3))) (return 2048))
+          (return 64)))
+    (if (== k K_TAGSET)
+      (do (let [^:mut m2 0]
+            (comment "040 if [lo, hi] holds a tag outside {2,3}; 800 if it holds 2 or 3.")
+            (if (or (or (!= (ld h l 0) 0) (!= (ld h l 2) 0))
+                    (or (ult (ld h l 1) 2) (ult 3 (ld h l 3))))
+              (set m2 (bit-or m2 64)))
+            (if (and (and (== (ld h l 0) 0) (ult (ld h l 1) 4))
+                     (or (!= (ld h l 2) 0) (not (ult (ld h l 3) 2))))
+              (set m2 (bit-or m2 2048)))
+            (return m2))))
+    (if (== k K_EMBED) (return 4))
+    (if (== k K_ARRAY) (return 16))
+    (if (== k K_MAP) (return 32))
+    (if (== k K_AND) (return (bit-and (leaf-mask h (ld h l 0)) (leaf-mask h (ld h l 1)))))
+    (if (== k K_NOT) (return (leaf-mask h (ld h l 0))))
+    (return 0)))
+
+(defn ^:pub ^I32 enc-class [^IntsR h ^I32 bid]
+  (comment "The class bit of the item encoded by bid (text, bytes or integer).")
+  (let [ib (bid-byte h bid 0)
+        m (ushr ib 5)]
+    (if (<= m 5) (return (shl 1 m)))
+    (if (== m 7)
+      (do (let [ai (bit-and ib 31)]
+            (if (== ai 25) (return 256))
+            (if (== ai 26) (return 512))
+            (if (== ai 27) (return 1024))
+            (return 128))))
+    (return 64)))
+
+;; ------------------------------------------------------------ literals
+
+(defn ^:pub ^I32 enc-arg-hi [^IntsR h ^I32 bid]
+  (comment "High word of the head argument of the encoded item (for majors 0..3).")
+  (let [ai (bit-and (bid-byte h bid 0) 31)]
+    (if (< ai 27) (return 0))
+    (return (bit-or (bit-or (shl (bid-byte h bid 1) 24) (shl (bid-byte h bid 2) 16))
+                    (bit-or (shl (bid-byte h bid 3) 8) (bid-byte h bid 4))))))
+
+(defn ^:pub ^I32 enc-arg-lo [^IntsR h ^I32 bid]
+  (let [ai (bit-and (bid-byte h bid 0) 31)]
+    (if (< ai 24) (return ai))
+    (if (== ai 24) (return (bid-byte h bid 1)))
+    (if (== ai 25) (return (bit-or (shl (bid-byte h bid 1) 8) (bid-byte h bid 2))))
+    (if (== ai 26)
+      (return (bit-or (bit-or (shl (bid-byte h bid 1) 24) (shl (bid-byte h bid 2) 16))
+                      (bit-or (shl (bid-byte h bid 3) 8) (bid-byte h bid 4)))))
+    (return (bit-or (bit-or (shl (bid-byte h bid 5) 24) (shl (bid-byte h bid 6) 16))
+                    (bit-or (shl (bid-byte h bid 7) 8) (bid-byte h bid 8))))))
+
+(defn ^:pub ^I32 enc-head-len [^IntsR h ^I32 bid]
+  (let [ai (bit-and (bid-byte h bid 0) 31)]
+    (if (< ai 24) (return 1))
+    (if (== ai 24) (return 2))
+    (if (== ai 25) (return 3))
+    (if (== ai 26) (return 5))
+    (return 9)))
+
+(defn ^Bool bits-ok [^IntsR h ^I32 bid ^I32 mask]
+  (comment "Does the content of the byte-string item bid satisfy the .bits mask bid?")
+  (let [hl (enc-head-len h bid)
+        n (- (bid-len h bid) hl)
+        ml (bid-len h mask)]
+    (for [^I32 i 0 n]
+      (let [d (bid-byte h bid (+ hl i))
+            ^:mut m 0]
+        (if (< i ml) (set m (bid-byte h mask i)))
+        (if (!= (bit-and d (bit-not m)) 0) (return false))))
+    (return true)))
+
+(defn ^:pub ^Bool lit-member [^Ints h ^I32 l ^I32 bid]
+  (comment "Does the literal item encoded by bid (text, bytes or a major 0/1"
+           "integer) match leaf l? Exact for every scalar kind; false for containers.")
+  (let [^I32 cls (enc-class h bid)
+        k (lk h l)]
+    (if (== (bit-and cls (leaf-mask h l)) 0) (return false))
+    (if (or (== k K_ANY) (== k K_MAJOR)) (return true))
+    (if (== k K_LIT) (return (== (ld h l 0) bid)))
+    (if (== k K_LITSET)
+      (do (for [^I32 i 0 (ld h l 1)]
+            (if (== (vget h T_LST (+ (ld h l 0) i)) bid) (return true)))
+          (return false)))
+    (if (or (== k K_INT) (== k K_UINTX))
+      (do (let [hi (enc-arg-hi h bid)
+                lo (enc-arg-lo h bid)
+                ^:mut ^I32 r R_POS]
+            (if (== cls 2) (set r R_NEG))
+            (if (== k K_INT) (return (iv-contains h (ld h l 0) (ld h l 1) r hi lo)))
+            (if (or (!= (bit-and hi (bit-not (ld h l 0))) 0) (!= (bit-and lo (bit-not (ld h l 1))) 0))
+              (return false))
+            (if (== (ld h l 3) 0) (return true))
+            (return (iv-contains h (ld h l 2) (ld h l 3) r hi lo)))))
+    (if (or (== k K_TEXT) (== k K_BYTES))
+      (do (let [hl (enc-head-len h bid)
+                n (- (bid-len h bid) hl)]
+            (if (or (< n (ld h l 0)) (> n (ld h l 1))) (return false))
+            (if (and (== k K_TEXT) (>= (ld h l 2) 0))
+              (return (rx-match h (ld h l 2) T_BYTE (+ (bid-off h bid) hl) n)))
+            (if (and (== k K_BYTES) (>= (ld h l 2) 0))
+              (return (bits-ok h bid (ld h l 2))))
+            (return true))))
+    (if (== k K_AND)
+      (return (and (lit-member h (ld h l 0) bid) (lit-member h (ld h l 1) bid))))
+    (if (== k K_NOT)
+      (return (and (lit-member h (ld h l 0) bid) (not (lit-member h (ld h l 1) bid)))))
+    (return false)))
+
+;; ------------------------------------------------------------ overlap
+
+(defn ^:pub ^Bool leaves-overlap [^Ints h ^I32 a ^I32 b]
+  (comment "Could some item match both a and b? Conservative: true unless provably"
+           "disjoint (architecture §4.3.2, §4.4).")
+  (if (== (bit-and (leaf-mask h a) (leaf-mask h b)) 0) (return false))
+  (let [ka (lk h a)
+        kb (lk h b)]
+    (if (== ka K_LIT) (return (lit-member h b (ld h a 0))))
+    (if (== kb K_LIT) (return (lit-member h a (ld h b 0))))
+    (if (== ka K_LITSET)
+      (do (for [^I32 i 0 (ld h a 1)]
+            (if (lit-member h b (vget h T_LST (+ (ld h a 0) i))) (return true)))
+          (return false)))
+    (if (== kb K_LITSET)
+      (do (for [^I32 j 0 (ld h b 1)]
+            (if (lit-member h a (vget h T_LST (+ (ld h b 0) j))) (return true)))
+          (return false)))
+    (if (and (== ka K_INT) (== kb K_INT))
+      (do (for [^I32 k 0 (ld h b 1)]
+            (let [o (* 6 (+ (ld h b 0) k))]
+              (if (iv-meets h (ld h a 0) (ld h a 1)
+                            (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2))
+                            (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5)))
+                (return true))))
+          (return false)))
+    (if (or (and (== ka K_TEXT) (== kb K_TEXT)) (and (== ka K_BYTES) (== kb K_BYTES)))
+      (return (and (<= (ld h a 0) (ld h b 1)) (<= (ld h b 0) (ld h a 1)))))
+    (if (and (== ka K_SIMPLE) (== kb K_SIMPLE)) (return (== (ld h a 0) (ld h b 0))))
+    (if (and (== ka K_TAG) (== kb K_TAG))
+      (return (and (== (ld h a 0) (ld h b 0)) (== (ld h a 1) (ld h b 1)))))
+    (return true)))
+
+(defn ^:pub ^Bool ts-member [^Ints h ^I32 ts ^I32 bid]
+  (comment "Does some leaf of typeset ts match the literal item bid?")
+  (let [^I32 off (ts-off h ts)]
+    (for [^I32 i 0 (ts-n h ts)]
+      (if (lit-member h (vget h T_TSL (+ off i)) bid) (return true)))
+    (return false)))
+
+(defn ^:pub ^Bool ts-overlap [^Ints h ^I32 a ^I32 b]
+  (let [^I32 oa (ts-off h a)
+        ^I32 ob (ts-off h b)]
+    (for [^I32 i 0 (ts-n h a)]
+      (for [^I32 j 0 (ts-n h b)]
+        (if (leaves-overlap h (vget h T_TSL (+ oa i)) (vget h T_TSL (+ ob j))) (return true))))
+    (return false)))
+
+;; ------------------------------------------------------------ typesets
+
+(defn ^:pub ^I32 ts-off [^IntsR h ^I32 ts] (return (vget h T_TS (+ (* ts 6) 4))))
+(defn ^:pub ^I32 ts-n [^IntsR h ^I32 ts] (return (vget h T_TS (+ (* ts 6) 1))))
+(defn ^:pub ^I32 ts-leaf [^IntsR h ^I32 ts ^I32 i] (return (vget h T_TSL (+ (ts-off h ts) i))))
+(defn ^:pub ^I32 nts [^IntsR h] (return (quot (vlen h T_TS) 6)))
+(defn ^:pub ^I32 ts-w [^IntsR h ^I32 ts ^I32 w] (return (vget h T_TS (+ (* ts 6) w))))
+(defn ^:pub ts-setw [^Ints h ^I32 ts ^I32 w ^I32 v] (vset h T_TS (+ (* ts 6) w) v))
+
+(defn ^I32 next-epoch [^Ints h]
+  (let [e (+ (hg h H_EPOCH) 1)]
+    (hs h H_EPOCH e)
+    (return e)))
+
+(defn ^I32 merge-ints [^Ints h ^I32 from]
+  (comment "Replace every INT leaf in T_STK[from..] by one merged INT leaf at the"
+           "position of the first (BIGOK if any was). Answers -1 on error.")
+  (let [n (vlen h T_STK)
+        ^:mut first (neg 1)
+        ^:mut count 0
+        ^:mut big 0]
+    (vtrunc h T_IVA 0)
+    (for [^I32 i from n]
+      (let [l (vget h T_STK i)]
+        (if (== (lk h l) K_INT)
+          (do (if (< first 0) (set first i))
+              (set count (+ count 1))
+              (set big (bit-or big (bit-and (lflags h l) 1)))
+              (iv-load h T_IVA (ld h l 0) (ld h l 1))))))
+    (if (< count 2) (return 0))
+    (if (< (iv-normalize h T_IVA T_IVB) 0) (return (neg 1)))
+    (let [m (mk-int-from h T_IVB big)]
+      (if (< m 0) (return (neg 1)))
+      (vset h T_STK first m)
+      (for [^I32 j (+ first 1) n]
+        (if (== (lk h (vget h T_STK j)) K_INT) (vset h T_STK j (neg 1))))
+      (return 0))))
+
+(defn ^I32 float-merge2 [^Ints h ^I32 a ^I32 b]
+  (comment "One FLOAT leaf for a / b if they merge exactly (equal widths: union of"
+           "intervals, unbounded wins; equal intervals: OR of widths), else -1.")
+  (if (== (lflags h a) (lflags h b))
+    (do (if (or (== (ld h a 1) 0) (== (ld h b 1) 0))
+          (return (mk-float-from h (lflags h a) T_IVA 0)))
+        (vtrunc h T_IVA 0)
+        (fiv-load h T_IVA (ld h a 0) (ld h a 1))
+        (fiv-load h T_IVA (ld h b 0) (ld h b 1))
+        (fiv-normalize h T_IVA T_IVB)
+        (return (mk-float-from h (lflags h a) T_IVB 1))))
+  (if (and (== (ld h a 1) (ld h b 1))
+           (or (== (ld h a 1) 0) (runs-equal h T_FIV (* 4 (ld h a 0)) (* 4 (ld h b 0)) (* 4 (ld h a 1)))))
+    (do (stage h K_FLOAT (bit-or (lflags h a) (lflags h b)))
+        (stage-d h 0 (ld h a 0))
+        (stage-d h 1 (ld h a 1))
+        (return (stage-intern h))))
+  (return (neg 1)))
+
+(defn ^I32 merge-floats [^Ints h ^I32 from]
+  (comment "Merge FLOAT leaves pairwise where float-merge2 can.")
+  (let [n (vlen h T_STK)]
+    (for [^I32 i from n]
+      (for [^I32 j (+ i 1) n]
+        (let [a (vget h T_STK i)
+              b (vget h T_STK j)]
+          (if (and (and (>= a 0) (>= b 0)) (and (== (lk h a) K_FLOAT) (== (lk h b) K_FLOAT)))
+            (do (let [m (float-merge2 h a b)]
+                  (if (>= m 0)
+                    (do (vset h T_STK i m)
+                        (vset h T_STK j (neg 1))))))))))
+    (if (erred h) (return (neg 1)))
+    (return 0)))
+
+(defn ^I32 lits-sorted-insert [^Ints h ^I32 from ^I32 bid]
+  (comment "Insert bid into the sorted (by bytes) unique list T_LSTK[from..].")
+  (let [n (vlen h T_LSTK)
+        ^:mut i from]
+    (while (and (< i n) (< (bid-cmp h (vget h T_LSTK i) bid) 0))
+      (set i (+ i 1)))
+    (if (and (< i n) (== (vget h T_LSTK i) bid)) (return 0))
+    (vpush1 h T_LSTK 0)
+    (let [^:mut j n]
+      (while (> j i)
+        (vset h T_LSTK j (vget h T_LSTK (- j 1)))
+        (set j (- j 1))))
+    (vset h T_LSTK i bid)
+    (return 0)))
+
+(defn ^I32 group-lits [^Ints h ^I32 from]
+  (comment "LIT/LITSET leaves of one class -> one LITSET (two or more members) at"
+           "the position of the first.")
+  (let [n (vlen h T_STK)]
+    (for [^I32 i from n]
+      (let [a (vget h T_STK i)]
+        (if (and (>= a 0) (or (== (lk h a) K_LIT) (== (lk h a) K_LITSET)))
+          (do (let [cls (leaf-mask h a)
+                    lf (vlen h T_LSTK)
+                    ^:mut others 0]
+                (for [^I32 j (+ i 1) n]
+                  (let [b (vget h T_STK j)]
+                    (if (and (>= b 0) (and (or (== (lk h b) K_LIT) (== (lk h b) K_LITSET))
+                                           (== (leaf-mask h b) cls)))
+                      (set others (+ others 1)))))
+                (if (> others 0)
+                  (do (for [^I32 k i n]
+                        (let [c (vget h T_STK k)]
+                          (if (and (>= c 0) (and (or (== (lk h c) K_LIT) (== (lk h c) K_LITSET))
+                                                 (== (leaf-mask h c) cls)))
+                            (do (if (== (lk h c) K_LIT)
+                                  (lits-sorted-insert h lf (ld h c 0))
+                                  (for [^I32 q 0 (ld h c 1)]
+                                    (lits-sorted-insert h lf (vget h T_LST (+ (ld h c 0) q)))))
+                                (vset h T_STK k (neg 1))))))
+                      (let [cnt (- (vlen h T_LSTK) lf)
+                            loff (vlen h T_LST)]
+                        (if (not (charge h cnt)) (return (neg 1)))
+                        (for [^I32 r 0 cnt]
+                          (let [x (vget h T_LSTK (+ lf r))]
+                            (vpush1 h T_LST x)))
+                        (vtrunc h T_LSTK lf)
+                        (if (== cnt 1)
+                          (do (let [nl1 (mk-lit h (vget h T_LST loff))]
+                                (if (< nl1 0) (return (neg 1)))
+                                (vset h T_STK i nl1)))
+                          (do (stage h K_LITSET 0)
+                              (stage-d h 0 loff)
+                              (stage-d h 1 cnt)
+                              (let [nl2 (stage-intern h)]
+                                (if (< nl2 0) (return (neg 1)))
+                                (vset h T_STK i nl2))))))))))))
+    (if (erred h) (return (neg 1)))
+    (return 0)))
+
+(defn ^:pub ^I32 ts-make [^Ints h ^I32 from]
+  (comment "The canonical typeset of the leaves in T_STK[from..] (creation order;"
+           "duplicates and -1/-2 entries allowed). T_STK is cut back to from.")
+  (let [n0 (vlen h T_STK)]
+    (if (not (charge h (+ 1 (- n0 from)))) (return (neg 1)))
+    (comment "drop empties; ANY absorbs everything")
+    (for [^I32 i from n0]
+      (if (and (>= (vget h T_STK i) 0) (== (lk h (vget h T_STK i)) K_ANY))
+        (do (let [any (vget h T_STK i)]
+              (vtrunc h T_STK from)
+              (vpush1 h T_STK any))
+            (break))))
+    (if (< (merge-ints h from) 0) (return (neg 1)))
+    (if (< (merge-floats h from) 0) (return (neg 1)))
+    (if (< (group-lits h from) 0) (return (neg 1)))
+    (comment "dedupe (first occurrence), keeping creation order")
+    (let [e (next-epoch h)
+          n (vlen h T_STK)
+          order (vlen h T_STK)]
+      (for [^I32 j from n]
+        (let [l (vget h T_STK j)]
+          (if (and (>= l 0) (!= (lw h l 15) e))
+            (do (lset h l 15 e)
+                (vpush1 h T_STK l)))))
+      (let [cnt (- (vlen h T_STK) order)
+            sorted (vlen h T_STK)]
+        (for [^I32 k 0 cnt]
+          (let [x (vget h T_STK (+ order k))]
+            (vpush1 h T_STK x)))
+        (comment "sorted copy (by internal id) for identity")
+        (for [^I32 a 1 cnt]
+          (let [^:mut b a]
+            (while (and (> b 0) (> (vget h T_STK (+ sorted (- b 1))) (vget h T_STK (+ sorted b))))
+              (let [t1 (vget h T_STK (+ sorted (- b 1)))
+                    t2 (vget h T_STK (+ sorted b))]
+                (vset h T_STK (+ sorted (- b 1)) t2)
+                (vset h T_STK (+ sorted b) t1))
+              (set b (- b 1)))))
+        (if (not (charge h (* cnt cnt))) (return (neg 1)))
+        (let [^:mut hsh (mix 5 cnt)]
+          (for [^I32 q 0 cnt]
+            (set hsh (mix hsh (vget h T_STK (+ sorted q)))))
+          (let [^:mut s (ht-start h T_HTS hsh)]
+            (forever
+             (let [id (ht-id h T_HTS s)]
+               (if (< id 0) (break))
+               (if (and (== (ts-w h id 2) hsh) (== (ts-n h id) cnt))
+                 (do (let [so (ts-w h id 0)
+                           ^:mut same true]
+                       (for [^I32 r 0 cnt]
+                         (if (!= (vget h T_TSL (+ so r)) (vget h T_STK (+ sorted r))) (set same false)))
+                       (if same
+                         (do (vtrunc h T_STK from)
+                             (return id))))))
+               (set s (ht-next h T_HTS s))))
+            (let [nid (nts h)
+                  soff (vlen h T_TSL)]
+              (for [^I32 u 0 cnt]
+                (let [y (vget h T_STK (+ sorted u))]
+                  (vpush1 h T_TSL y)))
+              (let [ooff (vlen h T_TSL)]
+                (for [^I32 v 0 cnt]
+                  (let [z (vget h T_STK (+ order v))]
+                    (vpush1 h T_TSL z)))
+                (vpush1 h T_TS soff)
+                (vpush1 h T_TS cnt)
+                (vpush1 h T_TS hsh)
+                (vpush1 h T_TS (neg 1))
+                (vpush1 h T_TS ooff)
+                (vpush1 h T_TS 0)
+                (vtrunc h T_STK from)
+                (if (erred h) (return (neg 1)))
+                (if (not (ht-put h T_HTS s nid hsh)) (return (neg 1)))
+                (return nid)))))))))
+
+(defn ^:pub ^I32 ts-of1 [^Ints h ^I32 l]
+  (comment "The typeset {l} (l -2: the empty typeset).")
+  (let [from (vlen h T_STK)]
+    (if (>= l 0) (vpush1 h T_STK l))
+    (return (ts-make h from))))
+
+(defn ^:pub ^I32 ts-push-leaves [^Ints h ^I32 ts]
+  (comment "Append the leaves of ts (creation order) to T_STK.")
+  (let [^I32 off (ts-off h ts)
+        ^I32 n (ts-n h ts)]
+    (for [^I32 i 0 n]
+      (let [l (vget h T_TSL (+ off i))]
+        (vpush1 h T_STK l)))
+    (return n)))

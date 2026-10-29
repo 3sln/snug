@@ -1,0 +1,95 @@
+;; Array automata (architecture §4.4, program.md §8.1): the Glushkov automaton
+;; of an array type's group, with COUNTERS only where they are exact.
+;;
+;; The tree (snug.compile.glush) marks every bounded repetition of a single
+;; entry as a tentative counter. After building, a counted position p keeps
+;; its counter only if no predecessor q != p can match a value p can match
+;; (conservative typeset overlap) and p does not follow itself through an
+;; enclosing loop; otherwise its repetition is unrolled and the automaton is
+;; rebuilt, until nothing changes. Unrolled positions are counted before each
+;; build against the array position limit (ERR_LIM_APOS).
+;;
+;; The internal array (T_ARR -> blob in T_ARRD) is program.md §8.1's record
+;; with INTERNAL typeset ids:
+;;     npos, W, ncounters, nullable, first[W], accept[W], pos[npos * 2]
+;;     (typeset, counter or -1), counters[ncounters * 2] (min, max),
+;;     follow[npos * W]
+(ns snug.compile.arrays
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
+                                        INF ERR_LIM_APOS ERR_INTERNAL H_LIM_APOS
+                                        T_ARR T_ARRD T_GPOS T_GOUT T_STK8]]
+            [snug.compile.glush :refer [g-count g-build g-w g-follows gset f-null f-fo f-fl f-lo f-ll]]
+            [snug.compile.leaf :refer [ts-overlap]]))
+
+(defn ^:pub ^I32 arr-npos [^IntsR h ^I32 a] (return (vget h T_ARRD (vget h T_ARR a))))
+
+(defn ^Bool counter-ok [^Ints h ^I32 w ^I32 npos ^I32 p]
+  (comment "§4.4's predecessor condition for the counted position p.")
+  (if (g-follows h w p p) (return false))
+  (let [tp (vget h T_GPOS (* p 4))]
+    (if (not (charge h npos)) (return false))
+    (for [^I32 q 0 npos]
+      (if (and (!= q p) (g-follows h w q p))
+        (if (ts-overlap h (vget h T_GPOS (* q 4)) tp) (return false))))
+    (return true)))
+
+(defn ^:pub ^I32 arr-finish [^Ints h ^I32 root ^I32 pos]
+  (comment "The internal array for the tree at root, or -1.")
+  (let [^:mut npos (g-count h root)]
+    (if (> npos (hg h H_LIM_APOS)) (return (fail h ERR_LIM_APOS pos)))
+    (let [^:mut f (g-build h root npos)]
+    (if (< f 0) (return (neg 1)))
+    (forever
+     (let [w (g-w npos)
+           ^:mut changed false]
+       (for [^I32 p 0 npos]
+         (if (>= (vget h T_GPOS (+ (* p 4) 1)) 0)
+           (if (not (counter-ok h w npos p))
+             (do (gset h (vget h T_GPOS (+ (* p 4) 3)) 4 0)
+                 (set changed true)))))
+       (if (erred h) (return (neg 1)))
+       (if (not changed) (break)))
+     (set npos (g-count h root))
+     (if (> npos (hg h H_LIM_APOS)) (return (fail h ERR_LIM_APOS pos)))
+     (set f (g-build h root npos))
+     (if (< f 0) (return (neg 1))))
+    (let [w2 (g-w npos)
+          blob (vlen h T_ARRD)
+          ^:mut nc 0]
+      (for [^I32 p2 0 npos]
+        (if (>= (vget h T_GPOS (+ (* p2 4) 1)) 0) (set nc (+ nc 1))))
+      (vpush1 h T_ARRD npos)
+      (vpush1 h T_ARRD w2)
+      (vpush1 h T_ARRD nc)
+      (vpush1 h T_ARRD (f-null h f))
+      (let [fb (vlen h T_ARRD)]
+        (if (< (vpush h T_ARRD (* 2 w2)) 0) (return (neg 1)))
+        (for [^I32 i 0 (f-fl h f)]
+          (let [p3 (vget h T_STK8 (+ (f-fo h f) i))
+                at (+ fb (sar p3 5))
+                old (vget h T_ARRD at)]
+            (vset h T_ARRD at (bit-or old (shl 1 (bit-and p3 31))))))
+        (for [^I32 j 0 (f-ll h f)]
+          (let [p4 (vget h T_STK8 (+ (f-lo h f) j))
+                at2 (+ (+ fb w2) (sar p4 5))
+                old2 (vget h T_ARRD at2)]
+            (vset h T_ARRD at2 (bit-or old2 (shl 1 (bit-and p4 31)))))))
+      (let [^:mut ci 0]
+        (for [^I32 p5 0 npos]
+          (vpush1 h T_ARRD (vget h T_GPOS (* p5 4)))
+          (if (>= (vget h T_GPOS (+ (* p5 4) 1)) 0)
+            (do (vpush1 h T_ARRD ci) (set ci (+ ci 1)))
+            (vpush1 h T_ARRD (neg 1)))))
+      (for [^I32 p6 0 npos]
+        (if (>= (vget h T_GPOS (+ (* p6 4) 1)) 0)
+          (do (vpush1 h T_ARRD (vget h T_GPOS (+ (* p6 4) 1)))
+              (vpush1 h T_ARRD (vget h T_GPOS (+ (* p6 4) 2))))))
+      (for [^I32 k 0 (* npos w2)]
+        (vpush1 h T_ARRD (vget h T_GOUT k)))
+      (if (erred h) (return (neg 1)))
+      (let [id (vlen h T_ARR)]
+        (vpush1 h T_ARR blob)
+        (return id))))))

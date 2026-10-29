@@ -1,0 +1,226 @@
+;; The rule table: every rule name of the schema and the prelude, its
+;; definitions (`=`, `/=`, `//=`), whether it is a type or a group, and its
+;; generic parameters (architecture §5.1 step 3).
+;;
+;; A rule record (T_RULE, 16 words):
+;;     0 name offset (in T_SRC)  1 name length  2 first definition (N_RULE)
+;;     3 last definition  4 kind (0 undecided, 1 type, 2 group)  5 parameter
+;;     count  6 first N_PARAM  7 prelude?  8 memo state (0, 1 in progress, 2
+;;     done)  9 memo typeset  10 source order  11 kind-resolution state
+;;     12 has an `=`  13 socket (0, 1 `$`, 2 `$$`)  14 index in RULES (-1)
+;;     15 next definition chain head is in each N_RULE's `next`... (see below)
+;; Definitions of one name are chained through T_RULEX (one word per N_RULE
+;; node: the next definition of the same name, or -1).
+;;
+;; A schema rule shadows a prelude rule of the same name (D031); duplicate `=`
+;; definitions are ERR_DUPLICATE; `/=` on a group or `//=` on a type is
+;; ERR_KIND. A rule `a = b` whose body is just a name takes b's kind (decided
+;; lazily, by usage, with cycles reported as nonproductive).
+(ns snug.compile.rules
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar bit-and bit-or
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
+                                        mix ht-init ht-start ht-id ht-next ht-put
+                                        ERR_DUPLICATE ERR_KIND ERR_GENERIC ERR_NONPRODUCTIVE ERR_INTERNAL
+                                        H_PRELUDE_AT H_CUR_RULE
+                                        T_RULE T_HNAME T_RULEX T_SRC T_AST]]
+            [snug.compile.lex :refer [tk-start tk-end]]
+            [snug.compile.parse :refer [nk ntok nnext na nb nc nd ne npos N_RULE N_TYPE N_NAME]]))
+
+(defconst ^:pub ^I32 RK_UNDECIDED 0)
+(defconst ^:pub ^I32 RK_TYPE 1)
+(defconst ^:pub ^I32 RK_GROUP 2)
+
+(declarefn ^Bool lone-name ^Bool names-param)
+
+(defn ^:pub ^I32 rw [^IntsR h ^I32 r ^I32 w] (return (vget h T_RULE (+ (* r 16) w))))
+(defn ^:pub rset [^Ints h ^I32 r ^I32 w ^I32 v] (vset h T_RULE (+ (* r 16) w) v))
+(defn ^:pub ^I32 nrules [^IntsR h] (return (quot (vlen h T_RULE) 16)))
+(defn ^:pub ^I32 def-next [^IntsR h ^I32 def] (return (vget h T_RULEX def)))
+
+(defn ^:pub ^I32 name-hash [^IntsR h ^I32 off ^I32 len]
+  (let [^:mut x (mix 31 len)]
+    (for [^I32 i 0 len]
+      (set x (mix x (vget h T_SRC (+ off i)))))
+    (return x)))
+
+(defn ^:pub ^Bool same-name [^IntsR h ^I32 o1 ^I32 l1 ^I32 o2 ^I32 l2]
+  (if (!= l1 l2) (return false))
+  (for [^I32 i 0 l1]
+    (if (!= (vget h T_SRC (+ o1 i)) (vget h T_SRC (+ o2 i))) (return false)))
+  (return true))
+
+(defn ^:pub ^I32 rule-find [^Ints h ^I32 off ^I32 len]
+  (comment "The rule named by T_SRC[off, off+len), or -1.")
+  (let [hsh (name-hash h off len)
+        ^:mut s (ht-start h T_HNAME hsh)]
+    (forever
+     (let [id (ht-id h T_HNAME s)]
+       (if (< id 0) (return (neg 1)))
+       (if (same-name h (rw h id 0) (rw h id 1) off len) (return id))
+       (set s (ht-next h T_HNAME s))))))
+
+(defn ^:pub ^I32 rule-find-tok [^Ints h ^I32 tok]
+  (let [s (tk-start h tok)
+        e (tk-end h tok)]
+    (return (rule-find h s (- e s)))))
+
+(defn ^I32 rule-add [^Ints h ^I32 off ^I32 len ^I32 prelude ^I32 order]
+  (let [hsh (name-hash h off len)
+        ^:mut s (ht-start h T_HNAME hsh)]
+    (while (>= (ht-id h T_HNAME s) 0)
+      (set s (ht-next h T_HNAME s)))
+    (let [id (nrules h)
+          at (vpush h T_RULE 16)]
+      (if (< at 0) (return (neg 1)))
+      (rset h id 0 off)
+      (rset h id 1 len)
+      (rset h id 2 (neg 1))
+      (rset h id 3 (neg 1))
+      (rset h id 6 (neg 1))
+      (rset h id 7 prelude)
+      (rset h id 9 (neg 1))
+      (rset h id 10 order)
+      (rset h id 14 (neg 1))
+      (comment "Sockets: `$$name` group, `$name` type.")
+      (if (== (vget h T_SRC off) 36)
+        (if (and (> len 1) (== (vget h T_SRC (+ off 1)) 36))
+          (rset h id 13 2)
+          (rset h id 13 1)))
+      (if (not (ht-put h T_HNAME s id hsh)) (return (neg 1)))
+      (return id))))
+
+(defn ^Bool add-def [^Ints h ^I32 r ^I32 def]
+  (comment "Chain definition def onto rule r and check its kind and arity.")
+  (let [c (nc h def)
+        assign (bit-and c 3)
+        grp (sar c 2)
+        np (ne h def)
+        prev (rw h r 3)
+        pos (npos h def)]
+    (if (< prev 0)
+      (do (rset h r 2 def)
+          (rset h r 5 np)
+          (rset h r 6 (nb h def)))
+      (do (vset h T_RULEX prev def)
+          (if (!= np (rw h r 5)) (do (fail h ERR_GENERIC pos) (return false)))))
+    (rset h r 3 def)
+    (if (== assign 0)
+      (do (if (!= (rw h r 12) 0) (do (fail h ERR_DUPLICATE pos) (return false)))
+          (rset h r 12 1)))
+    (let [kind (rw h r 4)
+          ^:mut ^I32 want RK_UNDECIDED]
+      (if (== assign 1) (set want RK_TYPE))
+      (if (== assign 2) (set want RK_GROUP))
+      (if (and (== assign 0) (== grp 1)) (set want RK_GROUP))
+      (if (and (== assign 0) (== grp 0))
+        (comment "`a = type`: a type unless its body is just a name (decided by usage)."))
+      (if (and (== assign 0) (and (== grp 0) (not (lone-name h (nd h def)))))
+        (set want RK_TYPE))
+      (if (!= want RK_UNDECIDED)
+        (do (if (and (!= kind RK_UNDECIDED) (!= kind want))
+              (do (fail h ERR_KIND pos) (return false)))
+            (rset h r 4 want))))
+    (return true)))
+
+(defn ^:pub ^Bool lone-name [^IntsR h ^I32 body]
+  (comment "Is the type body a single N_NAME (with or without generic arguments)?")
+  (if (or (< body 0) (!= (nk h body) N_TYPE)) (return false))
+  (if (!= (nb h body) 1) (return false))
+  (return (== (nk h (na h body)) N_NAME)))
+
+(defn ^:pub ^I32 build-rules [^Ints h ^I32 urules ^I32 prules]
+  (comment "Fill the rule table from the schema's rules, then the prelude's (a"
+           "prelude rule whose name the schema defines is skipped). Answers the"
+           "number of schema rule names, or -1.")
+  (vtrunc h T_RULE 0)
+  (vtrunc h T_RULEX 0)
+  (vfill h T_RULEX 0 0 0)
+  (if (not (ht-init h T_HNAME 128)) (return (neg 1)))
+  (comment "One T_RULEX word per AST node, so a definition's chain link is by node id.")
+  (let [na0 (quot (vlen h T_AST) 8)]
+    (if (< (vpush h T_RULEX na0) 0) (return (neg 1)))
+    (vfill h T_RULEX 0 na0 (neg 1)))
+  (let [^:mut order 0
+        ^:mut d urules]
+    (while (>= d 0)
+      (let [t (na h d)
+            off (tk-start h t)
+            len (- (tk-end h t) off)
+            ^:mut r (rule-find h off len)]
+        (if (< r 0)
+          (do (set r (rule-add h off len 0 order))
+              (set order (+ order 1))))
+        (if (< r 0) (return (neg 1)))
+        (if (not (add-def h r d)) (return (neg 1))))
+      (set d (nnext h d)))
+    (let [^:mut p prules]
+      (while (>= p 0)
+        (let [t2 (na h p)
+              off2 (tk-start h t2)
+              len2 (- (tk-end h t2) off2)
+              r2 (rule-find h off2 len2)]
+          (if (< r2 0)
+            (do (let [r3 (rule-add h off2 len2 1 (neg 1))]
+                  (if (< r3 0) (return (neg 1)))
+                  (if (not (add-def h r3 p)) (return (neg 1)))))))
+        (set p (nnext h p))))
+    (if (erred h) (return (neg 1)))
+    (return order)))
+
+(defn ^:pub ^I32 rule-kind [^Ints h ^I32 r]
+  (comment "Type or group, deciding `a = b` by b's kind (cycles: nonproductive)."
+           "A rule whose name-only body names a generic parameter, an undefined"
+           "name or a socket is a type.")
+  (let [k (rw h r 4)]
+    (if (!= k RK_UNDECIDED) (return k))
+    (if (== (rw h r 13) 2) (do (rset h r 4 RK_GROUP) (return RK_GROUP)))
+    (if (== (rw h r 2) (neg 1))
+      (do (comment "An undefined socket: its kind is its spelling.")
+          (rset h r 4 RK_TYPE)
+          (return RK_TYPE)))
+    (if (== (rw h r 11) 1)
+      (return (fail h ERR_NONPRODUCTIVE (npos h (rw h r 2)))))
+    (rset h r 11 1)
+    (let [def (rw h r 2)
+          body (nd h def)
+          nm (na h body)
+          tok (ntok h nm)
+          ^:mut ^I32 kind RK_TYPE]
+      (comment "A generic parameter of this rule is a type.")
+      (if (not (names-param h def tok))
+        (do (let [target (rule-find-tok h tok)]
+              (if (>= target 0)
+                (do (let [tk (rule-kind h target)]
+                      (if (< tk 0) (return (neg 1)))
+                      (set kind tk)))))))
+      (rset h r 11 2)
+      (rset h r 4 kind)
+      (return kind))))
+
+(defn ^:pub ^Bool names-param [^IntsR h ^I32 def ^I32 tok]
+  (comment "Does token tok spell one of the generic parameters of definition def?")
+  (let [s (tk-start h tok)
+        l (- (tk-end h tok) s)
+        ^:mut p (nb h def)]
+    (while (>= p 0)
+      (let [pt (ntok h p)
+            ps (tk-start h pt)]
+        (if (same-name h ps (- (tk-end h pt) ps) s l) (return true)))
+      (set p (nnext h p)))
+    (return false)))
+
+(defn ^:pub ^I32 param-index [^IntsR h ^I32 r ^I32 tok]
+  (comment "The index of the generic parameter of rule r spelled by tok, or -1.")
+  (let [s (tk-start h tok)
+        l (- (tk-end h tok) s)
+        ^:mut p (rw h r 6)
+        ^:mut i 0]
+    (while (>= p 0)
+      (let [pt (ntok h p)
+            ps (tk-start h pt)]
+        (if (same-name h ps (- (tk-end h pt) ps) s l) (return i)))
+      (set i (+ i 1))
+      (set p (nnext h p)))
+    (return (neg 1))))

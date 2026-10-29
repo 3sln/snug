@@ -1,0 +1,638 @@
+;; Controls (architecture §4.6) as transforms of typesets, leaf by leaf. Every
+;; function here takes the lowered target and controller typesets and answers
+;; the result typeset (or -1 with an error at source offset pos):
+;;
+;;   .size      text/bytes: byte-length interval; uint: values whose minimal
+;;              byte length is in the interval (program.md §17 q12: INT)
+;;   .bits      uint -> UINTX; bstr -> BYTES with a mask (RFC 8610 §3.8.2
+;;              numbering: bit n is byte n>>3, bit n&7, least significant first)
+;;   .lt .le .gt .ge   intersect the interval list (integers or floats)
+;;   .eq        fold to the literal when it is in the target (C8), else empty;
+;;              a composite controller gives AND
+;;   .ne        numeric: split the interval list; otherwise target AND NOT lit
+;;   .and .within  pairwise meet; same scalar kinds fold, others give AND
+;;   .regexp    TEXT with an I-Regexp (snug.compile.regexp)
+;;   .cbor .cborseq  EMBED (the container is made by snug.compile.lower)
+;;   .cat       literal concatenation (text or bytes)
+;; Literals are exact: membership of a literal in any scalar leaf is decided
+;; (snug.compile.leaf/lit-member), so `.eq`/`.ne` never need an AND on scalars.
+(ns snug.compile.ctl
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not
+                               < > <= >= == != and or not ult add32 sub32]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
+                                        INF ERR_CONTROL_TARGET ERR_CONTROL_VALUE ERR_LIM_POOL ERR_INTERNAL
+                                        H_R0 H_R1 H_R2 H_R3 H_LIM_POOL ERR_UNSUPPORTED_CONTROL
+                                        T_STK T_IVA T_IVB T_IVC T_IVS T_TMP2 T_LST T_IV T_FIV T_BYTE]]
+            [snug.compile.bytes :refer [bid-len bid-byte bid-off intern enc-string]]
+            [snug.compile.regexp :refer [rx-compile]]
+            [snug.compile.leaf :refer [lk lflags ld ts-n ts-leaf ts-make ts-of1 leaf-mask
+                                       stage stage-d stage-intern mk-lit mk-text mk-bytes mk-and mk-not
+                                       iv-push iv-load iv-normalize iv-intersect mk-int-from bound-cmp
+                                       bound-succ bound-pred fiv-load fiv-normalize fiv-intersect
+                                       mk-float-from u64-cmp lit-member enc-head-len
+                                       K_ANY K_MAJOR K_INT K_FLOAT K_SIMPLE K_LIT K_LITSET K_TEXT
+                                       K_BYTES K_UINTX K_TAG K_EMBED K_AND K_NOT
+                                       R_NEG_INF R_NEG R_POS R_POS_INF]]))
+
+;; ------------------------------------------------------------ controller values
+
+(declarefn ^Bool bits-pass)
+
+(defn ^:pub ^I32 single-leaf [^IntsR h ^I32 ts]
+  (if (!= (ts-n h ts) 1) (return (neg 1)))
+  (return (ts-leaf h ts 0)))
+
+(defn ^:pub ^Bool int-point [^Ints h ^I32 ts]
+  (comment "Is ts one INT leaf holding one value? (the bound into h[H_R0..H_R2])")
+  (let [l (single-leaf h ts)]
+    (if (or (< l 0) (!= (lk h l) K_INT)) (return false))
+    (if (!= (ld h l 1) 1) (return false))
+    (let [o (* 6 (ld h l 0))]
+      (if (!= (bound-cmp h (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2))
+                         (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5))) 0)
+        (return false))
+      (hs h H_R0 (vget h T_IV o))
+      (hs h H_R1 (vget h T_IV (+ o 1)))
+      (hs h H_R2 (vget h T_IV (+ o 2)))
+      (return true))))
+
+(defn ^:pub ^Bool float-point [^Ints h ^I32 ts]
+  (comment "Is ts one FLOAT leaf (every width) holding one value? (key hi, lo"
+           "into h[H_R0], h[H_R1])")
+  (let [l (single-leaf h ts)]
+    (if (or (< l 0) (!= (lk h l) K_FLOAT)) (return false))
+    (if (or (!= (lflags h l) 7) (!= (ld h l 1) 1)) (return false))
+    (let [o (* 4 (ld h l 0))]
+      (if (or (!= (vget h T_FIV o) (vget h T_FIV (+ o 2))) (!= (vget h T_FIV (+ o 1)) (vget h T_FIV (+ o 3))))
+        (return false))
+      (hs h H_R0 (vget h T_FIV o))
+      (hs h H_R1 (vget h T_FIV (+ o 1)))
+      (return true))))
+
+(defn ^:pub ^I32 single-lit [^IntsR h ^I32 ts]
+  (comment "The encoding bid of ts when it is one LIT leaf, else -1.")
+  (let [l (single-leaf h ts)]
+    (if (or (< l 0) (!= (lk h l) K_LIT)) (return (neg 1)))
+    (return (ld h l 0))))
+
+(defn ^I32 small-of [^I32 r ^I32 a ^I32 b]
+  (comment "A bound as a non-negative i32, clamped: below 0 -> 0, above INF -> INF.")
+  (if (< r R_POS) (return 0))
+  (if (> r R_POS) (return INF))
+  (if (or (!= a 0) (< b 0)) (return INF))
+  (return b))
+
+;; ------------------------------------------------------------ helpers
+
+(defn ^I32 int-with [^Ints h ^I32 l ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb]
+  (comment "INT leaf l intersected with [lo, hi] (-2 when empty).")
+  (vtrunc h T_IVA 0)
+  (iv-load h T_IVA (ld h l 0) (ld h l 1))
+  (vtrunc h T_IVB 0)
+  (iv-push h T_IVB lr la lb hr ha hb)
+  (if (< (iv-intersect h T_IVA T_IVB T_IVC) 0) (return (neg 1)))
+  (return (mk-int-from h T_IVC 0)))
+
+(defn ^I32 pow256-word [^I32 k ^I32 minus1 ^I32 high]
+  (comment "Word high (1) or low (0) of 256^k, or of 256^k - 1 when minus1; k 0..8"
+           "(256^8 - 1 = 2^64 - 1; 256^8 itself is not asked for).")
+  (let [bits (* 8 k)]
+    (if (== minus1 0)
+      (do (if (< bits 32)
+            (do (if (== high 1) (return 0)) (return (shl 1 bits))))
+          (if (== high 1) (return (shl 1 (- bits 32))))
+          (return 0)))
+    (if (>= bits 64) (return (neg 1)))
+    (if (< bits 32)
+      (do (if (== high 1) (return 0))
+          (if (== bits 0) (return 0))
+          (return (- (shl 1 bits) 1))))
+    (if (== high 0) (return (neg 1)))
+    (if (== bits 32) (return 0))
+    (return (- (shl 1 (- bits 32)) 1))))
+
+(defn ^Bool content-len-in [^IntsR h ^I32 bid ^I32 lo ^I32 hi]
+  (let [n (- (bid-len h bid) (enc-head-len h bid))]
+    (return (and (>= n lo) (<= n hi)))))
+
+(defn ^I32 filter-lits [^Ints h ^I32 l ^I32 mode ^I32 a ^I32 b]
+  (comment "The members of LIT/LITSET l that pass (mode 0: content length in"
+           "[a, b]; 1: .bits mask bid a; 2: member of leaf a; 3: not equal to bid a;"
+           "4: equal to bid a), pushed on T_STK as LIT leaves.")
+  (let [^:mut n 1
+        ^:mut base (neg 1)]
+    (if (== (lk h l) K_LITSET) (do (set n (ld h l 1)) (set base (ld h l 0))))
+    (for [^I32 i 0 n]
+      (let [^:mut bid (ld h l 0)]
+        (if (>= base 0) (set bid (vget h T_LST (+ base i))))
+        (let [^:mut keep false]
+          (if (== mode 0) (set keep (content-len-in h bid a b)))
+          (if (== mode 1) (set keep (bits-pass h bid a)))
+          (if (== mode 2) (set keep (lit-member h a bid)))
+          (if (== mode 3) (set keep (!= bid a)))
+          (if (== mode 4) (set keep (== bid a)))
+          (if keep
+            (do (let [nl (mk-lit h bid)]
+                  (vpush1 h T_STK nl)))))))
+    (return 0)))
+
+(defn ^Bool bits-pass [^IntsR h ^I32 bid ^I32 mask]
+  (let [hl (enc-head-len h bid)
+        n (- (bid-len h bid) hl)
+        ml (bid-len h mask)]
+    (for [^I32 i 0 n]
+      (let [d (bid-byte h bid (+ hl i))
+            ^:mut m 0]
+        (if (< i ml) (set m (bid-byte h mask i)))
+        (if (!= (bit-and d (bit-not m)) 0) (return false))))
+    (return true)))
+
+(defn ^I32 target-error [^Ints h ^I32 pos]
+  (return (fail h ERR_CONTROL_TARGET pos)))
+
+;; ------------------------------------------------------------ .size
+
+(defn ^:pub ^I32 ctl-size [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (let [cl (single-leaf h ctl)
+        from (vlen h T_STK)]
+    (if (or (< cl 0) (!= (lk h cl) K_INT)) (return (fail h ERR_CONTROL_VALUE pos)))
+    (for [^I32 i 0 (ts-n h target)]
+      (let [t (ts-leaf h target i)
+            k (lk h t)]
+        (for [^I32 j 0 (ld h cl 1)]
+          (let [o (* 6 (+ (ld h cl 0) j))
+                lo (small-of (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2)))
+                hi (small-of (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5)))]
+            (if (or (== k K_TEXT) (== k K_BYTES))
+              (do (let [^:mut nlo (ld h t 0)
+                        ^:mut nhi (ld h t 1)]
+                    (if (> lo nlo) (set nlo lo))
+                    (if (< hi nhi) (set nhi hi))
+                    (if (<= nlo nhi)
+                      (if (== k K_TEXT)
+                        (do (let [nlt (mk-text h nlo nhi (ld h t 2))] (vpush1 h T_STK nlt)))
+                        (do (let [nlb (mk-bytes h nlo nhi (ld h t 2))] (vpush1 h T_STK nlb)))))))
+              (if (== k K_INT)
+                (do (if (<= lo 8)
+                      (do (let [^:mut hk hi
+                                ^:mut llo 0
+                                ^:mut lhi 0]
+                            (if (> hk 8) (set hk 8))
+                            (if (> lo 0)
+                              (do (set lhi (pow256-word (- lo 1) 0 1))
+                                  (set llo (pow256-word (- lo 1) 0 0))))
+                            (let [nl2 (int-with h t R_POS lhi llo R_POS
+                                                (pow256-word hk 1 1) (pow256-word hk 1 0))]
+                              (if (== nl2 (neg 1)) (return (neg 1)))
+                              (vpush1 h T_STK nl2))))))
+                (if (or (== k K_LIT) (== k K_LITSET))
+                  (do (if (== (bit-and (leaf-mask h t) 12) 0) (return (target-error h pos)))
+                      (filter-lits h t 0 lo hi))
+                  (return (target-error h pos)))))))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ .bits
+
+(defn ^:pub ^I32 ctl-bits [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (let [cl (single-leaf h ctl)
+        from (vlen h T_STK)
+        ^:mut bhi 0
+        ^:mut blo 0
+        ^:mut maxbit (neg 1)]
+    (if (or (< cl 0) (!= (lk h cl) K_INT)) (return (fail h ERR_CONTROL_VALUE pos)))
+    (comment "The bit numbers: the controller's non-negative values.")
+    (for [^I32 j 0 (ld h cl 1)]
+      (let [o (* 6 (+ (ld h cl 0) j))
+            lo (small-of (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2)))
+            hi (small-of (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5)))]
+        (if (>= (vget h T_IV (+ o 3)) R_POS)
+          (do (if (> hi maxbit) (set maxbit hi))
+              (let [^:mut b lo]
+                (while (and (<= b hi) (< b 64))
+                  (if (< b 32) (set blo (bit-or blo (shl 1 b))) (set bhi (bit-or bhi (shl 1 (- b 32)))))
+                  (set b (+ b 1))))))))
+    (comment "The byte mask, built only if some target is a byte string.")
+    (let [^:mut mask (neg 1)]
+      (for [^I32 i 0 (ts-n h target)]
+        (let [t (ts-leaf h target i)
+              k (lk h t)]
+          (if (and (< mask 0) (or (== k K_BYTES) (or (== k K_LIT) (== k K_LITSET))))
+            (do (if (>= maxbit INF) (return (fail h ERR_CONTROL_VALUE pos)))
+                (let [mlen (+ (sar maxbit 3) 1)]
+                  (if (> mlen (hg h H_LIM_POOL)) (return (fail h ERR_LIM_POOL pos)))
+                  (if (not (charge h mlen)) (return (neg 1)))
+                  (vtrunc h T_TMP2 0)
+                  (for [^I32 _q 0 mlen] (vpush1 h T_TMP2 0))
+                  (for [^I32 j2 0 (ld h cl 1)]
+                    (let [o2 (* 6 (+ (ld h cl 0) j2))
+                          lo2 (small-of (vget h T_IV o2) (vget h T_IV (+ o2 1)) (vget h T_IV (+ o2 2)))
+                          hi2 (small-of (vget h T_IV (+ o2 3)) (vget h T_IV (+ o2 4)) (vget h T_IV (+ o2 5)))]
+                      (if (>= (vget h T_IV (+ o2 3)) R_POS)
+                        (do (let [^:mut b2 lo2]
+                              (while (<= b2 hi2)
+                                (let [cur (vget h T_TMP2 (sar b2 3))]
+                                  (vset h T_TMP2 (sar b2 3) (bit-or cur (shl 1 (bit-and b2 7)))))
+                                (set b2 (+ b2 1))))))))
+                  (comment "Trailing zero bytes of the mask mean nothing: drop them.")
+                  (let [^:mut ml mlen]
+                    (comment "...but keep one byte: an all-zero mask still constrains.")
+                    (while (and (> ml 1) (== (vget h T_TMP2 (- ml 1)) 0)) (set ml (- ml 1)))
+                    (set mask (intern h T_TMP2 0 ml))))))))
+      (for [^I32 i2 0 (ts-n h target)]
+        (let [t2 (ts-leaf h target i2)
+              k2 (lk h t2)]
+          (if (== k2 K_INT)
+            (do (comment "uint .bits: UINTX over the target's non-negative values")
+                (let [nl (int-with h t2 R_POS 0 0 R_POS (neg 1) (neg 1))]
+                  (if (== nl (neg 1)) (return (neg 1)))
+                  (if (>= nl 0)
+                    (do (stage h K_UINTX 0)
+                        (stage-d h 0 bhi)
+                        (stage-d h 1 blo)
+                        (comment "The full uint range needs no interval list.")
+                        (let [io (* 6 (ld h nl 0))]
+                          (if (and (== (ld h nl 1) 1)
+                                   (and (and (== (vget h T_IV (+ io 1)) 0) (== (vget h T_IV (+ io 2)) 0))
+                                        (and (== (vget h T_IV (+ io 4)) (neg 1)) (== (vget h T_IV (+ io 5)) (neg 1)))))
+                            (do (stage-d h 2 0) (stage-d h 3 0))
+                            (do (stage-d h 2 (ld h nl 0)) (stage-d h 3 (ld h nl 1)))))
+                        (let [ux (stage-intern h)]
+                          (vpush1 h T_STK ux))))))
+            (if (== k2 K_UINTX)
+              (do (stage h K_UINTX 0)
+                  (stage-d h 0 (bit-and bhi (ld h t2 0)))
+                  (stage-d h 1 (bit-and blo (ld h t2 1)))
+                  (stage-d h 2 (ld h t2 2))
+                  (stage-d h 3 (ld h t2 3))
+                  (let [ux2 (stage-intern h)]
+                    (vpush1 h T_STK ux2)))
+              (if (== k2 K_BYTES)
+                (do (let [^:mut m2 mask]
+                      (if (>= (ld h t2 2) 0)
+                        (do (comment "Both masks: byte-wise AND (absent bytes are 0).")
+                            (let [old (ld h t2 2)
+                                  ^:mut ml2 (bid-len h old)]
+                              (if (< (bid-len h mask) ml2) (set ml2 (bid-len h mask)))
+                              (vtrunc h T_TMP2 0)
+                              (for [^I32 r 0 ml2]
+                                (vpush1 h T_TMP2 (bit-and (bid-byte h old r) (bid-byte h mask r))))
+                              (set m2 (intern h T_TMP2 0 ml2)))))
+                      (let [nb (mk-bytes h (ld h t2 0) (ld h t2 1) m2)]
+                        (vpush1 h T_STK nb))))
+                (if (and (or (== k2 K_LIT) (== k2 K_LITSET)) (== (leaf-mask h t2) 4))
+                  (filter-lits h t2 1 mask 0)
+                  (return (target-error h pos)))))))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ comparisons
+
+(defn ^Bool float-to-int [^Ints h ^I32 khi ^I32 klo ^I32 op]
+  (comment "The integer bound a float controller (ordered key khi:klo) gives an"
+           "integer target under op (0 lt, 1 le, 2 gt, 3 ge): the bound in"
+           "h[H_R0..H_R2] as an INCLUSIVE bound for le/ge semantics (see"
+           "ctl-compare). Only |x| < 2^53; false otherwise.")
+  (let [^:mut hi (bit-and khi 2147483647)
+        ^:mut lo klo
+        ^:mut negative false]
+    (comment "Back from the ordered key to the binary64 pattern.")
+    (if (>= khi 0)
+      (do (set hi (bit-not khi)) (set lo (bit-not klo)) (set negative true)))
+    (let [e (- (bit-and (sar hi 20) 2047) 1023)]
+      (if (> e 52) (return false))
+      (if (< e 0)
+        (do (comment "|x| < 1 (x != 0 unless the pattern is zero)")
+            (let [nonzero (or (!= (bit-and hi 2147483647) 0) (!= lo 0))]
+              (hs h H_R0 R_POS) (hs h H_R1 0) (hs h H_R2 0)
+              (if (not nonzero) (return true))
+              (comment "floor(x) is 0 (x > 0) or -1 (x < 0); ceil(x) is 1 or 0")
+              (if negative
+                (do (if (or (== op 0) (== op 1)) (do (hs h H_R0 R_NEG) (hs h H_R2 0))))
+                (do (if (or (== op 2) (== op 3)) (hs h H_R2 1))))
+              (return true))))
+      (comment "Integer part: the 53-bit significand shifted right by 52 - e.")
+      (let [mhi (bit-or (bit-and hi 1048575) 1048576)
+            sh (- 52 e)
+            ^:mut ihi mhi
+            ^:mut ilo lo
+            ^:mut frac false]
+        (if (>= sh 32)
+          (do (set ilo (ushr mhi (- sh 32)))
+              (set ihi 0)
+              (set frac (or (!= lo 0) (!= (bit-and mhi (- (shl 1 (- sh 32)) 1)) 0))))
+          (if (> sh 0)
+            (do (set ilo (bit-or (ushr lo sh) (shl mhi (- 32 sh))))
+                (set ihi (ushr mhi sh))
+                (set frac (!= (bit-and lo (- (shl 1 sh) 1)) 0)))))
+        (comment "Round toward the inside of the half-line when x is not integral.")
+        (if negative
+          (do (comment "x = -(i + f): floor = -(i+1) when f > 0, ceil = -i")
+              (if (and frac (or (== op 0) (== op 1)))
+                (do (set ilo (add32 ilo 1)) (if (== ilo 0) (set ihi (add32 ihi 1)))))
+              (if (and (== ihi 0) (== ilo 0))
+                (do (hs h H_R0 R_POS) (hs h H_R1 0) (hs h H_R2 0))
+                (do (comment "v = -(m) -> n = m - 1")
+                    (let [nlo (sub32 ilo 1)
+                          ^:mut nhi ihi]
+                      (if (== ilo 0) (set nhi (sub32 ihi 1)))
+                      (hs h H_R0 R_NEG) (hs h H_R1 nhi) (hs h H_R2 nlo)))))
+          (do (if (and frac (or (== op 2) (== op 3)))
+                (do (set ilo (add32 ilo 1)) (if (== ilo 0) (set ihi (add32 ihi 1)))))
+              (hs h H_R0 R_POS) (hs h H_R1 ihi) (hs h H_R2 ilo)))
+        (comment "A non-integral bound already moved inside: lt/gt become le/ge.")
+        (if frac (hs h H_R3 1) (hs h H_R3 0))
+        (return true)))))
+
+(defn ^:pub ^I32 ctl-compare [^Ints h ^I32 target ^I32 ctl ^I32 op ^I32 pos]
+  (comment "op: 0 .lt, 1 .le, 2 .gt, 3 .ge.")
+  (let [from (vlen h T_STK)
+        isint (int-point h ctl)
+        pr (hg h H_R0) pa (hg h H_R1) pb (hg h H_R2)
+        isflt (float-point h ctl)
+        kh (hg h H_R0) kl (hg h H_R1)]
+    (if (and (not isint) (not isflt)) (return (fail h ERR_CONTROL_VALUE pos)))
+    (for [^I32 i 0 (ts-n h target)]
+      (let [t (ts-leaf h target i)
+            k (lk h t)]
+        (if (or (== k K_INT) (== k K_UINTX))
+          (do (let [^:mut r pr ^:mut a pa ^:mut b pb ^:mut eop op]
+                (if (not isint)
+                  (do (if (not (float-to-int h kh kl op)) (return (fail h ERR_CONTROL_VALUE pos)))
+                      (set r (hg h H_R0)) (set a (hg h H_R1)) (set b (hg h H_R2))
+                      (if (== (hg h H_R3) 1)
+                        (do (if (== op 0) (set eop 1)) (if (== op 2) (set eop 3))))))
+                (comment "The half-line as an inclusive interval.")
+                (let [^:mut ^I32 lr R_NEG_INF ^:mut la 0 ^:mut lb 0
+                      ^:mut ^I32 hr R_POS_INF ^:mut ha 0 ^:mut hb 0]
+                  (if (== eop 0) (do (bound-pred h r a b) (set hr (hg h H_R0)) (set ha (hg h H_R1)) (set hb (hg h H_R2))))
+                  (if (== eop 1) (do (set hr r) (set ha a) (set hb b)))
+                  (if (== eop 2) (do (bound-succ h r a b) (set lr (hg h H_R0)) (set la (hg h H_R1)) (set lb (hg h H_R2))))
+                  (if (== eop 3) (do (set lr r) (set la a) (set lb b)))
+                  (if (== k K_INT)
+                    (do (let [nl (int-with h t lr la lb hr ha hb)]
+                          (if (== nl (neg 1)) (return (neg 1)))
+                          (vpush1 h T_STK nl)))
+                    (do (comment "UINTX: intersect its interval list (none = all of uint).")
+                        (vtrunc h T_IVA 0)
+                        (if (== (ld h t 3) 0)
+                          (iv-push h T_IVA R_POS 0 0 R_POS (neg 1) (neg 1))
+                          (iv-load h T_IVA (ld h t 2) (ld h t 3)))
+                        (vtrunc h T_IVB 0)
+                        (iv-push h T_IVB lr la lb hr ha hb)
+                        (iv-intersect h T_IVA T_IVB T_IVC)
+                        (if (> (vlen h T_IVC) 0)
+                          (do (let [first (quot (vlen h T_IV) 6)]
+                                (for [^I32 c 0 (vlen h T_IVC)]
+                                  (vpush1 h T_IV (vget h T_IVC c)))
+                                (stage h K_UINTX 0)
+                                (stage-d h 0 (ld h t 0))
+                                (stage-d h 1 (ld h t 1))
+                                (stage-d h 2 first)
+                                (stage-d h 3 (quot (vlen h T_IVC) 6))
+                                (let [ux (stage-intern h)]
+                                  (vpush1 h T_STK ux))))))))))
+          (if (== k K_FLOAT)
+            (do (if (not isflt) (return (fail h ERR_CONTROL_VALUE pos)))
+                (let [^:mut lh 0 ^:mut ll 0 ^:mut hh (neg 1) ^:mut hl (neg 1)]
+                  (if (== op 0) (do (set hh kh) (set hl (sub32 kl 1)) (if (== kl 0) (set hh (sub32 kh 1)))))
+                  (if (== op 1) (do (set hh kh) (set hl kl)))
+                  (if (== op 2) (do (set lh kh) (set ll (add32 kl 1)) (if (== ll 0) (set lh (add32 kh 1)))))
+                  (if (== op 3) (do (set lh kh) (set ll kl)))
+                  (vtrunc h T_IVA 0)
+                  (if (== (ld h t 1) 0)
+                    (do (vpush1 h T_IVA 0) (vpush1 h T_IVA 0) (vpush1 h T_IVA (neg 1)) (vpush1 h T_IVA (neg 1)))
+                    (fiv-load h T_IVA (ld h t 0) (ld h t 1)))
+                  (vtrunc h T_IVB 0)
+                  (vpush1 h T_IVB lh) (vpush1 h T_IVB ll) (vpush1 h T_IVB hh) (vpush1 h T_IVB hl)
+                  (fiv-intersect h T_IVA T_IVB T_IVC)
+                  (let [nf (mk-float-from h (lflags h t) T_IVC 1)]
+                    (vpush1 h T_STK nf))))
+            (return (target-error h pos))))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ .eq / .ne
+
+(defn ^:pub ^I32 ctl-eq [^Ints h ^I32 target ^I32 ctl ^I32 ne ^I32 pos]
+  (comment "ne 0: .eq; ne 1: .ne.")
+  (let [from (vlen h T_STK)
+        isint (int-point h ctl)
+        pr (hg h H_R0) pa (hg h H_R1) pb (hg h H_R2)
+        isflt (float-point h ctl)
+        kh (hg h H_R0) kl (hg h H_R1)
+        lit (single-lit h ctl)
+        cl (single-leaf h ctl)]
+    (if (< cl 0) (return (fail h ERR_CONTROL_VALUE pos)))
+    (for [^I32 i 0 (ts-n h target)]
+      (let [t (ts-leaf h target i)
+            k (lk h t)]
+        (if (and isint (== k K_INT))
+          (do (if (== ne 0)
+                (do (let [nl (int-with h t pr pa pb pr pa pb)]
+                      (vpush1 h T_STK nl)))
+                (do (comment "split around the point: [-inf, p-1] and [p+1, +inf]")
+                    (vtrunc h T_IVA 0)
+                    (iv-load h T_IVA (ld h t 0) (ld h t 1))
+                    (vtrunc h T_IVB 0)
+                    (bound-pred h pr pa pb)
+                    (let [qr (hg h H_R0) qa (hg h H_R1) qb (hg h H_R2)]
+                      (iv-push h T_IVB R_NEG_INF 0 0 qr qa qb))
+                    (bound-succ h pr pa pb)
+                    (let [sr (hg h H_R0) sa (hg h H_R1) sb (hg h H_R2)]
+                      (iv-push h T_IVB sr sa sb R_POS_INF 0 0))
+                    (iv-intersect h T_IVA T_IVB T_IVC)
+                    (let [nl2 (mk-int-from h T_IVC 0)]
+                      (vpush1 h T_STK nl2)))))
+          (if (and isflt (== k K_FLOAT))
+            (do (vtrunc h T_IVA 0)
+                (if (== (ld h t 1) 0)
+                  (do (vpush1 h T_IVA 0) (vpush1 h T_IVA 0) (vpush1 h T_IVA (neg 1)) (vpush1 h T_IVA (neg 1)))
+                  (fiv-load h T_IVA (ld h t 0) (ld h t 1)))
+                (vtrunc h T_IVB 0)
+                (if (== ne 0)
+                  (do (vpush1 h T_IVB kh) (vpush1 h T_IVB kl) (vpush1 h T_IVB kh) (vpush1 h T_IVB kl))
+                  (do (let [pl (sub32 kl 1)
+                            ^:mut ph kh
+                            nl3 (add32 kl 1)
+                            ^:mut nh kh]
+                        (if (== kl 0) (set ph (sub32 kh 1)))
+                        (if (== nl3 0) (set nh (add32 kh 1)))
+                        (vpush1 h T_IVB 0) (vpush1 h T_IVB 0) (vpush1 h T_IVB ph) (vpush1 h T_IVB pl)
+                        (vpush1 h T_IVB nh) (vpush1 h T_IVB nl3) (vpush1 h T_IVB (neg 1)) (vpush1 h T_IVB (neg 1)))))
+                (fiv-intersect h T_IVA T_IVB T_IVC)
+                (let [nf (mk-float-from h (lflags h t) T_IVC 1)]
+                  (vpush1 h T_STK nf)))
+            (if (>= lit 0)
+              (do (if (or (== k K_LIT) (== k K_LITSET))
+                    (filter-lits h t (+ 3 (- 1 ne)) lit 0)
+                    (if (lit-member h t lit)
+                      (do (if (== ne 0)
+                            (do (let [ll2 (mk-lit h lit)] (vpush1 h T_STK ll2)))
+                            (do (let [ll3 (mk-lit h lit)
+                                      nn (mk-not h t ll3)]
+                                  (vpush1 h T_STK nn)))))
+                      (if (== ne 1) (vpush1 h T_STK t)))))
+              (if (or isint isflt)
+                (do (comment "A number never equals a non-number.")
+                    (if (== ne 1) (vpush1 h T_STK t)))
+                (do (comment "A composite controller: .eq is an AND; .ne has no lowering.")
+                    (if (== ne 1) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
+                    (if (!= (bit-and (leaf-mask h t) (leaf-mask h cl)) 0)
+                      (do (let [an (mk-and h t cl)] (vpush1 h T_STK an)))))))))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ .and / .within
+
+(defn ^I32 meet [^Ints h ^I32 a ^I32 b]
+  (comment "The leaf matching exactly what both a and b match, pushed on T_STK (or"
+           "nothing when provably empty).")
+  (let [ma (leaf-mask h a)
+        mb (leaf-mask h b)
+        ka (lk h a)
+        kb (lk h b)]
+    (if (== (bit-and ma mb) 0) (return 0))
+    (if (== ka K_ANY) (do (vpush1 h T_STK b) (return 0)))
+    (if (== kb K_ANY) (do (vpush1 h T_STK a) (return 0)))
+    (if (and (== ka K_MAJOR) (== (bit-and mb (bit-not ma)) 0)) (do (vpush1 h T_STK b) (return 0)))
+    (if (and (== kb K_MAJOR) (== (bit-and ma (bit-not mb)) 0)) (do (vpush1 h T_STK a) (return 0)))
+    (if (or (== ka K_LIT) (== ka K_LITSET)) (return (filter-lits h a 2 b 0)))
+    (if (or (== kb K_LIT) (== kb K_LITSET)) (return (filter-lits h b 2 a 0)))
+    (if (and (== ka K_INT) (== kb K_INT))
+      (do (vtrunc h T_IVA 0)
+          (iv-load h T_IVA (ld h a 0) (ld h a 1))
+          (vtrunc h T_IVB 0)
+          (iv-load h T_IVB (ld h b 0) (ld h b 1))
+          (iv-intersect h T_IVA T_IVB T_IVC)
+          (let [ni (mk-int-from h T_IVC 0)]
+            (vpush1 h T_STK ni))
+          (return 0)))
+    (if (and (== ka K_FLOAT) (== kb K_FLOAT))
+      (do (let [w (bit-and (lflags h a) (lflags h b))]
+            (if (and (== (ld h a 1) 0) (== (ld h b 1) 0))
+              (do (let [nf0 (mk-float-from h w T_IVA 0)] (vpush1 h T_STK nf0)) (return 0)))
+            (vtrunc h T_IVA 0)
+            (if (== (ld h a 1) 0)
+              (do (vpush1 h T_IVA 0) (vpush1 h T_IVA 0) (vpush1 h T_IVA (neg 1)) (vpush1 h T_IVA (neg 1)))
+              (fiv-load h T_IVA (ld h a 0) (ld h a 1)))
+            (vtrunc h T_IVB 0)
+            (if (== (ld h b 1) 0)
+              (do (vpush1 h T_IVB 0) (vpush1 h T_IVB 0) (vpush1 h T_IVB (neg 1)) (vpush1 h T_IVB (neg 1)))
+              (fiv-load h T_IVB (ld h b 0) (ld h b 1)))
+            (fiv-intersect h T_IVA T_IVB T_IVC)
+            (let [nf (mk-float-from h w T_IVC 1)] (vpush1 h T_STK nf))
+            (return 0))))
+    (if (and (== ka K_SIMPLE) (== kb K_SIMPLE))
+      (do (if (== (ld h a 0) (ld h b 0)) (vpush1 h T_STK a)) (return 0)))
+    (if (or (and (== ka K_TEXT) (== kb K_TEXT)) (and (== ka K_BYTES) (== kb K_BYTES)))
+      (do (let [^:mut lo (ld h a 0)
+                ^:mut hi (ld h a 1)]
+            (if (> (ld h b 0) lo) (set lo (ld h b 0)))
+            (if (< (ld h b 1) hi) (set hi (ld h b 1)))
+            (if (> lo hi) (return 0))
+            (let [xa (ld h a 2)
+                  xb (ld h b 2)]
+              (if (== ka K_TEXT)
+                (do (if (or (or (< xa 0) (< xb 0)) (== xa xb))
+                      (do (let [^:mut x xa]
+                            (if (< x 0) (set x xb))
+                            (let [nt (mk-text h lo hi x)] (vpush1 h T_STK nt))))
+                      (do (let [ta (mk-text h lo hi xa)
+                                tb (mk-text h lo hi xb)
+                                an (mk-and h ta tb)]
+                            (vpush1 h T_STK an))))
+                    (return 0)))
+              (let [^:mut m xa]
+                (if (< m 0) (set m xb))
+                (if (and (>= xa 0) (and (>= xb 0) (!= xa xb)))
+                  (do (let [^:mut ml (bid-len h xa)]
+                        (if (< (bid-len h xb) ml) (set ml (bid-len h xb)))
+                        (vtrunc h T_TMP2 0)
+                        (for [^I32 r 0 ml]
+                          (vpush1 h T_TMP2 (bit-and (bid-byte h xa r) (bid-byte h xb r))))
+                        (set m (intern h T_TMP2 0 ml)))))
+                (let [nb (mk-bytes h lo hi m)] (vpush1 h T_STK nb))
+                (return 0))))))
+    (let [an2 (mk-and h a b)]
+      (vpush1 h T_STK an2))
+    (return 0)))
+
+(defn ^:pub ^I32 ctl-and [^Ints h ^I32 target ^I32 ctl]
+  (let [from (vlen h T_STK)]
+    (if (not (charge h (* (ts-n h target) (ts-n h ctl)))) (return (neg 1)))
+    (for [^I32 i 0 (ts-n h target)]
+      (for [^I32 j 0 (ts-n h ctl)]
+        (let [a (ts-leaf h target i)
+              b (ts-leaf h ctl j)]
+          (meet h a b))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ .regexp
+
+(defn ^:pub ^I32 ctl-regexp [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (let [lit (single-lit h ctl)
+        from (vlen h T_STK)]
+    (if (or (< lit 0) (!= (bid-byte h lit 0) (bit-and (bid-byte h lit 0) 127)))
+      (return (fail h ERR_CONTROL_VALUE pos)))
+    (if (!= (sar (bid-byte h lit 0) 5) 3) (return (fail h ERR_CONTROL_VALUE pos)))
+    (comment "The pattern is the literal's content (its encoding minus the head).")
+    (let [hl (enc-head-len h lit)
+          plen (- (bid-len h lit) hl)]
+      (vtrunc h T_TMP2 0)
+      (for [^I32 i 0 plen]
+        (vpush1 h T_TMP2 (bid-byte h lit (+ hl i))))
+      (let [pat (intern h T_TMP2 0 plen)
+            rx (rx-compile h pat pos)]
+        (if (< rx 0) (return (neg 1)))
+        (for [^I32 j 0 (ts-n h target)]
+          (let [t (ts-leaf h target j)
+                k (lk h t)]
+            (if (== k K_TEXT)
+              (if (< (ld h t 2) 0)
+                (do (let [nt (mk-text h (ld h t 0) (ld h t 1) rx)] (vpush1 h T_STK nt)))
+                (do (let [t2 (mk-text h (ld h t 0) (ld h t 1) rx)
+                          an (mk-and h t t2)]
+                      (vpush1 h T_STK an))))
+              (if (and (or (== k K_LIT) (== k K_LITSET)) (== (leaf-mask h t) 8))
+                (do (let [probe (mk-text h 0 INF rx)]
+                      (filter-lits h t 2 probe 0)))
+                (return (target-error h pos))))))
+        (if (erred h) (return (neg 1)))
+        (return (ts-make h from))))))
+
+;; ------------------------------------------------------------ .cbor / .cborseq
+
+(defn ^:pub ^I32 ctl-cbor [^Ints h ^I32 target ^I32 embed ^I32 pos]
+  (comment "Combine the byte-string target with the EMBED leaf `embed`.")
+  (let [from (vlen h T_STK)]
+    (for [^I32 i 0 (ts-n h target)]
+      (let [t (ts-leaf h target i)
+            k (lk h t)]
+        (if (== k K_BYTES)
+          (if (and (and (== (ld h t 0) 0) (== (ld h t 1) INF)) (< (ld h t 2) 0))
+            (vpush1 h T_STK embed)
+            (do (let [an (mk-and h t embed)] (vpush1 h T_STK an))))
+          (return (target-error h pos)))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
+
+;; ------------------------------------------------------------ .cat
+
+(defn ^:pub ^I32 ctl-cat [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (let [a (single-lit h target)
+        b (single-lit h ctl)]
+    (if (or (< a 0) (< b 0)) (return (fail h ERR_CONTROL_VALUE pos)))
+    (let [ma (sar (bid-byte h a 0) 5)
+          mb (sar (bid-byte h b 0) 5)]
+      (if (or (!= ma mb) (or (< ma 2) (> ma 3))) (return (fail h ERR_CONTROL_VALUE pos)))
+      (let [ha (enc-head-len h a)
+            hb (enc-head-len h b)]
+        (vtrunc h T_TMP2 0)
+        (for [^I32 i ha (bid-len h a)] (vpush1 h T_TMP2 (bid-byte h a i)))
+        (for [^I32 j hb (bid-len h b)] (vpush1 h T_TMP2 (bid-byte h b j)))
+        (let [enc (enc-string h ma T_TMP2 0 (vlen h T_TMP2))
+              l (mk-lit h enc)]
+          (return (ts-of1 h l)))))))

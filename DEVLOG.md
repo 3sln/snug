@@ -323,10 +323,57 @@ slower); allocated head tuples; validating wrapper constructors in build
   normative charge schedule). q9 (read-only Program tag) and q21 (end-bounded
   scanner helpers for embedded documents) handed to the P1 owner.
 
-- [ ] **P3.2 — Compiler front end** (lexer, parser, resolver, generics,
+- [~] **P3.2 — Compiler front end** (lexer, parser, resolver, generics,
   sockets, prelude).
-- [ ] **P3.3 — Normaliser and lowering** (typesets, map factors and
+- [~] **P3.3 — Normaliser and lowering** (typesets, map factors and
   alternatives, determinism rule, array automata, regexps).
+
+  *Status 2026-10-29 (compiler engineer): working end to end; gates green.*
+  The compiler is kin in `kin/compile/*.kin` (namespaces `snug.compile.*`:
+  arena, lex, parse, prelude, rules, bytes, regexp, glush, leaf, ctl, maps,
+  arrays, lower, emit, main), the structural verifier `vm-verify`
+  (program.md §11) in `kin/program/verify.kin` (`snug.program.verify`; **the
+  compiler engineer builds it**, VM engineer please do not duplicate), both
+  generated into `gen/js` and `gen/rust` (`snug.project` now also lists
+  `kin/compile/` and `kin/program/`). Hosts: `host/js/src/compile.mjs`
+  (`compile(text, {profile, limits}) -> {program, pool, rules}`, throws
+  `SchemaError {code, line, column, rule}`) and `host/rust/src/compile.rs`
+  (`compile(text, profile, limits) -> Result<Compiled, SchemaError>`).
+  **compile() works on the whole corpus** (VM engineer: Programs are ready to
+  consume; the verifier needs `len(S) >= 48 + 2·VM_MARK_CAP` with
+  `VM_MARK_CAP >= N_LEAVES` and answers −2 otherwise; it checks lit runs in
+  ascending order, a stricter reading of "runs may not overlap").
+  Pipeline as architecture §5.1: lexer (RFC 8610 App. B + RFC 9682: `\u{…}`,
+  surrogate pairs, h''/b64'' with whitespace and h'' comments, hex floats),
+  depth-limited recursive descent into an int AST, rule table (sockets,
+  `/=` `//=`, generics), lowering with monomorphised memoised generics and the
+  instantiation limit, nonproductive-recursion detection, containers via a
+  worklist, maps (§4.3: top-level `//` split, group occurrence exact or
+  refused, unsatisfiable alternatives dropped, determinism rule, cut rules,
+  factors under §4.3.3 only), arrays (Glushkov, counters under the
+  predecessor condition else unrolled, regular tail recursion), I-Regexp
+  (§4.7, refusing `\p \d \w \s \x`), controls (§4.6), closure chains and
+  scratch sizing (§10, §12), and the exact program.md layout. Every phase
+  charges the compile budget; every limit of §7 (plus leaves, q18) is checked
+  prospectively.
+  Gates run (all ok, 2026-10-29): `bb compile-test` — 268/268 corpus
+  schemas compile on JS and Rust (debug); 31/31 expected refusals with the
+  expected code family; 301/301 identical across hosts (words, pool, or
+  error fields); 269/269 Programs pass `vm-verify` on both hosts; program.md
+  §15 compiles to exactly its 286 words and 14-byte pool on both hosts;
+  2 420/2 420 seeded invalid Programs refused; 10 760 random corruptions with
+  no crash and identical verdicts across hosts. Fuzz, drift and timings:
+  see the next entries as they land.
+  Learnt: (1) kin's JS target requires every local name unique per function
+  (not per block) and Rust's borrow checker forbids nesting a call that
+  takes the arena mutably inside another such call's arguments (read-only
+  `IntsR` reads may nest: two-phase borrows) — so every arena reader takes
+  `IntsR` and is checked, writers are checked and record a sticky
+  ERR_INTERNAL; (2) a corrupt Program's words must never size host memory
+  (the gate clamps the mark cap to 2^20 before verifying); (3) container
+  leaves made at once and filled from a worklist make recursion through maps,
+  arrays, tags and `.cbor` a reference, never a host recursion, and the leaf
+  numbering walk is iterative, so no schema can exhaust a host stack.
 - [ ] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
 - [~] **P3.5 — Conformance corpus** (study probes and contracts with expected
@@ -799,6 +846,130 @@ next to the I/O it waits on, and windows themselves cost almost nothing.
 **Alternatives**: one resumable walk for everything (simpler, one walk to
 review; costs the buffer 15–180% on this evidence); re-take at P3.4, where
 per-item VM work is larger and the walk's share smaller.
+- [ ] **Signed off** (owner)
+
+### D031 — The prelude is CDDL text in kin; schema rules shadow prelude rules
+**Decision**: RFC 8610 Appendix D is a `defdata` byte table in
+`kin/compile/prelude.kin` (the text is in its comment), parsed with every
+schema after the schema's rules. A schema rule with a prelude name replaces
+the prelude rule (no error); duplicate `=` definitions within the schema are
+`duplicate_rule`. `#6.2(bstr)` / `#6.3(bstr)` (the prelude's `biguint`,
+`bignint`, or any unconstrained byte-string content) lower to INT ranges with
+BIGOK, so `integer` is one INT leaf over (−∞, +∞).
+**Why**: one prelude by construction on every host (D003); shadowing is the
+reading under which existing schemas that define e.g. `text` keep working;
+the profile admits only canonical bignums, so tag 2/3 over `bstr` IS the
+bignum range and controls like `.lt` apply to it.
+**Alternatives**: a host-provided constant (two copies to keep equal);
+refusing prelude redefinition.
+- [ ] **Signed off** (owner)
+
+### D032 — The decimal-float port is a two-round call, not a kin host form
+**Decision**: the lexer rounds hex floats itself (exact, ties to even) and,
+for decimal float literals (≤ 17 significant digits, D020), records their
+spans and stops with `ERR_NEED_FLOATS`; the host converts each span with
+`Number()` / `str::parse::<f64>` and calls again with the bit patterns. kin
+refuses ±∞ and a nonzero literal that rounds to zero (`float_literal`).
+**Why**: D020's port without a host-linkage form in `snug.targets` /
+`snug.project` (another work item's files) or generated code importing host
+modules; the hosts already loop for the arena (D033), so one more round costs
+nothing and the decision stays in kin.
+**Alternatives**: a `@kin:link` port (`:link` on both targets, `:host` scan);
+big-integer decimal parsing in kin (rejected by D020).
+- [ ] **Signed off** (owner)
+
+### D033 — The compiler works in one host-allocated int arena, grown by retry
+**Decision**: the compiler allocates nothing: vectors live in an `Int32Array`
+/ `Vec<i32>` arena the host passes; when it is full the compile stops with
+`ERR_ARENA` and the host retries from scratch with twice the arena, up to
+2^24 words (then `limit_memory`). Every arena access is checked. The result
+never depends on the arena size because every limit and the compile budget
+are counted, not measured.
+**Why**: kin has no allocation forms and both targets need identical
+behaviour; one arena reused across compiles (JS: module-level; Rust:
+thread-local) keeps warm compiles allocation-free.
+**Alternatives**: growable host vectors through new vocabulary forms
+(`Vec<i32>` has no `&mut [i32]` spelling in kin calls); fixed per-limit
+tables (megabytes for tiny schemas).
+- [ ] **Signed off** (owner)
+
+### D034 — Normaliser policies that decide Program bytes
+**Decision**: integer literals and ranges are INT leaves (not LIT); an INT
+leaf is canonical (BIGOK exactly when an interval reaches a bignum region);
+in one typeset all INT leaves merge, FLOAT leaves merge when widths or
+intervals agree, ≥ 2 text (or byte) literals become one LITSET, ANY absorbs
+the rest; `#0`/`#1`/`#2`/`#3` are INT/INT/BYTES/TEXT leaves; a key typeset
+that is one text literal or one major 0/1 integer is a literal key; a map
+leaf whose every alternative is unsatisfiable is dropped (with AND/NOT over
+it). Leaf numbering (program.md §17 q11) visits a leaf's children in this
+order: a map's alternatives' literal entries (factor, pool, alternative,
+source order), then each pool's group entries (key, value); an array's
+positions; a tag's or embedded document's content; TS_ANY for ANY and bare
+`#4/#5/#6`; AND/NOT operands. Typesets are numbered in first-reach order of
+that walk with hash-consing by final content; groups and regexps by first
+use; interval/float-interval/LITSET runs per leaf in leaf order.
+**Why**: program.md fixes the format and the worked example, not these
+choices; writing them down makes the bytes reproducible from the text alone
+(the worked example's int-as-one-INT policy is the first item).
+**Alternatives**: LIT leaves for integer literals; per-occurrence leaves.
+- [ ] **Signed off** (owner)
+
+### D035 — Map normal form: where the architecture leaves room
+**Decision**: only a literal top-level `//` of a map's group splits it into
+map leaves; factor candidates are non-member entries whose altset has ≥ 2
+literal-only alternatives; factors are decided in three phases (a key shared
+with the residual or another candidate merges; then DISJOINT by §4.3.3 (1);
+then all remaining are ABSORB if the residual has one alternative and every
+overlapping residual entry absorbs, else all merge, so the ABSORB condition
+holds for the final residual); the determinism rule is checked before
+entries with max 0 are dropped (adversarial `seeded-001` expects
+`map_overlap` for `0*0 tstr => uint`); a keyless type entry in a map is
+`map_key`; a literal key the profile cannot carry (bytes, float, bignum) makes
+a required member unsatisfiable and an optional one absent; occurrence
+counts ≥ 2^24 are unbounded for maxima and unsatisfiable for minima.
+**Why**: each is the narrowest reading consistent with §4.3 and the corpus.
+**Alternatives**: splitting top-level choices reached through named groups
+(changes only witness order and cost); refusing unrepresentable keys.
+- [ ] **Signed off** (owner)
+
+### D036 — Arrays: counters, unrolling and regular recursion, precisely
+**Decision**: a repetition of ONE entry with min ≥ 2 or 2 ≤ max < ∞ is a
+tentative counter; after building, it keeps the counter only if no
+predecessor q ≠ p can match a value p can match (conservative typeset
+overlap) and p does not follow itself through an enclosing loop; otherwise
+it unrolls and the automaton is rebuilt until stable. Group recursion in an
+array is allowed only where every step from the recursive reference to the
+group's end is the last entry of a sequence under occurrences ≤ 1 (tail
+position); anything else is `group_recursion`, as is any group recursion in a
+map or an enumeration.
+**Why**: §4.4's predecessor condition plus the one case it does not cover
+(re-entry through an outer loop would need a counter reset).
+- [ ] **Signed off** (owner)
+
+### D037 — Schema errors: names, positions, lexing leniency
+**Decision**: errors carry a stable code name (`snug.compile.main
+error-name`: syntax, limit_*, undefined_name, duplicate_rule,
+type_group_mismatch, generic_arity, nonproductive, group_recursion, unwrap,
+enum, range, float_literal, control_target, control_value,
+unsupported_control, unknown_control, regexp, map_key,
+map_group_occurrence, map_cut, map_overlap, tag, major, profile,
+empty_schema), a 1-based line, a 1-based column counted in code points (0, 0
+when not about the text), and the innermost schema rule being compiled. The
+lexer accepts HT as whitespace and requires the whole text to be
+well-formed UTF-8; string literals follow RFC 8610's SCHAR/BCHAR ranges.
+**Why**: hosts must report identically (columns in UTF-16 units would make
+JS and Rust disagree); HT appears in real schemas and changes no meaning.
+- [ ] **Signed off** (owner)
+
+### D038 — Controls the architecture left open
+**Decision**: `.det` and `.plus` are refused (`unsupported_control`) until
+there is a use; `.cat` concatenates two literals of one kind; `.eq` with a
+composite controller (e.g. `[1]`) is an AND, `.ne` with one is refused;
+comparisons mixing integer targets and float controllers (or the reverse)
+convert exactly for |x| < 2^53 and refuse otherwise; `.bits` masks keep at
+least one byte (an all-zero mask still constrains); `.feature` and
+`.default` return the target.
+**Why**: exact or refused, never a different meaning (R1).
 - [ ] **Signed off** (owner)
 ---
 

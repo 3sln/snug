@@ -1,0 +1,220 @@
+;; Interned byte strings ("bids"), the CBOR encodings the compiler builds
+;; (text, byte string and integer literals, map keys), and arithmetic on
+;; big-endian magnitudes. Everything numeric is bytes and i32 (D009): an
+;; integer literal of any size is a sign and a minimal big-endian magnitude.
+;;
+;; A bid indexes T_BRUN (off, len, hash); its bytes live in T_BYTE, one byte
+;; per word. Equal byte strings intern to one bid, so equality of bids is
+;; equality of contents and a leaf can hash a bid as a plain word.
+(ns snug.compile.bytes
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
+                                        mix ht-init ht-start ht-id ht-next ht-put
+                                        H_R0 H_R1 T_BYTE T_BRUN T_HBYTE T_STK5 T_LITB]]))
+
+(defn ^:pub ^I32 bid-off [^IntsR h ^I32 b] (return (vget h T_BRUN (* b 3))))
+(defn ^:pub ^I32 bid-len [^IntsR h ^I32 b] (return (vget h T_BRUN (+ (* b 3) 1))))
+(defn ^:pub ^I32 bid-byte [^IntsR h ^I32 b ^I32 i]
+  (return (vget h T_BYTE (+ (vget h T_BRUN (* b 3)) i))))
+(defn ^:pub ^I32 nbids [^IntsR h] (return (quot (vlen h T_BRUN) 3)))
+
+(defn ^:pub ^Bool bytes-init [^Ints h]
+  (vtrunc h T_BYTE 0)
+  (vtrunc h T_BRUN 0)
+  (return (ht-init h T_HBYTE 256)))
+
+(defn ^:pub ^I32 intern [^Ints h ^I32 src ^I32 off ^I32 len]
+  (comment "The bid of the bytes src[off, off+len) (src: a vector of bytes as words).")
+  (if (not (charge h (+ 1 (quot len 8)))) (return (neg 1)))
+  (let [^:mut hsh (mix 2128831035 len)]
+    (for [^I32 i 0 len]
+      (set hsh (mix hsh (vget h src (+ off i)))))
+    (let [^:mut s (ht-start h T_HBYTE hsh)]
+      (forever
+       (let [id (ht-id h T_HBYTE s)]
+         (if (< id 0) (break))
+         (if (and (== (vget h T_BRUN (+ (* id 3) 2)) hsh) (== (bid-len h id) len))
+           (do (let [bo (bid-off h id)
+                     ^:mut same true
+                     ^:mut j 0]
+                 (while (and same (< j len))
+                   (if (!= (vget h T_BYTE (+ bo j)) (vget h src (+ off j))) (set same false))
+                   (set j (+ j 1)))
+                 (if same (return id)))))
+         (set s (ht-next h T_HBYTE s))))
+      (let [at (vlen h T_BYTE)
+            id2 (quot (vlen h T_BRUN) 3)]
+        (for [^I32 k 0 len]
+          (let [byte (vget h src (+ off k))]
+            (vpush1 h T_BYTE byte)))
+        (vpush1 h T_BRUN at)
+        (vpush1 h T_BRUN len)
+        (vpush1 h T_BRUN hsh)
+        (if (erred h) (return (neg 1)))
+        (if (not (ht-put h T_HBYTE s id2 hsh)) (return (neg 1)))
+        (return id2)))))
+
+(defn ^:pub ^I32 bid-cmp [^IntsR h ^I32 a ^I32 b]
+  (comment "<0, 0, >0: bytewise lexicographic, a proper prefix first (RFC 8949"
+           "§4.2.1 order of encoded keys).")
+  (if (== a b) (return 0))
+  (let [la (bid-len h a)
+        lb (bid-len h b)
+        oa (bid-off h a)
+        ob (bid-off h b)
+        ^:mut m la]
+    (if (< lb m) (set m lb))
+    (for [^I32 i 0 m]
+      (let [x (vget h T_BYTE (+ oa i))
+            y (vget h T_BYTE (+ ob i))]
+        (if (!= x y) (return (- x y)))))
+    (return (- la lb))))
+
+;; ------------------------------------------------------------ encodings
+
+(defn ^:pub head-push [^Ints h ^I32 dst ^I32 major ^I32 hi ^I32 lo]
+  (comment "Append the shortest CBOR head (major, 64-bit argument hi:lo) to vector dst.")
+  (let [m (shl major 5)]
+    (if (!= hi 0)
+      (do (vpush1 h dst (bit-or m 27))
+          (vpush1 h dst (bit-and (ushr hi 24) 255))
+          (vpush1 h dst (bit-and (ushr hi 16) 255))
+          (vpush1 h dst (bit-and (ushr hi 8) 255))
+          (vpush1 h dst (bit-and hi 255))
+          (vpush1 h dst (bit-and (ushr lo 24) 255))
+          (vpush1 h dst (bit-and (ushr lo 16) 255))
+          (vpush1 h dst (bit-and (ushr lo 8) 255))
+          (vpush1 h dst (bit-and lo 255)))
+      (if (or (< lo 0) (> lo 65535))
+        (do (vpush1 h dst (bit-or m 26))
+            (vpush1 h dst (bit-and (ushr lo 24) 255))
+            (vpush1 h dst (bit-and (ushr lo 16) 255))
+            (vpush1 h dst (bit-and (ushr lo 8) 255))
+            (vpush1 h dst (bit-and lo 255)))
+        (if (> lo 255)
+          (do (vpush1 h dst (bit-or m 25))
+              (vpush1 h dst (bit-and (ushr lo 8) 255))
+              (vpush1 h dst (bit-and lo 255)))
+          (if (> lo 23)
+            (do (vpush1 h dst (bit-or m 24))
+                (vpush1 h dst lo))
+            (vpush1 h dst (bit-or m lo))))))))
+
+(defn ^:pub ^I32 enc-string [^Ints h ^I32 major ^I32 src ^I32 off ^I32 len]
+  (comment "The bid of the encoding of a text (major 3) or byte (2) string whose"
+           "content is src[off, off+len).")
+  (vtrunc h T_STK5 0)
+  (head-push h T_STK5 major 0 len)
+  (for [^I32 i 0 len]
+    (let [byte (vget h src (+ off i))]
+      (vpush1 h T_STK5 byte)))
+  (if (erred h) (return (neg 1)))
+  (return (intern h T_STK5 0 (vlen h T_STK5))))
+
+(defn ^:pub ^I32 mag-word [^IntsR h ^I32 src ^I32 off ^I32 len ^I32 w]
+  (comment "Word w (0 = least significant 32 bits) of the magnitude src[off, len).")
+  (let [^:mut v 0]
+    (for [^I32 i 0 4]
+      (let [pos (- (- (+ off len) 1) (+ (* w 4) i))]
+        (if (and (>= pos off) (< pos (+ off len)))
+          (set v (bit-or v (shl (vget h src pos) (* 8 i)))))))
+    (return v)))
+
+(defn ^:pub ^I32 enc-int-key [^Ints h ^:mut ^I32 negative ^I32 src ^I32 off ^I32 len]
+  (comment "The bid of the encoding of an integer literal (sign + magnitude in src)"
+           "if it is a major 0/1 item (|v| fits 64 bits after the -1 for negatives),"
+           "else -1 (a bignum key, which the profile cannot carry).")
+  (if (> len 8) (return (neg 1)))
+  (let [^:mut hi (mag-word h src off len 1)
+        ^:mut lo (mag-word h src off len 0)]
+    (if (!= negative 0)
+      (do (if (and (== hi 0) (== lo 0)) (set negative 0)
+              (do (comment "n = |v| - 1")
+                  (if (== lo 0) (set hi (- hi 1)))
+                  (set lo (- lo 1))))))
+    (vtrunc h T_STK5 0)
+    (head-push h T_STK5 negative hi lo)
+    (if (erred h) (return (neg 1)))
+    (return (intern h T_STK5 0 (vlen h T_STK5)))))
+
+;; ------------------------------------------------------------ magnitudes
+;; A magnitude is a bid of big-endian bytes, minimal (no leading zero byte);
+;; zero is the empty string.
+
+(defn ^:pub ^I32 mag-of [^Ints h ^I32 src ^I32 off ^I32 len]
+  (comment "The magnitude bid of src[off, off+len), leading zeros dropped.")
+  (let [^:mut o off
+        ^:mut n len]
+    (while (and (> n 0) (== (vget h src o) 0))
+      (set o (+ o 1))
+      (set n (- n 1)))
+    (return (intern h src o n))))
+
+(defn ^:pub ^I32 mag-cmp [^IntsR h ^I32 a ^I32 b]
+  (comment "Compare two minimal magnitudes numerically.")
+  (let [la (bid-len h a)
+        lb (bid-len h b)]
+    (if (!= la lb) (return (- la lb)))
+    (return (bid-cmp h a b))))
+
+(defn ^:pub ^I32 mag-add1 [^Ints h ^I32 a ^I32 delta]
+  (comment "a + 1 (delta 1) or a - 1 (delta -1, a > 0), as a magnitude bid.")
+  (let [n (bid-len h a)]
+    (vtrunc h T_STK5 0)
+    (vpush1 h T_STK5 0)
+    (for [^I32 i 0 n]
+      (let [byte (bid-byte h a i)]
+        (vpush1 h T_STK5 byte)))
+    (let [^:mut k (vlen h T_STK5)
+          ^:mut carry 1]
+      (while (and (> carry 0) (> k 0))
+        (set k (- k 1))
+        (let [x (+ (vget h T_STK5 k) delta)]
+          (if (> x 255)
+            (vset h T_STK5 k 0)
+            (if (< x 0)
+              (vset h T_STK5 k 255)
+              (do (vset h T_STK5 k x) (set carry 0)))))))
+    (if (erred h) (return (neg 1)))
+    (return (mag-of h T_STK5 0 (vlen h T_STK5)))))
+
+(defn ^:pub ^I32 mag-hi [^IntsR h ^I32 a]
+  (comment "Bits 32..63 of a magnitude of at most 8 bytes.")
+  (return (mag-word h T_BYTE (bid-off h a) (bid-len h a) 1)))
+
+(defn ^:pub ^I32 mag-lo [^IntsR h ^I32 a]
+  (return (mag-word h T_BYTE (bid-off h a) (bid-len h a) 0)))
+
+(defn ^:pub ^I32 mag-from64 [^Ints h ^I32 hi ^I32 lo]
+  (comment "The magnitude bid of the unsigned 64-bit value hi:lo.")
+  (vtrunc h T_STK5 0)
+  (vpush1 h T_STK5 (bit-and (ushr hi 24) 255))
+  (vpush1 h T_STK5 (bit-and (ushr hi 16) 255))
+  (vpush1 h T_STK5 (bit-and (ushr hi 8) 255))
+  (vpush1 h T_STK5 (bit-and hi 255))
+  (vpush1 h T_STK5 (bit-and (ushr lo 24) 255))
+  (vpush1 h T_STK5 (bit-and (ushr lo 16) 255))
+  (vpush1 h T_STK5 (bit-and (ushr lo 8) 255))
+  (vpush1 h T_STK5 (bit-and lo 255))
+  (if (erred h) (return (neg 1)))
+  (return (mag-of h T_STK5 0 8)))
+
+(defn ^:pub ^I32 mag-pow256 [^Ints h ^I32 k ^I32 minus1]
+  (comment "256^k (minus1 = 0) or 256^k - 1 (minus1 = 1), k >= 0, as a magnitude.")
+  (vtrunc h T_STK5 0)
+  (if (!= minus1 0)
+    (for [^I32 _i 0 k] (vpush1 h T_STK5 255))
+    (do (vpush1 h T_STK5 1)
+        (for [^I32 _j 0 k] (vpush1 h T_STK5 0))))
+  (if (erred h) (return (neg 1)))
+  (return (mag-of h T_STK5 0 (vlen h T_STK5))))
+
+(defn ^:pub ^I32 mag-small [^IntsR h ^I32 a]
+  (comment "The magnitude as an i32 if it is below 2^31, else -1.")
+  (let [n (bid-len h a)]
+    (if (> n 4) (return (neg 1)))
+    (let [v (mag-word h T_BYTE (bid-off h a) n 0)]
+      (if (< v 0) (return (neg 1)))
+      (return v))))

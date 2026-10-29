@@ -1,0 +1,553 @@
+;; The CDDL parser: recursive descent over the tokens (RFC 8610 Appendix B,
+;; RFC 9682), depth-limited, into 8-word AST records in T_AST:
+;;
+;;     kind, tok, next, a, b, c, d, e
+;;
+;; `tok` is the token the node is reported at; `next` chains siblings (the
+;; type1s of a choice, the entries of a group choice, generic arguments).
+;;
+;; GROUPS AND TYPES. Inside `( )` the grammar's ordered choice is resolved
+;; without backtracking: a parenthesised group is parsed as a group, and if a
+;; type operator follows (`/`, `..`, `.ctl`, `=>`, `^`) it must be a single
+;; keyless entry and becomes the parenthesised type. A rule `name = X` parses X
+;; as a group entry; a single keyless entry with no occurrence is a type rule
+;; (`a = (b)` included); anything else is a group rule. A rule whose type is
+;; just a name is decided by usage later (snug.compile.rules).
+(ns snug.compile.parse
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst
+                              forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot bit-or shl ushr < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vget vset
+                                        ERR_SYNTAX ERR_LIM_NESTING ERR_LIM_AST INF
+                                        H_DEPTH H_LIM_NEST H_LIM_AST H_N_AST H_G0 H_G1 H_G2 H_G3 H_R0 ERR_TAG
+                                        T_AST T_LITB]]
+            [snug.compile.lex :refer [tk-kind tk-start tk-end tk-a tk-b tk-c
+                                      TK_EOF TK_ID TK_INT TK_FLOAT TK_TEXT TK_BYTES
+                                      TK_ASSIGN TK_TASSIGN TK_GASSIGN TK_SLASH TK_DSLASH
+                                      TK_LPAREN TK_RPAREN TK_LBRACE TK_RBRACE TK_LBRACK
+                                      TK_RBRACK TK_LT TK_GT TK_COMMA TK_COLON TK_ARROW
+                                      TK_CARET TK_STAR TK_PLUS TK_QUEST TK_TILDE TK_AMP
+                                      TK_HASH TK_DOT TK_RANGE TK_CTL]]))
+
+(defconst ^:pub ^I32 N_RULE 1)
+(defconst ^:pub ^I32 N_PARAM 2)
+(defconst ^:pub ^I32 N_TYPE 3)
+(defconst ^:pub ^I32 N_RANGE 4)
+(defconst ^:pub ^I32 N_CTL 5)
+(defconst ^:pub ^I32 N_VALUE 6)
+(defconst ^:pub ^I32 N_NAME 7)
+(defconst ^:pub ^I32 N_MAP 8)
+(defconst ^:pub ^I32 N_ARRAY 9)
+(defconst ^:pub ^I32 N_UNWRAP 10)
+(defconst ^:pub ^I32 N_ENUM 11)
+(defconst ^:pub ^I32 N_TAG 12)
+(defconst ^:pub ^I32 N_MAJOR 13)
+(defconst ^:pub ^I32 N_ANY 14)
+(defconst ^:pub ^I32 N_GROUP 15)
+(defconst ^:pub ^I32 N_GRPCHOICE 16)
+(defconst ^:pub ^I32 N_MEMBER 17)
+(defconst ^:pub ^I32 N_ENT 18)
+(defconst ^:pub ^I32 N_SUBGRP 19)
+(defconst ^:pub ^I32 N_KEY 20)
+
+(defconst ^:pub ^I32 KEY_BARE 0)
+(defconst ^:pub ^I32 KEY_VALUE 1)
+(defconst ^:pub ^I32 KEY_TYPE 2)
+
+;; ------------------------------------------------------------ nodes
+
+(defn ^:pub ^I32 nk [^IntsR h ^I32 n] (return (vget h T_AST (* n 8))))
+(defn ^:pub ^I32 ntok [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 1))))
+(defn ^:pub ^I32 nnext [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 2))))
+(defn ^:pub ^I32 na [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 3))))
+(defn ^:pub ^I32 nb [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 4))))
+(defn ^:pub ^I32 nc [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 5))))
+(defn ^:pub ^I32 nd [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 6))))
+(defn ^:pub ^I32 ne [^IntsR h ^I32 n] (return (vget h T_AST (+ (* n 8) 7))))
+(defn ^:pub nset [^Ints h ^I32 n ^I32 field ^I32 v]
+  (comment "Field 0..7 of node n.")
+  (vset h T_AST (+ (* n 8) field) v))
+
+(defn ^:pub ^I32 npos [^IntsR h ^I32 n]
+  (comment "The source offset node n is reported at.")
+  (if (< n 0) (return (neg 1)))
+  (return (tk-start h (ntok h n))))
+
+(defn ^:pub ^I32 node [^Ints h ^I32 kind ^I32 tok ^I32 a ^I32 b ^I32 c]
+  (comment "A new node (next = -1, d = e = -1); counted against the AST limit.")
+  (let [cnt (+ (hg h H_N_AST) 1)]
+    (hs h H_N_AST cnt)
+    (if (> cnt (hg h H_LIM_AST))
+      (do (let [p (tk-start h tok)] (return (fail h ERR_LIM_AST p))))))
+  (if (not (charge h 1)) (return (neg 1)))
+  (let [at (vpush h T_AST 8)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_AST at kind)
+    (vset h T_AST (+ at 1) tok)
+    (vset h T_AST (+ at 2) (neg 1))
+    (vset h T_AST (+ at 3) a)
+    (vset h T_AST (+ at 4) b)
+    (vset h T_AST (+ at 5) c)
+    (vset h T_AST (+ at 6) (neg 1))
+    (vset h T_AST (+ at 7) (neg 1))
+    (return (quot at 8))))
+
+;; ------------------------------------------------------------ the cursor
+
+(defn ^:pub ^I32 cur [^IntsR h] (return (hg h H_G0)))
+(defn ^:pub ^I32 ck [^IntsR h] (return (tk-kind h (hg h H_G0))))
+(defn ^:pub ^I32 ck1 [^IntsR h] (return (tk-kind h (+ (hg h H_G0) 1))))
+(defn ^:pub adv [^Ints h]
+  (let [t (hg h H_G0)]
+    (if (!= (tk-kind h t) TK_EOF) (hs h H_G0 (+ t 1)))))
+
+(defn ^:pub ^Bool adjacent [^IntsR h ^I32 t]
+  (comment "Does token t+1 start exactly where token t ends?")
+  (return (== (tk-end h t) (tk-start h (+ t 1)))))
+
+(defn ^I32 syntax [^Ints h]
+  (comment "A syntax error at the current token.")
+  (let [p (tk-start h (cur h))]
+    (return (fail h ERR_SYNTAX p))))
+
+(defn ^Bool expect [^Ints h ^I32 kind]
+  (if (== (ck h) kind) (do (adv h) (return true)))
+  (syntax h)
+  (return false))
+
+(defn ^Bool enter [^Ints h]
+  (comment "One level deeper; false (and ERR_LIM_NESTING) past the nesting limit.")
+  (let [d (+ (hg h H_DEPTH) 1)]
+    (hs h H_DEPTH d)
+    (if (> d (hg h H_LIM_NEST))
+      (do (let [p (tk-start h (cur h))] (fail h ERR_LIM_NESTING p))
+          (return false)))
+    (return true)))
+
+(defn leave [^Ints h]
+  (let [d (hg h H_DEPTH)]
+    (hs h H_DEPTH (- d 1))))
+
+(defn ^I32 small-uint [^IntsR h ^I32 t]
+  (comment "The value of a non-negative TK_INT, saturated at INF.")
+  (let [off (tk-b h t)
+        len (tk-c h t)
+        ^:mut v 0]
+    (if (> len 4) (return INF))
+    (for [^I32 i 0 len]
+      (set v (+ (* v 256) (vget h T_LITB (+ off i))))
+      (if (or (< v 0) (> v 8388607))
+        (if (< i (- len 1)) (return INF))))
+    (if (< v 0) (return INF))
+    (return v)))
+
+(declarefn ^I32 parse-type ^I32 parse-type1 ^I32 parse-type2 ^I32 parse-group ^I32 parse-grpent ^I32 if-close)
+
+;; ------------------------------------------------------------ generics
+
+(defn ^I32 parse-args [^Ints h]
+  (comment "`<` type1 *(`,` type1) `>` (cursor on `<`): answers the first argument"
+           "(a chain through `next`) and leaves the count in h[H_G1].")
+  (adv h)
+  (let [^:mut first (neg 1)
+        ^:mut last (neg 1)
+        ^:mut n 0]
+    (forever
+     (let [^I32 t1 (parse-type1 h)]
+       (if (< t1 0) (return (neg 1)))
+       (if (< last 0) (set first t1) (nset h last 2 t1))
+       (set last t1)
+       (set n (+ n 1)))
+     (if (== (ck h) TK_COMMA)
+       (adv h)
+       (break)))
+    (if (not (expect h TK_GT)) (return (neg 1)))
+    (hs h H_G1 n)
+    (return first)))
+
+;; ------------------------------------------------------------ types
+
+(defn ^I32 parse-name [^Ints h ^I32 kind]
+  (comment "An id (cursor on it) with optional adjacent generic arguments, as a"
+           "node of `kind` (N_NAME, N_UNWRAP or N_ENUM): tok = the id, then"
+           "N_NAME/N_UNWRAP: a = first argument, b = count; N_ENUM: b, c.")
+  (let [t (cur h)]
+    (adv h)
+    (if (and (== (ck h) TK_LT) (adjacent h t))
+      (do (let [args (parse-args h)
+                cnt (hg h H_G1)]
+            (if (< args 0) (return (neg 1)))
+            (if (== kind N_ENUM) (return (node h kind t (neg 1) args cnt)))
+            (return (node h kind t args cnt 0)))))
+    (if (== kind N_ENUM) (return (node h kind t (neg 1) (neg 1) 0)))
+    (return (node h kind t (neg 1) 0 0))))
+
+(defn ^I32 parse-hash [^Ints h]
+  (comment "`#`, `#m`, `#m.n`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on `#`).")
+  (let [t (cur h)
+        m (tk-a h t)]
+    (adv h)
+    (if (< m 0) (return (node h N_ANY t 0 0 0)))
+    (if (> m 7) (return (fail h ERR_SYNTAX (tk-start h t))))
+    (let [^:mut mode 2
+          ^:mut hi 0
+          ^:mut lo 0
+          ^:mut texpr (neg 1)]
+      (if (== (ck h) TK_DOT)
+        (do (adv h)
+            (if (== (ck h) TK_LT)
+              (do (if (!= m 6) (return (syntax h)))
+                  (adv h)
+                  (set texpr (parse-type h))
+                  (if (< texpr 0) (return (neg 1)))
+                  (if (not (expect h TK_GT)) (return (neg 1)))
+                  (set mode 1))
+              (do (let [nt (cur h)]
+                    (if (or (!= (ck h) TK_INT) (!= (tk-a h nt) 0)) (return (syntax h)))
+                    (comment "The number: up to 8 magnitude bytes, as hi:lo.")
+                    (let [off (tk-b h nt)
+                          len (tk-c h nt)]
+                      (if (> len 8) (return (fail h ERR_TAG (tk-start h nt))))
+                      (for [^I32 i 0 len]
+                        (let [byte (vget h T_LITB (+ off i))]
+                          (set hi (bit-or (shl hi 8) (ushr lo 24)))
+                          (set lo (bit-or (shl lo 8) byte)))))
+                    (adv h)
+                    (set mode 0))))))
+      (if (!= m 6)
+        (do (if (== mode 1) (return (syntax h)))
+            (let [mj (node h N_MAJOR t m mode hi)]
+              (if (< mj 0) (return (neg 1)))
+              (nset h mj 6 lo)
+              (return mj))))
+      (comment "major 6: a content type in parentheses, unless bare `#6` / `#6.n`.")
+      (let [^:mut content (neg 1)]
+        (if (== (ck h) TK_LPAREN)
+          (do (adv h)
+              (set content (parse-type h))
+              (if (< content 0) (return (neg 1)))
+              (if (not (expect h TK_RPAREN)) (return (neg 1))))
+          (if (== mode 1) (return (syntax h))))
+        (let [tg (node h N_TAG t mode hi lo)]
+          (if (< tg 0) (return (neg 1)))
+          (nset h tg 6 texpr)
+          (nset h tg 7 content)
+          (return tg))))))
+
+(defn ^I32 parse-type2 [^Ints h]
+  (let [k (ck h)
+        t (cur h)]
+    (if (or (or (== k TK_INT) (== k TK_FLOAT)) (or (== k TK_TEXT) (== k TK_BYTES)))
+      (do (adv h) (return (node h N_VALUE t 0 0 0))))
+    (if (== k TK_ID) (return (parse-name h N_NAME)))
+    (if (== k TK_LPAREN)
+      (do (adv h)
+          (let [^I32 inner (parse-type h)]
+            (if (< inner 0) (return (neg 1)))
+            (if (not (expect h TK_RPAREN)) (return (neg 1)))
+            (return inner))))
+    (if (or (== k TK_LBRACE) (== k TK_LBRACK))
+      (do (adv h)
+          (let [^I32 close (if-close k)
+                ^I32 g (parse-group h close)]
+            (if (< g 0) (return (neg 1)))
+            (if (not (expect h close)) (return (neg 1)))
+            (if (== k TK_LBRACE) (return (node h N_MAP t g 0 0)))
+            (return (node h N_ARRAY t g 0 0)))))
+    (if (== k TK_TILDE)
+      (do (adv h)
+          (if (!= (ck h) TK_ID) (return (syntax h)))
+          (return (parse-name h N_UNWRAP))))
+    (if (== k TK_AMP)
+      (do (adv h)
+          (if (== (ck h) TK_LPAREN)
+            (do (adv h)
+                (let [^I32 g2 (parse-group h TK_RPAREN)]
+                  (if (< g2 0) (return (neg 1)))
+                  (if (not (expect h TK_RPAREN)) (return (neg 1)))
+                  (return (node h N_ENUM t g2 (neg 1) 0)))))
+          (if (!= (ck h) TK_ID) (return (syntax h)))
+          (let [en (parse-name h N_ENUM)]
+            (if (< en 0) (return (neg 1)))
+            (return en))))
+    (if (== k TK_HASH) (return (parse-hash h)))
+    (return (syntax h))))
+
+(defn ^I32 if-close [^I32 k]
+  (comment "The closing token for an opening `{` or `[`.")
+  (if (== k TK_LBRACE) (return TK_RBRACE))
+  (return TK_RBRACK))
+
+(defn ^I32 parse-type1-tail [^Ints h ^I32 lhs]
+  (comment "type2 already parsed as lhs: an optional range or control operator.")
+  (let [k (ck h)
+        t (cur h)]
+    (if (or (== k TK_RANGE) (== k TK_CTL))
+      (do (adv h)
+          (let [^I32 rhs (parse-type2 h)]
+            (if (< rhs 0) (return (neg 1)))
+            (if (== k TK_RANGE) (return (node h N_RANGE t lhs rhs (tk-a h t))))
+            (return (node h N_CTL t lhs rhs t)))))
+    (return lhs)))
+
+(defn ^:pub ^I32 parse-type1 [^Ints h]
+  (if (not (enter h)) (return (neg 1)))
+  (let [^I32 lhs (parse-type2 h)]
+    (if (< lhs 0) (return (neg 1)))
+    (let [r (parse-type1-tail h lhs)]
+      (leave h)
+      (return r))))
+
+(defn ^I32 parse-choice-tail [^Ints h ^I32 first]
+  (comment "type1 `first` already parsed: further `/ type1`s, as an N_TYPE.")
+  (let [ty (node h N_TYPE (ntok h first) first 1 0)
+        ^:mut last first
+        ^:mut n 1]
+    (if (< ty 0) (return (neg 1)))
+    (while (== (ck h) TK_SLASH)
+      (adv h)
+      (let [^I32 t1 (parse-type1 h)]
+        (if (< t1 0) (return (neg 1)))
+        (nset h last 2 t1)
+        (set last t1)
+        (set n (+ n 1))))
+    (nset h ty 4 n)
+    (return ty)))
+
+(defn ^:pub ^I32 parse-type [^Ints h]
+  (comment "type1 *(`/` type1), as an N_TYPE (a = first, b = count).")
+  (if (not (enter h)) (return (neg 1)))
+  (let [^I32 first (parse-type1 h)]
+    (if (< first 0) (return (neg 1)))
+    (let [r (parse-choice-tail h first)]
+      (leave h)
+      (return r))))
+
+;; ------------------------------------------------------------ groups
+
+(defn ^I32 parse-occur [^Ints h]
+  (comment "An optional occurrence at the cursor: answers min (-2 when there is"
+           "none) and leaves max (-1 = unbounded) in h[H_G2].")
+  (let [k (ck h)
+        t (cur h)]
+    (hs h H_G2 1)
+    (if (== k TK_QUEST) (do (adv h) (hs h H_G2 1) (return 0)))
+    (if (== k TK_PLUS) (do (adv h) (hs h H_G2 (neg 1)) (return 1)))
+    (if (== k TK_STAR)
+      (do (adv h)
+          (hs h H_G2 (neg 1))
+          (if (and (== (ck h) TK_INT) (adjacent h t))
+            (do (let [mt (cur h)]
+                  (if (!= (tk-a h mt) 0) (return (syntax h)))
+                  (hs h H_G2 (small-uint h mt))
+                  (adv h))))
+          (return 0)))
+    (if (and (and (== k TK_INT) (== (tk-a h t) 0))
+             (and (== (ck1 h) TK_STAR) (adjacent h t)))
+      (do (let [lo (small-uint h t)
+                st (+ t 1)]
+            (adv h)
+            (adv h)
+            (hs h H_G2 (neg 1))
+            (if (and (== (ck h) TK_INT) (adjacent h st))
+              (do (let [mt2 (cur h)]
+                    (if (!= (tk-a h mt2) 0) (return (syntax h)))
+                    (hs h H_G2 (small-uint h mt2))
+                    (adv h))))
+            (return lo))))
+    (return (neg 2))))
+
+(defn ^Bool type-op-follows [^IntsR h]
+  (comment "Does a type operator follow (so a parenthesised group was a type)?")
+  (let [k (ck h)]
+    (return (or (or (== k TK_SLASH) (== k TK_RANGE))
+                (or (== k TK_CTL) (or (== k TK_ARROW) (== k TK_CARET)))))))
+
+(defn ^:pub ^I32 group-as-type [^Ints h ^I32 g]
+  (comment "The type of a group that is one keyless entry with no occurrence, else -1.")
+  (if (or (< g 0) (!= (nb h g) 1)) (return (neg 1)))
+  (let [gc (na h g)]
+    (if (!= (nb h gc) 1) (return (neg 1)))
+    (let [e (na h gc)]
+      (if (!= (nk h e) N_ENT) (return (neg 1)))
+      (if (or (!= (na h e) 1) (!= (nb h e) 1)) (return (neg 1)))
+      (return (nc h e)))))
+
+(defn ^I32 finish-member [^Ints h ^I32 lo ^I32 hi ^I32 keytype ^I32 t]
+  (comment "type1 `keytype` parsed, cursor on `^` or `=>`: a member with a type key.")
+  (let [^:mut cut 0]
+    (if (== (ck h) TK_CARET) (do (adv h) (set cut 1)))
+    (if (not (expect h TK_ARROW)) (return (neg 1)))
+    (let [key (node h N_KEY t KEY_TYPE cut keytype)]
+      (if (< key 0) (return (neg 1)))
+      (let [^I32 val (parse-type h)]
+        (if (< val 0) (return (neg 1)))
+        (let [m (node h N_MEMBER t lo hi key)]
+          (if (< m 0) (return (neg 1)))
+          (nset h m 6 val)
+          (return m))))))
+
+(defn ^:pub ^I32 parse-grpent [^Ints h]
+  (comment "[occur] then a member, a type, or a parenthesised group.")
+  (let [t (cur h)
+        occ (parse-occur h)
+        ^:mut lo occ
+        ^:mut hi (hg h H_G2)]
+    (if (erred h) (return (neg 1)))
+    (if (== occ (neg 2)) (do (set lo 1) (set hi 1)))
+    (let [k (ck h)
+          t2 (cur h)]
+      (comment "---- `( group )`, possibly a parenthesised type after all")
+      (if (== k TK_LPAREN)
+        (do (adv h)
+            (if (not (enter h)) (return (neg 1)))
+            (let [^I32 g (parse-group h TK_RPAREN)]
+              (if (< g 0) (return (neg 1)))
+              (if (not (expect h TK_RPAREN)) (return (neg 1)))
+              (leave h)
+              (if (not (type-op-follows h))
+                (return (node h N_SUBGRP t lo hi g)))
+              (let [ty (group-as-type h g)]
+                (if (< ty 0) (return (syntax h)))
+                (let [t1 (parse-type1-tail h ty)]
+                  (if (< t1 0) (return (neg 1)))
+                  (if (or (== (ck h) TK_ARROW) (== (ck h) TK_CARET))
+                    (return (finish-member h lo hi t1 t)))
+                  (let [ch (parse-choice-tail h t1)]
+                    (if (< ch 0) (return (neg 1)))
+                    (if (or (== (ck h) TK_ARROW) (== (ck h) TK_CARET))
+                      (return (finish-member h lo hi ch t)))
+                    (return (node h N_ENT t lo hi ch))))))))
+      (comment "---- bareword or value key with `:`")
+      (if (and (== (ck1 h) TK_COLON)
+               (or (== k TK_ID) (or (or (== k TK_INT) (== k TK_FLOAT))
+                                    (or (== k TK_TEXT) (== k TK_BYTES)))))
+        (do (adv h)
+            (adv h)
+            (let [^:mut ^I32 kk KEY_VALUE]
+              (if (== k TK_ID) (set kk KEY_BARE))
+              (let [key2 (node h N_KEY t2 kk 1 (neg 1))]
+                (if (< key2 0) (return (neg 1)))
+                (let [^I32 val2 (parse-type h)]
+                  (if (< val2 0) (return (neg 1)))
+                  (let [m2 (node h N_MEMBER t lo hi key2)]
+                    (if (< m2 0) (return (neg 1)))
+                    (nset h m2 6 val2)
+                    (return m2)))))))
+      (comment "---- a type1: a key if `^`/`=>` follows, else a (choice) type entry")
+      (let [^I32 t3 (parse-type1 h)]
+        (if (< t3 0) (return (neg 1)))
+        (if (or (== (ck h) TK_ARROW) (== (ck h) TK_CARET))
+          (return (finish-member h lo hi t3 t)))
+        (let [ch3 (parse-choice-tail h t3)]
+          (if (< ch3 0) (return (neg 1)))
+          (return (node h N_ENT t lo hi ch3)))))))
+
+(defn ^Bool ends-choice [^IntsR h ^I32 close]
+  (let [k (ck h)]
+    (return (or (or (== k close) (== k TK_DSLASH)) (== k TK_EOF)))))
+
+(defn ^:pub ^I32 parse-group [^Ints h ^I32 close]
+  (comment "grpchoice *(`//` grpchoice) up to (not past) the token `close`: an"
+           "N_GROUP (a = first choice, b = count); each N_GRPCHOICE has a = first"
+           "entry, b = count.")
+  (if (not (enter h)) (return (neg 1)))
+  (let [g (node h N_GROUP (cur h) (neg 1) 0 0)
+        ^:mut lastc (neg 1)
+        ^:mut nch 0]
+    (if (< g 0) (return (neg 1)))
+    (forever
+     (let [gc (node h N_GRPCHOICE (cur h) (neg 1) 0 0)
+           ^:mut laste (neg 1)
+           ^:mut ne 0]
+       (if (< gc 0) (return (neg 1)))
+       (if (< lastc 0) (nset h g 3 gc) (nset h lastc 2 gc))
+       (set lastc gc)
+       (set nch (+ nch 1))
+       (while (not (ends-choice h close))
+         (let [^I32 e (parse-grpent h)]
+           (if (< e 0) (return (neg 1)))
+           (if (< laste 0) (nset h gc 3 e) (nset h laste 2 e))
+           (set laste e)
+           (set ne (+ ne 1)))
+         (if (== (ck h) TK_COMMA) (adv h)))
+       (nset h gc 4 ne))
+     (if (== (ck h) TK_DSLASH)
+       (adv h)
+       (break)))
+    (nset h g 4 nch)
+    (leave h)
+    (return g)))
+
+;; ------------------------------------------------------------ rules
+
+(defn ^I32 parse-rule [^Ints h]
+  (comment "name [genericparm] assign body. An N_RULE: a = name token, b = first"
+           "N_PARAM, c = assign (0 `=`, 1 `/=`, 2 `//=`), d = body, e = parameter"
+           "count; h[H_G3] = 1 if the body is a group entry (else a type).")
+  (let [t (cur h)]
+    (if (!= (ck h) TK_ID) (return (syntax h)))
+    (adv h)
+    (let [^:mut params (neg 1)
+          ^:mut np 0]
+      (if (and (== (ck h) TK_LT) (adjacent h t))
+        (do (adv h)
+            (let [^:mut lastp (neg 1)]
+              (forever
+               (if (!= (ck h) TK_ID) (return (syntax h)))
+               (let [pn (node h N_PARAM (cur h) 0 0 0)]
+                 (if (< pn 0) (return (neg 1)))
+                 (if (< lastp 0) (set params pn) (nset h lastp 2 pn))
+                 (set lastp pn)
+                 (set np (+ np 1)))
+               (adv h)
+               (if (== (ck h) TK_COMMA) (adv h) (break))))
+            (if (not (expect h TK_GT)) (return (neg 1)))))
+      (let [ak (ck h)
+            ^:mut assign 0]
+        (if (== ak TK_TASSIGN) (set assign 1)
+            (if (== ak TK_GASSIGN) (set assign 2)
+                (if (!= ak TK_ASSIGN) (return (syntax h)))))
+        (adv h)
+        (let [r (node h N_RULE t t params assign)]
+          (if (< r 0) (return (neg 1)))
+          (nset h r 7 np)
+          (if (== assign 1)
+            (do (let [^I32 ty (parse-type h)]
+                  (if (< ty 0) (return (neg 1)))
+                  (nset h r 6 ty)
+                  (hs h H_G3 0)
+                  (return r))))
+          (let [^I32 e (parse-grpent h)]
+            (if (< e 0) (return (neg 1)))
+            (comment "A single keyless entry without occurrence is a type (`=` only).")
+            (if (and (== assign 0) (and (== (nk h e) N_ENT) (and (== (na h e) 1) (== (nb h e) 1))))
+              (do (nset h r 6 (nc h e))
+                  (hs h H_G3 0)
+                  (return r)))
+            (if (and (== assign 0) (and (== (nk h e) N_SUBGRP) (and (== (na h e) 1) (== (nb h e) 1))))
+              (do (let [gt (group-as-type h (nc h e))]
+                    (if (>= gt 0)
+                      (do (nset h r 6 gt)
+                          (hs h H_G3 0)
+                          (return r))))))
+            (nset h r 6 e)
+            (hs h H_G3 1)
+            (return r)))))))
+
+(defn ^:pub ^I32 parse-rules [^Ints h ^I32 first-tok]
+  (comment "Every rule from token first-tok to TK_EOF: answers the first N_RULE (a"
+           "chain through `next`), -1 if there is none, -2 on error. An N_RULE's c is"
+           "assign + 4 * (1 if the body is a group entry).")
+  (hs h H_G0 first-tok)
+  (let [^:mut first (neg 1)
+        ^:mut last (neg 1)]
+    (while (!= (ck h) TK_EOF)
+      (let [r (parse-rule h)]
+        (if (< r 0) (return (neg 2)))
+        (let [g (hg h H_G3)
+              asg (nc h r)]
+          (nset h r 5 (+ asg (* 4 g))))
+        (if (< last 0) (set first r) (nset h last 2 r))
+        (set last r)))
+    (return first)))

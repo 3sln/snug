@@ -15,5 +15,7 @@
               :task (apply shell "kin/scripts/scan-test" *command-line-args*)}
   rscan-test {:doc "P6.1: the resumable scanner == the recursive one under window splits and yields, JS and Rust."
               :task (apply shell "kin/scripts/rscan-test" *command-line-args*)}
+  compile-test {:doc "P3.2/P3.3: every corpus schema through the compiler on JS and Rust; refusals, identity, program.md §15, vm-verify."
+                :task (apply shell "kin/scripts/compile-test" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}
