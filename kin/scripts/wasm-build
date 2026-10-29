@@ -25,7 +25,7 @@ sysroot=$("$rustc" --print sysroot)
 if [ ! -d "$sysroot/lib/rustlib/wasm32-unknown-unknown/lib" ]; then echo "SKIP wasm -- $tc lacks wasm32-unknown-unknown" >&2; exit 3; fi
 if [ ! -d "$sysroot/lib/rustlib/src/rust/library" ]; then echo "SKIP wasm -- $tc lacks rust-src (needed for -Zbuild-std)" >&2; exit 3; fi
 crate=.cache/snug-wasm
-SNUG_RS_ONLY="${SNUG_RS_ONLY:-cbor}" ./kin/scripts/rust-crate "$crate" host/wasm/src host/wasm/Cargo.toml
+SNUG_RS_ONLY="${SNUG_RS_ONLY:-cbor vm}" ./kin/scripts/rust-crate "$crate" host/wasm/src host/wasm/Cargo.toml
 lld="$sysroot/lib/rustlib/$("$rustc" -vV | sed -n 's/^host: //p')/bin/rust-lld"
 wrap="$crate/lld.sh"
 printf '#!/bin/sh\nDYLD_LIBRARY_PATH=%s/lib exec %s "$@"\n' "$sysroot" "$lld" > "$wrap.new"

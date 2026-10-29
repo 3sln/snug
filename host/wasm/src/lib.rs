@@ -80,3 +80,72 @@ pub extern "C" fn snug_rscan(len: usize, top_any: i32, cose: i32, max_bytes: i32
 pub extern "C" fn snug_err() -> i32 {
     ERR.load(Ordering::Relaxed)
 }
+
+// P3.4: the validator VM behind the same plain integer ABI. The host writes a
+// verified Program into `snug_prog_buf()` (words) and its pool into
+// `snug_pool_buf()`, calls `snug_vm_load(words, bytes)`, then per call writes
+// the input into `snug_buf()` and the 8 limit words into `snug_lim_buf()` and
+// calls `snug_vm_validate(len, rule)`; the out words (program.md §13.2) are at
+// `snug_out_buf()`. One static scratch, shared by every Program, its mark
+// capacity only ever growing (program.md §13.1).
+const PCAP: usize = 1 << 20;
+const BCAP: usize = 1 << 20;
+const SCAP: usize = 1 << 21;
+const OUTW: usize = 8 + 2 * 257;
+struct Words<const N: usize>(UnsafeCell<[i32; N]>);
+unsafe impl<const N: usize> Sync for Words<N> {}
+struct Bytes<const N: usize>(UnsafeCell<[u8; N]>);
+unsafe impl<const N: usize> Sync for Bytes<N> {}
+static PROG: Words<PCAP> = Words(UnsafeCell::new([0; PCAP]));
+static POOL: Bytes<BCAP> = Bytes(UnsafeCell::new([0; BCAP]));
+static VMS: Words<SCAP> = Words(UnsafeCell::new([0; SCAP]));
+static LIMB: Words<8> = Words(UnsafeCell::new([0; 8]));
+static OUTB: Words<OUTW> = Words(UnsafeCell::new([0; OUTW]));
+static PLEN: AtomicI32 = AtomicI32::new(0);
+static BLEN: AtomicI32 = AtomicI32::new(0);
+static MCAP: AtomicI32 = AtomicI32::new(0);
+
+#[no_mangle]
+pub extern "C" fn snug_prog_buf() -> *mut i32 { PROG.0.get() as *mut i32 }
+#[no_mangle]
+pub extern "C" fn snug_pool_buf() -> *mut u8 { POOL.0.get() as *mut u8 }
+#[no_mangle]
+pub extern "C" fn snug_lim_buf() -> *mut i32 { LIMB.0.get() as *mut i32 }
+#[no_mangle]
+pub extern "C" fn snug_out_buf() -> *mut i32 { OUTB.0.get() as *mut i32 }
+
+/// Use the first `words` / `bytes` of the Program and pool buffers (the host
+/// verified them). 0, or -2 when they exceed the static capacities.
+#[no_mangle]
+pub extern "C" fn snug_vm_load(words: usize, bytes: usize) -> i32 {
+    if words > PCAP || bytes > BCAP || words < 64 { return -2; }
+    // SAFETY: single-threaded; no other reference exists during the call.
+    let p: &[i32] = unsafe { std::slice::from_raw_parts(PROG.0.get() as *const i32, words) };
+    let s: &mut [i32] = unsafe { &mut *VMS.0.get() };
+    let nl = p[16];
+    if nl > MCAP.load(Ordering::Relaxed) {
+        // a larger mark capacity: a fresh scratch (zeroed marks, epoch 1)
+        if 48 + 2 * nl as usize > SCAP { return -2; }
+        for w in s[..48 + 2 * nl as usize].iter_mut() { *w = 0; }
+        snug::vm::api::vm_scratch_init(s, nl);
+        MCAP.store(nl, Ordering::Relaxed);
+    }
+    PLEN.store(words as i32, Ordering::Relaxed);
+    BLEN.store(bytes as i32, Ordering::Relaxed);
+    0
+}
+
+/// Validate the first `len` bytes of the input buffer against `rule` of the
+/// loaded Program: vm-validate's answer (out words at `snug_out_buf()`).
+#[no_mangle]
+pub extern "C" fn snug_vm_validate(len: usize, rule: i32) -> i32 {
+    if len > CAP { return -1; }
+    // SAFETY: single-threaded; the host only writes the buffers between calls.
+    let input: &[u8] = unsafe { std::slice::from_raw_parts(BUF.0.get() as *const u8, len) };
+    let p: &[i32] = unsafe { std::slice::from_raw_parts(PROG.0.get() as *const i32, PLEN.load(Ordering::Relaxed) as usize) };
+    let b: &[u8] = unsafe { std::slice::from_raw_parts(POOL.0.get() as *const u8, BLEN.load(Ordering::Relaxed) as usize) };
+    let s: &mut [i32] = unsafe { &mut *VMS.0.get() };
+    let lim: &[i32] = unsafe { &*LIMB.0.get() };
+    let out: &mut [i32] = unsafe { &mut *OUTB.0.get() };
+    snug::vm::api::vm_validate(p, b, rule, input, lim, s, out)
+}

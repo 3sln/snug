@@ -6,7 +6,7 @@
 ;; verified before it is validated against.
 (ns snug.vm.api
   (:require [kin.lang :refer [defn let local return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg rem ushr < > <= >= == != and or not
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem ushr < > <= >= == != and or not
                                u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_COSE
                                      O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS
@@ -44,25 +44,55 @@
     (return (ia p (+ (ia p H_S_CSET_INDEX) (ia p (+ (+ ch 2) ci)))))))
 
 (defn ^:pub ^I32 chain-regex [^IntsR p ^I32 ch ^I32 dd]
-  (comment "max over depths 0..dd of the closure set's regex_words.")
-  (let [^:mut m 0]
-    (for [^I32 k 0 (+ dd 1)]
-      (let [cr (chain-cset p ch k)]
-        (if (>= cr 0)
-          (if (> (ia p (+ cr 2)) m) (set m (ia p (+ cr 2)))))))
+  (comment "max over depths 0..dd of the closure set's regex_words: every depth"
+           "beyond the chain repeats a set already visited, so the chain's first"
+           "min(n, dd + 1) sets suffice.")
+  (let [n (ia p ch)
+        ^:mut m 0
+        ^:mut top n]
+    (if (> top (+ dd 1)) (set top (+ dd 1)))
+    (for [^I32 k 0 top]
+      (let [cr (chain-cset p ch k)
+            rw (ia p (+ cr 2))]
+        (if (> rw m) (set m rw))))
     (return m)))
 
 (defn ^:pub ^I32 chain-frames [^IntsR p ^I32 ch ^I32 dd]
-  (comment "Sum over depths 0..dd of the closure set's frame_words.")
-  (let [^:mut t 0]
-    (for [^I32 k 0 (+ dd 1)]
-      (let [cr (chain-cset p ch k)]
-        (if (>= cr 0) (set t (+ t (ia p (+ cr 1)))))))
+  (comment "Sum over depths 0..dd of the closure set's frame_words, in O(n) from the"
+           "chain's period (program.md §12.1).")
+  (let [n (ia p ch)
+        r (ia p (+ ch 1))
+        ^:mut top n
+        ^:mut t 0]
+    (if (> top (+ dd 1)) (set top (+ dd 1)))
+    (for [^I32 k 0 top]
+      (set t (+ t (ia p (+ (chain-cset p ch k) 1)))))
+    (if (and (>= r 0) (> (+ dd 1) n))
+      (do (let [left (- (+ dd 1) n)
+                per (- n r)
+                full (quot left per)
+                part (rem left per)
+                ^:mut ps 0
+                ^:mut qs 0]
+            (for [^I32 j 0 per]
+              (let [fj (ia p (+ (chain-cset p ch (+ r j)) 1))]
+                (set ps (+ ps fj))
+                (if (< j part) (set qs (+ qs fj)))))
+            (set t (+ (+ t (* full ps)) qs)))))
     (return t)))
 
 (defn ^:pub ^I32 vm-scratch-words [^IntsR p ^I32 rule ^I32 mark-cap]
   (comment "Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)"
-           "(§12.1): 48 + 2M + 2(D + 1) + regex area + frames.")
+           "(§12.1): 48 + 2M + 2(D + 1) + regex area + frames. The rule's verified"
+           "scratch_words [D] is that total with M = N_LEAVES, so this is O(1).")
+  (let [nl (ia p H_N_LEAVES)
+        ^:mut m mark-cap]
+    (if (< m nl) (set m nl))
+    (return (+ (ia p (+ (+ (ia p H_S_RULES) (* 5 rule)) 4)) (* 2 (- m nl))))))
+
+(defn ^:pub ^I32 vm-scratch-words-slow [^IntsR p ^I32 rule ^I32 mark-cap]
+  (comment "The same total recomputed from the closure chain (the verifier's"
+           "formula), for tests.")
   (let [nl (ia p H_N_LEAVES)
         ^:mut m mark-cap
         dd (ia p H_LIM_DEPTH)

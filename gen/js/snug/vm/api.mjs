@@ -30,34 +30,72 @@ export function chainCset(p, ch, k) {
 }
 
 export function chainRegex(p, ch, dd) {
-    // max over depths 0..dd of the closure set's regex_words.
+    // max over depths 0..dd of the closure set's regex_words: every depth
+    // beyond the chain repeats a set already visited, so the chain's first
+    // min(n, dd + 1) sets suffice.
+    const n = p[ch];
     let m = 0;
-    for (let k = 0; k < dd + 1; k++) {
+    let top = n;
+    if (top > (dd + 1)) {
+        top = dd + 1;
+    }
+    for (let k = 0; k < top; k++) {
         const cr = chainCset(p, ch, k);
-        if (cr >= 0) {
-            if (p[cr + 2] > m) {
-                m = p[cr + 2];
-            }
+        const rw = p[cr + 2];
+        if (rw > m) {
+            m = rw;
         }
     }
     return m;
 }
 
 export function chainFrames(p, ch, dd) {
-    // Sum over depths 0..dd of the closure set's frame_words.
+    // Sum over depths 0..dd of the closure set's frame_words, in O(n) from the
+    // chain's period (program.md §12.1).
+    const n = p[ch];
+    const r = p[ch + 1];
+    let top = n;
     let t = 0;
-    for (let k = 0; k < dd + 1; k++) {
-        const cr = chainCset(p, ch, k);
-        if (cr >= 0) {
-            t += p[cr + 1];
+    if (top > (dd + 1)) {
+        top = dd + 1;
+    }
+    for (let k = 0; k < top; k++) {
+        t += p[chainCset(p, ch, k) + 1];
+    }
+    if ((r >= 0) && ((dd + 1) > n)) {
+        const left = (dd + 1) - n;
+        const per = n - r;
+        const full = (left / per) | 0;
+        const part = (left % per) | 0;
+        let ps = 0;
+        let qs = 0;
+        for (let j = 0; j < per; j++) {
+            const fj = p[chainCset(p, ch, r + j) + 1];
+            ps += fj;
+            if (j < part) {
+                qs += fj;
+            }
         }
+        t = (t + (full * ps)) + qs;
     }
     return t;
 }
 
 export function vmScratchWords(p, rule, markCap) {
     // Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)
-    // (§12.1): 48 + 2M + 2(D + 1) + regex area + frames.
+    // (§12.1): 48 + 2M + 2(D + 1) + regex area + frames. The rule's verified
+    // scratch_words [D] is that total with M = N_LEAVES, so this is O(1).
+    const nl = p[H_N_LEAVES];
+    let m = markCap;
+    if (m < nl) {
+        m = nl;
+    }
+    return p[(p[H_S_RULES] + (5 * rule)) + 4] + (2 * (m - nl));
+}
+
+export function vmScratchWordsSlow(p, rule, markCap) {
+    // The same total recomputed from the closure chain (the verifier's
+    // formula), for tests.
     const nl = p[H_N_LEAVES];
     let m = markCap;
     const dd = p[H_LIM_DEPTH];

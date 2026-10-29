@@ -28,32 +28,69 @@ pub fn chain_cset(p: &[i32], ch: i32, k: i32) -> i32 {
     return p[(p[(H_S_CSET_INDEX) as usize] + p[((ch + 2) + ci) as usize]) as usize];
 }
 pub fn chain_regex(p: &[i32], ch: i32, dd: i32) -> i32 {
-    // max over depths 0..dd of the closure set's regex_words.
+    // max over depths 0..dd of the closure set's regex_words: every depth
+    // beyond the chain repeats a set already visited, so the chain's first
+    // min(n, dd + 1) sets suffice.
+    let n: i32 = p[(ch) as usize];
     let mut m: i32 = 0;
-    for k in 0..dd + 1 {
+    let mut top: i32 = n;
+    if top > (dd + 1) {
+        top = dd + 1;
+    }
+    for k in 0..top {
         let cr: i32 = chain_cset(p, ch, k);
-        if cr >= 0 {
-            if p[(cr + 2) as usize] > m {
-                m = p[(cr + 2) as usize];
-            }
+        let rw: i32 = p[(cr + 2) as usize];
+        if rw > m {
+            m = rw;
         }
     }
     return m;
 }
 pub fn chain_frames(p: &[i32], ch: i32, dd: i32) -> i32 {
-    // Sum over depths 0..dd of the closure set's frame_words.
+    // Sum over depths 0..dd of the closure set's frame_words, in O(n) from the
+    // chain's period (program.md §12.1).
+    let n: i32 = p[(ch) as usize];
+    let r: i32 = p[(ch + 1) as usize];
+    let mut top: i32 = n;
     let mut t: i32 = 0;
-    for k in 0..dd + 1 {
-        let cr: i32 = chain_cset(p, ch, k);
-        if cr >= 0 {
-            t += p[(cr + 1) as usize];
+    if top > (dd + 1) {
+        top = dd + 1;
+    }
+    for k in 0..top {
+        t += p[(chain_cset(p, ch, k) + 1) as usize];
+    }
+    if (r >= 0) && ((dd + 1) > n) {
+        let left: i32 = (dd + 1) - n;
+        let per: i32 = n - r;
+        let full: i32 = left / per;
+        let part: i32 = left % per;
+        let mut ps: i32 = 0;
+        let mut qs: i32 = 0;
+        for j in 0..per {
+            let fj: i32 = p[(chain_cset(p, ch, r + j) + 1) as usize];
+            ps += fj;
+            if j < part {
+                qs += fj;
+            }
         }
+        t = (t + (full * ps)) + qs;
     }
     return t;
 }
 pub fn vm_scratch_words(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
     // Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)
-    // (§12.1): 48 + 2M + 2(D + 1) + regex area + frames.
+    // (§12.1): 48 + 2M + 2(D + 1) + regex area + frames. The rule's verified
+    // scratch_words [D] is that total with M = N_LEAVES, so this is O(1).
+    let nl: i32 = p[(H_N_LEAVES) as usize];
+    let mut m: i32 = mark_cap;
+    if m < nl {
+        m = nl;
+    }
+    return p[((p[(H_S_RULES) as usize] + (5 * rule)) + 4) as usize] + (2 * (m - nl));
+}
+pub fn vm_scratch_words_slow(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
+    // The same total recomputed from the closure chain (the verifier's
+    // formula), for tests.
     let nl: i32 = p[(H_N_LEAVES) as usize];
     let mut m: i32 = mark_cap;
     let dd: i32 = p[(H_LIM_DEPTH) as usize];

@@ -22,11 +22,12 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
 import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
-import { vmScratchWords, vmScratchInit, vmValidate, vmValidateSpan } from '../../gen/js/snug/vm/api.mjs';
+import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan } from '../../gen/js/snug/vm/api.mjs';
 import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
 import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
 import { assembledCases } from './vm-cases.mjs';
+import { Program as HostProgram } from '../../host/js/src/schema.mjs';
 import { encode, decode } from '../../bench/baseline/cbor-3sln.mjs';
 import { compile as oracleCompile, check as oracleCheck } from '../../corpus/tools/oracle.mjs';
 import { oracleSchemas } from './vm-oracle-gen.mjs';
@@ -44,6 +45,7 @@ function addProgram(P, B, label) {
   const S = new Int32Array(48 + 2 * Math.max(P[16], 1) + 64); S[16] = 1; S[17] = Math.max(P[16], 1);
   const v = vmVerify(P, B, S);
   if (v !== 0) fail(`${label}: vm-verify refused the Program (word ${S[35]}, check ${S[36]})`);
+  for (let r = 0; r < P[15]; r++) for (const m of [0, P[16] + 5]) if (vmScratchWords(P, r, m) !== vmScratchWordsSlow(P, r, m)) fail(`${label}: scratch words of rule ${r} differ from the chain formula`);
   programs.push({ P, B, label });
   return programs.length - 1;
 }
@@ -187,19 +189,38 @@ cases.forEach((c, i) => {
 });
 
 // ---------------------------------------------------------------- run Rust
-let rustLine = '  SKIP Rust (no binary given)';
+let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts';
 if (rustBin) {
   const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
   for (const c of cases) {
     const h = c.bytes.length ? hex(c.bytes) : '-';
     lines.push(c.span ? `span ${c.prog} ${c.rule} ${c.span.join(' ')} ${c.lim.join(' ')} ${h}` : `case ${c.prog} ${c.rule} ${c.lim.join(' ')} ${h}`);
   }
+  // host-rendering parity: corpus and assembled cases with default limits
+  const hostCases = [];
+  cases.forEach((c, i) => {
+    if (c.span || !(c.corpus || i >= asmStart) || c.lim.slice(2).some(x => x !== -1)) return;
+    hostCases.push(i);
+    lines.push(`host ${c.prog} ${c.rule} ${c.lim[0] === 0 ? 1 : 0} ${c.lim[1]} ${c.bytes.length ? hex(c.bytes) : '-'}`);
+  });
   const t1 = performance.now();
   const p = spawnSync(rustBin, [], { input: lines.join('\n') + '\n', maxBuffer: 1 << 30, encoding: 'utf8' });
   const tRs = performance.now() - t1;
   if (p.status !== 0) fail(`the Rust binary exited ${p.status}: ${p.stderr.slice(0, 400)}`);
-  const rs = p.stdout.trim().split('\n');
+  const all = p.stdout.trim().split('\n');
+  const rs = all.slice(0, cases.length), hs = all.slice(cases.length);
   if (rs.length !== cases.length) fail(`Rust answered ${rs.length} of ${cases.length} cases`);
+  const hostProgs = new Map();
+  let hostAgree = 0;
+  hostCases.forEach((i, k) => {
+    const c = cases[i];
+    if (!hostProgs.has(c.prog)) hostProgs.set(c.prog, new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify }));
+    const hp = hostProgs.get(c.prog);
+    const r = hp.result(hp.run(c.rule, c.bytes, { top: c.lim[0] === 0 ? 'map' : 'any', cose: c.lim[1] === 1 }));
+    const t = r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
+    if (t === hs[k]) hostAgree++; else fail(`${c.label}: JS host ${t} | Rust host ${hs[k]}`);
+  });
+  hostLine = `  ${hostAgree === hostCases.length ? 'ok  ' : 'FAIL'} hosts: JS Schema rendering == Rust snug::schema on ${hostAgree}/${hostCases.length} corpus and assembled cases (reason, subcode, offset, path from the key table)`;
   let agree = 0;
   rs.forEach((line, i) => {
     if (line === 'PANIC') { fail(`${cases[i].label} [${hex(cases[i].bytes).slice(0, 60)}]: Rust PANICKED`); return; }
@@ -207,6 +228,33 @@ if (rustBin) {
     agree++;
   });
   rustLine = `  ${agree === cases.length ? 'ok  ' : 'FAIL'} JS == Rust (debug, overflow checks on): ${agree}/${cases.length} cases, whole out array (code, subcode, offset, budget used, items, path), no panic (${(tRs / 1000).toFixed(1)} s)`;
+}
+
+// ---------------------------------------------------------------- run wasm
+let wasmLine = '  SKIP wasm (SNUG_VM_WASM not set)';
+if (process.env.SNUG_VM_WASM) {
+  const { instance } = await WebAssembly.instantiate(readFileSync(process.env.SNUG_VM_WASM));
+  const ex = instance.exports, mem = ex.memory;
+  const cap = ex.snug_cap();
+  let loaded = -1, agree = 0, tried = 0;
+  cases.forEach((c, i) => {
+    if (c.span || c.bytes.length > cap) return;
+    if (loaded !== c.prog) {
+      const { P, B } = programs[c.prog];
+      new Int32Array(mem.buffer, ex.snug_prog_buf(), P.length).set(P);
+      new Uint8Array(mem.buffer, ex.snug_pool_buf(), B.length).set(B);
+      if (ex.snug_vm_load(P.length, B.length) !== 0) { fail(`wasm: load ${programs[c.prog].label}`); return; }
+      loaded = c.prog;
+    }
+    tried++;
+    new Uint8Array(mem.buffer, ex.snug_buf(), c.bytes.length).set(c.bytes);
+    new Int32Array(mem.buffer, ex.snug_lim_buf(), 8).set(c.lim);
+    const code = ex.snug_vm_validate(c.bytes.length, c.rule);
+    const o = new Int32Array(mem.buffer, ex.snug_out_buf(), 8 + 2 * 257);
+    const got = code < 0 ? `ERR ${code}` : Array.from(o.slice(0, 8 + 2 * o[6])).join(' ');
+    if (got === js[i]) agree++; else fail(`${c.label}: JS ${js[i]} | wasm ${got}`);
+  });
+  wasmLine = `  ${agree === tried ? 'ok  ' : 'FAIL'} JS == wasm (release, Rust -> wasm32): ${agree}/${tried} cases, whole out array`;
 }
 
 const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
@@ -219,6 +267,8 @@ console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object
 line(stats.other[0] === stats.other[1], `§15 and assembled programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled)`);
 line(trapFails === 0, `JS bounds: ${guarded} cases re-run behind throwing out-of-bounds traps on P, B, input and scratch`);
 console.log(rustLine);
+console.log(hostLine);
+console.log(wasmLine);
 console.log(`  info ${programs.length} programs verified by vm-verify; JS ran ${cases.length} cases in ${(tJs / 1000).toFixed(1)} s`);
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
 console.log('  ok   vm-test');

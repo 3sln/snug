@@ -2,3 +2,4 @@
 //! that decides accept or refuse (D003).
 pub mod snug;
 pub mod compile;
+pub mod schema;

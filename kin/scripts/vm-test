@@ -4,19 +4,23 @@
 # the compiler, assembled programs, JS == Rust.
 #     kin/scripts/vm-test [mutations] [seed]
 #
-# The Rust crate holds only the generated cbor and vm modules and the vm test
-# binary (no compile host), so a sibling's unfinished compiler cannot break it.
+# The Rust crate holds the generated cbor, vm and program modules, the Rust
+# schema host and the vm test binary (no compile host), so a sibling's
+# unfinished compiler cannot break it.
 set -e
 cd "$(dirname "$0")/../.."
 ./kin/scripts/emit > /dev/null
 host=.cache/vm-host
 mkdir -p "$host/bin"
-printf '//! VM test crate: the generated cbor and vm modules only.\npub mod snug;\n' > "$host/lib.rs.new"
+printf '//! VM test crate: the generated cbor, vm and program modules and the Rust schema host.\npub mod snug;\npub mod schema;\n' > "$host/lib.rs.new"
 cmp -s "$host/lib.rs.new" "$host/lib.rs" 2>/dev/null || mv "$host/lib.rs.new" "$host/lib.rs"; rm -f "$host/lib.rs.new"
 cmp -s host/rust/src/bin/vm.rs "$host/bin/vm.rs" 2>/dev/null || cp host/rust/src/bin/vm.rs "$host/bin/vm.rs"
+cmp -s host/rust/src/schema.rs "$host/schema.rs" 2>/dev/null || cp host/rust/src/schema.rs "$host/schema.rs"
 crate=.cache/snug-vm
-SNUG_RS_ONLY="cbor vm" ./kin/scripts/rust-crate "$crate" "$host"
+SNUG_RS_ONLY="cbor vm program" ./kin/scripts/rust-crate "$crate" "$host"
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin vm 2>&1); then
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi
+# and the wasm build, when its toolchain is present (otherwise SKIP, loudly)
+if wasm=$(./kin/scripts/wasm-build speed 2>/dev/null); then export SNUG_VM_WASM="$wasm"; fi
 node kin/scripts/vm-test.mjs "$crate/target/debug/vm" "$@"
