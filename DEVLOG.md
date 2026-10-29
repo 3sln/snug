@@ -213,7 +213,39 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ## Phase 3 — CDDL compiler and validator VM
 
-- [ ] **P3.1 — Program format frozen (`docs/program.md`).** (D015)
+- [x] **P3.1 — Program format frozen (`docs/program.md`).** (D015)
+  *Status 2026-10-29:* format version 1 written as a **frozen candidate**,
+  not frozen: it waits for the owner/manager to accept or reject the 22
+  proposed resolutions in program.md §17. Each one is a point where
+  architecture revision 2 is silent or ambiguous, plus one it cannot
+  implement as written. What it contains: a 64-word header; fixed 8-word
+  leaves for every §4.2 kind; typesets with operand-first evaluation lists
+  (AND/NOT need no sort); a sorted key table; maps as factors → pools
+  (alternatives sharing a residual group) → alternatives → literal entries,
+  with a per-leaf key index and O(1) pool rejection; Glushkov arrays and
+  regexps as bitset rows (justified against the §7 charge); sign-magnitude
+  integer intervals and ordered-key float intervals; closure sets and
+  per-rule chains with derived frame sizes; the scratch carve (scanner block
+  reused as `o`, epoch marks, path stack, regex area, per-depth frames); the
+  reason codes (profile 1–21 = `kin/codes.kin`, schema 32–41, budget 48);
+  path segments; the kin API; the serialisation container; a precise
+  charging schedule (§14); and a worked example with exact words and budget
+  counts.
+  Learnt: (1) the witness path needs no copying if dead subtrees never write
+  the path stack; (2) per-pool counters are exact because the determinism
+  rule keeps constrained typeset entries away from every literal key their
+  pool names; (3) cross-leaf sharing for many open map types (A8) is not
+  achieved, only within-leaf sharing (§17 Q7); (4) embedded `.cbor` needs
+  end-bounded scanner helpers (§17 Q21, affects P1.3); (5) Rust needs a
+  read-only Program tag in snug.lang (§17 Q9). No code, no gates run (this
+  item is a document). Commit: pending the manager.
+  *Frozen 2026-10-29 (manager).* `docs/program.md` format 1: all 22 proposed
+  resolutions in its §17 accepted as proposed (D025). Architecture amended for
+  q7 (per-leaf map cost; the A8 cross-leaf claim withdrawn), q17 (budget
+  exhaustion preempts "profile errors win") and q8 (program.md §14 is the
+  normative charge schedule). q9 (read-only Program tag) and q21 (end-bounded
+  scanner helpers for embedded documents) handed to the P1 owner.
+
 - [ ] **P3.2 — Compiler front end** (lexer, parser, resolver, generics,
   sockets, prelude).
 - [ ] **P3.3 — Normaliser and lowering** (typesets, map factors and
@@ -487,6 +519,15 @@ cost only on invalid messages (review A5a).
 the chain that empties the root; ties broken by leaf id, latest-dying
 alternative, source order (architecture §6).
 **Why**: one host-identical answer without payload (reviews C14, A4, A10).
+- [ ] **Signed off** (owner)
+
+### D025 — Program format 1 frozen with program.md §17's resolutions
+**Decision**: `docs/program.md` is frozen as format 1 with its 22 proposed
+resolutions accepted. Changes after this need a DEVLOG decision and both the
+compiler and VM owners' agreement.
+**Why**: D015; the resolutions are consistent with architecture revision 2
+and close the gaps the designer found (embedded depth, witness paths, Rust
+read-only Programs, budget vs profile precedence).
 - [ ] **Signed off** (owner)
 
 ---

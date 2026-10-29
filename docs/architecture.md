@@ -273,7 +273,11 @@ For a map item and query set Q, the VM gathers the live alternatives of every
    leaf, for each literal key id, the alternatives naming it), and
    alternatives with identical residuals are grouped, so a pair whose key no
    alternative names costs one residual check per group, not one per
-   alternative (A8: 100 open-map message types do not cost 100 per pair).
+   alternative. *Amended (program.md §17 q7):* sharing is within one map
+   leaf; a pair still costs one unit per map leaf queried, so 100 distinct
+   open-map message types in one choice cost 100 per pair until the
+   discriminating key arrives. Accepted for format 1; a cross-leaf index is
+   parked.
 4. If no candidate survives, the map item fails here (§6).
 
 At the end, alternatives with an entry below its minimum die; the matched map
@@ -316,7 +320,9 @@ profile refusal occurs anywhere, it is reported instead of the schema
 failure. A message that is not valid profile CBOR therefore always gets a
 profile code, exactly as decode-then-validate gives today, which keeps
 3sln.me's split between "400 malformed" and "contract violation". The extra
-walk costs only on invalid messages.
+walk costs only on invalid messages. *Exception (program.md §17 q17):* if
+the step budget is exhausted, the walk stops and `budget` is reported; a
+later profile error cannot be found.
 
 **Order of checks** follows cbor.mjs exactly; the scanner specification
 (`docs/scanner.md`, owned by P1.3) is the normative table, gated by a seeded
@@ -521,7 +527,9 @@ every loop whose trip count depends on input or schema charges per trip:
 | AND / NOT / EMBED dependency | 1 per dependency |
 | profile-only continuation (§4.5) | 1 per item + 1 per 64 content bytes |
 
-Budget arithmetic saturates. The default 4 M units is calibrated in Phase 4
+Budget arithmetic saturates. The exact, normative per-event schedule (so
+that hosts agree on the exhaustion point) is `docs/program.md` §14; this table
+is its summary. The default 4 M units is calibrated in Phase 4
 so that the worst budget-bounded input stays under 50 ms in workerd on the
 reference machine (recorded).
 
