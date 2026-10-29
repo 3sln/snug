@@ -4,6 +4,8 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { build } from '../host/js/src/build.mjs';
+import { decode } from '../host/js/src/index.mjs';
+import { scan } from '../host/js/src/scan.mjs';
 import { encode } from '../host/js/src/encode.mjs';
 import { baseline, profile, oracle, fromHex, translate } from '../host/js/test/values.mjs';
 
@@ -59,8 +61,8 @@ const cases = [
   { name: 'map-heavy document 1.4 MB', value: document },
 ];
 
-console.log('| Workload | Bytes | build ms | baseline decode ms | build speedup | encode ms | baseline encode ms | encode speedup |');
-console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
+console.log('| Workload | Bytes | snug decode ms (scan+build) | scan ms | build ms | baseline decode ms | decode speedup | encode ms | baseline encode ms | encode speedup |');
+console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
 for (const c of cases) {
   // Raise container/item caps only for the intentionally oversized collection
   // workloads. Both codecs receive the exact same options.
@@ -74,8 +76,12 @@ for (const c of cases) {
     () => bytes.map(b => baseline.decode(b, options)),
     () => values.map(v => encode(v, options)),
     () => baselineValues.map(v => baseline.encode(v, options)),
+    () => bytes.map(b => decode(b, options)),
+    () => bytes.map(b => scan(b, options)),
   ];
   const check = (which, result) => {
+    if (which === 5) return;
+    if (which === 4) { assert.deepStrictEqual(result, values); return; }
     if (which >= 2) assert.deepStrictEqual(result, bytes);
     else assert.deepStrictEqual(which === 0 ? result : result.map(v => translate(v)), values);
   };
@@ -88,16 +94,16 @@ for (const c of cases) {
   const samples = operations.map(() => []);
   for (let round = 0; round < trials; round++) {
     // Rotate order so neither implementation always gets the warmer heap/CPU.
-    for (let offset = 0; offset < 4; offset++) {
-      const k = (round + offset) % 4, op = operations[k], n = iterations[k];
+    for (let offset = 0; offset < operations.length; offset++) {
+      const k = (round + offset) % operations.length, op = operations[k], n = iterations[k];
       const start = performance.now();
       for (let i = 0; i < n; i++) sink = op();
       samples[k].push((performance.now() - start) / n);
       check(k, sink); // correctness work is outside the timed region
     }
   }
-  const [b, d, e, be] = samples.map(median);
-  console.log(`| ${c.name} | ${bytes.reduce((n, b) => n + b.length, 0)} | ${b.toFixed(4)} | ${d.toFixed(4)} | ${(d / b).toFixed(2)}x | ${e.toFixed(4)} | ${be.toFixed(4)} | ${(be / e).toFixed(2)}x |`);
-  console.log(`<!-- iterations per sample: ${iterations.join(', ')} (build, decode, encode, baseline encode) -->`);
+  const [b, d, e, be, sd, sc] = samples.map(median);
+  console.log(`| ${c.name} | ${bytes.reduce((n, b) => n + b.length, 0)} | ${sd.toFixed(4)} | ${sc.toFixed(4)} | ${b.toFixed(4)} | ${d.toFixed(4)} | ${(d / sd).toFixed(2)}x | ${e.toFixed(4)} | ${be.toFixed(4)} | ${(be / e).toFixed(2)}x |`);
+  console.log(`<!-- iterations per sample: ${iterations.join(', ')} (build, baseline decode, encode, baseline encode, snug decode, scan) -->`);
 }
-console.log('Answers checked. build is TRUSTED build-only time; public decode = scan + build. Scanner unavailable: no end-to-end decode measurement or D017 conclusion.');
+console.log('Answers checked. snug decode = generated kin scanner (gen/js) + trusted build; both strict.');

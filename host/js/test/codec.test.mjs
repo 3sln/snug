@@ -5,11 +5,7 @@ import { scan } from '../src/scan.mjs';
 import { snug, baseline, profile, oracle, expected, translate, fromHex, toHex } from './values.mjs';
 import { createRandom, randomMap, randomValue, mutate } from './corpus.mjs';
 
-let scannerUnavailable = false;
-try { scan(fromHex('a0')); } catch (e) {
-  if (!(e instanceof snug.SnugFault) || e.code !== 'unavailable') throw e;
-  scannerUnavailable = true;
-}
+const scannerUnavailable = false; // the generated scanner is a static import now
 const pending = scannerUnavailable ? 'Generated profile scanner unavailable; trusted build must never receive refuse bytes.' : false;
 
 for (const v of profile.accept) test(`profile accept: ${v.name}`, () => {
@@ -46,8 +42,9 @@ for (const v of profile.refuse) test(`profile refuse: ${v.name}`, { skip: pendin
   assert.throws(() => snug.decode(fromHex(v.hex), { top: 'any' }), { name: 'SnugFault', code: v.code });
 });
 
-test('decode refuses to run without a scanner', { skip: !scannerUnavailable }, () => {
-  for (const hex of ['a0', 'ff', '']) assert.throws(() => snug.decode(fromHex(hex)), { name: 'SnugFault', code: 'unavailable' });
+test('decode refuses SharedArrayBuffer-backed input (review C17)', () => {
+  const shared = new Uint8Array(new SharedArrayBuffer(1)); shared[0] = 0xa0;
+  assert.throws(() => snug.decode(shared), TypeError);
 });
 
 test('seeded differential: 1000 maps and values, default and plain objects, COSE', () => {
