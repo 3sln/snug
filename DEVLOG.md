@@ -332,6 +332,15 @@ slower); allocated head tuples; validating wrapper constructors in build
   budget respected).
 - [ ] **P4.3 — Benchmarks** (architecture §12) and the 3sln.me recommendation.
 
+## Phase 5 — Cursor, views and builder (D026)
+
+- [ ] **P5.0 — Review of architecture §16** (independent).
+- [ ] **P5.1 — Tape** written by the VM on request; navigation primitives in kin.
+- [ ] **P5.2 — Views and cursor** (JS host): checked, indexed, lazy trusted.
+- [ ] **P5.3 — Position-aware subtree validation** (lazy `validate()`).
+- [ ] **P5.4 — Builder** (kin deterministic core + JS writer); `encode` over it.
+- [ ] **P5.5 — Benchmarks** (one field from 1.4 MB; writer vs encode vs cbor.mjs).
+
 ---
 
 ## Decisions
@@ -529,6 +538,27 @@ compiler and VM owners' agreement.
 and close the gaps the designer found (embedded depth, witness paths, Rust
 read-only Programs, budget vs profile precedence).
 - [ ] **Signed off** (owner)
+
+### D026 — One library around an opaque message and a cursor (OWNER DECISION)
+**Decision** (owner, 2026-10-29, relayed by the 3sln.me coordinator):
+combine the CBOR codec and the CDDL validator in one library, designed around
+an opaque, unparsed message and a cursor: zero-copy views, navigate and parse
+only what is needed, apply the validation for the cursor's position, skip
+unneeded subtrees, or validate fully in one pass when required; compiled CDDL
+as a small instruction program; strict-profile checks fused with schema
+checks; an encoder writing deterministic output directly from typed values;
+a materialising decode for convenience. The 3sln.me profile and vectors are
+the conformance floor. "The best CBOR library in the world, if we can do it
+without too much hassle."
+**How it is folded in**: architecture §16 (checked view, checked + indexed
+view with a VM-written tape, lazy trusted view; position-aware validation;
+cursor; builder). It confirms D002 and extends it; revision 2's core is
+unchanged. Lazy (partial) checking is opt-in and named as not satisfying
+profile §5, because untrusted messages must be refused whole before use.
+**Why**: owner direction; CBOR's length prefixes and deterministic sorted
+keys make lazy navigation cheap, and the received bytes are canonical spans.
+- [x] **Decided by the owner** (2026-10-29, via coordinator) — design of §16
+  itself is provisional, pending review.
 
 ---
 

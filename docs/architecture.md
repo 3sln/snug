@@ -1,6 +1,7 @@
 # snug — architecture
 
-Status: **design, revision 2 (2026-10-29)**, provisional. Revision 1 was
+Status: **design, revision 2 (2026-10-29)** with §16 added on the owner's
+decision D026, provisional. Revision 1 was
 reviewed independently by Codex (`docs/reviews/2026-10-29-codex.md`, "C#")
 and by a Claude reviewer (`docs/reviews/2026-10-29-claude.md`, "A#"); §15
 lists every finding and what this revision did about it. Decisions are
@@ -682,3 +683,102 @@ twice; D003 narrowed to bytes.
 | A11 duplicate literal keys | Accepted: §4.3.1 (4). |
 | A12 coverage gaps | Accepted: `#6.<type>`, `#7.n`, bare `#6`/`#7` (§4.2), undefined sockets (§4.8), regular group recursion (§4.4), `.feature` no-op (§4.6). |
 | A13 project controls | Recorded for the owner (§13). |
+
+---
+
+## 16. Cursor, lazy navigation and the builder (owner decision D026)
+
+The owner decided (2026-10-29, relayed by the 3sln.me coordinator) that the
+codec and validator are one library built around an **opaque, unparsed
+message and a cursor**: navigate and parse only what is needed, apply the
+right validation for the cursor's position, skip what is not needed, or
+validate everything in one pass when required; a zero-copy view API, an
+encoder that writes deterministic output directly from typed values, and a
+materialising decode for convenience — "the best CBOR library in the world, if
+we can do it without too much hassle". The 3sln.me profile and vectors stay
+the conformance floor. This section folds that into the design; the
+revision-2 core (one fused pass, Programs, the VM) is unchanged and is what
+the cursor stands on.
+
+### 16.1 Facts that shape it
+
+* **Strings carry byte lengths; containers carry only element counts.**
+  Skipping a text, byte string or typed array is O(1). Skipping an array or
+  map needs a walk over its descendants' heads (allocation-free, but
+  O(subtree)) unless an index already knows where it ends.
+* **Deterministic encoding makes maps searchable.** Keys are sorted by
+  encoded bytes and each value has one encoding, so a key lookup is a byte
+  comparison and, given pair offsets, a binary search.
+* **The received bytes are canonical.** Any subtree's byte span is its
+  canonical encoding: it can be hashed (fingerprints), stored or forwarded
+  without re-encoding.
+* **Profile §5 constrains laziness.** A receiver of untrusted input must
+  refuse the whole message before using any value. Lazy, partial checking is
+  therefore only for input the host already trusts (bytes it validated
+  before, its own storage) or for explicit opt-in tooling; it is never the
+  default and is named as such in the API.
+
+### 16.2 Three ways to open a message
+
+| Mode | What runs up front | Navigation cost | Allowed for untrusted input |
+| --- | --- | --- | --- |
+| `view(bytes, {schema?, rule?})` — **checked** | the full fused VM pass (profile + schema), allocation-free | sibling skip walks heads; map key lookup is a linear scan of keys with early exit on sort order | yes (this is the profile-§5 path) |
+| `view(bytes, {…, index: true})` — **checked + indexed** | the same pass, also writing a **tape**: for each container, its end offset and the start offsets of its children | O(1) skip, O(1) array index, O(log n) map key lookup | yes |
+| `viewTrusted(bytes, opts)` — **lazy** | nothing | each access checks the items it reads (head shortest form, lengths against the end, depth, UTF-8 of text it decodes, float rules, key order and duplicates of maps it searches or iterates); skipped content is walked structurally, not checked | no — documented as not satisfying profile §5 |
+
+**The tape** (D027 candidate, specified with the VM in P5.1) is an Int32Array
+written by the VM in the same pass when asked: one word per item (end offset,
+preorder) plus, per container, a contiguous child-offset table; at most
+`2 × items` words (≤ 1 MiB at the default item limit). It is allocated per
+indexed view (it must outlive the next validation), sized from the item count
+the pass measured, so it costs 8 bytes per item instead of a materialised
+object graph. Without `index`, nothing is allocated beyond the view object.
+
+### 16.3 Validation at the cursor's position
+
+A view carries the **query set** of its position when it was opened against
+a schema. Descending through a map by a literal key yields that entry's value
+typeset directly (from the Program's key index); descending into an array
+whose automaton gives every element the same typeset (`[* T]`, counted
+positions) yields it directly; other array shapes require evaluating the
+array's prefix. In checked mode this is informational (the whole message was
+validated); in lazy mode it lets `v.get("args").validate()` run the VM on just
+that subtree with the right typeset — validate-what-you-touch. Exactness is
+unchanged: lazy subtree validation evaluates the subtree exactly as the full
+pass would, and nothing outside it.
+
+### 16.4 API sketch (JavaScript)
+
+```js
+const v = view(bytes, { schema, rule: 'request', index: true }); // throws SnugFault
+v.kind;                 // 'uint' | 'nint' | 'bytes' | 'text' | 'array' | 'map' | 'tag' | 'float' | 'simple'
+v.get('args')?.get('key')?.text();
+v.at(3); v.length; for (const [k, x] of v.entries()) …
+v.number(); v.bigint(); v.bytes();   // bytes() is a zero-copy subarray; copyBytes() copies
+v.raw();                // the canonical encoded span (fingerprints, forwarding)
+v.value();              // materialise this subtree (the builder)
+```
+
+For hot loops a single mutable `Cursor` (`enter`, `next`, `up`, `key`, …)
+avoids even the view objects.
+
+### 16.5 The builder
+
+A `Writer` with typed methods (`uint`, `int`, `bigint`, `float`, `text`,
+`bytes`, `typed`, `decimal`, `beginArray(n)`, `beginMap(n)`, `end()`) writes
+deterministic bytes directly, without building host objects first. The
+deterministic choices (shortest head, float width by bit test, key order by
+encoded bytes, duplicate refusal) are kin, shared with the VM; the host
+wrapper is thin. Map keys may arrive in any order: `end()` of a map sorts its
+pairs by permuting their byte ranges once in a scratch area (or, with
+`keysSorted`, only verifies order). `encode(value)` becomes a walk of host
+values over the same writer.
+
+### 16.6 What goes where
+
+Navigation primitives (head reading, skip, key search by bytes, tape
+writing, lazy local checks) are kin, reusing the scanner's helpers. View and
+cursor objects, accessors producing JS values, and the writer's JS surface are
+host. Phase P5 (DEVLOG) builds this after the VM; the benchmark plan gains:
+fetch one field from a 1.4 MB message (checked, checked + index, lazy) vs full
+decode vs cbor.mjs, and writer vs `encode` vs cbor.mjs.
