@@ -418,6 +418,18 @@ slower); allocated head tuples; validating wrapper constructors in build
 - [ ] **P5.4 — Builder** (kin deterministic core + JS writer); `encode` over it.
 - [ ] **P5.5 — Benchmarks** (one field from 1.4 MB; writer vs encode vs cbor.mjs).
 
+## Phase 6 — Sources: blob handles and streams (D027)
+
+- [ ] **P6.0 — Review of architecture §17** (independent).
+- [ ] **P6.1 — Resumable scanner spike** (P1.5 in effect): explicit stack,
+  windows, `NEED`/resume; buffer cost vs the recursive scanner (§17.4's 15%
+  rule); random-window-split equivalence gate.
+- [ ] **P6.2 — Blob handle adapters** (JS: object `{size, read}`, `Blob`,
+  `fetch` Range, `FileHandle`; Rust trait) with chunk cache and read-ahead.
+- [ ] **P6.3 — Stream source** (ReadableStream/AsyncIterable, push `feed`),
+  backpressure, fused stream decode.
+- [ ] **P6.4 — Benchmarks** §12 items 9–11.
+
 ---
 
 ## Decisions
@@ -552,7 +564,7 @@ cost bundle size and no current contract needs them.
 **Why**: it is the only interface between the compiler and the VM work items.
 - [ ] **Signed off** (owner)
 
-### D016 — The VM recurses (bounded); an explicit-stack VM is deferred
+### D016 — ~~The VM recurses (bounded); an explicit-stack VM is deferred~~ (superseded by D027)
 **Why**: depth is bounded (32 default, 256 max); recursion is faster in JS;
 3sln.me receives whole bodies. Resumable chunked input would need the
 explicit stack.
@@ -675,6 +687,31 @@ profile §5, because untrusted messages must be refused whole before use.
 keys make lazy navigation cheap, and the received bytes are canonical spans.
 - [x] **Decided by the owner** (2026-10-29, via coordinator) — design of §16
   itself is provisional, pending review.
+
+### D027 — Buffers, blob handles and streams through one resumable VM (OWNER DIRECTION)
+**Decision** (owner direction 2026-10-29, relayed by the 3sln.me coordinator;
+design provisional): the codec/validator works over three sources — an
+in-memory buffer, an opaque random-access blob handle (size + sync/async range
+reads; object storage via HTTP range requests) and a forward-only stream
+(validate as bytes arrive, bounded buffering, resumable, backpressure) — with
+the same Program. The VM never does I/O: it suspends with `NEED(offset,
+length)` and the host resumes it with a new window (plan/fulfil, as emon
+D008). This requires an explicit-stack resumable VM: **D016 is superseded**.
+Strings are scanned incrementally; the only look-back buffering is the
+previous/current map key (key length limit, default 1 KiB) and ≤ 136 bytes of
+split scalars. D017 is amended: stream decode builds while validating and
+releases values only on success. The buffer keeps a monomorphic host fast
+path; whether the kin walk also needs a specialised recursive driver is
+decided by measurement (≤ 15% overhead → one VM), with a random-window-split
+differential gate if two drivers exist. Architecture §17.
+**Why**: owner direction; and plan/fulfil keeps async and I/O out of kin, so
+JS and Rust stay identical.
+**Alternatives**: host callbacks for reads (rejected: async cannot be awaited
+from generated synchronous code, and callbacks put the host in the hot loop);
+buffering whole messages from handles and streams (rejected: defeats the
+purpose).
+- [x] **Directed by the owner** (2026-10-29, via coordinator) — the design in
+  §17 is provisional, pending review.
 
 ---
 

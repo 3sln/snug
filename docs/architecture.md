@@ -1,7 +1,7 @@
 # snug — architecture
 
-Status: **design, revision 2 (2026-10-29)** with §16 added on the owner's
-decision D026, provisional. Revision 1 was
+Status: **design, revision 2 (2026-10-29)** with §16 and §17 added on the owner's
+decisions D026 and D027, provisional. Revision 1 was
 reviewed independently by Codex (`docs/reviews/2026-10-29-codex.md`, "C#")
 and by a Claude reviewer (`docs/reviews/2026-10-29-claude.md`, "A#"); §15
 lists every finding and what this revision did about it. Decisions are
@@ -782,3 +782,122 @@ cursor objects, accessors producing JS values, and the writer's JS surface are
 host. Phase P5 (DEVLOG) builds this after the VM; the benchmark plan gains:
 fetch one field from a 1.4 MB message (checked, checked + index, lazy) vs full
 decode vs cbor.mjs, and writer vs `encode` vs cbor.mjs.
+
+---
+
+## 17. Sources: buffers, blob handles and streams (owner direction D027)
+
+The owner directed (2026-10-29, relayed by the coordinator) that the codec and
+validator work over an **opaque blob handle** (size + sync or async range
+reads), so it can operate on remote data such as object-storage objects via
+HTTP range requests; that **streaming** parsing work over a stream interface
+(validate as bytes arrive, bounded buffering, resumable at item boundaries,
+backpressure-friendly); that the **same validation program** run over all
+three sources; and that the in-memory buffer stays as fast as possible,
+specialised if the abstraction costs too much, with a benchmark showing the
+abstraction's cost.
+
+### 17.1 The one idea: the VM never does I/O; it asks
+
+The VM (and the scanner, and the cursor primitives) consume a **window** of
+bytes `[base, base + len)` of the message and never call the host. When the
+next step needs bytes outside the window, the VM **suspends** with a request
+`NEED(offset, minLength)` and returns to the host; the host obtains the bytes
+(slice of a buffer, cached chunk, range read, next stream chunk — sync or
+async, the VM cannot tell) and **resumes** with a new window. This is emon's
+plan/fulfil discipline (emon D008) applied to input: no callbacks into the
+host, no async in kin, identical behaviour on every host, and the host owns
+scheduling, caching and backpressure.
+
+This requires the VM state to live in scratch, not on the host stack: **the
+explicit-stack VM that D016 deferred is now required** (D016 superseded by
+D027). Frames per depth already exist in program.md §12's scratch layout;
+the walk becomes a loop over an explicit frame stack, and every point where
+the walk can stop is a resumable state.
+
+### 17.2 Where it can stop, and what it must carry
+
+* **At item heads.** A head is at most 9 bytes; the VM requires the whole head
+  in the window (`NEED(pos, 9 or remaining)`), so heads are never split.
+* **Inside string content**, which can be megabytes: text, byte strings and
+  typed arrays are scanned **incrementally** with carried state — UTF-8
+  decoder state (≤ 3 pending bytes), regexp bitset state, literal-compare
+  position, `.bits` position, typed-array element remainder (≤ 7 bytes),
+  `.size` count. Nothing in a string needs to be buffered whole.
+* **Bounded look-back** is the only buffering: the previous map key (for
+  key order and duplicates) and the current key (for the literal key
+  search), each bounded by a **key length limit** (default 1 KiB, hard
+  64 KiB) that applies to every source so verdicts do not depend on the
+  source; bignum content (≤ 128 bytes) and float payloads (≤ 8 bytes) are
+  copied into scratch when split across windows. So a stream needs at most
+  `2 × keyLimit + 136` bytes of carried state plus the frame stack.
+* **Absolute offsets** can exceed 2^31 for remote objects: kin works with
+  window-relative int32 offsets and keeps the absolute window base as two
+  32-bit words in scratch; hosts use 53-bit numbers (JS) or `u64` (Rust).
+  Per-message item, depth and entry limits are unchanged; the input-bytes
+  limit becomes a 64-bit value for handle sources.
+
+### 17.3 The three sources
+
+| Source | Interface (JS) | Interface (Rust) | Window strategy | What is possible |
+| --- | --- | --- | --- | --- |
+| **Buffer** | `Uint8Array` | `&[u8]` | the whole input is the window; `NEED` never happens | everything; the fast path |
+| **Blob handle** (random access) | `{ size, read(offset, length) → Uint8Array \| Promise<Uint8Array> }`; adapters for `Blob`, `fetch` with `Range`, Node `FileHandle` | `trait Blob { fn size(&self) -> u64; fn read_at(&self, off: u64, buf: &mut [u8]) -> io::Result<usize>; }` and an async variant | a bounded chunk cache (default 16 × 64 KiB, LRU), sequential read-ahead during a full pass, coalesced ranges | full validation (one forward pass); views and cursors with backward moves, map lookups (binary search over an index or a forward scan); lazy validate-what-you-touch (§16.3) — the main use: read one field of a large stored object with a few range requests |
+| **Stream** (forward only) | a `ReadableStream<Uint8Array>` or `AsyncIterable<Uint8Array>`; push API `feed(chunk) → NEED/DONE/ERROR` | `Read` / `AsyncRead` | consumes chunks in order, holds at most the carried state of §17.2 plus the unconsumed tail of the current chunk | full validation as bytes arrive, with backpressure (the host stops pulling while the VM is busy, and the VM only asks for more when it has consumed the window); a forward-only cursor (no backward seeks; `get(key)` scans forward and can stop early because keys are sorted; a key already passed is gone); events for streaming consumers |
+
+**Rules for forward-only streams.** (1) No backward seeks: views are
+single-use forward cursors; asking for something behind the cursor is an API
+error, not a silent re-read. (2) Map key lookups proceed in key order; asking
+for keys in sorted order costs one pass, any other order requires the caller
+to buffer (or to use a blob handle). (3) **Profile §5 still holds**: a stream
+consumer that materialises values must not use them until the stream has
+ended and the whole message validated; `decodeStream` therefore builds values
+while validating (the two passes of D017 cannot both run over a stream
+without buffering it whole) and returns them only on success — allocation
+before the verdict, bounded by the input-bytes limit (D017 amended for
+streams). A streaming consumer that acts on items as they arrive is using
+the lazy, trusted mode (§16.2) and is named as such.
+
+### 17.4 Specialisation for the buffer fast path
+
+The generic VM pays for state in scratch and a window check per head. For
+buffers the window check is the same bounds check the scanner already makes,
+so the hypothesis is that one VM costs little on buffers. The decision is by
+measurement (P1.5 spike on the scanner, then P3.4 on the VM):
+
+* If the resumable walk costs **≤ 15%** over the recursive walk on the P1.4
+  buffer inputs, there is **one** VM for all sources.
+* Otherwise the buffer gets a **specialised driver**: the same leaf
+  predicates, Program and charging, with a recursive walk over the contiguous
+  buffer, and the resumable driver serves handles and streams. Both are kin;
+  a differential gate requires identical verdict, reason, path, offset and
+  budget count for every corpus input under random window splits (1 byte to
+  whole input), so two drivers cannot drift.
+
+The JS host additionally keeps a monomorphic fast path: a `Uint8Array` input
+never goes through the handle interface.
+
+### 17.5 Benchmarks added to §12
+
+9. **Abstraction cost**: buffer fast path vs the generic path over an
+   in-memory blob handle (64 KiB chunks) vs a stream fed in 1 KiB, 16 KiB and
+   64 KiB chunks, on the P1.4 inputs; scanner first (P1.5), then the VM.
+10. **Remote**: reading one field from a 100 MB object behind a simulated
+    range-read handle (latency injected, no network): bytes read, requests
+    made, time; with and without an index.
+11. **Streaming**: peak carried memory and throughput on 1.4 MB bodies fed in
+    small chunks, with backpressure.
+
+### 17.6 What it changes elsewhere
+
+* **D016** superseded: explicit-stack, resumable VM (and scanner, cursor).
+* **D017** amended: streams decode fused (build while validating, release on
+  success); buffers and handles keep check-then-build.
+* **program.md**: format 1's Program is unchanged; the **scratch** layout
+  gains the carried-state block of §17.2 and the frame contents needed to
+  resume (a format-1 scratch amendment, recorded when the VM work item
+  specifies it; scratch is not serialised).
+* **Limits**: a key length limit (default 1 KiB, hard 64 KiB) for all
+  sources; 64-bit input-size limit for handle sources.
+* **Scanner (P1.3)** becomes the first client: a resumable scanner spike
+  (P1.5) measures §17.4's question before the VM is written.
