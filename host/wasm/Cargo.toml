@@ -1,0 +1,26 @@
+[package]
+name = "snug_wasm"
+version = "0.0.0"
+license = "MIT"
+edition = "2021"
+publish = false
+
+# The P1.4 wasm build: the same generated modules as host/rust, plus
+# host/wasm/src/lib.rs (a plain integer ABI, no wasm-bindgen, no imports),
+# assembled by kin/scripts/wasm-build into .cache/snug-wasm/.
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# The size-optimised build P1.4 also reports (the strongest wasm on size).
+[profile.size]
+inherits = "release"
+opt-level = "z"

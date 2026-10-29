@@ -28,6 +28,13 @@ cbor.mjs's options clamped by the host to 0..2^31−1 (exact: no input or count
 reaches 2^31); inputs must be shorter than 2^31 bytes. Recursion depth is at
 most `maxDepth` + 2 frames of the walk; hosts should keep `maxDepth ≤ 256`.
 
+The walk functions (`item`, `read-arg`, `take-len`, `enter-container`,
+`bytes-content`, …) take an explicit **`end` offset** and never look at the
+input's length: `scan` passes `length(bytes)`, and a caller can walk an item
+embedded in a byte string by passing the byte string's end (`.cbor`,
+architecture §17 Q21; the navigation primitives of D026). "Bytes remaining"
+below always means `end − position`.
+
 Codes: 1 truncated, 2 non_shortest, 3 indefinite, 4 malformed, 5 key_type,
 6 key_order, 7 duplicate_key, 8 text, 9 float, 10 simple, 11 tag, 12 bignum,
 13 decimal, 14 typed_array, 15 ndarray, 16 trailing, 17 depth,

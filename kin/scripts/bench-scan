@@ -1,0 +1,17 @@
+#!/bin/sh
+# P1.4: build, then time and size the scanners (bench/SCAN.md records a run).
+#
+#     kin/scripts/bench-scan [rounds] [cold samples]
+set -e
+cd "$(dirname "$0")/../.."
+./kin/scripts/emit > /dev/null
+speed=$(./kin/scripts/wasm-build speed) || { echo "  SKIP wasm (no toolchain); timing JS only"; speed=""; }
+size=$(./kin/scripts/wasm-build size 2>/dev/null) || size=""
+echo "## environment"
+echo "- CPU: $(sysctl -n machdep.cpu.brand_string) ($(sysctl -n hw.ncpu) cores), load: $(uptime | sed 's/.*load averages*: //')"
+echo "- OS: $(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+echo "- node $(node --version); wasm toolchain: $(rustup run "${SNUG_WASM_TOOLCHAIN:-nightly-2026-09-16}" rustc --version 2>/dev/null); native: $(rustc --version)"
+echo; echo "## throughput"; node bench/scan-bench.mjs "$speed" "${1:-15}" | grep -v '^\[{'
+echo; echo "## size"; node bench/scan-size.mjs "$speed" "$size"
+echo; echo "## cold start, Node"; node bench/scan-cold.mjs "$speed" "${2:-31}"
+echo; echo "## cold start, workerd"; node bench/scan-cold-workerd.mjs "$speed" "${2:-15}"
