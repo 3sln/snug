@@ -274,7 +274,7 @@ Float64Array encode measured slower (0.8751 vs 0.7177 ms). These compare
 trusted build with strict baseline decode, not full snug decode; all
 environment, limits, method and results are in `bench/README.md`.
 
-#### D018 — Host fast paths preserve the baseline value model
+#### D028 — Host fast paths preserve the baseline value model (renumbered from a duplicate D018)
 **Decision**: use a String.fromCharCode ASCII builder path for at most 8
 bytes, arithmetic integer heads without per-head tuples, and ASCII text
 key sorting/writing without per-key Writers. Build wrappers through
@@ -717,6 +717,11 @@ purpose).
 
 ## Findings
 
+- 2026-10-29 (manager): commit `50b9a7c` was made with `git commit -a` and
+  swept up the P1 engineer's uncommitted work (q21 `end` offsets, `IntsR`, the
+  JS redeclaration guard, the smaller `read-arg`, gen/ output). Content correct
+  and gated; the message is wrong; `d5b74d7` records it. Rule: commit by
+  explicit path only, never `-a`, while several agents share the tree.
 (Measured facts worth keeping, with dates.)
 
 - 2026-10-29 (P1.4, `bench/SCAN.md`): on the CBOR scanner the kin-generated
