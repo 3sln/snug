@@ -1,0 +1,21 @@
+[package]
+name = "snug"
+version = "0.0.0"
+license = "MIT"
+edition = "2021"
+publish = false
+
+# Assembled by kin/scripts/rust-crate into .cache/snug-rs/: this manifest,
+# host/rust/src/*, and gen/rust/snug/** under src/snug/ with generated `mod`
+# files. Nothing here is built in place.
+
+[lib]
+path = "src/lib.rs"
+
+[profile.dev]
+overflow-checks = true
+
+[profile.release]
+overflow-checks = false
+opt-level = 3
+codegen-units = 1

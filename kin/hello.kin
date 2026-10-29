@@ -1,0 +1,114 @@
+;; The P1.1/P1.2 probe: every shape and every integer operator the scanner
+;; leans on, generated into JS and Rust, run by `bb check` on fixed inputs,
+;; and required to give identical output on both.
+;;
+;; The integer cases are chosen where JS and Rust would DISAGREE if the
+;; vocabulary spelled the operation naively: a quotient of negatives (`/` is
+;; float division in JS), a wrapping multiply (JS `*` loses bits past 2^53),
+;; a logical shift of a negative (JS `>>>` yields an unsigned number), an
+;; arithmetic shift, a remainder of a negative dividend (JS gives -0).
+(ns snug.hello
+  (:require [kin.lang :refer [defn let local return set if while forever break
+                              continue for case defconst defdata comment doc do]]
+            [snug.lang :refer [I32 Bool Bytes Ints + - * neg quot rem add32 mul32
+                               bit-and bit-or bit-xor bit-not shl sar ushr
+                               < > <= >= == != ult and or not
+                               u8 blen ia iset ilen hex]]))
+
+(defconst ^:pub ^I32 STEP_LIMIT 5)
+
+(defconst ^I32 MASK_LOW (hex 255))
+
+(defdata squares
+  :emitter snug.lang/table
+  :data [0 1 4 9 16 25 36 49]
+  :accessors {^I32 squares-n [^I32 ignored]
+              ^I32 squares-at [^I32 ignored ^I32 i]})
+
+(defn ^:pub ^I32 gcd [^:mut ^I32 a ^:mut ^I32 b]
+  (comment "Euclid, by repeated remainder.")
+  (while (!= b 0)
+    (let [t (rem a b)]
+      (set a b)
+      (set b t)))
+  (return a))
+
+(defn ^I32 sum-to [^I32 n]
+  (let [^:mut acc 0]
+    (for [^I32 i 0 n]
+      (set acc (+ acc i)))
+    (return acc)))
+
+(defn ^I32 classify [^I32 x]
+  (case x
+    [0] 100
+    (comment "small primes")
+    [2 3 7] 200
+    [STEP_LIMIT] 300
+    :else (neg 1)))
+
+(defn ^I32 first-zero [^Bytes b ^I32 from]
+  (comment "The index of the first zero byte at or after `from`, or -1.")
+  (let [^:mut i from
+        n (blen b)]
+    (forever
+     (if (>= i n) (return (neg 1)))
+     (if (== (u8 b i) 0) (break))
+     (set i (+ i 1)))
+    (return i)))
+
+(defn ^I32 count-ascii [^Bytes b]
+  (comment "Bytes below 0x80, skipping every byte equal to 0x20 with `continue`.")
+  (let [^:mut i 0
+        ^:mut k 0
+        n (blen b)]
+    (while (< i n)
+      (let [c (u8 b i)]
+        (set i (+ i 1))
+        (if (== c 32) (continue))
+        (if (< c (hex 128)) (set k (+ k 1)))))
+    (return k)))
+
+(defn ^I32 be32 [^Bytes b ^I32 p]
+  (comment "The big-endian 32-bit word at `p` (caller checked p + 4 <= length), as the" "i32 bit pattern.")
+  (return (bit-or (bit-or (shl (u8 b p) 24) (shl (u8 b (+ p 1)) 16))
+                  (bit-or (shl (u8 b (+ p 2)) 8) (u8 b (+ p 3))))))
+
+(defn ^I32 fill-squares [^Ints out ^I32 at]
+  (comment "Write squares-at 0..n-1 into out from `at`; answer how many.")
+  (let [n (squares-n 0)]
+    (for [^I32 i 0 n]
+      (iset out (+ at i) (squares-at 0 i)))
+    (return n)))
+
+(defn ^Bool both-small [^I32 a ^I32 b]
+  (return (and (< a 10) (not (or (< b 0) (> b 9))))))
+
+(defn ^:pub ^I32 selftest [^Ints out ^Bytes b]
+  (comment "Fill `out` with every probe answer; return the count written.")
+  (let [^:mut k 0]
+    (iset out k (gcd 12 18)) (set k (+ k 1))
+    (iset out k (gcd 42 63)) (set k (+ k 1))
+    (iset out k (sum-to STEP_LIMIT)) (set k (+ k 1))
+    (iset out k (classify 0)) (set k (+ k 1))
+    (iset out k (classify 5)) (set k (+ k 1))
+    (iset out k (classify 9)) (set k (+ k 1))
+    (iset out k (quot (neg 7) 2)) (set k (+ k 1))
+    (iset out k (rem (neg 7) 2)) (set k (+ k 1))
+    (iset out k (rem (neg 10) 5)) (set k (+ k 1))
+    (iset out k (mul32 123456789 987654321)) (set k (+ k 1))
+    (iset out k (add32 2147483647 1)) (set k (+ k 1))
+    (iset out k (ushr (neg 16) 28)) (set k (+ k 1))
+    (iset out k (sar (neg 16) 2)) (set k (+ k 1))
+    (iset out k (shl 3 30)) (set k (+ k 1))
+    (iset out k (bit-xor (bit-not 0) MASK_LOW)) (set k (+ k 1))
+    (iset out k (bit-and (neg 1) (hex 65535))) (set k (+ k 1))
+    (if (ult (neg 1) 5) (iset out k 1) (iset out k 0)) (set k (+ k 1))
+    (if (both-small 3 4) (iset out k 1) (iset out k 0)) (set k (+ k 1))
+    (iset out k (first-zero b 0)) (set k (+ k 1))
+    (iset out k (count-ascii b)) (set k (+ k 1))
+    (iset out k (be32 b 0)) (set k (+ k 1))
+    (iset out k (blen b)) (set k (+ k 1))
+    (let [w (fill-squares out k)]
+      (set k (+ k w)))
+    (return k)))

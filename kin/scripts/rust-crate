@@ -1,0 +1,34 @@
+#!/bin/sh
+# Assemble the Rust crate: kin/scripts/rust-crate DIR [HOST_SRC]
+#
+#   DIR/Cargo.toml        host/rust/Cargo.toml
+#   DIR/src/              HOST_SRC/* (default host/rust/src)
+#   DIR/src/snug/...      gen/rust/snug/** (kin's modules)
+#   DIR/src/snug.rs, DIR/src/snug/<d>.rs   `pub mod` lines, generated from the
+#                         tree, so a new module is compiled the day it is emitted.
+#
+# Copies only what changed (cargo's incremental build keys on mtimes).
+set -e
+cd "$(dirname "$0")/../.."
+dir="$1"; host="${2:-host/rust/src}"
+[ -n "$dir" ] || { echo "usage: rust-crate DIR [HOST_SRC]" >&2; exit 2; }
+mkdir -p "$dir/src"
+put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
+puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
+put host/rust/Cargo.toml "$dir/Cargo.toml"
+(cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done
+# kin's modules, and a mod file per directory.
+rm -rf "$dir/src/snug.new"; mkdir -p "$dir/src/snug.new"
+(cd gen/rust && find snug -type f -name '*.rs') | while read -r f; do put "gen/rust/$f" "$dir/src/$f"; done
+modfile() {  # modfile <gen dir> -> mod lines for its children
+  for e in $(ls "gen/rust/$1" | sort); do
+    case "$e" in *.rs) echo "pub mod ${e%.rs};" ;; *) [ -d "gen/rust/$1/$e" ] && echo "pub mod $e;" ;; esac
+  done
+}
+puttext "$(modfile snug)
+" "$dir/src/snug.rs"
+(cd gen/rust && find snug -mindepth 1 -type d) | while read -r d; do
+  puttext "$(modfile "$d")
+" "$dir/src/$d.rs"
+done
+rm -rf "$dir/src/snug.new"

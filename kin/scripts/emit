@@ -1,0 +1,13 @@
+#!/usr/bin/env bb
+;; Write EVERY source's modules into gen/.   kin/scripts/emit
+;;
+;; All of them, always: a namespace is resolved against what its siblings
+;; EXPORT, so `emit-all!` walks the dependency DAG and emits in order. And it
+;; is ATOMIC over the batch -- every source and target, or nothing (kin stages
+;; everything in memory and restores originals if a write fails partway).
+;; No input stamp: the whole batch takes seconds here.
+(require '[kin.project :as kp] '[snug.project :as p])
+(let [{:keys [order emitted]} (kp/emit-all! @p/project)]
+  (doseq [label order
+          r (get emitted label)]
+    (println (format "  %-5s %s" (name (:target r)) (or (:path r) "(nowhere)")))))

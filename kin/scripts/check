@@ -1,0 +1,54 @@
+#!/bin/sh
+# Generate, RUN both targets, and require the same answer -- and the right one.
+#
+#     kin/scripts/check
+#
+# 1. emit everything; `node --check` every generated module (syntax), and
+#    build the Rust crate with warnings DENIED (generated code may not be worse
+#    than hand-written, and a warning is worse);
+# 2. snug.hello's probe on JS (node) and Rust (cargo, debug: overflow checks
+#    on, so an arithmetic guarantee the source broke panics here);
+# 3. TWO CHECKS: the targets agree, and they agree on the answer worked out by
+#    hand (two identically wrong answers agree perfectly).
+set -e
+cd "$(dirname "$0")/../.."
+fails=0
+./kin/scripts/emit > /dev/null
+
+for f in $(find gen/js -name '*.mjs' | sort); do
+  if ! out=$(node --check "$f" 2>&1); then
+    echo "  FAIL node --check $f:"; printf '%s\n' "$out" | sed 's/^/    /'; fails=$((fails+1))
+  fi
+done
+echo "  ok   node --check: $(find gen/js -name '*.mjs' | wc -l | tr -d ' ') generated modules"
+
+crate=.cache/snug-rs
+./kin/scripts/rust-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bins 2>&1); then
+  echo "  FAIL cargo refused the generated code (warnings denied):"
+  printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+echo "  ok   cargo build (debug, overflow checks on, -D warnings)"
+
+# Worked by hand from kin/hello.kin, not copied from a run:
+#   gcd 12 18 = 6, gcd 42 63 = 21, sum 0..4 = 10, classify 0/5/9 = 100 300 -1,
+#   -7 quot 2 = -3, -7 rem 2 = -1, -10 rem 5 = 0 (not -0),
+#   123456789 * 987654321 mod 2^32 as i32 = -67153019, (2^31-1)+1 wraps to -2^31,
+#   -16 ushr 28 = 15, -16 sar 2 = -4, 3 shl 30 = -1073741824, ~0 ^ 0xff = -256,
+#   -1 & 0xffff = 65535, -1 ult 5 = 0 (0xffffffff is big), both-small 3 4 = 1,
+#   on 80 ff 12 34 20 41 00 42: first zero at 6, 5 bytes < 0x80 skipping 0x20,
+#   be32 = 0x80ff1234 as i32 = -2130767308, length 8, then the squares table.
+want="6 21 10 100 300 -1 -3 -1 0 -67153019 -2147483648 15 -4 -1073741824 -256 65535 0 1 6 5 -2130767308 8 0 1 4 9 16 25 36 49"
+
+if ! js=$(node kin/scripts/check-hello.mjs 2>&1); then
+  echo "  FAIL the JS probe did not run:"; printf '%s\n' "$js" | sed 's/^/    /'; exit 1
+fi
+if ! rs=$("$crate/target/debug/check" 2>&1); then
+  echo "  FAIL the Rust probe did not run:"; printf '%s\n' "$rs" | sed 's/^/    /'; exit 1
+fi
+echo "  js     $js"
+echo "  rust   $rs"
+[ "$js" = "$rs" ] || { echo "  FAIL the two targets disagree"; fails=$((fails+1)); }
+[ "$js" = "$want" ] || { echo "  FAIL expected \`$want\`"; fails=$((fails+1)); }
+[ "$fails" -eq 0 ] || exit 1
+echo "  ok   JS and Rust agree, on the hand-worked answer"

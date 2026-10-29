@@ -1,0 +1,82 @@
+#!/bin/sh
+# Is the committed generated code what the sources say it should be?
+#
+#     kin/scripts/drift
+#
+# gen/ is committed (kin's rule: a build must not need the generator), so it
+# can go stale silently. Adapted from emon's kin/scripts/drift; everything
+# under gen/ is kin's outright, so git is the comparison. Four questions:
+#
+#   1a. did re-emitting change the working tree?        (a hand edit)
+#   1b. does every source produce what is COMMITTED?    (a stale commit)
+#   2.  is a file under gen/ produced by no source?     (an orphan)
+#   3.  is a destination a source claims not committed? (missing)
+#
+# ORDER MATTERS: hash the tree BEFORE emitting, because re-emitting
+# overwrites a hand edit and a gate that destroys its evidence reports ok.
+set -e
+cd "$(dirname "$0")/../.."
+fails=0
+
+before=$(mktemp); want=$(mktemp); have=$(mktemp)
+trap 'rm -f "$before" "$want" "$have"' EXIT
+hash_tree() { find gen -type f 2>/dev/null | sort | xargs shasum 2>/dev/null || true; }
+hash_tree > "$before"
+
+./kin/scripts/emit > /dev/null
+
+if ! hash_tree | diff -q "$before" - > /dev/null; then
+  echo "  FAIL re-emitting changed the working tree -- it held something the"
+  echo "       sources do not produce (a hand edit, or an un-emitted change):"
+  hash_tree | diff "$before" - | grep '^[<>]' | sed 's/^/    /'
+  fails=$((fails+1))
+else
+  echo "  ok   re-emitting changed nothing -- no hand edits"
+fi
+
+if ! git diff --quiet -- gen/; then
+  echo "  FAIL the committed output is not what the sources say:"
+  git diff --stat -- gen/ | sed 's/^/    /'
+  echo "       (run bb emit and commit gen/ with its source)"
+  fails=$((fails+1))
+else
+  echo "  ok   every committed module matches its source"
+fi
+
+./kin/scripts/destinations | awk '{print $1 "/" $2}' | sort > "$want"
+git ls-files gen/ | sed 's|^gen/||' | sort -u > "$have"
+if [ ! -s "$want" ]; then
+  echo "  FAIL destinations named no file at all -- the gate has no input"
+  exit 1
+fi
+echo "  ok   $(wc -l < "$want" | tr -d ' ') destinations to account for"
+
+untracked=$(git ls-files --others --exclude-standard gen/)
+if [ -n "$untracked" ]; then
+  echo "  FAIL a file under gen/ is not tracked -- emitted but never added:"
+  printf '%s\n' "$untracked" | sed 's/^/    /'
+  fails=$((fails+1))
+else
+  echo "  ok   nothing under gen/ is untracked"
+fi
+
+orphaned=$(comm -13 "$want" "$have" || true)
+if [ -n "$orphaned" ]; then
+  echo "  FAIL a committed file under gen/ is produced by no source:"
+  printf '%s\n' "$orphaned" | sed 's/^/    /'
+  fails=$((fails+1))
+else
+  echo "  ok   every committed file under gen/ has a source that produces it"
+fi
+
+missing=$(comm -23 "$want" "$have" || true)
+if [ -n "$missing" ]; then
+  echo "  FAIL a source claims a destination that is not committed:"
+  printf '%s\n' "$missing" | sed 's/^/    /'
+  fails=$((fails+1))
+else
+  echo "  ok   every destination a source claims is committed"
+fi
+
+[ "$fails" -eq 0 ] || exit 1
+echo "  ok   no drift"

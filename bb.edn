@@ -1,0 +1,17 @@
+;; snug's kin wiring. kin is on the PATH (as in emon and nome) so that nothing
+;; in the generation path needs a JVM; `deps.edn` carries the Clojure-consumer
+;; form of the same thing.
+{:paths ["kin/src" "../kin/src"]
+ :tasks
+ {gen        {:doc "Print what one source generates.   bb gen kin/hello.kin"
+              :task (apply shell "kin/scripts/gen" *command-line-args*)}
+  emit       {:doc "Write every source's modules into gen/ (all or nothing)."
+              :task (shell "kin/scripts/emit")}
+  drift      {:doc "Is committed gen/ what the sources produce? (hand edits, stale, orphans, missing)"
+              :task (shell "kin/scripts/drift")}
+  check      {:doc "Generate, run JS (node) and Rust (cargo); require identical output."
+              :task (shell "kin/scripts/check")}
+  scan-test  {:doc "Every CBOR vector + seeded mutations through generated JS and Rust; codes must equal cbor.mjs's."
+              :task (apply shell "kin/scripts/scan-test" *command-line-args*)}
+  bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
+              :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}
