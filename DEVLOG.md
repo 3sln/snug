@@ -220,8 +220,78 @@ slower); allocated head tuples; validating wrapper constructors in build
   alternatives, determinism rule, array automata, regexps).
 - [ ] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
-- [ ] **P3.5 — Conformance corpus** (study probes and contracts with expected
+- [~] **P3.5 — Conformance corpus** (study probes and contracts with expected
   verdicts corrected to RFC semantics; RFC 8610 examples; adversarial cases).
+
+  *Implemented and checked 2026-10-29; manager commit pending (no commit made).*
+  Independent oracle in `corpus/tools/oracle.mjs`, tests in
+  `corpus/tools/oracle.test.mjs`, Node 24 directory entry in
+  `corpus/tools/index.js`, reproducible generator in
+  `corpus/tools/export-adversarial.mjs`, and vectors in
+  `corpus/conformance/adversarial.json`. No implementation sources in `kin/`,
+  `gen/` or `host/js/src/` were read or imported. Only the read-only baseline
+  codec supplies encoding/decoding and its value wrappers.
+
+  The oracle parses rules, groups, generics, sockets, choices, occurrences,
+  unwraps, enums, cuts, literals (including exact BigInt and hex floats),
+  ranges, tags, major types, all 40 Appendix D names and the requested
+  controls. It enumerates map pair assignments and literal group repetitions;
+  arrays and the small code-point I-Regexp interpreter retain all matching
+  positions. Cuts follow D021 per alternative and source order, so an earlier
+  wildcard can consume a pair before a later cut. Embedded decoding failures
+  are local predicates. A shared 1,000,000-step validation budget returns
+  `unknown` on exhaustion; callers may lower it for experiments. Compilation
+  is also bounded. Invalid roots/host calls give `unknown`, not a fabricated
+  refusal. No corpus case has an unknown verdict.
+
+  **D025 — Independently generated, reviewable corpus expectations.**
+  **Decision**: compute adversarial expectations with this AST interpreter;
+  assert 510 hand-reasoned verdicts during generation, and add 400 cases from
+  80 schemas using xorshift32 seed `0x5eed8610`. Store architecture refusals
+  separately as `snugSchemaError`, retaining the oracle's Boolean verdicts
+  (26 suites: six fixed witnesses and 20 generated overlap schemas).
+  **Why**: D022 needs an independent existential oracle for the counterexamples
+  that invalidated the first architecture; generation must not copy a VM's
+  answers or quietly bless changed study expectations.
+  **Alternatives**: the study's known-defective crate; manual verdicts alone;
+  sharing the implementation's normalisation/matching algorithm.
+
+  - [ ] **Signed off** (owner)
+
+  **Coverage**: 223 suites / 910 adversarial cases: reviews 126; crate defects
+  35; RFC examples 30; grammar 64; prelude 114; controls 141; generated 400.
+  Includes map repetition/count coupling and residual factors, source-order
+  cuts, ambiguous array counts, AND obligations, embedded locality, exact
+  bignum boundaries, float widths/subnormals, UTF-8 sizes, bit numbering and
+  anchored regexps. Review examples about invalid wire encodings, error
+  precedence, mutable input, Program integrity, memory and code generation
+  are not decoded-value CDDL verdicts; the strict profile forbids those
+  malformed encodings. C15's valid empty typed-array witness additionally
+  uses `maxItems: 1`.
+
+  **Study agreement / disagreements**: 197/197 eligible cases agree across
+  63 suites; **zero disagreements**. Seven suites / 16 cases are excluded
+  exactly as requested (`schemaError` or `phase: "later"`). No expectation
+  in `study.json` changed, and `export-study.mjs` needed no changes.
+
+  **Checks actually run**: `node --test corpus/tools/` — **301 tests passed,
+  0 failed, 0 skipped**. `node corpus/tools/export-adversarial.mjs` completed;
+  a second regeneration was checked byte-for-byte identical. Every adversarial
+  wire value decodes with the baseline using `top: "any"`, re-encodes
+  identically, and gives the stored Boolean verdict.
+
+  **Learnt**: the baseline's typed-array decoder assumes that `slice()` returns
+  a fresh offset-zero byte array. A Node `Buffer` violates that assumption:
+  pooled Buffer fixtures can produce a typed array over unrelated pool bytes.
+  The initial test run therefore had three round-trip failures; copying hex
+  fixtures into plain `Uint8Array`s fixed the adapter. The baseline was left
+  untouched. Numeric tag syntax must retain its original digits (`#6.0`,
+  `#6.20`, and large tag numbers), and a spaced `* 3` repeats literal 3 rather
+  than setting an occurrence maximum. Dedicated tests cover both. Fourteen
+  prelude names require tags/simple values forbidden by the profile, so no
+  profile-valid accepting case exists for them; `any` has no profile-valid
+  refusing case. These limits are explicit in the corpus. Scalar -0 likewise
+  has no profile value and is exercised only inside typed arrays.
 
 ## Phase 4 — Differential, fuzz, benchmarks
 

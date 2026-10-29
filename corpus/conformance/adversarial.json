@@ -1,0 +1,6252 @@
+{
+ "format": "snug conformance corpus v1. Each suite: cddl text, profile (full unless stated), cases [{rule, hex, expect: true|false, reason?, note?}]. A suite with schemaError expects compile to fail with that code. phase:\"later\" suites are not yet gated.",
+ "source": "Independent RFC 8610 / RFC 9682 oracle; reviews C1-C22 and A1-A14; deterministic seed 0x5eed8610",
+ "notes": [
+  "snugSchemaError marks an architecture revision 2 refusal, not an RFC parse error. Such suites still have oracle verdicts.",
+  "All hex values decode under the strict baseline profile. Scalar -0, infinities and NaN have no profile value; -0 is exercised inside typed arrays.",
+  "Prelude types whose only inhabitants use forbidden tags/simple values cannot have profile-valid accept cases; their suites explicitly document this.",
+  "Non-random cases are checked against hand-reasoned verdicts in export-adversarial.mjs. Random expectations come only from the oracle; no snug output is used."
+ ],
+ "suites": [
+  {
+   "category": "reviews",
+   "name": "C1: attainable group counts are {2,4}",
+   "cddl": "r = { 1*2 (2*2 tstr => uint) }",
+   "snugSchemaError": "map_group_occurrence: variable repetition of non-absorbing key typesets",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616100",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616100616200",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a3616100616200616300",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a4616100616200616300616400",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C1/A2: coupled text/integer counts",
+   "cddl": "r = { 1*2 (tstr => uint, uint => uint) }",
+   "options": {
+    "cose": true
+   },
+   "snugSchemaError": "map_group_occurrence: coupled variable repetition",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a20100616100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a30100616100616200",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a401000200616100616200",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C2: nullable literal copies",
+   "cddl": "r = { 2*2 (? a: uint, ? b: uint) }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616302",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A2: nullable single literal copies",
+   "cddl": "r = { 2*2 (? a: int) }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A2: distinct alternatives in repeated group",
+   "cddl": "r = { + (email: tstr // phone: tstr) }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a165656d61696c6165",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16570686f6e656170",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a265656d61696c61656570686f6e656170",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a265656d61696c006570686f6e656170",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A2: attainable group counts are {0,2,4}",
+   "cddl": "r = { 0*2 (2*2 tstr => int) }",
+   "snugSchemaError": "map_group_occurrence: count set {0,2,4} is not an interval",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1626b3000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2626b3000626b3101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a3626b3000626b3101626b3202",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a4626b3000626b3101626b3202626b3303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a5626b3000626b3101626b3202626b3303626b3404",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C3: non-cut literal fall-through",
+   "cddl": "r = { ? \"a\" => uint, * tstr => tstr }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16161f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a161626178",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C3/A1: absent optional factor forwards to residual",
+   "cddl": "r = { ? (a: int, b: int), * tstr => any }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616202",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610161636178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A1: choices correlate optional factor with residual",
+   "cddl": "r = { ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a261610161636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a361610161620261636178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616302",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617861636178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261616178616301",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A1c: top-level group choices stay closed",
+   "cddl": "r = { a: int, * tstr => int // b: tstr, * tstr => tstr }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161626178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610161626178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617861626178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C4: typeset cuts commit a matched key",
+   "cddl": "r = { * tstr ^ => uint, * tstr => any }",
+   "snugSchemaError": "map_cut: cuts on key typesets refused",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C5: value-disjoint existential assignment",
+   "cddl": "r = { tstr => 0, tstr => 1 }",
+   "snugSchemaError": "map_overlap: overlapping constrained key domains",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2616100616201",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616200",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616100616200",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A6b: wildcard before cut may consume pair",
+   "cddl": "r = { * tstr => any, ? \"a\": int }",
+   "snugSchemaError": "map_cut: literal cut after overlapping wildcard",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "D021: cut is alternative local",
+   "cddl": "r = { kind: \"a\", x: int // kind: \"b\", y: tstr }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a261796173646b696e646162",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2617801646b696e646161",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2617801646b696e646162",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2617801646b696e646163",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "D021: explicit and implied cuts block fall-through",
+   "cddl": "r = { ? \"a\" ^ => int, * tstr => any }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161626178",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "D021: colon optional cut blocks fall-through",
+   "cddl": "r = { ? a: int, * tstr => any }",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161626178",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C6: incoming optional prefix gives multiple counts",
+   "cddl": "r = [? uint, 2*3 uint, tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82016178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8301016178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "840101016178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "85010101016178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8601010101016178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A3: paired prefix gives multiple counts",
+   "cddl": "r = [* (int, int), 3*3 uint]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "820101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83010101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8401010101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "850101010101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "86010101010101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8701010101010101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "880101010101010101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C7: AND operands are not root alternatives",
+   "cddl": "r = ([uint] .and [tstr]) / [bool]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "81f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C7: empty intersection of child predicates",
+   "cddl": "r = [* uint] .within [* tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C7/A4: embedded failure stays local",
+   "cddl": "r = bstr .cbor {a: int} / bstr .size (0..16)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "41ff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "44a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "45a161616178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "51ffffffffffffffffffffffffffffffffff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C7: plain bytes survive failed embedded branch",
+   "cddl": "r = bstr / (bstr .cbor uint)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "41ff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "4101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A4: tag content failure stays local",
+   "cddl": "r = #6.2(bstr .size 9) / integer",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c24b0100000000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C8: equality preserves target constraints",
+   "cddl": "r = (tstr .size 1) .eq \"aa\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "626161",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6161",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C8: inequality preserves target constraints",
+   "cddl": "r = (tstr .size 1) .ne \"x\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "626161",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6179",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C8: numeric exclusion splits a range",
+   "cddl": "r = (0..10) .ne 5",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "20",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "04",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "05",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "06",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "0a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "0b",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C14: same-point failures do not create success",
+   "cddl": "r = (uint .lt 3) / 9",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "02",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "05",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "09",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C14: missing member alternatives",
+   "cddl": "r = {a:uint,b:uint}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616201",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616201",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "A11: socket alternatives with duplicate literals",
+   "cddl": "$$ext //= (a: int)\n$$ext //= (b: int)\nr = {a: int, $$ext}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616202",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "reviews",
+   "name": "C15: empty typed content is still a tag predicate",
+   "cddl": "r = #6.69(bstr .size 0)",
+   "options": {
+    "maxItems": 1
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d84540",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d845420100",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "member name equals type rule",
+   "cddl": "key = tstr .size (1..3)\nr = {key: key}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1636b657963616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1636b65796461626364",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a16361626363616263",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "closed map under group choices",
+   "cddl": "r = {a: int // b: tstr}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161626173",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610161626173",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261610165657874726100",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "optional group is all or none",
+   "cddl": "r = {id:tstr, ? (token:tstr, token_type:\"DPoP\", expires_at:uint)}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16269646178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2626964617865746f6b656e6174",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a362696461786a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a4626964617865746f6b656e61746a657870697265735f6174016a746f6b656e5f747970656444506f50",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "regexp whole-string anchoring",
+   "cddl": "r = tstr .regexp \"[a-z]+\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6421616263",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6461626321",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "646162630a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "CDDL escapes become regexp code points",
+   "cddl": "r = tstr .regexp \"[^\\u0000-\\u001f]{1,4}\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "62c3a9",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6461626364",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "656162636465",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6100",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "wasm32 integer boundaries",
+   "cddl": "r = 4294967296..18446744073709551615",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "1affffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "1b0000000100000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b0020000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "bignum ranges stay exact",
+   "cddl": "r = 18446744073709551616..340282366920938463463374607431768211455",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c250ffffffffffffffffffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c2510100000000000000000000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "crate-defects",
+   "name": "bytes literal used as method value",
+   "cddl": "r = {method: h'00'}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1666d6574686f644100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1666d6574686f646100",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1666d6574686f6400",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1666d6574686f644101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 introduction person",
+   "cddl": "person = {name: tstr, age: uint, ? employer: tstr}\nr = person",
+   "note": "RFC 8610 §1 person structure; profile-valid text keys.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a263616765182a646e616d65644a616e65",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a363616765182a646e616d65644a616e6568656d706c6f7965726441636d65",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26361676520646e616d65644a616e65",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a363616765182a646e616d65644a616e65656578747261f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 §3 group and array labels",
+   "cddl": "identity = (name: tstr, age: uint)\nr = [identity, ? bool]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82644a616e65182a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "83644a616e65182af5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "81644a616e65",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82182a644a616e65",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 §3.10 generic list",
+   "cddl": "list<t> = [* t]\nr = list<uint>",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "83000102",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "82006178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 §3.4 group enumeration",
+   "cddl": "color = (red: 1, green: 2, blue: 3)\nr = &color",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "02",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63726564",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 §3.7 unwrap",
+   "cddl": "header = [a: uint, b: tstr]\nr = [~header, * bstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82016178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "830161784100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 §3.8.4 embedded CBOR",
+   "cddl": "r = bstr .cbor [uint, tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "4482016178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "43820102",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "420102",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 §3.8.4 CBOR sequence",
+   "cddl": "r = bstr .cborseq [* uint]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "43000102",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "43006178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "41ff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "rfc-examples",
+   "name": "RFC 8610 Appendix D prelude composition",
+   "cddl": "r = {who: text, payload: bytes, amount: integer, factor: number}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a46377686f616166616d6f756e74c24901000000000000000066666163746f72f93e00677061796c6f61644100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a46377686f616166616d6f756e740166666163746f72f93e00677061796c6f61646178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a46377686f616166616d6f756e740166666163746f72c482200f677061796c6f616440",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "RFC 9682 variable tag number",
+   "cddl": "tagnum = 69..70\nr = #6.<tagnum>(bstr)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d845420100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d8464401000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d84e4401000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "1845",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "RFC 9682 variable tag number choice",
+   "cddl": "r = #6.<2 / 3>(bstr .size 9)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c24b0100000000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "bare major types",
+   "cddl": "r = [#0,#1,#2,#3,#4,#5,#6,#7]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "88012040617880a0c482200ff5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "88010140617880a0c482200ff5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "hex binary and huge integer literals",
+   "cddl": "r = 0xff / 0b1010 / -0x10 / 1844674407370955161600000000001",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "18ff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "0a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "2f",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c24d174876e8000000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "10",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "three byte literal spellings",
+   "cddl": "r = h'6162' / b64'Y2Q=' / 'ef'",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "426162",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "426364",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "426566",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "626162",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "4161",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "float literal scientific notation",
+   "cddl": "r = 1.5 / 1e-3",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb3f50624dd2f1a9fc",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "fb3f60624dd2f1a9fc",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "hex float literals round once to binary64",
+   "cddl": "r = 0x1.8p0 / 0x1p-1074 / 0x3p-1075",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb0000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb0000000000000002",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb0000000000000003",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "unqualified bytes with escaped quote and newline",
+   "cddl": "r = 'it\\'s\\n'",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "45697427730a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "4469742773",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "65697427730a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "star followed by a spaced numeric literal",
+   "cddl": "r = [* 3]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "820303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8102",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "820302",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "type socket and forward references",
+   "cddl": "$x /= small\n$x /= tstr\nsmall = 0..2\nr = [* $x]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8300026178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8103",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "undefined sockets",
+   "cddl": "r = {a:int, $$nothing}\ns = $nothing",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": false
+    },
+    {
+     "rule": "s",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "generic group and nested arguments",
+   "cddl": "pair<A,B> = (A,B)\nlist<T> = [* T]\nr = [pair<uint,list<tstr>>]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82018261786179",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "82018102",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "regular recursive array group",
+   "cddl": "g = (int, ? g)\nr = [g]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "83010203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "82016178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "recursive map",
+   "cddl": "node = {v: int, ? children: [* node]}\nr = node",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a2617601686368696c6472656e81a1617602",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2617601686368696c6472656e81a161766178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "enum nested groups",
+   "cddl": "g = (first: 1, (second: 2 // third: 3))\nr = &g",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "02",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "04",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "map unwrap",
+   "cddl": "base = {a: int}\nr = {~base,b:bool}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a26161016162f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616201",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "unwrap distributes a type choice",
+   "cddl": "base = [uint] / [tstr,bool]\nr = [~base, null]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8201f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "836178f5f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "826178f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "grammar",
+   "name": "type and group extensions",
+   "cddl": "t = int\nt /= tstr\ng = (a:int)\ng //= (b:tstr)\nr = {g, ? x:t}",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a261610161786178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261626173617802",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610161626173",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: any",
+   "cddl": "r = any",
+   "note": "No profile-valid refusing value exists: any accepts every profile value.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "81c482200f",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: uint",
+   "cddl": "r = uint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "20",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: nint",
+   "cddl": "r = nint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: int",
+   "cddl": "r = int",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: bstr",
+   "cddl": "r = bstr",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "4101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: bytes",
+   "cddl": "r = bytes",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "60",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: tstr",
+   "cddl": "r = tstr",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "4101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: text",
+   "cddl": "r = text",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "60",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: tdate",
+   "cddl": "r = tdate",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: time",
+   "cddl": "r = time",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: number",
+   "cddl": "r = number",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: biguint",
+   "cddl": "r = biguint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: bignint",
+   "cddl": "r = bignint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: bigint",
+   "cddl": "r = bigint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: integer",
+   "cddl": "r = integer",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: unsigned",
+   "cddl": "r = unsigned",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "20",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: decfrac",
+   "cddl": "r = decfrac",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c48222c249010000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: bigfloat",
+   "cddl": "r = bigfloat",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: eb64url",
+   "cddl": "r = eb64url",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: eb64legacy",
+   "cddl": "r = eb64legacy",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: eb16",
+   "cddl": "r = eb16",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: encoded-cbor",
+   "cddl": "r = encoded-cbor",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: uri",
+   "cddl": "r = uri",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: b64url",
+   "cddl": "r = b64url",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: b64legacy",
+   "cddl": "r = b64legacy",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: regexp",
+   "cddl": "r = regexp",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: mime-message",
+   "cddl": "r = mime-message",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: cbor-any",
+   "cddl": "r = cbor-any",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: float16",
+   "cddl": "r = float16",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fa3f8ccccd",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: float32",
+   "cddl": "r = float32",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "fa3f8ccccd",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: float64",
+   "cddl": "r = float64",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "fa3f8ccccd",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: float16-32",
+   "cddl": "r = float16-32",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fa3f8ccccd",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: float32-64",
+   "cddl": "r = float32-64",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "fa3f8ccccd",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: float",
+   "cddl": "r = float",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fa3f8ccccd",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb3ff199999999999a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: false",
+   "cddl": "r = false",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f4",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: true",
+   "cddl": "r = true",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: bool",
+   "cddl": "r = bool",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f4",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: nil",
+   "cddl": "r = nil",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: null",
+   "cddl": "r = null",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "prelude",
+   "name": "Appendix D: undefined",
+   "cddl": "r = undefined",
+   "note": "No profile-valid accepting value: the Appendix D tag/simple value is forbidden by the strict CBOR profile.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c482200f",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "uint .size 0",
+   "cddl": "r = uint .size 0",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "18ff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "uint .size 1",
+   "cddl": "r = uint .size 1",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "18ff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "190100",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "uint .size 8",
+   "cddl": "r = uint .size 8",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "uint size interval uses minimal byte capacity",
+   "cddl": "r = uint .size (1..2)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "17",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1818",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "18ff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "190100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "19ffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1a00010000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "uint size zero interval",
+   "cddl": "r = uint .size (0..0)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "20",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "UTF-8 text size",
+   "cddl": "r = tstr .size 4",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "64c3a9c3a9",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "64f09f9880",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "62c3a9",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6461626364",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "byte size exact",
+   "cddl": "r = bstr .size 2",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "420001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "4100",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "626162",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "bits byte boundaries LSB first",
+   "cddl": "flags = &(lo:0,hi:7,next:8,last:16)\nr = bstr .bits flags",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "43810101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "420080",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "43000002",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "420001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "420100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "uint bits zero and high bits",
+   "cddl": "r = uint .bits (0 / 8 / 63)",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "190101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b8000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1b4000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "lt at 18446744073709551615",
+   "cddl": "r = integer .lt 18446744073709551615",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bfffffffffffffffe",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "le at 18446744073709551615",
+   "cddl": "r = integer .le 18446744073709551615",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bfffffffffffffffe",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "gt at 18446744073709551615",
+   "cddl": "r = integer .gt 18446744073709551615",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bfffffffffffffffe",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "ge at 18446744073709551615",
+   "cddl": "r = integer .ge 18446744073709551615",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bfffffffffffffffe",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "lt at 18446744073709551616",
+   "cddl": "r = integer .lt 18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000001",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "le at 18446744073709551616",
+   "cddl": "r = integer .le 18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000001",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "gt at 18446744073709551616",
+   "cddl": "r = integer .gt 18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000001",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "ge at 18446744073709551616",
+   "cddl": "r = integer .ge 18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "1bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c249010000000000000001",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "lt at -18446744073709551616",
+   "cddl": "r = integer .lt -18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bfffffffffffffffe",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "le at -18446744073709551616",
+   "cddl": "r = integer .le -18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bfffffffffffffffe",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "gt at -18446744073709551616",
+   "cddl": "r = integer .gt -18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bfffffffffffffffe",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "ge at -18446744073709551616",
+   "cddl": "r = integer .ge -18446744073709551616",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bfffffffffffffffe",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "lt at -18446744073709551617",
+   "cddl": "r = integer .lt -18446744073709551617",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "le at -18446744073709551617",
+   "cddl": "r = integer .le -18446744073709551617",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "gt at -18446744073709551617",
+   "cddl": "r = integer .gt -18446744073709551617",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000001",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "ge at -18446744073709551617",
+   "cddl": "r = integer .ge -18446744073709551617",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c349010000000000000001",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "c349010000000000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "3bffffffffffffffff",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "float half subnormal inclusive range",
+   "cddl": "r = 0.0..0.00006103515625",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f90400",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fa33000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f98001",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "float64 minimum subnormal and exclusive bound",
+   "cddl": "r = 0.0...1e-300",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "fb0000000000000001",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb017124e63593f5e1",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "fb01a56e1fc2f8f359",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "fb8000000000000001",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "typed arrays retain negative zero",
+   "cddl": "r = #6.85(bstr .size 8)",
+   "note": "Scalar -0 is refused by the profile; only typed-array payloads carry it here.",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d855480000008000000000",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d8554400000000",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "equality on composite target",
+   "cddl": "r = [uint] .eq [1]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8102",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816131",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "feature and default are annotations",
+   "cddl": "r = (uint .default 3) .feature \"test-feature\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "00",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "03",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6133",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "regexp hyphen first",
+   "cddl": "r = tstr .regexp \"[-a-z]{2,3}\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "622d61",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63612d7a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "612d",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "646162637a",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "623161",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "regexp hyphen last",
+   "cddl": "r = tstr .regexp \"[a-z-]{2,3}\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "622d61",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63612d7a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6161",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "623161",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "regexp code points and counted bounds",
+   "cddl": "r = tstr .regexp \"[😀-🙏]{1,2}\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "64f09f9880",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "68f09f9880f09f998f",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6cf09f9880f09f9880f09f9880",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6141",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "regexp grouping alternation and empty branches",
+   "cddl": "r = tstr .regexp \"(ab|c){1,2}\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "626162",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63616263",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "626363",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "60",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "66616261626162",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "regexp metacharacter escapes",
+   "cddl": "r = tstr .regexp \"a\\\\.b\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "63612e62",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "63616362",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "6421612e62",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "regexp negated class and newline",
+   "cddl": "r = tstr .regexp \"[^a-c]{1,2}\"",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "62c3a9",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "6161",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "627a0a",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "637a7a7a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "embedded full consumption",
+   "cddl": "r = bstr .cbor uint",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "4101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "420102",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "40",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "41ff",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "embedded sequence with backtracking",
+   "cddl": "r = bstr .cborseq [? uint,2*3 uint,tstr]",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "4401026178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "46010203046178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "43016178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "controls",
+   "name": "tag array content obligation",
+   "cddl": "r = #6.40([[2], [uint,uint]]) / #6.40([[1], [tstr]])",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d828828102820102",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d828828101816178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "d8288281028261786179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "d8288281018101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-000",
+   "cddl": "r = { ? (a: (uint / tstr), b: (uint / tstr)), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 0; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616120",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616120616203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616120616303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f46163f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-001",
+   "cddl": "r = { a: bool, ? b: bool // c: bool, 0*0 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 1; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617961626178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f56178f66179f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616103616300",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-002",
+   "cddl": "r = [? int, 0*2 int, 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 2; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "85f500200303",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8501f503617903",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8600f4617801f620",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f503f66179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8500030320f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-003",
+   "cddl": "r = [* (int, bool), 0*1 int]",
+   "note": "xorshift32 seed 0x5eed8610, schema 3; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "85f603f5036178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "820020",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "846178f6f503",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "856179f66179617903",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-004",
+   "cddl": "r = { ? (a: bool, b: bool), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 4; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161206162f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261610361636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261620061636178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-005",
+   "cddl": "r = { a: 0..2, ? b: tstr // c: tstr, 2*2 tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 5; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16161f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a161636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f66162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f66178f66179f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616300",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-006",
+   "cddl": "r = [? tstr, 1*1 tstr, (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 6; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8301f601",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82f4f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8500f603617920",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-007",
+   "cddl": "r = [* (tstr, int), 0*2 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 7; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "84016179f4f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "836179036178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "86f661780001f420",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-008",
+   "cddl": "r = { ? (a: tstr, b: tstr), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 8; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161616179",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616103616203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161206163f4",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f66163f4",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-009",
+   "cddl": "r = { a: bool, ? b: int // c: int, 2*3 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 9; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161206162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f5617820617901",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161796163f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-010",
+   "cddl": "r = [? 0..2, 0*1 (uint / tstr), (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 10; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "83f6f520",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84010161796179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86010303f66178f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8520f5f4f5f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-011",
+   "cddl": "r = [* (tstr, tstr), 2*2 int]",
+   "note": "xorshift32 seed 0x5eed8610, schema 11; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "81f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "856179000120f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "87f5f401f6f403f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-012",
+   "cddl": "r = { ? (a: int, b: bool), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 12; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616120",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f46162f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616220616300",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-013",
+   "cddl": "r = { a: int, ? b: tstr // c: tstr, 1*3 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 13; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616103",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161786162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f4617820617903",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616120616303",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-014",
+   "cddl": "r = [? uint, 0*1 0..2, tstr]",
+   "note": "xorshift32 seed 0x5eed8610, schema 14; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "866179f600f6f4f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8201f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8403f461796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85f5f420f66178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-015",
+   "cddl": "r = [* (bool, (uint / tstr)), 0*2 tstr]",
+   "note": "xorshift32 seed 0x5eed8610, schema 15; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82f56179",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "870000f56179f561796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86f403f46178f601",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-016",
+   "cddl": "r = { ? (a: tstr, b: uint), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 16; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16161f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f46162f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616200616303",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-017",
+   "cddl": "r = { a: 0..2, ? b: 0..2 // c: 0..2, 1*3 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 17; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161796162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f56178f6617903",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161796163f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-018",
+   "cddl": "r = [? tstr, 0*1 0..2, 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 18; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8403030001",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8203f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84617800617920",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f4200101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-019",
+   "cddl": "r = [* (0..2, (uint / tstr)), 0*2 int]",
+   "note": "xorshift32 seed 0x5eed8610, schema 19; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8761790120f601f520",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "870000f6f60161786179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8461790001f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "870000f561790361786179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-020",
+   "cddl": "r = { ? (a: int, b: int), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 20; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616103",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617961626178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f46163f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f66163f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-021",
+   "cddl": "r = { a: 0..2, ? b: (uint / tstr) // c: (uint / tstr), 1*1 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 21; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616303",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f66162f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a3616361786178f66179f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f4616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-022",
+   "cddl": "r = [? tstr, 0*2 0..2, bool]",
+   "note": "xorshift32 seed 0x5eed8610, schema 22; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82006178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83f4f4f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82f403",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "842003f503",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86617801f5030020",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-023",
+   "cddl": "r = [* (bool, bool), 0*1 uint]",
+   "note": "xorshift32 seed 0x5eed8610, schema 23; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "816179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8300f5f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8501006179006178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86f461782003f620",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-024",
+   "cddl": "r = { ? (a: int, b: bool), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 24; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161016162f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161016163f6",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f46163f6",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-025",
+   "cddl": "r = { a: tstr, ? b: 0..2 // c: 0..2, 1*2 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 25; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616301",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616200",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a3616361796178f56179f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f56163f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-026",
+   "cddl": "r = [? 0..2, 0*2 (uint / tstr), (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 26; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8303617900",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8203f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8503f6010000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82f6f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8420f5f5f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-027",
+   "cddl": "r = [* (0..2, int), 1*3 (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 27; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "87f5f4002000f56179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8420f400f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "826178f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8720f4032000f46178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-028",
+   "cddl": "r = { ? (a: 0..2, b: bool), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 28; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161616179",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f6616203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f661636179",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f6616301",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-029",
+   "cddl": "r = { a: tstr, ? b: (uint / tstr) // c: (uint / tstr), 0*0 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 29; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a161636178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161036162f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a3616361796178f561796179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-030",
+   "cddl": "r = [? bool, 1*2 (uint / tstr), bool]",
+   "note": "xorshift32 seed 0x5eed8610, schema 30; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "81f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8420f6f6f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86f60061786178f66178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83f4f4f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-031",
+   "cddl": "r = [* (bool, int), 2*2 uint]",
+   "note": "xorshift32 seed 0x5eed8610, schema 31; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "86030101f6f503",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8420f401f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84617800f503",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85617900f56178f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "81f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-032",
+   "cddl": "r = { ? (a: uint, b: 0..2), * tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 32; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616103",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616100616220",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616100616303",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26162617961636179",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-033",
+   "cddl": "r = { a: (uint / tstr), ? b: tstr // c: tstr, 1*3 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 33; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16161f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f6616220",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a361632061780361796179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161786163f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-034",
+   "cddl": "r = [? (uint / tstr), 2*3 (uint / tstr), uint]",
+   "note": "xorshift32 seed 0x5eed8610, schema 34; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "85036178f40020",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8301617820",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8400f661796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "846178f4f420",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8503f46179f5f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-035",
+   "cddl": "r = [* (bool, tstr), 0*0 uint]",
+   "note": "xorshift32 seed 0x5eed8610, schema 35; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "87f4f561790120617803",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8703f60101f6f5f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86010103f40020",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8103",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-036",
+   "cddl": "r = { ? (a: (uint / tstr), b: int), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 36; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16161f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f66162f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616103616303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616220616300",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-037",
+   "cddl": "r = { a: uint, ? b: (uint / tstr) // c: (uint / tstr), 2*2 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 37; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16161f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616320",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161796162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163006178f56179f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616103616303",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-038",
+   "cddl": "r = [? tstr, 2*4 tstr, 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 38; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "84617861780301",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8403f4f4f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "81f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8500f66178006178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83030301",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-039",
+   "cddl": "r = [* (int, int), 0*2 (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 39; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "832000f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "87202061786178f400f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "822003",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-040",
+   "cddl": "r = { ? (a: tstr, b: 0..2), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 40; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161616179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161206162f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616300",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261626179616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-041",
+   "cddl": "r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 41; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a161616178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f4616200",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163617861780061796179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616300",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-042",
+   "cddl": "r = [? (uint / tstr), 0*2 uint, 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 42; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8320f500",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f46178f401",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "856178f401206178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86206179f400617820",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-043",
+   "cddl": "r = [* ((uint / tstr), tstr), 2*4 (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 43; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83f4036179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8701617803010020f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82036179",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-044",
+   "cddl": "r = { ? (a: tstr, b: int), * tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 44; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616100",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617861626179",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161016163f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261626178616301",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-045",
+   "cddl": "r = { a: 0..2, ? b: 0..2 // c: 0..2, 2*2 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 45; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16161f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616220",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a3616361796178f56179f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261610061636178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-046",
+   "cddl": "r = [? 0..2, 2*2 (uint / tstr), (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 46; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "83f5f4f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8503f4f5617901",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82f5f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83f46179f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83f5206179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-047",
+   "cddl": "r = [* (uint, tstr), 1*3 tstr]",
+   "note": "xorshift32 seed 0x5eed8610, schema 47; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "83f46178f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85030300f600",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8761780000f603617820",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "87f561796179617861786178f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8120",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-048",
+   "cddl": "r = { ? (a: tstr, b: int), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 48; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16161f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616120616203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f66163f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f6616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-049",
+   "cddl": "r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 49; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f6616203",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f56178617861796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616178616301",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-050",
+   "cddl": "r = [? tstr, 0*2 (uint / tstr), 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 50; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8261796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84617803f46179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "850300f503f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-051",
+   "cddl": "r = [* (uint, tstr), 1*1 tstr]",
+   "note": "xorshift32 seed 0x5eed8610, schema 51; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "84f501f56179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8103",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85f4f5f603f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82f6f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-052",
+   "cddl": "r = { ? (a: (uint / tstr), b: int), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 52; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616120616203",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616103616300",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f46163f4",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-053",
+   "cddl": "r = { a: 0..2, ? b: uint // c: uint, 2*2 tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 53; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a161636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616203",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f561780061796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616100616300",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-054",
+   "cddl": "r = [? 0..2, 2*4 uint, int]",
+   "note": "xorshift32 seed 0x5eed8610, schema 54; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "85f4f561790303",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "852001f620f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "830300f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f620f401",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-055",
+   "cddl": "r = [* ((uint / tstr), 0..2), 2*2 int]",
+   "note": "xorshift32 seed 0x5eed8610, schema 55; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82617800",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86f5010301617901",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f6f401f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8300f5f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "816179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-056",
+   "cddl": "r = { ? (a: bool, b: 0..2), * tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 56; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610061626178",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f66163f5",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26162617961636179",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-057",
+   "cddl": "r = { a: uint, ? b: int // c: int, 0*0 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 57; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a16161f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616103616200",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a3616361786178006179f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161006163f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-058",
+   "cddl": "r = [? bool, 1*1 int, tstr]",
+   "note": "xorshift32 seed 0x5eed8610, schema 58; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "84030303f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8661796178036178006178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "866179f46179200003",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86032001617900f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8661790300617900f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-059",
+   "cddl": "r = [* (int, 0..2), 1*3 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 59; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "81f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f661780103",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "87617801617820f4f6f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82617903",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-060",
+   "cddl": "r = { ? (a: tstr, b: (uint / tstr)), * tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 60; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616120",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261616179616200",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f4616320",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f4616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-061",
+   "cddl": "r = { a: (uint / tstr), ? b: int // c: int, 2*3 tstr => any }",
+   "note": "xorshift32 seed 0x5eed8610, schema 61; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616320",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161786162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f661786179617903",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261612061636179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-062",
+   "cddl": "r = [? int, 1*3 tstr, (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 62; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "816178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85f5617903617901",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8603f60000f4f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8200f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-063",
+   "cddl": "r = [* (bool, tstr), 1*2 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 63; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85200361786178f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82f5f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "87f561790301200120",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-064",
+   "cddl": "r = { ? (a: bool, b: 0..2), * tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 64; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616120",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161036162f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f4616300",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616203616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-065",
+   "cddl": "r = { a: (uint / tstr), ? b: 0..2 // c: 0..2, 0*2 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 65; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616320",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616203",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a3616361796178f46179f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617961636179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-066",
+   "cddl": "r = [? tstr, 0*2 uint, (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 66; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "83f600f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8201f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85036178f56178f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8520f6617901f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8520f620f56179",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-067",
+   "cddl": "r = [* ((uint / tstr), bool), 2*2 tstr]",
+   "note": "xorshift32 seed 0x5eed8610, schema 67; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "85f4f4f6f400",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86617920f66179f6f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85f40103f4f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82036178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-068",
+   "cddl": "r = { ? (a: tstr, b: int), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 68; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616120",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a261610361626179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161786163f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616203616301",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-069",
+   "cddl": "r = { a: bool, ? b: int // c: int, 0*2 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 69; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616300",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161206162f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f46178036179f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161786163f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-070",
+   "cddl": "r = [? tstr, 1*2 uint, uint]",
+   "note": "xorshift32 seed 0x5eed8610, schema 70; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "82f601",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8520f50001f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f5617820f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85f4f66179f501",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "85f46178f461786178",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-071",
+   "cddl": "r = [* (int, bool), 1*2 int]",
+   "note": "xorshift32 seed 0x5eed8610, schema 71; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "83f6f46179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "87f4f403206179f6f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f5f66179f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "84f4617903f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-072",
+   "cddl": "r = { ? (a: uint, b: tstr), * tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 72; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616120",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f4616200",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f461636178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a261626178616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-073",
+   "cddl": "r = { a: 0..2, ? b: int // c: int, 1*1 tstr => tstr }",
+   "note": "xorshift32 seed 0x5eed8610, schema 73; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616100",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16163f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161f661626179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163f56178617961796178",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161206163f5",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-074",
+   "cddl": "r = [? (uint / tstr), 2*4 tstr, 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 74; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8103",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8420f5f503",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "86f600f603617901",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "846178f4617901",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-075",
+   "cddl": "r = [* (int, uint), 1*2 bool]",
+   "note": "xorshift32 seed 0x5eed8610, schema 75; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8700f6f420002001",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "81f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "836178617900",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "876179f42001f50020",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8601617803006179f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-076",
+   "cddl": "r = { ? (a: int, b: uint), * tstr => int }",
+   "note": "xorshift32 seed 0x5eed8610, schema 76; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a16161f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617861626179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161796163f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a26162f6616320",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-077",
+   "cddl": "r = { a: 0..2, ? b: (uint / tstr) // c: (uint / tstr), 0*1 tstr => uint }",
+   "note": "xorshift32 seed 0x5eed8610, schema 77; expected verdicts computed only by oracle",
+   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616103",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a1616301",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a26161617861626179",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a36163006178f56179f6",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616161796163f4",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-078",
+   "cddl": "r = [? 0..2, 1*1 0..2, 0..2]",
+   "note": "xorshift32 seed 0x5eed8610, schema 78; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "82617820",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8600f66179006178f5",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "81f4",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "generated",
+   "name": "seeded-079",
+   "cddl": "r = [* (int, int), 0*0 (uint / tstr)]",
+   "note": "xorshift32 seed 0x5eed8610, schema 79; expected verdicts computed only by oracle",
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "85f600f4617920",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "83030000",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8420030303",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "8503016179f420",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "842001617920",
+     "expect": false
+    }
+   ]
+  }
+ ]
+}
