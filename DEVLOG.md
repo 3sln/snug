@@ -411,7 +411,9 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ## Phase 5 — Cursor, views and builder (D026)
 
-- [ ] **P5.0 — Review of architecture §16** (independent).
+- [x] **P5.0 — Review of architecture §16** (independent). *Done 2026-10-29*:
+  Codex, 20 findings (3 blockers: byte ownership, literal key ≠ one typeset,
+  subtree-validate contract); all accepted; §16 revision 3.
 - [ ] **P5.1 — Tape** written by the VM on request; navigation primitives in kin.
 - [ ] **P5.2 — Views and cursor** (JS host): checked, indexed, lazy trusted.
 - [ ] **P5.3 — Position-aware subtree validation** (lazy `validate()`).
@@ -420,7 +422,12 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ## Phase 6 — Sources: blob handles and streams (D027)
 
-- [ ] **P6.0 — Review of architecture §17** (independent).
+- [x] **P6.0 — Review of architecture §17** (independent). *Done 2026-10-29*:
+  Codex, 24 findings (3 blockers: unknown-length streams cannot keep the
+  check order by suspending; shared scratch corrupts across `await`; checked
+  blob views need immutable snapshots); all accepted; §17 revision 3. The
+  proposed key-length limit was withdrawn (it changed accepted language vs
+  cbor.mjs). P6.1's brief was corrected in flight.
 - [ ] **P6.1 — Resumable scanner spike** (P1.5 in effect): explicit stack,
   windows, `NEED`/resume; buffer cost vs the recursive scanner (§17.4's 15%
   rule); random-window-split equivalence gate.
@@ -772,6 +779,9 @@ purpose).
   length, decimal value bounds): in snug, or a 3sln.me extension hook? Names?
 - [ ] **`\p{…}` in regexps**: worth ~10–20 KB of tables?
 - [ ] **Program caching**: a stable serialised Program across snug versions?
+- [ ] **Unknown-length streams** (D027, architecture §17.1): drain to EOF and
+  keep cbor.mjs's refusal precedence, or accept a documented different
+  precedence for unframed streams?
 
 ## Parking lot
 

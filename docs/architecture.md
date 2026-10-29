@@ -1,7 +1,8 @@
 # snug — architecture
 
-Status: **design, revision 2 (2026-10-29)** with §16 and §17 added on the owner's
-decisions D026 and D027, provisional. Revision 1 was
+Status: **design, revision 2 (2026-10-29)** with §16 and §17 (revision 3, after
+their independent reviews) for the owner's decisions D026 and D027,
+provisional. Revision 1 was
 reviewed independently by Codex (`docs/reviews/2026-10-29-codex.md`, "C#")
 and by a Claude reviewer (`docs/reviews/2026-10-29-claude.md`, "A#"); §15
 lists every finding and what this revision did about it. Decisions are
@@ -684,220 +685,244 @@ twice; D003 narrowed to bytes.
 | A12 coverage gaps | Accepted: `#6.<type>`, `#7.n`, bare `#6`/`#7` (§4.2), undefined sockets (§4.8), regular group recursion (§4.4), `.feature` no-op (§4.6). |
 | A13 project controls | Recorded for the owner (§13). |
 
+
 ---
 
-## 16. Cursor, lazy navigation and the builder (owner decision D026)
+## 16. Cursor, views and the builder (owner decision D026) — revision 3
 
-The owner decided (2026-10-29, relayed by the 3sln.me coordinator) that the
-codec and validator are one library built around an **opaque, unparsed
-message and a cursor**: navigate and parse only what is needed, apply the
-right validation for the cursor's position, skip what is not needed, or
-validate everything in one pass when required; a zero-copy view API, an
-encoder that writes deterministic output directly from typed values, and a
-materialising decode for convenience — "the best CBOR library in the world, if
-we can do it without too much hassle". The 3sln.me profile and vectors stay
-the conformance floor. This section folds that into the design; the
-revision-2 core (one fused pass, Programs, the VM) is unchanged and is what
-the cursor stands on.
+The owner decided (2026-10-29) that codec and validator are one library built
+around an opaque, unparsed message and a cursor: navigate and parse only what
+is needed, validate fully in one pass when required, zero-copy views, an
+encoder writing deterministic output directly, a materialising decode for
+convenience; "the best CBOR library in the world, if we can do it without too
+much hassle". Revision 1 of this section was reviewed independently
+(`docs/reviews/2026-10-29-codex-s16.md`, "V#"); this revision answers it.
 
 ### 16.1 Facts that shape it
 
-* **Strings carry byte lengths; containers carry only element counts.**
-  Skipping a text, byte string or typed array is O(1). Skipping an array or
-  map needs a walk over its descendants' heads (allocation-free, but
-  O(subtree)) unless an index already knows where it ends.
-* **Deterministic encoding makes maps searchable.** Keys are sorted by
-  encoded bytes and each value has one encoding, so a key lookup is a byte
-  comparison and, given pair offsets, a binary search.
-* **The received bytes are canonical.** Any subtree's byte span is its
-  canonical encoding: it can be hashed (fingerprints), stored or forwarded
-  without re-encoding.
-* **Profile §5 constrains laziness.** A receiver of untrusted input must
-  refuse the whole message before using any value. Lazy, partial checking is
-  therefore only for input the host already trusts (bytes it validated
-  before, its own storage) or for explicit opt-in tooling; it is never the
-  default and is named as such in the API.
+* Strings carry byte lengths (O(1) skip); arrays and maps carry only counts,
+  so skipping one walks its descendants' heads unless an index knows its end.
+* Deterministic encoding sorts map keys by encoded bytes, so a key lookup is a
+  byte comparison and can stop early — **but only on bytes already proven
+  ordered** (V8): early exit and binary search are justified by a completed
+  check, never by the keys a lazy reader happened to visit.
+* Received bytes are canonical: a subtree's span is its encoding (hashing,
+  forwarding without re-encoding).
+* Profile §5: untrusted input is refused whole before any value is used.
 
-### 16.2 Three ways to open a message
+### 16.2 Two independent axes: trust and ownership (V1, V2)
 
-| Mode | What runs up front | Navigation cost | Allowed for untrusted input |
-| --- | --- | --- | --- |
-| `view(bytes, {schema?, rule?})` — **checked** | the full fused VM pass (profile + schema), allocation-free | sibling skip walks heads; map key lookup is a linear scan of keys with early exit on sort order | yes (this is the profile-§5 path) |
-| `view(bytes, {…, index: true})` — **checked + indexed** | the same pass, also writing a **tape**: for each container, its end offset and the start offsets of its children | O(1) skip, O(1) array index, O(log n) map key lookup | yes |
-| `viewTrusted(bytes, opts)` — **lazy** | nothing | each access checks the items it reads (head shortest form, lengths against the end, depth, UTF-8 of text it decodes, float rules, key order and duplicates of maps it searches or iterates); skipped content is walked structurally, not checked | no — documented as not satisfying profile §5 |
+**Trust.** A view is **checked** (the full fused pass ran: profile, plus the
+schema when one is given) or **trusted** (the caller asserts that these exact
+bytes were checked before, under the same profile options). There is no
+"lazy checking" mode that pretends partial reads satisfy profile §5; a trusted
+opener takes an explicit assertion argument and is documented as the
+caller's promise. Inspecting malformed bytes is not supported.
 
-**The tape** (specified with the VM in P5.1) is an Int32Array
-written by the VM in the same pass when asked: one word per item (end offset,
-preorder) plus, per container, a contiguous child-offset table; at most
-`2 × items` words (≤ 1 MiB at the default item limit). It is allocated per
-indexed view (it must outlive the next validation), sized from the item count
-the pass measured, so it costs 8 bytes per item instead of a materialised
-object graph. Without `index`, nothing is allocated beyond the view object.
+**Ownership.** A check is a statement about bytes; it stays true only while
+the bytes do not change. A view therefore either **owns** its bytes (copied at
+open, or an `ArrayBuffer` transferred to it) — the default for checked views,
+costing one memcpy (~0.1 ms per MB) — or **borrows** them under an explicit
+contract (the caller must not mutate the buffer for the view's lifetime;
+`SharedArrayBuffer` is refused). Zero-copy accessors (`bytes()` as a
+subarray) are available only on borrowed views and on owned views as
+read-only aliases of the view's own copy; `copyBytes()` always copies.
 
-### 16.3 Validation at the cursor's position
+**Indexing** is a third, independent choice (§16.4), not a trust mode.
 
-A view carries the **query set** of its position when it was opened against
-a schema. Descending through a map by a literal key yields that entry's value
-typeset directly (from the Program's key index); descending into an array
-whose automaton gives every element the same typeset (`[* T]`, counted
-positions) yields it directly; other array shapes require evaluating the
-array's prefix. In checked mode this is informational (the whole message was
-validated); in lazy mode it lets `v.get("args").validate()` run the VM on just
-that subtree with the right typeset — validate-what-you-touch. Exactness is
-unchanged: lazy subtree validation evaluates the subtree exactly as the full
-pass would, and nothing outside it.
+### 16.3 Validation and position (V3, V4, V5, V6)
 
-### 16.4 API sketch (JavaScript)
+Revision 1 claimed that descending through a map by a literal key yields that
+entry's value typeset. That is false in general: the live alternative
+depends on the map's other keys, and ancestor predicates (AND, sibling
+constraints) are not visible from the child. **Withdrawn.** Instead:
 
-```js
-const v = view(bytes, { schema, rule: 'request', index: true }); // throws SnugFault
-v.kind;                 // 'uint' | 'nint' | 'bytes' | 'text' | 'array' | 'map' | 'tag' | 'float' | 'simple'
-v.get('args')?.get('key')?.text();
-v.at(3); v.length; for (const [k, x] of v.entries()) …
-v.number(); v.bigint(); v.bytes();   // bytes() is a zero-copy subarray; copyBytes() copies
-v.raw();                // the canonical encoded span (fingerprints, forwarding)
-v.value();              // materialise this subtree (the builder)
-```
+* A **checked view against a schema** is valid as a whole; navigation needs no
+  typesets.
+* **`validateAt(rule)`** is a *detached* subtree validation: it proves exactly
+  that this subtree's span matches the named rule (and the profile), nothing
+  about its ancestors. It runs the VM over the span with an internal
+  span-evaluation entry (start, end, rule, scratch) whose result is the same as
+  validating the span as its own document, except that the depth and item
+  accounting continue from the enclosing position.
+* Position-aware lazy validation is parked until a precise contract exists.
 
-For hot loops a single mutable `Cursor` (`enter`, `next`, `up`, `key`, …)
-avoids even the view objects.
+### 16.4 Navigation and an optional index (V9–V13)
 
-### 16.5 The builder
+**First slice.** kin primitives over checked bytes: read a head, the span of
+an item (structural skip with progress and bounds checks, charged), the n-th
+child by sequential skip, key search in a map by linear scan with early exit
+on sort order. The host exposes a `View` (offset + owner) and a mutable
+`Cursor` (`enter`, `next`, `up`, `key`) for allocation-free loops, exact scalar
+accessors, raw spans and `value()` (materialise a subtree via the builder).
 
-A `Writer` with typed methods (`uint`, `int`, `bigint`, `float`, `text`,
-`bytes`, `typed`, `decimal`, `beginArray(n)`, `beginMap(n)`, `end()`) writes
-deterministic bytes directly, without building host objects first. The
-deterministic choices (shortest head, float width by bit test, key order by
-encoded bytes, duplicate refusal) are kin, shared with the VM; the host
-wrapper is thin. Map keys may arrive in any order: `end()` of a map sorts its
-pairs by permuting their byte ranges once in a scratch area (or, with
-`keysSorted`, only verifies order). `encode(value)` becomes a walk of host
-values over the same writer.
+**Index**, private until measured: a bounded **per-container child directory**
+built on first access to a container (offsets of its children, `n` words),
+held by the view (message-owned state, never the transient VM scratch; V14).
+Map lookup then binary-searches the directory. A dense whole-message tape is
+not built: its addressing and single-pass sizing were not specified (V10–V12)
+and nothing yet shows it beats on-demand directories. Benchmarks decide.
 
-### 16.6 What goes where
+### 16.5 The builder (V15–V17)
 
-Navigation primitives (head reading, skip, key search by bytes, tape
-writing, lazy local checks) are kin, reusing the scanner's helpers. View and
-cursor objects, accessors producing JS values, and the writer's JS surface are
-host. Phase P5 (DEVLOG) builds this after the VM; the benchmark plan gains:
-fetch one field from a 1.4 MB message (checked, checked + index, lazy) vs full
-decode vs cbor.mjs, and writer vs `encode` vs cbor.mjs.
+The current host encoder stays the baseline and the default. A `Writer` (typed
+methods, `beginArray(n)`/`beginMap(n)`/`end()`) is a later item with a
+specified grammar state machine (counts remaining, closed nested values,
+failure leaves the writer unusable), with map keys either supplied in order or
+sorted at `end()` by permuting complete, non-overlapping pair ranges. The
+deterministic choices are shared kin primitives; the host↔kin representation
+is specified with that item.
+
+### 16.6 Accessors (V18)
+
+Integers: `number()` throws outside ±(2^53−1); `bigint()` always works;
+`int()` returns either. Decimals and ndarrays as the builder's wrappers.
+Typed arrays: `typedView()` returns a portable accessor (element count,
+`get(i)` reading little-endian) because a subarray of the input may be
+misaligned for a native typed array; `typed()` copies into an aligned native
+array.
+
+### 16.7 Benchmarks that would justify "best" (V19)
+
+A matrix with correctness checks outside timing: open (copy vs borrow) + one
+field, sequential walk, repeated random access, full materialise; for the 287
+B put, 1 MiB bstr put, 120 000 ints, typed arrays, map-heavy and text-heavy
+bodies; vs cbor.mjs and, conceptually, the common JS CBOR libraries (cbor-x,
+cborg, cbor) — named, not installed (offline), so only cbor.mjs is measured;
+memory retained per view.
 
 ---
 
-## 17. Sources: buffers, blob handles and streams (owner direction D027)
+## 17. Sources: buffers, blob handles and streams (owner direction D027) — revision 3
 
-The owner directed (2026-10-29, relayed by the coordinator) that the codec and
-validator work over an **opaque blob handle** (size + sync or async range
-reads), so it can operate on remote data such as object-storage objects via
-HTTP range requests; that **streaming** parsing work over a stream interface
-(validate as bytes arrive, bounded buffering, resumable at item boundaries,
-backpressure-friendly); that the **same validation program** run over all
-three sources; and that the in-memory buffer stays as fast as possible,
-specialised if the abstraction costs too much, with a benchmark showing the
-abstraction's cost.
+The owner directed (2026-10-29) that the codec and validator work over an
+opaque blob handle (size + sync/async range reads; object storage via HTTP
+range requests) and over streams (validate as bytes arrive, bounded buffering,
+resumable, backpressure), with the same Program for all sources, the buffer
+path as fast as possible, and a benchmark of the abstraction's cost.
+Revision 1 was reviewed independently (`docs/reviews/2026-10-29-codex-s17.md`,
+"W#"); this revision answers it.
 
-### 17.1 The one idea: the VM never does I/O; it asks
+### 17.1 Plan/fulfil sessions
 
-The VM (and the scanner, and the cursor primitives) consume a **window** of
-bytes `[base, base + len)` of the message and never call the host. When the
-next step needs bytes outside the window, the VM **suspends** with a request
-`NEED(offset, minLength)` and returns to the host; the host obtains the bytes
-(slice of a buffer, cached chunk, range read, next stream chunk — sync or
-async, the VM cannot tell) and **resumes** with a new window. This is emon's
-plan/fulfil discipline (emon D008) applied to input: no callbacks into the
-host, no async in kin, identical behaviour on every host, and the host owns
-scheduling, caching and backpressure.
+The VM never does I/O. A **session** runs the walk over windows of the
+message; when it needs bytes it does not have it returns **`NEED(offset,
+minLength)`**, and the host resumes it with a window containing them (a slice
+of a buffer, a cached chunk, a range read, the next chunk of a stream). This
+requires the explicit-stack VM (D016 superseded). The session protocol (W2,
+W21):
 
-This requires the VM state to live in scratch, not on the host stack: **the
-explicit-stack VM that D016 deferred is now required** (D016 superseded by
-D027). Frames per depth already exist in program.md §12's scratch layout;
-the walk becomes a loop over an explicit frame stack, and every point where
-the walk can stop is a resumable state.
+* **Results**: `NEED`, `YIELD` (§17.4), `DONE` (verdict), `ERROR` (verdict:
+  profile/schema/budget code), and host-side `SOURCE_FAILURE` (read failed,
+  short read, size or version changed, declared length mismatch) and
+  `ABORTED`. Source failures are transport outcomes, never CBOR verdicts (W13).
+* **Window ownership**: each result reports the offset up to which the session
+  has consumed input; bytes before it will not be requested again by the
+  forward walk, so a stream host may drop them. A window must include the
+  requested range; the session guarantees progress (it never asks for a range
+  it was just given).
+* **Known length** (W1): every session declares the exact document length up
+  front — a buffer's length, a handle's size, a push stream's declared length
+  (`Content-Length`, a framing header). All existing checks that depend on the
+  end (`truncated` precedence, `too_large`, `trailing`, minimum remaining
+  lengths) use it, so codes are identical across sources. Delivered bytes that
+  do not match the declared length are a source failure. **Unknown-length
+  streams are out of scope** until their refusal precedence is decided (an
+  owner question: drain-to-EOF preserving codes, or a documented different
+  precedence); an empty chunk is never EOF.
+* **Exclusive state** (W9): a live session owns its scratch arena from start
+  to a terminal state, across every `await`. Programs (immutable) are shared;
+  arenas come from a pool of idle ones with a bound on live sessions and on
+  pooled high water. Concurrent resume of one session is refused. This amends
+  §8: "one scratch per isolate" holds for synchronous buffer validation (a
+  short exclusive lease); asynchronous sessions lease their own.
 
-### 17.2 Where it can stop, and what it must carry
+### 17.2 What a session carries across a suspension
 
-* **At item heads.** A head is at most 9 bytes; the VM requires the whole head
-  in the window (`NEED(pos, 9 or remaining)`), so heads are never split.
-* **Inside string content**, which can be megabytes: text, byte strings and
-  typed arrays are scanned **incrementally** with carried state — UTF-8
-  decoder state (≤ 3 pending bytes), regexp bitset state, literal-compare
-  position, `.bits` position, typed-array element remainder (≤ 7 bytes),
-  `.size` count. Nothing in a string needs to be buffered whole.
-* **Bounded look-back** is the only buffering: the previous map key (for
-  key order and duplicates) and the current key (for the literal key
-  search), each bounded by a **key length limit** (default 1 KiB, hard
-  64 KiB) that applies to every source so verdicts do not depend on the
-  source; bignum content (≤ 128 bytes) and float payloads (≤ 8 bytes) are
-  copied into scratch when split across windows. So a stream needs at most
-  `2 × keyLimit + 136` bytes of carried state plus the frame stack.
-* **Absolute offsets** can exceed 2^31 for remote objects: kin works with
-  window-relative int32 offsets and keeps the absolute window base as two
-  32-bit words in scratch; hosts use 53-bit numbers (JS) or `u64` (Rust).
-  Per-message item, depth and entry limits are unchanged; the input-bytes
-  limit becomes a 64-bit value for handle sources.
+* Heads are never split (the head must be in the window).
+* String and typed-array content is scanned **incrementally** with carried
+  state: UTF-8 decoder state, typed-array element remainder, NaN-check state,
+  regexp bitset, literal-compare position, `.bits` position, size counters.
+  Suspension can happen mid-string.
+* **Map key look-back without a new limit** (W3–W5): cbor.mjs has no key
+  length cap (a 1,025-byte key is valid), so none is added. Each *active* map
+  needs its previous key (nested maps each keep one). The session keeps
+  active key spans in its arena: for a buffer or handle source, as offsets
+  into the message (re-readable); for a forward-only stream, as copies, with
+  the arena bounded by the declared document length — bounded memory, but not
+  a tiny constant, and accounted as such. `LITSET`/literal-key binary search
+  over a key split across windows uses the copied key (W6).
+* Embedded `.cbor` content runs as a nested sub-walk over a sub-range of the
+  same windows (W7); tag-4/tag-40 deferred checks keep summaries in the frame
+  (W8); the profile-only continuation and the witness slot are session state
+  (W11).
+* Offsets stay below 2^31 and the 1.5 MB default stays (W14); 64-bit documents
+  are a later, separate change to the ABI.
 
-### 17.3 The three sources
+### 17.3 Sources
 
-| Source | Interface (JS) | Interface (Rust) | Window strategy | What is possible |
-| --- | --- | --- | --- | --- |
-| **Buffer** | `Uint8Array` | `&[u8]` | the whole input is the window; `NEED` never happens | everything; the fast path |
-| **Blob handle** (random access) | `{ size, read(offset, length) → Uint8Array \| Promise<Uint8Array> }`; adapters for `Blob`, `fetch` with `Range`, Node `FileHandle` | `trait Blob { fn size(&self) -> u64; fn read_at(&self, off: u64, buf: &mut [u8]) -> io::Result<usize>; }` and an async variant | a bounded chunk cache (default 16 × 64 KiB, LRU), sequential read-ahead during a full pass, coalesced ranges | full validation (one forward pass); views and cursors with backward moves, map lookups (binary search over an index or a forward scan); lazy validate-what-you-touch (§16.3) — the main use: read one field of a large stored object with a few range requests |
-| **Stream** (forward only) | a `ReadableStream<Uint8Array>` or `AsyncIterable<Uint8Array>`; push API `feed(chunk) → NEED/DONE/ERROR` | `Read` / `AsyncRead` | consumes chunks in order, holds at most the carried state of §17.2 plus the unconsumed tail of the current chunk | full validation as bytes arrive, with backpressure (the host stops pulling while the VM is busy, and the VM only asks for more when it has consumed the window); a forward-only cursor (no backward seeks; `get(key)` scans forward and can stop early because keys are sorted; a key already passed is gone); events for streaming consumers |
+| Source | Interface | Notes |
+| --- | --- | --- |
+| **Buffer** | `Uint8Array` / `&[u8]` | one window, `NEED` never happens; monomorphic fast path in the host (W20) |
+| **Blob handle** | JS `{ size, version?, read(offset, length) → Uint8Array \| Promise<Uint8Array> }`; Rust `trait Blob` (+ async) | a **checked view over a handle needs an immutable snapshot** (W12): the handle must pin a version (an ETag with `If-Match`, an object generation) and every read is made against it; a changed version is a source failure. Synchronous `read` results are used without a Promise (W20). Cache and read-ahead are byte-budgeted and come later, measured (W15). |
+| **Push stream (known length)** | `session.feed(chunk)` → result; `finalize()`; adapters for `ReadableStream` / `AsyncIterable` | backpressure = the driver pulls the next chunk only on `NEED` and respects `YIELD` (W16); a forward-only cursor exists only during the pass (W18); fused stream materialisation is deferred (W17); CBOR sequences (RFC 8742) are a later framing item (W21). |
 
-**Rules for forward-only streams.** (1) No backward seeks: views are
-single-use forward cursors; asking for something behind the cursor is an API
-error, not a silent re-read. (2) Map key lookups proceed in key order; asking
-for keys in sorted order costs one pass, any other order requires the caller
-to buffer (or to use a blob handle). (3) **Profile §5 still holds**: a stream
-consumer that materialises values must not use them until the stream has
-ended and the whole message validated; `decodeStream` therefore builds values
-while validating (the two passes of D017 cannot both run over a stream
-without buffering it whole) and returns them only on success — allocation
-before the verdict, bounded by the input-bytes limit (D017 amended for
-streams). A streaming consumer that acts on items as they arrive is using
-the lazy, trusted mode (§16.2) and is named as such.
+### 17.4 CPU scheduling: `YIELD` (W19)
 
-### 17.4 Specialisation for the buffer fast path
+A window that holds the whole message never produces `NEED`, so a long
+validation would occupy the event loop. The session therefore returns
+**`YIELD`** after a deterministic work quantum (a count of charged units,
+default 64 Ki), with safe points inside long content scans and regexp loops
+as well as at items. Yields and needs change nothing observable: verdict,
+code, path, error offset, items and budget are identical for every window
+split and quantum (W10, W22) — budget charges are per event and never depend
+on where windows end. The quantum gives fairness and responsive abort; it
+does not reset any CPU allowance, and the global budget still bounds total
+work.
 
-The generic VM pays for state in scratch and a window check per head. For
-buffers the window check is the same bounds check the scanner already makes,
-so the hypothesis is that one VM costs little on buffers. The decision is by
-measurement (P1.5 spike on the scanner, then P3.4 on the VM):
+### 17.5 One driver or two (W22, W23)
 
-* If the resumable walk costs **≤ 15%** over the recursive walk on the P1.4
-  buffer inputs, there is **one** VM for all sources.
-* Otherwise the buffer gets a **specialised driver**: the same leaf
-  predicates, Program and charging, with a recursive walk over the contiguous
-  buffer, and the resumable driver serves handles and streams. Both are kin;
-  a differential gate requires identical verdict, reason, path, offset and
-  budget count for every corpus input under random window splits (1 byte to
-  whole input), so two drivers cannot drift.
+The buffer fast path is measured against the resumable walk (P6.1, scanner
+first; then the VM). If whole-window resumable costs ≤ 15% over the recursive
+walk on the P1.4 inputs, one kin driver serves all sources; otherwise a
+specialised recursive buffer driver is kept beside the resumable one. **Either
+way**, a differential gate requires identical results for every corpus input
+between the recursive scanner (the oracle) and the resumable walk under
+whole-window, every-offset splits (small inputs), random splits and tiny yield
+quanta. The 15% figure is a trigger for a decision, not the decision.
 
-The JS host additionally keeps a monomorphic fast path: a `Uint8Array` input
-never goes through the handle interface.
+### 17.6 Benchmarks (W24)
 
-### 17.5 Benchmarks added to §12
+Separate the VM's overhead from transport policy and from retained output:
+(a) recursive vs resumable whole-window (pure VM overhead); (b) resumable with
+64 KiB / 16 KiB / 1 KiB windows from an in-memory source (driver overhead,
+sync and async); (c) a simulated remote handle with injected latency (requests,
+bytes read, time) for one-field reads; (d) carried memory high water.
 
-9. **Abstraction cost**: buffer fast path vs the generic path over an
-   in-memory blob handle (64 KiB chunks) vs a stream fed in 1 KiB, 16 KiB and
-   64 KiB chunks, on the P1.4 inputs; scanner first (P1.5), then the VM.
-10. **Remote**: reading one field from a 100 MB object behind a simulated
-    range-read handle (latency injected, no network): bytes read, requests
-    made, time; with and without an index.
-11. **Streaming**: peak carried memory and throughput on 1.4 MB bodies fed in
-    small chunks, with backpressure.
+### 17.7 First slice and what is deferred
 
-### 17.6 What it changes elsewhere
+First: the session contract above; the resumable profile scanner in kin with
+the recursive scanner as oracle; three supplies (buffer, immutable
+synchronous handle, genuinely async mock handle) plus a push source with a
+declared length; the split/EOF/lifetime/interleaving gates; benchmarks (a)
+and (b). Then the VM's scratch/API/charging amendment for sessions, with
+worked executions of long `LITSET` keys, key-typeset entries and nested
+`EMBED`. Deferred: unknown-length streams, fused stream decode, remote views
+and indexes, cache/read-ahead policy, sequences, 64-bit offsets.
 
-* **D016** superseded: explicit-stack, resumable VM (and scanner, cursor).
-* **D017** amended: streams decode fused (build while validating, release on
-  success); buffers and handles keep check-then-build.
-* **program.md**: format 1's Program is unchanged; the **scratch** layout
-  gains the carried-state block of §17.2 and the frame contents needed to
-  resume (a format-1 scratch amendment, recorded when the VM work item
-  specifies it; scratch is not serialised).
-* **Limits**: a key length limit (default 1 KiB, hard 64 KiB) for all
-  sources; 64-bit input-size limit for handle sources.
-* **Scanner (P1.3)** becomes the first client: a resumable scanner spike
-  (P1.5) measures §17.4's question before the VM is written.
+### 17.8 Review disposition
+
+Every finding of both reviews was accepted. §16: V1–V2 (trust and ownership
+axes), V3–V6 (withdrawn positional typesets; `validateAt`; span entry), V7–V9
+(no lazy checking mode; ordered search only on checked bytes; structural skip
+contract), V10–V14 (tape withdrawn; per-container directories in view state),
+V15–V17 (writer deferred, grammar and kin/host representation specified with
+it), V18 (accessors), V19 (benchmark matrix), V20 (complete-buffer scope for
+§16; sources in §17). §17: W1 (known length; unknown deferred to the owner),
+W2/W13/W21 (session protocol and outcomes), W3–W6 (no key cap; per-map key
+state; copies for streams), W7/W8/W11 (embedded, tag summaries, continuation
+as session state), W9 (exclusive arenas), W10/W22 (charge timing and the
+differential gate), W12/W15 (snapshot handles; cache later), W14 (offsets
+< 2^31), W16–W18 (backpressure, fused decode deferred, forward cursor during
+the pass), W19 (`YIELD`), W20 (sync reads, monomorphic buffer path), W23–W24
+(the 15% trigger; benchmark separation).
