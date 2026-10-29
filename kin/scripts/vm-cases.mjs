@@ -176,6 +176,26 @@ export function assembledCases() {
     ]);
   }
 
+  // ---------------------------------------------------------------- embedded roots at the compiled depth D
+  {
+    const p = C('r = [[bstr .cbor uint]]', { limits: { depth: 2 } });
+    add('embedded root past D (.cbor)', p, [
+      { label: 'byte string at depth D = 2: no frame for its root -> embedded, cbor/depth, path [0, 0, cbor]', bytes: enc([[Uint8Array.of(1)]]),
+        check: expect({ code: 41, sub: 17, path: [[0, 0], [0, 0], [4, 0]], offset: 3 }) },
+    ]);
+    const q = C('s = [* uint]\nr = [bstr .cborseq s]', { limits: { depth: 2 } });
+    add('embedded root past D (.cborseq)', q, [
+      { label: 'sequence items would sit at depth 3 > D -> embedded, cbor/depth', bytes: enc([Uint8Array.of(1, 2)]),
+        check: expect({ code: 41, sub: 17, path: [[0, 0], [4, 0]] }) },
+      { label: 'the guard is by depth, not content: an empty sequence there fails too (D040)', bytes: enc([new Uint8Array(0)]),
+        check: expect({ code: 41, sub: 17 }) },
+    ]);
+    const r = C('s = [* uint]\nr = bstr .cborseq s', { limits: { depth: 2 } });
+    add('embedded sequence within D', r, [
+      { label: 'items at depth 2 = D: fine', bytes: enc(Uint8Array.of(1, 2)), check: expect({ code: 0 }) },
+    ]);
+  }
+
   // ---------------------------------------------------------------- assembler: NOT
   {
     const a = new Asm();

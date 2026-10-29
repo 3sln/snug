@@ -199,14 +199,15 @@ export function embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, seq, pos) {
     if (nm > dd) {
         nm = dd;
     }
-    pathPut(s, d + 1, P_EMBED, 0);
     // No frame for the embedded root beyond the compiled depth D: an inner
-    // `cbor/depth` (program.md §17 q6).
+    // `cbor/depth` (program.md §17 q6). Its path is the byte string's plus
+    // `cbor` as the witness's extra segment (no path-stack slot past D).
     if (root > dd) {
-        witSet(s, CODE_DEPTH, 0, d + 1, -1, 0, cs);
+        witSet(s, CODE_DEPTH, 0, d, P_EMBED, 0, cs);
         embedKill(p, s, fb, w, nq, seq);
         return 0;
     }
+    pathPut(s, d + 1, P_EMBED, 0);
     for (let k = 0; k < nq; k++) {
         const fk = qFlag(s, fb, w, k);
         const lbk = qLeafBase(p, s, fb, k);
@@ -545,7 +546,9 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     let q = q0;
     let q1 = q0;
     let el = 0;
+    let ao1 = 0;
     let unacc = 0;
+    let nalive;
     const na = qFilter(p, s, fb, w, nq, 16, pos);
     if (na < 0) {
         return na;
@@ -564,9 +567,14 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
             nb += 1;
         }
     }
+    // The first block's automaton, hoisted (one block is the common case).
+    if (nb > 0) {
+        ao1 = blockAo(p, s, fb, area);
+    }
+    nalive = nb;
     const pend = countPending(p, s, fb, w, nq);
     while (((n < 0) && (q < end)) || ((n >= 0) && (el < n))) {
-        if (arrayAlive(p, s, fb, area, nb) === 0) {
+        if (nalive === 0) {
             q = deadItem(b, s, q, d + 1, end);
             if (q < 0) {
                 return q;
@@ -577,11 +585,14 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
             let bo = area;
             let still = 0;
             let r;
-            for (let _bi = 0; _bi < nb; _bi++) {
+            for (let bi = 0; bi < nb; bi++) {
                 if (!charge(s, 1, pos)) {
                     return -R_BUDGET;
                 }
-                const ao = blockAo(p, s, fb, bo);
+                let ao = ao1;
+                if (bi > 0) {
+                    ao = blockAo(p, s, fb, bo);
+                }
                 if (s[bo + 1] !== 0) {
                     cnq = arrayCandidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
                     if (cnq < 0) {
@@ -604,8 +615,11 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 return ev;
             }
             bo = area;
-            for (let _bj = 0; _bj < nb; _bj++) {
-                const aoj = blockAo(p, s, fb, bo);
+            for (let bj = 0; bj < nb; bj++) {
+                let aoj = ao1;
+                if (bj > 0) {
+                    aoj = blockAo(p, s, fb, bo);
+                }
                 if (s[bo + 1] !== 0) {
                     const adv = arrayAdvance(p, s, bo, aoj, ev, pos);
                     if (adv < 0) {
@@ -613,10 +627,13 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     }
                     if (adv === 1) {
                         still += 1;
-                    } else if (adv === 2) {
-                        qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
                     } else {
-                        qSetFlag(s, fb, w, s[bo], R_TYPE << 8);
+                        nalive -= 1;
+                        if (adv === 2) {
+                            qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+                        } else {
+                            qSetFlag(s, fb, w, s[bo], R_TYPE << 8);
+                        }
                     }
                 }
                 bo += arrayWords(p, aoj);
@@ -711,6 +728,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     let pe = -1;
     let klo = 0;
     let unsat = 0;
+    let nalive;
     const na = qFilter(p, s, fb, w, nq, 32, pos);
     if (na < 0) {
         return na;
@@ -734,6 +752,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     if ((used + (4 * ccap)) > cap) {
         return -R_INCONSISTENT;
     }
+    nalive = nb;
     const cl = area + used;
     const pend = countPending(p, s, fb, w, nq);
     for (let _k = 0; _k < n; _k++) {
@@ -747,7 +766,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 return fail(s, start, CODE_KEY_TYPE);
             }
         }
-        if (mapAlive(p, s, fb, area, nb) === 0) {
+        if (nalive === 0) {
             q = deadItem(b, s, start, d + 1, end);
             if (q < 0) {
                 return q;
@@ -905,10 +924,13 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     }
                     if (u === 1) {
                         still += 1;
-                    } else if (blockNamed(s, bo, cl, nc)) {
-                        qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
                     } else {
-                        qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+                        nalive -= 1;
+                        if (blockNamed(s, bo, cl, nc)) {
+                            qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
+                        } else {
+                            qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+                        }
                     }
                 }
                 bo += p[mtl + 6];

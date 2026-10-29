@@ -192,14 +192,15 @@ pub fn embed_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], cs: i32, ce: i
     if nm > dd {
         nm = dd;
     }
-    path_put(s, d + 1, P_EMBED, 0);
     // No frame for the embedded root beyond the compiled depth D: an inner
-    // `cbor/depth` (program.md §17 q6).
+    // `cbor/depth` (program.md §17 q6). Its path is the byte string's plus
+    // `cbor` as the witness's extra segment (no path-stack slot past D).
     if root > dd {
-        wit_set(s, CODE_DEPTH, 0, d + 1, -1, 0, cs);
+        wit_set(s, CODE_DEPTH, 0, d, P_EMBED, 0, cs);
         embed_kill(p, s, fb, w, nq, seq);
         return 0;
     }
+    path_put(s, d + 1, P_EMBED, 0);
     for k in 0..nq {
         let fk: i32 = q_flag(s, fb, w, k);
         let lbk: i32 = q_leaf_base(p, s, fb, k);
@@ -531,7 +532,9 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     let mut q: i32 = q0;
     let mut q1: i32 = q0;
     let mut el: i32 = 0;
+    let mut ao1: i32 = 0;
     let mut unacc: i32 = 0;
+    let mut nalive: i32;
     let na: i32 = q_filter(p, s, fb, w, nq, 16, pos);
     if na < 0 {
         return na;
@@ -550,9 +553,14 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             nb += 1;
         }
     }
+    // The first block's automaton, hoisted (one block is the common case).
+    if nb > 0 {
+        ao1 = block_ao(p, s, fb, area);
+    }
+    nalive = nb;
     let pend: i32 = count_pending(p, s, fb, w, nq);
     while ((n < 0) && (q < end)) || ((n >= 0) && (el < n)) {
-        if array_alive(p, s, fb, area, nb) == 0 {
+        if nalive == 0 {
             q = dead_item(b, s, q, d + 1, end);
             if q < 0 {
                 return q;
@@ -563,11 +571,14 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             let mut bo: i32 = area;
             let mut still: i32 = 0;
             let r: i32;
-            for _bi in 0..nb {
+            for bi in 0..nb {
                 if !charge(s, 1, pos) {
                     return -R_BUDGET;
                 }
-                let ao: i32 = block_ao(p, s, fb, bo);
+                let mut ao: i32 = ao1;
+                if bi > 0 {
+                    ao = block_ao(p, s, fb, bo);
+                }
                 if s[(bo + 1) as usize] != 0 {
                     cnq = array_candidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
                     if cnq < 0 {
@@ -590,8 +601,11 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                 return ev;
             }
             bo = area;
-            for _bj in 0..nb {
-                let aoj: i32 = block_ao(p, s, fb, bo);
+            for bj in 0..nb {
+                let mut aoj: i32 = ao1;
+                if bj > 0 {
+                    aoj = block_ao(p, s, fb, bo);
+                }
                 if s[(bo + 1) as usize] != 0 {
                     let adv: i32 = array_advance(p, s, bo, aoj, ev, pos);
                     if adv < 0 {
@@ -599,10 +613,13 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                     }
                     if adv == 1 {
                         still += 1;
-                    } else if adv == 2 {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
                     } else {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_TYPE << 8);
+                        nalive -= 1;
+                        if adv == 2 {
+                            q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+                        } else {
+                            q_set_flag(s, fb, w, s[(bo) as usize], R_TYPE << 8);
+                        }
                     }
                 }
                 bo += array_words(p, aoj);
@@ -695,6 +712,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     let mut pe: i32 = -1;
     let mut klo: i32 = 0;
     let mut unsat: i32 = 0;
+    let mut nalive: i32;
     let na: i32 = q_filter(p, s, fb, w, nq, 32, pos);
     if na < 0 {
         return na;
@@ -718,6 +736,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     if (used + (4 * ccap)) > cap {
         return -R_INCONSISTENT;
     }
+    nalive = nb;
     let cl: i32 = area + used;
     let pend: i32 = count_pending(p, s, fb, w, nq);
     for _k in 0..n {
@@ -731,7 +750,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                 return fail(s, start, CODE_KEY_TYPE);
             }
         }
-        if map_alive(p, s, fb, area, nb) == 0 {
+        if nalive == 0 {
             q = dead_item(b, s, start, d + 1, end);
             if q < 0 {
                 return q;
@@ -889,10 +908,13 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     }
                     if u == 1 {
                         still += 1;
-                    } else if block_named(s, bo, cl, nc) {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
                     } else {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+                        nalive -= 1;
+                        if block_named(s, bo, cl, nc) {
+                            q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
+                        } else {
+                            q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+                        }
                     }
                 }
                 bo += p[(mtl + 6) as usize];

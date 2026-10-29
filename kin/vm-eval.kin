@@ -184,13 +184,14 @@
         e (new-epoch s)
         ^:mut cnq 0]
     (if (> nm dd) (set nm dd))
-    (path-put s (+ d 1) P_EMBED 0)
     (comment "No frame for the embedded root beyond the compiled depth D: an inner"
-             "`cbor/depth` (program.md §17 q6).")
+             "`cbor/depth` (program.md §17 q6). Its path is the byte string's plus"
+             "`cbor` as the witness's extra segment (no path-stack slot past D).")
     (if (> root dd)
-      (do (wit-set s CODE_DEPTH 0 (+ d 1) (neg 1) 0 cs)
+      (do (wit-set s CODE_DEPTH 0 d P_EMBED 0 cs)
           (embed-kill p s fb w nq seq)
           (return 0)))
+    (path-put s (+ d 1) P_EMBED 0)
     (for [^I32 k 0 nq]
       (let [fk (q-flag s fb w k)
             lbk (q-leaf-base p s fb k)]
@@ -424,7 +425,9 @@
         ^:mut q q0
         ^:mut q1 q0
         ^:mut el 0
+        ^:mut ao1 0
         ^:mut unacc 0]
+    (local ^:mut ^I32 nalive)
     (let [na (q-filter p s fb w nq 16 pos)]
       (if (< na 0) (return na)))
     (for [^I32 i 0 nq]
@@ -435,9 +438,12 @@
                 (if (< ri 0) (return ri)))
               (set used (+ used words))
               (set nb (+ nb 1))))))
+    (comment "The first block's automaton, hoisted (one block is the common case).")
+    (if (> nb 0) (set ao1 (block-ao p s fb area)))
+    (set nalive nb)
     (let [pend (count-pending p s fb w nq)]
       (while (or (and (< n 0) (< q end)) (and (>= n 0) (< el n)))
-        (if (== (array-alive p s fb area nb) 0)
+        (if (== nalive 0)
           (do (set q (dead-item b s q (+ d 1) end))
               (if (< q 0) (return q)))
           (do (let [e (new-epoch s)
@@ -445,9 +451,10 @@
                     ^:mut bo area
                     ^:mut still 0]
                 (local ^I32 r)
-                (for [^I32 _bi 0 nb]
+                (for [^I32 bi 0 nb]
                   (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
-                  (let [ao (block-ao p s fb bo)]
+                  (let [^:mut ao ao1]
+                    (if (> bi 0) (set ao (block-ao p s fb bo)))
                     (if (!= (ia s (+ bo 1)) 0)
                       (do (set cnq (array-candidates p s bo ao el cfb cw cnq e pos))
                           (if (< cnq 0) (return cnq))))
@@ -460,16 +467,18 @@
                 (let [ev (q-stamp s cfb cw cnq pos)]
                   (if (< ev 0) (return ev))
                   (set bo area)
-                  (for [^I32 _bj 0 nb]
-                    (let [aoj (block-ao p s fb bo)]
+                  (for [^I32 bj 0 nb]
+                    (let [^:mut aoj ao1]
+                      (if (> bj 0) (set aoj (block-ao p s fb bo)))
                       (if (!= (ia s (+ bo 1)) 0)
                         (do (let [adv (array-advance p s bo aoj ev pos)]
                               (if (< adv 0) (return adv))
                               (if (== adv 1)
                                 (set still (+ still 1))
-                                (if (== adv 2)
-                                  (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8))
-                                  (q-set-flag s fb w (ia s bo) (shl R_TYPE 8)))))))
+                                (do (set nalive (- nalive 1))
+                                    (if (== adv 2)
+                                      (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8))
+                                      (q-set-flag s fb w (ia s bo) (shl R_TYPE 8))))))))
                       (set bo (+ bo (array-words p aoj))))))
                 (if (or (> still 0) (> pend 0))
                   (wit-clear s)
@@ -534,6 +543,7 @@
         ^:mut pe (neg 1)
         ^:mut klo 0
         ^:mut unsat 0]
+    (local ^:mut ^I32 nalive)
     (let [na (q-filter p s fb w nq 32 pos)]
       (if (< na 0) (return na)))
     (for [^I32 i 0 nq]
@@ -547,6 +557,7 @@
               (set ccap (+ ccap (ia p (+ mt 7))))
               (set nb (+ nb 1))))))
     (if (> (+ used (* 4 ccap)) cap) (return (neg R_INCONSISTENT)))
+    (set nalive nb)
     (let [cl (+ area used)
           pend (count-pending p s fb w nq)]
       (for [^I32 _k 0 n]
@@ -555,7 +566,7 @@
           (let [km (ushr (u8 b start) 5)]
             (if (!= km 3)
               (if (not (and cose (<= km 1))) (return (fail s start CODE_KEY_TYPE))))
-            (if (== (map-alive p s fb area nb) 0)
+            (if (== nalive 0)
               (do (set q (dead-item b s start (+ d 1) end))
                   (if (< q 0) (return q))
                   (if (<= km 1)
@@ -651,9 +662,10 @@
                                 (if (< u 0) (return u))
                                 (if (== u 1)
                                   (set still (+ still 1))
-                                  (if (block-named s bo cl nc)
-                                    (q-set-flag s fb w (ia s bo) (shl R_VALUE 8))
-                                    (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8)))))))
+                                  (do (set nalive (- nalive 1))
+                                      (if (block-named s bo cl nc)
+                                        (q-set-flag s fb w (ia s bo) (shl R_VALUE 8))
+                                        (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8))))))))
                         (set bo (+ bo (ia p (+ mtl 6))))))
                     (if (or (> still 0) (> pend 0))
                       (wit-clear s)

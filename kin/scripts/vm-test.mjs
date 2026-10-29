@@ -112,6 +112,31 @@ for (const c of sc.cases) {
       return null; } });
 }
 
+// 2b. the same inputs through a schema that keeps EVERYTHING live (maps,
+// arrays, tags, decimals, ndarrays, typed arrays, embedded CBOR): profile
+// errors must still win with the scanner's code and offset (D023), and
+// every profile-valid input is accepted with the scanner's item count.
+const LIVE = `r = v
+v = [* v] / { * (tstr / int) => v } / int / integer / float / tstr / bstr / bool / null /
+    #6.4([int, integer]) / #6.40([[* uint], [* v] / typed]) / typed / bstr .cbor v
+typed = #6.69(bstr) / #6.70(bstr) / #6.71(bstr) / #6.72(bstr) / #6.77(bstr) / #6.78(bstr) /
+        #6.79(bstr) / #6.84(bstr) / #6.85(bstr) / #6.86(bstr)`;
+const liveC = compile(LIVE, { limits: { depth: 256, inputBytes: 0x7fffffff, entries: 1 << 24, items: 1 << 24, budget: 0x7fffffff } });
+const liveP = addProgram(liveC.program, liveC.pool, 'live everything');
+const liveRule = liveC.rules.indexOf('r');
+for (const c of sc.cases) {
+  const opt = c.opt;
+  scanOptions(o16, opt.top === 'any' ? 1 : 0, opt.cose ? 1 : 0, clamp(opt.maxBytes), clamp(opt.maxDepth), clamp(opt.maxEntries), clamp(opt.maxItems));
+  const code = scan(c.bytes, o16), off = errorOffset(o16), items = itemsScanned(o16);
+  cases.push({ prog: liveP, rule: liveRule, lim: LIM(opt.top === 'any' ? 1 : 0, opt.cose ? 1 : 0, clamp(opt.maxBytes), clamp(opt.maxDepth), clamp(opt.maxEntries), clamp(opt.maxItems)),
+    bytes: c.bytes, label: `live identity ${c.label}`, identity: true,
+    check: o => { const w = o.split(' ').map(Number);
+      if (w[0] !== code) return `VM ${w[0]} scanner ${code} (${codeName(code)})`;
+      if (code !== 0 && w[2] !== off) return `offset VM ${w[2]} scanner ${off}`;
+      if (w[4] !== items) return `items VM ${w[4]} scanner ${items}`;
+      return null; } });
+}
+
 // ---------------------------------------------------------------- 3. conformance
 const corpus = { suites: 0, compiled: 0, refusedOk: 0, refusedNot: [], notCompiled: [], later: 0, cases: 0 };
 for (const file of ['study', 'adversarial']) {
@@ -188,6 +213,18 @@ cases.forEach((c, i) => {
   catch (e) { trapFails++; fail(`${c.label} [${hex(c.bytes).slice(0, 60)}]: ${e.message}`); }
 });
 
+// epochs: a sample re-run with the scratch's epoch just below EPOCH_MAX, so
+// the marks are zeroed and epochs restart mid-validation (§12.1)
+let epochRuns = 0, epochFails = 0;
+cases.forEach((c, i) => {
+  if (i % 11 !== 0 || c.bytes.length > 4096) return;
+  runJs(c);   // size the scratch for this program
+  scratch[16] = Math.max(scratch[16], 0x7ffffff0 - 3 - (i % 5));   // VM_EPOCH is monotone (§12.1)
+  const g = runJs(c);
+  epochRuns++;
+  if (g !== js[i]) { epochFails++; fail(`${c.label}: near-overflow epoch gives ${g} vs ${js[i]}`); }
+});
+
 // ---------------------------------------------------------------- run Rust
 let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts';
 if (rustBin) {
@@ -258,13 +295,14 @@ if (process.env.SNUG_VM_WASM) {
 }
 
 const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
-line(stats.identity[0] === stats.identity[1], `profile identity: ${stats.identity[0]}/${stats.identity[1]} inputs give the scanner's code, offset and items through the VM against \`any\` (${sc.nVectors} vectors, ${sc.nFixed} fixed, ${MUTATIONS} mutations seed ${SEED})`);
+line(stats.identity[0] === stats.identity[1], `profile identity: ${stats.identity[0]}/${stats.identity[1]} runs give the scanner's code, offset and items, through the VM against \`any\` and against a schema that keeps everything live (${sc.nVectors} vectors, ${sc.nFixed} fixed, ${MUTATIONS} mutations seed ${SEED})`);
 line(stats.corpus[0] === stats.corpus[1], `conformance: ${stats.corpus[0]}/${stats.corpus[1]} cases with the expected verdict, from ${corpus.compiled} compiled suites of ${corpus.suites} (${corpus.later} phase-later skipped)`);
 console.log(`  info refusal suites: ${corpus.refusedOk} refused by the compiler as expected; ${corpus.refusedNot.length} compiled anyway (compiler's gate)`);
 if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length} suites did not compile (not VM cases):`); for (const s of corpus.notCompiled.slice(0, 40)) console.log('       ' + s); }
 line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.oracle[0]}/${stats.oracle[1]} values agree with corpus/tools/oracle.mjs on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}); ${diff.unknown} oracle-unknown skipped`);
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `§15 and assembled programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled)`);
+line(epochFails === 0, `epochs: ${epochRuns} cases re-run from an epoch just below the restart threshold give the same out array`);
 line(trapFails === 0, `JS bounds: ${guarded} cases re-run behind throwing out-of-bounds traps on P, B, input and scratch`);
 console.log(rustLine);
 console.log(hostLine);

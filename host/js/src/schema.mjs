@@ -139,11 +139,18 @@ export class Schema {
   }
 }
 
-/** compile(text, opts) -> Schema, via the compiler's host entry (kin/compile). */
+/** compile(text, {profile, limits}) -> Schema, via the compiler's host entry
+ * (host/js/src/compile.mjs; throws its SchemaError). The Program is verified
+ * by vm-verify before use. */
 export async function compile(text, opts = {}) {
-  const { compileProgram } = await import('./compile.mjs');
-  const { P, B } = compileProgram(text, opts);
-  let verify;
-  try { ({ vmVerify: verify } = await import('../../../gen/js/snug/program/verify.mjs')); } catch { verify = undefined; }
-  return new Schema(new Program(P, B, { verify }));
+  const [{ compile: compileCddl }, { vmVerify }] = await Promise.all([
+    import('./compile.mjs'), import('../../../gen/js/snug/program/verify.mjs')]);
+  const { program, pool } = compileCddl(text, opts);
+  return new Schema(new Program(program, pool, { verify: vmVerify }));
+}
+
+/** fromProgram(P, B) -> Schema, for a Program compiled elsewhere (a trusted store). */
+export async function fromProgram(P, B) {
+  const { vmVerify } = await import('../../../gen/js/snug/program/verify.mjs');
+  return new Schema(new Program(P, B, { verify: vmVerify }));
 }
