@@ -105,23 +105,60 @@ vectors, fuzz and limits are scripts that print `ok`/`FAIL`, not prose.
 
 ## Phase 1 — kin toolchain, JS target experiment, profile scanner
 
-- [ ] **P1.1 — kin wiring.**
+- [x] **P1.1 — kin wiring.**
   *Brief*: `deps.edn`, `bb.edn` (tasks `gen emit drift check`), project,
   targets (`:js`, `:rust`), vocabulary `snug.lang` (tags `I32 U8 Bool Bytes
   Ints`, byte and int-arena forms, `ushr`/`sar`), `kin/hello.kin`.
   *Files*: `kin/src/snug/*.cljc`, `kin/scripts/*`, `gen/`.
   *Done when*: `bb emit` writes JS and Rust; `bb check` runs both and they
   agree; `bb drift` green and red on a hand edit to `gen/`.
+  *Done 2026-10-29* (commit `470e622`). `deps.edn`/`bb.edn` (kin by path;
+  tasks `gen emit drift check scan-test bench-scan`), `snug.project`
+  (`[snug.lang snug.js kin.lang]`, sources flat in `kin/` because kin's disk
+  vfs lists one level), `snug.targets` (`:js` ours, `:rust` = `kin.target/rust`
+  with a place), `snug.lang` (tags `I32 Bool Bytes Ints`, later `IntsR Str`;
+  no `U8` tag was needed: a byte read is an `I32` 0..255). Scripts as emon's:
+  `emit` is `kp/emit-all!` (atomic, no input stamp — the batch takes seconds),
+  `destinations` refuses a short answer, `drift` hashes before re-emitting and
+  checks hand edits, stale commits, untracked, orphans and missing
+  destinations; `rust-crate` assembles `.cache/snug-rs` with generated `mod`
+  files. Gates run: `bb check` green (JS and Rust print the hand-worked line);
+  `bb drift` green, and red on an appended line in `gen/js/snug/hello.mjs`
+  and on a committed orphan. Learnt: a `defn` docstring is not a kin thing
+  (it becomes the parameter vector) — use `(comment …)`; `defconst` needs a
+  tag or Rust gets `const X:  = 5`.
 
-- [ ] **P1.2 — The JS kin target.**
+- [x] **P1.2 — The JS kin target.**
   *Brief*: a `kin.lang` extension map for `:js` (every form `kin.lang` ships
   for Go) and a `:js` target map with an `:emit` producing an ES module, in
   snug's tree (D005). Integer semantics by tag.
   *Files*: `kin/src/snug/js.cljc`, `kin/src/snug/targets.cljc`.
   *Done when*: the P1.1 sources and a loop/case/defdata test source generate
   JS that `node --check`s and agrees with Rust.
+  *Done 2026-10-29* (commit `470e622`; guard and `IntsR` in `50b9a7c`). D018.
+  `snug.js` is a second `kin.lang` map for `#{:js}` (in a one-element vector:
+  `load-vocabulary` only accepts a foreign `:namespace` that way). It reuses
+  `kin.lang`'s own `if while forever break continue case comment do defdata .
+  declare*` (their non-Rust path is valid JS) and adds `defn` (`export
+  function`), `let` (`const`, `let` for `^:mut`), `local`, `return`, `set`
+  (JS compound operators), `for`, `defconst` (`export const`), `doc` (JSDoc),
+  `panic` (`throw`), the generic operators (`===`, `quot`/`rem` coerced) and
+  the `snug.js/table` data emitter. The ES module `:emit` writes named imports
+  computed from what each body referenced. Integer semantics live in
+  `snug.lang`'s operators (see D018). `kin/hello.kin` covers loops, `forever`,
+  `break`/`continue`, `case` with a comment arm and a constant label,
+  `defconst` (incl. hex), `defdata`, byte reads, int-array writes, a
+  read-only `IntsR`, and every operator where JS and Rust would disagree if
+  spelled naively; `bb check` builds Rust with `-D warnings` and debug
+  overflow checks, `node --check`s every module, and requires both targets to
+  print the line worked out by hand. Learnt: Rust infers an unsuffixed
+  literal's type from `as u32` (so `(-16) as u32` does not compile) and cannot
+  call `.wrapping_mul` on `{integer}` — the templates use `i32::cast_unsigned`
+  and `i32::wrapping_mul(a, b)`; a `let` shadowing a parameter is legal Rust
+  and a SyntaxError in JS, so the JS target now refuses a second declaration
+  of a name in one function at generation time.
 
-- [ ] **P1.3 — Profile scanner in kin.**
+- [x] **P1.3 — Profile scanner in kin.**
   *Brief*: the CBOR profile walk (architecture §3, §4.5, profile §5) as kin:
   heads, lengths, UTF-8 and noncharacters, key order and duplicates, floats
   by bit tests, tags 2/3/4/40 and typed arrays, limits. Returns a profile
@@ -129,13 +166,53 @@ vectors, fuzz and limits are scripts that print `ok`/`FAIL`, not prose.
   *Files*: `kin/cbor/*.kin`, `gen/`.
   *Done when*: every accept vector passes and every refuse vector fails with
   cbor.mjs's code, on JS and Rust.
+  *Done 2026-10-29* (commit `2f837c7`; `read-arg` compacted and explicit
+  `end` offsets (q21) in `50b9a7c`). D019. `kin/{codes,head,text,float,keys,
+  tags,scan}.kin` → `snug.cbor.*`; the ordered check list and the per-tag
+  item/depth table are `docs/scanner.md` (review C15/C16 included). Gate
+  `bb scan-test [mutations] [seed]`: both vector files (1,146 cases; the
+  oracle file's expected code is cbor.mjs's own), 214 fixed edge cases (every
+  limit at and one past, length bombs, cose labels at ±2^53, precedence on
+  multiply-invalid inputs) and seeded mutations of encoded values and of
+  structured byte-level items aimed at the bit tests, under random options —
+  through generated JS, a DEBUG Rust build (overflow checks on, panics caught
+  per case), the wasm build and the hand-written yardstick; every case must
+  give cbor.mjs's code, JS/Rust/wasm the same error offset, and a re-run behind
+  a throwing out-of-bounds trap shows the JS never reads past the input. Run:
+  200,000 mutations × seeds 2, 3, 4 and 21 green (201,360 cases each).
+  Mutating a threshold turns it red (20 mutants tried: 17 red; the 3
+  survivors are equivalent mutants, e.g. float16 `x >= 10` vs `>= 11`, where
+  the next check refuses the same inputs; one float-exponent survivor led to
+  targeted float generation, after which it went red). Learnt: integer-only
+  float rules are short (shortest form = "the low k fraction bits are zero"
+  for an exponent-dependent k); `(1 << k) - 1` overflows i32 at k = 31 in a
+  debug Rust build, so masks are `-1 >>> (32 - k)`; a forward call
+  (`declarefn`) carries no return tag, so its `let` needs `^I32`.
 
-- [ ] **P1.4 — Measure the experiment (D005 gate).**
+- [x] **P1.4 — Measure the experiment (D005 gate).**
   *Brief*: generated JS scanner vs a hand-written JS scanner (same algorithm)
   vs the Rust build compiled to wasm, on the benchmark inputs of architecture
   §12; code size gzip/brotli.
   *Files*: `bench/`, `bench/README.md`.
   *Done when*: numbers recorded with environment; D005 confirmed or reversed.
+  *Done 2026-10-29* (commit `d5b74d7`); numbers in `bench/SCAN.md` (scanner
+  numbers kept out of `bench/README.md`, which the codec work item owns).
+  CPU-time medians, shared machine (load 13–20). generated/hand-written:
+  0.94–1.09× on the int array, typed arrays and nested maps; 1.18–1.22× on the
+  RPC puts; 1.26× on the 216-vector set (1.19–1.27× across runs). Size, gzip:
+  JS 2,584 (wasm's API surface) / 2,935 (full) vs wasm 3,004 (O3) / 2,582
+  ("z"). wasm is 1.6–2.1× FASTER than both JS scanners on the 0.6–1.1 MB
+  item-heavy inputs; JS wins where the input copy dominates (1 MiB bstr:
+  0.9 µs vs 22 µs). Cold start: Node, bundled JS 1.4 ms vs wasm 0.75 ms
+  (7 unbundled modules 3.0 ms); workerd, both within noise of an empty worker.
+  **D005 verdict: the criteria hold at the margin, not decisively** (one tiny
+  input 0.01 over 1.25×; size a tie with the size-optimised wasm), and they
+  miss wasm's throughput lead — recommend keeping the JS target for now and
+  re-taking D005 after the VM with that gap as an input. Learnt: V8 inlines
+  functions under 460 bytes of bytecode — `read-arg` at 522 was 42% of the int
+  array, at 339 it inlines (2.1 → 1.6 ms); exception-based refusals cost ~9×
+  on refusal-heavy input; a wasm module is mostly std (23.5 KB → 6.6 KB with
+  build-std, `panic=immediate-abort` and no allocator).
 
 ## Phase 2 — JS host codec
 
@@ -486,8 +563,47 @@ explicit stack.
 in the hot loop. Revisit if P2.3 shows the second pass costs more than ~25%.
 - [ ] **Signed off** (owner)
 
-### D018 — (reserved for P1)
-### D019 — (reserved for P1)
+### D018 — The JavaScript kin target: integer semantics by operator, named imports, one declaration per name
+**Decision**: JS is added to `kin.lang` as a second map in snug's tree
+(`snug.js`), with no kin change. Integer meaning is in `snug.lang`'s
+operators, not in tags: `+ - *` are plain arithmetic the source guarantees not
+to overflow i32; `add32 sub32 mul32` wrap (`| 0`, `Math.imul` / `i32::
+wrapping_*`); `quot`/`rem` are `(a / b) | 0` and `(a % b) | 0`; `shl`, `sar`
+(arithmetic) and `ushr` (logical, `(a >>> n) | 0` / `cast_unsigned`) are
+separate words; `ult` compares u32 patterns; `==` is `===`. Byte and arena
+forms (`u8 blen ia iset ilen`) check nothing — the source checks every index
+explicitly, and the gates prove it (debug Rust panics, a JS out-of-bounds
+trap). Every function is exported (as Rust's are at least `pub(crate)`);
+cross-module references are named imports computed from use. A name is
+declared once per function (Rust's legal shadowing is a JS SyntaxError).
+**Why**: the JS traps (`/` is float division, `*` loses bits past 2^53, `>>>`
+is unsigned, `-0` from `%`) are all integer-semantics differences, and a word
+per meaning is the only spelling that cannot be misread on either target;
+reusing `kin.lang`'s own forms where their non-Rust path is valid JS keeps the
+extension small (D005's "no change to kin").
+**Alternatives**: unsigned or wrapping TAGS that change what `+` means (rejected:
+a form would have to inspect both operands' tags and a mismatch is silent);
+checked byte reads (`b[i] ?? 0` / `.get()`) (rejected: slower in both, and
+hides a missing bounds check that the gates now catch); namespace imports
+`import * as head` (works with kin's default cross-unit spelling, rejected as
+less idiomatic; it would also lift the `defdata` limitation in "Found in kin").
+- [ ] **Signed off** (owner)
+
+### D019 — The scanner ABI: an Int32Array of options and scratch, negative-code returns, explicit `end`
+**Decision**: `scan(bytes, o) → 0 | code` over a 16-word `Int32Array` /
+`[i32; 16]` (`scanOptions` fills slots 0–5; 6 error offset, 7 items, 8–10
+scratch — frozen by program.md §12); walk functions return a position or a
+negated code and take an explicit `end` offset; codes are cbor.mjs's, as
+integers, with `codeName`. The error offset is snug's own (cbor.mjs has none)
+and is identical on every target. The wasm build exports the same thing over
+a static input buffer (no allocator, no imports).
+**Why**: kin has no structs, objects or multiple returns, and an integer ABI
+is the same in JS, Rust and wasm; returning negative codes keeps the hot path
+free of exceptions (V8 throws cost ~9× on refusal-heavy input, P1.4);
+explicit `end` lets the VM and the D026 cursor walk embedded documents.
+**Alternatives**: a JS options object and string results (no kin spelling);
+state in module variables (no Rust equivalent without `static mut`); throwing.
+- [ ] **Signed off** (owner)
 
 ### D020 — Float literals in schemas through a host port, ≤ 17 significant digits
 **Decision**: the compiler converts decimal float literals with a host port
@@ -566,9 +682,47 @@ keys make lazy navigation cheap, and the received bytes are canonical spans.
 
 (Measured facts worth keeping, with dates.)
 
+- 2026-10-29 (P1.4, `bench/SCAN.md`): on the CBOR scanner the kin-generated
+  JS runs within 0.94–1.09× of a hand-written JS scanner on real inputs and
+  1.18–1.27× on sub-10 µs calls; the same kin source built as wasm is
+  1.6–2.1× faster than both on 0.6–1.1 MB item-heavy inputs, 22 µs slower on a
+  1 MiB byte string (the copy), and no slower to start.
+- 2026-10-29: V8 (Node 24.6) inlines a function only under 460 bytes of
+  bytecode (`--max-inlined-bytecode-size`); keeping hot kin helpers under it
+  is worth ~25% on item-heavy input. Generated module count matters for cold
+  start unbundled (7 modules 3.0 ms vs 1.4 ms bundled).
+- 2026-10-29: a Rust wasm module of ~600 lines of scanner is 23.5 KB with std's
+  panic and allocator machinery and 6.6 KB (5.2 KB at opt-level "z") with
+  `-Zbuild-std`, `panic=immediate-abort` and a static buffer.
+- 2026-10-29: cbor.mjs's decode of 9,000 small maps (1.1 MB) takes ~96 ms of
+  CPU (defineProperty per member), 16× the scan.
+
 ## Found in kin, not ours to fix here
 
 (Bullets: issue — REAL / WRONG / ours — explanation and workaround.)
+
+- `kin.lang`'s call machinery (`declared-call`, `qualifier`, `home-unit`,
+  `const-reference`) is private — REAL — so a language added in a project's
+  own tree restates ~40 lines of it (`snug.js` `js-call`/`qualify`/
+  `const-ref`); kin's Go map lives inside `kin.lang` for exactly this reason.
+  Workaround: restated. Suggest a public "register a callable / a name with
+  cross-unit linking" helper.
+- `kin.lang`'s `defn`, `defconst` (`:generate`) and `defdata` (binding) throw
+  for a target outside their `case`, and `const-spellings` knows only
+  `:rust :go :java :csharp` — REAL, minor — so a new target replaces
+  `defconst` whole (both slots). `defdata` works via `:helpers`.
+- A `defdata` accessor used from ANOTHER module hands the target's
+  `:cross-unit` an empty name (its `{unit}` prefix is `(qualified "")`) —
+  REAL — so a target importing by name cannot import the table. Workaround:
+  read a table through a `defn` in its own module.
+- A call to a function known only by `declarefn` carries no return tag, so an
+  unannotated `let` of it emits `let q:  = …` in Rust — REAL (or by design) —
+  annotate (`^I32`).
+- An untagged `defconst` emits `pub const X:  = 5;` in Rust rather than being
+  refused — REAL, minor — tag every constant.
+- `kin.vfs/disk-vfs` lists one directory level, so sources are flat in `kin/`
+  (the brief's `kin/cbor/*.kin` was not possible without a custom vfs) — known
+  and documented in kin; ours to live with.
 
 ## Open questions for the owner
 
