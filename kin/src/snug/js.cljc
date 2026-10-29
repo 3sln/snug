@@ -103,16 +103,38 @@
                                              :when tv]
                                          [p tv]))))]
          (kin/scoped ctx {:key :fn :value nm :indent 1}
-                     (fn [inner] (doseq [f body] (kin/statement! inner f)))))
+                     (fn [inner]
+                       (kin/scoped inner {:key :js-names
+                                          :value (atom (set (map (fn [p] (kin/local-name inner p)) params)))}
+                                   (fn [in2] (doseq [f body] (kin/statement! in2 f)))))))
        (kin/emit! ctx (kin/indent-of ctx) "}\n")))})
 
 ;; ------------------------------------------------------------- bindings
+
+(defn- declare-local!
+  "Refuse a second declaration of one name in one function, at generation time.
+
+  Rust lets a `let` shadow a parameter or an earlier `let`; JavaScript makes
+  `const x` after a parameter `x` (or a second `const x` in one block) a
+  SyntaxError, and that is found only when the module is loaded. kin's `let`
+  opens no block of its own, so the rule here is the simple, slightly
+  stricter one: a name is declared once per function (as nome's Go rule)."
+  [ctx nm]
+  (when-let [names (kin/get ctx :js-names)]
+    (let [n (kin/local-name ctx nm)]
+      (when (contains? @names n)
+        (throw (ex-info (str "snug.js: `" nm "` is declared twice in `" (kin/get ctx :fn)
+                             "` -- legal shadowing in Rust, a SyntaxError in JavaScript."
+                             " Give the second binding its own name.")
+                        {:symbol nm :fn (kin/get ctx :fn)})))
+      (swap! names conj n))))
 
 (defn- js-let [ctx form]
   (let [[_ bindings & body] form]
     (doseq [[nm init] (partition 2 bindings)]
       (let [{code :text produced :tag} (kin/render-tagged ctx init)
             declared (kin/tag ctx (:tag (meta nm)))]
+        (declare-local! ctx nm)
         (kin/define-tag! ctx {:scope :private} nm (or declared produced))
         (kin/emit! ctx (kin/indent-of ctx) (if (:mut (meta nm)) "let " "const ")
                    (kin/local-name ctx nm) " = " (kl/strip-parens code) ";\n")))
@@ -120,6 +142,7 @@
 
 (defn- js-local [ctx form]
   (let [nm (second form)]
+    (declare-local! ctx nm)
     (kin/define-tag! ctx {:scope :private} nm (kin/tag ctx (:tag (meta nm))))
     (kin/emit! ctx (kin/indent-of ctx) "let " (kin/local-name ctx nm) ";\n")))
 
@@ -153,6 +176,7 @@
   "`(for [^I32 i a b] ...)` -- `for (let i = a; i < b; i++) {`, half-open."
   [ctx form]
   (let [[_ [nm start end] & body] form
+        _ (declare-local! ctx nm)
         _ (kin/define-tag! ctx {:scope :private} nm (kin/tag ctx (:tag (meta nm))))
         n (kin/local-name ctx nm)
         a (kl/strip-parens (kin/render ctx start))

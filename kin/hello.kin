@@ -10,7 +10,7 @@
 (ns snug.hello
   (:require [kin.lang :refer [defn let local return set if while forever break
                               continue for case defconst defdata comment doc do]]
-            [snug.lang :refer [I32 Bool Bytes Ints + - * neg quot rem add32 mul32
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem add32 mul32
                                bit-and bit-or bit-xor bit-not shl sar ushr
                                < > <= >= == != ult and or not
                                u8 blen ia iset ilen hex]]))
@@ -81,6 +81,13 @@
       (iset out (+ at i) (squares-at 0 i)))
     (return n)))
 
+(defn ^I32 sum-range [^IntsR a ^I32 from ^I32 to]
+  (comment "Sum a[from..to) of a READ-ONLY arena (an Ints passes as an IntsR).")
+  (let [^:mut acc 0]
+    (for [^I32 i from to]
+      (set acc (+ acc (ia a i))))
+    (return acc)))
+
 (defn ^Bool both-small [^I32 a ^I32 b]
   (return (and (< a 10) (not (or (< b 0) (> b 9))))))
 
@@ -111,4 +118,7 @@
     (iset out k (blen b)) (set k (+ k 1))
     (let [w (fill-squares out k)]
       (set k (+ k w)))
+    (let [sq (sum-range out (- k 8) k)]
+      (iset out k sq)
+      (set k (+ k 1)))
     (return k)))

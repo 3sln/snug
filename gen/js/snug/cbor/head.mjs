@@ -19,74 +19,62 @@ export function be32(b, p) {
     return ((b[p] << 24) | (b[p + 1] << 16)) | ((b[p + 2] << 8) | b[p + 3]);
 }
 
-export function readArg(b, o, pos, ai) {
+export function readArg(b, o, pos, ai, end) {
     // The argument of the head at pos, whose additional information ai is
     // 24 or more: into o[O_HI], o[O_LO]; answers the position after the head.
-    // Shortest form is enforced here; 28..30 are malformed, 31 indefinite.
-    // The caller has checked that b[pos] exists.
-    const left = b.length - (pos + 1);
-    if (ai === 24) {
-        if (left < 1) {
-            return fail(o, pos, CODE_TRUNCATED);
+    // 28..30 are malformed and 31 indefinite (before anything is read); then
+    // the 1/2/4/8 argument bytes must remain; then the value must need its
+    // width (shortest form). The caller has checked that b[pos] exists.
+    // Kept small on purpose: under V8's inlining limit, so it inlines into
+    // the item walk (P1.4).
+    if (ai > 27) {
+        if (ai === 31) {
+            return fail(o, pos, CODE_INDEFINITE);
         }
-        const v1 = b[pos + 1];
-        if (v1 < 24) {
+        return fail(o, pos, CODE_MALFORMED);
+    }
+    const p = pos + 1;
+    const w = 1 << (ai - 24);
+    if (w > (end - p)) {
+        return fail(o, pos, CODE_TRUNCATED);
+    }
+    if (w === 8) {
+        const h8 = be32(b, p);
+        if (h8 === 0) {
             return fail(o, pos, CODE_NON_SHORTEST);
         }
-        o[O_HI] = 0;
-        o[O_LO] = v1;
-        return pos + 2;
+        o[O_HI] = h8;
+        o[O_LO] = be32(b, p + 4);
+        return p + 8;
     }
-    if (ai === 25) {
-        if (left < 2) {
-            return fail(o, pos, CODE_TRUNCATED);
-        }
-        const v2 = be16(b, pos + 1);
-        if (v2 < 256) {
-            return fail(o, pos, CODE_NON_SHORTEST);
-        }
-        o[O_HI] = 0;
-        o[O_LO] = v2;
-        return pos + 3;
+    let v = b[p];
+    let short = false;
+    if (w === 1) {
+        short = v < 24;
     }
-    if (ai === 26) {
-        if (left < 4) {
-            return fail(o, pos, CODE_TRUNCATED);
-        }
-        const v4 = be32(b, pos + 1);
-        if (((v4 >>> 16) | 0) === 0) {
-            return fail(o, pos, CODE_NON_SHORTEST);
-        }
-        o[O_HI] = 0;
-        o[O_LO] = v4;
-        return pos + 5;
+    if (w === 2) {
+        v = (v << 8) | b[p + 1];
+        short = v < 256;
     }
-    if (ai === 27) {
-        if (left < 8) {
-            return fail(o, pos, CODE_TRUNCATED);
-        }
-        const hi8 = be32(b, pos + 1);
-        const lo8 = be32(b, pos + 5);
-        if (hi8 === 0) {
-            return fail(o, pos, CODE_NON_SHORTEST);
-        }
-        o[O_HI] = hi8;
-        o[O_LO] = lo8;
-        return pos + 9;
+    if (w === 4) {
+        v = be32(b, p);
+        short = ((v >>> 16) | 0) === 0;
     }
-    if (ai === 31) {
-        return fail(o, pos, CODE_INDEFINITE);
+    if (short) {
+        return fail(o, pos, CODE_NON_SHORTEST);
     }
-    return fail(o, pos, CODE_MALFORMED);
+    o[O_HI] = 0;
+    o[O_LO] = v;
+    return p + w;
 }
 
-export function takeLen(b, o, pos, p, hi, lo) {
+export function takeLen(o, pos, p, hi, lo, end) {
     // The end of a payload of hi:lo bytes starting at p, or truncated --
     // checked against what remains BEFORE anything else (cbor.mjs `length`).
     if ((hi !== 0) || (lo < 0)) {
         return fail(o, pos, CODE_TRUNCATED);
     }
-    if (lo > (b.length - p)) {
+    if (lo > (end - p)) {
         return fail(o, pos, CODE_TRUNCATED);
     }
     return p + lo;
@@ -102,7 +90,7 @@ export function countItem(o, pos) {
     return 0;
 }
 
-export function enterContainer(b, o, pos, p, hi, lo, depth, pairs) {
+export function enterContainer(o, pos, p, hi, lo, depth, pairs, end) {
     // An array (pairs 0) or map (pairs 1) of hi:lo entries whose head ends at
     // p, at depth: depth bound, then the declared length against what remains
     // (n bytes per entry, 2n per pair), then the entry bound -- cbor.mjs's order.
@@ -112,7 +100,7 @@ export function enterContainer(b, o, pos, p, hi, lo, depth, pairs) {
     if ((hi !== 0) || (lo < 0)) {
         return fail(o, pos, CODE_TRUNCATED);
     }
-    const left = b.length - p;
+    const left = end - p;
     if (pairs === 0) {
         if (lo > left) {
             return fail(o, pos, CODE_TRUNCATED);
@@ -126,11 +114,11 @@ export function enterContainer(b, o, pos, p, hi, lo, depth, pairs) {
     return 0;
 }
 
-export function bytesContent(b, o, p, notBytes) {
+export function bytesContent(b, o, p, notBytes, end) {
     // A tag's byte-string content at p (cbor.mjs `bytesContent`): NOT counted
     // as an item and not a depth level. A non-byte-string is refused with
     // not-bytes. Answers the content end; its start goes in o[O_CSTART].
-    if (p >= b.length) {
+    if (p >= end) {
         return fail(o, p, CODE_TRUNCATED);
     }
     const ib = b[p];
@@ -139,17 +127,17 @@ export function bytesContent(b, o, p, notBytes) {
         return fail(o, p, notBytes);
     }
     if (ai < 24) {
-        const e1 = takeLen(b, o, p, p + 1, 0, ai);
+        const e1 = takeLen(o, p, p + 1, 0, ai, end);
         if (e1 >= 0) {
             o[O_CSTART] = p + 1;
         }
         return e1;
     }
-    const q = readArg(b, o, p, ai);
+    const q = readArg(b, o, p, ai, end);
     if (q < 0) {
         return q;
     }
-    const e2 = takeLen(b, o, p, q, o[O_HI], o[O_LO]);
+    const e2 = takeLen(o, p, q, o[O_HI], o[O_LO], end);
     if (e2 >= 0) {
         o[O_CSTART] = q;
     }

@@ -66,6 +66,13 @@
   "The input bytes, read only. Shared on both targets (a borrow / a view)."
   {:name 'Bytes :types {:js "Uint8Array" :rust "&[u8]"}})
 
+(def IntsR
+  "A READ-ONLY run of i32 (a compiled Program, docs/program.md): `Int32Array`
+  / `&[i32]`. `ia` and `ilen` read it; `iset` on one does not compile in Rust,
+  so read-only is enforced on the stricter target. Shared immutably, so one
+  Program can serve several Rust threads (program.md Q9)."
+  {:name 'IntsR :types {:js "Int32Array" :rust "&[i32]"}})
+
 (def Str
   "A string LITERAL the source returns (a name for a code): a JS string, a
   Rust `&'static str`. Never built, never compared; kin decides nothing on
@@ -159,7 +166,7 @@
 (def vocabulary
   {:namespace 'snug.lang
    :targets #{:js :rust}
-   :tags {'I32 I32 'Bool Bool 'Bytes Bytes 'Ints Ints 'Str Str}
+   :tags {'I32 I32 'Bool Bool 'Bytes Bytes 'Ints Ints 'IntsR IntsR 'Str Str}
    :names {}
    :forms forms
    ;; An unannotated integer literal is an I32 and `true`/`false` a Bool, so a

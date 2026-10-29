@@ -8,10 +8,10 @@ use crate::snug::cbor::keys::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
 
-pub(crate) fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32) -> i32 {
+pub(crate) fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
     // `non_shortest` (cbor.mjs `simple`).
-    let left: i32 = (b.len() as i32) - (pos + 1);
+    let left: i32 = end - (pos + 1);
     let mut c: i32 = 0;
     let mut w: i32 = 0;
     if ai == 25 {
@@ -48,26 +48,26 @@ pub(crate) fn scan_simple(o: &mut [i32], pos: i32, ai: i32) -> i32 {
     }
     return fail(o, pos, CODE_SIMPLE);
 }
-pub(crate) fn scan_text(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32) -> i32 {
-    let end: i32 = take_len(b, o, pos, p, hi, lo);
-    if end < 0 {
-        return end;
+pub(crate) fn scan_text(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, end: i32) -> i32 {
+    let stop: i32 = take_len(o, pos, p, hi, lo, end);
+    if stop < 0 {
+        return stop;
     }
-    let bad: i32 = utf8_invalid_at(b, p, end);
+    let bad: i32 = utf8_invalid_at(b, p, stop);
     if bad >= 0 {
         return fail(o, bad, CODE_TEXT);
     }
-    return end;
+    return stop;
 }
-pub(crate) fn scan_array(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32) -> i32 {
-    let r: i32 = enter_container(b, o, pos, p, hi, lo, depth, 0);
+pub(crate) fn scan_array(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
+    let r: i32 = enter_container(o, pos, p, hi, lo, depth, 0, end);
     let mut q: i32 = p;
     let inner: i32 = depth + 1;
     if r < 0 {
         return r;
     }
     for _i in 0..lo {
-        q = item(b, o, q, inner);
+        q = item(b, o, q, inner, end);
         if q < 0 {
             return q;
         }
@@ -89,13 +89,13 @@ pub(crate) fn cose_label_ok(b: &[u8], s: i32, major: i32) -> bool {
     }
     return (hi >= 0) && ((hi < top) || ((hi == top) && (lo != (-1))));
 }
-pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32) -> i32 {
+pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     // Per pair: the key's major type is PEEKED (key_type) before the key is
     // scanned; order and duplicates are decided after it, by its encoded bytes.
-    let r: i32 = enter_container(b, o, pos, p, hi, lo, depth, 1);
+    let r: i32 = enter_container(o, pos, p, hi, lo, depth, 1, end);
     let cose: bool = (depth == 0) && (o[(O_COSE) as usize] != 0);
     let inner: i32 = depth + 1;
-    let n: i32 = b.len() as i32;
+    let n: i32 = end;
     let mut q: i32 = p;
     let mut prev_start: i32 = -1;
     let mut prev_end: i32 = -1;
@@ -113,7 +113,7 @@ pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
                 return fail(o, start, CODE_KEY_TYPE);
             }
         }
-        q = item(b, o, start, inner);
+        q = item(b, o, start, inner, end);
         if q < 0 {
             return q;
         }
@@ -133,45 +133,45 @@ pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
         }
         prev_start = start;
         prev_end = q;
-        q = item(b, o, q, inner);
+        q = item(b, o, q, inner, end);
         if q < 0 {
             return q;
         }
     }
     return q;
 }
-pub(crate) fn scan_bignum(b: &[u8], o: &mut [i32], pos: i32, p: i32) -> i32 {
+pub(crate) fn scan_bignum(b: &[u8], o: &mut [i32], pos: i32, p: i32, end: i32) -> i32 {
     // Tags 2/3: a byte string (its head may fail first) of 9..128 bytes with no
     // leading zero. The content is not an item.
-    let end: i32 = bytes_content(b, o, p, CODE_BIGNUM);
-    if end < 0 {
-        return end;
+    let stop: i32 = bytes_content(b, o, p, CODE_BIGNUM, end);
+    if stop < 0 {
+        return stop;
     }
     let cs: i32 = o[(O_CSTART) as usize];
-    let len: i32 = end - cs;
+    let len: i32 = stop - cs;
     if (len < 9) || ((b[(cs) as usize] as i32) == 0) {
         return fail(o, pos, CODE_BIGNUM);
     }
     if len > MAX_BIGNUM_BYTES {
         return fail(o, pos, CODE_BIGNUM);
     }
-    return end;
+    return stop;
 }
-pub(crate) fn scan_typed(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, size: i32) -> i32 {
+pub(crate) fn scan_typed(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, size: i32, end: i32) -> i32 {
     // An RFC 8746 little-endian typed array: a byte string whose length is a
     // multiple of the element size; no NaN in float arrays (-0 and +-inf are
     // fine there). The content is not an item.
-    let end: i32 = bytes_content(b, o, p, CODE_TYPED_ARRAY);
-    if end < 0 {
-        return end;
+    let stop: i32 = bytes_content(b, o, p, CODE_TYPED_ARRAY, end);
+    if stop < 0 {
+        return stop;
     }
     let cs: i32 = o[(O_CSTART) as usize];
     let mut i: i32 = cs;
-    if ((end - cs) % size) != 0 {
+    if ((stop - cs) % size) != 0 {
         return fail(o, pos, CODE_TYPED_ARRAY);
     }
     if tag == 84 {
-        while i < end {
+        while i < stop {
             let h1: i32 = b[(i + 1) as usize] as i32;
             if (h1 & 124) == 124 {
                 if ((h1 & 3) | (b[(i) as usize] as i32)) != 0 {
@@ -182,7 +182,7 @@ pub(crate) fn scan_typed(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, si
         }
     }
     if tag == 85 {
-        while i < end {
+        while i < stop {
             let s3: i32 = b[(i + 3) as usize] as i32;
             let s2: i32 = b[(i + 2) as usize] as i32;
             if ((s3 & 127) == 127) && (s2 >= 128) {
@@ -194,7 +194,7 @@ pub(crate) fn scan_typed(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, si
         }
     }
     if tag == 86 {
-        while i < end {
+        while i < stop {
             let t7: i32 = b[(i + 7) as usize] as i32;
             let t6: i32 = b[(i + 6) as usize] as i32;
             if ((t7 & 127) == 127) && (t6 >= 240) {
@@ -205,14 +205,14 @@ pub(crate) fn scan_typed(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, si
             i += 8;
         }
     }
-    return end;
+    return stop;
 }
-pub(crate) fn scan_pair(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32, shape_code: i32) -> i32 {
+pub(crate) fn scan_pair(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32, shape_code: i32, end: i32) -> i32 {
     // The `[x, y]` content of tag 4 or tag 40, decoded as cbor.mjs's item()
     // would: 0x82 demanded first (else shape-code), then the inner array is an
     // item (counted, a depth level, its length checked), then both elements.
     // Answers the end; the second element's start goes in o[O_LO].
-    if p >= (b.len() as i32) {
+    if p >= end {
         return fail(o, p, CODE_TRUNCATED);
     }
     if (b[(p) as usize] as i32) != 0x82 {
@@ -222,43 +222,43 @@ pub(crate) fn scan_pair(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32, s
     if c < 0 {
         return c;
     }
-    let r: i32 = enter_container(b, o, p, p + 1, 0, 2, depth + 1, 0);
+    let r: i32 = enter_container(o, p, p + 1, 0, 2, depth + 1, 0, end);
     if r < 0 {
         return r;
     }
-    let q1: i32 = item(b, o, p + 1, depth + 2);
+    let q1: i32 = item(b, o, p + 1, depth + 2, end);
     if q1 < 0 {
         return q1;
     }
-    let q2: i32 = item(b, o, q1, depth + 2);
+    let q2: i32 = item(b, o, q1, depth + 2, end);
     if q2 < 0 {
         return q2;
     }
     o[(O_LO) as usize] = q1;
     return q2;
 }
-pub(crate) fn scan_decimal(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32) -> i32 {
+pub(crate) fn scan_decimal(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32, end: i32) -> i32 {
     // Tag 4: [exponent, mantissa], exponent -1024..-1, mantissa an integer or
     // bignum, non-zero, not divisible by 10 -- checked after both decode.
-    let end: i32 = scan_pair(b, o, pos, p, depth, CODE_DECIMAL);
-    if end < 0 {
-        return end;
+    let stop: i32 = scan_pair(b, o, pos, p, depth, CODE_DECIMAL, end);
+    if stop < 0 {
+        return stop;
     }
     let q1: i32 = o[(O_LO) as usize];
     if !exponent_ok(b, p + 1) {
         return fail(o, pos, CODE_DECIMAL);
     }
-    if !mantissa_ok(b, q1, end) {
+    if !mantissa_ok(b, q1, stop) {
         return fail(o, pos, CODE_DECIMAL);
     }
-    return end;
+    return stop;
 }
-pub(crate) fn scan_ndarray(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32) -> i32 {
+pub(crate) fn scan_ndarray(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32, end: i32) -> i32 {
     // Tag 40: [shape, data], shape 1..8 positive integers whose product is the
     // element count, data a typed array or an array -- checked after both decode.
-    let end: i32 = scan_pair(b, o, pos, p, depth, CODE_NDARRAY);
-    if end < 0 {
-        return end;
+    let stop: i32 = scan_pair(b, o, pos, p, depth, CODE_NDARRAY, end);
+    if stop < 0 {
+        return stop;
     }
     let count: i32 = data_count(b, o[(O_LO) as usize]);
     if count < 0 {
@@ -267,9 +267,9 @@ pub(crate) fn scan_ndarray(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32
     if !shape_ok(b, p + 1, count) {
         return fail(o, pos, CODE_NDARRAY);
     }
-    return end;
+    return stop;
 }
-pub(crate) fn scan_tag(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32) -> i32 {
+pub(crate) fn scan_tag(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     // A tag is a depth level, checked before its number is looked at.
     if depth >= o[(O_MAX_DEPTH) as usize] {
         return fail(o, pos, CODE_DEPTH);
@@ -278,28 +278,28 @@ pub(crate) fn scan_tag(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
         return fail(o, pos, CODE_TAG);
     }
     if (lo == 2) || (lo == 3) {
-        return scan_bignum(b, o, pos, p);
+        return scan_bignum(b, o, pos, p, end);
     }
     if lo == 4 {
-        return scan_decimal(b, o, pos, p, depth);
+        return scan_decimal(b, o, pos, p, depth, end);
     }
     if lo == 40 {
-        return scan_ndarray(b, o, pos, p, depth);
+        return scan_ndarray(b, o, pos, p, depth, end);
     }
     let size: i32 = typed_size(lo);
     if size == 0 {
         return fail(o, pos, CODE_TAG);
     }
-    return scan_typed(b, o, pos, p, lo, size);
+    return scan_typed(b, o, pos, p, lo, size, end);
 }
-pub(crate) fn item(b: &[u8], o: &mut [i32], pos: i32, depth: i32) -> i32 {
+pub(crate) fn item(b: &[u8], o: &mut [i32], pos: i32, depth: i32, end: i32) -> i32 {
     // One data item at pos (cbor.mjs `item`): counted first, then its head.
     let it: i32 = o[(O_ITEMS) as usize] + 1;
     o[(O_ITEMS) as usize] = it;
     if it > o[(O_MAX_ITEMS) as usize] {
         return fail(o, pos, CODE_TOO_MANY_ITEMS);
     }
-    if pos >= (b.len() as i32) {
+    if pos >= end {
         return fail(o, pos, CODE_TRUNCATED);
     }
     let ib: i32 = b[(pos) as usize] as i32;
@@ -311,10 +311,10 @@ pub(crate) fn item(b: &[u8], o: &mut [i32], pos: i32, depth: i32) -> i32 {
     if ai >= 24 {
         if major == 7 {
             if (ai >= 25) && (ai <= 27) {
-                return scan_float(b, o, pos, ai);
+                return scan_float(b, o, pos, ai, end);
             }
         }
-        p = read_arg(b, o, pos, ai);
+        p = read_arg(b, o, pos, ai, end);
         if p < 0 {
             return p;
         }
@@ -323,11 +323,11 @@ pub(crate) fn item(b: &[u8], o: &mut [i32], pos: i32, depth: i32) -> i32 {
     }
     return match major {
         0 | 1 => p,
-        2 => take_len(b, o, pos, p, hi, lo),
-        3 => scan_text(b, o, pos, p, hi, lo),
-        4 => scan_array(b, o, pos, p, hi, lo, depth),
-        5 => scan_map(b, o, pos, p, hi, lo, depth),
-        6 => scan_tag(b, o, pos, p, hi, lo, depth),
+        2 => take_len(o, pos, p, hi, lo, end),
+        3 => scan_text(b, o, pos, p, hi, lo, end),
+        4 => scan_array(b, o, pos, p, hi, lo, depth, end),
+        5 => scan_map(b, o, pos, p, hi, lo, depth, end),
+        6 => scan_tag(b, o, pos, p, hi, lo, depth, end),
         _ => scan_simple(o, pos, ai),
     };
 }
@@ -363,7 +363,7 @@ pub fn scan(b: &[u8], o: &mut [i32]) -> i32 {
             return -fail(o, 0, CODE_NOT_MAP);
         }
     }
-    let r: i32 = item(b, o, 0, 0);
+    let r: i32 = item(b, o, 0, 0, n);
     if r < 0 {
         return -r;
     }

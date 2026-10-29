@@ -88,6 +88,15 @@ export function fillSquares(out, at) {
     return n;
 }
 
+export function sumRange(a, from, to) {
+    // Sum a[from..to) of a READ-ONLY arena (an Ints passes as an IntsR).
+    let acc = 0;
+    for (let i = from; i < to; i++) {
+        acc += a[i];
+    }
+    return acc;
+}
+
 export function bothSmall(a, b) {
     return (a < 10) && (!((b < 0) || (b > 9)));
 }
@@ -149,5 +158,8 @@ export function selftest(out, b) {
     k += 1;
     const w = fillSquares(out, k);
     k += w;
+    const sq = sumRange(out, k - 8, k);
+    out[k] = sq;
+    k += 1;
     return k;
 }

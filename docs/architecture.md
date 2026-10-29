@@ -726,7 +726,7 @@ the cursor stands on.
 | `view(bytes, {…, index: true})` — **checked + indexed** | the same pass, also writing a **tape**: for each container, its end offset and the start offsets of its children | O(1) skip, O(1) array index, O(log n) map key lookup | yes |
 | `viewTrusted(bytes, opts)` — **lazy** | nothing | each access checks the items it reads (head shortest form, lengths against the end, depth, UTF-8 of text it decodes, float rules, key order and duplicates of maps it searches or iterates); skipped content is walked structurally, not checked | no — documented as not satisfying profile §5 |
 
-**The tape** (D027 candidate, specified with the VM in P5.1) is an Int32Array
+**The tape** (specified with the VM in P5.1) is an Int32Array
 written by the VM in the same pass when asked: one word per item (end offset,
 preorder) plus, per container, a contiguous child-offset table; at most
 `2 × items` words (≤ 1 MiB at the default item limit). It is allocated per

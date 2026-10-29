@@ -8,10 +8,10 @@ import { compareSpans } from './keys.mjs';
 import { dataCount, exponentOk, mantissaOk, shapeOk, typedSize } from './tags.mjs';
 import { utf8InvalidAt } from './text.mjs';
 
-export function scanFloat(b, o, pos, ai) {
+export function scanFloat(b, o, pos, ai, end) {
     // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
     // `non_shortest` (cbor.mjs `simple`).
-    const left = b.length - (pos + 1);
+    const left = end - (pos + 1);
     let c = 0;
     let w = 0;
     if (ai === 25) {
@@ -50,27 +50,27 @@ export function scanSimple(o, pos, ai) {
     return fail(o, pos, CODE_SIMPLE);
 }
 
-export function scanText(b, o, pos, p, hi, lo) {
-    const end = takeLen(b, o, pos, p, hi, lo);
-    if (end < 0) {
-        return end;
+export function scanText(b, o, pos, p, hi, lo, end) {
+    const stop = takeLen(o, pos, p, hi, lo, end);
+    if (stop < 0) {
+        return stop;
     }
-    const bad = utf8InvalidAt(b, p, end);
+    const bad = utf8InvalidAt(b, p, stop);
     if (bad >= 0) {
         return fail(o, bad, CODE_TEXT);
     }
-    return end;
+    return stop;
 }
 
-export function scanArray(b, o, pos, p, hi, lo, depth) {
-    const r = enterContainer(b, o, pos, p, hi, lo, depth, 0);
+export function scanArray(b, o, pos, p, hi, lo, depth, end) {
+    const r = enterContainer(o, pos, p, hi, lo, depth, 0, end);
     let q = p;
     const inner = depth + 1;
     if (r < 0) {
         return r;
     }
     for (let _i = 0; _i < lo; _i++) {
-        q = item(b, o, q, inner);
+        q = item(b, o, q, inner, end);
         if (q < 0) {
             return q;
         }
@@ -94,13 +94,13 @@ export function coseLabelOk(b, s, major) {
     return (hi >= 0) && ((hi < top) || ((hi === top) && (lo !== (-1))));
 }
 
-export function scanMap(b, o, pos, p, hi, lo, depth) {
+export function scanMap(b, o, pos, p, hi, lo, depth, end) {
     // Per pair: the key's major type is PEEKED (key_type) before the key is
     // scanned; order and duplicates are decided after it, by its encoded bytes.
-    const r = enterContainer(b, o, pos, p, hi, lo, depth, 1);
+    const r = enterContainer(o, pos, p, hi, lo, depth, 1, end);
     const cose = (depth === 0) && (o[O_COSE] !== 0);
     const inner = depth + 1;
-    const n = b.length;
+    const n = end;
     let q = p;
     let prevStart = -1;
     let prevEnd = -1;
@@ -118,7 +118,7 @@ export function scanMap(b, o, pos, p, hi, lo, depth) {
                 return fail(o, start, CODE_KEY_TYPE);
             }
         }
-        q = item(b, o, start, inner);
+        q = item(b, o, start, inner, end);
         if (q < 0) {
             return q;
         }
@@ -138,7 +138,7 @@ export function scanMap(b, o, pos, p, hi, lo, depth) {
         }
         prevStart = start;
         prevEnd = q;
-        q = item(b, o, q, inner);
+        q = item(b, o, q, inner, end);
         if (q < 0) {
             return q;
         }
@@ -146,39 +146,39 @@ export function scanMap(b, o, pos, p, hi, lo, depth) {
     return q;
 }
 
-export function scanBignum(b, o, pos, p) {
+export function scanBignum(b, o, pos, p, end) {
     // Tags 2/3: a byte string (its head may fail first) of 9..128 bytes with no
     // leading zero. The content is not an item.
-    const end = bytesContent(b, o, p, CODE_BIGNUM);
-    if (end < 0) {
-        return end;
+    const stop = bytesContent(b, o, p, CODE_BIGNUM, end);
+    if (stop < 0) {
+        return stop;
     }
     const cs = o[O_CSTART];
-    const len = end - cs;
+    const len = stop - cs;
     if ((len < 9) || (b[cs] === 0)) {
         return fail(o, pos, CODE_BIGNUM);
     }
     if (len > MAX_BIGNUM_BYTES) {
         return fail(o, pos, CODE_BIGNUM);
     }
-    return end;
+    return stop;
 }
 
-export function scanTyped(b, o, pos, p, tag, size) {
+export function scanTyped(b, o, pos, p, tag, size, end) {
     // An RFC 8746 little-endian typed array: a byte string whose length is a
     // multiple of the element size; no NaN in float arrays (-0 and +-inf are
     // fine there). The content is not an item.
-    const end = bytesContent(b, o, p, CODE_TYPED_ARRAY);
-    if (end < 0) {
-        return end;
+    const stop = bytesContent(b, o, p, CODE_TYPED_ARRAY, end);
+    if (stop < 0) {
+        return stop;
     }
     const cs = o[O_CSTART];
     let i = cs;
-    if ((((end - cs) % size) | 0) !== 0) {
+    if ((((stop - cs) % size) | 0) !== 0) {
         return fail(o, pos, CODE_TYPED_ARRAY);
     }
     if (tag === 84) {
-        while (i < end) {
+        while (i < stop) {
             const h1 = b[i + 1];
             if ((h1 & 124) === 124) {
                 if (((h1 & 3) | b[i]) !== 0) {
@@ -189,7 +189,7 @@ export function scanTyped(b, o, pos, p, tag, size) {
         }
     }
     if (tag === 85) {
-        while (i < end) {
+        while (i < stop) {
             const s3 = b[i + 3];
             const s2 = b[i + 2];
             if (((s3 & 127) === 127) && (s2 >= 128)) {
@@ -201,7 +201,7 @@ export function scanTyped(b, o, pos, p, tag, size) {
         }
     }
     if (tag === 86) {
-        while (i < end) {
+        while (i < stop) {
             const t7 = b[i + 7];
             const t6 = b[i + 6];
             if (((t7 & 127) === 127) && (t6 >= 240)) {
@@ -212,15 +212,15 @@ export function scanTyped(b, o, pos, p, tag, size) {
             i += 8;
         }
     }
-    return end;
+    return stop;
 }
 
-export function scanPair(b, o, pos, p, depth, shapeCode) {
+export function scanPair(b, o, pos, p, depth, shapeCode, end) {
     // The `[x, y]` content of tag 4 or tag 40, decoded as cbor.mjs's item()
     // would: 0x82 demanded first (else shape-code), then the inner array is an
     // item (counted, a depth level, its length checked), then both elements.
     // Answers the end; the second element's start goes in o[O_LO].
-    if (p >= b.length) {
+    if (p >= end) {
         return fail(o, p, CODE_TRUNCATED);
     }
     if (b[p] !== 0x82) {
@@ -230,15 +230,15 @@ export function scanPair(b, o, pos, p, depth, shapeCode) {
     if (c < 0) {
         return c;
     }
-    const r = enterContainer(b, o, p, p + 1, 0, 2, depth + 1, 0);
+    const r = enterContainer(o, p, p + 1, 0, 2, depth + 1, 0, end);
     if (r < 0) {
         return r;
     }
-    const q1 = item(b, o, p + 1, depth + 2);
+    const q1 = item(b, o, p + 1, depth + 2, end);
     if (q1 < 0) {
         return q1;
     }
-    const q2 = item(b, o, q1, depth + 2);
+    const q2 = item(b, o, q1, depth + 2, end);
     if (q2 < 0) {
         return q2;
     }
@@ -246,29 +246,29 @@ export function scanPair(b, o, pos, p, depth, shapeCode) {
     return q2;
 }
 
-export function scanDecimal(b, o, pos, p, depth) {
+export function scanDecimal(b, o, pos, p, depth, end) {
     // Tag 4: [exponent, mantissa], exponent -1024..-1, mantissa an integer or
     // bignum, non-zero, not divisible by 10 -- checked after both decode.
-    const end = scanPair(b, o, pos, p, depth, CODE_DECIMAL);
-    if (end < 0) {
-        return end;
+    const stop = scanPair(b, o, pos, p, depth, CODE_DECIMAL, end);
+    if (stop < 0) {
+        return stop;
     }
     const q1 = o[O_LO];
     if (!exponentOk(b, p + 1)) {
         return fail(o, pos, CODE_DECIMAL);
     }
-    if (!mantissaOk(b, q1, end)) {
+    if (!mantissaOk(b, q1, stop)) {
         return fail(o, pos, CODE_DECIMAL);
     }
-    return end;
+    return stop;
 }
 
-export function scanNdarray(b, o, pos, p, depth) {
+export function scanNdarray(b, o, pos, p, depth, end) {
     // Tag 40: [shape, data], shape 1..8 positive integers whose product is the
     // element count, data a typed array or an array -- checked after both decode.
-    const end = scanPair(b, o, pos, p, depth, CODE_NDARRAY);
-    if (end < 0) {
-        return end;
+    const stop = scanPair(b, o, pos, p, depth, CODE_NDARRAY, end);
+    if (stop < 0) {
+        return stop;
     }
     const count = dataCount(b, o[O_LO]);
     if (count < 0) {
@@ -277,10 +277,10 @@ export function scanNdarray(b, o, pos, p, depth) {
     if (!shapeOk(b, p + 1, count)) {
         return fail(o, pos, CODE_NDARRAY);
     }
-    return end;
+    return stop;
 }
 
-export function scanTag(b, o, pos, p, hi, lo, depth) {
+export function scanTag(b, o, pos, p, hi, lo, depth, end) {
     // A tag is a depth level, checked before its number is looked at.
     if (depth >= o[O_MAX_DEPTH]) {
         return fail(o, pos, CODE_DEPTH);
@@ -289,29 +289,29 @@ export function scanTag(b, o, pos, p, hi, lo, depth) {
         return fail(o, pos, CODE_TAG);
     }
     if ((lo === 2) || (lo === 3)) {
-        return scanBignum(b, o, pos, p);
+        return scanBignum(b, o, pos, p, end);
     }
     if (lo === 4) {
-        return scanDecimal(b, o, pos, p, depth);
+        return scanDecimal(b, o, pos, p, depth, end);
     }
     if (lo === 40) {
-        return scanNdarray(b, o, pos, p, depth);
+        return scanNdarray(b, o, pos, p, depth, end);
     }
     const size = typedSize(lo);
     if (size === 0) {
         return fail(o, pos, CODE_TAG);
     }
-    return scanTyped(b, o, pos, p, lo, size);
+    return scanTyped(b, o, pos, p, lo, size, end);
 }
 
-export function item(b, o, pos, depth) {
+export function item(b, o, pos, depth, end) {
     // One data item at pos (cbor.mjs `item`): counted first, then its head.
     const it = o[O_ITEMS] + 1;
     o[O_ITEMS] = it;
     if (it > o[O_MAX_ITEMS]) {
         return fail(o, pos, CODE_TOO_MANY_ITEMS);
     }
-    if (pos >= b.length) {
+    if (pos >= end) {
         return fail(o, pos, CODE_TRUNCATED);
     }
     const ib = b[pos];
@@ -323,10 +323,10 @@ export function item(b, o, pos, depth) {
     if (ai >= 24) {
         if (major === 7) {
             if ((ai >= 25) && (ai <= 27)) {
-                return scanFloat(b, o, pos, ai);
+                return scanFloat(b, o, pos, ai, end);
             }
         }
-        p = readArg(b, o, pos, ai);
+        p = readArg(b, o, pos, ai, end);
         if (p < 0) {
             return p;
         }
@@ -337,15 +337,15 @@ export function item(b, o, pos, depth) {
         case 0: case 1:
             return p;
         case 2:
-            return takeLen(b, o, pos, p, hi, lo);
+            return takeLen(o, pos, p, hi, lo, end);
         case 3:
-            return scanText(b, o, pos, p, hi, lo);
+            return scanText(b, o, pos, p, hi, lo, end);
         case 4:
-            return scanArray(b, o, pos, p, hi, lo, depth);
+            return scanArray(b, o, pos, p, hi, lo, depth, end);
         case 5:
-            return scanMap(b, o, pos, p, hi, lo, depth);
+            return scanMap(b, o, pos, p, hi, lo, depth, end);
         case 6:
-            return scanTag(b, o, pos, p, hi, lo, depth);
+            return scanTag(b, o, pos, p, hi, lo, depth, end);
         default:
             return scanSimple(o, pos, ai);
     }
@@ -386,7 +386,7 @@ export function scan(b, o) {
             return -fail(o, 0, CODE_NOT_MAP);
         }
     }
-    const r = item(b, o, 0, 0);
+    const r = item(b, o, 0, 0, n);
     if (r < 0) {
         return -r;
     }

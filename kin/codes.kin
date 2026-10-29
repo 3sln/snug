@@ -30,6 +30,8 @@
 
 ;; The options / scratch array. Slots 0..5 are INPUT (set them with
 ;; `snug.cbor.scan/scan-options`); 6..7 are OUTPUT; 8..10 are scratch.
+;; FROZEN: docs/program.md §12 makes these 16 words the first 16 of the VM's
+;; scratch, as they are; a change here is a Program format change (D025).
 (defconst ^:pub ^I32 O_TOP 0)
 (defconst ^:pub ^I32 O_COSE 1)
 (defconst ^:pub ^I32 O_MAX_BYTES 2)

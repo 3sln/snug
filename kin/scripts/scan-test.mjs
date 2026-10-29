@@ -20,6 +20,9 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { decode, encode, CBORFault, BindleDecimal, NDArray } from '../../bench/baseline/cbor-3sln.mjs';
 import { scan, scanOptions, errorOffset, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+// The hand-written P1.4 yardstick is held to the same arbiter, so the
+// benchmark compares two correct scanners.
+import { scanHand } from '../../bench/scan-hand.mjs';
 
 const [rustBin, mutArg, seedArg] = process.argv.slice(2);
 const MUTATIONS = Number(mutArg ?? 30000), SEED = Number(seedArg ?? 1);
@@ -318,6 +321,12 @@ for (const c of cases) {
   if ((g.code === 0) !== (g.offset === -1)) fail(`${c.label}: JS offset ${g.offset} with code ${g.code}`);
 }
 const tJs = performance.now() - t0;
+let handOk = 0;
+for (const c of cases) {
+  const h = codeName(scanHand(c.bytes, c.opt));
+  if (h !== c.want) fail(`${c.label} [${hex(c.bytes).slice(0, 80)}] ${JSON.stringify(c.opt)}: hand-written JS ${h}, cbor.mjs ${c.want}`);
+  else handOk++;
+}
 
 // JS never reads out of bounds: re-run cases with the input behind a Proxy
 // that throws on any index read outside 0..length-1 (an out-of-bounds read of
@@ -357,10 +366,32 @@ if (rustBin) {
   });
   rustLine = `  ${agree === cases.length ? 'ok  ' : 'FAIL'} Rust (debug, overflow checks on): ${agree}/${cases.length} cases with cbor.mjs's code and JS's offset, no panic (${(tRs / 1000).toFixed(1)} s)`;
 }
+// The wasm build (kin/scripts/wasm-build), when given: the same cases through
+// the same kin source compiled Rust -> wasm32, code and offset.
+let wasmLine = '  SKIP wasm (SNUG_SCAN_WASM not set)';
+if (process.env.SNUG_SCAN_WASM) {
+  const { instance } = await WebAssembly.instantiate(readFileSync(process.env.SNUG_SCAN_WASM));
+  const ex = instance.exports, ptr = ex.snug_buf(), cap = ex.snug_cap();
+  let agree = 0, tried = 0;
+  cases.forEach((c, i) => {
+    if (c.bytes.length > cap) return;
+    tried++;
+    new Uint8Array(ex.memory.buffer, ptr, cap).set(c.bytes);
+    const code = ex.snug_scan(c.bytes.length, c.opt.top === 'any' ? 1 : 0, c.opt.cose ? 1 : 0, clamp(c.opt.maxBytes),
+      clamp(c.opt.maxDepth), clamp(c.opt.maxEntries), clamp(c.opt.maxItems));
+    const off = ex.snug_err();
+    if (codeName(code) !== c.want) fail(`${c.label}: wasm ${codeName(code)}, cbor.mjs ${c.want}`);
+    else if (code !== js[i].code || off !== js[i].offset) fail(`${c.label}: JS ${js[i].code}@${js[i].offset}, wasm ${code}@${off}`);
+    else agree++;
+  });
+  wasmLine = `  ${agree === tried ? 'ok  ' : 'FAIL'} wasm (release, Rust -> wasm32): ${agree}/${tried} cases with cbor.mjs's code and JS's offset`;
+}
 console.log(`  cases: ${nVectors} vectors (${profile.accept.length} accept + ${profile.refuse.length} refuse profile, ${oracle.cases.length} cborg oracle), ${nFixed} fixed edge cases, ${MUTATIONS} seeded mutations (seed ${SEED})`);
 console.log(`  expected codes: ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 console.log(`  ${fails ? 'FAIL' : 'ok  '} JS: ${cases.length - js.filter((g, i) => g.name !== cases[i].want).length}/${cases.length} cases with cbor.mjs's code (${(tJs / 1000).toFixed(1)} s incl. cbor.mjs)`);
+console.log(`  ${handOk === cases.length ? 'ok  ' : 'FAIL'} bench/scan-hand.mjs (the P1.4 yardstick): ${handOk}/${cases.length} cases with cbor.mjs's code`);
 console.log(`  ${fails ? 'FAIL' : 'ok  '} JS bounds: ${guarded} cases re-run with a throwing out-of-bounds trap on the input`);
 console.log(rustLine);
+console.log(wasmLine);
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
 console.log('  ok   generated JS and Rust agree with cbor.mjs on every case');

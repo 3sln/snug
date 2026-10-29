@@ -33,10 +33,10 @@
 
 ;; ------------------------------------------------------------- leaves
 
-(defn ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai]
+(defn ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
   (comment "A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then"
            "`non_shortest` (cbor.mjs `simple`).")
-  (let [left (- (blen b) (+ pos 1))
+  (let [left (- end (+ pos 1))
         ^:mut c 0
         ^:mut w 0]
     (if (== ai 25)
@@ -60,22 +60,22 @@
   (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
   (return (fail o pos CODE_SIMPLE)))
 
-(defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo]
-  (let [end (take-len b o pos p hi lo)]
-    (if (< end 0) (return end))
-    (let [bad (utf8-invalid-at b p end)]
+(defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
+  (let [stop (take-len o pos p hi lo end)]
+    (if (< stop 0) (return stop))
+    (let [bad (utf8-invalid-at b p stop)]
       (if (>= bad 0) (return (fail o bad CODE_TEXT)))
-      (return end))))
+      (return stop))))
 
 ;; ------------------------------------------------------------- containers
 
-(defn ^I32 scan-array [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth]
-  (let [r (enter-container b o pos p hi lo depth 0)
+(defn ^I32 scan-array [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
+  (let [r (enter-container o pos p hi lo depth 0 end)
         ^:mut q p
         inner (+ depth 1)]
     (if (< r 0) (return r))
     (for [^I32 _i 0 lo]
-      (set q (item b o q inner))
+      (set q (item b o q inner end))
       (if (< q 0) (return q)))
     (return q)))
 
@@ -90,13 +90,13 @@
     (if (== major 0) (return (and (>= hi 0) (<= hi top))))
     (return (and (>= hi 0) (or (< hi top) (and (== hi top) (!= lo (neg 1))))))))
 
-(defn ^I32 scan-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth]
+(defn ^I32 scan-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (comment "Per pair: the key's major type is PEEKED (key_type) before the key is"
            "scanned; order and duplicates are decided after it, by its encoded bytes.")
-  (let [r (enter-container b o pos p hi lo depth 1)
+  (let [r (enter-container o pos p hi lo depth 1 end)
         cose (and (== depth 0) (!= (ia o O_COSE) 0))
         inner (+ depth 1)
-        n (blen b)
+        n end
         ^:mut q p
         ^:mut prev-start (neg 1)
         ^:mut prev-end (neg 1)]
@@ -107,7 +107,7 @@
         (let [km (ushr (u8 b start) 5)]
           (if (!= km 3)
             (if (not (and cose (<= km 1))) (return (fail o start CODE_KEY_TYPE))))
-          (set q (item b o start inner))
+          (set q (item b o start inner end))
           (if (< q 0) (return q))
           (if (<= km 1)
             (if (not (cose-label-ok b start km)) (return (fail o start CODE_KEY_TYPE))))
@@ -117,41 +117,41 @@
                   (if (> order 0) (return (fail o start CODE_KEY_ORDER))))))
           (set prev-start start)
           (set prev-end q)
-          (set q (item b o q inner))
+          (set q (item b o q inner end))
           (if (< q 0) (return q)))))
     (return q)))
 
 ;; ------------------------------------------------------------- tags
 
-(defn ^I32 scan-bignum [^Bytes b ^Ints o ^I32 pos ^I32 p]
+(defn ^I32 scan-bignum [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 end]
   (comment "Tags 2/3: a byte string (its head may fail first) of 9..128 bytes with no"
            "leading zero. The content is not an item.")
-  (let [end (bytes-content b o p CODE_BIGNUM)]
-    (if (< end 0) (return end))
+  (let [stop (bytes-content b o p CODE_BIGNUM end)]
+    (if (< stop 0) (return stop))
     (let [cs (ia o O_CSTART)
-          len (- end cs)]
+          len (- stop cs)]
       (if (or (< len 9) (== (u8 b cs) 0)) (return (fail o pos CODE_BIGNUM)))
       (if (> len MAX_BIGNUM_BYTES) (return (fail o pos CODE_BIGNUM)))
-      (return end))))
+      (return stop))))
 
-(defn ^I32 scan-typed [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 tag ^I32 size]
+(defn ^I32 scan-typed [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 tag ^I32 size ^I32 end]
   (comment "An RFC 8746 little-endian typed array: a byte string whose length is a"
            "multiple of the element size; no NaN in float arrays (-0 and +-inf are"
            "fine there). The content is not an item.")
-  (let [end (bytes-content b o p CODE_TYPED_ARRAY)]
-    (if (< end 0) (return end))
+  (let [stop (bytes-content b o p CODE_TYPED_ARRAY end)]
+    (if (< stop 0) (return stop))
     (let [cs (ia o O_CSTART)
           ^:mut i cs]
-      (if (!= (rem (- end cs) size) 0) (return (fail o pos CODE_TYPED_ARRAY)))
+      (if (!= (rem (- stop cs) size) 0) (return (fail o pos CODE_TYPED_ARRAY)))
       (if (== tag 84)
-        (while (< i end)
+        (while (< i stop)
           (let [h1 (u8 b (+ i 1))]
             (if (== (bit-and h1 124) 124)
               (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0)
                 (return (fail o i CODE_TYPED_ARRAY)))))
           (set i (+ i 2))))
       (if (== tag 85)
-        (while (< i end)
+        (while (< i stop)
           (let [s3 (u8 b (+ i 3))
                 s2 (u8 b (+ i 2))]
             (if (and (== (bit-and s3 127) 127) (>= s2 128))
@@ -159,7 +159,7 @@
                 (return (fail o i CODE_TYPED_ARRAY)))))
           (set i (+ i 4))))
       (if (== tag 86)
-        (while (< i end)
+        (while (< i stop)
           (let [t7 (u8 b (+ i 7))
                 t6 (u8 b (+ i 6))]
             (if (and (== (bit-and t7 127) 127) (>= t6 240))
@@ -169,65 +169,65 @@
                        0)
                 (return (fail o i CODE_TYPED_ARRAY)))))
           (set i (+ i 8))))
-      (return end))))
+      (return stop))))
 
-(defn ^I32 scan-pair [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 shape-code]
+(defn ^I32 scan-pair [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 shape-code ^I32 end]
   (comment "The `[x, y]` content of tag 4 or tag 40, decoded as cbor.mjs's item()"
            "would: 0x82 demanded first (else shape-code), then the inner array is an"
            "item (counted, a depth level, its length checked), then both elements."
            "Answers the end; the second element's start goes in o[O_LO].")
-  (if (>= p (blen b)) (return (fail o p CODE_TRUNCATED)))
+  (if (>= p end) (return (fail o p CODE_TRUNCATED)))
   (if (!= (u8 b p) (hex 130)) (return (fail o pos shape-code)))
   (let [c (count-item o p)]
     (if (< c 0) (return c)))
-  (let [r (enter-container b o p (+ p 1) 0 2 (+ depth 1) 0)]
+  (let [r (enter-container o p (+ p 1) 0 2 (+ depth 1) 0 end)]
     (if (< r 0) (return r)))
-  (let [^I32 q1 (item b o (+ p 1) (+ depth 2))]
+  (let [^I32 q1 (item b o (+ p 1) (+ depth 2) end)]
     (if (< q1 0) (return q1))
-    (let [^I32 q2 (item b o q1 (+ depth 2))]
+    (let [^I32 q2 (item b o q1 (+ depth 2) end)]
       (if (< q2 0) (return q2))
       (iset o O_LO q1)
       (return q2))))
 
-(defn ^I32 scan-decimal [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth]
+(defn ^I32 scan-decimal [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 end]
   (comment "Tag 4: [exponent, mantissa], exponent -1024..-1, mantissa an integer or"
            "bignum, non-zero, not divisible by 10 -- checked after both decode.")
-  (let [end (scan-pair b o pos p depth CODE_DECIMAL)]
-    (if (< end 0) (return end))
+  (let [stop (scan-pair b o pos p depth CODE_DECIMAL end)]
+    (if (< stop 0) (return stop))
     (let [q1 (ia o O_LO)]
       (if (not (exponent-ok b (+ p 1))) (return (fail o pos CODE_DECIMAL)))
-      (if (not (mantissa-ok b q1 end)) (return (fail o pos CODE_DECIMAL)))
-      (return end))))
+      (if (not (mantissa-ok b q1 stop)) (return (fail o pos CODE_DECIMAL)))
+      (return stop))))
 
-(defn ^I32 scan-ndarray [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth]
+(defn ^I32 scan-ndarray [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 end]
   (comment "Tag 40: [shape, data], shape 1..8 positive integers whose product is the"
            "element count, data a typed array or an array -- checked after both decode.")
-  (let [end (scan-pair b o pos p depth CODE_NDARRAY)]
-    (if (< end 0) (return end))
+  (let [stop (scan-pair b o pos p depth CODE_NDARRAY end)]
+    (if (< stop 0) (return stop))
     (let [count (data-count b (ia o O_LO))]
       (if (< count 0) (return (fail o pos CODE_NDARRAY)))
       (if (not (shape-ok b (+ p 1) count)) (return (fail o pos CODE_NDARRAY)))
-      (return end))))
+      (return stop))))
 
-(defn ^I32 scan-tag [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth]
+(defn ^I32 scan-tag [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (comment "A tag is a depth level, checked before its number is looked at.")
   (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
   (if (!= hi 0) (return (fail o pos CODE_TAG)))
-  (if (or (== lo 2) (== lo 3)) (return (scan-bignum b o pos p)))
-  (if (== lo 4) (return (scan-decimal b o pos p depth)))
-  (if (== lo 40) (return (scan-ndarray b o pos p depth)))
+  (if (or (== lo 2) (== lo 3)) (return (scan-bignum b o pos p end)))
+  (if (== lo 4) (return (scan-decimal b o pos p depth end)))
+  (if (== lo 40) (return (scan-ndarray b o pos p depth end)))
   (let [size (typed-size lo)]
     (if (== size 0) (return (fail o pos CODE_TAG)))
-    (return (scan-typed b o pos p lo size))))
+    (return (scan-typed b o pos p lo size end))))
 
 ;; ------------------------------------------------------------- the item
 
-(defn ^I32 item [^Bytes b ^Ints o ^I32 pos ^I32 depth]
+(defn ^I32 item [^Bytes b ^Ints o ^I32 pos ^I32 depth ^I32 end]
   (comment "One data item at pos (cbor.mjs `item`): counted first, then its head.")
   (let [it (+ (ia o O_ITEMS) 1)]
     (iset o O_ITEMS it)
     (if (> it (ia o O_MAX_ITEMS)) (return (fail o pos CODE_TOO_MANY_ITEMS))))
-  (if (>= pos (blen b)) (return (fail o pos CODE_TRUNCATED)))
+  (if (>= pos end) (return (fail o pos CODE_TRUNCATED)))
   (let [ib (u8 b pos)
         major (ushr ib 5)
         ai (bit-and ib 31)
@@ -236,18 +236,18 @@
         ^:mut p (+ pos 1)]
     (if (>= ai 24)
       (do (if (== major 7)
-            (if (and (>= ai 25) (<= ai 27)) (return (scan-float b o pos ai))))
-          (set p (read-arg b o pos ai))
+            (if (and (>= ai 25) (<= ai 27)) (return (scan-float b o pos ai end))))
+          (set p (read-arg b o pos ai end))
           (if (< p 0) (return p))
           (set hi (ia o O_HI))
           (set lo (ia o O_LO))))
     (case major
       [0 1] p
-      [2] (take-len b o pos p hi lo)
-      [3] (scan-text b o pos p hi lo)
-      [4] (scan-array b o pos p hi lo depth)
-      [5] (scan-map b o pos p hi lo depth)
-      [6] (scan-tag b o pos p hi lo depth)
+      [2] (take-len o pos p hi lo end)
+      [3] (scan-text b o pos p hi lo end)
+      [4] (scan-array b o pos p hi lo depth end)
+      [5] (scan-map b o pos p hi lo depth end)
+      [6] (scan-tag b o pos p hi lo depth end)
       :else (scan-simple o pos ai))))
 
 ;; ------------------------------------------------------------- the API
@@ -280,7 +280,7 @@
     (if (> n (ia o O_MAX_BYTES)) (return (neg (fail o 0 CODE_TOO_LARGE))))
     (if (== (ia o O_TOP) 0)
       (if (or (== n 0) (!= (ushr (u8 b 0) 5) 5)) (return (neg (fail o 0 CODE_NOT_MAP)))))
-    (let [r (item b o 0 0)]
+    (let [r (item b o 0 0 n)]
       (if (< r 0) (return (neg r)))
       (if (!= r n) (return (neg (fail o r CODE_TRAILING))))
       (return 0))))

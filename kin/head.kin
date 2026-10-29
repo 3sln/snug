@@ -7,7 +7,7 @@
 (ns snug.cbor.head
   (:require [kin.lang :refer [defn let return set if do comment]]
             [snug.lang :refer [I32 Bool Bytes Ints + - neg shl bit-or bit-and
-                               ushr < > <= >= == != or u8 blen ia iset]]
+                               ushr < > <= >= == != or u8 ia iset]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_NON_SHORTEST
                                      CODE_INDEFINITE CODE_MALFORMED
                                      CODE_TOO_MANY_ITEMS CODE_DEPTH
@@ -29,49 +29,45 @@
   (return (bit-or (bit-or (shl (u8 b p) 24) (shl (u8 b (+ p 1)) 16))
                   (bit-or (shl (u8 b (+ p 2)) 8) (u8 b (+ p 3))))))
 
-(defn ^:pub ^I32 read-arg [^Bytes b ^Ints o ^I32 pos ^I32 ai]
+(defn ^:pub ^I32 read-arg [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
   (comment "The argument of the head at pos, whose additional information ai is"
            "24 or more: into o[O_HI], o[O_LO]; answers the position after the head."
-           "Shortest form is enforced here; 28..30 are malformed, 31 indefinite."
-           "The caller has checked that b[pos] exists.")
-  (let [left (- (blen b) (+ pos 1))]
-    (if (== ai 24)
-      (do (if (< left 1) (return (fail o pos CODE_TRUNCATED)))
-          (let [v1 (u8 b (+ pos 1))]
-            (if (< v1 24) (return (fail o pos CODE_NON_SHORTEST)))
-            (iset o O_HI 0)
-            (iset o O_LO v1)
-            (return (+ pos 2)))))
-    (if (== ai 25)
-      (do (if (< left 2) (return (fail o pos CODE_TRUNCATED)))
-          (let [v2 (be16 b (+ pos 1))]
-            (if (< v2 256) (return (fail o pos CODE_NON_SHORTEST)))
-            (iset o O_HI 0)
-            (iset o O_LO v2)
-            (return (+ pos 3)))))
-    (if (== ai 26)
-      (do (if (< left 4) (return (fail o pos CODE_TRUNCATED)))
-          (let [v4 (be32 b (+ pos 1))]
-            (if (== (ushr v4 16) 0) (return (fail o pos CODE_NON_SHORTEST)))
-            (iset o O_HI 0)
-            (iset o O_LO v4)
-            (return (+ pos 5)))))
-    (if (== ai 27)
-      (do (if (< left 8) (return (fail o pos CODE_TRUNCATED)))
-          (let [hi8 (be32 b (+ pos 1))
-                lo8 (be32 b (+ pos 5))]
-            (if (== hi8 0) (return (fail o pos CODE_NON_SHORTEST)))
-            (iset o O_HI hi8)
-            (iset o O_LO lo8)
-            (return (+ pos 9)))))
-    (if (== ai 31) (return (fail o pos CODE_INDEFINITE)))
-    (return (fail o pos CODE_MALFORMED))))
+           "28..30 are malformed and 31 indefinite (before anything is read); then"
+           "the 1/2/4/8 argument bytes must remain; then the value must need its"
+           "width (shortest form). The caller has checked that b[pos] exists."
+           "Kept small on purpose: under V8's inlining limit, so it inlines into"
+           "the item walk (P1.4).")
+  (if (> ai 27)
+    (do (if (== ai 31) (return (fail o pos CODE_INDEFINITE)))
+        (return (fail o pos CODE_MALFORMED))))
+  (let [p (+ pos 1)
+        w (shl 1 (- ai 24))]
+    (if (> w (- end p)) (return (fail o pos CODE_TRUNCATED)))
+    (if (== w 8)
+      (do (let [h8 (be32 b p)]
+            (if (== h8 0) (return (fail o pos CODE_NON_SHORTEST)))
+            (iset o O_HI h8)
+            (iset o O_LO (be32 b (+ p 4)))
+            (return (+ p 8)))))
+    (let [^:mut v (u8 b p)
+          ^:mut short false]
+      (if (== w 1) (set short (< v 24)))
+      (if (== w 2)
+        (do (set v (bit-or (shl v 8) (u8 b (+ p 1))))
+            (set short (< v 256))))
+      (if (== w 4)
+        (do (set v (be32 b p))
+            (set short (== (ushr v 16) 0))))
+      (if short (return (fail o pos CODE_NON_SHORTEST)))
+      (iset o O_HI 0)
+      (iset o O_LO v)
+      (return (+ p w)))))
 
-(defn ^:pub ^I32 take-len [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo]
+(defn ^:pub ^I32 take-len [^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
   (comment "The end of a payload of hi:lo bytes starting at p, or truncated --"
            "checked against what remains BEFORE anything else (cbor.mjs `length`).")
   (if (or (!= hi 0) (< lo 0)) (return (fail o pos CODE_TRUNCATED)))
-  (if (> lo (- (blen b) p)) (return (fail o pos CODE_TRUNCATED)))
+  (if (> lo (- end p)) (return (fail o pos CODE_TRUNCATED)))
   (return (+ p lo)))
 
 (defn ^:pub ^I32 count-item [^Ints o ^I32 pos]
@@ -81,35 +77,35 @@
     (if (> it (ia o O_MAX_ITEMS)) (return (fail o pos CODE_TOO_MANY_ITEMS)))
     (return 0)))
 
-(defn ^:pub ^I32 enter-container [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo
-                                  ^I32 depth ^I32 pairs]
+(defn ^:pub ^I32 enter-container [^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo
+                                  ^I32 depth ^I32 pairs ^I32 end]
   (comment "An array (pairs 0) or map (pairs 1) of hi:lo entries whose head ends at"
            "p, at depth: depth bound, then the declared length against what remains"
            "(n bytes per entry, 2n per pair), then the entry bound -- cbor.mjs's order.")
   (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
   (if (or (!= hi 0) (< lo 0)) (return (fail o pos CODE_TRUNCATED)))
-  (let [left (- (blen b) p)]
+  (let [left (- end p)]
     (if (== pairs 0)
       (if (> lo left) (return (fail o pos CODE_TRUNCATED)))
       (if (> lo (ushr left 1)) (return (fail o pos CODE_TRUNCATED)))))
   (if (> lo (ia o O_MAX_ENTRIES)) (return (fail o pos CODE_TOO_MANY_ENTRIES)))
   (return 0))
 
-(defn ^:pub ^I32 bytes-content [^Bytes b ^Ints o ^I32 p ^I32 not-bytes]
+(defn ^:pub ^I32 bytes-content [^Bytes b ^Ints o ^I32 p ^I32 not-bytes ^I32 end]
   (comment "A tag's byte-string content at p (cbor.mjs `bytesContent`): NOT counted"
            "as an item and not a depth level. A non-byte-string is refused with"
            "not-bytes. Answers the content end; its start goes in o[O_CSTART].")
-  (if (>= p (blen b)) (return (fail o p CODE_TRUNCATED)))
+  (if (>= p end) (return (fail o p CODE_TRUNCATED)))
   (let [ib (u8 b p)
         ai (bit-and ib 31)]
     (if (!= (ushr ib 5) 2) (return (fail o p not-bytes)))
     (if (< ai 24)
-      (do (let [e1 (take-len b o p (+ p 1) 0 ai)]
+      (do (let [e1 (take-len o p (+ p 1) 0 ai end)]
             (if (>= e1 0) (iset o O_CSTART (+ p 1)))
             (return e1))))
-    (let [q (read-arg b o p ai)]
+    (let [q (read-arg b o p ai end)]
       (if (< q 0) (return q))
-      (let [e2 (take-len b o p q (ia o O_HI) (ia o O_LO))]
+      (let [e2 (take-len o p q (ia o O_HI) (ia o O_LO) end)]
         (if (>= e2 0) (iset o O_CSTART q))
         (return e2)))))
 

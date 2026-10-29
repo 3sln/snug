@@ -13,4 +13,6 @@ crate=.cache/snug-rs
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin scan 2>&1); then
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi
+# And the wasm build, when its toolchain is present (otherwise SKIP, loudly).
+if wasm=$(./kin/scripts/wasm-build speed 2>/dev/null); then export SNUG_SCAN_WASM="$wasm"; fi
 node kin/scripts/scan-test.mjs "$crate/target/debug/scan" "$@"

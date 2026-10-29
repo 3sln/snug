@@ -16,73 +16,61 @@ pub fn be32(b: &[u8], p: i32) -> i32 {
     // The big-endian 32-bit word at p as an i32 bit pattern (caller checked p + 4 <= length).
     return (((b[(p) as usize] as i32) << 24) | ((b[(p + 1) as usize] as i32) << 16)) | (((b[(p + 2) as usize] as i32) << 8) | (b[(p + 3) as usize] as i32));
 }
-pub fn read_arg(b: &[u8], o: &mut [i32], pos: i32, ai: i32) -> i32 {
+pub fn read_arg(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     // The argument of the head at pos, whose additional information ai is
     // 24 or more: into o[O_HI], o[O_LO]; answers the position after the head.
-    // Shortest form is enforced here; 28..30 are malformed, 31 indefinite.
-    // The caller has checked that b[pos] exists.
-    let left: i32 = (b.len() as i32) - (pos + 1);
-    if ai == 24 {
-        if left < 1 {
-            return fail(o, pos, CODE_TRUNCATED);
+    // 28..30 are malformed and 31 indefinite (before anything is read); then
+    // the 1/2/4/8 argument bytes must remain; then the value must need its
+    // width (shortest form). The caller has checked that b[pos] exists.
+    // Kept small on purpose: under V8's inlining limit, so it inlines into
+    // the item walk (P1.4).
+    if ai > 27 {
+        if ai == 31 {
+            return fail(o, pos, CODE_INDEFINITE);
         }
-        let v1: i32 = b[(pos + 1) as usize] as i32;
-        if v1 < 24 {
+        return fail(o, pos, CODE_MALFORMED);
+    }
+    let p: i32 = pos + 1;
+    let w: i32 = 1 << (ai - 24);
+    if w > (end - p) {
+        return fail(o, pos, CODE_TRUNCATED);
+    }
+    if w == 8 {
+        let h8: i32 = be32(b, p);
+        if h8 == 0 {
             return fail(o, pos, CODE_NON_SHORTEST);
         }
-        o[(O_HI) as usize] = 0;
-        o[(O_LO) as usize] = v1;
-        return pos + 2;
+        o[(O_HI) as usize] = h8;
+        o[(O_LO) as usize] = be32(b, p + 4);
+        return p + 8;
     }
-    if ai == 25 {
-        if left < 2 {
-            return fail(o, pos, CODE_TRUNCATED);
-        }
-        let v2: i32 = be16(b, pos + 1);
-        if v2 < 256 {
-            return fail(o, pos, CODE_NON_SHORTEST);
-        }
-        o[(O_HI) as usize] = 0;
-        o[(O_LO) as usize] = v2;
-        return pos + 3;
+    let mut v: i32 = b[(p) as usize] as i32;
+    let mut short: bool = false;
+    if w == 1 {
+        short = v < 24;
     }
-    if ai == 26 {
-        if left < 4 {
-            return fail(o, pos, CODE_TRUNCATED);
-        }
-        let v4: i32 = be32(b, pos + 1);
-        if (i32::cast_unsigned(v4) >> 16).cast_signed() == 0 {
-            return fail(o, pos, CODE_NON_SHORTEST);
-        }
-        o[(O_HI) as usize] = 0;
-        o[(O_LO) as usize] = v4;
-        return pos + 5;
+    if w == 2 {
+        v = (v << 8) | (b[(p + 1) as usize] as i32);
+        short = v < 256;
     }
-    if ai == 27 {
-        if left < 8 {
-            return fail(o, pos, CODE_TRUNCATED);
-        }
-        let hi8: i32 = be32(b, pos + 1);
-        let lo8: i32 = be32(b, pos + 5);
-        if hi8 == 0 {
-            return fail(o, pos, CODE_NON_SHORTEST);
-        }
-        o[(O_HI) as usize] = hi8;
-        o[(O_LO) as usize] = lo8;
-        return pos + 9;
+    if w == 4 {
+        v = be32(b, p);
+        short = (i32::cast_unsigned(v) >> 16).cast_signed() == 0;
     }
-    if ai == 31 {
-        return fail(o, pos, CODE_INDEFINITE);
+    if short {
+        return fail(o, pos, CODE_NON_SHORTEST);
     }
-    return fail(o, pos, CODE_MALFORMED);
+    o[(O_HI) as usize] = 0;
+    o[(O_LO) as usize] = v;
+    return p + w;
 }
-pub fn take_len(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32) -> i32 {
+pub fn take_len(o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, end: i32) -> i32 {
     // The end of a payload of hi:lo bytes starting at p, or truncated --
     // checked against what remains BEFORE anything else (cbor.mjs `length`).
     if (hi != 0) || (lo < 0) {
         return fail(o, pos, CODE_TRUNCATED);
     }
-    if lo > ((b.len() as i32) - p) {
+    if lo > (end - p) {
         return fail(o, pos, CODE_TRUNCATED);
     }
     return p + lo;
@@ -96,7 +84,7 @@ pub fn count_item(o: &mut [i32], pos: i32) -> i32 {
     }
     return 0;
 }
-pub fn enter_container(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, pairs: i32) -> i32 {
+pub fn enter_container(o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, pairs: i32, end: i32) -> i32 {
     // An array (pairs 0) or map (pairs 1) of hi:lo entries whose head ends at
     // p, at depth: depth bound, then the declared length against what remains
     // (n bytes per entry, 2n per pair), then the entry bound -- cbor.mjs's order.
@@ -106,7 +94,7 @@ pub fn enter_container(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
     if (hi != 0) || (lo < 0) {
         return fail(o, pos, CODE_TRUNCATED);
     }
-    let left: i32 = (b.len() as i32) - p;
+    let left: i32 = end - p;
     if pairs == 0 {
         if lo > left {
             return fail(o, pos, CODE_TRUNCATED);
@@ -119,11 +107,11 @@ pub fn enter_container(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
     }
     return 0;
 }
-pub fn bytes_content(b: &[u8], o: &mut [i32], p: i32, not_bytes: i32) -> i32 {
+pub fn bytes_content(b: &[u8], o: &mut [i32], p: i32, not_bytes: i32, end: i32) -> i32 {
     // A tag's byte-string content at p (cbor.mjs `bytesContent`): NOT counted
     // as an item and not a depth level. A non-byte-string is refused with
     // not-bytes. Answers the content end; its start goes in o[O_CSTART].
-    if p >= (b.len() as i32) {
+    if p >= end {
         return fail(o, p, CODE_TRUNCATED);
     }
     let ib: i32 = b[(p) as usize] as i32;
@@ -132,17 +120,17 @@ pub fn bytes_content(b: &[u8], o: &mut [i32], p: i32, not_bytes: i32) -> i32 {
         return fail(o, p, not_bytes);
     }
     if ai < 24 {
-        let e1: i32 = take_len(b, o, p, p + 1, 0, ai);
+        let e1: i32 = take_len(o, p, p + 1, 0, ai, end);
         if e1 >= 0 {
             o[(O_CSTART) as usize] = p + 1;
         }
         return e1;
     }
-    let q: i32 = read_arg(b, o, p, ai);
+    let q: i32 = read_arg(b, o, p, ai, end);
     if q < 0 {
         return q;
     }
-    let e2: i32 = take_len(b, o, p, q, o[(O_HI) as usize], o[(O_LO) as usize]);
+    let e2: i32 = take_len(o, p, q, o[(O_HI) as usize], o[(O_LO) as usize], end);
     if e2 >= 0 {
         o[(O_CSTART) as usize] = q;
     }

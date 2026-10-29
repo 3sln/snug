@@ -74,6 +74,14 @@ pub(crate) fn fill_squares(out: &mut [i32], at: i32) -> i32 {
     }
     return n;
 }
+pub(crate) fn sum_range(a: &[i32], from: i32, to: i32) -> i32 {
+    // Sum a[from..to) of a READ-ONLY arena (an Ints passes as an IntsR).
+    let mut acc: i32 = 0;
+    for i in from..to {
+        acc += a[(i) as usize];
+    }
+    return acc;
+}
 pub(crate) fn both_small(a: i32, b: i32) -> bool {
     return (a < 10) && (!((b < 0) || (b > 9)));
 }
@@ -134,5 +142,8 @@ pub fn selftest(out: &mut [i32], b: &[u8]) -> i32 {
     k += 1;
     let w: i32 = fill_squares(out, k);
     k += w;
+    let sq: i32 = sum_range(out, k - 8, k);
+    out[(k) as usize] = sq;
+    k += 1;
     return k;
 }
