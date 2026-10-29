@@ -43,7 +43,7 @@
   [c home nm]
   (when (seq nm)
     (kl/need! c {:qualified (str (kt/unit-import home) "#" nm)
-                 :import home :name nm}))
+                 :import home :import-name nm}))
   nm)
 
 (defn- js-emit
@@ -57,16 +57,25 @@
     (kt/with-unit
       ctx (kt/unit-of ctx ns-name)
       (fn [needs]
-        (let [named (filter :name needs)
+        (let [named (filter :import-name needs)
               by (group-by (comp kt/unit-import :import) named)]
           (str/join
            (for [[path entries] (sort-by key by)]
-             (str "import { " (str/join ", " (sort (distinct (map :name entries))))
+             (str "import { " (str/join ", " (sort (distinct (map :import-name entries))))
                   " } from '" (relative here path) "';\n")))))
       (fn [inner]
-        (doseq [[i f] (map-indexed vector (kt/body-of forms))]
-          (when (pos? i) (kin/emit! inner "\n"))
-          (kin/statement! inner f))))))
+        (let [body (vec (kt/body-of forms))
+              ;; forms that belong to (or emit nothing before) the next one
+              glue? (fn [f] (and (seq? f) (symbol? (first f))
+                                 (contains? #{"doc" "declarefn" "declaretag" "declarename"}
+                                            (name (first f)))))]
+          (doseq [[i f] (map-indexed vector body)]
+            ;; A blank line between top-level forms, except after a `doc`
+            ;; block (it belongs to the form it precedes) or a forward
+            ;; declaration (it emits nothing in JS).
+            (when (and (pos? i) (not (glue? (nth body (dec i)))))
+              (kin/emit! inner "\n"))
+            (kin/statement! inner f)))))))
 
 (def targets
   {:js {:key :js :ext "mjs" :line-comment "//" :doc-comment "///"

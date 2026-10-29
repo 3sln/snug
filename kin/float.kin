@@ -1,0 +1,79 @@
+;; The profile's float rules as BIT TESTS on the encoded pattern (D009): no
+;; host float is ever made. A scalar float is refused (`float`) when it is NaN,
+;; an infinity, a zero of either sign, or an integer of magnitude at most
+;; 2^53 - 1; then (`non_shortest`) when a narrower width holds it exactly --
+;; float32 that float16 holds, float64 that float32 holds. cbor.mjs's order:
+;; `float` first.
+(ns snug.cbor.float
+  (:require [kin.lang :refer [defn let return if do comment]]
+            [snug.lang :refer [I32 Bool + - neg sar ushr bit-and
+                               < > <= >= == != and or hex]]
+            [snug.cbor.codes :refer [CODE_FLOAT CODE_NON_SHORTEST]]))
+
+(defn ^:pub ^Bool low-zero [^I32 x ^I32 k]
+  (comment "Are the low k bits (0..32) of x all zero?")
+  (if (== k 0) (return true))
+  (return (== (bit-and x (ushr (neg 1) (- 32 k))) 0)))
+
+(defn ^:pub ^Bool low-zero64 [^I32 hi ^I32 lo ^I32 k]
+  (comment "Are the low k bits (0..64) of the 64-bit pattern hi:lo all zero?")
+  (if (<= k 32) (return (low-zero lo k)))
+  (return (and (== lo 0) (low-zero hi (- k 32)))))
+
+(defn ^:pub ^I32 check-f16 [^I32 h]
+  (comment "A float16 pattern (16 bits): 0, or the refusal. Never non_shortest.")
+  (let [e (bit-and (sar h 10) 31)
+        f (bit-and h (hex 1023))]
+    (if (== e 31) (return CODE_FLOAT))
+    (if (== e 0)
+      (do (if (== f 0) (return CODE_FLOAT))
+          (return 0)))
+    (let [x (- e 15)]
+      (comment "Integral when the exponent covers the fraction bits; every float16"
+               "integer is below 2^53.")
+      (if (< x 0) (return 0))
+      (if (>= x 10) (return CODE_FLOAT))
+      (if (low-zero f (- 10 x)) (return CODE_FLOAT))
+      (return 0))))
+
+(defn ^:pub ^I32 check-f32 [^I32 w]
+  (comment "A float32 pattern: 0, or the refusal.")
+  (let [e (bit-and (sar w 23) 255)
+        m (bit-and w (hex 8388607))]
+    (if (== e 255) (return CODE_FLOAT))
+    (if (== e 0)
+      (do (if (== m 0) (return CODE_FLOAT))
+          (comment "Subnormal float32: not integral, and below float16's range.")
+          (return 0)))
+    (let [x (- e 127)]
+      (if (and (>= x 0) (<= x 52))
+        (if (or (>= x 23) (low-zero m (- 23 x))) (return CODE_FLOAT)))
+      (comment "Held by float16: a normal one (exponent -14..15, 10 fraction bits)"
+               "or a subnormal one (exponent -24..-15, a multiple of 2^-24).")
+      (if (and (>= x (neg 14)) (<= x 15))
+        (do (if (low-zero m 13) (return CODE_NON_SHORTEST))
+            (return 0)))
+      (if (and (>= x (neg 24)) (<= x (neg 15)))
+        (if (low-zero m (- (neg 1) x)) (return CODE_NON_SHORTEST)))
+      (return 0))))
+
+(defn ^:pub ^I32 check-f64 [^I32 hi ^I32 lo]
+  (comment "A float64 pattern as two halves: 0, or the refusal.")
+  (let [e (bit-and (sar hi 20) (hex 2047))
+        mh (bit-and hi (hex 1048575))]
+    (if (== e 2047) (return CODE_FLOAT))
+    (if (== e 0)
+      (do (if (and (== mh 0) (== lo 0)) (return CODE_FLOAT))
+          (comment "Subnormal float64: not integral, and below float32's range.")
+          (return 0)))
+    (let [x (- e 1023)]
+      (if (and (>= x 0) (<= x 52))
+        (if (low-zero64 mh lo (- 52 x)) (return CODE_FLOAT)))
+      (comment "Held by float32: a normal one (exponent -126..127, 23 fraction bits)"
+               "or a subnormal one (exponent -149..-127, a multiple of 2^-149).")
+      (if (and (>= x (neg 126)) (<= x 127))
+        (do (if (low-zero lo 29) (return CODE_NON_SHORTEST))
+            (return 0)))
+      (if (and (>= x (neg 149)) (<= x (neg 127)))
+        (if (low-zero64 mh lo (- (neg 97) x)) (return CODE_NON_SHORTEST)))
+      (return 0))))

@@ -1,0 +1,20 @@
+;; Map key order: RFC 8949 §4.2.1 bytewise lexicographic order of the ENCODED
+;; keys (shorter first when one is a prefix), which is cbor.mjs's
+;; `compareBytes` over the two key spans.
+(ns snug.cbor.keys
+  (:require [kin.lang :refer [defn let return set if while comment]]
+            [snug.lang :refer [I32 Bytes + - < == != u8]]))
+
+(defn ^:pub ^I32 compare-spans [^Bytes b ^I32 s1 ^I32 e1 ^I32 s2 ^I32 e2]
+  (comment "<0, 0 or >0 as b[s1..e1) sorts before, equal to or after b[s2..e2).")
+  (let [l1 (- e1 s1)
+        l2 (- e2 s2)
+        ^:mut m l1
+        ^:mut i 0]
+    (if (< l2 m) (set m l2))
+    (while (< i m)
+      (let [x (u8 b (+ s1 i))
+            y (u8 b (+ s2 i))]
+        (if (!= x y) (return (- x y)))
+        (set i (+ i 1))))
+    (return (- l1 l2))))

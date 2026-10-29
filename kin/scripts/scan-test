@@ -1,0 +1,16 @@
+#!/bin/sh
+# Every CBOR vector, fixed edge cases and seeded mutations through the
+# generated JS and the Rust build; codes must equal cbor.mjs's, and JS and
+# Rust must agree on the error offset too.   kin/scripts/scan-test [mutations] [seed]
+#
+# The Rust build is DEBUG (overflow checks on): the scanner must never panic,
+# and a broken no-overflow guarantee in the source shows up here as a panic.
+set -e
+cd "$(dirname "$0")/../.."
+./kin/scripts/emit > /dev/null
+crate=.cache/snug-rs
+./kin/scripts/rust-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin scan 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/scan-test.mjs "$crate/target/debug/scan" "$@"

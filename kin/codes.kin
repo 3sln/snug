@@ -1,0 +1,48 @@
+;; The CBOR profile refusal codes and the layout of the scanner's options /
+;; scratch array (`Ints o`). Codes are cbor.mjs's `CBORFault` codes, as
+;; integers; `snug.cbor.scan/code-name` maps them back to cbor.mjs's strings.
+;; A scanner function returns a position (>= 0) or the NEGATED code.
+(ns snug.cbor.codes
+  (:require [kin.lang :refer [defconst]]
+            [snug.lang :refer [I32]]))
+
+(defconst ^:pub ^I32 CODE_TRUNCATED 1)
+(defconst ^:pub ^I32 CODE_NON_SHORTEST 2)
+(defconst ^:pub ^I32 CODE_INDEFINITE 3)
+(defconst ^:pub ^I32 CODE_MALFORMED 4)
+(defconst ^:pub ^I32 CODE_KEY_TYPE 5)
+(defconst ^:pub ^I32 CODE_KEY_ORDER 6)
+(defconst ^:pub ^I32 CODE_DUPLICATE_KEY 7)
+(defconst ^:pub ^I32 CODE_TEXT 8)
+(defconst ^:pub ^I32 CODE_FLOAT 9)
+(defconst ^:pub ^I32 CODE_SIMPLE 10)
+(defconst ^:pub ^I32 CODE_TAG 11)
+(defconst ^:pub ^I32 CODE_BIGNUM 12)
+(defconst ^:pub ^I32 CODE_DECIMAL 13)
+(defconst ^:pub ^I32 CODE_TYPED_ARRAY 14)
+(defconst ^:pub ^I32 CODE_NDARRAY 15)
+(defconst ^:pub ^I32 CODE_TRAILING 16)
+(defconst ^:pub ^I32 CODE_DEPTH 17)
+(defconst ^:pub ^I32 CODE_TOO_MANY_ENTRIES 18)
+(defconst ^:pub ^I32 CODE_TOO_MANY_ITEMS 19)
+(defconst ^:pub ^I32 CODE_TOO_LARGE 20)
+(defconst ^:pub ^I32 CODE_NOT_MAP 21)
+
+;; The options / scratch array. Slots 0..5 are INPUT (set them with
+;; `snug.cbor.scan/scan-options`); 6..7 are OUTPUT; 8..10 are scratch.
+(defconst ^:pub ^I32 O_TOP 0)
+(defconst ^:pub ^I32 O_COSE 1)
+(defconst ^:pub ^I32 O_MAX_BYTES 2)
+(defconst ^:pub ^I32 O_MAX_DEPTH 3)
+(defconst ^:pub ^I32 O_MAX_ENTRIES 4)
+(defconst ^:pub ^I32 O_MAX_ITEMS 5)
+(defconst ^:pub ^I32 O_ERR_POS 6)
+(defconst ^:pub ^I32 O_ITEMS 7)
+(defconst ^:pub ^I32 O_HI 8)
+(defconst ^:pub ^I32 O_LO 9)
+(defconst ^:pub ^I32 O_CSTART 10)
+(defconst ^:pub ^I32 SCAN_OPTS_LEN 16)
+
+;; Profile bounds that are not options (cbor.mjs LIMITS).
+(defconst ^:pub ^I32 MAX_BIGNUM_BYTES 128)
+(defconst ^:pub ^I32 MAX_DIMENSIONS 8)

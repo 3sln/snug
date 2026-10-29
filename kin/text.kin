@@ -1,0 +1,59 @@
+;; UTF-8 validation exactly as cbor.mjs's text rule: the WHATWG fatal decoder
+;; (no overlongs, no surrogates, nothing past U+10FFFF, no truncated sequence)
+;; and then no noncharacter (U+FDD0..U+FDEF, U+xFFFE/U+xFFFF in every plane).
+;; Integers only: the code point is assembled from the bytes to test it.
+(ns snug.cbor.text
+  (:require [kin.lang :refer [defn let return set if while do comment]]
+            [snug.lang :refer [I32 Bytes + - neg shl bit-or bit-and
+                               < > <= >= == != and or u8 hex]]))
+
+(defn ^:pub ^I32 utf8-seq [^Bytes b ^I32 i ^I32 end ^I32 c]
+  (comment "The length (2..4) of the valid, non-noncharacter sequence whose lead"
+           "byte c >= 0x80 is at i, or 0. Never reads at or past end.")
+  (if (< c 194) (return 0))
+  (if (< c 224)
+    (do (if (>= (+ i 1) end) (return 0))
+        (if (!= (bit-and (u8 b (+ i 1)) 192) 128) (return 0))
+        (return 2)))
+  (if (< c 240)
+    (do (if (>= (+ i 2) end) (return 0))
+        (let [c1 (u8 b (+ i 1))
+              c2 (u8 b (+ i 2))]
+          (comment "E0 needs A0..BF (no overlong); ED needs 80..9F (no surrogate).")
+          (if (== c 224) (if (< c1 160) (return 0)))
+          (if (== c 237) (if (> c1 159) (return 0)))
+          (if (!= (bit-and c1 192) 128) (return 0))
+          (if (!= (bit-and c2 192) 128) (return 0))
+          (let [cp3 (bit-or (bit-or (shl (bit-and c 15) 12) (shl (bit-and c1 63) 6))
+                            (bit-and c2 63))]
+            (if (and (>= cp3 (hex 64976)) (<= cp3 (hex 65007))) (return 0))
+            (if (>= cp3 (hex 65534)) (return 0))
+            (return 3)))))
+  (if (< c 245)
+    (do (if (>= (+ i 3) end) (return 0))
+        (let [d1 (u8 b (+ i 1))
+              d2 (u8 b (+ i 2))
+              d3 (u8 b (+ i 3))]
+          (comment "F0 needs 90..BF (no overlong); F4 needs 80..8F (<= U+10FFFF).")
+          (if (== c 240) (if (< d1 144) (return 0)))
+          (if (== c 244) (if (> d1 143) (return 0)))
+          (if (!= (bit-and d1 192) 128) (return 0))
+          (if (!= (bit-and d2 192) 128) (return 0))
+          (if (!= (bit-and d3 192) 128) (return 0))
+          (let [cp4 (bit-or (bit-or (shl (bit-and c 7) 18) (shl (bit-and d1 63) 12))
+                            (bit-or (shl (bit-and d2 63) 6) (bit-and d3 63)))]
+            (if (== (bit-and cp4 (hex 65534)) (hex 65534)) (return 0))
+            (return 4)))))
+  (return 0))
+
+(defn ^:pub ^I32 utf8-invalid-at [^Bytes b ^I32 start ^I32 end]
+  (comment "The offset of the first invalid sequence in b[start..end), or -1.")
+  (let [^:mut i start]
+    (while (< i end)
+      (let [c (u8 b i)]
+        (if (< c 128)
+          (set i (+ i 1))
+          (do (let [w (utf8-seq b i end c)]
+                (if (== w 0) (return i))
+                (set i (+ i w)))))))
+    (return (neg 1))))

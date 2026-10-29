@@ -1,0 +1,132 @@
+;; CBOR heads, by integer operations only (D009): a head's argument is up to
+;; 64 bits and is carried as two i32 halves (o[O_HI], o[O_LO]) holding the bit
+;; pattern; nothing becomes a host number.
+;;
+;; Every function returns a position (>= 0) or a NEGATED refusal code, and on
+;; refusal records the offset it was decided at in o[O_ERR_POS].
+(ns snug.cbor.head
+  (:require [kin.lang :refer [defn let return set if do comment]]
+            [snug.lang :refer [I32 Bool Bytes Ints + - neg shl bit-or bit-and
+                               ushr < > <= >= == != or u8 blen ia iset]]
+            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_NON_SHORTEST
+                                     CODE_INDEFINITE CODE_MALFORMED
+                                     CODE_TOO_MANY_ITEMS CODE_DEPTH
+                                     CODE_TOO_MANY_ENTRIES
+                                     O_ERR_POS O_ITEMS O_MAX_ITEMS O_MAX_DEPTH
+                                     O_MAX_ENTRIES O_HI O_LO O_CSTART]]))
+
+(defn ^:pub ^I32 fail [^Ints o ^I32 at ^I32 code]
+  (comment "Record where a refusal was decided; answer the negated code.")
+  (iset o O_ERR_POS at)
+  (return (neg code)))
+
+(defn ^:pub ^I32 be16 [^Bytes b ^I32 p]
+  (comment "The big-endian u16 at p (the caller checked p + 2 <= length).")
+  (return (bit-or (shl (u8 b p) 8) (u8 b (+ p 1)))))
+
+(defn ^:pub ^I32 be32 [^Bytes b ^I32 p]
+  (comment "The big-endian 32-bit word at p as an i32 bit pattern (caller checked p + 4 <= length).")
+  (return (bit-or (bit-or (shl (u8 b p) 24) (shl (u8 b (+ p 1)) 16))
+                  (bit-or (shl (u8 b (+ p 2)) 8) (u8 b (+ p 3))))))
+
+(defn ^:pub ^I32 read-arg [^Bytes b ^Ints o ^I32 pos ^I32 ai]
+  (comment "The argument of the head at pos, whose additional information ai is"
+           "24 or more: into o[O_HI], o[O_LO]; answers the position after the head."
+           "Shortest form is enforced here; 28..30 are malformed, 31 indefinite."
+           "The caller has checked that b[pos] exists.")
+  (let [left (- (blen b) (+ pos 1))]
+    (if (== ai 24)
+      (do (if (< left 1) (return (fail o pos CODE_TRUNCATED)))
+          (let [v1 (u8 b (+ pos 1))]
+            (if (< v1 24) (return (fail o pos CODE_NON_SHORTEST)))
+            (iset o O_HI 0)
+            (iset o O_LO v1)
+            (return (+ pos 2)))))
+    (if (== ai 25)
+      (do (if (< left 2) (return (fail o pos CODE_TRUNCATED)))
+          (let [v2 (be16 b (+ pos 1))]
+            (if (< v2 256) (return (fail o pos CODE_NON_SHORTEST)))
+            (iset o O_HI 0)
+            (iset o O_LO v2)
+            (return (+ pos 3)))))
+    (if (== ai 26)
+      (do (if (< left 4) (return (fail o pos CODE_TRUNCATED)))
+          (let [v4 (be32 b (+ pos 1))]
+            (if (== (ushr v4 16) 0) (return (fail o pos CODE_NON_SHORTEST)))
+            (iset o O_HI 0)
+            (iset o O_LO v4)
+            (return (+ pos 5)))))
+    (if (== ai 27)
+      (do (if (< left 8) (return (fail o pos CODE_TRUNCATED)))
+          (let [hi8 (be32 b (+ pos 1))
+                lo8 (be32 b (+ pos 5))]
+            (if (== hi8 0) (return (fail o pos CODE_NON_SHORTEST)))
+            (iset o O_HI hi8)
+            (iset o O_LO lo8)
+            (return (+ pos 9)))))
+    (if (== ai 31) (return (fail o pos CODE_INDEFINITE)))
+    (return (fail o pos CODE_MALFORMED))))
+
+(defn ^:pub ^I32 take-len [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo]
+  (comment "The end of a payload of hi:lo bytes starting at p, or truncated --"
+           "checked against what remains BEFORE anything else (cbor.mjs `length`).")
+  (if (or (!= hi 0) (< lo 0)) (return (fail o pos CODE_TRUNCATED)))
+  (if (> lo (- (blen b) p)) (return (fail o pos CODE_TRUNCATED)))
+  (return (+ p lo)))
+
+(defn ^:pub ^I32 count-item [^Ints o ^I32 pos]
+  (comment "One more data item (cbor.mjs `item`: counted BEFORE its head is read).")
+  (let [it (+ (ia o O_ITEMS) 1)]
+    (iset o O_ITEMS it)
+    (if (> it (ia o O_MAX_ITEMS)) (return (fail o pos CODE_TOO_MANY_ITEMS)))
+    (return 0)))
+
+(defn ^:pub ^I32 enter-container [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo
+                                  ^I32 depth ^I32 pairs]
+  (comment "An array (pairs 0) or map (pairs 1) of hi:lo entries whose head ends at"
+           "p, at depth: depth bound, then the declared length against what remains"
+           "(n bytes per entry, 2n per pair), then the entry bound -- cbor.mjs's order.")
+  (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+  (if (or (!= hi 0) (< lo 0)) (return (fail o pos CODE_TRUNCATED)))
+  (let [left (- (blen b) p)]
+    (if (== pairs 0)
+      (if (> lo left) (return (fail o pos CODE_TRUNCATED)))
+      (if (> lo (ushr left 1)) (return (fail o pos CODE_TRUNCATED)))))
+  (if (> lo (ia o O_MAX_ENTRIES)) (return (fail o pos CODE_TOO_MANY_ENTRIES)))
+  (return 0))
+
+(defn ^:pub ^I32 bytes-content [^Bytes b ^Ints o ^I32 p ^I32 not-bytes]
+  (comment "A tag's byte-string content at p (cbor.mjs `bytesContent`): NOT counted"
+           "as an item and not a depth level. A non-byte-string is refused with"
+           "not-bytes. Answers the content end; its start goes in o[O_CSTART].")
+  (if (>= p (blen b)) (return (fail o p CODE_TRUNCATED)))
+  (let [ib (u8 b p)
+        ai (bit-and ib 31)]
+    (if (!= (ushr ib 5) 2) (return (fail o p not-bytes)))
+    (if (< ai 24)
+      (do (let [e1 (take-len b o p (+ p 1) 0 ai)]
+            (if (>= e1 0) (iset o O_CSTART (+ p 1)))
+            (return e1))))
+    (let [q (read-arg b o p ai)]
+      (if (< q 0) (return q))
+      (let [e2 (take-len b o p q (ia o O_HI) (ia o O_LO))]
+        (if (>= e2 0) (iset o O_CSTART q))
+        (return e2)))))
+
+(defn ^:pub ^I32 head-size [^I32 ai]
+  (comment "Bytes in a (valid) head with additional information ai.")
+  (if (< ai 24) (return 1))
+  (if (== ai 24) (return 2))
+  (if (== ai 25) (return 3))
+  (if (== ai 26) (return 5))
+  (return 9))
+
+(defn ^:pub ^I32 small-arg [^Bytes b ^I32 x]
+  (comment "The argument of the ALREADY VALIDATED head at x, known to fit in 31 bits"
+           "(a container length or payload length, which never exceeds the input).")
+  (let [ai (bit-and (u8 b x) 31)]
+    (if (< ai 24) (return ai))
+    (if (== ai 24) (return (u8 b (+ x 1))))
+    (if (== ai 25) (return (be16 b (+ x 1))))
+    (if (== ai 26) (return (be32 b (+ x 1))))
+    (return (be32 b (+ x 5)))))

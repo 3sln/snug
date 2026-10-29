@@ -1,0 +1,319 @@
+;; The Bindle CBOR profile scanner: one forward pass over the bytes that
+;; accepts exactly what 3sln.me's cbor.mjs `decode` accepts and refuses
+;; everything it refuses WITH THE SAME CODE, deciding nothing on host numbers
+;; or strings (D003, D009). The order of checks is cbor.mjs's and is written
+;; down in docs/scanner.md; bb scan-test holds both targets to cbor.mjs's code
+;; on every vector and on seeded mutations.
+;;
+;; Every walk function answers a position (>= 0) or a NEGATED code, and
+;; records the offset a refusal was decided at in o[O_ERR_POS].
+(ns snug.cbor.scan
+  (:require [kin.lang :refer [defn let return set if while for do comment doc case declarefn]]
+            [snug.lang :refer [I32 Bool Bytes Ints Str + - neg rem sar ushr bit-and bit-or
+                               < > <= >= == != and or not u8 blen ia iset hex]]
+            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_NON_SHORTEST CODE_INDEFINITE
+                                     CODE_MALFORMED CODE_KEY_TYPE CODE_KEY_ORDER
+                                     CODE_DUPLICATE_KEY CODE_TEXT CODE_FLOAT
+                                     CODE_SIMPLE CODE_TAG CODE_BIGNUM CODE_DECIMAL
+                                     CODE_TYPED_ARRAY CODE_NDARRAY CODE_TRAILING
+                                     CODE_DEPTH CODE_TOO_MANY_ENTRIES
+                                     CODE_TOO_MANY_ITEMS CODE_TOO_LARGE CODE_NOT_MAP
+                                     O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH
+                                     O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS O_ITEMS
+                                     O_HI O_LO O_CSTART MAX_BIGNUM_BYTES]]
+            [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
+                                    enter-container bytes-content]]
+            [snug.cbor.text :refer [utf8-invalid-at]]
+            [snug.cbor.float :refer [check-f16 check-f32 check-f64]]
+            [snug.cbor.keys :refer [compare-spans]]
+            [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count
+                                    shape-ok]]))
+
+(declarefn item)
+
+;; ------------------------------------------------------------- leaves
+
+(defn ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai]
+  (comment "A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then"
+           "`non_shortest` (cbor.mjs `simple`).")
+  (let [left (- (blen b) (+ pos 1))
+        ^:mut c 0
+        ^:mut w 0]
+    (if (== ai 25)
+      (do (set w 2)
+          (if (< left 2) (return (fail o pos CODE_TRUNCATED)))
+          (set c (check-f16 (be16 b (+ pos 1))))))
+    (if (== ai 26)
+      (do (set w 4)
+          (if (< left 4) (return (fail o pos CODE_TRUNCATED)))
+          (set c (check-f32 (be32 b (+ pos 1))))))
+    (if (== ai 27)
+      (do (set w 8)
+          (if (< left 8) (return (fail o pos CODE_TRUNCATED)))
+          (set c (check-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5))))))
+    (if (!= c 0) (return (fail o pos c)))
+    (return (+ (+ pos 1) w))))
+
+(defn ^I32 scan-simple [^Ints o ^I32 pos ^I32 ai]
+  (comment "Major 7 other than a float: false, true and null only. ai 24 reaches"
+           "here only after its argument passed the shortest-form check.")
+  (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
+  (return (fail o pos CODE_SIMPLE)))
+
+(defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo]
+  (let [end (take-len b o pos p hi lo)]
+    (if (< end 0) (return end))
+    (let [bad (utf8-invalid-at b p end)]
+      (if (>= bad 0) (return (fail o bad CODE_TEXT)))
+      (return end))))
+
+;; ------------------------------------------------------------- containers
+
+(defn ^I32 scan-array [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth]
+  (let [r (enter-container b o pos p hi lo depth 0)
+        ^:mut q p
+        inner (+ depth 1)]
+    (if (< r 0) (return r))
+    (for [^I32 _i 0 lo]
+      (set q (item b o q inner))
+      (if (< q 0) (return q)))
+    (return q)))
+
+(defn ^Bool cose-label-ok [^Bytes b ^I32 s ^I32 major]
+  (comment "In cose mode a top-level integer label must be a SAFE integer (cbor.mjs"
+           "decodes it to a number): major 0 at most 2^53-1, major 1 with n below"
+           "2^53-1. Only an 8-byte argument can break that.")
+  (if (!= (bit-and (u8 b s) 31) 27) (return true))
+  (let [hi (be32 b (+ s 1))
+        lo (be32 b (+ s 5))
+        top (hex 2097151)]
+    (if (== major 0) (return (and (>= hi 0) (<= hi top))))
+    (return (and (>= hi 0) (or (< hi top) (and (== hi top) (!= lo (neg 1))))))))
+
+(defn ^I32 scan-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth]
+  (comment "Per pair: the key's major type is PEEKED (key_type) before the key is"
+           "scanned; order and duplicates are decided after it, by its encoded bytes.")
+  (let [r (enter-container b o pos p hi lo depth 1)
+        cose (and (== depth 0) (!= (ia o O_COSE) 0))
+        inner (+ depth 1)
+        n (blen b)
+        ^:mut q p
+        ^:mut prev-start (neg 1)
+        ^:mut prev-end (neg 1)]
+    (if (< r 0) (return r))
+    (for [^I32 _k 0 lo]
+      (let [start q]
+        (if (>= start n) (return (fail o start CODE_TRUNCATED)))
+        (let [km (ushr (u8 b start) 5)]
+          (if (!= km 3)
+            (if (not (and cose (<= km 1))) (return (fail o start CODE_KEY_TYPE))))
+          (set q (item b o start inner))
+          (if (< q 0) (return q))
+          (if (<= km 1)
+            (if (not (cose-label-ok b start km)) (return (fail o start CODE_KEY_TYPE))))
+          (if (>= prev-start 0)
+            (do (let [order (compare-spans b prev-start prev-end start q)]
+                  (if (== order 0) (return (fail o start CODE_DUPLICATE_KEY)))
+                  (if (> order 0) (return (fail o start CODE_KEY_ORDER))))))
+          (set prev-start start)
+          (set prev-end q)
+          (set q (item b o q inner))
+          (if (< q 0) (return q)))))
+    (return q)))
+
+;; ------------------------------------------------------------- tags
+
+(defn ^I32 scan-bignum [^Bytes b ^Ints o ^I32 pos ^I32 p]
+  (comment "Tags 2/3: a byte string (its head may fail first) of 9..128 bytes with no"
+           "leading zero. The content is not an item.")
+  (let [end (bytes-content b o p CODE_BIGNUM)]
+    (if (< end 0) (return end))
+    (let [cs (ia o O_CSTART)
+          len (- end cs)]
+      (if (or (< len 9) (== (u8 b cs) 0)) (return (fail o pos CODE_BIGNUM)))
+      (if (> len MAX_BIGNUM_BYTES) (return (fail o pos CODE_BIGNUM)))
+      (return end))))
+
+(defn ^I32 scan-typed [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 tag ^I32 size]
+  (comment "An RFC 8746 little-endian typed array: a byte string whose length is a"
+           "multiple of the element size; no NaN in float arrays (-0 and +-inf are"
+           "fine there). The content is not an item.")
+  (let [end (bytes-content b o p CODE_TYPED_ARRAY)]
+    (if (< end 0) (return end))
+    (let [cs (ia o O_CSTART)
+          ^:mut i cs]
+      (if (!= (rem (- end cs) size) 0) (return (fail o pos CODE_TYPED_ARRAY)))
+      (if (== tag 84)
+        (while (< i end)
+          (let [h1 (u8 b (+ i 1))]
+            (if (== (bit-and h1 124) 124)
+              (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0)
+                (return (fail o i CODE_TYPED_ARRAY)))))
+          (set i (+ i 2))))
+      (if (== tag 85)
+        (while (< i end)
+          (let [s3 (u8 b (+ i 3))
+                s2 (u8 b (+ i 2))]
+            (if (and (== (bit-and s3 127) 127) (>= s2 128))
+              (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0)
+                (return (fail o i CODE_TYPED_ARRAY)))))
+          (set i (+ i 4))))
+      (if (== tag 86)
+        (while (< i end)
+          (let [t7 (u8 b (+ i 7))
+                t6 (u8 b (+ i 6))]
+            (if (and (== (bit-and t7 127) 127) (>= t6 240))
+              (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
+                                      (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
+                              (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
+                       0)
+                (return (fail o i CODE_TYPED_ARRAY)))))
+          (set i (+ i 8))))
+      (return end))))
+
+(defn ^I32 scan-pair [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 shape-code]
+  (comment "The `[x, y]` content of tag 4 or tag 40, decoded as cbor.mjs's item()"
+           "would: 0x82 demanded first (else shape-code), then the inner array is an"
+           "item (counted, a depth level, its length checked), then both elements."
+           "Answers the end; the second element's start goes in o[O_LO].")
+  (if (>= p (blen b)) (return (fail o p CODE_TRUNCATED)))
+  (if (!= (u8 b p) (hex 130)) (return (fail o pos shape-code)))
+  (let [c (count-item o p)]
+    (if (< c 0) (return c)))
+  (let [r (enter-container b o p (+ p 1) 0 2 (+ depth 1) 0)]
+    (if (< r 0) (return r)))
+  (let [^I32 q1 (item b o (+ p 1) (+ depth 2))]
+    (if (< q1 0) (return q1))
+    (let [^I32 q2 (item b o q1 (+ depth 2))]
+      (if (< q2 0) (return q2))
+      (iset o O_LO q1)
+      (return q2))))
+
+(defn ^I32 scan-decimal [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth]
+  (comment "Tag 4: [exponent, mantissa], exponent -1024..-1, mantissa an integer or"
+           "bignum, non-zero, not divisible by 10 -- checked after both decode.")
+  (let [end (scan-pair b o pos p depth CODE_DECIMAL)]
+    (if (< end 0) (return end))
+    (let [q1 (ia o O_LO)]
+      (if (not (exponent-ok b (+ p 1))) (return (fail o pos CODE_DECIMAL)))
+      (if (not (mantissa-ok b q1 end)) (return (fail o pos CODE_DECIMAL)))
+      (return end))))
+
+(defn ^I32 scan-ndarray [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth]
+  (comment "Tag 40: [shape, data], shape 1..8 positive integers whose product is the"
+           "element count, data a typed array or an array -- checked after both decode.")
+  (let [end (scan-pair b o pos p depth CODE_NDARRAY)]
+    (if (< end 0) (return end))
+    (let [count (data-count b (ia o O_LO))]
+      (if (< count 0) (return (fail o pos CODE_NDARRAY)))
+      (if (not (shape-ok b (+ p 1) count)) (return (fail o pos CODE_NDARRAY)))
+      (return end))))
+
+(defn ^I32 scan-tag [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth]
+  (comment "A tag is a depth level, checked before its number is looked at.")
+  (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+  (if (!= hi 0) (return (fail o pos CODE_TAG)))
+  (if (or (== lo 2) (== lo 3)) (return (scan-bignum b o pos p)))
+  (if (== lo 4) (return (scan-decimal b o pos p depth)))
+  (if (== lo 40) (return (scan-ndarray b o pos p depth)))
+  (let [size (typed-size lo)]
+    (if (== size 0) (return (fail o pos CODE_TAG)))
+    (return (scan-typed b o pos p lo size))))
+
+;; ------------------------------------------------------------- the item
+
+(defn ^I32 item [^Bytes b ^Ints o ^I32 pos ^I32 depth]
+  (comment "One data item at pos (cbor.mjs `item`): counted first, then its head.")
+  (let [it (+ (ia o O_ITEMS) 1)]
+    (iset o O_ITEMS it)
+    (if (> it (ia o O_MAX_ITEMS)) (return (fail o pos CODE_TOO_MANY_ITEMS))))
+  (if (>= pos (blen b)) (return (fail o pos CODE_TRUNCATED)))
+  (let [ib (u8 b pos)
+        major (ushr ib 5)
+        ai (bit-and ib 31)
+        ^:mut hi 0
+        ^:mut lo ai
+        ^:mut p (+ pos 1)]
+    (if (>= ai 24)
+      (do (if (== major 7)
+            (if (and (>= ai 25) (<= ai 27)) (return (scan-float b o pos ai))))
+          (set p (read-arg b o pos ai))
+          (if (< p 0) (return p))
+          (set hi (ia o O_HI))
+          (set lo (ia o O_LO))))
+    (case major
+      [0 1] p
+      [2] (take-len b o pos p hi lo)
+      [3] (scan-text b o pos p hi lo)
+      [4] (scan-array b o pos p hi lo depth)
+      [5] (scan-map b o pos p hi lo depth)
+      [6] (scan-tag b o pos p hi lo depth)
+      :else (scan-simple o pos ai))))
+
+;; ------------------------------------------------------------- the API
+
+(defn ^:pub scan-options [^Ints o ^I32 top-any ^I32 cose ^I32 max-bytes ^I32 max-depth
+                          ^I32 max-entries ^I32 max-items]
+  (comment "Fill the options slots of o (length >= SCAN_OPTS_LEN). top-any: 0 the"
+           "top-level item must be a map (cbor.mjs top 'map'), 1 any item. cose: 1"
+           "allows safe-integer labels in the top-level map. Limits as cbor.mjs's"
+           "options, clamped by the host to 0..2^31-1 (equivalent: no input or"
+           "count reaches 2^31).")
+  (iset o O_TOP top-any)
+  (iset o O_COSE cose)
+  (iset o O_MAX_BYTES max-bytes)
+  (iset o O_MAX_DEPTH max-depth)
+  (iset o O_MAX_ENTRIES max-entries)
+  (iset o O_MAX_ITEMS max-items))
+
+(doc "Scan `b` (length < 2^31) under the options in `o` (see `scanOptions` /"
+     "`scan_options`). Answers 0 when cbor.mjs `decode` would accept, else"
+     "cbor.mjs's CBORFault code as an integer (`codeName` gives the string)."
+     "The offset a refusal was decided at is `errorOffset(o)` (-1 when"
+     "accepted); `itemsScanned(o)` is the item count. Allocates nothing; reads"
+     "`b` in place; never reads out of bounds. Recursion is bounded by the"
+     "maxDepth option (hosts should keep it <= 256).")
+(defn ^:pub ^I32 scan [^Bytes b ^Ints o]
+  (iset o O_ERR_POS (neg 1))
+  (iset o O_ITEMS 0)
+  (let [n (blen b)]
+    (if (> n (ia o O_MAX_BYTES)) (return (neg (fail o 0 CODE_TOO_LARGE))))
+    (if (== (ia o O_TOP) 0)
+      (if (or (== n 0) (!= (ushr (u8 b 0) 5) 5)) (return (neg (fail o 0 CODE_NOT_MAP)))))
+    (let [r (item b o 0 0)]
+      (if (< r 0) (return (neg r)))
+      (if (!= r n) (return (neg (fail o r CODE_TRAILING))))
+      (return 0))))
+
+(defn ^:pub ^I32 error-offset [^Ints o]
+  (return (ia o O_ERR_POS)))
+
+(defn ^:pub ^I32 items-scanned [^Ints o]
+  (return (ia o O_ITEMS)))
+
+(defn ^:pub ^Str code-name [^I32 code]
+  (comment "cbor.mjs's CBORFault code for a scanner code ('ok' for 0).")
+  (case code
+    [0] "ok"
+    [CODE_TRUNCATED] "truncated"
+    [CODE_NON_SHORTEST] "non_shortest"
+    [CODE_INDEFINITE] "indefinite"
+    [CODE_MALFORMED] "malformed"
+    [CODE_KEY_TYPE] "key_type"
+    [CODE_KEY_ORDER] "key_order"
+    [CODE_DUPLICATE_KEY] "duplicate_key"
+    [CODE_TEXT] "text"
+    [CODE_FLOAT] "float"
+    [CODE_SIMPLE] "simple"
+    [CODE_TAG] "tag"
+    [CODE_BIGNUM] "bignum"
+    [CODE_DECIMAL] "decimal"
+    [CODE_TYPED_ARRAY] "typed_array"
+    [CODE_NDARRAY] "ndarray"
+    [CODE_TRAILING] "trailing"
+    [CODE_DEPTH] "depth"
+    [CODE_TOO_MANY_ENTRIES] "too_many_entries"
+    [CODE_TOO_MANY_ITEMS] "too_many_items"
+    [CODE_TOO_LARGE] "too_large"
+    [CODE_NOT_MAP] "not_map"
+    :else "unknown"))

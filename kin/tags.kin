@@ -1,0 +1,99 @@
+;; The semantics of the allowed tags, checked on bytes the walk has ALREADY
+;; validated as well-formed items (so every head read here is in bounds and in
+;; shortest form). Integer-only (D009): a decimal mantissa's divisibility by 10
+;; is a remainder over its bytes; a tag-40 product is checked by division, so
+;; it never overflows on either target.
+(ns snug.cbor.tags
+  (:require [kin.lang :refer [defn let return set if while for do comment case]]
+            [snug.lang :refer [I32 Bool Bytes + - * neg quot rem ushr bit-and bit-or
+                               < > <= >= == != and or not u8 hex]]
+            [snug.cbor.codes :refer [MAX_DIMENSIONS]]
+            [snug.cbor.head :refer [be16 be32 head-size small-arg]]))
+
+(defn ^:pub ^I32 typed-size [^I32 tag]
+  (comment "The element size of an allowed RFC 8746 little-endian typed-array tag,"
+           "or 0 (big-endian forms, uint8 (64), clamped (68) and float128 are refused).")
+  (case tag
+    [72] 1
+    [69 77 84] 2
+    [70 78 85] 4
+    [71 79 86] 8
+    :else 0))
+
+(defn ^:pub ^I32 mod10 [^Bytes b ^I32 s ^I32 e]
+  (comment "The big-endian unsigned integer b[s..e) modulo 10.")
+  (let [^:mut r 0
+        ^:mut i s]
+    (while (< i e)
+      (set r (rem (+ (* r 256) (u8 b i)) 10))
+      (set i (+ i 1)))
+    (return r)))
+
+(defn ^:pub ^Bool exponent-ok [^Bytes b ^I32 x]
+  (comment "A decimal exponent: a negative integer (major 1) at least -1024, i.e."
+           "argument n <= 1023. Anything else -- a non-negative integer, a bignum,"
+           "a float, any other item -- is not.")
+  (let [ib (u8 b x)
+        ai (bit-and ib 31)]
+    (if (!= (ushr ib 5) 1) (return false))
+    (if (<= ai 24) (return true))
+    (if (== ai 25) (return (<= (be16 b (+ x 1)) 1023)))
+    (return false)))
+
+(defn ^:pub ^Bool mantissa-ok [^Bytes b ^I32 s ^I32 e]
+  (comment "A decimal mantissa b[s..e): an integer (major 0/1) or a bignum (tag 2/3),"
+           "non-zero and not divisible by 10. Major 1 and tag 3 hold -1-n, so test"
+           "n + 1.")
+  (let [ib (u8 b s)
+        major (ushr ib 5)
+        ai (bit-and ib 31)]
+    (if (or (== major 0) (== major 1))
+      (do (let [^:mut r ai]
+            (if (>= ai 24) (set r (mod10 b (+ s 1) e)))
+            (if (< ai 24) (set r (rem ai 10)))
+            (if (== major 1) (set r (rem (+ r 1) 10)))
+            (if (and (== major 0) (== ai 0)) (return false))
+            (return (!= r 0)))))
+    (if (or (== ib (hex 194)) (== ib (hex 195)))
+      (do (comment "A bignum: its byte-string head follows the tag byte.")
+          (let [cs (+ (+ s 1) (head-size (bit-and (u8 b (+ s 1)) 31)))
+                ^:mut r2 (mod10 b cs e)]
+            (if (== ib (hex 195)) (set r2 (rem (+ r2 1) 10)))
+            (return (!= r2 0)))))
+    (return false)))
+
+(defn ^:pub ^I32 data-count [^Bytes b ^I32 x]
+  (comment "Elements in a tag-40 data item at x: an array's length, or a typed"
+           "array's byte length over its element size; -1 for anything else.")
+  (let [ib (u8 b x)
+        major (ushr ib 5)]
+    (if (== major 4) (return (small-arg b x)))
+    (if (== major 6)
+      (do (if (!= ib (hex 216)) (return (neg 1)))
+          (let [size (typed-size (u8 b (+ x 1)))]
+            (if (== size 0) (return (neg 1)))
+            (return (quot (small-arg b (+ x 2)) size)))))
+    (return (neg 1))))
+
+(defn ^:pub ^Bool shape-ok [^Bytes b ^I32 s ^I32 count]
+  (comment "A tag-40 shape at s: an array of 1..8 integers (major 0), each positive"
+           "and at most 2^53 - 1, whose product equals count. The product is"
+           "checked by division (d <= count / p), so it never overflows; any"
+           "dimension past 31 bits already exceeds count.")
+  (let [ib (u8 b s)]
+    (if (!= (ushr ib 5) 4) (return false))
+    (let [k (small-arg b s)
+          ^:mut x (+ s (head-size (bit-and ib 31)))
+          ^:mut p 1]
+      (if (or (< k 1) (> k MAX_DIMENSIONS)) (return false))
+      (for [^I32 _j 0 k]
+        (let [db (u8 b x)
+              dai (bit-and db 31)]
+          (if (!= (ushr db 5) 0) (return false))
+          (if (== dai 27) (return false))
+          (let [d (small-arg b x)]
+            (if (<= d 0) (return false))
+            (if (> d (quot count p)) (return false))
+            (set p (* p d))
+            (set x (+ x (head-size dai))))))
+      (return (== p count)))))
