@@ -30,6 +30,14 @@ pub fn mark_dead(h: &mut [i32]) {
 pub(crate) fn dead(h: &[i32], l: i32) -> bool {
     return lw(h, l, 9) != 0;
 }
+pub fn rep(h: &[i32], l: i32) -> i32 {
+    // The representative of leaf l's equivalence class (itself unless
+    // canonicalise merged it).
+    if i32::cast_unsigned(l) < i32::cast_unsigned(vlen(h, T_REP)) {
+        return vget(h, T_REP, l);
+    }
+    return l;
+}
 pub fn any_ts(h: &mut [i32]) -> i32 {
     // The internal typeset {ANY} (made on first need).
     let t: i32 = hg(h, H_TS_ANY);
@@ -134,8 +142,10 @@ pub(crate) fn reach_ts(h: &mut [i32], ts: i32) {
     }
     push_frame(h, off, n);
 }
-pub(crate) fn reach_leaf(h: &mut [i32], l: i32) {
-    // First reach of a live leaf: number it, then visit its children.
+pub(crate) fn reach_leaf(h: &mut [i32], l0: i32) {
+    // First reach of a live leaf (its class representative, see canonicalise):
+    // number it, then visit its children.
+    let l: i32 = rep(h, l0);
     if dead(h, l) || (lw(h, l, 11) >= 0) {
         return;
     }
@@ -189,7 +199,7 @@ pub fn fts_w(h: &[i32], t: i32, w: i32) -> i32 {
     return vget(h, T_FTS, (t * 5) + w);
 }
 pub(crate) fn fin(h: &[i32], l: i32) -> i32 {
-    return lw(h, l, 11);
+    return lw(h, rep(h, l), 11);
 }
 pub(crate) fn fin_internal(h: &[i32], f: i32) -> i32 {
     return vget(h, T_FIN, f);
@@ -269,6 +279,16 @@ pub(crate) fn final_ts(h: &mut [i32], ts: i32) -> i32 {
     if !sort_records(h, T_FTSL, ans, n, 1) {
         return -1;
     }
+    // equivalent leaves (one class representative) count once
+    let mut w: i32 = 0;
+    for u in 0..n {
+        if (u == 0) || (vget(h, T_FTSL, ans + u) != vget(h, T_FTSL, ans + (u - 1))) {
+            vset(h, T_FTSL, ans + w, vget(h, T_FTSL, ans + u));
+            w += 1;
+        }
+    }
+    vtrunc(h, T_FTSL, ans + w);
+    n = w;
     let mut hsh: i32 = mix(3, n);
     for j in 0..n {
         hsh = mix(hsh, vget(h, T_FTSL, ans + j));
@@ -584,9 +604,254 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
     }
     return 0;
 }
+pub(crate) fn is_container(h: &[i32], l: i32) -> bool {
+    let k: i32 = lk(h, l);
+    return (((k == K_TAG) || (k == K_TAGSET)) || ((k == K_EMBED) || (k == K_ARRAY))) || ((k == K_MAP) || ((k == K_AND) || (k == K_NOT)));
+}
+pub(crate) fn shape_sig(h: &mut [i32], l: i32) {
+    // Push the shape of container l (everything but its child typesets) onto
+    // T_CSIG.
+    let k: i32 = lk(h, l);
+    vpush1(h, T_CSIG, k);
+    vpush1(h, T_CSIG, lflags(h, l));
+    if k == K_TAG {
+        vpush1(h, T_CSIG, ld(h, l, 0));
+        vpush1(h, T_CSIG, ld(h, l, 1));
+    }
+    if k == K_TAGSET {
+        for i in 0..4 {
+            vpush1(h, T_CSIG, ld(h, l, i));
+        }
+    }
+    if k == K_ARRAY {
+        let ablob: i32 = vget(h, T_ARR, ld(h, l, 0));
+        let npos: i32 = vget(h, T_ARRD, ablob);
+        let w: i32 = vget(h, T_ARRD, ablob + 1);
+        let nc: i32 = vget(h, T_ARRD, ablob + 2);
+        let apb: i32 = (ablob + 4) + (2 * w);
+        let n: i32 = (4 + (2 * w)) + ((2 * npos) + ((2 * nc) + (npos * w)));
+        for i2 in 0..n {
+            // every word but the positions' typesets
+            let at: i32 = ablob + i2;
+            if (at < apb) || ((at >= (apb + (2 * npos))) || (((at - apb) & 1) == 1)) {
+                vpush1(h, T_CSIG, vget(h, T_ARRD, at));
+            }
+        }
+    }
+    if k == K_MAP {
+        let blob: i32 = vget(h, T_MAP, ld(h, l, 0));
+        let nf: i32 = vget(h, T_MAPD, blob);
+        let np: i32 = vget(h, T_MAPD, blob + 1);
+        let na: i32 = vget(h, T_MAPD, blob + 2);
+        let fb: i32 = blob + 4;
+        let pb: i32 = fb + (3 * nf);
+        let ab: i32 = pb + (5 * np);
+        vpush1(h, T_CSIG, nf);
+        vpush1(h, T_CSIG, np);
+        vpush1(h, T_CSIG, na);
+        for f in 0..3 * nf {
+            vpush1(h, T_CSIG, vget(h, T_MAPD, fb + f));
+        }
+        for p in 0..np {
+            let prec: i32 = pb + (5 * p);
+            let go: i32 = vget(h, T_MAPD, prec + 1);
+            let gn: i32 = vget(h, T_MAPD, prec + 2);
+            vpush1(h, T_CSIG, vget(h, T_MAPD, prec));
+            vpush1(h, T_CSIG, gn);
+            vpush1(h, T_CSIG, vget(h, T_MAPD, prec + 3));
+            vpush1(h, T_CSIG, vget(h, T_MAPD, prec + 4));
+            if go >= 0 {
+                for g in 0..gn {
+                    vpush1(h, T_CSIG, vget(h, T_MAPD, (blob + go) + ((4 * g) + 2)));
+                    vpush1(h, T_CSIG, vget(h, T_MAPD, (blob + go) + ((4 * g) + 3)));
+                }
+            }
+        }
+        for a in 0..na {
+            let arec: i32 = ab + (3 * a);
+            let lo: i32 = blob + vget(h, T_MAPD, arec + 1);
+            let ln: i32 = vget(h, T_MAPD, arec + 2);
+            vpush1(h, T_CSIG, vget(h, T_MAPD, arec));
+            vpush1(h, T_CSIG, ln);
+            for i3 in 0..ln {
+                vpush1(h, T_CSIG, vget(h, T_MAPD, lo + (4 * i3)));
+                vpush1(h, T_CSIG, vget(h, T_MAPD, lo + ((4 * i3) + 2)));
+                vpush1(h, T_CSIG, vget(h, T_MAPD, lo + ((4 * i3) + 3)));
+            }
+        }
+    }
+}
+pub(crate) fn child_sig(h: &mut [i32], l: i32) {
+    // Push, per child slot of l, the sorted set of its leaves' classes onto
+    // T_CSIG (slot marker -1, then the count, then the classes).
+    let cstart: i32 = vlen(h, T_CHILD);
+    let cn: i32 = children(h, l, T_CHILD);
+    for j in 0..cn {
+        let kind: i32 = vget(h, T_CHILD, cstart + (2 * j));
+        let id: i32 = vget(h, T_CHILD, cstart + ((2 * j) + 1));
+        let at: i32 = vlen(h, T_CSIG);
+        vpush1(h, T_CSIG, -1);
+        vpush1(h, T_CSIG, 0);
+        if kind == 1 {
+            vpush1(h, T_CSIG, vget(h, T_CLSID, id));
+        } else {
+            for i in 0..ts_n(h, id) {
+                let x: i32 = vget(h, T_TSL, ts_off(h, id) + i);
+                if !dead(h, x) {
+                    vpush1(h, T_CSIG, vget(h, T_CLSID, x));
+                }
+            }
+        }
+        let m: i32 = vlen(h, T_CSIG) - (at + 2);
+        sort_records(h, T_CSIG, at + 2, m, 1);
+        // drop repeated classes (a set)
+        let mut w: i32 = at + 2;
+        for u in at + 2..(at + 2) + m {
+            if (u == (at + 2)) || (vget(h, T_CSIG, u) != vget(h, T_CSIG, u - 1)) {
+                vset(h, T_CSIG, w, vget(h, T_CSIG, u));
+                w += 1;
+            }
+        }
+        vtrunc(h, T_CSIG, w);
+        vset(h, T_CSIG, at + 1, w - (at + 2));
+    }
+    vtrunc(h, T_CHILD, cstart);
+}
+pub(crate) fn sig_intern(h: &mut [i32], start: i32) -> i32 {
+    // The index of the signature T_CSIG[start..] among this round's (equal
+    // signatures share one; T_HSIG hashes them, T_NCLS holds (offset, length)).
+    // A repeated signature is cut from T_CSIG.
+    let len: i32 = vlen(h, T_CSIG) - start;
+    let mut hsh: i32 = mix(23, len);
+    if !charge(h, 1 + len) {
+        return -1;
+    }
+    for i in 0..len {
+        hsh = mix(hsh, vget(h, T_CSIG, start + i));
+    }
+    let mut s: i32 = ht_start(h, T_HSIG, hsh);
+    loop {
+        let id: i32 = ht_id(h, T_HSIG, s);
+        if id < 0 {
+            break;
+        }
+        let o: i32 = vget(h, T_NCLS, 2 * id);
+        let n: i32 = vget(h, T_NCLS, (2 * id) + 1);
+        if n == len {
+            let mut same: bool = true;
+            let mut q: i32 = 0;
+            while same && (q < len) {
+                if vget(h, T_CSIG, o + q) != vget(h, T_CSIG, start + q) {
+                    same = false;
+                }
+                q += 1;
+            }
+            if same {
+                vtrunc(h, T_CSIG, start);
+                return id;
+            }
+        }
+        s = ht_next(h, T_HSIG, s);
+    }
+    let nid: i32 = vlen(h, T_NCLS) / 2;
+    vpush1(h, T_NCLS, start);
+    vpush1(h, T_NCLS, len);
+    if !ht_put(h, T_HSIG, s, nid, hsh) {
+        return -1;
+    }
+    return nid;
+}
+pub fn canonicalise(h: &mut [i32]) -> i32 {
+    // Partition refinement over the live containers (see above); fills T_REP.
+    let nl: i32 = nleaves(h);
+    vtrunc(h, T_REP, 0);
+    vtrunc(h, T_CLSID, 0);
+    vtrunc(h, T_CONT, 0);
+    for l in 0..nl {
+        vpush1(h, T_REP, l);
+        vpush1(h, T_CLSID, l);
+        if (!dead(h, l)) && is_container(h, l) {
+            vpush1(h, T_CONT, l);
+        }
+    }
+    let nc: i32 = vlen(h, T_CONT);
+    if nc == 0 {
+        return 0;
+    }
+    // round 0: shapes
+    vtrunc(h, T_CSIG, 0);
+    vtrunc(h, T_NCLS, 0);
+    if !ht_init(h, T_HSIG, 64) {
+        return -1;
+    }
+    vtrunc(h, T_TMP, 0);
+    for i in 0..nc {
+        let c: i32 = vget(h, T_CONT, i);
+        let st: i32 = vlen(h, T_CSIG);
+        shape_sig(h, c);
+        let id: i32 = sig_intern(h, st);
+        if id < 0 {
+            return -1;
+        }
+        vpush1(h, T_TMP, id);
+    }
+    let mut classes: i32 = vlen(h, T_NCLS) / 2;
+    for i2 in 0..nc {
+        vset(h, T_CLSID, vget(h, T_CONT, i2), nl + vget(h, T_TMP, i2));
+    }
+    // refine until stable
+    loop {
+        vtrunc(h, T_CSIG, 0);
+        vtrunc(h, T_NCLS, 0);
+        if !ht_init(h, T_HSIG, 64) {
+            return -1;
+        }
+        vtrunc(h, T_TMP, 0);
+        for i3 in 0..nc {
+            let c3: i32 = vget(h, T_CONT, i3);
+            let st3: i32 = vlen(h, T_CSIG);
+            vpush1(h, T_CSIG, vget(h, T_CLSID, c3));
+            child_sig(h, c3);
+            let id3: i32 = sig_intern(h, st3);
+            if id3 < 0 {
+                return -1;
+            }
+            vpush1(h, T_TMP, id3);
+        }
+        let nclasses: i32 = vlen(h, T_NCLS) / 2;
+        for i4 in 0..nc {
+            vset(h, T_CLSID, vget(h, T_CONT, i4), nl + vget(h, T_TMP, i4));
+        }
+        if nclasses == classes {
+            break;
+        }
+        classes = nclasses;
+    }
+    // representatives: the first member of each class
+    vtrunc(h, T_TMP, 0);
+    for _z in 0..classes {
+        vpush1(h, T_TMP, -1);
+    }
+    for i5 in 0..nc {
+        let c5: i32 = vget(h, T_CONT, i5);
+        let k5: i32 = vget(h, T_CLSID, c5) - nl;
+        if vget(h, T_TMP, k5) < 0 {
+            vset(h, T_TMP, k5, c5);
+        } else {
+            vset(h, T_REP, c5, vget(h, T_TMP, k5));
+        }
+    }
+    if erred(h) {
+        return -1;
+    }
+    return 0;
+}
 pub fn plan(h: &mut [i32]) -> i32 {
     // Steps 1-2 of the namespace doc. Answers 0 or -1.
     mark_dead(h);
+    if canonicalise(h) < 0 {
+        return -1;
+    }
     hs(h, H_TS_ANY, -1);
     hs(h, H_N_FIN, 0);
     vtrunc(h, T_FIN, 0);
@@ -1097,10 +1362,10 @@ pub(crate) fn cset_intern(h: &mut [i32], from: i32, n: i32) -> i32 {
 pub(crate) fn cset_w(h: &[i32], c: i32, w: i32) -> i32 {
     return vget(h, T_CSD, vget(h, T_CSET, c) + w);
 }
-pub(crate) fn chain_intern(h: &mut [i32], from: i32, n: i32, rep: i32) -> i32 {
+pub(crate) fn chain_intern(h: &mut [i32], from: i32, n: i32, rp: i32) -> i32 {
     // The chain (n, repeat_from, csets T_CLS2[from..]) -- T_CHAIN indexes
     // T_CHD records.
-    let mut hsh: i32 = mix(mix(19, n), rep);
+    let mut hsh: i32 = mix(mix(19, n), rp);
     for i in 0..n {
         hsh = mix(hsh, vget(h, T_CLS2, from + i));
     }
@@ -1111,7 +1376,7 @@ pub(crate) fn chain_intern(h: &mut [i32], from: i32, n: i32, rep: i32) -> i32 {
             break;
         }
         let o: i32 = vget(h, T_CHAIN, id);
-        if (vget(h, T_CHD, o) == n) && (vget(h, T_CHD, o + 1) == rep) {
+        if (vget(h, T_CHD, o) == n) && (vget(h, T_CHD, o + 1) == rp) {
             let mut same: bool = true;
             for j in 0..n {
                 if vget(h, T_CHD, o + (2 + j)) != vget(h, T_CLS2, from + j) {
@@ -1128,7 +1393,7 @@ pub(crate) fn chain_intern(h: &mut [i32], from: i32, n: i32, rep: i32) -> i32 {
     let at: i32 = vlen(h, T_CHD);
     vpush1(h, T_CHAIN, at);
     vpush1(h, T_CHD, n);
-    vpush1(h, T_CHD, rep);
+    vpush1(h, T_CHD, rp);
     for q in 0..n {
         vpush1(h, T_CHD, vget(h, T_CLS2, from + q));
     }
@@ -1150,7 +1415,7 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
     let base: i32 = vlen(h, T_CLS2);
     let width: i32 = hg(h, H_LIM_WIDTH);
     let nl: i32 = hg(h, H_N_FIN);
-    let mut rep: i32 = -1;
+    let mut repeat: i32 = -1;
     // R_0
     vtrunc(h, T_CLS, 0);
     let ep0: i32 = next_epoch(h);
@@ -1211,7 +1476,7 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
             }
         }
         if seen >= 0 {
-            rep = seen;
+            repeat = seen;
             break;
         }
         vpush1(h, T_CLS2, c);
@@ -1223,10 +1488,10 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
     for k in 0..d + 1 {
         let mut idx: i32 = k;
         if k >= n2 {
-            if rep < 0 {
+            if repeat < 0 {
                 idx = -1;
             } else {
-                idx = rep + rem2(k - rep, n2 - rep);
+                idx = repeat + rem2(k - repeat, n2 - repeat);
             }
         }
         if idx >= 0 {
@@ -1238,7 +1503,7 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
         }
     }
     hs(h, H_R0, ((48 + (2 * nl)) + (2 * (d + 1))) + (maxr + sumf));
-    let ch: i32 = chain_intern(h, base, n2, rep);
+    let ch: i32 = chain_intern(h, base, n2, repeat);
     vtrunc(h, T_CLS2, base);
     return ch;
 }

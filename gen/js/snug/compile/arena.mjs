@@ -425,6 +425,18 @@ export const T_KEYPRE = 107;
 
 export const T_LRULE = 108;
 
+export const T_REP = 109;
+
+export const T_CLSID = 110;
+
+export const T_CSIG = 111;
+
+export const T_HSIG = 112;
+
+export const T_NCLS = 113;
+
+export const T_CONT = 114;
+
 export const H_WALK_RULE = 61;
 
 export const H_TS_ANY = 59;

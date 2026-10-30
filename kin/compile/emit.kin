@@ -22,7 +22,7 @@
 ;;    written), then every section in order.
 (ns snug.compile.emit
   (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
-            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not ult
                                < > <= >= == != and or not]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vfill
                                         mix ht-init ht-start ht-id ht-next ht-put sort-records msort-records
@@ -35,7 +35,8 @@
                                         T_GRP T_GRPD T_HGRP T_POOLG T_KEYS T_KEYID T_POOL T_POOLOFF T_RORD
                                         T_LAUX T_RXF T_MAP T_MAPD T_ARR T_ARRD T_IV T_FIV T_LST T_SRC
                                         T_CSET T_CSD T_HCSET T_CHAIN T_CHD T_HCHAIN T_EPOCHS T_CLS T_CLS2
-                                        T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI T_LRULE]]
+                                        T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI T_LRULE T_REP T_CLSID T_CSIG T_HSIG
+                                        T_NCLS T_CONT]]
             [snug.compile.bytes :refer [intern bid-len bid-byte bid-cmp nbids sort-bids]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd nleaves ts-off ts-n ts-w ts-setw
                                        leaf-mask mk-any ts-of1 nts
@@ -61,6 +62,12 @@
       (lset h l 9 dead))))
 
 (defn ^Bool dead [^IntsR h ^I32 l] (return (!= (lw h l 9) 0)))
+
+(defn ^:pub ^I32 rep [^IntsR h ^I32 l]
+  (comment "The representative of leaf l's equivalence class (itself unless"
+           "canonicalise merged it).")
+  (if (ult l (vlen h T_REP)) (return (vget h T_REP l)))
+  (return l))
 
 ;; ------------------------------------------------------------ children
 
@@ -148,8 +155,10 @@
         (push2 h T_CHILD 1 l)))
     (push-frame h off n)))
 
-(defn reach-leaf [^Ints h ^I32 l]
-  (comment "First reach of a live leaf: number it, then visit its children.")
+(defn reach-leaf [^Ints h ^I32 l0]
+  (comment "First reach of a live leaf (its class representative, see canonicalise):"
+           "number it, then visit its children.")
+  (let [l (rep h l0)]
   (if (or (dead h l) (>= (lw h l 11) 0)) (return))
   (let [id (hg h H_N_FIN)]
     (hs h H_N_FIN (+ id 1))
@@ -159,7 +168,7 @@
     (vpush1 h T_LRULE (hg h H_WALK_RULE)))
   (let [off (vlen h T_CHILD)
         n (children h l T_CHILD)]
-    (push-frame h off n)))
+    (push-frame h off n))))
 
 (defn ^:pub ^I32 number-from [^Ints h ^I32 ts]
   (comment "The preorder walk from a rule's typeset.")
@@ -187,7 +196,7 @@
 (defn ^:pub ^I32 fts-n [^IntsR h] (return (quot (vlen h T_FTS) 5)))
 (defn ^:pub ^I32 fts-w [^IntsR h ^I32 t ^I32 w] (return (vget h T_FTS (+ (* t 5) w))))
 
-(defn ^I32 fin [^IntsR h ^I32 l] (return (lw h l 11)))
+(defn ^I32 fin [^IntsR h ^I32 l] (return (lw h (rep h l) 11)))
 (defn ^I32 fin-internal [^IntsR h ^I32 f] (return (vget h T_FIN f)))
 
 (defn ^I32 next-epoch [^Ints h]
@@ -249,6 +258,14 @@
               (if (or (== (lk h l) K_AND) (== (lk h l) K_NOT)) (set comb true))
               (set n (+ n 1))))))
     (if (not (sort-records h T_FTSL ans n 1)) (return (neg 1)))
+    (comment "equivalent leaves (one class representative) count once")
+    (let [^:mut w 0]
+      (for [^I32 u 0 n]
+        (if (or (== u 0) (!= (vget h T_FTSL (+ ans u)) (vget h T_FTSL (+ ans (- u 1)))))
+          (do (vset h T_FTSL (+ ans w) (vget h T_FTSL (+ ans u)))
+              (set w (+ w 1)))))
+      (vtrunc h T_FTSL (+ ans w))
+      (set n w))
     (let [^:mut hsh (mix 3 n)]
       (for [^I32 j 0 n]
         (set hsh (mix hsh (vget h T_FTSL (+ ans j)))))
@@ -480,11 +497,196 @@
                                 (vpush1 h T_PSTK c))))))))))))
     (return 0)))
 
+;; ------------------------------------------------------------ canonicalisation
+;; Architecture §4.2: leaves are hash-consed with cycle-aware
+;; canonicalisation. Scalars are interned when made; containers (maps,
+;; arrays, tags, embedded documents) and the combinators over them are merged
+;; here by partition refinement: start from classes of equal SHAPE (the leaf
+;; without its child typesets), then split classes until every member of a
+;; class has, slot by slot, children of the same SET of classes. The stable
+;; partition is a bisimulation, so a class's members match exactly the same
+;; items (recursive types reach the fixed point). Each class keeps its first
+;; member (lowest internal id) as representative.
+
+(defn ^Bool is-container [^IntsR h ^I32 l]
+  (let [k (lk h l)]
+    (return (or (or (or (== k K_TAG) (== k K_TAGSET)) (or (== k K_EMBED) (== k K_ARRAY)))
+                (or (== k K_MAP) (or (== k K_AND) (== k K_NOT)))))))
+
+(defn shape-sig [^Ints h ^I32 l]
+  (comment "Push the shape of container l (everything but its child typesets) onto"
+           "T_CSIG.")
+  (let [k (lk h l)]
+    (vpush1 h T_CSIG k)
+    (vpush1 h T_CSIG (lflags h l))
+    (if (== k K_TAG) (do (vpush1 h T_CSIG (ld h l 0)) (vpush1 h T_CSIG (ld h l 1))))
+    (if (== k K_TAGSET)
+      (for [^I32 i 0 4] (vpush1 h T_CSIG (ld h l i))))
+    (if (== k K_ARRAY)
+      (do (let [ablob (vget h T_ARR (ld h l 0))
+                npos (vget h T_ARRD ablob)
+                w (vget h T_ARRD (+ ablob 1))
+                nc (vget h T_ARRD (+ ablob 2))
+                apb (+ (+ ablob 4) (* 2 w))
+                n (+ (+ 4 (* 2 w)) (+ (* 2 npos) (+ (* 2 nc) (* npos w))))]
+            (for [^I32 i2 0 n]
+              (comment "every word but the positions' typesets")
+              (let [at (+ ablob i2)]
+                (if (or (< at apb) (or (>= at (+ apb (* 2 npos))) (== (bit-and (- at apb) 1) 1)))
+                  (vpush1 h T_CSIG (vget h T_ARRD at))))))))
+    (if (== k K_MAP)
+      (do (let [blob (vget h T_MAP (ld h l 0))
+                nf (vget h T_MAPD blob)
+                np (vget h T_MAPD (+ blob 1))
+                na (vget h T_MAPD (+ blob 2))
+                fb (+ blob 4)
+                pb (+ fb (* 3 nf))
+                ab (+ pb (* 5 np))]
+            (vpush1 h T_CSIG nf) (vpush1 h T_CSIG np) (vpush1 h T_CSIG na)
+            (for [^I32 f 0 (* 3 nf)] (vpush1 h T_CSIG (vget h T_MAPD (+ fb f))))
+            (for [^I32 p 0 np]
+              (let [prec (+ pb (* 5 p))
+                    go (vget h T_MAPD (+ prec 1))
+                    gn (vget h T_MAPD (+ prec 2))]
+                (vpush1 h T_CSIG (vget h T_MAPD prec))
+                (vpush1 h T_CSIG gn)
+                (vpush1 h T_CSIG (vget h T_MAPD (+ prec 3)))
+                (vpush1 h T_CSIG (vget h T_MAPD (+ prec 4)))
+                (if (>= go 0)
+                  (for [^I32 g 0 gn]
+                    (vpush1 h T_CSIG (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 2))))
+                    (vpush1 h T_CSIG (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 3))))))))
+            (for [^I32 a 0 na]
+              (let [arec (+ ab (* 3 a))
+                    lo (+ blob (vget h T_MAPD (+ arec 1)))
+                    ln (vget h T_MAPD (+ arec 2))]
+                (vpush1 h T_CSIG (vget h T_MAPD arec))
+                (vpush1 h T_CSIG ln)
+                (for [^I32 i3 0 ln]
+                  (vpush1 h T_CSIG (vget h T_MAPD (+ lo (* 4 i3))))
+                  (vpush1 h T_CSIG (vget h T_MAPD (+ lo (+ (* 4 i3) 2))))
+                  (vpush1 h T_CSIG (vget h T_MAPD (+ lo (+ (* 4 i3) 3))))))))))))
+
+(defn child-sig [^Ints h ^I32 l]
+  (comment "Push, per child slot of l, the sorted set of its leaves' classes onto"
+           "T_CSIG (slot marker -1, then the count, then the classes).")
+  (let [cstart (vlen h T_CHILD)
+        cn (children h l T_CHILD)]
+    (for [^I32 j 0 cn]
+      (let [kind (vget h T_CHILD (+ cstart (* 2 j)))
+            id (vget h T_CHILD (+ cstart (+ (* 2 j) 1)))
+            at (vlen h T_CSIG)]
+        (vpush1 h T_CSIG (neg 1))
+        (vpush1 h T_CSIG 0)
+        (if (== kind 1)
+          (vpush1 h T_CSIG (vget h T_CLSID id))
+          (for [^I32 i 0 (ts-n h id)]
+            (let [x (vget h T_TSL (+ (ts-off h id) i))]
+              (if (not (dead h x)) (vpush1 h T_CSIG (vget h T_CLSID x))))))
+        (let [m (- (vlen h T_CSIG) (+ at 2))]
+          (sort-records h T_CSIG (+ at 2) m 1)
+          (comment "drop repeated classes (a set)")
+          (let [^:mut w (+ at 2)]
+            (for [^I32 u (+ at 2) (+ (+ at 2) m)]
+              (if (or (== u (+ at 2)) (!= (vget h T_CSIG u) (vget h T_CSIG (- u 1))))
+                (do (vset h T_CSIG w (vget h T_CSIG u)) (set w (+ w 1)))))
+            (vtrunc h T_CSIG w)
+            (vset h T_CSIG (+ at 1) (- w (+ at 2)))))))
+    (vtrunc h T_CHILD cstart)))
+
+(defn ^I32 sig-intern [^Ints h ^I32 start]
+  (comment "The index of the signature T_CSIG[start..] among this round's (equal"
+           "signatures share one; T_HSIG hashes them, T_NCLS holds (offset, length))."
+           "A repeated signature is cut from T_CSIG.")
+  (let [len (- (vlen h T_CSIG) start)
+        ^:mut hsh (mix 23 len)]
+    (if (not (charge h (+ 1 len))) (return (neg 1)))
+    (for [^I32 i 0 len]
+      (set hsh (mix hsh (vget h T_CSIG (+ start i)))))
+    (let [^:mut s (ht-start h T_HSIG hsh)]
+      (forever
+       (let [id (ht-id h T_HSIG s)]
+         (if (< id 0) (break))
+         (let [o (vget h T_NCLS (* 2 id))
+               n (vget h T_NCLS (+ (* 2 id) 1))]
+           (if (== n len)
+             (do (let [^:mut same true
+                       ^:mut q 0]
+                   (while (and same (< q len))
+                     (if (!= (vget h T_CSIG (+ o q)) (vget h T_CSIG (+ start q))) (set same false))
+                     (set q (+ q 1)))
+                   (if same (do (vtrunc h T_CSIG start) (return id)))))))
+         (set s (ht-next h T_HSIG s))))
+      (let [nid (quot (vlen h T_NCLS) 2)]
+        (vpush1 h T_NCLS start)
+        (vpush1 h T_NCLS len)
+        (if (not (ht-put h T_HSIG s nid hsh)) (return (neg 1)))
+        (return nid)))))
+
+(defn ^:pub ^I32 canonicalise [^Ints h]
+  (comment "Partition refinement over the live containers (see above); fills T_REP.")
+  (let [nl (nleaves h)]
+    (vtrunc h T_REP 0)
+    (vtrunc h T_CLSID 0)
+    (vtrunc h T_CONT 0)
+    (for [^I32 l 0 nl]
+      (vpush1 h T_REP l)
+      (vpush1 h T_CLSID l)
+      (if (and (not (dead h l)) (is-container h l)) (vpush1 h T_CONT l)))
+    (let [nc (vlen h T_CONT)]
+      (if (== nc 0) (return 0))
+      (comment "round 0: shapes")
+      (vtrunc h T_CSIG 0)
+      (vtrunc h T_NCLS 0)
+      (if (not (ht-init h T_HSIG 64)) (return (neg 1)))
+      (vtrunc h T_TMP 0)
+      (for [^I32 i 0 nc]
+        (let [c (vget h T_CONT i)
+              st (vlen h T_CSIG)]
+          (shape-sig h c)
+          (let [id (sig-intern h st)]
+            (if (< id 0) (return (neg 1)))
+            (vpush1 h T_TMP id))))
+      (let [^:mut classes (quot (vlen h T_NCLS) 2)]
+      (for [^I32 i2 0 nc]
+        (vset h T_CLSID (vget h T_CONT i2) (+ nl (vget h T_TMP i2))))
+      (comment "refine until stable")
+      (forever
+       (vtrunc h T_CSIG 0)
+       (vtrunc h T_NCLS 0)
+       (if (not (ht-init h T_HSIG 64)) (return (neg 1)))
+       (vtrunc h T_TMP 0)
+       (for [^I32 i3 0 nc]
+         (let [c3 (vget h T_CONT i3)
+               st3 (vlen h T_CSIG)]
+           (vpush1 h T_CSIG (vget h T_CLSID c3))
+           (child-sig h c3)
+           (let [id3 (sig-intern h st3)]
+             (if (< id3 0) (return (neg 1)))
+             (vpush1 h T_TMP id3))))
+       (let [nclasses (quot (vlen h T_NCLS) 2)]
+         (for [^I32 i4 0 nc]
+           (vset h T_CLSID (vget h T_CONT i4) (+ nl (vget h T_TMP i4))))
+         (if (== nclasses classes) (break))
+         (set classes nclasses)))
+      (comment "representatives: the first member of each class")
+      (vtrunc h T_TMP 0)
+      (for [^I32 _z 0 classes] (vpush1 h T_TMP (neg 1)))
+      (for [^I32 i5 0 nc]
+        (let [c5 (vget h T_CONT i5)
+              k5 (- (vget h T_CLSID c5) nl)]
+          (if (< (vget h T_TMP k5) 0)
+            (vset h T_TMP k5 c5)
+            (vset h T_REP c5 (vget h T_TMP k5)))))
+      (if (erred h) (return (neg 1)))
+      (return 0)))))
+
 ;; ------------------------------------------------------------ the plan
 
 (defn ^:pub ^I32 plan [^Ints h]
   (comment "Steps 1-2 of the namespace doc. Answers 0 or -1.")
   (mark-dead h)
+  (if (< (canonicalise h) 0) (return (neg 1)))
   (hs h H_TS_ANY (neg 1))
   (hs h H_N_FIN 0)
   (vtrunc h T_FIN 0)
@@ -842,10 +1044,10 @@
 
 (defn ^I32 cset-w [^IntsR h ^I32 c ^I32 w] (return (vget h T_CSD (+ (vget h T_CSET c) w))))
 
-(defn ^I32 chain-intern [^Ints h ^I32 from ^I32 n ^I32 rep]
+(defn ^I32 chain-intern [^Ints h ^I32 from ^I32 n ^I32 rp]
   (comment "The chain (n, repeat_from, csets T_CLS2[from..]) -- T_CHAIN indexes"
            "T_CHD records.")
-  (let [^:mut hsh (mix (mix 19 n) rep)]
+  (let [^:mut hsh (mix (mix 19 n) rp)]
     (for [^I32 i 0 n]
       (set hsh (mix hsh (vget h T_CLS2 (+ from i)))))
     (let [^:mut s (ht-start h T_HCHAIN hsh)]
@@ -853,7 +1055,7 @@
        (let [id (ht-id h T_HCHAIN s)]
          (if (< id 0) (break))
          (let [o (vget h T_CHAIN id)]
-           (if (and (== (vget h T_CHD o) n) (== (vget h T_CHD (+ o 1)) rep))
+           (if (and (== (vget h T_CHD o) n) (== (vget h T_CHD (+ o 1)) rp))
              (do (let [^:mut same true]
                    (for [^I32 j 0 n]
                      (if (!= (vget h T_CHD (+ o (+ 2 j))) (vget h T_CLS2 (+ from j))) (set same false)))
@@ -863,7 +1065,7 @@
             at (vlen h T_CHD)]
         (vpush1 h T_CHAIN at)
         (vpush1 h T_CHD n)
-        (vpush1 h T_CHD rep)
+        (vpush1 h T_CHD rp)
         (for [^I32 q 0 n]
           (vpush1 h T_CHD (vget h T_CLS2 (+ from q))))
         (if (erred h) (return (neg 1)))
@@ -880,7 +1082,7 @@
         base (vlen h T_CLS2)
         width (hg h H_LIM_WIDTH)
         nl (hg h H_N_FIN)
-        ^:mut rep (neg 1)]
+        ^:mut repeat (neg 1)]
     (comment "R_0")
     (vtrunc h T_CLS 0)
     (let [ep0 (next-epoch h)]
@@ -919,7 +1121,7 @@
              (if (< c 0) (return (neg 1)))
              (for [^I32 q 0 n]
                (if (and (< seen 0) (== (vget h T_CLS2 (+ base q)) c)) (set seen q)))
-             (if (>= seen 0) (do (set rep seen) (break)))
+             (if (>= seen 0) (do (set repeat seen) (break)))
              (vpush1 h T_CLS2 c))))))
     (let [n2 (- (vlen h T_CLS2) base)
           ^:mut sumf 0
@@ -928,15 +1130,15 @@
       (for [^I32 k 0 (+ d 1)]
         (let [^:mut idx k]
           (if (>= k n2)
-            (if (< rep 0)
+            (if (< repeat 0)
               (set idx (neg 1))
-              (set idx (+ rep (rem2 (- k rep) (- n2 rep))))))
+              (set idx (+ repeat (rem2 (- k repeat) (- n2 repeat))))))
           (if (>= idx 0)
             (do (let [cs (vget h T_CLS2 (+ base idx))]
                   (set sumf (+ sumf (cset-w h cs 1)))
                   (if (> (cset-w h cs 2) maxr) (set maxr (cset-w h cs 2))))))))
       (hs h H_R0 (+ (+ (+ 48 (* 2 nl)) (* 2 (+ d 1))) (+ maxr sumf)))
-      (let [ch (chain-intern h base n2 rep)]
+      (let [ch (chain-intern h base n2 repeat)]
         (vtrunc h T_CLS2 base)
         (return ch)))))
 
