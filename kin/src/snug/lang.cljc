@@ -86,6 +86,14 @@
   needed."
   {:name 'Ints :types {:js "Int32Array" :rust "&mut [i32]"}})
 
+(def BytesW
+  "A WRITABLE run of bytes (the writer's output buffer and its scratch,
+  P5.4): `Uint8Array` / `&mut [u8]`. `u8` and `blen` read it as they read
+  `Bytes`; `bset` writes one byte and `bcopy` copies a range from ANOTHER
+  buffer. Same borrow rules as `Ints`; a `BytesW` may be passed where a
+  `Bytes` is taken (Rust reborrows `&mut [u8]` as `&[u8]`)."
+  {:name 'BytesW :types {:js "Uint8Array" :rust "&mut [u8]"}})
+
 ;; ---------------------------------------------------------------- the forms
 
 (defn- op
@@ -122,6 +130,37 @@
                (case (:target ctx)
                  :js (str a "[" i "] = " v ";\n")
                  :rust (str a "[(" i ") as usize] = " v ";\n")))))
+
+(defn- bset-form
+  "`(bset b i v)` -- a statement: byte i of a `BytesW` becomes the LOW 8 BITS
+  of v (a `Uint8Array` store truncates; Rust `as u8` truncates). Unchecked,
+  like `iset`: the source checks i."
+  [ctx form]
+  (when-not (and (= 4 (count form)) (= :statement (kin/position ctx)))
+    (throw (ex-info "snug: `(bset b i v)` is a statement of three arguments"
+                    {:form form})))
+  (let [[b i v] (map (fn [x] (kin/render ctx x)) (rest form))
+        i (kl/strip-parens i)
+        v (kl/strip-parens v)]
+    (kin/emit! ctx (kin/indent-of ctx)
+               (case (:target ctx)
+                 :js (str b "[" i "] = " v ";\n")
+                 :rust (str b "[(" i ") as usize] = (" v ") as u8;\n")))))
+
+(defn- bcopy-form
+  "`(bcopy dst at src s n)` -- a statement: dst[at..at+n) = src[s..s+n), for
+  two DIFFERENT buffers (Rust cannot borrow one slice twice). Unchecked: the
+  source checks both ranges (Rust would panic, JS would clamp silently)."
+  [ctx form]
+  (when-not (and (= 6 (count form)) (= :statement (kin/position ctx)))
+    (throw (ex-info "snug: `(bcopy dst at src s n)` is a statement of five arguments"
+                    {:form form})))
+  (let [[d at src s n] (map (fn [x] (kl/strip-parens (kin/render ctx x))) (rest form))]
+    (kin/emit! ctx (kin/indent-of ctx)
+               (case (:target ctx)
+                 :js (str d ".set(" src ".subarray(" s ", (" s ") + (" n ")), " at ");\n")
+                 :rust (str d "[(" at ") as usize..((" at ") + (" n ")) as usize]"
+                            ".copy_from_slice(&" src "[(" s ") as usize..((" s ") + (" n ")) as usize]);\n")))))
 
 (def forms
   {;; arithmetic the source guarantees not to overflow (see the ns doc)
@@ -161,12 +200,14 @@
    'ia (op "{0}[{1}]" "{0}[({1}) as usize]" I32)
    'ilen (op "{0}.length" "({0}.len() as i32)" I32)
    'iset iset-form
+   'bset bset-form
+   'bcopy bcopy-form
    'hex hex-form})
 
 (def vocabulary
   {:namespace 'snug.lang
    :targets #{:js :rust}
-   :tags {'I32 I32 'Bool Bool 'Bytes Bytes 'Ints Ints 'IntsR IntsR 'Str Str}
+   :tags {'I32 I32 'Bool Bool 'Bytes Bytes 'BytesW BytesW 'Ints Ints 'IntsR IntsR 'Str Str}
    :names {}
    :forms forms
    ;; An unannotated integer literal is an I32 and `true`/`false` a Bool, so a
