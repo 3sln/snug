@@ -709,6 +709,8 @@
       (let [l3 (fin-internal h f3)]
         (if (and (== (lk h l3) K_BYTES) (>= (ld h l3 2) 0)) (pool-place h (ld h l3 2)))))
     (if (> (vlen h T_POOL) (hg h H_LIM_POOL)) (return (fail h ERR_LIM_POOL (neg 1))))
+    (comment "§5.1: pool bytes are charged too.")
+    (if (not (charge h (vlen h T_POOL))) (return (neg 1)))
     (if (erred h) (return (neg 1)))
     (return 0)))
 

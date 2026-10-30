@@ -62,6 +62,15 @@ function floats(h, bytes) {
 
 /** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md, format 1). */
 export function compile(text, { profile = 'full', limits = {} } = {}) {
+  try { return compileOnce(text, profile, limits); }
+  finally {
+    // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
+    if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
+  }
+}
+const RETAIN_WORDS = 1 << 22;
+
+function compileOnce(text, profile, limits) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const opt = options(profile, limits);

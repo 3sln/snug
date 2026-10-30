@@ -914,6 +914,10 @@ pub fn build_pool(h: &mut [i32]) -> i32 {
     if vlen(h, T_POOL) > hg(h, H_LIM_POOL) {
         return fail(h, ERR_LIM_POOL, -1);
     }
+    // §5.1: pool bytes are charged too.
+    if !charge(h, vlen(h, T_POOL)) {
+        return -1;
+    }
     if erred(h) {
         return -1;
     }

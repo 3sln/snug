@@ -55,7 +55,7 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
         opt[i + 1] = *v;
     }
     let mut fl: Vec<i32> = Vec::new();
-    ARENA.with(|cell| {
+    let r = ARENA.with(|cell| {
         let mut h = cell.borrow_mut();
         loop {
             let code = kc::compile_schema(bytes, &opt, &fl, &mut h);
@@ -105,8 +105,18 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
             let rules = rule_names(&program, &pool);
             return Ok(Compiled { program, pool, rules });
         }
-    })
+    });
+    // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the thread's life.
+    ARENA.with(|cell| {
+        let mut h = cell.borrow_mut();
+        if h.len() > RETAIN_WORDS {
+            *h = vec![0; ARENA_MIN_WORDS as usize];
+        }
+    });
+    r
 }
+
+const RETAIN_WORDS: usize = 1 << 22;
 
 fn floats(h: &[i32], bytes: &[u8]) -> Vec<i32> {
     // D020/D032: kin found decimal float literals it cannot round itself.
