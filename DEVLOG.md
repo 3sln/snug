@@ -856,7 +856,84 @@ slower); allocated head tuples; validating wrapper constructors in build
   module 10.5 KB min / 4.0 KB gzip alone, 26 KB / 9.5 KB bundled with scan
   and build.
 - [ ] **P5.3 — Position-aware subtree validation** (lazy `validate()`).
-- [ ] **P5.4 — Builder** (kin deterministic core + JS writer); `encode` over it.
+- [~] **P5.4 — Builder** (kin deterministic core + JS writer); `encode` over it.
+
+  *Status 2026-10-29 (writer engineer): built and gated; `[~]` until the
+  owner disposes of D070–D074 (the D004 refinement in particular).*
+  Commits `200fba1` (vocabulary), `4b9365d` (primitives, Writer, gates),
+  `418e219` (encode over the Writer, sort-keys, bench).
+  **kin** (`kin/write/*.kin`, `snug.write.*`, D074): `put-head` (shortest
+  head from a 64-bit hi:lo), `float-width`/`put-float` (binary64 bits →
+  refusal or the shortest exact f16/f32/f64, the inverse of
+  `snug.cbor.float`), `put-int`/`int-len` (sign + magnitude bytes → major 0/1
+  or tag 2/3 with 9..128 minimal bytes, else `bignum`), `compare-in`/
+  `key-after` (encoded-key order), `close-map` (one map's complete pair
+  ranges: n − 1 comparisons and no copy when already sorted, else a stable
+  bottom-up merge sort of pair indices, duplicates refused where met, then a
+  permutation through a scratch area) and `sort-keys` (orders keys before
+  their values exist). Every write checks capacity first and answers
+  `-(WR_NEED + need)` instead of overflowing; comparisons are charged
+  against a budget (D070, D073). `snug.lang` gained `BytesW`, `bset`,
+  `bcopy` (additive). **JS** `host/js/src/writer.mjs`: `new Writer({cose,
+  keysSorted, omitUndefined, limits})`; `uint`, `int`, `bigint`, `float`,
+  `bool`, `null`, `text`, `bytes`, `typed`, `decimal`, `ndarray`, `value`
+  (any host value, encode's rules), `beginArray(n)`, `beginMap(n)`,
+  `key(k)`, `end()`, `finish()`, `failure` (D071). `encode(value, opts)` is
+  now `new Writer(opts).value(value).finish()` (D072); the Phase 2 encoder is
+  frozen at `bench/baseline/encode-p2.mjs` as baseline and test oracle.
+  **Rust**: the same primitives (`gen/rust/snug/write`) and a minimal Writer
+  (`host/rust/write/writer.rs`: integers as magnitude bytes, float bits,
+  text, bytes, bool, null, arrays, text-key maps, keysSorted) for the parity
+  gate.
+  **Gates run 2026-10-29** (all green): `bb write-test` (3000 seeded cases
+  per arm, seed 1): put-head 3000/3000 JS == Rust, 2020/2020 written heads
+  equal an independent BigInt encoding; floats 5213/5213 JS == Rust (every
+  f16/f32 exponent, f64/f32/f16 subnormals and edges, ±0, NaN payloads, ±∞,
+  random bits), 3999/3999 written floats equal cbor.mjs's encoding and pass
+  the scanner, 447/447 refusals are numbers cbor.mjs writes as integers or
+  refuses; put-int 3000/3000, 2615/2615 equal cbor.mjs, 206/206 bignum
+  refusals; key-after 1500/1500; close-map 3000/3000 JS == Rust, 1532/1532
+  sorted maps equal an independent sort, 1003/1003 duplicate answers
+  justified, comparisons within n − 1 + n⌈log₂ n⌉; sort-keys 3000/3000,
+  2545/2545 orders equal an independent stable sort; Writer streams
+  4500/4500 identical across hosts (3000 values with shuffled keys + 1500
+  misuse/keysSorted streams), 3000/3000 equal cbor.mjs's encode;
+  robustness 3000/3000 junk-argument calls identical, 0 Rust panics, 0 JS
+  throws. `node --test test/writer.test.mjs` 9/9: every accepted vector
+  (389) re-encodes byte for byte through value() and typed calls with keys
+  given, sorted and shuffled; 3000 seeded values: Writer (4 ways) == P2
+  encoder == cbor.mjs, every output passes decode() (the generated scanner)
+  and round-trips build(); 200 wide/nested shuffled maps; 30 refusal cases
+  with encode's codes and no payload in messages; 24 limit cases equal to
+  the P2 encoder and cbor.mjs; grammar misuse (17 cases: too many/few,
+  value without key, key without value, key outside a map, end() mismatch,
+  two roots, finish early, bad counts) throws and every later call throws
+  `writer_failed`. `npm test` 585/585 with encode over the Writer;
+  view/sources tests 99/99 together with writer's; `bb nav-test` green;
+  `bb drift` green (run in a clean worktree of `418e219`). Mutants (gen JS
+  edited, restored): no permutation, head boundary 24→25, f32-subnormal
+  shift each turn the writer tests red (the last only after adding
+  subnormal cases); f16 exponent 15→16 is equivalent (those values are
+  integers, refused first).
+  **Measured** (bench/WRITER.md, M1 Pro, Node 24.6, loaded): encode over
+  the Writer is not slower than the P2 encoder anywhere (CPU-time A/B
+  within 1 % on integers and typed arrays) and 1.2–1.7× faster on map-heavy
+  bodies; typed calls with keys in order 3.4–6× the P2 encoder on maps,
+  the document and integers; typed calls with shuffled keys move values (2×
+  on the 1 MiB bstr put). Bundle: writer 7.1 KB min+gzip vs the P2
+  encoder's 4.2 KB.
+  **Learnt**: ordering keys before writing values (an object walk knows its
+  keys) beats both a JS comparator over tuples and a byte permutation after
+  the fact; the permutation is for streamed typed calls only. The
+  dense-array check (`Reflect.ownKeys`, 120 000 index strings) dominates
+  encoding a 120 000-integer array in both encoders (~10 ms; typed calls
+  writing the same heads take 1.7 ms). Open: the +3 KB against R9; the comparison budget
+  is not exposed as a limit (hosts pass 2³¹ − 1); the grammar lives in each
+  host, not kin (review V17 asked for a portable grammar in kin; the brief
+  kept it host-side, D071); the Rust Writer has no typed arrays, decimals,
+  ndarrays, cose labels or value walk; `maxBytes` is checked at finish, as
+  the P2 encoder did, so growth is not capped before it; `test/index.js`
+  (npm test) does not import writer.test.mjs (not this item's file).
 - [ ] **P5.5 — Benchmarks** (one field from 1.4 MB; writer vs encode vs cbor.mjs).
 
 ## Phase 6 — Sources: blob handles and streams (D027)
@@ -1651,6 +1728,103 @@ output) and built by `kin/scripts/nav-crate` with the Rust view and the
 break the other crates' SNUG_RS_ONLY module subsets.
 **Alternatives**: flat `kin/nav.kin` (blocked whenever a flat source is
 mid-edit).
+- [ ] **Signed off** (owner)
+
+### D070 — The host-to-kin writer representation
+**Decision**: kin writes into a caller-owned writable byte buffer (`BytesW`:
+`Uint8Array` / `&mut [u8]`, with `bset`/`bcopy` added to `snug.lang`) at an
+explicit position. Arguments arrive as integers only: a head's 64-bit
+argument as two i32 halves; an integer of any size as a sign and the
+big-endian magnitude bytes of its CBOR argument (n, or −1 − n), leading
+zeros allowed; a float as its binary64 bits (the host's only float act is
+`Float64Array` aliasing); text as UTF-8 bytes the host produced after its
+admissibility check. Every write checks the room it needs first and, when
+short, writes nothing and answers `-(WR_NEED + need)` (WR_NEED = 64, above
+every refusal code); other negatives are negated cbor.mjs codes. The host
+grows and calls again.
+**Why**: review V17 asked for a small specified representation; this keeps
+every byte decision (head width, float width, bignum form, key order) in
+kin and memory in the host, with no overflow path in either target.
+**Alternatives**: one byte per i32 in an `Ints` buffer (4× memory, a copy
+out); hosts pre-reserving 9 bytes per head (moves the capacity rule into
+each host); a separate state array for the "short" answer (an extra argument
+on every call).
+- [ ] **Signed off** (owner)
+
+### D071 — Writer grammar and failure contract
+**Decision**: a host state machine (JS `Writer`, Rust `writer.rs`): one root;
+an open array owes exactly n values, a map exactly n key/value pairs with
+`key()` required before each value; `end()` only when the open container is
+complete; `finish()` only with the root complete, returning a copy, after
+which the writer is finished. Misuse throws `SnugFault('grammar')`; a
+wrong argument type or value (`int(1.5)`, `int(-0)`, `uint(-1)`,
+`uint(2n**64n)`, `typed(Uint8Array)`) throws `unsupported`; profile refusals
+throw cbor.mjs's codes (`float`, `text`, `key_type`, `bignum`, `depth`,
+`too_many_items`, ...). Any error leaves the writer failed: every later call
+throws `writer_failed`; `failure` reports the first code. `float(x)` refuses
+integral values within ±(2^53−1) (code `float`; use `int`/`value`), never
+normalising. `keysSorted: true` checks each key against the previous one
+(`key_order`, `duplicate_key`); otherwise keys may come in any order and are
+sorted at `end()`. Keys are text; integer labels only in the top-level map
+with `cose`. `typed`, `decimal`, `ndarray` and `value` write complete
+values with encode's counting and depth rules; `maxBytes` (only when given)
+is checked at `finish()`, as the P2 encoder did.
+**Why**: review V16's cases each have one answer; sticky failure means no
+partial output can be finished; refusing integral floats keeps one encoding
+per value without silent conversion.
+**Alternatives**: the grammar in kin (V17's suggestion; the item brief kept
+it host-side, and it is host state the hosts must own anyway — recorded as
+open); transactional rollback instead of sticky failure; normalising
+integral floats to integers.
+- [ ] **Signed off** (owner)
+
+### D072 — `encode()` is the object walk over the Writer
+**Decision**: `encode(value, opts)` = `new Writer(opts).value(value)
+.finish()`, with unchanged semantics, options and refusal codes; the Phase 2
+encoder is kept frozen at `bench/baseline/encode-p2.mjs` as the §16.5
+baseline and as a test oracle. This refines D004: the host still owns the
+value model and admissibility, but the encoder's byte decisions are now
+kin's.
+**Why**: the item's condition held: measured not slower on any of
+bench/codec.mjs's workloads and 1.2–1.7× faster on map-heavy ones
+(bench/WRITER.md); one implementation of the deterministic choices instead
+of two.
+**Alternatives**: keep the P2 encoder as `encode` and offer the Writer
+beside it (no speed reason to; two shortest-form implementations); a
+host-side key sort with kin verification only (not measured: a JS
+comparator plus n − 1 kin comparisons per map). Cost: +3 KB min+gzip.
+- [ ] **Signed off** (owner)
+
+### D073 — Two map-ordering paths, both kin
+**Decision**: streamed typed calls close a map with `close-map`: complete
+`[key || value]` ranges from a pair table of offsets, the already-sorted
+case n − 1 comparisons and no copy, else a stable merge sort of indices and
+one permutation through scratch (map content copied twice; a byte at depth D
+can move at D map ends). The object walk orders keys first with
+`sort-keys` (keys encoded into a scratch buffer, ordered, then each pair
+written in order), so no value moves. Both charge each comparison against a
+budget (`WR_BUDGET` when exceeded); hosts pass 2^31 − 1 until a writer
+limit exists. Duplicates are refused where the sort meets them (a
+comparison sort compares every two keys adjacent in the final order).
+Nested maps close before their parent, offsets survive buffer growth, and
+no position inside a closed map is kept.
+**Why**: review V15's ownership and offset rules; the measurement that
+moving values is the cost (1 MiB bstr put 0.83 vs 0.40 ms) and that
+ordering keys first is cheaper than the P2 encoder's tuple sort.
+**Alternatives**: always permuting (the walk would move every value); a
+cycle-following in-place permutation without scratch (O(1) memory, more
+code, same copies); insertion sort for small maps (not measured).
+- [ ] **Signed off** (owner)
+
+### D074 — Writer sources live in kin/write with their own emit, crate and gate
+**Decision**: `kin/write/*.kin` (`snug.write.*`, listed in
+`snug.project/source-subdirs`), emitted alone by `kin/scripts/write-emit`
+(with `codes.kin`/`float.kin`, identical output), built by
+`kin/scripts/write-crate` with `host/rust/write/{writer,write-test}.rs`,
+gated by `bb write-test` — the D055 arrangement.
+**Why**: the flat sources and the VM's are other engineers' active work;
+this keeps the writer's gates independent of their mid-edit state.
+**Alternatives**: flat `kin/write.kin` (blocked by any mid-edit flat source).
 - [ ] **Signed off** (owner)
 
 ## Findings
