@@ -1,0 +1,104 @@
+;; The writer's deterministic core (architecture §16.5, P5.4): CBOR heads in
+;; shortest form, written into a caller-owned output buffer by integer
+;; operations only (D009). A head's argument is up to 64 bits and arrives as
+;; two i32 halves (hi, lo) of its bit pattern; nothing becomes a host number.
+;;
+;; CAPACITY. No function here writes past the buffer: each checks the room it
+;; needs BEFORE writing anything and, when the buffer is too short, writes
+;; nothing and answers `(too-short need)` = -(WR_NEED + need), where `need` is the
+;; number of bytes the write needs from `at`. The host grows the buffer to
+;; at least at + need and calls again. Every other negative answer is a
+;; NEGATED profile refusal code (1..21, snug.cbor.codes), so the two never
+;; collide: a short answer is always <= -(WR_NEED + 1).
+(ns snug.write.out
+  (:require [kin.lang :refer [defn defconst let return set if do while comment]]
+            [snug.lang :refer [I32 Bool Bytes BytesW + - neg shl ushr bit-and bit-or
+                               < > <= >= == != or ult u8 blen bset]]
+            [snug.cbor.codes :refer [CODE_MALFORMED CODE_KEY_ORDER CODE_DUPLICATE_KEY]]))
+
+(defconst ^:pub ^I32 WR_NEED 64)
+
+(defn ^:pub ^I32 too-short [^I32 need]
+  (comment "The answer for an output buffer too short for a write of `need` bytes.")
+  (return (- (neg WR_NEED) need)))
+
+(defn ^:pub ^I32 short-need [^I32 r]
+  (comment "The `need` of a short answer r (r <= -(WR_NEED + 1)); 0 for anything else.")
+  (if (> r (- (neg WR_NEED) 1)) (return 0))
+  (return (- (neg r) WR_NEED)))
+
+(defn ^:pub ^Bool room [^Bytes out ^I32 at ^I32 need]
+  (comment "Do `need` bytes fit at `at` (0 <= at <= length)?")
+  (return (<= need (- (blen out) at))))
+
+(defn ^:pub put32 [^BytesW out ^I32 at ^I32 v]
+  (comment "The big-endian 32-bit word v at at (the caller checked the room).")
+  (bset out at (ushr v 24))
+  (bset out (+ at 1) (ushr v 16))
+  (bset out (+ at 2) (ushr v 8))
+  (bset out (+ at 3) v))
+
+(defn ^:pub ^I32 head-len [^I32 hi ^I32 lo]
+  (comment "Bytes in the shortest head whose argument is the 64-bit hi:lo (unsigned).")
+  (if (!= hi 0) (return 9))
+  (if (ult lo 24) (return 1))
+  (if (ult lo 256) (return 2))
+  (if (ult lo 65536) (return 3))
+  (return 5))
+
+(defn ^:pub ^I32 put-head [^BytesW out ^I32 at ^I32 major ^I32 hi ^I32 lo]
+  (comment "The shortest head of major type `major` (0..7) and argument hi:lo at"
+           "`at`; answers the position after it, or `(too-short need)`. RFC 8949"
+           "§4.2.1: the argument in the fewest of 0, 1, 2, 4 or 8 bytes.")
+  (if (or (< at 0) (> at (blen out))) (return (neg CODE_MALFORMED)))
+  (let [n (head-len hi lo)
+        m (shl (bit-and major 7) 5)]
+    (if (> n (- (blen out) at)) (return (too-short n)))
+    (if (== n 1)
+      (do (bset out at (bit-or m lo))
+          (return (+ at 1))))
+    (if (== n 2)
+      (do (bset out at (bit-or m 24))
+          (bset out (+ at 1) lo)
+          (return (+ at 2))))
+    (if (== n 3)
+      (do (bset out at (bit-or m 25))
+          (bset out (+ at 1) (ushr lo 8))
+          (bset out (+ at 2) lo)
+          (return (+ at 3))))
+    (if (== n 5)
+      (do (bset out at (bit-or m 26))
+          (put32 out (+ at 1) lo)
+          (return (+ at 5))))
+    (bset out at (bit-or m 27))
+    (put32 out (+ at 1) hi)
+    (put32 out (+ at 5) lo)
+    (return (+ at 9))))
+
+(defn ^:pub ^I32 compare-in [^Bytes b ^I32 s1 ^I32 e1 ^I32 s2 ^I32 e2]
+  (comment "<0, 0 or >0 as b[s1..e1) sorts before, equal to or after b[s2..e2):"
+           "RFC 8949 §4.2.1 bytewise order of two ENCODED keys, shorter first when"
+           "one is a prefix of the other. The caller checked both spans.")
+  (let [l1 (- e1 s1)
+        l2 (- e2 s2)
+        ^:mut m l1
+        ^:mut i 0]
+    (if (< l2 m) (set m l2))
+    (while (< i m)
+      (let [x (u8 b (+ s1 i))
+            y (u8 b (+ s2 i))]
+        (if (!= x y) (return (- x y)))
+        (set i (+ i 1))))
+    (return (- l1 l2))))
+
+(defn ^:pub ^I32 key-after [^Bytes b ^I32 ps ^I32 pe ^I32 ks ^I32 ke]
+  (comment "A key supplied in order (`keysSorted`): 0 when the encoded key"
+           "b[ks..ke) sorts strictly after the previous key b[ps..pe); else"
+           "duplicate_key (equal) or key_order (before), negated. The spans must be"
+           "non-empty, in order and inside b (else malformed: a host bug).")
+  (if (or (< ps 0) (or (>= ps pe) (or (> pe ks) (or (>= ks ke) (> ke (blen b))))))
+    (return (neg CODE_MALFORMED)))
+  (let [c (compare-in b ps pe ks ke)]
+    (if (< c 0) (return 0))
+    (if (== c 0) (return (neg CODE_DUPLICATE_KEY)))
+    (return (neg CODE_KEY_ORDER))))

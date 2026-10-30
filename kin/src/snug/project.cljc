@@ -10,9 +10,9 @@
 
 (def source-subdirs
   "Subdirectories of kin/ whose sources belong to the project too (the CDDL
-  compiler and the Program verifier, P3.2/P3.3; navigation, P5). Their labels carry the
+  compiler and the Program verifier, P3.2/P3.3; navigation, P5; the writer, P5.4). Their labels carry the
   directory: `compile/lex.kin`."
-  ["compile" "program" "nav"])
+  ["compile" "program" "nav" "write"])
 
 (defn source-vfs
   "kin/*.kin plus kin/<dir>/*.kin for each of `source-subdirs`: kin's disk vfs

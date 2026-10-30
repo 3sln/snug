@@ -25,5 +25,7 @@
               :task (apply shell "node" "corpus/tools/crate-diff.mjs" *command-line-args*)}
   nav-test   {:doc "P5: kin navigation primitives on JS and Rust -- trace identity, truth vs the builder, unchecked-input robustness, Rust View paths."
               :task (apply shell "kin/scripts/nav-test" *command-line-args*)}
+  write-test {:doc "P5.4: kin writer primitives on JS and Rust -- heads, float widths, integers, key order, close-map, Writer streams; truth vs cbor.mjs and the scanner; robustness."
+              :task (apply shell "kin/scripts/write-test" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

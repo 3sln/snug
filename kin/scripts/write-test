@@ -1,0 +1,16 @@
+#!/bin/sh
+# P5.4 writer gates on JS and Rust (kin/scripts/write-test.mjs says which):
+#
+#     kin/scripts/write-test [cases] [seed]
+#
+# Emits the writer sources (kin/scripts/write-emit) so the gate runs what the
+# sources say, then builds the write crate in DEBUG (overflow checks on).
+set -e
+cd "$(dirname "$0")/../.."
+bb -cp kin/src:../kin/src kin/scripts/write-emit > /dev/null
+crate=.cache/snug-write-gate
+kin/scripts/write-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin write-test 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/write-test.mjs "$crate/target/debug/write-test" "$@"

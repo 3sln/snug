@@ -1,0 +1,61 @@
+;; Integers of any size from magnitude bytes (P5.4). The host hands in the
+;; big-endian bytes of a CBOR integer's ARGUMENT (n for n >= 0, -1 - n for a
+;; negative n) and its sign; kin decides the form: a major 0/1 head when the
+;; argument fits 64 bits, else a bignum (tag 2 or 3) whose byte string is the
+;; argument in minimal bytes (no leading zero), 9..128 bytes (profile §2;
+;; MAX_BIGNUM_BYTES). Leading zero bytes in the input are allowed and dropped.
+(ns snug.write.int
+  (:require [kin.lang :refer [defn let return set if do while for comment]]
+            [snug.lang :refer [I32 Bytes BytesW + - neg shl ushr bit-or
+                               < > <= >= == != and or u8 blen bset bcopy hex]]
+            [snug.cbor.codes :refer [CODE_BIGNUM CODE_MALFORMED MAX_BIGNUM_BYTES]]
+            [snug.write.out :refer [too-short head-len put-head]]))
+
+(defn ^:pub ^I32 first-nonzero [^Bytes m ^I32 ms ^I32 me]
+  (comment "The first index in m[ms..me) holding a non-zero byte, or me.")
+  (let [^:mut s ms]
+    (while (and (< s me) (== (u8 m s) 0))
+      (set s (+ s 1)))
+    (return s)))
+
+(defn ^:pub ^I32 int-len [^Bytes m ^I32 ms ^I32 me]
+  (comment "Bytes put-int writes for this argument, or (neg CODE_BIGNUM) beyond"
+           "128 magnitude bytes (the caller checked the span).")
+  (let [s (first-nonzero m ms me)
+        len (- me s)]
+    (if (> len MAX_BIGNUM_BYTES) (return (neg CODE_BIGNUM)))
+    (if (> len 8) (return (+ (+ 1 (head-len 0 len)) len)))
+    (if (> len 4) (return 9))
+    (if (> len 2) (return 5))
+    (if (== len 2) (return 3))
+    (if (== len 0) (return 1))
+    (if (< (u8 m s) 24) (return 1))
+    (return 2)))
+
+(defn ^:pub ^I32 put-int [^BytesW out ^I32 at ^I32 negative ^Bytes m ^I32 ms ^I32 me]
+  (comment "The integer whose argument is the big-endian magnitude m[ms..me)"
+           "(negative != 0: major 1 / tag 3) at `at`: the position after it,"
+           "(neg CODE_BIGNUM) beyond 128 magnitude bytes, or `(too-short need)`.")
+  (if (or (< at 0) (> at (blen out))) (return (neg CODE_MALFORMED)))
+  (if (or (< ms 0) (or (> ms me) (> me (blen m)))) (return (neg CODE_MALFORMED)))
+  (let [s (first-nonzero m ms me)
+        len (- me s)
+        ^:mut major 0]
+    (if (!= negative 0) (set major 1))
+    (if (<= len 8)
+      (do (let [^:mut hi 0
+                ^:mut lo 0]
+            (for [^I32 i s me]
+              (set hi (bit-or (shl hi 8) (ushr lo 24)))
+              (set lo (bit-or (shl lo 8) (u8 m i))))
+            (return (put-head out at major hi lo)))))
+    (if (> len MAX_BIGNUM_BYTES) (return (neg CODE_BIGNUM)))
+    (comment "0xc2/0xc3, then the byte string's shortest head (9..23 bytes fit in"
+             "the head byte, 24..128 take one length byte), then the bytes.")
+    (let [h (head-len 0 len)
+          need (+ (+ 1 h) len)]
+      (if (> need (- (blen out) at)) (return (too-short need)))
+      (bset out at (+ (hex 194) major))
+      (let [q (put-head out (+ at 1) 2 0 len)]
+        (bcopy out q m s len)
+        (return (+ q len))))))

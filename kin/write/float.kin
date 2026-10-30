@@ -1,0 +1,91 @@
+;; Float width selection by bit tests (P5.4): given the binary64 bit pattern
+;; of a finite number as two i32 halves, refuse what the profile refuses as a
+;; scalar float (NaN, ±∞, ±0, and an integral value of magnitude at most
+;; 2^53 - 1), else choose the SHORTEST of float16, float32 and float64 that
+;; holds it exactly and write it. The exact inverse of snug.cbor.float's
+;; checks: a pattern written here is accepted there and never non_shortest.
+;; No host float is made; the host hands in the bits.
+(ns snug.write.float
+  (:require [kin.lang :refer [defn let return if do comment]]
+            [snug.lang :refer [I32 BytesW + - neg shl sar ushr bit-and bit-or
+                               < > <= >= == != and or blen bset hex]]
+            [snug.cbor.codes :refer [CODE_FLOAT CODE_MALFORMED]]
+            [snug.cbor.float :refer [low-zero low-zero64]]
+            [snug.write.out :refer [too-short put32]]))
+
+(defn ^:pub ^I32 float-width [^I32 hi ^I32 lo]
+  (comment "2, 4 or 8: the shortest encoded width holding binary64 hi:lo exactly;"
+           "or (neg CODE_FLOAT) for NaN, an infinity, a zero of either sign, or an"
+           "integer of magnitude below 2^53.")
+  (let [e (bit-and (sar hi 20) (hex 2047))
+        mh (bit-and hi (hex 1048575))]
+    (if (== e 2047) (return (neg CODE_FLOAT)))
+    (if (== e 0)
+      (do (if (and (== mh 0) (== lo 0)) (return (neg CODE_FLOAT)))
+          (comment "Subnormal binary64: below float32's range.")
+          (return 8)))
+    (let [x (- e 1023)]
+      (if (and (>= x 0) (<= x 52))
+        (if (low-zero64 mh lo (- 52 x)) (return (neg CODE_FLOAT))))
+      (comment "float16: normal (exponent -14..15, 10 fraction bits: the low 42 of"
+               "52 zero) or subnormal (exponent -24..-15, a multiple of 2^-24).")
+      (if (and (>= x (neg 14)) (<= x 15))
+        (if (and (== lo 0) (low-zero mh 10)) (return 2)))
+      (if (and (>= x (neg 24)) (<= x (neg 15)))
+        (if (low-zero64 mh lo (- 28 x)) (return 2)))
+      (comment "float32: normal (exponent -126..127, 23 fraction bits: the low 29"
+               "zero) or subnormal (exponent -149..-127, a multiple of 2^-149).")
+      (if (and (>= x (neg 126)) (<= x 127))
+        (if (low-zero lo 29) (return 4)))
+      (if (and (>= x (neg 149)) (<= x (neg 127)))
+        (if (low-zero64 mh lo (- (neg 97) x)) (return 4)))
+      (return 8))))
+
+(defn ^:pub ^I32 f16-bits [^I32 hi]
+  (comment "The float16 pattern of binary64 hi:lo, which float-width chose 2 for"
+           "(the low half is zero or below float16's precision: not needed).")
+  (let [s (bit-and (ushr hi 16) (hex 32768))
+        x (- (bit-and (sar hi 20) (hex 2047)) 1023)
+        mh (bit-and hi (hex 1048575))]
+    (if (>= x (neg 14))
+      (return (bit-or s (bit-or (shl (+ x 15) 10) (ushr mh 10)))))
+    (comment "Subnormal: (2^52 + m) / 2^(28 - x), and 28 - x is 43..52, so only"
+             "the high half (21 bits with the implicit one) contributes.")
+    (return (bit-or s (ushr (bit-or mh (hex 1048576)) (- (neg 4) x))))))
+
+(defn ^:pub ^I32 f32-bits [^I32 hi ^I32 lo]
+  (comment "The float32 pattern of binary64 hi:lo, which float-width chose 4 for.")
+  (let [s (bit-and hi (shl 1 31))
+        x (- (bit-and (sar hi 20) (hex 2047)) 1023)
+        mh (bit-and hi (hex 1048575))]
+    (if (>= x (neg 126))
+      (return (bit-or s (bit-or (shl (+ x 127) 23)
+                                (bit-or (shl mh 3) (ushr lo 29))))))
+    (comment "Subnormal: (2^52 + m) / 2^(-97 - x), the shift 30..52.")
+    (let [m53 (bit-or mh (hex 1048576))
+          k (- (neg 97) x)]
+      (if (>= k 32) (return (bit-or s (ushr m53 (- k 32)))))
+      (return (bit-or s (bit-or (shl m53 (- 32 k)) (ushr lo k)))))))
+
+(defn ^:pub ^I32 put-float [^BytesW out ^I32 at ^I32 hi ^I32 lo]
+  (comment "The shortest exact float for binary64 hi:lo at `at`: the position"
+           "after it, (neg CODE_FLOAT), or `(too-short need)`. The refusal comes"
+           "first: a refused float never asks for room.")
+  (if (or (< at 0) (> at (blen out))) (return (neg CODE_MALFORMED)))
+  (let [w (float-width hi lo)]
+    (if (< w 0) (return w))
+    (if (> (+ w 1) (- (blen out) at)) (return (too-short (+ w 1))))
+    (if (== w 8)
+      (do (bset out at (hex 251))
+          (put32 out (+ at 1) hi)
+          (put32 out (+ at 5) lo)
+          (return (+ at 9))))
+    (if (== w 4)
+      (do (bset out at (hex 250))
+          (put32 out (+ at 1) (f32-bits hi lo))
+          (return (+ at 5))))
+    (let [h (f16-bits hi)]
+      (bset out at (hex 249))
+      (bset out (+ at 1) (ushr h 8))
+      (bset out (+ at 2) h)
+      (return (+ at 3)))))

@@ -1,0 +1,40 @@
+#!/bin/sh
+# Assemble a Rust crate holding the writer primitives (kin/write, P5.4) with
+# the minimal Rust Writer and the write-test binary:
+#
+#     kin/scripts/write-crate DIR
+#
+#   DIR/src/snug/cbor/{codes,float}.rs   gen/rust/snug/cbor (committed)
+#   DIR/src/snug/write/*.rs              $SNUG_GEN/rust/snug/write (default gen)
+#   DIR/src/writer.rs                    host/rust/write/writer.rs
+#   DIR/src/bin/write-test.rs            host/rust/write/write-test.rs
+#
+# Kept out of host/rust/src (as nav's is, D055). Copies only what changed.
+set -e
+cd "$(dirname "$0")/../.."
+dir="$1"
+[ -n "$dir" ] || { echo "usage: write-crate DIR" >&2; exit 2; }
+mkdir -p "$dir/src/bin" "$dir/src/snug/cbor" "$dir/src/snug/write"
+put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
+puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
+put host/rust/Cargo.toml "$dir/Cargo.toml"
+puttext "//! snug writer crate (dev subset): the writer primitives and a minimal Rust Writer.
+pub mod snug;
+pub mod writer;
+" "$dir/src/lib.rs"
+put host/rust/write/writer.rs "$dir/src/writer.rs"
+put host/rust/write/write-test.rs "$dir/src/bin/write-test.rs"
+g="${SNUG_GEN:-gen}"
+puttext "pub mod cbor;
+pub mod write;
+" "$dir/src/snug.rs"
+for f in codes float; do put "gen/rust/snug/cbor/$f.rs" "$dir/src/snug/cbor/$f.rs"; done
+puttext "pub mod codes;
+pub mod float;
+" "$dir/src/snug/cbor.rs"
+lines=""
+for f in $(ls "$g/rust/snug/write" | sort); do
+  case "$f" in *.rs) put "$g/rust/snug/write/$f" "$dir/src/snug/write/$f"; lines="${lines}pub mod ${f%.rs};
+";; esac
+done
+puttext "$lines" "$dir/src/snug/write.rs"

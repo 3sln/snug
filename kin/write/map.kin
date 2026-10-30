@@ -1,0 +1,160 @@
+;; Closing a map (architecture §16.5, review V15): the pairs of ONE map, each
+;; a complete [encoded key || encoded value] range inside the output buffer,
+;; are put in RFC 8949 §4.2.1 order (bytewise order of the encoded keys) by
+;; a stable merge sort over pair indices and then permuted in place through
+;; a scratch byte area; equal keys are refused (duplicate_key).
+;;
+;; The pair table t (from word tb) holds two words per pair, in the order the
+;; pairs were written: the key's start and the key's end (= the value's
+;; start). Pair i ends where pair i + 1 starts; the last pair ends at `mend`.
+;; Nested maps are closed (sorted) first, inside their own ranges, so moving
+;; a whole pair never splits anything; positions are offsets, so a buffer
+;; that grew in between does not matter. After a move, positions inside the
+;; map are stale: the host keeps none.
+;;
+;; Cost: the already-sorted case is n - 1 comparisons and no copy; otherwise
+;; at most n - 1 + n * ceil(log2 n) comparisons, each charged one step
+;; against s[S_BUDGET] (WR_BUDGET when exceeded), plus two copies of the
+;; map's content bytes. Scratch: 2n words in x, the content size in tmp.
+(ns snug.write.map
+  (:require [kin.lang :refer [defn defconst let return set if do while for comment]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg ushr
+                               < > <= >= == != and or u8 blen ia iset ilen bset bcopy]]
+            [snug.cbor.codes :refer [CODE_MALFORMED CODE_DUPLICATE_KEY]]
+            [snug.write.out :refer [too-short compare-in]]))
+
+;; The state array s.
+(defconst ^:pub ^I32 S_COMPARES 0)
+(defconst ^:pub ^I32 S_BUDGET 1)
+(defconst ^:pub ^I32 S_WORDS 4)
+
+(defconst ^:pub ^I32 WR_BUDGET -40)
+
+(defn ^I32 pair-end [^IntsR t ^I32 tb ^I32 n ^I32 i ^I32 mend]
+  (comment "Where pair i ends: pair i + 1's key start, or mend for the last.")
+  (if (== (+ i 1) n) (return mend))
+  (return (ia t (+ tb (* 2 (+ i 1))))))
+
+(defn ^Bool charge [^Ints s]
+  (comment "One key comparison; true when the budget is exceeded.")
+  (let [c (+ (ia s S_COMPARES) 1)]
+    (iset s S_COMPARES c)
+    (return (> c (ia s S_BUDGET)))))
+
+(defn ^I32 compare-pairs [^Bytes out ^IntsR t ^I32 tb ^I32 a ^I32 b]
+  (comment "compare-in over the keys of pairs a and b.")
+  (let [ka (+ tb (* 2 a))
+        kb (+ tb (* 2 b))]
+    (return (compare-in out (ia t ka) (ia t (+ ka 1)) (ia t kb) (ia t (+ kb 1))))))
+
+(defn copy-range [^BytesW dst ^I32 at ^Bytes src ^I32 s ^I32 n]
+  (comment "dst[at..at+n) = src[s..s+n) (the caller checked both). A byte loop for"
+           "short ranges: a JS subarray per pair costs more than the copy.")
+  (if (< n 32)
+    (for [^I32 i 0 n]
+      (bset dst (+ at i) (u8 src (+ s i))))
+    (bcopy dst at src s n)))
+
+(defn ^:pub ^I32 check-pairs [^Bytes out ^IntsR t ^I32 tb ^I32 n ^I32 mend]
+  (comment "0 when the table describes n complete, non-empty, consecutive pairs"
+           "inside out[..mend), else (neg CODE_MALFORMED) (a host bug).")
+  (if (or (< n 0) (or (< tb 0) (> tb (ilen t)))) (return (neg CODE_MALFORMED)))
+  (if (> n (ushr (- (ilen t) tb) 1)) (return (neg CODE_MALFORMED)))
+  (if (> mend (blen out)) (return (neg CODE_MALFORMED)))
+  (if (== n 0) (return 0))
+  (if (< (ia t tb) 0) (return (neg CODE_MALFORMED)))
+  (for [^I32 i 0 n]
+    (let [ks (ia t (+ tb (* 2 i)))
+          ke (ia t (+ (+ tb (* 2 i)) 1))
+          pe (pair-end t tb n i mend)]
+      (if (or (>= ks ke) (>= ke pe)) (return (neg CODE_MALFORMED)))))
+  (return 0))
+
+(defn ^I32 merge-pass [^Bytes out ^IntsR t ^I32 tb ^I32 n ^Ints x ^I32 src ^I32 dst
+                       ^I32 width ^Ints s]
+  (comment "One bottom-up pass: merge runs of `width` from x[src..src+n) into"
+           "x[dst..dst+n). Answers 0, (neg CODE_DUPLICATE_KEY) or WR_BUDGET."
+           "Every comparison is charged; equal keys are refused where met: any"
+           "correct comparison sort compares each two keys adjacent in the final"
+           "order, so every duplicate is met.")
+  (let [^:mut lo 0]
+    (while (< lo n)
+      (let [^:mut mid (+ lo width)
+            ^:mut hi n]
+        (if (> width (- n lo)) (set mid n))
+        (if (<= width (- n mid)) (set hi (+ mid width)))
+        (let [^:mut i lo
+              ^:mut j mid
+              ^:mut k lo]
+          (while (and (< i mid) (< j hi))
+            (let [a (ia x (+ src i))
+                  b (ia x (+ src j))]
+              (if (charge s) (return WR_BUDGET))
+              (let [c (compare-pairs out t tb a b)]
+                (if (== c 0) (return (neg CODE_DUPLICATE_KEY)))
+                (if (< c 0)
+                  (do (iset x (+ dst k) a)
+                      (set i (+ i 1)))
+                  (do (iset x (+ dst k) b)
+                      (set j (+ j 1)))))
+              (set k (+ k 1))))
+          (while (< i mid)
+            (let [a2 (ia x (+ src i))]
+              (iset x (+ dst k) a2))
+            (set i (+ i 1))
+            (set k (+ k 1)))
+          (while (< j hi)
+            (let [b2 (ia x (+ src j))]
+              (iset x (+ dst k) b2))
+            (set j (+ j 1))
+            (set k (+ k 1))))
+        (set lo hi)))
+    (return 0)))
+
+(defn ^:pub ^I32 close-map [^BytesW out ^IntsR t ^I32 tb ^I32 n ^I32 mend
+                            ^BytesW tmp ^Ints x ^Ints s]
+  (comment "Sort the n pairs of one map (table t from tb, content ending at mend)"
+           "by encoded key, in place. Answers 0; (neg CODE_DUPLICATE_KEY);"
+           "WR_BUDGET; (neg CODE_MALFORMED) for a table that is not n complete"
+           "consecutive pairs; or `(too-short need)` when tmp holds fewer than"
+           "`need` bytes (the content size) or x fewer than 2n words (need 0)."
+           "Nothing is moved unless the answer is 0.")
+  (let [bad (check-pairs out t tb n mend)]
+    (if (< bad 0) (return bad)))
+  (if (< n 2) (return 0))
+  (comment "The fast path: already strictly increasing, nothing to move.")
+  (let [^:mut sorted true]
+    (for [^I32 i1 1 n]
+      (if (charge s) (return WR_BUDGET))
+      (let [c (compare-pairs out t tb (- i1 1) i1)]
+        (if (== c 0) (return (neg CODE_DUPLICATE_KEY)))
+        (if (> c 0) (set sorted false))))
+    (if sorted (return 0)))
+  (let [start (ia t tb)
+        size (- mend start)]
+    (if (> size (blen tmp)) (return (too-short size)))
+    (if (> n (ushr (ilen x) 1)) (return (too-short 0)))
+    (for [^I32 i2 0 n]
+      (iset x i2 i2))
+    (let [^:mut src 0
+          ^:mut dst n
+          ^:mut width 1]
+      (while (< width n)
+        (let [r (merge-pass out t tb n x src dst width s)]
+          (if (< r 0) (return r)))
+        (let [sw src]
+          (set src dst)
+          (set dst sw))
+        (if (> width (- n width))
+          (set width n)
+          (set width (* 2 width))))
+      (comment "Copy the pairs in sorted order into tmp, then back over the map.")
+      (let [^:mut q 0]
+        (for [^I32 k 0 n]
+          (let [p (ia x (+ src k))
+                ps (ia t (+ tb (* 2 p)))
+                pe (pair-end t tb n p mend)]
+            (copy-range tmp q out ps (- pe ps))
+            (set q (+ q (- pe ps))))))
+      (bcopy out start tmp 0 size)
+      (return 0))))

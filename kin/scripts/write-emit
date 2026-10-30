@@ -1,0 +1,32 @@
+#!/usr/bin/env bb
+;; Emit the writer sources (kin/write/*.kin, P5.4) into ROOT, with the flat
+;; sources they require (snug.cbor.codes, snug.cbor.float), without touching
+;; any other source's output -- so that a sibling's mid-edit source cannot
+;; block these gates (`emit-all!` is all or nothing over its batch).
+;;
+;;     kin/scripts/write-emit [ROOT]      (ROOT default `gen`)
+(require '[kin.project :as kp] '[kin.vfs :as vfs] '[snug.targets :as targets])
+(let [flat ["codes.kin" "float.kin"]
+      sources (reify
+                vfs/Vfs
+                (-exists? [_ p] (.exists (java.io.File. (str "kin/" p))))
+                (-read [_ p] (slurp (str "kin/" p)))
+                (-write [_ _ _] (throw (ex-info "read-only" {})))
+                vfs/Listing
+                (-list [_]
+                  (into flat
+                        (for [f (.listFiles (java.io.File. "kin/write"))
+                              :when (and (.isFile f) (.endsWith (.getName f) ".kin"))]
+                          (str "write/" (.getName f))))))
+      root (or (first *command-line-args*) "gen")
+      tgts (-> targets/targets
+               (assoc-in [:js :vfs] (vfs/disk-vfs (str root "/js")))
+               (assoc-in [:rust :vfs] (vfs/disk-vfs (str root "/rust"))))
+      prj (kp/load-project {:vocabularies '[snug.lang snug.js kin.lang]
+                            :targets tgts
+                            :target-order [:js :rust]
+                            :sources {:vfs sources :match "*"}})
+      {:keys [order emitted]} (kp/emit-all! prj)]
+  (doseq [label order
+          r (get emitted label)]
+    (println (format "  %-5s %s" (name (:target r)) (or (:path r) "(nowhere)")))))
