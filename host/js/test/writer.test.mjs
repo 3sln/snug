@@ -6,6 +6,8 @@ import { build } from '../src/build.mjs';
 import { typedInfo } from '../src/values.mjs';
 import { snug, baseline, profile, oracle, translate, fromHex, toHex } from './values.mjs';
 import { createRandom, randomValue, randomMap } from './corpus.mjs';
+// encode() is the walk over the Writer since P5.4; the Phase 2 encoder (frozen) and cbor.mjs are the oracles.
+import { encode as encodeP2 } from '../../../bench/baseline/encode-p2.mjs';
 const { encode, decode, SnugFault, Decimal, NDArray, Float16Bytes } = snug;
 
 const keyBytes = k => encode(k, { top: 'any' });
@@ -58,8 +60,9 @@ test('3000 seeded random values: Writer == encode == cbor.mjs; output passes dec
   const r = createRandom(20261029);
   for (let i = 0; i < 3000; i++) {
     const v = i % 3 ? randomValue(r, { maxDepth: 5 }) : randomMap(r, { maxDepth: 5 });
-    const want = toHex(encode(v, { top: 'any' }));
+    const want = toHex(encodeP2(v, { top: 'any' }));
     assert.equal(toHex(baseline.encode(translate(v, baseline))), want);
+    assert.equal(toHex(encode(v, { top: 'any' })), want);
     const outs = [writeValue(v), typedCalls(v, 'given'), typedCalls(v, 'shuffled', r), typedCalls(v, 'sorted')];
     for (const out of outs) {
       assert.equal(toHex(out), want);
@@ -75,7 +78,7 @@ test('shuffled wide maps and nested maps sort at end(); objects in any key order
   for (let i = 0; i < 200; i++) {
     const o = Object.create(null);
     for (let k = 0, n = 2 + r.int(400); k < n; k++) o[r.chance(0.5) ? 'k' + r.int(10000) : 'é' + r.int(99)] = r.chance(0.2) ? { z: r.int(5), a: [r.int(3)], m: { y: 1, b: 2 } } : r.int(1000);
-    const want = toHex(encode(o));
+    const want = toHex(encodeP2(o));
     assert.equal(toHex(typedCalls(o, 'shuffled', r)), want);
     const reversed = Object.create(null); for (const k of Object.keys(o).reverse()) reversed[k] = o[k];
     assert.equal(toHex(writeValue(reversed)), want);
@@ -96,6 +99,7 @@ const refusals = [
 ];
 test('value() refuses what encode refuses, with its code, never echoing the value; the writer stays failed', () => {
   for (const [value, code] of refusals) {
+    assert.throws(() => encodeP2(value), { code });
     assert.throws(() => encode(value), { code });
     const w = new Writer();
     assert.throws(() => w.value(value), e => e instanceof SnugFault && e.code === code && !e.message.includes('private'));
@@ -117,7 +121,9 @@ test('limits: depth, entries, items, bytes and the cycle match encode', () => {
     [1, { maxBytes: 0 }], [0, { maxItems: 0 }], [[], { maxEntries: 0 }], [Decimal.from('-123456789012345678901234567890.5'), { maxDepth: 2 }],
   ];
   for (const [value, options] of cases) {
-    let want; try { want = toHex(encode(value, options)); } catch (e) { want = e.code; }
+    let want; try { want = toHex(encodeP2(value, options)); } catch (e) { want = e.code; }
+    let base; try { base = toHex(baseline.encode(value === cycle ? cycle : translate(value, baseline), options)); } catch (e) { base = e.code; }
+    assert.equal(base, want);
     let got; try { got = toHex(writeValue(value, options)); } catch (e) { got = e.code; }
     assert.equal(got, want);
   }

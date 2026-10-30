@@ -11,7 +11,7 @@ import { Decimal, NDArray, Float16Bytes, typedInfo } from './values.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
 import { putFloat } from '../../../gen/js/snug/write/float.mjs';
 import { putInt } from '../../../gen/js/snug/write/int.mjs';
-import { closeMap, S_BUDGET } from '../../../gen/js/snug/write/map.mjs';
+import { closeMap, sortKeys, S_BUDGET } from '../../../gen/js/snug/write/map.mjs';
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER, MAX_SAFE_N = BigInt(MAX_SAFE), U64 = 1n << 64n, U32 = 4294967296;
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
@@ -58,7 +58,8 @@ export class Writer {
   #kind = ROOT; #left = 1; #depth = 0;
   #kinds = []; #lefts = []; #bases = [];   // saved frames; #bases: a map's first pair-table word
   #pairs = null; #np = 0; #base = 0;        // pair table: key start, key end per pair
-  #tmp = null; #x = null; #s = null;        // close-map scratch (lazy)
+  #tmp = null; #x = null; #s = null;        // close-map / sort-keys scratch (lazy)
+  #kbuf = null; #kpos = 0; #xtop = 0;       // the walk's key scratch and order stack
   #mag = null;                              // bignum magnitude scratch (lazy)
   #items = 0; #code = '';
   #cose; #sorted; #maxDepth; #maxEntries; #maxItems; #maxBytes; #omitUndefined;
@@ -182,10 +183,18 @@ export class Writer {
   // ------------------------------------------------------------------ the walk (encode's rules)
 
   #walk(v, depth) {
-    this.#count();
+    if (++this.#items > this.#maxItems) this.#fail('too_many_items', 'The message exceeds the item bound.');
     switch (typeof v) {
       case 'boolean': this.#head(7, 0, v ? 21 : 20); return;
-      case 'number': if (Number.isSafeInteger(v) && !Object.is(v, -0)) this.#intN(v); else this.#float(v); return;
+      case 'number': {
+        if (!Number.isSafeInteger(v) || Object.is(v, -0)) { this.#float(v); return; }
+        // the integer head, inline (the hot path of integer-heavy bodies)
+        const major = v < 0 ? 1 : 0, a = v < 0 ? -1 - v : v, hi = a > 0xffffffff ? (a / U32) | 0 : 0;
+        let p = putHead(this.#buf, this.#pos, major, hi, a | 0);
+        if (p < 0) { this.#short(p); p = putHead(this.#buf, this.#pos, major, hi, a | 0); }
+        this.#pos = p;
+        return;
+      }
       case 'bigint': this.#bigint(v, depth); return;
       case 'string': this.#text(v, 'text'); return;
       case 'object': break;
@@ -225,19 +234,45 @@ export class Writer {
     const n = keys.length;
     if (n > this.#maxEntries) this.#fail('too_many_entries', 'A map exceeds the entry bound.');
     this.#headN(5, n);
-    const base = this.#np;
+    if (n === 0) return;
+    if (n === 1) { this.#key(keys[0]); this.#count(); this.#walk(values[0], depth + 1); return; }
+    // The keys are known before any value: encode them into the key scratch, let kin order them (sort-keys), then
+    // write each pair in that order -- no value is ever moved. Keys are all checked before any is counted, as encode.
+    const base = this.#np, xb = this.#xtop, kb0 = this.#kpos;
     this.#pairWords(base + 2 * n);
+    const buf = this.#buf, pos = this.#pos;
+    if (this.#kbuf === null) this.#kbuf = new Uint8Array(256);
+    this.#buf = this.#kbuf; this.#pos = kb0;
+    try {
+      for (let i = 0; i < n; i++) {
+        const ks = this.#pos;
+        this.#key(keys[i]);
+        this.#pairs[base + 2 * i] = ks; this.#pairs[base + 2 * i + 1] = this.#pos;
+      }
+    } finally { this.#kbuf = this.#buf; this.#kpos = this.#pos; this.#buf = buf; this.#pos = pos; }
+    this.#np = base + 2 * n;
+    this.#xWords(xb + 2 * n);
+    if (this.#s === null) this.#s = new Int32Array(4);
+    this.#s[0] = 0; this.#s[S_BUDGET] = MAX_BUDGET;
+    const r = sortKeys(this.#kbuf, this.#pairs, base, n, this.#x, xb, this.#s);
+    if (r !== 0) this.#kinCode(r);
+    this.#xtop = xb + n;
     for (let i = 0; i < n; i++) {
-      const k = keys[i], ks = this.#pos;
+      const j = this.#x[xb + i], t = this.#pairs, ks = t[base + 2 * j], len = t[base + 2 * j + 1] - ks;
+      this.#ensure(len);
+      const kb = this.#kbuf, out = this.#buf, p0 = this.#pos;
+      for (let q = 0; q < len; q++) out[p0 + q] = kb[ks + q];
+      this.#pos = p0 + len;
       this.#count();
-      if (typeof k === 'string') this.#text(k, 'key_type'); else this.#intN(k);
-      const t = this.#pairs; // re-read: a nested map may have grown the table
-      t[base + 2 * i] = ks; t[base + 2 * i + 1] = this.#pos;
-      this.#np = base + 2 * i + 2;
-      this.#walk(values[i], depth + 1);
+      this.#walk(values[j], depth + 1);
     }
-    this.#close(base, n);
-    this.#np = base;
+    this.#np = base; this.#xtop = xb; this.#kpos = kb0;
+  }
+  /** A map key in the walk: text, or an integer label (already checked to be a safe integer). */
+  #key(k) { if (typeof k === 'string') this.#text(k, 'key_type'); else this.#intN(k); }
+  #xWords(words) {
+    if (this.#x === null) this.#x = new Int32Array(Math.max(64, words));
+    else if (words > this.#x.length) { const x = new Int32Array(Math.max(words, 2 * this.#x.length)); x.set(this.#x.subarray(0, this.#xtop)); this.#x = x; }
   }
   #pairWords(words) {
     if (this.#pairs === null) this.#pairs = new Int32Array(Math.max(64, words));
@@ -246,7 +281,9 @@ export class Writer {
   /** Sort one map's n pairs (table from base, content ending here) through kin. */
   #close(base, n) {
     if (n < 2) return;
-    if (this.#s === null) { this.#s = new Int32Array(4); this.#tmp = new Uint8Array(256); this.#x = new Int32Array(64); }
+    if (this.#s === null) this.#s = new Int32Array(4);
+    if (this.#tmp === null) this.#tmp = new Uint8Array(256);
+    if (this.#x === null) this.#x = new Int32Array(64);
     this.#s[0] = 0; this.#s[S_BUDGET] = MAX_BUDGET;
     for (;;) {
       const r = closeMap(this.#buf, this.#pairs, base, n, this.#pos, this.#tmp, this.#x, this.#s);

@@ -7,6 +7,8 @@
 //     K <hex> ps pe ks ke         key-after -> `k <answer>`
 //     M <hex> mend tmpcap xcap budget <ks ke>...   close-map over the pair table
 //                                 -> `m <answer> <compares> <hex of the buffer>`
+//     S <hex> xb xcap budget <ks ke>...   sort-keys over key spans in the bytes
+//                                 -> `s <answer> <compares> <x[xb..xb+n)>`
 //     W <op>...                   a Rust Writer driven by ops -> `w <hex>` or `w fail <code>`
 //
 // Writer ops: aN beginArray, mN beginMap, e end, k<hex utf8> key, t<hex utf8> text,
@@ -15,7 +17,7 @@
 // A panic prints PANIC.
 use snug::snug::write::float::{float_width, put_float};
 use snug::snug::write::int::{int_len, put_int};
-use snug::snug::write::map::{close_map, S_BUDGET, S_COMPARES};
+use snug::snug::write::map::{close_map, sort_keys, S_BUDGET, S_COMPARES};
 use snug::snug::write::out::{key_after, put_head};
 use snug::writer::{Fault, Writer};
 use std::io::{BufRead, Write};
@@ -103,6 +105,23 @@ fn main() {
                 let n = (t.len() / 2) as i32;
                 let a = close_map(&mut b, &t, 0, n, mend, &mut tmp, &mut x, &mut s);
                 format!("m {} {} {}", a, s[S_COMPARES as usize], hex(&b))
+            }
+            "S" => {
+                let b = unhex(parts.get(1).copied().unwrap_or(""));
+                let xb = num(parts.get(2).copied());
+                let mut x = vec![0i32; num(parts.get(3).copied()).max(0) as usize];
+                let mut s = [0i32; 4];
+                s[S_BUDGET as usize] = num(parts.get(4).copied());
+                let t: Vec<i32> = parts[5..].iter().map(|p| num(Some(p))).collect();
+                let n = (t.len() / 2) as i32;
+                let a = sort_keys(&b, &t, 0, n, &mut x, xb, &mut s);
+                let mut out = format!("s {} {}", a, s[S_COMPARES as usize]);
+                if a == 0 {
+                    for k in 0..n {
+                        out.push_str(&format!(" {}", x[(xb + k) as usize]));
+                    }
+                }
+                out
             }
             "W" => match writer(&parts[1..]) {
                 Ok(b) => format!("w {}", hex(&b)),

@@ -14,7 +14,7 @@
 //    duplicates, short scratch, small budgets, broken tables), JS == Rust,
 //    and every sorted result equals an independent sort of the pairs.
 // 5. Writer streams: seeded values driven through the Rust Writer and the JS
-//    Writer as typed calls, keys shuffled; the bytes equal encode(value);
+//    Writer as typed calls, keys shuffled; the bytes equal cbor.mjs's encode(value);
 //    misuse streams fail with the same code on both.
 // 6. Robustness: random arguments (negative positions, tiny buffers, junk
 //    tables): no panic, no throw, JS == Rust.
@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { putHead, keyAfter } from '../../gen/js/snug/write/out.mjs';
 import { floatWidth, putFloat } from '../../gen/js/snug/write/float.mjs';
 import { intLen, putInt } from '../../gen/js/snug/write/int.mjs';
-import { closeMap, S_BUDGET, S_COMPARES } from '../../gen/js/snug/write/map.mjs';
+import { closeMap, sortKeys, S_BUDGET, S_COMPARES } from '../../gen/js/snug/write/map.mjs';
 import { encode } from '../../host/js/src/encode.mjs';
 import { scan } from '../../host/js/src/scan.mjs';
 import { Writer } from '../../host/js/src/writer.mjs';
@@ -214,6 +214,33 @@ const cmpBytes = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b));
   ok(overBound === 0, `close-map: ${overBound} closes charged more than n - 1 + n ceil(log2 n) comparisons`);
 }
 
+{
+  // sort-keys: keys at arbitrary places in a key scratch (the walk's path), in any order
+  const lines = [], js = [];
+  let truth = 0, truthN = 0;
+  for (let i = 0; i < N; i++) {
+    const n = r.chance(0.1) ? r.int(200) : r.int(10), keys = [];
+    for (let k = 0; k < n; k++) keys.push(r.chance(0.05) && keys.length ? keys[r.int(keys.length)] : encKey(r.chance(0.3) ? r.int(1000) - 500 : randomString(r, 6)));
+    const buf = [], t = [];
+    for (const k of r.shuffle(keys.map((k, j) => [k, j]))) { for (let g = r.int(3); g > 0; g--) buf.push(r.int(256)); t[2 * k[1]] = buf.length; buf.push(...k[0]); t[2 * k[1] + 1] = buf.length; }
+    let junk = false;
+    if (r.chance(0.03) && t.length) { t[r.int(t.length)] = r.int(buf.length + 2) - 1; junk = true; }
+    const xb = r.int(4), xcap = r.chance(0.1) ? r.int(xb + 2 * n + 1) : xb + 2 * n, budget = r.chance(0.1) ? r.int(4 * n + 1) : 0x7fffffff;
+    const b = Uint8Array.from(buf), x = new Int32Array(xcap), s = new Int32Array(4); s[S_BUDGET] = budget;
+    const ans = sortKeys(b, Int32Array.from(t), 0, n, x, xb, s);
+    lines.push(`S ${hex(buf)} ${xb} ${xcap} ${budget} ${t.join(' ')}`.trimEnd());
+    js.push(`s ${ans} ${s[S_COMPARES]}` + (ans === 0 ? ' ' + Array.from(x.subarray(xb, xb + n)).join(' ') : '').trimEnd());
+    const dup = new Set(keys.map(hex)).size !== keys.length;
+    if (junk) { /* a corrupted table: only identity and robustness */ } else if (ans === 0) {
+      truthN++;
+      const order = Array.from(x.subarray(xb, xb + n)), want = keys.map((k, j) => j).sort((p, q) => cmpBytes(keys[p], keys[q]));
+      if (!dup && order.join() === want.join()) truth++;
+    } else if (ans === -7) { truthN++; if (dup) truth++; }
+  }
+  compare('sort-keys', lines, js.map(l => l.trimEnd()));
+  ok(truth === truthN, `sort-keys: ${truth}/${truthN} orders equal an independent stable sort (and every duplicate_key has a duplicate)`);
+}
+
 // ---------------------------------------------------------------- 5. writer streams
 function strip(v) { // the Rust Writer is minimal: no typed arrays, decimals, ndarrays
   if (Array.isArray(v)) return v.map(strip);
@@ -260,7 +287,7 @@ function jsWriter(list) {
   let equal = 0, total = 0;
   for (let i = 0; i < N; i++) {
     const v = strip(i % 2 ? randomMap(rr, { maxDepth: 4 }) : randomValue(rr, { maxDepth: 4 }));
-    let want; try { want = 'w ' + hex(encode(v, { top: 'any' })); } catch (e) { want = 'w fail ' + e.code; }
+    let want; try { want = 'w ' + hex(baseline.encode(v)); } catch (e) { want = 'w fail ' + e.code; }
     const list = []; ops(v, list, rr);
     lines.push('W ' + list.join(' '));
     const got = jsWriter(list);
@@ -278,7 +305,7 @@ function jsWriter(list) {
     js.push(jsWriter(list));
   }
   compare('Writer streams (typed calls, shuffled keys, misuse)', lines, js);
-  ok(equal === total, `Writer streams: ${equal}/${total} JS Writer outputs equal encode(value)`);
+  ok(equal === total, `Writer streams: ${equal}/${total} JS Writer outputs equal cbor.mjs's encode(value)`);
 }
 
 // ---------------------------------------------------------------- 6. robustness

@@ -120,6 +120,98 @@ pub(crate) fn merge_pass(out: &[u8], t: &[i32], tb: i32, n: i32, x: &mut [i32], 
     }
     return 0;
 }
+pub fn check_order(b: &[u8], t: &[i32], tb: i32, n: i32, s: &mut [i32]) -> i32 {
+    // The fast path: 1 when the n keys (spans t[tb + 2i], t[tb + 2i + 1] in b)
+    // are strictly increasing, 0 when they are not, or (neg
+    // CODE_DUPLICATE_KEY) / WR_BUDGET. n - 1 charged comparisons at most.
+    // The caller checked the spans.
+    let mut sorted: i32 = 1;
+    for i1 in 1..n {
+        if charge(s) {
+            return WR_BUDGET;
+        }
+        let c: i32 = compare_pairs(b, t, tb, i1 - 1, i1);
+        if c == 0 {
+            return -CODE_DUPLICATE_KEY;
+        }
+        if c > 0 {
+            sorted = 0;
+        }
+    }
+    return sorted;
+}
+pub fn sort_order(b: &[u8], t: &[i32], tb: i32, n: i32, x: &mut [i32], xb: i32, s: &mut [i32]) -> i32 {
+    // x[xb..xb+n) = the indices of the n keys in RFC 8949 order (stable
+    // bottom-up merge sort, x[xb+n..xb+2n) its other half). Answers 0, (neg
+    // CODE_DUPLICATE_KEY) or WR_BUDGET. The caller checked the spans and
+    // the 2n words of x.
+    for i2 in 0..n {
+        x[(xb + i2) as usize] = i2;
+    }
+    let mut src: i32 = xb;
+    let mut dst: i32 = xb + n;
+    let mut width: i32 = 1;
+    while width < n {
+        let r: i32 = merge_pass(b, t, tb, n, x, src, dst, width, s);
+        if r < 0 {
+            return r;
+        }
+        let sw: i32 = src;
+        src = dst;
+        dst = sw;
+        if width > (n - width) {
+            width = n;
+        } else {
+            width = 2 * width;
+        }
+    }
+    if src != xb {
+        for i3 in 0..n {
+            let v: i32 = x[(src + i3) as usize];
+            x[(xb + i3) as usize] = v;
+        }
+    }
+    return 0;
+}
+pub fn sort_keys(kb: &[u8], t: &[i32], tb: i32, n: i32, x: &mut [i32], xb: i32, s: &mut [i32]) -> i32 {
+    // Order n encoded keys BEFORE their values are written (an object walk
+    // knows its keys first): the spans t[tb + 2i], t[tb + 2i + 1] in kb, in
+    // any order and place; x[xb..xb+n) receives the indices in RFC 8949
+    // order. Answers 0, (neg CODE_DUPLICATE_KEY), WR_BUDGET, (neg
+    // CODE_MALFORMED) for a bad span, or `(too-short 0)` when x has fewer
+    // than 2n words from xb. Nothing is moved: the caller writes each pair
+    // in that order, so no value is ever copied.
+    if (n < 0) || ((tb < 0) || ((tb > (t.len() as i32)) || (xb < 0))) {
+        return -CODE_MALFORMED;
+    }
+    if n > (i32::cast_unsigned((t.len() as i32) - tb) >> 1).cast_signed() {
+        return -CODE_MALFORMED;
+    }
+    if xb > (x.len() as i32) {
+        return too_short(0);
+    }
+    if n > (i32::cast_unsigned((x.len() as i32) - xb) >> 1).cast_signed() {
+        return too_short(0);
+    }
+    for i in 0..n {
+        let ks: i32 = t[(tb + (2 * i)) as usize];
+        let ke: i32 = t[((tb + (2 * i)) + 1) as usize];
+        if (ks < 0) || ((ks >= ke) || (ke > (kb.len() as i32))) {
+            return -CODE_MALFORMED;
+        }
+    }
+    let r: i32 = check_order(kb, t, tb, n, s);
+    if r < 0 {
+        return r;
+    }
+    if r == 0 {
+        return sort_order(kb, t, tb, n, x, xb, s);
+    }
+    for j in 0..n {
+        x[(xb + j) as usize] = j;
+    }
+    return 0;
+}
 pub fn close_map(out: &mut [u8], t: &[i32], tb: i32, n: i32, mend: i32, tmp: &mut [u8], x: &mut [i32], s: &mut [i32]) -> i32 {
     // Sort the n pairs of one map (table t from tb, content ending at mend)
     // by encoded key, in place. Answers 0; (neg CODE_DUPLICATE_KEY);
@@ -134,21 +226,11 @@ pub fn close_map(out: &mut [u8], t: &[i32], tb: i32, n: i32, mend: i32, tmp: &mu
     if n < 2 {
         return 0;
     }
-    // The fast path: already strictly increasing, nothing to move.
-    let mut sorted: bool = true;
-    for i1 in 1..n {
-        if charge(s) {
-            return WR_BUDGET;
-        }
-        let c: i32 = compare_pairs(out, t, tb, i1 - 1, i1);
-        if c == 0 {
-            return -CODE_DUPLICATE_KEY;
-        }
-        if c > 0 {
-            sorted = false;
-        }
+    let r: i32 = check_order(out, t, tb, n, s);
+    if r < 0 {
+        return r;
     }
-    if sorted {
+    if r == 1 {
         return 0;
     }
     let start: i32 = t[(tb) as usize];
@@ -159,30 +241,14 @@ pub fn close_map(out: &mut [u8], t: &[i32], tb: i32, n: i32, mend: i32, tmp: &mu
     if n > (i32::cast_unsigned(x.len() as i32) >> 1).cast_signed() {
         return too_short(0);
     }
-    for i2 in 0..n {
-        x[(i2) as usize] = i2;
-    }
-    let mut src: i32 = 0;
-    let mut dst: i32 = n;
-    let mut width: i32 = 1;
-    while width < n {
-        let r: i32 = merge_pass(out, t, tb, n, x, src, dst, width, s);
-        if r < 0 {
-            return r;
-        }
-        let sw: i32 = src;
-        src = dst;
-        dst = sw;
-        if width > (n - width) {
-            width = n;
-        } else {
-            width = 2 * width;
-        }
+    let r2: i32 = sort_order(out, t, tb, n, x, 0, s);
+    if r2 < 0 {
+        return r2;
     }
     // Copy the pairs in sorted order into tmp, then back over the map.
     let mut q: i32 = 0;
     for k in 0..n {
-        let p: i32 = x[(src + k) as usize];
+        let p: i32 = x[(k) as usize];
         let ps: i32 = t[(tb + (2 * p)) as usize];
         let pe: i32 = pair_end(t, tb, n, p, mend);
         copy_range(tmp, q, out, ps, pe - ps);

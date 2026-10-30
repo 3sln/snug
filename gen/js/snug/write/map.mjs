@@ -130,6 +130,101 @@ export function mergePass(out, t, tb, n, x, src, dst, width, s) {
     return 0;
 }
 
+export function checkOrder(b, t, tb, n, s) {
+    // The fast path: 1 when the n keys (spans t[tb + 2i], t[tb + 2i + 1] in b)
+    // are strictly increasing, 0 when they are not, or (neg
+    // CODE_DUPLICATE_KEY) / WR_BUDGET. n - 1 charged comparisons at most.
+    // The caller checked the spans.
+    let sorted = 1;
+    for (let i1 = 1; i1 < n; i1++) {
+        if (charge(s)) {
+            return WR_BUDGET;
+        }
+        const c = comparePairs(b, t, tb, i1 - 1, i1);
+        if (c === 0) {
+            return -CODE_DUPLICATE_KEY;
+        }
+        if (c > 0) {
+            sorted = 0;
+        }
+    }
+    return sorted;
+}
+
+export function sortOrder(b, t, tb, n, x, xb, s) {
+    // x[xb..xb+n) = the indices of the n keys in RFC 8949 order (stable
+    // bottom-up merge sort, x[xb+n..xb+2n) its other half). Answers 0, (neg
+    // CODE_DUPLICATE_KEY) or WR_BUDGET. The caller checked the spans and
+    // the 2n words of x.
+    for (let i2 = 0; i2 < n; i2++) {
+        x[xb + i2] = i2;
+    }
+    let src = xb;
+    let dst = xb + n;
+    let width = 1;
+    while (width < n) {
+        const r = mergePass(b, t, tb, n, x, src, dst, width, s);
+        if (r < 0) {
+            return r;
+        }
+        const sw = src;
+        src = dst;
+        dst = sw;
+        if (width > (n - width)) {
+            width = n;
+        } else {
+            width = 2 * width;
+        }
+    }
+    if (src !== xb) {
+        for (let i3 = 0; i3 < n; i3++) {
+            const v = x[src + i3];
+            x[xb + i3] = v;
+        }
+    }
+    return 0;
+}
+
+export function sortKeys(kb, t, tb, n, x, xb, s) {
+    // Order n encoded keys BEFORE their values are written (an object walk
+    // knows its keys first): the spans t[tb + 2i], t[tb + 2i + 1] in kb, in
+    // any order and place; x[xb..xb+n) receives the indices in RFC 8949
+    // order. Answers 0, (neg CODE_DUPLICATE_KEY), WR_BUDGET, (neg
+    // CODE_MALFORMED) for a bad span, or `(too-short 0)` when x has fewer
+    // than 2n words from xb. Nothing is moved: the caller writes each pair
+    // in that order, so no value is ever copied.
+    if ((n < 0) || ((tb < 0) || ((tb > t.length) || (xb < 0)))) {
+        return -CODE_MALFORMED;
+    }
+    if (n > (((t.length - tb) >>> 1) | 0)) {
+        return -CODE_MALFORMED;
+    }
+    if (xb > x.length) {
+        return tooShort(0);
+    }
+    if (n > (((x.length - xb) >>> 1) | 0)) {
+        return tooShort(0);
+    }
+    for (let i = 0; i < n; i++) {
+        const ks = t[tb + (2 * i)];
+        const ke = t[(tb + (2 * i)) + 1];
+        if ((ks < 0) || ((ks >= ke) || (ke > kb.length))) {
+            return -CODE_MALFORMED;
+        }
+    }
+    const r = checkOrder(kb, t, tb, n, s);
+    if (r < 0) {
+        return r;
+    }
+    if (r === 0) {
+        return sortOrder(kb, t, tb, n, x, xb, s);
+    }
+    for (let j = 0; j < n; j++) {
+        x[xb + j] = j;
+    }
+    return 0;
+}
+
 export function closeMap(out, t, tb, n, mend, tmp, x, s) {
     // Sort the n pairs of one map (table t from tb, content ending at mend)
     // by encoded key, in place. Answers 0; (neg CODE_DUPLICATE_KEY);
@@ -144,21 +239,11 @@ export function closeMap(out, t, tb, n, mend, tmp, x, s) {
     if (n < 2) {
         return 0;
     }
-    // The fast path: already strictly increasing, nothing to move.
-    let sorted = true;
-    for (let i1 = 1; i1 < n; i1++) {
-        if (charge(s)) {
-            return WR_BUDGET;
-        }
-        const c = comparePairs(out, t, tb, i1 - 1, i1);
-        if (c === 0) {
-            return -CODE_DUPLICATE_KEY;
-        }
-        if (c > 0) {
-            sorted = false;
-        }
+    const r = checkOrder(out, t, tb, n, s);
+    if (r < 0) {
+        return r;
     }
-    if (sorted) {
+    if (r === 1) {
         return 0;
     }
     const start = t[tb];
@@ -169,30 +254,14 @@ export function closeMap(out, t, tb, n, mend, tmp, x, s) {
     if (n > ((x.length >>> 1) | 0)) {
         return tooShort(0);
     }
-    for (let i2 = 0; i2 < n; i2++) {
-        x[i2] = i2;
-    }
-    let src = 0;
-    let dst = n;
-    let width = 1;
-    while (width < n) {
-        const r = mergePass(out, t, tb, n, x, src, dst, width, s);
-        if (r < 0) {
-            return r;
-        }
-        const sw = src;
-        src = dst;
-        dst = sw;
-        if (width > (n - width)) {
-            width = n;
-        } else {
-            width = 2 * width;
-        }
+    const r2 = sortOrder(out, t, tb, n, x, 0, s);
+    if (r2 < 0) {
+        return r2;
     }
     // Copy the pairs in sorted order into tmp, then back over the map.
     let q = 0;
     for (let k = 0; k < n; k++) {
-        const p = x[src + k];
+        const p = x[k];
         const ps = t[tb + (2 * p)];
         const pe = pairEnd(t, tb, n, p, mend);
         copyRange(tmp, q, out, ps, pe - ps);
