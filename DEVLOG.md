@@ -472,9 +472,15 @@ slower); allocated head tuples; validating wrapper constructors in build
   subcode, offset, budget used, items, path), no panic; **JS == wasm
   16 975/16 975**; JS host rendering == Rust host rendering 1 033/1 033;
   6 000 JS cases re-run behind throwing out-of-bounds traps on P, B, input
-  and scratch; 684 Programs pass vm-verify. `bb check`, `bb scan-test 30000
-  1`, `bb rscan-test 30000 2` green (earlier in the session; re-run at the
-  end, see below).
+  and scratch; 684 Programs pass vm-verify. Final runs (after the last VM
+  commit): `bb vm-test 30000 {1,2,3} {2000,1000,1000}` — identity 62 720/
+  62 720 per seed, oracle 16 000 + 8 000 + 8 000 agreeing, JS == Rust 79 778
+  / 71 778 / 71 778, JS == wasm on every case, conformance 981/983 (the same
+  2); `bb check` green; `bb scan-test 30000 1` 31 360/31 360 (JS, Rust,
+  wasm); `bb rscan-test 30000 2` 255 481 policy runs identical; `cd host/js
+  && node --test test/` 585/585; `bb drift`: every VM file matches its
+  source — its one FAIL is the compiler engineer's uncommitted
+  `kin/compile/{arena,main}.kin` work in progress.
   **Benchmarks** (`bench/VM.md`, `node bench/vm-bench.mjs`; M1 Pro, Node 24.6,
   shared machine, CPU-time medians): the six study contracts validate in
   0.5–17 µs in snug JS and 0.5–10 µs in snug wasm against 11 µs–1.7 ms in
