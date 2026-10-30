@@ -30,12 +30,12 @@
                                         H_PROFILE H_LIM_DEPTH H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS
                                         H_LIM_BIGNUM H_LIM_VBUDGET H_LIM_TOTAL H_LIM_WIDTH H_LIM_POOL
                                         H_LIM_LEAVES H_TS_ANY H_N_FIN H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
-                                        H_EPOCH H_R0
+                                        H_EPOCH H_R0 H_WALK_RULE H_CUR_RULE
                                         T_LEAF T_TS T_TSL T_FIN T_ORD T_CHILD T_PSTK T_FTS T_FTSL T_HFTS
                                         T_GRP T_GRPD T_HGRP T_POOLG T_KEYS T_KEYID T_POOL T_POOLOFF T_RORD
                                         T_LAUX T_RXF T_MAP T_MAPD T_ARR T_ARRD T_IV T_FIV T_LST T_SRC
                                         T_CSET T_CSD T_HCSET T_CHAIN T_CHD T_HCHAIN T_EPOCHS T_CLS T_CLS2
-                                        T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI]]
+                                        T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI T_LRULE]]
             [snug.compile.bytes :refer [intern bid-len bid-byte bid-cmp nbids sort-bids]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd nleaves ts-off ts-n ts-w ts-setw
                                        leaf-mask mk-any ts-of1 nts
@@ -43,7 +43,8 @@
                                        K_BYTES K_UINTX K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP K_AND K_NOT
                                        R_NEG_BIG R_POS_BIG]]
             [snug.compile.regexp :refer [rx-npos rx-w rx-natoms rx-nullable rx-data rx-count]]
-            [snug.compile.rules :refer [rw nrules RK_TYPE]]))
+            [snug.compile.rules :refer [rw nrules RK_TYPE]]
+            [snug.compile.parse :refer [npos]]))
 
 ;; ------------------------------------------------------------ liveness
 
@@ -153,7 +154,9 @@
   (let [id (hg h H_N_FIN)]
     (hs h H_N_FIN (+ id 1))
     (lset h l 11 id)
-    (vpush1 h T_FIN l))
+    (vpush1 h T_FIN l)
+    (comment "the rule whose walk first reached it, for error reports")
+    (vpush1 h T_LRULE (hg h H_WALK_RULE)))
   (let [off (vlen h T_CHILD)
         n (children h l T_CHILD)]
     (push-frame h off n)))
@@ -341,6 +344,19 @@
 
 ;; ------------------------------------------------------------ the bus profile
 
+(defn ^I32 bus-fail [^Ints h ^I32 f]
+  (comment "Refuse under `bus` because of final leaf f: reported in the rule whose walk"
+           "first reached it, at the leaf's own source position if it is a container,"
+           "else at the rule's name.")
+  (let [l (fin-internal h f)
+        r (vget h T_LRULE f)
+        node (lw h l 12)
+        ^:mut pos (neg 1)]
+    (hs h H_CUR_RULE r)
+    (if (and (>= node 0) (>= (lk h l) K_TAG)) (set pos (npos h node)))
+    (if (and (< pos 0) (>= r 0)) (set pos (npos h (rw h r 2))))
+    (return (fail h ERR_PROFILE pos))))
+
 (defn ^I32 map-blob-of [^IntsR h ^I32 l] (return (vget h T_MAP (ld h l 0))))
 
 (defn ^I32 if-embed-other [^IntsR h ^I32 l]
@@ -404,9 +420,9 @@
     (for [^I32 f 0 nl]
       (let [l (fin-internal h f)
             k (lk h l)]
-        (if (or (== k K_ANY) (== k K_MAJOR)) (return (fail h ERR_PROFILE (neg 1))))
-        (if (and (or (== k K_TEXT) (== k K_BYTES)) (== (ld h l 1) INF)) (return (fail h ERR_PROFILE (neg 1))))
-        (if (and (== k K_ARRAY) (not (array-bounded h (ld h l 0)))) (return (fail h ERR_PROFILE (neg 1))))
+        (if (or (== k K_ANY) (== k K_MAJOR)) (return (bus-fail h f)))
+        (if (and (or (== k K_TEXT) (== k K_BYTES)) (== (ld h l 1) INF)) (return (bus-fail h f)))
+        (if (and (== k K_ARRAY) (not (array-bounded h (ld h l 0)))) (return (bus-fail h f)))
         (if (== k K_MAP)
           (do (let [blob (map-blob-of h l)
                     nf (vget h T_MAPD blob)
@@ -418,16 +434,16 @@
                     (if (>= go 0)
                       (for [^I32 g 0 gn]
                         (if (== (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 3))) INF)
-                          (return (fail h ERR_PROFILE (neg 1)))))))))))
+                          (return (bus-fail h f))))))))))
         (if (and (== k K_AND) (or (== (lk h (ld h l 0)) K_EMBED) (== (lk h (ld h l 1)) K_EMBED)))
           (do (comment "an embedded document needs a bounded byte string beside it")
               (let [other (if-embed-other h l)]
-                (if (or (!= (lk h other) K_BYTES) (== (ld h other 1) INF)) (return (fail h ERR_PROFILE (neg 1)))))))))
+                (if (or (!= (lk h other) K_BYTES) (== (ld h other 1) INF)) (return (bus-fail h f))))))))
     (comment "an EMBED answering for itself is an unbounded byte string")
     (for [^I32 t 0 (fts-n h)]
       (for [^I32 i 0 (fts-w h t 1)]
         (if (== (lk h (fin-internal h (vget h T_FTSL (+ (fts-w h t 0) i)))) K_EMBED)
-          (return (fail h ERR_PROFILE (neg 1))))))
+          (return (bus-fail h (vget h T_FTSL (+ (fts-w h t 0) i)))))))
     (comment "no recursion: no cycle through children (iterative DFS, colours in"
              "T_EPOCHS word 1: 0 new, 1 on the path, 2 done)")
     (vtrunc h T_EPOCHS 0)
@@ -455,7 +471,7 @@
                   (do (vset h T_PSTK (+ fr 2) (+ cur 1))
                       (let [c (vget h T_CHILD (+ off cur))
                             st (vget h T_EPOCHS (+ (* 2 c) 1))]
-                        (if (== st 1) (return (fail h ERR_PROFILE (neg 1))))
+                        (if (== st 1) (return (bus-fail h c)))
                         (if (== st 0)
                           (do (vset h T_EPOCHS (+ (* 2 c) 1) 1)
                               (let [co2 (vlen h T_CHILD)
@@ -472,6 +488,7 @@
   (hs h H_TS_ANY (neg 1))
   (hs h H_N_FIN 0)
   (vtrunc h T_FIN 0)
+  (vtrunc h T_LRULE 0)
   (vtrunc h T_ORD 0)
   (vtrunc h T_CHILD 0)
   (vtrunc h T_PSTK 0)
@@ -485,7 +502,8 @@
     (for [^I32 r 0 nr]
       (if (and (and (== (rw h r 7) 0) (== (rw h r 5) 0)) (== (rw h r 4) RK_TYPE))
         (if (>= (rw h r 9) 0)
-          (if (< (number-from h (rw h r 9)) 0) (return (neg 1)))))))
+          (do (hs h H_WALK_RULE r)
+              (if (< (number-from h (rw h r 9)) 0) (return (neg 1))))))))
   (let [nl (hg h H_N_FIN)]
     (if (> nl (hg h H_LIM_LEAVES)) (return (fail h ERR_LIM_LEAVES (neg 1))))
     (vtrunc h T_EPOCHS 0)

@@ -4,6 +4,7 @@
 use crate::snug::compile::arena::*;
 use crate::snug::compile::bytes::*;
 use crate::snug::compile::leaf::*;
+use crate::snug::compile::parse::*;
 use crate::snug::compile::regexp::*;
 use crate::snug::compile::rules::*;
 
@@ -142,6 +143,8 @@ pub(crate) fn reach_leaf(h: &mut [i32], l: i32) {
     hs(h, H_N_FIN, id + 1);
     lset(h, l, 11, id);
     vpush1(h, T_FIN, l);
+    // the rule whose walk first reached it, for error reports
+    vpush1(h, T_LRULE, hg(h, H_WALK_RULE));
     let off: i32 = vlen(h, T_CHILD);
     let n: i32 = children(h, l, T_CHILD);
     push_frame(h, off, n);
@@ -388,6 +391,23 @@ pub(crate) fn pool_place(h: &mut [i32], bid: i32) -> i32 {
     vset(h, T_POOLOFF, bid, off);
     return off;
 }
+pub(crate) fn bus_fail(h: &mut [i32], f: i32) -> i32 {
+    // Refuse under `bus` because of final leaf f: reported in the rule whose walk
+    // first reached it, at the leaf's own source position if it is a container,
+    // else at the rule's name.
+    let l: i32 = fin_internal(h, f);
+    let r: i32 = vget(h, T_LRULE, f);
+    let node: i32 = lw(h, l, 12);
+    let mut pos: i32 = -1;
+    hs(h, H_CUR_RULE, r);
+    if (node >= 0) && (lk(h, l) >= K_TAG) {
+        pos = npos(h, node);
+    }
+    if (pos < 0) && (r >= 0) {
+        pos = npos(h, rw(h, r, 2));
+    }
+    return fail(h, ERR_PROFILE, pos);
+}
 pub(crate) fn map_blob_of(h: &[i32], l: i32) -> i32 {
     return vget(h, T_MAP, ld(h, l, 0));
 }
@@ -475,13 +495,13 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
         let l: i32 = fin_internal(h, f);
         let k: i32 = lk(h, l);
         if (k == K_ANY) || (k == K_MAJOR) {
-            return fail(h, ERR_PROFILE, -1);
+            return bus_fail(h, f);
         }
         if ((k == K_TEXT) || (k == K_BYTES)) && (ld(h, l, 1) == INF) {
-            return fail(h, ERR_PROFILE, -1);
+            return bus_fail(h, f);
         }
         if (k == K_ARRAY) && (!array_bounded(h, ld(h, l, 0))) {
-            return fail(h, ERR_PROFILE, -1);
+            return bus_fail(h, f);
         }
         if k == K_MAP {
             let blob: i32 = map_blob_of(h, l);
@@ -494,7 +514,7 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
                 if go >= 0 {
                     for g in 0..gn {
                         if vget(h, T_MAPD, (blob + go) + ((4 * g) + 3)) == INF {
-                            return fail(h, ERR_PROFILE, -1);
+                            return bus_fail(h, f);
                         }
                     }
                 }
@@ -504,7 +524,7 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
             // an embedded document needs a bounded byte string beside it
             let other: i32 = if_embed_other(h, l);
             if (lk(h, other) != K_BYTES) || (ld(h, other, 1) == INF) {
-                return fail(h, ERR_PROFILE, -1);
+                return bus_fail(h, f);
             }
         }
     }
@@ -512,7 +532,7 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
     for t in 0..fts_n(h) {
         for i in 0..fts_w(h, t, 1) {
             if lk(h, fin_internal(h, vget(h, T_FTSL, fts_w(h, t, 0) + i))) == K_EMBED {
-                return fail(h, ERR_PROFILE, -1);
+                return bus_fail(h, vget(h, T_FTSL, fts_w(h, t, 0) + i));
             }
         }
     }
@@ -549,7 +569,7 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
                     let c: i32 = vget(h, T_CHILD, off + cur);
                     let st: i32 = vget(h, T_EPOCHS, (2 * c) + 1);
                     if st == 1 {
-                        return fail(h, ERR_PROFILE, -1);
+                        return bus_fail(h, c);
                     }
                     if st == 0 {
                         vset(h, T_EPOCHS, (2 * c) + 1, 1);
@@ -570,6 +590,7 @@ pub fn plan(h: &mut [i32]) -> i32 {
     hs(h, H_TS_ANY, -1);
     hs(h, H_N_FIN, 0);
     vtrunc(h, T_FIN, 0);
+    vtrunc(h, T_LRULE, 0);
     vtrunc(h, T_ORD, 0);
     vtrunc(h, T_CHILD, 0);
     vtrunc(h, T_PSTK, 0);
@@ -585,6 +606,7 @@ pub fn plan(h: &mut [i32]) -> i32 {
     for r in 0..nr {
         if ((rw(h, r, 7) == 0) && (rw(h, r, 5) == 0)) && (rw(h, r, 4) == RK_TYPE) {
             if rw(h, r, 9) >= 0 {
+                hs(h, H_WALK_RULE, r);
                 if number_from(h, rw(h, r, 9)) < 0 {
                     return -1;
                 }

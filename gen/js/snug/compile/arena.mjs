@@ -423,6 +423,10 @@ export const T_ODO2 = 106;
 
 export const T_KEYPRE = 107;
 
+export const T_LRULE = 108;
+
+export const H_WALK_RULE = 61;
+
 export const H_TS_ANY = 59;
 
 export const H_N_FIN = 60;

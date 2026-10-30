@@ -243,6 +243,8 @@
 (defconst ^:pub ^I32 T_ODO 105)
 (defconst ^:pub ^I32 T_ODO2 106)
 (defconst ^:pub ^I32 T_KEYPRE 107)
+(defconst ^:pub ^I32 T_LRULE 108)
+(defconst ^:pub ^I32 H_WALK_RULE 61)
 (defconst ^:pub ^I32 H_TS_ANY 59)
 (defconst ^:pub ^I32 H_N_FIN 60)
 (defconst ^:pub ^I32 H_WORK_AT 56)
