@@ -1829,6 +1829,14 @@ this keeps the writer's gates independent of their mid-edit state.
 
 ## Findings
 
+- 2026-10-29 (manager): **bundle sizes vs R9** (esbuild 0.28 minify, node
+  zlib; tree at the P5.4 commits): codec only (decode + encode) 30.4 KB raw /
+  10.7 KB gzip / 9.6 KB brotli (cbor.mjs: 6.1 KB gzip); runtime (codec + schema
+  VM + verifier) 92.4 / 33.0 / 28.6 KB; runtime + view + Writer 104.4 / 37.1 /
+  32.0 KB; compiler (lazily loaded) 118.5 / 38.2 / 32.8 KB. **R9's 20 KB runtime
+  target is missed by ~13 KB gzip**; the VM (with P3.6 fast paths) is the bulk.
+  Options: drop the verifier from bundles that only run in-process compiled
+  Programs; strip the force-generic duplicate paths; measure per-module.
 - 2026-10-29 (manager): commit `50b9a7c` was made with `git commit -a` and
   swept up the P1 engineer's uncommitted work (q21 `end` offsets, `IntsR`, the
   JS redeclaration guard, the smaller `read-arg`, gen/ output). Content correct
