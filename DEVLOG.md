@@ -705,8 +705,57 @@ slower); allocated head tuples; validating wrapper constructors in build
 - [x] **P5.0 — Review of architecture §16** (independent). *Done 2026-10-29*:
   Codex, 20 findings (3 blockers: byte ownership, literal key ≠ one typeset,
   subtree-validate contract); all accepted; §16 revision 3.
-- [ ] **P5.1 — Tape** written by the VM on request; navigation primitives in kin.
-- [ ] **P5.2 — Views and cursor** (JS host): checked, indexed, lazy trusted.
+- [~] **P5.1 — Tape** written by the VM on request; navigation primitives in kin.
+
+  *Status 2026-10-29 (compiler engineer, first slice per §16.4 rev. 3): the
+  navigation primitives are done; the tape is not built (§16.4: its
+  addressing and sizing are unspecified, and on-demand directories are the
+  measured alternative, bench/VIEW.md).* `kin/nav/walk.kin` (`snug.nav.walk`):
+  `nav-head` (major, ai, argument hi:lo, content start; bounds-checked),
+  `nav-skip`/`nav-skip-n` (structural skip with an owed-items counter, no
+  recursion, every head one charged step, NAV_BAD when owed items exceed the
+  bytes left), `nav-length`, `nav-child` (sequential), `compare-key`,
+  `nav-find` (linear, early exit on the proved key order), `nav-dir` (one
+  word per child) and `nav-dir-find` (binary search). `kin/nav/trace.kin`
+  is the cross-host trace. Generated into `gen/{js,rust}/snug/nav/`;
+  `kin/scripts/nav-emit` / `nav-crate` keep these gates independent of other
+  sources' mid-edit state (D055). D050.
+- [~] **P5.2 — Views and cursor** (JS host): checked, indexed, lazy trusted.
+
+  *Status 2026-10-29 (compiler engineer): first slice done (checked views,
+  owned/borrowed, optional directories, cursor, accessors, value(),
+  validateAt); the trusted opener (§16.2) and the Writer (§16.5) are not
+  started.* `host/js/src/view.mjs`: `view(bytes, {schema, rule, borrow,
+  directories, ...decodeOptions})` runs the full check (scanner, or the
+  schema VM through `host/js/src/schema.mjs`) on the private copy (default)
+  or the borrowed buffer, refuses SharedArrayBuffer, and returns a `View`
+  (`kind`, `length`, `get`, `at`, `entries`/`keys`/`values`, `number`,
+  `bigint`, `int`, `text`, `bool`, `isNull`, `bytes`, `copyBytes`,
+  `typedView`, `typed`, `decimal`, `ndarray`, `raw`, `value`, `cursor`,
+  `validateAt`); `Cursor` (`enter`, `next`, `up`, `find`, `key`, `keyIs`,
+  `kind`, scalar accessors). Minimal Rust view: `host/rust/nav/view.rs`
+  (borrowed only; open = scan; `get`, `at`, `raw`, `uint`, `text`). D051–D054.
+  Gates (2026-10-29): `bb nav-test`: 1009/1009 traces identical across
+  hosts; 250/250 traces agree with an independent structural reading;
+  5 000 unchecked inputs, JS threw 0, Rust panicked 0, 5000/5000 identical;
+  654/654 Rust View key paths answer the JS view's span.
+  `host/js/test/view.test.mjs` (84 tests, in `npm test`):
+  every profile accept vector and every Bindle-accepted oracle value walked
+  in full through accessors only, four modes (owned/borrowed × directories),
+  equal to build(); 400 seeded random documents, every subtree's raw span
+  decodes to its value(); directory lookups equal linear; cose labels;
+  1 500 mutations refused with decode()'s code in every mode; ownership;
+  exact integer accessors; validateAt equal to validating the copied span
+  standalone (reason, path, offset shifted by the span start) over 300
+  schema documents; per-walk step budget. Measurements (bench/VIEW.md, M1
+  Pro, Node 24.6, loaded machine): open + one field beats decode() + field
+  2.5–2.7× on the 1.1 MB map-heavy body and 110× on the 1 MiB bstr put
+  (borrowed; owned pays ~0.17 ms/MB for the copy); a field again costs
+  0.2–0.5 µs, but linear lookup deep in large containers costs ms, 0.07–0.5 µs
+  with directories; Cursor walks beat decode() + walk except on the
+  120 000-int array (1.5× slower); a borrowed view retains ~0.5 KB. View
+  module 10.5 KB min / 4.0 KB gzip alone, 26 KB / 9.5 KB bundled with scan
+  and build.
 - [ ] **P5.3 — Position-aware subtree validation** (lazy `validate()`).
 - [ ] **P5.4 — Builder** (kin deterministic core + JS writer); `encode` over it.
 - [ ] **P5.5 — Benchmarks** (one field from 1.4 MB; writer vs encode vs cbor.mjs).
@@ -1331,6 +1380,98 @@ unit per item plus scans instead of five.
 witnesses, ~5× the budget per item under `any`).
 - [ ] **Signed off** (owner)
 ---
+
+### D050 — Navigation primitives: contract over checked bytes
+**Decision**: `snug.nav.walk` assumes bytes that passed the full check and
+re-checks no profile rule, but every primitive is total on any bytes: each
+head is bounds-checked against `end` (≤ the buffer), a skip keeps a counter
+of owed items (array n, map 2n, tag 1) and answers NAV_BAD as soon as more
+items are owed than bytes remain, and each head read is one step charged
+against `o[N_BUDGET]` (NAV_BUDGET). Child i of a map is pair i's key (its
+value follows). Answers are positions or NAV_BAD −1, NAV_BUDGET −2,
+NAV_NOT_FOUND −3, NAV_SMALL −4. Hosts charge each operation from zero (the
+budget bounds one walk, not a view's life) and treat anything but a position
+or NAV_NOT_FOUND as a broken invariant (an error, never a silent miss).
+**Why**: §16.1 makes early exit and binary search sound only on proved
+bytes; totality on unproved bytes keeps a borrowed view whose caller broke
+the contract wrong-but-safe, and lets `bb nav-test` fuzz both hosts.
+**Alternatives**: a recursive skip (stack depth = nesting); a per-view
+budget (found by the benchmark: repeated linear lookups exhausted it and
+read as "absent").
+- [ ] **Signed off** (owner)
+
+### D051 — View and Cursor API details §16 leaves open
+**Decision**: `kind` is one of int, float, bytes, text, bool, null, array,
+map, decimal, ndarray, typed (tags 2/3 are int). `get` takes a string (or an
+integer label in the top-level map of a cose view) and `at` an integer;
+both answer undefined when absent and throw TypeError on the wrong container
+kind. `number()` also reads floats; `int()` is build()'s choice (number when
+safe, else bigint); `bytes()`/`copyBytes()` also give a typed array's
+little-endian payload; `typedView()` is `{tag, length, get(i)}` over a
+DataView; `typed()`, `decimal()`, `ndarray()` and `value()` use the trusted
+builder on the item's span. `Cursor.enter()` lands on the first element
+(map: the first value, with `key`); `next()`/`up()` answer false without
+moving at the ends; `find(key)` enters a map at that key; `keyIs(s)`
+compares encoded bytes without allocating.
+**Why**: exact, allocation-light accessors over one representation, and
+materialisation identical to decode() by construction.
+**Alternatives**: views for map keys; `at(i)` on maps; Cursor as an
+iterator protocol (allocates per step).
+- [ ] **Signed off** (owner)
+
+### D052 — Ownership: copy before the check; the trusted opener deferred
+**Decision**: an owned view copies the caller's bytes FIRST and checks the
+copy; `borrow: true` checks and views the caller's buffer under the §16.2
+contract; SharedArrayBuffer-backed input is refused in both modes. The
+trusted opener (an explicit assertion that these exact bytes were checked)
+is not in this slice.
+**Why**: checking the copy leaves no window between check and copy; the
+trusted opener needs its assertion argument specified with the cache that
+would justify it.
+**Alternatives**: check, then copy (correct for synchronous JS on a
+non-shared buffer, but one more argument to make); `ArrayBuffer` transfer
+(later, measured).
+- [ ] **Signed off** (owner)
+
+### D053 — Child directories: opt-in, lazy, per container of ≥ 8 children
+**Decision**: `directories: true` (a private option until §16.4's
+measurement is accepted) makes the view build, on first lookup in an array
+or map of at least 8 children, an Int32Array of child offsets (array: each
+element; map: each key), kept in a Map on the message state for the view's
+life; map lookups binary-search it, array access reads it. No cap beyond
+what the check already bounds (one word per checked entry).
+**Why**: bench/VIEW.md: linear lookup in a 120 000-element array or a
+9 000-document map costs ms per access; with directories, ~0.1–0.5 µs.
+The threshold keeps small containers (where the linear scan is as fast)
+free of allocations.
+**Alternatives**: a whole-message tape (§16.4: unspecified); directories
+by default (memory: up to ~half the message size for map-heavy bodies).
+- [ ] **Signed off** (owner)
+
+### D054 — `validateAt`: depth continues, items restart, top any
+**Decision**: `View.validateAt(rule)` runs the VM's span entry over the
+item's span with `depth0` = the view's depth, `items0` = 0, `top: 'any'`,
+the view's limits, and cose only at depth 0. Offsets in the result are
+absolute (in the message).
+**Why**: §16.3's detached validation. The item count before a position is
+not known without a walk, and the whole message already passed the same
+item limit, so restarting the count cannot accept what the profile refused;
+depth is known and is continued as §16.3 says.
+**Alternatives**: counting the items before the span (an O(offset) walk).
+- [ ] **Signed off** (owner)
+
+### D055 — Navigation sources live in kin/nav with their own emit and crate
+**Decision**: the navigation sources are `kin/nav/*.kin` (listed in
+`snug.project/source-subdirs`, so `bb emit`/`bb drift` cover them), emitted
+alone by `kin/scripts/nav-emit` (with `head.kin`/`codes.kin`, identical
+output) and built by `kin/scripts/nav-crate` with the Rust view and the
+`nav-test` binary from `host/rust/nav/` (not `host/rust/src`).
+**Why**: the flat sources are another engineer's mid-edit work (P3.6);
+`emit-all!` is all or nothing, and a binary in `host/rust/src/bin` would
+break the other crates' SNUG_RS_ONLY module subsets.
+**Alternatives**: flat `kin/nav.kin` (blocked whenever a flat source is
+mid-edit).
+- [ ] **Signed off** (owner)
 
 ## Findings
 

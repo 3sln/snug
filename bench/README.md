@@ -134,3 +134,8 @@ shapes until the generated API is wired.
 Compile timings (cold and warm, JS and native), hostile schemas against the
 compile budget, and the compiler's bundle size are in `bench/COMPILE.md`,
 with machine, OS, runtime versions and method (`node bench/compile-bench.mjs`).
+
+Views and cursor (P5, architecture §16.7): open + one field (owned and
+borrowed), field reads, cursor walks, random access with and without child
+directories, full materialisation and memory per view are in `bench/VIEW.md`
+(`node --expose-gc bench/view-bench.mjs`).
