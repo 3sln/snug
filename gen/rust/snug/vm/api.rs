@@ -272,6 +272,13 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     s[(VM_EXH) as usize] = 0;
     s[(VM_QIDX) as usize] = SCRATCH_MARK + mc;
     s[(VM_DLIM) as usize] = dl;
+    // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
+    // bit 0 forces the generic path (the fast == generic gate).
+    if ((limits.len() as i32) > 8) && ((limits[(8) as usize] & 1) != 0) {
+        s[(VM_GENERIC) as usize] = 1;
+    } else {
+        s[(VM_GENERIC) as usize] = 0;
+    }
     if n > s[(O_MAX_BYTES) as usize] {
         let c1: i32 = -fail(s, start, CODE_TOO_LARGE);
         return vm_output(s, out, c1, 0, start);

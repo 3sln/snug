@@ -1,0 +1,20 @@
+#!/usr/bin/env bb
+;; Emit the flat kin/*.kin sources (the profile scanner, the VM, hello) into
+;; gen/, without the compiler's subdirectories -- the VM's counterpart of
+;; kin/scripts/compile-emit, so that a sibling's mid-edit compiler cannot block
+;; the VM's gates (`emit-all!` is all or nothing over its batch).
+;;
+;;     kin/scripts/vm-emit [ROOT]      (ROOT default `gen`)
+(require '[kin.project :as kp] '[kin.vfs :as vfs] '[snug.targets :as targets])
+(let [root (or (first *command-line-args*) "gen")
+      tgts (-> targets/targets
+               (assoc-in [:js :vfs] (vfs/disk-vfs (str root "/js")))
+               (assoc-in [:rust :vfs] (vfs/disk-vfs (str root "/rust"))))
+      prj (kp/load-project {:vocabularies '[snug.lang snug.js kin.lang]
+                            :targets tgts
+                            :target-order [:js :rust]
+                            :sources {:vfs (vfs/disk-vfs "kin") :match "*.kin"}})
+      {:keys [order emitted]} (kp/emit-all! prj)]
+  (doseq [label order
+          r (get emitted label)]
+    (println (format "  %-5s %s" (name (:target r)) (or (:path r) "(nowhere)")))))

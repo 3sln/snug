@@ -2,15 +2,15 @@
 // source: snug.vm.eval
 
 import { CODE_DECIMAL, CODE_DEPTH, CODE_KEY_TYPE, CODE_NDARRAY, CODE_TAG, CODE_TEXT, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TRUNCATED, O_COSE, O_CSTART, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ITEMS } from '../cbor/codes.mjs';
-import { enterContainer, fail, readArg, takeLen } from '../cbor/head.mjs';
+import { be16, be32, enterContainer, fail, readArg, takeLen } from '../cbor/head.mjs';
 import { coseLabelOk, scanFloat, scanSimple } from '../cbor/scan.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c64, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadBignum, deadItem, deadPairBody, deadSeq, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
-import { CTX_KEY, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, K_AND, K_ARRAY, K_EMBED, K_MAP, K_NOT, K_TAG, K_TAGSET, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_D, VM_DLIM, VM_EMBED, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
-import { cmpU64, evalScalars, scalarKind } from './leaf.mjs';
+import { CTX_KEY, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ARRAY, K_EMBED, K_INT, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTM, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
 import { blockMt, blockNamed, candVts, keySearch, keySpanEnd, leafMap, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate } from './map.mjs';
 
 export function finishComb(p, s, fb, w, nq, pos) {
@@ -374,6 +374,325 @@ export function itemCls(major, ai, hi, lo) {
     return 128;
 }
 
+export function singleScalar(p, ts) {
+    // The leaf of typeset ts when it is exactly one answer of a scalar kind
+    // with no evaluation list (no combinator), else -1.
+    const off = p[p[H_S_TS_INDEX] + ts];
+    if ((p[off] !== 1) || (p[off + 1] !== 0)) {
+        return -1;
+    }
+    const l = p[off + 2];
+    if (scalarKind(p[p[H_S_LEAVES] + (8 * l)] & 255)) {
+        return l;
+    }
+    return -1;
+}
+
+export function singleLeaf(p, ts) {
+    // The leaf of typeset ts when it is exactly one answer and no evaluation
+    // list (any kind but a combinator), else -1.
+    const off = p[p[H_S_TS_INDEX] + ts];
+    if ((p[off] !== 1) || (p[off + 1] !== 0)) {
+        return -1;
+    }
+    return p[off + 2];
+}
+
+export function int1(p, pool, b, iv, cls, hi, lo) {
+    // Is the major-0 (cls 1) or major-1 (cls 2) point hi:lo inside interval iv?
+    const bo = p[H_S_INTERVALS] + (6 * iv);
+    let rg = 3;
+    if (cls === 2) {
+        rg = 2;
+    }
+    return (cmpPoint(p, pool, b, rg, hi, lo, bo) >= 0) && (cmpPoint(p, pool, b, rg, hi, lo, bo + 3) <= 0);
+}
+
+export function ptGe(rg, ph, pl, br, ba, bb) {
+    // point (rg 2 NEG / 3 POS, hi:lo) >= bound (region, a, b)?
+    if (rg !== br) {
+        return rg > br;
+    }
+    if (rg === 3) {
+        return cmpU64(ph, pl, ba, bb) >= 0;
+    }
+    return cmpU64(ba, bb, ph, pl) >= 0;
+}
+
+export function ptLe(rg, ph, pl, br, ba, bb) {
+    if (rg !== br) {
+        return rg < br;
+    }
+    if (rg === 3) {
+        return cmpU64(ph, pl, ba, bb) <= 0;
+    }
+    return cmpU64(ba, bb, ph, pl) <= 0;
+}
+
+export function arrayStreak(p, b, s, q0, limit, end, leaf) {
+    // P3.6 (D044): consecutive SUCCESSFUL elements of a `[* T]` array whose
+    // block already holds its one active position (|A| = 1), T one INT leaf
+    // over one interval or one TEXT leaf without a regexp. Each element is
+    // checked first -- items limit, head (shortest form, bytes present),
+    // UTF-8, the leaf -- and only then charged, in the generic order: 5 at
+    // the array (block 1 + W(|A|+1) 2 + candidate 1 + element 1), visit 1
+    // [+ UTF-8 ceil(len/64)] + filter 1 + leaf 1 [+ probe 1] at the element,
+    // 3 at the array (stamp, candidate, test). An element that would fail,
+    // need anything else or exceed the budget stops the streak BEFORE it is
+    // touched. No path write is needed: no witness can be recorded inside
+    // a successful streak. Answers the next position; the element count goes
+    // in s[VM_FASTM].
+    const lb = p[H_S_LEAVES] + (8 * leaf);
+    const kind = p[lb] & 255;
+    const isint = kind === K_INT;
+    const mask = p[lb + 1];
+    const iv = p[H_S_INTERVALS] + (6 * p[lb + 2]);
+    const lr = p[iv];
+    const la = p[iv + 1];
+    const lbb = p[iv + 2];
+    const hr = p[iv + 3];
+    const ha = p[iv + 4];
+    const hb = p[iv + 5];
+    const tlo = p[lb + 2];
+    const thi = p[lb + 3];
+    const maxit = s[O_MAX_ITEMS];
+    let q = q0;
+    let k = 0;
+    let items = s[O_ITEMS];
+    let left = s[VM_BUDGET];
+    while ((k < limit) && (q < end)) {
+        const ib = b[q];
+        const major = (ib >>> 5) | 0;
+        const ai = ib & 31;
+        let hi = 0;
+        let lo = ai;
+        let h = 1;
+        let cost = 12;
+        if (items >= maxit) {
+            break;
+        }
+        if (ai > 27) {
+            break;
+        }
+        if (ai >= 24) {
+            h = 1 + (1 << (ai - 24));
+            if (h > (end - q)) {
+                break;
+            }
+            if (ai === 24) {
+                lo = b[q + 1];
+            }
+            if (ai === 25) {
+                lo = be16(b, q + 1);
+            }
+            if (ai === 26) {
+                lo = be32(b, q + 1);
+            }
+            if (ai === 27) {
+                hi = be32(b, q + 1);
+                lo = be32(b, q + 5);
+            }
+            // shortest form, else the element is not ours
+            if ((ai === 24) && (lo < 24)) {
+                break;
+            }
+            if ((ai === 25) && (lo < 256)) {
+                break;
+            }
+            if ((ai === 26) && (((lo >>> 16) | 0) === 0)) {
+                break;
+            }
+            if ((ai === 27) && (hi === 0)) {
+                break;
+            }
+        }
+        if (isint) {
+            if (major > 1) {
+                break;
+            }
+            if ((mask & (1 << major)) === 0) {
+                break;
+            }
+            const rg = 3 - major;
+            if (!(ptGe(rg, hi, lo, lr, la, lbb) && ptLe(rg, hi, lo, hr, ha, hb))) {
+                break;
+            }
+            if (left < cost) {
+                break;
+            }
+            left -= cost;
+            q += h;
+        } else {
+            // TEXT: length, bytes present, size, UTF-8
+            if (major !== 3) {
+                break;
+            }
+            if ((hi !== 0) || (lo < 0)) {
+                break;
+            }
+            if (lo > (end - (q + h))) {
+                break;
+            }
+            if ((lo < tlo) || (lo > thi)) {
+                break;
+            }
+            cost = 11 + c64(lo);
+            if (left < cost) {
+                break;
+            }
+            if (utf8InvalidAt(b, q + h, (q + h) + lo) >= 0) {
+                break;
+            }
+            left -= cost;
+            q = (q + h) + lo;
+        }
+        items += 1;
+        k += 1;
+    }
+    s[VM_BUDGET] = left;
+    s[O_ITEMS] = items;
+    s[VM_FASTM] = k;
+    if (k > 0) {
+        witClear(s);
+    }
+    return q;
+}
+
+export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
+    // P3.6 (D044): eval-item on a query list of exactly ONE answer leaf
+    // `leaf` without building the list: for a scalar kind on a scalar major,
+    // the same profile checks, charges (consecutive charges at one offset
+    // merged, which no output can tell apart) and witness rule 1, with no
+    // frame or mark writes; the matched flag goes in s[VM_FASTM]. Any other
+    // item (container, tag, missing byte) or leaf kind takes the generic
+    // eval-item over the one-entry list written into the frame (its building
+    // was charged by the caller).
+    let major = 4;
+    const lb = p[H_S_LEAVES] + (8 * leaf);
+    const kind = p[lb] & 255;
+    if (pos < end) {
+        major = (b[pos] >>> 5) | 0;
+    }
+    if ((!scalarKind(kind)) || ((major === 4) || ((major === 5) || (major === 6)))) {
+        s[cfb] = leaf;
+        s[cfb + cw] = F_ANSWER;
+        const rg = evalItem(p, pool, b, s, pos, d, cfb, ck, 1, end, ctx);
+        const fq = s[cfb + cw];
+        if (rg < 0) {
+            return rg;
+        }
+        if ((fq & F_MATCHED) !== 0) {
+            s[VM_FASTM] = 1;
+        } else {
+            s[VM_FASTM] = 0;
+        }
+        return rg;
+    }
+    if (!charge(s, 1, pos)) {
+        return -R_BUDGET;
+    }
+    const it = s[O_ITEMS] + 1;
+    s[O_ITEMS] = it;
+    if (it > s[O_MAX_ITEMS]) {
+        return fail(s, pos, CODE_TOO_MANY_ITEMS);
+    }
+    const ai = b[pos] & 31;
+    let hi = 0;
+    let lo = ai;
+    let q = pos + 1;
+    let cs = pos + 1;
+    let stop = pos + 1;
+    if (ai >= 24) {
+        if ((major === 7) && ((ai >= 25) && (ai <= 27))) {
+            stop = scanFloat(b, s, pos, ai, end);
+            if (stop < 0) {
+                return stop;
+            }
+        } else {
+            q = readArg(b, s, pos, ai, end);
+            if (q < 0) {
+                return q;
+            }
+            hi = s[O_HI];
+            lo = s[O_LO];
+            cs = q;
+            stop = q;
+        }
+    }
+    if (major === 2) {
+        stop = takeLen(s, pos, q, hi, lo, end);
+        if (stop < 0) {
+            return stop;
+        }
+    }
+    if (major === 3) {
+        stop = takeLen(s, pos, q, hi, lo, end);
+        if (stop < 0) {
+            return stop;
+        }
+        if (!charge(s, c64(stop - q), pos)) {
+            return -R_BUDGET;
+        }
+        const bad = utf8InvalidAt(b, q, stop);
+        if (bad >= 0) {
+            return fail(s, bad, CODE_TEXT);
+        }
+    }
+    if ((major === 7) && ((ai < 25) || (ai > 27))) {
+        const r7 = scanSimple(s, pos, ai);
+        if (r7 < 0) {
+            return r7;
+        }
+    }
+    const cls = itemCls(major, ai, hi, lo);
+    let r = R_TYPE;
+    if ((p[lb + 1] & cls) !== 0) {
+        if ((kind === K_INT) && ((cls <= 2) && (p[lb + 3] === 1))) {
+            // INT over one interval: filter 1 + leaf 1 + its one probe
+            if (!charge(s, 3, pos)) {
+                return -R_BUDGET;
+            }
+            if (int1(p, pool, b, p[lb + 2], cls, hi, lo)) {
+                r = 0;
+            } else {
+                r = R_RANGE;
+            }
+        } else if ((kind === K_TEXT) && (p[lb + 4] < 0)) {
+            // TEXT without a regexp: filter 1 + leaf 1, a size check
+            if (!charge(s, 2, pos)) {
+                return -R_BUDGET;
+            }
+            if (((stop - cs) >= p[lb + 2]) && ((stop - cs) <= p[lb + 3])) {
+                r = 0;
+            } else {
+                r = R_SIZE;
+            }
+        } else {
+            if (!charge(s, 2, pos)) {
+                return -R_BUDGET;
+            }
+            r = evalLeaf(p, pool, b, s, lb, kind, pos, cs, stop, cls, hi, lo);
+            if (r < 0) {
+                return r;
+            }
+        }
+    } else if (!charge(s, 1, pos)) {
+        return -R_BUDGET;
+    }
+    if (r === 0) {
+        s[VM_FASTM] = 1;
+    } else {
+        s[VM_FASTM] = 0;
+        if (((ctx & CTX_KEY) === 0) && witEmpty(s)) {
+            if (!charge(s, 1, pos)) {
+                return -R_BUDGET;
+            }
+            witSet(s, r, 0, d, -1, 0, pos);
+        }
+    }
+    return stop;
+}
+
 export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) {
     // A tag item (§8.4): the scanner's depth and number checks, the filter,
     // TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried
@@ -515,6 +834,53 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) 
     return stop;
 }
 
+export function ifLimit(n, el) {
+    if (n < 0) {
+        return INF;
+    }
+    return n - el;
+}
+
+export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end) {
+    // P3.6 (D044): one element of a `[* T]` array (one block, one uncounted
+    // self-looping position, T one answer): the generic element step's
+    // charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's
+    // element 1 at the array, the child, then stamp 1 + candidate 1 + test 1
+    // -- the block's state and witness updated as array-advance would.
+    // Answers the element's end (the block's alive word tells a death).
+    if (!charge(s, s[area + 2] + 4, pos)) {
+        return -R_BUDGET;
+    }
+    pathPut(s, d + 1, P_INDEX, el);
+    const rf = fastChild(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, 0);
+    if (rf < 0) {
+        return rf;
+    }
+    if (!charge(s, 3, pos)) {
+        return -R_BUDGET;
+    }
+    if (s[VM_FASTM] === 1) {
+        if (s[area + 2] !== 1) {
+            s[area + 2] = 1;
+            s[area + 3] = 1;
+            s[area + 4] = 1;
+        }
+        witClear(s);
+    } else {
+        s[area + 1] = 0;
+        s[area + 2] = 0;
+        s[area + 3] = 0;
+        s[area + 4] = 0;
+        qSetFlag(s, fb, w, s[area], R_TYPE << 8);
+        if (pend > 0) {
+            witClear(s);
+        } else if (witEmpty(s)) {
+            witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, q);
+        }
+    }
+    return rf;
+}
+
 export function arrayAlive(p, s, fb, area, nb) {
     let bo = area;
     let k = 0;
@@ -547,6 +913,8 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     let q1 = q0;
     let el = 0;
     let ao1 = 0;
+    let fleaf = -1;
+    let sleaf = -1;
     let unacc = 0;
     let nalive;
     const na = qFilter(p, s, fb, w, nq, 16, pos);
@@ -572,12 +940,51 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
         ao1 = blockAo(p, s, fb, area);
     }
     nalive = nb;
+    // P3.6 fast step (D044): one block whose automaton is one uncounted
+    // self-looping position (`[* T]`) with a one-answer typeset T.
+    if ((nb === 1) && (s[VM_GENERIC] === 0)) {
+        if (((p[ao1] === 1) && (p[ao1 + 2] === 0)) && ((p[ao1 + 4] === 1) && ((p[ao1 + 8] & 1) === 1))) {
+            fleaf = singleLeaf(p, p[ao1 + 6]);
+        }
+    }
+    if (fleaf >= 0) {
+        const lbf = p[H_S_LEAVES] + (8 * fleaf);
+        const kf = p[lbf] & 255;
+        if (((kf === K_INT) && (p[lbf + 3] === 1)) || ((kf === K_TEXT) && (p[lbf + 4] < 0))) {
+            sleaf = fleaf;
+        }
+    }
     const pend = countPending(p, s, fb, w, nq);
     while (((n < 0) && (q < end)) || ((n >= 0) && (el < n))) {
         if (nalive === 0) {
             q = deadItem(b, s, q, d + 1, end);
             if (q < 0) {
                 return q;
+            }
+        } else if ((sleaf >= 0) && ((el >= 1) && (s[area + 2] === 1))) {
+            const qs = arrayStreak(p, b, s, q, ifLimit(n, el), end, sleaf);
+            const ks = s[VM_FASTM];
+            if (ks > 0) {
+                q = qs;
+                el += ks - 1;
+            } else {
+                const rf2 = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+                if (rf2 < 0) {
+                    return rf2;
+                }
+                q = rf2;
+                if (s[area + 1] === 0) {
+                    nalive = 0;
+                }
+            }
+        } else if (fleaf >= 0) {
+            const rf = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+            if (rf < 0) {
+                return rf;
+            }
+            q = rf;
+            if (s[area + 1] === 0) {
+                nalive = 0;
             }
         } else {
             const e = newEpoch(s);

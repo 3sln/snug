@@ -22,7 +22,7 @@
                                      CODE_TOO_MANY_ITEMS CODE_DECIMAL CODE_NDARRAY CODE_TRAILING
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
                                      O_ERR_POS]]
-            [snug.cbor.head :refer [fail read-arg take-len enter-container]]
+            [snug.cbor.head :refer [fail read-arg take-len enter-container be16 be32]]
             [snug.cbor.text :refer [utf8-invalid-at]]
             [snug.cbor.tags :refer [typed-size]]
             [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]
@@ -31,13 +31,15 @@
                                     VM_QIDX VM_Q1 VM_BIGNUM_MAX VM_EMBED VM_D VM_DLIM VM_W_STATE
                                     VM_W_REASON VM_W_SUB SCRATCH_MARK R_TYPE R_MISSING R_UNEXPECTED
                                     R_VALUE R_TAG R_EMBEDDED R_BUDGET R_INCONSISTENT P_INDEX P_KEY
-                                    P_ANYKEY P_TAG P_EMBED P_EMBEDSEQ CTX_KEY]]
+                                    P_ANYKEY P_TAG P_EMBED P_EMBEDSEQ CTX_KEY VM_GENERIC VM_FASTM
+                                    INF H_S_TS_INDEX H_S_GROUP_INDEX H_S_INTERVALS K_INT K_TEXT
+                                    R_RANGE R_SIZE VM_BUDGET]]
             [snug.vm.base :refer [charge c64 new-epoch q-add q-filter q-stamp ts-test q-flag q-set-flag
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
                                   wit-empty wit-clear wit-set path-put rule1]]
             [snug.vm.dead :refer [dead-item dead-seq key-order dead-typed dead-bignum dead-pair-body
                                   pair-check decimal-check ndarray-check]]
-            [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64]]
+            [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64 eval-leaf cmp-point]]
             [snug.vm.map :refer [leaf-map block-mt map-block-init key-span-end key-search map-cursor
                                  map-key-query map-key-phase cand-vts block-named map-update
                                  map-satisfied map-missing]]
@@ -310,6 +312,199 @@
   (if (== ai 27) (return 1024))
   (return 128))
 
+(defn ^:pub ^I32 single-scalar [^IntsR p ^I32 ts]
+  (comment "The leaf of typeset ts when it is exactly one answer of a scalar kind"
+           "with no evaluation list (no combinator), else -1.")
+  (let [off (ia p (+ (ia p H_S_TS_INDEX) ts))]
+    (if (or (!= (ia p off) 1) (!= (ia p (+ off 1)) 0)) (return (neg 1)))
+    (let [l (ia p (+ off 2))]
+      (if (scalar-kind (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 l))) 255)) (return l))
+      (return (neg 1)))))
+
+(defn ^:pub ^I32 single-leaf [^IntsR p ^I32 ts]
+  (comment "The leaf of typeset ts when it is exactly one answer and no evaluation"
+           "list (any kind but a combinator), else -1.")
+  (let [off (ia p (+ (ia p H_S_TS_INDEX) ts))]
+    (if (or (!= (ia p off) 1) (!= (ia p (+ off 1)) 0)) (return (neg 1)))
+    (return (ia p (+ off 2)))))
+
+(defn ^:pub ^Bool int1 [^IntsR p ^Bytes pool ^Bytes b ^I32 iv ^I32 cls ^I32 hi ^I32 lo]
+  (comment "Is the major-0 (cls 1) or major-1 (cls 2) point hi:lo inside interval iv?")
+  (let [bo (+ (ia p H_S_INTERVALS) (* 6 iv))
+        ^:mut rg 3]
+    (if (== cls 2) (set rg 2))
+    (return (and (>= (cmp-point p pool b rg hi lo bo) 0) (<= (cmp-point p pool b rg hi lo (+ bo 3)) 0)))))
+
+(defn ^:pub ^Bool pt-ge [^I32 rg ^I32 ph ^I32 pl ^I32 br ^I32 ba ^I32 bb]
+  (comment "point (rg 2 NEG / 3 POS, hi:lo) >= bound (region, a, b)?")
+  (if (!= rg br) (return (> rg br)))
+  (if (== rg 3) (return (>= (cmp-u64 ph pl ba bb) 0)))
+  (return (>= (cmp-u64 ba bb ph pl) 0)))
+
+(defn ^:pub ^Bool pt-le [^I32 rg ^I32 ph ^I32 pl ^I32 br ^I32 ba ^I32 bb]
+  (if (!= rg br) (return (< rg br)))
+  (if (== rg 3) (return (<= (cmp-u64 ph pl ba bb) 0)))
+  (return (<= (cmp-u64 ba bb ph pl) 0)))
+
+(defn ^:pub ^I32 array-streak [^IntsR p ^Bytes b ^Ints s ^I32 q0 ^I32 limit ^I32 end
+                               ^I32 leaf]
+  (comment "P3.6 (D044): consecutive SUCCESSFUL elements of a `[* T]` array whose"
+           "block already holds its one active position (|A| = 1), T one INT leaf"
+           "over one interval or one TEXT leaf without a regexp. Each element is"
+           "checked first -- items limit, head (shortest form, bytes present),"
+           "UTF-8, the leaf -- and only then charged, in the generic order: 5 at"
+           "the array (block 1 + W(|A|+1) 2 + candidate 1 + element 1), visit 1"
+           "[+ UTF-8 ceil(len/64)] + filter 1 + leaf 1 [+ probe 1] at the element,"
+           "3 at the array (stamp, candidate, test). An element that would fail,"
+           "need anything else or exceed the budget stops the streak BEFORE it is"
+           "touched. No path write is needed: no witness can be recorded inside"
+           "a successful streak. Answers the next position; the element count goes"
+           "in s[VM_FASTM].")
+  (let [lb (+ (ia p H_S_LEAVES) (* 8 leaf))
+        kind (bit-and (ia p lb) 255)
+        isint (== kind K_INT)
+        mask (ia p (+ lb 1))
+        iv (+ (ia p H_S_INTERVALS) (* 6 (ia p (+ lb 2))))
+        lr (ia p iv)
+        la (ia p (+ iv 1))
+        lbb (ia p (+ iv 2))
+        hr (ia p (+ iv 3))
+        ha (ia p (+ iv 4))
+        hb (ia p (+ iv 5))
+        tlo (ia p (+ lb 2))
+        thi (ia p (+ lb 3))
+        maxit (ia s O_MAX_ITEMS)
+        ^:mut q q0
+        ^:mut k 0
+        ^:mut items (ia s O_ITEMS)
+        ^:mut left (ia s VM_BUDGET)]
+    (while (and (< k limit) (< q end))
+      (let [ib (u8 b q)
+            major (ushr ib 5)
+            ai (bit-and ib 31)
+            ^:mut hi 0
+            ^:mut lo ai
+            ^:mut h 1
+            ^:mut cost 12]
+        (if (>= items maxit) (break))
+        (if (> ai 27) (break))
+        (if (>= ai 24)
+          (do (set h (+ 1 (shl 1 (- ai 24))))
+              (if (> h (- end q)) (break))
+              (if (== ai 24) (set lo (u8 b (+ q 1))))
+              (if (== ai 25) (set lo (be16 b (+ q 1))))
+              (if (== ai 26) (set lo (be32 b (+ q 1))))
+              (if (== ai 27) (do (set hi (be32 b (+ q 1))) (set lo (be32 b (+ q 5)))))
+              (comment "shortest form, else the element is not ours")
+              (if (and (== ai 24) (< lo 24)) (break))
+              (if (and (== ai 25) (< lo 256)) (break))
+              (if (and (== ai 26) (== (ushr lo 16) 0)) (break))
+              (if (and (== ai 27) (== hi 0)) (break))))
+        (if isint
+          (do (if (> major 1) (break))
+              (if (== (bit-and mask (shl 1 major)) 0) (break))
+              (let [rg (- 3 major)]
+                (if (not (and (pt-ge rg hi lo lr la lbb) (pt-le rg hi lo hr ha hb))) (break)))
+              (if (< left cost) (break))
+              (set left (- left cost))
+              (set q (+ q h)))
+          (do (comment "TEXT: length, bytes present, size, UTF-8")
+              (if (!= major 3) (break))
+              (if (or (!= hi 0) (< lo 0)) (break))
+              (if (> lo (- end (+ q h))) (break))
+              (if (or (< lo tlo) (> lo thi)) (break))
+              (set cost (+ 11 (c64 lo)))
+              (if (< left cost) (break))
+              (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (break))
+              (set left (- left cost))
+              (set q (+ (+ q h) lo))))
+        (set items (+ items 1))
+        (set k (+ k 1))))
+    (iset s VM_BUDGET left)
+    (iset s O_ITEMS items)
+    (iset s VM_FASTM k)
+    (if (> k 0) (wit-clear s))
+    (return q)))
+
+(defn ^:pub ^I32 fast-child [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 d ^I32 cfb ^I32 ck
+                             ^I32 cw ^I32 leaf ^I32 end ^I32 ctx]
+  (comment "P3.6 (D044): eval-item on a query list of exactly ONE answer leaf"
+           "`leaf` without building the list: for a scalar kind on a scalar major,"
+           "the same profile checks, charges (consecutive charges at one offset"
+           "merged, which no output can tell apart) and witness rule 1, with no"
+           "frame or mark writes; the matched flag goes in s[VM_FASTM]. Any other"
+           "item (container, tag, missing byte) or leaf kind takes the generic"
+           "eval-item over the one-entry list written into the frame (its building"
+           "was charged by the caller).")
+  (let [^:mut major 4
+        lb (+ (ia p H_S_LEAVES) (* 8 leaf))
+        kind (bit-and (ia p lb) 255)]
+    (if (< pos end) (set major (ushr (u8 b pos) 5)))
+    (if (or (not (scalar-kind kind)) (or (== major 4) (or (== major 5) (== major 6))))
+      (do (iset s cfb leaf)
+          (iset s (+ cfb cw) F_ANSWER)
+          (let [^I32 rg (eval-item p pool b s pos d cfb ck 1 end ctx)
+                fq (ia s (+ cfb cw))]
+            (if (< rg 0) (return rg))
+            (if (!= (bit-and fq F_MATCHED) 0) (iset s VM_FASTM 1) (iset s VM_FASTM 0))
+            (return rg))))
+    (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+    (let [it (+ (ia s O_ITEMS) 1)]
+      (iset s O_ITEMS it)
+      (if (> it (ia s O_MAX_ITEMS)) (return (fail s pos CODE_TOO_MANY_ITEMS))))
+    (let [ai (bit-and (u8 b pos) 31)
+          ^:mut hi 0
+          ^:mut lo ai
+          ^:mut q (+ pos 1)
+          ^:mut cs (+ pos 1)
+          ^:mut stop (+ pos 1)]
+      (if (>= ai 24)
+        (if (and (== major 7) (and (>= ai 25) (<= ai 27)))
+          (do (set stop (scan-float b s pos ai end))
+              (if (< stop 0) (return stop)))
+          (do (set q (read-arg b s pos ai end))
+              (if (< q 0) (return q))
+              (set hi (ia s O_HI))
+              (set lo (ia s O_LO))
+              (set cs q)
+              (set stop q))))
+      (if (== major 2)
+        (do (set stop (take-len s pos q hi lo end))
+            (if (< stop 0) (return stop))))
+      (if (== major 3)
+        (do (set stop (take-len s pos q hi lo end))
+            (if (< stop 0) (return stop))
+            (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
+            (let [bad (utf8-invalid-at b q stop)]
+              (if (>= bad 0) (return (fail s bad CODE_TEXT))))))
+      (if (and (== major 7) (or (< ai 25) (> ai 27)))
+        (do (let [r7 (scan-simple s pos ai)]
+              (if (< r7 0) (return r7)))))
+      (let [cls (item-cls major ai hi lo)
+            ^:mut ^I32 r R_TYPE]
+        (if (!= (bit-and (ia p (+ lb 1)) cls) 0)
+          (if (and (== kind K_INT) (and (<= cls 2) (== (ia p (+ lb 3)) 1)))
+            (do (comment "INT over one interval: filter 1 + leaf 1 + its one probe")
+                (if (not (charge s 3 pos)) (return (neg R_BUDGET)))
+                (if (int1 p pool b (ia p (+ lb 2)) cls hi lo) (set r 0) (set r R_RANGE)))
+            (if (and (== kind K_TEXT) (< (ia p (+ lb 4)) 0))
+              (do (comment "TEXT without a regexp: filter 1 + leaf 1, a size check")
+                  (if (not (charge s 2 pos)) (return (neg R_BUDGET)))
+                  (if (and (>= (- stop cs) (ia p (+ lb 2))) (<= (- stop cs) (ia p (+ lb 3))))
+                    (set r 0)
+                    (set r R_SIZE)))
+              (do (if (not (charge s 2 pos)) (return (neg R_BUDGET)))
+                  (set r (eval-leaf p pool b s lb kind pos cs stop cls hi lo))
+                  (if (< r 0) (return r)))))
+          (if (not (charge s 1 pos)) (return (neg R_BUDGET))))
+        (if (== r 0)
+          (iset s VM_FASTM 1)
+          (do (iset s VM_FASTM 0)
+              (if (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s))
+                (do (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+                    (wit-set s r 0 d (neg 1) 0 pos)))))
+        (return stop)))))
+
 (defn ^:pub ^I32 eval-tag [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q ^I32 hi ^I32 lo
                            ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
   (comment "A tag item (§8.4): the scanner's depth and number checks, the filter,"
@@ -397,6 +592,40 @@
 
 ;; ------------------------------------------------------------ arrays
 
+(defn ^:pub ^I32 if-limit [^I32 n ^I32 el]
+  (if (< n 0) (return INF))
+  (return (- n el)))
+
+(defn ^:pub ^I32 array-step [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q ^I32 d ^I32 fb
+                             ^I32 w ^I32 area ^I32 cfb ^I32 cck ^I32 cw ^I32 fleaf ^I32 el ^I32 pend
+                             ^I32 end]
+  (comment "P3.6 (D044): one element of a `[* T]` array (one block, one uncounted"
+           "self-looping position, T one answer): the generic element step's"
+           "charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's"
+           "element 1 at the array, the child, then stamp 1 + candidate 1 + test 1"
+           "-- the block's state and witness updated as array-advance would."
+           "Answers the element's end (the block's alive word tells a death).")
+  (if (not (charge s (+ (ia s (+ area 2)) 4) pos)) (return (neg R_BUDGET)))
+  (path-put s (+ d 1) P_INDEX el)
+  (let [^I32 rf (fast-child p pool b s q (+ d 1) cfb cck cw fleaf end 0)]
+    (if (< rf 0) (return rf))
+    (if (not (charge s 3 pos)) (return (neg R_BUDGET)))
+    (if (== (ia s VM_FASTM) 1)
+      (do (if (!= (ia s (+ area 2)) 1)
+            (do (iset s (+ area 2) 1)
+                (iset s (+ area 3) 1)
+                (iset s (+ area 4) 1)))
+          (wit-clear s))
+      (do (iset s (+ area 1) 0)
+          (iset s (+ area 2) 0)
+          (iset s (+ area 3) 0)
+          (iset s (+ area 4) 0)
+          (q-set-flag s fb w (ia s area) (shl R_TYPE 8))
+          (if (> pend 0)
+            (wit-clear s)
+            (if (wit-empty s) (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 q)))))
+    (return rf)))
+
 (defn ^:pub ^I32 array-alive [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
   (let [^:mut bo area
         ^:mut k 0]
@@ -426,6 +655,8 @@
         ^:mut q1 q0
         ^:mut el 0
         ^:mut ao1 0
+        ^:mut fleaf (neg 1)
+        ^:mut sleaf (neg 1)
         ^:mut unacc 0]
     (local ^:mut ^I32 nalive)
     (let [na (q-filter p s fb w nq 16 pos)]
@@ -441,11 +672,38 @@
     (comment "The first block's automaton, hoisted (one block is the common case).")
     (if (> nb 0) (set ao1 (block-ao p s fb area)))
     (set nalive nb)
+    (comment "P3.6 fast step (D044): one block whose automaton is one uncounted"
+             "self-looping position (`[* T]`) with a one-answer typeset T.")
+    (if (and (== nb 1) (== (ia s VM_GENERIC) 0))
+      (if (and (and (== (ia p ao1) 1) (== (ia p (+ ao1 2)) 0))
+               (and (== (ia p (+ ao1 4)) 1) (== (bit-and (ia p (+ ao1 8)) 1) 1)))
+        (set fleaf (single-leaf p (ia p (+ ao1 6))))))
+    (if (>= fleaf 0)
+      (do (let [lbf (+ (ia p H_S_LEAVES) (* 8 fleaf))
+                kf (bit-and (ia p lbf) 255)]
+            (if (or (and (== kf K_INT) (== (ia p (+ lbf 3)) 1))
+                    (and (== kf K_TEXT) (< (ia p (+ lbf 4)) 0)))
+              (set sleaf fleaf)))))
     (let [pend (count-pending p s fb w nq)]
       (while (or (and (< n 0) (< q end)) (and (>= n 0) (< el n)))
         (if (== nalive 0)
           (do (set q (dead-item b s q (+ d 1) end))
               (if (< q 0) (return q)))
+          (if (and (>= sleaf 0) (and (>= el 1) (== (ia s (+ area 2)) 1)))
+            (do (let [^I32 qs (array-streak p b s q (if-limit n el) end sleaf)
+                      ks (ia s VM_FASTM)]
+                  (if (> ks 0)
+                    (do (set q qs)
+                        (set el (+ el (- ks 1))))
+                    (do (let [^I32 rf2 (array-step p pool b s pos q d fb w area cfb cck cw fleaf el pend end)]
+                          (if (< rf2 0) (return rf2))
+                          (set q rf2)
+                          (if (== (ia s (+ area 1)) 0) (set nalive 0)))))))
+          (if (>= fleaf 0)
+            (do (let [^I32 rf (array-step p pool b s pos q d fb w area cfb cck cw fleaf el pend end)]
+                  (if (< rf 0) (return rf))
+                  (set q rf)
+                  (if (== (ia s (+ area 1)) 0) (set nalive 0))))
           (do (let [e (new-epoch s)
                     ^:mut cnq 0
                     ^:mut bo area
@@ -483,7 +741,7 @@
                 (if (or (> still 0) (> pend 0))
                   (wit-clear s)
                   (if (wit-empty s) (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 q)))
-                (set q r))))
+                (set q r))))))
         (if (== el 0) (set q1 q))
         (set el (+ el 1))))
     (let [^:mut be area]

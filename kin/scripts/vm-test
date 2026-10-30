@@ -9,7 +9,7 @@
 # unfinished compiler cannot break it.
 set -e
 cd "$(dirname "$0")/../.."
-./kin/scripts/emit > /dev/null
+bb -cp kin/src:../kin/src kin/scripts/vm-emit > /dev/null
 host=.cache/vm-host
 mkdir -p "$host/bin"
 printf '//! VM test crate: the generated cbor, vm and program modules and the Rust schema host.\npub mod snug;\npub mod schema;\n' > "$host/lib.rs.new"

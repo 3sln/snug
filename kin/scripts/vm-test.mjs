@@ -51,14 +51,14 @@ function addProgram(P, B, label) {
 }
 let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
-function runJs(c, trap = false) {
+function runJs(c, trap = false, generic = false) {
   const { P, B } = programs[c.prog];
   const cap = Math.max(markCap, P[16]);
   const need = vmScratchWords(P, c.rule, cap);
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
-  const lim = Int32Array.from(c.lim);
+  const lim = Int32Array.from([...c.lim, generic ? 1 : 0]);   // word 8 bit 0: force the generic path (D044)
   const code = c.span
     ? vmValidateSpan(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out)
     : vmValidate(p, b, c.rule, input, lim, s, out);
@@ -184,6 +184,43 @@ for (const { cddl, values } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
   }
 }
 
+// ---------------------------------------------------------------- 3c. fast-path stress (D044)
+// shapes the fast paths take, with failures, profile errors, item limits and
+// budgets landing at random points; the fast == generic comparison below and
+// the JS == Rust == wasm comparison hold them to the generic path.
+{
+  let st = (SEED * 2654435761) >>> 0 || 1;
+  const rnd = n => { st ^= st << 13; st ^= st >>> 17; st ^= st << 5; return (st >>> 0) % n; };
+  const shapes = [
+    ['r = [* int]', () => rnd(5) ? rnd(70000) - 35000 : choose(['x', 1.5, 1n << 70n, [1], null])],
+    ['r = [* (0..100)]', () => rnd(6) ? rnd(100) : choose([101, -1, 'x', 1000000])],
+    ['r = [* tstr .size (0..3)]', () => rnd(6) ? choose(['', 'a', 'ab', 'abc', 'é']) : choose(['abcd', 1, 'éé', [], 'ééé'])],
+    ['r = { v: [* uint], w: [* tstr] }', null],
+    ['r = [* { * tstr => int }]', null],
+    ['r = { * tstr => any }', null],
+    ['r = { * tstr => [* int] }', null],
+  ];
+  function choose(xs) { return xs[rnd(xs.length)]; }
+  for (const [text, el] of shapes) {
+    const c = compile(text, { limits: { items: 1 << 20, entries: 1 << 20 } });
+    const pi = addProgram(c.program, c.pool, `stress: ${text}`);
+    for (let k = 0; k < 400; k++) {
+      let v;
+      const len = rnd(4) ? rnd(40) : rnd(400);
+      if (el) v = Array.from({ length: len }, el);
+      else if (text.startsWith('r = { v:')) v = { v: Array.from({ length: len }, () => rnd(8) ? rnd(1000) : -1), w: Array.from({ length: rnd(20) }, () => rnd(8) ? 'ab' : 7) };
+      else if (text.startsWith('r = [*')) v = Array.from({ length: rnd(30) }, () => Object.fromEntries(Array.from({ length: rnd(6) }, (_, i) => ['k' + i, rnd(8) ? rnd(100) : 'z'])));
+      else if (text.includes('[* int]')) v = Object.fromEntries(Array.from({ length: rnd(12) }, (_, i) => ['k' + String.fromCharCode(97 + i), Array.from({ length: rnd(30) }, () => rnd(9) ? rnd(500) - 250 : 'q')]));
+      else v = Object.fromEntries(Array.from({ length: rnd(40) }, (_, i) => ['k' + i, rnd(3) ? i : rnd(2) ? 'x' : [i, { a: i }]]));
+      let bytes; try { bytes = encode(v, { maxItems: 1 << 20, maxEntries: 1 << 20 }); } catch { continue; }
+      if (rnd(4) === 0 && bytes.length > 2) { bytes = Uint8Array.from(bytes); const at = 1 + rnd(bytes.length - 1); bytes[at] = rnd(3) ? bytes[at] ^ (1 << rnd(8)) : choose([0xff, 0x18, 0x5b, 0x7f, 0x61]); }
+      if (rnd(5) === 0) bytes = bytes.subarray(0, rnd(bytes.length + 1));
+      const lim = LIM(1, 0, -1, -1, -1, rnd(4) ? -1 : rnd(200), -1, rnd(3) ? -1 : rnd(3000));
+      cases.push({ prog: pi, rule: c.rules.indexOf('r'), lim, bytes, label: `stress: ${text} #${k}`, check: () => null });
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 4. assembled
 const asmStart = cases.length;
 for (const a of assembledCases()) {
@@ -202,6 +239,12 @@ cases.forEach((c, i) => {
   stats[which][1]++;
   const r = js[i].startsWith('THROW') || js[i].startsWith('ERR') ? js[i] : c.check(js[i]);
   if (r) fail(`${c.label}: JS ${r}`); else stats[which][0]++;
+});
+// fast paths == the generic path (D044): every case again with them off
+let genericAgree = 0;
+cases.forEach((c, i) => {
+  let g; try { g = runJs(c, false, true); } catch (e) { g = 'THROW ' + e.message; }
+  if (g === js[i]) genericAgree++; else fail(`${c.label}: fast ${js[i]} | generic ${g}`);
 });
 // JS bounds: a sample behind traps
 let guarded = 0, trapFails = 0;
@@ -302,6 +345,7 @@ if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length
 line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.oracle[0]}/${stats.oracle[1]} values agree with corpus/tools/oracle.mjs on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}); ${diff.unknown} oracle-unknown skipped`);
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `§15 and assembled programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled)`);
+line(genericAgree === cases.length, `fast paths == generic path (D044): ${genericAgree}/${cases.length} cases give the same whole out array with the fast paths forced off`);
 line(epochFails === 0, `epochs: ${epochRuns} cases re-run from an epoch just below the restart threshold give the same out array`);
 line(trapFails === 0, `JS bounds: ${guarded} cases re-run behind throwing out-of-bounds traps on P, B, input and scratch`);
 console.log(rustLine);

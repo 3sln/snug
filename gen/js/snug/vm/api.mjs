@@ -6,7 +6,7 @@ import { fail } from '../cbor/head.mjs';
 import { csetRec, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { FORMAT_VERSION, HEADER_WORDS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_BUDGET, R_INCONSISTENT, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_EXH, VM_FRAMES, VM_MARK_CAP, VM_PATH, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
+import { FORMAT_VERSION, HEADER_WORDS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_BUDGET, R_INCONSISTENT, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_EXH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
 import { cmpBytes } from './leaf.mjs';
 
 export function chainOf(p, rule) {
@@ -284,6 +284,13 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     s[VM_EXH] = 0;
     s[VM_QIDX] = SCRATCH_MARK + mc;
     s[VM_DLIM] = dl;
+    // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
+    // bit 0 forces the generic path (the fast == generic gate).
+    if ((limits.length > 8) && ((limits[8] & 1) !== 0)) {
+        s[VM_GENERIC] = 1;
+    } else {
+        s[VM_GENERIC] = 0;
+    }
     if (n > s[O_MAX_BYTES]) {
         const c1 = -fail(s, start, CODE_TOO_LARGE);
         return vmOutput(s, out, c1, 0, start);

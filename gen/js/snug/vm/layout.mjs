@@ -163,6 +163,10 @@ export const VM_QIDX = 41;
 
 export const VM_DLIM = 42;
 
+export const VM_GENERIC = 43;
+
+export const VM_FASTM = 44;
+
 export const SCRATCH_MARK = 48;
 
 export const EPOCH_MAX = 2147483632;

@@ -6,7 +6,7 @@
 ;; verified before it is validated against.
 (ns snug.vm.api
   (:require [kin.lang :refer [defn let local return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem ushr < > <= >= == != and or not
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem ushr bit-and < > <= >= == != and or not
                                u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_COSE
                                      O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS
@@ -19,7 +19,7 @@
                                     VM_BUDGET VM_BUDGET_START VM_W_STATE VM_W_REASON VM_W_SUB
                                     VM_W_DEPTH VM_W_XKIND VM_W_XVAL VM_W_OFFSET VM_D VM_FRAMES VM_PATH
                                     VM_REGEX VM_RULE VM_CHAIN VM_EMBED VM_BIGNUM_MAX VM_POS VM_Q1
-                                    VM_EXH VM_REGCAP VM_QIDX VM_DLIM SCRATCH_MARK R_TYPE R_BUDGET
+                                    VM_EXH VM_REGCAP VM_QIDX VM_DLIM VM_GENERIC SCRATCH_MARK R_TYPE R_BUDGET
                                     R_INCONSISTENT]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec wit-empty wit-set]]
             [snug.vm.dead :refer [dead-item]]
@@ -227,6 +227,11 @@
       (iset s VM_EXH 0)
       (iset s VM_QIDX (+ SCRATCH_MARK mc))
       (iset s VM_DLIM dl)
+      (comment "limits word 8 (a VM extension beyond program.md §12.3's 8 words):"
+               "bit 0 forces the generic path (the fast == generic gate).")
+      (if (and (> (ilen limits) 8) (!= (bit-and (ia limits 8) 1) 0))
+        (iset s VM_GENERIC 1)
+        (iset s VM_GENERIC 0))
       (if (> n (ia s O_MAX_BYTES))
         (do (let [c1 (neg (fail s start CODE_TOO_LARGE))]
               (return (vm-output s out c1 0 start)))))

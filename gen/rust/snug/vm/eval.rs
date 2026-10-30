@@ -362,6 +362,318 @@ pub fn item_cls(major: i32, ai: i32, hi: i32, lo: i32) -> i32 {
     }
     return 128;
 }
+pub fn single_scalar(p: &[i32], ts: i32) -> i32 {
+    // The leaf of typeset ts when it is exactly one answer of a scalar kind
+    // with no evaluation list (no combinator), else -1.
+    let off: i32 = p[(p[(H_S_TS_INDEX) as usize] + ts) as usize];
+    if (p[(off) as usize] != 1) || (p[(off + 1) as usize] != 0) {
+        return -1;
+    }
+    let l: i32 = p[(off + 2) as usize];
+    if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * l)) as usize] & 255) {
+        return l;
+    }
+    return -1;
+}
+pub fn single_leaf(p: &[i32], ts: i32) -> i32 {
+    // The leaf of typeset ts when it is exactly one answer and no evaluation
+    // list (any kind but a combinator), else -1.
+    let off: i32 = p[(p[(H_S_TS_INDEX) as usize] + ts) as usize];
+    if (p[(off) as usize] != 1) || (p[(off + 1) as usize] != 0) {
+        return -1;
+    }
+    return p[(off + 2) as usize];
+}
+pub fn int1(p: &[i32], pool: &[u8], b: &[u8], iv: i32, cls: i32, hi: i32, lo: i32) -> bool {
+    // Is the major-0 (cls 1) or major-1 (cls 2) point hi:lo inside interval iv?
+    let bo: i32 = p[(H_S_INTERVALS) as usize] + (6 * iv);
+    let mut rg: i32 = 3;
+    if cls == 2 {
+        rg = 2;
+    }
+    return (cmp_point(p, pool, b, rg, hi, lo, bo) >= 0) && (cmp_point(p, pool, b, rg, hi, lo, bo + 3) <= 0);
+}
+pub fn pt_ge(rg: i32, ph: i32, pl: i32, br: i32, ba: i32, bb: i32) -> bool {
+    // point (rg 2 NEG / 3 POS, hi:lo) >= bound (region, a, b)?
+    if rg != br {
+        return rg > br;
+    }
+    if rg == 3 {
+        return cmp_u64(ph, pl, ba, bb) >= 0;
+    }
+    return cmp_u64(ba, bb, ph, pl) >= 0;
+}
+pub fn pt_le(rg: i32, ph: i32, pl: i32, br: i32, ba: i32, bb: i32) -> bool {
+    if rg != br {
+        return rg < br;
+    }
+    if rg == 3 {
+        return cmp_u64(ph, pl, ba, bb) <= 0;
+    }
+    return cmp_u64(ba, bb, ph, pl) <= 0;
+}
+pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end: i32, leaf: i32) -> i32 {
+    // P3.6 (D044): consecutive SUCCESSFUL elements of a `[* T]` array whose
+    // block already holds its one active position (|A| = 1), T one INT leaf
+    // over one interval or one TEXT leaf without a regexp. Each element is
+    // checked first -- items limit, head (shortest form, bytes present),
+    // UTF-8, the leaf -- and only then charged, in the generic order: 5 at
+    // the array (block 1 + W(|A|+1) 2 + candidate 1 + element 1), visit 1
+    // [+ UTF-8 ceil(len/64)] + filter 1 + leaf 1 [+ probe 1] at the element,
+    // 3 at the array (stamp, candidate, test). An element that would fail,
+    // need anything else or exceed the budget stops the streak BEFORE it is
+    // touched. No path write is needed: no witness can be recorded inside
+    // a successful streak. Answers the next position; the element count goes
+    // in s[VM_FASTM].
+    let lb: i32 = p[(H_S_LEAVES) as usize] + (8 * leaf);
+    let kind: i32 = p[(lb) as usize] & 255;
+    let isint: bool = kind == K_INT;
+    let mask: i32 = p[(lb + 1) as usize];
+    let iv: i32 = p[(H_S_INTERVALS) as usize] + (6 * p[(lb + 2) as usize]);
+    let lr: i32 = p[(iv) as usize];
+    let la: i32 = p[(iv + 1) as usize];
+    let lbb: i32 = p[(iv + 2) as usize];
+    let hr: i32 = p[(iv + 3) as usize];
+    let ha: i32 = p[(iv + 4) as usize];
+    let hb: i32 = p[(iv + 5) as usize];
+    let tlo: i32 = p[(lb + 2) as usize];
+    let thi: i32 = p[(lb + 3) as usize];
+    let maxit: i32 = s[(O_MAX_ITEMS) as usize];
+    let mut q: i32 = q0;
+    let mut k: i32 = 0;
+    let mut items: i32 = s[(O_ITEMS) as usize];
+    let mut left: i32 = s[(VM_BUDGET) as usize];
+    while (k < limit) && (q < end) {
+        let ib: i32 = b[(q) as usize] as i32;
+        let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+        let ai: i32 = ib & 31;
+        let mut hi: i32 = 0;
+        let mut lo: i32 = ai;
+        let mut h: i32 = 1;
+        let mut cost: i32 = 12;
+        if items >= maxit {
+            break;
+        }
+        if ai > 27 {
+            break;
+        }
+        if ai >= 24 {
+            h = 1 + (1 << (ai - 24));
+            if h > (end - q) {
+                break;
+            }
+            if ai == 24 {
+                lo = b[(q + 1) as usize] as i32;
+            }
+            if ai == 25 {
+                lo = be16(b, q + 1);
+            }
+            if ai == 26 {
+                lo = be32(b, q + 1);
+            }
+            if ai == 27 {
+                hi = be32(b, q + 1);
+                lo = be32(b, q + 5);
+            }
+            // shortest form, else the element is not ours
+            if (ai == 24) && (lo < 24) {
+                break;
+            }
+            if (ai == 25) && (lo < 256) {
+                break;
+            }
+            if (ai == 26) && ((i32::cast_unsigned(lo) >> 16).cast_signed() == 0) {
+                break;
+            }
+            if (ai == 27) && (hi == 0) {
+                break;
+            }
+        }
+        if isint {
+            if major > 1 {
+                break;
+            }
+            if (mask & (1 << major)) == 0 {
+                break;
+            }
+            let rg: i32 = 3 - major;
+            if !(pt_ge(rg, hi, lo, lr, la, lbb) && pt_le(rg, hi, lo, hr, ha, hb)) {
+                break;
+            }
+            if left < cost {
+                break;
+            }
+            left -= cost;
+            q += h;
+        } else {
+            // TEXT: length, bytes present, size, UTF-8
+            if major != 3 {
+                break;
+            }
+            if (hi != 0) || (lo < 0) {
+                break;
+            }
+            if lo > (end - (q + h)) {
+                break;
+            }
+            if (lo < tlo) || (lo > thi) {
+                break;
+            }
+            cost = 11 + c64(lo);
+            if left < cost {
+                break;
+            }
+            if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
+                break;
+            }
+            left -= cost;
+            q = (q + h) + lo;
+        }
+        items += 1;
+        k += 1;
+    }
+    s[(VM_BUDGET) as usize] = left;
+    s[(O_ITEMS) as usize] = items;
+    s[(VM_FASTM) as usize] = k;
+    if k > 0 {
+        wit_clear(s);
+    }
+    return q;
+}
+pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i32, cfb: i32, ck: i32, cw: i32, leaf: i32, end: i32, ctx: i32) -> i32 {
+    // P3.6 (D044): eval-item on a query list of exactly ONE answer leaf
+    // `leaf` without building the list: for a scalar kind on a scalar major,
+    // the same profile checks, charges (consecutive charges at one offset
+    // merged, which no output can tell apart) and witness rule 1, with no
+    // frame or mark writes; the matched flag goes in s[VM_FASTM]. Any other
+    // item (container, tag, missing byte) or leaf kind takes the generic
+    // eval-item over the one-entry list written into the frame (its building
+    // was charged by the caller).
+    let mut major: i32 = 4;
+    let lb: i32 = p[(H_S_LEAVES) as usize] + (8 * leaf);
+    let kind: i32 = p[(lb) as usize] & 255;
+    if pos < end {
+        major = (i32::cast_unsigned(b[(pos) as usize] as i32) >> 5).cast_signed();
+    }
+    if (!scalar_kind(kind)) || ((major == 4) || ((major == 5) || (major == 6))) {
+        s[(cfb) as usize] = leaf;
+        s[(cfb + cw) as usize] = F_ANSWER;
+        let rg: i32 = eval_item(p, pool, b, s, pos, d, cfb, ck, 1, end, ctx);
+        let fq: i32 = s[(cfb + cw) as usize];
+        if rg < 0 {
+            return rg;
+        }
+        if (fq & F_MATCHED) != 0 {
+            s[(VM_FASTM) as usize] = 1;
+        } else {
+            s[(VM_FASTM) as usize] = 0;
+        }
+        return rg;
+    }
+    if !charge(s, 1, pos) {
+        return -R_BUDGET;
+    }
+    let it: i32 = s[(O_ITEMS) as usize] + 1;
+    s[(O_ITEMS) as usize] = it;
+    if it > s[(O_MAX_ITEMS) as usize] {
+        return fail(s, pos, CODE_TOO_MANY_ITEMS);
+    }
+    let ai: i32 = (b[(pos) as usize] as i32) & 31;
+    let mut hi: i32 = 0;
+    let mut lo: i32 = ai;
+    let mut q: i32 = pos + 1;
+    let mut cs: i32 = pos + 1;
+    let mut stop: i32 = pos + 1;
+    if ai >= 24 {
+        if (major == 7) && ((ai >= 25) && (ai <= 27)) {
+            stop = scan_float(b, s, pos, ai, end);
+            if stop < 0 {
+                return stop;
+            }
+        } else {
+            q = read_arg(b, s, pos, ai, end);
+            if q < 0 {
+                return q;
+            }
+            hi = s[(O_HI) as usize];
+            lo = s[(O_LO) as usize];
+            cs = q;
+            stop = q;
+        }
+    }
+    if major == 2 {
+        stop = take_len(s, pos, q, hi, lo, end);
+        if stop < 0 {
+            return stop;
+        }
+    }
+    if major == 3 {
+        stop = take_len(s, pos, q, hi, lo, end);
+        if stop < 0 {
+            return stop;
+        }
+        if !charge(s, c64(stop - q), pos) {
+            return -R_BUDGET;
+        }
+        let bad: i32 = utf8_invalid_at(b, q, stop);
+        if bad >= 0 {
+            return fail(s, bad, CODE_TEXT);
+        }
+    }
+    if (major == 7) && ((ai < 25) || (ai > 27)) {
+        let r7: i32 = scan_simple(s, pos, ai);
+        if r7 < 0 {
+            return r7;
+        }
+    }
+    let cls: i32 = item_cls(major, ai, hi, lo);
+    let mut r: i32 = R_TYPE;
+    if (p[(lb + 1) as usize] & cls) != 0 {
+        if (kind == K_INT) && ((cls <= 2) && (p[(lb + 3) as usize] == 1)) {
+            // INT over one interval: filter 1 + leaf 1 + its one probe
+            if !charge(s, 3, pos) {
+                return -R_BUDGET;
+            }
+            if int1(p, pool, b, p[(lb + 2) as usize], cls, hi, lo) {
+                r = 0;
+            } else {
+                r = R_RANGE;
+            }
+        } else if (kind == K_TEXT) && (p[(lb + 4) as usize] < 0) {
+            // TEXT without a regexp: filter 1 + leaf 1, a size check
+            if !charge(s, 2, pos) {
+                return -R_BUDGET;
+            }
+            if ((stop - cs) >= p[(lb + 2) as usize]) && ((stop - cs) <= p[(lb + 3) as usize]) {
+                r = 0;
+            } else {
+                r = R_SIZE;
+            }
+        } else {
+            if !charge(s, 2, pos) {
+                return -R_BUDGET;
+            }
+            r = eval_leaf(p, pool, b, s, lb, kind, pos, cs, stop, cls, hi, lo);
+            if r < 0 {
+                return r;
+            }
+        }
+    } else if !charge(s, 1, pos) {
+        return -R_BUDGET;
+    }
+    if r == 0 {
+        s[(VM_FASTM) as usize] = 1;
+    } else {
+        s[(VM_FASTM) as usize] = 0;
+        if ((ctx & CTX_KEY) == 0) && wit_empty(s) {
+            if !charge(s, 1, pos) {
+                return -R_BUDGET;
+            }
+            wit_set(s, r, 0, d, -1, 0, pos);
+        }
+    }
+    return stop;
+}
 pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, hi: i32, lo: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32) -> i32 {
     // A tag item (§8.4): the scanner's depth and number checks, the filter,
     // TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried
@@ -502,6 +814,51 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     }
     return stop;
 }
+pub fn if_limit(n: i32, el: i32) -> i32 {
+    if n < 0 {
+        return INF;
+    }
+    return n - el;
+}
+pub fn array_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, d: i32, fb: i32, w: i32, area: i32, cfb: i32, cck: i32, cw: i32, fleaf: i32, el: i32, pend: i32, end: i32) -> i32 {
+    // P3.6 (D044): one element of a `[* T]` array (one block, one uncounted
+    // self-looping position, T one answer): the generic element step's
+    // charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's
+    // element 1 at the array, the child, then stamp 1 + candidate 1 + test 1
+    // -- the block's state and witness updated as array-advance would.
+    // Answers the element's end (the block's alive word tells a death).
+    if !charge(s, s[(area + 2) as usize] + 4, pos) {
+        return -R_BUDGET;
+    }
+    path_put(s, d + 1, P_INDEX, el);
+    let rf: i32 = fast_child(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, 0);
+    if rf < 0 {
+        return rf;
+    }
+    if !charge(s, 3, pos) {
+        return -R_BUDGET;
+    }
+    if s[(VM_FASTM) as usize] == 1 {
+        if s[(area + 2) as usize] != 1 {
+            s[(area + 2) as usize] = 1;
+            s[(area + 3) as usize] = 1;
+            s[(area + 4) as usize] = 1;
+        }
+        wit_clear(s);
+    } else {
+        s[(area + 1) as usize] = 0;
+        s[(area + 2) as usize] = 0;
+        s[(area + 3) as usize] = 0;
+        s[(area + 4) as usize] = 0;
+        q_set_flag(s, fb, w, s[(area) as usize], R_TYPE << 8);
+        if pend > 0 {
+            wit_clear(s);
+        } else if wit_empty(s) {
+            wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, q);
+        }
+    }
+    return rf;
+}
 pub fn array_alive(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
     let mut bo: i32 = area;
     let mut k: i32 = 0;
@@ -533,6 +890,8 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     let mut q1: i32 = q0;
     let mut el: i32 = 0;
     let mut ao1: i32 = 0;
+    let mut fleaf: i32 = -1;
+    let mut sleaf: i32 = -1;
     let mut unacc: i32 = 0;
     let mut nalive: i32;
     let na: i32 = q_filter(p, s, fb, w, nq, 16, pos);
@@ -558,12 +917,51 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         ao1 = block_ao(p, s, fb, area);
     }
     nalive = nb;
+    // P3.6 fast step (D044): one block whose automaton is one uncounted
+    // self-looping position (`[* T]`) with a one-answer typeset T.
+    if (nb == 1) && (s[(VM_GENERIC) as usize] == 0) {
+        if ((p[(ao1) as usize] == 1) && (p[(ao1 + 2) as usize] == 0)) && ((p[(ao1 + 4) as usize] == 1) && ((p[(ao1 + 8) as usize] & 1) == 1)) {
+            fleaf = single_leaf(p, p[(ao1 + 6) as usize]);
+        }
+    }
+    if fleaf >= 0 {
+        let lbf: i32 = p[(H_S_LEAVES) as usize] + (8 * fleaf);
+        let kf: i32 = p[(lbf) as usize] & 255;
+        if ((kf == K_INT) && (p[(lbf + 3) as usize] == 1)) || ((kf == K_TEXT) && (p[(lbf + 4) as usize] < 0)) {
+            sleaf = fleaf;
+        }
+    }
     let pend: i32 = count_pending(p, s, fb, w, nq);
     while ((n < 0) && (q < end)) || ((n >= 0) && (el < n)) {
         if nalive == 0 {
             q = dead_item(b, s, q, d + 1, end);
             if q < 0 {
                 return q;
+            }
+        } else if (sleaf >= 0) && ((el >= 1) && (s[(area + 2) as usize] == 1)) {
+            let qs: i32 = array_streak(p, b, s, q, if_limit(n, el), end, sleaf);
+            let ks: i32 = s[(VM_FASTM) as usize];
+            if ks > 0 {
+                q = qs;
+                el += ks - 1;
+            } else {
+                let rf2: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+                if rf2 < 0 {
+                    return rf2;
+                }
+                q = rf2;
+                if s[(area + 1) as usize] == 0 {
+                    nalive = 0;
+                }
+            }
+        } else if fleaf >= 0 {
+            let rf: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+            if rf < 0 {
+                return rf;
+            }
+            q = rf;
+            if s[(area + 1) as usize] == 0 {
+                nalive = 0;
             }
         } else {
             let e: i32 = new_epoch(s);
