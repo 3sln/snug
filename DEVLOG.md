@@ -410,59 +410,109 @@ slower); allocated head tuples; validating wrapper constructors in build
 - [~] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
 
-  *Status 2026-10-29 (VM engineer): buffer driver working end to end;
-  slices continuing (witness/budget/hostile assembled cases, oracle
-  differential, hosts, benchmarks).* The validator VM is kin in
+  *Status 2026-10-29 (VM engineer): the D030 buffer driver is complete and
+  gated; open: the one compiler lowering below, Phase 4 budget calibration,
+  the resumable session driver (D030, later).* Commits `056c0ab`, `100cf27`,
+  `41fdc35`, `e278de9` and this entry's. The validator VM is kin in
   `kin/vm-*.kin` (`snug.vm.layout base dead leaf map array eval api`),
-  generated into `gen/{js,rust}/snug/vm/`: the D030 **recursive buffer
-  driver** (`vm-validate`, `vm-validate-span` for §16.3 `validateAt`,
-  `vm-scratch-words`, `vm-scratch-init`, `vm-rule-index` per program.md
-  §13.1; vm-verify is the compiler engineer's and is consumed, not
-  duplicated). The live walk (`snug.vm.eval`) is the scanner's walk with the
-  schema evaluated alongside: same checks, order, codes, offsets and item
-  counting (reusing `snug.cbor.*` helpers with explicit `end` offsets);
-  query lists with epochs/marks, operand-first combinators, major-mask
-  filter, every §4.2 leaf kind (INT/FLOAT intervals over sign+magnitude and
-  ordered binary64 keys with integer-only widening, LIT/LITSET by bytes,
+  generated into `gen/{js,rust}/snug/vm/`: a bounded recursive walk over a
+  contiguous buffer with `vm-validate`, `vm-validate-span` (§16.3
+  `validateAt`), `vm-scratch-words` (O(1) from the verified
+  `rule.scratch_words`; the chain formula stays as `vm-scratch-words-slow`
+  and is cross-checked on every gate Program), `vm-scratch-init`,
+  `vm-rule-index` (program.md §13.1). vm-verify is the compiler engineer's
+  and is consumed. The live walk (`snug.vm.eval`) is the scanner's walk with
+  the schema evaluated alongside — same checks, order, codes, offsets and
+  item counts, reusing `snug.cbor.*` with explicit `end` offsets — over
+  query lists (epochs/marks, operand-first AND/NOT, major-mask filter),
+  every §4.2 leaf kind (INT/FLOAT interval lists over sign+magnitude and
+  ordered binary64 keys widened by integer operations, LIT/LITSET by bytes,
   TEXT size + I-Regexp bitset simulation, BYTES size/`.bits`, UINTX, SIMPLE,
-  TAG/TAGSET, EMBED sub-validation, ARRAY Glushkov with counters, MAP blocks
-  with factors/pools/alternatives/per-key index/O(1) pool rejection/cuts),
-  the witness slot and path stack (§9.2, §9.3), the §14 schedule and the
-  saturating budget, per-call limits that only lower compiled ones. A
-  dead item (empty query) is walked by `snug.vm.dead` (scanner + charges):
-  that is also the profile-only continuation of arch §4.5 and the hot path
-  of profile-only decode. JS host: `host/js/src/schema.mjs` (Program with
-  copy-on-load, per-isolate scratch lease, result rendering, Schema
-  `validate`/`validateAt`/`decode`, `compile` over the compiler's host).
-  Rust: `host/rust/src/bin/vm.rs` (`&mut` scratch per program). Test tools:
-  `kin/scripts/vm-asm.mjs` (a Program assembler computing every [D] field;
-  it reproduces program.md §15 word for word, pool included) and
-  `kin/scripts/vm-test` (`bb vm-test`).
-  Gates run 2026-10-29: `bb vm-test 2000 1`: program.md §15 worked
-  executions exact (`[0,0,0,64,6,…]`, `[33,0,0,47,3,1,1,0,1,0]`, the
-  contrast `type` at `["x"]`), and the compiler's §15 Program bit-identical
-  to the document; **profile identity 3 360/3 360** (VM against `any` = the
-  scanner's code, offset and items on every scan-test vector, fixed case and
-  2 000 seeded mutations); conformance 976/983 cases from 262 compiled suites
-  (31 refusal suites refused as expected) — the 7 misses are compiler
-  lowering, below; JS == Rust (debug) on 4 346/4 346 whole out arrays, no
-  panic; 1 464 JS cases re-run behind throwing out-of-bounds traps on P, B,
-  input and scratch; 264 Programs pass vm-verify. `bb check`, `bb scan-test
-  30000 1` (31 360/31 360 incl. wasm), `bb rscan-test 30000 2` green.
-  **For the compiler engineer (found by vm-test, not fixed here):** (1) an
-  inline container as a `.cbor`/`.cborseq` control type (`bstr .cbor [uint,
-  tstr]`, `bstr .cborseq [* uint]`, `bstr .cbor {a: int}`) lowers the EMBED
-  leaf's content typeset to the EMBED's own typeset (content `T0 = {L0}`);
-  the named-rule forms (`s = [uint, tstr]` `r = bstr .cbor s`) are right
-  and pass; (2) `uint .size n` lowers to `[256^(n-1), 256^n - 1]` (`.size 1`
-  refuses 0); arch §4.6 says `uint .size n` = `0..256^n−1` (only the range
-  form `uint .size (lo..hi)` has a lower bound). Please also confirm D040.
-  Shared-script change: `kin/scripts/{check,scan-test,rscan-test}` build
+  TAG/TAGSET, EMBED sub-validations, ARRAY Glushkov with counters, MAP blocks
+  with factors, pools, per-key index, O(1) pool rejection and cuts), the
+  witness slot and path stack (§9.2, §9.3), the §14 schedule (D041) and a
+  saturating budget, per-call limits that only lower compiled ones. A dead
+  item is walked by `snug.vm.dead` (scanner + charges): the profile-only
+  continuation of arch §4.5 and the hot path of profile-only decode (D043).
+  Hosts: `host/js/src/schema.mjs` (Program copied on load and verified,
+  per-isolate scratch lease, `Schema.validate` / `validateAt` / `decode`
+  (VM then the trusted builder), async `compile` over the compiler host
+  (lazily loaded, R9), `fromProgram`, results `{ok} | {ok:false, reason,
+  path, offset[, subcode]}` with paths rendered from KEYS only);
+  `host/rust/src/schema.rs` (`Program::new` verifies, `Scratch` owned by the
+  caller as `&mut`, `Options`, `validate`, `validate_at`, `Failure`);
+  `host/wasm/src/lib.rs` gains `snug_vm_load` / `snug_vm_validate` over
+  static buffers (the module with scanner + resumable scanner + VM is 63.8 KB
+  at O3; `kin/scripts/wasm-build` now builds `cbor vm` by default). Tools:
+  `kin/scripts/vm-asm.mjs` (a Program assembler computing every [D] field —
+  it reproduces program.md §15 word for word, pool included),
+  `vm-oracle-gen.mjs` (seeded schemas with value samplers), `vm-cases.mjs`
+  (hand-reasoned cases), `vm-test` / `vm-test.mjs` (`bb vm-test [mutations]
+  [seed] [schemas]`).
+  **Gates run 2026-10-29** (`bb vm-test 5000 1 400` unless stated):
+  program.md §15 worked executions exact (`[0,0,0,64,6,0,0,0]`,
+  `[33,0,0,47,3,1,1,0,1,0]`, the contrast case `type` at `["x"]`) and the
+  compiler's §15 Program bit-identical to the document; **profile identity
+  12 720/12 720 runs** — every scan-test input (1 146 vectors, 214 fixed
+  cases, 5 000 seeded mutations under random options) through the VM against
+  `any` AND against a recursive schema that keeps every map, array, tag,
+  decimal, ndarray, typed array and embedded document live: the scanner's
+  exact code and offset on every refusal (profile errors win, D023) and
+  acceptance with its item count otherwise; **conformance 981/983** cases
+  from 262 compiled suites (31 refusal suites refused as expected, 2
+  phase-later skipped) — the 2 misses are `uint .size n` (below); **oracle
+  differential (D022) 3 200/3 200** values on 400 generated schemas (seeds
+  2, 3, 4 × 2 000 schemas: 16 000/16 000 each; verdicts ~half true);
+  assembled/hand-reasoned 75/75 (witness reasons, paths and offsets incl.
+  the A10 key-leak rule, profile errors win, budget exhaustion points,
+  limits only lowering, hostile lengths/nesting/regexp/six-way choice,
+  `validateAt` spans, embedded roots at D); epochs: 1 542 cases re-run from
+  an epoch just below the restart give identical output; **JS == Rust
+  (debug, overflow checks on) 16 978/16 978 whole out arrays** (code,
+  subcode, offset, budget used, items, path), no panic; **JS == wasm
+  16 975/16 975**; JS host rendering == Rust host rendering 1 033/1 033;
+  6 000 JS cases re-run behind throwing out-of-bounds traps on P, B, input
+  and scratch; 684 Programs pass vm-verify. `bb check`, `bb scan-test 30000
+  1`, `bb rscan-test 30000 2` green (earlier in the session; re-run at the
+  end, see below).
+  **Benchmarks** (`bench/VM.md`, `node bench/vm-bench.mjs`; M1 Pro, Node 24.6,
+  shared machine, CPU-time medians): the six study contracts validate in
+  0.5–17 µs in snug JS and 0.5–10 µs in snug wasm against 11 µs–1.7 ms in
+  the crate's wasm build (11–270× faster in JS); permissive schemas over the
+  P1.4 inputs 1.1 µs–48 ms JS, 0.6 µs–19 ms wasm, crate 3.3 µs–162 ms (and
+  34 ms vs 6.8 µs on the 1 MiB put with a contract-shaped schema); the
+  invalid 1.48 MB six-way choice stops at the 4 M default budget in 75 ms JS
+  / 38 ms wasm (the crate: 2.4 s); profile-only decode (VM against `any` +
+  builder) is 0.29–0.97× cbor.mjs except the int array (1.38×).
+  **For the compiler engineer (found by vm-test, not fixed here):** `uint
+  .size n` lowers to `[256^(n−1), 256^n − 1]` (`.size 1` refuses 0); arch
+  §4.6 says `uint .size n` = `0..256^n−1` (only `uint .size (lo..hi)` has a
+  lower bound) — adversarial `uint .size 1`/`8` with value 0. Resolved on
+  your side meanwhile: inline `.cbor`/`.cborseq` control types (`7fac033`)
+  and a transient 2-byte `.bits` mask in your working tree. Please confirm
+  D040 (the VM consumes `.cborseq` content = the control's array typeset,
+  which you already emit).
+  Shared-script changes: `kin/scripts/{check,scan-test,rscan-test}` build
   with `SNUG_RS_ONLY="cbor vm compile program hello.rs"` (the committed
-  `lib.rs` now declares `pub mod compile`, and `bin/vm.rs` needs `vm`; absent
-  directories are skipped). Scratch words 37–42 (program.md "reserved") are
-  the VM's per-call run state (re-initialised every call); vm-verify uses
+  `lib.rs` declares `pub mod compile`; `bin/vm.rs` needs `vm`; absent
+  directories are skipped); `wasm-build` defaults to `cbor vm`; `lib.rs`
+  gains `pub mod schema;`. Scratch words 37–42 (program.md "reserved") are
+  the VM's per-call run state, re-initialised every call; vm-verify uses
   37–38 only at load, so they never overlap in time.
+  Learnt: (1) the §15 worked example is a precise spec of the charging
+  schedule's ambiguous corners — reproducing its 64/47 units exactly fixed
+  six readings (D041); (2) "profile identity" must be tested with a schema
+  that keeps everything live, not only `any` (whose children are dead): it
+  is the live map/array/tag/embed paths that re-implement the scanner's
+  order; (3) program.md §8.4's per-item `.cborseq` query cannot express
+  positional arrays — a virtual array item over the sequence reuses the
+  format unchanged (D040); (4) an epoch restart test must only move
+  VM_EPOCH forward: the contract is monotone, and a harness that sets it
+  back makes stale marks look current; (5) a byte string at depth D has no
+  frame (and no path slot) for an embedded root, so the guard must come
+  before any write at d + 1; (6) per-unit CPU varies 4.5–22 ns in JS
+  across event kinds, so the default 4 M budget costs up to ~90 ms in Node on
+  map-heavy hostile input — a Phase 4 calibration input (bench/VM.md §3).
 - [~] **P3.5 — Conformance corpus** (study probes and contracts with expected
   verdicts corrected to RFC semantics; RFC 8610 examples; adversarial cases).
 
@@ -1068,7 +1118,11 @@ as the query of a VIRTUAL array item at physical depth d + 1 (path segment
 would; the VM never writes `EMBEDSEQ`). The virtual array is not an item
 (not counted, no visit charge); its filter, blocks and elements are charged
 as an array's. Inner depth limit for a sequence: min(limit, D − d − 2).
-`.cbor` and `.cborseq` leaves on one byte string run as two sub-validations.
+`.cbor` and `.cborseq` leaves on one byte string run as two sub-validations
+(so the content is walked twice; nested through such byte strings the factor
+compounds per level — bounded by the budget, and only for schemas mixing both
+kinds on one byte string). The depth guard is by depth, not content: an empty
+sequence in a byte string at depth D − 1 also fails it.
 A byte string at a depth with no frame for the embedded root (d + 1 > D, or
 d + 2 > D for a sequence) fails its EMBED leaves with inner `cbor/depth`
 (program.md §17 q6) instead of writing past the scratch.
