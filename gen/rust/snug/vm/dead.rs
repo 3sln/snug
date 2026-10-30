@@ -25,17 +25,77 @@ pub fn dead_text(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, en
     }
     return stop;
 }
+pub fn dead_int_streak(b: &[u8], s: &mut [i32], q0: i32, limit: i32, end: i32) -> i32 {
+    // P3.6 (D044): up to `limit` consecutive dead integer items (major 0/1,
+    // a shortest head, its bytes present), each charged its visit and counted
+    // exactly as dead-item would; stops BEFORE any item that is not one, or
+    // that the items limit or the budget would refuse. Answers the next
+    // position; the count in s[VM_FASTM].
+    let maxit: i32 = s[(O_MAX_ITEMS) as usize];
+    let mut q: i32 = q0;
+    let mut k: i32 = 0;
+    let mut items: i32 = s[(O_ITEMS) as usize];
+    let mut left: i32 = s[(VM_BUDGET) as usize];
+    while (k < limit) && (q < end) {
+        let ib: i32 = b[(q) as usize] as i32;
+        let ai: i32 = ib & 31;
+        let mut h: i32 = 1;
+        if (i32::cast_unsigned(ib) >> 5).cast_signed() > 1 {
+            break;
+        }
+        if (items >= maxit) || (left < 1) {
+            break;
+        }
+        if ai >= 24 {
+            if ai > 27 {
+                break;
+            }
+            h = 1 + (1 << (ai - 24));
+            if h > (end - q) {
+                break;
+            }
+            if (ai == 24) && ((b[(q + 1) as usize] as i32) < 24) {
+                break;
+            }
+            if (ai == 25) && ((b[(q + 1) as usize] as i32) == 0) {
+                break;
+            }
+            if (ai == 26) && (((b[(q + 1) as usize] as i32) | (b[(q + 2) as usize] as i32)) == 0) {
+                break;
+            }
+            if (ai == 27) && ((((b[(q + 1) as usize] as i32) | (b[(q + 2) as usize] as i32)) | ((b[(q + 3) as usize] as i32) | (b[(q + 4) as usize] as i32))) == 0) {
+                break;
+            }
+        }
+        left -= 1;
+        items += 1;
+        q += h;
+        k += 1;
+    }
+    s[(VM_BUDGET) as usize] = left;
+    s[(O_ITEMS) as usize] = items;
+    s[(VM_FASTM) as usize] = k;
+    return q;
+}
 pub fn dead_array(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     let r: i32 = enter_container(s, pos, p, hi, lo, depth, 0, end);
     let inner: i32 = depth + 1;
     let mut q: i32 = p;
+    let mut i: i32 = 0;
     if r < 0 {
         return r;
     }
-    for _i in 0..lo {
-        q = dead_item(b, s, q, inner, end);
-        if q < 0 {
-            return q;
+    while i < lo {
+        if (s[(VM_GENERIC) as usize] & 1) == 0 {
+            q = dead_int_streak(b, s, q, lo - i, end);
+            i += s[(VM_FASTM) as usize];
+        }
+        if i < lo {
+            q = dead_item(b, s, q, inner, end);
+            if q < 0 {
+                return q;
+            }
+            i += 1;
         }
     }
     return q;

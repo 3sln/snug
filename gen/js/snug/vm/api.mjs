@@ -285,9 +285,10 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     s[VM_QIDX] = SCRATCH_MARK + mc;
     s[VM_DLIM] = dl;
     // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
-    // bit 0 forces the generic path (the fast == generic gate).
-    if ((limits.length > 8) && ((limits[8] & 1) !== 0)) {
-        s[VM_GENERIC] = 1;
+    // bit 0 forces the generic path (the fast == generic gate);
+    // bit 1 selects schedule 2 (D045, opt-in, provisional).
+    if (limits.length > 8) {
+        s[VM_GENERIC] = limits[8] & 3;
     } else {
         s[VM_GENERIC] = 0;
     }

@@ -226,6 +226,15 @@
             (return (ia p (+ (+ (+ go 2) (* 4 (ia s (+ cb 3)))) 1))))))
     (return (ia p (+ (+ (m-lits p mt) (* 4 (ia s (+ cb 3)))) 1)))))
 
+(defn ^:pub ^I32 cand-vts-mt [^IntsR p ^IntsR s ^I32 mt ^I32 cl ^I32 c]
+  (comment "cand-vts with the candidate's block table already known.")
+  (let [cb (+ cl (* 4 c))]
+    (if (== (bit-and (ia s (+ cb 1)) 1) 1)
+      (do (let [prec (+ (m-pools p mt) (* 5 (ia s (+ cb 2))))
+                go (group-rec p (ia p (+ prec 1)))]
+            (return (ia p (+ (+ (+ go 2) (* 4 (ia s (+ cb 3)))) 1))))))
+    (return (ia p (+ (+ (m-lits p mt) (* 4 (ia s (+ cb 3)))) 1)))))
+
 (defn ^:pub ^Bool block-named [^IntsR s ^I32 bo ^I32 cl ^I32 nc]
   (comment "Did this block contribute a literal (naming) candidate for the pair?")
   (let [^:mut c (ia s (+ bo 3))]
@@ -469,3 +478,80 @@
     (iset s O_HI lo)
     (iset s O_LO units)
     (return (neg 1))))
+
+(defn ^:pub ^Bool simple-struct [^IntsR p ^I32 mt]
+  (comment "One factor, one pool, one alternative, the empty group: a closed struct.")
+  (return (and (and (== (ia p mt) 1) (== (ia p (+ mt 1)) 1))
+               (and (== (ia p (+ mt 2)) 1) (== (ia p (group-rec p (ia p (+ (m-pools p mt) 1)))) 0)))))
+
+(defn ^:pub ^I32 key-phase-struct [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 cl ^I32 nc0 ^I32 cap ^I32 at]
+  (comment "map-key-phase for a simple-struct block (P3.6): no group entries, so only"
+           "the naming records of the key (1 unit each). Same candidates and charges.")
+  (let [kr (named-rec p s bo mt kid)
+        pso (ia p (+ (m-pools p mt) 4))
+        aso (ia p (+ (m-alts p mt) 4))
+        ^:mut nc nc0]
+    (iset s (+ bo 3) nc0)
+    (iset s (+ (+ bo pso) 3) nc0)
+    (if (>= kr 0)
+      (do (let [krec (+ (m-keys p mt) (* 4 kr))
+                nf (ia p (+ krec 2))
+                ncount (ia p (+ krec 3))
+                live (and (== (ia s (+ bo aso)) 0) (== (ia s (+ (+ bo aso) 1)) (ia s (+ bo pso))))]
+            (for [^I32 r 0 ncount]
+              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+              (if live
+                (do (if (>= nc cap) (return (neg R_INCONSISTENT)))
+                    (iset s (+ cl (* 4 nc)) bo)
+                    (iset s (+ (+ cl (* 4 nc)) 1) 0)
+                    (iset s (+ (+ cl (* 4 nc)) 2) (+ nf r))
+                    (iset s (+ (+ cl (* 4 nc)) 3) (ia p (+ (+ (m-names p mt) (* 2 (+ nf r))) 1)))
+                    (set nc (+ nc 1))))))))
+    (return nc)))
+
+(defn ^:pub ^I32 update-struct [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 cl ^I32 nc ^I32 at]
+  (comment "map-update for a simple-struct block (P3.6): the pool always REJECTs (no"
+           "group entry); the naming record of the key (1 unit) consumes, or kills on"
+           "a cut; the pool (1 unit). Same state and charges as map-update.")
+  (let [pso (ia p (+ (m-pools p mt) 4))
+        arec (m-alts p mt)
+        aso (ia p (+ arec 4))
+        lits (m-lits p mt)
+        kr (named-rec p s bo mt kid)]
+    (iset s (+ (+ bo pso) 2) 0)
+    (iset s (+ (+ bo pso) 3) (neg 1))
+    (if (>= kr 0)
+      (do (let [krec (+ (m-keys p mt) (* 4 kr))
+                nfst (ia p (+ krec 2))
+                ncount (ia p (+ krec 3))
+                names (m-names p mt)
+                ^:mut kc (ia s (+ bo 3))]
+            (for [^I32 r 0 ncount]
+              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+              (let [lit (ia p (+ (+ names (* 2 (+ nfst r))) 1))
+                    lrec (+ lits (* 4 lit))]
+                (if (and (== (ia s (+ bo aso)) 0) (== (ia s (+ (+ bo aso) 1)) (ia s (+ bo pso))))
+                  (do (if (or (>= kc nc) (!= (ia s (+ cl (* 4 kc))) bo)) (return (neg R_INCONSISTENT)))
+                      (let [matched (!= (bit-and (ia s (+ (+ cl (* 4 kc)) 1)) 2) 0)]
+                        (set kc (+ kc 1))
+                        (if matched
+                          (do (let [li (- lit (ia p (+ arec 1)))
+                                    wd (+ (+ (+ bo aso) 3) (sar li 5))]
+                                (iset s wd (bit-or (ia s wd) (shl 1 (bit-and li 31))))
+                                (iset s (+ (+ bo aso) 2) (+ (ia s (+ (+ bo aso) 2)) (ia p (+ lrec 2))))
+                                (iset s (+ (+ bo aso) 1) (+ (ia s (+ (+ bo aso) 1)) 1))
+                                (iset s (+ (+ bo pso) 2) (+ (ia s (+ (+ bo pso) 2)) 1))))
+                          (if (== (ia p (+ lrec 3)) 1)
+                            (do (iset s (+ bo aso) 1)
+                                (iset s (+ (+ bo pso) 1) (- (ia s (+ (+ bo pso) 1)) 1))
+                                (iset s (+ bo 4) (- (ia s (+ bo 4)) 1)))))))))))))
+    (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+    (let [lv (ia s (+ (+ bo pso) 1))
+          ex (ia s (+ (+ bo pso) 2))]
+      (iset s (+ bo pso) (+ (ia s (+ bo pso)) 1))
+      (iset s (+ bo 4) (- (ia s (+ bo 4)) (- lv ex)))
+      (iset s (+ (+ bo pso) 1) ex))
+    (if (== (ia s (+ bo 4)) 0)
+      (do (iset s (+ bo 1) 0)
+          (return 0)))
+    (return 1)))

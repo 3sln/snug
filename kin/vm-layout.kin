@@ -136,3 +136,6 @@
 
 ;; eval context bits
 (defconst ^:pub ^I32 CTX_KEY 1)
+;; schedule 2 (D045): a one-scalar-leaf child of a simple container; its filter
+;; and leaf units are not charged
+(defconst ^:pub ^I32 CTX_SIMPLE 2)

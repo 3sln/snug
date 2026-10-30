@@ -487,7 +487,7 @@ pub fn eval_leaf(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, kind:
         _ => R_TYPE,
     };
 }
-pub fn eval_scalars(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, nq: i32, pos: i32, cs: i32, ce: i32, cls: i32, hi: i32, lo: i32) -> i32 {
+pub fn eval_scalars(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, nq: i32, pos: i32, cs: i32, ce: i32, cls: i32, hi: i32, lo: i32, unit: i32) -> i32 {
     // Every admitted scalar leaf of the query list, in query order, on the item
     // at pos: 1 unit each, then its own work; sets MATCHED or the failure
     // reason (bits 8-15) in the entry's flags. 0 or a negated code.
@@ -500,7 +500,8 @@ pub fn eval_scalars(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w:
             let lb: i32 = lv + (8 * l);
             let kind: i32 = p[(lb) as usize] & 255;
             if scalar_kind(kind) {
-                if !charge(s, 1, pos) {
+                // unit 0: schedule 2's one-leaf child (D045), no leaf unit
+                if !charge(s, unit, pos) {
                     return -R_BUDGET;
                 }
                 let r: i32 = eval_leaf(p, pool, b, s, lb, kind, pos, cs, ce, cls, hi, lo);

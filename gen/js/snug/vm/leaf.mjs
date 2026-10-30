@@ -515,7 +515,7 @@ export function evalLeaf(p, pool, b, s, lb, kind, pos, cs, ce, cls, hi, lo) {
     }
 }
 
-export function evalScalars(p, pool, b, s, fb, w, nq, pos, cs, ce, cls, hi, lo) {
+export function evalScalars(p, pool, b, s, fb, w, nq, pos, cs, ce, cls, hi, lo, unit) {
     // Every admitted scalar leaf of the query list, in query order, on the item
     // at pos: 1 unit each, then its own work; sets MATCHED or the failure
     // reason (bits 8-15) in the entry's flags. 0 or a negated code.
@@ -528,7 +528,8 @@ export function evalScalars(p, pool, b, s, fb, w, nq, pos, cs, ce, cls, hi, lo) 
             const lb = lv + (8 * l);
             const kind = p[lb] & 255;
             if (scalarKind(kind)) {
-                if (!charge(s, 1, pos)) {
+                // unit 0: schedule 2's one-leaf child (D045), no leaf unit
+                if (!charge(s, unit, pos)) {
                     return -R_BUDGET;
                 }
                 const r = evalLeaf(p, pool, b, s, lb, kind, pos, cs, ce, cls, hi, lo);

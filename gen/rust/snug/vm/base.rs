@@ -90,6 +90,11 @@ pub fn charge(s: &mut [i32], n: i32, at: i32) -> bool {
     // exceeds what remains the call stops with `budget`; `at` (the item being
     // visited) becomes the reported offset. Nothing is deducted then, and
     // the host reports the whole budget as used.
+    // Schedule 2 (D045, opt-in) marks simple-shape bookkeeping free with
+    // bit 2 of s[VM_GENERIC] while it runs.
+    if (s[(VM_GENERIC) as usize] & 4) != 0 {
+        return true;
+    }
     let left: i32 = s[(VM_BUDGET) as usize];
     if left < n {
         s[(VM_POS) as usize] = at;
@@ -97,6 +102,17 @@ pub fn charge(s: &mut [i32], n: i32, at: i32) -> bool {
     }
     s[(VM_BUDGET) as usize] = left - n;
     return true;
+}
+pub fn sched2(s: &[i32]) -> bool {
+    return (s[(VM_GENERIC) as usize] & 2) != 0;
+}
+pub fn free_on(s: &mut [i32]) {
+    let g: i32 = s[(VM_GENERIC) as usize];
+    s[(VM_GENERIC) as usize] = g | 4;
+}
+pub fn free_off(s: &mut [i32]) {
+    let g: i32 = s[(VM_GENERIC) as usize];
+    s[(VM_GENERIC) as usize] = g & (4 ^ (-1));
 }
 pub fn new_epoch(s: &mut [i32]) -> i32 {
     // A fresh epoch. Near overflow the marks are zeroed and epochs restart

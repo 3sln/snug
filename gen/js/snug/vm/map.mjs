@@ -303,6 +303,17 @@ export function candVts(p, s, fb, cl, c) {
     return p[(mLits(p, mt) + (4 * s[cb + 3])) + 1];
 }
 
+export function candVtsMt(p, s, mt, cl, c) {
+    // cand-vts with the candidate's block table already known.
+    const cb = cl + (4 * c);
+    if ((s[cb + 1] & 1) === 1) {
+        const prec = mPools(p, mt) + (5 * s[cb + 2]);
+        const go = groupRec(p, p[prec + 1]);
+        return p[((go + 2) + (4 * s[cb + 3])) + 1];
+    }
+    return p[(mLits(p, mt) + (4 * s[cb + 3])) + 1];
+}
+
 export function blockNamed(s, bo, cl, nc) {
     // Did this block contribute a literal (naming) candidate for the pair?
     let c = s[bo + 3];
@@ -621,4 +632,101 @@ export function keyProbe(p, pool, b, s, ks, ke, lo0) {
     s[O_HI] = lo;
     s[O_LO] = units;
     return -1;
+}
+
+export function simpleStruct(p, mt) {
+    // One factor, one pool, one alternative, the empty group: a closed struct.
+    return ((p[mt] === 1) && (p[mt + 1] === 1)) && ((p[mt + 2] === 1) && (p[groupRec(p, p[mPools(p, mt) + 1])] === 0));
+}
+
+export function keyPhaseStruct(p, s, bo, mt, kid, cl, nc0, cap, at) {
+    // map-key-phase for a simple-struct block (P3.6): no group entries, so only
+    // the naming records of the key (1 unit each). Same candidates and charges.
+    const kr = namedRec(p, s, bo, mt, kid);
+    const pso = p[mPools(p, mt) + 4];
+    const aso = p[mAlts(p, mt) + 4];
+    let nc = nc0;
+    s[bo + 3] = nc0;
+    s[(bo + pso) + 3] = nc0;
+    if (kr >= 0) {
+        const krec = mKeys(p, mt) + (4 * kr);
+        const nf = p[krec + 2];
+        const ncount = p[krec + 3];
+        const live = (s[bo + aso] === 0) && (s[(bo + aso) + 1] === s[bo + pso]);
+        for (let r = 0; r < ncount; r++) {
+            if (!charge(s, 1, at)) {
+                return -R_BUDGET;
+            }
+            if (live) {
+                if (nc >= cap) {
+                    return -R_INCONSISTENT;
+                }
+                s[cl + (4 * nc)] = bo;
+                s[(cl + (4 * nc)) + 1] = 0;
+                s[(cl + (4 * nc)) + 2] = nf + r;
+                s[(cl + (4 * nc)) + 3] = p[(mNames(p, mt) + (2 * (nf + r))) + 1];
+                nc += 1;
+            }
+        }
+    }
+    return nc;
+}
+
+export function updateStruct(p, s, bo, mt, kid, cl, nc, at) {
+    // map-update for a simple-struct block (P3.6): the pool always REJECTs (no
+    // group entry); the naming record of the key (1 unit) consumes, or kills on
+    // a cut; the pool (1 unit). Same state and charges as map-update.
+    const pso = p[mPools(p, mt) + 4];
+    const arec = mAlts(p, mt);
+    const aso = p[arec + 4];
+    const lits = mLits(p, mt);
+    const kr = namedRec(p, s, bo, mt, kid);
+    s[(bo + pso) + 2] = 0;
+    s[(bo + pso) + 3] = -1;
+    if (kr >= 0) {
+        const krec = mKeys(p, mt) + (4 * kr);
+        const nfst = p[krec + 2];
+        const ncount = p[krec + 3];
+        const names = mNames(p, mt);
+        let kc = s[bo + 3];
+        for (let r = 0; r < ncount; r++) {
+            if (!charge(s, 1, at)) {
+                return -R_BUDGET;
+            }
+            const lit = p[(names + (2 * (nfst + r))) + 1];
+            const lrec = lits + (4 * lit);
+            if ((s[bo + aso] === 0) && (s[(bo + aso) + 1] === s[bo + pso])) {
+                if ((kc >= nc) || (s[cl + (4 * kc)] !== bo)) {
+                    return -R_INCONSISTENT;
+                }
+                const matched = (s[(cl + (4 * kc)) + 1] & 2) !== 0;
+                kc += 1;
+                if (matched) {
+                    const li = lit - p[arec + 1];
+                    const wd = ((bo + aso) + 3) + (li >> 5);
+                    s[wd] = s[wd] | (1 << (li & 31));
+                    s[(bo + aso) + 2] = s[(bo + aso) + 2] + p[lrec + 2];
+                    s[(bo + aso) + 1] = s[(bo + aso) + 1] + 1;
+                    s[(bo + pso) + 2] = s[(bo + pso) + 2] + 1;
+                } else if (p[lrec + 3] === 1) {
+                    s[bo + aso] = 1;
+                    s[(bo + pso) + 1] = s[(bo + pso) + 1] - 1;
+                    s[bo + 4] = s[bo + 4] - 1;
+                }
+            }
+        }
+    }
+    if (!charge(s, 1, at)) {
+        return -R_BUDGET;
+    }
+    const lv = s[(bo + pso) + 1];
+    const ex = s[(bo + pso) + 2];
+    s[bo + pso] = s[bo + pso] + 1;
+    s[bo + 4] = s[bo + 4] - (lv - ex);
+    s[(bo + pso) + 1] = ex;
+    if (s[bo + 4] === 0) {
+        s[bo + 1] = 0;
+        return 0;
+    }
+    return 1;
 }

@@ -285,6 +285,16 @@ pub fn cand_vts(p: &[i32], s: &[i32], fb: i32, cl: i32, c: i32) -> i32 {
     }
     return p[((m_lits(p, mt) + (4 * s[(cb + 3) as usize])) + 1) as usize];
 }
+pub fn cand_vts_mt(p: &[i32], s: &[i32], mt: i32, cl: i32, c: i32) -> i32 {
+    // cand-vts with the candidate's block table already known.
+    let cb: i32 = cl + (4 * c);
+    if (s[(cb + 1) as usize] & 1) == 1 {
+        let prec: i32 = m_pools(p, mt) + (5 * s[(cb + 2) as usize]);
+        let go: i32 = group_rec(p, p[(prec + 1) as usize]);
+        return p[(((go + 2) + (4 * s[(cb + 3) as usize])) + 1) as usize];
+    }
+    return p[((m_lits(p, mt) + (4 * s[(cb + 3) as usize])) + 1) as usize];
+}
 pub fn block_named(s: &[i32], bo: i32, cl: i32, nc: i32) -> bool {
     // Did this block contribute a literal (naming) candidate for the pair?
     let mut c: i32 = s[(bo + 3) as usize];
@@ -597,4 +607,98 @@ pub fn key_probe(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ks: i32, ke: i
     s[(O_HI) as usize] = lo;
     s[(O_LO) as usize] = units;
     return -1;
+}
+pub fn simple_struct(p: &[i32], mt: i32) -> bool {
+    // One factor, one pool, one alternative, the empty group: a closed struct.
+    return ((p[(mt) as usize] == 1) && (p[(mt + 1) as usize] == 1)) && ((p[(mt + 2) as usize] == 1) && (p[(group_rec(p, p[(m_pools(p, mt) + 1) as usize])) as usize] == 0));
+}
+pub fn key_phase_struct(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kid: i32, cl: i32, nc0: i32, cap: i32, at: i32) -> i32 {
+    // map-key-phase for a simple-struct block (P3.6): no group entries, so only
+    // the naming records of the key (1 unit each). Same candidates and charges.
+    let kr: i32 = named_rec(p, s, bo, mt, kid);
+    let pso: i32 = p[(m_pools(p, mt) + 4) as usize];
+    let aso: i32 = p[(m_alts(p, mt) + 4) as usize];
+    let mut nc: i32 = nc0;
+    s[(bo + 3) as usize] = nc0;
+    s[((bo + pso) + 3) as usize] = nc0;
+    if kr >= 0 {
+        let krec: i32 = m_keys(p, mt) + (4 * kr);
+        let nf: i32 = p[(krec + 2) as usize];
+        let ncount: i32 = p[(krec + 3) as usize];
+        let live: bool = (s[(bo + aso) as usize] == 0) && (s[((bo + aso) + 1) as usize] == s[(bo + pso) as usize]);
+        for r in 0..ncount {
+            if !charge(s, 1, at) {
+                return -R_BUDGET;
+            }
+            if live {
+                if nc >= cap {
+                    return -R_INCONSISTENT;
+                }
+                s[(cl + (4 * nc)) as usize] = bo;
+                s[((cl + (4 * nc)) + 1) as usize] = 0;
+                s[((cl + (4 * nc)) + 2) as usize] = nf + r;
+                s[((cl + (4 * nc)) + 3) as usize] = p[((m_names(p, mt) + (2 * (nf + r))) + 1) as usize];
+                nc += 1;
+            }
+        }
+    }
+    return nc;
+}
+pub fn update_struct(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kid: i32, cl: i32, nc: i32, at: i32) -> i32 {
+    // map-update for a simple-struct block (P3.6): the pool always REJECTs (no
+    // group entry); the naming record of the key (1 unit) consumes, or kills on
+    // a cut; the pool (1 unit). Same state and charges as map-update.
+    let pso: i32 = p[(m_pools(p, mt) + 4) as usize];
+    let arec: i32 = m_alts(p, mt);
+    let aso: i32 = p[(arec + 4) as usize];
+    let lits: i32 = m_lits(p, mt);
+    let kr: i32 = named_rec(p, s, bo, mt, kid);
+    s[((bo + pso) + 2) as usize] = 0;
+    s[((bo + pso) + 3) as usize] = -1;
+    if kr >= 0 {
+        let krec: i32 = m_keys(p, mt) + (4 * kr);
+        let nfst: i32 = p[(krec + 2) as usize];
+        let ncount: i32 = p[(krec + 3) as usize];
+        let names: i32 = m_names(p, mt);
+        let mut kc: i32 = s[(bo + 3) as usize];
+        for r in 0..ncount {
+            if !charge(s, 1, at) {
+                return -R_BUDGET;
+            }
+            let lit: i32 = p[((names + (2 * (nfst + r))) + 1) as usize];
+            let lrec: i32 = lits + (4 * lit);
+            if (s[(bo + aso) as usize] == 0) && (s[((bo + aso) + 1) as usize] == s[(bo + pso) as usize]) {
+                if (kc >= nc) || (s[(cl + (4 * kc)) as usize] != bo) {
+                    return -R_INCONSISTENT;
+                }
+                let matched: bool = (s[((cl + (4 * kc)) + 1) as usize] & 2) != 0;
+                kc += 1;
+                if matched {
+                    let li: i32 = lit - p[(arec + 1) as usize];
+                    let wd: i32 = ((bo + aso) + 3) + (li >> 5);
+                    s[(wd) as usize] = s[(wd) as usize] | (1 << (li & 31));
+                    s[((bo + aso) + 2) as usize] = s[((bo + aso) + 2) as usize] + p[(lrec + 2) as usize];
+                    s[((bo + aso) + 1) as usize] = s[((bo + aso) + 1) as usize] + 1;
+                    s[((bo + pso) + 2) as usize] = s[((bo + pso) + 2) as usize] + 1;
+                } else if p[(lrec + 3) as usize] == 1 {
+                    s[(bo + aso) as usize] = 1;
+                    s[((bo + pso) + 1) as usize] = s[((bo + pso) + 1) as usize] - 1;
+                    s[(bo + 4) as usize] = s[(bo + 4) as usize] - 1;
+                }
+            }
+        }
+    }
+    if !charge(s, 1, at) {
+        return -R_BUDGET;
+    }
+    let lv: i32 = s[((bo + pso) + 1) as usize];
+    let ex: i32 = s[((bo + pso) + 2) as usize];
+    s[(bo + pso) as usize] = s[(bo + pso) as usize] + 1;
+    s[(bo + 4) as usize] = s[(bo + 4) as usize] - (lv - ex);
+    s[((bo + pso) + 1) as usize] = ex;
+    if s[(bo + 4) as usize] == 0 {
+        s[(bo + 1) as usize] = 0;
+        return 0;
+    }
+    return 1;
 }

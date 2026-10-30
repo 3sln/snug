@@ -14,6 +14,50 @@ use crate::snug::vm::layout::*;
 use crate::snug::vm::leaf::*;
 use crate::snug::vm::map::*;
 
+pub fn unit_of(ctx: i32) -> i32 {
+    // The per-leaf unit of eval-scalars: 0 for schedule 2's one-leaf child.
+    if (ctx & CTX_SIMPLE) != 0 {
+        return 0;
+    }
+    return 1;
+}
+pub fn simple_of(p: &[i32], s: &[i32], on: i32, cfb: i32, cnq: i32) -> i32 {
+    // CTX_SIMPLE when schedule 2's simple pair (on = 1) queries its child with
+    // exactly one entry, a scalar answer leaf (D045 iii), else 0.
+    if (on != 1) || (cnq != 1) {
+        return 0;
+    }
+    if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * s[(cfb) as usize])) as usize] & 255) {
+        return CTX_SIMPLE;
+    }
+    return 0;
+}
+pub fn simple_leaf(p: &[i32], on: i32, leaf: i32) -> i32 {
+    // CTX_SIMPLE for schedule 2's one-leaf child when the leaf is scalar.
+    if (on != 1) || (leaf < 0) {
+        return 0;
+    }
+    if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * leaf)) as usize] & 255) {
+        return CTX_SIMPLE;
+    }
+    return 0;
+}
+pub fn if_s2(s: &[i32]) -> i32 {
+    if sched2(s) {
+        return 1;
+    }
+    return 0;
+}
+pub fn q_filter_x(p: &[i32], s: &mut [i32], fb: i32, w: i32, nq: i32, cls: i32, pos: i32, ctx: i32) -> i32 {
+    // q-filter; its |Q'| units free for schedule 2's one-leaf child (D045).
+    if (ctx & CTX_SIMPLE) != 0 {
+        free_on(s);
+        let r: i32 = q_filter(p, s, fb, w, nq, cls, pos);
+        free_off(s);
+        return r;
+    }
+    return q_filter(p, s, fb, w, nq, cls, pos);
+}
 pub fn finish_comb(p: &[i32], s: &mut [i32], fb: i32, w: i32, nq: i32, pos: i32) -> i32 {
     // Combinators of the item (§8.4): stamp its matched leaves in a fresh
     // epoch, then one pass in query order evaluates each admitted AND
@@ -103,11 +147,11 @@ pub fn bstr_tail(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, cs: 
     // profile checks: filter, scalar leaves, EMBED sub-validations, end.
     let cr: i32 = cset_rec(p, s, ck);
     let w: i32 = cset_width(p, cr);
-    let na: i32 = q_filter(p, s, fb, w, nq, 4, pos);
+    let na: i32 = q_filter_x(p, s, fb, w, nq, 4, pos, ctx);
     if na < 0 {
         return na;
     }
-    let r1: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, cs, ce, 4, 0, 0);
+    let r1: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, cs, ce, 4, 0, 0, unit_of(ctx));
     if r1 < 0 {
         return r1;
     }
@@ -413,7 +457,7 @@ pub fn pt_le(rg: i32, ph: i32, pl: i32, br: i32, ba: i32, bb: i32) -> bool {
     }
     return cmp_u64(ba, bb, ph, pl) <= 0;
 }
-pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end: i32, leaf: i32) -> i32 {
+pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end: i32, leaf: i32, s2: i32) -> i32 {
     // P3.6 (D044): consecutive SUCCESSFUL elements of a `[* T]` array whose
     // block already holds its one active position (|A| = 1), T one INT leaf
     // over one interval or one TEXT leaf without a regexp. Each element is
@@ -451,7 +495,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
         let mut hi: i32 = 0;
         let mut lo: i32 = ai;
         let mut h: i32 = 1;
-        let mut cost: i32 = 12;
+        let mut cost: i32 = 12 - (10 * s2);
         if items >= maxit {
             break;
         }
@@ -520,7 +564,8 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
             if (lo < tlo) || (lo > thi) {
                 break;
             }
-            cost = 11 + c64(lo);
+            // schedule 2: visit + UTF-8 only
+            cost = (11 - (10 * s2)) + c64(lo);
             if left < cost {
                 break;
             }
@@ -584,7 +629,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         if rc < 0 {
             return rc;
         }
-        if !charge(s, 1, pos) {
+        if !charge(s, unit_of(ctx), pos) {
             return -R_BUDGET;
         }
         let r0: i32;
@@ -596,7 +641,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         if r0 < 0 {
             return r0;
         }
-        if !charge(s, 1, pos) {
+        if !charge(s, unit_of(ctx), pos) {
             return -R_BUDGET;
         }
         s[(VM_FASTM) as usize] = 1;
@@ -678,7 +723,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
     if (p[(lb + 1) as usize] & cls) != 0 {
         if (kind == K_INT) && ((cls <= 2) && (p[(lb + 3) as usize] == 1)) {
             // INT over one interval: filter 1 + leaf 1 + its one probe
-            if !charge(s, 3, pos) {
+            if !charge(s, 1 + (2 * unit_of(ctx)), pos) {
                 return -R_BUDGET;
             }
             if int1(p, pool, b, p[(lb + 2) as usize], cls, hi, lo) {
@@ -688,7 +733,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
             }
         } else if (kind == K_TEXT) && (p[(lb + 4) as usize] < 0) {
             // TEXT without a regexp: filter 1 + leaf 1, a size check
-            if !charge(s, 2, pos) {
+            if !charge(s, 2 * unit_of(ctx), pos) {
                 return -R_BUDGET;
             }
             if ((stop - cs) >= p[(lb + 2) as usize]) && ((stop - cs) <= p[(lb + 3) as usize]) {
@@ -697,7 +742,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
                 r = R_SIZE;
             }
         } else {
-            if !charge(s, 2, pos) {
+            if !charge(s, 2 * unit_of(ctx), pos) {
                 return -R_BUDGET;
             }
             r = eval_leaf(p, pool, b, s, lb, kind, pos, cs, stop, cls, hi, lo);
@@ -705,7 +750,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
                 return r;
             }
         }
-    } else if !charge(s, 1, pos) {
+    } else if !charge(s, unit_of(ctx), pos) {
         return -R_BUDGET;
     }
     if r == 0 {
@@ -751,7 +796,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     if big {
         cls = 2048;
     }
-    let na: i32 = q_filter(p, s, fb, w, nq, cls, pos);
+    let na: i32 = q_filter_x(p, s, fb, w, nq, cls, pos, ctx);
     if na < 0 {
         return na;
     }
@@ -848,7 +893,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
             }
         }
     }
-    let r2: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, 0, lo);
+    let r2: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, 0, lo, unit_of(ctx));
     if r2 < 0 {
         return r2;
     }
@@ -867,22 +912,23 @@ pub fn if_limit(n: i32, el: i32) -> i32 {
     }
     return n - el;
 }
-pub fn array_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, d: i32, fb: i32, w: i32, area: i32, cfb: i32, cck: i32, cw: i32, fleaf: i32, el: i32, pend: i32, end: i32) -> i32 {
+pub fn array_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, d: i32, fb: i32, w: i32, area: i32, cfb: i32, cck: i32, cw: i32, fleaf: i32, el: i32, pend: i32, end: i32, s2: i32, cx: i32) -> i32 {
     // P3.6 (D044): one element of a `[* T]` array (one block, one uncounted
     // self-looping position, T one answer): the generic element step's
     // charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's
     // element 1 at the array, the child, then stamp 1 + candidate 1 + test 1
     // -- the block's state and witness updated as array-advance would.
     // Answers the element's end (the block's alive word tells a death).
-    if !charge(s, s[(area + 2) as usize] + 4, pos) {
+    // schedule 2 (D045): the element's bookkeeping is free
+    if !charge(s, (1 - s2) * (s[(area + 2) as usize] + 4), pos) {
         return -R_BUDGET;
     }
     path_put(s, d + 1, P_INDEX, el);
-    let rf: i32 = fast_child(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, 0);
+    let rf: i32 = fast_child(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, cx);
     if rf < 0 {
         return rf;
     }
-    if !charge(s, 3, pos) {
+    if !charge(s, (1 - s2) * 3, pos) {
         return -R_BUDGET;
     }
     if s[(VM_FASTM) as usize] == 1 {
@@ -939,9 +985,12 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     let mut ao1: i32 = 0;
     let mut fleaf: i32 = -1;
     let mut sleaf: i32 = -1;
+    let mut sl: i32 = -1;
+    let mut s2: i32 = 0;
+    let mut cx: i32 = 0;
     let mut unacc: i32 = 0;
     let mut nalive: i32;
-    let na: i32 = q_filter(p, s, fb, w, nq, 16, pos);
+    let na: i32 = q_filter_x(p, s, fb, w, nq, 16, pos, ctx);
     if na < 0 {
         return na;
     }
@@ -966,10 +1015,21 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     nalive = nb;
     // P3.6 fast step (D044): one block whose automaton is one uncounted
     // self-looping position (`[* T]`) with a one-answer typeset T.
-    if (nb == 1) && (s[(VM_GENERIC) as usize] == 0) {
+    if nb == 1 {
         if ((p[(ao1) as usize] == 1) && (p[(ao1 + 2) as usize] == 0)) && ((p[(ao1 + 4) as usize] == 1) && ((p[(ao1 + 8) as usize] & 1) == 1)) {
-            fleaf = single_leaf(p, p[(ao1 + 6) as usize]);
+            sl = single_leaf(p, p[(ao1 + 6) as usize]);
         }
+    }
+    // Schedule 2 (D045 i, iii): a simple [* T] block's element steps are free
+    // and a one-scalar-leaf element loses its filter and leaf units.
+    if sched2(s) && (sl >= 0) {
+        s2 = 1;
+        if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * sl)) as usize] & 255) {
+            cx = CTX_SIMPLE;
+        }
+    }
+    if (s[(VM_GENERIC) as usize] & 1) == 0 {
+        fleaf = sl;
     }
     if fleaf >= 0 {
         let lbf: i32 = p[(H_S_LEAVES) as usize] + (8 * fleaf);
@@ -981,18 +1041,34 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     let pend: i32 = count_pending(p, s, fb, w, nq);
     while ((n < 0) && (q < end)) || ((n >= 0) && (el < n)) {
         if nalive == 0 {
-            q = dead_item(b, s, q, d + 1, end);
-            if q < 0 {
-                return q;
+            // dead elements; a run of integers in one streak (D044), never
+            // element 0 of a two-element array (whose end VM_Q1 records)
+            if (el >= 1) && ((s[(VM_GENERIC) as usize] & 1) == 0) {
+                let qd: i32 = dead_int_streak(b, s, q, if_limit(n, el), end);
+                let kd: i32 = s[(VM_FASTM) as usize];
+                if kd > 0 {
+                    q = qd;
+                    el += kd - 1;
+                } else {
+                    q = dead_item(b, s, q, d + 1, end);
+                    if q < 0 {
+                        return q;
+                    }
+                }
+            } else {
+                q = dead_item(b, s, q, d + 1, end);
+                if q < 0 {
+                    return q;
+                }
             }
         } else if (sleaf >= 0) && ((el >= 1) && (s[(area + 2) as usize] == 1)) {
-            let qs: i32 = array_streak(p, b, s, q, if_limit(n, el), end, sleaf);
+            let qs: i32 = array_streak(p, b, s, q, if_limit(n, el), end, sleaf, s2);
             let ks: i32 = s[(VM_FASTM) as usize];
             if ks > 0 {
                 q = qs;
                 el += ks - 1;
             } else {
-                let rf2: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+                let rf2: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx);
                 if rf2 < 0 {
                     return rf2;
                 }
@@ -1002,7 +1078,7 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                 }
             }
         } else if fleaf >= 0 {
-            let rf: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+            let rf: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx);
             if rf < 0 {
                 return rf;
             }
@@ -1016,6 +1092,9 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             let mut bo: i32 = area;
             let mut still: i32 = 0;
             let r: i32;
+            if s2 == 1 {
+                free_on(s);
+            }
             for bi in 0..nb {
                 if !charge(s, 1, pos) {
                     return -R_BUDGET;
@@ -1032,14 +1111,18 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                 }
                 bo += array_words(p, ao);
             }
+            free_off(s);
             path_put(s, d + 1, P_INDEX, el);
             if cnq > 0 {
-                r = eval_item(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0);
+                r = eval_item(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, cx);
             } else {
                 r = dead_item(b, s, q, d + 1, end);
             }
             if r < 0 {
                 return r;
+            }
+            if s2 == 1 {
+                free_on(s);
             }
             let ev: i32 = q_stamp(s, cfb, cw, cnq, pos);
             if ev < 0 {
@@ -1069,6 +1152,7 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                 }
                 bo += array_words(p, aoj);
             }
+            free_off(s);
             if (still > 0) || (pend > 0) {
                 wit_clear(s);
             } else if wit_empty(s) {
@@ -1103,7 +1187,7 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     if n == 2 {
         s[(VM_Q1) as usize] = q1;
     }
-    let rs: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q0, q, 16, 0, el);
+    let rs: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q0, q, 16, 0, el, unit_of(ctx));
     if rs < 0 {
         return rs;
     }
@@ -1163,7 +1247,7 @@ pub fn map_pair_ok(p: &[i32], s: &[i32], bo: i32, mt: i32, kid: i32, mode: i32) 
     let lit: i32 = p[((m_names(p, mt) + (2 * p[(krec + 2) as usize])) + 1) as usize];
     return single_leaf(p, p[((m_lits(p, mt) + (4 * lit)) + 1) as usize]) >= 0;
 }
-pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, start: i32, km: i32, ps: i32, pe: i32, end: i32, d: i32, fb: i32, w: i32, bo: i32, mt: i32, cfb: i32, cck: i32, cw: i32, kid: i32, pend: i32, mode: i32) -> i32 {
+pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, start: i32, km: i32, ps: i32, pe: i32, end: i32, d: i32, fb: i32, w: i32, bo: i32, mt: i32, cfb: i32, cck: i32, cw: i32, kid: i32, pend: i32, mode: i32, ps2: i32) -> i32 {
     // P3.6 (D044): one pair of a single-block map in a fast mode, after the
     // shared key search and cursor step: the generic pair's charges merged
     // per offset, its pool/alternative state updates and witness. The key's
@@ -1181,11 +1265,12 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
     if mode == 1 {
         kq = dead_item(b, s, start, d + 1, end);
     } else {
-        if !charge(s, 1, pos) {
+        if !charge(s, 1 - ps2, pos) {
             return -R_BUDGET;
         }
         let go: i32 = group_rec(p, p[(pools + 1) as usize]);
-        kq = fast_child(p, pool, b, s, start, d + 1, cfb, cck, cw, single_leaf(p, p[(go + 2) as usize]), end, CTX_KEY);
+        let kl1: i32 = single_leaf(p, p[(go + 2) as usize]);
+        kq = fast_child(p, pool, b, s, start, d + 1, cfb, cck, cw, kl1, end, CTX_KEY | simple_leaf(p, ps2, kl1));
     }
     if kq < 0 {
         return kq;
@@ -1208,15 +1293,16 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
             let lit: i32 = p[((m_names(p, mt) + (2 * p[(krec + 2) as usize])) + 1) as usize];
             let lrec: i32 = lits + (4 * lit);
             named = true;
-            if !charge(s, 2, pos) {
+            if !charge(s, 2 * (1 - ps2), pos) {
                 return -R_BUDGET;
             }
             path_put(s, d + 1, P_KEY, kid);
-            vq = fast_child(p, pool, b, s, kq, d + 1, cfb, cck, cw, single_leaf(p, p[(lrec + 1) as usize]), end, 0);
+            let vl1: i32 = single_leaf(p, p[(lrec + 1) as usize]);
+            vq = fast_child(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl1, end, simple_leaf(p, ps2, vl1));
             if vq < 0 {
                 return vq;
             }
-            if !charge(s, 5, pos) {
+            if !charge(s, 5 * (1 - ps2), pos) {
                 return -R_BUDGET;
             }
             if s[(VM_FASTM) as usize] == 1 {
@@ -1237,7 +1323,7 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
             if vq < 0 {
                 return vq;
             }
-            if !charge(s, 1, pos) {
+            if !charge(s, 1 - ps2, pos) {
                 return -R_BUDGET;
             }
         }
@@ -1245,22 +1331,23 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
         let kmatch: bool = s[(VM_FASTM) as usize] == 1;
         let go2: i32 = group_rec(p, p[(pools + 1) as usize]);
         if kmatch {
-            if !charge(s, 4, pos) {
+            if !charge(s, 4 * (1 - ps2), pos) {
                 return -R_BUDGET;
             }
         } else {
-            if !charge(s, 3, pos) {
+            if !charge(s, 3 * (1 - ps2), pos) {
                 return -R_BUDGET;
             }
         }
         path_put(s, d + 1, P_ANYKEY, 0);
         if kmatch {
-            vq = fast_child(p, pool, b, s, kq, d + 1, cfb, cck, cw, single_leaf(p, p[(go2 + 3) as usize]), end, 0);
+            let vl2: i32 = single_leaf(p, p[(go2 + 3) as usize]);
+            vq = fast_child(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl2, end, simple_leaf(p, ps2, vl2));
             if vq < 0 {
                 return vq;
             }
             vm = s[(VM_FASTM) as usize];
-            if !charge(s, 4, pos) {
+            if !charge(s, 4 * (1 - ps2), pos) {
                 return -R_BUDGET;
             }
         } else {
@@ -1268,7 +1355,7 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
             if vq < 0 {
                 return vq;
             }
-            if !charge(s, 1, pos) {
+            if !charge(s, 1 - ps2, pos) {
                 return -R_BUDGET;
             }
         }
@@ -1397,7 +1484,7 @@ pub fn streak_kind(p: &[i32], leaf: i32) -> bool {
     let kind: i32 = p[(lb) as usize] & 255;
     return ((kind == K_INT) && (p[(lb + 3) as usize] == 1)) || ((kind == K_TEXT) && (p[(lb + 4) as usize] < 0));
 }
-pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cfb: i32, cck: i32, cw: i32, ps0: i32, pe0: i32, klo0: i32) -> i32 {
+pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cfb: i32, cck: i32, cw: i32, ps0: i32, pe0: i32, klo0: i32, s2: i32) -> i32 {
     // P3.6 (D044): consecutive SUCCESSFUL pairs of a single-block map in a fast
     // mode (1 struct: a named key whose value is an INT/TEXT leaf; 2 table:
     // a TEXT key leaf and an `any` or INT/TEXT value leaf). The key (text,
@@ -1532,6 +1619,14 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             ka += 1;
             kb += 2;
         }
+        // schedule 2 (D045): the pair costs 1 (no steps, no key element),
+        // a one-leaf key or value no filter and leaf units, nothing else
+        if s2 == 1 {
+            ka = sk + 1;
+            if mode == 2 {
+                kb -= 2;
+            }
+        }
         if !charge(s, ka, pos) {
             return -R_BUDGET;
         }
@@ -1544,11 +1639,11 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         if !charge(s, (kb - 1) + ko, start) {
             return -R_BUDGET;
         }
-        if !charge(s, 2 + (2 * (mode - 1)), pos) {
+        if !charge(s, (1 - s2) * (2 + (2 * (mode - 1))), pos) {
             return -R_BUDGET;
         }
         if vany {
-            let rv: i32 = fast_child(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, 0);
+            let rv: i32 = fast_child(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, simple_leaf(p, s2, vlf));
             if rv < 0 {
                 return rv;
             }
@@ -1558,11 +1653,11 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                 return -R_BUDGET;
             }
             s[(O_ITEMS) as usize] = s[(O_ITEMS) as usize] + 1;
-            if !charge(s, vunits - 1, kend) {
+            if !charge(s, (vunits - 1) - (2 * s2), kend) {
                 return -R_BUDGET;
             }
         }
-        if !charge(s, 6 - mode, pos) {
+        if !charge(s, (1 - s2) * (6 - mode), pos) {
             return -R_BUDGET;
         }
         if mode == 1 {
@@ -1623,11 +1718,12 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     let mut pe: i32 = -1;
     let mut klo: i32 = 0;
     let mut fmode: i32 = 0;
+    let mut smap: i32 = 0;
     let mut smode: i32 = 0;
     let mut pk: i32 = 0;
     let mut unsat: i32 = 0;
     let mut nalive: i32;
-    let na: i32 = q_filter(p, s, fb, w, nq, 32, pos);
+    let na: i32 = q_filter_x(p, s, fb, w, nq, 32, pos, ctx);
     if na < 0 {
         return na;
     }
@@ -1651,8 +1747,11 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
         return -R_INCONSISTENT;
     }
     nalive = nb;
-    if (nb == 1) && (s[(VM_GENERIC) as usize] == 0) {
-        fmode = map_fast_mode(p, block_mt(p, s, fb, area));
+    if nb == 1 {
+        smap = map_fast_mode(p, block_mt(p, s, fb, area));
+    }
+    if (s[(VM_GENERIC) as usize] & 1) == 0 {
+        fmode = smap;
     }
     if fmode == 1 {
         smode = 1;
@@ -1670,7 +1769,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     let pend: i32 = count_pending(p, s, fb, w, nq);
     while pk < n {
         if (smode > 0) && (nalive > 0) {
-            let qm: i32 = map_streak(p, pool, b, s, pos, q, n - pk, end, d, area, block_mt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo);
+            let qm: i32 = map_streak(p, pool, b, s, pos, q, n - pk, end, d, area, block_mt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo, if_s2(s));
             let km2: i32 = s[(VM_FASTM) as usize];
             if qm < 0 {
                 return qm;
@@ -1717,14 +1816,15 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
             } else {
                 let ke: i32 = key_span_end(b, start, end);
                 let mut kid: i32 = -1;
-                let mut bo: i32 = area;
                 let mut cnq: i32 = 0;
                 let mut nc: i32 = 0;
                 let mut named: bool = false;
                 let mut vnq: i32 = 0;
+                let mut ps2: i32 = 0;
                 let mut still: i32 = 0;
                 let kq: i32;
                 let vq: i32;
+                let mut bo: i32;
                 // The key's id in the schema-wide key table.
                 if ke > start {
                     kid = key_search(p, pool, b, s, start, ke, klo, pos);
@@ -1733,22 +1833,29 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     }
                     klo = s[(O_HI) as usize];
                 }
-                // Cursors: 1 unit per block, 1 per cursor step.
-                for _bi in 0..nb {
-                    if !charge(s, 1, pos) {
+                // Cursors: 1 unit per block, 1 per cursor step (a fast-mode map
+                // here; otherwise fused with the key query below: charges at
+                // one offset with no check between may be reordered).
+                if smap > 0 {
+                    // the cursor first, uncharged, to decide schedule 2's simple
+                    // pair (D045 ii); then block 1 + steps, or the pair's 1 unit,
+                    // merged at the map's offset
+                    let c0: i32 = s[(area + 2) as usize];
+                    let mt0: i32 = block_mt(p, s, fb, area);
+                    free_on(s);
+                    map_cursor(p, s, area, mt0, kid, pos);
+                    free_off(s);
+                    if sched2(s) && map_pair_ok(p, s, area, mt0, kid, smap) {
+                        ps2 = 1;
+                        if !charge(s, 1, pos) {
+                            return -R_BUDGET;
+                        }
+                    } else if !charge(s, 1 + (s[(area + 2) as usize] - c0), pos) {
                         return -R_BUDGET;
                     }
-                    let mtc: i32 = block_mt(p, s, fb, bo);
-                    if s[(bo + 1) as usize] != 0 {
-                        let rc: i32 = map_cursor(p, s, bo, mtc, kid, pos);
-                        if rc < 0 {
-                            return rc;
-                        }
-                    }
-                    bo += p[(mtc + 6) as usize];
                 }
                 if (fmode > 0) && map_pair_ok(p, s, area, block_mt(p, s, fb, area), kid, fmode) {
-                    let vf: i32 = map_pair_fast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, block_mt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode);
+                    let vf: i32 = map_pair_fast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, block_mt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode, ps2);
                     if vf < 0 {
                         return vf;
                     }
@@ -1760,10 +1867,24 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     q = vf;
                 } else {
                     // The key, queried with the live residual key typesets.
+                    if ps2 == 1 {
+                        free_on(s);
+                    }
                     let e: i32 = new_epoch(s);
                     bo = area;
                     for _bj in 0..nb {
                         let mtj: i32 = block_mt(p, s, fb, bo);
+                        if smap == 0 {
+                            if !charge(s, 1, pos) {
+                                return -R_BUDGET;
+                            }
+                            if s[(bo + 1) as usize] != 0 {
+                                let rc2: i32 = map_cursor(p, s, bo, mtj, kid, pos);
+                                if rc2 < 0 {
+                                    return rc2;
+                                }
+                            }
+                        }
                         if s[(bo + 1) as usize] != 0 {
                             cnq = map_key_query(p, s, bo, mtj, cfb, cw, cnq, e, pos);
                             if cnq < 0 {
@@ -1772,8 +1893,9 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                         }
                         bo += p[(mtj + 6) as usize];
                     }
+                    free_off(s);
                     if cnq > 0 {
-                        kq = eval_item(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY);
+                        kq = eval_item(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY | simple_of(p, s, ps2, cfb, cnq));
                     } else {
                         kq = dead_item(b, s, start, d + 1, end);
                     }
@@ -1792,6 +1914,9 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     ps = start;
                     pe = kq;
                     // Key phase: candidates.
+                    if ps2 == 1 {
+                        free_on(s);
+                    }
                     let ek: i32 = q_stamp(s, cfb, cw, cnq, pos);
                     if ek < 0 {
                         return ek;
@@ -1800,7 +1925,11 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     for _bk in 0..nb {
                         let mtk: i32 = block_mt(p, s, fb, bo);
                         if s[(bo + 1) as usize] != 0 {
-                            nc = map_key_phase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
+                            if simple_struct(p, mtk) {
+                                nc = key_phase_struct(p, s, bo, mtk, kid, cl, nc, ccap, pos);
+                            } else {
+                                nc = map_key_phase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
+                            }
                             if nc < 0 {
                                 return nc;
                             }
@@ -1826,13 +1955,17 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                             return vnq;
                         }
                     }
+                    free_off(s);
                     if vnq > 0 {
-                        vq = eval_item(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, 0);
+                        vq = eval_item(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, simple_of(p, s, ps2, cfb, vnq));
                     } else {
                         vq = dead_item(b, s, kq, d + 1, end);
                     }
                     if vq < 0 {
                         return vq;
+                    }
+                    if ps2 == 1 {
+                        free_on(s);
                     }
                     // Update: each candidate (1 unit + its value test), then
                     // each alive block.
@@ -1840,25 +1973,35 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     if ev < 0 {
                         return ev;
                     }
-                    for c3 in 0..nc {
-                        if !charge(s, 1, pos) {
-                            return -R_BUDGET;
-                        }
-                        let vts3: i32 = cand_vts(p, s, fb, cl, c3);
-                        let t: i32 = ts_test(p, s, vts3, ev, pos);
-                        if t < 0 {
-                            return t;
-                        }
-                        if t == 1 {
-                            let kw: i32 = (cl + (4 * c3)) + 1;
-                            s[(kw) as usize] = s[(kw) as usize] | 2;
-                        }
-                    }
                     bo = area;
                     for _bl in 0..nb {
                         let mtl: i32 = block_mt(p, s, fb, bo);
                         if s[(bo + 1) as usize] != 0 {
-                            let u: i32 = map_update(p, s, bo, mtl, kid, cl, nc, pos);
+                            // this block's candidates (contiguous), 1 unit + its
+                            // value test each, then its update
+                            let mut c3: i32 = s[(bo + 3) as usize];
+                            while (c3 < nc) && (s[(cl + (4 * c3)) as usize] == bo) {
+                                if !charge(s, 1, pos) {
+                                    return -R_BUDGET;
+                                }
+                                let vts3: i32 = cand_vts_mt(p, s, mtl, cl, c3);
+                                let t: i32 = ts_test(p, s, vts3, ev, pos);
+                                if t < 0 {
+                                    return t;
+                                }
+                                if t == 1 {
+                                    let kw: i32 = (cl + (4 * c3)) + 1;
+                                    s[(kw) as usize] = s[(kw) as usize] | 2;
+                                }
+                                c3 += 1;
+                            }
+                            let ss: bool = simple_struct(p, mtl);
+                            let u: i32;
+                            if ss {
+                                u = update_struct(p, s, bo, mtl, kid, cl, nc, pos);
+                            } else {
+                                u = map_update(p, s, bo, mtl, kid, cl, nc, pos);
+                            }
                             if u < 0 {
                                 return u;
                             }
@@ -1875,6 +2018,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                         }
                         bo += p[(mtl + 6) as usize];
                     }
+                    free_off(s);
                     if (still > 0) || (pend > 0) {
                         wit_clear(s);
                     } else if wit_empty(s) {
@@ -1917,7 +2061,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
         }
         be += p[(mtm + 6) as usize];
     }
-    let rs: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q0, q, 32, 0, n);
+    let rs: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q0, q, 32, 0, n, unit_of(ctx));
     if rs < 0 {
         return rs;
     }
@@ -1975,11 +2119,11 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
                 if stop < 0 {
                     return stop;
                 }
-                let nf: i32 = q_filter(p, s, fb, w, nq, item_cls(7, ai, 0, 0), pos);
+                let nf: i32 = q_filter_x(p, s, fb, w, nq, item_cls(7, ai, 0, 0), pos, ctx);
                 if nf < 0 {
                     return nf;
                 }
-                let rf: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, item_cls(7, ai, 0, 0), 0, 0);
+                let rf: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, item_cls(7, ai, 0, 0), 0, 0, unit_of(ctx));
                 if rf < 0 {
                     return rf;
                 }
@@ -2046,11 +2190,11 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
         }
     }
     let cls: i32 = item_cls(major, ai, hi, lo);
-    let nf2: i32 = q_filter(p, s, fb, w, nq, cls, pos);
+    let nf2: i32 = q_filter_x(p, s, fb, w, nq, cls, pos, ctx);
     if nf2 < 0 {
         return nf2;
     }
-    let r2: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q, stop, cls, hi, lo);
+    let r2: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q, stop, cls, hi, lo, unit_of(ctx));
     if r2 < 0 {
         return r2;
     }

@@ -9,8 +9,8 @@
 ;;
 ;; `s` is the VM scratch; its first 16 words are the scanner's `o`.
 (ns snug.vm.dead
-  (:require [kin.lang :refer [defn let return set if while for do comment declarefn]]
-            [snug.lang :refer [I32 Bool Bytes Ints + - neg rem ushr bit-and bit-or
+  (:require [kin.lang :refer [defn let return set if while for do comment declarefn break]]
+            [snug.lang :refer [I32 Bool Bytes Ints + - neg rem shl ushr bit-and bit-or
                                < > <= >= == != and or not u8 ia iset hex]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_KEY_ORDER
                                      CODE_DUPLICATE_KEY CODE_TEXT CODE_TAG CODE_DECIMAL
@@ -22,7 +22,7 @@
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok]]
             [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]
-            [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX]]
+            [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC]]
             [snug.vm.base :refer [charge c64 c64min]]))
 
 (declarefn dead-item)
@@ -36,14 +36,54 @@
       (if (>= bad 0) (return (fail s bad CODE_TEXT)))
       (return stop))))
 
+(defn ^:pub ^I32 dead-int-streak [^Bytes b ^Ints s ^I32 q0 ^I32 limit ^I32 end]
+  (comment "P3.6 (D044): up to `limit` consecutive dead integer items (major 0/1,"
+           "a shortest head, its bytes present), each charged its visit and counted"
+           "exactly as dead-item would; stops BEFORE any item that is not one, or"
+           "that the items limit or the budget would refuse. Answers the next"
+           "position; the count in s[VM_FASTM].")
+  (let [maxit (ia s O_MAX_ITEMS)
+        ^:mut q q0
+        ^:mut k 0
+        ^:mut items (ia s O_ITEMS)
+        ^:mut left (ia s VM_BUDGET)]
+    (while (and (< k limit) (< q end))
+      (let [ib (u8 b q)
+            ai (bit-and ib 31)
+            ^:mut h 1]
+        (if (> (ushr ib 5) 1) (break))
+        (if (or (>= items maxit) (< left 1)) (break))
+        (if (>= ai 24)
+          (do (if (> ai 27) (break))
+              (set h (+ 1 (shl 1 (- ai 24))))
+              (if (> h (- end q)) (break))
+              (if (and (== ai 24) (< (u8 b (+ q 1)) 24)) (break))
+              (if (and (== ai 25) (== (u8 b (+ q 1)) 0)) (break))
+              (if (and (== ai 26) (== (bit-or (u8 b (+ q 1)) (u8 b (+ q 2))) 0)) (break))
+              (if (and (== ai 27) (== (bit-or (bit-or (u8 b (+ q 1)) (u8 b (+ q 2))) (bit-or (u8 b (+ q 3)) (u8 b (+ q 4)))) 0)) (break))))
+        (set left (- left 1))
+        (set items (+ items 1))
+        (set q (+ q h))
+        (set k (+ k 1))))
+    (iset s VM_BUDGET left)
+    (iset s O_ITEMS items)
+    (iset s VM_FASTM k)
+    (return q)))
+
 (defn ^:pub ^I32 dead-array [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (let [r (enter-container s pos p hi lo depth 0 end)
         inner (+ depth 1)
-        ^:mut q p]
+        ^:mut q p
+        ^:mut i 0]
     (if (< r 0) (return r))
-    (for [^I32 _i 0 lo]
-      (set q (dead-item b s q inner end))
-      (if (< q 0) (return q)))
+    (while (< i lo)
+      (if (== (bit-and (ia s VM_GENERIC) 1) 0)
+        (do (set q (dead-int-streak b s q (- lo i) end))
+            (set i (+ i (ia s VM_FASTM)))))
+      (if (< i lo)
+        (do (set q (dead-item b s q inner end))
+            (if (< q 0) (return q))
+            (set i (+ i 1)))))
     (return q)))
 
 (defn ^:pub ^I32 key-order [^Bytes b ^Ints s ^I32 ps ^I32 pe ^I32 start ^I32 q]

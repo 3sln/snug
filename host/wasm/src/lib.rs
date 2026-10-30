@@ -99,7 +99,7 @@ unsafe impl<const N: usize> Sync for Bytes<N> {}
 static PROG: Words<PCAP> = Words(UnsafeCell::new([0; PCAP]));
 static POOL: Bytes<BCAP> = Bytes(UnsafeCell::new([0; BCAP]));
 static VMS: Words<SCAP> = Words(UnsafeCell::new([0; SCAP]));
-static LIMB: Words<8> = Words(UnsafeCell::new([0; 8]));
+static LIMB: Words<9> = Words(UnsafeCell::new([0; 9]));
 static OUTB: Words<OUTW> = Words(UnsafeCell::new([0; OUTW]));
 static PLEN: AtomicI32 = AtomicI32::new(0);
 static BLEN: AtomicI32 = AtomicI32::new(0);

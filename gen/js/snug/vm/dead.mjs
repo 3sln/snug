@@ -8,7 +8,7 @@ import { coseLabelOk, scanFloat, scanSimple } from '../cbor/scan.mjs';
 import { dataCount, exponentOk, mantissaOk, shapeOk, typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { c64, c64min, charge } from './base.mjs';
-import { R_BUDGET, VM_BIGNUM_MAX, VM_Q1 } from './layout.mjs';
+import { R_BUDGET, VM_BIGNUM_MAX, VM_BUDGET, VM_FASTM, VM_GENERIC, VM_Q1 } from './layout.mjs';
 
 export function deadText(b, s, pos, p, hi, lo, end) {
     // Text: its length, then UTF-8 (charged ceil(len/64) before the scan).
@@ -26,17 +26,78 @@ export function deadText(b, s, pos, p, hi, lo, end) {
     return stop;
 }
 
+export function deadIntStreak(b, s, q0, limit, end) {
+    // P3.6 (D044): up to `limit` consecutive dead integer items (major 0/1,
+    // a shortest head, its bytes present), each charged its visit and counted
+    // exactly as dead-item would; stops BEFORE any item that is not one, or
+    // that the items limit or the budget would refuse. Answers the next
+    // position; the count in s[VM_FASTM].
+    const maxit = s[O_MAX_ITEMS];
+    let q = q0;
+    let k = 0;
+    let items = s[O_ITEMS];
+    let left = s[VM_BUDGET];
+    while ((k < limit) && (q < end)) {
+        const ib = b[q];
+        const ai = ib & 31;
+        let h = 1;
+        if (((ib >>> 5) | 0) > 1) {
+            break;
+        }
+        if ((items >= maxit) || (left < 1)) {
+            break;
+        }
+        if (ai >= 24) {
+            if (ai > 27) {
+                break;
+            }
+            h = 1 + (1 << (ai - 24));
+            if (h > (end - q)) {
+                break;
+            }
+            if ((ai === 24) && (b[q + 1] < 24)) {
+                break;
+            }
+            if ((ai === 25) && (b[q + 1] === 0)) {
+                break;
+            }
+            if ((ai === 26) && ((b[q + 1] | b[q + 2]) === 0)) {
+                break;
+            }
+            if ((ai === 27) && (((b[q + 1] | b[q + 2]) | (b[q + 3] | b[q + 4])) === 0)) {
+                break;
+            }
+        }
+        left -= 1;
+        items += 1;
+        q += h;
+        k += 1;
+    }
+    s[VM_BUDGET] = left;
+    s[O_ITEMS] = items;
+    s[VM_FASTM] = k;
+    return q;
+}
+
 export function deadArray(b, s, pos, p, hi, lo, depth, end) {
     const r = enterContainer(s, pos, p, hi, lo, depth, 0, end);
     const inner = depth + 1;
     let q = p;
+    let i = 0;
     if (r < 0) {
         return r;
     }
-    for (let _i = 0; _i < lo; _i++) {
-        q = deadItem(b, s, q, inner, end);
-        if (q < 0) {
-            return q;
+    while (i < lo) {
+        if ((s[VM_GENERIC] & 1) === 0) {
+            q = deadIntStreak(b, s, q, lo - i, end);
+            i += s[VM_FASTM];
+        }
+        if (i < lo) {
+            q = deadItem(b, s, q, inner, end);
+            if (q < 0) {
+                return q;
+            }
+            i += 1;
         }
     }
     return q;

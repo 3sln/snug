@@ -214,3 +214,5 @@ export const P_EMBED = 4;
 export const P_EMBEDSEQ = 5;
 
 export const CTX_KEY = 1;
+
+export const CTX_SIMPLE = 2;

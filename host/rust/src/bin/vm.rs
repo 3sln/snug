@@ -1,8 +1,10 @@
 // `bb vm-test`'s Rust arm. Reads lines on stdin:
 //
 //     prog <words, comma-separated decimal> <pool hex or ->
-//     case <prog index> <rule> <l0> .. <l7> <input hex or ->
-//     span <prog index> <rule> <start> <end> <depth0> <items0> <l0> .. <l7> <input hex or ->
+//     case <prog index> <rule> <l0> .. <l8> <input hex or ->
+//     span <prog index> <rule> <start> <end> <depth0> <items0> <l0> .. <l8> <input hex or ->
+//
+// (l8: bit 0 forces the generic path, bit 1 selects schedule 2, D044/D045)
 //     host <prog index> <rule> <top_map> <cose> <input hex or ->
 //
 // `host` goes through the Rust host API (`snug::schema`) and prints `ok` or
@@ -63,8 +65,8 @@ fn main() {
                 let pi = n(1) as usize;
                 let rule = n(2);
                 let (start, end, d0, i0, lb) = if f[0] == "span" { (n(3), n(4), n(5), n(6), 7) } else { (0, 0, 0, 0, 3) };
-                let lim: Vec<i32> = (0..8).map(|i| n(lb + i)).collect();
-                let input = unhex(f[lb + 8]);
+                let lim: Vec<i32> = (0..9).map(|i| n(lb + i)).collect();
+                let input = unhex(f[lb + 9]);
                 let pr = &mut progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // the host protocol: cap' = max(cap, N_LEAVES); grow when short

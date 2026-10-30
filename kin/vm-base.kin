@@ -11,7 +11,7 @@
   (:require [kin.lang :refer [defn let return set if while for do comment]]
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
                                add32 sub32 mul32 < > <= >= == != and or not ia iset hex]]
-            [snug.vm.layout :refer [VM_BUDGET VM_POS VM_EPOCH VM_MARK_CAP VM_QIDX VM_CHAIN VM_PATH
+            [snug.vm.layout :refer [VM_GENERIC VM_BUDGET VM_POS VM_EPOCH VM_MARK_CAP VM_QIDX VM_CHAIN VM_PATH
                                     VM_W_STATE VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_XKIND VM_W_XVAL
                                     VM_W_OFFSET SCRATCH_MARK EPOCH_MAX H_S_TS_INDEX H_S_LEAVES
                                     H_S_CSET_INDEX F_ANSWER F_ADMITTED F_MATCHED R_BUDGET
@@ -72,10 +72,24 @@
            "exceeds what remains the call stops with `budget`; `at` (the item being"
            "visited) becomes the reported offset. Nothing is deducted then, and"
            "the host reports the whole budget as used.")
+  (comment "Schedule 2 (D045, opt-in) marks simple-shape bookkeeping free with"
+           "bit 2 of s[VM_GENERIC] while it runs.")
+  (if (!= (bit-and (ia s VM_GENERIC) 4) 0) (return true))
   (let [left (ia s VM_BUDGET)]
     (if (< left n) (do (iset s VM_POS at) (return false)))
     (iset s VM_BUDGET (- left n))
     (return true)))
+
+(defn ^:pub ^Bool sched2 [^IntsR s]
+  (return (!= (bit-and (ia s VM_GENERIC) 2) 0)))
+
+(defn ^:pub free-on [^Ints s]
+  (let [g (ia s VM_GENERIC)]
+    (iset s VM_GENERIC (bit-or g 4))))
+
+(defn ^:pub free-off [^Ints s]
+  (let [g (ia s VM_GENERIC)]
+    (iset s VM_GENERIC (bit-and g (bit-xor 4 (neg 1))))))
 
 ;; ------------------------------------------------------------ epochs and marks
 

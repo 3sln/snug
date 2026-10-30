@@ -8,11 +8,60 @@ import { coseLabelOk, scanFloat, scanSimple } from '../cbor/scan.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
-import { c64, c64min, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, tsTest, witClear, witEmpty, witSet } from './base.mjs';
-import { deadArrayElems, deadBignum, deadItem, deadMapPairs, deadPairBody, deadSeq, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
-import { CTX_KEY, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { c64, c64min, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
+import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadPairBody, deadSeq, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
+import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
-import { blockMt, blockNamed, candVts, groupRec, keyProbe, keySearch, keySpanEnd, leafMap, mAlts, mKeys, mLits, mNames, mPools, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, namedRec } from './map.mjs';
+import { blockMt, blockNamed, candVts, candVtsMt, groupRec, keyPhaseStruct, keyProbe, keySearch, keySpanEnd, leafMap, mAlts, mKeys, mLits, mNames, mPools, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, namedRec, simpleStruct, updateStruct } from './map.mjs';
+
+export function unitOf(ctx) {
+    // The per-leaf unit of eval-scalars: 0 for schedule 2's one-leaf child.
+    if ((ctx & CTX_SIMPLE) !== 0) {
+        return 0;
+    }
+    return 1;
+}
+
+export function simpleOf(p, s, on, cfb, cnq) {
+    // CTX_SIMPLE when schedule 2's simple pair (on = 1) queries its child with
+    // exactly one entry, a scalar answer leaf (D045 iii), else 0.
+    if ((on !== 1) || (cnq !== 1)) {
+        return 0;
+    }
+    if (scalarKind(p[p[H_S_LEAVES] + (8 * s[cfb])] & 255)) {
+        return CTX_SIMPLE;
+    }
+    return 0;
+}
+
+export function simpleLeaf(p, on, leaf) {
+    // CTX_SIMPLE for schedule 2's one-leaf child when the leaf is scalar.
+    if ((on !== 1) || (leaf < 0)) {
+        return 0;
+    }
+    if (scalarKind(p[p[H_S_LEAVES] + (8 * leaf)] & 255)) {
+        return CTX_SIMPLE;
+    }
+    return 0;
+}
+
+export function ifS2(s) {
+    if (sched2(s)) {
+        return 1;
+    }
+    return 0;
+}
+
+export function qFilterX(p, s, fb, w, nq, cls, pos, ctx) {
+    // q-filter; its |Q'| units free for schedule 2's one-leaf child (D045).
+    if ((ctx & CTX_SIMPLE) !== 0) {
+        freeOn(s);
+        const r = qFilter(p, s, fb, w, nq, cls, pos);
+        freeOff(s);
+        return r;
+    }
+    return qFilter(p, s, fb, w, nq, cls, pos);
+}
 
 export function finishComb(p, s, fb, w, nq, pos) {
     // Combinators of the item (§8.4): stamp its matched leaves in a fresh
@@ -106,11 +155,11 @@ export function bstrTail(p, pool, b, s, pos, cs, ce, d, fb, ck, nq, ctx) {
     // profile checks: filter, scalar leaves, EMBED sub-validations, end.
     const cr = csetRec(p, s, ck);
     const w = csetWidth(p, cr);
-    const na = qFilter(p, s, fb, w, nq, 4, pos);
+    const na = qFilterX(p, s, fb, w, nq, 4, pos, ctx);
     if (na < 0) {
         return na;
     }
-    const r1 = evalScalars(p, pool, b, s, fb, w, nq, pos, cs, ce, 4, 0, 0);
+    const r1 = evalScalars(p, pool, b, s, fb, w, nq, pos, cs, ce, 4, 0, 0, unitOf(ctx));
     if (r1 < 0) {
         return r1;
     }
@@ -430,7 +479,7 @@ export function ptLe(rg, ph, pl, br, ba, bb) {
     return cmpU64(ba, bb, ph, pl) <= 0;
 }
 
-export function arrayStreak(p, b, s, q0, limit, end, leaf) {
+export function arrayStreak(p, b, s, q0, limit, end, leaf, s2) {
     // P3.6 (D044): consecutive SUCCESSFUL elements of a `[* T]` array whose
     // block already holds its one active position (|A| = 1), T one INT leaf
     // over one interval or one TEXT leaf without a regexp. Each element is
@@ -468,7 +517,7 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf) {
         let hi = 0;
         let lo = ai;
         let h = 1;
-        let cost = 12;
+        let cost = 12 - (10 * s2);
         if (items >= maxit) {
             break;
         }
@@ -537,7 +586,8 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf) {
             if ((lo < tlo) || (lo > thi)) {
                 break;
             }
-            cost = 11 + c64(lo);
+            // schedule 2: visit + UTF-8 only
+            cost = (11 - (10 * s2)) + c64(lo);
             if (left < cost) {
                 break;
             }
@@ -602,7 +652,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
         if (rc < 0) {
             return rc;
         }
-        if (!charge(s, 1, pos)) {
+        if (!charge(s, unitOf(ctx), pos)) {
             return -R_BUDGET;
         }
         let r0;
@@ -614,7 +664,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
         if (r0 < 0) {
             return r0;
         }
-        if (!charge(s, 1, pos)) {
+        if (!charge(s, unitOf(ctx), pos)) {
             return -R_BUDGET;
         }
         s[VM_FASTM] = 1;
@@ -696,7 +746,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
     if ((p[lb + 1] & cls) !== 0) {
         if ((kind === K_INT) && ((cls <= 2) && (p[lb + 3] === 1))) {
             // INT over one interval: filter 1 + leaf 1 + its one probe
-            if (!charge(s, 3, pos)) {
+            if (!charge(s, 1 + (2 * unitOf(ctx)), pos)) {
                 return -R_BUDGET;
             }
             if (int1(p, pool, b, p[lb + 2], cls, hi, lo)) {
@@ -706,7 +756,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
             }
         } else if ((kind === K_TEXT) && (p[lb + 4] < 0)) {
             // TEXT without a regexp: filter 1 + leaf 1, a size check
-            if (!charge(s, 2, pos)) {
+            if (!charge(s, 2 * unitOf(ctx), pos)) {
                 return -R_BUDGET;
             }
             if (((stop - cs) >= p[lb + 2]) && ((stop - cs) <= p[lb + 3])) {
@@ -715,7 +765,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
                 r = R_SIZE;
             }
         } else {
-            if (!charge(s, 2, pos)) {
+            if (!charge(s, 2 * unitOf(ctx), pos)) {
                 return -R_BUDGET;
             }
             r = evalLeaf(p, pool, b, s, lb, kind, pos, cs, stop, cls, hi, lo);
@@ -723,7 +773,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
                 return r;
             }
         }
-    } else if (!charge(s, 1, pos)) {
+    } else if (!charge(s, unitOf(ctx), pos)) {
         return -R_BUDGET;
     }
     if (r === 0) {
@@ -770,7 +820,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) 
     if (big) {
         cls = 2048;
     }
-    const na = qFilter(p, s, fb, w, nq, cls, pos);
+    const na = qFilterX(p, s, fb, w, nq, cls, pos, ctx);
     if (na < 0) {
         return na;
     }
@@ -867,7 +917,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) 
             }
         }
     }
-    const r2 = evalScalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, 0, lo);
+    const r2 = evalScalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, 0, lo, unitOf(ctx));
     if (r2 < 0) {
         return r2;
     }
@@ -888,22 +938,23 @@ export function ifLimit(n, el) {
     return n - el;
 }
 
-export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end) {
+export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx) {
     // P3.6 (D044): one element of a `[* T]` array (one block, one uncounted
     // self-looping position, T one answer): the generic element step's
     // charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's
     // element 1 at the array, the child, then stamp 1 + candidate 1 + test 1
     // -- the block's state and witness updated as array-advance would.
     // Answers the element's end (the block's alive word tells a death).
-    if (!charge(s, s[area + 2] + 4, pos)) {
+    // schedule 2 (D045): the element's bookkeeping is free
+    if (!charge(s, (1 - s2) * (s[area + 2] + 4), pos)) {
         return -R_BUDGET;
     }
     pathPut(s, d + 1, P_INDEX, el);
-    const rf = fastChild(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, 0);
+    const rf = fastChild(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, cx);
     if (rf < 0) {
         return rf;
     }
-    if (!charge(s, 3, pos)) {
+    if (!charge(s, (1 - s2) * 3, pos)) {
         return -R_BUDGET;
     }
     if (s[VM_FASTM] === 1) {
@@ -962,9 +1013,12 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     let ao1 = 0;
     let fleaf = -1;
     let sleaf = -1;
+    let sl = -1;
+    let s2 = 0;
+    let cx = 0;
     let unacc = 0;
     let nalive;
-    const na = qFilter(p, s, fb, w, nq, 16, pos);
+    const na = qFilterX(p, s, fb, w, nq, 16, pos, ctx);
     if (na < 0) {
         return na;
     }
@@ -989,10 +1043,21 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     nalive = nb;
     // P3.6 fast step (D044): one block whose automaton is one uncounted
     // self-looping position (`[* T]`) with a one-answer typeset T.
-    if ((nb === 1) && (s[VM_GENERIC] === 0)) {
+    if (nb === 1) {
         if (((p[ao1] === 1) && (p[ao1 + 2] === 0)) && ((p[ao1 + 4] === 1) && ((p[ao1 + 8] & 1) === 1))) {
-            fleaf = singleLeaf(p, p[ao1 + 6]);
+            sl = singleLeaf(p, p[ao1 + 6]);
         }
+    }
+    // Schedule 2 (D045 i, iii): a simple [* T] block's element steps are free
+    // and a one-scalar-leaf element loses its filter and leaf units.
+    if (sched2(s) && (sl >= 0)) {
+        s2 = 1;
+        if (scalarKind(p[p[H_S_LEAVES] + (8 * sl)] & 255)) {
+            cx = CTX_SIMPLE;
+        }
+    }
+    if ((s[VM_GENERIC] & 1) === 0) {
+        fleaf = sl;
     }
     if (fleaf >= 0) {
         const lbf = p[H_S_LEAVES] + (8 * fleaf);
@@ -1004,18 +1069,34 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     const pend = countPending(p, s, fb, w, nq);
     while (((n < 0) && (q < end)) || ((n >= 0) && (el < n))) {
         if (nalive === 0) {
-            q = deadItem(b, s, q, d + 1, end);
-            if (q < 0) {
-                return q;
+            // dead elements; a run of integers in one streak (D044), never
+            // element 0 of a two-element array (whose end VM_Q1 records)
+            if ((el >= 1) && ((s[VM_GENERIC] & 1) === 0)) {
+                const qd = deadIntStreak(b, s, q, ifLimit(n, el), end);
+                const kd = s[VM_FASTM];
+                if (kd > 0) {
+                    q = qd;
+                    el += kd - 1;
+                } else {
+                    q = deadItem(b, s, q, d + 1, end);
+                    if (q < 0) {
+                        return q;
+                    }
+                }
+            } else {
+                q = deadItem(b, s, q, d + 1, end);
+                if (q < 0) {
+                    return q;
+                }
             }
         } else if ((sleaf >= 0) && ((el >= 1) && (s[area + 2] === 1))) {
-            const qs = arrayStreak(p, b, s, q, ifLimit(n, el), end, sleaf);
+            const qs = arrayStreak(p, b, s, q, ifLimit(n, el), end, sleaf, s2);
             const ks = s[VM_FASTM];
             if (ks > 0) {
                 q = qs;
                 el += ks - 1;
             } else {
-                const rf2 = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+                const rf2 = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx);
                 if (rf2 < 0) {
                     return rf2;
                 }
@@ -1025,7 +1106,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 }
             }
         } else if (fleaf >= 0) {
-            const rf = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end);
+            const rf = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx);
             if (rf < 0) {
                 return rf;
             }
@@ -1039,6 +1120,9 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
             let bo = area;
             let still = 0;
             let r;
+            if (s2 === 1) {
+                freeOn(s);
+            }
             for (let bi = 0; bi < nb; bi++) {
                 if (!charge(s, 1, pos)) {
                     return -R_BUDGET;
@@ -1055,14 +1139,18 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 }
                 bo += arrayWords(p, ao);
             }
+            freeOff(s);
             pathPut(s, d + 1, P_INDEX, el);
             if (cnq > 0) {
-                r = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0);
+                r = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, cx);
             } else {
                 r = deadItem(b, s, q, d + 1, end);
             }
             if (r < 0) {
                 return r;
+            }
+            if (s2 === 1) {
+                freeOn(s);
             }
             const ev = qStamp(s, cfb, cw, cnq, pos);
             if (ev < 0) {
@@ -1092,6 +1180,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 }
                 bo += arrayWords(p, aoj);
             }
+            freeOff(s);
             if ((still > 0) || (pend > 0)) {
                 witClear(s);
             } else if (witEmpty(s)) {
@@ -1126,7 +1215,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     if (n === 2) {
         s[VM_Q1] = q1;
     }
-    const rs = evalScalars(p, pool, b, s, fb, w, nq, pos, q0, q, 16, 0, el);
+    const rs = evalScalars(p, pool, b, s, fb, w, nq, pos, q0, q, 16, 0, el, unitOf(ctx));
     if (rs < 0) {
         return rs;
     }
@@ -1189,7 +1278,7 @@ export function mapPairOk(p, s, bo, mt, kid, mode) {
     return singleLeaf(p, p[(mLits(p, mt) + (4 * lit)) + 1]) >= 0;
 }
 
-export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, bo, mt, cfb, cck, cw, kid, pend, mode) {
+export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, bo, mt, cfb, cck, cw, kid, pend, mode, ps2) {
     // P3.6 (D044): one pair of a single-block map in a fast mode, after the
     // shared key search and cursor step: the generic pair's charges merged
     // per offset, its pool/alternative state updates and witness. The key's
@@ -1207,11 +1296,12 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
     if (mode === 1) {
         kq = deadItem(b, s, start, d + 1, end);
     } else {
-        if (!charge(s, 1, pos)) {
+        if (!charge(s, 1 - ps2, pos)) {
             return -R_BUDGET;
         }
         const go = groupRec(p, p[pools + 1]);
-        kq = fastChild(p, pool, b, s, start, d + 1, cfb, cck, cw, singleLeaf(p, p[go + 2]), end, CTX_KEY);
+        const kl1 = singleLeaf(p, p[go + 2]);
+        kq = fastChild(p, pool, b, s, start, d + 1, cfb, cck, cw, kl1, end, CTX_KEY | simpleLeaf(p, ps2, kl1));
     }
     if (kq < 0) {
         return kq;
@@ -1234,15 +1324,16 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
             const lit = p[(mNames(p, mt) + (2 * p[krec + 2])) + 1];
             const lrec = lits + (4 * lit);
             named = true;
-            if (!charge(s, 2, pos)) {
+            if (!charge(s, 2 * (1 - ps2), pos)) {
                 return -R_BUDGET;
             }
             pathPut(s, d + 1, P_KEY, kid);
-            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, singleLeaf(p, p[lrec + 1]), end, 0);
+            const vl1 = singleLeaf(p, p[lrec + 1]);
+            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl1, end, simpleLeaf(p, ps2, vl1));
             if (vq < 0) {
                 return vq;
             }
-            if (!charge(s, 5, pos)) {
+            if (!charge(s, 5 * (1 - ps2), pos)) {
                 return -R_BUDGET;
             }
             if (s[VM_FASTM] === 1) {
@@ -1263,7 +1354,7 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
             if (vq < 0) {
                 return vq;
             }
-            if (!charge(s, 1, pos)) {
+            if (!charge(s, 1 - ps2, pos)) {
                 return -R_BUDGET;
             }
         }
@@ -1271,22 +1362,23 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
         const kmatch = s[VM_FASTM] === 1;
         const go2 = groupRec(p, p[pools + 1]);
         if (kmatch) {
-            if (!charge(s, 4, pos)) {
+            if (!charge(s, 4 * (1 - ps2), pos)) {
                 return -R_BUDGET;
             }
         } else {
-            if (!charge(s, 3, pos)) {
+            if (!charge(s, 3 * (1 - ps2), pos)) {
                 return -R_BUDGET;
             }
         }
         pathPut(s, d + 1, P_ANYKEY, 0);
         if (kmatch) {
-            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, singleLeaf(p, p[go2 + 3]), end, 0);
+            const vl2 = singleLeaf(p, p[go2 + 3]);
+            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl2, end, simpleLeaf(p, ps2, vl2));
             if (vq < 0) {
                 return vq;
             }
             vm = s[VM_FASTM];
-            if (!charge(s, 4, pos)) {
+            if (!charge(s, 4 * (1 - ps2), pos)) {
                 return -R_BUDGET;
             }
         } else {
@@ -1294,7 +1386,7 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
             if (vq < 0) {
                 return vq;
             }
-            if (!charge(s, 1, pos)) {
+            if (!charge(s, 1 - ps2, pos)) {
                 return -R_BUDGET;
             }
         }
@@ -1426,7 +1518,7 @@ export function streakKind(p, leaf) {
     return ((kind === K_INT) && (p[lb + 3] === 1)) || ((kind === K_TEXT) && (p[lb + 4] < 0));
 }
 
-export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cfb, cck, cw, ps0, pe0, klo0) {
+export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cfb, cck, cw, ps0, pe0, klo0, s2) {
     // P3.6 (D044): consecutive SUCCESSFUL pairs of a single-block map in a fast
     // mode (1 struct: a named key whose value is an INT/TEXT leaf; 2 table:
     // a TEXT key leaf and an `any` or INT/TEXT value leaf). The key (text,
@@ -1561,6 +1653,14 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
             ka += 1;
             kb += 2;
         }
+        // schedule 2 (D045): the pair costs 1 (no steps, no key element),
+        // a one-leaf key or value no filter and leaf units, nothing else
+        if (s2 === 1) {
+            ka = sk + 1;
+            if (mode === 2) {
+                kb -= 2;
+            }
+        }
         if (!charge(s, ka, pos)) {
             return -R_BUDGET;
         }
@@ -1573,11 +1673,11 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
         if (!charge(s, (kb - 1) + ko, start)) {
             return -R_BUDGET;
         }
-        if (!charge(s, 2 + (2 * (mode - 1)), pos)) {
+        if (!charge(s, (1 - s2) * (2 + (2 * (mode - 1))), pos)) {
             return -R_BUDGET;
         }
         if (vany) {
-            const rv = fastChild(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, 0);
+            const rv = fastChild(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, simpleLeaf(p, s2, vlf));
             if (rv < 0) {
                 return rv;
             }
@@ -1587,11 +1687,11 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
                 return -R_BUDGET;
             }
             s[O_ITEMS] = s[O_ITEMS] + 1;
-            if (!charge(s, vunits - 1, kend)) {
+            if (!charge(s, (vunits - 1) - (2 * s2), kend)) {
                 return -R_BUDGET;
             }
         }
-        if (!charge(s, 6 - mode, pos)) {
+        if (!charge(s, (1 - s2) * (6 - mode), pos)) {
             return -R_BUDGET;
         }
         if (mode === 1) {
@@ -1654,11 +1754,12 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     let pe = -1;
     let klo = 0;
     let fmode = 0;
+    let smap = 0;
     let smode = 0;
     let pk = 0;
     let unsat = 0;
     let nalive;
-    const na = qFilter(p, s, fb, w, nq, 32, pos);
+    const na = qFilterX(p, s, fb, w, nq, 32, pos, ctx);
     if (na < 0) {
         return na;
     }
@@ -1682,8 +1783,11 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
         return -R_INCONSISTENT;
     }
     nalive = nb;
-    if ((nb === 1) && (s[VM_GENERIC] === 0)) {
-        fmode = mapFastMode(p, blockMt(p, s, fb, area));
+    if (nb === 1) {
+        smap = mapFastMode(p, blockMt(p, s, fb, area));
+    }
+    if ((s[VM_GENERIC] & 1) === 0) {
+        fmode = smap;
     }
     if (fmode === 1) {
         smode = 1;
@@ -1701,7 +1805,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     const pend = countPending(p, s, fb, w, nq);
     while (pk < n) {
         if ((smode > 0) && (nalive > 0)) {
-            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo);
+            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo, ifS2(s));
             const km2 = s[VM_FASTM];
             if (qm < 0) {
                 return qm;
@@ -1748,14 +1852,15 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
             } else {
                 const ke = keySpanEnd(b, start, end);
                 let kid = -1;
-                let bo = area;
                 let cnq = 0;
                 let nc = 0;
                 let named = false;
                 let vnq = 0;
+                let ps2 = 0;
                 let still = 0;
                 let kq;
                 let vq;
+                let bo;
                 // The key's id in the schema-wide key table.
                 if (ke > start) {
                     kid = keySearch(p, pool, b, s, start, ke, klo, pos);
@@ -1764,22 +1869,29 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     }
                     klo = s[O_HI];
                 }
-                // Cursors: 1 unit per block, 1 per cursor step.
-                for (let _bi = 0; _bi < nb; _bi++) {
-                    if (!charge(s, 1, pos)) {
+                // Cursors: 1 unit per block, 1 per cursor step (a fast-mode map
+                // here; otherwise fused with the key query below: charges at
+                // one offset with no check between may be reordered).
+                if (smap > 0) {
+                    // the cursor first, uncharged, to decide schedule 2's simple
+                    // pair (D045 ii); then block 1 + steps, or the pair's 1 unit,
+                    // merged at the map's offset
+                    const c0 = s[area + 2];
+                    const mt0 = blockMt(p, s, fb, area);
+                    freeOn(s);
+                    mapCursor(p, s, area, mt0, kid, pos);
+                    freeOff(s);
+                    if (sched2(s) && mapPairOk(p, s, area, mt0, kid, smap)) {
+                        ps2 = 1;
+                        if (!charge(s, 1, pos)) {
+                            return -R_BUDGET;
+                        }
+                    } else if (!charge(s, 1 + (s[area + 2] - c0), pos)) {
                         return -R_BUDGET;
                     }
-                    const mtc = blockMt(p, s, fb, bo);
-                    if (s[bo + 1] !== 0) {
-                        const rc = mapCursor(p, s, bo, mtc, kid, pos);
-                        if (rc < 0) {
-                            return rc;
-                        }
-                    }
-                    bo += p[mtc + 6];
                 }
                 if ((fmode > 0) && mapPairOk(p, s, area, blockMt(p, s, fb, area), kid, fmode)) {
-                    const vf = mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, blockMt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode);
+                    const vf = mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, blockMt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode, ps2);
                     if (vf < 0) {
                         return vf;
                     }
@@ -1791,10 +1903,24 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     q = vf;
                 } else {
                     // The key, queried with the live residual key typesets.
+                    if (ps2 === 1) {
+                        freeOn(s);
+                    }
                     const e = newEpoch(s);
                     bo = area;
                     for (let _bj = 0; _bj < nb; _bj++) {
                         const mtj = blockMt(p, s, fb, bo);
+                        if (smap === 0) {
+                            if (!charge(s, 1, pos)) {
+                                return -R_BUDGET;
+                            }
+                            if (s[bo + 1] !== 0) {
+                                const rc2 = mapCursor(p, s, bo, mtj, kid, pos);
+                                if (rc2 < 0) {
+                                    return rc2;
+                                }
+                            }
+                        }
                         if (s[bo + 1] !== 0) {
                             cnq = mapKeyQuery(p, s, bo, mtj, cfb, cw, cnq, e, pos);
                             if (cnq < 0) {
@@ -1803,8 +1929,9 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                         }
                         bo += p[mtj + 6];
                     }
+                    freeOff(s);
                     if (cnq > 0) {
-                        kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY);
+                        kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY | simpleOf(p, s, ps2, cfb, cnq));
                     } else {
                         kq = deadItem(b, s, start, d + 1, end);
                     }
@@ -1823,6 +1950,9 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     ps = start;
                     pe = kq;
                     // Key phase: candidates.
+                    if (ps2 === 1) {
+                        freeOn(s);
+                    }
                     const ek = qStamp(s, cfb, cw, cnq, pos);
                     if (ek < 0) {
                         return ek;
@@ -1831,7 +1961,11 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     for (let _bk = 0; _bk < nb; _bk++) {
                         const mtk = blockMt(p, s, fb, bo);
                         if (s[bo + 1] !== 0) {
-                            nc = mapKeyPhase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
+                            if (simpleStruct(p, mtk)) {
+                                nc = keyPhaseStruct(p, s, bo, mtk, kid, cl, nc, ccap, pos);
+                            } else {
+                                nc = mapKeyPhase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
+                            }
                             if (nc < 0) {
                                 return nc;
                             }
@@ -1857,13 +1991,17 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                             return vnq;
                         }
                     }
+                    freeOff(s);
                     if (vnq > 0) {
-                        vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, 0);
+                        vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, simpleOf(p, s, ps2, cfb, vnq));
                     } else {
                         vq = deadItem(b, s, kq, d + 1, end);
                     }
                     if (vq < 0) {
                         return vq;
+                    }
+                    if (ps2 === 1) {
+                        freeOn(s);
                     }
                     // Update: each candidate (1 unit + its value test), then
                     // each alive block.
@@ -1871,25 +2009,35 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     if (ev < 0) {
                         return ev;
                     }
-                    for (let c3 = 0; c3 < nc; c3++) {
-                        if (!charge(s, 1, pos)) {
-                            return -R_BUDGET;
-                        }
-                        const vts3 = candVts(p, s, fb, cl, c3);
-                        const t = tsTest(p, s, vts3, ev, pos);
-                        if (t < 0) {
-                            return t;
-                        }
-                        if (t === 1) {
-                            const kw = (cl + (4 * c3)) + 1;
-                            s[kw] = s[kw] | 2;
-                        }
-                    }
                     bo = area;
                     for (let _bl = 0; _bl < nb; _bl++) {
                         const mtl = blockMt(p, s, fb, bo);
                         if (s[bo + 1] !== 0) {
-                            const u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
+                            // this block's candidates (contiguous), 1 unit + its
+                            // value test each, then its update
+                            let c3 = s[bo + 3];
+                            while ((c3 < nc) && (s[cl + (4 * c3)] === bo)) {
+                                if (!charge(s, 1, pos)) {
+                                    return -R_BUDGET;
+                                }
+                                const vts3 = candVtsMt(p, s, mtl, cl, c3);
+                                const t = tsTest(p, s, vts3, ev, pos);
+                                if (t < 0) {
+                                    return t;
+                                }
+                                if (t === 1) {
+                                    const kw = (cl + (4 * c3)) + 1;
+                                    s[kw] = s[kw] | 2;
+                                }
+                                c3 += 1;
+                            }
+                            const ss = simpleStruct(p, mtl);
+                            let u;
+                            if (ss) {
+                                u = updateStruct(p, s, bo, mtl, kid, cl, nc, pos);
+                            } else {
+                                u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
+                            }
                             if (u < 0) {
                                 return u;
                             }
@@ -1906,6 +2054,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                         }
                         bo += p[mtl + 6];
                     }
+                    freeOff(s);
                     if ((still > 0) || (pend > 0)) {
                         witClear(s);
                     } else if (witEmpty(s)) {
@@ -1948,7 +2097,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
         }
         be += p[mtm + 6];
     }
-    const rs = evalScalars(p, pool, b, s, fb, w, nq, pos, q0, q, 32, 0, n);
+    const rs = evalScalars(p, pool, b, s, fb, w, nq, pos, q0, q, 32, 0, n, unitOf(ctx));
     if (rs < 0) {
         return rs;
     }
@@ -2007,11 +2156,11 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
                 if (stop < 0) {
                     return stop;
                 }
-                const nf = qFilter(p, s, fb, w, nq, itemCls(7, ai, 0, 0), pos);
+                const nf = qFilterX(p, s, fb, w, nq, itemCls(7, ai, 0, 0), pos, ctx);
                 if (nf < 0) {
                     return nf;
                 }
-                const rf = evalScalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, itemCls(7, ai, 0, 0), 0, 0);
+                const rf = evalScalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, itemCls(7, ai, 0, 0), 0, 0, unitOf(ctx));
                 if (rf < 0) {
                     return rf;
                 }
@@ -2078,11 +2227,11 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
         }
     }
     const cls = itemCls(major, ai, hi, lo);
-    const nf2 = qFilter(p, s, fb, w, nq, cls, pos);
+    const nf2 = qFilterX(p, s, fb, w, nq, cls, pos, ctx);
     if (nf2 < 0) {
         return nf2;
     }
-    const r2 = evalScalars(p, pool, b, s, fb, w, nq, pos, q, stop, cls, hi, lo);
+    const r2 = evalScalars(p, pool, b, s, fb, w, nq, pos, q, stop, cls, hi, lo, unitOf(ctx));
     if (r2 < 0) {
         return r2;
     }

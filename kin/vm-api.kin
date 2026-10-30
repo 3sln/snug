@@ -228,9 +228,10 @@
       (iset s VM_QIDX (+ SCRATCH_MARK mc))
       (iset s VM_DLIM dl)
       (comment "limits word 8 (a VM extension beyond program.md §12.3's 8 words):"
-               "bit 0 forces the generic path (the fast == generic gate).")
-      (if (and (> (ilen limits) 8) (!= (bit-and (ia limits 8) 1) 0))
-        (iset s VM_GENERIC 1)
+               "bit 0 forces the generic path (the fast == generic gate);")
+      (comment "bit 1 selects schedule 2 (D045, opt-in, provisional).")
+      (if (> (ilen limits) 8)
+        (iset s VM_GENERIC (bit-and (ia limits 8) 3))
         (iset s VM_GENERIC 0))
       (if (> n (ia s O_MAX_BYTES))
         (do (let [c1 (neg (fail s start CODE_TOO_LARGE))]

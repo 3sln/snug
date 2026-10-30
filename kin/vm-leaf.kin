@@ -351,7 +351,7 @@
     :else R_TYPE))
 
 (defn ^:pub ^I32 eval-scalars [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 fb ^I32 w ^I32 nq
-                               ^I32 pos ^I32 cs ^I32 ce ^I32 cls ^I32 hi ^I32 lo]
+                               ^I32 pos ^I32 cs ^I32 ce ^I32 cls ^I32 hi ^I32 lo ^I32 unit]
   (comment "Every admitted scalar leaf of the query list, in query order, on the item"
            "at pos: 1 unit each, then its own work; sets MATCHED or the failure"
            "reason (bits 8-15) in the entry's flags. 0 or a negated code.")
@@ -364,7 +364,8 @@
                     lb (+ lv (* 8 l))
                     kind (bit-and (ia p lb) 255)]
                 (if (scalar-kind kind)
-                  (do (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+                  (do (comment "unit 0: schedule 2's one-leaf child (D045), no leaf unit")
+                      (if (not (charge s unit pos)) (return (neg R_BUDGET)))
                       (let [r (eval-leaf p pool b s lb kind pos cs ce cls hi lo)]
                         (if (< r 0) (return r))
                         (if (== r 0)
