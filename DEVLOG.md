@@ -1170,6 +1170,7 @@ its own automaton reference (unnecessary).
   control type's typeset as the EMBED SEQ content, and now refuses a
   `.cborseq` whose controller is not array types only (`control_value`), so
   the virtual array is always well defined.
+- [x] **Accepted provisionally** (manager, 2026-10-29, relayed to the VM engineer)
 
 ### D041 — The VM's reading of program.md §14 where the table is not exact
 **Decision**: (1) a binary-search probe that compares bytes (key table,
