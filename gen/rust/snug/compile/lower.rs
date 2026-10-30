@@ -508,8 +508,8 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
     if code == 0 {
         return fail(h, ERR_UNKNOWN_CONTROL, pos);
     }
-    // .det, .plus, .pcre, .abnf, .abnfb: refused before anything is lowered (D013).
-    if (code == 17) || (code >= 18) {
+    // .pcre, .abnf, .abnfb: refused before anything is lowered (D013).
+    if code >= 19 {
         return fail(h, ERR_UNSUPPORTED_CONTROL, pos);
     }
     let target: i32 = lower_type(h, na(h, node), env);
@@ -585,6 +585,12 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
     }
     if code == 16 {
         return ctl_cat(h, target, ctl, pos);
+    }
+    if code == 17 {
+        return ctl_det(h, target, ctl, pos);
+    }
+    if code == 18 {
+        return ctl_plus(h, target, ctl, pos);
     }
     return fail(h, ERR_INTERNAL, pos);
 }

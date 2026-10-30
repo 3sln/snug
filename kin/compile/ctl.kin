@@ -24,20 +24,20 @@
                                         INF ERR_CONTROL_TARGET ERR_CONTROL_VALUE ERR_LIM_POOL ERR_INTERNAL
                                         H_R0 H_R1 H_R2 H_R3 H_LIM_POOL ERR_UNSUPPORTED_CONTROL
                                         T_STK T_IVA T_IVB T_IVC T_IVS T_TMP2 T_LST T_IV T_FIV T_BYTE]]
-            [snug.compile.bytes :refer [bid-len bid-byte bid-off intern enc-string]]
+            [snug.compile.bytes :refer [bid-len bid-byte bid-off intern enc-string mag-add mag-sub mag-cmp mag-from64 mag-add1]]
             [snug.compile.regexp :refer [rx-compile]]
             [snug.compile.leaf :refer [lk lflags ld ts-n ts-leaf ts-make ts-of1 leaf-mask
                                        stage stage-d stage-intern mk-lit mk-text mk-bytes mk-and mk-not
                                        iv-push iv-load iv-normalize iv-intersect mk-int-from bound-cmp
                                        bound-succ bound-pred fiv-load fiv-normalize fiv-intersect
-                                       mk-float-from u64-cmp lit-member enc-head-len
+                                       mk-float-from u64-cmp lit-member enc-head-len point-of mk-int-range
                                        K_ANY K_MAJOR K_INT K_FLOAT K_SIMPLE K_LIT K_LITSET K_TEXT
                                        K_BYTES K_UINTX K_TAG K_EMBED K_AND K_NOT
                                        R_NEG_INF R_NEG R_POS R_POS_INF]]))
 
 ;; ------------------------------------------------------------ controller values
 
-(declarefn ^Bool bits-pass)
+(declarefn ^Bool bits-pass ^I32 if-neg-region ^I32 plus-mag)
 
 (defn ^:pub ^I32 single-leaf [^IntsR h ^I32 ts]
   (if (!= (ts-n h ts) 1) (return (neg 1)))
@@ -641,3 +641,90 @@
         (let [enc (enc-string h ma T_TMP2 0 (vlen h T_TMP2))
               l (mk-lit h enc)]
           (return (ts-of1 h l)))))))
+
+;; ------------------------------------------------------------ .plus, .det
+
+(defn ^I32 point-mag [^Ints h ^I32 r ^I32 a ^I32 b]
+  (comment "The magnitude bid of the integer at bound (r, a, b); its sign is"
+           "negative exactly when r is NEG or NEG_BIG (v = -1 - n: |v| = n + 1).")
+  (if (== r R_POS) (return (mag-from64 h a b)))
+  (if (== r 4) (return a))
+  (if (== r R_NEG)
+    (do (let [n (mag-from64 h a b)] (return (mag-add1 h n 1)))))
+  (return (mag-add1 h a 1)))
+
+(defn ^:pub ^I32 ctl-plus [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (comment "RFC 9165 .plus on two integer literals: their exact sum.")
+  (if (not (int-point h target)) (return (fail h ERR_CONTROL_VALUE pos)))
+  (let [r1 (hg h H_R0) a1 (hg h H_R1) b1 (hg h H_R2)]
+    (if (not (int-point h ctl)) (return (fail h ERR_CONTROL_VALUE pos)))
+    (let [r2 (hg h H_R0) a2 (hg h H_R1) b2 (hg h H_R2)
+          ^I32 s1 (if-neg-region r1)
+          ^I32 s2 (if-neg-region r2)
+          m1 (point-mag h r1 a1 b1)
+          m2 (point-mag h r2 a2 b2)
+          same (== s1 s2)
+          left-big (>= (mag-cmp h m1 m2) 0)
+          ^:mut sign s1]
+      (if (and (not same) (not left-big)) (set sign s2))
+      (let [^I32 mag (plus-mag h m1 m2 same left-big)]
+      (if (< mag 0) (return (neg 1)))
+      (if (== (bid-len h mag) 0) (set sign 0))
+      (point-of h sign mag)
+      (let [r (hg h H_R0) a (hg h H_R1) b (hg h H_R2)
+            l (mk-int-range h r a b r a b)]
+        (return (ts-of1 h l)))))))
+
+(defn ^I32 plus-mag [^Ints h ^I32 m1 ^I32 m2 ^Bool same ^Bool left-big]
+  (comment "|v1 + v2| from the magnitudes: their sum when the signs agree, else the"
+           "larger minus the smaller.")
+  (if same (return (mag-add h m1 m2)))
+  (if left-big (return (mag-sub h m1 m2)))
+  (return (mag-sub h m2 m1)))
+
+(defn ^I32 if-neg-region [^I32 r]
+  (if (or (== r R_NEG) (== r 1)) (return 1))
+  (return 0))
+
+(defn dedent-into [^Ints h ^I32 bid ^I32 dst]
+  (comment "RFC 9165 .det: the literal's content with the longest run of leading"
+           "spaces common to its non-blank lines removed from every line (lines end"
+           "at LF), appended to vector dst.")
+  (let [hl (enc-head-len h bid)
+        n (bid-len h bid)
+        ^:mut ^I32 prefix INF
+        ^:mut i hl]
+    (while (< i n)
+      (let [^:mut sp 0
+            ^:mut j i]
+        (while (and (< j n) (== (bid-byte h bid j) 32)) (set sp (+ sp 1)) (set j (+ j 1)))
+        (if (and (< j n) (!= (bid-byte h bid j) 10))
+          (if (< sp prefix) (set prefix sp)))
+        (while (and (< j n) (!= (bid-byte h bid j) 10)) (set j (+ j 1)))
+        (set i (+ j 1))))
+    (if (== prefix INF) (set prefix 0))
+    (let [^:mut k hl
+          ^:mut col 0]
+      (while (< k n)
+        (let [c (bid-byte h bid k)]
+          (if (== c 10)
+            (do (vpush1 h dst c) (set col 0))
+            (do (if (or (!= c 32) (>= col prefix)) (vpush1 h dst c))
+                (if (and (== c 32) (< col prefix)) (set col (+ col 1)) (set col prefix)))))
+        (set k (+ k 1))))))
+
+(defn ^:pub ^I32 ctl-det [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (comment "RFC 9165 .det: .cat of the two literals after dedenting each.")
+  (let [a (single-lit h target)
+        b (single-lit h ctl)]
+    (if (or (< a 0) (< b 0)) (return (fail h ERR_CONTROL_VALUE pos)))
+    (let [ma (sar (bid-byte h a 0) 5)
+          mb (sar (bid-byte h b 0) 5)]
+      (if (or (!= ma mb) (or (< ma 2) (> ma 3))) (return (fail h ERR_CONTROL_VALUE pos)))
+      (if (not (charge h (+ (bid-len h a) (bid-len h b)))) (return (neg 1)))
+      (vtrunc h T_TMP2 0)
+      (dedent-into h a T_TMP2)
+      (dedent-into h b T_TMP2)
+      (let [enc (enc-string h ma T_TMP2 0 (vlen h T_TMP2))
+            l (mk-lit h enc)]
+        (return (ts-of1 h l))))))

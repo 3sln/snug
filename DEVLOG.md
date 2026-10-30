@@ -1109,8 +1109,10 @@ JS and Rust disagree); HT appears in real schemas and changes no meaning.
 - [ ] **Signed off** (owner)
 
 ### D038 — Controls the architecture left open
-**Decision**: `.det` and `.plus` are refused (`unsupported_control`) until
-there is a use; `.cat` concatenates two literals of one kind; `.eq` with a
+**Decision**: *(amended 2026-10-29: `.plus` adds two integer literals
+exactly, any size; `.det` is `.cat` after dedenting each literal — the
+common leading spaces of its non-blank lines removed, RFC 9165; floats under
+`.plus` are refused)* `.cat` concatenates two literals of one kind; `.eq` with a
 composite controller (e.g. `[1]`) is an AND, `.ne` with one is refused;
 comparisons mixing integer targets and float controllers (or the reverse)
 convert exactly for |x| < 2^53 and refuse otherwise; `.bits` masks keep at

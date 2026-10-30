@@ -336,3 +336,68 @@ export function sortBids(h, t, n) {
     }
     return !erred(h);
 }
+
+export function magAdd(h, a, b) {
+    // a + b for magnitude bids (big-endian, minimal).
+    const la = bidLen(h, a);
+    const lb = bidLen(h, b);
+    let n = la;
+    if (lb > n) {
+        n = lb;
+    }
+    if (!charge(h, n + 1)) {
+        return -1;
+    }
+    vtrunc(h, T_STK5, 0);
+    for (let _z = 0; _z < n + 1; _z++) {
+        vpush1(h, T_STK5, 0);
+    }
+    let carry = 0;
+    for (let i = 0; i < n; i++) {
+        let x = carry;
+        if (i < la) {
+            x += bidByte(h, a, (la - 1) - i);
+        }
+        if (i < lb) {
+            x += bidByte(h, b, (lb - 1) - i);
+        }
+        vset(h, T_STK5, n - i, x & 255);
+        carry = x >> 8;
+    }
+    vset(h, T_STK5, 0, carry);
+    if (erred(h)) {
+        return -1;
+    }
+    return magOf(h, T_STK5, 0, n + 1);
+}
+
+export function magSub(h, a, b) {
+    // a - b for magnitude bids with a >= b.
+    const la = bidLen(h, a);
+    const lb = bidLen(h, b);
+    if (!charge(h, la + 1)) {
+        return -1;
+    }
+    vtrunc(h, T_STK5, 0);
+    for (let _z2 = 0; _z2 < la; _z2++) {
+        vpush1(h, T_STK5, 0);
+    }
+    let borrow = 0;
+    for (let i = 0; i < la; i++) {
+        let x = bidByte(h, a, (la - 1) - i) - borrow;
+        if (i < lb) {
+            x -= bidByte(h, b, (lb - 1) - i);
+        }
+        if (x < 0) {
+            x += 256;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        vset(h, T_STK5, (la - 1) - i, x);
+    }
+    if (erred(h)) {
+        return -1;
+    }
+    return magOf(h, T_STK5, 0, la);
+}

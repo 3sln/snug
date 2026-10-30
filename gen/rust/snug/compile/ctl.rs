@@ -986,3 +986,143 @@ pub fn ctl_cat(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
     let l: i32 = mk_lit(h, enc);
     return ts_of1(h, l);
 }
+pub(crate) fn point_mag(h: &mut [i32], r: i32, a: i32, b: i32) -> i32 {
+    // The magnitude bid of the integer at bound (r, a, b); its sign is
+    // negative exactly when r is NEG or NEG_BIG (v = -1 - n: |v| = n + 1).
+    if r == R_POS {
+        return mag_from64(h, a, b);
+    }
+    if r == 4 {
+        return a;
+    }
+    if r == R_NEG {
+        let n: i32 = mag_from64(h, a, b);
+        return mag_add1(h, n, 1);
+    }
+    return mag_add1(h, a, 1);
+}
+pub fn ctl_plus(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
+    // RFC 9165 .plus on two integer literals: their exact sum.
+    if !int_point(h, target) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    let r1: i32 = hg(h, H_R0);
+    let a1: i32 = hg(h, H_R1);
+    let b1: i32 = hg(h, H_R2);
+    if !int_point(h, ctl) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    let r2: i32 = hg(h, H_R0);
+    let a2: i32 = hg(h, H_R1);
+    let b2: i32 = hg(h, H_R2);
+    let s1: i32 = if_neg_region(r1);
+    let s2: i32 = if_neg_region(r2);
+    let m1: i32 = point_mag(h, r1, a1, b1);
+    let m2: i32 = point_mag(h, r2, a2, b2);
+    let same: bool = s1 == s2;
+    let left_big: bool = mag_cmp(h, m1, m2) >= 0;
+    let mut sign: i32 = s1;
+    if (!same) && (!left_big) {
+        sign = s2;
+    }
+    let mag: i32 = plus_mag(h, m1, m2, same, left_big);
+    if mag < 0 {
+        return -1;
+    }
+    if bid_len(h, mag) == 0 {
+        sign = 0;
+    }
+    point_of(h, sign, mag);
+    let r: i32 = hg(h, H_R0);
+    let a: i32 = hg(h, H_R1);
+    let b: i32 = hg(h, H_R2);
+    let l: i32 = mk_int_range(h, r, a, b, r, a, b);
+    return ts_of1(h, l);
+}
+pub(crate) fn plus_mag(h: &mut [i32], m1: i32, m2: i32, same: bool, left_big: bool) -> i32 {
+    // |v1 + v2| from the magnitudes: their sum when the signs agree, else the
+    // larger minus the smaller.
+    if same {
+        return mag_add(h, m1, m2);
+    }
+    if left_big {
+        return mag_sub(h, m1, m2);
+    }
+    return mag_sub(h, m2, m1);
+}
+pub(crate) fn if_neg_region(r: i32) -> i32 {
+    if (r == R_NEG) || (r == 1) {
+        return 1;
+    }
+    return 0;
+}
+pub(crate) fn dedent_into(h: &mut [i32], bid: i32, dst: i32) {
+    // RFC 9165 .det: the literal's content with the longest run of leading
+    // spaces common to its non-blank lines removed from every line (lines end
+    // at LF), appended to vector dst.
+    let hl: i32 = enc_head_len(h, bid);
+    let n: i32 = bid_len(h, bid);
+    let mut prefix: i32 = INF;
+    let mut i: i32 = hl;
+    while i < n {
+        let mut sp: i32 = 0;
+        let mut j: i32 = i;
+        while (j < n) && (bid_byte(h, bid, j) == 32) {
+            sp += 1;
+            j += 1;
+        }
+        if (j < n) && (bid_byte(h, bid, j) != 10) {
+            if sp < prefix {
+                prefix = sp;
+            }
+        }
+        while (j < n) && (bid_byte(h, bid, j) != 10) {
+            j += 1;
+        }
+        i = j + 1;
+    }
+    if prefix == INF {
+        prefix = 0;
+    }
+    let mut k: i32 = hl;
+    let mut col: i32 = 0;
+    while k < n {
+        let c: i32 = bid_byte(h, bid, k);
+        if c == 10 {
+            vpush1(h, dst, c);
+            col = 0;
+        } else {
+            if (c != 32) || (col >= prefix) {
+                vpush1(h, dst, c);
+            }
+            if (c == 32) && (col < prefix) {
+                col += 1;
+            } else {
+                col = prefix;
+            }
+        }
+        k += 1;
+    }
+}
+pub fn ctl_det(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
+    // RFC 9165 .det: .cat of the two literals after dedenting each.
+    let a: i32 = single_lit(h, target);
+    let b: i32 = single_lit(h, ctl);
+    if (a < 0) || (b < 0) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    let ma: i32 = bid_byte(h, a, 0) >> 5;
+    let mb: i32 = bid_byte(h, b, 0) >> 5;
+    if (ma != mb) || ((ma < 2) || (ma > 3)) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    if !charge(h, bid_len(h, a) + bid_len(h, b)) {
+        return -1;
+    }
+    vtrunc(h, T_TMP2, 0);
+    dedent_into(h, a, T_TMP2);
+    dedent_into(h, b, T_TMP2);
+    let enc: i32 = enc_string(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
+    let l: i32 = mk_lit(h, enc);
+    return ts_of1(h, l);
+}

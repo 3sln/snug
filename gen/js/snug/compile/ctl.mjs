@@ -2,8 +2,8 @@
 // source: snug.compile.ctl
 
 import { ERR_CONTROL_TARGET, ERR_CONTROL_VALUE, ERR_LIM_POOL, ERR_UNSUPPORTED_CONTROL, H_LIM_POOL, H_R0, H_R1, H_R2, H_R3, INF, T_FIV, T_IV, T_IVA, T_IVB, T_IVC, T_LST, T_STK, T_TMP2, charge, erred, fail, hg, hs, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
-import { bidByte, bidLen, encString, intern } from './bytes.mjs';
-import { K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkLit, mkNot, mkText, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
+import { bidByte, bidLen, encString, intern, magAdd, magAdd1, magCmp, magFrom64, magSub } from './bytes.mjs';
+import { K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
 import { rxCompile } from './regexp.mjs';
 
 export function singleLeaf(h, ts) {
@@ -1002,6 +1002,152 @@ export function ctlCat(h, target, ctl, pos) {
     for (let j = hb; j < bidLen(h, b); j++) {
         vpush1(h, T_TMP2, bidByte(h, b, j));
     }
+    const enc = encString(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
+    const l = mkLit(h, enc);
+    return tsOf1(h, l);
+}
+
+export function pointMag(h, r, a, b) {
+    // The magnitude bid of the integer at bound (r, a, b); its sign is
+    // negative exactly when r is NEG or NEG_BIG (v = -1 - n: |v| = n + 1).
+    if (r === R_POS) {
+        return magFrom64(h, a, b);
+    }
+    if (r === 4) {
+        return a;
+    }
+    if (r === R_NEG) {
+        const n = magFrom64(h, a, b);
+        return magAdd1(h, n, 1);
+    }
+    return magAdd1(h, a, 1);
+}
+
+export function ctlPlus(h, target, ctl, pos) {
+    // RFC 9165 .plus on two integer literals: their exact sum.
+    if (!intPoint(h, target)) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    const r1 = hg(h, H_R0);
+    const a1 = hg(h, H_R1);
+    const b1 = hg(h, H_R2);
+    if (!intPoint(h, ctl)) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    const r2 = hg(h, H_R0);
+    const a2 = hg(h, H_R1);
+    const b2 = hg(h, H_R2);
+    const s1 = ifNegRegion(r1);
+    const s2 = ifNegRegion(r2);
+    const m1 = pointMag(h, r1, a1, b1);
+    const m2 = pointMag(h, r2, a2, b2);
+    const same = s1 === s2;
+    const leftBig = magCmp(h, m1, m2) >= 0;
+    let sign = s1;
+    if ((!same) && (!leftBig)) {
+        sign = s2;
+    }
+    const mag = plusMag(h, m1, m2, same, leftBig);
+    if (mag < 0) {
+        return -1;
+    }
+    if (bidLen(h, mag) === 0) {
+        sign = 0;
+    }
+    pointOf(h, sign, mag);
+    const r = hg(h, H_R0);
+    const a = hg(h, H_R1);
+    const b = hg(h, H_R2);
+    const l = mkIntRange(h, r, a, b, r, a, b);
+    return tsOf1(h, l);
+}
+
+export function plusMag(h, m1, m2, same, leftBig) {
+    // |v1 + v2| from the magnitudes: their sum when the signs agree, else the
+    // larger minus the smaller.
+    if (same) {
+        return magAdd(h, m1, m2);
+    }
+    if (leftBig) {
+        return magSub(h, m1, m2);
+    }
+    return magSub(h, m2, m1);
+}
+
+export function ifNegRegion(r) {
+    if ((r === R_NEG) || (r === 1)) {
+        return 1;
+    }
+    return 0;
+}
+
+export function dedentInto(h, bid, dst) {
+    // RFC 9165 .det: the literal's content with the longest run of leading
+    // spaces common to its non-blank lines removed from every line (lines end
+    // at LF), appended to vector dst.
+    const hl = encHeadLen(h, bid);
+    const n = bidLen(h, bid);
+    let prefix = INF;
+    let i = hl;
+    while (i < n) {
+        let sp = 0;
+        let j = i;
+        while ((j < n) && (bidByte(h, bid, j) === 32)) {
+            sp += 1;
+            j += 1;
+        }
+        if ((j < n) && (bidByte(h, bid, j) !== 10)) {
+            if (sp < prefix) {
+                prefix = sp;
+            }
+        }
+        while ((j < n) && (bidByte(h, bid, j) !== 10)) {
+            j += 1;
+        }
+        i = j + 1;
+    }
+    if (prefix === INF) {
+        prefix = 0;
+    }
+    let k = hl;
+    let col = 0;
+    while (k < n) {
+        const c = bidByte(h, bid, k);
+        if (c === 10) {
+            vpush1(h, dst, c);
+            col = 0;
+        } else {
+            if ((c !== 32) || (col >= prefix)) {
+                vpush1(h, dst, c);
+            }
+            if ((c === 32) && (col < prefix)) {
+                col += 1;
+            } else {
+                col = prefix;
+            }
+        }
+        k += 1;
+    }
+}
+
+export function ctlDet(h, target, ctl, pos) {
+    // RFC 9165 .det: .cat of the two literals after dedenting each.
+    const a = singleLit(h, target);
+    const b = singleLit(h, ctl);
+    if ((a < 0) || (b < 0)) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    const ma = bidByte(h, a, 0) >> 5;
+    const mb = bidByte(h, b, 0) >> 5;
+    if ((ma !== mb) || ((ma < 2) || (ma > 3))) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    if (!charge(h, bidLen(h, a) + bidLen(h, b))) {
+        return -1;
+    }
+    vtrunc(h, T_TMP2, 0);
+    dedentInto(h, a, T_TMP2);
+    dedentInto(h, b, T_TMP2);
     const enc = encString(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
     const l = mkLit(h, enc);
     return tsOf1(h, l);

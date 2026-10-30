@@ -317,3 +317,66 @@ pub fn sort_bids(h: &mut [i32], t: i32, n: i32) -> bool {
     }
     return !erred(h);
 }
+pub fn mag_add(h: &mut [i32], a: i32, b: i32) -> i32 {
+    // a + b for magnitude bids (big-endian, minimal).
+    let la: i32 = bid_len(h, a);
+    let lb: i32 = bid_len(h, b);
+    let mut n: i32 = la;
+    if lb > n {
+        n = lb;
+    }
+    if !charge(h, n + 1) {
+        return -1;
+    }
+    vtrunc(h, T_STK5, 0);
+    for _z in 0..n + 1 {
+        vpush1(h, T_STK5, 0);
+    }
+    let mut carry: i32 = 0;
+    for i in 0..n {
+        let mut x: i32 = carry;
+        if i < la {
+            x += bid_byte(h, a, (la - 1) - i);
+        }
+        if i < lb {
+            x += bid_byte(h, b, (lb - 1) - i);
+        }
+        vset(h, T_STK5, n - i, x & 255);
+        carry = x >> 8;
+    }
+    vset(h, T_STK5, 0, carry);
+    if erred(h) {
+        return -1;
+    }
+    return mag_of(h, T_STK5, 0, n + 1);
+}
+pub fn mag_sub(h: &mut [i32], a: i32, b: i32) -> i32 {
+    // a - b for magnitude bids with a >= b.
+    let la: i32 = bid_len(h, a);
+    let lb: i32 = bid_len(h, b);
+    if !charge(h, la + 1) {
+        return -1;
+    }
+    vtrunc(h, T_STK5, 0);
+    for _z2 in 0..la {
+        vpush1(h, T_STK5, 0);
+    }
+    let mut borrow: i32 = 0;
+    for i in 0..la {
+        let mut x: i32 = bid_byte(h, a, (la - 1) - i) - borrow;
+        if i < lb {
+            x -= bid_byte(h, b, (lb - 1) - i);
+        }
+        if x < 0 {
+            x += 256;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        vset(h, T_STK5, (la - 1) - i, x);
+    }
+    if erred(h) {
+        return -1;
+    }
+    return mag_of(h, T_STK5, 0, la);
+}

@@ -4,7 +4,7 @@
 import { ERR_CONTROL_VALUE, ERR_ENUM, ERR_GENERIC, ERR_GROUP_RECURSION, ERR_INTERNAL, ERR_KIND, ERR_LIM_INST, ERR_LIM_NESTING, ERR_MAJOR, ERR_MAP_CUT, ERR_MAP_KEY, ERR_NONPRODUCTIVE, ERR_PROFILE, ERR_RANGE, ERR_TAG, ERR_UNDEFINED, ERR_UNKNOWN_CONTROL, ERR_UNSUPPORTED_CONTROL, ERR_UNWRAP, H_CUR_RULE, H_DEPTH, H_DEPTH_MAX, H_LIM_INST, H_N_INST, H_PROFILE, H_R0, H_R1, H_R2, H_WORK_AT, INF, T_ASTK, T_CON, T_ENV, T_GSTACK, T_HCON, T_HENV, T_HMEMO, T_IV, T_LITB, T_MEMO, T_PSTK, T_SRC, T_STK, T_TMP2, T_WORK, charge, erred, fail, hg, hs, htId, htInit, htNext, htPut, htStart, mix, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
 import { arrFinish } from './arrays.mjs';
 import { bidByte, encIntKey, encString, headPush, intern, magOf } from './bytes.mjs';
-import { ctlAnd, ctlBits, ctlCat, ctlCbor, ctlCompare, ctlEq, ctlRegexp, ctlSize, floatPoint, intPoint, singleLeaf } from './ctl.mjs';
+import { ctlAnd, ctlBits, ctlCat, ctlCbor, ctlCompare, ctlDet, ctlEq, ctlPlus, ctlRegexp, ctlSize, floatPoint, intPoint, singleLeaf } from './ctl.mjs';
 import { G_ALT, G_EMPTY, G_FRAME, G_POS, G_REC, G_REP, G_SEQ, gAdd, gList, gNode, gk, gset } from './glush.mjs';
 import { K_ARRAY, K_EMBED, K_INT, K_LIT, K_MAP, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimple, mkText, pointOf, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
 import { TK_BYTES, TK_FLOAT, TK_INT, TK_TEXT, tkA, tkB, tkC, tkEnd, tkKind, tkStart } from './lex.mjs';
@@ -530,8 +530,8 @@ export function lowerCtl(h, node, env) {
     if (code === 0) {
         return fail(h, ERR_UNKNOWN_CONTROL, pos);
     }
-    // .det, .plus, .pcre, .abnf, .abnfb: refused before anything is lowered (D013).
-    if ((code === 17) || (code >= 18)) {
+    // .pcre, .abnf, .abnfb: refused before anything is lowered (D013).
+    if (code >= 19) {
         return fail(h, ERR_UNSUPPORTED_CONTROL, pos);
     }
     const target = lowerType(h, na(h, node), env);
@@ -607,6 +607,12 @@ export function lowerCtl(h, node, env) {
     }
     if (code === 16) {
         return ctlCat(h, target, ctl, pos);
+    }
+    if (code === 17) {
+        return ctlDet(h, target, ctl, pos);
+    }
+    if (code === 18) {
+        return ctlPlus(h, target, ctl, pos);
     }
     return fail(h, ERR_INTERNAL, pos);
 }

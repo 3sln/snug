@@ -49,7 +49,7 @@
                                        K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
                                        R_NEG_INF R_NEG_BIG R_NEG R_POS R_POS_BIG R_POS_INF]]
             [snug.compile.ctl :refer [ctl-size ctl-bits ctl-compare ctl-eq ctl-and ctl-regexp ctl-cbor
-                                      ctl-cat int-point float-point single-leaf]]
+                                      ctl-cat ctl-det ctl-plus int-point float-point single-leaf]]
             [snug.compile.maps :refer [ent-new as-single as-unit as-none as-product as-product-many as-union as-occur
                                        as-n as-aoff as-alen alt-ent ew map-finish]]
             [snug.compile.glush :refer [g-node g-list g-add gk gset G_POS G_SEQ G_ALT G_REP G_EMPTY G_REC G_FRAME]]
@@ -375,8 +375,8 @@
         code (ctl-code h tok)
         pos (npos h node)]
     (if (== code 0) (return (fail h ERR_UNKNOWN_CONTROL pos)))
-    (comment ".det, .plus, .pcre, .abnf, .abnfb: refused before anything is lowered (D013).")
-    (if (or (== code 17) (>= code 18)) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
+    (comment ".pcre, .abnf, .abnfb: refused before anything is lowered (D013).")
+    (if (>= code 19) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
     (let [^I32 target (lower-type h (na h node) env)]
       (if (< target 0) (return (neg 1)))
       (if (or (== code 14) (== code 15)) (return target))
@@ -414,6 +414,8 @@
           (do (if (== (hg h H_PROFILE) 2) (return (fail h ERR_PROFILE pos)))
               (return (ctl-regexp h target ctl pos))))
         (if (== code 16) (return (ctl-cat h target ctl pos)))
+        (if (== code 17) (return (ctl-det h target ctl pos)))
+        (if (== code 18) (return (ctl-plus h target ctl pos)))
         (return (fail h ERR_INTERNAL pos))))))
 
 ;; ------------------------------------------------------------ tags, majors

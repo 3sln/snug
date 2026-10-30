@@ -246,3 +246,41 @@
         (vset h t c (vget h T_MSORT c)))
       (set width (* width 2))))
   (return (not (erred h))))
+
+(defn ^:pub ^I32 mag-add [^Ints h ^I32 a ^I32 b]
+  (comment "a + b for magnitude bids (big-endian, minimal).")
+  (let [la (bid-len h a)
+        lb (bid-len h b)
+        ^:mut n la]
+    (if (> lb n) (set n lb))
+    (if (not (charge h (+ n 1))) (return (neg 1)))
+    (vtrunc h T_STK5 0)
+    (for [^I32 _z 0 (+ n 1)] (vpush1 h T_STK5 0))
+    (let [^:mut carry 0]
+      (for [^I32 i 0 n]
+        (let [^:mut x carry]
+          (if (< i la) (set x (+ x (bid-byte h a (- (- la 1) i)))))
+          (if (< i lb) (set x (+ x (bid-byte h b (- (- lb 1) i)))))
+          (vset h T_STK5 (- n i) (bit-and x 255))
+          (set carry (sar x 8))))
+      (vset h T_STK5 0 carry))
+    (if (erred h) (return (neg 1)))
+    (return (mag-of h T_STK5 0 (+ n 1)))))
+
+(defn ^:pub ^I32 mag-sub [^Ints h ^I32 a ^I32 b]
+  (comment "a - b for magnitude bids with a >= b.")
+  (let [la (bid-len h a)
+        lb (bid-len h b)]
+    (if (not (charge h (+ la 1))) (return (neg 1)))
+    (vtrunc h T_STK5 0)
+    (for [^I32 _z2 0 la] (vpush1 h T_STK5 0))
+    (let [^:mut borrow 0]
+      (for [^I32 i 0 la]
+        (let [^:mut x (- (bid-byte h a (- (- la 1) i)) borrow)]
+          (if (< i lb) (set x (- x (bid-byte h b (- (- lb 1) i)))))
+          (if (< x 0)
+            (do (set x (+ x 256)) (set borrow 1))
+            (set borrow 0))
+          (vset h T_STK5 (- (- la 1) i) x))))
+    (if (erred h) (return (neg 1)))
+    (return (mag-of h T_STK5 0 la))))
