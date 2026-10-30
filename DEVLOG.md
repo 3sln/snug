@@ -616,7 +616,79 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ## Phase 4 — Differential, fuzz, benchmarks
 
-- [ ] **P4.1 — Differential vs the `cddl` crate (native)** on its correct subset.
+- [x] **P4.1 — Differential vs the `cddl` crate (native)** on its correct subset.
+  *Done 2026-10-29; no commit requested or made.* Added
+  `corpus/tools/crate-diff.mjs`, the single `bb crate-diff` task entry, and
+  [the findings with reduced reproductions](corpus/conformance/crate-diff-findings.md).
+  No validator sources were changed by this item.
+
+  **Actual final run:** `bb crate-diff` (native `cddl` 0.10.7, Node v24.6.0,
+  seed `0x5eed8610`, 2,000 ms timeout and SIGKILL per fresh native process).
+  All 295 corpus suites were offered to snug's compiler, including later-phase
+  annotations: 264 suites / **987 cases compiled**; 31 expected refusal suites /
+  136 cases were recorded as skipped. Added **6,000 generated cases** on 2,000
+  varied schemas: 375 cases each for structs, open maps, tables, array
+  occurrences, nested generics, type choices, ranges, text size, byte size,
+  bits, typed arrays/tags, tag 40, integer/biguint bignums, decfrac, literals,
+  recursion. Generation follows the requested crate subset exclusions and
+  includes constructive matches, near misses and arbitrary profile values.
+
+  **6,987 cases attempted; 6,915 Boolean comparisons; 6,613 agreements;
+  302 disagreements in 26 verdict classes.** Separately: **70 native schema
+  errors in five classes; two crate panics in one class; zero timeouts.**
+  Study: 198 compared / 183 agree / 15 disagree, plus three schema errors.
+  Adversarial: 717 / 584 / 133, plus 67 schema errors and two panics.
+  Generated: 6,000 / 5,846 / 154, no schema errors, panics or timeouts.
+
+  **All 32 classes are crate defects or documented crate limitations;
+  snug bugs: 0; incorrect corpus expectations: 0; unclassified: 0.**
+  Verdict-class counts: optional map groups 60; map-choice coverage 4;
+  regexp anchoring 13; map unwrap 2; prelude bignums 5; prelude tagged-value
+  dispatch 17; float widths 9; member/rule-name collision 2; repeated map
+  choices 2; non-cut fall-through 1; array occurrences 6; composite `.ne`
+  targets 5; socket group extensions 2; byte-literal/text confusion 1;
+  variable tag constraint ignored 1; bare major 6 refused 1; undefined group
+  socket 1; named group extensions 2; prelude signedness 2; uint size range 5;
+  zero/empty `.bits` 44; high `.bits` 1; bignum comparison 2; nested control
+  target lost 1; embedded trailing CBOR ignored 1; nested generic scope 112.
+  Schema-error classes: `.cborseq` 9; native integer literal limits 48;
+  base64 byte literal 5; escaped byte literal 3; hex subnormal literal 5.
+  Panic class: byte literal with byte-string input 2 (`cbor.rs:4957:29`).
+
+  **Checks actually run:** `bb crate-diff` completed with exit 0, source
+  fingerprint unchanged during the run; all 6,987 snug verdicts rechecked
+  against `corpus/tools/oracle.mjs` (four `.cat`/`.plus` cases use explicit
+  RFC 9165 literal folds because the interpreter predates those controls),
+  zero unknowns; baseline decode/re-encode identity on every input;
+  33 reduced witnesses run through all three implementations; two independent
+  6,000-case generations had identical schemas, bytes and all three verdicts;
+  `node --check corpus/tools/crate-diff.mjs`; `node --test corpus/tools/` —
+  **301 passed, zero failures/skips**. Babashka printed a sandbox
+  ProcessHandle/process-tree cleanup exception after its successful run;
+  the harness itself completed successfully. Detailed evidence, binary/source
+  hashes and skipped-suite codes are under `.cache/p41/`; durable counts,
+  minimal reproductions and RFC arguments are in the findings file.
+
+  **Learnt:** native CLI validation refusal exits **zero**; verdicts require
+  explicit success/failure messages and an assertion of the selected first
+  rule. The intended correct subset still contains two crate defects:
+  **112 nested-generic scope failures and 42 zero-bits failures** in generation.
+  They were retained and classified, not silently excluded. Native 64-bit
+  literals remove the wasm32-only ceiling but not all native literal limits.
+  Other work changed the shared tree between exploratory runs; the final
+  unchanged-source run above is authoritative, and unrelated changes were
+  left untouched. No timing benchmark or Rust-host identity claim is made.
+
+  **D044 — Keep discovered crate defects as classified differential evidence.**
+  **Decision:** retain every generated case and every snug-compiled corpus
+  case; separate Boolean disagreements from native parse errors, panics and
+  timeouts. Fail the harness for an unclassified result, an unknown independent
+  verdict, a changed source set, a snug bug or a corpus bug.
+  **Why:** deleting newly failing cases would overstate the oracle's correct
+  subset; treating a native crash or parse failure as `false` invents a verdict.
+  **Alternatives:** silently filter defects, trust process exit status, or
+  abort on the first known crate defect (all lose useful evidence).
+  - [ ] **Signed off** (owner)
 - [ ] **P4.2 — Fuzz** (schemas, values, mutated bytes; hosts agree; no crash;
   budget respected).
 - [ ] **P4.3 — Benchmarks** (architecture §12) and the 3sln.me recommendation.

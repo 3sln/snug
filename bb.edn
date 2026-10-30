@@ -21,5 +21,7 @@
               :task (apply shell "kin/scripts/vm-test" *command-line-args*)}
   compile-fuzz {:doc "P3.2/P3.3: seeded random/mutated CDDL; only SchemaError, no panic, budget kept, JS == Rust, vm-verify accepts."
                 :task (apply shell "kin/scripts/compile-fuzz" *command-line-args*)}
+  crate-diff {:doc "P4.1: seeded differential vs the native cddl crate 0.10.7."
+              :task (apply shell "node" "corpus/tools/crate-diff.mjs" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}
