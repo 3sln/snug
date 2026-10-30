@@ -421,6 +421,8 @@ export const T_ODO = 105;
 
 export const T_ODO2 = 106;
 
+export const T_KEYPRE = 107;
+
 export const H_TS_ANY = 59;
 
 export const H_N_FIN = 60;

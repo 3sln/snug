@@ -23,8 +23,10 @@ put host/rust/Cargo.toml "$dir/Cargo.toml"
 puttext "//! snug compiler crate (dev subset): generated modules + the compile host.
 pub mod snug;
 pub mod compile;
+pub mod sha256;
 " "$dir/src/lib.rs"
 put host/rust/src/compile.rs "$dir/src/compile.rs"
+put host/rust/src/sha256.rs "$dir/src/sha256.rs"
 for f in host/rust/src/bin/compile*.rs; do [ -f "$f" ] && put "$f" "$dir/src/bin/$(basename "$f")"; done
 g="${SNUG_GEN:-gen}"
 mods=""

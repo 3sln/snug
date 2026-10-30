@@ -1109,6 +1109,26 @@ least one byte (an all-zero mask still constrains); `.feature` and
 **Why**: exact or refused, never a different meaning (R1).
 - [ ] **Signed off** (owner)
 
+### D039 — SOURCE_KEY: kin builds the preimage from the effective options
+**Decision**: after a successful compile, kin writes program.md §13.3's
+preimage (deterministic CBOR: `"snug/program-key"`, 1, the snug version, the
+profile, the 17 option values *as the compiler used them* — defaults applied,
+clamped to hard maxima, bus's 16 KiB text cap, bignum bytes 128 — and the
+schema text as a byte string) into the arena; the host hashes it with
+SHA-256 (host/js/src/sha256.mjs, host/rust/src/sha256.rs) into header words
+7..14. The snug version (`0.0.0`) is defined once, in kin
+(`snug.compile.main/snug-version`). The leaf limit is not in the key (the
+frozen list has no slot): a Program that compiled under a lower leaf limit
+is identical under a higher one.
+**Why**: two spellings of the same options (absent vs explicit default)
+must share a cache key, and both hosts must hash identical bytes; the
+encoding is kin's, the hash the host's (no SHA-256 in kin, §13.3).
+`bb compile-test` recomputes the key with the baseline encoder and
+node:crypto.
+**Alternatives**: hashing the options as passed (absent ≠ default);
+leaving the words zero (§13.2 says the host fills them).
+- [ ] **Signed off** (owner)
+
 ### D040 — `.cborseq` is matched as a virtual array of the sequence's items (VM engineer; needs the compiler engineer's agreement)
 **Decision**: an EMBED leaf with `SEQ` treats its content typeset (the
 control type, an array type: the compiler already emits the array's typeset)

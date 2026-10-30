@@ -117,17 +117,39 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
       want[at + k++] = t.startsWith('-') ? -Number(t.slice(1)) : Number(t);
     }
   }
-  for (let k = 7; k < 15; k++) want[k] = 0;
+  // Words 7..14 are SOURCE_KEY, host-filled (the listing shows k0..k7): compared separately below.
+  for (let k = 7; k < 15; k++) want[k] = undefined;
   const pool = block.match(/B\[[^\n]*/g);
   const wantPool = '72' + '6178' + '6179' + '646b696e64' + '6161' + '6162';
   const j = jsCompile('r = { kind: "a", x: int // kind: "b", ? y: [* tstr] }');
   const rex = spawnSync(rustBin, [], { input: `0 ${hex(Buffer.from('r = { kind: "a", x: int // kind: "b", ? y: [* tstr] }'))}\n` }).stdout.toString().trim().split(' ');
-  const missing = want.some(w => w === undefined);
-  const okJs = j.ok && j.program.length === 286 && want.every((w, i) => j.program[i] === w) && hex(j.pool) === wantPool;
-  const okRust = rex[0] === 'ok' && rex[2] === wordsHex(Int32Array.from(want)) && rex[3] === wantPool;
+  const missing = want.some((w, i) => w === undefined && (i < 7 || i > 14));
+  const okJs = j.ok && j.program.length === 286 && want.every((w, i) => w === undefined || j.program[i] === w) && hex(j.pool) === wantPool;
+  const rw = rex[2] ?? '';
+  const okRust = rex[0] === 'ok' && want.every((w, i) => w === undefined || rw.slice(8 * i, 8 * i + 8) === (w >>> 0).toString(16).padStart(8, '0')) && rex[3] === wantPool && j.ok && rw === wordsHex(j.program);
   if (missing || !pool) fail('could not read the worked example from docs/program.md');
   console.log(`  ${okJs && okRust && !missing ? 'ok  ' : 'FAIL'} program.md §15: ${j.ok ? j.program.length : 'no'} words, ${j.ok ? j.pool.length : 'no'}-byte pool, exactly as listed (JS ${okJs ? 'yes' : 'NO'}, Rust ${okRust ? 'yes' : 'NO'})`);
   if (!(okJs && okRust)) fails++;
+}
+
+// ---------------------------------------------------------------- SOURCE_KEY
+// program.md §13.3, recomputed independently: the baseline codec encodes the
+// preimage with the default effective limits, node:crypto hashes it.
+{
+  const { encode } = await import('../../bench/baseline/cbor-3sln.mjs');
+  const { createHash } = await import('node:crypto');
+  const { SNUG_VERSION } = await import('../../host/js/src/compile.mjs');
+  const LIMITS = [262144, 64, 65536, 1024, 64, 256, 256, 256, 1048576, 8388608, 10000000, 32, 1500000, 65536, 131072, 128, 4000000];
+  let good = 0, n = 0;
+  for (const c of cases.slice(0, 60)) {
+    let p; try { p = compile(c.text).program; } catch { continue; }
+    n++;
+    const pre = encode(['snug/program-key', 1, SNUG_VERSION, 0, LIMITS, new Uint8Array(Buffer.from(c.text, 'utf8'))]);
+    const d = createHash('sha256').update(pre).digest();
+    if ([0, 1, 2, 3, 4, 5, 6, 7].every(i => p[7 + i] === d.readInt32BE(4 * i))) good++;
+    else fail(`${c.label}: SOURCE_KEY is not SHA-256 of the §13.3 preimage`);
+  }
+  console.log(`  ${good === n ? 'ok  ' : 'FAIL'} ${good}/${n} SOURCE_KEYs equal SHA-256 of program.md §13.3's preimage (baseline encoder, node:crypto)`);
 }
 
 // ---------------------------------------------------------------- normaliser structure
@@ -200,7 +222,8 @@ const PROFILE_CASES = [
     if (got === 'ok') {
       const full = compile(t, { profile: 'full' });
       const a = Int32Array.from(prog.program), b = Int32Array.from(full.program);
-      a[5] = 0; b[5] = 0;
+      // PROFILE (word 5) and SOURCE_KEY (7..14, which hashes the profile and limits) may differ.
+      for (const w of [5, 7, 8, 9, 10, 11, 12, 13, 14]) { a[w] = 0; b[w] = 0; }
       if (wordsHex(a) !== wordsHex(b) || hex(prog.pool) !== hex(full.pool)) { same = false; fail(`profile ${p} ${JSON.stringify(t.slice(0, 50))}: differs from full`); }
     }
     if (got === want && same) good++;

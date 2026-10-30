@@ -7,9 +7,14 @@
 //   compile(text, { profile, limits }) -> { program: Int32Array, pool: Uint8Array, rules: string[] }
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
 import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn,
-  errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, OPT_WORDS }
+  errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
+  keyPreimageLen, snugVersion, OPT_WORDS }
   from '../../../gen/js/snug/compile/main.mjs';
 import { ERR_ARENA, ERR_NEED_FLOATS, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
+import { sha256 } from './sha256.mjs';
+
+/** The snug version (kin's, so both hosts agree): in the source key and the serialisation container. */
+export const SNUG_VERSION = snugVersion();
 
 /** A schema the compiler refuses. `code` is a stable name (e.g. `map_overlap`); line and column are 1-based (column in code points), 0 when not about a place in the text. */
 export class SchemaError extends Error {
@@ -79,6 +84,10 @@ export function compile(text, { profile = 'full', limits = {} } = {}) {
     if (outProgramWords(h) < 64) throw new SchemaError('internal', 0, 0, undefined);
     const program = h.slice(p, p + outProgramWords(h));
     const pool = Uint8Array.from(h.subarray(b, b + outPoolBytes(h)));
+    // SOURCE_KEY (header words 7..14): SHA-256 of kin's deterministic preimage, word i = big-endian bytes 4i..4i+3.
+    const k = keyPreimageAt(h);
+    const key = sha256(Uint8Array.from(h.subarray(k, k + keyPreimageLen(h))));
+    for (let i = 0; i < 8; i++) program[7 + i] = (key[4 * i] << 24) | (key[4 * i + 1] << 16) | (key[4 * i + 2] << 8) | key[4 * i + 3];
     return { program, pool, rules: ruleNames(program, pool) };
   }
 }

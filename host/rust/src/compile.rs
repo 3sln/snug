@@ -26,6 +26,11 @@ pub struct Compiled {
     pub rules: Vec<String>,
 }
 
+/// The snug version (kin's, so both hosts agree).
+pub fn snug_version() -> &'static str {
+    kc::snug_version()
+}
+
 /// Option order: program.md §13.3's source key, then the leaf limit.
 pub const COMPILE_OPTIONS: [&str; 18] = [
     "schemaBytes", "nesting", "astNodes", "instantiations", "alternatives", "arrayPositions",
@@ -89,6 +94,14 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
             let b = kc::out_pool_at(&h) as usize;
             let program = h[p..p + kc::out_program_words(&h) as usize].to_vec();
             let pool: Vec<u8> = h[b..b + kc::out_pool_bytes(&h) as usize].iter().map(|&x| x as u8).collect();
+            // SOURCE_KEY (header words 7..14): SHA-256 of kin's deterministic preimage.
+            let k = kc::key_preimage_at(&h) as usize;
+            let pre: Vec<u8> = h[k..k + kc::key_preimage_len(&h) as usize].iter().map(|&x| x as u8).collect();
+            let key = crate::sha256::sha256(&pre);
+            let mut program = program;
+            for i in 0..8 {
+                program[7 + i] = i32::from_be_bytes([key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]]);
+            }
             let rules = rule_names(&program, &pool);
             return Ok(Compiled { program, pool, rules });
         }

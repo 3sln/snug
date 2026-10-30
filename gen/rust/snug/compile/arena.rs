@@ -211,6 +211,7 @@ pub const T_KEYTRI: i32 = 103;
 pub const T_LITS: i32 = 104;
 pub const T_ODO: i32 = 105;
 pub const T_ODO2: i32 = 106;
+pub const T_KEYPRE: i32 = 107;
 pub const H_TS_ANY: i32 = 59;
 pub const H_N_FIN: i32 = 60;
 pub const H_WORK_AT: i32 = 56;

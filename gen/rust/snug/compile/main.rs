@@ -214,7 +214,99 @@ pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> i3
     if hg(h, H_OUT_PN) < 64 {
         return bail(h);
     }
+    build_key_preimage(h);
+    if erred(h) {
+        return bail(h);
+    }
     return 0;
+}
+pub const SNUG_VERSION_LEN: i32 = 5;
+pub fn snug_version() -> &'static str {
+    // The snug version: in the source key (program.md §13.3) and the
+    // serialisation container. One place, so both hosts agree.
+    return "0.0.0";
+}
+pub(crate) fn version_byte(i: i32) -> i32 {
+    // Byte i of the version text "0.0.0" (kept beside snug-version).
+    if (i & 1) == 1 {
+        return 46;
+    }
+    return 48;
+}
+pub(crate) fn push_uint(h: &mut [i32], t: i32, v: i32) {
+    head_push(h, t, 0, 0, v);
+}
+pub fn build_key_preimage(h: &mut [i32]) {
+    // program.md §13.3's source-key preimage, deterministic CBOR, into T_KEYPRE
+    // (one byte per word): ["snug/program-key", 1, version, profile, [17
+    // effective limits], schema text as bytes]. The host hashes it (SHA-256)
+    // into header words 7..14.
+    vtrunc(h, T_KEYPRE, 0);
+    vpush1(h, T_KEYPRE, 134);
+    head_push(h, T_KEYPRE, 3, 0, 16);
+    // "snug/program-key"
+    vpush1(h, T_KEYPRE, 115);
+    vpush1(h, T_KEYPRE, 110);
+    vpush1(h, T_KEYPRE, 117);
+    vpush1(h, T_KEYPRE, 103);
+    vpush1(h, T_KEYPRE, 47);
+    vpush1(h, T_KEYPRE, 112);
+    vpush1(h, T_KEYPRE, 114);
+    vpush1(h, T_KEYPRE, 111);
+    vpush1(h, T_KEYPRE, 103);
+    vpush1(h, T_KEYPRE, 114);
+    vpush1(h, T_KEYPRE, 97);
+    vpush1(h, T_KEYPRE, 109);
+    vpush1(h, T_KEYPRE, 45);
+    vpush1(h, T_KEYPRE, 107);
+    vpush1(h, T_KEYPRE, 101);
+    vpush1(h, T_KEYPRE, 121);
+    push_uint(h, T_KEYPRE, 1);
+    head_push(h, T_KEYPRE, 3, 0, SNUG_VERSION_LEN);
+    for i in 0..SNUG_VERSION_LEN {
+        vpush1(h, T_KEYPRE, version_byte(i));
+    }
+    let pr: i32 = hg(h, H_PROFILE);
+    push_uint(h, T_KEYPRE, pr);
+    head_push(h, T_KEYPRE, 4, 0, 17);
+    for k in 0..17 {
+        let v: i32 = hg(h, if_limit(k));
+        push_uint(h, T_KEYPRE, v);
+    }
+    let n: i32 = hg(h, H_NSRC);
+    head_push(h, T_KEYPRE, 2, 0, n);
+    for j in 0..n {
+        let c: i32 = vget(h, T_SRC, j);
+        vpush1(h, T_KEYPRE, c);
+    }
+}
+pub(crate) fn if_limit(k: i32) -> i32 {
+    // The header word of compile option k (source-key order).
+    return match k {
+        0 => H_LIM_TEXT,
+        1 => H_LIM_NEST,
+        2 => H_LIM_AST,
+        3 => H_LIM_INST,
+        4 => H_LIM_ALTS,
+        5 => H_LIM_APOS,
+        6 => H_LIM_RPOS,
+        7 => H_LIM_WIDTH,
+        8 => H_LIM_POOL,
+        9 => H_LIM_TOTAL,
+        10 => H_LIM_BUDGET,
+        11 => H_LIM_DEPTH,
+        12 => H_LIM_INPUT,
+        13 => H_LIM_ENTRIES,
+        14 => H_LIM_ITEMS,
+        15 => H_LIM_BIGNUM,
+        _ => H_LIM_VBUDGET,
+    };
+}
+pub fn key_preimage_at(h: &[i32]) -> i32 {
+    return vbase(h, T_KEYPRE);
+}
+pub fn key_preimage_len(h: &[i32]) -> i32 {
+    return vlen(h, T_KEYPRE);
 }
 pub fn error_name(code: i32) -> &'static str {
     // The stable name of a schema error code (the API's SchemaError.code).
