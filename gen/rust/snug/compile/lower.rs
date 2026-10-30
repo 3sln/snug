@@ -404,6 +404,18 @@ pub(crate) fn lower_range(h: &mut [i32], node: i32, env: i32) -> i32 {
     }
     return fail(h, ERR_RANGE, pos);
 }
+pub(crate) fn ranged_ast(h: &[i32], n: i32) -> i32 {
+    // 1 if the controller expression is written as a range (through
+    // parentheses), else 0.
+    let mut x: i32 = n;
+    while (x >= 0) && ((nk(h, x) == N_TYPE) && (nb(h, x) == 1)) {
+        x = na(h, x);
+    }
+    if (x >= 0) && (nk(h, x) == N_RANGE) {
+        return 1;
+    }
+    return 0;
+}
 pub(crate) fn pack_name(h: &[i32], s: i32, len: i32, from: i32) -> i32 {
     // Bytes from..from+3 of the name at s as one little-endian word (0 past the end).
     let mut w: i32 = 0;
@@ -511,6 +523,19 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
         if (code == 13) && (hg(h, H_PROFILE) > 0) {
             return fail(h, ERR_PROFILE, pos);
         }
+        // RFC 8610 §3.8.4: a .cborseq controller is an array type describing
+        // the sequence (the VM matches it as a virtual array, D040).
+        if code == 13 {
+            let cts: i32 = lower_type(h, nb(h, node), env);
+            if cts < 0 {
+                return -1;
+            }
+            for i in 0..ts_n(h, cts) {
+                if lk(h, ts_leaf(h, cts, i)) != K_ARRAY {
+                    return fail(h, ERR_CONTROL_VALUE, pos);
+                }
+            }
+        }
         let cn: i32 = nb(h, node);
         let mut flags: i32 = 0;
         if code == 13 {
@@ -535,7 +560,7 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
         return -1;
     }
     if code == 1 {
-        return ctl_size(h, target, ctl, pos);
+        return ctl_size(h, target, ctl, ranged_ast(h, nb(h, node)), pos);
     }
     if code == 2 {
         return ctl_bits(h, target, ctl, pos);

@@ -153,7 +153,10 @@
 
 ;; ------------------------------------------------------------ .size
 
-(defn ^:pub ^I32 ctl-size [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+(defn ^:pub ^I32 ctl-size [^Ints h ^I32 target ^I32 ctl ^I32 ranged ^I32 pos]
+  (comment "ranged: 1 when the controller is written as a range (`.size (lo..hi)`)."
+           "On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),"
+           "`uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.")
   (let [cl (single-leaf h ctl)
         from (vlen h T_STK)]
     (if (or (< cl 0) (!= (lk h cl) K_INT)) (return (fail h ERR_CONTROL_VALUE pos)))
@@ -174,12 +177,12 @@
                         (do (let [nlt (mk-text h nlo nhi (ld h t 2))] (vpush1 h T_STK nlt)))
                         (do (let [nlb (mk-bytes h nlo nhi (ld h t 2))] (vpush1 h T_STK nlb)))))))
               (if (== k K_INT)
-                (do (if (<= lo 8)
+                (do (if (or (<= lo 8) (== ranged 0))
                       (do (let [^:mut hk hi
                                 ^:mut llo 0
                                 ^:mut lhi 0]
                             (if (> hk 8) (set hk 8))
-                            (if (> lo 0)
+                            (if (and (> lo 0) (!= ranged 0))
                               (do (set lhi (pow256-word (- lo 1) 0 1))
                                   (set llo (pow256-word (- lo 1) 0 0))))
                             (let [nl2 (int-with h t R_POS lhi llo R_POS

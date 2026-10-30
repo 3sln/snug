@@ -188,7 +188,10 @@ export function targetError(h, pos) {
     return fail(h, ERR_CONTROL_TARGET, pos);
 }
 
-export function ctlSize(h, target, ctl, pos) {
+export function ctlSize(h, target, ctl, ranged, pos) {
+    // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
+    // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
+    // `uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.
     const cl = singleLeaf(h, ctl);
     const from = vlen(h, T_STK);
     if ((cl < 0) || (lk(h, cl) !== K_INT)) {
@@ -220,14 +223,14 @@ export function ctlSize(h, target, ctl, pos) {
                     }
                 }
             } else if (k === K_INT) {
-                if (lo <= 8) {
+                if ((lo <= 8) || (ranged === 0)) {
                     let hk = hi;
                     let llo = 0;
                     let lhi = 0;
                     if (hk > 8) {
                         hk = 8;
                     }
-                    if (lo > 0) {
+                    if ((lo > 0) && (ranged !== 0)) {
                         lhi = pow256Word(lo - 1, 0, 1);
                         llo = pow256Word(lo - 1, 0, 0);
                     }

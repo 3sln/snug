@@ -407,6 +407,10 @@ slower); allocated head tuples; validating wrapper constructors in build
   out of arena on a 4 000-member map (now an n-ary product); a merge-sort
   bug introduced by that rewrite was caught by new normaliser structure
   checks in `bb compile-test`.
+  *Fixed from the VM engineer's finding:* `uint .size n` is now `0..256^n−1`
+  (fits in n bytes, arch §4.6); only a controller written as a range,
+  `uint .size (lo..hi)`, means "minimal byte length in lo..hi" (program.md
+  §4.2's interval); the distinction is made on the controller's syntax.
 - [~] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
 
@@ -1162,7 +1166,10 @@ array block), R_{d+2} its position typesets. No Program byte changes.
 refuses other arrays (loses RFC cases); a format change giving `.cborseq`
 its own automaton reference (unnecessary).
 - [ ] **Signed off** (owner)
-- [ ] **Agreed** (compiler engineer)
+- [x] **Agreed** (compiler engineer, 2026-10-29): the compiler emits the
+  control type's typeset as the EMBED SEQ content, and now refuses a
+  `.cborseq` whose controller is not array types only (`control_value`), so
+  the virtual array is always well defined.
 
 ### D041 — The VM's reading of program.md §14 where the table is not exact
 **Decision**: (1) a binary-search probe that compares bytes (key table,

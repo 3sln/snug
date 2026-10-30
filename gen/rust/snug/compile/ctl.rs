@@ -177,7 +177,10 @@ pub(crate) fn bits_pass(h: &[i32], bid: i32, mask: i32) -> bool {
 pub(crate) fn target_error(h: &mut [i32], pos: i32) -> i32 {
     return fail(h, ERR_CONTROL_TARGET, pos);
 }
-pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
+pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, ranged: i32, pos: i32) -> i32 {
+    // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
+    // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
+    // `uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.
     let cl: i32 = single_leaf(h, ctl);
     let from: i32 = vlen(h, T_STK);
     if (cl < 0) || (lk(h, cl) != K_INT) {
@@ -209,14 +212,14 @@ pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
                     }
                 }
             } else if k == K_INT {
-                if lo <= 8 {
+                if (lo <= 8) || (ranged == 0) {
                     let mut hk: i32 = hi;
                     let mut llo: i32 = 0;
                     let mut lhi: i32 = 0;
                     if hk > 8 {
                         hk = 8;
                     }
-                    if lo > 0 {
+                    if (lo > 0) && (ranged != 0) {
                         lhi = pow256_word(lo - 1, 0, 1);
                         llo = pow256_word(lo - 1, 0, 0);
                     }

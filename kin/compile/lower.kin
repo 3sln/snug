@@ -322,6 +322,15 @@
 
 ;; ------------------------------------------------------------ controls
 
+(defn ^I32 ranged-ast [^IntsR h ^I32 n]
+  (comment "1 if the controller expression is written as a range (through"
+           "parentheses), else 0.")
+  (let [^:mut x n]
+    (while (and (>= x 0) (and (== (nk h x) N_TYPE) (== (nb h x) 1)))
+      (set x (na h x)))
+    (if (and (>= x 0) (== (nk h x) N_RANGE)) (return 1))
+    (return 0)))
+
 (defn ^I32 pack-name [^IntsR h ^I32 s ^I32 len ^I32 from]
   (comment "Bytes from..from+3 of the name at s as one little-endian word (0 past the end).")
   (let [^:mut w 0]
@@ -373,6 +382,13 @@
       (if (or (== code 14) (== code 15)) (return target))
       (if (or (== code 12) (== code 13))
         (do (if (and (== code 13) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
+            (comment "RFC 8610 §3.8.4: a .cborseq controller is an array type describing"
+                     "the sequence (the VM matches it as a virtual array, D040).")
+            (if (== code 13)
+              (do (let [^I32 cts (lower-type h (nb h node) env)]
+                    (if (< cts 0) (return (neg 1)))
+                    (for [^I32 i 0 (ts-n h cts)]
+                      (if (!= (lk h (ts-leaf h cts i)) K_ARRAY) (return (fail h ERR_CONTROL_VALUE pos)))))))
             (let [cn (nb h node)
                   ^:mut flags 0]
               (if (== code 13) (set flags 1))
@@ -388,7 +404,7 @@
                 (return (ctl-cbor h target (ts-leaf h ets 0) pos))))))
       (let [^I32 ctl (lower-type h (nb h node) env)]
         (if (< ctl 0) (return (neg 1)))
-        (if (== code 1) (return (ctl-size h target ctl pos)))
+        (if (== code 1) (return (ctl-size h target ctl (ranged-ast h (nb h node)) pos)))
         (if (== code 2) (return (ctl-bits h target ctl pos)))
         (if (and (>= code 3) (<= code 6)) (return (ctl-compare h target ctl (- code 3) pos)))
         (if (== code 7) (return (ctl-eq h target ctl 0 pos)))
