@@ -173,7 +173,7 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
   const { encode } = await import('../../bench/baseline/cbor-3sln.mjs');
   const { createHash } = await import('node:crypto');
   const { SNUG_VERSION } = await import('../../host/js/src/compile.mjs');
-  const LIMITS = [262144, 64, 65536, 1024, 64, 256, 256, 256, 1048576, 8388608, 10000000, 32, 1500000, 65536, 131072, 128, 4000000];
+  const LIMITS = [262144, 64, 65536, 1024, 64, 256, 256, 256, 1048576, 8388608, 10000000, 32, 1500000, 65536, 131072, 128, 2300000];
   let good = 0, n = 0;
   for (const c of cases.slice(0, 60)) {
     let p; try { p = compile(c.text).program; } catch { continue; }

@@ -60,7 +60,7 @@ export function setupLimits(h, opt) {
     hs(h, H_LIM_ITEMS, optLimit(opt, 15, 131072, 16777216));
     // program.md §17 q22: only 128 bignum content bytes in revision 2.
     hs(h, H_LIM_BIGNUM, 128);
-    hs(h, H_LIM_VBUDGET, optLimit(opt, 17, 4000000, INF));
+    hs(h, H_LIM_VBUDGET, optLimit(opt, 17, 2300000, INF));
     hs(h, H_LIM_LEAVES, optLimit(opt, 18, 65536, 1048576));
     const b = hg(h, H_LIM_BUDGET);
     hs(h, H_BUDGET, b);

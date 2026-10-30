@@ -274,11 +274,12 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     s[(VM_DLIM) as usize] = dl;
     // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
     // bit 0 forces the generic path (the fast == generic gate);
-    // bit 1 selects schedule 2 (D045, opt-in, provisional).
+    // bit 1 selects the legacy schedule 1; schedule 2 (D045) is the default
+    // (s[VM_GENERIC] bit 1 set = schedule 2).
     if (limits.len() as i32) > 8 {
-        s[(VM_GENERIC) as usize] = limits[(8) as usize] & 3;
+        s[(VM_GENERIC) as usize] = ((limits[(8) as usize] & 1) + 2) - (limits[(8) as usize] & 2);
     } else {
-        s[(VM_GENERIC) as usize] = 0;
+        s[(VM_GENERIC) as usize] = 2;
     }
     if n > s[(O_MAX_BYTES) as usize] {
         let c1: i32 = -fail(s, start, CODE_TOO_LARGE);

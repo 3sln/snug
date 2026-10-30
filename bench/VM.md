@@ -210,8 +210,16 @@ generic-path tuning and the opt-in schedule 2 (D045). Same machine and method
 as above (M1 Pro, Node v24.6.0, shared, load 8–16; CPU time, best of rounds).
 Reproduce: `node bench/vm-perf.mjs` (live validation vs the generated scanner,
 and `schema.decode` vs cbor.mjs on the codec set), `node bench/vm-calib.mjs
-[budget] [--s2]` (CPU per unit, worst budget-bounded inputs, units of valid
+[budget] [--s1]` (CPU per unit, worst budget-bounded inputs, units of valid
 messages), `node bench/vm-bench.mjs [--quick]` (the three-way table above).
+
+*Since 2026-10-29 (D045/D046 accepted, provisional)*: schedule 2 is the
+default and the compiled default budget is 2.3 M; `vm-calib.mjs` takes
+`--s1` for the legacy schedule (it took `--s2` when these tables were
+recorded). The tables below are as recorded, labelled by schedule; the
+4 M rows in section 3 above predate the change. A re-run at the new
+defaults gave a worst of 23.6 ns/unit (contract object-storage request,
+generic choice), within this machine's run-to-run spread.
 
 ## Live validation vs the scanner (`bench/vm-perf.mjs`)
 

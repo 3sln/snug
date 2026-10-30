@@ -113,7 +113,7 @@ export function assembledCases() {
     const big = enc(Array.from({ length: 1000 }, (_, i) => i));
     add('budget', p, [
       { label: 'enough budget', bytes: big, check: expect({ code: 0 }) },
-      ...[1, 2, 3, 10, 100, 1001, 5000].map(n => ({ label: `budget ${n}: exhausted, whole budget reported used`, bytes: big, lim: lim({ budget: n }),
+      ...[1, 2, 3, 10, 100, 1001, 2000].map(n => ({ label: `budget ${n}: exhausted, whole budget reported used`, bytes: big, lim: lim({ budget: n }),
         check: o => { const g = parse(o); return g.code === 48 && g.used === n ? null : `out ${o}`; } })),
       { label: 'budget 0 on an empty array', bytes: enc([]), lim: lim({ budget: 0 }), check: expect({ code: 48, used: 0, offset: 0 }) },
       { label: 'budget wins over a later profile error', bytes: Uint8Array.from([0x98, 50, ...Array(49).fill(1), 0xff]), lim: lim({ budget: 20 }), check: expect({ code: 48 }) },
@@ -144,7 +144,7 @@ export function assembledCases() {
   // ---------------------------------------------------------------- hostile
   {
     const six = C(['r = [* msg]', 'msg = a / b / c / d / e / f',
-      ...'abcdef'.split('').map(k => `${k} = { kind: "${k}", v: ${({ a: 'uint', b: 'tstr', c: 'bool', d: '[* int]', e: '{ * tstr => int }', f: 'bstr' })[k]} }`)].join('\n'));
+      ...'abcdef'.split('').map(k => `${k} = { kind: "${k}", v: ${({ a: 'uint', b: 'tstr', c: 'bool', d: '[* int]', e: '{ * tstr => int }', f: 'bstr' })[k]} }`)].join('\n'), { limits: { budget: 4000000 } });   // 4 M: the valid input needs ~3 M units (a refusal D046 records)
     const msgs = Array.from({ length: 24000 }, (_, i) => ({ kind: 'a', v: i }));
     const good = enc(msgs);
     const bad = enc([...msgs.slice(0, -1), { kind: 'a', v: 'late' }]);
@@ -153,6 +153,7 @@ export function assembledCases() {
       { label: `invalid at the last element, ${bad.length} B: "v" sorts first, only {kind:"b", v: tstr} survives it and dies at the value of "kind" (rule 1 at the value, kept by rule 3) -> value at [23999, "kind"]`,
         bytes: bad, check: expect({ code: 35, path: [[0, 23999], [1, KEY(six.P, six.B, 'kind')]], offset: bad.length - 2 }) },
       { label: 'the valid input under a 1 M budget: budget, at the same point on both hosts', bytes: good, lim: lim({ budget: 1000000 }), check: expect({ code: 48, used: 1000000 }) },
+      { label: 'the valid input under the 2.3 M default (D046): budget, a recorded refusal', bytes: good, lim: lim({ budget: 2300000 }), check: expect({ code: 48, used: 2300000 }) },
     ]);
     const s = C('r = bstr / tstr / [* any] / { * tstr => any }');
     add('hostile declared lengths', s, ['5bffffffffffffffff', '9bffffffffffffffff', 'bbffffffffffffffff', '7bffffffffffffffff', '5a7fffffff', '9a7fffffff', 'ba7fffffff', 'b9ffff', '9a00010000' + '00'.repeat(10)]

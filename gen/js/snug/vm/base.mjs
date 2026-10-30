@@ -96,7 +96,7 @@ export function charge(s, n, at) {
     // exceeds what remains the call stops with `budget`; `at` (the item being
     // visited) becomes the reported offset. Nothing is deducted then, and
     // the host reports the whole budget as used.
-    // Schedule 2 (D045, opt-in) marks simple-shape bookkeeping free with
+    // Schedule 2 (D045, the default) marks simple-shape bookkeeping free with
     // bit 2 of s[VM_GENERIC] while it runs.
     if ((s[VM_GENERIC] & 4) !== 0) {
         return true;

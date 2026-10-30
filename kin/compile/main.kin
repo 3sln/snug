@@ -72,7 +72,7 @@
     (hs h H_LIM_ITEMS (opt-limit opt 15 131072 16777216))
     (comment "program.md §17 q22: only 128 bignum content bytes in revision 2.")
     (hs h H_LIM_BIGNUM 128)
-    (hs h H_LIM_VBUDGET (opt-limit opt 17 4000000 INF))
+    (hs h H_LIM_VBUDGET (opt-limit opt 17 2300000 INF))
     (hs h H_LIM_LEAVES (opt-limit opt 18 65536 1048576))
     (let [b (hg h H_LIM_BUDGET)]
       (hs h H_BUDGET b))

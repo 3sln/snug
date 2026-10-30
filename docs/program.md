@@ -1072,6 +1072,42 @@ A dead item (empty query) therefore costs 1 + its profile scans, which is arch
 §7's "profile-only continuation" row. Embedded content is charged the same
 way, against the same budget.
 
+**Schedule 2 (D045; the default).** Three exceptions to the table, everything
+else unchanged. They make the bookkeeping of the simplest shapes cost what it
+costs in CPU; a validator implementing them must apply them exactly, since
+they move the exhaustion point:
+
+1. **Simple array element.** At an array item whose only admitted leaf is an
+   ARRAY leaf whose group is one uncounted, self-looping position (`[* T]`)
+   with a one-answer typeset (`n_eval = 0`, one answer), each element taken
+   while that block is alive has no bookkeeping units: no block visit,
+   W · (|A| + 1), candidate position, typeset element, stamping, candidate or
+   typeset test. The array item's visit, filter and block initialisation and
+   the array end stay.
+2. **Simple map pair.** At a map item whose only admitted leaf is a MAP leaf
+   that is either a closed struct (one factor, one pool, one alternative, the
+   empty residual group) or a pure table (no literal entry; one absorbing
+   group entry; one-leaf key and value typesets), each pair taken while that
+   block is alive that is *simple* — for a struct, an unnamed key or a key
+   named by exactly one literal entry with a one-leaf value typeset; for a
+   table, every pair — costs exactly **1** bookkeeping unit at the map,
+   replacing the block visit and cursor steps, the key and value query
+   elements, both stampings, key-phase entries and their tests, naming
+   records (key phase and update), candidates and their tests and the pools.
+   The key-table binary search probes and the key order comparison stay. The
+   map item's visit, filter and block initialisation and the map end stay.
+3. **One scalar leaf.** A key, value or element taken under rule 1 or 2 whose
+   query is exactly one admitted scalar leaf has no mask-filter unit and no
+   leaf unit. Its visit, its profile scans and the leaf's variable work
+   (interval and LITSET probes, byte comparisons, regexp steps, `.bits`
+   scans) stay.
+
+A pair or element that falls outside a rule (a second admitted leaf, a
+non-simple pair, a dead block) is charged by the table. The legacy schedule
+(the table alone, "schedule 1") remains selectable per call for comparison
+(the reference VM's `limits` word 8 bit 1, a VM extension); it changes only
+the budget used.
+
 ---
 
 ## 15. Worked example
@@ -1138,7 +1174,7 @@ order), bignum magnitudes, `.bits` masks; identical byte strings share.
  34  65536        LIM_ENTRIES
  35  131072       LIM_ITEMS
  36  128          LIM_BIGNUM_BYTES
- 37  4000000      LIM_BUDGET
+ 37  2300000      LIM_BUDGET
  38  8388608      LIM_TOTAL_BYTES (8 MiB)
  39  0
  40  181          SCRATCH_MAX
@@ -1270,41 +1306,48 @@ brackets.
    * Value query from T4: 1 element [15]. Frame 1: QL = [5].
    * **Array item at 3** (depth 1). Visit 1, filter 1, init L5 block
      ⌈5/16⌉ = 1 [18].
-     * Element 0: path depth-2 segment = `INDEX 0`. L5 block: 1 + W·(0 + 1)
-       = 2, C = first = {p0}, 1 candidate [21]. Query from T5: 1 [22]. Frame
-       2: QL = [6]. **Text `"p"`** at 4: visit 1, UTF-8 1, filter 1, L6 TEXT
-       (size 1 in 0..INF) 1 → matched [26]. Stamp 1 [27]. Candidate p0: 1 +
-       test T5 (1) → matched [29]; A = {p0}. Array still live → clear slot
+     * Element 0: path depth-2 segment = `INDEX 0`. The array item admitted
+       only L5, one uncounted self-looping position with the one-answer
+       typeset T5, and the block is alive: §14 schedule 2 rule 1, the
+       element's bookkeeping is free (L5 block, C = first = {p0}, query from
+       T5, frame 2: QL = [6]). **Text `"p"`** at 4: visit 1, UTF-8 1 [20];
+       one scalar answer leaf (rule 3): no filter unit, L6 TEXT (size 1 in
+       0..INF) evaluated without a leaf unit → matched. Stamp and candidate
+       p0 (test T5 → matched) free; A = {p0}. Array still live → clear slot
        (already empty).
-     * End: L5 block 1 + W [31]: p0 ∈ accept → L5 matched.
-   * Stamp frame 1's matches (L5) [32]. Update: candidate (L3, lit 1): 1 +
-     test T4 → matched [34]. Pool outcomes: L0 pool 0 and L3 pool 0 both see
+     * End: L5 block 1 + W [22]: p0 ∈ accept → L5 matched.
+   * Stamp frame 1's matches (L5) [23]. Update: candidate (L3, lit 1): 1 +
+     test T4 → matched [25]. Pool outcomes: L0 pool 0 and L3 pool 0 both see
      key 1 routed to the residual (L0 does not own it; L3's owner is factor
      0) with group G0 → `REJECT`. Naming record (L3 alt 0, lit 1): value
      matched → consume: `consumed` bit 1, `req_done` += 0, and since its pool
-     rejected, `r` = 1 (exempt), pool `exempt` = 1 [35]. Pools [37]: L0 pool 0
+     rejected, `r` = 1 (exempt), pool `exempt` = 1 [26]. Pools [28]: L0 pool 0
      `rej` = 1, `live` = exempt 0 → `factor_live` 0 → **L0 dead**; L3 pool 0
      `rej` = 1, `live` = 1.
-   * L3 live → map survives the pair; slot cleared.
+   * L3 live → map survives the pair; slot cleared. (The map item admitted
+     two MAP leaves, so schedule 2 rule 2 does not apply to its pairs.)
 4. **Pair 1, key `"kind"`** at 6.
-   * Key search over [2, 3) (keys ascend): probe 2 equal → key 2 [38].
-   * Blocks: L0 visited, dead [39]; L3 cursor 0 → 1 (key 2): named [41].
-   * Key eval: visit 1, UTF-8 1, key order `61 79` < `64 6b…` 1 [44].
+   * Key search over [2, 3) (keys ascend): probe 2 equal → key 2 [29].
+   * Blocks: L0 visited, dead [30]; L3 cursor 0 → 1 (key 2): named [32].
+   * Key eval: visit 1, UTF-8 1, key order `61 79` < `64 6b…` 1 [35].
      Path: depth-1 segment = `KEY 2`.
    * Key phase: L3 naming record (alt 0, lit 0): alt 0 live (`r` 1 = `rej`
-     1) → candidate (L3, lit, T3) [45]. Value query from T3 [46]: QL = [4].
+     1) → candidate (L3, lit, T3) [36]. Value query from T3 [37]: QL = [4].
    * **Text `"b"`** at 11: visit 1, UTF-8 1, filter 1, L4 LIT: 1 + compare
-     `61 62` = `61 62` 1 → matched [51]. Stamp [52].
-   * Update: candidate 1 + test [54]; L3 pool 0 `REJECT` (G0); naming record:
-     consume lit 0, `req_done` = 1, `r` = 2 [55]; pool: `rej` = 2, `live` = 1
-     [56]. Survives; slot cleared.
-5. **Map end.** L0 visited, dead [57]; L3: 1 + alt 0 (live: `r` 2 =
+     `61 62` = `61 62` 1 → matched [42]. Stamp [43].
+   * Update: candidate 1 + test [45]; L3 pool 0 `REJECT` (G0); naming record:
+     consume lit 0, `req_done` = 1, `r` = 2 [46]; pool: `rej` = 2, `live` = 1
+     [47]. Survives; slot cleared.
+5. **Map end.** L0 visited, dead [48]; L3: 1 + alt 0 (live: `r` 2 =
    `rej` 2; `req_done` 1 = `req_count` 1 → satisfied) + pool 0 (no
-   constrained entries) [60]. **L3 matched.**
-6. **Root result.** Stamp Q′₀ (2) [62]; test T0: L0 not stamped, L3 stamped
-   [64]. Scanner: end at 13 = length, no trailing.
+   constrained entries) [51]. **L3 matched.**
+6. **Root result.** Stamp Q′₀ (2) [53]; test T0: L0 not stamped, L3 stamped
+   [55]. Scanner: end at 13 = length, no trailing.
 
-`out = [0, 0, 0, 64, 6, 0, 0, 0]`: ok, 64 units, 6 items.
+`out = [0, 0, 0, 55, 6, 0, 0, 0]`: ok, 55 units, 6 items. (Under the legacy
+schedule 1 the element costs 9 more — L5 block 1 + W · (0 + 1) and 1
+candidate, query 1, filter 1, leaf 1, stamp 1, candidate 1 + test 1 — for 64
+units.)
 
 ### 15.4 Invalid input: `{"kind": "a"}`
 
@@ -1333,7 +1376,8 @@ Bytes (8): `a1 | 64 6b 69 6e 64 | 61 61`.
    profile failure; the slot is the result.
 
 `out = [33, 0, 0, 47, 3, 1, 1, 0, 1, 0]`: `missing` at path `["x"]` (segment
-`KEY 0`, rendered from KEYS[0] = `61 78`), 47 units, 3 items.
+`KEY 0`, rendered from KEYS[0] = `61 78`), 47 units, 3 items. Schedule 2 changes nothing
+here: the map item admits two MAP leaves, and no array is reached.
 
 For contrast, `{"x": "1", "kind": "a"}`: the value `"1"` is queried with
 {L2} only (L3 does not name `x` and is closed, so it dies `unexpected` at

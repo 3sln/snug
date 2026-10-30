@@ -509,7 +509,7 @@ content. Schema compile errors are `{code, line, column, rule}`.
 | entries per container | 65 536 | 2^24 | validate |
 | items per message | 131 072 | 2^24 | validate |
 | bignum content bytes | 128 | 4 096 | validate |
-| step budget | 4 000 000 | 2^31 − 1 | validate |
+| step budget | 2 300 000 | 2^31 − 1 | validate |
 
 Per-call validation limits may only **lower** the compiled ones (A8): depth
 and state capacity were sized at compile time.
@@ -531,9 +531,11 @@ every loop whose trip count depends on input or schema charges per trip:
 
 Budget arithmetic saturates. The exact, normative per-event schedule (so
 that hosts agree on the exhaustion point) is `docs/program.md` §14; this table
-is its summary. The default 4 M units is calibrated in Phase 4
-so that the worst budget-bounded input stays under 50 ms in workerd on the
-reference machine (recorded).
+is its summary. The default 2.3 M units (D046, under program.md §14's
+schedule 2, D045; both provisional) is calibrated so that the worst
+budget-bounded input measured stays near 50 ms in Node on the reference
+machine (bench/VM.md P3.6); the workerd measurement is still to be taken
+(Phase 4).
 
 ---
 

@@ -51,14 +51,14 @@ function addProgram(P, B, label) {
 }
 let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
-function runJs(c, trap = false, generic = false, s2 = false) {
+function runJs(c, trap = false, generic = false, s1 = false) {
   const { P, B } = programs[c.prog];
   const cap = Math.max(markCap, P[16]);
   const need = vmScratchWords(P, c.rule, cap);
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
-  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s2 ? 2 : 0)]);   // word 8: bit 0 generic (D044), bit 1 schedule 2 (D045)
+  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0)]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default)
   const code = c.span
     ? vmValidateSpan(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out)
     : vmValidate(p, b, c.rule, input, lim, s, out);
@@ -81,7 +81,7 @@ const LIM = (top, cose, mb = -1, md = -1, me = -1, mi = -1, bn = -1, bu = -1) =>
 
 // ---------------------------------------------------------------- 1. §15
 const ex = addProgram(EXAMPLE_P, EXAMPLE_B, 'program.md §15');
-const want15 = [['a26179816170646b696e646162', '0 0 0 64 6 0 0 0'], ['a1646b696e646161', '33 0 0 47 3 1 1 0 1 0'],
+const want15 = [['a26179816170646b696e646162', '0 0 0 55 6 0 0 0'], ['a1646b696e646161', '33 0 0 47 3 1 1 0 1 0'],
   ['a261786131646b696e646161', null]];
 for (const [h, w] of want15) cases.push({ prog: ex, rule: 0, lim: LIM(1, 0), bytes: unhex(h), label: `§15 ${h}`,
   check: o => (w === null ? (o.startsWith('32 0 3 ') && o.endsWith(' 1 1 0 1 0') ? null : `contrast ${o}`) : (o === w ? null : `got ${o}, document says ${w}`)) });
@@ -250,16 +250,16 @@ cases.forEach((c, i) => {
   let g; try { g = runJs(c, false, true); } catch (e) { g = 'THROW ' + e.message; }
   if (g === js[i]) genericAgree++; else fail(`${c.label}: fast ${js[i]} | generic ${g}`);
 });
-// schedule 2 (D045, opt-in): fast == generic exactly; and it changes nothing
-// but the budget used (every other out word equal unless a run hit the budget)
+// legacy schedule 1 (limits word 8 bit 1; schedule 2, D045, is the default):
+// fast == generic exactly; and it changes nothing but the budget used (every other out word equal unless a run hit the budget)
 let s2Agree = 0, s2Same = 0;
 const js2 = cases.map(c => { try { return runJs(c, false, false, true); } catch (e) { return 'THROW ' + e.message; } });
 cases.forEach((c, i) => {
   let g; try { g = runJs(c, false, true, true); } catch (e) { g = 'THROW ' + e.message; }
-  if (g === js2[i]) s2Agree++; else fail(`${c.label}: schedule 2 fast ${js2[i]} | generic ${g}`);
+  if (g === js2[i]) s2Agree++; else fail(`${c.label}: schedule 1 fast ${js2[i]} | generic ${g}`);
   const a = js[i].split(' '), b = js2[i].split(' ');
   if (a[0] === '48' || b[0] === '48' || (a.length === b.length && a.every((x, k) => k === 3 || x === b[k]))) s2Same++;
-  else fail(`${c.label}: schedule 2 changed more than the budget: ${js[i]} | ${js2[i]}`);
+  else fail(`${c.label}: schedule 1 changed more than the budget: ${js[i]} | ${js2[i]}`);
 });
 // JS bounds: a sample behind traps
 let guarded = 0, trapFails = 0;
@@ -284,7 +284,7 @@ cases.forEach((c, i) => {
 });
 
 // ---------------------------------------------------------------- run Rust
-let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts', rust2Line = '  SKIP schedule 2 Rust';
+let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts', rust2Line = '  SKIP schedule 1 Rust';
 if (rustBin) {
   const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
   const caseLine = (c, w8) => {
@@ -308,8 +308,8 @@ if (rustBin) {
   const all = p.stdout.trim().split('\n');
   const rs = all.slice(0, cases.length), rs2 = all.slice(cases.length, 2 * cases.length), hs = all.slice(2 * cases.length);
   let agree2 = 0;
-  rs2.forEach((line, i) => { if (line === js2[i]) agree2++; else fail(`${cases[i].label}: schedule 2 JS ${js2[i]} | Rust ${line}`); });
-  rust2Line = `  ${agree2 === cases.length ? 'ok  ' : 'FAIL'} schedule 2 JS == Rust: ${agree2}/${cases.length} cases`;
+  rs2.forEach((line, i) => { if (line === js2[i]) agree2++; else fail(`${cases[i].label}: schedule 1 JS ${js2[i]} | Rust ${line}`); });
+  rust2Line = `  ${agree2 === cases.length ? 'ok  ' : 'FAIL'} schedule 1 (legacy) JS == Rust: ${agree2}/${cases.length} cases`;
   if (all.length !== 2 * cases.length + hostCases.length) fail(`Rust answered ${all.length} lines, expected ${2 * cases.length + hostCases.length}`);
   const hostProgs = new Map();
   let hostAgree = 0;
@@ -367,8 +367,8 @@ line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.o
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `§15 and assembled programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled)`);
 line(genericAgree === cases.length, `fast paths == generic path (D044): ${genericAgree}/${cases.length} cases give the same whole out array with the fast paths forced off`);
-line(s2Agree === cases.length, `schedule 2 (D045, opt-in): fast == generic on ${s2Agree}/${cases.length} cases`);
-line(s2Same === cases.length, `schedule 2 changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);
+line(s2Agree === cases.length, `legacy schedule 1 (word 8 bit 1): fast == generic on ${s2Agree}/${cases.length} cases`);
+line(s2Same === cases.length, `schedule 1 vs the default schedule 2 (D045) changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);
 line(epochFails === 0, `epochs: ${epochRuns} cases re-run from an epoch just below the restart threshold give the same out array`);
 line(trapFails === 0, `JS bounds: ${guarded} cases re-run behind throwing out-of-bounds traps on P, B, input and scratch`);
 console.log(rustLine);

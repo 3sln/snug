@@ -696,6 +696,29 @@ slower); allocated head tuples; validating wrapper constructors in build
   ns/unit is set by the generic choice-of-maps path (~20 ns), the floor by
   the dead walk (~5–13 ns/item), so the budget/CPU ratio cannot be tighter
   than those two without a faster generic path.
+  *Follow-up 2026-10-29 (VM engineer)*: the manager accepted D045 and D046
+  (provisional; owner sign-off pending) and the contracts' 10–29× as is for
+  now (discriminator-first dispatch / lazy DFA → parking lot, with the
+  analysis above). Schedule 2 is now the default: `limits` word 8 bit 1
+  selects the legacy schedule 1 instead (kept: one flag test, shared code,
+  and the gate's comparison arm). program.md §14 gains the three schedule-2
+  rules; §15.3 re-derived (64 → 55 units: the one `[* tstr]` element's
+  bookkeeping, filter and leaf units; §15.4 unchanged at 47); the compiled
+  default `LIM_BUDGET` is 2 300 000 (`kin/compile/main.kin` option 17,
+  §15.2 word 37, architecture §7's limits table and text). No other Program
+  word changes. The hostile six-way case compiles with a 4 M budget (its
+  valid 0.31 MB input needs ~3 M units — a refusal D046 records) and gains
+  a case asserting that refusal at the 2.3 M default; the `[* int]` budget
+  sweep uses 2 000 instead of 5 000 (1 000 ints cost 2 008 units now).
+  Gates run: `bb vm-test` (all ok: §15 55/47, fast == generic 50 579/50 579,
+  schedule 1 fast == generic and budget-only, JS == Rust under both, JS ==
+  wasm, hosts, epochs, traps), `bb compile-test`, `bb compile-fuzz`,
+  `bb check`, `bb scan-test`, `bb rscan-test`, host tests 585/585, `bb
+  drift` after the commit. `node bench/vm-calib.mjs` at the new defaults:
+  worst 23.6 ns/unit this run (contract object-storage request, generic
+  choice; ~54 ms at 2.3 M — within the run-to-run spread of the 21–22 ns
+  measured before on this shared machine, recorded as is); every valid
+  benchmark message fits (largest 1 450 008 units).
 
 ## Phase 4 — Differential, fuzz, benchmarks
 
@@ -1511,8 +1534,13 @@ generic map work instead (same ratio, larger numbers, §15 changes anyway).
 one-element `[* tstr]` changes; the two-leaf map choice does not), with the
 compiler engineer's agreement (no Program byte changes); until then schedule
 1 stays the default.
+**Accepted (provisional, reversible) 2026-10-29 by the manager**: schedule 2
+is the default; schedule 1 stays selectable behind `limits` word 8 bit 1
+(cheap: one flag test). program.md §14/§15 amended by the VM engineer under
+the manager's authorisation. Owner sign-off pending.
 - [ ] **Signed off** (owner)
-- [ ] **Agreed** (compiler engineer)
+- [x] **Agreed** (compiler side: the manager, on behalf of the finished
+  compiler work item, 2026-10-29)
 
 ### D046 — Default step budget: 2.3 M under schedule 2 (proposal)
 **Decision (proposed)**: with schedule 2, the compiled default `LIM_BUDGET`
@@ -1525,6 +1553,10 @@ either 2.3 M with the refusals listed in bench/VM.md P3.6, or 4 M with
 **Needs**: the compiler sets the default (`snug.compile.main`
 `setup-limits`, option 17); the compiler engineer changes it after this
 decision. workerd timings are still to be taken (Phase 4).
+**Accepted (provisional, reversible) 2026-10-29 by the manager**: 2.3 M
+under schedule 2. The VM engineer made the one-line compiler change under
+the manager's authorisation (compiler-side agreement: the manager, on behalf
+of the finished compiler work item). Owner sign-off pending.
 - [ ] **Signed off** (owner)
 
 ---
@@ -1685,6 +1717,21 @@ mid-edit).
 ## Parking lot
 
 - Lazy DFA cache over typesets (architecture §4.1).
+- Discriminator-first dispatch for choices of maps, or the lazy DFA cache
+  above (P3.6, 2026-10-29; contracts accepted at 10–29× the scanner for now).
+  Analysis: the study contracts' maps are choices of several map types, and
+  type-set evaluation advances every alternative in parallel — e.g. a
+  request's `args` value is evaluated against six map types until `method`
+  decides — so the work is the §14 work itself (253 units for a 59-byte
+  object-storage request) at ~20 ns/unit on the generic path; fast paths
+  cannot remove it. Two ways out: (a) the compiler detects a literal-valued
+  key whose literals partition the alternatives (a discriminator), and the
+  VM looks that key up first and evaluates only the matching alternative —
+  needs a Program addition, and the walk order (pairs in input order, with
+  path and witness rules) must not change observable results; (b) a lazy
+  DFA cache over (typeset, input class) transitions, which helps repeated
+  shapes but not first sight. Both are larger designs with a §14 question
+  (what does a discriminated pair cost?).
 - Explicit-stack, resumable VM for chunked input (D016).
 - Go/Java/C# targets (D006).
 - CDDL over JSON.

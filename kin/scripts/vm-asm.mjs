@@ -42,7 +42,7 @@ function mag(n) { const out = []; while (n > 0n) { out.unshift(Number(n & 255n))
 // ---------------------------------------------------------------- the assembler
 export class Asm {
   constructor(opt = {}) {
-    this.opt = { depth: 32, input: 1500000, entries: 65536, items: 131072, bignum: 128, budget: 4000000, total: 8388608, profile: 0, ...opt };
+    this.opt = { depth: 32, input: 1500000, entries: 65536, items: 131072, bignum: 128, budget: 2300000, total: 8388608, profile: 0, ...opt };
     this.leaves = []; this.typesets = []; this.tsKey = new Map(); this.groups = []; this.groupKey = new Map();
     this.maps = []; this.arrays = []; this.regexps = []; this.rules = [];
   }

@@ -90,7 +90,7 @@ pub fn charge(s: &mut [i32], n: i32, at: i32) -> bool {
     // exceeds what remains the call stops with `budget`; `at` (the item being
     // visited) becomes the reported offset. Nothing is deducted then, and
     // the host reports the whole budget as used.
-    // Schedule 2 (D045, opt-in) marks simple-shape bookkeeping free with
+    // Schedule 2 (D045, the default) marks simple-shape bookkeeping free with
     // bit 2 of s[VM_GENERIC] while it runs.
     if (s[(VM_GENERIC) as usize] & 4) != 0 {
         return true;

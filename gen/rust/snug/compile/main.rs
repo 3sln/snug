@@ -57,7 +57,7 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     hs(h, H_LIM_ITEMS, opt_limit(opt, 15, 131072, 16777216));
     // program.md §17 q22: only 128 bignum content bytes in revision 2.
     hs(h, H_LIM_BIGNUM, 128);
-    hs(h, H_LIM_VBUDGET, opt_limit(opt, 17, 4000000, INF));
+    hs(h, H_LIM_VBUDGET, opt_limit(opt, 17, 2300000, INF));
     hs(h, H_LIM_LEAVES, opt_limit(opt, 18, 65536, 1048576));
     let b: i32 = hg(h, H_LIM_BUDGET);
     hs(h, H_BUDGET, b);

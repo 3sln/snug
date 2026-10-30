@@ -1,15 +1,15 @@
 // P3.6 budget calibration (bench/VM.md "Budget"): CPU per budget unit by
 // event kind, the worst budget-bounded inputs found, and the units valid
 // benchmark messages need. CPU time, best of rounds (shared machine).
-//     node bench/vm-calib.mjs [budget] [--s2]   (default 4 000 000; --s2: schedule 2, D045)
+//     node bench/vm-calib.mjs [budget] [--s1]   (default 2 300 000, D046; schedule 2, D045, is the default; --s1: legacy schedule 1)
 import { readFileSync } from 'node:fs';
 import { encode } from './baseline/cbor-3sln.mjs';
 import { inputs } from './scan-inputs.mjs';
 import { compile } from '../host/js/src/compile.mjs';
 import { vmScratchInit, vmValidate } from '../gen/js/snug/vm/api.mjs';
 
-const S2 = process.argv.includes('--s2') ? 2 : 0;
-const BUDGET = Number(process.argv.slice(2).find(a => !a.startsWith('--')) ?? 4_000_000);
+const S1 = process.argv.includes('--s1') ? 2 : 0;   // limits word 8 bit 1: legacy schedule 1
+const BUDGET = Number(process.argv.slice(2).find(a => !a.startsWith('--')) ?? 2_300_000);
 const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
 function best(fn) {
   fn();
@@ -24,7 +24,7 @@ function vm(text, rule = 'r') {
   const c = compile(text, { limits: BIG });
   const P = c.program, B = c.pool, S = new Int32Array(P[40] + 64); vmScratchInit(S, P[16]);
   const out = new Int32Array(600), r = c.rules.indexOf(rule);
-  return (bytes, budget = -1, generic = 0) => { vmValidate(P, B, r, bytes, Int32Array.of(1, 0, -1, -1, -1, -1, -1, budget, generic | S2), S, out); return [out[0], out[3]]; };
+  return (bytes, budget = -1, generic = 0) => { vmValidate(P, B, r, bytes, Int32Array.of(1, 0, -1, -1, -1, -1, -1, budget, generic | S1), S, out); return [out[0], out[3]]; };
 }
 const rows = [];
 function kind(label, text, bytes, rule = 'r') {
@@ -35,7 +35,7 @@ function kind(label, text, bytes, rule = 'r') {
   rows.push({ label, code, units, t, ns: t * 1e6 / units, nsg: tg * 1e6 / units });
   console.log(`${label.padEnd(64).slice(0, 64)} code ${String(code).padStart(2)} units ${String(units).padStart(9)} ${t.toFixed(3).padStart(8)} ms  ${(t * 1e6 / units).toFixed(1).padStart(5)} ns/unit  (generic ${(tg * 1e6 / units).toFixed(1)})`);
 }
-console.log(`# CPU per unit by event kind (unlimited budget)${S2 ? ' -- SCHEDULE 2 (D045)' : ''}`);
+console.log(`# CPU per unit by event kind (unlimited budget)${S1 ? ' -- LEGACY SCHEDULE 1' : ' -- schedule 2 (D045)'}`);
 const te = new TextEncoder();
 const ints = Array.from({ length: 120000 }, (_, i) => i * 7 - 300000);
 kind('dead walk: 120k ints under any', 'r = any', encode(ints, { maxEntries: 1 << 20 }));
