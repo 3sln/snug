@@ -3,6 +3,7 @@
 
 use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
+use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
@@ -549,13 +550,59 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
     // item (container, tag, missing byte) or leaf kind takes the generic
     // eval-item over the one-entry list written into the frame (its building
     // was charged by the caller).
-    let mut major: i32 = 4;
+    let mut major: i32 = -1;
     let lb: i32 = p[(H_S_LEAVES) as usize] + (8 * leaf);
     let kind: i32 = p[(lb) as usize] & 255;
     if pos < end {
         major = (i32::cast_unsigned(b[(pos) as usize] as i32) >> 5).cast_signed();
     }
-    if (!scalar_kind(kind)) || ((major == 4) || ((major == 5) || (major == 6))) {
+    // ANY, or the matching bare major, on an array or map: the generic
+    // item's visit, head, container checks, filter 1, children walked dead
+    // (D043), then 1 for the leaf -- directly.
+    if ((major == 4) || (major == 5)) && ((kind == K_ANY) || ((kind == K_MAJOR) && (p[(lb + 2) as usize] == major))) {
+        if !charge(s, 1, pos) {
+            return -R_BUDGET;
+        }
+        let it0: i32 = s[(O_ITEMS) as usize] + 1;
+        s[(O_ITEMS) as usize] = it0;
+        if it0 > s[(O_MAX_ITEMS) as usize] {
+            return fail(s, pos, CODE_TOO_MANY_ITEMS);
+        }
+        let ai0: i32 = (b[(pos) as usize] as i32) & 31;
+        let mut hi0: i32 = 0;
+        let mut lo0: i32 = ai0;
+        let mut q0: i32 = pos + 1;
+        if ai0 >= 24 {
+            q0 = read_arg(b, s, pos, ai0, end);
+            if q0 < 0 {
+                return q0;
+            }
+            hi0 = s[(O_HI) as usize];
+            lo0 = s[(O_LO) as usize];
+        }
+        let rc: i32 = enter_container(s, pos, q0, hi0, lo0, d, major - 4, end);
+        if rc < 0 {
+            return rc;
+        }
+        if !charge(s, 1, pos) {
+            return -R_BUDGET;
+        }
+        let r0: i32;
+        if major == 4 {
+            r0 = dead_array_elems(b, s, q0, lo0, d, end);
+        } else {
+            r0 = dead_map_pairs(b, s, q0, lo0, d, end);
+        }
+        if r0 < 0 {
+            return r0;
+        }
+        if !charge(s, 1, pos) {
+            return -R_BUDGET;
+        }
+        s[(VM_FASTM) as usize] = 1;
+        return r0;
+    }
+    if (major < 0) || ((!scalar_kind(kind)) || ((major == 4) || ((major == 5) || (major == 6)))) {
         s[(cfb) as usize] = leaf;
         s[(cfb + cw) as usize] = F_ANSWER;
         let rg: i32 = eval_item(p, pool, b, s, pos, d, cfb, ck, 1, end, ctx);
@@ -1076,6 +1123,472 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     }
     return q;
 }
+pub fn map_fast_mode(p: &[i32], mt: i32) -> i32 {
+    // P3.6 (D044): 1 for a closed struct (one factor, pool and alternative,
+    // the empty group), 2 for a pure table `{* K => V}` (no literal entry,
+    // one absorbing group entry, K and V one leaf each), else 0.
+    if (p[(mt) as usize] != 1) || ((p[(mt + 1) as usize] != 1) || (p[(mt + 2) as usize] != 1)) {
+        return 0;
+    }
+    let go: i32 = group_rec(p, p[(m_pools(p, mt) + 1) as usize]);
+    let ne: i32 = p[(go) as usize];
+    if ne == 0 {
+        return 1;
+    }
+    if (ne != 1) || (p[(mt + 3) as usize] != 0) {
+        return 0;
+    }
+    if (p[(go + 4) as usize] != 0) || (p[(go + 5) as usize] != INF) {
+        return 0;
+    }
+    if (single_leaf(p, p[(go + 2) as usize]) < 0) || (single_leaf(p, p[(go + 3) as usize]) < 0) {
+        return 0;
+    }
+    return 2;
+}
+pub fn map_pair_ok(p: &[i32], s: &[i32], bo: i32, mt: i32, kid: i32, mode: i32) -> bool {
+    // Can this pair take the fast step? A struct: an unnamed key, or a key
+    // named once whose value typeset is one leaf.
+    if mode == 2 {
+        return true;
+    }
+    let kr: i32 = named_rec(p, s, bo, mt, kid);
+    if kr < 0 {
+        return true;
+    }
+    let krec: i32 = m_keys(p, mt) + (4 * kr);
+    if p[(krec + 3) as usize] != 1 {
+        return false;
+    }
+    let lit: i32 = p[((m_names(p, mt) + (2 * p[(krec + 2) as usize])) + 1) as usize];
+    return single_leaf(p, p[((m_lits(p, mt) + (4 * lit)) + 1) as usize]) >= 0;
+}
+pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, start: i32, km: i32, ps: i32, pe: i32, end: i32, d: i32, fb: i32, w: i32, bo: i32, mt: i32, cfb: i32, cck: i32, cw: i32, kid: i32, pend: i32, mode: i32) -> i32 {
+    // P3.6 (D044): one pair of a single-block map in a fast mode, after the
+    // shared key search and cursor step: the generic pair's charges merged
+    // per offset, its pool/alternative state updates and witness. The key's
+    // end goes in s[VM_FASTK]; answers the value's end.
+    let pools: i32 = m_pools(p, mt);
+    let pso: i32 = p[(pools + 4) as usize];
+    let arec: i32 = m_alts(p, mt);
+    let aso: i32 = p[(arec + 4) as usize];
+    let lits: i32 = m_lits(p, mt);
+    let mut named: bool = false;
+    let mut vm: i32 = 0;
+    let mut take: bool = false;
+    let kq: i32;
+    let vq: i32;
+    if mode == 1 {
+        kq = dead_item(b, s, start, d + 1, end);
+    } else {
+        if !charge(s, 1, pos) {
+            return -R_BUDGET;
+        }
+        let go: i32 = group_rec(p, p[(pools + 1) as usize]);
+        kq = fast_child(p, pool, b, s, start, d + 1, cfb, cck, cw, single_leaf(p, p[(go + 2) as usize]), end, CTX_KEY);
+    }
+    if kq < 0 {
+        return kq;
+    }
+    if km <= 1 {
+        if !cose_label_ok(b, start, km) {
+            return fail(s, start, CODE_KEY_TYPE);
+        }
+    }
+    let ko: i32 = key_order(b, s, ps, pe, start, kq);
+    if ko < 0 {
+        return ko;
+    }
+    s[(VM_FASTK) as usize] = kq;
+    s[((bo + pso) + 2) as usize] = 0;
+    if mode == 1 {
+        let kr: i32 = named_rec(p, s, bo, mt, kid);
+        if kr >= 0 {
+            let krec: i32 = m_keys(p, mt) + (4 * kr);
+            let lit: i32 = p[((m_names(p, mt) + (2 * p[(krec + 2) as usize])) + 1) as usize];
+            let lrec: i32 = lits + (4 * lit);
+            named = true;
+            if !charge(s, 2, pos) {
+                return -R_BUDGET;
+            }
+            path_put(s, d + 1, P_KEY, kid);
+            vq = fast_child(p, pool, b, s, kq, d + 1, cfb, cck, cw, single_leaf(p, p[(lrec + 1) as usize]), end, 0);
+            if vq < 0 {
+                return vq;
+            }
+            if !charge(s, 5, pos) {
+                return -R_BUDGET;
+            }
+            if s[(VM_FASTM) as usize] == 1 {
+                let li: i32 = lit - p[(arec + 1) as usize];
+                let wd: i32 = ((bo + aso) + 3) + (li >> 5);
+                s[(wd) as usize] = s[(wd) as usize] | (1 << (li & 31));
+                s[((bo + aso) + 2) as usize] = s[((bo + aso) + 2) as usize] + p[(lrec + 2) as usize];
+                s[((bo + aso) + 1) as usize] = s[((bo + aso) + 1) as usize] + 1;
+                s[((bo + pso) + 2) as usize] = 1;
+            } else if p[(lrec + 3) as usize] == 1 {
+                s[(bo + aso) as usize] = 1;
+                s[((bo + pso) + 1) as usize] = s[((bo + pso) + 1) as usize] - 1;
+                s[(bo + 4) as usize] = s[(bo + 4) as usize] - 1;
+            }
+        } else {
+            path_put(s, d + 1, P_ANYKEY, 0);
+            vq = dead_item(b, s, kq, d + 1, end);
+            if vq < 0 {
+                return vq;
+            }
+            if !charge(s, 1, pos) {
+                return -R_BUDGET;
+            }
+        }
+    } else {
+        let kmatch: bool = s[(VM_FASTM) as usize] == 1;
+        let go2: i32 = group_rec(p, p[(pools + 1) as usize]);
+        if kmatch {
+            if !charge(s, 4, pos) {
+                return -R_BUDGET;
+            }
+        } else {
+            if !charge(s, 3, pos) {
+                return -R_BUDGET;
+            }
+        }
+        path_put(s, d + 1, P_ANYKEY, 0);
+        if kmatch {
+            vq = fast_child(p, pool, b, s, kq, d + 1, cfb, cck, cw, single_leaf(p, p[(go2 + 3) as usize]), end, 0);
+            if vq < 0 {
+                return vq;
+            }
+            vm = s[(VM_FASTM) as usize];
+            if !charge(s, 4, pos) {
+                return -R_BUDGET;
+            }
+        } else {
+            vq = dead_item(b, s, kq, d + 1, end);
+            if vq < 0 {
+                return vq;
+            }
+            if !charge(s, 1, pos) {
+                return -R_BUDGET;
+            }
+        }
+        take = kmatch && (vm == 1);
+    }
+    // the pool's outcome: TAKE of the absorbing entry, or REJECT
+    if take {
+        s[((bo + pso) + 3) as usize] = 0;
+    } else {
+        let lv: i32 = s[((bo + pso) + 1) as usize];
+        let ex: i32 = s[((bo + pso) + 2) as usize];
+        s[((bo + pso) + 3) as usize] = -1;
+        s[(bo + pso) as usize] = s[(bo + pso) as usize] + 1;
+        s[(bo + 4) as usize] = s[(bo + 4) as usize] - (lv - ex);
+        s[((bo + pso) + 1) as usize] = ex;
+    }
+    if s[(bo + 4) as usize] == 0 {
+        s[(bo + 1) as usize] = 0;
+    }
+    if s[(bo + 1) as usize] != 0 {
+        wit_clear(s);
+    } else {
+        if named {
+            q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
+        } else {
+            q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+        }
+        if pend > 0 {
+            wit_clear(s);
+        } else if wit_empty(s) {
+            if named {
+                wit_set(s, R_VALUE, 0, d + 1, -1, 0, start);
+            } else {
+                wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+            }
+        }
+    }
+    return vq;
+}
+pub fn pre_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], q: i32, end: i32, lb: i32, kind: i32) -> i32 {
+    // P3.6 streaks: does the item at q certainly pass the profile and match
+    // leaf lb -- an INT over one interval or a TEXT without a regexp?
+    // Checked without charging: its end, with the units its generic
+    // evaluation charges (visit, UTF-8, filter, leaf, probe) in s[O_LO]; or
+    // -1 when it would not, or it is anything else.
+    if q >= end {
+        return -1;
+    }
+    let ib: i32 = b[(q) as usize] as i32;
+    let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+    let ai: i32 = ib & 31;
+    let mut hi: i32 = 0;
+    let mut lo: i32 = ai;
+    let mut h: i32 = 1;
+    if ai > 27 {
+        return -1;
+    }
+    if ai >= 24 {
+        h = 1 + (1 << (ai - 24));
+        if h > (end - q) {
+            return -1;
+        }
+        if ai == 24 {
+            lo = b[(q + 1) as usize] as i32;
+        }
+        if ai == 25 {
+            lo = be16(b, q + 1);
+        }
+        if ai == 26 {
+            lo = be32(b, q + 1);
+        }
+        if ai == 27 {
+            hi = be32(b, q + 1);
+            lo = be32(b, q + 5);
+        }
+        if (ai == 24) && (lo < 24) {
+            return -1;
+        }
+        if (ai == 25) && (lo < 256) {
+            return -1;
+        }
+        if (ai == 26) && ((i32::cast_unsigned(lo) >> 16).cast_signed() == 0) {
+            return -1;
+        }
+        if (ai == 27) && (hi == 0) {
+            return -1;
+        }
+    }
+    if kind == K_INT {
+        if (major > 1) || (p[(lb + 3) as usize] != 1) {
+            return -1;
+        }
+        if (p[(lb + 1) as usize] & (1 << major)) == 0 {
+            return -1;
+        }
+        if !int1(p, pool, b, p[(lb + 2) as usize], major + 1, hi, lo) {
+            return -1;
+        }
+        s[(O_LO) as usize] = 4;
+        return q + h;
+    }
+    if (kind == K_TEXT) && (major == 3) {
+        if (hi != 0) || (lo < 0) {
+            return -1;
+        }
+        if lo > (end - (q + h)) {
+            return -1;
+        }
+        if (lo < p[(lb + 2) as usize]) || (lo > p[(lb + 3) as usize]) {
+            return -1;
+        }
+        if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
+            return -1;
+        }
+        s[(O_LO) as usize] = 3 + c64(lo);
+        return (q + h) + lo;
+    }
+    return -1;
+}
+pub fn streak_kind(p: &[i32], leaf: i32) -> bool {
+    // Leaves pre-scalar decides: INT over one interval, TEXT without a regexp.
+    if leaf < 0 {
+        return false;
+    }
+    let lb: i32 = p[(H_S_LEAVES) as usize] + (8 * leaf);
+    let kind: i32 = p[(lb) as usize] & 255;
+    return ((kind == K_INT) && (p[(lb + 3) as usize] == 1)) || ((kind == K_TEXT) && (p[(lb + 4) as usize] < 0));
+}
+pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cfb: i32, cck: i32, cw: i32, ps0: i32, pe0: i32, klo0: i32) -> i32 {
+    // P3.6 (D044): consecutive SUCCESSFUL pairs of a single-block map in a fast
+    // mode (1 struct: a named key whose value is an INT/TEXT leaf; 2 table:
+    // a TEXT key leaf and an `any` or INT/TEXT value leaf). The key (text,
+    // shortest head, UTF-8, ascending order, the key search done without
+    // charging) and, except under `any`, the value are checked first; then
+    // the pair is charged in the generic order with charges merged per
+    // offset, and its state updated. A pair that would not succeed stops the
+    // streak before it is touched. Answers the next position; the pair count
+    // in s[VM_FASTM], the last key in s[VM_FASTP], s[VM_FASTK], the next
+    // key-table bound in s[VM_FASTL].
+    let pools: i32 = m_pools(p, mt);
+    let pso: i32 = p[(pools + 4) as usize];
+    let arec: i32 = m_alts(p, mt);
+    let aso: i32 = p[(arec + 4) as usize];
+    let lits: i32 = m_lits(p, mt);
+    let keys: i32 = m_keys(p, mt);
+    let names: i32 = m_names(p, mt);
+    let nkm: i32 = p[(mt + 4) as usize];
+    let go: i32 = group_rec(p, p[(pools + 1) as usize]);
+    let maxit: i32 = s[(O_MAX_ITEMS) as usize];
+    let mut klb: i32 = 0;
+    let mut vleaf2: i32 = -1;
+    let mut q: i32 = q0;
+    let mut k: i32 = 0;
+    let mut ps: i32 = ps0;
+    let mut pe: i32 = pe0;
+    let mut klo: i32 = klo0;
+    if mode == 2 {
+        klb = p[(H_S_LEAVES) as usize] + (8 * single_leaf(p, p[(go + 2) as usize]));
+        vleaf2 = single_leaf(p, p[(go + 3) as usize]);
+    }
+    while (k < limit) && (q < end) {
+        let start: i32 = q;
+        let ib: i32 = b[(start) as usize] as i32;
+        let ai: i32 = ib & 31;
+        let mut kh: i32 = 1;
+        let mut kl: i32 = ai;
+        let mut cur: i32 = s[(bo + 2) as usize];
+        let mut steps: i32 = 0;
+        let mut lrec: i32 = 0;
+        let mut lit: i32 = 0;
+        let mut vend: i32 = 0;
+        let mut vunits: i32 = 0;
+        let vlf: i32;
+        // the key: text, a valid head, present, UTF-8, ascending
+        if (i32::cast_unsigned(ib) >> 5).cast_signed() != 3 {
+            break;
+        }
+        if ai > 27 {
+            break;
+        }
+        if ai >= 24 {
+            kh = 1 + (1 << (ai - 24));
+            if (kh > 3) || (kh > (end - start)) {
+                break;
+            }
+            if ai == 24 {
+                kl = b[(start + 1) as usize] as i32;
+            }
+            if ai == 25 {
+                kl = be16(b, start + 1);
+            }
+            if (ai == 24) && (kl < 24) {
+                break;
+            }
+            if (ai == 25) && (kl < 256) {
+                break;
+            }
+        }
+        if kl > (end - (start + kh)) {
+            break;
+        }
+        if (s[(O_ITEMS) as usize] + 2) > maxit {
+            break;
+        }
+        if utf8_invalid_at(b, start + kh, (start + kh) + kl) >= 0 {
+            break;
+        }
+        let kend: i32 = (start + kh) + kl;
+        if ps >= 0 {
+            if compare_spans(b, ps, pe, start, kend) >= 0 {
+                break;
+            }
+        }
+        let kid: i32 = key_probe(p, pool, b, s, start, kend, klo);
+        let sk: i32 = s[(O_LO) as usize];
+        let nlo: i32 = s[(O_HI) as usize];
+        if mode == 1 {
+            if kid >= 0 {
+                while (cur < nkm) && (p[(keys + (4 * cur)) as usize] < kid) {
+                    cur += 1;
+                    steps += 1;
+                }
+            }
+            if (kid < 0) || ((cur >= nkm) || (p[(keys + (4 * cur)) as usize] != kid)) {
+                break;
+            }
+            if p[((keys + (4 * cur)) + 3) as usize] != 1 {
+                break;
+            }
+            lit = p[((names + (2 * p[((keys + (4 * cur)) + 2) as usize])) + 1) as usize];
+            lrec = lits + (4 * lit);
+            vlf = single_leaf(p, p[(lrec + 1) as usize]);
+            if !streak_kind(p, vlf) {
+                break;
+            }
+        } else {
+            if (kl < p[(klb + 2) as usize]) || (kl > p[(klb + 3) as usize]) {
+                break;
+            }
+            vlf = vleaf2;
+        }
+        // the value, unless under `any`
+        let vlb: i32 = p[(H_S_LEAVES) as usize] + (8 * vlf);
+        let vkind: i32 = p[(vlb) as usize] & 255;
+        let vany: bool = vkind == K_ANY;
+        if !vany {
+            vend = pre_scalar(p, pool, b, s, kend, end, vlb, vkind);
+            if vend < 0 {
+                break;
+            }
+            vunits = s[(O_LO) as usize];
+        }
+        // commit, in the generic order
+        let mut ko: i32 = 0;
+        let mut ka: i32 = (sk + 1) + steps;
+        let mut kb: i32 = 1 + c64(kl);
+        if ps >= 0 {
+            ko = c64min(pe - ps, kend - start);
+        }
+        if mode == 2 {
+            ka += 1;
+            kb += 2;
+        }
+        if !charge(s, ka, pos) {
+            return -R_BUDGET;
+        }
+        // the visit, then the count, then the rest: the item count is
+        // observable, so no merge crosses it
+        if !charge(s, 1, start) {
+            return -R_BUDGET;
+        }
+        s[(O_ITEMS) as usize] = s[(O_ITEMS) as usize] + 1;
+        if !charge(s, (kb - 1) + ko, start) {
+            return -R_BUDGET;
+        }
+        if !charge(s, 2 + (2 * (mode - 1)), pos) {
+            return -R_BUDGET;
+        }
+        if vany {
+            let rv: i32 = fast_child(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, 0);
+            if rv < 0 {
+                return rv;
+            }
+            vend = rv;
+        } else {
+            if !charge(s, 1, kend) {
+                return -R_BUDGET;
+            }
+            s[(O_ITEMS) as usize] = s[(O_ITEMS) as usize] + 1;
+            if !charge(s, vunits - 1, kend) {
+                return -R_BUDGET;
+            }
+        }
+        if !charge(s, 6 - mode, pos) {
+            return -R_BUDGET;
+        }
+        if mode == 1 {
+            let li: i32 = lit - p[(arec + 1) as usize];
+            let wd: i32 = ((bo + aso) + 3) + (li >> 5);
+            s[(bo + 2) as usize] = cur;
+            s[(wd) as usize] = s[(wd) as usize] | (1 << (li & 31));
+            s[((bo + aso) + 2) as usize] = s[((bo + aso) + 2) as usize] + p[(lrec + 2) as usize];
+            s[((bo + aso) + 1) as usize] = s[((bo + aso) + 1) as usize] + 1;
+            s[(bo + pso) as usize] = s[(bo + pso) as usize] + 1;
+        }
+        ps = start;
+        pe = kend;
+        klo = nlo;
+        q = vend;
+        k += 1;
+    }
+    s[(VM_FASTM) as usize] = k;
+    s[(VM_FASTP) as usize] = ps;
+    s[(VM_FASTK) as usize] = pe;
+    s[(VM_FASTL) as usize] = klo;
+    if k > 0 {
+        wit_clear(s);
+    }
+    return q;
+}
 pub fn map_alive(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
     let mut bo: i32 = area;
     let mut k: i32 = 0;
@@ -1109,6 +1622,9 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     let mut ps: i32 = -1;
     let mut pe: i32 = -1;
     let mut klo: i32 = 0;
+    let mut fmode: i32 = 0;
+    let mut smode: i32 = 0;
+    let mut pk: i32 = 0;
     let mut unsat: i32 = 0;
     let mut nalive: i32;
     let na: i32 = q_filter(p, s, fb, w, nq, 32, pos);
@@ -1135,199 +1651,244 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
         return -R_INCONSISTENT;
     }
     nalive = nb;
+    if (nb == 1) && (s[(VM_GENERIC) as usize] == 0) {
+        fmode = map_fast_mode(p, block_mt(p, s, fb, area));
+    }
+    if fmode == 1 {
+        smode = 1;
+    }
+    if fmode == 2 {
+        let gom: i32 = group_rec(p, p[(m_pools(p, block_mt(p, s, fb, area)) + 1) as usize]);
+        let kfl: i32 = single_leaf(p, p[(gom + 2) as usize]);
+        let vfl: i32 = single_leaf(p, p[(gom + 3) as usize]);
+        let klbm: i32 = p[(H_S_LEAVES) as usize] + (8 * kfl);
+        if (((p[(klbm) as usize] & 255) == K_TEXT) && (p[(klbm + 4) as usize] < 0)) && (((p[(p[(H_S_LEAVES) as usize] + (8 * vfl)) as usize] & 255) == K_ANY) || streak_kind(p, vfl)) {
+            smode = 2;
+        }
+    }
     let cl: i32 = area + used;
     let pend: i32 = count_pending(p, s, fb, w, nq);
-    for _k in 0..n {
-        let start: i32 = q;
-        if start >= end {
-            return fail(s, start, CODE_TRUNCATED);
-        }
-        let km: i32 = (i32::cast_unsigned(b[(start) as usize] as i32) >> 5).cast_signed();
-        if km != 3 {
-            if !(cose && (km <= 1)) {
-                return fail(s, start, CODE_KEY_TYPE);
+    while pk < n {
+        if (smode > 0) && (nalive > 0) {
+            let qm: i32 = map_streak(p, pool, b, s, pos, q, n - pk, end, d, area, block_mt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo);
+            let km2: i32 = s[(VM_FASTM) as usize];
+            if qm < 0 {
+                return qm;
+            }
+            if km2 > 0 {
+                q = qm;
+                ps = s[(VM_FASTP) as usize];
+                pe = s[(VM_FASTK) as usize];
+                klo = s[(VM_FASTL) as usize];
+                pk += km2;
             }
         }
-        if nalive == 0 {
-            q = dead_item(b, s, start, d + 1, end);
-            if q < 0 {
-                return q;
+        if pk < n {
+            let start: i32 = q;
+            if start >= end {
+                return fail(s, start, CODE_TRUNCATED);
             }
-            if km <= 1 {
-                if !cose_label_ok(b, start, km) {
+            let km: i32 = (i32::cast_unsigned(b[(start) as usize] as i32) >> 5).cast_signed();
+            if km != 3 {
+                if !(cose && (km <= 1)) {
                     return fail(s, start, CODE_KEY_TYPE);
                 }
             }
-            let kod: i32 = key_order(b, s, ps, pe, start, q);
-            if kod < 0 {
-                return kod;
-            }
-            ps = start;
-            pe = q;
-            q = dead_item(b, s, q, d + 1, end);
-            if q < 0 {
-                return q;
-            }
-        } else {
-            let ke: i32 = key_span_end(b, start, end);
-            let mut kid: i32 = -1;
-            let mut bo: i32 = area;
-            let mut cnq: i32 = 0;
-            let mut nc: i32 = 0;
-            let mut named: bool = false;
-            let mut vnq: i32 = 0;
-            let mut still: i32 = 0;
-            let kq: i32;
-            let vq: i32;
-            // The key's id in the schema-wide key table.
-            if ke > start {
-                kid = key_search(p, pool, b, s, start, ke, klo, pos);
-                if kid == (-2) {
-                    return -R_BUDGET;
+            if nalive == 0 {
+                q = dead_item(b, s, start, d + 1, end);
+                if q < 0 {
+                    return q;
                 }
-                klo = s[(O_HI) as usize];
-            }
-            // Cursors: 1 unit per block, 1 per cursor step.
-            for _bi in 0..nb {
-                if !charge(s, 1, pos) {
-                    return -R_BUDGET;
-                }
-                let mtc: i32 = block_mt(p, s, fb, bo);
-                if s[(bo + 1) as usize] != 0 {
-                    let rc: i32 = map_cursor(p, s, bo, mtc, kid, pos);
-                    if rc < 0 {
-                        return rc;
+                if km <= 1 {
+                    if !cose_label_ok(b, start, km) {
+                        return fail(s, start, CODE_KEY_TYPE);
                     }
                 }
-                bo += p[(mtc + 6) as usize];
-            }
-            // The key, queried with the live residual key typesets.
-            let e: i32 = new_epoch(s);
-            bo = area;
-            for _bj in 0..nb {
-                let mtj: i32 = block_mt(p, s, fb, bo);
-                if s[(bo + 1) as usize] != 0 {
-                    cnq = map_key_query(p, s, bo, mtj, cfb, cw, cnq, e, pos);
-                    if cnq < 0 {
-                        return cnq;
-                    }
+                let kod: i32 = key_order(b, s, ps, pe, start, q);
+                if kod < 0 {
+                    return kod;
                 }
-                bo += p[(mtj + 6) as usize];
-            }
-            if cnq > 0 {
-                kq = eval_item(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY);
+                ps = start;
+                pe = q;
+                q = dead_item(b, s, q, d + 1, end);
+                if q < 0 {
+                    return q;
+                }
             } else {
-                kq = dead_item(b, s, start, d + 1, end);
-            }
-            if kq < 0 {
-                return kq;
-            }
-            if km <= 1 {
-                if !cose_label_ok(b, start, km) {
-                    return fail(s, start, CODE_KEY_TYPE);
-                }
-            }
-            let ko: i32 = key_order(b, s, ps, pe, start, kq);
-            if ko < 0 {
-                return ko;
-            }
-            ps = start;
-            pe = kq;
-            // Key phase: candidates.
-            let ek: i32 = q_stamp(s, cfb, cw, cnq, pos);
-            if ek < 0 {
-                return ek;
-            }
-            bo = area;
-            for _bk in 0..nb {
-                let mtk: i32 = block_mt(p, s, fb, bo);
-                if s[(bo + 1) as usize] != 0 {
-                    nc = map_key_phase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
-                    if nc < 0 {
-                        return nc;
+                let ke: i32 = key_span_end(b, start, end);
+                let mut kid: i32 = -1;
+                let mut bo: i32 = area;
+                let mut cnq: i32 = 0;
+                let mut nc: i32 = 0;
+                let mut named: bool = false;
+                let mut vnq: i32 = 0;
+                let mut still: i32 = 0;
+                let kq: i32;
+                let vq: i32;
+                // The key's id in the schema-wide key table.
+                if ke > start {
+                    kid = key_search(p, pool, b, s, start, ke, klo, pos);
+                    if kid == (-2) {
+                        return -R_BUDGET;
                     }
+                    klo = s[(O_HI) as usize];
                 }
-                bo += p[(mtk + 6) as usize];
-            }
-            for c in 0..nc {
-                if (s[((cl + (4 * c)) + 1) as usize] & 1) == 0 {
-                    named = true;
-                }
-            }
-            if named {
-                path_put(s, d + 1, P_KEY, kid);
-            } else {
-                path_put(s, d + 1, P_ANYKEY, 0);
-            }
-            // The value, queried with the candidates' value typesets.
-            let e2: i32 = new_epoch(s);
-            for c2 in 0..nc {
-                let vts: i32 = cand_vts(p, s, fb, cl, c2);
-                vnq = q_add(p, s, cfb, cw, vnq, vts, e2, pos);
-                if vnq < 0 {
-                    return vnq;
-                }
-            }
-            if vnq > 0 {
-                vq = eval_item(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, 0);
-            } else {
-                vq = dead_item(b, s, kq, d + 1, end);
-            }
-            if vq < 0 {
-                return vq;
-            }
-            // Update: each candidate (1 unit + its value test), then
-            // each alive block.
-            let ev: i32 = q_stamp(s, cfb, cw, vnq, pos);
-            if ev < 0 {
-                return ev;
-            }
-            for c3 in 0..nc {
-                if !charge(s, 1, pos) {
-                    return -R_BUDGET;
-                }
-                let vts3: i32 = cand_vts(p, s, fb, cl, c3);
-                let t: i32 = ts_test(p, s, vts3, ev, pos);
-                if t < 0 {
-                    return t;
-                }
-                if t == 1 {
-                    let kw: i32 = (cl + (4 * c3)) + 1;
-                    s[(kw) as usize] = s[(kw) as usize] | 2;
-                }
-            }
-            bo = area;
-            for _bl in 0..nb {
-                let mtl: i32 = block_mt(p, s, fb, bo);
-                if s[(bo + 1) as usize] != 0 {
-                    let u: i32 = map_update(p, s, bo, mtl, kid, cl, nc, pos);
-                    if u < 0 {
-                        return u;
+                // Cursors: 1 unit per block, 1 per cursor step.
+                for _bi in 0..nb {
+                    if !charge(s, 1, pos) {
+                        return -R_BUDGET;
                     }
-                    if u == 1 {
-                        still += 1;
-                    } else {
-                        nalive -= 1;
-                        if block_named(s, bo, cl, nc) {
-                            q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
-                        } else {
-                            q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+                    let mtc: i32 = block_mt(p, s, fb, bo);
+                    if s[(bo + 1) as usize] != 0 {
+                        let rc: i32 = map_cursor(p, s, bo, mtc, kid, pos);
+                        if rc < 0 {
+                            return rc;
                         }
                     }
+                    bo += p[(mtc + 6) as usize];
                 }
-                bo += p[(mtl + 6) as usize];
-            }
-            if (still > 0) || (pend > 0) {
-                wit_clear(s);
-            } else if wit_empty(s) {
-                if named {
-                    wit_set(s, R_VALUE, 0, d + 1, -1, 0, start);
+                if (fmode > 0) && map_pair_ok(p, s, area, block_mt(p, s, fb, area), kid, fmode) {
+                    let vf: i32 = map_pair_fast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, block_mt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode);
+                    if vf < 0 {
+                        return vf;
+                    }
+                    ps = start;
+                    pe = s[(VM_FASTK) as usize];
+                    if s[(area + 1) as usize] == 0 {
+                        nalive = 0;
+                    }
+                    q = vf;
                 } else {
-                    wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+                    // The key, queried with the live residual key typesets.
+                    let e: i32 = new_epoch(s);
+                    bo = area;
+                    for _bj in 0..nb {
+                        let mtj: i32 = block_mt(p, s, fb, bo);
+                        if s[(bo + 1) as usize] != 0 {
+                            cnq = map_key_query(p, s, bo, mtj, cfb, cw, cnq, e, pos);
+                            if cnq < 0 {
+                                return cnq;
+                            }
+                        }
+                        bo += p[(mtj + 6) as usize];
+                    }
+                    if cnq > 0 {
+                        kq = eval_item(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY);
+                    } else {
+                        kq = dead_item(b, s, start, d + 1, end);
+                    }
+                    if kq < 0 {
+                        return kq;
+                    }
+                    if km <= 1 {
+                        if !cose_label_ok(b, start, km) {
+                            return fail(s, start, CODE_KEY_TYPE);
+                        }
+                    }
+                    let ko: i32 = key_order(b, s, ps, pe, start, kq);
+                    if ko < 0 {
+                        return ko;
+                    }
+                    ps = start;
+                    pe = kq;
+                    // Key phase: candidates.
+                    let ek: i32 = q_stamp(s, cfb, cw, cnq, pos);
+                    if ek < 0 {
+                        return ek;
+                    }
+                    bo = area;
+                    for _bk in 0..nb {
+                        let mtk: i32 = block_mt(p, s, fb, bo);
+                        if s[(bo + 1) as usize] != 0 {
+                            nc = map_key_phase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
+                            if nc < 0 {
+                                return nc;
+                            }
+                        }
+                        bo += p[(mtk + 6) as usize];
+                    }
+                    for c in 0..nc {
+                        if (s[((cl + (4 * c)) + 1) as usize] & 1) == 0 {
+                            named = true;
+                        }
+                    }
+                    if named {
+                        path_put(s, d + 1, P_KEY, kid);
+                    } else {
+                        path_put(s, d + 1, P_ANYKEY, 0);
+                    }
+                    // The value, queried with the candidates' value typesets.
+                    let e2: i32 = new_epoch(s);
+                    for c2 in 0..nc {
+                        let vts: i32 = cand_vts(p, s, fb, cl, c2);
+                        vnq = q_add(p, s, cfb, cw, vnq, vts, e2, pos);
+                        if vnq < 0 {
+                            return vnq;
+                        }
+                    }
+                    if vnq > 0 {
+                        vq = eval_item(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, 0);
+                    } else {
+                        vq = dead_item(b, s, kq, d + 1, end);
+                    }
+                    if vq < 0 {
+                        return vq;
+                    }
+                    // Update: each candidate (1 unit + its value test), then
+                    // each alive block.
+                    let ev: i32 = q_stamp(s, cfb, cw, vnq, pos);
+                    if ev < 0 {
+                        return ev;
+                    }
+                    for c3 in 0..nc {
+                        if !charge(s, 1, pos) {
+                            return -R_BUDGET;
+                        }
+                        let vts3: i32 = cand_vts(p, s, fb, cl, c3);
+                        let t: i32 = ts_test(p, s, vts3, ev, pos);
+                        if t < 0 {
+                            return t;
+                        }
+                        if t == 1 {
+                            let kw: i32 = (cl + (4 * c3)) + 1;
+                            s[(kw) as usize] = s[(kw) as usize] | 2;
+                        }
+                    }
+                    bo = area;
+                    for _bl in 0..nb {
+                        let mtl: i32 = block_mt(p, s, fb, bo);
+                        if s[(bo + 1) as usize] != 0 {
+                            let u: i32 = map_update(p, s, bo, mtl, kid, cl, nc, pos);
+                            if u < 0 {
+                                return u;
+                            }
+                            if u == 1 {
+                                still += 1;
+                            } else {
+                                nalive -= 1;
+                                if block_named(s, bo, cl, nc) {
+                                    q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
+                                } else {
+                                    q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+                                }
+                            }
+                        }
+                        bo += p[(mtl + 6) as usize];
+                    }
+                    if (still > 0) || (pend > 0) {
+                        wit_clear(s);
+                    } else if wit_empty(s) {
+                        if named {
+                            wit_set(s, R_VALUE, 0, d + 1, -1, 0, start);
+                        } else {
+                            wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+                        }
+                    }
+                    q = vq;
                 }
             }
-            q = vq;
         }
+        pk += 1;
     }
     // The end: 1 unit per block; alive blocks + 1 per alternative and pool.
     let mut be: i32 = area;

@@ -58,16 +58,13 @@ pub fn key_order(b: &[u8], s: &mut [i32], ps: i32, pe: i32, start: i32, q: i32) 
     }
     return 0;
 }
-pub fn dead_map(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
-    let r: i32 = enter_container(s, pos, p, hi, lo, depth, 1, end);
+pub fn dead_map_pairs(b: &[u8], s: &mut [i32], p: i32, lo: i32, depth: i32, end: i32) -> i32 {
+    // The lo pairs of a map at depth (after its container checks), dead.
     let cose: bool = (depth == 0) && (s[(O_COSE) as usize] != 0);
     let inner: i32 = depth + 1;
     let mut q: i32 = p;
     let mut ps: i32 = -1;
     let mut pe: i32 = -1;
-    if r < 0 {
-        return r;
-    }
     for _k in 0..lo {
         let start: i32 = q;
         if start >= end {
@@ -98,6 +95,33 @@ pub fn dead_map(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, dep
         if q < 0 {
             return q;
         }
+    }
+    return q;
+}
+pub fn dead_map(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
+    let r: i32 = enter_container(s, pos, p, hi, lo, depth, 1, end);
+    if r < 0 {
+        return r;
+    }
+    return dead_map_pairs(b, s, p, lo, depth, end);
+}
+pub fn dead_array_elems(b: &[u8], s: &mut [i32], p: i32, lo: i32, depth: i32, end: i32) -> i32 {
+    // The lo elements of an array at depth (after its container checks),
+    // dead; the second element's start goes in s[VM_Q1] when lo = 2.
+    let inner: i32 = depth + 1;
+    let mut q: i32 = p;
+    let mut q1: i32 = p;
+    for i in 0..lo {
+        q = dead_item(b, s, q, inner, end);
+        if q < 0 {
+            return q;
+        }
+        if i == 0 {
+            q1 = q;
+        }
+    }
+    if lo == 2 {
+        s[(VM_Q1) as usize] = q1;
     }
     return q;
 }

@@ -167,6 +167,12 @@ export const VM_GENERIC = 43;
 
 export const VM_FASTM = 44;
 
+export const VM_FASTK = 45;
+
+export const VM_FASTP = 46;
+
+export const VM_FASTL = 47;
+
 export const SCRATCH_MARK = 48;
 
 export const EPOCH_MAX = 2147483632;

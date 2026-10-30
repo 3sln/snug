@@ -565,3 +565,36 @@ pub fn map_missing(p: &[i32], s: &mut [i32], bo: i32, mt: i32, d: i32, pos: i32)
     wit_set(s, R_MISSING, 0, d, -1, 0, pos);
     return 0;
 }
+pub fn key_probe(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ks: i32, ke: i32, lo0: i32) -> i32 {
+    // key-search without charging (P3.6 streaks): the id or -1; the next
+    // lower bound in s[O_HI] and the units key-search would charge in
+    // s[O_LO].
+    let kb: i32 = p[(H_S_KEYS) as usize];
+    let kl: i32 = ke - ks;
+    let mut lo: i32 = lo0;
+    let mut hi: i32 = p[(H_N_KEYS) as usize];
+    let mut units: i32 = 0;
+    if lo > hi {
+        lo = hi;
+    }
+    while lo < hi {
+        let mid: i32 = (lo + hi) >> 1;
+        let ko: i32 = p[(kb + (2 * mid)) as usize];
+        let kn: i32 = p[((kb + (2 * mid)) + 1) as usize];
+        units += c64min(kl, kn);
+        let c: i32 = cmp_bytes(b, ks, kl, pool, ko, kn);
+        if c == 0 {
+            s[(O_HI) as usize] = mid + 1;
+            s[(O_LO) as usize] = units;
+            return mid;
+        }
+        if c < 0 {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    s[(O_HI) as usize] = lo;
+    s[(O_LO) as usize] = units;
+    return -1;
+}

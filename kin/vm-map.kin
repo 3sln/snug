@@ -15,7 +15,7 @@
   (:require [kin.lang :refer [defn let return set if while for do comment]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg shl sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 ia iset]]
-            [snug.cbor.codes :refer [O_HI]]
+            [snug.cbor.codes :refer [O_HI O_LO]]
             [snug.cbor.head :refer [be16 be32]]
             [snug.vm.layout :refer [H_S_LEAVES H_S_MAP_INDEX H_S_GROUP_INDEX H_S_KEYS H_N_KEYS
                                     MODE_ABSORB INF R_BUDGET R_INCONSISTENT R_MISSING P_KEY P_ANYKEY]]
@@ -447,3 +447,25 @@
                             (return 0)))))))))))
     (wit-set s R_MISSING 0 d (neg 1) 0 pos)
     (return 0)))
+
+(defn ^:pub ^I32 key-probe [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 ks ^I32 ke ^I32 lo0]
+  (comment "key-search without charging (P3.6 streaks): the id or -1; the next"
+           "lower bound in s[O_HI] and the units key-search would charge in"
+           "s[O_LO].")
+  (let [kb (ia p H_S_KEYS)
+        kl (- ke ks)
+        ^:mut lo lo0
+        ^:mut hi (ia p H_N_KEYS)
+        ^:mut units 0]
+    (if (> lo hi) (set lo hi))
+    (while (< lo hi)
+      (let [mid (sar (+ lo hi) 1)
+            ko (ia p (+ kb (* 2 mid)))
+            kn (ia p (+ (+ kb (* 2 mid)) 1))]
+        (set units (+ units (c64min kl kn)))
+        (let [c (cmp-bytes b ks kl pool ko kn)]
+          (if (== c 0) (do (iset s O_HI (+ mid 1)) (iset s O_LO units) (return mid)))
+          (if (< c 0) (set hi mid) (set lo (+ mid 1))))))
+    (iset s O_HI lo)
+    (iset s O_LO units)
+    (return (neg 1))))

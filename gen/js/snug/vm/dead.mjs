@@ -61,16 +61,13 @@ export function keyOrder(b, s, ps, pe, start, q) {
     return 0;
 }
 
-export function deadMap(b, s, pos, p, hi, lo, depth, end) {
-    const r = enterContainer(s, pos, p, hi, lo, depth, 1, end);
+export function deadMapPairs(b, s, p, lo, depth, end) {
+    // The lo pairs of a map at depth (after its container checks), dead.
     const cose = (depth === 0) && (s[O_COSE] !== 0);
     const inner = depth + 1;
     let q = p;
     let ps = -1;
     let pe = -1;
-    if (r < 0) {
-        return r;
-    }
     for (let _k = 0; _k < lo; _k++) {
         const start = q;
         if (start >= end) {
@@ -101,6 +98,35 @@ export function deadMap(b, s, pos, p, hi, lo, depth, end) {
         if (q < 0) {
             return q;
         }
+    }
+    return q;
+}
+
+export function deadMap(b, s, pos, p, hi, lo, depth, end) {
+    const r = enterContainer(s, pos, p, hi, lo, depth, 1, end);
+    if (r < 0) {
+        return r;
+    }
+    return deadMapPairs(b, s, p, lo, depth, end);
+}
+
+export function deadArrayElems(b, s, p, lo, depth, end) {
+    // The lo elements of an array at depth (after its container checks),
+    // dead; the second element's start goes in s[VM_Q1] when lo = 2.
+    const inner = depth + 1;
+    let q = p;
+    let q1 = p;
+    for (let i = 0; i < lo; i++) {
+        q = deadItem(b, s, q, inner, end);
+        if (q < 0) {
+            return q;
+        }
+        if (i === 0) {
+            q1 = q;
+        }
+    }
+    if (lo === 2) {
+        s[VM_Q1] = q1;
     }
     return q;
 }

@@ -199,6 +199,8 @@ for (const { cddl, values } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
     ['r = [* { * tstr => int }]', null],
     ['r = { * tstr => any }', null],
     ['r = { * tstr => [* int] }', null],
+    ['r = [* { a: uint, ? b: tstr, c: bool }]', null],
+    ['r = { id: uint, ? m: { x: int, y: int }, tags: [* tstr] }', null],
   ];
   function choose(xs) { return xs[rnd(xs.length)]; }
   for (const [text, el] of shapes) {
@@ -210,6 +212,8 @@ for (const { cddl, values } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
       if (el) v = Array.from({ length: len }, el);
       else if (text.startsWith('r = { v:')) v = { v: Array.from({ length: len }, () => rnd(8) ? rnd(1000) : -1), w: Array.from({ length: rnd(20) }, () => rnd(8) ? 'ab' : 7) };
       else if (text.startsWith('r = [*')) v = Array.from({ length: rnd(30) }, () => Object.fromEntries(Array.from({ length: rnd(6) }, (_, i) => ['k' + i, rnd(8) ? rnd(100) : 'z'])));
+      else if (text.includes('c: bool')) v = Array.from({ length: rnd(30) }, () => { const o = {}; if (rnd(9)) o.a = rnd(8) ? rnd(9) : 'x'; if (rnd(2)) o.b = rnd(6) ? 'b' : 0; if (rnd(9)) o.c = rnd(8) ? true : 1; if (!rnd(12)) o.z = 1; return o; });
+      else if (text.includes('tags:')) { v = { id: rnd(7) ? rnd(99) : -3, tags: Array.from({ length: rnd(9) }, () => rnd(9) ? 't' : 5) }; if (rnd(2)) v.m = { x: rnd(5), y: rnd(9) ? 2 : 'y' }; if (!rnd(9)) delete v.id; }
       else if (text.includes('[* int]')) v = Object.fromEntries(Array.from({ length: rnd(12) }, (_, i) => ['k' + String.fromCharCode(97 + i), Array.from({ length: rnd(30) }, () => rnd(9) ? rnd(500) - 250 : 'q')]));
       else v = Object.fromEntries(Array.from({ length: rnd(40) }, (_, i) => ['k' + i, rnd(3) ? i : rnd(2) ? 'x' : [i, { a: i }]]));
       let bytes; try { bytes = encode(v, { maxItems: 1 << 20, maxEntries: 1 << 20 }); } catch { continue; }

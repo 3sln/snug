@@ -56,14 +56,13 @@
     (if (> order 0) (return (fail s start CODE_KEY_ORDER)))
     (return 0)))
 
-(defn ^:pub ^I32 dead-map [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
-  (let [r (enter-container s pos p hi lo depth 1 end)
-        cose (and (== depth 0) (!= (ia s O_COSE) 0))
+(defn ^:pub ^I32 dead-map-pairs [^Bytes b ^Ints s ^I32 p ^I32 lo ^I32 depth ^I32 end]
+  (comment "The lo pairs of a map at depth (after its container checks), dead.")
+  (let [cose (and (== depth 0) (!= (ia s O_COSE) 0))
         inner (+ depth 1)
         ^:mut q p
         ^:mut ps (neg 1)
         ^:mut pe (neg 1)]
-    (if (< r 0) (return r))
     (for [^I32 _k 0 lo]
       (let [start q]
         (if (>= start end) (return (fail s start CODE_TRUNCATED)))
@@ -80,6 +79,24 @@
           (set pe q)
           (set q (dead-item b s q inner end))
           (if (< q 0) (return q)))))
+    (return q)))
+
+(defn ^:pub ^I32 dead-map [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
+  (let [r (enter-container s pos p hi lo depth 1 end)]
+    (if (< r 0) (return r))
+    (return (dead-map-pairs b s p lo depth end))))
+
+(defn ^:pub ^I32 dead-array-elems [^Bytes b ^Ints s ^I32 p ^I32 lo ^I32 depth ^I32 end]
+  (comment "The lo elements of an array at depth (after its container checks),"
+           "dead; the second element's start goes in s[VM_Q1] when lo = 2.")
+  (let [inner (+ depth 1)
+        ^:mut q p
+        ^:mut q1 p]
+    (for [^I32 i 0 lo]
+      (set q (dead-item b s q inner end))
+      (if (< q 0) (return q))
+      (if (== i 0) (set q1 q)))
+    (if (== lo 2) (iset s VM_Q1 q1))
     (return q)))
 
 (defn ^:pub ^I32 dead-typed [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 tag ^I32 size ^I32 end]

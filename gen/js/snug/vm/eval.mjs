@@ -3,15 +3,16 @@
 
 import { CODE_DECIMAL, CODE_DEPTH, CODE_KEY_TYPE, CODE_NDARRAY, CODE_TAG, CODE_TEXT, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TRUNCATED, O_COSE, O_CSTART, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ITEMS } from '../cbor/codes.mjs';
 import { be16, be32, enterContainer, fail, readArg, takeLen } from '../cbor/head.mjs';
+import { compareSpans } from '../cbor/keys.mjs';
 import { coseLabelOk, scanFloat, scanSimple } from '../cbor/scan.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
-import { c64, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, tsTest, witClear, witEmpty, witSet } from './base.mjs';
-import { deadBignum, deadItem, deadPairBody, deadSeq, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
-import { CTX_KEY, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ARRAY, K_EMBED, K_INT, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTM, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { c64, c64min, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, tsTest, witClear, witEmpty, witSet } from './base.mjs';
+import { deadArrayElems, deadBignum, deadItem, deadMapPairs, deadPairBody, deadSeq, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
+import { CTX_KEY, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
-import { blockMt, blockNamed, candVts, keySearch, keySpanEnd, leafMap, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate } from './map.mjs';
+import { blockMt, blockNamed, candVts, groupRec, keyProbe, keySearch, keySpanEnd, leafMap, mAlts, mKeys, mLits, mNames, mPools, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, namedRec } from './map.mjs';
 
 export function finishComb(p, s, fb, w, nq, pos) {
     // Combinators of the item (§8.4): stamp its matched leaves in a fresh
@@ -567,13 +568,59 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
     // item (container, tag, missing byte) or leaf kind takes the generic
     // eval-item over the one-entry list written into the frame (its building
     // was charged by the caller).
-    let major = 4;
+    let major = -1;
     const lb = p[H_S_LEAVES] + (8 * leaf);
     const kind = p[lb] & 255;
     if (pos < end) {
         major = (b[pos] >>> 5) | 0;
     }
-    if ((!scalarKind(kind)) || ((major === 4) || ((major === 5) || (major === 6)))) {
+    // ANY, or the matching bare major, on an array or map: the generic
+    // item's visit, head, container checks, filter 1, children walked dead
+    // (D043), then 1 for the leaf -- directly.
+    if (((major === 4) || (major === 5)) && ((kind === K_ANY) || ((kind === K_MAJOR) && (p[lb + 2] === major)))) {
+        if (!charge(s, 1, pos)) {
+            return -R_BUDGET;
+        }
+        const it0 = s[O_ITEMS] + 1;
+        s[O_ITEMS] = it0;
+        if (it0 > s[O_MAX_ITEMS]) {
+            return fail(s, pos, CODE_TOO_MANY_ITEMS);
+        }
+        const ai0 = b[pos] & 31;
+        let hi0 = 0;
+        let lo0 = ai0;
+        let q0 = pos + 1;
+        if (ai0 >= 24) {
+            q0 = readArg(b, s, pos, ai0, end);
+            if (q0 < 0) {
+                return q0;
+            }
+            hi0 = s[O_HI];
+            lo0 = s[O_LO];
+        }
+        const rc = enterContainer(s, pos, q0, hi0, lo0, d, major - 4, end);
+        if (rc < 0) {
+            return rc;
+        }
+        if (!charge(s, 1, pos)) {
+            return -R_BUDGET;
+        }
+        let r0;
+        if (major === 4) {
+            r0 = deadArrayElems(b, s, q0, lo0, d, end);
+        } else {
+            r0 = deadMapPairs(b, s, q0, lo0, d, end);
+        }
+        if (r0 < 0) {
+            return r0;
+        }
+        if (!charge(s, 1, pos)) {
+            return -R_BUDGET;
+        }
+        s[VM_FASTM] = 1;
+        return r0;
+    }
+    if ((major < 0) || ((!scalarKind(kind)) || ((major === 4) || ((major === 5) || (major === 6))))) {
         s[cfb] = leaf;
         s[cfb + cw] = F_ANSWER;
         const rg = evalItem(p, pool, b, s, pos, d, cfb, ck, 1, end, ctx);
@@ -1100,6 +1147,478 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     return q;
 }
 
+export function mapFastMode(p, mt) {
+    // P3.6 (D044): 1 for a closed struct (one factor, pool and alternative,
+    // the empty group), 2 for a pure table `{* K => V}` (no literal entry,
+    // one absorbing group entry, K and V one leaf each), else 0.
+    if ((p[mt] !== 1) || ((p[mt + 1] !== 1) || (p[mt + 2] !== 1))) {
+        return 0;
+    }
+    const go = groupRec(p, p[mPools(p, mt) + 1]);
+    const ne = p[go];
+    if (ne === 0) {
+        return 1;
+    }
+    if ((ne !== 1) || (p[mt + 3] !== 0)) {
+        return 0;
+    }
+    if ((p[go + 4] !== 0) || (p[go + 5] !== INF)) {
+        return 0;
+    }
+    if ((singleLeaf(p, p[go + 2]) < 0) || (singleLeaf(p, p[go + 3]) < 0)) {
+        return 0;
+    }
+    return 2;
+}
+
+export function mapPairOk(p, s, bo, mt, kid, mode) {
+    // Can this pair take the fast step? A struct: an unnamed key, or a key
+    // named once whose value typeset is one leaf.
+    if (mode === 2) {
+        return true;
+    }
+    const kr = namedRec(p, s, bo, mt, kid);
+    if (kr < 0) {
+        return true;
+    }
+    const krec = mKeys(p, mt) + (4 * kr);
+    if (p[krec + 3] !== 1) {
+        return false;
+    }
+    const lit = p[(mNames(p, mt) + (2 * p[krec + 2])) + 1];
+    return singleLeaf(p, p[(mLits(p, mt) + (4 * lit)) + 1]) >= 0;
+}
+
+export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, bo, mt, cfb, cck, cw, kid, pend, mode) {
+    // P3.6 (D044): one pair of a single-block map in a fast mode, after the
+    // shared key search and cursor step: the generic pair's charges merged
+    // per offset, its pool/alternative state updates and witness. The key's
+    // end goes in s[VM_FASTK]; answers the value's end.
+    const pools = mPools(p, mt);
+    const pso = p[pools + 4];
+    const arec = mAlts(p, mt);
+    const aso = p[arec + 4];
+    const lits = mLits(p, mt);
+    let named = false;
+    let vm = 0;
+    let take = false;
+    let kq;
+    let vq;
+    if (mode === 1) {
+        kq = deadItem(b, s, start, d + 1, end);
+    } else {
+        if (!charge(s, 1, pos)) {
+            return -R_BUDGET;
+        }
+        const go = groupRec(p, p[pools + 1]);
+        kq = fastChild(p, pool, b, s, start, d + 1, cfb, cck, cw, singleLeaf(p, p[go + 2]), end, CTX_KEY);
+    }
+    if (kq < 0) {
+        return kq;
+    }
+    if (km <= 1) {
+        if (!coseLabelOk(b, start, km)) {
+            return fail(s, start, CODE_KEY_TYPE);
+        }
+    }
+    const ko = keyOrder(b, s, ps, pe, start, kq);
+    if (ko < 0) {
+        return ko;
+    }
+    s[VM_FASTK] = kq;
+    s[(bo + pso) + 2] = 0;
+    if (mode === 1) {
+        const kr = namedRec(p, s, bo, mt, kid);
+        if (kr >= 0) {
+            const krec = mKeys(p, mt) + (4 * kr);
+            const lit = p[(mNames(p, mt) + (2 * p[krec + 2])) + 1];
+            const lrec = lits + (4 * lit);
+            named = true;
+            if (!charge(s, 2, pos)) {
+                return -R_BUDGET;
+            }
+            pathPut(s, d + 1, P_KEY, kid);
+            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, singleLeaf(p, p[lrec + 1]), end, 0);
+            if (vq < 0) {
+                return vq;
+            }
+            if (!charge(s, 5, pos)) {
+                return -R_BUDGET;
+            }
+            if (s[VM_FASTM] === 1) {
+                const li = lit - p[arec + 1];
+                const wd = ((bo + aso) + 3) + (li >> 5);
+                s[wd] = s[wd] | (1 << (li & 31));
+                s[(bo + aso) + 2] = s[(bo + aso) + 2] + p[lrec + 2];
+                s[(bo + aso) + 1] = s[(bo + aso) + 1] + 1;
+                s[(bo + pso) + 2] = 1;
+            } else if (p[lrec + 3] === 1) {
+                s[bo + aso] = 1;
+                s[(bo + pso) + 1] = s[(bo + pso) + 1] - 1;
+                s[bo + 4] = s[bo + 4] - 1;
+            }
+        } else {
+            pathPut(s, d + 1, P_ANYKEY, 0);
+            vq = deadItem(b, s, kq, d + 1, end);
+            if (vq < 0) {
+                return vq;
+            }
+            if (!charge(s, 1, pos)) {
+                return -R_BUDGET;
+            }
+        }
+    } else {
+        const kmatch = s[VM_FASTM] === 1;
+        const go2 = groupRec(p, p[pools + 1]);
+        if (kmatch) {
+            if (!charge(s, 4, pos)) {
+                return -R_BUDGET;
+            }
+        } else {
+            if (!charge(s, 3, pos)) {
+                return -R_BUDGET;
+            }
+        }
+        pathPut(s, d + 1, P_ANYKEY, 0);
+        if (kmatch) {
+            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, singleLeaf(p, p[go2 + 3]), end, 0);
+            if (vq < 0) {
+                return vq;
+            }
+            vm = s[VM_FASTM];
+            if (!charge(s, 4, pos)) {
+                return -R_BUDGET;
+            }
+        } else {
+            vq = deadItem(b, s, kq, d + 1, end);
+            if (vq < 0) {
+                return vq;
+            }
+            if (!charge(s, 1, pos)) {
+                return -R_BUDGET;
+            }
+        }
+        take = kmatch && (vm === 1);
+    }
+    // the pool's outcome: TAKE of the absorbing entry, or REJECT
+    if (take) {
+        s[(bo + pso) + 3] = 0;
+    } else {
+        const lv = s[(bo + pso) + 1];
+        const ex = s[(bo + pso) + 2];
+        s[(bo + pso) + 3] = -1;
+        s[bo + pso] = s[bo + pso] + 1;
+        s[bo + 4] = s[bo + 4] - (lv - ex);
+        s[(bo + pso) + 1] = ex;
+    }
+    if (s[bo + 4] === 0) {
+        s[bo + 1] = 0;
+    }
+    if (s[bo + 1] !== 0) {
+        witClear(s);
+    } else {
+        if (named) {
+            qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
+        } else {
+            qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+        }
+        if (pend > 0) {
+            witClear(s);
+        } else if (witEmpty(s)) {
+            if (named) {
+                witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
+            } else {
+                witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+            }
+        }
+    }
+    return vq;
+}
+
+export function preScalar(p, pool, b, s, q, end, lb, kind) {
+    // P3.6 streaks: does the item at q certainly pass the profile and match
+    // leaf lb -- an INT over one interval or a TEXT without a regexp?
+    // Checked without charging: its end, with the units its generic
+    // evaluation charges (visit, UTF-8, filter, leaf, probe) in s[O_LO]; or
+    // -1 when it would not, or it is anything else.
+    if (q >= end) {
+        return -1;
+    }
+    const ib = b[q];
+    const major = (ib >>> 5) | 0;
+    const ai = ib & 31;
+    let hi = 0;
+    let lo = ai;
+    let h = 1;
+    if (ai > 27) {
+        return -1;
+    }
+    if (ai >= 24) {
+        h = 1 + (1 << (ai - 24));
+        if (h > (end - q)) {
+            return -1;
+        }
+        if (ai === 24) {
+            lo = b[q + 1];
+        }
+        if (ai === 25) {
+            lo = be16(b, q + 1);
+        }
+        if (ai === 26) {
+            lo = be32(b, q + 1);
+        }
+        if (ai === 27) {
+            hi = be32(b, q + 1);
+            lo = be32(b, q + 5);
+        }
+        if ((ai === 24) && (lo < 24)) {
+            return -1;
+        }
+        if ((ai === 25) && (lo < 256)) {
+            return -1;
+        }
+        if ((ai === 26) && (((lo >>> 16) | 0) === 0)) {
+            return -1;
+        }
+        if ((ai === 27) && (hi === 0)) {
+            return -1;
+        }
+    }
+    if (kind === K_INT) {
+        if ((major > 1) || (p[lb + 3] !== 1)) {
+            return -1;
+        }
+        if ((p[lb + 1] & (1 << major)) === 0) {
+            return -1;
+        }
+        if (!int1(p, pool, b, p[lb + 2], major + 1, hi, lo)) {
+            return -1;
+        }
+        s[O_LO] = 4;
+        return q + h;
+    }
+    if ((kind === K_TEXT) && (major === 3)) {
+        if ((hi !== 0) || (lo < 0)) {
+            return -1;
+        }
+        if (lo > (end - (q + h))) {
+            return -1;
+        }
+        if ((lo < p[lb + 2]) || (lo > p[lb + 3])) {
+            return -1;
+        }
+        if (utf8InvalidAt(b, q + h, (q + h) + lo) >= 0) {
+            return -1;
+        }
+        s[O_LO] = 3 + c64(lo);
+        return (q + h) + lo;
+    }
+    return -1;
+}
+
+export function streakKind(p, leaf) {
+    // Leaves pre-scalar decides: INT over one interval, TEXT without a regexp.
+    if (leaf < 0) {
+        return false;
+    }
+    const lb = p[H_S_LEAVES] + (8 * leaf);
+    const kind = p[lb] & 255;
+    return ((kind === K_INT) && (p[lb + 3] === 1)) || ((kind === K_TEXT) && (p[lb + 4] < 0));
+}
+
+export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cfb, cck, cw, ps0, pe0, klo0) {
+    // P3.6 (D044): consecutive SUCCESSFUL pairs of a single-block map in a fast
+    // mode (1 struct: a named key whose value is an INT/TEXT leaf; 2 table:
+    // a TEXT key leaf and an `any` or INT/TEXT value leaf). The key (text,
+    // shortest head, UTF-8, ascending order, the key search done without
+    // charging) and, except under `any`, the value are checked first; then
+    // the pair is charged in the generic order with charges merged per
+    // offset, and its state updated. A pair that would not succeed stops the
+    // streak before it is touched. Answers the next position; the pair count
+    // in s[VM_FASTM], the last key in s[VM_FASTP], s[VM_FASTK], the next
+    // key-table bound in s[VM_FASTL].
+    const pools = mPools(p, mt);
+    const pso = p[pools + 4];
+    const arec = mAlts(p, mt);
+    const aso = p[arec + 4];
+    const lits = mLits(p, mt);
+    const keys = mKeys(p, mt);
+    const names = mNames(p, mt);
+    const nkm = p[mt + 4];
+    const go = groupRec(p, p[pools + 1]);
+    const maxit = s[O_MAX_ITEMS];
+    let klb = 0;
+    let vleaf2 = -1;
+    let q = q0;
+    let k = 0;
+    let ps = ps0;
+    let pe = pe0;
+    let klo = klo0;
+    if (mode === 2) {
+        klb = p[H_S_LEAVES] + (8 * singleLeaf(p, p[go + 2]));
+        vleaf2 = singleLeaf(p, p[go + 3]);
+    }
+    while ((k < limit) && (q < end)) {
+        const start = q;
+        const ib = b[start];
+        const ai = ib & 31;
+        let kh = 1;
+        let kl = ai;
+        let cur = s[bo + 2];
+        let steps = 0;
+        let lrec = 0;
+        let lit = 0;
+        let vend = 0;
+        let vunits = 0;
+        let vlf;
+        // the key: text, a valid head, present, UTF-8, ascending
+        if (((ib >>> 5) | 0) !== 3) {
+            break;
+        }
+        if (ai > 27) {
+            break;
+        }
+        if (ai >= 24) {
+            kh = 1 + (1 << (ai - 24));
+            if ((kh > 3) || (kh > (end - start))) {
+                break;
+            }
+            if (ai === 24) {
+                kl = b[start + 1];
+            }
+            if (ai === 25) {
+                kl = be16(b, start + 1);
+            }
+            if ((ai === 24) && (kl < 24)) {
+                break;
+            }
+            if ((ai === 25) && (kl < 256)) {
+                break;
+            }
+        }
+        if (kl > (end - (start + kh))) {
+            break;
+        }
+        if ((s[O_ITEMS] + 2) > maxit) {
+            break;
+        }
+        if (utf8InvalidAt(b, start + kh, (start + kh) + kl) >= 0) {
+            break;
+        }
+        const kend = (start + kh) + kl;
+        if (ps >= 0) {
+            if (compareSpans(b, ps, pe, start, kend) >= 0) {
+                break;
+            }
+        }
+        const kid = keyProbe(p, pool, b, s, start, kend, klo);
+        const sk = s[O_LO];
+        const nlo = s[O_HI];
+        if (mode === 1) {
+            if (kid >= 0) {
+                while ((cur < nkm) && (p[keys + (4 * cur)] < kid)) {
+                    cur += 1;
+                    steps += 1;
+                }
+            }
+            if ((kid < 0) || ((cur >= nkm) || (p[keys + (4 * cur)] !== kid))) {
+                break;
+            }
+            if (p[(keys + (4 * cur)) + 3] !== 1) {
+                break;
+            }
+            lit = p[(names + (2 * p[(keys + (4 * cur)) + 2])) + 1];
+            lrec = lits + (4 * lit);
+            vlf = singleLeaf(p, p[lrec + 1]);
+            if (!streakKind(p, vlf)) {
+                break;
+            }
+        } else {
+            if ((kl < p[klb + 2]) || (kl > p[klb + 3])) {
+                break;
+            }
+            vlf = vleaf2;
+        }
+        // the value, unless under `any`
+        const vlb = p[H_S_LEAVES] + (8 * vlf);
+        const vkind = p[vlb] & 255;
+        const vany = vkind === K_ANY;
+        if (!vany) {
+            vend = preScalar(p, pool, b, s, kend, end, vlb, vkind);
+            if (vend < 0) {
+                break;
+            }
+            vunits = s[O_LO];
+        }
+        // commit, in the generic order
+        let ko = 0;
+        let ka = (sk + 1) + steps;
+        let kb = 1 + c64(kl);
+        if (ps >= 0) {
+            ko = c64min(pe - ps, kend - start);
+        }
+        if (mode === 2) {
+            ka += 1;
+            kb += 2;
+        }
+        if (!charge(s, ka, pos)) {
+            return -R_BUDGET;
+        }
+        // the visit, then the count, then the rest: the item count is
+        // observable, so no merge crosses it
+        if (!charge(s, 1, start)) {
+            return -R_BUDGET;
+        }
+        s[O_ITEMS] = s[O_ITEMS] + 1;
+        if (!charge(s, (kb - 1) + ko, start)) {
+            return -R_BUDGET;
+        }
+        if (!charge(s, 2 + (2 * (mode - 1)), pos)) {
+            return -R_BUDGET;
+        }
+        if (vany) {
+            const rv = fastChild(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, 0);
+            if (rv < 0) {
+                return rv;
+            }
+            vend = rv;
+        } else {
+            if (!charge(s, 1, kend)) {
+                return -R_BUDGET;
+            }
+            s[O_ITEMS] = s[O_ITEMS] + 1;
+            if (!charge(s, vunits - 1, kend)) {
+                return -R_BUDGET;
+            }
+        }
+        if (!charge(s, 6 - mode, pos)) {
+            return -R_BUDGET;
+        }
+        if (mode === 1) {
+            const li = lit - p[arec + 1];
+            const wd = ((bo + aso) + 3) + (li >> 5);
+            s[bo + 2] = cur;
+            s[wd] = s[wd] | (1 << (li & 31));
+            s[(bo + aso) + 2] = s[(bo + aso) + 2] + p[lrec + 2];
+            s[(bo + aso) + 1] = s[(bo + aso) + 1] + 1;
+            s[bo + pso] = s[bo + pso] + 1;
+        }
+        ps = start;
+        pe = kend;
+        klo = nlo;
+        q = vend;
+        k += 1;
+    }
+    s[VM_FASTM] = k;
+    s[VM_FASTP] = ps;
+    s[VM_FASTK] = pe;
+    s[VM_FASTL] = klo;
+    if (k > 0) {
+        witClear(s);
+    }
+    return q;
+}
+
 export function mapAlive(p, s, fb, area, nb) {
     let bo = area;
     let k = 0;
@@ -1134,6 +1653,9 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     let ps = -1;
     let pe = -1;
     let klo = 0;
+    let fmode = 0;
+    let smode = 0;
+    let pk = 0;
     let unsat = 0;
     let nalive;
     const na = qFilter(p, s, fb, w, nq, 32, pos);
@@ -1160,199 +1682,244 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
         return -R_INCONSISTENT;
     }
     nalive = nb;
+    if ((nb === 1) && (s[VM_GENERIC] === 0)) {
+        fmode = mapFastMode(p, blockMt(p, s, fb, area));
+    }
+    if (fmode === 1) {
+        smode = 1;
+    }
+    if (fmode === 2) {
+        const gom = groupRec(p, p[mPools(p, blockMt(p, s, fb, area)) + 1]);
+        const kfl = singleLeaf(p, p[gom + 2]);
+        const vfl = singleLeaf(p, p[gom + 3]);
+        const klbm = p[H_S_LEAVES] + (8 * kfl);
+        if ((((p[klbm] & 255) === K_TEXT) && (p[klbm + 4] < 0)) && (((p[p[H_S_LEAVES] + (8 * vfl)] & 255) === K_ANY) || streakKind(p, vfl))) {
+            smode = 2;
+        }
+    }
     const cl = area + used;
     const pend = countPending(p, s, fb, w, nq);
-    for (let _k = 0; _k < n; _k++) {
-        const start = q;
-        if (start >= end) {
-            return fail(s, start, CODE_TRUNCATED);
-        }
-        const km = (b[start] >>> 5) | 0;
-        if (km !== 3) {
-            if (!(cose && (km <= 1))) {
-                return fail(s, start, CODE_KEY_TYPE);
+    while (pk < n) {
+        if ((smode > 0) && (nalive > 0)) {
+            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo);
+            const km2 = s[VM_FASTM];
+            if (qm < 0) {
+                return qm;
+            }
+            if (km2 > 0) {
+                q = qm;
+                ps = s[VM_FASTP];
+                pe = s[VM_FASTK];
+                klo = s[VM_FASTL];
+                pk += km2;
             }
         }
-        if (nalive === 0) {
-            q = deadItem(b, s, start, d + 1, end);
-            if (q < 0) {
-                return q;
+        if (pk < n) {
+            const start = q;
+            if (start >= end) {
+                return fail(s, start, CODE_TRUNCATED);
             }
-            if (km <= 1) {
-                if (!coseLabelOk(b, start, km)) {
+            const km = (b[start] >>> 5) | 0;
+            if (km !== 3) {
+                if (!(cose && (km <= 1))) {
                     return fail(s, start, CODE_KEY_TYPE);
                 }
             }
-            const kod = keyOrder(b, s, ps, pe, start, q);
-            if (kod < 0) {
-                return kod;
-            }
-            ps = start;
-            pe = q;
-            q = deadItem(b, s, q, d + 1, end);
-            if (q < 0) {
-                return q;
-            }
-        } else {
-            const ke = keySpanEnd(b, start, end);
-            let kid = -1;
-            let bo = area;
-            let cnq = 0;
-            let nc = 0;
-            let named = false;
-            let vnq = 0;
-            let still = 0;
-            let kq;
-            let vq;
-            // The key's id in the schema-wide key table.
-            if (ke > start) {
-                kid = keySearch(p, pool, b, s, start, ke, klo, pos);
-                if (kid === (-2)) {
-                    return -R_BUDGET;
+            if (nalive === 0) {
+                q = deadItem(b, s, start, d + 1, end);
+                if (q < 0) {
+                    return q;
                 }
-                klo = s[O_HI];
-            }
-            // Cursors: 1 unit per block, 1 per cursor step.
-            for (let _bi = 0; _bi < nb; _bi++) {
-                if (!charge(s, 1, pos)) {
-                    return -R_BUDGET;
-                }
-                const mtc = blockMt(p, s, fb, bo);
-                if (s[bo + 1] !== 0) {
-                    const rc = mapCursor(p, s, bo, mtc, kid, pos);
-                    if (rc < 0) {
-                        return rc;
+                if (km <= 1) {
+                    if (!coseLabelOk(b, start, km)) {
+                        return fail(s, start, CODE_KEY_TYPE);
                     }
                 }
-                bo += p[mtc + 6];
-            }
-            // The key, queried with the live residual key typesets.
-            const e = newEpoch(s);
-            bo = area;
-            for (let _bj = 0; _bj < nb; _bj++) {
-                const mtj = blockMt(p, s, fb, bo);
-                if (s[bo + 1] !== 0) {
-                    cnq = mapKeyQuery(p, s, bo, mtj, cfb, cw, cnq, e, pos);
-                    if (cnq < 0) {
-                        return cnq;
-                    }
+                const kod = keyOrder(b, s, ps, pe, start, q);
+                if (kod < 0) {
+                    return kod;
                 }
-                bo += p[mtj + 6];
-            }
-            if (cnq > 0) {
-                kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY);
+                ps = start;
+                pe = q;
+                q = deadItem(b, s, q, d + 1, end);
+                if (q < 0) {
+                    return q;
+                }
             } else {
-                kq = deadItem(b, s, start, d + 1, end);
-            }
-            if (kq < 0) {
-                return kq;
-            }
-            if (km <= 1) {
-                if (!coseLabelOk(b, start, km)) {
-                    return fail(s, start, CODE_KEY_TYPE);
-                }
-            }
-            const ko = keyOrder(b, s, ps, pe, start, kq);
-            if (ko < 0) {
-                return ko;
-            }
-            ps = start;
-            pe = kq;
-            // Key phase: candidates.
-            const ek = qStamp(s, cfb, cw, cnq, pos);
-            if (ek < 0) {
-                return ek;
-            }
-            bo = area;
-            for (let _bk = 0; _bk < nb; _bk++) {
-                const mtk = blockMt(p, s, fb, bo);
-                if (s[bo + 1] !== 0) {
-                    nc = mapKeyPhase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
-                    if (nc < 0) {
-                        return nc;
+                const ke = keySpanEnd(b, start, end);
+                let kid = -1;
+                let bo = area;
+                let cnq = 0;
+                let nc = 0;
+                let named = false;
+                let vnq = 0;
+                let still = 0;
+                let kq;
+                let vq;
+                // The key's id in the schema-wide key table.
+                if (ke > start) {
+                    kid = keySearch(p, pool, b, s, start, ke, klo, pos);
+                    if (kid === (-2)) {
+                        return -R_BUDGET;
                     }
+                    klo = s[O_HI];
                 }
-                bo += p[mtk + 6];
-            }
-            for (let c = 0; c < nc; c++) {
-                if ((s[(cl + (4 * c)) + 1] & 1) === 0) {
-                    named = true;
-                }
-            }
-            if (named) {
-                pathPut(s, d + 1, P_KEY, kid);
-            } else {
-                pathPut(s, d + 1, P_ANYKEY, 0);
-            }
-            // The value, queried with the candidates' value typesets.
-            const e2 = newEpoch(s);
-            for (let c2 = 0; c2 < nc; c2++) {
-                const vts = candVts(p, s, fb, cl, c2);
-                vnq = qAdd(p, s, cfb, cw, vnq, vts, e2, pos);
-                if (vnq < 0) {
-                    return vnq;
-                }
-            }
-            if (vnq > 0) {
-                vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, 0);
-            } else {
-                vq = deadItem(b, s, kq, d + 1, end);
-            }
-            if (vq < 0) {
-                return vq;
-            }
-            // Update: each candidate (1 unit + its value test), then
-            // each alive block.
-            const ev = qStamp(s, cfb, cw, vnq, pos);
-            if (ev < 0) {
-                return ev;
-            }
-            for (let c3 = 0; c3 < nc; c3++) {
-                if (!charge(s, 1, pos)) {
-                    return -R_BUDGET;
-                }
-                const vts3 = candVts(p, s, fb, cl, c3);
-                const t = tsTest(p, s, vts3, ev, pos);
-                if (t < 0) {
-                    return t;
-                }
-                if (t === 1) {
-                    const kw = (cl + (4 * c3)) + 1;
-                    s[kw] = s[kw] | 2;
-                }
-            }
-            bo = area;
-            for (let _bl = 0; _bl < nb; _bl++) {
-                const mtl = blockMt(p, s, fb, bo);
-                if (s[bo + 1] !== 0) {
-                    const u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
-                    if (u < 0) {
-                        return u;
+                // Cursors: 1 unit per block, 1 per cursor step.
+                for (let _bi = 0; _bi < nb; _bi++) {
+                    if (!charge(s, 1, pos)) {
+                        return -R_BUDGET;
                     }
-                    if (u === 1) {
-                        still += 1;
-                    } else {
-                        nalive -= 1;
-                        if (blockNamed(s, bo, cl, nc)) {
-                            qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
-                        } else {
-                            qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+                    const mtc = blockMt(p, s, fb, bo);
+                    if (s[bo + 1] !== 0) {
+                        const rc = mapCursor(p, s, bo, mtc, kid, pos);
+                        if (rc < 0) {
+                            return rc;
                         }
                     }
+                    bo += p[mtc + 6];
                 }
-                bo += p[mtl + 6];
-            }
-            if ((still > 0) || (pend > 0)) {
-                witClear(s);
-            } else if (witEmpty(s)) {
-                if (named) {
-                    witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
+                if ((fmode > 0) && mapPairOk(p, s, area, blockMt(p, s, fb, area), kid, fmode)) {
+                    const vf = mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, blockMt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode);
+                    if (vf < 0) {
+                        return vf;
+                    }
+                    ps = start;
+                    pe = s[VM_FASTK];
+                    if (s[area + 1] === 0) {
+                        nalive = 0;
+                    }
+                    q = vf;
                 } else {
-                    witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+                    // The key, queried with the live residual key typesets.
+                    const e = newEpoch(s);
+                    bo = area;
+                    for (let _bj = 0; _bj < nb; _bj++) {
+                        const mtj = blockMt(p, s, fb, bo);
+                        if (s[bo + 1] !== 0) {
+                            cnq = mapKeyQuery(p, s, bo, mtj, cfb, cw, cnq, e, pos);
+                            if (cnq < 0) {
+                                return cnq;
+                            }
+                        }
+                        bo += p[mtj + 6];
+                    }
+                    if (cnq > 0) {
+                        kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY);
+                    } else {
+                        kq = deadItem(b, s, start, d + 1, end);
+                    }
+                    if (kq < 0) {
+                        return kq;
+                    }
+                    if (km <= 1) {
+                        if (!coseLabelOk(b, start, km)) {
+                            return fail(s, start, CODE_KEY_TYPE);
+                        }
+                    }
+                    const ko = keyOrder(b, s, ps, pe, start, kq);
+                    if (ko < 0) {
+                        return ko;
+                    }
+                    ps = start;
+                    pe = kq;
+                    // Key phase: candidates.
+                    const ek = qStamp(s, cfb, cw, cnq, pos);
+                    if (ek < 0) {
+                        return ek;
+                    }
+                    bo = area;
+                    for (let _bk = 0; _bk < nb; _bk++) {
+                        const mtk = blockMt(p, s, fb, bo);
+                        if (s[bo + 1] !== 0) {
+                            nc = mapKeyPhase(p, s, bo, mtk, kid, ek, cl, nc, ccap, pos);
+                            if (nc < 0) {
+                                return nc;
+                            }
+                        }
+                        bo += p[mtk + 6];
+                    }
+                    for (let c = 0; c < nc; c++) {
+                        if ((s[(cl + (4 * c)) + 1] & 1) === 0) {
+                            named = true;
+                        }
+                    }
+                    if (named) {
+                        pathPut(s, d + 1, P_KEY, kid);
+                    } else {
+                        pathPut(s, d + 1, P_ANYKEY, 0);
+                    }
+                    // The value, queried with the candidates' value typesets.
+                    const e2 = newEpoch(s);
+                    for (let c2 = 0; c2 < nc; c2++) {
+                        const vts = candVts(p, s, fb, cl, c2);
+                        vnq = qAdd(p, s, cfb, cw, vnq, vts, e2, pos);
+                        if (vnq < 0) {
+                            return vnq;
+                        }
+                    }
+                    if (vnq > 0) {
+                        vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, 0);
+                    } else {
+                        vq = deadItem(b, s, kq, d + 1, end);
+                    }
+                    if (vq < 0) {
+                        return vq;
+                    }
+                    // Update: each candidate (1 unit + its value test), then
+                    // each alive block.
+                    const ev = qStamp(s, cfb, cw, vnq, pos);
+                    if (ev < 0) {
+                        return ev;
+                    }
+                    for (let c3 = 0; c3 < nc; c3++) {
+                        if (!charge(s, 1, pos)) {
+                            return -R_BUDGET;
+                        }
+                        const vts3 = candVts(p, s, fb, cl, c3);
+                        const t = tsTest(p, s, vts3, ev, pos);
+                        if (t < 0) {
+                            return t;
+                        }
+                        if (t === 1) {
+                            const kw = (cl + (4 * c3)) + 1;
+                            s[kw] = s[kw] | 2;
+                        }
+                    }
+                    bo = area;
+                    for (let _bl = 0; _bl < nb; _bl++) {
+                        const mtl = blockMt(p, s, fb, bo);
+                        if (s[bo + 1] !== 0) {
+                            const u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
+                            if (u < 0) {
+                                return u;
+                            }
+                            if (u === 1) {
+                                still += 1;
+                            } else {
+                                nalive -= 1;
+                                if (blockNamed(s, bo, cl, nc)) {
+                                    qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
+                                } else {
+                                    qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+                                }
+                            }
+                        }
+                        bo += p[mtl + 6];
+                    }
+                    if ((still > 0) || (pend > 0)) {
+                        witClear(s);
+                    } else if (witEmpty(s)) {
+                        if (named) {
+                            witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
+                        } else {
+                            witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+                        }
+                    }
+                    q = vq;
                 }
             }
-            q = vq;
         }
+        pk += 1;
     }
     // The end: 1 unit per block; alive blocks + 1 per alternative and pool.
     let be = area;

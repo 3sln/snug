@@ -105,6 +105,9 @@
 ;; the matched flag a fast child hands its parent
 (defconst ^:pub ^I32 VM_GENERIC 43)
 (defconst ^:pub ^I32 VM_FASTM 44)
+(defconst ^:pub ^I32 VM_FASTK 45)
+(defconst ^:pub ^I32 VM_FASTP 46)
+(defconst ^:pub ^I32 VM_FASTL 47)
 (defconst ^:pub ^I32 SCRATCH_MARK 48)
 (defconst ^:pub ^I32 EPOCH_MAX 2147483632)
 
