@@ -411,6 +411,24 @@ slower); allocated head tuples; validating wrapper constructors in build
   (fits in n bytes, arch §4.6); only a controller written as a range,
   `uint .size (lo..hi)`, means "minimal byte length in lo..hi" (program.md
   §4.2's interval); the distinction is made on the controller's syntax.
+  *Then:* `.plus` and `.det` implemented (D038 amended); SOURCE_KEY filled
+  by both hosts (D039); pool bytes charged; hosts release an arena grown
+  past 16 MiB; an arena exhausted while parsing a regexp was reported as a
+  `regexp` error (fixed), which prompted a new gate: **outcomes independent
+  of the starting arena size** (all 301 corpus schemas in `bb compile-test`,
+  every 8th text in `bb compile-fuzz`). Current gate lines (`bb
+  compile-test`, 2026-10-29): 268/268 compile on both hosts; 31/31 expected
+  refusals; 301/301 identical across hosts; 270/270 Programs pass
+  vm-verify on both; §15 exact on both; 301/301 arena-independent; 55/55
+  SOURCE_KEYs equal an independent SHA-256 of the §13.3 preimage; 6/6
+  normaliser structure checks; 27/27 profile cases; 2 429/2 429 seeded
+  invalid Programs refused; 10 800 random corruptions, no crash, identical
+  verdicts. `bb compile-fuzz` 8 000–10 000 texts on seeds 1–3, 11–14,
+  21–22, 31–34, 41, 51–52, 61, 71–72: all ok. `bb drift` and `bb check`
+  green.
+  Open: containers are not hash-consed structurally (two identical inline
+  map types are two map tables; only size and closure width suffer); bus
+  profile refusals carry no source position; `.plus` refuses floats.
 - [~] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
 
