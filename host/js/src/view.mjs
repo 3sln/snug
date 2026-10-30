@@ -25,7 +25,7 @@
 // state (never the VM scratch); map lookups then binary-search it and array
 // access is O(1). Without it, lookups are linear with an early exit.
 import { navInit, navHead, navSkip, navLength, navChild, navFind, navDir, navDirFind,
-  N_MAJOR, N_AI, N_HI, N_LO, NAV_WORDS } from '../../../gen/js/snug/nav/walk.mjs';
+  N_MAJOR, N_AI, N_HI, N_LO, N_STEPS, NAV_WORDS, NAV_NOT_FOUND } from '../../../gen/js/snug/nav/walk.mjs';
 import { scan } from './scan.mjs';
 import { build } from './build.mjs';
 import { TYPED_BY_TAG } from './values.mjs';
@@ -52,18 +52,28 @@ class Message {
     this.dirWords = 0;
   }
   head(p) { return navHead(this.b, this.o, p, this.end); }
-  skip(p) { return navSkip(this.b, this.o, p, this.end); }
+  // Each operation is charged from zero: the step budget bounds one walk, not the view's lifetime.
+  skip(p) { this.o[N_STEPS] = 0; return ok(navSkip(this.b, this.o, p, this.end)); }
   /** The child directory of the container at p (count n known), or null. */
   dir(p, n) {
     if (this.dirs === null || n < DIRECTORY_MIN) return null;
     let d = this.dirs.get(p);
     if (d === undefined) {
       d = new Int32Array(n);
+      this.o[N_STEPS] = 0;
       if (navDir(this.b, this.o, p, d, this.end) !== n) throw new Error('snug: view directory inconsistent');
       this.dirs.set(p, d); this.dirWords += n;
     }
     return d;
   }
+}
+
+/** A primitive's answer: a position, NAV_NOT_FOUND as -1; anything else is a broken invariant (bytes changed under a
+ * borrowed view, or a bug), never a silent miss. */
+function ok(r) {
+  if (r >= 0) return r;
+  if (r === NAV_NOT_FOUND) return -1;
+  throw new Error(`snug view: navigation failed (${r}); were borrowed bytes modified?`);
 }
 
 // ------------------------------------------------------------------ scalar readers (shared by View and Cursor)
@@ -182,6 +192,13 @@ function keyAt(m, q) {
 let keyBuf = new Uint8Array(64);
 function encodeKey(key, cose) {
   if (typeof key === 'string') {
+    // short ASCII keys (the common case) without the encoder
+    const len = key.length;
+    if (len < 24) {
+      let i = 0;
+      for (; i < len; i++) { const c = key.charCodeAt(i); if (c >= 128) break; keyBuf[1 + i] = c; }
+      if (i === len) { keyBuf[0] = 0x60 | len; return [0, 1 + len]; }
+    }
     const max = 9 + key.length * 3;
     if (keyBuf.length < max) keyBuf = new Uint8Array(Math.max(max, keyBuf.length * 2));
     // Write after a 9-byte gap, then place the head right before the text.
@@ -218,8 +235,8 @@ function findIn(m, p, n, key, cose) {
     return -1;
   }
   const d = m.dir(p, n);
-  const r = d !== null ? navDirFind(m.b, m.o, d, n, keyBuf, span[0], span[1], m.end) : navFind(m.b, m.o, p, keyBuf, span[0], span[1], m.end);
-  return r >= 0 ? r : -1;
+  m.o[N_STEPS] = 0;
+  return ok(d !== null ? navDirFind(m.b, m.o, d, n, keyBuf, span[0], span[1], m.end) : navFind(m.b, m.o, p, keyBuf, span[0], span[1], m.end));
 }
 
 function elementIn(m, p, n, i) {
@@ -227,8 +244,8 @@ function elementIn(m, p, n, i) {
   if (i < 0 || i >= n) return -1;
   const d = m.dir(p, n);
   if (d !== null) return d[i];
-  const r = navChild(m.b, m.o, p, i, m.end);
-  return r >= 0 ? r : -1;
+  m.o[N_STEPS] = 0;
+  return ok(navChild(m.b, m.o, p, i, m.end));
 }
 
 function valueAt(m, p, depth) {
@@ -385,7 +402,10 @@ export class Cursor {
     if (this._n === 0) return false;
     const f = 4 * (this._n - 1), i = this._f[f + 1] + 1;
     if (i >= this._f[f + 2]) return false;
-    const m = this._m, q = m.skip(this._p);
+    const m = this._m;
+    // the end of the current item: scalars and strings from their head, containers by a structural skip
+    const c = m.head(this._p), major = m.o[N_MAJOR];
+    const q = major <= 1 || major === 7 ? c : major <= 3 ? c + m.o[N_LO] : m.skip(this._p);
     this._f[f + 1] = i;
     if (this._k >= 0) { this._k = q; this._p = m.skip(q); } else this._p = q;
     return true;
@@ -418,7 +438,13 @@ export class Cursor {
   }
   number() { return numberAt(this._m, this._p, this.view()); }
   bigint() { return bigintAt(this._m, this._p); }
-  int() { want(kindAt(this._m, this._p) === 'int', 'an integer'); return intAt(this._m, this._p); }
+  int() {
+    const m = this._m; m.head(this._p);
+    const major = m.o[N_MAJOR];
+    if (major === 0 && m.o[N_HI] === 0 && m.o[N_LO] >= 0) return m.o[N_LO];   // fast path: below 2^31
+    if (major === 1 && m.o[N_HI] === 0 && m.o[N_LO] >= 0) return -1 - m.o[N_LO];
+    want(kindAt(m, this._p) === 'int', 'an integer'); return intAt(m, this._p);
+  }
   text() { return textAt(this._m, this._p); }
   bool() { return boolAt(this._m, this._p); }
   isNull() { return isNullAt(this._m, this._p); }

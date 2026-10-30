@@ -254,3 +254,12 @@ test('view: a View is a cheap object', () => {
   assert.ok(v instanceof View);
   assert.deepStrictEqual(Object.keys(v).sort(), ['_d', '_m', '_p']);
 });
+
+test('view: the step budget bounds one walk, not the view\'s life; a failed walk throws, never a silent miss', () => {
+  const v = view(snug.encode({ a: Array.from({ length: 1000 }, (_, i) => i) }));
+  const a = v.get('a');
+  for (let k = 0; k < 50; k++) assert.equal(a.at(900).int(), 900);   // ~45 000 steps in all
+  v._m.o[5] = 100;                                                   // N_BUDGET: 100 heads per walk
+  for (let k = 0; k < 20; k++) assert.equal(a.at(50).int(), 50);
+  assert.throws(() => a.at(500), /navigation failed/);
+});
