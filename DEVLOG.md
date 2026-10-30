@@ -531,9 +531,10 @@ slower); allocated head tuples; validating wrapper constructors in build
   with `SNUG_RS_ONLY="cbor vm compile program hello.rs"` (the committed
   `lib.rs` declares `pub mod compile`; `bin/vm.rs` needs `vm`; absent
   directories are skipped); `wasm-build` defaults to `cbor vm`; `lib.rs`
-  gains `pub mod schema;`. Scratch words 37–42 (program.md "reserved") are
-  the VM's per-call run state, re-initialised every call; vm-verify uses
-  37–38 only at load, so they never overlap in time.
+  gains `pub mod schema;`. Scratch words 37–47 (program.md "reserved"; 43–47
+  since P3.6: the generic/schedule/free flags and the fast paths' hand-off
+  words) are the VM's per-call run state, re-initialised every call;
+  vm-verify uses 37–38 only at load, so they never overlap in time.
   Learnt: (1) the §15 worked example is a precise spec of the charging
   schedule's ambiguous corners — reproducing its 64/47 units exactly fixed
   six readings (D041); (2) "profile identity" must be tested with a schema
@@ -620,6 +621,81 @@ slower); allocated head tuples; validating wrapper constructors in build
   profile-valid accepting case exists for them; `any` has no profile-valid
   refusing case. These limits are explicit in the corpus. Scalar -0 likewise
   has no profile value and is exercised only inside typed arrays.
+
+- [~] **P3.6 — VM performance and budget calibration.** (manager, 2026-10-29)
+  *Brief*: common-shape fast paths with identical observable results (verdict,
+  reason, path, offset, items, budget used) and a gate holding them to the
+  generic path; live validation ≤ 2× the scanner on the P1.4 inputs with
+  permissive schemas and on the study contracts; `schema.decode` ≤ cbor.mjs on
+  the codec set; optionally a revised §14 so units track CPU; a default budget
+  keeping the worst budget-bounded input ≤ 50 ms CPU in Node with every valid
+  benchmark message fitting.
+  *Status 2026-10-29 (VM engineer)*: fast paths, generic tuning, the opt-in
+  schedule 2 and the calibration are done and gated (commits `e732153`,
+  `452f4d2`, `660bb80` and this entry's); the contracts' 2× target is not
+  reachable this way (below); schedule 2 and the new default budget wait for
+  the decisions D045/D046.
+  Built (D044): `fast-child` (an item queried with exactly one answer leaf,
+  no frame or marks; scalar leaves inline, INT over one interval and TEXT
+  without a regexp without a call; `any`/bare major on an array or map walks
+  the children dead directly); `array-step` and `array-streak` for `[* T]`;
+  `map-pair-fast` and `map-streak` for single-block closed structs and pure
+  tables `{* K => V}` (the key search probed without charging, then the exact
+  units); `dead-int-streak` in the dead walk; generic maps: fused per-block
+  loops (charges at one offset with no check between may be reordered) and
+  struct-block key-phase/update routines for choices of structs. A streak
+  checks an element or pair completely before charging it and stops BEFORE
+  anything that would fail, run out of budget or need anything else; merged
+  charges never cross an item count (the count is observable — the gate
+  caught exactly that). `limits` word 8 (a VM extension beyond program.md
+  §12.3's 8 words): bit 0 forces the generic path, bit 1 selects schedule 2.
+  `kin/scripts/vm-emit` emits only the flat sources (scanner + VM), so a
+  sibling's mid-edit compiler cannot block the VM's gates.
+  Gates run (`bb vm-test 5000 {1,2} 400`, all ok): conformance 983/983 (the
+  compiler's `.size` fix landed); profile identity 12 720/12 720 per seed;
+  oracle 3 200/3 200; assembled 75/75 + 3 600 fast-path stress cases (long
+  `[* int]`, `[* range]`, `[* tstr .size]`, structs and tables with bad
+  elements, profile mutations, item limits and budgets landing at random
+  points); **fast == generic 20 578/20 578** whole out arrays under schedule
+  1 and again under schedule 2; schedule 2 changes nothing but the budget used
+  on 20 578/20 578; JS == Rust 20 578/20 578 under each schedule; JS == wasm
+  20 575/20 575; epochs 1 869/1 869; JS host == Rust host 1 033/1 033. Also
+  `bb check`, `bb scan-test 30000 1`, `bb rscan-test 30000 2` (see below).
+  Measured (`bench/VM.md` "P3.6"): `{v: [* int]}` 16.0 → 1.1 ms (scanner 1.3
+  ms, 0.86×); typed arrays 1.0–1.3×; `{docs: [* {* tstr => any}]}` 42.6 →
+  11–12 ms (2.2–2.4×); RPC put `{* tstr => any}` 3.7 → 1.2 µs (1.9×); the
+  six-way choice 19.7 → 16.3 ns/unit. Contracts 10–29× the scanner (they were
+  11–33×): **not met**, and not meetable with fast paths — their maps are
+  choices of several map types and type-set evaluation advances every
+  alternative in parallel, so the work is the §14 work itself (a 59-byte
+  object-storage request is 253 units) at ~20 ns/unit on the generic path; a
+  discriminator-first dispatch or the parked lazy DFA cache would be the next
+  step, both larger designs. Mixed literal + wildcard maps also stay generic
+  (8.9× on the 1 MiB put, 5.9 µs absolute). `schema.decode` ≤ cbor.mjs on
+  every integer, map, struct and document workload (0.25–0.9×); the 1 MiB
+  `Float64Array` (1.0–1.4×) and some runs of the 1 MiB put are decided by
+  the builder's copy, not the VM.
+  Calibration (`bench/vm-calib.mjs`, 19 event kinds incl. the worst shapes
+  found: 20-way and mixed map choices, absorb factors, AND per element, wide
+  automata, regexps, LITSETs): worst large-input rate ~22 ns/unit (schedule
+  1) / ~21 ns/unit (schedule 2), both generic choice-of-maps work; fast shapes
+  0.7–5 ns/unit under schedule 1. **Plainly: under §14 as it is, a budget
+  bounding the worst case at 50 ms (~2.2–2.3 M) refuses valid 1.5 MB integer
+  arrays (3.6 M units), 1.1 MB nested maps (2.5 M) and 0.95 MB of small maps
+  (4.45 M), which validate in 3–31 ms; today's 4 M default still refuses the
+  last and lets the worst input cost ~80–90 ms.** Under schedule 2 every
+  valid benchmark message needs ≤ 1.45 M units; proposal: schedule 2 with a
+  2.3 M default (D045, D046).
+  Learnt: (1) the only safe way to make a fast path is to make it a different
+  *implementation* of the same charges, with a switch to run the other one on
+  every gate case — every bug the gate found was in charging order or state
+  (items counted across a merged charge, a sentinel colliding with a real
+  major type), none in verdicts; (2) once the fast paths run, the schedule,
+  not the VM, decides what fits: units must be calibrated against the code
+  that runs, which is why schedule 2 charges by shape; (3) the worst-case
+  ns/unit is set by the generic choice-of-maps path (~20 ns), the floor by
+  the dead walk (~5–13 ns/item), so the budget/CPU ratio cannot be tighter
+  than those two without a faster generic path.
 
 ## Phase 4 — Differential, fuzz, benchmarks
 
@@ -1379,6 +1455,78 @@ unit per item plus scans instead of five.
 **Alternatives**: arch §4.1's literal "ANY gives {ANY}" (same verdicts and
 witnesses, ~5× the budget per item under `any`).
 - [ ] **Signed off** (owner)
+
+### D044 — Fast paths are other implementations of the same charges, held to the generic path (VM engineer)
+**Decision**: shape-specific paths (one-answer child without frames; `[* T]`
+element step and success streak; single-block closed-struct and `{* K => V}`
+pair step and streak; `any`/bare major on containers; dead integer streak;
+struct-block routines and fused loops on the generic map path) must give the
+identical out array — verdict, reason, subcode, offset, budget used, items,
+path — for every input. Charges at one offset with no observable check
+between may be merged or reordered; never across an item count, a profile
+check or another offset. A streak checks an element or pair fully before
+charging and stops before anything that would fail, exhaust the budget or
+need the generic path. `limits` word 8 bit 0 forces the generic path; `bb
+vm-test` compares both on every case (corpus, oracle generator, mutations,
+assembled, a fast-path stress set) under both schedules.
+**Why**: live validation was 8× the scanner on arrays and maps; the
+observable contract (R6: same budget exhaustion point on every host) leaves
+no room for fast paths that charge differently.
+**Alternatives**: changing the schedule to whatever the fast paths do
+(couples the schedule to the implementation); a lazy DFA cache over typesets
+(parking lot; larger); compiling schemas to code (not kin's model).
+- [ ] **Signed off** (owner)
+
+### D045 — Schedule 2: simple-shape bookkeeping charged in proportion to its CPU (proposal; implemented opt-in)
+**Decision (proposed)**: amend program.md §14 with three rules, everything
+else unchanged: (i) an element of an array item whose one admitted ARRAY
+block is one uncounted self-looping position with a one-answer typeset (no
+evaluation list), while the block is alive, has no bookkeeping units (block
+visit, W(|A|+1), candidate, typeset element, stamp, candidate, test); (ii) a
+pair of a map item whose one admitted MAP block is a closed struct (one
+factor, pool and alternative, the empty group) or a pure table (no literal
+entry, one absorbing group entry, one-leaf key and value typesets), while the
+block is alive and the pair is simple (an unnamed key, or a key named once
+with a one-leaf value typeset; every table pair), costs exactly 1
+bookkeeping unit at the map (replacing block visit, cursor steps, key and
+value query elements, both stampings, key-phase entries and tests, naming
+visits, candidate tests, naming update and pools; key-search probes and the
+key-order comparison stay); (iii) a key, value or element of (i)/(ii) queried
+with exactly one scalar answer leaf has no filter unit and no leaf unit (its
+visit, profile scans and the leaf's variable work — interval and LITSET
+probes, literal comparisons, regexp steps, `.bits` scans — stay). Implemented
+in the VM behind `limits` word 8 bit 1 on the fast and generic paths alike
+(the generic path marks the bookkeeping free while it runs), gated fast ==
+generic and "changes only the budget used" on every vm-test case.
+**Why**: with the fast paths, §14 charges simple shapes 0.7–5 ns of CPU per
+unit against ~20 ns on generic choice-of-maps work, so no single budget both
+bounds hostile input at 50 ms and admits valid 1–1.5 MB messages (bench/VM.md
+P3.6). Under schedule 2 valid benchmark messages need 3–6× fewer units and
+the per-unit CPU of every measured shape is 4.4–21 ns.
+**Alternatives**: keep §14 and accept a 2.2–2.3 M default that refuses valid
+large messages, or keep 4 M and accept ~80–90 ms worst cases; a budget that
+grows with input size (does not bound per-byte cost); raising the charges of
+generic map work instead (same ratio, larger numbers, §15 changes anyway).
+**Needs**: program.md §14 amended and §15's worked totals re-derived (§15.3's
+one-element `[* tstr]` changes; the two-leaf map choice does not), with the
+compiler engineer's agreement (no Program byte changes); until then schedule
+1 stays the default.
+- [ ] **Signed off** (owner)
+- [ ] **Agreed** (compiler engineer)
+
+### D046 — Default step budget: 2.3 M under schedule 2 (proposal)
+**Decision (proposed)**: with schedule 2, the compiled default `LIM_BUDGET`
+becomes 2 300 000 units: the worst large budget-bounded input measured costs
+~21–22 ns/unit in Node v24.6 on an M1 Pro (≈ 50 ms), and the largest valid
+benchmark message needs 1 450 008 units (63%). If schedule 2 is rejected:
+either 2.3 M with the refusals listed in bench/VM.md P3.6, or 4 M with
+~80–90 ms worst cases — an owner trade-off, not taken here.
+**Why**: architecture §7's 50 ms target, recorded per event kind.
+**Needs**: the compiler sets the default (`snug.compile.main`
+`setup-limits`, option 17); the compiler engineer changes it after this
+decision. workerd timings are still to be taken (Phase 4).
+- [ ] **Signed off** (owner)
+
 ---
 
 ### D050 — Navigation primitives: contract over checked bytes

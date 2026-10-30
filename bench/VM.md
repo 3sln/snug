@@ -200,3 +200,124 @@ nested maps, short text keys, 1107041 B        r = { docs: [* { * tstr => any }]
 
 {"cpu":"Apple M1 Pro","cores":10,"os":"Darwin 23.6.0","node":"v24.6.0","load":"8.2 13.1 13.0","wasm":true,"crate":true,"date":"2026-10-29T23:56:06.303Z"}
 ```
+
+---
+
+# P3.6 — VM performance and budget calibration
+
+Recorded 2026-10-29 by the VM engineer, after the fast paths (D044), the
+generic-path tuning and the opt-in schedule 2 (D045). Same machine and method
+as above (M1 Pro, Node v24.6.0, shared, load 8–16; CPU time, best of rounds).
+Reproduce: `node bench/vm-perf.mjs` (live validation vs the generated scanner,
+and `schema.decode` vs cbor.mjs on the codec set), `node bench/vm-calib.mjs
+[budget] [--s2]` (CPU per unit, worst budget-bounded inputs, units of valid
+messages), `node bench/vm-bench.mjs [--quick]` (the three-way table above).
+
+## Live validation vs the scanner (`bench/vm-perf.mjs`)
+
+| input :: schema | before P3.6 | now | scanner | now / scanner |
+| --- | ---: | ---: | ---: | ---: |
+| RPC put 287 B :: `{ * tstr => any }` | 3.69 µs | 1.20 µs | 0.63 µs | 1.9× |
+| RPC put 1 MiB :: `{ method: tstr, args: { key: tstr, data: bstr, * tstr => any }, * tstr => any }` | 5.55 µs | 5.85 µs | 0.66 µs | 8.9× (mixed literal + wildcard maps take the generic path) |
+| 120 000 ints :: `{ v: [* int] }` | 15.98 ms | 1.11 ms | 1.30 ms | 0.86× |
+| 1 MiB typed arrays :: three tags | 0.19 ms | 0.17–0.22 ms | 0.17 ms | 1.0–1.3× |
+| nested maps 1.1 MB :: `{ docs: [* { * tstr => any }] }` | 42.6 ms | 11.0–12.4 ms | 5.0 ms | 2.2–2.4× |
+| object-storage request 59 B | 6.27 µs | 5.3 µs | 0.18 µs | 29× |
+| object-storage presign-result 95 B | 3.49 µs | 2.4–2.7 µs | 0.24 µs | 10× |
+| item-classification 163 B | 8.93 µs | 7.3–7.8 µs | 0.45 µs | 17× |
+| event-bus record (`.cbor`) 29 B | 1.63 µs | 1.2–1.3 µs | 0.07 µs | 17× |
+| preferences result 107 B | 4.57 µs | 4.2–4.6 µs | 0.28 µs | 15× |
+| ledger entry 165 B | 5.14 µs | 4.5–5.6 µs | 0.41 µs | 11–14× |
+| signaling message 296 B | 17.1 µs | 13.9–15.0 µs | 0.76 µs | 18–20× |
+
+The ≤ 2× target is met for the integer arrays, the typed arrays and the small
+table map, and nearly (2.2–2.4×) for the nested maps. It is **not met for the
+study contracts (10–29×) or for mixed literal + wildcard maps**: their maps are
+choices of several map types, and type-set evaluation advances every
+alternative in parallel (the `args` value of an object-storage request is
+evaluated against six map types until `method` arrives), so their cost is the
+§14 work itself — 250 units for a 59-byte message — at ~20 ns per unit on
+the generic path. Closing that gap needs a different evaluation strategy
+(discriminator-first dispatch or the lazy DFA cache of the parking lot), not a
+fast path.
+
+## schema.decode (VM, then the trusted builder) vs cbor.mjs decode
+
+| codec workload :: schema | snug decode | cbor.mjs | ratio |
+| --- | ---: | ---: | ---: |
+| RPC put 287 B :: `any` | 2.90 µs | 5.04 µs | 0.57× |
+| RPC put 287 B :: `{ * tstr => any }` | 3.29 µs | 4.81 µs | 0.68× |
+| RPC put + 1 MiB :: `any` | 172 µs | 229 µs | 0.75× |
+| RPC put + 1 MiB :: `{ * tstr => any }` | 220–245 µs | 165–250 µs | 1.0–1.5× (noisy: the 1 MiB copy dominates both) |
+| 120 000 integers :: `any` | 1.57–1.65 ms | 1.8–2.1 ms | 0.74–0.92× |
+| 120 000 integers :: `[* int]` | 1.9–2.1 ms | 1.8–2.3 ms | 0.89–1.12× |
+| 1 MiB Float64Array :: `any` | 0.39–0.48 ms | 0.40–0.45 ms | 0.9–1.2× |
+| 1 MiB Float64Array :: `#6.86(bstr)` | 0.42–0.53 ms | 0.38–0.44 ms | 1.0–1.4× |
+| 10 000 maps × 8 keys :: `any` | 6.6 ms | 26.6 ms | 0.25× |
+| 10 000 maps × 8 keys :: `[* { * tstr => any }]` | 10.4–11.6 ms | 25.8–26.5 ms | 0.4× |
+| 10 000 maps × 8 keys :: struct | 17.6–18.1 ms | 25.1–26.9 ms | 0.7× |
+| map-heavy document 1.4 MB :: `any` | 12.9 ms | 31.1 ms | 0.42× |
+| map-heavy document 1.4 MB :: nested structs | 25.6–26.3 ms | 31.6–31.8 ms | 0.8× |
+
+`schema.decode` ≤ cbor.mjs holds on every map, struct and integer workload.
+The exceptions are the 1 MiB `Float64Array` (1.0–1.4×) and, in some runs, the
+1 MiB byte-string put: there the builder's copy of the megabyte, not the VM,
+decides (the VM takes 1–6 µs on those inputs).
+
+## Budget calibration (`bench/vm-calib.mjs`)
+
+CPU per budget unit (ns), schedule 1 (program.md §14, the default) and
+schedule 2 (D045, opt-in), on large inputs that run to the end with an
+unlimited budget:
+
+| event kind | units (s1) | ns/unit s1 | units (s2) | ns/unit s2 |
+| --- | ---: | ---: | ---: | ---: |
+| dead walk, 120k ints (`any`) | 120 006 | 4.9–13.6 | 120 006 | 5.5–12.7 |
+| dead walk, nested maps (`any`) | 756 009 | 7.5–10.3 | 756 009 | 8.0–9.1 |
+| `[* int]` (fast) | 1 440 007 | 0.7–0.8 | 240 008 | 4.4–4.7 |
+| `[* tstr]` (fast) | 1 200 007 | 1.0 | 200 008 | 6.0–6.4 |
+| `{docs: [* {* tstr => any}]}` (fast) | 2 484 024 | 4.2–5.2 | 1 008 018 | 12.8–13.5 |
+| struct records (fast struct + generic `bool` pairs) | 1 620 007 | 10.0–11.0 | 880 008 | 20.9–21.4 |
+| six-way choice of maps (generic) | 3 048 007 | 19.2–19.4 | 3 048 007 | 18.3–18.6 |
+| 20-way choice of maps, late discriminator | 4 512 007 | 18.2–19.3 | 4 512 007 | 17.6–17.7 |
+| 20-way mixed (literal + wildcard) maps | 6 714 007 | 18.3–19.6 | 6 714 007 | 18.1–19.1 |
+| absorb factor `{ ? (a: int, b: int), * tstr => any }` | 1 740 007 | 15.6–17.5 | 1 580 008 | 17.8–18.5 |
+| array of 6-way struct choices, discriminator first | 3 288 007 | 18.3–20.4 | 3 288 007 | 17.6–18.5 |
+| 12k object-storage requests (choices) | 3 504 007 | 19.4–21.7 | 3 276 007 | 20.6–20.7 |
+| AND per element (text `.size` ∧ `.regexp`) | 1 950 007 | 3.6–4.8 | 1 450 008 | 5.8–5.9 |
+| regexp `(a\|b\|ab\|ba)*c`, 200k code points | 1 303 128 | 4.3–4.8 | 1 303 128 | 4.6–4.7 |
+| LITSET of 200 text literals | 375 307 | 7.6–8.1 | 175 308 | 17.3–17.6 |
+| wide array automaton `[* (uint, tstr, bool, null)]` | 510 007 | 9.3–10.8 | 510 007 | 10.8–10.9 |
+
+(One 253-unit contract message reaches 22–25 ns/unit, the per-call setup
+dominating; it is not budget-bounded.) The worst large-input rate is
+**~22 ns/unit** under schedule 1 and **~21 ns/unit** under schedule 2, both
+on generic choice-of-maps work (and, under schedule 2, struct records whose
+`bool` members leave the one-leaf shape).
+
+Units needed by valid benchmark messages:
+
+| message :: schema | bytes | units s1 | units s2 | CPU |
+| --- | ---: | ---: | ---: | ---: |
+| RPC put :: `{ * tstr => any }` | 287 | 191 | 74 | < 0.01 ms |
+| 120k ints :: `{ v: [* int] }` | 584 247 | 1 440 024 | 240 018 | 1.2 ms |
+| nested maps :: `{ docs: [* { * tstr => any }] }` | 1 107 041 | 2 484 024 | 1 008 018 | 11–14 ms |
+| typed arrays :: tags | 1 048 610 | 12 363 | 12 340 | 0.2 ms |
+| struct records (10k) :: nested struct | 1 269 723 | 1 620 007 | 880 008 | 16–19 ms |
+| ints :: `[* int]` | 1 456 219 | 3 600 007 | 600 008 | 2.8–3.1 ms |
+| 50k small maps :: `[* { * tstr => int }]` | 949 163 | 4 450 007 | 1 450 008 | 23–31 ms |
+
+**The trade-off, plainly.** With program.md §14 as it is (schedule 1), a
+default budget that keeps the worst budget-bounded input at ≤ 50 ms of CPU in
+Node here is ~2.2–2.3 M units; at that budget valid messages of 1.5 MB of
+integers (3.6 M), 1.1 MB of nested maps (2.5 M) and 0.95 MB of small maps
+(4.45 M) are refused although they validate in 3–31 ms. The current 4 M
+default admits the first two but still refuses the third, and lets the worst
+input cost ~80–90 ms. Schedule 1 charges simple shapes 20–30× more units than
+their CPU once the fast paths run. Under schedule 2 every valid benchmark
+message needs ≤ 1.45 M units, so **schedule 2 with a 2.3 M default** keeps the
+worst case at ≈ 50 ms (21–22 ns/unit) and leaves the largest valid benchmark
+message at 63% of the budget (D045, D046). Schedule 2 needs program.md §14
+and §15 amended (§15.3's `[* tstr]` element charges change) with the compiler
+engineer's agreement before it can become the default; the default budget
+itself is a compile option the compiler sets (D046).
