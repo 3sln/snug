@@ -23,5 +23,7 @@
                 :task (apply shell "kin/scripts/compile-fuzz" *command-line-args*)}
   crate-diff {:doc "P4.1: seeded differential vs the native cddl crate 0.10.7."
               :task (apply shell "node" "corpus/tools/crate-diff.mjs" *command-line-args*)}
+  nav-test   {:doc "P5: kin navigation primitives on JS and Rust -- trace identity, truth vs the builder, unchecked-input robustness, Rust View paths."
+              :task (apply shell "kin/scripts/nav-test" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

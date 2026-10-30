@@ -1,0 +1,40 @@
+#!/bin/sh
+# Assemble a Rust crate holding the profile scanner and the navigation
+# modules (P5) with the minimal Rust view and the nav-test binary:
+#
+#     kin/scripts/nav-crate DIR
+#
+#   DIR/src/snug/cbor/*.rs   gen/rust/snug/cbor (committed)
+#   DIR/src/snug/nav/*.rs    $SNUG_GEN/rust/snug/nav (default gen)
+#   DIR/src/view.rs          host/rust/nav/view.rs
+#   DIR/src/bin/nav-test.rs  host/rust/nav/nav-test.rs
+#
+# Kept out of host/rust/src so the other crates' module subsets
+# (SNUG_RS_ONLY) are unaffected. Copies only what changed.
+set -e
+cd "$(dirname "$0")/../.."
+dir="$1"
+[ -n "$dir" ] || { echo "usage: nav-crate DIR" >&2; exit 2; }
+mkdir -p "$dir/src/bin" "$dir/src/snug/cbor" "$dir/src/snug/nav"
+put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
+puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
+put host/rust/Cargo.toml "$dir/Cargo.toml"
+puttext "//! snug navigation crate (dev subset): the scanner, the nav modules, a minimal view.
+pub mod snug;
+pub mod view;
+" "$dir/src/lib.rs"
+put host/rust/nav/view.rs "$dir/src/view.rs"
+put host/rust/nav/nav-test.rs "$dir/src/bin/nav-test.rs"
+g="${SNUG_GEN:-gen}"
+puttext "pub mod cbor;
+pub mod nav;
+" "$dir/src/snug.rs"
+for d in cbor nav; do
+  src=gen; [ "$d" = nav ] && src="$g"
+  lines=""
+  for f in $(ls "$src/rust/snug/$d" | sort); do
+    case "$f" in *.rs) put "$src/rust/snug/$d/$f" "$dir/src/snug/$d/$f"; lines="${lines}pub mod ${f%.rs};
+";; esac
+  done
+  puttext "$lines" "$dir/src/snug/$d.rs"
+done

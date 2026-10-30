@@ -1,0 +1,16 @@
+#!/bin/sh
+# P5 navigation gates on JS and Rust (kin/scripts/nav-test.mjs says which):
+#
+#     kin/scripts/nav-test [random documents] [seed]
+#
+# Emits the navigation sources (kin/scripts/nav-emit) so the gate runs what
+# the sources say, then builds the nav crate in DEBUG (overflow checks on).
+set -e
+cd "$(dirname "$0")/../.."
+bb -cp kin/src:../kin/src kin/scripts/nav-emit > /dev/null
+crate=.cache/snug-nav-gate
+kin/scripts/nav-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin nav-test 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/nav-test.mjs "$crate/target/debug/nav-test" "$@"

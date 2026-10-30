@@ -1,0 +1,222 @@
+;; Navigation over CHECKED Bindle CBOR (architecture §16.4, first slice):
+;; read a head, skip an item, the n-th child, key search in a map, and a
+;; per-container child directory that turns key search into binary search.
+;;
+;; Every function assumes its bytes passed the full profile check (the
+;; scanner, or the schema VM) under the options the caller holds; nothing here
+;; re-checks the profile. Still, nothing reads out of bounds or loops on any
+;; input: each head is bounds-checked against `end` (which must not exceed
+;; the buffer), every step makes progress, and the walk is charged one step
+;; per head against a budget (o[N_BUDGET]); a malformed span answers NAV_BAD.
+;;
+;; Every function answers a position (>= 0) or a negative NAV_* code. The
+;; state array `o` (NAV_WORDS words) carries the last head read and the step
+;; counter.
+(ns snug.nav.walk
+  (:require [kin.lang :refer [defn defconst let return set if while for do comment]]
+            [snug.lang :refer [I32 Bytes Ints IntsR + - * neg shl ushr bit-and
+                               < > <= >= == != and or u8 blen ia iset ilen]]
+            [snug.cbor.head :refer [be16 be32]]))
+
+;; ------------------------------------------------------------- state and codes
+
+(defconst ^:pub ^I32 N_MAJOR 0)
+(defconst ^:pub ^I32 N_AI 1)
+(defconst ^:pub ^I32 N_HI 2)
+(defconst ^:pub ^I32 N_LO 3)
+(defconst ^:pub ^I32 N_STEPS 4)
+(defconst ^:pub ^I32 N_BUDGET 5)
+(defconst ^:pub ^I32 NAV_WORDS 8)
+
+(defconst ^:pub ^I32 NAV_BAD -1)
+(defconst ^:pub ^I32 NAV_BUDGET -2)
+(defconst ^:pub ^I32 NAV_NOT_FOUND -3)
+(defconst ^:pub ^I32 NAV_SMALL -4)
+
+(defn ^:pub nav-init [^Ints o ^I32 budget]
+  (comment "Reset the step counter and set the step budget (heads read).")
+  (iset o N_STEPS 0)
+  (iset o N_BUDGET budget))
+
+(defn ^:pub ^I32 nav-steps [^IntsR o]
+  (return (ia o N_STEPS)))
+
+;; ------------------------------------------------------------- heads
+
+(defn ^:pub ^I32 nav-head [^Bytes b ^Ints o ^I32 p ^I32 end]
+  (comment "The head at p: major type, additional information and the argument"
+           "(two i32 halves of its bit pattern; for a float, its bits) into o;"
+           "answers the content start (the position after the head). A float16's"
+           "bits are in o[N_LO], a float32's too, a float64's in hi:lo.")
+  (if (or (< p 0) (>= p end)) (return NAV_BAD))
+  (if (> end (blen b)) (return NAV_BAD))
+  (let [ib (u8 b p)
+        ai (bit-and ib 31)
+        q (+ p 1)]
+    (iset o N_MAJOR (ushr ib 5))
+    (iset o N_AI ai)
+    (iset o N_HI 0)
+    (if (< ai 24)
+      (do (iset o N_LO ai)
+          (return q)))
+    (if (> ai 27) (return NAV_BAD))
+    (let [w (shl 1 (- ai 24))]
+      (if (> w (- end q)) (return NAV_BAD))
+      (if (== w 1) (iset o N_LO (u8 b q)))
+      (if (== w 2) (iset o N_LO (be16 b q)))
+      (if (== w 4) (iset o N_LO (be32 b q)))
+      (if (== w 8)
+        (do (iset o N_HI (be32 b q))
+            (iset o N_LO (be32 b (+ q 4)))))
+      (return (+ q w)))))
+
+;; ------------------------------------------------------------- skipping
+
+(defn ^:pub ^I32 nav-skip-n [^Bytes b ^Ints o ^I32 p ^I32 count ^I32 end]
+  (comment "The position after `count` consecutive items starting at p, by a"
+           "structural walk with no recursion: a counter of items still owed (an"
+           "array owes its n elements, a map 2n, a tag its content). Each owed item"
+           "needs at least one byte, so a count beyond what remains is NAV_BAD;"
+           "every head is a step charged against o[N_BUDGET].")
+  (let [^:mut q p
+        ^:mut need count]
+    (if (< count 0) (return NAV_BAD))
+    (if (> need (- end q)) (return NAV_BAD))
+    (while (> need 0)
+      (let [steps (+ (ia o N_STEPS) 1)]
+        (iset o N_STEPS steps)
+        (if (> steps (ia o N_BUDGET)) (return NAV_BUDGET)))
+      (let [c (nav-head b o q end)]
+        (if (< c 0) (return c))
+        (set need (- need 1))
+        (set q c)
+        (let [major (ia o N_MAJOR)
+              hi (ia o N_HI)
+              lo (ia o N_LO)
+              left (- end c)]
+          (if (and (>= major 2) (<= major 5))
+            (if (or (!= hi 0) (< lo 0)) (return NAV_BAD)))
+          (if (<= major 3)
+            (if (>= major 2)
+              (do (if (> lo left) (return NAV_BAD))
+                  (set q (+ c lo)))))
+          (if (== major 4)
+            (do (if (> lo left) (return NAV_BAD))
+                (set need (+ need lo))))
+          (if (== major 5)
+            (do (if (> lo (ushr left 1)) (return NAV_BAD))
+                (set need (+ need (* 2 lo)))))
+          (if (== major 6) (set need (+ need 1)))))
+      (if (> need (- end q)) (return NAV_BAD)))
+    (return q)))
+
+(defn ^:pub ^I32 nav-skip [^Bytes b ^Ints o ^I32 p ^I32 end]
+  (comment "The end of the item at p (its span is [p, answer)).")
+  (return (nav-skip-n b o p 1 end)))
+
+;; ------------------------------------------------------------- children
+
+(defn ^:pub ^I32 nav-length [^Bytes b ^Ints o ^I32 p ^I32 end]
+  (comment "An array's element count, a map's pair count, a tag's 1, else"
+           "NAV_NOT_FOUND.")
+  (let [c (nav-head b o p end)]
+    (if (< c 0) (return c))
+    (let [major (ia o N_MAJOR)]
+      (if (== major 6) (return 1))
+      (if (or (== major 4) (== major 5))
+        (do (if (!= (ia o N_HI) 0) (return NAV_BAD))
+            (return (ia o N_LO))))
+      (return NAV_NOT_FOUND))))
+
+(defn ^:pub ^I32 nav-child [^Bytes b ^Ints o ^I32 p ^I32 i ^I32 end]
+  (comment "The position of child i of the container at p, by sequential skip:"
+           "an array's element i, a map's KEY of pair i (its value follows the"
+           "key), a tag's content (i = 0). NAV_NOT_FOUND outside the container.")
+  (let [n (nav-length b o p end)]
+    (if (< n 0) (return n))
+    (if (or (< i 0) (>= i n)) (return NAV_NOT_FOUND))
+    (let [c (nav-head b o p end)
+          major (ia o N_MAJOR)]
+      (if (< c 0) (return c))
+      (if (== major 5) (return (nav-skip-n b o c (* 2 i) end)))
+      (return (nav-skip-n b o c i end)))))
+
+;; ------------------------------------------------------------- keys
+
+(defn ^:pub ^I32 compare-key [^Bytes b ^I32 s1 ^I32 e1 ^Bytes k ^I32 s2 ^I32 e2]
+  (comment "<0, 0 or >0 as b[s1..e1) sorts before, equal to or after k[s2..e2):"
+           "RFC 8949 §4.2.1 bytewise order of encoded keys (snug.cbor.keys over two"
+           "buffers).")
+  (let [l1 (- e1 s1)
+        l2 (- e2 s2)
+        ^:mut m l1
+        ^:mut i 0]
+    (if (< l2 m) (set m l2))
+    (while (< i m)
+      (let [x (u8 b (+ s1 i))
+            y (u8 k (+ s2 i))]
+        (if (!= x y) (return (- x y)))
+        (set i (+ i 1))))
+    (return (- l1 l2))))
+
+(defn ^:pub ^I32 nav-find [^Bytes b ^Ints o ^I32 p ^Bytes k ^I32 ks ^I32 ke ^I32 end]
+  (comment "In the map at p, the VALUE position of the key whose encoding is"
+           "k[ks..ke), or NAV_NOT_FOUND. Linear: stops at the first key that sorts"
+           "after the target, which is sound only because the map's key order was"
+           "proved by the check (architecture §16.1).")
+  (let [c (nav-head b o p end)]
+    (if (< c 0) (return c))
+    (if (!= (ia o N_MAJOR) 5) (return NAV_NOT_FOUND))
+    (let [n (ia o N_LO)
+          ^:mut q c]
+      (if (!= (ia o N_HI) 0) (return NAV_BAD))
+      (for [^I32 _i 0 n]
+        (let [ke1 (nav-skip b o q end)]
+          (if (< ke1 0) (return ke1))
+          (let [cmp (compare-key b q ke1 k ks ke)]
+            (if (== cmp 0) (return ke1))
+            (if (> cmp 0) (return NAV_NOT_FOUND)))
+          (set q (nav-skip b o ke1 end))
+          (if (< q 0) (return q))))
+      (return NAV_NOT_FOUND))))
+
+;; ------------------------------------------------------------- directories
+
+(defn ^:pub ^I32 nav-dir [^Bytes b ^Ints o ^I32 p ^Ints d ^I32 end]
+  (comment "A child directory of the array or map at p: d[i] = the position of"
+           "element i (array) or of KEY i (map), one word per child; answers the"
+           "count, NAV_SMALL when d is shorter, NAV_NOT_FOUND for a non-container.")
+  (let [c (nav-head b o p end)]
+    (if (< c 0) (return c))
+    (let [major (ia o N_MAJOR)
+          n (ia o N_LO)
+          ^:mut q c
+          ^:mut per 1]
+      (if (and (!= major 4) (!= major 5)) (return NAV_NOT_FOUND))
+      (if (!= (ia o N_HI) 0) (return NAV_BAD))
+      (if (> n (ilen d)) (return NAV_SMALL))
+      (if (== major 5) (set per 2))
+      (for [^I32 i 0 n]
+        (iset d i q)
+        (set q (nav-skip-n b o q per end))
+        (if (< q 0) (return q)))
+      (return n))))
+
+(defn ^:pub ^I32 nav-dir-find [^Bytes b ^Ints o ^IntsR d ^I32 n ^Bytes k ^I32 ks ^I32 ke ^I32 end]
+  (comment "Binary search of a map's directory (nav-dir) for the key encoded as"
+           "k[ks..ke): the VALUE position, or NAV_NOT_FOUND. Sound only over a"
+           "checked map (its keys are strictly increasing).")
+  (let [^:mut lo 0
+        ^:mut hi (- n 1)]
+    (if (> n (ilen d)) (return NAV_BAD))
+    (while (<= lo hi)
+      (let [mid (+ lo (ushr (- hi lo) 1))
+            s (ia d mid)
+            e (nav-skip b o s end)]
+        (if (< e 0) (return e))
+        (let [cmp (compare-key b s e k ks ke)]
+          (if (== cmp 0) (return e))
+          (if (< cmp 0)
+            (set lo (+ mid 1))
+            (set hi (- mid 1))))))
+    (return NAV_NOT_FOUND)))
