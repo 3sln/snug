@@ -210,7 +210,13 @@ function hostile() {
 const cases = [];
 for (let i = 0; i < N; i++) {
   const r = rnd();
-  const text = r < 0.3 ? mutate(pick(seeds)) : r < 0.55 ? schema() : r < 0.9 ? wschema() : hostile();
+  let text = r < 0.3 ? mutate(pick(seeds)) : r < 0.55 ? schema() : r < 0.9 ? wschema() : hostile();
+  if (chance(0.05)) {
+    // raw bytes: a valid prefix, then bytes that need not be UTF-8 at all
+    const pre = Buffer.from(text.slice(0, ri(text.length + 1)), 'utf8');
+    const tail = Uint8Array.from({ length: ri(40) }, () => ri(256));
+    text = Uint8Array.from([...pre, ...tail]);
+  }
   const limits = {};
   if (chance(0.2)) {
     const k = ri(COMPILE_OPTIONS.length);
@@ -239,14 +245,14 @@ const js = cases.map((c, i) => {
 });
 const rin = cases.map(c => {
   const lim = COMPILE_OPTIONS.map(k => c.limits[k] ?? -1);
-  return `${PROF[c.profile]} ${hex(Buffer.from(c.text, 'utf8'))} ${lim.join(' ')}`;
+  return `${PROF[c.profile]} ${hex(typeof c.text === 'string' ? Buffer.from(c.text, 'utf8') : c.text)} ${lim.join(' ')}`;
 }).join('\n') + '\n';
 const rr = spawnSync(rustBin, [], { input: rin, maxBuffer: 1 << 30 });
 const rust = rr.stdout.toString().trimEnd().split('\n');
 if (rust.length !== cases.length) { console.log(`  FAIL Rust answered ${rust.length} of ${cases.length}`); process.exit(1); }
 for (let i = 0; i < cases.length; i++) {
   const c = cases[i], j = js[i], r = rust[i];
-  const show = JSON.stringify(c.text.slice(0, 70));
+  const show = typeof c.text === 'string' ? JSON.stringify(c.text.slice(0, 70)) : `bytes ${hex(c.text.slice(0, 35))}`;
   if (j.ms > slowest) { slowest = j.ms; slowText = show; }
   if (j.ms > 2000) fail(`${show}: ${j.ms.toFixed(0)} ms on JS`);
   if (j.crash) { fail(`${show}: JS threw ${j.crash.split('\n')[0]}`); continue; }
@@ -261,7 +267,7 @@ for (let i = 0; i < cases.length; i++) {
   } else {
     errCount++;
     codes[j.code] = (codes[j.code] ?? 0) + 1;
-    if (process.env.SNUG_SHOW && j.code === process.env.SNUG_SHOW) console.log(`  show ${j.ms.toFixed(0)}ms ${JSON.stringify(c.text.slice(0, 300))} ${JSON.stringify(c.limits)}`);
+    if (process.env.SNUG_SHOW && j.code === process.env.SNUG_SHOW) console.log(`  show ${j.ms.toFixed(0)}ms ${show} ${JSON.stringify(c.limits)}`);
     if (j.code === 'internal') fail(`${show}: internal error (a compiler bug) at ${j.line}:${j.column}`);
     if (!(f[0] === 'err' && f[1] === j.code && Number(f[2]) === j.line && Number(f[3]) === j.column && f.slice(4).join(' ') === j.rule))
       fail(`${show}: JS ${j.code} ${j.line}:${j.column} ${j.rule} vs Rust ${r}`);
