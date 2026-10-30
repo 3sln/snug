@@ -132,6 +132,40 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
   if (!(okJs && okRust)) fails++;
 }
 
+// ---------------------------------------------------------------- arena-size independence
+// The arena only grows by retry (D033): the outcome must not depend on where
+// it starts. Each corpus schema from the smallest arena (many retries) and
+// from a 4 Mi-word one (none) must give the same code and the same words.
+{
+  const M = await import('../../gen/js/snug/compile/main.mjs');
+  const A = await import('../../gen/js/snug/compile/arena.mjs');
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const run = (text, start) => {
+    const bytes = enc.encode(text), opt = new Int32Array(M.OPT_WORDS).fill(-1);
+    let fl = new Int32Array(0), words = start, retries = 0;
+    for (;;) {
+      const h = new Int32Array(words);
+      const code = M.compileSchema(bytes, opt, fl, h);
+      if (code === A.ERR_ARENA) { words *= 2; retries++; continue; }
+      if (code === A.ERR_NEED_FLOATS) {
+        const n = M.floatRequests(h), f = new Int32Array(1 + 2 * n), dv = new DataView(new ArrayBuffer(8)); f[0] = n;
+        for (let i = 0; i < n; i++) { dv.setFloat64(0, Number(dec.decode(bytes.subarray(M.floatRequestStart(h, i), M.floatRequestEnd(h, i))))); f[1 + 2 * i] = dv.getInt32(0); f[2 + 2 * i] = dv.getInt32(4); }
+        fl = f; continue;
+      }
+      if (code !== 0) return { key: `err ${code} ${M.errorLine(h)} ${M.errorColumn(h)}`, retries };
+      const p = M.outProgramAt(h);
+      return { key: wordsHex(h.subarray(p, p + M.outProgramWords(h))), retries };
+    }
+  };
+  let same = 0, retried = 0;
+  for (const c of cases) {
+    const small = run(c.text, A.ARENA_MIN_WORDS), big = run(c.text, 1 << 22);
+    if (small.retries > 0) retried++;
+    if (small.key === big.key) same++; else fail(`${c.label}: the outcome depends on the arena size`);
+  }
+  console.log(`  ${same === cases.length ? 'ok  ' : 'FAIL'} ${same}/${cases.length} outcomes independent of the starting arena size (${retried} needed retries)`);
+}
+
 // ---------------------------------------------------------------- SOURCE_KEY
 // program.md §13.3, recomputed independently: the baseline codec encodes the
 // preimage with the default effective limits, node:crypto hashes it.

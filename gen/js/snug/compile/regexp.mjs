@@ -482,9 +482,14 @@ export function rxCompile(h, bid, pos) {
     vtrunc(h, T_STK8, 0);
     const root = parseAlt(h);
     if ((root < 0) || (at(h) < vlen(h, T_STK2))) {
-        // Report at the control's position, not inside the pattern.
-        hs(h, H_ERR, 0);
-        return fail(h, ERR_REGEXP, pos);
+        // A pattern error is reported at the control's position, not inside
+        // the pattern; any other failure (the arena, the budget, nesting) is
+        // kept as it is, so the host still retries an exhausted arena.
+        if ((hg(h, H_ERR) === 0) || (hg(h, H_ERR) === ERR_REGEXP)) {
+            hs(h, H_ERR, 0);
+            return fail(h, ERR_REGEXP, pos);
+        }
+        return -1;
     }
     const npos = gCount(h, root);
     if (npos > hg(h, H_LIM_RPOS)) {

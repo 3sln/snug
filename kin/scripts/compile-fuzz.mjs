@@ -273,6 +273,39 @@ for (let i = 0; i < cases.length; i++) {
       fail(`${show}: JS ${j.code} ${j.line}:${j.column} ${j.rule} vs Rust ${r}`);
   }
 }
+// Arena-size independence (D033) on every 8th text: from the smallest arena
+// (retrying) and from a large one, the same outcome.
+{
+  const M = await import('../../gen/js/snug/compile/main.mjs');
+  const A = await import('../../gen/js/snug/compile/arena.mjs');
+  const dec = new TextDecoder();
+  const run = (c, start) => {
+    const bytes = typeof c.text === 'string' ? new TextEncoder().encode(c.text) : c.text;
+    const opt = new Int32Array(M.OPT_WORDS).fill(-1);
+    opt[0] = PROF[c.profile];
+    COMPILE_OPTIONS.forEach((k, i) => { if (c.limits[k] !== undefined) opt[i + 1] = c.limits[k]; });
+    let fl = new Int32Array(0), words = start;
+    for (;;) {
+      const h = new Int32Array(words);
+      const code = M.compileSchema(bytes, opt, fl, h);
+      if (code === A.ERR_ARENA) { if (words >= A.ARENA_MAX_WORDS) return 'limit_memory'; words = Math.min(words * 2, A.ARENA_MAX_WORDS); continue; }
+      if (code === A.ERR_NEED_FLOATS) {
+        const n = M.floatRequests(h), f = new Int32Array(1 + 2 * n), dv = new DataView(new ArrayBuffer(8)); f[0] = n;
+        for (let i = 0; i < n; i++) { dv.setFloat64(0, Number(dec.decode(bytes.subarray(M.floatRequestStart(h, i), M.floatRequestEnd(h, i))))); f[1 + 2 * i] = dv.getInt32(0); f[2 + 2 * i] = dv.getInt32(4); }
+        fl = f; continue;
+      }
+      if (code !== 0) return `err ${code} ${M.errorLine(h)} ${M.errorColumn(h)}`;
+      const p = M.outProgramAt(h);
+      return wordsHex(h.subarray(p, p + M.outProgramWords(h)));
+    }
+  };
+  let checked = 0;
+  for (let i = 0; i < cases.length; i += 8) {
+    checked++;
+    if (run(cases[i], A.ARENA_MIN_WORDS) !== run(cases[i], 1 << 22)) fail(`case ${i}: the outcome depends on the starting arena size`);
+  }
+  console.log(`  ${fails ? 'FAIL' : 'ok  '} ${checked} texts compiled from two starting arena sizes: same outcomes`);
+}
 console.log(`  ${fails ? 'FAIL' : 'ok  '} ${N} texts (seed ${SEED}): ${okCount} compiled, ${errCount} refused; slowest ${slowest.toFixed(1)} ms ${slowText}`);
 console.log(`       refusals: ${Object.entries(codes).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 if (failed.length) writeFileSync(new URL('.cache/compile-fuzz-failures.txt', root), failed.join('\n') + '\n');
