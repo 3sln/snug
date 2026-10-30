@@ -426,9 +426,16 @@ slower); allocated head tuples; validating wrapper constructors in build
   verdicts. `bb compile-fuzz` 8 000–10 000 texts on seeds 1–3, 11–14,
   21–22, 31–34, 41, 51–52, 61, 71–72: all ok. `bb drift` and `bb check`
   green.
-  Open: containers are not hash-consed structurally (two identical inline
-  map types are two map tables; only size and closure width suffer); bus
-  profile refusals carry no source position; `.plus` refuses floats.
+  Container canonicalisation (`d450b56`): structurally equal containers
+  (TAG/TAGSET/EMBED/ARRAY/MAP/AND/NOT, recursive ones included) now share
+  one leaf through partition refinement to a fixpoint, the representative
+  being the first member in leaf-numbering order; final typesets are
+  deduplicated after replacement. signaling-message-v1 goes from 2 463 to
+  2 427 words; §15 and every other corpus Program are unchanged. Gates were
+  re-run after the change: `bb compile-test` all 11 lines ok (same counts
+  as above), `compile-fuzz` 10 000 texts on seeds 71 and 1029 ok,
+  `bb drift` ok.
+  Open: `.plus` refuses floats.
 - [~] **P3.4 — VM** (type-set evaluation fused with the profile walk, errors,
   budget).
 
@@ -1143,7 +1150,10 @@ order: a map's alternatives' literal entries (factor, pool, alternative,
 source order), then each pool's group entries (key, value); an array's
 positions; a tag's or embedded document's content; TS_ANY for ANY and bare
 `#4/#5/#6`; AND/NOT operands. Typesets are numbered in first-reach order of
-that walk with hash-consing by final content; groups and regexps by first
+that walk with hash-consing by final content (containers are first
+canonicalised: structurally equal container leaves, compared by partition
+refinement over their shapes and children's classes, collapse to the
+earliest member, so equal inline types share one leaf); groups and regexps by first
 use; interval/float-interval/LITSET runs per leaf in leaf order.
 **Why**: program.md fixes the format and the worked example, not these
 choices; writing them down makes the bytes reproducible from the text alone

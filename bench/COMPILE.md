@@ -76,9 +76,17 @@ product) — see DEVLOG P3.2/P3.3.
 
 | artefact | raw | gzip -9 | brotli 11 |
 | --- | ---: | ---: | ---: |
-| compiler (`host/js/src/compile.mjs` + `gen/js/snug/compile/*`), bundled | 258 530 | 51 694 | 42 431 |
-| compiler, bundled + minified | 110 691 | 35 238 | 30 487 |
+| compiler (`host/js/src/compile.mjs` + `gen/js/snug/compile/*`), bundled | 276 278 | 55 725 | 45 550 |
+| compiler, bundled + minified | 118 693 | 38 257 | 32 861 |
 | verifier (`gen/js/snug/program/verify.mjs`), bundled + minified | 20 622 | 7 539 | 6 543 |
+
+Compiler sizes re-measured after container canonicalisation (commit
+`d450b56`, +8 KB minified, +3 KB gzip). The same commit shrinks
+signaling-message-v1 from 2 463 to 2 427 words (its two `{ * tstr => any }`
+share one map leaf); the other contracts' Programs are unchanged. A quick
+re-run of the warm loop (200 compiles after 300 warm-up, same loaded machine,
+no sampling) gave 0.23–2.2 ms per contract, within the noise of the table
+above, plus or minus about 15 %.
 
 The compiler is a separate, lazily loadable module (architecture R9): a
 runtime-only bundle that validates with Programs compiled elsewhere does not
