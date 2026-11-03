@@ -1,0 +1,13 @@
+{"cpu":"Apple M1 Pro","cpuModel":"Apple M1 Pro","cores":10,"macOS":"14.6.1","build":"23G93","node":"v24.6.0","v8":"13.6.233.10-node.24","load":[7.28,8.74,9.19],"cborxNative":true,"rounds":9,"targetMs":25,"warm":3,"wasmBytes":86559}
+| workload | bytes | scan JS | scan wasm (incl. copy) | copy alone | decode JS | wasm scan + JS build | validate JS (VM) | validate wasm (VM, incl. copy) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| RPC put 287 B | 287 | 580 ns | 290 ns | 25 ns | 3.3 µs | 3.2 µs | 2.9 µs | 1.4 µs |
+| RPC put + 1 MiB bstr | 1048786 | 585 ns | 21 µs | 21 µs | 163 µs | 293 µs | 2.8 µs | 22 µs |
+| 120k integers | 468653 | 1.51 ms | 798 µs | 8.4 µs | 3.00 ms | 2.11 ms | 1.06 ms | 555 µs |
+| 1 MiB typed arrays (f32,f64,i16) | 1048610 | 215 µs | 107 µs | 21 µs | 366 µs | 337 µs | 270 µs | 108 µs |
+| 10k maps x 8 short keys | 359723 | 1.90 ms | 1.02 ms | 6.3 µs | 6.41 ms | 5.62 ms | 18.50 ms | 5.68 ms |
+| map-heavy document 1.4 MB | 1400000 | 2.96 ms | 1.69 ms | 29 µs | 14.13 ms | 12.87 ms | 21.10 ms | 7.29 ms |
+| text-heavy document 1.2 MB | 1200000 | 2.90 ms | 1.86 ms | 24 µs | 9.30 ms | 7.94 ms | 4.65 ms | 2.54 ms |
+| CWT-like integer-key map | 204 | 449 ns | 264 ns | 25 ns | 2.0 µs | 1.8 µs | 5.5 µs | 2.6 µs |
+| 10k small messages (separate buffers) | 559743 | 2.73 ms | 1.66 ms | 143 µs | 13.34 ms | 11.78 ms | 15.41 ms | 7.46 ms |
+load at end: 6.97,8.51,9.09

@@ -1,0 +1,19 @@
+{
+  "name": "snug-bench-compare",
+  "private": true,
+  "type": "module",
+  "description": "P7.8: snug vs existing CBOR and CDDL libraries. Benchmark-only dependencies; nothing here is imported by snug's sources.",
+  "license": "MIT",
+  "dependencies": {
+    "@cbortech/cbor": "0.27.3",
+    "@grinstead/cddl": "1.0.0",
+    "@levischuck/tiny-cbor": "0.3.6",
+    "cbor": "10.0.12",
+    "cbor-x": "1.6.9",
+    "cbor2": "2.4.1",
+    "cborg": "6.2.1",
+    "cddl": "0.23.0",
+    "cddl.js": "1.0.10",
+    "esbuild": "0.28.2"
+  }
+}

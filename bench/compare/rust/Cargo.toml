@@ -1,0 +1,12 @@
+# P7.8 Rust comparison (bench/compare/README.md). Benchmark-only; never a dependency of snug.
+# `snug` is the host crate assembled by kin/scripts/rust-crate into target/snug-rs (see run-rust.sh).
+[workspace]
+members = ["native", "cddl-wasm"]
+exclude = ["target"]
+resolver = "2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false

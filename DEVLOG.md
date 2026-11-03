@@ -2276,8 +2276,86 @@ are answered as provisional decisions D082–D085. None is open now.
   sources, refusal-heavy input. Deliver a matrix with environment details and
   a recommendation (native JS, wasm+SDK, or both with a rule for choosing),
   recorded as the D005 re-take.
-- [ ] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
-  ciborium, minicbor (Rust) and the `cddl` crate.
+- [x] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
+  ciborium, minicbor (Rust) and the `cddl` crate. Done 2026-11-03 by the P7.8
+  benchmark engineer; `bench/compare/README.md` (method, versions/licences,
+  lockfile hashes, all tables), raw output in `bench/compare/results/`.
+  Measured on an Apple M1 Pro (macOS 14.6.1), Node 24.6.0, rustc 1.92.0 native
+  and 1.100-nightly for wasm, as thread CPU time on a shared machine (load
+  7–12). Each JS library ran in its own isolate.
+  - **Decode.** Packages: cbor-x 1.6.9, cborg 6.2.1, cbor2 2.4.1, node-cbor
+    10.0.12 and @levischuck/tiny-cbor 0.3.6.
+    - **cbor-x is 2–3.5× faster than snug** on every structured workload, and
+      5.3× faster on typed arrays. It checks nothing beyond well-formedness.
+    - **snug is 2–7× faster than cbor2 in its CDE configuration**
+      (+ rejectDuplicateKeys + rejectLongFloats). That is the only JS decoder
+      that verifies RFC 8949 §4.2.1 key order and shortest forms as snug does.
+    - **cborg strict** checks less (no key order or float form). Against it,
+      snug ranges from 1.32× slower (typed arrays) and 1.27× slower (text) to
+      2.26× faster (integers).
+    - **1 MiB bstr:** cbor-x, cbor2 and node-cbor alias the input buffer and
+      snug copies it, so that row shows representation, not speed.
+    - **Where the time goes:** snug's check pass is 14–41% of its decode (D017).
+  - **Encode.** snug `encode()` is mid-pack.
+    - On large integer arrays it is 6× slower than cbor2 CDE. The cause is the
+      known dense-array check; the typed Writer does the same array in
+      1.35 ms, against `encode()`'s 27.7 ms.
+    - On typed arrays and the 1 MiB bstr it is 3–5× slower. Not profiled.
+    - The typed Writer is the fastest deterministic producer on all five
+      workloads that have a builder.
+    - Every deterministic encoder's output was byte-equal to snug's, except
+      cborg's typed arrays (untagged) and node-cbor's `Uint8Array` (tag 64).
+  - **Found in other libraries:** node-cbor's `encode()`/`encodeCanonical()`
+    silently truncate output at ~64 KiB, and `encodeCanonical` retains about
+    170 MB per call on 10k maps.
+  - **What snug's strict profile refuses that the others accept** (the probe
+    table in the README):
+    - output of cbor-x (16-bit map heads, float64), of cbor2, node-cbor and
+      tiny-cbor defaults (key order), and node-cbor's tag 64;
+    - tags 1 and 18, nested integer keys (COSE_Key in a CWT `cnf`),
+      undefined, NaN and ±∞.
+
+    D081/P7.1 is where the profile part of that changes.
+  - **CDDL validation** (study probes, then the large workloads):
+    - **The `cddl` crate 0.10.7:** snug is 7–197× faster in a JS host, where
+      both run as wasm; the crate's wasm build was redone here with a plain
+      ABI. It is 17–388× faster native. On the workloads: 1.2–91× (JS host)
+      and 3.3–437× (native). The crate still gets the same two study verdicts
+      wrong.
+    - **@cbortech/cbor 0.27.3** is the only maintained JS CDDL validator over
+      bytes. It agrees on all 22 probes. snug JS is 2.6–18× faster on the
+      probes and 6–13× on the workloads, but 1.25× slower on the typed-array
+      schema. @cbortech/cbor overflows the stack on a 120k-element `[* int]`.
+    - **cddl.js 1.0.10** (Zod) parses none of the study contracts and has open
+      maps.
+    - The npm packages `cddl` and `@grinstead/cddl` only check CDDL syntax.
+  - **Rust.** snug has no Rust value builder, so the comparison is limited.
+    - snug's strict scan takes 0.84–1.43× the time of minicbor 2.3.1's
+      unchecked `skip`.
+    - ciborium 0.2.2, serde_cbor 0.11.2 and cbor4ii 1.2.4 Value decodes take
+      1.3–11× the scan's time. Exceptions: the 1 MiB bstr, which they copy,
+      and typed arrays, where snug reads every element.
+  - **wasm vs JS.** snug wasm is 1.6–2× faster than JS for the scan and
+    1.8–3.3× for the VM, input copy included. The exception is a large
+    byte-string body, where the copy costs more than the JS scan.
+  - **Sizes**, gzip:
+    - snug codec 10.7 KB, against cbor-x 11.3, cborg 8.1, cbor2 14.5 and
+      tiny-cbor 2.1 KB.
+    - snug runtime 35.4 KB.
+    - snug compile entry 67 KB, against @cbortech/cbor's CDDL module at 61 KB.
+    - snug wasm 32.7 KB, against the crate's wasm at 832 KB (not stripped).
+  - **Learnt (benchmark hygiene):** one library's leftovers distort the next
+    library's numbers if they share a V8 isolate, and `process.cpuUsage` under
+    parallel GC charges one library's garbage to another. Isolates per library
+    plus `threadCpuUsage` with `--single-threaded-gc` fixed this.
+  - **Caveats** (all in the README):
+    - The machine was shared.
+    - The JS runs used the working tree between `0f85e8e` and `d034d68`; Rust
+      and wasm are pinned to `0f85e8e`. The working tree's
+      `gen/rust/snug/vm/session.rs` did not compile mid-run.
+    - Strict configurations are mine, taken from each library's documentation.
+    - Not measured: browsers, workerd, cold start, memory, and hostile inputs
+      against the other libraries.
 
 ## Parking lot
 

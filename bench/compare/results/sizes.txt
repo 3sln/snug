@@ -1,0 +1,15 @@
+| bundle | min B | min+gzip B | min+brotli B |
+| --- | ---: | ---: | ---: |
+| snug codec (decode + encode) | 30472 | 10750 | 9680 |
+| snug codec + Writer | 30482 | 10756 | 9684 |
+| snug runtime (codec + schema validate/decode, Program loader) | 98387 | 35418 | 30474 |
+| snug compile entry (compiler + the runtime schema API it returns) | 198853 | 67113 | 57333 |
+| 3sln.me cbor.mjs (decode + encode) | 15717 | 5684 | 5110 |
+| cbor-x (decode + encode) | 30282 | 11260 | 10168 |
+| cborg (decode + encode) | 26253 | 8107 | 7251 |
+| cbor2 (decode + encode) | 43050 | 14471 | 13141 |
+| cbor / node-cbor (decodeFirstSync + encode), platform=node, Node builtins external | 43136 | 12974 | 11732 |
+| @levischuck/tiny-cbor (decodeCBOR + encodeCBOR) | 5462 | 2060 | 1833 |
+| @cbortech/cbor CDDL (CDDL.compile + validate; compiler included) | 209540 | 61185 | 52232 |
+| snug wasm (scanner + VM, opt-level 3, no wasm-opt; JS glue not counted) | 86559 | 32688 | 27688 |
+| cddl crate wasm (rust/cddl-wasm, opt-level 3, not stripped, no wasm-opt) | 3192826 | 832247 | 515313 |

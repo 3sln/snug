@@ -1,0 +1,134 @@
+{"cpu":"Apple M1 Pro","cpuModel":"Apple M1 Pro","cores":10,"macOS":"14.6.1","build":"23G93","node":"v24.6.0","v8":"13.6.233.10-node.24","load":[8.79,10.88,9.46],"cborxNative":true,"quick":false,"rounds":9,"targetMs":25,"timing":"thread CPU, one isolate per library family"}
+
+## RPC put 287 B (287 B)
+decode: snug=3.7 µs snug-scan=633 ns cbor.mjs=6.5 µs cbor-x=1.2 µs cbor-x-js=1.7 µs cborg=3.5 µs cborg-strict=4.1 µs cbor2=13 µs cbor2-strict=12 µs node-cbor=33 µs node-cbor-dup=37 µs tiny-cbor=8.5 µs
+encode: snug=14 µs snug-writer=6.3 µs cbor.mjs=22 µs cbor-x=1.1 µs cborg=7.1 µs cborg-8949=15 µs cbor2=38 µs cbor2-cde=40 µs node-cbor=34 µs node-cbor-canon=174 µs tiny-cbor=12 µs
+  encode:snug: 287 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:snug-writer: 287 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 287 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 295 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 287 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 287 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 287 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 287 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 289 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:node-cbor-canon: 289 B, byte-equal to snug: false, same value: true, snug accepts: false (tag)
+  encode:tiny-cbor: 287 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+## RPC put + 1 MiB bstr (1048786 B)
+decode: snug=154 µs snug-scan=657 ns cbor.mjs=176 µs cbor-x=1.2 µs cbor-x-js=1.8 µs cborg=154 µs cborg-strict=143 µs cbor2=13 µs cbor2-strict=16 µs node-cbor=39 µs node-cbor-dup=40 µs tiny-cbor=161 µs
+encode: snug=445 µs cbor.mjs=472 µs cbor-x=109 µs cborg=132 µs cborg-8949=164 µs cbor2=229 µs cbor2-cde=236 µs node-cbor=230 µs node-cbor-canon=471 µs tiny-cbor=161 µs
+  encode:snug: 1048786 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 1048786 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 1048794 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 1048786 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 1048786 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 1048786 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 1048786 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 1048788 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:node-cbor-canon: 1048788 B, byte-equal to snug: false, same value: true, snug accepts: false (tag)
+  encode:tiny-cbor: 1048786 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+## 120k integers (468653 B)
+decode: snug=3.60 ms snug-scan=1.48 ms cbor.mjs=2.77 ms cbor-x=1.05 ms cbor-x-js=1.03 ms cborg=7.83 ms cborg-strict=8.13 ms cbor2=27.11 ms cbor2-strict=26.19 ms node-cbor=61.03 ms node-cbor-dup=58.23 ms tiny-cbor=7.77 ms
+encode: snug=27.66 ms snug-writer=1.35 ms cbor.mjs=20.21 ms cbor-x=1.60 ms cborg=9.96 ms cborg-8949=9.91 ms cbor2=4.81 ms cbor2-cde=4.63 ms node-cbor=65.53 ms node-cbor-canon=65.53 ms tiny-cbor=55.82 ms
+  encode:snug: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:snug-writer: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2-cde: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor-canon: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:tiny-cbor: 468653 B, byte-equal to snug: true, same value: true, snug accepts: true
+
+## 1 MiB typed arrays (f32,f64,i16) (1048610 B)
+decode: snug=380 µs snug-scan=218 µs cbor.mjs=770 µs cbor-x=73 µs cbor-x-js=72 µs cborg=280 µs cborg-strict=289 µs cbor2=2.65 ms cbor2-strict=2.66 ms node-cbor=262 µs node-cbor-dup=254 µs tiny-cbor=144 µs
+encode: snug=939 µs cbor.mjs=1.02 ms cbor-x=114 µs cborg=121 µs cborg-8949=131 µs cbor2=187 µs cbor2-cde=193 µs node-cbor=233 µs node-cbor-canon=296 µs tiny-cbor=failed
+  encode:snug: 1048610 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 1048610 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 1048612 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 1048604 B, byte-equal to snug: false, same value: false, snug accepts: true
+  encode:cborg-8949: 1048604 B, byte-equal to snug: false, same value: false, snug accepts: true
+  encode:cbor2: 1048610 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2-cde: 1048610 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 1048610 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor-canon: 1048610 B, byte-equal to snug: true, same value: true, snug accepts: true
+  note encode:tiny-cbor: failed: Not implemented
+
+## 10k maps x 8 short keys (359723 B)
+decode: snug=12.17 ms snug-scan=2.08 ms cbor.mjs=54.19 ms cbor-x=4.54 ms cbor-x-js=4.28 ms cborg=11.98 ms cborg-strict=11.71 ms cbor2=72.93 ms cbor2-strict=79.10 ms node-cbor=87.91 ms node-cbor-dup=88.83 ms tiny-cbor=53.84 ms
+encode: snug=39.51 ms snug-writer=9.04 ms cbor.mjs=111 ms cbor-x=2.92 ms cborg=46.45 ms cborg-8949=85.01 ms cbor2=241 ms cbor2-cde=285 ms node-cbor=91.41 ms node-cbor-canon=880 ms tiny-cbor=110 ms
+  encode:snug: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:snug-writer: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 379723 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 359723 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 359723 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:node-cbor-canon: 359723 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:tiny-cbor: 359723 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+## map-heavy document 1.4 MB (1400000 B)
+decode: snug=21.84 ms snug-scan=2.99 ms cbor.mjs=54.84 ms cbor-x=9.51 ms cbor-x-js=12.62 ms cborg=28.21 ms cborg-strict=27.96 ms cbor2=87.92 ms cbor2-strict=96.19 ms node-cbor=93.80 ms node-cbor-dup=99.46 ms tiny-cbor=53.22 ms
+encode: snug=59.41 ms cbor.mjs=112 ms cbor-x=9.57 ms cborg=47.67 ms cborg-8949=119 ms cbor2=250 ms cbor2-cde=339 ms node-cbor=88.25 ms node-cbor-canon=836 ms tiny-cbor=100 ms
+  encode:snug: 1400000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 1400000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 1440002 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 1400000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 1400000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 1400000 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 1400000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 1400000 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:node-cbor-canon: 1400000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:tiny-cbor: 1400000 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+## text-heavy document 1.2 MB (1200000 B)
+decode: snug=9.44 ms snug-scan=3.01 ms cbor.mjs=12.75 ms cbor-x=4.57 ms cbor-x-js=5.62 ms cborg=7.02 ms cborg-strict=7.45 ms cbor2=18.62 ms cbor2-strict=19.36 ms node-cbor=24.68 ms node-cbor-dup=21.01 ms tiny-cbor=10.35 ms
+encode: snug=14.29 ms cbor.mjs=23.10 ms cbor-x=4.37 ms cborg=9.72 ms cborg-8949=15.51 ms cbor2=41.27 ms cbor2-cde=39.73 ms node-cbor=19.56 ms node-cbor-canon=118 ms tiny-cbor=14.32 ms
+  encode:snug: 1200000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 1200000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 1204002 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 1200000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 1200000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 1200000 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 1200000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 1200000 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:node-cbor-canon: 1200000 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:tiny-cbor: 1200000 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+## CWT-like integer-key map (204 B)
+decode: snug=1.9 µs snug-scan=490 ns cbor.mjs=3.0 µs cbor-x=796 ns cbor-x-js=942 ns cborg=2.5 µs cborg-strict=2.8 µs cbor2=9.2 µs cbor2-strict=12 µs node-cbor=29 µs node-cbor-dup=30 µs tiny-cbor=4.6 µs
+encode: snug=7.9 µs snug-writer=4.3 µs cbor.mjs=14 µs cbor-x=2.0 µs cborg=6.0 µs cborg-8949=11 µs cbor2=56 µs cbor2-cde=53 µs node-cbor=34 µs node-cbor-canon=120 µs tiny-cbor=9.2 µs
+  encode:snug: 204 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:snug-writer: 204 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 204 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 213 B, byte-equal to snug: false, same value: false, snug accepts: false (tag)
+  encode:cborg: 204 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 204 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 204 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 204 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 210 B, byte-equal to snug: false, same value: true, snug accepts: false (tag)
+  encode:node-cbor-canon: 210 B, byte-equal to snug: false, same value: true, snug accepts: false (tag)
+  encode:tiny-cbor: 204 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+## 10k small messages (separate buffers) (559743 B)
+decode: snug=19.13 ms snug-scan=3.15 ms cbor.mjs=49.11 ms cbor-x=7.58 ms cbor-x-js=7.38 ms cborg=16.66 ms cborg-strict=20.59 ms cbor2=71.21 ms cbor2-strict=76.80 ms node-cbor=147 ms node-cbor-dup=137 ms tiny-cbor=46.52 ms
+encode: snug=68.17 ms snug-writer=26.25 ms cbor.mjs=88.16 ms cbor-x=10.68 ms cborg=41.60 ms cborg-8949=73.21 ms cbor2=223 ms cbor2-cde=226 ms node-cbor=156 ms node-cbor-canon=745 ms tiny-cbor=63.56 ms
+  encode:snug: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:snug-writer: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor.mjs: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor-x: 579743 B, byte-equal to snug: false, same value: true, snug accepts: false (non_shortest)
+  encode:cborg: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cborg-8949: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:cbor2: 559743 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:cbor2-cde: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:node-cbor: 559743 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+  encode:node-cbor-canon: 559743 B, byte-equal to snug: true, same value: true, snug accepts: true
+  encode:tiny-cbor: 559743 B, byte-equal to snug: false, same value: true, snug accepts: false (key_order)
+
+load at end: 12.01,12.06,10.31

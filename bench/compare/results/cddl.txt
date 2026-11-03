@@ -1,0 +1,82 @@
+{"cpu":"Apple M1 Pro","cpuModel":"Apple M1 Pro","cores":10,"macOS":"14.6.1","build":"23G93","node":"v24.6.0","v8":"13.6.233.10-node.24","load":[6.97,8.51,9.09],"cborxNative":true,"quick":false,"rounds":7,"targetMs":25}
+object-storage-v1#0                59 B valid   | snug-js=6.0 µs | snug-wasm=2.7 µs | crate-wasm=270 µs | cbortech=26 µs | cddl.js=skip | units 253
+object-storage-v1#1                66 B invalid | snug-js=5.0 µs | snug-wasm=2.2 µs | crate-wasm=620 µs | cbortech=34 µs | cddl.js=skip | units 205
+object-storage-v1#2                51 B valid   | snug-js=5.3 µs | snug-wasm=2.4 µs | crate-wasm=176 µs | cbortech=21 µs | cddl.js=skip | units 237
+object-storage-v1#3                71 B valid   | snug-js=6.7 µs | snug-wasm=3.2 µs | crate-wasm=550 µs | cbortech=31 µs | cddl.js=skip | units 286
+object-storage-v1#4                27 B valid   | snug-js=2.9 µs | snug-wasm=1.3 µs | crate-wasm=34 µs | cbortech=7.6 µs | cddl.js=skip | units 133
+object-storage-v1#5                95 B valid   | snug-js=3.2 µs | snug-wasm=1.6 µs | crate-wasm=165 µs | cbortech=23 µs | cddl.js=skip | units 195
+object-storage-v1#6                92 B invalid | snug-js=1.2 µs | snug-wasm=582 ns | crate-wasm=154 µs ! | cbortech=14 µs | cddl.js=skip | units 46
+item-classification-v1#0          102 B valid   | snug-js=5.9 µs | snug-wasm=2.8 µs | crate-wasm=191 µs | cbortech=34 µs | cddl.js=skip | units 384
+item-classification-v1#1          163 B valid   | snug-js=9.0 µs | snug-wasm=4.3 µs | crate-wasm=1.08 ms | cbortech=70 µs | cddl.js=skip | units 618
+item-classification-v1#2          128 B invalid | snug-js=4.9 µs | snug-wasm=2.2 µs | crate-wasm=963 µs | cbortech=33 µs | cddl.js=skip | units 301
+event-bus-tasks#0                  21 B valid   | snug-js=666 ns | snug-wasm=373 ns | crate-wasm=9.2 µs | cbortech=11 µs | cddl.js=skip | units 23
+event-bus-tasks#1                  29 B valid   | snug-js=1.6 µs | snug-wasm=721 ns | crate-wasm=15 µs | cbortech=14 µs | cddl.js=skip | units 44
+event-bus-tasks#2                  27 B invalid | snug-js=2.0 µs | snug-wasm=672 ns | crate-wasm=14 µs | cbortech=13 µs | cddl.js=skip | units 35
+preferences-v2#0                  107 B valid   | snug-js=5.7 µs | snug-wasm=2.7 µs | crate-wasm=187 µs | cbortech=39 µs | cddl.js=skip | units 455
+preferences-v2#1                  140 B valid   | snug-js=6.2 µs | snug-wasm=3.0 µs | crate-wasm=198 µs | cbortech=38 µs | cddl.js=skip | units 461
+preferences-v2#2                   56 B valid   | snug-js=3.4 µs | snug-wasm=1.7 µs | crate-wasm=64 µs | cbortech=39 µs | cddl.js=skip | units 240
+ledger-numeric#0                  165 B valid   | snug-js=6.0 µs | snug-wasm=2.6 µs | crate-wasm=49 µs | cbortech=60 µs | cddl.js=skip | units 228
+ledger-numeric#1                   39 B invalid | snug-js=1.1 µs | snug-wasm=512 ns | crate-wasm=41 µs | cbortech=19 µs | cddl.js=skip | units 32
+signaling-message-v1#0            207 B valid   | snug-js=12 µs | snug-wasm=5.9 µs | crate-wasm=429 µs | cbortech=53 µs | cddl.js=skip | units 989
+signaling-message-v1#1            262 B valid   | snug-js=17 µs | snug-wasm=8.7 µs | crate-wasm=1.17 ms | cbortech=99 µs | cddl.js=skip | units 1489
+signaling-message-v1#2            296 B valid   | snug-js=16 µs | snug-wasm=7.4 µs | crate-wasm=1.36 ms ! | cbortech=61 µs | cddl.js=skip | units 1169
+signaling-message-v1#3            260 B invalid | snug-js=17 µs | snug-wasm=8.1 µs | crate-wasm=1.40 ms | cbortech=115 µs | cddl.js=skip | units 1448
+workload:rpc287                   287 B valid   | snug-js=3.1 µs | snug-wasm=1.4 µs | crate-wasm=22 µs | cbortech=36 µs | cddl.js=15 µs | units 107
+workload:rpc1m                1048786 B valid   | snug-js=3.1 µs | snug-wasm=22 µs | crate-wasm=284 µs | cbortech=208 µs | cddl.js=15 µs | units 107
+workload:ints                  468653 B valid   | snug-js=1.18 ms | snug-wasm=548 µs | crate-wasm=70.19 ms | cbortech=error | cddl.js=40.25 ms | units 240008
+workload:typed                1048610 B valid   | snug-js=192 µs | snug-wasm=110 µs | crate-wasm=231 µs | cbortech=155 µs | cddl.js=skip | units 12340
+workload:maps                  359723 B valid   | snug-js=14.70 ms | snug-wasm=5.86 ms | crate-wasm=237 ms | cbortech=187 ms | cddl.js=70.84 ms | units 870008
+workload:doc                  1400000 B valid   | snug-js=17.83 ms | snug-wasm=7.59 ms | crate-wasm=267 ms | cbortech=194 ms | cddl.js=85.30 ms | units 962061
+workload:text                 1200000 B valid   | snug-js=4.60 ms | snug-wasm=2.53 ms | crate-wasm=33.77 ms | cbortech=39.17 ms | cddl.js=19.32 ms | units 109142
+workload:cwt                      204 B valid   | snug-js=5.9 µs | snug-wasm=2.5 µs | crate-wasm=9.5 µs | cbortech=37 µs | cddl.js=skip | units 292
+workload:seq                   559743 B valid   | snug-js=16.28 ms | snug-wasm=7.53 ms | crate-wasm=105 ms | cbortech=125 ms | cddl.js=66.44 ms
+  object-storage-v1#0 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  object-storage-v1#0 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  object-storage-v1#1 crate-wasm: ok verdict false (expected false) - study workaround (safe-uint = uint)
+  object-storage-v1#1 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  object-storage-v1#2 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  object-storage-v1#2 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  object-storage-v1#3 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  object-storage-v1#3 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  object-storage-v1#4 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  object-storage-v1#4 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  object-storage-v1#5 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  object-storage-v1#5 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  object-storage-v1#6 crate-wasm: ok verdict true (expected false) - study workaround (safe-uint = uint)
+  object-storage-v1#6 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received "{"Type":"/","Liter
+  item-classification-v1#0 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/item-classification-v1.cddl:3:22 - error: group identifier expected, received "{"Type":"/","
+  item-classification-v1#1 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/item-classification-v1.cddl:3:22 - error: group identifier expected, received "{"Type":"/","
+  item-classification-v1#2 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/item-classification-v1.cddl:3:22 - error: group identifier expected, received "{"Type":"/","
+  event-bus-tasks#0 cddl.js: skip - cddl.js: rule "payload" uses .size with a non-literal-integer value, outside cddl.js's supported subset
+  event-bus-tasks#1 cddl.js: skip - cddl.js: rule "payload" uses .size with a non-literal-integer value, outside cddl.js's supported subset
+  event-bus-tasks#2 cddl.js: skip - cddl.js: rule "payload" uses .size with a non-literal-integer value, outside cddl.js's supported subset
+  preferences-v2#0 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  preferences-v2#0 cddl.js: skip - cddl.js: rule "result" uses .size with a non-literal-integer value, outside cddl.js's supported subset
+  preferences-v2#1 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  preferences-v2#1 cddl.js: skip - cddl.js: rule "result" uses .size with a non-literal-integer value, outside cddl.js's supported subset
+  preferences-v2#2 crate-wasm: ok verdict true (expected true) - study workaround (safe-uint = uint)
+  preferences-v2#2 cddl.js: skip - cddl.js: rule "result" uses .size with a non-literal-integer value, outside cddl.js's supported subset
+  ledger-numeric#0 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/ledger-numeric.cddl:3:9 - error: Expected property name, received )()), ,(,)
+
+          ? ma
+  ledger-numeric#1 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/ledger-numeric.cddl:3:9 - error: Expected property name, received )()), ,(,)
+
+          ? ma
+  signaling-message-v1#0 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received "{"Type":"=","Li
+  signaling-message-v1#1 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received "{"Type":"=","Li
+  signaling-message-v1#2 crate-wasm: ok verdict false (expected true)
+  signaling-message-v1#2 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received "{"Type":"=","Li
+  signaling-message-v1#3 cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received "{"Type":"=","Li
+  workload:rpc287 cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+  workload:rpc1m cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+  workload:ints cbortech: error - Maximum call stack size exceeded
+  workload:ints cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+  workload:typed cddl.js: skip - cddl.js: rule "r" has a property type shape outside cddl.js's supported subset: {"Type":"tag","Value":{"NumericPart":6.85,"TypePa
+  workload:maps cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+  workload:doc cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+  workload:text cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+  workload:cwt cddl.js: skip - cddl.js: /node_modules/.cache/cddljs/workload-cwt.cddl:1:11 - error: Expected property name, received NUMBER(1), :(:)
+
+r = { 1: t
+  workload:seq cddl.js: ok verdict true (expected true) - cbor2 decode + Zod safeParse of the decoded value
+load at end: 7.14,8.4,9.02

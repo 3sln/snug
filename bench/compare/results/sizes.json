@@ -1,0 +1,80 @@
+[
+ {
+  "name": "snug codec (decode + encode)",
+  "raw": 30472,
+  "gzip": 10750,
+  "brotli": 9680
+ },
+ {
+  "name": "snug codec + Writer",
+  "raw": 30482,
+  "gzip": 10756,
+  "brotli": 9684
+ },
+ {
+  "name": "snug runtime (codec + schema validate/decode, Program loader)",
+  "raw": 98387,
+  "gzip": 35418,
+  "brotli": 30474
+ },
+ {
+  "name": "snug compile entry (compiler + the runtime schema API it returns)",
+  "raw": 198853,
+  "gzip": 67113,
+  "brotli": 57333
+ },
+ {
+  "name": "3sln.me cbor.mjs (decode + encode)",
+  "raw": 15717,
+  "gzip": 5684,
+  "brotli": 5110
+ },
+ {
+  "name": "cbor-x (decode + encode)",
+  "raw": 30282,
+  "gzip": 11260,
+  "brotli": 10168
+ },
+ {
+  "name": "cborg (decode + encode)",
+  "raw": 26253,
+  "gzip": 8107,
+  "brotli": 7251
+ },
+ {
+  "name": "cbor2 (decode + encode)",
+  "raw": 43050,
+  "gzip": 14471,
+  "brotli": 13141
+ },
+ {
+  "name": "cbor / node-cbor (decodeFirstSync + encode), platform=node, Node builtins external",
+  "raw": 43136,
+  "gzip": 12974,
+  "brotli": 11732
+ },
+ {
+  "name": "@levischuck/tiny-cbor (decodeCBOR + encodeCBOR)",
+  "raw": 5462,
+  "gzip": 2060,
+  "brotli": 1833
+ },
+ {
+  "name": "@cbortech/cbor CDDL (CDDL.compile + validate; compiler included)",
+  "raw": 209540,
+  "gzip": 61185,
+  "brotli": 52232
+ },
+ {
+  "name": "snug wasm (scanner + VM, opt-level 3, no wasm-opt; JS glue not counted)",
+  "raw": 86559,
+  "gzip": 32688,
+  "brotli": 27688
+ },
+ {
+  "name": "cddl crate wasm (rust/cddl-wasm, opt-level 3, not stripped, no wasm-opt)",
+  "raw": 3192826,
+  "gzip": 832247,
+  "brotli": 515313
+ }
+]

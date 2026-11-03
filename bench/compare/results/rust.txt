@@ -1,0 +1,56 @@
+snug commit: 0f85e8e28d341e89c69e5af26e30607540364f1e
+31 cases, 15 schemas -> /Users/raystubbs/Projects/@3sln/snug/bench/compare/rust/target/cases
+rustc 1.92.0 (ded5c06cf 2025-12-08) (Homebrew)
+{"rounds":9,"targetMs":25,"timing":"thread CPU"}
+
+# codec: per call (a sequence row is the whole batch of separate messages)
+
+| workload | bytes | snug scan (strict) | snug VM vs `any` | minicbor skip | minicbor tokens | ciborium Value | serde_cbor Value | cbor4ii Value | cddl crate decode_cbor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| rpc287 | 287 | 191 ns | 346 ns | 201 ns | 279 ns | 1.3 µs | 994 ns | 615 ns | 741 ns |
+| rpc1m | 1048786 | 192 ns | 342 ns | 198 ns | 275 ns | 45 µs | 24 µs | 22 µs | 32 µs |
+| ints | 468653 | 823 µs | 442 µs | 576 µs | 825 µs | 4.48 ms | 1.48 ms | 1.36 ms | 1.80 ms |
+| typed | 1048610 | 88 µs | 88 µs | 69 ns | 135 ns | 72 µs | 35 µs | refused | 48 µs |
+| maps | 359723 | 835 µs | 1.22 ms | 1.00 ms | 1.63 ms | 8.82 ms | 8.37 ms | 4.58 ms | 5.32 ms |
+| doc | 1400000 | 1.37 ms | 2.25 ms | 1.36 ms | 2.03 ms | 10.06 ms | 9.92 ms | 5.79 ms | 6.36 ms |
+| text | 1200000 | 1.76 ms | 1.86 ms | 1.53 ms | 1.62 ms | 2.83 ms | 2.67 ms | 2.29 ms | 2.31 ms |
+| cwt | 204 | 173 ns | 268 ns | 141 ns | 239 ns | 1.1 µs | 706 ns | 394 ns | 524 ns |
+| seq | 559743 | 817 µs | 1.92 ms | 970 µs | 1.47 ms | 6.85 ms | 4.66 ms | 2.91 ms | 3.64 ms |
+
+note: workload:typed: cbor4ii refused: Core(Unsupported { name: "any", found: 216 })
+
+# cddl: per call
+
+| case | rule | bytes | expected | snug | cddl crate (decode_cbor + CBORValidator) | snug result |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| object-storage-v1#0 | request | 59 | valid | 2.2 µs | 211 µs | ok |
+| object-storage-v1#1 | request | 66 | invalid | 1.8 µs | 475 µs | unexpected (units 205) |
+| object-storage-v1#2 | request | 51 | valid | 1.9 µs | 132 µs | ok |
+| object-storage-v1#3 | request | 71 | valid | 2.7 µs | 416 µs | ok |
+| object-storage-v1#4 | request | 27 | valid | 990 ns | 28 µs | ok |
+| object-storage-v1#5 | presign-result | 95 | valid | 1.3 µs | 131 µs | ok |
+| object-storage-v1#6 | presign-result | 92 | invalid | 392 ns | 122 µs ! | pattern (units 46) |
+| item-classification-v1#0 | classify-args | 102 | valid | 2.1 µs | 143 µs | ok |
+| item-classification-v1#1 | classify-args | 163 | valid | 3.6 µs | 817 µs | ok |
+| item-classification-v1#2 | classify-args | 128 | invalid | 1.9 µs | 737 µs | pattern (units 301) |
+| event-bus-tasks#0 | payload | 21 | valid | 173 ns | 6.8 µs | ok |
+| event-bus-tasks#1 | record | 29 | valid | 495 ns | 11 µs | ok |
+| event-bus-tasks#2 | record | 27 | invalid | 504 ns | 10 µs | embedded (units 35) |
+| preferences-v2#0 | result | 107 | valid | 2.3 µs | 142 µs | ok |
+| preferences-v2#1 | result | 140 | valid | 2.5 µs | 146 µs | ok |
+| preferences-v2#2 | result | 56 | valid | 1.3 µs | 53 µs | ok |
+| ledger-numeric#0 | entry | 165 | valid | 2.2 µs | 38 µs | ok |
+| ledger-numeric#1 | entry | 39 | invalid | 353 ns | 32 µs | bits (units 32) |
+| signaling-message-v1#0 | message | 207 | valid | 5.5 µs | 354 µs | ok |
+| signaling-message-v1#1 | message | 262 | valid | 8.1 µs | 927 µs | ok |
+| signaling-message-v1#2 | message | 296 | valid | 6.8 µs | 1.10 ms ! | ok |
+| signaling-message-v1#3 | message | 260 | invalid | 7.6 µs | 1.10 ms | value (units 1448) |
+| workload:rpc287 | r | 287 | valid | 1.2 µs | 17 µs | ok |
+| workload:rpc1m | r | 1048786 | valid | 1.2 µs | 524 µs | ok |
+| workload:ints | r | 468653 | valid | 553 µs | 50.78 ms | ok |
+| workload:typed | r | 1048610 | valid | 86 µs | 477 µs | ok |
+| workload:maps | r | 359723 | valid | 5.34 ms | 193 ms | ok |
+| workload:doc | r | 1400000 | valid | 7.07 ms | 213 ms | ok |
+| workload:text | r | 1200000 | valid | 2.41 ms | 28.82 ms | ok |
+| workload:cwt | r | 204 | valid | 2.2 µs | 7.2 µs | ok |
+| workload:seq | r | 559743 | valid | 5.90 ms | 79.32 ms | ok |

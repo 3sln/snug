@@ -1,0 +1,15 @@
+[package]
+name = "snug-compare"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[dependencies]
+snug = { path = "../target/snug-rs" }
+ciborium = "=0.2.2"
+minicbor = { version = "=2.3.1", features = ["std", "half"] }
+serde_cbor = "=0.11.2"
+cbor4ii = { version = "=1.2.4", features = ["use_std", "serde1"] }
+cddl = { version = "=0.10.7", default-features = false, features = ["std", "ast-span", "cbor", "json", "additional-controls"] }
+serde = "=1.0.229"

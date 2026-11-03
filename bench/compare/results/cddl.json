@@ -1,0 +1,2886 @@
+{
+ "env": {
+  "cpu": "Apple M1 Pro",
+  "cpuModel": "Apple M1 Pro",
+  "cores": 10,
+  "macOS": "14.6.1",
+  "build": "23G93",
+  "node": "v24.6.0",
+  "v8": "13.6.233.10-node.24",
+  "load": [
+   6.97,
+   8.51,
+   9.09
+  ],
+  "cborxNative": true,
+  "quick": false,
+  "rounds": 7,
+  "targetMs": 25,
+  "loadEnd": [
+   7.14,
+   8.4,
+   9.02
+  ]
+ },
+ "groups": [
+  "snug-js",
+  "snug-wasm",
+  "crate-wasm",
+  "cbortech",
+  "cddl.js"
+ ],
+ "rows": [
+  {
+   "id": "object-storage-v1#0",
+   "rule": "request",
+   "valid": true,
+   "bytes": 59,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 253
+     },
+     "n": 4352,
+     "samples": [
+      0.0062036,
+      0.0059862,
+      0.0060395,
+      0.0060841,
+      0.0060363,
+      0.0062668,
+      0.0058566
+     ],
+     "med": 0.006039522058823528,
+     "min": 0.005856617647058811
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 9936,
+     "samples": [
+      0.0027475,
+      0.0027123,
+      0.0026437,
+      0.0026586,
+      0.0027032,
+      0.0026894,
+      0.0027503
+     ],
+     "med": 0.002703200483091791,
+     "min": 0.002643719806763288
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 105,
+     "samples": [
+      0.27167,
+      0.27915,
+      0.27031,
+      0.2668,
+      0.27686,
+      0.26551,
+      0.26548
+     ],
+     "med": 0.27031428571428606,
+     "min": 0.2654761904761905
+    },
+    "cbortech": {
+     "id": "object-storage-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 2082,
+     "samples": [
+      0.033232,
+      0.025578,
+      0.023954,
+      0.029069,
+      0.022418,
+      0.022465,
+      0.030811
+     ],
+     "med": 0.025578290105667582,
+     "min": 0.022418347742555213
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#0",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "object-storage-v1#1",
+   "rule": "request",
+   "valid": false,
+   "bytes": 66,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "extra": {
+      "units": 205
+     },
+     "n": 4921,
+     "samples": [
+      0.0053325,
+      0.0050207,
+      0.0050589,
+      0.0049965,
+      0.0050234,
+      0.004926,
+      0.0051386
+     ],
+     "med": 0.0050233692338955555,
+     "min": 0.0049260312944523444
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 12170,
+     "samples": [
+      0.0022254,
+      0.0021938,
+      0.0022417,
+      0.0021896,
+      0.0022742,
+      0.0024317,
+      0.0022484
+     ],
+     "med": 0.0022417419884962963,
+     "min": 0.0021895645028759286
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 47,
+     "samples": [
+      0.66749,
+      0.635,
+      0.61136,
+      0.62119,
+      0.5973,
+      0.61994,
+      0.60645
+     ],
+     "med": 0.6199361702127647,
+     "min": 0.5972978723404226
+    },
+    "cbortech": {
+     "id": "object-storage-v1#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 1555,
+     "samples": [
+      0.038185,
+      0.034133,
+      0.032014,
+      0.036339,
+      0.033024,
+      0.029337,
+      0.037439
+     ],
+     "med": 0.03413311897106109,
+     "min": 0.02933697749196136
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#1",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "object-storage-v1#2",
+   "rule": "request",
+   "valid": true,
+   "bytes": 51,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 237
+     },
+     "n": 5190,
+     "samples": [
+      0.0053786,
+      0.0053027,
+      0.0052636,
+      0.0053526,
+      0.0053118,
+      0.0054617,
+      0.005305
+     ],
+     "med": 0.0053117533718689755,
+     "min": 0.005263583815028898
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 11283,
+     "samples": [
+      0.0024333,
+      0.0024733,
+      0.0023963,
+      0.0024409,
+      0.0024351,
+      0.002395,
+      0.0024513
+     ],
+     "med": 0.002435079322875134,
+     "min": 0.0023950190552158236
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 150,
+     "samples": [
+      0.17255,
+      0.17551,
+      0.17323,
+      0.1796,
+      0.17651,
+      0.17715,
+      0.17388
+     ],
+     "med": 0.1755066666666668,
+     "min": 0.1725533333333336
+    },
+    "cbortech": {
+     "id": "object-storage-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 2346,
+     "samples": [
+      0.025498,
+      0.019067,
+      0.019532,
+      0.026428,
+      0.020489,
+      0.021391,
+      0.023793
+     ],
+     "med": 0.02139130434782617,
+     "min": 0.019066922421142465
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#2",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "object-storage-v1#3",
+   "rule": "request",
+   "valid": true,
+   "bytes": 71,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#3",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 286
+     },
+     "n": 3942,
+     "samples": [
+      0.006672,
+      0.0066794,
+      0.0069561,
+      0.0066923,
+      0.0066246,
+      0.0068179,
+      0.0066114
+     ],
+     "med": 0.006679350583460154,
+     "min": 0.0066113647894469555
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#3",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 8591,
+     "samples": [
+      0.0031876,
+      0.0032325,
+      0.0032444,
+      0.0032348,
+      0.0031786,
+      0.0031694,
+      0.0032738
+     ],
+     "med": 0.0032324525666395042,
+     "min": 0.00316936328716099
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#3",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 53,
+     "samples": [
+      0.54717,
+      0.55226,
+      0.55013,
+      0.54125,
+      0.54706,
+      0.57089,
+      0.55243
+     ],
+     "med": 0.550132075471701,
+     "min": 0.5412452830188708
+    },
+    "cbortech": {
+     "id": "object-storage-v1#3",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1505,
+     "samples": [
+      0.038482,
+      0.031411,
+      0.030205,
+      0.029845,
+      0.030441,
+      0.036054,
+      0.033656
+     ],
+     "med": 0.03141063122923597,
+     "min": 0.02984451827242536
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#3",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "object-storage-v1#4",
+   "rule": "request",
+   "valid": true,
+   "bytes": 27,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#4",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 133
+     },
+     "n": 8581,
+     "samples": [
+      0.0029423,
+      0.0029244,
+      0.0029363,
+      0.0028886,
+      0.0029185,
+      0.0029103,
+      0.0029929
+     ],
+     "med": 0.002924367789301952,
+     "min": 0.002888591073301484
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#4",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 20623,
+     "samples": [
+      0.0014454,
+      0.0013159,
+      0.0013254,
+      0.0013459,
+      0.0013412,
+      0.0013547,
+      0.001394
+     ],
+     "med": 0.0013458759637298093,
+     "min": 0.001315860931969158
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#4",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 830,
+     "samples": [
+      0.03377,
+      0.034233,
+      0.033788,
+      0.034334,
+      0.033259,
+      0.034183,
+      0.033417
+     ],
+     "med": 0.03378795180722931,
+     "min": 0.033259036144577786
+    },
+    "cbortech": {
+     "id": "object-storage-v1#4",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 6351,
+     "samples": [
+      0.0076223,
+      0.0060424,
+      0.0082494,
+      0.0060542,
+      0.0079318,
+      0.0066075,
+      0.0079548
+     ],
+     "med": 0.00762226421036059,
+     "min": 0.006042355534561486
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#4",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "object-storage-v1#5",
+   "rule": "presign-result",
+   "valid": true,
+   "bytes": 95,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#5",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 195
+     },
+     "n": 8242,
+     "samples": [
+      0.0032138,
+      0.0033153,
+      0.0031012,
+      0.0031051,
+      0.0031902,
+      0.003124,
+      0.0031632
+     ],
+     "med": 0.003163188546469348,
+     "min": 0.0031011890317883943
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#5",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 16478,
+     "samples": [
+      0.0016375,
+      0.0015894,
+      0.0015862,
+      0.0016421,
+      0.0016205,
+      0.0016828,
+      0.0016262
+     ],
+     "med": 0.0016262289112756417,
+     "min": 0.001586175506736251
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#5",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 155,
+     "samples": [
+      0.18335,
+      0.16086,
+      0.16421,
+      0.16428,
+      0.17401,
+      0.16545,
+      0.16973
+     ],
+     "med": 0.1654516129032257,
+     "min": 0.16086451612903352
+    },
+    "cbortech": {
+     "id": "object-storage-v1#5",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 2580,
+     "samples": [
+      0.024323,
+      0.018795,
+      0.023997,
+      0.018923,
+      0.023152,
+      0.017426,
+      0.024047
+     ],
+     "med": 0.023152325581395416,
+     "min": 0.017425968992247996
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#5",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "object-storage-v1#6",
+   "rule": "presign-result",
+   "valid": false,
+   "bytes": 92,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "object-storage-v1#6",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "extra": {
+      "units": 46
+     },
+     "n": 23106,
+     "samples": [
+      0.0012382,
+      0.0011967,
+      0.0011885,
+      0.0011975,
+      0.0011734,
+      0.0012115,
+      0.0011993
+     ],
+     "med": 0.0011974811737211254,
+     "min": 0.0011733748809832978
+    },
+    "snug-wasm": {
+     "id": "object-storage-v1#6",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 47288,
+     "samples": [
+      0.00058243,
+      0.00059616,
+      0.00057784,
+      0.00056678,
+      0.00057372,
+      0.00061318,
+      0.0007116
+     ],
+     "med": 0.0005824310607342226,
+     "min": 0.0005667822703434208
+    },
+    "crate-wasm": {
+     "id": "object-storage-v1#6",
+     "status": "ok",
+     "verdict": true,
+     "agrees": false,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 176,
+     "samples": [
+      0.1587,
+      0.1591,
+      0.15424,
+      0.15206,
+      0.15403,
+      0.15247,
+      0.15694
+     ],
+     "med": 0.15424431818182038,
+     "min": 0.15205681818181915
+    },
+    "cbortech": {
+     "id": "object-storage-v1#6",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 3874,
+     "samples": [
+      0.013743,
+      0.010739,
+      0.015018,
+      0.011761,
+      0.015125,
+      0.010626,
+      0.014322
+     ],
+     "med": 0.013743417656169266,
+     "min": 0.010626226122870461
+    },
+    "cddl.js": {
+     "id": "object-storage-v1#6",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/object-storage-v1.cddl:3:16 - error: group identifier expected, received \"{\"Type\":\"/\",\"Liter"
+    }
+   }
+  },
+  {
+   "id": "item-classification-v1#0",
+   "rule": "classify-args",
+   "valid": true,
+   "bytes": 102,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "item-classification-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 384
+     },
+     "n": 4665,
+     "samples": [
+      0.0058232,
+      0.0060581,
+      0.0060463,
+      0.0059136,
+      0.0057473,
+      0.0068744,
+      0.0058969
+     ],
+     "med": 0.005913612004287243,
+     "min": 0.005747266881028971
+    },
+    "snug-wasm": {
+     "id": "item-classification-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 10338,
+     "samples": [
+      0.0027923,
+      0.0029892,
+      0.0029256,
+      0.0026214,
+      0.0029017,
+      0.0026638,
+      0.0026688
+     ],
+     "med": 0.0027923195976011016,
+     "min": 0.002621396788547099
+    },
+    "crate-wasm": {
+     "id": "item-classification-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 156,
+     "samples": [
+      0.18173,
+      0.20054,
+      0.19148,
+      0.1864,
+      0.17966,
+      0.19491,
+      0.2252
+     ],
+     "med": 0.19148076923076984,
+     "min": 0.17966025641025668
+    },
+    "cbortech": {
+     "id": "item-classification-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1528,
+     "samples": [
+      0.043078,
+      0.034272,
+      0.034406,
+      0.040269,
+      0.034258,
+      0.033322,
+      0.041425
+     ],
+     "med": 0.03440575916230374,
+     "min": 0.03332198952879532
+    },
+    "cddl.js": {
+     "id": "item-classification-v1#0",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/item-classification-v1.cddl:3:22 - error: group identifier expected, received \"{\"Type\":\"/\",\""
+    }
+   }
+  },
+  {
+   "id": "item-classification-v1#1",
+   "rule": "classify-args",
+   "valid": true,
+   "bytes": 163,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "item-classification-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 618
+     },
+     "n": 2762,
+     "samples": [
+      0.0098023,
+      0.010148,
+      0.0088689,
+      0.0088418,
+      0.0090894,
+      0.0088436,
+      0.0089786
+     ],
+     "med": 0.008978638667632143,
+     "min": 0.00884178131788569
+    },
+    "snug-wasm": {
+     "id": "item-classification-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 6525,
+     "samples": [
+      0.0046624,
+      0.0046495,
+      0.0043715,
+      0.0042489,
+      0.0042719,
+      0.0042756,
+      0.0042057
+     ],
+     "med": 0.004275555555555577,
+     "min": 0.0042056704980842925
+    },
+    "crate-wasm": {
+     "id": "item-classification-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 26,
+     "samples": [
+      1.1658,
+      1.0925,
+      1.0917,
+      1.0733,
+      1.0803,
+      1.0777,
+      1.0635
+     ],
+     "med": 1.0803076923076822,
+     "min": 1.063461538461542
+    },
+    "cbortech": {
+     "id": "item-classification-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 644,
+     "samples": [
+      0.064,
+      0.075939,
+      0.06982,
+      0.06068,
+      0.056561,
+      0.072107,
+      0.071803
+     ],
+     "med": 0.06981987577639742,
+     "min": 0.05656055900621005
+    },
+    "cddl.js": {
+     "id": "item-classification-v1#1",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/item-classification-v1.cddl:3:22 - error: group identifier expected, received \"{\"Type\":\"/\",\""
+    }
+   }
+  },
+  {
+   "id": "item-classification-v1#2",
+   "rule": "classify-args",
+   "valid": false,
+   "bytes": 128,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "item-classification-v1#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "extra": {
+      "units": 301
+     },
+     "n": 5554,
+     "samples": [
+      0.0050007,
+      0.0049015,
+      0.0047884,
+      0.0048641,
+      0.0048077,
+      0.0049989,
+      0.0050178
+     ],
+     "med": 0.004901512423478566,
+     "min": 0.00478844076341372
+    },
+    "snug-wasm": {
+     "id": "item-classification-v1#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 12076,
+     "samples": [
+      0.002267,
+      0.002214,
+      0.002219,
+      0.0023085,
+      0.0022384,
+      0.0022613,
+      0.002238
+     ],
+     "med": 0.0022384067572043683,
+     "min": 0.00221397813845647
+    },
+    "crate-wasm": {
+     "id": "item-classification-v1#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 28,
+     "samples": [
+      1.0242,
+      0.96321,
+      0.99386,
+      0.96096,
+      0.94518,
+      0.99418,
+      0.96057
+     ],
+     "med": 0.9632142857142786,
+     "min": 0.9451785714285766
+    },
+    "cbortech": {
+     "id": "item-classification-v1#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 1229,
+     "samples": [
+      0.035392,
+      0.0285,
+      0.042002,
+      0.028862,
+      0.031995,
+      0.040922,
+      0.03252
+     ],
+     "med": 0.03251993490642844,
+     "min": 0.028499593165174808
+    },
+    "cddl.js": {
+     "id": "item-classification-v1#2",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/item-classification-v1.cddl:3:22 - error: group identifier expected, received \"{\"Type\":\"/\",\""
+    }
+   }
+  },
+  {
+   "id": "event-bus-tasks#0",
+   "rule": "payload",
+   "valid": true,
+   "bytes": 21,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "event-bus-tasks#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 23
+     },
+     "n": 42651,
+     "samples": [
+      0.00065194,
+      0.00066622,
+      0.00065616,
+      0.00068301,
+      0.00066578,
+      0.00069051,
+      0.00067614
+     ],
+     "med": 0.0006662211905934202,
+     "min": 0.0006519425101404431
+    },
+    "snug-wasm": {
+     "id": "event-bus-tasks#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 70094,
+     "samples": [
+      0.0003734,
+      0.00037806,
+      0.00037321,
+      0.00037097,
+      0.00037518,
+      0.00036852,
+      0.00036973
+     ],
+     "med": 0.0003732131138185844,
+     "min": 0.00036851941678317225
+    },
+    "crate-wasm": {
+     "id": "event-bus-tasks#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 3045,
+     "samples": [
+      0.0091521,
+      0.009356,
+      0.0091826,
+      0.0091695,
+      0.0096837,
+      0.0095639,
+      0.0092319
+     ],
+     "med": 0.009231855500820977,
+     "min": 0.009152052545155973
+    },
+    "cbortech": {
+     "id": "event-bus-tasks#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 3854,
+     "samples": [
+      0.012295,
+      0.012052,
+      0.01078,
+      0.01059,
+      0.011031,
+      0.011182,
+      0.0092551
+     ],
+     "med": 0.01103139595225748,
+     "min": 0.009255059678256324
+    },
+    "cddl.js": {
+     "id": "event-bus-tasks#0",
+     "status": "skip",
+     "note": "cddl.js: rule \"payload\" uses .size with a non-literal-integer value, outside cddl.js's supported subset"
+    }
+   }
+  },
+  {
+   "id": "event-bus-tasks#1",
+   "rule": "record",
+   "valid": true,
+   "bytes": 29,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "event-bus-tasks#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 44
+     },
+     "n": 16769,
+     "samples": [
+      0.001562,
+      0.001606,
+      0.0016563,
+      0.0015587,
+      0.0015651,
+      0.002048,
+      0.0015503
+     ],
+     "med": 0.0015650903452800015,
+     "min": 0.0015503011509332605
+    },
+    "snug-wasm": {
+     "id": "event-bus-tasks#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 34627,
+     "samples": [
+      0.00075715,
+      0.00070789,
+      0.00072085,
+      0.0007195,
+      0.0007186,
+      0.00075519,
+      0.00072646
+     ],
+     "med": 0.0007208536691021526,
+     "min": 0.0007078869090594095
+    },
+    "crate-wasm": {
+     "id": "event-bus-tasks#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1782,
+     "samples": [
+      0.015004,
+      0.014707,
+      0.014719,
+      0.014825,
+      0.016254,
+      0.015425,
+      0.016686
+     ],
+     "med": 0.01500448933782283,
+     "min": 0.014707070707070499
+    },
+    "cbortech": {
+     "id": "event-bus-tasks#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 3633,
+     "samples": [
+      0.016849,
+      0.013452,
+      0.012581,
+      0.017212,
+      0.013676,
+      0.013828,
+      0.016536
+     ],
+     "med": 0.013828241123038638,
+     "min": 0.012580787228186108
+    },
+    "cddl.js": {
+     "id": "event-bus-tasks#1",
+     "status": "skip",
+     "note": "cddl.js: rule \"payload\" uses .size with a non-literal-integer value, outside cddl.js's supported subset"
+    }
+   }
+  },
+  {
+   "id": "event-bus-tasks#2",
+   "rule": "record",
+   "valid": false,
+   "bytes": 27,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "event-bus-tasks#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "extra": {
+      "units": 35
+     },
+     "n": 15253,
+     "samples": [
+      0.0020888,
+      0.00203,
+      0.0019205,
+      0.0020237,
+      0.0019564,
+      0.0019477,
+      0.0018219
+     ],
+     "med": 0.0019564020192749196,
+     "min": 0.001821936668196418
+    },
+    "snug-wasm": {
+     "id": "event-bus-tasks#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 41443,
+     "samples": [
+      0.00067193,
+      0.00066009,
+      0.00066417,
+      0.00068282,
+      0.00066173,
+      0.0006735,
+      0.00068875
+     ],
+     "med": 0.0006719349467943973,
+     "min": 0.0006600873488888406
+    },
+    "crate-wasm": {
+     "id": "event-bus-tasks#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 1978,
+     "samples": [
+      0.014107,
+      0.013981,
+      0.014774,
+      0.014516,
+      0.014008,
+      0.014074,
+      0.013799
+     ],
+     "med": 0.014074317492417013,
+     "min": 0.013799292214357974
+    },
+    "cbortech": {
+     "id": "event-bus-tasks#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 3915,
+     "samples": [
+      0.016684,
+      0.013429,
+      0.012803,
+      0.016618,
+      0.012088,
+      0.012367,
+      0.015965
+     ],
+     "med": 0.013429374201788,
+     "min": 0.012087611749680796
+    },
+    "cddl.js": {
+     "id": "event-bus-tasks#2",
+     "status": "skip",
+     "note": "cddl.js: rule \"payload\" uses .size with a non-literal-integer value, outside cddl.js's supported subset"
+    }
+   }
+  },
+  {
+   "id": "preferences-v2#0",
+   "rule": "result",
+   "valid": true,
+   "bytes": 107,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "preferences-v2#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 455
+     },
+     "n": 4552,
+     "samples": [
+      0.0058394,
+      0.006047,
+      0.0056312,
+      0.0058229,
+      0.0056801,
+      0.0053967,
+      0.0054602
+     ],
+     "med": 0.005680140597539492,
+     "min": 0.005396748681898024
+    },
+    "snug-wasm": {
+     "id": "preferences-v2#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 10304,
+     "samples": [
+      0.002755,
+      0.00274,
+      0.0027335,
+      0.002861,
+      0.0027273,
+      0.0027507,
+      0.002716
+     ],
+     "med": 0.0027400038819875945,
+     "min": 0.00271603260869564
+    },
+    "crate-wasm": {
+     "id": "preferences-v2#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 151,
+     "samples": [
+      0.18749,
+      0.1924,
+      0.19656,
+      0.18895,
+      0.18664,
+      0.18462,
+      0.17383
+     ],
+     "med": 0.18749006622516354,
+     "min": 0.17382781456953372
+    },
+    "cbortech": {
+     "id": "preferences-v2#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1253,
+     "samples": [
+      0.04135,
+      0.038973,
+      0.035304,
+      0.036802,
+      0.033024,
+      0.042105,
+      0.039437
+     ],
+     "med": 0.038972865123702814,
+     "min": 0.03302394253790894
+    },
+    "cddl.js": {
+     "id": "preferences-v2#0",
+     "status": "skip",
+     "note": "cddl.js: rule \"result\" uses .size with a non-literal-integer value, outside cddl.js's supported subset"
+    }
+   }
+  },
+  {
+   "id": "preferences-v2#1",
+   "rule": "result",
+   "valid": true,
+   "bytes": 140,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "preferences-v2#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 461
+     },
+     "n": 4512,
+     "samples": [
+      0.0060977,
+      0.0061977,
+      0.0061097,
+      0.0062808,
+      0.0064249,
+      0.0062245,
+      0.0062137
+     ],
+     "med": 0.006213652482269516,
+     "min": 0.00609773936170211
+    },
+    "snug-wasm": {
+     "id": "preferences-v2#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 9559,
+     "samples": [
+      0.0030052,
+      0.0030528,
+      0.0029947,
+      0.0030098,
+      0.0030503,
+      0.0032239,
+      0.0029978
+     ],
+     "med": 0.0030098336646092404,
+     "min": 0.0029946647138822265
+    },
+    "crate-wasm": {
+     "id": "preferences-v2#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 137,
+     "samples": [
+      0.19956,
+      0.18677,
+      0.19738,
+      0.19773,
+      0.19043,
+      0.21129,
+      0.20726
+     ],
+     "med": 0.19772992700729886,
+     "min": 0.18676642335766747
+    },
+    "cbortech": {
+     "id": "preferences-v2#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1192,
+     "samples": [
+      0.046721,
+      0.037163,
+      0.036702,
+      0.043216,
+      0.038396,
+      0.036771,
+      0.043436
+     ],
+     "med": 0.03839597315436244,
+     "min": 0.03670218120805352
+    },
+    "cddl.js": {
+     "id": "preferences-v2#1",
+     "status": "skip",
+     "note": "cddl.js: rule \"result\" uses .size with a non-literal-integer value, outside cddl.js's supported subset"
+    }
+   }
+  },
+  {
+   "id": "preferences-v2#2",
+   "rule": "result",
+   "valid": true,
+   "bytes": 56,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "preferences-v2#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 240
+     },
+     "n": 8188,
+     "samples": [
+      0.0033979,
+      0.0033969,
+      0.0032609,
+      0.0033616,
+      0.0033312,
+      0.0033974,
+      0.0031687
+     ],
+     "med": 0.0033616267708842873,
+     "min": 0.003168661455788924
+    },
+    "snug-wasm": {
+     "id": "preferences-v2#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 16062,
+     "samples": [
+      0.0017096,
+      0.0016806,
+      0.0016634,
+      0.0017596,
+      0.0016962,
+      0.0017429,
+      0.0016278
+     ],
+     "med": 0.0016962395716598115,
+     "min": 0.0016278172083177519
+    },
+    "crate-wasm": {
+     "id": "preferences-v2#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "study workaround (safe-uint = uint)",
+     "n": 427,
+     "samples": [
+      0.064623,
+      0.067035,
+      0.063194,
+      0.063583,
+      0.064068,
+      0.07081,
+      0.063895
+     ],
+     "med": 0.06406791569086644,
+     "min": 0.06319437939109945
+    },
+    "cbortech": {
+     "id": "preferences-v2#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1313,
+     "samples": [
+      0.038357,
+      0.037534,
+      0.036935,
+      0.038516,
+      0.039957,
+      0.039675,
+      0.042663
+     ],
+     "med": 0.03851561309977145,
+     "min": 0.0369352627570457
+    },
+    "cddl.js": {
+     "id": "preferences-v2#2",
+     "status": "skip",
+     "note": "cddl.js: rule \"result\" uses .size with a non-literal-integer value, outside cddl.js's supported subset"
+    }
+   }
+  },
+  {
+   "id": "ledger-numeric#0",
+   "rule": "entry",
+   "valid": true,
+   "bytes": 165,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "ledger-numeric#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 228
+     },
+     "n": 4642,
+     "samples": [
+      0.0059377,
+      0.0060808,
+      0.0060595,
+      0.006305,
+      0.0059978,
+      0.0058673,
+      0.0058445
+     ],
+     "med": 0.005997845756139714,
+     "min": 0.005844463593278782
+    },
+    "snug-wasm": {
+     "id": "ledger-numeric#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 10470,
+     "samples": [
+      0.0026658,
+      0.0026647,
+      0.0026136,
+      0.0028433,
+      0.0026481,
+      0.0025357,
+      0.0026287
+     ],
+     "med": 0.002648137535816586,
+     "min": 0.0025357211079274095
+    },
+    "crate-wasm": {
+     "id": "ledger-numeric#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 552,
+     "samples": [
+      0.050663,
+      0.049353,
+      0.050089,
+      0.049351,
+      0.054995,
+      0.048375,
+      0.049045
+     ],
+     "med": 0.049353260869564285,
+     "min": 0.04837500000000078
+    },
+    "cbortech": {
+     "id": "ledger-numeric#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 894,
+     "samples": [
+      0.063002,
+      0.049935,
+      0.069709,
+      0.047616,
+      0.060205,
+      0.046362,
+      0.069996
+     ],
+     "med": 0.060204697986577536,
+     "min": 0.04636241610738291
+    },
+    "cddl.js": {
+     "id": "ledger-numeric#0",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/ledger-numeric.cddl:3:9 - error: Expected property name, received )()), ,(,)\n\n          ? ma"
+    }
+   }
+  },
+  {
+   "id": "ledger-numeric#1",
+   "rule": "entry",
+   "valid": false,
+   "bytes": 39,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "ledger-numeric#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "extra": {
+      "units": 32
+     },
+     "n": 24932,
+     "samples": [
+      0.001099,
+      0.0010539,
+      0.0010654,
+      0.0011545,
+      0.001051,
+      0.0010848,
+      0.0010592
+     ],
+     "med": 0.0010654179367880676,
+     "min": 0.0010510187710572646
+    },
+    "snug-wasm": {
+     "id": "ledger-numeric#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 50580,
+     "samples": [
+      0.00054162,
+      0.00051936,
+      0.0005328,
+      0.00049081,
+      0.00051172,
+      0.00051026,
+      0.0005089
+     ],
+     "med": 0.0005117240015816491,
+     "min": 0.0004908066429418706
+    },
+    "crate-wasm": {
+     "id": "ledger-numeric#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 685,
+     "samples": [
+      0.041182,
+      0.040655,
+      0.041209,
+      0.040307,
+      0.040723,
+      0.04081,
+      0.040499
+     ],
+     "med": 0.040722627737226916,
+     "min": 0.04030656934306654
+    },
+    "cbortech": {
+     "id": "ledger-numeric#1",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 2597,
+     "samples": [
+      0.021727,
+      0.015748,
+      0.022429,
+      0.01672,
+      0.023546,
+      0.016374,
+      0.018761
+     ],
+     "med": 0.018761262995764326,
+     "min": 0.015748170966500212
+    },
+    "cddl.js": {
+     "id": "ledger-numeric#1",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/ledger-numeric.cddl:3:9 - error: Expected property name, received )()), ,(,)\n\n          ? ma"
+    }
+   }
+  },
+  {
+   "id": "signaling-message-v1#0",
+   "rule": "message",
+   "valid": true,
+   "bytes": 207,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "signaling-message-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 989
+     },
+     "n": 2255,
+     "samples": [
+      0.012499,
+      0.012469,
+      0.01245,
+      0.012566,
+      0.012689,
+      0.01244,
+      0.012588
+     ],
+     "med": 0.012498891352549663,
+     "min": 0.012440354767183984
+    },
+    "snug-wasm": {
+     "id": "signaling-message-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 4710,
+     "samples": [
+      0.0059034,
+      0.0059276,
+      0.0059331,
+      0.0058607,
+      0.0059011,
+      0.0059225,
+      0.0059743
+     ],
+     "med": 0.005922505307855526,
+     "min": 0.005860721868365044
+    },
+    "crate-wasm": {
+     "id": "signaling-message-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 65,
+     "samples": [
+      0.41709,
+      0.42877,
+      0.43169,
+      0.44078,
+      0.42726,
+      0.41708,
+      0.45243
+     ],
+     "med": 0.42876923076922907,
+     "min": 0.417076923076932
+    },
+    "cbortech": {
+     "id": "signaling-message-v1#0",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 987,
+     "samples": [
+      0.057318,
+      0.052681,
+      0.049479,
+      0.048604,
+      0.048683,
+      0.055355,
+      0.054364
+     ],
+     "med": 0.052680851063828964,
+     "min": 0.04860385005065831
+    },
+    "cddl.js": {
+     "id": "signaling-message-v1#0",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received \"{\"Type\":\"=\",\"Li"
+    }
+   }
+  },
+  {
+   "id": "signaling-message-v1#1",
+   "rule": "message",
+   "valid": true,
+   "bytes": 262,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "signaling-message-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 1489
+     },
+     "n": 1600,
+     "samples": [
+      0.017312,
+      0.016946,
+      0.017493,
+      0.017308,
+      0.016804,
+      0.01737,
+      0.016984
+     ],
+     "med": 0.017307500000000003,
+     "min": 0.016804375000000392
+    },
+    "snug-wasm": {
+     "id": "signaling-message-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 3192,
+     "samples": [
+      0.0086118,
+      0.0086526,
+      0.0086714,
+      0.0087086,
+      0.0086523,
+      0.008739,
+      0.0087278
+     ],
+     "med": 0.008671365914786995,
+     "min": 0.00861184210526331
+    },
+    "crate-wasm": {
+     "id": "signaling-message-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 25,
+     "samples": [
+      1.151,
+      1.1521,
+      1.1657,
+      1.136,
+      1.1716,
+      1.1846,
+      1.1906
+     ],
+     "med": 1.1656800000000294,
+     "min": 1.1360399999999935
+    },
+    "cbortech": {
+     "id": "signaling-message-v1#1",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 474,
+     "samples": [
+      0.097378,
+      0.097549,
+      0.09919,
+      0.09903,
+      0.10343,
+      0.11026,
+      0.10568
+     ],
+     "med": 0.09918987341772072,
+     "min": 0.0973776371308001
+    },
+    "cddl.js": {
+     "id": "signaling-message-v1#1",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received \"{\"Type\":\"=\",\"Li"
+    }
+   }
+  },
+  {
+   "id": "signaling-message-v1#2",
+   "rule": "message",
+   "valid": true,
+   "bytes": 296,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "signaling-message-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 1169
+     },
+     "n": 1661,
+     "samples": [
+      0.015883,
+      0.015801,
+      0.01585,
+      0.01601,
+      0.015834,
+      0.01637,
+      0.01591
+     ],
+     "med": 0.01588320288982517,
+     "min": 0.015801324503311315
+    },
+    "snug-wasm": {
+     "id": "signaling-message-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 3748,
+     "samples": [
+      0.0073701,
+      0.0073911,
+      0.0073959,
+      0.0073559,
+      0.007373,
+      0.0074042,
+      0.0074418
+     ],
+     "med": 0.007391141942369324,
+     "min": 0.0073559231590180655
+    },
+    "crate-wasm": {
+     "id": "signaling-message-v1#2",
+     "status": "ok",
+     "verdict": false,
+     "agrees": false,
+     "n": 21,
+     "samples": [
+      1.3888,
+      1.358,
+      1.3454,
+      1.3412,
+      1.4014,
+      1.3631,
+      1.3969
+     ],
+     "med": 1.3630952380952381,
+     "min": 1.3412380952381031
+    },
+    "cbortech": {
+     "id": "signaling-message-v1#2",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 762,
+     "samples": [
+      0.08099,
+      0.056096,
+      0.056106,
+      0.070319,
+      0.060731,
+      0.052781,
+      0.077136
+     ],
+     "med": 0.06073097112860898,
+     "min": 0.052780839895012
+    },
+    "cddl.js": {
+     "id": "signaling-message-v1#2",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received \"{\"Type\":\"=\",\"Li"
+    }
+   }
+  },
+  {
+   "id": "signaling-message-v1#3",
+   "rule": "message",
+   "valid": false,
+   "bytes": 260,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "signaling-message-v1#3",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "extra": {
+      "units": 1448
+     },
+     "n": 1608,
+     "samples": [
+      0.016657,
+      0.016578,
+      0.016679,
+      0.016256,
+      0.016596,
+      0.016002,
+      0.016607
+     ],
+     "med": 0.016595771144278983,
+     "min": 0.016001865671641646
+    },
+    "snug-wasm": {
+     "id": "signaling-message-v1#3",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 3407,
+     "samples": [
+      0.0082427,
+      0.0082254,
+      0.0080088,
+      0.0081321,
+      0.0080845,
+      0.0079208,
+      0.008042
+     ],
+     "med": 0.008084531846198964,
+     "min": 0.007920751394188399
+    },
+    "crate-wasm": {
+     "id": "signaling-message-v1#3",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 20,
+     "samples": [
+      1.4245,
+      1.4305,
+      1.3978,
+      1.4174,
+      1.395,
+      1.377,
+      1.3818
+     ],
+     "med": 1.3978000000000066,
+     "min": 1.3770499999999628
+    },
+    "cbortech": {
+     "id": "signaling-message-v1#3",
+     "status": "ok",
+     "verdict": false,
+     "agrees": true,
+     "n": 453,
+     "samples": [
+      0.11164,
+      0.11638,
+      0.11405,
+      0.11548,
+      0.10864,
+      0.12218,
+      0.12025
+     ],
+     "med": 0.11547682119205231,
+     "min": 0.10863576158940697
+    },
+    "cddl.js": {
+     "id": "signaling-message-v1#3",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/signaling-message-v1.cddl:9:20 - error: group identifier expected, received \"{\"Type\":\"=\",\"Li"
+    }
+   }
+  },
+  {
+   "id": "workload:rpc287",
+   "rule": "r",
+   "valid": true,
+   "bytes": 287,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:rpc287",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 107
+     },
+     "n": 8992,
+     "samples": [
+      0.0031299,
+      0.0030849,
+      0.0031144,
+      0.0030993,
+      0.0031044,
+      0.0031669,
+      0.0031655
+     ],
+     "med": 0.003114435053380795,
+     "min": 0.0030848532028470294
+    },
+    "snug-wasm": {
+     "id": "workload:rpc287",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 19060,
+     "samples": [
+      0.0014422,
+      0.0014041,
+      0.0014059,
+      0.0014275,
+      0.0013996,
+      0.0014216,
+      0.0013969
+     ],
+     "med": 0.0014059286463798783,
+     "min": 0.0013968520461700264
+    },
+    "crate-wasm": {
+     "id": "workload:rpc287",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1274,
+     "samples": [
+      0.022338,
+      0.021796,
+      0.0224,
+      0.021983,
+      0.021881,
+      0.021876,
+      0.02224
+     ],
+     "med": 0.021982731554160372,
+     "min": 0.021795918367346963
+    },
+    "cbortech": {
+     "id": "workload:rpc287",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1688,
+     "samples": [
+      0.036914,
+      0.027434,
+      0.036198,
+      0.027524,
+      0.036551,
+      0.026302,
+      0.036404
+     ],
+     "med": 0.03619786729857758,
+     "min": 0.02630154028436069
+    },
+    "cddl.js": {
+     "id": "workload:rpc287",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 3092,
+     "samples": [
+      0.016186,
+      0.014099,
+      0.014561,
+      0.014969,
+      0.014617,
+      0.0146,
+      0.015096
+     ],
+     "med": 0.014616752910737366,
+     "min": 0.014099288486416568
+    }
+   }
+  },
+  {
+   "id": "workload:rpc1m",
+   "rule": "r",
+   "valid": true,
+   "bytes": 1048786,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:rpc1m",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 107
+     },
+     "n": 8790,
+     "samples": [
+      0.0031843,
+      0.0030352,
+      0.0031494,
+      0.0031069,
+      0.0031032,
+      0.0031093,
+      0.0031067
+     ],
+     "med": 0.0031069397042093744,
+     "min": 0.0030351535836177575
+    },
+    "snug-wasm": {
+     "id": "workload:rpc1m",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1209,
+     "samples": [
+      0.023892,
+      0.021729,
+      0.022244,
+      0.022411,
+      0.023886,
+      0.022156,
+      0.024194
+     ],
+     "med": 0.02241108354011601,
+     "min": 0.021728701406121122
+    },
+    "crate-wasm": {
+     "id": "workload:rpc1m",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 95,
+     "samples": [
+      0.31684,
+      0.25126,
+      0.28403,
+      0.26015,
+      0.25586,
+      0.31698,
+      0.28688
+     ],
+     "med": 0.2840315789473607,
+     "min": 0.2512631578947357
+    },
+    "cbortech": {
+     "id": "workload:rpc1m",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 206,
+     "samples": [
+      0.20846,
+      0.20982,
+      0.21262,
+      0.21747,
+      0.2019,
+      0.17824,
+      0.17767
+     ],
+     "med": 0.2084563106796161,
+     "min": 0.17767475728154733
+    },
+    "cddl.js": {
+     "id": "workload:rpc1m",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 3003,
+     "samples": [
+      0.015388,
+      0.014159,
+      0.0151,
+      0.01455,
+      0.014611,
+      0.014698,
+      0.015134
+     ],
+     "med": 0.014697968697968748,
+     "min": 0.014159174159174153
+    }
+   }
+  },
+  {
+   "id": "workload:ints",
+   "rule": "r",
+   "valid": true,
+   "bytes": 468653,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:ints",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 240008
+     },
+     "n": 24,
+     "samples": [
+      1.1804,
+      1.1363,
+      1.1797,
+      1.1756,
+      1.1349,
+      1.2051,
+      1.1802
+     ],
+     "med": 1.1796666666666624,
+     "min": 1.1349166666666786
+    },
+    "snug-wasm": {
+     "id": "workload:ints",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 52,
+     "samples": [
+      0.55513,
+      0.53829,
+      0.54831,
+      0.53338,
+      0.5524,
+      0.55994,
+      0.53362
+     ],
+     "med": 0.5483076923077044,
+     "min": 0.533384615384613
+    },
+    "crate-wasm": {
+     "id": "workload:ints",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      70.194,
+      69.67,
+      69.016,
+      69.78,
+      70.532,
+      71.138,
+      70.692
+     ],
+     "med": 70.1939999999995,
+     "min": 69.01599999999962
+    },
+    "cbortech": {
+     "id": "workload:ints",
+     "status": "error",
+     "note": "Maximum call stack size exceeded"
+    },
+    "cddl.js": {
+     "id": "workload:ints",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 1,
+     "samples": [
+      41.174,
+      41.853,
+      39.392,
+      40.251,
+      39.929,
+      42.409,
+      39.78
+     ],
+     "med": 40.250999999999976,
+     "min": 39.39200000000005
+    }
+   }
+  },
+  {
+   "id": "workload:typed",
+   "rule": "r",
+   "valid": true,
+   "bytes": 1048610,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:typed",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 12340
+     },
+     "n": 143,
+     "samples": [
+      0.19214,
+      0.19087,
+      0.1971,
+      0.19209,
+      0.19079,
+      0.1985,
+      0.19651
+     ],
+     "med": 0.19213986013986412,
+     "min": 0.19079020979021227
+    },
+    "snug-wasm": {
+     "id": "workload:typed",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 253,
+     "samples": [
+      0.10448,
+      0.10842,
+      0.10953,
+      0.1047,
+      0.11079,
+      0.11063,
+      0.1101
+     ],
+     "med": 0.10952569169960488,
+     "min": 0.10448221343873595
+    },
+    "crate-wasm": {
+     "id": "workload:typed",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 116,
+     "samples": [
+      0.22131,
+      0.22518,
+      0.1971,
+      0.23566,
+      0.2349,
+      0.23612,
+      0.23094
+     ],
+     "med": 0.23093965517241957,
+     "min": 0.19710344827587412
+    },
+    "cbortech": {
+     "id": "workload:typed",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 185,
+     "samples": [
+      0.15609,
+      0.15432,
+      0.15481,
+      0.15392,
+      0.16125,
+      0.15684,
+      0.14757
+     ],
+     "med": 0.15481081081080766,
+     "min": 0.14757297297297015
+    },
+    "cddl.js": {
+     "id": "workload:typed",
+     "status": "skip",
+     "note": "cddl.js: rule \"r\" has a property type shape outside cddl.js's supported subset: {\"Type\":\"tag\",\"Value\":{\"NumericPart\":6.85,\"TypePa"
+    }
+   }
+  },
+  {
+   "id": "workload:maps",
+   "rule": "r",
+   "valid": true,
+   "bytes": 359723,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:maps",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 870008
+     },
+     "n": 2,
+     "samples": [
+      14.696,
+      14.817,
+      14.667,
+      14.544,
+      14.701,
+      14.706,
+      14.899
+     ],
+     "med": 14.701000000000022,
+     "min": 14.543999999999869
+    },
+    "snug-wasm": {
+     "id": "workload:maps",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 5,
+     "samples": [
+      5.8388,
+      5.7754,
+      5.8616,
+      5.8732,
+      5.8418,
+      5.9364,
+      5.9244
+     ],
+     "med": 5.861599999999998,
+     "min": 5.7753999999999
+    },
+    "crate-wasm": {
+     "id": "workload:maps",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      237.51,
+      237.3,
+      237.35,
+      235.27,
+      236.05,
+      240.57,
+      236.97
+     ],
+     "med": 237.30299999999988,
+     "min": 235.26599999999962
+    },
+    "cbortech": {
+     "id": "workload:maps",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      186.84,
+      178.01,
+      191.08,
+      180.56,
+      187.26,
+      186.64,
+      190.12
+     ],
+     "med": 186.84000000000015,
+     "min": 178.01300000000083
+    },
+    "cddl.js": {
+     "id": "workload:maps",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 1,
+     "samples": [
+      78.008,
+      68.394,
+      70.835,
+      69.074,
+      69.694,
+      77.71,
+      71.71
+     ],
+     "med": 70.83500000000004,
+     "min": 68.39400000000023
+    }
+   }
+  },
+  {
+   "id": "workload:doc",
+   "rule": "r",
+   "valid": true,
+   "bytes": 1400000,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:doc",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 962061
+     },
+     "n": 2,
+     "samples": [
+      18.065,
+      17.763,
+      17.918,
+      17.697,
+      17.766,
+      17.831,
+      17.881
+     ],
+     "med": 17.83100000000013,
+     "min": 17.697000000000116
+    },
+    "snug-wasm": {
+     "id": "workload:doc",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 4,
+     "samples": [
+      7.636,
+      8.881,
+      7.5252,
+      7.5965,
+      7.478,
+      7.5707,
+      7.5875
+     ],
+     "med": 7.587500000000091,
+     "min": 7.4780000000000655
+    },
+    "crate-wasm": {
+     "id": "workload:doc",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      276.01,
+      269.24,
+      267.29,
+      264.08,
+      265.3,
+      269.25,
+      265.01
+     ],
+     "med": 267.29099999999926,
+     "min": 264.0789999999997
+    },
+    "cbortech": {
+     "id": "workload:doc",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      193.46,
+      191.92,
+      193.36,
+      193.55,
+      200.47,
+      195.4,
+      201.66
+     ],
+     "med": 193.54599999999846,
+     "min": 191.91799999999967
+    },
+    "cddl.js": {
+     "id": "workload:doc",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 1,
+     "samples": [
+      98.049,
+      84.172,
+      83.677,
+      85.294,
+      87.475,
+      85.301,
+      85.622
+     ],
+     "med": 85.30099999999993,
+     "min": 83.67700000000013
+    }
+   }
+  },
+  {
+   "id": "workload:text",
+   "rule": "r",
+   "valid": true,
+   "bytes": 1200000,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:text",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 109142
+     },
+     "n": 6,
+     "samples": [
+      4.6857,
+      4.6833,
+      4.6012,
+      4.8313,
+      4.5362,
+      4.5602,
+      4.581
+     ],
+     "med": 4.6011666666666615,
+     "min": 4.536166666666456
+    },
+    "snug-wasm": {
+     "id": "workload:text",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 11,
+     "samples": [
+      2.5899,
+      2.5325,
+      2.585,
+      2.5131,
+      2.4715,
+      2.5525,
+      2.5136
+     ],
+     "med": 2.5325454545454704,
+     "min": 2.471545454545445
+    },
+    "crate-wasm": {
+     "id": "workload:text",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      34.409,
+      34.604,
+      33.579,
+      34.022,
+      32.959,
+      33.77,
+      33.689
+     ],
+     "med": 33.77000000000044,
+     "min": 32.95900000000074
+    },
+    "cbortech": {
+     "id": "workload:text",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 2,
+     "samples": [
+      42.203,
+      31.726,
+      39.169,
+      33.414,
+      39.683,
+      31.784,
+      41.825
+     ],
+     "med": 39.16949999999997,
+     "min": 31.72599999999875
+    },
+    "cddl.js": {
+     "id": "workload:text",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 2,
+     "samples": [
+      21.188,
+      20.413,
+      19.323,
+      20.052,
+      19.094,
+      19.238,
+      19.259
+     ],
+     "med": 19.323000000000093,
+     "min": 19.093500000000176
+    }
+   }
+  },
+  {
+   "id": "workload:cwt",
+   "rule": "r",
+   "valid": true,
+   "bytes": 204,
+   "items": 1,
+   "cells": {
+    "snug-js": {
+     "id": "workload:cwt",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {
+      "units": 292
+     },
+     "n": 4537,
+     "samples": [
+      0.0058651,
+      0.0059191,
+      0.0058223,
+      0.0058475,
+      0.0059376,
+      0.0058697,
+      0.0058735
+     ],
+     "med": 0.005869737712144458,
+     "min": 0.00582234957020081
+    },
+    "snug-wasm": {
+     "id": "workload:cwt",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 10595,
+     "samples": [
+      0.0025274,
+      0.0025287,
+      0.0025057,
+      0.0025114,
+      0.0025437,
+      0.002613,
+      0.0025588
+     ],
+     "med": 0.002528739971684706,
+     "min": 0.0025057102406796303
+    },
+    "crate-wasm": {
+     "id": "workload:cwt",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 2902,
+     "samples": [
+      0.0096861,
+      0.009531,
+      0.0095293,
+      0.0094576,
+      0.0093787,
+      0.0097226,
+      0.0096089
+     ],
+     "med": 0.00953101309441815,
+     "min": 0.009378704341833409
+    },
+    "cbortech": {
+     "id": "workload:cwt",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1248,
+     "samples": [
+      0.034857,
+      0.042978,
+      0.040183,
+      0.040192,
+      0.034436,
+      0.036982,
+      0.034551
+     ],
+     "med": 0.03698157051282217,
+     "min": 0.03443589743589643
+    },
+    "cddl.js": {
+     "id": "workload:cwt",
+     "status": "skip",
+     "note": "cddl.js: /node_modules/.cache/cddljs/workload-cwt.cddl:1:11 - error: Expected property name, received NUMBER(1), :(:)\n\nr = { 1: t"
+    }
+   }
+  },
+  {
+   "id": "workload:seq",
+   "rule": "r",
+   "valid": true,
+   "bytes": 559743,
+   "items": 10000,
+   "cells": {
+    "snug-js": {
+     "id": "workload:seq",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "extra": {},
+     "n": 2,
+     "samples": [
+      16.101,
+      16.599,
+      16.315,
+      16.275,
+      16.239,
+      16.324,
+      16.207
+     ],
+     "med": 16.275499999999738,
+     "min": 16.100999999999658
+    },
+    "snug-wasm": {
+     "id": "workload:seq",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 4,
+     "samples": [
+      7.4233,
+      7.4327,
+      7.6045,
+      7.5318,
+      7.655,
+      7.587,
+      7.5277
+     ],
+     "med": 7.531750000000102,
+     "min": 7.42325000000028
+    },
+    "crate-wasm": {
+     "id": "workload:seq",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      104.44,
+      104.96,
+      103.9,
+      106.75,
+      105.88,
+      106.97,
+      105.49
+     ],
+     "med": 105.49200000000019,
+     "min": 103.90300000000025
+    },
+    "cbortech": {
+     "id": "workload:seq",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "n": 1,
+     "samples": [
+      106.15,
+      124.62,
+      128.25,
+      124.02,
+      125.44,
+      125.09,
+      118.24
+     ],
+     "med": 124.6150000000016,
+     "min": 106.15399999999863
+    },
+    "cddl.js": {
+     "id": "workload:seq",
+     "status": "ok",
+     "verdict": true,
+     "agrees": true,
+     "note": "cbor2 decode + Zod safeParse of the decoded value",
+     "n": 1,
+     "samples": [
+      64.96,
+      66.441,
+      68.249,
+      66.234,
+      67.65,
+      65.212,
+      67.085
+     ],
+     "med": 66.4409999999998,
+     "min": 64.96000000000004
+    }
+   }
+  }
+ ]
+}

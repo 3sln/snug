@@ -1,0 +1,12 @@
+[package]
+name = "cddl-wasm"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cddl = { version = "=0.10.7", default-features = false, features = ["std", "ast-span", "cbor", "json", "additional-controls"] }
