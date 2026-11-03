@@ -245,3 +245,18 @@ test('P6.2: a quantum yield at the declared end is stepped by finalize, not a le
     assert.deepEqual(v.finalize(), want, `quantum ${quantum}`);
   }
 });
+
+import { pickYield } from '../src/sources.mjs';
+test('P6.2: the yield helper prefers scheduler.yield, setImmediate, MessageChannel, and setTimeout only last', async () => {
+  const noTimer = () => { throw new Error('setTimeout must not be chosen'); };
+  const y = pickYield({ MessageChannel, setTimeout: noTimer });
+  assert.equal(y.kind, 'MessageChannel');
+  await y.turn(); await y.turn();
+  y.dispose();
+  let used = 0;
+  assert.equal(pickYield({ scheduler: { yield: async () => { used++; } }, setImmediate, MessageChannel, setTimeout: noTimer }).kind, 'scheduler.yield');
+  await pickYield({ scheduler: { yield: async () => { used++; } } }).turn();
+  assert.equal(used, 1);
+  assert.equal(pickYield({ setImmediate, MessageChannel, setTimeout: noTimer }).kind, 'setImmediate');
+  assert.equal(pickYield({ setTimeout }).kind, 'setTimeout');
+});

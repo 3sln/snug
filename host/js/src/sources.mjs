@@ -51,7 +51,34 @@ export class SourceError extends Error {
 
 const I32_MAX = 0x7fffffff;
 const clamp = n => (n > I32_MAX ? I32_MAX : n);
-const nextTurn = typeof setImmediate === 'function' ? () => new Promise(r => setImmediate(r)) : () => new Promise(r => setTimeout(r, 0));
+/** How an async driver gives the event loop back after a YIELD: scheduler.yield()
+ *  where it exists (browsers), then setImmediate (Node), then a shared MessageChannel
+ *  (workers, workerd), setTimeout(0) last -- browsers clamp chained timeouts to >= 4 ms
+ *  (P7.7 runtime evidence: Chrome 4.77 ms a yield by setTimeout, 0.010 ms by
+ *  MessageChannel). Answers {kind, turn, dispose}. */
+export function pickYield(env = globalThis) {
+  if (env.scheduler && typeof env.scheduler.yield === 'function') {
+    const sch = env.scheduler;
+    return { kind: 'scheduler.yield', turn: () => sch.yield(), dispose() {} };
+  }
+  if (typeof env.setImmediate === 'function') {
+    const si = env.setImmediate;
+    return { kind: 'setImmediate', turn: () => new Promise(r => si(r)), dispose() {} };
+  }
+  if (typeof env.MessageChannel === 'function') {
+    let channel = null;
+    const waiting = [];
+    const turn = () => new Promise(r => {
+      if (!channel) { channel = new env.MessageChannel(); channel.port1.onmessage = () => { const w = waiting.shift(); if (w) w(); }; }
+      waiting.push(r);
+      channel.port2.postMessage(0);
+    });
+    return { kind: 'MessageChannel', turn, dispose() { if (channel) { channel.port1.close(); channel.port2.close(); channel = null; } } };
+  }
+  const st = env.setTimeout;
+  return { kind: 'setTimeout', turn: () => new Promise(r => st(r, 0)), dispose() {} };
+}
+const nextTurn = pickYield().turn;
 
 /** The buffer fast path: a Uint8Array never goes through a handle. */
 export const scanBuffer = scan;
@@ -89,12 +116,16 @@ export function bufferHandle(bytes) {
   return { size: copy.length, read: (offset, length) => copy.subarray(offset, offset + length) };
 }
 
-/** A genuinely asynchronous in-memory handle: every read resolves on a later turn. */
+/** A genuinely asynchronous in-memory handle: every read is a Promise (a microtask, or a
+ *  timer of `delay` ms). */
 export function asyncHandle(bytes, { delay = 0 } = {}) {
   const copy = bytes.slice();
   return {
     size: copy.length,
-    read: (offset, length) => new Promise(resolve => setTimeout(() => resolve(copy.slice(offset, offset + length)), delay)),
+    // delay 0: resolved on a microtask (a genuine Promise, no timer clamp); delay > 0: a timer
+    read: (offset, length) => delay > 0
+      ? new Promise(resolve => setTimeout(() => resolve(copy.slice(offset, offset + length)), delay))
+      : Promise.resolve().then(() => copy.slice(offset, offset + length)),
   };
 }
 
