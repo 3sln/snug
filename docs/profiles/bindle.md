@@ -1,3 +1,12 @@
+> **Historical input (2026-11-03).** Bindle and 3sln.me are paused (owner
+> direction, D080). snug continues as a standalone library; the Bindle CBOR
+> profile remains an optional named profile (`bindle`) and its vectors and
+> contracts remain test inputs. The requirements below are kept as one
+> consumer's checklist; most of them (public API, wire compatibility for the
+> profile, hostile-input bounds, runtime evidence, reproducibility, a worked
+> example) are also simply what a good library owes any user, and are tracked
+> as Phase 7 items in DEVLOG.
+
 # Bindle adoption requirements for Snug
 
 Handoff from the Bindle coordinator, 2026-11-02. These are consumer requirements and proposed adoption gates, not a claim that Snug is finished or an instruction to rewrite its architecture. Owner will drive completion in the existing Snug session. No Snug implementation changes were made during this audit.
