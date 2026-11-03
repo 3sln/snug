@@ -1074,6 +1074,11 @@ comparison. Each further target costs a vocabulary arm per form and a host,
 with no consumer asking.
 **Alternatives**: all four of emon/nome's targets from day one (rejected: no
 consumer; adding later is adding arms).
+*Owner confirmation 2026-11-03* (relayed by the coordinator): "js/wasm/rust
+is fine for first release" — first-release targets are JavaScript, Rust, and
+WebAssembly built from Rust. D005 (JS target vs wasm for JS hosts) is to be
+re-taken on the full library once the VM/validator is stable (P7.9).
+- [x] **Confirmed by the owner** (2026-11-03, via coordinator) — targets only.
 - [ ] **Signed off** (owner)
 
 ### D007 — Licence MIT, `Copyright (c) 2026 3sln`
@@ -1988,6 +1993,8 @@ are answered as provisional decisions D082–D085. None is open now.
   examples, a worked consumer example, README.
 - [ ] **P7.6 — Bundle size** (R9: runtime 33 KB vs 20 KB gzip).
 - [ ] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
+- [ ] **P7.9 — Re-take D005** (generated JS vs wasm for JS hosts) on the full
+  library: compile + validate + decode + views + writer; owner asked for the verdict.
 - [ ] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
   ciborium, minicbor (Rust) and the `cddl` crate.
 
