@@ -970,9 +970,88 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ## Phase 6 — Sources: blob handles and streams (D027)
 
-- [~] **P6.2 — Resumable session VM.** Shared refactors committed (`d63868d`);
-  the session driver is unfinished in `wip/vm-session.kin.wip` (interrupted by
-  an API usage limit, 2026-10-29).
+- [x] **P6.2 — Resumable session VM** (D027, architecture §17 rev 3, D029/D030).
+  *Done 2026-11-03* (session-VM engineer; commits `d034d68`, `0d9d86e`,
+  `3ed4739`, `4e8939d`, `654cdf8`, `3551d7a`, on the shared refactors of
+  `d63868d`). D090–D095. The interrupted draft (`wip/vm-session.kin.wip`) was
+  read and **restarted from**, keeping its frame machinery for arrays, maps,
+  tag notes and embed runs but not its core: it evaluated in-window items
+  speculatively with `end` cut to the window and rolled back on `truncated`,
+  which is not exact (D091), re-read string content for every leaf, and asked
+  for whole map keys in the window. `wip/` is removed.
+  Built: `kin/vm-session{,-base,-str,-cont}.kin` (`snug.vm.session`, `sbase`,
+  `sstr`, `scont`; ~2,600 lines; gen/ committed). A session runs one message of
+  a declared length over windows: `vms-step` answers the verdict (out exactly
+  as vm-validate's), `VMS_NEED(offset, length)` or `VMS_YIELD`. Items the
+  window holds whole (structural prescan, once per step over the pending item
+  and its siblings, recording the crossing chain) go to `eval-item` /
+  `dead-item` themselves; crossing items get frames running the generic path
+  with the shared block, query, witness, charging and leaf functions, the
+  buffer walk's streaks with `end` cut to the cut, and inline evaluation of
+  known-fitting children (D091). Heads never split; bounded pieces asked whole
+  (D090); text content in one pass with UTF-8 and every regexp advancing per
+  code point and the leaf charges dry-run then charged as one sum (D094);
+  `.bits` from the pass; EMBED as a nested document on the frame stack with
+  inner refusals caught; content read twice replayed with a `vms-keep` pin;
+  crossing map keys copied into the per-session key arena, the copy then the
+  previous key (D092); tag-4/40 notes from element heads; witness, path,
+  profile-only continuation in the session's own scratch; budget charges
+  identical for every split and quantum (gated). Hosts: JS `Schema.session` /
+  `VmSession` (own scratch, session array and arena per session, no concurrent
+  resume) and `sources.mjs` `validateHandle`, `validateHandleSync`,
+  `pushValidator` over the scanner's drivers (made generic); Rust
+  `schema::Session`, `trait Blob`, `validate_blob` (minimal, sync).
+  **Gate** `bb vmsession-test [mutations] [seed] [schemas] [stress]`: every
+  vm-test case (its case building moved to `kin/scripts/vm-allcases.mjs`; the
+  3 `validateAt` span cases are not sessions) and a session stress set
+  (`kin/scripts/vmsession-cases.mjs`: long keys at several levels, LITSET and
+  regexp key typesets, multi-regexp long texts, LIT/LITSET on long strings,
+  `.bits`+`.cbor`, `.cbor`+`.cborseq`, nested `.cbor`, float typed arrays with
+  tails, ndarrays, decimals with bignum mantissas, cose keys; valid and broken)
+  under whole windows, 1-byte windows, random 1..7 (with quanta 1–3) / 1..300 /
+  1..4096-byte windows, whole windows under quanta 1–3, a split at every offset
+  (≤ 48 bytes), part-way budgets, the generic path and schedule 1 (samples):
+  vm-validate's whole out array each time; windows start exactly where asked;
+  JS behind out-of-bounds traps; sessions interleaved step by step; the debug
+  Rust build identical; JS sources == Rust `validate_blob` == `Schema.validate`.
+  **Run** (defaults: 20,000 mutations, 400 schemas, 60 stress, seed 1;
+  2026-11-03, final tree): 673,757/673,757 session runs identical over 50,576
+  vm-test and 900 stress cases; 63,387 trapped runs; 6,936 interleaved; Rust
+  434,209/434,209, no panic; hosts 4,701/4,701. Eight targeted mutants of the
+  session sources (deferred text charge, key order, key arena copy, regexp
+  first step, prescan of crossing strings, witness rebase, arena offset
+  translation, shape note window) each turn it red. All other gates green on
+  the same tree: `bb check`, `drift`, `scan-test`, `rscan-test`, `vm-test`,
+  `compile-test`, `nav-test`, `write-test`, host/js `npm test` 1053/1053.
+  The proptest campaign's S1 (a push source's finalize after a yield at the
+  declared end threw `length_mismatch`) is fixed with a test; async drivers
+  now yield by `scheduler.yield` / `setImmediate` / `MessageChannel` before
+  `setTimeout` (P7.7's runtime finding), with a test.
+  **Bench** (`bench/VM.md` "P6.2", JS, CPU, interleaved rounds, shared
+  machine): one window = the buffer walk (0.98–1.02× on every large input;
+  ~0.4 µs fixed cost per message); 64 KiB windows 1.04–1.13× on scalar and
+  typed arrays, 1.28–1.35× on the 1.1 MB nested maps; 1 KiB windows 1.23–1.9×;
+  the 64 Ki quantum on one window costs what 64 KiB windows cost.
+  **Learnt**: (1) a speculative in-window walk with a cut `end` is inexact —
+  the walk charges differently once it consults `end`, before it answers
+  `truncated`; a structural prescan is exact and costs a third of a dead walk
+  per window; (2) the frames must reuse the buffer walk's streaks: without
+  them a scalar array crossing windows cost 15–22×; (3) the regex area the
+  verifier sizes already holds every TEXT leaf of a depth, so concurrent
+  regexps need no new scratch; (4) a LIT is decided by length, so long
+  strings need no literal compare state; (5) a crossing point must stop at a
+  refusal the walk stops at — an embedded document's refusal is caught and
+  the outer walk goes on past it (a bug the gate found); (6) stream notes
+  (tag 4/40) forbid streaks over a pair's elements.
+  **Open**: D085's unknown-length drain mode (the end-dependent checks are
+  `doc-start`'s `too_large`, `root-end`'s trailing and the `end` every item
+  inherits from the root's `IT_END`: a drain session would carry an open end
+  and pending checks); arena pooling and a bound on live sessions (each
+  session allocates its arrays; JS `VmSession.bytesHeld` reports them); handle
+  version pinning (W12) is the handle's contract, not checked; no Rust async
+  driver and no wasm session exports; frames do not yet run `map-streak`, so a
+  map that itself crosses windows takes the generic pair path; the V8 OSR
+  deoptimisation seen on `array-streak` in small windows (Findings).
 
 - [x] **P6.0 — Review of architecture §17** (independent). *Done 2026-10-29*:
   Codex, 24 findings (3 blockers: unknown-length streams cannot keep the
@@ -1945,6 +2024,112 @@ Bounded by `maxBytes` and the host's deadline.
 cost (reading to EOF on a doomed message) is bounded and opt-out.
 - [ ] **Signed off** (owner)
 
+### D090 — The session asks for bounded pieces whole; a LIT is decided by length (P6.2)
+**Decision** (session-VM engineer, provisional): besides heads (D029), a session
+asks for these pieces whole, from their first byte: a bignum's tag, head and
+content (≤ 139 bytes); the prefix of a string item that an admitted LITSET's
+binary search may read (min(item length, its longest member) ≤ pool bytes);
+the whole string item only when an admitted LIT has exactly its encoded length
+(so ≤ pool bytes); the 73 / 11 bytes a tag-40 shape / data note reads and a
+decimal mantissa's bignum (D029's summaries); a typed array's content head.
+Every other content is read incrementally. A LIT whose length differs from the
+item's is refused by length, without reading content, so no literal-compare
+position is carried.
+**Why**: what a stream must buffer stays bounded by the Program (its literal
+pool) or by constants, never by the input; the shared leaf functions
+(`leaf-lit`, `leaf-litset`, `eval-leaf`) run unchanged on window bytes.
+**Alternatives**: carried compare state per LIT leaf (more state, no gain once
+the length decides); copying LITSET prefixes into the key arena (the copies
+would overlap embedded content's keys, so the arena bound by the message
+length would no longer hold).
+- [ ] **Signed off** (owner)
+
+### D091 — Two tiers: the buffer walk takes whole items, frames run the generic path; a structural prescan decides (P6.2)
+**Decision** (provisional): an item every byte of whose walk lies before the
+step's CUT (the window's end, or the quantum's byte bound, D093) is evaluated by
+`eval-item` / `dead-item` themselves; anything else gets a frame that runs
+snug.vm.eval's GENERIC path phase by phase with the same block, query, witness
+and charging functions (fast == generic is gated, D044). "Every byte before the
+cut" is decided by a structural PRESCAN (heads and lengths, no charges) that
+stops at the cut or at a refusal the walk cannot get past (a malformed head, a
+length or count beyond end, an unsupported or 64-bit tag); once per step it
+runs over the pending item and its siblings and records the crossing chain and
+the crossing point, so later siblings and descendants are looked up, not
+rescanned. Frames run the buffer walk's streaks (`dead-int-streak`,
+`array-streak`) with `end` cut to the cut — a streak checks an element whole
+before charging it and stops before one that would not do, so a short `end`
+only ends it sooner — and evaluate known-fitting children inline.
+**Why**: the D030 condition — two drivers, both kin, sharing every leaf check —
+with nothing forked but control flow; a whole-window session IS the buffer
+walk (≈ 1.0×). Exact by construction: the interrupted draft's speculation (run
+the buffer walk with `end` cut to the window, roll back on `truncated`) is not:
+once a cut `end` is consulted the walk can charge differently before it
+returns `truncated` (`key-span-end` answers −1 and the key search's probes are
+skipped), so a `budget` or `too_many_items` result there is not the buffer's.
+**Alternatives**: speculation with rollback (inexact, above); framing every item
+(the 120,000-int array cost 15–22× at 64 KiB windows before the streaks).
+- [ ] **Signed off** (owner)
+
+### D092 — Map keys whole: in the window or copied into the key arena (P6.2)
+**Decision** (provisional): a pair's key is taken whole before any of the
+pair's charges — from the window, or, when it crosses the window, copied into
+the session's byte KEY ARENA (BytesW, min(declared length, input limit) bytes)
+window by window — and the key search, the key's typeset evaluation
+(`eval-item` over the copy, offsets moved back) and the order comparison run on
+it; the copy then becomes the map's previous key. A previous key held as a
+window span is copied out on suspension and before any frame push; each map's
+region starts at its frame's floor (the arena is a stack in frame order).
+**Why**: the key search is charged before the key's visit, so the stop point
+needs the key whole first; keys are disjoint spans of the message, so the arena
+never needs more than the message (architecture §17.2, W3–W6), and a key is
+copied at most once (plus one move when it becomes the previous key).
+**Alternatives**: asking for whole keys in the window (the host then buffers
+arbitrarily long keys instead); copying every key (costs keys the window holds).
+- [ ] **Signed off** (owner)
+
+### D093 — The work quantum and the cut (P6.2)
+**Decision** (provisional): a step yields once it has made progress and its
+work (budget units charged + 1 per item begun + 1 per 64 content bytes scanned)
+reaches the quantum, or when it would begin an item at or past its cut
+(its starting position + quantum bytes); content scans chunk by what the
+quantum leaves (64 bytes a unit). Yields depend only on the windows and the
+quantum and change nothing in `out` (gated).
+- [ ] **Signed off** (owner)
+
+### D094 — String content in one pass; deferred dry-run charges; replay only for content read twice (P6.2)
+**Decision** (provisional): a text item's UTF-8 scan (charged before, as
+`eval-item` does) and every admitted regexp advance together, a code point at a
+time, each regexp's active set in its own slot of the regex area (the verifier
+sizes it for every TEXT leaf of the depth); the filter and leaf charges
+(units, regexp steps, LITSET probes) are DRY-RUN (the budget word parked) and
+charged as one sum at the item's offset after the scan — they are all at that
+offset with nothing observable between, so the stop point is the buffer's; a
+regexp's dry run stops once the sum exceeds the budget left. A byte string's
+filter and leaves are charged in order at its start (a `.bits` charge does not
+depend on content), the `.bits` verdict comes from the pass, and an EMBED
+sub-walk runs as a nested document on the frame stack, the byte-string frame
+catching an inner profile refusal (embed-run). Content read twice — `.bits`
+with EMBED, `.cbor` with `.cborseq`, a float typed array whose content tail
+reads content — is replayed: the frame pins `vms-keep` at the content start.
+**Why**: the common shapes cost one pass and bounded buffering; replay only for
+rare combinations. **Alternatives**: replaying every crossing string (the
+draft: a stream buffers every such string); running every observer of a byte
+string concurrently with deferred charges for embedded walks (much larger).
+- [ ] **Signed off** (owner)
+
+### D095 — The session API and its hosts (P6.2)
+**Decision** (provisional): kin `snug.vm.session`: `vms-words(P)`,
+`vms-arena(P, limits, total)`, `vms-init(P, B, rule, limits, s, ss, ka, total,
+quantum)`, `vms-step(P, B, window, s, ss, ka, out, base)` → the code (out as
+vm-validate's) | VMS_NEED (−64) | VMS_YIELD (−65), `vms-need-offset`,
+`vms-need-length`, `vms-position`, `vms-keep`. JS: `Schema.session` →
+`VmSession` (its own scratch, session array and arena; no concurrent resume)
+and sources.mjs `validateHandle`, `validateHandleSync`, `pushValidator`. Rust:
+`schema::Session`, `trait Blob` (an immutable snapshot), `validate_blob`.
+Known length only (D085's drain mode is a later item); `validateAt` spans are
+not sessions.
+- [ ] **Signed off** (owner)
+
 ### D100 — Program container compatibility and format-word spelling
 **Decision**: implement program.md §13.3's 96-byte header unchanged, with
 explicit little-endian P words, byte pool, printable ASCII/NUL-padded snug
@@ -2156,6 +2341,15 @@ array prototypes or undefined handling (outside this decision).
   and gated; the message is wrong; `d5b74d7` records it. Rule: commit by
   explicit path only, never `-a`, while several agents share the tree.
 (Measured facts worth keeping, with dates.)
+
+- 2026-11-03 (P6.2): V8 (Node 24.6) can enter a kin streak (`array-streak`,
+  `dead-int-streak`) through OSR code compiled before the stores after its
+  loop had type feedback, and then deoptimise at every loop exit ("insufficient
+  type feedback for generic keyed access" at the post-loop store into `s`,
+  ~20 µs a call, the same optimised code each time). One call per message is
+  harmless; a session calling it once per small window can pay it per window
+  (seen as 3.5× at 1 KiB windows on the 120,000-int array in some process
+  histories, 1.26× in others). Not a correctness issue; Rust/wasm unaffected.
 
 - 2026-10-29 (P1.4, `bench/SCAN.md`): on the CBOR scanner the kin-generated
   JS runs within 0.94–1.09× of a hand-written JS scanner on real inputs and

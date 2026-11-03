@@ -329,3 +329,60 @@ message at 63% of the budget (D045, D046). Schedule 2 needs program.md §14
 and §15 amended (§15.3's `[* tstr]` element charges change) with the compiler
 engineer's agreement before it can become the default; the default budget
 itself is a compile option the compiler sets (D046).
+
+---
+
+# P6.2 — the resumable session vs the buffer driver
+
+Recorded 2026-11-03 by the session-VM engineer. Reproduce with
+`node bench/vmsession-bench.mjs` (`--quick` for a short pass). Apple M1 Pro,
+macOS 14.6.1, Node v24.6.0; the machine was **shared** (load average 14 at
+the start of this run, 50–90 earlier in the day from other agents' work), so
+only ratios within one row mean much. Method: CPU time
+(`process.cpuUsage`); per input the six variants run in **interleaved
+rounds** (each round ~25 ms of CPU per variant), median of 11 rounds; every
+variant's whole out array is checked against the buffer driver first.
+Session arrays are allocated once per schema and re-initialised per call
+(`vms-init`), as a pooled host would; windows are zero-copy `subarray` views
+from an in-memory buffer, each starting where the session asks, of
+max(window size, its need). Inputs and schemas are section 2's (budget
+unlimited). JS only (generated); Rust/wasm sessions were not timed.
+
+| input | schema | buffer | session, one window | one window, quantum 64 Ki | 64 KiB | 16 KiB | 1 KiB |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 216 profile vectors (per set) | `any` | 99.3 µs | 191 µs (1.92×) | 182 µs | 180 µs | 184 µs | 190 µs |
+| RPC put, 287 B | `any` | 2.6 µs | 2.9 µs (1.14×) | 2.9 µs | 2.9 µs | 3.0 µs | 3.0 µs |
+| | `{ * tstr => any }` | 3.9 µs | 4.4 µs (1.12×) | 4.4 µs | 4.4 µs | 4.4 µs | 4.4 µs |
+| RPC put with 1 MiB bstr | `any` | 2.8 µs | 3.2 µs (1.15×) | 9.2 µs | 8.6 µs | 8.5 µs | 8.5 µs |
+| | contract-shaped | 18.4 µs | 18.8 µs (1.02×) | 27.3 µs | 26.0 µs | 26.2 µs | 25.9 µs |
+| 120,000-int array | `any` | 1.70 ms | 1.72 ms (1.01×) | 1.88 ms | 1.92 ms (1.13×) | 1.76 ms | 2.09 ms (1.23×) |
+| | `{ v: [* int] }` | 3.26 ms | 3.20 ms (0.98×) | 3.49 ms | 3.55 ms (1.09×) | 3.44 ms | 4.11 ms (1.26×) |
+| 1 MiB typed arrays | `any` | 486 µs | 481 µs (0.99×) | 507 µs | 505 µs (1.04×) | 519 µs | 790 µs (1.62×) |
+| | typed-array tags | 506 µs | 507 µs (1.00×) | 516 µs | 529 µs (1.05×) | 548 µs | 813 µs (1.60×) |
+| nested maps, 1.1 MB | `any` | 21.3 ms | 21.3 ms (1.00×) | 29.3 ms | 28.8 ms (1.35×) | 29.6 ms | 35.7 ms (1.68×) |
+| | `{ docs: [* { * tstr => any }] }` | 38.7 ms | 38.6 ms (1.00×) | 50.4 ms | 49.5 ms (1.28×) | 51.1 ms | 73.3 ms (1.90×) |
+
+Reading it:
+
+* **One window = the buffer walk** (0.98–1.02× on every large input): the
+  root item fits the window, so the session hands it to `eval-item` whole.
+  The fixed cost of a session is ~0.3–0.5 µs per message (`vms-init`, the
+  step loop): visible only on tiny messages (1.1× on 287 B, 1.9× over the 216
+  vectors of a few bytes each).
+* **Windows cost the prescan and the chain's frames.** Scalar-dense arrays
+  run the buffer walk's streaks inside the frame (1.09–1.13× at 64 KiB); a
+  head-dense document pays the structural prescan of each window (one pass
+  over its heads, about a third of a dead walk) and a frame per crossing
+  container: 1.28–1.35× at 64 KiB, 1.7–1.9× at 1 KiB. A 1 MiB byte string
+  costs ~6 µs of window round trips whatever the size (its content is never
+  read).
+* **The quantum** (64 Ki units) on one whole window costs what 64 KiB windows
+  cost: each quantum's cut is a window boundary for the walk.
+* Before the frames ran the streaks (first draft of this item), the 120,000-int
+  array cost 15–22× at 64 KiB: every element made a round trip through the
+  session loop and the generic element step. Measured on this run's tree.
+* A V8 artifact to know about: `array-streak` / `dead-int-streak` are entered
+  from OSR code whose post-loop stores lacked type feedback, and in some
+  orders of first use V8 deoptimises at every loop exit (≈ 20 µs a call):
+  seen as 3.5× at 1 KiB windows on the int array in other process histories
+  of this benchmark, 1.26× here. Rust and wasm do not have it.
