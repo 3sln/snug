@@ -24,6 +24,9 @@ import { buildVmCases } from './vm-allcases.mjs';
 import { sessionCases } from './vmsession-cases.mjs';
 import { runSession, sessionSteps } from './vmsession-run.mjs';
 import { hex } from './scan-cases.mjs';
+import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
+import { validateHandleSync, bufferHandle } from '../../host/js/src/sources.mjs';
+import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
 
 const [rustBin, mutArg, seedArg, schemaArg, stressArg] = process.argv.slice(2);
 const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 400), STRESS = Number(stressArg ?? 60);
@@ -143,8 +146,34 @@ for (let i = 0; i + 2 < runs.length; i += 3 * 97) {
   group.forEach((r, k) => { inter++; if (res[k] !== r.want) { interFails++; fail(`${desc(r)}: interleaved ${res[k]} vs ${r.want}`); } });
 }
 
+// ---------------------------------------------------------------- hosts: JS sources == Rust validate_blob
+const hostRuns = [];   // {ci, chunk, quantum, js}
+const hostProgs = new Map();
+const render = r => r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
+cases.forEach((c, ci) => {
+  if (!(c.corpus || c.stress) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0) return;
+  if (!hostProgs.has(c.prog)) {
+    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify }); } catch { hp = null; }
+    hostProgs.set(c.prog, hp);
+  }
+  const hp = hostProgs.get(c.prog);
+  if (!hp) return;
+  const schema = new HostSchema(hp), rule = schema.program.P[42] !== undefined ? c.rule : 0;
+  const names = []; const td = new TextDecoder();
+  for (let i = 0; i < hp.P[15]; i++) { const at = hp.P[42] + 5 * i; names.push(td.decode(hp.B.subarray(hp.P[at], hp.P[at] + hp.P[at + 1]))); }
+  const opts = { top: c.lim[0] === 0 ? 'map' : 'any', cose: c.lim[1] === 1 };
+  for (const [chunk, quantum] of [[1, 0], [5, 2], [4096, 0]]) {
+    let js;
+    try { js = render(validateHandleSync(schema, bufferHandle(c.bytes), names[rule], opts, { chunk, quantum })); }
+    catch (e) { js = 'THROW ' + e.message; }
+    const want = render(hp.result(hp.run(rule, c.bytes, opts)));
+    if (js !== want) fail(`${c.label}: JS host session ${js} | JS host validate ${want}`);
+    hostRuns.push({ ci, chunk, quantum, js });
+  }
+});
+
 // ---------------------------------------------------------------- Rust
-let rustLine = '  SKIP Rust (no binary given)';
+let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts';
 if (rustBin) {
   const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
   const sel = [];
@@ -154,12 +183,20 @@ if (rustBin) {
     sel.push(i);
     lines.push(`case ${c.prog} ${c.rule} ${Array.from(r.lim).join(' ')} ${pol.kind} ${pol.w} ${pol.q} ${pol.seed >>> 0} ${pol.k} ${c.bytes.length ? hex(c.bytes) : '-'}`);
   });
+  for (const h of hostRuns) {
+    const c = cases[h.ci];
+    lines.push(`host ${c.prog} ${c.rule} ${c.lim[0] === 0 ? 1 : 0} ${c.lim[1]} ${h.chunk} ${h.quantum} ${c.bytes.length ? hex(c.bytes) : '-'}`);
+  }
   const t2 = performance.now();
   const p = spawnSync(rustBin, [], { input: lines.join('\n') + '\n', maxBuffer: 1 << 30, encoding: 'utf8' });
   const tRs = performance.now() - t2;
   if (p.status !== 0) fail(`the Rust binary exited ${p.status}: ${p.stderr.slice(0, 400)}`);
-  const rs = p.stdout.trim().split('\n');
-  if (rs.length !== sel.length) fail(`Rust answered ${rs.length} lines, expected ${sel.length}`);
+  const all = p.stdout.trim().split('\n');
+  const rs = all.slice(0, sel.length), hs = all.slice(sel.length);
+  if (all.length !== sel.length + hostRuns.length) fail(`Rust answered ${all.length} lines, expected ${sel.length + hostRuns.length}`);
+  let ha = 0;
+  hostRuns.forEach((h, k) => { if (hs[k] === h.js) ha++; else fail(`${cases[h.ci].label} chunk ${h.chunk} q ${h.quantum}: JS host ${h.js} | Rust host ${hs[k]}`); });
+  hostLine = `  ${ha === hostRuns.length ? 'ok  ' : 'FAIL'} hosts: JS validateHandleSync == Rust snug::schema::validate_blob on ${ha}/${hostRuns.length} corpus and stress runs (chunks 1, 5 with quantum 2, 4096), both == Schema.validate`;
   let ra = 0, panics = 0;
   sel.forEach((i, k) => {
     if (rs[k] === 'PANIC') { panics++; fail(`${desc(runs[i])}: Rust PANICKED`); return; }
@@ -176,6 +213,7 @@ console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).
 line(trapFails === 0, `JS bounds: ${guarded} runs behind throwing out-of-bounds traps on P, B, window, scratch, session array, key arena, out`);
 line(interFails === 0, `interleaved sessions: ${inter} sessions run three at a time, a step each in turn, on one Program`);
 console.log(rustLine);
+console.log(hostLine);
 console.log(`  info ${programs.length} programs; JS ran ${runs.length} sessions in ${(tJs / 1000).toFixed(1)} s (all ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
 console.log('  ok   vmsession-test');

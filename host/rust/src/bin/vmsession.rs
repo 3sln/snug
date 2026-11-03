@@ -4,11 +4,17 @@
 //
 //     prog <words, comma-separated decimal> <pool hex or ->
 //     case <prog index> <rule> <l0> .. <l8> <kind> <w> <q> <seed> <k> <input hex or ->
+//     host <prog index> <rule> <top_map> <cose> <chunk> <quantum> <input hex or ->
+//
+// `host` goes through the Rust host's session API (`snug::schema::validate_blob`)
+// and prints `ok` or `<reason>|<subcode>|<offset>|<path segments joined by />`,
+// as vm.rs does for `validate`.
 //
 // and prints, per case, `out[0..8+2*out[6]]` space-separated, `E <why>` for a
 // broken session contract, or `PANIC` (caught per case; the crate is built in
 // debug, overflow checks on). Every session owns fresh scratch, session array
 // and key arena.
+use snug::schema::{validate_blob, BytesBlob, Options, Program, Segment};
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
 use snug::snug::vm::session::{vms_arena, vms_init, vms_need_length, vms_need_offset, vms_position, vms_step, vms_words};
 use std::io::{BufRead, Write};
@@ -123,6 +129,34 @@ fn main() {
                 let input = unhex(f[17]);
                 let (p, pool) = &progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(p, pool, rule, &lim, &input, &pol)));
+                match r {
+                    Ok(t) => writeln!(out, "{}", t).unwrap(),
+                    Err(_) => writeln!(out, "PANIC").unwrap(),
+                }
+            }
+            "host" => {
+                let n = |i: usize| -> i32 { f[i].parse().expect("number") };
+                let (p, pool) = &progs[n(1) as usize];
+                let input = unhex(f[7]);
+                let opts = Options { top_map: n(3) == 1, cose: n(4) == 1, ..Options::default() };
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match Program::new(p, pool) {
+                    Err(_) => "UNVERIFIED".to_string(),
+                    Ok(h) => match validate_blob(&h, n(2), &BytesBlob(&input), &opts, n(5) as usize, n(6)) {
+                        Err(e) => format!("SOURCE {:?}", e),
+                        Ok(Ok(())) => "ok".to_string(),
+                        Ok(Err(e)) => {
+                            let path: Vec<String> = e.path.iter().map(|s| match s {
+                                Segment::Index(i) => i.to_string(),
+                                Segment::Key(k) => format!("{:?}", k),
+                                Segment::AnyKey => "*".to_string(),
+                                Segment::Tag => "#tag".to_string(),
+                                Segment::Embedded => "cbor".to_string(),
+                                Segment::EmbeddedItem(i) => format!("cbor/{}", i),
+                            }).collect();
+                            format!("{}|{}|{}|{}", e.reason, e.subcode.unwrap_or(""), e.offset, path.join("/"))
+                        }
+                    },
+                }));
                 match r {
                     Ok(t) => writeln!(out, "{}", t).unwrap(),
                     Err(_) => writeln!(out, "PANIC").unwrap(),

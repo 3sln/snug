@@ -190,3 +190,129 @@ pub fn validate_at(prog: &Program, rule: i32, bytes: &[u8], start: i32, end: i32
     assert!(c >= 0, "snug: vm-validate-span answered {} for a verified Program", c);
     result(prog, &out)
 }
+
+// ---------------------------------------------------------------- sessions (P6.2)
+
+use crate::snug::vm::session::{vms_arena, vms_init, vms_keep, vms_need_length, vms_need_offset, vms_position, vms_step, vms_words};
+
+const VMS_NEED: i32 = -64;
+const VMS_YIELD: i32 = -65;
+
+/// What one [`Session::step`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    /// Give a window holding `[offset, offset + len)`; no byte before `keep` is asked for again.
+    Need { offset: i32, len: i32, keep: i32 },
+    /// The work quantum is spent: give a window holding `position`.
+    Yield { position: i32, keep: i32 },
+    /// The verdict, as [`validate`]'s.
+    Done(Result<(), Failure>),
+}
+
+/// A resumable validation (architecture §17, P6.2) of one message of a declared
+/// length over windows of it. It owns its scratch, session array and key arena
+/// (never shared between sessions); the Program is borrowed.
+pub struct Session<'p> {
+    prog: &'p Program,
+    s: Vec<i32>,
+    ss: Vec<i32>,
+    ka: Vec<u8>,
+    out: Vec<i32>,
+    done: Option<Result<(), Failure>>,
+}
+
+impl<'p> Session<'p> {
+    /// A session on `rule` over a message of exactly `total` bytes; `quantum` > 0
+    /// yields after about that many work units per step.
+    pub fn new(prog: &'p Program, rule: i32, total: i32, opts: &Options, quantum: i32) -> Session<'p> {
+        let lim = opts.words();
+        let cap = prog.p[16].max(1);
+        let mut s = vec![0i32; vm_scratch_words(&prog.p, rule, cap) as usize];
+        vm_scratch_init(&mut s, cap);
+        let mut ss = vec![0i32; vms_words(&prog.p) as usize];
+        let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
+        let c = vms_init(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
+        assert!(c >= 0, "snug: vms-init answered {} for a verified Program", c);
+        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
+    }
+    /// Run over `window`, the message's bytes from `base`.
+    pub fn step(&mut self, window: &[u8], base: i32) -> Step {
+        if let Some(d) = &self.done {
+            return Step::Done(d.clone());
+        }
+        let r = vms_step(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base);
+        if r == VMS_NEED {
+            return Step::Need { offset: vms_need_offset(&self.ss), len: vms_need_length(&self.ss), keep: vms_keep(&self.ss) };
+        }
+        if r == VMS_YIELD {
+            return Step::Yield { position: vms_position(&self.ss), keep: vms_keep(&self.ss) };
+        }
+        assert!(r >= 0, "snug: vms-step answered {}", r);
+        let d = result(self.prog, &self.out);
+        self.done = Some(d.clone());
+        Step::Done(d)
+    }
+}
+
+/// A random-access source of a known size whose contents do not change while it
+/// is read (an immutable snapshot: architecture §17.3, W12).
+pub trait Blob {
+    fn size(&self) -> usize;
+    fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>, SourceError>;
+}
+
+/// A source broke its contract: a transport outcome, never a CBOR verdict (W13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceError {
+    ShortRead { offset: usize, wanted: usize, got: usize },
+    Read,
+    TooLarge,
+}
+
+/// An in-memory blob (a borrowed buffer), for tests and as the simplest source.
+pub struct BytesBlob<'a>(pub &'a [u8]);
+
+impl Blob for BytesBlob<'_> {
+    fn size(&self) -> usize {
+        self.0.len()
+    }
+    fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>, SourceError> {
+        self.0.get(offset..offset + len).map(|x| x.to_vec()).ok_or(SourceError::Read)
+    }
+}
+
+/// Validate a blob against `rule` through a session, reading `chunk`-byte windows
+/// only when the session asks for bytes it does not have.
+pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options, chunk: usize, quantum: i32)
+                     -> Result<Result<(), Failure>, SourceError> {
+    let size = blob.size();
+    if size > 0x7fff_ffff {
+        return Err(SourceError::TooLarge);
+    }
+    let mut session = Session::new(prog, rule, size as i32, opts, quantum);
+    let (mut base, mut window): (usize, Vec<u8>) = (0, Vec::new());
+    let (mut at, mut need) = (0usize, chunk.min(size));
+    loop {
+        let end = base + window.len();
+        if !(at >= base && at + need.min(size - at) <= end && (at < end || at == size)) {
+            let len = need.max(chunk).min(size - at);
+            let got = blob.read(at, len)?;
+            if got.len() != len {
+                return Err(SourceError::ShortRead { offset: at, wanted: len, got: got.len() });
+            }
+            base = at;
+            window = got;
+        }
+        match session.step(&window, base as i32) {
+            Step::Done(d) => return Ok(d),
+            Step::Need { offset, len, .. } => {
+                at = offset as usize;
+                need = len as usize;
+            }
+            Step::Yield { position, .. } => {
+                at = position as usize;
+                need = 1;
+            }
+        }
+    }
+}
