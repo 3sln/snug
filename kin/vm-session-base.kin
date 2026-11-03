@@ -1,0 +1,751 @@
+;; The resumable validator session's machinery (P6.2; D027, architecture §17
+;; rev 3, D029/D030; this item's design D090-D095): the session array's layout,
+;; the frame stack and its control words, suspension (NEED / YIELD), the work
+;; quantum, the window-relative rebasing of the scratch's position words, the
+;; byte KEY ARENA (each active map's previous key and a key being copied across
+;; windows), the structural PRESCAN that tells whether the buffer walk may take
+;; an item whole from the current window (D091), and the tag-4/40 notes taken
+;; from element heads (D029's summaries).
+;;
+;; Conventions: `ss` is the session array (Ints), `s` the VM scratch (Ints, as
+;; for vm-validate, exclusive to the session), `ka` the key arena (BytesW), `b`
+;; the current window and `base` its first byte's message offset. Positions in
+;; `ss` are ABSOLUTE; positions handed to the buffer walk's functions are
+;; window-relative (absolute - base) and may be negative or past the window
+;; when they only label a charge or a witness.
+(ns snug.vm.sbase
+  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg quot rem shl sar ushr bit-and bit-or
+                               bit-xor < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
+            [snug.cbor.codes :refer [CODE_DUPLICATE_KEY CODE_KEY_ORDER CODE_DECIMAL CODE_NDARRAY O_ERR_POS]]
+            [snug.cbor.head :refer [fail head-size small-arg be16 be32]]
+            [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok]]
+            [snug.vm.layout :refer [H_LIM_DEPTH H_LIM_INPUT H_S_LEAVES H_S_LITREFS H_FLAGS FL_EMBED
+                                    K_LIT K_LITSET K_BYTES K_EMBED VM_BUDGET VM_POS VM_W_OFFSET
+                                    VM_BIGNUM_MAX R_BUDGET INF]]
+            [snug.vm.base :refer [charge c64min]]
+            [snug.vm.api :refer [lim]]))
+
+;; ------------------------------------------------------------ results
+
+(defconst ^:pub ^I32 VMS_NEED -64)
+(defconst ^:pub ^I32 VMS_YIELD -65)
+(defconst ^:pub ^I32 GO 0)
+
+;; ------------------------------------------------------------ the session array header
+
+(defconst ^:pub ^I32 SS_PH 0)
+(defconst ^:pub ^I32 SS_TOTAL 1)
+(defconst ^:pub ^I32 SS_POS 2)
+(defconst ^:pub ^I32 SS_NEED_OFF 3)
+(defconst ^:pub ^I32 SS_NEED_LEN 4)
+(defconst ^:pub ^I32 SS_QUANTUM 5)
+(defconst ^:pub ^I32 SS_SP 6)
+(defconst ^:pub ^I32 SS_RET 7)
+(defconst ^:pub ^I32 SS_KEEP 8)
+(defconst ^:pub ^I32 SS_ATOP 9)
+(defconst ^:pub ^I32 SS_FRAMES 10)
+(defconst ^:pub ^I32 SS_MAXF 11)
+(defconst ^:pub ^I32 SS_CODE 12)
+(defconst ^:pub ^I32 SS_WB0 13)
+(defconst ^:pub ^I32 SS_WORK 14)
+(defconst ^:pub ^I32 SS_CUT 15)
+(defconst ^:pub ^I32 SS_CHN 16)
+(defconst ^:pub ^I32 SS_CHAIN 17)
+(defconst ^:pub ^I32 SS_PSTK 18)
+(defconst ^:pub ^I32 SS_PCAP 19)
+(defconst ^:pub ^I32 SS_PROG 20)
+(defconst ^:pub ^I32 SS_RTS 21)
+(defconst ^:pub ^I32 SS_RNQ 22)
+(defconst ^:pub ^I32 SS_STEPS 23)
+(defconst ^:pub ^I32 IT_POS 24)
+(defconst ^:pub ^I32 IT_D 25)
+(defconst ^:pub ^I32 IT_FB 26)
+(defconst ^:pub ^I32 IT_CK 27)
+(defconst ^:pub ^I32 IT_NQ 28)
+(defconst ^:pub ^I32 IT_END 29)
+(defconst ^:pub ^I32 IT_CTX 30)
+(defconst ^:pub ^I32 IT_MODE 31)
+(defconst ^:pub ^I32 IT_NOTE 32)
+(defconst ^:pub ^I32 IT_PAIR 33)
+(defconst ^:pub ^I32 SS_ABYTES 34)
+(defconst ^:pub ^I32 SS_HDR 40)
+
+(defconst ^:pub ^I32 PH_START 0)
+(defconst ^:pub ^I32 PH_ITEM 1)
+(defconst ^:pub ^I32 PH_RET 2)
+(defconst ^:pub ^I32 PH_FRAME 3)
+(defconst ^:pub ^I32 PH_DONE 4)
+
+;; item modes (IT_MODE)
+(defconst ^:pub ^I32 MODE_ITEM 0)
+(defconst ^:pub ^I32 MODE_VSEQ 1)
+(defconst ^:pub ^I32 MODE_DSEQ 2)
+(defconst ^:pub ^I32 MODE_FRAME 3)
+
+;; ------------------------------------------------------------ frames
+
+(defconst ^:pub ^I32 FW 48)
+(defconst ^:pub ^I32 FK_ARR 1)
+(defconst ^:pub ^I32 FK_MAP 2)
+(defconst ^:pub ^I32 FK_TAG 3)
+(defconst ^:pub ^I32 FK_TEXT 4)
+(defconst ^:pub ^I32 FK_BSTR 5)
+(defconst ^:pub ^I32 FK_DARR 6)
+(defconst ^:pub ^I32 FK_DMAP 7)
+(defconst ^:pub ^I32 FK_DTEXT 8)
+(defconst ^:pub ^I32 FK_DSEQ 9)
+
+;; every frame
+(defconst ^:pub ^I32 F_KIND 0)
+(defconst ^:pub ^I32 F_PH 1)
+(defconst ^:pub ^I32 F_POS 2)
+(defconst ^:pub ^I32 F_END 3)
+(defconst ^:pub ^I32 F_D 4)
+(defconst ^:pub ^I32 F_FB 5)
+(defconst ^:pub ^I32 F_CK 6)
+(defconst ^:pub ^I32 F_NQ 7)
+(defconst ^:pub ^I32 F_CTX 8)
+(defconst ^:pub ^I32 F_Q 9)
+(defconst ^:pub ^I32 F_N 10)
+(defconst ^:pub ^I32 F_EL 11)
+(defconst ^:pub ^I32 F_Q0 12)
+(defconst ^:pub ^I32 F_FLOOR 13)
+(defconst ^:pub ^I32 F_PIN 14)
+;; arrays
+(defconst ^:pub ^I32 F_NB 15)
+(defconst ^:pub ^I32 F_S2 16)
+(defconst ^:pub ^I32 F_CX 17)
+(defconst ^:pub ^I32 F_PEND 18)
+(defconst ^:pub ^I32 F_NALIVE 19)
+(defconst ^:pub ^I32 F_Q1 20)
+(defconst ^:pub ^I32 F_CNQ 21)
+(defconst ^:pub ^I32 F_PAIR 22)
+(defconst ^:pub ^I32 F_ESTART 23)
+;; maps (F_NB, F_PEND, F_NALIVE as arrays)
+(defconst ^:pub ^I32 F_CL 16)
+(defconst ^:pub ^I32 F_CCAP 17)
+(defconst ^:pub ^I32 F_SMAP 20)
+(defconst ^:pub ^I32 F_KLO 21)
+(defconst ^:pub ^I32 F_COSE 22)
+(defconst ^:pub ^I32 F_PS 23)
+(defconst ^:pub ^I32 F_PE 24)
+(defconst ^:pub ^I32 F_PPIN 25)
+(defconst ^:pub ^I32 F_START 27)
+(defconst ^:pub ^I32 F_KID 28)
+(defconst ^:pub ^I32 F_MCNQ 29)
+(defconst ^:pub ^I32 F_NC 30)
+(defconst ^:pub ^I32 F_NAMED 31)
+(defconst ^:pub ^I32 F_VNQ 32)
+(defconst ^:pub ^I32 F_PS2 33)
+(defconst ^:pub ^I32 F_KM 34)
+(defconst ^:pub ^I32 F_KE 35)
+(defconst ^:pub ^I32 F_KGOT 36)
+(defconst ^:pub ^I32 F_KA 37)
+(defconst ^:pub ^I32 F_KQ 38)
+;; strings (text, byte strings, a typed array's content tail)
+(defconst ^:pub ^I32 F_MAJ 15)
+(defconst ^:pub ^I32 F_CS 16)
+(defconst ^:pub ^I32 F_STOP 17)
+(defconst ^:pub ^I32 F_I 18)
+(defconst ^:pub ^I32 F_CLS 19)
+(defconst ^:pub ^I32 F_DEFER 20)
+(defconst ^:pub ^I32 F_RXOFF 21)
+(defconst ^:pub ^I32 F_RXCP 24)
+(defconst ^:pub ^I32 F_BITS 25)
+(defconst ^:pub ^I32 F_BITSOK 26)
+(defconst ^:pub ^I32 F_EPH 27)
+(defconst ^:pub ^I32 F_ECNQ 28)
+(defconst ^:pub ^I32 F_SITEMS 29)
+(defconst ^:pub ^I32 F_SMAXD 30)
+(defconst ^:pub ^I32 F_SCOSE 31)
+(defconst ^:pub ^I32 F_SERR 32)
+(defconst ^:pub ^I32 F_SEQ 33)
+(defconst ^:pub ^I32 F_TAIL 34)
+;; tags
+(defconst ^:pub ^I32 F_TNUM 15)
+(defconst ^:pub ^I32 F_TCLS 16)
+(defconst ^:pub ^I32 F_TCNQ 17)
+(defconst ^:pub ^I32 F_TCS 18)
+(defconst ^:pub ^I32 F_TSTOP 19)
+(defconst ^:pub ^I32 F_TSIZE 20)
+(defconst ^:pub ^I32 F_TI 21)
+(defconst ^:pub ^I32 F_TNOTED 22)
+(defconst ^:pub ^I32 F_EXPOK 23)
+(defconst ^:pub ^I32 F_MANT 24)
+(defconst ^:pub ^I32 F_NDBAD 25)
+(defconst ^:pub ^I32 F_NDK 26)
+(defconst ^:pub ^I32 F_COUNT 27)
+(defconst ^:pub ^I32 F_DIMS 28)
+(defconst ^:pub ^I32 F_TLIVE 36)
+
+;; ------------------------------------------------------------ sizes
+
+(defn ^:pub ^I32 nframes [^IntsR p]
+  (comment "Frames (and prescan levels, chain entries) a session holds: one per"
+           "physical depth 0..D, a virtual `.cborseq` level and slack.")
+  (return (+ (ia p H_LIM_DEPTH) 6)))
+
+(defn ^:pub ^I32 vms-session-words [^IntsR p]
+  (comment "Words of the session array (Ints) for any message: the header, the"
+           "frames, the prescan stack and the crossing chain.")
+  (let [nf (nframes p)]
+    (return (+ (+ SS_HDR (* nf FW)) (* 3 nf)))))
+
+(defn ^:pub ^I32 vms-arena-bytes [^IntsR p ^IntsR limits ^I32 total]
+  (comment "Bytes of the key arena (BytesW) for a message of `total` bytes under"
+           "limits: min(total, the effective input limit). Keys are disjoint spans"
+           "of the message, so their copies never need more (architecture §17.2).")
+  (let [^:mut n total
+        mb (lim limits 2 (ia p H_LIM_INPUT))]
+    (if (> n mb) (set n mb))
+    (if (< n 0) (set n 0))
+    (return n)))
+
+;; ------------------------------------------------------------ small helpers
+
+(defn ^:pub ^I32 imin [^I32 a ^I32 b]
+  (if (< a b) (return a))
+  (return b))
+
+(defn ^:pub ^I32 b01 [^Bool x]
+  (if x (return 1))
+  (return 0))
+
+;; ------------------------------------------------------------ frames and control
+
+(defn ^:pub ^I32 fbase [^IntsR ss ^I32 i]
+  (return (+ (ia ss SS_FRAMES) (* i FW))))
+
+(defn ^:pub ^I32 ftop [^IntsR ss]
+  (return (fbase ss (- (ia ss SS_SP) 1))))
+
+(defn ^:pub ^I32 fidx [^IntsR ss ^I32 f]
+  (comment "The stack index of the frame at word f.")
+  (return (quot (- f (ia ss SS_FRAMES)) FW)))
+
+(defn ^:pub ^I32 arena-move [^BytesW ka ^I32 from ^I32 to ^I32 n]
+  (comment "Move n arena bytes down from `from` to `to` <= from.")
+  (let [^:mut j 0]
+    (while (< j n)
+      (let [v (u8 ka (+ from j))]
+        (bset ka (+ to j) v))
+      (set j (+ j 1))))
+  (return 0))
+
+(defn ^:pub keys-save [^Bytes b ^Ints ss ^BytesW ka ^I32 base]
+  (comment "Before the window may go, or before an arena region is stacked: a"
+           "map's previous key still held as a window span is copied to the arena"
+           "at its frame's floor (only the top-most map can hold one: every push"
+           "saves first, D092).")
+  (let [sp (ia ss SS_SP)]
+    (for [^I32 i 0 sp]
+      (let [f (fbase ss i)
+            kind (ia ss (+ f F_KIND))]
+        (if (and (or (== kind FK_MAP) (== kind FK_DMAP))
+                 (and (>= (ia ss (+ f F_PS)) 0) (== (ia ss (+ f F_PPIN)) 0)))
+          (do (let [ps (- (ia ss (+ f F_PS)) base)
+                    len (- (ia ss (+ f F_PE)) (ia ss (+ f F_PS)))
+                    fl (ia ss (+ f F_FLOOR))]
+                (bcopy ka fl b ps len)
+                (iset ss (+ f F_PS) fl)
+                (iset ss (+ f F_PE) (+ fl len))
+                (iset ss (+ f F_PPIN) 1)
+                (iset ss SS_ATOP (+ fl len)))))))))
+
+(defn ^:pub ^I32 fpush [^Bytes b ^Ints ss ^BytesW ka ^I32 base ^I32 kind]
+  (comment "A new zeroed top frame of this kind (after saving window-held keys); its"
+           "base, or -1 when the stack is full.")
+  (keys-save b ss ka base)
+  (let [sp (ia ss SS_SP)]
+    (if (>= sp (ia ss SS_MAXF)) (return (neg 1)))
+    (let [f (fbase ss sp)
+          top (ia ss SS_ATOP)]
+      (for [^I32 k 0 FW] (iset ss (+ f k) 0))
+      (iset ss (+ f F_KIND) kind)
+      (iset ss (+ f F_FLOOR) top)
+      (iset ss (+ f F_PIN) (neg 1))
+      (iset ss SS_SP (+ sp 1))
+      (return f))))
+
+(defn ^:pub fpop [^Ints ss]
+  (comment "Drop the top frame and the arena regions above its floor.")
+  (let [f (ftop ss)
+        fl (ia ss (+ f F_FLOOR))]
+    (iset ss SS_ATOP fl)
+    (iset ss SS_SP (- (ia ss SS_SP) 1))))
+
+(defn ^:pub ^I32 ret [^Ints ss ^I32 base ^I32 r]
+  (comment "The current item ends at r (window-relative) or with the negated code r.")
+  (if (>= r 0) (iset ss SS_RET (+ r base)) (iset ss SS_RET r))
+  (iset ss SS_PH PH_RET)
+  (return GO))
+
+(defn ^:pub ^I32 err [^Ints ss ^I32 r]
+  (comment "The current item ends with the negated code r.")
+  (iset ss SS_RET r)
+  (iset ss SS_PH PH_RET)
+  (return GO))
+
+(defn ^:pub ^I32 done [^Ints ss ^I32 base ^I32 r]
+  (comment "The top frame's item ends at r: pop it, return r to its parent.")
+  (fpop ss)
+  (return (ret ss base r)))
+
+(defn ^:pub ^I32 cont [^Ints ss ^I32 f ^I32 ph]
+  (comment "The top frame continues in phase ph.")
+  (iset ss (+ f F_PH) ph)
+  (iset ss SS_PH PH_FRAME)
+  (return GO))
+
+(defn ^:pub ^I32 call [^Ints ss ^I32 base ^I32 pos ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx
+                       ^I32 mode ^I32 note ^I32 pair]
+  (comment "Evaluate a child item next (nq 0: dead), window-relative pos and end."
+           "mode: MODE_ITEM, MODE_VSEQ (a `.cborseq` virtual array), MODE_DSEQ (a"
+           "dead sequence), MODE_FRAME (always framed). note >= 0: frame * 4 +"
+           "kind of a tag-4/40 note to take from its head; pair >= 0: the item is"
+           "that tag frame's content.")
+  (iset ss IT_POS (+ pos base))
+  (iset ss IT_D d)
+  (iset ss IT_FB fb)
+  (iset ss IT_CK ck)
+  (iset ss IT_NQ nq)
+  (iset ss IT_END (+ end base))
+  (iset ss IT_CTX ctx)
+  (iset ss IT_MODE mode)
+  (iset ss IT_NOTE note)
+  (iset ss IT_PAIR pair)
+  (iset ss SS_PH PH_ITEM)
+  (return GO))
+
+(defn ^:pub ^I32 need [^Ints ss ^I32 base ^I32 off ^I32 len]
+  (comment "Suspend for a window holding [off, off + len) (window-relative here),"
+           "clipped to the message.")
+  (let [abs (+ off base)
+        room (- (ia ss SS_TOTAL) abs)]
+    (iset ss SS_NEED_OFF abs)
+    (if (< room len) (iset ss SS_NEED_LEN room) (iset ss SS_NEED_LEN len))
+    (if (< (ia ss SS_NEED_LEN) 1) (iset ss SS_NEED_LEN 1))
+    (iset ss SS_POS abs)
+    (return VMS_NEED)))
+
+(defn ^:pub ^I32 yld [^Ints ss ^I32 base ^I32 at]
+  (iset ss SS_POS (+ at base))
+  (return VMS_YIELD))
+
+(defn ^:pub ^Bool suspended [^I32 r]
+  (return (or (== r VMS_NEED) (== r VMS_YIELD))))
+
+(defn ^:pub ^I32 ensure [^Ints ss ^I32 base ^I32 wend ^I32 from ^I32 to]
+  (comment "GO when the window holds [from, to) (window-relative), else NEED.")
+  (if (>= from to) (return GO))
+  (if (or (< from 0) (> to wend)) (return (need ss base from (- to from))))
+  (return GO))
+
+;; ------------------------------------------------------------ the work quantum (D093)
+
+(defn ^:pub ^I32 work [^IntsR s ^IntsR ss]
+  (return (+ (- (ia ss SS_WB0) (ia s VM_BUDGET)) (ia ss SS_WORK))))
+
+(defn ^:pub ^Bool must-yield [^IntsR s ^IntsR ss]
+  (comment "Yield once this step has made progress and done its quantum of work"
+           "(budget units charged plus one per item begun and per 64 content bytes"
+           "scanned); a step always makes progress first, so any quantum advances.")
+  (let [q (ia ss SS_QUANTUM)]
+    (if (<= q 0) (return false))
+    (if (== (ia ss SS_PROG) 0) (return false))
+    (return (>= (work s ss) q))))
+
+(defn ^:pub progress [^Ints ss ^I32 units]
+  (iset ss SS_PROG 1)
+  (iset ss SS_WORK (+ (ia ss SS_WORK) units)))
+
+(defn ^:pub ^I32 chunk-end [^IntsR s ^IntsR ss ^I32 i ^I32 stop ^I32 wend]
+  (comment "The end of the next content chunk from i: the content's end, the"
+           "window's, or what the quantum allows (64 bytes a unit, at least 64).")
+  (let [^:mut e stop
+        q (ia ss SS_QUANTUM)]
+    (if (< wend e) (set e wend))
+    (if (> q 0)
+      (do (let [^:mut left (- q (work s ss))]
+            (if (< left 1) (set left 1))
+            (if (< left (sar (- e i) 6)) (set e (+ i (* left 64)))))))
+    (return e)))
+
+;; ------------------------------------------------------------ rebasing
+
+(defn ^:pub rebase [^Ints s ^I32 delta]
+  (comment "The scratch's position words between absolute (between steps) and"
+           "window-relative (inside one): the error offset, the budget stop and the"
+           "witness offset.")
+  (let [a (ia s O_ERR_POS)
+        b2 (ia s VM_POS)
+        c (ia s VM_W_OFFSET)]
+    (iset s O_ERR_POS (+ a delta))
+    (iset s VM_POS (+ b2 delta))
+    (iset s VM_W_OFFSET (+ c delta))))
+
+;; ------------------------------------------------------------ dry runs (D094)
+
+(defn ^:pub ^I32 dry-begin [^Ints s]
+  (comment "Start a dry run: the budget word is parked and replaced by INF, so a"
+           "shared leaf function computes its result and its charges without"
+           "spending. Answers the parked budget (give it to dry-end).")
+  (let [b0 (ia s VM_BUDGET)]
+    (iset s VM_BUDGET INF)
+    (return b0)))
+
+(defn ^:pub ^I32 dry-end [^Ints s ^I32 b0]
+  (comment "End a dry run: the units it charged; the budget word restored.")
+  (let [u (- INF (ia s VM_BUDGET))]
+    (iset s VM_BUDGET b0)
+    (return u)))
+
+;; ------------------------------------------------------------ keys (D092)
+
+(defn ^:pub ^I32 kbyte [^Bytes b ^Bytes ka ^I32 inka ^I32 x]
+  (if (!= inka 0) (return (u8 ka x)))
+  (return (u8 b x)))
+
+(defn ^:pub ^I32 key-order-s [^Bytes b ^Bytes ka ^Ints s ^IntsR ss ^I32 f ^I32 base ^I32 start
+                              ^I32 kinka ^I32 ks ^I32 klen]
+  (comment "dead.kin's key-order for a map frame: the key of klen bytes at ks (in"
+           "the arena when kinka, else window-relative) against the frame's previous"
+           "key (arena or window span), charged ceil(min(len)/64), at least 1, at"
+           "the key's start. 0, or the negated refusal.")
+  (let [ps (ia ss (+ f F_PS))]
+    (if (< ps 0) (return 0))
+    (let [pin (ia ss (+ f F_PPIN))
+          plen (- (ia ss (+ f F_PE)) ps)
+          ^:mut px ps
+          ^:mut m plen
+          ^:mut order (- plen klen)
+          ^:mut j 0]
+      (if (not (charge s (c64min plen klen) start)) (return (neg R_BUDGET)))
+      (if (== pin 0) (set px (- ps base)))
+      (if (< klen m) (set m klen))
+      (while (< j m)
+        (let [x (kbyte b ka pin (+ px j))
+              y (kbyte b ka kinka (+ ks j))]
+          (if (!= x y) (do (set order (- x y)) (break))))
+        (set j (+ j 1)))
+      (if (== order 0) (return (fail s start CODE_DUPLICATE_KEY)))
+      (if (> order 0) (return (fail s start CODE_KEY_ORDER)))
+      (return 0))))
+
+(defn ^:pub set-prev [^Ints ss ^I32 f ^I32 ps ^I32 pe]
+  (comment "The map's previous key becomes the window span [ps, pe) (absolute);"
+           "its arena region is freed.")
+  (iset ss SS_ATOP (ia ss (+ f F_FLOOR)))
+  (iset ss (+ f F_PPIN) 0)
+  (iset ss (+ f F_PS) ps)
+  (iset ss (+ f F_PE) pe))
+
+(defn ^:pub set-prev-arena [^Ints ss ^BytesW ka ^I32 f ^I32 at ^I32 len]
+  (comment "The map's previous key becomes the copied key at arena offset `at`: it"
+           "moves down to the frame's floor, replacing the old one.")
+  (let [fl (ia ss (+ f F_FLOOR))]
+    (arena-move ka at fl len)
+    (iset ss (+ f F_PPIN) 1)
+    (iset ss (+ f F_PS) fl)
+    (iset ss (+ f F_PE) (+ fl len))
+    (iset ss SS_ATOP (+ fl len))))
+
+;; ------------------------------------------------------------ the prescan (D091)
+
+(defn ^I32 chain-put [^Ints ss ^I32 lvl ^I32 extra]
+  (comment "Record the crossing chain: the starts of the open levels, then `extra`"
+           "(an item whose head or content crosses), all absolute.")
+  (let [pst (ia ss SS_PSTK)
+        ch (ia ss SS_CHAIN)
+        ^:mut n 0]
+    (for [^I32 k 0 lvl]
+      (let [v (ia ss (+ pst (* 2 k)))]
+        (iset ss (+ ch n) v))
+      (set n (+ n 1)))
+    (if (>= extra 0)
+      (do (iset ss (+ ch n) extra)
+          (set n (+ n 1))))
+    (iset ss SS_CHN n)
+    (return 0)))
+
+(defn ^:pub ^Bool chain-has [^IntsR ss ^I32 at]
+  (comment "Is the item at absolute offset `at` known to cross the step's cut?")
+  (let [n (ia ss SS_CHN)
+        ch (ia ss SS_CHAIN)]
+    (for [^I32 k 0 n]
+      (if (== (ia ss (+ ch k)) at) (return true)))
+    (return false)))
+
+(defn ^:pub ^I32 prescan [^Bytes b ^Ints ss ^I32 base ^I32 pos ^I32 end ^I32 cut]
+  (comment "May the buffer walk take the item at pos (bounded by end) from this"
+           "window? 1 when every byte it can read lies before cut -- the item ends"
+           "there, or a refusal the walk cannot get past (a malformed head, a length"
+           "or count beyond end, an unsupported or 64-bit tag) comes first; 0 when"
+           "it may read at or past cut, recording the chain of items that cross"
+           "(window-relative arguments). Reads nothing at or past cut.")
+  (let [pst (ia ss SS_PSTK)
+        cap (ia ss SS_PCAP)
+        ^:mut i pos
+        ^:mut rem 1
+        ^:mut lvl 0]
+    (forever
+      (while (== rem 0)
+        (if (== lvl 0) (return 1))
+        (set lvl (- lvl 1))
+        (set rem (ia ss (+ (+ pst (* 2 lvl)) 1))))
+      (if (>= i end) (return 1))
+      (if (>= i cut) (do (chain-put ss lvl (neg 1)) (return 0)))
+      (let [ib (u8 b i)
+            major (ushr ib 5)
+            ai (bit-and ib 31)
+            ^:mut hi 0
+            ^:mut lo ai]
+        (if (>= ai 28) (return 1))
+        (let [h (head-size ai)
+              p (+ i h)]
+          (if (> p end) (return 1))
+          (if (> p cut) (do (chain-put ss lvl (+ i base)) (return 0)))
+          (if (== ai 24) (set lo (u8 b (+ i 1))))
+          (if (== ai 25) (set lo (be16 b (+ i 1))))
+          (if (== ai 26) (set lo (be32 b (+ i 1))))
+          (if (== ai 27) (do (set hi (be32 b (+ i 1))) (set lo (be32 b (+ i 5)))))
+          (if (or (<= major 1) (== major 7))
+            (do (set i p)
+                (set rem (- rem 1)))
+            (if (<= major 3)
+              (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return 1))
+                  (if (> (+ p lo) cut) (do (chain-put ss lvl (+ i base)) (return 0)))
+                  (set i (+ p lo))
+                  (set rem (- rem 1)))
+              (do (local ^:mut ^I32 n)
+                  (if (or (!= hi 0) (< lo 0)) (return 1))
+                  (set n lo)
+                  (if (== major 4) (if (> lo (- end p)) (return 1)))
+                  (if (== major 5)
+                    (do (if (> lo (ushr (- end p) 1)) (return 1))
+                        (set n (* 2 lo))))
+                  (if (== major 6)
+                    (do (if (and (!= lo 2) (and (!= lo 3) (and (!= lo 4) (and (!= lo 40) (== (typed-size lo) 0)))))
+                          (return 1))
+                        (set n 1)))
+                  (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return 0)))
+                  (iset ss (+ pst (* 2 lvl)) (+ i base))
+                  (iset ss (+ (+ pst (* 2 lvl)) 1) (- rem 1))
+                  (set lvl (+ lvl 1))
+                  (set rem n)
+                  (set i p)))))))))
+
+;; ------------------------------------------------------------ bounded asks (D090)
+
+(defn ^:pub ^I32 str-stop [^Bytes b ^I32 pos ^I32 end]
+  (comment "The end of the text or byte string at pos (its head in the window), or"
+           "-1 when the walk refuses its head or length before any content: a"
+           "malformed or non-shortest head, a 64-bit or too long length.")
+  (let [ai (bit-and (u8 b pos) 31)]
+    (if (> ai 27) (return (neg 1)))
+    (let [h (head-size ai)
+          ^:mut len ai]
+      (if (> (+ pos h) end) (return (neg 1)))
+      (if (== ai 24) (do (set len (u8 b (+ pos 1))) (if (< len 24) (return (neg 1)))))
+      (if (== ai 25) (do (set len (be16 b (+ pos 1))) (if (< len 256) (return (neg 1)))))
+      (if (== ai 26) (do (set len (be32 b (+ pos 1))) (if (== (ushr len 16) 0) (return (neg 1)))))
+      (if (== ai 27) (return (neg 1)))
+      (if (< len 0) (return (neg 1)))
+      (if (> len (- end (+ pos h))) (return (neg 1)))
+      (return (+ (+ pos h) len)))))
+
+(defn ^:pub ^I32 big-req [^Bytes b ^IntsR s ^I32 pos ^I32 end ^I32 wend]
+  (comment "How far from pos a bignum (c2/c3 at pos) must be in the window before"
+           "the walk decides it: its byte-string head, then its whole content when"
+           "that is 9..bignum-limit bytes (or its first byte when longer: the walk"
+           "then refuses it). Call again once the window holds the answer.")
+  (let [x (+ pos 1)]
+    (if (>= x end) (return x))
+    (if (>= x wend) (return (+ x 1)))
+    (let [ib (u8 b x)
+          ai (bit-and ib 31)]
+      (if (or (!= (ushr ib 5) 2) (> ai 27)) (return (+ x 1)))
+      (let [h (head-size ai)
+            ^:mut len ai
+            ^:mut ok true]
+        (if (> (+ x h) end) (return (+ x 1)))
+        (if (> (+ x h) wend) (return (+ x h)))
+        (if (== ai 24) (do (set len (u8 b (+ x 1))) (if (< len 24) (set ok false))))
+        (if (== ai 25) (do (set len (be16 b (+ x 1))) (if (< len 256) (set ok false))))
+        (if (== ai 26) (do (set len (be32 b (+ x 1))) (if (== (ushr len 16) 0) (set ok false))))
+        (if (== ai 27) (set ok false))
+        (if (or (not ok) (< len 0)) (return (+ x h)))
+        (let [cs (+ x h)]
+          (if (> len (- end cs)) (return cs))
+          (if (< len 9) (return cs))
+          (if (> len (ia s VM_BIGNUM_MAX)) (return (+ cs 1)))
+          (return (+ cs len)))))))
+
+(defn ^:pub ^I32 lits-need [^IntsR p ^IntsR s ^I32 fb ^I32 nq ^I32 cls ^I32 il]
+  (comment "What the literal leaves of a string item of il encoded bytes (class cls)"
+           "need to read: -1 the whole item (a LIT of exactly its length, so il <="
+           "pool bytes), else the prefix a LITSET's binary search may read"
+           "(min(il, its longest member)), else 0. Entries are taken by mask, as the"
+           "filter will admit them.")
+  (let [lv (ia p H_S_LEAVES)
+        lr (ia p H_S_LITREFS)
+        ^:mut pre 0]
+    (for [^I32 i 0 nq]
+      (let [l (ia s (+ fb i))
+            lb (+ lv (* 8 l))
+            kind (bit-and (ia p lb) 255)]
+        (if (!= (bit-and (ia p (+ lb 1)) cls) 0)
+          (do (if (and (== kind K_LIT) (== (ia p (+ lb 3)) il)) (return (neg 1)))
+              (if (== kind K_LITSET)
+                (do (let [first (ia p (+ lb 2))
+                          count (ia p (+ lb 3))]
+                      (for [^I32 k 0 count]
+                        (let [ml (ia p (+ (+ lr (* 2 (+ first k))) 1))
+                              ^:mut m ml]
+                          (if (> m il) (set m il))
+                          (if (> m pre) (set pre m)))))))))))
+    (return pre)))
+
+(defn ^:pub ^Bool bstr-reads [^IntsR p ^IntsR s ^I32 fb ^I32 nq ^I32 len]
+  (comment "Does a byte string's query (content length len) need its content: a"
+           "`.bits` leaf of an admissible size, or an EMBED leaf? (LIT/LITSET are"
+           "lits-need's.)")
+  (let [lv (ia p H_S_LEAVES)
+        emb (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0)]
+    (for [^I32 i 0 nq]
+      (let [l (ia s (+ fb i))
+            lb (+ lv (* 8 l))
+            kind (bit-and (ia p lb) 255)]
+        (if (!= (bit-and (ia p (+ lb 1)) 4) 0)
+          (do (if (and (== kind K_BYTES)
+                       (and (!= (ia p (+ lb 5)) 0) (and (>= len (ia p (+ lb 2))) (<= len (ia p (+ lb 3))))))
+                (return true))
+              (if (and emb (== kind K_EMBED)) (return true))))))
+    (return false)))
+
+;; ------------------------------------------------------------ tag 4 / tag 40 notes
+
+(defn ^:pub ^I32 note-req [^Bytes b ^IntsR s ^I32 kind ^I32 pos ^I32 end ^I32 wend]
+  (comment "How far from pos a pair element must be in the window for its note"
+           "(its head is already there): 0 decimal exponent, 1 mantissa (a"
+           "bignum's whole content), 2 ndarray shape (<= 73 bytes), 3 data (<= 11).")
+  (if (>= pos end) (return pos))
+  (if (== kind 1)
+    (do (let [ib (u8 b pos)]
+          (if (or (== ib 194) (== ib 195)) (return (big-req b s pos end wend))))))
+  (if (== kind 2)
+    (do (if (< (+ pos 73) end) (return (+ pos 73)))
+        (return end)))
+  (if (== kind 3)
+    (do (if (< (+ pos 11) end) (return (+ pos 11)))
+        (return end)))
+  (return pos))
+
+(defn ^:pub note-put [^Bytes b ^IntsR s ^Ints ss ^I32 kind ^I32 pos ^I32 end ^I32 wend ^I32 tf]
+  (comment "Note what the pair's verdict needs of this element while its bytes are"
+           "here (decimal-check, ndarray-check's inputs). The walk refuses a"
+           "malformed element before the verdict, so a malformed one may note"
+           "anything; nothing is read past the window or end.")
+  (if (>= pos end) (return))
+  (let [lim0 (imin end wend)
+        ib (u8 b pos)
+        major (ushr ib 5)
+        ai (bit-and ib 31)]
+    (if (== kind 0)
+      (do (if (and (<= ai 27) (<= (+ pos (head-size ai)) lim0))
+            (if (exponent-ok b pos) (iset ss (+ tf F_EXPOK) 1) (iset ss (+ tf F_EXPOK) 0))
+            (iset ss (+ tf F_EXPOK) 0))
+          (return)))
+    (if (== kind 1)
+      (do (iset ss (+ tf F_MANT) 0)
+          (if (<= major 1)
+            (if (and (<= ai 27) (<= (+ pos (head-size ai)) lim0))
+              (if (mantissa-ok b pos (+ pos (head-size ai))) (iset ss (+ tf F_MANT) 1))))
+          (if (or (== ib 194) (== ib 195))
+            (do (let [req (big-req b s pos end wend)
+                      x1 (+ pos 1)]
+                  (if (and (and (< x1 lim0) (<= req lim0)) (== (ushr (u8 b x1) 5) 2))
+                    (if (and (<= (bit-and (u8 b x1) 31) 27) (<= (+ x1 (head-size (bit-and (u8 b x1) 31))) req))
+                      (if (mantissa-ok b pos req) (iset ss (+ tf F_MANT) 1)))))))
+          (return)))
+    (if (== kind 2)
+      (do (let [^:mut lim lim0
+                ^:mut bad 0
+                ^:mut k 0
+                ^:mut x (+ pos 1)]
+            (if (> lim (+ pos 73)) (set lim (+ pos 73)))
+            (if (!= major 4) (set bad 1))
+            (if (== bad 0)
+              (if (< ai 24)
+                (set k ai)
+                (if (and (== ai 24) (< (+ pos 1) lim))
+                  (do (set k (u8 b (+ pos 1))) (set x (+ pos 2)))
+                  (set bad 1))))
+            (if (or (< k 1) (> k 8)) (set bad 1))
+            (let [^:mut j 0]
+              (while (and (== bad 0) (< j k))
+                (if (>= x lim)
+                  (set bad 1)
+                  (do (let [db (u8 b x)
+                            dai (bit-and db 31)]
+                        (if (or (!= (ushr db 5) 0) (> dai 26))
+                          (set bad 1)
+                          (do (let [hs (head-size dai)]
+                                (if (> (+ x hs) lim)
+                                  (set bad 1)
+                                  (do (let [dv (small-arg b x)]
+                                        (if (<= dv 0)
+                                          (set bad 1)
+                                          (do (iset ss (+ (+ tf F_DIMS) j) dv)
+                                              (set x (+ x hs))
+                                              (set j (+ j 1)))))))))))))))
+            (iset ss (+ tf F_NDBAD) bad)
+            (iset ss (+ tf F_NDK) k))
+          (return)))
+    (comment "kind 3: the data item's element count (data-count, guarded).")
+    (let [^:mut lim3 lim0
+          ^:mut count (neg 1)]
+      (if (> lim3 (+ pos 11)) (set lim3 (+ pos 11)))
+      (if (and (== major 4) (<= ai 27))
+        (if (<= (+ pos (head-size ai)) lim3) (set count (small-arg b pos))))
+      (if (and (== ib 216) (< (+ pos 2) lim3))
+        (do (let [size (typed-size (u8 b (+ pos 1)))
+                  ai2 (bit-and (u8 b (+ pos 2)) 31)]
+              (if (and (> size 0) (<= ai2 27))
+                (if (<= (+ (+ pos 2) (head-size ai2)) lim3)
+                  (set count (quot (small-arg b (+ pos 2)) size)))))))
+      (iset ss (+ tf F_COUNT) count))))
+
+(defn ^:pub ^I32 pair-verdict [^Ints s ^IntsR ss ^I32 tf ^I32 lo ^I32 tpos]
+  (comment "The tag-4/40 semantics from the notes (decimal-check; ndarray-check's"
+           "shape-ok, product by division): 0, or the negated refusal at the tag.")
+  (if (== lo 4)
+    (do (if (== (ia ss (+ tf F_EXPOK)) 0) (return (fail s tpos CODE_DECIMAL)))
+        (if (== (ia ss (+ tf F_MANT)) 0) (return (fail s tpos CODE_DECIMAL)))
+        (return 0)))
+  (let [count (ia ss (+ tf F_COUNT))
+        k (ia ss (+ tf F_NDK))
+        ^:mut pr 1]
+    (if (< count 0) (return (fail s tpos CODE_NDARRAY)))
+    (if (!= (ia ss (+ tf F_NDBAD)) 0) (return (fail s tpos CODE_NDARRAY)))
+    (for [^I32 j 0 k]
+      (let [dv (ia ss (+ (+ tf F_DIMS) j))]
+        (if (> dv (quot count pr)) (return (fail s tpos CODE_NDARRAY)))
+        (set pr (* pr dv))))
+    (if (!= pr count) (return (fail s tpos CODE_NDARRAY)))
+    (return 0)))
+
+(defn ^:pub ^I32 notes-init [^Ints ss ^I32 f]
+  (iset ss (+ f F_EXPOK) 0)
+  (iset ss (+ f F_MANT) 0)
+  (iset ss (+ f F_NDBAD) 1)
+  (iset ss (+ f F_NDK) 0)
+  (iset ss (+ f F_COUNT) (neg 1))
+  (return f))
+
+(defn ^:pub ^I32 pair-note [^IntsR ss ^I32 pair ^I32 el]
+  (comment "The note of element el of the pair whose notes live in frame `pair`.")
+  (if (or (< pair 0) (>= el 2)) (return (neg 1)))
+  (if (== (ia ss (+ (fbase ss pair) F_TNUM)) 4) (return (+ (* pair 4) el)))
+  (return (+ (* pair 4) (+ 2 el))))

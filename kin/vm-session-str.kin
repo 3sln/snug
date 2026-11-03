@@ -1,0 +1,555 @@
+;; The resumable session's string frames (P6.2, D094): a text or byte string, or a
+;; typed array's content, whose content crosses the window. Content is read in
+;; ONE forward pass where the buffer walk's order allows it:
+;;   * text: UTF-8 validation (charged before, as eval-item does) and every
+;;     admitted regexp advance together, a code point at a time, with each
+;;     regexp's active set in its own slot of the regex area; the leaves'
+;;     charges (filter, units, regexp steps, LITSET probes) are DRY-RUN and
+;;     charged as one sum at the item's offset once the UTF-8 scan has passed
+;;     (they are all at that offset with nothing observable between, so the
+;;     sum stops the budget where the walk would);
+;;   * byte strings: the filter and scalar leaves are charged in order at the
+;;     start (a `.bits` scan's units do not depend on the content), the `.bits`
+;;     result comes from the pass, and an EMBED sub-walk runs over the content
+;;     as a nested document on the frame stack;
+;;   * LIT / LITSET read at most a literal's length: a LIT of exactly the item's
+;;     length makes the whole item (<= pool bytes) be asked for, a LITSET the
+;;     prefix its search may read (snug.vm.sbase lits-need), so no literal
+;;     compare state is carried.
+;; A byte string whose content must be read twice (a `.bits` leaf and an EMBED
+;; leaf, or both `.cbor` and `.cborseq`) or a float typed array whose content
+;; tail reads content replays it: its frame pins vms-keep at the content start.
+(ns snug.vm.sstr
+  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
+                               rem < > <= >= == != and or not u8 blen ia iset]]
+            [snug.cbor.codes :refer [CODE_TEXT CODE_TYPED_ARRAY CODE_TRAILING CODE_DEPTH CODE_TOO_MANY_ITEMS
+                                     O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ERR_POS O_ITEMS O_HI O_LO]]
+            [snug.cbor.head :refer [fail read-arg take-len]]
+            [snug.cbor.text :refer [utf8-window]]
+            [snug.vm.layout :refer [H_FLAGS H_S_LEAVES H_S_REGEX_INDEX FL_EMBED K_TEXT K_BYTES K_EMBED
+                                    F_ADMITTED F_MATCHED F_EVAL VM_REGEX VM_REGCAP VM_EMBED VM_DLIM VM_D
+                                    VM_BUDGET VM_W_REASON VM_W_SUB R_SIZE R_PATTERN R_BITS R_EMBEDDED
+                                    R_BUDGET R_INCONSISTENT P_EMBED]]
+            [snug.vm.base :refer [charge c64 popcount new-epoch q-add q-stamp ts-test q-flag q-set-flag
+                                  q-kind q-leaf-base cset-rec next-ck cset-width cset-frame wit-empty
+                                  wit-clear wit-set path-put]]
+            [snug.vm.leaf :refer [eval-leaf scalar-kind rx-cp rx-accepts utf8-len bits-ok]]
+            [snug.vm.dead :refer [typed-bad-at]]
+            [snug.vm.eval :refer [unit-of q-filter-x finish-scalar embed-kill embed-live count-matched-scalars]]
+            [snug.vm.sbase :refer [GO FW FK_TEXT FK_BSTR FK_DTEXT F_KIND F_PH F_POS F_END F_D F_FB F_CK F_NQ
+                                   F_CTX F_PIN F_MAJ F_CS F_STOP F_I F_CLS F_DEFER F_RXOFF F_RXCP F_BITS
+                                   F_BITSOK F_EPH F_ECNQ F_SITEMS F_SMAXD F_SCOSE F_SERR F_SEQ F_TAIL
+                                   F_TSTOP F_TSIZE F_TI F_TNUM MODE_ITEM MODE_VSEQ MODE_DSEQ
+                                   fpush done err cont call need yld suspended must-yield progress chunk-end
+                                   dry-begin dry-end b01]]))
+
+;; string frame phases
+(defconst ^:pub ^I32 S_SCAN 1)
+(defconst ^:pub ^I32 S_BITS 2)
+(defconst ^:pub ^I32 S_EMBED 3)
+(defconst ^:pub ^I32 S_EMBRUN 4)
+(defconst ^:pub ^I32 S_FIN 5)
+
+;; ------------------------------------------------------------ item prologue
+
+(defn ^:pub ^I32 prologue [^IntsR p ^Bytes b ^Ints s ^I32 pos ^I32 end ^I32 ck ^I32 live]
+  (comment "An item's visit (1 unit), count and head, as eval-item / dead-item do"
+           "them (pos < end, head in the window): the position after the head"
+           "(argument in s[O_HI], s[O_LO]) or a negated code.")
+  (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+  (let [it (+ (ia s O_ITEMS) 1)]
+    (iset s O_ITEMS it)
+    (if (> it (ia s O_MAX_ITEMS)) (return (fail s pos CODE_TOO_MANY_ITEMS))))
+  (if (and (!= live 0) (< (cset-rec p s ck) 0)) (return (neg R_INCONSISTENT)))
+  (let [ai (bit-and (u8 b pos) 31)]
+    (if (>= ai 24) (return (read-arg b s pos ai end)))
+    (iset s O_HI 0)
+    (iset s O_LO ai)
+    (return (+ pos 1))))
+
+(defn ^:pub ^I32 frame-item [^Ints ss ^I32 f ^I32 base ^I32 pos ^I32 end ^I32 d ^I32 fb ^I32 ck ^I32 nq
+                             ^I32 ctx]
+  (iset ss (+ f F_POS) (+ pos base))
+  (iset ss (+ f F_END) (+ end base))
+  (iset ss (+ f F_D) d)
+  (iset ss (+ f F_FB) fb)
+  (iset ss (+ f F_CK) ck)
+  (iset ss (+ f F_NQ) nq)
+  (iset ss (+ f F_CTX) ctx)
+  (return f))
+
+;; ------------------------------------------------------------ text
+
+(defn ^:pub ^I32 open-text [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base
+                            ^I32 pos ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
+  (comment "A text item whose content crosses the window (live when nq > 0):"
+           "eval-item's visit, head, length and UTF-8 charge; then, live, the"
+           "filter and the leaves dry-run up to their content (LIT by length,"
+           "LITSET over its asked prefix, TEXT sizes; regexps marked F_EVAL to run"
+           "with the scan).")
+  (let [live (b01 (> nq 0))
+        q (prologue p b s pos end ck live)]
+    (if (< q 0) (return (err ss q)))
+    (let [hi (ia s O_HI)
+          lo (ia s O_LO)
+          stop (take-len s pos q hi lo end)]
+      (if (< stop 0) (return (err ss stop)))
+      (if (not (charge s (c64 (- stop q)) pos)) (return (err ss (neg R_BUDGET))))
+      (let [^:mut ^I32 kind FK_DTEXT]
+        (if (== live 1) (set kind FK_TEXT))
+        (let [f (fpush b ss ka base kind)]
+          (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
+          (frame-item ss f base pos end d fb ck nq ctx)
+          (iset ss (+ f F_CS) (+ q base))
+          (iset ss (+ f F_STOP) (+ stop base))
+          (iset ss (+ f F_I) (+ q base))
+          (iset ss (+ f F_CLS) 8)
+          (if (== live 1)
+            (do (let [w (cset-width p (cset-rec p s ck))
+                      fl0 (+ fb w)
+                      lv (ia p H_S_LEAVES)
+                      b0 (dry-begin s)
+                      na (q-filter-x p s fb w nq 8 pos ctx)
+                      ^:mut defer (dry-end s b0)]
+                  (if (< na 0) (return (err ss na)))
+                  (for [^I32 i 0 nq]
+                    (let [fi (ia s (+ fl0 i))
+                          lb (+ lv (* 8 (ia s (+ fb i))))
+                          lk (bit-and (ia p lb) 255)]
+                      (if (and (!= (bit-and fi F_ADMITTED) 0) (scalar-kind lk))
+                        (do (set defer (+ defer (unit-of ctx)))
+                            (if (== lk K_TEXT)
+                              (do (let [len (- stop q)]
+                                    (if (or (< len (ia p (+ lb 2))) (> len (ia p (+ lb 3))))
+                                      (iset s (+ fl0 i) (bit-or fi (shl R_SIZE 8)))
+                                      (if (< (ia p (+ lb 4)) 0)
+                                        (iset s (+ fl0 i) (bit-or fi F_MATCHED))
+                                        (iset s (+ fl0 i) (bit-or fi F_EVAL))))))
+                              (do (let [b1 (dry-begin s)
+                                        r (eval-leaf p pool b s lb lk pos q stop 8 hi lo)
+                                        u (dry-end s b1)]
+                                    (if (< r 0) (return (err ss r)))
+                                    (set defer (+ defer u))
+                                    (if (== r 0)
+                                      (iset s (+ fl0 i) (bit-or fi F_MATCHED))
+                                      (iset s (+ fl0 i) (bit-or fi (shl r 8)))))))))))
+                  (iset ss (+ f F_DEFER) defer))))
+          (return (cont ss f S_SCAN)))))))
+
+(defn ^:pub ^I32 area-pop [^IntsR s ^I32 area ^I32 w]
+  (let [^:mut n 0]
+    (for [^I32 j 0 w]
+      (set n (+ n (popcount (ia s (+ area j))))))
+    (return n)))
+
+(defn ^:pub ^I32 rx-advance [^IntsR p ^Bytes b ^Ints s ^Ints ss ^I32 f ^I32 i ^I32 t ^I32 pos]
+  (comment "Every pending regexp of the text frame over the (valid) code points of"
+           "b[i, t), dry-run (rx-cp, its active set in the leaf's own slot of the"
+           "regex area: slots in query order, 2W words each, within the area the"
+           "verifier sized for every TEXT leaf of the depth). Their units add to"
+           "F_DEFER; once that exceeds the budget left the exhaustion is certain"
+           "and the regexps stop (F_RXOFF 1); when every run has died, F_RXOFF 2."
+           "0 or a negated code.")
+  (let [fb (ia ss (+ f F_FB))
+        nq (ia ss (+ f F_NQ))
+        w0 (cset-width p (cset-rec p s (ia ss (+ f F_CK))))
+        fl0 (+ fb w0)
+        lv (ia p H_S_LEAVES)
+        rx0 (ia s VM_REGEX)
+        cap (ia s VM_REGCAP)
+        ^:mut defer (ia ss (+ f F_DEFER))
+        ^:mut cp (ia ss (+ f F_RXCP))
+        ^:mut j i]
+    (while (< j t)
+      (let [^:mut alive 0
+            ^:mut slot 0
+            ^:mut step 0]
+        (if (> cp 0) (set step 1))
+        (for [^I32 k 0 nq]
+          (let [fk (ia s (+ fl0 k))]
+            (if (!= (bit-and fk F_EVAL) 0)
+              (do (let [lb (+ lv (* 8 (ia s (+ fb k))))
+                        rx (ia p (+ lb 4))
+                        ro (ia p (+ (ia p H_S_REGEX_INDEX) rx))
+                        w (ia p (+ ro 1))
+                        area (+ rx0 slot)
+                        ^:mut act 0]
+                    (if (> (+ slot (* 2 w)) cap) (return (neg R_INCONSISTENT)))
+                    (if (== step 1) (set act (area-pop s area w)))
+                    (if (or (== step 0) (> act 0))
+                      (do (iset s VM_REGEX area)
+                          (let [b0 (dry-begin s)
+                                r (rx-cp p s b rx j step act pos)
+                                u (dry-end s b0)]
+                            (iset s VM_REGEX rx0)
+                            (if (< r 0) (return r))
+                            (set defer (+ defer u))
+                            (if (> r 0) (set alive (+ alive 1))))))
+                    (set slot (+ slot (* 2 w))))))))
+        (set cp (+ cp 1))
+        (set j (+ j (utf8-len (u8 b j))))
+        (if (== alive 0)
+          (do (iset ss (+ f F_RXOFF) 2) (break)))
+        (if (> defer (ia s VM_BUDGET))
+          (do (iset ss (+ f F_RXOFF) 1) (break)))))
+    (iset ss (+ f F_DEFER) defer)
+    (iset ss (+ f F_RXCP) cp)
+    (return 0)))
+
+(defn ^:pub ^I32 text-scan [^IntsR p ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f ^I32 live]
+  (comment "The text content [F_I, F_STOP) a chunk at a time (utf8-window: a"
+           "sequence is never split across windows), the regexps riding along:"
+           "0 when done, a suspension, or the negated refusal.")
+  (let [stop (- (ia ss (+ f F_STOP)) base)
+        pos (- (ia ss (+ f F_POS)) base)]
+    (forever
+      (let [i (- (ia ss (+ f F_I)) base)]
+        (if (>= i stop) (return 0))
+        (if (or (< i 0) (>= i wend)) (return (need ss base i 1)))
+        (if (must-yield s ss) (return (yld ss base i)))
+        (let [e (chunk-end s ss i stop wend)
+              t (utf8-window b i e stop)]
+          (if (< t 0) (return (fail s (- (neg 1) t) CODE_TEXT)))
+          (if (and (== live 1) (== (ia ss (+ f F_RXOFF)) 0))
+            (do (let [ra (rx-advance p b s ss f i t pos)]
+                  (if (< ra 0) (return ra)))))
+          (progress ss (+ 1 (sar (- t i) 6)))
+          (iset ss (+ f F_I) (+ t base))
+          (if (and (< t e) (== e wend))
+            (do (let [c (u8 b t)
+                      ^:mut l 2]
+                  (if (>= c 224) (set l 3))
+                  (if (>= c 240) (set l 4))
+                  (return (need ss base t l))))))))))
+
+(defn ^:pub ^I32 text-run [^IntsR p ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f]
+  (comment "A text frame: the scan; then (live) the regexp verdicts, the deferred"
+           "charges as one sum at the item's offset, and finish-scalar.")
+  (let [live (b01 (== (ia ss (+ f F_KIND)) FK_TEXT))
+        r (text-scan p b s ss base wend f live)]
+    (if (suspended r) (return r))
+    (if (< r 0) (return (err ss r)))
+    (let [stop (- (ia ss (+ f F_STOP)) base)]
+      (if (== live 0) (return (done ss base stop)))
+      (let [pos (- (ia ss (+ f F_POS)) base)
+            cs (- (ia ss (+ f F_CS)) base)
+            d (ia ss (+ f F_D))
+            fb (ia ss (+ f F_FB))
+            nq (ia ss (+ f F_NQ))
+            ctx (ia ss (+ f F_CTX))
+            w0 (cset-width p (cset-rec p s (ia ss (+ f F_CK))))
+            fl0 (+ fb w0)
+            lv (ia p H_S_LEAVES)
+            rx0 (ia s VM_REGEX)
+            defer (ia ss (+ f F_DEFER))
+            ^:mut slot 0]
+        (if (!= (ia ss (+ f F_RXOFF)) 1)
+          (for [^I32 k 0 nq]
+            (let [fk (ia s (+ fl0 k))]
+              (if (!= (bit-and fk F_EVAL) 0)
+                (do (let [lb (+ lv (* 8 (ia s (+ fb k))))
+                          rx (ia p (+ lb 4))
+                          ro (ia p (+ (ia p H_S_REGEX_INDEX) rx))
+                          w (ia p (+ ro 1))
+                          ]
+                      (local ^I32 ok)
+                      (if (== cs stop)
+                        (set ok (ia p (+ ro 3)))
+                        (do (iset s VM_REGEX (+ rx0 slot))
+                            (set ok (rx-accepts p s rx))
+                            (iset s VM_REGEX rx0)))
+                      (if (== ok 1)
+                        (iset s (+ fl0 k) (bit-or (bit-xor fk F_EVAL) F_MATCHED))
+                        (iset s (+ fl0 k) (bit-or (bit-xor fk F_EVAL) (shl R_PATTERN 8))))
+                      (set slot (+ slot (* 2 w)))))))))
+        (if (not (charge s defer pos)) (return (err ss (neg R_BUDGET))))
+        (let [r3 (finish-scalar p s fb w0 nq d pos ctx)]
+          (if (< r3 0) (return (err ss r3))))
+        (return (done ss base stop))))))
+
+;; ------------------------------------------------------------ byte strings
+
+(defn ^:pub ^I32 open-bstr [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base
+                            ^I32 pos ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx ^I32 tail
+                            ^I32 cs0 ^I32 stop0]
+  (comment "A live byte string whose content a leaf reads (a `.bits` leaf or EMBED;"
+           "bstr-reads). tail 0: the item at pos (eval-item's visit, head, length);"
+           "tail 1: bstr-tail on a typed array's content [cs0, stop0) whose head is"
+           "at pos. Then bstr-tail's filter and scalar leaves, charged in order"
+           "(`.bits`: its units now, its verdict from the pass), then the phases.")
+  (local ^I32 cs)
+  (local ^I32 stop)
+  (if (== tail 0)
+    (do (let [q (prologue p b s pos end ck 1)]
+          (if (< q 0) (return (err ss q)))
+          (set cs q)
+          (set stop (take-len s pos q (ia s O_HI) (ia s O_LO) end))
+          (if (< stop 0) (return (err ss stop)))))
+    (do (set cs cs0)
+        (set stop stop0)))
+  (let [f (fpush b ss ka base FK_BSTR)
+        cr (cset-rec p s ck)
+        w (cset-width p cr)
+        fl0 (+ fb w)
+        lv (ia p H_S_LEAVES)
+        len (- stop cs)
+        ^:mut bits (neg 1)
+        ^:mut ne0 0
+        ^:mut ne1 0]
+    (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
+    (frame-item ss f base pos end d fb ck nq ctx)
+    (iset ss (+ f F_CS) (+ cs base))
+    (iset ss (+ f F_STOP) (+ stop base))
+    (iset ss (+ f F_I) (+ cs base))
+    (iset ss (+ f F_CLS) 4)
+    (iset ss (+ f F_TAIL) tail)
+    (let [na (q-filter-x p s fb w nq 4 pos ctx)]
+      (if (< na 0) (return (err ss na))))
+    (for [^I32 i 0 nq]
+      (let [fi (ia s (+ fl0 i))
+            lb (+ lv (* 8 (ia s (+ fb i))))
+            lk (bit-and (ia p lb) 255)]
+        (if (!= (bit-and fi F_ADMITTED) 0)
+          (do (if (scalar-kind lk)
+                (do (if (not (charge s (unit-of ctx) pos)) (return (err ss (neg R_BUDGET))))
+                    (if (and (== lk K_BYTES)
+                             (and (!= (ia p (+ lb 5)) 0) (and (>= len (ia p (+ lb 2))) (<= len (ia p (+ lb 3))))))
+                      (do (if (not (charge s (c64 len) pos)) (return (err ss (neg R_BUDGET))))
+                          (set bits i))
+                      (do (let [r (eval-leaf p pool b s lb lk pos cs stop 4 0 0)]
+                            (if (< r 0) (return (err ss r)))
+                            (if (== r 0)
+                              (iset s (+ fl0 i) (bit-or fi F_MATCHED))
+                              (iset s (+ fl0 i) (bit-or fi (shl r 8)))))))))
+              (if (and (== lk K_EMBED) (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0))
+                (if (== (bit-and (ia p lb) 256) 0) (set ne0 (+ ne0 1)) (set ne1 (+ ne1 1))))))))
+    (iset ss (+ f F_BITS) bits)
+    (iset ss (+ f F_BITSOK) 1)
+    (comment "content read twice: pin the content start (replay, D094)")
+    (if (or (and (>= bits 0) (> (+ ne0 ne1) 0)) (and (> ne0 0) (> ne1 0)))
+      (iset ss (+ f F_PIN) (+ cs base)))
+    (if (>= bits 0) (return (cont ss f S_BITS)))
+    (iset ss (+ f F_EPH) 0)
+    (if (> (+ ne0 ne1) 0) (return (cont ss f S_EMBED)))
+    (return (cont ss f S_FIN))))
+
+(defn ^:pub ^I32 bits-scan [^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f ^I32 moff
+                            ^I32 mlen]
+  (comment "`.bits` over the content a chunk at a time: 1 ok, 0 refused (the rest"
+           "is not needed), or a suspension.")
+  (let [cs (- (ia ss (+ f F_CS)) base)
+        stop (- (ia ss (+ f F_STOP)) base)]
+    (forever
+      (let [i (- (ia ss (+ f F_I)) base)]
+        (if (>= i stop) (return 1))
+        (if (or (< i 0) (>= i wend)) (return (need ss base i 1)))
+        (if (must-yield s ss) (return (yld ss base i)))
+        (let [e (chunk-end s ss i stop wend)]
+          (if (not (bits-ok pool b moff mlen cs i e)) (return 0))
+          (progress ss (+ 1 (sar (- e i) 6)))
+          (iset ss (+ f F_I) (+ e base)))))))
+
+(defn ^:pub ^I32 embed-start [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 seq]
+  (comment "embed-run's start for the live EMBED leaves of one kind (D040): the"
+           "depth guard, the content query, the counters saved, then the sub-walk"
+           "of the content [cs, stop) as a child (`.cborseq`: a virtual array, or a"
+           "dead sequence).")
+  (let [pos (- (ia ss (+ f F_POS)) base)
+        cs (- (ia ss (+ f F_CS)) base)
+        stop (- (ia ss (+ f F_STOP)) base)
+        d (ia ss (+ f F_D))
+        fb (ia ss (+ f F_FB))
+        ck (ia ss (+ f F_CK))
+        nq (ia ss (+ f F_NQ))
+        cr (cset-rec p s ck)
+        w (cset-width p cr)
+        cfb (+ fb (cset-frame p cr))
+        cck (next-ck p s ck)
+        cw (cset-width p (cset-rec p s cck))
+        dd (ia s VM_D)
+        root (+ (+ d 1) seq)
+        ^:mut nm (+ (ia s VM_DLIM) root)
+        ^:mut cnq 0
+        e (new-epoch s)]
+    (if (> nm dd) (set nm dd))
+    (iset ss (+ f F_SEQ) seq)
+    (if (> root dd)
+      (do (wit-set s CODE_DEPTH 0 d P_EMBED 0 cs)
+          (embed-kill p s fb w nq seq)
+          (iset ss (+ f F_EPH) (+ 20 seq))
+          (return (cont ss f S_EMBED))))
+    (path-put s (+ d 1) P_EMBED 0)
+    (for [^I32 k 0 nq]
+      (let [fk (q-flag s fb w k)
+            lbk (q-leaf-base p s fb k)]
+        (if (and (and (!= (bit-and fk F_EVAL) 0) (== (q-kind p s fb k) K_EMBED))
+                 (== (sar (bit-and (ia p lbk) 256) 8) seq))
+          (do (let [ets (ia p (+ lbk 2))]
+                (set cnq (q-add p s cfb cw cnq ets e pos)))
+              (if (< cnq 0) (return (err ss cnq)))))))
+    (iset ss (+ f F_SITEMS) (ia s O_ITEMS))
+    (iset ss (+ f F_SMAXD) (ia s O_MAX_DEPTH))
+    (iset ss (+ f F_SCOSE) (ia s O_COSE))
+    (iset ss (+ f F_SERR) (+ (ia s O_ERR_POS) base))
+    (iset s O_ITEMS 0)
+    (iset s O_MAX_DEPTH nm)
+    (iset s O_COSE 0)
+    (iset s VM_EMBED (+ (ia s VM_EMBED) 1))
+    (iset ss (+ f F_ECNQ) cnq)
+    (iset ss (+ f F_PH) S_EMBRUN)
+    (if (== seq 1)
+      (if (> cnq 0)
+        (return (call ss base cs (+ d 1) cfb cck cnq stop 0 MODE_VSEQ (neg 1) (neg 1)))
+        (return (call ss base cs (+ d 2) 0 0 0 stop 0 MODE_DSEQ (neg 1) (neg 1)))))
+    (if (> cnq 0)
+      (return (call ss base cs (+ d 1) cfb cck cnq stop 0 MODE_ITEM (neg 1) (neg 1))))
+    (return (call ss base cs (+ d 1) 0 0 0 stop 0 MODE_ITEM (neg 1) (neg 1)))))
+
+(defn ^:pub ^I32 embed-ret [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 r]
+  (comment "embed-run's end (r absolute, or a profile code the frame caught): the"
+           "counters restored; a refusal becomes the witness and kills these"
+           "leaves; else the content typesets are tested, and `.cbor` content must"
+           "end at the byte string's end.")
+  (let [seq (ia ss (+ f F_SEQ))
+        pos (- (ia ss (+ f F_POS)) base)
+        stop (- (ia ss (+ f F_STOP)) base)
+        d (ia ss (+ f F_D))
+        fb (ia ss (+ f F_FB))
+        ck (ia ss (+ f F_CK))
+        nq (ia ss (+ f F_NQ))
+        cr (cset-rec p s ck)
+        w (cset-width p cr)
+        cfb (+ fb (cset-frame p cr))
+        cw (cset-width p (cset-rec p s (next-ck p s ck)))
+        cnq (ia ss (+ f F_ECNQ))
+        ierr (ia s O_ERR_POS)]
+    (iset s O_ITEMS (ia ss (+ f F_SITEMS)))
+    (iset s O_MAX_DEPTH (ia ss (+ f F_SMAXD)))
+    (iset s O_COSE (ia ss (+ f F_SCOSE)))
+    (iset s O_ERR_POS (- (ia ss (+ f F_SERR)) base))
+    (iset s VM_EMBED (- (ia s VM_EMBED) 1))
+    (iset ss (+ f F_EPH) (+ 20 seq))
+    (if (< r 0)
+      (do (wit-set s (neg r) 0 (+ d 1) (neg 1) 0 ierr)
+          (embed-kill p s fb w nq seq)
+          (return (cont ss f S_EMBED))))
+    (let [rr (- r base)
+          ev (q-stamp s cfb cw cnq pos)]
+      (if (< ev 0) (return (err ss ev)))
+      (for [^I32 k2 0 nq]
+        (let [f2 (q-flag s fb w k2)
+              lb2 (q-leaf-base p s fb k2)]
+          (if (and (and (!= (bit-and f2 F_EVAL) 0) (== (q-kind p s fb k2) K_EMBED))
+                   (== (sar (bit-and (ia p lb2) 256) 8) seq))
+            (do (let [t (ts-test p s (ia p (+ lb2 2)) ev pos)]
+                  (if (< t 0) (return (err ss t)))
+                  (if (== t 0)
+                    (iset s (+ (+ fb w) k2)
+                          (bit-or (bit-and f2 (bit-xor F_EVAL (neg 1))) (shl R_EMBEDDED 8)))))))))
+      (if (and (== seq 0) (!= rr stop))
+        (if (> (embed-live p s fb w nq 0) 0)
+          (do (wit-set s CODE_TRAILING 0 (+ d 1) (neg 1) 0 rr)
+              (embed-kill p s fb w nq 0))))
+      (return (cont ss f S_EMBED)))))
+
+(defn ^:pub ^I32 bstr-embed [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f]
+  (comment "eval-embed's phases (F_EPH): 0 charge and mark, 1/2 the `.cbor` and"
+           "`.cborseq` runs, 20/21 their witness clearing, 3 the verdict.")
+  (let [eph (ia ss (+ f F_EPH))
+        pos (- (ia ss (+ f F_POS)) base)
+        d (ia ss (+ f F_D))
+        fb (ia ss (+ f F_FB))
+        nq (ia ss (+ f F_NQ))
+        w (cset-width p (cset-rec p s (ia ss (+ f F_CK))))]
+    (if (== eph 0)
+      (do (for [^I32 j 0 nq]
+            (let [fj (q-flag s fb w j)]
+              (if (and (!= (bit-and fj F_ADMITTED) 0) (== (q-kind p s fb j) K_EMBED))
+                (do (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
+                    (q-set-flag s fb w j F_EVAL)))))
+          (iset ss (+ f F_EPH) 1)
+          (return GO)))
+    (if (== eph 1)
+      (do (if (> (embed-live p s fb w nq 0) 0) (return (embed-start p s ss base f 0)))
+          (iset ss (+ f F_EPH) 2)
+          (return GO)))
+    (if (== eph 2)
+      (do (if (> (embed-live p s fb w nq 1) 0) (return (embed-start p s ss base f 1)))
+          (iset ss (+ f F_EPH) 3)
+          (return GO)))
+    (if (== eph 20)
+      (do (if (or (> (embed-live p s fb w nq 0) 0) (> (count-matched-scalars p s fb w nq) 0))
+            (wit-clear s))
+          (iset ss (+ f F_EPH) 2)
+          (return GO)))
+    (if (== eph 21)
+      (do (if (or (> (embed-live p s fb w nq 1) 0)
+                  (or (> (embed-live p s fb w nq 0) 0) (> (count-matched-scalars p s fb w nq) 0)))
+            (wit-clear s))
+          (iset ss (+ f F_EPH) 3)
+          (return GO)))
+    (let [^:mut won 0]
+      (for [^I32 m 0 nq]
+        (let [fm (q-flag s fb w m)]
+          (if (and (!= (bit-and fm F_EVAL) 0) (== (q-kind p s fb m) K_EMBED))
+            (do (iset s (+ (+ fb w) m) (bit-or fm F_MATCHED))
+                (set won (+ won 1))))))
+      (if (and (== won 0) (== (count-matched-scalars p s fb w nq) 0))
+        (if (wit-empty s)
+          (wit-set s R_EMBEDDED 0 d (neg 1) 0 pos)
+          (if (!= (ia s VM_W_REASON) R_EMBEDDED)
+            (do (let [wr (ia s VM_W_REASON)]
+                  (iset s VM_W_SUB wr))
+                (iset s VM_W_REASON R_EMBEDDED)))))
+      (return (cont ss f S_FIN)))))
+
+(defn ^:pub ^I32 bstr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f]
+  (let [ph (ia ss (+ f F_PH))
+        pos (- (ia ss (+ f F_POS)) base)
+        d (ia ss (+ f F_D))
+        fb (ia ss (+ f F_FB))
+        nq (ia ss (+ f F_NQ))
+        ctx (ia ss (+ f F_CTX))
+        w (cset-width p (cset-rec p s (ia ss (+ f F_CK))))]
+    (if (== ph S_BITS)
+      (do (let [bi (ia ss (+ f F_BITS))
+                lb (q-leaf-base p s fb bi)
+                r (bits-scan pool b s ss base wend f (ia p (+ lb 4)) (ia p (+ lb 5)))]
+            (if (suspended r) (return r))
+            (if (== r 1)
+              (q-set-flag s fb w bi F_MATCHED)
+              (q-set-flag s fb w bi (shl R_BITS 8)))
+            (let [^:mut ne 0]
+              (if (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0)
+                (for [^I32 i 0 nq]
+                  (if (and (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0) (== (q-kind p s fb i) K_EMBED))
+                    (set ne (+ ne 1)))))
+              (iset ss (+ f F_EPH) 0)
+              (if (> ne 0) (return (cont ss f S_EMBED)))
+              (return (cont ss f S_FIN))))))
+    (if (== ph S_EMBED) (return (bstr-embed p s ss base f)))
+    (let [r3 (finish-scalar p s fb w nq d pos ctx)]
+      (if (< r3 0) (return (err ss r3)))
+      (return (done ss base (- (ia ss (+ f F_STOP)) base))))))
+
+;; ------------------------------------------------------------ typed arrays (the NaN scan)
+
+(defn ^:pub ^I32 typed-scan [^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f]
+  (comment "dead-typed's NaN scan of a float typed array, whole elements a chunk at"
+           "a time: 0 when done, a suspension, or the negated refusal.")
+  (let [stop (- (ia ss (+ f F_TSTOP)) base)
+        size (ia ss (+ f F_TSIZE))
+        tag (ia ss (+ f F_TNUM))]
+    (forever
+      (let [i (- (ia ss (+ f F_TI)) base)]
+        (if (>= i stop) (return 0))
+        (if (or (< i 0) (> (+ i size) wend)) (return (need ss base i size)))
+        (if (must-yield s ss) (return (yld ss base i)))
+        (let [e0 (chunk-end s ss i stop wend)
+              ^:mut e (- e0 (rem (- e0 i) size))]
+          (if (== e i) (set e (+ i size)))
+          (let [bad (typed-bad-at b i e tag)]
+            (if (>= bad 0) (return (fail s bad CODE_TYPED_ARRAY)))
+            (progress ss (+ 1 (sar (- e i) 6)))
+            (iset ss (+ f F_TI) (+ e base))))))))

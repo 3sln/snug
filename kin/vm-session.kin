@@ -1,0 +1,405 @@
+;; The RESUMABLE validator session (P6.2; owner direction D027, architecture
+;; §17 rev 3; D029/D030; design D090-D095): one message of a DECLARED length
+;; validated against one rule of a verified Program over WINDOWS of it. Each
+;; vms-step call is given a window [base, base + len) and runs until the
+;; verdict (the code, out filled as vm-validate fills it), until it needs bytes
+;; the window does not hold (VMS_NEED: vms-need-offset / vms-need-length), or
+;; until it has done its work quantum (VMS_YIELD: give a window holding
+;; vms-position). It never calls the host. Verdict, reason, subcode, offset,
+;; budget used, items and path are vm-validate's whatever the windows and the
+;; quantum (bb vmsession-test).
+;;
+;; The walk is the buffer walk's, item by item (D091): an item the window holds
+;; whole (by a structural prescan, bounded by the window and the quantum) is
+;; evaluated by snug.vm.eval / snug.vm.dead THEMSELVES; an item that crosses gets
+;; a frame (snug.vm.scont, snug.vm.sstr) that runs the generic path phase by
+;; phase with the same leaf, block, witness and charging functions. Buffer
+;; walk and session therefore share every leaf predicate and every state
+;; machine; only the walk's control flow is duplicated.
+(ns snug.vm.session
+  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
+                               < > <= >= == != and or not u8 blen ia iset ilen]]
+            [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_MAX_BYTES O_ERR_POS
+                                     O_HI O_LO]]
+            [snug.cbor.head :refer [fail head-size be16 be32]]
+            [snug.cbor.tags :refer [typed-size]]
+            [snug.vm.layout :refer [HEADER_WORDS H_POOL_BYTES H_S_RULES VM_BUDGET VM_POS VM_FRAMES VM_RULE R_TYPE
+                                    R_BUDGET R_INCONSISTENT]]
+            [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec cset-width wit-empty wit-set]]
+            [snug.vm.dead :refer [dead-item]]
+            [snug.vm.eval :refer [eval-item]]
+            [snug.vm.api :refer [vm-setup vm-output vm-witness-output]]
+            [snug.vm.sbase :refer [VMS_NEED VMS_YIELD GO SS_PH SS_TOTAL SS_POS SS_NEED_OFF SS_NEED_LEN
+                                   SS_QUANTUM SS_SP SS_RET SS_KEEP SS_ATOP SS_FRAMES SS_MAXF SS_CODE SS_WB0
+                                   SS_WORK SS_CUT SS_CHN SS_CHAIN SS_PSTK SS_PCAP SS_PROG SS_RTS SS_RNQ
+                                   SS_STEPS IT_POS IT_D IT_FB IT_CK IT_NQ IT_END IT_CTX IT_MODE IT_NOTE
+                                   IT_PAIR SS_ABYTES SS_HDR PH_START PH_ITEM PH_RET PH_FRAME PH_DONE
+                                   MODE_ITEM MODE_VSEQ MODE_DSEQ MODE_FRAME FW FK_ARR FK_MAP FK_TAG FK_TEXT
+                                   FK_BSTR FK_DARR FK_DMAP FK_DTEXT FK_DSEQ F_KIND F_PH F_PIN
+                                   nframes vms-session-words vms-arena-bytes fbase ftop fpop ret ensure
+                                   need yld suspended must-yield progress keys-save rebase chain-has
+                                   prescan str-stop big-req lits-need bstr-reads note-req note-put imin]]
+            [snug.vm.sstr :refer [S_EMBRUN open-text text-run open-bstr bstr-run embed-ret]]
+            [snug.vm.scont :refer [M_KEY open-arr arr-start arr-run arr-ret open-darr open-dseq darr-run
+                                   darr-ret open-map open-dmap map-next map-key map-ret open-tag tag-run
+                                   tag-ret]]))
+
+;; a handler's "the session has finished" (SS_CODE holds the answer)
+(defconst ^I32 FIN -66)
+
+;; ------------------------------------------------------------ API
+
+(defn ^:pub ^I32 vms-words [^IntsR p]
+  (comment "Words of the session array (Ints): header, frames, prescan stack,"
+           "crossing chain (D+6 of each).")
+  (return (vms-session-words p)))
+
+(defn ^:pub ^I32 vms-arena [^IntsR p ^IntsR limits ^I32 total]
+  (comment "Bytes of the key arena (BytesW) for a message of `total` bytes.")
+  (return (vms-arena-bytes p limits total)))
+
+(defn ^:pub ^I32 vms-init [^IntsR p ^Bytes pool ^I32 rule ^IntsR limits ^Ints s ^Ints ss ^BytesW ka
+                           ^I32 total ^I32 quantum]
+  (comment "Start a session on rule over a message of exactly `total` bytes: s is a"
+           "VM scratch (vm-scratch-words, initialised as for vm-validate), ss the"
+           "session array (vms-words), ka the key arena (vms-arena bytes), all"
+           "owned by this session until it ends. quantum > 0 yields after about"
+           "that many work units per step (D093); 0 never yields. 0, or -1 Program"
+           "inconsistent (or a negative total or quantum), -2 an array too small,"
+           "-3 rule out of range.")
+  (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
+  (if (!= (ia p H_POOL_BYTES) (blen pool)) (return (neg 1)))
+  (if (or (< total 0) (< quantum 0)) (return (neg 1)))
+  (let [su (vm-setup p rule 0 0 0 limits s)]
+    (if (< su 0) (return su)))
+  (if (< (ilen ss) (vms-session-words p)) (return (neg 2)))
+  (if (< (blen ka) (vms-arena-bytes p limits total)) (return (neg 2)))
+  (let [nf (nframes p)]
+    (for [^I32 k 0 SS_HDR] (iset ss k 0))
+    (iset ss SS_PH PH_START)
+    (iset ss SS_TOTAL total)
+    (iset ss SS_QUANTUM quantum)
+    (iset ss SS_FRAMES SS_HDR)
+    (iset ss SS_MAXF nf)
+    (iset ss SS_PSTK (+ SS_HDR (* nf FW)))
+    (iset ss SS_PCAP nf)
+    (iset ss SS_CHAIN (+ (+ SS_HDR (* nf FW)) (* 2 nf)))
+    (iset ss SS_CHN (neg 1))
+    (iset ss SS_ATOP 0)
+    (iset ss SS_ABYTES (blen ka)))
+  (return 0))
+
+(defn ^:pub ^I32 vms-need-offset [^IntsR ss]
+  (return (ia ss SS_NEED_OFF)))
+
+(defn ^:pub ^I32 vms-need-length [^IntsR ss]
+  (return (ia ss SS_NEED_LEN)))
+
+(defn ^:pub ^I32 vms-position [^IntsR ss]
+  (comment "Where the walk stands after VMS_NEED or VMS_YIELD (absolute).")
+  (return (ia ss SS_POS)))
+
+(defn ^:pub ^I32 vms-keep [^IntsR ss]
+  (comment "After VMS_NEED or VMS_YIELD: no byte before this offset will be asked"
+           "for again, so a forward-only source may drop them. It is the position,"
+           "or the start of a content that must be read twice (D094).")
+  (return (ia ss SS_KEEP)))
+
+(defn ^:pub ^I32 vms-steps [^IntsR ss]
+  (return (ia ss SS_STEPS)))
+
+;; ------------------------------------------------------------ the end
+
+(defn ^I32 fin [^Ints s ^Ints ss ^Ints out ^I32 base ^I32 code ^I32 sub ^I32 off]
+  (comment "The verdict: the scratch back to absolute offsets, out filled (off is"
+           "window-relative), the session done.")
+  (rebase s base)
+  (vm-output s out code sub (+ off base))
+  (iset ss SS_CODE code)
+  (iset ss SS_PH PH_DONE)
+  (return FIN))
+
+(defn ^I32 fin-bad [^Ints s ^Ints ss ^I32 base]
+  (comment "The Program is inconsistent with its scratch (vm-validate's -1).")
+  (rebase s base)
+  (iset ss SS_CODE (neg 1))
+  (iset ss SS_PH PH_DONE)
+  (return FIN))
+
+(defn ^I32 doc-start [^IntsR p ^Bytes b ^Ints s ^Ints ss ^Ints out ^I32 base ^I32 wend]
+  (comment "vm-run's start: too_large, not_map, the rule's typeset as the root's"
+           "query; then the root item.")
+  (let [n (ia ss SS_TOTAL)
+        at (- 0 base)]
+    (if (> n (ia s O_MAX_BYTES))
+      (do (fail s at CODE_TOO_LARGE)
+          (return (fin s ss out base CODE_TOO_LARGE 0 at))))
+    (if (== (ia s O_TOP) 0)
+      (do (if (== n 0)
+            (do (fail s at CODE_NOT_MAP)
+                (return (fin s ss out base CODE_NOT_MAP 0 at))))
+          (let [g (ensure ss base wend at (+ at 1))]
+            (if (suspended g) (return g)))
+          (if (!= (ushr (u8 b at) 5) 5)
+            (do (fail s at CODE_NOT_MAP)
+                (return (fin s ss out base CODE_NOT_MAP 0 at))))))
+    (let [rr (+ (ia p H_S_RULES) (* 5 (ia s VM_RULE)))
+          ts (ia p (+ rr 2))
+          cr (cset-rec p s 0)
+          w (ia p cr)
+          frames (ia s VM_FRAMES)
+          e (new-epoch s)
+          nq (q-add p s frames w 0 ts e at)]
+      (if (== nq (neg R_BUDGET))
+        (do (let [vp (ia s VM_POS)]
+              (return (fin s ss out base R_BUDGET 0 vp)))))
+      (if (< nq 0) (return (fin-bad s ss base)))
+      (iset ss SS_RTS ts)
+      (iset ss SS_RNQ nq)
+      (iset ss IT_POS 0)
+      (iset ss IT_D 0)
+      (iset ss IT_FB frames)
+      (iset ss IT_CK 0)
+      (iset ss IT_NQ nq)
+      (iset ss IT_END n)
+      (iset ss IT_CTX 0)
+      (iset ss IT_MODE MODE_ITEM)
+      (iset ss IT_NOTE (neg 1))
+      (iset ss IT_PAIR (neg 1))
+      (iset ss SS_PH PH_ITEM)
+      (return GO))))
+
+(defn ^I32 root-end [^IntsR p ^Ints s ^Ints ss ^Ints out ^I32 base]
+  (comment "vm-run's end: a code, trailing bytes, else the root's typeset test and"
+           "the witness.")
+  (let [r (ia ss SS_RET)
+        n (ia ss SS_TOTAL)
+        at (- 0 base)]
+    (if (== r (neg R_BUDGET))
+      (do (let [vp (ia s VM_POS)]
+            (return (fin s ss out base R_BUDGET 0 vp)))))
+    (if (== r (neg R_INCONSISTENT)) (return (fin-bad s ss base)))
+    (if (< r 0)
+      (do (let [ep (ia s O_ERR_POS)]
+            (return (fin s ss out base (neg r) 0 ep)))))
+    (if (!= r n)
+      (do (fail s (- r base) CODE_TRAILING)
+          (return (fin s ss out base CODE_TRAILING 0 (- r base)))))
+    (let [frames (ia s VM_FRAMES)
+          w (cset-width p (cset-rec p s 0))
+          nq (ia ss SS_RNQ)
+          ts (ia ss SS_RTS)
+          ev (q-stamp s frames w nq at)]
+      (if (< ev 0)
+        (do (let [vp1 (ia s VM_POS)]
+              (return (fin s ss out base R_BUDGET 0 vp1)))))
+      (let [t (ts-test p s ts ev at)]
+        (if (< t 0)
+          (do (let [vp2 (ia s VM_POS)]
+                (return (fin s ss out base R_BUDGET 0 vp2)))))
+        (if (== t 1) (return (fin s ss out base 0 0 at)))
+        (if (wit-empty s) (wit-set s R_TYPE 0 0 (neg 1) 0 at))
+        (rebase s base)
+        (let [code (vm-witness-output s out)]
+          (iset ss SS_CODE code)
+          (iset ss SS_PH PH_DONE)
+          (return FIN))))))
+
+;; ------------------------------------------------------------ one item
+
+(defn ^I32 tag-number [^Bytes b ^I32 pos]
+  (comment "The number of the tag whose (valid-sized) head is at pos, -1 past 31 bits.")
+  (let [ai (bit-and (u8 b pos) 31)]
+    (if (< ai 24) (return ai))
+    (if (== ai 24) (return (u8 b (+ pos 1))))
+    (if (== ai 25) (return (be16 b (+ pos 1))))
+    (return (neg 1))))
+
+(defn ^I32 item-begin [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend]
+  (comment "The pending item: its head (and any note or bounded piece it must have"
+           "whole) in the window, then whole by the buffer walk when the window"
+           "holds everything it can read, else a frame.")
+  (let [pos (- (ia ss IT_POS) base)
+        end (- (ia ss IT_END) base)
+        d (ia ss IT_D)
+        fb (ia ss IT_FB)
+        ck (ia ss IT_CK)
+        nq (ia ss IT_NQ)
+        ctx (ia ss IT_CTX)
+        mode (ia ss IT_MODE)
+        note (ia ss IT_NOTE)
+        pair (ia ss IT_PAIR)
+        cut (- (ia ss SS_CUT) base)]
+    (if (== mode MODE_VSEQ)
+      (return (arr-start p b s ss ka base pos pos (neg 1) d fb ck nq end 0 (neg 1))))
+    (if (== mode MODE_DSEQ) (return (open-dseq b ss ka base pos d end)))
+    (if (must-yield s ss) (return (yld ss base pos)))
+    (if (>= pos end)
+      (do (progress ss 1)
+          (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx))))
+          (return (ret ss base (dead-item b s pos d end)))))
+    (if (or (< pos 0) (>= pos wend)) (return (need ss base pos 1)))
+    (let [ib (u8 b pos)
+          major (ushr ib 5)
+          ai (bit-and ib 31)
+          ^:mut h 1
+          ^:mut direct 0]
+      (if (<= ai 27) (set h (head-size ai)))
+      (let [g (ensure ss base wend pos (+ pos (imin h (- end pos))))]
+        (if (suspended g) (return g)))
+      (if (>= note 0)
+        (do (let [tf (fbase ss (sar note 2))
+                  nk (bit-and note 3)
+                  req (note-req b s nk pos end wend)
+                  g2 (ensure ss base wend pos req)]
+              (if (suspended g2) (return g2))
+              (note-put b s ss nk pos end wend tf)
+              (iset ss IT_NOTE (neg 1)))))
+      (comment "what the walk may read, decided without charging anything: 1 the"
+               "buffer walk takes it whole, -1 a frame, 0 the prescan decides")
+      (if (== mode MODE_FRAME) (set direct (neg 1)))
+      (if (and (== direct 0) (<= end cut)) (set direct 1))
+      (if (and (== direct 0) (or (<= major 1) (== major 7))) (set direct 1))
+      (if (and (== direct 0) (and (== major 2) (== nq 0))) (set direct 1))
+      (if (and (== direct 0) (and (== major 6) (or (== ib 194) (== ib 195))))
+        (do (let [req2 (big-req b s pos end wend)]
+              (if (> req2 wend) (return (need ss base pos (- req2 pos)))))
+            (set direct 1)))
+      (if (and (== direct 0) (and (== major 6) (and (== nq 0) (== ai 24))))
+        (do (let [tn (tag-number b pos)
+                  x (+ pos 2)]
+              (if (and (> (typed-size tn) 0) (< tn 84))
+                (do (comment "dead-typed reads only its content's head")
+                    (if (< x end)
+                      (do (let [g5 (ensure ss base wend pos (+ x 1))]
+                            (if (suspended g5) (return g5)))
+                          (let [ai5 (bit-and (u8 b x) 31)
+                                ^:mut h5 1]
+                            (if (<= ai5 27) (set h5 (head-size ai5)))
+                            (let [g6 (ensure ss base wend pos (+ x (imin h5 (- end x))))]
+                              (if (suspended g6) (return g6))))))
+                    (set direct 1))))))
+      (if (and (== direct 0) (and (<= major 3) (> nq 0)))
+        (do (let [stop (str-stop b pos end)]
+              (if (< stop 0) (set direct 1))
+              (if (>= stop 0)
+                (do (let [^:mut cls 8]
+                      (if (== major 2) (set cls 4))
+                      (let [ln (lits-need p s fb nq cls (- stop pos))]
+                        (if (< ln 0)
+                          (do (let [g3 (ensure ss base wend pos stop)]
+                                (if (suspended g3) (return g3)))
+                              (set direct 1))
+                          (do (let [g4 (ensure ss base wend pos (+ pos ln))]
+                                (if (suspended g4) (return g4)))
+                              (if (and (== major 2) (not (bstr-reads p s fb nq (- stop (+ pos h)))))
+                                (set direct 1)))))))))))
+      (if (== direct 0)
+        (if (and (>= (ia ss SS_CHN) 0) (chain-has ss (+ pos base)))
+          (set direct (neg 1))
+          (if (== (prescan b ss base pos end cut) 1) (set direct 1) (set direct (neg 1)))))
+      (progress ss 1)
+      (if (== direct 1)
+        (do (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx))))
+            (return (ret ss base (dead-item b s pos d end)))))
+      (if (== major 2) (return (open-bstr p pool b s ss ka base pos d fb ck nq end ctx 0 0 0)))
+      (if (== major 3) (return (open-text p pool b s ss ka base pos d fb ck nq end ctx)))
+      (if (== major 4)
+        (do (if (> nq 0) (return (open-arr p b s ss ka base pos d fb ck nq end ctx pair)))
+            (return (open-darr p b s ss ka base pos d end pair))))
+      (if (== major 5)
+        (do (if (> nq 0) (return (open-map p b s ss ka base pos d fb ck nq end ctx)))
+            (return (open-dmap p b s ss ka base pos d end))))
+      (return (open-tag p b s ss ka base pos d fb ck nq end ctx)))))
+
+;; ------------------------------------------------------------ returns and frames
+
+(defn ^I32 deliver [^IntsR p ^Bytes b ^Ints s ^Ints ss ^Ints out ^I32 base]
+  (comment "An item returned (SS_RET): to the top frame, or the root's end. A"
+           "negated code unwinds frame by frame, as every caller of the buffer walk"
+           "returns it at once, except that a byte string running an EMBED"
+           "sub-walk catches an inner profile or limit refusal (embed-run).")
+  (let [sp (ia ss SS_SP)
+        r (ia ss SS_RET)]
+    (if (== sp 0) (return (root-end p s ss out base)))
+    (let [f (ftop ss)
+          kind (ia ss (+ f F_KIND))]
+      (if (< r 0)
+        (do (if (and (and (!= r (neg R_BUDGET)) (!= r (neg R_INCONSISTENT)))
+                     (and (== kind FK_BSTR) (== (ia ss (+ f F_PH)) S_EMBRUN)))
+              (return (embed-ret p s ss base f r)))
+            (fpop ss)
+            (return GO)))
+      (if (== kind FK_ARR) (return (arr-ret p s ss base f r)))
+      (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-ret ss f r)))
+      (if (or (== kind FK_MAP) (== kind FK_DMAP)) (return (map-ret p s ss base f r)))
+      (if (== kind FK_TAG) (return (tag-ret b s ss base f r)))
+      (if (== kind FK_BSTR) (return (embed-ret p s ss base f r)))
+      (return (fin-bad s ss base)))))
+
+(defn ^I32 frame-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend]
+  (let [f (ftop ss)
+        kind (ia ss (+ f F_KIND))]
+    (if (== kind FK_ARR) (return (arr-run p pool b s ss base f)))
+    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run ss base f)))
+    (if (or (== kind FK_MAP) (== kind FK_DMAP))
+      (do (if (== (ia ss (+ f F_PH)) M_KEY) (return (map-key p pool b s ss ka base wend f)))
+          (return (map-next p pool b s ss ka base wend f))))
+    (if (== kind FK_TAG) (return (tag-run p pool b s ss ka base wend f)))
+    (if (or (== kind FK_TEXT) (== kind FK_DTEXT)) (return (text-run p b s ss base wend f)))
+    (if (== kind FK_BSTR) (return (bstr-run p pool b s ss base wend f)))
+    (return (fin-bad s ss base))))
+
+(defn ^I32 keep-of [^IntsR ss]
+  (comment "vms-keep: the position, or the earliest pinned content start.")
+  (let [^:mut k (ia ss SS_POS)
+        sp (ia ss SS_SP)]
+    (for [^I32 i 0 sp]
+      (let [pin (ia ss (+ (fbase ss i) F_PIN))]
+        (if (and (>= pin 0) (< pin k)) (set k pin))))
+    (return k)))
+
+(defn ^:pub ^I32 vms-step [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base]
+  (comment "Run the session over the window b, message bytes from base. Answers the"
+           "verdict's code (>= 0; out filled as by vm-validate: absolute offsets),"
+           "VMS_NEED (give a window holding [vms-need-offset, + vms-need-length)),"
+           "VMS_YIELD (give a window holding vms-position; nothing else changed),"
+           "or -1 Program inconsistent / a negative base, -4 out shorter than 8"
+           "words. After the verdict every call answers it again.")
+  (if (< (ilen out) 8) (return (neg 4)))
+  (if (== (ia ss SS_PH) PH_DONE) (return (ia ss SS_CODE)))
+  (if (< base 0) (return (neg 1)))
+  (let [wend (blen b)
+        q (ia ss SS_QUANTUM)
+        pos0 (- (ia ss SS_POS) base)
+        ^:mut cut wend]
+    (rebase s (neg base))
+    (iset ss SS_WB0 (ia s VM_BUDGET))
+    (iset ss SS_WORK 0)
+    (iset ss SS_PROG 0)
+    (iset ss SS_CHN (neg 1))
+    (iset ss SS_STEPS (+ (ia ss SS_STEPS) 1))
+    (if (> q 0)
+      (do (let [^:mut c2 (+ pos0 q)]
+            (if (< c2 (+ pos0 1)) (set c2 (+ pos0 1)))
+            (if (< c2 cut) (set cut c2)))))
+    (iset ss SS_CUT (+ cut base))
+    (forever
+      (let [ph (ia ss SS_PH)]
+        (local ^I32 r)
+        (if (== ph PH_ITEM)
+          (set r (item-begin p pool b s ss ka base wend))
+          (if (== ph PH_RET)
+            (set r (deliver p b s ss out base))
+            (if (== ph PH_FRAME)
+              (set r (frame-run p pool b s ss ka base wend))
+              (if (== ph PH_START)
+                (set r (doc-start p b s ss out base wend))
+                (return (ia ss SS_CODE))))))
+        (if (== r FIN) (return (ia ss SS_CODE)))
+        (if (suspended r)
+          (do (keys-save b ss ka base)
+              (rebase s base)
+              (iset ss SS_KEEP (keep-of ss))
+              (return r)))))))
