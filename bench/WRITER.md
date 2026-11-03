@@ -230,3 +230,74 @@ Both benchmark scripts checked every answer. `git diff --check` passed.
 No kin/generated source, acceptance policy or byte decisions were changed.
 The array optimization is deliberately **not completed** under the combined
 non-allocation and identical-behavior requirements above.
+
+## D113 — Array elements by default, strict arrays opt in — 2026-11-03
+
+D113 resolves the policy constraint left open by D112: encode and
+Writer.value ignore extra array own properties by default. `strictArrays:
+true` retains the old own-key count check, and `profiles.bindle` sets it.
+Both modes retain the exact Array.prototype rule and refuse holes; the
+default checks membership only when an element reads as undefined.
+
+Machine: Apple M1 Pro, arm64, 32 GiB, macOS 14.6.1; Node v24.6.0,
+V8 13.6.233.10-node.24. Shared machine, with changing background load.
+The CPU-brand sysctl was sandbox-denied; Node os.cpus() identified the CPU.
+Only the 120,000-integer encode results are reported for this focused change.
+The encoding remains **468,653 bytes**, byte-equal to cbor.mjs and the
+frozen Phase 2 encoder.
+
+### Existing benchmark scripts, before and after
+
+Ran both complete scripts using the preceding section's scratch-copy method:
+resolve relative static imports to file URLs, replace performance.now()
+with `t = process.threadCpuUsage(); return (t.user + t.system) / 1000`
+(one call per reading), and run `node --single-threaded-gc`.
+Workloads, correctness checks, 9 trials, 15 ms target CPU samples, 3
+interleaved warm-up rounds and rotating operation order were unchanged.
+The Writer size step was skipped via `SNUG_ESBUILD` pointing to an absent
+scratch path; no install. These are median thread CPU ms per encode:
+
+| 120,000 integers | Before ms | Default after ms |
+| --- | ---: | ---: |
+| bench/codec.mjs encode | 30.8880 | 7.9925 |
+| bench/writer-bench.mjs encode, sorted object keys | 31.6750 | 7.8590 |
+| bench/writer-bench.mjs encode, shuffled object keys | 30.0940 | 7.6290 |
+
+One-minute start → end loads: codec before **8.43 → 9.40**, Writer before
+**9.40 → 13.68**, codec after **15.46 → 22.04**, Writer after
+**22.04 → 20.95**. For this array, the Writer's sorted/shuffled inputs have
+identical element order. Untouched cbor.mjs controls were **31.6730 →
+30.6110 ms** (codec) and **30.4170 → 32.2400 ms** (Writer).
+
+### Same-process rotating comparison
+
+A saved pre-change Writer and the current Writer ran on the same thread,
+with default and strict current modes, all receiving the same array and
+limits (maxEntries 120000, maxItems 500000, maxBytes 1500000). Each mode
+received 30 interleaved warm-up calls, then one calibration; 15 rounds
+rotated all three modes with a 25 ms target CPU sample, GC included.
+Every result was checked against cbor.mjs outside timing. This uses only
+the integer fixture, so its JIT history differs from the complete scripts.
+
+| 120,000 integers | Median thread CPU ms |
+| --- | ---: |
+| Saved Writer before | 29.6960 |
+| Current Writer, default | 4.7339 |
+| Current Writer, strictArrays true | 29.2940 |
+
+Load **19.91 → 20.25** (5-minute **15.54 → 15.75**). The paired result is
+**6.27× faster** by default; strict mode is near parity with the old path.
+This supports removing enumeration as the source of the gain, rather than
+comparing different loads or JIT histories. Raw scratch scripts and output:
+`/private/tmp/snug-d113-wgbvq4c8/`.
+
+Gate: `cd host/js && npm test` — **1,051 passed, 0 failed, 0 skipped**.
+Only the old default array-refusal assertions changed: the extra-property
+row in encode.test.mjs, the extra-property row in writer.test.mjs, and the
+array-refusal matrix in encoder-fast-paths.test.mjs now use profiles.bindle.
+New coverage checks ignored named/hidden/symbol extras without invoking
+getters, strict/Bindle refusals, nested Writer.value calls, holes, present
+undefined (including omitUndefined and item limits), genuine arrays and
+unchanged subclass/foreign/null-prototype refusals. Declaration syntax and
+exports passed; offline TypeScript was unavailable. `git diff --check`
+passed for the task's files. No kin or generated changes were made here.

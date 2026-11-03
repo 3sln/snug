@@ -26,6 +26,8 @@ export interface DecodeOptions extends Limits {
 export interface EncodeOptions extends Limits {
   cose?: boolean;
   omitUndefined?: boolean;
+  /** Default false: ignore extra array own properties. True keeps the strict own-key count check. Holes are refused in both modes. */
+  strictArrays?: boolean;
 }
 export type ProfileCode = 'truncated' | 'non_shortest' | 'indefinite' | 'malformed' |
   'key_type' | 'key_order' | 'duplicate_key' | 'text' | 'float' | 'simple' | 'tag' |
@@ -48,7 +50,7 @@ export declare const LIMITS: Readonly<{
   maxBignumBytes: 128; minDecimalExponent: -1024; maxDimensions: 8;
 }>;
 /** D081's general deterministic preset is planned, and is not exported yet. */
-export declare const profiles: Readonly<{ bindle: Readonly<{ top: 'map'; cose: false }> }>;
+export declare const profiles: Readonly<{ bindle: Readonly<{ top: 'map'; cose: false; strictArrays: true }> }>;
 export declare function decode(bytes: Uint8Array, options?: DecodeOptions): Value;
 /** maxBytes is enforced at finish only when explicitly supplied. */
 export declare function encode(value: unknown, options?: EncodeOptions): Uint8Array;

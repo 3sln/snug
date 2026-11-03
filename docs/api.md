@@ -26,12 +26,21 @@ arrays, string-keyed objects, or a top-level Map with `cose`.
 | `objects: 'null' \| 'plain'` | `'null'` | Decode ordinary maps into null/ordinary-prototype objects |
 | `maxBytes`, `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Resource bounds |
 | `omitUndefined: boolean` | false | Encode object-member omission; see guide |
+| `strictArrays: boolean` | false | Encode: refuse extra array own properties with `unsupported`; Bindle preset sets true |
 
 DecodeOptions includes `top`, `cose`, `objects` and the four limits.
-EncodeOptions includes `cose`, `omitUndefined` and the four limits. `encode`
+EncodeOptions includes `cose`, `omitUndefined`, `strictArrays` and the four limits. `encode`
 does not enforce a map root. Its `maxBytes` check happens only when supplied,
 at finish, after allocation. Invalid CBOR/profile or inadmissible host values
 throw `SnugFault`; argument misuse can throw `TypeError`.
+
+Arrays encode elements 0..length−1, ignoring extra named own properties
+(including hidden and symbol properties) by default. `strictArrays: true`
+retains the old own-key count check. Both modes refuse holes and present
+undefined elements with `unsupported`, regardless of `omitUndefined`.
+Only when an element reads as undefined is absence checked (`!(i in array)`).
+Arrays must pass Array.isArray and have exactly the local Array.prototype;
+subclassed, foreign-realm and null-prototype arrays remain refused.
 
 | Export | Members and contract |
 | --- | --- |
@@ -43,7 +52,7 @@ throw `SnugFault`; argument misuse can throw `TypeError`.
 | `NDArray` | `new NDArray(shape: number[], data: Value[] \| TypedArray \| Float16Bytes)`; readonly `shape`, `data`. Positive dimensions (1..8); product equals element count. Data is retained, not deeply frozen. |
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
-| `profiles` | Frozen object containing only `bindle: { top: 'map', cose: false }`. The general deterministic preset is not implemented/exported. |
+| `profiles` | Frozen object containing only `bindle: { top: 'map', cose: false, strictArrays: true }`. Pass as options to encode/Writer for the old array-property refusals. The general deterministic preset is not implemented/exported. |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
 Float16 where available, Float32/64. `Uint8Array` is a byte string.
@@ -177,6 +186,8 @@ directory instrumentation is part of this entry point.
 `new Writer(options?: WriterOptions)` accepts EncodeOptions plus
 `keysSorted?: boolean` (false) and `limits?: Limits`. The grouped limits
 override top-level limit resolution; prefer using one spelling.
+`strictArrays` applies to `value(v)` and its nested arrays just as in encode;
+`new Writer(profiles.bindle)` enables the strict own-property check.
 All methods return `this` except `finish`; `failure` is the first code or ''.
 
 | Methods | Arguments |

@@ -3,6 +3,7 @@ export interface WriterOptions extends EncodeOptions { keysSorted?: boolean; lim
 export declare class Writer {
   constructor(options?: WriterOptions);
   readonly failure: string;
+  /** encode's array policy, including strictArrays, applies to all nested values. */
   value(value: unknown): this;
   uint(value: number | bigint): this;
   int(value: number | bigint): this;

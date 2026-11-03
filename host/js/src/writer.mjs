@@ -4,7 +4,7 @@
 // integers and bignums from magnitude bytes, encoded-key comparison and the
 // map-closing permutation); this host owns memory, host-value admissibility
 // (D003 as amended: lone surrogates, NaN, non-integers, classes) and the
-// grammar. Semantics of value(v) are encode()'s (cbor.mjs's rules).
+// grammar. Semantics of value(v) are encode()'s (D113 array policy).
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { Decimal, NDArray, Float16Bytes, typedInfo } from './values.mjs';
@@ -49,12 +49,13 @@ function typedPayload(v, info, fail) {
   return raw;
 }
 
-/** Deterministic CBOR from typed calls. `new Writer({cose, keysSorted, limits})` (limit names may also be given at the
+/** Deterministic CBOR from typed calls. `new Writer({cose, keysSorted, strictArrays, limits})` (limit names may also be given at the
  * top level, as encode takes them). Values: uint, int, bigint, float, bool, null, text, bytes, typed, decimal, ndarray,
  * value (any host value, encode's rules); containers: beginArray(n), beginMap(n), key(k), end(); finish() returns the
  * bytes once exactly one complete root has been written. Map keys may come in any order (sorted at end() by encoded
  * bytes) or, with keysSorted, must come in strictly increasing encoded order (checked at each key). Text keys only;
- * integer labels in the top-level map with cose. Any error throws SnugFault and leaves the writer failed for good. */
+ * integer labels in the top-level map with cose. value() ignores extra array own properties unless strictArrays is true;
+ * holes and undefined elements are refused in both modes. Any error throws SnugFault and leaves the writer failed for good. */
 export class Writer {
   #buf = new Uint8Array(256); #pos = 0;
   #kind = ROOT; #left = 1; #depth = 0;
@@ -64,7 +65,7 @@ export class Writer {
   #kbuf = null; #kpos = 0; #xtop = 0;       // the walk's key scratch and order stack
   #mag = null;                              // bignum magnitude scratch (lazy)
   #items = 0; #code = '';
-  #cose; #sorted; #maxDepth; #maxEntries; #maxItems; #maxBytes; #omitUndefined;
+  #cose; #sorted; #maxDepth; #maxEntries; #maxItems; #maxBytes; #omitUndefined; #strictArrays;
 
   constructor(options = {}) {
     if (options === null || typeof options !== 'object') throw new TypeError('Writer options must be an object.');
@@ -72,6 +73,7 @@ export class Writer {
     this.#cose = options.cose === true;
     this.#sorted = options.keysSorted === true;
     this.#omitUndefined = options.omitUndefined === true;
+    this.#strictArrays = options.strictArrays === true;
     this.#maxDepth = limits.maxDepth; this.#maxEntries = limits.maxEntries; this.#maxItems = limits.maxItems;
     const explicit = options.maxBytes ?? options.limits?.maxBytes;
     this.#maxBytes = explicit === undefined ? Infinity : limits.maxBytes;
@@ -230,12 +232,15 @@ export class Writer {
     if (v instanceof Decimal) { this.#headN(6, 4); this.#walk([v.exponent, v.mantissa], depth + 1); return; }
     if (v instanceof NDArray) { this.#headN(6, 40); this.#walk([v.shape, v.data], depth + 1); return; }
     if (Array.isArray(v)) {
-      // Enumeration is required to include non-enumerable own properties and
-      // symbols. for-in/index checks alone would silently widen this contract.
-      if (Object.getPrototypeOf(v) !== Array.prototype || Reflect.ownKeys(v).length !== v.length + 1) this.#fail('unsupported', 'Arrays must be dense with no extra properties.');
+      // D113: own-key enumeration is only needed for the strict/Bindle policy.
+      if (Object.getPrototypeOf(v) !== Array.prototype || (this.#strictArrays && Reflect.ownKeys(v).length !== v.length + 1)) this.#fail('unsupported', 'Arrays must be dense with no extra properties.');
       if (v.length > this.#maxEntries) this.#fail('too_many_entries', 'An array exceeds the entry bound.');
       this.#headN(4, v.length);
-      for (let i = 0; i < v.length; i++) this.#walk(v[i], depth + 1);
+      for (let i = 0; i < v.length; i++) {
+        const value = v[i];
+        if (value === undefined && !(i in v)) this.#fail('unsupported', 'Arrays must be dense with no extra properties.');
+        this.#walk(value, depth + 1);
+      }
       return;
     }
     const keys = [], values = [];

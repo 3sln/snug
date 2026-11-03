@@ -149,12 +149,24 @@ the first code is available as `failure`; later calls throw `writer_failed`.
 `float(1)` is refused: use `int(1)` or `value(1)`. There is no raw unchecked
 CBOR insertion API.
 
-Only dense ordinary arrays, plain/null-prototype objects with enumerable
-data properties, the documented wrappers and the admitted scalars are
-encodable. Classes, accessors, functions and sparse arrays fail with
-`unsupported`. `omitUndefined: true` omits undefined object members and
-symbol/non-enumerable members; array holes/undefined and enumerable accessors
-remain refused. Avoid proxies or other executable objects at this boundary.
+Arrays encode elements at indexes 0..length−1. Extra named own properties,
+including non-enumerable and symbol properties, are ignored without reading
+their values, as with JSON.stringify. `strictArrays: true` retains the old
+own-key count check and refuses extra properties with `unsupported`.
+`encode(value, profiles.bindle)` and `new Writer(profiles.bindle)` select this
+strict behavior (`profiles` is exported by `snug`). Both modes require genuine
+arrays with exactly the local `Array.prototype`; subclassed, foreign-realm
+and null-prototype arrays remain refused. Holes and present undefined array
+elements are refused in both modes. A missing element is checked only when
+its value reads as undefined, using `i in array`.
+
+Plain/null-prototype objects with enumerable data properties, the documented
+wrappers and the admitted scalars are also encodable. Classes, object
+accessors and functions fail with `unsupported`. `omitUndefined: true` omits
+undefined object members and symbol/non-enumerable object members; array
+holes/undefined and enumerable object accessors remain refused. Writer.value
+uses the same options and array behavior at every nesting level. Avoid proxies
+or other executable objects at this boundary.
 
 ## Read selected fields through a view
 

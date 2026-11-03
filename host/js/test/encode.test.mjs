@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { build } from '../src/build.mjs';
 import { snug, baseline, translate, fromHex, toHex } from './values.mjs';
-const { encode, SnugFault, Decimal, NDArray, Float16Bytes } = snug;
+const { encode, SnugFault, Decimal, NDArray, Float16Bytes, profiles } = snug;
 
 const cases = [
   [undefined, 'unsupported'], [NaN, 'float'], [Infinity, 'float'], [-Infinity, 'float'], [-0, 'float'],
@@ -14,15 +14,15 @@ const cases = [
   [new Float32Array([NaN]), 'typed_array'], [new Float64Array([1, NaN]), 'typed_array'],
   ['\ufdd0', 'text'], ['\ud800', 'text'], ['a\udfff', 'text'], ['\u{10ffff}', 'text'],
   [2n ** 1024n, 'bignum'], [-(2n ** 1024n) - 1n, 'bignum'], [new (class X {})(), 'unsupported'],
-  [[1, , 3], 'unsupported'], [Object.assign([1], { extra: 1 }), 'unsupported'],
+  [[1, , 3], 'unsupported'], [Object.assign([1], { extra: 1 }), 'unsupported', profiles.bindle],
   [{ [Symbol('private-key')]: 1 }, 'unsupported'],
   [Object.defineProperty({}, 'private-key', { get: () => { throw new Error('getter must never run'); }, enumerable: true }), 'unsupported'],
   [Object.defineProperty({}, 'hidden', { value: 1 }), 'unsupported'], [{ u: undefined }, 'unsupported'],
   [{ '\ufffe': 1 }, 'key_type'],
 ];
-for (const [i, [value, code]] of cases.entries()) test(`encoder refuses case ${i}: ${code}`, () => {
+for (const [i, [value, code, options]] of cases.entries()) test(`encoder refuses case ${i}: ${code}`, () => {
   assert.throws(() => baseline.encode(value), { name: 'CBORFault', code });
-  assert.throws(() => encode(value), e => e instanceof SnugFault && e.code === code && !e.message.includes('private'));
+  assert.throws(() => encode(value, options), e => e instanceof SnugFault && e.code === code && !e.message.includes('private'));
 });
 
 test('cycles, depth boundaries, tags and all encoder resource options match baseline', () => {

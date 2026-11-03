@@ -2115,6 +2115,25 @@ refusals are counted and asserted separately from category comparisons.
 validation; inherit each host's possibly different installed Unicode version.
 - [ ] **Signed off** (owner)
 
+### D113 — Array elements by default; strict own-property checks opt in
+**Decision** (manager, 2026-11-03): JS encode and Writer.value encode array
+elements at indexes 0..length−1 and ignore extra named own properties,
+including hidden and symbol properties. Keep Array.isArray and today's
+exact Array.prototype rule. If an element reads as undefined, check
+`!(i in v)` and refuse a hole with the existing `unsupported` code; present
+undefined follows the existing undefined rules. `strictArrays: true` retains
+the old Reflect.ownKeys count check; `profiles.bindle` sets it to preserve
+Bindle byte/refusal compatibility with cbor.mjs.
+**Why**: D080/D081 make snug a standalone library. Enumerating 120k array
+index keys costs about 20 ms under load (D112), making encode about 6× slower
+than cbor2 to refuse extra properties that JSON.stringify and other CBOR
+libraries ignore. An undefined-only membership check avoids that enumeration
+on the default path while continuing to refuse holes.
+**Alternatives**: always enumerate (D112's unresolved bottleneck); for-in or
+Object.keys (cannot enforce the old hidden/symbol-property contract); change
+array prototypes or undefined handling (outside this decision).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-10-29 (manager): **bundle sizes vs R9** (esbuild 0.28 minify, node
@@ -2188,6 +2207,7 @@ are answered as provisional decisions D082–D085. None is open now.
 
 - [ ] **P7.1 — General default profile** (D081): key kinds, standard tag set,
   presets `deterministic` (default) and `bindle`; scanner, VM, builder, writer.
+  D113 array-policy follow-up done: default ignores extras, strictArrays/Bindle retain the old check; **Learnt**: enumeration dominates 120k integers (paired CPU 29.6960 → 4.7339 ms); npm test 1,051 passed / 0 failed; method and evidence in bench/WRITER.md.
 - [ ] **P7.2 — Extension controls** (D082) and the generic controls module.
 - [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
   *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.

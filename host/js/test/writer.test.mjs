@@ -8,7 +8,7 @@ import { snug, baseline, profile, oracle, translate, fromHex, toHex } from './va
 import { createRandom, randomValue, randomMap } from './corpus.mjs';
 // encode() is the walk over the Writer since P5.4; the Phase 2 encoder (frozen) and cbor.mjs are the oracles.
 import { encode as encodeP2 } from '../../../bench/baseline/encode-p2.mjs';
-const { encode, decode, SnugFault, Decimal, NDArray, Float16Bytes } = snug;
+const { encode, decode, SnugFault, Decimal, NDArray, Float16Bytes, profiles } = snug;
 
 const keyBytes = k => encode(k, { top: 'any' });
 const byEncoded = (a, b) => Buffer.compare(Buffer.from(keyBytes(a)), Buffer.from(keyBytes(b)));
@@ -92,16 +92,16 @@ const refusals = [
   [new Float32Array([NaN]), 'typed_array'], [new Float64Array([1, NaN]), 'typed_array'],
   ['﷐', 'text'], ['\ud800', 'text'], ['a\udfff', 'text'], ['\u{10ffff}', 'text'], ['x'.repeat(70) + '\ud800', 'text'],
   [2n ** 1024n, 'bignum'], [-(2n ** 1024n) - 1n, 'bignum'], [new (class X {})(), 'unsupported'],
-  [[1, , 3], 'unsupported'], [Object.assign([1], { extra: 1 }), 'unsupported'], [{ [Symbol('private-key')]: 1 }, 'unsupported'],
+  [[1, , 3], 'unsupported'], [Object.assign([1], { extra: 1 }), 'unsupported', profiles.bindle], [{ [Symbol('private-key')]: 1 }, 'unsupported'],
   [Object.defineProperty({}, 'private-key', { get: () => { throw new Error('getter must never run'); }, enumerable: true }), 'unsupported'],
   [Object.defineProperty({}, 'hidden', { value: 1 }), 'unsupported'], [{ u: undefined }, 'unsupported'],
   [{ '￾': 1 }, 'key_type'], [{ ['x'.repeat(80) + '\ud800']: 1 }, 'key_type'],
 ];
 test('value() refuses what encode refuses, with its code, never echoing the value; the writer stays failed', () => {
-  for (const [value, code] of refusals) {
+  for (const [value, code, options] of refusals) {
     assert.throws(() => encodeP2(value), { code });
-    assert.throws(() => encode(value), { code });
-    const w = new Writer();
+    assert.throws(() => encode(value, options), { code });
+    const w = new Writer(options);
     assert.throws(() => w.value(value), e => e instanceof SnugFault && e.code === code && !e.message.includes('private'));
     assert.equal(w.failure, code);
     assert.throws(() => w.null(), { code: 'writer_failed' });
