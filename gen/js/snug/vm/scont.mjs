@@ -7,13 +7,15 @@ import { coseLabelOk } from '../cbor/scan.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c64, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
-import { deadItem, deadPairBody, decimalCheck, ndarrayCheck, pairCheck } from './dead.mjs';
-import { bstrTail, countMatched, countPending, evalItem, finishComb, finishScalar, mapFastMode, mapPairOk, qFilterX, simpleOf, singleLeaf, unitOf } from './eval.mjs';
-import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, H_S_LEAVES, K_ARRAY, K_MAP, K_TAG, K_TAGSET, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_INCONSISTENT, R_MISSING, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_POS, VM_Q1 } from './layout.mjs';
+import { deadIntStreak, deadItem, deadPairBody, decimalCheck, ndarrayCheck, pairCheck } from './dead.mjs';
+import { arrayStreak, bstrTail, countMatched, countPending, evalItem, finishComb, finishScalar, ifLimit, mapFastMode, mapPairOk, qFilterX, simpleOf, singleLeaf, unitOf } from './eval.mjs';
+import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, H_S_LEAVES, K_ARRAY, K_INT, K_MAP, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_INCONSISTENT, R_MISSING, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1 } from './layout.mjs';
 import { cmpU64, evalScalars, scalarKind } from './leaf.mjs';
 import { blockMt, blockNamed, candVts, candVtsMt, keyPhaseStruct, keySearch, keySpanEnd, leafMap, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, simpleStruct, updateStruct } from './map.mjs';
-import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLO, F_KM, F_MCNQ, F_N, F_NALIVE, F_NAMED, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VNQ, GO, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, bstrReads, call, cont, done, ensure, err, fbase, fidx, fpush, imin, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, prescan, progress, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
+import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLO, F_KM, F_MCNQ, F_N, F_NALIVE, F_NAMED, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VNQ, GO, IT_PAIR, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, bstrReads, call, cont, cutYield, done, ensure, err, fbase, fidx, fitsKnown, fpush, imin, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
 import { frameItem, openBstr, prologue, typedScan } from './sstr.mjs';
+
+export const F_SLEAF = 24;
 
 export const A_NEXT = 0;
 
@@ -49,6 +51,29 @@ export function markPair(ss, pair) {
         const tf = fbase(ss, pair);
         ss[tf + F_TNOTED] = 1;
     }
+}
+
+export const NOINL = -1000;
+
+export function inlineChild(p, pool, b, s, ss, base, pos, d, fb, ck, nq, end, ctx, note) {
+    // A child the step's prescan knows to lie before the cut, evaluated by the
+    // buffer walk at once (no round trip through the session loop): its end
+    // or code, or NOINL (take the item path: a note, a yield, or unknown).
+    if (note >= 0) {
+        return NOINL;
+    }
+    const at = pos + base;
+    if (cutYield(s, ss, at)) {
+        return NOINL;
+    }
+    if (!fitsKnown(ss, at)) {
+        return NOINL;
+    }
+    progress(ss, 1);
+    if (nq > 0) {
+        return evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx);
+    }
+    return deadItem(b, s, pos, d, end);
 }
 
 export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, ctx, pair) {
@@ -94,7 +119,19 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
             cx = CTX_SIMPLE;
         }
     }
+    // eval-array's streak leaf: an INT over one interval or a TEXT without a
+    // regexp, fast paths on (D044)
+    let sleaf = -1;
+    if ((sl >= 0) && ((s[VM_GENERIC] & 1) === 0)) {
+        const lbf = p[H_S_LEAVES] + (8 * sl);
+        const kf = p[lbf] & 255;
+        if (((kf === K_INT) && (p[lbf + 3] === 1)) || ((kf === K_TEXT) && (p[lbf + 4] < 0))) {
+            sleaf = sl;
+        }
+    }
+    ss[IT_PAIR] = sleaf;
     const pend = countPending(p, s, fb, w, nq);
+    const sleaf2 = ss[IT_PAIR];
     const f = fpush(b, ss, ka, base, FK_ARR);
     if (f < 0) {
         return err(ss, -R_INCONSISTENT);
@@ -110,6 +147,7 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
     ss[f + F_PEND] = pend;
     ss[f + F_NALIVE] = nb;
     ss[f + F_PAIR] = pair;
+    ss[f + F_SLEAF] = sleaf2;
     markPair(ss, pair);
     return cont(ss, f, A_NEXT);
 }
@@ -186,67 +224,6 @@ export function arrEnd(p, pool, b, s, ss, base, f) {
     return done(ss, base, q);
 }
 
-export function arrRun(p, pool, b, s, ss, base, f) {
-    // The next element: its query from the live blocks (charged), then the
-    // element as a child item; or the end.
-    const pos = ss[f + F_POS] - base;
-    const end = ss[f + F_END] - base;
-    const d = ss[f + F_D];
-    const fb = ss[f + F_FB];
-    const ck = ss[f + F_CK];
-    const q = ss[f + F_Q] - base;
-    const n = ss[f + F_N];
-    const el = ss[f + F_EL];
-    const nb = ss[f + F_NB];
-    const s2 = ss[f + F_S2];
-    const cx = ss[f + F_CX];
-    const note = pairNote(ss, ss[f + F_PAIR], el);
-    if (!(((n < 0) && (q < end)) || ((n >= 0) && (el < n)))) {
-        return arrEnd(p, pool, b, s, ss, base, f);
-    }
-    if (ss[f + F_NALIVE] === 0) {
-        ss[f + F_PH] = A_DEAD;
-        return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
-    }
-    const cr = csetRec(p, s, ck);
-    const w = csetWidth(p, cr);
-    const area = fb + (2 * w);
-    const cfb = fb + csetFrame(p, cr);
-    const cck = nextCk(p, s, ck);
-    const cw = csetWidth(p, csetRec(p, s, cck));
-    const e = newEpoch(s);
-    const ao1 = blockAo(p, s, fb, area);
-    let cnq = 0;
-    let bo = area;
-    if (s2 === 1) {
-        freeOn(s);
-    }
-    for (let bi = 0; bi < nb; bi++) {
-        if (!charge(s, 1, pos)) {
-            return err(ss, -R_BUDGET);
-        }
-        let ao = ao1;
-        if (bi > 0) {
-            ao = blockAo(p, s, fb, bo);
-        }
-        if (s[bo + 1] !== 0) {
-            cnq = arrayCandidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
-            if (cnq < 0) {
-                return err(ss, cnq);
-            }
-        }
-        bo += arrayWords(p, ao);
-    }
-    freeOff(s);
-    pathPut(s, d + 1, P_INDEX, el);
-    ss[f + F_CNQ] = cnq;
-    ss[f + F_PH] = A_LIVE;
-    if (cnq > 0) {
-        return call(ss, base, q, d + 1, cfb, cck, cnq, end, cx, MODE_ITEM, note, -1);
-    }
-    return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
-}
-
 export function arrRet(p, s, ss, base, f, r) {
     // The element ended at r (absolute): after a live element, stamp and
     // advance the live blocks, then the witness; next.
@@ -313,6 +290,118 @@ export function arrRet(p, s, ss, base, f, r) {
     return cont(ss, f, A_NEXT);
 }
 
+export function arrRun(p, pool, b, s, ss, base, f) {
+    // The next element: its query from the live blocks (charged), then the
+    // element as a child item; or the end.
+    const pos = ss[f + F_POS] - base;
+    const end = ss[f + F_END] - base;
+    const d = ss[f + F_D];
+    const fb = ss[f + F_FB];
+    const ck = ss[f + F_CK];
+    const q = ss[f + F_Q] - base;
+    const n = ss[f + F_N];
+    const el = ss[f + F_EL];
+    const nb = ss[f + F_NB];
+    const s2 = ss[f + F_S2];
+    const cx = ss[f + F_CX];
+    const note = pairNote(ss, ss[f + F_PAIR], el);
+    if (!(((n < 0) && (q < end)) || ((n >= 0) && (el < n)))) {
+        return arrEnd(p, pool, b, s, ss, base, f);
+    }
+    // eval-array's streaks over the elements the window (and the quantum's
+    // cut) holds: each checks an element whole before charging it and stops
+    // before one that would not do, so a cut short `end` only ends them sooner
+    const cutend = imin(end, ss[SS_CUT] - base);
+    const generic = s[VM_GENERIC] & 1;
+    if ((((el >= 1) && (generic === 0)) && (ss[f + F_PAIR] < 0)) && ((q >= 0) && (q < cutend))) {
+        if (ss[f + F_NALIVE] === 0) {
+            const qd = deadIntStreak(b, s, q, ifLimit(n, el), cutend);
+            const kd = s[VM_FASTM];
+            if (kd > 0) {
+                ss[f + F_Q] = qd + base;
+                ss[f + F_EL] = el + kd;
+                progress(ss, kd);
+                return cont(ss, f, A_NEXT);
+            }
+        } else {
+            const sleaf = ss[f + F_SLEAF];
+            const area0 = fb + (2 * csetWidth(p, csetRec(p, s, ck)));
+            if ((sleaf >= 0) && (s[area0 + 2] === 1)) {
+                const qs = arrayStreak(p, b, s, q, ifLimit(n, el), cutend, sleaf, s2);
+                const ks = s[VM_FASTM];
+                if (ks > 0) {
+                    ss[f + F_Q] = qs + base;
+                    ss[f + F_EL] = el + ks;
+                    progress(ss, ks);
+                    return cont(ss, f, A_NEXT);
+                }
+            }
+        }
+    }
+    if (ss[f + F_NALIVE] === 0) {
+        ss[f + F_PH] = A_DEAD;
+        const ir0 = inlineChild(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note);
+        if (ir0 >= 0) {
+            return arrRet(p, s, ss, base, f, ir0 + base);
+        }
+        if (ir0 !== NOINL) {
+            return ret(ss, base, ir0);
+        }
+        return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
+    }
+    const cr = csetRec(p, s, ck);
+    const w = csetWidth(p, cr);
+    const area = fb + (2 * w);
+    const cfb = fb + csetFrame(p, cr);
+    const cck = nextCk(p, s, ck);
+    const cw = csetWidth(p, csetRec(p, s, cck));
+    const e = newEpoch(s);
+    const ao1 = blockAo(p, s, fb, area);
+    let cnq = 0;
+    let bo = area;
+    if (s2 === 1) {
+        freeOn(s);
+    }
+    for (let bi = 0; bi < nb; bi++) {
+        if (!charge(s, 1, pos)) {
+            return err(ss, -R_BUDGET);
+        }
+        let ao = ao1;
+        if (bi > 0) {
+            ao = blockAo(p, s, fb, bo);
+        }
+        if (s[bo + 1] !== 0) {
+            cnq = arrayCandidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
+            if (cnq < 0) {
+                return err(ss, cnq);
+            }
+        }
+        bo += arrayWords(p, ao);
+    }
+    freeOff(s);
+    pathPut(s, d + 1, P_INDEX, el);
+    ss[f + F_CNQ] = cnq;
+    ss[f + F_PH] = A_LIVE;
+    let ir;
+    if (cnq > 0) {
+        ir = inlineChild(p, pool, b, s, ss, base, q, d + 1, cfb, cck, cnq, end, cx, note);
+    } else {
+        ir = inlineChild(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note);
+    }
+    if (ir < 0) {
+        if (ir !== NOINL) {
+            return ret(ss, base, ir);
+        }
+    }
+    if (ir >= 0) {
+        return arrRet(p, s, ss, base, f, ir + base);
+    }
+    if (cnq > 0) {
+        return call(ss, base, q, d + 1, cfb, cck, cnq, end, cx, MODE_ITEM, note, -1);
+    }
+    return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
+}
+
 export function openDarr(p, b, s, ss, ka, base, pos, d, end, pair) {
     const q = prologue(p, b, s, pos, end, 0, 0);
     if (q < 0) {
@@ -347,7 +436,13 @@ export function openDseq(b, ss, ka, base, pos, d, end) {
     return cont(ss, f, A_NEXT);
 }
 
-export function darrRun(ss, base, f) {
+export function darrRet(ss, f, r) {
+    ss[f + F_Q] = r;
+    ss[f + F_EL] = ss[f + F_EL] + 1;
+    return cont(ss, f, A_NEXT);
+}
+
+export function darrRun(p, pool, b, s, ss, base, f) {
     // The next dead element (or sequence item), or the end.
     const el = ss[f + F_EL];
     const q = ss[f + F_Q] - base;
@@ -357,18 +452,41 @@ export function darrRun(ss, base, f) {
         if (q >= end) {
             return done(ss, base, q);
         }
-        return call(ss, base, q, ss[f + F_D], 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
+        const sd = ss[f + F_D];
+        const ir2 = inlineChild(p, pool, b, s, ss, base, q, sd, 0, 0, 0, end, 0, -1);
+        if (ir2 >= 0) {
+            return darrRet(ss, f, ir2 + base);
+        }
+        if (ir2 !== NOINL) {
+            return ret(ss, base, ir2);
+        }
+        return call(ss, base, q, sd, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
     }
     if (el >= ss[f + F_N]) {
         return done(ss, base, q);
     }
-    return call(ss, base, q, ss[f + F_D] + 1, 0, 0, 0, end, 0, MODE_ITEM, pairNote(ss, ss[f + F_PAIR], el), -1);
-}
-
-export function darrRet(ss, f, r) {
-    ss[f + F_Q] = r;
-    ss[f + F_EL] = ss[f + F_EL] + 1;
-    return cont(ss, f, A_NEXT);
+    // dead-array's integer streak over what the window and the cut hold
+    const cutend = imin(end, ss[SS_CUT] - base);
+    if ((((s[VM_GENERIC] & 1) === 0) && (ss[f + F_PAIR] < 0)) && ((q >= 0) && (q < cutend))) {
+        const qd = deadIntStreak(b, s, q, ss[f + F_N] - el, cutend);
+        const kd = s[VM_FASTM];
+        if (kd > 0) {
+            ss[f + F_Q] = qd + base;
+            ss[f + F_EL] = el + kd;
+            progress(ss, kd);
+            return cont(ss, f, A_NEXT);
+        }
+    }
+    const dnote = pairNote(ss, ss[f + F_PAIR], el);
+    const dd = ss[f + F_D] + 1;
+    const ir1 = inlineChild(p, pool, b, s, ss, base, q, dd, 0, 0, 0, end, 0, dnote);
+    if (ir1 >= 0) {
+        return darrRet(ss, f, ir1 + base);
+    }
+    if (ir1 !== NOINL) {
+        return ret(ss, base, ir1);
+    }
+    return call(ss, base, q, dd, 0, 0, 0, end, 0, MODE_ITEM, dnote, -1);
 }
 
 export function mapStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, ctx) {
@@ -552,6 +670,94 @@ export function keyFix(s, r, delta) {
     return r;
 }
 
+export function mapRet(p, s, ss, base, f, r) {
+    // The value ended at r (absolute): after a live value, each candidate's
+    // value test and each block's update, then the witness; next pair.
+    if (ss[f + F_PH] === M_LVAL) {
+        const pos = ss[f + F_POS] - base;
+        const d = ss[f + F_D];
+        const fb = ss[f + F_FB];
+        const ck = ss[f + F_CK];
+        const nb = ss[f + F_NB];
+        const cl = ss[f + F_CL];
+        const kid = ss[f + F_KID];
+        const nc = ss[f + F_NC];
+        const vnq = ss[f + F_VNQ];
+        const start = ss[f + F_START] - base;
+        const cr = csetRec(p, s, ck);
+        const w = csetWidth(p, cr);
+        const area = fb + (2 * w);
+        const cfb = fb + csetFrame(p, cr);
+        const cw = csetWidth(p, csetRec(p, s, nextCk(p, s, ck)));
+        let nalive = ss[f + F_NALIVE];
+        let still = 0;
+        let bo = area;
+        if (ss[f + F_PS2] === 1) {
+            freeOn(s);
+        }
+        const ev = qStamp(s, cfb, cw, vnq, pos);
+        if (ev < 0) {
+            return err(ss, ev);
+        }
+        for (let _bl = 0; _bl < nb; _bl++) {
+            const mtl = blockMt(p, s, fb, bo);
+            if (s[bo + 1] !== 0) {
+                let c3 = s[bo + 3];
+                while ((c3 < nc) && (s[cl + (4 * c3)] === bo)) {
+                    if (!charge(s, 1, pos)) {
+                        return err(ss, -R_BUDGET);
+                    }
+                    const vts3 = candVtsMt(p, s, mtl, cl, c3);
+                    const t = tsTest(p, s, vts3, ev, pos);
+                    if (t < 0) {
+                        return err(ss, t);
+                    }
+                    if (t === 1) {
+                        const kw = (cl + (4 * c3)) + 1;
+                        const kv = s[kw];
+                        s[kw] = kv | 2;
+                    }
+                    c3 += 1;
+                }
+                let u;
+                if (simpleStruct(p, mtl)) {
+                    u = updateStruct(p, s, bo, mtl, kid, cl, nc, pos);
+                } else {
+                    u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
+                }
+                if (u < 0) {
+                    return err(ss, u);
+                }
+                if (u === 1) {
+                    still += 1;
+                } else {
+                    nalive -= 1;
+                    if (blockNamed(s, bo, cl, nc)) {
+                        qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
+                    } else {
+                        qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
+                    }
+                }
+            }
+            bo += p[mtl + 6];
+        }
+        freeOff(s);
+        if ((still > 0) || (ss[f + F_PEND] > 0)) {
+            witClear(s);
+        } else if (witEmpty(s)) {
+            if (ss[f + F_NAMED] === 1) {
+                witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
+            } else {
+                witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+            }
+        }
+        ss[f + F_NALIVE] = nalive;
+    }
+    ss[f + F_Q] = r;
+    ss[f + F_EL] = ss[f + F_EL] + 1;
+    return cont(ss, f, M_NEXT);
+}
+
 export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
     // A pair whose key is whole -- in the window (inka 0) or copied into the
     // arena (inka 1) -- after the key's first checks: dead (a dead map, or no
@@ -602,6 +808,13 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
             setPrev(ss, f, start + base, kq0 + base);
         }
         ss[f + F_PH] = M_DVAL;
+        const ir3 = inlineChild(p, pool, b, s, ss, base, kq0, d + 1, 0, 0, 0, end, 0, -1);
+        if (ir3 >= 0) {
+            return mapRet(p, s, ss, base, f, ir3 + base);
+        }
+        if (ir3 !== NOINL) {
+            return ret(ss, base, ir3);
+        }
         return call(ss, base, kq0, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
     }
     const fb = ss[f + F_FB];
@@ -765,8 +978,21 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
     ss[f + F_VNQ] = vnq;
     ss[f + F_PS2] = ps2;
     ss[f + F_PH] = M_LVAL;
+    const vctx = simpleOf(p, s, ps2, cfb, vnq);
+    let ir4;
     if (vnq > 0) {
-        return call(ss, base, kq, d + 1, cfb, cck, vnq, end, simpleOf(p, s, ps2, cfb, vnq), MODE_ITEM, -1, -1);
+        ir4 = inlineChild(p, pool, b, s, ss, base, kq, d + 1, cfb, cck, vnq, end, vctx, -1);
+    } else {
+        ir4 = inlineChild(p, pool, b, s, ss, base, kq, d + 1, 0, 0, 0, end, 0, -1);
+    }
+    if (ir4 >= 0) {
+        return mapRet(p, s, ss, base, f, ir4 + base);
+    }
+    if (ir4 !== NOINL) {
+        return ret(ss, base, ir4);
+    }
+    if (vnq > 0) {
+        return call(ss, base, kq, d + 1, cfb, cck, vnq, end, vctx, MODE_ITEM, -1, -1);
     }
     return call(ss, base, kq, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
 }
@@ -805,7 +1031,7 @@ export function mapNext(p, pool, b, s, ss, ka, base, wend, f) {
     if ((start + hh) > wend) {
         return need(ss, base, start, hh);
     }
-    if (mustYield(s, ss)) {
+    if (cutYield(s, ss, start + base)) {
         return yld(ss, base, start);
     }
     const ke = keySpanEnd(b, start, end);
@@ -849,94 +1075,6 @@ export function mapKey(p, pool, b, s, ss, ka, base, wend, f) {
         return need(ss, base, x + n, 1);
     }
     return mapPair(p, pool, b, s, ss, ka, base, f, 1);
-}
-
-export function mapRet(p, s, ss, base, f, r) {
-    // The value ended at r (absolute): after a live value, each candidate's
-    // value test and each block's update, then the witness; next pair.
-    if (ss[f + F_PH] === M_LVAL) {
-        const pos = ss[f + F_POS] - base;
-        const d = ss[f + F_D];
-        const fb = ss[f + F_FB];
-        const ck = ss[f + F_CK];
-        const nb = ss[f + F_NB];
-        const cl = ss[f + F_CL];
-        const kid = ss[f + F_KID];
-        const nc = ss[f + F_NC];
-        const vnq = ss[f + F_VNQ];
-        const start = ss[f + F_START] - base;
-        const cr = csetRec(p, s, ck);
-        const w = csetWidth(p, cr);
-        const area = fb + (2 * w);
-        const cfb = fb + csetFrame(p, cr);
-        const cw = csetWidth(p, csetRec(p, s, nextCk(p, s, ck)));
-        let nalive = ss[f + F_NALIVE];
-        let still = 0;
-        let bo = area;
-        if (ss[f + F_PS2] === 1) {
-            freeOn(s);
-        }
-        const ev = qStamp(s, cfb, cw, vnq, pos);
-        if (ev < 0) {
-            return err(ss, ev);
-        }
-        for (let _bl = 0; _bl < nb; _bl++) {
-            const mtl = blockMt(p, s, fb, bo);
-            if (s[bo + 1] !== 0) {
-                let c3 = s[bo + 3];
-                while ((c3 < nc) && (s[cl + (4 * c3)] === bo)) {
-                    if (!charge(s, 1, pos)) {
-                        return err(ss, -R_BUDGET);
-                    }
-                    const vts3 = candVtsMt(p, s, mtl, cl, c3);
-                    const t = tsTest(p, s, vts3, ev, pos);
-                    if (t < 0) {
-                        return err(ss, t);
-                    }
-                    if (t === 1) {
-                        const kw = (cl + (4 * c3)) + 1;
-                        const kv = s[kw];
-                        s[kw] = kv | 2;
-                    }
-                    c3 += 1;
-                }
-                let u;
-                if (simpleStruct(p, mtl)) {
-                    u = updateStruct(p, s, bo, mtl, kid, cl, nc, pos);
-                } else {
-                    u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
-                }
-                if (u < 0) {
-                    return err(ss, u);
-                }
-                if (u === 1) {
-                    still += 1;
-                } else {
-                    nalive -= 1;
-                    if (blockNamed(s, bo, cl, nc)) {
-                        qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
-                    } else {
-                        qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
-                    }
-                }
-            }
-            bo += p[mtl + 6];
-        }
-        freeOff(s);
-        if ((still > 0) || (ss[f + F_PEND] > 0)) {
-            witClear(s);
-        } else if (witEmpty(s)) {
-            if (ss[f + F_NAMED] === 1) {
-                witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
-            } else {
-                witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
-            }
-        }
-        ss[f + F_NALIVE] = nalive;
-    }
-    ss[f + F_Q] = r;
-    ss[f + F_EL] = ss[f + F_EL] + 1;
-    return cont(ss, f, M_NEXT);
 }
 
 export function ifLive(nq) {

@@ -46,6 +46,8 @@ pub const IT_MODE: i32 = 31;
 pub const IT_NOTE: i32 = 32;
 pub const IT_PAIR: i32 = 33;
 pub const SS_ABYTES: i32 = 34;
+pub const SS_CSTART: i32 = 35;
+pub const SS_CPT: i32 = 36;
 pub const SS_HDR: i32 = 40;
 pub const PH_START: i32 = 0;
 pub const PH_ITEM: i32 = 1;
@@ -330,6 +332,21 @@ pub fn ensure(ss: &mut [i32], base: i32, wend: i32, from: i32, to: i32) -> i32 {
 pub fn work(s: &[i32], ss: &[i32]) -> i32 {
     return (ss[(SS_WB0) as usize] - s[(VM_BUDGET) as usize]) + ss[(SS_WORK) as usize];
 }
+pub fn cut_yield(s: &[i32], ss: &[i32], at: i32) -> bool {
+    // must-yield, or the quantum's byte cut passed at `at` (absolute) after
+    // progress: a step never runs past its cut (D093).
+    let q: i32 = ss[(SS_QUANTUM) as usize];
+    if q <= 0 {
+        return false;
+    }
+    if ss[(SS_PROG) as usize] == 0 {
+        return false;
+    }
+    if at >= ss[(SS_CUT) as usize] {
+        return true;
+    }
+    return work(s, ss) >= q;
+}
 pub fn must_yield(s: &[i32], ss: &[i32]) -> bool {
     // Yield once this step has made progress and done its quantum of work
     // (budget units charged plus one per item begun and per 64 content bytes
@@ -474,6 +491,10 @@ pub(crate) fn chain_put(ss: &mut [i32], lvl: i32, extra: i32) -> i32 {
     ss[(SS_CHN) as usize] = n;
     return 0;
 }
+pub fn chain_span(ss: &mut [i32], from: i32, cp: i32, base: i32) {
+    ss[(SS_CSTART) as usize] = from + base;
+    ss[(SS_CPT) as usize] = cp + base;
+}
 pub fn chain_has(ss: &[i32], at: i32) -> bool {
     // Is the item at absolute offset `at` known to cross the step's cut?
     let n: i32 = ss[(SS_CHN) as usize];
@@ -510,6 +531,7 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
         }
         if i >= cut {
             chain_put(ss, lvl, -1);
+            chain_span(ss, pos, i, base);
             return 0;
         }
         let ib: i32 = b[(i) as usize] as i32;
@@ -527,6 +549,7 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
         }
         if p > cut {
             chain_put(ss, lvl, i + base);
+            chain_span(ss, pos, i, base);
             return 0;
         }
         if ai == 24 {
@@ -551,6 +574,7 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
             }
             if (p + lo) > cut {
                 chain_put(ss, lvl, i + base);
+                chain_span(ss, pos, i, base);
                 return 0;
             }
             i = p + lo;
@@ -589,6 +613,145 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
             i = p;
         }
     }
+}
+pub fn cpt_at(ss: &mut [i32], at: i32, base: i32) -> i32 {
+    ss[(SS_CPT) as usize] = at + base;
+    return 0;
+}
+pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32, rem0: i32) -> i32 {
+    // The prescan over the item at pos and its rem0 - 1 following siblings
+    // (rem0 < 0: siblings up to end), once per step: it records the crossing
+    // chain, the start (SS_CSTART) and the crossing point (SS_CPT, absolute:
+    // the first item start at or past the cut, the item that crosses it, the
+    // end of the last sibling, or one past an item the walk refuses at its
+    // head or length -- items that start inside it are then never reached). Any item a walk begins in [SS_CSTART, SS_CPT) that is not
+    // in the chain then lies before the cut (fits-known). Answers 0, or -1 when
+    // the levels overflow (the chain is then invalid).
+    let pst: i32 = ss[(SS_PSTK) as usize];
+    let cap: i32 = ss[(SS_PCAP) as usize];
+    let mut i: i32 = pos;
+    let mut rem: i32 = rem0;
+    let mut lvl: i32 = 0;
+    ss[(SS_CSTART) as usize] = pos + base;
+    ss[(SS_CPT) as usize] = INF;
+    ss[(SS_CHN) as usize] = 0;
+    loop {
+        while rem == 0 {
+            if lvl == 0 {
+                ss[(SS_CPT) as usize] = i + base;
+                return 0;
+            }
+            lvl -= 1;
+            rem = ss[((pst + (2 * lvl)) + 1) as usize];
+        }
+        if i >= end {
+            ss[(SS_CPT) as usize] = i + base;
+            return 0;
+        }
+        if i >= cut {
+            chain_put(ss, lvl, -1);
+            ss[(SS_CPT) as usize] = i + base;
+            return 0;
+        }
+        let ib: i32 = b[(i) as usize] as i32;
+        let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+        let ai: i32 = ib & 31;
+        let mut hi: i32 = 0;
+        let mut lo: i32 = ai;
+        if ai >= 28 {
+            return cpt_at(ss, i + 1, base);
+        }
+        let h: i32 = head_size(ai);
+        let p: i32 = i + h;
+        if p > end {
+            return cpt_at(ss, i + 1, base);
+        }
+        if p > cut {
+            chain_put(ss, lvl, i + base);
+            ss[(SS_CPT) as usize] = i + base;
+            return 0;
+        }
+        if ai == 24 {
+            lo = b[(i + 1) as usize] as i32;
+        }
+        if ai == 25 {
+            lo = be16(b, i + 1);
+        }
+        if ai == 26 {
+            lo = be32(b, i + 1);
+        }
+        if ai == 27 {
+            hi = be32(b, i + 1);
+            lo = be32(b, i + 5);
+        }
+        if (major <= 1) || (major == 7) {
+            i = p;
+            rem -= 1;
+        } else if major <= 3 {
+            if (hi != 0) || ((lo < 0) || (lo > (end - p))) {
+                return cpt_at(ss, i + 1, base);
+            }
+            if (p + lo) > cut {
+                chain_put(ss, lvl, i + base);
+                ss[(SS_CPT) as usize] = i + base;
+                return 0;
+            }
+            i = p + lo;
+            rem -= 1;
+        } else {
+            let mut n: i32;
+            if (hi != 0) || (lo < 0) {
+                return cpt_at(ss, i + 1, base);
+            }
+            n = lo;
+            if major == 4 {
+                if lo > (end - p) {
+                    return cpt_at(ss, i + 1, base);
+                }
+            }
+            if major == 5 {
+                if lo > (i32::cast_unsigned(end - p) >> 1).cast_signed() {
+                    return cpt_at(ss, i + 1, base);
+                }
+                n = 2 * lo;
+            }
+            if major == 6 {
+                if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
+                    return cpt_at(ss, i + 1, base);
+                }
+                n = 1;
+            }
+            if lvl >= cap {
+                ss[(SS_CHN) as usize] = -1;
+                return -1;
+            }
+            ss[(pst + (2 * lvl)) as usize] = i + base;
+            ss[((pst + (2 * lvl)) + 1) as usize] = rem - 1;
+            lvl += 1;
+            rem = n;
+            i = p;
+        }
+    }
+}
+pub fn fits_known(ss: &[i32], at: i32) -> bool {
+    // Is the item at absolute `at` known to lie before the step's cut?
+    if ss[(SS_CHN) as usize] < 0 {
+        return false;
+    }
+    if (at < ss[(SS_CSTART) as usize]) || (at >= ss[(SS_CPT) as usize]) {
+        return false;
+    }
+    return !chain_has(ss, at);
+}
+pub fn cross_known(ss: &[i32], at: i32) -> bool {
+    // Is the item at absolute `at` known to cross the step's cut?
+    if ss[(SS_CHN) as usize] < 0 {
+        return false;
+    }
+    if (at < ss[(SS_CSTART) as usize]) || (at > ss[(SS_CPT) as usize]) {
+        return false;
+    }
+    return chain_has(ss, at);
 }
 pub fn str_stop(b: &[u8], pos: i32, end: i32) -> i32 {
     // The end of the text or byte string at pos (its head in the window), or

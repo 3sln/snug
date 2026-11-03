@@ -203,7 +203,8 @@ function pushSession(session, length, keepOf) {
   let want = null, finished = false;
   const holds = () => {
     const at = want.state === 'need' ? want.offset : want.position;
-    const need = want.state === 'need' ? want.length : 1;
+    // a yield at the message's end (an item expected there: truncated) needs no byte
+    const need = want.state === 'need' ? want.length : (at < length ? 1 : 0);
     return at >= bufBase && at + need <= bufBase + bufLen;
   };
   const run = () => {

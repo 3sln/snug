@@ -9,7 +9,7 @@ import { csetRec, csetWidth, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } 
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
 import { HEADER_WORDS, H_POOL_BYTES, H_S_RULES, R_BUDGET, R_INCONSISTENT, R_TYPE, VM_BUDGET, VM_FRAMES, VM_POS, VM_RULE } from './layout.mjs';
-import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_KIND, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_HDR, SS_KEEP, SS_MAXF, SS_NEED_LEN, SS_NEED_OFF, SS_PCAP, SS_PH, SS_POS, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SP, SS_STEPS, SS_TOTAL, SS_WB0, SS_WORK, bigReq, bstrReads, chainHas, ensure, fbase, fpop, ftop, imin, keysSave, litsNeed, mustYield, need, nframes, notePut, noteReq, prescan, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
+import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_EL, F_KIND, F_N, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_HDR, SS_KEEP, SS_MAXF, SS_NEED_LEN, SS_NEED_OFF, SS_PCAP, SS_PH, SS_POS, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SP, SS_STEPS, SS_TOTAL, SS_WB0, SS_WORK, bigReq, bstrReads, crossKnown, cutYield, ensure, fbase, fitsKnown, fpop, ftop, imin, keysSave, litsNeed, need, nframes, notePut, noteReq, prescan, prescanRun, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
 import { M_KEY, arrRet, arrRun, arrStart, darrRet, darrRun, mapKey, mapNext, mapRet, openArr, openDarr, openDmap, openDseq, openMap, openTag, tagRet, tagRun } from './scont.mjs';
 import { S_EMBRUN, bstrRun, embedRet, openBstr, openText, textRun } from './sstr.mjs';
 
@@ -214,6 +214,31 @@ export function rootEnd(p, s, ss, out, base) {
     return FIN;
 }
 
+export function sibRem(ss) {
+    // The items the top frame still owes from the pending one on (it
+    // included), for the sibling prescan; -1: up to the end.
+    if (ss[SS_SP] === 0) {
+        return 1;
+    }
+    const f = ftop(ss);
+    const kind = ss[f + F_KIND];
+    const n = ss[f + F_N];
+    const el = ss[f + F_EL];
+    if ((kind === FK_ARR) || (kind === FK_DARR)) {
+        if (n < 0) {
+            return -1;
+        }
+        return n - el;
+    }
+    if (kind === FK_DSEQ) {
+        return -1;
+    }
+    if ((kind === FK_MAP) || (kind === FK_DMAP)) {
+        return (2 * (n - el)) - 1;
+    }
+    return 1;
+}
+
 export function tagNumber(b, pos) {
     // The number of the tag whose (valid-sized) head is at pos, -1 past 31 bits.
     const ai = b[pos] & 31;
@@ -250,7 +275,7 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend) {
     if (mode === MODE_DSEQ) {
         return openDseq(b, ss, ka, base, pos, d, end);
     }
-    if (mustYield(s, ss)) {
+    if (cutYield(s, ss, pos + base)) {
         return yld(ss, base, pos);
     }
     if (pos >= end) {
@@ -359,12 +384,27 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend) {
         }
     }
     if (direct === 0) {
-        if ((ss[SS_CHN] >= 0) && chainHas(ss, pos + base)) {
+        const at = pos + base;
+        if (crossKnown(ss, at)) {
             direct = -1;
-        } else if (prescan(b, ss, base, pos, end, cut) === 1) {
+        }
+        if ((direct === 0) && fitsKnown(ss, at)) {
             direct = 1;
-        } else {
-            direct = -1;
+        }
+        if (direct === 0) {
+            const pr = prescanRun(b, ss, base, pos, end, cut, sibRem(ss));
+            if (pr < 0) {
+                if (prescan(b, ss, base, pos, end, cut) === 1) {
+                    direct = 1;
+                } else {
+                    direct = -1;
+                }
+                ss[SS_CHN] = -1;
+            } else if (fitsKnown(ss, at)) {
+                direct = 1;
+            } else {
+                direct = -1;
+            }
         }
     }
     progress(ss, 1);
@@ -439,7 +479,7 @@ export function frameRun(p, pool, b, s, ss, ka, base, wend) {
         return arrRun(p, pool, b, s, ss, base, f);
     }
     if ((kind === FK_DARR) || (kind === FK_DSEQ)) {
-        return darrRun(ss, base, f);
+        return darrRun(p, pool, b, s, ss, base, f);
     }
     if ((kind === FK_MAP) || (kind === FK_DMAP)) {
         if (ss[f + F_PH] === M_KEY) {

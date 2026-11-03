@@ -15,6 +15,7 @@ use crate::snug::vm::map::*;
 use crate::snug::vm::sbase::*;
 use crate::snug::vm::sstr::*;
 
+pub const F_SLEAF: i32 = 24;
 pub const A_NEXT: i32 = 0;
 pub const A_DEAD: i32 = 1;
 pub const A_LIVE: i32 = 2;
@@ -35,6 +36,27 @@ pub fn mark_pair(ss: &mut [i32], pair: i32) {
         let tf: i32 = fbase(ss, pair);
         ss[(tf + F_TNOTED) as usize] = 1;
     }
+}
+pub const NOINL: i32 = -1000;
+pub fn inline_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, note: i32) -> i32 {
+    // A child the step's prescan knows to lie before the cut, evaluated by the
+    // buffer walk at once (no round trip through the session loop): its end
+    // or code, or NOINL (take the item path: a note, a yield, or unknown).
+    if note >= 0 {
+        return NOINL;
+    }
+    let at: i32 = pos + base;
+    if cut_yield(s, ss, at) {
+        return NOINL;
+    }
+    if !fits_known(ss, at) {
+        return NOINL;
+    }
+    progress(ss, 1);
+    if nq > 0 {
+        return eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx);
+    }
+    return dead_item(b, s, pos, d, end);
 }
 pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, pair: i32) -> i32 {
     // eval-array's start (generic path): filter, blocks, the schedule-2 shape
@@ -79,7 +101,19 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
             cx = CTX_SIMPLE;
         }
     }
+    // eval-array's streak leaf: an INT over one interval or a TEXT without a
+    // regexp, fast paths on (D044)
+    let mut sleaf: i32 = -1;
+    if (sl >= 0) && ((s[(VM_GENERIC) as usize] & 1) == 0) {
+        let lbf: i32 = p[(H_S_LEAVES) as usize] + (8 * sl);
+        let kf: i32 = p[(lbf) as usize] & 255;
+        if ((kf == K_INT) && (p[(lbf + 3) as usize] == 1)) || ((kf == K_TEXT) && (p[(lbf + 4) as usize] < 0)) {
+            sleaf = sl;
+        }
+    }
+    ss[(IT_PAIR) as usize] = sleaf;
     let pend: i32 = count_pending(p, s, fb, w, nq);
+    let sleaf2: i32 = ss[(IT_PAIR) as usize];
     let f: i32 = fpush(b, ss, ka, base, FK_ARR);
     if f < 0 {
         return err(ss, -R_INCONSISTENT);
@@ -95,6 +129,7 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     ss[(f + F_PEND) as usize] = pend;
     ss[(f + F_NALIVE) as usize] = nb;
     ss[(f + F_PAIR) as usize] = pair;
+    ss[(f + F_SLEAF) as usize] = sleaf2;
     mark_pair(ss, pair);
     return cont(ss, f, A_NEXT);
 }
@@ -168,66 +203,6 @@ pub fn arr_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     }
     return done(ss, base, q);
 }
-pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32) -> i32 {
-    // The next element: its query from the live blocks (charged), then the
-    // element as a child item; or the end.
-    let pos: i32 = ss[(f + F_POS) as usize] - base;
-    let end: i32 = ss[(f + F_END) as usize] - base;
-    let d: i32 = ss[(f + F_D) as usize];
-    let fb: i32 = ss[(f + F_FB) as usize];
-    let ck: i32 = ss[(f + F_CK) as usize];
-    let q: i32 = ss[(f + F_Q) as usize] - base;
-    let n: i32 = ss[(f + F_N) as usize];
-    let el: i32 = ss[(f + F_EL) as usize];
-    let nb: i32 = ss[(f + F_NB) as usize];
-    let s2: i32 = ss[(f + F_S2) as usize];
-    let cx: i32 = ss[(f + F_CX) as usize];
-    let note: i32 = pair_note(ss, ss[(f + F_PAIR) as usize], el);
-    if !(((n < 0) && (q < end)) || ((n >= 0) && (el < n))) {
-        return arr_end(p, pool, b, s, ss, base, f);
-    }
-    if ss[(f + F_NALIVE) as usize] == 0 {
-        ss[(f + F_PH) as usize] = A_DEAD;
-        return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
-    }
-    let cr: i32 = cset_rec(p, s, ck);
-    let w: i32 = cset_width(p, cr);
-    let area: i32 = fb + (2 * w);
-    let cfb: i32 = fb + cset_frame(p, cr);
-    let cck: i32 = next_ck(p, s, ck);
-    let cw: i32 = cset_width(p, cset_rec(p, s, cck));
-    let e: i32 = new_epoch(s);
-    let ao1: i32 = block_ao(p, s, fb, area);
-    let mut cnq: i32 = 0;
-    let mut bo: i32 = area;
-    if s2 == 1 {
-        free_on(s);
-    }
-    for bi in 0..nb {
-        if !charge(s, 1, pos) {
-            return err(ss, -R_BUDGET);
-        }
-        let mut ao: i32 = ao1;
-        if bi > 0 {
-            ao = block_ao(p, s, fb, bo);
-        }
-        if s[(bo + 1) as usize] != 0 {
-            cnq = array_candidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
-            if cnq < 0 {
-                return err(ss, cnq);
-            }
-        }
-        bo += array_words(p, ao);
-    }
-    free_off(s);
-    path_put(s, d + 1, P_INDEX, el);
-    ss[(f + F_CNQ) as usize] = cnq;
-    ss[(f + F_PH) as usize] = A_LIVE;
-    if cnq > 0 {
-        return call(ss, base, q, d + 1, cfb, cck, cnq, end, cx, MODE_ITEM, note, -1);
-    }
-    return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
-}
 pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32) -> i32 {
     // The element ended at r (absolute): after a live element, stamp and
     // advance the live blocks, then the witness; next.
@@ -293,6 +268,117 @@ pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
     ss[(f + F_EL) as usize] = el + 1;
     return cont(ss, f, A_NEXT);
 }
+pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32) -> i32 {
+    // The next element: its query from the live blocks (charged), then the
+    // element as a child item; or the end.
+    let pos: i32 = ss[(f + F_POS) as usize] - base;
+    let end: i32 = ss[(f + F_END) as usize] - base;
+    let d: i32 = ss[(f + F_D) as usize];
+    let fb: i32 = ss[(f + F_FB) as usize];
+    let ck: i32 = ss[(f + F_CK) as usize];
+    let q: i32 = ss[(f + F_Q) as usize] - base;
+    let n: i32 = ss[(f + F_N) as usize];
+    let el: i32 = ss[(f + F_EL) as usize];
+    let nb: i32 = ss[(f + F_NB) as usize];
+    let s2: i32 = ss[(f + F_S2) as usize];
+    let cx: i32 = ss[(f + F_CX) as usize];
+    let note: i32 = pair_note(ss, ss[(f + F_PAIR) as usize], el);
+    if !(((n < 0) && (q < end)) || ((n >= 0) && (el < n))) {
+        return arr_end(p, pool, b, s, ss, base, f);
+    }
+    // eval-array's streaks over the elements the window (and the quantum's
+    // cut) holds: each checks an element whole before charging it and stops
+    // before one that would not do, so a cut short `end` only ends them sooner
+    let cutend: i32 = imin(end, ss[(SS_CUT) as usize] - base);
+    let generic: i32 = s[(VM_GENERIC) as usize] & 1;
+    if (((el >= 1) && (generic == 0)) && (ss[(f + F_PAIR) as usize] < 0)) && ((q >= 0) && (q < cutend)) {
+        if ss[(f + F_NALIVE) as usize] == 0 {
+            let qd: i32 = dead_int_streak(b, s, q, if_limit(n, el), cutend);
+            let kd: i32 = s[(VM_FASTM) as usize];
+            if kd > 0 {
+                ss[(f + F_Q) as usize] = qd + base;
+                ss[(f + F_EL) as usize] = el + kd;
+                progress(ss, kd);
+                return cont(ss, f, A_NEXT);
+            }
+        } else {
+            let sleaf: i32 = ss[(f + F_SLEAF) as usize];
+            let area0: i32 = fb + (2 * cset_width(p, cset_rec(p, s, ck)));
+            if (sleaf >= 0) && (s[(area0 + 2) as usize] == 1) {
+                let qs: i32 = array_streak(p, b, s, q, if_limit(n, el), cutend, sleaf, s2);
+                let ks: i32 = s[(VM_FASTM) as usize];
+                if ks > 0 {
+                    ss[(f + F_Q) as usize] = qs + base;
+                    ss[(f + F_EL) as usize] = el + ks;
+                    progress(ss, ks);
+                    return cont(ss, f, A_NEXT);
+                }
+            }
+        }
+    }
+    if ss[(f + F_NALIVE) as usize] == 0 {
+        ss[(f + F_PH) as usize] = A_DEAD;
+        let ir0: i32 = inline_child(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note);
+        if ir0 >= 0 {
+            return arr_ret(p, s, ss, base, f, ir0 + base);
+        }
+        if ir0 != NOINL {
+            return ret(ss, base, ir0);
+        }
+        return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
+    }
+    let cr: i32 = cset_rec(p, s, ck);
+    let w: i32 = cset_width(p, cr);
+    let area: i32 = fb + (2 * w);
+    let cfb: i32 = fb + cset_frame(p, cr);
+    let cck: i32 = next_ck(p, s, ck);
+    let cw: i32 = cset_width(p, cset_rec(p, s, cck));
+    let e: i32 = new_epoch(s);
+    let ao1: i32 = block_ao(p, s, fb, area);
+    let mut cnq: i32 = 0;
+    let mut bo: i32 = area;
+    if s2 == 1 {
+        free_on(s);
+    }
+    for bi in 0..nb {
+        if !charge(s, 1, pos) {
+            return err(ss, -R_BUDGET);
+        }
+        let mut ao: i32 = ao1;
+        if bi > 0 {
+            ao = block_ao(p, s, fb, bo);
+        }
+        if s[(bo + 1) as usize] != 0 {
+            cnq = array_candidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
+            if cnq < 0 {
+                return err(ss, cnq);
+            }
+        }
+        bo += array_words(p, ao);
+    }
+    free_off(s);
+    path_put(s, d + 1, P_INDEX, el);
+    ss[(f + F_CNQ) as usize] = cnq;
+    ss[(f + F_PH) as usize] = A_LIVE;
+    let ir: i32;
+    if cnq > 0 {
+        ir = inline_child(p, pool, b, s, ss, base, q, d + 1, cfb, cck, cnq, end, cx, note);
+    } else {
+        ir = inline_child(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note);
+    }
+    if ir < 0 {
+        if ir != NOINL {
+            return ret(ss, base, ir);
+        }
+    }
+    if ir >= 0 {
+        return arr_ret(p, s, ss, base, f, ir + base);
+    }
+    if cnq > 0 {
+        return call(ss, base, q, d + 1, cfb, cck, cnq, end, cx, MODE_ITEM, note, -1);
+    }
+    return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
+}
 pub fn open_darr(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, d: i32, end: i32, pair: i32) -> i32 {
     let q: i32 = prologue(p, b, s, pos, end, 0, 0);
     if q < 0 {
@@ -325,7 +411,12 @@ pub fn open_dseq(b: &[u8], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, d
     ss[(f + F_Q) as usize] = pos + base;
     return cont(ss, f, A_NEXT);
 }
-pub fn darr_run(ss: &mut [i32], base: i32, f: i32) -> i32 {
+pub fn darr_ret(ss: &mut [i32], f: i32, r: i32) -> i32 {
+    ss[(f + F_Q) as usize] = r;
+    ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
+    return cont(ss, f, A_NEXT);
+}
+pub fn darr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32) -> i32 {
     // The next dead element (or sequence item), or the end.
     let el: i32 = ss[(f + F_EL) as usize];
     let q: i32 = ss[(f + F_Q) as usize] - base;
@@ -335,17 +426,41 @@ pub fn darr_run(ss: &mut [i32], base: i32, f: i32) -> i32 {
         if q >= end {
             return done(ss, base, q);
         }
-        return call(ss, base, q, ss[(f + F_D) as usize], 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
+        let sd: i32 = ss[(f + F_D) as usize];
+        let ir2: i32 = inline_child(p, pool, b, s, ss, base, q, sd, 0, 0, 0, end, 0, -1);
+        if ir2 >= 0 {
+            return darr_ret(ss, f, ir2 + base);
+        }
+        if ir2 != NOINL {
+            return ret(ss, base, ir2);
+        }
+        return call(ss, base, q, sd, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
     }
     if el >= ss[(f + F_N) as usize] {
         return done(ss, base, q);
     }
-    return call(ss, base, q, ss[(f + F_D) as usize] + 1, 0, 0, 0, end, 0, MODE_ITEM, pair_note(ss, ss[(f + F_PAIR) as usize], el), -1);
-}
-pub fn darr_ret(ss: &mut [i32], f: i32, r: i32) -> i32 {
-    ss[(f + F_Q) as usize] = r;
-    ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
-    return cont(ss, f, A_NEXT);
+    // dead-array's integer streak over what the window and the cut hold
+    let cutend: i32 = imin(end, ss[(SS_CUT) as usize] - base);
+    if (((s[(VM_GENERIC) as usize] & 1) == 0) && (ss[(f + F_PAIR) as usize] < 0)) && ((q >= 0) && (q < cutend)) {
+        let qd: i32 = dead_int_streak(b, s, q, ss[(f + F_N) as usize] - el, cutend);
+        let kd: i32 = s[(VM_FASTM) as usize];
+        if kd > 0 {
+            ss[(f + F_Q) as usize] = qd + base;
+            ss[(f + F_EL) as usize] = el + kd;
+            progress(ss, kd);
+            return cont(ss, f, A_NEXT);
+        }
+    }
+    let dnote: i32 = pair_note(ss, ss[(f + F_PAIR) as usize], el);
+    let dd: i32 = ss[(f + F_D) as usize] + 1;
+    let ir1: i32 = inline_child(p, pool, b, s, ss, base, q, dd, 0, 0, 0, end, 0, dnote);
+    if ir1 >= 0 {
+        return darr_ret(ss, f, ir1 + base);
+    }
+    if ir1 != NOINL {
+        return ret(ss, base, ir1);
+    }
+    return call(ss, base, q, dd, 0, 0, 0, end, 0, MODE_ITEM, dnote, -1);
 }
 pub fn map_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32) -> i32 {
     // eval-map's start (generic path): filter, blocks, then the frame.
@@ -523,6 +638,93 @@ pub fn key_fix(s: &mut [i32], r: i32, delta: i32) -> i32 {
     }
     return r;
 }
+pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32) -> i32 {
+    // The value ended at r (absolute): after a live value, each candidate's
+    // value test and each block's update, then the witness; next pair.
+    if ss[(f + F_PH) as usize] == M_LVAL {
+        let pos: i32 = ss[(f + F_POS) as usize] - base;
+        let d: i32 = ss[(f + F_D) as usize];
+        let fb: i32 = ss[(f + F_FB) as usize];
+        let ck: i32 = ss[(f + F_CK) as usize];
+        let nb: i32 = ss[(f + F_NB) as usize];
+        let cl: i32 = ss[(f + F_CL) as usize];
+        let kid: i32 = ss[(f + F_KID) as usize];
+        let nc: i32 = ss[(f + F_NC) as usize];
+        let vnq: i32 = ss[(f + F_VNQ) as usize];
+        let start: i32 = ss[(f + F_START) as usize] - base;
+        let cr: i32 = cset_rec(p, s, ck);
+        let w: i32 = cset_width(p, cr);
+        let area: i32 = fb + (2 * w);
+        let cfb: i32 = fb + cset_frame(p, cr);
+        let cw: i32 = cset_width(p, cset_rec(p, s, next_ck(p, s, ck)));
+        let mut nalive: i32 = ss[(f + F_NALIVE) as usize];
+        let mut still: i32 = 0;
+        let mut bo: i32 = area;
+        if ss[(f + F_PS2) as usize] == 1 {
+            free_on(s);
+        }
+        let ev: i32 = q_stamp(s, cfb, cw, vnq, pos);
+        if ev < 0 {
+            return err(ss, ev);
+        }
+        for _bl in 0..nb {
+            let mtl: i32 = block_mt(p, s, fb, bo);
+            if s[(bo + 1) as usize] != 0 {
+                let mut c3: i32 = s[(bo + 3) as usize];
+                while (c3 < nc) && (s[(cl + (4 * c3)) as usize] == bo) {
+                    if !charge(s, 1, pos) {
+                        return err(ss, -R_BUDGET);
+                    }
+                    let vts3: i32 = cand_vts_mt(p, s, mtl, cl, c3);
+                    let t: i32 = ts_test(p, s, vts3, ev, pos);
+                    if t < 0 {
+                        return err(ss, t);
+                    }
+                    if t == 1 {
+                        let kw: i32 = (cl + (4 * c3)) + 1;
+                        let kv: i32 = s[(kw) as usize];
+                        s[(kw) as usize] = kv | 2;
+                    }
+                    c3 += 1;
+                }
+                let u: i32;
+                if simple_struct(p, mtl) {
+                    u = update_struct(p, s, bo, mtl, kid, cl, nc, pos);
+                } else {
+                    u = map_update(p, s, bo, mtl, kid, cl, nc, pos);
+                }
+                if u < 0 {
+                    return err(ss, u);
+                }
+                if u == 1 {
+                    still += 1;
+                } else {
+                    nalive -= 1;
+                    if block_named(s, bo, cl, nc) {
+                        q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
+                    } else {
+                        q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
+                    }
+                }
+            }
+            bo += p[(mtl + 6) as usize];
+        }
+        free_off(s);
+        if (still > 0) || (ss[(f + F_PEND) as usize] > 0) {
+            wit_clear(s);
+        } else if wit_empty(s) {
+            if ss[(f + F_NAMED) as usize] == 1 {
+                wit_set(s, R_VALUE, 0, d + 1, -1, 0, start);
+            } else {
+                wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+            }
+        }
+        ss[(f + F_NALIVE) as usize] = nalive;
+    }
+    ss[(f + F_Q) as usize] = r;
+    ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
+    return cont(ss, f, M_NEXT);
+}
 pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, f: i32, inka: i32) -> i32 {
     // A pair whose key is whole -- in the window (inka 0) or copied into the
     // arena (inka 1) -- after the key's first checks: dead (a dead map, or no
@@ -573,6 +775,13 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
             set_prev(ss, f, start + base, kq0 + base);
         }
         ss[(f + F_PH) as usize] = M_DVAL;
+        let ir3: i32 = inline_child(p, pool, b, s, ss, base, kq0, d + 1, 0, 0, 0, end, 0, -1);
+        if ir3 >= 0 {
+            return map_ret(p, s, ss, base, f, ir3 + base);
+        }
+        if ir3 != NOINL {
+            return ret(ss, base, ir3);
+        }
         return call(ss, base, kq0, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
     }
     let fb: i32 = ss[(f + F_FB) as usize];
@@ -736,8 +945,21 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     ss[(f + F_VNQ) as usize] = vnq;
     ss[(f + F_PS2) as usize] = ps2;
     ss[(f + F_PH) as usize] = M_LVAL;
+    let vctx: i32 = simple_of(p, s, ps2, cfb, vnq);
+    let ir4: i32;
     if vnq > 0 {
-        return call(ss, base, kq, d + 1, cfb, cck, vnq, end, simple_of(p, s, ps2, cfb, vnq), MODE_ITEM, -1, -1);
+        ir4 = inline_child(p, pool, b, s, ss, base, kq, d + 1, cfb, cck, vnq, end, vctx, -1);
+    } else {
+        ir4 = inline_child(p, pool, b, s, ss, base, kq, d + 1, 0, 0, 0, end, 0, -1);
+    }
+    if ir4 >= 0 {
+        return map_ret(p, s, ss, base, f, ir4 + base);
+    }
+    if ir4 != NOINL {
+        return ret(ss, base, ir4);
+    }
+    if vnq > 0 {
+        return call(ss, base, kq, d + 1, cfb, cck, vnq, end, vctx, MODE_ITEM, -1, -1);
     }
     return call(ss, base, kq, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
 }
@@ -775,7 +997,7 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     if (start + hh) > wend {
         return need(ss, base, start, hh);
     }
-    if must_yield(s, ss) {
+    if cut_yield(s, ss, start + base) {
         return yld(ss, base, start);
     }
     let ke: i32 = key_span_end(b, start, end);
@@ -818,93 +1040,6 @@ pub fn map_key(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         return need(ss, base, x + n, 1);
     }
     return map_pair(p, pool, b, s, ss, ka, base, f, 1);
-}
-pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32) -> i32 {
-    // The value ended at r (absolute): after a live value, each candidate's
-    // value test and each block's update, then the witness; next pair.
-    if ss[(f + F_PH) as usize] == M_LVAL {
-        let pos: i32 = ss[(f + F_POS) as usize] - base;
-        let d: i32 = ss[(f + F_D) as usize];
-        let fb: i32 = ss[(f + F_FB) as usize];
-        let ck: i32 = ss[(f + F_CK) as usize];
-        let nb: i32 = ss[(f + F_NB) as usize];
-        let cl: i32 = ss[(f + F_CL) as usize];
-        let kid: i32 = ss[(f + F_KID) as usize];
-        let nc: i32 = ss[(f + F_NC) as usize];
-        let vnq: i32 = ss[(f + F_VNQ) as usize];
-        let start: i32 = ss[(f + F_START) as usize] - base;
-        let cr: i32 = cset_rec(p, s, ck);
-        let w: i32 = cset_width(p, cr);
-        let area: i32 = fb + (2 * w);
-        let cfb: i32 = fb + cset_frame(p, cr);
-        let cw: i32 = cset_width(p, cset_rec(p, s, next_ck(p, s, ck)));
-        let mut nalive: i32 = ss[(f + F_NALIVE) as usize];
-        let mut still: i32 = 0;
-        let mut bo: i32 = area;
-        if ss[(f + F_PS2) as usize] == 1 {
-            free_on(s);
-        }
-        let ev: i32 = q_stamp(s, cfb, cw, vnq, pos);
-        if ev < 0 {
-            return err(ss, ev);
-        }
-        for _bl in 0..nb {
-            let mtl: i32 = block_mt(p, s, fb, bo);
-            if s[(bo + 1) as usize] != 0 {
-                let mut c3: i32 = s[(bo + 3) as usize];
-                while (c3 < nc) && (s[(cl + (4 * c3)) as usize] == bo) {
-                    if !charge(s, 1, pos) {
-                        return err(ss, -R_BUDGET);
-                    }
-                    let vts3: i32 = cand_vts_mt(p, s, mtl, cl, c3);
-                    let t: i32 = ts_test(p, s, vts3, ev, pos);
-                    if t < 0 {
-                        return err(ss, t);
-                    }
-                    if t == 1 {
-                        let kw: i32 = (cl + (4 * c3)) + 1;
-                        let kv: i32 = s[(kw) as usize];
-                        s[(kw) as usize] = kv | 2;
-                    }
-                    c3 += 1;
-                }
-                let u: i32;
-                if simple_struct(p, mtl) {
-                    u = update_struct(p, s, bo, mtl, kid, cl, nc, pos);
-                } else {
-                    u = map_update(p, s, bo, mtl, kid, cl, nc, pos);
-                }
-                if u < 0 {
-                    return err(ss, u);
-                }
-                if u == 1 {
-                    still += 1;
-                } else {
-                    nalive -= 1;
-                    if block_named(s, bo, cl, nc) {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
-                    } else {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
-                    }
-                }
-            }
-            bo += p[(mtl + 6) as usize];
-        }
-        free_off(s);
-        if (still > 0) || (ss[(f + F_PEND) as usize] > 0) {
-            wit_clear(s);
-        } else if wit_empty(s) {
-            if ss[(f + F_NAMED) as usize] == 1 {
-                wit_set(s, R_VALUE, 0, d + 1, -1, 0, start);
-            } else {
-                wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
-            }
-        }
-        ss[(f + F_NALIVE) as usize] = nalive;
-    }
-    ss[(f + F_Q) as usize] = r;
-    ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
-    return cont(ss, f, M_NEXT);
 }
 pub fn if_live(nq: i32) -> i32 {
     if nq > 0 {

@@ -84,6 +84,10 @@ export const IT_PAIR = 33;
 
 export const SS_ABYTES = 34;
 
+export const SS_CSTART = 35;
+
+export const SS_CPT = 36;
+
 export const SS_HDR = 40;
 
 export const PH_START = 0;
@@ -487,6 +491,22 @@ export function work(s, ss) {
     return (ss[SS_WB0] - s[VM_BUDGET]) + ss[SS_WORK];
 }
 
+export function cutYield(s, ss, at) {
+    // must-yield, or the quantum's byte cut passed at `at` (absolute) after
+    // progress: a step never runs past its cut (D093).
+    const q = ss[SS_QUANTUM];
+    if (q <= 0) {
+        return false;
+    }
+    if (ss[SS_PROG] === 0) {
+        return false;
+    }
+    if (at >= ss[SS_CUT]) {
+        return true;
+    }
+    return work(s, ss) >= q;
+}
+
 export function mustYield(s, ss) {
     // Yield once this step has made progress and done its quantum of work
     // (budget units charged plus one per item begun and per 64 content bytes
@@ -642,6 +662,11 @@ export function chainPut(ss, lvl, extra) {
     return 0;
 }
 
+export function chainSpan(ss, from, cp, base) {
+    ss[SS_CSTART] = from + base;
+    ss[SS_CPT] = cp + base;
+}
+
 export function chainHas(ss, at) {
     // Is the item at absolute offset `at` known to cross the step's cut?
     const n = ss[SS_CHN];
@@ -679,6 +704,7 @@ export function prescan(b, ss, base, pos, end, cut) {
         }
         if (i >= cut) {
             chainPut(ss, lvl, -1);
+            chainSpan(ss, pos, i, base);
             return 0;
         }
         const ib = b[i];
@@ -696,6 +722,7 @@ export function prescan(b, ss, base, pos, end, cut) {
         }
         if (p > cut) {
             chainPut(ss, lvl, i + base);
+            chainSpan(ss, pos, i, base);
             return 0;
         }
         if (ai === 24) {
@@ -720,6 +747,7 @@ export function prescan(b, ss, base, pos, end, cut) {
             }
             if ((p + lo) > cut) {
                 chainPut(ss, lvl, i + base);
+                chainSpan(ss, pos, i, base);
                 return 0;
             }
             i = p + lo;
@@ -758,6 +786,149 @@ export function prescan(b, ss, base, pos, end, cut) {
             i = p;
         }
     }
+}
+
+export function cptAt(ss, at, base) {
+    ss[SS_CPT] = at + base;
+    return 0;
+}
+
+export function prescanRun(b, ss, base, pos, end, cut, rem0) {
+    // The prescan over the item at pos and its rem0 - 1 following siblings
+    // (rem0 < 0: siblings up to end), once per step: it records the crossing
+    // chain, the start (SS_CSTART) and the crossing point (SS_CPT, absolute:
+    // the first item start at or past the cut, the item that crosses it, the
+    // end of the last sibling, or one past an item the walk refuses at its
+    // head or length -- items that start inside it are then never reached). Any item a walk begins in [SS_CSTART, SS_CPT) that is not
+    // in the chain then lies before the cut (fits-known). Answers 0, or -1 when
+    // the levels overflow (the chain is then invalid).
+    const pst = ss[SS_PSTK];
+    const cap = ss[SS_PCAP];
+    let i = pos;
+    let rem = rem0;
+    let lvl = 0;
+    ss[SS_CSTART] = pos + base;
+    ss[SS_CPT] = INF;
+    ss[SS_CHN] = 0;
+    for (;;) {
+        while (rem === 0) {
+            if (lvl === 0) {
+                ss[SS_CPT] = i + base;
+                return 0;
+            }
+            lvl -= 1;
+            rem = ss[(pst + (2 * lvl)) + 1];
+        }
+        if (i >= end) {
+            ss[SS_CPT] = i + base;
+            return 0;
+        }
+        if (i >= cut) {
+            chainPut(ss, lvl, -1);
+            ss[SS_CPT] = i + base;
+            return 0;
+        }
+        const ib = b[i];
+        const major = (ib >>> 5) | 0;
+        const ai = ib & 31;
+        let hi = 0;
+        let lo = ai;
+        if (ai >= 28) {
+            return cptAt(ss, i + 1, base);
+        }
+        const h = headSize(ai);
+        const p = i + h;
+        if (p > end) {
+            return cptAt(ss, i + 1, base);
+        }
+        if (p > cut) {
+            chainPut(ss, lvl, i + base);
+            ss[SS_CPT] = i + base;
+            return 0;
+        }
+        if (ai === 24) {
+            lo = b[i + 1];
+        }
+        if (ai === 25) {
+            lo = be16(b, i + 1);
+        }
+        if (ai === 26) {
+            lo = be32(b, i + 1);
+        }
+        if (ai === 27) {
+            hi = be32(b, i + 1);
+            lo = be32(b, i + 5);
+        }
+        if ((major <= 1) || (major === 7)) {
+            i = p;
+            rem -= 1;
+        } else if (major <= 3) {
+            if ((hi !== 0) || ((lo < 0) || (lo > (end - p)))) {
+                return cptAt(ss, i + 1, base);
+            }
+            if ((p + lo) > cut) {
+                chainPut(ss, lvl, i + base);
+                ss[SS_CPT] = i + base;
+                return 0;
+            }
+            i = p + lo;
+            rem -= 1;
+        } else {
+            let n;
+            if ((hi !== 0) || (lo < 0)) {
+                return cptAt(ss, i + 1, base);
+            }
+            n = lo;
+            if (major === 4) {
+                if (lo > (end - p)) {
+                    return cptAt(ss, i + 1, base);
+                }
+            }
+            if (major === 5) {
+                if (lo > (((end - p) >>> 1) | 0)) {
+                    return cptAt(ss, i + 1, base);
+                }
+                n = 2 * lo;
+            }
+            if (major === 6) {
+                if ((lo !== 2) && ((lo !== 3) && ((lo !== 4) && ((lo !== 40) && (typedSize(lo) === 0))))) {
+                    return cptAt(ss, i + 1, base);
+                }
+                n = 1;
+            }
+            if (lvl >= cap) {
+                ss[SS_CHN] = -1;
+                return -1;
+            }
+            ss[pst + (2 * lvl)] = i + base;
+            ss[(pst + (2 * lvl)) + 1] = rem - 1;
+            lvl += 1;
+            rem = n;
+            i = p;
+        }
+    }
+}
+
+export function fitsKnown(ss, at) {
+    // Is the item at absolute `at` known to lie before the step's cut?
+    if (ss[SS_CHN] < 0) {
+        return false;
+    }
+    if ((at < ss[SS_CSTART]) || (at >= ss[SS_CPT])) {
+        return false;
+    }
+    return !chainHas(ss, at);
+}
+
+export function crossKnown(ss, at) {
+    // Is the item at absolute `at` known to cross the step's cut?
+    if (ss[SS_CHN] < 0) {
+        return false;
+    }
+    if ((at < ss[SS_CSTART]) || (at > ss[SS_CPT])) {
+        return false;
+    }
+    return chainHas(ss, at);
 }
 
 export function strStop(b, pos, end) {

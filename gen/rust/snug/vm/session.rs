@@ -201,6 +201,30 @@ pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32]
     ss[(SS_PH) as usize] = PH_DONE;
     return FIN;
 }
+pub(crate) fn sib_rem(ss: &[i32]) -> i32 {
+    // The items the top frame still owes from the pending one on (it
+    // included), for the sibling prescan; -1: up to the end.
+    if ss[(SS_SP) as usize] == 0 {
+        return 1;
+    }
+    let f: i32 = ftop(ss);
+    let kind: i32 = ss[(f + F_KIND) as usize];
+    let n: i32 = ss[(f + F_N) as usize];
+    let el: i32 = ss[(f + F_EL) as usize];
+    if (kind == FK_ARR) || (kind == FK_DARR) {
+        if n < 0 {
+            return -1;
+        }
+        return n - el;
+    }
+    if kind == FK_DSEQ {
+        return -1;
+    }
+    if (kind == FK_MAP) || (kind == FK_DMAP) {
+        return (2 * (n - el)) - 1;
+    }
+    return 1;
+}
 pub(crate) fn tag_number(b: &[u8], pos: i32) -> i32 {
     // The number of the tag whose (valid-sized) head is at pos, -1 past 31 bits.
     let ai: i32 = (b[(pos) as usize] as i32) & 31;
@@ -236,7 +260,7 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     if mode == MODE_DSEQ {
         return open_dseq(b, ss, ka, base, pos, d, end);
     }
-    if must_yield(s, ss) {
+    if cut_yield(s, ss, pos + base) {
         return yld(ss, base, pos);
     }
     if pos >= end {
@@ -345,12 +369,27 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
         }
     }
     if direct == 0 {
-        if (ss[(SS_CHN) as usize] >= 0) && chain_has(ss, pos + base) {
+        let at: i32 = pos + base;
+        if cross_known(ss, at) {
             direct = -1;
-        } else if prescan(b, ss, base, pos, end, cut) == 1 {
+        }
+        if (direct == 0) && fits_known(ss, at) {
             direct = 1;
-        } else {
-            direct = -1;
+        }
+        if direct == 0 {
+            let pr: i32 = prescan_run(b, ss, base, pos, end, cut, sib_rem(ss));
+            if pr < 0 {
+                if prescan(b, ss, base, pos, end, cut) == 1 {
+                    direct = 1;
+                } else {
+                    direct = -1;
+                }
+                ss[(SS_CHN) as usize] = -1;
+            } else if fits_known(ss, at) {
+                direct = 1;
+            } else {
+                direct = -1;
+            }
         }
     }
     progress(ss, 1);
@@ -423,7 +462,7 @@ pub(crate) fn frame_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mu
         return arr_run(p, pool, b, s, ss, base, f);
     }
     if (kind == FK_DARR) || (kind == FK_DSEQ) {
-        return darr_run(ss, base, f);
+        return darr_run(p, pool, b, s, ss, base, f);
     }
     if (kind == FK_MAP) || (kind == FK_DMAP) {
         if ss[(f + F_PH) as usize] == M_KEY {

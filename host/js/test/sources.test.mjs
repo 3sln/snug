@@ -232,3 +232,16 @@ test('P6.2: a session owns its arrays; after the verdict it answers the verdict 
   assert.deepEqual(r.result, { ok: true });
   assert.deepEqual(a.step(new Uint8Array(0), 0).result, { ok: true });
 });
+
+test('P6.2: a quantum yield at the declared end is stepped by finalize, not a length mismatch', async () => {
+  assert.equal(pushAll(Uint8Array.from([0x82, 0x18, 0x18]), { top: 'any' }, [3], 1), 'truncated');
+  const schema = await compileSchema('r = bstr .cbor { a: int }');
+  const bytes = Uint8Array.from([0x43, 0xa1, 0x61, 0x62]);
+  const want = schema.validate(bytes, 'r');
+  for (const quantum of [0, 1, 2, 3]) {
+    const v = pushValidator(schema, bytes.length, 'r', {}, { quantum });
+    let s = v.feed(bytes);
+    while (s.state === 'yield') s = v.resume();
+    assert.deepEqual(v.finalize(), want, `quantum ${quantum}`);
+  }
+});

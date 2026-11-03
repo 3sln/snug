@@ -36,9 +36,9 @@
                                    SS_STEPS IT_POS IT_D IT_FB IT_CK IT_NQ IT_END IT_CTX IT_MODE IT_NOTE
                                    IT_PAIR SS_ABYTES SS_HDR PH_START PH_ITEM PH_RET PH_FRAME PH_DONE
                                    MODE_ITEM MODE_VSEQ MODE_DSEQ MODE_FRAME FW FK_ARR FK_MAP FK_TAG FK_TEXT
-                                   FK_BSTR FK_DARR FK_DMAP FK_DTEXT FK_DSEQ F_KIND F_PH F_PIN
+                                   FK_BSTR FK_DARR FK_DMAP FK_DTEXT FK_DSEQ F_KIND F_PH F_PIN F_N F_EL
                                    nframes vms-session-words vms-arena-bytes fbase ftop fpop ret ensure
-                                   need yld suspended must-yield progress keys-save rebase chain-has
+                                   need yld suspended must-yield cut-yield progress keys-save rebase chain-has prescan-run fits-known cross-known
                                    prescan str-stop big-req lits-need bstr-reads note-req note-put imin]]
             [snug.vm.sstr :refer [S_EMBRUN open-text text-run open-bstr bstr-run embed-ret]]
             [snug.vm.scont :refer [M_KEY open-arr arr-start arr-run arr-ret open-darr open-dseq darr-run
@@ -208,6 +208,21 @@
 
 ;; ------------------------------------------------------------ one item
 
+(defn ^I32 sib-rem [^IntsR ss]
+  (comment "The items the top frame still owes from the pending one on (it"
+           "included), for the sibling prescan; -1: up to the end.")
+  (if (== (ia ss SS_SP) 0) (return 1))
+  (let [f (ftop ss)
+        kind (ia ss (+ f F_KIND))
+        n (ia ss (+ f F_N))
+        el (ia ss (+ f F_EL))]
+    (if (or (== kind FK_ARR) (== kind FK_DARR))
+      (do (if (< n 0) (return (neg 1)))
+          (return (- n el))))
+    (if (== kind FK_DSEQ) (return (neg 1)))
+    (if (or (== kind FK_MAP) (== kind FK_DMAP)) (return (- (* 2 (- n el)) 1)))
+    (return 1)))
+
 (defn ^I32 tag-number [^Bytes b ^I32 pos]
   (comment "The number of the tag whose (valid-sized) head is at pos, -1 past 31 bits.")
   (let [ai (bit-and (u8 b pos) 31)]
@@ -234,7 +249,7 @@
     (if (== mode MODE_VSEQ)
       (return (arr-start p b s ss ka base pos pos (neg 1) d fb ck nq end 0 (neg 1))))
     (if (== mode MODE_DSEQ) (return (open-dseq b ss ka base pos d end)))
-    (if (must-yield s ss) (return (yld ss base pos)))
+    (if (cut-yield s ss (+ pos base)) (return (yld ss base pos)))
     (if (>= pos end)
       (do (progress ss 1)
           (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx))))
@@ -296,9 +311,15 @@
                               (if (and (== major 2) (not (bstr-reads p s fb nq (- stop (+ pos h)))))
                                 (set direct 1)))))))))))
       (if (== direct 0)
-        (if (and (>= (ia ss SS_CHN) 0) (chain-has ss (+ pos base)))
-          (set direct (neg 1))
-          (if (== (prescan b ss base pos end cut) 1) (set direct 1) (set direct (neg 1)))))
+        (do (let [at (+ pos base)]
+              (if (cross-known ss at) (set direct (neg 1)))
+              (if (and (== direct 0) (fits-known ss at)) (set direct 1))
+              (if (== direct 0)
+                (do (let [pr (prescan-run b ss base pos end cut (sib-rem ss))]
+                      (if (< pr 0)
+                        (do (if (== (prescan b ss base pos end cut) 1) (set direct 1) (set direct (neg 1)))
+                            (iset ss SS_CHN (neg 1)))
+                        (if (fits-known ss at) (set direct 1) (set direct (neg 1))))))))))
       (progress ss 1)
       (if (== direct 1)
         (do (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx))))
@@ -342,7 +363,7 @@
   (let [f (ftop ss)
         kind (ia ss (+ f F_KIND))]
     (if (== kind FK_ARR) (return (arr-run p pool b s ss base f)))
-    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run ss base f)))
+    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run p pool b s ss base f)))
     (if (or (== kind FK_MAP) (== kind FK_DMAP))
       (do (if (== (ia ss (+ f F_PH)) M_KEY) (return (map-key p pool b s ss ka base wend f)))
           (return (map-next p pool b s ss ka base wend f))))
