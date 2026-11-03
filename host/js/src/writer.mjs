@@ -8,6 +8,7 @@
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { Decimal, NDArray, Float16Bytes, typedInfo } from './values.mjs';
+import { copyTypedBytes } from './typed-bytes.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
 import { putFloat } from '../../../gen/js/snug/write/float.mjs';
 import { putInt } from '../../../gen/js/snug/write/int.mjs';
@@ -17,6 +18,7 @@ const MAX_SAFE = Number.MAX_SAFE_INTEGER, MAX_SAFE_N = BigInt(MAX_SAFE), U64 = 1
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 const HI = LITTLE_ENDIAN ? 1 : 0, LO = 1 - HI;
 const f64 = new Float64Array(1), f64w = new Int32Array(f64.buffer);
+const typedIncludes = Float64Array.prototype.includes;
 const utf8 = new TextEncoder();
 // Noncharacters U+FDD0..U+FDEF and U+xFFFE/U+xFFFF in every plane (encode.mjs's rule).
 const NONCHARACTER = /[﷐-﷯￾￿]|[\uD83F\uD87F\uD8BF\uD8FF\uD93F\uD97F\uD9BF\uD9FF\uDA3F\uDA7F\uDABF\uDAFF\uDB3F\uDB7F\uDBBF\uDBFF][\uDFFE\uDFFF]/;
@@ -39,12 +41,12 @@ function typedPayload(v, info, fail) {
   const raw = v instanceof Float16Bytes ? v.bytes : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
   if (info.tag >= 84) { // NaN is refused in any payload; -0 and ±∞ are allowed here (encode.mjs).
     if (info.tag === 84) { for (let i = 0; i < raw.length; i += 2) { const h = LITTLE_ENDIAN || v instanceof Float16Bytes ? raw[i] | raw[i + 1] << 8 : raw[i] << 8 | raw[i + 1]; if ((h & 0x7c00) === 0x7c00 && (h & 0x3ff)) fail('typed_array', 'NaN is not allowed in a float array.'); } }
-    else for (let i = 0; i < v.length; i++) if (v[i] !== v[i]) fail('typed_array', 'NaN is not allowed in a float array.');
+    else if (Object.hasOwn(v, 'length')) {
+      // Retain the existing host-property behavior for unusual decorated views.
+      for (let i = 0; i < v.length; i++) if (v[i] !== v[i]) fail('typed_array', 'NaN is not allowed in a float array.');
+    } else if (typedIncludes.call(v, NaN)) fail('typed_array', 'NaN is not allowed in a float array.');
   }
-  if (LITTLE_ENDIAN || v instanceof Float16Bytes || info.size === 1) return raw;
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += info.size) for (let j = 0; j < info.size; j++) out[i + j] = raw[i + info.size - 1 - j];
-  return out;
+  return raw;
 }
 
 /** Deterministic CBOR from typed calls. `new Writer({cose, keysSorted, limits})` (limit names may also be given at the
@@ -110,6 +112,15 @@ export class Writer {
     let size = this.#buf.length * 2; while (size < want) size *= 2;
     const next = new Uint8Array(size); next.set(this.#buf.subarray(0, this.#pos)); this.#buf = next;
   }
+  #reservePayload(need) {
+    // A large payload needs one allocation close to its known size rather
+    // than rounding to a power of two (1 MiB plus a head used to take 2 MiB).
+    // Keep a little room for subsequent map members, but size a root exactly.
+    const want = this.#pos + need + (this.#pos <= 9 ? 0 : 256);
+    if (want <= this.#buf.length) return;
+    const size = Math.max(this.#buf.length * 2, want);
+    const next = new Uint8Array(size); next.set(this.#buf.subarray(0, this.#pos)); this.#buf = next;
+  }
   /** After a kin write answered r < 0: grow for a short answer, else fail with its refusal. */
   #short(r) {
     const need = -r - WR_NEED;
@@ -127,7 +138,18 @@ export class Writer {
     if (p < 0) { this.#short(p); p = putHead(this.#buf, this.#pos, major, n > 0xffffffff ? (n / U32) | 0 : 0, n | 0); }
     this.#pos = p;
   }
-  #raw(bytes) { this.#ensure(bytes.length); this.#buf.set(bytes, this.#pos); this.#pos += bytes.length; }
+  #raw(bytes, swap = 0) {
+    if (bytes.length >= 4096 || swap > 1) { this.#rawPayload(bytes, swap); return; }
+    this.#ensure(bytes.length); this.#buf.set(bytes, this.#pos); this.#pos += bytes.length;
+  }
+  #textBytes(bytes) { this.#ensure(bytes.length); this.#buf.set(bytes, this.#pos); this.#pos += bytes.length; }
+
+  #rawPayload(bytes, swap) {
+    this.#reservePayload(bytes.length);
+    if (swap > 1) copyTypedBytes(this.#buf, this.#pos, bytes, swap, false);
+    else this.#buf.set(bytes, this.#pos);
+    this.#pos += bytes.length;
+  }
 
   // ------------------------------------------------------------------ scalars (after #count)
 
@@ -177,7 +199,7 @@ export class Writer {
       this.#headN(3, written); this.#pos += written;
       return;
     }
-    const b = utf8.encode(s); this.#headN(3, b.length); this.#raw(b);
+    const b = utf8.encode(s); this.#headN(3, b.length); this.#textBytes(b);
   }
 
   // ------------------------------------------------------------------ the walk (encode's rules)
@@ -204,10 +226,12 @@ export class Writer {
     if (v instanceof Uint8Array) { this.#headN(2, v.byteLength); this.#raw(v); return; }
     if (depth >= this.#maxDepth) this.#fail('depth', 'Nesting exceeds the depth bound.');
     const info = typedInfo(v);
-    if (info) { const b = typedPayload(v, info, (c, m) => this.#fail(c, m)); this.#headN(6, info.tag); this.#headN(2, b.length); this.#raw(b); return; }
+    if (info) { const b = typedPayload(v, info, (c, m) => this.#fail(c, m)); this.#headN(6, info.tag); this.#headN(2, b.length); this.#raw(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
     if (v instanceof Decimal) { this.#headN(6, 4); this.#walk([v.exponent, v.mantissa], depth + 1); return; }
     if (v instanceof NDArray) { this.#headN(6, 40); this.#walk([v.shape, v.data], depth + 1); return; }
     if (Array.isArray(v)) {
+      // Enumeration is required to include non-enumerable own properties and
+      // symbols. for-in/index checks alone would silently widen this contract.
       if (Object.getPrototypeOf(v) !== Array.prototype || Reflect.ownKeys(v).length !== v.length + 1) this.#fail('unsupported', 'Arrays must be dense with no extra properties.');
       if (v.length > this.#maxEntries) this.#fail('too_many_entries', 'An array exceeds the entry bound.');
       this.#headN(4, v.length);
@@ -403,6 +427,9 @@ export class Writer {
     }
     if (this.#pos > this.#maxBytes) this.#fail('too_large', 'The encoding exceeds the size bound.');
     this.#kind = DONE;
+    // This buffer has no external aliases and DONE forbids further writes.
+    // Hand off exact-size storage directly; otherwise return an exact copy.
+    if (this.#pos === this.#buf.length) return this.#buf;
     return this.#buf.slice(0, this.#pos);
   }
   /** The failure code, or '' while the writer has not failed. */

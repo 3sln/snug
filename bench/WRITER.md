@@ -104,3 +104,129 @@ esbuild `--bundle --format=esm --minify`, gzip -9 (node zlib):
 The Writer costs ~3.0 KB gzip more than the P2 encoder (the grammar, the
 typed methods, merge sort and both map paths). Against R9's 20 KB runtime
 budget this is the open cost of D072.
+
+## Encoder performance follow-up — 2026-11-03
+
+Apple M1 Pro (10 cores, arm64, 32 GiB), macOS 14.6.1, Node v24.6.0,
+V8 13.6.233.10-node.24. This was a shared machine: load started around 7,
+climbed as high as 35, and varied substantially during measurement. CPU time
+also varies with core placement and frequency; unpaired runs at different
+loads must not be read as a speedup by themselves.
+
+The baseline is a saved copy of the Writer at the start of this work, not
+the frozen P2 encoder. `node --single-threaded-gc --cpu-prof` profiled all
+eight comparison workloads (excluding the separate-message sequence), about
+1.2 seconds each, before and after. Samples locate the integer-array cost
+at the own-key enumeration, float-array work at the JS NaN loop, and bulk
+byte costs at buffer allocation/growth and `finish()`'s slice. Little-endian
+typed payloads already used `set()`; adding another memcpy fast path there
+would not help. The object walk dominates the structured workloads; no kin
+primitive was changed or replaced.
+
+Changes: use the captured intrinsic typed-array `includes(NaN)` for ordinary
+float views (keep the old length-based loop for views with their own
+`length` property); reserve close to the known bulk payload size, leaving
+256 bytes for following members; hand off an exact-size owned output buffer
+at finish, copying otherwise. Big-endian payloads swap directly into the
+output, without an intermediate payload allocation. Text retains its
+existing growth policy. Header, float-width and map-order decisions still
+use the generated kin primitives.
+
+### Array check: the requested non-allocating replacement is unavailable
+
+Standard JavaScript cannot enumerate *all* own properties without producing
+a property list. `for…in` misses non-enumerable properties and symbols;
+index membership tests cannot discover named properties. Combining either
+with a symbol check still misses non-enumerable string properties. Reading
+all own names to cover that case allocates every index string again.
+
+Measured checks alone, 120,000 integers, 15 rotating rounds of 10 checks,
+median thread CPU ms (load about 7):
+
+| Check | ms | Covers the existing own-key count contract? |
+| --- | ---: | --- |
+| `Reflect.ownKeys` | 8.1204 | yes |
+| own names plus own symbols | 7.9821 | yes; still allocates all indices |
+| `for…in` plus `hasOwn` | 4.1094 | no |
+| `Object.keys` | 2.3448 | no |
+| `hasOwn` for each index | 0.7355 | no |
+
+The existing check is retained, so the integer-array bottleneck remains.
+There is also a pre-existing semantic wrinkle: counting keys does not prove
+density. An extra own property can compensate a hole, changing refusal
+precedence (e.g. `too_many_items` rather than `unsupported` with a small
+item limit), or allowing inherited/virtual index values. Tightening that
+check would change behavior and requires a separate correctness decision.
+
+### Measurement method
+
+Both `bench/codec.mjs` and `bench/writer-bench.mjs` were run before and after
+using temporary copies with their relative imports resolved absolutely and
+`performance.now()` replaced with a clock taking `t = process.threadCpuUsage()`
+and returning `(t.user + t.system) / 1000` (one call per reading).
+No workload, correctness check,
+rotation or sampling policy was changed: 9 trials, target 15 ms CPU per
+sample, 3 interleaved warm-up rounds, median ms per operation. Run with
+`node --single-threaded-gc`. Each output was checked against the frozen
+encoder/baseline outside timing as in the original scripts. Bundle sizes
+were skipped because the benchmark's esbuild path is absent; no install.
+
+An additional same-thread A/B runs the saved Writer and current Writer in
+alternating order over `bench/compare/workloads.mjs`, 30 warm-up calls per
+implementation, 9 rounds, target 25 ms CPU per sample, GC included. It checks
+every answer against the workload bytes outside timing. Keeping both
+implementations on one thread reduces the core-placement bias seen with
+two workers. Before timing, **both implementations encode the entire fixture
+set**, including the 10k separate messages. The workload factory itself calls
+the current encoder: failing to give the saved encoder that same type history
+produced misleading structured-workload differences (including an apparent
+document regression that disappeared with matched warm-up).
+Raw scripts, profiles and outputs are in
+`/private/tmp/snug-encoder-perf/` on the measurement machine.
+
+### Paired comparison workloads
+
+Median thread CPU ms; load 11.67 → 9.82 (5-minute load 17.32 → 16.64).
+Treat small differences as parity on this shared machine.
+
+| Workload | Before ms | After ms | Before / after |
+| --- | ---: | ---: | ---: |
+| RPC put 287 B | 0.008888 | 0.007837 | 1.13× |
+| RPC put + 1 MiB bstr | 1.218643 | 0.783683 | 1.56× |
+| 120k integers | 22.532500 | 22.307000 | 1.01× |
+| 1 MiB typed arrays (f32, f64, i16) | 2.685833 | 1.543222 | 1.74× |
+| 10k maps × 8 short keys | 38.932000 | 36.547000 | 1.07× |
+| Map-heavy document 1.4 MB | 21.830000 | 21.387500 | 1.02× |
+| Text-heavy document 1.2 MB | 6.619000 | 6.451000 | 1.03× |
+| CWT-like integer-key map | 0.002573 | 0.002570 | 1.00× |
+
+### Existing benchmark scripts: unpaired CPU medians
+
+These are the complete final before/after runs' encode columns. The baseline
+controls and even untouched decode operations varied by about 3× within these
+runs, so **use the paired table above for speed comparisons**. Writer run
+start loads were 18.34 before and 26.93 after. Codec runs occurred immediately
+before those Writer runs; the entire sequence spanned load roughly 18–27.
+
+| Workload | codec encode before / after ms | Writer typed sorted before / after ms | Writer typed shuffled before / after ms | writer-bench encode sorted before / after ms | writer-bench encode shuffled before / after ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Vectors | 5.7630 / 1.5036 | 8.1060 / 2.4040 | 4.4935 / 1.5359 | 5.0970 / 1.6485 | 4.3048 / 1.5865 |
+| RPC put 287 B | 0.0103 / 0.0030 | 0.0049 / 0.0016 | 0.0081 / 0.0060 | 0.0091 / 0.0031 | 0.0099 / 0.0033 |
+| RPC put + 1 MiB bytes | 1.0900 / 0.5333 | 0.8110 / 0.4348 | 2.5391 / 0.8992 | 1.4538 / 0.5192 | 1.4843 / 0.4756 |
+| 120000 integers | 11.2330 / 10.0510 | 5.0830 / 1.7227 | 5.1333 / 1.7292 | 30.0600 / 10.3570 | 29.7040 / 10.6610 |
+| 1 MiB Float64Array | 0.8541 / 0.2823 | 1.7848 / 0.3038 | 1.8911 / 0.2145 | 1.7871 / 0.2833 | 1.9620 / 0.2406 |
+| 1 MiB BigInt64Array | 0.6773 / 0.2187 | 0.9788 / 0.2193 | 1.0021 / 0.2369 | 1.1598 / 0.2077 | 1.1125 / 0.2049 |
+| 10000 maps × 8 short keys | 11.1115 / 13.1855 | 2.9177 / 3.0424 | 6.6307 / 6.7937 | 11.7480 / 11.4240 | 12.0720 / 14.5055 |
+| Map-heavy document 1.4 MB | 13.8020 / 45.7350 | 6.8253 / 12.6960 | 12.8480 / 22.1805 | 15.5300 / 31.4820 | 16.3600 / 29.7350 |
+
+### Gates and limits of this result
+
+`npm --prefix host/js test`: **1,048 passed, 0 failed**. New focused tests
+cover sparse/extra-property/subclassed arrays and refusal precedence; every
+typed-array family, non-zero-offset views, NaN refusals and decorated views;
+forced big-endian Writer output and byte-copy branches; Float16Bytes; output
+ownership, exact backing-buffer sizes, sticky Writer grammar and maxBytes.
+Both benchmark scripts checked every answer. `git diff --check` passed.
+No kin/generated source, acceptance policy or byte decisions were changed.
+The array optimization is deliberately **not completed** under the combined
+non-allocation and identical-behavior requirements above.

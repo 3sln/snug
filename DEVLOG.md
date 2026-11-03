@@ -934,6 +934,38 @@ slower); allocated head tuples; validating wrapper constructors in build
   ndarrays, cose labels or value walk; `maxBytes` is checked at finish, as
   the P2 encoder did, so growth is not capped before it; `test/index.js`
   (npm test) does not import writer.test.mjs (not this item's file).
+  #### D112 — Encoder performance follow-up (2026-11-03)
+  **Decision**: keep all kin byte decisions and the existing array own-key
+  check; optimize host bulk allocation/copying and native float-array NaN
+  scanning. Finish may hand off exact-size private storage, with independent
+  output ownership and the same sticky grammar. Big-endian typed payloads
+  swap straight into output; Float16Bytes remains little-endian.
+  **Why**: `node --cpu-prof` identifies array reflection, the JS NaN loop,
+  buffer growth and final copying. Matched-history, alternating thread CPU
+  medians on the shared M1 Pro/macOS 14.6.1/Node 24.6 machine: 1 MiB bstr put
+  **1.218643 → 0.783683 ms (1.56×)**; mixed 1 MiB typed arrays
+  **2.685833 → 1.543222 ms (1.74×)**. Integers remain
+  **22.532500 → 22.307000 ms**; maps, document, text and CWT are near parity.
+  Load 11.67 → 9.82 in that paired run, up to 35 during the session.
+  `bench/WRITER.md` records profiles, method, both requested benchmark
+  scripts' before/after CPU medians, and the full comparison-workload table.
+  `npm --prefix host/js test`: **1,048 passed, 0 failed**; benchmark answer
+  checks and `git diff --check` passed. Focused tests include forced
+  big-endian output, byte-offset views, Float16Bytes, ownership and refusals.
+  **Alternatives**: for-in/index checks miss hidden own properties;
+  own names plus symbols still allocates all indices (7.98 vs 8.12 ms for
+  Reflect.ownKeys). Therefore the requested non-allocating, behavior-identical
+  array replacement remains unresolved. Tightening the old count check
+  would also change refusal precedence for holes compensated by extra keys.
+  Output-buffer transfer was discarded after an experimental regression;
+  exact-size ownership handoff avoids detaching buffers. No kin changes.
+  **Learnt**: fixture construction warms the current encoder, including
+  10k separate messages. Giving the saved encoder the same complete type
+  history removes misleading structured-workload regressions. CPU time
+  still varies with core placement/frequency under load; use alternating
+  measurements, not ratios between the unpaired runs.
+  - [ ] **Signed off** (owner)
+
 - [ ] **P5.5 — Benchmarks** (one field from 1.4 MB; writer vs encode vs cbor.mjs).
 
 ## Phase 6 — Sources: blob handles and streams (D027)
