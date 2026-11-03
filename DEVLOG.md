@@ -2311,7 +2311,125 @@ are answered as provisional decisions D082–D085. None is open now.
   including the major/minor word spelling; that document is outside this
   task's write set. Browser/Worker and broader release evidence remain P7.7.
 - [ ] **P7.6 — Bundle size** (R9: runtime 33 KB vs 20 KB gzip).
-- [ ] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
+- [x] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
+  *Done 2026-11-03 by the P7.7 runtime engineer.* Harness and full record:
+  `tools/runtime/` (`run.mjs`, `README.md`).
+  - **What was tested**: the package staged by `package-build.mjs` from a
+    clean worktree of **f275938**. The session-VM edits in the working tree
+    were not in it.
+  - **The suite**: 976 checks:
+    - profile vectors (74 accept, 142 refuse) and 327 cborg-oracle inputs;
+    - the six study contracts (45 cases) and 64 study probes;
+    - serialise / fromSerialized / fromProgram;
+    - a checked View plus Cursor walk;
+    - the Writer;
+    - `scanHandle` over `asyncHandle`.
+
+    Each check runs twice: compiling the CDDL in the runtime, and loading
+    Programs serialised in Node with `fromSerialized` and no compiler.
+  - **Checks actually run**, all **976 / 0** in both arms:
+    - **Node v24.6.0**, from a fresh temporary consumer directory
+      (`node_modules/snug` copied from the staged package).
+    - **Headless Chrome 156.0.8078.80**, as an esbuild 0.28.2 ESM bundle with
+      code splitting, served on loopback with
+      `Content-Security-Policy: default-src 'self'; script-src 'self'`.
+      A control script confirmed that the policy blocks `eval` and
+      `new Function`. Its two blocked probes were the only CSP violations.
+    - **workerd 2026-11-02**, locally, with three module-syntax bundles:
+      split (lazy compiler chunks), one file (compiler inlined), and no
+      compiler.
+    - **workerd 2025-12-17**: the same three bundles passed in a repeat run.
+
+    Every verdict, value, encoding and Program container byte was identical
+    across the runtimes.
+  - **Dynamic code**: none. The 38 produced bundle files and the package's
+    `src/` and `generated/` contain 0 `eval(`, `new Function`, `Function(`,
+    `WebAssembly.*` compile/instantiate calls, string timers, or non-literal
+    `import()`.
+  - **Lazy compiler in Workers works**:
+    - esbuild `--splitting` makes the compiler separate chunks.
+    - workerd resolves `import()` of those chunks during a request when each
+      chunk is listed as an `esModule`.
+    - A one-file bundle inlines the compiler: still lazily initialised, but
+      always shipped.
+  - **Sizes** (min+gzip):
+
+    | bundle | gzip |
+    | --- | ---: |
+    | runtime without the compiler | **56.2 KB** |
+    | runtime + compiler, one file | **94.5 KB** |
+    | split: loaded at import | 57.5 KB |
+    | split: loaded by the first `compile()` | 38.9 KB |
+    | `snug/schema` alone | 41.0 KB |
+    | codec alone | 11.0 KB |
+
+    For Workers: precompile Programs at build time, load them with
+    `fromSerialized`, and leave `snug/compile` out of the bundle. That
+    worker passed the full precompiled arm.
+  - **CPU per warm call** is the same in Node, workerd and Chrome:
+
+    | op | Node | workerd |
+    | --- | ---: | ---: |
+    | validate | 16.5 µs | 14.0 µs |
+    | decode | 3.1 µs | 3.3 µs |
+    | fromSerialized | 264 µs | 273 µs |
+    | compile | 3.2 ms | 4.1 ms |
+
+    Inputs: the object-storage `put` request and its 8,785-byte Program.
+  - **workerd cold start** (21 interleaved samples, spawn to first response;
+    load average 60–120, so wall figures are inflated):
+
+    | worker | median wall − empty | CPU at first response − empty |
+    | --- | ---: | ---: |
+    | import only | +19 ms | +10 ms |
+    | first request loads a Program and validates | +78 ms | **+40 ms** |
+    | first request compiles | +281 ms | **+140 ms** |
+
+    The first call runs cold generated code. A fresh Node process shows the
+    same shape: first `fromSerialized` ≈ 10–14 ms, second ≈ 2 ms. On a Workers
+    plan with a 10 ms CPU limit per request, the first `fromSerialized` in a
+    request would exceed the limit. Calling it at module scope, where it runs
+    synchronously during startup, is a likely mitigation; it was not measured.
+  - **Incompatibility found** (performance only; not fixed here, since
+    `host/js/src` is outside this item):
+    - **Where**: cooperative yields in `src/sources.mjs`. The code is
+      `nextTurn = setImmediate ? … : setTimeout(r, 0)`.
+    - **Cause**: browsers and workerd without `nodejs_compat` have no
+      `setImmediate`. Chained `setTimeout(0)` is clamped to ≥ 4 ms after five
+      levels.
+    - **Reproduction**:
+      ```js
+      scanHandle(bufferHandle(doc), {}, { chunk: doc.length, quantum: 1000 })
+      ```
+      `doc` is a ~200 KB document; the call yields 130 times.
+    - **Measured** (no quantum → quantum 1000):
+
+      | runtime | no quantum | quantum 1000 |
+      | --- | ---: | ---: |
+      | Chrome | 1.8 ms | **651 ms** |
+      | workerd, wall per request | 4.6 ms | 263 ms |
+      | workerd, CPU | 2.3 ms | 18.7 ms |
+      | Node, CPU | 2.8 ms | 3.9 ms |
+
+    - **Chrome cost per yield**: `setTimeout` 4.77 ms, `MessageChannel`
+      0.010 ms, `scheduler.yield()` 0.021 ms.
+    - **asyncHandle**: the test helper resolves each read through
+      `setTimeout`, so it is clamped the same way.
+    - **Proposed fix**: choose `scheduler.yield`, then `setImmediate`, then a
+      shared `MessageChannel`, with `setTimeout` last. The session-VM drivers
+      share `nextTurn`, so `validateHandle` will inherit the fix.
+  - **Learnt**:
+    - The npm `workerd/bin/workerd` is a Node launcher. Killing it leaves the
+      native workerd running, so the harness resolves the native binary and
+      kills process groups.
+    - `../3sln.me/node_modules` is gone on this machine. workerd came from
+      other read-only installs; set `SNUG_WORKERD`.
+    - The repository's baseline codec accepts the NaN float32 typed-array
+      oracle input labelled `profile:typed_array`, and mis-decodes it to
+      1.6e19. snug refuses it, as labelled. `codec.test.mjs` therefore never
+      checks that refusal.
+    - Public sources are still profile-only (D106). Schema validation over
+      handles is not covered.
 - [ ] **P7.9 — Re-take D005** (owner directions 2026-11-03): on the full library
   once the VM is stable, compare the native-JS build against a **wasm build
   wrapped in a JS SDK with the same public API** — what a real JS user gets

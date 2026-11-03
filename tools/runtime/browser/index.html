@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>snug runtime check</title>
+<!-- Served with Content-Security-Policy: default-src 'self'; script-src 'self'.
+     No inline script: control.js checks that the policy blocks eval, then
+     entry.js (the esbuild bundle) runs the suite and POSTs its results. -->
+<script src="control.js"></script>
+<script type="module" src="entry.js"></script>
+</head>
+<body><pre id="out">running…</pre></body>
+</html>
