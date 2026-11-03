@@ -1,0 +1,38 @@
+{
+ "sig": "P6/compile-fuzz",
+ "prop": 6,
+ "seed": 1001,
+ "index": 0,
+ "cls": "gate-failed",
+ "detail": "compile-fuzz 30000 1001 exited 1",
+ "actual": {
+  "fails": [
+   "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2280 ms on JS",
+   "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2078 ms on JS",
+   "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2638 ms on JS",
+   "  FAIL 3750 texts compiled from two starting arena sizes: same outcomes",
+   "  FAIL 30000 texts (seed 1001): 4491 compiled, 25509 refused; slowest 2638.1 ms \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\"",
+   "  FAIL 3 failure(s)"
+  ],
+  "context": [
+   "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2280 ms on JS",
+   "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2078 ms on JS",
+   "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2638 ms on JS",
+   "  FAIL 3750 texts compiled from two starting arena sizes: same outcomes",
+   "  FAIL 30000 texts (seed 1001): 4491 compiled, 25509 refused; slowest 2638.1 ms \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\"",
+   "  FAIL 3 failure(s)"
+  ]
+ },
+ "repro": {
+  "gate": "compile-fuzz",
+  "args": [
+   30000,
+   1001
+  ],
+  "log": "/Users/raystubbs/Projects/@3sln/snug/.cache/proptest/2026-11-03T21-44-27-660Z/gates/compile-fuzz-r0.log"
+ },
+ "triage": {
+  "class": "environment",
+  "analysis": "compile-fuzz 30000 1001 under the campaign load: two texts (the a_i chain) took 2,078 and 2,280 ms against the gate’s 2 s wall-time criterion; every other assertion of the gate passed. See the standalone re-run in DEVLOG P4.2."
+ }
+}

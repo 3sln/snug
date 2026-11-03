@@ -31,5 +31,7 @@
               :task (apply shell "kin/scripts/nav-test" *command-line-args*)}
   write-test {:doc "P5.4: kin writer primitives on JS and Rust -- heads, float widths, integers, key order, close-map, Writer streams; truth vs cbor.mjs and the scanner; robustness."
               :task (apply shell "kin/scripts/write-test" *command-line-args*)}
+  proptest   {:doc "P4.2: the property-based campaign (schema x value vs the oracle, codec, views, serialised Programs, robustness, Rust-parity gates); findings in tools/proptest/findings/."
+              :task (apply shell "node" "tools/proptest/campaign.mjs" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

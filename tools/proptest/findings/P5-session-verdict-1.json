@@ -1,0 +1,60 @@
+{
+ "sig": "P5/session-verdict",
+ "prop": 5,
+ "seed": 1,
+ "index": 41,
+ "cls": "session-verdict",
+ "detail": "resumable session (handle / push) differs from Schema.validate",
+ "actual": {
+  "$plain": {
+   "full": {
+    "$plain": {
+     "ok": false,
+     "reason": "cbor/truncated",
+     "path": [],
+     "offset": 15
+    }
+   },
+   "handle": {
+    "$plain": {
+     "ok": false,
+     "reason": "cbor/truncated",
+     "path": [],
+     "offset": 15
+    }
+   },
+   "push": {
+    "$plain": {
+     "name": "SourceError",
+     "code": "length_mismatch",
+     "message": "The session needs bytes beyond what was delivered."
+    }
+   }
+  }
+ },
+ "repro": {
+  "bytes": "82d84844aebe7e8bc4823a0fc37b62",
+  "opts": {
+   "top": "any"
+  },
+  "schema": "r = any",
+  "source": {
+   "chunk": 7,
+   "quantum": 3,
+   "sizes": [
+    1,
+    46
+   ]
+  }
+ },
+ "minimized": {
+  "bytes": "82d8484400000000c4823a00010000",
+  "tries": 503
+ },
+ "caseMs": 52,
+ "triage": {
+  "class": "snug bug",
+  "bug": "S1",
+  "analysis": "pushValidator (host/js/src/sources.mjs pushSession) under a nonzero quantum: see P5/source-verdict. Minimised: r = any, 82d8484400000000c4823a00010000, quantum 3."
+ }
+}

@@ -1,0 +1,39 @@
+{
+ "sig": "P5/source-verdict",
+ "prop": 5,
+ "seed": 1,
+ "index": 75,
+ "cls": "source-verdict",
+ "detail": "decode / scanBuffer / scanHandleSync / pushScanner / view disagree",
+ "actual": {
+  "$plain": {
+   "decode": "truncated",
+   "scanBuffer": "truncated",
+   "handle": "truncated",
+   "push": "throw:SourceError:The session needs bytes beyond what was delivered.",
+   "view": "truncated"
+  }
+ },
+ "repro": {
+  "bytes": "83d828828103d845461ee07af7bb8ed84540",
+  "opts": {
+   "top": "any",
+   "maxDepth": 4
+  },
+  "chunk": 2,
+  "quantum": 1,
+  "pushSizes": [
+   335
+  ]
+ },
+ "minimized": {
+  "bytes": "828100",
+  "tries": 73
+ },
+ "caseMs": 79,
+ "triage": {
+  "class": "snug bug",
+  "bug": "S1",
+  "analysis": "pushScanner/pushValidator: when the last step before EOF was a quantum yield at the end of the delivered bytes, finalize() sees holds() fail (it wants one byte at position == length) and throws SourceError('length_mismatch') instead of stepping the session, which knows the declared length and would answer the CBOR refusal (truncated / embedded). Minimal: pushScanner(3, {top:'any'}, {quantum:1}) fed 821818 -> SourceError length_mismatch; scanBuffer, scanHandleSync (any quantum) and pushScanner with quantum 0 answer SnugFault truncated. The same shared pushSession serves pushValidator: schema 'r = bstr .cbor { a: int }', bytes 43a16162, quantum 1 or 2 -> SourceError; Schema.validate, validateHandleSync and quantum 0/3/4 -> embedded / cbor/truncated. Campaign minimisations: 828100 (pushScanner, quantum 1, one chunk) and d82882540000000000000000000000000000000000000000 (quantum 2). 384 occurrences in the 66.9-minute run; 49 + 1835 more as P1/P5 session-verdict."
+ }
+}

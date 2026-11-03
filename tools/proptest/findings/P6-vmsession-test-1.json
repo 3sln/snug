@@ -1,0 +1,26 @@
+{
+ "sig": "P6/vmsession-test",
+ "prop": 6,
+ "seed": 1001,
+ "index": 0,
+ "cls": "gate-failed",
+ "detail": "vmsession-test 200000 1001 4000 600 exited null SIGTERM",
+ "actual": {
+  "fails": [],
+  "context": []
+ },
+ "repro": {
+  "gate": "vmsession-test",
+  "args": [
+   200000,
+   1001,
+   4000,
+   600
+  ],
+  "log": "/Users/raystubbs/Projects/@3sln/snug/.cache/proptest/2026-11-03T21-44-27-660Z/gates/vmsession-test-r0.log"
+ },
+ "triage": {
+  "class": "environment",
+  "analysis": "vmsession-test 200000 1001 4000 600 was ended by an external SIGTERM after 873 s with no output (the campaign only SIGKILLs at 3600 s); see the standalone re-run in DEVLOG P4.2."
+ }
+}

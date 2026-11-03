@@ -1,0 +1,69 @@
+{
+ "sig": "P1/session-verdict",
+ "prop": 1,
+ "seed": 45,
+ "index": 29,
+ "cls": "session-verdict",
+ "detail": "resumable session (handle / push) differs from Schema.validate",
+ "actual": {
+  "$plain": {
+   "full": {
+    "$plain": {
+     "ok": false,
+     "reason": "embedded",
+     "path": [
+      "cbor"
+     ],
+     "offset": 4,
+     "subcode": "cbor/truncated"
+    }
+   },
+   "handle": {
+    "$plain": {
+     "ok": false,
+     "reason": "embedded",
+     "path": [
+      "cbor"
+     ],
+     "offset": 4,
+     "subcode": "cbor/truncated"
+    }
+   },
+   "push": {
+    "$plain": {
+     "name": "SourceError",
+     "code": "length_mismatch",
+     "message": "The session needs bytes beyond what was delivered."
+    }
+   }
+  }
+ },
+ "repro": {
+  "text": "r = bstr .cbor { a: int }",
+  "rule": "r",
+  "bytes": "43a16162",
+  "kind": "near",
+  "vopts": {},
+  "limits": {},
+  "unicode": false,
+  "source": {
+   "chunk": 7,
+   "quantum": 1,
+   "sizes": [
+    58,
+    729,
+    1
+   ]
+  }
+ },
+ "minimized": {
+  "bytes": "a16100",
+  "tries": 16
+ },
+ "caseMs": 9,
+ "triage": {
+  "class": "snug bug",
+  "bug": "S1",
+  "analysis": "pushValidator (host/js/src/sources.mjs pushSession) under a nonzero quantum: see P5/source-verdict. Minimised: schema r = bstr .cbor { a: int } (any schema does: r = any), bytes a16100 (a map whose value is missing), quantum 2 -> SourceError length_mismatch; Schema.validate and validateHandleSync answer cbor/truncated at offset 3."
+ }
+}

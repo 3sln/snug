@@ -1,0 +1,33 @@
+{
+ "P1/session-verdict": {
+  "class": "snug bug",
+  "bug": "S1",
+  "analysis": "pushValidator (host/js/src/sources.mjs pushSession) under a nonzero quantum: see P5/source-verdict. Minimised: schema r = bstr .cbor { a: int } (any schema does: r = any), bytes a16100 (a map whose value is missing), quantum 2 -> SourceError length_mismatch; Schema.validate and validateHandleSync answer cbor/truncated at offset 3."
+ },
+ "P5/session-verdict": {
+  "class": "snug bug",
+  "bug": "S1",
+  "analysis": "pushValidator (host/js/src/sources.mjs pushSession) under a nonzero quantum: see P5/source-verdict. Minimised: r = any, 82d8484400000000c4823a00010000, quantum 3."
+ },
+ "P5/source-verdict": {
+  "class": "snug bug",
+  "bug": "S1",
+  "analysis": "pushScanner/pushValidator: when the last step before EOF was a quantum yield at the end of the delivered bytes, finalize() sees holds() fail (it wants one byte at position == length) and throws SourceError('length_mismatch') instead of stepping the session, which knows the declared length and would answer the CBOR refusal (truncated / embedded). Minimal: pushScanner(3, {top:'any'}, {quantum:1}) fed 821818 -> SourceError length_mismatch; scanBuffer, scanHandleSync (any quantum) and pushScanner with quantum 0 answer SnugFault truncated. The same shared pushSession serves pushValidator: schema 'r = bstr .cbor { a: int }', bytes 43a16162, quantum 1 or 2 -> SourceError; Schema.validate, validateHandleSync and quantum 0/3/4 -> embedded / cbor/truncated. Campaign minimisations: 828100 (pushScanner, quantum 1, one chunk) and d82882540000000000000000000000000000000000000000 (quantum 2). 384 occurrences in the 66.9-minute run; 49 + 1835 more as P1/P5 session-verdict."
+ },
+ "P6/write-test": {
+  "class": "generator bug",
+  "analysis": "kin/scripts/write-test.mjs compare(): rs = stdout.trimEnd().split('\\n') strips the trailing space of the LAST Rust line only, while the JS line keeps it; whenever the last of N cases prints an empty final field (e.g. 'm 0 0 ', 'h -69 ', 'f -9 -4 '), the gate reports N-1/N identical. Seen at seeds 1005 (close-map), 1009 (put-head), 1011 (robustness) with 3000 cases. Not a host difference."
+ },
+ "P5/slow-compile": {
+  "class": "environment",
+  "analysis": "Compile wall time above the 2 s threshold only under the campaign load (7 property workers + cargo gates + another engineer’s jobs; load average up to ~54 on 10 cores). 203 of 249 are the new hostile text tstr .regexp \"[\\\\p{L}\\\\p{N}]\" x k (k <= 80) with the Unicode tables, 46 the a_i = [a_{i+1}, a_{i+1}] chain. Unloaded (same HEAD): k = 80 class repetitions 376-378 ms / 4,778,582 compile units, \\\\p{L} x 80 335 ms / 4,110,658, chain of 400 rules 319-426 ms / 1,572,297. All compiled inside the default compile budget; no budget overrun, no snug bug. Note: a \\\\p class costs ~58k compile units per position (tables probed per class), ~730x an ASCII class."
+ },
+ "P6/compile-fuzz": {
+  "class": "environment",
+  "analysis": "compile-fuzz 30000 1001 under the campaign load: two texts (the a_i chain) took 2,078 and 2,280 ms against the gate’s 2 s wall-time criterion; every other assertion of the gate passed. See the standalone re-run in DEVLOG P4.2."
+ },
+ "P6/vmsession-test": {
+  "class": "environment",
+  "analysis": "vmsession-test 200000 1001 4000 600 was ended by an external SIGTERM after 873 s with no output (the campaign only SIGKILLs at 3600 s); see the standalone re-run in DEVLOG P4.2."
+ }
+}

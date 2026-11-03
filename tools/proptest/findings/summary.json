@@ -1,0 +1,426 @@
+{
+ "campaign": "P4.2",
+ "started": "2026-11-03T21:44:27.780Z",
+ "wallMs": 4014379,
+ "minutes": 65,
+ "seeds": [
+  1,
+  1000000
+ ],
+ "casesPerSeed": 250,
+ "timeoutMs": 30000,
+ "head": "2434b0671bc6eb94d02ec8abf2a2487817e551f9",
+ "uncommittedPaths": 0,
+ "machine": {
+  "node": "v24.6.0",
+  "platform": "darwin arm64",
+  "cpus": 10,
+  "cpu": "Apple M1 Pro",
+  "memGB": 32
+ },
+ "properties": {
+  "1": {
+   "workers": 2,
+   "cases": 369404,
+   "stats": {
+    "cases": 369404,
+    "compiled": 320059,
+    "refused": 49345,
+    "values": 2960691,
+    "oracle": 8682199,
+    "oracleUnknown": 17,
+    "decode": 2960691,
+    "spans": 6803088,
+    "budget": 815935,
+    "unicodeEval": 258448,
+    "sessions": 1185433
+   },
+   "failures": 49,
+   "hangs": 0,
+   "workerCrashes": 0
+  },
+  "2": {
+   "workers": 1,
+   "cases": 1236143,
+   "stats": {
+    "cases": 1236143,
+    "encodes": 1236143,
+    "roundtrips": 1236143,
+    "mutations": 12361430,
+    "mutAccepted": 1891707,
+    "mutRefused": 10469723,
+    "structural": 3999807
+   },
+   "failures": 0,
+   "hangs": 0,
+   "workerCrashes": 0
+  },
+  "3": {
+   "workers": 1,
+   "cases": 186127,
+   "stats": {
+    "cases": 186127,
+    "modes": 744508,
+    "nodes": 40768160,
+    "subtrees": 2565982,
+    "schemaViews": 30503,
+    "spans": 122012
+   },
+   "failures": 0,
+   "hangs": 0,
+   "workerCrashes": 0
+  },
+  "4": {
+   "workers": 1,
+   "cases": 186473,
+   "stats": {
+    "cases": 186473,
+    "compiled": 174433,
+    "roundtrips": 174433,
+    "validations": 1609854,
+    "corruptions": 2442062,
+    "rehashed": 2442062,
+    "rehashedAccepted": 444393,
+    "randomFiles": 523299
+   },
+   "failures": 0,
+   "hangs": 0,
+   "workerCrashes": 0
+  },
+  "5": {
+   "workers": 2,
+   "cases": 153623,
+   "stats": {
+    "cases": 153623,
+    "blobs": 921738,
+    "texts": 307246,
+    "compiled": 43789,
+    "refused": 263457,
+    "pushes": 921738,
+    "misuse": 5069559,
+    "slowCompile": 249,
+    "slowValidate": 0,
+    "sessions": 1381807
+   },
+   "failures": 2468,
+   "hangs": 0,
+   "workerCrashes": 0
+  }
+ },
+ "gates": [
+  {
+   "gate": "scan-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    300000,
+    1001
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 466,
+   "fails": [],
+   "summary": [
+    "  ok   JS: 301360/301360 cases with cbor.mjs's code (24.8 s incl. cbor.mjs)",
+    "  ok   bench/scan-hand.mjs (the P1.4 yardstick): 301360/301360 cases with cbor.mjs's code",
+    "  ok   JS bounds: 20000 cases re-run with a throwing out-of-bounds trap on the input",
+    "  ok   Rust (debug, overflow checks on): 301360/301360 cases with cbor.mjs's code and JS's offset, no panic (12.1 s)",
+    "  ok   wasm (release, Rust -> wasm32): 301360/301360 cases with cbor.mjs's code and JS's offset",
+    "  ok   generated JS and Rust agree with cbor.mjs on every case"
+   ]
+  },
+  {
+   "gate": "rscan-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    200000,
+    1001
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 546,
+   "fails": [],
+   "summary": [
+    "  ok   JS resumable == recursive (code, offset, items): 1615477 policy runs (323072 behind an out-of-bounds trap) + 1699834 split-at-every-offset runs (206.1 s)",
+    "  ok   Rust resumable (debug, overflow checks on): 1615456/1615456 runs identical to JS (code, offset, items, steps), no panic",
+    "  ok   the resumable scanner matches the recursive one under every window split and yield quantum"
+   ]
+  },
+  {
+   "gate": "vm-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    200000,
+    1001,
+    4000
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 389,
+   "fails": [],
+   "summary": [
+    "  ok   profile identity: 402720/402720 runs give the scanner's code, offset and items, through the VM against `any` and against a schema that keeps everything live (1146 vectors, 214 fixed, 200000 mutations seed 1001)",
+    "  ok   conformance: 983/983 cases with the expected verdict, from 262 compiled suites of 295 (2 phase-later skipped)",
+    "  info refusal suites: 31 refused by the compiler as expected; 0 compiled anyway (compiler's gate)",
+    "  ok   oracle differential (D022): 32000/32000 values agree with corpus/tools/oracle.mjs on 4000 compiled schemas of 4000 generated (seed 1001); 0 oracle-unknown skipped",
+    "  info compiler refused 0 generated schemas: ; oracle refused 0",
+    "  ok   §15 and assembled programs: 3676/3676 cases (73 assembled)",
+    "  ok   fast paths == generic path (D044): 439379/439379 cases give the same whole out array with the fast paths forced off",
+    "  ok   legacy schedule 1 (word 8 bit 1): fast == generic on 439379/439379 cases",
+    "  ok   schedule 1 vs the default schedule 2 (D045) changes only the budget used on 439379/439379 cases (verdict, reason, offset, items, path equal unless either run hit the budget)",
+    "  ok   epochs: 39943 cases re-run from an epoch just below the restart threshold give the same out array",
+    "  ok   JS bounds: 6000 cases re-run behind throwing out-of-bounds traps on P, B, input and scratch",
+    "  ok   JS == Rust (debug, overflow checks on): 439379/439379 cases, whole out array (code, subcode, offset, budget used, items, path), no panic (131.5 s)",
+    "  ok   schedule 1 (legacy) JS == Rust: 439379/439379 cases",
+    "  ok   hosts: JS Schema rendering == Rust snug::schema on 1033/1033 corpus and assembled cases (reason, subcode, offset, path from the key table)",
+    "  ok   JS == wasm (release, Rust -> wasm32): 439376/439376 cases, whole out array",
+    "  info 4293 programs verified by vm-verify; JS ran 439379 cases in 15.5 s",
+    "  ok   vm-test"
+   ]
+  },
+  {
+   "gate": "vmsession-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    200000,
+    1001,
+    4000,
+    600
+   ],
+   "exit": null,
+   "signal": "SIGTERM",
+   "seconds": 873,
+   "fails": [],
+   "summary": []
+  },
+  {
+   "gate": "compile-fuzz",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    30000,
+    1001
+   ],
+   "exit": 1,
+   "signal": null,
+   "seconds": 997,
+   "fails": [
+    "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2280 ms on JS",
+    "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2078 ms on JS",
+    "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2638 ms on JS",
+    "  FAIL 3750 texts compiled from two starting arena sizes: same outcomes",
+    "  FAIL 30000 texts (seed 1001): 4491 compiled, 25509 refused; slowest 2638.1 ms \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\"",
+    "  FAIL 3 failure(s)"
+   ],
+   "summary": [
+    "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2280 ms on JS",
+    "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2078 ms on JS",
+    "  FAIL \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\": 2638 ms on JS",
+    "  FAIL 3750 texts compiled from two starting arena sizes: same outcomes",
+    "  FAIL 30000 texts (seed 1001): 4491 compiled, 25509 refused; slowest 2638.1 ms \"a0 = [a1, a1]\\na1 = [a2, a2]\\na2 = [a3, a3]\\na3 = [a4, a4]\\na4 = [a5, a5]\\n\"",
+    "  FAIL 3 failure(s)"
+   ]
+  },
+  {
+   "gate": "nav-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    6000,
+    1001
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 19,
+   "fails": [],
+   "summary": [
+    "  ok   6409/6409 traces identical across hosts (checked documents)",
+    "  ok   250/250 traces agree with an independent structural reading (ends, children, keys found, absent keys absent)",
+    "  ok   5000 unchecked inputs: JS threw 0, Rust panicked 0, 5000/5000 identical",
+    "  ok   3601/3601 Rust View key paths answer the JS view's span",
+    "  ok   nav-test"
+   ]
+  },
+  {
+   "gate": "write-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    30000,
+    1001
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 113,
+   "fails": [],
+   "summary": [
+    "  ok   put-head: 30000/30000 identical across hosts, 0 Rust panics",
+    "  ok   put-head: 19907/19907 written heads equal an independent shortest encoding",
+    "  ok   float-width/put-float: 38963/38963 identical across hosts, 0 Rust panics",
+    "  ok   floats: 30941/30941 written floats equal cbor.mjs's encoding and pass the scanner",
+    "  ok   floats: 1323/1323 refusals are numbers cbor.mjs encodes as integers or refuses (float)",
+    "  ok   put-int: 30000/30000 identical across hosts, 0 Rust panics",
+    "  ok   put-int: 26235/26235 written integers equal cbor.mjs's encoding (and int-len)",
+    "  ok   put-int: 1798/1798 bignum refusals are cbor.mjs's",
+    "  ok   key-after: 15000/15000 identical across hosts, 0 Rust panics",
+    "  ok   close-map: 30000/30000 identical across hosts, 0 Rust panics",
+    "  ok   close-map: 15106/15106 sorted maps equal an independent sort of their pairs",
+    "  ok   close-map: 10139/10139 duplicate_key answers have a duplicate key",
+    "  ok   close-map: 0 closes charged more than n - 1 + n ceil(log2 n) comparisons",
+    "  ok   sort-keys: 30000/30000 identical across hosts, 0 Rust panics",
+    "  ok   sort-keys: 25784/25784 orders equal an independent stable sort (and every duplicate_key has a duplicate)",
+    "  ok   Writer streams (typed calls, shuffled keys, misuse): 45000/45000 identical across hosts, 0 Rust panics",
+    "  ok   Writer streams: 30000/30000 JS Writer outputs equal cbor.mjs's encode(value)",
+    "  ok   robustness (junk arguments): 30000/30000 identical across hosts, 0 Rust panics",
+    "  ok   write-test"
+   ]
+  },
+  {
+   "gate": "compile-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [
+    400,
+    1001
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 94,
+   "fails": [],
+   "summary": [
+    "  ok   268/268 schemas compile on both hosts",
+    "  ok   31/31 expected refusals, with the expected code family",
+    "  ok   301/301 identical across hosts (Programs byte for byte, errors field for field)",
+    "  ok   270/270 Programs accepted by the verifier (JS and Rust)",
+    "  ok   program.md §15: 286 words, 14-byte pool, exactly as listed (JS yes, Rust yes)",
+    "  ok   301/301 outcomes independent of the starting arena size (6 needed retries)",
+    "  ok   55/55 SOURCE_KEYs equal SHA-256 of program.md §13.3's preimage (baseline encoder, node:crypto)",
+    "  ok   6/6 normaliser structure checks (merged intervals, LITSETs, key order)",
+    "  ok   27/27 profile cases (bindle, bus) on both hosts; accepted ones identical to full",
+    "  ok   2429/2429 seeded invalid Programs refused",
+    "  ok   108000 random corruptions: no crash, 110429/110429 verdicts identical across hosts",
+    "  ok   compile-test"
+   ]
+  },
+  {
+   "gate": "unicode-test",
+   "round": 0,
+   "seed": 1001,
+   "args": [],
+   "exit": 0,
+   "signal": null,
+   "seconds": 154,
+   "fails": [],
+   "summary": [
+    "ok 574 JS == Rust outcomes: 368 complete Programs, 206 errors; Rust verifier accepts every Program",
+    "ok Unicode outcomes independent of arena size, including float retries and low budgets (1037 arena growth retries)",
+    "ok Unicode-bound SOURCE_KEY independently recomputed with baseline CBOR + node:crypto",
+    "ℹ pass 40",
+    "ℹ fail 0"
+   ]
+  },
+  {
+   "gate": "scan-test",
+   "round": 1,
+   "seed": 1002,
+   "args": [
+    300000,
+    1002
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 121,
+   "fails": [],
+   "summary": [
+    "  ok   JS: 301360/301360 cases with cbor.mjs's code (21.7 s incl. cbor.mjs)",
+    "  ok   bench/scan-hand.mjs (the P1.4 yardstick): 301360/301360 cases with cbor.mjs's code",
+    "  ok   JS bounds: 20000 cases re-run with a throwing out-of-bounds trap on the input",
+    "  ok   Rust (debug, overflow checks on): 301360/301360 cases with cbor.mjs's code and JS's offset, no panic (10.8 s)",
+    "  ok   wasm (release, Rust -> wasm32): 301360/301360 cases with cbor.mjs's code and JS's offset",
+    "  ok   generated JS and Rust agree with cbor.mjs on every case"
+   ]
+  },
+  {
+   "gate": "rscan-test",
+   "round": 1,
+   "seed": 1002,
+   "args": [
+    200000,
+    1002
+   ],
+   "exit": 0,
+   "signal": null,
+   "seconds": 243,
+   "fails": [],
+   "summary": [
+    "  ok   JS resumable == recursive (code, offset, items): 1615486 policy runs (323104 behind an out-of-bounds trap) + 1688737 split-at-every-offset runs (121.7 s)",
+    "  ok   Rust resumable (debug, overflow checks on): 1615472/1615472 runs identical to JS (code, offset, items, steps), no panic",
+    "  ok   the resumable scanner matches the recursive one under every window split and yield quantum"
+   ]
+  }
+ ],
+ "tree": "git archive of HEAD 2434b0671bc6eb94d02ec8abf2a2487817e551f9 (+ working tools/proptest) at /private/tmp/claude-501/-Users-raystubbs-Projects--3sln-3sln-me/8f763b0e-277c-4c0c-b7f0-8c3d4fc70450/scratchpad/snug-proptest-AHzSOk/snug",
+ "gateTree": "working tree",
+ "logDir": "/Users/raystubbs/Projects/@3sln/snug/.cache/proptest/2026-11-03T21-44-27-660Z",
+ "findings": [
+  {
+   "sig": "P1/session-verdict",
+   "count": 49,
+   "triage": "snug bug",
+   "files": [
+    "P1-session-verdict-1.json",
+    "P1-session-verdict-2.json",
+    "P1-session-verdict-3.json"
+   ]
+  },
+  {
+   "sig": "P5/session-verdict",
+   "count": 1835,
+   "triage": "snug bug",
+   "files": [
+    "P5-session-verdict-1.json",
+    "P5-session-verdict-2.json",
+    "P5-session-verdict-3.json"
+   ]
+  },
+  {
+   "sig": "P5/slow-compile",
+   "count": 249,
+   "triage": "environment",
+   "files": [
+    "P5-slow-compile-1.json",
+    "P5-slow-compile-2.json",
+    "P5-slow-compile-3.json"
+   ]
+  },
+  {
+   "sig": "P5/source-verdict",
+   "count": 384,
+   "triage": "snug bug",
+   "files": [
+    "P5-source-verdict-1.json",
+    "P5-source-verdict-2.json",
+    "P5-source-verdict-3.json"
+   ]
+  },
+  {
+   "sig": "P6/compile-fuzz",
+   "count": 1,
+   "triage": "environment",
+   "files": [
+    "P6-compile-fuzz-1.json"
+   ]
+  },
+  {
+   "sig": "P6/vmsession-test",
+   "count": 1,
+   "triage": "environment",
+   "files": [
+    "P6-vmsession-test-1.json"
+   ]
+  }
+ ]
+}

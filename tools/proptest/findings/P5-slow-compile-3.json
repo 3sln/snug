@@ -1,0 +1,19 @@
+{
+ "sig": "P5/slow-compile",
+ "prop": 5,
+ "seed": 1,
+ "index": 103,
+ "cls": "slow-compile",
+ "detail": "2744 ms",
+ "repro": {
+  "text": "r = tstr .regexp \"[\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}]\"",
+  "limits": {},
+  "profile": "full",
+  "unicode": true
+ },
+ "caseMs": 2804,
+ "triage": {
+  "class": "environment",
+  "analysis": "Compile wall time above the 2 s threshold only under the campaign load (7 property workers + cargo gates + another engineer’s jobs; load average up to ~54 on 10 cores). 203 of 249 are the new hostile text tstr .regexp \"[\\\\p{L}\\\\p{N}]\" x k (k <= 80) with the Unicode tables, 46 the a_i = [a_{i+1}, a_{i+1}] chain. Unloaded (same HEAD): k = 80 class repetitions 376-378 ms / 4,778,582 compile units, \\\\p{L} x 80 335 ms / 4,110,658, chain of 400 rules 319-426 ms / 1,572,297. All compiled inside the default compile budget; no budget overrun, no snug bug. Note: a \\\\p class costs ~58k compile units per position (tables probed per class), ~730x an ASCII class."
+ }
+}
