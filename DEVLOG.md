@@ -2136,6 +2136,12 @@ array prototypes or undefined handling (outside this decision).
 
 ## Findings
 
+- 2026-11-03 (manager): P7.7's side finding that the baseline codec "accepts a
+  float32 typed array holding a NaN" in the cborg oracle file was **not
+  reproduced**: snug and `bench/baseline/cbor-3sln.mjs` give the same verdict
+  and code on all 930 oracle inputs, and no oracle case is labelled as a NaN
+  refusal (cborg's `error` strings cover tag-content and length refusals). No
+  test change made.
 - 2026-10-29 (manager): **bundle sizes vs R9** (esbuild 0.28 minify, node
   zlib; tree at the P5.4 commits): codec only (decode + encode) 30.4 KB raw /
   10.7 KB gzip / 9.6 KB brotli (cbor.mjs: 6.1 KB gzip); runtime (codec + schema
