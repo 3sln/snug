@@ -19,8 +19,15 @@ export function xorshift(seed) {
   return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x; };
 }
 
-/** Run one session; answers {out: 'words...', steps, needs, yields, maxWindow} or {error}. */
-export function runSession(P, B, rule, lim, bytes, policy, { guard = null, maxSteps = 0 } = {}) {
+/** Run one session; answers {out: 'words...', steps, needs, yields} or {error}. */
+export function runSession(P, B, rule, lim, bytes, policy, opts = {}) {
+  const it = sessionSteps(P, B, rule, lim, bytes, policy, opts);
+  for (;;) { const r = it.next(); if (r.done) return r.value; }
+}
+
+/** The same session as a generator that yields after every vms-step call, so
+ *  several sessions can be interleaved step by step (each owns its arrays). */
+export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, maxSteps = 0 } = {}) {
   const n = bytes.length;
   const cap = Math.max(P[16], 1);
   let s = new Int32Array(vmScratchWords(P, rule, cap)); vmScratchInit(s, cap);
@@ -46,12 +53,13 @@ export function runSession(P, B, rule, lim, bytes, policy, { guard = null, maxSt
     if (guard) win = guard(win, 'window');
     const r = vmsStep(p, b, win, s, ss, ka, o, off);
     steps++;
+    yield r;
     if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields };
     if (r === VMS_NEED) {
       needs++;
       const no = vmsNeedOffset(ss), nl = vmsNeedLength(ss);
       if (no < 0 || nl < 1 || no + nl > n) return { error: `bad NEED(${no}, ${nl}) of ${n}` };
-      if (no >= off && no + nl <= e && !(no === e)) return { error: `NEED(${no}, ${nl}) inside the window [${off}, ${e})` };
+      if (no >= off && no + nl <= e) return { error: `NEED(${no}, ${nl}) inside the window [${off}, ${e})` };
       const keep = vmsKeep(ss);
       if (keep > no) return { error: `keep ${keep} past the need offset ${no}` };
       if (keep < lastKeep) return { error: `keep went back from ${lastKeep} to ${keep}` };

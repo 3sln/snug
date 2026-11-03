@@ -1,0 +1,181 @@
+// bb vmsession-test: the resumable session (P6.2) against the buffer driver --
+// the D030 condition. Every vm-test case (corpus, oracle generator, mutations,
+// fast-path stress, assembled; validateAt span cases excepted: a session is a
+// whole message) and a session stress set (kin/scripts/vmsession-cases.mjs)
+// must give vm-validate's ENTIRE out array (code, subcode, offset, budget
+// used, items, path) under:
+//   * whole windows (no quantum), 1-byte windows, random windows of 1..7 /
+//     1..300 / 1..4096 bytes, whole windows under tiny quanta (1-3 units);
+//   * a split at every offset for inputs of at most 48 bytes;
+//   * random budgets that stop it part-way (stress set: three per case under
+//     two policies; vm-test cases: a sample), the generic path forced and
+//     the legacy schedule 1 (samples);
+// with the windows starting EXACTLY where asked (fresh copies), vms-keep never
+// past a need nor going back, no step answering a range it was given;
+// JS behind throwing out-of-bounds traps on P, B, the window and every
+// session array (a sample); sessions interleaved step by step on one Program;
+// and the debug Rust build giving JS's answers, without a panic.
+//
+//     node kin/scripts/vmsession-test.mjs <rust-vmsession-binary> [mutations] [seed] [schemas] [stress]
+import { spawnSync } from 'node:child_process';
+import { compile } from '../../host/js/src/compile.mjs';
+import { vmScratchWords, vmScratchInit, vmValidate } from '../../gen/js/snug/vm/api.mjs';
+import { buildVmCases } from './vm-allcases.mjs';
+import { sessionCases } from './vmsession-cases.mjs';
+import { runSession, sessionSteps } from './vmsession-run.mjs';
+import { hex } from './scan-cases.mjs';
+
+const [rustBin, mutArg, seedArg, schemaArg, stressArg] = process.argv.slice(2);
+const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 400), STRESS = Number(stressArg ?? 60);
+let fails = 0;
+const fail = msg => { if (fails < 40) console.log('  FAIL ' + msg); fails++; };
+
+// ---------------------------------------------------------------- cases
+const t0 = performance.now();
+const { programs, cases: vmCases } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail });
+const cases = vmCases.filter(c => !c.span).map(c => ({ ...c, vm: true }));
+const nSpan = vmCases.length - cases.length;
+const stressProg = new Map();
+for (const c of sessionCases(STRESS, SEED)) {
+  if (!stressProg.has(c.cddl)) {
+    const k = compile(c.cddl, { limits: { items: 1 << 20, entries: 1 << 20 } });
+    programs.push({ P: k.program, B: k.pool, label: c.cddl });
+    stressProg.set(c.cddl, { prog: programs.length - 1, rule: k.rules.indexOf('r') });
+  }
+  const { prog, rule } = stressProg.get(c.cddl);
+  cases.push({ prog, rule, lim: c.lim, bytes: c.bytes, label: c.label, stress: true });
+}
+
+// ---------------------------------------------------------------- the oracle
+const out = new Int32Array(8 + 2 * 257);
+let scratch = new Int32Array(0), markCap = 0;
+function buffer(c, lim) {
+  const { P, B } = programs[c.prog];
+  const cap = Math.max(markCap, P[16], 1);
+  const need = vmScratchWords(P, c.rule, cap);
+  if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
+  const code = vmValidate(P, B, c.rule, c.bytes, lim, scratch, out);
+  return code < 0 ? `ERR ${code}` : Array.from(out.slice(0, 8 + 2 * out[6])).join(' ');
+}
+function guard(arr, name) {
+  return new Proxy(arr, {
+    get(t, k) {
+      if (typeof k === 'string' && /^-?[0-9]+$/.test(k)) { const i = Number(k); if (i < 0 || i >= t.length) throw new Error(`out-of-bounds read ${name}[${i}] of ${t.length}`); return t[i]; }
+      const v = Reflect.get(t, k, t); return typeof v === 'function' ? v.bind(t) : v;
+    },
+    set(t, k, v) {
+      if (typeof k === 'string' && /^-?[0-9]+$/.test(k)) { const i = Number(k); if (i < 0 || i >= t.length) throw new Error(`out-of-bounds write ${name}[${i}] of ${t.length}`); t[i] = v; return true; }
+      t[k] = v; return true;
+    } });
+}
+
+// ---------------------------------------------------------------- runs
+let st = (SEED * 2654435761) >>> 0 || 1;
+const rnd = n => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st % n; };
+const runs = [];   // {ci, lim, policy, want, rust}
+const counts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, rnd4096: 0, quanta: 0, split: 0, budget: 0, generic: 0, sched1: 0 };
+cases.forEach((c, ci) => {
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0]);
+  const want0 = buffer(c, lim0);
+  const n = c.bytes.length;
+  const add = (lim, want, policy, tag, rust) => { runs.push({ ci, lim, want, policy, rust }); counts[tag]++; };
+  add(lim0, want0, { kind: 0, w: 0, q: 0, seed: 1, k: 0 }, 'whole', false);
+  add(lim0, want0, { kind: 1, w: 1, q: 0, seed: 1, k: 0 }, 'byte', true);
+  add(lim0, want0, { kind: 2, w: 7, q: 1 + rnd(3), seed: 1 + rnd(1 << 30), k: 0 }, 'rnd7', true);
+  add(lim0, want0, { kind: 2, w: 300, q: 0, seed: 1 + rnd(1 << 30), k: 0 }, 'rnd300', false);
+  add(lim0, want0, { kind: 2, w: 4096, q: rnd(4), seed: 1 + rnd(1 << 30), k: 0 }, 'rnd4096', true);
+  add(lim0, want0, { kind: 0, w: 0, q: 1 + rnd(3), seed: 1, k: 0 }, 'quanta', true);
+  if (n <= 48) for (let k = 1; k < n; k++) add(lim0, want0, { kind: 3, w: 0, q: k % 3 === 0 ? 1 : 0, seed: 1, k }, 'split', n <= 24);
+  // budgets stopping part-way
+  const nb = c.stress ? 3 : (ci % 5 === 0 ? 1 : 0);
+  if (nb > 0) {
+    const free = Int32Array.from(lim0); free[7] = -1;
+    const full = buffer(c, free).split(' ');
+    const used = full[0].startsWith('ERR') ? 0 : Number(full[3]);
+    for (let j = 0; j < nb; j++) {
+      const lb = Int32Array.from(lim0); lb[7] = rnd(used + 2);
+      const wb = buffer(c, lb);
+      add(lb, wb, { kind: 2, w: 7, q: rnd(3), seed: 1 + rnd(1 << 30), k: 0 }, 'budget', true);
+      if (c.stress) add(lb, wb, { kind: 1, w: 1, q: 0, seed: 1, k: 0 }, 'budget', false);
+    }
+  }
+  if (ci % 7 === 0) { const lg = Int32Array.from(lim0); lg[8] |= 1; add(lg, buffer(c, lg), { kind: 2, w: 5, q: 1, seed: 1 + rnd(1 << 30), k: 0 }, 'generic', true); }
+  if (ci % 11 === 0) { const l1 = Int32Array.from(lim0); l1[8] |= 2; add(l1, buffer(c, l1), { kind: 2, w: 9, q: 0, seed: 1 + rnd(1 << 30), k: 0 }, 'sched1', true); }
+});
+
+const t1 = performance.now();
+const js = runs.map(r => {
+  const c = cases[r.ci], { P, B } = programs[c.prog];
+  try { const x = runSession(P, B, c.rule, r.lim, c.bytes, r.policy); return x.error ? 'E ' + x.error : x.out; }
+  catch (e) { return 'THROW ' + e.message; }
+});
+const tJs = performance.now() - t1;
+let agree = 0;
+const desc = r => `${cases[r.ci].label} policy ${JSON.stringify(r.policy)} lim[7]=${r.lim[7]} lim[8]=${r.lim[8]} [${hex(cases[r.ci].bytes).slice(0, 60)}]`;
+runs.forEach((r, i) => { if (js[i] === r.want) agree++; else fail(`${desc(r)}: buffer ${r.want} | session ${js[i]}`); });
+
+// JS bounds: a sample behind traps
+let guarded = 0, trapFails = 0;
+runs.forEach((r, i) => {
+  const c = cases[r.ci];
+  if (!(i % 9 === 0 && c.bytes.length <= 2048 && r.policy.kind !== 0)) return;
+  guarded++;
+  const { P, B } = programs[c.prog];
+  let g;
+  try { const x = runSession(P, B, c.rule, r.lim, c.bytes, r.policy, { guard }); g = x.error ? 'E ' + x.error : x.out; }
+  catch (e) { g = 'THROW ' + e.message; }
+  if (g !== r.want) { trapFails++; fail(`${desc(r)}: trapped ${g} vs ${r.want}`); }
+});
+
+// interleaved sessions on one Program: three at a time, one step each in turn
+let inter = 0, interFails = 0;
+for (let i = 0; i + 2 < runs.length; i += 3 * 97) {
+  const group = [runs[i], runs[i + 1], runs[i + 2]].map(r => ({ ...r, policy: { ...r.policy, kind: 2, w: 5, q: 1 } }));
+  if (new Set(group.map(r => cases[r.ci].prog)).size !== 1) continue;
+  const its = group.map(r => { const c = cases[r.ci], { P, B } = programs[c.prog]; return sessionSteps(P, B, c.rule, r.lim, c.bytes, r.policy); });
+  const res = group.map(() => null);
+  let live = 3;
+  while (live > 0) for (let k = 0; k < 3; k++) {
+    if (res[k] !== null) continue;
+    const x = its[k].next();
+    if (x.done) { res[k] = x.value.error ? 'E ' + x.value.error : x.value.out; live--; }
+  }
+  group.forEach((r, k) => { inter++; if (res[k] !== r.want) { interFails++; fail(`${desc(r)}: interleaved ${res[k]} vs ${r.want}`); } });
+}
+
+// ---------------------------------------------------------------- Rust
+let rustLine = '  SKIP Rust (no binary given)';
+if (rustBin) {
+  const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
+  const sel = [];
+  runs.forEach((r, i) => {
+    if (!r.rust) return;
+    const c = cases[r.ci], pol = r.policy;
+    sel.push(i);
+    lines.push(`case ${c.prog} ${c.rule} ${Array.from(r.lim).join(' ')} ${pol.kind} ${pol.w} ${pol.q} ${pol.seed >>> 0} ${pol.k} ${c.bytes.length ? hex(c.bytes) : '-'}`);
+  });
+  const t2 = performance.now();
+  const p = spawnSync(rustBin, [], { input: lines.join('\n') + '\n', maxBuffer: 1 << 30, encoding: 'utf8' });
+  const tRs = performance.now() - t2;
+  if (p.status !== 0) fail(`the Rust binary exited ${p.status}: ${p.stderr.slice(0, 400)}`);
+  const rs = p.stdout.trim().split('\n');
+  if (rs.length !== sel.length) fail(`Rust answered ${rs.length} lines, expected ${sel.length}`);
+  let ra = 0, panics = 0;
+  sel.forEach((i, k) => {
+    if (rs[k] === 'PANIC') { panics++; fail(`${desc(runs[i])}: Rust PANICKED`); return; }
+    if (rs[k] !== js[i]) { fail(`${desc(runs[i])}: JS ${js[i]} | Rust ${rs[k]}`); return; }
+    ra++;
+  });
+  rustLine = `  ${ra === sel.length ? 'ok  ' : 'FAIL'} JS == Rust (debug, overflow checks on): ${ra}/${sel.length} session runs, whole out array, ${panics} panics (${(tRs / 1000).toFixed(1)} s)`;
+}
+
+const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
+const nStress = cases.filter(c => c.stress).length;
+line(agree === runs.length, `session == buffer driver: ${agree}/${runs.length} runs give vm-validate's whole out array, over ${cases.length - nStress} vm-test cases (${MUTATIONS} mutations, ${SCHEMAS} oracle schemas, seed ${SEED}; ${nSpan} span cases are not sessions) and ${nStress} stress cases`);
+console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+line(trapFails === 0, `JS bounds: ${guarded} runs behind throwing out-of-bounds traps on P, B, window, scratch, session array, key arena, out`);
+line(interFails === 0, `interleaved sessions: ${inter} sessions run three at a time, a step each in turn, on one Program`);
+console.log(rustLine);
+console.log(`  info ${programs.length} programs; JS ran ${runs.length} sessions in ${(tJs / 1000).toFixed(1)} s (all ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
+if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
+console.log('  ok   vmsession-test');
