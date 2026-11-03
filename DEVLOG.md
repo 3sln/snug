@@ -2032,6 +2032,57 @@ quality and reproducibility rather than unsupported completion claims.
 generated gates during active parallel work (outside this item's scope).
 - [ ] **Signed off** (owner)
 
+### D110 — Explicit Unicode data port and source-key binding
+**Decision**: extend the kin compile entry point with a read-only flat int
+array of `[category id, lo, hi]` triples; an empty array means no module.
+Ids are first ASCII letter × 256 + suffix (zero for aggregate categories).
+Kin checks category ids, sorted/disjoint/non-adjacent scalar ranges and the
+surrogate gap, copies the data into the compiler arena, then resolves
+`\p{X}` / `\P{X}` into existing regexp classes. Missing category ranges
+are empty; Cs is always empty. Hosts provide data, never a matching callback.
+JS uses `compile(text, {unicode: tables})` with `tables` from `snug/unicode`;
+Rust has `CompileOptions {unicode: Some(&tables), …}` and
+`compile_with_options` / `compile_bytes_with_options`. Existing Rust compile
+calls keep working without tables. Table ingestion and source-key encoding
+charge one unit per input word; category search, copied ranges and class
+binary-search probes are charged, with existing sort/automaton charges and
+position limits retained. Missing-module failures keep code `regexp` and
+carry a message naming the module.
+
+When tables are supplied, append their complete canonical word array as a
+seventh CBOR element in D039's source-key preimage. With no tables D039's
+preimage is unchanged. The Program/container layout is unchanged; the VM
+and Program loader never import or retain the optional Unicode module.
+**Why**: D003/D032 require explicit deterministic host data and kin-owned
+accept/refuse decisions. The table content, rather than a mutable version
+label, must determine the cache key; independently generated JS/Rust
+Programs and independently recomputed hashes gate this. Charging class
+probes closes the table-dependent binary-search work that a constant
+per-atom charge alone would miss.
+**Alternatives**: host regexp callbacks; bundling tables into the VM; hashing
+only Unicode version metadata; changing the Program format (all unnecessary
+or contrary to D083).
+- [ ] **Signed off** (owner)
+
+### D111 — Offline ICU generation pinned to Unicode 16.0
+**Decision**: `tools/unicode/categories.json` lists RFC 9485 category names;
+`gen-tables.mjs` tests all U+0000..U+10FFFF against Node's ICU
+`\p{gc=…}` regexps, excluding surrogates, and emits JS and Rust from the same
+packed byte stream. Both outputs name the generator, Node v24.6.0 and
+Unicode 16.0; ICU is 77.1. Range gaps/spans use unsigned base-128 varints,
+base64 in JS and a byte array in Rust. `--check` regenerates in memory and
+requires byte-identical output, including the pinned Node header. Generator
+inputs and generated data are checked in; runtime upgrades do not regenerate
+or change category semantics implicitly. Treat exported tables as immutable.
+**Why**: this environment has no network/install requirement or external
+Unicode file dependency. Scalar-only tables implement RFC 9485's empty Cs;
+C also excludes surrogates. Node supplies an independent category oracle for
+VM boundary/neighbour/random tests. The existing wire profile's noncharacter
+refusals are counted and asserted separately from category comparisons.
+**Alternatives**: download UCD data; query a host regexp engine during
+validation; inherit each host's possibly different installed Unicode version.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-10-29 (manager): **bundle sizes vs R9** (esbuild 0.28 minify, node
@@ -2106,7 +2157,53 @@ are answered as provisional decisions D082–D085. None is open now.
 - [ ] **P7.1 — General default profile** (D081): key kinds, standard tag set,
   presets `deterministic` (default) and `bindle`; scanner, VM, builder, writer.
 - [ ] **P7.2 — Extension controls** (D082) and the generic controls module.
-- [ ] **P7.3 — Unicode `\p{…}` table module** (D083).
+- [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
+  *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.
+  Offline Node v24.6.0 / ICU 77.1 / Unicode 16.0 generation produces the same
+  **6,419 ranges across 37 category names** (empty Cs included) for both
+  hosts. Optional `snug/unicode` export and types; JS/Rust explicit compile
+  options; kin-owned property parsing, complements, class unions, canonical
+  table checks and compile-budget charging. No VM/source-adapter changes,
+  no Program format change, no implicit runtime or compiler table import.
+  Complete table data binds the opted-in SOURCE_KEY; no-table keys remain
+  unchanged. Headers preserve generator/runtime/Unicode provenance.
+
+  *Sizes*: JS **19,875 source / 19,377 minified / 9,287 gzip-9 bytes**;
+  Rust source **37,361 bytes**; packed shared data **14,109 bytes**; decoded
+  Int32 triples **77,028 bytes**. Machine, versions and reproducible method
+  are in `bench/README.md` (Apple M1 Pro, arm64, macOS 14.6.1, esbuild 0.28.2).
+
+  *Checks actually run*: compiler-only `kin/scripts/compile-emit`;
+  **bb unicode-test**: exact offline regeneration, **1 Rust API test**, **574
+  JS == Rust outcomes (368 complete verified Programs / 206 errors)**,
+  including **400 seeded Unicode schema mutations**, malformed table inputs,
+  float-port retries, **1,037 arena-growth retries** across starting sizes
+  and low budgets, independent baseline-CBOR/node:crypto source-key check;
+  **40 JS VM/API tests**, **51,548 category/complement scalar comparisons**
+  against Node and **270 noncharacter profile refusals** checked separately.
+  **bb compile-test**: **301/301 identical outcomes**, **270/270 verified
+  Programs**, unchanged §15 example (286 words / 14-byte pool), **55/55
+  independently recomputed no-table source keys**, **13,229/13,229 corruption
+  verdicts identical**. **bb compile-fuzz**: **3,000 texts**, seed 24,301,
+  **441 compiled / 2,559 refused**, no crash/internal failure/budget overrun;
+  **375** arena-size checks agree. **cd host/js && npm test**: **1,036 passed,
+  0 failed, 0 skipped**, including Unicode tests, all seven export/declaration
+  checks and existing staged-package checks. Unicode guide example and a scratch-staged bare
+  `snug/unicode` import/compile/stored-Program validation executed
+  successfully. Offline TypeScript was absent; no semantic tsc claim.
+  Babashka printed a sandbox-denied process-descendant cleanup stack trace
+  after successful gates; gate assertions completed successfully.
+
+  *Learnt*: optional table semantics must be in the cache key, even without
+  changing the Program format. Large category classes require charging each
+  class probe as well as copying/sorting ranges. Cs must be empty before
+  grouping C; complements can contain unreachable surrogate intervals in
+  the automaton but no UTF-8 text can reach them. The current profile rejects
+  noncharacters independently of I-Regexp; those are not category mismatches.
+  Node's explicit `test/` runner uses `test/index.js`, so the new tests must
+  be imported there. Tables are compile-time inputs; their decoded-size
+  figure excludes temporary decode storage and compiler arena peak memory.
+
 - [x] **P7.4 — Serialised Program API** (D084), JS host side.
   *Done 2026-11-03; manager commit pending; no commit made.* Public
   program.serialize() returns deterministic Uint8Array; fromSerialized checks

@@ -7,13 +7,14 @@
 //     ok <verify result> <program words as 8-hex-digit groups> <pool hex>
 //     err <code> <line> <column> <rule or ->
 //
+// Prefix `U ` loads the pinned Unicode module; `T <table words hex> ` passes explicit test data.
 // A line `V <program words as 8-hex-digit groups> <pool hex> <mark cap>` runs
 // only the verifier and prints `v <result> <detail word> <check id>`.
 //
 // A panic is caught per case and printed as `PANIC`: the compiler and the
 // verifier must never panic on any input, and this binary is built in debug
 // (overflow checks on).
-use snug::compile::compile_bytes;
+use snug::compile::{compile_bytes_with_options, CompileOptions};
 use snug::snug::program::verify::vm_verify;
 use std::fmt::Write as _;
 use std::io::{BufRead, Write};
@@ -61,11 +62,20 @@ fn main() {
             }
             continue;
         }
+        let (line, tables) = if let Some(rest) = line.strip_prefix("T ") {
+            let (words, rest) = rest.split_once(' ').unwrap_or(("", rest));
+            let table = (0..words.len() / 8)
+                .map(|i| u32::from_str_radix(&words[8 * i..8 * i + 8], 16).unwrap_or(0) as i32)
+                .collect::<Vec<_>>();
+            (rest, Some(table))
+        } else if let Some(rest) = line.strip_prefix("U ") {
+            (rest, Some(snug::unicode_tables::tables()))
+        } else { (line.as_str(), None) };
         let mut f = line.split(' ');
         let profile: i32 = f.next().unwrap_or("0").parse().unwrap_or(0);
         let text = unhex(f.next().unwrap_or(""));
         let limits: Vec<i32> = f.map(|x| x.parse().unwrap_or(-1)).collect();
-        let r = std::panic::catch_unwind(|| match compile_bytes(&text, profile, &limits) {
+        let r = std::panic::catch_unwind(|| match compile_bytes_with_options(&text, &CompileOptions { profile, limits: &limits, unicode: tables.as_deref() }) {
             Ok(c) => {
                 let m = (c.program.get(16).copied().unwrap_or(1)).max(1) as usize;
                 let mut s = vec![0i32; 48 + 2 * m + 16];

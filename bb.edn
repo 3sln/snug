@@ -17,6 +17,8 @@
               :task (apply shell "kin/scripts/rscan-test" *command-line-args*)}
   compile-test {:doc "P3.2/P3.3: every corpus schema through the compiler on JS and Rust; refusals, identity, program.md §15, vm-verify."
                 :task (apply shell "kin/scripts/compile-test" *command-line-args*)}
+  unicode-test {:doc "P7.3: offline Unicode tables, JS/Rust Program identity, category samples through the VM."
+                :task (shell "kin/scripts/unicode-test")}
   vm-test    {:doc "P3.4: the VM on JS and Rust -- §15, profile identity vs the scanner, the corpus through the compiler, assembled programs, JS == Rust."
               :task (apply shell "kin/scripts/vm-test" *command-line-args*)}
   compile-fuzz {:doc "P3.2/P3.3: seeded random/mutated CDDL; only SchemaError, no panic, budget kept, JS == Rust, vm-verify accepts."

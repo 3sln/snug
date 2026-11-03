@@ -4,3 +4,4 @@ pub mod snug;
 pub mod compile;
 pub mod schema;
 pub mod sha256;
+pub mod unicode_tables;

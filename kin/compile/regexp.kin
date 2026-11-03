@@ -1,7 +1,7 @@
 ;; `.regexp`: RFC 9485 I-Regexp, anchored at both ends (architecture §4.7,
 ;; D014), compiled to a Glushkov automaton over code-point classes.
 ;;
-;; Refused: `\p{..}` / `\P{..}` (D014) and every escape that is not
+;; Unicode categories use explicit compile-time tables (D083). Refused: every escape that is not
 ;; I-Regexp (`\d \w \s \x..` and the like), as ERR_REGEXP. Counted
 ;; repetition unrolls within the regexp position limit (ERR_LIM_RPOS, checked
 ;; before anything is built).
@@ -11,12 +11,12 @@
 ;; first[W], accept[W], follow[npos * W], atom_start[natoms],
 ;; atom_mask[natoms * W] (program.md §8.2). Regexps are interned by pattern.
 (ns snug.compile.regexp
-  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst case forever break declarefn]]
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or
-                               < > <= >= == != and or not]]
+                               < > <= >= == != and or not ia ilen rem]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
                                         mix ht-init ht-start ht-id ht-next ht-put sort-records
-                                        INF ERR_REGEXP ERR_LIM_RPOS ERR_LIM_NESTING ERR_INTERNAL
+                                        T_UNICODE ERR_NEED_UNICODE INF ERR_REGEXP ERR_LIM_RPOS ERR_LIM_NESTING ERR_INTERNAL
                                         H_R0 H_R1 H_DEPTH H_DEPTH_MAX H_LIM_RPOS H_G0 H_ERR
                                         T_RX T_RXD T_RXA T_HRX T_STK2 T_STK4 T_STK8 T_GPOS T_GOUT T_BYTE]]
             [snug.compile.bytes :refer [bid-off bid-len]]
@@ -25,6 +25,73 @@
                                         G_POS G_SEQ G_ALT G_REP G_EMPTY]]))
 
 (defconst ^I32 CP_MAX 1114111)
+
+;; Category ids are the ASCII first letter * 256 + suffix (0 for aggregates).
+;; The host only supplies data; kin checks its canonical ordering and scalar ranges.
+(defn ^Bool category-valid [^I32 id]
+  (case id
+    [17152] true
+    [17251] true
+    [17254] true
+    [17262] true
+    [17263] true
+    [17267] true
+    [19456] true
+    [19564] true
+    [19565] true
+    [19567] true
+    [19572] true
+    [19573] true
+    [19712] true
+    [19811] true
+    [19813] true
+    [19822] true
+    [19968] true
+    [20068] true
+    [20076] true
+    [20079] true
+    [20480] true
+    [20579] true
+    [20580] true
+    [20581] true
+    [20582] true
+    [20585] true
+    [20591] true
+    [20595] true
+    [21248] true
+    [21347] true
+    [21355] true
+    [21357] true
+    [21359] true
+    [23040] true
+    [23148] true
+    [23152] true
+    [23155] true
+    :else false))
+
+(defn ^:pub ^Bool unicode-init [^Ints h ^IntsR unicode]
+  (let [n (ilen unicode)]
+    (if (!= (rem n 3) 0) (do (fail h ERR_REGEXP (neg 1)) (return false)))
+    (if (not (charge h n)) (return false))
+    (let [^:mut prev-id (neg 1)
+          ^:mut prev-hi (neg 2)]
+      (for [^I32 i 0 (quot n 3)]
+        (let [id (ia unicode (* i 3))
+              lo (ia unicode (+ (* i 3) 1))
+              hi (ia unicode (+ (* i 3) 2))]
+          (if (or (not (category-valid id))
+                  (or (< id prev-id)
+                      (or (or (< lo 0) (or (< hi lo) (> hi CP_MAX)))
+                          (or (and (<= lo 57343) (>= hi 55296))
+                              (or (== id 17267) (and (== id prev-id) (<= lo (+ prev-hi 1))))))))
+            (do (fail h ERR_REGEXP (neg 1)) (return false)))
+          (vpush1 h T_UNICODE id)
+          (vpush1 h T_UNICODE lo)
+          (vpush1 h T_UNICODE hi)
+          (if (erred h) (return false))
+          (set prev-id id)
+          (set prev-hi hi))))
+    (return true)))
 
 (defn ^:pub ^Bool rx-init [^Ints h]
   (vtrunc h T_RX 0)
@@ -130,12 +197,13 @@
         (if (erred h) (return (neg 1)))
         (return at)))))
 
-(defn ^Bool class-has [^IntsR h ^I32 cls ^I32 cp]
+(defn ^Bool class-has [^Ints h ^I32 cls ^I32 cp]
   (comment "Does class cls contain code point cp? (binary search)")
   (let [n (vget h T_RXA cls)
         ^:mut lo 0
         ^:mut hi (- n 1)]
     (while (<= lo hi)
+      (if (not (charge h 1)) (return false))
       (let [mid (sar (+ lo hi) 1)
             a (vget h T_RXA (+ cls (+ 1 (* 2 mid))))
             b (vget h T_RXA (+ cls (+ 2 (* 2 mid))))]
@@ -159,6 +227,51 @@
   (vpush1 h T_STK8 lo)
   (vpush1 h T_STK8 hi)
   (return 0))
+
+(defn ^Bool property-escape [^IntsR h]
+  (return (and (== (pc h (at h)) 92)
+               (or (== (pc h (+ (at h) 1)) 112) (== (pc h (+ (at h) 1)) 80)))))
+
+(defn ^Bool parse-property [^Ints h]
+  (comment "Append a category or its complement to T_STK8; one regexp position."
+           "Each binary-search probe and each copied range is charged.")
+  (if (== (vlen h T_UNICODE) 0)
+    (do (fail h ERR_NEED_UNICODE (neg 1)) (return false)))
+  (let [negate (== (pc h (+ (at h) 1)) 80)]
+    (mv h 2)
+    (if (!= (pc h (at h)) 123) (do (fail h ERR_REGEXP (neg 1)) (return false)))
+    (mv h 1)
+    (let [^:mut id (* (pc h (at h)) 256)]
+      (if (not (category-valid id)) (do (fail h ERR_REGEXP (neg 1)) (return false)))
+      (mv h 1)
+      (if (!= (pc h (at h)) 125)
+        (do (if (or (< (pc h (at h)) 97) (> (pc h (at h)) 122))
+              (do (fail h ERR_REGEXP (neg 1)) (return false)))
+            (set id (+ id (pc h (at h)))) (mv h 1)))
+      (if (or (!= (pc h (at h)) 125) (not (category-valid id)))
+        (do (fail h ERR_REGEXP (neg 1)) (return false)))
+      (mv h 1)
+      (let [n (quot (vlen h T_UNICODE) 3)
+            ^:mut lo 0
+            ^:mut hi (quot (vlen h T_UNICODE) 3)
+            ^:mut next 0]
+        (while (< lo hi)
+          (if (not (charge h 1)) (return false))
+          (let [mid (sar (+ lo hi) 1)]
+            (if (< (vget h T_UNICODE (* mid 3)) id)
+              (set lo (+ mid 1)) (set hi mid))))
+        (while (and (< lo n) (== (vget h T_UNICODE (* lo 3)) id))
+          (if (not (charge h 1)) (return false))
+          (let [a (vget h T_UNICODE (+ (* lo 3) 1))
+                b (vget h T_UNICODE (+ (* lo 3) 2))]
+            (if negate
+              (if (> a next) (range-push h next (- a 1)))
+              (range-push h a b))
+            (set next (+ b 1)))
+          (if (erred h) (return false))
+          (set lo (+ lo 1)))
+        (if (and negate (<= next CP_MAX)) (range-push h next CP_MAX)))))
+  (return (not (erred h))))
 
 (defn ^I32 parse-class-char [^Ints h]
   (comment "A CCchar at the cursor (a plain char or a SingleCharEsc): its code"
@@ -189,9 +302,9 @@
              (if (or first (== (pc h (+ (at h) 1)) 93))
                (do (range-push h 45 45) (mv h 1))
                (return (fail h ERR_REGEXP (neg 1)))))
-         (do (if (and (== c 92) (or (== (pc h (+ (at h) 1)) 112) (== (pc h (+ (at h) 1)) 80)))
-               (return (fail h ERR_REGEXP (neg 1))))
-             (let [lo (parse-class-char h)]
+         (if (property-escape h)
+           (if (not (parse-property h)) (return (neg 1)))
+           (do (let [lo (parse-class-char h)]
                (if (< lo 0) (return (neg 1)))
                (if (and (== (pc h (at h)) 45) (!= (pc h (+ (at h) 1)) 93))
                  (do (mv h 1)
@@ -199,7 +312,7 @@
                        (if (< hi 0) (return (neg 1)))
                        (if (< hi lo) (return (fail h ERR_REGEXP (neg 1))))
                        (range-push h lo hi)))
-                 (range-push h lo lo))))))
+                 (range-push h lo lo)))))))
      (set first false))
     (mv h 1)
     (return (class-commit h from negate))))
@@ -244,6 +357,12 @@
           (let [dot (make-dot h)]
             (if (< dot 0) (return (neg 1)))
             (return (g-node h G_POS dot 0 0)))))
+    (if (property-escape h)
+      (let [from (vlen h T_STK8)]
+        (if (not (parse-property h)) (return (neg 1)))
+        (let [prop-class (class-commit h from 0)]
+          (if (< prop-class 0) (return (neg 1)))
+          (return (g-node h G_POS prop-class 0 0)))))
     (if (== c 92)
       (do (let [e (single-esc (pc h (+ (at h) 1)))]
             (if (< e 0) (return (fail h ERR_REGEXP (neg 1))))
@@ -336,9 +455,11 @@
         (do (comment "A pattern error is reported at the control's position, not inside"
                      "the pattern; any other failure (the arena, the budget, nesting) is"
                      "kept as it is, so the host still retries an exhausted arena.")
-            (if (or (== (hg h H_ERR) 0) (== (hg h H_ERR) ERR_REGEXP))
-              (do (hs h H_ERR 0)
-                  (return (fail h ERR_REGEXP pos))))
+            (if (or (== (hg h H_ERR) 0) (or (== (hg h H_ERR) ERR_REGEXP) (== (hg h H_ERR) ERR_NEED_UNICODE)))
+              (let [code (hg h H_ERR)]
+                (hs h H_ERR 0)
+                (if (== code ERR_NEED_UNICODE) (return (fail h ERR_NEED_UNICODE pos)))
+                (return (fail h ERR_REGEXP pos))))
             (return (neg 1))))
       (let [npos (g-count h root)]
         (if (> npos (hg h H_LIM_RPOS)) (return (fail h ERR_LIM_RPOS pos)))
@@ -397,6 +518,7 @@
           (for [^I32 a 0 natoms]
             (let [cp (vget h T_RXD (+ astart a))]
               (for [^I32 p3 0 npos]
+                (if (erred h) (return (neg 1)))
                 (if (class-has h (vget h T_GPOS (* p3 4)) cp)
                   (do (let [at3 (+ mstart (+ (* a w) (sar p3 5)))
                             old3 (vget h T_RXD at3)]

@@ -66,6 +66,7 @@
 (defconst ^:pub ^I32 ERR_PROFILE 51)
 (defconst ^:pub ^I32 ERR_EMPTY 52)
 (defconst ^:pub ^I32 ERR_ARRAY_KEY 53)
+(defconst ^:pub ^I32 ERR_NEED_UNICODE 54)
 
 ;; ------------------------------------------------------------ the header
 (defconst ^:pub ^I32 H_TOP 0)
@@ -250,6 +251,7 @@
 (defconst ^:pub ^I32 T_HSIG 112)
 (defconst ^:pub ^I32 T_NCLS 113)
 (defconst ^:pub ^I32 T_CONT 114)
+(defconst ^:pub ^I32 T_UNICODE 115)
 (defconst ^:pub ^I32 H_WALK_RULE 61)
 (defconst ^:pub ^I32 H_TS_ANY 59)
 (defconst ^:pub ^I32 H_N_FIN 60)

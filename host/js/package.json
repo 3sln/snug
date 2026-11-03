@@ -11,6 +11,7 @@
     "./compile": { "types": "./types/compile.d.ts", "default": "./src/public-compile.mjs" },
     "./view": { "types": "./types/view.d.ts", "default": "./src/public-view.mjs" },
     "./writer": { "types": "./types/writer.d.ts", "default": "./src/public-writer.mjs" },
+    "./unicode": { "types": "./types/unicode.d.ts", "default": "./src/unicode-tables.mjs" },
     "./sources": { "types": "./types/sources.d.ts", "default": "./src/public-sources.mjs" }
   },
   "types": "./types/index.d.ts",

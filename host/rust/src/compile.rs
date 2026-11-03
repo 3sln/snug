@@ -3,7 +3,7 @@
 //! limits, the compile budget, the Program's bytes -- is kin's; this file owns
 //! only the arena, the decimal float-literal port (D020: `str::parse::<f64>`,
 //! at most 17 significant digits, checked by kin) and the result's shape.
-use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_FLOATS};
+use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE};
 use crate::snug::compile::main as kc;
 use std::cell::RefCell;
 
@@ -15,6 +15,7 @@ pub struct SchemaError {
     pub line: i32,
     pub column: i32,
     pub rule: Option<String>,
+    pub message: &'static str,
 }
 
 /// A compiled schema: the Program words and pool (docs/program.md, format 1)
@@ -48,9 +49,26 @@ pub fn compile(text: &str, profile: i32, limits: &[i32]) -> Result<Compiled, Sch
     compile_bytes(text.as_bytes(), profile, limits)
 }
 
+/// Optional explicit compile-time Unicode ranges. The default loads no tables.
+#[derive(Default)]
+pub struct CompileOptions<'a> {
+    pub profile: i32,
+    pub limits: &'a [i32],
+    pub unicode: Option<&'a [i32]>,
+}
+
+pub fn compile_with_options(text: &str, options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
+    compile_bytes_with_options(text.as_bytes(), options)
+}
+
 pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compiled, SchemaError> {
+    compile_bytes_with_options(bytes, &CompileOptions { profile, limits, unicode: None })
+}
+
+pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
+    let CompileOptions { profile, limits, unicode } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
-    opt[0] = profile;
+    opt[0] = *profile;
     for (i, v) in limits.iter().enumerate().take(opt.len() - 1) {
         opt[i + 1] = *v;
     }
@@ -58,10 +76,10 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
     let r = ARENA.with(|cell| {
         let mut h = cell.borrow_mut();
         loop {
-            let code = kc::compile_schema(bytes, &opt, &fl, &mut h);
+            let code = kc::compile_schema(bytes, &opt, &fl, unicode.unwrap_or(&[]), &mut h);
             if code == ERR_ARENA {
                 if h.len() >= ARENA_MAX_WORDS as usize {
-                    return Err(SchemaError { code: "limit_memory", line: 0, column: 0, rule: None });
+                    return Err(SchemaError { code: "limit_memory", line: 0, column: 0, rule: None, message: "CDDL schema refused" });
                 }
                 let n = (h.len() * 2).min(ARENA_MAX_WORDS as usize);
                 *h = vec![0; n];
@@ -85,10 +103,13 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
                     line: kc::error_line(&h),
                     column: kc::error_column(&h),
                     rule,
+                    message: if code == ERR_NEED_UNICODE {
+                        "Unicode categories require snug::unicode_tables (snug/unicode)"
+                    } else { "CDDL schema refused" },
                 });
             }
             if kc::out_program_words(&h) < 64 {
-                return Err(SchemaError { code: "internal", line: 0, column: 0, rule: None });
+                return Err(SchemaError { code: "internal", line: 0, column: 0, rule: None, message: "CDDL schema refused" });
             }
             let p = kc::out_program_at(&h) as usize;
             let b = kc::out_pool_at(&h) as usize;
@@ -145,4 +166,23 @@ pub fn rule_names(program: &[i32], pool: &[u8]) -> Vec<String> {
             String::from_utf8_lossy(&pool[off..off + len]).into_owned()
         })
         .collect()
+}
+
+#[cfg(test)]
+mod unicode_tests {
+    use super::*;
+
+    #[test]
+    fn optional_tables_and_missing_module_diagnostic() {
+        let text = r#"r = tstr .regexp "\\p{L}""#;
+        let error = compile(text, 0, &[]).unwrap_err();
+        assert_eq!(error.code, "regexp");
+        assert!(error.message.contains("snug::unicode_tables"));
+        let tables = crate::unicode_tables::tables();
+        let options = CompileOptions { unicode: Some(&tables), ..Default::default() };
+        let result = compile_with_options(text, &options).unwrap();
+        assert_eq!(result, compile_bytes_with_options(text.as_bytes(), &options).unwrap());
+        assert_eq!(result.rules, vec!["r"]);
+        assert_eq!(crate::unicode_tables::UNICODE_VERSION, "16.0");
+    }
 }

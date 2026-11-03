@@ -7,3 +7,4 @@ import './writer.test.mjs';
 import './serialized.test.mjs';
 import './package.test.mjs';
 import './examples.test.mjs';
+import './unicode.test.mjs';

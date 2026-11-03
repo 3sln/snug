@@ -374,9 +374,14 @@ whose class contains the code point. Cost per code point is
 `(active + 1) × ⌈P/32⌉` word operations and is **charged as such** (C11, A7);
 the worst case is `P × ⌈P/32⌉` = 2 048 word operations at P = 256. A class
 lookup is a binary search over the regexp's range table. Counted repetition
-unrolls within the position limit. `\p{…}` is refused in revision 2 (D014);
-so are `\d \w \s` and `\x..`, which are not I-Regexp (the CDDL string literal
-can carry `\u` escapes instead).
+unrolls within the position limit. D083/P7.3 adds `\\p{…}` and `\\P{…}` via
+an explicitly supplied, compile-time-only `snug/unicode` module (Unicode 16.0,
+D110–D111); without it these remain schema errors naming the module. Kin
+resolves categories into the existing classes, including class unions and
+complements; Cs is empty because text has no surrogates. Table ingestion,
+lookup and class probes consume compile budget. Validation and stored
+Programs need no table module. `\\d \\w \\s` and `\\x..` are refused as non-I-Regexp
+(the CDDL string literal can carry `\\u` escapes instead).
 
 ### 4.8 Semantic notes
 

@@ -9,7 +9,7 @@ from the prelude but its CBOR simple value is refused by the scanner.
 
 The compiler and matcher are kin, shared by JS and Rust. This document
 describes the current implementation, informed by D010–D014, D020–D025,
-D031–D043, and the [architecture](architecture.md#4-validation-semantics).
+D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validation-semantics).
 
 ## Grammar and types
 
@@ -65,6 +65,43 @@ depth still bounds embedding. A schema querying both `.cbor` and `.cborseq`
 on the same bytes can cause separate inner walks; the work budget bounds it
 (D040). The one-pass claim does not promise one visit across independent
 embedded interpretations.
+
+## Unicode regexp categories
+
+`.regexp` matches the whole text as RFC 9485 I-Regexp. Opt in to Unicode
+General_Category escapes with `compile(text, { unicode: tables })`, importing
+`tables` from `snug/unicode`. `\p{X}` selects category X and `\P{X}` its
+complement; both work inside classes, including `[\p{L}\p{Nd}_-]` and
+negated classes. Escapes are case-sensitive. Supported names are:
+
+```
+L Lu Ll Lt Lm Lo   M Mn Mc Me   N Nd Nl No
+P Pc Pd Ps Pe Pi Pf Po   Z Zs Zl Zp   S Sm Sc Sk So
+C Cc Cf Co Cn Cs
+```
+
+`Cs` is empty: surrogate code points never occur in Unicode text. `C` also
+excludes surrogates; `\P{Cs}` matches any single scalar allowed by the wire
+profile. The current profile rejects noncharacters with `cbor/text`, even
+when a category would otherwise match. Category aliases, scripts, blocks,
+`gc=…` spellings in CDDL and host-engine extensions are refused.
+
+Tables are pinned to **Unicode 16.0**, generated offline from **Node
+v24.6.0 / ICU 77.1**, and checked in for JS and Rust. The separate JS module
+is **19,377 bytes minified / 9,287 bytes gzip-9** (complete exported module;
+[method](../bench/README.md#unicode-table-module-p73)). It is never imported
+implicitly by the compiler or runtime. Without tables, category escapes
+remain a `regexp` schema error whose message names `snug/unicode`.
+
+Kin checks the sorted scalar-range data and charges table ingestion, lookup,
+class normalisation and atom construction against the compile budget.
+A category consumes one regexp position regardless of its range count;
+quantifiers still obey the position limit. Compiled Programs contain only
+the resulting automata and use the existing format. Unicode tables and
+version metadata are unnecessary for validation or loading stored Programs.
+The source key includes supplied table contents (D110), so regenerating with
+another Unicode version cannot reuse a key for different category semantics.
+See the [loading example](guide.md#optional-unicode-regexp-tables).
 
 ## Map determinism and cuts
 
@@ -138,7 +175,7 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 | --- | --- |
 | `.pcre`, `.abnf`, `.abnfb` | `unsupported_control`; portable, bounded engines required (D013). |
 | Unknown/custom controls, including `.chars`, `.unique`, `.samelen` | `unknown_control`; extension leaf/predicate mechanism and optional generic controls are planned in P7.2 (D082). |
-| Regexp `\p{…}`/`\P{…}` | `regexp`; optional pinned Unicode table module planned in P7.3, not exported now (D014/D083). |
+| Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `snug/unicode` and pass `unicode: tables` (D083). |
 | Regexp `\d`, `\w`, `\s`, `\x..`, lookarounds, backreferences, host-engine extensions | `regexp`; use the supported I-Regexp grammar. No host regex engine/ReDoS path. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
 | Unprovable map overlap / unsupported cut placement | `map_overlap` / `map_cut`; exact existential meaning must be provable. |

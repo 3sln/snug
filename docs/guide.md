@@ -30,6 +30,53 @@ It does not select the codec wire policy. The default is `full`. `bus`
 refuses recursion, regexps and unbounded structures; it is useful for
 untrusted schemas, within its supported subset. See [profiles](profiles.md).
 
+## Optional Unicode regexp tables
+
+```js
+import { tables, unicodeVersion } from 'snug/unicode';
+const words = await compile(String.raw`word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"`, {
+  unicode: tables,
+});
+// unicodeVersion === '16.0'
+```
+
+The extra JavaScript module is 19,377 bytes minified, 9,287 bytes gzip-9,
+with 77,028 bytes of decoded Int32 ranges; see the
+[measurement method](../bench/README.md#unicode-table-module-p73).
+It is pinned to Unicode 16.0, generated from Node v24.6.0 / ICU 77.1 without
+network access. Exported `nodeVersion` and `unicodeVersion` identify its
+inputs. A newer runtime does not silently update these checked-in tables.
+Treat `tables` as immutable compile-time data.
+
+Both `\p{X}` and `\P{X}` accept the RFC 9485 general-category names, inside
+or outside character classes. `String.raw` preserves CDDL's doubled backslashes
+in the example. Without the option, these escapes raise a `SchemaError`
+with code `regexp` and a message naming `snug/unicode`. `Cs` matches nothing;
+surrogates cannot occur in text. The current CBOR profile still refuses
+noncharacters before regexp matching. [Category details](cddl-support.md#unicode-regexp-categories).
+
+Compile where the tables are available, then serialize the Program for a
+validation-only bundle. The runtime and Program loader need no Unicode
+module. Table contents are included in the source key; even schemas without
+category escapes get a different key when compiled with supplied tables.
+There is no change to the Program format.
+
+Rust uses the same generated data through an explicit compile option:
+
+```rust
+use snug::compile::{compile_with_options, CompileOptions};
+let tables = snug::unicode_tables::tables();
+let options = CompileOptions { unicode: Some(&tables), ..Default::default() };
+let compiled = compile_with_options(r#"word = tstr .regexp "\\p{L}+""#, &options)?;
+```
+
+For maintainers, `node tools/unicode/gen-tables.mjs` regenerates both hosts
+from the running Node's ICU. `--check` verifies exact reproducibility and
+requires the pinned Node version; `bb unicode-test` also compares the two
+hosts' Programs and checks VM matches against Node's pinned Unicode oracle.
+Regeneration under a different Node/Unicode version is an explicit table
+upgrade whose generated headers and measurements need review.
+
 ## Validate hostile bytes without decoding
 
 ```js

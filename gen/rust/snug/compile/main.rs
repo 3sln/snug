@@ -71,7 +71,7 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     }
     hs(h, H_DEPTH_MAX, dm);
 }
-pub fn setup(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> bool {
+pub fn setup(text: &[u8], opt: &[i32], fl: &[i32], unicode: &[i32], h: &mut [i32]) -> bool {
     // Fresh header and vectors; the source vector: text, -1, prelude, -1.
     for i in 0..H_DATA {
         h[(i) as usize] = 0;
@@ -112,6 +112,9 @@ pub fn setup(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> bool {
                 vpush1(h, T_FLREQ, w);
             }
         }
+    }
+    if !unicode_init(h, unicode) {
+        return false;
     }
     return !erred(h);
 }
@@ -158,12 +161,12 @@ pub(crate) fn bail(h: &mut [i32]) -> i32 {
     finish_error(h);
     return h[(H_ERR) as usize];
 }
-pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], h: &mut [i32]) -> i32 {
+pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], unicode: &[i32], h: &mut [i32]) -> i32 {
     // See the namespace doc. Answers 0 or an error code (also in h[H_ERR]).
     if (h.len() as i32) < (H_DATA + 1024) {
         return ERR_ARENA;
     }
-    if !setup(text, opt, fl, h) {
+    if !setup(text, opt, fl, unicode, h) {
         return bail(h);
     }
     let n: i32 = hg(h, H_NSRC);
@@ -242,7 +245,11 @@ pub fn build_key_preimage(h: &mut [i32]) {
     // effective limits], schema text as bytes]. The host hashes it (SHA-256)
     // into header words 7..14.
     vtrunc(h, T_KEYPRE, 0);
-    vpush1(h, T_KEYPRE, 134);
+    if vlen(h, T_UNICODE) > 0 {
+        vpush1(h, T_KEYPRE, 135);
+    } else {
+        vpush1(h, T_KEYPRE, 134);
+    }
     head_push(h, T_KEYPRE, 3, 0, 16);
     // "snug/program-key"
     vpush1(h, T_KEYPRE, 115);
@@ -278,6 +285,19 @@ pub fn build_key_preimage(h: &mut [i32]) {
     for j in 0..n {
         let c: i32 = vget(h, T_SRC, j);
         vpush1(h, T_KEYPRE, c);
+    }
+    // D110: optional seventh element binds the source key to table contents.
+    // The no-table preimage stays byte-identical to D039.
+    let un: i32 = vlen(h, T_UNICODE);
+    if un > 0 {
+        if !charge(h, un) {
+            return;
+        }
+        head_push(h, T_KEYPRE, 4, 0, un);
+        for j2 in 0..un {
+            let uv: i32 = vget(h, T_UNICODE, j2);
+            push_uint(h, T_KEYPRE, uv);
+        }
     }
 }
 pub(crate) fn if_limit(k: i32) -> i32 {
@@ -342,6 +362,7 @@ pub fn error_name(code: i32) -> &'static str {
         42 => "unsupported_control",
         43 => "unknown_control",
         44 => "regexp",
+        54 => "regexp",
         45 => "map_key",
         46 => "map_group_occurrence",
         47 => "map_cut",

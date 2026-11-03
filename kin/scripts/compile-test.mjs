@@ -145,7 +145,7 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
     let fl = new Int32Array(0), words = start, retries = 0;
     for (;;) {
       const h = new Int32Array(words);
-      const code = M.compileSchema(bytes, opt, fl, h);
+      const code = M.compileSchema(bytes, opt, fl, new Int32Array(0), h);
       if (code === A.ERR_ARENA) { words *= 2; retries++; continue; }
       if (code === A.ERR_NEED_FLOATS) {
         const n = M.floatRequests(h), f = new Int32Array(1 + 2 * n), dv = new DataView(new ArrayBuffer(8)); f[0] = n;

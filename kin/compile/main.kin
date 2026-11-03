@@ -2,7 +2,7 @@
 ;; 1) out, or a schema error. The host owns only the arena and the loop around
 ;; this call (host/js/src/compile.mjs, host/rust/src/compile.rs):
 ;;
-;;     code = compile-schema(text, opt, fl, h)
+;;     code = compile-schema(text, opt, fl, unicode, h)
 ;;     ERR_ARENA        -> retry with a larger arena (up to ARENA_MAX_WORDS)
 ;;     ERR_NEED_FLOATS  -> convert the requested literal spans (D020/D029), retry
 ;;     0                -> the Program: h[H_OUT_P ..] words, h[H_OUT_B ..] pool bytes
@@ -23,13 +23,13 @@
                                         H_LIM_VBUDGET H_LIM_LEAVES H_PROFILE H_FL_GIVEN H_PRELUDE_AT
                                         H_DATA N_TABLES H_DEPTH_MAX H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
                                         ERR_LIM_TEXT ERR_SYNTAX ERR_NEED_FLOATS ERR_EMPTY ERR_ARENA ERR_INTERNAL H_G1 H_G2
-                                        T_SRC T_FLREQ T_STK6 T_KEYPRE]]
+                                        T_UNICODE T_SRC T_FLREQ T_STK6 T_KEYPRE]]
             [snug.compile.prelude :refer [prelude-len prelude-byte]]
             [snug.compile.lex :refer [lex check-utf8 tk-start]]
             [snug.compile.parse :refer [parse-rules]]
             [snug.compile.bytes :refer [bytes-init head-push]]
             [snug.compile.leaf :refer [leaf-init]]
-            [snug.compile.regexp :refer [rx-init]]
+            [snug.compile.regexp :refer [rx-init unicode-init]]
             [snug.compile.rules :refer [build-rules nrules rw]]
             [snug.compile.lower :refer [lower-init lower-rules]]
             [snug.compile.emit :refer [emit-program]]))
@@ -84,7 +84,7 @@
       (if (> dm 512) (set dm 512))
       (hs h H_DEPTH_MAX dm))))
 
-(defn ^:pub ^Bool setup [^Bytes text ^IntsR opt ^IntsR fl ^Ints h]
+(defn ^:pub ^Bool setup [^Bytes text ^IntsR opt ^IntsR fl ^IntsR unicode ^Ints h]
   (comment "Fresh header and vectors; the source vector: text, -1, prelude, -1.")
   (for [^I32 i 0 H_DATA]
     (iset h i 0))
@@ -117,6 +117,7 @@
                 (for [^I32 q 0 (* 2 nf)]
                   (let [w (ia fl (+ q 1))]
                     (vpush1 h T_FLREQ w))))))))
+  (if (not (unicode-init h unicode)) (return false))
   (return (not (erred h))))
 
 (defn ^:pub ^I32 float-requests [^IntsR h]
@@ -153,10 +154,10 @@
   (finish-error h)
   (return (ia h H_ERR)))
 
-(defn ^:pub ^I32 compile-schema [^Bytes text ^IntsR opt ^IntsR fl ^Ints h]
+(defn ^:pub ^I32 compile-schema [^Bytes text ^IntsR opt ^IntsR fl ^IntsR unicode ^Ints h]
   (comment "See the namespace doc. Answers 0 or an error code (also in h[H_ERR]).")
   (if (< (ilen h) (+ H_DATA 1024)) (return ERR_ARENA))
-  (if (not (setup text opt fl h))
+  (if (not (setup text opt fl unicode h))
     (return (bail h)))
   (let [n (hg h H_NSRC)
         bad (check-utf8 h 0 n)]
@@ -211,7 +212,7 @@
            "effective limits], schema text as bytes]. The host hashes it (SHA-256)"
            "into header words 7..14.")
   (vtrunc h T_KEYPRE 0)
-  (vpush1 h T_KEYPRE 134)
+  (if (> (vlen h T_UNICODE) 0) (vpush1 h T_KEYPRE 135) (vpush1 h T_KEYPRE 134))
   (head-push h T_KEYPRE 3 0 16)
   (comment "\"snug/program-key\"")
   (vpush1 h T_KEYPRE 115) (vpush1 h T_KEYPRE 110) (vpush1 h T_KEYPRE 117) (vpush1 h T_KEYPRE 103)
@@ -231,7 +232,16 @@
     (head-push h T_KEYPRE 2 0 n)
     (for [^I32 j 0 n]
       (let [c (vget h T_SRC j)]
-        (vpush1 h T_KEYPRE c)))))
+        (vpush1 h T_KEYPRE c))))
+  (comment "D110: optional seventh element binds the source key to table contents."
+           "The no-table preimage stays byte-identical to D039.")
+  (let [un (vlen h T_UNICODE)]
+    (if (> un 0)
+      (do (if (not (charge h un)) (return))
+          (head-push h T_KEYPRE 4 0 un)
+          (for [^I32 j2 0 un]
+            (let [uv (vget h T_UNICODE j2)]
+              (push-uint h T_KEYPRE uv)))))))
 
 (defn ^I32 if-limit [^I32 k]
   (comment "The header word of compile option k (source-key order).")
@@ -291,6 +301,7 @@
     [42] "unsupported_control"
     [43] "unknown_control"
     [44] "regexp"
+    [54] "regexp"
     [45] "map_key"
     [46] "map_group_occurrence"
     [47] "map_cut"

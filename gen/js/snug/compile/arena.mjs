@@ -83,6 +83,8 @@ export const ERR_EMPTY = 52;
 
 export const ERR_ARRAY_KEY = 53;
 
+export const ERR_NEED_UNICODE = 54;
+
 export const H_TOP = 0;
 
 export const H_ERR = 1;
@@ -436,6 +438,8 @@ export const T_HSIG = 112;
 export const T_NCLS = 113;
 
 export const T_CONT = 114;
+
+export const T_UNICODE = 115;
 
 export const H_WALK_RULE = 61;
 

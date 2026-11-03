@@ -10,7 +10,7 @@ import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, error
   errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
   keyPreimageLen, snugVersion, OPT_WORDS }
   from '../../../gen/js/snug/compile/main.mjs';
-import { ERR_ARENA, ERR_NEED_FLOATS, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
+import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 import { sha256 } from './sha256.mjs';
 
 /** The snug version (kin's, so both hosts agree): in the source key and the serialisation container. */
@@ -18,8 +18,8 @@ export const SNUG_VERSION = snugVersion();
 
 /** A schema the compiler refuses. `code` is a stable name (e.g. `map_overlap`); line and column are 1-based (column in code points), 0 when not about a place in the text. */
 export class SchemaError extends Error {
-  constructor(code, line, column, rule) {
-    super(`CDDL schema refused: ${code}` + (line > 0 ? ` at ${line}:${column}` : '') + (rule ? ` in rule ${rule}` : ''));
+  constructor(code, line, column, rule, detail = '') {
+    super(`CDDL schema refused: ${code}` + (line > 0 ? ` at ${line}:${column}` : '') + (rule ? ` in rule ${rule}` : '') + detail);
     this.name = 'SchemaError'; this.code = code; this.line = line; this.column = column; this.rule = rule;
   }
 }
@@ -61,8 +61,8 @@ function floats(h, bytes) {
 }
 
 /** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md, format 1). */
-export function compile(text, { profile = 'full', limits = {} } = {}) {
-  try { return compileOnce(text, profile, limits); }
+export function compile(text, { profile = 'full', limits = {}, unicode } = {}) {
+  try { return compileOnce(text, profile, limits, unicode); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
     if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
@@ -70,14 +70,17 @@ export function compile(text, { profile = 'full', limits = {} } = {}) {
 }
 const RETAIN_WORDS = 1 << 22;
 
-function compileOnce(text, profile, limits) {
+function compileOnce(text, profile, limits, unicode) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const opt = options(profile, limits);
+  const tables = unicode ?? new Int32Array(0);
+  if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
+    throw new TypeError('unicode must be the Int32Array tables from snug/unicode');
   let fl = new Int32Array(0);
   for (;;) {
     const h = arena;
-    const code = compileSchema(bytes, opt, fl, h);
+    const code = compileSchema(bytes, opt, fl, tables, h);
     if (code === ERR_ARENA) {
       if (arena.length >= ARENA_MAX_WORDS) throw new SchemaError('limit_memory', 0, 0, undefined);
       arena = new Int32Array(Math.min(arena.length * 2, ARENA_MAX_WORDS));
@@ -87,7 +90,8 @@ function compileOnce(text, profile, limits) {
     if (code !== 0) {
       const rs = errorRuleStart(h);
       const rule = rs >= 0 ? decoder.decode(bytes.subarray(rs, rs + errorRuleLen(h))) : undefined;
-      throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule);
+      throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule,
+        code === ERR_NEED_UNICODE ? '; Unicode categories require tables from snug/unicode' : '');
     }
     const p = outProgramAt(h), b = outPoolAt(h);
     if (outProgramWords(h) < 64) throw new SchemaError('internal', 0, 0, undefined);

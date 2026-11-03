@@ -1,0 +1,12 @@
+#!/bin/sh
+# No network: the generator uses the running Node's ICU; Rust has no deps.
+set -e
+cd "$(dirname "$0")/../.."
+node tools/unicode/gen-tables.mjs --check
+bb -cp kin/src:../kin/src kin/scripts/compile-emit > /dev/null
+crate=.cache/snug-compile-gate
+kin/scripts/compile-crate "$crate"
+(cd "$crate" && CARGO_NET_OFFLINE=true RUSTFLAGS="-D warnings" cargo build --quiet --bin compile-test)
+(cd "$crate" && CARGO_NET_OFFLINE=true RUSTFLAGS="-D warnings" cargo test --quiet --lib)
+node tools/unicode/check.mjs "$crate/target/debug/compile-test"
+node --test host/js/test/unicode.test.mjs

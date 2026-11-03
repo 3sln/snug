@@ -6,7 +6,7 @@ export interface CompileLimits {
   depth?: number; inputBytes?: number; entries?: number; items?: number;
   bignumBytes?: number; budget?: number;
 }
-export interface CompileOptions { profile?: 'full' | 'bindle' | 'bus'; limits?: CompileLimits }
+export interface CompileOptions { profile?: 'full' | 'bindle' | 'bus'; limits?: CompileLimits; unicode?: Int32Array }
 export type SchemaErrorCode = 'syntax' | 'undefined_name' | 'duplicate_rule' | 'type_group_mismatch' |
   'generic_arity' | 'nonproductive' | 'group_recursion' | 'unwrap' | 'enum' | 'range' |
   'float_literal' | 'control_target' | 'control_value' | 'unsupported_control' |

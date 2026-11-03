@@ -497,6 +497,11 @@ one unit per enumerated position.
 
 ### 8.2 Regexp automata (S11, S12)
 
+D083/P7.3 category escapes are resolved by kin at compile time using explicit
+Unicode scalar-range triples from the optional host module. Categories,
+complements and unions produce this same atom representation; the Program
+contains neither the general Unicode tables nor a Unicode dependency.
+
 RFC 9485 I-Regexp, anchored, as a Glushkov automaton over code-point classes
 (arch §4.7):
 
@@ -1031,6 +1036,17 @@ deterministic CBOR encoding of
 — every compile option, in that order, as uints. It is the cache key of arch
 §5.2; the container digest is a separate integrity check of the bytes (§17
 Q1).
+
+**D110 amendment for optional Unicode data:** when nonempty tables are
+supplied, kin appends a seventh array element, a CBOR array of uint words
+`[category id, lo, hi, …]`, sorted by id then lo. Category id is the first
+ASCII letter × 256 plus the suffix letter (zero for aggregate categories).
+Within a category ranges are disjoint and non-adjacent; bounds are scalar
+values and no range crosses the surrogate interval. Cs has no ranges.
+The complete contents, rather than just a caller-supplied version label,
+therefore bind the source key to the table semantics. With no tables the
+six-element preimage above is unchanged. This changes key construction for
+opted-in compilation only, not the Program/container format.
 
 ## 14. Charging schedule
 

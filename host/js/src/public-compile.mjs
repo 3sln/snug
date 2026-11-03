@@ -13,7 +13,11 @@ export async function compile(text, options = {}) {
   let compiled;
   try { compiled = compiler.compile(text, options); }
   catch (e) {
-    if (e instanceof compiler.SchemaError) throw new SchemaError(e.code, e.line, e.column, e.rule);
+    if (e instanceof compiler.SchemaError) {
+      const error = new SchemaError(e.code, e.line, e.column, e.rule);
+      error.message = e.message;
+      throw error;
+    }
     throw e;
   }
   return new Schema(new Program(compiled.program, compiled.pool));
