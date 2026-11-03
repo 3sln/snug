@@ -938,6 +938,10 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ## Phase 6 — Sources: blob handles and streams (D027)
 
+- [~] **P6.2 — Resumable session VM.** Shared refactors committed (`d63868d`);
+  the session driver is unfinished in `wip/vm-session.kin.wip` (interrupted by
+  an API usage limit, 2026-10-29).
+
 - [x] **P6.0 — Review of architecture §17** (independent). *Done 2026-10-29*:
   Codex, 24 findings (3 blockers: unknown-length streams cannot keep the
   check order by suspending; shared scratch corrupts across `await`; checked
@@ -1827,6 +1831,83 @@ this keeps the writer's gates independent of their mid-edit state.
 **Alternatives**: flat `kin/write.kin` (blocked by any mid-edit flat source).
 - [ ] **Signed off** (owner)
 
+### D080 — snug is a standalone library; Bindle becomes an optional profile (OWNER DIRECTION)
+**Decision** (owner direction 2026-11-03, relayed by the coordinator: Bindle
+and 3sln.me are paused; "Make it good, efficient, high quality"): snug is a
+general-purpose CDDL validator and deterministic CBOR library, not shaped
+around 3sln.me. The Bindle CBOR profile, its vectors and the study contracts
+remain test inputs and a named, optional profile (`bindle`), and the
+conformance floor for that profile. README/SPEC present snug on its own terms;
+the Bindle requirements handoff is kept as historical input
+(`docs/profiles/bindle.md`). A general default profile is planned (D081, P7.1).
+- [x] **Directed by the owner** (2026-11-03, via coordinator).
+
+### D081 — General default profile; Bindle's restrictions become options
+**Decision** (manager, provisional): the scanner/VM/builder take profile
+options — map key kinds (text only / integer and text / any), allowed tags
+(the Bindle set, or a standard set adding e.g. 0, 1, 21–24, 32, 55799 with
+their RFC 8949 content checks), scalar float policy (Bindle's refusals vs RFC
+8949 deterministic only), and limits — with `bindle` and `deterministic`
+presets. The default becomes `deterministic` (RFC 8949 §4.2.1 core
+deterministic encoding, verified on decode). Every option only removes
+acceptance relative to RFC 8949 §4.2.1; none adds a non-deterministic form.
+**Why**: a standalone library cannot default to one application's tag list
+and text-only keys (COSE, CWT and most CBOR protocols use integer keys).
+- [ ] **Signed off** (owner)
+
+### D082 — Extension controls are host predicates over item bytes
+**Decision** (manager, provisional; answers the project-controls question):
+a compiled schema may register custom control operators (`.name`) with the
+compiler; each lowers to an `EXT` leaf whose verdict is a host predicate
+`(id, argument literal bytes, item bytes) → bool`, called by the VM through a
+kin host port only when that leaf is queried, with the item fully available.
+Under type-set semantics this is an ordinary leaf, so exactness is preserved.
+The predicate must be a pure function of its inputs (documented; the host's
+responsibility); its cost is charged per item byte; extension leaves are
+refused in the untrusted (`bus`) profile unless allowed explicitly. A small
+module of generic controls ships separately: `.chars` (code-point length),
+`.unique` (distinct array elements by encoded bytes), `.samelen`
+(equal-length array/typed-array members of a map). No application names.
+**Why**: keeps the VM pure for every built-in construct, needs no new VM
+language, and lets applications express what CDDL cannot without forking.
+**Alternatives**: a post-validation callback pass (rejected: under set
+semantics there is no single accepting derivation to attach it to); built-in
+application controls (rejected: not generic).
+- [ ] **Signed off** (owner)
+
+### D083 — `\p{…}` via an optional, separately loaded Unicode table module
+**Decision** (manager, provisional): `compile(text, {unicode})` accepts a
+category-table module (`snug/unicode`, generated from a pinned Unicode
+version recorded in the module); without it `\p{…}` stays a schema error
+naming the missing module. The tables are used only at compile time — a
+compiled Program contains code-point ranges — so validation bundles never
+carry them.
+- [ ] **Signed off** (owner)
+
+### D084 — A stable, versioned serialised Program with a compatibility rule
+**Decision** (manager, provisional): program.md §13.3's container is the
+public serialised form. A loader accepts a Program iff its format major
+equals the loader's and its format minor is ≤ the loader's; a change altering
+the meaning of existing Program words bumps the major; an additive change (new
+leaf kinds, new optional sections) bumps the minor. SOURCE_KEY (SHA-256 over
+text + effective options + format version) is the cache key; every loaded
+Program goes through `vm-verify`; caches must be trusted stores (program.md
+§17 q1). The current layout is format 1.0.
+- [ ] **Signed off** (owner)
+
+### D085 — Unknown-length streams drain to preserve refusal codes
+**Decision** (manager, provisional; answers architecture §17.1's question):
+an unknown-length stream session runs as a known-length one until a check
+needs the document end; such checks (`truncated` precedence, `too_large`,
+`trailing`, minimum-remaining lengths) are held pending and resolved at EOF or
+when `maxBytes` is reached, consuming and dropping bytes meanwhile. Codes are
+therefore identical to a buffer of the same bytes. An opt-in `failFast` mode
+reports the first certain error and documents that its code may differ.
+Bounded by `maxBytes` and the host's deadline.
+**Why**: cross-source identity (SPEC §7) is the property tests can hold; the
+cost (reading to EOF on a doomed message) is bounded and opt-out.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-10-29 (manager): **bundle sizes vs R9** (esbuild 0.28 minify, node
@@ -1888,13 +1969,27 @@ this keeps the writer's gates independent of their mid-edit state.
 
 ## Open questions for the owner
 
-- [ ] **Project controls** (equal-length columns, uniqueness, code-point
-  length, decimal value bounds): in snug, or a 3sln.me extension hook? Names?
-- [ ] **`\p{…}` in regexps**: worth ~10–20 KB of tables?
-- [ ] **Program caching**: a stable serialised Program across snug versions?
-- [ ] **Unknown-length streams** (D027, architecture §17.1): drain to EOF and
-  keep cbor.mjs's refusal precedence, or accept a documented different
-  precedence for unframed streams?
+All four earlier questions were delegated to the manager on 2026-11-03 and
+are answered as provisional decisions D082–D085. None is open now.
+
+- [x] **Project controls** → D082 (generic host-predicate extension controls).
+- [x] **`\p{…}` in regexps** → D083 (optional table module; compile time only).
+- [x] **Program caching** → D084 (versioned serialised Program, compatibility rule).
+- [x] **Unknown-length streams** → D085 (drain to EOF within maxBytes; opt-in fail-fast).
+
+## Phase 7 — Standalone library (D080, 2026-11-03)
+
+- [ ] **P7.1 — General default profile** (D081): key kinds, standard tag set,
+  presets `deterministic` (default) and `bindle`; scanner, VM, builder, writer.
+- [ ] **P7.2 — Extension controls** (D082) and the generic controls module.
+- [ ] **P7.3 — Unicode `\p{…}` table module** (D083).
+- [ ] **P7.4 — Serialised Program API** (D084).
+- [ ] **P7.5 — Public package**: entry points, TypeScript declarations, docs,
+  examples, a worked consumer example, README.
+- [ ] **P7.6 — Bundle size** (R9: runtime 33 KB vs 20 KB gzip).
+- [ ] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
+- [ ] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
+  ciborium, minicbor (Rust) and the `cddl` crate.
 
 ## Parking lot
 
