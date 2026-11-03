@@ -18,7 +18,8 @@ const schema = await compile(`
 
 The first call imports the compiler, then runs it synchronously with its
 compile budget. It returns a `Schema` containing a verified `Program`.
-Reuse it for many messages. A syntax/semantic/compile-limit refusal rejects
+Reuse it for many messages. The Promise is a loading boundary, not background
+execution or cancellation. A syntax/semantic/compile-limit refusal rejects
 with `SchemaError { code, line, column, rule }`; line/column are 1-based,
 columns count code points, and 0 means the error has no source position.
 `program.rules` lists the user's validatable, non-generic type rules, sorted
@@ -61,21 +62,10 @@ module. Table contents are included in the source key; even schemas without
 category escapes get a different key when compiled with supplied tables.
 There is no change to the Program format.
 
-Rust uses the same generated data through an explicit compile option:
-
-```rust
-use snug::compile::{compile_with_options, CompileOptions};
-let tables = snug::unicode_tables::tables();
-let options = CompileOptions { unicode: Some(&tables), ..Default::default() };
-let compiled = compile_with_options(r#"word = tstr .regexp "\\p{L}+""#, &options)?;
-```
-
-For maintainers, `node tools/unicode/gen-tables.mjs` regenerates both hosts
-from the running Node's ICU. `--check` verifies exact reproducibility and
-requires the pinned Node version; `bb unicode-test` also compares the two
-hosts' Programs and checks VM matches against Node's pinned Unicode oracle.
-Regeneration under a different Node/Unicode version is an explicit table
-upgrade whose generated headers and measurements need review.
+For basic ASCII patterns and both JS/CDDL escaping layers, see the
+[regexp cookbook](cddl-support.md#regexp-cookbook). Cross-host generation
+and maintenance evidence is recorded in [P7.3](../DEVLOG.md#phase-7--standalone-library-d080-2026-11-03)
+and the [table measurement](../bench/README.md#unicode-table-module-p73).
 
 ## Validate hostile bytes without decoding
 
@@ -91,6 +81,23 @@ all live CDDL alternatives. On schema failure it continues checking the
 profile; a profile error wins, unless the global step budget runs out first.
 Missing rules, wrong argument types and SharedArrayBuffer input are API
 misuse (`TypeError`), not validation results.
+Schema option validation currently has exceptions: malformed limits can
+be coerced into refusals or accepted, and unknown keys can be ignored.
+Validate application configuration before calling; P7.10 tracks consistent
+rejection. Do not use a validation result to diagnose configuration validity.
+
+A failure is one deterministic witness, not an exhaustive error list or an
+explanation of the branch your application intended. For example:
+
+```js
+const response = await compile(`response = { ok: true, id: uint }
+  / { ok: false, error: tstr .size (1..120) }`);
+response.validate(encode({ ok: false, id: 7 }), 'response');
+// { ok: false, reason: 'value', path: ['ok'], offset: 8 }
+```
+
+Here `false` is valid in the second alternative, but the whole message fits
+neither. Do not turn the witness into a claim that `false` is always invalid.
 
 The buffer default for schema methods is `top: 'any'`. Pass `top: 'map'`
 when the protocol requires a map independently of its schema. Buffer
@@ -104,6 +111,7 @@ import { encode, decode } from 'snug';
 const bytes = encode({ id: 7, body: new Uint8Array([1, 2]) }, { maxBytes: 2048 });
 const message = schema.decode(bytes, 'message');
 const profileOnly = decode(bytes);
+const array = decode(encode([1, 2]), { top: 'any' });
 ```
 
 Schema decode validates, then materialises; codec decode checks the profile,
@@ -121,6 +129,45 @@ unavailable. Decimals refuse implicit numeric coercion and JSON serialisation.
 Use `toString()` and an explicit application representation. All decimal
 normalisation discards presentation scale.
 
+Encoding admits any supported root; codec checking defaults to map-root
+application policy. Thus `decode(encode([1, 2]))` throws `not_map`, while
+schema decode defaults to any root. Choose `top` explicitly for your protocol.
+
+| Input to encode | CBOR kind | Decoded JS type/value | CDDL type |
+| --- | --- | --- | --- |
+| `7n` | major 0 integer | number `7` | `uint` (also `unsigned`, `integer`) |
+| `2 ** 53` | float | number | `float`, not `uint` |
+| `2n ** 53n` | major 0 integer | bigint | `uint` (also `unsigned`, `integer`) |
+| `2n ** 64n` | tag 2 bignum | bigint | `unsigned` or `integer`, not `uint` |
+
+Negative integers use major 1 or tag 3; `integer` includes both signs and
+bignums, while `int` includes only major 0/1. Numeric value is preserved,
+not JS number/bigint identity. Use bigint before arithmetic exceeds Number's
+safe domain: snug cannot recover precision already lost in a Number.
+
+| Host map representation | Admission / decode |
+| --- | --- |
+| Plain or null-prototype object | Text keys; admitted at any nesting depth; ordinary decode returns null-prototype objects |
+| Text-only `Map` | Refused by default; admitted only as the root with `cose: true` |
+| Mixed safe-integer/text `Map` | Root only with `cose: true`; decode with `cose: true` returns a root Map |
+| Nested `Map` | Refused even with `cose: true`; use text-keyed objects |
+
+For an application Map whose keys must all be text, validate the key types
+before conversion (avoid numeric-key stringification or collisions):
+
+```js
+function textMapObject(map) {
+  const object = Object.create(null);
+  for (const [key, value] of map) {
+    if (typeof key !== 'string') throw new TypeError('Text keys required');
+    object[key] = value;
+  }
+  return object;
+}
+encode({ labels: textMapObject(new Map([['name', 'sample']])) });
+// Apply the same conversion to nested Maps before encoding.
+```
+
 ## Encode and write deterministic bytes
 
 ```js
@@ -129,9 +176,21 @@ import { Writer } from 'snug/writer';
 const price = Decimal.from('1.50');
 const encodedPrice = encode({ price, id: 7 }, { maxBytes: 256 });
 const writer = new Writer({ maxBytes: 256 });
-writer.beginMap(2).key('price').decimal(price).key('id').uint(7).end();
+writer.beginMap(2).key('price').value(price).key('id').uint(7).end();
 const sameBytes = writer.finish();
+const prices = ['1.50', '2.00', '0.00'].map(text => Decimal.from(text));
+// Decimal(15n, -1), number 2, number 0; Writer.value accepts all three.
+const priceList = new Writer().value(prices).finish();
 ```
+
+`Decimal.from` returns `Decimal | number | bigint`: integral results use
+integer CBOR, including zero. `.decimal(d)` requires a known non-integral
+Decimal; use `.value(Decimal.from(text))` for arbitrary factory results.
+This is an exact numeric representation, not a fixed-scale money type.
+`1.50` becomes `1.5` and `2.00` becomes `2`; scale is lost. For fixed-scale
+money, define a protocol such as `{ currency: "USD", minor: 200 }`, using an
+exact integer in minor units and explicit currency/scale rules, or preserve
+a validated decimal string when presentation scale is part of the contract.
 
 Map keys are ordered by their complete encoded bytes, independent of object
 insertion order. Numbers that are safe integers encode as integers; other
@@ -148,6 +207,8 @@ encoded key order; otherwise `end()` sorts the map. A Writer error is sticky:
 the first code is available as `failure`; later calls throw `writer_failed`.
 `float(1)` is refused: use `int(1)` or `value(1)`. There is no raw unchecked
 CBOR insertion API.
+Wrong-type calls such as `.text(7)`, `.uint('7')` and `.beginArray('2')`
+also throw sticky `SnugFault('unsupported')`; discard the failed Writer.
 
 Arrays encode elements at indexes 0..length−1. Extra named own properties,
 including non-enumerable and symbol properties, are ignored without reading
@@ -184,9 +245,26 @@ remains live. SharedArrayBuffer is refused in both modes. `raw()` and
 `bytes()` are aliases even on owned views: never mutate them. Use
 `copyBytes()` for writable byte content or `new Uint8Array(v.raw())` for a
 writable encoded span.
+Mutation invalidates the check; snug does not detect it. Owned mode protects
+against the original input, not against aliases obtained from the view:
+
+```js
+const original = encode({ id: 7 });
+const owned = view(original);
+const borrowed = view(original, { borrow: true });
+original[original.length - 1] = 8; // deliberately violates borrowed lifetime
+console.log(owned.get('id').number(), borrowed.get('id').number()); // 7, 8
+owned.get('id').raw()[0] = 9; // deliberately invalidates owned check too
+console.log(owned.get('id').number()); // 9; no revalidation
+// Keep aliases read-only; copyBytes() or new Uint8Array(v.raw()) is writable.
+```
 
 Use `get(key)` on maps and `at(index)` on arrays; absent children return
 `undefined`. `entries`, `keys` and `values` iterate in encoded order.
+Negative or out-of-range integer array indexes return undefined; fractional
+indexes throw TypeError. Conversion accessors on the wrong kind throw
+TypeError; `isNull()` is a predicate returning false on other kinds, on both
+View and Cursor.
 `number()` throws `RangeError` for an unsafe integer; `bigint()` is exact;
 `int()` chooses either. `typedView()` offers unaligned little-endian element
 access without copying; `typed()` and `value()` materialise copies.
@@ -229,15 +307,27 @@ start at the detached item. Span `end` is exclusive. Supply a schema to
 
 ```js
 import { asyncHandle, validateHandle, pushValidator } from 'snug/sources';
-const result = await validateHandle(schema, asyncHandle(bytes), 'message', {},
-  { chunk: 16384, quantum: 4096 });
+const result = await validateHandle(schema, asyncHandle(new Uint8Array(bytes)), 'message');
 // Same ValidationResult as schema.validate(bytes, 'message'); no decoded tree.
+```
+
+```js
+import { SourceError } from 'snug/sources';
+try {
+  const checked = await validateHandle(schema, asyncHandle(new Uint8Array(bytes)),
+    'message', {}, { chunk: 16384, quantum: 4096 });
+  if (!checked.ok) console.log(checked.reason, checked.path, checked.offset);
+} catch (error) {
+  if (error instanceof SourceError) console.log(error.code); // adapter failure
+  else throw error; // API misuse or transport failure; sanitise before logging
+}
 ```
 
 **Known length is required**, in bytes, before validation starts: handle
 `size`, Content-Length or an application framing header. It must be an exact
 integer in 0..2^31−1, subject to the schema's input limit. Unknown-length
 streams remain pending D085; drain/failFast are not implemented options.
+Source decoding is unavailable; these APIs validate without materialising.
 
 A handle is `{ size, read(offset, length) }`, with reads returning a Uint8Array
 or Promise of one. It must supply **one immutable snapshot** for the entire
@@ -260,21 +350,34 @@ enables them. The async driver gives the event loop a turn on yields through
 the available scheduler, while the sync driver continues immediately. Yields
 change neither verdict nor budget and do not reset a runtime's CPU allowance.
 Set transport deadlines in your handle implementation.
+Default `asyncHandle` reads resolve through Promise microtasks, not one
+event-loop turn per read; `quantum` supplies cooperative scheduling.
 
 For an ordered push source with a declared length:
 
 ```js
-const push = pushValidator(schema, bytes.length, 'message', {}, { quantum: 4096 });
-// Replace these chunks with chunks from your known-length transport.
-for (let offset = 0; offset < bytes.length; offset += 16384) {
-  let step = push.feed(bytes.subarray(offset, offset + 16384));
-  while (step.state === 'yield') {
-    await new Promise(resolve => setTimeout(resolve, 0)); // give the event loop a turn
-    step = push.resume();
+async function validateChunks(schema, chunks, length, rule) {
+  // chunks: AsyncIterable<Uint8Array>, with an exact length from trusted framing.
+  const push = pushValidator(schema, length, rule, {}, { quantum: 4096 });
+  for await (const chunk of chunks) {
+    let step = push.feed(chunk);
+    while (step.state === 'yield') {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      step = push.resume();
+    }
+    // Continue delivering after done, even if step.result is a refusal.
   }
+  return push.finalize(); // unconditional on normal EOF, including early done
 }
-const pushedResult = push.finalize();
+async function* exampleChunks(bytes) {
+  for (let offset = 0; offset < bytes.length; offset += 16384)
+    yield bytes.subarray(offset, offset + 16384);
+}
+const pushedResult = await validateChunks(schema, exampleChunks(bytes), bytes.length, 'message');
 ```
+
+On transport exception, discard the session and propagate the failure; do
+not convert it into a successful result by finalizing a partial stream.
 
 Feed in order on `need`. A `yield` means stop feeding, give the event loop a
 turn, then call `resume()` until it needs input or finishes. Empty chunks are
@@ -308,6 +411,46 @@ Standard Blob/File/HTTP Range adapters and fused source decode remain pending.
 
 ## Limits
 
+Configure compile-time policy inside `limits`, then optionally lower it per
+validation call. The vocabularies differ:
+
+| Compile `limits` | Runtime schema / codec | Writer top level or `limits` |
+| --- | --- | --- |
+| `inputBytes` | `maxBytes` | `maxBytes` (output acceptance only) |
+| `depth` | `maxDepth` | `maxDepth` |
+| `entries` | `maxEntries` | `maxEntries` |
+| `items` | `maxItems` | `maxItems` |
+| `bignumBytes` | schema `maxBignumBytes` | fixed profile bound |
+| `budget` | schema `budget` | no public VM budget |
+| `schemaBytes`, `compileBudget`, other compiler resources below | no equivalent | no equivalent |
+
+```js
+const bounded = await compile('message = { id: uint }', {
+  limits: { inputBytes: 2048, depth: 8, entries: 16, items: 64, budget: 10000 },
+});
+const checked = bounded.validate(encode({ id: 7 }), 'message', {
+  maxBytes: 1024, maxDepth: 4, maxEntries: 8, maxItems: 32, budget: 5000,
+});
+const output = new Writer({ limits: { maxBytes: 1024, maxDepth: 4,
+  maxEntries: 8, maxItems: 32 } }).value({ id: 7 }).finish();
+```
+
+| Supplied limit | Current operational meaning |
+| --- | --- |
+| Omitted | Compiler uses defaults; schema calls inherit compiled caps; codec uses `LIMITS`; encode/Writer have no output byte cap unless explicitly supplied |
+| Zero | A real zero bound, never “unlimited” (except the fixed compiler bignumBytes policy): zero input/items/budget can compile but refuse messages; zero schemaBytes/compileBudget refuses compilation; depth zero still admits an untagged scalar with `top: 'any'` |
+| Valid integer above compiler hard ceiling | Clamped to the effective ceiling, not rejected; `bus` schemaBytes remains at most 16 KiB |
+| Valid per-call value above compiled cap | Effective value is the smaller of call and compiled cap; it cannot raise the cap |
+| Invalid type, negative or fractional | Compiler limit entries and codec/Writer limits reject with TypeError; schema facades currently coerce or accept some malformed values (P7.10). Reject these in application configuration |
+| Unknown key | Unknown entries inside compile `limits` reject; unknown top-level compile and codec/schema option keys can be silently ignored (P7.10). Do not rely on this to check configuration |
+
+There is no read-only effective-limits object on public Schema. Keep your
+validated policy beside it and account for the documented clamps; sourceKey
+identifies effective compilation inputs but is not a limits inspection API.
+Validate exact allowed names, finite non-negative integer values and enum
+options in your own configuration layer until P7.10 lands. Writer grouped
+limits override top-level spellings; use just one spelling.
+
 | Resource | Default | Hard ceiling for compiled schemas |
 | --- | --- | --- |
 | Schema UTF-8 bytes | 262,144 (`bus`: 16,384) | 1,048,576 |
@@ -328,18 +471,34 @@ Standard Blob/File/HTTP Range adapters and fused source decode remain pending.
 | Bignum content bytes | 128 | Currently fixed at 128 |
 | Validation work units | 2,300,000 | 2³¹−1 |
 
+Root depth is 0. Entering an array, map or tag consumes a level; their
+children are at depth +1. With maxDepth 1 a root array of scalars is allowed,
+but a nested container is not. Map keys and values are both visited items;
+maxEntries counts map pairs or array elements per container, not bytes.
+maxItems counts the root, containers, keys, values and tags across the
+document, not just leaves. Tags 2/3 and typed-array tags count as one item
+with a specially checked byte payload, not one item per native element or
+an extra bstr item. Tags 4/40 also count their inner arrays and elements.
+Text/byte-string content bytes are not items; maxBytes counts the complete
+encoded document. Embedded `.cbor`/`.cborseq` checks restart item accounting
+but share the VM budget and remain physically depth-bounded. `validateAt`
+continues depth but restarts items unless explicitly seeded.
+
 Compile limit names are in the [API reference](api.md#compilation).
 Runtime schema options are `maxBytes`, `maxDepth`, `maxEntries`, `maxItems`,
 `maxBignumBytes`, `budget`; they can only lower compiled values. Bignum
 content still has the scanner's 128-byte ceiling even if other format fields
-suggest a higher future maximum. LIMITS also fixes decimal exponent ≥−1024
+suggest a higher future maximum. Compiler bignumBytes requests currently
+leave the fixed 128-byte cap unchanged; schema maxBignumBytes can lower it.
+LIMITS also fixes decimal exponent ≥−1024
 and ndarray dimensions ≤8.
 
 Codec/view-without-schema/profile-source options expose the four ordinary `max*`
 limits. Schema source validation also exposes the VM budget. Writer
 `limits` can group those four options; top-level names are also accepted.
 Encoding only checks an explicitly supplied `maxBytes` **at finish** after
-buffer growth; bound the values you construct as well. A depth bound stops
+buffer growth: it bounds output acceptance, not peak allocation. Bound
+constructed values and concurrent encodes as well. A depth bound stops
 ordinary cyclic objects but does not make arbitrary getters/proxies safe.
 Compilation and synchronous validation cannot be cancelled mid-call by a
 timer; isolate especially hostile work in a worker/process when necessary.
@@ -347,10 +506,17 @@ timer; isolate especially hostile work in a worker/process when necessary.
 ## Programs, caching and compatibility
 
 ```js
-import { fromSerialized } from 'snug/schema';
+import { fromSerialized, ProgramError } from 'snug/schema';
 const cacheKey = schema.program.sourceKey; // SHA-256 hex, source + effective options
 const stored = schema.program.serialize(); // synchronous Uint8Array
-const cached = await fromSerialized(stored); // no compiler loaded
+let cached;
+try {
+  cached = await fromSerialized(stored); // no compiler loaded
+} catch (error) {
+  if (!(error instanceof ProgramError)) throw error;
+  console.log(error.code); // evict corrupt/incompatible entry; rebuild from trusted CDDL
+  throw error;
+}
 ```
 
 Every public Program verifies before use and owns copies of its arrays.
@@ -366,7 +532,7 @@ and zero reserved bytes. Words are written/read little endian with DataView.
 The digest covers the whole container except its own 32 bytes. See
 [program.md §13.3](program.md#133-serialisation-container).
 
-D084 supersedes that older document's exact snug-version check: format major
+The current [D084 rule](../DEVLOG.md#d084--a-stable-versioned-serialised-program-with-a-compatibility-rule) is: format major
 must equal the loader's, minor must be no greater than the loader's. In the
 32-bit format word, low 16 bits are major and high 16 bits are minor; 1.0
 therefore retains word value 1. Current loader 1.0 refuses every newer minor.
@@ -383,6 +549,223 @@ application policy. Share immutable public Programs; synchronous validation
 uses a shared per-isolate scratch lease. Async source sessions own their
 state. There is no supported re-entrant internal VM API.
 
+Because the package is still 0.0.0, namespace application caches by the pinned
+repository/package revision as well as sourceKey. This is conservative cache
+management, not a producer-version equality requirement.
+
+At build time, compile trusted CDDL and save `schema.program.serialize()`
+as a trusted artifact. At startup, load it once with `fromSerialized`, retain
+the Schema and reuse `validate` for requests. Both loaders return Promises
+for an awaitable facade consistent with compile; neither offloads verification.
+`new Program(P, B)` verifies synchronously and throws synchronously. A Promise
+does not make compilation/verification cancellable or background work.
+
+For hostile compilation in Node, use a separate worker with application
+deadlines and a live-worker quota. For example, these two files in the local
+consumer project keep compilation off the parent event loop:
+
+```js
+// compile-worker.mjs
+import { parentPort, workerData } from 'node:worker_threads';
+import { compile, SchemaError } from 'snug/compile';
+try {
+  const schema = await compile(workerData, { profile: 'bus',
+    limits: { schemaBytes: 16384, compileBudget: 1000000 } });
+  const stored = schema.program.serialize();
+  parentPort.postMessage({ stored }, [stored.buffer]);
+} catch (error) {
+  parentPort.postMessage({ code: error instanceof SchemaError ? error.code : 'compile_failed' });
+}
+```
+
+```js
+// isolated-compile.mjs (Node; bound input and concurrent workers in the caller)
+import { Worker } from 'node:worker_threads';
+import { fromSerialized } from 'snug/schema';
+export async function isolatedCompile(text, timeoutMs = 30000) {
+  const worker = new Worker(new URL('./compile-worker.mjs', import.meta.url), { workerData: text });
+  try {
+    const stored = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('compile_timeout')), timeoutMs);
+      const fail = error => { clearTimeout(timer); reject(error); };
+      worker.once('error', fail);
+      worker.once('exit', () => fail(new Error('compile_worker_exited')));
+      worker.once('message', message => {
+        clearTimeout(timer);
+        if (message.stored) resolve(message.stored);
+        else reject(new Error(message.code));
+      });
+    });
+    return await fromSerialized(stored); // trusted local producer; verification still synchronous
+  } finally {
+    await worker.terminate();
+  }
+}
+```
+
+Choose timeoutMs and concurrency for your deployment; the example default
+is an application deadline, not a performance guarantee. This isolates
+compilation, not parent-side Program verification. A separate
+process can impose a stronger memory boundary when required.
+
+## TypeScript onboarding
+
+CDDL validation does not infer a TypeScript interface. `schema.decode`
+returns the recursive `Value` union; narrow it or implement a checked domain
+wrapper. There is no inferred `decode<T>()` contract.
+
+In the ESM consumer from the README, save this as `main.ts`:
+
+```ts
+import { encode } from 'snug';
+import { compile } from 'snug/compile';
+import type { ValidationResult } from 'snug/schema';
+
+const schema = await compile('message = { id: uint }');
+const bytes = encode({ id: 7n });
+const result: ValidationResult = schema.validate(bytes, 'message');
+if (!result.ok) {
+  console.log(result.reason, result.path, result.offset); // union narrowed here
+  throw new Error('message refused');
+}
+// ValidationResult does not narrow an independently decoded Value.
+const decoded = schema.decode(bytes, 'message');
+if (decoded === null || typeof decoded !== 'object' || !('id' in decoded))
+  throw new Error('expected message object');
+const id = decoded.id;
+if (typeof id !== 'number' && typeof id !== 'bigint')
+  throw new Error('expected exact integer');
+const message: { id: number | bigint } = { id };
+console.log(message.id, 2n ** 53n);
+```
+
+Use `package.json` with `"type": "module"` and this `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"], "strict": true, "noEmit": true
+  },
+  "include": ["main.ts"]
+}
+```
+
+ES2022 includes bigint and modern typed arrays; DOM supplies console in this
+small example without installing Node declarations. A `.mts` file is also
+ESM (adjust `include`); a `.ts` file needs the package's ESM setting above.
+Run an already available `tsc -p tsconfig.json`; no compiler install is needed
+for the JS package. Consumer evidence on 2026-11-03: TypeScript **5.8.3**
+from an existing offline language-server dependency checked this example
+against the staged package with these options. `bench/compare/node_modules/.bin/tsc`
+was absent. This is the tested compiler version, not a claim for every TS release.
+
+## Browser and Worker recipes
+
+Use the staged consumer package; bare specifiers need a bundler (or an
+application import map). With an already available esbuild, from the consumer
+directory create `browser.mjs`:
+
+```js
+import { encode } from 'snug';
+import { compile } from 'snug/compile';
+const schema = await compile('message = { id: uint }');
+document.body.textContent = JSON.stringify(schema.validate(encode({ id: 7 }), 'message'));
+```
+
+```sh
+# Set SNUG_ESBUILD to an absolute existing binary; do not use npx/downloads.
+"$SNUG_ESBUILD" browser.mjs --bundle --format=esm --platform=browser \
+  --target=es2022 --splitting --outdir=browser-dist
+```
+
+Load `<script type="module" src="./browser-dist/browser.js"></script>`
+from a locally served HTML file. Retain all emitted chunks and their relative
+paths. `--splitting --format=esm --outdir` preserves the compiler's dynamic
+import. A one-file bundle ships compiler bytes even if initialisation waits
+until the first call. For CSP, use same-origin external scripts/chunks and
+`default-src 'self'; script-src 'self'`; no `unsafe-eval` is needed in the
+recorded evidence. CSP and a local HTTP origin must permit chunk loading.
+
+For a compiler-free module Worker, generate a trusted Program before bundling:
+
+```js
+// prepare.mjs — run with Node, once at build time
+import { writeFile } from 'node:fs/promises';
+import { compile } from 'snug/compile';
+const schema = await compile('message = { id: uint }');
+await writeFile('program.json', JSON.stringify(Array.from(schema.program.serialize())));
+```
+
+```js
+// worker.mjs — no snug/compile or snug/unicode import
+import stored from './program.json'; // bundled by esbuild's JSON loader
+import { fromSerialized } from 'snug/schema';
+const ready = fromSerialized(Uint8Array.from(stored)); // one startup verification
+export default {
+  async fetch(request) {
+    const schema = await ready;
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    return Response.json(schema.validate(bytes, 'message'));
+  },
+};
+```
+
+```sh
+node prepare.mjs
+"$SNUG_ESBUILD" worker.mjs --bundle --format=esm --platform=browser \
+  --target=es2022 --outfile=worker-dist/worker.js
+```
+
+This minimal Worker buffers the request: enforce transport size/deadline and
+concurrency policy before using it with untrusted traffic. Retain the trusted
+Program provenance. Startup verification still costs CPU; moving it to module
+scope was suggested, not measured, in P7.7. For a Worker that compiles at
+runtime, use the browser recipe's split flags and register **every** emitted
+chunk as an `esModule` in workerd's config. For the compiler-free bundle a
+minimal local `worker-dist/config.capnp` is:
+
+```capnp
+using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [(name = "app", worker = (
+    modules = [(name = "worker.js", esModule = embed "worker.js")],
+    compatibilityDate = "2025-12-01"
+  ))],
+  sockets = [(name = "http", address = "127.0.0.1:8787", http = (),
+    service = "app")]
+);
+```
+
+Run an existing native binary with
+`"$SNUG_WORKERD" serve worker-dist/config.capnp`; no deployment is required.
+To reproduce the fuller local browser/workerd checks, from the repository:
+
+```sh
+SNUG_ESBUILD=/absolute/path/to/esbuild SNUG_WORKERD=/absolute/path/to/workerd \
+  node tools/runtime/run.mjs --package .cache/docfix/staged --out .cache/docfix/runtime
+```
+
+The harness serves loopback only, runs Chrome and local workerd, and writes
+`results.json`. It needs those existing tools (Chrome may be set with
+`SNUG_CHROME`); it does not install them. See [method and fixtures](../tools/runtime/README.md).
+These recipe commands are not a claim of a new browser/runtime gate run.
+
+Recorded evidence, **2026-11-03**, staged revision **f275938** (esbuild 0.28.2):
+
+| Runtime actually checked | Entry points / scope | Outcome |
+| --- | --- | --- |
+| Node v24.6.0, fresh consumer | `snug`, `/schema`, `/compile`, `/view`, `/writer`, `/sources`; compile and stored-Program arms | 976 checks per arm, 0 failures |
+| Chrome 156.0.8078.80 headless, strict CSP | Same six entries, split ESM bundle, both arms | 976 per arm, 0 failures; eval/Function blocked by control probes |
+| workerd 2026-11-02 (1.20261102.1), repeat 2025-12-17; compatibility date 2025-12-01, no nodejs_compat | Same six entries; split and one-file compile arms, compiler-free stored-Program arm | 976 per tested arm, 0 failures |
+| Current Unicode and schema handle/push APIs, later scheduler changes | Absent from that revision's suite | No browser/Worker evidence claimed here |
+
+The old source arm checks profile scanning, not the later CDDL source API.
+The full compiler-free public runtime artifact was **56,226 bytes gzip-9**
+in that record, covering codec/schema/view/writer/sources, not just a VM core.
+See the [evidence index](../bench/README.md#current-evidence-index--2026-11-03)
+for size boundaries and older snapshots.
+
 ## Errors and security
 
 | Operation | Ordinary refusal |
@@ -392,7 +775,8 @@ state. There is no supported re-entrant internal VM API.
 | codec/schema decode, checked view, Writer, profile sources | `SnugFault` |
 | Program loading | rejected Promise with `ProgramError` |
 | Broken source protocol | `SourceError` |
-| Wrong API arguments or unknown rule | `TypeError` (view integer range: `RangeError`) |
+| Facade byte/rule misuse or unknown rule | `TypeError` (view integer range: `RangeError`); malformed schema options have exceptions pending P7.10 |
+| Writer wrong-type/admission arguments, e.g. `.text(7)` | sticky `SnugFault('unsupported')`; later calls throw `writer_failed` |
 
 CBOR fault codes are unprefixed, such as `key_order` or `indefinite`.
 Validation reasons spell these `cbor/key_order`, `cbor/indefinite`.
@@ -400,6 +784,11 @@ Schema decode/view faults use `schema/type`, `schema/missing`, etc., keeping
 `reason`, `path`, `offset` and optional `subcode` from validation. Codec and
 profile-source faults need only `code`; they do not promise offsets.
 The complete families are in [errors](api.md#errors).
+Messages can be generic and codec/profile refusals may lack offsets. Branch
+on structured fields, not message text. Resource codes describe policy
+exhaustion, not necessarily malformed CBOR; the API reference gives recovery
+guidance per code. Unexpected invariant failures are ordinary Error; transport
+errors propagate unchanged and are outside the library's safe-message promise.
 
 Never log received bytes or values to explain a refusal. Unnamed input keys
 become `*`; only keys named by a live schema alternative appear in paths.

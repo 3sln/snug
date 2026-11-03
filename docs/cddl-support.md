@@ -103,6 +103,46 @@ The source key includes supplied table contents (D110), so regenerating with
 another Unicode version cannot reuse a key for different category semantics.
 See the [loading example](guide.md#optional-unicode-regexp-tables).
 
+## Regexp cookbook
+
+Patterns match the **whole string**; use `.*` explicitly when you mean
+surrounding text. There are no JS flags or slash delimiters. The grammar is
+RFC 9485 I-Regexp, with literals, code-point classes/ranges, grouping,
+alternation, `.`, and `?`, `*`, `+`, `{n}`, `{n,m}` repetitions; see the
+recorded [regexp design](architecture.md#47-regular-expressions). JS shorthands `\d`,
+`\w`, `\s`, lookarounds and backreferences are not supported. Use explicit
+classes, e.g. `[0-9]`, `[A-Za-z0-9_]` or `[ \t]` as appropriate to your protocol.
+
+These paired JavaScript strings produce identical CDDL text:
+
+```js
+const digits = 'digits = tstr .regexp "[0-9]+"';
+const digitsRaw = String.raw`digits = tstr .regexp "[0-9]+"`;
+const identifier = 'identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"';
+const identifierRaw = String.raw`identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"`;
+const word = 'word = tstr .regexp "[\\\\p{L}\\\\p{Nd}_-]+"';
+const wordRaw = String.raw`word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"`;
+// Compile word/wordRaw with { unicode: tables } from snug/unicode.
+```
+
+Actual CDDL text (the CDDL string parser consumes each doubled backslash):
+
+```cddl
+digits = tstr .regexp "[0-9]+"
+identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"
+word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"
+```
+
+`digits` accepts `123`, refuses `x123` and the empty string. `identifier`
+admits 1..16 ASCII code points with a leading letter. `word` admits Unicode
+letters/digits plus `_`/`-` and needs the explicit category tables. Regexps
+operate on code points, while text `.size` measures UTF-8 bytes.
+The position limit counts consuming automaton positions after bounded
+repetition expansion, not JS/CDDL source characters: `[0-9]` or `\p{L}`
+is one position; copies from `{n,m}` consume more. Unbounded loops reuse
+positions. Complex alternatives/classes also consume compile work/pool
+space. Exceeding the limit is `limit_regexp_positions`, never truncation.
+
 ## Map determinism and cuts
 
 Maps are **closed** unless an explicit entry covers remaining pairs. Every
@@ -168,6 +208,11 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 - Profile errors outrank schema errors, except that budget exhaustion stops
   the walk immediately (D023/D025). Errors never echo a data value or unnamed
   map key. See [errors](api.md#errors).
+- A schema-choice refusal is one deterministic witness, not a preferred
+  application branch explanation. In `{ ok: true, id: uint } /
+  { ok: false, error: tstr .size (1..120) }`, `{ ok: false, id: 7 }` can report
+  `value` at `['ok']` (offset 8); the complete message fits neither branch.
+  See [validation diagnostics](guide.md#validate-hostile-bytes-without-decoding).
 
 ## Refused and planned features
 

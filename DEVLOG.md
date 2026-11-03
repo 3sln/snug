@@ -795,8 +795,117 @@ slower); allocated head tuples; validating wrapper constructors in build
   **Alternatives:** silently filter defects, trust process exit status, or
   abort on the first known crate defect (all lose useful evidence).
   - [ ] **Signed off** (owner)
-- [ ] **P4.2 — Fuzz** (schemas, values, mutated bytes; hosts agree; no crash;
-  budget respected).
+- [x] **P4.2 — Fuzz** (schemas, values, mutated bytes; hosts agree; no crash;
+  budget respected). *Done 2026-11-03; D115–D118.* `tools/proptest/`
+  (`campaign.mjs`, `props.mjs`, `gen.mjs`, `shrink.mjs`, `worker.mjs`,
+  `gates.mjs`) and one `bb proptest` task; findings, minimised witnesses and
+  the hand triage in `tools/proptest/findings/` (`summary.json`,
+  `P<n>-<class>-<k>.json`, `triage.json`). No kin, gen or host code changed.
+
+  **Properties.** (1) schema × value: schemas from a new typed generator
+  (maps with optional groups, group choices, wildcards, cuts, bounded
+  wildcard counts, named groups, unwraps; arrays with occurrences and fixed
+  counters; controls, tags incl. typed arrays/decfrac/ndarray, embedded
+  CBOR, generics, recursion, regexps incl. `\p{…}` with `snug/unicode`),
+  vm-oracle-gen's D022 shapes, conformance-corpus schemas and compile-fuzz's
+  grammar; values constructive / near-miss / random; checks: verdict ==
+  corpus/tools/oracle.mjs when it answers (D116), `cbor/<cbor.mjs code>` on
+  bytes cbor.mjs refuses (D023), `\p` shapes == a JS `u` RegExp, validate ok
+  ⇔ schema.decode succeeds (same value, same witness), validateAt(span) ==
+  validate(slice) with shifted offsets (and the oracle on the slice),
+  budget units ≤ budget and an unexhausted budgeted run == the full run,
+  tables change no Program word outside the source key, and the committed
+  resumable session (P6.2: validateHandleSync and pushValidator under random
+  chunks and quanta) == Schema.validate. (2) codec: encode == Writer typed
+  calls (given/sorted/shuffled) == Writer.value == cbor.mjs; decode(encode(v))
+  == normalise(v) (D118) == cbor.mjs's decode, re-encodes identically
+  (null and plain objects); 10 byte/structural mutations per value
+  (non-shortest heads, swapped/duplicated entries, indefinite lengths, tag
+  wraps, counts ±1, float widening, bad UTF-8, trailing, specials, nesting)
+  refused with cbor.mjs's code or re-encoded identically; scanBuffer, view
+  and an `any` schema agree. (3) views: four modes (owned/borrowed ×
+  directories) walk to decode(), get/at/entries/find/cursor agree, offsets
+  identical across modes, every subtree's raw span builds to its value(),
+  schema-checked opening ⇔ validate, View.validateAt == validating the raw
+  span. (4) serialised Programs: round trip identical (words, pool, key,
+  rules, bytes, verdicts, decode); every container corruption refused with
+  ProgramError; rehashed corruptions accepted by vm-verify validate,
+  validateAt and budget without throwing; random files refused.
+  (5) robustness: random/mutated bytes through decode, view, scanBuffer,
+  scanHandleSync, pushScanner, schema validate/decode and sessions throw only
+  documented errors and agree; random CDDL (compile-fuzz grammar plus new
+  hostile `\p` texts) only SchemaError, never `internal`, compiled Programs
+  pass Program/vm-verify; 33 API misuses throw only TypeError/RangeError/
+  SnugFault/ProgramError/SchemaError/SourceError; a worker watchdog (30 s per
+  case) for hangs; compile/validate > 2 s flagged. (6) the gates with seeds
+  1001+ and 10× counts in the same snapshot.
+
+  **Run** (authoritative): `bb proptest --minutes=65 --timeout=30000
+  --gate-scale=10`, git archive of HEAD `2434b06` (D115), Apple M1 Pro
+  (10 cores), macOS, Node v24.6.0; **66.9 min wall**; the machine was shared
+  (load average 14–54, other agents' builds). Cases: **P1 369,404** (320,059
+  compiled, 2,960,691 values, 8,682,199 oracle verdicts, 17 unknown,
+  6,803,088 spans, 1,185,433 session runs, 258,448 `\p` evaluations, 815,935
+  budget checks); **P2 1,236,143** (12,361,430 mutations, 3,999,807
+  structural, 1,891,707 accepted); **P3 186,127** (40,768,160 view nodes,
+  2,565,982 subtrees); **P4 186,473** (2,442,062 corruptions, 2,442,062
+  rehashed of which 444,393 passed vm-verify, 523,299 random files);
+  **P5 153,623** (921,738 byte inputs, 307,246 texts, 1,381,807 session runs,
+  5,069,559 misuse calls). No hang, no worker crash. Gates: scan-test
+  300000/1001 and /1002, rscan-test 200000/1001 and /1002, vm-test
+  200000/1001/4000, nav-test 6000/1001, write-test 30000/1001, compile-test
+  400/1001, unicode-test: all ok; compile-fuzz 30000/1001 and vmsession-test
+  see below.
+
+  **Failures by class** (counts; `findings/triage.json`):
+  * **snug bug S1** — P5/source-verdict 384, P5/session-verdict 1,835,
+    P1/session-verdict 49: `pushScanner` / `pushValidator` (host/js
+    sources.mjs `pushSession`) under a nonzero quantum threw
+    `SourceError('length_mismatch')` when the last step was a yield at the
+    declared end, instead of the CBOR refusal every other driver gives.
+    Minimal: `pushScanner(3, {top:'any'}, {quantum:1})` fed `821818` (or
+    the campaign's minimisation `828100`); `pushValidator` on `r = any`,
+    bytes `a16100`, quantum 2 → SourceError, where Schema.validate and
+    validateHandleSync answer `cbor/truncated` at offset 3. Fixed meanwhile by
+    the session engineer in `654cdf8` (not by P4.2); at `3551d7a` the minimal
+    cases agree and a 15-min confirmation campaign (seeds 2000001+, P1 53,115,
+    P2 79,280, P3 27,552, P4 24,336, P5 23,711 cases) found no session or
+    source disagreement.
+  * **generator (gate harness) bug** — `kin/scripts/write-test.mjs`
+    `compare()` trims only the last Rust line (`stdout.trimEnd()`), so when
+    the last of N cases prints an empty final field the gate reports
+    N−1/N identical; seen in a trial run at seeds 1005 (close-map), 1009
+    (put-head), 1011 (robustness), 3000 cases each. Not a host difference;
+    a fix is one line in a file outside P4.2's write set.
+  * **environment** — P5/slow-compile 249 (+83 in the confirmation run) and
+    compile-fuzz 30000/1001's two 2,078/2,280 ms texts: wall time above the
+    2 s criterion only under load. Unloaded on the same HEAD: the
+    a_i = [a_{i+1}, a_{i+1}] chain of 400 rules 319–426 ms (1,572,297 compile
+    units), `[\p{L}\p{N}]` × 80 376–378 ms (4,778,582 units), `\p{L}` × 80
+    335 ms; every one compiled inside the default compile budget. The
+    vmsession-test run was killed by another agent's `pkill` (SIGTERM, empty
+    log) and is not counted; GATE_RERUN.
+  * **harness bugs found and fixed while building** (not snug): an unbounded
+    structural reader on mutated bytes (worker OOM), ANY-schema comparisons
+    without the codec's map root, a COSE subtree built without `cose`, and
+    the exponential oracle taking ~5 s on hostile texts (a false hang; D116).
+  * **oracle bugs: 0; oracle mismatches: 0** in 8.7 M verdicts;
+    documented differences: none needed beyond D118's normalisation.
+
+  **Snug bugs: 1 (S1), already fixed upstream by `654cdf8`.**
+
+  *Checks actually run*: the 66.9-min campaign above; the 15-min
+  confirmation campaign at `3551d7a`; standalone gate re-runs at `3551d7a`
+  (GATE_RERUN_LIST); `node --check` on every tools/proptest module.
+  `npm test` was not run: P4.2 changes no SDK/core/host code. *Learnt*: the
+  shared checkout changes under a long run (HEAD moved eight commits during
+  P4.2 and an uncommitted encoder change briefly made `encode` throw), so a
+  campaign has to pin a snapshot; per-case timeouts need a separate thread
+  (a worker plus a shared heartbeat) because the code under test is
+  synchronous; the oracle is fast enough for 8.7 M verdicts once hostile
+  texts are kept from it; a `\p` class costs ~58 k compile units per
+  regexp position against ~80 for an ASCII class (tables probed per class),
+  inside the budget but ~730× more compile work.
 - [ ] **P4.3 — Benchmarks** (architecture §12) and the 3sln.me recommendation.
 
 ## Phase 5 — Cursor, views and builder (D026)
@@ -2371,6 +2480,67 @@ Object.keys (cannot enforce the old hidden/symbol-property contract); change
 array prototypes or undefined handling (outside this decision).
 - [ ] **Signed off** (owner)
 
+### D115 — The property campaign tests a HEAD snapshot, not the shared checkout
+**Decision** (P4.2): `bb proptest` (default `--tree=head`) extracts
+`git archive HEAD` into a scratch directory beside a `kin` symlink, clones
+`.cache`, overlays the working `tools/proptest/` and re-runs itself there:
+properties 1–5 import that tree's host and generated JS, and the gates
+(property 6) run `emit` and cargo in it. `--tree=working` tests the checkout
+as it is. The summary records the HEAD tested.
+**Why**: several agents share the checkout. During P4.2's trial runs an
+uncommitted encoder change made `encode` throw `RangeError`, untracked session
+sources sat beside the VM's, and HEAD moved eight commits; importing or
+emitting the working tree would report half-finished work as snug bugs, and
+the gates' `emit` would rewrite other people's gen/ files.
+**Alternatives**: `git worktree` (writes shared `.git` metadata); running in
+the checkout and filtering (an import cannot be partially excluded);
+stashing others' work (not ours to touch).
+- [ ] **Signed off** (owner)
+
+### D116 — When the oracle's verdict counts
+**Decision** (P4.2): corpus/tools/oracle.mjs is consulted only for string
+schemas of at most 1,500 characters, compiled without limits, validated with
+default options, on bytes cbor.mjs accepts; `unknown` and a snug `budget`
+result are not verdicts. Bytes cbor.mjs refuses must instead give
+`cbor/<its code>` (D023). `\p{…}` schemas, which the oracle cannot read, are
+held to four fixed shapes whose verdict is a JS `u`-flag RegExp over Node's
+ICU (the tables' own source, D111), with I-Regexp `.` written `[^\n\r]`.
+**Why**: the oracle is deliberately exponential; a 200-rule hostile text takes
+it ~5 s to exhaust its compile budget (a false P1 hang in a trial run).
+Limits and options change snug's verdict for reasons the oracle does not model.
+**Alternatives**: a longer watchdog (hides real hangs); a smaller oracle budget
+(changes a shared tool); no `\p` coverage.
+- [ ] **Signed off** (owner)
+
+### D117 — Findings are signatures with minimised witnesses and a hand triage
+**Decision** (P4.2): a failure's signature is `P<property>/<class>[/<sub>]`.
+Every occurrence is counted (and appended to
+`.cache/proptest/<run>/failures.jsonl`); the first three of each signature go
+to `tools/proptest/findings/` with campaign seed, case index, inputs (hex or
+text), expected and actual, and the first two are greedily minimised (bytes,
+CDDL tokens, host values) under the same signature. `--replay=P:SEED:INDEX`
+re-runs one case. `findings/triage.json` is hand-written (snug bug, oracle
+bug, generator bug, documented difference, environment) and the summary
+carries it forward. Gate failures are findings `P6/<gate>`.
+**Why**: a frequent defect produces thousands of identical failures; the
+evidence is the count, one exact case and one minimal case.
+**Alternatives**: stop at the first failure (hides co-occurring defects);
+commit every failure (megabytes of duplicates).
+- [ ] **Signed off** (owner)
+
+### D118 — The round-trip normalisation the codec property allows
+**Decision** (P4.2): `decode(encode(v))` must deep-equal `normalise(v)`:
+a bigint within ±(2^53−1) becomes a number and every ordinary map object a
+null-prototype object with the same own keys in the same order (a `cose` Map
+stays a Map); typed arrays, Float16Bytes, Decimal, NDArray and floats must not
+change. `objects: 'plain'` decoding must re-encode to the same bytes.
+**Why**: exactly the documented value model (exact integers, null-prototype
+maps); anything wider would hide a codec change. 1.24 M values needed nothing
+more.
+**Alternatives**: compare bytes only (misses a decoder that loses what the
+encoder recreates); compare to cbor.mjs only (a shared ancestor).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (manager): P7.7's side finding that the baseline codec "accepts a
@@ -2778,6 +2948,79 @@ are answered as provisional decisions D082–D085. None is open now.
     - Strict configurations are mine, taken from each library's documentation.
     - Not measured: browsers, workerd, cold start, memory, and hostile inputs
       against the other libraries.
+
+- [ ] **P7.10 — usability API fixes** (2026-11-03; engineering follow-up
+  to `docs/reviews/2026-11-03-usability.md`; code not changed by the doc pass).
+  - **Finding 1 — consistent schema option admission:** validate documented
+    limit/budget types (finite non-negative integers) and `top`/`objects`
+    enums at all public schema boundaries: validate, decode, validateAt,
+    schema-backed view, session, sync/async handle and push validation.
+    Reject bad configuration with safe TypeError before inspecting bytes;
+    retain ordinary resource exhaustion as ValidationResult. Cross-facade
+    regression cases: `maxBytes: 'x'`, negative limits, string budget,
+    `maxDepth: 1.5`, `maxBytes: Infinity`, `top: 'banana'` and invalid objects.
+  - **Finding 2 — Buffer snapshot ownership:** make both bufferHandle and
+    asyncHandle copy accepted byte input without dispatching to Buffer.slice
+    (e.g. new Uint8Array(bytes)); retain stable independent reads. Regress
+    both Buffer and ordinary Uint8Array inputs by mutating the original
+    after construction and verifying unchanged read bytes/validation.
+    Docs/examples show the explicit plain-Uint8Array copy until fixed.
+  - **Finding 10 — alternative diagnostics:** preserve the existing
+    deterministic witness contract by default. Investigate an explicit
+    diagnostic mode preferring a matching literal discriminator, with a
+    reviewed rule and cross-host tests before changing diagnostic semantics.
+    Reproducer: `response = { ok: true, id: uint } /
+    { ok: false, error: tstr .size (1..120) }`; `{ ok: false, id: 7 }`
+    currently reports value at ['ok'], offset 8, while `{ ok: false }`
+    reports missing error. Refusal is correct; document single-witness limits
+    (done), do not treat this as an acceptance bug or silently change defaults.
+  - **Finding 13 — option-key admission:** reject unknown keys consistently
+    in compile, codec, schema/view/source and Writer options, while permitting
+    documented preset fields when spread across operations. Regress misplaced
+    compile `maxBytes` versus `limits.inputBytes`, `maxByets` at codec/schema
+    calls, and unknown grouped limits. Preserve/document Writer grouped-limit
+    precedence; review any unified/named options design separately. Compile
+    limits and runtime spellings are mapped in the guide; unknown options
+    currently being ignored is disclosed, not endorsed as validation.
+
+  *Documentation completed 2026-11-03*: findings 3–6, 7 checklist, 8–9,
+  11–12, 14–27 in the authorised files only. Decimal Writer example uses
+  value() for integral factory results; Unicode/seven exports and schema
+  sources reconciled; errors/recovery and current exceptions, limits,
+  ownership/numerics/Map/regexp/source contracts, TypeScript, local package
+  handoff and browser/Worker recipes documented. Program §13.3 changes only
+  its compatibility paragraph to D084/D100; benchmark additions are the top
+  evidence index and archival banners. Historical records remain historical.
+  No accept/refuse implementation, host/kin/gen/tools files or declarations
+  changed; no commits, dependency installs, publishing or network operations.
+
+  *Checks actually run*: README staging/consumer recipe executed under
+  `.cache/docfix/` (new TMPDIR-backed destination, separate ESM project with
+  a copied node_modules/snug, file: dependency and producing-revision file);
+  consumer printed 7 and all seven bare exports loaded. No npm install.
+  The documented main.ts + strict ES2022/NodeNext configuration passed
+  semantic checking with offline TypeScript **5.8.3**, read-only from
+  `/Users/raystubbs/.nvm/versions/node/v18.20.5/lib/node_modules/@vtsls/language-server/node_modules/typescript/bin/tsc`;
+  `bench/compare/node_modules/.bin/tsc` and PATH tsc were absent.
+  Final guide snippets checked Decimal factory cases, Unicode and regexp
+  escaping/matching, limits, ownership mutation, choice witness, known-length
+  AsyncIterable validation and isolated compilation. Browser ESM split
+  bundle retained dynamic imports; compiler-free Worker output contained
+  no compiler/Unicode table contribution (esbuild 0.28.2 metafiles checked),
+  and its handler validated a request in Node. No fresh Chrome/workerd run:
+  their matrix remains scoped to f275938. Local doc links/anchors and
+  git diff --check passed. Final **cd host/js && npm test: 1,058 passed,
+  0 failed, 0 skipped**, Node v24.6.0 / npm 11.5.1, at c15a722 plus this
+  worktree; includes all seven examples and isolated staged-package tests.
+  Log: `.cache/docfix/npm-test.log`. Existing unrelated DEVLOG/bb.edn/
+  tools/proptest work was preserved.
+  *Learnt*: capability evidence must name its revision and API boundary:
+  P7.7 tested f275938 before Unicode/schema sources; a Promise-shaped loader
+  still verifies synchronously. Build destinations are guarded by runtime
+  temporary roots, not gitignore status. Decimal factories preserve exact
+  numeric values but discard scale and can return integers. Current schema
+  option coercion and Writer sticky argument faults require explicit public
+  caveats until the separate engineering fixes land.
 
 ## Parking lot
 

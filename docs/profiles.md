@@ -10,11 +10,18 @@ on the planned general preset; `profile: 'deterministic'` is not supported.
 ## What exists now
 
 `import { profiles } from 'snug'` exports a frozen
-`profiles.bindle = { top: 'map', cose: false }` option object. Use it by
+`profiles.bindle = { top: 'map', cose: false, strictArrays: true }` option object. Use it by
 spreading, e.g. `decode(bytes, { ...profiles.bindle, top: 'any' })`.
 It documents current defaults; the restrictive scanner policy is already
 in force independently of that object. There is deliberately no
 `profiles.deterministic` alias that would imply wider acceptance.
+
+`strictArrays: true` refuses extra array own properties (including hidden
+and symbol properties) with `unsupported`; default encode ignores those
+properties. Both modes refuse holes/undefined elements and require the local
+Array.prototype. `top` controls checking/decoding; encode and Writer accept
+non-map roots even with this preset. `cose: false` retains text-only map keys.
+Compiler `profile` is a separate option and does not select this object.
 
 | Property | Current wire policy | Planned general default (D081) |
 | --- | --- | --- |
@@ -78,5 +85,8 @@ Programs use the separate D084 format compatibility contract: same major,
 minor no newer than the loader. SOURCE_KEY incorporates effective compiler
 options and snug version; a matching digest does not authenticate a cache.
 See [Programs](guide.md#programs-caching-and-compatibility) for loader errors
-and migration/cache policy. Current JS buffer, view, writer and profile-source
-tests do not establish real-browser/Worker or full Rust-host API support.
+and migration/cache policy. Current JS buffer, view, writer and source tests
+do not establish full Rust-host API support. The
+[dated browser/Worker matrix](guide.md#browser-and-worker-recipes) covers
+revision f275938's six entry points; Unicode and later schema sources are
+outside that runtime evidence.

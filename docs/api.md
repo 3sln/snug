@@ -1,10 +1,12 @@
 # JavaScript API
 
 This reference describes the package facades and is maintained with the
-six [declaration files](../host/js/types/). `npm test` checks declarations
+seven [declaration files](../host/js/types/). `npm test` checks declarations
 with Node's TypeScript parser, checks exported names against runtime exports,
 and uses offline TypeScript for semantic checks if it exists in the permitted
-neighbouring checkout. This run had no offline TypeScript. No installs are
+neighbouring checkout. The original package gate had no offline TypeScript;
+the [onboarding example](guide.md#typescript-onboarding) was separately
+checked with offline TypeScript 5.8.3 on 2026-11-03. No installs are
 required. Internal `src/schema.mjs`/`src/compile.mjs` are host interfaces;
 their signatures and error classes are not the package contract.
 
@@ -18,13 +20,17 @@ encode(value: unknown, options?: EncodeOptions): Uint8Array
 `Value` is the decoded union: null, boolean, number, bigint, string,
 Uint8Array, admitted native typed arrays, Decimal, Float16Bytes, NDArray,
 arrays, string-keyed objects, or a top-level Map with `cose`.
+The recursive union cannot express every root-only admission restriction;
+see the [host compatibility and integer tables](guide.md#decode-after-checking).
+CDDL validation does not infer a narrower TS type.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `top: 'map' \| 'any'` | `'map'` for codec/view/source; `'any'` for schema | Decode/check root policy |
 | `cose: boolean` | false | Safe integer labels as well as text, top-level map only |
 | `objects: 'null' \| 'plain'` | `'null'` | Decode ordinary maps into null/ordinary-prototype objects |
-| `maxBytes`, `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Resource bounds |
+| `maxBytes` | decode: `LIMITS.maxBytes`; encode: unset | Input byte cap; encode/Writer check only when supplied, at finish: output acceptance, not peak allocation |
+| `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Nesting, per-container entries and total item bounds; see operational accounting in the guide |
 | `omitUndefined: boolean` | false | Encode object-member omission; see guide |
 | `strictArrays: boolean` | false | Encode: refuse extra array own properties with `unsupported`; Bindle preset sets true |
 
@@ -33,6 +39,8 @@ EncodeOptions includes `cose`, `omitUndefined`, `strictArrays` and the four limi
 does not enforce a map root. Its `maxBytes` check happens only when supplied,
 at finish, after allocation. Invalid CBOR/profile or inadmissible host values
 throw `SnugFault`; argument misuse can throw `TypeError`.
+For a non-map round trip use `decode(encode([1, 2]), { top: 'any' })`;
+encode accepts any supported root while codec decode defaults to map.
 
 Arrays encode elements 0..length−1, ignoring extra named own properties
 (including hidden and symbol properties) by default. `strictArrays: true`
@@ -45,7 +53,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | Export | Members and contract |
 | --- | --- |
 | `Decimal` | `new Decimal(mantissa: bigint, exponent: number)` requires normalised nonzero mantissa not divisible by 10, exponent −1024..−1. Immutable value. |
-| `Decimal.from(text: string)` | Returns Decimal, number or bigint; plain decimal notation, exact normalisation. |
+| `Decimal.from(text: string)` | Returns Decimal, number or bigint; plain decimal notation, exact normalisation. `'1.50'` → Decimal 1.5, `'2.00'` → number 2, `'0.00'` → number 0. Use Writer.value for factory output. |
 | `Decimal.normalize(mantissa: bigint, exponent: number)` | Returns Decimal or integral number/bigint. |
 | `Decimal#toString()` | Exact decimal string; `valueOf`/numeric coercion/`toJSON` throw. |
 | `Float16Bytes` | `new Float16Bytes(bytes: Uint8Array)`; `bytes`, `length`. Copies an even-length little-endian payload; NaN is checked when encoded. Byte storage is mutable by contract. |
@@ -59,6 +67,10 @@ Float16 where available, Float32/64. `Uint8Array` is a byte string.
 The declarations spell native Float16 structurally (`Float16ArrayLike`) to
 avoid requiring newer TypeScript libraries; runtime admission still requires
 the actual native type. Do not substitute an arbitrary structural lookalike.
+Decimal is an exact numeric value, not fixed-scale money: normalisation
+discards scale and integral results encode as integers. Use integer minor
+units with explicit currency/scale, or a protocol-defined string, when scale
+must be retained.
 
 ## Compilation
 
@@ -70,7 +82,7 @@ compile(text: string | Uint8Array, options?: CompileOptions): Promise<Schema>
 
 Importing this entry point does not load the generated compiler; calling it
 does. After loading, the compile is synchronous. `CompileOptions` is
-`{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits }`.
+`{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits, unicode?: Int32Array }`.
 `profile` defaults to `full` and restricts accepted CDDL, not wire policy.
 Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 
@@ -82,13 +94,34 @@ Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 
 All are non-negative integers; defaults and ceilings are in the
 [guide](guide.md#limits). kin applies effective defaults and ceilings before
-computing the source key. No custom controls or Unicode module option is
-currently exposed (D082/D083 are planned).
+computing the source key. Custom controls remain planned (D082); Unicode tables
+are an explicit option described below (D083/D110).
+
+Omitted limits use defaults, zero means zero (not unlimited), valid requests
+above compiler ceilings clamp, and per-call runtime limits can only lower
+compiled caps. `bignumBytes` is currently fixed to 128 at compilation.
+There is no public effective-limits object. See the [operational limits
+reference](guide.md#limits), including root/item accounting and current
+malformed/unknown-option exceptions tracked in P7.10.
 
 `SchemaError` extends Error: constructor
 `(code, line = 0, column = 0, rule?)`, fields `code`, `line`, `column`,
 `rule`. The compiler supplies positions in code points and safe schema
 metadata. The public error message uses the code and position.
+
+## Unicode tables: `snug/unicode`
+
+Exports `tables: Int32Array`, `categories: readonly string[]`,
+`unicodeVersion: string` and `nodeVersion: string`. Tables are pinned to
+Unicode 16.0 (Node v24.6.0 / ICU 77.1); treat them as immutable.
+Pass `compile(text, { unicode: tables })` to enable RFC 9485
+General_Category `\\p{…}` / `\\P{…}` escapes. Without tables those escapes
+reject with SchemaError `regexp` naming `snug/unicode`. Categories are
+case-sensitive; scripts, blocks and aliases are refused.
+Table contents bind sourceKey. Neither validation nor Program loading needs
+the module: Programs contain the compiled automata, with unchanged format.
+See [category reference](cddl-support.md#unicode-regexp-categories) and the
+[escaping cookbook](cddl-support.md#regexp-cookbook).
 
 ## Schemas and Programs: `snug/schema`
 
@@ -105,6 +138,11 @@ type ValidationResult = { ok: true } | {
 `ValidationOptions` extends DecodeOptions with `maxBignumBytes` and `budget`.
 Per-call schema limits only lower compiled limits. SpanOptions adds
 `depth?: number` and `items?: number`, both defaulting to 0.
+A failure is one deterministic witness across live alternatives, not a full
+error list or necessarily the application's intended branch explanation.
+For `{ ok: true, id: uint } / { ok: false, error: tstr .size (1..120) }`,
+`{ ok: false, id: 7 }` reports `value` at `['ok']`, offset 8, even though
+false is valid in the second branch. The message as a whole fits neither.
 
 | API | Result / behaviour |
 | --- | --- |
@@ -137,6 +175,11 @@ currently 1.0. Container version is 1. Producer snug version is informational,
 retained on reserialisation. The four-byte format word stores major in low
 16 bits, minor in high 16 bits. P and B must remain semantically trustworthy;
 SHA-256 is a corruption check, not authentication. See [caching](guide.md#programs-caching-and-compatibility).
+`fromProgram`/`fromSerialized` have Promise-shaped facades; verification runs
+synchronously, with no scheduling, background execution or cancellation
+guarantee. `new Program` verifies and throws synchronously. Compile trusted
+schemas ahead of time and load once at startup; isolate hostile compilation
+in a worker/process. See the [worked isolation recipe](guide.md#programs-caching-and-compatibility).
 
 `VmSession` is a public interface obtained through `schema.session`, with no
 public constructor. It exposes readonly `length`, `bytesHeld` (exclusive VM
@@ -174,6 +217,8 @@ ViewOptions extends ValidationOptions with `schema?`, `rule?`, `borrow?`
 The default owned view copies before checking; borrowed bytes and every alias
 must remain unchanged. `View` is obtained through `view`, not constructed
 directly; `new Cursor(view)` is also available.
+Mutation of borrowed input or any alias invalidates the check; snug does not
+detect it. Owned copying protects against the original input only.
 
 | View member | Signature / meaning |
 | --- | --- |
@@ -181,13 +226,13 @@ directly; `new Cursor(view)` is also available.
 | `length` | number or undefined; entries/bytes/elements according to kind |
 | `offset`, `depth`, `borrowed` | Absolute item position, physical depth, ownership flag |
 | `get(key: string \| number \| bigint)` | View or undefined; map only; integer lookup only for top-level COSE maps |
-| `at(index: number)` | View or undefined; array only |
+| `at(index: number)` | View or undefined; array only; negative/out-of-range integer → undefined, fractional → TypeError |
 | `entries()` | IterableIterator of `[key or index, View]` |
 | `keys()`, `values()` | IterableIterator of keys/indexes or Views |
 | `number()` | number; unsafe integers throw RangeError |
 | `bigint()`, `int()` | Exact bigint; or number when safe else bigint |
 | `text()`, `bool()`, `isNull()` | string, boolean, boolean |
-| `bytes()`, `raw()` | Uint8Array alias of content/encoded span; read-only by contract |
+| `bytes()`, `raw()` | Uint8Array alias of content/encoded span; mutation invalidates the check without detection, even on owned views |
 | `copyBytes()` | Copied byte content |
 | `typedView()` | Readonly `{ tag, length, get(index): number \| bigint }`, no payload copy |
 | `typed()` | Copied native typed array or Float16Bytes |
@@ -206,7 +251,10 @@ Cursor members:
 | `number()`, `bigint()`, `int()`, `text()`, `bool()`, `isNull()`, `value()` | Same scalar/materialisation semantics as View |
 | `view()` | Small View object at the current item |
 
-Accessors on the wrong kind throw TypeError. Detached validation says
+Conversion accessors on the wrong kind throw TypeError. `isNull()` is a
+predicate and returns false for other kinds on both View and Cursor.
+Use `copyBytes()` or `new Uint8Array(v.raw())` for writable data.
+Detached validation says
 nothing about enclosing constraints. No unchecked opener, raw VM state or
 directory instrumentation is part of this entry point.
 
@@ -227,7 +275,7 @@ All methods return `this` except `finish`; `failure` is the first code or ''.
 | `bigint(n)` | bigint |
 | `float(x)` | number; shortest width, current scalar-float restrictions |
 | `bool(b)`, `null()`, `text(s)`, `bytes(b)` | boolean, no argument, string, Uint8Array |
-| `typed(a)`, `decimal(d)`, `ndarray(a)` | admitted typed array/Float16Bytes, Decimal, NDArray |
+| `typed(a)`, `decimal(d)`, `ndarray(a)` | admitted typed array/Float16Bytes, known non-integral Decimal, NDArray; use value(Decimal.from(text)) for integral-or-decimal results |
 | `beginArray(n)`, `beginMap(n)` | non-negative safe count, checked against entry bound |
 | `key(k)` | string; safe integer number only for top-level map with cose |
 | `end()` | close one complete container |
@@ -236,7 +284,11 @@ All methods return `this` except `finish`; `failure` is the first code or ''.
 Each key owes exactly one value. Unsorted keys are ordered at map close;
 `keysSorted` checks order as keys arrive. Any writing error makes the Writer
 unusable. `maxBytes` is an explicitly supplied finish-time check; growth is
-not capped in advance. Map comparison budget is currently internal (D073).
+not capped in advance: maxBytes bounds output acceptance, not peak allocation.
+Wrong-type typed calls such as `new Writer().text(7)`, `.uint('7')` or
+`.beginArray('2')` throw sticky SnugFault `unsupported`, not TypeError.
+The first failure poisons the Writer; discard it and construct a new one.
+Map comparison budget is currently internal (D073).
 
 ## Sources: `snug/sources`
 
@@ -270,8 +322,8 @@ with top defaulting to any and limits only lowering the compiled values.
 | `validateHandle(schema, handle, rule, options?, sourceOptions?)` | Promise resolving ValidationResult; sync or async reads, one in flight |
 | `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` | ValidationResult; Promise reads refused |
 | `pushValidator(schema, length, rule, options?, { quantum? }?)` | PushValidator with `feed`, `resume`, `finalize` |
-| `bufferHandle(bytes)` | SyncHandle; use ordinary Uint8Array for snapshot copying |
-| `asyncHandle(bytes, { delay? }?)` | Handle, default delay 0 (Promise microtask); positive delay uses a timer |
+| `bufferHandle(bytes)` | SyncHandle; use `bufferHandle(new Uint8Array(buffer))` for Node Buffer snapshot ownership until P7.10 |
+| `asyncHandle(bytes, { delay? }?)` | Handle; use `asyncHandle(new Uint8Array(buffer))` for Node Buffers; default delay 0 (Promise microtask), positive delay uses a timer |
 | `pushScanner(length, options?, { quantum? }?)` | `{ feed(chunk), resume(), finalize() }` |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
@@ -284,6 +336,10 @@ the caller's handle implementation and enforce the pin on every read. The
 library does not inspect a `version` field or detect object changes. Each read
 must return exactly the requested range as a Uint8Array, stable while used.
 Unknown-length streams remain pending D085; no drain/failFast option exists.
+Source decoding is unavailable. Default helper reads alone do not give the
+event loop a turn per read; positive quantum enables cooperative scheduling.
+Start with the [minimal schema-handle recipe](guide.md#validating-remote-objects-and-streams)
+and known-length AsyncIterable adapter before implementing custom sessions.
 
 Profile `ScanSession.step` returns
 `{state:'need', offset, length}`, `{state:'yield', position}`, or
@@ -334,6 +390,131 @@ SchemaError codes:
 - `internal` identifies an implementation problem; it is not a supported
   CDDL construct being deliberately refused.
 
-Public API misuse uses TypeError; exact integer view conversion can use
-RangeError. Unexpected internal invariant failures remain ordinary Error;
-they must not be interpreted as successful validation or a schema verdict.
+Facade byte/rule/span misuse uses TypeError; exact integer view conversion
+can use RangeError (use `bigint()` or `int()` instead of unsafe `number()`).
+Writer typed argument/admission refusals are sticky SnugFaults; `.text(7)`
+throws `unsupported`, and the next call throws `writer_failed`.
+Codec/Writer limit type checks reject invalid limits, but schema facades
+currently coerce/accept some malformed options; unknown options may be ignored.
+P7.10 tracks consistent configuration rejection. Validate your configuration
+before calling; a data refusal is not a configuration check.
+SharedArrayBuffer input must first be copied into stable, exclusively owned
+bytes; coordinate concurrent writers while taking that copy.
+Unexpected internal invariant failures remain ordinary Error; they must not
+be interpreted as successful validation or a schema verdict. Transport
+exceptions propagate unchanged and need their own sanitisation policy.
+
+Messages are explanatory text, sometimes generic; they are not a recovery
+API. Codec/profile refusals need only a code, not an offset. Log selected
+`code`, `reason`, `path`, `offset`, `subcode` fields from library refusals,
+never received values/bytes or arbitrary transport errors. Schema rule names
+are caller-controlled metadata; apply your logging policy to them too.
+
+Recovery by CBOR/profile code (also applies to `cbor/<code>` reasons):
+
+| Code | Meaning / next action |
+| --- | --- |
+| `truncated` | Missing bytes/head/content; check framing and retransmit a complete immutable document |
+| `non_shortest` | Non-minimal argument or float width; fix the producer's deterministic encoding |
+| `indefinite` | Indefinite length/break form; produce definite lengths |
+| `malformed` | Invalid CBOR head/structure; reject and fix the producer |
+| `key_type` | Key kind/label outside current policy; use text or permitted root COSE labels; check protocol compatibility |
+| `key_order` | Encoded keys out of lexicographic order; fix producer sorting |
+| `duplicate_key` | Duplicate deterministic key; reject, resolve duplicate at the producer |
+| `text` | Invalid UTF-8 scalar text or forbidden noncharacter; fix text at the producer |
+| `float` | Scalar width/value violates current policy; use shortest width, integers for safe integral values, and supported finite scalars |
+| `simple` | Unsupported simple value, including undefined; use admitted false/true/null or revise the protocol |
+| `tag` | Tag outside allowed set or invalid tag form; check current tag list, do not strip tags blindly |
+| `bignum` | Invalid magnitude/size/canonical form; use major 0/1 when it fits, otherwise canonical 9..128-byte magnitude |
+| `decimal` | Invalid tag-4 shape/normalisation; use Decimal factories and value(), not presentation-scale encodings |
+| `typed_array` | Unsupported/invalid typed-array content, width or NaN; use admitted little-endian tags and valid elements |
+| `ndarray` | Shape/data dimensions or product invalid; check positive dimensions and matching data count |
+| `trailing` | More bytes after the one root; fix framing or use an explicit sequence schema where supported |
+| `depth` | Nesting policy exhausted; simplify structure or deliberately raise the relevant cap |
+| `too_many_entries` | Per-container pair/element cap exceeded; reduce that container or review its cap |
+| `too_many_items` | Total item accounting exhausted; reduce document complexity or review its cap |
+| `too_large` | Input/output byte acceptance cap exceeded; reduce size or review cap; encoding checks only at finish |
+| `not_map` | Codec/view/profile scanner defaults to map root; use top: 'any' if the protocol permits other roots |
+
+The last five resource/root codes need not mean malformed CBOR. For schema
+limits a larger per-call value cannot lift the compiled cap; recompile with
+reviewed policy if appropriate. Retrying identical bytes and policy will not
+help. Never raise caps automatically in response to an untrusted message.
+
+| Schema reason (or `schema/<reason>` fault) | Meaning / next action |
+| --- | --- |
+| `type` | Wrong CBOR kind; check numeric and host-value representations against the rule |
+| `missing` | Required member/position absent; supply required structure |
+| `unexpected` | Extra member/position in a closed structure; remove it or revise the schema |
+| `value` | Literal/choice predicate failed; check the whole alternative, not only the witness field |
+| `size` | Byte length/count predicate failed; text size is UTF-8 bytes |
+| `range` | Numeric bounds failed; fix value or reviewed schema bounds |
+| `pattern` | Whole-string I-Regexp failed; fix text or intended pattern |
+| `tag` | Schema tag predicate failed; check tag and content against rule |
+| `bits` | Disallowed set bit; correct bit mask/content |
+| `embedded` | Inner CBOR/sequence predicate failed; inspect safe subcode and fix embedded producer/schema |
+| `budget` | VM work policy exhausted, not proof of invalid data; reduce complexity or review compiled/per-call budget and concurrency |
+
+| Other code / class | Meaning / next action |
+| --- | --- |
+| SnugFault `unsupported` | Host value or typed Writer argument not admitted; use documented representations; replace failed Writer |
+| SnugFault `grammar` | Writer root/count/key/end sequence invalid; fix call sequence and replace Writer |
+| SnugFault `writer_failed` | Writer already poisoned; inspect failure for first code and replace Writer |
+| ProgramError `magic` | Wrong artifact type; load a snug Program container |
+| ProgramError `container_version` | Unsupported framing version; regenerate with compatible toolchain |
+| ProgramError `format_version` | Major mismatch/newer minor; use compatible loader or regenerate trusted schema |
+| ProgramError `length` | Claimed/actual framing sizes disagree; evict and regenerate trusted artifact |
+| ProgramError `version` | Malformed producer metadata, not producer-version inequality; regenerate artifact |
+| ProgramError `reserved` | Nonzero reserved bytes; reject and regenerate artifact |
+| ProgramError `digest` | Container integrity mismatch; evict/reload from trusted origin, never bypass verification |
+| ProgramError `verify` | Structural Program verification failed; reject artifact and regenerate from trusted CDDL |
+| ProgramError `too_large` | Container/program body exceeds loader cap; bound cache/artifact size |
+| SourceError `bad_chunk` | Handle read returned the wrong type, or a Promise was supplied to a sync driver; fix adapter or use async driver |
+| SourceError `short_read` | Handle returned other than the requested range length; fix exact immutable range reads |
+| SourceError `length_mismatch` | Push delivery differs from declared count; correct framing, deliver remainder and finalize on normal EOF |
+
+Push `feed` with a non-Uint8Array is argument misuse and throws TypeError;
+it does not produce SourceError `bad_chunk`.
+
+SchemaError recovery (line/column locate schema text, not payload):
+
+| Code | Meaning / next action |
+| --- | --- |
+| `syntax` | Invalid CDDL/escape; correct syntax at reported position |
+| `undefined_name` | Unresolved rule; define or correct reference |
+| `duplicate_rule` | Repeated definition; use intended extension syntax or unique names |
+| `type_group_mismatch` | Type/group used in wrong context; correct definition/reference |
+| `generic_arity` | Generic argument count wrong; match parameters |
+| `nonproductive` | Recursion makes no progress; pass through a container/tag |
+| `group_recursion` | Unsupported recursive group; use regular tail recursion or finite structure |
+| `unwrap` | Inapplicable unwrap target; use supported container/group target |
+| `enum` | Inapplicable/recursive enumeration; use a supported finite group |
+| `range` | Invalid/incompatible range endpoints; correct bounds and kinds |
+| `float_literal` | Literal outside supported precision/range; use supported finite ≤17-significant-digit decimal or appropriate hex literal |
+| `empty_schema` | No usable schema; supply a type rule |
+| `control_target` | Control on wrong target kind; use supported target |
+| `control_value` | Unsupported controller/value conversion; use documented exact controller forms |
+| `unsupported_control` | Recognised control deliberately unsupported; rewrite with supported constraints |
+| `unknown_control` | Unknown control/extensions pending; correct spelling or enforce application constraint separately |
+| `regexp` | Unsupported I-Regexp/escaping or missing tables; use cookbook replacements for JS shorthands, pass snug/unicode for categories |
+| `map_key` | Unsupported map-key schema; use allowed literal/key domain |
+| `map_group_occurrence` | Repeated map group cannot be represented exactly; rewrite disjoint/absorbing entries or explicit alternatives |
+| `map_cut` | Unsupported cut placement; use documented literal-key cuts |
+| `map_overlap` | Cannot prove priority matching exact; make domains disjoint or lower-priority entry absorbing |
+| `tag` | Invalid/unsupported schema tag constraint; correct syntax/content type |
+| `major` | Invalid major/simple constraint; use supported major syntax |
+| `profile` | Compiler restriction set disallows construct; simplify or deliberately choose another compiler profile, without relaxing wire policy |
+| `limit_schema_bytes` | Schema text cap; reduce text or review schemaBytes |
+| `limit_nesting` | Parser/lowering nesting cap; simplify or review nesting |
+| `limit_ast_nodes` | AST cap; simplify or review astNodes |
+| `limit_instantiations` | Generic expansion cap; bound expansion or review instantiations |
+| `limit_alternatives` | Map alternative expansion cap; simplify/disjoint factors or review alternatives |
+| `limit_array_positions` | Array automaton cap; simplify repetition or review arrayPositions |
+| `limit_regexp_positions` | Regexp automaton cap; simplify pattern/repetition or review regexpPositions |
+| `limit_width` | Reachable leaf width cap; simplify choices or review width |
+| `limit_pool_bytes` | Literal/automaton pool cap; reduce data or review poolBytes |
+| `limit_total_bytes` | Program/pool/scratch cap; simplify or review totalBytes |
+| `limit_compile_budget` | Compile work exhausted; simplify schema/tables or review compileBudget and isolation |
+| `limit_leaves` | Leaf count cap; reduce choices/expansion or review leaves |
+| `limit_memory` | Compiler arena capacity exhausted; simplify schema; investigate if unexpectedly small |
+| `internal` | Implementation invariant failure; report a minimal schema reproducer, do not reinterpret as a deliberate feature refusal |

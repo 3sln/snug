@@ -27,9 +27,23 @@ Why snug:
 
 **Experimental, private package, version 0.0.0.** The JS buffer APIs work.
 The current wire policy still has Bindle's restrictions; the general
-`deterministic` default is planned in P7.1 (D081). Bindle is one optional
+`deterministic` default is being implemented in P7.1 (D081), and is not yet
+available. Bindle is one optional
 consumer profile in the standalone design (D080), not snug's purpose. See
 [profiles](docs/profiles.md) before using another CBOR protocol.
+
+Before adopting snug, check your protocol:
+
+- Producers must emit core deterministic CBOR: shortest forms, definite
+  lengths and lexicographic encoded-key order. There is no lenient mode.
+- Maps need text keys. `cose: true` permits safe integer labels only in the
+  top-level map; nested integer maps in COSE/CWT protocols are refused.
+- Timestamp tags 0/1, arbitrary tags and generic tagged wrappers are refused;
+  check the [current tag list](docs/profiles.md#what-exists-now).
+- `undefined`, scalar NaN, infinities and negative zero are refused.
+- Compiler `profile: 'full'` does not relax these wire restrictions.
+
+Currently this is a restricted deterministic subset, with no general mode.
 
 ## Quick start
 
@@ -55,12 +69,15 @@ if (!result.ok) throw new Error(result.reason);
 const message = schema.decode(bytes, 'message'); // validated, then materialised
 console.log(message.id, decode(bytes).text);
 console.log(view(bytes, { schema, rule: 'message' }).get('id').number());
+console.log(decode(encode([1, 2]), { top: 'any' })); // non-map codec round trip
 ```
 
 Compile once and reuse the schema. Compilation is asynchronous at the public
 boundary because the compiler loads on the first call; the compile work
 itself is synchronous. All buffer operations are synchronous. There is no
 wasm initialisation step for the pure JS package.
+The returned Promise does not make compilation or Program verification
+background or cancellable work. See [startup and isolation](docs/guide.md#programs-caching-and-compatibility).
 
 Run the worked examples from the repository root:
 
@@ -71,6 +88,7 @@ node examples/encode-writer.mjs
 node examples/view.mjs
 node examples/program-cache.mjs
 node examples/async-handle.mjs
+node examples/validate-handle.mjs
 ```
 
 ## Package layout and reproducibility
@@ -86,6 +104,7 @@ hand-written TypeScript declarations:
 | `snug/view` | `view`, `View`, `Cursor` |
 | `snug/writer` | `Writer` |
 | `snug/sources` | CDDL validation over handles and push sources; profile scanners, in-memory handles, `SourceError` |
+| `snug/unicode` | optional Unicode 16.0 regexp category `tables` and provenance metadata; compile-time only |
 
 In a checkout, host code imports the committed `gen/js` tree by relative
 path. To produce a **self-contained private package**, run `npm run build`
@@ -97,13 +116,51 @@ An explicit destination is also supported:
 npm run build -- /private/tmp/snug-local-package
 ```
 
-The destination must be a new scratch directory. The build copies `gen/js`
+An explicit destination must not exist, its parent must exist, and its
+resolved path must be beneath Node's `os.tmpdir()`, `/private/tmp/`, or
+`/tmp/`. Being gitignored or outside the repository alone is insufficient.
+With no destination, the build creates a fresh directory under `os.tmpdir()`.
+Set `TMPDIR` to an absolute project scratch path to stage inside the checkout.
+The build copies `gen/js`
 and rewrites generated import paths in the **staged copies only**. It does
 not regenerate kin, install dependencies or publish. Point a local package
 dependency/bundler at the staged directory; pin the repository revision that
 produced it. Deep imports into generated modules are blocked by `exports`.
 The compiler stays outside the static runtime import graph, including when
 `snug/compile` is imported; bundlers must preserve the dynamic import split.
+
+Here is a complete local consumer recipe, from the repository root. It
+copies the package into a separate project without running an installer or
+using the network. Use fresh `staged` and `consumer` paths on a repeat run:
+
+```sh
+mkdir -p .cache/docfix
+SNUG_DOCFIX="$(pwd)/.cache/docfix"
+git rev-parse HEAD > "$SNUG_DOCFIX/producing-revision.txt"
+(cd host/js && TMPDIR="$SNUG_DOCFIX" npm run build -- "$SNUG_DOCFIX/staged")
+mkdir -p "$SNUG_DOCFIX/consumer/node_modules"
+cp -R "$SNUG_DOCFIX/staged" "$SNUG_DOCFIX/consumer/node_modules/snug"
+cp "$SNUG_DOCFIX/producing-revision.txt" "$SNUG_DOCFIX/consumer/snug-revision.txt"
+cat > "$SNUG_DOCFIX/consumer/package.json" <<'JSON'
+{"private":true,"type":"module","dependencies":{"snug":"file:../staged"}}
+JSON
+cat > "$SNUG_DOCFIX/consumer/main.mjs" <<'JS'
+import { encode } from 'snug';
+import { compile } from 'snug/compile';
+const schema = await compile('message = { id: uint }');
+console.log(schema.decode(encode({ id: 7 }), 'message').id);
+JS
+(cd "$SNUG_DOCFIX/consumer" && node main.mjs) # 7
+```
+
+The `file:` dependency records the local source for a package manager; the
+copy above supplies it immediately. Retain the complete staged directory
+(including `generated/`), and adjust the relative `file:` path if relocating
+the project. Copying `host/js` alone is insufficient. Version `0.0.0` does
+not identify the producing revision; keep `snug-revision.txt` and record
+uncommitted package changes separately. No registry installation is promised.
+See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
+[browser/Worker bundling](docs/guide.md#browser-and-worker-recipes).
 
 ## Features and status
 
@@ -116,16 +173,25 @@ The compiler stays outside the static runtime import graph, including when
 | Typed Writer, deterministic map ordering | Implemented in JS; failures are sticky |
 | Serialised Programs and runtime-only loading | Implemented; format 1.0, digest plus structural verification |
 | Known-length handles and push sources | CDDL validation over handles and declared-length push sources implemented; unknown-length streams pending D085 |
-| General deterministic preset, extension controls, Unicode category module | Planned: P7.1–P7.3 |
+| Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
+| General deterministic preset, extension controls | Pending P7.1–P7.2 |
 | Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
-| Real browser and Worker package evidence | Pending P7.7; current package gate runs on Node |
+| Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
 | Runtime ≤20 KB min+gzip | Target missed in the recorded runtime measurement; P7.6 remains open |
 
-This work's `cd host/js && npm test` passes **996 tests, no failures or
-skips**, on Node v24.6.0. It includes every example, isolated staged-package
-execution, declaration syntax/export checks, and Program corruption tests.
-TypeScript semantic checking was unavailable offline. This is not a fresh
-Rust/wasm, compiler-fuzz, regeneration/drift, browser or Worker gate run.
+Documentation gate on **2026-11-03**, Node v24.6.0, revision `c15a722`
+plus the documentation worktree: `cd host/js && npm test` recorded
+**1,058 passed, 0 failed/skipped** ([P7.10 record](DEVLOG.md)).
+Earlier gate runs on **2026-11-03**, Node v24.6.0: P7.5 ran
+`cd host/js && npm test` with **996 passed, 0 failed/skipped**
+([record](DEVLOG.md#phase-7--standalone-library-d080-2026-11-03)); the later
+D113 run recorded **1,051 passed, 0 failed/skipped**
+([record](bench/WRITER.md#d113--array-elements-by-default-strict-arrays-opt-in--2026-11-03)).
+These are dated runs, not evergreen test totals. They include examples,
+staged-package execution, declaration syntax/export checks and Program
+corruption tests. Semantic TypeScript checking was unavailable in those runs;
+the onboarding section records separate consumer evidence. These runs do
+not establish fresh Rust/wasm, fuzz, drift or current browser/Worker coverage.
 Earlier evidence and remaining work are recorded in [DEVLOG](DEVLOG.md),
 with measurements and methods under [bench](bench/README.md).
 

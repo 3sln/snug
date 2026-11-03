@@ -1014,10 +1014,15 @@ Little-endian bytes:
 | 96 | 4·words | P, each word little-endian |
 | 96 + 4·words | pool bytes | B |
 
-Total `96 + 4·words + pool`. A loader refuses on any of: wrong magic,
-container or format version, snug version ≠ its own (Programs are first-class
-within a version, arch §13 Q3), total length mismatch, digest mismatch; then
-runs `vm-verify`. The digest is computed by the host (no SHA-256 in kin).
+Total `96 + 4·words + pool`. **Compatibility note, 2026-11-03:** apply
+[D084](../DEVLOG.md#d084--a-stable-versioned-serialised-program-with-a-compatibility-rule),
+made concrete by D100: format major must equal the loader's and format minor
+must be no newer (currently 1.0; low 16 bits major, high 16 bits minor).
+Producer snug version is provenance, not an equality gate. A loader refuses
+wrong magic/container version, incompatible format, malformed producer
+metadata, nonzero reserved bytes, length or digest mismatch; then runs
+`vm-verify`. This supersedes the older exact producer-version requirement.
+The digest is computed by the host (no SHA-256 in kin).
 Little-endian decoding uses a `DataView` (or a zero-copy view when the host is
 little-endian and the offset is 4-aligned, which 96 is).
 

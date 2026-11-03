@@ -1,5 +1,28 @@
 # JS host codec measurements
 
+## Current evidence index — 2026-11-03
+
+This index points to recorded snapshots; no new performance measurements
+were run for the documentation fixes. Do not add component sizes or treat
+trusted build-only timings as public decode. Revision is stated where the
+record supplies one; “worktree” is not a reproducible clean revision.
+
+| Date / revision | Operation or artifact measured | Ownership / boundary | Runtime and record |
+| --- | --- | --- | --- |
+| 2026-11-03 / `f275938` | **Full public runtime bundle:** codec + schema + view + writer + sources, no compiler; 155,193 minified / **56,226 gzip-9 bytes** | Staged package, all five runtime entries together; no fixtures; esbuild 0.28.2, not an internal-core size | Node v24.6.0; [P7.7 sizes/method](../tools/runtime/README.md#sizes-esbuild---minify-bytes) |
+| 2026-11-03 / `f275938` | Public decode, encode, validate, schema.decode, checked view + lookup, Program load, compile, profile handle scan; 976 conformance checks per arm | Decode builds copies; checked view owned by default; staged package in fresh consumers; compiler/precompiled arms separate | Node v24.6.0, Chrome 156.0.8078.80, workerd 2026-11-02 and repeat 2025-12-17; [P7.7](../tools/runtime/README.md). Later Unicode/schema sources not tested there |
+| 2026-11-03 / D113 worktree (clean revision not recorded) | encode and Writer.value array-policy follow-up; gate 1,051 passed, 0 failed/skipped | Input values reused; output ownership/hand-off described in record; strictArrays compared separately | Node v24.6.0; [WRITER D113](WRITER.md#d113--array-elements-by-default-strict-arrays-opt-in--2026-11-03), supersedes mandatory-array-enumeration status |
+| 2026-11-03 / P6.2 worktree (clean revision not recorded) | Resumable VM vs buffer validation | Reused low-level session storage and zero-copy subarray windows; **not** allocating public async-handle facade | Node v24.6.0; [VM P6.2](VM.md#p62--the-resumable-session-vs-the-buffer-driver) |
+| 2026-11-03 / P7.3 worktree (clean revision not recorded) | Optional Unicode table module, 19,377 minified / 9,287 gzip-9 bytes | Complete exported module only; 77,028 decoded range bytes exclude temporary/compiler storage | Node v24.6.0 / ICU 77.1, esbuild 0.28.2; [method below](#unicode-table-module-p73) |
+| 2026-11-03 / JS worktree between `0f85e8e`–`d034d68`; Rust/wasm `0f85e8e` | Public JS codec/schema comparisons and package size boundaries | Per-operation checking/ownership and competitor policy differences in record | Node v24.6.0, native/Rust/wasm versions in [comparison record](compare/README.md) |
+| 2026-10-29 / `5501952` | Checked view/cursor, selective lookup and full materialisation vs decode | Owned copy and borrowed modes separate; repeated lookup excludes open/check | Node v24.6.0; [VIEW](VIEW.md) |
+| 2026-10-29 / P3.6 snapshot (clean revision not recorded) | VM validation, schema.decode and schedule-2 budget calibration | Validation borrows synchronous input; decode includes VM then builder; not a universal deadline guarantee | Node v24.6.0; [VM P3.6](VM.md#p36--vm-performance-and-budget-calibration) |
+| 2026-10-29 / original codec snapshot (clean revision not recorded) | Trusted build-only, encode and primitives below | Build omits scanner; baseline decode includes checks | Node v24.6.0; archived tables below |
+
+All these measurement records identify Apple M1 Pro / macOS 14.6.1 and their
+sampling methods and load; consult each before comparing numbers. The
+original scanner-unavailable status below is archival, not today's API.
+
 Measured 2026-10-29. Commands (from the snug root):
 
 ```sh
@@ -34,6 +57,10 @@ is checked before measurement and each timed sample's final answer is
 checked afterward: deep equality for values and byte equality for encodings.
 The vector row is one complete batch of 389 inputs, not a per-vector time.
 The final codec and primitive measurements were run sequentially.
+
+> **Archive — 2026-10-29:** the following method/status describes the early
+> build-only snapshot. The scanner now works; use the evidence index above
+> for checking-plus-building decode and current package size boundaries.
 
 **build is trusted build-only time. Public decode = scan + build.** The
 generated scanner is unavailable, so these numbers do not measure snug
@@ -109,6 +136,12 @@ materializing bigint only beyond the safe range (including major-1's
 negative boundary adjustment).
 
 ## Tests and outstanding scanner work
+
+> **Archive — 2026-10-29:** this entire section records the former partial
+> codec and scanner-unavailable state, including skipped tests and
+> `decode` throwing `unavailable`. It is preserved as historical evidence;
+> it does not describe the current codec. See the dated gate/runtime records
+> in the current evidence index above.
 
 Final `cd host/js && node --test test/`: **585 tests, 430 passed, 155
 skipped, 0 failed**, 278.435959 ms on this run. This includes 74 profile
