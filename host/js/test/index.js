@@ -4,3 +4,6 @@ import './encode.test.mjs';
 import './sources.test.mjs';
 import './view.test.mjs';
 import './writer.test.mjs';
+import './serialized.test.mjs';
+import './package.test.mjs';
+import './examples.test.mjs';

@@ -1,7 +1,21 @@
 {
   "name": "snug",
+  "version": "0.0.0",
+  "description": "CDDL validation and strict deterministic CBOR",
+  "license": "MIT",
   "private": true,
   "type": "module",
-  "exports": "./src/index.mjs",
-  "scripts": { "test": "node --test test/" }
+  "exports": {
+    ".": { "types": "./types/index.d.ts", "default": "./src/index.mjs" },
+    "./schema": { "types": "./types/schema.d.ts", "default": "./src/public-schema.mjs" },
+    "./compile": { "types": "./types/compile.d.ts", "default": "./src/public-compile.mjs" },
+    "./view": { "types": "./types/view.d.ts", "default": "./src/public-view.mjs" },
+    "./writer": { "types": "./types/writer.d.ts", "default": "./src/public-writer.mjs" },
+    "./sources": { "types": "./types/sources.d.ts", "default": "./src/public-sources.mjs" }
+  },
+  "types": "./types/index.d.ts",
+  "scripts": {
+    "test": "node --test test/",
+    "build": "node src/package-build.mjs"
+  }
 }

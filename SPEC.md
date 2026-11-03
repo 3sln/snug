@@ -1,11 +1,18 @@
 # snug — SPECIFICATION
 
-A CDDL (RFC 8610) validator and a strict deterministic CBOR (RFC 8949 §4.2)
-codec, written once in kin and generated into JavaScript and Rust. Sound map
-and choice matching, one pass over the bytes, bounded time and memory, errors
+A standalone, MIT-licensed CDDL (RFC 8610) validator and a strict deterministic
+CBOR (RFC 8949 §4.2.1) library, written once in kin and generated into
+JavaScript and Rust. Sound map and choice matching, one validation pass over
+the bytes, bounded time and memory, errors
 that never echo the payload.
 
-Status: **specification, revision 1 (2026-10-29)**. Nothing is implemented.
+Status: **experimental implementation, updated 2026-11-03**. The generated
+compiler, verifier, scanner and buffer VM work, with JS codec, schema API,
+checked views/cursor, Writer, profile-only source adapters and serialised
+Programs. Rust/wasm core and test hosts exist; public host coverage is less
+complete. General default profiles, extensions, Unicode tables, public
+resumable CDDL sessions, package evidence in browsers/Workers and the bundle
+size target remain work in progress. See the [feature matrix](README.md#features-and-status).
 `DEVLOG.md` is the live tracker; this file is what the tracker derives from
 and changes only when a decision changes. Decisions are `D###` in `DEVLOG.md`
 and are provisional until signed off. The design is in
@@ -18,17 +25,28 @@ snug (D001).
 
 ## 1. What snug is
 
-A **library** with four operations:
+A **standalone library** (D080) with four basic operations:
 
 | Operation | Input | Output |
 | --- | --- | --- |
-| `compile(cddl, {profile, limits})` | CDDL text | a compiled schema, or a schema error with line and column |
-| `schema.validate(bytes, rule, {limits})` | CBOR bytes | `ok`, or `{reason, path}` |
-| `schema.decode(bytes, rule, opts)` / `decode(bytes, opts)` | CBOR bytes | host values, or the same error |
+| `compile(cddl, {profile, limits})` | CDDL text | a compiled schema (Promise in the JS package), or SchemaError with code, line and column |
+| `schema.validate(bytes, rule, opts)` | CBOR bytes | `{ok: true}`, or `{ok: false, reason, path, offset, subcode?}` |
+| `schema.decode(bytes, rule, opts)` / `decode(bytes, opts)` | CBOR bytes | host values, or SnugFault |
 | `encode(value, opts)` | host values | deterministic CBOR bytes |
 
 Validation works on CBOR bytes. Host values are validated by encoding them
-first (which 3sln.me does anyway for anything it sends).
+first. Checked views and a cursor expose selected values without materialising
+the entire message (D026, D050–D054); `validateAt` checks a detached span, not
+ancestor constraints. Typed Writer calls produce deterministic bytes directly
+(D070–D074). Known-length handle/push adapters currently check the CBOR profile;
+the broader resumable schema/source direction is D027/D085.
+
+JS package entry points, declarations, errors, ownership and examples are in
+[README](README.md), [guide](docs/guide.md) and [API](docs/api.md).
+`program.serialize()` and `fromSerialized(bytes)` provide runtime-only Program
+loading through a versioned, hashed and structurally verified container
+(D084, D100–D102); caches must have trusted origins. The package remains
+`private: true`; no publication is implied.
 
 ### 1.1 What snug is not
 
@@ -37,9 +55,11 @@ first (which 3sln.me does anyway for anything it sends).
   out-of-profile CBOR (§3).
 * Not a code generator for CDDL types.
 * Not a complete RFC 8610 implementation: `.pcre`, `.abnf`, `.abnfb`,
-  `.feature` and non-I-Regexp regexps are refused (D013, D014), and maps the
+  and non-I-Regexp regexps are refused (D013, D014), and maps the
   determinism rule cannot decide are refused (D011). Every refusal is a schema
-  error at compile time, never a different meaning.
+  error at compile time, never a different meaning. `.feature` is a no-op
+  annotation (D013 amended). The precise current subset and reasons for
+  refusals are in [CDDL support](docs/cddl-support.md).
 
 ## 2. Semantics
 
@@ -57,42 +77,62 @@ these precise choices (each with a decision):
    shortest-form rule this is narrower than it looks (architecture §4.8).
 5. `uint` is major type 0 only; `integer` and `unsigned` include bignums.
 6. `.size` on text counts UTF-8 bytes.
-7. A **profile** (`full`, `bindle`, `bus`) restricts the accepted CDDL; it
+7. A **compiler profile** (`full`, `bindle`, `bus`) restricts the accepted CDDL; it
    never changes the meaning of what it accepts (architecture §5.3).
 
 ## 3. The CBOR profile
 
-snug implements the Bindle CBOR profile (3sln.me `docs/spec/cbor.md`) exactly:
+The standalone design has general `deterministic` and optional `bindle`
+presets (D080/D081). **P7.1 is not implemented yet:** current scanner/VM/codec
+behaviour still follows the legacy Bindle restrictions. `profiles.bindle`
+exposes the current root/key defaults; there is no general deterministic
+preset in the public API yet (D104). Compiler profiles are a separate axis.
+See [profiles](docs/profiles.md) for the current/planned distinction.
+
+Current restrictions:
 RFC 8949 core deterministic encoding verified on decode; text map keys (a
 `cose` option allows integer labels in the top-level map); definite lengths;
 `false`, `true`, `null` and shortest floats only, with scalar NaN, ±∞, −0 and
 integral floats within ±(2^53−1) refused; tags 2 and 3 (bignums beyond 64
 bits, 9..128 bytes, no leading zero), 4 (normalised decimal fractions), 40
 (row-major multi-dimensional arrays) and the RFC 8746 little-endian typed
-arrays 69–72, 77–79, 84–86; nothing else. The resource bounds of profile §5
-are defaults (§5). Refusal codes are cbor.mjs's.
+arrays 69–72, 77–79, 84–86; nothing else. Resource bounds are defaults (§5).
+Refusal codes retain the imported vector vocabulary.
+This test input and its [consumer checklist](docs/profiles/bindle.md) do not
+define snug's product scope. Codec/view/source default to a map root; schema
+methods default to any root; both accept an explicit `top` option.
 
 ## 4. Errors
 
 A validation error is a reason code and a path (architecture §6). It never
 contains a payload value, input bytes, or a data map key the schema does not
 name. The reported failure is a deterministic function of the bytes and the
-compiled schema, identical on every host.
+compiled schema, with cross-host identity as a gate. Public codec, checked
+view and schema-decode refusals use SnugFault; compilation uses SchemaError;
+validation uses result objects. ProgramError and SourceError distinguish
+container/source failures from CBOR or CDDL verdicts (D103). Codes and the
+limits of this contract are documented in [API errors](docs/api.md#errors).
 
 ## 5. Limits
 
 Every resource is bounded by an explicit limit with a default and a hard
 maximum (architecture §7): schema size and structure at compile time; input
 size, depth, entries, items and a step budget at validation time. Exceeding a
-limit is an ordinary error with its own reason. No input and no schema can
-cause a panic, a trap, unbounded allocation or super-linear time.
+limit is an ordinary error with its own reason. Bounded work without panics,
+traps or unbounded scratch is a core requirement, tested through the corpus,
+fuzz and cross-host gates. The [guide](docs/guide.md#limits) states the current
+defaults and ceilings. Work budgets are not wall-clock deadlines; schemas,
+decoded values and caches require host-level quotas. The Writer checks an
+explicit maxBytes only at finish, after growth (D071); it is not yet an
+advance allocation cap. Profile-only scanners expose size/structure bounds,
+while the schema VM also exposes its step budget.
 
 ## 6. Targets and kin
 
 * **kin** owns everything that decides accept or refuse: the CDDL compiler and
   the validator VM, including every CBOR profile check (D003).
-* **Hosts** own the value model: the JS value builder, the JS encoder, and
-  the public API (D004).
+* **Hosts** own the value model, allocation, the object walk and the public
+  API (D004, refined by D070–D074); kin owns the Writer's byte decisions.
 * **Targets**: JavaScript (a kin target defined in this tree, D005) and Rust
   (kin's), with WebAssembly built from Rust. Go, Java and C# are not targets in
   revision 1 (D006).
@@ -103,7 +143,10 @@ cause a panic, a trap, unbounded allocation or super-linear time.
 
 For the same schema text, options and input bytes, every host produces the
 same compiled Program bytes, the same verdict, the same reason, the same path
-and the same budget exhaustion point. This is a gate (`bb identity`).
+and the same budget exhaustion point. This is a gate (`bb identity`). The
+public serialisation uses explicit little-endian words and a host SHA-256
+digest; format major must equal the loader's and minor be no newer (D084).
+The producer snug version is provenance, not an equality gate (D100).
 
 ## 8. Testing
 

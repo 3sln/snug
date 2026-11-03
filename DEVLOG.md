@@ -1913,6 +1913,125 @@ Bounded by `maxBytes` and the host's deadline.
 cost (reading to EOF on a doomed message) is bounded and opt-out.
 - [ ] **Signed off** (owner)
 
+### D100 — Program container compatibility and format-word spelling
+**Decision**: implement program.md §13.3's 96-byte header unchanged, with
+explicit little-endian P words, byte pool, printable ASCII/NUL-padded snug
+version, zero reserved bytes and host SHA-256 over [0,56) concatenated with
+[88,end). Apply D084 instead of the older document's exact snug-version
+equality: equal format major and minor no newer than the loader. The format
+word's low 16 bits are major, high 16 bits minor; 1.0 therefore remains the
+existing word value 1. Producer version is provenance, retained on reload.
+Current loader is 1.0 and always runs kin vm-verify after framing/digest.
+**Why**: retain existing Program/container bytes while making D084's
+compatibility rule concrete; a digest catches corruption but does not
+authenticate Programs or prove semantic compiler invariants.
+**Alternatives**: exact snug-version equality (superseded by D084); a new
+container layout or encoding 1.0 as 0x00010000 (unnecessary migration).
+- [ ] **Signed off** (owner)
+
+### D101 — Private package staging with generated dependencies inside it
+**Decision**: expose six package entry points from host/js/package.json,
+retain private:true and version 0.0.0, and provide npm run build. It stages
+a self-contained package in a new scratch directory, copying gen/js and
+rewriting generated import paths only in staged host copies. Include
+declarations, docs, examples, licence/provenance and recorded benchmark docs;
+staged examples use package imports. Never overwrite an existing target.
+Checkout imports continue using committed gen/js. Runtime version metadata
+is a compiler-free mirror checked against kin's version and package.json.
+**Why**: portable package dependencies without changing gen/, kin/, existing
+host imports or a sibling engineer's files; runtime import graphs must stay
+compiler-free. No publish/install/network step is needed.
+**Alternatives**: distribute host/js alone (generated imports break);
+change every host import or add a Node-only import map (unnecessary shared
+file changes or portability cost); publish (not authorised).
+- [ ] **Signed off** (owner)
+
+### D102 — Verified public Program ownership through host facades
+**Decision**: new package facades compose the unchanged schema host. Every
+public Program copies and verifies P/B; WeakMap storage keeps its live arrays
+private, array getters return copies, and its schema/program objects are
+frozen. Program exposes serialize(), sourceKey and sorted rule names.
+fromProgram/fromSerialized resolve to Schema; serialize is synchronous and
+uses the existing dependency-free host SHA-256. Cap container body at the
+format's 64 MiB ceiling before allocation from claimed lengths. Shared
+buffers are refused at the public buffer boundary.
+**Why**: structural verification remains useful only while the verified
+words stay unchanged; public package work must not modify session/scratch
+internals being edited by another engineer.
+**Alternatives**: expose mutable verified storage; mutate host prototypes;
+copy the VM/verification rules into a new host implementation (all rejected).
+- [ ] **Signed off** (owner)
+
+### D103 — Public refusal families, without changing VM verdicts
+**Decision**: public compile rejects with its exported SchemaError; validate
+and validateAt retain validation result objects. Codec/profile refusals and
+schema-decode/checked-view refusals share SnugFault. CBOR fault codes stay
+unprefixed; schema faults use schema/<reason> and retain reason/path/offset
+and optional embedded subcode. ProgramError distinguishes container/verify
+failures; existing SourceError distinguishes source protocol failures.
+Unknown rules/API misuse use safe TypeError messages. Internal invariant
+failures are errors, never a fabricated validation verdict.
+**Why**: one catchable public contract with no payload leakage and no
+renaming of kin's result reasons. Compiler import stays lazy even when its
+SchemaError class is imported.
+**Alternatives**: expose legacy generic decode Error objects; turn every
+error including programming/transport errors into a CBOR refusal.
+- [ ] **Signed off** (owner)
+
+### D104 — Describe the current profile honestly during P7.1
+**Decision**: publish only profiles.bindle (current map-root/key defaults),
+document its use by option spreading, and clearly distinguish compiler
+restriction sets full/bindle/bus from wire policy. No deterministic alias
+is exported while the scanner still enforces legacy Bindle restrictions.
+README/SPEC present the standalone D080 purpose and state P7.1–P7.3 as
+planned; this package task adds no profile accept/refuse semantics.
+**Why**: users must know that generic deterministic CBOR can currently be
+refused; naming a future preset is not an implementation of D081.
+**Alternatives**: advertise the general default now; describe snug as a
+Bindle-only product (both would misstate current implementation/direction).
+- [ ] **Signed off** (owner)
+
+### D105 — Hand-written declarations with bounded offline evidence
+**Decision**: six .d.ts entry points describe the actual package facades,
+including recursive decoded values, async compilation/loading, fault/result
+families and source/view/Writer contracts. Tests use Node's TypeScript parser,
+match runtime export names and resolve declaration imports. They run semantic
+TypeScript checks only if ../3sln.me/node_modules supplies it offline.
+Native Float16 is structurally spelled without requiring a newer TS library;
+runtime admission still requires a native typed-array prototype.
+**Why**: no network/install dependency, no false claim of semantic type
+checking when the offline compiler is absent, no fabricated schema-inferred
+return types.
+**Alternatives**: introduce tsc as a dependency; export any for every API;
+claim a full TypeScript check after parsing only (rejected).
+- [ ] **Signed off** (owner)
+
+### D106 — Runnable examples and profile-only source scope
+**Decision**: six small Node examples cover hostile byte validation without
+building a value tree, checked decode, deterministic encode/Writer, checked
+navigation/detached validateAt, Program caching, and profile validation over
+an async in-memory handle. Run every example in npm test, also execute staged
+copies with bare package imports. Export the existing handle/push scanners;
+do not present them as resumable CDDL validation or unknown-length streams.
+**Why**: provide reviewable consumer migration fixtures without claiming the
+parallel session work is complete or buffering whole sources as a substitute.
+**Alternatives**: documentation-only examples; a fake streaming schema
+adapter that materialises its entire source (rejected).
+- [ ] **Signed off** (owner)
+
+### D107 — Package evidence remains separate from broader release gates
+**Decision**: README, guide, API, CDDL support, profiles and SPEC describe
+the current JS package and its limits, including finish-time-only encode
+maxBytes, trusted Program caches, view alias lifetimes, Node-only package
+evidence and unfinished general profiles/streaming/runtime-size work. Leave
+the wider milestone reconciliation and release gates to their owners.
+**Why**: the successful host suite does not establish browser/Worker support,
+fresh Rust/wasm identity, drift, fuzz or the bundle-size target. D080 requires
+quality and reproducibility rather than unsupported completion claims.
+**Alternatives**: replace every old milestone or rerun unrelated shared
+generated gates during active parallel work (outside this item's scope).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-10-29 (manager): **bundle sizes vs R9** (esbuild 0.28 minify, node
@@ -1988,13 +2107,78 @@ are answered as provisional decisions D082–D085. None is open now.
   presets `deterministic` (default) and `bindle`; scanner, VM, builder, writer.
 - [ ] **P7.2 — Extension controls** (D082) and the generic controls module.
 - [ ] **P7.3 — Unicode `\p{…}` table module** (D083).
-- [ ] **P7.4 — Serialised Program API** (D084).
-- [ ] **P7.5 — Public package**: entry points, TypeScript declarations, docs,
+- [x] **P7.4 — Serialised Program API** (D084), JS host side.
+  *Done 2026-11-03; manager commit pending; no commit made.* Public
+  program.serialize() returns deterministic Uint8Array; fromSerialized checks
+  magic, versions, lengths, producer metadata, reserved bytes and digest,
+  then kin vm-verify. D100 specifies D084's compatibility rule over the
+  existing format word. Runtime-only loading never imports the compiler.
+  Arrays are owned/private through the new public Program facade (D102).
+  Corpus round trips cover all 295 suites: **264 schemas loaded, 31 annotated
+  refusal/later schemas refused**, **987 validation results preserved**.
+  Recompilation and reserialisation are byte-identical. **3,848 single-bit
+  mutations (every bit of every byte) and 481 truncations** of a small Program
+  refused; targeted corruption tests include rehashed malformed Programs,
+  major/newer-minor refusal, cross-snug-version acceptance, offset Buffer
+  views, claimed-length bombs, trailing bytes, ownership and independent
+  node:crypto SHA-256 comparison.
+  *Learnt*: D084 supersedes program.md §13.3's exact producer-version check;
+  the 1.0 word spelling can be preserved with major in the low 16 bits.
+  Integrity checks do not prove semantic compiler properties: a cache still
+  needs trusted origin. Copying with new Uint8Array avoids Buffer#slice aliases.
+
+- [x] **P7.5 — Public package**: entry points, TypeScript declarations, docs,
   examples, a worked consumer example, README.
+  *Done 2026-11-03; manager commit pending; no commit made.* D101–D107.
+  Six explicit exports with declarations; lazy asynchronous public compile;
+  safe coherent faults/results; a compiler-free runtime import graph; a
+  scratch-only self-contained build containing generated dependencies; six
+  runnable examples, also checked after staging. README, SPEC and four
+  consumer docs describe snug as standalone, distinguish current/planned
+  wire profiles and explain exact CDDL support, errors, limits and ownership.
+  *Checks actually run*: **cd host/js && npm test — 996 passed, 0 failed,
+  0 skipped**, Node v24.6.0. Includes the existing 684 host tests, all new
+  corpus/container/public-package tests, six examples and isolated staged
+  package execution through every entry point. Node parsed all declarations
+  and checked runtime export/declaration imports; offline TypeScript was
+  absent, so **no semantic TypeScript check is claimed**. All README/guide JS
+  snippets executed through Node; local links in the new/updated consumer
+  docs checked; npm run build produced a self-contained scratch package;
+  git diff --check clean. Evidence is against HEAD
+  677b9410efbe9ae33d244915f749032d3df9589e plus this uncommitted worktree;
+  unrelated parallel work is not part of the package change. No fresh
+  bb emit/drift, Rust/wasm, fuzz, browser/Worker or bundle measurement run.
+  *Learnt*: host/js alone cannot be copied away from the tree while its
+  imports point at gen/js; staged copies solve that without touching shared
+  hosts/generated files. Public source support is still profile-only. The
+  default wire policy still has Bindle restrictions despite D080's standalone
+  direction; an exported deterministic alias would conceal that gap.
+  *Requests to the schema/source owners and manager (not changed here)*:
+  (1) expose the finished resumable CDDL session API through the public facade
+  and declarations once its contract/gates settle; (2) harden
+  bufferHandle/asyncHandle snapshot construction for Buffer inputs
+  (Buffer#slice aliases), and clarify read-result immutability/session reuse;
+  (3) reconcile program.md §13.3's older exact-version text with D084/D100,
+  including the major/minor word spelling; that document is outside this
+  task's write set. Browser/Worker and broader release evidence remain P7.7.
 - [ ] **P7.6 — Bundle size** (R9: runtime 33 KB vs 20 KB gzip).
 - [ ] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
-- [ ] **P7.9 — Re-take D005** (generated JS vs wasm for JS hosts) on the full
-  library: compile + validate + decode + views + writer; owner asked for the verdict.
+- [ ] **P7.9 — Re-take D005** (owner directions 2026-11-03): on the full library
+  once the VM is stable, compare the native-JS build against a **wasm build
+  wrapped in a JS SDK with the same public API** — what a real JS user gets
+  either way. Count the boundary: per-call overhead (fine-grained view/cursor
+  navigation and per-field access), copying into linear memory and results out
+  (and the zero-copy alternatives: reading wasm memory views,
+  SharedArrayBuffer where allowed, streaming chunks into a reusable wasm
+  buffer), materialising JS values from wasm output, TextDecoder over wasm
+  memory, memory growth that never shrinks, instantiation/cold start (Node,
+  browsers, Workers), bundle size including SDK glue, trap recovery. The SDK
+  must be designed fairly (batched calls, no needless copies). Workloads:
+  validate-only small RPC and ~1 MB messages, decode-to-values, encode, lazy
+  navigation of a few fields from a large message, blob-handle/stream
+  sources, refusal-heavy input. Deliver a matrix with environment details and
+  a recommendation (native JS, wasm+SDK, or both with a rule for choosing),
+  recorded as the D005 re-take.
 - [ ] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
   ciborium, minicbor (Rust) and the `cddl` crate.
 
