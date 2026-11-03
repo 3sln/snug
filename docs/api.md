@@ -116,6 +116,7 @@ Per-call schema limits only lower compiled limits. SpanOptions adds
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
 | `schema.validate(bytes, rule, options?)` | ValidationResult; default top any. |
+| `schema.session(rule, length, options?, { quantum? }?)` | Advanced `VmSession` over an exact known-length document; default top any. |
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
 | `fromProgram(P, B): Promise<Schema>` | Copies and verifies, without loading the compiler. |
@@ -136,6 +137,34 @@ currently 1.0. Container version is 1. Producer snug version is informational,
 retained on reserialisation. The four-byte format word stores major in low
 16 bits, minor in high 16 bits. P and B must remain semantically trustworthy;
 SHA-256 is a corruption check, not authentication. See [caching](guide.md#programs-caching-and-compatibility).
+
+`VmSession` is a public interface obtained through `schema.session`, with no
+public constructor. It exposes readonly `length`, `bytesHeld` (exclusive VM
+array bytes, excluding the shared Program and supplied windows), and
+`step(window: Uint8Array, base: number): VmStep`. Scratch and Program storage
+remain private. Each session owns exclusive state across suspensions; share
+Programs, use separate sessions for independent validations, and never resume
+one session concurrently. There is no session pool or live-session cap.
+
+`VmStep` is one of:
+
+```ts
+type VmStep =
+  { state: 'need'; offset: number; length: number; keep: number } |
+  { state: 'yield'; position: number; keep: number } |
+  { state: 'done'; result: ValidationResult };
+```
+
+Start with an empty window at base 0. On `need`, supply a window containing
+the entire requested absolute range; the request can exceed your preferred
+chunk size. `base` is the window's absolute offset, and its span must stay
+within the declared document. On `yield`, give the event loop a turn, then
+resume with the current window. `keep` means no earlier byte will be requested
+again; retain bytes from there for forward-only sources, since some checks
+replay content. Keep every supplied byte immutable, including across awaits;
+SharedArrayBuffer windows are refused. `done.result` has exactly buffer
+validation's meaning. Discard sessions after completion or failure.
+Prefer the source drivers below unless implementing a custom window driver.
 
 ## Views: `snug/view`
 
@@ -211,8 +240,10 @@ not capped in advance. Map comparison budget is currently internal (D073).
 
 ## Sources: `snug/sources`
 
-These are current **profile-only** scanners, not resumable CDDL validation.
-No arbitrary source is eagerly buffered by these adapters.
+Schema validators and profile-only scanners support known-length handles and
+declared-length push sources. Validation builds no decoded value tree. The
+adapters read on demand; push retention follows the session's replay needs
+and can grow with the document, bounded by its declared length.
 
 ```ts
 interface Handle {
@@ -222,27 +253,55 @@ interface Handle {
 ```
 
 `SyncHandle` requires synchronous reads. SourceOptions is
-`{ chunk?: number, quantum?: number }` (65536, 0). Use a positive chunk and
-a non-negative quantum. Scan options are DecodeOptions (objects is irrelevant).
+`{ chunk?: number, quantum?: number }` (65536, 0). Use a positive integer chunk;
+quantum 0 disables scheduling yields, while a positive quantum enables them
+(schema sessions accept up to 2^31−1). Async drivers yield through
+`scheduler.yield`, `setImmediate`, `MessageChannel`, or finally `setTimeout(0)`,
+according to runtime availability; synchronous drivers continue immediately.
+Yields do not replenish the validation budget or change verdicts. Scan options
+are DecodeOptions (objects is irrelevant); schema options are ValidationOptions,
+with top defaulting to any and limits only lowering the compiled values.
 
 | Function / class | Result |
 | --- | --- |
 | `scanBuffer(bytes, options?)` | void, or SnugFault; specialised contiguous-buffer path |
 | `scanHandle(handle, options?, sourceOptions?)` | Promise resolving true; demand-driven, one read in flight |
 | `scanHandleSync(handle, options?, sourceOptions?)` | true; Promise reads refused |
+| `validateHandle(schema, handle, rule, options?, sourceOptions?)` | Promise resolving ValidationResult; sync or async reads, one in flight |
+| `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` | ValidationResult; Promise reads refused |
+| `pushValidator(schema, length, rule, options?, { quantum? }?)` | PushValidator with `feed`, `resume`, `finalize` |
 | `bufferHandle(bytes)` | SyncHandle; use ordinary Uint8Array for snapshot copying |
-| `asyncHandle(bytes, { delay? }?)` | Handle, default delay 0; reads resolve on a later turn |
+| `asyncHandle(bytes, { delay? }?)` | Handle, default delay 0 (Promise microtask); positive delay uses a timer |
 | `pushScanner(length, options?, { quantum? }?)` | `{ feed(chunk), resume(), finalize() }` |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
 
-Lengths are exact non-negative int32 document lengths. `step` returns
+Lengths are exact non-negative int32 document lengths (0..2^31−1), required
+before validation starts. A handle must represent an **immutable snapshot**:
+size and every read must refer to the same bytes throughout the operation,
+including repeated reads. Pin remote object versions/generations or ETags in
+the caller's handle implementation and enforce the pin on every read. The
+library does not inspect a `version` field or detect object changes. Each read
+must return exactly the requested range as a Uint8Array, stable while used.
+Unknown-length streams remain pending D085; no drain/failFast option exists.
+
+Profile `ScanSession.step` returns
 `{state:'need', offset, length}`, `{state:'yield', position}`, or
-`{state:'done'}`. Push feed/resume return `{state:'need'|'yield'|'done'}`;
-`finalize` returns true after checking the delivered length. Always finalise,
-even if a feed already reported done. Empty chunks do not signal EOF.
-Session reuse after completion/failure is unsupported. Transport errors can
-propagate from reads; SourceError is for the adapter's protocol checks.
+`{state:'done'}`. Push scanners return these states without range metadata.
+Push validators' `feed(chunk)` / `resume()` return `{state:'need'}`,
+`{state:'yield'}`, or `{state:'done', result: ValidationResult}`. Feed chunks
+in order on `need`; on `yield`, resume on a later turn before feeding more.
+Empty chunks do not signal EOF. Always deliver the declared byte count and
+call `finalize()`, even after an early done/refusal. It checks delivered length
+and returns the ValidationResult (true for profile scanners). Finalize runs
+remaining work synchronously; drain yields via resume first for fairness.
+
+CBOR/CDDL/budget refusals from schema sources are ValidationResult objects,
+including `cbor/…` reasons. Profile scanners instead throw SnugFault. SourceError
+identifies adapter protocol failures (`bad_chunk`, `short_read`,
+`length_mismatch`), never a CBOR/CDDL verdict. Transport exceptions/rejections
+propagate unchanged; sanitise them before logging. Wrong arguments/unknown
+rules use TypeError. Session reuse after completion/failure is unsupported.
 
 ## Errors
 

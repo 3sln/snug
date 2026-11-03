@@ -3,6 +3,7 @@ import './codec.test.mjs';
 import './encode.test.mjs';
 import './encoder-fast-paths.test.mjs';
 import './sources.test.mjs';
+import './public-sources.test.mjs';
 import './view.test.mjs';
 import './writer.test.mjs';
 import './serialized.test.mjs';

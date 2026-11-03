@@ -85,7 +85,7 @@ hand-written TypeScript declarations:
 | `snug/compile` | lazy asynchronous `compile`, `SchemaError` |
 | `snug/view` | `view`, `View`, `Cursor` |
 | `snug/writer` | `Writer` |
-| `snug/sources` | buffer/handle/push profile scanners, sessions, in-memory handles, `SourceError` |
+| `snug/sources` | CDDL validation over handles and push sources; profile scanners, in-memory handles, `SourceError` |
 
 In a checkout, host code imports the committed `gen/js` tree by relative
 path. To produce a **self-contained private package**, run `npm run build`
@@ -115,7 +115,7 @@ The compiler stays outside the static runtime import graph, including when
 | Checked views, cursor, detached subtree validation | Implemented; owned by default, borrowing is an explicit lifetime contract |
 | Typed Writer, deterministic map ordering | Implemented in JS; failures are sticky |
 | Serialised Programs and runtime-only loading | Implemented; format 1.0, digest plus structural verification |
-| Known-length handles and push sources | Profile scanning implemented; public CDDL sessions remain separate work |
+| Known-length handles and push sources | CDDL validation over handles and declared-length push sources implemented; unknown-length streams pending D085 |
 | General deterministic preset, extension controls, Unicode category module | Planned: P7.1–P7.3 |
 | Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
 | Real browser and Worker package evidence | Pending P7.7; current package gate runs on Node |

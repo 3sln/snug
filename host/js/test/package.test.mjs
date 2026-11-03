@@ -111,7 +111,7 @@ test('self-contained staged package works away from the repository through all e
       import {fromSerialized,validate,decode as schemaDecode,validateAt} from 'snug/schema';
       import {view,View,Cursor} from 'snug/view';
       import {Writer} from 'snug/writer';
-      import {asyncHandle,scanHandle} from 'snug/sources';
+      import {asyncHandle,bufferHandle,scanHandle,validateHandle,validateHandleSync,pushValidator} from 'snug/sources';
       const s = await compile('r = { id: uint }');
       const b = encode({id:7});
       assert.deepEqual(validate(s,b,'r'),{ok:true});
@@ -123,6 +123,12 @@ test('self-contained staged package works away from the repository through all e
       assert.deepEqual((await fromSerialized(s.program.serialize())).validate(b,'r'),{ok:true});
       assert.deepEqual(new Writer().beginMap(1).key('id').uint(7).end().finish(),b);
       assert.equal(await scanHandle(asyncHandle(b)),true);
+      assert.deepEqual(await validateHandle(s,asyncHandle(b),'r'),s.validate(b,'r'));
+      assert.deepEqual(validateHandleSync(s,bufferHandle(b),'r'),{ok:true});
+      const push=pushValidator(s,b.length,'r');
+      push.feed(b);
+      assert.deepEqual(push.finalize(),{ok:true});
+      assert.deepEqual(s.session('r',b.length).step(b,0),{state:'done',result:{ok:true}});
       assert.equal(Decimal.from('1.5').toString(),'1.5');
       assert.ok(new NDArray([1],[7]) && new Float16Bytes(new Uint8Array(2)) && profiles.bindle);
       await assert.rejects(import('snug/generated/snug/vm/api.mjs'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});

@@ -1113,6 +1113,35 @@ slower); allocated head tuples; validating wrapper constructors in build
 
 ---
 
+## P7.5 follow-up — Public session/source packaging
+
+- [x] **Expose the P6.2 schema source APIs** (2026-11-03; no commit made).
+  `snug/sources` now exports `validateHandle`, `validateHandleSync` and
+  `pushValidator`; the public Schema supports `session`. D108 makes its
+  `VmSession` window protocol an advanced interface while preserving D102's
+  private verified storage. Added matching declarations, handle/push lifecycle
+  documentation, the sources feature-table update, and
+  `examples/validate-handle.mjs`, discovered by the existing example runner.
+  The earlier P7.5/D106 profile-only scope describes the original package
+  evidence; this follow-up exposes the subsequently completed P6.2 work.
+  *Checks actually run*: **cd host/js && npm test — 1058 passed, 0 failed,
+  0 skipped**, Node v24.6.0. Includes public export checks, buffer/async/sync/
+  push verdict identity (success, CDDL, CBOR and budget refusals), independent
+  interleaved sessions, protocol/transport failures, early completion's
+  finalize obligation, private-state/window checks, seven runnable examples
+  and staged-package execution of the new APIs. Focused public-source/package/
+  example suite: 16 passed, 0 failed. New guide handle/push snippets executed
+  through Node; git diff --check clean. Declaration syntax, exports/imports
+  checked; offline TypeScript absent, so no semantic TypeScript check claimed.
+  No kin/generated edits, installs, network, publishing or commits.
+  *Learnt*: re-exporting the source functions alone is insufficient because
+  they call `schema.session`; returning the internal VmSession directly would
+  also expose mutable verified Program/scratch arrays. A small private-state
+  facade keeps that boundary intact without changing VM/source hosts.
+  Push completion can precede delivery, so even an early verdict still needs
+  the declared byte count and finalize. Version pinning remains the caller's
+  handle contract; unknown-length streams remain pending D085.
+
 ## Decisions
 
 Append-only. Each entry says what was decided, why, and what else was
@@ -2247,6 +2276,29 @@ fresh Rust/wasm identity, drift, fuzz or the bundle-size target. D080 requires
 quality and reproducibility rather than unsupported completion claims.
 **Alternatives**: replace every old milestone or rerun unrelated shared
 generated gates during active parallel work (outside this item's scope).
+- [ ] **Signed off** (owner)
+
+### D108 — Public source validation and an encapsulated advanced session interface
+**Decision** (provisional): expose the existing P6.2 `validateHandle`,
+`validateHandleSync` and `pushValidator` through `snug/sources`. Expose
+`Schema.session(rule, length, options?, scheduling?)` through `snug/schema`,
+returning a VmSession interface with `length`, `bytesHeld` and `step` only;
+there is no exported VmSession constructor. Keep the host session private,
+including its Program, scratch and key arena. Refuse shared windows and
+invalid window spans at the facade. Document need/yield/keep/done as advanced
+use; recommend the handle/push drivers for normal callers. Schema sources
+return ValidationResult, source protocol failures remain SourceError, and
+transport exceptions propagate unchanged. Known exact length and immutable
+snapshots are required; callers enforce version pins. This extends D106's
+original profile-only package scope after P6.2's implementation.
+**Why**: the drivers require Schema.session; publishing its window contract
+also permits custom drivers while D102's verified Program ownership stays
+intact. Separate sessions own exclusive state across awaits without changing
+the shared host/kin implementation or accepting new wire forms.
+**Alternatives**: re-export drivers without a public session bridge (broken
+with public Schemas); return/export the internal VmSession (leaks live arrays);
+hide session behind a separate driver-only adapter (adds an unnecessary
+parallel Schema contract and prevents custom window drivers).
 - [ ] **Signed off** (owner)
 
 ### D110 — Explicit Unicode data port and source-key binding

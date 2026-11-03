@@ -225,36 +225,86 @@ the root. Failure offsets are absolute in the containing message; paths
 start at the detached item. Span `end` is exclusive. Supply a schema to
 `v.validateAt(rule, { schema })` if the view was opened without one.
 
-## Validate a source
+## Validating remote objects and streams
 
 ```js
-import { asyncHandle, scanHandle } from 'snug/sources';
-await scanHandle(asyncHandle(bytes), {}, { chunk: 16384, quantum: 4096 });
+import { asyncHandle, validateHandle, pushValidator } from 'snug/sources';
+const result = await validateHandle(schema, asyncHandle(bytes), 'message', {},
+  { chunk: 16384, quantum: 4096 });
+// Same ValidationResult as schema.validate(bytes, 'message'); no decoded tree.
 ```
 
-The current public adapters perform **profile-only scanning**, not CDDL
-schema validation or materialising decode. They support a buffer, an exact
-known-length sync/async `{ size, read(offset, length) }` handle, and
-`pushScanner(length)` with `feed`, `resume`, `finalize`. `scanBuffer` returns
-undefined on success; the handle scanners and push `finalize` return true.
-Profile refusals throw `SnugFault`; broken source contracts throw
-`SourceError` (`bad_chunk`, `short_read`, `length_mismatch`). Transport reads
-may also reject with the transport's own error; sanitise those before logging.
+**Known length is required**, in bytes, before validation starts: handle
+`size`, Content-Length or an application framing header. It must be an exact
+integer in 0..2^31−1, subject to the schema's input limit. Unknown-length
+streams remain pending D085; drain/failFast are not implemented options.
 
-Use positive `chunk` sizes and non-negative `quantum`. Reads occur one at a
-time on demand; async yields return control to the event loop. A pushed
-`yield` means resume on a later turn before continuing. Empty chunks are not
-EOF. A successful intermediate verdict does not waive the declared-length
-contract: deliver the remaining bytes and call `finalize`. Do not reuse a
-raw `ScanSession` after it finishes or fails. Real handle implementations
-must provide stable snapshots, exact reads and their own deadlines. The
-in-memory helpers copy ordinary Uint8Array input; pass a plain Uint8Array,
-not a mutable Node Buffer, when relying on `bufferHandle` snapshot ownership.
+A handle is `{ size, read(offset, length) }`, with reads returning a Uint8Array
+or Promise of one. It must supply **one immutable snapshot** for the entire
+validation: fixed size, identical bytes on every read, including rereads.
+Version pinning is the caller's responsibility. For remote objects, capture
+an object generation or ETag and enforce it on every range request (for
+example, If-Match); fail the read if the snapshot is unavailable. snug does
+not check a version field or detect remote mutations. Return exactly the
+requested range and keep the returned bytes unchanged while used. The
+[async in-memory example](../examples/validate-handle.mjs) needs no network.
+The helpers copy ordinary Uint8Array input; use a plain Uint8Array when
+relying on snapshot ownership, since Node Buffer.slice aliases its input.
 
-Unknown-length streams, standard Blob/File/HTTP Range adapters, fused decode
-and public resumable CDDL validation are pending. D085 defines future drain
-versus fail-fast behaviour; it is not an implemented option here. No example
-buffers an unbounded stream to pretend it supports streaming schemas.
+`validateHandleSync(schema, handle, rule, options?, sourceOptions?)` has the
+same result contract for synchronous handles and refuses Promise reads.
+Reads occur on demand, one at a time. Use a positive integer `chunk` size
+(default 65536); requests may be larger to satisfy a VM need. `quantum`
+defaults to 0, disabling scheduling yields; a positive value up to 2^31−1
+enables them. The async driver gives the event loop a turn on yields through
+the available scheduler, while the sync driver continues immediately. Yields
+change neither verdict nor budget and do not reset a runtime's CPU allowance.
+Set transport deadlines in your handle implementation.
+
+For an ordered push source with a declared length:
+
+```js
+const push = pushValidator(schema, bytes.length, 'message', {}, { quantum: 4096 });
+// Replace these chunks with chunks from your known-length transport.
+for (let offset = 0; offset < bytes.length; offset += 16384) {
+  let step = push.feed(bytes.subarray(offset, offset + 16384));
+  while (step.state === 'yield') {
+    await new Promise(resolve => setTimeout(resolve, 0)); // give the event loop a turn
+    step = push.resume();
+  }
+}
+const pushedResult = push.finalize();
+```
+
+Feed in order on `need`. A `yield` means stop feeding, give the event loop a
+turn, then call `resume()` until it needs input or finishes. Empty chunks are
+not EOF. `done` includes `result`, which may arrive before all bytes do.
+Deliver the remaining bytes and **always call finalize**, even after an early
+success or refusal: only finalize checks the delivered count. It returns the
+ValidationResult and runs any remaining work synchronously. The adapter
+retains bytes required for replay; some schema checks can retain a large span,
+so buffering is bounded by the declared length rather than a fixed chunk size.
+
+Each validation has exclusive session state across every await. Immutable
+Programs can be shared, and independent sessions can interleave; never resume
+one session concurrently. There is no live-session quota or pool, so bound
+concurrency in the application. Advanced custom drivers can call
+`schema.session(rule, length, options?, { quantum? }?)` for a `VmSession`
+with `step(window, base)`, `length` and `bytesHeld`; its need/yield/keep protocol
+is in the [API reference](api.md#schemas-and-programs-snugschema). Scratch
+and verified Program arrays stay private. Discard sessions after completion
+or failure.
+
+CBOR/CDDL/budget refusals are results, identical to buffer validation.
+Broken adapter contracts throw/reject with `SourceError` (`bad_chunk`,
+`short_read`, `length_mismatch`); these are source failures, never validation
+verdicts. Read exceptions/rejections propagate unchanged, so sanitise
+transport errors before logging. Unknown rules/API misuse use TypeError.
+The profile-only `scanBuffer`, `scanHandle`, `scanHandleSync`, `pushScanner`
+remain available: profile refusals throw SnugFault, buffer success returns
+undefined, and handle scanning / push finalize return true.
+
+Standard Blob/File/HTTP Range adapters and fused source decode remain pending.
 
 ## Limits
 
@@ -285,8 +335,8 @@ content still has the scanner's 128-byte ceiling even if other format fields
 suggest a higher future maximum. LIMITS also fixes decimal exponent ≥−1024
 and ndarray dimensions ≤8.
 
-Codec/view-without-schema/source options expose the four ordinary `max*`
-limits. They do not expose a VM budget; schema validation does. Writer
+Codec/view-without-schema/profile-source options expose the four ordinary `max*`
+limits. Schema source validation also exposes the VM budget. Writer
 `limits` can group those four options; top-level names are also accepted.
 Encoding only checks an explicitly supplied `maxBytes` **at finish** after
 buffer growth; bound the values you construct as well. A depth bound stops
@@ -338,7 +388,7 @@ state. There is no supported re-entrant internal VM API.
 | Operation | Ordinary refusal |
 | --- | --- |
 | `compile` | rejected Promise with `SchemaError` |
-| `schema.validate`, `validateAt`, `View.validateAt` | `ValidationResult` |
+| `schema.validate`, `validateAt`, `View.validateAt`, schema source validation | `ValidationResult` (async handles resolve it) |
 | codec/schema decode, checked view, Writer, profile sources | `SnugFault` |
 | Program loading | rejected Promise with `ProgramError` |
 | Broken source protocol | `SourceError` |

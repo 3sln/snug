@@ -48,6 +48,21 @@ function bytesInput(bytes) {
     throw new TypeError('snug: copy SharedArrayBuffer input first');
 }
 
+// Advanced window protocol without exposing the host session's Program/scratch.
+// Obtain sessions through Schema.session(); there is no public constructor.
+class VmSession {
+  #host;
+  constructor(host) { this.#host = host; Object.freeze(this); }
+  get length() { return this.#host.length; }
+  get bytesHeld() { return this.#host.bytesHeld; }
+  step(window, base) {
+    bytesInput(window);
+    if (!Number.isSafeInteger(base) || base < 0 || base + window.length > this.length)
+      throw new TypeError('snug: invalid window span');
+    return this.#host.step(window, base);
+  }
+}
+
 export class Schema {
   #host;
   constructor(program) {
@@ -63,6 +78,10 @@ export class Schema {
   validate(bytes, rule, options = {}) {
     bytesInput(bytes); this.#rule(rule);
     return this.#host.validate(bytes, rule, options);
+  }
+  session(rule, length, options = {}, scheduling = {}) {
+    this.#rule(rule);
+    return new VmSession(this.#host.session(rule, length, options, scheduling));
   }
   validateAt(bytes, start, end, rule, options = {}) {
     bytesInput(bytes); this.#rule(rule);
