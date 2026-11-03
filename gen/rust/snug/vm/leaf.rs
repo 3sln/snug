@@ -192,17 +192,30 @@ pub fn in_fintervals(p: &[i32], s: &mut [i32], first: i32, count: i32, khi: i32,
     }
     return 0;
 }
-pub fn rx_match(p: &[i32], s: &mut [i32], b: &[u8], rx: i32, cs: i32, ce: i32, at: i32) -> i32 {
-    // Run I-Regexp automaton rx over the code points of the (UTF-8-valid) text
-    // b[cs, ce): N = (first step ? first : OR of follow rows of the active set)
-    // AND the mask of the code point's atom (§8.2). Per code point:
-    // W (|active| + 1) units, then 1 per atom probe. Stops when the active set
-    // empties. 1 matched, 0 not, or a negated code.
+pub fn utf8_len(c0: i32) -> i32 {
+    // The length of the (valid) UTF-8 sequence whose lead byte is c0.
+    if c0 >= 240 {
+        return 4;
+    }
+    if c0 >= 224 {
+        return 3;
+    }
+    if c0 >= 192 {
+        return 2;
+    }
+    return 1;
+}
+pub fn rx_cp(p: &[i32], s: &mut [i32], b: &[u8], rx: i32, i: i32, step: i32, act: i32, at: i32) -> i32 {
+    // One code point of an I-Regexp run (§8.2): the whole UTF-8 sequence at
+    // b[i], W (|active| + 1) units, the atom (1 unit per probe), then the next
+    // active set N = (step 0 ? first : OR of the follow rows of the active
+    // set) AND the atom's mask, kept in the regex area. act is |active|.
+    // Answers the new |active| (0: the run is dead) or a negated code. The
+    // buffer walk (rx-match) and the resumable session share it.
     let ro: i32 = p[(p[(H_S_REGEX_INDEX) as usize] + rx) as usize];
     let npos: i32 = p[(ro) as usize];
     let w: i32 = p[(ro + 1) as usize];
     let natoms: i32 = p[(ro + 2) as usize];
-    let nullable: i32 = p[(ro + 3) as usize];
     let first: i32 = ro + 4;
     let accept: i32 = first + w;
     let follow: i32 = accept + w;
@@ -210,6 +223,87 @@ pub fn rx_match(p: &[i32], s: &mut [i32], b: &[u8], rx: i32, cs: i32, ce: i32, a
     let amask: i32 = astart + natoms;
     let cur: i32 = s[(VM_REGEX) as usize];
     let nxt: i32 = cur + w;
+    let c0: i32 = b[(i) as usize] as i32;
+    let mut cp: i32 = c0;
+    let mut na: i32 = 0;
+    if c0 >= 240 {
+        cp = (((c0 & 7) << 18) | (((b[(i + 1) as usize] as i32) & 63) << 12)) | ((((b[(i + 2) as usize] as i32) & 63) << 6) | ((b[(i + 3) as usize] as i32) & 63));
+    } else if c0 >= 224 {
+        cp = (((c0 & 15) << 12) | (((b[(i + 1) as usize] as i32) & 63) << 6)) | ((b[(i + 2) as usize] as i32) & 63);
+    } else if c0 >= 192 {
+        cp = ((c0 & 31) << 6) | ((b[(i + 1) as usize] as i32) & 63);
+    }
+    if !charge(s, w * (act + 1), at) {
+        return -R_BUDGET;
+    }
+    // The atom: the last atom_start <= cp.
+    let mut lo: i32 = 0;
+    let mut hi: i32 = natoms;
+    while lo < hi {
+        if !charge(s, 1, at) {
+            return -R_BUDGET;
+        }
+        let mid: i32 = (lo + hi) >> 1;
+        if p[(astart + mid) as usize] <= cp {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    let atom: i32 = lo - 1;
+    let mrow: i32 = amask + (atom * w);
+    if step == 0 {
+        for j in 0..w {
+            s[(nxt + j) as usize] = p[(first + j) as usize] & p[(mrow + j) as usize];
+        }
+    } else {
+        for j2 in 0..w {
+            s[(nxt + j2) as usize] = 0;
+        }
+        for wi in 0..w {
+            let mut x: i32 = s[(cur + wi) as usize];
+            while x != 0 {
+                let pp: i32 = (wi * 32) + low_bit(x);
+                let row: i32 = follow + (pp * w);
+                x &= i32::wrapping_sub(x, 1);
+                for j3 in 0..w {
+                    let v: i32 = s[(nxt + j3) as usize];
+                    s[(nxt + j3) as usize] = v | p[(row + j3) as usize];
+                }
+            }
+        }
+        for j4 in 0..w {
+            let v4: i32 = s[(nxt + j4) as usize];
+            s[(nxt + j4) as usize] = v4 & p[(mrow + j4) as usize];
+        }
+    }
+    for j5 in 0..w {
+        let v5: i32 = s[(nxt + j5) as usize];
+        s[(cur + j5) as usize] = v5;
+        na += popcount(v5);
+    }
+    return na;
+}
+pub fn rx_accepts(p: &[i32], s: &[i32], rx: i32) -> i32 {
+    // After the last code point: 1 if the active set meets `accept`, else 0.
+    let ro: i32 = p[(p[(H_S_REGEX_INDEX) as usize] + rx) as usize];
+    let w: i32 = p[(ro + 1) as usize];
+    let accept: i32 = (ro + 4) + w;
+    let cur: i32 = s[(VM_REGEX) as usize];
+    for j in 0..w {
+        if (s[(cur + j) as usize] & p[(accept + j) as usize]) != 0 {
+            return 1;
+        }
+    }
+    return 0;
+}
+pub fn rx_match(p: &[i32], s: &mut [i32], b: &[u8], rx: i32, cs: i32, ce: i32, at: i32) -> i32 {
+    // Run I-Regexp automaton rx over the code points of the (UTF-8-valid) text
+    // b[cs, ce), one rx-cp per code point; stops when the active set
+    // empties. 1 matched, 0 not, or a negated code.
+    let ro: i32 = p[(p[(H_S_REGEX_INDEX) as usize] + rx) as usize];
+    let w: i32 = p[(ro + 1) as usize];
+    let nullable: i32 = p[(ro + 3) as usize];
     let mut i: i32 = cs;
     let mut act: i32 = 0;
     let mut step: i32 = 0;
@@ -220,81 +314,17 @@ pub fn rx_match(p: &[i32], s: &mut [i32], b: &[u8], rx: i32, cs: i32, ce: i32, a
         return nullable;
     }
     while i < ce {
-        let c0: i32 = b[(i) as usize] as i32;
-        let mut cp: i32 = c0;
-        let mut len: i32 = 1;
-        if c0 >= 240 {
-            len = 4;
-            cp = (((c0 & 7) << 18) | (((b[(i + 1) as usize] as i32) & 63) << 12)) | ((((b[(i + 2) as usize] as i32) & 63) << 6) | ((b[(i + 3) as usize] as i32) & 63));
-        } else if c0 >= 224 {
-            len = 3;
-            cp = (((c0 & 15) << 12) | (((b[(i + 1) as usize] as i32) & 63) << 6)) | ((b[(i + 2) as usize] as i32) & 63);
-        } else if c0 >= 192 {
-            len = 2;
-            cp = ((c0 & 31) << 6) | ((b[(i + 1) as usize] as i32) & 63);
-        }
-        if !charge(s, w * (act + 1), at) {
-            return -R_BUDGET;
-        }
-        // The atom: the last atom_start <= cp.
-        let mut lo: i32 = 0;
-        let mut hi: i32 = natoms;
-        while lo < hi {
-            if !charge(s, 1, at) {
-                return -R_BUDGET;
-            }
-            let mid: i32 = (lo + hi) >> 1;
-            if p[(astart + mid) as usize] <= cp {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        let atom: i32 = lo - 1;
-        let mrow: i32 = amask + (atom * w);
-        if step == 0 {
-            for j in 0..w {
-                s[(nxt + j) as usize] = p[(first + j) as usize] & p[(mrow + j) as usize];
-            }
-        } else {
-            for j2 in 0..w {
-                s[(nxt + j2) as usize] = 0;
-            }
-            for wi in 0..w {
-                let mut x: i32 = s[(cur + wi) as usize];
-                while x != 0 {
-                    let pp: i32 = (wi * 32) + low_bit(x);
-                    let row: i32 = follow + (pp * w);
-                    x &= i32::wrapping_sub(x, 1);
-                    for j3 in 0..w {
-                        let v: i32 = s[(nxt + j3) as usize];
-                        s[(nxt + j3) as usize] = v | p[(row + j3) as usize];
-                    }
-                }
-            }
-            for j4 in 0..w {
-                let v4: i32 = s[(nxt + j4) as usize];
-                s[(nxt + j4) as usize] = v4 & p[(mrow + j4) as usize];
-            }
-        }
-        act = 0;
-        for j5 in 0..w {
-            let v5: i32 = s[(nxt + j5) as usize];
-            s[(cur + j5) as usize] = v5;
-            act += popcount(v5);
+        act = rx_cp(p, s, b, rx, i, step, act, at);
+        if act < 0 {
+            return act;
         }
         if act == 0 {
             return 0;
         }
+        i += utf8_len(b[(i) as usize] as i32);
         step = 1;
-        i += len;
     }
-    for j6 in 0..w {
-        if (s[(cur + j6) as usize] & p[(accept + j6) as usize]) != 0 {
-            return 1;
-        }
-    }
-    return 0;
+    return rx_accepts(p, s, rx);
 }
 pub fn scalar_kind(kind: i32) -> bool {
     // Kinds a scalar evaluation decides (TAG/TAGSET/EMBED/ARRAY/MAP/AND/NOT are
@@ -419,6 +449,24 @@ pub fn leaf_text(p: &[i32], b: &[u8], s: &mut [i32], lb: i32, pos: i32, cs: i32,
     }
     return R_PATTERN;
 }
+pub fn bits_ok(pool: &[u8], b: &[u8], moff: i32, mlen: i32, cs: i32, i0: i32, stop: i32) -> bool {
+    // `.bits` over b[i0, stop) of content starting at cs: data[k] & ~mask[k] = 0
+    // with k = i - cs and mask 0 past its length (shared by the buffer walk
+    // and the resumable session, which checks a window at a time).
+    let mut i: i32 = i0;
+    while i < stop {
+        let k: i32 = i - cs;
+        let mut m: i32 = 0;
+        if k < mlen {
+            m = pool[(moff + k) as usize] as i32;
+        }
+        if ((b[(i) as usize] as i32) & (m ^ 255)) != 0 {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
 pub fn leaf_bytes(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos: i32, cs: i32, ce: i32) -> i32 {
     // BYTES: size, then `.bits` (data[i] & ~mask[i] = 0, mask 0 past its
     // length; charged ceil(len/64)).
@@ -434,16 +482,10 @@ pub fn leaf_bytes(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos:
     if !charge(s, c64(len), pos) {
         return -R_BUDGET;
     }
-    for i in 0..len {
-        let mut m: i32 = 0;
-        if i < mlen {
-            m = pool[(moff + i) as usize] as i32;
-        }
-        if ((b[(cs + i) as usize] as i32) & (m ^ 255)) != 0 {
-            return R_BITS;
-        }
+    if bits_ok(pool, b, moff, mlen, cs, cs, ce) {
+        return 0;
     }
-    return 0;
+    return R_BITS;
 }
 pub fn leaf_simple(p: &[i32], b: &[u8], lb: i32, pos: i32) -> i32 {
     if ((b[(pos) as usize] as i32) & 31) == p[(lb + 2) as usize] {

@@ -139,42 +139,48 @@
     (if (== lo 2) (iset s VM_Q1 q1))
     (return q)))
 
+(defn ^:pub ^I32 typed-bad-at [^Bytes b ^I32 i0 ^I32 stop ^I32 tag]
+  (comment "The first float element of a typed array (tags 84/85/86, little-endian"
+           "float16/32/64) in b[i0, stop) that is a NaN with a payload, or -1."
+           "Shared by the buffer walk and the resumable session.")
+  (let [^:mut i i0]
+    (if (== tag 84)
+      (while (< i stop)
+        (let [h1 (u8 b (+ i 1))]
+          (if (== (bit-and h1 124) 124)
+            (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0) (return i))))
+        (set i (+ i 2))))
+    (if (== tag 85)
+      (while (< i stop)
+        (let [s3 (u8 b (+ i 3))
+              s2 (u8 b (+ i 2))]
+          (if (and (== (bit-and s3 127) 127) (>= s2 128))
+            (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0) (return i))))
+        (set i (+ i 4))))
+    (if (== tag 86)
+      (while (< i stop)
+        (let [t7 (u8 b (+ i 7))
+              t6 (u8 b (+ i 6))]
+          (if (and (== (bit-and t7 127) 127) (>= t6 240))
+            (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
+                                    (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
+                            (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
+                     0)
+              (return i))))
+        (set i (+ i 8))))
+    (return (neg 1))))
+
 (defn ^:pub ^I32 dead-typed [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 tag ^I32 size ^I32 end]
   (comment "scan-typed, with the NaN scan of float arrays charged ceil(len/64)"
            "after the length checks and before the scan.")
   (let [stop (bytes-content b s p CODE_TYPED_ARRAY end)]
     (if (< stop 0) (return stop))
-    (let [cs (ia s O_CSTART)
-          ^:mut i cs]
+    (let [cs (ia s O_CSTART)]
       (if (!= (rem (- stop cs) size) 0) (return (fail s pos CODE_TYPED_ARRAY)))
       (if (>= tag 84)
         (if (not (charge s (c64 (- stop cs)) pos)) (return (neg R_BUDGET))))
-      (if (== tag 84)
-        (while (< i stop)
-          (let [h1 (u8 b (+ i 1))]
-            (if (== (bit-and h1 124) 124)
-              (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0)
-                (return (fail s i CODE_TYPED_ARRAY)))))
-          (set i (+ i 2))))
-      (if (== tag 85)
-        (while (< i stop)
-          (let [s3 (u8 b (+ i 3))
-                s2 (u8 b (+ i 2))]
-            (if (and (== (bit-and s3 127) 127) (>= s2 128))
-              (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0)
-                (return (fail s i CODE_TYPED_ARRAY)))))
-          (set i (+ i 4))))
-      (if (== tag 86)
-        (while (< i stop)
-          (let [t7 (u8 b (+ i 7))
-                t6 (u8 b (+ i 6))]
-            (if (and (== (bit-and t7 127) 127) (>= t6 240))
-              (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
-                                      (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
-                              (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
-                       0)
-                (return (fail s i CODE_TYPED_ARRAY)))))
-          (set i (+ i 8))))
+      (let [bad (typed-bad-at b cs stop tag)]
+        (if (>= bad 0) (return (fail s bad CODE_TYPED_ARRAY))))
       (return stop))))
 
 (defn ^:pub ^I32 dead-bignum [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 bmax ^I32 end]

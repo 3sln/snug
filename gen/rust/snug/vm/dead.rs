@@ -185,29 +185,17 @@ pub fn dead_array_elems(b: &[u8], s: &mut [i32], p: i32, lo: i32, depth: i32, en
     }
     return q;
 }
-pub fn dead_typed(b: &[u8], s: &mut [i32], pos: i32, p: i32, tag: i32, size: i32, end: i32) -> i32 {
-    // scan-typed, with the NaN scan of float arrays charged ceil(len/64)
-    // after the length checks and before the scan.
-    let stop: i32 = bytes_content(b, s, p, CODE_TYPED_ARRAY, end);
-    if stop < 0 {
-        return stop;
-    }
-    let cs: i32 = s[(O_CSTART) as usize];
-    let mut i: i32 = cs;
-    if ((stop - cs) % size) != 0 {
-        return fail(s, pos, CODE_TYPED_ARRAY);
-    }
-    if tag >= 84 {
-        if !charge(s, c64(stop - cs), pos) {
-            return -R_BUDGET;
-        }
-    }
+pub fn typed_bad_at(b: &[u8], i0: i32, stop: i32, tag: i32) -> i32 {
+    // The first float element of a typed array (tags 84/85/86, little-endian
+    // float16/32/64) in b[i0, stop) that is a NaN with a payload, or -1.
+    // Shared by the buffer walk and the resumable session.
+    let mut i: i32 = i0;
     if tag == 84 {
         while i < stop {
             let h1: i32 = b[(i + 1) as usize] as i32;
             if (h1 & 124) == 124 {
                 if ((h1 & 3) | (b[(i) as usize] as i32)) != 0 {
-                    return fail(s, i, CODE_TYPED_ARRAY);
+                    return i;
                 }
             }
             i += 2;
@@ -219,7 +207,7 @@ pub fn dead_typed(b: &[u8], s: &mut [i32], pos: i32, p: i32, tag: i32, size: i32
             let s2: i32 = b[(i + 2) as usize] as i32;
             if ((s3 & 127) == 127) && (s2 >= 128) {
                 if (((s2 & 127) | (b[(i + 1) as usize] as i32)) | (b[(i) as usize] as i32)) != 0 {
-                    return fail(s, i, CODE_TYPED_ARRAY);
+                    return i;
                 }
             }
             i += 4;
@@ -231,11 +219,33 @@ pub fn dead_typed(b: &[u8], s: &mut [i32], pos: i32, p: i32, tag: i32, size: i32
             let t6: i32 = b[(i + 6) as usize] as i32;
             if ((t7 & 127) == 127) && (t6 >= 240) {
                 if ((((t6 & 15) | (b[(i + 5) as usize] as i32)) | ((b[(i + 4) as usize] as i32) | (b[(i + 3) as usize] as i32))) | (((b[(i + 2) as usize] as i32) | (b[(i + 1) as usize] as i32)) | (b[(i) as usize] as i32))) != 0 {
-                    return fail(s, i, CODE_TYPED_ARRAY);
+                    return i;
                 }
             }
             i += 8;
         }
+    }
+    return -1;
+}
+pub fn dead_typed(b: &[u8], s: &mut [i32], pos: i32, p: i32, tag: i32, size: i32, end: i32) -> i32 {
+    // scan-typed, with the NaN scan of float arrays charged ceil(len/64)
+    // after the length checks and before the scan.
+    let stop: i32 = bytes_content(b, s, p, CODE_TYPED_ARRAY, end);
+    if stop < 0 {
+        return stop;
+    }
+    let cs: i32 = s[(O_CSTART) as usize];
+    if ((stop - cs) % size) != 0 {
+        return fail(s, pos, CODE_TYPED_ARRAY);
+    }
+    if tag >= 84 {
+        if !charge(s, c64(stop - cs), pos) {
+            return -R_BUDGET;
+        }
+    }
+    let bad: i32 = typed_bad_at(b, cs, stop, tag);
+    if bad >= 0 {
+        return fail(s, bad, CODE_TYPED_ARRAY);
     }
     return stop;
 }

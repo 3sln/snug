@@ -199,17 +199,31 @@ export function inFintervals(p, s, first, count, khi, klo, at) {
     return 0;
 }
 
-export function rxMatch(p, s, b, rx, cs, ce, at) {
-    // Run I-Regexp automaton rx over the code points of the (UTF-8-valid) text
-    // b[cs, ce): N = (first step ? first : OR of follow rows of the active set)
-    // AND the mask of the code point's atom (§8.2). Per code point:
-    // W (|active| + 1) units, then 1 per atom probe. Stops when the active set
-    // empties. 1 matched, 0 not, or a negated code.
+export function utf8Len(c0) {
+    // The length of the (valid) UTF-8 sequence whose lead byte is c0.
+    if (c0 >= 240) {
+        return 4;
+    }
+    if (c0 >= 224) {
+        return 3;
+    }
+    if (c0 >= 192) {
+        return 2;
+    }
+    return 1;
+}
+
+export function rxCp(p, s, b, rx, i, step, act, at) {
+    // One code point of an I-Regexp run (§8.2): the whole UTF-8 sequence at
+    // b[i], W (|active| + 1) units, the atom (1 unit per probe), then the next
+    // active set N = (step 0 ? first : OR of the follow rows of the active
+    // set) AND the atom's mask, kept in the regex area. act is |active|.
+    // Answers the new |active| (0: the run is dead) or a negated code. The
+    // buffer walk (rx-match) and the resumable session share it.
     const ro = p[p[H_S_REGEX_INDEX] + rx];
     const npos = p[ro];
     const w = p[ro + 1];
     const natoms = p[ro + 2];
-    const nullable = p[ro + 3];
     const first = ro + 4;
     const accept = first + w;
     const follow = accept + w;
@@ -217,6 +231,89 @@ export function rxMatch(p, s, b, rx, cs, ce, at) {
     const amask = astart + natoms;
     const cur = s[VM_REGEX];
     const nxt = cur + w;
+    const c0 = b[i];
+    let cp = c0;
+    let na = 0;
+    if (c0 >= 240) {
+        cp = (((c0 & 7) << 18) | ((b[i + 1] & 63) << 12)) | (((b[i + 2] & 63) << 6) | (b[i + 3] & 63));
+    } else if (c0 >= 224) {
+        cp = (((c0 & 15) << 12) | ((b[i + 1] & 63) << 6)) | (b[i + 2] & 63);
+    } else if (c0 >= 192) {
+        cp = ((c0 & 31) << 6) | (b[i + 1] & 63);
+    }
+    if (!charge(s, w * (act + 1), at)) {
+        return -R_BUDGET;
+    }
+    // The atom: the last atom_start <= cp.
+    let lo = 0;
+    let hi = natoms;
+    while (lo < hi) {
+        if (!charge(s, 1, at)) {
+            return -R_BUDGET;
+        }
+        const mid = (lo + hi) >> 1;
+        if (p[astart + mid] <= cp) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    const atom = lo - 1;
+    const mrow = amask + (atom * w);
+    if (step === 0) {
+        for (let j = 0; j < w; j++) {
+            s[nxt + j] = p[first + j] & p[mrow + j];
+        }
+    } else {
+        for (let j2 = 0; j2 < w; j2++) {
+            s[nxt + j2] = 0;
+        }
+        for (let wi = 0; wi < w; wi++) {
+            let x = s[cur + wi];
+            while (x !== 0) {
+                const pp = (wi * 32) + lowBit(x);
+                const row = follow + (pp * w);
+                x &= (x - 1) | 0;
+                for (let j3 = 0; j3 < w; j3++) {
+                    const v = s[nxt + j3];
+                    s[nxt + j3] = v | p[row + j3];
+                }
+            }
+        }
+        for (let j4 = 0; j4 < w; j4++) {
+            const v4 = s[nxt + j4];
+            s[nxt + j4] = v4 & p[mrow + j4];
+        }
+    }
+    for (let j5 = 0; j5 < w; j5++) {
+        const v5 = s[nxt + j5];
+        s[cur + j5] = v5;
+        na += popcount(v5);
+    }
+    return na;
+}
+
+export function rxAccepts(p, s, rx) {
+    // After the last code point: 1 if the active set meets `accept`, else 0.
+    const ro = p[p[H_S_REGEX_INDEX] + rx];
+    const w = p[ro + 1];
+    const accept = (ro + 4) + w;
+    const cur = s[VM_REGEX];
+    for (let j = 0; j < w; j++) {
+        if ((s[cur + j] & p[accept + j]) !== 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+export function rxMatch(p, s, b, rx, cs, ce, at) {
+    // Run I-Regexp automaton rx over the code points of the (UTF-8-valid) text
+    // b[cs, ce), one rx-cp per code point; stops when the active set
+    // empties. 1 matched, 0 not, or a negated code.
+    const ro = p[p[H_S_REGEX_INDEX] + rx];
+    const w = p[ro + 1];
+    const nullable = p[ro + 3];
     let i = cs;
     let act = 0;
     let step = 0;
@@ -227,81 +324,17 @@ export function rxMatch(p, s, b, rx, cs, ce, at) {
         return nullable;
     }
     while (i < ce) {
-        const c0 = b[i];
-        let cp = c0;
-        let len = 1;
-        if (c0 >= 240) {
-            len = 4;
-            cp = (((c0 & 7) << 18) | ((b[i + 1] & 63) << 12)) | (((b[i + 2] & 63) << 6) | (b[i + 3] & 63));
-        } else if (c0 >= 224) {
-            len = 3;
-            cp = (((c0 & 15) << 12) | ((b[i + 1] & 63) << 6)) | (b[i + 2] & 63);
-        } else if (c0 >= 192) {
-            len = 2;
-            cp = ((c0 & 31) << 6) | (b[i + 1] & 63);
-        }
-        if (!charge(s, w * (act + 1), at)) {
-            return -R_BUDGET;
-        }
-        // The atom: the last atom_start <= cp.
-        let lo = 0;
-        let hi = natoms;
-        while (lo < hi) {
-            if (!charge(s, 1, at)) {
-                return -R_BUDGET;
-            }
-            const mid = (lo + hi) >> 1;
-            if (p[astart + mid] <= cp) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        const atom = lo - 1;
-        const mrow = amask + (atom * w);
-        if (step === 0) {
-            for (let j = 0; j < w; j++) {
-                s[nxt + j] = p[first + j] & p[mrow + j];
-            }
-        } else {
-            for (let j2 = 0; j2 < w; j2++) {
-                s[nxt + j2] = 0;
-            }
-            for (let wi = 0; wi < w; wi++) {
-                let x = s[cur + wi];
-                while (x !== 0) {
-                    const pp = (wi * 32) + lowBit(x);
-                    const row = follow + (pp * w);
-                    x &= (x - 1) | 0;
-                    for (let j3 = 0; j3 < w; j3++) {
-                        const v = s[nxt + j3];
-                        s[nxt + j3] = v | p[row + j3];
-                    }
-                }
-            }
-            for (let j4 = 0; j4 < w; j4++) {
-                const v4 = s[nxt + j4];
-                s[nxt + j4] = v4 & p[mrow + j4];
-            }
-        }
-        act = 0;
-        for (let j5 = 0; j5 < w; j5++) {
-            const v5 = s[nxt + j5];
-            s[cur + j5] = v5;
-            act += popcount(v5);
+        act = rxCp(p, s, b, rx, i, step, act, at);
+        if (act < 0) {
+            return act;
         }
         if (act === 0) {
             return 0;
         }
+        i += utf8Len(b[i]);
         step = 1;
-        i += len;
     }
-    for (let j6 = 0; j6 < w; j6++) {
-        if ((s[cur + j6] & p[accept + j6]) !== 0) {
-            return 1;
-        }
-    }
-    return 0;
+    return rxAccepts(p, s, rx);
 }
 
 export function scalarKind(kind) {
@@ -433,6 +466,25 @@ export function leafText(p, b, s, lb, pos, cs, ce) {
     return R_PATTERN;
 }
 
+export function bitsOk(pool, b, moff, mlen, cs, i0, stop) {
+    // `.bits` over b[i0, stop) of content starting at cs: data[k] & ~mask[k] = 0
+    // with k = i - cs and mask 0 past its length (shared by the buffer walk
+    // and the resumable session, which checks a window at a time).
+    let i = i0;
+    while (i < stop) {
+        const k = i - cs;
+        let m = 0;
+        if (k < mlen) {
+            m = pool[moff + k];
+        }
+        if ((b[i] & (m ^ 255)) !== 0) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
 export function leafBytes(p, pool, b, s, lb, pos, cs, ce) {
     // BYTES: size, then `.bits` (data[i] & ~mask[i] = 0, mask 0 past its
     // length; charged ceil(len/64)).
@@ -448,16 +500,10 @@ export function leafBytes(p, pool, b, s, lb, pos, cs, ce) {
     if (!charge(s, c64(len), pos)) {
         return -R_BUDGET;
     }
-    for (let i = 0; i < len; i++) {
-        let m = 0;
-        if (i < mlen) {
-            m = pool[moff + i];
-        }
-        if ((b[cs + i] & (m ^ 255)) !== 0) {
-            return R_BITS;
-        }
+    if (bitsOk(pool, b, moff, mlen, cs, cs, ce)) {
+        return 0;
     }
-    return 0;
+    return R_BITS;
 }
 
 export function leafSimple(p, b, lb, pos) {

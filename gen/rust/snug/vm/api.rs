@@ -195,26 +195,22 @@ pub fn vm_witness_output(s: &mut [i32], out: &mut [i32]) -> i32 {
     out[(6) as usize] = k;
     return s[(VM_W_REASON) as usize];
 }
-pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
-    // Validate the single item b[start, end) against rule, its depth and item
-    // accounting starting at depth0 / items0. See vm-validate for results.
-    if (out.len() as i32) < 8 {
-        return -4;
-    }
+pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32]) -> i32 {
+    // Check the Program header, rule and scratch, then fill S for a run on
+    // rule from start (§12.1, §13.1). 0, or -1 Program inconsistent,
+    // -2 scratch too small, -3 rule out of range. Shared by the buffer walk
+    // and the resumable session (snug.vm.session).
     if (p.len() as i32) < HEADER_WORDS {
         return -1;
     }
     if (p[(0) as usize] != MAGIC) || ((p[(H_FORMAT) as usize] != FORMAT_VERSION) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
         return -1;
     }
-    if (p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32)) || (p[(H_POOL_BYTES) as usize] != (pool.len() as i32)) {
+    if p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32) {
         return -1;
     }
     if (rule < 0) || (rule >= p[(H_N_RULES) as usize]) {
         return -3;
-    }
-    if (start < 0) || ((end < start) || (end > (b.len() as i32))) {
-        return -1;
     }
     if (s.len() as i32) < SCRATCH_MARK {
         return -2;
@@ -235,7 +231,6 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     let mut dl: i32 = lim(limits, 3, dd) - depth0;
     let bmax: i32 = lim(limits, 6, p[(H_LIM_BIGNUM) as usize]);
     let budget: i32 = lim(limits, 7, p[(H_LIM_BUDGET) as usize]);
-    let n: i32 = end - start;
     if dl < 0 {
         dl = 0;
     }
@@ -281,6 +276,35 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     } else {
         s[(VM_GENERIC) as usize] = 2;
     }
+    return 0;
+}
+pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
+    // Validate the single item b[start, end) against rule, its depth and item
+    // accounting starting at depth0 / items0. See vm-validate for results.
+    if (out.len() as i32) < 8 {
+        return -4;
+    }
+    if (p.len() as i32) < HEADER_WORDS {
+        return -1;
+    }
+    if (p[(0) as usize] != MAGIC) || ((p[(H_FORMAT) as usize] != FORMAT_VERSION) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
+        return -1;
+    }
+    if (p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32)) || (p[(H_POOL_BYTES) as usize] != (pool.len() as i32)) {
+        return -1;
+    }
+    if (rule < 0) || (rule >= p[(H_N_RULES) as usize]) {
+        return -3;
+    }
+    if (start < 0) || ((end < start) || (end > (b.len() as i32))) {
+        return -1;
+    }
+    let su: i32 = vm_setup(p, rule, start, depth0, items0, limits, s);
+    if su < 0 {
+        return su;
+    }
+    let frames: i32 = s[(VM_FRAMES) as usize];
+    let n: i32 = end - start;
     if n > s[(O_MAX_BYTES) as usize] {
         let c1: i32 = -fail(s, start, CODE_TOO_LARGE);
         return vm_output(s, out, c1, 0, start);

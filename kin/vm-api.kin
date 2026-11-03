@@ -175,18 +175,18 @@
     (iset out 6 k)
     (return (ia s VM_W_REASON))))
 
-(defn ^:pub ^I32 vm-run [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
-                         ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
-  (comment "Validate the single item b[start, end) against rule, its depth and item"
-           "accounting starting at depth0 / items0. See vm-validate for results.")
-  (if (< (ilen out) 8) (return (neg 4)))
+(defn ^:pub ^I32 vm-setup [^IntsR p ^I32 rule ^I32 start ^I32 depth0 ^I32 items0
+                           ^IntsR limits ^Ints s]
+  (comment "Check the Program header, rule and scratch, then fill S for a run on"
+           "rule from start (§12.1, §13.1). 0, or -1 Program inconsistent,"
+           "-2 scratch too small, -3 rule out of range. Shared by the buffer walk"
+           "and the resumable session (snug.vm.session).")
   (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
   (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_VERSION)
                                   (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
     (return (neg 1)))
-  (if (or (!= (ia p H_PROGRAM_WORDS) (ilen p)) (!= (ia p H_POOL_BYTES) (blen pool))) (return (neg 1)))
+  (if (!= (ia p H_PROGRAM_WORDS) (ilen p)) (return (neg 1)))
   (if (or (< rule 0) (>= rule (ia p H_N_RULES))) (return (neg 3)))
-  (if (or (< start 0) (or (< end start) (> end (blen b)))) (return (neg 1)))
   (if (< (ilen s) SCRATCH_MARK) (return (neg 2)))
   (let [mc (ia s VM_MARK_CAP)
         dd (ia p H_LIM_DEPTH)
@@ -199,8 +199,7 @@
           frames (+ rx rxw)
           ^:mut dl (- (lim limits 3 dd) depth0)
           bmax (lim limits 6 (ia p H_LIM_BIGNUM))
-          budget (lim limits 7 (ia p H_LIM_BUDGET))
-          n (- end start)]
+          budget (lim limits 7 (ia p H_LIM_BUDGET))]
       (if (< dl 0) (set dl 0))
       (iset s O_TOP (opt01 limits 0))
       (if (== depth0 0) (iset s O_COSE (opt01 limits 1)) (iset s O_COSE 0))
@@ -234,43 +233,61 @@
       (if (> (ilen limits) 8)
         (iset s VM_GENERIC (- (+ (bit-and (ia limits 8) 1) 2) (bit-and (ia limits 8) 2)))
         (iset s VM_GENERIC 2))
-      (if (> n (ia s O_MAX_BYTES))
-        (do (let [c1 (neg (fail s start CODE_TOO_LARGE))]
-              (return (vm-output s out c1 0 start)))))
-      (if (== (ia s O_TOP) 0)
-        (if (or (== n 0) (!= (ushr (u8 b start) 5) 5))
-          (do (let [c2 (neg (fail s start CODE_NOT_MAP))]
-                (return (vm-output s out c2 0 start))))))
-      (let [rr (+ (ia p H_S_RULES) (* 5 rule))
-            ts (ia p (+ rr 2))
-            cr (cset-rec p s 0)
-            w (ia p cr)
-            e (new-epoch s)
-            nq (q-add p s frames w 0 ts e start)]
-        (if (== nq (neg R_BUDGET))
-          (do (let [at1 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at1)))))
-        (if (< nq 0) (return (neg 1)))
-        (local ^I32 r)
-        (if (> nq 0)
-          (set r (eval-item p pool b s start 0 frames 0 nq end 0))
-          (set r (dead-item b s start 0 end)))
-        (if (== r (neg R_BUDGET))
-          (do (let [at2 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at2)))))
-        (if (== r (neg R_INCONSISTENT)) (return (neg 1)))
-        (if (< r 0)
-          (do (let [at3 (ia s O_ERR_POS)] (return (vm-output s out (neg r) 0 at3)))))
-        (if (!= r end)
-          (do (let [c3 (neg (fail s r CODE_TRAILING))]
-                (return (vm-output s out c3 0 r)))))
-        (let [ev (q-stamp s frames w nq start)]
-          (if (< ev 0)
-            (do (let [at4 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at4)))))
-          (let [t (ts-test p s ts ev start)]
-            (if (< t 0)
-              (do (let [at5 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at5)))))
-            (if (== t 1) (return (vm-output s out 0 0 0)))
-            (if (wit-empty s) (wit-set s R_TYPE 0 0 (neg 1) 0 start))
-            (return (vm-witness-output s out))))))))
+      (return 0))))
+
+(defn ^:pub ^I32 vm-run [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
+                         ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
+  (comment "Validate the single item b[start, end) against rule, its depth and item"
+           "accounting starting at depth0 / items0. See vm-validate for results.")
+  (if (< (ilen out) 8) (return (neg 4)))
+  (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
+  (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_VERSION)
+                                  (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
+    (return (neg 1)))
+  (if (or (!= (ia p H_PROGRAM_WORDS) (ilen p)) (!= (ia p H_POOL_BYTES) (blen pool))) (return (neg 1)))
+  (if (or (< rule 0) (>= rule (ia p H_N_RULES))) (return (neg 3)))
+  (if (or (< start 0) (or (< end start) (> end (blen b)))) (return (neg 1)))
+  (let [su (vm-setup p rule start depth0 items0 limits s)]
+    (if (< su 0) (return su)))
+  (let [frames (ia s VM_FRAMES)
+        n (- end start)]
+    (if (> n (ia s O_MAX_BYTES))
+      (do (let [c1 (neg (fail s start CODE_TOO_LARGE))]
+            (return (vm-output s out c1 0 start)))))
+    (if (== (ia s O_TOP) 0)
+      (if (or (== n 0) (!= (ushr (u8 b start) 5) 5))
+        (do (let [c2 (neg (fail s start CODE_NOT_MAP))]
+              (return (vm-output s out c2 0 start))))))
+    (let [rr (+ (ia p H_S_RULES) (* 5 rule))
+          ts (ia p (+ rr 2))
+          cr (cset-rec p s 0)
+          w (ia p cr)
+          e (new-epoch s)
+          nq (q-add p s frames w 0 ts e start)]
+      (if (== nq (neg R_BUDGET))
+        (do (let [at1 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at1)))))
+      (if (< nq 0) (return (neg 1)))
+      (local ^I32 r)
+      (if (> nq 0)
+        (set r (eval-item p pool b s start 0 frames 0 nq end 0))
+        (set r (dead-item b s start 0 end)))
+      (if (== r (neg R_BUDGET))
+        (do (let [at2 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at2)))))
+      (if (== r (neg R_INCONSISTENT)) (return (neg 1)))
+      (if (< r 0)
+        (do (let [at3 (ia s O_ERR_POS)] (return (vm-output s out (neg r) 0 at3)))))
+      (if (!= r end)
+        (do (let [c3 (neg (fail s r CODE_TRAILING))]
+              (return (vm-output s out c3 0 r)))))
+      (let [ev (q-stamp s frames w nq start)]
+        (if (< ev 0)
+          (do (let [at4 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at4)))))
+        (let [t (ts-test p s ts ev start)]
+          (if (< t 0)
+            (do (let [at5 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at5)))))
+          (if (== t 1) (return (vm-output s out 0 0 0)))
+          (if (wit-empty s) (wit-set s R_TYPE 0 0 (neg 1) 0 start))
+          (return (vm-witness-output s out)))))))
 
 (defn ^:pub ^I32 vm-validate [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
                               ^Ints out]

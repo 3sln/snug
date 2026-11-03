@@ -207,26 +207,22 @@ export function vmWitnessOutput(s, out) {
     return s[VM_W_REASON];
 }
 
-export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, out) {
-    // Validate the single item b[start, end) against rule, its depth and item
-    // accounting starting at depth0 / items0. See vm-validate for results.
-    if (out.length < 8) {
-        return -4;
-    }
+export function vmSetup(p, rule, start, depth0, items0, limits, s) {
+    // Check the Program header, rule and scratch, then fill S for a run on
+    // rule from start (§12.1, §13.1). 0, or -1 Program inconsistent,
+    // -2 scratch too small, -3 rule out of range. Shared by the buffer walk
+    // and the resumable session (snug.vm.session).
     if (p.length < HEADER_WORDS) {
         return -1;
     }
     if ((p[0] !== MAGIC) || ((p[H_FORMAT] !== FORMAT_VERSION) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
         return -1;
     }
-    if ((p[H_PROGRAM_WORDS] !== p.length) || (p[H_POOL_BYTES] !== pool.length)) {
+    if (p[H_PROGRAM_WORDS] !== p.length) {
         return -1;
     }
     if ((rule < 0) || (rule >= p[H_N_RULES])) {
         return -3;
-    }
-    if ((start < 0) || ((end < start) || (end > b.length))) {
-        return -1;
     }
     if (s.length < SCRATCH_MARK) {
         return -2;
@@ -247,7 +243,6 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     let dl = lim(limits, 3, dd) - depth0;
     const bmax = lim(limits, 6, p[H_LIM_BIGNUM]);
     const budget = lim(limits, 7, p[H_LIM_BUDGET]);
-    const n = end - start;
     if (dl < 0) {
         dl = 0;
     }
@@ -293,6 +288,36 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     } else {
         s[VM_GENERIC] = 2;
     }
+    return 0;
+}
+
+export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, out) {
+    // Validate the single item b[start, end) against rule, its depth and item
+    // accounting starting at depth0 / items0. See vm-validate for results.
+    if (out.length < 8) {
+        return -4;
+    }
+    if (p.length < HEADER_WORDS) {
+        return -1;
+    }
+    if ((p[0] !== MAGIC) || ((p[H_FORMAT] !== FORMAT_VERSION) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
+        return -1;
+    }
+    if ((p[H_PROGRAM_WORDS] !== p.length) || (p[H_POOL_BYTES] !== pool.length)) {
+        return -1;
+    }
+    if ((rule < 0) || (rule >= p[H_N_RULES])) {
+        return -3;
+    }
+    if ((start < 0) || ((end < start) || (end > b.length))) {
+        return -1;
+    }
+    const su = vmSetup(p, rule, start, depth0, items0, limits, s);
+    if (su < 0) {
+        return su;
+    }
+    const frames = s[VM_FRAMES];
+    const n = end - start;
     if (n > s[O_MAX_BYTES]) {
         const c1 = -fail(s, start, CODE_TOO_LARGE);
         return vmOutput(s, out, c1, 0, start);

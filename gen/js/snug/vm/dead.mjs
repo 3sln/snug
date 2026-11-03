@@ -192,29 +192,17 @@ export function deadArrayElems(b, s, p, lo, depth, end) {
     return q;
 }
 
-export function deadTyped(b, s, pos, p, tag, size, end) {
-    // scan-typed, with the NaN scan of float arrays charged ceil(len/64)
-    // after the length checks and before the scan.
-    const stop = bytesContent(b, s, p, CODE_TYPED_ARRAY, end);
-    if (stop < 0) {
-        return stop;
-    }
-    const cs = s[O_CSTART];
-    let i = cs;
-    if ((((stop - cs) % size) | 0) !== 0) {
-        return fail(s, pos, CODE_TYPED_ARRAY);
-    }
-    if (tag >= 84) {
-        if (!charge(s, c64(stop - cs), pos)) {
-            return -R_BUDGET;
-        }
-    }
+export function typedBadAt(b, i0, stop, tag) {
+    // The first float element of a typed array (tags 84/85/86, little-endian
+    // float16/32/64) in b[i0, stop) that is a NaN with a payload, or -1.
+    // Shared by the buffer walk and the resumable session.
+    let i = i0;
     if (tag === 84) {
         while (i < stop) {
             const h1 = b[i + 1];
             if ((h1 & 124) === 124) {
                 if (((h1 & 3) | b[i]) !== 0) {
-                    return fail(s, i, CODE_TYPED_ARRAY);
+                    return i;
                 }
             }
             i += 2;
@@ -226,7 +214,7 @@ export function deadTyped(b, s, pos, p, tag, size, end) {
             const s2 = b[i + 2];
             if (((s3 & 127) === 127) && (s2 >= 128)) {
                 if ((((s2 & 127) | b[i + 1]) | b[i]) !== 0) {
-                    return fail(s, i, CODE_TYPED_ARRAY);
+                    return i;
                 }
             }
             i += 4;
@@ -238,11 +226,34 @@ export function deadTyped(b, s, pos, p, tag, size, end) {
             const t6 = b[i + 6];
             if (((t7 & 127) === 127) && (t6 >= 240)) {
                 if (((((t6 & 15) | b[i + 5]) | (b[i + 4] | b[i + 3])) | ((b[i + 2] | b[i + 1]) | b[i])) !== 0) {
-                    return fail(s, i, CODE_TYPED_ARRAY);
+                    return i;
                 }
             }
             i += 8;
         }
+    }
+    return -1;
+}
+
+export function deadTyped(b, s, pos, p, tag, size, end) {
+    // scan-typed, with the NaN scan of float arrays charged ceil(len/64)
+    // after the length checks and before the scan.
+    const stop = bytesContent(b, s, p, CODE_TYPED_ARRAY, end);
+    if (stop < 0) {
+        return stop;
+    }
+    const cs = s[O_CSTART];
+    if ((((stop - cs) % size) | 0) !== 0) {
+        return fail(s, pos, CODE_TYPED_ARRAY);
+    }
+    if (tag >= 84) {
+        if (!charge(s, c64(stop - cs), pos)) {
+            return -R_BUDGET;
+        }
+    }
+    const bad = typedBadAt(b, cs, stop, tag);
+    if (bad >= 0) {
+        return fail(s, bad, CODE_TYPED_ARRAY);
     }
     return stop;
 }
