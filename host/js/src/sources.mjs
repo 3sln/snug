@@ -13,6 +13,19 @@
 //   bufferHandle(bytes), asyncHandle(bytes, {delay})   an immutable in-memory handle, sync
 //                                         or genuinely async (each read resolves later)
 //
+// Schema validation over the same sources (P6.2): the resumable kin VM session
+// (Schema.session, host/js/src/schema.mjs VmSession) driven by the same loops:
+//
+//   validateHandle(schema, handle, rule, options, opts)      handle reads may be Promises
+//   validateHandleSync(schema, handle, rule, options, opts)  handle reads are synchronous
+//   pushValidator(schema, length, rule, options, opts)       feed(chunk) ... finalize()
+//
+// each answering Schema.validate's result ({ok: true} or {ok: false, reason, path,
+// offset[, subcode]}), identical to the buffer's for every window and quantum (bb
+// vmsession-test). A session may ask again for bytes it was given (a byte string read
+// twice, a typed array's content tail) but never before its `keep` offset; the push
+// source keeps the bytes from there on.
+//
 // All but scanBuffer drive the RESUMABLE generated scanner (gen/js/snug/cbor/rscan.mjs):
 // it consumes a window [base, base + len) of the message and, when it needs other
 // bytes, answers NEED(offset, minLength); the driver fetches them and resumes. The
@@ -91,9 +104,16 @@ function checkRead(chunk, offset, length) {
   return chunk;
 }
 
+function checkHandle(handle) {
+  if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
+}
+
 function* drive(handle, options, { chunk = 65536, quantum = 0 } = {}) {
-  if (!handle || !Number.isSafeInteger(handle.size) || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
-  const session = new ScanSession(handle.size, options, { quantum });
+  checkHandle(handle);
+  return yield* driveSession(new ScanSession(handle.size, options, { quantum }), handle, chunk);
+}
+
+function* driveSession(session, handle, chunk) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
   for (;;) {
@@ -109,36 +129,57 @@ function* drive(handle, options, { chunk = 65536, quantum = 0 } = {}) {
       } else if (want.state === 'yield') yield { pause: true };
     }
     want = session.step(window, base);
-    if (want.state === 'done') return true;
+    if (want.state === 'done') return want.result ?? true;
   }
 }
 
-/** Validate through a handle whose read may return a Promise. Resolves true or rejects with SnugFault/SourceError. */
-export async function scanHandle(handle, options = {}, opts = {}) {
-  const it = drive(handle, options, opts);
-  let next = it.next();
-  while (!next.done) {
-    const req = next.value;
-    if (req.pause) { await nextTurn(); next = it.next(); continue; }
-    let got = req.read();
-    if (got && typeof got.then === 'function') got = await got;
-    next = it.next(got);
-  }
-  return next.value;
+function runAsync(it) {
+  return (async () => {
+    let next = it.next();
+    while (!next.done) {
+      const req = next.value;
+      if (req.pause) { await nextTurn(); next = it.next(); continue; }
+      let got = req.read();
+      if (got && typeof got.then === 'function') got = await got;
+      next = it.next(got);
+    }
+    return next.value;
+  })();
 }
 
-/** Validate through a handle whose read returns bytes synchronously. Returns true or throws. */
-export function scanHandleSync(handle, options = {}, opts = {}) {
-  const it = drive(handle, options, opts);
+function runSync(it, what) {
   let next = it.next();
   while (!next.done) {
     const req = next.value;
     if (req.pause) { next = it.next(); continue; }
     const got = req.read();
-    if (got && typeof got.then === 'function') throw new SourceError('bad_chunk', 'scanHandleSync got a Promise; use scanHandle.');
+    if (got && typeof got.then === 'function') throw new SourceError('bad_chunk', `${what} got a Promise; use its async form.`);
     next = it.next(got);
   }
   return next.value;
+}
+
+/** Validate through a handle whose read may return a Promise. Resolves true or rejects with SnugFault/SourceError. */
+export async function scanHandle(handle, options = {}, opts = {}) {
+  return runAsync(drive(handle, options, opts));
+}
+
+/** Validate through a handle whose read returns bytes synchronously. Returns true or throws. */
+export function scanHandleSync(handle, options = {}, opts = {}) {
+  return runSync(drive(handle, options, opts), 'scanHandleSync');
+}
+
+/** Validate against schema's rule through a handle whose read may return a Promise
+ *  (P6.2). Resolves Schema.validate's result, or rejects with SourceError. */
+export async function validateHandle(schema, handle, rule, options = {}, { chunk = 65536, quantum = 0 } = {}) {
+  checkHandle(handle);
+  return runAsync(driveSession(schema.session(rule, handle.size, options, { quantum }), handle, chunk));
+}
+
+/** The same through a handle whose read returns bytes synchronously. */
+export function validateHandleSync(schema, handle, rule, options = {}, { chunk = 65536, quantum = 0 } = {}) {
+  checkHandle(handle);
+  return runSync(driveSession(schema.session(rule, handle.size, options, { quantum }), handle, chunk), 'validateHandleSync');
 }
 
 /** Bytes pushed in order, for a message of a DECLARED length. feed(chunk) answers
@@ -147,6 +188,17 @@ export function scanHandleSync(handle, options = {}, opts = {}) {
  *  the bytes from the scanner's current position on (bounded by what it asks for). */
 export function pushScanner(length, options = {}, { quantum = 0 } = {}) {
   const session = new ScanSession(length, options, { quantum });
+  return pushSession(session, length, want => Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
+}
+
+/** Bytes pushed in order for schema validation of a message of a DECLARED length (P6.2):
+ *  feed / resume as pushScanner's; finalize() answers Schema.validate's result. It holds
+ *  only the bytes from the session's `keep` on. */
+export function pushValidator(schema, length, rule, options = {}, { quantum = 0 } = {}) {
+  return pushSession(schema.session(rule, length, options, { quantum }), length, want => want.keep);
+}
+
+function pushSession(session, length, keepOf) {
   let buf = new Uint8Array(Math.min(length, 65536)), bufBase = 0, bufLen = 0, delivered = 0;
   let want = null, finished = false;
   const holds = () => {
@@ -159,10 +211,10 @@ export function pushScanner(length, options = {}, { quantum = 0 } = {}) {
       if (want && want.state !== 'done' && !holds()) return { state: 'need' };
       want = session.step(buf.subarray(0, bufLen), bufBase);
       if (want.state === 'done') { finished = true; return want; }
-      // Drop what precedes the earliest byte the scanner may still ask for.
+      // Drop what precedes the earliest byte the session may still ask for.
       // (A skipped byte string can put that beyond what has arrived: then the
       // buffer empties and the bytes up to it are dropped as they arrive.)
-      const keep = Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s));
+      const keep = keepOf(want);
       if (keep > bufBase) {
         if (keep >= bufBase + bufLen) bufLen = 0;
         else { buf.copyWithin(0, keep - bufBase, bufLen); bufLen -= keep - bufBase; }
@@ -179,7 +231,7 @@ export function pushScanner(length, options = {}, { quantum = 0 } = {}) {
       delivered += chunk.length;
       // A verdict can come before the last byte arrives (a byte string's content is
       // never read); the rest is still owed, and counted, for finalize().
-      if (finished) return { state: 'done' };
+      if (finished) return want;
       if (chunk.length === 0) return want && want.state === 'yield' ? { state: 'yield' } : { state: 'need' };  // never EOF
       if (bufBase >= delivered) return { state: 'need' };  // all of it is skipped content
       if (bufBase > start) chunk = chunk.subarray(bufBase - start);
@@ -191,14 +243,14 @@ export function pushScanner(length, options = {}, { quantum = 0 } = {}) {
       if (want && want.state === 'yield') return { state: 'yield' };
       return run();
     },
-    resume() { return finished ? { state: 'done' } : run(); },
+    resume() { return finished ? want : run(); },
     finalize() {
       if (delivered !== length) throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`);
       while (!finished) {
         const r = run();
-        if (r.state === 'need') throw new SourceError('length_mismatch', 'The scanner needs bytes beyond what was delivered.');
+        if (r.state === 'need') throw new SourceError('length_mismatch', 'The session needs bytes beyond what was delivered.');
       }
-      return true;
+      return want.result ?? true;
     },
   };
 }

@@ -6,6 +6,7 @@
 // and the rendering of results (reason names, paths rendered from the
 // Program's key table only, §9.3).
 import { vmScratchWords, vmScratchInit, vmRuleIndex, vmValidate, vmValidateSpan } from '../../../gen/js/snug/vm/api.mjs';
+import { vmsWords, vmsArena, vmsInit, vmsStep, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../../gen/js/snug/vm/session.mjs';
 import { codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { build } from './build.mjs';
 
@@ -88,6 +89,11 @@ export class Program {
       return out.slice(0, 8 + 2 * out[6]);
     } finally { leased = false; }
   }
+  /** A resumable validation session over a message of exactly `length` bytes
+   *  (architecture §17, P6.2): see VmSession. */
+  session(rule, length, opts = {}, { quantum = 0 } = {}) {
+    return new VmSession(this, rule, length, opts, quantum);
+  }
   result(o) {
     if (o[0] === 0) return { ok: true };
     const path = [];
@@ -103,6 +109,48 @@ export class Program {
     const r = { ok: false, reason: reasonName(o[0]), path, offset: o[2] };
     if (o[0] === 41) r.subcode = reasonName(o[1]);
     return r;
+  }
+}
+
+// ---------------------------------------------------------------- sessions
+const VMS_NEED = -64, VMS_YIELD = -65;
+/** One resumable validation (P6.2, D027): the kin session over windows of a message of
+ *  a declared length. It owns its scratch, session array and key arena from start to
+ *  verdict (§17.1 W9: interleaved async sessions never share state); the Program is
+ *  shared. step(window, base) answers {state: 'need', offset, length, keep},
+ *  {state: 'yield', position, keep} or {state: 'done', result} (result as
+ *  Schema.validate's). `keep`: no byte before it will be asked for again. */
+export class VmSession {
+  constructor(program, rule, length, opts = {}, quantum = 0) {
+    if (!Number.isSafeInteger(length) || length < 0 || length > 0x7fffffff) throw new TypeError('snug: length must be an integer in 0..2^31-1');
+    if (!Number.isSafeInteger(quantum) || quantum < 0 || quantum > 0x7fffffff) throw new TypeError('snug: quantum must be a non-negative integer');
+    if (!Number.isInteger(rule) || rule < 0 || rule >= program.P[15]) throw new TypeError('snug: rule index out of range');
+    const { P, B } = program;
+    this.program = program; this.length = length;
+    const limits = limitWords(opts), cap = Math.max(P[16], 1);
+    this.s = new Int32Array(vmScratchWords(P, rule, cap)); vmScratchInit(this.s, cap);
+    this.ss = new Int32Array(vmsWords(P));
+    this.ka = new Uint8Array(vmsArena(P, limits, length));
+    this.out = new Int32Array(8 + 2 * 257);
+    const c = vmsInit(P, B, rule, limits, this.s, this.ss, this.ka, length, quantum);
+    if (c < 0) throw new Error(`snug: vms-init answered ${c}`);
+    this.busy = false; this.verdict = null;
+  }
+  /** Bytes this session holds beyond the Program (its exclusive arrays). */
+  get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length) + this.ka.length; }
+  step(window, base) {
+    if (this.verdict) return this.verdict;
+    if (this.busy) throw new Error('snug: a session cannot be resumed concurrently');
+    if (!(window instanceof Uint8Array)) throw new TypeError('snug: a window is a Uint8Array');
+    this.busy = true;
+    let r;
+    try { r = vmsStep(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base); }
+    finally { this.busy = false; }
+    if (r === VMS_NEED) return { state: 'need', offset: vmsNeedOffset(this.ss), length: vmsNeedLength(this.ss), keep: vmsKeep(this.ss) };
+    if (r === VMS_YIELD) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
+    if (r < 0) throw new Error(`snug: vms-step answered ${r}`);
+    this.verdict = { state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
+    return this.verdict;
   }
 }
 
@@ -127,6 +175,11 @@ export class Schema {
   validateAt(bytes, start, end, rule, opts = {}) {
     return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), { top: 'any', ...opts },
       { start, end, depth: opts.depth ?? 0, items: opts.items ?? 0 }));
+  }
+  /** A resumable session on a rule over a message of `length` bytes (P6.2); the drivers
+   *  in sources.mjs (validateHandle, validateHandleSync, pushValidator) run it. */
+  session(rule, length, opts = {}, sessionOpts = {}) {
+    return this.program.session(this.rule(rule), length, opts, sessionOpts);
   }
   /** decode(bytes, rule, opts): validate, then the trusted builder (D017). */
   decode(bytes, rule, opts = {}) {
