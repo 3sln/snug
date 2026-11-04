@@ -570,7 +570,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
             if left < cost {
                 break;
             }
-            if utf8_invalid_at(b, q + h, (q + h) + lo, text_nc(s)) >= 0 {
+            if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
                 break;
             }
             left -= cost;
@@ -708,9 +708,12 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         if !charge(s, c64(stop - q), pos) {
             return -R_BUDGET;
         }
-        let bad: i32 = utf8_invalid_at(b, q, stop, text_nc(s));
+        let bad: i32 = utf8_invalid_at(b, q, stop);
         if bad >= 0 {
-            return fail(s, bad, CODE_TEXT);
+            let tbad: i32 = text_bad(b, s, bad, stop);
+            if tbad < 0 {
+                return tbad;
+            }
         }
     }
     if (major == 7) && ((ai < 25) || (ai > 27)) {
@@ -1483,7 +1486,7 @@ pub fn pre_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], q: i32, end: 
         if (lo < p[(lb + 2) as usize]) || (lo > p[(lb + 3) as usize]) {
             return -1;
         }
-        if utf8_invalid_at(b, q + h, (q + h) + lo, text_nc(s)) >= 0 {
+        if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
             return -1;
         }
         s[(O_LO) as usize] = 3 + c64(lo);
@@ -1576,7 +1579,7 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         if (s[(O_ITEMS) as usize] + 2) > maxit {
             break;
         }
-        if utf8_invalid_at(b, start + kh, (start + kh) + kl, text_nc(s)) >= 0 {
+        if utf8_invalid_at(b, start + kh, (start + kh) + kl) >= 0 {
             break;
         }
         let kend: i32 = (start + kh) + kl;
@@ -2194,9 +2197,12 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
         if !charge(s, c64(stop - q), pos) {
             return -R_BUDGET;
         }
-        let bad: i32 = utf8_invalid_at(b, q, stop, text_nc(s));
+        let bad: i32 = utf8_invalid_at(b, q, stop);
         if bad >= 0 {
-            return fail(s, bad, CODE_TEXT);
+            let tbad2: i32 = text_bad(b, s, bad, stop);
+            if tbad2 < 0 {
+                return tbad2;
+            }
         }
     }
     if major == 7 {

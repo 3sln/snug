@@ -14,12 +14,25 @@ pub fn text_nc(o: &[i32]) -> i32 {
     // admits noncharacters in text (PF_NONCHAR).
     return o[(O_PROFILE) as usize] & PF_NONCHAR;
 }
-pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
-    // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
-    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS the RFC 8949
-    // deterministic rules of snug.cbor.float instead (D122).
+pub fn text_bad(b: &[u8], o: &mut [i32], bad: i32, stop: i32) -> i32 {
+    // The strict UTF-8 check of a text ending at stop failed at bad: under
+    // PF_NONCHAR re-check from bad admitting noncharacters (stop when the rest
+    // is valid, D127), else the refusal (text) at the first failure. The
+    // strict check stays the hot path, unchanged for every profile.
+    if text_nc(o) != 0 {
+        let b2: i32 = utf8_invalid_at_nc(b, bad, stop);
+        if b2 < 0 {
+            return stop;
+        }
+        return fail(o, b2, CODE_TEXT);
+    }
+    return fail(o, bad, CODE_TEXT);
+}
+pub fn scan_float_rfc(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
+    // scan-float under PF_FLOATS: the bytes, then the RFC 8949 deterministic
+    // rules of snug.cbor.float (D122). Apart from scan-float so the Bindle
+    // path stays under V8's inlining limit.
     let left: i32 = end - (pos + 1);
-    let rfc: bool = (o[(O_PROFILE) as usize] & PF_FLOATS) != 0;
     let mut c: i32 = 0;
     let mut w: i32 = 0;
     if ai == 25 {
@@ -27,33 +40,56 @@ pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
         if left < 2 {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        if rfc {
-            c = rfc_f16(be16(b, pos + 1));
-        } else {
-            c = check_f16(be16(b, pos + 1));
-        }
+        c = rfc_f16(be16(b, pos + 1));
     }
     if ai == 26 {
         w = 4;
         if left < 4 {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        if rfc {
-            c = rfc_f32(be32(b, pos + 1));
-        } else {
-            c = check_f32(be32(b, pos + 1));
-        }
+        c = rfc_f32(be32(b, pos + 1));
     }
     if ai == 27 {
         w = 8;
         if left < 8 {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        if rfc {
-            c = rfc_f64(be32(b, pos + 1), be32(b, pos + 5));
-        } else {
-            c = check_f64(be32(b, pos + 1), be32(b, pos + 5));
+        c = rfc_f64(be32(b, pos + 1), be32(b, pos + 5));
+    }
+    if c != 0 {
+        return fail(o, pos, c);
+    }
+    return (pos + 1) + w;
+}
+pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
+    // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
+    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS scan-float-rfc.
+    if (o[(O_PROFILE) as usize] & PF_FLOATS) != 0 {
+        return scan_float_rfc(b, o, pos, ai, end);
+    }
+    let left: i32 = end - (pos + 1);
+    let mut c: i32 = 0;
+    let mut w: i32 = 0;
+    if ai == 25 {
+        w = 2;
+        if left < 2 {
+            return fail(o, pos, CODE_TRUNCATED);
         }
+        c = check_f16(be16(b, pos + 1));
+    }
+    if ai == 26 {
+        w = 4;
+        if left < 4 {
+            return fail(o, pos, CODE_TRUNCATED);
+        }
+        c = check_f32(be32(b, pos + 1));
+    }
+    if ai == 27 {
+        w = 8;
+        if left < 8 {
+            return fail(o, pos, CODE_TRUNCATED);
+        }
+        c = check_f64(be32(b, pos + 1), be32(b, pos + 5));
     }
     if c != 0 {
         return fail(o, pos, c);
@@ -77,9 +113,9 @@ pub(crate) fn scan_text(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: 
     if stop < 0 {
         return stop;
     }
-    let bad: i32 = utf8_invalid_at(b, p, stop, text_nc(o));
+    let bad: i32 = utf8_invalid_at(b, p, stop);
     if bad >= 0 {
-        return fail(o, bad, CODE_TEXT);
+        return text_bad(b, o, bad, stop);
     }
     return stop;
 }

@@ -13,7 +13,7 @@
             [snug.lang :refer [I32 Bool Bytes Ints + - neg rem shl ushr bit-and bit-or
                                < > <= >= == != and or not u8 ia iset hex]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_KEY_ORDER
-                                     CODE_DUPLICATE_KEY CODE_TEXT CODE_TAG CODE_DECIMAL
+                                     CODE_DUPLICATE_KEY CODE_TAG CODE_DECIMAL
                                      CODE_TYPED_ARRAY CODE_NDARRAY CODE_DEPTH CODE_TOO_MANY_ITEMS
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
                                      O_PROFILE CODE_BIGNUM CODE_TRAILING MAX_BIGNUM_BYTES]]
@@ -21,7 +21,7 @@
             [snug.cbor.text :refer [utf8-invalid-at]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok]]
-            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc]]
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad]]
             [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]
             [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC]]
             [snug.vm.base :refer [charge c64 c64min]]))
@@ -33,8 +33,8 @@
   (let [stop (take-len s pos p hi lo end)]
     (if (< stop 0) (return stop))
     (if (not (charge s (c64 (- stop p)) pos)) (return (neg R_BUDGET)))
-    (let [bad (utf8-invalid-at b p stop (text-nc s))]
-      (if (>= bad 0) (return (fail s bad CODE_TEXT)))
+    (let [bad (utf8-invalid-at b p stop)]
+      (if (>= bad 0) (return (text-bad b s bad stop)))
       (return stop))))
 
 (defn ^:pub ^I32 dead-int-streak [^Bytes b ^Ints s ^I32 q0 ^I32 limit ^I32 end]

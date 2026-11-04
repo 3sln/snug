@@ -7,7 +7,7 @@ import { be16, be32, bytesContent, countItem, enterContainer, fail, readArg, tak
 import { compareSpans } from './keys.mjs';
 import { stdAllowed, stdContentOk, stdInner } from './stdtags.mjs';
 import { dataCount, exponentOk, mantissaOk, shapeOk, typedSize } from './tags.mjs';
-import { utf8InvalidAt } from './text.mjs';
+import { utf8InvalidAt, utf8InvalidAtNc } from './text.mjs';
 
 export function textNc(o) {
     // The noncharacter argument of the UTF-8 checks: non-zero when the profile
@@ -15,12 +15,26 @@ export function textNc(o) {
     return o[O_PROFILE] & PF_NONCHAR;
 }
 
-export function scanFloat(b, o, pos, ai, end) {
-    // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
-    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS the RFC 8949
-    // deterministic rules of snug.cbor.float instead (D122).
+export function textBad(b, o, bad, stop) {
+    // The strict UTF-8 check of a text ending at stop failed at bad: under
+    // PF_NONCHAR re-check from bad admitting noncharacters (stop when the rest
+    // is valid, D127), else the refusal (text) at the first failure. The
+    // strict check stays the hot path, unchanged for every profile.
+    if (textNc(o) !== 0) {
+        const b2 = utf8InvalidAtNc(b, bad, stop);
+        if (b2 < 0) {
+            return stop;
+        }
+        return fail(o, b2, CODE_TEXT);
+    }
+    return fail(o, bad, CODE_TEXT);
+}
+
+export function scanFloatRfc(b, o, pos, ai, end) {
+    // scan-float under PF_FLOATS: the bytes, then the RFC 8949 deterministic
+    // rules of snug.cbor.float (D122). Apart from scan-float so the Bindle
+    // path stays under V8's inlining limit.
     const left = end - (pos + 1);
-    const rfc = (o[O_PROFILE] & PF_FLOATS) !== 0;
     let c = 0;
     let w = 0;
     if (ai === 25) {
@@ -28,33 +42,57 @@ export function scanFloat(b, o, pos, ai, end) {
         if (left < 2) {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        if (rfc) {
-            c = rfcF16(be16(b, pos + 1));
-        } else {
-            c = checkF16(be16(b, pos + 1));
-        }
+        c = rfcF16(be16(b, pos + 1));
     }
     if (ai === 26) {
         w = 4;
         if (left < 4) {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        if (rfc) {
-            c = rfcF32(be32(b, pos + 1));
-        } else {
-            c = checkF32(be32(b, pos + 1));
-        }
+        c = rfcF32(be32(b, pos + 1));
     }
     if (ai === 27) {
         w = 8;
         if (left < 8) {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        if (rfc) {
-            c = rfcF64(be32(b, pos + 1), be32(b, pos + 5));
-        } else {
-            c = checkF64(be32(b, pos + 1), be32(b, pos + 5));
+        c = rfcF64(be32(b, pos + 1), be32(b, pos + 5));
+    }
+    if (c !== 0) {
+        return fail(o, pos, c);
+    }
+    return (pos + 1) + w;
+}
+
+export function scanFloat(b, o, pos, ai, end) {
+    // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
+    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS scan-float-rfc.
+    if ((o[O_PROFILE] & PF_FLOATS) !== 0) {
+        return scanFloatRfc(b, o, pos, ai, end);
+    }
+    const left = end - (pos + 1);
+    let c = 0;
+    let w = 0;
+    if (ai === 25) {
+        w = 2;
+        if (left < 2) {
+            return fail(o, pos, CODE_TRUNCATED);
         }
+        c = checkF16(be16(b, pos + 1));
+    }
+    if (ai === 26) {
+        w = 4;
+        if (left < 4) {
+            return fail(o, pos, CODE_TRUNCATED);
+        }
+        c = checkF32(be32(b, pos + 1));
+    }
+    if (ai === 27) {
+        w = 8;
+        if (left < 8) {
+            return fail(o, pos, CODE_TRUNCATED);
+        }
+        c = checkF64(be32(b, pos + 1), be32(b, pos + 5));
     }
     if (c !== 0) {
         return fail(o, pos, c);
@@ -80,9 +118,9 @@ export function scanText(b, o, pos, p, hi, lo, end) {
     if (stop < 0) {
         return stop;
     }
-    const bad = utf8InvalidAt(b, p, stop, textNc(o));
+    const bad = utf8InvalidAt(b, p, stop);
     if (bad >= 0) {
-        return fail(o, bad, CODE_TEXT);
+        return textBad(b, o, bad, stop);
     }
     return stop;
 }

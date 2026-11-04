@@ -27,7 +27,7 @@
                                      PF_KEYS PF_FLOATS PF_UNDEFINED PF_NONCHAR PF_HOST]]
             [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
                                     enter-container bytes-content]]
-            [snug.cbor.text :refer [utf8-invalid-at]]
+            [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
             [snug.cbor.float :refer [check-f16 check-f32 check-f64 rfc-f16 rfc-f32 rfc-f64]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count
@@ -43,28 +43,58 @@
            "admits noncharacters in text (PF_NONCHAR).")
   (return (bit-and (ia o O_PROFILE) PF_NONCHAR)))
 
-(defn ^:pub ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
-  (comment "A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then"
-           "`non_shortest` (cbor.mjs `simple`); under PF_FLOATS the RFC 8949"
-           "deterministic rules of snug.cbor.float instead (D122).")
+(defn ^:pub ^I32 text-bad [^Bytes b ^Ints o ^I32 bad ^I32 stop]
+  (comment "The strict UTF-8 check of a text ending at stop failed at bad: under"
+           "PF_NONCHAR re-check from bad admitting noncharacters (stop when the rest"
+           "is valid, D127), else the refusal (text) at the first failure. The"
+           "strict check stays the hot path, unchanged for every profile.")
+  (if (!= (text-nc o) 0)
+    (do (let [b2 (utf8-invalid-at-nc b bad stop)]
+          (if (< b2 0) (return stop))
+          (return (fail o b2 CODE_TEXT)))))
+  (return (fail o bad CODE_TEXT)))
+
+(defn ^:pub ^I32 scan-float-rfc [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
+  (comment "scan-float under PF_FLOATS: the bytes, then the RFC 8949 deterministic"
+           "rules of snug.cbor.float (D122). Apart from scan-float so the Bindle"
+           "path stays under V8's inlining limit.")
   (let [left (- end (+ pos 1))
-        rfc (!= (bit-and (ia o O_PROFILE) PF_FLOATS) 0)
         ^:mut c 0
         ^:mut w 0]
     (if (== ai 25)
       (do (set w 2)
           (if (< left 2) (return (fail o pos CODE_TRUNCATED)))
-          (if rfc (set c (rfc-f16 (be16 b (+ pos 1)))) (set c (check-f16 (be16 b (+ pos 1)))))))
+          (set c (rfc-f16 (be16 b (+ pos 1))))))
     (if (== ai 26)
       (do (set w 4)
           (if (< left 4) (return (fail o pos CODE_TRUNCATED)))
-          (if rfc (set c (rfc-f32 (be32 b (+ pos 1)))) (set c (check-f32 (be32 b (+ pos 1)))))))
+          (set c (rfc-f32 (be32 b (+ pos 1))))))
     (if (== ai 27)
       (do (set w 8)
           (if (< left 8) (return (fail o pos CODE_TRUNCATED)))
-          (if rfc
-            (set c (rfc-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5))))
-            (set c (check-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5)))))))
+          (set c (rfc-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5))))))
+    (if (!= c 0) (return (fail o pos c)))
+    (return (+ (+ pos 1) w))))
+
+(defn ^:pub ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
+  (comment "A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then"
+           "`non_shortest` (cbor.mjs `simple`); under PF_FLOATS scan-float-rfc.")
+  (if (!= (bit-and (ia o O_PROFILE) PF_FLOATS) 0) (return (scan-float-rfc b o pos ai end)))
+  (let [left (- end (+ pos 1))
+        ^:mut c 0
+        ^:mut w 0]
+    (if (== ai 25)
+      (do (set w 2)
+          (if (< left 2) (return (fail o pos CODE_TRUNCATED)))
+          (set c (check-f16 (be16 b (+ pos 1))))))
+    (if (== ai 26)
+      (do (set w 4)
+          (if (< left 4) (return (fail o pos CODE_TRUNCATED)))
+          (set c (check-f32 (be32 b (+ pos 1))))))
+    (if (== ai 27)
+      (do (set w 8)
+          (if (< left 8) (return (fail o pos CODE_TRUNCATED)))
+          (set c (check-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5))))))
     (if (!= c 0) (return (fail o pos c)))
     (return (+ (+ pos 1) w))))
 
@@ -79,8 +109,8 @@
 (defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
   (let [stop (take-len o pos p hi lo end)]
     (if (< stop 0) (return stop))
-    (let [bad (utf8-invalid-at b p stop (text-nc o))]
-      (if (>= bad 0) (return (fail o bad CODE_TEXT)))
+    (let [bad (utf8-invalid-at b p stop)]
+      (if (>= bad 0) (return (text-bad b o bad stop)))
       (return stop))))
 
 ;; ------------------------------------------------------------- containers

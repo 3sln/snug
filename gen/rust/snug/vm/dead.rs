@@ -20,9 +20,9 @@ pub fn dead_text(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, en
     if !charge(s, c64(stop - p), pos) {
         return -R_BUDGET;
     }
-    let bad: i32 = utf8_invalid_at(b, p, stop, text_nc(s));
+    let bad: i32 = utf8_invalid_at(b, p, stop);
     if bad >= 0 {
-        return fail(s, bad, CODE_TEXT);
+        return text_bad(b, s, bad, stop);
     }
     return stop;
 }

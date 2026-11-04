@@ -18,7 +18,7 @@
   (:require [kin.lang :refer [defn let local return set if while for do comment declarefn break]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
                                < > <= >= == != and or not u8 ia iset]]
-            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TEXT CODE_TAG CODE_DEPTH
+            [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TAG CODE_DEPTH
                                      CODE_TOO_MANY_ITEMS CODE_DECIMAL CODE_NDARRAY CODE_TRAILING
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
                                      O_ERR_POS O_PROFILE]]
@@ -26,7 +26,7 @@
             [snug.cbor.text :refer [utf8-invalid-at]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size]]
-            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc]]
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad]]
             [snug.cbor.stdtags :refer [std-allowed]]
             [snug.vm.layout :refer [H_FLAGS H_S_LEAVES FL_EMBED FL_COMB K_TAG K_TAGSET K_EMBED
                                     K_ARRAY K_MAP K_AND K_NOT F_ANSWER F_ADMITTED F_MATCHED F_EVAL
@@ -452,7 +452,7 @@
               (comment "schedule 2: visit + UTF-8 only")
               (set cost (+ (- 11 (* 10 s2)) (c64 lo)))
               (if (< left cost) (break))
-              (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo) (text-nc s)) 0) (break))
+              (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (break))
               (set left (- left cost))
               (set q (+ (+ q h) lo))))
         (set items (+ items 1))
@@ -541,8 +541,10 @@
         (do (set stop (take-len s pos q hi lo end))
             (if (< stop 0) (return stop))
             (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
-            (let [bad (utf8-invalid-at b q stop (text-nc s))]
-              (if (>= bad 0) (return (fail s bad CODE_TEXT))))))
+            (let [bad (utf8-invalid-at b q stop)]
+              (if (>= bad 0)
+                (do (let [tbad (text-bad b s bad stop)]
+                      (if (< tbad 0) (return tbad))))))))
       (if (and (== major 7) (or (< ai 25) (> ai 27)))
         (do (let [r7 (scan-simple s pos ai)]
               (if (< r7 0) (return r7)))))
@@ -1026,7 +1028,7 @@
       (do (if (or (!= hi 0) (< lo 0)) (return (neg 1)))
           (if (> lo (- end (+ q h))) (return (neg 1)))
           (if (or (< lo (ia p (+ lb 2))) (> lo (ia p (+ lb 3)))) (return (neg 1)))
-          (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo) (text-nc s)) 0) (return (neg 1)))
+          (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (return (neg 1)))
           (iset s O_LO (+ 3 (c64 lo)))
           (return (+ (+ q h) lo))))
     (return (neg 1))))
@@ -1097,7 +1099,7 @@
               (if (and (== ai 25) (< kl 256)) (break))))
         (if (> kl (- end (+ start kh))) (break))
         (if (> (+ (ia s O_ITEMS) 2) maxit) (break))
-        (if (>= (utf8-invalid-at b (+ start kh) (+ (+ start kh) kl) (text-nc s)) 0) (break))
+        (if (>= (utf8-invalid-at b (+ start kh) (+ (+ start kh) kl)) 0) (break))
         (let [kend (+ (+ start kh) kl)]
           (if (>= ps 0) (if (>= (compare-spans b ps pe start kend) 0) (break)))
           (let [kid (key-probe p pool b s start kend klo)
@@ -1489,8 +1491,10 @@
       (do (set stop (take-len s pos q hi lo end))
           (if (< stop 0) (return stop))
           (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
-          (let [bad (utf8-invalid-at b q stop (text-nc s))]
-            (if (>= bad 0) (return (fail s bad CODE_TEXT))))))
+          (let [bad (utf8-invalid-at b q stop)]
+            (if (>= bad 0)
+              (do (let [tbad2 (text-bad b s bad stop)]
+                    (if (< tbad2 0) (return tbad2))))))))
     (if (== major 7)
       (do (let [r7 (scan-simple s pos ai)]
             (if (< r7 0) (return r7)))))
