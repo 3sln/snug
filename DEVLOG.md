@@ -7166,8 +7166,12 @@ compile-test's format 1 expectations are red on it until phase 2.
   check C_VERSION); PEG records, map and array tables, every derived field
   recomputed (incl. the relaxed automata), left recursion (C_RECURSION),
   `vm-verify-words`.
-* **Hosts**: JS / Rust / wasm compile options and warnings; verifier scratch
-  sized by `vm-verify-words`; serialisation loaders accept major 2 only.
+* **Hosts**: JS / Rust compile options and warnings, the wasm compiler's
+  option words (`cc.rs`, `wasm-sdk/src/compile.mjs`: registry moved to word
+  22, `cuts`, `groupWords`); verifier scratch sized by `vm-verify-words` in
+  the JS and Rust Programs; serialisation loaders accept major 2 only. The
+  wasm SDK's `sdk.rs` (owner-gated, see the open items) is untouched: its
+  verifier scratch is still format 1's size, a phase 2 item.
 * **Gates**: `bb compile2-test` (new; `kin/scripts/compile2-test.mjs`, Rust
   `compile2-test` bin, test-only reference interpreter
   `kin/scripts/peg2-ref.mjs`).
@@ -7239,6 +7243,9 @@ rings, the arena with chunk heap and growth, map F/S/T with the T sort,
 witnesses incl. FAIL events and provenance, forced-tier mode), the charging
 order of §10, D280's replay (P8.4), `vm-scratch-words` with ARRWORDS /
 MAPWORDS (the compiler's cset frame words already use them), the limits word
-10 arena limit, `group_limit` (code 44), and the wasm SDK's warnings. The
+10 arena limit, `group_limit` (code 44), the wasm SDK's warnings and its
+`sdk_prog_load` verifier scratch (`vm-verify-words`; owner authorisation for
+`sdk.rs`), and the `cc.rs` / `wasm-sdk/src/compile.mjs` option-word edits made
+here (same category as f23aea0's, flagged for the owner). The
 reference interpreter (`peg2-ref.mjs`) is the semantic baseline the VM's
 verdicts can be compared with.
