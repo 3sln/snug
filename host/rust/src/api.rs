@@ -94,6 +94,8 @@ impl CompileLimits {
 pub struct CompileOptions<'a> {
     /// CDDL restriction set (default full).
     pub profile: CompilerProfile,
+    /// XSD Appendix F (default), or RFC 9485 I-Regexp.
+    pub regexp: crate::compile::Regexp,
     /// Resource and compiled runtime limits.
     pub limits: CompileLimits,
     /// Canonical category triples from `unicode_tables::tables()`.
@@ -186,6 +188,7 @@ impl Schema {
             text,
             &crate::compile::CompileOptions {
                 profile,
+                regexp: options.regexp,
                 limits: &limits,
                 unicode: options.unicode,
                 controls: options.controls.map(|c| c as &dyn crate::compile::Registry),

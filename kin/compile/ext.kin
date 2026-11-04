@@ -4,20 +4,20 @@
 ;;
 ;; The registry rides after the OPT_WORDS compile options (snug.compile.main):
 ;;
-;;     opt[19]      n, the number of registered controls (0..256)
-;;     opt[20]      flags: bit 0 admits them under the `bus` profile
+;;     opt[20]      n, the number of registered controls (0..256)
+;;     opt[21]      flags: bit 0 admits them under the `bus` profile
 ;;     then n records: name length (1..64), max item bytes (>= 0), the name's
 ;;     bytes one per word -- names strictly ascending bytewise, each
 ;;     [A-Za-z_][A-Za-z0-9_-]*, none a built-in control's name.
 ;;
-;; A shorter opt (the 19 words of every earlier host) registers nothing.
+;; A shorter opt registers nothing; opt[19] is the regexp dialect (D242).
 (ns snug.compile.ext
   (:require [kin.lang :refer [defn let return set if while for do comment defconst]]
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl bit-or < > <= >= == != and or not ia ilen]]
             [snug.compile.arena :refer [hg hs fail charge vlen vpush1 vget vtrunc
                                         ERR_CONTROL_REGISTRY H_EXT_FLAGS T_EXT T_EXTB T_EXTUSE T_SRC]]))
 
-(defconst ^:pub ^I32 EXT_OPT_AT 19)
+(defconst ^:pub ^I32 EXT_OPT_AT 20)
 (defconst ^:pub ^I32 EXT_MAX_CONTROLS 256)
 (defconst ^:pub ^I32 EXT_MAX_NAME 64)
 

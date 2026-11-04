@@ -58,7 +58,7 @@ loading through a versioned, hashed and structurally verified container
   never accept invalid CBOR (duplicate keys, malformed UTF-8 or items).
 * Not a code generator for CDDL types.
 * Not a complete RFC 8610 implementation: `.pcre`, `.abnf`, `.abnfb`,
-  and non-I-Regexp regexps are refused (D013, D014), and maps the
+  and unsupported regexp constructs are refused (D013, D242–D243), and maps the
   determinism rule cannot decide are refused (D011). Every refusal is a schema
   error at compile time, never a different meaning. `.feature` is a no-op
   annotation (D013 amended). The precise current subset and reasons for
@@ -74,8 +74,10 @@ these precise choices (each with a decision):
 2. Maps are closed. Map matching follows RFC 8610's existential semantics,
    computed by a greedy priority assignment that the compiler proves
    equivalent or refuses (D011).
-3. `.regexp` is RFC 9485 I-Regexp, anchored at both ends; `\p{…}` is refused
-   in revision 1 (D014).
+3. `.regexp` defaults to XSD Appendix F, with RFC 9485 I-Regexp as a compile
+   option; both match the whole text. Unicode categories require explicit
+   compile-time tables; block escapes are refused pending pinned block data
+   (D242–D243).
 4. `float16`/`float32`/`float64` mean the encoded width; under the profile's
    shortest-form rule this is narrower than it looks (architecture §4.8).
 5. `uint` is major type 0 only; `integer` and `unsigned` include bignums.

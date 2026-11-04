@@ -13,7 +13,8 @@ use crate::snug::compile::prelude::*;
 use crate::snug::compile::regexp::*;
 use crate::snug::compile::rules::*;
 
-pub const OPT_WORDS: i32 = 19;
+pub const OPT_WORDS: i32 = 20;
+pub const OPT_REGEXP: i32 = 19;
 pub const OPT_PROFILE: i32 = 0;
 pub(crate) fn opt_limit(opt: &[i32], i: i32, dflt: i32, hard: i32) -> i32 {
     // Option i: the default when absent (-1 or negative), at most `hard`.
@@ -34,6 +35,7 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     let profile: i32 = opt_limit(opt, 0, 0, 2);
     let mut text_default: i32 = 262144;
     hs(h, H_PROFILE, profile);
+    hs(h, H_REGEXP, opt_limit(opt, OPT_REGEXP, 0, 1));
     if profile == 2 {
         text_default = 16384;
     }
@@ -252,7 +254,9 @@ pub fn build_key_preimage(h: &mut [i32]) {
     vtrunc(h, T_KEYPRE, 0);
     // 6 elements; 7 with Unicode tables (D110); 8 with registered controls (D141),
     // the seventh then the tables' words or an empty array.
-    if n_exts(h) > 0 {
+    if hg(h, H_REGEXP) == 0 {
+        vpush1(h, T_KEYPRE, 137);
+    } else if n_exts(h) > 0 {
         vpush1(h, T_KEYPRE, 136);
     } else if vlen(h, T_UNICODE) > 0 {
         vpush1(h, T_KEYPRE, 135);
@@ -298,7 +302,7 @@ pub fn build_key_preimage(h: &mut [i32]) {
     // D110: optional seventh element binds the source key to table contents.
     // The no-table preimage stays byte-identical to D039.
     let un: i32 = vlen(h, T_UNICODE);
-    if (un > 0) || (n_exts(h) > 0) {
+    if (hg(h, H_REGEXP) == 0) || ((un > 0) || (n_exts(h) > 0)) {
         if !charge(h, un) {
             return;
         }
@@ -330,6 +334,11 @@ pub fn build_key_preimage(h: &mut [i32]) {
             }
             push_uint(h, T_KEYPRE, mx);
         }
+    } else if hg(h, H_REGEXP) == 0 {
+        head_push(h, T_KEYPRE, 4, 0, 0);
+    }
+    if hg(h, H_REGEXP) == 0 {
+        push_uint(h, T_KEYPRE, 0);
     }
 }
 pub(crate) fn if_limit(k: i32) -> i32 {
@@ -396,6 +405,7 @@ pub fn error_name(code: i32) -> &'static str {
         44 => "regexp",
         54 => "regexp",
         55 => "control_registry",
+        56 => "regexp",
         45 => "map_key",
         46 => "map_group_occurrence",
         47 => "map_cut",

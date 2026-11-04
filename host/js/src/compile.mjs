@@ -8,11 +8,11 @@
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
 import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn, errorOffset,
   errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
-  keyPreimageLen, snugVersion, OPT_WORDS }
+  keyPreimageLen, snugVersion, OPT_WORDS, OPT_REGEXP }
   from '../../../gen/js/snug/compile/main.mjs';
-import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
+import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 import { sha256 } from './sha256.mjs';
-import { validateOptions } from './options.mjs';
+import { validateCompileOptions } from './options.mjs';
 import { controlEntries, registryWords, programControls, programArguments } from './ext.mjs';
 
 /** The snug version (kin's, so both hosts agree): in the source key and the serialisation container. */
@@ -64,10 +64,10 @@ function floats(h, bytes) {
 
 /** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md, format 1). */
 export function compile(text, opts = {}) {
-  validateOptions(opts, 'compile');
-  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false } = opts;
+  validateCompileOptions(opts);
+  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd' } = opts;
   const entries = controlEntries(controls);
-  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus); }
+  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
     if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
@@ -75,10 +75,11 @@ export function compile(text, opts = {}) {
 }
 const RETAIN_WORDS = 1 << 22;
 
-function compileOnce(text, profile, limits, unicode, entries, inBus) {
+function compileOnce(text, profile, limits, unicode, entries, inBus, regexp) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const opt = options(profile, limits, registryWords(entries, inBus));
+  opt[OPT_REGEXP] = regexp === 'iregexp' ? 1 : 0;
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
     throw new TypeError('unicode must be the Int32Array tables from snug/unicode');
@@ -97,6 +98,7 @@ function compileOnce(text, profile, limits, unicode, entries, inBus) {
       const rule = rs >= 0 ? decoder.decode(bytes.subarray(rs, rs + errorRuleLen(h))) : undefined;
       throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule,
         code === ERR_NEED_UNICODE ? '; Unicode categories require tables from snug/unicode'
+          : code === ERR_REGEXP_BLOCK ? '; XSD block escapes require unavailable pinned Unicode block data'
           : errorName(code) === 'unknown_control' ? controlNamed(bytes, errorOffset(h)) : '');
     }
     const p = outProgramAt(h), b = outPoolAt(h);

@@ -3,7 +3,7 @@
 
 use crate::snug::compile::arena::*;
 
-pub const EXT_OPT_AT: i32 = 19;
+pub const EXT_OPT_AT: i32 = 20;
 pub const EXT_MAX_CONTROLS: i32 = 256;
 pub const EXT_MAX_NAME: i32 = 64;
 pub fn builtin_ctl(len: i32, w1: i32, w2: i32) -> i32 {

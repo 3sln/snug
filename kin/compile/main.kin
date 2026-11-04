@@ -24,7 +24,7 @@
                                         H_LIM_VBUDGET H_LIM_LEAVES H_PROFILE H_FL_GIVEN H_PRELUDE_AT
                                         H_DATA N_TABLES H_DEPTH_MAX H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
                                         ERR_LIM_TEXT ERR_SYNTAX ERR_NEED_FLOATS ERR_EMPTY ERR_ARENA ERR_INTERNAL H_G1 H_G2
-                                        T_UNICODE T_SRC T_FLREQ T_STK6 T_KEYPRE H_EXT_FLAGS]]
+                                        T_UNICODE T_SRC T_FLREQ T_STK6 T_KEYPRE H_EXT_FLAGS H_REGEXP]]
             [snug.compile.prelude :refer [prelude-len prelude-byte]]
             [snug.compile.lex :refer [lex check-utf8 tk-start]]
             [snug.compile.parse :refer [parse-rules]]
@@ -36,7 +36,8 @@
             [snug.compile.emit :refer [emit-program]]
             [snug.compile.ext :refer [ext-init n-exts ext-name-len ext-name-byte ext-max]]))
 
-(defconst ^:pub ^I32 OPT_WORDS 19)
+(defconst ^:pub ^I32 OPT_WORDS 20)
+(defconst ^:pub ^I32 OPT_REGEXP 19)
 
 (declarefn build-key-preimage ^I32 if-limit)
 (defconst ^:pub ^I32 OPT_PROFILE 0)
@@ -54,6 +55,7 @@
   (let [profile (opt-limit opt 0 0 2)
         ^:mut text-default 262144]
     (hs h H_PROFILE profile)
+    (hs h H_REGEXP (opt-limit opt OPT_REGEXP 0 1))
     (if (== profile 2) (set text-default 16384))
     (hs h H_LIM_TEXT (opt-limit opt 1 text-default 1048576))
     (comment "bus: schema text at most 16 KiB whatever the option says (§5.3).")
@@ -218,9 +220,11 @@
   (vtrunc h T_KEYPRE 0)
   (comment "6 elements; 7 with Unicode tables (D110); 8 with registered controls (D141),"
            "the seventh then the tables' words or an empty array.")
-  (if (> (n-exts h) 0)
+  (if (== (hg h H_REGEXP) 0)
+    (vpush1 h T_KEYPRE 137)
+    (if (> (n-exts h) 0)
     (vpush1 h T_KEYPRE 136)
-    (if (> (vlen h T_UNICODE) 0) (vpush1 h T_KEYPRE 135) (vpush1 h T_KEYPRE 134)))
+    (if (> (vlen h T_UNICODE) 0) (vpush1 h T_KEYPRE 135) (vpush1 h T_KEYPRE 134))))
   (head-push h T_KEYPRE 3 0 16)
   (comment "\"snug/program-key\"")
   (vpush1 h T_KEYPRE 115) (vpush1 h T_KEYPRE 110) (vpush1 h T_KEYPRE 117) (vpush1 h T_KEYPRE 103)
@@ -244,7 +248,7 @@
   (comment "D110: optional seventh element binds the source key to table contents."
            "The no-table preimage stays byte-identical to D039.")
   (let [un (vlen h T_UNICODE)]
-    (if (or (> un 0) (> (n-exts h) 0))
+    (if (or (== (hg h H_REGEXP) 0) (or (> un 0) (> (n-exts h) 0)))
       (do (if (not (charge h un)) (return))
           (head-push h T_KEYPRE 4 0 un)
           (for [^I32 j2 0 un]
@@ -265,7 +269,9 @@
               (head-push h T_KEYPRE 3 0 len)
               (for [^I32 xc 0 len]
                 (let [xb (ext-name-byte h k2 xc)] (vpush1 h T_KEYPRE xb)))
-              (push-uint h T_KEYPRE mx)))))))
+              (push-uint h T_KEYPRE mx))))
+      (if (== (hg h H_REGEXP) 0) (head-push h T_KEYPRE 4 0 0))))
+  (if (== (hg h H_REGEXP) 0) (push-uint h T_KEYPRE 0)))
 
 (defn ^I32 if-limit [^I32 k]
   (comment "The header word of compile option k (source-key order).")
@@ -327,6 +333,7 @@
     [44] "regexp"
     [54] "regexp"
     [55] "control_registry"
+    [56] "regexp"
     [45] "map_key"
     [46] "map_group_occurrence"
     [47] "map_cut"

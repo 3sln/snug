@@ -18,10 +18,6 @@ const scheduling = { quantum: value => integer(value) && value <= 0x7fffffff, fa
 const controlsShape = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const schema = value => value !== null && typeof value === 'object' &&
   typeof value.validate === 'function' && typeof value.validateAt === 'function';
-const compileLimits = Object.fromEntries(['schemaBytes', 'nesting', 'astNodes', 'instantiations',
-  'alternatives', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes',
-  'compileBudget', 'leaves', 'depth', 'inputBytes', 'entries', 'items', 'bignumBytes', 'budget']
-  .map(name => [name, integer]));
 const shapes = {
   limits, decode, encode, validation, scheduling,
   span: { ...validation, depth: integer, items: integer },
@@ -30,11 +26,6 @@ const shapes = {
   viewSpan: { schema },
   source: { ...scheduling, chunk: value => integer(value) && value > 0 },
   snapshot: { delay: integer },
-  compile: { profile: enumeration('full', 'bindle', 'bus'),
-    limits: value => checked(value, compileLimits, 'limits'),
-    unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
-    // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`
-    controls: controlsShape, controlsInBus: boolean },
   // loading a Program: the registry its extension controls need (D141)
   program: { controls: controlsShape },
 };
@@ -73,6 +64,21 @@ export function validateSequenceOptions(options, stream) {
   const shape = { ...perMessage, maxMessageBytes: integer, schema, rule: value => typeof value === 'string',
     onInvalid: enumeration('stop', 'skip'), copy: enumeration('spanning', 'always'), failFast: boolean };
   if (stream) shape.quantum = scheduling.quantum;
+  checked(options, shape, 'options');
+  return options;
+}
+
+/** Compile admission is separate so runtime entries carry no compiler options. */
+export function validateCompileOptions(options) {
+  const compileLimits = Object.fromEntries(['schemaBytes', 'nesting', 'astNodes', 'instantiations',
+    'alternatives', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes',
+    'compileBudget', 'leaves', 'depth', 'inputBytes', 'entries', 'items', 'bignumBytes', 'budget']
+    .map(name => [name, integer]));
+  const shape = { profile: enumeration('full', 'bindle', 'bus'), regexp: enumeration('xsd', 'iregexp'),
+    limits: value => checked(value, compileLimits, 'limits'),
+    unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
+    // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`
+    controls: controlsShape, controlsInBus: boolean };
   checked(options, shape, 'options');
   return options;
 }

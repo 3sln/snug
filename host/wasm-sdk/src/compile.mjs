@@ -15,7 +15,7 @@
 // class, with the native message.
 import { Program, Schema } from './schema.mjs';
 import { SchemaError } from '../../js/src/public-compile.mjs';
-import { validateOptions } from '../../js/src/options.mjs';
+import { validateCompileOptions } from '../../js/src/options.mjs';
 import { controlEntries, registryWords, programControls, programArguments } from '../../js/src/ext.mjs';
 
 export { SchemaError };
@@ -53,15 +53,16 @@ function refused(code, line, column, rule, detail) {
 }
 
 export async function compile(text, options = {}) {
-  validateOptions(options, 'compile');
-  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false } = options;
+  validateCompileOptions(options);
+  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd' } = options;
   const entries = controlEntries(controls);
   const bytes = typeof text === 'string' ? te.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const registry = registryWords(entries, controlsInBus);
-  const opt = new Int32Array(19 + registry.length).fill(-1);
-  opt.set(registry, 19);
+  const opt = new Int32Array(20 + registry.length).fill(-1);
+  opt.set(registry, 20);
   opt[0] = PROFILES[profile];
+  opt[19] = regexp === 'iregexp' ? 1 : 0;
   for (const [i, k] of COMPILE_OPTIONS.entries()) if (limits[k] !== undefined) opt[i + 1] = Math.min(limits[k], 0x7fffffff);
   const c = await compiler();
   let P, B;
@@ -82,6 +83,7 @@ export async function compile(text, options = {}) {
       const rule = inf[3] >= 0 ? td.decode(m.subarray(p + inf[0], p + inf[0] + rl)) : undefined;
       const name = inf[4] >= 0 ? td.decode(m.subarray(p + inf[0] + rl, p + inf[0] + rl + inf[4])) : undefined;
       const detail = inf[5] === 1 ? '; Unicode categories require tables from snug/unicode'
+        : inf[5] === 2 ? '; XSD block escapes require unavailable pinned Unicode block data'
         : code === 'unknown_control' && name !== undefined ? ` (.${name} is not a registered control)` : '';
       c.cc_release();
       throw refused(code, inf[1], inf[2], rule, detail);

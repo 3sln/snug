@@ -62,6 +62,9 @@ fn main() {
             }
             continue;
         }
+        let (line, regexp) = if let Some(rest) = line.strip_prefix("I ") {
+            (rest, snug::compile::Regexp::IRegexp)
+        } else { (line.as_str(), snug::compile::Regexp::Xsd) };
         let (line, tables) = if let Some(rest) = line.strip_prefix("T ") {
             let (words, rest) = rest.split_once(' ').unwrap_or(("", rest));
             let table = (0..words.len() / 8)
@@ -70,12 +73,12 @@ fn main() {
             (rest, Some(table))
         } else if let Some(rest) = line.strip_prefix("U ") {
             (rest, Some(snug::unicode_tables::tables()))
-        } else { (line.as_str(), None) };
+        } else { (line, None) };
         let mut f = line.split(' ');
         let profile: i32 = f.next().unwrap_or("0").parse().unwrap_or(0);
         let text = unhex(f.next().unwrap_or(""));
         let limits: Vec<i32> = f.map(|x| x.parse().unwrap_or(-1)).collect();
-        let r = std::panic::catch_unwind(|| match compile_bytes_with_options(&text, &CompileOptions { profile, limits: &limits, unicode: tables.as_deref(), controls: None }) {
+        let r = std::panic::catch_unwind(|| match compile_bytes_with_options(&text, &CompileOptions { profile, limits: &limits, unicode: tables.as_deref(), controls: None, regexp }) {
             Ok(c) => {
                 let m = (c.program.get(16).copied().unwrap_or(1)).max(1) as usize;
                 let mut s = vec![0i32; 48 + 2 * m + 16];

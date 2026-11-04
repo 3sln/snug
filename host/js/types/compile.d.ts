@@ -9,6 +9,8 @@ export interface CompileLimits {
   bignumBytes?: number; budget?: number;
 }
 export interface CompileOptions {
+  /** XSD Appendix F (default), or strict RFC 9485 interoperability mode. */
+  regexp?: 'xsd' | 'iregexp';
   profile?: 'full' | 'bindle' | 'bus'; limits?: CompileLimits; unicode?: Int32Array;
   /** Extension controls the schema may use as `.name` (D141); see snug/controls. */
   controls?: Controls;

@@ -18,8 +18,11 @@
 //      across hosts.
 import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { compile, SchemaError } from '../../host/js/src/compile.mjs';
+import { compile as compileCurrent, SchemaError } from '../../host/js/src/compile.mjs';
 import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+
+// Keep the existing corpus and source-key assertions in their original dialect.
+const compile = (text, opts) => compileCurrent(text, { ...opts, regexp: 'iregexp' });
 
 const [rustBin, corrArg, seedArg] = process.argv.slice(2);
 const CORRUPTIONS = Number(corrArg ?? 40), SEED = Number(seedArg ?? 7);
@@ -61,7 +64,7 @@ function verifyJs(P, B, cap = Math.max(P[16] ?? 1, 1)) {
 
 // ---------------------------------------------------------------- run both hosts
 const js = cases.map(c => jsCompile(c.text));
-const rustIn = cases.map(c => `0 ${hex(Buffer.from(c.text, 'utf8'))}`).join('\n') + '\n';
+const rustIn = cases.map(c => `I 0 ${hex(Buffer.from(c.text, 'utf8'))}`).join('\n') + '\n';
 const rr = spawnSync(rustBin, [], { input: rustIn, maxBuffer: 1 << 30 });
 if (rr.status !== 0) { console.log(`  FAIL the Rust binary exited ${rr.status}: ${rr.stderr}`); process.exit(1); }
 const rust = rr.stdout.toString().trimEnd().split('\n');
@@ -124,7 +127,7 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
   const pool = block.match(/B\[[^\n]*/g);
   const wantPool = '72' + '6178' + '6179' + '646b696e64' + '6161' + '6162';
   const j = jsCompile('r = { kind: "a", x: int // kind: "b", ? y: [* tstr] }');
-  const rex = spawnSync(rustBin, [], { input: `0 ${hex(Buffer.from('r = { kind: "a", x: int // kind: "b", ? y: [* tstr] }'))}\n` }).stdout.toString().trim().split(' ');
+  const rex = spawnSync(rustBin, [], { input: `I 0 ${hex(Buffer.from('r = { kind: "a", x: int // kind: "b", ? y: [* tstr] }'))}\n` }).stdout.toString().trim().split(' ');
   const missing = want.some((w, i) => w === undefined && (i < 7 || i > 14));
   const okJs = j.ok && j.program.length === 286 && want.every((w, i) => w === undefined || j.program[i] === w) && hex(j.pool) === wantPool;
   const rw = rex[2] ?? '';
@@ -143,7 +146,7 @@ console.log(`  ${verified === programs.length ? 'ok  ' : 'FAIL'} ${verified}/${p
   const A = await import('../../gen/js/snug/compile/arena.mjs');
   const enc = new TextEncoder(), dec = new TextDecoder();
   const run = (text, start) => {
-    const bytes = enc.encode(text), opt = new Int32Array(M.OPT_WORDS).fill(-1);
+    const bytes = enc.encode(text), opt = new Int32Array(M.OPT_WORDS).fill(-1); opt[M.OPT_REGEXP] = 1;
     let fl = new Int32Array(0), words = start, retries = 0;
     for (;;) {
       const h = new Int32Array(words);
@@ -245,7 +248,7 @@ const PROFILE_CASES = [
   ['bus', 'r = int / float / bool / null / #6.1(int) / 0..9 / "a" / h\'00\'', 'ok'],
 ];
 {
-  const pin = PROFILE_CASES.map(([p, t]) => `${{ full: 0, bindle: 1, bus: 2 }[p]} ${hex(Buffer.from(t, 'utf8'))}`).join('\n') + '\n';
+  const pin = PROFILE_CASES.map(([p, t]) => `I ${{ full: 0, bindle: 1, bus: 2 }[p]} ${hex(Buffer.from(t, 'utf8'))}`).join('\n') + '\n';
   const pr = spawnSync(rustBin, [], { input: pin, maxBuffer: 1 << 30 }).stdout.toString().trimEnd().split('\n');
   let good = 0;
   PROFILE_CASES.forEach(([p, t, want], i) => {

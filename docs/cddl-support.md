@@ -48,7 +48,7 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.eq` | Target intersected with controller, not replacement of target; `(tstr .size 1) .eq "aa"` is empty. Composite controllers lower to AND (D038). |
 | `.ne` | Numeric exclusion splits intervals: `float .ne 0.0` excludes both zeros and `float .ne 1.5` keeps NaN (NaN equals no number, D250); other targets exclude a literal while retaining target constraints. Composite nonliteral controllers refused. |
 | `.and`, `.within` | Intersections, with operands evaluated as same-item dependencies; they do not create extra accepting alternatives. |
-| `.regexp` | Whole-string RFC 9485 I-Regexp, compiled to a bounded code-point automaton; details below. |
+| `.regexp` | Whole-string XSD Appendix F by default; `regexp: 'iregexp'` selects strict RFC 9485. Both compile to the same bounded code-point automata; details below. |
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
 | `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only (D040). |
 | `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). |
@@ -82,7 +82,7 @@ embedded interpretations.
 
 ## Unicode regexp categories
 
-`.regexp` matches the whole text as RFC 9485 I-Regexp. Opt in to Unicode
+`.regexp` matches the whole text in either dialect (D242–D243). Opt in to Unicode
 General_Category escapes with `compile(text, { unicode: tables })`, importing
 `tables` from `snug/unicode`. `\p{X}` selects category X and `\P{X}` its
 complement; both work inside classes, including `[\p{L}\p{Nd}_-]` and
@@ -98,8 +98,12 @@ C Cc Cf Co Cn Cs
 excludes surrogates; `\P{Cs}` matches any single scalar allowed by the wire
 profile. The Bindle profile (`wire: 'bindle'`) rejects noncharacters with
 `cbor/text`, even when a category would otherwise match; the deterministic
-preset admits them, and they match their categories (Cn). Category aliases, scripts, blocks,
-`gc=…` spellings in CDDL and host-engine extensions are refused.
+preset admits them, and they match their categories (Cn). Category aliases,
+scripts, `gc=…` spellings in CDDL and host-engine extensions are refused.
+XSD block escapes `\p{IsBasicLatin}` / `\P{Is…}` are also refused with a
+message explaining unavailable pinned Unicode block data: the pinned Node
+ICU API exposes no Block property, and the repository has no authoritative
+block-name/range input. Category tables do not supply blocks (D243).
 
 Tables are pinned to **Unicode 16.0**, generated offline from **Node
 v24.6.0 / ICU 77.1**, and checked in for JS and Rust. The separate JS module
@@ -120,13 +124,37 @@ See the [loading example](guide.md#optional-unicode-regexp-tables).
 
 ## Regexp cookbook
 
-Patterns match the **whole string**; use `.*` explicitly when you mean
-surrounding text. There are no JS flags or slash delimiters. The grammar is
-RFC 9485 I-Regexp, with literals, code-point classes/ranges, grouping,
-alternation, `.`, and `?`, `*`, `+`, `{n}`, `{n,m}` repetitions; see the
-recorded [regexp design](architecture.md#47-regular-expressions). JS shorthands `\d`,
-`\w`, `\s`, lookarounds and backreferences are not supported. Use explicit
-classes, e.g. `[0-9]`, `[A-Za-z0-9_]` or `[ \t]` as appropriate to your protocol.
+`compile(text, { regexp: 'xsd' | 'iregexp' })` selects the dialect; **`xsd`
+is the default**, following RFC 8610 §3.8.3's reference to XSD 1.0 Part 2
+Appendix F. The corrected XSD 1.0 class grammar is used, with XML 1.0 fifth
+edition name classes and Unicode 16.0 categories; this does not implement
+XSD 1.1's relaxed escape/block-name rules. `iregexp` keeps the previous
+strict RFC 9485 admissions and refusals. Patterns valid in both have the
+same meaning: dot excludes CR/LF, `^` and `$` are ordinary characters,
+category escapes are case sensitive, and matching covers the whole text.
+There are no JS flags or slash delimiters. Use `.*` explicitly for surrounding
+text. Neither dialect supports backreferences, lookaround or `\x..` escapes.
+
+| Construct | XSD | I-Regexp | Tables needed |
+| --- | --- | --- | --- |
+| Literals, ranges/classes, negation, grouping, alternation, dot | Yes | Yes | No |
+| `?`, `*`, `+`, `{n}`, `{n,m}`, `{n,}` | Bounded expansion | Same | No |
+| `[a-z-[aeiou]]`, nested subtraction | Range-set difference; negate base before subtraction | Refused | Only if operands use categories |
+| `\s` / `\S` | TAB, LF, CR, SPACE / complement | Refused | No |
+| `\i` / `\I` | XML NameStartChar / complement | Refused | No |
+| `\c` / `\C` | XML NameChar / complement | Refused | No |
+| `\d` / `\D` | Nd / complement | Refused | `snug/unicode` |
+| `\w` / `\W` | Complement of P/Z/C / P/Z/C | Refused | `snug/unicode` |
+| `\p{L}` / `\P{L}` and other categories | Yes | Yes | `snug/unicode` |
+| `\p{IsBlock}` / `\P{IsBlock}` | Explicit data-unavailable error | Refused | Pinned block data unavailable |
+
+XSD `\w` includes letters, marks, numbers and symbols (including emoji),
+but excludes underscore (`Pc`), punctuation, separators and other/control
+characters. It is different from JavaScript's `\w`. For ASCII protocols use
+explicit `[0-9]` or `[A-Za-z0-9_]` classes. XML names include colon; for a
+colon-free name, subtract it, e.g. `[\i-[:]][\c-[:]]*`. A hyphen in a
+class is literal at the beginning/end or when escaped; subtraction must be
+last in the class. It can produce an empty class, which matches no code point.
 
 These paired JavaScript strings produce identical CDDL text:
 
@@ -157,6 +185,10 @@ repetition expansion, not JS/CDDL source characters: `[0-9]` or `\p{L}`
 is one position; copies from `{n,m}` consume more. Unbounded loops reuse
 positions. Complex alternatives/classes also consume compile work/pool
 space. Exceeding the limit is `limit_regexp_positions`, never truncation.
+XSD compares decimal quantifier bounds before saturating expansion counts,
+including bounds on empty expressions. I-Regexp retains its historical
+saturation behaviour for extreme bounds on zero-position expressions
+([P8.3 finding](../DEVLOG.md#findings)); ordinary bounded patterns are unchanged.
 
 ## Map determinism and cuts
 
@@ -269,7 +301,8 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 | `.pcre`, `.abnf`, `.abnfb` | `unsupported_control`; portable, bounded engines required (D013). |
 | Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time (D082, D140–D143), e.g. `.chars`, `.unique`, `.samelen` from `snug/controls`. |
 | Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `snug/unicode` and pass `unicode: tables` (D083). |
-| Regexp `\d`, `\w`, `\s`, `\x..`, lookarounds, backreferences, host-engine extensions | `regexp`; use the supported I-Regexp grammar. No host regex engine/ReDoS path. |
+| Regexp XSD shorthands/subtraction in `iregexp` mode; `\x..`, lookarounds, backreferences in either mode | `regexp`; no host regex engine/ReDoS path. |
+| Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable (D243), even with category tables. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
 | Unprovable map overlap / unsupported cut placement | `map_overlap` / `map_cut`; exact existential meaning must be provable. |
 | Non-exact repeated map groups | `map_group_occurrence`; cannot represent coupled/non-interval counts as independent counters. |

@@ -31,6 +31,33 @@ It does not select the codec wire policy. The default is `full`. `bus`
 refuses recursion, regexps and unbounded structures; it is useful for
 untrusted schemas, within its supported subset. See [profiles](profiles.md).
 
+## Regexp dialects
+
+`compile(text, { regexp: 'xsd' })` is the default, following RFC 8610's
+XSD Appendix F reference. Use `{ regexp: 'iregexp' }` for strict RFC 9485
+interoperability and the previous compiler's regexp behaviour. Both match
+the entire text; dot excludes CR/LF, and `^`/`$` are literal characters.
+
+```js
+const consonants = await compile('r = tstr .regexp "[a-z-[aeiou]]+"');
+const xmlName = await compile(String.raw`r = tstr .regexp "\\i\\c*"`);
+const asciiDigits = await compile('r = tstr .regexp "[0-9]+"', { regexp: 'iregexp' });
+```
+
+XSD adds nested class subtraction, XML 1.0 fifth edition name escapes and
+`\s`/`\S` (TAB/LF/CR/SPACE). These need no Unicode module. `\d`/`\D` use
+Nd, and `\w`/`\W` use the complement of P/Z/C and its inverse; those need
+the optional tables below. XSD `\w` excludes underscore and includes emoji.
+Block escapes such as `\p{IsBasicLatin}` explicitly fail with `regexp`:
+the pinned Node ICU API exposes no block ranges. See the
+[construct table](cddl-support.md#regexp-cookbook) for coverage and escaping.
+
+All syntax lowers at compile time into existing bounded automata. Subtraction
+and table operations spend compile budget; repetitions obey the existing
+256-position default / 512-position hard cap. The Program format and runtime
+are unchanged. The source key includes the effective dialect; explicit
+`iregexp` preserves the previous preimage.
+
 ## Optional Unicode regexp tables
 
 ```js
@@ -690,7 +717,7 @@ const small = await compile('message = { id: uint }', { limits: { inputBytes: 10
 
 Complete presets can still be spread into every runtime options bag:
 `strictArrays` is ignored while reading and `top` while writing, but their
-types are checked. Compile options are separate (`profile`, `limits`, `unicode`);
+types are checked. Compile options are separate (`profile`, `regexp`, `limits`, `unicode`);
 wire presets belong on validation/codec/view/Writer/source calls.
 
 | Resource | Default | Hard ceiling for compiled schemas |

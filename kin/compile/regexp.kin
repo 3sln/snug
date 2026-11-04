@@ -1,10 +1,10 @@
-;; `.regexp`: RFC 9485 I-Regexp, anchored at both ends (architecture §4.7,
-;; D014), compiled to a Glushkov automaton over code-point classes.
+;; `.regexp`: XSD Appendix F or RFC 9485 I-Regexp (D242–D243), anchored
+;; at both ends, compiled to the same Glushkov automaton over code-point classes.
 ;;
-;; Unicode categories use explicit compile-time tables (D083). Refused: every escape that is not
-;; I-Regexp (`\d \w \s \x..` and the like), as ERR_REGEXP. Counted
-;; repetition unrolls within the regexp position limit (ERR_LIM_RPOS, checked
-;; before anything is built).
+;; Unicode categories use explicit compile-time tables (D083). XSD adds
+;; subtraction and XML-name/digit/word/space classes; I-Regexp keeps its
+;; original strict grammar. Counted repetition unrolls within the regexp
+;; position limit (ERR_LIM_RPOS, checked before the automaton is built).
 ;;
 ;; An internal regexp (T_RX, 6 words: pattern bid, data offset, npos, W,
 ;; natoms, nullable) keeps its data in T_RXD exactly in Program order:
@@ -16,7 +16,7 @@
                                < > <= >= == != and or not ia ilen rem]]
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc
                                         mix ht-init ht-start ht-id ht-next ht-put sort-records
-                                        T_UNICODE ERR_NEED_UNICODE INF ERR_REGEXP ERR_LIM_RPOS ERR_LIM_NESTING ERR_INTERNAL
+                                        T_UNICODE ERR_NEED_UNICODE ERR_REGEXP_BLOCK H_REGEXP INF ERR_REGEXP ERR_LIM_RPOS ERR_LIM_NESTING ERR_INTERNAL
                                         H_R0 H_R1 H_DEPTH H_DEPTH_MAX H_LIM_RPOS H_G0 H_ERR
                                         T_RX T_RXD T_RXA T_HRX T_STK2 T_STK4 T_STK8 T_GPOS T_GOUT T_BYTE]]
             [snug.compile.bytes :refer [bid-off bid-len]]
@@ -232,9 +232,38 @@
   (return (and (== (pc h (at h)) 92)
                (or (== (pc h (+ (at h) 1)) 112) (== (pc h (+ (at h) 1)) 80)))))
 
+(defn ^Bool category-ranges [^Ints h ^I32 id ^Bool negate]
+  (comment "Append a category or its complement; charge searches and copied ranges.")
+  (if (== (vlen h T_UNICODE) 0)
+    (do (fail h ERR_NEED_UNICODE (neg 1)) (return false)))
+  (let [n (quot (vlen h T_UNICODE) 3)
+        ^:mut lo 0
+        ^:mut hi (quot (vlen h T_UNICODE) 3)
+        ^:mut next 0]
+    (while (< lo hi)
+      (if (not (charge h 1)) (return false))
+      (let [mid (sar (+ lo hi) 1)]
+        (if (< (vget h T_UNICODE (* mid 3)) id)
+          (set lo (+ mid 1)) (set hi mid))))
+    (while (and (< lo n) (== (vget h T_UNICODE (* lo 3)) id))
+      (if (not (charge h 1)) (return false))
+      (let [a (vget h T_UNICODE (+ (* lo 3) 1))
+            b (vget h T_UNICODE (+ (* lo 3) 2))]
+        (if negate
+          (if (> a next) (range-push h next (- a 1)))
+          (range-push h a b))
+        (set next (+ b 1)))
+      (if (erred h) (return false))
+      (set lo (+ lo 1)))
+    (if (and negate (<= next CP_MAX)) (range-push h next CP_MAX)))
+  (return (not (erred h))))
+
 (defn ^Bool parse-property [^Ints h]
-  (comment "Append a category or its complement to T_STK8; one regexp position."
-           "Each binary-search probe and each copied range is charged.")
+  (comment "General_Category in both dialects; blocks need pinned block data.")
+  (if (and (== (hg h H_REGEXP) 0)
+           (and (== (pc h (+ (at h) 2)) 123)
+                (and (== (pc h (+ (at h) 3)) 73) (== (pc h (+ (at h) 4)) 115))))
+    (do (fail h ERR_REGEXP_BLOCK (neg 1)) (return false)))
   (if (== (vlen h T_UNICODE) 0)
     (do (fail h ERR_NEED_UNICODE (neg 1)) (return false)))
   (let [negate (== (pc h (+ (at h) 1)) 80)]
@@ -251,27 +280,83 @@
       (if (or (!= (pc h (at h)) 125) (not (category-valid id)))
         (do (fail h ERR_REGEXP (neg 1)) (return false)))
       (mv h 1)
-      (let [n (quot (vlen h T_UNICODE) 3)
-            ^:mut lo 0
-            ^:mut hi (quot (vlen h T_UNICODE) 3)
-            ^:mut next 0]
-        (while (< lo hi)
-          (if (not (charge h 1)) (return false))
-          (let [mid (sar (+ lo hi) 1)]
-            (if (< (vget h T_UNICODE (* mid 3)) id)
-              (set lo (+ mid 1)) (set hi mid))))
-        (while (and (< lo n) (== (vget h T_UNICODE (* lo 3)) id))
-          (if (not (charge h 1)) (return false))
-          (let [a (vget h T_UNICODE (+ (* lo 3) 1))
-                b (vget h T_UNICODE (+ (* lo 3) 2))]
-            (if negate
-              (if (> a next) (range-push h next (- a 1)))
-              (range-push h a b))
-            (set next (+ b 1)))
-          (if (erred h) (return false))
-          (set lo (+ lo 1)))
-        (if (and negate (<= next CP_MAX)) (range-push h next CP_MAX)))))
+      (return (category-ranges h id negate)))))
+
+(defn ^Bool append-class [^Ints h ^I32 cls ^Bool negate]
+  (let [n (vget h T_RXA cls)
+        ^:mut next 0]
+    (for [^I32 i 0 n]
+      (if (not (charge h 1)) (return false))
+      (let [lo (vget h T_RXA (+ cls (+ 1 (* 2 i))))
+            hi (vget h T_RXA (+ cls (+ 2 (* 2 i))))]
+        (if negate
+          (if (> lo next) (range-push h next (- lo 1)))
+          (range-push h lo hi))
+        (set next (+ hi 1))))
+    (if (and negate (<= next CP_MAX)) (range-push h next CP_MAX)))
   (return (not (erred h))))
+
+(defn ^Bool multi-escape [^IntsR h]
+  (if (property-escape h) (return true))
+  (if (or (!= (hg h H_REGEXP) 0) (!= (pc h (at h)) 92)) (return false))
+  (let [c (bit-or (pc h (+ (at h) 1)) 32)]
+    (return (or (or (== c 115) (== c 105)) (or (or (== c 99) (== c 100)) (== c 119))))))
+
+(defn ^Bool parse-multi [^Ints h]
+  (if (property-escape h) (return (parse-property h)))
+  (let [esc (pc h (+ (at h) 1))
+        c (bit-or esc 32)
+        from (vlen h T_STK8)]
+    (mv h 2)
+    (if (== c 100) (return (category-ranges h 20068 (!= esc c))))
+    (if (== c 119)
+      (do (if (not (category-ranges h 20480 false)) (return false))
+          (if (not (category-ranges h 23040 false)) (return false))
+          (if (not (category-ranges h 17152 false)) (return false))))
+    (if (== c 115)
+      (do (range-push h 9 10) (range-push h 13 13) (range-push h 32 32)))
+    (if (or (== c 105) (== c 99))
+      (do (comment "XML 1.0 fifth edition [4] NameStartChar; no Unicode module.")
+          (range-push h 58 58) (range-push h 65 90) (range-push h 95 95)
+          (range-push h 97 122) (range-push h 192 214) (range-push h 216 246)
+          (range-push h 248 767) (range-push h 880 893) (range-push h 895 8191)
+          (range-push h 8204 8205) (range-push h 8304 8591) (range-push h 11264 12271)
+          (range-push h 12289 55295) (range-push h 63744 64975)
+          (range-push h 65008 65533) (range-push h 65536 983039)
+          (if (== c 99)
+            (do (comment "[4a] NameChar adds hyphen, dot, digits, middle dot and marks.")
+                (range-push h 45 46) (range-push h 48 57) (range-push h 183 183)
+                (range-push h 768 879) (range-push h 8255 8256)))))
+    (let [cls (class-commit h from 0)]
+      (if (< cls 0) (return false))
+      (comment "w is the complement of P/Z/C; uppercase W is P/Z/C.")
+      (let [^:mut complement (!= esc c)]
+        (if (== c 119) (set complement (== esc c)))
+        (return (append-class h cls complement))))))
+
+(defn ^I32 class-difference [^Ints h ^I32 base ^I32 sub]
+  (comment "Sorted range-set difference in linear work; no scan over code points.")
+  (let [from (vlen h T_STK8)
+        n (vget h T_RXA base)
+        m (vget h T_RXA sub)
+        ^:mut j 0]
+    (for [^I32 i 0 n]
+      (if (not (charge h 1)) (return (neg 1)))
+      (let [^:mut lo (vget h T_RXA (+ base (+ 1 (* 2 i))))
+            hi (vget h T_RXA (+ base (+ 2 (* 2 i))))]
+        (while (< j m)
+          (if (not (charge h 1)) (return (neg 1)))
+          (let [a (vget h T_RXA (+ sub (+ 1 (* 2 j))))
+                b (vget h T_RXA (+ sub (+ 2 (* 2 j))))]
+            (if (> a hi) (break))
+            (if (>= b lo)
+              (do (if (> a lo) (range-push h lo (- a 1)))
+                  (set lo (+ b 1))))
+            (if (>= b hi) (break))
+            (set j (+ j 1))))
+        (if (<= lo hi) (range-push h lo hi))
+        (if (erred h) (return (neg 1)))))
+    (return (class-commit h from 0))))
 
 (defn ^I32 parse-class-char [^Ints h]
   (comment "A CCchar at the cursor (a plain char or a SingleCharEsc): its code"
@@ -317,6 +402,57 @@
     (mv h 1)
     (return (class-commit h from negate))))
 
+(declarefn ^I32 parse-xsd-bracket)
+
+(defn ^I32 parse-xsd-bracket [^Ints h]
+  (let [d (+ (hg h H_DEPTH) 1)]
+    (hs h H_DEPTH d)
+    (if (> d (hg h H_DEPTH_MAX)) (return (fail h ERR_LIM_NESTING (neg 1)))))
+  (mv h 1)
+  (let [from (vlen h T_STK8)
+        ^:mut negate 0
+        ^:mut first true]
+    (if (== (pc h (at h)) 94) (do (set negate 1) (mv h 1)))
+    (forever
+     (if (not (charge h 1)) (return (neg 1)))
+     (let [c (pc h (at h))]
+       (if (< c 0) (return (fail h ERR_REGEXP (neg 1))))
+       (if (and (== c 93) (not first)) (break))
+       (if (and (not first) (and (== c 45) (== (pc h (+ (at h) 1)) 91)))
+         (do (let [base (class-commit h from negate)]
+               (if (< base 0) (return (neg 1)))
+               (mv h 1)
+               (let [^I32 sub (parse-xsd-bracket h)]
+                 (if (< sub 0) (return (neg 1)))
+                 (if (!= (pc h (at h)) 93) (return (fail h ERR_REGEXP (neg 1))))
+                 (mv h 1)
+                 (let [depth (hg h H_DEPTH)] (hs h H_DEPTH (- depth 1)))
+                 (return (class-difference h base sub))))))
+       (if (== c 45)
+         (if (or first (== (pc h (+ (at h) 1)) 93))
+           (do (range-push h 45 45) (mv h 1))
+           (return (fail h ERR_REGEXP (neg 1))))
+         (if (multi-escape h)
+           (if (not (parse-multi h)) (return (neg 1)))
+           (let [lo (parse-class-char h)]
+             (if (< lo 0) (return (neg 1)))
+             (if (and (== (pc h (at h)) 45)
+                      (and (!= (pc h (+ (at h) 1)) 93) (!= (pc h (+ (at h) 1)) 91)))
+               (do (mv h 1)
+                   (let [hi (parse-class-char h)]
+                     (if (< hi 0) (return (neg 1)))
+                     (if (< hi lo) (return (fail h ERR_REGEXP (neg 1))))
+                     (range-push h lo hi)))
+               (range-push h lo lo))))))
+     (set first false))
+    (mv h 1)
+    (let [depth2 (hg h H_DEPTH)] (hs h H_DEPTH (- depth2 1)))
+    (return (class-commit h from negate))))
+
+(defn ^I32 parse-class [^Ints h]
+  (if (== (hg h H_REGEXP) 0) (return (parse-xsd-bracket h)))
+  (return (parse-bracket h)))
+
 (defn ^I32 make-class1 [^Ints h ^I32 lo ^I32 hi]
   (let [from (vlen h T_STK8)]
     (range-push h lo hi)
@@ -349,7 +485,7 @@
             (mv h 1)
             (return inner))))
     (if (== c 91)
-      (do (let [cls (parse-bracket h)]
+      (do (let [cls (parse-class h)]
             (if (< cls 0) (return (neg 1)))
             (return (g-node h G_POS cls 0 0)))))
     (if (== c 46)
@@ -357,9 +493,9 @@
           (let [dot (make-dot h)]
             (if (< dot 0) (return (neg 1)))
             (return (g-node h G_POS dot 0 0)))))
-    (if (property-escape h)
+    (if (multi-escape h)
       (let [from (vlen h T_STK8)]
-        (if (not (parse-property h)) (return (neg 1)))
+        (if (not (parse-multi h)) (return (neg 1)))
         (let [prop-class (class-commit h from 0)]
           (if (< prop-class 0) (return (neg 1)))
           (return (g-node h G_POS prop-class 0 0)))))
@@ -386,6 +522,27 @@
       (mv h 1))
     (return v)))
 
+(defn ^Bool quant-ordered [^Ints h ^I32 a ^I32 ae ^I32 b ^I32 be]
+  (comment "Compare arbitrary decimal quantifiers before saturated expansion counts."
+           "XSD only: large bounds on epsilon must still have correct ordering.")
+  (let [^:mut left a
+        ^:mut right b]
+    (while (and (< left ae) (== (pc h left) 48))
+      (if (not (charge h 1)) (return false))
+      (set left (+ left 1)))
+    (while (and (< right be) (== (pc h right) 48))
+      (if (not (charge h 1)) (return false))
+      (set right (+ right 1)))
+    (let [ln (- ae left)
+          rn (- be right)]
+      (if (!= ln rn) (return (< ln rn)))
+      (for [^I32 i 0 ln]
+        (if (not (charge h 1)) (return false))
+        (let [lc (pc h (+ left i))
+              rc (pc h (+ right i))]
+          (if (!= lc rc) (return (< lc rc)))))
+      (return true))))
+
 (defn ^I32 parse-piece [^Ints h]
   (let [a (parse-atom h)]
     (if (< a 0) (return (neg 1)))
@@ -395,16 +552,22 @@
       (if (== q 63) (do (mv h 1) (return (g-node h G_REP a 0 1))))
       (if (== q 123)
         (do (mv h 1)
-            (let [lo (quant-num h)
+            (let [ls (at h)
+                  lo (quant-num h)
+                  le (at h)
                   ^:mut hi lo]
               (if (< lo 0) (return (fail h ERR_REGEXP (neg 1))))
               (if (== (pc h (at h)) 44)
                 (do (mv h 1)
-                    (set hi (quant-num h))
+                    (let [us (at h)]
+                      (set hi (quant-num h))
+                      (if (and (== (hg h H_REGEXP) 0) (>= hi 0))
+                        (if (not (quant-ordered h ls le us (at h)))
+                          (return (fail h ERR_REGEXP (neg 1))))))
                     (if (< hi 0) (set hi INF))))
               (if (!= (pc h (at h)) 125) (return (fail h ERR_REGEXP (neg 1))))
               (mv h 1)
-              (if (< hi lo) (return (fail h ERR_REGEXP (neg 1))))
+              (if (and (!= (hg h H_REGEXP) 0) (< hi lo)) (return (fail h ERR_REGEXP (neg 1))))
               (return (g-node h G_REP a lo hi)))))
       (return a))))
 
@@ -455,10 +618,10 @@
         (do (comment "A pattern error is reported at the control's position, not inside"
                      "the pattern; any other failure (the arena, the budget, nesting) is"
                      "kept as it is, so the host still retries an exhausted arena.")
-            (if (or (== (hg h H_ERR) 0) (or (== (hg h H_ERR) ERR_REGEXP) (== (hg h H_ERR) ERR_NEED_UNICODE)))
+            (if (or (== (hg h H_ERR) 0) (or (== (hg h H_ERR) ERR_REGEXP) (or (== (hg h H_ERR) ERR_NEED_UNICODE) (== (hg h H_ERR) ERR_REGEXP_BLOCK))))
               (let [code (hg h H_ERR)]
                 (hs h H_ERR 0)
-                (if (== code ERR_NEED_UNICODE) (return (fail h ERR_NEED_UNICODE pos)))
+                (if (or (== code ERR_NEED_UNICODE) (== code ERR_REGEXP_BLOCK)) (return (fail h code pos)))
                 (return (fail h ERR_REGEXP pos))))
             (return (neg 1))))
       (let [npos (g-count h root)]

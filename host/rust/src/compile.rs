@@ -3,7 +3,7 @@
 //! limits, the compile budget, the Program's bytes -- is kin's; this file owns
 //! only the arena, the decimal float-literal port (D020: `str::parse::<f64>`,
 //! at most 17 significant digits, checked by kin) and the result's shape.
-use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE};
+use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK};
 use crate::snug::compile::main as kc;
 use std::cell::RefCell;
 
@@ -52,11 +52,20 @@ pub fn compile(text: &str, profile: i32, limits: &[i32]) -> Result<Compiled, Sch
     compile_bytes(text.as_bytes(), profile, limits)
 }
 
+/// Compile-time regexp dialect (D242); both lower to the existing portable automaton.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Regexp {
+    #[default]
+    Xsd,
+    IRegexp,
+}
+
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
 /// and extension controls (D141; none by default).
 #[derive(Default)]
 pub struct CompileOptions<'a> {
     pub profile: i32,
+    pub regexp: Regexp,
     pub limits: &'a [i32],
     pub unicode: Option<&'a [i32]>,
     pub controls: Option<&'a dyn Registry>,
@@ -77,16 +86,17 @@ pub fn compile_with_options(text: &str, options: &CompileOptions<'_>) -> Result<
 }
 
 pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compiled, SchemaError> {
-    compile_bytes_with_options(bytes, &CompileOptions { profile, limits, unicode: None, controls: None })
+    compile_bytes_with_options(bytes, &CompileOptions { profile, limits, ..Default::default() })
 }
 
 pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
-    let CompileOptions { profile, limits, unicode, controls } = options;
+    let CompileOptions { profile, limits, unicode, controls, regexp } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
     opt[0] = *profile;
-    for (i, v) in limits.iter().enumerate().take(kc::OPT_WORDS as usize - 1) {
+    for (i, v) in limits.iter().enumerate().take(COMPILE_OPTIONS.len()) {
         opt[i + 1] = *v;
     }
+    opt[kc::OPT_REGEXP as usize] = if *regexp == Regexp::IRegexp { 1 } else { 0 };
     // D141: the extension-control registry rides after the OPT_WORDS options
     if let Some(c) = controls {
         opt.extend(c.words());
@@ -125,6 +135,8 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                     rule,
                     message: if code == ERR_NEED_UNICODE {
                         "Unicode categories require snug::unicode_tables (snug/unicode)"
+                    } else if code == ERR_REGEXP_BLOCK {
+                        "XSD block escapes require unavailable pinned Unicode block data"
                     } else { "CDDL schema refused" },
                     detail,
                 });

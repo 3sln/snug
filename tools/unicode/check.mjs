@@ -90,7 +90,7 @@ assert.ok(retries > 0);
 console.log(`ok Unicode outcomes independent of arena size, including float retries and low budgets (${retries} arena growth retries)`);
 
 const keyText = schema('\\p{L}');
-const { program } = compile(keyText, { unicode: tables });
+const { program } = compile(keyText, { unicode: tables, regexp: 'iregexp' });
 const defaults = [262144, 64, 65536, 1024, 64, 256, 256, 256, 1048576, 8388608, 10000000, 32, 1500000, 65536, 131072, 128, 2250000];
 const preimage = encode(['snug/program-key', 1, SNUG_VERSION, 0, defaults, new TextEncoder().encode(keyText), Array.from(tables)]);
 const hash = createHash('sha256').update(preimage).digest();

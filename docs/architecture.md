@@ -365,7 +365,7 @@ as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
 | `.eq` | `target ∧ LIT k`, folded to `LIT k` only if the compiler proves `k ∈ target` (C8); `(tstr .size 1) .eq "aa"` is empty |
 | `.ne` | numeric target: split interval (`(0..10) .ne 5` → `0..4, 6..10`); otherwise `target ∧ NOT LIT k` (C8) |
 | `.and`, `.within` | folded when both sides are the same scalar kind (interval intersection); otherwise `AND` |
-| `.regexp` | RFC 9485 I-Regexp, anchored (§4.7) |
+| `.regexp` | XSD Appendix F (default) or RFC 9485 I-Regexp, anchored (§4.7) |
 | `.cbor T` / `.cborseq T` | `EMBED`: the content is validated as a **sub-validation**. Its profile, limit and schema failures kill only the `EMBED` leaf, never the message (`bstr .cbor {a: int} / bstr .size (0..16)` accepts `h'ff'`); if it is the reported failure the reason is `embedded` with a sub-code. Depth and item limits are accounted separately for the embedded document; only the budget is global. Exact span: the content must be fully consumed (`.cbor`: exactly one item; `.cborseq`: items to the end) (A4, C7). |
 | `.default` | annotation; no effect |
 | `.feature` | accepted as a no-op annotation (RFC 9165: it always matches) (A12) |
@@ -375,7 +375,8 @@ as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
 
 ### 4.7 Regular expressions
 
-`.regexp` is RFC 9485 I-Regexp, matched against the whole string. It compiles
+`.regexp` selects XSD 1.0 Appendix F (default) or RFC 9485 I-Regexp with
+`regexp: 'xsd' | 'iregexp'` (D242–D243), matched against the whole string. It compiles
 to a Glushkov automaton over code-point range classes, at most 256 positions
 (hard maximum 512), simulated as a bitset: per code point, the next state is
 the OR of the follow masks of active positions, ANDed with the positions
@@ -389,8 +390,16 @@ D110–D111); without it these remain schema errors naming the module. Kin
 resolves categories into the existing classes, including class unions and
 complements; Cs is empty because text has no surrogates. Table ingestion,
 lookup and class probes consume compile budget. Validation and stored
-Programs need no table module. `\\d \\w \\s` and `\\x..` are refused as non-I-Regexp
-(the CDDL string literal can carry `\\u` escapes instead).
+Programs need no table module. XSD class subtraction is range-set difference
+(after base negation), with budget charged per range comparison/copy and
+nesting capped. XML 1.0 fifth edition `\i`/`\c` ranges and `\s` (TAB/LF/CR/
+SPACE) are static compiler data; complements need no tables. `\d` is Nd;
+`\w` is the complement of P/Z/C, both requiring optional category tables.
+I-Regexp still refuses these shorthands/subtraction. Block escapes explicitly
+refuse unavailable pinned block data (Node's ICU API has no Block property).
+Neither mode accepts host extensions or `\x..` (use CDDL Unicode escapes).
+No VM/Program fields, runtime charges or scratch change. See the
+[coverage table](cddl-support.md#regexp-cookbook).
 
 ### 4.8 Semantic notes
 
@@ -552,7 +561,7 @@ every loop whose trip count depends on input or schema charges per trip:
 | map pair | 1 per candidate entry tested + 1 per live alternative group updated |
 | array element | 1 per follow edge traversed + 1 per active position |
 | AND / NOT / EMBED dependency | 1 per dependency |
-| profile-only continuation (§4.5) | 1 per item + 1 per 64 content bytes |
+| profile-only continuation (§4.5) | 1 per item + its content scans (above) |
 | extension control asked (D190–D193) | 1 + 16 per call, + the predicate's units: a host predicate's declared cost (default 1 per item byte), charged before it runs; a generic control's metered work (heads, hashing, comparisons, probes) |
 
 Budget arithmetic saturates. The exact, normative per-event schedule (so

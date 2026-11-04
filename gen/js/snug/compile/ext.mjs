@@ -3,7 +3,7 @@
 
 import { ERR_CONTROL_REGISTRY, H_EXT_FLAGS, T_EXT, T_EXTB, T_EXTUSE, T_SRC, charge, fail, hs, vget, vlen, vpush1, vtrunc } from './arena.mjs';
 
-export const EXT_OPT_AT = 19;
+export const EXT_OPT_AT = 20;
 
 export const EXT_MAX_CONTROLS = 256;
 

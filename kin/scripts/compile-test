@@ -14,3 +14,5 @@ if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin co
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi
 node kin/scripts/compile-test.mjs "$crate/target/debug/compile-test" "$@"
+
+node kin/scripts/regexp-test.mjs "$crate/target/debug/compile-test"

@@ -87,6 +87,8 @@ export const ERR_NEED_UNICODE = 54;
 
 export const ERR_CONTROL_REGISTRY = 55;
 
+export const ERR_REGEXP_BLOCK = 56;
+
 export const H_TOP = 0;
 
 export const H_ERR = 1;
@@ -198,6 +200,8 @@ export const H_G1 = 53;
 export const H_G2 = 54;
 
 export const H_G3 = 55;
+
+export const H_REGEXP = 448;
 
 export const H_EXT_FLAGS = 62;
 

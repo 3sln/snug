@@ -259,39 +259,12 @@ pub(crate) fn range_push(h: &mut [i32], lo: i32, hi: i32) -> i32 {
 pub(crate) fn property_escape(h: &[i32]) -> bool {
     return (pc(h, at(h)) == 92) && ((pc(h, at(h) + 1) == 112) || (pc(h, at(h) + 1) == 80));
 }
-pub(crate) fn parse_property(h: &mut [i32]) -> bool {
-    // Append a category or its complement to T_STK8; one regexp position.
-    // Each binary-search probe and each copied range is charged.
+pub(crate) fn category_ranges(h: &mut [i32], id: i32, negate: bool) -> bool {
+    // Append a category or its complement; charge searches and copied ranges.
     if vlen(h, T_UNICODE) == 0 {
         fail(h, ERR_NEED_UNICODE, -1);
         return false;
     }
-    let negate: bool = pc(h, at(h) + 1) == 80;
-    mv(h, 2);
-    if pc(h, at(h)) != 123 {
-        fail(h, ERR_REGEXP, -1);
-        return false;
-    }
-    mv(h, 1);
-    let mut id: i32 = pc(h, at(h)) * 256;
-    if !category_valid(id) {
-        fail(h, ERR_REGEXP, -1);
-        return false;
-    }
-    mv(h, 1);
-    if pc(h, at(h)) != 125 {
-        if (pc(h, at(h)) < 97) || (pc(h, at(h)) > 122) {
-            fail(h, ERR_REGEXP, -1);
-            return false;
-        }
-        id += pc(h, at(h));
-        mv(h, 1);
-    }
-    if (pc(h, at(h)) != 125) || (!category_valid(id)) {
-        fail(h, ERR_REGEXP, -1);
-        return false;
-    }
-    mv(h, 1);
     let n: i32 = vlen(h, T_UNICODE) / 3;
     let mut lo: i32 = 0;
     let mut hi: i32 = vlen(h, T_UNICODE) / 3;
@@ -330,6 +303,183 @@ pub(crate) fn parse_property(h: &mut [i32]) -> bool {
         range_push(h, next, CP_MAX);
     }
     return !erred(h);
+}
+pub(crate) fn parse_property(h: &mut [i32]) -> bool {
+    // General_Category in both dialects; blocks need pinned block data.
+    if (hg(h, H_REGEXP) == 0) && ((pc(h, at(h) + 2) == 123) && ((pc(h, at(h) + 3) == 73) && (pc(h, at(h) + 4) == 115))) {
+        fail(h, ERR_REGEXP_BLOCK, -1);
+        return false;
+    }
+    if vlen(h, T_UNICODE) == 0 {
+        fail(h, ERR_NEED_UNICODE, -1);
+        return false;
+    }
+    let negate: bool = pc(h, at(h) + 1) == 80;
+    mv(h, 2);
+    if pc(h, at(h)) != 123 {
+        fail(h, ERR_REGEXP, -1);
+        return false;
+    }
+    mv(h, 1);
+    let mut id: i32 = pc(h, at(h)) * 256;
+    if !category_valid(id) {
+        fail(h, ERR_REGEXP, -1);
+        return false;
+    }
+    mv(h, 1);
+    if pc(h, at(h)) != 125 {
+        if (pc(h, at(h)) < 97) || (pc(h, at(h)) > 122) {
+            fail(h, ERR_REGEXP, -1);
+            return false;
+        }
+        id += pc(h, at(h));
+        mv(h, 1);
+    }
+    if (pc(h, at(h)) != 125) || (!category_valid(id)) {
+        fail(h, ERR_REGEXP, -1);
+        return false;
+    }
+    mv(h, 1);
+    return category_ranges(h, id, negate);
+}
+pub(crate) fn append_class(h: &mut [i32], cls: i32, negate: bool) -> bool {
+    let n: i32 = vget(h, T_RXA, cls);
+    let mut next: i32 = 0;
+    for i in 0..n {
+        if !charge(h, 1) {
+            return false;
+        }
+        let lo: i32 = vget(h, T_RXA, cls + (1 + (2 * i)));
+        let hi: i32 = vget(h, T_RXA, cls + (2 + (2 * i)));
+        if negate {
+            if lo > next {
+                range_push(h, next, lo - 1);
+            }
+        } else {
+            range_push(h, lo, hi);
+        }
+        next = hi + 1;
+    }
+    if negate && (next <= CP_MAX) {
+        range_push(h, next, CP_MAX);
+    }
+    return !erred(h);
+}
+pub(crate) fn multi_escape(h: &[i32]) -> bool {
+    if property_escape(h) {
+        return true;
+    }
+    if (hg(h, H_REGEXP) != 0) || (pc(h, at(h)) != 92) {
+        return false;
+    }
+    let c: i32 = pc(h, at(h) + 1) | 32;
+    return ((c == 115) || (c == 105)) || (((c == 99) || (c == 100)) || (c == 119));
+}
+pub(crate) fn parse_multi(h: &mut [i32]) -> bool {
+    if property_escape(h) {
+        return parse_property(h);
+    }
+    let esc: i32 = pc(h, at(h) + 1);
+    let c: i32 = esc | 32;
+    let from: i32 = vlen(h, T_STK8);
+    mv(h, 2);
+    if c == 100 {
+        return category_ranges(h, 20068, esc != c);
+    }
+    if c == 119 {
+        if !category_ranges(h, 20480, false) {
+            return false;
+        }
+        if !category_ranges(h, 23040, false) {
+            return false;
+        }
+        if !category_ranges(h, 17152, false) {
+            return false;
+        }
+    }
+    if c == 115 {
+        range_push(h, 9, 10);
+        range_push(h, 13, 13);
+        range_push(h, 32, 32);
+    }
+    if (c == 105) || (c == 99) {
+        // XML 1.0 fifth edition [4] NameStartChar; no Unicode module.
+        range_push(h, 58, 58);
+        range_push(h, 65, 90);
+        range_push(h, 95, 95);
+        range_push(h, 97, 122);
+        range_push(h, 192, 214);
+        range_push(h, 216, 246);
+        range_push(h, 248, 767);
+        range_push(h, 880, 893);
+        range_push(h, 895, 8191);
+        range_push(h, 8204, 8205);
+        range_push(h, 8304, 8591);
+        range_push(h, 11264, 12271);
+        range_push(h, 12289, 55295);
+        range_push(h, 63744, 64975);
+        range_push(h, 65008, 65533);
+        range_push(h, 65536, 983039);
+        if c == 99 {
+            // [4a] NameChar adds hyphen, dot, digits, middle dot and marks.
+            range_push(h, 45, 46);
+            range_push(h, 48, 57);
+            range_push(h, 183, 183);
+            range_push(h, 768, 879);
+            range_push(h, 8255, 8256);
+        }
+    }
+    let cls: i32 = class_commit(h, from, 0);
+    if cls < 0 {
+        return false;
+    }
+    // w is the complement of P/Z/C; uppercase W is P/Z/C.
+    let mut complement: bool = esc != c;
+    if c == 119 {
+        complement = esc == c;
+    }
+    return append_class(h, cls, complement);
+}
+pub(crate) fn class_difference(h: &mut [i32], base: i32, sub: i32) -> i32 {
+    // Sorted range-set difference in linear work; no scan over code points.
+    let from: i32 = vlen(h, T_STK8);
+    let n: i32 = vget(h, T_RXA, base);
+    let m: i32 = vget(h, T_RXA, sub);
+    let mut j: i32 = 0;
+    for i in 0..n {
+        if !charge(h, 1) {
+            return -1;
+        }
+        let mut lo: i32 = vget(h, T_RXA, base + (1 + (2 * i)));
+        let hi: i32 = vget(h, T_RXA, base + (2 + (2 * i)));
+        while j < m {
+            if !charge(h, 1) {
+                return -1;
+            }
+            let a: i32 = vget(h, T_RXA, sub + (1 + (2 * j)));
+            let b: i32 = vget(h, T_RXA, sub + (2 + (2 * j)));
+            if a > hi {
+                break;
+            }
+            if b >= lo {
+                if a > lo {
+                    range_push(h, lo, a - 1);
+                }
+                lo = b + 1;
+            }
+            if b >= hi {
+                break;
+            }
+            j += 1;
+        }
+        if lo <= hi {
+            range_push(h, lo, hi);
+        }
+        if erred(h) {
+            return -1;
+        }
+    }
+    return class_commit(h, from, 0);
 }
 pub(crate) fn parse_class_char(h: &mut [i32]) -> i32 {
     // A CCchar at the cursor (a plain char or a SingleCharEsc): its code
@@ -403,6 +553,92 @@ pub(crate) fn parse_bracket(h: &mut [i32]) -> i32 {
     mv(h, 1);
     return class_commit(h, from, negate);
 }
+pub(crate) fn parse_xsd_bracket(h: &mut [i32]) -> i32 {
+    let d: i32 = hg(h, H_DEPTH) + 1;
+    hs(h, H_DEPTH, d);
+    if d > hg(h, H_DEPTH_MAX) {
+        return fail(h, ERR_LIM_NESTING, -1);
+    }
+    mv(h, 1);
+    let from: i32 = vlen(h, T_STK8);
+    let mut negate: i32 = 0;
+    let mut first: bool = true;
+    if pc(h, at(h)) == 94 {
+        negate = 1;
+        mv(h, 1);
+    }
+    loop {
+        if !charge(h, 1) {
+            return -1;
+        }
+        let c: i32 = pc(h, at(h));
+        if c < 0 {
+            return fail(h, ERR_REGEXP, -1);
+        }
+        if (c == 93) && (!first) {
+            break;
+        }
+        if (!first) && ((c == 45) && (pc(h, at(h) + 1) == 91)) {
+            let base: i32 = class_commit(h, from, negate);
+            if base < 0 {
+                return -1;
+            }
+            mv(h, 1);
+            let sub: i32 = parse_xsd_bracket(h);
+            if sub < 0 {
+                return -1;
+            }
+            if pc(h, at(h)) != 93 {
+                return fail(h, ERR_REGEXP, -1);
+            }
+            mv(h, 1);
+            let depth: i32 = hg(h, H_DEPTH);
+            hs(h, H_DEPTH, depth - 1);
+            return class_difference(h, base, sub);
+        }
+        if c == 45 {
+            if first || (pc(h, at(h) + 1) == 93) {
+                range_push(h, 45, 45);
+                mv(h, 1);
+            } else {
+                return fail(h, ERR_REGEXP, -1);
+            }
+        } else if multi_escape(h) {
+            if !parse_multi(h) {
+                return -1;
+            }
+        } else {
+            let lo: i32 = parse_class_char(h);
+            if lo < 0 {
+                return -1;
+            }
+            if (pc(h, at(h)) == 45) && ((pc(h, at(h) + 1) != 93) && (pc(h, at(h) + 1) != 91)) {
+                mv(h, 1);
+                let hi: i32 = parse_class_char(h);
+                if hi < 0 {
+                    return -1;
+                }
+                if hi < lo {
+                    return fail(h, ERR_REGEXP, -1);
+                }
+                range_push(h, lo, hi);
+            } else {
+                range_push(h, lo, lo);
+            }
+        }
+        first = false;
+    }
+    mv(h, 1);
+    let depth2: i32 = hg(h, H_DEPTH);
+    hs(h, H_DEPTH, depth2 - 1);
+    return class_commit(h, from, negate);
+}
+pub(crate) fn parse_class(h: &mut [i32]) -> i32 {
+    if hg(h, H_REGEXP) == 0 {
+        return parse_xsd_bracket(h);
+    }
+    return parse_bracket(h);
+}
 pub(crate) fn make_class1(h: &mut [i32], lo: i32, hi: i32) -> i32 {
     let from: i32 = vlen(h, T_STK8);
     range_push(h, lo, hi);
@@ -446,7 +682,7 @@ pub(crate) fn parse_atom(h: &mut [i32]) -> i32 {
         return inner;
     }
     if c == 91 {
-        let cls: i32 = parse_bracket(h);
+        let cls: i32 = parse_class(h);
         if cls < 0 {
             return -1;
         }
@@ -460,9 +696,9 @@ pub(crate) fn parse_atom(h: &mut [i32]) -> i32 {
         }
         return g_node(h, G_POS, dot, 0, 0);
     }
-    if property_escape(h) {
+    if multi_escape(h) {
         let from: i32 = vlen(h, T_STK8);
-        if !parse_property(h) {
+        if !parse_multi(h) {
             return -1;
         }
         let prop_class: i32 = class_commit(h, from, 0);
@@ -507,6 +743,40 @@ pub(crate) fn quant_num(h: &mut [i32]) -> i32 {
     }
     return v;
 }
+pub(crate) fn quant_ordered(h: &mut [i32], a: i32, ae: i32, b: i32, be: i32) -> bool {
+    // Compare arbitrary decimal quantifiers before saturated expansion counts.
+    // XSD only: large bounds on epsilon must still have correct ordering.
+    let mut left: i32 = a;
+    let mut right: i32 = b;
+    while (left < ae) && (pc(h, left) == 48) {
+        if !charge(h, 1) {
+            return false;
+        }
+        left += 1;
+    }
+    while (right < be) && (pc(h, right) == 48) {
+        if !charge(h, 1) {
+            return false;
+        }
+        right += 1;
+    }
+    let ln: i32 = ae - left;
+    let rn: i32 = be - right;
+    if ln != rn {
+        return ln < rn;
+    }
+    for i in 0..ln {
+        if !charge(h, 1) {
+            return false;
+        }
+        let lc: i32 = pc(h, left + i);
+        let rc: i32 = pc(h, right + i);
+        if lc != rc {
+            return lc < rc;
+        }
+    }
+    return true;
+}
 pub(crate) fn parse_piece(h: &mut [i32]) -> i32 {
     let a: i32 = parse_atom(h);
     if a < 0 {
@@ -527,14 +797,22 @@ pub(crate) fn parse_piece(h: &mut [i32]) -> i32 {
     }
     if q == 123 {
         mv(h, 1);
+        let ls: i32 = at(h);
         let lo: i32 = quant_num(h);
+        let le: i32 = at(h);
         let mut hi: i32 = lo;
         if lo < 0 {
             return fail(h, ERR_REGEXP, -1);
         }
         if pc(h, at(h)) == 44 {
             mv(h, 1);
+            let us: i32 = at(h);
             hi = quant_num(h);
+            if (hg(h, H_REGEXP) == 0) && (hi >= 0) {
+                if !quant_ordered(h, ls, le, us, at(h)) {
+                    return fail(h, ERR_REGEXP, -1);
+                }
+            }
             if hi < 0 {
                 hi = INF;
             }
@@ -543,7 +821,7 @@ pub(crate) fn parse_piece(h: &mut [i32]) -> i32 {
             return fail(h, ERR_REGEXP, -1);
         }
         mv(h, 1);
-        if hi < lo {
+        if (hg(h, H_REGEXP) != 0) && (hi < lo) {
             return fail(h, ERR_REGEXP, -1);
         }
         return g_node(h, G_REP, a, lo, hi);
@@ -620,11 +898,11 @@ pub fn rx_compile(h: &mut [i32], bid: i32, pos: i32) -> i32 {
         // A pattern error is reported at the control's position, not inside
         // the pattern; any other failure (the arena, the budget, nesting) is
         // kept as it is, so the host still retries an exhausted arena.
-        if (hg(h, H_ERR) == 0) || ((hg(h, H_ERR) == ERR_REGEXP) || (hg(h, H_ERR) == ERR_NEED_UNICODE)) {
+        if (hg(h, H_ERR) == 0) || ((hg(h, H_ERR) == ERR_REGEXP) || ((hg(h, H_ERR) == ERR_NEED_UNICODE) || (hg(h, H_ERR) == ERR_REGEXP_BLOCK))) {
             let code: i32 = hg(h, H_ERR);
             hs(h, H_ERR, 0);
-            if code == ERR_NEED_UNICODE {
-                return fail(h, ERR_NEED_UNICODE, pos);
+            if (code == ERR_NEED_UNICODE) || (code == ERR_REGEXP_BLOCK) {
+                return fail(h, code, pos);
             }
             return fail(h, ERR_REGEXP, pos);
         }

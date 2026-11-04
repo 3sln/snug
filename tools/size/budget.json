@@ -38,10 +38,11 @@
         "brotli": 1178
       },
       "full": {
-        "min": 222502,
-        "gzip": 75536,
-        "brotli": 64181
-      }
+        "min": 227285,
+        "gzip": 77222,
+        "brotli": 65648
+      },
+      "justification": "P8.3 D242-D243: compile-time XSD parser, XML-name ranges, metered subtraction and exact large quantifier ordering. Ceil(final full closure * 1.02); static and runtime caps unchanged. Evidence: bench/README.md#xsd-regexp-compiler-p83; .cache/p83-size-final.json."
     },
     "snug/view": {
       "static": {

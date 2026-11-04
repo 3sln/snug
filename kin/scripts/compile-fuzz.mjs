@@ -39,7 +39,7 @@ const PRE = ['int', 'uint', 'nint', 'tstr', 'bstr', 'text', 'bytes', 'bool', 'nu
   'float32', 'float64', 'number', 'integer', 'unsigned', 'biguint', 'bignint', 'decfrac', 'tdate', 'uri', 'true', 'false'];
 const CTLS = ['.size', '.bits', '.lt', '.le', '.gt', '.ge', '.eq', '.ne', '.and', '.within', '.regexp', '.cbor', '.cborseq',
   '.default', '.feature', '.cat', '.pcre', '.abnf', '.bogus'];
-const REGEX = ['[a-z]+', '(ab|c){1,3}', '[^x]?', 'a.b', '[0-9]{2,4}-x', '\\\\.', '(a|)', 'x{0}', '[a-z][a-z0-9-]{0,20}', '\\\\w', '[😀-🙏]'];
+const REGEX = ['[a-z-[aeiou]]+', '[\\i-[:_]]\\c*', '\\s\\S', '[^a-z-[0-9]]', '[a-z]+', '(ab|c){1,3}', '[^x]?', 'a.b', '[0-9]{2,4}-x', '\\\\.', '(a|)', 'x{0}', '[a-z][a-z0-9-]{0,20}', '\\\\w', '[😀-🙏]'];
 function lit() {
   switch (ri(9)) {
     case 0: return String(ri(300));
@@ -223,7 +223,7 @@ for (let i = 0; i < N; i++) {
     limits[COMPILE_OPTIONS[k]] = pick([0, 1, 2, 3, 8, 64, 1000]);
   }
   if (chance(0.1)) limits.compileBudget = pick([100, 1000, 10000, 100000]);
-  cases.push({ text, limits, profile: pick(['full', 'full', 'full', 'bindle', 'bus']) });
+  cases.push({ text, limits, profile: pick(['full', 'full', 'full', 'bindle', 'bus']), regexp: pick(['xsd', 'iregexp']) });
 }
 const PROF = { full: 0, bindle: 1, bus: 2 };
 const hex = b => Buffer.from(b).toString('hex');
@@ -233,19 +233,21 @@ const failed = [];
 const fail = m => { fails++; if (fails <= 30) console.log(`  FAIL ${m}`); };
 const codes = {};
 const js = cases.map((c, i) => {
-  const t0 = performance.now();
+  // The guard uses process CPU time, not wall time: a busy machine must not fail a correct compile (P8.3/P7.13 notes).
+  const t0 = performance.now(), c0 = process.cpuUsage();
+  const cpuMs = () => { const d = process.cpuUsage(c0); return (d.user + d.system) / 1000; };
   try {
-    const { program, pool } = compile(c.text, { profile: c.profile, limits: c.limits });
-    return { ok: true, program, pool, ms: performance.now() - t0 };
+    const { program, pool } = compile(c.text, { profile: c.profile, limits: c.limits, regexp: c.regexp });
+    return { ok: true, program, pool, ms: cpuMs(), wall: performance.now() - t0 };
   } catch (e) {
-    const ms = performance.now() - t0;
+    const ms = cpuMs();
     if (e instanceof SchemaError) return { ok: false, code: e.code, line: e.line, column: e.column, rule: e.rule ?? '-', ms };
     return { crash: String(e && e.stack || e), ms };
   }
 });
 const rin = cases.map(c => {
   const lim = COMPILE_OPTIONS.map(k => c.limits[k] ?? -1);
-  return `${PROF[c.profile]} ${hex(typeof c.text === 'string' ? Buffer.from(c.text, 'utf8') : c.text)} ${lim.join(' ')}`;
+  return `${c.regexp === 'iregexp' ? 'I ' : ''}${PROF[c.profile]} ${hex(typeof c.text === 'string' ? Buffer.from(c.text, 'utf8') : c.text)} ${lim.join(' ')}`;
 }).join('\n') + '\n';
 const rr = spawnSync(rustBin, [], { input: rin, maxBuffer: 1 << 30 });
 const rust = rr.stdout.toString().trimEnd().split('\n');
@@ -254,7 +256,7 @@ for (let i = 0; i < cases.length; i++) {
   const c = cases[i], j = js[i], r = rust[i];
   const show = typeof c.text === 'string' ? JSON.stringify(c.text.slice(0, 70)) : `bytes ${hex(c.text.slice(0, 35))}`;
   if (j.ms > slowest) { slowest = j.ms; slowText = show; }
-  if (j.ms > 2000) fail(`${show}: ${j.ms.toFixed(0)} ms on JS`);
+  if (j.ms > 2000) fail(`${show}: ${j.ms.toFixed(0)} ms CPU on JS`);
   if (j.crash) { fail(`${show}: JS threw ${j.crash.split('\n')[0]}`); continue; }
   if (r === 'PANIC') { failed.push(rin.split('\n')[i]); fail(`${show}: Rust panicked`); continue; }
   const f = r.split(' ');
@@ -281,7 +283,7 @@ for (let i = 0; i < cases.length; i++) {
   const dec = new TextDecoder();
   const run = (c, start) => {
     const bytes = typeof c.text === 'string' ? new TextEncoder().encode(c.text) : c.text;
-    const opt = new Int32Array(M.OPT_WORDS).fill(-1);
+    const opt = new Int32Array(M.OPT_WORDS).fill(-1); opt[M.OPT_REGEXP] = c.regexp === 'iregexp' ? 1 : 0;
     opt[0] = PROF[c.profile];
     COMPILE_OPTIONS.forEach((k, i) => { if (c.limits[k] !== undefined) opt[i + 1] = c.limits[k]; });
     let fl = new Int32Array(0), words = start;
@@ -306,7 +308,7 @@ for (let i = 0; i < cases.length; i++) {
   }
   console.log(`  ${fails ? 'FAIL' : 'ok  '} ${checked} texts compiled from two starting arena sizes: same outcomes`);
 }
-console.log(`  ${fails ? 'FAIL' : 'ok  '} ${N} texts (seed ${SEED}): ${okCount} compiled, ${errCount} refused; slowest ${slowest.toFixed(1)} ms ${slowText}`);
+console.log(`  ${fails ? 'FAIL' : 'ok  '} ${N} texts (seed ${SEED}): ${okCount} compiled, ${errCount} refused; slowest ${slowest.toFixed(1)} ms CPU ${slowText}`);
 console.log(`       refusals: ${Object.entries(codes).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 if (failed.length) writeFileSync(new URL('.cache/compile-fuzz-failures.txt', root), failed.join('\n') + '\n');
 if (fails) { console.log(`  FAIL ${fails} failure(s)${failed.length ? ' (Rust inputs in .cache/compile-fuzz-failures.txt)' : ''}`); process.exit(1); }

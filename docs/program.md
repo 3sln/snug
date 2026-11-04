@@ -546,7 +546,7 @@ Unicode scalar-range triples from the optional host module. Categories,
 complements and unions produce this same atom representation; the Program
 contains neither the general Unicode tables nor a Unicode dependency.
 
-RFC 9485 I-Regexp, anchored, as a Glushkov automaton over code-point classes
+XSD Appendix F or RFC 9485 I-Regexp (compile option, D242), anchored, as a Glushkov automaton over code-point classes
 (arch §4.7):
 
 ```
@@ -1128,7 +1128,7 @@ an empty array, the eighth `[<flags: uint>, [[<name: tstr>, <max item bytes:
 uint>], …]]` over the WHOLE registry in name order (flags bit 0: admitted
 under `bus`). A cached Program is therefore never reused under another
 registry, nor under the same names with another maximum. Hosts pass the
-registry after the compile options (`opt` words 19.., snug.compile.ext).
+registry after the compile options (`opt` words 20.., snug.compile.ext; D242 adds the dialect word).
 
 **Loading a 1.1 Program** (`fromSerialized(bytes, { controls })`,
 `Schema::from_serialized_with`): framing and `vm-verify` as for 1.0, then each
@@ -1137,6 +1137,15 @@ otherwise `ProgramError('missing_control')` / `Error::MissingControls`, which
 names them. The predicates are not part of the Program: the registry at load
 must give the same verdicts as at compile time (pure predicates, a trusted
 store, as for every cached Program).
+
+**Regexp dialect (D242).** Explicit `regexp: 'iregexp'` retains the preimages
+above exactly. For `regexp: 'xsd'` (the default), the preimage has nine
+elements: the seventh is the Unicode word array or `[]`, the eighth is the
+registry element above or `[]`, and the ninth is uint `0` (XSD). This binds
+the effective compile option even for schemas without regexps. This changes
+only the opaque SOURCE_KEY, with no Program layout/version change: both
+dialects lower into §8.2's same range automata. The internal compile options
+now have 20 words (dialect at 19, 0 XSD / 1 I-Regexp); registry data follows.
 
 ## 14. Charging schedule
 

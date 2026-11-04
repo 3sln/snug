@@ -3,7 +3,7 @@
 //! integer ABI, no imports. host/rust/src/compile.rs (the Rust host's loop:
 //! arena, D020 float port, SOURCE_KEY digest) is reused unchanged; the
 //! extension-control registry (D141) arrives as kin's registry words after the
-//! 19 option words, and the optional Unicode tables (D110) as words too.
+//! 20 option words, and the optional Unicode tables (D110) as words too.
 //! Control arguments are checked by the SDK in JS afterwards (D142), as the
 //! native host does, so no import is needed here.
 use crate::compile::{compile_bytes_with_options, snug_version, CompileOptions, Compiled, Registry, SchemaError};
@@ -11,7 +11,7 @@ use std::cell::UnsafeCell;
 
 struct State {
     text: Vec<u8>,
-    /// [profile, 18 limits in COMPILE_OPTIONS order (-1 = default), registry words...]
+    /// [profile, 18 limits in COMPILE_OPTIONS order (-1 = default), regexp dialect, registry words...]
     opt: Vec<i32>,
     unicode: Vec<i32>,
     result: Option<Result<Compiled, SchemaError>>,
@@ -25,7 +25,7 @@ static STATE: Cell = Cell(UnsafeCell::new(None));
 fn st() -> &'static mut State {
     // SAFETY: single-threaded; each export holds it only for its own duration.
     let s = unsafe { &mut *STATE.0.get() };
-    s.get_or_insert_with(|| State { text: Vec::new(), opt: vec![-1; 19], unicode: Vec::new(), result: None, info: [0; 8] })
+    s.get_or_insert_with(|| State { text: Vec::new(), opt: vec![-1; 20], unicode: Vec::new(), result: None, info: [0; 8] })
 }
 
 /// The registry words as compile.rs's Registry (arguments are the SDK's to check).
@@ -42,13 +42,13 @@ pub extern "C" fn cc_text(n: usize) -> *mut u8 {
     if s.text.len() < n { s.text.resize(n, 0); }
     s.text.as_mut_ptr()
 }
-/// The option words, n >= 19 of them: [profile, then the 18 limits in
+/// The option words, n >= 20 of them: [profile, then the 18 limits in
 /// COMPILE_OPTIONS order, -1 = default, then the registry words (D141)].
 #[no_mangle]
 pub extern "C" fn cc_opt(n: usize) -> *mut i32 {
     let s = st();
     s.opt.clear();
-    s.opt.resize(n.max(19), -1);
+    s.opt.resize(n.max(20), -1);
     s.opt.as_mut_ptr()
 }
 /// The Unicode table words (D110), n of them (0: none).
@@ -68,12 +68,13 @@ pub extern "C" fn cc_info() -> *mut i32 {
 #[no_mangle]
 pub extern "C" fn cc_compile(n: usize) -> i32 {
     let s = st();
-    let registry = Words(&s.opt[19..]);
+    let registry = Words(&s.opt[20..]);
     let options = CompileOptions {
         profile: s.opt[0],
+        regexp: if s.opt[19] == 1 { crate::compile::Regexp::IRegexp } else { crate::compile::Regexp::Xsd },
         limits: &s.opt[1..19],
         unicode: if s.unicode.is_empty() { None } else { Some(&s.unicode) },
-        controls: if s.opt.len() > 19 { Some(&registry) } else { None },
+        controls: if s.opt.len() > 20 { Some(&registry) } else { None },
     };
     let r = compile_bytes_with_options(&s.text[..n], &options);
     let code = if r.is_ok() { 0 } else { 1 };
@@ -112,7 +113,7 @@ pub extern "C" fn cc_error() -> *const u8 {
             Some(d) => { buf.extend_from_slice(d.as_bytes()); s.info[4] = d.len() as i32; }
             None => s.info[4] = -1,
         }
-        s.info[5] = e.message.contains("unicode_tables") as i32;
+        s.info[5] = if e.message.contains("block data") { 2 } else { e.message.contains("unicode_tables") as i32 };
     }
     s.text.clear();
     s.text.extend_from_slice(&buf);

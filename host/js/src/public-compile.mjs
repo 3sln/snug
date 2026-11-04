@@ -1,5 +1,5 @@
 // Importing snug/compile does not load the compiler; the first call does.
-import { validateOptions } from './options.mjs';
+import { validateCompileOptions } from './options.mjs';
 
 /** A stable public class without eagerly importing the generated compiler. */
 export class SchemaError extends Error {
@@ -9,7 +9,7 @@ export class SchemaError extends Error {
   }
 }
 export async function compile(text, options = {}) {
-  validateOptions(options, 'compile');
+  validateCompileOptions(options);
   const compiler = await import('./compile-runtime.mjs');
   const { Program, Schema } = compiler;
   let compiled;

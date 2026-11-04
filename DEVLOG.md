@@ -4531,6 +4531,15 @@ budget.
 
 ## Findings
 
+- 2026-11-04 (P8.3): quantifier counts must be compared as decimal strings
+  before saturating the expansion count. The pre-P8.3 I-Regexp parser accepts
+  `(){100000000001,100000000000}` (invalid decreasing bounds), and refuses
+  the valid `(){999999999999,1000000000000}`, because it loses that ordering
+  during saturation. XSD mode now handles both correctly, with charged digit
+  comparisons and zero-position expansion still constant work. Explicit
+  I-Regexp intentionally preserves the old outcomes/compile units under this
+  task's compatibility requirement; a separate fix would change that contract.
+
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
   import for a function named only inside the arguments of a call to a
   `declarefn`-declared function — `(item b o (std-inner b p) …)` in scan.kin,
@@ -6047,13 +6056,73 @@ authorised), the existing gate set, and conformance-corpus vectors.
   (D254); the size gate grew ~2 KB min for the URI recogniser (caps raised
   with justification); `.chars`/hash cross-host fit still unresolved (D240);
   a quiet-machine timing confirmation of the 2.25 M default is still owed.
-- [ ] **P8.3 — Regexp: XSD and I-Regexp options** (audit rank 8): XSD regexps
-  (RFC 8610 §3.8.3 → XSD Appendix F) compiled at compile time into the same
-  bounded automata (class subtraction, `\i \c \d \w \s` and their
-  complements, block escapes `\p{IsBlock}`, categories), with Unicode/XML-name
-  and block tables in the optional `snug/unicode` module; I-Regexp kept as an
-  option. Default chosen in D242. Stop and report if XSD cannot be bounded and
-  portable.
+- [~] **P8.3 — Regexp: XSD and I-Regexp options** (audit rank 8):
+  **Implemented 2026-11-04; timing gate pending; no commits.** D242/D243 are
+  before Findings, owner sign-offs unticked. Default `regexp: 'xsd'` follows
+  RFC 8610's XSD 1.0 Appendix F reference; `iregexp` retains previous
+  admissions/refusals, automata, source keys and compile units. Kin lowers
+  nested class subtraction (including negated operands), `\i/\I`, `\c/\C`,
+  `\s/\S`, `\d/\D`, `\w/\W`, categories and bounded quantifiers into the
+  existing Glushkov automata. XML 1.0 fifth edition name ranges are static
+  compiler data; digits/words/categories use optional `snug/unicode`.
+  **Allowed block-data fallback:** `\p{Is…}`/`\P{Is…}` explicitly refuse
+  unavailable pinned block data even with category tables. The pinned Node
+  ICU API exposes no Block property; the generator checks/reports this.
+  No Program format, VM, scratch or runtime-charge change. XSD source keys
+  bind the dialect; the embedded JS `any` Program's key was regenerated.
+  JS validation/types, Rust raw/public options, wasm compiler/SDK option
+  transport, guide, support/spec/architecture/Program docs and generated
+  compiler output are updated. Compile admission is outside the runtime
+  option-shape graph. Two integer annotations in concurrent float-control
+  bindings were needed for a warnings-denied Rust build; no semantic change.
+
+  **Checks actually run:** `bb emit` passed; `bb compile-test` passed
+  (301 existing cross-host outcomes, 270 verified Programs; old corpus cases
+  and assertions retained under explicit I-Regexp). New regexp gate:
+  **158 JS == Rust == wasm compiler outcomes** (62 complete Programs,
+  96 schema errors), **229 equivalent Node v reference verdicts**, independent
+  dialect/Unicode source-key hashes, **6,696 complete JS == Rust VM outputs**
+  including both schedules, fast/generic and partial budgets. Hand-derived
+  Appendix F/XML vectors are in `corpus/conformance/xsd-regexp.json`; Ruby
+  cddl's host-regexp anchoring/escape differences supply no expectations.
+  Direct final comparison to pre-P8.3 HEAD: **126/126 identical I-Regexp
+  Programs/errors and compile units**, with/without Unicode. `bb unicode-test`
+  passed (574 cross-host compiler outcomes, arena retries, 40 category tests);
+  `bb vm-test` passed (74,300 JS == Rust whole outputs, 72,222 JS == wasm);
+  **host/js npm test: 1,387 passed, 0 failed**, including 40 XSD tests.
+  Rust public regexp integration tests: 2/2 passed. `bb size` and
+  `git diff --check` passed. Logs: `.cache/p83-*.log`.
+
+  **Gate still red:** two full `bb compile-fuzz` runs checked 3,000 texts
+  (seed 24301, both dialects; 427 compiled / 2,573 refused) and 375 arena-size
+  comparisons without identity/verifier/panic/budget/arena differences, but
+  the unchanged **2-second wall-clock threshold** failed on non-regexp
+  shared-array chains: first run 1 case (2,820 ms); second 4 cases
+  (2,527–3,998 ms). System load at the second failure was 66.65/144.15/124.21.
+  A subsequent same-schema sequential diagnostic also exceeds that threshold
+  on the **unmodified pre-P8.3 compiler** (4,734 ms vs current 3,603 ms;
+  both accept, both 1,572,297 units; method/environment in bench/README).
+  No threshold was relaxed or case removed. A quiet-machine compile-fuzz
+  pass remains required before this item is ticked complete.
+
+  **Sizes** (esbuild min / gzip, full closure): compiler **222,828 / 75,707 B**;
+  runtime **116,402 / 41,848 B** (shared before snapshot 116,794 / 42,028).
+  Only this task's compiler-full caps rose, with 2% margin and justification
+  in budget.json; runtime caps were preserved by P8.3. Concurrent sequence
+  budget updates belong to that item. Unicode stays 19,377 / 9,287 B.
+  Environment/method/source hashes and complete entry sizes: bench/README
+  "XSD regexp compiler (P8.3)".
+
+  **Learnt:** negation precedes subtraction; XSD word excludes underscore and
+  includes symbols, while whitespace is only TAB/LF/CR/SPACE. XML names do
+  not need category tables. Compare arbitrary decimal bounds before saturating
+  expansion counts, including empty expressions; the old I-Regexp extreme
+  bound quirks are preserved and recorded under Findings. Raw U+10FFFF is
+  outside CDDL's unescaped string production, so boundary schemas must use
+  a CDDL Unicode escape. Compile-time options can be tree-shaken out of all
+  runtime entries; changes to source-key construction also require updating
+  embedded compiled constants. Wall-clock fuzz thresholds require a quiet
+  host even when semantic outcomes and charged work are unchanged.
 - [ ] **P8.4 — Valid-CBOR default** (audit ranks 5 and 9; D230): a `valid`
   wire preset as the default — indefinite lengths, non-shortest heads and
   floats, unsorted keys, NaN payloads, decimal/typed-array/ndarray/tag-55799

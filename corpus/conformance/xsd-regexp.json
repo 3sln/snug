@@ -1,0 +1,560 @@
+{
+  "reference": "XSD 1.0 Part 2 second edition Appendix F (corrected class grammar), XML 1.0 fifth edition productions [4]/[4a]; fixed hand-derived verdicts. Node v patterns are explicit translations ONLY where semantics coincide. Ruby cddl is not XSD-exact (anchors/dot/escapes) and supplies no expectations.",
+  "cases": [
+    {
+      "name": "whole-string and literal assertions",
+      "pattern": "^x$",
+      "accept": [
+        "^x$"
+      ],
+      "reject": [
+        "x",
+        "x$",
+        "^x",
+        "^x$\n"
+      ],
+      "node": "\\^x\\$"
+    },
+    {
+      "name": "dot excludes LF and CR",
+      "pattern": ".",
+      "accept": [
+        "a",
+        "😀",
+        "",
+        " ",
+        "\u0000"
+      ],
+      "reject": [
+        "",
+        "\n",
+        "\r",
+        "ab"
+      ],
+      "node": "[^\\n\\r]"
+    },
+    {
+      "name": "single character escapes",
+      "pattern": "\\n\\r\\t\\.\\-\\[\\]\\^\\\\\\|\\?\\*\\+\\(\\)\\{\\}",
+      "accept": [
+        "\n\r\t.-[]^\\|?*+(){}"
+      ],
+      "reject": [
+        "",
+        "nrt.-[]^\\|?*+(){}"
+      ]
+    },
+    {
+      "name": "group alternation optional unbounded",
+      "pattern": "(ab|c)+d?",
+      "accept": [
+        "ab",
+        "ccabd"
+      ],
+      "reject": [
+        "",
+        "ac",
+        "abdd"
+      ],
+      "node": "(ab|c)+d?"
+    },
+    {
+      "name": "empty branches and zero repetitions",
+      "pattern": "(a|){0,2}",
+      "accept": [
+        "",
+        "a",
+        "aa"
+      ],
+      "reject": [
+        "aaa",
+        "b"
+      ],
+      "node": "(a|){0,2}"
+    },
+    {
+      "name": "exact quantifier",
+      "pattern": "a{2}",
+      "accept": [
+        "aa"
+      ],
+      "reject": [
+        "",
+        "a",
+        "aaa"
+      ],
+      "node": "a{2}"
+    },
+    {
+      "name": "bounded quantifier",
+      "pattern": "a{2,4}",
+      "accept": [
+        "aa",
+        "aaa",
+        "aaaa"
+      ],
+      "reject": [
+        "",
+        "a",
+        "aaaaa"
+      ],
+      "node": "a{2,4}"
+    },
+    {
+      "name": "unbounded counted quantifier",
+      "pattern": "a{2,}",
+      "accept": [
+        "aa",
+        "aaaaaa"
+      ],
+      "reject": [
+        "",
+        "a"
+      ],
+      "node": "a{2,}"
+    },
+    {
+      "name": "class edge hyphens",
+      "pattern": "[-a-c]+",
+      "accept": [
+        "-",
+        "abc-"
+      ],
+      "reject": [
+        "",
+        "d"
+      ],
+      "node": "[\\-a-c]+"
+    },
+    {
+      "name": "class trailing hyphen",
+      "pattern": "[a-c-]+",
+      "accept": [
+        "-",
+        "abc-"
+      ],
+      "reject": [
+        "d"
+      ],
+      "node": "[a-c\\-]+"
+    },
+    {
+      "name": "class literal caret",
+      "pattern": "[a^]+",
+      "accept": [
+        "a^",
+        "^"
+      ],
+      "reject": [
+        "b"
+      ],
+      "node": "[a\\^]+"
+    },
+    {
+      "name": "negated class",
+      "pattern": "[^a-c]+",
+      "accept": [
+        "d😀",
+        "\n"
+      ],
+      "reject": [
+        "",
+        "ab"
+      ],
+      "node": "[^a-c]+"
+    },
+    {
+      "name": "class subtraction",
+      "pattern": "[a-z-[aeiou]]+",
+      "accept": [
+        "bcdf",
+        "xyz"
+      ],
+      "reject": [
+        "",
+        "ae",
+        "bca"
+      ],
+      "node": "[[a-z]--[aeiou]]+"
+    },
+    {
+      "name": "nested subtraction",
+      "pattern": "[a-z-[d-w-[m-o]]]+",
+      "accept": [
+        "abcmnoxyz"
+      ],
+      "reject": [
+        "d",
+        "l",
+        "p",
+        "w"
+      ],
+      "node": "[[a-z]--[[d-w]--[m-o]]]+"
+    },
+    {
+      "name": "negated base subtraction",
+      "pattern": "[^a-z-[0-9]]",
+      "accept": [
+        "_",
+        "😀",
+        "\n"
+      ],
+      "reject": [
+        "a",
+        "m",
+        "0",
+        "9"
+      ],
+      "node": "[[^a-z]--[0-9]]"
+    },
+    {
+      "name": "negated subtrahend",
+      "pattern": "[a-z-[^aeiou]]+",
+      "accept": [
+        "aeiou"
+      ],
+      "reject": [
+        "bc",
+        "A"
+      ],
+      "node": "[[a-z]--[^aeiou]]+"
+    },
+    {
+      "name": "empty difference",
+      "pattern": "[a-[a]]",
+      "accept": [],
+      "reject": [
+        "",
+        "a",
+        "b"
+      ],
+      "node": "[[a]--[a]]"
+    },
+    {
+      "name": "empty difference under star",
+      "pattern": "[a-[a]]*",
+      "accept": [
+        ""
+      ],
+      "reject": [
+        "a",
+        "b"
+      ],
+      "node": "[[a]--[a]]*"
+    },
+    {
+      "name": "whitespace",
+      "pattern": "\\s+",
+      "accept": [
+        "\t\n\r "
+      ],
+      "reject": [
+        "",
+        "\u000b",
+        "\f",
+        "",
+        " ",
+        " "
+      ],
+      "node": "[\\t\\n\\r ]+"
+    },
+    {
+      "name": "nonwhitespace",
+      "pattern": "\\S",
+      "accept": [
+        "x",
+        "\u000b",
+        "\f",
+        " "
+      ],
+      "reject": [
+        " ",
+        "\t",
+        "\n",
+        "\r"
+      ],
+      "node": "[^\\t\\n\\r ]"
+    },
+    {
+      "name": "XML names",
+      "pattern": "\\i\\c*",
+      "accept": [
+        "a",
+        "_x",
+        ":x",
+        "λ1",
+        "a-b.c·̀‿",
+        "𐀀",
+        "󯿿"
+      ],
+      "reject": [
+        "",
+        "1a",
+        "-a",
+        "·a",
+        "̀a",
+        ";",
+        "󰀀"
+      ]
+    },
+    {
+      "name": "NameStart complement",
+      "pattern": "\\I",
+      "accept": [
+        "1",
+        "-",
+        "·",
+        ";",
+        "󰀀"
+      ],
+      "reject": [
+        "a",
+        "_",
+        ":",
+        "λ",
+        "𐀀"
+      ]
+    },
+    {
+      "name": "NameChar complement",
+      "pattern": "\\C",
+      "accept": [
+        " ",
+        "/",
+        ";",
+        "󰀀"
+      ],
+      "reject": [
+        "a",
+        "_",
+        ":",
+        "1",
+        "-",
+        ".",
+        "·",
+        "̀",
+        "‿"
+      ]
+    },
+    {
+      "name": "name class subtraction",
+      "pattern": "[\\i-[:_]]+",
+      "accept": [
+        "Aλ𐀀"
+      ],
+      "reject": [
+        ":",
+        "_",
+        "A:",
+        "1"
+      ]
+    },
+    {
+      "name": "decimal digits",
+      "pattern": "\\d+",
+      "accept": [
+        "012",
+        "٣",
+        "９",
+        "𝟡"
+      ],
+      "reject": [
+        "",
+        "a",
+        "²",
+        "Ⅳ"
+      ],
+      "node": "\\p{Nd}+",
+      "unicode": true
+    },
+    {
+      "name": "nondigits",
+      "pattern": "\\D",
+      "accept": [
+        "a",
+        "²",
+        "Ⅳ"
+      ],
+      "reject": [
+        "1",
+        "٣",
+        "𝟡"
+      ],
+      "node": "\\P{Nd}",
+      "unicode": true
+    },
+    {
+      "name": "word excludes P Z C",
+      "pattern": "\\w+",
+      "accept": [
+        "Aλ٣😀$+̀"
+      ],
+      "reject": [
+        "",
+        "_",
+        "-",
+        " ",
+        "\t",
+        "\u0000",
+        "‍"
+      ],
+      "node": "[^\\p{P}\\p{Z}\\p{C}]+",
+      "unicode": true
+    },
+    {
+      "name": "nonword",
+      "pattern": "\\W",
+      "accept": [
+        "_",
+        "-",
+        " ",
+        "\t",
+        "\u0000",
+        "‍"
+      ],
+      "reject": [
+        "A",
+        "λ",
+        "٣",
+        "😀",
+        "$",
+        "̀"
+      ],
+      "node": "[\\p{P}\\p{Z}\\p{C}]",
+      "unicode": true
+    },
+    {
+      "name": "letter category",
+      "pattern": "\\p{L}+",
+      "accept": [
+        "aλ𐐀"
+      ],
+      "reject": [
+        "",
+        "٣",
+        "_"
+      ],
+      "node": "\\p{L}+",
+      "unicode": true
+    },
+    {
+      "name": "category complement",
+      "pattern": "\\P{Nd}",
+      "accept": [
+        "a",
+        "😀"
+      ],
+      "reject": [
+        "1",
+        "٣"
+      ],
+      "node": "\\P{Nd}",
+      "unicode": true
+    },
+    {
+      "name": "category subtraction",
+      "pattern": "[\\p{L}-[\\p{Lu}]]+",
+      "accept": [
+        "aλ"
+      ],
+      "reject": [
+        "A",
+        "Λ",
+        "٣"
+      ],
+      "node": "[\\p{L}--\\p{Lu}]+",
+      "unicode": true
+    },
+    {
+      "name": "escape union in class",
+      "pattern": "[\\s\\d]+",
+      "accept": [
+        " \t٣"
+      ],
+      "reject": [
+        "",
+        "A",
+        "_"
+      ],
+      "node": "[\\t\\n\\r \\p{Nd}]+",
+      "unicode": true
+    },
+    {
+      "name": "surrogates are empty",
+      "pattern": "\\p{Cs}",
+      "accept": [],
+      "reject": [
+        "",
+        "a",
+        "😀"
+      ],
+      "node": "\\p{Cs}",
+      "unicode": true
+    },
+    {
+      "name": "surrogate complement",
+      "pattern": "\\P{Cs}",
+      "accept": [
+        "\u0000",
+        "😀",
+        "􏿿"
+      ],
+      "reject": [
+        "",
+        "ab"
+      ],
+      "node": "\\P{Cs}",
+      "unicode": true
+    },
+    {
+      "name": "all code point endpoints",
+      "pattern": "[\u0000-􏿿]",
+      "accept": [
+        "\u0000",
+        "􏿿",
+        "😀"
+      ],
+      "reject": [
+        "",
+        "ab"
+      ],
+      "node": "[\\u{0}-\\u{10ffff}]"
+    },
+    {
+      "name": "large epsilon quantifier",
+      "pattern": "(){999999999999,1000000000000}",
+      "accept": [
+        ""
+      ],
+      "reject": [
+        "a"
+      ]
+    }
+  ],
+  "invalid": [
+    "[]",
+    "[^]",
+    "[a-z-[aeiou]x]",
+    "[a-z-[]]",
+    "[a-z-[a]-[b]]",
+    "[a-\\d]",
+    "[\\d-a]",
+    "[a-b-c]",
+    "[z-a]",
+    "[a",
+    "\\",
+    "\\x41",
+    "\\u0041",
+    "\\1",
+    "(?=a)",
+    "(?:a)",
+    "a*?",
+    "a++",
+    "a{,2}",
+    "a{3,2}",
+    "a{2",
+    "\\b",
+    "\\p{Letter}",
+    "(){100000000001,100000000000}"
+  ]
+}

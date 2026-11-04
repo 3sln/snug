@@ -3,6 +3,16 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 const root = new URL('../../', import.meta.url);
 const names = JSON.parse(readFileSync(new URL('categories.json', import.meta.url)));
+// D243: ECMAScript/Node ICU exposes General_Category but no Block property.
+// Never infer block ranges from scripts/categories. An authoritative pinned
+// block-name/range input is needed before the compiler can accept IsBlock.
+for (const flag of ['u', 'v']) {
+  let supported = false;
+  try { new RegExp('\\p{Block=Basic_Latin}', flag); supported = true; } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e;
+  }
+  if (supported) throw new Error('Block properties are now exposed; review D243 and pin block data before regenerating');
+}
 const id = s => s.charCodeAt(0) * 256 + (s.charCodeAt(1) || 0);
 const ranges = [], packed = [];
 function vint(n) { do { const b = n & 127; n >>>= 7; packed.push(b | (n ? 128 : 0)); } while (n); }
@@ -86,3 +96,4 @@ for (const [path, data] of [['host/js/src/unicode-tables.mjs', js], ['host/rust/
   } else writeFileSync(url, data);
 }
 console.log(`${names.length} categories, ${ranges.length / 3} ranges, ${packed.length} packed bytes; Node ${process.version}, Unicode ${process.versions.unicode}`);
+console.log('Block tables unavailable from this pinned Node API; XSD IsBlock escapes are explicitly refused (D243).');

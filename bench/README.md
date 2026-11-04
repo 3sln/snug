@@ -438,3 +438,60 @@ use this current snapshot +2%. Static min/gzip/brotli bytes:
 
 Current input hash: `d25ff5e3d4416131a1d69e828afc883c0608a4bb401038d1a1ef8768e4c0b23c`. Full graphs and changed
 module measurements: [report](../tools/size/report.md#current-shared-tree-after-concurrent-regeneration).
+
+## XSD regexp compiler (P8.3)
+
+2026-11-04 shared worktree, Apple M1 Pro (10 cores, 32 GiB), macOS
+14.6.1 / Darwin 23.6.0 arm64; Node v24.6.0, V8
+13.6.233.10-node.24, npm 11.5.1, ICU 77.1 / Unicode 16.0; native
+Rust/cargo 1.92.0. Offline esbuild 0.28.2, ESM/browser/ES2022, all exports
+retained, minification/tree shaking, gzip level 9 / brotli quality 11.
+`node tools/size/size.mjs --no-gate --report=.cache/p83-size-final.json`
+freezes sources in memory and measures static/full/split graphs using the
+existing P7.6 method. No latency/performance inference.
+
+| Entry | Static min | Static gzip | Full min | Full gzip | Full brotli |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| snug | 41,837 | 14,426 | 41,837 | 14,426 | 12,873 |
+| snug/schema | 92,437 | 34,026 | 92,437 | 34,026 | 29,342 |
+| snug/compile | 2,550 | 1,308 | 222,828 | 75,707 | 64,360 |
+| snug/view | 54,692 | 18,621 | 54,692 | 18,621 | 16,609 |
+| snug/writer | 38,350 | 13,219 | 38,350 | 13,219 | 11,845 |
+| snug/unicode | 19,377 | 9,287 | 19,377 | 9,287 | 8,817 |
+| snug/sources | 122,038 | 45,337 | 122,038 | 45,337 | 38,626 |
+| snug/sequence | 148,535 | 53,134 | 148,535 | 53,134 | 45,997 |
+| snug/controls | 6,196 | 2,412 | 6,196 | 2,412 | 2,160 |
+| runtime | 116,402 | 41,848 | 116,402 | 41,848 | 35,777 |
+| all-runtime | 204,733 | 73,623 | 204,733 | 73,623 | 61,821 |
+
+Full compiler: 219,238 → 222,828 min bytes; 74,472 → 75,707 gzip bytes.
+The kin XSD parser adds metered range subtraction, static XML-name ranges,
+shorthands and exact decimal ordering before bounded repetition expansion.
+Only `snug/compile.full` caps were raised to ceil(measured × 1.02):
+227,285 min / 77,222 gzip / 65,648 brotli bytes. Compiler static caps and
+all runtime caps were preserved. Compile admission moved out of the runtime
+option-shape graph; the embedded `any` Program changed only its source key.
+Runtime: 116,794 → 116,402 min bytes; 42,028 → 41,848 gzip bytes.
+Concurrent sequence/source and correctness edits were present, so these
+shared snapshots are evidence for total sizes, not isolated attribution.
+The optional Unicode module is unchanged. Block escapes explicitly refuse
+unavailable pinned data; no guessed block table was shipped.
+
+Before input hash: `0d0978da3c668779439f9b0cf2e00ec4d6be0fd5501b7dbd7f16e873581af69d`.
+Final input hash: `71a22657290dfdfab3c550e24ce1969b6d71051c103a916d77da3d1854542ab9`.
+Detailed graphs: `.cache/p83-size-before.json`, `.cache/p83-size-final.json`;
+budget gate log: `.cache/p83-size-gate.log`.
+
+P8.3 compile-fuzz timing diagnostic (same environment above; ordinary Node,
+no flags): two default 3,000-text/seed-24301 runs had only wall-clock failures
+on shared-array schemas without regexps (2-second threshold unchanged).
+The second run saw load averages 66.65/144.15/124.21. To distinguish this
+from a regexp regression, one sequential call per compiler compiled the
+same `a0=[a1,a1] … a399=[a400,a400]; a400=int; r=a0` schema, including cold
+retained arenas, ordinary arena retries and default limits. The unmodified
+pre-P8.3 HEAD snapshot took **4,733.875 ms**, load 50.33/117.53/115.99;
+current explicit I-Regexp took **3,603.243 ms**, load 47.58/115.84/115.41.
+Both accepted and spent **1,572,297 compile units**. This single loaded pair
+is diagnostic evidence, not a latency estimate or a performance improvement
+claim. Raw record: `.cache/p83-fuzz-load.json`; gate logs:
+`.cache/p83-compile-fuzz-first.log`, `.cache/p83-compile-fuzz.log`.
