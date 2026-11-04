@@ -13,6 +13,12 @@ publish = false
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
+# P7.9: `sdk` builds the SDK runtime exports (src/sdk.rs) instead of the
+# P1.4/P3.4 ones; `compiler` builds the compiler module (src/cc.rs).
+[features]
+sdk = []
+compiler = []
+
 [profile.release]
 opt-level = 3
 lto = true
@@ -24,3 +30,8 @@ strip = true
 [profile.size]
 inherits = "release"
 opt-level = "z"
+
+# P7.9 also reports opt-level "s".
+[profile.size-s]
+inherits = "release"
+opt-level = "s"

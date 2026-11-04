@@ -1,0 +1,16 @@
+{
+  "name": "snug-wasm-sdk",
+  "version": "0.0.0",
+  "description": "P7.9 experiment: snug's public JS API over the Rust->wasm build (D005 re-take)",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./schema": "./src/schema.mjs",
+    "./compile": "./src/compile.mjs",
+    "./view": "./src/view.mjs",
+    "./sources": "./src/sources.mjs"
+  },
+  "scripts": { "test": "node --test test/parity.test.mjs" }
+}

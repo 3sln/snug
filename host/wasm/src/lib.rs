@@ -6,6 +6,25 @@
 #![allow(dead_code)]
 pub mod snug;
 
+// P7.9 (D005 re-take): the SDK runtime exports (sdk.rs, growable memory) and
+// the compiler module (cc.rs over host/rust/src/compile.rs), each its own
+// build (`kin/scripts/wasm-build sdk|sdk-size|cc`, cargo features). The
+// default build is the P1.4/P3.4 module below, unchanged.
+#[cfg(feature = "sdk")]
+mod sdk;
+#[cfg(feature = "compiler")]
+pub mod compile;
+#[cfg(feature = "compiler")]
+pub mod sha256;
+#[cfg(feature = "compiler")]
+mod cc;
+
+#[cfg(not(any(feature = "sdk", feature = "compiler")))]
+pub use legacy::*;
+#[cfg(not(any(feature = "sdk", feature = "compiler")))]
+mod legacy {
+use crate::snug;
+
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -149,3 +168,4 @@ pub extern "C" fn snug_vm_validate(len: usize, rule: i32) -> i32 {
     let out: &mut [i32] = unsafe { &mut *OUTB.0.get() };
     snug::vm::api::vm_validate(p, b, rule, input, lim, s, out)
 }
+} // mod legacy

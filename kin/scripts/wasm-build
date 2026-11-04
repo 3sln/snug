@@ -2,9 +2,14 @@
 # Build the generated scanner as wasm32-unknown-unknown (P1.4); print the path.
 #
 #     kin/scripts/wasm-build [speed|size]     (default speed)
+#     kin/scripts/wasm-build sdk|sdk-size|sdk-s|cc|cc-size|cc-s   (P7.9)
 #
 #   speed  profile release: opt-level 3, LTO, one codegen unit, stripped
 #   size   profile size:    the same at opt-level "z"
+#   sdk*   P7.9's SDK runtime module (feature sdk: host/wasm/src/sdk.rs, growable
+#          memory) at opt-level 3 / "z" / "s", crate .cache/snug-wasm-sdk
+#   cc*    P7.9's compiler module (feature compiler: host/wasm/src/cc.rs over
+#          host/rust/src/compile.rs), crate .cache/snug-wasm-cc
 #
 # Both build std from source with panic=immediate-abort (`-Zbuild-std`): the
 # scanner never panics, so the module needs no panic machinery, and this is
@@ -16,7 +21,17 @@
 set -e
 cd "$(dirname "$0")/../.."
 mode="${1:-speed}"
-case "$mode" in speed) profile=release ;; size) profile=size ;; *) echo "usage: wasm-build [speed|size]" >&2; exit 2 ;; esac
+crate=.cache/snug-wasm; features=""; only="cbor vm"
+case "$mode" in
+  speed) profile=release ;; size) profile=size ;;
+  sdk) profile=release ;; sdk-size) profile=size ;; sdk-s) profile=size-s ;;
+  cc) profile=release ;; cc-size) profile=size ;; cc-s) profile=size-s ;;
+  *) echo "usage: wasm-build [speed|size|sdk|sdk-size|sdk-s|cc|cc-size|cc-s]" >&2; exit 2 ;;
+esac
+case "$mode" in
+  sdk*) crate=.cache/snug-wasm-sdk; features="--features sdk"; only="cbor vm nav write program" ;;
+  cc*) crate=.cache/snug-wasm-cc; features="--features compiler"; only="compile" ;;
+esac
 tc="${SNUG_WASM_TOOLCHAIN:-nightly-2026-09-16}"
 cargo=$(rustup which --toolchain "$tc" cargo 2>/dev/null || true)
 rustc=$(rustup which --toolchain "$tc" rustc 2>/dev/null || true)
@@ -24,8 +39,8 @@ if [ -z "$cargo" ] || [ -z "$rustc" ]; then echo "SKIP wasm -- toolchain $tc not
 sysroot=$("$rustc" --print sysroot)
 if [ ! -d "$sysroot/lib/rustlib/wasm32-unknown-unknown/lib" ]; then echo "SKIP wasm -- $tc lacks wasm32-unknown-unknown" >&2; exit 3; fi
 if [ ! -d "$sysroot/lib/rustlib/src/rust/library" ]; then echo "SKIP wasm -- $tc lacks rust-src (needed for -Zbuild-std)" >&2; exit 3; fi
-crate=.cache/snug-wasm
-SNUG_RS_ONLY="${SNUG_RS_ONLY:-cbor vm}" ./kin/scripts/rust-crate "$crate" host/wasm/src host/wasm/Cargo.toml
+SNUG_RS_ONLY="${SNUG_RS_ONLY:-$only}" ./kin/scripts/rust-crate "$crate" host/wasm/src host/wasm/Cargo.toml
+case "$mode" in cc*) for f in compile sha256; do cmp -s "host/rust/src/$f.rs" "$crate/src/$f.rs" 2>/dev/null || cp "host/rust/src/$f.rs" "$crate/src/$f.rs"; done ;; esac
 lld="$sysroot/lib/rustlib/$("$rustc" -vV | sed -n 's/^host: //p')/bin/rust-lld"
 wrap="$crate/lld.sh"
 printf '#!/bin/sh\nDYLD_LIBRARY_PATH=%s/lib exec %s "$@"\n' "$sysroot" "$lld" > "$wrap.new"
@@ -34,5 +49,5 @@ cmp -s "$wrap.new" "$wrap" 2>/dev/null || { mv "$wrap.new" "$wrap"; chmod +x "$w
   CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER="$(pwd)/lld.sh" \
   RUSTFLAGS="-D warnings -Zunstable-options -Cpanic=immediate-abort" \
   "$cargo" build --quiet --profile "$profile" --target wasm32-unknown-unknown \
-    -Zbuild-std=std,panic_abort >&2)
+    -Zbuild-std=std,panic_abort $features >&2)
 echo "$crate/target/wasm32-unknown-unknown/$profile/snug_wasm.wasm"

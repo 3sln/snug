@@ -1314,6 +1314,9 @@ same code" — true, and the deciding question here is cost on the primary
 host, which is measurable.
 **Alternatives**: wasm only (the fallback); hand-written JS (rejected: a
 second implementation to keep identical, the problem kin exists to remove).
+*Re-taken 2026-11-03 on the full library (P7.9): see **D130**. The generated
+JS stays the default JS package; a wasm build behind a JS SDK with the same API
+is the opt-in for VM-heavy hosts that can run wasm (bench/D005.md).*
 - [ ] **Signed off** (owner)
 
 ### D006 — Revision 1 targets: JavaScript and Rust (+ wasm)
@@ -2567,6 +2570,113 @@ unknown rules as successful validation; buffering source documents as a
 replacement for the existing session driver (all rejected).
 - [ ] **Signed off** (owner)
 
+### D130 — D005 re-taken: native JS stays the default; wasm + SDK is an opt-in, chosen by rule (P7.9)
+**Decision** (recommendation; the owner signs off):
+- **Default: the generated-JS package (`snug`)** for every JS host.
+- **Opt-in: the Rust build as wasm behind the JS SDK** (`host/wasm-sdk`, the
+  same public functions). A user should choose it when all three hold:
+  1. the hot path is the validator VM or the compiler: validate,
+     `schema.decode`, views over large messages, handle/stream sources,
+     refusal-heavy traffic, or runtime compile;
+  2. the host can run wasm: `'wasm-unsafe-eval'` in a page's CSP, a `.wasm`
+     module binding in Workers, and one `await init()`;
+  3. a linear-memory high water that never shrinks is acceptable, or the app
+     calls `reset()` / `view.release()`.
+- **Stay native even then** when validating large byte-string bodies held in
+  JS buffers (the copy in), when encoding large integer arrays in a browser or
+  workerd, and when many views are held.
+- **First release:** native ships; the SDK ships, if at all, marked
+  experimental, with its parity test made a gate.
+
+**Why** (bench/D005.md, measured at 93f8718 on a load-100–150 machine;
+Node CPU medians, interleaved):
+- **wasm is faster on VM and scanner work.** In Node, Chrome and workerd the
+  wasm SDK takes 0.38–0.62× native's time on validate, views, sources and
+  refusal-heavy input. Compile takes 0.10–0.24×, with byte-identical Programs.
+- **The boundary is small.** A per-step wasm call costs about 5–8 ns more
+  than the same kin function in JS. Batched navigation (`path()`, paged
+  `entries()`) measured the same as per-step calls.
+- **Codec work is mixed:**
+  - decode 0.65–1.40× (the JS builder dominates);
+  - encode 0.44–1.01× in Node, but 1.25–1.54× on large integer arrays in
+    Chrome and workerd.
+- **The copy can dominate.** Validating a 1 MiB bstr body takes 3.4×
+  native's time: 75 µs against 22 µs, because the copy costs 61 µs per MiB.
+  With the bytes already in linear memory it is 9 µs.
+- **Native wins on the rest:**
+  - It runs under a strict CSP. wasm needs `'wasm-unsafe-eval'`.
+  - It needs no init. workerd refuses to compile wasm from bytes at run time.
+  - Its memory returns to the GC. 100 dropped 1.4 MB views keep 136 MiB of
+    linear memory until reset; native returns to 0.1 MiB after GC.
+  - It is smaller: 57 KB gzip for the runtime, against 60–83 KB for the wasm
+    module plus 16 KB of glue.
+- **Cold start is close.** Node, Chrome and workerd first-request costs come
+  out similar: wasm pays the compile, native pays cold JIT.
+
+**Alternatives** (all rejected):
+- wasm only: CSP, Workers packaging, init and memory costs for every user,
+  including codec-only users who gain nothing;
+- native only: leaves the 1.6–2.5× (compile 4–10×) VM speed unused for the
+  hosts that can take it;
+- a hybrid, wasm check plus JS navigation: a sum of measured medians,
+  13.4 ms, against 9.1 ms all-wasm.
+- [ ] **Signed off** (owner)
+
+### D131 — The wasm SDK's shape (P7.9)
+**Decision**:
+- **wasm modules:** a plain integer ABI, no wasm-bindgen, no imports.
+  - The runtime module is `host/wasm/src/sdk.rs` (cargo feature `sdk`). It
+    uses std's allocator, so it starts at 1.06 MiB and grows on demand.
+  - The compiler is a second, lazily loaded module: `host/wasm/src/cc.rs`
+    over the unchanged `host/rust/src/compile.rs` (feature `compiler`).
+  - The P1.4/P3.4 module, the default build used by the gates, is unchanged.
+- **The SDK, per API:**
+
+  | API | Design |
+  | --- | --- |
+  | decode | wasm check, then the native JS builder over the caller's bytes |
+  | encode | the JS walk (native admission rules) writes a tape into linear memory; one wasm call applies kin's writer primitives, with keys sorted before values |
+  | validate | one call over a reusable, growable input buffer; out words read in place |
+  | Programs | live in wasm; JS keeps copies for the public accessors and reloads after instance loss |
+  | views | a per-view copy in linear memory, a call per navigation step, plus `path()` and paged `entries()` |
+  | sessions | state and window in linear memory; the push buffer *is* the window |
+
+- **Instance loss:** a `WebAssembly.RuntimeError` or engine RangeError
+  escaping a wasm call resets the instance and throws `InstanceLost`.
+**Why**: each choice crosses the boundary once per unit of work, and copies
+only what JS must own. V8 reports wasm stack exhaustion as a RangeError and
+leaves the shadow-stack pointer behind, so the instance cannot be trusted
+afterwards.
+**Alternatives**:
+- a value-builder tape for decode (not built: the bytes are already in JS);
+- a wasm call per head when encoding (measured: 22 ns against 14 ns per
+  call);
+- unpaged batched `entries()` (measured: 10× slower when iteration stops
+  early);
+- static buffers sized for the default bounds (that is the old module, with
+  about 17 MiB of initial memory);
+- SharedArrayBuffer memory (needs a threads build, and reintroduces
+  mutation-under-check).
+- [ ] **Signed off** (owner)
+
+### D132 — API differences a wasm SDK cannot avoid (P7.9)
+**Decision**: if the SDK ships, document these as its contract:
+- `await init(source)` or `initSync(module)` first;
+- `bytes()`, `raw()` and `typedView()` copy, and `borrow` is ignored;
+- view memory is freed by a FinalizationRegistry, or now by
+  `view.release()`;
+- `reset()` and `trim()` exist, with `memoryBytes()` to observe;
+- with several encode faults in one message, the one reported may differ;
+- the encode tape refuses nesting beyond 4,096 levels;
+- Unicode compile tables and the public `Writer` are not ported yet.
+**Why**: aliases into linear memory are detached when memory grows and freed
+with the view. Browsers deliver wasm asynchronously, and workerd only as an
+imported module.
+**Alternatives**: hide init behind top-level await (rejected: workerd and
+some bundlers refuse it); keep aliases valid until the next SDK call
+(rejected: a silent use-after-free class).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (manager): P7.7's side finding that the baseline codec "accepts a
@@ -2878,7 +2988,7 @@ are answered as provisional decisions D082–D085. None is open now.
       checks that refusal.
     - Public sources are still profile-only (D106). Schema validation over
       handles is not covered.
-- [ ] **P7.9 — Re-take D005** (owner directions 2026-11-03): on the full library
+- [x] **P7.9 — Re-take D005** (owner directions 2026-11-03): on the full library
   once the VM is stable, compare the native-JS build against a **wasm build
   wrapped in a JS SDK with the same public API** — what a real JS user gets
   either way. Count the boundary: per-call overhead (fine-grained view/cursor
@@ -2894,6 +3004,55 @@ are answered as provisional decisions D082–D085. None is open now.
   sources, refusal-heavy input. Deliver a matrix with environment details and
   a recommendation (native JS, wasm+SDK, or both with a rule for choosing),
   recorded as the D005 re-take.
+  *Done 2026-11-03 by the P7.9 engineer.*
+  - **Result:** both, with a rule (**D130**). D131 records the SDK design
+    and D132 its unavoidable API differences.
+  - **Record:** `bench/D005.md` holds the matrix, environment and method.
+    `bench/d005-node.mjs` (Node CPU), `d005-memory.mjs` (memory and cold
+    start), `d005-runtimes.mjs` (Chrome, workerd, sizes), `d005-ops.mjs` and
+    `d005-inputs.mjs` reproduce it.
+  - **What was built:**
+    - The SDK, `host/wasm-sdk/` (about 1,300 lines of JS). Its
+      `host/wasm-sdk/test/parity.test.mjs` passes 6/6. Each test compares
+      the same inputs through the SDK and the native package:
+      - the 216 profile vectors;
+      - encodings;
+      - byte-identical Programs for the six study contracts;
+      - whole validation results;
+      - views, cursor and `path()`;
+      - handle and push sources over 1 B–64 KiB chunks;
+      - instance-loss recovery.
+    - Additive wasm exports: `host/wasm/src/sdk.rs` and `cc.rs`, under cargo
+      features.
+    - `kin/scripts/wasm-build` modes `sdk|sdk-size|sdk-s|cc|cc-size|cc-s`.
+  - **Measured at:** a worktree of **93f8718** (P7.1's in-flight edits not
+    included).
+  - **Gates:** `bb vm-test` passed (JS == wasm on 50,576 cases) and
+    `bb scan-test` passed (wasm on 31,360 cases), with the gated `lib.rs`.
+  - **Learnt:**
+    - wasm is 1.6–2.5× faster on all VM work in Node, Chrome and workerd,
+      and compile is 4–10× faster. The JS builder and walk cap decode and
+      encode near parity.
+    - A wasm call costs about 5–8 ns more than the same kin function in JS,
+      so batching navigation buys nothing measurable. An unpaged batch is
+      10× worse when iteration stops early.
+    - The input copy costs 61 µs per MiB, which is decisive for large
+      byte-string bodies.
+    - Chrome blocks wasm under `script-src 'self'`; it needs
+      `'wasm-unsafe-eval'`.
+    - workerd refuses `WebAssembly.compile` and `new WebAssembly.Module` on
+      bytes ("disallowed by embedder"). The module must be a `wasm` module
+      binding.
+    - V8 reports stack exhaustion inside wasm as a RangeError, not a trap.
+    - Linear memory keeps 136 MiB after 100 dropped 1.4 MB views, until
+      `reset()`. A hostile schema leaves the compiler instance at 66 MiB
+      until it is dropped.
+    - The SDK runtime module is 83 KB gzip at opt-level 3 and 60 KB at z.
+      It is much larger than the scanner + VM module (33 KB), because of
+      vm-verify, both session machines, nav, the writer and the allocator.
+    - wasm-opt was unavailable offline.
+  - **Not done:** a decode tape, SharedArrayBuffer memory, a codec-only
+    module, Firefox and Safari, Cloudflare production.
 - [x] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
   ciborium, minicbor (Rust) and the `cddl` crate. Done 2026-11-03 by the P7.8
   benchmark engineer; `bench/compare/README.md` (method, versions/licences,
