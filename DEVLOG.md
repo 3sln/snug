@@ -3044,7 +3044,15 @@ are answered as provisional decisions D082–D085. None is open now.
     scan shim have no profile option yet; `wire` should be added to P7.10's
     option-key admission; cbor2's `rejectLongFloats` cannot separate float
     width from integral floats, so that class is confirmed, not compared.
-- [ ] **P7.2 — Extension controls** (D082) and the generic controls module.
+- [~] **P7.2 — Extension controls** (D082) and the generic controls module.
+  *In progress 2026-11-03 (VM-features engineer, Claude).* Coordination with
+  P7.10 (Codex, host/js option validation): kin first (snug.lang `Ext` tag,
+  VM, verifier, compiler, sessions); host/js edits are additive — new files
+  `host/js/src/controls.mjs`, `host/js/src/ext.mjs`, and small hooks in
+  `compile.mjs`, `schema.mjs`, `public-schema.mjs`, `serialized.mjs`,
+  `sources.mjs` (re-read before every edit; only my hunks committed). New
+  option keys to admit in `options.mjs`: compile `controls`; validation
+  `failFast` (D085); sources `streamSource`/unknown length. Then D085 (P6.4b).
 - [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
   *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.
   Offline Node v24.6.0 / ICU 77.1 / Unicode 16.0 generation produces the same
