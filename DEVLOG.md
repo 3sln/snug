@@ -3322,7 +3322,8 @@ out of the box, D123's motivation half met); accept the invalid numbers
 checks for each (large, and every rule is a refusal a caller might not want);
 a new flag bit instead of the free PF_TAGS values (PF_TAGS had 2 bits, values
 2 and 3 meant "standard" with no caller relying on them).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (owner, 2026-11-04, in session via the coordinator): any-tag is
+  the deterministic default. Approved.
 
 ### D181 — Bignum minimality stays in every tag level (P7.12)
 **Decision** (profile engineer, provisional): tags 2/3 keep the P7.1 rule
