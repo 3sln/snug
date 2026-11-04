@@ -3549,6 +3549,197 @@ Further shrinking (the verifier refactor, a possible `schema-lite` entry) is
 opportunistic, not required.
 - [x] **Signed off** (owner, 2026-11-04, in session via the coordinator).
 
+### D210 — CBOR sequences are an explicit mode over the session VM; profile-only runs it against `any` (P7.13, W21)
+**Decision** (sequences engineer, provisional): RFC 8742 sequences get their
+own entry points (`readSequence`, `sequenceReader`; Rust `read_sequence`,
+`Sequence`); every single-document API keeps refusing `trailing`. Each
+message is one root validated in ONE fused pass (profile + optional schema
+rule) by the resumable session VM in a new sequence mode (D212); boundaries
+come from that walk, not from a separate framing pass. Without a schema the
+session runs against the built-in `r = any` Program, as unknown-length
+scanning does (D146). The resumable scanner (`rscan`) is not changed.
+**Why**: the session already fuses profile and schema checks over windows
+and holds end-dependent checks (D144); a sequence only changes what happens
+at the root's end. One implementation of pending end checks is gated once.
+**Alternatives**: a sequence mode in `rscan` too (the brief's suggestion: a
+second set of pending checks to keep equal, for a path the VM-against-`any`
+already covers with identical codes, D146); frame with a structural skip and
+validate each framed message with the buffer driver (two passes, and the
+skip trusts unchecked bytes); speculative buffer runs cut at the chunk end
+(inexact budget/items stop points, D091).
+- [ ] **Signed off** (owner)
+
+### D211 — A message's verdict is the buffer driver's over its message window (P7.13)
+**Decision** (provisional): for a message at absolute offset o with limit P
+and R bytes following, the verdict is the buffer driver's over
+W = S[o, o + min(R, P)) with `trailing` read as a boundary: a root ending at
+t gives the buffer verdict of S[o, o + t) (offsets + o) and the next message
+at o + t; `truncated` with R > P is `too_large` at o; any other refusal
+stands (architecture §18.1). The gate's oracle is this definition.
+**Why**: for a valid message it is exactly "the buffer driver on the
+message's own bytes"; for an invalid one (whose bytes are undefined) it is a
+function of (S, o, P) alone, independent of chunking, that never needs input
+beyond o + P — so a refusal is answered without draining a live stream.
+**Alternatives**: D085's drain semantics per message (the message would run
+to the end of the stream: every refusal in a long stream becomes
+`too_large`, and a live stream that stalls never answers); `too_large` at
+once on any claim past P (cheaper, but it differs from the buffer driver for
+a truncated tail and cannot tell an embedded payload's truncation from P).
+- [ ] **Signed off** (owner)
+
+### D212 — The session's sequence mode: a boundary at the root's end, held while claims are open (P7.13)
+**Decision** (provisional): kin `vms-init-seq` starts an unknown-length
+session (provisional end P = the effective input limit) with `SS_SEQ` set.
+At the root's end it skips the trailing check, records the message length
+(`vms-message-length`, −1 until a root completes) and finishes the root's
+typeset test and witness. A verdict is held (`VMS_HELD`) while a pending end
+check remains or while it is `truncated`; every later step drops the checks
+its window covers and answers the verdict once none remains (a truncation
+stays held for `vms-eof`). `vms-eof` is unchanged. Offsets are relative to
+the message start; hosts add o. Per message the host re-runs `vms-init-seq`
+on the same arrays.
+**Why**: the smallest change to a gated walk: the root end, `settle` and the
+held state's step; everything before the root's end is drain mode's walk,
+already held identical to the buffer (bb vmsession-test).
+**Alternatives**: a `vms-next` that keeps the session array across messages
+(re-init is cheap next to a message's walk; one more state to gate); 64-bit
+offsets in kin (a later ABI change; per-message offsets suffice).
+- [ ] **Signed off** (owner)
+
+### D213 — Limits apply per message; no per-sequence cap in this slice (P7.13)
+**Decision** (provisional): `maxMessageBytes` (default the input limit:
+1,500,000 profile-only, the compiled input limit with a schema), `maxDepth`,
+`maxEntries`, `maxItems`, `maxBignumBytes` and `budget` apply to each
+message from zero. `maxBytes` is refused in sequence options (TypeError
+naming `maxMessageBytes`). No total-bytes or message-count cap: a consumer
+stops by leaving the loop, which cancels the source.
+**Why**: a sequence is a series of documents; per-message limits are the ones
+every other API has. A total cap's meaning on refusal (which message is
+refused, with which code?) is a decision with no consumer yet.
+**Alternatives**: reuse `maxBytes` as the per-message limit (ambiguous in a
+sequence); `maxTotalBytes` / `maxMessages` with a new code.
+- [ ] **Signed off** (owner)
+
+### D214 — `onInvalid: 'stop' | 'skip'`; only schema refusals of complete messages are skippable (P7.13)
+**Decision** (provisional): `stop` (default) ends the sequence at the first
+refused message after delivering every earlier one. `skip` drops a refused
+message only when its root completed (profile-valid, end known, bytes
+delivered) and its reason is a schema reason (`type`, `missing`,
+`unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`,
+`embedded`, `control`, `control_size`); everything else stops: every
+`cbor/*` code, `budget`, a throwing extension predicate, source failures.
+JS push answers skipped refusals in `skipped`; `readSequence` counts them in
+`stats`; Rust yields them as `Err` items and goes on.
+**Why**: after a profile refusal there is no safe resynchronisation point in
+CBOR (any byte can start an item); a schema refusal of a complete message
+leaves the framing intact. `budget` can stop the walk before the end is
+known, so it is never skippable.
+**Alternatives**: skip `budget` refusals found at the root's end (the
+answer would depend on where the allowance ran out); a callback option.
+- [ ] **Signed off** (owner)
+
+### D215 — Borrowed messages inside a chunk, one assembly across chunks, views minted internally (P7.13)
+**Decision** (provisional): a message wholly inside one delivered chunk is a
+subarray of it; a spanning message is copied once into one fresh buffer.
+`copy: 'spanning'` (default) | `'always'` (every message copied). The View
+is minted from the session's verdict by an unexported function of the view
+module (the internal capability); no public trusted opener. Rust: push
+messages are `Cow<'chunk, [u8]>`, iterator messages owned.
+**Why**: zero copy for the common case (small events in large chunks) and a
+contiguous buffer for the View; the capability keeps §16.2's rule that a View
+means "checked" (V1/V2).
+**Alternatives**: always copy (simplest, costs a memcpy per message); a
+public `view(bytes, {trusted: true})` (rejected by V1/V2); views over a
+chunk list (every accessor would need to handle discontiguous bytes).
+- [ ] **Signed off** (owner)
+
+### D216 — Sequence refusals carry index and absolute offsets in the SnugFault family (P7.13)
+**Decision** (provisional): JS throws (stop) or reports (skip) a SnugFault
+with `code`, `reason`, `path`, `offset` (absolute), `subcode`, `index`,
+`messageOffset`, `skippable`. Rust: `Error::Sequence(MessageFailure {index,
+message_offset, offset, failure, skippable})`, `failure.offset` relative.
+**Why**: D103's one catchable family; no payload.
+**Alternatives**: a SequenceError class (a fourth family); result objects in
+the stream (every loop would test `ok`).
+- [ ] **Signed off** (owner)
+
+### D217 — End of input in a sequence (P7.13)
+**Decision** (provisional): EOF at a boundary ends the sequence (the empty
+sequence is valid); EOF inside a message is `truncated` with its index;
+`too_large` is answered once more than P bytes follow the message start
+while the walk still needs one (bytes counted, not kept); `failFast`
+reports a held refusal at once (D145's contract). The drain machinery runs
+only inside a message.
+**Why**: §18.1 needs no byte past o + P; counting rather than buffering keeps
+an oversize message's memory at zero after its refusal is known.
+**Alternatives**: report `truncated` at once for any held truncation
+(`failFast` gives that when wanted).
+- [ ] **Signed off** (owner)
+
+### D218 — `bb sequence-test` (P7.13)
+**Decision** (provisional): a gate of its own: the vm-test case sets and the
+scanner's vectors/mutations as sequences under whole / 1-byte / random /
+every-offset chunkings against D211's oracle (every out word, absolute
+offsets, lengths, stop/skip outcome), JS == Rust at kin level (debug, panics
+caught), JS behind out-of-bounds traps, and the JS and Rust host APIs
+(borrowed vs assembled bytes, walk-equal views).
+**Why**: the D030 condition for a new mode: the oracle is the buffer driver.
+- [ ] **Signed off** (owner)
+
+### D219 — The wasm SDK's sequence reader is deferred (P7.13; waits on P7.9c)
+**Decision**: `host/wasm*/` is not changed in this item. The SDK will need
+the `vms-init-seq` / `vms-message-length` exports, the native sequence host
+driven through its session wrapper (D173: views re-derived after every step,
+windows copied into linear memory), and views minted over a JS-side copy of
+each message (linear memory cannot be borrowed across steps).
+- [ ] **Signed off** (owner)
+
+### D230 — Owner directions 2026-11-04: spec compliance first (OWNER DECISION)
+**Decision** (owner, 2026-11-04, in session via the coordinator), recorded
+verbatim in substance:
+1. **Calibration**: "use good defaults" — the D190–D194 weights and the
+   default budget are chosen by the manager from quiet-machine measurement,
+   with the rationale recorded (D190–D194's own owner boxes stay unticked).
+2. **snug must be spec compliant as a general CBOR/CDDL library**; optimise
+   where possible but compliance first; the conformance audit (P8.1) is the
+   worklist.
+   - Default decode, view, scan and validate accept any well-formed, valid
+     CBOR per RFC 8949 §5.3 — indefinite lengths, non-shortest heads,
+     unsorted keys, NaN payloads — and still refuse what the RFC calls
+     invalid: duplicate map keys, invalid UTF-8, invalid tag content for known
+     tags.
+   - Encoders keep emitting deterministic output.
+   - Deterministic checking (RFC 8949 §4.2) and the `bindle` preset remain
+     available as options, not the default; a specialised deterministic-only
+     fast path is kept only if measurement shows it is material (the checking
+     option itself stays: dCBOR, CTAP2 and signing protocols need it).
+   - Literal and key comparisons and duplicate detection must be correct on
+     non-canonical encodings: compare by value where the RFC says values are
+     equal; duplicate detection on unsorted maps within the budget.
+   - CDDL: accept every schema the RFCs define. Keep the proven fast paths;
+     add general, budget-metered algorithms where exactness is not provable
+     (maps now refused as `map_overlap`/`map_group_occurrence` — bipartite or
+     bounded search; non-regular group recursion; composite `.ne`; non-literal
+     `.cat`/`.plus`/`.det`; `.abnf`/`.abnfb`); every new algorithm charged; the
+     brute-force oracle must agree.
+   - Cuts follow what the audit concludes RFC 8610 and the reference
+     implementation mean; change D021 if they differ.
+   - Prelude types that can never match must be matchable under the default.
+3. **Regex**: offer I-Regexp (RFC 9485) and XSD regex (RFC 8610's reference)
+   as options, only if XSD can be supported on every target via a kin-written
+   bounded automaton (no host regex engine); the default is chosen from the
+   audit; if XSD cannot be done portably and bounded, report back rather than
+   ship half of it.
+4. **CBOR sequences** (D210+) proceed and must work under the new valid-CBOR
+   default.
+Sequencing: audit, then the decode-default change, then CDDL coverage; every
+change gated (oracle, JS == Rust == wasm — the wasm SDK part waits on P7.9c);
+the conformance corpus gains RFC vectors including non-deterministic ones.
+This supersedes D081/D120/D126's choice of `deterministic` as the default
+wire profile, D013 (refused controls), D014 (I-Regexp only) and, subject to
+the audit, D011/D012's refusals and D021.
+- [x] **Directed by the owner** (2026-11-04, in session via the coordinator).
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
