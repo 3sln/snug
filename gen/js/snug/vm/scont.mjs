@@ -1061,10 +1061,8 @@ export function mapNext(p, pool, b, s, ss, ka, base, wend, f, ext) {
         }
         if (kx < (-1)) {
             const want = ((-2) - kx) - start;
-            const twice = 2 * (wend - start);
-            if (twice > want) {
-                return need(ss, base, start, twice);
-            }
+            // D212 liveness: exactly what key-end-any needs next (never a
+            // doubled window: it could reach past the key and the message)
             return need(ss, base, start, want);
         }
         ke = kx;

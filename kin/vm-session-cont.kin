@@ -784,9 +784,9 @@
                   (do (let [mc (key-max-claim b start end wend)]
                         (if (> mc wend) (return (need ss base start (- mc start)))))))
                 (if (< kx (neg 1))
-                  (do (let [want (- (- (neg 2) kx) start)
-                            twice (* 2 (- wend start))]
-                        (if (> twice want) (return (need ss base start twice)))
+                  (do (let [want (- (- (neg 2) kx) start)]
+                        (comment "D212 liveness: exactly what key-end-any needs next (never a"
+                                 "doubled window: it could reach past the key and the message)")
                         (return (need ss base start want)))))
                 (set ke kx))))
         (iset ss (+ f F_START) (+ start base))

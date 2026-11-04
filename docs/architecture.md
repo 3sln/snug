@@ -1014,8 +1014,9 @@ For a valid message, case 1/2 equals the buffer driver over the message's
 own bytes in every word (code, offset, budget used, items, path): every claim
 of a completed root lies inside it, so no check depends on what follows.
 For an invalid one "its own bytes" is undefined; W makes the answer a pure
-function of (S, o, P) — independent of chunking — and never needs the input
-past o + P. Two consequences, both deliberate: a refusal other than
+function of (S, o, P) — independent of chunking — and needs no byte past
+o + P beyond knowing whether one exists (R > P), which is counted, never
+buffered. Two consequences, both deliberate: a refusal other than
 truncation is answered as soon as no earlier length claim is still open
 (there is no drain to the end of the stream, unlike D085, whose `too_large`
 counts the whole input); and an embedded payload truncated inside its byte
@@ -1086,15 +1087,21 @@ a consumer can see which kind it got.
 
 * A message lying wholly inside one delivered chunk is a **borrowed
   subarray** of that chunk (zero copy). A message spanning chunks is
-  **assembled** into one fresh buffer, each of its bytes copied once (the
-  assembly copies a chunk's part only once the walk has moved past it or
-  the message's end is known).
+  **assembled** into a buffer of its own (growth doubles, capped at P, so
+  copies are amortised linear; bytes after a message that ended inside the
+  assembly stay a view of it and each message gets exactly its own bytes, so
+  splitting many messages out of one assembly is linear too).
+* `readSequence` checks one message ahead of its consumer (it pauses after
+  each message, keeping the chunk), so leaving the loop stops the work at the
+  next boundary; the push API returns everything a chunk completes.
 * `copy: 'spanning'` (default) borrows when it can; `copy: 'always'` gives
   every message a fresh buffer. Borrowing is safe when the source hands over
-  fresh chunks it never touches again — a `ReadableStream` default reader,
-  `fetch` bodies, Node streams, an async generator yielding new arrays. Use
-  `'always'` with a BYOB reader, a pooled or reused buffer, or a push caller
-  that recycles its chunk after `feed` returns. snug never writes to a chunk;
+  chunks whose buffers it never mutates, recycles or transfers afterwards — a
+  `fetch` body's byte stream, an async generator yielding new arrays. A
+  default `ReadableStream` reader does not guarantee that by itself (it hands
+  over whatever the producer enqueued). Use `'always'` (a plain copy, Node
+  `Buffer` chunks included) otherwise: BYOB adapters, pooled or reused
+  buffers, a push caller that recycles its chunk after `feed` returns. snug never writes to a chunk;
   a borrowed message (and its View) aliases the chunk, so the chunk must not
   change while either is used. SharedArrayBuffer chunks are refused.
 * A message's View is minted from its verdict by an internal function of the
@@ -1113,7 +1120,18 @@ offset of the message (`messageOffset`) and of the failure (`offset`), the
 code / reason / path / subcode of the per-message verdict, and `skippable` —
 never payload. JS: a `SnugFault` (D103's family: `code` unprefixed for CBOR,
 `schema/<reason>` otherwise). Rust: `Error::Sequence(MessageFailure)`.
-Source failures stay `SourceError` / `Error::Source`.
+Adapter failures are `SourceError` (`bad_chunk`) / `Error::Source`; transport
+exceptions pass through unchanged, as for the other sources. An exception
+from an extension predicate ends the sequence after the messages found
+before it (yielded first; the push result carries it as `error`).
+
+**Liveness (D212, amended after review 2026-11-04).** A complete message is
+released by the bytes that complete it: no read the walk makes reaches past
+the item it is reading. Where a check wants a fixed span (an extension leaf's
+maximum, a tag-40 shape/data note) the session first asks whether the item
+already ends in the window (the structural prescan) and otherwise asks for
+exactly one more byte of it; key reads ask for exactly what `key-end-any`
+needs next. Gated: no accepted message waits for a byte past its end.
 
 ### 18.7 End of input (D217)
 

@@ -518,14 +518,29 @@ defaults as for the codec without a schema and to `'any'` with one.
 `SequenceMessage` is `{ index, offset, length, bytes, borrowed, view }`:
 `offset` is absolute; `bytes` is the exact encoding, a subarray of the chunk
 it lay in when `borrowed` (one chunk held it and `copy` is `'spanning'`), else
-a fresh buffer; `view` is a checked `View` minted from the reader's verdict
-(there is no public way to mint one). Do not change a chunk while a borrowed
-message or its view is used; use `copy: 'always'` for reused buffers.
+a fresh buffer (a plain Uint8Array copy under `copy: 'always'`, Node
+`Buffer` chunks included); `view` is a checked `View` minted from the bytes
+the reader checked (message fields are read-only getters; View and Cursor
+keep their state private and refuse construction outside `view()`).
+Borrowing is safe only when the producer never mutates, recycles or
+transfers a chunk's buffer after handing it over (a `fetch` body's byte
+stream; not guaranteed by an arbitrary default `ReadableStream` reader);
+otherwise use `copy: 'always'`. A retained borrowed message keeps its chunk's
+buffer alive.
+
+Delivery: an accepted message is released by the feed that completes it
+(no wait for later bytes). `readSequence` runs one message ahead of the
+consumer; `feed` returns every message its chunk completes (result storage
+proportional to that). `bytesHeld` counts the message in progress's
+assembled bytes, not buffer capacity, chunks or the session arena (sized for
+`maxMessageBytes`).
 
 A message's verdict equals the buffer validation of its window — the bytes
 from its start, at most `maxMessageBytes` — with the root's end as the
 boundary (architecture §18.1): exactly `schema.validate` / the codec check of
-the message's own bytes when it is accepted. Refusals are `SnugFault`s with
+the message's own bytes when it is accepted (and for a schema refusal of a
+complete message); a message that does not complete is judged over that
+window, so its code can differ from the same bytes checked alone. Refusals are `SnugFault`s with
 `code`, `reason`, `path`, `subcode`, `offset` (absolute), `index`,
 `messageOffset` and `skippable`. Skippable (`onInvalid: 'skip'`): schema
 reasons of a complete message. Not skippable: `cbor/*` codes (incl.
@@ -533,7 +548,10 @@ reasons of a complete message. Not skippable: `cbor/*` codes (incl.
 within `maxMessageBytes`) and `budget`. `failFast` answers a held refusal at
 once (D145's contract). An empty source is an empty sequence. Non-Uint8Array
 chunks reject with SourceError `bad_chunk`; SharedArrayBuffer chunks with
-TypeError.
+TypeError. An exception from an extension predicate ends the sequence after
+the earlier messages (readSequence yields them, then throws; the push result
+carries it as `error`). Transport exceptions (a rejected source read) pass
+through unchanged; cancel a pending read with the fetch's AbortController.
 
 ## Errors
 

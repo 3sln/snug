@@ -28,15 +28,22 @@ const isShared = b => typeof SharedArrayBuffer === 'function' && b.buffer instan
 /** D214: schema reasons of a complete message are skippable; cbor/* and budget never. */
 const skippableCode = code => code >= 32 && code <= 43;
 
-/** One message of a sequence (D215). `view` is minted on first use from the verdict. */
+/** One message of a sequence (D215). Its fields are read-only and `view` is minted on first
+ *  use from the bytes the check ran over (a private reference, not the public `bytes` getter
+ *  a caller could shadow; review 2026-11-04 #3). */
 class SequenceMessage {
-  #view = null; #opts;
-  #mint;
+  #index; #offset; #bytes; #borrowed; #opts; #mint; #view = null;
   constructor(index, offset, bytes, borrowed, opts, mint) {
-    this.index = index; this.offset = offset; this.length = bytes.length;
-    this.bytes = bytes; this.borrowed = borrowed; this.#opts = opts; this.#mint = mint;
+    this.#index = index; this.#offset = offset; this.#bytes = bytes; this.#borrowed = borrowed;
+    this.#opts = opts; this.#mint = mint;
   }
-  get view() { return this.#view ??= this.#mint(this.bytes, this.#opts, this.borrowed); }
+  get index() { return this.#index; }
+  get offset() { return this.#offset; }
+  get length() { return this.#bytes.length; }
+  get bytes() { return this.#bytes; }
+  get borrowed() { return this.#borrowed; }
+  get view() { return this.#view ??= this.#mint(this.#bytes, this.#opts, this.#borrowed); }
+  toJSON() { return { index: this.#index, offset: this.#offset, length: this.#bytes.length, borrowed: this.#borrowed }; }
 }
 
 /** The reader's engine: one session's arrays, re-initialised per message. */
@@ -44,11 +51,12 @@ class SequenceCore {
   /** backend: the session of one host (begin, step, eof, needOffset, needLength, position,
    *  heldCode, messageLength, code, result; total = the provisional end P); mint(bytes, opts,
    *  borrowed) -> View; viewOpts: what a minted View needs to know. */
-  constructor(backend, options, mint, viewOpts) {
+  constructor(backend, options, mint, viewOpts, batch = Infinity) {
     const { onInvalid = 'stop', copy = 'spanning', failFast = false } = options;
     this.b = backend; this.mint = mint; this.viewOpts = viewOpts;
     this.skip = onInvalid === 'skip'; this.always = copy === 'always'; this.failFast = failFast === true;
     this.quantum = backend.quantum;
+    this.batch = batch;                          // messages (and skips) per run before pausing
     this.total = backend.total;
     // the stream
     this.delivered = 0; this.next = 0; this.index = 0; this.done = false; this.busy = false;
@@ -69,18 +77,26 @@ class SequenceCore {
       if (chunk.length === 0) return res;      // never EOF
       this.chunk = chunk; this.cb = this.delivered; this.delivered += chunk.length;
       return this.run(res);
-    } catch (e) { this.done = true; throw e; } finally { this.busy = false; }
+    } catch (e) { return this.thrown(res, e); } finally { this.busy = false; }
   }
   resume() {
     this.enter();
     const res = { state: 'need', messages: [], skipped: [], error: undefined };
-    try { return this.run(res); } catch (e) { this.done = true; throw e; } finally { this.busy = false; }
+    try { return this.run(res); } catch (e) { return this.thrown(res, e); } finally { this.busy = false; }
   }
   /** The end of the input: settles the message in progress (EOF inside it is truncated). */
   finish() {
     this.enter();
     const res = { state: 'need', messages: [], skipped: [], error: undefined };
-    try { this.final = true; return this.run(res); } catch (e) { this.done = true; throw e; } finally { this.busy = false; }
+    try { this.final = true; return this.run(res); } catch (e) { return this.thrown(res, e); } finally { this.busy = false; }
+  }
+  /** An exception (an extension predicate that threw, or an internal invariant) ends the
+   *  sequence; the messages and skips found before it are kept and it is reported as the
+   *  result's error (review 2026-11-04 #6). */
+  thrown(res, e) {
+    this.done = true; this.msg = -1; this.mb = null; this.chunk = null;
+    res.error = e; res.state = 'done';
+    return res;
   }
   enter() {
     if (this.done) throw new TypeError('snug: the sequence has ended');
@@ -112,6 +128,8 @@ class SequenceCore {
       }
       if (r >= 0) {
         if (!this.verdict(res)) return res;
+        // per-message backpressure (readSequence): pause, keeping the chunk, until resumed
+        if (res.messages.length + res.skipped.length >= this.batch) { res.state = 'more'; return res; }
         continue;
       }
       if (r === VMS_NEED || r === VMS_YIELD) {
@@ -190,7 +208,9 @@ class SequenceCore {
     const n = to - from;
     if (n <= 0) return;
     if (this.mb === null || this.mbLen + n > this.mb.length) {
-      const grown = new Uint8Array(Math.max(this.mbLen + n, this.mb === null ? 0 : 2 * this.mb.length, 256));
+      // doubling (amortised copies), never past the message limit P
+      const need = this.mbLen + n;
+      const grown = new Uint8Array(Math.min(Math.max(need, this.mb === null ? 0 : 2 * this.mb.length, 256), Math.max(need, this.total)));
       if (this.mb !== null) grown.set(this.mb.subarray(0, this.mbLen));
       this.mb = grown;
     }
@@ -215,13 +235,18 @@ class SequenceCore {
         // wholly inside the chunk: a subarray of it (D215)
         if (code === 0) {
           const bytes = c.subarray(o - this.cb, o - this.cb + ml);
-          res.messages.push(new SequenceMessage(this.index, o, this.always ? bytes.slice() : bytes, !this.always, this.viewOpts, this.mint));
+          // copy 'always': a plain Uint8Array copy (Buffer#slice would alias; review 2026-11-04 #2)
+          res.messages.push(new SequenceMessage(this.index, o, this.always ? new Uint8Array(bytes) : bytes, !this.always, this.viewOpts, this.mint));
         } else res.skipped.push(this.fault(o));
       } else {
         // assembled across chunks: each byte copied once; bytes past it start the next message
+        // the bytes after it stay a view of the assembly (no copy); the message gets exactly its
+        // own bytes (the assembly itself when it is exactly that), so splitting many messages
+        // out of one assembly copies each byte once (review 2026-11-04 #5)
         this.absorb(o + ml);
-        if (this.mbLen > ml) this.left = this.mb.slice(ml, this.mbLen);
-        if (code === 0) res.messages.push(new SequenceMessage(this.index, o, this.mb.subarray(0, ml), false, this.viewOpts, this.mint));
+        const mb = this.mb, exact = this.mbLen === ml && mb.byteOffset === 0 && mb.buffer.byteLength === ml;
+        if (this.mbLen > ml) this.left = mb.subarray(ml, this.mbLen);
+        if (code === 0) res.messages.push(new SequenceMessage(this.index, o, exact ? mb : mb.slice(0, ml), false, this.viewOpts, this.mint));
         else res.skipped.push(this.fault(o));
       }
       this.index++; this.next = o + ml; this.msg = -1; this.mb = null; this.mbLen = 0;
@@ -265,7 +290,7 @@ function chunksOf(source) {
 /** The public pair for one host: openBackend(options, quantum) -> { backend, viewOpts }, mint
  *  (the host's internal view capability), SourceError and nextTurn (its scheduling yield). */
 export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
-  const open = (options, quantum) => { const { backend, viewOpts } = openBackend(options, quantum); return new SequenceCore(backend, options, mint, viewOpts); };
+  const open = (options, quantum, batch) => { const { backend, viewOpts } = openBackend(options, quantum); return new SequenceCore(backend, options, mint, viewOpts, batch); };
   /** A push reader of a CBOR sequence (D210): feed(chunk) and end() answer
    *  { messages, skipped, error }; after an error (onInvalid 'stop', or a refusal that
    *  cannot be skipped) the reader is done. */
@@ -289,7 +314,7 @@ export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
   function readSequence(source, options = {}) {
     validateSequenceOptions(options, true);
     const { quantum, ...rest } = options;
-    const core = open(rest, quantum ?? 0);
+    const core = open(rest, quantum ?? 0, 1);   // one message per run: the consumer paces the reader
     const src = chunksOf(source);
     const stats = { messages: 0, skipped: 0, bytes: 0, lastSkipped: undefined };
     async function* messages() {
@@ -311,6 +336,7 @@ export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
             if (res.skipped.length) stats.lastSkipped = res.skipped[res.skipped.length - 1];
             for (const m of res.messages) { stats.messages++; yield m; }
             if (res.error) throw res.error;
+            if (res.state === 'more') { res = core.resume(); continue; }
             if (res.state !== 'yield') break;
             await nextTurn();
             res = core.resume();

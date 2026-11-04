@@ -366,6 +366,21 @@ pub(crate) fn skip_bstr(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mu
     }
     return ret(ss, base, r);
 }
+pub(crate) fn note_live(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, wend: i32, nk: i32, req: i32) -> i32 {
+    // D212 liveness: a tag-40 shape or data note (nk 2, 3) asks for a fixed span
+    // (73, 11 bytes) from the element; when the element already ends in the
+    // window (note-put reads nothing past it) the window suffices; else ask for
+    // one more byte of it, never for bytes past its own end.
+    if (req <= wend) || ((nk != 2) && (nk != 3)) {
+        return req;
+    }
+    let w: i32 = prescan(b, ss, base, pos, end, wend);
+    ss[(SS_CHN) as usize] = -1;
+    if w == 1 {
+        return wend;
+    }
+    return wend + 1;
+}
 pub(crate) fn ext_need(p: &[i32], s: &[i32], fb: i32, nq: i32) -> i32 {
     // D140: the largest maximum item size of the EXT leaves in the query list
     // (their mask admits every item), or -1 when it has none.
@@ -469,7 +484,8 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     if note >= 0 {
         let tf: i32 = fbase(ss, note >> 2);
         let nk: i32 = note & 3;
-        let req: i32 = note_req(b, s, nk, pos, end, wend);
+        let req0: i32 = note_req(b, s, nk, pos, end, wend);
+        let req: i32 = note_live(b, ss, base, pos, end, wend, nk, req0);
         let g2: i32 = ensure(ss, base, wend, pos, req);
         if suspended(g2) {
             return g2;
@@ -583,11 +599,16 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
         let xm: i32 = ext_need(p, s, fb, nq);
         if xm >= 0 {
             let xreq: i32 = pos + imin(xm, end - pos);
-            let g7: i32 = ensure(ss, base, wend, pos, xreq);
-            if suspended(g7) {
-                return g7;
-            }
-            if prescan(b, ss, base, pos, end, xreq) == 1 {
+            // D212 liveness: before asking for the leaves' maximum, take the
+            // item whole if it already ends in the window; else ask for one
+            // more byte of it (never for bytes past its own end)
+            if xreq > wend {
+                if prescan(b, ss, base, pos, end, wend) != 1 {
+                    ss[(SS_CHN) as usize] = -1;
+                    return need(ss, base, pos, (wend - pos) + 1);
+                }
+                direct = 1;
+            } else if prescan(b, ss, base, pos, end, xreq) == 1 {
                 direct = 1;
             }
             ss[(SS_CHN) as usize] = -1;

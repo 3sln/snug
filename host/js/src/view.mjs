@@ -41,6 +41,8 @@ const isShared = b => typeof SharedArrayBuffer === 'function' && b.buffer instan
 
 // ------------------------------------------------------------------ message state
 
+let viewParts = null;   // View's private state, for this module only (set in View's static block)
+
 class Message {
   constructor(b, opts) {
     this.b = b; this.end = b.length;
@@ -275,36 +277,43 @@ function valueAt(m, p, depth) {
 
 /** An item of a checked message. Immutable; cheap (message + offset + depth). */
 export class View {
-  constructor(m, p, depth) { this._m = m; this._p = p; this._d = depth; }
+  #m; #p; #d;
+  // D215, review 2026-11-04 #3: only this module makes Views of checked bytes; the message
+  // state is private (no public field or constructor leads to it)
+  constructor(m, p, depth) {
+    if (!(m instanceof Message)) throw new TypeError('snug view: open a View with view()');
+    this.#m = m; this.#p = p; this.#d = depth;
+  }
+  static { viewParts = v => (#m in v ? [v.#m, v.#p, v.#d] : null); }
   /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'array' | 'map' | 'decimal' | 'ndarray' |
    * 'typed' | 'tagged' (any other tag the profile admits, D121, D180) */
-  get kind() { return kindAt(this._m, this._p); }
+  get kind() { return kindAt(this.#m, this.#p); }
   /** Entries of an array or map, bytes of a bytes/text item, elements of a typed array; else undefined. */
-  get length() { return lengthAt(this._m, this._p); }
+  get length() { return lengthAt(this.#m, this.#p); }
   /** Offset of this item in the message, and its depth (the root is 0). */
-  get offset() { return this._p; }
-  get depth() { return this._d; }
+  get offset() { return this.#p; }
+  get depth() { return this.#d; }
   /** Was the message borrowed (true) or copied at open (false)? */
-  get borrowed() { return this._m.borrowed; }
+  get borrowed() { return this.#m.borrowed; }
 
   /** The value under `key` in a map, or undefined: a string; an integer (number or bigint) when the profile admits
    * integer keys (or in the top-level map of a cose view); any value with keys 'any', compared by its encoding. */
   get(key) {
-    const m = this._m, p = this._p;
+    const m = this.#m, p = this.#p;
     m.head(p); want(m.o[N_MAJOR] === 5, 'a map');
-    const r = findIn(m, p, m.o[N_LO], key, m.cose && this._d === 0);
-    return r < 0 ? undefined : new View(m, r, this._d + 1);
+    const r = findIn(m, p, m.o[N_LO], key, m.cose && this.#d === 0);
+    return r < 0 ? undefined : new View(m, r, this.#d + 1);
   }
   /** Element i of an array, or undefined. */
   at(i) {
-    const m = this._m, p = this._p;
+    const m = this.#m, p = this.#p;
     m.head(p); want(m.o[N_MAJOR] === 4, 'an array');
     const r = elementIn(m, p, m.o[N_LO], i);
-    return r < 0 ? undefined : new View(m, r, this._d + 1);
+    return r < 0 ? undefined : new View(m, r, this.#d + 1);
   }
   /** [key, View] per map entry in encoded-key order, or [index, View] per array element. */
   *entries() {
-    const m = this._m, c = m.head(this._p), major = m.o[N_MAJOR], n = m.o[N_LO], d = this._d + 1;
+    const m = this.#m, c = m.head(this.#p), major = m.o[N_MAJOR], n = m.o[N_LO], d = this.#d + 1;
     want(major === 4 || major === 5, 'an array or map');
     let q = c;
     for (let i = 0; i < n; i++) {
@@ -320,39 +329,39 @@ export class View {
   *values() { for (const [, v] of this.entries()) yield v; }
 
   /** An int as a number (RangeError outside ±(2^53-1)); a float as a number. */
-  number() { return numberAt(this._m, this._p, this); }
+  number() { return numberAt(this.#m, this.#p, this); }
   /** Any int (including tags 2/3) as a bigint. */
-  bigint() { return bigintAt(this._m, this._p); }
+  bigint() { return bigintAt(this.#m, this.#p); }
   /** An int as a number when safe, else a bigint (build()'s choice). */
-  int() { want(kindAt(this._m, this._p) === 'int', 'an integer'); return intAt(this._m, this._p); }
-  text() { return textAt(this._m, this._p); }
-  bool() { return boolAt(this._m, this._p); }
-  isNull() { return isNullAt(this._m, this._p); }
-  isUndefined() { const m = this._m; m.head(this._p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 23; }
+  int() { want(kindAt(this.#m, this.#p) === 'int', 'an integer'); return intAt(this.#m, this.#p); }
+  text() { return textAt(this.#m, this.#p); }
+  bool() { return boolAt(this.#m, this.#p); }
+  isNull() { return isNullAt(this.#m, this.#p); }
+  isUndefined() { const m = this.#m; m.head(this.#p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 23; }
   /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays; a bigint beyond 2^53 - 1), else
    * undefined. */
   get tag() {
-    const m = this._m; m.head(this._p);
+    const m = this.#m; m.head(this.#p);
     if (m.o[N_MAJOR] !== 6) return undefined;
     const hi = m.o[N_HI] >>> 0, lo = m.o[N_LO] >>> 0;
     return hi <= 0x1fffff ? hi * 4294967296 + lo : (BigInt(hi) << 32n) | BigInt(lo);
   }
   /** A View of a tagged item's content. */
   content() {
-    const m = this._m, c = m.head(this._p);
+    const m = this.#m, c = m.head(this.#p);
     want(m.o[N_MAJOR] === 6, 'a tagged item');
-    return new View(m, c, this._d + 1);
+    return new View(m, c, this.#d + 1);
   }
   /** A byte string's content (or a typed array's little-endian payload) as a zero-copy alias; read-only by contract. */
-  bytes() { const [s, e] = payloadAt(this._m, this._p); return this._m.b.subarray(s, e); }
+  bytes() { const [s, e] = payloadAt(this.#m, this.#p); return this.#m.b.subarray(s, e); }
   /** The same bytes, copied. */
-  copyBytes() { const [s, e] = payloadAt(this._m, this._p); return this._m.b.slice(s, e); }
+  copyBytes() { const [s, e] = payloadAt(this.#m, this.#p); return this.#m.b.slice(s, e); }
   /** A typed array as a portable accessor over its payload: { tag, length, get(i) } (little-endian reads; no alignment needed). */
   typedView() {
-    const m = this._m;
-    m.head(this._p); const tag = m.o[N_LO];
-    want(kindAt(m, this._p) === 'typed', 'a typed array');
-    const [s, e] = payloadAt(m, this._p), info = TYPED_BY_TAG.get(tag), size = info.size;
+    const m = this.#m;
+    m.head(this.#p); const tag = m.o[N_LO];
+    want(kindAt(m, this.#p) === 'typed', 'a typed array');
+    const [s, e] = payloadAt(m, this.#p), info = TYPED_BY_TAG.get(tag), size = info.size;
     const dv = new DataView(m.b.buffer, m.b.byteOffset + s, e - s);
     const get = {
       69: i => dv.getUint16(i * 2, true), 70: i => dv.getUint32(i * 4, true), 71: i => dv.getBigUint64(i * 8, true),
@@ -363,15 +372,15 @@ export class View {
     return Object.freeze({ tag, length, get: i => { if (!Number.isInteger(i) || i < 0 || i >= length) throw new RangeError('snug view: typed index out of range'); return get(i); } });
   }
   /** A typed array copied into an aligned native typed array (Float16Bytes where Float16Array is missing). */
-  typed() { want(kindAt(this._m, this._p) === 'typed', 'a typed array'); return this.value(); }
+  typed() { want(kindAt(this.#m, this.#p) === 'typed', 'a typed array'); return this.value(); }
   /** A decimal (tag 4) as the builder's Decimal. */
-  decimal() { want(kindAt(this._m, this._p) === 'decimal', 'a decimal'); return this.value(); }
+  decimal() { want(kindAt(this.#m, this.#p) === 'decimal', 'a decimal'); return this.value(); }
   /** An ndarray (tag 40) as the builder's NDArray. */
-  ndarray() { want(kindAt(this._m, this._p) === 'ndarray', 'an ndarray'); return this.value(); }
+  ndarray() { want(kindAt(this.#m, this.#p) === 'ndarray', 'an ndarray'); return this.value(); }
   /** This item's canonical encoding: a zero-copy alias of its span (read-only by contract). */
-  raw() { return this._m.b.subarray(this._p, this._m.skip(this._p)); }
+  raw() { return this.#m.b.subarray(this.#p, this.#m.skip(this.#p)); }
   /** Materialise this subtree with the trusted builder (decode()'s values). */
-  value() { return valueAt(this._m, this._p, this._d); }
+  value() { return valueAt(this.#m, this.#p, this.#d); }
   /** A mutable cursor starting at this item. */
   cursor() { return new Cursor(this); }
   /** Detached validation (§16.3): does this subtree's span match `rule` (and the profile) as its own document?
@@ -379,10 +388,10 @@ export class View {
   validateAt(rule, options = {}) {
     validateOptions(options, 'viewSpan');
     const { schema } = options;
-    const m = this._m, s = schema ?? m.schema;
+    const m = this.#m, s = schema ?? m.schema;
     if (!s) throw new TypeError('snug view: validateAt needs a schema');
-    const e = m.skip(this._p);
-    return s.validateAt(m.b, this._p, e, rule, { ...m.limits, cose: m.cose && this._d === 0, top: 'any', depth: this._d });
+    const e = m.skip(this.#p);
+    return s.validateAt(m.b, this.#p, e, rule, { ...m.limits, cose: m.cose && this.#d === 0, top: 'any', depth: this.#d });
   }
 }
 
@@ -401,93 +410,96 @@ function half(h) {
  *     c.up();     // only after a successful enter()
  */
 export class Cursor {
+  #m; #base; #p; #k; #f; #n;
   constructor(view) {
-    this._m = view._m; this._base = view._d;
-    this._p = view._p; this._k = -1;            // current item, and its key's position (map entries) or -1
-    this._f = new Int32Array(24); this._n = 0;  // frames: container, index, count, saved key position
+    const parts = viewParts(view);
+    if (parts === null) throw new TypeError('snug view: a Cursor is made from a View');
+    this.#m = parts[0]; this.#base = parts[2];
+    this.#p = parts[1]; this.#k = -1;            // current item, and its key's position (map entries) or -1
+    this.#f = new Int32Array(24); this.#n = 0;  // frames: container, index, count, saved key position
   }
-  get depth() { return this._base + this._n; }
-  get offset() { return this._p; }
-  get kind() { return kindAt(this._m, this._p); }
-  get length() { return lengthAt(this._m, this._p); }
+  get depth() { return this.#base + this.#n; }
+  get offset() { return this.#p; }
+  get kind() { return kindAt(this.#m, this.#p); }
+  get length() { return lengthAt(this.#m, this.#p); }
   /** The current entry's key (decoded), or its index in an array; undefined at the cursor's root. */
   get key() {
-    if (this._n === 0) return undefined;
-    return this._k >= 0 ? keyAt(this._m, this._k) : this._f[4 * this._n - 3];
+    if (this.#n === 0) return undefined;
+    return this.#k >= 0 ? keyAt(this.#m, this.#k) : this.#f[4 * this.#n - 3];
   }
   /** Does the current entry's key equal this string, compared as encoded bytes (no allocation)? */
   keyIs(s) {
-    if (this._k < 0) return false;
-    const m = this._m, e = m.skip(this._k), span = encodeKey(s, false, undefined);
-    if (span === null || e - this._k !== span[1] - span[0]) return false;
-    for (let i = 0; i < e - this._k; i++) if (m.b[this._k + i] !== keyBuf[span[0] + i]) return false;
+    if (this.#k < 0) return false;
+    const m = this.#m, e = m.skip(this.#k), span = encodeKey(s, false, undefined);
+    if (span === null || e - this.#k !== span[1] - span[0]) return false;
+    for (let i = 0; i < e - this.#k; i++) if (m.b[this.#k + i] !== keyBuf[span[0] + i]) return false;
     return true;
   }
   /** Into the current array or map: to its first element (or first entry's value). False, and no move, when not a container or empty. */
   enter() {
-    const m = this._m, c = m.head(this._p), major = m.o[N_MAJOR], n = m.o[N_LO];
+    const m = this.#m, c = m.head(this.#p), major = m.o[N_MAJOR], n = m.o[N_LO];
     if ((major !== 4 && major !== 5) || n === 0) return false;
-    if (4 * (this._n + 1) > this._f.length) { const g = new Int32Array(this._f.length * 2); g.set(this._f); this._f = g; }
-    const f = 4 * this._n;
-    this._f[f] = this._p; this._f[f + 1] = 0; this._f[f + 2] = n; this._f[f + 3] = this._k;
-    this._n++;
-    if (major === 5) { this._k = c; this._p = m.skip(c); } else { this._k = -1; this._p = c; }
+    if (4 * (this.#n + 1) > this.#f.length) { const g = new Int32Array(this.#f.length * 2); g.set(this.#f); this.#f = g; }
+    const f = 4 * this.#n;
+    this.#f[f] = this.#p; this.#f[f + 1] = 0; this.#f[f + 2] = n; this.#f[f + 3] = this.#k;
+    this.#n++;
+    if (major === 5) { this.#k = c; this.#p = m.skip(c); } else { this.#k = -1; this.#p = c; }
     return true;
   }
   /** To the next sibling; false (no move) after the last one or at the cursor's root. */
   next() {
-    if (this._n === 0) return false;
-    const f = 4 * (this._n - 1), i = this._f[f + 1] + 1;
-    if (i >= this._f[f + 2]) return false;
-    const m = this._m;
+    if (this.#n === 0) return false;
+    const f = 4 * (this.#n - 1), i = this.#f[f + 1] + 1;
+    if (i >= this.#f[f + 2]) return false;
+    const m = this.#m;
     // the end of the current item: scalars and strings from their head, containers by a structural skip
-    const c = m.head(this._p), major = m.o[N_MAJOR];
-    const q = major <= 1 || major === 7 ? c : major <= 3 ? c + m.o[N_LO] : m.skip(this._p);
-    this._f[f + 1] = i;
-    if (this._k >= 0) { this._k = q; this._p = m.skip(q); } else this._p = q;
+    const c = m.head(this.#p), major = m.o[N_MAJOR];
+    const q = major <= 1 || major === 7 ? c : major <= 3 ? c + m.o[N_LO] : m.skip(this.#p);
+    this.#f[f + 1] = i;
+    if (this.#k >= 0) { this.#k = q; this.#p = m.skip(q); } else this.#p = q;
     return true;
   }
   /** Back to the enclosing container; false at the cursor's root. */
   up() {
-    if (this._n === 0) return false;
-    this._n--;
-    const f = 4 * this._n;
-    this._p = this._f[f]; this._k = this._f[f + 3];
+    if (this.#n === 0) return false;
+    this.#n--;
+    const f = 4 * this.#n;
+    this.#p = this.#f[f]; this.#k = this.#f[f + 3];
     return true;
   }
   /** Within the current map, move to the entry with this key (true), or stay (false). */
   find(key) {
-    const m = this._m;
-    m.head(this._p); if (m.o[N_MAJOR] !== 5) return false;
-    const n = m.o[N_LO], c = m.head(this._p);
-    const v = findIn(m, this._p, n, key, m.cose && this.depth === 0);
+    const m = this.#m;
+    m.head(this.#p); if (m.o[N_MAJOR] !== 5) return false;
+    const n = m.o[N_LO], c = m.head(this.#p);
+    const v = findIn(m, this.#p, n, key, m.cose && this.depth === 0);
     if (v < 0) return false;
     // the key ends where the value starts; find the key's start by walking (directory or sequential)
     let q = c, i = 0;
-    const d = m.dir(this._p, n);
+    const d = m.dir(this.#p, n);
     if (d !== null) { let lo = 0, hi = n - 1; while (lo <= hi) { const mid = (lo + hi) >> 1; const e = m.skip(d[mid]); if (e === v) { i = mid; q = d[mid]; break; } if (e < v) lo = mid + 1; else hi = mid - 1; } }
     else for (; i < n; i++) { const e = m.skip(q); if (e === v) break; q = m.skip(e); }
-    if (4 * (this._n + 1) > this._f.length) { const g = new Int32Array(this._f.length * 2); g.set(this._f); this._f = g; }
-    const f = 4 * this._n;
-    this._f[f] = this._p; this._f[f + 1] = i; this._f[f + 2] = n; this._f[f + 3] = this._k;
-    this._n++; this._k = q; this._p = v;
+    if (4 * (this.#n + 1) > this.#f.length) { const g = new Int32Array(this.#f.length * 2); g.set(this.#f); this.#f = g; }
+    const f = 4 * this.#n;
+    this.#f[f] = this.#p; this.#f[f + 1] = i; this.#f[f + 2] = n; this.#f[f + 3] = this.#k;
+    this.#n++; this.#k = q; this.#p = v;
     return true;
   }
-  number() { return numberAt(this._m, this._p, this.view()); }
-  bigint() { return bigintAt(this._m, this._p); }
+  number() { return numberAt(this.#m, this.#p, this.view()); }
+  bigint() { return bigintAt(this.#m, this.#p); }
   int() {
-    const m = this._m; m.head(this._p);
+    const m = this.#m; m.head(this.#p);
     const major = m.o[N_MAJOR];
     if (major === 0 && m.o[N_HI] === 0 && m.o[N_LO] >= 0) return m.o[N_LO];   // fast path: below 2^31
     if (major === 1 && m.o[N_HI] === 0 && m.o[N_LO] >= 0) return -1 - m.o[N_LO];
-    want(kindAt(m, this._p) === 'int', 'an integer'); return intAt(m, this._p);
+    want(kindAt(m, this.#p) === 'int', 'an integer'); return intAt(m, this.#p);
   }
-  text() { return textAt(this._m, this._p); }
-  bool() { return boolAt(this._m, this._p); }
-  isNull() { return isNullAt(this._m, this._p); }
+  text() { return textAt(this.#m, this.#p); }
+  bool() { return boolAt(this.#m, this.#p); }
+  isNull() { return isNullAt(this.#m, this.#p); }
   /** A View of the current item (allocates one small object). */
-  view() { return new View(this._m, this._p, this.depth); }
-  value() { return valueAt(this._m, this._p, this.depth); }
+  view() { return new View(this.#m, this.#p, this.depth); }
+  value() { return valueAt(this.#m, this.#p, this.depth); }
 }
 
 // ------------------------------------------------------------------ open
@@ -521,4 +533,6 @@ export function mintView(b, opts, borrowed) {
 }
 
 /** Directory words a view's message holds (for measurements). */
-export function directoryWords(v) { return v._m.dirWords; }
+export function directoryWords(v) { return viewParts(v)[0].dirWords; }
+/** INTERNAL (tests): the message state behind a View. */
+export function messageOf(v) { return viewParts(v)[0]; }

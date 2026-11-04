@@ -388,6 +388,22 @@ export function skipBstr(p, pool, b, s, ss, base, pos, hp, d, fb, ck, nq, end, c
     return ret(ss, base, r);
 }
 
+export function noteLive(b, ss, base, pos, end, wend, nk, req) {
+    // D212 liveness: a tag-40 shape or data note (nk 2, 3) asks for a fixed span
+    // (73, 11 bytes) from the element; when the element already ends in the
+    // window (note-put reads nothing past it) the window suffices; else ask for
+    // one more byte of it, never for bytes past its own end.
+    if ((req <= wend) || ((nk !== 2) && (nk !== 3))) {
+        return req;
+    }
+    const w = prescan(b, ss, base, pos, end, wend);
+    ss[SS_CHN] = -1;
+    if (w === 1) {
+        return wend;
+    }
+    return wend + 1;
+}
+
 export function extNeed(p, s, fb, nq) {
     // D140: the largest maximum item size of the EXT leaves in the query list
     // (their mask admits every item), or -1 when it has none.
@@ -494,7 +510,8 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend, ext) {
     if (note >= 0) {
         const tf = fbase(ss, note >> 2);
         const nk = note & 3;
-        const req = noteReq(b, s, nk, pos, end, wend);
+        const req0 = noteReq(b, s, nk, pos, end, wend);
+        const req = noteLive(b, ss, base, pos, end, wend, nk, req0);
         const g2 = ensure(ss, base, wend, pos, req);
         if (suspended(g2)) {
             return g2;
@@ -608,11 +625,16 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend, ext) {
         const xm = extNeed(p, s, fb, nq);
         if (xm >= 0) {
             const xreq = pos + imin(xm, end - pos);
-            const g7 = ensure(ss, base, wend, pos, xreq);
-            if (suspended(g7)) {
-                return g7;
-            }
-            if (prescan(b, ss, base, pos, end, xreq) === 1) {
+            // D212 liveness: before asking for the leaves' maximum, take the
+            // item whole if it already ends in the window; else ask for one
+            // more byte of it (never for bytes past its own end)
+            if (xreq > wend) {
+                if (prescan(b, ss, base, pos, end, wend) !== 1) {
+                    ss[SS_CHN] = -1;
+                    return need(ss, base, pos, (wend - pos) + 1);
+                }
+                direct = 1;
+            } else if (prescan(b, ss, base, pos, end, xreq) === 1) {
                 direct = 1;
             }
             ss[SS_CHN] = -1;

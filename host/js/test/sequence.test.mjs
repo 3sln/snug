@@ -140,3 +140,73 @@ test('quantum yields change nothing', async () => {
   const a = await collect(readSequence(chunked(body, 5), { schema, rule: 'event', quantum: 1 }));
   assert.deepEqual(a.map(m => [m.index, m.offset, m.length]), parts.map((p, i) => [i, offsets[i], p.length]));
 });
+
+// ---------------------------------------------------------------- review 2026-11-04 findings
+
+test('copy: always copies Node Buffer messages too (Buffer#slice aliases)', () => {
+  for (const make of [b => Buffer.from(b), b => Uint8Array.from(b)]) {
+    const chunk = make([1, 2]);
+    const r = sequenceReader({ copy: 'always' });
+    const { messages } = r.feed(chunk);
+    chunk[0] = 9; chunk[1] = 9;
+    assert.deepEqual(messages.map(m => [m.borrowed, m.view.number()]), [[false, 1], [false, 2]]);
+  }
+});
+
+test('message fields are read-only and the view comes from the checked bytes', () => {
+  const m = sequenceReader({}).feed(encode('ok')).messages[0];
+  assert.throws(() => { m.bytes = Uint8Array.of(0x62, 0xc0, 0xae); }, TypeError);
+  assert.throws(() => { m.index = 7; }, TypeError);
+  assert.equal(m.view.text(), 'ok');
+  assert.deepEqual(Object.keys(m), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(m)), { index: 0, offset: 0, length: 3, borrowed: true });
+});
+
+test('every message is released by its own last byte (no wait for unrelated input)', async () => {
+  const ok = { maxBytes: 64, check: () => true };
+  const cases = [
+    [await compile('r = uint .ok 0', { controls: { ok } }), 'r', [Uint8Array.of(1)]],
+    [await compile('r = { text: tstr .ok 0 }', { controls: { ok } }), 'r', [encode({ text: 'a' })]],
+    [null, null, [Uint8Array.of(0xd8, 0x28, 0x82, 0x81, 0x01, 0x81, 0x01)]],          // tag 40: shape [1], data [1]
+    [null, null, [Uint8Array.of(0xa1, 0x81, 0x01, 0x02)]],                              // a non-text key: {[1]: 2}
+  ];
+  for (const [schema, rule, msgs] of cases) {
+    const bytes = cat(msgs);
+    const r = sequenceReader(schema ? { schema, rule } : {});
+    let got = 0;
+    for (let i = 0; i < bytes.length; i++) got += r.feed(bytes.subarray(i, i + 1)).messages.length;
+    assert.equal(got, msgs.length, `released by its last byte: ${Buffer.from(bytes).toString('hex')}`);
+  }
+});
+
+test('an exception from a predicate ends the sequence after the messages before it', async () => {
+  const schema = await compile('r = uint .check 0', { controls: { check: { maxBytes: 1, check: (_a, item) => { if (item[0] === 2) throw new Error('predicate failed'); return true; } } } });
+  for (const chunks of [[Uint8Array.of(1, 2)], [Uint8Array.of(1), Uint8Array.of(2)]]) {
+    const seen = [];
+    await assert.rejects(async () => { for await (const m of readSequence(chunks, { schema, rule: 'r' })) seen.push(m.view.number()); }, /extension control .check threw/);
+    assert.deepEqual(seen, [1]);
+  }
+  const r = sequenceReader({ schema, rule: 'r' });
+  const res = r.feed(Uint8Array.of(1, 2));
+  assert.deepEqual([res.messages.length, /threw/.test(res.error?.message), r.done], [1, true, true]);
+});
+
+test('readSequence checks one message ahead of the consumer, not a whole chunk', async () => {
+  let calls = 0;
+  const schema = await compile('r = uint .count 0', { controls: { count: { maxBytes: 1, check: () => { calls++; return true; } } } });
+  const it = readSequence([new Uint8Array(10000)], { schema, rule: 'r' });
+  const first = await it.next();
+  assert.equal(first.value.index, 0);
+  assert.ok(calls <= 2, `${calls} messages checked before the first was consumed`);
+  await it.return();
+});
+
+test('splitting many messages out of one assembly copies linearly', async () => {
+  const schema = await compile('r = uint .ok 0', { controls: { ok: { maxBytes: 512, check: () => true } } });
+  const r = sequenceReader({ schema, rule: 'r', maxMessageBytes: 512 });
+  const all = [...r.feed(Uint8Array.of(0)).messages, ...r.feed(new Uint8Array(511)).messages, ...r.end().messages];
+  assert.equal(all.length, 512);
+  const backings = new Set(all.map(m => m.bytes.buffer));
+  const retained = [...backings].reduce((n, b) => n + b.byteLength, 0);
+  assert.ok(retained <= 4 * 512, `${retained} bytes retained for 512 bytes of messages`);
+});

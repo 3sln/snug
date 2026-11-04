@@ -204,10 +204,13 @@ pub struct Sequence<'p> {
     next: u64,
     index: u64,
     done: bool,
-    left: Option<Vec<u8>>,
+    // bytes after a message that ended inside its assembly: the assembly and where they start
+    left: Option<(Vec<u8>, usize)>,
     // the message in progress
     msg: Option<u64>,
+    // the message's assembly is mb[mb_at..] (mb_at > 0 when it began inside an earlier one)
     mb: Vec<u8>,
+    mb_at: usize,
     at: i32,
     end: i64,
     eofed: bool,
@@ -256,6 +259,7 @@ impl<'p> Sequence<'p> {
             left: None,
             msg: None,
             mb: Vec::new(),
+            mb_at: 0,
             at: 0,
             end: 0,
             eofed: false,
@@ -273,7 +277,7 @@ impl<'p> Sequence<'p> {
 
     /// Bytes held for the message in progress (its assembly so far).
     pub fn bytes_held(&self) -> usize {
-        self.mb.len() + self.left.as_ref().map_or(0, Vec::len)
+        self.mlen() + self.left.as_ref().map_or(0, |(v, at)| v.len() - at)
     }
 
     /// The messages this chunk completes (an empty chunk is not the end). After the
@@ -324,6 +328,7 @@ impl<'p> Sequence<'p> {
                     }
                     self.dropping = true;
                     self.mb = Vec::new();
+                    self.mb_at = 0;
                 }
                 // from now on a step only asserts the frontier (an empty window there)
                 self.held = true;
@@ -386,17 +391,22 @@ impl<'p> Sequence<'p> {
         // bytes after the previous message that it had already assembled start this one,
         // unless the chunk being read holds them too (then the message may borrow it)
         let left = self.left.take();
-        self.mb = match c {
-            Some(ch) if o >= ch.base => Vec::new(),
+        (self.mb, self.mb_at) = match c {
+            Some(ch) if o >= ch.base => (Vec::new(), 0),
             _ => left.unwrap_or_default(),
         };
         true
     }
 
+    /// Bytes of the message in its assembly so far.
+    fn mlen(&self) -> usize {
+        self.mb.len() - self.mb_at
+    }
+
     /// Copy the message's bytes from the chunk into its assembly up to absolute `upto`.
     fn absorb(&mut self, c: Option<Chunk<'_>>, upto: u64) {
         let (Some(c), Some(o)) = (c, self.msg) else { return };
-        let from = o + self.mb.len() as u64;
+        let from = o + self.mlen() as u64;
         let to = upto.min(c.base + c.bytes.len() as u64);
         if to <= from {
             return;
@@ -420,15 +430,15 @@ impl<'p> Sequence<'p> {
                 self.asserted = at + w.len() as i64;
                 return self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at);
             }
-            if (self.mb.len() as i64) < end {
+            if (self.mlen() as i64) < end {
                 // a piece that starts in the assembly and continues in the chunk: extend it that far
-                let want = end.min((at + i64::from(vms_need_length(&self.ss))).max(self.mb.len() as i64 + 1));
+                let want = end.min((at + i64::from(vms_need_length(&self.ss))).max(self.mlen() as i64 + 1));
                 self.absorb(c, o + want as u64);
             }
         }
-        let to = (self.mb.len() as i64).min(end) as usize;
+        let to = (self.mlen() as i64).min(end) as usize;
         let lo = (at as usize).min(to);
-        let w = &self.mb[lo..to];
+        let w = &self.mb[self.mb_at + lo..self.mb_at + to];
         self.asserted = to as i64;
         self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at)
     }
@@ -460,7 +470,7 @@ impl<'p> Sequence<'p> {
         if code == 0 || (self.skip && ml >= 0 && skippable_code(code)) {
             let len = ml as u64;
             let whole = match c {
-                Some(ch) if self.mb.is_empty() && o >= ch.base && o + len <= ch.base + ch.bytes.len() as u64 => Some(ch),
+                Some(ch) if self.mlen() == 0 && o >= ch.base && o + len <= ch.base + ch.bytes.len() as u64 => Some(ch),
                 _ => None,
             };
             let item = if let Some(ch) = whole {
@@ -472,14 +482,22 @@ impl<'p> Sequence<'p> {
                     Err(self.fault(o))
                 }
             } else {
-                // assembled across chunks: each byte copied once; bytes past it start the next message
+                // assembled across chunks; the bytes after it stay in the assembly (an offset, no
+                // copy of the tail), the message gets exactly its own bytes, so splitting many
+                // messages out of one assembly copies each byte once (review 2026-11-04 #5)
                 self.absorb(c, o + len);
-                let mut mb = std::mem::take(&mut self.mb);
-                if mb.len() > ml as usize {
-                    self.left = Some(mb.split_off(ml as usize));
-                }
+                let mb = std::mem::take(&mut self.mb);
+                let at = std::mem::take(&mut self.mb_at);
+                let ml = ml as usize;
+                let bytes = if at == 0 && mb.len() == ml { mb } else {
+                    let own = mb[at..at + ml].to_vec();
+                    if mb.len() > at + ml {
+                        self.left = Some((mb, at + ml));
+                    }
+                    own
+                };
                 if code == 0 {
-                    Ok(Message { index: self.index, offset: o, bytes: Cow::Owned(mb) })
+                    Ok(Message { index: self.index, offset: o, bytes: Cow::Owned(bytes) })
                 } else {
                     Err(self.fault(o))
                 }
@@ -489,6 +507,7 @@ impl<'p> Sequence<'p> {
             self.next = o + len;
             self.msg = None;
             self.mb = Vec::new();
+            self.mb_at = 0;
             return true;
         }
         self.stop(out);
@@ -501,6 +520,7 @@ impl<'p> Sequence<'p> {
         self.done = true;
         self.msg = None;
         self.mb = Vec::new();
+        self.mb_at = 0;
     }
 
     fn fault(&self, o: u64) -> Error {

@@ -1024,10 +1024,8 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
         }
         if kx < (-1) {
             let want: i32 = ((-2) - kx) - start;
-            let twice: i32 = 2 * (wend - start);
-            if twice > want {
-                return need(ss, base, start, twice);
-            }
+            // D212 liveness: exactly what key-end-any needs next (never a
+            // doubled window: it could reach past the key and the message)
             return need(ss, base, start, want);
         }
         ke = kx;

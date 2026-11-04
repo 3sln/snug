@@ -589,14 +589,28 @@ View:
 import { readSequence } from 'snug/sequence';
 const schema = await compile('event = { type: tstr, seq: uint, ? text: tstr }');
 
-const res = await fetch(url, { headers: { accept: 'application/cbor-seq' } });
+const abort = new AbortController();           // abort() cancels even while waiting for bytes
+const res = await fetch(url, { headers: { accept: 'application/cbor-seq' }, signal: abort.signal });
+if (!res.ok) throw new Error(`HTTP ${res.status}`);
+if (!res.headers.get('content-type')?.startsWith('application/cbor-seq')) throw new Error('not a CBOR sequence');
+if (res.body === null) throw new Error('no body');
+let expected = 1;                               // the application's own sequence numbers
 for await (const m of readSequence(res.body, { schema, rule: 'event' })) {
-  switch (m.view.get('type').text()) {          // reads two fields, decodes nothing else
-    case 'note': show(m.view.get('text').text()); break;
-    case 'tick': tick(m.view.get('seq').number()); break;
-  }
+  const seq = m.view.get('seq').number();       // reads the fields it needs, decodes nothing else
+  if (seq !== expected) resync(expected, seq);  // a gap: reconnect / replay by your protocol
+  expected = seq + 1;
+  if (m.view.get('type').text() === 'note') show(m.view.get('text').text());
 }
 ```
+
+Check the HTTP status, the media type and a non-null body before reading.
+Leaving the loop cancels the body, but an async generator cannot interrupt a
+read that is still waiting for the network: cancel with the fetch's
+`AbortController` (the pending read then rejects and the loop throws). RFC
+8742 framing cannot tell that a whole final message never arrived (the
+stream simply ends at a boundary), and it has no retry semantics: use your
+own sequence numbers or end marker and reconnect rules when completeness
+matters.
 
 The [runnable example](../examples/sequence-sse.mjs) simulates such a response
 locally. Each message `m` is `{ index, offset, length, bytes, borrowed, view }`:
@@ -607,9 +621,22 @@ plain value).
 **One pass per message.** The same walk finds where a message ends and checks
 it — the wire profile, and the schema rule when you give one — so the View is
 opened from that verdict without scanning again. Without `schema` each message
-is profile-checked only. A message's verdict is exactly what `schema.validate`
-(or `decode`'s check) gives for that message's bytes, offsets made absolute
-(gated by `bb sequence-test` under every chunking). Single-document APIs
+is profile-checked only. An **accepted** message's verdict is exactly what
+`schema.validate` (or `decode`'s check) gives for that message's bytes, and a
+schema refusal of a complete message likewise (offsets made absolute). A
+message that does not complete has no bytes of its own: its refusal is the
+buffer check's over the bytes from its start up to `maxMessageBytes` (the
+following messages' bytes included), so a truncation inside a tag-24 payload
+can be `cbor/too_large` when more than `maxMessageBytes` bytes follow while
+the same bytes alone say `cbor/truncated` (architecture §18.1). All of this is
+gated by `bb sequence-test` under every chunking.
+
+**Delivery.** A message is yielded as soon as its own last byte has arrived:
+the walk never waits for bytes past the message's end (gated: every accepted
+message, with one-byte chunks, is released by the feed that completes it).
+`readSequence` checks one message ahead of your loop, so `break` stops the
+work at the next boundary; the push reader returns all the messages a chunk
+completes. Single-document APIs
 (`decode`, `view`, `validateStream`, …) still refuse a second root as
 `cbor/trailing`; sequences are only read by these functions.
 
@@ -642,13 +669,25 @@ from `too_large`).
 
 **Borrowed bytes.** A message lying wholly inside one chunk is a subarray of
 that chunk (`borrowed: true`, no copy); one spanning chunks is assembled into
-a single fresh buffer, each byte copied once. snug never writes to a chunk,
-but a borrowed message and its View alias it, so the chunk must not change
-while you use them. `fetch` bodies, `ReadableStream` default readers, Node
-streams and generators of new arrays hand over fresh chunks: the default
-`copy: 'spanning'` is safe. With a BYOB reader, a pooled buffer, or a push
-caller that reuses its chunk after `feed` returns, use `copy: 'always'`.
-SharedArrayBuffer chunks are refused.
+a fresh buffer of its own. snug never writes to a chunk, but a borrowed
+message and its View alias it, so the default `copy: 'spanning'` is safe only
+when the producer never mutates, recycles or transfers a chunk's buffer after
+handing it over. A `fetch` body's byte stream meets that requirement. A
+default `ReadableStream` reader does not by itself: it hands over whatever
+object the producer enqueued, so an arbitrary stream (or a custom Node
+stream, a pooled-buffer source, a BYOB adapter that passes the previous view
+back to `read`, a push caller that reuses its chunk after `feed`) needs
+`copy: 'always'`, which gives every message a plain copy (Node `Buffer`
+chunks included). A retained borrowed message keeps its whole chunk's buffer
+alive. SharedArrayBuffer chunks are refused.
+
+**Errors that are not refusals.** An extension predicate that throws ends the
+sequence after the messages before it: `readSequence` yields those, then
+throws; the push reader returns them with the exception as `error`. Transport
+failures (a rejected read, a network error) pass through unchanged, as for
+the other sources — they are not SnugFaults or SourceErrors and may carry
+arbitrary text: sanitise before logging. A non-Uint8Array chunk is
+SourceError `bad_chunk`.
 
 **Push.** Without an async source, `sequenceReader(options)` gives
 `feed(chunk)` and `end()`, each answering `{ messages, skipped, error }`;

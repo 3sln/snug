@@ -3611,7 +3611,17 @@ when P8.4 gives the session VM a valid-CBOR mode (indefinite lengths ended by
 a break, unsorted keys), sequences pick it up through the same options with
 no change here — an indefinite item simply has no length claim to hold, and
 its end is the break the walk reads. The View's key-order early exits are
-the view module's concern under P8.4, not the reader's.
+the view module's concern under P8.4, not the reader's. *Correction (review
+2026-11-04 #12):* "no change" is too strong for the planned implementation:
+the hosts' drivers must also learn any new session status (§19.7's
+`VMS_GROW`: growth and resume with fixed arrays), the option admission of a
+`valid` wire, and split-at-every-byte tests around breaks.
+*Amendment (liveness, review 2026-11-04 #1):* a complete message must be
+released by its own bytes. The session no longer asks past an item's end: an
+extension leaf's maximum span and a tag-40 note's fixed span are asked for
+only when the item does not already end in the window (prescan), and then one
+more byte at a time; key reads ask for exactly what `key-end-any` needs
+(no doubled window). `bb sequence-test` asserts it.
 - [ ] **Signed off** (owner)
 
 ### D213 — Limits apply per message; no per-sequence cap in this slice (P7.13)
@@ -3656,6 +3666,17 @@ messages are `Cow<'chunk, [u8]>`, iterator messages owned.
 **Why**: zero copy for the common case (small events in large chunks) and a
 contiguous buffer for the View; the capability keeps §16.2's rule that a View
 means "checked" (V1/V2).
+*Amendment (review 2026-11-04 #2–#5):* `copy: 'always'` copies with
+`new Uint8Array` (Node `Buffer#slice` aliases); message fields are private
+getters and the View is minted from the checked bytes, not a public field;
+View and Cursor keep their state in private fields and refuse construction
+outside the view module (a brand check on its private Message class), which
+closes the pre-existing `new View(fakeState)` escape; assembly growth is
+capped at P and splitting messages out of an assembly is linear (a view of
+the tail, exact copies out; Rust keeps an offset instead of `split_off`);
+`readSequence` pauses after each message. Borrowing requires a producer that
+never mutates, recycles or transfers a handed-over buffer — a default
+`ReadableStream` reader does not guarantee it by itself.
 **Alternatives**: always copy (simplest, costs a memcpy per message); a
 public `view(bytes, {trusted: true})` (rejected by V1/V2); views over a
 chunk list (every accessor would need to handle discontiguous bytes).
@@ -3667,6 +3688,10 @@ with `code`, `reason`, `path`, `offset` (absolute), `subcode`, `index`,
 `messageOffset`, `skippable`. Rust: `Error::Sequence(MessageFailure {index,
 message_offset, offset, failure, skippable})`, `failure.offset` relative.
 **Why**: D103's one catchable family; no payload.
+*Amendment (review 2026-11-04 #6, #8):* an exception from an extension
+predicate ends the sequence after the messages before it (readSequence yields
+them, then throws; the push result carries it as `error`); transport
+exceptions pass through unchanged, as for the other sources.
 **Alternatives**: a SequenceError class (a fourth family); result objects in
 the stream (every loop would test `ok`).
 - [ ] **Signed off** (owner)
@@ -5958,13 +5983,28 @@ are answered as provisional decisions D082–D085. None is open now.
     while a verdict is held (an oversize message waits for P bytes: quadratic
     copying); one 1,500,001-zero-byte vector is 1.5 million messages as a
     sequence, so the gate cuts sequences at 2,000 messages and keeps one uncut
-    run. Release latency: an accepted message waits for a byte past its end
-    only when the walk asks for more than the item (tag-40 notes, non-text
-    keys crossing a window, extension-control whole reads) — counted by the
-    gate, zero for text-keyed events.
+    run. Release latency: an accepted message waited for a byte past its end
+    whenever the walk asked for more than the item (tag-40 notes, non-text
+    keys crossing a window, extension-control whole reads — including
+    text-keyed events using a control such as `.chars`); the first commits
+    only counted it. Fixed after the review (below): now asserted zero.
   - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
     exports and the native sequence host driven through the SDK session
     wrapper; views over a JS-side copy of each message.
+  - **Review 2026-11-04 (docs/reviews/2026-11-04-sequences.md) addressed:**
+    #1 liveness in kin (`vm-session.kin` `note-live` and the EXT whole read,
+    `vm-session-cont.kin` key reads; D212 amendment), gated; #2 Buffer copy;
+    #3 private message/View/Cursor state; #4 per-message pacing in
+    readSequence; #5 linear assembly (JS and Rust); #6 exception after the
+    earlier messages; #7, #8, #10 docs (ownership precisely, transport
+    exceptions, verdict wording for refusals, SSE recipe with status /
+    media type / null body / AbortController / sequence numbers); #9 the gate
+    asserts last-byte release and the strict borrow rule, npm tests cover
+    Buffer, read-only fields, exception order, work before the first yield and
+    assembly retention. Not done: an independent RFC framer in the gate (the
+    reviewer's own 40,400-comparison parity probe is the independent check for
+    now); the SDK's view.mjs has the same public-state escape (host/wasm-sdk
+    is under the P7.13w block).
 - [!] **P7.13w — wasm SDK sequence reader: BLOCKED pending owner authorisation**
   (2026-11-04). P7.9c landed (88263f1) and the manager asked for the SDK
   reader, but this session's permission system refused the edit to

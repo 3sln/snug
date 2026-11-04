@@ -243,11 +243,12 @@ async function hostRun(q, policy, skip) {
   if (anyCase) { const d = [1500000, 32, 65536, 131072]; oLim = Int32Array.from(lim); for (let k = 0; k < 4; k++) if (oLim[2 + k] < 0) oLim[2 + k] = d[k]; }
   const want0 = oracleSequence(oP, oB, q.rule, oLim, q.S, { skip }).lines.join(' | ');
   const ends = chunkEnds(q.S.length, policy);
-  // D215's rule: a message is borrowed iff it lies inside one chunk AND is released while that
-  // chunk is being read (a message completed in a later feed -- after an item whose walk asked
-  // past its end -- is an assembly: a chunk is never retained after its feed returned)
+  // D215's rule: a message is borrowed iff it lies inside one chunk -- it is then released while
+  // that chunk is read (D212 liveness: no walk asks past its item's end), so the chunk is never
+  // retained after its feed returned
   const chunkOf = at => { for (let k = 0; k < ends.length; k++) if (at < ends[k]) return k; return -1; };
-  const borrowRule = (m, current) => (chunkOf(m.offset) === chunkOf(m.offset + m.length - 1) && chunkOf(m.offset) === current);
+  const borrowRule = (m, current) => chunkOf(m.offset) === chunkOf(m.offset + m.length - 1) && chunkOf(m.offset) === current;
+  const inOneChunk = m => chunkOf(m.offset) === chunkOf(m.offset + m.length - 1);
   const renderer = anyCase ? anyHost : hp;
   const want = hostWant(renderer, want0), wantAlways = want;
   let pulled = -1;   // the chunk being read (readSequence pulls one chunk per feed); ends.length at the end
@@ -267,7 +268,7 @@ async function hostRun(q, policy, skip) {
         const v2 = openView(m.bytes.slice(), schema ? { ...vo, schema, rule: rr, maxBytes: maxMessageBytes } : { ...vo, maxBytes: maxMessageBytes });
         if (walk(m.view) !== walk(v2)) hfail(`${q.label}: message ${m.index} view walk differs from a View opened on its bytes`);
       }
-      if (m.borrowed !== borrowRule(m, pulled)) hfail(`readSequence ${q.label} ${JSON.stringify(policy)}: message ${m.index} borrowed ${m.borrowed}, but the rule says ${!m.borrowed}`);
+      if (m.borrowed !== borrowRule(m, pulled) || m.borrowed !== inOneChunk(m)) hfail(`readSequence ${q.label} ${JSON.stringify(policy)}: message ${m.index} borrowed ${m.borrowed}, but the rule says ${!m.borrowed}`);
       got.push(`m ${m.index} ${m.offset} ${m.length}`);
     }
     got.push('end');
@@ -350,7 +351,7 @@ line(agree === runs.length - ffRuns, `kin sequence mode == oracle (D211): ${agre
 console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle outcomes: ${outcome.m} messages, ${outcome.s} skipped, ${outcome.x} stops, ${outcome.end} clean ends`);
 line(ffBad === 0, `fail-fast: ${ffRuns - ffBad}/${ffRuns} runs give the oracle's messages and decision (${ffEarly} stopped early with another code or offset)`);
 line(true, `JS bounds: ${guarded} runs behind throwing out-of-bounds traps (failures above if any)`);
-console.log(`  info release latency: ${late} of ${lateMsgs} accepted messages in 1-byte runs waited for a byte past their end (tag-40 notes, non-text keys crossing a window, extension-control whole reads)`);
+line(late === 0, `release latency (D212 liveness): ${late} of ${lateMsgs} accepted messages in 1-byte runs waited for a byte past their own end`);
 line(hostFails === 0, `JS hosts: readSequence (spanning) and sequenceReader (always) == the oracle on ${hostRuns.length} host runs; ${hostMsgs} messages (${borrowedMsgs} borrowed, ${assembledMsgs} assembled), ${walks} view walks equal to a View on the bytes (${(tHost / 1000).toFixed(1)} s)`);
 console.log(rustLine);
 console.log(rustHostLine);

@@ -337,6 +337,14 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
     let mut lines: Vec<String> = Vec::new();
     let mut from = 0usize;
     let mut stopped = false;
+    let ends = chunk_ends(input.len(), kind, w, seed, k);
+    // D215 with D212 liveness: borrowed iff the message lies inside one chunk (it is then
+    // released by the feed of that chunk)
+    let one_chunk = |o: usize, len: usize| -> bool {
+        let first = ends.iter().position(|&e| o < e);
+        let last = ends.iter().position(|&e| o + len - 1 < e);
+        first.is_some() && first == last
+    };
     let take = |items: Vec<Result<snug::Message<'_>, Error>>, chunk_from: usize, chunk_to: usize, lines: &mut Vec<String>| -> bool {
         for it in items {
             match it {
@@ -350,7 +358,7 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
                     // D215: borrowed iff inside the chunk this feed was given (a message completed in a
                     // later feed owns its assembly)
                     lines.push(format!("m {} {} {}{}{}", m.index, o, len, if good && vw { "" } else { " BAD" },
-                                       if borrowed != inside { " BADBORROW" } else { "" }));
+                                       if borrowed != inside || borrowed != one_chunk(o, len) { " BADBORROW" } else { "" }));
                 }
                 Err(e) => {
                     let stop = !matches!(&e, Error::Sequence(f) if f.skippable && opts.on_invalid == OnInvalid::Skip);
@@ -363,7 +371,7 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
         }
         false
     };
-    for end in chunk_ends(input.len(), kind, w, seed, k) {
+    for &end in &ends {
         let chunk = input[from..end].to_vec();
         let items = seq.feed(&chunk);
         if take(items, from, end, &mut lines) {

@@ -35,7 +35,9 @@ const stream = new ReadableStream({
 const fetchLike = async () => new Response(stream, { headers: { 'content-type': 'application/cbor-seq' } });
 
 // The client side.
-const res = await fetchLike('https://example.invalid/events', { headers: { accept: 'application/cbor-seq' } });
+const abort = new AbortController();   // abort() would cancel even a read that is waiting for bytes
+const res = await fetchLike('https://example.invalid/events', { headers: { accept: 'application/cbor-seq' }, signal: abort.signal });
+assert.ok(res.ok && res.headers.get('content-type').startsWith('application/cbor-seq') && res.body !== null);
 const seen = [];
 for await (const m of readSequence(res.body, { schema, rule: 'event', maxMessageBytes: 4096 })) {
   const type = m.view.get('type').text();
