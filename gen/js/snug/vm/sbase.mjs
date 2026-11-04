@@ -3,7 +3,7 @@
 
 import { CODE_DECIMAL, CODE_DUPLICATE_KEY, CODE_KEY_ORDER, CODE_NDARRAY, O_ERR_POS, O_ITEMS, O_MAX_DEPTH } from '../cbor/codes.mjs';
 import { be16, be32, enterContainer, fail, headSize, smallArg } from '../cbor/head.mjs';
-import { stdAllowed } from '../cbor/stdtags.mjs';
+import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { exponentOk, mantissaOk, typedSize } from '../cbor/tags.mjs';
 import { lim } from './api.mjs';
 import { c64min, charge } from './base.mjs';
@@ -481,9 +481,6 @@ export function keyMaxClaim(b, start, end, wend) {
             rem += 2 * lo;
         }
         if (major === 6) {
-            if (hi !== 0) {
-                return mc;
-            }
             rem += 1;
         }
     }
@@ -946,7 +943,7 @@ export function prescan(b, ss, base, pos, end, cut) {
             rem -= 1;
         } else {
             let n;
-            if ((hi !== 0) || (lo < 0)) {
+            if ((major !== 6) && ((hi !== 0) || (lo < 0))) {
                 return pstop(ss, lvl);
             }
             n = lo;
@@ -962,8 +959,13 @@ export function prescan(b, ss, base, pos, end, cut) {
                 n = 2 * lo;
             }
             if (major === 6) {
-                if ((lo !== 2) && ((lo !== 3) && ((lo !== 4) && ((lo !== 40) && (typedSize(lo) === 0))))) {
-                    if (!stdAllowed(ss[SS_PROF], lo, 0)) {
+                // a tag of any number (D180): the rule tag decides
+                const rt = ruleTag(hi, lo);
+                if ((hi !== 0) && (!anyTags(ss[SS_PROF]))) {
+                    return pstop(ss, lvl);
+                }
+                if ((rt !== 2) && ((rt !== 3) && ((rt !== 4) && ((rt !== 40) && (typedSize(rt) === 0))))) {
+                    if (!stdAllowed(ss[SS_PROF], rt, 0)) {
                         return pstop(ss, lvl);
                     }
                 }
@@ -1078,7 +1080,7 @@ export function prescanRun(b, ss, base, pos, end, cut, rem0) {
             rem -= 1;
         } else {
             let n;
-            if ((hi !== 0) || (lo < 0)) {
+            if ((major !== 6) && ((hi !== 0) || (lo < 0))) {
                 return rstop(ss, lvl, i + 1, base);
             }
             n = lo;
@@ -1094,8 +1096,13 @@ export function prescanRun(b, ss, base, pos, end, cut, rem0) {
                 n = 2 * lo;
             }
             if (major === 6) {
-                if ((lo !== 2) && ((lo !== 3) && ((lo !== 4) && ((lo !== 40) && (typedSize(lo) === 0))))) {
-                    if (!stdAllowed(ss[SS_PROF], lo, 0)) {
+                // a tag of any number (D180): the rule tag decides
+                const rt = ruleTag(hi, lo);
+                if ((hi !== 0) && (!anyTags(ss[SS_PROF]))) {
+                    return rstop(ss, lvl, i + 1, base);
+                }
+                if ((rt !== 2) && ((rt !== 3) && ((rt !== 4) && ((rt !== 40) && (typedSize(rt) === 0))))) {
+                    if (!stdAllowed(ss[SS_PROF], rt, 0)) {
                         return rstop(ss, lvl, i + 1, base);
                     }
                 }

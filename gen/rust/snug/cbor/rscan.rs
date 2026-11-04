@@ -263,12 +263,13 @@ pub fn note_head(b: &[u8], s: &mut [i32], sp: i32, pos: i32, p: i32, major: i32,
     let elem: i32 = s[(tb + F_STATE) as usize];
     if kind == K_STD {
         // A standard-set tag's content (D121): the verdict its head decides --
-        // tag 1's whole rule (a float's payload is part of its head), the
+        // tag 1's whole rule (a float's payload is part of its head) and an
+        // any-level typed array's (D180: a byte string of whole elements), the
         // major type for 0, 24 and 32 (their content is checked whole at the end).
         let stag: i32 = s[(tb + F_STAG) as usize];
         let mut ok: i32 = 1;
-        if stag == 1 {
-            if !std_content_ok(b, 1, pos, p) {
+        if (stag == 1) || (typed_any_size(stag) > 0) {
+            if !std_content_ok(b, stag, pos, p) {
                 ok = 0;
             }
         }
@@ -578,24 +579,26 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                     r = fail(o, pos, CODE_DEPTH);
                     break;
                 }
-                if hi != 0 {
+                if (hi != 0) && (!any_tags(o[(O_PROFILE) as usize])) {
                     r = fail(o, pos, CODE_TAG);
                     break;
                 }
+                // rt: the rule tag of the number (D180, rule-tag)
+                let rt: i32 = rule_tag(hi, lo);
                 s[(S_TPOS) as usize] = pos + base;
-                s[(S_TTAG) as usize] = lo;
+                s[(S_TTAG) as usize] = rt;
                 pos = p;
-                if (lo == 2) || (lo == 3) {
+                if (rt == 2) || (rt == 3) {
                     phase = PH_BIGNUM;
                     continue;
                 }
-                if (lo == 4) || (lo == 40) {
+                if (rt == 4) || (rt == 40) {
                     phase = PH_PAIR;
                     continue;
                 }
-                let size: i32 = typed_size(lo);
+                let size: i32 = typed_size(rt);
                 if size == 0 {
-                    if !std_allowed(o[(O_PROFILE) as usize], lo, depth) {
+                    if !std_allowed(o[(O_PROFILE) as usize], rt, depth) {
                         r = fail(o, s[(S_TPOS) as usize] - base, CODE_TAG);
                         break;
                     }
@@ -607,7 +610,7 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                     s[(xb + F_REM) as usize] = 1;
                     s[(xb + F_STATE) as usize] = 0;
                     s[(xb + F_TPOS) as usize] = s[(S_TPOS) as usize];
-                    s[(xb + F_STAG) as usize] = lo;
+                    s[(xb + F_STAG) as usize] = rt;
                     s[(xb + F_EXPOK) as usize] = 0;
                     s[(xb + F_COUNT) as usize] = pos + base;
                     sp += 1;
@@ -860,7 +863,9 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
             }
             // A tag-0/32 text is in the window whole: scanned in this step.
             if sp > 0 {
-                if s[((S_FRAMES + ((sp - 1) * FW)) + F_KIND) as usize] == K_STD {
+                let tf0: i32 = S_FRAMES + ((sp - 1) * FW);
+                let st0: i32 = s[(tf0 + F_STAG) as usize];
+                if (s[(tf0 + F_KIND) as usize] == K_STD) && ((st0 == 0) || (st0 == 32)) {
                     if work < (stop - pos) {
                         work = stop - pos;
                     }

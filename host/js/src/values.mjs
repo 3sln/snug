@@ -86,13 +86,18 @@ export class NDArray {
 Object.freeze(NDArray.prototype);
 
 
-/** A tagged item of the standard tag set (D121, D123): tag 0 (RFC 3339 date/time text), 1 (epoch number), 21-23
- * (expected base64url / base64 / base16 conversions), 24 (an encoded CBOR data item: `value` is its bytes), 32 (URI
- * text) or 55799 (self-described CBOR, top level only). `value` is the decoded content. Immutable (shallowly: a byte
- * string value is a Uint8Array). The tag number and the content are checked against the profile when encoded. */
+/** A tagged item outside the Bindle set (D121, D123, D180): a standard-set tag -- 0 (RFC 3339 date/time text), 1
+ * (epoch number), 21-23 (expected base64url / base64 / base16 conversions), 24 (an encoded CBOR data item: `value` is
+ * its bytes), 32 (URI text), 55799 (self-described CBOR, top level only) -- or, under the any-tag level, any other tag
+ * number (COSE 16-18 and 96-98, CWT 61, ...). `tag` is a non-negative integer: a number up to 2^53 - 1, a bigint
+ * beyond (below 2^64). `value` is the decoded content. Immutable (shallowly: a byte string value is a Uint8Array).
+ * The tag number and the content are checked against the profile when encoded. */
 export class Tagged {
   constructor(tag, value) {
-    if (!Number.isSafeInteger(tag) || tag < 0 || tag > 0xffffffff) throw new TypeError('A tag number is an integer in 0..2^32-1.');
+    if (typeof tag === 'bigint') {
+      if (tag < 0n || tag >= 1n << 64n) throw new TypeError('A tag number is an integer in 0..2^64-1.');
+      if (tag <= BigInt(MAX_SAFE)) tag = Number(tag);
+    } else if (!Number.isSafeInteger(tag) || tag < 0) throw new TypeError('A tag number is an integer in 0..2^64-1.');
     this.tag = tag; this.value = value; Object.freeze(this);
   }
 }

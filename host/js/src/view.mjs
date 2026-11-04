@@ -84,6 +84,9 @@ function ok(r) {
 
 // ------------------------------------------------------------------ scalar readers (shared by View and Cursor)
 
+// The tag whose kind a tag head has (D180): its number, or -2 (no known tag) beyond 32 bits.
+const ruleTag = o => (o[N_HI] === 0 ? o[N_LO] >>> 0 : -2);
+
 function kindAt(m, p) {
   m.head(p);
   const o = m.o, major = o[N_MAJOR];
@@ -93,7 +96,7 @@ function kindAt(m, p) {
     case 3: return 'text';
     case 4: return 'array';
     case 5: return 'map';
-    case 6: { const t = o[N_LO]; return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : TYPED_BY_TAG.has(t) ? 'typed' : 'tagged'; }
+    case 6: { const t = ruleTag(o); return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : TYPED_BY_TAG.has(t) ? 'typed' : 'tagged'; }
     default: { const ai = o[N_AI]; return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : 'float'; }
   }
 }
@@ -102,7 +105,7 @@ function lengthAt(m, p) {
   const c = m.head(p), o = m.o, major = o[N_MAJOR];
   if (major >= 2 && major <= 5) return o[N_LO];
   if (major === 6) {
-    const info = TYPED_BY_TAG.get(o[N_LO]);
+    const info = TYPED_BY_TAG.get(ruleTag(o));
     if (info) { m.head(c); return m.o[N_LO] / info.size; }
   }
   return undefined;
@@ -130,8 +133,9 @@ function bigintAt(m, p) {
     const n = (BigInt(o[N_HI] >>> 0) << 32n) | BigInt(o[N_LO] >>> 0);
     return major === 0 ? n : -1n - n;
   }
-  want(major === 6 && (o[N_LO] === 2 || o[N_LO] === 3), 'an integer');
-  const tag = o[N_LO], s = m.head(c), n = m.o[N_LO];
+  const tag = ruleTag(o);
+  want(major === 6 && (tag === 2 || tag === 3), 'an integer');
+  const s = m.head(c), n = m.o[N_LO];
   let v = 0n;
   for (let i = s; i < s + n; i++) v = (v << 8n) | BigInt(m.b[i]);
   return tag === 2 ? v : -1n - v;
@@ -182,7 +186,7 @@ function isNullAt(m, p) { m.head(p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 
 function payloadAt(m, p) {
   const c = m.head(p), o = m.o;
   if (o[N_MAJOR] === 2) return [c, c + o[N_LO]];
-  want(o[N_MAJOR] === 6 && TYPED_BY_TAG.has(o[N_LO]), 'bytes');
+  want(o[N_MAJOR] === 6 && TYPED_BY_TAG.has(ruleTag(o)), 'bytes');
   const s = m.head(c);
   return [s, s + m.o[N_LO]];
 }
@@ -273,7 +277,7 @@ function valueAt(m, p, depth) {
 export class View {
   constructor(m, p, depth) { this._m = m; this._p = p; this._d = depth; }
   /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'array' | 'map' | 'decimal' | 'ndarray' |
-   * 'typed' | 'tagged' (a standard-set tag, D121) */
+   * 'typed' | 'tagged' (any other tag the profile admits, D121, D180) */
   get kind() { return kindAt(this._m, this._p); }
   /** Entries of an array or map, bytes of a bytes/text item, elements of a typed array; else undefined. */
   get length() { return lengthAt(this._m, this._p); }
@@ -325,8 +329,14 @@ export class View {
   bool() { return boolAt(this._m, this._p); }
   isNull() { return isNullAt(this._m, this._p); }
   isUndefined() { const m = this._m; m.head(this._p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 23; }
-  /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays), else undefined. */
-  get tag() { const m = this._m; m.head(this._p); return m.o[N_MAJOR] === 6 ? m.o[N_LO] >>> 0 : undefined; }
+  /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays; a bigint beyond 2^53 - 1), else
+   * undefined. */
+  get tag() {
+    const m = this._m; m.head(this._p);
+    if (m.o[N_MAJOR] !== 6) return undefined;
+    const hi = m.o[N_HI] >>> 0, lo = m.o[N_LO] >>> 0;
+    return hi <= 0x1fffff ? hi * 4294967296 + lo : (BigInt(hi) << 32n) | BigInt(lo);
+  }
   /** A View of a tagged item's content. */
   content() {
     const m = this._m, c = m.head(this._p);

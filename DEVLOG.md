@@ -3137,6 +3137,104 @@ skipped verification (change behaviour). An options-only openSession bag adds
 an unnecessary option shape; positional arguments preserve existing checking.
 - [ ] **Signed off** (owner)
 
+### D180 — An "any tag" level, and the deterministic preset uses it (P7.12)
+**Decision** (profile engineer, provisional; answers D121's open "any tag"
+level): `PF_TAGS` 2 or 3 (`PF_TAGS_ANY` = 8; JS `tags: 'any'`, Rust
+`Tags::Any`) admits every tag number, 64-bit ones included, with any
+well-formed content — the content an ordinary item one level below the tag,
+counted, walked first — except where a rule is known: the Bindle tags (2, 3,
+4, 40, the little-endian typed arrays) and the standard set keep theirs
+(55799 still only at the top), RFC 8949 §9.2's invalid numbers 65535,
+2^32−1 and 2^64−1 are refused (`tag`), and the RFC 8746 typed-array tags
+outside the Bindle set (64–68, 73–75, 80–83, 87) need a byte string of whole
+elements (D182). **The deterministic preset defaults to it**:
+`PF_DETERMINISTIC` = 2 | 8 | 16 | 32 | 64 = 122 (118, the P7.1 preset, is
+`tags: 'standard'`). Tag heads stay shortest like every head.
+**Why**: a general deterministic CBOR library must read COSE (COSE_Sign1 18,
+Encrypt0 16, Mac0 17, Encrypt/Mac/Sign 96–98), CWT (61) and the long tail of
+registered and private tags; RFC 8949 §4.2.1 restricts encodings, not tag
+numbers, and cbor2's CDE mode accepts them. Refusing them by default made
+"valid snug CBOR" narrower than CDE for no determinism gain. Schemas are where
+a protocol narrows tags (`#6.18(...)`), and `tags: 'standard'` keeps the
+narrower policy one option away. The invalid numbers are never data (cbor2
+refuses them too).
+**Alternatives**: keep the standard set as the default (COSE/CWT refused
+out of the box, D123's motivation half met); accept the invalid numbers
+(RFC 8949 reserves them as sentinels); a registry of IANA tags with content
+checks for each (large, and every rule is a refusal a caller might not want);
+a new flag bit instead of the free PF_TAGS values (PF_TAGS had 2 bits, values
+2 and 3 meant "standard" with no caller relying on them).
+- [ ] **Signed off** (owner)
+
+### D181 — Bignum minimality stays in every tag level (P7.12)
+**Decision** (profile engineer, provisional): tags 2/3 keep the P7.1 rule
+under every level: a byte string of 9..128 bytes with no leading zero, i.e.
+a value that does not fit major 0/1 and is written in its shortest
+magnitude. **Why**: RFC 8949 §4.2.1 requires preferred serialization, and
+§3.4.3 defines it for bignums (no leading zeros; integers that fit 64 bits
+use major 0/1); draft-ietf-cbor-cde and cbor2's CDE mode refuse
+non-preferred bignums as well (checked: cbor2 refuses `c24100`). 128 bytes
+is a resource bound (`maxBignumBytes`), not a determinism rule, and keeps its
+code (`bignum`). **Alternatives**: accept leading zeros under the any level
+(two encodings of one value); lift the 128-byte cap with the level (an
+unbounded integer is a resource choice, separate from tag numbers).
+- [ ] **Signed off** (owner)
+
+### D182 — Rule tags: what a tag number's rules are (P7.12)
+**Decision** (profile engineer, provisional): every walker decides a tag by
+its *rule tag* (`snug.cbor.stdtags/rule-tag`): the 32-bit number itself, −1
+for 2^64−1 (2^32−1's rule: refused) and −2 for any other number of more than
+32 bits (no rule). A 64-bit number therefore never takes a 32-bit tag's path
+— tag 2^32+2 is not a bignum, 2^32+24 not an encoded item — while schema
+`TAG`/`TAGSET` leaves compare the whole number (the VM's tests had compared
+the high word with 0; they now compare it with the head's). The any-level
+RFC 8746 tags check only that the content is a byte string whose length is a
+multiple of the element size (1/2/4/8/16), read from the content's head; no
+NaN rule (the Bindle NaN rule is for the little-endian floats it decodes to
+JS typed arrays); 76 (reserved) has no rule. Their content is an item like
+every non-Bindle tag's (counted, a level), unlike the Bindle typed arrays'.
+**Why**: one integer per tag keeps the four walkers, the resumable scanner
+and the session on one path (`std-allowed`, `std-content-ok`) with no extra
+state; −1/−2 are the only 32-bit values whose own rules are "refused" and
+"none", so no rule changes meaning. A whole-element length is the one check
+every RFC 8746 decoder makes. **Alternatives**: carry hi:lo through the rule
+functions (wider signatures in hot paths for no extra behaviour); decode the
+BE forms to typed values (a host-value question, D123); refuse 64–87 outside
+the Bindle set even under the any level (contradicts "any tag").
+- [ ] **Signed off** (owner)
+
+### D183 — Resumable drivers: head rules from the head, tag numbers structural (P7.12)
+**Decision** (profile engineer, provisional): the any-level typed-array rule
+is a head rule. The resumable scanner records it from the content's head in
+the `K_STD` frame (as tag 1's); the session decides it at `T_STD` from the
+content's head (asking for at most 9 bytes) before the walk, holds a refusal
+in `F_TNOTED` and reports it after the content's own refusals, so such
+content is never pinned (D094) and streams through the windows. `key-end-any`
+(and the D085 `key-max-claim`) treat any tag head as one owed item: a tag
+number is not a length, so a 64-bit tag inside a key no longer reads as
+"refused inside the window". The session prescans admit tags by rule tag.
+**Why**: refusal precedence (content first, then the rule) stays the buffer
+walk's; pinning a large byte string just to re-read its 9-byte head would be
+the whole-buffering D124 tries to bound. **Alternatives**: pin and re-read
+like tag 1 (buffers the content); check the rule before the walk (changes
+precedence).
+- [ ] **Signed off** (owner)
+
+### D184 — JS `Tagged` numbers and the Writer's tag refusals (P7.12)
+**Decision** (profile engineer, provisional): `Tagged.tag` is a non-negative
+integer below 2^64 — a number up to 2^53−1, a bigint beyond, a bigint within
+the safe range normalised to a number (as decoded integers are); views'
+`tag` likewise. The builder makes a `Tagged` of every tag but 2, 3, 4, 40 and
+the little-endian typed arrays, which keep their value types (bigint,
+`Decimal`, `NDArray`, typed arrays); encoding a `Tagged` with one of those
+numbers is refused with `tag` (use the value type). Rust's `Value::Tag(u64,
+_)` already carried any number. **Why**: decode and encode stay inverse
+without two representations of one value; bigints only where a number would
+lose bits. **Alternatives**: always bigint (breaks every `t.tag === 18`);
+allow `Tagged(2, bytes)` (a second encoder path for bignums whose result the
+scanner would then judge).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no

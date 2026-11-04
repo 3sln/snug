@@ -74,7 +74,8 @@ pub enum Value {
     Array(Vec<Value>),
     /// Ordered pairs; decoded keys are in canonical encoded-byte order.
     Map(Vec<(Value, Value)>),
-    /// Tag number and its content; allowed content is checked by kin.
+    /// Tag number (any the profile admits, D180) and its content; kin checks
+    /// the number and the content.
     Tag(u64, Box<Value>),
     /// Normalized tag 4 decimal, mantissa × 10^exponent.
     Decimal {

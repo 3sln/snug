@@ -94,13 +94,16 @@ for (const c of sc.cases) {
 
 // 2c. the profile options (P7.1, D120): the deterministic vectors, fixed edge cases and seeded cases under random
 // profile flags (kin/scripts/det-cases.mjs) through the VM against `any` and against a schema that keeps the new
-// shapes live (any keys, the standard tags, undefined, every float), limits word 9 = the flags: the scanner's code,
+// shapes live (any keys, the standard tags, tags of any number (D180, live content for some, 64-bit ones too, `#6`
+// for the rest), undefined, every float), limits word 9 = the flags: the scanner's code,
 // offset and item count under the same flags.
 const LIVE2 = `r = v
 v = [* v] / { * any => v } / int / integer / float / tstr / bstr / bool / null / undefined /
     tdate / time / eb64url / eb64legacy / eb16 / encoded-cbor / uri / cbor-any /
     #6.24(bytes .cbor v) / #6.4([int, integer]) / #6.40([[* uint], [* v] / typed]) / typed / bstr .cbor v /
-    float16 .ge 0.0 / (-1.0 .. 1.0) / (1.5 .. 100000.0)
+    float16 .ge 0.0 / (-1.0 .. 1.0) / (1.5 .. 100000.0) /
+    #6.5(v) / #6.18(v) / #6.61(v) / #6.1000(v) / #6.65(bstr) / #6.4294967294(v) / #6.4294967296(v) /
+    #6.18446744073709551614(v) / #6
 typed = #6.69(bstr) / #6.70(bstr) / #6.71(bstr) / #6.72(bstr) / #6.77(bstr) / #6.78(bstr) /
         #6.79(bstr) / #6.84(bstr) / #6.85(bstr) / #6.86(bstr)`;
 const live2C = compile(LIVE2, { limits: { depth: 256, inputBytes: 0x7fffffff, entries: 1 << 24, items: 1 << 24, budget: 0x7fffffff } });

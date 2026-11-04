@@ -22,7 +22,7 @@
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok]]
             [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad]]
-            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag]]
             [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC]]
             [snug.vm.base :refer [charge c64 c64min]]))
 
@@ -250,7 +250,13 @@
 
 (defn ^:pub ^I32 dead-tag [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (if (>= depth (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
-  (if (!= hi 0) (return (fail s pos CODE_TAG)))
+  (if (!= hi 0)
+    (do (comment "a tag number of more than 32 bits: its rule tag (D180)")
+        (let [rw (rule-tag hi lo)]
+          (if (not (std-allowed (ia s O_PROFILE) rw depth)) (return (fail s pos CODE_TAG)))
+          (let [^I32 qh (dead-item b s p (+ depth 1) end)]
+            (if (< qh 0) (return qh))
+            (return (dead-std-check b s pos rw p qh depth))))))
   (if (or (== lo 2) (== lo 3)) (return (dead-bignum b s pos p (ia s VM_BIGNUM_MAX) end)))
   (if (== lo 4)
     (do (let [c4 (pair-check b s pos p CODE_DECIMAL end)]

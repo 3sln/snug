@@ -8,13 +8,14 @@
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { validateOptions, selectOptions } from './options.mjs';
-import { profileFlags, strictArraysOf, keysOf, standardTags, rfcFloats, undefinedOk, noncharactersOk } from './profiles.mjs';
+import { profileFlags, strictArraysOf, keysOf, standardTags, anyTags, rfcFloats, undefinedOk, noncharactersOk } from './profiles.mjs';
 import { Decimal, NDArray, Float16Bytes, Tagged, typedInfo } from './values.mjs';
 import { copyTypedBytes } from './typed-bytes.mjs';
 import { scan } from './scan.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
 import { putFloat, putFloatRfc } from '../../../gen/js/snug/write/float.mjs';
 import { stdAllowed, stdContentOk, stdInner } from '../../../gen/js/snug/cbor/stdtags.mjs';
+import { typedSize } from '../../../gen/js/snug/cbor/tags.mjs';
 import { putInt } from '../../../gen/js/snug/write/int.mjs';
 import { closeMap, sortKeys, S_BUDGET } from '../../../gen/js/snug/write/map.mjs';
 
@@ -74,14 +75,14 @@ export class Writer {
   #mag = null;                              // bignum magnitude scratch (lazy)
   #items = 0; #code = '';
   #cose; #sorted; #maxDepth; #maxEntries; #maxItems; #maxBytes; #omitUndefined; #strictArrays;
-  #options; #flags; #keys; #std; #rfc; #undef; #nonch;
+  #options; #flags; #keys; #std; #anyTags; #rfc; #undef; #nonch;
 
   constructor(options = {}) {
     validateOptions(options, 'writer');
     const limits = resolveLimits(options.limits ? { ...selectOptions(options, 'limits'), ...selectOptions(options.limits, 'limits') } : options);
     this.#options = options;
     const flags = this.#flags = profileFlags(options);
-    this.#keys = keysOf(flags); this.#std = standardTags(flags); this.#rfc = rfcFloats(flags);
+    this.#keys = keysOf(flags); this.#std = standardTags(flags); this.#anyTags = anyTags(flags); this.#rfc = rfcFloats(flags);
     this.#undef = undefinedOk(flags); this.#nonch = noncharactersOk(flags);
     this.#cose = options.cose === true;
     this.#sorted = options.keysSorted === true;
@@ -333,15 +334,22 @@ export class Writer {
     if (this.#items > this.#maxItems) this.#fail('too_many_items', 'The message exceeds the item bound.');
     return sub.#buf.subarray(0, sub.#pos);
   }
-  /** A standard-set tag (D121): the tag number and its content are checked by kin after the content is written
-   * (snug.cbor.stdtags; a tag-24 payload by the scanner under this profile). */
+  /** A tag outside the Bindle set (D121, D180): the tag number and its content are checked by kin after the content
+   * is written (snug.cbor.stdtags, by the rule tag: the number; beyond 32 bits -2, or -1 for 2^64 - 1; a tag-24 payload by the
+   * scanner under this profile). */
   #tagged(v, depth) {
-    if (!stdAllowed(this.#flags, v.tag, depth)) this.#fail('tag', this.#std ? 'This tag is not in the standard set here.' : 'Tagged values need the standard tag set (profile option tags).');
-    this.#headN(6, v.tag);
+    const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;
+    if (!stdAllowed(this.#flags, rule, depth)) {
+      if (t === 2 || t === 3 || t === 4 || t === 40 || typedSize(rule) > 0) this.#fail('tag', 'This tag has its own value type (a bigint, Decimal, NDArray or typed array).');
+      this.#fail('tag', !this.#std ? 'Tagged values need the standard tag set or any tags (profile option tags).'
+        : t === 55799 ? 'Tag 55799 is allowed only at the top level.' : this.#anyTags ? 'This tag is not allowed here.' : 'This tag is not in the standard set (profile option tags: \'any\').');
+    }
+    if (typeof t === 'bigint') this.#head(6, Number(t >> 32n) | 0, Number(t & 0xffffffffn) | 0);
+    else this.#headN(6, t);
     const q = this.#pos;
     this.#walk(v.value, depth + 1);
-    if (!stdContentOk(this.#buf, v.tag, q, this.#pos)) this.#fail('tag', 'The tag content does not satisfy its tag.');
-    if (v.tag === 24) {
+    if (!stdContentOk(this.#buf, rule, q, this.#pos)) this.#fail('tag', 'The tag content does not satisfy its tag.');
+    if (rule === 24) {
       try { scan(this.#buf.subarray(stdInner(this.#buf, q), this.#pos), { ...selectOptions(this.#options, 'decode'), top: 'any' }); }
       catch (e) { if (e instanceof SnugFault) this.#fail(e.code, 'A tag-24 payload must be one valid data item.'); throw e; }
     }
@@ -411,7 +419,7 @@ export class Writer {
     if (!this.#undef) this.#badArgument('undefined needs the profile option undefinedValue.');
     this.#slot(); this.#count(); this.#head(7, 0, 23); return this;
   }
-  /** A tag of the standard set with its content (as value(new Tagged(tag, content))). */
+  /** A tag outside the Bindle set with its content (as value(new Tagged(tag, content))); tag a number or bigint. */
   tagged(tag, content) { const v = new Tagged(tag, content); this.#slot(); this.#walk(v, this.#depth); return this; }
   text(s) { if (typeof s !== 'string') this.#badArgument('text expects a string.'); this.#slot(); this.#count(); this.#text(s, 'text'); return this; }
   bytes(b) { if (!(b instanceof Uint8Array)) this.#badArgument('bytes expects a Uint8Array.'); this.#slot(); this.#count(); this.#headN(2, b.byteLength); this.#raw(b); return this; }

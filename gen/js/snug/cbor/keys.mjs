@@ -91,10 +91,8 @@ export function keyEndAny(b, start, end, wend) {
             }
             rem += 2 * lo;
         }
+        // a tag's number is not a length: any number owes one item (D180)
         if (major === 6) {
-            if (hi !== 0) {
-                return -1;
-            }
             rem += 1;
         }
     }

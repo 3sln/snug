@@ -5,7 +5,7 @@ import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_KEY_ORD
 import { bytesContent, countItem, enterContainer, fail, readArg, takeLen } from '../cbor/head.mjs';
 import { compareSpans } from '../cbor/keys.mjs';
 import { keyLabel, keyPeek, scanFloat, scanSimple, textBad } from '../cbor/scan.mjs';
-import { stdAllowed, stdContentOk, stdInner } from '../cbor/stdtags.mjs';
+import { ruleTag, stdAllowed, stdContentOk, stdInner } from '../cbor/stdtags.mjs';
 import { dataCount, exponentOk, mantissaOk, shapeOk, typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { c64, c64min, charge } from './base.mjs';
@@ -374,7 +374,16 @@ export function deadTag(b, s, pos, p, hi, lo, depth, end) {
         return fail(s, pos, CODE_DEPTH);
     }
     if (hi !== 0) {
-        return fail(s, pos, CODE_TAG);
+        // a tag number of more than 32 bits: its rule tag (D180)
+        const rw = ruleTag(hi, lo);
+        if (!stdAllowed(s[O_PROFILE], rw, depth)) {
+            return fail(s, pos, CODE_TAG);
+        }
+        const qh = deadItem(b, s, p, depth + 1, end);
+        if (qh < 0) {
+            return qh;
+        }
+        return deadStdCheck(b, s, pos, rw, p, qh, depth);
     }
     if ((lo === 2) || (lo === 3)) {
         return deadBignum(b, s, pos, p, s[VM_BIGNUM_MAX], end);

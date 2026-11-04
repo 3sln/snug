@@ -32,7 +32,7 @@
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count
                                     shape-ok]]
-            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]))
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag]]))
 
 (declarefn item scan-one)
 
@@ -282,9 +282,14 @@
     (return q)))
 
 (defn ^I32 scan-tag [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
-  (comment "A tag is a depth level, checked before its number is looked at.")
+  (comment "A tag is a depth level, checked before its number is looked at. A tag"
+           "number of more than 32 bits follows its rule tag (D180): allowed only"
+           "under the any-tag level, 2^64 - 1 never.")
   (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
-  (if (!= hi 0) (return (fail o pos CODE_TAG)))
+  (if (!= hi 0)
+    (do (let [rw (rule-tag hi lo)]
+          (if (std-allowed (ia o O_PROFILE) rw depth) (return (scan-std b o pos p rw depth end))))
+        (return (fail o pos CODE_TAG))))
   (if (or (== lo 2) (== lo 3)) (return (scan-bignum b o pos p end)))
   (if (== lo 4) (return (scan-decimal b o pos p depth end)))
   (if (== lo 40) (return (scan-ndarray b o pos p depth end)))

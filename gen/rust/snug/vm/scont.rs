@@ -1111,15 +1111,17 @@ pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     }
     let hi: i32 = s[(O_HI) as usize];
     let lo: i32 = s[(O_LO) as usize];
-    let tsize: i32 = typed_size(lo);
-    let std: bool = ((lo != 4) && ((lo != 40) && (tsize == 0))) && std_allowed(s[(O_PROFILE) as usize], lo, d);
+    let rt: i32 = rule_tag(hi, lo);
+    let tsize: i32 = typed_size(rt);
+    let std: bool = ((rt != 4) && ((rt != 40) && (tsize == 0))) && std_allowed(s[(O_PROFILE) as usize], rt, d);
+    // rt: the rule tag (D180); F_TNUM holds it, the TAG/TAGSET tests hi:lo
     if d >= s[(O_MAX_DEPTH) as usize] {
         return err(ss, fail(s, pos, CODE_DEPTH));
     }
-    if hi != 0 {
+    if (hi != 0) && (!any_tags(s[(O_PROFILE) as usize])) {
         return err(ss, fail(s, pos, CODE_TAG));
     }
-    if (lo != 4) && ((lo != 40) && ((tsize == 0) && (!std))) {
+    if (rt != 4) && ((rt != 40) && ((tsize == 0) && (!std))) {
         return err(ss, fail(s, pos, CODE_TAG));
     }
     let f: i32 = fpush(b, ss, ka, base, FK_TAG);
@@ -1129,7 +1131,7 @@ pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     frame_item(ss, f, base, pos, end, d, fb, ck, nq, ctx);
     notes_init(ss, f);
     ss[(f + F_Q) as usize] = q + base;
-    ss[(f + F_TNUM) as usize] = lo;
+    ss[(f + F_TNUM) as usize] = rt;
     ss[(f + F_TSIZE) as usize] = tsize;
     ss[(f + F_TLIVE) as usize] = live;
     ss[(f + F_TCLS) as usize] = 64;
@@ -1155,7 +1157,7 @@ pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
                 }
                 let lb: i32 = q_leaf_base(p, s, fb, i);
                 let istag: bool = kind == K_TAG;
-                let hit: bool = (istag && ((p[(lb + 2) as usize] == 0) && (p[(lb + 3) as usize] == lo))) || ((!istag) && ((cmp_u64(p[(lb + 2) as usize], p[(lb + 3) as usize], 0, lo) <= 0) && (cmp_u64(p[(lb + 4) as usize], p[(lb + 5) as usize], 0, lo) >= 0)));
+                let hit: bool = (istag && ((p[(lb + 2) as usize] == hi) && (p[(lb + 3) as usize] == lo))) || ((!istag) && ((cmp_u64(p[(lb + 2) as usize], p[(lb + 3) as usize], hi, lo) <= 0) && (cmp_u64(p[(lb + 4) as usize], p[(lb + 5) as usize], hi, lo) >= 0)));
                 let mut cts: i32 = p[(lb + 6) as usize];
                 if istag {
                     cts = p[(lb + 4) as usize];
@@ -1187,7 +1189,7 @@ pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     if std {
         // tags 0, 1, 24, 32 read their content again after its walk:
         // pinned until then (D094 replay)
-        if ((lo == 0) || (lo == 1)) || ((lo == 24) || (lo == 32)) {
+        if ((rt == 0) || (rt == 1)) || ((rt == 24) || (rt == 32)) {
             ss[(f + F_PIN) as usize] = q + base;
         }
         return cont(ss, f, T_STD);
@@ -1198,8 +1200,9 @@ pub fn std_need(b: &[u8], tag: i32, q: i32, stop: i32, wend: i32) -> i32 {
     // How far from q a standard tag's content b[q, stop) must be in the window
     // for dead-std-check: nothing for tags 21-23 and 55799 (q); else its first
     // byte, then the whole of a text (tags 0, 32) or byte string (24), at most 9
-    // bytes for tag 1 (these four are pinned). Ask again once the window holds
-    // the answer.
+    // bytes for tag 1 (these four are pinned). An any-level typed array's rule
+    // was decided at its content's head (T_STD, D180): nothing. Ask again once
+    // the window holds the answer.
     if !(((tag == 0) || (tag == 1)) || ((tag == 24) || (tag == 32))) {
         return q;
     }
@@ -1337,6 +1340,32 @@ pub fn tag_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     }
     if ph == T_STD {
         // A standard-set tag's content: the child item (live or dead) at d + 1.
+        // An any-level typed array (D180) decides its rule from the content's
+        // head first, held in F_TNOTED (1 refused) and reported after the walk,
+        // so its content is never pinned.
+        if typed_any_size(lo) > 0 {
+            let mut bad: i32 = 1;
+            if q < end {
+                if (q < 0) || (q >= wend) {
+                    return need(ss, base, q, 1);
+                }
+                let ai_s: i32 = (b[(q) as usize] as i32) & 31;
+                let mut h_s: i32 = 1;
+                if ai_s <= 27 {
+                    h_s = head_size(ai_s);
+                }
+                let hh_s: i32 = imin(h_s, end - q);
+                if (q + hh_s) > wend {
+                    return need(ss, base, q, hh_s);
+                }
+                if (ai_s <= 27) && ((q + h_s) <= end) {
+                    if std_content_ok(b, lo, q, end) {
+                        bad = 0;
+                    }
+                }
+            }
+            ss[(f + F_TNOTED) as usize] = bad;
+        }
         ss[(f + F_PH) as usize] = T_STDRET;
         if (live == 1) && (cnq > 0) {
             let crs: i32 = cset_rec(p, s, ck);
@@ -1359,9 +1388,17 @@ pub fn tag_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         if suspended(g2) {
             return g2;
         }
-        let vs: i32 = dead_std_check(b, s, pos, lo, q, stop_s, d);
+        let ta: i32 = typed_any_size(lo);
+        let mut rs: i32 = lo;
+        if ta > 0 {
+            rs = -1;
+        }
+        let vs: i32 = dead_std_check(b, s, pos, rs, q, stop_s, d);
         if vs < 0 {
             return err(ss, vs);
+        }
+        if (ta > 0) && (ss[(f + F_TNOTED) as usize] == 1) {
+            return err(ss, fail(s, pos, CODE_TAG));
         }
         ss[(f + F_PIN) as usize] = -1;
         ss[(f + F_TCS) as usize] = q + base;

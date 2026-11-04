@@ -101,7 +101,9 @@ same offset (gated).
         **key_order**;
      6. the value is scanned as an item at d+1.
    * 6 tag t: `d ≥ maxDepth` → **depth** (a tag is a level, checked before its
-     number); t ≥ 2^32 → **tag**; then by t (below); any other t → **tag**.
+     number); t ≥ 2^32 → **tag** unless `PF_TAGS` is 2/3 **[flag]** (then
+     its *rule tag*: −2, or −1 for 2^64 − 1, D180); then by t (below); any
+     other t → **tag** unless `PF_TAGS` is 2/3.
    * 7: `ai` 20, 21, 22 (false, true, null) accepted; `f7` undefined
      accepted under `PF_UNDEFINED` **[flag]**; anything else (unassigned
      simple values, `f8 xx` with xx ≥ 24) → **simple**.
@@ -135,7 +137,7 @@ width holds exactly — ±0 and ±∞ in float32/float64 included — →
 | 4 decimal | byte left? (**truncated**) → byte is `82`? (**decimal**) → the inner array AS AN ITEM (counted → **too_many_items**; a level → **depth**; 2 ≤ remaining → **truncated**; 2 ≤ maxEntries → **too_many_entries**) → exponent item → mantissa item (each with all its own refusals) → THEN semantics (**decimal**): exponent major 1 with n ≤ 1023 (−1024..−1); mantissa major 0/1 or tag 2/3, non-zero, not divisible by 10 (n+1 for major 1 and tag 3; remainder over the bytes) | tag + array + both elements (+ their contents) | tag, array |
 | 40 ndarray | as tag 4 up to the semantics, with **ndarray**; then: data an array, or a typed-array tag (counted by bytes / element size); shape an array of 1..8 major-0 integers, each 1..2^53−1, whose product equals the count — product checked by division (`d ≤ count / p`), so it never overflows (**ndarray** for all) | tag + array + shape and data items | tag, array |
 
-Under `PF_TAGS` **[flag]** the standard set adds (D121; checks after the
+Under `PF_TAGS` 1–3 **[flag]** the standard set adds (D121; checks after the
 tag's depth and 32-bit checks):
 
 | Tag | Content check order | Items counted | Depth levels |
@@ -144,8 +146,18 @@ tag's depth and 32-bit checks):
 | 24 | the content as an item at d+1 → a byte string (**tag**) → its payload as ONE item at d+2, bounded by the string's end (its own refusals; **truncated** if it runs past the end, **trailing** at the byte after it) | tag + string + the payload's items | tag, string, payload |
 | 55799 | only at d = 0 of the document (`PF_SUB` clear), else **tag**; then the content as an item | tag + content | tag, content |
 
-Other tags (5, 64, 68, 73–76, 80–83, 87, 1040, …), and the standard ones
-without the flag, → **tag**.
+Under `PF_TAGS` 2 or 3 (any tag, D180) every other tag number is admitted
+(`std-allowed`), by the same path as 21–23:
+
+| Tag | Content check order | Items counted | Depth levels |
+| --- | --- | --- | --- |
+| 65535, 2^32 − 1, 2^64 − 1 (rule tag −1) | **tag** at once (RFC 8949 §9.2 invalid numbers) | the tag | the tag |
+| 64–68, 73–75, 80–83, 87 | the content as an item at d+1 → a byte string whose length is a multiple of the element size (1/2/4/8/16), read from its head (**tag**) | tag + content | tag, content |
+| any other (5, 16–18, 61, 76, 96–98, 1040, ≥ 2^32 …) | the content as an item at d+1 (all its own refusals) | tag + content | tag, content |
+
+A number of more than 32 bits never takes a 32-bit tag's path (2^32 + 2 is
+not a bignum). Under `PF_TAGS` 1 the other tags, and under 0 the standard
+ones too, → **tag**.
 
 ## How it is gated
 
@@ -226,7 +238,8 @@ semantic check runs at the pair's end, in the recursive scanner's order.
 **Standard tags** (P7.1, D124) get a frame of kind 5 (`K_STD`: `F_STAG` 27 the
 tag number, `F_EXPOK` the head verdict, `F_COUNT` the content start). The
 content's head verdict is noted from its head (tag 1's whole rule; the major
-type for 0, 24, 32). The text content of a tag 0/32 and the byte-string
+type for 0, 24, 32; an any-level typed array's whole rule, D180). The text
+content of a tag 0/32 and the byte-string
 content of a tag 24 are **asked for whole** before their walk (and scanned
 without yielding), so the rule — or the tag-24 payload walk by the recursive
 scanner — runs over the window when the content ends.

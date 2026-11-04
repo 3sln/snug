@@ -359,7 +359,16 @@ pub fn dead_tag(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, dep
         return fail(s, pos, CODE_DEPTH);
     }
     if hi != 0 {
-        return fail(s, pos, CODE_TAG);
+        // a tag number of more than 32 bits: its rule tag (D180)
+        let rw: i32 = rule_tag(hi, lo);
+        if !std_allowed(s[(O_PROFILE) as usize], rw, depth) {
+            return fail(s, pos, CODE_TAG);
+        }
+        let qh: i32 = dead_item(b, s, p, depth + 1, end);
+        if qh < 0 {
+            return qh;
+        }
+        return dead_std_check(b, s, pos, rw, p, qh, depth);
     }
     if (lo == 2) || (lo == 3) {
         return dead_bignum(b, s, pos, p, s[(VM_BIGNUM_MAX) as usize], end);

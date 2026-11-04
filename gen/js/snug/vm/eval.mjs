@@ -5,7 +5,7 @@ import { CODE_DECIMAL, CODE_DEPTH, CODE_KEY_TYPE, CODE_NDARRAY, CODE_TAG, CODE_T
 import { be16, be32, enterContainer, fail, readArg, takeLen } from '../cbor/head.mjs';
 import { compareSpans } from '../cbor/keys.mjs';
 import { keyLabel, keyPeek, scanFloat, scanSimple, textBad } from '../cbor/scan.mjs';
-import { stdAllowed } from '../cbor/stdtags.mjs';
+import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
@@ -869,12 +869,15 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
     if (d >= s[O_MAX_DEPTH]) {
         return fail(s, pos, CODE_DEPTH);
     }
-    if (hi !== 0) {
+    if ((hi !== 0) && (!anyTags(s[O_PROFILE]))) {
         return fail(s, pos, CODE_TAG);
     }
-    const big = (lo === 2) || (lo === 3);
-    const tsize = typedSize(lo);
-    const std = ((!big) && ((lo !== 4) && ((lo !== 40) && (tsize === 0)))) && stdAllowed(s[O_PROFILE], lo, d);
+    // rt: the rule tag (D180, rule-tag) of the number hi:lo; the TAG/TAGSET
+    // tests read the whole number
+    const rt = ruleTag(hi, lo);
+    const big = (rt === 2) || (rt === 3);
+    const tsize = typedSize(rt);
+    const std = ((!big) && ((rt !== 4) && ((rt !== 40) && (tsize === 0)))) && stdAllowed(s[O_PROFILE], rt, d);
     const cr = csetRec(p, s, ck);
     const w = csetWidth(p, cr);
     const fw = csetFrame(p, cr);
@@ -885,7 +888,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
     let cnq = 0;
     let cs = q;
     let stop;
-    if ((!big) && ((lo !== 4) && ((lo !== 40) && ((tsize === 0) && (!std))))) {
+    if ((!big) && ((rt !== 4) && ((rt !== 40) && ((tsize === 0) && (!std))))) {
         return fail(s, pos, CODE_TAG);
     }
     if (big) {
@@ -905,7 +908,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
             }
             const lb = qLeafBase(p, s, fb, i);
             const istag = kind === K_TAG;
-            const hit = (istag && ((p[lb + 2] === 0) && (p[lb + 3] === lo))) || ((!istag) && ((cmpU64(p[lb + 2], p[lb + 3], 0, lo) <= 0) && (cmpU64(p[lb + 4], p[lb + 5], 0, lo) >= 0)));
+            const hit = (istag && ((p[lb + 2] === hi) && (p[lb + 3] === lo))) || ((!istag) && ((cmpU64(p[lb + 2], p[lb + 3], hi, lo) <= 0) && (cmpU64(p[lb + 4], p[lb + 5], hi, lo) >= 0)));
             let cts = p[lb + 6];
             if (istag) {
                 cts = p[lb + 4];
@@ -931,7 +934,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
         if (big) {
             stop = deadBignum(b, s, pos, q, s[VM_BIGNUM_MAX], end);
         } else {
-            stop = deadTyped(b, s, pos, q, lo, tsize, end);
+            stop = deadTyped(b, s, pos, q, rt, tsize, end);
         }
         if (stop < 0) {
             return stop;
@@ -952,12 +955,12 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
         if (stop < 0) {
             return stop;
         }
-        stop = deadStdCheck(b, s, pos, lo, q, stop, d);
+        stop = deadStdCheck(b, s, pos, rt, q, stop, d);
         if (stop < 0) {
             return stop;
         }
     } else {
-        const pc = pairCheck(b, s, pos, q, ifCode(lo), end);
+        const pc = pairCheck(b, s, pos, q, ifCode(rt), end);
         if (pc < 0) {
             return pc;
         }
@@ -969,7 +972,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
         if (stop < 0) {
             return stop;
         }
-        if (lo === 4) {
+        if (rt === 4) {
             stop = decimalCheck(b, s, pos, q, stop);
         } else {
             stop = ndarrayCheck(b, s, pos, q, stop);
@@ -1001,7 +1004,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
             }
         }
     }
-    const r2 = evalScalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, 0, lo, unitOf(ctx));
+    const r2 = evalScalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, hi, lo, unitOf(ctx));
     if (r2 < 0) {
         return r2;
     }

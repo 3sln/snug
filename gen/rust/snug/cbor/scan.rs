@@ -363,11 +363,17 @@ pub(crate) fn scan_std(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, dept
     return q;
 }
 pub(crate) fn scan_tag(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
-    // A tag is a depth level, checked before its number is looked at.
+    // A tag is a depth level, checked before its number is looked at. A tag
+    // number of more than 32 bits follows its rule tag (D180): allowed only
+    // under the any-tag level, 2^64 - 1 never.
     if depth >= o[(O_MAX_DEPTH) as usize] {
         return fail(o, pos, CODE_DEPTH);
     }
     if hi != 0 {
+        let rw: i32 = rule_tag(hi, lo);
+        if std_allowed(o[(O_PROFILE) as usize], rw, depth) {
+            return scan_std(b, o, pos, p, rw, depth, end);
+        }
         return fail(o, pos, CODE_TAG);
     }
     if (lo == 2) || (lo == 3) {

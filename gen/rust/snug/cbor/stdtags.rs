@@ -3,13 +3,67 @@
 
 use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
+use crate::snug::cbor::tags::*;
 
+pub fn any_tags(flags: i32) -> bool {
+    // Does the profile admit any tag number (PF_TAGS 2 or 3, D180)?
+    return (flags & PF_TAGS) >= PF_TAGS_ANY;
+}
+pub fn rule_tag(hi: i32, lo: i32) -> i32 {
+    // The tag whose rules a tag number hi:lo follows (D180): lo for a 32-bit
+    // number; -1 (2^32 - 1's rules: refused) for 2^64 - 1; -2 (2^32 - 2's:
+    // none) for every other number of more than 32 bits.
+    if hi == 0 {
+        return lo;
+    }
+    if (hi == (-1)) && (lo == (-1)) {
+        return -1;
+    }
+    return -2;
+}
+pub fn typed_any_size(tag: i32) -> i32 {
+    // The element size of an RFC 8746 typed-array tag OUTSIDE the Bindle set
+    // (uint8 64, the big-endian forms, clamped 68, float128 83/87), checked
+    // only under the any-tag level; 0 for any other tag (76 is reserved).
+    if (tag < 64) || (tag > 87) {
+        return 0;
+    }
+    if (tag == 64) || (tag == 68) {
+        return 1;
+    }
+    if (tag == 65) || ((tag == 73) || (tag == 80)) {
+        return 2;
+    }
+    if (tag == 66) || ((tag == 74) || (tag == 81)) {
+        return 4;
+    }
+    if (tag == 67) || ((tag == 75) || (tag == 82)) {
+        return 8;
+    }
+    if (tag == 83) || (tag == 87) {
+        return 16;
+    }
+    return 0;
+}
+pub fn std_reads(tag: i32) -> bool {
+    // Does the content rule of (rule) tag `tag` read its content? 0, 24 and 32
+    // read it whole; 1 and the any-level typed arrays only its head (<= 9
+    // bytes). Every other tag's rule reads nothing.
+    if ((tag == 0) || (tag == 1)) || ((tag == 24) || (tag == 32)) {
+        return true;
+    }
+    return typed_any_size(tag) > 0;
+}
 pub fn std_allowed(flags: i32, tag: i32, depth: i32) -> bool {
-    // Is tag (a 32-bit argument, possibly negative as an i32) one of the
-    // standard set's additions, allowed under profile flags at depth? 55799
-    // only at the top level (depth 0 of a walk whose root is the document's
-    // top: PF_SUB clear).
-    if (flags & PF_TAGS) == 0 {
+    // Is (rule) tag `tag` (a 32-bit argument, possibly negative as an i32; a
+    // rule-tag for a number of more than 32 bits) one of the standard set's
+    // additions, or any other tag under the any-tag level, allowed under
+    // profile flags at depth? 55799 only at the top level (depth 0 of a walk
+    // whose root is the document's top: PF_SUB clear), in every level. The
+    // Bindle set's own tags (2, 3, 4, 40, the little-endian typed arrays)
+    // never take this path: false.
+    let lvl: i32 = flags & PF_TAGS;
+    if lvl == 0 {
         return false;
     }
     if tag == 55799 {
@@ -18,7 +72,20 @@ pub fn std_allowed(flags: i32, tag: i32, depth: i32) -> bool {
     if (tag == 0) || ((tag == 1) || (tag == 32)) {
         return true;
     }
-    return (tag >= 21) && (tag <= 24);
+    if (tag >= 21) && (tag <= 24) {
+        return true;
+    }
+    if lvl < PF_TAGS_ANY {
+        return false;
+    }
+    // RFC 8949 §9.2: 65535, 2^32 - 1 (-1) and 2^64 - 1 (rule tag -1) are invalid tag numbers
+    if (tag == 65535) || (tag == (-1)) {
+        return false;
+    }
+    if ((tag == 2) || (tag == 3)) || ((tag == 4) || (tag == 40)) {
+        return false;
+    }
+    return typed_size(tag) == 0;
 }
 pub fn std_inner(b: &[u8], q: i32) -> i32 {
     // Where the content of the (valid) string item at q starts.
@@ -224,15 +291,21 @@ pub fn std_content_ok(b: &[u8], tag: i32, q: i32, stop: i32) -> bool {
     // The content rule of standard tag `tag` over its well-formed content
     // item b[q, stop): 0 a text in RFC 3339 date-time form; 1 an integer
     // (major 0/1) or a finite float; 24 a byte string (its content is then
-    // walked by the caller); 32 a text in URI form (uri-ok); 21-23 and
-    // 55799 anything (and nothing is read: the session calls this with the
-    // content of those tags no longer in its window).
-    if !(((tag == 0) || (tag == 1)) || ((tag == 24) || (tag == 32))) {
+    // walked by the caller); 32 a text in URI form (uri-ok); an any-level
+    // typed array (typed-any-size) a byte string of whole elements, read from
+    // its head; 21-23, 55799 and every other tag anything (and nothing is
+    // read: the session calls this with the content of those tags no longer
+    // in its window; std-reads).
+    if !std_reads(tag) {
         return true;
     }
     let ib: i32 = b[(q) as usize] as i32;
     let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
     let ai: i32 = ib & 31;
+    let ts: i32 = typed_any_size(tag);
+    if ts > 0 {
+        return (major == 2) && ((small_arg(b, q) % ts) == 0);
+    }
     if tag == 1 {
         if major <= 1 {
             return true;

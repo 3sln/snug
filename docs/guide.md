@@ -189,7 +189,8 @@ other key (integer, byte string, array, ...) becomes a `Map` with decoded
 keys, at any depth; under `wire: 'bindle'`, `cose: true` makes a top-level
 map a `Map` with safe integer and text keys. Codec decode accepts any root
 under the default deterministic preset; `wire: 'bindle'` requires a map
-unless `top: 'any'` is given. The standard tags decode to `Tagged`, `f7` to
+unless `top: 'any'` is given. Tags outside the Bindle set (the standard
+ones, COSE/CWT and any other number, D180) decode to `Tagged`, `f7` to
 `undefined` ([profiles](profiles.md#javascript-values-d123)).
 
 Major-0/1 integers become numbers when safe and bigints otherwise. Tags 2/3

@@ -24,6 +24,7 @@ import { scan, scanOptions, scanProfile, errorOffset, codeName } from '../../gen
 import { buildDetCases, optWords, DDEF } from './det-cases.mjs';
 import { loadCbor2, acceptanceDiff, encodeDiff } from './det-diff.mjs';
 import { encode as snugEncode } from '../../host/js/src/encode.mjs';
+import { Tagged as SnugTagged } from '../../host/js/src/values.mjs';
 // The hand-written P1.4 yardstick is held to the same arbiter, so the
 // benchmark compares two correct scanners.
 import { scanHand } from '../../bench/scan-hand.mjs';
@@ -171,9 +172,9 @@ if (cbor2) {
   const ad = acceptanceDiff(cbor2, pool, b => { const g = detRun(b, DDEF); return { code: g.name, offset: g.offset }; });
   for (const u of ad.unexplained.slice(0, 20)) fail(`cbor2: unexplained ${u}`);
   console.log(`  ${ad.unexplained.length ? 'FAIL' : 'ok  '} deterministic preset vs cbor2 (CDE + rejectDuplicateKeys/LongLoundNaN/Simple): ${ad.agree}/${ad.compared} same verdict; the rest by documented class: ${Object.entries(ad.classes).map(([k, v]) => `${k} ${v}`).join(', ')}; ${ad.unexplained.length} unexplained`);
-  const ed = encodeDiff(cbor2, v => snugEncode(v), 4000, SEED);
+  const ed = encodeDiff(cbor2, v => snugEncode(v), 4000, SEED, { Tagged: SnugTagged });
   for (const d of ed.differ.slice(0, 20)) fail(`cbor2 encode: ${d}`);
-  console.log(`  ${ed.differ.length ? 'FAIL' : 'ok  '} encode (deterministic preset) == cbor2 encode({cde: true}): ${ed.equal}/${ed.values} seeded values byte for byte`);
+  console.log(`  ${ed.differ.length ? 'FAIL' : 'ok  '} encode (deterministic preset) == cbor2 encode({cde: true}): ${ed.equal}/${ed.values} seeded values byte for byte (${ed.tags} holding tags of any number)`);
 } else console.log('  SKIP cbor2 differential (bench/compare/node_modules/cbor2 not installed)');
 
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }

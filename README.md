@@ -28,7 +28,8 @@ Why snug:
 **Experimental, private package, version 0.0.0.** The JS buffer APIs work.
 The default wire policy is the **deterministic preset** (P7.1, D081, D120):
 RFC 8949 §4.2.1 core deterministic CBOR, verified on read, with any map key
-kind, the standard tag set and RFC floats. The **Bindle** preset (`wire:
+kind, any tag number (the known tags content-checked, D180) and RFC floats.
+The **Bindle** preset (`wire:
 'bindle'`) keeps the pre-P7.1 restrictions bit for bit; Bindle is one optional
 consumer profile in the standalone design (D080), not snug's purpose. See
 [profiles](docs/profiles.md) for every option.
@@ -42,7 +43,7 @@ consumer profile in the standalone design (D080), not snug's purpose. See
 | Integer map keys at any depth (COSE, CWT `cnf` holding a COSE_Key) | yes (decodes to `Map`) | no (`cose` admits safe integer labels in the top-level map only) |
 | Keys that are byte strings, arrays, maps, tags, floats, `null`... | yes | no |
 | Tags 0 (date/time text), 1 (epoch time), 21–23, 24 (embedded CBOR), 32 (URI), 55799 | yes, content checked (`Tagged`) | no |
-| Other tags (5 bigfloat, 16–18/61 COSE/CWT, 33–36, ...) | **no** (`tag`) | no |
+| Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 64-bit numbers, ...) | yes, any content (`Tagged`); `tags: 'standard'` refuses them | no |
 | `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (NaN only as `f97e00`) | no |
 | Unicode noncharacters in text | yes | no |
 | Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes, normalised forms only | yes |
@@ -204,7 +205,7 @@ with measurements and methods under [bench](bench/README.md).
 ## Defaults and limits
 
 The wire profile defaults to the **deterministic preset**: any root, any map
-key kind, the standard tag set, RFC 8949 floats, `undefined` and
+key kind, any tag number, RFC 8949 floats, `undefined` and
 noncharacters admitted. `{ wire: 'bindle' }` (or `...profiles.bindle`)
 restores the Bindle profile: a top-level map required by codec decode, views
 and profile sources, text keys only (safe integer labels in the top-level map

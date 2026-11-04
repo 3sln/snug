@@ -5,7 +5,7 @@ import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_KEY_ORD
 import { be16, be32, bytesContent, countItem, enterContainer, fail, headSize, readArg, takeLen } from './head.mjs';
 import { compareSpans, keyEndAny } from './keys.mjs';
 import { keyLabel, keyPeek, scanFloat, scanItem, scanOne, scanSimple, textNc } from './scan.mjs';
-import { stdAllowed, stdContentOk, stdInner } from './stdtags.mjs';
+import { anyTags, ruleTag, stdAllowed, stdContentOk, stdInner, typedAnySize } from './stdtags.mjs';
 import { exponentOk, mantissaOk, mod10, typedSize } from './tags.mjs';
 import { utf8Window } from './text.mjs';
 
@@ -336,12 +336,13 @@ export function noteHead(b, s, sp, pos, p, major, ai, lo) {
     const elem = s[tb + F_STATE];
     if (kind === K_STD) {
         // A standard-set tag's content (D121): the verdict its head decides --
-        // tag 1's whole rule (a float's payload is part of its head), the
+        // tag 1's whole rule (a float's payload is part of its head) and an
+        // any-level typed array's (D180: a byte string of whole elements), the
         // major type for 0, 24 and 32 (their content is checked whole at the end).
         const stag = s[tb + F_STAG];
         let ok = 1;
-        if (stag === 1) {
-            if (!stdContentOk(b, 1, pos, p)) {
+        if ((stag === 1) || (typedAnySize(stag) > 0)) {
+            if (!stdContentOk(b, stag, pos, p)) {
                 ok = 0;
             }
         }
@@ -656,24 +657,26 @@ export function rscanStep(b, o, s, baseHi, baseLo) {
                     r = fail(o, pos, CODE_DEPTH);
                     break;
                 }
-                if (hi !== 0) {
+                if ((hi !== 0) && (!anyTags(o[O_PROFILE]))) {
                     r = fail(o, pos, CODE_TAG);
                     break;
                 }
+                // rt: the rule tag of the number (D180, rule-tag)
+                const rt = ruleTag(hi, lo);
                 s[S_TPOS] = pos + base;
-                s[S_TTAG] = lo;
+                s[S_TTAG] = rt;
                 pos = p;
-                if ((lo === 2) || (lo === 3)) {
+                if ((rt === 2) || (rt === 3)) {
                     phase = PH_BIGNUM;
                     continue;
                 }
-                if ((lo === 4) || (lo === 40)) {
+                if ((rt === 4) || (rt === 40)) {
                     phase = PH_PAIR;
                     continue;
                 }
-                const size = typedSize(lo);
+                const size = typedSize(rt);
                 if (size === 0) {
-                    if (!stdAllowed(o[O_PROFILE], lo, depth)) {
+                    if (!stdAllowed(o[O_PROFILE], rt, depth)) {
                         r = fail(o, s[S_TPOS] - base, CODE_TAG);
                         break;
                     }
@@ -685,7 +688,7 @@ export function rscanStep(b, o, s, baseHi, baseLo) {
                     s[xb + F_REM] = 1;
                     s[xb + F_STATE] = 0;
                     s[xb + F_TPOS] = s[S_TPOS];
-                    s[xb + F_STAG] = lo;
+                    s[xb + F_STAG] = rt;
                     s[xb + F_EXPOK] = 0;
                     s[xb + F_COUNT] = pos + base;
                     sp += 1;
@@ -938,7 +941,9 @@ export function rscanStep(b, o, s, baseHi, baseLo) {
             }
             // A tag-0/32 text is in the window whole: scanned in this step.
             if (sp > 0) {
-                if (s[(S_FRAMES + ((sp - 1) * FW)) + F_KIND] === K_STD) {
+                const tf0 = S_FRAMES + ((sp - 1) * FW);
+                const st0 = s[tf0 + F_STAG];
+                if ((s[tf0 + F_KIND] === K_STD) && ((st0 === 0) || (st0 === 32))) {
                     if (work < (stop - pos)) {
                         work = stop - pos;
                     }

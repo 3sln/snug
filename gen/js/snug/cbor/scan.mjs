@@ -5,7 +5,7 @@ import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_FLOAT, 
 import { checkF16, checkF32, checkF64, rfcF16, rfcF32, rfcF64 } from './float.mjs';
 import { be16, be32, bytesContent, countItem, enterContainer, fail, readArg, takeLen } from './head.mjs';
 import { compareSpans } from './keys.mjs';
-import { stdAllowed, stdContentOk, stdInner } from './stdtags.mjs';
+import { ruleTag, stdAllowed, stdContentOk, stdInner } from './stdtags.mjs';
 import { dataCount, exponentOk, mantissaOk, shapeOk, typedSize } from './tags.mjs';
 import { utf8InvalidAt, utf8InvalidAtNc } from './text.mjs';
 
@@ -380,11 +380,17 @@ export function scanStd(b, o, pos, p, tag, depth, end) {
 }
 
 export function scanTag(b, o, pos, p, hi, lo, depth, end) {
-    // A tag is a depth level, checked before its number is looked at.
+    // A tag is a depth level, checked before its number is looked at. A tag
+    // number of more than 32 bits follows its rule tag (D180): allowed only
+    // under the any-tag level, 2^64 - 1 never.
     if (depth >= o[O_MAX_DEPTH]) {
         return fail(o, pos, CODE_DEPTH);
     }
     if (hi !== 0) {
+        const rw = ruleTag(hi, lo);
+        if (stdAllowed(o[O_PROFILE], rw, depth)) {
+            return scanStd(b, o, pos, p, rw, depth, end);
+        }
         return fail(o, pos, CODE_TAG);
     }
     if ((lo === 2) || (lo === 3)) {

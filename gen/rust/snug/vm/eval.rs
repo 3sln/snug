@@ -843,12 +843,15 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     if d >= s[(O_MAX_DEPTH) as usize] {
         return fail(s, pos, CODE_DEPTH);
     }
-    if hi != 0 {
+    if (hi != 0) && (!any_tags(s[(O_PROFILE) as usize])) {
         return fail(s, pos, CODE_TAG);
     }
-    let big: bool = (lo == 2) || (lo == 3);
-    let tsize: i32 = typed_size(lo);
-    let std: bool = ((!big) && ((lo != 4) && ((lo != 40) && (tsize == 0)))) && std_allowed(s[(O_PROFILE) as usize], lo, d);
+    // rt: the rule tag (D180, rule-tag) of the number hi:lo; the TAG/TAGSET
+    // tests read the whole number
+    let rt: i32 = rule_tag(hi, lo);
+    let big: bool = (rt == 2) || (rt == 3);
+    let tsize: i32 = typed_size(rt);
+    let std: bool = ((!big) && ((rt != 4) && ((rt != 40) && (tsize == 0)))) && std_allowed(s[(O_PROFILE) as usize], rt, d);
     let cr: i32 = cset_rec(p, s, ck);
     let w: i32 = cset_width(p, cr);
     let fw: i32 = cset_frame(p, cr);
@@ -859,7 +862,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     let mut cnq: i32 = 0;
     let mut cs: i32 = q;
     let mut stop: i32;
-    if (!big) && ((lo != 4) && ((lo != 40) && ((tsize == 0) && (!std)))) {
+    if (!big) && ((rt != 4) && ((rt != 40) && ((tsize == 0) && (!std)))) {
         return fail(s, pos, CODE_TAG);
     }
     if big {
@@ -879,7 +882,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
             }
             let lb: i32 = q_leaf_base(p, s, fb, i);
             let istag: bool = kind == K_TAG;
-            let hit: bool = (istag && ((p[(lb + 2) as usize] == 0) && (p[(lb + 3) as usize] == lo))) || ((!istag) && ((cmp_u64(p[(lb + 2) as usize], p[(lb + 3) as usize], 0, lo) <= 0) && (cmp_u64(p[(lb + 4) as usize], p[(lb + 5) as usize], 0, lo) >= 0)));
+            let hit: bool = (istag && ((p[(lb + 2) as usize] == hi) && (p[(lb + 3) as usize] == lo))) || ((!istag) && ((cmp_u64(p[(lb + 2) as usize], p[(lb + 3) as usize], hi, lo) <= 0) && (cmp_u64(p[(lb + 4) as usize], p[(lb + 5) as usize], hi, lo) >= 0)));
             let mut cts: i32 = p[(lb + 6) as usize];
             if istag {
                 cts = p[(lb + 4) as usize];
@@ -905,7 +908,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
         if big {
             stop = dead_bignum(b, s, pos, q, s[(VM_BIGNUM_MAX) as usize], end);
         } else {
-            stop = dead_typed(b, s, pos, q, lo, tsize, end);
+            stop = dead_typed(b, s, pos, q, rt, tsize, end);
         }
         if stop < 0 {
             return stop;
@@ -926,12 +929,12 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
         if stop < 0 {
             return stop;
         }
-        stop = dead_std_check(b, s, pos, lo, q, stop, d);
+        stop = dead_std_check(b, s, pos, rt, q, stop, d);
         if stop < 0 {
             return stop;
         }
     } else {
-        let pc: i32 = pair_check(b, s, pos, q, if_code(lo), end);
+        let pc: i32 = pair_check(b, s, pos, q, if_code(rt), end);
         if pc < 0 {
             return pc;
         }
@@ -943,7 +946,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
         if stop < 0 {
             return stop;
         }
-        if lo == 4 {
+        if rt == 4 {
             stop = decimal_check(b, s, pos, q, stop);
         } else {
             stop = ndarray_check(b, s, pos, q, stop);
@@ -975,7 +978,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
             }
         }
     }
-    let r2: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, 0, lo, unit_of(ctx));
+    let r2: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, cs, stop, cls, hi, lo, unit_of(ctx));
     if r2 < 0 {
         return r2;
     }

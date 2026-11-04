@@ -5,11 +5,12 @@
 // RFC floats, undefined, noncharacters), the Bindle vector files' inputs, and byte mutations of all of them.
 // buildDetCases(mutations, seed) -> {cases, nVectors, nFixed, det}; a case is
 // {label, bytes, opt: {top, cose, maxBytes, maxDepth, maxEntries, maxItems, flags}, want?: {code, offset}}.
-// `flags` are the kin profile flags (snug.cbor.codes PF_*): 118 the deterministic preset, 0 Bindle.
+// `flags` are the kin profile flags (snug.cbor.codes PF_*): 122 the deterministic preset (any tag, D180), 0 Bindle.
 import { readFileSync } from 'node:fs';
 import { hex, unhex } from './scan-cases.mjs';
 
-export const PF_DET = 118;
+export const PF_DET = 122;
+export const PF_STD = (PF_DET & ~12) | 4;   // the preset with the standard tag set
 export const DDEF = { top: 'any', cose: false, maxBytes: 1_500_000, maxDepth: 32, maxEntries: 65_536, maxItems: 131_072, flags: PF_DET };
 export const optWords = opt => [opt.top === 'any' ? 1 : 0, opt.cose ? 1 : 0, Math.min(opt.maxBytes, 0x7fffffff),
   Math.min(opt.maxDepth, 0x7fffffff), Math.min(opt.maxEntries, 0x7fffffff), Math.min(opt.maxItems, 0x7fffffff)];
@@ -22,6 +23,9 @@ export function buildDetCases(MUTATIONS, SEED) {
   for (const v of det.refuse) add(`det ${v.name}`, unhex(v.hex), DDEF, { code: v.code, offset: v.offset });
   // the same bytes under the Bindle flags: the vector file's bindle column (top any)
   for (const v of [...det.accept, ...det.refuse]) add(`det/bindle ${v.name}`, unhex(v.hex), { ...DDEF, flags: 0 }, { code: v.bindle });
+  // ... and under the standard tag set (D180): the standard column, else the vector's own verdict
+  for (const v of det.accept) add(`det/standard ${v.name}`, unhex(v.hex), { ...DDEF, flags: PF_STD }, v.standard ? { code: v.standard } : { code: 'ok', offset: -1 });
+  for (const v of det.refuse) add(`det/standard ${v.name}`, unhex(v.hex), { ...DDEF, flags: PF_STD }, v.standard ? { code: v.standard } : { code: v.code, offset: v.offset });
   const nVectors = cases.length;
 
   // ---------------------------------------------------------------- fixed edge cases
@@ -44,7 +48,13 @@ export function buildDetCases(MUTATIONS, SEED) {
     ['a1' + 'a1' + '0102' + '00', DDEF], ['a1' + 'a10102' + '00', { ...DDEF, flags: PF_DET & ~2 | 1 }],
     ['a2' + 'f97e00' + '00' + 'f97c00' + '00', DDEF], ['a2' + 'f97c00' + '00' + 'f97e00' + '00', DDEF],
     // each flag alone on the inputs it decides
-    ...[0, 4, 16, 32, 64, 118].flatMap(f => ['f97e00', 'f7', 'c100', '63efbfbf', 'a10100', 'fa7fc00000'].map(h => [h, { ...DDEF, flags: f }])),
+    ...[0, 4, 8, 12, 16, 32, 64, 118, 122].flatMap(f => ['f97e00', 'f7', 'c100', '63efbfbf', 'a10100', 'fa7fc00000', 'd24100', 'db00000001000000020100', 'd841420001', 'd8414100'].map(h => [h, { ...DDEF, flags: f }])),
+    // any tag (D180): depth and item counts of unknown and 64-bit tags, 55799 under PF_SUB-like nesting
+    [nest(31, 'd200'), DDEF], [nest(32, 'd200'), DDEF], [nest(31, 'db000000010000000000'), DDEF], [nest(32, 'db000000010000000000'), DDEF],
+    ['d2d2d200', { ...DDEF, maxDepth: 2 }], ['d2d2d200', { ...DDEF, maxDepth: 3 }], ['d2d2d200', { ...DDEF, maxItems: 3 }], ['d2d2d200', { ...DDEF, maxItems: 4 }],
+    [t24('d9d9f700'), DDEF], [t24('d200'), DDEF], ['d9d9f7d200', DDEF], ['d2d9d9f700', DDEF],
+    ['a1' + 'd200' + '00', DDEF], ['a1' + 'db000000010000000000' + '00', DDEF], ['a2' + 'd200' + '00' + 'd201' + '00', DDEF], ['a2' + 'd201' + '00' + 'd200' + '00', DDEF],
+    ['d8414401000200', DDEF], ['d84144010002', DDEF], ['d8574f' + '00'.repeat(15), DDEF], ['d857' + '5810' + '00'.repeat(16), DDEF],
     // date/time and URI boundaries
     ...['1900-02-29T00:00:00Z', '2000-02-29T00:00:00Z', '2100-02-28T23:59:59Z', '2023-04-31T00:00:00Z', '2023-04-30T00:00:00Z',
       '0000-01-01T00:00:00Z', '9999-12-31T23:59:60+23:59', '2023-01-01T00:00:00-24:00', '2023-01-01T00:00:00+00:60',
@@ -110,12 +120,14 @@ export function buildDetCases(MUTATIONS, SEED) {
     return [...head(5, kept.length), ...kept.flatMap(([k, v]) => [...k, ...v])];
   }
   function stdTag(depth) {
-    const t = pick([0, 1, 21, 22, 23, 24, 32, 55799, 5, 18]);
+    const t = pick([0, 1, 21, 22, 23, 24, 32, 55799, 5, 18, 16, 17, 61, 96, 97, 98, 64, 65, 66, 67, 68, 73, 76, 80, 83, 87, 255, 256, 65535,
+      65536, 4294967295n, 4294967296n, 4294967298n, 2n ** 64n - 1n, 2n ** 53n]);
     let content;
     if (t === 0) content = r() < 0.8 ? text(pick(DATES)) : item(depth + 1);
     else if (t === 1) content = r() < 0.7 ? pick([head(0, ri(2e9)), head(1, ri(100)), pick(FLOATS)]) : item(depth + 1);
     else if (t === 24) content = r() < 0.8 ? bytes(r() < 0.8 ? item(depth + 2) : [...item(depth + 2), ...item(depth + 2)]) : item(depth + 1);
     else if (t === 32) content = r() < 0.8 ? text(pick(URIS)) : item(depth + 1);
+    else if (t >= 64 && t <= 87) content = r() < 0.8 ? bytes(Array.from({ length: pick([0, 1, 2, 3, 4, 8, 15, 16, 32]) }, () => ri(256))) : item(depth + 1);
     else content = item(depth + 1);
     return [...head(6, t), ...content];
   }
@@ -141,7 +153,7 @@ export function buildDetCases(MUTATIONS, SEED) {
   const profile = JSON.parse(readFileSync(new URL('../../corpus/cbor-vectors/cbor-profile.json', import.meta.url)));
   const seeds = [...det.accept, ...det.refuse, ...profile.accept].map(v => unhex(v.hex));
   const randomOpt = () => {
-    const flags = r() < 0.6 ? PF_DET : r() < 0.5 ? ri(128) : pick([0, 1, 2, 4, 16, 32, 64, PF_DET & ~4, PF_DET & ~16]);
+    const flags = r() < 0.6 ? PF_DET : r() < 0.5 ? ri(128) : pick([0, 1, 2, 4, 8, 16, 32, 64, PF_STD, PF_DET & ~8, PF_DET & ~16]);
     if (r() < 0.7) return { ...DDEF, flags };
     return { top: r() < 0.8 ? 'any' : 'map', cose: r() < 0.2, maxBytes: r() < 0.85 ? 1_500_000 : ri(40), maxDepth: r() < 0.6 ? 32 : ri(6),
       maxEntries: r() < 0.6 ? 65_536 : ri(6), maxItems: r() < 0.6 ? 131_072 : ri(14), flags };

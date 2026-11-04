@@ -87,7 +87,7 @@ CDDL validation does not infer a narrower TS type.
 | --- | --- | --- |
 | `wire: 'deterministic' \| 'bindle'` | `'deterministic'` | The wire preset ([profiles](profiles.md#options)); the five options below override it |
 | `keys: 'text' \| 'integer' \| 'any'` | preset (`'any'`; bindle `'text'`) | Map key kinds |
-| `tags: 'bindle' \| 'standard'` | preset (`'standard'`) | Tag set |
+| `tags: 'bindle' \| 'standard' \| 'any'` | preset (`'any'`) | Tag level: the Bindle set, the standard set, or any tag number with the known tags' content rules (D180) |
 | `floats: 'bindle' \| 'deterministic'` | preset (`'deterministic'`) | Scalar float rules |
 | `undefinedValue: boolean` | preset (true) | `f7` |
 | `noncharacters: boolean` | preset (true) | Unicode noncharacters in text |
@@ -129,7 +129,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
 | `profiles` | Frozen `{ deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
-| `Tagged` | `new Tagged(tag: number, value: Value)`; frozen, `tag` (0..2³²−1) and `value`. Standard-set tags (0, 1, 21–24, 32, 55799) decode to it (tag 24's `value` is the payload bytes); encode checks the tag and content with kin and refuses others with `tag`. |
+| `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes); encode checks the tag number and content with kin under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 2/3/4/40/typed arrays have their own value types). |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
 Float16 where available, Float32/64. `Uint8Array` is a byte string.

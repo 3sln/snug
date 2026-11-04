@@ -5,7 +5,7 @@ import { CODE_DECIMAL, CODE_DEPTH, CODE_KEY_TYPE, CODE_NDARRAY, CODE_TAG, CODE_T
 import { bytesContent, fail, headSize } from '../cbor/head.mjs';
 import { keyEndAny } from '../cbor/keys.mjs';
 import { keyLabel, keyPeek } from '../cbor/scan.mjs';
-import { stdAllowed } from '../cbor/stdtags.mjs';
+import { anyTags, ruleTag, stdAllowed, stdContentOk, typedAnySize } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c64, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
@@ -1153,15 +1153,17 @@ export function openTag(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx) {
     }
     const hi = s[O_HI];
     const lo = s[O_LO];
-    const tsize = typedSize(lo);
-    const std = ((lo !== 4) && ((lo !== 40) && (tsize === 0))) && stdAllowed(s[O_PROFILE], lo, d);
+    const rt = ruleTag(hi, lo);
+    const tsize = typedSize(rt);
+    const std = ((rt !== 4) && ((rt !== 40) && (tsize === 0))) && stdAllowed(s[O_PROFILE], rt, d);
+    // rt: the rule tag (D180); F_TNUM holds it, the TAG/TAGSET tests hi:lo
     if (d >= s[O_MAX_DEPTH]) {
         return err(ss, fail(s, pos, CODE_DEPTH));
     }
-    if (hi !== 0) {
+    if ((hi !== 0) && (!anyTags(s[O_PROFILE]))) {
         return err(ss, fail(s, pos, CODE_TAG));
     }
-    if ((lo !== 4) && ((lo !== 40) && ((tsize === 0) && (!std)))) {
+    if ((rt !== 4) && ((rt !== 40) && ((tsize === 0) && (!std)))) {
         return err(ss, fail(s, pos, CODE_TAG));
     }
     const f = fpush(b, ss, ka, base, FK_TAG);
@@ -1171,7 +1173,7 @@ export function openTag(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx) {
     frameItem(ss, f, base, pos, end, d, fb, ck, nq, ctx);
     notesInit(ss, f);
     ss[f + F_Q] = q + base;
-    ss[f + F_TNUM] = lo;
+    ss[f + F_TNUM] = rt;
     ss[f + F_TSIZE] = tsize;
     ss[f + F_TLIVE] = live;
     ss[f + F_TCLS] = 64;
@@ -1197,7 +1199,7 @@ export function openTag(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx) {
                 }
                 const lb = qLeafBase(p, s, fb, i);
                 const istag = kind === K_TAG;
-                const hit = (istag && ((p[lb + 2] === 0) && (p[lb + 3] === lo))) || ((!istag) && ((cmpU64(p[lb + 2], p[lb + 3], 0, lo) <= 0) && (cmpU64(p[lb + 4], p[lb + 5], 0, lo) >= 0)));
+                const hit = (istag && ((p[lb + 2] === hi) && (p[lb + 3] === lo))) || ((!istag) && ((cmpU64(p[lb + 2], p[lb + 3], hi, lo) <= 0) && (cmpU64(p[lb + 4], p[lb + 5], hi, lo) >= 0)));
                 let cts = p[lb + 6];
                 if (istag) {
                     cts = p[lb + 4];
@@ -1229,7 +1231,7 @@ export function openTag(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx) {
     if (std) {
         // tags 0, 1, 24, 32 read their content again after its walk:
         // pinned until then (D094 replay)
-        if (((lo === 0) || (lo === 1)) || ((lo === 24) || (lo === 32))) {
+        if (((rt === 0) || (rt === 1)) || ((rt === 24) || (rt === 32))) {
             ss[f + F_PIN] = q + base;
         }
         return cont(ss, f, T_STD);
@@ -1241,8 +1243,9 @@ export function stdNeed(b, tag, q, stop, wend) {
     // How far from q a standard tag's content b[q, stop) must be in the window
     // for dead-std-check: nothing for tags 21-23 and 55799 (q); else its first
     // byte, then the whole of a text (tags 0, 32) or byte string (24), at most 9
-    // bytes for tag 1 (these four are pinned). Ask again once the window holds
-    // the answer.
+    // bytes for tag 1 (these four are pinned). An any-level typed array's rule
+    // was decided at its content's head (T_STD, D180): nothing. Ask again once
+    // the window holds the answer.
     if (!(((tag === 0) || (tag === 1)) || ((tag === 24) || (tag === 32)))) {
         return q;
     }
@@ -1382,6 +1385,32 @@ export function tagRun(p, pool, b, s, ss, ka, base, wend, f, ext) {
     }
     if (ph === T_STD) {
         // A standard-set tag's content: the child item (live or dead) at d + 1.
+        // An any-level typed array (D180) decides its rule from the content's
+        // head first, held in F_TNOTED (1 refused) and reported after the walk,
+        // so its content is never pinned.
+        if (typedAnySize(lo) > 0) {
+            let bad = 1;
+            if (q < end) {
+                if ((q < 0) || (q >= wend)) {
+                    return need(ss, base, q, 1);
+                }
+                const aiS = b[q] & 31;
+                let hS = 1;
+                if (aiS <= 27) {
+                    hS = headSize(aiS);
+                }
+                const hhS = imin(hS, end - q);
+                if ((q + hhS) > wend) {
+                    return need(ss, base, q, hhS);
+                }
+                if ((aiS <= 27) && ((q + hS) <= end)) {
+                    if (stdContentOk(b, lo, q, end)) {
+                        bad = 0;
+                    }
+                }
+            }
+            ss[f + F_TNOTED] = bad;
+        }
         ss[f + F_PH] = T_STDRET;
         if ((live === 1) && (cnq > 0)) {
             const crs = csetRec(p, s, ck);
@@ -1404,9 +1433,17 @@ export function tagRun(p, pool, b, s, ss, ka, base, wend, f, ext) {
         if (suspended(g2)) {
             return g2;
         }
-        const vs = deadStdCheck(b, s, pos, lo, q, stopS, d);
+        const ta = typedAnySize(lo);
+        let rs = lo;
+        if (ta > 0) {
+            rs = -1;
+        }
+        const vs = deadStdCheck(b, s, pos, rs, q, stopS, d);
         if (vs < 0) {
             return err(ss, vs);
+        }
+        if ((ta > 0) && (ss[f + F_TNOTED] === 1)) {
+            return err(ss, fail(s, pos, CODE_TAG));
         }
         ss[f + F_PIN] = -1;
         ss[f + F_TCS] = q + base;

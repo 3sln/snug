@@ -16,7 +16,7 @@ export declare class Writer {
   /** f7; needs the profile's undefinedValue. */
   undefined(): this;
   /** A standard-set tag and its content: value(new Tagged(tag, content)). */
-  tagged(tag: number, content: unknown): this;
+  tagged(tag: number | bigint, content: unknown): this;
   text(value: string): this;
   bytes(value: Uint8Array): this;
   typed(value: TypedArray | Float16Bytes): this;

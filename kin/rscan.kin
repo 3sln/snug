@@ -41,7 +41,8 @@
             [snug.cbor.keys :refer [compare-spans key-end-any]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok mod10]]
             [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc scan-one scan-item]]
-            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]))
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner any-tags rule-tag
+                                       typed-any-size]]))
 
 ;; ------------------------------------------------------------- layout
 
@@ -284,11 +285,13 @@
         elem (ia s (+ tb F_STATE))]
     (if (== kind K_STD)
       (do (comment "A standard-set tag's content (D121): the verdict its head decides --"
-                   "tag 1's whole rule (a float's payload is part of its head), the"
+                   "tag 1's whole rule (a float's payload is part of its head) and an"
+                   "any-level typed array's (D180: a byte string of whole elements), the"
                    "major type for 0, 24 and 32 (their content is checked whole at the end).")
           (let [stag (ia s (+ tb F_STAG))
                 ^:mut ok 1]
-            (if (== stag 1) (if (not (std-content-ok b 1 pos p)) (set ok 0)))
+            (if (or (== stag 1) (> (typed-any-size stag) 0))
+              (if (not (std-content-ok b stag pos p)) (set ok 0)))
             (if (and (or (== stag 0) (== stag 32)) (!= major 3)) (set ok 0))
             (if (and (== stag 24) (!= major 2)) (set ok 0))
             (iset s (+ tb F_EXPOK) ok))
@@ -471,15 +474,17 @@
                    (continue)))
              (if (== major 6)
                (do (if (>= depth (ia o O_MAX_DEPTH)) (do (set r (fail o pos CODE_DEPTH)) (break)))
-                   (if (!= hi 0) (do (set r (fail o pos CODE_TAG)) (break)))
+                   (if (and (!= hi 0) (not (any-tags (ia o O_PROFILE)))) (do (set r (fail o pos CODE_TAG)) (break)))
+                   (comment "rt: the rule tag of the number (D180, rule-tag)")
+                   (let [rt (rule-tag hi lo)]
                    (iset s S_TPOS (+ pos base))
-                   (iset s S_TTAG lo)
+                   (iset s S_TTAG rt)
                    (set pos p)
-                   (if (or (== lo 2) (== lo 3)) (do (set phase PH_BIGNUM) (continue)))
-                   (if (or (== lo 4) (== lo 40)) (do (set phase PH_PAIR) (continue)))
-                   (let [size (typed-size lo)]
+                   (if (or (== rt 2) (== rt 3)) (do (set phase PH_BIGNUM) (continue)))
+                   (if (or (== rt 4) (== rt 40)) (do (set phase PH_PAIR) (continue)))
+                   (let [size (typed-size rt)]
                      (if (== size 0)
-                       (do (if (not (std-allowed (ia o O_PROFILE) lo depth))
+                       (do (if (not (std-allowed (ia o O_PROFILE) rt depth))
                              (do (set r (fail o (- (ia s S_TPOS) base) CODE_TAG)) (break)))
                            (comment "A standard-set tag (D121): one frame, its content one item"
                                     "at depth + 1, checked when it ends.")
@@ -489,7 +494,7 @@
                              (iset s (+ xb F_REM) 1)
                              (iset s (+ xb F_STATE) 0)
                              (iset s (+ xb F_TPOS) (ia s S_TPOS))
-                             (iset s (+ xb F_STAG) lo)
+                             (iset s (+ xb F_STAG) rt)
                              (iset s (+ xb F_EXPOK) 0)
                              (iset s (+ xb F_COUNT) (+ pos base)))
                            (set sp (+ sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
@@ -497,7 +502,7 @@
                            (continue)))
                      (iset s S_TSIZE size))
                    (set phase PH_TYPEDHEAD)
-                   (continue)))
+                   (continue))))
              (set r (scan-simple o pos ai))
              (if (< r 0) (break))
              (set pos r)
@@ -644,8 +649,10 @@
                    (if (< work 4) (set work 4))
                    (comment "A tag-0/32 text is in the window whole: scanned in this step.")
                    (if (> sp 0)
-                     (if (== (ia s (+ (+ S_FRAMES (* (- sp 1) FW)) F_KIND)) K_STD)
-                       (if (< work (- stop pos)) (set work (- stop pos)))))
+                     (do (let [tf0 (+ S_FRAMES (* (- sp 1) FW))
+                               st0 (ia s (+ tf0 F_STAG))]
+                           (if (and (== (ia s (+ tf0 F_KIND)) K_STD) (or (== st0 0) (== st0 32)))
+                             (if (< work (- stop pos)) (set work (- stop pos)))))))
                    (local ^I32 qstop)
                    (if (< work (- stop pos)) (set qstop (+ pos work)) (set qstop stop))
                    (let [t (utf8-window b pos qstop cend (text-nc o))]

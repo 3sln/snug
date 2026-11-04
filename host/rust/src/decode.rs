@@ -35,6 +35,9 @@ pub enum Tags {
     Bindle,
     /// The Bindle set plus 0, 1, 21-24, 32 and 55799 with RFC 8949 content checks.
     Standard,
+    /// Any tag number (D180; 64-bit ones too, but not the invalid 65535,
+    /// 2^32-1 and 2^64-1), the known tags keeping their content rules.
+    Any,
 }
 /// Scalar float rules (D122).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +75,7 @@ impl Profile {
     /// The deterministic preset (the default).
     pub const DETERMINISTIC: Profile = Profile {
         keys: Keys::Any,
-        tags: Tags::Standard,
+        tags: Tags::Any,
         floats: Floats::Deterministic,
         undefined_value: true,
         noncharacters: true,
@@ -92,7 +95,12 @@ impl Profile {
             Keys::Integer => 1,
             Keys::Any => 2,
         };
-        keys | if self.tags == Tags::Standard { 4 } else { 0 }
+        let tags = match self.tags {
+            Tags::Bindle => 0,
+            Tags::Standard => 4,
+            Tags::Any => 8,
+        };
+        keys | tags
             | if self.floats == Floats::Deterministic { 16 } else { 0 }
             | if self.undefined_value { 32 } else { 0 }
             | if self.noncharacters { 64 } else { 0 }

@@ -24,7 +24,7 @@ function value(v) {
   if ('$float' in v) return { NaN: NaN, Infinity: Infinity, '-Infinity': -Infinity, '-0': -0 }[v.$float];
   if ('$int' in v) { const n = BigInt(v.$int); return n >= -BigInt(Number.MAX_SAFE_INTEGER) && n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : n; }
   if ('$bytes' in v) return fromHex(v.$bytes);
-  if ('$tag' in v) return new Tagged(v.$tag, value(v.value));
+  if ('$tag' in v) return new Tagged(typeof v.$tag === 'string' ? BigInt(v.$tag) : v.$tag, value(v.value));
   if ('$map' in v) return new Map(v.$map.map(([k, x]) => [value(k), value(x)]));
   const out = Object.create(null);
   for (const [k, x] of Object.entries(v)) out[k] = value(x);
@@ -58,12 +58,15 @@ for (const v of det.refuse) test(`deterministic refuse: ${v.name}`, () => {
 });
 
 test('option resolution: presets, overrides, refusals of unknown values', () => {
-  assert.equal(profileFlags({}), 118);
-  assert.equal(profileFlags({ wire: 'deterministic' }), 118);
+  assert.equal(profileFlags({}), 122);
+  assert.equal(profileFlags({ wire: 'deterministic' }), 122);
   assert.equal(profileFlags(B), 0);
-  assert.equal(profileFlags(profiles.deterministic), 118);
-  assert.equal(profileFlags({ keys: 'text' }), 116);
-  assert.equal(profileFlags({ keys: 'integer' }), 117);
+  assert.equal(profileFlags(profiles.deterministic), 122);
+  assert.equal(profiles.deterministic.tags, 'any');
+  assert.equal(profileFlags({ tags: 'standard' }), 118);
+  assert.equal(profileFlags({ wire: 'bindle', tags: 'any' }), 8);
+  assert.equal(profileFlags({ keys: 'text' }), 120);
+  assert.equal(profileFlags({ keys: 'integer' }), 121);
   assert.equal(profileFlags({ wire: 'bindle', keys: 'any', tags: 'standard' }), 6);
   assert.equal(profileFlags({ wire: 'bindle', floats: 'deterministic', undefinedValue: true, noncharacters: true }), 112);
   assert.equal(codecTop({}), 'any'); assert.equal(codecTop(B), 'map'); assert.equal(codecTop({ wire: 'bindle', top: 'any' }), 'any');
@@ -94,7 +97,13 @@ test('JS values: maps by key kind, Tagged, undefined, special floats; key collis
   assert.throws(() => decode(fromHex('a2f90000f98000f9800001')), { code: 'unsupported' });  // 0.0 and -0.0
   assert.equal(view(fromHex('a201f93c00f93c0001')).length, 2);  // a view still reads it
   assert.throws(() => new Tagged(-1, 0), TypeError);
-  assert.throws(() => new Tagged(2 ** 32, 0), TypeError);
+  assert.throws(() => new Tagged(2 ** 53, 0), TypeError);
+  assert.throws(() => new Tagged(2n ** 64n, 0), TypeError);
+  assert.throws(() => new Tagged(-1n, 0), TypeError);
+  assert.throws(() => new Tagged(1.5, 0), TypeError);
+  assert.equal(new Tagged(2 ** 32, 0).tag, 2 ** 32);
+  assert.equal(new Tagged(5n, 0).tag, 5);  // a bigint within 2^53 - 1 normalises to a number, as integers do
+  assert.equal(new Tagged(2n ** 63n, 0).tag, 2n ** 63n);
 });
 
 test('encode: Maps, Tagged and undefined under each preset; the profile decides what encodes', () => {
@@ -104,11 +113,11 @@ test('encode: Maps, Tagged and undefined under each preset; the profile decides 
   assert.equal(toHex(encode(new Tagged(32, 'http://www.example.com'))), 'd82076687474703a2f2f7777772e6578616d706c652e636f6d');
   assert.equal(toHex(encode(new Tagged(24, encode(new Map([[1, 2]]))))), 'd81843a10102');
   assert.equal(toHex(encode(new Tagged(55799, { a: 1 }))), 'd9d9f7a1616101');
-  for (const [v, code] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(1, NaN), 'tag'],
-    [new Tagged(32, '/relative'), 'tag'], [new Tagged(5, [1, 2]), 'tag'], [new Tagged(2, new Uint8Array(9)), 'tag'],
+  for (const [v, code, opts] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(1, NaN), 'tag'],
+    [new Tagged(32, '/relative'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, new Uint8Array(9)), 'tag'],
     [[new Tagged(55799, 0)], 'tag'], [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest'],
     [new Tagged(24, 'text'), 'tag'], [new Map([[1, 0], [1n, 1]]), 'duplicate_key']])
-    assert.throws(() => encode(v), { name: 'SnugFault', code }, `${code}`);
+    assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code}`);
   assert.throws(() => encode(new Map([[[0], 1]]), { keys: 'integer' }), { code: 'key_type' });
   assert.equal(toHex(encode(new Map([[2n ** 64n - 1n, 0]]), { keys: 'integer' })), 'a11bffffffffffffffff00');
   assert.throws(() => encode(new Map([[2n ** 64n, 0]]), { keys: 'integer' }), { code: 'key_type' });
@@ -201,4 +210,65 @@ test('schemas: the prelude types the deterministic preset admits; float ranges o
   assert.deepEqual(validateHandleSync(s, bufferHandle(bytes), 'k', {}, { chunk: 1, quantum: 1 }), { ok: true });
   assert.equal(validateHandleSync(s, bufferHandle(bytes), 'k', B, { chunk: 1 }).reason, 'cbor/key_type');
   assert.ok(Decimal);
+});
+
+test('any tag (D180): decode, encode, Writer, views and schemas over tags of any number', async () => {
+  // COSE_Sign1 round trip, Tagged with a Map inside; a 64-bit tag number as a bigint beyond 2^53 - 1
+  const sign1 = fromHex('d28443a10126a10442313154746869732069732074686520636f6e74656e742e4100');
+  const t = decode(sign1);
+  assert.ok(t instanceof Tagged); assert.equal(t.tag, 18); assert.ok(t.value[1] instanceof Map);
+  assert.equal(toHex(encode(t)), toHex(sign1));
+  assert.throws(() => decode(sign1, { tags: 'standard' }), { code: 'tag' });
+  assert.throws(() => decode(sign1, { ...B, top: 'any' }), { code: 'tag' });
+  assert.equal(decode(sign1, { ...B, top: 'any', tags: 'any', keys: 'integer' }).tag, 18);
+  const big = decode(fromHex('dbfffffffffffffffe00'));
+  assert.equal(big.tag, 2n ** 64n - 2n);
+  assert.equal(toHex(encode(new Tagged(2n ** 64n - 2n, 0))), 'dbfffffffffffffffe00');
+  assert.equal(toHex(encode(new Tagged(2 ** 32, null))), 'db0000000100000000f6');
+  assert.equal(toHex(encode(new Tagged(2 ** 32 - 2, 1))), 'dafffffffe01');
+  assert.equal(toHex(encode(new Tagged(4294967298, Uint8Array.of(0)))), 'db00000001000000024100');  // not a bignum
+  assert.equal(toHex(encode(new Tagged(65, Uint8Array.of(0, 1)))), 'd841420001');
+  for (const [v, code, opts] of [[new Tagged(65535, 0), 'tag'], [new Tagged(2 ** 32 - 1, 0), 'tag'], [new Tagged(2n ** 64n - 1n, 0), 'tag'],
+    [new Tagged(65, Uint8Array.of(0)), 'tag'], [new Tagged(87, Uint8Array.of(0)), 'tag'], [new Tagged(64, 'text'), 'tag'],
+    [[new Tagged(18, new Tagged(55799, 0))], 'tag'], [new Tagged(2, Uint8Array.of(1, 2)), 'tag'], [new Tagged(70, Uint8Array.of(0, 0, 0, 0)), 'tag'],
+    [new Tagged(4, [-1, 15]), 'tag'], [new Tagged(18, []), 'tag', { tags: 'standard' }], [new Tagged(2 ** 32, 0), 'tag', { tags: 'standard' }],
+    [new Tagged(1000, new Tagged(0, 'x')), 'tag'], [new Tagged(18, new Tagged(18, [])), 'depth', { maxDepth: 1 }]])
+    assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code} ${String(v.tag ?? v[0]?.tag)}`);
+  // Writer
+  const w = new Writer(); w.beginArray(2).tagged(2n ** 40n, 'x').tagged(98, []).end();
+  assert.equal(toHex(w.finish()), '82' + 'db0000010000000000' + '6178' + 'd86280');
+  assert.throws(() => new Writer({ tags: 'standard' }).tagged(98, []), { code: 'tag' });
+  // views: 64-bit tag numbers, kinds, content; a big tag number with a bignum-like low word is 'tagged'
+  const v = view(fromHex('82db00000001000000024100d2f6'));
+  assert.equal(v.at(0).kind, 'tagged'); assert.equal(v.at(0).tag, 4294967298); assert.deepStrictEqual(v.at(0).content().bytes(), Uint8Array.of(0));
+  assert.equal(v.at(1).tag, 18); assert.equal(v.at(1).content().isNull(), true);
+  assert.equal(view(fromHex('dbfffffffffffffffe00')).tag, 2n ** 64n - 2n);
+  assert.deepStrictEqual(v.value(), [new Tagged(4294967298, Uint8Array.of(0)), new Tagged(18, null)]);
+  // schemas: #6.n(T) for any n now matches valid data; the whole 64-bit number is compared
+  const s = await compile(`
+    sign1 = #6.18([bstr, {* int => any}, bstr / nil, bstr])
+    cwt = #6.61(sign1)
+    wide = #6.4294967296(uint)
+    w2 = #6.18446744073709551614(tstr)
+    low = #6.0(uint)
+    anytag = #6
+  `);
+  const ok = (rule, hex, opts = {}) => s.validate(fromHex(hex), rule, opts);
+  assert.deepEqual(ok('sign1', toHex(sign1)), { ok: true });
+  assert.equal(ok('sign1', toHex(sign1), { tags: 'standard' }).reason, 'cbor/tag');
+  assert.deepEqual(ok('cwt', 'd83d' + toHex(sign1)), { ok: true });
+  assert.equal(ok('cwt', toHex(sign1)).ok, false);
+  assert.deepEqual(ok('wide', 'db000000010000000001'), { ok: true });
+  assert.equal(ok('wide', 'db000000010000000061').ok, false);       // content type
+  assert.equal(ok('wide', 'db000000020000000001').ok, false);       // high word differs
+  assert.equal(ok('wide', 'c001').ok, false);                        // hi 0, lo 0
+  assert.equal(ok('low', 'db000000010000000001').ok, false);       // lo 0, hi 1 is not tag 0
+  assert.deepEqual(ok('w2', 'dbfffffffffffffffe6161'), { ok: true });
+  assert.deepEqual(ok('anytag', 'db000000010000000001'), { ok: true });
+  assert.equal(ok('anytag', 'dbffffffffffffffff01').reason, 'cbor/tag');
+  // the resumable paths agree, byte by byte
+  for (const [rule, hex] of [['sign1', toHex(sign1)], ['wide', 'db000000010000000001'], ['w2', 'dbfffffffffffffffe6161']])
+    assert.deepEqual(validateHandleSync(s, bufferHandle(fromHex(hex)), rule, {}, { chunk: 1, quantum: 1 }), { ok: true });
+  assert.equal(validateHandleSync(s, bufferHandle(fromHex('d84143000102')), 'anytag', {}, { chunk: 1, quantum: 1 }).reason, 'cbor/tag');
+  assert.equal(scanHandleSync(bufferHandle(fromHex('d8414401000200')), {}, { chunk: 1 }), true);
 });

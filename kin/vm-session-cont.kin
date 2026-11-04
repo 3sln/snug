@@ -20,7 +20,7 @@
             [snug.cbor.head :refer [fail head-size enter-container bytes-content]]
             [snug.cbor.tags :refer [typed-size]]
             [snug.cbor.scan :refer [key-peek key-label]]
-            [snug.cbor.stdtags :refer [std-allowed]]
+            [snug.cbor.stdtags :refer [std-allowed any-tags rule-tag typed-any-size std-content-ok]]
             [snug.cbor.keys :refer [key-end-any]]
             [snug.vm.layout :refer [H_S_LEAVES VM_POS VM_Q1 VM_GENERIC VM_FASTM K_INT K_TEXT K_ARRAY K_MAP K_TAG K_TAGSET F_ADMITTED
                                     F_MATCHED F_EVAL R_TYPE R_MISSING R_UNEXPECTED R_VALUE R_TAG R_BUDGET
@@ -847,17 +847,19 @@
     (if (< q 0) (return (err ss q)))
     (let [hi (ia s O_HI)
           lo (ia s O_LO)
-          tsize (typed-size lo)
-          std (and (and (!= lo 4) (and (!= lo 40) (== tsize 0))) (std-allowed (ia s O_PROFILE) lo d))]
+          rt (rule-tag hi lo)
+          tsize (typed-size rt)
+          std (and (and (!= rt 4) (and (!= rt 40) (== tsize 0))) (std-allowed (ia s O_PROFILE) rt d))]
+      (comment "rt: the rule tag (D180); F_TNUM holds it, the TAG/TAGSET tests hi:lo")
       (if (>= d (ia s O_MAX_DEPTH)) (return (err ss (fail s pos CODE_DEPTH))))
-      (if (!= hi 0) (return (err ss (fail s pos CODE_TAG))))
-      (if (and (!= lo 4) (and (!= lo 40) (and (== tsize 0) (not std)))) (return (err ss (fail s pos CODE_TAG))))
+      (if (and (!= hi 0) (not (any-tags (ia s O_PROFILE)))) (return (err ss (fail s pos CODE_TAG))))
+      (if (and (!= rt 4) (and (!= rt 40) (and (== tsize 0) (not std)))) (return (err ss (fail s pos CODE_TAG))))
       (let [f (fpush b ss ka base FK_TAG)]
         (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
         (frame-item ss f base pos end d fb ck nq ctx)
         (notes-init ss f)
         (iset ss (+ f F_Q) (+ q base))
-        (iset ss (+ f F_TNUM) lo)
+        (iset ss (+ f F_TNUM) rt)
         (iset ss (+ f F_TSIZE) tsize)
         (iset ss (+ f F_TLIVE) live)
         (iset ss (+ f F_TCLS) 64)
@@ -879,10 +881,10 @@
                         (do (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
                             (let [lb (q-leaf-base p s fb i)
                                   istag (== kind K_TAG)
-                                  hit (or (and istag (and (== (ia p (+ lb 2)) 0) (== (ia p (+ lb 3)) lo)))
+                                  hit (or (and istag (and (== (ia p (+ lb 2)) hi) (== (ia p (+ lb 3)) lo)))
                                           (and (not istag)
-                                               (and (<= (cmp-u64 (ia p (+ lb 2)) (ia p (+ lb 3)) 0 lo) 0)
-                                                    (>= (cmp-u64 (ia p (+ lb 4)) (ia p (+ lb 5)) 0 lo) 0))))
+                                               (and (<= (cmp-u64 (ia p (+ lb 2)) (ia p (+ lb 3)) hi lo) 0)
+                                                    (>= (cmp-u64 (ia p (+ lb 4)) (ia p (+ lb 5)) hi lo) 0))))
                                   ^:mut cts (ia p (+ lb 6))]
                               (if istag (set cts (ia p (+ lb 4))))
                               (if hit
@@ -899,7 +901,7 @@
         (if std
           (do (comment "tags 0, 1, 24, 32 read their content again after its walk:"
                        "pinned until then (D094 replay)")
-                (if (or (or (== lo 0) (== lo 1)) (or (== lo 24) (== lo 32))) (iset ss (+ f F_PIN) (+ q base)))
+                (if (or (or (== rt 0) (== rt 1)) (or (== rt 24) (== rt 32))) (iset ss (+ f F_PIN) (+ q base)))
                 (return (cont ss f T_STD))))
         (return (cont ss f T_PAIR))))))
 
@@ -907,8 +909,9 @@
   (comment "How far from q a standard tag's content b[q, stop) must be in the window"
            "for dead-std-check: nothing for tags 21-23 and 55799 (q); else its first"
            "byte, then the whole of a text (tags 0, 32) or byte string (24), at most 9"
-           "bytes for tag 1 (these four are pinned). Ask again once the window holds"
-           "the answer.")
+           "bytes for tag 1 (these four are pinned). An any-level typed array's rule"
+           "was decided at its content's head (T_STD, D180): nothing. Ask again once"
+           "the window holds the answer.")
   (if (not (or (or (== tag 0) (== tag 1)) (or (== tag 24) (== tag 32)))) (return q))
   (if (or (< q 0) (>= q wend)) (return (+ q 1)))
   (let [major (ushr (u8 b q) 5)]
@@ -994,7 +997,22 @@
                       (if (< rb-t 0) (return (err ss rb-t)))))))
             (return (cont ss f T_FIN)))))
     (if (== ph T_STD)
-      (do (comment "A standard-set tag's content: the child item (live or dead) at d + 1.")
+      (do (comment "A standard-set tag's content: the child item (live or dead) at d + 1."
+                   "An any-level typed array (D180) decides its rule from the content's"
+                   "head first, held in F_TNOTED (1 refused) and reported after the walk,"
+                   "so its content is never pinned.")
+          (if (> (typed-any-size lo) 0)
+            (do (let [^:mut bad 1]
+                  (if (< q end)
+                    (do (if (or (< q 0) (>= q wend)) (return (need ss base q 1)))
+                        (let [ai-s (bit-and (u8 b q) 31)
+                              ^:mut h-s 1]
+                          (if (<= ai-s 27) (set h-s (head-size ai-s)))
+                          (let [hh-s (imin h-s (- end q))]
+                            (if (> (+ q hh-s) wend) (return (need ss base q hh-s))))
+                          (if (and (<= ai-s 27) (<= (+ q h-s) end))
+                            (if (std-content-ok b lo q end) (set bad 0))))))
+                  (iset ss (+ f F_TNOTED) bad))))
           (iset ss (+ f F_PH) T_STDRET)
           (if (and (== live 1) (> cnq 0))
             (do (let [crs (cset-rec p s ck)
@@ -1011,8 +1029,12 @@
             (let [rq2 (std-need b lo q stop-s wend)
                   g2 (ensure ss base wend q rq2)]
               (if (suspended g2) (return g2)))
-            (let [vs (dead-std-check b s pos lo q stop-s d)]
-              (if (< vs 0) (return (err ss vs))))
+            (let [ta (typed-any-size lo)
+                  ^:mut rs lo]
+              (if (> ta 0) (set rs (neg 1)))
+              (let [vs (dead-std-check b s pos rs q stop-s d)]
+                (if (< vs 0) (return (err ss vs))))
+              (if (and (> ta 0) (== (ia ss (+ f F_TNOTED)) 1)) (return (err ss (fail s pos CODE_TAG)))))
             (iset ss (+ f F_PIN) (neg 1))
             (iset ss (+ f F_TCS) (+ q base))
             (return (cont ss f T_FIN)))))

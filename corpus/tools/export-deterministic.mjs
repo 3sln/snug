@@ -32,7 +32,7 @@ const map = (...pairs) => head(5, pairs.length) + pairs.map(([k, v]) => k + v).j
 const tag = (t, content) => head(6, t) + content;
 
 // ------------------------------------------------------------------ the vectors
-// accept: [name, hex, value, {rfc, reencode, bindle}]   refuse: [name, hex, code, offset, {bindle}]
+// accept: [name, hex, value, {rfc, reencode, bindle, standard}]   refuse: [name, hex, code, offset, {bindle, standard}]
 // value notation (docs: the format field): JSON scalars; {"$int"}; {"$bytes"}; {"$map": [[k, v], ...]} a Map;
 // {"$tag": n, "value": v} a Tagged; {"$float": "NaN" | "Infinity" | "-Infinity" | "-0"}; {"$undefined": true}.
 const A = [], R = [];
@@ -215,12 +215,70 @@ ref('tag 32 with a bracket in the query', tag(32, tstr('a:b?[c]')), 'tag', 0, { 
 ref('tag 32 with an empty scheme', tag(32, tstr(':b')), 'tag', 0, { bindle: 'tag' });
 ref('tag 55799 nested', arr(tag(55799, uint(0))), 'tag', 1, { bindle: 'tag' });
 ref('tag 55799 twice', tag(55799, tag(55799, uint(0))), 'tag', 3, { bindle: 'tag' });
-ref('tag 5 (bigfloat) is not in the standard set', tag(5, arr(uint(1), uint(3))), 'tag', 0, { bindle: 'tag' });
-ref('tag 18 (COSE_Sign1) is not in the standard set', tag(18, arr()), 'tag', 0, { bindle: 'tag' });
-ref('tag 33 is not in the standard set', tag(33, tstr('AA')), 'tag', 0, { bindle: 'tag' });
-ref('tag 64 stays refused', tag(64, bstr('00')), 'tag', 0, { bindle: 'tag' });
-ref('a 64-bit tag number', 'db000000010000000000', 'tag', 0, { bindle: 'tag' });
 ref('a non-shortest tag head', 'd80000', 'non_shortest', 0, { bindle: 'non_shortest' });
+
+// Any tag (D180, the preset's tag level): every tag number, its content one item a level below; the known tags keep
+// their rules. `standard` is the code under { tags: 'standard' } where it differs.
+const STD = { standard: 'tag', bindle: 'tag' };
+acc('tag 5 (bigfloat): no content rule', tag(5, arr(nint(-1), uint(3))), T(5, [-1, 3]), STD);
+acc('tag 18 over an empty array: no content rule', tag(18, arr()), T(18, []), STD);
+acc('tag 33 (base64url) content is not checked', tag(33, tstr('AA')), T(33, 'AA'), STD);
+const sig = '8eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36';
+const sign1 = tag(18, arr(bstr('a10126'), map([uint(4), bstr('3131')]), bstr(utf8('This is the content.')), bstr(sig)));
+acc('COSE_Sign1 (RFC 9052 C.2.1)', sign1,
+  T(18, [B('a10126'), M([4, B('3131')]), B(utf8('This is the content.')), B(sig)]), { ...STD, bindle: 'tag' });
+acc('CWT: tag 61 over a COSE_Sign1 whose payload is the RFC 8392 A.1 claims',
+  tag(61, tag(18, arr(bstr('a10126'), map(), bstr(cwt), bstr(sig)))),
+  T(61, T(18, [B('a10126'), {}, B(cwt), B(sig)])), STD);
+acc('COSE_Encrypt0 (16), COSE_Mac0 (17), COSE_Encrypt (96), COSE_Mac (97), COSE_Sign (98)',
+  arr(tag(16, arr(bstr('a1010a'), map([uint(5), bstr('00112233')]), bstr('deadbeef'))),
+    tag(17, arr(bstr('a1010f'), map(), bstr('00'), bstr('726043745027214f'))),
+    tag(96, arr(bstr(''), map(), 'f6', arr(arr(bstr(''), map([uint(1), nint(-6)]), bstr(''))))),
+    tag(97, arr(bstr('a10105'), map(), bstr('00'), bstr('01'), arr(arr(bstr(''), map(), bstr(''))))),
+    tag(98, arr(bstr(''), map(), bstr('00'), arr(arr(bstr('a10126'), map(), bstr('01')))))),
+  undefined, STD);
+acc('self-described COSE_Sign1 (55799 over tag 18)', tag(55799, sign1), undefined, STD);
+acc('nested unknown tags', tag(1000, tag(5, tag(260, tstr('x')))), T(1000, T(5, T(260, 'x'))), STD);
+acc('a standard tag inside an unknown one keeps its rule', tag(1001, tag(1, uint(0))), T(1001, T(1, 0)), STD);
+acc('tag 256 (2-byte head)', tag(256, uint(0)), T(256, 0), STD);
+acc('tag 65534 and 65536 (2- and 4-byte heads)', arr(tag(65534, uint(0)), tag(65536, uint(0))), [T(65534, 0), T(65536, 0)], STD);
+acc('tag 2^32 - 2 (4-byte head, a negative i32)', tag(2n ** 32n - 2n, uint(0)), T(4294967294, 0), STD);
+acc('tag 2^32 (8-byte head)', tag(2n ** 32n, 'f6'), T(4294967296, null), STD);
+acc('tag 2^53 - 1', tag(2n ** 53n - 1n, uint(1)), T(9007199254740991, 1), STD);
+acc('tag 2^64 - 2', tag(2n ** 64n - 2n, uint(0)), T('18446744073709551614', 0), STD);
+acc('tag 2^63 + 2^32 - 1 (both halves odd)', tag(2n ** 63n + 2n ** 32n - 1n, uint(0)), T('9223372041149743103', 0), STD);
+ref('tag 65535 is invalid (RFC 8949 §9.2)', tag(65535, uint(0)), 'tag', 0, STD);
+ref('tag 2^32 - 1 is invalid', tag(2n ** 32n - 1n, uint(0)), 'tag', 0, STD);
+ref('tag 2^64 - 1 is invalid', tag(2n ** 64n - 1n, uint(0)), 'tag', 0, STD);
+ref('an invalid tag nested in a valid one', tag(18, tag(65535, uint(0))), 'tag', 1, STD);
+acc('tag 2^32 + 2 is not a bignum (the rule follows the whole number)', tag(2n ** 32n + 2n, bstr('00')), T(4294967298, B('00')), STD);
+acc('tag 2^32 + 24 is not an encoded data item', tag(2n ** 32n + 24n, tstr('x')), T(4294967320, 'x'), STD);
+acc('an unknown tag as a map key, and a 64-bit one', map([tag(7, uint(0)), uint(1)], [tag(2n ** 40n, uint(0)), uint(2)]),
+  M([T(7, 0), 1], [T(1099511627776, 0), 2]), { standard: 'tag', bindle: 'key_type' });
+acc('tag 24 holding an unknown tag', tag(24, bstr(tag(18, arr()))), T(24, B(tag(18, arr()))), STD);
+acc('tag 64 (uint8) over a byte string', tag(64, bstr('00ff')), T(64, B('00ff')), STD);
+acc('tag 65 (uint16 big-endian) over whole elements', tag(65, bstr('00010002')), T(65, B('00010002')), STD);
+acc('tag 87 (float128 little-endian) over 16 bytes', tag(87, bstr('00'.repeat(16))), T(87, B('00'.repeat(16))), STD);
+acc('tag 76 (reserved in RFC 8746) has no rule', tag(76, uint(0)), T(76, 0), STD);
+acc('tag 82 (float64 big-endian) may hold a NaN', tag(82, bstr('7ff8000000000001')), T(82, B('7ff8000000000001')), STD);
+ref('tag 65 with an odd byte count', tag(65, bstr('000100')), 'tag', 0, STD);
+ref('tag 87 with 8 bytes', tag(87, bstr('00'.repeat(8))), 'tag', 0, STD);
+ref('tag 64 over text', tag(64, tstr('a')), 'tag', 0, STD);
+ref('tag 66 over a truncated byte string: the content walk first', tag(66, '4400'), 'truncated', 2, { ...STD, standard: 'tag' });
+ref('an unknown tag with a non-shortest content: the content walk first', tag(1000, '1817'), 'non_shortest', 3, STD);
+ref('an unknown tag with no content', tag(18, ''), 'truncated', 1, STD);
+ref('a 64-bit tag head truncated', 'db00000001000000', 'truncated', 0, { standard: 'truncated', bindle: 'truncated' });
+ref('a 64-bit tag number with no content', 'db0000000100000000', 'truncated', 9, STD);
+ref('tag 18 in a 1-byte head', 'd81280', 'non_shortest', 0, { standard: 'non_shortest', bindle: 'non_shortest' });
+ref('tag 18 in a 2-byte head', 'd9001280', 'non_shortest', 0, { standard: 'non_shortest', bindle: 'non_shortest' });
+ref('tag 256 in a 4-byte head', 'da0000010000', 'non_shortest', 0, { standard: 'non_shortest', bindle: 'non_shortest' });
+ref('tag 2^32 - 1 in an 8-byte head', 'db00000000ffffffff00', 'non_shortest', 0, { standard: 'non_shortest', bindle: 'non_shortest' });
+ref('an indefinite tag head', 'df00', 'indefinite', 0, { standard: 'indefinite', bindle: 'indefinite' });
+ref('tag 55799 nested under an unknown tag', tag(18, tag(55799, uint(0))), 'tag', 1, STD);
+ref('unknown tags past maxDepth (32)', tag(1000, '').repeat(33) + '00', 'depth', 96, STD);
+ref('tag 2 bignum that fits 64 bits (preferred serialization, D181)', tag(2, bstr('ffffffffffffffff')), 'bignum', 0, { standard: 'bignum', bindle: 'bignum' });
+ref('tag 3 bignum with a leading zero', tag(3, bstr('000100000000000000')), 'bignum', 0, { standard: 'bignum', bindle: 'bignum' });
+ref('tag 2 over text', tag(2, tstr('1')), 'bignum', 1, { standard: 'bignum', bindle: 'bignum' });
 
 // Determinism of heads and lengths (unchanged from the Bindle profile).
 ref('non-shortest integer', '1817', 'non_shortest', 0, { bindle: 'non_shortest' });
@@ -234,13 +292,15 @@ ref('trailing bytes', '0000', 'trailing', 1, { bindle: 'trailing' });
 ref('empty input', '', 'truncated', 0, { bindle: 'truncated' });
 
 const doc = {
-  profile: 'snug deterministic preset (D081, D120-D125): docs/profiles.md',
+  profile: 'snug deterministic preset (D081, D120-D125, D180): docs/profiles.md',
   format: 'hex is the full input, decoded with { profile: "deterministic" } (top any). Accept vectors give the decoded '
     + 'value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: '
     + 'cbor-profile.json\'s, plus {"$map": [[key, value], ...]} a Map, {"$tag": n, "value": v} a Tagged, {"$float": '
     + '"NaN" | "Infinity" | "-Infinity" | "-0"} and {"$undefined": true}; a missing value is not checked. Refuse '
     + 'vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of '
-    + 'the same bytes under { profile: "bindle", top: "any" } (cbor.mjs\'s).',
+    + 'the same bytes under { profile: "bindle", top: "any" } (cbor.mjs\'s). standard, when given, is the code of '
+    + 'the same bytes under { tags: "standard" } (D180; else the vector\'s own verdict). A $tag number beyond 2^53 - 1 '
+    + 'is a decimal string.',
   generator: 'corpus/tools/export-deterministic.mjs',
   accept: A, refuse: R,
 };

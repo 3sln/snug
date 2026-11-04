@@ -1,7 +1,7 @@
 // Trusted second pass over scanner-approved CBOR (any profile, D123). Invalid
 // input is outside this module's contract; all profile decisions belong to the
 // scanner. Maps with only text keys become objects, maps with any other key a Map
-// (a cose top-level map always); standard-set tags become Tagged; f7 undefined.
+// (a cose top-level map always); every tag outside the Bindle set becomes Tagged (D180); f7 undefined.
 import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue } from './values.mjs';
 import { fail } from './fault.mjs';
 
@@ -107,7 +107,8 @@ class Builder {
     return out;
   }
   tag(tag) {
-    if (tag === 0 || tag === 1 || tag === 32 || tag === 55799 || (tag >= 21 && tag <= 24)) return taggedValue(tag, this.item());
+    // Every tag but the Bindle set's own (2, 3, 4, 40, the little-endian typed arrays) is a Tagged (D121, D180).
+    if (tag !== 2 && tag !== 3 && tag !== 4 && tag !== 40 && !TYPED_BY_TAG.has(tag)) return taggedValue(tag, this.item());
     if (tag === 4) {
       this.pos++; // scanner proved the two-element array head
       const exponent = this.item(), mantissa = this.item();

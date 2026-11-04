@@ -631,3 +631,46 @@ fn shared_schemas_independent_scratch_and_source_errors() {
         Err(Error::Usage(_))
     ));
 }
+
+#[test]
+fn any_tag_level_d180() {
+    use snug::{Profile, Tags};
+    assert_eq!(Profile::DETERMINISTIC.tags, Tags::Any);
+    assert_eq!(Profile::DETERMINISTIC.flags(), 122);
+    let standard = Profile {
+        tags: Tags::Standard,
+        ..Profile::DETERMINISTIC
+    };
+    assert_eq!(standard.flags(), 118);
+    // COSE_Sign1 (RFC 9052 C.2.1 shape) decodes to Value::Tag(18, ..) and re-encodes byte for byte.
+    let sign1 = unhex("d28443a10126a10442313154746869732069732074686520636f6e74656e742e4100");
+    let v = decode(&sign1, &DecodeOptions::default()).unwrap();
+    assert!(matches!(&v, Value::Tag(18, _)));
+    assert_eq!(encode(&v, &EncodeOptions::default()).unwrap(), sign1);
+    let std_opts = DecodeOptions {
+        profile: standard,
+        ..DecodeOptions::default()
+    };
+    assert_eq!(decode(&sign1, &std_opts).unwrap_err().code(), "tag");
+    // 64-bit tag numbers: the whole number, never a bignum; the invalid numbers refused.
+    let wide = Value::Tag((1 << 32) + 2, Box::new(Value::Bytes(vec![0])));
+    let bytes = encode(&wide, &EncodeOptions::default()).unwrap();
+    assert_eq!(hex(&bytes), "db00000001000000024100");
+    assert_eq!(decode(&bytes, &DecodeOptions::default()).unwrap(), wide);
+    let top = Value::Tag(u64::MAX - 1, Box::new(Value::Uint(0)));
+    assert_eq!(hex(&encode(&top, &EncodeOptions::default()).unwrap()), "dbfffffffffffffffe00");
+    for n in [65535u64, (1 << 32) - 1, u64::MAX] {
+        let e = encode(&Value::Tag(n, Box::new(Value::Uint(0))), &EncodeOptions::default()).unwrap_err();
+        assert_eq!(e.code(), "tag", "tag {n}");
+    }
+    // RFC 8746 typed arrays outside the Bindle set: a byte string of whole elements, kept as a Tag.
+    let be16 = unhex("d841420001");
+    assert_eq!(
+        decode(&be16, &DecodeOptions::default()).unwrap(),
+        Value::Tag(65, Box::new(Value::Bytes(vec![0, 1])))
+    );
+    assert_eq!(decode(&unhex("d84143000102"), &DecodeOptions::default()).unwrap_err().code(), "tag");
+    // A view reads the whole tag number.
+    let view = View::open(&bytes, &DecodeOptions::default()).unwrap();
+    assert_eq!(view.value().unwrap(), wide);
+}

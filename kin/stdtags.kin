@@ -8,22 +8,71 @@
 ;; item (so every head read here is in bounds and shortest). A tag-24 byte
 ;; string's content is then walked by the caller as one item (its own walker:
 ;; the scanner's, or the VM's dead walk). Integer-only (D009).
+;;
+;; The "any tag" level (PF_TAGS 2/3, D180) sends every other tag number down the
+;; same path: its content one item a level below, no rule -- except the RFC
+;; 8746 typed-array tags outside the Bindle set (big-endian forms, 64, 68,
+;; float128), whose content must be a byte string holding whole elements (a
+;; rule on the content's head alone) -- and the invalid tag numbers 65535,
+;; 2^32 - 1 and 2^64 - 1 (RFC 8949 §9.2), refused. A tag number of more than 32
+;; bits is passed here as its "rule tag" (rule-tag): -2, or -1 for 2^64 - 1.
 (ns snug.cbor.stdtags
   (:require [kin.lang :refer [defn let return set if while do comment]]
             [snug.lang :refer [I32 Bool Bytes + - * neg rem sar ushr bit-and
                                < > <= >= == != and or not u8]]
-            [snug.cbor.codes :refer [PF_TAGS PF_SUB]]
-            [snug.cbor.head :refer [be16 be32 head-size]]))
+            [snug.cbor.codes :refer [PF_TAGS PF_TAGS_ANY PF_SUB]]
+            [snug.cbor.head :refer [be16 be32 head-size small-arg]]
+            [snug.cbor.tags :refer [typed-size]]))
+
+(defn ^:pub ^Bool any-tags [^I32 flags]
+  (comment "Does the profile admit any tag number (PF_TAGS 2 or 3, D180)?")
+  (return (>= (bit-and flags PF_TAGS) PF_TAGS_ANY)))
+
+(defn ^:pub ^I32 rule-tag [^I32 hi ^I32 lo]
+  (comment "The tag whose rules a tag number hi:lo follows (D180): lo for a 32-bit"
+           "number; -1 (2^32 - 1's rules: refused) for 2^64 - 1; -2 (2^32 - 2's:"
+           "none) for every other number of more than 32 bits.")
+  (if (== hi 0) (return lo))
+  (if (and (== hi (neg 1)) (== lo (neg 1))) (return (neg 1)))
+  (return (neg 2)))
+
+(defn ^:pub ^I32 typed-any-size [^I32 tag]
+  (comment "The element size of an RFC 8746 typed-array tag OUTSIDE the Bindle set"
+           "(uint8 64, the big-endian forms, clamped 68, float128 83/87), checked"
+           "only under the any-tag level; 0 for any other tag (76 is reserved).")
+  (if (or (< tag 64) (> tag 87)) (return 0))
+  (if (or (== tag 64) (== tag 68)) (return 1))
+  (if (or (== tag 65) (or (== tag 73) (== tag 80))) (return 2))
+  (if (or (== tag 66) (or (== tag 74) (== tag 81))) (return 4))
+  (if (or (== tag 67) (or (== tag 75) (== tag 82))) (return 8))
+  (if (or (== tag 83) (== tag 87)) (return 16))
+  (return 0))
+
+(defn ^:pub ^Bool std-reads [^I32 tag]
+  (comment "Does the content rule of (rule) tag `tag` read its content? 0, 24 and 32"
+           "read it whole; 1 and the any-level typed arrays only its head (<= 9"
+           "bytes). Every other tag's rule reads nothing.")
+  (if (or (or (== tag 0) (== tag 1)) (or (== tag 24) (== tag 32))) (return true))
+  (return (> (typed-any-size tag) 0)))
 
 (defn ^:pub ^Bool std-allowed [^I32 flags ^I32 tag ^I32 depth]
-  (comment "Is tag (a 32-bit argument, possibly negative as an i32) one of the"
-           "standard set's additions, allowed under profile flags at depth? 55799"
-           "only at the top level (depth 0 of a walk whose root is the document's"
-           "top: PF_SUB clear).")
-  (if (== (bit-and flags PF_TAGS) 0) (return false))
-  (if (== tag 55799) (return (and (== depth 0) (== (bit-and flags PF_SUB) 0))))
-  (if (or (== tag 0) (or (== tag 1) (== tag 32))) (return true))
-  (return (and (>= tag 21) (<= tag 24))))
+  (comment "Is (rule) tag `tag` (a 32-bit argument, possibly negative as an i32; a"
+           "rule-tag for a number of more than 32 bits) one of the standard set's"
+           "additions, or any other tag under the any-tag level, allowed under"
+           "profile flags at depth? 55799 only at the top level (depth 0 of a walk"
+           "whose root is the document's top: PF_SUB clear), in every level. The"
+           "Bindle set's own tags (2, 3, 4, 40, the little-endian typed arrays)"
+           "never take this path: false.")
+  (let [lvl (bit-and flags PF_TAGS)]
+    (if (== lvl 0) (return false))
+    (if (== tag 55799) (return (and (== depth 0) (== (bit-and flags PF_SUB) 0))))
+    (if (or (== tag 0) (or (== tag 1) (== tag 32))) (return true))
+    (if (and (>= tag 21) (<= tag 24)) (return true))
+    (if (< lvl PF_TAGS_ANY) (return false))
+    (comment "RFC 8949 §9.2: 65535, 2^32 - 1 (-1) and 2^64 - 1 (rule tag -1) are invalid tag numbers")
+    (if (or (== tag 65535) (== tag (neg 1))) (return false))
+    (if (or (or (== tag 2) (== tag 3)) (or (== tag 4) (== tag 40))) (return false))
+    (return (== (typed-size tag) 0))))
 
 (defn ^:pub ^I32 std-inner [^Bytes b ^I32 q]
   (comment "Where the content of the (valid) string item at q starts.")
@@ -148,13 +197,17 @@
   (comment "The content rule of standard tag `tag` over its well-formed content"
            "item b[q, stop): 0 a text in RFC 3339 date-time form; 1 an integer"
            "(major 0/1) or a finite float; 24 a byte string (its content is then"
-           "walked by the caller); 32 a text in URI form (uri-ok); 21-23 and"
-           "55799 anything (and nothing is read: the session calls this with the"
-           "content of those tags no longer in its window).")
-  (if (not (or (or (== tag 0) (== tag 1)) (or (== tag 24) (== tag 32)))) (return true))
+           "walked by the caller); 32 a text in URI form (uri-ok); an any-level"
+           "typed array (typed-any-size) a byte string of whole elements, read from"
+           "its head; 21-23, 55799 and every other tag anything (and nothing is"
+           "read: the session calls this with the content of those tags no longer"
+           "in its window; std-reads).")
+  (if (not (std-reads tag)) (return true))
   (let [ib (u8 b q)
         major (ushr ib 5)
-        ai (bit-and ib 31)]
+        ai (bit-and ib 31)
+        ts (typed-any-size tag)]
+    (if (> ts 0) (return (and (== major 2) (== (rem (small-arg b q) ts) 0))))
     (if (== tag 1)
       (do (if (<= major 1) (return true))
           (if (and (== major 7) (and (>= ai 25) (<= ai 27))) (return (finite-float b q)))

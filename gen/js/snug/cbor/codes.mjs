@@ -73,6 +73,8 @@ export const PF_KEYS = 3;
 
 export const PF_TAGS = 12;
 
+export const PF_TAGS_ANY = 8;
+
 export const PF_FLOATS = 16;
 
 export const PF_UNDEFINED = 32;
@@ -83,7 +85,7 @@ export const PF_HOST = 127;
 
 export const PF_SUB = 128;
 
-export const PF_DETERMINISTIC = 118;
+export const PF_DETERMINISTIC = 122;
 
 export const MAX_BIGNUM_BYTES = 128;
 

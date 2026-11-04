@@ -27,7 +27,7 @@
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size]]
             [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad]]
-            [snug.cbor.stdtags :refer [std-allowed]]
+            [snug.cbor.stdtags :refer [std-allowed any-tags rule-tag]]
             [snug.vm.layout :refer [H_FLAGS H_S_LEAVES FL_EMBED FL_COMB FL_EXT K_TAG K_TAGSET K_EMBED
                                     K_ARRAY K_MAP K_AND K_NOT K_EXT R_CONTROL R_CONTROL_SIZE F_ANSWER F_ADMITTED F_MATCHED F_EVAL
                                     VM_QIDX VM_Q1 VM_BIGNUM_MAX VM_EMBED VM_D VM_DLIM VM_W_STATE
@@ -627,11 +627,14 @@
            "array as an item; a standard-set tag: its content item, D121), the"
            "scanner's tag semantics, then the leaves.")
   (if (>= d (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
-  (if (!= hi 0) (return (fail s pos CODE_TAG)))
-  (let [big (or (== lo 2) (== lo 3))
-        tsize (typed-size lo)
-        std (and (and (not big) (and (!= lo 4) (and (!= lo 40) (== tsize 0))))
-                 (std-allowed (ia s O_PROFILE) lo d))
+  (if (and (!= hi 0) (not (any-tags (ia s O_PROFILE)))) (return (fail s pos CODE_TAG)))
+  (comment "rt: the rule tag (D180, rule-tag) of the number hi:lo; the TAG/TAGSET"
+           "tests read the whole number")
+  (let [rt (rule-tag hi lo)
+        big (or (== rt 2) (== rt 3))
+        tsize (typed-size rt)
+        std (and (and (not big) (and (!= rt 4) (and (!= rt 40) (== tsize 0))))
+                 (std-allowed (ia s O_PROFILE) rt d))
         cr (cset-rec p s ck)
         w (cset-width p cr)
         fw (cset-frame p cr)
@@ -642,7 +645,7 @@
         ^:mut cnq 0
         ^:mut cs q]
     (local ^:mut ^I32 stop)
-    (if (and (not big) (and (!= lo 4) (and (!= lo 40) (and (== tsize 0) (not std))))) (return (fail s pos CODE_TAG)))
+    (if (and (not big) (and (!= rt 4) (and (!= rt 40) (and (== tsize 0) (not std))))) (return (fail s pos CODE_TAG)))
     (if big (set cls 2048))
     (let [na (q-filter-x p s fb w nq cls pos ctx)]
       (if (< na 0) (return na)))
@@ -654,10 +657,10 @@
             (do (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
                 (let [lb (q-leaf-base p s fb i)
                       istag (== kind K_TAG)
-                      hit (or (and istag (and (== (ia p (+ lb 2)) 0) (== (ia p (+ lb 3)) lo)))
+                      hit (or (and istag (and (== (ia p (+ lb 2)) hi) (== (ia p (+ lb 3)) lo)))
                               (and (not istag)
-                                   (and (<= (cmp-u64 (ia p (+ lb 2)) (ia p (+ lb 3)) 0 lo) 0)
-                                        (>= (cmp-u64 (ia p (+ lb 4)) (ia p (+ lb 5)) 0 lo) 0))))
+                                   (and (<= (cmp-u64 (ia p (+ lb 2)) (ia p (+ lb 3)) hi lo) 0)
+                                        (>= (cmp-u64 (ia p (+ lb 4)) (ia p (+ lb 5)) hi lo) 0))))
                       ^:mut cts (ia p (+ lb 6))]
                   (if istag (set cts (ia p (+ lb 4))))
                   (if hit
@@ -670,7 +673,7 @@
       (do (if (not (charge s 1 q)) (return (neg R_BUDGET)))
           (if big
             (set stop (dead-bignum b s pos q (ia s VM_BIGNUM_MAX) end))
-            (set stop (dead-typed b s pos q lo tsize end)))
+            (set stop (dead-typed b s pos q rt tsize end)))
           (if (< stop 0) (return stop))
           (set cs (ia s O_CSTART))
           (if (> cnq 0)
@@ -681,15 +684,15 @@
               (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0 ext))
               (set stop (dead-item b s q (+ d 1) end)))
             (if (< stop 0) (return stop))
-            (set stop (dead-std-check b s pos lo q stop d))
+            (set stop (dead-std-check b s pos rt q stop d))
             (if (< stop 0) (return stop)))
-        (do (let [pc (pair-check b s pos q (if-code lo) end)]
+        (do (let [pc (pair-check b s pos q (if-code rt) end)]
               (if (< pc 0) (return pc)))
             (if (> cnq 0)
               (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0 ext))
               (set stop (dead-pair-body b s q d end)))
             (if (< stop 0) (return stop))
-            (if (== lo 4)
+            (if (== rt 4)
               (set stop (decimal-check b s pos q stop))
               (set stop (ndarray-check b s pos q stop)))
             (if (< stop 0) (return stop)))))
@@ -706,7 +709,7 @@
                     (if (== t 1)
                       (q-set-flag s fb w j F_MATCHED)
                       (q-set-flag s fb w j (shl R_TYPE 8))))))))))
-    (let [r2 (eval-scalars p pool b s fb w nq pos cs stop cls 0 lo (unit-of ctx))]
+    (let [r2 (eval-scalars p pool b s fb w nq pos cs stop cls hi lo (unit-of ctx))]
       (if (< r2 0) (return r2)))
     (if (> (count-matched p s fb w nq) 0) (wit-clear s))
     (let [r3 (finish-scalar p pool b s fb w nq d pos stop ctx ext)]

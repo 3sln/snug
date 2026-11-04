@@ -6,19 +6,19 @@
 import { PF_DETERMINISTIC } from '../../../gen/js/snug/cbor/codes.mjs';
 
 const KEYS = { text: 0, integer: 1, any: 2 };
-const TAGS = { bindle: 0, standard: 4 };
+const TAGS = { bindle: 0, standard: 4, any: 8 };
 const FLOATS = { bindle: 0, deterministic: 16 };
 const UNDEFINED = 32, NONCHAR = 64;
 
 export const profiles = Object.freeze({
-  deterministic: Object.freeze({ wire: 'deterministic', top: 'any', cose: false, keys: 'any', tags: 'standard',
+  deterministic: Object.freeze({ wire: 'deterministic', top: 'any', cose: false, keys: 'any', tags: 'any',
     floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false }),
   bindle: Object.freeze({ wire: 'bindle', top: 'map', cose: false, keys: 'text', tags: 'bindle', floats: 'bindle',
     undefinedValue: false, noncharacters: false, strictArrays: true }),
 });
 
 const BINDLE_FLAGS = 0;
-if (PF_DETERMINISTIC !== 118) throw new Error('snug: profile flags out of step with kin');
+if (PF_DETERMINISTIC !== 122) throw new Error('snug: profile flags out of step with kin');
 
 function presetOf(options) {
   const p = options.wire;
@@ -64,6 +64,7 @@ export function strictArraysOf(options) {
 // Flag tests for host code (the same bits kin reads).
 export const keysOf = flags => flags & 3;          // 0 text, 1 text + integer, 2/3 any
 export const standardTags = flags => (flags & 12) !== 0;
+export const anyTags = flags => (flags & 12) >= 8;
 export const rfcFloats = flags => (flags & 16) !== 0;
 export const undefinedOk = flags => (flags & 32) !== 0;
 export const noncharactersOk = flags => (flags & 64) !== 0;

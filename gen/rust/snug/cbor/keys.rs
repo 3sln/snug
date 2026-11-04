@@ -90,10 +90,8 @@ pub fn key_end_any(b: &[u8], start: i32, end: i32, wend: i32) -> i32 {
             }
             rem += 2 * lo;
         }
+        // a tag's number is not a length: any number owes one item (D180)
         if major == 6 {
-            if hi != 0 {
-                return -1;
-            }
             rem += 1;
         }
     }

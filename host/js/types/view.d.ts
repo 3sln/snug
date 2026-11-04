@@ -29,8 +29,8 @@ export declare class View {
   bool(): boolean;
   isNull(): boolean;
   isUndefined(): boolean;
-  /** A tagged item's tag number, else undefined. */
-  readonly tag: number | undefined;
+  /** A tagged item's tag number (a bigint beyond 2^53 - 1), else undefined. */
+  readonly tag: number | bigint | undefined;
   /** A View of a tagged item's content. */
   content(): View;
   /** Read-only aliases by contract; JS cannot enforce that contract. */

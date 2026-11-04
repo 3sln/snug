@@ -328,9 +328,6 @@ pub fn key_max_claim(b: &[u8], start: i32, end: i32, wend: i32) -> i32 {
             rem += 2 * lo;
         }
         if major == 6 {
-            if hi != 0 {
-                return mc;
-            }
             rem += 1;
         }
     }
@@ -758,7 +755,7 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
             rem -= 1;
         } else {
             let mut n: i32;
-            if (hi != 0) || (lo < 0) {
+            if (major != 6) && ((hi != 0) || (lo < 0)) {
                 return pstop(ss, lvl);
             }
             n = lo;
@@ -774,8 +771,13 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
                 n = 2 * lo;
             }
             if major == 6 {
-                if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
-                    if !std_allowed(ss[(SS_PROF) as usize], lo, 0) {
+                // a tag of any number (D180): the rule tag decides
+                let rt: i32 = rule_tag(hi, lo);
+                if (hi != 0) && (!any_tags(ss[(SS_PROF) as usize])) {
+                    return pstop(ss, lvl);
+                }
+                if (rt != 2) && ((rt != 3) && ((rt != 4) && ((rt != 40) && (typed_size(rt) == 0)))) {
+                    if !std_allowed(ss[(SS_PROF) as usize], rt, 0) {
                         return pstop(ss, lvl);
                     }
                 }
@@ -887,7 +889,7 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
             rem -= 1;
         } else {
             let mut n: i32;
-            if (hi != 0) || (lo < 0) {
+            if (major != 6) && ((hi != 0) || (lo < 0)) {
                 return rstop(ss, lvl, i + 1, base);
             }
             n = lo;
@@ -903,8 +905,13 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
                 n = 2 * lo;
             }
             if major == 6 {
-                if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
-                    if !std_allowed(ss[(SS_PROF) as usize], lo, 0) {
+                // a tag of any number (D180): the rule tag decides
+                let rt: i32 = rule_tag(hi, lo);
+                if (hi != 0) && (!any_tags(ss[(SS_PROF) as usize])) {
+                    return rstop(ss, lvl, i + 1, base);
+                }
+                if (rt != 2) && ((rt != 3) && ((rt != 4) && ((rt != 40) && (typed_size(rt) == 0)))) {
+                    if !std_allowed(ss[(SS_PROF) as usize], rt, 0) {
                         return rstop(ss, lvl, i + 1, base);
                     }
                 }

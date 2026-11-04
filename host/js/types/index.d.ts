@@ -27,8 +27,9 @@ export interface ProfileOptions {
   wire?: 'deterministic' | 'bindle';
   /** Map key kinds: text only, text and integers (major 0/1), or any item. deterministic: 'any'; bindle: 'text'. */
   keys?: 'text' | 'integer' | 'any';
-  /** The Bindle tag set, or the standard set adding 0, 1, 21-24, 32, 55799. deterministic: 'standard'. */
-  tags?: 'bindle' | 'standard';
+  /** The Bindle tag set; the standard set adding 0, 1, 21-24, 32, 55799; or any tag number (D180), the known tags
+   * keeping their content rules. deterministic: 'any'. */
+  tags?: 'bindle' | 'standard' | 'any';
   /** Bindle refuses NaN, ±∞, −0 and safe-range integral floats; deterministic is RFC 8949 (canonical NaN f97e00). */
   floats?: 'bindle' | 'deterministic';
   /** The simple value undefined (f7). deterministic: true; bindle: false. */
@@ -78,7 +79,7 @@ export declare const LIMITS: Readonly<{
 }>;
 /** The two presets spelled out as frozen option objects (D120). */
 export declare const profiles: Readonly<{
-  deterministic: Readonly<{ wire: 'deterministic'; top: 'any'; cose: false; keys: 'any'; tags: 'standard';
+  deterministic: Readonly<{ wire: 'deterministic'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
     floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
   bindle: Readonly<{ wire: 'bindle'; top: 'map'; cose: false; keys: 'text'; tags: 'bindle'; floats: 'bindle';
     undefinedValue: false; noncharacters: false; strictArrays: true }>;
@@ -99,8 +100,9 @@ export declare class Decimal {
 }
 /** A standard-set tag (D121): 0, 1, 21, 22, 23, 24 (value: the payload bytes), 32 or 55799. Frozen. */
 export declare class Tagged {
-  constructor(tag: number, value: Value);
-  readonly tag: number;
+  /** tag: 0..2^64-1, a bigint beyond 2^53 - 1 (normalised to a number within it). */
+  constructor(tag: number | bigint, value: Value);
+  readonly tag: number | bigint;
   readonly value: Value;
 }
 export declare class Float16Bytes {

@@ -1,6 +1,6 @@
 {
- "profile": "snug deterministic preset (D081, D120-D125): docs/profiles.md",
- "format": "hex is the full input, decoded with { profile: \"deterministic\" } (top any). Accept vectors give the decoded value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: cbor-profile.json's, plus {\"$map\": [[key, value], ...]} a Map, {\"$tag\": n, \"value\": v} a Tagged, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\" | \"-0\"} and {\"$undefined\": true}; a missing value is not checked. Refuse vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of the same bytes under { profile: \"bindle\", top: \"any\" } (cbor.mjs's).",
+ "profile": "snug deterministic preset (D081, D120-D125, D180): docs/profiles.md",
+ "format": "hex is the full input, decoded with { profile: \"deterministic\" } (top any). Accept vectors give the decoded value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: cbor-profile.json's, plus {\"$map\": [[key, value], ...]} a Map, {\"$tag\": n, \"value\": v} a Tagged, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\" | \"-0\"} and {\"$undefined\": true}; a missing value is not checked. Refuse vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of the same bytes under { profile: \"bindle\", top: \"any\" } (cbor.mjs's). standard, when given, is the code of the same bytes under { tags: \"standard\" } (D180; else the vector's own verdict). A $tag number beyond 2^53 - 1 is a decimal string.",
  "generator": "corpus/tools/export-deterministic.mjs",
  "accept": [
   {
@@ -991,6 +991,326 @@
    "name": "typed array (tag 70) and decimal (tag 4) stay",
    "hex": "82d8464401000000c48221196ab3",
    "bindle": "ok"
+  },
+  {
+   "name": "tag 5 (bigfloat): no content rule",
+   "hex": "c5822003",
+   "value": {
+    "$tag": 5,
+    "value": [
+     -1,
+     3
+    ]
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 18 over an empty array: no content rule",
+   "hex": "d280",
+   "value": {
+    "$tag": 18,
+    "value": []
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 33 (base64url) content is not checked",
+   "hex": "d821624141",
+   "value": {
+    "$tag": 33,
+    "value": "AA"
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "COSE_Sign1 (RFC 9052 C.2.1)",
+   "hex": "d28443a10126a10442313154546869732069732074686520636f6e74656e742e58408eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36",
+   "value": {
+    "$tag": 18,
+    "value": [
+     {
+      "$bytes": "a10126"
+     },
+     {
+      "$map": [
+       [
+        4,
+        {
+         "$bytes": "3131"
+        }
+       ]
+      ]
+     },
+     {
+      "$bytes": "546869732069732074686520636f6e74656e742e"
+     },
+     {
+      "$bytes": "8eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36"
+     }
+    ]
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "CWT: tag 61 over a COSE_Sign1 whose payload is the RFC 8392 A.1 claims",
+   "hex": "d83dd28443a10126a05850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158408eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36",
+   "value": {
+    "$tag": 61,
+    "value": {
+     "$tag": 18,
+     "value": [
+      {
+       "$bytes": "a10126"
+      },
+      {},
+      {
+       "$bytes": "a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71"
+      },
+      {
+       "$bytes": "8eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36"
+      }
+     ]
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "COSE_Encrypt0 (16), COSE_Mac0 (17), COSE_Encrypt (96), COSE_Mac (97), COSE_Sign (98)",
+   "hex": "85d08343a1010aa105440011223344deadbeefd18443a1010fa0410048726043745027214fd8608440a0f6818340a1012540d8618543a10105a041004101818340a040d8628440a04100818343a10126a04101",
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "self-described COSE_Sign1 (55799 over tag 18)",
+   "hex": "d9d9f7d28443a10126a10442313154546869732069732074686520636f6e74656e742e58408eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36",
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "nested unknown tags",
+   "hex": "d903e8c5d901046178",
+   "value": {
+    "$tag": 1000,
+    "value": {
+     "$tag": 5,
+     "value": {
+      "$tag": 260,
+      "value": "x"
+     }
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "a standard tag inside an unknown one keeps its rule",
+   "hex": "d903e9c100",
+   "value": {
+    "$tag": 1001,
+    "value": {
+     "$tag": 1,
+     "value": 0
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 256 (2-byte head)",
+   "hex": "d9010000",
+   "value": {
+    "$tag": 256,
+    "value": 0
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 65534 and 65536 (2- and 4-byte heads)",
+   "hex": "82d9fffe00da0001000000",
+   "value": [
+    {
+     "$tag": 65534,
+     "value": 0
+    },
+    {
+     "$tag": 65536,
+     "value": 0
+    }
+   ],
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^32 - 2 (4-byte head, a negative i32)",
+   "hex": "dafffffffe00",
+   "value": {
+    "$tag": 4294967294,
+    "value": 0
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^32 (8-byte head)",
+   "hex": "db0000000100000000f6",
+   "value": {
+    "$tag": 4294967296,
+    "value": null
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^53 - 1",
+   "hex": "db001fffffffffffff01",
+   "value": {
+    "$tag": 9007199254740991,
+    "value": 1
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^64 - 2",
+   "hex": "dbfffffffffffffffe00",
+   "value": {
+    "$tag": "18446744073709551614",
+    "value": 0
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^63 + 2^32 - 1 (both halves odd)",
+   "hex": "db80000000ffffffff00",
+   "value": {
+    "$tag": "9223372041149743103",
+    "value": 0
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^32 + 2 is not a bignum (the rule follows the whole number)",
+   "hex": "db00000001000000024100",
+   "value": {
+    "$tag": 4294967298,
+    "value": {
+     "$bytes": "00"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^32 + 24 is not an encoded data item",
+   "hex": "db00000001000000186178",
+   "value": {
+    "$tag": 4294967320,
+    "value": "x"
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "an unknown tag as a map key, and a 64-bit one",
+   "hex": "a2c70001db00000100000000000002",
+   "value": {
+    "$map": [
+     [
+      {
+       "$tag": 7,
+       "value": 0
+      },
+      1
+     ],
+     [
+      {
+       "$tag": 1099511627776,
+       "value": 0
+      },
+      2
+     ]
+    ]
+   },
+   "standard": "tag",
+   "bindle": "key_type"
+  },
+  {
+   "name": "tag 24 holding an unknown tag",
+   "hex": "d81842d280",
+   "value": {
+    "$tag": 24,
+    "value": {
+     "$bytes": "d280"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 64 (uint8) over a byte string",
+   "hex": "d8404200ff",
+   "value": {
+    "$tag": 64,
+    "value": {
+     "$bytes": "00ff"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 65 (uint16 big-endian) over whole elements",
+   "hex": "d8414400010002",
+   "value": {
+    "$tag": 65,
+    "value": {
+     "$bytes": "00010002"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 87 (float128 little-endian) over 16 bytes",
+   "hex": "d8575000000000000000000000000000000000",
+   "value": {
+    "$tag": 87,
+    "value": {
+     "$bytes": "00000000000000000000000000000000"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 76 (reserved in RFC 8746) has no rule",
+   "hex": "d84c00",
+   "value": {
+    "$tag": 76,
+    "value": 0
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 82 (float64 big-endian) may hold a NaN",
+   "hex": "d852487ff8000000000001",
+   "value": {
+    "$tag": 82,
+    "value": {
+     "$bytes": "7ff8000000000001"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
   }
  ],
  "refuse": [
@@ -1498,46 +1818,187 @@
    "bindle": "tag"
   },
   {
-   "name": "tag 5 (bigfloat) is not in the standard set",
-   "hex": "c5820103",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
-   "name": "tag 18 (COSE_Sign1) is not in the standard set",
-   "hex": "d280",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
-   "name": "tag 33 is not in the standard set",
-   "hex": "d821624141",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
-   "name": "tag 64 stays refused",
-   "hex": "d8404100",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
-   "name": "a 64-bit tag number",
-   "hex": "db000000010000000000",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
    "name": "a non-shortest tag head",
    "hex": "d80000",
    "code": "non_shortest",
    "offset": 0,
    "bindle": "non_shortest"
+  },
+  {
+   "name": "tag 65535 is invalid (RFC 8949 §9.2)",
+   "hex": "d9ffff00",
+   "code": "tag",
+   "offset": 0,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^32 - 1 is invalid",
+   "hex": "daffffffff00",
+   "code": "tag",
+   "offset": 0,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2^64 - 1 is invalid",
+   "hex": "dbffffffffffffffff00",
+   "code": "tag",
+   "offset": 0,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "an invalid tag nested in a valid one",
+   "hex": "d2d9ffff00",
+   "code": "tag",
+   "offset": 1,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 65 with an odd byte count",
+   "hex": "d84143000100",
+   "code": "tag",
+   "offset": 0,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 87 with 8 bytes",
+   "hex": "d857480000000000000000",
+   "code": "tag",
+   "offset": 0,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 64 over text",
+   "hex": "d8406161",
+   "code": "tag",
+   "offset": 0,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 66 over a truncated byte string: the content walk first",
+   "hex": "d8424400",
+   "code": "truncated",
+   "offset": 2,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "an unknown tag with a non-shortest content: the content walk first",
+   "hex": "d903e81817",
+   "code": "non_shortest",
+   "offset": 3,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "an unknown tag with no content",
+   "hex": "d2",
+   "code": "truncated",
+   "offset": 1,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "a 64-bit tag head truncated",
+   "hex": "db00000001000000",
+   "code": "truncated",
+   "offset": 0,
+   "standard": "truncated",
+   "bindle": "truncated"
+  },
+  {
+   "name": "a 64-bit tag number with no content",
+   "hex": "db0000000100000000",
+   "code": "truncated",
+   "offset": 9,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 18 in a 1-byte head",
+   "hex": "d81280",
+   "code": "non_shortest",
+   "offset": 0,
+   "standard": "non_shortest",
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "tag 18 in a 2-byte head",
+   "hex": "d9001280",
+   "code": "non_shortest",
+   "offset": 0,
+   "standard": "non_shortest",
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "tag 256 in a 4-byte head",
+   "hex": "da0000010000",
+   "code": "non_shortest",
+   "offset": 0,
+   "standard": "non_shortest",
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "tag 2^32 - 1 in an 8-byte head",
+   "hex": "db00000000ffffffff00",
+   "code": "non_shortest",
+   "offset": 0,
+   "standard": "non_shortest",
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "an indefinite tag head",
+   "hex": "df00",
+   "code": "indefinite",
+   "offset": 0,
+   "standard": "indefinite",
+   "bindle": "indefinite"
+  },
+  {
+   "name": "tag 55799 nested under an unknown tag",
+   "hex": "d2d9d9f700",
+   "code": "tag",
+   "offset": 1,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "unknown tags past maxDepth (32)",
+   "hex": "d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e8d903e800",
+   "code": "depth",
+   "offset": 96,
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 2 bignum that fits 64 bits (preferred serialization, D181)",
+   "hex": "c248ffffffffffffffff",
+   "code": "bignum",
+   "offset": 0,
+   "standard": "bignum",
+   "bindle": "bignum"
+  },
+  {
+   "name": "tag 3 bignum with a leading zero",
+   "hex": "c349000100000000000000",
+   "code": "bignum",
+   "offset": 0,
+   "standard": "bignum",
+   "bindle": "bignum"
+  },
+  {
+   "name": "tag 2 over text",
+   "hex": "c26131",
+   "code": "bignum",
+   "offset": 1,
+   "standard": "bignum",
+   "bindle": "bignum"
   },
   {
    "name": "non-shortest integer",
