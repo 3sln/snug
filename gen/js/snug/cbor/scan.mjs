@@ -30,46 +30,37 @@ export function textBad(b, o, bad, stop) {
     return fail(o, bad, CODE_TEXT);
 }
 
-export function scanFloatRfc(b, o, pos, ai, end) {
-    // scan-float under PF_FLOATS: the bytes, then the RFC 8949 deterministic
-    // rules of snug.cbor.float (D122). Apart from scan-float so the Bindle
-    // path stays under V8's inlining limit.
-    const left = end - (pos + 1);
-    let c = 0;
-    let w = 0;
-    if (ai === 25) {
-        w = 2;
-        if (left < 2) {
-            return fail(o, pos, CODE_TRUNCATED);
+export function floatBad(b, o, pos, ai, c) {
+    // The Bindle float check refused the float at pos (its bytes present) with c.
+    // Under PF_FLOATS the RFC 8949 deterministic rules decide instead (D122):
+    // they accept every float the Bindle rules accept, so they are consulted
+    // only here and scan-float stays the Bindle hot path, unchanged.
+    if ((o[O_PROFILE] & PF_FLOATS) !== 0) {
+        let c2 = 0;
+        let w = 2;
+        if (ai === 25) {
+            c2 = rfcF16(be16(b, pos + 1));
         }
-        c = rfcF16(be16(b, pos + 1));
-    }
-    if (ai === 26) {
-        w = 4;
-        if (left < 4) {
-            return fail(o, pos, CODE_TRUNCATED);
+        if (ai === 26) {
+            w = 4;
+            c2 = rfcF32(be32(b, pos + 1));
         }
-        c = rfcF32(be32(b, pos + 1));
-    }
-    if (ai === 27) {
-        w = 8;
-        if (left < 8) {
-            return fail(o, pos, CODE_TRUNCATED);
+        if (ai === 27) {
+            w = 8;
+            c2 = rfcF64(be32(b, pos + 1), be32(b, pos + 5));
         }
-        c = rfcF64(be32(b, pos + 1), be32(b, pos + 5));
+        if (c2 === 0) {
+            return (pos + 1) + w;
+        }
+        return fail(o, pos, c2);
     }
-    if (c !== 0) {
-        return fail(o, pos, c);
-    }
-    return (pos + 1) + w;
+    return fail(o, pos, c);
 }
 
 export function scanFloat(b, o, pos, ai, end) {
     // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
-    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS scan-float-rfc.
-    if ((o[O_PROFILE] & PF_FLOATS) !== 0) {
-        return scanFloatRfc(b, o, pos, ai, end);
-    }
+    // `non_shortest` (cbor.mjs `simple`); a refusal goes through float-bad,
+    // where PF_FLOATS gives the RFC rules their say.
     const left = end - (pos + 1);
     let c = 0;
     let w = 0;
@@ -95,7 +86,7 @@ export function scanFloat(b, o, pos, ai, end) {
         c = checkF64(be32(b, pos + 1), be32(b, pos + 5));
     }
     if (c !== 0) {
-        return fail(o, pos, c);
+        return floatBad(b, o, pos, ai, c);
     }
     return (pos + 1) + w;
 }

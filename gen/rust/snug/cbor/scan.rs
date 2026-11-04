@@ -28,45 +28,36 @@ pub fn text_bad(b: &[u8], o: &mut [i32], bad: i32, stop: i32) -> i32 {
     }
     return fail(o, bad, CODE_TEXT);
 }
-pub fn scan_float_rfc(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
-    // scan-float under PF_FLOATS: the bytes, then the RFC 8949 deterministic
-    // rules of snug.cbor.float (D122). Apart from scan-float so the Bindle
-    // path stays under V8's inlining limit.
-    let left: i32 = end - (pos + 1);
-    let mut c: i32 = 0;
-    let mut w: i32 = 0;
-    if ai == 25 {
-        w = 2;
-        if left < 2 {
-            return fail(o, pos, CODE_TRUNCATED);
+pub fn float_bad(b: &[u8], o: &mut [i32], pos: i32, ai: i32, c: i32) -> i32 {
+    // The Bindle float check refused the float at pos (its bytes present) with c.
+    // Under PF_FLOATS the RFC 8949 deterministic rules decide instead (D122):
+    // they accept every float the Bindle rules accept, so they are consulted
+    // only here and scan-float stays the Bindle hot path, unchanged.
+    if (o[(O_PROFILE) as usize] & PF_FLOATS) != 0 {
+        let mut c2: i32 = 0;
+        let mut w: i32 = 2;
+        if ai == 25 {
+            c2 = rfc_f16(be16(b, pos + 1));
         }
-        c = rfc_f16(be16(b, pos + 1));
-    }
-    if ai == 26 {
-        w = 4;
-        if left < 4 {
-            return fail(o, pos, CODE_TRUNCATED);
+        if ai == 26 {
+            w = 4;
+            c2 = rfc_f32(be32(b, pos + 1));
         }
-        c = rfc_f32(be32(b, pos + 1));
-    }
-    if ai == 27 {
-        w = 8;
-        if left < 8 {
-            return fail(o, pos, CODE_TRUNCATED);
+        if ai == 27 {
+            w = 8;
+            c2 = rfc_f64(be32(b, pos + 1), be32(b, pos + 5));
         }
-        c = rfc_f64(be32(b, pos + 1), be32(b, pos + 5));
+        if c2 == 0 {
+            return (pos + 1) + w;
+        }
+        return fail(o, pos, c2);
     }
-    if c != 0 {
-        return fail(o, pos, c);
-    }
-    return (pos + 1) + w;
+    return fail(o, pos, c);
 }
 pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
-    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS scan-float-rfc.
-    if (o[(O_PROFILE) as usize] & PF_FLOATS) != 0 {
-        return scan_float_rfc(b, o, pos, ai, end);
-    }
+    // `non_shortest` (cbor.mjs `simple`); a refusal goes through float-bad,
+    // where PF_FLOATS gives the RFC rules their say.
     let left: i32 = end - (pos + 1);
     let mut c: i32 = 0;
     let mut w: i32 = 0;
@@ -92,7 +83,7 @@ pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
         c = check_f64(be32(b, pos + 1), be32(b, pos + 5));
     }
     if c != 0 {
-        return fail(o, pos, c);
+        return float_bad(b, o, pos, ai, c);
     }
     return (pos + 1) + w;
 }
