@@ -3849,6 +3849,102 @@ charges; one shared schedule cannot fit both, and the default favours normal
 dispatch (the forced-generic flag is a test mode).
 - [ ] **Signed off** (owner) — calibration was delegated; recorded for review.
 
+### D242 — `.regexp` defaults to XSD; I-Regexp remains an explicit interop option
+**Decision** (P8.3, provisional): `compile(text, {regexp: 'xsd' | 'iregexp'})`
+defaults to `xsd`, following RFC 8610 §3.8.3's normative XSD 1.0 Part 2
+Appendix F reference. Use the corrected XSD 1.0 class grammar, XML 1.0 fifth
+edition NameStartChar/NameChar, and the existing pinned Unicode 16.0 scalar
+categories. This is not the XSD 1.1 regex language: do not add its relaxed
+escapes/block-name rules. Both dialects match the whole string; dot excludes
+LF and CR, ^/$ are literals, category names are case sensitive, and class
+complements operate on Unicode scalar text. No differing meaning was found
+for patterns valid in both grammars. Explicit `iregexp` retains the existing
+parser's admissions, refusals, automata and source keys. XSD source keys add
+a ninth preimage element `0` (with empty Unicode/registry placeholders when
+absent), binding the dialect without changing any Program field or version.
+**Why**: audit §(e) identifies I-Regexp-only coverage as a deliberate deviation;
+the larger regular language needs no new runtime machinery. RFC 9485 remains
+a useful strict interoperability mode.
+**Alternatives**: keep I-Regexp as default (does not follow the normative
+reference); host regexps (different anchoring/escapes and no shared budget).
+- [ ] **Signed off** (owner)
+
+### D243 — XSD lowers to existing bounded range automata at compile time
+**Decision** (P8.3, provisional): kin parses XSD into the existing Glushkov
+tree. Class subtraction computes sorted range-set difference, after applying
+the base's negation; nested subtraction shares the compiler nesting cap.
+Each compared/copied range consumes compile budget. XML name classes are
+small static ranges in kin, needing no optional module; `\s` is exactly
+TAB/LF/CR/SPACE. `\d` is Nd; `\w` complements P/Z/C (so underscore is not
+a word character); their complements and categories require `snug/unicode`.
+Existing position limits (256 default, 512 hard), saturating repetition
+counts, expansion checks, arena cap and compile budget apply. VM and Program
+format are unchanged, including runtime work prices and scratch.
+
+The pinned Node v24.6.0 / ICU 77.1 generator cannot query Block properties:
+both `\p{Block=Basic_Latin}` and `\p{IsBasicLatin}` are syntax errors under
+`u` and `v`. No authoritative block-name/range input is pinned in this tree.
+Use the task's explicit fallback: refuse XSD `\p{Is…}`/`\P{Is…}` with a
+`regexp` error explaining unavailable pinned block data, even with category
+tables. The generator checks and reports this limitation; do not substitute
+scripts or guess blocks from category runs. Block support remains a stated
+coverage limitation pending an authoritative pinned offline input.
+**Why**: all matching stays portable kin over ranges; explicit data refusal
+is preferable to incorrect Unicode blocks. Ruby cddl uses Ruby regexps and
+is not an XSD oracle; fixed expectations come from Appendix F and XML's name
+productions, with Node `v` checks only for equivalent translated patterns.
+**Alternatives**: change Program/VM (unnecessary); infer blocks from scripts
+(incorrect); fetch/install Unicode data (forbidden by this task).
+- [ ] **Signed off** (owner)
+
+### D270 — Group matching follows RFC 8610 Appendix A (PEG): prioritised choice, greedy occurrence
+**Decision** (manager, provisional, per D230 "spec compliance first"; the
+RFC quotation check of 2026-11-04 verified the text in `corpus/rfc/rfc8610.txt`):
+RFC 8610 Appendix A is normative ("This appendix is normative") and gives
+CDDL groups PEG semantics: `//` (and `/` for types) is a prioritised choice —
+"tested in left-to-right order, locking in the first successful match" — and
+occurrence indicators are greedy ("`*a a` in CDDL syntax never can match
+anything"). snug's array and map matching currently computes exact
+regular/existential semantics (D010–D012, with D011's determinism rule and
+refusals); it therefore accepts data the RFC rejects (`[* uint, uint]` accepts
+`[1]`; `[? uint, 2*3 uint, tstr]` accepts `[1,2,"x"]`) and refuses schemas
+the RFC defines. Both reference tools (Ruby `cddl` 0.12.14, cddl-rs 0.10.7)
+match greedily. New semantics, for **arrays and maps**:
+- Groups are PEG expressions over the container's elements (arrays: in
+  order; maps: entries tested in source order, each greedily consuming the
+  remaining pairs it matches); choices are prioritised; occurrences greedy;
+  no backtracking into a locked choice or a completed repetition.
+- **Type** evaluation of a single item stays set-based (D010): an item's
+  verdict for each candidate type is computed once, and the PEG runs over
+  those per-element verdict vectors, so bytes are still read once (buffer,
+  session and sequence drivers alike) and the PEG cost (≤ group nodes ×
+  elements, packrat-memoised where needed) is charged to the budget.
+- D011's determinism rule, factors and the `map_overlap` /
+  `map_group_occurrence` refusals and D012's counter/unrolling refusals are
+  withdrawn: PEG makes every such schema determinate.
+- The D022 oracle must be re-based on PEG semantics (and differentially
+  checked against the Ruby reference tool, noting its known defects).
+- Likely a Program format major bump (2.0) for map/array group tables (D084
+  rule); decided in the P8.5 design.
+Supersedes D011, D012 and the group parts of D010/D035/D036; reframes P8.5
+(no bipartite search is needed). P8.4 (valid CBOR) proceeds first.
+- [ ] **Signed off** (owner)
+
+### D271 — Cut scope: RFC text vs reference tools (OWNER QUESTION, interim: keep D021)
+RFC 8610 §3.5.4 says that after a cut "the entire map fails to match", and
+Appendix A says a cut disables "alternatives in choices containing this
+choice"; both reference tools (and snug's D021) instead let another
+group-choice branch match. D230 said to follow what the audit concludes the
+RFC *and* the reference implementation mean; they disagree. Interim: keep
+D021 (reference behaviour, now classified a deliberate deviation) as the
+default, and implement the literal RFC cut as an option (`cuts: 'rfc'`) in the
+PEG engine, where a cut is a commit. **Question for the owner:** default to
+the reference behaviour (D021) or the literal RFC text? Recommendation: the
+reference behaviour, because the literal reading makes the common
+discriminated-union idiom `{ kind: "a", … // kind: "b", … }` unmatchable and
+both reference tools agree.
+- [ ] **Owner decision pending**
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -5289,7 +5385,7 @@ authorised), the existing gate set, and conformance-corpus vectors.
   value; scanner, both VM drivers, views, builder, sessions and sequences;
   `deterministic` and `bindle` stay as options; measure whether a specialised
   deterministic-only fast path is material and keep it only if so.
-- [ ] **P8.5 — CDDL coverage** (audit ranks 6, 7, 10; D230): budget-metered
+- [ ] **P8.5 — CDDL coverage, rescoped by D270 (PEG group semantics)** (audit ranks 6, 7, 10; D230): budget-metered
   general map assignment where D011 cannot prove greedy exact (bounded
   search / bipartite matching), coupled and non-interval group repetitions,
   non-regular group recursion, composite `.ne`, non-literal `.cat`/`.plus`/
