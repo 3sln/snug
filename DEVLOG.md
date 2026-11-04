@@ -2854,7 +2854,8 @@ Node CPU medians, interleaved):
   hosts that can take it;
 - a hybrid, wasm check plus JS navigation: a sum of measured medians,
   13.4 ms, against 9.1 ms all-wasm.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (owner, 2026-11-04, in session via the coordinator): native JS is
+  the default and the wasm SDK is opt-in. Approved.
 
 ### D131 — The wasm SDK's shape (P7.9)
 **Decision**:
@@ -3536,6 +3537,17 @@ charge (views are O(1)). Cost: 65,536 tiny items each asked by a control now
 exhaust the default budget (they took ~40–50 ms before).
 - [ ] **Signed off** (owner)
 
+### D200 — R9 restated at the measured sizes and enforced as a gate (OWNER DECISION)
+**Decision** (owner, 2026-11-04, in session via the coordinator; option 1 of
+`docs/briefs/r9-bundle-size.md`): the bundle-size requirement R9 is restated
+at the measured sizes — codec (`snug`) ≈ 14.6 KB gzip, runtime (codec +
+`snug/schema`) ≈ 41.9 KB gzip, every other public entry at its measured size
+— and enforced by `bb size` (`tools/size/budget.json`, +2% regression caps),
+which is part of the gate set. The earlier 20 KB runtime figure is withdrawn.
+Further shrinking (the verifier refactor, a possible `schema-lite` entry) is
+opportunistic, not required.
+- [x] **Signed off** (owner, 2026-11-04, in session via the coordinator).
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -3995,7 +4007,7 @@ are answered as provisional decisions D082–D085. None is open now.
   (3) reconcile program.md §13.3's older exact-version text with D084/D100,
   including the major/minor word spelling; that document is outside this
   task's write set. Browser/Worker and broader release evidence remain P7.7.
-- [ ] **P7.6 — Bundle size** (R9: current codec + schema **41,553 B** vs 20 KB gzip).
+- [x] **P7.6 — Bundle size.** R9 restated at the measured sizes and gated by `bb size` (owner decision D200, 2026-11-04).
   *Phase 1 completed 2026-11-03; R9 remains open. No kin/generated edits,
   network, installs or commits by this task.* Offline esbuild 0.28.2; full
   machine/method and before/after tables: [bench](bench/README.md#bundle-size-p76-phase-1--2026-11-03).

@@ -184,7 +184,7 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | Extension controls | Implemented (P7.2, D140–D143): registered `.name` controls decided by pure host predicates; generic `.chars`, `.unique`, `.samelen` in `snug/controls` / `snug::controls`; [guide](docs/guide.md#custom-controls) |
 | Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
 | Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
-| Runtime ≤20 KB min+gzip | Target missed in the recorded runtime measurement; P7.6 remains open |
+| Bundle size | Gated per entry by `bb size` at the measured sizes (codec ≈ 14.6 KB gzip, codec + schema ≈ 41.9 KB gzip; owner decision D200, 2026-11-04) |
 
 Documentation gate on **2026-11-03**, Node v24.6.0, revision `c15a722`
 plus the documentation worktree: `cd host/js && npm test` recorded

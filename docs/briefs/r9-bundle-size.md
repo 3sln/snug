@@ -1,6 +1,6 @@
 # Decision brief: R9 (runtime bundle size)
 
-Prepared 2026-11-04 by the manager for the owner. **Not decided.** R9
+Prepared 2026-11-04 by the manager for the owner. **Decided 2026-11-04: option 1 (owner decision D200).** R9
 (architecture §1) says: runtime (VM + builder + encoder) ≤ 20 KB min+gzip,
 compiler separate. This brief gives the measured position and the options.
 

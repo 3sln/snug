@@ -32,7 +32,7 @@ profile (`3sln.me/docs/spec/cbor.md`, "the profile") and its codec
 | R6 | **Deterministic** across hosts: same verdict, same reason, same path, same budget exhaustion point in JS and Rust. | owner constraint; kin's purpose |
 | R7 | **Strict CBOR profile** with cbor.mjs's refusals *and refusal precedence*, passing `tests/vectors/cbor-*.json`. | owner constraint |
 | R8 | **Single pass** over the bytes where possible; streaming-compatible structure. | owner constraint |
-| R9 | **Small**: runtime (VM + builder + encoder) ≤ 20 KB min+gzip; compiler a separate, lazily loadable module (target to be measured). | browser and Worker bundles |
+| R9 | **Small, and gated**: each public entry stays within its measured size (+2%) as recorded in `tools/size/budget.json` and checked by `bb size` — codec ≈ 14.6 KB gzip, runtime (codec + schema) ≈ 41.9 KB gzip on 2026-11-04; the compiler is a separate, lazily loaded module. *Restated by owner decision D200 (2026-11-04); the original 20 KB runtime target was withdrawn.* | browser and Worker bundles |
 | R10 | **Untrusted schemas** (event-bus manifests) compile under explicit limits *and a compile budget*; a profile can forbid features. | study §8 |
 | R11 | Integers of any size, exact; no host floats in any validation decision. | profile §3; study §3.1 (wasm32 integer bug) |
 
