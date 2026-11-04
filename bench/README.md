@@ -1,5 +1,26 @@
 # JS host codec measurements
 
+## Budget calibration — 2026-11-04
+
+[VM calibration and proposal](VM.md#calibration-2026-11-04): clean
+`df612f5fdabbf38b05fd3f89e5913472ab7791b3`, Apple M1 Pro (10 cores,
+32 GiB), macOS 14.6.1 / Darwin 23.6.0 arm64; Node v24.6.0 / V8
+13.6.233.10-node.24 (`--expose-gc --single-threaded-gc`), rustc 1.92.0
+Homebrew, native `-O`, offline. Forty charged-work shapes/kernels, JS/Rust
+verdict and unit parity, thread CPU, medians of nine interleaved rounds,
+each row bracketed by a map-choice reference; compilation/construction/
+binding/IPC excluded. `uptime` before every engine/row batch. Waited 180 s
+before a full preliminary pass and 60 s before the final pass; load never
+fell below 2, final timing load 10.71–13.93. **No quiet-machine result.**
+Raw samples and reference ratios: [JSON](calibration-2026-11-04.json).
+
+Do not blanket-raise EXT prices 1.5×: proposal targets profile scans and
+specific control steps, with a conditional 2.25 M public-dispatch default
+(~50 ms using the historical quiet reference, 64.44% largest valid unit
+requirement). The exact ±25% cross-host/all-path fit is mathematically
+infeasible with shared constants; the VM record explains residuals and the
+forced-generic/default-headroom conflict. No runtime source changes made.
+
 ## Current evidence index — 2026-11-03
 
 This index points to recorded snapshots; no new performance measurements

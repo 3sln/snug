@@ -3740,6 +3740,82 @@ wire profile, D013 (refused controls), D014 (I-Regexp only) and, subject to
 the audit, D011/D012's refusals and D021.
 - [x] **Directed by the owner** (2026-11-04, in session via the coordinator).
 
+## P8.1 — Spec-conformance audit (2026-11-04)
+
+- **Report delivered:** [docs/conformance.md](docs/conformance.md). Independent
+  offline review of all **142 declared D decisions** (including D028/D112,
+  D210–D219 and newly added D230) and **74 documented semantic/refusal items**.
+  Inventory counts: **147 conformant; 45 conformant but incomplete;
+  18 deliberate deviation; 6 non-conformant**. Counts include overlapping
+  decision/semantic rows, not six independent implementation bugs.
+- **Findings:** D021's branch-local cuts agree with Ruby and Rust; do not
+  introduce global map poisoning. Confirmed accepted-schema defects include
+  signed-zero float comparisons/exclusions and unplugged group sockets;
+  NaN exclusion and known date/URI validity also need attention. Current
+  byte APIs cannot validate valid non-deterministic CBOR, even against any.
+  Canonical-NaN-only and several tag/decimal/typed restrictions exceed core
+  deterministic encoding. Default any-tag policy has prelude witnesses that
+  older docs incorrectly call impossible. D230 is pending implementation.
+- **Checks actually run:** public JS compile/validate/decode/view/Writer,
+  detached spans, handles, known/unknown push/streams; Ruby cddl **0.12.14**
+  and offline-rebuilt Rust cddl **0.10.7** CLI (supplied native binary absent;
+  use --ci for failing exit statuses); **1,840** selected map/array comparisons
+  with the independent local interpreter, zero differences/unknown;
+  **42** public JS sequence scenarios after those exports appeared during
+  the audit. All scratch fixtures, scripts, tool output and source-state
+  records are in .cache/audit/. Node v24.6.0, Ruby 2.6.10, rustc/Cargo 1.92.0.
+  No project gates, snug Rust/wasm build, emission, installs, network or
+  commits were performed by this audit. Only the report and this new item
+  were edited; concurrent engineers' changes were preserved.
+- **Evidence limits/learnt:** a reference validator can implement greedy
+  matching or host-regexp semantics incorrectly; disagreement is evidence,
+  not an RFC verdict. Empty group choice is not empty group. Separate wire
+  policy, schema coverage and host representation. No authoritative local
+  RFC copies were available for sentence-exact quotation verification;
+  quotes are limited/qualified in the report. Six representative protocol
+  fragments compiled; no full published-schema census or coverage percentage
+  is claimed. Working-tree sequence work changed during the audit.
+- **Ranked fixes** (impact/effort and acceptance examples in the report):
+  1. Fix float signed-zero comparisons/exclusions and NaN inequality.
+  2. Fix unplugged group sockets, including oracle/corpus expectations.
+  3. Complete known-tag URI/date validity and distinguish opaque tags.
+  4. Reconcile public scope, prelude/profile and float documentation.
+  5. Deliver D230's valid-CBOR input policy with value-correct comparisons
+     and lossless host representation; keep explicit strict policies.
+  6. Add budget-metered general map assignment/group matching fallback.
+  7. Complete standard controls and mixed numeric-controller coverage.
+  8. Provide precise portable XSD/I-Regexp options per D230.
+  9. Separate inherited decimal/typed/ndarray/tag restrictions from general
+     policy and complete advertised tag1040 support.
+  10. Broaden recursive/group/simple-value coverage and sequence parity.
+- [ ] **Signed off** (owner)
+
+### D240 — Calibration: targeted prices, with an explicit limit on the fit (proposal only)
+**Decision (proposed, 2026-11-04)**: do not blanket-raise EXT weights 1.5×.
+Use the concrete price proposal in [bench/VM.md](bench/VM.md#calibration-2026-11-04):
+EXT_CALL 16→0; T_ELEM 5→10; T_CMP 8→6; T_PROBE 4→3; new C_FIRST 2
+instead of the initial 8-tick chunk, continuation chunks unchanged; profile
+UTF-8 and VM comparison quanta 64→8 bytes/unit; `.bits` 64→12. Propose a
+2.25 M default for normal automatic dispatch after repricing, conditional
+on a quiet confirmation. **No kin/gen/host/program.md changes made.**
+**Why**: 40 shapes/kernels at clean df612f5, nine interleaved thread-CPU
+rounds, JS/native verdict-and-unit parity. Dispatch is cheap; a default-cap
+`.bits` rescan exhausts 2.3 M in 190 ms on the loaded machine. Targeted
+repricing models ~50 ms at 2.25 M against the historical quiet reference;
+all seven valid benchmarks still need ≤1,450,008 units (64.44%). One shared
+schedule cannot put every measured path/host within ±25%: identical array
+charges differ 21–25× by implementation path; `.chars` has disjoint JS/Rust
+price-fit intervals. The forced-generic diagnostic mode with raised caps
+would still need ~0.79 M for 50 ms. These are unresolved constraints, not
+an approved exception or a claimed universal deadline. Load never reached
+<2; absolute quiet confirmation remains open.
+**Alternatives**: blanket +1.5× EXT (worsens cheap calls/probes and misses
+profile scans); lower default alone (~0.66 M for the existing scan witness,
+losing valid-message headroom); host/path-specific units (breaks R6/D044);
+optimise slow paths or extend fractional VM metering (future engineering,
+not implemented by this measurement).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -4050,6 +4126,36 @@ are answered as provisional decisions D082–D085. None is open now.
     overcharges `.chars` by 64× and undercharges `.unique` sorts. Measured
     under load, CPU per unit moves ~2.7× (E-cores, contention), so the
     weights were set as ratios to a VM reference measured at the same time.
+  - **Calibration follow-up 2026-11-04 (measurement/proposal only; D240):**
+    clean detached `df612f5fdabbf38b05fd3f89e5913472ab7791b3` under
+    `.cache/calib-wt`; 40 charged-work cases, JS/native verdict-and-unit
+    parity, nine rotated interleaved thread-CPU rounds, per-batch uptime and
+    paired map-reference ratios. Apple M1 Pro / macOS 14.6.1 / Node 24.6.0 /
+    rustc 1.92.0 -O. Waited 180 s before a preliminary pass and 60 s before
+    the final pass; never load <2, final 10.71–13.93. Results, all concrete
+    proposed prices and the conditional 2.25 M default are in
+    [bench/VM.md, Calibration 2026-11-04](bench/VM.md#calibration-2026-11-04)
+    and `bench/calibration-2026-11-04.json`. No broad 1.5× EXT increase:
+    dispatch 8.03 ns/unit versus map reference 19.83; expensive `.chars`
+    totals are substantially the profile's UTF-8 scan. A 1.4 MB `.bits`
+    rescan fits other default caps and spends 2.3 M units in 189.97 ms;
+    its paired-reference-normalised estimate is 175.43 ms. Proposed targeted
+    scan prices fix that imbalance; an untimed in-memory price projection
+    leaves the largest valid budget requirement at 1,450,008 (64.44% of
+    2.25 M), including seven fast/generic unit equalities. **Exact ±25%
+    equalisation across all hosts/paths is infeasible with common constants;
+    no quiet confirmation or universal 50 ms bound is claimed.**
+    **Checks run:** benchmark parity/retained-combinator/tick-sum assertions,
+    native release build and rustfmt, JS syntax, projected valid-message
+    acceptance/unit parity, diff whitespace. No emit/conformance gates,
+    network, installs, commits or protected-source edits. Worktree removed.
+    **Learnt:** constant multipliers cannot correct fast/generic CPU ratios
+    when D044 requires equal charges, or disjoint relative-host costs. An
+    early CBOR length-head mismatch can hide the intended common-prefix
+    work; long-probe fixtures must have equal encoded lengths. Compiler
+    folding can erase AND examples; assert retained opcodes. Separating
+    first-byte comparison overhead from continuation chunks improves probe
+    pricing; lowering the default alone loses valid-message headroom.
   - **P7.2/D085 benchmark, 2026-11-03:** clean detached HEAD
     `aa7dd560491e7c733015562029be1562be37d56d` (shared kin/scanner edits
     excluded), Apple M1 Pro/macOS 14.6.1/Node v24.6.0. Median CPU over 11

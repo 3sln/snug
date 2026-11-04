@@ -834,3 +834,286 @@ Rust reuses a thread-local scratch instead of allocating per call.
 
 Reproduction: as in the 2026-11-04 section, with commit `e1a7910` and
 `node --expose-gc --single-threaded-gc bench/ext-worst.mjs --out ../hard-results.json`.
+
+
+## Calibration 2026-11-04
+
+**Recommendation: do not raise EXT weights by 1.5×.** Dispatch is already
+cheap per unit; the substantial undercharges are the VM's own UTF-8,
+long-byte comparisons and `.bits` scans. Propose the targeted prices below
+and a **2,250,000-unit default**, conditional on normal automatic dispatch.
+This is a measurement and proposal, **not an implemented schedule change**.
+The requested ±25% fit for **every kind in both hosts is infeasible with
+one portable set of constants**, as demonstrated below. Neither a quiet run
+nor a universal 50 ms bound is established here.
+
+### Revision, environment and method
+
+Clean detached **`df612f5fdabbf38b05fd3f89e5913472ab7791b3`** in
+`.cache/calib-wt`; shared-tree kin/host/generated edits were excluded.
+The worktree used disposable `.cache/calib-git` metadata copied from the
+local repository because the sandbox makes the shared `.git` read-only.
+No emit, installs, network, remotes, commits or publishing. The worktree
+and its disposable git metadata were removed after measurement.
+
+Apple M1 Pro, **10 logical CPUs, 32 GiB**, macOS **14.6.1**, Darwin
+**23.6.0 arm64**. Node **v24.6.0**, V8 **13.6.233.10-node.24**,
+`--expose-gc --single-threaded-gc`; rustc **1.92.0
+(ded5c06cf 2025-12-08), Homebrew**, compiled offline with `--edition=2021 -O`.
+No wasm measurement. The existing Rust `vm` test binary has no timed-repeat
+protocol and prepares controls/parses input per case, so
+`bench/calibrate.rs` supplies a small measurement protocol against the same
+clean generated VM and the **unchanged Rust host control port**.
+
+An earlier full pass waited **180 seconds** for 1-minute load < 2; the final
+pass waited **60 more seconds**. It never qualified. Final invocation:
+**16:15:39–16:18:41 UTC**; timing phase began **16:16:54 UTC**, load
+**10.71–13.93**. This was a shared, loaded machine. Every engine/row batch
+records `uptime` and all three load averages before its reference bracket.
+The raw record also retains the earlier wait samples. Absolute figures
+below are measured CPU, **not quiet-machine figures**.
+
+Each row warms for ≥60 ms of thread CPU per host, then runs batches targeted
+at ≥22 ms. Nine rounds rotate row order; JS/Rust order alternates each
+round. Every sample is bracketed by the six-way map-choice reference in the
+**same host and round**. `ns/reference-unit` is the ratio of the sample's
+ns/unit to the mean of its two reference measurements. Medians of those
+ratios are shown separately from the ratio to the median kind. This reduces
+load/core-placement effects; it does not eliminate them. For example, the
+JS `.bits` rescan/reference ratios ranged 3.948–4.299 (middle five
+4.083–4.176). The final map-reference median was **19.83 ns/unit JS,
+8.13 Rust**. A preliminary lower-load pass gave 17.41/7.84; no absolute
+quiet timing is claimed from that either.
+
+JS uses `threadCpuUsage().user + system`; Rust uses
+`clock_gettime(CLOCK_THREAD_CPUTIME_ID)` (Darwin clock ID 16, checked against
+the installed SDK header). Compilation, fixture construction, IPC, parsing,
+control preparation, scratch growth and untimed counters are excluded.
+Scratch is reused; no forced GC in samples. Rust black-boxes inputs and
+answers. All **40 rows agreed on verdict and units in JS and Rust** before
+timing. AND/NOT opcode assertions prevent compiler folding from silently
+turning those cases into interval tests.
+
+VM workloads exhaust 2.3 M units, except explicitly fixed whole-input scan
+rows. They use raised input/items/entries caps to isolate the budget, as
+P3.6 did; **not every fixture fits all other default limits**. In particular,
+forced-generic rows select the internal diagnostic bit, not public automatic
+dispatch. A claimed default envelope must distinguish those cases.
+The 1.4 MB `.bits` rescan adversary, however, fits the default input, item,
+depth and entry caps: 128 distinct `.bits` leaves over one zero-filled byte
+string; it really exhausts the default budget.
+
+Control-work rows call the actual generated kernels with one shared 2.3 M
+meter until a spend fails. They exclude the outer profile/dispatch walk;
+`EXT-*` rows retain it. Unused remainder is excluded from the direct-kernel
+denominator (hash 2,293,586; chars 2,297,856 units). Untimed in-memory
+instrumentation checks that successful tick charges sum to the real meter:
+hashing is >99.9% hash ticks, sorting ~94.3% comparison ticks, long collision
+comparison >99.97% byte ticks, and long name searches ~97% byte ticks.
+The collision spans are **unequal valid bstr encodings with a real equal
+FNV-1a hash**, found by a deterministic birthday search; comparisons are not
+forced by inventing a hash. Short name probes mismatch early; long probes
+use **equal-length encodings** to reach the common prefix.
+
+A VM workload isolates a *shape*, not a single charge site: array, scalar,
+map, combinator and embedded rows necessarily include their query/filter/
+profile/bookkeeping charges. Their ns/unit must not be interpreted as an
+independent regression coefficient for each constituent §14 event. Direct
+kernels additionally include their small repeated-call loop overhead;
+`unique-record-element` intentionally measures the one-element case.
+
+### Measurements at the current prices
+
+Units are consumed per validation, or per direct-kernel meter run. Code 48
+in the raw record is VM budget exhaustion; direct-kernel sentinels differ.
+The declared-cost refusal invokes no predicate and reports a full spent
+budget despite negligible CPU; it is shown but excluded from the kind
+median. The other **39 rows** define an unweighted median kind of
+**16.35 ns/unit JS and 7.11 Rust**. This median depends on the chosen suite,
+not a natural machine constant. `/med` divides the host's row median by
+that median; `/ref` is the median of the interleaved reference ratios.
+
+| Kind | Units | JS ns/unit | JS /med | Rust ns/unit | Rust /med | JS /ref | Rust /ref |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| array-fast | 2,300,000 | 3.18 | 0.19 | 1.53 | 0.21 | 0.162 | 0.183 |
+| array-generic-same-charges | 2,300,000 | 67.92 | 4.16 | 38.56 | 5.42 | 3.396 | 4.566 |
+| array-automaton | 2,300,000 | 11.19 | 0.68 | 5.86 | 0.82 | 0.592 | 0.693 |
+| dead-walk | 2,300,000 | 2.98 | 0.18 | 1.07 | 0.15 | 0.153 | 0.129 |
+| map-struct | 2,300,000 | 19.52 | 1.19 | 7.57 | 1.06 | 0.967 | 0.905 |
+| map-struct-generic | 2,300,000 | 52.74 | 3.23 | 22.88 | 3.22 | 2.670 | 2.728 |
+| map-table | 2,300,000 | 23.99 | 1.47 | 9.35 | 1.32 | 1.204 | 1.098 |
+| map-table-generic | 2,300,000 | 67.76 | 4.15 | 29.60 | 4.16 | 3.333 | 3.528 |
+| reference-map-choice | 2,300,000 | 19.83 | 1.21 | 8.13 | 1.14 | 0.981 | 0.997 |
+| scalar-leaves | 2,300,000 | 6.90 | 0.42 | 3.44 | 0.48 | 0.358 | 0.424 |
+| text-ascii | 21,881 | 136.14 | 8.33 | 32.62 | 4.59 | 7.142 | 3.936 |
+| literal-long-compare | 43,786 | 115.58 | 7.07 | 38.04 | 5.35 | 5.952 | 4.556 |
+| text-utf8 | 21,881 | 166.84 | 10.21 | 43.06 | 6.06 | 8.163 | 5.355 |
+| bytes-bits-scan | 21,881 | 87.75 | 5.37 | 44.59 | 6.27 | 4.464 | 5.501 |
+| bytes-bits-rescan | 2,300,000 | 82.60 | 5.05 | 45.14 | 6.35 | 4.123 | 5.508 |
+| regexp | 2,300,000 | 5.23 | 0.32 | 3.68 | 0.52 | 0.269 | 0.446 |
+| key-binary-search | 2,300,000 | 11.37 | 0.70 | 6.45 | 0.91 | 0.581 | 0.806 |
+| key-long-prefix-search | 185,872 | 81.09 | 4.96 | 40.19 | 5.65 | 4.196 | 4.717 |
+| AND | 2,300,000 | 9.11 | 0.56 | 4.86 | 0.68 | 0.465 | 0.587 |
+| NOT | 2,300,000 | 9.61 | 0.59 | 4.25 | 0.60 | 0.481 | 0.499 |
+| embedded | 2,300,000 | 23.28 | 1.42 | 8.59 | 1.21 | 1.171 | 1.027 |
+| EXT_CALL | 2,300,000 | 8.03 | 0.49 | 2.97 | 0.42 | 0.404 | 0.348 |
+| custom-declared-byte | 2,300,000 | 5.49 | 0.34 | 1.03 | 0.14 | 0.270 | 0.123 |
+| custom-declared-3n+5 | 2,300,000 | 6.57 | 0.40 | 2.80 | 0.39 | 0.336 | 0.320 |
+| custom-declared-refused | 2,300,000 | 0.00 | 0.00 | 0.00 | 0.00 | 0.000 | 0.000 |
+| chars-ascii-work | 2,297,856 | 16.26 | 0.99 | 1.27 | 0.18 | 0.832 | 0.151 |
+| chars-utf8-work | 2,297,856 | 16.71 | 1.02 | 1.36 | 0.19 | 0.855 | 0.152 |
+| unique-heads | 2,300,000 | 14.93 | 0.91 | 7.11 | 1.00 | 0.735 | 0.871 |
+| unique-hash | 2,293,586 | 10.82 | 0.66 | 10.86 | 1.53 | 0.558 | 1.299 |
+| unique-record-element | 2,300,000 | 26.49 | 1.62 | 11.09 | 1.56 | 1.356 | 1.373 |
+| unique-sort | 2,300,000 | 10.22 | 0.63 | 4.96 | 0.70 | 0.514 | 0.600 |
+| unique-record-compare | 2,300,000 | 12.40 | 0.76 | 2.49 | 0.35 | 0.642 | 0.306 |
+| unique-collision-byte-compare | 2,300,000 | 16.58 | 1.01 | 6.97 | 0.98 | 0.831 | 0.852 |
+| byte-chunk-compare | 2,300,000 | 16.35 | 1.00 | 7.16 | 1.01 | 0.816 | 0.858 |
+| samelen-pass | 2,300,000 | 20.03 | 1.23 | 8.81 | 1.24 | 1.022 | 1.090 |
+| samelen-short-probes | 2,300,000 | 5.93 | 0.36 | 3.09 | 0.44 | 0.280 | 0.371 |
+| samelen-long-probes | 2,300,000 | 17.22 | 1.05 | 7.24 | 1.02 | 0.860 | 0.851 |
+| EXT-chars | 113,439 | 47.11 | 2.88 | 9.66 | 1.36 | 2.462 | 1.168 |
+| EXT-unique | 2,300,000 | 9.80 | 0.60 | 4.95 | 0.70 | 0.511 | 0.579 |
+| EXT-samelen | 1,409,639 | 5.65 | 0.35 | 2.49 | 0.35 | 0.286 | 0.299 |
+
+The three fixed content-scan rows finish with 21,881 units; the long literal
+finishes with 43,786, long-key maps with 185,872. Their rates identify bad
+prices even when input size prevents budget exhaustion. The `.bits` rescan
+provides the separate budget-bounded witness: **189.97 ms JS** for 2.3 M
+units, or **175.43 ms** after normalising its paired reference ratio to
+P3.6's 18.5 ns/unit quiet-reference estimate. End-to-end `.chars` costs
+47.11 ns/unit while its count itself costs 16–17: inflating the control's
+weight would conceal the undercharged profile text scan.
+
+### Why a universal ±25% fit cannot be promised
+
+* Identical `[* uint]` inputs and charges cost **3.18 vs 67.92 ns/unit** on
+  fast and forced-generic JS paths (Rust **1.53 vs 38.56**). Multiplying any
+  common charge preserves those ratios; two values both in ±25% of one
+  median can differ by at most 1.25/0.75 = **1.667×**, not 21–25×. D044
+  requires these paths to retain identical charges. This needs implementation
+  optimisation or a changed requirement, not a path-dependent price.
+* `.chars` is **0.995× the JS median but 0.179× the Rust median**. A common
+  unit-price multiplier f would have to lie in [0.796, 1.326] for JS and
+  [0.143, 0.239] for Rust; these intervals do not intersect. Hashing has the
+  opposite relative-host mismatch. Host-specific units would break R6.
+  Even letting both median targets move does not solve this: the JS/Rust
+  CPU ratio is ~12.8 for the count and ~1.0 for hashing. Common per-kind
+  prices preserve those ratios; both hosts fitting ±25% would allow their
+  spread to be at most (1.25/0.75)² = 2.78, not 12.8.
+* One visit/probe already costs the smallest positive whole unit. Making
+  the cheapest events several times cheaper in units needs fractional VM
+  ticks/batching, not a smaller positive integer. D191 supplies ticks only
+  inside generic controls.
+* D193's arbitrary host predicates have arbitrary CPU and declarations.
+  Neither a default per-byte price nor EXT_CALL can equalise all of them.
+
+These are limits of the requested fit, not reasons to leave the measured
+undercharges unfixed. The following is a conservative portable proposal,
+with explicitly unresolved residuals, not a claim that every table row
+would then meet ±25%.
+
+### Concrete price proposal (no source changes made)
+
+| File / charge | Old → proposed | Measurement / intent |
+| --- | --- | --- |
+| `kin/vm-eval.kin`, `EXT_CALL` | **16 → 0** (the separate 1-unit EXT leaf charge stays) | Tiny no-op is 8.03 ns/unit, 37 units/item. Removing 16 makes 21 units/item and ~14.15 ns/unit JS (~5.23 Rust), close to the kind medians. Raising to 24 would lower it to ~6.60 and worsen the mismatch. |
+| `kin/vm-controls.kin`, `T_ELEM` | **5 → 10** | One-element unique costs 26.49/11.09 ns/unit; 9 → 14 ticks/element models ~17.03/7.13, within both bands. |
+| `kin/vm-controls.kin`, `T_CMP` | **8 → 6** | The sort is comparison-dominated and currently 10.22/4.96. Together with T_ELEM this models ~12.9/6.3. Isolated record comparisons remain cheap in Rust; no universal fit is claimed. |
+| `kin/vm-controls.kin`, `T_PROBE` | **4 → 3** | Use with the next row; short probes currently ~5.93/3.09, much cheaper per unit than long probes. |
+| `kin/vm-controls.kin`, **new `C_FIRST`** for `mcmp`'s initial spend | **implicit `C_TICKS` = 8 → 2 ticks** | Keep subsequent chunks at C_TICKS=8. Short probe total 12 → 5 ticks models ~14.23/7.42; long-byte work changes only slightly. Reusing the same price for the first and later chunks prevents fitting both. |
+| §14 UTF-8 profile scan; `kin/vm-{eval,dead,session-str}.kin`, including streak/pre-scalar key charges | **⌈len/64⌉ → ⌈len/8⌉** | ASCII 136.14 and two-byte UTF-8 166.84 model ~17.0/20.9 JS; the latter is ~18.9 with its paired reference normalised to 18.5. Keep this separate from typed-float scans. |
+| §14 VM byte comparisons; `kin/vm-base.kin`, `c64min`'s comparison quantum and threshold (and callers using full-span comparisons) | **64 → 8 bytes/unit**, minimum 1 unchanged | Long key search 81.09 and long literal 115.58 expose undercharged content comparisons. Reprice the comparison helper separately from the shared `c64` helper; long text literals also receive the UTF-8 change. |
+| §14 `.bits`; `kin/vm-leaf.kin` and matching session byte-string charge | **⌈len/64⌉ → ⌈len/12⌉** | JS rescan ~82.60 models ~15.5; native ~45.14 models ~8.5. Direct fixed-scan results are noisier. |
+| `kin/compile/main.kin`, `setup-limits`, option 17 fallback | **2,300,000 → 2,250,000** | Conditional default proposal below. |
+
+**Keep** `TPU=8`, `T_HEAD=3`, `T_PAIR=5`, `C_BYTES=8`, continuation
+`C_TICKS=8`, `B_HASH=1`, `B_TEXT=16`, and the §14 typed-float NaN scan
+quantum 64. Do not globally replace `c64`: these events have different CPU
+rates. A 1.5× increase is particularly wrong for short probes/dispatch and
+does not change the undercharged VM profile scan at all. B_HASH is already
+one byte per tick; a fractional reprice would need another numerator.
+
+All projected rates hold measured work constant and change the denominator;
+they are **not timings of a new implementation**. Adoption needs kin changes
+across fast/generic and resumable paths, emit, deterministic exhaustion-point
+regressions and a new timing pass. Current gate results below validate the
+benchmark and unit model, not those future changes.
+
+### Default budget and valid-message headroom
+
+With **current** prices, the budget-bounded `.bits` witness normalises to
+**76.27 ns/unit**. A 50 ms budget is then only **~655,548 units**, whereas
+keeping 1,450,008 valid-message units below 65% requires at least
+**2,230,782**. Lowering the default alone cannot satisfy both.
+
+With the targeted scan/comparison repricing and normal automatic dispatch,
+the remaining measured reference-normalised maximum is the map-table shape,
+**1.204 × 18.5 ≈ 22.28 ns/unit** (embedded: ~21.66). Thus **2.25 M** models
+**~50.1 ms**, and **1,450,008 / 2,250,000 = 64.44%**. The unnormalised final
+map-table rate would give ~54.0 ms; that is why this is a **provisional
+quiet-reference estimate**, not an actual quiet run. 18.5 is the historical
+P3.6 reference, not a measured idle frequency for this session.
+
+The P3.6 valid-message table above supplies the original counts. An
+**untimed in-memory source-load-hook projection**, leaving every source file
+unchanged, recomputed all seven messages under the proposed scan/comparison
+prices and checked **fast == generic** units:
+
+| P3.6 valid message | Current units (P3.6 table) | Proposed units | % of 2.25 M |
+| --- | ---: | ---: | ---: |
+| RPC put 287 B | 74 | 100 | 0.004% |
+| 120k ints | 240,018 | 240,018 | 10.67% |
+| nested maps 1.1 MB | 1,008,018 | 1,008,018 | 44.80% |
+| typed arrays 1 MiB | 12,340 | 12,340 | 0.55% |
+| 10k struct records | 880,008 | 950,008 | 42.22% |
+| ints 1,456,219 B | 600,008 | 600,008 | 26.67% |
+| 50k small maps 949,163 B | **1,450,008** | **1,450,008** | **64.44%** |
+
+These are budget headroom figures; original benchmark overrides for entry/
+item caps are still needed where P3.6 specifies them. Literal "largest"
+by bytes is the 1,456,219 B integer message (26.67%); the **largest unit
+requirement** is the 949,163 B small-map message (64.44%).
+
+**If the ~50 ms requirement includes forced-generic diagnostic execution
+with raised structural caps, no proposed default meets both targets.**
+That array row still normalises to ~62.82 ns/unit after the price changes
+(it contains no repriced text/comparisons/controls): ~141 ms at 2.25 M.
+It needs a default near **0.79 M** for 50 ms, which loses the valid-message
+headroom. The internal diagnostic flag is not exposed by the public API;
+other default caps also stop some of these diagnostic fixtures earlier.
+2.25 M is recommended for normal public dispatch after repricing, not as a
+universal guarantee for every calibration mode. This residual and the
+cross-host fit prevent calling the full owner target settled by constants
+alone. A quiet rerun remains owed; new workloads can expose another maximum.
+
+### Artifacts, reproduction and checks actually run
+
+* `bench/calibrate.mjs`: fixtures, interleaved timing, per-sample uptime,
+  thread CPU, charge parity and control tick attribution.
+* `bench/calibrate.rs`: offline Rust measurement protocol, generated kernels
+  and unchanged host control port; parsing/preparation outside timing.
+* `bench/calibrate-proposal.mjs`: **untimed** valid-message projection, with
+  load hooks only; seven fast/generic unit equalities and acceptance checks.
+* `bench/calibration-2026-11-04.json`: machine/runtime/revision, harness SHA-256s,
+  raw nine-round samples, all reference brackets, uptimes/load, tick shares,
+  projection counts and earlier wait samples. No input bytes are stored.
+
+Recreate using disposable local git metadata (no remote operations):
+
+```sh
+mkdir -p .cache/calib-git
+cp -R .git/ .cache/calib-git/
+git --git-dir="$PWD/.cache/calib-git" worktree add --detach "$PWD/.cache/calib-wt" df612f5fdabbf38b05fd3f89e5913472ab7791b3
+cp bench/calibrate.mjs bench/calibrate.rs bench/calibrate-proposal.mjs .cache/calib-wt/bench/
+(cd .cache/calib-wt && node --expose-gc --single-threaded-gc bench/calibrate.mjs --wait-load-seconds 180 --out ../calibrate-results.json)
+(cd .cache/calib-wt && node bench/calibrate-proposal.mjs --out ../calibrate-projection.json)
+git --git-dir="$PWD/.cache/calib-git" worktree remove --force "$PWD/.cache/calib-wt"
+```
+
+Checks actually run: 40-row JS/native verdict-and-unit parity; nine timed
+interleaved rounds; instrumentation tick sums and instrumented/original
+identity; explicit retained AND/NOT opcodes; seven projected valid-message
+acceptances and fast/generic unit equalities; `node --check` on the delivered
+JS scripts; Rust release compilation and rustfmt check; `git diff --check`.
+No repository conformance/emit gates were run for this measurement-only work.
