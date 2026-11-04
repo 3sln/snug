@@ -768,3 +768,35 @@ returns `cut`. That passes through SEQ and REP to the root: invalid, with
 2. Should `ACT_SUM` use 4-word frames for array programs instead of the
    common 8?
 3. Is a 64-word chunk the right size?
+
+## 14. Implementation notes (P8.5 phase 1, branch `p85-peg`, 2026-11-04)
+
+The compiler (`kin/compile/peg.kin`, `lower.kin`, `emit.kin`) writes and
+`vm-verify` checks this format; the VM does not run it yet (phase 2). Where
+the draft is silent or wrong, the implementation decided as follows (DEVLOG
+D290–D299, all unsigned):
+
+* **§2, word 62.** Format 1.1's word 62 was `S_END`, not reserved. Format 2.0
+  drops `S_END` (the last section ends at `PROGRAM_WORDS`) and word 62 is
+  `RECLEAF_MAX` (D296). `FORMAT_VERSION` is always `0x00020000`; the 1.1
+  extension table is part of 2.0.
+* **§3.** `depth` is the root's height counting every node, a `CALL` being a
+  leaf (D295). `B` is stored only for A1. Positions and members are numbered
+  in node order and nodes in preorder; the verifier checks the numbering and
+  that no `REP` of a `MEMBER` the fold table rewrites remains (D291, D297).
+  An occurrence `n*m` with m < n is a schema error (`syntax`, D293).
+* **§3.1.** The verifier's working area follows the marks; `vm-verify-words(P,
+  mark_cap)` gives the scratch length. The verify budget is raised before each
+  fixed point by 4·(n_calls + 2)·n·(2W + 2) + 4·n·npos·W per array table and
+  4·(n_calls + 2)·n per program (D297). New check ids: 25 `C_VERSION`, 26
+  `C_RECURSION`.
+* **§6.** `named`'s second word is the offset of the key's run in `namers`.
+  `key_ts` is the exact union of the non-literal members' key typesets (no
+  normalisation), so each member's own key leaves are queried (D294).
+* **§9.4.** W7 compares the bound with the compiled cap `LIM_GROUP_WORDS`
+  (the default unless `groupWords` was given).
+* **§11.** Compile option 5 is `pegNodes` (default 1024, hard 16384); members
+  per map and frames per activation are bounded by it; the ring limit is the
+  default 4096 words (D292).
+* **Keys.** A byte-string, float or beyond-64-bit integer before `:` is a cut
+  key typeset (withdraws D125's `map_cut`, D294).
