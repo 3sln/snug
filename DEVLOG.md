@@ -5451,8 +5451,15 @@ are answered as provisional decisions D082–D085. None is open now.
     2026-11-04 worst-case analysis) apply to the SDK exactly as to native,
     since the predicates are kin's or the host's; `bytesHeld` does not count
     the session's kin arrays inside wasm.
-- [!] **P7.9c — wasm SDK EXT port adaptation: BLOCKED pending user
-  authorisation** (2026-11-05). D190–D193 changed the kin `Ext` port, so the
+- [x] **P7.9c — wasm SDK EXT port adaptation.** *Done 2026-11-04 (commit
+  `88263f1`): the owner explicitly authorised both edits in session, and the
+  coordinator made them (only `host/wasm/src/sdk.rs` and
+  `host/wasm-sdk/src/runtime.mjs`); `bb wasm-sdk-test` passes 11/11, extension
+  controls 14/14 wasm == native, unknown-length sessions included. The new
+  metered EXT cases (costly, huge, unique-big, samelen-many, chars-budget) are
+  in the parity set through `kin/scripts/vm-allcases.mjs` → `addExtCases`.
+  The wasm parts of sequences (D219) and Phase 8 are unblocked.* Original
+  entry (2026-11-05 dating as written): D190–D193 changed the kin `Ext` port, so the
   wasm SDK module does not compile any more: `bb wasm-sdk-test` was run on
   2026-11-05 and failed at `kin/scripts/wasm-build sdk` (5 rustc errors in
   `sdk.rs`: the `kc::*_ok` imports and the closures' signature). It stays red
