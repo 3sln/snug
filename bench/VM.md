@@ -386,3 +386,269 @@ Reading it:
   orders of first use V8 deoptimises at every loop exit (≈ 20 µs a call):
   seen as 3.5× at 1 KiB windows on the int array in other process histories
   of this benchmark, 1.26× here. Rust and wasm do not have it.
+---
+
+# Extension controls and drain mode (P7.2/D085) — 2026-11-03
+
+Measured **only the clean tracked files at
+`aa7dd560491e7c733015562029be1562be37d56d`**, in detached
+`.cache/extbench-wt`. The shared checkout's uncommitted scanner/kin work was
+excluded. This sandbox denies writes to the shared `.git`, so the worktree
+was registered in temporary `.cache/extbench-git` metadata with a read-only
+object-store alternate. No builds, installs, network, commits or remote
+operations were used. The worktree was removed with `git worktree remove`.
+Only JS is measured; these figures do not establish Rust/wasm or browser costs.
+
+Reproduction (from the main checkout, with the delivered benchmark file):
+
+```sh
+revision=aa7dd560491e7c733015562029be1562be37d56d
+git init --bare --template= .cache/extbench-git
+printf '%s\n' "$PWD/.git/objects" > .cache/extbench-git/objects/info/alternates
+git --git-dir=.cache/extbench-git worktree add --detach .cache/extbench-wt "$revision"
+cp bench/ext-drain-bench.mjs .cache/extbench-wt/bench/ext-drain-bench.mjs
+(cd .cache/extbench-wt && node --expose-gc --single-threaded-gc bench/ext-drain-bench.mjs --out ../extbench-results.json > ../extbench-results.log)
+git --git-dir=.cache/extbench-git worktree remove --force .cache/extbench-wt
+```
+
+On an unrestricted checkout, ordinary `git worktree add --detach` / `remove`
+also suffice. `--force` discards only the copied, untracked benchmark script
+in this disposable worktree. `--quick` shortens timing; `--check-only` runs
+fixture/agreement checks without timings or memory children. The script
+refuses modified tracked sources, prints complete result tables and caveats,
+and optionally saves all round samples, input hashes, schema texts, verdicts
+and 54 memory samples as JSON. Local raw output is under
+`.cache/extbench-results.{json,log}`; those scratch artifacts are not required
+to reproduce the fixtures.
+
+**Machine and method.** Apple M1 Pro, 10 logical CPUs,
+32 GiB RAM, macOS 14.6.1 (Darwin 23.6.0 arm64),
+Node v24.6.0, V8 13.6.233.10-node.24, flags
+`--expose-gc --single-threaded-gc`. Local date is 2026-11-03
+(America/Merida); UTC run 2026-11-04T05:46:57.302Z to 2026-11-04T05:50:48.452Z.
+The machine was shared: 1/5/15-minute load averages were
+21.43, 14.46, 11.95 at start and
+45.64, 37.28, 22.73 at end; free RAM snapshots
+1.56 / 1.06 GiB.
+These are load snapshots, not continuous monitoring.
+
+CPU is `process.cpuUsage` user + system, **median of 11 rotated,
+interleaved rounds** within each input's arms, after at least 200 ms CPU
+warm-up per arm and separate iteration calibration targeting at least
+25 ms CPU batches. Compile, input construction, assertions, callback counters
+and memory sampling are excluded. Buffer times use public `schema.validate`;
+stream times use public `pushValidator`, with a **new session per call**,
+normal allocation/copying and finalization included. This differs from P6.2's
+pooled low-level VM arrays. Scheduling quantum is 0; there is no actual I/O.
+No forced GC occurs inside CPU timings. Fixed iteration counts can run faster
+after calibration; the observed per-arm median batches ranged from 9.6 ms
+to 248.8 ms CPU.
+
+All Programs use deterministic wire rules, input cap 1,500,000 B,
+`budget: 2^31−1`, `items: 2^24`, `entries: 2^24`. Registry `maxBytes` is
+raised from the default 65,536 to **1,500,000 B** for all timed controls;
+otherwise large controls would measure `control_size`, not predicate work.
+Defaults are checked separately. These are throughput measurements with
+raised work limits, not default-budget acceptance claims.
+
+**EXT fixtures and cost.** The 287 B RPC is a synthetic `put` with
+`args.name`, distinct `args.tags`, equal-count `args.x/y` and a byte payload,
+padded to exactly 287 B; it differs from P1.4's RPC. Its base rule is
+`{method: tstr, args: {name: tstr, tags: [* tstr], x: [* uint], y: [* uint], data: bstr}}`.
+Every arm sees the same bytes. A `.pass true` predicate always returns true.
+`.chars` checks the name, `.unique` the tags, and `.samelen ["x", "y"]`
+the args map. The large text array/map each hold 4,096 ASCII strings of
+253 characters (255 encoded bytes); the map uses fixed `k0000`…`k4095`
+keys. The column map holds two 32,768-element bstr arrays.
+
+“Equivalent” means **same verdict on these timed fixtures**: controls add
+redundant constraints to the same base target. There is no general
+built-in-only schema equivalent of arbitrary uniqueness or Unicode
+code-point length. ASCII makes byte/character counts coincide here;
+non-ASCII, duplicates and unequal counts are covered by untimed assertions.
+
+RPC CPU per call (extension delta includes VM AND/EXT query work, charging,
+view creation and host dispatch; it is not an isolated JS call instruction):
+
+| arm | controlled item B | CPU | delta vs built-in |
+| --- | --- | --- | --- |
+| built-in | — | 8.52 µs | — |
+| pass-root | 287 | 9.38 µs | 0.86 µs |
+| chars-name | 5 | 11.43 µs | 2.91 µs |
+| unique-tags | 5 | 10.46 µs | 1.94 µs |
+| samelen-args | 270 | 11.52 µs | 3.00 µs |
+
+Large inputs; each delta is against the same input's built-in-only schema.
+Item B is the sum of whole encoded items handed to the predicate, including heads.
+
+| input | bytes | arm | calls | CPU | delta | delta ns/item B |
+| --- | --- | --- | --- | --- | --- | --- |
+| array-text-1MiB | 1,044,483 | built-in | 0 | 3.14 ms | — | — |
+| array-text-1MiB | 1,044,483 | pass-root | 1 | 3.14 ms | 4.11 µs | 0.004 |
+| array-text-1MiB | 1,044,483 | pass-item | 4096 | 8.24 ms | 5.10 ms | 4.885 |
+| array-text-1MiB | 1,044,483 | chars-item | 4096 | 11.01 ms | 7.87 ms | 7.534 |
+| map-text-1MiB | 1,069,059 | built-in | 0 | 3.71 ms | — | — |
+| map-text-1MiB | 1,069,059 | pass-root | 1 | 3.74 ms | 29.26 µs | 0.027 |
+| map-text-1MiB | 1,069,059 | pass-value | 4096 | 11.46 ms | 7.76 ms | 7.425 |
+| map-text-1MiB | 1,069,059 | chars-value | 4096 | 14.34 ms | 10.63 ms | 10.177 |
+| samelen-map-1MiB | 1,048,587 | built-in | 0 | 10.66 ms | — | — |
+| samelen-map-1MiB | 1,048,587 | pass-root | 1 | 10.72 ms | 61.33 µs | 0.058 |
+| samelen-map-1MiB | 1,048,587 | samelen-root | 1 | 11.46 ms | 796.33 µs | 0.759 |
+
+The small root-level VM-to-host extension costs **0.86 µs/call**
+in this comparison. Per-value no-op extensions add
+**1.25 µs/call** on the text array and
+**1.89 µs/call** on the map. Per-element extensions
+also change VM fast-path/query work, so these are total integration costs,
+not a universal host-call constant. `.chars` adds a content scan; root no-op
+byte charging is arithmetic, not a second physical byte scan. Tiny or negative
+large-root deltas are below this run's resolution and do not imply a speedup.
+
+**Worst-case stress for `.unique`.** Distinct 15-byte bstrs share a
+12-byte payload prefix; an odd multiplicative permutation (`(i * 40503) & (n−1)`) defeats an already-sorted input. Each encoded element is 16 B.
+The generic control heap-sorts spans: **O(n log n) span comparisons**, with
+additional cost for the compared prefix length. This stresses its 65,536-item
+case; it is not a proof that this permutation maximises every comparison.
+
+| elements | bytes | built-in | pass root | unique root | unique − pass ns/item B | unique − pass ns/(n log2 n) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4,096 | 65,539 | 672.67 µs | 672.12 µs | 6.50 ms | 88.89 | 118.5 |
+| 16,384 | 262,147 | 2.69 ms | 2.69 ms | 32.31 ms | 113.00 | 129.1 |
+| 65,536 | 1,048,581 | 10.69 ms | 10.58 ms | 175.99 ms | 157.75 | 157.7 |
+
+At 65,536 elements, `uniqueWords(itemBytes) = 2 * itemBytes + 2` means
+8,388,656 B of host Int32 scratch. `snug/controls` drops scratch larger than
+2^20 words after each call, so this row includes repeated allocation; the
+4,096/16,384-element rows reuse retained scratch after warm-up. This is an
+implementation-derived allocation size, not a measured EXT memory peak.
+
+**EXT under choices.** The base RPC target is `T`; the deny predicate
+always returns false. Counter registries used only outside timing confirm
+one call per queried extension item, and no call when a target fails.
+
+| schema | built-in comparison | EXT CPU | delta |
+| --- | --- | --- | --- |
+| (T .pass true) / bstr | 9.70 µs | 10.64 µs | 0.95 µs |
+| (T .deny true) / T | 9.72 µs | 10.57 µs | 0.85 µs |
+
+**Drain versus known length versus fail-fast.** Every message is exactly
+**1,400,000 B**. Valid and late-schema fixtures contain 10,000 records with
+`id: uint`, `title: tstr`, `body: tstr`, plus text padding. Late-schema changes
+the last title to a byte string without changing wire validity or length.
+Early-wire replaces the first map-key head with `0xff` (`cbor/indefinite`).
+Pending-truncation declares a 1,450,000-element array, then starts with
+`0xff`: the known end proves truncation before that refusal; drain waits to
+settle it. Limit-after-error is early-wire with `maxBytes: 1,350,000`.
+Trailing starts with a complete integer root followed by the remaining bytes.
+
+Below each cell is **CPU ms / delivered MiB/s**. Throughput divides bytes
+actually delivered by CPU time: a fail-fast cell's rate must not be read as
+processing the full 1.4 MB. Very high rejection throughput mostly counts and
+drops bytes; it does not scan their contents. Known push keeps delivering all
+bytes and always calls finalize, as its API requires, including after early
+done. A known-length range-handle caller could stop reads earlier; that is a
+different source contract. Drain stops when the cap is exceeded. Fast is
+unknown-length with `failFast: true`; acceptance always waits for EOF.
+
+| fixture | chunk KiB | known | drain | fast |
+| --- | --- | --- | --- | --- |
+| valid | 64 | 25.480 / 52.4 | 25.776 / 51.8 | 26.010 / 51.3 |
+| valid | 16 | 26.993 / 49.5 | 26.805 / 49.8 | 26.661 / 50.1 |
+| valid | 1 | 36.999 / 36.1 | 37.282 / 35.8 | 36.265 / 36.8 |
+| early-wire | 64 | 0.694 / 1924.2 | 0.650 / 2054.4 | 0.836 / 74.8 |
+| early-wire | 16 | 0.516 / 2587.2 | 0.726 / 1838.9 | 0.675 / 23.2 |
+| early-wire | 1 | 0.992 / 1345.5 | 1.161 / 1150.1 | 0.600 / 1.6 |
+| late-schema | 64 | 25.358 / 52.7 | 25.844 / 51.7 | 26.190 / 51.0 |
+| late-schema | 16 | 26.541 / 50.3 | 26.460 / 50.5 | 26.368 / 50.6 |
+| late-schema | 1 | 37.680 / 35.4 | 37.414 / 35.7 | 36.384 / 36.7 |
+| pending-truncation | 64 | 0.719 / 1857.2 | 0.637 / 2096.7 | 0.630 / 99.2 |
+| pending-truncation | 16 | 0.577 / 2314.6 | 0.782 / 1708.1 | 0.668 / 23.4 |
+| pending-truncation | 1 | 1.142 / 1169.4 | 1.469 / 909.2 | 0.605 / 1.6 |
+| limit-after-error | 64 | 0.592 / 2255.6 | 0.622 / 2109.3 | 0.703 / 88.9 |
+| limit-after-error | 16 | 0.664 / 2011.7 | 0.726 / 1785.3 | 0.552 / 28.3 |
+| limit-after-error | 1 | 1.087 / 1228.0 | 1.066 / 1208.0 | 0.619 / 1.6 |
+| trailing | 64 | 0.651 / 2052.2 | 0.680 / 1964.6 | 0.732 / 85.4 |
+| trailing | 16 | 0.708 / 1884.9 | 0.700 / 1906.2 | 0.687 / 22.8 |
+| trailing | 1 | 0.988 / 1351.6 | 1.303 / 1024.4 | 0.627 / 1.6 |
+
+Extra reads **after the chunk that first exposes a certain refusal**:
+first-error read is the fail-fast delivered count, not the error offset.
+This excludes the rest of that already-read chunk in both modes. For the
+early wire/trailing examples the deciding prefix is only 2 B, or 6 B for
+pending-truncation, but the whole input chunk has already arrived.
+
+| chunk KiB | first-error read B | ordinary drain total B | ordinary drain extra B | limit drain total B | limit drain extra B | fast extra B |
+| --- | --- | --- | --- | --- | --- | --- |
+| 64 | 65,536 | 1,400,000 | 1,334,464 | 1,376,256 | 1,310,720 | 0 |
+| 16 | 16,384 | 1,400,000 | 1,383,616 | 1,359,872 | 1,343,488 | 0 |
+| 1 | 1,024 | 1,400,000 | 1,398,976 | 1,350,656 | 1,349,632 | 0 |
+
+Ordinary-drain read counts apply to early-wire, pending-truncation and
+trailing. Late-schema first becomes observable at all 1,400,000 B, so both
+unknown modes have zero extra reads; valid has no error boundary. Known push
+always receives 1,400,000 B, even in the limit case. These are adapter-delivery
+counts, not kernel/network read-ahead measurements.
+
+**Memory high water (approximate).** A separate fresh Node child for each
+of the 54 stream cells runs one validation: it builds its selected
+bytes/Program, forces GC, then samples `process.memoryUsage()` at session creation, after each chunk/resume
+and finalization. Heap/external are increases from that baseline; RSS shows
+the largest sampled absolute resident size and its increase. These are
+**sampled high waters, not exact peaks or heap snapshots**: transient work
+inside a feed can be missed, GC/allocator/JIT activity affects RSS, and the
+in-memory input/Program are already in the baseline. Sampling is outside all
+CPU timing. These children are not warmed like the timing process.
+ArrayBuffers are included in external and must not be added to it.
+
+Valid-message samples (MiB except exact exclusive VM-array bytes):
+
+| chunk KiB | mode | VM arrays B | heap increase MiB | external increase MiB | sampled RSS high MiB (+increase) |
+| --- | --- | --- | --- | --- | --- |
+| 64 | known | 1,411,356 | 1.44 | 1.41 | 117.7 (+12.0) |
+| 64 | drain | 1,511,356 | 1.34 | 1.51 | 122.9 (+17.1) |
+| 64 | fast | 1,511,356 | 1.57 | 1.51 | 113.8 (+9.7) |
+| 16 | known | 1,411,356 | 1.70 | 1.41 | 113.3 (+12.2) |
+| 16 | drain | 1,511,356 | 2.17 | 1.49 | 115.8 (+13.7) |
+| 16 | fast | 1,511,356 | 1.47 | 1.49 | 111.0 (+6.7) |
+| 1 | known | 1,411,356 | 3.62 | 1.41 | 116.8 (+10.0) |
+| 1 | drain | 1,511,356 | 3.64 | 1.45 | 133.0 (+28.0) |
+| 1 | fast | 1,511,356 | 3.63 | 1.45 | 116.8 (+12.6) |
+
+Invalid-message sample ranges across all five refusal fixtures and three
+chunk sizes, 15 fresh children per mode (MiB):
+
+| mode | heap increase | external increase | sampled RSS high | RSS increase |
+| --- | --- | --- | --- | --- |
+| known | 0.05–3.65 | 1.36–1.41 | 100.5–122.5 | 0.0–15.5 |
+| drain | 0.10–3.61 | 1.30–1.51 | 99.5–127.9 | 0.0–22.8 |
+| fast | 0.05–3.64 | 1.30–1.51 | 103.8–118.9 | 0.0–13.8 |
+
+The reproducible structural difference is the key arena: for these valid
+messages the known session owns **1,411,356 B**, unknown **1,511,356 B**
+(**100,000 B more**), because unknown length sizes the arena to the 1.5 MB
+input cap instead of 1.4 MB. These figures exclude the Program and host push
+buffer. The post-feed retained-byte getter is not a peak buffer-capacity
+measurement (a whole chunk can be consumed within feed). Small chunks also
+produce more host objects; these samples do not establish a concurrency quota.
+
+**Agreement actually checked (before timing).** Comparisons use the full
+public result, including reason, path, offset and optional subcode; public
+results do not expose the VM's budget/items words.
+
+| comparisons | count | outcome |
+| --- | --- | --- |
+| timed EXT inputs/arms × 3 chunks × 3 modes | 261 | all full results equal to buffer |
+| 8 independent semantic/size/choice probes × 3 chunks × 3 modes | 72 | all full results equal to buffer and expected reason |
+| 6 stream fixtures × 3 chunks × 3 modes | 54 | 48 full results equal; 6 D145 early-code differences |
+| fail-fast indefinite → buffer/drain truncated | 3 | pending-truncation, all chunk sizes |
+| fail-fast indefinite → buffer/drain too_large | 3 | limit-after-error, all chunk sizes |
+| unexpected code differences / verdict mismatches | 0 | none |
+
+All **387 session comparisons agree on accept/refuse**; 381 also agree on
+the full public result. Additional untimed counter checks confirm the
+expected EXT call counts/item-byte totals. `node --check`, a check-only pass,
+a short timing/memory pass, and this full timing/memory pass completed. No
+compiler, scanner, VM, host implementation or generated files were changed.
+The shared load, public API allocation policy, ASCII text, elevated limits,
+long-prefix uniqueness data, chunk-boundary first-error definition and
+approximate memory method limit extrapolation.

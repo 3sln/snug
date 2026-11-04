@@ -3403,6 +3403,23 @@ are answered as provisional decisions D082–D085. None is open now.
     are trusted to be pure -- a host could memoise by (id, argument, item) but
     snug does not; `.unique` compares encodings (so `1` and `1.0` differ, as
     documented).
+  - **P7.2/D085 benchmark, 2026-11-03:** clean detached HEAD
+    `aa7dd560491e7c733015562029be1562be37d56d` (shared kin/scanner edits
+    excluded), Apple M1 Pro/macOS 14.6.1/Node v24.6.0. Median CPU over 11
+    interleaved rounds after warm-up: 287 B RPC + always-true EXT
+    **+0.86 µs/call**; long-prefix `.unique` on 65,536 elements
+    (1,048,581 B) **176.0 ms**.
+    Valid 1.4 MB / 64 KiB known/drain/fast **25.48 / 25.78 / 26.01 ms**;
+    early-refusal drain reads **1,334,464–1,398,976 B** more than fail-fast
+    (64/16/1 KiB chunks). Unknown session arrays use **100,000 B** more
+    than known at the 1.5 MB cap; sampled process memory is approximate.
+    **387** session comparisons: no verdict mismatches; **6** permitted D145
+    early-code differences (3 truncated precedence, 3 too_large precedence).
+    **Learnt:** per-item EXT includes query/fast-path changes; large-root no-op
+    deltas can be noise, `.unique` includes per-call large-scratch allocation,
+    and known push must still deliver/finalize after early done. Full method,
+    timings, memory caveats and reproduction: [bench/VM.md](bench/VM.md#extension-controls-and-drain-mode-p72d085--2026-11-03),
+    harness `bench/ext-drain-bench.mjs`. Worktree removed; no commit made.
 - [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
   *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.
   Offline Node v24.6.0 / ICU 77.1 / Unicode 16.0 generation produces the same
