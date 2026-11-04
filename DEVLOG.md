@@ -3805,6 +3805,47 @@ are answered as provisional decisions D082–D085. None is open now.
     are trusted to be pure -- a host could memoise by (id, argument, item) but
     snug does not; `.unique` compares encodings (so `1` and `1.0` differ, as
     documented).
+  - [x] **P7.2 hardening: extension controls charged for their work** (R2;
+    D190–D194; 2026-11-04, commits `b0a7233`, `e1a7910`). Brief: the
+    2026-11-04 analysis below (and bench/VM.md). *Done*:
+    * The kin `Ext` port now takes `room` and answers a verdict word (D190).
+      `ext-eval` charges 1 + `EXT_CALL` 16, then the units the port reports.
+    * `.chars`, `.unique` and `.samelen` are metered in kin, in ticks charged
+      before each step (D191). `.unique` hashes elements, heap-sorts by
+      (hash, bytes) and stops at the first equal pair. `.samelen` makes one
+      pass with a binary search over names prepared and de-duplicated once at
+      bind (D192). `.chars` is one count at ⌈len/16⌉ units.
+    * Host predicates are charged `cost(itemBytes)` (default `itemBytes`)
+      before the call, and are not called when it exceeds `room`. Their own
+      CPU is documented as the host's responsibility (D193).
+    * Scratch is reused: a JS module array, and a Rust `thread_local`.
+    * program.md §14 has the normative EXT schedule. No Program format change.
+    * Docs: guide (custom controls), api, rust.md, architecture (lowering table, §7).
+    * vm-test and vmsession-test EXT arms add `.costly` (declared 3n + 5),
+      `.huge` (refused unasked), a big `.unique`, an 8-name `.samelen` with
+      duplicates, and a `.chars` budget sweep. Part-way budgets up to 6,000
+      exercise refusals inside a metered run.
+    * The snug/controls size budget is now 2,460 B gzip (+2% over the
+      measured 2,412 B, for the metered kin code).
+    **Gates run 2026-11-04, all ok:** check, drift, scan-test, rscan-test,
+    vm-test (JS == Rust == wasm-vm on 74,300 cases, whole out array incl.
+    budget; 2,075 EXT cases), vmsession-test (989,773 session runs; JS ==
+    Rust 643,044), compile-test, compile-fuzz, nav-test, write-test,
+    unicode-test, rust-api-test, host/js npm test (1,346), size.
+    **Not ok:** `bb wasm-sdk-test` fails to build the SDK module (P7.9c,
+    blocked).
+    **Benchmark** (bench/VM.md, 2026-11-04 metered section): `.samelen`
+    58.6 s → 33.5 ms, `.unique` 35 choices 992 ms → 70.9 ms (budget), no-op
+    tiny calls 79 → 46.6 ms (budget). A declared-cost slow predicate is
+    refused unasked. **The absolute 50 ms gate failed** on six budget-bounded
+    rows (53–72 ms), on a machine where 2.3 M units of plain VM work took
+    114.9 ms (load ~10). Per unit, every EXT row costs at most that
+    reference, so the scaled worst is ~27 ms. A quiet-machine run is open.
+    **Learnt:** a bool port cannot be made R2-compliant: the work has to be
+    reported, and to be stoppable it needs `room`. A fixed per-byte charge
+    overcharges `.chars` by 64× and undercharges `.unique` sorts. Measured
+    under load, CPU per unit moves ~2.7× (E-cores, contention), so the
+    weights were set as ratios to a VM reference measured at the same time.
   - **P7.2/D085 benchmark, 2026-11-03:** clean detached HEAD
     `aa7dd560491e7c733015562029be1562be37d56d` (shared kin/scanner edits
     excluded), Apple M1 Pro/macOS 14.6.1/Node v24.6.0. Median CPU over 11

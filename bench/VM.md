@@ -767,3 +767,70 @@ selects cases. Raw per-run data and merged results remain locally under
 The worktree was removed. No kin/host/generated changes, installs, builds,
 network operations or commits; no Rust/wasm/browser/source-driver timing or
 memory-peak measurement is claimed.
+
+## Extension controls metered (D190–D194) — 2026-11-04
+
+**Verdict.** No row runs unbounded any more. Every generic-control row either
+finishes or is refused with `budget`, and the work is charged as it happens.
+Per unit, each EXT row costs at most the VM's own worst walk measured beside
+it (except rows whose per-unit cost is the profile walk's, see below). **The
+absolute ≤ 50 ms gate failed on this run because the machine was heavily
+loaded.** Six budget-bounded rows took 53–72 ms, while the reference VM work
+took **114.9 ms** for 2.3 M units (49.9 ns/unit, against ~18.5 ns/unit at D046
+calibration). Scaled by that load factor (×18.5/49.9), the worst EXT row is
+~27 ms. A run on a quiet machine is still owed.
+
+Clean commit **`e1a7910`** (code from `b0a7233`), detached in
+`.cache/hard-wt` with scratch git metadata. Machine: Apple M1 Pro, 10 logical
+CPUs, 32 GiB; macOS 14.6.1 / Darwin 23.6.0 arm64; Node v24.6.0 / V8
+13.6.233.10-node.24, `--expose-gc --single-threaded-gc`. Run 07:22:49–07:23:17
+UTC, load 1/5/15-minute **10.20/15.39/19.42 → 9.31/14.69/19.03**, with other
+users' java/Rust processes (~3 cores) running throughout. Method as in the
+2026-11-04 analysis: public `schema.validate`, thread CPU user+system, medians
+of 7 batches after ≥100 ms warm-up, default limits and maxima (65,536 B). The
+undeclared slow predicate is the only single-call row. The harness now takes
+each row's verdict from the real run. It counts calls through the real port,
+and adds a `reference-six-way-choice` row (bench/VM.md's six-way choice of
+maps run to budget refusal under defaults).
+
+| Row | Before (c189dda) | After | Steps after | ns/unit | Verdict after |
+| --- | ---: | ---: | ---: | ---: | --- |
+| reference: six-way choice of maps to refusal (VM only) | — | 114.87 ms | 2,300,000 | 49.9 | budget |
+| `.chars` 22 full 2-byte strings | 15.54 ms | 15.55 ms | 113,439 | 137.1 † | ok |
+| `.chars` 65,534 empty strings ×2 | 83.05 ms | 39.17 ms | 2,300,000 | 17.0 | budget |
+| no-op host EXT on tiny ints ×2 | 79.30 ms | 46.55 ms | 2,300,000 | 20.2 | budget |
+| `.unique` ranked 65,533 ints (one) | 55.04 ms | 3.90 ms | 172,074 | 22.6 | control |
+| `.unique` 22 × 4,095 long-prefix bstrs | 138.44 ms | 68.16 ms | 2,300,000 | 29.6 | budget |
+| `.unique` 21,844 elements ×4 | — | 71.82 ms | 2,300,000 | 31.2 | budget |
+| `.unique` 35 choices over the ranked array | 991.57 ms | 70.89 ms | 2,300,000 | 30.8 | budget |
+| `.samelen` 21,000 absent names, 16,400 int keys | 4,749.30 ms | 2.71 ms | 71,780 | 37.8 | ok |
+| `.samelen` 22 maps × 2,978 long-prefix keys | 58,638.25 ms | 33.47 ms | 582,237 | 57.5 † | ok |
+| `.samelen` 5,000 distinct 44-B names, 23 maps | — | 24.93 ms | 699,736 | 35.6 | ok |
+| `.samelen` empty maps, 21,000 empty names | 50,687.43 ms | 52.81 ms | 2,300,000 | 23.0 | budget |
+| host predicate, 100M iterations, cost declared (D193) | — | 0.001 ms | 2,300,000 | — | budget (not called) |
+| host predicate, 100M iterations, undeclared | 303.51 ms | 352.49 ms | 32 | — | ok (host's responsibility) |
+
+† Bounded by input size rather than the budget. Their per-unit cost is the
+VM's own profile walk: the UTF-8 scan of 1.44 MB charged ⌈len/64⌉, and the
+map/key walk. The `any` walk of the same 2,978-key map alone measures
+48.7 ns/unit, against ~34 ns/unit for the samelen part. All 47 rows:
+`.cache/hard-results.{json,log}` (local).
+
+**What changed.** A predicate call costs 1 + 16 units. The generic controls
+meter their own ticks (program.md §14): `.unique` hashes each element and
+heap-sorts by (hash, bytes) with charged comparisons, and stops at the first
+equal pair. `.samelen` prepares its names once and makes one charged pass.
+`.chars` is one linear count at ⌈len/16⌉ units. Host predicates are charged
+their declared cost before the call. The weights came from direct kin calls
+(`scratchpad calib.mjs`, same machine and load). Hashing, heads, comparisons,
+tie byte compares, probes and pairs each landed at 17–39 ns/unit while the
+reference ran at ~50 ns/unit. The no-op/tiny rows' per-call overhead set
+`EXT_CALL`.
+
+**Rust** was not timed. Its units are identical by construction, and
+`bb vm-test` / `bb vmsession-test` compare whole out arrays, budget included.
+Rust reuses a thread-local scratch instead of allocating per call.
+**Wasm** was not timed: its SDK is not adapted yet (DEVLOG P7.9c).
+
+Reproduction: as in the 2026-11-04 section, with commit `e1a7910` and
+`node --expose-gc --single-threaded-gc bench/ext-worst.mjs --out ../hard-results.json`.
