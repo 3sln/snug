@@ -5,10 +5,20 @@
 //! `.name` is a schema error naming it) and again when a serialised Program
 //! that uses controls is loaded (a missing one is
 //! `Error::MissingControls`). kin decides when a control is asked: only for an
-//! item its leaf is queried for, whole, after the profile walk, and charged one
-//! budget unit per item byte. A predicate must be a pure function of its two
-//! inputs; `max_bytes` bounds the item it is asked about (a longer item fails
-//! the control with the reason `control_size`, under every source).
+//! item its leaf is queried for, whole, after the profile walk. A predicate
+//! must be a pure function of its two inputs; `max_bytes` bounds the item it is
+//! asked about (a longer item fails the control with the reason
+//! `control_size`, under every source).
+//!
+//! **Budget (D193).** Every call is charged a fixed number of units, then the
+//! predicate's [`Control::cost`] (by default one unit per item byte), BEFORE it
+//! runs; a cost above what the budget has left stops validation with `budget`
+//! without calling. The VM cannot interrupt or measure host code: what a
+//! predicate does with its CPU is the host's responsibility, and `cost` is how
+//! a host keeps a slow predicate inside the budget (the default budget assumes
+//! roughly 20 ns of CPU per unit). The generic controls ([`Chars`],
+//! [`Unique`], [`Samelen`]) instead meter their own work in kin, against the
+//! budget that remains, so JS and Rust charge them identically.
 //!
 //! ```
 //! use snug::{Schema, CompileOptions, Scratch, controls::Controls};
@@ -20,6 +30,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 use crate::snug::vm::controls as kc;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -39,6 +50,93 @@ pub trait Control: Send + Sync {
     fn argument(&self, _argument: &[u8]) -> bool {
         true
     }
+    /// The budget units charged BEFORE `check` is asked about an item of
+    /// `item_bytes` bytes (default: one per byte). A cost above what remains
+    /// stops validation with `budget` without calling `check`.
+    fn cost(&self, item_bytes: u32) -> u64 {
+        u64::from(item_bytes)
+    }
+    /// Metered in kin (snug's generic controls only; not a public contract):
+    /// the argument prepared once per EXT leaf, or None for a host predicate.
+    #[doc(hidden)]
+    fn prepare(&self, _pool: &[u8], _ao: i32, _al: i32) -> Option<Vec<i32>> {
+        None
+    }
+    /// Metered run (with `prepare`): a verdict word, see `snug.vm.controls`.
+    #[doc(hidden)]
+    fn run(&self, _pool: &[u8], _ao: i32, _prepared: &[i32], _b: &[u8], _s: i32, _e: i32, _room: i32) -> i32 {
+        -1
+    }
+}
+
+/// The verdict word of one port call (D190): a metered control's run, else
+/// `cost` checked against `room`, then `check`.
+#[doc(hidden)]
+pub fn port(c: &dyn Control, prepared: Option<&[i32]>, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32,
+            room: i32) -> i32 {
+    if let Some(t) = prepared {
+        return c.run(pool, ao, t, b, s, e, room);
+    }
+    let units = c.cost((e - s) as u32);
+    if units > room.max(0) as u64 || units > 0x7fff_fffd {
+        return -1;
+    }
+    let u = units as i32;
+    if c.check(&pool[ao as usize..(ao + al) as usize], &b[s as usize..e as usize]) { u } else { -2 - u }
+}
+
+/// A Program's EXT leaves' prepared arguments for the metered controls among
+/// `bound` (id order): (id, argument offset) -> table.
+#[doc(hidden)]
+pub fn prepare_all(p: &[i32], b: &[u8], bound: &[Arc<dyn Control>]) -> BTreeMap<(i32, i32), Vec<i32>> {
+    let mut out = BTreeMap::new();
+    if p.len() < 64 {
+        return out;
+    }
+    let (at, n) = (p[43].max(0) as usize, p[16].max(0) as usize);
+    for l in 0..n {
+        let o = at + 8 * l;
+        if o + 4 >= p.len() || p[o] & 255 != 18 {
+            continue;
+        }
+        let (id, ao, al) = (p[o + 2], p[o + 3], p[o + 4]);
+        if let Some(c) = bound.get(id as usize) {
+            if !out.contains_key(&(id, ao)) {
+                if let Some(t) = c.prepare(b, ao, al) {
+                    out.insert((id, ao), t);
+                }
+            }
+        }
+    }
+    out
+}
+
+thread_local! {
+    /// One meter + `.unique` scratch per thread, reused (kin never re-enters a
+    /// run); three words per element of the largest array asked about (the
+    /// profile walk bounds elements by the entries limit), given back past 2^20.
+    static SCRATCH: RefCell<Vec<i32>> = RefCell::new(vec![0; 64]);
+}
+
+fn metered(need: i32, room: i32, f: impl FnOnce(&mut [i32]) -> i32) -> i32 {
+    SCRATCH.with(|cell| {
+        let mut t = cell.borrow_mut();
+        if t.len() < need as usize {
+            t.resize(need as usize, 0);
+        }
+        kc::meter_init(&mut t, room);
+        let r = f(&mut t);
+        if t.len() > 1 << 20 {
+            *t = vec![0; 64];
+        }
+        r
+    })
+}
+
+/// A metered control asked directly (no budget): prepare, run, the verdict.
+fn direct(c: &dyn Control, a: &[u8], item: &[u8]) -> bool {
+    let t = c.prepare(a, 0, a.len() as i32).unwrap_or_default();
+    c.run(a, 0, &t, item, 0, item.len() as i32, i32::MAX) >= 0
 }
 
 impl<F: Fn(&[u8], &[u8]) -> bool + Send + Sync> Control for F {
@@ -136,22 +234,34 @@ pub fn program_controls(p: &[i32], b: &[u8]) -> Vec<String> {
 pub struct Chars;
 impl Control for Chars {
     fn check(&self, a: &[u8], item: &[u8]) -> bool {
-        kc::chars_ok(a, 0, a.len() as i32, item, 0, item.len() as i32)
+        direct(self, a, item)
     }
     fn argument(&self, a: &[u8]) -> bool {
         kc::chars_arg(a, 0, a.len() as i32)
+    }
+    fn prepare(&self, pool: &[u8], ao: i32, al: i32) -> Option<Vec<i32>> {
+        let mut t = vec![0; 2];
+        Some(if kc::chars_prep(pool, ao, al, &mut t) == 0 { t } else { vec![1, 0] })
+    }
+    fn run(&self, _pool: &[u8], _ao: i32, t: &[i32], b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+        metered(kc::M_WORDS, room, |m| kc::chars_run(t, b, s, e, m))
     }
 }
 
 /// `.unique <any>`: an array whose elements' encodings are pairwise distinct.
 pub struct Unique;
 impl Control for Unique {
-    fn check(&self, _a: &[u8], item: &[u8]) -> bool {
-        let mut t = vec![0i32; kc::unique_words(item.len() as i32) as usize];
-        kc::unique_ok(item, 0, item.len() as i32, &mut t)
+    fn check(&self, a: &[u8], item: &[u8]) -> bool {
+        direct(self, a, item)
     }
     fn argument(&self, a: &[u8]) -> bool {
         kc::any_arg(a, 0, a.len() as i32)
+    }
+    fn prepare(&self, _pool: &[u8], _ao: i32, _al: i32) -> Option<Vec<i32>> {
+        Some(Vec::new())
+    }
+    fn run(&self, _pool: &[u8], _ao: i32, _t: &[i32], b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+        metered(kc::unique_words(b, s, e), room, |m| kc::unique_run(b, s, e, m))
     }
 }
 
@@ -160,9 +270,19 @@ impl Control for Unique {
 pub struct Samelen;
 impl Control for Samelen {
     fn check(&self, a: &[u8], item: &[u8]) -> bool {
-        kc::samelen_ok(a, 0, a.len() as i32, item, 0, item.len() as i32)
+        direct(self, a, item)
     }
     fn argument(&self, a: &[u8]) -> bool {
         kc::names_arg(a, 0, a.len() as i32)
+    }
+    fn prepare(&self, pool: &[u8], ao: i32, al: i32) -> Option<Vec<i32>> {
+        let mut t = vec![0; kc::samelen_words(pool, ao, al) as usize];
+        Some(if kc::samelen_prep(pool, ao, al, &mut t) == 0 { t } else { Vec::new() })
+    }
+    fn run(&self, pool: &[u8], ao: i32, t: &[i32], b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+        if t.is_empty() {
+            return -2;
+        }
+        metered(kc::M_WORDS, room, |m| kc::samelen_run(pool, ao, t, b, s, e, m))
     }
 }

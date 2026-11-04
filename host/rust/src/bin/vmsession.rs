@@ -18,7 +18,7 @@ use snug::schema::{validate_blob, BytesBlob, Options, Program, Segment};
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
 use snug::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_unknown, vms_keep, vms_need_length,
                                vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
-use snug::controls::{program_controls, Control, Controls};
+use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::io::{BufRead, Write};
 use std::sync::Arc;
 
@@ -32,9 +32,26 @@ pub struct Tiny;
 impl Control for Tiny {
     fn check(&self, a: &[u8], item: &[u8]) -> bool { snug::controls::Chars.check(a, item) }
     fn max_bytes(&self) -> u32 { 8 }
+    fn prepare(&self, pool: &[u8], ao: i32, al: i32) -> Option<Vec<i32>> { snug::controls::Chars.prepare(pool, ao, al) }
+    fn run(&self, pool: &[u8], ao: i32, t: &[i32], b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+        snug::controls::Chars.run(pool, ao, t, b, s, e, room)
+    }
+}
+/// `.costly`: the item's length is not a multiple of 3, declared cost 3n + 5 (D193), maxBytes 1000.
+pub struct Costly;
+impl Control for Costly {
+    fn check(&self, _a: &[u8], item: &[u8]) -> bool { item.len() % 3 != 0 }
+    fn max_bytes(&self) -> u32 { 1000 }
+    fn cost(&self, n: u32) -> u64 { 3 * u64::from(n) + 5 }
+}
+/// `.huge`: always true, declared cost 1,000,000,000 (the budget refuses unasked).
+pub struct Huge;
+impl Control for Huge {
+    fn check(&self, _a: &[u8], _item: &[u8]) -> bool { true }
+    fn cost(&self, _n: u32) -> u64 { 1_000_000_000 }
 }
 fn test_controls() -> Controls {
-    Controls::generic().with("even", Even).with("tiny", Tiny)
+    Controls::generic().with("even", Even).with("tiny", Tiny).with("costly", Costly).with("huge", Huge)
 }
 
 const VMS_NEED: i32 = -64;
@@ -75,8 +92,9 @@ fn run(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Polic
     let mut out = vec![0i32; 8 + 2 * 257];
     let reg = test_controls();
     let ext: Vec<Arc<dyn Control>> = program_controls(p, pool).iter().filter_map(|n| reg.get(n).cloned()).collect();
-    let xf = |id: i32, pl: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| -> bool {
-        ext[id as usize].check(&pl[ao as usize..(ao + al) as usize], &b[st as usize..e as usize])
+    let preps = prepare_all(p, pool, &ext);
+    let xf = |id: i32, pl: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| -> i32 {
+        port(&*ext[id as usize], preps.get(&(id, ao)).map(Vec::as_slice), pl, ao, al, b, st, e, room)
     };
     let ci = vms_init(p, pool, rule, lim, &mut s, &mut ss, &mut ka, n, pol.q);
     if ci < 0 {
@@ -150,8 +168,9 @@ fn run_unknown(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol
     let mut out = vec![0i32; 8 + 2 * 257];
     let reg = test_controls();
     let ext: Vec<Arc<dyn Control>> = program_controls(p, pool).iter().filter_map(|n| reg.get(n).cloned()).collect();
-    let xf = |id: i32, pl: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| -> bool {
-        ext[id as usize].check(&pl[ao as usize..(ao + al) as usize], &b[st as usize..e as usize])
+    let preps = prepare_all(p, pool, &ext);
+    let xf = |id: i32, pl: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| -> i32 {
+        port(&*ext[id as usize], preps.get(&(id, ao)).map(Vec::as_slice), pl, ao, al, b, st, e, room)
     };
     let ci = vms_init_unknown(p, pool, rule, lim, &mut s, &mut ss, &mut ka, pol.q);
     if ci < 0 {

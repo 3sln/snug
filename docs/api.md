@@ -187,7 +187,7 @@ metadata. The public error message uses the code and position.
 ```ts
 type Control = ((argument: Uint8Array, item: Uint8Array) => boolean) |
   { check(argument: Uint8Array, item: Uint8Array): boolean; maxBytes?: number;
-    argument?(argument: Uint8Array): boolean };
+    argument?(argument: Uint8Array): boolean; cost?(itemBytes: number): number };
 type Controls = Record<string, Control>;
 export const chars: Control, unique: Control, samelen: Control;
 export const controls: { chars, unique, samelen };
@@ -197,9 +197,15 @@ export const controls: { chars, unique, samelen };
 distinct element encodings of an array), `.samelen "a" | [names]` (equal
 element counts of the named array/typed-array members of a map). Their
 verdicts are kin's (`snug.vm.controls`), identical on every host. A predicate
-must be pure; it is asked only for a queried, whole, profile-checked item,
-charged 1 + one unit per item byte; an item longer than `maxBytes` (default
-65,536, at most 2³¹−1) fails with `control_size` unasked. A throwing
+must be pure; it is asked only for a queried, whole, profile-checked item;
+an item longer than `maxBytes` (default 65,536, at most 2³¹−1) fails with
+`control_size` unasked (1 unit). Otherwise the call costs 17 units, then the
+predicate's `cost(itemBytes)` (a non-negative safe integer; default
+`itemBytes`), charged **before** it runs: a cost above the budget left stops
+validation with `budget` without calling. A predicate's own CPU is the host's
+responsibility; `cost` is how it stays inside the budget (~20 ns per unit by
+default). The generic controls meter their work in kin (program.md §14), with
+arguments prepared once per Program, so they cost the same on every host. A throwing
 predicate makes the validation call throw (`cause` set). New reasons:
 `control` (the predicate refused) and `control_size`. Programs using a control
 are format 1.1 and need the registry to load

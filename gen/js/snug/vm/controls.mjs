@@ -5,6 +5,65 @@ import { typedSize } from '../cbor/tags.mjs';
 
 export const BIG = 2147483647;
 
+export const TPU = 8;
+
+export const T_HEAD = 3;
+
+export const T_ELEM = 5;
+
+export const T_CMP = 8;
+
+export const T_PROBE = 4;
+
+export const T_PAIR = 5;
+
+export const C_BYTES = 8;
+
+export const C_TICKS = 8;
+
+export const B_HASH = 1;
+
+export const B_TEXT = 16;
+
+export const M_WORDS = 2;
+
+export const TICK_CAP = 1073741824;
+
+export function meterInit(m, room) {
+    // Allow a run `room` budget units (at most 2^30 ticks: no run over an item
+    // within its maximum comes near that).
+    m[0] = 0;
+    if (room >= ((TICK_CAP / TPU) | 0)) {
+        m[1] = TICK_CAP;
+    } else {
+        m[1] = room * TPU;
+    }
+}
+
+export function spend(m, t) {
+    // Charge t ticks before their work; false (nothing charged) past the allowance.
+    const u = m[0];
+    if (t > (m[1] - u)) {
+        return false;
+    }
+    m[0] = u + t;
+    return true;
+}
+
+export function hticks(n) {
+    // Ticks for hashing n bytes: ceil(n / B_HASH).
+    return ((n + (B_HASH - 1)) / B_HASH) | 0;
+}
+
+export function verdict(m, ok) {
+    // The verdict word of a finished run (see the header).
+    const u = ((m[0] + (TPU - 1)) / TPU) | 0;
+    if (ok) {
+        return u;
+    }
+    return (-2) - u;
+}
+
 export function hlen(b, i) {
     // The length of the head at i (ai 0..27).
     const ai = b[i] & 31;
@@ -47,7 +106,7 @@ export function harg(b, i) {
 export function skip(b, i, e) {
     // The end of the (well-formed, definite) item at i, or -1 if it would pass
     // e. One counter of items still owed is enough: a container adds its
-    // children, a tag its content.
+    // children, a tag its content. Unmetered: arguments only.
     let at = i;
     let owe = 1;
     while (owe > 0) {
@@ -92,16 +151,95 @@ export function skip(b, i, e) {
     return at;
 }
 
-export function spanEq(x, xs, xe, y, ys, ye) {
-    if ((xe - xs) !== (ye - ys)) {
-        return false;
-    }
-    for (let i = 0; i < xe - xs; i++) {
-        if (x[xs + i] !== y[ys + i]) {
-            return false;
+export function mskip(b, i, e, m) {
+    // `skip` charging T_HEAD per head visited: the end, -1 if it would pass e,
+    // -2 if the meter ran out.
+    let at = i;
+    let owe = 1;
+    while (owe > 0) {
+        if (at >= e) {
+            return -1;
+        }
+        if (!spend(m, T_HEAD)) {
+            return -2;
+        }
+        const ib = b[at];
+        const major = (ib >>> 5) | 0;
+        const ai = ib & 31;
+        if (ai > 27) {
+            return -1;
+        }
+        const h = hlen(b, at);
+        const n = harg(b, at);
+        owe -= 1;
+        if (h > (e - at)) {
+            return -1;
+        }
+        at += h;
+        if ((major === 2) || (major === 3)) {
+            if (n > (e - at)) {
+                return -1;
+            }
+            at += n;
+        }
+        if (major === 4) {
+            if (n > (e - at)) {
+                return -1;
+            }
+            owe += n;
+        }
+        if (major === 5) {
+            if (n > (((e - at) / 2) | 0)) {
+                return -1;
+            }
+            owe += 2 * n;
+        }
+        if (major === 6) {
+            owe += 1;
         }
     }
-    return true;
+    return at;
+}
+
+export function bytesCmp(x, xs, xl, y, ys, yl) {
+    // Bytewise order of x[xs, +xl) and y[ys, +yl), a proper prefix first.
+    let n = xl;
+    if (yl < n) {
+        n = yl;
+    }
+    for (let i = 0; i < n; i++) {
+        const c = x[xs + i];
+        const d = y[ys + i];
+        if (c !== d) {
+            return c - d;
+        }
+    }
+    return xl - yl;
+}
+
+export function mcmp(x, xs, xl, y, ys, yl, m) {
+    // `bytes-cmp` charging C_TICKS per chunk of C_BYTES bytes examined, as it
+    // goes, the first chunk up front; BIG: the meter ran out.
+    let n = xl;
+    if (yl < n) {
+        n = yl;
+    }
+    if (!spend(m, C_TICKS)) {
+        return BIG;
+    }
+    for (let i = 0; i < n; i++) {
+        if ((i > 0) && ((i & (C_BYTES - 1)) === 0)) {
+            if (!spend(m, C_TICKS)) {
+                return BIG;
+            }
+        }
+        const c = x[xs + i];
+        const d = y[ys + i];
+        if (c !== d) {
+            return c - d;
+        }
+    }
+    return xl - yl;
 }
 
 export function rangeLo(a, ao, al) {
@@ -183,69 +321,234 @@ export function anyArg(a, ao, al) {
     return (al >= 1) && (skip(a, ao, ao + al) === (ao + al));
 }
 
-export function charsOk(a, ao, al, b, s, e) {
-    // A text string whose code points number within the argument's range
-    // (UTF-8 already checked by the profile: count the non-continuation bytes).
-    if ((s >= e) || (((b[s] >>> 5) | 0) !== 3)) {
-        return false;
-    }
+export function charsPrep(a, ao, al, t) {
+    // Prepare a `.chars` argument once: t[0] lo, t[1] hi (t has 2 words); 0, or
+    // -1 when it is not a `.chars` argument.
     const lo = rangeLo(a, ao, al);
     if (lo < 0) {
-        return false;
+        return -1;
     }
-    const hi = rangeHi(a, ao, al);
+    t[0] = lo;
+    t[1] = rangeHi(a, ao, al);
+    return 0;
+}
+
+export function charsRun(t, b, s, e, m) {
+    // A text string whose code points number within [t[0], t[1]] (UTF-8
+    // already checked by the profile: count the non-continuation bytes).
+    // Charge: ceil(content bytes / B_TEXT) units, before the count.
+    if ((s >= e) || (((b[s] >>> 5) | 0) !== 3)) {
+        return verdict(m, false);
+    }
+    const c = s + hlen(b, s);
+    const u = (((e - c) + (B_TEXT - 1)) / B_TEXT) | 0;
+    if (!spend(m, u * TPU)) {
+        return -1;
+    }
     let n = 0;
-    let i = s + hlen(b, s);
-    while (i < e) {
+    for (let i = c; i < e; i++) {
         if ((b[i] & 192) !== 128) {
             n += 1;
         }
-        i += 1;
     }
-    return (n >= lo) && (n <= hi);
+    return verdict(m, (n >= t[0]) && (n <= t[1]));
 }
 
-export function spanCmp(b, t, x, y) {
-    // Order of the spans recorded at pairs x and y of t (start, length):
-    // bytewise, a proper prefix first.
-    const xs = t[2 * x];
-    const xl = t[(2 * x) + 1];
-    const ys = t[2 * y];
-    const yl = t[(2 * y) + 1];
-    let m = xl;
-    if (yl < m) {
-        m = yl;
+export function uniqueWords(b, s, e) {
+    // Words of meter + scratch `unique-run` needs for the item [s, e): three per
+    // element of an array (its head's count, which the profile walk bounded by
+    // the entries limit and the item's length), else the meter alone.
+    if ((s >= e) || (((b[s] >>> 5) | 0) !== 4)) {
+        return M_WORDS;
     }
-    for (let i = 0; i < m; i++) {
-        const c = b[xs + i];
-        const d = b[ys + i];
-        if (c !== d) {
-            return c - d;
-        }
+    const n = harg(b, s);
+    if (n > (e - s)) {
+        return M_WORDS + (3 * (e - s));
     }
-    return xl - yl;
+    return M_WORDS + (3 * n);
 }
 
-export function spanSwap(t, x, y) {
-    const a = t[2 * x];
-    const al = t[(2 * x) + 1];
-    const c = t[2 * y];
-    const cl = t[(2 * y) + 1];
-    t[2 * x] = c;
-    t[(2 * x) + 1] = cl;
-    t[2 * y] = a;
-    t[(2 * y) + 1] = al;
+export function recCmp(b, m, x, y) {
+    // Order of records x and y: hash, then bytewise. Charges T_CMP, and the
+    // bytes examined when the hashes tie. BIG: the meter ran out.
+    if (!spend(m, T_CMP)) {
+        return BIG;
+    }
+    const rx = M_WORDS + (3 * x);
+    const ry = M_WORDS + (3 * y);
+    const hx = m[rx + 2];
+    const hy = m[ry + 2];
+    if (hx < hy) {
+        return -1;
+    }
+    if (hx > hy) {
+        return 1;
+    }
+    const c = mcmp(b, m[rx], m[rx + 1], b, m[ry], m[ry + 1], m);
+    if (c === BIG) {
+        return BIG;
+    }
+    if (c < 0) {
+        return -1;
+    }
+    if (c > 0) {
+        return 1;
+    }
+    return 0;
 }
 
-export function sift(b, t, root0, n) {
+export function recSwap(m, x, y) {
+    const rx = M_WORDS + (3 * x);
+    const ry = M_WORDS + (3 * y);
+    for (let k = 0; k < 3; k++) {
+        const v = m[rx + k];
+        m[rx + k] = m[ry + k];
+        m[ry + k] = v;
+    }
+}
+
+export function sift(b, m, root0, n) {
+    // Sift record root0 down a heap of n: 0, 1 two equal records met, 2 the
+    // meter ran out.
     let root = root0;
     while (((2 * root) + 1) < n) {
         let c = (2 * root) + 1;
-        if (((c + 1) < n) && (spanCmp(b, t, c, c + 1) < 0)) {
+        if ((c + 1) < n) {
+            const d = recCmp(b, m, c, c + 1);
+            if (d === BIG) {
+                return 2;
+            }
+            if (d === 0) {
+                return 1;
+            }
+            if (d < 0) {
+                c += 1;
+            }
+        }
+        const d2 = recCmp(b, m, root, c);
+        if (d2 === BIG) {
+            return 2;
+        }
+        if (d2 === 0) {
+            return 1;
+        }
+        if (d2 < 0) {
+            recSwap(m, root, c);
+            root = c;
+        } else {
+            root = n;
+        }
+    }
+    return 0;
+}
+
+export function uniqueRun(b, s, e, m) {
+    // An array whose elements' encodings are pairwise distinct. m holds the
+    // meter and `unique-words` of scratch. Charges: per element T_ELEM, its
+    // heads (T_HEAD each) and its bytes hashed (1 tick per B_HASH); per record
+    // comparison T_CMP, + C_TICKS per C_BYTES bytes examined on a hash tie.
+    // O(n log n) comparisons, no allocation.
+    if ((s >= e) || (((b[s] >>> 5) | 0) !== 4)) {
+        return verdict(m, false);
+    }
+    const n = harg(b, s);
+    let x = s + hlen(b, s);
+    if ((((m.length - M_WORDS) / 3) | 0) < n) {
+        return verdict(m, false);
+    }
+    for (let k = 0; k < n; k++) {
+        if (!spend(m, T_ELEM)) {
+            return -1;
+        }
+        const y = mskip(b, x, e, m);
+        if (y === (-2)) {
+            return -1;
+        }
+        if (y < 0) {
+            return verdict(m, false);
+        }
+        if (!spend(m, hticks(y - x))) {
+            return -1;
+        }
+        let h = -2128831035;
+        for (let q = x; q < y; q++) {
+            h = Math.imul(h ^ b[q], 16777619);
+        }
+        const rk = M_WORDS + (3 * k);
+        m[rk] = x;
+        m[rk + 1] = y - x;
+        m[rk + 2] = h;
+        x = y;
+    }
+    let i = ((n / 2) | 0) - 1;
+    while (i >= 0) {
+        const r = sift(b, m, i, n);
+        if (r === 2) {
+            return -1;
+        }
+        if (r === 1) {
+            return verdict(m, false);
+        }
+        i -= 1;
+    }
+    let j = n - 1;
+    while (j > 0) {
+        recSwap(m, 0, j);
+        const r2 = sift(b, m, 0, j);
+        if (r2 === 2) {
+            return -1;
+        }
+        if (r2 === 1) {
+            return verdict(m, false);
+        }
+        j -= 1;
+    }
+    for (let k2 = 1; k2 < n; k2++) {
+        const d = recCmp(b, m, k2 - 1, k2);
+        if (d === BIG) {
+            return -1;
+        }
+        if (d === 0) {
+            return verdict(m, false);
+        }
+    }
+    return verdict(m, true);
+}
+
+export function samelenWords(a, ao, al) {
+    // Words `samelen-prep` needs for an argument (3 when it is not an array).
+    if ((al < 1) || (((a[ao] >>> 5) | 0) !== 4)) {
+        return 3;
+    }
+    const n = harg(a, ao);
+    if (n > al) {
+        return 3;
+    }
+    return 1 + (2 * n);
+}
+
+export function nameCmp(a, ao, t, x, y) {
+    return bytesCmp(a, ao + t[1 + (2 * x)], t[2 + (2 * x)], a, ao + t[1 + (2 * y)], t[2 + (2 * y)]);
+}
+
+export function nameSwap(t, x, y) {
+    const o = t[1 + (2 * x)];
+    const l = t[2 + (2 * x)];
+    t[1 + (2 * x)] = t[1 + (2 * y)];
+    t[2 + (2 * x)] = t[2 + (2 * y)];
+    t[1 + (2 * y)] = o;
+    t[2 + (2 * y)] = l;
+}
+
+export function nameSift(a, ao, t, root0, n) {
+    let root = root0;
+    while (((2 * root) + 1) < n) {
+        let c = (2 * root) + 1;
+        if (((c + 1) < n) && (nameCmp(a, ao, t, c, c + 1) < 0)) {
             c += 1;
         }
-        if (spanCmp(b, t, root, c) < 0) {
-            spanSwap(t, root, c);
+        if (nameCmp(a, ao, t, root, c) < 0) {
+            nameSwap(t, root, c);
             root = c;
         } else {
             root = n;
@@ -253,49 +556,50 @@ export function sift(b, t, root0, n) {
     }
 }
 
-export function uniqueWords(n) {
-    // Words of scratch `unique-ok` needs for an item of n bytes.
-    return (2 * n) + 2;
-}
-
-export function uniqueOk(b, s, e, t) {
-    // An array whose elements' encodings are pairwise distinct: record each
-    // element's span in t (unique-words of the item's length), heap-sort the
-    // spans, compare neighbours. O(n log n) comparisons, no allocation.
-    if ((s >= e) || (((b[s] >>> 5) | 0) !== 4)) {
-        return false;
+export function samelenPrep(a, ao, al, t) {
+    // Prepare a `.samelen` argument once (t has samelen-words): t[0] k, then k
+    // (offset from ao, length) spans of the DISTINCT names' encodings, sorted
+    // bytewise. 0, or -1 when it is not a `.samelen` argument. Bind-time work
+    // over the schema's own literal (heap sort, O(n log n)), not charged.
+    if (!namesArg(a, ao, al)) {
+        return -1;
     }
-    const n = harg(b, s);
-    let x = s + hlen(b, s);
-    if (((t.length / 2) | 0) < n) {
-        return false;
+    if (((a[ao] >>> 5) | 0) === 3) {
+        t[0] = 1;
+        t[1] = 0;
+        t[2] = al;
+        return 0;
     }
+    const n = harg(a, ao);
+    const e = ao + al;
+    let x = ao + hlen(a, ao);
     for (let k = 0; k < n; k++) {
-        const y = skip(b, x, e);
-        if (y < 0) {
-            return false;
-        }
-        t[2 * k] = x;
-        t[(2 * k) + 1] = y - x;
+        const y = skip(a, x, e);
+        t[1 + (2 * k)] = x - ao;
+        t[2 + (2 * k)] = y - x;
         x = y;
     }
     let i = ((n / 2) | 0) - 1;
     while (i >= 0) {
-        sift(b, t, i, n);
+        nameSift(a, ao, t, i, n);
         i -= 1;
     }
     let j = n - 1;
     while (j > 0) {
-        spanSwap(t, 0, j);
-        sift(b, t, 0, j);
+        nameSwap(t, 0, j);
+        nameSift(a, ao, t, 0, j);
         j -= 1;
     }
-    for (let k2 = 1; k2 < n; k2++) {
-        if (spanCmp(b, t, k2 - 1, k2) === 0) {
-            return false;
+    let w = 0;
+    for (let z = 0; z < n; z++) {
+        if ((w === 0) || (nameCmp(a, ao, t, w - 1, z) !== 0)) {
+            t[1 + (2 * w)] = t[1 + (2 * z)];
+            t[2 + (2 * w)] = t[2 + (2 * z)];
+            w += 1;
         }
     }
-    return true;
+    t[0] = w;
+    return 0;
 }
 
 export function countOf(b, v, e) {
@@ -319,56 +623,82 @@ export function countOf(b, v, e) {
     return (harg(b, c) / sz) | 0;
 }
 
-export function named(a, ao, al, b, ks, ke) {
-    // Is the key encoded at b[ks, ke) one of the argument's names?
-    const e = ao + al;
-    if (((a[ao] >>> 5) | 0) === 3) {
-        return spanEq(a, ao, e, b, ks, ke);
-    }
-    const n = harg(a, ao);
-    let x = ao + hlen(a, ao);
-    for (let _k = 0; _k < n; _k++) {
-        const y = skip(a, x, e);
-        if (spanEq(a, x, y, b, ks, ke)) {
-            return true;
+export function named(a, ao, t, b, ks, ke, m) {
+    // Is the key b[ks, ke) one of the prepared names? 1 yes, 0 no, -1 the
+    // meter ran out. Binary search: T_PROBE per probe + C_TICKS per C_BYTES bytes
+    // examined.
+    let lo = 0;
+    let hi = t[0];
+    const kl = ke - ks;
+    while (lo < hi) {
+        const mid = ((lo + hi) >>> 1) | 0;
+        const no = ao + t[1 + (2 * mid)];
+        const nl = t[2 + (2 * mid)];
+        if (!spend(m, T_PROBE)) {
+            return -1;
         }
-        x = y;
+        const c = mcmp(a, no, nl, b, ks, kl, m);
+        if (c === BIG) {
+            return -1;
+        }
+        if (c === 0) {
+            return 1;
+        }
+        if (c < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
     }
-    return false;
+    return 0;
 }
 
-export function samelenOk(a, ao, al, b, s, e) {
-    // A map whose members named by the argument, where present, all hold
-    // arrays or typed arrays with one element count.
+export function samelenRun(a, ao, t, b, s, e, m) {
+    // A map whose members named by the prepared argument t (its names in pool a
+    // from ao), where present, all hold arrays or typed arrays with one element
+    // count. One pass over the pairs: T_PAIR each, the heads skipped, a text
+    // key's name search.
     if ((s >= e) || (((b[s] >>> 5) | 0) !== 5)) {
-        return false;
-    }
-    if (!namesArg(a, ao, al)) {
-        return false;
+        return verdict(m, false);
     }
     const n = harg(b, s);
     let x = s + hlen(b, s);
     let len = -1;
     for (let _k = 0; _k < n; _k++) {
-        const ke = skip(b, x, e);
+        if (!spend(m, T_PAIR)) {
+            return -1;
+        }
+        const ke = mskip(b, x, e, m);
+        if (ke === (-2)) {
+            return -1;
+        }
         if (ke < 0) {
-            return false;
+            return verdict(m, false);
         }
-        const ve = skip(b, ke, e);
+        const ve = mskip(b, ke, e, m);
+        if (ve === (-2)) {
+            return -1;
+        }
         if (ve < 0) {
-            return false;
+            return verdict(m, false);
         }
-        if (named(a, ao, al, b, x, ke)) {
-            const c = countOf(b, ke, ve);
-            if (c < 0) {
-                return false;
+        if (((b[x] >>> 5) | 0) === 3) {
+            const hit = named(a, ao, t, b, x, ke, m);
+            if (hit < 0) {
+                return -1;
             }
-            if ((len >= 0) && (c !== len)) {
-                return false;
+            if (hit === 1) {
+                const c = countOf(b, ke, ve);
+                if (c < 0) {
+                    return verdict(m, false);
+                }
+                if ((len >= 0) && (c !== len)) {
+                    return verdict(m, false);
+                }
+                len = c;
             }
-            len = c;
         }
         x = ve;
     }
-    return true;
+    return verdict(m, true);
 }

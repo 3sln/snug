@@ -15,7 +15,7 @@
 ;; leaf (ANY, MAJOR, LIT, ...); leaf failure reasons for containers are
 ;; `unexpected`/`value` (died at a pair or element) and `missing` (at the end).
 (ns snug.vm.eval
-  (:require [kin.lang :refer [defn let local return set if while for do comment declarefn break]]
+  (:require [kin.lang :refer [defn let local return set if while for do comment declarefn break defconst]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR Ext + - * neg shl sar ushr bit-and bit-or bit-xor
                                < > <= >= == != and or not u8 ia iset blen ext-call]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TAG CODE_DEPTH
@@ -36,7 +36,7 @@
                                     P_ANYKEY P_TAG P_EMBED P_EMBEDSEQ CTX_KEY CTX_SIMPLE VM_GENERIC VM_FASTM
                                     INF H_S_TS_INDEX H_S_GROUP_INDEX H_S_INTERVALS K_INT K_TEXT
                                     R_RANGE R_SIZE VM_BUDGET VM_FASTK MODE_ABSORB K_ANY K_MAJOR
-                                    VM_FASTP VM_FASTL]]
+                                    VM_FASTP VM_FASTL VM_POS]]
             [snug.vm.base :refer [charge c64 c64min new-epoch sched2 free-on free-off q-add q-filter q-stamp ts-test q-flag q-set-flag
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
                                   wit-empty wit-clear wit-set path-put rule1]]
@@ -86,15 +86,21 @@
           (return r))))
   (return (q-filter p s fb w nq cls pos)))
 
+(defconst ^:pub ^I32 EXT_CALL 16)
+
 (defn ^:pub ^I32 ext-eval [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 fb ^I32 w ^I32 l ^I32 pos
                            ^I32 end ^I32 e ^Ext ext]
-  (comment "EXT leaf l (D140) on the item [pos, end) of b, once per item, when a"
+  (comment "EXT leaf l (D140, D190) on the item [pos, end) of b, once per item, when a"
            "combinator needs it: longer than its maximum (d3) -> R_CONTROL_SIZE for 1"
-           "unit, without asking; else 1 + one unit per item byte, then the host"
-           "predicate (id d0, argument pool[d1, d1 + d2)) -> MATCHED (stamped in epoch"
-           "e) or R_CONTROL. A walk that cannot hold the item whole never gets here"
-           "with one that fits (the session asks for it whole); -inconsistent if so."
-           "0 or a negated code.")
+           "unit, without asking; else 1 + EXT_CALL units, then the host predicate"
+           "(id d0, argument pool[d1, d1 + d2)) is asked with the budget that remains"
+           "(`room`) and answers a verdict word: u >= 0 matched after u units, -2 - u"
+           "refused after u units, -1 more than `room` (budget). u is charged; a"
+           "generic control meters its own work (snug.vm.controls), a host predicate"
+           "its declared cost, by default one unit per item byte, before it runs."
+           "MATCHED (stamped in epoch e) or R_CONTROL. A walk that cannot hold the"
+           "item whole never gets here with one that fits (the session asks for it"
+           "whole); -inconsistent if so. 0 or a negated code.")
   (let [qi (ia s VM_QIDX)
         j (ia s (+ qi l))
         fl0 (+ fb w)
@@ -108,11 +114,18 @@
       (do (iset s (+ fl0 j) (bit-or f (shl R_CONTROL_SIZE 8)))
           (return 0)))
     (if (or (< pos 0) (> end (blen b))) (return (neg R_INCONSISTENT)))
-    (if (not (charge s n pos)) (return (neg R_BUDGET)))
-    (if (ext-call ext (ia p (+ lb 2)) pool (ia p (+ lb 3)) (ia p (+ lb 4)) b pos end)
-      (do (iset s (+ fl0 j) (bit-or f F_MATCHED))
-          (iset s (+ SCRATCH_MARK l) e))
-      (iset s (+ fl0 j) (bit-or f (shl R_CONTROL 8))))
+    (if (not (charge s EXT_CALL pos)) (return (neg R_BUDGET)))
+    (let [room (ia s VM_BUDGET)
+          r (ext-call ext (ia p (+ lb 2)) pool (ia p (+ lb 3)) (ia p (+ lb 4)) b pos end room)
+          ^:mut u r]
+      (if (< r (neg 1)) (set u (- (neg 2) r)))
+      (if (or (== r (neg 1)) (> u room))
+        (do (iset s VM_POS pos) (return (neg R_BUDGET))))
+      (if (not (charge s u pos)) (return (neg R_BUDGET)))
+      (if (>= r 0)
+        (do (iset s (+ fl0 j) (bit-or f F_MATCHED))
+            (iset s (+ SCRATCH_MARK l) e))
+        (iset s (+ fl0 j) (bit-or f (shl R_CONTROL 8)))))
     (return 0)))
 
 (defn ^:pub ^I32 leaf-kind-of [^IntsR p ^I32 l]

@@ -111,14 +111,32 @@ the wire profile. Only a strict `true` matches. The generic controls:
 I/O, clock, randomness, state, and no call back into snug (validation holds
 the shared scratch; a re-entrant call throws). The VM asks it only for an item
 its leaf is queried for, at most once per item, never for an item already
-refused, and charges **one budget unit per item byte** (plus one), so a
-hostile message cannot make it run longer than the budget allows. An item
-longer than `maxBytes` (default 65,536) fails with the reason `control_size`
-*without asking*; streams therefore never buffer more than `maxBytes` for a
+refused. An item longer than `maxBytes` (default 65,536) fails with the reason
+`control_size` *without asking*; streams therefore never buffer more than `maxBytes` for a
 control, and every source gives the same answer. If a predicate throws, the
 call throws an `Error` whose `cause` is the original (the verdict is void).
 An optional `argument(bytes) => boolean` is checked once per use at compile
 time (`control_value` when false); the generic controls check theirs.
+
+**Budget: a predicate's CPU is yours.** Each call costs 17 budget units, then
+the predicate's **cost**, charged *before* it runs: by default one unit per
+item byte, or what `cost(itemBytes)` answers (a non-negative integer). When
+the cost is more than the budget has left, validation stops with `budget` and
+the predicate is not called. snug cannot interrupt or measure host code, so
+the cost is the host's promise: the default budget (2.3 M units) is sized for
+about 20 ns of CPU per unit, and a predicate that does more work per byte
+should declare it, or a hostile message can spend more CPU in it than the
+budget suggests.
+
+```js
+// A predicate that does ~1 µs of work per item byte declares ~50 units per byte.
+const registry = { ...controls, sig: { check: verifySignature, cost: n => 64 + 50 * n } };
+```
+
+The generic controls meter their own work in kin instead (a linear pass for
+`.chars` and `.samelen`, hashing plus an O(n log n) sort for `.unique`, each
+step charged as it happens, program.md §14), so JS and Rust charge them
+identically and a run that would pass the budget stops in the middle.
 
 **Errors and caching.** An unregistered `.name` is the `SchemaError`
 `unknown_control`, and its message names the control. A Program that uses a

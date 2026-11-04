@@ -3450,6 +3450,92 @@ with major 2/7 KEYS (owner's call, with the compiler's naming records and the
 VM's key search, which compare encodings and so need no other change).
 - [ ] **Signed off** (owner)
 
+### D190 — The extension-control port answers a verdict word and is told the budget left (P7.2 hardening)
+**Decision** (provisional): the kin port `Ext` becomes `(id, pool, ao, al, b,
+s, e, room) -> i32` (was `-> bool`): `room` is the budget the VM has left
+after charging 1 + `EXT_CALL` (16) units for the call; the answer is u >= 0
+matched after u units, -2 - u refused after u units, or -1 "more than
+`room`". `ext-eval` charges u (or stops with `budget` at the item, exactly
+like any other charge that exceeds the remainder). No Program word changes:
+format 1.1 as before; program.md §14 gains the EXT schedule.
+**Why**: R2 (architecture §1, §7) needs every unit of work charged; a bool
+port cannot report work, and an EXT predicate's work depends on the item
+(and, for `.samelen`, on the argument). Passing `room` lets the work stop
+inside a run (generic controls) or before it (declared costs), so one call
+can never overshoot the budget.
+**Alternatives**: a per-leaf declared cost in a Program word (a format
+change, refused by the brief); charging a worst-case bound before the call
+(`.unique`'s n log n bound would overcharge every valid array several
+times); running the generic controls inside the VM by name (a registry could
+rebind the names).
+- [ ] **Signed off** (owner)
+
+### D191 — Generic controls are metered in kin, in ticks (P7.2 hardening)
+**Decision** (provisional): `snug.vm.controls` runs `.chars`, `.unique` and
+`.samelen` against a meter (host scratch m[0] ticks spent, m[1] allowed =
+room × 8) and charges every step BEFORE doing it: heads skipped 3 ticks;
+`.chars` ⌈len/16⌉ units before its single linear count; `.unique` 5 per
+element + 1 per byte hashed (FNV-1a over the element's encoding), 8 per
+record comparison of a heap sort by (hash, bytes) + 8 per 8 bytes examined
+only on equal hashes, stopping at the first equal pair; `.samelen` 5 per pair
++ a binary search over prepared names, 4 per probe + 8 per 8 bytes examined.
+u = ⌈ticks / 8⌉. Weights calibrated (bench/VM.md, 2026-11-05) so that each
+kind of generic work costs no more CPU per unit than the VM's own worst
+walk measured alongside it (the six-way choice of maps, D046's reference).
+**Why**: identical units on every host by construction (JS == Rust == wasm),
+work proportional to the item (O(B) for `.chars`/`.samelen`, O(B log n) worst
+for `.unique`, which hash collisions cannot push further), and a run that would
+pass the budget stops in the middle.
+**Alternatives**: whole units per step (coarse: overcharges cheap steps 2-4×);
+an open-addressing hash set for `.unique` (expected O(n) but adversarial
+multi-collisions make it O(n²) probes — charged, but valid arrays would then
+be refused); merging sorted keys against sorted names (relies on map key
+order).
+- [ ] **Signed off** (owner)
+
+### D192 — Generic control arguments are prepared once, at bind (P7.2 hardening)
+**Decision** (provisional): `chars-prep` (lo, hi) and `samelen-prep` (the
+distinct names' spans, heap-sorted bytewise) run once per (control id,
+argument offset) when a host binds a Program (JS `bindControls`, Rust
+`Program::bind` / `controls::prepare_all`), not per item; bind-time work over
+the schema's own literal is not charged. Hosts reuse one meter/`.unique`
+scratch per thread (JS module, Rust `thread_local`), three words per element
+of the largest array (bounded by the entries limit), released past 2^20 words.
+**Why**: the 2026-11-04 analysis found `.samelen` re-parsed and linearly
+searched a 237 KB controller per item (58.6 s under defaults); duplicates
+collapse and lookup becomes O(log names). **Alternatives**: charging argument
+bytes per call (bounded but still argument-amplified); preparing in the
+compiler (a Program change).
+- [ ] **Signed off** (owner)
+
+### D193 — Host predicates: a declared cost, charged before the call; their CPU is the host's (P7.2 hardening)
+**Decision** (provisional): a registered control may declare `cost(itemBytes)
+-> units` (JS, a non-negative safe integer) / `Control::cost(item_bytes) ->
+u64` (Rust); default `itemBytes` (D140's one unit per item byte). The binding
+computes it before calling; more than `room` answers -1 (`budget`) without
+calling. The per-control maximum item size stays 65,536 B. Documented
+plainly (guide, api, rust.md, program.md §14): the VM cannot interrupt or
+measure host code, so a predicate's own CPU is the host's responsibility and
+`cost` is how a host keeps it inside the budget (~20 ns per unit by default).
+**Why**: an arbitrary pure predicate is unbounded (303 ms for 16 steps in the
+analysis); the only enforceable bound without isolation is a trusted
+declaration charged before the work. **Alternatives**: a units-per-byte
+integer in the registry words (needs a compiler/source-key change and is
+less expressive); timing predicates (non-deterministic, hosts would disagree);
+lowering the default maximum (does not bound per-byte cost).
+- [ ] **Signed off** (owner)
+
+### D194 — EXT_CALL = 16 units per predicate call (P7.2 hardening)
+**Decision** (provisional): every call (generic or host) costs 1 + 16 units
+before it, on top of its own units. **Why**: the per-call dispatch, walk and
+combinator overhead of a tiny item was charged ~22 units for ~760 ns (34 ns
+per unit, the 79 ms no-op row); at 16 the tiny-item rows run at ~17–20 ns per
+unit even on the loaded machine (bench/VM.md 2026-11-05). **Alternatives**: 8
+(about 25 ns/unit loaded, past the 50 ms gate under load); a per-byte view
+charge (views are O(1)). Cost: 65,536 tiny items each asked by a control now
+exhaust the default budget (they took ~40–50 ms before).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -4406,6 +4492,40 @@ are answered as provisional decisions D082–D085. None is open now.
     2026-11-04 worst-case analysis) apply to the SDK exactly as to native,
     since the predicates are kin's or the host's; `bytesHeld` does not count
     the session's kin arrays inside wasm.
+- [!] **P7.9c — wasm SDK EXT port adaptation: BLOCKED pending user
+  authorisation** (2026-11-05). D190–D193 changed the kin `Ext` port, so the
+  wasm SDK module does not compile any more: `bb wasm-sdk-test` was run on
+  2026-11-05 and failed at `kin/scripts/wasm-build sdk` (5 rustc errors in
+  `sdk.rs`: the `kc::*_ok` imports and the closures' signature). It stays red
+  until these edits land. The P7.2 hardening engineer was given
+  ownership of these files by the manager, but the session's permission
+  classifier refused the edit; it was not worked around. The exact edits:
+  * `host/wasm/src/sdk.rs`: the import becomes `fn snug_ext(id, ap, al, ip,
+    il, room: i32) -> i32`, returning kin's verdict word as it is. `use` changes
+    from `chars_ok, samelen_ok, unique_ok, unique_words` to `chars_prep,
+    chars_run, meter_init, samelen_prep, samelen_run, samelen_words,
+    unique_run, unique_words, M_WORDS`. `Prog` gains `preps:
+    BTreeMap<(i32, i32), Vec<i32>>`, filled in `sdk_prog_bind`. For every
+    leaf with kind 18 (P[43] + 8l: id P[o+2], ao P[o+3], al P[o+4]) whose
+    kind is 1 it takes `chars_prep` into 2 words (`[1, 0]` if it refuses);
+    for kind 3 it takes `samelen_prep` into `samelen_words` words (empty if
+    it refuses). `ext_call(pr, id, pool, ao, al, b, s, e, room) -> i32`:
+    kind 0 calls the import with `room`. Otherwise it sizes UNIQ to
+    `unique_words(b, s, e)` (kind 2) or `M_WORDS`, runs `meter_init(m,
+    room)`, then `chars_run(t, b, s, e, m)` / `unique_run(b, s, e, m)` /
+    `samelen_run(pool, ao, t, b, s, e, m)` (-2 if the prepared table is
+    missing), and frees UNIQ past 2^20 words. All three closures (validate,
+    validate_span, ses_step) gain the `room: i32` parameter and return i32.
+  * `host/wasm-sdk/src/runtime.mjs`: `snugExt(id, ap, al, ip, il, room)`
+    answers `-2` (not 0) when unbound or failed, and returns `bound.call(id,
+    arg, 0, al, item, 0, il, room)` as it is (the native binding charges the
+    declared cost, D193).
+  * `host/wasm-sdk/src/schema.mjs` needs no change: its `GENERIC` map by
+    `check` still recognises the generic controls, since `{...chars,
+    maxBytes}` keeps `check` and the `Symbol.for('snug.metered')` key.
+  Done when: `kin/scripts/wasm-build sdk` builds, and `bb wasm-sdk-test` is
+  green, including the new EXT cases (`costly`, `huge`, `unique-big`,
+  `samelen-many`, `chars-budget`).
 - [x] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
   ciborium, minicbor (Rust) and the `cddl` crate. Done 2026-11-03 by the P7.8
   benchmark engineer; `bench/compare/README.md` (method, versions/licences,

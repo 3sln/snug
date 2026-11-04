@@ -91,14 +91,14 @@
     },
     "snug/controls": {
       "static": {
-        "min": 3498,
-        "gzip": 1406,
-        "brotli": 1287
+        "min": 6320,
+        "gzip": 2460,
+        "brotli": 2203
       },
       "full": {
-        "min": 3498,
-        "gzip": 1406,
-        "brotli": 1287
+        "min": 6320,
+        "gzip": 2460,
+        "brotli": 2203
       }
     },
     "runtime": {

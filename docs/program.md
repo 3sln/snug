@@ -231,7 +231,8 @@ Notes on kinds:
   operand or a NOT's target — and at most once per item: an item longer than
   d3 bytes fails with `control_size` without asking; otherwise the host
   predicate is called with (d0, the pool bytes [d1, d1 + d2), the item's whole
-  encoding) and its verdict is MATCHED or `control`. The argument is the CBOR
+  encoding, the budget left) and its verdict is MATCHED, `control` or `budget`
+  (§14: the units it reports are charged). The argument is the CBOR
   encoding of the controller literal (an integer, text, bytes, a simple value,
   a range `lo..hi` as the array `[lo, hi]`, or an array of those).
 
@@ -1144,7 +1145,7 @@ exceeds the remainder. These are the arch §7 rows, restated for this format
 | `.bits` scan | ⌈len/64⌉ |
 | regexp, per code point, per live regexp | W · (\|active\| + 1) + atom probes |
 | combinator (AND, NOT) | 2 |
-| EXT leaf decided (1.1, once per item, when its combinator needs it) | 1, + 1 per item byte when the item is no longer than its maximum (then the predicate is asked) |
+| EXT leaf decided (1.1, once per item, when its combinator needs it) | 1; when the item is no longer than its maximum, + `EXT_CALL` (16) and then the predicate's units u (below) |
 | container block initialisation | ⌈words/16⌉ per block |
 | stamping a returned child's matches | \|Q′_child\| (only if non-empty) |
 | typeset test | 1 per answer element examined (stops at the first hit) |
@@ -1163,6 +1164,39 @@ exceeds the remainder. These are the arch §7 rows, restated for this format
 A dead item (empty query) therefore costs 1 + its profile scans, which is arch
 §7's "profile-only continuation" row. Embedded content is charged the same
 way, against the same budget.
+
+**Extension controls (format 1.1; D190–D193).** After its 1 + `EXT_CALL`
+units the VM asks the host port with `room`, the units the budget has left,
+and the port answers a verdict word: u ≥ 0 matched after u units, −2 − u
+refused after u units, −1 more than `room`. The VM charges u (−1, or u >
+`room`: `budget` at the item, as any charge that exceeds the remainder). What
+u is depends on the control, and both are deterministic functions of the
+Program and the item, so hosts agree on the exhaustion point:
+
+* **A host predicate:** its declared cost for the item's encoded length n —
+  by default **n** (one unit per item byte) — decided before the predicate
+  runs; a cost above `room` is −1 and the predicate is not called. The VM
+  cannot interrupt or measure host code: a predicate's own CPU is the host's
+  responsibility, and a declared cost is how a host bounds it by the budget.
+* **A generic control** (`snug.vm.controls`) meters its own work in kin, in
+  **ticks**, 8 to a unit, each charged before the work it pays for (a run that
+  would pass `room` × 8 ticks stops at once: −1); u = ⌈ticks / 8⌉:
+
+| Generic work | Ticks |
+| --- | --- |
+| `.chars`: the text content's code-point count | 8 per 16 content bytes (⌈len/16⌉ units), before the count |
+| skipping an element, key or value (`.unique`, `.samelen`) | 3 per item head visited |
+| `.unique`: recording an element (span and FNV-1a hash) | 5, + 1 per byte hashed |
+| `.unique`: comparing two records (heap sort, then neighbours) | 8, + on equal hashes 8 per 8 bytes examined (the first 8 up front) |
+| `.samelen`: a map pair | 5 |
+| `.samelen`: a text key's binary search, per probe | 4, + 8 per 8 bytes examined (the first 8 up front) |
+
+  The weights were set so that each kind of generic work costs no more CPU per
+  unit than the VM's own worst generic walk (bench/VM.md, 2026-11-05).
+  `.unique` stops (refused) at the first comparison that finds two equal
+  encodings. `.samelen`'s names are parsed, de-duplicated and sorted once,
+  when the host binds the Program, and are not charged per item. An item that
+  is not of the control's kind is refused after the units spent so far.
 
 **Schedule 2 (D045; the default).** Three exceptions to the table, everything
 else unchanged. They make the bookkeeping of the simplest shapes cost what it

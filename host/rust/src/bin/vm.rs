@@ -18,7 +18,7 @@
 // program.md §13.1 (`&mut` scratch, D040).
 use snug::schema::{validate, Options, Program, Segment};
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span, vm_validate_span_x, vm_validate_x};
-use snug::controls::{program_controls, Control, Controls};
+use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::sync::Arc;
 
 /// P7.2: kin/scripts/ext-cases.mjs's test registry -- the generic controls, `.even`
@@ -32,9 +32,26 @@ pub struct Tiny;
 impl Control for Tiny {
     fn check(&self, a: &[u8], item: &[u8]) -> bool { snug::controls::Chars.check(a, item) }
     fn max_bytes(&self) -> u32 { 8 }
+    fn prepare(&self, pool: &[u8], ao: i32, al: i32) -> Option<Vec<i32>> { snug::controls::Chars.prepare(pool, ao, al) }
+    fn run(&self, pool: &[u8], ao: i32, t: &[i32], b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+        snug::controls::Chars.run(pool, ao, t, b, s, e, room)
+    }
+}
+/// `.costly`: the item's length is not a multiple of 3, declared cost 3n + 5 (D193), maxBytes 1000.
+pub struct Costly;
+impl Control for Costly {
+    fn check(&self, _a: &[u8], item: &[u8]) -> bool { item.len() % 3 != 0 }
+    fn max_bytes(&self) -> u32 { 1000 }
+    fn cost(&self, n: u32) -> u64 { 3 * u64::from(n) + 5 }
+}
+/// `.huge`: always true, declared cost 1,000,000,000 (the budget refuses unasked).
+pub struct Huge;
+impl Control for Huge {
+    fn check(&self, _a: &[u8], _item: &[u8]) -> bool { true }
+    fn cost(&self, _n: u32) -> u64 { 1_000_000_000 }
 }
 fn test_controls() -> Controls {
-    Controls::generic().with("even", Even).with("tiny", Tiny)
+    Controls::generic().with("even", Even).with("tiny", Tiny).with("costly", Costly).with("huge", Huge)
 }
 /// The predicates of a Program's controls, in id order (empty: it uses none).
 fn bound(p: &[i32], b: &[u8], reg: &Controls) -> Vec<Arc<dyn Control>> {
@@ -106,8 +123,9 @@ fn main() {
                     }
                     let mut o = vec![0i32; 8 + 2 * 257];
                     let ext = pr.ext.clone();
-                    let x = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32| -> bool {
-                        ext[id as usize].check(&pool[ao as usize..(ao + al) as usize], &b[s as usize..e as usize])
+                    let preps = prepare_all(&pr.p, &pr.b, &ext);
+                    let x = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32, room: i32| -> i32 {
+                        port(&*ext[id as usize], preps.get(&(id, ao)).map(Vec::as_slice), pool, ao, al, b, s, e, room)
                     };
                     let c = if !pr.ext.is_empty() {
                         if f[0] == "span" {

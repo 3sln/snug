@@ -282,7 +282,7 @@ pub(crate) fn bstr_claim(b: &[u8], s: &mut [i32], pos: i32, end: i32) -> i32 {
     }
     return q + lo;
 }
-pub(crate) fn skip_bstr(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, hp: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub(crate) fn skip_bstr(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, hp: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // D085: a byte string the walk takes from its head alone (no leaf reads its
     // content), in an unknown-length session: as the buffer walk, plus the
     // pending check of its length when its content passes the window. The walk's
@@ -376,7 +376,7 @@ pub(crate) fn tag_number(b: &[u8], pos: i32) -> i32 {
     }
     return -1;
 }
-pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // The pending item: its head (and any note or bounded piece it must have
     // whole) in the window, then whole by the buffer walk when the window
     // holds everything it can read, else a frame.
@@ -619,7 +619,7 @@ pub(crate) fn deliver(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out: &
     }
     return fin_bad(s, ss, base);
 }
-pub(crate) fn frame_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub(crate) fn frame_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     let f: i32 = ftop(ss);
     let kind: i32 = ss[(f + F_KIND) as usize];
     if kind == FK_ARR {
@@ -657,7 +657,7 @@ pub(crate) fn keep_of(ss: &[i32]) -> i32 {
     }
     return k;
 }
-pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // Run the session over the window b, message bytes from base. Answers the
     // verdict's code (>= 0; out filled as by vm-validate: absolute offsets),
     // VMS_NEED (give a window holding [vms-need-offset, + vms-need-length)),
@@ -729,7 +729,7 @@ pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32
 }
 pub fn vms_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32) -> i32 {
     // vms-step-x with no extension controls (D140).
-    return vms_step_x(p, pool, b, s, ss, ka, out, base, &|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false);
+    return vms_step_x(p, pool, b, s, ss, ka, out, base, &|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -2);
 }
 pub fn vms_eof(ss: &mut [i32], out: &mut [i32], n: i32) -> i32 {
     // D085: the message of an unknown-length session ended after n bytes (or has

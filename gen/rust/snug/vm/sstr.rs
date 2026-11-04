@@ -251,7 +251,7 @@ pub fn text_scan(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, 
         }
     }
 }
-pub fn text_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn text_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A text frame: the scan; then (live) the regexp verdicts, the deferred
     // charges as one sum at the item's offset, and finish-scalar.
     let live: i32 = b01(ss[(f + F_KIND) as usize] == FK_TEXT);
@@ -621,7 +621,7 @@ pub fn bstr_embed(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32) -
     }
     return cont(ss, f, S_FIN);
 }
-pub fn bstr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn bstr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     let ph: i32 = ss[(f + F_PH) as usize];
     let pos: i32 = ss[(f + F_POS) as usize] - base;
     let d: i32 = ss[(f + F_D) as usize];

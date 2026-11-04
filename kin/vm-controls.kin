@@ -1,26 +1,76 @@
-;; The GENERIC extension controls (D082, D142): `.chars`, `.unique` and
-;; `.samelen` as pure predicates over an item's encoded bytes, written in kin so
-;; that every host computes the same verdict. Hosts wrap them as ordinary
-;; registered controls (JS `snug/controls`, Rust `snug::controls`); the VM
-;; calls them, like any extension control, only for an item that is whole and
-;; has already passed the profile walk -- so every head read here is
-;; well-formed, definite and in bounds of [s, e).
+;; The GENERIC extension controls (D082, D142, D190-D192): `.chars`, `.unique`
+;; and `.samelen` as METERED predicates over an item's encoded bytes, written in
+;; kin so that every host computes the same verdict AND charges the same units.
+;; Hosts wrap them as registered controls (JS `snug/controls`, Rust
+;; `snug::controls`); the VM calls them, like any extension control, only for an
+;; item that is whole and has already passed the profile walk -- so every head
+;; read here is well-formed, definite and in bounds of [s, e).
 ;;
 ;; Arguments are the CBOR encodings the compiler made of the control's
 ;; controller (snug.compile.lower `ext-arg`): an unsigned integer n, a range
-;; `lo..hi` as the array [lo, hi], a text string, or an array of those.
+;; `lo..hi` as the array [lo, hi], a text string, or an array of those. They
+;; are parsed ONCE, when a host binds a Program (`chars-prep`, `samelen-prep`
+;; into a small prepared table), never per item.
 ;;
 ;;   .chars n | lo..hi     a text string of n / lo..hi Unicode code points
 ;;   .unique <any>         an array whose elements' encodings are pairwise distinct
 ;;   .samelen "a" | [...]  a map whose named members that are present all hold
 ;;                         arrays or typed arrays of one element count
+;;
+;; METERING (program.md §14, D191). Every run takes a meter m (host scratch):
+;; m[0] the ticks spent, m[1] the ticks allowed (`meter-init` from the VM's
+;; remaining budget). Work is charged in TICKS, TPU ticks to a budget unit,
+;; BEFORE it is done; a run that would pass its allowance stops at once and
+;; answers -1. Otherwise it answers a VERDICT word (`verdict`): u >= 0 matched
+;; after u units, -2 - u refused after u units, u = ceil(ticks / TPU). The VM
+;; charges the units (snug.vm.eval `ext-eval`).
 (ns snug.vm.controls
   (:require [kin.lang :refer [defn let return set if while for do comment defconst]]
-            [snug.lang :refer [I32 Bool Bytes Ints + - * neg quot shl ushr bit-and bit-or
-                               < > <= >= == != and or not u8 blen ia iset ilen]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot shl ushr bit-and bit-or bit-xor
+                               < > <= >= == != and or not u8 blen ia iset ilen mul32]]
             [snug.cbor.tags :refer [typed-size]]))
 
 (defconst ^I32 BIG 2147483647)
+
+;; ------------------------------------------------------------ the meter
+
+(defconst ^:pub ^I32 TPU 8)          ;; ticks per budget unit
+(defconst ^:pub ^I32 T_HEAD 3)       ;; a head visited while skipping an item
+(defconst ^:pub ^I32 T_ELEM 5)       ;; .unique: an element recorded (its span and hash)
+(defconst ^:pub ^I32 T_CMP 8)        ;; .unique: a comparison of two records (and its swap)
+(defconst ^:pub ^I32 T_PROBE 4)      ;; .samelen: a name probe (binary search)
+(defconst ^:pub ^I32 T_PAIR 5)       ;; .samelen: a map pair
+(defconst ^:pub ^I32 C_BYTES 8)      ;; bytes compared per chunk (a power of two)...
+(defconst ^:pub ^I32 C_TICKS 8)      ;; ...and the chunk's ticks
+(defconst ^:pub ^I32 B_HASH 1)       ;; .unique: bytes hashed per tick
+(defconst ^:pub ^I32 B_TEXT 16)      ;; .chars: content bytes counted per unit
+(defconst ^:pub ^I32 M_WORDS 2)      ;; meter words before a run's own scratch
+(defconst ^I32 TICK_CAP 1073741824)  ;; 2^30: the most ticks one run may be allowed
+
+(defn ^:pub meter-init [^Ints m ^I32 room]
+  (comment "Allow a run `room` budget units (at most 2^30 ticks: no run over an item"
+           "within its maximum comes near that).")
+  (iset m 0 0)
+  (if (>= room (quot TICK_CAP TPU))
+    (iset m 1 TICK_CAP)
+    (iset m 1 (* room TPU))))
+
+(defn ^Bool spend [^Ints m ^I32 t]
+  (comment "Charge t ticks before their work; false (nothing charged) past the allowance.")
+  (let [u (ia m 0)]
+    (if (> t (- (ia m 1) u)) (return false))
+    (iset m 0 (+ u t))
+    (return true)))
+
+(defn ^I32 hticks [^I32 n]
+  (comment "Ticks for hashing n bytes: ceil(n / B_HASH).")
+  (return (quot (+ n (- B_HASH 1)) B_HASH)))
+
+(defn ^:pub ^I32 verdict [^IntsR m ^Bool ok]
+  (comment "The verdict word of a finished run (see the header).")
+  (let [u (quot (+ (ia m 0) (- TPU 1)) TPU)]
+    (if ok (return u))
+    (return (- (neg 2) u))))
 
 ;; ------------------------------------------------------------ heads
 
@@ -48,7 +98,7 @@
 (defn ^:pub ^I32 skip [^Bytes b ^I32 i ^I32 e]
   (comment "The end of the (well-formed, definite) item at i, or -1 if it would pass"
            "e. One counter of items still owed is enough: a container adds its"
-           "children, a tag its content.")
+           "children, a tag its content. Unmetered: arguments only.")
   (let [^:mut at i
         ^:mut owe 1]
     (while (> owe 0)
@@ -74,11 +124,58 @@
           (if (== major 6) (set owe (+ owe 1))))))
     (return at)))
 
-(defn ^Bool span-eq [^Bytes x ^I32 xs ^I32 xe ^Bytes y ^I32 ys ^I32 ye]
-  (if (!= (- xe xs) (- ye ys)) (return false))
-  (for [^I32 i 0 (- xe xs)]
-    (if (!= (u8 x (+ xs i)) (u8 y (+ ys i))) (return false)))
-  (return true))
+(defn ^I32 mskip [^Bytes b ^I32 i ^I32 e ^Ints m]
+  (comment "`skip` charging T_HEAD per head visited: the end, -1 if it would pass e,"
+           "-2 if the meter ran out.")
+  (let [^:mut at i
+        ^:mut owe 1]
+    (while (> owe 0)
+      (if (>= at e) (return (neg 1)))
+      (if (not (spend m T_HEAD)) (return (neg 2)))
+      (let [ib (u8 b at)
+            major (ushr ib 5)
+            ai (bit-and ib 31)]
+        (if (> ai 27) (return (neg 1)))
+        (let [h (hlen b at)
+              n (harg b at)]
+          (set owe (- owe 1))
+          (if (> h (- e at)) (return (neg 1)))
+          (set at (+ at h))
+          (if (or (== major 2) (== major 3))
+            (do (if (> n (- e at)) (return (neg 1)))
+                (set at (+ at n))))
+          (if (== major 4)
+            (do (if (> n (- e at)) (return (neg 1)))
+                (set owe (+ owe n))))
+          (if (== major 5)
+            (do (if (> n (quot (- e at) 2)) (return (neg 1)))
+                (set owe (+ owe (* 2 n)))))
+          (if (== major 6) (set owe (+ owe 1))))))
+    (return at)))
+
+(defn ^I32 bytes-cmp [^Bytes x ^I32 xs ^I32 xl ^Bytes y ^I32 ys ^I32 yl]
+  (comment "Bytewise order of x[xs, +xl) and y[ys, +yl), a proper prefix first.")
+  (let [^:mut n xl]
+    (if (< yl n) (set n yl))
+    (for [^I32 i 0 n]
+      (let [c (u8 x (+ xs i))
+            d (u8 y (+ ys i))]
+        (if (!= c d) (return (- c d)))))
+    (return (- xl yl))))
+
+(defn ^I32 mcmp [^Bytes x ^I32 xs ^I32 xl ^Bytes y ^I32 ys ^I32 yl ^Ints m]
+  (comment "`bytes-cmp` charging C_TICKS per chunk of C_BYTES bytes examined, as it"
+           "goes, the first chunk up front; BIG: the meter ran out.")
+  (let [^:mut n xl]
+    (if (< yl n) (set n yl))
+    (if (not (spend m C_TICKS)) (return BIG))
+    (for [^I32 i 0 n]
+      (if (and (> i 0) (== (bit-and i (- C_BYTES 1)) 0))
+        (if (not (spend m C_TICKS)) (return BIG)))
+      (let [c (u8 x (+ xs i))
+            d (u8 y (+ ys i))]
+        (if (!= c d) (return (- c d)))))
+    (return (- xl yl))))
 
 ;; ------------------------------------------------------------ arguments
 
@@ -130,88 +227,193 @@
 
 ;; ------------------------------------------------------------ .chars
 
-(defn ^:pub ^Bool chars-ok [^Bytes a ^I32 ao ^I32 al ^Bytes b ^I32 s ^I32 e]
-  (comment "A text string whose code points number within the argument's range"
-           "(UTF-8 already checked by the profile: count the non-continuation bytes).")
-  (if (or (>= s e) (!= (ushr (u8 b s) 5) 3)) (return false))
+(defn ^:pub ^I32 chars-prep [^Bytes a ^I32 ao ^I32 al ^Ints t]
+  (comment "Prepare a `.chars` argument once: t[0] lo, t[1] hi (t has 2 words); 0, or"
+           "-1 when it is not a `.chars` argument.")
   (let [lo (range-lo a ao al)]
-    (if (< lo 0) (return false))
-    (let [hi (range-hi a ao al)
-          ^:mut n 0
-          ^:mut i (+ s (hlen b s))]
-      (while (< i e)
-        (if (!= (bit-and (u8 b i) 192) 128) (set n (+ n 1)))
-        (set i (+ i 1)))
-      (return (and (>= n lo) (<= n hi))))))
+    (if (< lo 0) (return (neg 1)))
+    (iset t 0 lo)
+    (iset t 1 (range-hi a ao al))
+    (return 0)))
+
+(defn ^:pub ^I32 chars-run [^IntsR t ^Bytes b ^I32 s ^I32 e ^Ints m]
+  (comment "A text string whose code points number within [t[0], t[1]] (UTF-8"
+           "already checked by the profile: count the non-continuation bytes)."
+           "Charge: ceil(content bytes / B_TEXT) units, before the count.")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 3)) (return (verdict m false)))
+  (let [c (+ s (hlen b s))
+        u (quot (+ (- e c) (- B_TEXT 1)) B_TEXT)]
+    (if (not (spend m (* u TPU))) (return (neg 1)))
+    (let [^:mut n 0]
+      (for [^I32 i c e]
+        (if (!= (bit-and (u8 b i) 192) 128) (set n (+ n 1))))
+      (return (verdict m (and (>= n (ia t 0)) (<= n (ia t 1))))))))
 
 ;; ------------------------------------------------------------ .unique
 
-(defn ^I32 span-cmp [^Bytes b ^Ints t ^I32 x ^I32 y]
-  (comment "Order of the spans recorded at pairs x and y of t (start, length):"
-           "bytewise, a proper prefix first.")
-  (let [xs (ia t (* 2 x))
-        xl (ia t (+ (* 2 x) 1))
-        ys (ia t (* 2 y))
-        yl (ia t (+ (* 2 y) 1))
-        ^:mut m xl]
-    (if (< yl m) (set m yl))
-    (for [^I32 i 0 m]
-      (let [c (u8 b (+ xs i))
-            d (u8 b (+ ys i))]
-        (if (!= c d) (return (- c d)))))
-    (return (- xl yl))))
+;; Scratch after the meter: one record of 3 words per element -- its start, its
+;; length and a 32-bit FNV-1a hash of its encoding. Records are heap-sorted by
+;; (hash, bytes); a comparison that finds two equal encodings ends the run
+;; (refused), and neighbours are compared once more after the sort.
 
-(defn span-swap [^Ints t ^I32 x ^I32 y]
-  (let [a (ia t (* 2 x))
-        al (ia t (+ (* 2 x) 1))
-        c (ia t (* 2 y))
-        cl (ia t (+ (* 2 y) 1))]
-    (iset t (* 2 x) c)
-    (iset t (+ (* 2 x) 1) cl)
-    (iset t (* 2 y) a)
-    (iset t (+ (* 2 y) 1) al)))
+(defn ^:pub ^I32 unique-words [^Bytes b ^I32 s ^I32 e]
+  (comment "Words of meter + scratch `unique-run` needs for the item [s, e): three per"
+           "element of an array (its head's count, which the profile walk bounded by"
+           "the entries limit and the item's length), else the meter alone.")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 4)) (return M_WORDS))
+  (let [n (harg b s)]
+    (if (> n (- e s)) (return (+ M_WORDS (* 3 (- e s)))))
+    (return (+ M_WORDS (* 3 n)))))
 
-(defn sift [^Bytes b ^Ints t ^I32 root0 ^I32 n]
+(defn ^I32 rec-cmp [^Bytes b ^Ints m ^I32 x ^I32 y]
+  (comment "Order of records x and y: hash, then bytewise. Charges T_CMP, and the"
+           "bytes examined when the hashes tie. BIG: the meter ran out.")
+  (if (not (spend m T_CMP)) (return BIG))
+  (let [rx (+ M_WORDS (* 3 x))
+        ry (+ M_WORDS (* 3 y))
+        hx (ia m (+ rx 2))
+        hy (ia m (+ ry 2))]
+    (if (< hx hy) (return (neg 1)))
+    (if (> hx hy) (return 1))
+    (let [c (mcmp b (ia m rx) (ia m (+ rx 1)) b (ia m ry) (ia m (+ ry 1)) m)]
+      (if (== c BIG) (return BIG))
+      (if (< c 0) (return (neg 1)))
+      (if (> c 0) (return 1))
+      (return 0))))
+
+(defn rec-swap [^Ints m ^I32 x ^I32 y]
+  (let [rx (+ M_WORDS (* 3 x))
+        ry (+ M_WORDS (* 3 y))]
+    (for [^I32 k 0 3]
+      (let [v (ia m (+ rx k))]
+        (iset m (+ rx k) (ia m (+ ry k)))
+        (iset m (+ ry k) v)))))
+
+(defn ^I32 sift [^Bytes b ^Ints m ^I32 root0 ^I32 n]
+  (comment "Sift record root0 down a heap of n: 0, 1 two equal records met, 2 the"
+           "meter ran out.")
   (let [^:mut root root0]
     (while (< (+ (* 2 root) 1) n)
       (let [^:mut c (+ (* 2 root) 1)]
-        (if (and (< (+ c 1) n) (< (span-cmp b t c (+ c 1)) 0)) (set c (+ c 1)))
-        (if (< (span-cmp b t root c) 0)
-          (do (span-swap t root c) (set root c))
-          (set root n))))))
+        (if (< (+ c 1) n)
+          (do (let [d (rec-cmp b m c (+ c 1))]
+                (if (== d BIG) (return 2))
+                (if (== d 0) (return 1))
+                (if (< d 0) (set c (+ c 1))))))
+        (let [d2 (rec-cmp b m root c)]
+          (if (== d2 BIG) (return 2))
+          (if (== d2 0) (return 1))
+          (if (< d2 0)
+            (do (rec-swap m root c) (set root c))
+            (set root n)))))
+    (return 0)))
 
-(defn ^:pub ^I32 unique-words [^I32 n]
-  (comment "Words of scratch `unique-ok` needs for an item of n bytes.")
-  (return (+ (* 2 n) 2)))
-
-(defn ^:pub ^Bool unique-ok [^Bytes b ^I32 s ^I32 e ^Ints t]
-  (comment "An array whose elements' encodings are pairwise distinct: record each"
-           "element's span in t (unique-words of the item's length), heap-sort the"
-           "spans, compare neighbours. O(n log n) comparisons, no allocation.")
-  (if (or (>= s e) (!= (ushr (u8 b s) 5) 4)) (return false))
+(defn ^:pub ^I32 unique-run [^Bytes b ^I32 s ^I32 e ^Ints m]
+  (comment "An array whose elements' encodings are pairwise distinct. m holds the"
+           "meter and `unique-words` of scratch. Charges: per element T_ELEM, its"
+           "heads (T_HEAD each) and its bytes hashed (1 tick per B_HASH); per record"
+           "comparison T_CMP, + C_TICKS per C_BYTES bytes examined on a hash tie."
+           "O(n log n) comparisons, no allocation.")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 4)) (return (verdict m false)))
   (let [n (harg b s)
         ^:mut x (+ s (hlen b s))]
-    (if (< (quot (ilen t) 2) n) (return false))
+    (if (< (quot (- (ilen m) M_WORDS) 3) n) (return (verdict m false)))
     (for [^I32 k 0 n]
-      (let [y (skip b x e)]
-        (if (< y 0) (return false))
-        (iset t (* 2 k) x)
-        (iset t (+ (* 2 k) 1) (- y x))
+      (if (not (spend m T_ELEM)) (return (neg 1)))
+      (let [y (mskip b x e m)]
+        (if (== y (neg 2)) (return (neg 1)))
+        (if (< y 0) (return (verdict m false)))
+        (if (not (spend m (hticks (- y x)))) (return (neg 1)))
+        (let [^:mut h (neg 2128831035)]
+          (for [^I32 q x y]
+            (set h (mul32 (bit-xor h (u8 b q)) 16777619)))
+          (let [rk (+ M_WORDS (* 3 k))]
+            (iset m rk x)
+            (iset m (+ rk 1) (- y x))
+            (iset m (+ rk 2) h)))
         (set x y)))
     (let [^:mut i (- (quot n 2) 1)]
       (while (>= i 0)
-        (sift b t i n)
+        (let [r (sift b m i n)]
+          (if (== r 2) (return (neg 1)))
+          (if (== r 1) (return (verdict m false))))
         (set i (- i 1))))
     (let [^:mut j (- n 1)]
       (while (> j 0)
-        (span-swap t 0 j)
-        (sift b t 0 j)
+        (rec-swap m 0 j)
+        (let [r2 (sift b m 0 j)]
+          (if (== r2 2) (return (neg 1)))
+          (if (== r2 1) (return (verdict m false))))
         (set j (- j 1))))
     (for [^I32 k2 1 n]
-      (if (== (span-cmp b t (- k2 1) k2) 0) (return false)))
-    (return true)))
+      (let [d (rec-cmp b m (- k2 1) k2)]
+        (if (== d BIG) (return (neg 1)))
+        (if (== d 0) (return (verdict m false)))))
+    (return (verdict m true))))
 
 ;; ------------------------------------------------------------ .samelen
+
+(defn ^:pub ^I32 samelen-words [^Bytes a ^I32 ao ^I32 al]
+  (comment "Words `samelen-prep` needs for an argument (3 when it is not an array).")
+  (if (or (< al 1) (!= (ushr (u8 a ao) 5) 4)) (return 3))
+  (let [n (harg a ao)]
+    (if (> n al) (return 3))
+    (return (+ 1 (* 2 n)))))
+
+(defn ^I32 name-cmp [^Bytes a ^I32 ao ^Ints t ^I32 x ^I32 y]
+  (return (bytes-cmp a (+ ao (ia t (+ 1 (* 2 x)))) (ia t (+ 2 (* 2 x)))
+                     a (+ ao (ia t (+ 1 (* 2 y)))) (ia t (+ 2 (* 2 y))))))
+
+(defn name-swap [^Ints t ^I32 x ^I32 y]
+  (let [o (ia t (+ 1 (* 2 x)))
+        l (ia t (+ 2 (* 2 x)))]
+    (iset t (+ 1 (* 2 x)) (ia t (+ 1 (* 2 y))))
+    (iset t (+ 2 (* 2 x)) (ia t (+ 2 (* 2 y))))
+    (iset t (+ 1 (* 2 y)) o)
+    (iset t (+ 2 (* 2 y)) l)))
+
+(defn name-sift [^Bytes a ^I32 ao ^Ints t ^I32 root0 ^I32 n]
+  (let [^:mut root root0]
+    (while (< (+ (* 2 root) 1) n)
+      (let [^:mut c (+ (* 2 root) 1)]
+        (if (and (< (+ c 1) n) (< (name-cmp a ao t c (+ c 1)) 0)) (set c (+ c 1)))
+        (if (< (name-cmp a ao t root c) 0)
+          (do (name-swap t root c) (set root c))
+          (set root n))))))
+
+(defn ^:pub ^I32 samelen-prep [^Bytes a ^I32 ao ^I32 al ^Ints t]
+  (comment "Prepare a `.samelen` argument once (t has samelen-words): t[0] k, then k"
+           "(offset from ao, length) spans of the DISTINCT names' encodings, sorted"
+           "bytewise. 0, or -1 when it is not a `.samelen` argument. Bind-time work"
+           "over the schema's own literal (heap sort, O(n log n)), not charged.")
+  (if (not (names-arg a ao al)) (return (neg 1)))
+  (if (== (ushr (u8 a ao) 5) 3)
+    (do (iset t 0 1) (iset t 1 0) (iset t 2 al) (return 0)))
+  (let [n (harg a ao)
+        e (+ ao al)
+        ^:mut x (+ ao (hlen a ao))]
+    (for [^I32 k 0 n]
+      (let [y (skip a x e)]
+        (iset t (+ 1 (* 2 k)) (- x ao))
+        (iset t (+ 2 (* 2 k)) (- y x))
+        (set x y)))
+    (let [^:mut i (- (quot n 2) 1)]
+      (while (>= i 0)
+        (name-sift a ao t i n)
+        (set i (- i 1))))
+    (let [^:mut j (- n 1)]
+      (while (> j 0)
+        (name-swap t 0 j)
+        (name-sift a ao t 0 j)
+        (set j (- j 1))))
+    (let [^:mut w 0]
+      (for [^I32 z 0 n]
+        (if (or (== w 0) (!= (name-cmp a ao t (- w 1) z) 0))
+          (do (iset t (+ 1 (* 2 w)) (ia t (+ 1 (* 2 z))))
+              (iset t (+ 2 (* 2 w)) (ia t (+ 2 (* 2 z))))
+              (set w (+ w 1)))))
+      (iset t 0 w))
+    (return 0)))
 
 (defn ^I32 count-of [^Bytes b ^I32 v ^I32 e]
   (comment "The element count of the array or (allowed) typed array at v, or -1.")
@@ -225,35 +427,48 @@
       (if (!= (ushr (u8 b c) 5) 2) (return (neg 1)))
       (return (quot (harg b c) sz)))))
 
-(defn ^Bool named [^Bytes a ^I32 ao ^I32 al ^Bytes b ^I32 ks ^I32 ke]
-  (comment "Is the key encoded at b[ks, ke) one of the argument's names?")
-  (let [e (+ ao al)]
-    (if (== (ushr (u8 a ao) 5) 3) (return (span-eq a ao e b ks ke)))
-    (let [n (harg a ao)
-          ^:mut x (+ ao (hlen a ao))]
-      (for [^I32 _k 0 n]
-        (let [y (skip a x e)]
-          (if (span-eq a x y b ks ke) (return true))
-          (set x y)))
-      (return false))))
+(defn ^I32 named [^Bytes a ^I32 ao ^IntsR t ^Bytes b ^I32 ks ^I32 ke ^Ints m]
+  (comment "Is the key b[ks, ke) one of the prepared names? 1 yes, 0 no, -1 the"
+           "meter ran out. Binary search: T_PROBE per probe + C_TICKS per C_BYTES bytes"
+           "examined.")
+  (let [^:mut lo 0
+        ^:mut hi (ia t 0)
+        kl (- ke ks)]
+    (while (< lo hi)
+      (let [mid (ushr (+ lo hi) 1)
+            no (+ ao (ia t (+ 1 (* 2 mid))))
+            nl (ia t (+ 2 (* 2 mid)))]
+        (if (not (spend m T_PROBE)) (return (neg 1)))
+        (let [c (mcmp a no nl b ks kl m)]
+          (if (== c BIG) (return (neg 1)))
+          (if (== c 0) (return 1))
+          (if (< c 0) (set lo (+ mid 1)) (set hi mid)))))
+    (return 0)))
 
-(defn ^:pub ^Bool samelen-ok [^Bytes a ^I32 ao ^I32 al ^Bytes b ^I32 s ^I32 e]
-  (comment "A map whose members named by the argument, where present, all hold"
-           "arrays or typed arrays with one element count.")
-  (if (or (>= s e) (!= (ushr (u8 b s) 5) 5)) (return false))
-  (if (not (names-arg a ao al)) (return false))
+(defn ^:pub ^I32 samelen-run [^Bytes a ^I32 ao ^IntsR t ^Bytes b ^I32 s ^I32 e ^Ints m]
+  (comment "A map whose members named by the prepared argument t (its names in pool a"
+           "from ao), where present, all hold arrays or typed arrays with one element"
+           "count. One pass over the pairs: T_PAIR each, the heads skipped, a text"
+           "key's name search.")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 5)) (return (verdict m false)))
   (let [n (harg b s)
         ^:mut x (+ s (hlen b s))
         ^:mut len (neg 1)]
     (for [^I32 _k 0 n]
-      (let [ke (skip b x e)]
-        (if (< ke 0) (return false))
-        (let [ve (skip b ke e)]
-          (if (< ve 0) (return false))
-          (if (named a ao al b x ke)
-            (do (let [c (count-of b ke ve)]
-                  (if (< c 0) (return false))
-                  (if (and (>= len 0) (!= c len)) (return false))
-                  (set len c))))
+      (if (not (spend m T_PAIR)) (return (neg 1)))
+      (let [ke (mskip b x e m)]
+        (if (== ke (neg 2)) (return (neg 1)))
+        (if (< ke 0) (return (verdict m false)))
+        (let [ve (mskip b ke e m)]
+          (if (== ve (neg 2)) (return (neg 1)))
+          (if (< ve 0) (return (verdict m false)))
+          (if (== (ushr (u8 b x) 5) 3)
+            (do (let [hit (named a ao t b x ke m)]
+                  (if (< hit 0) (return (neg 1)))
+                  (if (== hit 1)
+                    (do (let [c (count-of b ke ve)]
+                          (if (< c 0) (return (verdict m false)))
+                          (if (and (>= len 0) (!= c len)) (return (verdict m false)))
+                          (set len c)))))))
           (set x ve))))
-    (return true)))
+    (return (verdict m true))))

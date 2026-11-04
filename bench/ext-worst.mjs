@@ -2,8 +2,12 @@
 // node --expose-gc --single-threaded-gc bench/ext-worst.mjs --out ../ext-worst.json
 // --quick: three rounds; --check-only: admission/charging/counter checks only.
 // --only <id-substring>: run a subset (including for supplementary measurements).
-// Long samelen rows take seconds per call; they use three single-call samples.
+// --dirty: allow tracked edits (calibration runs only; recorded in the report).
 // Timed calls use default limits/registry maxima and the original predicates.
+// Since D190-D194 the generic controls meter their own work and every row's
+// verdict is whatever the real run answers (often `budget`); the gate is that
+// no row but the undeclared custom predicate (host responsibility, D193)
+// takes more than ~50 ms of CPU.
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -15,11 +19,10 @@ import { encode } from '../host/js/src/index.mjs';
 import { controls } from '../host/js/src/controls.mjs';
 import { schemaPrograms } from '../host/js/src/schema-state.mjs';
 import { controlEntries } from '../host/js/src/ext.mjs';
-import { uniqueWords } from '../gen/js/snug/vm/controls.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const argv = process.argv.slice(2), quick = argv.includes('--quick');
-const checkOnly = argv.includes('--check-only');
+const checkOnly = argv.includes('--check-only'), dirty = argv.includes('--dirty');
 const onlyAt = argv.indexOf('--only'), only = onlyAt < 0 ? '' : argv[onlyAt + 1];
 const cpu = () => { const t = process.threadCpuUsage(); return t.user + t.system; };
 const median = a => [...a].sort((a, b) => a - b)[a.length >> 1];
@@ -30,12 +33,12 @@ const environment = () => ({ utc: new Date().toISOString(), load: os.loadavg(),
   macOS: command('sw_vers', ['-productVersion']), node: process.version,
   v8: process.versions.v8, flags: process.execArgv });
 const revision = command('git', ['rev-parse', 'HEAD']);
-assert.equal(command('git', ['status', '--porcelain', '--untracked-files=no']), '',
+if (!dirty) assert.equal(command('git', ['status', '--porcelain', '--untracked-files=no']), '',
   'Run a copy in a clean worktree: concurrent tracked edits invalidate this benchmark');
 assert.equal(typeof process.threadCpuUsage, 'function');
 assert(process.execArgv.includes('--single-threaded-gc'), 'Use --single-threaded-gc');
 assert(controlEntries(controls).every(c => c.maxBytes === 65536));
-const report = { revision, start: environment(), method: 'threadCpuUsage user+system; public buffer validate; medians; compilation/construction/counters excluded', rows: [] };
+const report = { revision, dirty, start: environment(), method: 'threadCpuUsage user+system; public buffer validate; medians; compilation/construction/counters excluded', rows: [] };
 console.log(JSON.stringify({ revision, start: report.start }));
 
 const concat = parts => {
@@ -50,20 +53,19 @@ const array = parts => concat([head(4, parts.length), ...parts]);
 const repeat = (b, n) => array(Array(n).fill(b));
 const reason = r => r.ok ? 'ok' : r.reason;
 
-// Generated kin, instrumented ONLY in an in-memory untimed copy. Count actual
-// comparator invocations and compared byte pairs, not n*log(n) estimates.
+// Generated kin, instrumented ONLY in an in-memory untimed copy: record
+// comparisons and name probes actually made (the units are the VM's own).
 let source = readFileSync(new URL('../gen/js/snug/vm/controls.mjs', import.meta.url), 'utf8');
 function replaceOnce(from, to) {
   assert.equal(source.split(from).length, 2, `instrumentation anchor: ${from}`);
   source = source.replace(from, to);
 }
 replaceOnce("'../cbor/tags.mjs'", JSON.stringify(new URL('../gen/js/snug/cbor/tags.mjs', import.meta.url).href));
-replaceOnce('export function spanCmp(b, t, x, y) {', 'export function spanCmp(b, t, x, y) { counts.sortComparisons++;');
-replaceOnce('const c = b[xs + i];', 'counts.sortBytePairs++; const c = b[xs + i];');
-replaceOnce('export function spanEq(x, xs, xe, y, ys, ye) {', 'export function spanEq(x, xs, xe, y, ys, ye) { counts.nameComparisons++;');
-replaceOnce('if (x[xs + i] !== y[ys + i]) {', 'counts.nameBytePairs++; if (x[xs + i] !== y[ys + i]) {');
-source += '\nexport const counts = {sortComparisons:0, sortBytePairs:0, nameComparisons:0, nameBytePairs:0};';
+replaceOnce('export function recCmp(b, m, x, y) {', 'export function recCmp(b, m, x, y) { counts.sortComparisons++;');
+replaceOnce('export function named(a, ao, t, b, ks, ke, m) {', 'export function named(a, ao, t, b, ks, ke, m) { counts.nameSearches++;');
+source += '\nexport const counts = {sortComparisons:0, nameSearches:0};';
 const counted = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const bigMeter = n => { const m = new Int32Array(counted.M_WORDS + 3 * n + 8); counted.meterInit(m, 0x7fffffff); return m; };
 
 const pass = () => true;
 // Finite, pure example: even a one-byte item can request arbitrarily much
@@ -72,7 +74,11 @@ const slow = (_a, b) => {
   let x = b[0]; for (let i = 0; i < 100_000_000; i++) x = (Math.imul(x ^ i, 16777619) + 1) | 0;
   return x !== 0;
 };
-const registry = { ...controls, pass, slow };
+// The same predicate with a declared cost (D193): 100M iterations at ~3 ns is
+// ~300 ms, so the host declares 15,000,000 units (~20 ns each) and the budget
+// refuses before the call.
+const slowDeclared = { check: slow, cost: () => 15_000_000 };
+const registry = { ...controls, pass, slow, slowDeclared };
 const schemas = new Map();
 async function schema(text) {
   if (!schemas.has(text)) {
@@ -84,23 +90,23 @@ async function schema(text) {
   return schemas.get(text);
 }
 
-async function run(id, bytes, text, { expected = 'ok', predicateResult = true, slowRow = false, counters, ...details } = {}) {
+async function run(id, bytes, text, { slowRow = false, counters, ...details } = {}) {
   if (!id.includes(only)) return;
   assert(bytes.length <= 1500000);
   const s = await schema(text), p = schemaPrograms.get(s), rid = p.ruleIndex('r');
-  // Untimed dispatch/charging audit substitutes constant verdicts for expensive
-  // predicates. Timed calls below use the original generic/custom predicates.
+  // Untimed audit: the real predicates, counted.
   const original = p.ext.call; let calls = 0, itemBytes = 0, maxItem = 0;
-  p.ext.call = (_id, _pool, _ao, _al, _b, lo, hi) => {
-    calls++; itemBytes += hi - lo; maxItem = Math.max(maxItem, hi - lo); return predicateResult;
+  p.ext.call = (id_, pool, ao, al, b, lo, hi, room) => {
+    calls++; itemBytes += hi - lo; maxItem = Math.max(maxItem, hi - lo);
+    return original(id_, pool, ao, al, b, lo, hi, room);
   };
   let audit;
   try { audit = p.run(rid, bytes, {}); } finally { p.ext.call = original; }
-  assert.equal(reason(p.result(audit)), expected, id + ': charged-path verdict');
+  const expected = reason(p.result(audit));
   assert(maxItem <= 65536, id + ': no oversized callback');
   const row = { id, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
-    schema: text, verdict: expected, steps: audit[3], items: audit[4], calls, itemBytes,
-    extCharge: calls + itemBytes, maxItem, ...details };
+    schema: text.length > 200 ? text.slice(0, 200) + '...' : text, verdict: expected, steps: audit[3], items: audit[4], calls, itemBytes,
+    maxItem, ...details };
   if (counters) row.work = await counters();
   if (!checkOnly) {
     const fn = () => s.validate(bytes, 'r');
@@ -123,7 +129,8 @@ async function run(id, bytes, text, { expected = 'ok', predicateResult = true, s
       assert.equal(reason(answer), expected, id + ': measured verdict');
       if (slowRow) console.error(`${id}: sample ${r + 1}/${rounds}, ${(samplesUs.at(-1) / 1000).toFixed(2)} ms CPU`);
     }
-    Object.assign(row, { medianMs: median(samplesUs) / 1000, samplesUs, iterations: n, rounds });
+    const medianUs = median(samplesUs);
+    Object.assign(row, { medianMs: medianUs / 1000, nsPerUnit: medianUs * 1000 / Math.max(1, audit[3]), samplesUs, iterations: n, rounds });
   }
   row.load = os.loadavg(); report.rows.push(row);
   console.log(JSON.stringify(row));
@@ -140,12 +147,14 @@ for (const [label, ch] of [['ascii', 'a'], ['utf8-2', 'é'], ['utf8-3', '€'], 
 const tiny = concat([head(4, 65536), new Uint8Array(65536)]);
 await run('pass-tiny-65536', tiny, '[* (uint .pass true)]');
 await run('pass-tiny-131068', repeat(concat([head(4, 65534), new Uint8Array(65534)]), 2),
-  '[* [* (uint .pass true)]]', { expected: 'budget' });
+  '[* [* (uint .pass true)]]');
 await run('extra-chars-tiny-131068', repeat(concat([head(4, 65534), new Uint8Array(65534).fill(0x60)]), 2),
-  '[* [* (tstr .chars 0)]]', { expected: 'budget' });
+  '[* [* (tstr .chars 0)]]');
 await run('extra-chars-tiny-65536', concat([head(4, 65536), new Uint8Array(65536).fill(0x60)]),
   '[* (tstr .chars 0)]');
-await run('slow-one-byte', Uint8Array.of(0), 'any .slow true', { slowRow: true });
+await run('slow-declared-one-byte', Uint8Array.of(0), 'any .slowDeclared true');
+// Host responsibility (D193): an undeclared predicate's own CPU is not the VM's to bound.
+await run('slow-one-byte', Uint8Array.of(0), 'any .slow true', { slowRow: true, hostResponsibility: true });
 
 // Exactly the previous 65,536-element long-prefix case, now with DEFAULTS.
 function uniqueInput(n, size, duplicate = false) {
@@ -157,8 +166,7 @@ function uniqueInput(n, size, duplicate = false) {
   }
   return array(blobs);
 }
-await run('unique-65536-refused', uniqueInput(65536, 15), 'any .unique true',
-  { expected: 'control_size' });
+await run('unique-65536-refused', uniqueInput(65536, 15), 'any .unique true');
 
 // Sweep element counts and common prefix lengths under 65,536 encoded bytes.
 // Repeated rows obey total input/items/budget limits, not just the per-item cap.
@@ -169,29 +177,30 @@ for (const n of [64, 256, 1024, 2047, 4095, 8191, 16383, 21844]) {
   const copies = Math.min(Math.floor((1500000 - 5) / b.length), Math.floor(131070 / (n + 1)));
   const counters = () => {
     for (const k of Object.keys(counted.counts)) counted.counts[k] = 0;
-    assert.equal(counted.uniqueOk(b, 0, b.length, new Int32Array(uniqueWords(b.length))), true);
-    return { ...counted.counts, scratchBytes: 4 * uniqueWords(b.length) };
+    const r = counted.uniqueRun(b, 0, b.length, bigMeter(n));
+    assert(r >= 0);
+    return { ...counted.counts, units: r, scratchBytes: 4 * counted.uniqueWords(b, 0, b.length) };
   };
   const prefix = n === 21844 ? 'extra-' : '';
   await run(`${prefix}unique-${n}-one`, b, 'any .unique true', { elements: n, payloadBytes: size, counters });
   await run(`${prefix}unique-${n}-repeat`, repeat(b, copies), '[* (any .unique true)]',
     { elements: n, payloadBytes: size, copies });
 }
-await run('unique-duplicates', uniqueInput(4095, 15, true), 'any .unique true',
-  { expected: 'control', predicateResult: false });
+await run('unique-duplicates', uniqueInput(4095, 15, true), 'any .unique true');
 // Many distinct ranks repeated: duplicates are detected only AFTER sorting.
 const ranked = concat([head(4, 65533), Uint8Array.from({ length: 65533 }, (_, i) => (i * 17) % 24)]);
 await run('extra-unique-ranked-one', ranked, 'any .unique true',
-  { expected: 'control', predicateResult: false, counters: () => {
+  { counters: () => {
     for (const k of Object.keys(counted.counts)) counted.counts[k] = 0;
-    assert.equal(counted.uniqueOk(ranked, 0, ranked.length, new Int32Array(uniqueWords(ranked.length))), false);
-    return { ...counted.counts, scratchBytes: 4 * uniqueWords(ranked.length) };
+    const r = counted.uniqueRun(ranked, 0, ranked.length, bigMeter(65533));
+    assert(r < -1);
+    return { ...counted.counts, units: -2 - r, scratchBytes: 4 * counted.uniqueWords(ranked, 0, ranked.length) };
   } });
 // Different arguments make different EXT leaves. Every choice must be decided;
 // purity/once-per-leaf caching does not memoise the ignored .unique controller.
 await run('chain-unique-ranked-35', ranked,
   Array.from({ length: 35 }, (_, i) => `(any .unique ${i})`).join(' / '),
-  { expected: 'budget', predicateResult: false, slowRow: true, variants: 35 });
+  { variants: 35 });
 
 // samelen: absent names still search the ENTIRE controller array for every key.
 // Duplicate controller names are legal. Repeated strings avoid spending schema
@@ -203,14 +212,27 @@ for (const [nameLength, names, members, copies] of [[0, 21000, 16400, 3], [8, 21
   const b = encode(map), arg = '[' + Array(names).fill(JSON.stringify(name)).join(',') + ']';
   const encodedArg = encode(Array(names).fill(name));
   assert(b.length <= 65536);
-  const counters = () => ({ nameComparisons: names * members,
-    // Same encoded lengths/prefix; every key mismatches at the first hex digit.
-    nameBytePairs: nameLength ? names * members * (1 + prefix.length + 1) : names * 24,
-    argumentBytes: encodedArg.length, formula: true });
+  const counters = () => {
+    for (const k of Object.keys(counted.counts)) counted.counts[k] = 0;
+    const t = new Int32Array(counted.samelenWords(encodedArg, 0, encodedArg.length));
+    assert.equal(counted.samelenPrep(encodedArg, 0, encodedArg.length, t), 0);
+    const r = counted.samelenRun(encodedArg, 0, t, b, 0, b.length, bigMeter(0));
+    return { ...counted.counts, units: r >= 0 ? r : -2 - r, distinctNames: t[0], argumentBytes: encodedArg.length };
+  };
   await run(`samelen-${nameLength}-one`, b, `any .samelen ${arg}`,
-    { slowRow: true, names, members, nameLength, counters });
+    { names, members, nameLength, counters });
   await run(`samelen-${nameLength}-repeat`, repeat(b, copies), `[* (any .samelen ${arg})]`,
-    { slowRow: true, names, members, nameLength, copies });
+    { names, members, nameLength, copies });
+}
+// Distinct long names (the old duplicates collapse when prepared): every key
+// probes ~13 names, each compared over a 40-byte common prefix.
+{
+  const names = Array.from({ length: 5000 }, (_, i) => 'a'.repeat(40) + i.toString(16).padStart(4, '0'));
+  const map = new Map(Array.from({ length: 1300 }, (_, i) => ['a'.repeat(40) + (i * 5).toString(16).padStart(4, '0') + 'x', 0]));
+  const b = encode(map), arg = '[' + names.map(n => JSON.stringify(n)).join(',') + ']';
+  await run('samelen-distinct-long-one', b, `any .samelen ${arg}`, { names: names.length, members: map.size });
+  await run('samelen-distinct-long-repeat', repeat(b, Math.floor(1500000 / b.length) - 1), `[* (any .samelen ${arg})]`,
+    { names: names.length, members: map.size });
 }
 
 // Ordinary samelen has linear item work when its name list is short.
@@ -220,20 +242,18 @@ await run('samelen-two-columns', columns, 'any .samelen ["x", "y"]');
 const emptyMaps = repeat(concat([head(4, 65534), new Uint8Array(65534).fill(0xa0)]), 2);
 const emptyNames = '[' + Array(21000).fill('""').join(',') + ']';
 await run('extra-samelen-empty-131068', emptyMaps, `[* [* (any .samelen ${emptyNames})]]`,
-  { expected: 'budget', slowRow: true, names: 21000,
-    argumentHeadVisitsPerCall: 42001 });
-
-// Validate counter formulas against the generated predicate on a small map.
-const smallMap = encode(new Map([['aaaa0000', 0], ['aaaa0001', 0]]));
-const smallArg = encode(Array(3).fill('aaaaaaaa'));
-for (const k of Object.keys(counted.counts)) counted.counts[k] = 0;
-assert(counted.samelenOk(smallArg, 0, smallArg.length, smallMap, 0, smallMap.length));
-assert.equal(counted.counts.nameComparisons, 6);
-assert.equal(counted.counts.nameBytePairs, 36);
+  { names: 21000 });
+// Deep values: every head of a skipped value is charged.
+const nestedUnique = array(Array.from({ length: 3000 }, (_, i) => array(Array.from({ length: 20 }, (_, j) => Uint8Array.of(j === 0 ? i % 24 : 0)))));
+await run('unique-nested-3000x20', nestedUnique, 'any .unique true');
+const deepValues = encode({ a: Array(16000).fill([0]), b: Array(16000).fill([0]) });
+await run('samelen-deep-values', deepValues, 'any .samelen ["a", "b"]');
 report.counterCheck = { ...counted.counts };
 report.end = environment();
 const outAt = argv.indexOf('--out');
 if (outAt >= 0) writeFileSync(argv[outAt + 1], JSON.stringify(report, null, 2) + '\n');
-console.table(report.rows.map(({ id, bytes, steps, calls, medianMs, verdict }) => ({ id, bytes, steps, calls, medianMs, verdict })));
+console.table(report.rows.map(({ id, bytes, steps, calls, medianMs, nsPerUnit, verdict }) => ({ id, bytes, steps, calls, medianMs, nsPerUnit, verdict })));
+const over = report.rows.filter(r => !r.hostResponsibility && r.medianMs > 50);
+console.log(over.length ? `GATE FAIL: ${over.map(r => r.id).join(', ')} over 50 ms` : 'GATE ok: every row other than the undeclared custom predicate is at most 50 ms CPU (or refused by the budget first).');
 console.log(JSON.stringify({ end: report.end, counterCheck: report.counterCheck }));
-console.log('Verdict: these are adversarial measured lower bounds, not exhaustive CPU upper bounds. Generic samelen/unique work is not proportional to EXT byte charging; arbitrary custom predicates have no CPU bound. Rust source inspected, not timed. No stream/wasm/browser timing.');
+console.log('These are adversarial measured cases, not exhaustive CPU upper bounds. An undeclared custom predicate\'s own CPU is the host\'s responsibility (D193). Rust not timed here. No stream/wasm/browser timing.');

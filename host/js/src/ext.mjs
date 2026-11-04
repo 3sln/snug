@@ -1,17 +1,33 @@
-// Extension controls on the JS host (D082, D140-D142). kin decides where an
-// EXT leaf is queried and charges it; this module only turns a registry
-// ({name: predicate}) into the compiler's registry words, reads a Program's
-// control table, and binds it to predicates the VM can call.
+// Extension controls on the JS host (D082, D140-D142, D190-D193). kin decides
+// where an EXT leaf is queried and charges it; this module only turns a
+// registry ({name: predicate}) into the compiler's registry words, reads a
+// Program's control table, and binds it to the predicate port the VM calls.
 //
 //   control  = (argument: Uint8Array, item: Uint8Array) => boolean
-//            | { check(argument, item): boolean, maxBytes?: number, argument?(argument): boolean }
+//            | { check(argument, item): boolean, maxBytes?: number,
+//                argument?(argument): boolean, cost?(itemBytes): number }
 //
 // A predicate must be a pure function of its two inputs (no I/O, no clock, no
 // state, no call back into snug); only a strict `true` matches. `maxBytes`
 // (default 65,536) bounds the item a control is asked about: a longer item
 // fails the control with the reason `control_size` without asking, under
 // every source, so the session driver never buffers more than that for it.
+//
+// BUDGET (D193). The VM charges every call EXT_CALL units, then the
+// predicate's COST, before it runs: `cost(itemBytes)` budget units (a
+// non-negative safe integer), by default `itemBytes`. A cost above what the
+// budget has left stops validation with `budget` without calling. The VM
+// cannot interrupt or measure host code: what a predicate does with its CPU is
+// the host's responsibility, and `cost` is how a host keeps a slow predicate
+// inside the budget (~20 ns of CPU per unit is what the default budget assumes).
+// The generic controls (snug/controls) instead meter their own work in kin
+// (the METERED protocol below, not a public contract).
 import { ProgramError } from './serialized.mjs';
+
+/** Registry entries carrying this key are metered in kin (snug/controls only):
+ *  { prepare(pool, ao, al): Int32Array, run(pool, ao, prepared, b, s, e, room): verdict }. */
+export const METERED = Symbol.for('snug.metered');
+const MAX_UNITS = 0x7ffffffd;
 
 export const DEFAULT_MAX_BYTES = 65536;
 const NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
@@ -37,7 +53,9 @@ export function controlEntries(controls) {
       throw new TypeError(`Control .${name} maxBytes must be an integer in 0..2^31-1.`);
     if (entry.argument !== undefined && typeof entry.argument !== 'function')
       throw new TypeError(`Control .${name} argument must be a function.`);
-    entries.push({ name, check: entry.check, maxBytes, argument: entry.argument });
+    if (entry.cost !== undefined && typeof entry.cost !== 'function')
+      throw new TypeError(`Control .${name} cost must be a function of the item's byte length.`);
+    entries.push({ name, check: entry.check, maxBytes, argument: entry.argument, cost: entry.cost, metered: entry[METERED] });
   }
   return entries;
 }
@@ -83,9 +101,10 @@ export function programArguments(P, B) {
   return out;
 }
 
-/** A Program's controls bound to the registry: the predicate the VM calls (null when the
+/** A Program's controls bound to the registry: the port the VM calls (null when the
  *  Program uses none). A control the Program names but the registry lacks is
- *  ProgramError('missing_control'), naming it. */
+ *  ProgramError('missing_control'), naming it. A metered (generic) control's
+ *  arguments are prepared here, once per EXT leaf, keyed by (id, argument offset). */
 export function bindControls(P, B, entries) {
   const names = programControls(P, B);
   if (names.length === 0) return null;
@@ -97,13 +116,32 @@ export function bindControls(P, B, entries) {
     e.controls = missing;
     throw e;
   }
-  const checks = names.map(n => byName.get(n).check);
+  const bound_ = names.map(n => byName.get(n));
+  const checks = bound_.map(e => e.check), costs = bound_.map(e => e.cost ?? null);
+  const metered = bound_.map(e => e.metered ?? null);
+  const preps = names.map(() => new Map());
+  const at = P[43];
+  for (let l = 0; l < P[16]; l++) {
+    const o = at + 8 * l, id = P[o + 2];
+    if ((P[o] & 255) !== 18 || !metered[id] || preps[id].has(P[o + 3])) continue;
+    preps[id].set(P[o + 3], metered[id].prepare(B, P[o + 3], P[o + 4]));
+  }
   const bound = {
     names, failure: null,
-    call(id, pool, ao, al, b, s, e) {
-      if (bound.failure) return false;
-      try { return checks[id](pool.subarray(ao, ao + al), b.subarray(s, e)) === true; }
-      catch (error) { bound.failure = { name: names[id], error }; return false; }
+    call(id, pool, ao, al, b, s, e, room) {
+      const m = metered[id];
+      if (m !== null) return m.run(pool, ao, preps[id].get(ao), b, s, e, room);
+      if (bound.failure) return -2;
+      let units = e - s;
+      try {
+        if (costs[id] !== null) {
+          units = costs[id](e - s);
+          if (!Number.isSafeInteger(units) || units < 0)
+            throw new TypeError(`Control .${names[id]} cost must answer a non-negative integer.`);
+        }
+        if (units > room || units > MAX_UNITS) return -1;
+        return checks[id](pool.subarray(ao, ao + al), b.subarray(s, e)) === true ? units : -2 - units;
+      } catch (error) { bound.failure = { name: names[id], error }; return -2; }
     },
   };
   return bound;

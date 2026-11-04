@@ -95,14 +95,18 @@
   {:name 'BytesW :types {:js "Uint8Array" :rust "&mut [u8]"}})
 
 (def Ext
-  "An EXTENSION-CONTROL predicate (D082, D140): the host's verdict for an `EXT`
-  leaf, `(ext id pool arg-off arg-len b item-start item-end) -> bool`, called by
-  the VM only when such a leaf is queried and the item is whole in `b`. A JS
-  function (only a strict `true` matches) / a Rust `&dyn Fn` trait object. The
-  predicate must be a pure function of its inputs; the VM charges it per item
-  byte and never calls it on a dead item."
+  "An EXTENSION-CONTROL predicate port (D082, D140, D190): the host's verdict
+  for an `EXT` leaf, `(ext id pool arg-off arg-len b item-start item-end room)
+  -> verdict`, called by the VM only when such a leaf is queried and the item
+  is whole in `b`, with `room` the budget units that remain. The verdict word:
+  u >= 0 matched after u units of work, -2 - u refused after u units, -1 the
+  work needs more than `room` (the VM stops with `budget`). A JS function / a
+  Rust `&dyn Fn` trait object. A generic control meters its own work in kin; a
+  host predicate reports its declared cost (by default one unit per item byte),
+  checked against `room` BEFORE it runs. The VM charges u and never calls a
+  predicate on a dead item."
   {:name 'Ext :types {:js "Function"
-                      :rust "&dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool"}})
+                      :rust "&dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32"}})
 
 ;; ---------------------------------------------------------------- the forms
 
@@ -213,11 +217,11 @@
    'bset bset-form
    'bcopy bcopy-form
    'hex hex-form
-   ;; extension controls (D140): call a predicate; the predicate that never matches
-   'ext-call (op "({0}({1}, {2}, {3}, {4}, {5}, {6}, {7}) === true)"
-                 "{0}({1}, {2}, {3}, {4}, {5}, {6}, {7})" Bool)
-   'ext-none (kl/call {:js "((_i, _p, _ao, _al, _b, _s, _e) => false)"
-                       :rust "&|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false"}
+   ;; extension controls (D140, D190): call a predicate (a verdict word); the one that never matches
+   'ext-call (op "({0}({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) | 0)"
+                 "{0}({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})" I32)
+   'ext-none (kl/call {:js "((_i, _p, _ao, _al, _b, _s, _e, _r) => -2)"
+                       :rust "&|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -2"}
                       {:tag Ext :arity 0})})
 
 (def vocabulary

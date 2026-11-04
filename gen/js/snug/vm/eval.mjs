@@ -11,7 +11,7 @@ import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c64, c64min, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadPairBody, deadSeq, deadStdCheck, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
-import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
 import { blockMt, blockNamed, candVts, candVtsMt, groupRec, keyPhaseStruct, keyProbe, keySearch, keySpanEnd, leafMap, mAlts, mKeys, mLits, mNames, mPools, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, namedRec, simpleStruct, updateStruct } from './map.mjs';
 
@@ -64,14 +64,20 @@ export function qFilterX(p, s, fb, w, nq, cls, pos, ctx) {
     return qFilter(p, s, fb, w, nq, cls, pos);
 }
 
+export const EXT_CALL = 16;
+
 export function extEval(p, pool, b, s, fb, w, l, pos, end, e, ext) {
-    // EXT leaf l (D140) on the item [pos, end) of b, once per item, when a
+    // EXT leaf l (D140, D190) on the item [pos, end) of b, once per item, when a
     // combinator needs it: longer than its maximum (d3) -> R_CONTROL_SIZE for 1
-    // unit, without asking; else 1 + one unit per item byte, then the host
-    // predicate (id d0, argument pool[d1, d1 + d2)) -> MATCHED (stamped in epoch
-    // e) or R_CONTROL. A walk that cannot hold the item whole never gets here
-    // with one that fits (the session asks for it whole); -inconsistent if so.
-    // 0 or a negated code.
+    // unit, without asking; else 1 + EXT_CALL units, then the host predicate
+    // (id d0, argument pool[d1, d1 + d2)) is asked with the budget that remains
+    // (`room`) and answers a verdict word: u >= 0 matched after u units, -2 - u
+    // refused after u units, -1 more than `room` (budget). u is charged; a
+    // generic control meters its own work (snug.vm.controls), a host predicate
+    // its declared cost, by default one unit per item byte, before it runs.
+    // MATCHED (stamped in epoch e) or R_CONTROL. A walk that cannot hold the
+    // item whole never gets here with one that fits (the session asks for it
+    // whole); -inconsistent if so. 0 or a negated code.
     const qi = s[VM_QIDX];
     const j = s[qi + l];
     const fl0 = fb + w;
@@ -94,10 +100,23 @@ export function extEval(p, pool, b, s, fb, w, l, pos, end, e, ext) {
     if ((pos < 0) || (end > b.length)) {
         return -R_INCONSISTENT;
     }
-    if (!charge(s, n, pos)) {
+    if (!charge(s, EXT_CALL, pos)) {
         return -R_BUDGET;
     }
-    if (ext(p[lb + 2], pool, p[lb + 3], p[lb + 4], b, pos, end) === true) {
+    const room = s[VM_BUDGET];
+    const r = ext(p[lb + 2], pool, p[lb + 3], p[lb + 4], b, pos, end, room) | 0;
+    let u = r;
+    if (r < (-1)) {
+        u = (-2) - r;
+    }
+    if ((r === (-1)) || (u > room)) {
+        s[VM_POS] = pos;
+        return -R_BUDGET;
+    }
+    if (!charge(s, u, pos)) {
+        return -R_BUDGET;
+    }
+    if (r >= 0) {
         s[fl0 + j] = f | F_MATCHED;
         s[SCRATCH_MARK + l] = e;
     } else {

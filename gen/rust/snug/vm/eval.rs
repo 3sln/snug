@@ -59,14 +59,19 @@ pub fn q_filter_x(p: &[i32], s: &mut [i32], fb: i32, w: i32, nq: i32, cls: i32, 
     }
     return q_filter(p, s, fb, w, nq, cls, pos);
 }
-pub fn ext_eval(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, l: i32, pos: i32, end: i32, e: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
-    // EXT leaf l (D140) on the item [pos, end) of b, once per item, when a
+pub const EXT_CALL: i32 = 16;
+pub fn ext_eval(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, l: i32, pos: i32, end: i32, e: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
+    // EXT leaf l (D140, D190) on the item [pos, end) of b, once per item, when a
     // combinator needs it: longer than its maximum (d3) -> R_CONTROL_SIZE for 1
-    // unit, without asking; else 1 + one unit per item byte, then the host
-    // predicate (id d0, argument pool[d1, d1 + d2)) -> MATCHED (stamped in epoch
-    // e) or R_CONTROL. A walk that cannot hold the item whole never gets here
-    // with one that fits (the session asks for it whole); -inconsistent if so.
-    // 0 or a negated code.
+    // unit, without asking; else 1 + EXT_CALL units, then the host predicate
+    // (id d0, argument pool[d1, d1 + d2)) is asked with the budget that remains
+    // (`room`) and answers a verdict word: u >= 0 matched after u units, -2 - u
+    // refused after u units, -1 more than `room` (budget). u is charged; a
+    // generic control meters its own work (snug.vm.controls), a host predicate
+    // its declared cost, by default one unit per item byte, before it runs.
+    // MATCHED (stamped in epoch e) or R_CONTROL. A walk that cannot hold the
+    // item whole never gets here with one that fits (the session asks for it
+    // whole); -inconsistent if so. 0 or a negated code.
     let qi: i32 = s[(VM_QIDX) as usize];
     let j: i32 = s[(qi + l) as usize];
     let fl0: i32 = fb + w;
@@ -89,10 +94,23 @@ pub fn ext_eval(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32
     if (pos < 0) || (end > (b.len() as i32)) {
         return -R_INCONSISTENT;
     }
-    if !charge(s, n, pos) {
+    if !charge(s, EXT_CALL, pos) {
         return -R_BUDGET;
     }
-    if ext(p[(lb + 2) as usize], pool, p[(lb + 3) as usize], p[(lb + 4) as usize], b, pos, end) {
+    let room: i32 = s[(VM_BUDGET) as usize];
+    let r: i32 = ext(p[(lb + 2) as usize], pool, p[(lb + 3) as usize], p[(lb + 4) as usize], b, pos, end, room);
+    let mut u: i32 = r;
+    if r < (-1) {
+        u = (-2) - r;
+    }
+    if (r == (-1)) || (u > room) {
+        s[(VM_POS) as usize] = pos;
+        return -R_BUDGET;
+    }
+    if !charge(s, u, pos) {
+        return -R_BUDGET;
+    }
+    if r >= 0 {
         s[(fl0 + j) as usize] = f | F_MATCHED;
         s[(SCRATCH_MARK + l) as usize] = e;
     } else {
@@ -103,7 +121,7 @@ pub fn ext_eval(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32
 pub fn leaf_kind_of(p: &[i32], l: i32) -> i32 {
     return p[(p[(H_S_LEAVES) as usize] + (8 * l)) as usize] & 255;
 }
-pub fn finish_comb(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, nq: i32, pos: i32, end: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn finish_comb(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, nq: i32, pos: i32, end: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // Combinators of the item (§8.4): stamp its matched leaves in a fresh
     // epoch, then one pass in query order evaluates each admitted AND
     // (both operands) and NOT (target and not the literal), 2 units each.
@@ -181,7 +199,7 @@ pub fn finish_comb(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: 
     }
     return 0;
 }
-pub fn finish_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, nq: i32, d: i32, pos: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn finish_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, nq: i32, d: i32, pos: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // End of an item that is not a container: combinators, then witness rule 1
     // if no answer matched (never for a map key, §9.2 rule 6).
     let m: i32 = finish_comb(p, pool, b, s, fb, w, nq, pos, end, ext);
@@ -206,7 +224,7 @@ pub fn count_pending(p: &[i32], s: &[i32], fb: i32, w: i32, nq: i32) -> i32 {
     }
     return k;
 }
-pub fn bstr_tail(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, cs: i32, ce: i32, d: i32, fb: i32, ck: i32, nq: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn bstr_tail(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, cs: i32, ce: i32, d: i32, fb: i32, ck: i32, nq: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A byte string item at pos (content [cs, ce)) at depth d, after its
     // profile checks: filter, scalar leaves, EMBED sub-validations, end.
     let cr: i32 = cset_rec(p, s, ck);
@@ -273,7 +291,7 @@ pub fn embed_live(p: &[i32], s: &[i32], fb: i32, w: i32, nq: i32, seq: i32) -> i
     }
     return k;
 }
-pub fn embed_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], cs: i32, ce: i32, d: i32, fb: i32, ck: i32, nq: i32, seq: i32, pos: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn embed_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], cs: i32, ce: i32, d: i32, fb: i32, ck: i32, nq: i32, seq: i32, pos: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // One sub-validation of the content [cs, ce) for the live EMBED leaves of
     // one kind. `.cbor` (seq 0): one item at physical depth d + 1 queried with
     // their content typesets, which must end at ce (else inner trailing).
@@ -377,7 +395,7 @@ pub fn embed_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], cs: i32, ce: i
     }
     return 0;
 }
-pub fn eval_embed(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, cs: i32, ce: i32, d: i32, fb: i32, ck: i32, nq: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn eval_embed(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, cs: i32, ce: i32, d: i32, fb: i32, ck: i32, nq: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // §8.4 EMBED on a byte string item at depth d with content [cs, ce): 1 unit
     // per admitted EMBED leaf, then a sub-validation for the `.cbor` leaves and
     // one for the `.cborseq` leaves (D040). Survivors match; with no other
@@ -650,7 +668,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
     }
     return q;
 }
-pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i32, cfb: i32, ck: i32, cw: i32, leaf: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i32, cfb: i32, ck: i32, cw: i32, leaf: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // P3.6 (D044): eval-item on a query list of exactly ONE answer leaf
     // `leaf` without building the list: for a scalar kind on a scalar major,
     // the same profile checks, charges (consecutive charges at one offset
@@ -833,7 +851,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
     }
     return stop;
 }
-pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, hi: i32, lo: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, hi: i32, lo: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A tag item (§8.4): the scanner's depth and number checks, the filter,
     // TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried
     // with the content typesets of the leaves whose number matched (bignum and
@@ -997,7 +1015,7 @@ pub fn if_limit(n: i32, el: i32) -> i32 {
     }
     return n - el;
 }
-pub fn array_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, d: i32, fb: i32, w: i32, area: i32, cfb: i32, cck: i32, cw: i32, fleaf: i32, el: i32, pend: i32, end: i32, s2: i32, cx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn array_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, d: i32, fb: i32, w: i32, area: i32, cfb: i32, cck: i32, cw: i32, fleaf: i32, el: i32, pend: i32, end: i32, s2: i32, cx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // P3.6 (D044): one element of a `[* T]` array (one block, one uncounted
     // self-looping position, T one answer): the generic element step's
     // charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's
@@ -1048,7 +1066,7 @@ pub fn array_alive(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
     }
     return k;
 }
-pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // An array item (§8.1) after its head and container checks: a block per
     // admitted ARRAY leaf; per element the candidate positions of the live
     // blocks give the element's query; at the end, acceptance. n < 0: a
@@ -1332,7 +1350,7 @@ pub fn map_pair_ok(p: &[i32], s: &[i32], bo: i32, mt: i32, kid: i32, mode: i32) 
     let lit: i32 = p[((m_names(p, mt) + (2 * p[(krec + 2) as usize])) + 1) as usize];
     return single_leaf(p, p[((m_lits(p, mt) + (4 * lit)) + 1) as usize]) >= 0;
 }
-pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, start: i32, km: i32, ps: i32, pe: i32, end: i32, d: i32, fb: i32, w: i32, bo: i32, mt: i32, cfb: i32, cck: i32, cw: i32, kid: i32, pend: i32, mode: i32, ps2: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, start: i32, km: i32, ps: i32, pe: i32, end: i32, d: i32, fb: i32, w: i32, bo: i32, mt: i32, cfb: i32, cck: i32, cw: i32, kid: i32, pend: i32, mode: i32, ps2: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // P3.6 (D044): one pair of a single-block map in a fast mode, after the
     // shared key search and cursor step: the generic pair's charges merged
     // per offset, its pool/alternative state updates and witness. The key's
@@ -1569,7 +1587,7 @@ pub fn streak_kind(p: &[i32], leaf: i32) -> bool {
     let kind: i32 = p[(lb) as usize] & 255;
     return ((kind == K_INT) && (p[(lb + 3) as usize] == 1)) || ((kind == K_TEXT) && (p[(lb + 4) as usize] < 0));
 }
-pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cfb: i32, cck: i32, cw: i32, ps0: i32, pe0: i32, klo0: i32, s2: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cfb: i32, cck: i32, cw: i32, ps0: i32, pe0: i32, klo0: i32, s2: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // P3.6 (D044): consecutive SUCCESSFUL pairs of a single-block map in a fast
     // mode (1 struct: a named key whose value is an INT/TEXT leaf; 2 table:
     // a TEXT key leaf and an `any` or INT/TEXT value leaf). The key (text,
@@ -1780,7 +1798,7 @@ pub fn map_alive(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
     }
     return k;
 }
-pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A map item (§8.3) after its head and container checks. Per pair: the
     // scanner's key checks; the key search, cursors, the key's query (key
     // typesets of live residual pools), the key, its order; the key phase
@@ -2170,7 +2188,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     }
     return q;
 }
-pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // One LIVE item at pos, physical depth d, query list (nq > 0 entries) in the
     // frame at fb: visit (1 unit), counted, then its head -- the scanner's
     // `item`, with the schema evaluated alongside.

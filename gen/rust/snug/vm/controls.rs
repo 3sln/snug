@@ -4,6 +4,49 @@
 use crate::snug::cbor::tags::*;
 
 pub(crate) const BIG: i32 = 2147483647;
+pub const TPU: i32 = 8;
+pub const T_HEAD: i32 = 3;
+pub const T_ELEM: i32 = 5;
+pub const T_CMP: i32 = 8;
+pub const T_PROBE: i32 = 4;
+pub const T_PAIR: i32 = 5;
+pub const C_BYTES: i32 = 8;
+pub const C_TICKS: i32 = 8;
+pub const B_HASH: i32 = 1;
+pub const B_TEXT: i32 = 16;
+pub const M_WORDS: i32 = 2;
+pub(crate) const TICK_CAP: i32 = 1073741824;
+pub fn meter_init(m: &mut [i32], room: i32) {
+    // Allow a run `room` budget units (at most 2^30 ticks: no run over an item
+    // within its maximum comes near that).
+    m[(0) as usize] = 0;
+    if room >= (TICK_CAP / TPU) {
+        m[(1) as usize] = TICK_CAP;
+    } else {
+        m[(1) as usize] = room * TPU;
+    }
+}
+pub(crate) fn spend(m: &mut [i32], t: i32) -> bool {
+    // Charge t ticks before their work; false (nothing charged) past the allowance.
+    let u: i32 = m[(0) as usize];
+    if t > (m[(1) as usize] - u) {
+        return false;
+    }
+    m[(0) as usize] = u + t;
+    return true;
+}
+pub(crate) fn hticks(n: i32) -> i32 {
+    // Ticks for hashing n bytes: ceil(n / B_HASH).
+    return (n + (B_HASH - 1)) / B_HASH;
+}
+pub fn verdict(m: &[i32], ok: bool) -> i32 {
+    // The verdict word of a finished run (see the header).
+    let u: i32 = (m[(0) as usize] + (TPU - 1)) / TPU;
+    if ok {
+        return u;
+    }
+    return (-2) - u;
+}
 pub fn hlen(b: &[u8], i: i32) -> i32 {
     // The length of the head at i (ai 0..27).
     let ai: i32 = (b[(i) as usize] as i32) & 31;
@@ -44,7 +87,7 @@ pub fn harg(b: &[u8], i: i32) -> i32 {
 pub fn skip(b: &[u8], i: i32, e: i32) -> i32 {
     // The end of the (well-formed, definite) item at i, or -1 if it would pass
     // e. One counter of items still owed is enough: a container adds its
-    // children, a tag its content.
+    // children, a tag its content. Unmetered: arguments only.
     let mut at: i32 = i;
     let mut owe: i32 = 1;
     while owe > 0 {
@@ -88,16 +131,93 @@ pub fn skip(b: &[u8], i: i32, e: i32) -> i32 {
     }
     return at;
 }
-pub(crate) fn span_eq(x: &[u8], xs: i32, xe: i32, y: &[u8], ys: i32, ye: i32) -> bool {
-    if (xe - xs) != (ye - ys) {
-        return false;
-    }
-    for i in 0..xe - xs {
-        if (x[(xs + i) as usize] as i32) != (y[(ys + i) as usize] as i32) {
-            return false;
+pub(crate) fn mskip(b: &[u8], i: i32, e: i32, m: &mut [i32]) -> i32 {
+    // `skip` charging T_HEAD per head visited: the end, -1 if it would pass e,
+    // -2 if the meter ran out.
+    let mut at: i32 = i;
+    let mut owe: i32 = 1;
+    while owe > 0 {
+        if at >= e {
+            return -1;
+        }
+        if !spend(m, T_HEAD) {
+            return -2;
+        }
+        let ib: i32 = b[(at) as usize] as i32;
+        let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+        let ai: i32 = ib & 31;
+        if ai > 27 {
+            return -1;
+        }
+        let h: i32 = hlen(b, at);
+        let n: i32 = harg(b, at);
+        owe -= 1;
+        if h > (e - at) {
+            return -1;
+        }
+        at += h;
+        if (major == 2) || (major == 3) {
+            if n > (e - at) {
+                return -1;
+            }
+            at += n;
+        }
+        if major == 4 {
+            if n > (e - at) {
+                return -1;
+            }
+            owe += n;
+        }
+        if major == 5 {
+            if n > ((e - at) / 2) {
+                return -1;
+            }
+            owe += 2 * n;
+        }
+        if major == 6 {
+            owe += 1;
         }
     }
-    return true;
+    return at;
+}
+pub(crate) fn bytes_cmp(x: &[u8], xs: i32, xl: i32, y: &[u8], ys: i32, yl: i32) -> i32 {
+    // Bytewise order of x[xs, +xl) and y[ys, +yl), a proper prefix first.
+    let mut n: i32 = xl;
+    if yl < n {
+        n = yl;
+    }
+    for i in 0..n {
+        let c: i32 = x[(xs + i) as usize] as i32;
+        let d: i32 = y[(ys + i) as usize] as i32;
+        if c != d {
+            return c - d;
+        }
+    }
+    return xl - yl;
+}
+pub(crate) fn mcmp(x: &[u8], xs: i32, xl: i32, y: &[u8], ys: i32, yl: i32, m: &mut [i32]) -> i32 {
+    // `bytes-cmp` charging C_TICKS per chunk of C_BYTES bytes examined, as it
+    // goes, the first chunk up front; BIG: the meter ran out.
+    let mut n: i32 = xl;
+    if yl < n {
+        n = yl;
+    }
+    if !spend(m, C_TICKS) {
+        return BIG;
+    }
+    for i in 0..n {
+        if (i > 0) && ((i & (C_BYTES - 1)) == 0) {
+            if !spend(m, C_TICKS) {
+                return BIG;
+            }
+        }
+        let c: i32 = x[(xs + i) as usize] as i32;
+        let d: i32 = y[(ys + i) as usize] as i32;
+        if c != d {
+            return c - d;
+        }
+    }
+    return xl - yl;
 }
 pub fn range_lo(a: &[u8], ao: i32, al: i32) -> i32 {
     // The lower bound of a `.chars` argument (n, or [lo, hi] of unsigned
@@ -173,114 +293,274 @@ pub fn any_arg(a: &[u8], ao: i32, al: i32) -> bool {
     // `.unique` takes any one item (conventionally `true`).
     return (al >= 1) && (skip(a, ao, ao + al) == (ao + al));
 }
-pub fn chars_ok(a: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32) -> bool {
-    // A text string whose code points number within the argument's range
-    // (UTF-8 already checked by the profile: count the non-continuation bytes).
-    if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 3) {
-        return false;
-    }
+pub fn chars_prep(a: &[u8], ao: i32, al: i32, t: &mut [i32]) -> i32 {
+    // Prepare a `.chars` argument once: t[0] lo, t[1] hi (t has 2 words); 0, or
+    // -1 when it is not a `.chars` argument.
     let lo: i32 = range_lo(a, ao, al);
     if lo < 0 {
-        return false;
+        return -1;
     }
-    let hi: i32 = range_hi(a, ao, al);
+    t[(0) as usize] = lo;
+    t[(1) as usize] = range_hi(a, ao, al);
+    return 0;
+}
+pub fn chars_run(t: &[i32], b: &[u8], s: i32, e: i32, m: &mut [i32]) -> i32 {
+    // A text string whose code points number within [t[0], t[1]] (UTF-8
+    // already checked by the profile: count the non-continuation bytes).
+    // Charge: ceil(content bytes / B_TEXT) units, before the count.
+    if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 3) {
+        return verdict(m, false);
+    }
+    let c: i32 = s + hlen(b, s);
+    let u: i32 = ((e - c) + (B_TEXT - 1)) / B_TEXT;
+    if !spend(m, u * TPU) {
+        return -1;
+    }
     let mut n: i32 = 0;
-    let mut i: i32 = s + hlen(b, s);
-    while i < e {
+    for i in c..e {
         if ((b[(i) as usize] as i32) & 192) != 128 {
             n += 1;
         }
-        i += 1;
     }
-    return (n >= lo) && (n <= hi);
+    return verdict(m, (n >= t[(0) as usize]) && (n <= t[(1) as usize]));
 }
-pub(crate) fn span_cmp(b: &[u8], t: &mut [i32], x: i32, y: i32) -> i32 {
-    // Order of the spans recorded at pairs x and y of t (start, length):
-    // bytewise, a proper prefix first.
-    let xs: i32 = t[(2 * x) as usize];
-    let xl: i32 = t[((2 * x) + 1) as usize];
-    let ys: i32 = t[(2 * y) as usize];
-    let yl: i32 = t[((2 * y) + 1) as usize];
-    let mut m: i32 = xl;
-    if yl < m {
-        m = yl;
+pub fn unique_words(b: &[u8], s: i32, e: i32) -> i32 {
+    // Words of meter + scratch `unique-run` needs for the item [s, e): three per
+    // element of an array (its head's count, which the profile walk bounded by
+    // the entries limit and the item's length), else the meter alone.
+    if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 4) {
+        return M_WORDS;
     }
-    for i in 0..m {
-        let c: i32 = b[(xs + i) as usize] as i32;
-        let d: i32 = b[(ys + i) as usize] as i32;
-        if c != d {
-            return c - d;
-        }
+    let n: i32 = harg(b, s);
+    if n > (e - s) {
+        return M_WORDS + (3 * (e - s));
     }
-    return xl - yl;
+    return M_WORDS + (3 * n);
 }
-pub(crate) fn span_swap(t: &mut [i32], x: i32, y: i32) {
-    let a: i32 = t[(2 * x) as usize];
-    let al: i32 = t[((2 * x) + 1) as usize];
-    let c: i32 = t[(2 * y) as usize];
-    let cl: i32 = t[((2 * y) + 1) as usize];
-    t[(2 * x) as usize] = c;
-    t[((2 * x) + 1) as usize] = cl;
-    t[(2 * y) as usize] = a;
-    t[((2 * y) + 1) as usize] = al;
+pub(crate) fn rec_cmp(b: &[u8], m: &mut [i32], x: i32, y: i32) -> i32 {
+    // Order of records x and y: hash, then bytewise. Charges T_CMP, and the
+    // bytes examined when the hashes tie. BIG: the meter ran out.
+    if !spend(m, T_CMP) {
+        return BIG;
+    }
+    let rx: i32 = M_WORDS + (3 * x);
+    let ry: i32 = M_WORDS + (3 * y);
+    let hx: i32 = m[(rx + 2) as usize];
+    let hy: i32 = m[(ry + 2) as usize];
+    if hx < hy {
+        return -1;
+    }
+    if hx > hy {
+        return 1;
+    }
+    let c: i32 = mcmp(b, m[(rx) as usize], m[(rx + 1) as usize], b, m[(ry) as usize], m[(ry + 1) as usize], m);
+    if c == BIG {
+        return BIG;
+    }
+    if c < 0 {
+        return -1;
+    }
+    if c > 0 {
+        return 1;
+    }
+    return 0;
 }
-pub(crate) fn sift(b: &[u8], t: &mut [i32], root0: i32, n: i32) {
+pub(crate) fn rec_swap(m: &mut [i32], x: i32, y: i32) {
+    let rx: i32 = M_WORDS + (3 * x);
+    let ry: i32 = M_WORDS + (3 * y);
+    for k in 0..3 {
+        let v: i32 = m[(rx + k) as usize];
+        m[(rx + k) as usize] = m[(ry + k) as usize];
+        m[(ry + k) as usize] = v;
+    }
+}
+pub(crate) fn sift(b: &[u8], m: &mut [i32], root0: i32, n: i32) -> i32 {
+    // Sift record root0 down a heap of n: 0, 1 two equal records met, 2 the
+    // meter ran out.
     let mut root: i32 = root0;
     while ((2 * root) + 1) < n {
         let mut c: i32 = (2 * root) + 1;
-        if ((c + 1) < n) && (span_cmp(b, t, c, c + 1) < 0) {
+        if (c + 1) < n {
+            let d: i32 = rec_cmp(b, m, c, c + 1);
+            if d == BIG {
+                return 2;
+            }
+            if d == 0 {
+                return 1;
+            }
+            if d < 0 {
+                c += 1;
+            }
+        }
+        let d2: i32 = rec_cmp(b, m, root, c);
+        if d2 == BIG {
+            return 2;
+        }
+        if d2 == 0 {
+            return 1;
+        }
+        if d2 < 0 {
+            rec_swap(m, root, c);
+            root = c;
+        } else {
+            root = n;
+        }
+    }
+    return 0;
+}
+pub fn unique_run(b: &[u8], s: i32, e: i32, m: &mut [i32]) -> i32 {
+    // An array whose elements' encodings are pairwise distinct. m holds the
+    // meter and `unique-words` of scratch. Charges: per element T_ELEM, its
+    // heads (T_HEAD each) and its bytes hashed (1 tick per B_HASH); per record
+    // comparison T_CMP, + C_TICKS per C_BYTES bytes examined on a hash tie.
+    // O(n log n) comparisons, no allocation.
+    if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 4) {
+        return verdict(m, false);
+    }
+    let n: i32 = harg(b, s);
+    let mut x: i32 = s + hlen(b, s);
+    if (((m.len() as i32) - M_WORDS) / 3) < n {
+        return verdict(m, false);
+    }
+    for k in 0..n {
+        if !spend(m, T_ELEM) {
+            return -1;
+        }
+        let y: i32 = mskip(b, x, e, m);
+        if y == (-2) {
+            return -1;
+        }
+        if y < 0 {
+            return verdict(m, false);
+        }
+        if !spend(m, hticks(y - x)) {
+            return -1;
+        }
+        let mut h: i32 = -2128831035;
+        for q in x..y {
+            h = i32::wrapping_mul(h ^ (b[(q) as usize] as i32), 16777619);
+        }
+        let rk: i32 = M_WORDS + (3 * k);
+        m[(rk) as usize] = x;
+        m[(rk + 1) as usize] = y - x;
+        m[(rk + 2) as usize] = h;
+        x = y;
+    }
+    let mut i: i32 = (n / 2) - 1;
+    while i >= 0 {
+        let r: i32 = sift(b, m, i, n);
+        if r == 2 {
+            return -1;
+        }
+        if r == 1 {
+            return verdict(m, false);
+        }
+        i -= 1;
+    }
+    let mut j: i32 = n - 1;
+    while j > 0 {
+        rec_swap(m, 0, j);
+        let r2: i32 = sift(b, m, 0, j);
+        if r2 == 2 {
+            return -1;
+        }
+        if r2 == 1 {
+            return verdict(m, false);
+        }
+        j -= 1;
+    }
+    for k2 in 1..n {
+        let d: i32 = rec_cmp(b, m, k2 - 1, k2);
+        if d == BIG {
+            return -1;
+        }
+        if d == 0 {
+            return verdict(m, false);
+        }
+    }
+    return verdict(m, true);
+}
+pub fn samelen_words(a: &[u8], ao: i32, al: i32) -> i32 {
+    // Words `samelen-prep` needs for an argument (3 when it is not an array).
+    if (al < 1) || ((i32::cast_unsigned(a[(ao) as usize] as i32) >> 5).cast_signed() != 4) {
+        return 3;
+    }
+    let n: i32 = harg(a, ao);
+    if n > al {
+        return 3;
+    }
+    return 1 + (2 * n);
+}
+pub(crate) fn name_cmp(a: &[u8], ao: i32, t: &mut [i32], x: i32, y: i32) -> i32 {
+    return bytes_cmp(a, ao + t[(1 + (2 * x)) as usize], t[(2 + (2 * x)) as usize], a, ao + t[(1 + (2 * y)) as usize], t[(2 + (2 * y)) as usize]);
+}
+pub(crate) fn name_swap(t: &mut [i32], x: i32, y: i32) {
+    let o: i32 = t[(1 + (2 * x)) as usize];
+    let l: i32 = t[(2 + (2 * x)) as usize];
+    t[(1 + (2 * x)) as usize] = t[(1 + (2 * y)) as usize];
+    t[(2 + (2 * x)) as usize] = t[(2 + (2 * y)) as usize];
+    t[(1 + (2 * y)) as usize] = o;
+    t[(2 + (2 * y)) as usize] = l;
+}
+pub(crate) fn name_sift(a: &[u8], ao: i32, t: &mut [i32], root0: i32, n: i32) {
+    let mut root: i32 = root0;
+    while ((2 * root) + 1) < n {
+        let mut c: i32 = (2 * root) + 1;
+        if ((c + 1) < n) && (name_cmp(a, ao, t, c, c + 1) < 0) {
             c += 1;
         }
-        if span_cmp(b, t, root, c) < 0 {
-            span_swap(t, root, c);
+        if name_cmp(a, ao, t, root, c) < 0 {
+            name_swap(t, root, c);
             root = c;
         } else {
             root = n;
         }
     }
 }
-pub fn unique_words(n: i32) -> i32 {
-    // Words of scratch `unique-ok` needs for an item of n bytes.
-    return (2 * n) + 2;
-}
-pub fn unique_ok(b: &[u8], s: i32, e: i32, t: &mut [i32]) -> bool {
-    // An array whose elements' encodings are pairwise distinct: record each
-    // element's span in t (unique-words of the item's length), heap-sort the
-    // spans, compare neighbours. O(n log n) comparisons, no allocation.
-    if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 4) {
-        return false;
+pub fn samelen_prep(a: &[u8], ao: i32, al: i32, t: &mut [i32]) -> i32 {
+    // Prepare a `.samelen` argument once (t has samelen-words): t[0] k, then k
+    // (offset from ao, length) spans of the DISTINCT names' encodings, sorted
+    // bytewise. 0, or -1 when it is not a `.samelen` argument. Bind-time work
+    // over the schema's own literal (heap sort, O(n log n)), not charged.
+    if !names_arg(a, ao, al) {
+        return -1;
     }
-    let n: i32 = harg(b, s);
-    let mut x: i32 = s + hlen(b, s);
-    if ((t.len() as i32) / 2) < n {
-        return false;
+    if (i32::cast_unsigned(a[(ao) as usize] as i32) >> 5).cast_signed() == 3 {
+        t[(0) as usize] = 1;
+        t[(1) as usize] = 0;
+        t[(2) as usize] = al;
+        return 0;
     }
+    let n: i32 = harg(a, ao);
+    let e: i32 = ao + al;
+    let mut x: i32 = ao + hlen(a, ao);
     for k in 0..n {
-        let y: i32 = skip(b, x, e);
-        if y < 0 {
-            return false;
-        }
-        t[(2 * k) as usize] = x;
-        t[((2 * k) + 1) as usize] = y - x;
+        let y: i32 = skip(a, x, e);
+        t[(1 + (2 * k)) as usize] = x - ao;
+        t[(2 + (2 * k)) as usize] = y - x;
         x = y;
     }
     let mut i: i32 = (n / 2) - 1;
     while i >= 0 {
-        sift(b, t, i, n);
+        name_sift(a, ao, t, i, n);
         i -= 1;
     }
     let mut j: i32 = n - 1;
     while j > 0 {
-        span_swap(t, 0, j);
-        sift(b, t, 0, j);
+        name_swap(t, 0, j);
+        name_sift(a, ao, t, 0, j);
         j -= 1;
     }
-    for k2 in 1..n {
-        if span_cmp(b, t, k2 - 1, k2) == 0 {
-            return false;
+    let mut w: i32 = 0;
+    for z in 0..n {
+        if (w == 0) || (name_cmp(a, ao, t, w - 1, z) != 0) {
+            t[(1 + (2 * w)) as usize] = t[(1 + (2 * z)) as usize];
+            t[(2 + (2 * w)) as usize] = t[(2 + (2 * z)) as usize];
+            w += 1;
         }
     }
-    return true;
+    t[(0) as usize] = w;
+    return 0;
 }
 pub(crate) fn count_of(b: &[u8], v: i32, e: i32) -> i32 {
     // The element count of the array or (allowed) typed array at v, or -1.
@@ -302,55 +582,81 @@ pub(crate) fn count_of(b: &[u8], v: i32, e: i32) -> i32 {
     }
     return harg(b, c) / sz;
 }
-pub(crate) fn named(a: &[u8], ao: i32, al: i32, b: &[u8], ks: i32, ke: i32) -> bool {
-    // Is the key encoded at b[ks, ke) one of the argument's names?
-    let e: i32 = ao + al;
-    if (i32::cast_unsigned(a[(ao) as usize] as i32) >> 5).cast_signed() == 3 {
-        return span_eq(a, ao, e, b, ks, ke);
-    }
-    let n: i32 = harg(a, ao);
-    let mut x: i32 = ao + hlen(a, ao);
-    for _k in 0..n {
-        let y: i32 = skip(a, x, e);
-        if span_eq(a, x, y, b, ks, ke) {
-            return true;
+pub(crate) fn named(a: &[u8], ao: i32, t: &[i32], b: &[u8], ks: i32, ke: i32, m: &mut [i32]) -> i32 {
+    // Is the key b[ks, ke) one of the prepared names? 1 yes, 0 no, -1 the
+    // meter ran out. Binary search: T_PROBE per probe + C_TICKS per C_BYTES bytes
+    // examined.
+    let mut lo: i32 = 0;
+    let mut hi: i32 = t[(0) as usize];
+    let kl: i32 = ke - ks;
+    while lo < hi {
+        let mid: i32 = (i32::cast_unsigned(lo + hi) >> 1).cast_signed();
+        let no: i32 = ao + t[(1 + (2 * mid)) as usize];
+        let nl: i32 = t[(2 + (2 * mid)) as usize];
+        if !spend(m, T_PROBE) {
+            return -1;
         }
-        x = y;
+        let c: i32 = mcmp(a, no, nl, b, ks, kl, m);
+        if c == BIG {
+            return -1;
+        }
+        if c == 0 {
+            return 1;
+        }
+        if c < 0 {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
     }
-    return false;
+    return 0;
 }
-pub fn samelen_ok(a: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32) -> bool {
-    // A map whose members named by the argument, where present, all hold
-    // arrays or typed arrays with one element count.
+pub fn samelen_run(a: &[u8], ao: i32, t: &[i32], b: &[u8], s: i32, e: i32, m: &mut [i32]) -> i32 {
+    // A map whose members named by the prepared argument t (its names in pool a
+    // from ao), where present, all hold arrays or typed arrays with one element
+    // count. One pass over the pairs: T_PAIR each, the heads skipped, a text
+    // key's name search.
     if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 5) {
-        return false;
-    }
-    if !names_arg(a, ao, al) {
-        return false;
+        return verdict(m, false);
     }
     let n: i32 = harg(b, s);
     let mut x: i32 = s + hlen(b, s);
     let mut len: i32 = -1;
     for _k in 0..n {
-        let ke: i32 = skip(b, x, e);
+        if !spend(m, T_PAIR) {
+            return -1;
+        }
+        let ke: i32 = mskip(b, x, e, m);
+        if ke == (-2) {
+            return -1;
+        }
         if ke < 0 {
-            return false;
+            return verdict(m, false);
         }
-        let ve: i32 = skip(b, ke, e);
+        let ve: i32 = mskip(b, ke, e, m);
+        if ve == (-2) {
+            return -1;
+        }
         if ve < 0 {
-            return false;
+            return verdict(m, false);
         }
-        if named(a, ao, al, b, x, ke) {
-            let c: i32 = count_of(b, ke, ve);
-            if c < 0 {
-                return false;
+        if (i32::cast_unsigned(b[(x) as usize] as i32) >> 5).cast_signed() == 3 {
+            let hit: i32 = named(a, ao, t, b, x, ke, m);
+            if hit < 0 {
+                return -1;
             }
-            if (len >= 0) && (c != len) {
-                return false;
+            if hit == 1 {
+                let c: i32 = count_of(b, ke, ve);
+                if c < 0 {
+                    return verdict(m, false);
+                }
+                if (len >= 0) && (c != len) {
+                    return verdict(m, false);
+                }
+                len = c;
             }
-            len = c;
         }
         x = ve;
     }
-    return true;
+    return verdict(m, true);
 }

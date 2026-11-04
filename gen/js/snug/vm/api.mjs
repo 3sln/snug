@@ -415,7 +415,7 @@ export function vmValidateX(p, pool, rule, input, limits, s, out, ext) {
 export function vmValidate(p, pool, rule, input, limits, s, out) {
     // vm-validate-x with no extension controls: an EXT leaf never matches
     // (hosts refuse to run such a Program without its predicates, D141).
-    return vmValidateX(p, pool, rule, input, limits, s, out, (_i, _p, _ao, _al, _b, _s, _e) => false);
+    return vmValidateX(p, pool, rule, input, limits, s, out, (_i, _p, _ao, _al, _b, _s, _e, _r) => -2);
 }
 
 export function vmValidateSpanX(p, pool, rule, input, start, end, depth0, items0, limits, s, out, ext) {
@@ -429,5 +429,5 @@ export function vmValidateSpanX(p, pool, rule, input, start, end, depth0, items0
 
 export function vmValidateSpan(p, pool, rule, input, start, end, depth0, items0, limits, s, out) {
     // vm-validate-span-x with no extension controls.
-    return vmValidateSpanX(p, pool, rule, input, start, end, depth0, items0, limits, s, out, (_i, _p, _ao, _al, _b, _s, _e) => false);
+    return vmValidateSpanX(p, pool, rule, input, start, end, depth0, items0, limits, s, out, (_i, _p, _ao, _al, _b, _s, _e, _r) => -2);
 }

@@ -43,7 +43,7 @@ pub fn mark_pair(ss: &mut [i32], pair: i32) {
     }
 }
 pub const NOINL: i32 = -1000;
-pub fn inline_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, note: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn inline_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, note: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A child the step's prescan knows to lie before the cut, evaluated by the
     // buffer walk at once (no round trip through the session loop): its end
     // or code, or NOINL (take the item path: a note, a yield, or unknown).
@@ -151,7 +151,7 @@ pub fn open_arr(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     }
     return arr_start(p, b, s, ss, ka, base, pos, q, lo, d, fb, ck, nq, end, ctx, pair);
 }
-pub fn arr_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn arr_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     let pos: i32 = ss[(f + F_POS) as usize] - base;
     let d: i32 = ss[(f + F_D) as usize];
     let fb: i32 = ss[(f + F_FB) as usize];
@@ -273,7 +273,7 @@ pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
     ss[(f + F_EL) as usize] = el + 1;
     return cont(ss, f, A_NEXT);
 }
-pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // The next element: its query from the live blocks (charged), then the
     // element as a child item; or the end.
     let pos: i32 = ss[(f + F_POS) as usize] - base;
@@ -421,7 +421,7 @@ pub fn darr_ret(ss: &mut [i32], f: i32, r: i32) -> i32 {
     ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
     return cont(ss, f, A_NEXT);
 }
-pub fn darr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn darr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // The next dead element (or sequence item), or the end.
     let el: i32 = ss[(f + F_EL) as usize];
     let q: i32 = ss[(f + F_Q) as usize] - base;
@@ -564,7 +564,7 @@ pub fn open_dmap(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     }
     return cont(ss, f, M_NEXT);
 }
-pub fn map_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn map_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     let pos: i32 = ss[(f + F_POS) as usize] - base;
     let d: i32 = ss[(f + F_D) as usize];
     let fb: i32 = ss[(f + F_FB) as usize];
@@ -730,7 +730,7 @@ pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
     ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
     return cont(ss, f, M_NEXT);
 }
-pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, f: i32, inka: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, f: i32, inka: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A pair whose key is whole -- in the window (inka 0) or copied into the
     // arena (inka 1) -- after the key's first checks: dead (a dead map, or no
     // live block) or live (eval-map's generic pair up to the value), then the
@@ -972,7 +972,7 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     }
     return call(ss, base, kq, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
 }
-pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A pair starts (or the map ends): the key's first byte, major type and
     // head; then the key whole -- in the window, or copied into the arena
     // across windows (phase M_KEY) when it crosses.
@@ -1050,7 +1050,7 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     }
     return map_pair(p, pool, b, s, ss, ka, base, f, 0, ext);
 }
-pub fn map_key(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn map_key(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // Copy the crossing key into the arena, a window at a time (D092). D085:
     // F_KE -1 is a key the message ended inside -- its pair goes on over the copy.
     if ss[(f + F_KE) as usize] < 0 {
@@ -1246,7 +1246,7 @@ pub fn tail_need(p: &[i32], s: &[i32], ss: &mut [i32], f: i32) -> i32 {
     }
     return 0;
 }
-pub fn tag_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+pub fn tag_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     let ph: i32 = ss[(f + F_PH) as usize];
     let pos: i32 = ss[(f + F_POS) as usize] - base;
     let end: i32 = ss[(f + F_END) as usize] - base;

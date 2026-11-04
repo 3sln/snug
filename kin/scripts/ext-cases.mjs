@@ -1,9 +1,13 @@
 // Extension-control cases (P7.2, D140-D142) for bb vm-test and bb vmsession-test.
 //
 // The registry is the generic controls (kin's snug.vm.controls, so JS and Rust
-// agree by construction) plus two host-defined ones the Rust bins restate:
+// agree by construction, verdicts AND metered units, D190-D192) plus host-defined
+// ones the Rust bins restate:
 //   .even   the item's encoding has an even number of bytes (maxBytes 300)
 //   .tiny   `.chars` with maxBytes 8 (so control_size is reachable cheaply)
+//   .costly the item's length is not a multiple of 3, declared cost 3n + 5
+//           (D193), maxBytes 1000
+//   .huge   always true, declared cost 1,000,000,000: the budget refuses unasked
 // `extFor(P, B)` answers the predicate the VM calls for a Program (null when it
 // uses no control); `addExtCases` adds schemas and seeded values -- EXT under
 // choices (exactness), in arrays, maps (values and keys), embedded documents,
@@ -15,6 +19,8 @@ export const testControls = {
   ...generic,
   even: { check: (a, item) => item.length % 2 === 0, maxBytes: 300 },
   tiny: { ...generic.chars, maxBytes: 8 },
+  costly: { check: (a, item) => item.length % 3 !== 0, cost: n => 3 * n + 5, maxBytes: 1000 },
+  huge: { check: () => true, cost: () => 1_000_000_000 },
 };
 const entries = controlEntries(testControls);
 const bound = new WeakMap();
@@ -38,6 +44,12 @@ export const EXT_SCHEMAS = [
   ['r = (tstr .chars 3) .ne "abc"', 'ne'],
   ['r = [* (tstr .even 0) / (tstr .chars (5..400))]', 'long'],
   ['r = { m: { * tstr => [* (int / tstr)] .unique 2 } .samelen "xs" }', 'deep'],
+  // D190-D193: declared costs, budget refusals inside metered runs, big generic items
+  ['r = [* (bstr .costly 0) / (bstr .size 2)]', 'costly'],
+  ['r = (int .huge 0) / tstr', 'huge'],
+  ['r = [* [* (int / tstr / [* int])] .unique true]', 'unique-big'],
+  ['r = { * tstr => [* int] } .samelen ["k0", "k1", "k2", "k3", "k1", "k5", "k0", "kk"]', 'samelen-many'],
+  ['r = [* (tstr .chars (0..40))]', 'chars-budget'],
 ];
 
 // Verdicts the semantics fix (out[0], and the embedded subcode): exactness under
@@ -50,6 +62,9 @@ const FIXED = {
   tiny: [[['abcdefghi'], 43], [['abc'], 0], [['abcdefg'], 0]],
   ne: [['abc', 35], ['abd', 0], ['ab', 42]],
   embedded: [[[1, 2], 0], [[1, 1], 41, 42]],
+  costly: [[[new Uint8Array(1)], 0], [[new Uint8Array(2)], 0], [[new Uint8Array(3)], 0], [[new Uint8Array(5)], 42]],
+  huge: [[1, 48], ['a', 0]],
+  'samelen-many': [[{ k0: [1], k1: [2], z: [] }, 0], [{ k0: [1], k1: [] }, 42], [{ k5: [1, 2], kk: [3, 4] }, 0]],
 };
 
 /** Seeded values for one schema kind (plain JS values for the baseline encoder). */
@@ -70,6 +85,12 @@ function value(kind, rnd) {
     case 'ne': return rnd(3) ? pick(['abc', 'abd', 'ab', 'abcd', '€€€']) : 3;
     case 'long': return Array.from({ length: rnd(3) }, () => str(rnd(4) ? rnd(40) : rnd(600), rnd(3) === 0));
     case 'deep': return { m: Object.fromEntries(Array.from({ length: rnd(3) }, (_, i) => ['k' + i, ints(rnd(4))])) };
+    case 'costly': return Array.from({ length: rnd(5) }, () => new Uint8Array(rnd(3) ? rnd(8) : rnd(1100)));
+    case 'huge': return rnd(2) ? rnd(100) : str(rnd(4));
+    case 'unique-big': return Array.from({ length: rnd(4) }, () => Array.from({ length: rnd(60) }, () => {
+      const k = rnd(10); return k < 5 ? rnd(40) - 5 : k < 8 ? str(rnd(30), true) : ints(rnd(6)); }));
+    case 'samelen-many': return Object.fromEntries(Array.from({ length: rnd(12) }, () => [pick(['k0', 'k1', 'k2', 'k3', 'k5', 'kk', 'x', 'k', 'k00']), ints(rnd(3))]));
+    case 'chars-budget': return Array.from({ length: rnd(20) }, () => str(rnd(45), true));
   }
 }
 
@@ -98,7 +119,8 @@ export function addExtCases({ compile, encode, addProgram, LIM, cases, seed, cou
       } catch { continue; }
       if (rnd(6) === 0 && bytes.length > 2) { bytes = Uint8Array.from(bytes); const at = 1 + rnd(bytes.length - 1); bytes[at] ^= 1 << rnd(8); }
       if (rnd(10) === 0) bytes = bytes.subarray(0, rnd(bytes.length + 1));
-      const lim = LIM(1, 0, -1, -1, -1, -1, -1, rnd(5) ? -1 : rnd(400));
+      const metered = kind === 'unique-big' || kind === 'samelen-many' || kind === 'chars-budget' || kind === 'costly';
+      const lim = LIM(1, 0, -1, -1, -1, -1, -1, rnd(5) ? -1 : rnd(metered ? 6000 : 400));
       cases.push({ prog: pi, rule, lim, bytes, label: `ext ${kind} #${k}`, check: () => null, ext: true });
       n++;
     }

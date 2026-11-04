@@ -8,7 +8,8 @@ use crate::snug::cbor::scan::code_name;
 use crate::snug::program::verify::vm_verify;
 use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span,
                            vm_validate_span_x, vm_validate_x};
-use crate::controls::{program_controls, Control, Controls};
+use crate::controls::{port, prepare_all, program_controls, Control, Controls};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// A verified Program (docs/program.md format 1) from a store the host trusts.
@@ -19,17 +20,18 @@ pub struct Program {
     ext: Option<Bound>,
 }
 
-/// A Program's extension controls bound to predicates, in id order (D141).
+/// A Program's extension controls bound to predicates, in id order (D141), and
+/// the metered ones' prepared arguments per (id, argument offset) (D192).
 #[derive(Clone)]
-struct Bound(Vec<Arc<dyn Control>>);
+struct Bound(Vec<Arc<dyn Control>>, Arc<BTreeMap<(i32, i32), Vec<i32>>>);
 impl std::fmt::Debug for Bound {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Bound({})", self.0.len())
     }
 }
 impl Bound {
-    fn call(&self, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32) -> bool {
-        self.0[id as usize].check(&pool[ao as usize..(ao + al) as usize], &b[s as usize..e as usize])
+    fn call(&self, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+        port(&*self.0[id as usize], self.1.get(&(id, ao)).map(Vec::as_slice), pool, ao, al, b, s, e, room)
     }
 }
 
@@ -68,7 +70,9 @@ impl Program {
         if !missing.is_empty() {
             return Err(missing);
         }
-        self.ext = Some(Bound(names.iter().filter_map(|n| controls.get(n).cloned()).collect()));
+        let bound: Vec<Arc<dyn Control>> = names.iter().filter_map(|n| controls.get(n).cloned()).collect();
+        let preps = prepare_all(&self.p, &self.b, &bound);
+        self.ext = Some(Bound(bound, Arc::new(preps)));
         Ok(())
     }
     /// A rule's index (its position in RULES), or None.
@@ -223,7 +227,7 @@ pub fn validate(prog: &Program, rule: i32, bytes: &[u8], opts: &Options, scratch
     let s = scratch.lease(prog, rule);
     let c = match &prog.ext {
         Some(x) => {
-            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| x.call(id, pool, ao, al, b, st, e);
+            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
             vm_validate_x(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out, &f)
         }
         None => vm_validate(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out),
@@ -242,7 +246,7 @@ pub fn validate_at(prog: &Program, rule: i32, bytes: &[u8], start: i32, end: i32
     let s = scratch.lease(prog, rule);
     let c = match &prog.ext {
         Some(x) => {
-            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| x.call(id, pool, ao, al, b, st, e);
+            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
             vm_validate_span_x(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out, &f)
         }
         None => vm_validate_span(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out),
@@ -345,7 +349,7 @@ impl<'p> Session<'p> {
         }
         let r = match &self.prog.ext {
             Some(x) => {
-                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| x.call(id, pool, ao, al, b, st, e);
+                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
                 vms_step_x(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base, &f)
             }
             None => vms_step(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base),

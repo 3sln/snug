@@ -756,7 +756,7 @@ export function vmsStepX(p, pool, b, s, ss, ka, out, base, ext) {
 
 export function vmsStep(p, pool, b, s, ss, ka, out, base) {
     // vms-step-x with no extension controls (D140).
-    return vmsStepX(p, pool, b, s, ss, ka, out, base, (_i, _p, _ao, _al, _b, _s, _e) => false);
+    return vmsStepX(p, pool, b, s, ss, ka, out, base, (_i, _p, _ao, _al, _b, _s, _e, _r) => -2);
 }
 
 export function vmsEof(ss, out, n) {

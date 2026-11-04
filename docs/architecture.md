@@ -370,7 +370,7 @@ as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
 | `.feature` | accepted as a no-op annotation (RFC 9165: it always matches) (A12) |
 | `.cat`, `.det`, `.plus` | compile-time folding (P3, not gated in revision 2) |
 | `.pcre`, `.abnf`, `.abnfb` | refused (D013) |
-| a registered `.name` | extension control (D082, D140–D142): `AND(target leaf, EXT)` per target leaf; the EXT is decided by a host predicate over the item's encoding, only when the AND needs it, after the item's profile walk, charged per item byte, bounded by the control's maximum item size (program.md §4.2, format 1.1). Unregistered: `unknown_control` naming it. |
+| a registered `.name` | extension control (D082, D140–D142): `AND(target leaf, EXT)` per target leaf; the EXT is decided by a host predicate over the item's encoding, only when the AND needs it, after the item's profile walk, charged before it runs (a fixed call charge plus the predicate's declared cost, by default one unit per item byte; the generic controls meter their own work in kin, D190–D193), bounded by the control's maximum item size (program.md §4.2, §14, format 1.1). Unregistered: `unknown_control` naming it. |
 
 ### 4.7 Regular expressions
 
@@ -541,6 +541,7 @@ every loop whose trip count depends on input or schema charges per trip:
 | array element | 1 per follow edge traversed + 1 per active position |
 | AND / NOT / EMBED dependency | 1 per dependency |
 | profile-only continuation (§4.5) | 1 per item + 1 per 64 content bytes |
+| extension control asked (D190–D193) | 1 + 16 per call, + the predicate's units: a host predicate's declared cost (default 1 per item byte), charged before it runs; a generic control's metered work (heads, hashing, comparisons, probes) |
 
 Budget arithmetic saturates. The exact, normative per-event schedule (so
 that hosts agree on the exhaustion point) is `docs/program.md` §14; this table

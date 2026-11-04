@@ -225,7 +225,10 @@ let again = Schema::from_serialized_with(&bytes, &controls)?;   // the registry 
 A control is a `snug::controls::Control` trait object (any
 `Fn(&[u8], &[u8]) -> bool + Send + Sync` is one): `check(argument, item)`
 over the encodings, optional `max_bytes()` (default 65,536; a longer item
-fails with `control_size` unasked) and `argument()` (checked at compile time).
+fails with `control_size` unasked), `argument()` (checked at compile time) and
+`cost(item_bytes) -> u64`, the budget units charged before `check` runs
+(default: one per byte; more than the budget left stops with `budget`
+unasked; a predicate's own CPU is the host's responsibility, D193).
 Semantics, charging and caching are the JS host's ([guide](guide.md#custom-controls)).
 An unregistered `.name` is `Error::Compile` with code `unknown_control` and
 `detail` naming it; loading a Program without its controls is
