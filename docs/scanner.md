@@ -1,14 +1,19 @@
 # The CBOR profile scanner — order of checks
 
 Normative for `kin/scan.kin` and its helpers (`kin/head.kin`, `text.kin`,
-`float.kin`, `keys.kin`, `tags.kin`), generated to
-`gen/{js,rust}/snug/cbor/*`. The scanner accepts exactly what 3sln.me's
-`packages/core/cbor.mjs` `decode` accepts and refuses everything it refuses
-**with the same code**; where an input breaks several rules, the first check
-below that fails decides. The arbiter is cbor.mjs itself
-(`bench/baseline/cbor-3sln.mjs`): `bb scan-test` compares codes on every
-vector, on fixed edge cases and on seeded mutations (architecture §4.5; review
-C15, C16).
+`float.kin`, `keys.kin`, `tags.kin`, `stdtags.kin`), generated to
+`gen/{js,rust}/snug/cbor/*`. The scanner checks RFC 8949 §4.2.1 core
+deterministic encoding under the **profile flags** in `o[11]` (D120,
+[profiles](profiles.md#the-option-model-d120)). With the flags at 0 — the
+Bindle profile — it accepts exactly what 3sln.me's `packages/core/cbor.mjs`
+`decode` accepts and refuses everything it refuses **with the same code**;
+where an input breaks several rules, the first check below that fails
+decides. The Bindle arbiter is cbor.mjs itself (`bench/baseline/cbor-3sln.mjs`):
+`bb scan-test` compares codes on every vector, on fixed edge cases and on
+seeded mutations (architecture §4.5; review C15, C16). The other flags are
+held to the hand-written codes and offsets of
+`corpus/cbor-vectors/deterministic.json` and to cbor2 (profiles.md, "Against
+cbor2"). Rules marked **[flag]** below depend on a flag.
 
 Status: implemented and gated (DEVLOG P1.3). Integer-only (D009).
 
@@ -16,14 +21,15 @@ Status: implemented and gated (DEVLOG P1.3). Integer-only (D009).
 
 | JS (`gen/js/snug/cbor/scan.mjs`) | Rust (`snug::cbor::scan`) | |
 | --- | --- | --- |
-| `scanOptions(o, topAny, cose, maxBytes, maxDepth, maxEntries, maxItems)` | `scan_options` | fill an `Int32Array(16)` / `[i32; 16]` |
+| `scanOptions(o, topAny, cose, maxBytes, maxDepth, maxEntries, maxItems)` | `scan_options` | fill an `Int32Array(16)` / `[i32; 16]`; the profile flags to 0 (Bindle) |
+| `scanProfile(o, flags)` | `scan_profile` | the profile flags (PF_*, host bits 0–6), after `scanOptions` |
 | `scan(bytes, o)` | `scan` | 0, or a code (below) |
 | `errorOffset(o)` | `error_offset` | offset the refusal was decided at, -1 if accepted |
 | `itemsScanned(o)` | `items_scanned` | the item counter |
 | `codeName(code)` | `code_name` | cbor.mjs's string for a code |
 
 `o` is input and scratch: slots 0–5 options, 6 error offset, 7 items, 8–10
-scratch (`snug.cbor.codes`). Allocate it once and reuse it. Limits are
+scratch, 11 the profile flags (`snug.cbor.codes`). Allocate it once and reuse it. Limits are
 cbor.mjs's options clamped by the host to 0..2^31−1 (exact: no input or count
 reaches 2^31); inputs must be shorter than 2^31 bytes. Recursion depth is at
 most `maxDepth` + 2 frames of the walk; hosts should keep `maxDepth ≤ 256`.
@@ -83,22 +89,32 @@ same offset (gated).
    * 5 map of n pairs: `d ≥ maxDepth` → **depth**; 2n > bytes remaining →
      **truncated**; n > maxEntries → **too_many_entries**; then per pair:
      1. no byte left → **truncated**;
-     2. the key's major type is PEEKED: not 3 (text), and not (cose option,
-        `d = 0`, major 0/1) → **key_type**;
+     2. the key's major type is PEEKED: not 3 (text), and not admitted by
+        the key kinds **[flag]** (`PF_KEYS` 2/3: any major; 1: majors 0/1;
+        0: majors 0/1 only with the cose option at `d = 0`) → **key_type**;
      3. the key is scanned as an item at d+1 (its own refusals win);
-     4. a cose integer label must be a safe integer (major 0 ≤ 2^53−1,
-        major 1 with n < 2^53−1, i.e. value ≥ −(2^53−1)) → **key_type**;
+     4. under `PF_KEYS` 0, a cose integer label must be a safe integer
+        (major 0 ≤ 2^53−1, major 1 with n < 2^53−1, i.e. value ≥ −(2^53−1))
+        → **key_type**;
      5. compared with the previous key's encoded bytes (bytewise, shorter
         first on a common prefix): equal → **duplicate_key**, smaller →
         **key_order**;
      6. the value is scanned as an item at d+1.
    * 6 tag t: `d ≥ maxDepth` → **depth** (a tag is a level, checked before its
      number); t ≥ 2^32 → **tag**; then by t (below); any other t → **tag**.
-   * 7: `ai` 20, 21, 22 (false, true, null) accepted; anything else
-     (unassigned simple values, `f7` undefined, `f8 xx` with xx ≥ 24) →
-     **simple**.
+   * 7: `ai` 20, 21, 22 (false, true, null) accepted; `f7` undefined
+     accepted under `PF_UNDEFINED` **[flag]**; anything else (unassigned
+     simple values, `f8 xx` with xx ≥ 24) → **simple**.
+   * 3, text: noncharacters are refused unless `PF_NONCHAR` **[flag]**.
 
 ## Floats (major 7, `ai` 25/26/27)
+
+Under `PF_FLOATS` **[flag]** (D122): 2/4/8 bytes must remain (**truncated**);
+then a NaN other than float16 `7e00`, and the quiet NaN with a sign bit
+included, → **float** (the canonical quiet NaN as float32 `7fc00000` or
+float64 `7ff8000000000000` → **non_shortest**); then any value a narrower
+width holds exactly — ±0 and ±∞ in float32/float64 included — →
+**non_shortest**. Without the flag (Bindle):
 
 1. 2/4/8 bytes must remain → **truncated**.
 2. **float**: NaN, ±∞, ±0, or an integral value of magnitude ≤ 2^53−1 — bit
@@ -119,7 +135,17 @@ same offset (gated).
 | 4 decimal | byte left? (**truncated**) → byte is `82`? (**decimal**) → the inner array AS AN ITEM (counted → **too_many_items**; a level → **depth**; 2 ≤ remaining → **truncated**; 2 ≤ maxEntries → **too_many_entries**) → exponent item → mantissa item (each with all its own refusals) → THEN semantics (**decimal**): exponent major 1 with n ≤ 1023 (−1024..−1); mantissa major 0/1 or tag 2/3, non-zero, not divisible by 10 (n+1 for major 1 and tag 3; remainder over the bytes) | tag + array + both elements (+ their contents) | tag, array |
 | 40 ndarray | as tag 4 up to the semantics, with **ndarray**; then: data an array, or a typed-array tag (counted by bytes / element size); shape an array of 1..8 major-0 integers, each 1..2^53−1, whose product equals the count — product checked by division (`d ≤ count / p`), so it never overflows (**ndarray** for all) | tag + array + shape and data items | tag, array |
 
-Other tags (0, 1, 5, 64, 68, 73–76, 80–83, 87, 1040, 55799, …) → **tag**.
+Under `PF_TAGS` **[flag]** the standard set adds (D121; checks after the
+tag's depth and 32-bit checks):
+
+| Tag | Content check order | Items counted | Depth levels |
+| --- | --- | --- | --- |
+| 0, 1, 21, 22, 23, 32 | the content AS AN ITEM at d+1 (all its own refusals) → the rule (**tag**): 0 text in RFC 3339 date-time form; 1 an integer or a finite float; 32 text in URI form; 21–23 anything | tag + content (+ its contents) | tag, content |
+| 24 | the content as an item at d+1 → a byte string (**tag**) → its payload as ONE item at d+2, bounded by the string's end (its own refusals; **truncated** if it runs past the end, **trailing** at the byte after it) | tag + string + the payload's items | tag, string, payload |
+| 55799 | only at d = 0 of the document (`PF_SUB` clear), else **tag**; then the content as an item | tag + content | tag, content |
+
+Other tags (5, 64, 68, 73–76, 80–83, 87, 1040, …), and the standard ones
+without the flag, → **tag**.
 
 ## How it is gated
 
@@ -196,6 +222,20 @@ bytes may be gone), so each child's verdict input is **noted from its head**
 as it starts (exponent and integer-mantissa checks, shape entries, data
 count; a bignum mantissa's remainder when its content is read) and the
 semantic check runs at the pair's end, in the recursive scanner's order.
+
+**Standard tags** (P7.1, D124) get a frame of kind 5 (`K_STD`: `F_STAG` 27 the
+tag number, `F_EXPOK` the head verdict, `F_COUNT` the content start). The
+content's head verdict is noted from its head (tag 1's whole rule; the major
+type for 0, 24, 32). The text content of a tag 0/32 and the byte-string
+content of a tag 24 are **asked for whole** before their walk (and scanned
+without yielding), so the rule — or the tag-24 payload walk by the recursive
+scanner — runs over the window when the content ends.
+
+**Keys of any kind** (`PF_KEYS` any): a key that is an array, map or tag is
+asked for whole (its extent by `key-end-any`, windows doubling) and walked by
+the recursive scanner, so no nested key state crosses a window; byte-string,
+bignum and integer typed-array content inside an active key is not skipped
+but walked through the windows (`PH_KSKIP`, 11) so the key arena receives it.
 
 **Yields**: one unit per item and per byte of text or typed-array content
 scanned (at least one whole UTF-8 sequence per step, so any quantum

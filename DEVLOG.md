@@ -2576,6 +2576,169 @@ unknown rules as successful validation; buffering source documents as a
 replacement for the existing session driver (all rejected).
 - [ ] **Signed off** (owner)
 
+### D120 — Profile options are one kin flags word, zero being the Bindle profile (P7.1)
+**Decision** (profile engineer, provisional; implements D081): every
+wire-profile option is a bit field of one integer, `PF_KEYS` (bits 0–1: text,
+text + integer, any), `PF_TAGS` (bits 2–3: Bindle set, standard set),
+`PF_FLOATS` (bit 4), `PF_UNDEFINED` (bit 5), `PF_NONCHAR` (bit 6), plus the
+internal `PF_SUB` (bit 7: the walk's root is not the document's top). It
+lives in the scanner block's word 11 (`O_PROFILE`, one of program.md §12.1's
+scanner-reserved words), set by `scan-profile` after `scan-options` (which
+writes 0); the VM takes it as limits word 9 (absent or negative = 0) and
+copies it there in setup, adding `PF_SUB` for spans below the root. **0 is
+the Bindle profile** and every set bit admits more; the deterministic preset
+is 118. Every check reads that one word (scanner, resumable scanner, buffer
+VM, dead walk, session), so the fused VM walk is the scanner's policy by
+construction. Programs do not record a profile and compilation never reads
+it: Program words, the container and `SOURCE_KEY` are unchanged, so this is
+not a format version change (D084). Hosts resolve options to flags only
+(`host/js/src/profiles.mjs`, Rust `snug::Profile::flags`).
+**Why**: the frozen 16-word block had reserved words, so no layout change;
+an all-zero (never filled) word failing safe to the strictest policy means
+every existing gate, host and stored caller keeps its exact pre-P7.1
+behaviour, and the default changes only where a host deliberately sets 118.
+A run-time option keeps one Program usable under either preset.
+**Alternatives**: separate words per option (more ABI for no gain); zero as
+the deterministic preset (an unfilled array would silently widen
+acceptance); recording the profile in the Program (couples caches to a
+run-time choice); a new limits array layout (breaks D084 callers).
+- [ ] **Signed off** (owner)
+
+### D121 — The standard tag set and its content rules (P7.1)
+**Decision** (profile engineer, provisional): the standard set is the Bindle
+set plus 0, 1, 21, 22, 23, 24, 32 and 55799 (32-bit tag numbers only; no
+"any tag" level yet). Their content is an ordinary item (counted, one level
+below the tag) walked first; then, refused with `tag` at the tag's head:
+tag 0 needs RFC 3339 `date-time` text (T/Z either case, field ranges, the
+day within its month and leap years, seconds to 60); tag 1 an integer or a
+finite float (RFC 8949 §3.4.2 discourages non-finite epochs); tag 32 text
+matching RFC 3986 `URI` at the character level (scheme, permitted
+characters, `%HH`, one fragment, brackets only before the query/fragment —
+the authority/IP-literal grammar is not parsed); tag 24 a byte string whose
+payload is then walked as one item two levels below the tag under the same
+profile, bounded by the string (its own codes and offsets; `trailing` after
+the item); 21–23 any item; 55799 any item, only at depth 0 of the document
+(`PF_SUB` clear). The Bindle tags keep their rules in both sets. Kin owns the
+rules (`kin/stdtags.kin`); the Writer runs the same functions after writing
+a `Tagged` value's content. VM charges: 1 unit per standard tag check, plus
+⌈len/64⌉ for a tag-0/32 text's form scan; the payload walk is charged as
+dead items.
+**Why**: these are RFC 8949's registered core tags whose decoders a general
+library is expected to read; checking their content keeps "valid snug CBOR"
+meaningful (a date tag holds a date) and every rule only refuses. Walking
+the content first keeps refusal precedence uniform across all walkers.
+**Alternatives**: accept any tag (a later `PF_TAGS` value can add it; COSE
+tags 16–18/61 are refused today); type-only content checks (weaker for no
+gain); full RFC 3986 parsing in kin (large; deferred and documented).
+- [ ] **Signed off** (owner)
+
+### D122 — Deterministic floats: shortest forms and the canonical NaN only (P7.1)
+**Decision** (profile engineer, provisional; answers D081's open question):
+under `PF_FLOATS` every float must be in its shortest exact width, so ±0,
+±∞ and NaN occur only as float16; the only NaN is the canonical quiet NaN
+`f97e00` (RFC 8949 §4.2.2's recommendation): any other NaN — a sign bit, a
+signalling NaN, a payload — is `float`, and the canonical NaN in a float32 or
+float64 is `non_shortest`. Integral floats are accepted (RFC 8949 §4.2.1 does
+not forbid them; dCBOR does). The writer's `put-float-rfc` maps every NaN to
+`f97e00`. Float ranges compare as IEEE 754: a NaN is in no range and a zero is
+in a range holding the key of +0 or −0 (two adjacent keys); literals still
+compare encodings.
+**Why**: one encoding per value is the point of a deterministic profile, and
+NaN payloads are not portable values; refusing the rest keeps the rule exact
+and testable by bit tests. Integral floats are distinct CBOR values in RFC
+8949's data model.
+**Alternatives**: accept any shortest NaN (non-unique encodings of "NaN");
+refuse integral floats (dCBOR's rule, not §4.2.1's); keep Bindle's
+refusals as the default (contrary to D081).
+- [ ] **Signed off** (owner)
+
+### D123 — JavaScript values for the deterministic data (P7.1)
+**Decision** (profile engineer, provisional): a map with only text keys
+decodes to an object as before; a map with any other key decodes to a `Map`
+whose keys are decoded values (a cose top-level map stays a `Map`); the
+builder restarts a map as a `Map` when a non-text key follows text keys (only
+majors 4–7 sort after text). Distinct CBOR keys that are one JS `Map` key
+(1 and 1.0, 0.0 and −0.0) are refused by decode with `unsupported` (a view
+still reads them). Standard-set tags decode to a frozen `Tagged { tag, value }`
+(tag 24: the payload bytes); `f7` to `undefined`; floats to the number.
+Encoding takes `Map` (keys as the profile admits), `Tagged` (kin-checked) and
+`undefined`; holes stay refused. Rust: `Value::Undefined`, the existing
+`Value::Tag` and `Value::Map` pairs.
+**Why**: a general CBOR library must round-trip integer-keyed (COSE/CWT)
+data; Maps are the only JS container with value keys. A generic Tagged keeps
+round trips exact without guessing Date semantics; silent key collisions
+would lose data.
+**Alternatives**: always a Map (breaks every text-keyed caller); Date for tag
+0 (loses offsets and precision); lazily decodable wrappers for tag 24 (left
+to `decode(t.value)`).
+- [ ] **Signed off** (owner)
+
+### D124 — Resumable drivers read tag-0/24/32 contents and non-text keys whole (P7.1)
+**Decision** (profile engineer, provisional): the content rules of tags 0,
+24 and 32 need the whole content; the resumable scanner asks for it whole
+before walking it (and walks it without yielding), the session pins the
+content start (D094) and re-reads it after the content's walk (`T_STDCHK`).
+A map key that is a container or tag is asked for whole and walked by the
+recursive scanner (rscan) or the buffer walk (session; the session also asks
+for byte-string and float keys whole, by a structural extent `key-end-any`
+that asks for doubling windows); byte-string, bignum and integer typed-array
+content inside an active rscan key goes through the windows (`PH_KSKIP`) so
+the key arena receives it. The session's prescan admits standard tags.
+**Why**: these are bounded by the document (`maxBytes`), the existing
+replay/whole-piece mechanisms (D090, D092, D094) cover them, and nested keys
+would otherwise need a stack of key arenas.
+**Alternatives**: incremental date/URI/payload automata across windows
+(much more state for rare large contents); a per-frame key arena stack.
+- [ ] **Signed off** (owner)
+
+### D125 — The compiler no longer assumes the wire profile (P7.1)
+**Decision** (profile engineer, provisional): a `:` member whose key is a
+byte-string, float or beyond-64-bit integer value (`h'00': T`) was compiled
+as a member that can never be present (absent if optional, the alternative
+unsatisfiable if required) — a Bindle assumption. It is now a `map_cut`
+schema error under `full` (the compiler restriction sets still answer
+`profile` first): colon implies a cut, and cuts are supported only on text
+and integer literal keys. `h'00' => T` (no cut) compiles as before.
+**Why**: under the deterministic preset such keys reach the VM, so the old
+lowering silently refused valid data; Programs must not depend on a run-time
+profile (D120). Refusing is exact; supporting cuts on these keys needs KEYS
+entries of majors 2/7 (a D084 minor) and is left open.
+**Alternatives**: drop the cut (changes the meaning when another entry's key
+domain overlaps); extend the KEYS table now (a format change beyond P7.1).
+- [ ] **Signed off** (owner)
+
+### D126 — The JS wire selector is `wire`; both hosts default to the deterministic preset (P7.1)
+**Decision** (profile engineer, provisional): JS options gain `wire:
+'deterministic' | 'bindle'` (the preset) and the per-option overrides `keys`,
+`tags`, `floats`, `undefinedValue`, `noncharacters`, on decode, encode, the
+Writer, views, profile sources and schema calls; `profiles.deterministic` and
+`profiles.bindle` spell them out (bindle also `top: 'map'`, `strictArrays:
+true`). The codec/view/source root default is the preset's (`any` for
+deterministic). Rust: `Profile` (`DETERMINISTIC`, `BINDLE`, fields) in
+`DecodeOptions` / `EncodeOptions` / `ValidationOptions`, defaulting to the
+deterministic preset; `schema::Options.profile` carries the flags. Tests that
+hold the codec to cbor.mjs select the Bindle preset explicitly.
+**Why**: usability review finding 7 asked for a wire selector distinct from
+the compiler's `profile` (a restriction set); D081 makes deterministic the
+default, in both hosts alike.
+**Alternatives**: reuse `profile` (two meanings, and spreading a preset into
+compile options would select a compiler profile); keep Rust on Bindle
+(cross-host defaults would differ).
+- [ ] **Signed off** (owner)
+
+### D127 — The deterministic preset admits Unicode noncharacters (P7.1)
+**Decision** (profile engineer, provisional): a sixth option, `noncharacters`
+(`PF_NONCHAR`), beyond D081's list: the deterministic preset accepts text
+holding U+FDD0..U+FDEF and U+xFFFE/U+xFFFF (well-formed UTF-8 scalar values);
+Bindle refuses them as before. The UTF-8 functions take the flag
+(`utf8-seq`, `utf8-invalid-at`, `utf8-window`).
+**Why**: RFC 8949 text is any well-formed UTF-8; noncharacters are valid
+scalar values that JS strings, cbor2 and the Unicode tables (D083) all carry.
+Refusing them by default would contradict "deterministic = §4.2.1".
+**Alternatives**: keep the refusal in every preset (a Bindle-only rule in the
+general default).
+- [ ] **Signed off** (owner)
+
 ### D130 — D005 re-taken: native JS stays the default; wasm + SDK is an opt-in, chosen by rule (P7.9)
 **Decision** (recommendation; the owner signs off):
 - **Default: the generated-JS package (`snug`)** for every JS host.
@@ -2685,6 +2848,27 @@ some bundlers refuse it); keep aliases valid until the next SDK call
 
 ## Findings
 
+- 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
+  import for a function named only inside the arguments of a call to a
+  `declarefn`-declared function — `(item b o (std-inner b p) …)` in scan.kin,
+  `(dead-item b s (std-inner b q) …)` in vm-dead.kin: the JS module throws
+  ReferenceError at run time while Rust (glob imports) builds. Workaround:
+  bind the inner call to a local first. Ours (snug.js), not fixed.
+- 2026-11-03 (P7.1): V8 inlining is the cost model of the hot scanner paths.
+  A one-line profile test at the top of `scan-float` made the Bindle float
+  scan 1.16–2.1× slower when one process also ran the deterministic path (not
+  inlined into `item` any more), and passing the noncharacter flag into
+  `utf8-invalid-at` cost text/map-heavy scans ~6%. The strict functions are
+  kept exactly as they were and the new behaviour lives in separate ones
+  (`rfc-f*` via `float-bad`, `utf8-*-nc` via `text-bad`, each consulted only
+  after a strict refusal): measured alone, the Bindle preset is within noise of
+  the pre-P7.1 tree ([bench](bench/README.md#profile-options-p71)).
+- 2026-11-03 (P7.1): another agent's commit `ea87d06` (a write-test harness
+  fix, by explicit path) swept this item's uncommitted RFC-float section of
+  `kin/scripts/write-test.mjs` into HEAD before the kin functions it imports
+  were committed (`20fe2e6`); HEAD's write-test was broken in between. A file
+  two agents edit is not safe to commit by path either.
+
 - 2026-11-03 (manager): P7.7's side finding that the baseline codec "accepts a
   float32 typed array holding a NaN" in the cborg oracle file was **not
   reproduced**: snug and `bench/baseline/cbor-3sln.mjs` give the same verdict
@@ -2769,9 +2953,97 @@ are answered as provisional decisions D082–D085. None is open now.
 
 ## Phase 7 — Standalone library (D080, 2026-11-03)
 
-- [ ] **P7.1 — General default profile** (D081): key kinds, standard tag set,
+- [x] **P7.1 — General default profile** (D081): key kinds, standard tag set,
   presets `deterministic` (default) and `bindle`; scanner, VM, builder, writer.
   D113 array-policy follow-up done: default ignores extras, strictArrays/Bindle retain the old check; **Learnt**: enumeration dominates 120k integers (paired CPU 29.6960 → 4.7339 ms); npm test 1,051 passed / 0 failed; method and evidence in bench/WRITER.md.
+  *Done 2026-11-03 by the P7.1 profile engineer; commits `20fe2e6`, `aaabb57`
+  and the docs/bench commit after them.* Decisions **D120–D127**;
+  [profiles](docs/profiles.md) is the user-facing description.
+  - **Option model (D120):** one kin flags word, `O_PROFILE` = scanner word 11
+    (`scan-profile`) and VM limits word 9; zero = Bindle, every bit admits
+    more (`PF_KEYS` 2 bits, `PF_TAGS` 2 bits, `PF_FLOATS`, `PF_UNDEFINED`,
+    `PF_NONCHAR`; internal `PF_SUB`); deterministic = 118. No Program,
+    container or SOURCE_KEY change; Programs validate under either preset.
+  - **kin:** key kinds (`key-peek`/`key-label`); `kin/stdtags.kin` (RFC 3339
+    date-time, finite epoch numbers, URI characters, 55799 at the top only,
+    the tag-24 payload walked as one item) in the scanner, dead walk, live
+    walk and session (D121); RFC floats with the canonical NaN, consulted
+    only after a Bindle float refusal (`float-bad`), and `put-float-rfc`
+    (D122); `undefined`; noncharacters through `utf8-*-nc`, consulted only
+    after a strict failure (`text-bad`, D127); float ranges compare as IEEE
+    (NaN in none, −0 = +0). Resumable: rscan `K_STD` frames with whole reads
+    for tags 0/24/32, container/tag keys walked whole, `PH_KSKIP` streams
+    byte content of an active key into the arena; session `T_STD`/`T_STDCHK`
+    with a pinned re-read, `key-end-any` for non-text keys, the prescan
+    admits standard tags (D124). Compiler: `h'00': T`-style cut keys are now
+    `map_cut`, not silently never present (D125).
+  - **JS:** `wire`, `keys`, `tags`, `floats`, `undefinedValue`,
+    `noncharacters` on every operation; `profiles.{deterministic,bindle}`;
+    Map for non-text keys (collisions refused), `Tagged`, `undefined`;
+    Writer `undefined()`, `tagged()`, any keys, RFC floats; views with any
+    keys and `tagged`/`undefined` kinds; declarations (D123, D126).
+    **Rust:** `snug::Profile` in `DecodeOptions`/`EncodeOptions`/
+    `ValidationOptions`, `Value::Undefined`, `schema::Options.profile`,
+    deterministic by default, `bindle()` constructors; bins and the wasm
+    shim's limits buffer take the flags. Rust API tests that compare with
+    Bindle fixtures select the Bindle preset explicitly.
+  - **Vectors:** `corpus/cbor-vectors/deterministic.json` (generator
+    `corpus/tools/export-deterministic.mjs`): **92 accept / 85 refuse** with
+    hand-written codes and offsets — RFC 8949 Appendix A (deterministic
+    examples accepted; non-shortest ±∞/NaN, unassigned simple values and
+    indefinite examples refused), integer/negative/64-bit keys, the RFC 8392
+    A.1 CWT, a CWT `cnf` holding a COSE_Key, mixed key kinds in bytewise
+    order and the length-first trap, tags 0/1/21–24/32/55799 valid and
+    invalid, undefined, every NaN/±∞/±0 form, non-shortest heads/lengths —
+    each with the Bindle code of the same bytes (checked against cbor.mjs).
+  - **Gates (actual runs, Node v24.6.0, rustc 1.92, the final tree):**
+    `bb check` ok; **scan-test** 31,360/31,360 Bindle cases = cbor.mjs on JS,
+    Rust and wasm; profile options 354/354 vector runs (code and offset) +
+    92 fixed + 20,000 seeded cases under random flags, JS == Rust 20,446/20,446;
+    **rscan-test** 259,081 policy runs + 267,541 every-offset splits ==
+    recursive, Rust 259,032/259,032 identical (incl. the profile-option
+    cases); **vm-test** profile identity 63,612/63,612 (VM against `any` and a
+    schema keeping the new shapes live, under the flags), 983/983 conformance,
+    71,471/71,471 JS == Rust == fast/generic, wasm 71,468/71,468;
+    **vmsession-test** 949,035/949,035 session runs == buffer, 612,517/612,517
+    JS == Rust, 0 panics, traps clean; **compile-test** 301/301 identical,
+    270/270 verified, §15 unchanged, 55/55 SOURCE_KEYs; **nav-test** 1,106/1,106
+    traces (deterministic documents included), 670/670 Rust View paths;
+    **write-test** incl. 5,213/5,213 RFC float patterns JS == Rust, 4,371/4,371
+    pass the scanner's RFC rules, 3,980/3,980 equal put-float where Bindle
+    writes them; **unicode-test** ok (noncharacters compared with the Node
+    oracle under the deterministic preset); **rust-api-test** ok (12
+    integration, 10 doc, 5 + 1 docs/README doctests, clippy); **cd host/js &&
+    npm test 1,241 passed / 0 failed / 0 skipped** (183 new profile tests);
+    **bb drift** ok (88 destinations).
+  - **Differential (cbor2 2.4.1, CDE + rejectDuplicateKeys/LongLoundNaN/
+    Simple):** 38,086/40,420 inputs same verdict; every other one in a
+    documented class (tag 621, snugtags 1,211, floatwidth 391 confirmed by
+    rejectLongFloats, tag24 56, nan 41, limits 12, cbor2tag1 2), 0
+    unexplained; `encode()` == cbor2 `encode({cde:true})` on 4,000/4,000
+    seeded values byte for byte.
+  - **Learnt:** a Program must not encode a wire-profile assumption — the
+    compiler's "never present" lowering of non-text cut keys only looked
+    correct because Bindle refused such keys (D125). Nested keys need either
+    whole-key reads or a stack of key arenas; whole reads were simpler and
+    bounded (D124). V8's inlining budget is the scanner's cost model: new
+    behaviour belongs in separate functions consulted after the hot path
+    refuses (Findings). A file two agents edit is not safe to commit by path
+    (Findings).
+  - **Bench** ([bench/README.md](bench/README.md#profile-options-p71),
+    `bench/profiles-bench.mjs`, thread CPU, one preset per process, 3 × 11
+    trials vs `c37eaaf`, shared M1 Pro, Node v24.6.0): Bindle scan medians
+    0.96–1.03 of the base on all 8 workloads (no regression); decode/encode
+    medians 0.87–1.13 with single-run outliers both ways on a loaded machine.
+    Deterministic float scan median 1.046 (the `float-bad` re-check);
+    `bench/codec.mjs` takes `bindle|deterministic`.
+  - **Open:** an "any tag" level (COSE/CWT tags) and full RFC 3986 URI
+    parsing (D121); cut literal keys of byte-string/float kinds (KEYS majors
+    2/7, a D084 minor; D125); the deterministic float scan is ~5% slower than
+    the Bindle one (the `float-bad` re-check); host/wasm-sdk (D130–D132) and the wasm
+    scan shim have no profile option yet; `wire` should be added to P7.10's
+    option-key admission; cbor2's `rejectLongFloats` cannot separate float
+    width from integral floats, so that class is confirmed, not compared.
 - [ ] **P7.2 — Extension controls** (D082) and the generic controls module.
 - [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
   *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.

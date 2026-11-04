@@ -249,9 +249,13 @@ a binary search for the last interval with lo ≤ point.
 Record: `lo_hi lo_lo hi_hi hi_lo` (4 words): inclusive bounds as **ordered
 keys** of binary64 patterns, `key(x) = x ≥ 0 ? x | 2^63 : ~x` (64-bit,
 unsigned order). float16/float32 data are widened to binary64 by integer
-operations before keying; NaN, ±∞ and −0 never reach a leaf (profile
-`float`). Exclusive bounds are normalised by stepping the key by one. Runs
-sorted, disjoint, non-adjacent [V].
+operations before keying. Under the Bindle float rules NaN, ±∞ and −0 never
+reach a leaf (profile `float`); under the deterministic rules (D122) they
+arrive as float16 only and compare as IEEE 754 does: a NaN is in no interval,
+±∞ key as binary64 ±∞, and a zero is in a run when the key of +0 or of −0 is
+(two adjacent keys; a second binary search for −0, charged as probes).
+Exclusive bounds are normalised by stepping the key by one. Runs sorted,
+disjoint, non-adjacent [V].
 
 ### 4.5 LITSET members (S15)
 
@@ -593,7 +597,11 @@ and every factor is satisfied.
   matched, possibly empty. A TAG/TAGSET leaf matches iff its number matched
   and its content typeset matched. Profile counting is the scanner's: bignum
   and typed-array content is visited as a schema child but not counted as an
-  item (scanner.md).
+  item (scanner.md). A standard-set tag (D121, under the profile flag) has
+  its content visited as an ordinary item (counted) with that query; after
+  it the profile's content rule runs, and a tag-24 payload is walked dead as
+  one item at d + 2 against the shared counters and budget (unlike an EMBED
+  sub-validation, an inner refusal is a profile refusal of the document).
 * **EMBED.** The byte string's content `[s, e)` is a sub-validation: the
   scanner's item counter is saved and reset, the depth limit is
   `min(limit, D − d − 1)`, top-any 1, `cose` 0, and the walk is bounded by e
@@ -826,8 +834,9 @@ grown lazily, shared by every Program. For a call on rule r of Program P:
 ```
 S[0  .. 16)     scanner block: snug.cbor.codes O_* layout (O_TOP 0, O_COSE 1,
                 O_MAX_BYTES 2, O_MAX_DEPTH 3, O_MAX_ENTRIES 4, O_MAX_ITEMS 5,
-                O_ERR_POS 6, O_ITEMS 7, O_HI 8, O_LO 9, O_CSTART 10, 11–15
-                scanner-reserved); the VM passes S itself as the scanner's `o`
+                O_ERR_POS 6, O_ITEMS 7, O_HI 8, O_LO 9, O_CSTART 10, O_PROFILE 11
+                (the profile flags, D120: setup copies limits word 9 here),
+                12–15 scanner-reserved); the VM passes S itself as the scanner's `o`
 S[16 .. 48)     VM block (below)
 S[48 .. 48+M)               mark[M]       epoch stamps per leaf id
 S[48+M .. 48+2M)            qidx[M]       query-list index per leaf id
@@ -944,8 +953,12 @@ before evaluating a live child: `INDEX`, `KEY`/`ANYKEY`, `TAG`, `EMBED`).
 | 5 | items | min(given, `LIM_ITEMS`) |
 | 6 | bignum bytes | min(given, `LIM_BIGNUM_BYTES`) |
 | 7 | budget | min(given, `LIM_BUDGET`) |
+| 8 | VM extension: bit 0 forces the generic path (D044), bit 1 the legacy schedule 1 (D045) | as given; absent = 0 |
+| 9 | VM extension: the profile flags (D120, snug.cbor.codes `PF_*`; host bits 0–6) | as given; absent (fewer than 10 words) or negative = 0, the Bindle profile; `PF_SUB` added when the span's depth is not 0 |
 
 The VM copies the effective values into the scanner block and the VM block.
+Words 8 and 9 are API extensions of the call, not Program words: a Program
+validates under any profile, and the format is unchanged (D084).
 
 ## 13. API, rule names, serialisation
 
@@ -1066,6 +1079,7 @@ exceeds the remainder. These are the arch §7 rows, restated for this format
 | text item UTF-8 validation (profile; live or dead) | ⌈len/64⌉ |
 | map key order comparison (each key after the first) | ⌈min(len₁, len₂)/64⌉, at least 1 |
 | typed-array float NaN scan (profile) | ⌈len/64⌉ |
+| standard-set tag check after its content (profile, D121) | 1, + ⌈len/64⌉ for a tag-0/32 text's form scan; a tag-24 payload is walked as dead items |
 | query construction: each typeset element scanned (eval list, or answers when `n_eval = 0`) | 1 |
 | mask filter, at a live item | \|Q′\| |
 | scalar/TAG/TAGSET/EMBED leaf evaluated (admitted) | 1 |

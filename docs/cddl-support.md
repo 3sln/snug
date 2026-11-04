@@ -82,8 +82,9 @@ C Cc Cf Co Cn Cs
 
 `Cs` is empty: surrogate code points never occur in Unicode text. `C` also
 excludes surrogates; `\P{Cs}` matches any single scalar allowed by the wire
-profile. The current profile rejects noncharacters with `cbor/text`, even
-when a category would otherwise match. Category aliases, scripts, blocks,
+profile. The Bindle profile (`wire: 'bindle'`) rejects noncharacters with
+`cbor/text`, even when a category would otherwise match; the deterministic
+preset admits them, and they match their categories (Cn). Category aliases, scripts, blocks,
 `gc=…` spellings in CDDL and host-engine extensions are refused.
 
 Tables are pinned to **Unicode 16.0**, generated offline from **Node
@@ -166,7 +167,11 @@ other alternatives (D021). This permits discriminated choices such as
 `{ kind: "a", x: uint // kind: "b", y: tstr }`.
 Cuts on key typesets and cut literals after an overlapping wildcard are
 refused (`map_cut`), because the priority transformation would otherwise
-change the source-order cut meaning.
+change the source-order cut meaning. A literal colon key that is a byte
+string, a float or an integer beyond 64 bits (`h'00': T`, `1.5: T`) is a cut
+on a key that only a key typeset can hold, also refused with `map_cut`
+(D125); write `h'00' => T`. (Before P7.1 such a member silently compiled as
+never present.)
 
 Optional groups are expanded exactly. Repeated literal-only groups combine
 key-disjoint alternatives, including empty ones; duplicate literal keys
@@ -196,15 +201,26 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
   so it does not include decimal fractions or arbitrary bignums.
 - `float16`, `float32`, `float64` constrain **encoded width**. Shortest-form
   CBOR encodes 1.5 as float16, so `float32` refuses it. Use `float` when the
-  encoded width is not a protocol constraint. Current scalar-float policy
-  also refuses NaN, infinities, −0 and integral floats within the safe range.
+  encoded width is not a protocol constraint. Under the deterministic
+  preset NaN (only `f97e00`), ±∞, −0 and integral floats are valid floats;
+  float ranges compare as IEEE 754 (−0.0 is in `0.0..1.0`, NaN is in no
+  range, +∞ is in `float .ge 1.5`), while literals compare encodings (`0.0`
+  does not match −0.0). The Bindle profile refuses NaN, ±∞, −0 and integral
+  floats within the safe range before the schema sees them.
 - Text `.size` is UTF-8 byte length, not code-point or grapheme length.
   Regexps operate on code points; `.chars` is only planned (D082).
 - CDDL numeric bounds compare bytes/bit patterns, not rounded JS values;
   integers beyond Number's safe range stay exact. Literal comparisons rely
   on the unique admitted wire encoding.
-- A schema can describe integer map keys, tags or simple values that the
-  current wire policy refuses. `profile: 'full'` never disables strict CBOR.
+- The wire profile, not the schema, decides which data reach the schema:
+  under the deterministic preset (the default) integer and other non-text
+  map keys, the prelude's `tdate`, `time`, `uri`, `encoded-cbor`, `eb64url`,
+  `eb64legacy`, `eb16`, `cbor-any` and `undefined` match valid data; tags
+  outside the standard set (`bigfloat`, `b64url`, `regexp`, `mime-message`
+  …) are refused by the profile whatever the schema says. Under `wire:
+  'bindle'` the Bindle restrictions apply. Compiler `profile: 'full'` never
+  disables strict CBOR, and a compiled Program validates under either preset
+  ([profiles](profiles.md#cddl-and-schemas)).
 - Profile errors outrank schema errors, except that budget exhaustion stops
   the walk immediately (D023/D025). Errors never echo a data value or unnamed
   map key. See [errors](api.md#errors).

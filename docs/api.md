@@ -17,35 +17,47 @@ decode(bytes: Uint8Array, options?: DecodeOptions): Value
 encode(value: unknown, options?: EncodeOptions): Uint8Array
 ```
 
-`Value` is the decoded union: null, boolean, number, bigint, string,
-Uint8Array, admitted native typed arrays, Decimal, Float16Bytes, NDArray,
-arrays, string-keyed objects, or a top-level Map with `cose`.
+`Value` is the decoded union: null, undefined, boolean, number, bigint,
+string, Uint8Array, admitted native typed arrays, Decimal, Float16Bytes,
+NDArray, Tagged, arrays, string-keyed objects (maps with only text keys), or
+`Map` (maps with any other key, and a top-level map with `cose`).
 The recursive union cannot express every root-only admission restriction;
 see the [host compatibility and integer tables](guide.md#decode-after-checking).
 CDDL validation does not infer a narrower TS type.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `top: 'map' \| 'any'` | `'map'` for codec/view/source; `'any'` for schema | Decode/check root policy |
-| `cose: boolean` | false | Safe integer labels as well as text, top-level map only |
+| `wire: 'deterministic' \| 'bindle'` | `'deterministic'` | The wire preset ([profiles](profiles.md#options)); the five options below override it |
+| `keys: 'text' \| 'integer' \| 'any'` | preset (`'any'`; bindle `'text'`) | Map key kinds |
+| `tags: 'bindle' \| 'standard'` | preset (`'standard'`) | Tag set |
+| `floats: 'bindle' \| 'deterministic'` | preset (`'deterministic'`) | Scalar float rules |
+| `undefinedValue: boolean` | preset (true) | `f7` |
+| `noncharacters: boolean` | preset (true) | Unicode noncharacters in text |
+| `top: 'map' \| 'any'` | codec/view/source: the preset's (`'any'`; bindle `'map'`); schema: `'any'` | Decode/check root policy |
+| `cose: boolean` | false | Under `keys: 'text'`: safe integer labels as well as text, top-level map only |
 | `objects: 'null' \| 'plain'` | `'null'` | Decode ordinary maps into null/ordinary-prototype objects |
 | `maxBytes` | decode: `LIMITS.maxBytes`; encode: unset | Input byte cap; encode/Writer check only when supplied, at finish: output acceptance, not peak allocation |
 | `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Nesting, per-container entries and total item bounds; see operational accounting in the guide |
 | `omitUndefined: boolean` | false | Encode object-member omission; see guide |
-| `strictArrays: boolean` | false | Encode: refuse extra array own properties with `unsupported`; Bindle preset sets true |
+| `strictArrays: boolean` | preset (false; bindle true) | Encode: refuse extra array own properties with `unsupported` |
 
-DecodeOptions includes `top`, `cose`, `objects` and the four limits.
-EncodeOptions includes `cose`, `omitUndefined`, `strictArrays` and the four limits. `encode`
+DecodeOptions includes the profile options, `top`, `cose`, `objects` and the
+four limits. EncodeOptions includes the profile options, `cose`,
+`omitUndefined`, `strictArrays` and the four limits. An unknown option value
+is a `TypeError`. `encode`
 does not enforce a map root. Its `maxBytes` check happens only when supplied,
 at finish, after allocation. Invalid CBOR/profile or inadmissible host values
 throw `SnugFault`; argument misuse can throw `TypeError`.
-For a non-map round trip use `decode(encode([1, 2]), { top: 'any' })`;
-encode accepts any supported root while codec decode defaults to map.
+Encode accepts any supported root; codec decode accepts any root under the
+deterministic preset and requires a map under `wire: 'bindle'` unless
+`top: 'any'` is given.
 
 Arrays encode elements 0..length−1, ignoring extra named own properties
 (including hidden and symbol properties) by default. `strictArrays: true`
-retains the old own-key count check. Both modes refuse holes and present
-undefined elements with `unsupported`, regardless of `omitUndefined`.
+retains the old own-key count check. Both modes refuse holes with
+`unsupported`; a present undefined element encodes as `f7` when the profile
+admits `undefinedValue` (the deterministic preset) and is refused with
+`unsupported` otherwise, regardless of `omitUndefined`.
 Only when an element reads as undefined is absence checked (`!(i in array)`).
 Arrays must pass Array.isArray and have exactly the local Array.prototype;
 subclassed, foreign-realm and null-prototype arrays remain refused.
@@ -60,7 +72,8 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `NDArray` | `new NDArray(shape: number[], data: Value[] \| TypedArray \| Float16Bytes)`; readonly `shape`, `data`. Positive dimensions (1..8); product equals element count. Data is retained, not deeply frozen. |
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
-| `profiles` | Frozen object containing only `bindle: { top: 'map', cose: false, strictArrays: true }`. Pass as options to encode/Writer for the old array-property refusals. The general deterministic preset is not implemented/exported. |
+| `profiles` | Frozen `{ deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into any options to select it and override fields. |
+| `Tagged` | `new Tagged(tag: number, value: Value)`; frozen, `tag` (0..2³²−1) and `value`. Standard-set tags (0, 1, 21–24, 32, 55799) decode to it (tag 24's `value` is the payload bytes); encode checks the tag and content with kin and refuses others with `tag`. |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
 Float16 where available, Float32/64. `Uint8Array` is a byte string.
@@ -222,10 +235,12 @@ detect it. Owned copying protects against the original input only.
 
 | View member | Signature / meaning |
 | --- | --- |
-| `kind` | int, float, bytes, text, bool, null, array, map, decimal, ndarray, typed |
+| `kind` | int, float, bytes, text, bool, null, undefined, array, map, decimal, ndarray, typed, tagged |
+| `tag`, `content()` | A tagged item's tag number (else undefined); a View of its content |
+| `isUndefined()` | boolean |
 | `length` | number or undefined; entries/bytes/elements according to kind |
 | `offset`, `depth`, `borrowed` | Absolute item position, physical depth, ownership flag |
-| `get(key: string \| number \| bigint)` | View or undefined; map only; integer lookup only for top-level COSE maps |
+| `get(key: unknown)` | View or undefined; map only. Strings; integers (number or bigint) when the profile admits integer keys or in a top-level cose map; any value under `keys: 'any'`, compared by its deterministic encoding |
 | `at(index: number)` | View or undefined; array only; negative/out-of-range integer → undefined, fractional → TypeError |
 | `entries()` | IterableIterator of `[key or index, View]` |
 | `keys()`, `values()` | IterableIterator of keys/indexes or Views |
@@ -273,11 +288,13 @@ All methods return `this` except `finish`; `failure` is the first code or ''.
 | `uint(n)` | number or bigint in 0..2⁶⁴−1; numbers must be safe integers |
 | `int(n)` | safe integer number or exact bigint (bignum beyond 64 bits) |
 | `bigint(n)` | bigint |
-| `float(x)` | number; shortest width, current scalar-float restrictions |
+| `float(x)` | number; shortest width. Deterministic floats: NaN → `f97e00`, ±∞/±0 float16, `float(1)` → `f93c00`; Bindle floats refuse NaN, ±∞, ±0 and safe-range integers (`float`) |
 | `bool(b)`, `null()`, `text(s)`, `bytes(b)` | boolean, no argument, string, Uint8Array |
+| `undefined()` | `f7`; needs `undefinedValue` |
+| `tagged(tag, content)` | `value(new Tagged(tag, content))` |
 | `typed(a)`, `decimal(d)`, `ndarray(a)` | admitted typed array/Float16Bytes, known non-integral Decimal, NDArray; use value(Decimal.from(text)) for integral-or-decimal results |
 | `beginArray(n)`, `beginMap(n)` | non-negative safe count, checked against entry bound |
-| `key(k)` | string; safe integer number only for top-level map with cose |
+| `key(k)` | string; an integer (number or bigint) with `keys: 'integer'`/`'any'`, or a safe integer label in a top-level cose map under `keys: 'text'`; any value with `keys: 'any'` (written by a value walk whose items count toward `maxItems`) |
 | `end()` | close one complete container |
 | `finish(): Uint8Array` | finish one complete root; return copied encoding |
 

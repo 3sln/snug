@@ -10,9 +10,9 @@ Status: **experimental implementation, updated 2026-11-03**. The generated
 compiler, verifier, scanner and buffer VM work, with JS codec, schema API,
 checked views/cursor, Writer, profile-only source adapters and serialised
 Programs. Rust/wasm core and test hosts exist; public host coverage is less
-complete. General default profiles, extensions, Unicode tables, public
-resumable CDDL sessions, package evidence in browsers/Workers and the bundle
-size target remain work in progress. See the [feature matrix](README.md#features-and-status).
+complete. The deterministic and Bindle wire presets (P7.1) are implemented
+in JS and Rust. Extensions, unknown-length streams, current package evidence
+in browsers/Workers and the bundle size target remain work in progress. See the [feature matrix](README.md#features-and-status).
 `DEVLOG.md` is the live tracker; this file is what the tracker derives from
 and changes only when a decision changes. Decisions are `D###` in `DEVLOG.md`
 and are provisional until signed off. The design is in
@@ -82,25 +82,33 @@ these precise choices (each with a decision):
 
 ## 3. The CBOR profile
 
-The standalone design has general `deterministic` and optional `bindle`
-presets (D080/D081). **P7.1 is not implemented yet:** current scanner/VM/codec
-behaviour still follows the legacy Bindle restrictions. `profiles.bindle`
-exposes the current root/key defaults; there is no general deterministic
-preset in the public API yet (D104). Compiler profiles are a separate axis.
-See [profiles](docs/profiles.md) for the current/planned distinction.
+Every path verifies RFC 8949 §4.2.1 core deterministic encoding on decode
+(definite lengths, shortest arguments and floats, bytewise encoded-key order,
+no duplicates, one root) and produces only that. A wire profile narrows
+acceptance further; every option only removes acceptance (D081, D120). Two
+presets (P7.1):
 
-Current restrictions:
-RFC 8949 core deterministic encoding verified on decode; text map keys (a
-`cose` option allows integer labels in the top-level map); definite lengths;
-`false`, `true`, `null` and shortest floats only, with scalar NaN, ±∞, −0 and
-integral floats within ±(2^53−1) refused; tags 2 and 3 (bignums beyond 64
-bits, 9..128 bytes, no leading zero), 4 (normalised decimal fractions), 40
-(row-major multi-dimensional arrays) and the RFC 8746 little-endian typed
-arrays 69–72, 77–79, 84–86; nothing else. Resource bounds are defaults (§5).
-Refusal codes retain the imported vector vocabulary.
-This test input and its [consumer checklist](docs/profiles/bindle.md) do not
-define snug's product scope. Codec/view/source default to a map root; schema
-methods default to any root; both accept an explicit `top` option.
+* **`deterministic`** (default): any map key kind; tags 2, 3, 4, 40, the
+  RFC 8746 little-endian typed arrays and the standard additions 0, 1, 21–24,
+  32, 55799 with RFC 8949 content checks; RFC 8949 floats (canonical NaN
+  `f97e00`, ±∞, −0, integral floats); `false`, `true`, `null`, `undefined`;
+  any well-formed UTF-8 text.
+* **`bindle`**: text map keys (a `cose` option allows safe integer labels in
+  the top-level map); the tags above without the standard additions;
+  `false`, `true`, `null` and shortest floats only, with scalar NaN, ±∞, −0
+  and integral floats within ±(2^53−1) refused; no noncharacters. It is the
+  pre-P7.1 behaviour bit for bit, and the 3sln.me vectors' arbiter.
+
+Both: bignums beyond 64 bits only (9..128 bytes, no leading zero),
+normalised decimal fractions, unassigned simple values refused; resource
+bounds are defaults (§5). Refusal codes retain the imported vector
+vocabulary. Programs do not depend on the wire profile: it is a run-time
+option of each call. Compiler profiles are a separate axis. See
+[profiles](docs/profiles.md). The Bindle test input and its
+[consumer checklist](docs/profiles/bindle.md) do not define snug's product
+scope. Codec/view/source default to the preset's root (any for
+deterministic, a map for bindle); schema methods default to any root; all
+accept an explicit `top` option.
 
 ## 4. Errors
 

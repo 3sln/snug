@@ -342,6 +342,13 @@ fail first, and **its content is not counted as an item**; `float` before
 `malformed`; a stray `0xff` is `indefinite`; in `cose` mode integer labels
 must be safe integers, else `key_type`.
 
+**Profile options** (P7.1, D120–D127) are one integer of flags in the
+scanner block's word 11, read by every walk: zero is the Bindle profile above
+(cbor.mjs's order and codes, bit for bit) and each set bit admits more — any
+key kind, the standard tags with content checks, RFC 8949 floats, `undefined`,
+noncharacters ([profiles](profiles.md#the-option-model-d120)). The extended
+order of checks is in `docs/scanner.md`. Programs never depend on the flags.
+
 **Profile item counting is separate from predicate visits** (C15): typed
 arrays and bignums are one item each, decimal and ndarray inner arrays count
 as cbor.mjs counts them, and embedded `.cbor` content has its own accounting

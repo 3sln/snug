@@ -26,24 +26,29 @@ Why snug:
   deterministic encoding decisions, with cross-host conformance gates.
 
 **Experimental, private package, version 0.0.0.** The JS buffer APIs work.
-The current wire policy still has Bindle's restrictions; the general
-`deterministic` default is being implemented in P7.1 (D081), and is not yet
-available. Bindle is one optional
+The default wire policy is the **deterministic preset** (P7.1, D081, D120):
+RFC 8949 §4.2.1 core deterministic CBOR, verified on read, with any map key
+kind, the standard tag set and RFC floats. The **Bindle** preset (`wire:
+'bindle'`) keeps the pre-P7.1 restrictions bit for bit; Bindle is one optional
 consumer profile in the standalone design (D080), not snug's purpose. See
-[profiles](docs/profiles.md) before using another CBOR protocol.
+[profiles](docs/profiles.md) for every option.
 
-Before adopting snug, check your protocol:
+### Can it read my protocol?
 
-- Producers must emit core deterministic CBOR: shortest forms, definite
-  lengths and lexicographic encoded-key order. There is no lenient mode.
-- Maps need text keys. `cose: true` permits safe integer labels only in the
-  top-level map; nested integer maps in COSE/CWT protocols are refused.
-- Timestamp tags 0/1, arbitrary tags and generic tagged wrappers are refused;
-  check the [current tag list](docs/profiles.md#what-exists-now).
-- `undefined`, scalar NaN, infinities and negative zero are refused.
-- Compiler `profile: 'full'` does not relax these wire restrictions.
+| Your data | Deterministic preset (default) | `wire: 'bindle'` |
+| --- | --- | --- |
+| Producer emits shortest forms, definite lengths, keys sorted by encoded bytes (RFC 8949 §4.2.1 / CDE) | yes | yes |
+| Producer emits non-shortest heads or floats, indefinite lengths, unsorted or length-first-sorted keys | **no**: there is no lenient mode | no |
+| Integer map keys at any depth (COSE, CWT `cnf` holding a COSE_Key) | yes (decodes to `Map`) | no (`cose` admits safe integer labels in the top-level map only) |
+| Keys that are byte strings, arrays, maps, tags, floats, `null`... | yes | no |
+| Tags 0 (date/time text), 1 (epoch time), 21–23, 24 (embedded CBOR), 32 (URI), 55799 | yes, content checked (`Tagged`) | no |
+| Other tags (5 bigfloat, 16–18/61 COSE/CWT, 33–36, ...) | **no** (`tag`) | no |
+| `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (NaN only as `f97e00`) | no |
+| Unicode noncharacters in text | yes | no |
+| Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes, normalised forms only | yes |
 
-Currently this is a restricted deterministic subset, with no general mode.
+Compiler `profile: 'full'` does not relax any wire restriction; it is a
+separate, schema-side restriction set.
 
 ## Quick start
 
@@ -98,7 +103,7 @@ hand-written TypeScript declarations:
 
 | Entry | Exports |
 | --- | --- |
-| `snug` | `decode`, `encode`, `Decimal`, `NDArray`, `Float16Bytes`, `SnugFault`, `LIMITS`, `profiles` |
+| `snug` | `decode`, `encode`, `Decimal`, `NDArray`, `Float16Bytes`, `Tagged`, `SnugFault`, `LIMITS`, `profiles` |
 | `snug/schema` | `Schema`, `Program`, `ProgramError`, `validate`, `decode`, `validateAt`, `fromProgram`, `fromSerialized` |
 | `snug/compile` | lazy asynchronous `compile`, `SchemaError` |
 | `snug/view` | `view`, `View`, `Cursor` |
@@ -174,7 +179,8 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | Serialised Programs and runtime-only loading | Implemented; format 1.0, digest plus structural verification |
 | Known-length handles and push sources | CDDL validation over handles and declared-length push sources implemented; unknown-length streams pending D085 |
 | Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
-| General deterministic preset, extension controls | Pending P7.1–P7.2 |
+| Wire profiles | Deterministic preset (default) and Bindle preset with per-option overrides, P7.1 (D120–D127); JS and Rust |
+| Extension controls | Pending P7.2 |
 | Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
 | Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
 | Runtime ≤20 KB min+gzip | Target missed in the recorded runtime measurement; P7.6 remains open |
@@ -197,10 +203,14 @@ with measurements and methods under [bench](bench/README.md).
 
 ## Defaults and limits
 
-Codec decode/view/source scanning require a top-level map by default; pass
-`{ top: 'any' }` for another root. Schema validation/decode default to any
-root. Maps use text keys, with safe integer labels allowed only in the
-top-level map under `cose: true`. Decoded ordinary maps have a null prototype.
+The wire profile defaults to the **deterministic preset**: any root, any map
+key kind, the standard tag set, RFC 8949 floats, `undefined` and
+noncharacters admitted. `{ wire: 'bindle' }` (or `...profiles.bindle`)
+restores the Bindle profile: a top-level map required by codec decode, views
+and profile sources, text keys only (safe integer labels in the top-level map
+under `cose: true`), Bindle tags and floats. Schema validation/decode default
+to any root under both. Decoded text-keyed maps have a null prototype; maps
+with other keys decode to `Map` ([values](docs/profiles.md#javascript-values-d123)).
 
 Default input cap: **1,500,000 bytes**, depth **32**, entries per container
 **65,536**, items **131,072**, bignum content **128 bytes**; compiled schemas

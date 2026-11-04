@@ -9,6 +9,7 @@ record supplies one; “worktree” is not a reproducible clean revision.
 
 | Date / revision | Operation or artifact measured | Ownership / boundary | Runtime and record |
 | --- | --- | --- | --- |
+| 2026-11-03 / `f1a78c0` | P7.1 profile options: this tree under each preset vs the pre-P7.1 tree `c37eaaf` (decode, scan, encode; 8 workloads) | Same public calls on both arms; one preset per process; Bindle arm with `strictArrays: false` (D113 measured separately) | Node v24.6.0, thread CPU; [P7.1 below](#profile-options-p71) |
 | 2026-11-03 / `f275938` | **Full public runtime bundle:** codec + schema + view + writer + sources, no compiler; 155,193 minified / **56,226 gzip-9 bytes** | Staged package, all five runtime entries together; no fixtures; esbuild 0.28.2, not an internal-core size | Node v24.6.0; [P7.7 sizes/method](../tools/runtime/README.md#sizes-esbuild---minify-bytes) |
 | 2026-11-03 / `f275938` | Public decode, encode, validate, schema.decode, checked view + lookup, Program load, compile, profile handle scan; 976 conformance checks per arm | Decode builds copies; checked view owned by default; staged package in fresh consumers; compiler/precompiled arms separate | Node v24.6.0, Chrome 156.0.8078.80, workerd 2026-11-02 and repeat 2025-12-17; [P7.7](../tools/runtime/README.md). Later Unicode/schema sources not tested there |
 | 2026-11-03 / D113 worktree (clean revision not recorded) | encode and Writer.value array-policy follow-up; gate 1,051 passed, 0 failed/skipped | Input values reused; output ownership/hand-off described in record; strictArrays compared separately | Node v24.6.0; [WRITER D113](WRITER.md#d113--array-elements-by-default-strict-arrays-opt-in--2026-11-03), supersedes mandatory-array-enumeration status |
@@ -209,3 +210,75 @@ plus one, followed by its span; unsigned base-128 varints encode counts,
 category ids, gaps and spans. Programs contain only the compiled automata;
 there is no runtime table-module import. Temporary decode arrays and compiler
 arena memory are outside the decoded-Int32 figure; no peak-memory claim.
+
+## Profile options (P7.1)
+
+**Question:** does the Bindle preset cost anything after P7.1, and what does
+the deterministic preset cost? **Machine:** Apple M1 Pro, macOS 14.6.1,
+32 GiB, **shared** (1/5/15-minute load average 8–9 / 21–25 / 35–38 during
+the runs). **Runtime:** Node v24.6.0 (V8 13.6.233.10), `--single-threaded-gc`.
+**Method:** `node --single-threaded-gc bench/profiles-bench.mjs <base> <preset> 11`
+with `<base>` a detached worktree of `c37eaaf` (the last commit before
+P7.1), tree `f1a78c0`. Each process runs one preset (V8 inlines differently
+when a process exercises both presets' paths; a library process uses one)
+and interleaves the base arm and this tree's arm, rotated each round;
+`process.threadCpuUsage`, µs per call, median of 11 trials; answers checked
+equal across the arms first. Three processes per preset; the table gives the
+three ratios (this tree / base) and their median. Option objects are built
+outside the timed calls. The Bindle arm passes `strictArrays: false`, as the
+base encoder behaves; the preset's own-key check is D113's cost
+([WRITER](WRITER.md#d113--array-elements-by-default-strict-arrays-opt-in--2026-11-03)).
+
+| Workload | op | Bindle / base (3 runs) | median | deterministic / base (3 runs) | median |
+| --- | --- | --- | ---: | --- | ---: |
+| RPC put (small) | decode | 1.043 1.076 1.065 | 1.065 | 1.012 0.959 0.997 | 0.997 |
+| RPC put (small) | scan | 0.909 0.956 0.977 | 0.956 | 1.007 0.979 0.997 | 0.997 |
+| RPC put (small) | encode | 1.042 1.046 0.879 | 1.042 | 1.160 1.003 1.042 | 1.042 |
+| RPC put + 1 MiB bytes | decode | 0.674 0.965 1.106 | 0.965 | 1.295 1.149 1.072 | 1.149 |
+| RPC put + 1 MiB bytes | scan | 1.014 1.017 0.946 | 1.014 | 0.941 0.990 1.018 | 0.990 |
+| RPC put + 1 MiB bytes | encode | 1.129 1.033 1.280 | 1.129 | 0.972 0.809 0.950 | 0.950 |
+| 120000 integers | decode | 1.033 0.988 1.001 | 1.001 | 1.043 1.008 0.986 | 1.008 |
+| 120000 integers | scan | 0.999 1.015 1.015 | 1.015 | 1.002 1.017 1.004 | 1.004 |
+| 120000 integers | encode | 1.071 0.975 0.969 | 0.975 | 1.053 0.990 1.068 | 1.053 |
+| 1 MiB Float64Array | decode | 1.153 0.982 1.035 | 1.035 | 1.080 1.055 0.881 | 1.055 |
+| 1 MiB Float64Array | scan | 0.994 0.997 1.009 | 0.997 | 1.018 1.025 1.003 | 1.018 |
+| 1 MiB Float64Array | encode | 1.027 0.870 0.839 | 0.870 | 0.854 0.851 0.844 | 0.851 |
+| 10000 maps x 8 short keys | decode | 1.178 0.996 1.017 | 1.017 | 1.031 1.143 1.057 | 1.057 |
+| 10000 maps x 8 short keys | scan | 0.967 1.001 0.996 | 0.996 | 1.025 0.968 0.998 | 0.998 |
+| 10000 maps x 8 short keys | encode | 0.987 1.002 1.000 | 1.000 | 0.983 1.010 1.005 | 1.005 |
+| map-heavy document | decode | 1.017 1.013 0.985 | 1.013 | 1.008 1.045 0.956 | 1.008 |
+| map-heavy document | scan | 1.011 0.995 1.004 | 1.004 | 1.008 1.013 1.003 | 1.008 |
+| map-heavy document | encode | 0.998 0.994 1.058 | 0.998 | 1.001 1.020 0.988 | 1.001 |
+| 5000 floats (scalar) | decode | 1.049 0.990 1.867 | 1.049 | 1.046 0.991 0.975 | 0.991 |
+| 5000 floats (scalar) | scan | 1.048 1.033 0.989 | 1.033 | 1.264 1.046 1.027 | 1.046 |
+| 5000 floats (scalar) | encode | 1.036 0.958 0.942 | 0.958 | 0.926 1.101 0.933 | 0.933 |
+| text-heavy (5000 strings) | decode | 1.004 0.957 0.999 | 0.999 | 1.026 0.990 0.997 | 0.997 |
+| text-heavy (5000 strings) | scan | 1.018 0.996 1.006 | 1.006 | 0.930 1.009 1.011 | 1.009 |
+| text-heavy (5000 strings) | encode | 0.995 1.046 1.046 | 1.046 | 0.844 0.884 0.850 | 0.850 |
+
+**Reading:** the scanner — the code P7.1 changed — is within 0.96–1.03 of
+the base for the Bindle preset on every workload (medians), so Bindle did not
+regress there. Decode and encode medians are within 0.87–1.13; the outliers
+(1 MiB bytes decode 0.67–1.11, encode 1.03–1.28; floats decode 1.87 once) are
+single runs on large copies or allocation-bound work on a loaded machine and
+move both ways, not a reproducible change. The deterministic preset costs
+about 3–5% on a float-only scan (median 1.046; earlier runs ~1.09): a float
+the Bindle rules refuse, such as an integral one, is re-checked by
+`float-bad`. Its text-heavy and Float64Array encodes measured 0.85 of the base in all
+three runs; the cause was not investigated.
+
+An earlier draft of P7.1 regressed Bindle scans of floats and maps (up to
+1.16) by adding a profile test and a parameter to the hot strict functions;
+moving the new rules into separate functions consulted only after a strict
+refusal (`text-bad`, `float-bad`) removed it. Measuring both presets in one
+process also showed a false 1.16–2× on the Bindle float path (inlining), hence
+one preset per process.
+
+`node bench/codec.mjs bindle|deterministic` (wall-clock, the original codec
+table's method) was also run on `f1a78c0`; on this loaded machine its absolute
+times are about 2–3× the archived 2026-10-29 table for both arms, so only its
+ratios to the in-process baseline are meaningful: decode speedups 0.84–4.84×
+(Bindle) and 0.81–4.88× (deterministic), with the same shape as before. Its
+Bindle 120000-integer encode (33.8 ms vs 8.6 ms deterministic) is the
+`strictArrays` own-key check that the Bindle preset keeps (D113), not P7.1.
+

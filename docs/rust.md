@@ -25,9 +25,12 @@ schema.validate(&[0xa1, 0x62, b'i', b'd', 7], "message", &mut scratch)?;
 ```
 
 Compilation is synchronous. `CompilerProfile::{Full, Bindle, Bus}` restricts
-CDDL; it is independent of wire policy. This Rust facade selects the
-restricted Bindle scanner policy, with root `cose` integer labels as an option;
-it does not yet expose general deterministic presets. `CompileOptions::unicode`
+CDDL; it is independent of wire policy. The wire profile is `snug::Profile`
+in `DecodeOptions`, `EncodeOptions` and `ValidationOptions` (P7.1, D120,
+D126): `Profile::DETERMINISTIC` by default, `Profile::BINDLE` for the Bindle
+restrictions (root `cose` integer labels an option there), or the fields
+`keys`, `tags`, `floats`, `undefined_value`, `noncharacters`
+([profiles](profiles.md)). `CompileOptions::unicode`
 accepts `Some(&tables)` from `snug::unicode_tables::tables()` for pinned
 Unicode 16.0 category regexps. Programs contain the compiled automata and do
 not need the category tables at validation time.
@@ -77,13 +80,15 @@ accepts pairs in any order, sorts through kin and refuses duplicate keys.
 BigInt encoding strips leading zeroes and uses major 0/1 when possible;
 decoding bignums produces their canonical bytes. There is no decimal string
 parser/normalizer yet: supply normalized parts. Decimal values do not retain
-presentation scale. `Float(1.0)` is refused by the current profile; choose
-`Uint(1)` explicitly. NaN is refused in typed arrays; permitted typed infinities
+presentation scale. `Float(1.0)` encodes as the float `f93c00` under the
+deterministic preset and is refused under `Profile::BINDLE`; choose
+`Uint(1)` for the integer. `Value::Undefined` is `f7`. NaN is refused in typed arrays; permitted typed infinities
 and signed zero retain their bits. Byte strings use `Bytes`, not typed U8.
 
-`DecodeOptions::bindle()` is the current default. `DecodeOptions::any()` changes
-only root shape. `Top`, `cose` and `Limits` remain separate settings so future
-wire presets can be added without mixing them with compiler profiles.
+`DecodeOptions::default()` (also `any()` and `deterministic()`) is the
+deterministic preset with any root; `DecodeOptions::bindle()` is the Bindle
+preset with a map root, and `EncodeOptions::bindle()` its encoder. `Top`,
+`cose`, `Limits` and `profile` remain separate settings.
 
 ## Encode with typed Writer calls
 

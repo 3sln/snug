@@ -1,4 +1,6 @@
-// Offline, dependency-free Phase 2 benchmark. Run: node bench/codec.mjs
+// Offline, dependency-free Phase 2 benchmark. Run: node bench/codec.mjs [deterministic|bindle]
+// The optional argument selects snug's wire preset (P7.1, D120; default: the library default, deterministic);
+// the baseline codec is always cbor.mjs. bench/profiles-bench.mjs compares the presets with a pre-P7.1 tree.
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -10,6 +12,9 @@ import { encode } from '../host/js/src/encode.mjs';
 import { baseline, profile, oracle, fromHex, translate } from '../host/js/test/values.mjs';
 
 const median = xs => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+const wire = process.argv[2];
+if (wire !== undefined && wire !== 'deterministic' && wire !== 'bindle') throw new Error('usage: node bench/codec.mjs [deterministic|bindle]');
+const W = wire === undefined ? {} : { wire };
 const trials = 9, targetMs = 15;
 let sink;
 const system = (command, args) => {
@@ -19,7 +24,7 @@ const system = (command, args) => {
 console.log(JSON.stringify({ cpuSysctl: system('/usr/sbin/sysctl', ['-n', 'machdep.cpu.brand_string']),
   cpuFallback: os.cpus()[0]?.model, arch: os.arch(), macOS: system('/usr/bin/sw_vers', ['-productVersion']),
   node: process.version, v8: process.versions.v8, memoryGiB: os.totalmem() / 2 ** 30,
-  trials, targetMs, warmup: '3 interleaved rounds, then one calibration per operation' }));
+  trials, targetMs, warmup: '3 interleaved rounds, then one calibration per operation', wire: wire ?? 'default (deterministic)' }));
 
 const vectors = profile.accept.map(v => fromHex(v.hex));
 for (const v of oracle.cases) if (v.accept) {
@@ -74,10 +79,10 @@ for (const c of cases) {
   const operations = [
     () => bytes.map(b => build(b, options)),
     () => bytes.map(b => baseline.decode(b, options)),
-    () => values.map(v => encode(v, options)),
+    () => values.map(v => encode(v, { ...options, ...W })),
     () => baselineValues.map(v => baseline.encode(v, options)),
-    () => bytes.map(b => decode(b, options)),
-    () => bytes.map(b => scan(b, options)),
+    () => bytes.map(b => decode(b, { ...options, ...W })),
+    () => bytes.map(b => scan(b, { ...options, ...W })),
   ];
   const check = (which, result) => {
     if (which === 5) return;

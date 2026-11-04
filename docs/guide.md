@@ -53,8 +53,9 @@ Both `\p{X}` and `\P{X}` accept the RFC 9485 general-category names, inside
 or outside character classes. `String.raw` preserves CDDL's doubled backslashes
 in the example. Without the option, these escapes raise a `SchemaError`
 with code `regexp` and a message naming `snug/unicode`. `Cs` matches nothing;
-surrogates cannot occur in text. The current CBOR profile still refuses
-noncharacters before regexp matching. [Category details](cddl-support.md#unicode-regexp-categories).
+surrogates cannot occur in text. The Bindle wire profile refuses
+noncharacters before regexp matching; the deterministic preset (the default)
+admits them. [Category details](cddl-support.md#unicode-regexp-categories).
 
 Compile where the tables are available, then serialize the Program for a
 validation-only bundle. The runtime and Program loader need no Unicode
@@ -76,8 +77,9 @@ if (!result.ok) console.log(result.reason, result.path, result.offset);
 
 `validate` returns `{ ok: true }` or
 `{ ok: false, reason, path, offset, subcode? }`. It does not build the data
-tree. The validator checks the current strict CBOR policy while matching
-all live CDDL alternatives. On schema failure it continues checking the
+tree. The validator checks the wire profile (the deterministic preset by
+default, `wire: 'bindle'` for the Bindle one) while matching all live CDDL
+alternatives; one compiled Program validates under either. On schema failure it continues checking the
 profile; a profile error wins, unless the global step budget runs out first.
 Missing rules, wrong argument types and SharedArrayBuffer input are API
 misuse (`TypeError`), not validation results.
@@ -115,11 +117,15 @@ const array = decode(encode([1, 2]), { top: 'any' });
 ```
 
 Schema decode validates, then materialises; codec decode checks the profile,
-then materialises. A refusal throws `SnugFault`. Ordinary maps become
-null-prototype objects; `objects: 'plain'` opts into ordinary objects with
-safe own data properties for names such as `__proto__`. `cose: true` makes a
-top-level map a `Map`, with safe integer and text keys. Nested maps remain
-text-keyed objects. Codec decode requires a map unless `top: 'any'` is given.
+then materialises. A refusal throws `SnugFault`. Maps with only text keys
+become null-prototype objects; `objects: 'plain'` opts into ordinary objects
+with safe own data properties for names such as `__proto__`. A map with any
+other key (integer, byte string, array, ...) becomes a `Map` with decoded
+keys, at any depth; under `wire: 'bindle'`, `cose: true` makes a top-level
+map a `Map` with safe integer and text keys. Codec decode accepts any root
+under the default deterministic preset; `wire: 'bindle'` requires a map
+unless `top: 'any'` is given. The standard tags decode to `Tagged`, `f7` to
+`undefined` ([profiles](profiles.md#javascript-values-d123)).
 
 Major-0/1 integers become numbers when safe and bigints otherwise. Tags 2/3
 become bigints; byte strings are copied `Uint8Array`s; typed arrays are copied
@@ -129,9 +135,11 @@ unavailable. Decimals refuse implicit numeric coercion and JSON serialisation.
 Use `toString()` and an explicit application representation. All decimal
 normalisation discards presentation scale.
 
-Encoding admits any supported root; codec checking defaults to map-root
-application policy. Thus `decode(encode([1, 2]))` throws `not_map`, while
-schema decode defaults to any root. Choose `top` explicitly for your protocol.
+Encoding admits any supported root. Codec checking accepts any root under
+the deterministic preset and defaults to a map root under `wire: 'bindle'`
+(there `decode(encode([1, 2]), { wire: 'bindle' })` throws `not_map`);
+schema decode defaults to any root. Choose `top` explicitly for your
+protocol.
 
 | Input to encode | CBOR kind | Decoded JS type/value | CDDL type |
 | --- | --- | --- | --- |
@@ -145,12 +153,11 @@ bignums, while `int` includes only major 0/1. Numeric value is preserved,
 not JS number/bigint identity. Use bigint before arithmetic exceeds Number's
 safe domain: snug cannot recover precision already lost in a Number.
 
-| Host map representation | Admission / decode |
-| --- | --- |
-| Plain or null-prototype object | Text keys; admitted at any nesting depth; ordinary decode returns null-prototype objects |
-| Text-only `Map` | Refused by default; admitted only as the root with `cose: true` |
-| Mixed safe-integer/text `Map` | Root only with `cose: true`; decode with `cose: true` returns a root Map |
-| Nested `Map` | Refused even with `cose: true`; use text-keyed objects |
+| Host map representation | Deterministic preset (default) | `wire: 'bindle'` |
+| --- | --- | --- |
+| Plain or null-prototype object | Text keys at any depth; decodes to a null-prototype object | the same |
+| `Map` with any admitted keys, at any depth | Encodes, keys sorted by encoding; maps with a non-text key decode to `Map` | Refused, except a root `Map` of safe integer/text keys with `cose: true` |
+| `Map` whose keys collide as JS values on decode (`1` and `1.0`) | decode refuses with `unsupported`; read it with a view | refused by the profile |
 
 For an application Map whose keys must all be text, validate the key types
 before conversion (avoid numeric-key stringification or collisions):
@@ -205,8 +212,11 @@ The Writer writes exactly one root. Declare array item/map pair counts with
 and finishes the writer. `keysSorted: true` requires strictly increasing
 encoded key order; otherwise `end()` sorts the map. A Writer error is sticky:
 the first code is available as `failure`; later calls throw `writer_failed`.
-`float(1)` is refused: use `int(1)` or `value(1)`. There is no raw unchecked
-CBOR insertion API.
+`float(1)` writes the float `f93c00` under the deterministic preset and is
+refused under `wire: 'bindle'` (use `int(1)` or `value(1)` for the integer).
+`undefined()` writes `f7`, `tagged(tag, content)` a standard-set tag, and
+`key(k)` takes any key the profile admits. There is no raw unchecked CBOR
+insertion API.
 Wrong-type calls such as `.text(7)`, `.uint('7')` and `.beginArray('2')`
 also throw sticky `SnugFault('unsupported')`; discard the failed Writer.
 
@@ -217,8 +227,9 @@ own-key count check and refuses extra properties with `unsupported`.
 `encode(value, profiles.bindle)` and `new Writer(profiles.bindle)` select this
 strict behavior (`profiles` is exported by `snug`). Both modes require genuine
 arrays with exactly the local `Array.prototype`; subclassed, foreign-realm
-and null-prototype arrays remain refused. Holes and present undefined array
-elements are refused in both modes. A missing element is checked only when
+and null-prototype arrays remain refused. Holes are refused in both modes;
+a present undefined element encodes as `f7` under the deterministic preset
+and is refused under `wire: 'bindle'`. A missing element is checked only when
 its value reads as undefined, using `i in array`.
 
 Plain/null-prototype objects with enumerable data properties, the documented

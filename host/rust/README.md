@@ -1,9 +1,9 @@
 # snug for Rust
 
 Experimental, dependency-free Rust API for the kin compiler, strict CBOR
-scanner, schema VM, writer primitives and checked navigation. The current wire
-policy has Bindle restrictions; general profile presets are not yet exposed
-by this Rust facade. Compiler `Full` does not relax wire policy.
+scanner, schema VM, writer primitives and checked navigation. The wire policy
+is `snug::Profile`: the deterministic preset by default, `Profile::BINDLE` for
+the Bindle restrictions (P7.1). Compiler `Full` does not relax wire policy.
 
 Build from the repository root (Cargo 1.92, no network or installation):
 
@@ -74,7 +74,7 @@ modules remain available for the existing test hosts. New consumers should use
 the crate-root facade. See [the guide](../../docs/rust.md) and the rustdoc
 examples for ownership, error handling and exact numeric conventions.
 
-Current limits: no general profile, async source adapters, unknown-length
+Current limits: no async source adapters, unknown-length
 sources, unchecked view opener, view directories or `keys_sorted` Writer mode.
 The public source driver is synchronous; yields resume immediately. Rust
 profile refusals for text/tag/decimal/typed content can surface at Writer
