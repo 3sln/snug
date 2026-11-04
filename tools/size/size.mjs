@@ -133,5 +133,5 @@ if (!process.argv.includes('--no-gate')) {
     }
   }
   if (failures) process.exitCode = 1;
-  else console.log('Size budgets passed. R9 remains a separate 20 KB runtime target.');
+  else console.log('Size budgets passed. These budgets are R9 (owner decision D200).');
 }

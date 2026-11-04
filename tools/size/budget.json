@@ -1,5 +1,5 @@
 {
-  "description": "Ceil(P7.6 phase 2 current shared-tree bytes * 1.02), static and full closure independently. Paired and later concurrent-tag evidence: tools/size/phase2.json. Regression caps; R9 remains a separate 20 KB runtime gzip target.",
+  "description": "Ceil(P7.6 phase 2 current shared-tree bytes * 1.02), static and full closure independently. Paired and later concurrent-tag evidence: tools/size/phase2.json. These caps are R9 (restated by owner decision D200, 2026-11-04).",
   "recorded": "2026-11-04T05:34:45.101Z",
   "sourceHash": "9eee972b5376ae6714d2187849dd40de35d0b6a85b0dc2d048bf4cf99c11c657",
   "esbuild": "0.28.2",
