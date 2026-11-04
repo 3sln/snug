@@ -53,3 +53,5 @@ echo "  rust   $rs"
 [ "$js" = "$want" ] || { echo "  FAIL expected \`$want\`"; fails=$((fails+1)); }
 [ "$fails" -eq 0 ] || exit 1
 echo "  ok   JS and Rust agree, on the hand-worked answer"
+# snug's own JS target on in-memory probes (D187: imports from declared calls' arguments)
+./kin/scripts/js-target-test

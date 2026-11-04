@@ -370,8 +370,7 @@ export function scanStd(b, o, pos, p, tag, depth, end) {
         return fail(o, pos, CODE_TAG);
     }
     if (tag === 24) {
-        const cs = stdInner(b, p);
-        const r = scanOne(b, o, cs, depth + 2, q);
+        const r = scanOne(b, o, stdInner(b, p), depth + 2, q);
         if (r < 0) {
             return r;
         }

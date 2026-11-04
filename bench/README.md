@@ -10,6 +10,7 @@ record supplies one; “worktree” is not a reproducible clean revision.
 | Date / revision | Operation or artifact measured | Ownership / boundary | Runtime and record |
 | --- | --- | --- | --- |
 | 2026-11-03 / P7.6 hashed worktree snapshots | Every public entry and module, static/full/split graphs; codec + schema 53,452 gzip B; compile static 45,754 → 1,243 gzip B | All exports retained; generated inputs identical before/after; no timing claims | Node v24.6.0, esbuild 0.28.2; [P7.6 below](#bundle-size-p76-phase-1--2026-11-03) |
+| 2026-11-04 / `f734753` | P7.12: scalar float scan per preset, one preset per process (deterministic = Bindle 172.9 µs; pre-P7.1 169.8 µs) | `scan()` only, no build; 12 processes per arm | Node v24.6.0, thread CPU; [P7.1 below](#profile-options-p71) (P7.12 follow-up) |
 | 2026-11-03 / `f1a78c0` | P7.1 profile options: this tree under each preset vs the pre-P7.1 tree `c37eaaf` (decode, scan, encode; 8 workloads) | Same public calls on both arms; one preset per process; Bindle arm with `strictArrays: false` (D113 measured separately) | Node v24.6.0, thread CPU; [P7.1 below](#profile-options-p71) |
 | 2026-11-03 / `f275938` | **Full public runtime bundle:** codec + schema + view + writer + sources, no compiler; 155,193 minified / **56,226 gzip-9 bytes** | Staged package, all five runtime entries together; no fixtures; esbuild 0.28.2, not an internal-core size | Node v24.6.0; [P7.7 sizes/method](../tools/runtime/README.md#sizes-esbuild---minify-bytes) |
 | 2026-11-03 / `f275938` | Public decode, encode, validate, schema.decode, checked view + lookup, Program load, compile, profile handle scan; 976 conformance checks per arm | Decode builds copies; checked view owned by default; staged package in fresh consumers; compiler/precompiled arms separate | Node v24.6.0, Chrome 156.0.8078.80, workerd 2026-11-02 and repeat 2025-12-17; [P7.7](../tools/runtime/README.md). Later Unicode/schema sources not tested there |
@@ -267,6 +268,24 @@ about 3–5% on a float-only scan (median 1.046; earlier runs ~1.09): a float
 the Bindle rules refuse, such as an integral one, is re-checked by
 `float-bad`. Its text-heavy and Float64Array encodes measured 0.85 of the base in all
 three runs; the cause was not investigated.
+
+**P7.12 follow-up (2026-11-04, tree `f734753`): the deterministic float
+scan is not slower than the Bindle one.** The 5000-float workload holds
+`i + 0.25`, which the Bindle float rules accept, so `float-bad` never runs on
+it and the explanation above cannot hold. Measured one preset per process
+and no base tree in the process (the arrangement that removed the false
+1.16–2× above): `scan()` of the same 23,979-byte array, 2,000 warm-up calls,
+then 31 trials of 400 calls, median µs per call by `process.threadCpuUsage`,
+`node --single-threaded-gc`, 12 processes per arm, interleaved: deterministic
+median of medians **172.9 µs** (166.3–186.1), Bindle **172.9 µs**
+(167.4–179.5), the pre-P7.1 tree `c37eaaf` (its `host/js/src` + `gen/js`
+from `git archive`) **169.8 µs** (167.3–173.6). V8 inlines `scanFloat`
+(283 bytes of bytecode, 279 before P7.1) into `item` in both trees
+(`--trace-turbo-inlining`). So the presets are equal, both ~1.8% over the
+pre-P7.1 tree, about the run-to-run spread; the 1.046 above comes from
+`profiles-bench.mjs` running the base tree's codec in the same process (it
+gives 1.14–1.16 for BOTH presets' float scans today). No change made (D185).
+Apple M1 Pro, macOS 14.6.1, Node v24.6.0.
 
 An earlier draft of P7.1 regressed Bindle scans of floats and maps (up to
 1.16) by adding a profile test and a parameter to the hot strict functions;

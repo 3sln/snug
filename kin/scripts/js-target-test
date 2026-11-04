@@ -1,0 +1,42 @@
+#!/usr/bin/env bb
+;; snug's own JS target (kin/src/snug/js.cljc) on probes that are not project
+;; sources (generated in memory, never emitted): a function named only inside
+;; the arguments of a call to a `declarefn`-declared function, from another
+;; unit, must be IMPORTED (P7.12, D187; it used to be spelled bare with no
+;; import, a ReferenceError at run time). The modules are written to a temp
+;; directory and run by node.     kin/scripts/js-target-test (part of bb check)
+(require '[kin.project :as kp] '[snug.project :as p] '[clojure.string :as str]
+         '[babashka.process :refer [shell]] '[babashka.fs :as fs])
+(def a "(ns snug.cbor.probea
+  (:require [kin.lang :refer [defn return]]
+            [snug.lang :refer [I32 Bytes +]]))
+(defn ^:pub ^I32 inner [^Bytes b ^I32 p] (return (+ p 1)))
+(defn ^:pub ^I32 twice [^I32 p] (return (+ p p)))")
+(def b "(ns snug.cbor.probeb
+  (:require [kin.lang :refer [defn let return declarefn]]
+            [snug.lang :refer [I32 Bytes + u8]]
+            [snug.cbor.probea :refer [inner twice]]))
+(declarefn f h)
+(defn ^:pub ^I32 g [^Bytes b ^I32 p]
+  (let [^I32 x (h (twice p))]
+    (return (+ x (f b (inner b p))))))
+(defn ^I32 f [^Bytes b ^I32 q] (return (+ q (u8 b 0))))
+(defn ^I32 h [^I32 v] (return (+ v 1)))")
+(let [{:keys [generated]} (kp/generate-in-order @p/project [{:label "probea.kin" :text a}
+                                                           {:label "probeb.kin" :text b}])
+      ja (get-in generated ["probea.kin" :js])
+      jb (get-in generated ["probeb.kin" :js])
+      dir (str (fs/create-temp-dir {:prefix "snug-js-target-"}))
+      fails (atom 0)
+      check (fn [ok what] (println (str "  " (if ok "ok  " "FAIL") " " what)) (when-not ok (swap! fails inc)))]
+  (check (str/includes? jb "import { inner, twice } from './probea.mjs';")
+         "a cross-unit function used only in a declared call's arguments is imported")
+  (spit (str dir "/probea.mjs") ja)
+  (spit (str dir "/probeb.mjs") jb)
+  ;; g(b=[5], p=3): h(twice 3) = 7, f(b, inner 3) = 4 + 5 = 9 -> 16
+  (let [out (-> (shell {:out :string :err :string :continue true} "node" "--input-type=module" "-e"
+                       (str "import { g } from '" dir "/probeb.mjs'; console.log(g(Uint8Array.of(5), 3));"))
+                :out str/trim)]
+    (check (= out "16") (str "the probe runs under node and answers 16 (got " (pr-str out) ")")))
+  (fs/delete-tree dir)
+  (when (pos? @fails) (System/exit 1)))

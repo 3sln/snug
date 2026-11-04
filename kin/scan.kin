@@ -276,8 +276,7 @@
     (if (< q 0) (return q))
     (if (not (std-content-ok b tag p q)) (return (fail o pos CODE_TAG)))
     (if (== tag 24)
-      (do (let [cs (std-inner b p)
-                ^I32 r (scan-one b o cs (+ depth 2) q)]
+      (do (let [^I32 r (scan-one b o (std-inner b p) (+ depth 2) q)]
             (if (< r 0) (return r)))))
     (return q)))
 

@@ -3235,6 +3235,64 @@ allow `Tagged(2, bytes)` (a second encoder path for bignums whose result the
 scanner would then judge).
 - [ ] **Signed off** (owner)
 
+### D185 — The deterministic float scan needs no fix (P7.12)
+**Decision** (profile engineer, provisional): no change to `scan-float` /
+`float-bad`. Measured one preset per process, the deterministic and Bindle
+float scans are equal (172.9 µs median of 12 processes each on 5,000 scalar
+floats) and ~1.8% over the pre-P7.1 tree (169.8 µs), within run-to-run
+spread; V8 inlines `scanFloat` into `item` in both trees. P7.1's "~5%"
+(median 1.046) came from `bench/profiles-bench.mjs` running the base tree's
+codec in the same process, which today shows 1.14–1.16 for both presets; its
+explanation (a `float-bad` re-check) could not apply, since the workload's
+floats pass the Bindle rules ([bench](bench/README.md#profile-options-p71)).
+**Why**: nothing to fix that a measurement can see. **Alternatives**: inline
+the RFC rules into `scan-float` (grows the hot function past what V8 inlines,
+the P7.1 Finding).
+- [ ] **Signed off** (owner)
+
+### D186 — Whole reads in the resumable drivers stay, bounded and documented (P7.12)
+**Decision** (profile engineer, provisional): D124 stands — tag-0/32 text
+and tag-24 byte-string contents, and map keys that are containers, tags,
+byte strings or floats, are read whole by the resumable scanner and the
+session. Each is bounded by the item's size, so by `maxBytes` (and keys by
+the session's key arena); docs/profiles.md says so. D180 adds no new whole
+read: rule-free tags stream like tags 21–23, and the any-level typed-array
+rule is decided from the content's head (D183). **Why**: these rules need
+their whole content (a date, a URI, a nested item, a key's bytes for order);
+incremental automata across windows would add much state for rare large
+contents. **Alternatives**: incremental date/URI/payload automata; a stack of
+key arenas for nested keys (both open in the Parking lot).
+- [ ] **Signed off** (owner)
+
+### D187 — snug.js renders calls to declared functions at once (P7.12)
+**Decision** (profile engineer, provisional): snug's JS target gives
+`declarefn` its own `:generate`: kin.lang's reservation, then, for each
+unqualified name, the callable a `defn` registers (bare name, this unit, no
+return tag) filled into the placeholder at once; the later `defn` fills it
+again with its own. kin itself is unchanged. `kin/scripts/js-target-test`
+(run by `bb check`) generates two in-memory probe namespaces and requires the
+import and the answer under node; it fails on the previous js.cljc. One
+workaround in the sources (`scan-std`'s `cs` local) is removed so real code
+exercises the fix. **Why**: kin defers a call to a declared-but-undefined
+function into a promise settled at join, after the module header is
+formatted, so imports registered while rendering its arguments were lost
+(Findings, P7.1). JS hoists function declarations, so nothing the definition
+adds is needed to spell the call. **Alternatives**: a lazy header settled
+after the body's promises (relies on kin's settle order); keep the
+local-binding workaround (a trap for every new forward call).
+- [ ] **Signed off** (owner)
+
+### D188 — Cut keys of byte-string and float kinds stay a `map_cut` error (P7.12)
+**Decision** (profile engineer, provisional): D125 stands. Supporting
+`h'00': T` / `1.5: T` needs KEYS entries of majors 2 and 7; `vm-verify`'s
+`check-keys` accepts only major 0/1/3 keys, so such Programs would be refused
+by every existing verifier — a Program format change (a D084 minor), which
+this item may not make. **Why**: the rule "no Program format change"; the
+refusal is exact and names the rewrite (`=>`). **Alternatives**: format 1.2
+with major 2/7 KEYS (owner's call, with the compiler's naming records and the
+VM's key search, which compare encodings and so need no other change).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -3242,7 +3300,10 @@ scanner would then judge).
   `declarefn`-declared function — `(item b o (std-inner b p) …)` in scan.kin,
   `(dead-item b s (std-inner b q) …)` in vm-dead.kin: the JS module throws
   ReferenceError at run time while Rust (glob imports) builds. Workaround:
-  bind the inner call to a local first. Ours (snug.js), not fixed.
+  bind the inner call to a local first. Ours (snug.js). **Fixed 2026-11-04
+  (P7.12, D187)**: kin defers such a call into a promise settled after the
+  header is formatted; snug.js's `declarefn` now fills the callable at once;
+  `kin/scripts/js-target-test` in `bb check`.
 - 2026-11-03 (P7.1): V8 inlining is the cost model of the hot scanner paths.
   A one-line profile test at the top of `scan-float` made the Bindle float
   scan 1.16–2.1× slower when one process also ran the deterministic path (not
@@ -4321,6 +4382,90 @@ are answered as provisional decisions D082–D085. None is open now.
   numeric values but discard scale and can return integers. Current schema
   option coercion and Writer sticky argument faults require explicit public
   caveats until the separate engineering fixes land.
+
+- [x] **P7.12 — Tag levels and small items** (follow-up to P7.1's open list).
+  *Done 2026-11-04 by the profile engineer (Claude); commits `f734753` (any
+  tag) and the small-items commit after it.* Decisions **D180–D188**.
+  - **Any tag (D180–D184):** `PF_TAGS` 2/3 = any tag number (JS `tags:
+    'any'`, Rust `Tags::Any`), now the deterministic preset (flags 122; 118 =
+    `tags: 'standard'`). Known tags keep their rules (2/3/4/40/LE typed
+    arrays, the standard set, 55799 only at the top); RFC 8949 §9.2's
+    invalid 65535, 2^32−1, 2^64−1 refused; RFC 8746 tags outside the Bindle
+    set need a byte string of whole elements; everything else any content,
+    an item one level below. Bignum minimality kept (D181). One *rule tag*
+    per head (`rule-tag`: the number, −2 beyond 32 bits, −1 for 2^64−1) keeps
+    the scanner, dead walk, live walk, resumable scanner and session on the
+    `std-allowed`/`std-content-ok` path; schema `TAG`/`TAGSET` tests compare
+    the whole 64-bit number (they compared the high word with 0). Session:
+    the typed-array head rule is decided at `T_STD` from the head and held
+    (`F_TNOTED`), never pinned; `key-end-any`/`key-max-claim` treat tag heads
+    structurally (D183). JS: builder `Tagged` for every non-Bindle tag,
+    `Tagged.tag` number|bigint (D184), Writer/encode any number (bigint
+    heads), views read 64-bit numbers; CDDL `#6.n(T)` for any n matches.
+  - **Small items:** (a) the "~5%" deterministic float scan cost does not
+    reproduce one preset per process (deterministic = Bindle = 172.9 µs,
+    pre-P7.1 169.8 µs; no change, D185, bench/README.md). (b) D124's whole
+    reads stay — bounded by `maxBytes`/the key arena, documented; D180 adds
+    none (D186). (c) The snug.js `declarefn` import bug is fixed in snug's JS
+    target (`js-declarefn`), with `kin/scripts/js-target-test` in `bb check`
+    (fails on the old target) and one source workaround removed (D187).
+    (d) Byte-string/float cut keys stay `map_cut`: they need major 2/7 KEYS,
+    which `vm-verify` refuses — a Program format change (D188).
+  - **Vectors:** `corpus/cbor-vectors/deterministic.json` **117 accept / 102
+    refuse** (was 92/85): COSE_Sign1 (RFC 9052 C.2.1), CWT = 61(18(...)) over
+    the RFC 8392 A.1 claims, COSE 16/17/96/97/98, 55799 over COSE_Sign1,
+    nested unknown tags, tag numbers 256, 65534, 65536, 2^32−2, 2^32,
+    2^53−1, 2^63+2^32−1, 2^64−2, 2^32+2 (not a bignum), 2^32+24 (not tag
+    24), unknown and 64-bit tags as map keys, tag 24 over an unknown tag,
+    typed arrays 64/65/82/87 and 76; refused: the invalid numbers (also
+    nested), odd/short BE typed arrays, tag 64 over text, content-first
+    precedence, non-shortest tag heads (1/2/4/8-byte), an indefinite tag
+    head, truncated 64-bit heads, 55799 nested in an unknown tag, unknown
+    tags past maxDepth, non-preferred bignums. New `standard` column (the
+    code under `tags: 'standard'`), checked by the gates. det-cases: seeded
+    tags of 35 numbers (COSE/CWT, 64–87, 2^32±, 2^64−1) and fixed depth/item/
+    key/typed cases under 9 flag values. vm-test's live schema holds
+    `#6.18(v)`, `#6.4294967296(v)`, `#6.18446744073709551614(v)`, `#6`.
+  - **Differential (cbor2 2.4.1 CDE + rejectDuplicateKeys/LongLoundNaN/
+    Simple):** 38,563/40,503 same verdict, the rest in documented classes
+    (floatwidth 412, nan 44, tag 196, tag24 41, limits 20, snugtags 1226,
+    cbor2tags 1), 0 unexplained. The `tag` class now fails the gate unless
+    the refused tag has a rule (0, 1, 24, 32, 55799, the any-level typed
+    arrays), so snug refuses no rule-free tag number cbor2 accepts; new
+    `cbor2tags` (cbor2's own tag decoders, e.g. 33 base64url, confirmed with
+    `ignoreGlobalTags`). `encode()` == cbor2 `encode({cde: true})` on
+    4,000/4,000 seeded values, 945 holding `Tagged` of rule-free numbers
+    (64-bit included) against cbor2 `Tag`.
+  - **Gates (actual runs, Node v24.6.0, the final tree):** `bb check` ok
+    (incl. js-target-test); **scan-test** 31,360/31,360 Bindle cases on JS,
+    Rust, wasm; 657/657 profile vector runs, 20,823/20,823 JS == Rust;
+    **rscan-test** 262,097 policy + 272,354 split runs == recursive, Rust
+    262,048/262,048; **vm-test** profile identity 64,366/64,366, 983/983
+    conformance, 73,691/73,691 JS == Rust == fast/generic; **vmsession-test**
+    982,778/982,778 session runs == buffer,
+    638,986/638,986 JS == Rust, 481,536/481,536 unknown-length streams, 0 panics; **compile-test** 301/301
+    identical, 270/270 verified, 55/55 SOURCE_KEYs; **nav-test** 1,131/1,131;
+    **write-test** ok; **unicode-test** ok; **rust-api-test** ok (13
+    integration incl. `any_tag_level_d180`, doctests, clippy); **host/js npm
+    test 1,346 passed / 0 failed / 0 skipped**; **bb size** within budgets;
+    **bb drift** ok after each commit.
+  - **Sizes** (esbuild min / gzip vs `6c3237e`): snug 42,312 / 14,586 B
+    (+959 / +373), snug/schema +620 / +216, snug/view +1,062 / +411,
+    snug/writer +960 / +351, snug/sources +928 / +384, runtime +1,103 / +369,
+    all-runtime +1,592 / +673; under the P7.6 budgets, no budget change.
+  - **Learnt:** a 64-bit tag head must not take a 32-bit tag's path — the
+    walkers had refused hi ≠ 0 before looking at lo, so nothing noticed that
+    the VM's tag tests compared the high word with 0. An explanation in a
+    bench record ("float-bad re-check") must be checked against the workload's
+    data: the floats never reached the re-check. kin's deferred calls render
+    after the module header, so a target that computes imports while
+    rendering must not let calls defer.
+  - **Open:** README/guide/architecture tag sentences were corrected in
+    passing; host/wasm-sdk and the wasm scan shim still take no profile
+    option (their defaults follow `Profile::DETERMINISTIC`, now 122);
+    full RFC 3986 URI parsing (D121); cut keys of byte-string/float kinds
+    (a format 1.2 decision, D188); incremental automata for whole reads
+    (D186); bignum content cap under the any level stays 128 bytes (D181).
 
 ## P7.11 — Rust public API
 

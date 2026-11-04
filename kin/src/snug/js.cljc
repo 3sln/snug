@@ -109,6 +109,32 @@
                                    (fn [in2] (doseq [f body] (kin/statement! in2 f)))))))
        (kin/emit! ctx (kin/indent-of ctx) "}\n")))})
 
+;; ------------------------------------------------------------- forward declarations
+
+(def ^:private base-declarefn (get (kl/forms {:default-tag nil}) 'declarefn))
+
+(def ^:private js-declarefn
+  "`(declarefn f g)` for JavaScript: kin.lang's reservation, then -- for a name
+  this namespace defines later (an unqualified symbol) -- the callable a `defn`
+  registers, filled in at once: bare name, this unit, no return tag yet (a
+  declared call carries none on Rust either, DEVLOG \"Found in kin\").
+
+  WHY: kin defers a call to a declared-but-undefined function into a promise
+  settled when the module is joined -- after its header has been formatted --
+  so a function named only inside that call's ARGUMENTS, from another unit,
+  registered its import too late and the module threw ReferenceError at run
+  time (`(item b o (std-inner b p) ...)`; DEVLOG Findings, P7.12, D187).
+  JavaScript hoists function declarations, so the call needs nothing the
+  definition will add: rendering it at once registers every import in time.
+  The later `defn` fills the same placeholder with its own callable."
+  {:declare (:declare base-declarefn)
+   :generate
+   (fn [ctx form]
+     ((:generate base-declarefn) ctx form)
+     (doseq [nm (rest form) :when (nil? (namespace nm))]
+       (kin/define-form! ctx {:scope (if (:pub (meta nm)) :public :private)} nm
+                         (js-call nil (home-unit ctx) nm))))})
+
 ;; ------------------------------------------------------------- bindings
 
 (defn- declare-local!
@@ -299,7 +325,8 @@
              'for js-for
              'defconst js-defconst
              'doc js-doc
-             'panic js-panic}
+             'panic js-panic
+             'declarefn js-declarefn}
             (select-keys base ['if 'while 'forever 'break 'continue 'case
-                               'comment 'do 'defdata '. 'declarefn 'declaretag
+                               'comment 'do 'defdata '. 'declaretag
                                'declarename]))}])

@@ -354,8 +354,7 @@ pub(crate) fn scan_std(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, dept
         return fail(o, pos, CODE_TAG);
     }
     if tag == 24 {
-        let cs: i32 = std_inner(b, p);
-        let r: i32 = scan_one(b, o, cs, depth + 2, q);
+        let r: i32 = scan_one(b, o, std_inner(b, p), depth + 2, q);
         if r < 0 {
             return r;
         }
