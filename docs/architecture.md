@@ -1303,7 +1303,7 @@ option stays regardless (dCBOR, CTAP2 and signing protocols need it).
 
 ---
 
-## 20. PEG group semantics (D270–D279) — design revision 2, 2026-11-04, provisional
+## 20. PEG group semantics (D270–D280) — design revision 3, 2026-11-04, provisional
 
 D270 moves group matching in arrays and maps from the exact regular /
 existential semantics of §4.3–§4.4 (D010–D012, D035, D036) to the parsing
@@ -1312,8 +1312,12 @@ two cut readings. Revision 1 of this section (cd7c33c) was reviewed
 independently by a Claude reviewer (`docs/reviews/2026-11-04-peg-claude.md`,
 "C#") and by Codex (`docs/reviews/2026-11-04-peg-codex.md`, "X#").
 
-This revision answers every finding; §20.14 holds the disposition. It also
-applies the manager's decisions of 2026-11-04:
+Revision 2 (d4dd863) answered every finding and was re-reviewed by Codex
+(`docs/reviews/2026-11-04-peg-rereview.md`, "N#"). Revision 3 answers N1–N9:
+summed activation bounds and a chunk heap for recursive frames, demand
+growth with a cap and session relocation, sorted T traversal, FAIL events,
+and refusal replay on the canonical path (D280). §20.14 holds the full
+disposition. Revision 2 also applied the manager's decisions of 2026-11-04:
 
 * the reference cut mode becomes "rule A";
 * the T tier sorts its own records;
@@ -1321,8 +1325,8 @@ applies the manager's decisions of 2026-11-04:
 * memo cells are reserved, not shipped;
 * only proven complexity bounds are stated.
 
-The decisions are D272–D279, all unsigned. The Program format is in
-[program-2.md](program-2.md) (format 2.0, revision 2). Nothing here is
+The decisions are D272–D280, all unsigned. The Program format is in
+[program-2.md](program-2.md) (format 2.0, revision 3). Nothing here is
 implemented. §4.1–§4.2 (type-set evaluation of single items) are unchanged.
 This section supersedes §4.3, §4.4, the group parts of §5.1 steps 4–5, and
 the D011/D012 refusals once it lands.
@@ -1506,7 +1510,13 @@ map matches           ⇔ run(root, all pairs) is the empty set   -- closed (§2
   `cut` again if none succeeds. At the root, `cut` fails the map.
   * This keeps D021's purpose: `{kind: "a", … // kind: "b", …}` works, and
     so does the D271 case.
-  * It honours §3.5.4's "later entries … are no longer allowed".
+  * It honours §3.5.4's "later entries … are no longer allowed" through
+    `?`, `*` and named groups. An explicit `//` can still absorb the cut,
+    and a later wildcard can then take the key:
+    `{(a: int) // (), * tstr => any}` accepts `{a: "x"}` while
+    `{? a: int, * tstr => any}` rejects it. So rule A deliberately does not
+    follow App. C's literal "occurrence acts as a group choice" expansion
+    when cuts are involved (R9, N9).
   * It is invariant under replacing a group name by its definition, so the
     verbose and compact `reputon` of App. H mean the same (C1).
   * It is not what Ruby does, nor what format 1's DNF did: they let a group
@@ -1544,7 +1554,7 @@ policy. A policy choice is labelled as one (X R-audit).
 | R6 | Does a member consume a pair whose key matches and whose value does not? | Without a cut, no: the pair is skipped and stays for later entries. `{? "optional-key" => int, * tstr => any}` accepts `{"optional-key": "nonsense"}`. | §3.5.4's first example, verbatim; §3.5.3 "a *matching* member". Ruby deviates (RL, RK). |
 | R7 | How much does a member take? | Every remaining matching pair, up to its maximum (greedy). A 1..1 member takes one. | App. A greed; §3.5.3's "tends to consume all matches" is supporting text only (X R7) |
 | R8 | Which pairs does a member with a finite maximum take when more match? | The first in pick order (EC key order). `{int => int, int => 6}` accepts `{3:5, 4:6}` however encoded, and rejects `{3:6, 4:5}`. | **snug policy (D274).** §3.5.3 calls the pick "indeterminate, but does matter". EC order makes it determinate and independent of serialisation (§2.2.3). Warning W6 flags such members. |
-| R9 | What does a failed cut kill? | reference (rule A): the innermost enclosing choice alternative, else the map; rfc: the map type. | D273. Rule A is a deliberate deviation from the literal text (X R9). |
+| R9 | What does a failed cut kill? | reference (rule A): the innermost enclosing choice alternative, else the map; rfc: the map type. A successful cut does not commit under rule A: `{(a: int, b: int) // (* tstr => any)}` accepts `{a: 1}`. | D273. Rule A deviates deliberately from App. A ("choices containing this choice") and from App. C's occurrence-as-choice expansion: `(a: int) // ()` absorbs a cut where `? a: int` does not. App. H transparency selects neither mode uniquely (N9). |
 | R10 | Does a cut reach back to earlier entries? | No: earlier entries ran first. `{* tstr => any, ? a: int}` accepts `{a: "x"}`; `{* tstr => any, "a" => int}` matches no map at all (C12). | §3.5.4 "later entries"; App. A greed. Warnings W1, W2. |
 | R11 | Cuts on key types (`tstr ^=> uint`) | Allowed: the same rule for each pair examined. In rfc mode every matching key commits (C14). | App. C memberkey has no restriction. Byte/float key handling follows the actual key representation (§19), not a text/integer optimisation. |
 | R12 | `* (a: int, b: int)` in a map | Both pairs or neither; a failed iteration is undone. `{a: 1}` alone is rejected. | §3.2. Ruby leaks the consumption (RI). |
@@ -1670,11 +1680,12 @@ are withdrawn. The Program field is reserved and must be 0, and a later
 minor may define it only together with EOF sentinel rows and a loader
 capability rule (program-2 §1). §20.7 states what is proven instead.
 
-**Recursive activations** (X1). A recursive program keeps every frame of
-every activation in the arena's downward region, behind a 3-word activation
-record pushed by `CALL` (program-2 §5.3). Non-recursive programs use the
-static block stack. Left recursion is refused, so live activations are at
-most (consumed + 1)·n_calls.
+**Recursive activations** (X1, N2). A recursive program keeps every frame
+of every activation in its own linked list of 64-word chunks from the
+arena's chunk heap, behind a 3-word activation record pushed by `CALL`
+(program-2 §5.3). Non-recursive programs use the static block stack. Left
+recursion is refused, so live activations are at most
+(consumed + 1)·n_calls per block.
 
 **Maps.** A pair is still evaluated once:
 
@@ -1723,9 +1734,10 @@ mode could not offer.
     `{* tstr => any, (a: int // b: int)}` rejects `{a: 1}`. Both are
     regression tests.
 * **T (table).** Everything else. One record per pair goes in the arena.
-  * At the end, if an order-sensitive member exists and the map was
-    unordered or had an EC-sensitive key, the machine **sorts its own
-    records** by EC key comparison. This is a heap sort, charged per
+  * At the end, if the map was unordered or had an EC-sensitive key, the
+    machine **sorts its own records** by EC key comparison, whatever its
+    members (N4). Cut traversal and failure scores therefore always follow
+    pick order. This is a heap sort, charged per
     comparison identically on every route, and independent of §19.4's
     permutation (C4).
   * The machine then runs over the records with an undo trail.
@@ -1737,72 +1749,122 @@ normalised.
 and tier (X Q14: a sufficient test, not a necessary one). The block dies at
 that pair. Profile validation continues as usual (D023).
 
-### 20.6 Charging and resources (D276, D277)
+### 20.6 Charging, refusal order and resources (D276, D277, D280)
 
 **One logical event order on every route** (X4, program-2 §10). The buffer
-walk, the canonical-copy walk (§19.3) and the framed session all charge the
-same events in the same order:
+walk, the canonical-copy walk (§19.3) and the framed session charge the same
+events in the same order:
 
-* **Per item:** format 1's order up to the candidates' typeset tests; then
-  the record or slot store; then the machine's steps until it suspends or
+* **Per item:** format 1's order up to the candidates' typeset tests, then
+  the record or slot store, then the machine's steps until it suspends or
   its block dies.
-* **At a map's logical end, after its last value:**
-  1. the deferred duplicate check's units (§19.4);
-  2. the map end row;
-  3. the T sort;
-  4. the machine;
-  5. closedness;
-  6. the witness trace.
+* **At a map's logical end** (after its last value): the deferred duplicate
+  check's units (§19.4), the map end row, the T sort, the machine,
+  closedness, then the witness trace.
 * **At an array's end:** the end row, then the machine.
 
-Physical work may happen earlier, but its units are charged at the logical
-point. **This requires amending §19.5** (D277). It currently charges the
-deferred duplicate check "before it starts". The scanner can instead record
-each marked map's unit count, for the VM to charge when it reaches that
-map's end. X4's counterexample `[uint, {0*1000 int => int}]` with descending
-inner keys then exhausts at the same point on both routes. Until P8.4
-adopts this, D277 is a requirement on it.
+§19.5 now charges the duplicate-check units at the map's logical end on
+every route. P8.4 agreed to D277 and amended §19.5 in 531220f, so X4's
+valid-input example is closed (N9).
 
-Prices are bounded-work charges, not an equal-CPU claim, until the
+**Refusals in the same order (D280, N6; owned with P8.4).** D277 deferred
+only units. On the canonical path the scanner still refuses before the VM
+runs, while a framed session may first spend its budget on earlier schema
+work. N6 shows this with `9f00a3020001000200ff` under `r=[uint,{* int=>int}]`.
+D280 extends §19.5's own embedded-table rule ("reports the recorded refusal
+where its own walk would have found one") to the outer item:
+
+1. When the scanner refuses, it records the refusal: its code, its input
+   offset, and its **logical event**. That is the head of the refused item,
+   or the end of the map for a deferred duplicate check, or the break /
+   end-of-input position.
+2. The copy writer builds the canonical copy of the valid prefix, up to that
+   event.
+3. The VM walks the prefix as usual. That includes profile-only
+   continuation after a schema failure (D023), and stopping on `budget`
+   (§4.5 / program.md §17 Q17). When the walk reaches the recorded event,
+   it reports the recorded refusal.
+
+So `budget` wins exactly when the budget runs out before the event, as in
+the session, and a profile refusal wins over an earlier schema failure, as
+everywhere. The same applies to embedded content (unchanged) and to
+sequence messages. This needs P8.4's agreement and a §19.5 amendment; the
+manager is coordinating it.
+
+**Prices** are bounded-work charges, not an equal-CPU claim, until the
 implemented paths are measured with D241's method (X Q12):
 
 * a stored record costs ⌈R/16⌉;
-* a PEG step costs 1. A step is a node entry, a rewind, or a record
-  examined by a T member, consumed or not (X10);
-* a trail entry undone costs 1;
+* a PEG step costs 1. A step is a node entry, a rewind, a record examined
+  in T (consumed or not), or a chunk link or unlink (program-2 §5.3);
+* a trail entry costs 1;
 * a T sort comparison costs ⌈min len/8⌉.
 
-D045 rule 1 also makes `[* T]`'s machine steps free.
+D045 rule 1 also makes the machine steps of `[* T]` free.
 
-**Scratch.** Frames stay closure-sized (R3). Their exact layouts are
-program-2 §5.2 and §6.3 (X2): 14 + 2W words of array block state plus the
-static stack and any ring, and 16 + 4·members words of map block state plus
-the stack and slots.
+**Scratch.** Frames stay closure-sized (R3), with the layouts of program-2
+§5.2 and §6.3.
 
-**The group arena** (D276) holds A2/T records, T sort permutations,
-trails and recursive activations. It is **not** preallocated. It is bounded
-by the effective limits:
+**The group arena** (D276, revised for N1–N3) holds A2/T records, T sort
+permutations and trails in an **upward stack**. Recursive activations live
+in a **chunk heap** growing downward from the arena's end:
+
+* **Chunks** are fixed-size chunks of 64 words.
+* **Per-block lists.** Each recursive block owns a linked list of chunks and
+  pushes its frames into its own current chunk.
+* **Free list.** A freed chunk goes to a free list. So machines that suspend
+  interleaved never need global LIFO order (N2).
+* **Chunk addresses** are chunk indices counted from the arena's end. Record
+  addresses are offsets from its start. Both stay valid when the arena is
+  copied into a larger array, so a session relocates by copying the two
+  regions and updating only the end and the heap top (N3).
+
+**Bound (N1).** Activation cost is summed over the simultaneous recursive
+leaves of a closure set, as records are, and items are counted by a global
+counter `VM_GROUP_ITEMS` that EMBED does not reset. Program-2 §9.4:
 
 ```
-A_max = maxItems · R_ITEM_MAX + 2 · maxEntries + (maxItems + D + 1) · ACT_WORDS
+need ≤ items · (R_ITEM_MAX + ACT_SUM) + (D + 1)·ACT_SUM + 2·maxEntries + chunk slack
 ```
 
-(program-2 §9.4). It grows on demand:
+`ACT_SUM` is the maximum, over closure sets, of the sum of per-item
+activation words of their recursive leaves, in whole chunks. `items` ≤ the
+input bytes. The compiler evaluates this at the compiled limits and warns
+(W7) when it exceeds the default arena cap.
 
-* **buffer route:** through the scratch-regrow protocol of §19.5 (internal
-  code 22, one re-run with `A_max` words; charges are a function of the
-  run);
-* **session route:** through `VMS_GROW` (§19.7), with no re-run.
+**Growth and caps (N3).** Growth follows demand: the arena doubles from its
+lease.
 
-At default limits it never refuses (C5). **`group_limit` (code 44)** exists
-only under an explicit arena limit (`groupWords` compile option or per-call
-limit). It is a resource outcome like `budget`, never skippable and never
-swallowed by EMBED.
+* **Buffer route:** a re-run per doubling. Charges are a pure function of
+  the run. CPU ≤ (1 + number of doublings) × one run, and EXT predicates may
+  be called again on a re-run (they must be pure, D140).
+* **Session route:** `VMS_GROW` with the relocation above, no re-run.
 
-* **Precedence:** a charge always comes before its allocation, so on the
-  same event `budget` wins (X Q11, X Format Q3).
-* **Offsets:** the current element or pair head, or the container head for
-  end-run allocations (X11). Records therefore need no pair offsets.
+The arena never exceeds its **cap**: the explicit `groupWords` limit if one
+is given, else `LIM_GROUP_WORDS`. That defaults to 2^22 words (16 MiB) and
+is never more than 2^24. It is counted separately from the 64 MiB
+Program/pool/scratch cap, with its own hard maximum.
+
+Demand beyond the cap is **`group_limit` (code 44)**:
+
+* a resource outcome, like `budget`;
+* never skippable;
+* never swallowed by EMBED;
+* `budget` wins if both happen on the same event, because the charge comes
+  first;
+* the offset is the current item's head, or the container head for
+  end-runs.
+
+**Rebuttal of "never refuses at defaults" (C5, part):** no finite default
+can promise that. N1's twenty-recursive-leaf family needs memory linear in
+leaves × items, and N3 shows the loose bound exceeds a Worker. What is
+promised instead:
+
+* no refusal below the default cap;
+* demand-sized allocation;
+* a compile-time warning when a schema's worst case can exceed the cap.
+
+No corpus schema comes near the cap.
 
 ### 20.7 Complexity contracts (D279; C10, X10)
 
@@ -1813,9 +1875,9 @@ charged.
 
 | Part | Contract |
 | --- | --- |
-| Compile / verify | O(Program words + npos·W·(n_calls + 1)) word and bitset operations, plus the fixed points (program-2 §3.1). Charged to the compile and verify budgets. |
+| Compile / verify | Charged to the compile and verify budgets. The O(Program words + npos·W·(n_calls+1)) figure plus the fixed-point rounds is a **proof obligation** (N8), not an established bound. |
 | Arrays, query and records | Per element O(W·(\|A\|+1) + \|C\|), as format 1 |
-| Arrays A0/A1, non-recursive | Linear in n for a fixed group: steps ≤ (n + 1)·K(G), where K(G) is finite (sketch below). K(G) can be exponential in nesting depth: X10's `[* ((2*2 (2*2 (… uint))), tstr) // uint)]` gives Ω(n·2^k) with B = 2^k. |
+| Arrays A0/A1, non-recursive | **Proof obligation** (N8): linear in n for a fixed group: steps ≤ (n + 1)·K(G), where K(G) is finite (sketch below). K(G) can be exponential in nesting depth: X10's `[* ((2*2 (2*2 (… uint))), tstr) // uint)]` gives Ω(n·2^k) with B = 2^k. |
 | Arrays A2, recursive | No bound beyond the budget. Rescans are polynomial for fixed non-recursive groups and can be exponential with recursion. |
 | Maps F | Per pair O(members); end O(members) |
 | Maps S | Per pair O(members); one end-run bounded by a constant K_S(G) independent of n. Slots number n_named, and every successful group iteration consumes a slot. |
@@ -1851,7 +1913,9 @@ computed from an element's evaluation, never from its bytes.
 Witnesses are a function of the semantics. They are the same in every tier
 and on every route. Program-2 §8 makes this operational.
 
-**Arrays.** The farthest failure event is reported:
+**Arrays.** The farthest failure event is reported (a `FAIL` node at
+index i is event E4: `unexpected` at `INDEX i` when i < n, else `missing`;
+N5):
 
 * E1: an `ENTRY` failed at i < n.
 * E2: an `ENTRY` was tested at n (end of input).
@@ -1883,6 +1947,16 @@ own deep witness when rᵢ = ∅; otherwise it reports `type` at `INDEX i`.
    * Leftovers after a root success report the first leftover in wire
      order: `value` if a member's key matched it and that member rejected
      its value, else `unexpected`.
+   * A `FAIL` node records an event too (N5), scored at the current trail
+     length. A folded `FAIL` carries the member whose repetition it
+     replaced, and reports `missing` for it exactly as the unfolded `REP`
+     would. An unplugged socket's `FAIL` reports `missing` with no key
+     segment.
+   * A `CHOICE` that re-raises `cut` passes up its best event (by score),
+     like any failing `CHOICE` (N4).
+   * T always traverses in pick order. F and S scores do not depend on
+     order: F has no choice, and S's choices hold only literal members
+     after unbounded root members (program-2 §8).
 
 End-of-map witnesses are shallow (the map path plus one segment). That is
 an intentional D024 revision, not the old deep witness. With several leaves,
@@ -1955,6 +2029,7 @@ identical typesets, `any`, or a literal tested with the VM.
 | W4 | `REP(lo ≥ 2)` wraps a body that consumes all it matches | `{2*3 (+ tstr => int)}`, `[2*3 (+ uint)]` |
 | W5 | A choice alternative follows one that cannot fail | `{(? a: int) // (b: int)}`, §3.11's `group2` |
 | W6 | Order-sensitive overlapping members (§3.5.3's pathological case) | `{int => int, int => 6}` |
+| W7 | The worst-case group arena at the compiled limits can exceed the arena cap (§20.6) | the twenty-recursive-leaf family of N1 |
 
 **Fast paths** that survive and are PEG-equivalent (both reviewers agreed
 for verdicts):
@@ -1993,9 +2068,14 @@ equivalent, and W1 warns about it.
     with group choices, nested and saturated occurrences, zero-length
     bodies, cuts on literal and typeset keys with named diagnostic keys,
     duplicate literal members, and center recursion;
-  * **forced-tier equality** of verdict and witness (§20.9);
-  * **metamorphic encodings**: every valid re-encoding of a case (§19's
-    equivalence property) gives the same verdict and witness;
+  * **forced-tier equality** of verdict and witness *under sufficient
+    resources*; with a tight budget or explicit arena limit, each tier's
+    resource outcome is gated against its own charge and allocation
+    schedule (N7);
+  * **metamorphic encodings**: every valid re-encoding gives the same
+    verdict and the same wire-independent witness parts (reason, schema
+    path). Diagnostic pair choice and offsets are wire-ordered by design and
+    may change (N7);
   * **splits**: every split, quantum and `VMS_GROW` point gives the same
     out array;
   * **resource boundaries**: the budget immediately before, at and after
@@ -2048,11 +2128,11 @@ Other changes:
   * witness cases for every §20.9 rule.
 * **Docs:** superseded notes in §4.3, §4.4 and §6; cddl-support.md;
   conformance.md D012, D036, S28 and D021/S26 re-audited after landing.
-* **Order of work:** P8.4, including §19.5's charge-order amendment (D277);
+* **Order of work:** P8.4, including D280's refusal replay (D277 is done);
   then the PEG oracle; then compiler and format; then the VM buffer driver;
   then sessions; then the corpus; then docs.
 
-### 20.14 Review disposition (revision 1 → revision 2)
+### 20.14 Review disposition (revisions 2 and 3)
 
 **A** = accepted with the change shown. **R** = rebutted, with the reason.
 **M** = settled by a manager decision of 2026-11-04.
@@ -2063,7 +2143,7 @@ Other changes:
 | C2 MAJOR: B needs maxlen(FAIL) = 0 | A: syntactic `ml`, `ml(FAIL) = 0`, `0·∞ = 0`; read-bound lemma stated; verifier recomputes | program-2 §3.2, §20.5 |
 | C3 MAJOR: F fold false | A: exact fold table, with `SEQ(M, FAIL)` instead of `FAIL` when the member has a cut (keeps `cut`/commit outcomes) | program-2 §3.3 |
 | C4 MAJOR: T permutation absent on the canonical path | A/M: T sorts its own records, charged identically on every route | program-2 §6.5 |
-| C5 MAJOR: `group_limit` refuses valid data at defaults | A/M: arena bounded by `A_max` from limits and grown on demand; code 44 only under an explicit limit | program-2 §9.4, §20.6 |
+| C5 MAJOR: `group_limit` refuses valid data at defaults | A/M: arena bounded by `A_max` from limits and grown on demand; code 44 only under an explicit limit. *Revised in revision 3 (N1, N3): demand growth to a cap; see N3* | program-2 §9.4, §20.6 |
 | C6 App. C existential vs R8/R15 | A: R8/R15 labelled policy; tension recorded; W6 | §20.3 |
 | C7 F stop-at-taker | A | program-2 §6.2 |
 | C8 witness gaps; forced-tier gate | A: score before undo; cut diagnostic predicate; leftover reason for non-literal members; forced-tier mode and gate | program-2 §8, §20.9 |
@@ -2076,17 +2156,17 @@ Other changes:
 | C15 superset lemma holds; test assertion | A | §20.5, program-2 §4 |
 | C16 charge determinism | A: per-element stepping incl. streaks; a dying block charged at its element | program-2 §5.1 |
 | C answers P1–P4 | A: memo reserved; fixed stride Rₜ; no `group_limit` at defaults; key-id → record table kept | program-2 |
-| X1 BLOCKER: recursive activation storage | A: all frames of recursive programs live in the arena behind a 3-word activation record; bound `ACT_WORDS` per consumed item | program-2 §5.3 |
+| X1 BLOCKER: recursive activation storage | A: all frames of recursive programs live in the arena behind a 3-word activation record; bound `ACT_WORDS` per consumed item. *Revised in revision 3 (N1, N2): per-block chunk lists; `ACT_SUM`* | program-2 §5.3 |
 | X2 BLOCKER: 8-word machine state holds 9 fields | A: exact block and frame layouts; formulas derived from them | program-2 §5.2, §6.3 |
 | X3 BLOCKER: key lookup assumes ascending keys | A: full-range search and `named` lookup once unordered; 1 unit per probe on every route | program-2 §6.1 |
-| X4 BLOCKER: canonical precharge vs session charging | A: one logical order; duplicate-check units charged at the map's end on every route. **Needs a §19.5 amendment** (P8.4 owns §19), recorded as requirement D277 | §20.6, program-2 §10 |
+| X4 BLOCKER: canonical precharge vs session charging | A: one logical order; duplicate-check units charged at the map's end on every route. §19.5 amended by P8.4 in 531220f (D277 agreed); refusal order remains (N6 → D280) | §20.6, program-2 §10 |
 | X5 MAJOR: F vs generic cut witness | A: diagnostic pair = smallest wire index in scope; T does a charged scan | program-2 §8 |
 | X6 MAJOR: nested occurrence collapse | A: fold table (as C3) | program-2 §3.3 |
 | X7 MAJOR: large-minimum rewrite contradicts R4 | A: minima saturate at 2^24 and are not lowered to `FAIL`; `0*0` → `EMPTY`; saturating arithmetic | §20.2, program-2 §3 |
 | X8 MAJOR: memo has no EOF row | A/M: memo withdrawn from 2.0; a future minor needs sentinel rows and a capability rule | §20.5, program-2 §1 |
 | X9 MAJOR: rfc cut lifetime inconsistent | A: commitment epochs per attempt; `{* (a: int)}` / `{a: 1}` accepted; called snug's formalisation, not settled RFC text | §20.2 |
 | X10 MAJOR: linear-time claim false | A/M: withdrawn; proven contracts only | §20.7 |
-| X11 MAJOR: arena bound and resource offsets | A: `A_max` sums records, end-run and activations over open containers; offsets at the item head or container head; charge before allocation | program-2 §8, §9.4 |
+| X11 MAJOR: arena bound and resource offsets | A: `A_max` sums records, end-run and activations over open containers; offsets at the item head or container head; charge before allocation. *Bound revised in revision 3 (N1)* | program-2 §8, §9.4 |
 | X12 MAJOR: map trace metadata; S import | A: per-frame score/event fields; S imports `ucount`/`ukey`/`ucut` | program-2 §6.3–6.4, §8 |
 | X13 verifier cost | A: cost stated in words and bitset ops; verify budget raised; SCC fixed points | program-2 §3.1 |
 | X14 oracle cannot certify mechanisms | A: four expectation kinds; metamorphic, forced-tier, split and resource gates; tag unwrap in the oracle and in R17 | §20.12 |
@@ -2100,6 +2180,22 @@ Other changes:
 
 Only X Q1 is rebutted, and that is by the manager's decision, with the
 reason stated above. No other finding is rejected.
+
+**Re-review of revision 2** (`docs/reviews/2026-11-04-peg-rereview.md`,
+"N#"; it confirms C1–C5 and X1–X14 as resolved or partially resolved and
+raises the following, answered in revision 3):
+
+| Finding | Disposition | Where |
+| --- | --- | --- |
+| N1 BLOCKER: A_max takes a max where simultaneous blocks need a sum | A: `ACT_SUM` sums per-item activation words over a closure set's recursive leaves (like `R_ITEM_MAX` for records); items counted by a global `VM_GROUP_ITEMS` that EMBED does not reset; bound saturates and is checked against a cap | §20.6, program-2 §2, §9.4 |
+| N2 BLOCKER: one downward LIFO region cannot host interleaved suspended machines | A: chunk heap with 64-word chunks, per-block chunk lists, a free list; chunk addresses are indices; link/unlink charged as steps | §20.6, program-2 §5.3 |
+| N3 MAJOR: growth unsafe; session relocation missing | A: demand-sized doubling (no jump to the loose bound); explicit cap with its own hard maximum, separate from the 64 MiB cap; relocation by copying two regions with stable addressing; re-run CPU bound restated; EXT purity noted. **Partly rebutted:** "never refuses at defaults" cannot be promised by any finite default; replaced by "no refusal below the cap" + warning W7 | §20.6, program-2 §9.4 |
+| N4 MAJOR: unbounded cut members make scores and steps order-sensitive | A: T always visits records in pick order (sorted whenever the map is unordered or EC-sensitive, not only with order-sensitive members); F/S scores are order-independent (argued in program-2 §8); CHOICE re-raising `cut` passes its best event | program-2 §6.2, §6.5, §8 |
+| N5 MAJOR: FAIL has no failure event | A: `FAIL` records an event (arrays E4; maps kind `fail` with score); folded `FAIL` carries provenance (the member whose iteration it replaces) so it reports what the unfolded REP would; unplugged sockets report `missing`/`unexpected` without a key | program-2 §3, §8 |
+| N6 BLOCKER: early scanner refusals not deferred | A: D280 refusal replay — the scanner records refusal and logical event, the copy covers the valid prefix, the VM reports the refusal on reaching the event; needs P8.4's §19.5 amendment (requested via the manager) | §20.6, D280 |
+| N7 MINOR: gates need resource and wire-order qualifications | A: forced-tier equality under sufficient resources; resource outcomes gated against their own schedules; encoding invariance only for the verdict and the wire-independent parts of witnesses | §20.12 |
+| N8 MINOR: proofs vs established bounds | A: verifier cost and the A0/A1 bound labelled proof obligations | §20.7, program-2 §3.1, §20.16 |
+| N9 MINOR: wording | A: D277 marked done; §20.2's §3.5.4 claim qualified; App. C occurrence-expansion exception recorded in R9 | §20.2, §20.3 |
 
 ### 20.15 Probe record (2026-11-04, revision 2)
 
@@ -2243,13 +2339,17 @@ timeout.
 
 ### 20.16 Remaining questions
 
-1. **D271 (owner).** Should `reference` (rule A) or `rfc` be the default,
-   and should `reference` be renamed (for example to `branch`), now that it
-   is no longer the reference tools' behaviour?
-2. **P8.4 (§19.5 owner).** Adopt D277's charge point: the deferred
-   duplicate-check units charged at the map's logical end on the canonical
-   route too.
-3. **Review.** Prove or break the A0/A1 linear bound sketch (§20.7).
-4. **Measurement before adoption.** PEG step, record and sort prices (D241
-   method), and the cost of the buffer route's single re-run on arena
-   overflow (program-2 §13).
+1. **D271 (owner).** Which cut mode should be the default, and should
+   `reference` be renamed?
+2. **D280 (P8.4).** Agree to refusal replay on the canonical path and amend
+   §19.5.
+3. **Arena cap (manager/owner).** Is a 16 MiB default arena cap with a W7
+   warning acceptable, given that no finite default can rule out
+   `group_limit` (§20.6)?
+4. **Proof obligations (N8):**
+   * the A0/A1 linear bound (§20.7);
+   * the verifier's fixed-point cost (program-2 §3.1).
+
+   Both are labelled as obligations, not as established bounds.
+5. **Measurement before adoption:** PEG step, record, chunk and sort
+   prices; re-run cost on the buffer route.

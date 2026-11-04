@@ -1,10 +1,13 @@
-# snug — Program format 2.0 (draft, revision 2)
+# snug — Program format 2.0 (draft, revision 3)
 
-Status: **draft revision 2 (2026-11-04)**. This revision answers the two
+Status: **draft revision 3 (2026-11-04)**. Revision 2 answered the two
 independent reviews: `docs/reviews/2026-11-04-peg-claude.md` ("C#") and
-`docs/reviews/2026-11-04-peg-codex.md` ("X#"). The disposition table is in
-architecture §20.14. Nothing here is implemented, frozen or owner-approved
-(D272–D279).
+`docs/reviews/2026-11-04-peg-codex.md` ("X#"). Revision 3 answers the
+re-review `docs/reviews/2026-11-04-peg-rereview.md` ("N#"). The changes are
+summed activation bounds, a chunk heap for recursive frames, a capped
+demand-grown arena with session relocation, sorted T traversal, `FAIL`
+events, and refusal replay (D280). The disposition table is in architecture
+§20.14. Nothing here is implemented, frozen or owner-approved (D272–D280).
 
 This document implements architecture §20 (PEG group semantics, D270, D271)
 on paper. It is a **delta** against [program.md](program.md) (format 1.1).
@@ -59,8 +62,9 @@ merged into program.md and this file is deleted.
 | 6 | `FLAGS` bits 0–4 | unchanged; **bit 5** `CUTS_RFC`; **bit 6** `ARENA` (some ARRAY leaf is A2 or some MAP leaf is T) | bit 5 [V], bit 6 [D] |
 | 19 | `N_GROUPS` | `N_PEGS` | [V] |
 | 29 | `G_EMPTY` | `R_ITEM_MAX`: the maximum, over closure sets R, of the sum of the record words of the A2/T leaves in R (§9.4) | [D] |
-| 41 | reserved | `LIM_GROUP_WORDS`: an explicit compiled arena limit in words, or 0 for none (then the derived bound of §9.4 applies) | [V] |
-| 63 | reserved | `ACT_WORDS`: the maximum, over recursive PEG programs, of `n_calls · (8·depth + 3)`; the activation bound per consumed item (§5.3) | [D] |
+| 41 | reserved | `LIM_GROUP_WORDS`: the arena cap in words (default 4 194 304; ≤ 2^24; §9.4) | [V] |
+| 62 | reserved | `RECLEAF_MAX`: the most recursive ARRAY/MAP leaves in one closure set | [D] |
+| 63 | reserved | `ACT_SUM`: the maximum, over closure sets, of the sum of per-element activation chunk words of their recursive leaves (§5.3) | [D] |
 
 ## 3. Sections S5/S6: PEG programs
 
@@ -85,7 +89,7 @@ kids[n_kids]
 | op | Name | a | b | c | d | Semantics (arch §20.2) |
 | --- | --- | --- | --- | --- | --- | --- |
 | 0 | `EMPTY` | – | – | – | −1 | succeed, consume nothing |
-| 1 | `FAIL` | – | – | – | −1 | fail |
+| 1 | `FAIL` | – | provenance: the member id (maps) or position (arrays) whose iteration a fold replaced, else −1 | – | −1 | fail, recording an event (§8) |
 | 2 | `ENTRY` | position p | – | – | −1 | element at idx matched position p |
 | 3 | `MEMBER` | member id | min | max | −1 | member loop with occurrence min..max (the cut flag is in the member record) |
 | 4 | `SEQ` | first kid | count ≥ 2 | – | −1 | thread |
@@ -113,8 +117,11 @@ unsatisfiable except through the zero-length rule, which stays available.
 
 ### 3.1 Derived fields and how the verifier computes them (X13)
 
-The verifier recomputes every [D] field. Its cost is O(Program words +
-npos·W·(n_calls + 1)) word and bitset operations. The verify budget
+The verifier recomputes every [D] field. Its cost is bounded by the verify
+budget, which charges every word read and every bitset operation, the
+fixed-point rounds included. The figure O(Program words +
+npos·W·(n_calls + 1)) per round is a **proof obligation** (N8), not an
+established bound. The verify budget
 (program.md §11) is raised to `64·(PROGRAM_WORDS + POOL_BYTES/4 +
 npos·W·(n_calls + 1) + 1)` to cover it.
 
@@ -278,28 +285,44 @@ following is one **step** (§10):
   alternative, each REP iteration's entry into its child, and each `CALL`;
 * each rewind of `idx`.
 
-**Activation contract.**
+**Activation contract (X1, N2).**
 
 * A non-recursive program keeps all its frames in the block's static stack
   (`depth` frames).
-* A **recursive** program has no static stack. Every frame lives in the
-  arena's downward region.
+* A **recursive** program has no static stack. Its frames live in its own
+  **chunk list**, drawn from the arena's chunk heap (§9.4).
+  * Chunks are 64 words: 2 header words (next chunk index or −1, words
+    used) and 62 payload words.
+  * A frame or an activation record never spans two chunks. When the current
+    chunk lacks room, the block links a new chunk from the free list, or
+    carves a new one from the heap.
+  * When a chunk's last frame is popped, it is unlinked and returned to the
+    free list.
+  * The block's `act` word holds a **chunk address**, `chunk index · 64 +
+    offset`, of its current top.
 * A `CALL` pushes a 3-word activation record `{caller pc, caller act, frame
-  count}`. The callee's frames are pushed after it as they are created.
-* A return, success or failure, pops the callee's frames and the record, and
-  restores `act`, `sp` and `pc`. Unwinding a failed call pops the same way.
-* Suspension needs nothing extra, because the arena is part of the scratch.
-* Charges: 1 step for the `CALL`. Node entries already cover frame pushes and
-  pops. Nothing is ever copied.
+  count}`; the callee's frames follow it.
+* A return, success or failure, pops them and restores `act`, `sp` and
+  `pc`. Unwinding a failed call does the same.
+* Several blocks can suspend interleaved, inside one container or across
+  nested containers. Each pushes and pops only in its own list, so no global
+  LIFO order is needed.
+* Charges: 1 step per `CALL`, and 1 step per chunk link or unlink. Node
+  entries cover frame pushes and pops. Nothing is ever copied.
 
 **Activation bound.** Left recursion is refused: the verifier rejects any
 `CALL` cycle reachable through nullable prefixes. So between two activations
-of one cycle on the live chain, at least one element is consumed on the live
-path, and a chain that consumes nothing contains at most `n_calls` calls.
-Live activations therefore number at most (consumed + 1) · n_calls. Each
-has at most `depth` frames of 8 words or fewer, plus the 3-word record.
-`ACT_WORDS` (header word 63) is that cost per consumed item; the total is
-at most `ACT_WORDS` per item consumed, plus one more `ACT_WORDS`.
+of one cycle on a block's live chain, at least one of that block's elements
+is consumed. A chain that consumes nothing contains at most `n_calls` calls.
+A block's live activations therefore number at most
+(its consumed elements + 1)·n_calls.
+
+Each activation costs at most `a = 3 + 8·depth` words. Chunking wastes at
+most 2 header words plus 8 words of tail per chunk, so it needs at most
+⌈a·n_calls·64/54⌉ chunk words per consumed element, plus one partly filled
+chunk per live block. Header word 63 `ACT_SUM` is the maximum, over closure
+sets R, of the sum of ⌈n_calls·(3 + 8·depth)·64/54⌉ over the recursive
+leaves in R. It sums simultaneous blocks (N1).
 
 ## 6. Sections S7/S8: map tables
 
@@ -360,9 +383,9 @@ root[n_root]:            class-R members, source order
   (a key matched) and `ucut` (the wire index of the first cut violation).
   The machine runs at the map's end (§6.4).
 * **T.** Append the pair's record to the item's arena record (§9.4). At the
-  end, if the map has an order-sensitive member and is either `unordered` or
-  contained an EC-sensitive key (arch §19.2), the machine first sorts its
-  records (§6.5). Then it runs (§6.4) and checks closedness.
+  end, if the map is `unordered` or contained an EC-sensitive key (arch
+  §19.2), the machine first sorts its records (§6.5), whatever its members
+  (N4). Then it runs (§6.4) and checks closedness.
 
 ### 6.3 Map block layout (X2)
 
@@ -425,7 +448,8 @@ Pick order is ascending EC key order (arch §20.2, R8).
 F and S never need it. They have no order-sensitive member, so their results
 do not depend on it, and their diagnostics use wire order (§8).
 
-T needs it only when it has an order-sensitive member:
+T always traverses in pick order, because cut traversal, failure scores and
+step counts depend on it even with unbounded members (N4):
 
 * If the map is neither `unordered` nor `ecsens`, wire order already is EC
   order and nothing is done.
@@ -455,8 +479,8 @@ fields; header words 29, 41 and 63; FLAGS bits 5–6; reserved fields equal to
 **Code 44 `group_limit`** is a validator code like 48 `budget`, and is not
 skippable.
 
-* **When.** Only when an explicit arena limit is set (`LIM_GROUP_WORDS` ≠ 0,
-  or limits word 10 ≥ 0) and an allocation would exceed it.
+* **When.** An allocation misses with the arena already at its cap (§9.4).
+  Below the cap a miss is growth, never a refusal.
 * **Precedence.** Every allocation comes after its charge. If the charge
   exhausts the budget, `budget` is reported and nothing is allocated.
 * **Offset.** An allocation made while processing an element or pair
@@ -475,12 +499,25 @@ some member's key matched, else `unexpected`, with the path to the value.
 
 * **Failure events.** When a `MEMBER` fails, it records an event: score =
   the trail length at that moment, before any undo; kind = `missing` or
-  `cut`; the member; the pair.
+  `cut`; the member; the pair. A `FAIL` node also records an event (N5):
+  its score is the trail length and its kind is `missing`. The member is
+  its provenance member (a fold reports what the unfolded `REP` would: that
+  member's next iteration met no pair), or none for an unplugged socket,
+  which reports `missing` with no key segment.
 * **Propagation.** A frame keeps the best event among its failed
   sub-attempts (higher score wins; ties go to the earlier). A failing `SEQ`
   passes up its failing child's event. A failing `CHOICE` passes up its best
   event. A `REP` below its minimum passes up its failing iteration's event.
-  Rule A `cut` and rfc `fail!` pass up the event that raised them.
+  rfc `fail!` passes up the event that raised it. A rule-A `cut` raised by a
+  `MEMBER` passes up that member's event, and a `CHOICE` that re-raises
+  `cut` passes up its best event, by the same rule as any failing `CHOICE`
+  (N4).
+* **Order independence (N4).** Scores are compared only at a `CHOICE`. T
+  traverses in pick order (§6.5), so its scores and steps do not depend on
+  the serialisation. F has no `CHOICE`. In S, choices appear only in literal
+  subtrees: a literal member's consumption does not depend on order, and
+  the class-R members before such a subtree consume all their matches,
+  whatever the order, so its scores do not depend on order either.
 * **Reporting.** The root's event is reported:
   * `missing`: extra segment `KEY id` or `ANYKEY`;
   * a cut: `value` at the **diagnostic pair**. That is the cut-violating
@@ -504,22 +541,31 @@ id) and read its tracker:
   and not cleared since. That always holds when this block was the item's
   last live block at i. Otherwise `type` + `INDEX i`.
 * Any other E1: `type` + `INDEX i`.
+* E4, a `FAIL` node tested at index i (N5): `unexpected` + `INDEX i` when
+  i < n, else `missing` + `INDEX n`. It competes with E1–E3 by index (ties:
+  run order), so `[$$g]` reports `missing` on `[]` and `unexpected` at 0 on
+  `[1]`.
 
 Rule 2 (clearing) applies while some block of the item is live and has not
 failed.
 
 **Forced-tier test mode (C8).** Limits word 8 bit 2 forces every map to T
 and every array to A2, ignoring the natural tier (the programs stay valid).
-Gate (`bb vm-test`): on every case, verdict, reason, subcode, path and
-offset must be equal with and without the bit. Only the budget used may
-differ.
+Gate (`bb vm-test`): with sufficient budget and arena, on every case,
+verdict, reason, subcode, path and offset must be equal with and without
+the bit. Only the budget used may differ. With a tight budget or arena,
+each mode's `budget`/`group_limit` outcome is gated against that mode's own
+charge and allocation schedule. The forced mode can legitimately refuse
+where the natural tier finishes (N7).
 
 ## 9. Scratch (delta to program.md §12)
 
 ### 9.1 VM block
 
-Words 37–40 are `VM_ARENA` (offset), `VM_ARENA_UP`, `VM_ARENA_DOWN` and
-`VM_ARENA_END`. Word 41 is `VM_ARENA_LIMIT` (the explicit limit, or −1).
+Words 37–40 are `VM_ARENA` (offset), `VM_ARENA_UP`, `VM_CHUNK_TOP` (chunks
+carved) and `VM_ARENA_END`. Word 41 is `VM_ARENA_CAP` (the effective cap).
+Word 42 is `VM_CHUNK_FREE` (free-list head, −1). Word 43 is
+`VM_GROUP_ITEMS` (the global item counter, never reset by EMBED).
 
 ### 9.2 Frames
 
@@ -533,49 +579,91 @@ naming count.
 
 ### 9.3 Limits array
 
-Word 10 (optional) is the explicit arena limit in words; −1 or absent means
-none, and then `LIM_GROUP_WORDS` applies if it is non-zero. When both are
-given, the smaller one is the effective explicit limit.
+Word 10 (optional) is an explicit arena limit in words; −1 or absent means
+none. The effective cap is min(word 10, `LIM_GROUP_WORDS`) when given, else
+`LIM_GROUP_WORDS`.
 
-### 9.4 The group arena: content, bound and growth (C5, X11)
+### 9.4 The group arena: content, bound, cap, growth, relocation (C5, X11, N1–N3)
 
-**Content.**
+**Layout.** The arena is one region of scratch words with two parts.
 
-* Records grow upward. An item with A2/T blocks reserves one element record
-  of fixed stride Rₜ, the sum of the record words (A2: W; T: rec_words) of
-  the A2/T blocks admitted when its container was entered. A dead block's
-  words stay in the stride (X Format Q2).
-* Nested items push above and pop at their end.
-* End-runs push a T sort permutation (n words) and a trail (≤ n words)
-  above, and discard them after the run.
-* Recursive activations grow downward.
-* An embedded sub-validation saves and restores both tops.
+* **The upward stack**, from `VM_ARENA`:
+  * Element records: an item with A2/T blocks reserves one record of fixed
+    stride Rₜ, the sum of the record words (A2: W; T: rec_words) of the A2/T
+    blocks admitted when its container was entered. A dead block's words
+    stay in the stride (X Format Q2).
+  * End-run permutations and trails.
+  * Nested items push above and pop at their end.
 
-**Bound.** With the effective limits, the arena never needs more than
+  Addresses here are offsets from `VM_ARENA`.
+* **The chunk heap**, growing down from `VM_ARENA_END`:
+  * Chunk c occupies `[END − 64·(c+1), END − 64·c)`.
+  * Free chunks form a list headed by `VM_CHUNK_FREE`.
+  * `VM_CHUNK_TOP` counts the chunks ever carved.
+
+  Addresses here are chunk indices and in-chunk offsets.
+* A push that would make the two parts meet is a **miss**: the arena must
+  grow (below) or the cap is reached.
+* An embedded sub-validation saves and restores the upward top. Chunks are
+  per block and freed by their block.
+
+**Bound (N1).** A global item counter `VM_GROUP_ITEMS` counts every item the
+walk visits, at every embedding level, and is never reset (unlike the EMBED
+item counter). At any moment,
 
 ```
-A_max = maxItems · R_ITEM_MAX + 2 · maxEntries + (maxItems + D + 1) · ACT_WORDS
+need ≤ VM_GROUP_ITEMS · (R_ITEM_MAX + ACT_SUM)
+       + (D + 1) · (ACT_SUM + 64 · RECLEAF_MAX)
+       + 2 · maxEntries
 ```
 
-words, computed with saturation. The three terms are: records (at most one
-per item); one end-run's permutation and trail (only one end-run runs at a
-time); activations by §5.3, summed over the at most D + 1 open containers.
+where:
 
-**Growth.** The arena is not preallocated.
+* `VM_GROUP_ITEMS` ≤ the input bytes;
+* `RECLEAF_MAX` is the most recursive leaves in any one closure set;
+* the D + 1 term covers each open container's "+1" activation and its
+  partly filled chunks;
+* 2·maxEntries covers one end-run's permutation and trail.
 
-* **Buffer route.** The VM starts with the host's leased arena (default
-  4 096 words). A push beyond it ends the call with the internal code
-  `scratch` (22, never visible to users; arch §19.5). The host then
-  allocates `A_max` words for these limits (or the explicit limit, if
-  smaller) and runs the validation once more. Charges are a pure function of
-  the run, so the second run's out array is the answer, and total CPU is at
-  most twice one run.
-* **Session route.** The session suspends with `VMS_GROW` (arch §19.7). The
-  host copies the scratch into a larger array (doubling, capped at `A_max`)
-  and steps again. Nothing is re-run.
+All arithmetic saturates at 2^31 − 1. The compiler evaluates the bound at
+the compiled limits, with items = the input limit, and warns **W7** when it
+exceeds the default cap.
 
-Neither route ever refuses at default limits. `group_limit` exists only
-under an explicit limit.
+**Cap (N3).** The arena never exceeds its cap:
+
+* the explicit limit if one is given (compile option `groupWords`, or limits
+  word 10);
+* else `LIM_GROUP_WORDS` (header word 41), which defaults to 4 194 304
+  words (16 MiB);
+* never more than 2^24 words (64 MiB).
+
+The arena is counted outside `LIM_TOTAL_BYTES`, the 64 MiB
+Program/pool/scratch cap, which is unchanged. A miss at the cap is
+`group_limit`.
+
+**Growth (N3).** Allocation follows demand, never the bound.
+
+* **Buffer route.** The VM starts with the host's lease (default 4 096
+  words). On a miss below the cap it ends with the internal code `scratch`
+  (22). The host doubles the arena (at most to the cap) and runs the
+  validation again.
+  * Charges are a pure function of the run, so the final run's out array is
+    the answer.
+  * CPU is at most (1 + number of doublings) × one run, the doublings being
+    ≤ log₂(cap/lease) ≤ 10.
+  * EXT predicates may be called again on a re-run. They must be pure
+    (D140), so the outcome is unchanged.
+* **Session route.** On a miss the session suspends with `VMS_GROW`. The
+  host allocates a scratch array with the arena doubled (at most to the cap)
+  and relocates:
+  1. copy the words below `VM_ARENA_UP` to the same offsets;
+  2. copy the chunk heap so that each chunk keeps its index counted from the
+     new end, i.e. it moves by the growth amount;
+  3. set `VM_ARENA_END` to the new end.
+
+  Record offsets, chunk indices and chunk addresses (`act`, saved `caller
+  act`, chunk links, `VM_CHUNK_FREE`) are all relative, so nothing else is
+  rebased. Nothing is re-run, and growth costs no units on either route.
 
 ## 10. Charging (delta to program.md §14): one order on every route (X4)
 
@@ -584,7 +672,7 @@ under an explicit limit.
 | array element, per block visited | 1; live blocks + W·(\|A\| + 1) + 1 per candidate position |
 | array element, after the child: each candidate | 1 + typeset test |
 | array record stored (A1, A2) | ⌈R/16⌉ (R = W) |
-| PEG step (§5.3, §6.4) | 1 |
+| PEG step (§5.3, §6.4; including chunk link/unlink) | 1 |
 | array end, per block visited | 1; live blocks + W, then the machine's steps |
 | map pair, per block visited | 1, + 1 per cursor step (ascending) or per probe of `named` (unordered) |
 | map pair, key phase: each non-literal member's key typeset test | 1 + the test |
@@ -607,12 +695,12 @@ under an explicit limit.
 * **At an array's end:** the end row, then the machine.
 * Yields and window boundaries never move a charge.
 
-**Dependency on §19 (X4).** The canonical route must charge the deferred
-duplicate check at the same logical point, the map's end. The current draft
-of arch §19.5 charges it before the VM starts instead. The scanner can still
-do the physical work early and record each marked map's unit count for the
-VM to charge when it reaches that map's end. Until §19.5 is amended, this
-order is a stated requirement on P8.4 (DEVLOG D277).
+**Dependency on §19.** D277 is in place: §19.5 (531220f) charges the
+deferred duplicate check at the map's logical end on every route. **D280**
+(refusal replay, arch §20.6) is still to be agreed and amended into §19.5.
+Under it, the canonical route reports a scanner refusal when the VM's walk
+reaches the refusal's logical event, not before the VM runs. That makes
+the refusal order the same as the session's (N6).
 
 **Schedule 2 (D045).** Rule 1 also removes the machine steps of a `[* T]`
 element. Rule 2's shapes are tier F and keep 1 unit per simple pair. Rule 3
@@ -631,7 +719,7 @@ equal-CPU claim until the implemented paths are measured with D241's method
 | members per map | 256 | 4 096 | compile |
 | frames per activation (`depth`) | 64 | 256 | compile |
 | A1 ring words (B + 1)·W | 4 096 | 65 536 | compile (above it the array is A2) |
-| explicit group arena words | none | 2^26 | compile option `groupWords` / per call |
+| group arena cap (words) | 4 194 304 | 2^24 | compile option `groupWords` / per call (lower only) |
 
 ## 12. Worked examples (operational)
 
@@ -666,7 +754,9 @@ returns `cut`. That passes through SEQ and REP to the root: invalid, with
 
 ## 13. Questions remaining for the format
 
-1. On the buffer route, is a single re-run acceptable for latency on the rare
-   A2/T inputs that overflow the lease, rather than preallocating `A_max`?
-2. Should `ACT_WORDS` use 4-word frames for array programs instead of the
+1. Is up to 10 doubling re-runs on the buffer route acceptable for A2/T
+   inputs that outgrow the lease? The alternative is a resumable buffer
+   driver that relocates like the session.
+2. Should `ACT_SUM` use 4-word frames for array programs instead of the
    common 8?
+3. Is a 64-word chunk the right size?

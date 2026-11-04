@@ -4310,6 +4310,7 @@ transparency. It is recorded as Ruby class RC (7 probes) and as 22 corpus
 flips.
 **Owner questions**: which mode is the default (D271), and whether to rename
 `reference`.
+*Amended (revision 3, 2026-11-04; re-review N9):* rule A honours §3.5.4's later-entry restriction through `?`, `*` and named groups only. An explicit `//` absorbs a cut (`{(a: int) // (), * tstr => any}` accepts `{a: "x"}` while `{? a: int, * tstr => any}` rejects it), so rule A deliberately departs from App. C's occurrence-as-choice expansion when cuts are involved. App. H transparency is satisfied by both modes and does not select rule A alone.
 - [ ] **Signed off** (owner)
 
 ### D274 — Pick order is EC key order; T sorts its own records (P8.5)
@@ -4324,6 +4325,7 @@ No dependency on the scanner path, which exists only on the buffer
 canonical route (review C4).
 **Alternatives**: wire order (Ruby; depends on the serialisation); reusing
 §19.4's permutation (not available on every route).
+*Amended (revision 3; N4):* T sorts its records whenever the map is unordered or EC-sensitive, whatever its members, because cut traversal, failure scores and steps depend on order even with unbounded members. F and S scores do not depend on order (program-2 §8).
 - [ ] **Signed off** (owner)
 
 ### D275 — Evaluation: relaxed query automaton, verdict records, incremental machine, tiers; no memo in 2.0 (P8.5)
@@ -4341,6 +4343,7 @@ lemmas (proved by both reviewers); the memo design was incomplete (EOF rows,
 link proofs).
 **Alternatives**: evaluating against the whole group alphabet (more work,
 same verdicts); shipping memo cells (deferred).
+*Amended (revision 3; N2, N5):* recursive frames live in per-block lists of 64-word chunks from a chunk heap with a free list (not one LIFO region). Folded `FAIL` nodes carry provenance.
 - [ ] **Signed off** (owner)
 
 ### D276 — The group arena is sized from limits and grown on demand; `group_limit` only under an explicit limit (P8.5)
@@ -4355,6 +4358,7 @@ stay separate resources (X Q11).
 **Alternatives**: a fixed 65,536-word arena (revision 1; refuses valid T
 maps from about 16k pairs); pricing records so the budget always runs out
 first.
+*Amended (revision 3; N1, N3):* the bound sums activation words over simultaneous recursive leaves (`ACT_SUM`) and counts items globally (`VM_GROUP_ITEMS`, not reset by EMBED). Allocation follows demand by doubling (buffer: re-run per doubling; session: `VMS_GROW` with relocation by stable chunk indices), up to a cap: the explicit limit, else `LIM_GROUP_WORDS` (default 4,194,304 words, at most 2^24, outside `LIM_TOTAL_BYTES`). `group_limit` is a miss at the cap. **Partly rebuts** "never at defaults": no finite default can promise it. Instead: no refusal below the cap, and compile warning W7 when the worst case exceeds the cap.
 - [ ] **Signed off** (owner)
 
 ### D277 — One charging order on every route; duplicate-check units at the map's logical end (P8.5; requirement on P8.4)
@@ -4368,6 +4372,7 @@ counts and the VM charges them at that map's end.
 routes.
 **Alternatives**: precharging on the session route too (the session cannot
 know the sort cost before reaching the map).
+*Note (revision 3):* agreed by P8.4 and amended into §19.5 in 531220f. Refusal order is D280.
 - [ ] **Signed off** (owner)
 - [x] **Agreed** (P8.4 / §19 owner, 2026-11-04): §19.5 amended — the scanner
   records each marked map's duplicate-check units with the map's position, the
@@ -4385,6 +4390,7 @@ witness. Compile warnings W1–W6 never refuse.
 (C8, X5, X12); the warnings flag PEG surprises (C12, X Q16).
 **Alternatives**: deep witnesses at map end (needs path copies); witnesses
 that depend on the tier.
+*Amended (revision 3; N4, N5, N7):* `FAIL` events (arrays E4; maps scored `missing` with provenance). A `CHOICE` re-raising `cut` passes its best event. Forced-tier equality holds under sufficient resources, with resource outcomes gated per schedule. Encoding invariance covers the verdict and the wire-independent witness parts. Warning W7 added.
 - [ ] **Signed off** (owner)
 
 ### D279 — Format 2.0, the PEG oracle, and proven complexity contracts only (P8.5)
@@ -4396,7 +4402,27 @@ the contracts of architecture §20.7 are stated.
 **Why**: S5–S10 change meaning; the oracle checks semantics, not mechanisms
 (X14); the linear claims were false (X10, C10).
 **Alternatives**: a format 1.2 keeping both engines.
+*Amended (revision 3; N8):* the verifier cost figure and the A0/A1 linear bound are proof obligations, not established bounds.
 - [ ] **Signed off** (owner)
+
+### D280 — Refusal replay on the canonical path (P8.5/P8.4; re-review N6)
+**Decision** (designer, provisional; needs P8.4's agreement and a §19.5
+amendment): when the canonical path's scanner refuses, it records the code,
+input offset and logical event (the refused item's head; a map's end for a
+deferred duplicate check; the break / end-of-input position). The copy
+writer builds the copy of the valid prefix, and the VM reports the recorded
+refusal when its walk reaches that event. Before that, profile-only
+continuation (D023) and `budget` stopping (program.md §17 Q17) apply as on
+every route.
+**Why**: D277 deferred units but not refusals. On
+`9f00a3020001000200ff` under `r=[uint,{* int=>int}]` the buffer route
+refused `duplicate_key` before the VM ran, while a session spent its budget
+first. Replay makes the out arrays identical. §19.5 already does this for
+embedded content.
+**Alternatives**: making the session pre-scan whole items (breaks
+streaming); accepting route-dependent codes (breaks R6/§17.5).
+- [ ] **Signed off** (owner)
+- [ ] **Agreed** (P8.4 / §19 owner)
 
 ## Findings
 
@@ -5902,6 +5928,19 @@ authorised), the existing gate set, and conformance-corpus vectors.
     Probes now number 117: Ruby agrees on 88 and every one of the 29
     disagreements is classified (new class RC: 7 probes, App. H evidence).
     Corpus flips under rule A: 33 (11 structural, 22 rule A).
+  - **Revision 3 (2026-11-04, after the focused re-review
+    docs/reviews/2026-11-04-peg-rereview.md):** N1–N9 answered (architecture
+    §20.14), with amendments to D273–D279 and new D280.
+    * Summed activation bound (`ACT_SUM`) and a global item counter.
+    * Per-block chunk lists, so interleaved suspended machines need no LIFO
+      order.
+    * Demand growth to a cap (16 MiB default) with stable-index session
+      relocation. "Never refuses at defaults" is partly rebutted and
+      replaced by W7.
+    * T always sorts when not in EC order.
+    * `FAIL` events with provenance.
+    * D280 refusal replay, pending P8.4's agreement.
+    * Gate wording qualified; proof obligations labelled.
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
