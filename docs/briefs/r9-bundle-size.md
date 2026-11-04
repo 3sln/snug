@@ -51,9 +51,9 @@ without dropping features**; the codec alone (14.6 KB) already meets 20 KB.
    compiled in-process or embedded and trusted): ~24–26 KB, slower on large
    homogeneous data. Useful for browsers that validate small messages. Adds an
    entry point to maintain and document.
-4. **Keep R9 at 20 KB as written**: would require dropping capabilities
-   (regexps, embedded CBOR, sessions are already out) or moving validation to
-   wasm, which is larger. Not recommended.
+4. **Keep R9 at 20 KB as written**: would require removing capabilities
+   from the runtime (for example regexps or embedded `.cbor`; sessions already
+   live outside it) or moving validation to wasm, which is larger. Not recommended.
 
 ## Recommendation
 
