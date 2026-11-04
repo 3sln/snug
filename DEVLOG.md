@@ -4646,6 +4646,26 @@ are answered as provisional decisions D082–D085. None is open now.
 - [x] **Program caching** → D084 (versioned serialised Program, compatibility rule).
 - [x] **Unknown-length streams** → D085 (drain to EOF within maxBytes; opt-in fail-fast).
 
+**Open as of 2026-11-04 (manager):**
+
+- [ ] **P7.13w — authorise wasm SDK edits for the sequence reader (D219).**
+  The sequences engineer's edit to `host/wasm/src/sdk.rs` was refused by the
+  session's permission system (P7.9c's authorisation covered specific edits
+  only); not worked around. Needed: `sdk_vs_new` with total −2 →
+  `vms_init_seq`; new `sdk_vs_reseq(h, quantum)`; `INFO[4]` = `vms_held_code`,
+  `INFO[5]` = `vms_message_length`; an SDK sequence backend over WasmSession;
+  an internal `mintView` module. Native side ready (`host/js/src/sequence-core.mjs`).
+- [ ] **P8.4w (likely) — authorise wasm SDK edits for the valid-CBOR default**
+  if P8.4's edit is refused the same way; until then the SDK stays on an
+  explicit profile and `bb wasm-sdk-test` stays green.
+- [ ] **Review note:** commit `f23aea0` (P8.3) includes two small Codex edits
+  in `host/wasm/src/cc.rs` and `host/wasm-sdk/src/compile.mjs` (regexp option
+  pass-through). They were not refused and are not `sdk.rs`; flagged in case
+  the owner wants every wasm edit gated.
+- [ ] **D271/D273 — cut-scope default** (literal RFC global cut vs the
+  reference tools' per-alternative cut, refined to rule A) and the name of the
+  reference mode.
+
 ## Phase 7 — Standalone library (D080, 2026-11-03)
 
 - [x] **P7.1 — General default profile** (D081): key kinds, standard tag set,
