@@ -4422,7 +4422,28 @@ embedded content.
 **Alternatives**: making the session pre-scan whole items (breaks
 streaming); accepting route-dependent codes (breaks R6/§17.5).
 - [ ] **Signed off** (owner)
-- [ ] **Agreed** (P8.4 / §19 owner)
+- [x] **Agreed** (P8.4 / §19 owner, 2026-11-04): §19.5 amended. Implementation:
+  the scanner's innermost item frame records the refusal's event (that item's
+  head) as the walk unwinds; a duplicate check's event is its map's end (a flag
+  on the map's D277 units entry); the copy writer writes the valid prefix with
+  each open container's count one past its complete children, so the VM's walk
+  meets the end of the copy exactly at the event (after the item's visit and
+  count, as on every route) and the driver reports the recorded refusal there.
+  Refusals the VM sees itself on the copy (tag rules, embedded content) need no
+  record.
+
+### D281 — PEG group arena: 16 MiB default cap with compile warning W7 (manager)
+**Decision** (manager, provisional; answers architecture §20.16's arena
+question): the PEG group arena grows on demand to a default cap of 4,194,304
+words (16 MiB; hard cap 2^24 words), counted separately from the
+Program/scratch cap; `group_limit` (code 44) applies only under an explicit
+`groupWords` limit, and the compiler emits warning W7 when a schema's worst
+case can exceed the cap. **Why**: the final PEG check accepted the partial
+rebuttal that no finite default can promise "never refuses at default limits"
+(the twenty-recursive-leaf family needs memory linear in leaves × items); a
+documented, explicit cap with a warning is the honest contract, like the step
+budget.
+- [ ] **Signed off** (owner)
 
 ## Findings
 
