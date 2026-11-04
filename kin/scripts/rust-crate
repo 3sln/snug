@@ -15,12 +15,21 @@
 set -e
 cd "$(dirname "$0")/../.."
 dir="$1"; host="${2:-host/rust/src}"; manifest="${3:-host/rust/Cargo.toml}"
+# The full host now exposes navigation and encoding alongside the legacy APIs.
+# Preserve the older scanner/check subset callers without changing their hosts.
+if [ "$host" = host/rust/src ] && [ -n "$SNUG_RS_ONLY" ]; then
+  SNUG_RS_ONLY="$SNUG_RS_ONLY nav write"
+fi
 [ -n "$dir" ] || { echo "usage: rust-crate DIR [HOST_SRC]" >&2; exit 2; }
 mkdir -p "$dir/src"
 put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
 puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
 put "$manifest" "$dir/Cargo.toml"
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done
+# Public API integration tests accompany the default host only.
+if [ "$host" = host/rust/src ] && [ -d host/rust/tests ]; then
+  (cd host/rust/tests && find . -type f) | while read -r f; do put "host/rust/tests/$f" "$dir/tests/$f"; done
+fi
 # kin's modules, and a mod file per directory.
 rm -rf "$dir/src/snug.new" "$dir/src/snug" "$dir/src/snug.rs"
 keep() {  # keep <path under gen/rust>: is it in SNUG_RS_ONLY?

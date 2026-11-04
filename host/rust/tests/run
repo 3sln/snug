@@ -1,0 +1,17 @@
+#!/bin/sh
+# Assemble and test the public Rust API offline; Node supplies the JS oracle.
+set -eu
+cd "$(dirname "$0")/../../.."
+kin/scripts/rust-crate .cache/snug-rs
+cargo test --offline --manifest-path .cache/snug-rs/Cargo.toml
+cargo build --offline --manifest-path .cache/snug-rs/Cargo.toml --lib
+rustdoc --test --edition 2021 docs/rust.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps
+rustdoc --test --edition 2021 host/rust/README.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps
+if cargo clippy --version >/dev/null 2>&1; then
+  # Existing generated compile/ctl.rs compares an i32 against INF == i32::MAX.
+  # Allow that one generated-code deny lint; leave all other lint levels intact.
+  cargo clippy --offline --manifest-path .cache/snug-rs/Cargo.toml --lib --tests -- -A clippy::absurd_extreme_comparisons > .cache/snug-rs/clippy.log 2>&1 || { cat .cache/snug-rs/clippy.log; exit 1; }
+  echo "clippy passed with generated comparison allowance (diagnostics: .cache/snug-rs/clippy.log)"
+else
+  echo "clippy unavailable; skipped"
+fi

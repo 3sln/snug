@@ -2541,6 +2541,32 @@ more.
 encoder recreates); compare to cbor.mjs only (a shared ancestor).
 - [ ] **Signed off** (owner)
 
+### D119 — Rust owns exact values and borrows checked documents
+**Decision** (P7.11): add a crate-root facade alongside the legacy Rust test
+hosts. Integers retain u64 major-0/1 arguments (negative means −1−argument),
+with big-endian argument bytes for bignums and exact Integer decimal
+coefficients; typed arrays own native vectors, including binary16 bits.
+Decode uses the generated scanner before a trusted builder; schema decode
+uses the VM before that builder. Encoding and Writer use kin byte-writing
+and map-order primitives and a final generated scan. Rust output growth has
+an explicit default byte cap, rather than JS's optional finish-only cap;
+content refusals may occur at finish. Views/cursors borrow shared slices,
+so safe Rust enforces the no-mutation lifetime without an input copy.
+Programs share private verified storage and use D084/D100 containers unchanged.
+The requested validate Result<(), Failure> also reports an unknown-rule API
+failure with code −1/reason unknown_rule; this is distinct from VM verdicts
+and from JS's TypeError. Other facade operations use one Error enum with
+safe codes; the existing synchronous session driver supplies validate_blob.
+**Why**: make first-release Rust useful without moving byte/schema decisions
+out of kin or modifying parity files another engineer owns. Exact integer
+and typed representations preserve every accepted vector byte, while shared
+borrows implement D050/D052's ownership contract directly in the type system.
+**Alternatives**: lossy f64 integers; mutable verified Program buffers;
+duplicated profile checks; an unchecked view constructor; silently treating
+unknown rules as successful validation; buffering source documents as a
+replacement for the existing session driver (all rejected).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (manager): P7.7's side finding that the baseline codec "accepts a
@@ -3021,6 +3047,84 @@ are answered as provisional decisions D082–D085. None is open now.
   numeric values but discard scale and can return integers. Current schema
   option coercion and Writer sticky argument faults require explicit public
   caveats until the separate engineering fixes land.
+
+## P7.11 — Rust public API
+
+- **Status (2026-11-03): complete for the requested restricted-profile API;
+  no commits.** D119 records the representation and boundary choices.
+  New `host/rust/src/{value,error,decode,encode,writer,program,view,api}.rs`
+  expose exact owned values, scanner-first decode, kin-backed encode/Writer,
+  compiled Schema with caller-owned Scratch, serialised Programs, checked
+  borrowed views/cursors and the existing blob session driver. Legacy hosts
+  remain available. The assembler copies integration tests and supplies nav/
+  write modules to legacy default-host subset callers; `bb rust-api-test`
+  runs Cargo debug tests/doctests and optional offline Clippy.
+- **Coordination:** schema.rs/compile.rs, kin/, gen/ and host/js are not edited
+  by P7.11. During the gate, concurrent P7.1 generated Rust had missing type
+  annotations in cbor/scan.rs (`scan_std_tag`) and vm/dead.rs, preventing a
+  live build. A scratch snapshot of generated code/JS/corpus at
+  `cbbe6b8f66565c35241bb1f4cc5a2a8f2a7c01c7` is used to isolate API defects;
+  its initial 11 integration tests passed. The P7.1 owner then repaired the
+  declarations, and live-tree gates passed too. The JS default changed to
+  deterministic during the final gate; fixtures now select profiles.bindle
+  explicitly, matching this Rust facade's scope. No change to protected
+  schema.rs/compile.rs was needed.
+- **Checks actually run:** final `bb rust-api-test` exited 0, assembling the
+  live working tree at cbbe6b8f plus concurrent P7.1 edits and P7.11. Cargo
+  **1.92.0**, rustc **1.92.0** (Homebrew), Node **24.6.0**, offline, debug with
+  overflow checks on. **1 existing library test + 12 integration tests + 9
+  rustdoc tests + 5 guide examples + 1 README example passed; 0 failed.**
+  All existing test-host binaries also compiled under cargo test.
+  - All **216 profile vectors (74 accept / 142 refuse)**: exact JS code
+    identity; accepted decode→encode byte identity and checked-view values.
+    **1,024 seeded byte mutations + 3 COSE probes** also match JS codes.
+  - **512 independently generated Rust/JS values** encode byte-identically;
+    Rust decoded values re-encode identically.
+  - All **45 cases from six study contract suites** match JS verdicts,
+    reasons, paths, offsets and subcodes. The same cases match buffer results
+    through the session/blob driver at chunk sizes **1, 7 and 65,536** with
+    quantum 7 (**135 source validations**).
+  - Six JS contract Programs load and reserialize in Rust; Rust compilation
+    produces identical containers and JS loads/reserializes those containers.
+    An additional bounded compiler-profile/limit configuration has identical
+    JS/Rust container bytes. Framing, digest, major/minor refusals, verifier
+    refusal, and differing producer-version retention are checked.
+  - **8,192 arbitrary byte inputs / malformed containers + 1,024 Program-word
+    mutations** produced no panic in the exercised APIs. Exact numerics,
+    typed bits/NaN refusal, Writer grammar/sticky failure/duplicates, borrowed
+    cursor navigation, unaligned typed reads, safe diagnostics, source short
+    reads/range overflow, shared schemas with separate thread scratch, zero
+    VM budget, named caps, huge counts and the **depth-256 boundary** passed.
+    A compile-fail doctest proves mutation while a checked view is live is
+    rejected by Rust.
+  - Offline **Clippy passed with `-A clippy::absurd_extreme_comparisons`**.
+    Unmodified generated compile/ctl.rs compares i32 against INF == i32::MAX;
+    the raw Clippy run fails that default-deny lint. Other lint levels remain
+    intact; existing generated/legacy warnings remain, with no diagnostics in
+    the new API modules/tests in the final log. `sh -n` on the scripts and
+    `git diff --check` passed. Gate log: `.cache/rust-api-test.log`; Clippy:
+    `.cache/snug-rs/clippy.log`. Babashka prints a sandbox ProcessHandle
+    cleanup warning on shutdown; the final task and child checks exit 0.
+- **Limitations:** the Rust facade intentionally selects Bindle restrictions,
+  even as P7.1 adds general flags/presets elsewhere. Output growth defaults to
+  a 1,500,000-byte cap; this differs from JS's optional finish-only cap.
+  Writer content refusals may surface at finish. The requested validate
+  signature reports unknown-rule API misuse as Failure code −1. Blob driving
+  is synchronous/known-length, with no async/unknown-length adapter, source
+  decode, unchecked opener, view directory or sorted-key Writer mode. Standard
+  allocator exhaustion behavior remains; byte limits are not a total heap
+  quota. Program origins must be trusted under D084. No wasm public facade,
+  broader release gate, dependency installation, publishing or emission is
+  claimed by this item.
+- **Learnt:** preserve negative CBOR arguments rather than absolute magnitudes
+  to cover −2^64 without overflow; retaining typed bit patterns also preserves
+  signed zero/infinities and every accepted vector. Shared Rust borrows replace
+  the JS copy-or-promise ownership contract directly. Corpus/oracle gates must
+  name their wire profile explicitly when defaults evolve concurrently.
+  Container byte identity tests cover named compiler-limit wiring as well as
+  SHA-256/version framing; a pinned scratch baseline isolates API defects but
+  must be followed by a live-tree gate. Clippy's generated-code diagnostics
+  need a narrow documented allowance, not edits to emitted Rust.
 
 ## Parking lot
 

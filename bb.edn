@@ -19,6 +19,8 @@
                 :task (apply shell "kin/scripts/compile-test" *command-line-args*)}
   unicode-test {:doc "P7.3: offline Unicode tables, JS/Rust Program identity, category samples through the VM."
                 :task (shell "kin/scripts/unicode-test")}
+  rust-api-test {:doc "P7.11: public Rust API, JS codec/schema/Program parity, doctests and offline clippy."
+                 :task (shell "sh" "host/rust/tests/run")}
   vm-test    {:doc "P3.4: the VM on JS and Rust -- §15, profile identity vs the scanner, the corpus through the compiler, assembled programs, JS == Rust."
               :task (apply shell "kin/scripts/vm-test" *command-line-args*)}
   vmsession-test {:doc "P6.2: the resumable session VM == the buffer driver (whole out array) under window splits, yields and budgets; JS and Rust."
