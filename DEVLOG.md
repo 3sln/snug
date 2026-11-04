@@ -5391,6 +5391,35 @@ authorised), the existing gate set, and conformance-corpus vectors.
   non-regular group recursion, composite `.ne`, non-literal `.cat`/`.plus`/
   `.det`, `.abnf`/`.abnfb` as a bounded kin engine; proven fast paths kept;
   oracle agreement on all of it.
+  - **Design delivered (2026-11-04, group-semantics designer; for
+    independent review, nothing implemented):** architecture §20 "PEG group
+    semantics" and a draft [docs/program-2.md](docs/program-2.md) (format 2.0,
+    a major bump under D084; 1.x refused). Semantics: arrays are the App. A
+    PEG with prioritised choice, greedy occurrence, no retry from the
+    end-of-array test, and a zero-length iteration ending a repetition as
+    satisfied. In maps, entries run in source order, each taking the matching
+    remaining pairs greedily up to its maximum in EC key order; non-cut
+    members skip pairs whose key matches but whose value does not (§3.5.4);
+    choices lock in and closedness is tested after the root. Cuts:
+    `'reference'` (D021 in PEG: a cut-failed member fails, ordinarily) and
+    `'rfc'` (commit on key match). §20.3 resolves R1–R18.
+    Evaluation: elements and pairs are still evaluated once. Arrays get a
+    relaxed Glushkov query automaton plus per-element verdict records and an
+    incremental PEG machine, in tiers A0/A1/A2 by failing-prefix length;
+    maps get pair-major F, slot-based S or record-based T. A bounded group
+    arena brings a new `group_limit` refusal; one unit per PEG step. The
+    D011/D012 refusals are withdrawn; only left recursion stays refused.
+    Evidence (scratch, `.cache/peg/`, not committed): 108 probes. Ruby
+    0.12.14 agrees on 87; its 21 disagreements fall in seven classes
+    (RL/RK/RI/RZ/RR/RO/RX, §20.4). 11 current corpus expectations flip
+    (§20.11), and the D271 suite becomes mode-dependent. A syntactic tier
+    census of the corpus: 799 A0, 25 A1, 0 A2 arrays; 61 F, 37 S, 26 T maps.
+    Proposed decisions, to be numbered D272+ after the review: the §20.2
+    semantics and §20.3 resolutions; the `cuts` option and its default; EC
+    pick order; the tiered evaluation and the arena with `group_limit`;
+    format 2.0; the PEG oracle replacing D022's existential oracle; the
+    witness rules of §20.8. Open questions for the reviewer: §20.14 (16) and
+    program-2 §13 (4).
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
