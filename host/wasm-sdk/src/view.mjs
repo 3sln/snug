@@ -72,7 +72,7 @@ class Message {
     if (this.dirs === null || n < DIRECTORY_MIN) return null;
     let d = this.dirs.get(p);
     if (d === undefined) {
-      d = rt.x.sdk_alloc(4 * n); rt.refresh();
+      d = rt.x.sdk_alloc(4 * n) >>> 0; rt.refresh();
       this.allocs.push([d, 4 * n]);
       if (rt.x.sdk_nav_dir(this.ptr, this.end, p, d, n) !== n) throw new Error('snug: view directory inconsistent');
       this.dirs.set(p, d); this.dirWords += n;
@@ -228,7 +228,7 @@ function elementIn(m, p, n, i) {
   if (!Number.isInteger(i)) throw new TypeError('snug view: an index is an integer');
   if (i < 0 || i >= n) return -1;
   const d = m.dir(p, n);
-  if (d !== null) return rt.i32[(d >> 2) + i];
+  if (d !== null) return rt.i32[(d >>> 2) + i];
   return ok(rt.x.sdk_nav_child(m.ptr, m.end, p, i));
 }
 function valueAt(m, p, depth) {
@@ -240,7 +240,7 @@ let entPtr = 0, entCap = 0, entGen = -1;
 function entryWords(n) {
   if (n > entCap || entGen !== rt.generation) {
     if (entCap > 0 && entGen === rt.generation) rt.x.sdk_free(entPtr, 8 * entCap);
-    entCap = Math.max(n, 64, 2 * entCap); entPtr = rt.x.sdk_alloc(8 * entCap); entGen = rt.generation; rt.refresh();
+    entCap = Math.max(n, 64, 2 * entCap); entPtr = rt.x.sdk_alloc(8 * entCap) >>> 0; entGen = rt.generation; rt.refresh();
   }
   return entPtr;
 }
@@ -268,10 +268,10 @@ export class View {
    * wasm call; a View, or undefined when a step misses or meets the wrong kind. */
   path(...steps) {
     const m = this._m; m.live();
-    const n = steps.length, sp = rt.x.sdk_steps(3 * n); rt.refresh();
+    const n = steps.length, sp = rt.x.sdk_steps(3 * n) >>> 0; rt.refresh();
     let at = 0;
     for (let k = 0; k < n; k++) {
-      const s = steps[k], w = (sp >> 2) + 3 * k;
+      const s = steps[k], w = (sp >>> 2) + 3 * k;
       if (typeof s === 'number' && !(m.cose && this._d === 0 && k === 0)) {
         if (!Number.isInteger(s)) throw new TypeError('snug view: an index is an integer');
         rt.i32[w] = 0; rt.i32[w + 1] = s; rt.i32[w + 2] = 0;
@@ -294,7 +294,7 @@ export class View {
       for (let i = 0; i < n;) {
         const k = Math.min(PAGE, n - i), w = entryWords(k);
         q = ok(rt.x.sdk_nav_page(m.ptr, m.end, q, k, major === 5 ? 1 : 0, w));
-        const pos = rt.i32.slice(w >> 2, (w >> 2) + 2 * k);   // copied: a later call may grow memory
+        const pos = rt.i32.slice(w >>> 2, (w >>> 2) + 2 * k);   // copied: a later call may grow memory
         for (let j = 0; j < k; j++, i++) yield [major === 4 ? i : keyAt(m, pos[2 * j]), new View(m, pos[2 * j + 1], d)];
       }
       return;
@@ -469,7 +469,7 @@ export function view(bytes, opts = {}) {
   const n = bytes.length;
   let ptr, r;
   try {
-    ptr = rt.x.sdk_alloc(Math.max(n, 1)); rt.refresh();
+    ptr = rt.x.sdk_alloc(Math.max(n, 1)) >>> 0; rt.refresh();
     rt.u8.set(bytes, ptr);
     if (opts.schema) {
       if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');

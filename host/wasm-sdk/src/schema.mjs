@@ -57,9 +57,9 @@ class Inner {
   load() {
     rt.ready();
     const { P, B } = this, x = rt.x;
-    const pp = x.sdk_alloc(P.byteLength), bp = x.sdk_alloc(B.length);
+    const pp = x.sdk_alloc(P.byteLength) >>> 0, bp = x.sdk_alloc(B.length) >>> 0;
     rt.refresh();
-    rt.i32.set(P, pp >> 2); rt.u8.set(B, bp);
+    rt.i32.set(P, pp >>> 2); rt.u8.set(B, bp);
     const h = x.sdk_prog_load(pp, P.length, bp, B.length);
     x.sdk_free(pp, P.byteLength); x.sdk_free(bp, B.length);
     rt.refresh();
@@ -69,8 +69,8 @@ class Inner {
     if (this.kinds) this.bind();
   }
   bind() {
-    const k = this.kinds, x = rt.x, p = x.sdk_alloc(4 * k.length);
-    rt.refresh(); rt.i32.set(k, p >> 2);
+    const k = this.kinds, x = rt.x, p = x.sdk_alloc(4 * k.length) >>> 0;
+    rt.refresh(); rt.i32.set(k, p >>> 2);
     x.sdk_prog_bind(this.h, p, k.length);
     x.sdk_free(p, 4 * k.length);
   }

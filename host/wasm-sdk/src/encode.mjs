@@ -59,12 +59,12 @@ let busy = false, scanArgs = null;
 function words(n) {
   if (tn + n <= tcap) return;
   tcap = Math.max(2 * tcap, tn + n, 1024);
-  tp = rt.x.sdk_enc_tape(tcap) >> 2; rt.refresh();
+  tp = rt.x.sdk_enc_tape(tcap) >>> 2; rt.refresh();
 }
 function room(n) {
   if (bn + n <= bcap) return;
   bcap = Math.max(2 * bcap, bn + n, 4096);
-  bp = rt.x.sdk_enc_bytes(bcap); rt.refresh();
+  bp = rt.x.sdk_enc_bytes(bcap) >>> 0; rt.refresh();
 }
 function op4(a, b, c, d) { words(4); const t = rt.i32, k = tp + tn; t[k] = a; t[k + 1] = b; t[k + 2] = c; t[k + 3] = d; tn += 4; }
 function op3(a, b, c) { words(3); const t = rt.i32, k = tp + tn; t[k] = a; t[k + 1] = b; t[k + 2] = c; tn += 3; }
@@ -242,7 +242,7 @@ export function encode(value, options = {}) {
     rt.refresh();
     if (r < 0) refusal(r);
     if (options.maxBytes !== undefined && r > limits.maxBytes) fail('too_large', 'The encoding exceeds the size bound.');
-    const p = rt.x.sdk_enc_out();
+    const p = rt.x.sdk_enc_out() >>> 0;
     return rt.u8.slice(p, p + r);
   } finally { busy = false; }
 }

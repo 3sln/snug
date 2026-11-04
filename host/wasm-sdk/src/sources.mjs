@@ -62,7 +62,7 @@ class WasmSession {
   /** The window buffer, at least n bytes (contents kept): its pointer. */
   window(n) {
     this.live();
-    if (n > this.wcap) { this.wcap = Math.max(n, 2 * this.wcap); this.wp = rt.x.sdk_ses_window(this.h, this.wcap); rt.refresh(); this.lastWindow = null; }
+    if (n > this.wcap) { this.wcap = Math.max(n, 2 * this.wcap); this.wp = rt.x.sdk_ses_window(this.h, this.wcap) >>> 0; rt.refresh(); this.lastWindow = null; }
     return this.wp;
   }
   /** Copy a JS window in unless it is the one already there. */
@@ -339,8 +339,9 @@ function pushUnknown(session, scheduling, settle) {
   let cap = 4096, bufBase = 0, bufLen = 0, delivered = 0;
   session.window(cap);
   let want = null, result = null, held = false;
-  const done = r => { result = r; session.free(); return { state: 'done', result: r }; };
-  const final = s => done(settle(s.result));
+  // free the session BEFORE settling: a scan's settle throws its refusal (linear memory is not the GC's)
+  const done = r => { result = r; return { state: 'done', result: r }; };
+  const final = s => { session.free(); return done(settle(s.result)); };
   const holds = () => {
     const at = want.state === 'need' ? want.offset : want.position;
     const need = want.state === 'need' ? want.length : 1;
@@ -352,7 +353,7 @@ function pushUnknown(session, scheduling, settle) {
       want = session.stepIn(bufLen, bufBase);
       if (want.state === 'done') return final(want);
       if (want.state === 'held') {
-        if (failFast && !want.result.ok) return done(settle(want.result));
+        if (failFast && !want.result.ok) return final(want);
         held = true; bufLen = 0; bufBase = delivered;
         return { state: 'need' };
       }
@@ -368,7 +369,7 @@ function pushUnknown(session, scheduling, settle) {
   const settleEnd = () => {
     let r = session.end(delivered);
     while (r.state === 'yield') r = session.stepIn(bufLen, bufBase);
-    if (r.state !== 'done') throw new SourceError('length_mismatch', 'The session asked for bytes past the end.');
+    if (r.state !== 'done') { session.free(); throw new SourceError('length_mismatch', 'The session asked for bytes past the end.'); }
     return final(r);
   };
   return {

@@ -62,7 +62,7 @@ function start() {
   inst = new WebAssembly.Instance(mod, { env: { snug_ext: snugExt } });
   x = inst.exports;
   buf = null; refresh();
-  OUT = x.sdk_out() >> 2; INFO = x.sdk_info() >> 2; NAV = x.sdk_nav_words() >> 2;
+  OUT = x.sdk_out() >>> 2; INFO = x.sdk_info() >>> 2; NAV = x.sdk_nav_words() >>> 2;
   x.sdk_nav_init();
   generation++;
 }
@@ -121,7 +121,7 @@ let inPtr = 0, inCap = 0, inGen = -1;
 /** Copy bytes into the reusable input buffer; answers its pointer. */
 export function input(bytes) {
   const n = bytes.length;
-  if (n > inCap || inGen !== generation) { inPtr = x.sdk_input(n); inCap = n; inGen = generation; refresh(); }
+  if (n > inCap || inGen !== generation) { inPtr = x.sdk_input(n) >>> 0; inCap = n; inGen = generation; refresh(); }
   if (n <= 64) { const u = u8; for (let i = 0; i < n; i++) u[inPtr + i] = bytes[i]; }
   else u8.set(bytes, inPtr);
   return inPtr;
@@ -132,7 +132,7 @@ export function trim() { x.sdk_trim(); inCap = 0; refresh(); }
 let kPtr = 0, kCap = 0, kGen = -1;
 /** The key scratch, at least n bytes: its pointer. */
 export function kbuf(n) {
-  if (n > kCap || kGen !== generation) { kPtr = x.sdk_kbuf(Math.max(n, 64)); kCap = Math.max(n, 64); kGen = generation; refresh(); }
+  if (n > kCap || kGen !== generation) { kPtr = x.sdk_kbuf(Math.max(n, 64)) >>> 0; kCap = Math.max(n, 64); kGen = generation; refresh(); }
   return kPtr;
 }
 
@@ -141,6 +141,6 @@ const td = new TextDecoder();
 /** The scanner's code name (from kin, through wasm). */
 export function codeName(code) {
   let s = names.get(code);
-  if (s === undefined) { const p = x.sdk_code_name(code); s = td.decode(u8.subarray(p, p + i32[INFO])); names.set(code, s); }
+  if (s === undefined) { const p = x.sdk_code_name(code) >>> 0; s = td.decode(u8.subarray(p, p + i32[INFO])); names.set(code, s); }
   return s;
 }
