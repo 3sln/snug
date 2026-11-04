@@ -4053,6 +4053,123 @@ epochs as the default (a local rule; the Bindle preset already refuses
 non-finite floats outright).
 - [ ] **Signed off** (owner)
 
+### D272 — PEG group semantics for arrays and maps, with R1–R19 resolved (P8.5)
+**Decision** (designer, provisional; architecture §20.2–§20.3 rev 2): adopt
+the `run` definitions for arrays and maps. Arrays: prioritised `//` that
+locks in; greedy occurrences; no retry from the end-of-array test; a
+zero-length iteration satisfies its repetition; minima ≥ 2^24 saturate and
+are not lowered to `FAIL`; `0*0` is `EMPTY`. Maps: members run in source
+order, each taking remaining pairs whose key and value match, up to its max;
+non-cut members skip a key-only match; choices lock in; closedness is tested
+after the root; an unplugged `$$g` is `FAIL`; guarded recursion is allowed
+and left recursion refused; `~tag` gives the content type.
+**Why**: RFC 8610 App. A/C are normative. Every ambiguity is resolved and
+labelled as RFC text or snug policy (two independent reviews).
+**Alternatives**: an existential reading of maps (App. C's "can be ordered")
+was rejected because it brings back permutation search and §3.5.3 allows
+either pick.
+- [ ] **Signed off** (owner)
+
+### D273 — Cut modes: `reference` = rule A (default), `rfc` = commitment epochs (P8.5; refines D271)
+**Decision** (manager 2026-11-04, after review C1). `reference`: a cut
+member that meets a key match with a wrong value returns `cut`. `SEQ` and
+`REP` pass it through; only `//` absorbs it, and re-raises it if every
+alternative fails. `rfc`: per-attempt commitment epochs; `fail!` scope is
+the map type (R19).
+**Why**: name transparency. App. C says a rule's semantics "does not change
+when the name is replaced by its (parenthesized if needed) definition", and
+App. H calls its verbose and compact `reputon` forms "equivalent". Revision
+1's mode made them differ. Rule A keeps D021's discriminated unions.
+**Alternatives**: the D021-DNF/Ruby reading (revision 1; Codex Q1) breaks
+transparency. It is recorded as Ruby class RC (7 probes) and as 22 corpus
+flips.
+**Owner questions**: which mode is the default (D271), and whether to rename
+`reference`.
+- [ ] **Signed off** (owner)
+
+### D274 — Pick order is EC key order; T sorts its own records (P8.5)
+**Decision** (manager decision 2): a member with a finite max takes the
+first matching pairs in EC key order (§19.2). F and S never need an order.
+T heap-sorts a permutation of its records with kin's EC comparator, only
+when it has an order-sensitive member and the map was unordered or had an
+EC-sensitive key. Comparisons are charged identically on every route.
+§19.4's permutation is not used.
+**Why**: verdicts depend on the value, not the serialisation (§2.2.3, D230).
+No dependency on the scanner path, which exists only on the buffer
+canonical route (review C4).
+**Alternatives**: wire order (Ruby; depends on the serialisation); reusing
+§19.4's permutation (not available on every route).
+- [ ] **Signed off** (owner)
+
+### D275 — Evaluation: relaxed query automaton, verdict records, incremental machine, tiers; no memo in 2.0 (P8.5)
+**Decision**: arrays are evaluated once against relaxed Glushkov candidates
+(with `CALL` fixed points). A per-element record is the A′ bitset. The
+incremental PEG machine runs in tiers A0/A1/A2 by B, the maximum FL over
+backtrack attempts, with syntactic `ml` and `ml(FAIL) = 0`. Recursive
+programs keep all their frames in the arena behind activation records.
+Maps are evaluated once per pair, in tiers F (stop-at-taker), S (slots plus
+imported unnamed state) or T (records), after the exact fold table. Key
+lookup covers the full range once keys stop ascending. Memo fields are
+reserved and must be 0.
+**Why**: single-pass reading on every driver; the superset and read-bound
+lemmas (proved by both reviewers); the memo design was incomplete (EOF rows,
+link proofs).
+**Alternatives**: evaluating against the whole group alphabet (more work,
+same verdicts); shipping memo cells (deferred).
+- [ ] **Signed off** (owner)
+
+### D276 — The group arena is sized from limits and grown on demand; `group_limit` only under an explicit limit (P8.5)
+**Decision** (manager decision 3): `A_max = maxItems·R_ITEM_MAX +
+2·maxEntries + (maxItems + D + 1)·ACT_WORDS`. The buffer route grows by
+code 22 and a single re-run; sessions grow by `VMS_GROW`. Code 44
+`group_limit` applies only under an explicit `groupWords` limit. A charge
+always precedes its allocation, so `budget` wins on the same event.
+Offsets are the item head, or the container head for end-runs.
+**Why**: no refusal of valid data at default limits (C5); memory and CPU
+stay separate resources (X Q11).
+**Alternatives**: a fixed 65,536-word arena (revision 1; refuses valid T
+maps from about 16k pairs); pricing records so the budget always runs out
+first.
+- [ ] **Signed off** (owner)
+
+### D277 — One charging order on every route; duplicate-check units at the map's logical end (P8.5; requirement on P8.4)
+**Decision**: buffer, canonical-copy and session routes charge the same
+events in the same logical order (program-2 §10). At a map's end the order
+is: deferred duplicate check, end row, T sort, machine, closedness, witness
+trace. **This requires amending architecture §19.5**, which today charges
+the duplicate check before the VM starts: the scanner records per-map unit
+counts and the VM charges them at that map's end.
+**Why**: Codex X4's counterexample exhausts at different points on the two
+routes.
+**Alternatives**: precharging on the session route too (the session cannot
+know the sort cost before reaching the map).
+- [ ] **Signed off** (owner)
+- [ ] **Agreed** (P8.4 / §19 owner)
+
+### D278 — Witnesses (amends D024), forced-tier test mode, compile warnings (P8.5)
+**Decision**: arrays report the farthest event (E1/E2/E3). Maps report the
+first unacceptable pair at that pair, or else an end trace that scores each
+failure by trail length before undo. A cut is reported at its diagnostic
+pair (smallest wire index in scope). End-of-map witnesses are shallow. A
+forced-tier test mode (limits word 8 bit 2) gates equality of verdict and
+witness. Compile warnings W1–W6 never refuse.
+**Why**: the witness must be the same in every tier and on every route
+(C8, X5, X12); the warnings flag PEG surprises (C12, X Q16).
+**Alternatives**: deep witnesses at map end (needs path copies); witnesses
+that depend on the tier.
+- [ ] **Signed off** (owner)
+
+### D279 — Format 2.0, the PEG oracle, and proven complexity contracts only (P8.5)
+**Decision**: Program format 2.0; 1.x is refused (D084 major bump). An
+independent PEG oracle replaces D022's existential oracle. Corpus
+expectations are tagged rfc / policy / observed / invariant. D270's
+nodes × elements claim and revision 1's O(|G|·n) claim are withdrawn; only
+the contracts of architecture §20.7 are stated.
+**Why**: S5–S10 change meaning; the oracle checks semantics, not mechanisms
+(X14); the linear claims were false (X10, C10).
+**Alternatives**: a format 1.2 keeping both engines.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -5528,6 +5645,18 @@ authorised), the existing gate set, and conformance-corpus vectors.
     format 2.0; the PEG oracle replacing D022's existential oracle; the
     witness rules of §20.8. Open questions for the reviewer: §20.14 (16) and
     program-2 §13 (4).
+  - **Revision 2 (2026-11-04, after the two independent reviews,
+    docs/reviews/2026-11-04-peg-claude.md and -codex.md):** architecture §20
+    and docs/program-2.md were rewritten. Every finding is dispositioned in
+    §20.14: all accepted except Codex Q1, which the manager decided against
+    (rule A). Manager decisions applied: rule A as `reference`; T sorts its
+    own records; the arena is derived from limits and grown on demand; memo
+    reserved; proven bounds only.
+    Decisions D272–D279 recorded (unsigned). D277 needs P8.4's agreement to
+    move §19.5's duplicate-check charge to the map's logical end.
+    Probes now number 117: Ruby agrees on 88 and every one of the 29
+    disagreements is classified (new class RC: 7 probes, App. H evidence).
+    Corpus flips under rule A: 33 (11 structural, 22 rule A).
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.

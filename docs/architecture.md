@@ -967,19 +967,29 @@ the pass), W19 (`YIELD`), W20 (sync reads, monomorphic buffer path), W23–W24
 
 ---
 
-## 20. PEG group semantics (D270, D271) — design 2026-11-04, provisional, for independent review
+## 20. PEG group semantics (D270–D279) — design revision 2, 2026-11-04, provisional
 
 D270 moves group matching in arrays and maps from the exact regular /
 existential semantics of §4.3–§4.4 (D010–D012, D035, D036) to the parsing
-expression grammar (PEG) semantics of RFC 8610 Appendix A. D271 keeps D021's
-cut reading as the default and asks for the literal RFC reading as an
-option. This section defines the semantics exactly, resolves each ambiguity in
-the RFC text, records what the Ruby reference tool does, and designs the
-evaluation, the compiler changes, the oracle and the migration. The Program
-format it needs is drafted in [program-2.md](program-2.md) (format 2.0).
-Nothing here is implemented. §4.1–§4.2 (type-set evaluation of single items)
-are unchanged. §4.3, §4.4, the group parts of §5.1 steps 4–5 and the D011 /
-D012 refusals are superseded once this lands.
+expression grammar (PEG) semantics of RFC 8610 Appendix A. D271 asked for
+two cut readings. Revision 1 of this section (cd7c33c) was reviewed
+independently by a Claude reviewer (`docs/reviews/2026-11-04-peg-claude.md`,
+"C#") and by Codex (`docs/reviews/2026-11-04-peg-codex.md`, "X#").
+
+This revision answers every finding; §20.14 holds the disposition. It also
+applies the manager's decisions of 2026-11-04:
+
+* the reference cut mode becomes "rule A";
+* the T tier sorts its own records;
+* the group arena is sized from the limits and grown on demand;
+* memo cells are reserved, not shipped;
+* only proven complexity bounds are stated.
+
+The decisions are D272–D279, all unsigned. The Program format is in
+[program-2.md](program-2.md) (format 2.0, revision 2). Nothing here is
+implemented. §4.1–§4.2 (type-set evaluation of single items) are unchanged.
+This section supersedes §4.3, §4.4, the group parts of §5.1 steps 4–5, and
+the D011/D012 refusals once it lands.
 
 ### 20.1 What the RFCs say
 
@@ -1048,21 +1058,44 @@ grammar changes are escapes, empty files and `#6.<type>` / `#7.<type>`.
   the second choice." So `{cd: 3}` fails under PEG. The empty first
   alternative succeeds, locks in, and leaves `cd` uncovered.
 
-### 20.2 The semantics, exactly
+* **Appendix H** (informative) gives the verbose `reputon` (named groups such
+  as `conf-value = ( confidence: float16 )` used as `? conf-value`) and says
+  "An equivalent, more compact form of this example would be" one that
+  writes `? confidence: float16` directly. Together with App. C's rule that a
+  rule's semantics "does not change when the name is replaced by its
+  (parenthesized if needed) definition", that makes `? (k: v)` and `? k: v`
+  equal in every cut mode (D273).
 
-A group is a tree after names, generics, sockets and unwraps are resolved.
-Its nodes are `EMPTY`, `FAIL` (the empty group choice: an unplugged `$$g`,
-§3.9, S32), `SEQ(g₁…gₖ)`, `CHOICE(g₁…gₖ)` (`//`, in source order, with
-`//=` contributions in rule order, App. C), `REP(min, max, g)` (an
-occurrence indicator; `?` = 0..1, `*` = 0..∞, `+` = 1..∞, no indicator =
-1..1; counts ≥ 2^24 are ∞ as a maximum and unsatisfiable as a minimum,
-D035), `ENTRY(T)` (array context: one element of type T) or `MEMBER(K, V,
-cut)` (map context), and `CALL(r)` for a recursive group reference. Type
-choices `/` stay inside the types T, K and V. They are prioritised in App.
-A, but prioritising alternatives cannot change whether one item matches, so
+### 20.2 The semantics, exactly (D272, D273)
+
+A group is a tree once names, generics, sockets and unwraps are resolved.
+Its nodes are:
+
+* `EMPTY`;
+* `FAIL`: the empty group choice, i.e. an unplugged `$$g` (§3.9, S32);
+* `SEQ(g₁…gₖ)`;
+* `CHOICE(g₁…gₖ)`: `//`, in source order, with `//=` contributions in rule
+  order (App. C);
+* `REP(lo, hi, g)`: an occurrence indicator, with `?` = 0..1, `*` = 0..∞,
+  `+` = 1..∞ and no indicator = 1..1;
+* `ENTRY(T)` in array context, or `MEMBER(K, V, cut)` in map context;
+* `CALL(r)`: a recursive group reference.
+
+Unwrap `~` of a map or array inlines its group, and a type choice of
+containers unwraps to a group choice in rule order. Unwrap of a tag (§3.7:
+"type (for tags)") yields an `ENTRY` of the tag's content type (X14,
+R17).
+
+**Counts.** A minimum ≥ 2^24 is stored as 2^24. Consumption can never reach
+that count (entries ≤ 2^24 − 1), so such a minimum is met only through the
+zero-length rule; it is never lowered to `FAIL` (X7). A maximum ≥ 2^24 is
+∞. `0*0 g` is `EMPTY`.
+
+Type choices `/` stay inside the types T, K and V. App. A makes them
+prioritised, but prioritising cannot change whether one item matches, so
 set-based evaluation (D010) stays exact for types.
 
-**Arrays.** `run(g, i)` gives an index j ≥ i or `fail`. Elements are
+**Arrays.** `run(g, i)` returns an index j ≥ i or `fail`. The elements are
 `e₀…e_{n−1}`.
 
 ```
@@ -1075,25 +1108,28 @@ run(REP(lo,hi,g), i) = c := 0, p := i
                        while c < hi:
                          q := run(g, p)
                          if q = fail: break
-                         if q = p: c := hi; break      -- zero-length iteration (R4)
+                         if q = p: c := hi; break      -- zero-length success (R4)
                          p := q; c := c + 1
                        return p if c ≥ lo, else fail
 run(CALL(r), i)      = run(body(r), i)
 array matches        ⇔ run(root, 0) = n
 ```
 
-Nothing is retried after a node returns: a choice that returned keeps its
-alternative, a repetition keeps its count, and the final `= n` test does not
-re-enter the root. Member keys in arrays are labels. Cuts have no effect in
-arrays (§3.5.4 is about maps).
+Nothing is retried after a node returns. A choice keeps the alternative it
+returned with, a repetition keeps its count, and the final `= n` test does
+not re-enter the root. Member keys in arrays are labels, and cuts have no
+effect in arrays: §3.5.4 is about maps.
 
-**Maps.** The state is the set R of pairs not yet consumed. The pairs are
-taken in **pick order**: ascending bytewise order of the keys' EC forms
-(§19.2, the data-model equivalence form; for every key without a float zero,
-a NaN or a map inside, this is its RFC 8949 §4.2.1 deterministic encoding).
-It is a function of the map's value, not of its serialisation (R8).
-`run(g, R)` gives a new set R′ ⊆ R or `fail`. Under `cuts: 'rfc'` it can
-also give `fail!`, a failure no enclosing construct may recover from.
+**Maps.** The state R is the set of pairs not yet consumed. Pairs are taken
+in **pick order**: ascending bytewise order of the keys' EC forms (§19.2).
+For every key with no float zero, NaN or map inside it, the EC form is its
+RFC 8949 §4.2.1 deterministic encoding. Pick order therefore depends on the
+map's value, not on its serialisation (R8). `run(g, R)` returns a new set
+R′ ⊆ R or a failure. There are three failure kinds:
+
+* `fail`, the ordinary kind;
+* `cut`, in the reference mode only;
+* `fail!`, in the rfc mode only.
 
 ```
 run(MEMBER(K, V, cut) with occurrence lo..hi, R):
@@ -1101,615 +1137,783 @@ run(MEMBER(K, V, cut) with occurrence lo..hi, R):
     for p in R in pick order:
         if c = hi: break
         if key(p) ∉ K: continue
-        [rfc] if cut: committed := true                        -- the key matched
-        if value(p) ∈ V: R′ := R′ − {p}; c := c + 1            -- consume
-        elif cut: return fail  [reference]  |  fail!  [rfc]    -- §3.5.4
-        -- else (no cut): skip; p stays for later entries (§3.5.4, first example)
+        [rfc] if cut: commits := commits + 1                    -- the key matched
+        if value(p) ∈ V: R′ := R′ − {p}; c := c + 1             -- consume
+        elif cut: return cut [reference] | fail! [rfc]          -- §3.5.4
+        -- no cut: skip; p stays for later entries (§3.5.4, first example)
     return R′ if c ≥ lo, else fail
-run(SEQ(g₁…gₖ), R)    = thread R through g₁…gₖ; the first fail (or fail!) is the result
-run(CHOICE(g₁…gₖ), R) = for m in 1..k:
-                           r := run(gₘ, R)                -- consumption of a failed gₘ is undone
-                           if r ≠ fail/fail!: return r     -- locked in
-                           [rfc] if r = fail! or a cut key matched inside gₘ: return fail!
-                        return fail
-run(REP(lo,hi,g), R)  = iterate as for arrays on sets, a failed iteration undone,
-                        "zero-length" meaning "consumed nothing";
-                        [rfc] a fail! (or a failed iteration in which a cut key
-                        matched) is returned as fail!
+run(SEQ(g₁…gₖ), R)    = thread R; the first failure (of any kind) is the result
+run(CHOICE(g₁…gₖ), R) = saw := false
+                        for m in 1..k:
+                           c₀ := commits; r := run(gₘ, R)  -- a failed gₘ's consumption is undone
+                           if r is a set: return r          -- locked in
+                           [rfc] if r = fail! or commits > c₀: return fail!
+                           [reference] if r = cut: saw := true
+                        return cut if saw, else fail
+run(REP(lo,hi,g), R)  = iterate as for arrays on sets; a failed iteration is undone;
+                        "zero-length" means "consumed nothing";
+                        an iteration returning cut → return cut       [reference]
+                        an iteration returning fail!, or failing with
+                          commits > its c₀ (taken at the iteration's start) → fail!   [rfc]
+                        otherwise a failed iteration ends the repetition
 run(EMPTY/FAIL/CALL)  as for arrays
-map matches           ⇔ run(root, all pairs) = ∅            -- closed (§2.1)
+map matches           ⇔ run(root, all pairs) is the empty set   -- closed (§2.1)
 ```
 
-A `MEMBER` with an occurrence is one node. The loop above is its
-repetition. `REP` around a parenthesised *group* is the general repetition,
-even when that group has one member. That difference is observable only
-through cuts, and only in the reference mode (R9, probes N01/M03).
+**Cut modes (D273).**
 
-**Cut modes (D271).** `cuts: 'reference'` (the default until the owner
-decides D271) is D021 translated to PEG. A cut member that meets a remaining
-pair whose key matches but whose value does not, before reaching its
-maximum, **fails**, even when its own minimum is 0. That failure is ordinary:
-an enclosing `?(…)`/`*(…)` group may end with fewer iterations, and an
-enclosing `//` tries its next alternative. This is what both Ruby and snug's
-DNF did: a cut killed the expanded alternative that contained it and spared
-the zero-iterations alternative (probes M18, M19, N01, N02, N06). `cuts:
-'rfc'` is the literal text. A cut member whose key matches a remaining pair
-**commits**: from then on, any failure inside every enclosing choice or
-repetition of this map's group fails the whole map type (App. A: a cut
-disables "alternatives in choices containing this choice"; a repetition is a
-choice between one more iteration and stopping). A value mismatch fails the
-map at once (§3.5.4 "the entire map fails to match"). The map *type* fails;
-an enclosing *type* choice `{…} / {…}` is outside the group and still tries
-its other alternatives.
+* **`cuts: 'reference'` (default) is "rule A".** When a cut member meets a
+  remaining pair whose key matches and whose value does not, before reaching
+  its maximum, it returns `cut`. `SEQ` and `REP` pass `cut` through, so an
+  enclosing `?(…)` or `*(…)` cannot recover by matching fewer times. Only a
+  `CHOICE` absorbs it: the choice tries its next alternative, and raises
+  `cut` again if none succeeds. At the root, `cut` fails the map.
+  * This keeps D021's purpose: `{kind: "a", … // kind: "b", …}` works, and
+    so does the D271 case.
+  * It honours §3.5.4's "later entries … are no longer allowed".
+  * It is invariant under replacing a group name by its definition, so the
+    verbose and compact `reputon` of App. H mean the same (C1).
+  * It is not what Ruby does, nor what format 1's DNF did: they let a group
+    repetition absorb the failure. That is deviation class RC (§20.4).
+  * The name `reference` is kept per the manager's decision. It now names
+    D021's reading, not the reference tools' behaviour (D273 asks the owner
+    about renaming it).
+* **`cuts: 'rfc'` is commitment epochs (X9).** Each CHOICE alternative
+  attempt and each REP iteration attempt records `commits` at its start. A
+  cut member's key match increments `commits`. An attempt that fails after
+  `commits` grew returns `fail!`, and `fail!` passes through everything to
+  the root of the map's group. A cut member's value mismatch is `fail!` at
+  once.
+  * A fresh iteration that sees no cut can still end its repetition
+    normally: `{* (a: int)}` accepts `{a: 1}`.
+  * A later failure of an enclosing alternative still sees the cuts matched
+    inside it, even in sub-attempts that succeeded.
+  * The scope is the map type (R19). An enclosing *type* choice `{…} / {…}`
+    and an enclosing EMBED are outside it.
+  * These lifetime rules are snug's formalisation. They are consistent with
+    §3.5.4 and App. A, but they are not settled RFC text.
 
-### 20.3 Ambiguities resolved
+### 20.3 Ambiguities resolved (D272)
+
+The basis column separates what the RFC text says from what is snug's
+policy. A policy choice is labelled as one (X R-audit).
 
 | # | Question | Resolution | Basis |
 | --- | --- | --- | --- |
-| R1 | Can the end-of-array test make a choice try its next alternative? | No. `[(int) // (int, int)]` rejects `[1, 2]`. | App. A example (2) ("the second alternative will never match"); §2.1 "exactly match" read as "the PEG consumed every element" |
-| R2 | Greedy occurrence | The maximum number of iterations that succeed; never given back. `[* uint, uint]` matches nothing. `[? uint, 2*3 uint, tstr]` rejects `[1,2,"x"]`. | App. A ("*a a" "never can match anything") |
-| R3 | Ranges with min > 1 | Iterate greedily; succeed iff count ≥ min. `[2*3 uint, uint]` rejects `[1,2,3]` and `[1,2]` and accepts `[1,2,3,4]`. | App. C's "group choice … repeated each of the occurrences times", read with App. A's greed as a prioritised choice of counts in descending order. That gives the same results, because a locked count is never revisited. |
-| R4 | An iteration that succeeds without consuming | The repetition stops and counts as satisfied (min reached). `[2*2 (? int)]` accepts `[]` and `[1]`; `[* (? int)]` cannot loop. | Repeating a zero-length success at the same position repeats it identically, so App. C's alternative "repeated min times" matches. Ruby stops instead and fails (deviation RZ; it also hangs on `[* (? int)]` with `["x"]`). |
-| R5 | Group choice in a map: union (§2.2.2) or prioritised (App. A/C)? | Prioritised, locking in. Closedness is tested after the root and does not retry. `{(? a: int) // (b: int)}` rejects `{b: 1}`, and the §3.11 example rejects `{cd: 3}`. | App. A and C are normative and specific. §2.2.2 describes the generative set and is satisfied for every non-overlapping choice. |
-| R6 | Does a member consume a pair whose key matches and whose value does not? | Without a cut, no: the pair is skipped and stays for later entries. `{? "optional-key" => int, * tstr => any}` accepts `{"optional-key": "nonsense"}`. | §3.5.4 first example, verbatim; §3.5.3 "a *matching* member is picked". Ruby always fails here (RL, RK). |
-| R7 | How much does a map member take? | Every remaining matching pair, up to its maximum (greedy). | App. A greed; §3.5.3 "the group expression tends to consume all matches" |
-| R8 | Which pairs does a member with a finite maximum take when more match? | The first ones in pick order (EC key order). `{int => int, int => 6}` accepts `{3:5, 4:6}` however it is encoded and rejects `{3:6, 4:5}`. Pick order is the wire order for every map that §19.4 does not mark (in particular all deterministic input), and the deferred duplicate check's sort order for marked maps, so it costs no extra comparison. | §3.5.3 calls the outcome indeterminate. snug fixes it, independently of the serialisation (§2.2.3: CDDL "does not provide any language means to restrict the choice of serialization variants"; D230: compare by value). Ruby uses wire order (RO). |
-| R9 | What does a failed cut kill? | reference: the member (ordinary failure from there on). rfc: the map type. | D021/D271 (above) |
-| R10 | Does a cut reach back to earlier entries? | No: earlier entries ran first. `{* tstr => any, ? a: int}` accepts `{a: "x"}` (the wildcard took it), and `{* tstr => any, "a" => int}` matches no map containing `"a"`. | §3.5.4 "later entries"; App. A greed. The old `map_cut` refusal is withdrawn. |
-| R11 | Cuts on key types (`tstr ^=> uint`) | Allowed: the same rule for each pair the member examines. | App. C memberkey (no restriction). The old `map_cut` refusal is withdrawn. D188's byte-string/float cut keys follow P8.4's key policy. |
-| R12 | What does `* (a: int, b: int)` match in a map? | Both pairs or neither. A failed iteration is undone completely; `{a: 1}` alone is rejected (leftover). | §3.2 "concatenating a number of sequences that the basic group entry matches". Ruby leaks a failed iteration's consumption (RI). |
-| R13 | The same literal key twice in one sequence (`$$ext //=` compositions, `{? "a" => int, ? "a" => tstr}`) | Legal; plain PEG. The second member sees the pair only if the first did not take it. The old "unsatisfiable alternative dropped" rule (§4.3.1 step 4) is withdrawn. | No RFC restriction; PEG is determinate |
-| R14 | Unplugged group socket | `FAIL`: `{a: int, $$x}` matches nothing, `{a: int, * $$x}` = `{a: int}`. | §3.9 "empty group choice" (S32, D251) |
-| R15 | Does App. C's "can be ordered in such a way" make maps existential? | No. snug reads it together with §3.5.3: the PEG picks members from the whole map. An existential reading would bring back permutation search and contradict §3.5.3's "leaving nothing for the second entry". For non-pathological groups (§3.5.3) the two readings give the same results. | §3.5.3 is the specific text |
-| R16 | Recursion | A group reference cycle is a PEG nonterminal and is allowed. Only **left recursion** (a cycle that can re-enter without consuming) is refused, because a PEG with it does not terminate. `[g]`, `g = (0, ? g, 1)` accepts `[0,0,1,1]`. | PEG well-formedness [PEG] |
-| R17 | `~` unwrap, `&` enumeration, `.cborseq` | `~` inlines the group (a choice of maps/arrays unwraps to a group choice in rule order). `&` stays a value set (occurrences ignored). A `.cborseq` sequence is a virtual array (D040) and gets array PEG semantics. | App. C, §3.7, §3.8.4 |
-| R18 | A keyless type entry in a map | Refused (`map_key`), as now | App. C ("can only be used for matching arrays") |
+| R1 | Can the end-of-array test make a choice try its next alternative? | No. `[(int) // (int, int)]` rejects `[1, 2]`. | App. A: "locking in the first successful match"; example (2). §2.1's "exactly match" adds the completeness check, not a licence to retry. |
+| R2 | Greedy occurrence | The most iterations that succeed, never given back. `[* uint, uint]` matches nothing; `[? uint, 2*3 uint, tstr]` rejects `[1,2,"x"]`. | App. A ("*a a" "never can match anything") |
+| R3 | Ranges with min > 1 | Iterate greedily; succeed iff count ≥ min. `[2*3 uint, uint]` rejects `[1,2,3]` and `[1,2]`, and accepts `[1,2,3,4]`. | App. A copies the n*m notation. App. C's "repeated each of the occurrences times" explains the same verdicts; it is not an algorithm. |
+| R4 | An iteration that succeeds without consuming | The repetition stops and counts as satisfied, also for minima saturated at 2^24. `[2*2 (? int)]` accepts `[]`. | A terminating extension. Repeating a deterministic empty success gives the same result, so App. C's choice "repeated min times" matches. snug policy for termination and charges; Ruby fails or hangs (RZ). |
+| R5 | Group choice in a map: union (§2.2.2) or prioritised (App. A/C)? | Prioritised, locking in; closedness is tested after the root without retry. `{(? a: int) // (b: int)}` rejects `{b: 1}`; the §3.11 `group2` rejects `{cd: 3}`. | App. C "again using PEG semantics" + App. A lock-in. §3.11 only fixes the parse ("optionality is attached to the first choice"); App. A supplies the lock-in (C11). There is a real tension with §2.2.2's "union of the sets", resolved in favour of the normative PEG appendices (X R5). Warning W5. |
+| R6 | Does a member consume a pair whose key matches and whose value does not? | Without a cut, no: the pair is skipped and stays for later entries. `{? "optional-key" => int, * tstr => any}` accepts `{"optional-key": "nonsense"}`. | §3.5.4's first example, verbatim; §3.5.3 "a *matching* member". Ruby deviates (RL, RK). |
+| R7 | How much does a member take? | Every remaining matching pair, up to its maximum (greedy). A 1..1 member takes one. | App. A greed; §3.5.3's "tends to consume all matches" is supporting text only (X R7) |
+| R8 | Which pairs does a member with a finite maximum take when more match? | The first in pick order (EC key order). `{int => int, int => 6}` accepts `{3:5, 4:6}` however encoded, and rejects `{3:6, 4:5}`. | **snug policy (D274).** §3.5.3 calls the pick "indeterminate, but does matter". EC order makes it determinate and independent of serialisation (§2.2.3). Warning W6 flags such members. |
+| R9 | What does a failed cut kill? | reference (rule A): the innermost enclosing choice alternative, else the map; rfc: the map type. | D273. Rule A is a deliberate deviation from the literal text (X R9). |
+| R10 | Does a cut reach back to earlier entries? | No: earlier entries ran first. `{* tstr => any, ? a: int}` accepts `{a: "x"}`; `{* tstr => any, "a" => int}` matches no map at all (C12). | §3.5.4 "later entries"; App. A greed. Warnings W1, W2. |
+| R11 | Cuts on key types (`tstr ^=> uint`) | Allowed: the same rule for each pair examined. In rfc mode every matching key commits (C14). | App. C memberkey has no restriction. Byte/float key handling follows the actual key representation (§19), not a text/integer optimisation. |
+| R12 | `* (a: int, b: int)` in a map | Both pairs or neither; a failed iteration is undone. `{a: 1}` alone is rejected. | §3.2. Ruby leaks the consumption (RI). |
+| R13 | The same literal key twice in one sequence | Legal. The second member sees the pair only if the first did not take it. | App. C. Distinct *data* keys (§3.2) are a different matter. |
+| R14 | Unplugged group socket | `FAIL`: `{a: int, $$x}` matches nothing; `{a: int, * $$x}` = `{a: int}`. | §3.9 "the choice is empty" (S32) |
+| R15 | Does App. C's "can be ordered in such a way" make maps existential? | No: the PEG picks members from the whole map in pick order. | **Policy resolving a real tension** (C6, X R15). App. C literally reads existentially; §3.5.3 explicitly allows an unsuccessful pick in its pathological example, which supports implementation-defined picking over mandatory permutation search. The two differ only for order-sensitive groups (W6). |
+| R16 | Recursion | Guarded group recursion is allowed. **Left recursion** is refused, as a snug termination policy, not RFC text (X R16). A conservative check may also refuse unreachable left-recursive branches. Growing generic recursion is refused by the compile budget before lowering (C13). | App. C allows names in their own rules |
+| R17 | `~`, `&`, `.cborseq` | `~` inlines a map or array group. A choice of containers unwraps to a group choice in rule order (a lowering rule, not §3.7 text). `~` of a tag gives the tag's content type (X14). `&` is a value set, occurrences ignored. `.cborseq` is a virtual array (D040). | §3.7, App. C, §3.8.4 |
+| R18 | A keyless type entry in a map | Refused (`map_key`) after resolving names and unwraps; `{g}` with `g = (a: int)` stays valid. | App. C |
+| R19 | Scope of an rfc cut | The map type. An enclosing type choice or EMBED is outside it. | §3.5.4 "the entire map fails to match"; App. A "choices containing this choice" (C14) |
 
 ### 20.4 What the Ruby reference tool does
 
-Probes live in `.cache/peg/` (not committed): `proto.mjs` is a scratch PEG
-interpreter derived from the existing oracle's parser and used only to check
-this design. `probes*.mjs` / `table.mjs` produce the table in §20.13. Tools:
-Ruby `cddl` 0.12.14 (`… schema.cddl validate data.cbor`; rc 0 valid, 1
-invalid), cddl-rs 0.10.7 (the audit's offline build, `--ci`, secondary
-evidence), and current snug (HEAD working tree, default options). Of 108
-cases, **Ruby agrees with the reference-mode semantics above on 87**. Every
-one of the 21 disagreements falls in one of seven classes that Ruby's source
-(`lib/cddl.rb`, `map_check` / `validate_forward`) explains:
+The probes live in `.cache/peg/` and are not committed:
+
+* `proto.mjs` is a scratch PEG interpreter derived from the existing
+  oracle's parser. It has known gaps, such as no tag unwrap (X14).
+* `probes*.mjs` and `table.mjs` generate the table in §20.15.
+
+Tools: Ruby `cddl` 0.12.14, with rc 0 for valid, 1 for invalid and 65 for a
+*parse error*, which is not a refusal; cddl-rs 0.10.7 (`--ci`, secondary
+evidence); and snug as of the working tree.
+
+Of 117 cases, **Ruby agrees with §20.2 (reference = rule A) on 88**. The 29
+disagreements fall into eight classes, all explained by Ruby's source
+(`map_check`, `validate_forward`):
 
 | Class | Ruby behaviour | Cases | snug |
 | --- | --- | --- | --- |
-| RL | A literal-key member is always a cut: a present key with a wrong value fails the member, even for `=>` and `?`. It also looks the key up in the whole map, including pairs an earlier entry consumed. | M01, M05, M22, M34 | follow §3.5.4 (its first example is exactly M01) |
-| RK | A non-literal member fails as soon as a key-matching pair has the wrong value (until its maximum is reached), cut or not | M15, M16, N08, F01 ×2 | follow §3.5.3 ("a matching member") |
-| RI | A failed iteration of a group repetition keeps what it consumed (`d_check1` is shared across iterations) | M07, M08, M30 | undo (R12) |
-| RZ | A zero-length iteration stops the repetition and the minimum fails; in arrays an empty-matching body loops until the timeout | A09 ×2, A10, M14 ×2 | R4 |
+| RC | A group repetition (`?(…)`, `*(…)`) absorbs a member's cut failure, so the verbose and compact App. H forms differ | H01 (vs H02), M18, M19, N01, N02, N06, R07 | rule A (D273). Evidence: App. H calls the two forms "equivalent" |
+| RL | Every literal-key member acts as a cut, even `=>` and `?`. It also looks keys up in the whole map, including pairs already consumed | M01, M05, M22, M34, R02 | §3.5.4, whose first example is exactly M01 |
+| RK | A non-literal member fails on a key match with a wrong value | M15, M16, N08, F01 ×2 | §3.5.3 |
+| RI | A failed group iteration keeps what it consumed | M07, M08, M30 | undo (R12) |
+| RZ | A zero-length iteration fails the minimum; an empty-matching array body loops until killed | A09 ×2, A10, M14 ×2 | R4 |
 | RR | Group recursion in arrays rejects valid data | A17, A18 | R16 |
-| RO | Picks in wire order | M06 (unsorted encoding) | EC key order (R8) |
-| RX | `.cborseq` fails with an internal error | F04 | — |
+| RO | Picks in wire order | M06 (unsorted encoding) | EC order (R8) |
+| RX | `.cborseq` gives a parse error (rc 65) | F04 | no evidence either way |
 
-On arrays, Ruby is PEG with prioritised choice, greedy occurrence and no
-retry, exactly as R1–R3 say (A01–A08, A11–A16 and A19–A22 all agree). On
-maps, its choices are prioritised and lock in (M10, M11, F05, F08 agree). Its
-reference-mode cut behaviour, including a group repetition absorbing a member's
-cut failure, is what `cuts: 'reference'` reproduces (M18, M19, N01–N06).
-cddl-rs deviates more widely (M04, M13, M28, M31, M35 and others) and is not
-used as a semantic witness.
+In more detail:
 
-### 20.5 Evaluation: one read of every byte, then a PEG over verdicts
+* **Arrays:** Ruby is PEG with prioritised choice, greedy occurrence and no
+  retry (R1–R3).
+* **Maps:** Ruby's choices lock in (M10, M11, F05, F08).
+* **cddl-rs** deviates more widely and is not used as a semantic witness.
+* **Votes:** no RFC conclusion is drawn from tool votes. The table records
+  evidence; RFC expectations, snug policy and tool observations are kept
+  apart in the corpus (§20.12).
 
-The bytes are still read once, by the existing walk, in every driver. What
-changes is what a container does with its children's results.
+### 20.5 Evaluation: bytes read once, a PEG over verdicts (D275)
 
-**Arrays.** Each ARRAY leaf keeps two things:
+Every driver still reads each byte once, in the existing walk. What changes
+is what a container does with its children's results.
 
-1. **A query automaton** decides what each element is evaluated against. It
-   is the Glushkov automaton of the group with priorities and counts
-   *relaxed*. Positions are the `ENTRY` nodes. `REP(lo, hi, g)` adds g's
-   loop edges when hi ≥ 2 and makes g skippable when lo = 0. `CHOICE` is a
-   union. A `CALL` is approximated context-insensitively: a call site
-   follows into the callee's first positions, and the callee's last
-   positions follow into every call site's follow set. So every group,
-   recursive or not, has one with no unrolling and no counters. Element i
-   is evaluated **once** against the union of the typesets of the candidate
-   positions Cᵢ (format 1's step, minus counters).
-   **Superset lemma:** if the PEG ever tests element i against position p,
-   then p ∈ Cᵢ. *Proof sketch:* the PEG reaches p at i only after
-   consuming e₀…e_{i−1} through `ENTRY` nodes along a path of the tree that
-   ignores priorities and counts. Each of those elements matched its node's
-   type, so the relaxed automaton has the same path.
-2. **A verdict record** per element: rᵢ = {p ∈ Cᵢ : eᵢ matched typeset(p)},
-   W = ⌈npos/32⌉ words. This is exactly format 1's A′ bitset, the next
-   automaton state. The PEG's `ENTRY(p)` test at i is "bit p of rᵢ". The
-   PEG never touches bytes.
+**Arrays.** Each ARRAY leaf has two parts.
 
-The **PEG machine** (program-2 §5.2) runs `run(root, 0)` of §20.2 over the
-records with an explicit stack. It runs **incrementally**: after rᵢ is
-stored, it runs until it asks for r_{i+1} or terminates. At the array's end
-(count reached, or `break` for indefinite arrays) it is told the input ended
-(`ENTRY` at n fails) and finishes. The array leaf matches iff the result is
-n. If the root succeeds at e while elements remain, the leaf fails
-(`unexpected` at e). If rᵢ = ∅, no `ENTRY` can consume eᵢ, so the leaf
-cannot match: the machine is run to termination with no later record (it
-never asks for one), which yields the witness (§20.8), and the block dies.
-As now, elements after that are walked dead when no other candidate lives.
+1. **A query automaton** decides what each element is evaluated against.
+   It is the Glushkov automaton of the group with priorities and counts
+   relaxed:
+   * positions are the `ENTRY` nodes;
+   * `REP(lo, hi, g)` adds g's loop edges when hi ≥ 2 and makes g skippable
+     when lo = 0;
+   * `CHOICE` is a union;
+   * a `CALL` is approximated context-insensitively. nullable, first and
+     last are least fixed points; every call site gets the callee's first
+     positions and a bypass when the callee is nullable; every callee-last
+     position follows into every call site's follow set.
 
-**How far back the PEG can go: three storage tiers.** A backtrack point is a
-`REP` iteration attempt or a `CHOICE` alternative that is not the last. On
-failure the machine rewinds to the point's start index. Let FL(g) be the
-most elements g can consume before failing:
+   Element i is evaluated **once**, against the union of the typesets of
+   its candidate positions Cᵢ. This is format 1's step without counters.
+
+   **Superset lemma** (C15, X15; both reviewers proved it). If the PEG tests
+   element i against position p, then p ∈ Cᵢ. *Proof sketch:* drop the
+   undone speculation and follow the active path from the root to the test.
+   Its first i successful `ENTRY` matches spell the input prefix. Relaxing
+   choices admits the selected alternative, dropping finite counts admits
+   the actual repetition count, and erasing the call stack admits every
+   finite call/return path. Induction on the prefix then gives the result.
+
+   The lemma rests on lowering obligations. Distinct generic instantiations
+   must get distinct typesets (`g<uint>` must not share an `ENTRY` with
+   `g<tstr>`). Unwrapped choices and `~tag` are lowered before the
+   construction. `.cborseq` content has its own root, first set and EOF.
+   Test builds assert the lemma on every `ENTRY` test.
+2. **A verdict record** per element: rᵢ = {p ∈ Cᵢ : eᵢ matched
+   typeset(p)}. It is W = ⌈npos/32⌉ words, and equals format 1's A′, the
+   next automaton state. The PEG's test of `ENTRY(p)` at i reads bit p of
+   rᵢ. The PEG never touches bytes.
+
+**The PEG machine** (program-2 §5) runs `run(root, 0)` over the records,
+incrementally:
+
+* After rᵢ is stored, the machine runs until it asks for r_{i+1} or
+  terminates.
+* At the array's end it is told the input ended and finishes. The leaf
+  matches iff the result is n.
+* A root success at e ≤ i, a failure, or rᵢ = ∅ kills the block at element
+  i. For rᵢ = ∅ the machine is first run to termination, which produces the
+  witness, and those steps are charged at that element (C16).
+
+**Storage tiers** come from syntactic lengths `ml`, with `ml(FAIL) = 0` and
+`0·∞ = 0`, and the failing-prefix bound `FL` (program-2 §3.2). B is the
+maximum FL over the backtrack attempts: every REP child attempt and every
+non-last CHOICE alternative.
+
+**Read-bound lemma** (C2, X16). An attempt of g started at index s reads no
+record past s + ml(g), and no record past s + FL(g) if it fails. So B + 1
+ring rows suffice. Both bounds are syntactic. Revision 1 left maxlen
+undefined; a semantic maxlen (0 for a body that can never succeed) breaks
+the bound: C2's `[* ((int, int, ? (int, int, int, $$g), tstr) // int)]`.
+B is a safe upper bound, not the minimal storage (X16).
+
+| Tier | Condition | Storage | Examples |
+| --- | --- | --- | --- |
+| A0 | B = 0 | no stored record | `[* T]`, `[a, b, ? c]`, `[* uint, uint]`, `[? uint, 2*3 uint, tstr]` |
+| A1 | 0 < B < ∞ and (B+1)·W ≤ the ring limit | a ring in the block | `[* (k, v)]` (B = 1) |
+| A2 | anything else, including recursion | group arena records | `[(* int, tstr) // (* int)]` |
+
+The syntactic census of the corpus, `tiers.mjs`, found 799 A0, 25 A1, 0 A2
+and 1 recursive array.
+
+**No memoisation in 2.0** (D275; C8, X8, X10). Memo cells and link cells
+are withdrawn. The Program field is reserved and must be 0, and a later
+minor may define it only together with EOF sentinel rows and a loader
+capability rule (program-2 §1). §20.7 states what is proven instead.
+
+**Recursive activations** (X1). A recursive program keeps every frame of
+every activation in the arena's downward region, behind a 3-word activation
+record pushed by `CALL` (program-2 §5.3). Non-recursive programs use the
+static block stack. Left recursion is refused, so live activations are at
+most (consumed + 1)·n_calls.
+
+**Maps.** A pair is still evaluated once:
+
+* **Key id.** Binary search over the whole key table once keys stop
+  arriving in ascending order, which is the case for §19's unsorted input
+  (X3). Format 1's ascending-only search and naming cursor are used only
+  while keys ascend; once unordered, the naming record is found by binary
+  search too.
+* **Key test.** The key is evaluated against `key_ts`, the union of the
+  non-literal members' key typesets.
+* **Value test.** The value is evaluated against the value typesets of the
+  members whose key matched.
+
+**Normalisation** is the exact fold table of program-2 §3.3 (C3, X6). For
+example, `REP(lo,hi,MEMBER(1,1))` becomes `MEMBER(lo,hi)`, and
+`{2*2 (+ tstr => int)}` becomes `SEQ(MEMBER(1,∞), FAIL)`, which matches
+nothing. Under rule A every fold holds with cuts too, which revision 1's
+mode could not offer.
+
+**Map tiers:**
+
+* **F (flat).** The normalised root is a sequence of members with no
+  order-sensitive member (a non-literal key with a finite maximum).
+  * F is a pair-major pass. Each pair walks the members in source order. At
+    the first member whose key and value match and which has room, the pair
+    is taken and the walk **stops** (C7: `{* tstr => int, ? "a" ^=> tstr}`
+    accepts `{a: 1}`).
+  * A key-matching cut member before the taker that rejects the value
+    records a cut event.
+  * At the end, the first member in source order with a cut event or count
+    < min fails.
+  * Equivalence with the entry-major PEG: both reviewers proved it for
+    verdicts under these conditions (X17).
+* **S (slots).** Every non-literal member is class R: at the root, with an
+  unbounded maximum.
+  * A pair with an unnamed key runs the F walk over the class-R members at
+    arrival. Each member keeps `ucount`, `ukey` and its first cut
+    violation.
+  * A pair with a named key writes its slot.
+  * At the end the machine runs the root. A class-R member first imports
+    its saved unnamed state, then takes the matching unconsumed slots at
+    its source position (X12: `{+ tstr => int, ? (a: int)}` accepts
+    `{z: 1}`).
+  * Slots are not consumed before the group runs (X17). So
+    `{* tstr => any, ?(a: int, b: int)}` accepts `{a: "x"}`, while
+    `{* tstr => any, (a: int // b: int)}` rejects `{a: 1}`. Both are
+    regression tests.
+* **T (table).** Everything else. One record per pair goes in the arena.
+  * At the end, if an order-sensitive member exists and the map was
+    unordered or had an EC-sensitive key, the machine **sorts its own
+    records** by EC key comparison. This is a heap sort, charged per
+    comparison identically on every route, and independent of §19.4's
+    permutation (C4).
+  * The machine then runs over the records with an undo trail.
+
+The census found 61 F, 37 S and 26 T. The published T cases are F once
+normalised.
+
+**Fail-fast.** A pair that no member can take dooms the map in every mode
+and tier (X Q14: a sufficient test, not a necessary one). The block dies at
+that pair. Profile validation continues as usual (D023).
+
+### 20.6 Charging and resources (D276, D277)
+
+**One logical event order on every route** (X4, program-2 §10). The buffer
+walk, the canonical-copy walk (§19.3) and the framed session all charge the
+same events in the same order:
+
+* **Per item:** format 1's order up to the candidates' typeset tests; then
+  the record or slot store; then the machine's steps until it suspends or
+  its block dies.
+* **At a map's logical end, after its last value:**
+  1. the deferred duplicate check's units (§19.4);
+  2. the map end row;
+  3. the T sort;
+  4. the machine;
+  5. closedness;
+  6. the witness trace.
+* **At an array's end:** the end row, then the machine.
+
+Physical work may happen earlier, but its units are charged at the logical
+point. **This requires amending §19.5** (D277). It currently charges the
+deferred duplicate check "before it starts". The scanner can instead record
+each marked map's unit count, for the VM to charge when it reaches that
+map's end. X4's counterexample `[uint, {0*1000 int => int}]` with descending
+inner keys then exhausts at the same point on both routes. Until P8.4
+adopts this, D277 is a requirement on it.
+
+Prices are bounded-work charges, not an equal-CPU claim, until the
+implemented paths are measured with D241's method (X Q12):
+
+* a stored record costs ⌈R/16⌉;
+* a PEG step costs 1. A step is a node entry, a rewind, or a record
+  examined by a T member, consumed or not (X10);
+* a trail entry undone costs 1;
+* a T sort comparison costs ⌈min len/8⌉.
+
+D045 rule 1 also makes `[* T]`'s machine steps free.
+
+**Scratch.** Frames stay closure-sized (R3). Their exact layouts are
+program-2 §5.2 and §6.3 (X2): 14 + 2W words of array block state plus the
+static stack and any ring, and 16 + 4·members words of map block state plus
+the stack and slots.
+
+**The group arena** (D276) holds A2/T records, T sort permutations,
+trails and recursive activations. It is **not** preallocated. It is bounded
+by the effective limits:
 
 ```
-FL(ENTRY) = 0;  FL(FAIL) = 0;  FL(EMPTY) = −∞ (cannot fail)
-FL(SEQ(g₁…gₖ)) = max over j with FL(gⱼ) ≠ −∞ of (maxlen(g₁…g_{j−1}) + FL(gⱼ))
-FL(CHOICE(g₁…gₖ)) = max FL(gⱼ), −∞ if some gⱼ cannot fail
-FL(REP(lo, hi, g)) = −∞ if lo = 0, else (lo − 1)·maxlen(g) + FL(g)
-B = max over backtrack points of FL(the attempted node)   (∞ through a CALL)
+A_max = maxItems · R_ITEM_MAX + 2 · maxEntries + (maxItems + D + 1) · ACT_WORDS
 ```
 
-* **A0, B = 0.** No record is kept beyond the current one (it is the
-  automaton state). This covers `[* T]`, records `[a, b, ? c]`, `[* uint,
-  uint]`, `[* (int, * tstr)]`, `[? uint, 2*3 uint, tstr]` and every
-  single-element choice.
-* **A1, 0 < B < ∞.** A ring of B + 1 records lives in the leaf's frame block
-  (static size): `[* (k, v)]` has B = 1, `[* (int, int), 3*3 uint]` has
-  B = 1.
-* **A2, B = ∞.** Records go in the scratch's **group arena** (§20.6) from
-  the start of the array:
-  `[(* int, tstr) // (* int)]`, recursive groups.
+(program-2 §9.4). It grows on demand:
 
-A static census of the 825 array types in the conformance corpus (syntactic,
-`.cache/peg/tiers.mjs`) found 799 A0, 25 A1, 0 A2 and 1 recursive.
+* **buffer route:** through the scratch-regrow protocol of §19.5 (internal
+  code 22, one re-run with `A_max` words; charges are a function of the
+  run);
+* **session route:** through `VMS_GROW` (§19.7), with no re-run.
 
-**Memoisation (A2 only).** Packrat memo cells live in each A2 record, one
-word per memoised node, initialised 0 when the record is stored. Two kinds:
-*result* cells (0 unknown, 1 fail, 2 + length) for `CHOICE` and finite-max
-`REP` nodes the compiler proves **re-entrant** (the node can be invoked twice
-at the same index); and *link* cells for `REP(lo, ∞)` nodes that can start
-at more than one index. A link cell at s holds (end, iterations) of the
-greedy run from s, saturated at lo. It is written as each iteration
-completes and path-compressed when the run ends, so `* ((* x, y) // x)` is
-linear, not quadratic. Claim, for review: with these cells, PEG steps for a
-non-recursive group are O(|G|·(n+1)), plus O(n·m) for a finite-max-m
-repetition that can start at many indices. Every step is charged anyway, so
-the budget bounds any case the claim misses.
+At default limits it never refuses (C5). **`group_limit` (code 44)** exists
+only under an explicit arena limit (`groupWords` compile option or per-call
+limit). It is a resource outcome like `budget`, never skippable and never
+swallowed by EMBED.
 
-**Maps: three tiers.** A pair is still evaluated once. Its key is looked up
-by binary search (literal key id, as now) and evaluated against the union of
-the key typesets of the non-literal members (one static typeset). Its value
-is evaluated against the union of the value typesets of the members whose key
-matched. That gives the pair's verdict: for each member, key matched and
-value matched. Then:
+* **Precedence:** a charge always comes before its allocation, so on the
+  same event `budget` wins (X Q11, X Format Q3).
+* **Offsets:** the current element or pair head, or the container head for
+  end-run allocations (X11). Records therefore need no pair offsets.
 
-* **F (flat):** the root is a sequence of members only, and no member is
-  *order-sensitive* (a non-literal key with a finite maximum). A repetition
-  around a single cut-free member counts as that member's own occurrence;
-  the two are identical without a cut. The PEG run of a flat sequence
-  equals a **pair-major** pass: each pair goes to the first member in source
-  order whose key and value match and which has room. A key-matching
-  cut member with room that rejects the value records a cut event. Then
-  minimums are checked at the end. *Proof sketch:* by induction over the
-  members in source order, member m takes exactly the first max(m) matching
-  pairs not taken by earlier members, in both orders. Pick order does not
-  matter without order-sensitive members. Counters per member; no
-  per-pair storage. Closed structs and `{* K => V}` tables are F, so D045
-  schedule 2 rule 2 and the map streaks survive unchanged.
-* **S (slots):** every non-literal member sits at the root, not under a
-  choice or a group repetition, and has an unbounded maximum. Pairs whose
-  key no literal member names can only be taken by those root members:
-  handle them pair-major at arrival, as in F. A pair whose key is named
-  stores its verdict in the leaf's **slot** for that key (one per named key,
-  static size: wire index plus the verdict bits). At the map's end the PEG
-  runs over the slots: literal members are O(1) lookups; a root non-literal
-  member takes the matching unconsumed named slots. COSE headers and CWT
-  claims are S.
-* **T (table):** anything else: non-literal members inside choices or
-  repetitions, order-sensitive members, recursion. Each pair's verdict is a
-  record in the group arena (key id, flags, two bits per member). At the
-  end the PEG runs over the records with a consumed bit per record and an
-  undo trail. When an order-sensitive member exists and §19.4 marked the
-  map, the records are visited in the deferred duplicate check's sorted
-  order (EC bytes, ties by offset; keys are distinct once that check
-  passes). That permutation is kept, one word per pair. Nothing else needs
-  a pick order (§20.2).
+### 20.7 Complexity contracts (D279; C10, X10)
 
-Census (same corpus): 61 F, 37 S, 26 T. Every T map is adversarial except
-two that the syntactic census misclassifies: `* ext-value` is a
-single-member group under an occurrence, and `? v => number` has a
-generic literal key; both are F after normalisation.
+Revision 1 claimed O(|G|·(n+1)) PEG work. **That claim is withdrawn**, and
+so is D270's "group nodes × elements" bound. The proven contracts are below.
+Everything else is bounded by the step budget only, and every step is
+charged.
 
-**Fail-fast.** A pair that no member can take (no member's key matches, or
-every key-matching member rejects its value) dooms the map in every mode
-and tier. The leaf dies at that pair, as format 1 does, with its deep
-witness. An array whose PEG fails, or whose record is empty, dies at that
-element.
+| Part | Contract |
+| --- | --- |
+| Compile / verify | O(Program words + npos·W·(n_calls + 1)) word and bitset operations, plus the fixed points (program-2 §3.1). Charged to the compile and verify budgets. |
+| Arrays, query and records | Per element O(W·(\|A\|+1) + \|C\|), as format 1 |
+| Arrays A0/A1, non-recursive | Linear in n for a fixed group: steps ≤ (n + 1)·K(G), where K(G) is finite (sketch below). K(G) can be exponential in nesting depth: X10's `[* ((2*2 (2*2 (… uint))), tstr) // uint)]` gives Ω(n·2^k) with B = 2^k. |
+| Arrays A2, recursive | No bound beyond the budget. Rescans are polynomial for fixed non-recursive groups and can be exponential with recursion. |
+| Maps F | Per pair O(members); end O(members) |
+| Maps S | Per pair O(members); one end-run bounded by a constant K_S(G) independent of n. Slots number n_named, and every successful group iteration consumes a slot. |
+| Maps T | No polynomial bound claimed. Lower bound Θ(n²) for `{* (int => int // tstr => tstr)}` (X10, C10). Budget-bounded. |
 
-### 20.6 Budget and scratch
+*Sketch for A0/A1.* Between two successive record requests the machine
+works inside a window of B + 1 records. An attempt is fixed by its node, its
+start index and its enclosing live chain. Within a window, finitely many of
+these can start without a new record, because every rewind abandons an
+attempt for good. This is a review item (§20.16 Q3).
 
-Exact rows are in program-2 §10. In summary: per element or pair, everything
-format 1 charged for the automaton step, candidates and typeset tests; a
-stored record costs ⌈R/16⌉ (R its words; nothing in A0); and **one unit per
-PEG step**. A step is a node entry (each `ENTRY` test, each `SEQ`/`CHOICE`
-alternative/`REP` iteration entry, each `MEMBER` evaluation), a memo probe
-or store, a link follow or rewrite, a rewind (plus one per trail entry
-undone), or a pair examined by a non-literal member in S/T. Steps are
-charged in a fixed order: after each record is stored, the machine's steps
-until it suspends; at the end, the rest. So the exhaustion point is a pure
-function of (Program, input), whichever driver or window split is used. D045
-schedule 2's rule 1 (`[* T]`) also makes that shape's PEG steps free.
+### 20.8 Sessions, streaming and sequences
 
-**Scratch** stays closure-sized (R3), with one bounded, explicit addition:
+The VM scratch holds everything the PEG needs: records, slots, counters,
+rings, the arena and the machine stacks. A session owns its scratch from
+start to a terminal state (§17.1). A suspension (`NEED`, `YIELD`,
+`VMS_GROW`) therefore keeps all of it without re-reading a byte: a record is
+computed from an element's evaluation, never from its bytes.
 
-* Frames: an array block adds the machine state (8 words), its static
-  stack (4 words per nesting level of the PEG tree, [D]) and, for A1,
-  (B + 1)·W ring words. A map block adds member counters, cut-event words
-  and (S) slots: n_named_keys × slot_words. All static, from closure sets
-  as today.
-* **The group arena**: one region of `LIM_PEG_WORDS` words, present only
-  when the Program has an A2 or T leaf (FLAGS bit 6). Records and undo
-  trails grow upward; recursion frames grow downward. Items nest
-  stack-wise: an inner container's region is popped when it ends, and an
-  embedded sub-validation restores the tops it found. A collision
-  refuses the message with the new validator reason **`group_limit`**
-  (code 44): a resource refusal like `budget`, never a schema verdict, and
-  not skippable in sequences. The explicit bound: an A2 array uses
-  n·(W + memo columns) words, a T map n·(2 + ⌈2·members/32⌉ (+1 rank)) +
-  trail ≤ n words, with n ≤ the entries limit. Default 65 536 words
-  (256 KiB), hard maximum 2^24, counted in `LIM_TOTAL_BYTES`. Per-call
-  limits may lower it.
+* **Yielding.** The machine has a safe point after every step, so long
+  end-runs yield on the quantum.
+* **Charges** never depend on where windows end.
+* **Drain mode** (D144) holds the PEG verdict like any schema verdict.
+* **Sequence mode** resets the arena tops per message.
+* **§19.3's discarded attempt** discards its records along with the rest of
+  its state.
+* **T sort keys.** In a forward-only stream, the T sort compares only the
+  key forms §19.7 already keeps for the duplicate check. No tier needs any
+  byte after it has passed.
 
-### 20.7 Sessions, streaming and sequences
+### 20.9 Witnesses (D278, amends D024)
 
-Records, slots, counters, rings, the arena and the machine stacks are all in
-the VM scratch. A session owns its scratch from start to a terminal state
-(§17.1), so a suspension (`NEED`/`YIELD`) keeps them without re-reading a
-byte: a record is computed from the element's evaluation, never from its
-bytes. The machine has a safe point after every step, so long end-of-array
-or end-of-map runs yield on the quantum (§17.4), and charges never depend
-on where windows end. Unknown-length drain mode (D144) and held verdicts are
-unchanged: the PEG is part of the schema verdict that is held. Sequence mode
-(§18.2) resets the arena tops with the rest of the per-message state. When
-§19.3 discards a deterministic attempt and re-runs on the canonical copy,
-the attempt's records and machine state go with the rest of its scratch
-state. In a forward-only stream, the only key bytes an order-sensitive T
-map needs at its end are the ones §19.7 already keeps for the deferred
-duplicate check. No tier needs any byte after it has passed.
+Witnesses are a function of the semantics. They are the same in every tier
+and on every route. Program-2 §8 makes this operational.
 
-### 20.8 Witnesses (D024 adapted)
+**Arrays.** The farthest failure event is reported:
 
-The witness is a function of the semantics. It is the same in every tier and
-driver, and computed from verdict records and the run.
+* E1: an `ENTRY` failed at i < n.
+* E2: an `ENTRY` was tested at n (end of input).
+* E3: the root succeeded at e < n.
 
-* **Arrays.** A run records failure events: `ENTRY` at i < n failed (E1),
-  `ENTRY` at n (E2), and the root succeeding at e < n (E3). The reported event
-  has the greatest index; ties go to the first in run order. E2: `missing`
-  at the array, extra segment `INDEX n` (format 1 rule 5). E3: `unexpected`,
-  extra `INDEX e`. E1 at i: if rᵢ = ∅, the element's own witness, recorded
-  while it was evaluated and kept because the block died there (later
-  siblings were dead, so the path stack still holds it). Otherwise `type`,
-  extra `INDEX i`. `[* T]`, which ends with an E1/E3 tie, therefore reports
-  what format 1 did.
-* **Maps.** (1) At a pair, in every tier: the first pair in wire order that
-  no member can take. The block dies with format 1 rule 3's witness. (2) At
-  the end: follow the failure trace. A `SEQ` goes to its failing child. A
-  `CHOICE` goes to the alternative that failed with the most pairs consumed;
-  ties go to the earliest. A `REP` below its minimum goes to its failing
-  iteration. A `MEMBER` gives `value` at its cut-violating pair with the
-  smallest wire index (extra segment `KEY k` or `ANYKEY`), or `missing`
-  (extra `KEY id` / `ANYKEY`). If the root succeeded with leftovers: the
-  first leftover in wire order, `value` if a member naming its key rejected
-  its value, else `unexpected`. F computes the same trace at the end from
-  its counters and its first cut pair per member. Witnesses found at the end
-  are shallow: the map's path plus one segment.
-* When several ARRAY or MAP leaves are admitted, the block that died last
-  in walk order reports (ties: lowest leaf id), consistent with D024's
-  "deepest emptied query set".
-* Paths still name a schema key only if a member of that map names it (A10).
+Ties go to the first event in run order. E2 is `missing` and E3 is
+`unexpected`, each with an extra `INDEX` segment. E1 reports the element's
+own deep witness when rᵢ = ∅; otherwise it reports `type` at `INDEX i`.
 
-### 20.9 EXT, AND/NOT, EMBED, tags
+**Maps.** Witnesses are found at two points.
+
+1. **At a pair, every tier:** the first unacceptable pair in wire order. Its
+   witness follows format 1's rule 3.
+2. **At the end:** a failure trace with explicit metadata (X12).
+   * Each `MEMBER` failure records a score, the trail length *before
+     undo*, plus its kind, member and pair.
+   * A frame keeps the best score among its failed sub-attempts; ties go
+     to the earlier one.
+   * `SEQ` passes up its failing child's event, `CHOICE` its best event, a
+     `REP` below its minimum its failing iteration's event, and `cut` or
+     `fail!` the event that raised it.
+   * A cut is reported as `value` at the **diagnostic pair**: the
+     cut-violating pair with the smallest wire index in the member's scope
+     (X5, C8). The scope is the pairs unconsumed at its entry that it would
+     examine before reaching its maximum, ignoring violations. F and S keep
+     this pair at arrival; T finds it with a charged scan. So
+     `{* tstr ^=> int, ? "a" => any, ? "b" => any}` on wire-order
+     `{b:"x",a:"y"}` reports `b` in every tier.
+   * Leftovers after a root success report the first leftover in wire
+     order: `value` if a member's key matched it and that member rejected
+     its value, else `unexpected`.
+
+End-of-map witnesses are shallow (the map path plus one segment). That is
+an intentional D024 revision, not the old deep witness. With several leaves,
+the block that died last reports, ties to the lowest leaf id.
+
+**Forced-tier gate** (C8; program-2 §8). In a test mode that forces every
+map to T and every array to A2, verdict, reason, subcode, path and offset
+must equal the natural run on every vm-test case. Only the budget used may
+differ.
+
+**Relaxed queries** (C9, X Q15) can degrade nothing in a verdict. They can
+add EXT calls, nested evaluations, charges, and resource refusals for
+positions the PEG never tests. This is deterministic and documented, and a
+resource refusal is never evidence that the PEG rejects. Pruning queries in
+A0 is a later, separately versioned optimisation.
+
+### 20.10 EXT, AND/NOT, EMBED, tags
 
 Nothing changes at the type level. An element's verdict for a position is a
-typeset test after the item's combinator pass, so `AND`, `NOT` and EXT
-decide before the record is formed. Because queries come from the relaxed
-automaton, an EXT predicate (or a nested container) can be evaluated
-against a position the PEG never tests. That costs units but is
-deterministic: calls depend on (Program, input), never on PEG decisions,
-which is the same contract as today. Tags and their contents are untouched.
-`.cborseq` content is a virtual array (D040) with its own block and PEG.
-`.cbor` and `.cborseq` sub-validations nest in the arena as items do.
+typeset test made after the item's combinator pass, so `AND`, `NOT` and EXT
+are decided before the record is formed.
 
-### 20.10 Compiler changes
+* An EXT call depends only on the Program and the input, never on PEG
+  decisions. This is the same contract as today.
+* `.cborseq` content is a virtual array (D040) with its own PEG and EOF.
+* Sub-validations save and restore the arena tops.
 
-**Removed:** map normal form (§4.3.1: DNF alternatives, the top-level `//`
-split into separate map leaves, unsatisfiable-alternative dropping), factors
-and pools (§4.3.3), the determinism rule and every overlap test (§4.3.2),
-array counters and unrolling (§4.4, D036), and the alternatives limit. The
-regexp Glushkov builder stays (and the relaxed array automaton reuses it).
+### 20.11 Compiler changes, refusals, warnings, fast paths (D275, D278)
 
-**Added:** lowering of each array/map group to a **PEG program** (program-2
-§3: a node table of `EMPTY`, `FAIL`, `ENTRY`, `MEMBER`, `SEQ`, `CHOICE`,
-`REP`, `CALL`), plus static analyses that the verifier recomputes as [D]
-fields. These are nullable, min/max length, FL and B (array tier),
-nesting depth (stack words), re-entrancy and multi-start (memo columns), map
-tier, order-sensitivity and the S slot layout. The left-recursion check is
-the one semantic refusal.
+**Removed:**
 
-**Refusals that remain:** left-recursive groups (`group_recursion`: the PEG
-does not terminate); a keyless type entry in a map (`map_key`); compile
-limits (PEG nodes per group, positions per array, members per map, nesting
-depth, ring words B·W, memo columns, total bytes). Withdrawn:
-`map_overlap`, `map_group_occurrence`, `map_cut`, counter/unrolling
-position refusals, non-tail `group_recursion`, and the alternatives limit.
+* the map normal form: DNF alternatives, the top-level `//` split, and
+  dropping unsatisfiable alternatives;
+* factors and pools;
+* the determinism rule and every overlap test;
+* array counters and unrolling;
+* the alternatives limit.
 
-**Fast paths that survive, and why they are PEG-equivalent:**
+**Added:**
 
-* `[* T]`: `REP(0, ∞, ENTRY p)` continues while bit p is set and stops at
-  the first clear bit, so the root ends at n iff every element matched T.
-  That is the one-position automaton's language, and its witness is format
-  1's (§20.8). The array streak and schedule 2 rule 1 stand.
-* Closed structs (distinct literal keys, occurrence ≤ 1, no wildcard) and
-  struct + trailing absorbing wildcards: F tier. Keys are unique in a valid
-  map, so literal members never compete. A non-cut literal member that
-  rejects a value leaves the pair to the wildcards that follow it, which is
-  the same outcome as format 1 ("the alternative follows its pool's
-  outcome"). The struct and table streaks stand.
-* `{* K => V}`: one unbounded member takes every matching pair, so the map
-  is valid iff all pairs match. That is the old table rule.
-* Not equivalent, so these change: a required literal member *after* an
-  overlapping wildcard (`{* tstr => any, "a" => int}` used to take `"a"` by
-  literal priority; PEG gives it to the wildcard).
+* PEG lowering;
+* the fold table;
+* the relaxed automaton, including its `CALL` fixed points;
+* the analyses: syntactic lengths, FL and B, `depth`, `n_calls`, map tier,
+  order-sensitivity and the S slot layout;
+* the left-recursion check.
 
-### 20.11 Oracle and differential testing
+The verifier recomputes every one of these (program-2 §3.1).
 
-* **A new independent PEG oracle**, `corpus/tools/peg-oracle.mjs`. A
-  different engineer writes it from RFC 8610 Appendix A, Appendix C, §2.1,
-  §3.2, §3.5.3–§3.5.4 and §20.2–§20.3 of this document, without reading kin
-  code or this design's prototype. It is a direct recursive interpreter of
-  `run`: no tiers, no automaton, no memo, no records. It reuses only the
-  oracle's existing CDDL parser and value model, and the type-level `test`
-  (unchanged semantics). It has both cut modes and EC pick order,
-  its budget gives `unknown` on exhaustion, and its self-tests are the
-  §20.3 examples. The existential oracle (`arrayRun`/`mapMatch`) is
-  retired. Its 1,840 audit agreements were evidence for the old semantics.
-* **snug == PEG oracle** (gate, D022 re-based): every vm-test case set plus
-  a generator extended with group choices, nested repetitions with min > 1,
-  zero-length bodies, cuts on literal and typeset keys, duplicate literal
-  members, recursion, and maps forced into each tier. It runs both cut
-  modes, the forced-generic path, schedule 1 and 2, sessions under every
-  split (`bb sequence-test` included), and JS == Rust (== wasm when P7.9c
-  lands).
-* **PEG oracle vs Ruby** (evidence, not a gate): the §20.13 probes plus
-  generated cases. A disagreement is triaged into RL/RK/RI/RZ/RR/RO/RX by a
-  predicate per class; anything outside the classes is investigated before
-  the corpus records an expectation. cddl-rs is optional extra evidence.
-* **Corpus expectations that flip** (current corpus, run through the
-  prototype in reference mode; the old oracle agreed with every one of the
-  old expectations): `adversarial.json` A1 `{ ? (a: int, b: int), ((* tstr
-  => int) // (* tstr => tstr)) }` ×2 (`{a:1,b:2,c:"x"}`, `{a:"x",c:"x"}`:
-  the first choice alternative succeeds empty and locks in); C6 `[? uint,
-  2*3 uint, tstr]` / `[1,1,"x"]`; A3 `[* (int, int), 3*3 uint]` ×3; the
-  embedded-sequence-with-backtracking `.cborseq` case; seeded-041 and
-  seeded-049 `{ a: tstr, ? b: int // c: int, 0*2 tstr => tstr }`; seeded-043
-  `[* ((uint / tstr), tstr), 2*4 (uint / tstr)]` / `[3,"y"]`; seeded-050
-  `[? tstr, 0*2 (uint / tstr), 0..2]` / `[0]`. That is 11 cases, all true →
-  false. Ruby agrees with the new verdict on 9 of them; the two A1 cases
-  are class RK. The 26 `snugSchemaError` suites (21 `map_overlap`, 3
-  `map_group_occurrence`, 2 `map_cut`) compile; their cases keep their
-  verdicts except seeded-041/049. RFC suites: the D271 cut-scope case
-  (`{kind: "a", x: uint // kind: "b", y: tstr}` / `{kind: "b", y: "z"}`)
-  is true under `cuts: 'reference'` and false under `'rfc'`. The suite
-  format gains a per-suite `options` field. Staged `dependsOn: ["D270"]`
-  cases (§3.5.3 indeterminate, §3.11 precedence-2) already match the
-  prototype and become gated.
+**Refusals that remain:**
 
-### 20.12 Migration
+* left recursion (`group_recursion`);
+* a keyless type entry in a map (`map_key`);
+* growing generic recursion (compile budget, before lowering);
+* compile limits.
 
-* **Format 2.0** (program-2 §1). Map tables and array automata change
-  meaning, so D084 requires a major version. Staying at 1.x with new leaf
-  kinds would keep the existential engine in every VM just to run old
-  Programs, with a meaning different from recompiling the same text, which
-  is wrong for R1 and costs size (R9). The loader refuses 1.x. SOURCE_KEY's
-  preimage gains the format version change and two option values (`cuts`,
-  the arena limit), so caches miss rather than serve old meanings. snug is
-  0.0.0, so nothing outside the repo stores Programs.
-* **Compile option** `cuts: 'reference' | 'rfc'` (default `'reference'`
-  pending D271). It is stored in the Program (FLAGS bit 5), because it
-  changes verdicts.
-* **Conformance corpus additions** (P8.6): every §20.13 probe with a
-  verdict per cut mode and the Ruby class as evidence; App. A's examples;
-  §3.5.3/§3.5.4/§3.11 cases; zero-length, min > 1 and lock-in cases;
-  center recursion and a left-recursion refusal; a `group_limit` case at a
-  lowered arena limit; witness cases for each §20.8 rule; split-invariance
-  sessions for A1, A2, S and T.
-* **Documents**: §4.3/§4.4 and §6 rules 4–5 get superseded notes;
-  cddl-support.md loses the D011/D012 refusal list; conformance.md D012,
-  D036, S28 (and D021/S26 as an option) are re-audited after landing.
-* **Order of work**: P8.4 (valid CBOR, value-correct keys) first, as D270
-  says. Then the PEG oracle; compiler + format 2.0; VM buffer driver;
-  sessions; corpus; docs.
+**Withdrawn:** `map_overlap`, `map_group_occurrence`, `map_cut`, the
+counter and unrolling position refusals, and the non-tail `group_recursion`
+refusal.
 
-### 20.13 Probe record (2026-11-04)
+**Compile warnings** (C12, X Q16). Warnings never refuse a schema. Each
+analysis is conservative and cheap: subsumption is proved only between
+identical typesets, `any`, or a literal tested with the VM.
 
-Columns: **ref** = §20.2 with `cuts: 'reference'`, EC pick order (the
-prototype sorts by the keys' encoded bytes, which equals EC order for these
-keys); **rfc** = `cuts: 'rfc'`; **old** = snug today (format 1, default
-options); **Ruby** = `cddl` 0.12.14; **Rust** = cddl-rs 0.10.7. ✓ valid, ✗
-invalid. Notes: Ruby's deviation class (§20.4); *flips* = old ≠ ref; *was
-refused* = old compile refusal; *rfc differs*; *rule A differs* = the
-alternative cut reading of Q1. The root rule is always `r`. Data is shown
-in wire order, which is canonical for every case except M06.1. A10.1's Ruby
-run hung until the 8 s timeout.
+| Code | Warns when | Example |
+| --- | --- | --- |
+| W1 | A required member can never match: an earlier unbounded member with an `any` value already takes its key domain | `{* tstr => any, "a" => int}` |
+| W2 | The same, for an optional member (an ineffective constraint) | `{* tstr => any, ? a: int}` |
+| W3 | A greedy unbounded repetition is followed directly by a required entry whose type it subsumes | `[* uint, uint]`, `[* any, int]` |
+| W4 | `REP(lo ≥ 2)` wraps a body that consumes all it matches | `{2*3 (+ tstr => int)}`, `[2*3 (+ uint)]` |
+| W5 | A choice alternative follows one that cannot fail | `{(? a: int) // (b: int)}`, §3.11's `group2` |
+| W6 | Order-sensitive overlapping members (§3.5.3's pathological case) | `{int => int, int => 6}` |
 
-| Case | Schema | Data | ref | rfc | old | Ruby | Rust | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A01.0 | `r = [* uint, uint]` | `[1]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A01.1 | `r = [* uint, uint]` | `[1,2]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A02.0 | `r = [? uint, 2*3 uint, tstr]` | `[1,2,"x"]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A02.1 | `r = [? uint, 2*3 uint, tstr]` | `[1,2,3,"x"]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A03.0 | `r = [(int) // (int, int)]` | `[1,2]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A03.1 | `r = [(int) // (int, int)]` | `[1]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A04.0 | `r = [(int, int) // (int)]` | `[1]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A04.1 | `r = [(int, int) // (int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A05.0 | `r = [2*3 uint, uint]` | `[1,2,3]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A05.1 | `r = [2*3 uint, uint]` | `[1,2,3,4]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A05.2 | `r = [2*3 uint, uint]` | `[1,2]` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| A06.0 | `r = [* (tstr, uint)]` | `["a",1,"b"]` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| A06.1 | `r = [* (tstr, uint)]` | `["a",1]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A07.0 | `r = [(* int, tstr) // (* int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A07.1 | `r = [(* int, tstr) // (* int)]` | `[1,2,"x"]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A08.0 | `r = [* ((* int, tstr) // int)]` | `[1,2,3]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A08.1 | `r = [* ((* int, tstr) // int)]` | `[1,"x",2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A09.0 | `r = [2*2 (? int)]` | `[]` | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
-| A09.1 | `r = [2*2 (? int)]` | `[1]` | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
-| A10.0 | `r = [* (? int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A10.1 | `r = [* (? int)]` | `["x"]` | ✗ | ✗ | ✗ | hang | ✗ | Ruby RZ |
-| A11.0 | `r = [* (int // tstr), int]` | `[1,"a"]` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| A12.0 | `r = [+ uint, * uint, uint]` | `[1,2,3]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A13.0 | `r = [uint, ? (uint, tstr), uint]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A13.1 | `r = [uint, ? (uint, tstr), uint]` | `[1,2,"x",3]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A13.2 | `r = [uint, ? (uint, tstr), uint]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| A14.0 | `r = [* (int, int), 3*3 uint]` | `[1,2,3]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A14.1 | `r = [* (int, int), 3*3 uint]` | `[1,2,3,4,5]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A15.0 | `r = [? (int, int), int]` | `[1,2]` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| A15.1 | `r = [? (int, int), int]` | `[1,2,3]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A16.0 | `r = [(int, tstr) // (int, int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A17.0 | `r = [int, ? g]; g = (int, ? g)` | `[1,2,3]` | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RR |
-| A18.0 | `r = [g]; g = (0, ? g, 1)` | `[0,0,1,1]` | ✓ | ✓ | refused (group_recursion) | ✗ | ✓ | Ruby RR; was refused |
-| A18.1 | `r = [g]; g = (0, ? g, 1)` | `[0,1,1]` | ✗ | ✗ | refused (group_recursion) | ✗ | ✗ | was refused |
-| A19.0 | `r = [* any, int]` | `[1]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A20.0 | `r = [int] / [int, int]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| A21.0 | `r = [* (a: int, b: int)]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| A22.0 | `r = [1*3 uint, 2*2 uint]` | `[1,2,3]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| A22.1 | `r = [1*3 uint, 2*2 uint]` | `[1,2,3,4]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F01.0 | `r = { ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }` | `{"a":1,"b":2,"c":"x"}` | ✗ | ✗ | ✓ | ✓ | ✓ | Ruby RK; flips |
-| F01.1 | `r = { ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }` | `{"a":"x","c":"x"}` | ✗ | ✗ | ✓ | ✓ | ✗ | Ruby RK; flips |
-| F02.0 | `r = [? uint, 2*3 uint, tstr]` | `[1,1,"x"]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F03.0 | `r = [* (int, int), 3*3 uint]` | `[1,1,1]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F03.1 | `r = [* (int, int), 3*3 uint]` | `[1,1,1,1,1]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F03.2 | `r = [* (int, int), 3*3 uint]` | `[1,1,1,1,1,1,1]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F04.0 | `r = bstr .cborseq [? uint,2*3 uint,tstr]` | `h'01026178'` | ✗ | ✗ | ✓ | error | ✗ | Ruby RX; flips |
-| F05.0 | `r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }` | `{"a":"y","c":0}` | ✗ | ✗ | refused (map_overlap) | ✗ | ✗ | was refused |
-| F05.1 | `r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }` | `{"a":"x","c":1}` | ✗ | ✗ | refused (map_overlap) | ✗ | ✗ | was refused |
-| F06.0 | `r = [* ((uint / tstr), tstr), 2*4 (uint / tstr)]` | `[3,"y"]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F07.0 | `r = [? tstr, 0*2 (uint / tstr), 0..2]` | `[0]` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| F08.0 | `r = {group2}; group2 = (? ab: a / b // cd: c / d); a = 1 b = 2 c = 3 d = 4` | `{"cd":3}` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| M01.0 | `r = {? "optional-key" => int, * tstr => any}` | `{"optional-key":"nonsense"}` | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RL |
-| M02.0 | `r = {? "optional-key" ^=> int, * tstr => any}` | `{"optional-key":"nonsense"}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M03.0 | `r = {? optional-key: int, * tstr => any}` | `{"optional-key":"nonsense"}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M03.1 | `r = {? optional-key: int, * tstr => any}` | `{"z":2,"optional-key":1}` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| M04.0 | `r = {* tstr => any, "a" => int}` | `{"a":1}` | ✗ | ✗ | ✓ | ✗ | ✓ | flips |
-| M05.0 | `r = {* tstr => any, ? a: int}` | `{"a":"x"}` | ✓ | ✓ | refused (map_cut) | ✗ | ✗ | Ruby RL; was refused |
-| M06.0 | `r = {int => int, int => 6}` | `{3:5,4:6}` | ✓ | ✓ | refused (map_overlap) | ✓ | ✗ | was refused |
-| M06.1 | `r = {int => int, int => 6}` | `{4:6,3:5}` | ✓ | ✓ | refused (map_overlap) | ✗ | ✗ | Ruby RO; was refused |
-| M07.0 | `r = {* (a: int, b: int)}` | `{"a":1}` | ✗ | ✗ | ✗ | ✓ | ✓ | Ruby RI |
-| M07.1 | `r = {* (a: int, b: int)}` | `{"a":1,"b":2}` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| M08.0 | `r = {? (a: int, b: int)}` | `{"a":1}` | ✗ | ✗ | ✗ | ✓ | ✓ | Ruby RI |
-| M09.0 | `r = {? (a: int, b: int), * tstr => any}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs |
-| M10.0 | `r = {(? a: int) // (b: int)}` | `{"b":1}` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| M11.0 | `r = {(a: int) // (a: int, b: int)}` | `{"a":1,"b":2}` | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
-| M12.0 | `r = {kind: "a", x: int // kind: "b", y: tstr}` | `{"y":"s","kind":"b"}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs |
-| M12.1 | `r = {kind: "a", x: int // kind: "b", y: tstr}` | `{"y":"s","kind":"c"}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M13.0 | `r = {+ (email: tstr // phone: tstr)}` | `{"email":"a","phone":"b"}` | ✓ | ✓ | ✓ | ✓ | ✗ |  |
-| M13.1 | `r = {+ (email: tstr // phone: tstr)}` | `{}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M14.0 | `r = {2*2 (? a: int)}` | `{}` | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
-| M14.1 | `r = {2*2 (? a: int)}` | `{"a":1}` | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
-| M15.0 | `r = {* tstr => int, * tstr => tstr}` | `{"a":1,"b":"x"}` | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RK |
-| M16.0 | `r = {(* tstr => int) // (* tstr => tstr)}` | `{"b":"x"}` | ✗ | ✗ | ✓ | ✓ | ✓ | Ruby RK; flips |
-| M16.1 | `r = {(* tstr => int) // (* tstr => tstr)}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| M17.0 | `r = {1*2 tstr => int}` | `{"a":1,"b":2,"c":3}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M18.0 | `r = {* (a: int, b: int), * tstr => any}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✗ | rfc differs; rule A differs |
-| M18.1 | `r = {* (a: int, b: int), * tstr => any}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs |
-| M19.0 | `r = {? ((a: int) // (b: int)), * tstr => any}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs; rule A differs |
-| M20.0 | `r = {(a: int, b: int) // (* tstr => any)}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs |
-| M21.0 | `r = {"a" => int, * tstr => any}` | `{"a":"x"}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M22.0 | `r = {? "a" => int, * tstr => any}` | `{"a":"x"}` | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RL |
-| M23.0 | `r = {* tstr ^=> uint, * any => any}` | `{"a":"x"}` | ✗ | ✗ | refused (map_cut) | ✗ | ✗ | was refused |
-| M23.1 | `r = {* tstr ^=> uint, * any => any}` | `{1:"x"}` | ✓ | ✓ | refused (map_cut) | ✓ | ✗ | was refused |
-| M24.0 | `r = {1*2 tstr ^=> uint, * tstr => tstr}` | `{"a":1,"b":2,"c":"x"}` | ✓ | ✓ | refused (map_cut) | ✓ | ✗ | was refused |
-| M24.1 | `r = {1*2 tstr ^=> uint, * tstr => tstr}` | `{"a":"x","b":1,"c":2}` | ✗ | ✗ | refused (map_cut) | ✗ | ✗ | was refused |
-| M25.0 | `r = {a: int, ? b: int, * tstr => tstr}` | `{"a":1,"b":"x"}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M26.0 | `r = {a: int, $$x}` | `{"a":1}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M27.0 | `r = {a: int, * $$x}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| M28.0 | `r = {(a: int // b: int), (a: int // b: int)}` | `{"a":1,"b":2}` | ✓ | ✓ | ✓ | ✓ | ✗ |  |
-| M28.1 | `r = {(a: int // b: int), (a: int // b: int)}` | `{"a":1}` | ✗ | ✗ | ✗ | ✗ | ✓ |  |
-| M29.0 | `r = {* (a: int // b: tstr)}` | `{"a":1,"b":"x"}` | ✓ | ✓ | ✓ | ✓ | ✗ |  |
-| M30.0 | `r = {? (a: int, b: int), a: int}` | `{"a":1}` | ✓ | ✗ | ✓ | ✗ | ✓ | Ruby RI; rfc differs |
-| M31.0 | `r = {(kind: "a", x: int) // (kind: "b")}` | `{"x":1,"kind":"b"}` | ✗ | ✗ | ✗ | ✗ | ✓ |  |
-| M32.0 | `r = {? 1 => int, ? (5 => bstr // 6 => bstr)}` | `{5:h'00',6:h'00'}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M32.1 | `r = {? 1 => int, ? (5 => bstr // 6 => bstr)}` | `{6:h'00'}` | ✓ | ✓ | ✓ | ✓ | ✗ |  |
-| M33.0 | `r = {? a: int, ? a: tstr}` | `{"a":"x"}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| M34.0 | `r = {? "a" => int, ? "a" => tstr}` | `{"a":"x"}` | ✓ | ✓ | ✗ | ✗ | ✗ | Ruby RL; flips |
-| M35.0 | `r = {* int => tstr, 1 => tstr}` | `{1:"x"}` | ✗ | ✗ | ✓ | ✗ | ✓ | flips |
-| N01.0 | `r = {? (a: int), * tstr => any}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✗ | rfc differs; rule A differs |
-| N02.0 | `r = {* (a: int), * tstr => any}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✗ | rfc differs; rule A differs |
-| N03.0 | `r = {(a: int) // (* tstr => any)}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs |
-| N04.0 | `r = {? ("a" => int), * tstr => any}` | `{"a":"x"}` | ✓ | ✓ | ✓ | ✓ | ✗ |  |
-| N05.0 | `r = {(a: int, b: int) // (a: tstr)}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✓ | rfc differs |
-| N06.0 | `r = {? (a: int, b: tstr), * tstr => any}` | `{"a":1,"b":2}` | ✓ | ✗ | ✓ | ✓ | ✗ | rfc differs; rule A differs |
-| N07.0 | `r = {a: int // b: int}` | `{"a":1,"b":2}` | ✗ | ✗ | ✗ | ✗ | ✗ |  |
-| N08.0 | `r = {* tstr => int, ? "a" => tstr}` | `{"a":"x","b":1}` | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RK |
-| N09.0 | `r = {+ a: int}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| N10.0 | `r = [* int, ? tstr, * int]` | `[1,"x",2]` | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+**Fast paths** that survive and are PEG-equivalent (both reviewers agreed
+for verdicts):
 
-### 20.14 Open questions for the independent review
+* `[* T]`: A0, with D045 rule 1 and the array streak (C16).
+* Closed structs, and structs followed by absorbing wildcards: F.
+* `{* K => V}`: F.
 
-1. **Reference cut mode.** Is the D021 translation right? A cut failure
-   fails the member, and an enclosing `?(…)`/`*(…)` or `//` may then
-   recover. It reproduces Ruby and format 1, but it makes `? (k: v)` differ
-   from `? k: v` (N01 vs M03). The alternative ("rule A": a cut failure also
-   passes through repetitions and is absorbed only by `//`) honours §3.5.4's
-   "later entries … no longer allowed", but no tool implements it (M18, M19,
-   N01, N02, N06).
-2. **RFC cut mode.** Is "commit on key match, value matching or not; then
-   every enclosing choice *and repetition* in the map's group is disabled;
-   an enclosing type choice is not" the right formalisation of App. A plus
-   §3.5.4? It rejects `{? (a: int, b: int), * tstr => any}` / `{a: 1}` (M09).
-3. **Pick order.** EC key order makes verdicts independent of the
-   serialisation. It reuses §19.4's deferred duplicate check (its sort
-   order for marked maps, wire order otherwise), so it adds no comparisons,
-   only a kept permutation, but it couples P8.5 to §19's records. Is that
-   better than wire order (simpler and Ruby's choice, but
-   serialisation-dependent for §3.5.3's pathological schemas)?
-4. **Zero-length iterations (R4).** Is "stop and count as satisfied" the
-   right reading, or should a zero-length iteration count once and the loop
-   continue up to the minimum (the same verdicts, different charges)?
-5. **Lock-in consequences (R1, R5).** `[(int) // (int, int)]` rejects
-   `[1, 2]`, and `{(? a: int) // (b: int)}` rejects `{b: 1}`. Is any RFC
-   text an argument for retrying alternatives at the end of an array or for
-   closedness?
-6. **Superset lemma (§20.5).** Prove or break it for the relaxed automaton,
-   including context-insensitive `CALL` approximation, unwrapped choices,
-   generics and `.cborseq`.
-7. **FL and B.** Is B (max FL over backtrack points) exactly the ring the
-   incremental machine needs, so that it never rewinds before i − B? Check
-   the last alternative of a choice, `REP` with lo > 0 inside a `SEQ`, and
-   nested repetitions.
-8. **Memoisation.** Do the re-entrancy and multi-start analyses plus link
-   cells give O(|G|·n) as claimed? Should memo cells be left out of 2.0
-   entirely (no A2 group in the corpus) and the budget relied on, with a
-   reserved field for later?
-9. **Tier equivalence.** Check the F pair-major proof with cut events and
-   minimums. Check S when a root non-literal member *precedes* a literal
-   subtree in source order: the member takes named slots before the
-   subtree runs. Is the order of slot consumption then exactly the PEG's?
-10. **Witnesses.** Are farthest-failure (arrays) and the failure trace with
-    "most pairs consumed" (maps) deterministic and tier-independent? Is
-    losing format 1's deep witness at end-of-map failures acceptable?
-11. **`group_limit`.** Is a resource refusal of valid data acceptable, or
-    should records be priced so that the budget always runs out before the
-    arena?
-12. **Charges.** Is one unit per PEG step, ⌈R/16⌉ per record and one per
-    trail entry in line with D241's equal-CPU-per-unit target? Measure it
-    before adopting.
-13. **Format.** Is 2.0, with 1.x refused, the right call under D084, rather
-    than a 1.2 that keeps both engines?
-14. **Fail-fast pairs.** Is "a pair no member can take dooms the map" sound
-    in both cut modes and every tier, so that early death never changes a
-    verdict?
-15. **Query supersets.** Relaxed queries can call EXT predicates and
-    evaluate nested containers against positions the PEG never tests. Is
-    that acceptable (it is deterministic), or should the PEG prune queries
-    in A0, where the next tested positions are known exactly?
-16. **Literal priority loss.** Format 1 gave literal entries priority over
-    wildcards whatever the source order. PEG follows source order
-    (`{* tstr => any, "a" => int}` now matches nothing containing `"a"`).
-    Should the compiler warn when a required member can never match?
+The literal-priority change (`{* tstr => any, "a" => int}`) is not
+equivalent, and W1 warns about it.
+
+### 20.12 Oracle and testing (D279; X14)
+
+* **Four kinds of expectation, kept apart in the corpus.** Each case is
+  tagged with its basis:
+  * `rfc`: the verdict follows from quoted RFC text;
+  * `policy`: the verdict follows from a snug resolution (R4, R8, R15, R16,
+    rule A), naming the D number;
+  * `observed`: a tool's answer, kept as evidence and never as an
+    expectation;
+  * `invariant`: an execution or resource property (forced-tier equality,
+    split invariance, budget and arena boundaries).
+
+  A parse error, a timeout and `unknown` are recorded as such, never as a
+  refusal.
+* **The independent PEG oracle**, `corpus/tools/peg-oracle.mjs`. A different
+  engineer writes it from the RFC and from §20.2–§20.3 only. It is a direct
+  recursive interpreter with both cut modes, EC pick order, tag unwrap and
+  inherited type semantics. It deliberately does not copy the prototype,
+  whose gaps include tag unwrap. It replaces D022's existential oracle.
+
+  The oracle checks *semantics*. It cannot certify tiers, rings, the arena,
+  charges or witnesses (X14). Those come from the gates below.
+* **Gates:**
+  * snug equals the oracle on vm-test cases and on a generator extended
+    with group choices, nested and saturated occurrences, zero-length
+    bodies, cuts on literal and typeset keys with named diagnostic keys,
+    duplicate literal members, and center recursion;
+  * **forced-tier equality** of verdict and witness (§20.9);
+  * **metamorphic encodings**: every valid re-encoding of a case (§19's
+    equivalence property) gives the same verdict and witness;
+  * **splits**: every split, quantum and `VMS_GROW` point gives the same
+    out array;
+  * **resource boundaries**: the budget immediately before, at and after
+    each charging event, and an explicit arena limit at each allocation, on
+    the buffer, canonical and session routes, with EMBED;
+  * JS == Rust (and wasm once P7.9c lands).
+* **Ruby** stays evidence, triaged by class (§20.4).
+
+### 20.13 Corpus changes and migration (D279)
+
+**Expectations that flip.** The current corpus was run through the
+prototype with rule A; the old oracle agreed with every one of the old
+expectations. **33 cases flip, all from true to false:**
+
+* **11 PEG-structural flips** (unchanged from revision 1):
+  * adversarial A1 ×2: the first choice alternative locks in;
+  * C6 `[? uint, 2*3 uint, tstr]`;
+  * A3 `[* (int, int), 3*3 uint]` ×3;
+  * the embedded backtracking `.cborseq` case;
+  * seeded-041 and seeded-049: lock-in;
+  * seeded-043;
+  * seeded-050.
+* **22 rule-A flips** in 14 suites of the shape `{ ? (a: T, b: U), * tstr
+  => … }`: seeded-000 ×3, -004, -008 ×2, -012 ×2, -016 ×3, -024, -028 ×3,
+  -044, -048, -052, -056 ×3 and -068. Here a present `a` or `b` with a
+  wrong value is cut-failed through the `?`. Ruby accepts these (class RC).
+
+Other changes:
+
+* The D271 suite is true under `reference` and false under `rfc`. Suites
+  gain an `options` field.
+* The 26 `snugSchemaError` suites now compile.
+* Staged `dependsOn: ["D270"]` cases become gated.
+
+**Migration:**
+
+* **Format 2.0**, with 1.x refused (program-2 §1).
+* **Compile options** `cuts` (default `reference`) and `groupWords`, both
+  part of SOURCE_KEY.
+* **Corpus additions:**
+  * every probe in §20.15, each with its basis tag;
+  * App. A and App. H, with the reputon verbose and compact forms on the
+    same data;
+  * the §3.5.3, §3.5.4 and §3.11 examples;
+  * zero-length, saturated-minimum and lock-in cases;
+  * C2's FAIL-in-ring case;
+  * X1's center recursion and X5's diagnostic-pair case;
+  * the S-versus-T regression pair (X17);
+  * explicit-arena `group_limit` cases;
+  * witness cases for every §20.9 rule.
+* **Docs:** superseded notes in §4.3, §4.4 and §6; cddl-support.md;
+  conformance.md D012, D036, S28 and D021/S26 re-audited after landing.
+* **Order of work:** P8.4, including §19.5's charge-order amendment (D277);
+  then the PEG oracle; then compiler and format; then the VM buffer driver;
+  then sessions; then the corpus; then docs.
+
+### 20.14 Review disposition (revision 1 → revision 2)
+
+**A** = accepted with the change shown. **R** = rebutted, with the reason.
+**M** = settled by a manager decision of 2026-11-04.
+
+| Finding | Disposition | Where |
+| --- | --- | --- |
+| C1 BLOCKER: reference cuts break name transparency | A/M: `reference` = rule A; new Ruby class RC with App. H as evidence; 22 extra corpus flips listed | §20.2, §20.4, §20.13, D273 |
+| C2 MAJOR: B needs maxlen(FAIL) = 0 | A: syntactic `ml`, `ml(FAIL) = 0`, `0·∞ = 0`; read-bound lemma stated; verifier recomputes | program-2 §3.2, §20.5 |
+| C3 MAJOR: F fold false | A: exact fold table, with `SEQ(M, FAIL)` instead of `FAIL` when the member has a cut (keeps `cut`/commit outcomes) | program-2 §3.3 |
+| C4 MAJOR: T permutation absent on the canonical path | A/M: T sorts its own records, charged identically on every route | program-2 §6.5 |
+| C5 MAJOR: `group_limit` refuses valid data at defaults | A/M: arena bounded by `A_max` from limits and grown on demand; code 44 only under an explicit limit | program-2 §9.4, §20.6 |
+| C6 App. C existential vs R8/R15 | A: R8/R15 labelled policy; tension recorded; W6 | §20.3 |
+| C7 F stop-at-taker | A | program-2 §6.2 |
+| C8 witness gaps; forced-tier gate | A: score before undo; cut diagnostic predicate; leftover reason for non-literal members; forced-tier mode and gate | program-2 §8, §20.9 |
+| C9 relaxed queries degrade witnesses / add EXT calls | A: documented, deterministic | §20.9 |
+| C10 T can be Θ(n²) | A: stated; every record examined is charged | §20.7 |
+| C11 §3.11 basis misattributed | A: R5 basis corrected; W5 | §20.3 |
+| C12 warnings | A: W1–W6 | §20.11 |
+| C13 root as CALL target; `0*0`; nullable callees; growing generics | A | program-2 §3, §4; R16 |
+| C14 R19 scope; surprises | A: R19 added; M09, M20, M30 and typeset-key commits documented in the table | §20.3, §20.15 |
+| C15 superset lemma holds; test assertion | A | §20.5, program-2 §4 |
+| C16 charge determinism | A: per-element stepping incl. streaks; a dying block charged at its element | program-2 §5.1 |
+| C answers P1–P4 | A: memo reserved; fixed stride Rₜ; no `group_limit` at defaults; key-id → record table kept | program-2 |
+| X1 BLOCKER: recursive activation storage | A: all frames of recursive programs live in the arena behind a 3-word activation record; bound `ACT_WORDS` per consumed item | program-2 §5.3 |
+| X2 BLOCKER: 8-word machine state holds 9 fields | A: exact block and frame layouts; formulas derived from them | program-2 §5.2, §6.3 |
+| X3 BLOCKER: key lookup assumes ascending keys | A: full-range search and `named` lookup once unordered; 1 unit per probe on every route | program-2 §6.1 |
+| X4 BLOCKER: canonical precharge vs session charging | A: one logical order; duplicate-check units charged at the map's end on every route. **Needs a §19.5 amendment** (P8.4 owns §19), recorded as requirement D277 | §20.6, program-2 §10 |
+| X5 MAJOR: F vs generic cut witness | A: diagnostic pair = smallest wire index in scope; T does a charged scan | program-2 §8 |
+| X6 MAJOR: nested occurrence collapse | A: fold table (as C3) | program-2 §3.3 |
+| X7 MAJOR: large-minimum rewrite contradicts R4 | A: minima saturate at 2^24 and are not lowered to `FAIL`; `0*0` → `EMPTY`; saturating arithmetic | §20.2, program-2 §3 |
+| X8 MAJOR: memo has no EOF row | A/M: memo withdrawn from 2.0; a future minor needs sentinel rows and a capability rule | §20.5, program-2 §1 |
+| X9 MAJOR: rfc cut lifetime inconsistent | A: commitment epochs per attempt; `{* (a: int)}` / `{a: 1}` accepted; called snug's formalisation, not settled RFC text | §20.2 |
+| X10 MAJOR: linear-time claim false | A/M: withdrawn; proven contracts only | §20.7 |
+| X11 MAJOR: arena bound and resource offsets | A: `A_max` sums records, end-run and activations over open containers; offsets at the item head or container head; charge before allocation | program-2 §8, §9.4 |
+| X12 MAJOR: map trace metadata; S import | A: per-frame score/event fields; S imports `ucount`/`ukey`/`ucut` | program-2 §6.3–6.4, §8 |
+| X13 verifier cost | A: cost stated in words and bitset ops; verify budget raised; SCC fixed points | program-2 §3.1 |
+| X14 oracle cannot certify mechanisms | A: four expectation kinds; metamorphic, forced-tier, split and resource gates; tag unwrap in the oracle and in R17 | §20.12 |
+| X15 superset lemma obligations | A | §20.5 |
+| X16 B is a conservative bound | A: called an upper bound, not exact | program-2 §3.2 |
+| X17 F/S equivalence conditions; S-vs-T tests | A | §20.5, §20.13 |
+| X R-audit (R1–R18) | A: bases separated into text vs policy; R5 tension; R7 support only; R15 tension; R16 policy; R17 tag unwrap; R18 named groups | §20.3 |
+| X Q1: keep the Ruby-compatible reference mode, do not quietly replace it with rule A | **R/M**: rule A adopted openly, not quietly. Name transparency (App. C, App. H) is decisive, and the Ruby difference is recorded as class RC with 7 probes. Renaming the mode is put to the owner (D273) | §20.2, §20.4 |
+| X Q2–Q16 | A as the corresponding findings. Q3: EC order kept, but the coupling to §19.4 is dropped (manager decision 2). Q11: distinct code kept, precedence defined. Q12: prices provisional until measured | — |
+| X Format Q1–Q4 | A: memo reserved with a capability rule; fixed stride keeping dead blocks; code 44 with precedence; `index[n_named]` with −1 initialisation | program-2 |
+
+Only X Q1 is rebutted, and that is by the manager's decision, with the
+reason stated above. No other finding is rejected.
+
+### 20.15 Probe record (2026-11-04, revision 2)
+
+Columns:
+
+* **ref**: §20.2 with `cuts: 'reference'` (rule A) and EC pick order. The
+  prototype sorts keys by their encoded bytes, which equals EC order for
+  these keys.
+* **rfc**: `cuts: 'rfc'` (commitment epochs).
+* **DNF**: revision 1's reference mode, i.e. the D021-DNF and Ruby-like
+  reading.
+* **old**: snug today (format 1).
+* **Ruby**: `cddl` 0.12.14.
+* **Rust**: cddl-rs 0.10.7.
+
+✓ is valid and ✗ invalid. The Notes column gives Ruby's deviation class
+(§20.4) and marks *flips* (old ≠ ref) and *was refused* (format 1 refused
+the schema). The root rule is `r`. Data is shown in wire order, which is
+canonical except for M06.1. A10.1's Ruby run hung and was killed at the
+timeout.
+
+| Case | Schema | Data | ref | rfc | DNF | old | Ruby | Rust | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A01.0 | `r = [* uint, uint]` | `[1]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A01.1 | `r = [* uint, uint]` | `[1,2]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A02.0 | `r = [? uint, 2*3 uint, tstr]` | `[1,2,"x"]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A02.1 | `r = [? uint, 2*3 uint, tstr]` | `[1,2,3,"x"]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A03.0 | `r = [(int) // (int, int)]` | `[1,2]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A03.1 | `r = [(int) // (int, int)]` | `[1]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A04.0 | `r = [(int, int) // (int)]` | `[1]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A04.1 | `r = [(int, int) // (int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A05.0 | `r = [2*3 uint, uint]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A05.1 | `r = [2*3 uint, uint]` | `[1,2,3,4]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A05.2 | `r = [2*3 uint, uint]` | `[1,2]` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| A06.0 | `r = [* (tstr, uint)]` | `["a",1,"b"]` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| A06.1 | `r = [* (tstr, uint)]` | `["a",1]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A07.0 | `r = [(* int, tstr) // (* int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A07.1 | `r = [(* int, tstr) // (* int)]` | `[1,2,"x"]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A08.0 | `r = [* ((* int, tstr) // int)]` | `[1,2,3]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A08.1 | `r = [* ((* int, tstr) // int)]` | `[1,"x",2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A09.0 | `r = [2*2 (? int)]` | `[]` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
+| A09.1 | `r = [2*2 (? int)]` | `[1]` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
+| A10.0 | `r = [* (? int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A10.1 | `r = [* (? int)]` | `["x"]` | ✗ | ✗ | ✗ | ✗ | hang | ✗ | Ruby RZ |
+| A11.0 | `r = [* (int // tstr), int]` | `[1,"a"]` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| A12.0 | `r = [+ uint, * uint, uint]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A13.0 | `r = [uint, ? (uint, tstr), uint]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A13.1 | `r = [uint, ? (uint, tstr), uint]` | `[1,2,"x",3]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A13.2 | `r = [uint, ? (uint, tstr), uint]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| A14.0 | `r = [* (int, int), 3*3 uint]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A14.1 | `r = [* (int, int), 3*3 uint]` | `[1,2,3,4,5]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A15.0 | `r = [? (int, int), int]` | `[1,2]` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| A15.1 | `r = [? (int, int), int]` | `[1,2,3]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A16.0 | `r = [(int, tstr) // (int, int)]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A17.0 | `r = [int, ? g]; g = (int, ? g)` | `[1,2,3]` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RR |
+| A18.0 | `r = [g]; g = (0, ? g, 1)` | `[0,0,1,1]` | ✓ | ✓ | ✓ | refused (group_recursion) | ✗ | ✓ | Ruby RR; was refused |
+| A18.1 | `r = [g]; g = (0, ? g, 1)` | `[0,1,1]` | ✗ | ✗ | ✗ | refused (group_recursion) | ✗ | ✗ | was refused |
+| A19.0 | `r = [* any, int]` | `[1]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A20.0 | `r = [int] / [int, int]` | `[1,2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| A21.0 | `r = [* (a: int, b: int)]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| A22.0 | `r = [1*3 uint, 2*2 uint]` | `[1,2,3]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| A22.1 | `r = [1*3 uint, 2*2 uint]` | `[1,2,3,4]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F01.0 | `r = { ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }` | `{"a":1,"b":2,"c":"x"}` | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | Ruby RK; flips |
+| F01.1 | `r = { ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }` | `{"a":"x","c":"x"}` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | Ruby RK; flips |
+| F02.0 | `r = [? uint, 2*3 uint, tstr]` | `[1,1,"x"]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F03.0 | `r = [* (int, int), 3*3 uint]` | `[1,1,1]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F03.1 | `r = [* (int, int), 3*3 uint]` | `[1,1,1,1,1]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F03.2 | `r = [* (int, int), 3*3 uint]` | `[1,1,1,1,1,1,1]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F04.0 | `r = bstr .cborseq [? uint,2*3 uint,tstr]` | `h'01026178'` | ✗ | ✗ | ✗ | ✓ | error | ✗ | Ruby RX; flips |
+| F05.0 | `r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }` | `{"a":"y","c":0}` | ✗ | ✗ | ✗ | refused (map_overlap) | ✗ | ✗ | was refused |
+| F05.1 | `r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }` | `{"a":"x","c":1}` | ✗ | ✗ | ✗ | refused (map_overlap) | ✗ | ✗ | was refused |
+| F06.0 | `r = [* ((uint / tstr), tstr), 2*4 (uint / tstr)]` | `[3,"y"]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F07.0 | `r = [? tstr, 0*2 (uint / tstr), 0..2]` | `[0]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| F08.0 | `r = {group2}; group2 = (? ab: a / b // cd: c / d); a = 1 b = 2 c = 3 d = 4` | `{"cd":3}` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| H01.0 | `r = {rater-value, ? conf-value, * ext-value}; rater-value = (rater: text); conf-value = (confidence: uint); ext-value = (text => any)` | `{"rater":"x","confidence":"bad"}` | ✗ | ✗ | ✓ | refused (map_group_occurrence) | ✓ | ✗ | Ruby RC; was refused; D021-DNF differs |
+| H02.0 | `r = {rater: text, ? confidence: uint, * text => any}` | `{"rater":"x","confidence":"bad"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M01.0 | `r = {? "optional-key" => int, * tstr => any}` | `{"optional-key":"nonsense"}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RL |
+| M02.0 | `r = {? "optional-key" ^=> int, * tstr => any}` | `{"optional-key":"nonsense"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M03.0 | `r = {? optional-key: int, * tstr => any}` | `{"optional-key":"nonsense"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M03.1 | `r = {? optional-key: int, * tstr => any}` | `{"z":2,"optional-key":1}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| M04.0 | `r = {* tstr => any, "a" => int}` | `{"a":1}` | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | flips |
+| M05.0 | `r = {* tstr => any, ? a: int}` | `{"a":"x"}` | ✓ | ✓ | ✓ | refused (map_cut) | ✗ | ✗ | Ruby RL; was refused |
+| M06.0 | `r = {int => int, int => 6}` | `{3:5,4:6}` | ✓ | ✓ | ✓ | refused (map_overlap) | ✓ | ✗ | was refused |
+| M06.1 | `r = {int => int, int => 6}` | `{4:6,3:5}` | ✓ | ✓ | ✓ | refused (map_overlap) | ✗ | ✗ | Ruby RO; was refused |
+| M07.0 | `r = {* (a: int, b: int)}` | `{"a":1}` | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | Ruby RI |
+| M07.1 | `r = {* (a: int, b: int)}` | `{"a":1,"b":2}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| M08.0 | `r = {? (a: int, b: int)}` | `{"a":1}` | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | Ruby RI |
+| M09.0 | `r = {? (a: int, b: int), * tstr => any}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | rfc differs |
+| M10.0 | `r = {(? a: int) // (b: int)}` | `{"b":1}` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| M11.0 | `r = {(a: int) // (a: int, b: int)}` | `{"a":1,"b":2}` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
+| M12.0 | `r = {kind: "a", x: int // kind: "b", y: tstr}` | `{"y":"s","kind":"b"}` | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | rfc differs |
+| M12.1 | `r = {kind: "a", x: int // kind: "b", y: tstr}` | `{"y":"s","kind":"c"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M13.0 | `r = {+ (email: tstr // phone: tstr)}` | `{"email":"a","phone":"b"}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| M13.1 | `r = {+ (email: tstr // phone: tstr)}` | `{}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M14.0 | `r = {2*2 (? a: int)}` | `{}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
+| M14.1 | `r = {2*2 (? a: int)}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | Ruby RZ |
+| M15.0 | `r = {* tstr => int, * tstr => tstr}` | `{"a":1,"b":"x"}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RK |
+| M16.0 | `r = {(* tstr => int) // (* tstr => tstr)}` | `{"b":"x"}` | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | Ruby RK; flips |
+| M16.1 | `r = {(* tstr => int) // (* tstr => tstr)}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| M17.0 | `r = {1*2 tstr => int}` | `{"a":1,"b":2,"c":3}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M18.0 | `r = {* (a: int, b: int), * tstr => any}` | `{"a":"x"}` | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | Ruby RC; flips; D021-DNF differs |
+| M18.1 | `r = {* (a: int, b: int), * tstr => any}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | rfc differs |
+| M19.0 | `r = {? ((a: int) // (b: int)), * tstr => any}` | `{"a":"x"}` | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | Ruby RC; flips; D021-DNF differs |
+| M20.0 | `r = {(a: int, b: int) // (* tstr => any)}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | rfc differs |
+| M21.0 | `r = {"a" => int, * tstr => any}` | `{"a":"x"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M22.0 | `r = {? "a" => int, * tstr => any}` | `{"a":"x"}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RL |
+| M23.0 | `r = {* tstr ^=> uint, * any => any}` | `{"a":"x"}` | ✗ | ✗ | ✗ | refused (map_cut) | ✗ | ✗ | was refused |
+| M23.1 | `r = {* tstr ^=> uint, * any => any}` | `{1:"x"}` | ✓ | ✓ | ✓ | refused (map_cut) | ✓ | ✗ | was refused |
+| M24.0 | `r = {1*2 tstr ^=> uint, * tstr => tstr}` | `{"a":1,"b":2,"c":"x"}` | ✓ | ✓ | ✓ | refused (map_cut) | ✓ | ✗ | was refused |
+| M24.1 | `r = {1*2 tstr ^=> uint, * tstr => tstr}` | `{"a":"x","b":1,"c":2}` | ✗ | ✗ | ✗ | refused (map_cut) | ✗ | ✗ | was refused |
+| M25.0 | `r = {a: int, ? b: int, * tstr => tstr}` | `{"a":1,"b":"x"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M26.0 | `r = {a: int, $$x}` | `{"a":1}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M27.0 | `r = {a: int, * $$x}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| M28.0 | `r = {(a: int // b: int), (a: int // b: int)}` | `{"a":1,"b":2}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| M28.1 | `r = {(a: int // b: int), (a: int // b: int)}` | `{"a":1}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |  |
+| M29.0 | `r = {* (a: int // b: tstr)}` | `{"a":1,"b":"x"}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| M30.0 | `r = {? (a: int, b: int), a: int}` | `{"a":1}` | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | Ruby RI; rfc differs |
+| M31.0 | `r = {(kind: "a", x: int) // (kind: "b")}` | `{"x":1,"kind":"b"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |  |
+| M32.0 | `r = {? 1 => int, ? (5 => bstr // 6 => bstr)}` | `{5:h'00',6:h'00'}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M32.1 | `r = {? 1 => int, ? (5 => bstr // 6 => bstr)}` | `{6:h'00'}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| M33.0 | `r = {? a: int, ? a: tstr}` | `{"a":"x"}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| M34.0 | `r = {? "a" => int, ? "a" => tstr}` | `{"a":"x"}` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | Ruby RL; flips |
+| M35.0 | `r = {* int => tstr, 1 => tstr}` | `{1:"x"}` | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | flips |
+| N01.0 | `r = {? (a: int), * tstr => any}` | `{"a":"x"}` | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | Ruby RC; flips; D021-DNF differs |
+| N02.0 | `r = {* (a: int), * tstr => any}` | `{"a":"x"}` | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | Ruby RC; flips; D021-DNF differs |
+| N03.0 | `r = {(a: int) // (* tstr => any)}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | rfc differs |
+| N04.0 | `r = {? ("a" => int), * tstr => any}` | `{"a":"x"}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| N05.0 | `r = {(a: int, b: int) // (a: tstr)}` | `{"a":"x"}` | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | rfc differs |
+| N06.0 | `r = {? (a: int, b: tstr), * tstr => any}` | `{"a":1,"b":2}` | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | Ruby RC; flips; D021-DNF differs |
+| N07.0 | `r = {a: int // b: int}` | `{"a":1,"b":2}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| N08.0 | `r = {* tstr => int, ? "a" => tstr}` | `{"a":"x","b":1}` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Ruby RK |
+| N09.0 | `r = {+ a: int}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| N10.0 | `r = [* int, ? tstr, * int]` | `[1,"x",2]` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| R01.0 | `r = {* (a: int)}` | `{"a":1}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
+| R02.0 | `r = {* tstr => int, ? "a" ^=> tstr}` | `{"a":1}` | ✓ | ✓ | ✓ | refused (map_cut) | ✗ | ✗ | Ruby RL; was refused |
+| R03.0 | `r = {* tstr=>any, (a:int // b:int)}` | `{"a":1}` | ✗ | ✗ | ✗ | refused (map_cut) | ✗ | ✓ | was refused |
+| R04.0 | `r = {* tstr=>any, ?(a:int,b:int)}` | `{"a":"x"}` | ✓ | ✓ | ✓ | refused (map_cut) | ✓ | ✗ | was refused |
+| R05.0 | `r = {+ tstr => int, ? (a: int)}` | `{"z":1}` | ✓ | ✓ | ✓ | refused (map_cut) | ✓ | ✓ | was refused |
+| R06.0 | `r = {2*2 (+ int => int)}` | `{"1":1}` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
+| R07.0 | `r = {? (a: tstr, b: tstr), * tstr => any}` | `{"a":3,"b":3}` | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | Ruby RC; flips; D021-DNF differs |
+
+### 20.16 Remaining questions
+
+1. **D271 (owner).** Should `reference` (rule A) or `rfc` be the default,
+   and should `reference` be renamed (for example to `branch`), now that it
+   is no longer the reference tools' behaviour?
+2. **P8.4 (§19.5 owner).** Adopt D277's charge point: the deferred
+   duplicate-check units charged at the map's logical end on the canonical
+   route too.
+3. **Review.** Prove or break the A0/A1 linear bound sketch (§20.7).
+4. **Measurement before adoption.** PEG step, record and sort prices (D241
+   method), and the cost of the buffer route's single re-run on arena
+   overflow (program-2 §13).

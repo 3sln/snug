@@ -1,424 +1,672 @@
-# snug — Program format 2.0 (draft)
+# snug — Program format 2.0 (draft, revision 2)
 
-Status: **draft for independent review (2026-11-04)**. Not implemented,
-not frozen, not owner-approved. It implements architecture §20 (PEG group
-semantics, D270, D271) on paper. It is a **delta** against
-[program.md](program.md) (format 1.1): every section, field, rule and charge
-not mentioned here is unchanged, including leaves other than ARRAY/MAP,
-typesets, literal keys, regexps, closure sets, EXT and the scanner block.
-When it is accepted it is merged into program.md and this file is deleted.
+Status: **draft revision 2 (2026-11-04)**. This revision answers the two
+independent reviews: `docs/reviews/2026-11-04-peg-claude.md` ("C#") and
+`docs/reviews/2026-11-04-peg-codex.md` ("X#"). The disposition table is in
+architecture §20.14. Nothing here is implemented, frozen or owner-approved
+(D272–D279).
+
+This document implements architecture §20 (PEG group semantics, D270, D271)
+on paper. It is a **delta** against [program.md](program.md) (format 1.1).
+Every section, field, rule and charge not mentioned here is unchanged. That
+includes leaves other than ARRAY/MAP, typesets, literal keys, regexps,
+closure sets, EXT and the scanner block. When this draft is accepted it is
+merged into program.md and this file is deleted.
+
+**What revision 2 changes:**
+
+* memo cells removed and their fields reserved (C8, X8, manager decision);
+* exact block and frame layouts (X2);
+* a contract for storing recursive activations (X1);
+* key lookup on unordered input (X3);
+* syntactic lengths with `ml(FAIL) = 0`, and a read-bound lemma (C2, X16);
+* an exact fold table for map normalisation (C3, X6);
+* F's stop-at-taker rule, and S importing its unnamed-pair state (C7, X12);
+* T sorts its own records (C4);
+* large minima stored saturated instead of lowered to FAIL (X7);
+* the arena sized from the limits and grown on demand, with `group_limit`
+  only under an explicit limit (C5, X11);
+* one charging order on every route (X4);
+* the verifier's cost stated (X13);
+* a forced-tier test mode (C8).
 
 ---
 
-## 1. Version and compatibility (D084)
+## 1. Version and compatibility (D084, D279)
 
-* `FORMAT_VERSION` (header word 1) = `0x00020000` (major 2, minor 0). A
-  format 2 loader refuses every 1.x Program (1, `0x00010001`). A 1.x loader
-  refuses 2.0 (its check is exact).
-* **Why a major version.** Format 1's map tables (S5–S8: residual groups,
-  factors, pools, alternatives) and array automata (S9/S10 with counters)
-  encode existential semantics. Their words cannot be reinterpreted under
-  PEG, and D084 says a change "altering the meaning of existing Program
-  words bumps the major". A 1.2 that added new ARRAY/MAP leaf kinds beside
-  the old ones would keep the existential engine in every VM, only to run
-  old Programs whose meaning differs from recompiling the same text
-  (architecture §20.12). snug is 0.0.0, so no external store holds
-  Programs.
+* `FORMAT_VERSION` (header word 1) = `0x00020000`. A format 2 loader refuses
+  every 1.x Program, and a 1.x loader refuses 2.0.
+* **Why a major version.** S5–S10 change meaning: format 1 encodes
+  existential map tables and counter automata. The old engine is removed
+  too. A 1.2 that added new ARRAY/MAP kinds beside the old ones is possible,
+  but it keeps both engines and their compatibility cost. The reason for the
+  bump is the deliberate support policy (snug is 0.0.0, and no external store
+  holds Programs). It is not that recompiling the same text would give a
+  different result (X Q13).
+* A later 2.x minor may give the reserved memo fields a meaning, but only
+  with a loader capability rule. A 2.0 loader refuses any Program with a
+  non-zero reserved field (§3), so it can never run an unsupported memo
+  Program by accident.
 * **SOURCE_KEY preimage** (program.md §13.3, D039, D242). The format version
-  element becomes 2. The option list gains two values, `cuts` (0 reference,
-  1 rfc) and `pegWords` (the arena limit, default applied). Old cache
-  entries therefore never match.
+  element becomes 2. The option list gains `cuts` (0 reference, 1 rfc) and
+  `groupWords` (−1 when not given). Old cache entries therefore never match.
 
 ## 2. Header changes
 
 | Word | Format 1.1 | Format 2.0 | |
 | --- | --- | --- | --- |
 | 1 | `FORMAT_VERSION` | `0x00020000` | [V] |
-| 6 | `FLAGS` bits 0–4 | unchanged; **bit 5** `CUTS_RFC` (the Program was compiled with `cuts: 'rfc'`); **bit 6** `ARENA` (some ARRAY leaf is tier A2 or some MAP leaf is tier T, §5.4/§6.3) | [D] for bit 6; [V] for bit 5 |
-| 19 | `N_GROUPS` | `N_PEGS`: PEG programs in S5/S6 | [V] |
-| 29 | `G_EMPTY` | reserved, 0 | [V] |
-| 41 | reserved | `LIM_PEG_WORDS`: compiled group-arena limit in words (default 65 536, hard maximum 2^24); 0 when bit 6 is clear | [V] |
-| 42–61 | section offsets | same twenty sections; S5–S10 are redefined below | [V] |
-
-Per-call limits may lower `LIM_PEG_WORDS` (limits array word 10, §9.3).
+| 6 | `FLAGS` bits 0–4 | unchanged; **bit 5** `CUTS_RFC`; **bit 6** `ARENA` (some ARRAY leaf is A2 or some MAP leaf is T) | bit 5 [V], bit 6 [D] |
+| 19 | `N_GROUPS` | `N_PEGS` | [V] |
+| 29 | `G_EMPTY` | `R_ITEM_MAX`: the maximum, over closure sets R, of the sum of the record words of the A2/T leaves in R (§9.4) | [D] |
+| 41 | reserved | `LIM_GROUP_WORDS`: an explicit compiled arena limit in words, or 0 for none (then the derived bound of §9.4 applies) | [V] |
+| 63 | reserved | `ACT_WORDS`: the maximum, over recursive PEG programs, of `n_calls · (8·depth + 3)`; the activation bound per consumed item (§5.3) | [D] |
 
 ## 3. Sections S5/S6: PEG programs
 
-S5 `PEG_INDEX` (1 word per program, [D]) and S6 `PEG_DATA`. One PEG
-program per array or map group (one per ARRAY leaf and one per MAP leaf; equal
-programs are hash-consed).
+S5 `PEG_INDEX` (1 word per program, [D]) and S6 `PEG_DATA` hold one
+program per array or map group. Identical programs are hash-consed.
 
 ```
-+0  kind              0 array, 1 map                                   [V]
-+1  n_nodes           ≥ 1; node 0 is the root                          [V]
-+2  n_kids                                                             [V]
-+3  tier              arrays 0 A0, 1 A1, 2 A2; maps 0 F, 1 S, 2 T      [D]
-+4  B                 arrays: ring bound (FL max), 0 unless tier A1;   [D]
-                      maps: 0
-+5  n_memo            memo columns (A2 only; else 0)                   [D]
-+6  depth             maximum non-CALL nesting depth of the tree       [D]
-+7  flags             bit 0 recursive (has CALL); bit 1 order-sensitive
-                      member (maps); bit 2 has a cut member            [D]
-nodes[n_nodes] × 5    op, a, b, c, d
-kids[n_kids]          node indices, referenced by SEQ and CHOICE
++0  kind            0 array, 1 map                                    [V]
++1  n_nodes         ≥ 1; node 0 is the root                           [V]
++2  n_kids                                                            [V]
++3  tier            arrays 0 A0, 1 A1, 2 A2; maps 0 F, 1 S, 2 T       [D]
++4  B               arrays: read-back bound (§3.2), 0 unless A1        [D]
++5  memo            reserved, must be 0                                [V]
++6  depth           max frames of one activation (§5.3)                [D]
++7  flags           bit 0 recursive; bit 1 order-sensitive member;
+                    bit 2 has a cut member                             [D]
++8  n_calls         CALL nodes                                         [D]
+nodes[n_nodes] × 5  op, a, b, c, d
+kids[n_kids]
 ```
 
 | op | Name | a | b | c | d | Semantics (arch §20.2) |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | `EMPTY` | – | – | – | – | succeed, consume nothing |
-| 1 | `FAIL` | – | – | – | – | fail (empty group choice, unplugged `$$g`) |
-| 2 | `ENTRY` | position p (< npos of the array table) | – | – | – | arrays: element i matched position p (bit p of record i) |
-| 3 | `MEMBER` | member id (< n_members of the map table) | min | max (INF) | cut 0/1 | maps: §20.2 member loop with occurrence min..max |
-| 4 | `SEQ` | first kid index | count ≥ 2 | – | – | thread |
-| 5 | `CHOICE` | first kid index | count ≥ 2 | memo column or −1 | – | prioritised, locks in |
-| 6 | `REP` | child node | min | max (INF, ≥ 1, ≥ min) | memo column or −1 | greedy; zero-length iteration ends it, satisfied |
-| 7 | `CALL` | target node (the root of a recursive group, inside this program) | – | – | – | `run(target)` |
+| 0 | `EMPTY` | – | – | – | −1 | succeed, consume nothing |
+| 1 | `FAIL` | – | – | – | −1 | fail |
+| 2 | `ENTRY` | position p | – | – | −1 | element at idx matched position p |
+| 3 | `MEMBER` | member id | min | max | −1 | member loop with occurrence min..max (the cut flag is in the member record) |
+| 4 | `SEQ` | first kid | count ≥ 2 | – | −1 | thread |
+| 5 | `CHOICE` | first kid | count ≥ 2 | – | −1 | prioritised; cut outcomes per arch §20.2 |
+| 6 | `REP` | child | min | max (≥ 1, ≥ min, INF) | −1 | greedy; a zero-length success satisfies the minimum |
+| 7 | `CALL` | target node | – | – | −1 | `run(target)` |
 
-Kinds of memo column: for `CHOICE` and finite-max `REP`, a result cell (0
-unknown, 1 fail, 2 + consumed length). For `REP` with max INF, a link cell
-pair (2 columns: end, iterations saturated at min). Columns are numbered
-0..n_memo−1 in node order.
+Field d is reserved (it held the memo column) and must be −1 [V].
 
-**Invariants [V].** Node and kid indices are in range. The tree is acyclic
-except through `CALL`, and every `CALL` target is a node of the same
-program. Each non-root node is referenced exactly once (as a kid, a `REP`
-child, or a `CALL` target, which may be referenced more than once). `ENTRY`
-appears only in array programs and `MEMBER` only in map programs.
-0 ≤ min ≤ max. min < 2^24 or the node is `FAIL` (D035).
+**Counts (X7).** `REP` and `MEMBER` store min = min(lo, 2^24), and store max
+= INF when hi ≥ 2^24. No count is lowered to `FAIL`. Consumption cannot
+reach 2^24, because entries ≤ 2^24 − 1. A saturated minimum is therefore
+unsatisfiable except through the zero-length rule, which stays available.
+`0*0 g` lowers to `EMPTY`, so a `REP` record always has max ≥ 1.
 
-**Derived [D].** The verifier recomputes in O(nodes), with the formulas in
-architecture §20.5: nullable, minimum and maximum length (arrays: elements;
-maps: pairs, max INF for unbounded members), FL, B and the array tier;
-`depth`; map tier (§6.3); order-sensitivity (a `MEMBER` whose key is a
-typeset and whose max is finite); **re-entrancy** and **multi-start**
-(below), and from them the memo columns. The verifier also checks the PEG
-well-formedness condition: no `CALL` cycle is reachable through nullable
-prefixes (no left recursion).
+**Invariants [V]:**
 
-* *multi-start(N)*: N can be invoked at more than one index in one run. The
-  root is not. A `SEQ` child after a variable-length sibling, or below a
-  multi-start parent, is. A `REP` body with max ≥ 2 is. A `CHOICE`
-  alternative or `REP` body of a multi-start node is. Every node reachable
-  from a `CALL` target is.
-* *re-entrant(N)*: N can be invoked twice at the same index. Its parent is
-  re-entrant; or its parent is a multi-start `SEQ` and an earlier sibling
-  has variable length; or its parent is a multi-start `REP` with max ≥ 2
-  (iteration chains of two invocations can merge); or N is reachable from a
-  `CALL` target.
-* Memo columns (A2 only): a result column for each re-entrant `CHOICE` and
-  finite-max `REP`; a link pair for each multi-start `REP` with max INF.
+* every index is in range;
+* the graph is acyclic except through `CALL`;
+* every non-root node is referenced exactly once, as a kid or as a `REP`
+  child;
+* a `CALL` may target any node of the same program, the root included (C13);
+* `ENTRY` appears only in array programs and `MEMBER` only in map programs;
+* 0 ≤ min ≤ max.
 
-[S] (not checkable): the PEG program is the lowering of the schema group.
+### 3.1 Derived fields and how the verifier computes them (X13)
+
+The verifier recomputes every [D] field. Its cost is O(Program words +
+npos·W·(n_calls + 1)) word and bitset operations. The verify budget
+(program.md §11) is raised to `64·(PROGRAM_WORDS + POOL_BYTES/4 +
+npos·W·(n_calls + 1) + 1)` to cover it.
+
+Nullable, first and last sets over `CALL` are least fixed points, iterated
+one strongly connected component at a time. Each iteration only adds bits,
+so an SCC needs at most npos·(n_calls + 1) rounds. All length arithmetic
+saturates at INF.
+
+### 3.2 Syntactic lengths and the read bound (C2, X16)
+
+```
+ml(ENTRY) = 1          ml(EMPTY) = ml(FAIL) = 0
+ml(SEQ)   = Σ ml(kids) ml(CHOICE) = max ml(kids)
+ml(REP(lo,hi,g)) = hi · ml(g)   (0 · INF = 0)       ml(CALL) = INF
+FL(ENTRY) = FL(FAIL) = 0        FL(EMPTY) = −∞ (cannot fail)
+FL(SEQ(g₁…gₖ))   = max over j with FL(gⱼ) ≠ −∞ of ml(g₁…g_{j−1}) + FL(gⱼ)
+FL(CHOICE(g…))   = max FL(gⱼ); −∞ if some gⱼ cannot fail
+FL(REP(lo,hi,g)) = −∞ if lo = 0, else (lo − 1)·ml(g) + FL(g)  (0·INF = 0)
+FL(CALL)         = INF
+B = max over backtrack attempts of FL(attempted node), 0 if there are none.
+    The backtrack attempts are every REP's child (each iteration attempt,
+    including the last, failed one) and every CHOICE alternative except
+    the last.
+```
+
+`ml` is syntactic. `FAIL` counts 0, and an unsatisfiable minimum does not
+shrink a `REP`'s length.
+
+**Read-bound lemma.** Take any attempt of node g that starts at index s.
+Every record it reads has index ≤ s + ml(g). If the attempt fails, every
+record it reads has index ≤ s + FL(g). Also FL(g) ≤ ml(g).
+
+*Proof sketch* (structural induction):
+
+* A SEQ prefix that succeeds reads only within its own ml.
+* A child that fails reads only within its FL.
+* A REP's last, failing iteration starts at most at s + (hi − 1)·ml(g) and
+  reads within FL(g) ≤ ml(g).
+* A failed sub-attempt is undone, but its reads stayed within its own bound.
+
+So when the machine rewinds to the start s of a failed backtrack attempt of
+g, the newest record is ≤ s + FL(g) ≤ s + B. **B + 1 ring rows therefore
+suffice** in A1.
+
+B is a safe upper bound, not the minimal storage. X16's
+`[(* uint, tstr) // ()]` is classed A2 although constant memory would do.
+Over-classification never gives a wrong verdict. Ring access is still
+checked: a violation is an internal Program fault (not reason 44), never an
+out-of-range read.
+
+Tier: A0 iff B = 0; A1 iff 0 < B < INF and (B + 1)·W ≤ the ring-word limit;
+otherwise A2. A recursive program is always A2.
+
+### 3.3 Map normalisation (fold table) and tier [D] (C3, X6)
+
+The folds apply bottom-up, before tier selection, in both cut modes. Every
+row holds with cuts, under rule A and under rfc. The row marked * may fold
+to plain `FAIL` only when the member has no cut.
+
+| Before | After |
+| --- | --- |
+| `REP(lo, hi, MEMBER(1,1))` | `MEMBER(lo, hi)` |
+| `REP(lo, hi ≥ 1, MEMBER(0, INF))` | `MEMBER(0, INF)` |
+| `REP(0, hi ≥ 1, MEMBER(1, INF))` | `MEMBER(0, INF)` |
+| `REP(1, hi ≥ 1, MEMBER(1, INF))` | `MEMBER(1, INF)` |
+| `REP(lo ≥ 2, hi, MEMBER(k ≥ 1, INF))` | `SEQ(MEMBER(k, INF), FAIL)`; `FAIL`* when the member has no cut |
+| anything else | unchanged |
+
+So `{2*2 (+ int => int)}` becomes `SEQ(MEMBER(1,INF), FAIL)` and matches
+nothing, as PEG says. `{2* int => int}` is `MEMBER(2, INF)`, which differs.
+
+Tier:
+
+* **F** iff the normalised root is a `SEQ` of `MEMBER`s (or a single
+  `MEMBER`, or `EMPTY`) and no member is order-sensitive (a non-literal key
+  with a finite max);
+* else **S** iff every non-literal member is class R (at the root sequence,
+  max INF), no member is order-sensitive, and there is no `CALL`;
+* else **T**.
 
 ## 4. Sections S9/S10: array tables
 
-S9 `ARRAY_INDEX` [D], S10 `ARRAY_DATA`. One table per ARRAY leaf:
-
 ```
-+0  npos          ENTRY nodes of the program; ≤ 4 096                 [V]
-+1  W             (npos + 31) >> 5                                     [D]
-+2  peg           PEG program id (kind 0)                              [V]
++0  npos            ENTRY nodes; ≤ 4 096                              [V]
++1  W               (npos + 31) >> 5                                   [D]
++2  peg             program id (kind 0)                                [V]
 +3  reserved 0
-    first[W]      relaxed-automaton initial positions                  [D]
-    pos[npos]     typeset id per position                              [V]
-    follow[npos × W]  relaxed follow rows                              [D]
+    first[W]        relaxed initial positions                          [D]
+    pos[npos]       typeset id per position                            [V]
+    follow[npos × W] relaxed follow rows                               [D]
 ```
 
-There are no counters, no `accept` and no `nullable`: acceptance is the
-PEG's. `first` and `follow` are the relaxed automaton of architecture §20.5,
-computed from the PEG program. Because they are [D], a corrupt table cannot
-claim a smaller query than the lowering gives. The superset lemma itself is
-[S]. Bits ≥ npos are 0 [V]. `ENTRY` node p ↔ position p, a bijection [V].
+There are no counters, accept bits or nullable flag. `first` and `follow`
+are the relaxed automaton of arch §20.5. They include a bypass edge for
+every nullable `CALL` and an edge from each callee-last position to each call
+site's follow set (C13, X15).
+
+[S]: the lowering obligations of arch §20.5 (distinct generic
+instantiations, unwrap, `.cborseq` roots). Debug builds assert that every
+`ENTRY` test is of a position in Cᵢ (C15); a violation is an internal fault.
 
 ## 5. Array evaluation
 
 ### 5.1 Per element (live block)
 
-1. Candidates C = (first element) `first`, else ∪ over p ∈ A of
-   `follow[p]`, where A is the previous record. Query += typesets of C. This
-   is format 1's step without the counter clauses.
-2. The element is evaluated (child).
-3. Record r = {p ∈ C : typeset(p) matched}. A := r.
-4. Store r: A0, nothing more (A is the record); A1, ring slot i mod (B + 1);
-   A2, append to the item's arena record (§10.3), with the program's memo
-   cells set to 0.
-5. If r = ∅: run the machine to termination with record i treated as given
-   and no later record (it cannot ask for one). Record the witness (§8).
-   The block dies.
-6. Else run the machine until it asks for record i + 1 (suspend) or
-   terminates. A failure kills the block. A root success at e ≤ i also
-   kills it (`unexpected` at e).
+1. Candidates: C = `first` for element 0, otherwise ∪ over p ∈ A of
+   `follow[p]`. Add the typesets of C to the query. This is format 1's step
+   without counters.
+2. Evaluate the element.
+3. Record r = {p ∈ C : typeset(p) matched}. Set A := r.
+4. Store r. In A0, A is the record. In A1, write ring row i mod (B + 1). In
+   A2, write the item's arena record (§9.4).
+5. If r = ∅, run the machine to termination with no later record. The block
+   dies at this element, and those steps are charged here (C16).
+6. Otherwise, run the machine until it requests record i + 1 or terminates.
+   A failure, or a root success at e ≤ i, kills the block at this element.
 
-At the array end: if the machine is suspended, resume it with
-end-of-input (an `ENTRY` at index n fails), and run it to termination. The
-leaf matches iff the root succeeded at n.
+At the array's end, resume the machine with end-of-input (an `ENTRY` at n
+fails) and run it to termination. The leaf matches iff the root succeeded at
+n.
 
-### 5.2 The machine
+D044 streaks step the machine per element, exactly as above. A streak stops
+before any element whose machine run is anything other than the `[* T]`
+no-op (C16).
 
-State per block (8 words): `pc` (node), `idx` (current index), `sp` (stack
-top), `status` (running, suspended, succeeded, failed), `want` (the index it
-waits for), and the witness tracker (farthest event index, its kind, its
-position, and for E1 whether the record was empty). Stack frame (4 words):
-node, start index, counter (SEQ kid / CHOICE alternative / REP count), aux
-(REP iteration start; for memoisation, the frame's own start). `depth`
-frames are static, in the block. `CALL` frames go to the arena's downward
-stack (§10.3).
+### 5.2 Array block layout (X2)
 
-The machine executes `run` of architecture §20.2 exactly, in node order.
-Each of the following is one **step** (§12): entering a node at an index
-(every `ENTRY` test, every `SEQ` kid, every `CHOICE` alternative, every `REP`
-iteration's entry of its child, every `CALL`); a memo probe; a memo store; a
-link follow; a link rewrite during path compression; a rewind of `idx` to a
-backtrack point. An `ENTRY` that must wait for a record is charged once,
-when it is entered; resuming it costs nothing. A memo hit replaces the node's evaluation: one entry step
-plus one probe. A node whose index would be < i − B in tier A1 is
-impossible by the [D] B; the access is checked, and violating it fails the
-block, never reads out of range.
+| Offset | Field |
+| --- | --- |
+| +0 | `qindex` |
+| +1 | `alive` |
+| +2 | `nactive` (\|A\|) |
+| +3 | `status`: 0 running, 1 suspended, 2 succeeded, 3 failed |
+| +4 | `pc`: current node |
+| +5 | `idx`: current element index |
+| +6 | `sp`: frame count of the current activation |
+| +7 | `want`: index the machine waits for, or −1 |
+| +8 | `ev_idx`: farthest failure index, −1 for none |
+| +9 | `ev_kind`: 0 none, 1 E1, 2 E2, 3 E3; bit 8 set for E1 with an empty record |
+| +10 | `ev_off`: input offset of the event's element head (E1/E3), else the array head |
+| +11 | `act`: arena offset of the current activation record, −1 at top level |
+| +12 | `rec0`: arena offset of record 0 (A2) or the ring origin (A1); −1 for A0 |
+| +13 | `head`: the array's head offset (used for end-run and resource offsets) |
+| +14 | `active[W]`, then `cand[W]` |
+| … | `stack[4 · depth]` (non-recursive programs only) |
+| … | `ring[(B + 1) · W]` (A1 only) |
+
+An array frame is 4 words: `node, start, counter, aux`. `counter` is the SEQ
+kid, the CHOICE alternative or the REP count. `aux` is the REP iteration
+start.
+
+`ARRWORDS(a) = 14 + 2W + (recursive ? 0 : 4·depth) + (A1 ? (B+1)·W : 0)`.
+
+### 5.3 The machine and recursive activations (X1)
+
+The machine executes `run` of arch §20.2 in node order. Each of the
+following is one **step** (§10):
+
+* entering a node at an index. This covers each `ENTRY` test (charged once,
+  even if it then waits for a record), each SEQ kid, each CHOICE
+  alternative, each REP iteration's entry into its child, and each `CALL`;
+* each rewind of `idx`.
+
+**Activation contract.**
+
+* A non-recursive program keeps all its frames in the block's static stack
+  (`depth` frames).
+* A **recursive** program has no static stack. Every frame lives in the
+  arena's downward region.
+* A `CALL` pushes a 3-word activation record `{caller pc, caller act, frame
+  count}`. The callee's frames are pushed after it as they are created.
+* A return, success or failure, pops the callee's frames and the record, and
+  restores `act`, `sp` and `pc`. Unwinding a failed call pops the same way.
+* Suspension needs nothing extra, because the arena is part of the scratch.
+* Charges: 1 step for the `CALL`. Node entries already cover frame pushes and
+  pops. Nothing is ever copied.
+
+**Activation bound.** Left recursion is refused: the verifier rejects any
+`CALL` cycle reachable through nullable prefixes. So between two activations
+of one cycle on the live chain, at least one element is consumed on the live
+path, and a chain that consumes nothing contains at most `n_calls` calls.
+Live activations therefore number at most (consumed + 1) · n_calls. Each
+has at most `depth` frames of 8 words or fewer, plus the 3-word record.
+`ACT_WORDS` (header word 63) is that cost per consumed item; the total is
+at most `ACT_WORDS` per item consumed, plus one more `ACT_WORDS`.
 
 ## 6. Sections S7/S8: map tables
 
-S7 `MAP_INDEX` [D], S8 `MAP_DATA`. One table per MAP leaf:
-
 ```
 header (8):  peg  n_members  n_named  key_ts  slot_words  rec_words  n_root  flags
-members[n_members] × 4:  key id or −1, key typeset or −1, value typeset, class
+members[n_members] × 5:  key id or −1, key typeset or −1, value typeset, class, cut
 named[n_named] × 3:      key id, first naming member, naming count   (sorted by key id)
-namers[Σ counts]:        member ids, ascending, per named key
-root[n_root]:            the class-R members, in source order
+namers[Σ counts]:        member ids, ascending
+root[n_root]:            class-R members, source order
 ```
 
 | Field | Meaning | |
 | --- | --- | --- |
-| `peg` | PEG program id (kind 1) | [V] |
-| `key_ts` | union typeset of the non-literal members' key typesets, or −1 | [D] |
-| member `class` | 0 literal; 1 class R (non-literal, at the root sequence, max INF); 2 other non-literal | [D] |
-| `slot_words` | tier S: 1 (wire index) + ⌈namers_max/32⌉ (value bits of the naming members) + 2·⌈n_root/32⌉ (key and value bits of the class-R members); else 0 | [D] |
-| `rec_words` | tier T: 2 (key id; flags: consumed, unacceptable, rank present) + ⌈2·n_members/32⌉ (+1 rank when order-sensitive); else 0 | [D] |
+| `key_ts` | union of the non-literal members' key typesets, or −1 | [D] |
+| member `class` | 0 literal; 1 class R; 2 other non-literal | [D] |
+| member `cut` | 0/1 (`^ =>`, `name:`, `value:`) | [V] |
+| `slot_words` | S: 2 (wire index, pair offset) + ⌈namers_max/32⌉ + 2·⌈n_root/32⌉; else 0 | [D] |
+| `rec_words` | T: 2 (key id; flags: consumed, has-rank) + ⌈2·n_members/32⌉; else 0 | [D] |
 | `flags` | bit 0 order-sensitive; bit 1 has a cut member | [D] |
-
-A member is a literal-key member iff its key id ≥ 0 (then its key typeset is
-−1) [V]. Each `MEMBER` node's a is a member id, and every member is
-referenced by exactly one node [V]. The members naming key k are the
-literal members whose key id is k [D].
 
 ### 6.1 Per pair (live block), every tier
 
-1. Key id k by binary search (format 1 §8.3 step 2). Key query =
-   `key_ts`; the key is evaluated at d + 1 (keys never record a witness).
-2. Key matches: literal members naming k; non-literal members whose key
-   typeset matched.
-3. Value query = union of the value typesets of key-matching members. The
-   value is evaluated at d + 1.
-4. The pair's verdict = for each key-matching member, value matched or not.
-   **Unacceptable** if no member's key matched, or every key-matching
-   member rejected the value. Then the block dies here (witness rule M1, §8).
+1. **Key id (X3).** Every route already compares each key with the previous
+   one. While the map's keys have arrived strictly ascending, binary search
+   `[lo, N_KEYS)` as format 1 does. From the first key that does not ascend,
+   binary search the full range `[0, N_KEYS)`; the block flag `unordered` is
+   set and stays set for the rest of the map. The format-1 naming cursor is
+   used only while keys ascend. Once unordered, the naming record of k is
+   found by binary search in `named`. Both cases charge 1 per probe, so the
+   routes agree: they all see the same wire order.
+2. The key query is `key_ts`. Key matches are the naming members of k and
+   the non-literal members whose key typeset matched.
+3. The value query is the union of the value typesets of the key-matching
+   members.
+4. **Unacceptable** pair: no key matched, or every key-matching member
+   rejected the value. The block dies here (rule 3′).
 5. Tier action (§6.2).
 
 ### 6.2 Tiers
 
-* **F.** Pair-major. Members in source order; the first key-matching member
-  with count < max whose value matched takes the pair (count += 1). A
-  key-matching cut member with count < max that rejects the value records
-  the pair's wire index as its cut event, if it has none yet. The pair then
-  continues to later members (reference mode; in rfc mode a cut event is
-  `fail!`: the block fails at the end, with the same witness). A pair
-  nobody takes is unacceptable (step 4 already caught it) or skipped by
-  every non-cut member, and then it is leftover: the block fails at the end
-  with witness M2. End: for each member in source order, a cut event or
-  count < min fails, and the first such is the witness.
-* **S.** A pair whose key k is named writes slot k (wire index, value bits
-  of the naming members, key/value bits of the class-R members). Other
-  pairs go through the class-R members in source order as in F. End: run
-  the machine over the slots (§6.4), then closedness: every slot consumed.
-* **T.** Append the pair's record to the item's arena record (§10.3). End:
-  if order-sensitive and the map is marked (architecture §19.4), take the
-  deferred duplicate check's sort permutation as the pick order; run the
-  machine over the records (§6.4); then closedness: every record consumed.
+* **F (C7).** Walk the members in source order. At each member whose key
+  matches:
+  * if the value matched and count < max, take the pair (count += 1) and
+    **stop**;
+  * if the value was rejected, the member has a cut and count < max, record
+    a cut event (the first wire index per member) and continue. Under rule A
+    the member will fail; under rfc the map will fail;
+  * otherwise continue.
 
-### 6.3 Tier selection [D]
+  At the end, the first member in source order that has a cut event or
+  count < min fails the root (witness by §8). Under rfc, a cut member whose
+  key matched sets its `ukey` bit. F has no enclosing choice, so this
+  commitment has no further effect.
+* **S (X12).** A pair with a named key k writes slot k: the wire index, the
+  pair offset, the value bits of the naming members, and the key/value bits
+  of the class-R members. A pair with an unnamed key runs the F walk over
+  the class-R members only. Per class-R member it updates `ucount`, `ukey`
+  (a key matched) and `ucut` (the wire index of the first cut violation).
+  The machine runs at the map's end (§6.4).
+* **T.** Append the pair's record to the item's arena record (§9.4). At the
+  end, if the map has an order-sensitive member and is either `unordered` or
+  contained an EC-sensitive key (arch §19.2), the machine first sorts its
+  records (§6.5). Then it runs (§6.4) and checks closedness.
 
-F iff the root is a `SEQ` of `MEMBER`s (or a single `MEMBER`/`EMPTY`) and
-there is no order-sensitive member. Else S iff every non-literal member is
-class R and there is no order-sensitive member and no `CALL`. Else T.
+### 6.3 Map block layout (X2)
+
+| Offset | Field |
+| --- | --- |
+| +0 | `qindex` |
+| +1 | `alive` |
+| +2 | `cursor` (format-1 naming cursor) |
+| +3 | `status` |
+| +4 | `pc` |
+| +5 | `mark`: trail top of the current attempt |
+| +6 | `sp` |
+| +7 | `commits`: the rfc commitment epoch counter |
+| +8 | `npairs` |
+| +9 | bit 0 `unordered`, bit 1 `ecsens` |
+| +10, +11, +12 | the reported failure (§8): `fail_score`; `fail_evA` (kind << 16 \| member); `fail_evB` (pair index, or −1) |
+| +13, +14, +15 | `act` (recursive programs); `rec0` (T); `head` (map head offset) |
+| +16 | 4 words per member: `count`, `cutpair` (wire index or −1), `ucount`, `uflags` (bit 0 `ukey`; bits 8 and up hold `ucut` + 1) |
+| … | `stack[8 · depth]` (non-recursive programs) |
+| … | S: `slots[n_named · slot_words]`; T: `index[n_named]` (key id → record, −1 if absent) |
+
+A map frame is 8 words: `node, mark, counter, aux, commits0, score, evA,
+evB`. `commits0` is the epoch at the attempt's start (rfc). `score`, `evA`
+and `evB` hold the best failure seen among the frame's failed sub-attempts
+(§8).
+
+`MAPWORDS(m) = 16 + 4·n_members + (recursive ? 0 : 8·depth) + (S ?
+n_named·slot_words : 0) + (T ? n_named : 0)`.
 
 ### 6.4 The map machine
 
-Same frames and steps as §5.2, with `idx` replaced by the arena's trail
-mark. `MEMBER` evaluation:
+Frames and steps are as in §5.3, with `mark` in place of `idx`. A `MEMBER`
+looks at the unconsumed candidates in pick order (§6.5):
 
-* literal member: look up the slot/record of its key: 1 step for the
-  lookup, plus 1 to consume (push the pair on the trail);
-* non-literal member: examine unconsumed records or slots in pick order, 1
-  step each, consuming per §20.2 up to max;
-* rewind: pop the trail to the frame's mark, 1 step plus 1 per entry
-  popped.
+* **Literal member:** look up k's slot (S) or `index[k]` (T; filled at
+  arrival, −1 if absent; X Format Q4). That costs 1 step, and consuming the
+  pair costs 1 more.
+* **Non-literal member (T):** examine records in pick order until count =
+  max. It costs **1 step per record examined, consumed or not** (X10).
+* **Class-R member (S):** first import its saved unnamed-pair state:
+  `ucount` adds to count, `ukey` counts as a key match for rfc commitment,
+  and `ucut` is a cut violation. Then examine the named slots, 1 step each.
+* **Consume:** push the pair on the trail (1 step). **Rewind:** pop to
+  `mark`, 1 step plus 1 per entry popped.
 
-Under `CUTS_RFC`, a frame bit `committed` is set when a cut member's key
-matches. `CHOICE` and `REP` read it on failure, and `fail!` unwinds to the
-root without trying anything else.
+Cut outcomes (arch §20.2):
+
+* **Rule A** (reference): the member returns `cut`. `SEQ` and `REP`
+  propagate it. `CHOICE` absorbs it, remembers it, and tries the next
+  alternative; if no alternative succeeds, it raises `cut` again.
+* **rfc:** a cut key match increments `commits`. An attempt (a CHOICE
+  alternative or a REP iteration) that fails with `commits > commits0`
+  returns `fail!`, which unwinds to the map root. A value mismatch returns
+  `fail!` at once.
+
+### 6.5 Pick order and the T sort (C4)
+
+Pick order is ascending EC key order (arch §20.2, R8).
+
+F and S never need it. They have no order-sensitive member, so their results
+do not depend on it, and their diagnostics use wire order (§8).
+
+T needs it only when it has an order-sensitive member:
+
+* If the map is neither `unordered` nor `ecsens`, wire order already is EC
+  order and nothing is done.
+* Otherwise the machine heap-sorts a permutation of the records (n words in
+  the arena) by the keys' EC comparison. It uses kin's EC comparator over
+  the keys' DC bytes (buffer and canonical copy) or over the session's
+  retained key forms (§19.7).
+* Each comparison is charged ⌈min(len₁, len₂)/8⌉, at least 1 (the D241
+  quantum). The comparison sequence is a function of the record sequence,
+  so every route charges the same.
+* It does not use §19.4's permutation, so there is no coupling to the
+  scanner.
 
 ## 7. Leaves, closure, verifier
 
-* Leaf kinds 14 `ARRAY` and 15 `MAP` keep d0 = table id; masks are
-  unchanged. Closure children: ARRAY, every position typeset (as format 1);
-  MAP, every member's key typeset (if any) and value typeset (replacing
-  "every literal entry's value typeset; every key and value typeset of
-  every group its pools use").
-* Verifier additions (program.md §11): §3 invariants and derived fields,
-  §4 and §6 [V]/[D] fields, FLAGS bits 5–6, header word 41 ≤ 2^24, and
-  `LIM_PEG_WORDS` counted in step 5's byte cap.
+Leaf kinds 14 and 15 keep d0 = table id and keep their masks.
+
+Closure children: for ARRAY, every position typeset; for MAP, every member's
+key typeset (if any) and value typeset.
+
+Verifier: the §3 invariants; the §3.1–§3.3 derived fields; the §4 and §6
+fields; header words 29, 41 and 63; FLAGS bits 5–6; reserved fields equal to
+−1 or 0 as specified.
 
 ## 8. Errors and witness (replaces program.md §9.2 rules 3–5)
 
-New reason code **44 `group_limit`**: the group arena would overflow (a
-validator code like 48 `budget`; offset = the head of the element or pair
-whose record, trail entry or frame did not fit; path empty). Not skippable
-in sequences (architecture §18.4 is amended to list it beside `budget`).
+**Code 44 `group_limit`** is a validator code like 48 `budget`, and is not
+skippable.
 
-* **Rule 3′ (map pair, M1).** An unacceptable pair (§6.1 step 4) kills the
-  block. If no MAP block of the item is then live and the slot is empty:
-  `value` if some member's key matched, else `unexpected`; path to the
-  value. (This is format 1's rule with "a live alternative named the key"
-  read as "a member's key matched".)
-* **Rule 4′ (map end, M2).** The block that died last (at the end beats at
-  a pair; ties: lowest leaf id); its failure trace (architecture §20.8); `value`
-  with extra segment `KEY k`/`ANYKEY` (k if named by a member of this map)
-  or `missing` with extra `KEY id`/`ANYKEY`; or `unexpected`/`value` at the
-  first leftover in wire order. Offset: the map's head. A trace step costs
-  1 (§12).
-* **Rule 5′ (array, events).** The block that died last in walk order (ties:
-  lowest leaf id). Its tracker gives E2 (`missing`, extra `INDEX n`), E3
-  (`unexpected`, extra `INDEX e`) or E1 at i. For E1 with an empty record,
-  the slot is used if it was recorded at element i and not cleared since,
-  which always holds when this block was the item's last live block at i.
-  Otherwise `type` with extra `INDEX i`. Offset: E1/E3 the element's head
-  (kept in the tracker), E2 the array's head.
-* Rule 2 (clearing) applies after each element or pair while a block of the
-  item is live and not yet failed. A block whose machine failed at element
-  i keeps its tracker but no longer prevents clearing; the slot then holds
-  the witness only if every block failed.
+* **When.** Only when an explicit arena limit is set (`LIM_GROUP_WORDS` ≠ 0,
+  or limits word 10 ≥ 0) and an allocation would exceed it.
+* **Precedence.** Every allocation comes after its charge. If the charge
+  exhausts the budget, `budget` is reported and nothing is allocated.
+* **Offset.** An allocation made while processing an element or pair
+  reports that item's head. An allocation made during an end-run reports
+  the container's `head`. End-runs are the array end, the map end, the T
+  sort, trails, and activations created during an end-run.
+* **Inside an embedded sub-validation** the refusal is a resource outcome
+  for the whole document. It is never swallowed as an EMBED failure (X
+  Format Q3).
+
+**Rule 3′ (map pair, M1).** An unacceptable pair kills the block. If no MAP
+block of the item is live and the slot is empty, the witness is `value` if
+some member's key matched, else `unexpected`, with the path to the value.
+
+**Rule 4′ (map end, M2).**
+
+* **Failure events.** When a `MEMBER` fails, it records an event: score =
+  the trail length at that moment, before any undo; kind = `missing` or
+  `cut`; the member; the pair.
+* **Propagation.** A frame keeps the best event among its failed
+  sub-attempts (higher score wins; ties go to the earlier). A failing `SEQ`
+  passes up its failing child's event. A failing `CHOICE` passes up its best
+  event. A `REP` below its minimum passes up its failing iteration's event.
+  Rule A `cut` and rfc `fail!` pass up the event that raised them.
+* **Reporting.** The root's event is reported:
+  * `missing`: extra segment `KEY id` or `ANYKEY`;
+  * a cut: `value` at the **diagnostic pair**. That is the cut-violating
+    pair with the smallest wire index in the member's scope. The scope is
+    the pairs that were unconsumed when the member was entered and that it
+    would examine before reaching max if violations were skipped (all of
+    them when max is INF). T finds it with a diagnostic scan (1 step per
+    record). F and S already hold it in `cutpair`, `ucut` and their slots
+    (X5).
+* **Root success with leftovers.** Report the first leftover in wire order:
+  `value` if some member's key matched it and that member rejected its
+  value, else `unexpected`.
+* The offset is the map head. Each trace or scan step costs 1.
+
+**Rule 5′ (array).** Take the block that died last (ties: the lowest leaf
+id) and read its tracker:
+
+* E2: `missing` + `INDEX n`.
+* E3: `unexpected` + `INDEX e`.
+* E1 at i with an empty record: the slot, if it was recorded at element i
+  and not cleared since. That always holds when this block was the item's
+  last live block at i. Otherwise `type` + `INDEX i`.
+* Any other E1: `type` + `INDEX i`.
+
+Rule 2 (clearing) applies while some block of the item is live and has not
+failed.
+
+**Forced-tier test mode (C8).** Limits word 8 bit 2 forces every map to T
+and every array to A2, ignoring the natural tier (the programs stay valid).
+Gate (`bb vm-test`): on every case, verdict, reason, subcode, path and
+offset must be equal with and without the bit. Only the budget used may
+differ.
 
 ## 9. Scratch (delta to program.md §12)
 
 ### 9.1 VM block
 
-Words 37–39 (were reserved): `VM_ARENA` (offset of the arena),
-`VM_ARENA_UP` (upward top: records and trails), `VM_ARENA_DOWN` (downward
-top: `CALL` frames). Word 40 `VM_ARENA_END`.
+Words 37–40 are `VM_ARENA` (offset), `VM_ARENA_UP`, `VM_ARENA_DOWN` and
+`VM_ARENA_END`. Word 41 is `VM_ARENA_LIMIT` (the explicit limit, or −1).
 
 ### 9.2 Frames
 
 ```
-ARRAREA(R) = Σ over ARRAY leaves a ∈ R of
-             (4 + 2·W(a) + 8 + 4·depth(peg(a)) + (tier A1 ? (B + 1)·W(a) : 0))
-MAPAREA(R) = Σ over MAP leaves m ∈ R of
-             (4 + 8 + 2·n_members(m) + 4·depth(peg(m))
-              + (tier S ? n_named(m)·slot_words(m) : 0)
-              + (tier T ? n_named(m) : 0))            -- T: key id → record index
-             + 4·cand_max(R)
+ARRAREA(R) = Σ over ARRAY leaves a ∈ R of ARRWORDS(a)
+MAPAREA(R) = Σ over MAP leaves m ∈ R of MAPWORDS(m) + 4·cand_max(R)
 ```
 
-Block layouts: array `qindex, alive, |A|, rsv, active[W], cand[W],
-machine[8], stack[4·depth], ring[...]`; map `qindex, alive, cursor, rsv,
-machine[8], count[n_members], cutpair[n_members], stack[4·depth],
-slots[...]`. `cand_max` = n_members + max namers (the candidate list of a
-pair). All of these are static and closure-sized (R3).
+`cand_max` is the maximum, over MAP leaves, of n_members plus the largest
+naming count.
 
-### 9.3 The group arena and the limits array
+### 9.3 Limits array
 
-When FLAGS bit 6 is set, scratch gains `LIM_PEG_WORDS` words after the
-frames. `rule.scratch_words` and `SCRATCH_MAX` include them. Limits array
-word 10 (new, optional): arena words, effective = min(given,
-`LIM_PEG_WORDS`).
+Word 10 (optional) is the explicit arena limit in words; −1 or absent means
+none, and then `LIM_GROUP_WORDS` applies if it is non-zero. When both are
+given, the smaller one is the effective explicit limit.
 
-### 9.4 Arena layout
+### 9.4 The group arena: content, bound and growth (C5, X11)
 
-An item with A2/T blocks reserves an **element record** per element or pair
-at `VM_ARENA_UP`: the concatenation of its live A2/T blocks' records, in
-query order, with a fixed total size Rₜ, so block b's record i is at base +
-i·Rₜ + off_b. Nested items push above and pop at their end. A map's end-run
-pushes its trail above its records, block after block, and discards it.
-`CALL` frames grow down from `VM_ARENA_END`. An embedded sub-validation
-saves and restores both tops. A push that would cross the other top is
-`group_limit`. Sessions keep all of it (the scratch is theirs, architecture
-§17.1); sequence mode resets the tops per message.
+**Content.**
 
-## 10. Charging (delta to program.md §14)
+* Records grow upward. An item with A2/T blocks reserves one element record
+  of fixed stride Rₜ, the sum of the record words (A2: W; T: rec_words) of
+  the A2/T blocks admitted when its container was entered. A dead block's
+  words stay in the stride (X Format Q2).
+* Nested items push above and pop at their end.
+* End-runs push a T sort permutation (n words) and a trail (≤ n words)
+  above, and discard them after the run.
+* Recursive activations grow downward.
+* An embedded sub-validation saves and restores both tops.
 
-The rows "array element …", "array element, after the child …", "array end
-…" and every "map pair …" / "map end …" row are replaced by:
+**Bound.** With the effective limits, the arena never needs more than
+
+```
+A_max = maxItems · R_ITEM_MAX + 2 · maxEntries + (maxItems + D + 1) · ACT_WORDS
+```
+
+words, computed with saturation. The three terms are: records (at most one
+per item); one end-run's permutation and trail (only one end-run runs at a
+time); activations by §5.3, summed over the at most D + 1 open containers.
+
+**Growth.** The arena is not preallocated.
+
+* **Buffer route.** The VM starts with the host's leased arena (default
+  4 096 words). A push beyond it ends the call with the internal code
+  `scratch` (22, never visible to users; arch §19.5). The host then
+  allocates `A_max` words for these limits (or the explicit limit, if
+  smaller) and runs the validation once more. Charges are a pure function of
+  the run, so the second run's out array is the answer, and total CPU is at
+  most twice one run.
+* **Session route.** The session suspends with `VMS_GROW` (arch §19.7). The
+  host copies the scratch into a larger array (doubling, capped at `A_max`)
+  and steps again. Nothing is re-run.
+
+Neither route ever refuses at default limits. `group_limit` exists only
+under an explicit limit.
+
+## 10. Charging (delta to program.md §14): one order on every route (X4)
 
 | Event | Units |
 | --- | --- |
-| array element, per block visited | 1; live blocks + W·(\|A\| + 1) + 1 per candidate position (unchanged) |
-| array element, after the child: each candidate position | 1 + its typeset test (unchanged) |
-| array record stored (A1, A2) | ⌈R/16⌉ (R = W, or W + n_memo for A2) |
-| array/map PEG step (§5.2, §6.4) | 1 each |
-| array end, per block visited | 1; live blocks + W, then the machine's remaining steps |
-| map pair, per block visited (live or dead) | 1, + 1 per cursor step (live blocks) |
+| array element, per block visited | 1; live blocks + W·(\|A\| + 1) + 1 per candidate position |
+| array element, after the child: each candidate | 1 + typeset test |
+| array record stored (A1, A2) | ⌈R/16⌉ (R = W) |
+| PEG step (§5.3, §6.4) | 1 |
+| array end, per block visited | 1; live blocks + W, then the machine's steps |
+| map pair, per block visited | 1, + 1 per cursor step (ascending) or per probe of `named` (unordered) |
 | map pair, key phase: each non-literal member's key typeset test | 1 + the test |
 | map pair, key phase: each naming member visited | 1 |
-| map pair: each candidate | 1 + its value typeset test |
-| map pair, F/S unnamed: each member visited in the pair-major pass | 1 |
+| map pair: each candidate | 1 + value typeset test |
+| map pair, F/S pair-major walk: each member visited | 1 |
 | map pair, S named: slot write | slot_words |
-| map pair, T: record stored | ⌈rec_words/16⌉ |
-| map end, per block visited | 1; live blocks + 1 per member (F); + the machine's steps (S, T); + 1 per slot or record checked for closedness (S, T) |
-| T pick order (order-sensitive, map marked by §19.4) | 1 per pair (keeping the deferred check's permutation); the sort itself is §19.4's, already charged |
-| witness: trace step (rule 4′) | 1 |
+| map pair, T: record stored + index entry | ⌈rec_words/16⌉ + 1 |
+| map end, per block visited | 1; live blocks + 1 per member (F); S/T: the T sort (§6.5), then the machine's steps, then 1 per slot/record checked for closedness |
+| witness trace / diagnostic scan step | 1 |
 
-Schedule 2 (D045): rule 1 also removes the PEG steps of that element (the
-shape is A0 `REP(0, ∞, ENTRY)`). Rule 2's shapes (closed struct, pure
-table) are tier F and keep exactly 1 bookkeeping unit per simple pair.
-Rule 3 is unchanged. **Order of charges** within an element or pair:
-format 1's order up to and including the candidates' tests; then the record
-or slot store; then the machine's steps until it suspends. At an array or
-map end: the end row, then the machine's steps, then closedness, then any
-witness trace. Yields and window boundaries never move a charge.
+**Order (normative, every route).**
+
+* **Within an item:** format 1's order up to the candidates' tests; then the
+  record or slot store; then the machine's steps until it suspends or the
+  block dies.
+* **At a map's logical end** (after its last value): first the deferred
+  duplicate check's units (arch §19.4); then the map end row; then the T
+  sort, the machine, closedness, and the witness trace.
+* **At an array's end:** the end row, then the machine.
+* Yields and window boundaries never move a charge.
+
+**Dependency on §19 (X4).** The canonical route must charge the deferred
+duplicate check at the same logical point, the map's end. The current draft
+of arch §19.5 charges it before the VM starts instead. The scanner can still
+do the physical work early and record each marked map's unit count for the
+VM to charge when it reaches that map's end. Until §19.5 is amended, this
+order is a stated requirement on P8.4 (DEVLOG D277).
+
+**Schedule 2 (D045).** Rule 1 also removes the machine steps of a `[* T]`
+element. Rule 2's shapes are tier F and keep 1 unit per simple pair. Rule 3
+is unchanged.
+
+These prices are provisional bounded-work charges. They are not an
+equal-CPU claim until the implemented paths are measured with D241's method
+(X Q12).
 
 ## 11. Limits (delta to architecture §7)
 
 | Limit | Default | Hard max | Where |
 | --- | --- | --- | --- |
 | PEG nodes per group (after inlining) | 1 024 | 16 384 | compile |
-| positions per array (ENTRY nodes; no unrolling) | 256 | 4 096 | compile (unchanged values) |
-| members per map | 256 | 4 096 | compile (replaces "alternatives per map sequence") |
-| PEG nesting depth | 64 | 256 | compile |
-| ring words (B + 1)·W per array | 4 096 | 65 536 | compile |
-| memo columns per group | 16 | 256 | compile |
-| group arena words | 65 536 | 2^24 | compile default, lowered per call |
+| positions per array | 256 | 4 096 | compile |
+| members per map | 256 | 4 096 | compile |
+| frames per activation (`depth`) | 64 | 256 | compile |
+| A1 ring words (B + 1)·W | 4 096 | 65 536 | compile (above it the array is A2) |
+| explicit group arena words | none | 2^26 | compile option `groupWords` / per call |
 
-## 12. Worked example (operational, not a unit total)
+## 12. Worked examples (operational)
 
-`r = [* uint, uint]` on `[1]` (A0, B = 0; positions p0 (`* uint`), p1
-(`uint`); program: `SEQ(REP(0, ∞, ENTRY p0), ENTRY p1)`):
+**`r = [* uint, uint]` on `[1]`** (A0; `SEQ(REP(0, INF, ENTRY p0), ENTRY
+p1)`).
 
-* Element 0: C = first = {p0, p1}; query = {uint} (hash-consed). 1 matches,
-  so r₀ = {p0, p1}. Machine: enter SEQ, enter REP, enter ENTRY p0 at 0
-  (bit set), REP iteration 2: enter ENTRY p0 at 1, which needs r₁, so it
-  suspends (4 steps).
-* End (n = 1): resume with end-of-input. The waiting ENTRY p0 at 1 fails
-  (event E2 at 1; no new step). REP ends with count 1. Enter ENTRY p1 at 1:
-  it fails (E2 at 1, 1 step). SEQ fails, root fails. Witness: the first E2,
-  `missing`, extra `INDEX 1`.
+1. Element 0: C = {p0, p1}, so r₀ = {p0, p1}.
+2. Steps so far (4): SEQ; REP; `ENTRY p0` at 0 ✓; `ENTRY p0` at 1, which
+   waits for record 1.
+3. End of input: the waiting `ENTRY p0` at 1 fails (E2 at 1). The REP ends
+   with count 1.
+4. `ENTRY p1` at 1 fails (E2, 1 step). The root fails.
+5. Witness: `missing`, `INDEX 1`.
 
-`r = {? (a: int, b: int), * tstr => any}` on `{"a": 1}` (tier S; named keys
-a, b; class R: the wildcard). Pair `"a"`: named, so slot a = (wire 0;
-`a: int` value ✓; wildcard key ✓, value ✓). End: enter SEQ; enter REP;
-enter SEQ; MEMBER a consumes slot a (2 steps); MEMBER b: slot b is empty
-and min 1, so it fails; rewind (1 + 1 popped); REP ends with 0; MEMBER
-wildcard consumes slot a; closedness ✓. Valid. Under `cuts: 'rfc'`, MEMBER
-a's key matched (commit), so the REP's failed iteration is `fail!` and the
-map fails.
+**`r = {? (a: int, b: int), * tstr => any}` on `{"a": 1}`** (tier S; class R
+is the wildcard).
 
-## 13. Questions specific to the format
+1. Arrival: slot a = (wire 0; `a: int` ✓; wildcard key ✓, value ✓).
+2. End-run: SEQ; REP; SEQ; `MEMBER a` consumes slot a.
+3. `MEMBER b` fails (`missing`, score 1). The REP iteration fails and is
+   undone (rewind 1, plus 1 popped). The REP ends with 0 iterations.
+4. The wildcard member imports its unnamed state (none) and consumes slot a.
+   Closedness ✓.
+5. Valid in reference mode. Under rfc, `MEMBER a`'s key match raised
+   `commits`, so the failed iteration returns `fail!`: invalid, witness
+   `missing` b.
 
-1. Should memo columns and link cells ship in 2.0, or be reserved
-   (n_memo = 0 enforced) until an A2 schema needs them (architecture §20.14
-   Q8)?
-2. Should element records of different A2/T blocks of one item be
-   concatenated (fixed Rₜ, simple addressing, wasted words when a block
-   dies early), or should each block have its own arena run (needs a
-   per-block index)?
-3. Is `group_limit` a new reason code (44), or `budget` with a subcode?
-4. Should a T map store a key-id → record index table in its frame (fast
-   literal lookups, n_named words), or scan the records?
+**`r = {? (a: int, b: int), * tstr => any}` on `{"a": "x"}`.** In reference
+mode (rule A), `MEMBER a`'s value fails and the member has a cut, so it
+returns `cut`. That passes through SEQ and REP to the root: invalid, with
+`value` at a. Format 1 and Ruby both accepted this.
+
+## 13. Questions remaining for the format
+
+1. On the buffer route, is a single re-run acceptable for latency on the rare
+   A2/T inputs that overflow the lease, rather than preallocating `A_max`?
+2. Should `ACT_WORDS` use 4-word frames for array programs instead of the
+   common 8?
