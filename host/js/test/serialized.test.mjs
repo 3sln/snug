@@ -88,7 +88,7 @@ test('container refusals have precise safe codes, including rehashed invalid Pro
   await assert.rejects(fromSerialized(mutate(0, 0)), refused('magic'));
   await assert.rejects(fromSerialized(mutate(8, 2, true)), refused('container_version'));
   await assert.rejects(fromSerialized(mutate(12, 2, true)), refused('format_version'));
-  await assert.rejects(fromSerialized(mutate(14, 1, true)), refused('format_version')); // major 1, minor 1
+  await assert.rejects(fromSerialized(mutate(14, 2, true)), refused('format_version')); // major 1, minor 2 (the loader is 1.1, D141)
   await assert.rejects(fromSerialized(mutate(24, 0, true)), refused('version'));
   await assert.rejects(fromSerialized(mutate(29, 0x80, true)), refused('version'));
   await assert.rejects(fromSerialized(mutate(88, 1, true)), refused('reserved'));

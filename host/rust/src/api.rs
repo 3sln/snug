@@ -98,6 +98,8 @@ pub struct CompileOptions<'a> {
     pub limits: CompileLimits,
     /// Canonical category triples from `unicode_tables::tables()`.
     pub unicode: Option<&'a [i32]>,
+    /// Extension controls (D141): the `.name` operators the schema may use.
+    pub controls: Option<&'a crate::controls::Controls>,
 }
 /// Runtime overrides only lower the caps compiled into the Program.
 #[derive(Debug, Clone)]
@@ -186,10 +188,12 @@ impl Schema {
                 profile,
                 limits: &limits,
                 unicode: options.unicode,
+                controls: options.controls.map(|c| c as &dyn crate::compile::Registry),
             },
         )?;
-        Ok(Self::from_program(Program::from_parts(
-            &c.program, &c.pool,
+        let none = crate::controls::Controls::default();
+        Ok(Self::from_program(Program::from_parts_with(
+            &c.program, &c.pool, options.controls.unwrap_or(&none),
         )?))
     }
     /// Create a schema without invoking the compiler.
@@ -199,6 +203,11 @@ impl Schema {
     /// Load a trusted persisted Program without invoking the compiler.
     pub fn from_serialized(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self::from_program(Program::deserialize(bytes)?))
+    }
+    /// [`Schema::from_serialized`] for a Program using extension controls (D141):
+    /// the registry it was compiled with, else `Error::MissingControls`.
+    pub fn from_serialized_with(bytes: &[u8], controls: &crate::controls::Controls) -> Result<Self, Error> {
+        Ok(Self::from_program(Program::deserialize_with(bytes, controls)?))
     }
     /// Immutable Program for caching or sharing.
     pub fn program(&self) -> &Program {
@@ -311,5 +320,15 @@ impl Blob for BytesBlob<'_> {
             .get(offset..end)
             .map(|b| b.to_vec())
             .ok_or(schema::SourceError::Read)
+    }
+}
+
+/// The compiler sees a registry through `compile::Registry` (it builds without the VM).
+impl crate::compile::Registry for crate::controls::Controls {
+    fn words(&self) -> Vec<i32> {
+        crate::controls::Controls::words(self)
+    }
+    fn argument_ok(&self, name: &str, argument: &[u8]) -> bool {
+        self.get(name).is_none_or(|c| c.argument(argument))
     }
 }

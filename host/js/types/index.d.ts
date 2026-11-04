@@ -61,7 +61,7 @@ export type ProfileCode = 'truncated' | 'non_shortest' | 'indefinite' | 'malform
   'bignum' | 'decimal' | 'typed_array' | 'ndarray' | 'trailing' | 'depth' |
   'too_many_entries' | 'too_many_items' | 'too_large' | 'not_map';
 export type SchemaReason = 'type' | 'missing' | 'unexpected' | 'value' | 'size' |
-  'range' | 'pattern' | 'tag' | 'bits' | 'embedded' | 'budget';
+  'range' | 'pattern' | 'tag' | 'bits' | 'embedded' | 'control' | 'control_size' | 'budget';
 export type Reason = SchemaReason | `cbor/${ProfileCode}`;
 export type FaultCode = ProfileCode | 'unsupported' | 'grammar' | 'writer_failed' | `schema/${SchemaReason}`;
 export declare class SnugFault extends Error {

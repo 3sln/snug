@@ -6,13 +6,14 @@
 //
 //   compile(text, { profile, limits }) -> { program: Int32Array, pool: Uint8Array, rules: string[] }
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
-import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn,
+import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn, errorOffset,
   errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
   keyPreimageLen, snugVersion, OPT_WORDS }
   from '../../../gen/js/snug/compile/main.mjs';
 import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 import { sha256 } from './sha256.mjs';
 import { validateOptions } from './options.mjs';
+import { controlEntries, registryWords, programControls, programArguments } from './ext.mjs';
 
 /** The snug version (kin's, so both hosts agree): in the source key and the serialisation container. */
 export const SNUG_VERSION = snugVersion();
@@ -36,8 +37,10 @@ let arena = new Int32Array(ARENA_MIN_WORDS);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function options(profile, limits) {
-  const opt = new Int32Array(OPT_WORDS).fill(-1);
+function options(profile, limits, registry = []) {
+  // D141: the extension-control registry rides after the OPT_WORDS options
+  const opt = new Int32Array(OPT_WORDS + registry.length).fill(-1);
+  opt.set(registry, OPT_WORDS);
   opt[0] = PROFILES[profile];
   for (const [i, k] of COMPILE_OPTIONS.entries()) {
     const v = limits[k];
@@ -62,8 +65,9 @@ function floats(h, bytes) {
 /** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md, format 1). */
 export function compile(text, opts = {}) {
   validateOptions(opts, 'compile');
-  const { profile = 'full', limits = {}, unicode } = opts;
-  try { return compileOnce(text, profile, limits, unicode); }
+  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false } = opts;
+  const entries = controlEntries(controls);
+  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
     if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
@@ -71,10 +75,10 @@ export function compile(text, opts = {}) {
 }
 const RETAIN_WORDS = 1 << 22;
 
-function compileOnce(text, profile, limits, unicode) {
+function compileOnce(text, profile, limits, unicode, entries, inBus) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
-  const opt = options(profile, limits);
+  const opt = options(profile, limits, registryWords(entries, inBus));
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
     throw new TypeError('unicode must be the Int32Array tables from snug/unicode');
@@ -92,7 +96,8 @@ function compileOnce(text, profile, limits, unicode) {
       const rs = errorRuleStart(h);
       const rule = rs >= 0 ? decoder.decode(bytes.subarray(rs, rs + errorRuleLen(h))) : undefined;
       throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule,
-        code === ERR_NEED_UNICODE ? '; Unicode categories require tables from snug/unicode' : '');
+        code === ERR_NEED_UNICODE ? '; Unicode categories require tables from snug/unicode'
+          : errorName(code) === 'unknown_control' ? controlNamed(bytes, errorOffset(h)) : '');
     }
     const p = outProgramAt(h), b = outPoolAt(h);
     if (outProgramWords(h) < 64) throw new SchemaError('internal', 0, 0, undefined);
@@ -102,7 +107,27 @@ function compileOnce(text, profile, limits, unicode) {
     const k = keyPreimageAt(h);
     const key = sha256(Uint8Array.from(h.subarray(k, k + keyPreimageLen(h))));
     for (let i = 0; i < 8; i++) program[7 + i] = (key[4 * i] << 24) | (key[4 * i + 1] << 16) | (key[4 * i + 2] << 8) | key[4 * i + 3];
-    return { program, pool, rules: ruleNames(program, pool) };
+    checkArguments(program, pool, entries);
+    return { program, pool, rules: ruleNames(program, pool), controls: entries };
+  }
+}
+
+// D141: name the control a schema uses but the registry lacks (schema text, never payload).
+function controlNamed(bytes, at) {
+  if (at < 0 || bytes[at] !== 0x2e) return '';
+  let e = at + 1;
+  while (e < bytes.length && /[A-Za-z0-9_\-@$.]/.test(String.fromCharCode(bytes[e]))) e++;
+  return ` (.${decoder.decode(bytes.subarray(at + 1, e))} is not a registered control)`;
+}
+
+// A registered control may check its argument once, at compile time (D142).
+function checkArguments(program, pool, entries) {
+  if (program[30] === 0) return;
+  const names = programControls(program, pool), byName = new Map(entries.map(e => [e.name, e]));
+  for (const { id, argument } of programArguments(program, pool)) {
+    const entry = byName.get(names[id]);
+    if (entry.argument && entry.argument(Uint8Array.from(argument)) !== true)
+      throw new SchemaError('control_value', 0, 0, undefined, ` (.${entry.name} argument)`);
   }
 }
 

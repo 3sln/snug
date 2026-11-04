@@ -68,6 +68,70 @@ For basic ASCII patterns and both JS/CDDL escaping layers, see the
 and maintenance evidence is recorded in [P7.3](../DEVLOG.md#phase-7--standalone-library-d080-2026-11-03)
 and the [table measurement](../bench/README.md#unicode-table-module-p73).
 
+## Custom controls
+
+CDDL cannot say "at most 3 characters", "no duplicates" or "these columns have
+the same length". Register a control and the schema can, without forking snug:
+
+```js
+import { compile } from 'snug/compile';
+import { controls } from 'snug/controls';            // .chars, .unique, .samelen
+import { encode } from 'snug';
+
+const schema = await compile(`
+  user  = { name: tstr .chars (1..32), tags: [* tstr] .unique true }
+  table = { x: [* float], y: [* float] } .samelen ["x", "y"]
+  even  = bstr .even 0`, {
+  controls: {
+    ...controls,
+    even: { check: (argument, item) => item.length % 2 === 0, maxBytes: 4096 },
+  },
+});
+schema.validate(encode({ name: 'Zoë', tags: ['a', 'b'] }), 'user');   // { ok: true }
+schema.validate(encode({ name: 'Zoë', tags: ['a', 'a'] }), 'user');
+// { ok: false, reason: 'control', path: ['tags'], offset: … }
+```
+
+`target .name argument` means *the target, and the predicate holds*: the
+compiler lowers it to an ordinary AND of the target's leaves and an extension
+leaf, so exactness under choices is unchanged — `(tstr .chars (1..3)) /
+(tstr .size 10)` accepts `"0123456789"` through the second alternative. A
+predicate receives the CBOR **encoding** of the argument (an integer, text,
+bytes, a named simple value such as `true`, a range `lo..hi` as `[lo, hi]`,
+or an array of those) and the item's **whole encoding**, already checked by
+the wire profile. Only a strict `true` matches. The generic controls:
+
+| Control | Item | Argument |
+| --- | --- | --- |
+| `.chars` | a text string of n / lo..hi Unicode code points | `n` or `lo..hi` |
+| `.unique` | an array whose elements' encodings are pairwise distinct (so `1` and `1.0` differ) | anything, conventionally `true` |
+| `.samelen` | a map whose named members, where present, hold arrays or typed arrays with one element count | a name or an array of names |
+
+**Rules for a predicate.** It must be a pure function of its two inputs: no
+I/O, clock, randomness, state, and no call back into snug (validation holds
+the shared scratch; a re-entrant call throws). The VM asks it only for an item
+its leaf is queried for, at most once per item, never for an item already
+refused, and charges **one budget unit per item byte** (plus one), so a
+hostile message cannot make it run longer than the budget allows. An item
+longer than `maxBytes` (default 65,536) fails with the reason `control_size`
+*without asking*; streams therefore never buffer more than `maxBytes` for a
+control, and every source gives the same answer. If a predicate throws, the
+call throws an `Error` whose `cause` is the original (the verdict is void).
+An optional `argument(bytes) => boolean` is checked once per use at compile
+time (`control_value` when false); the generic controls check theirs.
+
+**Errors and caching.** An unregistered `.name` is the `SchemaError`
+`unknown_control`, and its message names the control. A Program that uses a
+control is format 1.1 (others stay 1.0); its source key includes the whole
+registry — names and `maxBytes` — so a cache keyed by `program.sourceKey`
+never mixes registries. Loading needs the predicates again:
+`fromSerialized(bytes, { controls })` (or `fromProgram(P, B, { controls })`);
+a missing one is `ProgramError('missing_control')`, naming it.
+`program.controls` lists the names a Program uses. The `bus` compiler profile
+refuses extension controls unless `controlsInBus: true`. Rust: `snug::controls`
+(`Control` trait objects, `Controls::generic()`, `CompileOptions::controls`,
+`Schema::from_serialized_with`).
+
 ## Validate hostile bytes without decoding
 
 ```js

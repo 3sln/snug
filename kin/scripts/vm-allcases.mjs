@@ -15,6 +15,7 @@ import { Program as HostProgram } from '../../host/js/src/schema.mjs';
 import { encode, decode } from '../../bench/baseline/cbor-3sln.mjs';
 import { compile as oracleCompile, check as oracleCheck } from '../../corpus/tools/oracle.mjs';
 import { oracleSchemas } from './vm-oracle-gen.mjs';
+import { addExtCases } from './ext-cases.mjs';
 
 export const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
 // limits words (program.md §12.3): 0..7, word 8 the VM's generic/schedule bits, word 9 the profile flags (D120)
@@ -208,6 +209,11 @@ for (const { cddl, values } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
   }
 }
 
+// ---------------------------------------------------------------- 3b. extension controls (P7.2)
+const extStart = cases.length;
+addExtCases({ compile, encode, addProgram, LIM, cases, seed: SEED });
+const nExt = cases.length - extStart;
+
 // ---------------------------------------------------------------- 4. assembled
 const asmStart = cases.length;
 for (const a of assembledCases()) {
@@ -215,5 +221,5 @@ for (const a of assembledCases()) {
   for (const k of a.cases) cases.push({ prog: pi, rule: k.rule ?? 0, lim: [...(k.lim ?? LIM(1, 0)).slice(0, 8), 0], bytes: k.bytes, span: k.span, label: `${a.label}: ${k.label ?? hex(k.bytes).slice(0, 40)}`, check: k.check });
 }
 const nAsm = cases.length - asmStart;
-return { programs, cases, sc, corpus, diff, nAsm, asmStart, nIdentity };
+return { programs, cases, sc, corpus, diff, nAsm, asmStart, nIdentity, nExt };
 }

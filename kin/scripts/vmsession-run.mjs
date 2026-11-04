@@ -10,7 +10,8 @@
 //   q: the work quantum (0: none). Every window starts EXACTLY at the offset
 //   asked for (nothing earlier is available) and is a fresh copy.
 import { vmScratchWords, vmScratchInit } from '../../gen/js/snug/vm/api.mjs';
-import { vmsWords, vmsArena, vmsInit, vmsStep, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../gen/js/snug/vm/session.mjs';
+import { vmsWords, vmsArena, vmsInit, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../gen/js/snug/vm/session.mjs';
+import { extFor } from './ext-cases.mjs';
 
 export const VMS_NEED = -64, VMS_YIELD = -65;
 
@@ -29,6 +30,7 @@ export function runSession(P, B, rule, lim, bytes, policy, opts = {}) {
  *  several sessions can be interleaved step by step (each owns its arrays). */
 export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, maxSteps = 0 } = {}) {
   const n = bytes.length;
+  const x = extFor(P, B);   // P7.2: the test registry's predicates for a Program using extension controls
   const cap = Math.max(P[16], 1);
   let s = new Int32Array(vmScratchWords(P, rule, cap)); vmScratchInit(s, cap);
   let ss = new Int32Array(vmsWords(P));
@@ -51,7 +53,7 @@ export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, ma
     const e = Math.min(n, off + L);
     let win = bytes.slice(off, e);
     if (guard) win = guard(win, 'window');
-    const r = vmsStep(p, b, win, s, ss, ka, o, off);
+    const r = x ? vmsStepX(p, b, win, s, ss, ka, o, off, x) : vmsStep(p, b, win, s, ss, ka, o, off);
     steps++;
     yield r;
     if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields };

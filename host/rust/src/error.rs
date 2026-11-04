@@ -29,6 +29,9 @@ pub enum Error {
     Usage(&'static str),
     /// Source protocol failure, using JS SourceError codes.
     Source(&'static str),
+    /// A Program uses extension controls the registry lacks (D141); their
+    /// names, from the Program (schema text, never payload).
+    MissingControls(Vec<String>),
     /// A host/generated invariant failed, never a fabricated CBOR verdict.
     Internal,
 }
@@ -42,6 +45,7 @@ impl Error {
             | Self::Usage(code)
             | Self::Source(code) => code,
             Self::Compile(e) => e.code,
+            Self::MissingControls(_) => "missing_control",
             Self::Validation(e) => match e.reason {
                 "type" => "schema/type",
                 "missing" => "schema/missing",
@@ -53,6 +57,8 @@ impl Error {
                 "tag" => "schema/tag",
                 "bits" => "schema/bits",
                 "embedded" => "schema/embedded",
+                "control" => "schema/control",
+                "control_size" => "schema/control_size",
                 "budget" => "schema/budget",
                 r => r.strip_prefix("cbor/").unwrap_or(r),
             },
@@ -99,7 +105,11 @@ impl fmt::Display for SchemaError {
             f,
             "snug: schema refused ({}) at {}:{}",
             self.code, self.line, self.column
-        )
+        )?;
+        match &self.detail {
+            Some(d) => write!(f, " (.{})", d),
+            None => Ok(()),
+        }
     }
 }
 impl std::error::Error for SchemaError {}

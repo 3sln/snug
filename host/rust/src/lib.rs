@@ -13,6 +13,7 @@ pub mod writer;
 pub mod program;
 pub mod view;
 pub mod api;
+pub mod controls;
 pub use value::{Value, Integer, TypedArray};
 pub use error::Error;
 pub use decode::{decode, DecodeOptions, Floats, Keys, Limits, Profile, Tags, Top};

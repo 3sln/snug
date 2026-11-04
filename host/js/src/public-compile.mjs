@@ -22,5 +22,6 @@ export async function compile(text, options = {}) {
     }
     throw e;
   }
-  return new Schema(new Program(compiled.program, compiled.pool));
+  return new Schema(new Program(compiled.program, compiled.pool,
+    options.controls === undefined ? {} : { controls: options.controls }));
 }

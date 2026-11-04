@@ -1,0 +1,118 @@
+// Extension controls on the JS host (D082, D140-D142). kin decides where an
+// EXT leaf is queried and charges it; this module only turns a registry
+// ({name: predicate}) into the compiler's registry words, reads a Program's
+// control table, and binds it to predicates the VM can call.
+//
+//   control  = (argument: Uint8Array, item: Uint8Array) => boolean
+//            | { check(argument, item): boolean, maxBytes?: number, argument?(argument): boolean }
+//
+// A predicate must be a pure function of its two inputs (no I/O, no clock, no
+// state, no call back into snug); only a strict `true` matches. `maxBytes`
+// (default 65,536) bounds the item a control is asked about: a longer item
+// fails the control with the reason `control_size` without asking, under
+// every source, so the session driver never buffers more than that for it.
+import { ProgramError } from './serialized.mjs';
+
+export const DEFAULT_MAX_BYTES = 65536;
+const NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
+const BUILTIN = new Set(['size', 'bits', 'lt', 'le', 'gt', 'ge', 'eq', 'ne', 'and', 'within', 'regexp',
+  'cbor', 'cborseq', 'default', 'feature', 'cat', 'det', 'plus', 'pcre', 'abnf', 'abnfb']);
+const encoder = new TextEncoder(), decoder = new TextDecoder();
+
+/** The registry as sorted entries {name, check, maxBytes, argument}; TypeError on a malformed one. */
+export function controlEntries(controls) {
+  if (controls === undefined) return [];
+  if (controls === null || typeof controls !== 'object' || Array.isArray(controls))
+    throw new TypeError('controls must be an object of named predicates.');
+  const entries = [];
+  for (const name of Object.keys(controls).sort((a, b) => compareBytes(encoder.encode(a), encoder.encode(b)))) {
+    if (!NAME.test(name) || BUILTIN.has(name))
+      throw new TypeError(`Invalid control name ${JSON.stringify(name)} (an identifier that is not a built-in control).`);
+    const c = controls[name];
+    const entry = typeof c === 'function' ? { check: c } : c;
+    if (entry === null || typeof entry !== 'object' || typeof entry.check !== 'function')
+      throw new TypeError(`Control .${name} must be a function or an object with a check function.`);
+    const maxBytes = entry.maxBytes ?? DEFAULT_MAX_BYTES;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > 0x7fffffff)
+      throw new TypeError(`Control .${name} maxBytes must be an integer in 0..2^31-1.`);
+    if (entry.argument !== undefined && typeof entry.argument !== 'function')
+      throw new TypeError(`Control .${name} argument must be a function.`);
+    entries.push({ name, check: entry.check, maxBytes, argument: entry.argument });
+  }
+  return entries;
+}
+
+function compareBytes(a, b) {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return a.length - b.length;
+}
+
+/** The registry words that follow the compile options (snug.compile.ext): n, flags, then per
+ *  control its name length, maximum item bytes and name bytes. */
+export function registryWords(entries, inBus) {
+  if (entries.length === 0) return [];
+  const w = [entries.length, inBus ? 1 : 0];
+  for (const { name, maxBytes } of entries) {
+    const b = encoder.encode(name);
+    w.push(b.length, maxBytes, ...b);
+  }
+  return w;
+}
+
+/** The names of a Program's extension controls, in id order (format 1.1, D141). */
+export function programControls(P, B) {
+  const names = [], n = P[30];
+  let i = P[31];
+  const end = i + P[39];
+  while (names.length < n && i < end) {
+    let len = B[i] & 31, c = i + 1;
+    if (len === 24) { len = B[c]; c++; }
+    names.push(decoder.decode(B.subarray(c, c + len)));
+    i = c + len;
+  }
+  return names;
+}
+
+/** Each EXT leaf of a Program: {id, argument} (the argument's encoded bytes). */
+export function programArguments(P, B) {
+  const out = [], at = P[43], n = P[16];
+  for (let l = 0; l < n; l++) {
+    const o = at + 8 * l;
+    if ((P[o] & 255) === 18) out.push({ id: P[o + 2], argument: B.subarray(P[o + 3], P[o + 3] + P[o + 4]) });
+  }
+  return out;
+}
+
+/** A Program's controls bound to the registry: the predicate the VM calls (null when the
+ *  Program uses none). A control the Program names but the registry lacks is
+ *  ProgramError('missing_control'), naming it. */
+export function bindControls(P, B, entries) {
+  const names = programControls(P, B);
+  if (names.length === 0) return null;
+  const byName = new Map(entries.map(e => [e.name, e]));
+  const missing = names.filter(n => !byName.has(n));
+  if (missing.length) {
+    const e = new ProgramError('missing_control');
+    e.message = `snug: Program refused (missing_control: ${missing.map(n => '.' + n).join(', ')})`;
+    e.controls = missing;
+    throw e;
+  }
+  const checks = names.map(n => byName.get(n).check);
+  const bound = {
+    names, failure: null,
+    call(id, pool, ao, al, b, s, e) {
+      if (bound.failure) return false;
+      try { return checks[id](pool.subarray(ao, ao + al), b.subarray(s, e)) === true; }
+      catch (error) { bound.failure = { name: names[id], error }; return false; }
+    },
+  };
+  return bound;
+}
+
+/** After a VM call: a predicate that threw makes the call throw (its verdict is void). */
+export function rethrow(bound) {
+  if (!bound || !bound.failure) return;
+  const { name, error } = bound.failure;
+  bound.failure = null;
+  throw new Error(`snug: extension control .${name} threw`, { cause: error });
+}

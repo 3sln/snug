@@ -151,7 +151,7 @@ compile(text: string | Uint8Array, options?: CompileOptions): Promise<Schema>
 
 Importing this entry point does not load the generated compiler; calling it
 does. After loading, the compile is synchronous. `CompileOptions` is
-`{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits, unicode?: Int32Array }`.
+`{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits, unicode?: Int32Array, controls?: Controls, controlsInBus?: boolean }`.
 `profile` defaults to `full` and restricts accepted CDDL, not wire policy.
 Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 
@@ -163,8 +163,12 @@ Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 
 All are non-negative safe integers; defaults and ceilings are in the
 [guide](guide.md#limits). kin applies effective defaults and ceilings before
-computing the source key. Custom controls remain planned (D082); Unicode tables
-are an explicit option described below (D083/D110).
+computing the source key. `controls` registers extension controls
+(D082/D140–D142, [Custom controls](guide.md#custom-controls), `snug/controls`
+below): a name → `Control` object (malformed names or entries are TypeErrors;
+built-in control names are refused). The whole registry is part of the source
+key; `controlsInBus` admits controls under `bus`. Unicode tables are an
+explicit option described below (D083/D110).
 
 Omitted limits use defaults, zero means zero (not unlimited), valid requests
 above compiler ceilings clamp, and per-call runtime limits can only lower
@@ -177,6 +181,33 @@ unknown options reject with TypeError before compilation.
 `(code, line = 0, column = 0, rule?)`, fields `code`, `line`, `column`,
 `rule`. The compiler supplies positions in code points and safe schema
 metadata. The public error message uses the code and position.
+
+## Extension controls: `snug/controls`
+
+```ts
+type Control = ((argument: Uint8Array, item: Uint8Array) => boolean) |
+  { check(argument: Uint8Array, item: Uint8Array): boolean; maxBytes?: number;
+    argument?(argument: Uint8Array): boolean };
+type Controls = Record<string, Control>;
+export const chars: Control, unique: Control, samelen: Control;
+export const controls: { chars, unique, samelen };
+```
+
+`.chars n | lo..hi` (code points of a text string), `.unique <any>` (pairwise
+distinct element encodings of an array), `.samelen "a" | [names]` (equal
+element counts of the named array/typed-array members of a map). Their
+verdicts are kin's (`snug.vm.controls`), identical on every host. A predicate
+must be pure; it is asked only for a queried, whole, profile-checked item,
+charged 1 + one unit per item byte; an item longer than `maxBytes` (default
+65,536, at most 2³¹−1) fails with `control_size` unasked. A throwing
+predicate makes the validation call throw (`cause` set). New reasons:
+`control` (the predicate refused) and `control_size`. Programs using a control
+are format 1.1 and need the registry to load
+(`fromSerialized(bytes, { controls })`, `fromProgram(P, B, { controls })`,
+`new Program(P, B, { controls })`); a missing name is
+`ProgramError('missing_control')` naming it; `program.controls` lists the
+names used. Name rule: `[A-Za-z_][A-Za-z0-9_-]*`, at most 64 bytes, not a
+built-in control.
 
 ## Unicode tables: `snug/unicode`
 
@@ -215,10 +246,11 @@ false is valid in the second branch. The message as a whole fits neither.
 
 | API | Result / behaviour |
 | --- | --- |
-| `new Program(P: Int32Array, B: Uint8Array)` | Copies and structurally verifies; throws ProgramError on refusal. Trusted origin is still required. |
+| `new Program(P: Int32Array, B: Uint8Array, { controls? }?)` | Copies and structurally verifies; throws ProgramError on refusal (`missing_control` when a control the Program uses is not in `controls`). Trusted origin is still required. |
 | `program.P`, `program.B` | Fresh copies of verified words/pool; mutations do not affect the Program. |
 | `program.sourceKey` | Lowercase 64-character SHA-256 hex cache key. |
 | `program.rules` | Frozen array of sorted validatable rule names. |
+| `program.controls` | Frozen array of the extension controls the Program uses (empty for format 1.0). |
 | `program.serialize(): Uint8Array` | Deterministic §13.3 container, synchronously hashed. |
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
@@ -226,8 +258,8 @@ false is valid in the second branch. The message as a whole fits neither.
 | `schema.session(rule, length, options?, { quantum? }?)` | Advanced `VmSession` over an exact known-length document; default top any. |
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
-| `fromProgram(P, B): Promise<Schema>` | Copies and verifies, without loading the compiler. |
-| `fromSerialized(bytes: Uint8Array): Promise<Schema>` | Checks container integrity/compatibility and verifies; without the compiler. |
+| `fromProgram(P, B, { controls? }?): Promise<Schema>` | Copies and verifies, without loading the compiler. |
+| `fromSerialized(bytes: Uint8Array, { controls? }?): Promise<Schema>` | Checks container integrity/compatibility (format 1.0 or 1.1) and verifies; without the compiler. A Program using extension controls needs the registry it was compiled with. |
 
 The entry also exports schema-first helpers:
 
@@ -445,10 +477,10 @@ indexes and the markers `*`, `#tag`, `cbor` appear in paths.
 | Family | Codes |
 | --- | --- |
 | CBOR/profile (`SnugFault.code`) | `truncated`, `non_shortest`, `indefinite`, `malformed`, `key_type`, `key_order`, `duplicate_key`, `text`, `float`, `simple`, `tag`, `bignum`, `decimal`, `typed_array`, `ndarray`, `trailing`, `depth`, `too_many_entries`, `too_many_items`, `too_large`, `not_map` |
-| Validation reason | `cbor/` plus a profile code; or `type`, `missing`, `unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `budget` |
+| Validation reason | `cbor/` plus a profile code; or `type`, `missing`, `unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `control`, `control_size`, `budget` |
 | Schema decode/checked-view SnugFault | Profile codes unchanged; schema reason prefixed `schema/`, e.g. `schema/type`, `schema/budget`; also carries reason/path/offset/subcode |
 | Host encode / Writer | Profile codes where applicable; `unsupported`, `grammar`, `writer_failed` |
-| ProgramError | `magic`, `container_version`, `format_version`, `length`, `version` (malformed producer metadata), `reserved`, `digest`, `verify`, `too_large` |
+| ProgramError | `magic`, `container_version`, `format_version`, `length`, `version` (malformed producer metadata), `reserved`, `digest`, `verify`, `too_large`, `missing_control` |
 | SourceError | `bad_chunk`, `short_read`, `length_mismatch` |
 
 SchemaError codes:
@@ -530,6 +562,8 @@ help. Never raise caps automatically in response to an untrusted message.
 | `tag` | Schema tag predicate failed; check tag and content against rule |
 | `bits` | Disallowed set bit; correct bit mask/content |
 | `embedded` | Inner CBOR/sequence predicate failed; inspect safe subcode and fix embedded producer/schema |
+| `control` | A registered extension control's predicate refused the item |
+| `control_size` | The item is longer than the extension control's `maxBytes`; the predicate was not asked |
 | `budget` | VM work policy exhausted, not proof of invalid data; reduce complexity or review compiled/per-call budget and concurrency |
 
 | Other code / class | Meaning / next action |
@@ -546,6 +580,7 @@ help. Never raise caps automatically in response to an untrusted message.
 | ProgramError `digest` | Container integrity mismatch; evict/reload from trusted origin, never bypass verification |
 | ProgramError `verify` | Structural Program verification failed; reject artifact and regenerate from trusted CDDL |
 | ProgramError `too_large` | Container/program body exceeds loader cap; bound cache/artifact size |
+| ProgramError `missing_control` | The Program uses extension controls the loader's registry lacks (the message names them); pass the registry it was compiled with |
 | SourceError `bad_chunk` | Handle read returned the wrong type, or a Promise was supplied to a sync driver; fix adapter or use async driver |
 | SourceError `short_read` | Handle returned other than the requested range length; fix exact immutable range reads |
 | SourceError `length_mismatch` | Push delivery differs from declared count; correct framing, deliver remainder and finalize on normal EOF |

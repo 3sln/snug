@@ -22,7 +22,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
 import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
-import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan } from '../../gen/js/snug/vm/api.mjs';
+import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan, vmValidateX, vmValidateSpanX } from '../../gen/js/snug/vm/api.mjs';
+import { extFor, testControls } from './ext-cases.mjs';
+import { controlEntries } from '../../host/js/src/ext.mjs';
 import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
 import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
@@ -39,7 +41,7 @@ let fails = 0;
 const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); fails++; };
 
 // ---------------------------------------------------------------- programs and the JS runner
-const { programs, cases, sc, corpus, diff, nAsm, asmStart } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail });
+const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail });
 let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
 function runJs(c, trap = false, generic = false, s1 = false) {
@@ -50,7 +52,11 @@ function runJs(c, trap = false, generic = false, s1 = false) {
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
   const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0), c.lim[9] ?? 0]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default); word 9: the profile flags (D120)
-  const code = c.span
+  const x = extFor(P, B);   // P7.2: a Program using extension controls gets the test registry's predicates
+  const code = x
+    ? (c.span ? vmValidateSpanX(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out, x)
+      : vmValidateX(p, b, c.rule, input, lim, s, out, x))
+    : c.span
     ? vmValidateSpan(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out)
     : vmValidate(p, b, c.rule, input, lim, s, out);
   if (code < 0) return `ERR ${code}`;
@@ -134,7 +140,7 @@ if (rustBin) {
   // host-rendering parity: corpus and assembled cases with default limits
   const hostCases = [];
   cases.forEach((c, i) => {
-    if (c.span || !(c.corpus || i >= asmStart) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[9] ?? 0) !== 0) return;
+    if (c.span || !(c.corpus || c.ext || i >= asmStart) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[9] ?? 0) !== 0) return;
     hostCases.push(i);
     lines.push(`host ${c.prog} ${c.rule} ${c.lim[0] === 0 ? 1 : 0} ${c.lim[1]} ${c.bytes.length ? hex(c.bytes) : '-'}`);
   });
@@ -152,7 +158,7 @@ if (rustBin) {
   let hostAgree = 0;
   hostCases.forEach((i, k) => {
     const c = cases[i];
-    if (!hostProgs.has(c.prog)) hostProgs.set(c.prog, new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify }));
+    if (!hostProgs.has(c.prog)) hostProgs.set(c.prog, new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, controls: controlEntries(testControls) }));
     const hp = hostProgs.get(c.prog);
     const r = hp.result(hp.run(c.rule, c.bytes, { top: c.lim[0] === 0 ? 'map' : 'any', cose: c.lim[1] === 1 }));
     const t = r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
@@ -176,7 +182,8 @@ if (process.env.SNUG_VM_WASM) {
   const cap = ex.snug_cap();
   let loaded = -1, agree = 0, tried = 0;
   cases.forEach((c, i) => {
-    if (c.span || c.bytes.length > cap) return;
+    // the wasm shim has no extension-control port (P7.2 open item): EXT Programs are not run there
+    if (c.span || c.ext || c.bytes.length > cap) return;
     if (loaded !== c.prog) {
       const { P, B } = programs[c.prog];
       new Int32Array(mem.buffer, ex.snug_prog_buf(), P.length).set(P);
@@ -202,7 +209,7 @@ console.log(`  info refusal suites: ${corpus.refusedOk} refused by the compiler 
 if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length} suites did not compile (not VM cases):`); for (const s of corpus.notCompiled.slice(0, 40)) console.log('       ' + s); }
 line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.oracle[0]}/${stats.oracle[1]} values agree with corpus/tools/oracle.mjs on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}); ${diff.unknown} oracle-unknown skipped`);
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
-line(stats.other[0] === stats.other[1], `§15 and assembled programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled)`);
+line(stats.other[0] === stats.other[1], `§15, assembled and extension-control programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled, ${nExt} extension-control cases incl. ${cases.filter(c => c.ext && c.label.includes('fixed')).length} with fixed verdicts; they run in every section below except wasm)`);
 line(genericAgree === cases.length, `fast paths == generic path (D044): ${genericAgree}/${cases.length} cases give the same whole out array with the fast paths forced off`);
 line(s2Agree === cases.length, `legacy schedule 1 (word 8 bit 1): fast == generic on ${s2Agree}/${cases.length} cases`);
 line(s2Same === cases.length, `schedule 1 vs the default schedule 2 (D045) changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);

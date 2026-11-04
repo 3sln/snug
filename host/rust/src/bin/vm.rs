@@ -17,7 +17,29 @@
 // (overflow checks on). One scratch per program, grown by the host protocol of
 // program.md §13.1 (`&mut` scratch, D040).
 use snug::schema::{validate, Options, Program, Segment};
-use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span};
+use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span, vm_validate_span_x, vm_validate_x};
+use snug::controls::{program_controls, Control, Controls};
+use std::sync::Arc;
+
+/// P7.2: kin/scripts/ext-cases.mjs's test registry -- the generic controls, `.even`
+/// (an even number of item bytes, maxBytes 300) and `.tiny` (`.chars`, maxBytes 8).
+pub struct Even;
+impl Control for Even {
+    fn check(&self, _a: &[u8], item: &[u8]) -> bool { item.len() % 2 == 0 }
+    fn max_bytes(&self) -> u32 { 300 }
+}
+pub struct Tiny;
+impl Control for Tiny {
+    fn check(&self, a: &[u8], item: &[u8]) -> bool { snug::controls::Chars.check(a, item) }
+    fn max_bytes(&self) -> u32 { 8 }
+}
+fn test_controls() -> Controls {
+    Controls::generic().with("even", Even).with("tiny", Tiny)
+}
+/// The predicates of a Program's controls, in id order (empty: it uses none).
+fn bound(p: &[i32], b: &[u8], reg: &Controls) -> Vec<Arc<dyn Control>> {
+    program_controls(p, b).iter().filter_map(|n| reg.get(n).cloned()).collect()
+}
 use std::io::{BufRead, Write};
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -42,6 +64,7 @@ struct Prog {
     s: Vec<i32>,
     cap: i32,
     host: Option<Program>,
+    ext: Vec<Arc<dyn Control>>,
 }
 
 fn main() {
@@ -57,8 +80,10 @@ fn main() {
             "prog" => {
                 let p: Vec<i32> = if f[1].is_empty() { Vec::new() } else { f[1].split(',').map(|x| x.parse().expect("word")).collect() };
                 let b = unhex(f[2]);
-                let host = Program::new(&p, &b).ok();
-                progs.push(Prog { p, b, s: Vec::new(), cap: 0, host });
+                let reg = test_controls();
+                let host = Program::new(&p, &b).ok().map(|mut h| { let _ = h.bind(&reg); h });
+                let ext = if host.is_some() { bound(&p, &b, &reg) } else { Vec::new() };
+                progs.push(Prog { p, b, s: Vec::new(), cap: 0, host, ext });
             }
             "case" | "span" => {
                 let n = |i: usize| -> i32 { f[i].parse().expect("number") };
@@ -80,7 +105,17 @@ fn main() {
                         vm_scratch_init(&mut pr.s, cap);
                     }
                     let mut o = vec![0i32; 8 + 2 * 257];
-                    let c = if f[0] == "span" {
+                    let ext = pr.ext.clone();
+                    let x = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32| -> bool {
+                        ext[id as usize].check(&pool[ao as usize..(ao + al) as usize], &b[s as usize..e as usize])
+                    };
+                    let c = if !pr.ext.is_empty() {
+                        if f[0] == "span" {
+                            vm_validate_span_x(&pr.p, &pr.b, rule, &input, start, end, d0, i0, &lim, &mut pr.s, &mut o, &x)
+                        } else {
+                            vm_validate_x(&pr.p, &pr.b, rule, &input, &lim, &mut pr.s, &mut o, &x)
+                        }
+                    } else if f[0] == "span" {
                         vm_validate_span(&pr.p, &pr.b, rule, &input, start, end, d0, i0, &lim, &mut pr.s, &mut o)
                     } else {
                         vm_validate(&pr.p, &pr.b, rule, &input, &lim, &mut pr.s, &mut o)

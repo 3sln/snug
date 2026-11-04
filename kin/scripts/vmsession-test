@@ -7,10 +7,11 @@ cd "$(dirname "$0")/../.."
 bb -cp kin/src:../kin/src kin/scripts/vm-emit > /dev/null
 host=.cache/vmsession-host
 mkdir -p "$host/bin"
-printf '//! Session test crate: the generated cbor, vm and program modules and the Rust schema host.\npub mod snug;\npub mod schema;\n' > "$host/lib.rs.new"
+printf '//! Session test crate: the generated cbor, vm and program modules and the Rust schema host.\npub mod snug;\npub mod schema;\npub mod controls;\n' > "$host/lib.rs.new"
 cmp -s "$host/lib.rs.new" "$host/lib.rs" 2>/dev/null || mv "$host/lib.rs.new" "$host/lib.rs"; rm -f "$host/lib.rs.new"
 cmp -s host/rust/src/bin/vmsession.rs "$host/bin/vmsession.rs" 2>/dev/null || cp host/rust/src/bin/vmsession.rs "$host/bin/vmsession.rs"
 cmp -s host/rust/src/schema.rs "$host/schema.rs" 2>/dev/null || cp host/rust/src/schema.rs "$host/schema.rs"
+cmp -s host/rust/src/controls.rs "$host/controls.rs" 2>/dev/null || cp host/rust/src/controls.rs "$host/controls.rs"
 crate=.cache/snug-vmsession
 SNUG_RS_ONLY="cbor vm program" ./kin/scripts/rust-crate "$crate" "$host"
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin vmsession 2>&1); then

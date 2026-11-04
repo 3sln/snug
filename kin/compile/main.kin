@@ -338,6 +338,12 @@
     :else "internal"))
 
 (defn ^:pub ^I32 error-line [^IntsR h] (return (hg h H_ERR_LINE)))
+(defn ^:pub ^I32 error-offset [^IntsR h]
+  (comment "The error's byte offset in the schema text (-1 when not about a place in"
+           "it); at an `unknown_control` error, the control's `.` (D141: hosts name it).")
+  (let [pos (hg h H_ERR_POS)]
+    (if (> pos (hg h H_NSRC)) (return (neg 1)))
+    (return pos)))
 (defn ^:pub ^I32 error-column [^IntsR h] (return (hg h H_ERR_COL)))
 
 (defn ^:pub ^I32 error-rule-start [^IntsR h]

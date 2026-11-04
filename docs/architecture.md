@@ -370,6 +370,7 @@ as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
 | `.feature` | accepted as a no-op annotation (RFC 9165: it always matches) (A12) |
 | `.cat`, `.det`, `.plus` | compile-time folding (P3, not gated in revision 2) |
 | `.pcre`, `.abnf`, `.abnfb` | refused (D013) |
+| a registered `.name` | extension control (D082, D140–D142): `AND(target leaf, EXT)` per target leaf; the EXT is decided by a host predicate over the item's encoding, only when the AND needs it, after the item's profile walk, charged per item byte, bounded by the control's maximum item size (program.md §4.2, format 1.1). Unregistered: `unknown_control` naming it. |
 
 ### 4.7 Regular expressions
 
@@ -559,7 +560,7 @@ machine (bench/VM.md P3.6); the workerd measurement is still to be taken
   simultaneously, not per type (C13). The Program records the requirement;
   compile refuses a schema whose Program + pool + scratch exceeds the cap.
 * **One scratch per isolate, not per schema** (A8): JS validation is
-  synchronous and the VM calls no host code, so a single lazily grown scratch
+  synchronous and the VM calls no host code (beyond a pure extension-control predicate, which must not call snug), so a single lazily grown scratch
   (grown to the largest compiled requirement, releasable) serves every
   compiled schema. 1 000 cached bus manifests cost their Programs, not 1 000
   scratch arenas. In Rust, `validate` takes a `&mut Scratch` (or a per-thread

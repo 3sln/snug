@@ -14,6 +14,7 @@ const decode = { ...preset, ...limits, objects: enumeration('null', 'plain') };
 const validation = { ...decode, maxBignumBytes: integer, budget: integer };
 const encode = { ...preset, ...limits, objects: decode.objects, omitUndefined: boolean };
 const scheduling = { quantum: value => integer(value) && value <= 0x7fffffff };
+const controlsShape = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const schema = value => value !== null && typeof value === 'object' &&
   typeof value.validate === 'function' && typeof value.validateAt === 'function';
 const compileLimits = Object.fromEntries(['schemaBytes', 'nesting', 'astNodes', 'instantiations',
@@ -30,7 +31,11 @@ const shapes = {
   snapshot: { delay: integer },
   compile: { profile: enumeration('full', 'bindle', 'bus'),
     limits: value => checked(value, compileLimits, 'limits'),
-    unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer) },
+    unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
+    // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`
+    controls: controlsShape, controlsInBus: boolean },
+  // loading a Program: the registry its extension controls need (D141)
+  program: { controls: controlsShape },
 };
 
 function checked(options, shape, context) {

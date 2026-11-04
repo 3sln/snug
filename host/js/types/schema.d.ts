@@ -1,4 +1,7 @@
 import type { DecodeOptions, Value, Reason } from './index.js';
+import type { Controls } from './controls.js';
+/** Loading a Program that uses extension controls needs their registry (D141). */
+export interface ProgramOptions { controls?: Controls }
 /** Invalid/unknown options throw TypeError, never a ValidationResult. Limits only lower compiled caps. */
 export interface ValidationOptions extends DecodeOptions {
   maxBignumBytes?: number;
@@ -22,19 +25,21 @@ export interface VmSession {
   step(window: Uint8Array, base: number): VmStep;
 }
 export type ProgramErrorCode = 'magic' | 'container_version' | 'format_version' |
-  'length' | 'version' | 'reserved' | 'digest' | 'verify' | 'too_large';
+  'length' | 'version' | 'reserved' | 'digest' | 'verify' | 'too_large' | 'missing_control';
 export declare class ProgramError extends Error {
   constructor(code: ProgramErrorCode);
   code: ProgramErrorCode;
 }
 /** Verified on construction; do not load Programs from untrusted stores. */
 export declare class Program {
-  constructor(P: Int32Array, B: Uint8Array);
+  constructor(P: Int32Array, B: Uint8Array, options?: ProgramOptions);
   /** Copies, never aliases of the verified storage. */
   readonly P: Int32Array;
   readonly B: Uint8Array;
   readonly sourceKey: string;
   readonly rules: readonly string[];
+  /** The extension controls this Program uses, by name (format 1.1). */
+  readonly controls: readonly string[];
   serialize(): Uint8Array;
 }
 export declare class Schema {
@@ -48,5 +53,5 @@ export declare class Schema {
 export declare function validate(schema: Schema, bytes: Uint8Array, rule: string, options?: ValidationOptions): ValidationResult;
 export declare function validateAt(schema: Schema, bytes: Uint8Array, start: number, end: number, rule: string, options?: SpanOptions): ValidationResult;
 export declare function decode(schema: Schema, bytes: Uint8Array, rule: string, options?: ValidationOptions): Value;
-export declare function fromProgram(P: Int32Array, B: Uint8Array): Promise<Schema>;
-export declare function fromSerialized(bytes: Uint8Array): Promise<Schema>;
+export declare function fromProgram(P: Int32Array, B: Uint8Array, options?: ProgramOptions): Promise<Schema>;
+export declare function fromSerialized(bytes: Uint8Array, options?: ProgramOptions): Promise<Schema>;

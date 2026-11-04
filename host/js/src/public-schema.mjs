@@ -4,13 +4,18 @@ import { vmVerify } from '../../../gen/js/snug/program/verify.mjs';
 import { parseSerialized, serializeProgram, ProgramError } from './serialized.mjs';
 import { validationFault } from './public-errors.mjs';
 import { SNUG_VERSION } from './version.mjs';
+import { controlEntries, programControls } from './ext.mjs';
+import { validateOptions } from './options.mjs';
 
 export { ProgramError };
 const internals = new WeakMap(), versions = new WeakMap();
 
 /** Verified, owned Program. Array accessors return copies (D102). */
 export class Program {
-  constructor(P, B) {
+  constructor(P, B, options = {}) {
+    validateOptions(options, 'program');
+    // D141: a Program using extension controls needs the same registry to load
+    const controls = controlEntries(options.controls);
     if (!(P instanceof Int32Array) || !(B instanceof Uint8Array))
       throw new TypeError('snug: Program needs Int32Array words and Uint8Array pool');
     if ((typeof SharedArrayBuffer === 'function') &&
@@ -18,8 +23,8 @@ export class Program {
       throw new TypeError('snug: copy SharedArrayBuffer input first');
     if (P.byteLength + B.length > 64 * 1024 * 1024) throw new ProgramError('too_large');
     let inner;
-    try { inner = new HostProgram(P, B, { verify: vmVerify }); }
-    catch { throw new ProgramError('verify'); }
+    try { inner = new HostProgram(P, B, { verify: vmVerify, controls }); }
+    catch (e) { if (e instanceof ProgramError) throw e; throw new ProgramError('verify'); }
     internals.set(this, inner); versions.set(this, SNUG_VERSION);
     Object.freeze(this);
   }
@@ -35,6 +40,11 @@ export class Program {
       names.push(td.decode(B.subarray(P[at], P[at] + P[at + 1])));
     }
     return Object.freeze(names);
+  }
+  /** The extension controls this Program uses (D141), by name. */
+  get controls() {
+    const { P, B } = internals.get(this);
+    return Object.freeze(programControls(P, B));
   }
   serialize() {
     const { P, B } = internals.get(this);
@@ -99,10 +109,11 @@ export class Schema {
 export const validate = (schema, bytes, rule, options) => schema.validate(bytes, rule, options);
 export const validateAt = (schema, bytes, start, end, rule, options) => schema.validateAt(bytes, start, end, rule, options);
 export const decode = (schema, bytes, rule, options) => schema.decode(bytes, rule, options);
-export async function fromProgram(P, B) { return new Schema(new Program(P, B)); }
-export async function fromSerialized(bytes) {
+export async function fromProgram(P, B, options = {}) { return new Schema(new Program(P, B, options)); }
+export async function fromSerialized(bytes, options = {}) {
+  validateOptions(options, 'program');
   const { P, B, version } = parseSerialized(bytes);
-  const program = new Program(P, B);
+  const program = new Program(P, B, options);
   versions.set(program, version);
   return new Schema(program);
 }

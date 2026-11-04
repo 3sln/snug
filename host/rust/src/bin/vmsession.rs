@@ -16,8 +16,26 @@
 // and key arena.
 use snug::schema::{validate_blob, BytesBlob, Options, Program, Segment};
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
-use snug::snug::vm::session::{vms_arena, vms_init, vms_need_length, vms_need_offset, vms_position, vms_step, vms_words};
+use snug::snug::vm::session::{vms_arena, vms_init, vms_need_length, vms_need_offset, vms_position, vms_step, vms_step_x,
+                               vms_words};
+use snug::controls::{program_controls, Control, Controls};
 use std::io::{BufRead, Write};
+use std::sync::Arc;
+
+/// P7.2: kin/scripts/ext-cases.mjs's test registry (as in bin/vm.rs).
+pub struct Even;
+impl Control for Even {
+    fn check(&self, _a: &[u8], item: &[u8]) -> bool { item.len() % 2 == 0 }
+    fn max_bytes(&self) -> u32 { 300 }
+}
+pub struct Tiny;
+impl Control for Tiny {
+    fn check(&self, a: &[u8], item: &[u8]) -> bool { snug::controls::Chars.check(a, item) }
+    fn max_bytes(&self) -> u32 { 8 }
+}
+fn test_controls() -> Controls {
+    Controls::generic().with("even", Even).with("tiny", Tiny)
+}
 
 const VMS_NEED: i32 = -64;
 const VMS_YIELD: i32 = -65;
@@ -53,6 +71,11 @@ fn run(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Polic
     let mut ss = vec![0i32; vms_words(p) as usize];
     let mut ka = vec![0u8; vms_arena(p, lim, n).max(0) as usize];
     let mut out = vec![0i32; 8 + 2 * 257];
+    let reg = test_controls();
+    let ext: Vec<Arc<dyn Control>> = program_controls(p, pool).iter().filter_map(|n| reg.get(n).cloned()).collect();
+    let xf = |id: i32, pl: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| -> bool {
+        ext[id as usize].check(&pl[ao as usize..(ao + al) as usize], &b[st as usize..e as usize])
+    };
     let ci = vms_init(p, pool, rule, lim, &mut s, &mut ss, &mut ka, n, pol.q);
     if ci < 0 {
         return format!("E vms-init {}", ci);
@@ -79,7 +102,11 @@ fn run(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Polic
         first = false;
         let e = n.min(off + l);
         let win: Vec<u8> = input[off as usize..e as usize].to_vec();
-        let r = vms_step(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off);
+        let r = if ext.is_empty() {
+            vms_step(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off)
+        } else {
+            vms_step_x(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &xf)
+        };
         steps += 1;
         if r >= 0 {
             let m = 8 + 2 * out[6] as usize;
@@ -140,7 +167,7 @@ fn main() {
                 let (p, pool) = &progs[n(1) as usize];
                 let input = unhex(f[7]);
                 let opts = Options { top_map: n(3) == 1, cose: n(4) == 1, ..Options::default() };
-                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match Program::new(p, pool) {
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match Program::new(p, pool).map(|mut h| { let _ = h.bind(&test_controls()); h }) {
                     Err(_) => "UNVERIFIED".to_string(),
                     Ok(h) => match validate_blob(&h, n(2), &BytesBlob(&input), &opts, n(5) as usize, n(6)) {
                         Err(e) => format!("SOURCE {:?}", e),

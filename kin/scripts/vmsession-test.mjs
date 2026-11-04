@@ -19,7 +19,9 @@
 //     node kin/scripts/vmsession-test.mjs <rust-vmsession-binary> [mutations] [seed] [schemas] [stress]
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
-import { vmScratchWords, vmScratchInit, vmValidate } from '../../gen/js/snug/vm/api.mjs';
+import { vmScratchWords, vmScratchInit, vmValidate, vmValidateX } from '../../gen/js/snug/vm/api.mjs';
+import { extFor, testControls } from './ext-cases.mjs';
+import { controlEntries } from '../../host/js/src/ext.mjs';
 import { buildVmCases } from './vm-allcases.mjs';
 import { sessionCases } from './vmsession-cases.mjs';
 import { runSession, sessionSteps } from './vmsession-run.mjs';
@@ -57,7 +59,8 @@ function buffer(c, lim) {
   const cap = Math.max(markCap, P[16], 1);
   const need = vmScratchWords(P, c.rule, cap);
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
-  const code = vmValidate(P, B, c.rule, c.bytes, lim, scratch, out);
+  const x = extFor(P, B);
+  const code = x ? vmValidateX(P, B, c.rule, c.bytes, lim, scratch, out, x) : vmValidate(P, B, c.rule, c.bytes, lim, scratch, out);
   return code < 0 ? `ERR ${code}` : Array.from(out.slice(0, 8 + 2 * out[6])).join(' ');
 }
 function guard(arr, name) {
@@ -151,9 +154,9 @@ const hostRuns = [];   // {ci, chunk, quantum, js}
 const hostProgs = new Map();
 const render = r => r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
 cases.forEach((c, ci) => {
-  if (!(c.corpus || c.stress) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0 || (c.lim[9] ?? 0) !== 0) return;
+  if (!(c.corpus || c.stress || c.ext) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0 || (c.lim[9] ?? 0) !== 0) return;
   if (!hostProgs.has(c.prog)) {
-    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify }); } catch { hp = null; }
+    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, controls: controlEntries(testControls) }); } catch { hp = null; }
     hostProgs.set(c.prog, hp);
   }
   const hp = hostProgs.get(c.prog);

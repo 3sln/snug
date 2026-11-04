@@ -8,7 +8,7 @@
 //! assert_eq!(program.source_key(), schema.program().source_key());
 //! # Ok::<(), snug::Error>(())
 //! ```
-use crate::{schema, sha256::sha256, Error};
+use crate::{controls::Controls, schema, sha256::sha256, Error};
 use std::sync::Arc;
 
 const HEADER: usize = 96;
@@ -55,11 +55,17 @@ impl Program {
     /// Copy and run kin's structural verifier on raw Program words and pool.
     /// Prefer deserialization for a persisted JS or Rust Program.
     pub fn from_parts(words: &[i32], pool: &[u8]) -> Result<Self, Error> {
-        Self::with_version(words, pool, crate::compile::snug_version().to_owned())
+        Self::from_parts_with(words, pool, &Controls::default())
     }
-    fn with_version(words: &[i32], pool: &[u8], version: String) -> Result<Self, Error> {
+    /// [`Program::from_parts`] for a Program using extension controls (D141): each
+    /// it names must be in `controls`, else [`Error::MissingControls`].
+    pub fn from_parts_with(words: &[i32], pool: &[u8], controls: &Controls) -> Result<Self, Error> {
+        Self::with_version(words, pool, crate::compile::snug_version().to_owned(), controls)
+    }
+    fn with_version(words: &[i32], pool: &[u8], version: String, controls: &Controls) -> Result<Self, Error> {
         body_len(words.len(), pool.len())?;
-        let host = schema::Program::new(words, pool).map_err(|_| Error::Program("verify"))?;
+        let mut host = schema::Program::new(words, pool).map_err(|_| Error::Program("verify"))?;
+        host.bind(controls).map_err(Error::MissingControls)?;
         let count = usize::try_from(*words.get(15).ok_or(Error::Program("verify"))?)
             .map_err(|_| Error::Program("verify"))?;
         let base = usize::try_from(*words.get(42).ok_or(Error::Program("verify"))?)
@@ -104,6 +110,10 @@ impl Program {
     /// Validatable rule names in the compiler's UTF-8 sort order.
     pub fn rules(&self) -> &[String] {
         &self.0.rules
+    }
+    /// The extension controls this Program uses (D141), by name.
+    pub fn controls(&self) -> Vec<String> {
+        self.0.host.controls()
     }
     /// Informational producer version, preserved by reserialization.
     pub fn producer_version(&self) -> &str {
@@ -158,6 +168,11 @@ impl Program {
     /// Check framing, format compatibility, canonical version padding, reserved
     /// bytes, SHA-256 and finally kin vm-verify before owning a Program.
     pub fn deserialize(bytes: &[u8]) -> Result<Self, Error> {
+        Self::deserialize_with(bytes, &Controls::default())
+    }
+    /// [`Program::deserialize`] for a Program using extension controls (D141): the
+    /// same registry it was compiled with, else [`Error::MissingControls`].
+    pub fn deserialize_with(bytes: &[u8], controls: &Controls) -> Result<Self, Error> {
         if bytes.len() < HEADER {
             return Err(Error::Program("length"));
         }
@@ -171,7 +186,8 @@ impl Program {
             return Err(Error::Program("container_version"));
         }
         let format = word(bytes, 12)?;
-        if format & 0xffff != 1 || format >> 16 > 0 {
+        // D084/D141: major 1, minor up to 1 (extension controls)
+        if format & 0xffff != 1 || format >> 16 > 1 {
             return Err(Error::Program("format_version"));
         }
         let (nw, nb) = (word(bytes, 16)? as usize, word(bytes, 20)? as usize);
@@ -229,6 +245,7 @@ impl Program {
             &words,
             bytes.get(words_end..).ok_or(Error::Internal)?,
             version,
+            controls,
         )
     }
 }

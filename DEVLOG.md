@@ -2846,6 +2846,105 @@ some bundlers refuse it); keep aliases valid until the next SDK call
 (rejected: a silent use-after-free class).
 - [ ] **Signed off** (owner)
 
+### D140 — Extension controls: an EXT leaf decided by a host predicate inside the combinator pass (P7.2)
+**Decision** (VM-features engineer, provisional; implements D082): `target
+.name argument` with `.name` registered lowers to one EXT leaf (control id,
+the argument's CBOR encoding, the control's maximum item bytes) and
+`AND(t, EXT)` for every leaf t of the target, so the EXT never answers alone.
+The VM decides an EXT only in `finish-comb` (the item's end, after its whole
+walk, so the item's encoding [pos, end) is known and profile-checked), only
+when a combinator needs it -- an AND's first operand, its second operand once
+the first matched, a NOT's target -- and at most once per item. Charge: 1,
+then (when the item is no longer than the maximum) 1 per item byte, then the
+predicate; longer than the maximum: reason `control_size` (43) for the 1 unit,
+never asking; predicate false: `control` (42). The host port is a value, not a
+global: a kin tag `Ext` (snug.lang; JS a function, Rust `&dyn Fn(i32, &[u8],
+i32, i32, &[u8], i32, i32) -> bool`) threaded as the last argument through
+the 30 live-walk and session functions that reach `finish-comb`; the
+existing entry points keep their signatures and pass `ext-none`
+(`vm-validate-x`, `vm-validate-span-x`, `vms-step-x` take a predicate).
+**Why**: an ordinary leaf keeps type-set exactness (D010) for free; deciding
+it lazily never asks about an item whose target already failed; deciding it
+at the item's end gives containers their whole encoding; a threaded value is
+reentrant and thread-safe, and needs neither a `@kin:link` host module nor
+generated code importing host files (the package staging rewrites only
+generated imports). Charging per byte bounds a hostile message's predicate
+work by the budget (predicates are arbitrary host code).
+**Alternatives**: a `@kin:link` host form with a global/thread-local registry
+(not reentrant; generated JS would import a host path); D032's two-round call
+(the recursive buffer walk cannot suspend: one restart per query); a
+post-validation callback pass (D082 rejected it: no single derivation);
+deciding every admitted EXT eagerly (asks about items the target refused);
+charging ⌈len/64⌉ like built-in scans (host code is not kin's cost).
+- [ ] **Signed off** (owner)
+
+### D141 — Format 1.1, the registry in the compiler options and the source key, binding at load (P7.2)
+**Decision** (provisional): Program format **1.1** (D084: an additive minor)
+= leaf kind 18 EXT (d0 id, d1/d2 argument pool span, d3 maximum, mask ALL),
+FLAGS bit 4, header words 30 `N_EXTS`, 31 / 39 the pool span of the used
+controls' names (deterministic CBOR text strings, strictly ascending, 1..64
+bytes `[A-Za-z_][A-Za-z0-9_-]*`; id = position). The compiler writes 1.1 only
+when an EXT is used: every other Program stays byte-identical 1.0. vm-verify:
+format word 1 or 0x00010001; under 1.0 words 30/31/39 zero and no kind 18;
+the name table (check `C_EXT` 24); EXT fields; no EXT as a typeset answer.
+The registry rides after the 19 compile option words (`opt[19]` n, `opt[20]`
+flags with bit 0 = admitted under `bus`, then name length, maximum, name
+bytes, sorted; kin refuses a malformed one as `control_registry`, 55), so the
+compile entry point and every older host are unchanged. SOURCE_KEY: with a
+registry the preimage has 8 elements -- the 7th the D110 Unicode words or
+`[]`, the 8th `[flags, [[name, max]...]]` over the WHOLE registry. Loading a
+1.1 Program (`fromSerialized(bytes, { controls })`, `fromProgram`, `new
+Program(P, B, { controls })`; Rust `deserialize_with`, `from_parts_with`,
+`Schema::from_serialized_with`) binds each named control; a missing one is
+`ProgramError('missing_control')` / `Error::MissingControls`, naming it.
+The `bus` profile refuses EXT (`profile`) unless the flag admits them. An
+unregistered `.name` stays `unknown_control`; hosts add the name to the
+message from kin's new `error-offset`.
+**Why**: additive and opt-in (D084's minor rule), caches cannot mix
+registries, untrusted-schema profiles do not run host code by default.
+**Alternatives**: a 20th Program section (moves S_END; a 1.0 loader would
+mis-walk it); ids in registry order (Programs would need unused controls at
+load); max bytes as a call option (sessions and buffers must agree; a
+Program-carried value makes every source give the same answer).
+- [ ] **Signed off** (owner)
+
+### D142 — Generic controls in kin, argument literals, compile-time argument checks (P7.2)
+**Decision** (provisional): `.chars n | lo..hi` (code points of a text
+string), `.unique <any>` (pairwise distinct element encodings of an array:
+heap sort of element spans in host scratch, O(n log n), no allocation in
+kin), `.samelen "a" | [names]` (equal element counts of the named, present,
+array / typed-array members of a map) are kin functions (`snug.vm.controls`)
+wrapped by `snug/controls` and `snug::controls`, so JS == Rust by
+construction. A control argument is the CBOR encoding of a literal
+controller: integer, text, bytes, a named simple value, a range `lo..hi` as
+`[lo, hi]` (inclusive; `...` already normalised), or an array of those;
+anything else is `control_value`. A registered control may supply
+`argument(bytes) -> bool`, checked once per use after compilation
+(`control_value` naming it); the generic controls do. Compile-time literal
+membership in an EXT is unknown, so `.eq`/`.ne`/`.and` never fold through one
+(AND / NOT kept) and map determinism treats it as possibly matching (stricter
+only).
+**Why**: one implementation for both hosts; arguments as plain CBOR keep
+predicates host-agnostic. **Alternatives**: host-written generic controls
+(two implementations to keep equal); arguments as typesets (no literal form
+to hand a predicate).
+- [ ] **Signed off** (owner)
+
+### D143 — Sessions take an EXT item whole up to its maximum (P7.2)
+**Decision** (provisional): before routing an item whose query list holds an
+EXT leaf, the session asks for min(largest EXT maximum, bound − pos) bytes from
+the item's start and prescans with that cut: if the item ends there, the
+buffer walk takes it whole (whatever the quantum); otherwise it is longer
+than every such maximum, so each EXT fails by size before asking and the walk
+goes on as routed (frames need no item bytes for that). A byte string no
+leaf reads is otherwise walked from its head alone, so the rule runs whatever
+`direct` was decided. Map keys are already whole (D092).
+**Why**: verdict, offset, budget and items equal the buffer's under every
+split (gated); a stream buffers at most the control's maximum for it.
+**Alternatives**: retaining every crossing item's bytes (unbounded); a
+per-item EXT byte cursor (predicates take whole items).
+- [ ] **Signed off** (owner)
+
 ### D150 — One host option validator with per-operation allowlists (P7.10)
 **Decision**: all public JS option bags, including compile/grouped limits,
 view detached checks and source/scheduling bags, use options.mjs. Require
@@ -3080,15 +3179,74 @@ are answered as provisional decisions D082–D085. None is open now.
     scan shim have no profile option yet; `wire` should be added to P7.10's
     option-key admission; cbor2's `rejectLongFloats` cannot separate float
     width from integral floats, so that class is confirmed, not compared.
-- [~] **P7.2 — Extension controls** (D082) and the generic controls module.
-  *In progress 2026-11-03 (VM-features engineer, Claude).* Coordination with
-  P7.10 (Codex, host/js option validation): kin first (snug.lang `Ext` tag,
-  VM, verifier, compiler, sessions); host/js edits are additive — new files
-  `host/js/src/controls.mjs`, `host/js/src/ext.mjs`, and small hooks in
-  `compile.mjs`, `schema.mjs`, `public-schema.mjs`, `serialized.mjs`,
-  `sources.mjs` (re-read before every edit; only my hunks committed). New
-  option keys to admit in `options.mjs`: compile `controls`; validation
-  `failFast` (D085); sources `streamSource`/unknown length. Then D085 (P6.4b).
+- [x] **P7.2 — Extension controls** (D082) and the generic controls module.
+  *Done 2026-11-03 by the VM-features engineer (Claude); commits `6d63892`,
+  `0012463` and the host/docs commit after them.* Decisions **D140–D143**.
+  - **kin:** snug.lang tag `Ext` + forms `ext-call` / `ext-none`; the predicate
+    is threaded as the last argument of the 30 live-walk and session functions
+    reaching `finish-comb` (a rewrite-clj script; `vm-validate`,
+    `vm-validate-span`, `vms-step` keep their signatures, `-x` variants take
+    one). EXT leaves (kind 18) are decided lazily in the combinator pass at the
+    item's end, once per item: 1 unit, + 1 per item byte and the predicate, or
+    `control_size` (43) past the leaf's maximum; `control` (42) when refused
+    (D140). Compiler: registry after the 19 option words (snug.compile.ext,
+    `control_registry` 55), `lower-ext` (AND per target leaf), argument
+    literals (`ext-arg`), `.eq`/`.ne`/`.and` never fold through an EXT,
+    `lit-member` answers a conservative yes; emit writes format 1.1 only for a
+    Program using a control (header words 30/31/39, names table, FLAGS bit 4);
+    SOURCE_KEY's 8th element is the whole registry; `error-offset` for hosts
+    to name an unknown control (D141). vm-verify: 1.0/1.1 format word, the
+    names table (check 24), EXT fields, no EXT answer. Session: an item whose
+    query holds an EXT is asked for whole up to the largest maximum (D143).
+    Generic `.chars`/`.unique`/`.samelen` in `snug.vm.controls` (D142).
+  - **Hosts:** JS `snug/controls` (new export; `controls.mjs`, `ext.mjs`),
+    `compile(text, { controls, controlsInBus })`, `new Program(P, B, {
+    controls })`, `fromProgram`/`fromSerialized(bytes, { controls })`,
+    `program.controls`, `ProgramError('missing_control')` naming them, reasons
+    `control` / `control_size`, a throwing predicate makes the call throw
+    (`cause`), loader minor 1, options admitted in options.mjs, types. Rust
+    `snug::controls` (`Control` trait objects, closures included,
+    `Controls::generic()`, `in_bus`), `CompileOptions::controls`,
+    `Program::{from_parts_with, deserialize_with, controls}`,
+    `Schema::from_serialized_with`, `Error::MissingControls`, `SchemaError::detail`;
+    the compiler sees a registry through `compile::Registry` (the compile crate
+    builds without the VM).
+  - **Gates (actual runs, Node v24.6.0, rustc 1.92, this tree, defaults):**
+    `bb check` ok; **scan-test** 31,360/31,360 + profile options ok;
+    **rscan-test** 259,081 policy + 267,541 split runs, Rust 259,032 identical;
+    **compile-test** 301/301 identical, 270/270 verified, §15 unchanged, 55/55
+    SOURCE_KEYs (format 1.0 Programs byte-identical); **compile-fuzz** 3,000
+    texts, 441/2,559, ok; **nav-test** ok; **write-test** ok; **unicode-test**
+    ok (574 JS == Rust); **rust-api-test** ok (incl. the new
+    `tests/controls.rs`: shared table, compile/serialise/refuse, closures and
+    `max_bytes`; clippy; docs/rust.md doctest of the controls example);
+    **vm-test** profile identity 63,612/63,612, conformance 983/983, oracle
+    3,200/3,200, 5,142/5,142 §15 + assembled + **1,466 extension-control cases
+    (26 with fixed verdicts: exactness under choices, keys, `.ne`, size bound,
+    embedded)**, fast == generic 72,937/72,937 (both schedules), JS == Rust
+    72,937/72,937, hosts 2,215/2,215, wasm 71,468/71,468 (EXT cases excluded:
+    no wasm port); **vmsession-test** 969,521/969,521 session runs == buffer
+    over 72,934 vm-test cases (the EXT ones included) and 900 stress, traps
+    91,201, interleaved 9,501, JS == Rust 628,417/628,417, hosts 8,247/8,247;
+    **npm test 1,292 passed / 0 failed** (8 new in `controls.test.mjs`: shared
+    table + an independent decode-based oracle, exactness, `maxBytes` under
+    every source, every split and budget, unknown/argument/registry errors,
+    `bus`, format 1.1 + source key + serialised loading, encoded arguments and
+    a throwing predicate); **bb drift** ok after the commit.
+  - **Learnt:** the first session run went red on `{x: …, y: [* (bstr .even
+    0)]}` under 1-byte windows: `direct = 1` does not mean "whole in the
+    window" -- a byte string no leaf reads is walked from its head alone, so
+    the EXT rule has to run whatever routing decided (D143). Rust: a generic
+    `&dyn Fn` port needs no host module in any of the five crates; a trait
+    reference in `compile.rs` must not name host modules the compile crate
+    lacks. Exactness needed nothing new: AND already made an EXT an ordinary
+    same-item dependency.
+  - **Open:** the wasm shim and host/wasm-sdk have no extension-control port
+    (EXT Programs are excluded from the wasm comparison); per-call lowering of
+    a control's maximum is not offered (the Program carries it); predicates
+    are trusted to be pure -- a host could memoise by (id, argument, item) but
+    snug does not; `.unique` compares encodings (so `1` and `1.0` differ, as
+    documented).
 - [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
   *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.
   Offline Node v24.6.0 / ICU 77.1 / Unicode 16.0 generation produces the same

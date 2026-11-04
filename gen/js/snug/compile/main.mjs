@@ -490,6 +490,16 @@ export function errorLine(h) {
     return hg(h, H_ERR_LINE);
 }
 
+export function errorOffset(h) {
+    // The error's byte offset in the schema text (-1 when not about a place in
+    // it); at an `unknown_control` error, the control's `.` (D141: hosts name it).
+    const pos = hg(h, H_ERR_POS);
+    if (pos > hg(h, H_NSRC)) {
+        return -1;
+    }
+    return pos;
+}
+
 export function errorColumn(h) {
     return hg(h, H_ERR_COL);
 }

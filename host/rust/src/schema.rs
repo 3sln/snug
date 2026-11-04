@@ -6,13 +6,31 @@
 //! rendered from the Program's key table only (program.md §9.3).
 use crate::snug::cbor::scan::code_name;
 use crate::snug::program::verify::vm_verify;
-use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span};
+use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span,
+                           vm_validate_span_x, vm_validate_x};
+use crate::controls::{program_controls, Control, Controls};
+use std::sync::Arc;
 
 /// A verified Program (docs/program.md format 1) from a store the host trusts.
 #[derive(Debug, Clone)]
 pub struct Program {
     p: Vec<i32>,
     b: Vec<u8>,
+    ext: Option<Bound>,
+}
+
+/// A Program's extension controls bound to predicates, in id order (D141).
+#[derive(Clone)]
+struct Bound(Vec<Arc<dyn Control>>);
+impl std::fmt::Debug for Bound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Bound({})", self.0.len())
+    }
+}
+impl Bound {
+    fn call(&self, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32) -> bool {
+        self.0[id as usize].check(&pool[ao as usize..(ao + al) as usize], &b[s as usize..e as usize])
+    }
 }
 
 /// `vm-verify` refused the Program: the word (or pool byte) offset and check id.
@@ -33,7 +51,25 @@ impl Program {
         if vm_verify(p, b, &mut s) != 0 {
             return Err(Refused { at: s[35], check: s[36] });
         }
-        Ok(Program { p: p.to_vec(), b: b.to_vec() })
+        Ok(Program { p: p.to_vec(), b: b.to_vec(), ext: None })
+    }
+    /// The extension controls this Program uses (format 1.1, D141), by name.
+    pub fn controls(&self) -> Vec<String> {
+        program_controls(&self.p, &self.b)
+    }
+    /// Bind the Program's extension controls to `controls`; the names it lacks
+    /// on failure. Until bound, an extension control never matches.
+    pub fn bind(&mut self, controls: &Controls) -> Result<(), Vec<String>> {
+        let names = self.controls();
+        if names.is_empty() {
+            return Ok(());
+        }
+        let missing: Vec<String> = names.iter().filter(|n| controls.get(n).is_none()).cloned().collect();
+        if !missing.is_empty() {
+            return Err(missing);
+        }
+        self.ext = Some(Bound(names.iter().filter_map(|n| controls.get(n).cloned()).collect()));
+        Ok(())
     }
     /// A rule's index (its position in RULES), or None.
     pub fn rule(&self, name: &str) -> Option<i32> {
@@ -148,7 +184,8 @@ pub fn reason_name(code: i32) -> &'static str {
         14 => "cbor/typed_array", 15 => "cbor/ndarray", 16 => "cbor/trailing", 17 => "cbor/depth",
         18 => "cbor/too_many_entries", 19 => "cbor/too_many_items", 20 => "cbor/too_large", 21 => "cbor/not_map",
         32 => "type", 33 => "missing", 34 => "unexpected", 35 => "value", 36 => "size", 37 => "range",
-        38 => "pattern", 39 => "tag", 40 => "bits", 41 => "embedded", 48 => "budget",
+        38 => "pattern", 39 => "tag", 40 => "bits", 41 => "embedded", 42 => "control", 43 => "control_size",
+        48 => "budget",
         _ => if code > 0 && code < 32 { code_name(code) } else { "unknown" },
     }
 }
@@ -184,7 +221,13 @@ pub fn validate(prog: &Program, rule: i32, bytes: &[u8], opts: &Options, scratch
     let mut out = [0i32; 8 + 2 * 257];
     let lim = opts.words();
     let s = scratch.lease(prog, rule);
-    let c = vm_validate(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out);
+    let c = match &prog.ext {
+        Some(x) => {
+            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| x.call(id, pool, ao, al, b, st, e);
+            vm_validate_x(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out, &f)
+        }
+        None => vm_validate(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out),
+    };
     assert!(c >= 0, "snug: vm-validate answered {} for a verified Program", c);
     result(prog, &out)
 }
@@ -197,14 +240,21 @@ pub fn validate_at(prog: &Program, rule: i32, bytes: &[u8], start: i32, end: i32
     let mut lim = opts.words();
     lim[0] = if opts.top_map { 0 } else { 1 };
     let s = scratch.lease(prog, rule);
-    let c = vm_validate_span(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out);
+    let c = match &prog.ext {
+        Some(x) => {
+            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| x.call(id, pool, ao, al, b, st, e);
+            vm_validate_span_x(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out, &f)
+        }
+        None => vm_validate_span(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out),
+    };
     assert!(c >= 0, "snug: vm-validate-span answered {} for a verified Program", c);
     result(prog, &out)
 }
 
 // ---------------------------------------------------------------- sessions (P6.2)
 
-use crate::snug::vm::session::{vms_arena, vms_init, vms_keep, vms_need_length, vms_need_offset, vms_position, vms_step, vms_words};
+use crate::snug::vm::session::{vms_arena, vms_init, vms_keep, vms_need_length, vms_need_offset, vms_position, vms_step,
+                               vms_step_x, vms_words};
 
 const VMS_NEED: i32 = -64;
 const VMS_YIELD: i32 = -65;
@@ -251,7 +301,13 @@ impl<'p> Session<'p> {
         if let Some(d) = &self.done {
             return Step::Done(d.clone());
         }
-        let r = vms_step(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base);
+        let r = match &self.prog.ext {
+            Some(x) => {
+                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| x.call(id, pool, ao, al, b, st, e);
+                vms_step_x(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base, &f)
+            }
+            None => vms_step(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base),
+        };
         if r == VMS_NEED {
             return Step::Need { offset: vms_need_offset(&self.ss), len: vms_need_length(&self.ss), keep: vms_keep(&self.ss) };
         }

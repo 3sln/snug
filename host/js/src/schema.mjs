@@ -5,15 +5,16 @@
 // synchronous validation holds one shared scratch for the duration of a call)
 // and the rendering of results (reason names, paths rendered from the
 // Program's key table only, §9.3).
-import { vmScratchWords, vmScratchInit, vmRuleIndex, vmValidate, vmValidateSpan } from '../../../gen/js/snug/vm/api.mjs';
-import { vmsWords, vmsArena, vmsInit, vmsStep, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../../gen/js/snug/vm/session.mjs';
+import { vmScratchWords, vmScratchInit, vmRuleIndex, vmValidate, vmValidateSpan, vmValidateX, vmValidateSpanX } from '../../../gen/js/snug/vm/api.mjs';
+import { vmsWords, vmsArena, vmsInit, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../../gen/js/snug/vm/session.mjs';
+import { bindControls, rethrow } from './ext.mjs';
 import { codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { build } from './build.mjs';
 import { profileFlags } from './profiles.mjs';
 import { validateOptions } from './options.mjs';
 
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
-  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 48: 'budget' };
+  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 48: 'budget' };
 export function reasonName(code) {
   if (code >= 1 && code <= 21) return 'cbor/' + codeName(code);
   return REASONS[code] ?? 'unknown';
@@ -52,7 +53,7 @@ function lim(v) { return v === undefined ? -1 : Math.min(v, 0x7fffffff); }
 const td = new TextDecoder('utf-8', { fatal: true });
 /** A Program (P: Int32Array, B: Uint8Array) the host trusts (architecture §5.2). */
 export class Program {
-  constructor(P, B, { verify } = {}) {
+  constructor(P, B, { verify, controls } = {}) {
     // copy on load: P and B stay private after verification (program.md §11)
     this.P = Int32Array.from(P); this.B = Uint8Array.from(B);
     if (verify) {
@@ -64,6 +65,8 @@ export class Program {
       const r = verify(this.P, this.B, S);
       if (r !== 0) throw new Error(`snug: Program refused by vm-verify (word ${S[35]}, check ${S[36]})`);
     }
+    // D141: a Program naming extension controls runs only with their predicates
+    this.ext = bindControls(this.P, this.B, controls ?? []);
     this.rules = new Map();
   }
   ruleIndex(name) {
@@ -84,14 +87,21 @@ export class Program {
   }
   /** Low level: run the VM; answers the out words (code first) as a fresh array. */
   run(rule, bytes, opts, span) {
-    const S = lease(this.P, rule);
+    const S = lease(this.P, rule), x = this.ext;
+    let o;
     try {
-      const c = span
-        ? vmValidateSpan(this.P, this.B, rule, bytes, span.start, span.end, span.depth ?? 0, span.items ?? 0, limitWords(opts), S, out)
-        : vmValidate(this.P, this.B, rule, bytes, limitWords(opts), S, out);
-      if (c < 0) throw new Error(`snug: vm-validate answered ${c}`);
-      return out.slice(0, 8 + 2 * out[6]);
+      const c = x
+        ? (span
+          ? vmValidateSpanX(this.P, this.B, rule, bytes, span.start, span.end, span.depth ?? 0, span.items ?? 0, limitWords(opts), S, out, x.call)
+          : vmValidateX(this.P, this.B, rule, bytes, limitWords(opts), S, out, x.call))
+        : (span
+          ? vmValidateSpan(this.P, this.B, rule, bytes, span.start, span.end, span.depth ?? 0, span.items ?? 0, limitWords(opts), S, out)
+          : vmValidate(this.P, this.B, rule, bytes, limitWords(opts), S, out));
+      if (c < 0 && !(x && x.failure)) throw new Error(`snug: vm-validate answered ${c}`);
+      o = out.slice(0, 8 + 2 * out[6]);
     } finally { leased = false; }
+    rethrow(x);
+    return o;
   }
   /** A resumable validation session over a message of exactly `length` bytes
    *  (architecture §17, P6.2): see VmSession. */
@@ -147,12 +157,18 @@ export class VmSession {
   get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length) + this.ka.length; }
   step(window, base) {
     if (this.verdict) return this.verdict;
+    if (this.dead) throw this.dead;
     if (this.busy) throw new Error('snug: a session cannot be resumed concurrently');
     if (!(window instanceof Uint8Array)) throw new TypeError('snug: a window is a Uint8Array');
     this.busy = true;
     let r;
-    try { r = vmsStep(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base); }
-    finally { this.busy = false; }
+    const x = this.program.ext;
+    try {
+      r = x ? vmsStepX(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x.call)
+        : vmsStep(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base);
+    } finally { this.busy = false; }
+    // a predicate that threw voids the session (its walk went on with a false verdict)
+    try { rethrow(x); } catch (e) { this.dead = e; throw e; }
     if (r === VMS_NEED) return { state: 'need', offset: vmsNeedOffset(this.ss), length: vmsNeedLength(this.ss), keep: vmsKeep(this.ss) };
     if (r === VMS_YIELD) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
     if (r < 0) throw new Error(`snug: vms-step answered ${r}`);
@@ -208,12 +224,13 @@ export class Schema {
 export async function compile(text, opts = {}) {
   const [{ compile: compileCddl }, { vmVerify }] = await Promise.all([
     import('./compile.mjs'), import('../../../gen/js/snug/program/verify.mjs')]);
-  const { program, pool } = compileCddl(text, opts);
-  return new Schema(new Program(program, pool, { verify: vmVerify }));
+  const { program, pool, controls } = compileCddl(text, opts);
+  return new Schema(new Program(program, pool, { verify: vmVerify, controls }));
 }
 
 /** fromProgram(P, B) -> Schema, for a Program compiled elsewhere (a trusted store). */
-export async function fromProgram(P, B) {
-  const { vmVerify } = await import('../../../gen/js/snug/program/verify.mjs');
-  return new Schema(new Program(P, B, { verify: vmVerify }));
+export async function fromProgram(P, B, { controls } = {}) {
+  const [{ vmVerify }, { controlEntries }] = await Promise.all([
+    import('../../../gen/js/snug/program/verify.mjs'), import('./ext.mjs')]);
+  return new Schema(new Program(P, B, { verify: vmVerify, controls: controlEntries(controls) }));
 }

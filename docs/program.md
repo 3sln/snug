@@ -10,7 +10,11 @@ resolutions are accepted. A rejected resolution changes this document before
 either side builds on it.
 
 Changes after freezing bump `FORMAT_VERSION` (header word 1); the VM refuses
-any other version.
+any other version. **Format 1.1** (D084, D141, 2026-11-03) adds extension
+controls: leaf kind 18 `EXT` (§4.2), header words 30, 31 and 39 (§2, §4.6),
+reason codes 42 and 43 (§9.1) and a charge row (§14). The compiler writes 1.1
+only for a Program that uses an extension control; every other Program is
+byte-identical to 1.0.
 
 ---
 
@@ -88,7 +92,7 @@ and requires `index[id]` to equal the walk position.
 | 3 | `PROGRAM_WORDS` | length of P | [V] |
 | 4 | `POOL_BYTES` | length of B | [V] |
 | 5 | `PROFILE` | 0 `full`, 1 `bindle`, 2 `bus` (informative at run time) | [V] |
-| 6 | `FLAGS` | bit 0: some key in KEYS is an integer; bit 1: a TEXT leaf has a regexp; bit 2: an EMBED leaf exists; bit 3: an AND/NOT leaf exists | [D] |
+| 6 | `FLAGS` | bit 0: some key in KEYS is an integer; bit 1: a TEXT leaf has a regexp; bit 2: an EMBED leaf exists; bit 3: an AND/NOT leaf exists; bit 4 (1.1): an EXT leaf exists | [D] |
 | 7–14 | `SOURCE_KEY` | SHA-256 of the source preimage (§13.2), 8 words, word i = big-endian bytes 4i..4i+3 as i32. The kin compiler writes zeros; the host fills it before the Program is used or stored. Not verifiable. | — |
 | 15 | `N_RULES` | rules | [V] |
 | 16 | `N_LEAVES` | leaves (≤ 2^20, §17 Q18) | [V] |
@@ -105,7 +109,8 @@ and requires `index[id]` to equal the walk position.
 | 27 | `N_CHAINS` | closure chains | [V] |
 | 28 | `TS_ANY` | typeset id of `{ANY}`, or −1 if no leaf needs it | [V] |
 | 29 | `G_EMPTY` | group id of the empty group, or −1 | [V] |
-| 30–31 | reserved | 0 | |
+| 30 | `N_EXTS` | format 1.1: extension controls in the table (§4.6); 0 under 1.0 | [V] |
+| 31 | `EXT_NAMES` | format 1.1: pool offset of their names; 0 when `N_EXTS` = 0 | [V] |
 | 32 | `LIM_DEPTH` | compiled depth **D** (default 32, ≤ 256); scratch is sized for item depths 0..D | [V] |
 | 33 | `LIM_INPUT_BYTES` | default input bytes (≤ 2^31 − 1) | [V] |
 | 34 | `LIM_ENTRIES` | default entries per container (≤ 2^24) | [V] |
@@ -113,7 +118,7 @@ and requires `index[id]` to equal the walk position.
 | 36 | `LIM_BIGNUM_BYTES` | default bignum content bytes (≤ 4 096) | [V] |
 | 37 | `LIM_BUDGET` | default step budget | [V] |
 | 38 | `LIM_TOTAL_BYTES` | the compile cap on Program + pool + scratch bytes that this Program was checked against (≤ 64 MiB) | [V] |
-| 39 | reserved | 0 | |
+| 39 | `EXT_NAMES_LEN` | format 1.1: byte length of the names; 0 when `N_EXTS` = 0 | [V] |
 | 40 | `SCRATCH_MAX` | max over rules of `rule.scratch_words` | [D] |
 | 41 | reserved | 0 | |
 | 42–61 | `S_RULES` … `S_CHAIN_DATA` | word offsets of sections S0..S19 | [V] |
@@ -192,8 +197,10 @@ match whole classes and a prefilter for the rest.
 | 15 | `MAP` | 0 | map id | | | | | `020` | every literal entry's value typeset; every key and value typeset of every group its pools use |
 | 16 | `AND` | 0 | leaf a | leaf b | | | | `mask(a) & mask(b)` | none (operands are same-item dependencies) |
 | 17 | `NOT` | 0 | target leaf | literal leaf (kind `LIT`) | | | | `mask(target)` | none |
+| 18 | `EXT` (1.1) | 0 | control id (< `N_EXTS`) | argument byte offset | argument length ≥ 1 | max item bytes ≥ 0 | | `ALL` | none |
 
-Kind 0 and kinds ≥ 18 are invalid. Unused `d` words are 0.
+Kind 0 and kinds ≥ 19 are invalid; kind 18 only under format 1.1. Unused `d`
+words are 0.
 
 Notes on kinds:
 
@@ -215,6 +222,29 @@ Notes on kinds:
 * **NOT** is only `target ∧ ¬literal` (`.ne` on non-numeric targets).
 * **TAG** content and **EMBED** content and every map/array child are typeset
   ids, never leaf ids.
+* **EXT** (format 1.1, D140/D141) is an extension control: `target .name
+  argument` with `.name` registered with the compiler. The compiler emits one
+  EXT leaf per (control, argument encoding, max) and `AND(t, EXT)` for each
+  leaf t of the target, so an EXT is never an answer by itself (verified). The
+  VM decides an EXT only inside the combinator pass (§8.4), only when it is
+  needed — an AND's second operand once the first matched, an AND's first
+  operand or a NOT's target — and at most once per item: an item longer than
+  d3 bytes fails with `control_size` without asking; otherwise the host
+  predicate is called with (d0, the pool bytes [d1, d1 + d2), the item's whole
+  encoding) and its verdict is MATCHED or `control`. The argument is the CBOR
+  encoding of the controller literal (an integer, text, bytes, a simple value,
+  a range `lo..hi` as the array `[lo, hi]`, or an array of those).
+
+### 4.6 The extension-control table (format 1.1)
+
+Header word 30 (`N_EXTS`) counts the extension controls the Program uses;
+words 31 and 39 locate their names in the pool: `N_EXTS` deterministic CBOR
+text strings, back to back, filling exactly [`EXT_NAMES`, + `EXT_NAMES_LEN`).
+Each name is 1..64 bytes `[A-Za-z_][A-Za-z0-9_-]*`, the names strictly
+ascending bytewise; control id i is the i-th name [V]. With `N_EXTS` = 0 both
+words are 0. A host binds each name to its registry's predicate when it loads
+the Program and refuses a Program naming a control its registry lacks
+(`missing_control`, naming it); the VM itself never reads the names.
 
 ### 4.3 Integer intervals (S13)
 
@@ -634,7 +664,9 @@ and every factor is satisfied.
 | 7 | `cbor/duplicate_key` | | 39 | `tag` |
 | 8 | `cbor/text` | | 40 | `bits` |
 | 9 | `cbor/float` | | 41 | `embedded` |
-| 10 | `cbor/simple` | | 48 | `budget` |
+| 10 | `cbor/simple` | | 42 | `control` (1.1) |
+| | | | 43 | `control_size` (1.1) |
+| | | | 48 | `budget` |
 | 11 | `cbor/tag` | | | |
 | 12 | `cbor/bignum` | | | |
 | 13 | `cbor/decimal` | | | |
@@ -648,7 +680,7 @@ and every factor is satisfied.
 | 21 | `cbor/not_map` | | | |
 
 Codes 1–21 are exactly `snug.cbor.codes` (`kin/codes.kin`, `CODE_*`, cbor.mjs
-order); 22–31 are reserved for the scanner; 42–47 and 49–63 reserved. A
+order); 22–31 are reserved for the scanner; 44–47 and 49–63 reserved. A
 reason code fits in 8 bits.
 
 `embedded` carries a **subcode**: the innermost non-`embedded` reason of the
@@ -672,6 +704,7 @@ Leaf failure reasons, decided in this fixed order per kind:
 | `EMBED` | sub-validation → `embedded` |
 | `AND` | the first failing operand's reason (a, then b) |
 | `NOT` | target's reason; literal matched → `value` |
+| `EXT` (1.1) | item longer than d3 → `control_size`; predicate false → `control` |
 | `ARRAY`, `MAP` | witnesses arise at elements, pairs or the end (§9.2) |
 
 ### 9.2 The witness (arch §6 rules, made operational)
@@ -809,6 +842,11 @@ Order (first failure refuses, with the failing word offset and a check id in
    cset `frame_words`/`regex_words`, rule `scratch_words`, `SCRATCH_MAX`;
    and `PROGRAM_WORDS·4 + POOL_BYTES + SCRATCH_MAX·4 ≤ LIM_TOTAL_BYTES`.
 6. Closure chains (§10).
+7. Format 1.1 (D141): the format word is 1 or 0x00010001; under 1.0 words 30,
+   31 and 39 are 0 and no leaf has kind 18; under 1.1 the extension table of
+   §4.6 is well formed (check id 24, `C_EXT`), every EXT leaf's id is below
+   `N_EXTS`, its argument a non-empty pool range, its maximum ≥ 0, d4 = d5 =
+   0, its mask `ALL`, and no typeset has an EXT leaf as an answer.
 
 The verifier does **not** check [S] properties and does not check
 `SOURCE_KEY`. A Program must also come from a store the host trusts (arch
@@ -982,8 +1020,10 @@ vm-validate      (P: Ints, B: Bytes, rule: I32, input: Bytes, limits: Ints,
                  −4 out shorter than 8 words
 ```
 
-All arrays are distinct (Rust borrows). The VM calls no host code and
-allocates nothing. Host protocol for the shared scratch: `cap' = max(cap,
+All arrays are distinct (Rust borrows). The VM allocates nothing and calls no
+host code, except the extension-control predicate of a format 1.1 Program
+(`vm-validate-x`, `vm-validate-span-x`, `vms-step-x` take it as their last
+argument; the plain entry points pass one that never matches). Host protocol for the shared scratch: `cap' = max(cap,
 N_LEAVES)`; `need = vm-scratch-words(P, rule, cap')`; if `cap' > cap` or
 `need > len(S)`, allocate a new zeroed array of `max(need, len(S))` words
 (`SCRATCH_MAX`-based sizing avoids regrowth per rule) and `vm-scratch-init`
@@ -1066,6 +1106,22 @@ therefore bind the source key to the table semantics. With no tables the
 six-element preimage above is unchanged. This changes key construction for
 opted-in compilation only, not the Program/container format.
 
+**D141 amendment for extension controls:** when the host registers controls,
+the preimage has eight elements: the seventh is the Unicode element above or
+an empty array, the eighth `[<flags: uint>, [[<name: tstr>, <max item bytes:
+uint>], …]]` over the WHOLE registry in name order (flags bit 0: admitted
+under `bus`). A cached Program is therefore never reused under another
+registry, nor under the same names with another maximum. Hosts pass the
+registry after the compile options (`opt` words 19.., snug.compile.ext).
+
+**Loading a 1.1 Program** (`fromSerialized(bytes, { controls })`,
+`Schema::from_serialized_with`): framing and `vm-verify` as for 1.0, then each
+name of the extension table must be in the registry given at load —
+otherwise `ProgramError('missing_control')` / `Error::MissingControls`, which
+names them. The predicates are not part of the Program: the registry at load
+must give the same verdicts as at compile time (pure predicates, a trusted
+store, as for every cached Program).
+
 ## 14. Charging schedule
 
 The step budget (arch §7) is charged **before** each unit of work, in walk
@@ -1088,6 +1144,7 @@ exceeds the remainder. These are the arch §7 rows, restated for this format
 | `.bits` scan | ⌈len/64⌉ |
 | regexp, per code point, per live regexp | W · (\|active\| + 1) + atom probes |
 | combinator (AND, NOT) | 2 |
+| EXT leaf decided (1.1, once per item, when its combinator needs it) | 1, + 1 per item byte when the item is no longer than its maximum (then the predicate is asked) |
 | container block initialisation | ⌈words/16⌉ per block |
 | stamping a returned child's matches | \|Q′_child\| (only if non-empty) |
 | typeset test | 1 per answer element examined (stops at the first hit) |

@@ -163,7 +163,8 @@ loaded.validate_blob(&BytesBlob(&[7]), "r", &ValidationOptions::default(), 4096,
 ```
 
 Programs use the same 96-byte-header container as JS: little-endian words,
-SHA-256 integrity, format major 1 and minor 0. Loading requires equal major,
+SHA-256 integrity, format major 1 and minor 0 (1 for a Program using
+extension controls). Loading requires equal major,
 minor no newer than the loader, valid framing/digest and kin vm-verify.
 Producer version is provenance and survives reserialization. `source_key()`
 is the source/options SHA-256 hex cache key; namespace caches by the producing
@@ -181,6 +182,33 @@ immediately. The driver does not buffer the entire document as an API shortcut.
 Pin a remote object's version in the Blob implementation and return exactly
 the requested bytes on every read. Unknown-length sources, async adapters,
 source decode, view directories and Writer sorted-key mode remain unavailable.
+
+## Extension controls
+
+```rust
+use snug::{Schema, CompileOptions, Scratch, controls::Controls};
+let controls = Controls::generic()                         // .chars .unique .samelen
+    .with("even", |_arg: &[u8], item: &[u8]| item.len() % 2 == 0);
+let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
+let schema = Schema::compile("ids = [* uint] .unique true
+b = bstr .even 0", &options)?;
+assert!(schema.validate(&[0x82, 1, 2], "ids", &mut Scratch::new()).is_ok());
+assert_eq!(schema.validate(&[0x82, 1, 1], "ids", &mut Scratch::new()).unwrap_err().reason, "control");
+let bytes = schema.program().serialize()?;
+let again = Schema::from_serialized_with(&bytes, &controls)?;   // the registry is needed again
+# let _ = again;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+A control is a `snug::controls::Control` trait object (any
+`Fn(&[u8], &[u8]) -> bool + Send + Sync` is one): `check(argument, item)`
+over the encodings, optional `max_bytes()` (default 65,536; a longer item
+fails with `control_size` unasked) and `argument()` (checked at compile time).
+Semantics, charging and caching are the JS host's ([guide](guide.md#custom-controls)).
+An unregistered `.name` is `Error::Compile` with code `unknown_control` and
+`detail` naming it; loading a Program without its controls is
+`Error::MissingControls(names)` (code `missing_control`); `Controls::in_bus`
+admits them under the `bus` profile.
 
 ## Handle errors safely
 

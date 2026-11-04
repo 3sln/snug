@@ -412,8 +412,10 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     // D140: an item an EXT leaf may judge is taken whole when it is no longer
     // than the leaves' largest maximum: ask for that much from its start;
     // if it still crosses, it is longer, every such leaf fails by size, and
-    // frames take it as usual.
-    if (direct != 1) && (nq > 0) {
+    // the walk goes on as decided: whatever it reads, every EXT leaf fails by
+    // size before asking. (direct 1 alone does not mean whole: a byte string no
+    // leaf reads is walked from its head, so this runs whatever direct is.)
+    if nq > 0 {
         let xm: i32 = ext_need(p, s, fb, nq);
         if xm >= 0 {
             let xreq: i32 = pos + imin(xm, end - pos);

@@ -16,6 +16,9 @@ pub struct SchemaError {
     pub column: i32,
     pub rule: Option<String>,
     pub message: &'static str,
+    /// Schema-text detail (never payload): at `unknown_control` the control's name,
+    /// at a refused control argument the control's name (D141, D142).
+    pub detail: Option<String>,
 }
 
 /// A compiled schema: the Program words and pool (docs/program.md, format 1)
@@ -49,12 +52,24 @@ pub fn compile(text: &str, profile: i32, limits: &[i32]) -> Result<Compiled, Sch
     compile_bytes(text.as_bytes(), profile, limits)
 }
 
-/// Optional explicit compile-time Unicode ranges. The default loads no tables.
+/// Optional explicit compile-time Unicode ranges (the default loads no tables)
+/// and extension controls (D141; none by default).
 #[derive(Default)]
 pub struct CompileOptions<'a> {
     pub profile: i32,
     pub limits: &'a [i32],
     pub unicode: Option<&'a [i32]>,
+    pub controls: Option<&'a dyn Registry>,
+}
+
+/// What the compiler needs of an extension-control registry (D141):
+/// `snug::controls::Controls` is one. A trait here, so the compiler builds
+/// without the VM's modules.
+pub trait Registry {
+    /// The registry words after the compile options (snug.compile.ext).
+    fn words(&self) -> Vec<i32>;
+    /// Whether control `name` accepts `argument` (an encoding), at compile time.
+    fn argument_ok(&self, name: &str, argument: &[u8]) -> bool;
 }
 
 pub fn compile_with_options(text: &str, options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
@@ -62,15 +77,19 @@ pub fn compile_with_options(text: &str, options: &CompileOptions<'_>) -> Result<
 }
 
 pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compiled, SchemaError> {
-    compile_bytes_with_options(bytes, &CompileOptions { profile, limits, unicode: None })
+    compile_bytes_with_options(bytes, &CompileOptions { profile, limits, unicode: None, controls: None })
 }
 
 pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
-    let CompileOptions { profile, limits, unicode } = options;
+    let CompileOptions { profile, limits, unicode, controls } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
     opt[0] = *profile;
-    for (i, v) in limits.iter().enumerate().take(opt.len() - 1) {
+    for (i, v) in limits.iter().enumerate().take(kc::OPT_WORDS as usize - 1) {
         opt[i + 1] = *v;
+    }
+    // D141: the extension-control registry rides after the OPT_WORDS options
+    if let Some(c) = controls {
+        opt.extend(c.words());
     }
     let mut fl: Vec<i32> = Vec::new();
     let r = ARENA.with(|cell| {
@@ -79,7 +98,7 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
             let code = kc::compile_schema(bytes, &opt, &fl, unicode.unwrap_or(&[]), &mut h);
             if code == ERR_ARENA {
                 if h.len() >= ARENA_MAX_WORDS as usize {
-                    return Err(SchemaError { code: "limit_memory", line: 0, column: 0, rule: None, message: "CDDL schema refused" });
+                    return Err(SchemaError { code: "limit_memory", line: 0, column: 0, rule: None, message: "CDDL schema refused", detail: None });
                 }
                 let n = (h.len() * 2).min(ARENA_MAX_WORDS as usize);
                 *h = vec![0; n];
@@ -98,6 +117,7 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                 } else {
                     None
                 };
+                let detail = if kc::error_name(code) == "unknown_control" { control_named(bytes, kc::error_offset(&h)) } else { None };
                 return Err(SchemaError {
                     code: kc::error_name(code),
                     line: kc::error_line(&h),
@@ -106,10 +126,11 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                     message: if code == ERR_NEED_UNICODE {
                         "Unicode categories require snug::unicode_tables (snug/unicode)"
                     } else { "CDDL schema refused" },
+                    detail,
                 });
             }
             if kc::out_program_words(&h) < 64 {
-                return Err(SchemaError { code: "internal", line: 0, column: 0, rule: None, message: "CDDL schema refused" });
+                return Err(SchemaError { code: "internal", line: 0, column: 0, rule: None, message: "CDDL schema refused", detail: None });
             }
             let p = kc::out_program_at(&h) as usize;
             let b = kc::out_pool_at(&h) as usize;
@@ -122,6 +143,9 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
             let mut program = program;
             for i in 0..8 {
                 program[7 + i] = i32::from_be_bytes([key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]]);
+            }
+            if let Some(c) = controls {
+                check_arguments(&program, &pool, *c)?;
             }
             let rules = rule_names(&program, &pool);
             return Ok(Compiled { program, pool, rules });
@@ -138,6 +162,56 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
 }
 
 const RETAIN_WORDS: usize = 1 << 22;
+
+/// D141: the name of a control the schema uses but the registry lacks (schema text).
+fn control_named(bytes: &[u8], at: i32) -> Option<String> {
+    let at = usize::try_from(at).ok()?;
+    if bytes.get(at) != Some(&b'.') {
+        return None;
+    }
+    let rest = &bytes[at + 1..];
+    let n = rest.iter().take_while(|&&c| c.is_ascii_alphanumeric() || b"_-@$.".contains(&c)).count();
+    Some(String::from_utf8_lossy(&rest[..n]).into_owned())
+}
+
+/// D142: a registered control may check its argument once, at compile time.
+fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry) -> Result<(), SchemaError> {
+    if program[30] == 0 {
+        return Ok(());
+    }
+    let names = ext_names(program, pool);
+    let (at, n) = (program[43] as usize, program[16] as usize);
+    for l in 0..n {
+        let o = at + 8 * l;
+        if program[o] & 255 != 18 {
+            continue;
+        }
+        let name = &names[program[o + 2] as usize];
+        let (ao, al) = (program[o + 3] as usize, program[o + 4] as usize);
+        if !controls.argument_ok(name, &pool[ao..ao + al]) {
+            return Err(SchemaError { code: "control_value", line: 0, column: 0, rule: None,
+                message: "CDDL schema refused", detail: Some(name.clone()) });
+        }
+    }
+    Ok(())
+}
+
+/// The names of a compiled Program's extension controls (format 1.1's table, D141).
+fn ext_names(p: &[i32], b: &[u8]) -> Vec<String> {
+    let (n, mut i) = (p[30].max(0) as usize, p[31].max(0) as usize);
+    let end = i + p[39].max(0) as usize;
+    let mut names = Vec::new();
+    while names.len() < n && i < end {
+        let (mut len, mut c) = ((b[i] & 31) as usize, i + 1);
+        if len == 24 {
+            len = b[c] as usize;
+            c += 1;
+        }
+        names.push(String::from_utf8_lossy(&b[c..c + len]).into_owned());
+        i = c + len;
+    }
+    names
+}
 
 fn floats(h: &[i32], bytes: &[u8]) -> Vec<i32> {
     // D020/D032: kin found decimal float literals it cannot round itself.

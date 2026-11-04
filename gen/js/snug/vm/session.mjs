@@ -428,8 +428,10 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend, ext) {
     // D140: an item an EXT leaf may judge is taken whole when it is no longer
     // than the leaves' largest maximum: ask for that much from its start;
     // if it still crosses, it is longer, every such leaf fails by size, and
-    // frames take it as usual.
-    if ((direct !== 1) && (nq > 0)) {
+    // the walk goes on as decided: whatever it reads, every EXT leaf fails by
+    // size before asking. (direct 1 alone does not mean whole: a byte string no
+    // leaf reads is walked from its head, so this runs whatever direct is.)
+    if (nq > 0) {
         const xm = extNeed(p, s, fb, nq);
         if (xm >= 0) {
             const xreq = pos + imin(xm, end - pos);

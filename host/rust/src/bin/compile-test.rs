@@ -75,7 +75,7 @@ fn main() {
         let profile: i32 = f.next().unwrap_or("0").parse().unwrap_or(0);
         let text = unhex(f.next().unwrap_or(""));
         let limits: Vec<i32> = f.map(|x| x.parse().unwrap_or(-1)).collect();
-        let r = std::panic::catch_unwind(|| match compile_bytes_with_options(&text, &CompileOptions { profile, limits: &limits, unicode: tables.as_deref() }) {
+        let r = std::panic::catch_unwind(|| match compile_bytes_with_options(&text, &CompileOptions { profile, limits: &limits, unicode: tables.as_deref(), controls: None }) {
             Ok(c) => {
                 let m = (c.program.get(16).copied().unwrap_or(1)).max(1) as usize;
                 let mut s = vec![0i32; 48 + 2 * m + 16];

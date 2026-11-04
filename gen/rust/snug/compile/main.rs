@@ -410,6 +410,15 @@ pub fn error_name(code: i32) -> &'static str {
 pub fn error_line(h: &[i32]) -> i32 {
     return hg(h, H_ERR_LINE);
 }
+pub fn error_offset(h: &[i32]) -> i32 {
+    // The error's byte offset in the schema text (-1 when not about a place in
+    // it); at an `unknown_control` error, the control's `.` (D141: hosts name it).
+    let pos: i32 = hg(h, H_ERR_POS);
+    if pos > hg(h, H_NSRC) {
+        return -1;
+    }
+    return pos;
+}
 pub fn error_column(h: &[i32]) -> i32 {
     return hg(h, H_ERR_COL);
 }

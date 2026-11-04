@@ -6,7 +6,8 @@ const MAGIC = new TextEncoder().encode('snugprog');
 const HEADER = 96, MAX_BODY = 64 * 1024 * 1024;
 // Format 1.0 retains the frozen P[1] = 1 spelling. Low 16 bits: major;
 // high 16 bits: minor. D084 supersedes §13.3's exact snug-version equality.
-export const FORMAT_MAJOR = 1, FORMAT_MINOR = 0;
+// 1.1 (D141) adds extension controls; the compiler writes 1.1 only for a Program using one.
+export const FORMAT_MAJOR = 1, FORMAT_MINOR = 1;
 
 export class ProgramError extends Error {
   constructor(code) { super(`snug: Program refused (${code})`); this.name = 'ProgramError'; this.code = code; }

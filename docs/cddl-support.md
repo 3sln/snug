@@ -49,6 +49,7 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). |
 | `.cat`, `.det` | Compile-time concatenation of two literals of the same text/byte kind; `.det` dedents each literal first. |
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
+| registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
 Numeric controls mixing an integer target and float controller (or vice
 versa) require exact conversion within the compiler's restricted |x|<2⁵³
@@ -56,6 +57,12 @@ domain; otherwise `control_value` (D038). Decimal schema float literals have
 at most 17 significant digits, must be finite, and a nonzero value may not
 round to zero. Hex floats are rounded by kin (D020/D032). Unsupported
 control targets/controllers are errors rather than ignored controls.
+
+An unregistered `.name` is the schema error `unknown_control`, and the message
+names the control. Literal membership in an extension control is unknown at
+compile time, so `.eq`/`.ne`/`.and` never fold through one (they keep the AND /
+NOT), and map determinism treats it as possibly matching any key (stricter,
+never looser).
 
 Embedded checks are local predicates: `bstr .cbor uint / bstr .size (0..16)`
 can accept bytes that fail the embedded branch. An embedded failure is

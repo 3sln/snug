@@ -240,10 +240,13 @@ fails:
 | --- | --- |
 | `full` (default) | All currently supported constructs, subject to exactness and resource bounds |
 | `bindle` | No sockets, `.cborseq`, unwrap, explicit cuts, recursive generics, or non-text/integer map key domains |
-| `bus` | Bindle set minus regexps and recursive types; strings, containers and embedded byte strings must be bounded; no unconstrained any/bare majors; schema text capped at 16 KiB |
+| `bus` | Bindle set minus regexps and recursive types; strings, containers and embedded byte strings must be bounded; no unconstrained any/bare majors; schema text capped at 16 KiB; **no extension controls** unless the compile option `controlsInBus: true` (Rust `Controls::in_bus`) admits them (D141) |
 
 These profiles only refuse schemas; they never relax wire checks or change
-the meaning of an accepted construct. In particular `full` is not a lenient
+the meaning of an accepted construct. `bus` is the profile for schemas from a
+less trusted party: a registered extension control runs host code on every
+item it judges, so such a schema may use one only when the host opts in
+(`controlsInBus`; the flag is part of the source key). In particular `full` is not a lenient
 CBOR mode. Colon-implied cuts remain ordinary struct syntax in `bindle`.
 
 ## Version policy

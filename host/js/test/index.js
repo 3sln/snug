@@ -12,3 +12,4 @@ import './examples.test.mjs';
 import './unicode.test.mjs';
 import './profiles.test.mjs';
 import './options.test.mjs';
+import './controls.test.mjs';
