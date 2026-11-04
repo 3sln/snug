@@ -3788,6 +3788,22 @@ the audit, D011/D012's refusals and D021.
   9. Separate inherited decimal/typed/ndarray/tag restrictions from general
      policy and complete advertised tag1040 support.
   10. Broaden recursive/group/simple-value coverage and sequence parity.
+- **RFC quotation check (2026-11-04, independent reviewer):** fetched the
+  RFC texts into corpus/rfc/ (unmodified, README with URLs, hashes and IETF
+  Trust terms) and checked every quotation/paraphrase:
+  [docs/reviews/2026-11-04-rfc-quotation-check.md](docs/reviews/2026-11-04-rfc-quotation-check.md).
+  40 rows: 7 exact, 1 minor wording, 1 misquote ("implicitly anchored at
+  both ends" is not RFC 8610 text), 5 wrong section (tags 65535/2^32-1/2^64-1
+  are 8949 §3.4, "MAY flag"; I-Regexp syntax is 9485 §3), 9 unfaithful
+  paraphrases, 17 faithful. Six reclassifications, applied in
+  docs/conformance.md with a dated note: D012/D036/S28 -> non-conformant
+  (RFC 8610 Appendix A, normative, makes arrays greedy PEG: snug accepts
+  [1] for [* uint, uint]); D021/S26 -> deliberate deviation (§3.5.4 "the
+  entire map fails to match" and Appendix A cuts are literally global);
+  S46 -> non-conformant (§3.8.6 .default carries an "implied .ne"; contested
+  by Erratum 9229, status Reported). Totals now 143/43/20/10. Also: tag-40
+  zero extents are RFC-required (8746 §3.1.1); RFC 9682 adds #7.<type> and
+  touches neither prelude nor sockets. No code changed.
 - [ ] **Signed off** (owner)
 
 ### D240 — Calibration: targeted prices, with an explicit limit on the fit (proposal only)
