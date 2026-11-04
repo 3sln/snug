@@ -89,7 +89,7 @@ vm('custom-declared-refused', 'r = any .huge true', 0);
 // module or generated files. The sum is checked against the real meter.
 let countedSource = readFileSync(new URL('../gen/js/snug/vm/controls.mjs', import.meta.url), 'utf8');
 countedSource = countedSource.replace("'../cbor/tags.mjs'", JSON.stringify(new URL('../gen/js/snug/cbor/tags.mjs', import.meta.url).href));
-for (const [expr, label] of [['T_HEAD','heads'],['T_ELEM','elements'],['T_CMP','comparisons'],['T_PROBE','probes'],['T_PAIR','pairs'],['C_TICKS','byteChunks'],['u * TPU','chars'],['hticks(y - x)','hash']]) {
+for (const [expr, label] of [['T_HEAD','heads'],['T_ELEM','elements'],['T_CMP','comparisons'],['T_PROBE','probes'],['T_PAIR','pairs'],['C_TICKS','byteChunks'],['C_FIRST','firstChunks'],['u * TPU','chars'],['hticks(y - x)','hash']]) {
   assert(countedSource.includes(`spend(m, ${expr})`), label + ': attribution anchor');
   countedSource = countedSource.replaceAll(`spend(m, ${expr})`, `countedSpend(m, ${expr}, '${label}')`);
 }
