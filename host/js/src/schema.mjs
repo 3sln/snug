@@ -10,6 +10,7 @@ import { vmsWords, vmsArena, vmsInit, vmsStep, vmsNeedOffset, vmsNeedLength, vms
 import { codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { build } from './build.mjs';
 import { profileFlags } from './profiles.mjs';
+import { validateOptions } from './options.mjs';
 
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
   38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 48: 'budget' };
@@ -45,7 +46,7 @@ export function releaseScratch() { if (!leased) { scratch = new Int32Array(0); m
 const limitWords = (opts = {}) => Int32Array.of(
   opts.top === 'map' ? 0 : 1, opts.cose ? 1 : 0, lim(opts.maxBytes), lim(opts.maxDepth), lim(opts.maxEntries),
   lim(opts.maxItems), lim(opts.maxBignumBytes), lim(opts.budget), 0, profileFlags(opts));
-function lim(v) { return v === undefined || v === null ? -1 : Math.max(0, Math.min(Number(v), 0x7fffffff)) | 0; }
+function lim(v) { return v === undefined ? -1 : Math.min(v, 0x7fffffff); }
 
 // ---------------------------------------------------------------- Programs
 const td = new TextDecoder('utf-8', { fatal: true });
@@ -94,7 +95,10 @@ export class Program {
   }
   /** A resumable validation session over a message of exactly `length` bytes
    *  (architecture §17, P6.2): see VmSession. */
-  session(rule, length, opts = {}, { quantum = 0 } = {}) {
+  session(rule, length, opts = {}, scheduling = {}) {
+    validateOptions(opts, 'validation');
+    validateOptions(scheduling, 'scheduling');
+    const { quantum = 0 } = scheduling;
     return new VmSession(this, rule, length, opts, quantum);
   }
   result(o) {
@@ -172,10 +176,12 @@ export class Schema {
   }
   /** validate(bytes, rule, opts) -> {ok: true} | {ok: false, reason, path, offset[, subcode]} */
   validate(bytes, rule, opts = {}) {
+    validateOptions(opts, 'validation');
     return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), opts));
   }
   /** validateAt(bytes, start, end, rule, opts): the span as its own document (§16.3). */
   validateAt(bytes, start, end, rule, opts = {}) {
+    validateOptions(opts, 'span');
     return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), { top: 'any', ...opts },
       { start, end, depth: opts.depth ?? 0, items: opts.items ?? 0 }));
   }
@@ -186,6 +192,7 @@ export class Schema {
   }
   /** decode(bytes, rule, opts): validate, then the trusted builder (D017). */
   decode(bytes, rule, opts = {}) {
+    validateOptions(opts, 'validation');
     asBytes(bytes);
     if (typeof SharedArrayBuffer !== 'undefined' && bytes.buffer instanceof SharedArrayBuffer)
       throw new TypeError('snug: SharedArrayBuffer input is refused (architecture §8)');

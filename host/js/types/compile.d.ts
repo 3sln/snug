@@ -1,4 +1,5 @@
 import type { Schema } from './schema.js';
+/** Finite non-negative safe integers; unknown keys and malformed values reject with TypeError. */
 export interface CompileLimits {
   schemaBytes?: number; nesting?: number; astNodes?: number; instantiations?: number;
   alternatives?: number; arrayPositions?: number; regexpPositions?: number; width?: number;

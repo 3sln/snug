@@ -1,8 +1,10 @@
 import type { DecodeOptions, Value, Reason } from './index.js';
+/** Invalid/unknown options throw TypeError, never a ValidationResult. Limits only lower compiled caps. */
 export interface ValidationOptions extends DecodeOptions {
   maxBignumBytes?: number;
   budget?: number;
 }
+/** depth/items are non-negative safe integers, default 0. */
 export interface SpanOptions extends ValidationOptions { depth?: number; items?: number }
 export type ValidationResult = { ok: true } | {
   ok: false; reason: Reason; path: (string | number)[]; offset: number; subcode?: Reason;

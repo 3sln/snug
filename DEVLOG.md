@@ -2846,6 +2846,42 @@ some bundlers refuse it); keep aliases valid until the next SDK call
 (rejected: a silent use-after-free class).
 - [ ] **Signed off** (owner)
 
+### D150 — One host option validator with per-operation allowlists (P7.10)
+**Decision**: all public JS option bags, including compile/grouped limits,
+view detached checks and source/scheduling bags, use options.mjs. Require
+ordinary/null-prototype objects, exact enum strings, real booleans and
+non-negative safe integer limits/budgets/seeds/delay; chunk is positive and
+quantum is 0..2^31−1. Known undefined fields are omitted. Reject unknown own
+keys (including symbols/non-enumerables), naming allowed fields rather than
+echoing unknown names or values. Validate overridden Writer limits too;
+grouped limits retain precedence. Preserve preset spreading: reading ignores
+checked strictArrays; writing ignores checked top and objects (the latter
+retains existing codec round-trip option reuse). Forward only receiver
+options from views/Writer internal scanner calls. kin keeps all CBOR/schema
+verdicts and effective caps; a valid call cannot raise compiled bounds.
+**Why**: configuration mistakes must throw TypeError before byte checks or
+source reads, rather than looking like rejected data. One checked allowlist
+per bag prevents typo-driven policy omissions and enum coercion.
+**Alternatives**: separate partial validators/coercion at each boundary;
+ignore unknown keys; echo arbitrary unknown keys; reject complete presets;
+change VM verdict semantics (all rejected).
+- [ ] **Signed off** (owner)
+
+### D151 — In-memory handles own snapshots for every accepted byte type (P7.10)
+**Decision**: bufferHandle and asyncHandle require unshared Uint8Array input
+(including Node Buffer), copy with new Uint8Array(bytes), freeze the handle,
+and return independent plain-Uint8Array copies on every read. No borrow
+option. The snapshot is stable after input mutation, and a returned range
+cannot mutate the private snapshot. Reject SharedArrayBuffer input with
+TypeError, as other checked public byte boundaries do.
+**Why**: Buffer.slice aliases the original, unlike Uint8Array.slice. A
+snapshot helper must have the same ownership contract for both; independent
+reads also close the sync helper's alias to private storage.
+**Alternatives**: retain the documented Buffer workaround; expose a borrow
+flag and lifetime promise; return mutable aliases of the private copy. The
+extra range copy makes immutability enforceable for these testing helpers.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -3421,7 +3457,9 @@ are answered as provisional decisions D082–D085. None is open now.
       against the other libraries.
 
 - [ ] **P7.10 — usability API fixes** (2026-11-03; engineering follow-up
-  to `docs/reviews/2026-11-03-usability.md`; code not changed by the doc pass).
+  to `docs/reviews/2026-11-03-usability.md`; host fixes implemented, gate
+  held on one legacy assertion requiring permission to update).
+  Decisions D150–D151; no kin/generated edits in this work.
   - **Finding 1 — consistent schema option admission:** validate documented
     limit/budget types (finite non-negative integers) and `top`/`objects`
     enums at all public schema boundaries: validate, decode, validateAt,
@@ -3435,7 +3473,8 @@ are answered as provisional decisions D082–D085. None is open now.
     (e.g. new Uint8Array(bytes)); retain stable independent reads. Regress
     both Buffer and ordinary Uint8Array inputs by mutating the original
     after construction and verifying unchanged read bytes/validation.
-    Docs/examples show the explicit plain-Uint8Array copy until fixed.
+    Implemented for both helpers, with frozen handles and independent reads;
+    removed the obsolete Buffer workaround from API/guide.
   - **Finding 10 — alternative diagnostics:** preserve the existing
     deterministic witness contract by default. Investigate an explicit
     diagnostic mode preferring a matching literal discriminator, with a
@@ -3445,14 +3484,46 @@ are answered as provisional decisions D082–D085. None is open now.
     currently reports value at ['ok'], offset 8, while `{ ok: false }`
     reports missing error. Refusal is correct; document single-witness limits
     (done), do not treat this as an acceptance bug or silently change defaults.
+    **Proposal/analysis (no VM change):** an opt-in diagnostic could report a
+    bounded, deterministically sorted set of named schema rules/alternatives
+    considered at the choice, plus a schema location or stable alternative
+    index for anonymous branches. Those are Program metadata, independent of
+    payload values; never include observed discriminator values, bytes or
+    unnamed keys. Reporting which branch matched a literal discriminator
+    would require an explicit kin witness rule, tie-breaks, work/memory bounds
+    and cross-host tests. Even schema names need caller logging policy. The
+    current result carries only one witness, so the host cannot reconstruct
+    the actual candidate set at failure reliably from reason/path alone.
+    A future Program/VM diagnostic extension should carry that provenance;
+    preserve the existing witness and accept/refuse behavior by default.
   - **Finding 13 — option-key admission:** reject unknown keys consistently
     in compile, codec, schema/view/source and Writer options, while permitting
     documented preset fields when spread across operations. Regress misplaced
     compile `maxBytes` versus `limits.inputBytes`, `maxByets` at codec/schema
     calls, and unknown grouped limits. Preserve/document Writer grouped-limit
     precedence; review any unified/named options design separately. Compile
-    limits and runtime spellings are mapped in the guide; unknown options
-    currently being ignored is disclosed, not endorsed as validation.
+    limits and runtime spellings are mapped in the guide. Implemented one
+    shared validator with allowlists for each public bag, including wire
+    options and compile, and documented every entry point's accepted keys.
+
+  **Host checks/learnt (2026-11-03):** new table-driven package-boundary
+  regression tests cover malformed values and unknown keys across 33 option
+  bags, safe diagnostics, no source reads before rejection, preset spreading,
+  limits/cap semantics and Writer precedence. Buffer and Uint8Array subrange
+  tests mutate inputs and returned reads, covering sync, microtask and timer
+  helpers. The new option/snapshot suite plus codec differential suite passed
+  592/592, including non-enumerable limit forwarding. First full npm test: 1,281 passed,
+  2 failed, 0 skipped: existing round-trip tests reuse objects on encode
+  (now retained as a checked no-op); a legacy omitUndefined: 1 assertion
+  expects a data fault and conflicts with the requested TypeError contract.
+  Requested permission for that one assertion because existing test edits
+  were scoped to index.js. **Learnt:** validating outer option bags requires
+  filtering internal forwarding (view metadata and Writer knobs are not
+  schema/scanner options), and Buffer copying alone is insufficient if reads
+  still expose the helper's private storage. Latest full gate on Node v24.6.0 /
+  npm 11.5.1: 1,283 passed, 1 failed, 0 skipped (the legacy omitUndefined
+  assertion alone). git diff --check passed. Permission for that assertion
+  update remains pending; P7.10 is not marked complete while this gate fails.
 
   *Documentation completed 2026-11-03*: findings 3–6, 7 checklist, 8–9,
   11–12, 14–27 in the authorised files only. Decimal Writer example uses

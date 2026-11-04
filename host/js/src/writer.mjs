@@ -7,6 +7,7 @@
 // grammar. Semantics of value(v) are encode()'s (D113 array policy).
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
+import { validateOptions, selectOptions } from './options.mjs';
 import { profileFlags, strictArraysOf, keysOf, standardTags, rfcFloats, undefinedOk, noncharactersOk } from './profiles.mjs';
 import { Decimal, NDArray, Float16Bytes, Tagged, typedInfo } from './values.mjs';
 import { copyTypedBytes } from './typed-bytes.mjs';
@@ -59,9 +60,10 @@ function typedPayload(v, info, fail) {
  * value (any host value, encode's rules); containers: beginArray(n), beginMap(n), key(k), end(); finish() returns the
  * bytes once exactly one complete root has been written. Map keys may come in any order (sorted at end() by encoded
  * bytes) or, with keysSorted, must come in strictly increasing encoded order (checked at each key). Key kinds and
- * every other wire choice follow the profile options (D120): `profile`, `keys`, `tags`, `floats`, `undefinedValue`,
+ * every other wire choice follow the profile options (D120): `wire`, `keys`, `tags`, `floats`, `undefinedValue`,
  * `noncharacters`; integer labels in the top-level map with cose under keys 'text'. value() ignores extra array own properties unless strictArrays is true;
- * holes and undefined elements are refused in both modes. Any error throws SnugFault and leaves the writer failed for good. */
+ * holes are refused in both modes; present undefined follows the wire profile. Malformed constructor options throw
+ * TypeError; writing errors throw SnugFault and leave the writer failed for good. */
 export class Writer {
   #buf = new Uint8Array(256); #pos = 0;
   #kind = ROOT; #left = 1; #depth = 0;
@@ -75,8 +77,8 @@ export class Writer {
   #options; #flags; #keys; #std; #rfc; #undef; #nonch;
 
   constructor(options = {}) {
-    if (options === null || typeof options !== 'object') throw new TypeError('Writer options must be an object.');
-    const limits = resolveLimits(options.limits ? { ...options, ...options.limits } : options);
+    validateOptions(options, 'writer');
+    const limits = resolveLimits(options.limits ? { ...selectOptions(options, 'limits'), ...selectOptions(options.limits, 'limits') } : options);
     this.#options = options;
     const flags = this.#flags = profileFlags(options);
     this.#keys = keysOf(flags); this.#std = standardTags(flags); this.#rfc = rfcFloats(flags);
@@ -340,7 +342,7 @@ export class Writer {
     this.#walk(v.value, depth + 1);
     if (!stdContentOk(this.#buf, v.tag, q, this.#pos)) this.#fail('tag', 'The tag content does not satisfy its tag.');
     if (v.tag === 24) {
-      try { scan(this.#buf.subarray(stdInner(this.#buf, q), this.#pos), { ...this.#options, top: 'any' }); }
+      try { scan(this.#buf.subarray(stdInner(this.#buf, q), this.#pos), { ...selectOptions(this.#options, 'decode'), top: 'any' }); }
       catch (e) { if (e instanceof SnugFault) this.#fail(e.code, 'A tag-24 payload must be one valid data item.'); throw e; }
     }
   }

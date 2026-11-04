@@ -83,10 +83,11 @@ alternatives; one compiled Program validates under either. On schema failure it 
 profile; a profile error wins, unless the global step budget runs out first.
 Missing rules, wrong argument types and SharedArrayBuffer input are API
 misuse (`TypeError`), not validation results.
-Schema option validation currently has exceptions: malformed limits can
-be coerced into refusals or accepted, and unknown keys can be ignored.
-Validate application configuration before calling; P7.10 tracks consistent
-rejection. Do not use a validation result to diagnose configuration validity.
+Malformed options and unknown keys throw TypeError before checking bytes;
+the same shared option validator serves codec, schema, view, Writer and
+source entry points. Invalid known values name the option without echoing
+its value; unknown-key errors list allowed names. Resource exhaustion under
+valid configuration remains a validation result.
 
 A failure is one deterministic witness, not an exhaustive error list or an
 explanation of the branch your application intended. For example:
@@ -318,14 +319,14 @@ start at the detached item. Span `end` is exclusive. Supply a schema to
 
 ```js
 import { asyncHandle, validateHandle, pushValidator } from 'snug/sources';
-const result = await validateHandle(schema, asyncHandle(new Uint8Array(bytes)), 'message');
+const result = await validateHandle(schema, asyncHandle(bytes), 'message');
 // Same ValidationResult as schema.validate(bytes, 'message'); no decoded tree.
 ```
 
 ```js
 import { SourceError } from 'snug/sources';
 try {
-  const checked = await validateHandle(schema, asyncHandle(new Uint8Array(bytes)),
+  const checked = await validateHandle(schema, asyncHandle(bytes),
     'message', {}, { chunk: 16384, quantum: 4096 });
   if (!checked.ok) console.log(checked.reason, checked.path, checked.offset);
 } catch (error) {
@@ -349,8 +350,10 @@ example, If-Match); fail the read if the snapshot is unavailable. snug does
 not check a version field or detect remote mutations. Return exactly the
 requested range and keep the returned bytes unchanged while used. The
 [async in-memory example](../examples/validate-handle.mjs) needs no network.
-The helpers copy ordinary Uint8Array input; use a plain Uint8Array when
-relying on snapshot ownership, since Node Buffer.slice aliases its input.
+`bufferHandle` and `asyncHandle` own a copy of Uint8Array and Node Buffer
+input, including subranges. Later input mutation cannot change the snapshot.
+Each read returns a fresh copy, so modifying a read cannot change subsequent
+reads either. Handles are frozen; SharedArrayBuffer input is refused.
 
 `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` has the
 same result contract for synchronous handles and refuses Promise reads.
@@ -452,15 +455,32 @@ const output = new Writer({ limits: { maxBytes: 1024, maxDepth: 4,
 | Zero | A real zero bound, never “unlimited” (except the fixed compiler bignumBytes policy): zero input/items/budget can compile but refuse messages; zero schemaBytes/compileBudget refuses compilation; depth zero still admits an untagged scalar with `top: 'any'` |
 | Valid integer above compiler hard ceiling | Clamped to the effective ceiling, not rejected; `bus` schemaBytes remains at most 16 KiB |
 | Valid per-call value above compiled cap | Effective value is the smaller of call and compiled cap; it cannot raise the cap |
-| Invalid type, negative or fractional | Compiler limit entries and codec/Writer limits reject with TypeError; schema facades currently coerce or accept some malformed values (P7.10). Reject these in application configuration |
-| Unknown key | Unknown entries inside compile `limits` reject; unknown top-level compile and codec/schema option keys can be silently ignored (P7.10). Do not rely on this to check configuration |
+| Invalid type, negative, fractional, NaN, Infinity or unsafe integer | All public option bags reject with TypeError (async APIs reject their Promise); no coercion and no data refusal |
+| Unknown key | TypeError at every public boundary, including compile/Writer grouped limits and source/scheduling bags; the error lists permitted names without echoing unknown keys |
 
 There is no read-only effective-limits object on public Schema. Keep your
 validated policy beside it and account for the documented clamps; sourceKey
 identifies effective compilation inputs but is not a limits inspection API.
-Validate exact allowed names, finite non-negative integer values and enum
-options in your own configuration layer until P7.10 lands. Writer grouped
-limits override top-level spellings; use just one spelling.
+The shared host validator checks exact allowed names, finite non-negative
+safe integers, booleans and enum strings before checking CBOR or reading a
+source. Known fields set to undefined use defaults; null is malformed.
+Options bags must be ordinary or null-prototype objects. See the complete
+[per-entry-point option tables](api.md#option-admission). Writer grouped
+limits override top-level spellings; both bags are validated even when a
+grouped value overrides a top-level one. Use just one spelling.
+
+```js
+schema.validate(bytes, 'message', { maxDepth: 1.5 }); // throws TypeError naming maxDepth
+schema.validate(bytes, 'message', { top: 'banana' }); // throws TypeError naming top
+decode(bytes, { maxByets: 1024 }); // throws TypeError listing allowed options
+// At compile time the byte limit is limits.inputBytes, not maxBytes:
+const small = await compile('message = { id: uint }', { limits: { inputBytes: 1024 } });
+```
+
+Complete presets can still be spread into every runtime options bag:
+`strictArrays` is ignored while reading and `top` while writing, but their
+types are checked. Compile options are separate (`profile`, `limits`, `unicode`);
+wire presets belong on validation/codec/view/Writer/source calls.
 
 | Resource | Default | Hard ceiling for compiled schemas |
 | --- | --- | --- |
@@ -786,7 +806,7 @@ for size boundaries and older snapshots.
 | codec/schema decode, checked view, Writer, profile sources | `SnugFault` |
 | Program loading | rejected Promise with `ProgramError` |
 | Broken source protocol | `SourceError` |
-| Facade byte/rule misuse or unknown rule | `TypeError` (view integer range: `RangeError`); malformed schema options have exceptions pending P7.10 |
+| Facade byte/rule misuse, unknown rule, malformed or unknown options | `TypeError` (async APIs reject); view integer range uses `RangeError` |
 | Writer wrong-type/admission arguments, e.g. `.text(7)` | sticky `SnugFault('unsupported')`; later calls throw `writer_failed` |
 
 CBOR fault codes are unprefixed, such as `key_order` or `indefinite`.

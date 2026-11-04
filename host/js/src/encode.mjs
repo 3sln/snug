@@ -3,6 +3,7 @@
 // byte-level choice (shortest heads, float widths, bignums, key order) in kin (gen/js/snug/write). The Phase 2
 // encoder this replaced is frozen at bench/baseline/encode-p2.mjs as the benchmark baseline (architecture §16.5).
 import { Writer } from './writer.mjs';
+import { validateOptions } from './options.mjs';
 
 /** Encodes a value in deterministic CBOR (RFC 8949 §4.2.1) under the profile options (D120; default the
  * deterministic preset, `wire: 'bindle'` the Bindle profile). number: safe integer → integer, any other number →
@@ -18,5 +19,6 @@ import { Writer } from './writer.mjs';
  * JSON.stringify does; RPC adapters use it for handler results, never for decoded data, which holds none of these;
  * accessor properties are still refused), maxDepth/maxEntries/maxItems/maxBytes. */
 export function encode(value, options = {}) {
+  validateOptions(options, 'encode');
   return new Writer(options).value(value).finish();
 }

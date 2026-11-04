@@ -2,6 +2,7 @@ import type { Value, TypedArray, Float16Bytes, Decimal, NDArray } from './index.
 import type { Schema, ValidationOptions, ValidationResult } from './schema.js';
 export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' |
   'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged';
+/** Unknown keys/malformed values throw TypeError before bytes are checked or copied. */
 export interface ViewOptions extends ValidationOptions {
   schema?: Schema; rule?: string; borrow?: boolean;
   /** Experimental, opt-in per-container offset directories (D053). */

@@ -1,4 +1,6 @@
 import type { EncodeOptions, Limits, TypedArray, Float16Bytes, Decimal, NDArray } from './index.js';
+/** Grouped limits override top-level limits; both are checked. maxBytes bounds finish-time acceptance, not peak allocation.
+ * Unknown keys/malformed values throw TypeError at construction, before any value is written. */
 export interface WriterOptions extends EncodeOptions { keysSorted?: boolean; limits?: Limits }
 export declare class Writer {
   constructor(options?: WriterOptions);

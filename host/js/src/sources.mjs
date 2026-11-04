@@ -40,6 +40,7 @@
 // short read) throws SourceError, which is not a CBOR verdict.
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
+import { validateOptions } from './options.mjs';
 import { scan } from './scan.mjs';
 import { profileFlags, codecTop } from './profiles.mjs';
 import { scanOptions, scanProfile, codeName } from '../../../gen/js/snug/cbor/scan.mjs';
@@ -86,7 +87,10 @@ export const scanBuffer = scan;
 
 /** One validation session over a message of exactly `length` bytes. */
 export class ScanSession {
-  constructor(length, options = {}, { quantum = 0 } = {}) {
+  constructor(length, options = {}, scheduling = {}) {
+    validateOptions(options, 'decode');
+    validateOptions(scheduling, 'scheduling');
+    const { quantum = 0 } = scheduling;
     if (!Number.isSafeInteger(length) || length < 0 || length > I32_MAX) throw new TypeError('length must be an integer in 0..2^31-1.');
     if (!Number.isSafeInteger(quantum) || quantum < 0) throw new TypeError('quantum must be a non-negative integer.');
     const top = codecTop(options), flags = profileFlags(options);
@@ -112,23 +116,32 @@ export class ScanSession {
   }
 }
 
-/** An immutable in-memory handle (the bytes are copied once). */
+/** An immutable in-memory handle (a private snapshot, with independent copied reads). */
 export function bufferHandle(bytes) {
-  const copy = bytes.slice();
-  return { size: copy.length, read: (offset, length) => copy.subarray(offset, offset + length) };
+  const copy = snapshot(bytes);
+  return Object.freeze({ size: copy.length, read: (offset, length) => copy.slice(offset, offset + length) });
 }
 
 /** A genuinely asynchronous in-memory handle: every read is a Promise (a microtask, or a
  *  timer of `delay` ms). */
-export function asyncHandle(bytes, { delay = 0 } = {}) {
-  const copy = bytes.slice();
-  return {
+export function asyncHandle(bytes, options = {}) {
+  validateOptions(options, 'snapshot');
+  const { delay = 0 } = options;
+  const copy = snapshot(bytes);
+  return Object.freeze({
     size: copy.length,
     // delay 0: resolved on a microtask (a genuine Promise, no timer clamp); delay > 0: a timer
     read: (offset, length) => delay > 0
       ? new Promise(resolve => setTimeout(() => resolve(copy.slice(offset, offset + length)), delay))
       : Promise.resolve().then(() => copy.slice(offset, offset + length)),
-  };
+  });
+}
+
+function snapshot(bytes) {
+  if (!(bytes instanceof Uint8Array)) throw new TypeError('bytes must be a Uint8Array.');
+  if (typeof SharedArrayBuffer === 'function' && bytes.buffer instanceof SharedArrayBuffer)
+    throw new TypeError('bytes must not use SharedArrayBuffer; copy stable input first.');
+  return new Uint8Array(bytes);
 }
 
 function checkRead(chunk, offset, length) {
@@ -141,7 +154,10 @@ function checkHandle(handle) {
   if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
 }
 
-function* drive(handle, options, { chunk = 65536, quantum = 0 } = {}) {
+function* drive(handle, options, opts = {}) {
+  validateOptions(options, 'decode');
+  validateOptions(opts, 'source');
+  const { chunk = 65536, quantum = 0 } = opts;
   checkHandle(handle);
   return yield* driveSession(new ScanSession(handle.size, options, { quantum }), handle, chunk);
 }
@@ -204,13 +220,19 @@ export function scanHandleSync(handle, options = {}, opts = {}) {
 
 /** Validate against schema's rule through a handle whose read may return a Promise
  *  (P6.2). Resolves Schema.validate's result, or rejects with SourceError. */
-export async function validateHandle(schema, handle, rule, options = {}, { chunk = 65536, quantum = 0 } = {}) {
+export async function validateHandle(schema, handle, rule, options = {}, opts = {}) {
+  validateOptions(options, 'validation');
+  validateOptions(opts, 'source');
+  const { chunk = 65536, quantum = 0 } = opts;
   checkHandle(handle);
   return runAsync(driveSession(schema.session(rule, handle.size, options, { quantum }), handle, chunk));
 }
 
 /** The same through a handle whose read returns bytes synchronously. */
-export function validateHandleSync(schema, handle, rule, options = {}, { chunk = 65536, quantum = 0 } = {}) {
+export function validateHandleSync(schema, handle, rule, options = {}, opts = {}) {
+  validateOptions(options, 'validation');
+  validateOptions(opts, 'source');
+  const { chunk = 65536, quantum = 0 } = opts;
   checkHandle(handle);
   return runSync(driveSession(schema.session(rule, handle.size, options, { quantum }), handle, chunk), 'validateHandleSync');
 }
@@ -219,16 +241,18 @@ export function validateHandleSync(schema, handle, rule, options = {}, { chunk =
  *  {state:'need'} (feed more), {state:'yield'} (call resume() on a later turn) or
  *  {state:'done'}; finalize() checks the declared length was delivered. It holds only
  *  the bytes from the scanner's current position on (bounded by what it asks for). */
-export function pushScanner(length, options = {}, { quantum = 0 } = {}) {
-  const session = new ScanSession(length, options, { quantum });
+export function pushScanner(length, options = {}, scheduling = {}) {
+  const session = new ScanSession(length, options, scheduling);
   return pushSession(session, length, want => Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
 }
 
 /** Bytes pushed in order for schema validation of a message of a DECLARED length (P6.2):
  *  feed / resume as pushScanner's; finalize() answers Schema.validate's result. It holds
  *  only the bytes from the session's `keep` on. */
-export function pushValidator(schema, length, rule, options = {}, { quantum = 0 } = {}) {
-  return pushSession(schema.session(rule, length, options, { quantum }), length, want => want.keep);
+export function pushValidator(schema, length, rule, options = {}, scheduling = {}) {
+  validateOptions(options, 'validation');
+  validateOptions(scheduling, 'scheduling');
+  return pushSession(schema.session(rule, length, options, scheduling), length, want => want.keep);
 }
 
 function pushSession(session, length, keepOf) {

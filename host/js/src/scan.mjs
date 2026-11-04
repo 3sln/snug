@@ -1,5 +1,6 @@
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
+import { validateOptions } from './options.mjs';
 import { profileFlags, codecTop } from './profiles.mjs';
 import { scan as scanGenerated, scanOptions, scanProfile, codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 
@@ -12,6 +13,7 @@ const clamp = n => (n > I32_MAX ? I32_MAX : n);
 
 /** Throws SnugFault(code) unless bytes are valid under the profile with these options. */
 export function scan(bytes, options = {}) {
+  validateOptions(options, 'decode');
   if (!(bytes instanceof Uint8Array)) throw new TypeError('decode expects a Uint8Array.');
   // Review C17: a SharedArrayBuffer-backed input could change between the checking pass and the trusted build.
   if (typeof SharedArrayBuffer === 'function' && bytes.buffer instanceof SharedArrayBuffer) throw new TypeError('decode refuses SharedArrayBuffer-backed input; copy it first.');

@@ -10,6 +10,64 @@ checked with offline TypeScript 5.8.3 on 2026-11-03. No installs are
 required. Internal `src/schema.mjs`/`src/compile.mjs` are host interfaces;
 their signatures and error classes are not the package contract.
 
+## Option admission
+
+Every public options bag uses the same host validator. Supply an ordinary
+object (or one with a null prototype); arrays, null, primitives and class
+instances are TypeErrors. Omitted bags and known fields set to `undefined`
+use defaults. Unknown own keys, including non-enumerable and symbol keys,
+throw TypeError. Invalid known values name the option; unknown-key errors
+list allowed names without echoing the supplied key or value. No option
+value is coerced. Limits, budgets, span depth/items and delay must be finite,
+non-negative **safe integers**; chunk must be positive; quantum must be in
+0..2^31−1. Boolean fields require booleans and enums require exact strings.
+
+These checks run before CBOR checking, value walking or source reads.
+Schema validation never turns malformed configuration into a data refusal;
+valid limits that exhaust resources still produce the documented result or
+SnugFault. Async entry points reject their Promise with TypeError.
+
+The following named sets are the complete option-key lists used below:
+
+| Set | Allowed keys |
+| --- | --- |
+| Preset fields | `wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays` |
+| Limits | `maxBytes`, `maxDepth`, `maxEntries`, `maxItems` |
+| DecodeOptions | Preset fields + Limits + `objects` |
+| EncodeOptions | Preset fields + Limits + `objects`, `omitUndefined` |
+| ValidationOptions | DecodeOptions + `maxBignumBytes`, `budget` |
+| SpanOptions | ValidationOptions + `depth`, `items` |
+
+| Entry point | Options bag | Additional bag |
+| --- | --- | --- |
+| `decode` | DecodeOptions | none |
+| `encode` | EncodeOptions | none |
+| `new Writer` | EncodeOptions + `keysSorted`, `limits` | nested `limits`: Limits only |
+| `compile` | `profile`, `limits`, `unicode` | nested `limits`: [CompileLimits](#compilation) only |
+| `Schema.validate`, schema-first `validate` | ValidationOptions | none |
+| `Schema.decode`, schema-first `decode` | ValidationOptions | none |
+| `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
+| `Schema.session` | ValidationOptions | scheduling: `quantum` |
+| `view` | ValidationOptions + `schema`, `rule`, `borrow`, `directories` | none |
+| `View.validateAt` | `schema` | none |
+| `scanBuffer` | DecodeOptions | none |
+| `scanHandle`, `scanHandleSync` | DecodeOptions | sourceOptions: `chunk`, `quantum` |
+| `new ScanSession`, `pushScanner` | DecodeOptions | scheduling: `quantum` |
+| `validateHandle`, `validateHandleSync` | ValidationOptions | sourceOptions: `chunk`, `quantum` |
+| `pushValidator` | ValidationOptions | scheduling: `quantum` |
+| `asyncHandle` | `delay` | none |
+| `bufferHandle` | no options argument | none |
+
+All runtime operations accept complete `profiles` objects: `strictArrays`
+is checked but ignored while reading, and `top` is checked but ignored while
+writing. `objects` is checked but has no effect on writing or validation-only
+calls; encode accepts it so a codec round trip can reuse decode options.
+Without a schema, views check `budget`/`maxBignumBytes` option types but use
+only scanner limits. Compile has a separate vocabulary: `profile` selects
+CDDL restrictions; `wire` selects a runtime wire preset. For example,
+`maxByets` at any runtime boundary, top-level `compile({ maxBytes })`, and
+unknown keys inside either grouped limits object are rejected.
+
 ## Codec: `snug`
 
 ```ts
@@ -41,10 +99,8 @@ CDDL validation does not infer a narrower TS type.
 | `omitUndefined: boolean` | false | Encode object-member omission; see guide |
 | `strictArrays: boolean` | preset (false; bindle true) | Encode: refuse extra array own properties with `unsupported` |
 
-DecodeOptions includes the profile options, `top`, `cose`, `objects` and the
-four limits. EncodeOptions includes the profile options, `cose`,
-`omitUndefined`, `strictArrays` and the four limits. An unknown option value
-is a `TypeError`. `encode`
+The complete allowed lists are in [option admission](#option-admission).
+Unknown keys and malformed values throw TypeError. `encode`
 does not enforce a map root. Its `maxBytes` check happens only when supplied,
 at finish, after allocation. Invalid CBOR/profile or inadmissible host values
 throw `SnugFault`; argument misuse can throw `TypeError`.
@@ -72,7 +128,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `NDArray` | `new NDArray(shape: number[], data: Value[] \| TypedArray \| Float16Bytes)`; readonly `shape`, `data`. Positive dimensions (1..8); product equals element count. Data is retained, not deeply frozen. |
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
-| `profiles` | Frozen `{ deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into any options to select it and override fields. |
+| `profiles` | Frozen `{ deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
 | `Tagged` | `new Tagged(tag: number, value: Value)`; frozen, `tag` (0..2³²−1) and `value`. Standard-set tags (0, 1, 21–24, 32, 55799) decode to it (tag 24's `value` is the payload bytes); encode checks the tag and content with kin and refuses others with `tag`. |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
@@ -105,7 +161,7 @@ Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 | --- | --- |
 | `schemaBytes`, `nesting`, `astNodes`, `instantiations`, `alternatives`, `arrayPositions`, `regexpPositions`, `width`, `poolBytes`, `totalBytes`, `compileBudget`, `leaves` | `depth`, `inputBytes`, `entries`, `items`, `bignumBytes`, `budget` |
 
-All are non-negative integers; defaults and ceilings are in the
+All are non-negative safe integers; defaults and ceilings are in the
 [guide](guide.md#limits). kin applies effective defaults and ceilings before
 computing the source key. Custom controls remain planned (D082); Unicode tables
 are an explicit option described below (D083/D110).
@@ -114,8 +170,8 @@ Omitted limits use defaults, zero means zero (not unlimited), valid requests
 above compiler ceilings clamp, and per-call runtime limits can only lower
 compiled caps. `bignumBytes` is currently fixed to 128 at compilation.
 There is no public effective-limits object. See the [operational limits
-reference](guide.md#limits), including root/item accounting and current
-malformed/unknown-option exceptions tracked in P7.10.
+reference](guide.md#limits), including root/item accounting. Malformed or
+unknown options reject with TypeError before compilation.
 
 `SchemaError` extends Error: constructor
 `(code, line = 0, column = 0, rule?)`, fields `code`, `line`, `column`,
@@ -322,9 +378,9 @@ interface Handle {
 ```
 
 `SyncHandle` requires synchronous reads. SourceOptions is
-`{ chunk?: number, quantum?: number }` (65536, 0). Use a positive integer chunk;
+`{ chunk?: number, quantum?: number }` (65536, 0). Use a positive safe integer chunk;
 quantum 0 disables scheduling yields, while a positive quantum enables them
-(schema sessions accept up to 2^31−1). Async drivers yield through
+(all sessions accept up to 2^31−1). Async drivers yield through
 `scheduler.yield`, `setImmediate`, `MessageChannel`, or finally `setTimeout(0)`,
 according to runtime availability; synchronous drivers continue immediately.
 Yields do not replenish the validation budget or change verdicts. Scan options
@@ -339,8 +395,8 @@ with top defaulting to any and limits only lowering the compiled values.
 | `validateHandle(schema, handle, rule, options?, sourceOptions?)` | Promise resolving ValidationResult; sync or async reads, one in flight |
 | `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` | ValidationResult; Promise reads refused |
 | `pushValidator(schema, length, rule, options?, { quantum? }?)` | PushValidator with `feed`, `resume`, `finalize` |
-| `bufferHandle(bytes)` | SyncHandle; use `bufferHandle(new Uint8Array(buffer))` for Node Buffer snapshot ownership until P7.10 |
-| `asyncHandle(bytes, { delay? }?)` | Handle; use `asyncHandle(new Uint8Array(buffer))` for Node Buffers; default delay 0 (Promise microtask), positive delay uses a timer |
+| `bufferHandle(bytes)` | SyncHandle; owns a copy of Uint8Array or Node Buffer input; each read returns an independent copy |
+| `asyncHandle(bytes, { delay? }?)` | Handle; same snapshot ownership as bufferHandle; delay is a non-negative safe integer in milliseconds, default 0 (Promise microtask), positive delay uses a timer |
 | `pushScanner(length, options?, { quantum? }?)` | `{ feed(chunk), resume(), finalize() }` |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
@@ -350,7 +406,10 @@ before validation starts. A handle must represent an **immutable snapshot**:
 size and every read must refer to the same bytes throughout the operation,
 including repeated reads. Pin remote object versions/generations or ETags in
 the caller's handle implementation and enforce the pin on every read. The
-library does not inspect a `version` field or detect object changes. Each read
+library does not inspect a `version` field or detect object changes. The
+in-memory helpers own independent copies, including for Node Buffer subranges;
+mutating the input or a returned read cannot change subsequent reads. Their
+handles are frozen and SharedArrayBuffer input is refused. Each custom read
 must return exactly the requested range as a Uint8Array, stable while used.
 Unknown-length streams remain pending D085; no drain/failFast option exists.
 Source decoding is unavailable. Default helper reads alone do not give the
@@ -411,10 +470,11 @@ Facade byte/rule/span misuse uses TypeError; exact integer view conversion
 can use RangeError (use `bigint()` or `int()` instead of unsafe `number()`).
 Writer typed argument/admission refusals are sticky SnugFaults; `.text(7)`
 throws `unsupported`, and the next call throws `writer_failed`.
-Codec/Writer limit type checks reject invalid limits, but schema facades
-currently coerce/accept some malformed options; unknown options may be ignored.
-P7.10 tracks consistent configuration rejection. Validate your configuration
-before calling; a data refusal is not a configuration check.
+Every public options bag rejects malformed values and unknown keys with
+TypeError before checking data (or rejects its Promise for async calls).
+Known-option errors name the option without displaying its value;
+unknown-key errors list permitted names. See [option admission](#option-admission).
+Valid resource exhaustion remains a data result/fault; it is not TypeError.
 SharedArrayBuffer input must first be copied into stable, exclusively owned
 bytes; coordinate concurrent writers while taking that copy.
 Unexpected internal invariant failures remain ordinary Error; they must not

@@ -31,6 +31,7 @@ import { build } from './build.mjs';
 import { TYPED_BY_TAG } from './values.mjs';
 import { profileFlags, keysOf } from './profiles.mjs';
 import { Writer } from './writer.mjs';
+import { validateOptions, selectOptions } from './options.mjs';
 
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const encoder = new TextEncoder();
@@ -365,7 +366,9 @@ export class View {
   cursor() { return new Cursor(this); }
   /** Detached validation (§16.3): does this subtree's span match `rule` (and the profile) as its own document?
    * Says nothing about the ancestors. Uses the view's schema unless one is given. */
-  validateAt(rule, { schema } = {}) {
+  validateAt(rule, options = {}) {
+    validateOptions(options, 'viewSpan');
+    const { schema } = options;
     const m = this._m, s = schema ?? m.schema;
     if (!s) throw new TypeError('snug view: validateAt needs a schema');
     const e = m.skip(this._p);
@@ -483,15 +486,16 @@ export class Cursor {
  * directories, and the decode options (top, cose, maxBytes, maxDepth, maxEntries, maxItems, objects). Throws as
  * decode()/schema.decode() would when the bytes are refused. */
 export function view(bytes, opts = {}) {
+  validateOptions(opts, 'view');
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug view: bytes must be a Uint8Array');
   if (isShared(bytes)) throw new TypeError('snug view: SharedArrayBuffer-backed input is refused (architecture §16.2)');
   const borrowed = opts.borrow === true;
   const b = borrowed ? bytes : new Uint8Array(bytes);   // owned: the check runs on the private copy
   if (opts.schema) {
     if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
-    const r = opts.schema.validate(b, opts.rule, opts);
+    const r = opts.schema.validate(b, opts.rule, selectOptions(opts, 'validation'));
     if (!r.ok) { const e = new Error(`snug: ${r.reason}`); e.reason = r.reason; e.path = r.path; e.offset = r.offset; if (r.subcode) e.subcode = r.subcode; throw e; }
-  } else scan(b, opts);
+  } else scan(b, selectOptions(opts, 'decode'));
   const m = new Message(b, opts);
   m.borrowed = borrowed;
   return new View(m, 0, 0);

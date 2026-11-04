@@ -68,7 +68,8 @@ test('omitUndefined uses descriptors, skips symbols and non-enumerable members, 
     assert.throws(() => encode(value, opts), { code: 'unsupported' });
     assert.throws(() => baseline.encode(value, opts), { code: 'unsupported' });
   }
-  assert.throws(() => encode({ u: undefined }, { omitUndefined: 1 }), { code: 'unsupported' });
+  // P7.10: a malformed option is an API error (TypeError naming the option), not a data refusal.
+  assert.throws(() => encode({ u: undefined }, { omitUndefined: 1 }), TypeError);
 });
 
 test('encoded key ordering: ASCII, UTF-8, head size transitions and COSE integers', () => {

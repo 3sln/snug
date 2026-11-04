@@ -12,6 +12,7 @@ export interface Float16ArrayLike {
  * Map whose keys are decoded values (D123). `undefined` and Tagged arise only under profiles that admit them. */
 export type Value = null | undefined | boolean | number | bigint | string | Uint8Array | TypedArray |
   Decimal | NDArray | Float16Bytes | Tagged | Value[] | { [key: string]: Value } | Map<Value, Value>;
+/** Finite non-negative safe integers. Zero is a real bound; malformed/unknown options throw TypeError. */
 export interface Limits {
   maxBytes?: number;
   maxDepth?: number;
@@ -36,6 +37,8 @@ export interface ProfileOptions {
   noncharacters?: boolean;
 }
 export interface DecodeOptions extends Limits, ProfileOptions {
+  /** Accepted for preset spreading; ignored while reading/checking. */
+  strictArrays?: boolean;
   /** Codec, view and profile-source default: the preset's ('any' for deterministic, 'map' for bindle). Schema default: 'any'. */
   top?: 'map' | 'any';
   /** Under keys 'text': safe integer labels in the top-level map; materialises that map as Map. */
@@ -43,6 +46,10 @@ export interface DecodeOptions extends Limits, ProfileOptions {
   objects?: 'null' | 'plain';
 }
 export interface EncodeOptions extends Limits, ProfileOptions {
+  /** Accepted for preset spreading; encoding permits any supported root. */
+  top?: 'map' | 'any';
+  /** Accepted for codec round trips; ignored while writing. */
+  objects?: 'null' | 'plain';
   cose?: boolean;
   omitUndefined?: boolean;
   /** Default: the preset's (deterministic false: ignore extra array own properties; bindle true: the strict own-key
@@ -77,7 +84,7 @@ export declare const profiles: Readonly<{
     undefinedValue: false; noncharacters: false; strictArrays: true }>;
 }>;
 export declare function decode(bytes: Uint8Array, options?: DecodeOptions): Value;
-/** maxBytes is enforced at finish only when explicitly supplied. */
+/** maxBytes bounds output acceptance at finish when supplied, not peak allocation. Unknown/malformed options throw TypeError. */
 export declare function encode(value: unknown, options?: EncodeOptions): Uint8Array;
 export declare class Decimal {
   constructor(mantissa: bigint, exponent: number);

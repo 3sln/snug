@@ -12,6 +12,7 @@ import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, error
   from '../../../gen/js/snug/compile/main.mjs';
 import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 import { sha256 } from './sha256.mjs';
+import { validateOptions } from './options.mjs';
 
 /** The snug version (kin's, so both hosts agree): in the source key and the serialisation container. */
 export const SNUG_VERSION = snugVersion();
@@ -37,12 +38,10 @@ const decoder = new TextDecoder();
 
 function options(profile, limits) {
   const opt = new Int32Array(OPT_WORDS).fill(-1);
-  if (!(profile in PROFILES)) throw new TypeError("profile must be 'full', 'bindle' or 'bus'.");
   opt[0] = PROFILES[profile];
-  for (const [k, v] of Object.entries(limits)) {
-    const i = COMPILE_OPTIONS.indexOf(k);
-    if (i < 0) throw new TypeError(`unknown compile limit ${k}`);
-    if (!Number.isInteger(v) || v < 0) throw new TypeError(`limit ${k} must be a non-negative integer`);
+  for (const [i, k] of COMPILE_OPTIONS.entries()) {
+    const v = limits[k];
+    if (v === undefined) continue;
     opt[i + 1] = Math.min(v, 0x7fffffff);
   }
   return opt;
@@ -61,7 +60,9 @@ function floats(h, bytes) {
 }
 
 /** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md, format 1). */
-export function compile(text, { profile = 'full', limits = {}, unicode } = {}) {
+export function compile(text, opts = {}) {
+  validateOptions(opts, 'compile');
+  const { profile = 'full', limits = {}, unicode } = opts;
   try { return compileOnce(text, profile, limits, unicode); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
