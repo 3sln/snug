@@ -1,4 +1,4 @@
-# snug — Program format 2.0 (draft, revision 3)
+# snug — Program format 2.0 (draft, revision 3.1)
 
 Status: **draft revision 3 (2026-11-04)**. Revision 2 answered the two
 independent reviews: `docs/reviews/2026-11-04-peg-claude.md` ("C#") and
@@ -178,8 +178,12 @@ otherwise A2. A recursive program is always A2.
 ### 3.3 Map normalisation (fold table) and tier [D] (C3, X6)
 
 The folds apply bottom-up, before tier selection, in both cut modes. Every
-row holds with cuts, under rule A and under rfc. The row marked * may fold
-to plain `FAIL` only when the member has no cut.
+row holds with cuts, under rule A and under rfc, and **preserves failure
+events and scores**. The last row always keeps the `MEMBER`, cut or no cut
+(revision 3.1, F1). Folding it to plain `FAIL` would drop the first
+iteration's consumption, so the `FAIL` event's score would no longer equal
+the unfolded repetition's. Provenance gives back the member id, not the
+score.
 
 | Before | After |
 | --- | --- |
@@ -187,7 +191,7 @@ to plain `FAIL` only when the member has no cut.
 | `REP(lo, hi ≥ 1, MEMBER(0, INF))` | `MEMBER(0, INF)` |
 | `REP(0, hi ≥ 1, MEMBER(1, INF))` | `MEMBER(0, INF)` |
 | `REP(1, hi ≥ 1, MEMBER(1, INF))` | `MEMBER(1, INF)` |
-| `REP(lo ≥ 2, hi, MEMBER(k ≥ 1, INF))` | `SEQ(MEMBER(k, INF), FAIL)`; `FAIL`* when the member has no cut |
+| `REP(lo ≥ 2, hi, MEMBER(k ≥ 1, INF))` | `SEQ(MEMBER(k, INF), FAIL)`, the `FAIL` with provenance = that member |
 | anything else | unchanged |
 
 So `{2*2 (+ int => int)}` becomes `SEQ(MEMBER(1,INF), FAIL)` and matches
@@ -501,8 +505,10 @@ some member's key matched, else `unexpected`, with the path to the value.
   the trail length at that moment, before any undo; kind = `missing` or
   `cut`; the member; the pair. A `FAIL` node also records an event (N5):
   its score is the trail length and its kind is `missing`. The member is
-  its provenance member (a fold reports what the unfolded `REP` would: that
-  member's next iteration met no pair), or none for an unplugged socket,
+  its provenance member. A folded `SEQ(MEMBER, FAIL)` reports what the
+  unfolded `REP` would, with the same score, because the `MEMBER` still
+  consumes before the `FAIL` scores: that member's next iteration met no
+  pair, or none for an unplugged socket,
   which reports `missing` with no key segment.
 * **Propagation.** A frame keeps the best event among its failed
   sub-attempts (higher score wins; ties go to the earlier). A failing `SEQ`

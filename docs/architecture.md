@@ -2197,6 +2197,13 @@ raises the following, answered in revision 3):
 | N8 MINOR: proofs vs established bounds | A: verifier cost and the A0/A1 bound labelled proof obligations | §20.7, program-2 §3.1, §20.16 |
 | N9 MINOR: wording | A: D277 marked done; §20.2's §3.5.4 claim qualified; App. C occurrence-expansion exception recorded in R9 | §20.2, §20.3 |
 
+**Final check** (`docs/reviews/2026-11-04-peg-final-check.md`, "F#"; revision 3.1):
+
+| Finding | Disposition | Where |
+| --- | --- | --- |
+| F1 MAJOR: a no-cut fold to plain `FAIL` loses the consumed-prefix score, so a competing `CHOICE` reports the wrong event (`{((2*2 (+ tstr => int)) // ("a" => int, "c" => int)), ? "a" => any, ? "b" => any, ? "c" => any}` on `{a:1, b:2}`: unfolded missing `ANYKEY` with score 2; plain-`FAIL` fold missing `KEY c`) | A: plain-`FAIL` folding removed. `REP(lo ≥ 2, hi, MEMBER(k ≥ 1, INF))` always becomes `SEQ(MEMBER(k, INF), FAIL)` with provenance, so the event and score equal the unfolded repetition's. This example, with its competing branch, is a corpus witness case | program-2 §3.3, §8 |
+| F2 BLOCKER: D280 replay phases and partial-copy representation | Routed by the manager to the P8.4 engineer (§19.5 owner); D280 stays pending | §20.6, D280 |
+
 ### 20.15 Probe record (2026-11-04, revision 2)
 
 Columns:
