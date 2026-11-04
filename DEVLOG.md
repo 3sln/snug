@@ -3816,6 +3816,23 @@ optimise slow paths or extend fractional VM metering (future engineering,
 not implemented by this measurement).
 - [ ] **Signed off** (owner)
 
+### D241 — Calibration adopted from the 2026-11-04 measurement (manager, per D230.1)
+**Decision** (manager, provisional; the owner delegated calibration, D230
+item 1): adopt D240's measured repricing so that kinds of work cost roughly
+equal CPU per budget unit: UTF-8 profile scan and the byte-comparison quantum
+`c64min` 64 → 8 bytes/unit; `.bits` scan 64 → 12 bytes/unit; `T_ELEM` 5 → 10,
+`T_CMP` 8 → 6, `T_PROBE` 4 → 3 ticks, a cheaper first comparison chunk; default
+budget 2,300,000 → 2,250,000. **Not adopted**: `EXT_CALL` 16 → 0 — the
+measured 8 ns/unit for a no-op call already includes the 16-unit charge, so
+removing it would make a call several times dearer per unit than the median.
+**Why**: per-unit ratios measured in the same interleaved rounds cancel most
+machine load; the machine never reached a quiet state (load 10.7–13.9 during
+timing), so absolute milliseconds are recorded but not relied on. Forced-
+generic paths cost 4–5× per unit more than their fast paths with identical
+charges; one shared schedule cannot fit both, and the default favours normal
+dispatch (the forced-generic flag is a test mode).
+- [ ] **Signed off** (owner) — calibration was delegated; recorded for review.
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -5227,6 +5244,44 @@ are answered as provisional decisions D082–D085. None is open now.
   SHA-256/version framing; a pinned scratch baseline isolates API defects but
   must be followed by a live-tree gate. Clippy's generated-code diagnostics
   need a narrow documented allowance, not edits to emitted Rust.
+
+## Phase 8 — Spec compliance (D230; audit P8.1, 2026-11-04)
+
+Plan (manager, 2026-11-04), in the owner's order: audit (done, `docs/conformance.md`)
+→ correctness fixes and documentation → valid-CBOR default → CDDL coverage.
+Every item is gated by the oracle, JS == Rust (and wasm when P7.9c is
+authorised), the existing gate set, and conformance-corpus vectors.
+
+- [ ] **P8.2 — Correctness fixes and repricing** (audit ranks 1–4; D241):
+  float comparison/exclusion lowering for ±0 and NaN (S15, S16, D038);
+  unplugged group sockets are empty choices, not empty groups (S32; repair
+  the oracle and corpus assumption); known-tag validity — RFC 3339 leap-second
+  rules for tag 0, RFC 3986 grammar for tag 32 (S61, D121); documentation
+  drift (S74); adopt the calibration repricing D241.
+- [ ] **P8.3 — Regexp: XSD and I-Regexp options** (audit rank 8): XSD regexps
+  (RFC 8610 §3.8.3 → XSD Appendix F) compiled at compile time into the same
+  bounded automata (class subtraction, `\i \c \d \w \s` and their
+  complements, block escapes `\p{IsBlock}`, categories), with Unicode/XML-name
+  and block tables in the optional `snug/unicode` module; I-Regexp kept as an
+  option. Default chosen in D242. Stop and report if XSD cannot be bounded and
+  portable.
+- [ ] **P8.4 — Valid-CBOR default** (audit ranks 5 and 9; D230): a `valid`
+  wire preset as the default — indefinite lengths, non-shortest heads and
+  floats, unsorted keys, NaN payloads, decimal/typed-array/ndarray/tag-55799
+  application rules moved out of the general policy; duplicate keys by value
+  on unsorted maps within the budget; literal, key and duplicate comparison by
+  value; scanner, both VM drivers, views, builder, sessions and sequences;
+  `deterministic` and `bindle` stay as options; measure whether a specialised
+  deterministic-only fast path is material and keep it only if so.
+- [ ] **P8.5 — CDDL coverage** (audit ranks 6, 7, 10; D230): budget-metered
+  general map assignment where D011 cannot prove greedy exact (bounded
+  search / bipartite matching), coupled and non-interval group repetitions,
+  non-regular group recursion, composite `.ne`, non-literal `.cat`/`.plus`/
+  `.det`, `.abnf`/`.abnfb` as a bounded kin engine; proven fast paths kept;
+  oracle agreement on all of it.
+- [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
+  non-deterministic encodings, RFC 8610/9165/9682 examples, published
+  protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
 
 ## Parking lot
 
