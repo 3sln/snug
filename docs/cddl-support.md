@@ -215,7 +215,8 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
   does not match −0.0). The Bindle profile refuses NaN, ±∞, −0 and integral
   floats within the safe range before the schema sees them.
 - Text `.size` is UTF-8 byte length, not code-point or grapheme length.
-  Regexps operate on code points; `.chars` is only planned (D082).
+  Regexps operate on code points; for a code-point length use the `.chars`
+  extension control from `snug/controls` (D082, D140–D142).
 - CDDL numeric bounds compare bytes/bit patterns, not rounded JS values;
   integers beyond Number's safe range stay exact. Literal comparisons rely
   on the unique admitted wire encoding.
@@ -242,7 +243,7 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 | Construct | Current refusal / reason |
 | --- | --- |
 | `.pcre`, `.abnf`, `.abnfb` | `unsupported_control`; portable, bounded engines required (D013). |
-| Unknown/custom controls, including `.chars`, `.unique`, `.samelen` | `unknown_control`; extension leaf/predicate mechanism and optional generic controls are planned in P7.2 (D082). |
+| Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time (D082, D140–D143), e.g. `.chars`, `.unique`, `.samelen` from `snug/controls`. |
 | Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `snug/unicode` and pass `unicode: tables` (D083). |
 | Regexp `\d`, `\w`, `\s`, `\x..`, lookarounds, backreferences, host-engine extensions | `regexp`; use the supported I-Regexp grammar. No host regex engine/ReDoS path. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
