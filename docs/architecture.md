@@ -967,6 +967,342 @@ the pass), W19 (`YIELD`), W20 (sync reads, monomorphic buffer path), W23–W24
 
 ---
 
+## 19. Valid CBOR input (RFC 8949 §5.3; owner direction D230.2) — design 2026-11-04, provisional
+
+D230 makes snug a general CBOR decoder: by default every decoder path —
+`decode`, views, the scanner, `validate`/`validateAt`, handles, streams, push
+sources and sequences — accepts any **well-formed, valid** CBOR item (RFC 8949
+§3, §5.3), not only the deterministic subset (§4.2.1), while still refusing
+what the RFC calls invalid. Deterministic checking (§4.2, with D122's NaN
+rule) and the Bindle profile stay as options. Encoders keep writing
+deterministic bytes. Decisions D260–D269; the audit's ranked fixes 5 and 9
+(docs/conformance.md §(c), §(h), §(j)).
+
+### 19.1 The `valid` preset and its flag (D260)
+
+A new host profile bit **`PF_VALID` (bit 8, 256)** in the profile flags word
+(`O_PROFILE`, scanner `o[11]`; VM limits word 9): set, it admits the
+non-deterministic encodings of RFC 8949; clear, every path behaves exactly as
+before. Presets: `valid` = `PF_DETERMINISTIC | PF_VALID` = **378** (the new
+default: any key, any tag, RFC floats, `undefined`, noncharacters, plus
+non-deterministic encodings); `deterministic` = 122; `bindle` = 0. Zero is
+still the Bindle profile and every set bit still admits more, so old flag
+words keep their meaning and a host that never fills the word still gets the
+strictest policy. `PF_HOST` becomes 383. Two internal bits follow `PF_SUB`
+(bit 7): `PF_CANON` (bit 9: the walk is over a canonical copy whose
+duplicates the canonical pass has already checked, §19.5) and nothing else;
+hosts never set them (`scanProfile` keeps the host bits only). The VM's
+deterministic walk of a valid-CBOR run carries `PF_VREL` (bit 10) instead of
+`PF_VALID`: what `PF_VALID` admits without changing bytes.
+
+Under `PF_VALID`:
+
+| Admitted (valid, not deterministic) | Still refused |
+| --- | --- |
+| Indefinite-length byte and text strings (definite chunks of the same major type, a `ff` break), arrays and maps | Every Appendix F well-formedness error: reserved AI 28–30, `f8 xx` with xx < 32, AI 31 on majors 0/1/6, a wrong or indefinite chunk, a break outside an indefinite item, in a definite container or tag, or in a map's value position (`malformed`); input ending before a break (`truncated`) |
+| Non-shortest heads: integers, lengths, counts, tag numbers | Duplicate map keys, by value (§19.2, §19.4) — `duplicate_key` |
+| Floats in any width, NaN with any sign, payload or signalling bit | Invalid UTF-8 in a text string or any chunk of one (a chunk boundary inside a code point is invalid, §3.2.3) — `text` |
+| Map keys in any order | Invalid content of a tag snug knows (§5.3.2): dates, epochs, URIs, tag 24, bignums, decimals, ndarrays, typed arrays (§19.6) — their codes |
+| Bignums with leading zero bytes or that fit major 0/1 (§3.4.3: decoders MUST accept leading zeros) | RFC 8949 §9.2's invalid tag numbers; unassigned simple values (a coverage gap, kept refused until P8.5); the limits |
+
+The other flags (keys, tags, floats, `undefined`, noncharacters, `top`, `cose`)
+keep their meaning and combine with `PF_VALID`. Refusal codes are unchanged;
+the only new spelling is `malformed` for the indefinite-structure errors that
+the deterministic profile reports as `indefinite` (a deterministic walk still
+says `indefinite`, `non_shortest` and `key_order`, at the same offsets).
+
+### 19.2 What "equal" means: the canonical-value comparison model (D261)
+
+Comparisons on bytes must now be comparisons of **values** (RFC 8949 §2 data
+model; §5.6.1 for map keys). snug defines two canonical forms of an item:
+
+* **DC, the deterministic canonical form** — the §4.2.1 encoding of the
+  item's data-model value: shortest heads, definite lengths, a string's
+  chunks concatenated, every float in the shortest width that holds its exact
+  bits (sign, NaN payload and signalling bit included: `fa7fc00000` →
+  `f97e00`, `fa7fc00001` stays four bytes, `-0.0` stays `f98000`), tag numbers
+  shortest, tag content in DC, bignum content bytes unchanged (`2(h'0001')`
+  stays: a tag-2 item is not the integer 1 and keeps its bytes), **map pairs
+  in their wire order**. DC is what a CDDL literal, a LITSET member, a KEYS
+  entry and the key order are compared against: `1` matches `1801`, `"a"`
+  matches `7f6161ff`, `1.5` matches `fa3fc00000`; `1` does not match `1.0`
+  (distinct values, §5.6.1; S17 unchanged). For deterministic input DC is the
+  input itself, so no existing verdict moves.
+* **EC, the equivalence form** (§5.6.1) — DC with every float zero positive
+  (`-0.0` equals `0.0`), every NaN's sign cleared (NaNs are equal when their
+  significands, zero-extended on the right, are; the DC width already depends
+  on the significand only), and every map's pairs sorted by their keys' EC
+  bytes (maps are equal as sets of pairs). Two keys are duplicates iff their
+  EC bytes are equal. EC is used for duplicate detection only.
+
+A key is **EC-sensitive** when its EC form can differ from its DC form other
+than by being non-canonical: it contains a float zero, a NaN, or a map whose
+keys are not in canonical order. Only EC-sensitive and non-canonical keys ever
+need an EC form written out; for every other key its bytes are its DC and EC
+form.
+
+### 19.3 Where canonicalisation happens (D262)
+
+The guiding constraint: deterministic input must cost what it costs today on
+every path, and the walkers that matter for speed (the VM's live and dead
+walks, their D044 fast paths, the resumable session's buffer walks) must not
+grow per-byte work for encodings that deterministic input never has.
+
+* **The recursive scanner (`kin/scan.kin`) checks valid CBOR natively** — loops
+  until a break, chunk checks, non-shortest heads, any float width, the key
+  order test against the previous key's DC form, the duplicate check of §19.4 —
+  and can write the **canonical copy** (DC, wire order) of a non-deterministic
+  input (§19.5). Deterministic input takes the existing code path (the extra
+  tests sit only where the deterministic walk would refuse).
+* **The VM's buffer walks stay deterministic.** Under `PF_VALID` a run first
+  walks the input exactly as the deterministic profile does (the
+  **attempt**). If it ends in a refusal that only a non-deterministic
+  encoding can cause — `indefinite`, `non_shortest`, `key_order` — or saw an
+  EC-sensitive key (§19.4), the attempt is discarded (budget, items and the
+  witness restored) and the run takes the **canonical path**: the scanner
+  checks the item and writes its canonical copy, then the unchanged VM
+  validates the copy under `PF_VALID | PF_CANON` (§19.5), and every offset it
+  reports is mapped back to the input. Deterministic input is decided by the
+  attempt alone, as today. What `PF_VALID` admits without changing an
+  encoding's bytes — a NaN with a sign, payload or signalling bit in its
+  shortest width, a bignum with leading zeros, the tag rules of §19.6 — the
+  attempt and the walk over the copy admit directly (the copy contains them).
+* **`decode` and views** run the scanner; for non-deterministic input the
+  builder and the View read the canonical copy (which the View owns: `borrow`
+  cannot alias input that is not the canonical form; Rust's borrowing `View`
+  answers `owned_view` and a new owned `Document` holds the copy). `raw()` is
+  already documented as an item's canonical encoding; `offset` is a position
+  in the View's message (the copy). Map order is the wire order in both; a
+  view whose scan noted keys out of order searches maps linearly
+  (`nav-find-any`).
+* **The resumable session (handles, streams, push, sequences)** cannot copy a
+  stream; it walks valid CBOR natively in its frames (§19.7) and sends
+  non-deterministic items it takes whole through the same attempt/canonical
+  path as the buffer driver. Profile-only handles under `PF_VALID` run the
+  session against `any` (as unknown-length scanning already does, D146);
+  `rscan` stays a deterministic/Bindle path.
+
+The three routes give **the same out array** (code, offset, budget used,
+items, path) for any input, because the charges of the canonical path are
+defined on the canonical form (§19.4) and the copy keeps wire order (so a
+witness names the same pair the session's frames name).
+
+### 19.4 Key order and duplicate keys (D263)
+
+Per map, in wire order, every key's DC form is compared with the previous
+key's (the existing key-order comparison, charged as today: ⌈min(len₁,
+len₂)/64⌉, at least 1, on the DC lengths):
+
+* **ascending** (greater): no duplicate is possible so far;
+* **equal**: `duplicate_key` at this key, immediately (deterministic and valid
+  alike; the existing behaviour);
+* **descending**: under the deterministic profiles `key_order` at this key;
+  under `PF_VALID` (or `PF_CANON`) the map is **marked**.
+
+A map with an EC-sensitive key is also marked (all profiles: under the
+deterministic preset `{0.0: 1, -0.0: 2}` is today accepted although RFC 8949
+§5.6.1 makes those keys equal; the mark fixes it). When a marked map ends —
+after its last value, so refusals inside the map's pairs come first — the
+**deferred check** runs: one record per key (its comparison form: the input
+bytes when the key is canonical and not EC-sensitive, else its EC form
+written to scratch, with the key's offset), a heap sort of the records by
+comparison bytes (ties by offset), then a pass over neighbours. The refusal
+is `duplicate_key` at the **earliest second occurrence**: the smallest key
+offset that equals some earlier key (what an O(n²) walk in wire order would
+report). Cost (program.md §14 additions): 1 per record, then each sort and
+neighbour comparison ⌈min(len₁, len₂)/64⌉, at least 1. An n-key map costs at
+most n + 2n·⌈log₂ n⌉ comparison units beyond its keys' bytes; n is bounded by
+`maxEntries`. The scanner rebuilds the records by re-walking the marked map's
+keys from its head (no memory for sorted maps); the session retains them
+(its bytes are gone, §19.7). Both produce the same record sequence, so the
+same comparisons and charges. Over a canonical copy (`PF_CANON`) the keys come
+in wire order: a key below its predecessor restarts the key-table search bound
+and every map block's cursor (uncharged), so the map matching of program.md §8.3
+needs no sorted input; the session does the same.
+
+### 19.5 The canonical copy and the canonical path (D264)
+
+**Two passes, both kin.** A valid-CBOR check is the scanner's walk (`scan-cb`;
+`scan-x` for a span or a session's whole item). When the walk admitted an
+encoding that changes bytes in the DC form (`o[12]` bit `VC_NONDET`), a second,
+trusted pass over the checked input writes its **canonical copy**
+(`canon-build`, `kin/vcopy.kin`, over the writers of `kin/canon.kin`). Input
+that is only out of key order, or holds NaN payloads or bignum leading zeros, is
+its own copy: nothing is written.
+
+**Content.** The DC form of the item in wire order, written sequentially:
+definite heads in shortest form, strings concatenated, floats shortened,
+everything else byte for byte (byte-string and text content, bignum content,
+tag-24 payloads). Size ≤ n + ⌊n/128⌋ + 16 for an n-byte item (strings, heads
+and floats never grow; an indefinite container of k ≥ 256 elements grows by
+at most 3 bytes and holds ≥ k bytes).
+
+**Embedded CBOR.** Byte strings whose content the VM may walk as CBOR — every
+tag-24 payload, and, when the Program has `.cbor`/`.cborseq` controls
+(`FL_EMBED`), every byte string — are checked as a CBOR sequence under the same
+profile; content that is valid but not its own DC form gets its own canonical
+copy, appended after the main copy (and visited in turn), and every such
+content and every refused one gets an entry in the **embedded table**: content
+start and end, copy start and end, the refusal's code and offset. The VM,
+walking embedded content under `PF_CANON`, looks the content up and walks the
+copy instead (or reports the recorded refusal where its own walk would have
+found one). Content in an indefinite-length byte string is gathered into the
+buffer first: the table is built over the main copy, where every string is
+definite.
+
+**Offsets.** The copy keeps the input's item structure one for one, so a copy
+offset maps back by a lockstep walk of the two (`map-back`: an item's head
+maps to the item's start, a string's content byte to the matching byte of the
+matching chunk, a child recursively; embedded copies first map to their
+content). Every offset the VM reports on the canonical path (error, witness,
+budget position) is mapped once, at the end; paths are unchanged (they name
+schema keys and indices, never bytes). No offset table is kept.
+
+**Deferred checks in the scanner.** The scanner's walk takes no byte buffer of
+its own (its hot path stays as it was), so three rare checks that need one are
+recorded and run when the walk ends, in the order they were recorded — which is
+walk order, and before the walk's own refusal if any, since every record
+precedes the point where the walk stopped: a marked map's duplicate check
+whose keys need EC forms, the text rule of tag 0/32 and the payload walk of tag
+24 over an indefinite-length string (gathered into the buffer; refusals inside
+a gathered payload map back into its chunks; a payload's items are counted as
+they would be in walk order, a replay of the walk settling `maxItems` when
+payload items could pass it). The records sit at the end of the options
+array's scratch (`o[16..]`, D264's protocol below), the records of a running
+duplicate check at its start.
+
+**The scratch protocol.** `scan-cb(b, o, cb)`: `o` is the scanner's options
+array, now any length — words 16–23 a scratch header (record stack top,
+deferral bottom, duplicate-check units, buffer scratch top, deferral count,
+source, payload items, embedded-table count), the rest records and
+deferrals — and `cb` the byte buffer. `o[12]` carries the outcomes
+(`VC_NONDET`; `VC_UNSORTED`: some map's keys may be out of canonical order;
+`VC_ECS`: the VM saw an EC-sensitive key), `o[13]`/`o[14]` the words and bytes
+needed, `o[15]` the copy's length or −1. A buffer that is too small ends the
+call with the internal code `scratch` (22), never seen by a user: the host
+grows the buffer and calls again (D033's rule). `scan(b, o)` stays for callers
+without a buffer and answers `scratch` when a deferred check is needed. The
+VM's `vm-validate-v` / `vm-validate-span-v` take `vs` (the scanner's options
+array for the canonical path, which also holds the embedded table) and `cb`;
+too small, they answer −5 with the words, bytes and VM-scratch words needed in
+`out[5..7]`; the embedded table is copied to the VM scratch past the rule's own
+words (`S[36]` its offset during the run). Hosts keep one leased set per
+isolate, as for the VM scratch.
+
+**Charges (D277).** The canonical pass (reading the input, writing the copy and
+the table) is not metered: it is linear in the input, like the codec's scan.
+The attempt's units are discarded. The VM's run over the copy is charged by
+the table as for any input, the key-order comparison of every key included
+(`PF_CANON` compares, charges and never refuses). A marked map's deferred
+duplicate check (§19.4) is charged **at that map's logical end**, before the
+map's own end charges, on every route: the scanner records each marked map's
+units with the map's position, the copy writer translates the position into
+the copy, and the VM charges the units when it reaches that map's end — as the
+session does when it runs the check there. A non-deterministic input therefore
+costs what its canonical copy costs plus its duplicate checks, charged at the
+same points as on the session's route, so the exhaustion point is the same.
+CPU per call is bounded by twice the budget plus the linear passes.
+
+### 19.6 Application rules move to the Bindle tag set (D265; audit rank 9)
+
+These restrictions are Bindle's value model, not RFC validity; they now apply
+only at tag level 0 (`tags: 'bindle'`, the Bindle preset):
+
+| Rule | `tags: 'bindle'` | `tags: 'standard'` / `'any'` (both other presets) |
+| --- | --- | --- |
+| Tag 4 decimal | `[e, m]`, e −1024..−1, m non-zero, not divisible by 10 | RFC 8949 §3.4.4: a two-element array of an integer exponent (major 0/1) and an integer or bignum mantissa — `decimal` otherwise |
+| Tag 40 ndarray | 1..8 positive dimensions, product = element count | RFC 8746 §3.1.1: `[shape, data]`, shape an array of unsigned integers "distinct from zero" (any rank, no cap of 8), data an array, a typed array or a homogeneous array (tag 41) whose element count is the product — `ndarray` otherwise (tag 1040 stays an opaque tag, as today) |
+| Little-endian float typed arrays (84–86) | no NaN element | any element |
+| Tag 55799 | — (not in the set) | anywhere, any depth (§3.4.6 imposes no nesting rule) |
+| Bignum content (tags 2, 3) | 9..`maxBignumBytes` bytes, no leading zero | deterministic: the same (preferred serialization, §3.4.3); `PF_VALID`: 0..`maxBignumBytes` bytes, leading zeros allowed |
+
+At levels 1–3 the order of checks for tags 4 and 40 is: a byte is left
+(`truncated`), the content is an array (else the tag's code), the array is
+walked as an item, it holds exactly two items (else the tag's code), then the
+rule; at level 0 Bindle's order (`0x82` first) stays. Under `PF_VALID`, `f8 xx`
+with xx < 32 is `malformed` (Appendix F). Nothing else changes for the Bindle
+preset: every 3sln.me vector keeps its code. Hosts build `Decimal`/`NDArray` only from content inside those classes'
+invariants and a `Tagged` otherwise (D267).
+
+### 19.7 Sessions: handles, streams, push, sequences (D266)
+
+The session (§17) walks valid CBOR natively in its frames; what it takes
+whole goes through the canonical path of §19.5:
+
+* **Heads** in frames (strings, containers, tags) may be non-shortest.
+* **Indefinite arrays and maps** are frames with count −1 (`F_N`): each step
+  that would start the next element first looks for a break (one byte, asked
+  for like any head); a break ends the frame; a break in a map's value
+  position is `malformed`; end of input inside one is `truncated` at the
+  position where the break or next item was due. Entry limits are counted as
+  elements arrive (`too_many_entries` at the element that passes
+  `maxEntries`). The carried state is the frame's element count so far and the
+  break flag; nothing else crosses a window.
+* **Indefinite strings, and any non-deterministic item the session would take
+  whole** (the D091 prescan understands indefinite items: it scans to their
+  breaks): taken whole (bounded by `maxBytes`, as D124's keys and tag contents
+  are) and validated by the attempt/canonical path, inside the session's step.
+  A deterministic item stays on the buffer walk; a non-deterministic one gives
+  the canonical path's results whichever way the windows fall — so a
+  session's out array is still a function of the input alone, and equals the
+  buffer driver's.
+* **Map frames** keep, in the key arena, every key's comparison form (its
+  bytes, or its DC/EC form when it is not canonical or is EC-sensitive) and a
+  record per key while the map is open (under `PF_VALID`; under the
+  deterministic profiles only EC-sensitive keys are retained). A key that is
+  not canonical is asked for whole and canonicalised into the arena (its DC
+  form serves the KEYS lookup and LIT comparisons). At the map's end the
+  deferred check of §19.4 runs over the records. Memory: the keys of the open
+  maps (≤ the message), which is the price of duplicate detection on a stream
+  (§5.6: streaming decoders "often do not keep the state"); the arena and the
+  record area grow on demand (a new suspension `VMS_GROW`: the host copies the
+  array into a larger one and steps again).
+* **Sequences** (§18, D210–D219): a message is still one root; an indefinite
+  root ends at its break; nothing else changes. Each message under the default
+  is validated as valid CBOR.
+
+### 19.8 Hosts (D267)
+
+`wire: 'valid'` is the default in JS (`profiles.valid`) and Rust
+(`Profile::VALID`, the `Default` of every options struct);
+`'deterministic'` and `'bindle'` select the checking presets. `encode`, the
+Writer and Rust `encode` write deterministic bytes under every preset (the
+`valid` preset encodes as `deterministic`). Decoded values: maps keep wire
+order (canonical copies keep it); a `Decimal` only for tag-4 content inside
+`Decimal`'s invariants and an `NDArray` only for tag-40 content inside
+`NDArray`'s (else `Tagged(4, [e, m])`, `Tagged(40, [shape, data])`); a bignum with leading zeros decodes to its integer; a NaN's
+payload is not kept by a JS number (a View's `raw()` keeps the bytes).
+
+### 19.9 Gates, vectors and the differential (D268)
+
+Gates that hold deterministic input name their preset explicitly
+(`wire: 'deterministic'` / flags 122, or Bindle 0) and keep every expectation;
+none is weakened. New: RFC 8949 Appendix A in full (every row, including all
+non-deterministic encodings: `fa7fc00000`, `fb7ff8000000000000`, the
+`f9`/`fa`/`fb` infinities, the indefinite strings, arrays and maps), plus
+every Appendix F example (each with its code under every preset), duplicate
+keys by value (`{1, 1801}`, `{"a", 7f6161ff}`, `{0.0, -0.0}`, NaN keys of two
+widths, maps as keys in two orders), and the rank-9 cases; a **canonical
+equivalence** property (random values; every non-canonical variant —
+indefinite splits, widened heads and floats, permuted keys, nested — decodes
+and validates under `valid` exactly as its canonical encoding, and is refused
+under `deterministic` with the documented code); a **differential against
+cbor2 2.4.1's default (non-CDE) decoder** with every difference classified;
+JS == Rust at kin level and through the hosts; session == buffer under
+`valid` (vmsession-test, sequence-test); oracle agreement unchanged.
+
+### 19.10 The deterministic-only fast path (D269)
+
+The attempt (§19.3) *is* a deterministic-only fast path for the VM; the
+alternative is a VM that walks non-deterministic input natively. D269 records
+the measurement: `valid` against `deterministic` on the standard inputs
+(bench/README.md) and the canonical path's cost on their non-deterministic
+variants, and keeps the split only if the native alternative would be
+measurably slower on deterministic input. The deterministic *checking*
+option stays regardless (dCBOR, CTAP2 and signing protocols need it).
+
+---
+
 ## 20. PEG group semantics (D270–D279) — design revision 2, 2026-11-04, provisional
 
 D270 moves group matching in arrays and maps from the exact regular /
