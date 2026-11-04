@@ -384,9 +384,23 @@ export function leafInt(p, pool, b, s, lb, pos, cs, ce, cls, hi, lo) {
     return R_RANGE;
 }
 
+export function floatNan(p, s, lb, count, pos) {
+    // Every NaN (any width, sign or payload) is one number for CDDL: it is in the
+    // run when the NaN key fff80000:00000000 is (D250).
+    const r = inFintervals(p, s, p[lb + 2], count, -524288, 0, pos);
+    if (r < 0) {
+        return r;
+    }
+    if (r === 1) {
+        return 0;
+    }
+    return R_RANGE;
+}
+
 export function leafFloat(p, b, s, lb, pos) {
     // FLOAT: the width is exact by mask; then the interval list, if any. Under
-    // the RFC float rules (D122) a NaN is in no interval, and a zero compares
+    // the RFC float rules (D122) a NaN is looked up as the one NaN key
+    // fff80000:00000000 (the key of f97e00, above +inf: D250), and a zero compares
     // as IEEE does (-0 = +0): it is in the list when the key of +0 or of -0 is
     // (the two keys are adjacent), a second search for -0.
     const count = p[lb + 3];
@@ -397,7 +411,7 @@ export function leafFloat(p, b, s, lb, pos) {
     if (ai === 25) {
         const h = be16(b, pos + 1);
         if (((h & 0x7c00) === 0x7c00) && ((h & 0x3ff) !== 0)) {
-            return R_RANGE;
+            return floatNan(p, s, lb, count, pos);
         }
         if ((h & 0x7fff) === 0) {
             const rz = inFintervals(p, s, p[lb + 2], count, 1 << 31, 0, pos);
@@ -415,6 +429,18 @@ export function leafFloat(p, b, s, lb, pos) {
                 return 0;
             }
             return R_RANGE;
+        }
+    }
+    if (ai === 26) {
+        const w = be32(b, pos + 1);
+        if (((w & 0x7f800000) === 0x7f800000) && ((w & 0x7fffff) !== 0)) {
+            return floatNan(p, s, lb, count, pos);
+        }
+    }
+    if (ai === 27) {
+        const wh = be32(b, pos + 1);
+        if (((wh & 0x7ff00000) === 0x7ff00000) && (((wh & 0xfffff) !== 0) || (be32(b, pos + 5) !== 0))) {
+            return floatNan(p, s, lb, count, pos);
         }
     }
     floatKey(b, s, pos, ai);

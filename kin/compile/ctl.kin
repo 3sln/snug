@@ -33,7 +33,7 @@
                                        mk-float-from u64-cmp lit-member has-ext enc-head-len point-of mk-int-range
                                        K_ANY K_MAJOR K_INT K_FLOAT K_SIMPLE K_LIT K_LITSET K_TEXT
                                        K_BYTES K_UINTX K_TAG K_EMBED K_AND K_NOT
-                                       R_NEG_INF R_NEG R_POS R_POS_INF]]))
+                                       R_NEG_INF R_NEG R_POS R_POS_INF ZK_NEG_HI FK_NEG_INF_HI FK_POS_INF_HI]]))
 
 ;; ------------------------------------------------------------ controller values
 
@@ -58,16 +58,19 @@
       (return true))))
 
 (defn ^:pub ^Bool float-point [^Ints h ^I32 ts]
-  (comment "Is ts one FLOAT leaf (every width) holding one value? (key hi, lo"
-           "into h[H_R0], h[H_R1])")
+  (comment "Is ts one FLOAT leaf (every width) holding one number? Its lowest key"
+           "into h[H_R0], h[H_R1] and its highest into h[H_R2], h[H_R3]: the same key,"
+           "except for zero, which is the two adjacent keys of -0 and +0 (D250).")
   (let [l (single-leaf h ts)]
     (if (or (< l 0) (!= (lk h l) K_FLOAT)) (return false))
     (if (or (!= (lflags h l) 7) (!= (ld h l 1) 1)) (return false))
-    (let [o (* 4 (ld h l 0))]
-      (if (or (!= (vget h T_FIV o) (vget h T_FIV (+ o 2))) (!= (vget h T_FIV (+ o 1)) (vget h T_FIV (+ o 3))))
+    (let [o (* 4 (ld h l 0))
+          lh (vget h T_FIV o) ll (vget h T_FIV (+ o 1))
+          hh (vget h T_FIV (+ o 2)) hl (vget h T_FIV (+ o 3))]
+      (if (not (or (and (== lh hh) (== ll hl))
+                   (and (and (== lh ZK_NEG_HI) (== ll (neg 1))) (and (== hh (shl 1 31)) (== hl 0)))))
         (return false))
-      (hs h H_R0 (vget h T_FIV o))
-      (hs h H_R1 (vget h T_FIV (+ o 1)))
+      (hs h H_R0 lh) (hs h H_R1 ll) (hs h H_R2 hh) (hs h H_R3 hl)
       (return true))))
 
 (defn ^:pub ^I32 single-lit [^IntsR h ^I32 ts]
@@ -356,7 +359,7 @@
         isint (int-point h ctl)
         pr (hg h H_R0) pa (hg h H_R1) pb (hg h H_R2)
         isflt (float-point h ctl)
-        kh (hg h H_R0) kl (hg h H_R1)]
+        kh (hg h H_R0) kl (hg h H_R1) xh (hg h H_R2) xl (hg h H_R3)]
     (if (and (not isint) (not isflt)) (return (fail h ERR_CONTROL_VALUE pos)))
     (for [^I32 i 0 (ts-n h target)]
       (let [t (ts-leaf h target i)
@@ -400,10 +403,13 @@
                                   (vpush1 h T_STK ux))))))))))
           (if (== k K_FLOAT)
             (do (if (not isflt) (return (fail h ERR_CONTROL_VALUE pos)))
-                (let [^:mut lh 0 ^:mut ll 0 ^:mut hh (neg 1) ^:mut hl (neg 1)]
+                (comment "D250: an ordered comparison is false for NaN, so the half-line stops"
+                         "at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,"
+                         "so lt stops below -0, le at +0, gt starts above +0 and ge at -0.")
+                (let [^:mut ^I32 lh FK_NEG_INF_HI ^:mut ll (neg 1) ^:mut ^I32 hh FK_POS_INF_HI ^:mut hl 0]
                   (if (== op 0) (do (set hh kh) (set hl (sub32 kl 1)) (if (== kl 0) (set hh (sub32 kh 1)))))
-                  (if (== op 1) (do (set hh kh) (set hl kl)))
-                  (if (== op 2) (do (set lh kh) (set ll (add32 kl 1)) (if (== ll 0) (set lh (add32 kh 1)))))
+                  (if (== op 1) (do (set hh xh) (set hl xl)))
+                  (if (== op 2) (do (set lh xh) (set ll (add32 xl 1)) (if (== ll 0) (set lh (add32 xh 1)))))
                   (if (== op 3) (do (set lh kh) (set ll kl)))
                   (vtrunc h T_IVA 0)
                   (if (== (ld h t 1) 0)
@@ -426,7 +432,7 @@
         isint (int-point h ctl)
         pr (hg h H_R0) pa (hg h H_R1) pb (hg h H_R2)
         isflt (float-point h ctl)
-        kh (hg h H_R0) kl (hg h H_R1)
+        kh (hg h H_R0) kl (hg h H_R1) xh (hg h H_R2) xl (hg h H_R3)
         lit (single-lit h ctl)
         cl (single-leaf h ctl)]
     (if (< cl 0) (return (fail h ERR_CONTROL_VALUE pos)))
@@ -456,14 +462,16 @@
                   (do (vpush1 h T_IVA 0) (vpush1 h T_IVA 0) (vpush1 h T_IVA (neg 1)) (vpush1 h T_IVA (neg 1)))
                   (fiv-load h T_IVA (ld h t 0) (ld h t 1)))
                 (vtrunc h T_IVB 0)
+                (comment "D250: .eq is the point (both zero keys for a zero); .ne its complement"
+                         "over every key, NaN's included: NaN is not equal to any number.")
                 (if (== ne 0)
-                  (do (vpush1 h T_IVB kh) (vpush1 h T_IVB kl) (vpush1 h T_IVB kh) (vpush1 h T_IVB kl))
+                  (do (vpush1 h T_IVB kh) (vpush1 h T_IVB kl) (vpush1 h T_IVB xh) (vpush1 h T_IVB xl))
                   (do (let [pl (sub32 kl 1)
                             ^:mut ph kh
-                            nl3 (add32 kl 1)
-                            ^:mut nh kh]
+                            nl3 (add32 xl 1)
+                            ^:mut nh xh]
                         (if (== kl 0) (set ph (sub32 kh 1)))
-                        (if (== nl3 0) (set nh (add32 kh 1)))
+                        (if (== nl3 0) (set nh (add32 xh 1)))
                         (vpush1 h T_IVB 0) (vpush1 h T_IVB 0) (vpush1 h T_IVB ph) (vpush1 h T_IVB pl)
                         (vpush1 h T_IVB nh) (vpush1 h T_IVB nl3) (vpush1 h T_IVB (neg 1)) (vpush1 h T_IVB (neg 1)))))
                 (fiv-intersect h T_IVA T_IVB T_IVC)

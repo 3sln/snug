@@ -1,0 +1,2188 @@
+{
+ "format": "snug conformance corpus v1. Each suite: cddl text, profile (full unless stated), cases [{rule, hex, expect: true|false, reason?, note?}]. A suite with schemaError expects compile to fail with that code. phase:\"later\" suites are not yet gated.",
+ "source": "P8.2 regression vectors for the 2026-11-04 audit (docs/conformance.md S15, S16, S32, S60-S62, D038, D121). Expected verdicts are the RFC verdicts (RFC 8610 §3.8.6 and §3.9, RFC 8949 §3.4.1, §3.4.2 and §3.4.5.3, RFC 3339 §5.6-§5.7, RFC 3986 URI-reference); every case was also run on 2026-11-04 through the Ruby cddl gem 0.12.14 (`schema.cddl validate data.cbor`) and the offline-rebuilt Rust cddl 0.10.7 CLI (`--ci validate`). A note records each disagreement; where a reference tool and the RFC disagree the RFC verdict is kept.",
+ "notes": [
+  "Ruby validates the FIRST rule of a schema; every schema here starts with r.",
+  "Ruby 0.12.14 refuses every tag-0 time with second 60, including real leap seconds (2016-12-31T23:59:60Z) and RFC 3339 §5.7's own example; RFC 3339 admits them (D252).",
+  "Neither reference checks tag-32 URI syntax or tag-0 offsets/leap seconds structurally; their acceptances there are not evidence of validity.",
+  "Rust 0.10.7 refuses NaN for float .ne 1.5 and mishandles controls on bounded float ranges and .and; the audit already recorded the first as a shared bug.",
+  "Every suite runs under the deterministic wire preset (options.wire, D120-D125, any tag per D180; vm-test passes its profile flags): scalar -0.0, infinities and NaN appear only as float16 (D122). The Bindle preset would refuse them before the schema."
+ ],
+ "suites": [
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "lt0: r = float .lt 0.0",
+   "cddl": "r = float .lt 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "ltn0: r = float .lt -0.0",
+   "cddl": "r = float .lt -0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "le0: r = float .le 0.0",
+   "cddl": "r = float .le 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "gt0: r = float .gt 0.0",
+   "cddl": "r = float .gt 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "gtn0: r = float .gt -0.0",
+   "cddl": "r = float .gt -0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "ge0: r = float .ge -0.0",
+   "cddl": "r = float .ge -0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "ne0: r = float .ne 0.0",
+   "cddl": "r = float .ne 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": true,
+     "note": "NaN; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "nen0: r = float .ne -0.0",
+   "cddl": "r = float .ne -0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": true,
+     "note": "NaN; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "ne15: r = float .ne 1.5",
+   "cddl": "r = float .ne 1.5",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": true,
+     "note": "NaN; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "eq0: r = float .eq -0.0",
+   "cddl": "r = float .eq -0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "lit0: r = 0.0",
+   "cddl": "r = 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "litn0: r = -0.0",
+   "cddl": "r = -0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "rng-excl0: r = -1.0...0.0",
+   "cddl": "r = -1.0...0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "rng-excln0: r = -1.0...-0.0",
+   "cddl": "r = -1.0...-0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "rng-n0p1: r = -0.0..1.0",
+   "cddl": "r = -0.0..1.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "bnd-ne0: r = (-1.0..1.0) .ne 0.0",
+   "cddl": "r = (-1.0..1.0) .ne 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "bnd-lt0: r = (-1.0..1.0) .lt 0.0",
+   "cddl": "r = (-1.0..1.0) .lt 0.0",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "and0: r = 0.0 .and (-1.0..-0.0)",
+   "cddl": "r = 0.0 .and (-1.0..-0.0)",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "lt15: r = float .lt 1.5",
+   "cddl": "r = float .lt 1.5",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": false,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "gt15: r = float .gt 1.5",
+   "cddl": "r = float .gt 1.5",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": false,
+     "note": "NaN"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": false,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": false,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": false,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": false,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "f16ne: r = float16 .ne 1.5",
+   "cddl": "r = float16 .ne 1.5",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": true,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": true,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": true,
+     "note": "NaN; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": false,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "float-controls (S15/S16/D038, D250)",
+   "name": "ne-lit-choice: r = float .ne 0.0 / 1.5",
+   "cddl": "r = float .ne 0.0 / 1.5",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "f90000",
+     "expect": false,
+     "note": "+0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f98000",
+     "expect": false,
+     "note": "-0.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f97e00",
+     "expect": true,
+     "note": "NaN; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "f93e00",
+     "expect": true,
+     "note": "1.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9bc00",
+     "expect": true,
+     "note": "-1.0"
+    },
+    {
+     "rule": "r",
+     "hex": "f93800",
+     "expect": true,
+     "note": "0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f9b800",
+     "expect": true,
+     "note": "-0.5"
+    },
+    {
+     "rule": "r",
+     "hex": "f97c00",
+     "expect": true,
+     "note": "+Infinity"
+    },
+    {
+     "rule": "r",
+     "hex": "f9fc00",
+     "expect": true,
+     "note": "-Infinity"
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-arr",
+   "cddl": "r = [ $$x ]",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-map",
+   "cddl": "r = { a: int, $$x }",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-opt-map",
+   "cddl": "r = { a: int, ? $$x }",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-opt-arr",
+   "cddl": "r = [ int, * $$x ]",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "820102",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-plug",
+   "cddl": "r = { a: int, $$x }\n$$x //= (b: int)",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "a2616101616202",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-plug-arr",
+   "cddl": "r = [ $$x ]\n$$x //= (int)",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true,
+     "note": "Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-choice",
+   "cddl": "r = { a: int // $$x }",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-arr-choice",
+   "cddl": "r = [ int // $$x ]",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "80",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-type",
+   "cddl": "r = $x",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-type-opt",
+   "cddl": "r = { ? a: $x }",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "a0",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-zero",
+   "cddl": "r = [ 0*0 $$x, int ]",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-grouprule",
+   "cddl": "r = [ int, g ]\ng = ( a: int, $$x )",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "8101",
+     "expect": false
+    },
+    {
+     "rule": "r",
+     "hex": "820101",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "unplugged sockets (S32, D251)",
+   "name": "sock-type-plug",
+   "cddl": "r = $x\n$x /= int",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "01",
+     "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "f6",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "category": "known tags (S60/S61/S62/D121, D252)",
+   "name": "tag0: r = tdate",
+   "cddl": "r = tdate",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c074323031362d31322d33315432333a35393a36305a",
+     "expect": true,
+     "note": "\"2016-12-31T23:59:60Z\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323031352d30362d33305432333a35393a36305a",
+     "expect": true,
+     "note": "\"2015-06-30T23:59:60Z\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c07819313939302d31322d33315431353a35393a36302d30383a3030",
+     "expect": true,
+     "note": "\"1990-12-31T15:59:60-08:00\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323032342d30312d30315430303a30303a36305a",
+     "expect": false,
+     "note": "\"2024-01-01T00:00:60Z\"; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323032342d30312d33315432333a35393a36305a",
+     "expect": true,
+     "note": "\"2024-01-31T23:59:60Z\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323032342d30312d31355432333a35393a36305a",
+     "expect": false,
+     "note": "\"2024-01-15T23:59:60Z\"; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "c07819323032342d30312d30315430383a35393a36302b30393a3030",
+     "expect": true,
+     "note": "\"2024-01-01T08:59:60+09:00\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c07819323031362d31322d33315432333a35393a36302b30303a3030",
+     "expect": true,
+     "note": "\"2016-12-31T23:59:60+00:00\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323031362d31322d33315432333a35383a36305a",
+     "expect": false,
+     "note": "\"2016-12-31T23:58:60Z\"; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323031362d31322d33315432333a35393a35395a",
+     "expect": true,
+     "note": "\"2016-12-31T23:59:59Z\""
+    },
+    {
+     "rule": "r",
+     "hex": "c074323032342d30322d32395432333a35393a36305a",
+     "expect": true,
+     "note": "\"2024-02-29T23:59:60Z\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323032332d30322d32385432333a35393a36305a",
+     "expect": true,
+     "note": "\"2023-02-28T23:59:60Z\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c07819323031372d30312d30315430303a35393a36302b30313a3030",
+     "expect": true,
+     "note": "\"2017-01-01T00:59:60+01:00\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c07819323031362d31322d33305432333a35393a36302d30313a3030",
+     "expect": false,
+     "note": "\"2016-12-30T23:59:60-01:00\"; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "c07819323031362d31322d33315432323a35393a36302d30313a3030",
+     "expect": true,
+     "note": "\"2016-12-31T22:59:60-01:00\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c076323031362d31322d33315432333a35393a36302e355a",
+     "expect": true,
+     "note": "\"2016-12-31T23:59:60.5Z\"; Ruby 0.12.14 disagrees (rejects); RFC verdict kept"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323031362d31322d33315432333a35393a36315a",
+     "expect": false,
+     "note": "\"2016-12-31T23:59:61Z\""
+    },
+    {
+     "rule": "r",
+     "hex": "c074323031362d31322d33315432343a30303a30305a",
+     "expect": false,
+     "note": "\"2016-12-31T24:00:00Z\""
+    }
+   ]
+  },
+  {
+   "category": "known tags (S60/S61/S62/D121, D252)",
+   "name": "tag32: r = uri",
+   "cddl": "r = uri",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "d82069687474703a2f2f5b78",
+     "expect": false,
+     "note": "\"http://[x\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8207818687474703a2f2f6578616d706c652e636f6d2f613f622363",
+     "expect": true,
+     "note": "\"http://example.com/a?b#c\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206d687474703a2f2f5b3a3a315d2f",
+     "expect": true,
+     "note": "\"http://[::1]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8207819687474703a2f2f5b323030313a6462383a3a375d3a38302f78",
+     "expect": true,
+     "note": "\"http://[2001:db8::7]:80/x\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f5b76312e66655d2f",
+     "expect": true,
+     "note": "\"http://[v1.fe]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8207819687474703a2f2f5b313a323a333a343a353a363a373a385d2f",
+     "expect": true,
+     "note": "\"http://[1:2:3:4:5:6:7:8]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820781b687474703a2f2f5b313a323a333a343a353a363a373a383a395d2f",
+     "expect": false,
+     "note": "\"http://[1:2:3:4:5:6:7:8:9]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d820781a687474703a2f2f5b3a3a666666663a3139322e302e322e315d2f",
+     "expect": true,
+     "note": "\"http://[::ffff:192.0.2.1]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820781c687474703a2f2f5b3a3a666666663a3139322e302e322e3235365d2f",
+     "expect": false,
+     "note": "\"http://[::ffff:192.0.2.256]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82071687474703a2f2f5b313a3a323a3a335d2f",
+     "expect": false,
+     "note": "\"http://[1::2::3]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206a687474703a2f2f5b5d2f",
+     "expect": false,
+     "note": "\"http://[]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82076687474703a2f2f613a6240686f73743a383038302f70",
+     "expect": true,
+     "note": "\"http://a:b@host:8080/p\""
+    },
+    {
+     "rule": "r",
+     "hex": "d82070687474703a2f2f686f73743a3830782f",
+     "expect": false,
+     "note": "\"http://host:80x/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f686f73742f257a7a",
+     "expect": false,
+     "note": "\"http://host/%zz\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f686f73742f253431",
+     "expect": true,
+     "note": "\"http://host/%41\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8207375726e3a6973626e3a30343531343530353233",
+     "expect": true,
+     "note": "\"urn:isbn:0451450523\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206a6d61696c746f3a614062",
+     "expect": true,
+     "note": "\"mailto:a@b\""
+    },
+    {
+     "rule": "r",
+     "hex": "d82060",
+     "expect": true,
+     "note": "\"\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206b2f2f686f73742f70617468",
+     "expect": true,
+     "note": "\"//host/path\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820692f6162732f70617468",
+     "expect": true,
+     "note": "\"/abs/path\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206872656c2f70617468",
+     "expect": true,
+     "note": "\"rel/path\""
+    },
+    {
+     "rule": "r",
+     "hex": "d82063613a62",
+     "expect": true,
+     "note": "\"a:b\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206431613a62",
+     "expect": false,
+     "note": "\"1a:b\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82063612062",
+     "expect": false,
+     "note": "\"a b\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f686f73742f612062",
+     "expect": false,
+     "note": "\"http://host/a b\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206d687474703a2f2f686f2073742f",
+     "expect": false,
+     "note": "\"http://ho st/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f686f737423612362",
+     "expect": false,
+     "note": "\"http://host#a#b\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d820623f71",
+     "expect": true,
+     "note": "\"?q\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820622366",
+     "expect": true,
+     "note": "\"#f\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f686f73742f5b785d",
+     "expect": false,
+     "note": "\"http://host/[x]\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206e687474703a2f2f5b3a3a315d782f",
+     "expect": false,
+     "note": "\"http://[::1]x/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82069485454503a2f2f482f",
+     "expect": true,
+     "note": "\"HTTP://H/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d82069612b622d632e643a78",
+     "expect": true,
+     "note": "\"a+b-c.d:x\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206f687474703a2f2f682f3f613d5b625d",
+     "expect": false,
+     "note": "\"http://h/?a=[b]\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82069687474703a2f2f402f",
+     "expect": true,
+     "note": "\"http://@/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8207818687474703a2f2f5b666538303a3a31253235657468305d2f",
+     "expect": false,
+     "note": "\"http://[fe80::1%25eth0]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82073687474703a2f2f5b3a3a312e322e332e345d2f",
+     "expect": true,
+     "note": "\"http://[::1.2.3.4]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820781d687474703a2f2f5b313a323a333a343a353a363a312e322e332e345d2f",
+     "expect": true,
+     "note": "\"http://[1:2:3:4:5:6:1.2.3.4]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820781f687474703a2f2f5b313a323a333a343a353a363a373a312e322e332e345d2f",
+     "expect": false,
+     "note": "\"http://[1:2:3:4:5:6:7:1.2.3.4]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82072687474703a2f2f5b30312e322e332e345d2f",
+     "expect": false,
+     "note": "\"http://[01.2.3.4]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d8206a687474703a2f2f683a2f",
+     "expect": true,
+     "note": "\"http://h:/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d820652e2f613a62",
+     "expect": true,
+     "note": "\"./a:b\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206e687474703a2f2f5b56312e785d2f",
+     "expect": true,
+     "note": "\"http://[V1.x]/\""
+    },
+    {
+     "rule": "r",
+     "hex": "d8206e687474703a2f2f5b76672e785d2f",
+     "expect": false,
+     "note": "\"http://[vg.x]/\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    }
+   ]
+  },
+  {
+   "category": "known tags (S60/S61/S62/D121, D252)",
+   "name": "tag1: r = time",
+   "cddl": "r = time",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c100",
+     "expect": true,
+     "note": "\"0\""
+    },
+    {
+     "rule": "r",
+     "hex": "c120",
+     "expect": true,
+     "note": "\"-1\""
+    },
+    {
+     "rule": "r",
+     "hex": "c1f93e00",
+     "expect": true,
+     "note": "\"1.5\""
+    },
+    {
+     "rule": "r",
+     "hex": "c1f97e00",
+     "expect": true,
+     "note": "\"NaN\""
+    },
+    {
+     "rule": "r",
+     "hex": "c1f97c00",
+     "expect": true,
+     "note": "\"inf\"; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "c1f9fc00",
+     "expect": true,
+     "note": "\"-inf\"; Rust cddl 0.10.7 disagrees (rejects)"
+    },
+    {
+     "rule": "r",
+     "hex": "c16130",
+     "expect": false,
+     "note": "\"\\\"0\\\"\""
+    },
+    {
+     "rule": "r",
+     "hex": "c1c249010000000000000000",
+     "expect": false,
+     "note": "\"bignum\""
+    },
+    {
+     "rule": "r",
+     "hex": "c1f6",
+     "expect": false,
+     "note": "\"null\""
+    }
+   ]
+  },
+  {
+   "category": "known tags (S60/S61/S62/D121, D252)",
+   "name": "tag1any: r = #6.1(any)",
+   "cddl": "r = #6.1(any)",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c100",
+     "expect": true,
+     "note": "\"0\""
+    },
+    {
+     "rule": "r",
+     "hex": "c1f97e00",
+     "expect": true,
+     "note": "\"NaN\""
+    },
+    {
+     "rule": "r",
+     "hex": "c16130",
+     "expect": false,
+     "note": "\"\\\"0\\\"\"; Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    }
+   ]
+  },
+  {
+   "category": "known tags (S60/S61/S62/D121, D252)",
+   "name": "tag0any: r = any",
+   "cddl": "r = any",
+   "options": {
+    "wire": "deterministic"
+   },
+   "cases": [
+    {
+     "rule": "r",
+     "hex": "c074323032342d30312d30315430303a30303a36305a",
+     "expect": false,
+     "note": "Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "d82069687474703a2f2f5b78",
+     "expect": false,
+     "note": "Ruby 0.12.14 disagrees (accepts); RFC verdict kept; Rust cddl 0.10.7 disagrees (accepts)"
+    },
+    {
+     "rule": "r",
+     "hex": "c074323031362d31322d33315432333a35393a36305a",
+     "expect": true
+    }
+   ]
+  }
+ ]
+}

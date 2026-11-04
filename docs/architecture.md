@@ -398,9 +398,20 @@ Programs need no table module. `\\d \\w \\s` and `\\x..` are refused as non-I-Re
   compiler warns.
 * `uint` is major 0 only; `integer`/`unsigned` include bignums.
 * `number` is `int / float`; decimals are not numbers.
-* Undefined sockets: an undefined type socket `$x` matches nothing; an
-  undefined group socket `$$x` is the empty group (so `{ a: int, $$x }`
-  accepts `{a: 1}`; crate issue #838).
+* Undefined sockets (RFC 8610 §3.9): an undefined type socket `$x` is the
+  empty type choice and an undefined group socket `$$x` the empty group
+  *choice* -- no alternatives, so nothing matches through either. `[ $$x ]`
+  and `{ a: int, $$x }` match nothing until `$$x` is plugged; `? $$x` and
+  `* $$x` still match by taking zero occurrences.
+  *Amended 2026-11-04 (D251, audit S32):* this note used to say `$$x` was the
+  empty group (one empty derivation, so `{ a: int, $$x }` accepted `{a: 1}`,
+  citing crate issue #838). That was a misreading of §3.9; the Ruby and Rust
+  reference tools refuse both examples, and so does snug now.
+* Float numbers compare numerically (RFC 8610 §3.8.6, D250): −0.0 and +0.0
+  are one number for literals, ranges and `.lt .le .gt .ge .eq .ne`
+  (`float .lt 0.0` and `float .ne 0.0` exclude both zeros; `0.0` and `-0.0`
+  each match both), and NaN is outside every ordered comparison but unequal
+  to every number (`float .ne 1.5` accepts NaN; `float .lt 2.0` refuses it).
 
 ---
 

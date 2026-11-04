@@ -371,9 +371,22 @@ pub fn leaf_int(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos: i
     }
     return R_RANGE;
 }
+pub(crate) fn float_nan(p: &[i32], s: &mut [i32], lb: i32, count: i32, pos: i32) -> i32 {
+    // Every NaN (any width, sign or payload) is one number for CDDL: it is in the
+    // run when the NaN key fff80000:00000000 is (D250).
+    let r: i32 = in_fintervals(p, s, p[(lb + 2) as usize], count, -524288, 0, pos);
+    if r < 0 {
+        return r;
+    }
+    if r == 1 {
+        return 0;
+    }
+    return R_RANGE;
+}
 pub fn leaf_float(p: &[i32], b: &[u8], s: &mut [i32], lb: i32, pos: i32) -> i32 {
     // FLOAT: the width is exact by mask; then the interval list, if any. Under
-    // the RFC float rules (D122) a NaN is in no interval, and a zero compares
+    // the RFC float rules (D122) a NaN is looked up as the one NaN key
+    // fff80000:00000000 (the key of f97e00, above +inf: D250), and a zero compares
     // as IEEE does (-0 = +0): it is in the list when the key of +0 or of -0 is
     // (the two keys are adjacent), a second search for -0.
     let count: i32 = p[(lb + 3) as usize];
@@ -384,7 +397,7 @@ pub fn leaf_float(p: &[i32], b: &[u8], s: &mut [i32], lb: i32, pos: i32) -> i32 
     if ai == 25 {
         let h: i32 = be16(b, pos + 1);
         if ((h & 0x7c00) == 0x7c00) && ((h & 0x3ff) != 0) {
-            return R_RANGE;
+            return float_nan(p, s, lb, count, pos);
         }
         if (h & 0x7fff) == 0 {
             let rz: i32 = in_fintervals(p, s, p[(lb + 2) as usize], count, 1 << 31, 0, pos);
@@ -402,6 +415,18 @@ pub fn leaf_float(p: &[i32], b: &[u8], s: &mut [i32], lb: i32, pos: i32) -> i32 
                 return 0;
             }
             return R_RANGE;
+        }
+    }
+    if ai == 26 {
+        let w: i32 = be32(b, pos + 1);
+        if ((w & 0x7f800000) == 0x7f800000) && ((w & 0x7fffff) != 0) {
+            return float_nan(p, s, lb, count, pos);
+        }
+    }
+    if ai == 27 {
+        let wh: i32 = be32(b, pos + 1);
+        if ((wh & 0x7ff00000) == 0x7ff00000) && (((wh & 0xfffff) != 0) || (be32(b, pos + 5) != 0)) {
+            return float_nan(p, s, lb, count, pos);
         }
     }
     float_key(b, s, pos, ai);

@@ -113,8 +113,11 @@ test('encode: Maps, Tagged and undefined under each preset; the profile decides 
   assert.equal(toHex(encode(new Tagged(32, 'http://www.example.com'))), 'd82076687474703a2f2f7777772e6578616d706c652e636f6d');
   assert.equal(toHex(encode(new Tagged(24, encode(new Map([[1, 2]]))))), 'd81843a10102');
   assert.equal(toHex(encode(new Tagged(55799, { a: 1 }))), 'd9d9f7a1616101');
-  for (const [v, code, opts] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(1, NaN), 'tag'],
-    [new Tagged(32, '/relative'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, new Uint8Array(9)), 'tag'],
+  // D252: tag 1 admits non-finite floats and tag 32 any URI-reference; leap seconds only at a UTC month end
+  assert.equal(toHex(encode(new Tagged(1, NaN))), 'c1f97e00');
+  assert.equal(toHex(encode(new Tagged(32, '/relative'))), 'd820692f72656c6174697665');
+  for (const [v, code, opts] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(0, '2024-01-01T00:00:60Z'), 'tag'],
+    [new Tagged(32, 'http://[x'), 'tag'], [new Tagged(0, '2013-03-21t20:04:00z'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, new Uint8Array(9)), 'tag'],
     [[new Tagged(55799, 0)], 'tag'], [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest'],
     [new Tagged(24, 'text'), 'tag'], [new Map([[1, 0], [1n, 1]]), 'duplicate_key']])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code}`);

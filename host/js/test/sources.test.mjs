@@ -118,7 +118,7 @@ function pushValidate(schema, bytes, rule, options, sizes, quantum = 0) {
 }
 
 const suites = [];
-for (const file of ['study', 'adversarial']) {
+for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
   const j = JSON.parse(readFileSync(new URL(`../../../corpus/conformance/${file}.json`, import.meta.url)));
   for (const su of j.suites) if (su.cddl && !su.schemaError && !su.snugSchemaError && su.phase !== 'later') suites.push(su);
 }

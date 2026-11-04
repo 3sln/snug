@@ -3,7 +3,7 @@
 //     node kin/scripts/compile-test.mjs <rust-compile-test-binary> [corruptions per program] [seed]
 //
 // Gates (each prints ok/FAIL; exit 1 on any FAIL):
-//   1. every schema of corpus/conformance/{study,adversarial}.json and
+//   1. every schema of corpus/conformance/{study,adversarial,audit-2026-11-04}.json and
 //      corpus/cddl-study/contracts/*.cddl compiles on BOTH hosts, except the
 //      suites that expect a refusal (study `schemaError`, adversarial
 //      `snugSchemaError`), which must fail with that code family (the text
@@ -38,6 +38,8 @@ for (const s of study.suites)
 const adv = JSON.parse(read('corpus/conformance/adversarial.json'));
 for (const s of adv.suites)
   cases.push({ label: `adversarial ${s.name}`, text: s.cddl, want: s.snugSchemaError });
+for (const s of JSON.parse(read('corpus/conformance/audit-2026-11-04.json')).suites)
+  cases.push({ label: `audit ${s.name}`, text: s.cddl, want: s.snugSchemaError });
 for (const f of readdirSync(new URL('corpus/cddl-study/contracts/', root)).sort())
   cases.push({ label: `contract ${f}`, text: read('corpus/cddl-study/contracts/' + f) });
 const family = w => w === undefined ? undefined : w.split(':')[0].trim();

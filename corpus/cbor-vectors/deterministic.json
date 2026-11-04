@@ -870,11 +870,29 @@
    "bindle": "tag"
   },
   {
-   "name": "tag 0 lower-case t and z, leap day, leap second",
-   "hex": "c074323032342d30322d32397432333a35393a36307a",
+   "name": "tag 0 leap day, leap second at the month end",
+   "hex": "c074323032342d30322d32395432333a35393a36305a",
    "value": {
     "$tag": 0,
-    "value": "2024-02-29t23:59:60z"
+    "value": "2024-02-29T23:59:60Z"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 leap second at a month end in UTC, before it locally (D252)",
+   "hex": "c07819313939302d31322d33315431353a35393a36302d30383a3030",
+   "value": {
+    "$tag": 0,
+    "value": "1990-12-31T15:59:60-08:00"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 leap second on the eve of local day 1 (D252)",
+   "hex": "c07819323031372d30312d30315430303a35393a36302b30313a3030",
+   "value": {
+    "$tag": 0,
+    "value": "2017-01-01T00:59:60+01:00"
    },
    "bindle": "tag"
   },
@@ -894,6 +912,28 @@
     "$tag": 1,
     "value": {
      "$float": "-0"
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with NaN: discouraged, not invalid (RFC 8949 §3.4.2, D252)",
+   "hex": "c1f97e00",
+   "value": {
+    "$tag": 1,
+    "value": {
+     "$float": "NaN"
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with -Infinity: discouraged, not invalid (D252)",
+   "hex": "c1f9fc00",
+   "value": {
+    "$tag": 1,
+    "value": {
+     "$float": "-Infinity"
     }
    },
    "bindle": "tag"
@@ -973,6 +1013,24 @@
    "value": {
     "$tag": 32,
     "value": "http://[::1]:80/p"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 relative reference: URI-reference (RFC 8949 §3.4.5.3, D252)",
+   "hex": "d820642f612f62",
+   "value": {
+    "$tag": 32,
+    "value": "/a/b"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with an IPv4-embedded IPv6 literal",
+   "hex": "d820781a687474703a2f2f5b3a3a666666663a3139322e302e322e315d2f",
+   "value": {
+    "$tag": 32,
+    "value": "http://[::ffff:192.0.2.1]/"
    },
    "bindle": "tag"
   },
@@ -1671,6 +1729,27 @@
    "bindle": "tag"
   },
   {
+   "name": "tag 0 lower-case t and z: RFC 4287 §3.3 refinement (D252)",
+   "hex": "c074323032342d30322d32397432333a35393a36307a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 leap second at 00:00 (audit S61, D252)",
+   "hex": "c074323032342d30312d30315430303a30303a36305a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 leap second mid-month (D252)",
+   "hex": "c074323032342d30312d31355432333a35393a36305a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
    "name": "tag 0 with bad UTF-8: the content walk first",
    "hex": "c062c0af",
    "code": "text",
@@ -1680,20 +1759,6 @@
   {
    "name": "tag 1 with text",
    "hex": "c16131",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
-   "name": "tag 1 with NaN",
-   "hex": "c1f97e00",
-   "code": "tag",
-   "offset": 0,
-   "bindle": "tag"
-  },
-  {
-   "name": "tag 1 with -Infinity",
-   "hex": "c1f9fc00",
    "code": "tag",
    "offset": 0,
    "bindle": "tag"
@@ -1762,8 +1827,36 @@
    "bindle": "tag"
   },
   {
-   "name": "tag 32 relative reference",
-   "hex": "d820642f612f62",
+   "name": "tag 32 with an unclosed IP literal (audit S60, D252)",
+   "hex": "d82069687474703a2f2f5b78",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with nine IPv6 pieces",
+   "hex": "d820781b687474703a2f2f5b313a323a333a343a353a363a373a383a395d2f",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with two :: in an IP literal",
+   "hex": "d82071687474703a2f2f5b313a3a323a3a335d2f",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with a non-digit port",
+   "hex": "d8206c687474703a2f2f683a38782f",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with a colon in a schemeless first segment",
+   "hex": "d8206431613a62",
    "code": "tag",
    "offset": 0,
    "bindle": "tag"

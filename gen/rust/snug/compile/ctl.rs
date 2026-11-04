@@ -31,8 +31,9 @@ pub fn int_point(h: &mut [i32], ts: i32) -> bool {
     return true;
 }
 pub fn float_point(h: &mut [i32], ts: i32) -> bool {
-    // Is ts one FLOAT leaf (every width) holding one value? (key hi, lo
-    // into h[H_R0], h[H_R1])
+    // Is ts one FLOAT leaf (every width) holding one number? Its lowest key
+    // into h[H_R0], h[H_R1] and its highest into h[H_R2], h[H_R3]: the same key,
+    // except for zero, which is the two adjacent keys of -0 and +0 (D250).
     let l: i32 = single_leaf(h, ts);
     if (l < 0) || (lk(h, l) != K_FLOAT) {
         return false;
@@ -41,11 +42,17 @@ pub fn float_point(h: &mut [i32], ts: i32) -> bool {
         return false;
     }
     let o: i32 = 4 * ld(h, l, 0);
-    if (vget(h, T_FIV, o) != vget(h, T_FIV, o + 2)) || (vget(h, T_FIV, o + 1) != vget(h, T_FIV, o + 3)) {
+    let lh: i32 = vget(h, T_FIV, o);
+    let ll: i32 = vget(h, T_FIV, o + 1);
+    let hh: i32 = vget(h, T_FIV, o + 2);
+    let hl: i32 = vget(h, T_FIV, o + 3);
+    if !(((lh == hh) && (ll == hl)) || (((lh == ZK_NEG_HI) && (ll == (-1))) && ((hh == (1 << 31)) && (hl == 0)))) {
         return false;
     }
-    hs(h, H_R0, vget(h, T_FIV, o));
-    hs(h, H_R1, vget(h, T_FIV, o + 1));
+    hs(h, H_R0, lh);
+    hs(h, H_R1, ll);
+    hs(h, H_R2, hh);
+    hs(h, H_R3, hl);
     return true;
 }
 pub fn single_lit(h: &[i32], ts: i32) -> i32 {
@@ -488,6 +495,8 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
     let isflt: bool = float_point(h, ctl);
     let kh: i32 = hg(h, H_R0);
     let kl: i32 = hg(h, H_R1);
+    let xh: i32 = hg(h, H_R2);
+    let xl: i32 = hg(h, H_R3);
     if (!isint) && (!isflt) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
@@ -579,10 +588,13 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
             if !isflt {
                 return fail(h, ERR_CONTROL_VALUE, pos);
             }
-            let mut lh: i32 = 0;
-            let mut ll: i32 = 0;
-            let mut hh: i32 = -1;
-            let mut hl: i32 = -1;
+            // D250: an ordered comparison is false for NaN, so the half-line stops
+            // at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,
+            // so lt stops below -0, le at +0, gt starts above +0 and ge at -0.
+            let mut lh: i32 = FK_NEG_INF_HI;
+            let mut ll: i32 = -1;
+            let mut hh: i32 = FK_POS_INF_HI;
+            let mut hl: i32 = 0;
             if op == 0 {
                 hh = kh;
                 hl = i32::wrapping_sub(kl, 1);
@@ -591,14 +603,14 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
                 }
             }
             if op == 1 {
-                hh = kh;
-                hl = kl;
+                hh = xh;
+                hl = xl;
             }
             if op == 2 {
-                lh = kh;
-                ll = i32::wrapping_add(kl, 1);
+                lh = xh;
+                ll = i32::wrapping_add(xl, 1);
                 if ll == 0 {
-                    lh = i32::wrapping_add(kh, 1);
+                    lh = i32::wrapping_add(xh, 1);
                 }
             }
             if op == 3 {
@@ -641,6 +653,8 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
     let isflt: bool = float_point(h, ctl);
     let kh: i32 = hg(h, H_R0);
     let kl: i32 = hg(h, H_R1);
+    let xh: i32 = hg(h, H_R2);
+    let xl: i32 = hg(h, H_R3);
     let lit: i32 = single_lit(h, ctl);
     let cl: i32 = single_leaf(h, ctl);
     if cl < 0 {
@@ -683,21 +697,23 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
                 fiv_load(h, T_IVA, ld(h, t, 0), ld(h, t, 1));
             }
             vtrunc(h, T_IVB, 0);
+            // D250: .eq is the point (both zero keys for a zero); .ne its complement
+            // over every key, NaN's included: NaN is not equal to any number.
             if ne == 0 {
                 vpush1(h, T_IVB, kh);
                 vpush1(h, T_IVB, kl);
-                vpush1(h, T_IVB, kh);
-                vpush1(h, T_IVB, kl);
+                vpush1(h, T_IVB, xh);
+                vpush1(h, T_IVB, xl);
             } else {
                 let pl: i32 = i32::wrapping_sub(kl, 1);
                 let mut ph: i32 = kh;
-                let nl3: i32 = i32::wrapping_add(kl, 1);
-                let mut nh: i32 = kh;
+                let nl3: i32 = i32::wrapping_add(xl, 1);
+                let mut nh: i32 = xh;
                 if kl == 0 {
                     ph = i32::wrapping_sub(kh, 1);
                 }
                 if nl3 == 0 {
-                    nh = i32::wrapping_add(kh, 1);
+                    nh = i32::wrapping_add(xh, 1);
                 }
                 vpush1(h, T_IVB, 0);
                 vpush1(h, T_IVB, 0);

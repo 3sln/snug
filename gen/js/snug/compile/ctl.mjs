@@ -3,7 +3,7 @@
 
 import { ERR_CONTROL_TARGET, ERR_CONTROL_VALUE, ERR_LIM_POOL, ERR_UNSUPPORTED_CONTROL, H_LIM_POOL, H_R0, H_R1, H_R2, H_R3, INF, T_FIV, T_IV, T_IVA, T_IVB, T_IVC, T_LST, T_STK, T_TMP2, charge, erred, fail, hg, hs, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
 import { bidByte, bidLen, encString, intern, magAdd, magAdd1, magCmp, magFrom64, magSub } from './bytes.mjs';
-import { K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
+import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
 import { rxCompile } from './regexp.mjs';
 
 export function singleLeaf(h, ts) {
@@ -33,8 +33,9 @@ export function intPoint(h, ts) {
 }
 
 export function floatPoint(h, ts) {
-    // Is ts one FLOAT leaf (every width) holding one value? (key hi, lo
-    // into h[H_R0], h[H_R1])
+    // Is ts one FLOAT leaf (every width) holding one number? Its lowest key
+    // into h[H_R0], h[H_R1] and its highest into h[H_R2], h[H_R3]: the same key,
+    // except for zero, which is the two adjacent keys of -0 and +0 (D250).
     const l = singleLeaf(h, ts);
     if ((l < 0) || (lk(h, l) !== K_FLOAT)) {
         return false;
@@ -43,11 +44,17 @@ export function floatPoint(h, ts) {
         return false;
     }
     const o = 4 * ld(h, l, 0);
-    if ((vget(h, T_FIV, o) !== vget(h, T_FIV, o + 2)) || (vget(h, T_FIV, o + 1) !== vget(h, T_FIV, o + 3))) {
+    const lh = vget(h, T_FIV, o);
+    const ll = vget(h, T_FIV, o + 1);
+    const hh = vget(h, T_FIV, o + 2);
+    const hl = vget(h, T_FIV, o + 3);
+    if (!(((lh === hh) && (ll === hl)) || (((lh === ZK_NEG_HI) && (ll === (-1))) && ((hh === (1 << 31)) && (hl === 0))))) {
         return false;
     }
-    hs(h, H_R0, vget(h, T_FIV, o));
-    hs(h, H_R1, vget(h, T_FIV, o + 1));
+    hs(h, H_R0, lh);
+    hs(h, H_R1, ll);
+    hs(h, H_R2, hh);
+    hs(h, H_R3, hl);
     return true;
 }
 
@@ -502,6 +509,8 @@ export function ctlCompare(h, target, ctl, op, pos) {
     const isflt = floatPoint(h, ctl);
     const kh = hg(h, H_R0);
     const kl = hg(h, H_R1);
+    const xh = hg(h, H_R2);
+    const xl = hg(h, H_R3);
     if ((!isint) && (!isflt)) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
@@ -593,10 +602,13 @@ export function ctlCompare(h, target, ctl, op, pos) {
             if (!isflt) {
                 return fail(h, ERR_CONTROL_VALUE, pos);
             }
-            let lh = 0;
-            let ll = 0;
-            let hh = -1;
-            let hl = -1;
+            // D250: an ordered comparison is false for NaN, so the half-line stops
+            // at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,
+            // so lt stops below -0, le at +0, gt starts above +0 and ge at -0.
+            let lh = FK_NEG_INF_HI;
+            let ll = -1;
+            let hh = FK_POS_INF_HI;
+            let hl = 0;
             if (op === 0) {
                 hh = kh;
                 hl = (kl - 1) | 0;
@@ -605,14 +617,14 @@ export function ctlCompare(h, target, ctl, op, pos) {
                 }
             }
             if (op === 1) {
-                hh = kh;
-                hl = kl;
+                hh = xh;
+                hl = xl;
             }
             if (op === 2) {
-                lh = kh;
-                ll = (kl + 1) | 0;
+                lh = xh;
+                ll = (xl + 1) | 0;
                 if (ll === 0) {
-                    lh = (kh + 1) | 0;
+                    lh = (xh + 1) | 0;
                 }
             }
             if (op === 3) {
@@ -656,6 +668,8 @@ export function ctlEq(h, target, ctl, ne, pos) {
     const isflt = floatPoint(h, ctl);
     const kh = hg(h, H_R0);
     const kl = hg(h, H_R1);
+    const xh = hg(h, H_R2);
+    const xl = hg(h, H_R3);
     const lit = singleLit(h, ctl);
     const cl = singleLeaf(h, ctl);
     if (cl < 0) {
@@ -698,21 +712,23 @@ export function ctlEq(h, target, ctl, ne, pos) {
                 fivLoad(h, T_IVA, ld(h, t, 0), ld(h, t, 1));
             }
             vtrunc(h, T_IVB, 0);
+            // D250: .eq is the point (both zero keys for a zero); .ne its complement
+            // over every key, NaN's included: NaN is not equal to any number.
             if (ne === 0) {
                 vpush1(h, T_IVB, kh);
                 vpush1(h, T_IVB, kl);
-                vpush1(h, T_IVB, kh);
-                vpush1(h, T_IVB, kl);
+                vpush1(h, T_IVB, xh);
+                vpush1(h, T_IVB, xl);
             } else {
                 const pl = (kl - 1) | 0;
                 let ph = kh;
-                const nl3 = (kl + 1) | 0;
-                let nh = kh;
+                const nl3 = (xl + 1) | 0;
+                let nh = xh;
                 if (kl === 0) {
                     ph = (kh - 1) | 0;
                 }
                 if (nl3 === 0) {
-                    nh = (kh + 1) | 0;
+                    nh = (xh + 1) | 0;
                 }
                 vpush1(h, T_IVB, 0);
                 vpush1(h, T_IVB, 0);

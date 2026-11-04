@@ -121,12 +121,26 @@ pub(crate) fn mdays(y: i32, m: i32) -> i32 {
     }
     return 31;
 }
+pub(crate) fn leap_ok(y: i32, mo: i32, dd: i32, um: i32) -> bool {
+    // um: the UTC minute of the day, local hh*60+mm minus the offset, in
+    // -1439..2878. 23:59 UTC the same day needs the last day of the month;
+    // the day before needs local day 1 (whose eve is a month end); the next
+    // day's 23:59 is out of reach of an offset under 24 hours.
+    if um == 1439 {
+        return dd == mdays(y, mo);
+    }
+    if um == (-1) {
+        return dd == 1;
+    }
+    return false;
+}
 pub fn date_time_ok(b: &[u8], s: i32, e: i32) -> bool {
-    // RFC 3339 §5.6 `date-time` over b[s, e): YYYY-MM-DD, T, hh:mm:ss, an
-    // optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm; T and Z in
-    // either case (§5.6 NOTE). Month 01..12, day within its month (leap
-    // years), hour 00..23, minute 00..59, second 00..60, offset hour 00..23
-    // and minute 00..59.
+    // RFC 3339 §5.6 `date-time` over b[s, e), as RFC 8949 §3.4.1 asks: refined
+    // by RFC 4287 §3.3, so T and Z are upper case. YYYY-MM-DD, T, hh:mm:ss, an
+    // optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm. Month 01..12,
+    // day within its month (leap years), hour 00..23, minute 00..59, second
+    // 00..59 or a leap second 60 (leap-ok), offset hour 00..23 and minute
+    // 00..59.
     if (e - s) < 20 {
         return false;
     }
@@ -137,15 +151,15 @@ pub fn date_time_ok(b: &[u8], s: i32, e: i32) -> bool {
     let hh: i32 = num2(b, s + 11);
     let mi: i32 = num2(b, s + 14);
     let sc: i32 = num2(b, s + 17);
-    let t: i32 = b[(s + 10) as usize] as i32;
     let mut i: i32 = s + 19;
+    let mut off: i32 = 0;
     if (y1 < 0) || (y2 < 0) {
         return false;
     }
     if ((b[(s + 4) as usize] as i32) != 45) || ((b[(s + 7) as usize] as i32) != 45) {
         return false;
     }
-    if (t != 84) && (t != 116) {
+    if (b[(s + 10) as usize] as i32) != 84 {
         return false;
     }
     if ((b[(s + 13) as usize] as i32) != 58) || ((b[(s + 16) as usize] as i32) != 58) {
@@ -182,115 +196,310 @@ pub fn date_time_ok(b: &[u8], s: i32, e: i32) -> bool {
         return false;
     }
     let z: i32 = b[(i) as usize] as i32;
-    if (z == 90) || (z == 122) {
-        return (i + 1) == e;
+    if z == 90 {
+        if (i + 1) != e {
+            return false;
+        }
+    } else {
+        if (z != 43) && (z != 45) {
+            return false;
+        }
+        if (i + 6) != e {
+            return false;
+        }
+        if (b[(i + 3) as usize] as i32) != 58 {
+            return false;
+        }
+        let oh: i32 = num2(b, i + 1);
+        let om: i32 = num2(b, i + 4);
+        if !(((oh >= 0) && (oh <= 23)) && ((om >= 0) && (om <= 59))) {
+            return false;
+        }
+        off = (oh * 60) + om;
+        if z == 45 {
+            off = -off;
+        }
     }
-    if (z != 43) && (z != 45) {
-        return false;
+    if sc != 60 {
+        return true;
     }
-    if (i + 6) != e {
-        return false;
-    }
-    if (b[(i + 3) as usize] as i32) != 58 {
-        return false;
-    }
-    let oh: i32 = num2(b, i + 1);
-    let om: i32 = num2(b, i + 4);
-    return ((oh >= 0) && (oh <= 23)) && ((om >= 0) && (om <= 59));
+    return leap_ok((y1 * 100) + y2, mo, dd, ((hh * 60) + mi) - off);
 }
 pub(crate) fn alpha(c: i32) -> bool {
     return ((c >= 65) && (c <= 90)) || ((c >= 97) && (c <= 122));
 }
+pub(crate) fn digit(c: i32) -> bool {
+    return (c >= 48) && (c <= 57);
+}
 pub(crate) fn hexd(c: i32) -> bool {
-    return ((c >= 48) && (c <= 57)) || (((c >= 65) && (c <= 70)) || ((c >= 97) && (c <= 102)));
+    return digit(c) || (((c >= 65) && (c <= 70)) || ((c >= 97) && (c <= 102)));
 }
-pub(crate) fn uri_char(c: i32) -> bool {
-    // RFC 3986 unreserved, gen-delims or sub-delims (`%` is handled apart):
-    // printable ASCII except " % < > \ ^ ` { | }.
-    if (c < 33) || (c > 126) {
-        return false;
+pub(crate) fn unreserved(c: i32) -> bool {
+    // ALPHA / DIGIT / - . _ ~
+    if alpha(c) || digit(c) {
+        return true;
     }
-    if ((c == 34) || (c == 37)) || ((c == 60) || (c == 62)) {
-        return false;
-    }
-    if ((c == 92) || (c == 94)) || (c == 96) {
-        return false;
-    }
-    return (c < 123) || (c > 125);
+    return ((c == 45) || (c == 46)) || ((c == 95) || (c == 126));
 }
-pub fn uri_ok(b: &[u8], s: i32, e: i32) -> bool {
-    // RFC 3986 `URI` over b[s, e), checked at the character level: a scheme
-    // (ALPHA *(ALPHA / DIGIT / + / - / .)) and `:`; then only unreserved,
-    // gen-delims and sub-delims characters or %HH escapes; at most one `#`;
-    // `[` and `]` only before the query and the fragment. The authority,
-    // IP-literal and path structure is not parsed (D121).
+pub(crate) fn sub_delim(c: i32) -> bool {
+    // ! $ & ' ( ) * + , ; =
+    if c == 33 {
+        return true;
+    }
+    if (c >= 36) && (c <= 44) {
+        return c != 37;
+    }
+    return (c == 59) || (c == 61);
+}
+pub(crate) fn uchar(b: &[u8], i: i32, e: i32, extra: i32) -> i32 {
+    // The length of one character at b[i] (i < e) of the class: unreserved,
+    // sub-delims, a %HH escape, and by extra's bits 1 `:`, 2 `@`, 4 `/`, 8 `?`;
+    // 0 when there is none.
+    let c: i32 = b[(i) as usize] as i32;
+    if c == 37 {
+        if (i + 3) > e {
+            return 0;
+        }
+        if hexd(b[(i + 1) as usize] as i32) && hexd(b[(i + 2) as usize] as i32) {
+            return 3;
+        }
+        return 0;
+    }
+    if unreserved(c) || sub_delim(c) {
+        return 1;
+    }
+    if (c == 58) && ((extra & 1) != 0) {
+        return 1;
+    }
+    if (c == 64) && ((extra & 2) != 0) {
+        return 1;
+    }
+    if (c == 47) && ((extra & 4) != 0) {
+        return 1;
+    }
+    if (c == 63) && ((extra & 8) != 0) {
+        return 1;
+    }
+    return 0;
+}
+pub(crate) fn urun(b: &[u8], i: i32, e: i32, extra: i32) -> i32 {
+    // Past the longest run of uchar class characters from i.
+    let mut j: i32 = i;
+    while j < e {
+        let n: i32 = uchar(b, j, e, extra);
+        if n == 0 {
+            return j;
+        }
+        j += n;
+    }
+    return j;
+}
+pub(crate) fn ipv4_ok(b: &[u8], s: i32, e: i32) -> bool {
+    // IPv4address: four dec-octets (0..255, no leading zero) joined by `.`.
+    let mut i: i32 = s;
+    let mut n: i32 = 0;
+    while n < 4 {
+        if n > 0 {
+            if (i >= e) || ((b[(i) as usize] as i32) != 46) {
+                return false;
+            }
+            i += 1;
+        }
+        let st: i32 = i;
+        let mut v: i32 = 0;
+        while (i < e) && digit(b[(i) as usize] as i32) {
+            v = (v * 10) + ((b[(i) as usize] as i32) - 48);
+            i += 1;
+            if (i - st) > 3 {
+                return false;
+            }
+        }
+        if i == st {
+            return false;
+        }
+        if ((i - st) > 1) && ((b[(st) as usize] as i32) == 48) {
+            return false;
+        }
+        if v > 255 {
+            return false;
+        }
+        n += 1;
+    }
+    return i == e;
+}
+pub(crate) fn h16_list(b: &[u8], s: i32, e: i32, v4: bool) -> i32 {
+    // The 16-bit pieces of `h16 *(: h16)` over b[s, e) (an IPv4address last
+    // counts 2 when v4), 0 for an empty range, -1 when malformed.
+    if s == e {
+        return 0;
+    }
+    let mut i: i32 = s;
+    let mut n: i32 = 0;
+    loop {
+        let st: i32 = i;
+        let mut dot: bool = false;
+        while (i < e) && ((b[(i) as usize] as i32) != 58) {
+            if (b[(i) as usize] as i32) == 46 {
+                dot = true;
+            }
+            i += 1;
+        }
+        if dot {
+            if (!v4) || (i < e) {
+                return -1;
+            }
+            if !ipv4_ok(b, st, i) {
+                return -1;
+            }
+            return n + 2;
+        }
+        if (i == st) || ((i - st) > 4) {
+            return -1;
+        }
+        for k in st..i {
+            if !hexd(b[(k) as usize] as i32) {
+                return -1;
+            }
+        }
+        n += 1;
+        if i == e {
+            return n;
+        }
+        i += 1;
+        if i == e {
+            return -1;
+        }
+    }
+}
+pub(crate) fn ip_literal_ok(b: &[u8], s: i32, e: i32) -> bool {
+    // Between `[` and `]`: IPvFuture (v 1*HEXDIG . 1*(unreserved / sub-delims
+    // / :)) or IPv6address -- 8 pieces, or fewer with one `::` standing for
+    // at least one zero piece. No RFC 6874 zone identifier.
     if s >= e {
         return false;
     }
-    if !alpha(b[(s) as usize] as i32) {
-        return false;
-    }
-    let mut i: i32 = s + 1;
-    let mut st: i32 = 0;
-    // st: 0 scheme, 1 hierarchical part, 2 query, 3 fragment
-    while i < e {
-        let c: i32 = b[(i) as usize] as i32;
-        if st == 0 {
-            if c == 58 {
-                st = 1;
-            } else {
-                if !(alpha(c) || (((c >= 48) && (c <= 57)) || ((c == 43) || ((c == 45) || (c == 46))))) {
-                    return false;
-                }
-            }
-        } else {
-            if c == 37 {
-                if (i + 3) > e {
-                    return false;
-                }
-                if !(hexd(b[(i + 1) as usize] as i32) && hexd(b[(i + 2) as usize] as i32)) {
-                    return false;
-                }
-                i += 2;
-            } else {
-                if !uri_char(c) {
-                    return false;
-                }
-                if (c == 91) || (c == 93) {
-                    if st != 1 {
-                        return false;
-                    }
-                }
-                if c == 35 {
-                    if st == 3 {
-                        return false;
-                    }
-                    st = 3;
-                }
-                if (c == 63) && (st == 1) {
-                    st = 2;
-                }
-            }
+    let c0: i32 = b[(s) as usize] as i32;
+    if (c0 == 118) || (c0 == 86) {
+        let mut i: i32 = s + 1;
+        while (i < e) && hexd(b[(i) as usize] as i32) {
+            i += 1;
+        }
+        if (i == (s + 1)) || ((i >= e) || ((b[(i) as usize] as i32) != 46)) {
+            return false;
         }
         i += 1;
+        if i >= e {
+            return false;
+        }
+        return urun(b, i, e, 1) == e;
     }
-    return st >= 1;
+    let mut d: i32 = -1;
+    for k in s..e - 1 {
+        if (d < 0) && (((b[(k) as usize] as i32) == 58) && ((b[(k + 1) as usize] as i32) == 58)) {
+            d = k;
+        }
+    }
+    if d < 0 {
+        return h16_list(b, s, e, true) == 8;
+    }
+    let l: i32 = h16_list(b, s, d, false);
+    let r: i32 = h16_list(b, d + 2, e, true);
+    return ((l >= 0) && (r >= 0)) && ((l + r) <= 7);
 }
-pub(crate) fn finite_float(b: &[u8], q: i32) -> bool {
-    // Is the float item at q (major 7, ai 25..27) finite?
-    let ai: i32 = (b[(q) as usize] as i32) & 31;
-    if ai == 25 {
-        return ((be16(b, q + 1) >> 10) & 31) != 31;
+pub(crate) fn host_end(b: &[u8], h: i32, z: i32) -> i32 {
+    // Past `host` (IP-literal or reg-name) at b[h, z), or -1.
+    if (h < z) && ((b[(h) as usize] as i32) == 91) {
+        let mut rb: i32 = h + 1;
+        while (rb < z) && ((b[(rb) as usize] as i32) != 93) {
+            rb += 1;
+        }
+        if rb >= z {
+            return -1;
+        }
+        if !ip_literal_ok(b, h + 1, rb) {
+            return -1;
+        }
+        return rb + 1;
     }
-    if ai == 26 {
-        return ((be32(b, q + 1) >> 23) & 255) != 255;
+    return urun(b, h, z, 0);
+}
+pub(crate) fn authority_end(b: &[u8], s: i32, e: i32) -> i32 {
+    // Past `authority` = [userinfo @] host [: port] at b[s, e), whose extent
+    // ends at the first / ? # (or e); -1 when it is malformed.
+    let mut z: i32 = s;
+    let mut at: i32 = -1;
+    while (z < e) && (!(((b[(z) as usize] as i32) == 47) || (((b[(z) as usize] as i32) == 63) || ((b[(z) as usize] as i32) == 35)))) {
+        if (at < 0) && ((b[(z) as usize] as i32) == 64) {
+            at = z;
+        }
+        z += 1;
     }
-    return ((be32(b, q + 1) >> 20) & 2047) != 2047;
+    let mut h: i32 = s;
+    if at >= 0 {
+        if urun(b, s, at, 1) != at {
+            return -1;
+        }
+        h = at + 1;
+    }
+    let p: i32 = host_end(b, h, z);
+    if p < 0 {
+        return -1;
+    }
+    if p < z {
+        if (b[(p) as usize] as i32) != 58 {
+            return -1;
+        }
+        for k in p + 1..z {
+            if !digit(b[(k) as usize] as i32) {
+                return -1;
+            }
+        }
+    }
+    return z;
+}
+pub fn uri_ok(b: &[u8], s: i32, e: i32) -> bool {
+    // RFC 3986 `URI-reference` over b[s, e): `URI` when a `:` comes before any
+    // / ? # (the text before it must then be a scheme, ALPHA *(ALPHA / DIGIT /
+    // + / - / .)), else `relative-ref` (whose first segment so has no `:`);
+    // then `//` authority, or a path of pchar and /; [? query] [# fragment]
+    // over pchar / ? (no second #). Hosts are reg-name or IP-literal (an
+    // IPv4address is also a reg-name).
+    let mut k: i32 = s;
+    let mut i: i32 = s;
+    while (k < e) && (!((((b[(k) as usize] as i32) == 58) || ((b[(k) as usize] as i32) == 47)) || (((b[(k) as usize] as i32) == 63) || ((b[(k) as usize] as i32) == 35)))) {
+        k += 1;
+    }
+    if (k < e) && ((b[(k) as usize] as i32) == 58) {
+        if (k == s) || (!alpha(b[(s) as usize] as i32)) {
+            return false;
+        }
+        for j in s + 1..k {
+            let c: i32 = b[(j) as usize] as i32;
+            if !((alpha(c) || digit(c)) || ((c == 43) || ((c == 45) || (c == 46)))) {
+                return false;
+            }
+        }
+        i = k + 1;
+    }
+    if ((i + 1) < e) && (((b[(i) as usize] as i32) == 47) && ((b[(i + 1) as usize] as i32) == 47)) {
+        i = authority_end(b, i + 2, e);
+        if i < 0 {
+            return false;
+        }
+    }
+    i = urun(b, i, e, 7);
+    if (i < e) && ((b[(i) as usize] as i32) == 63) {
+        i = urun(b, i + 1, e, 15);
+    }
+    if (i < e) && ((b[(i) as usize] as i32) == 35) {
+        i = urun(b, i + 1, e, 15);
+    }
+    return i == e;
 }
 pub fn std_content_ok(b: &[u8], tag: i32, q: i32, stop: i32) -> bool {
     // The content rule of standard tag `tag` over its well-formed content
     // item b[q, stop): 0 a text in RFC 3339 date-time form; 1 an integer
-    // (major 0/1) or a finite float; 24 a byte string (its content is then
+    // (major 0/1) or a float; 24 a byte string (its content is then
     // walked by the caller); 32 a text in URI form (uri-ok); an any-level
     // typed array (typed-any-size) a byte string of whole elements, read from
     // its head; 21-23, 55799 and every other tag anything (and nothing is
@@ -310,10 +519,8 @@ pub fn std_content_ok(b: &[u8], tag: i32, q: i32, stop: i32) -> bool {
         if major <= 1 {
             return true;
         }
-        if (major == 7) && ((ai >= 25) && (ai <= 27)) {
-            return finite_float(b, q);
-        }
-        return false;
+        // D252: RFC 8949 §3.4.2 admits every float; non-finite ones are discouraged, not invalid.
+        return (major == 7) && ((ai >= 25) && (ai <= 27));
     }
     if tag == 24 {
         return major == 2;

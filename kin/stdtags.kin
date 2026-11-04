@@ -17,7 +17,7 @@
 ;; 2^32 - 1 and 2^64 - 1 (RFC 8949 §9.2), refused. A tag number of more than 32
 ;; bits is passed here as its "rule tag" (rule-tag): -2, or -1 for 2^64 - 1.
 (ns snug.cbor.stdtags
-  (:require [kin.lang :refer [defn let return set if while do comment]]
+  (:require [kin.lang :refer [defn let return set if while for do comment forever]]
             [snug.lang :refer [I32 Bool Bytes + - * neg rem sar ushr bit-and
                                < > <= >= == != and or not u8]]
             [snug.cbor.codes :refer [PF_TAGS PF_TAGS_ANY PF_SUB]]
@@ -99,12 +99,28 @@
   (if (or (or (== m 4) (== m 6)) (or (== m 9) (== m 11))) (return 30))
   (return 31))
 
+;; RFC 3339 §5.7 leap seconds (D252): second 60 is the inserted leap second,
+;; which is always 23:59:60 UTC on the last day of a UTC month (ITU-R TF.460-6:
+;; the end of any month, June and December preferred). Which months actually
+;; had or will have one is announced by the IERS months ahead, so it is not a
+;; static fact: every such month end is admitted, and second 60 anywhere else
+;; (after the offset is applied) is refused.
+(defn ^Bool leap-ok [^I32 y ^I32 mo ^I32 dd ^I32 um]
+  (comment "um: the UTC minute of the day, local hh*60+mm minus the offset, in"
+           "-1439..2878. 23:59 UTC the same day needs the last day of the month;"
+           "the day before needs local day 1 (whose eve is a month end); the next"
+           "day's 23:59 is out of reach of an offset under 24 hours.")
+  (if (== um 1439) (return (== dd (mdays y mo))))
+  (if (== um (neg 1)) (return (== dd 1)))
+  (return false))
+
 (defn ^:pub ^Bool date-time-ok [^Bytes b ^I32 s ^I32 e]
-  (comment "RFC 3339 §5.6 `date-time` over b[s, e): YYYY-MM-DD, T, hh:mm:ss, an"
-           "optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm; T and Z in"
-           "either case (§5.6 NOTE). Month 01..12, day within its month (leap"
-           "years), hour 00..23, minute 00..59, second 00..60, offset hour 00..23"
-           "and minute 00..59.")
+  (comment "RFC 3339 §5.6 `date-time` over b[s, e), as RFC 8949 §3.4.1 asks: refined"
+           "by RFC 4287 §3.3, so T and Z are upper case. YYYY-MM-DD, T, hh:mm:ss, an"
+           "optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm. Month 01..12,"
+           "day within its month (leap years), hour 00..23, minute 00..59, second"
+           "00..59 or a leap second 60 (leap-ok), offset hour 00..23 and minute"
+           "00..59.")
   (if (< (- e s) 20) (return false))
   (let [y1 (num2 b s)
         y2 (num2 b (+ s 2))
@@ -113,11 +129,11 @@
         hh (num2 b (+ s 11))
         mi (num2 b (+ s 14))
         sc (num2 b (+ s 17))
-        t (u8 b (+ s 10))
-        ^:mut i (+ s 19)]
+        ^:mut i (+ s 19)
+        ^:mut off 0]
     (if (or (< y1 0) (< y2 0)) (return false))
     (if (or (!= (u8 b (+ s 4)) 45) (!= (u8 b (+ s 7)) 45)) (return false))
-    (if (and (!= t 84) (!= t 116)) (return false))
+    (if (!= (u8 b (+ s 10)) 84) (return false))
     (if (or (!= (u8 b (+ s 13)) 58) (!= (u8 b (+ s 16)) 58)) (return false))
     (if (or (< mo 1) (> mo 12)) (return false))
     (if (or (< dd 1) (> dd (mdays (+ (* y1 100) y2) mo))) (return false))
@@ -132,71 +148,193 @@
             (set i (+ i 1)))))
     (if (>= i e) (return false))
     (let [z (u8 b i)]
-      (if (or (== z 90) (== z 122)) (return (== (+ i 1) e)))
-      (if (and (!= z 43) (!= z 45)) (return false))
-      (if (!= (+ i 6) e) (return false))
-      (if (!= (u8 b (+ i 3)) 58) (return false))
-      (let [oh (num2 b (+ i 1))
-            om (num2 b (+ i 4))]
-        (return (and (and (>= oh 0) (<= oh 23)) (and (>= om 0) (<= om 59))))))))
+      (if (== z 90)
+        (do (if (!= (+ i 1) e) (return false)))
+        (do (if (and (!= z 43) (!= z 45)) (return false))
+            (if (!= (+ i 6) e) (return false))
+            (if (!= (u8 b (+ i 3)) 58) (return false))
+            (let [oh (num2 b (+ i 1))
+                  om (num2 b (+ i 4))]
+              (if (not (and (and (>= oh 0) (<= oh 23)) (and (>= om 0) (<= om 59)))) (return false))
+              (set off (+ (* oh 60) om))
+              (if (== z 45) (set off (neg off)))))))
+    (if (!= sc 60) (return true))
+    (return (leap-ok (+ (* y1 100) y2) mo dd (- (+ (* hh 60) mi) off)))))
+
+;; ------------------------------------------------------------ RFC 3986 URI-reference
+;; Tag 32 (RFC 8949 §3.4.5.3): the text must match RFC 3986's URI-reference
+;; production (D252). A linear recogniser: each byte is looked at a bounded
+;; number of times (the IP-literal is re-read once to find `::`).
 
 (defn ^Bool alpha [^I32 c]
   (return (or (and (>= c 65) (<= c 90)) (and (>= c 97) (<= c 122)))))
 
-(defn ^Bool hexd [^I32 c]
-  (return (or (and (>= c 48) (<= c 57)) (or (and (>= c 65) (<= c 70)) (and (>= c 97) (<= c 102))))))
+(defn ^Bool digit [^I32 c]
+  (return (and (>= c 48) (<= c 57))))
 
-(defn ^Bool uri-char [^I32 c]
-  (comment "RFC 3986 unreserved, gen-delims or sub-delims (`%` is handled apart):"
-           "printable ASCII except \" % < > \\ ^ ` { | }.")
-  (if (or (< c 33) (> c 126)) (return false))
-  (if (or (or (== c 34) (== c 37)) (or (== c 60) (== c 62))) (return false))
-  (if (or (or (== c 92) (== c 94)) (== c 96)) (return false))
-  (return (or (< c 123) (> c 125))))
+(defn ^Bool hexd [^I32 c]
+  (return (or (digit c) (or (and (>= c 65) (<= c 70)) (and (>= c 97) (<= c 102))))))
+
+(defn ^Bool unreserved [^I32 c]
+  (comment "ALPHA / DIGIT / - . _ ~")
+  (if (or (alpha c) (digit c)) (return true))
+  (return (or (or (== c 45) (== c 46)) (or (== c 95) (== c 126)))))
+
+(defn ^Bool sub-delim [^I32 c]
+  (comment "! $ & ' ( ) * + , ; =")
+  (if (== c 33) (return true))
+  (if (and (>= c 36) (<= c 44)) (return (!= c 37)))
+  (return (or (== c 59) (== c 61))))
+
+(defn ^I32 uchar [^Bytes b ^I32 i ^I32 e ^I32 extra]
+  (comment "The length of one character at b[i] (i < e) of the class: unreserved,"
+           "sub-delims, a %HH escape, and by extra's bits 1 `:`, 2 `@`, 4 `/`, 8 `?`;"
+           "0 when there is none.")
+  (let [c (u8 b i)]
+    (if (== c 37)
+      (do (if (> (+ i 3) e) (return 0))
+          (if (and (hexd (u8 b (+ i 1))) (hexd (u8 b (+ i 2)))) (return 3))
+          (return 0)))
+    (if (or (unreserved c) (sub-delim c)) (return 1))
+    (if (and (== c 58) (!= (bit-and extra 1) 0)) (return 1))
+    (if (and (== c 64) (!= (bit-and extra 2) 0)) (return 1))
+    (if (and (== c 47) (!= (bit-and extra 4) 0)) (return 1))
+    (if (and (== c 63) (!= (bit-and extra 8) 0)) (return 1))
+    (return 0)))
+
+(defn ^I32 urun [^Bytes b ^I32 i ^I32 e ^I32 extra]
+  (comment "Past the longest run of uchar class characters from i.")
+  (let [^:mut j i]
+    (while (< j e)
+      (let [n (uchar b j e extra)]
+        (if (== n 0) (return j))
+        (set j (+ j n))))
+    (return j)))
+
+(defn ^Bool ipv4-ok [^Bytes b ^I32 s ^I32 e]
+  (comment "IPv4address: four dec-octets (0..255, no leading zero) joined by `.`.")
+  (let [^:mut i s
+        ^:mut n 0]
+    (while (< n 4)
+      (if (> n 0)
+        (do (if (or (>= i e) (!= (u8 b i) 46)) (return false))
+            (set i (+ i 1))))
+      (let [st i
+            ^:mut v 0]
+        (while (and (< i e) (digit (u8 b i)))
+          (set v (+ (* v 10) (- (u8 b i) 48)))
+          (set i (+ i 1))
+          (if (> (- i st) 3) (return false)))
+        (if (== i st) (return false))
+        (if (and (> (- i st) 1) (== (u8 b st) 48)) (return false))
+        (if (> v 255) (return false)))
+      (set n (+ n 1)))
+    (return (== i e))))
+
+(defn ^I32 h16-list [^Bytes b ^I32 s ^I32 e ^Bool v4]
+  (comment "The 16-bit pieces of `h16 *(: h16)` over b[s, e) (an IPv4address last"
+           "counts 2 when v4), 0 for an empty range, -1 when malformed.")
+  (if (== s e) (return 0))
+  (let [^:mut i s
+        ^:mut n 0]
+    (forever
+      (let [st i
+            ^:mut dot false]
+        (while (and (< i e) (!= (u8 b i) 58))
+          (if (== (u8 b i) 46) (set dot true))
+          (set i (+ i 1)))
+        (if dot
+          (do (if (or (not v4) (< i e)) (return (neg 1)))
+              (if (not (ipv4-ok b st i)) (return (neg 1)))
+              (return (+ n 2))))
+        (if (or (== i st) (> (- i st) 4)) (return (neg 1)))
+        (for [^I32 k st i]
+          (if (not (hexd (u8 b k))) (return (neg 1))))
+        (set n (+ n 1))
+        (if (== i e) (return n))
+        (set i (+ i 1))
+        (if (== i e) (return (neg 1)))))))
+
+(defn ^Bool ip-literal-ok [^Bytes b ^I32 s ^I32 e]
+  (comment "Between `[` and `]`: IPvFuture (v 1*HEXDIG . 1*(unreserved / sub-delims"
+           "/ :)) or IPv6address -- 8 pieces, or fewer with one `::` standing for"
+           "at least one zero piece. No RFC 6874 zone identifier.")
+  (if (>= s e) (return false))
+  (let [c0 (u8 b s)]
+    (if (or (== c0 118) (== c0 86))
+      (do (let [^:mut i (+ s 1)]
+            (while (and (< i e) (hexd (u8 b i))) (set i (+ i 1)))
+            (if (or (== i (+ s 1)) (or (>= i e) (!= (u8 b i) 46))) (return false))
+            (set i (+ i 1))
+            (if (>= i e) (return false))
+            (return (== (urun b i e 1) e))))))
+  (let [^:mut d (neg 1)]
+    (for [^I32 k s (- e 1)]
+      (if (and (< d 0) (and (== (u8 b k) 58) (== (u8 b (+ k 1)) 58))) (set d k)))
+    (if (< d 0) (return (== (h16-list b s e true) 8)))
+    (let [l (h16-list b s d false)
+          r (h16-list b (+ d 2) e true)]
+      (return (and (and (>= l 0) (>= r 0)) (<= (+ l r) 7))))))
+
+(defn ^I32 host-end [^Bytes b ^I32 h ^I32 z]
+  (comment "Past `host` (IP-literal or reg-name) at b[h, z), or -1.")
+  (if (and (< h z) (== (u8 b h) 91))
+    (do (let [^:mut rb (+ h 1)]
+          (while (and (< rb z) (!= (u8 b rb) 93)) (set rb (+ rb 1)))
+          (if (>= rb z) (return (neg 1)))
+          (if (not (ip-literal-ok b (+ h 1) rb)) (return (neg 1)))
+          (return (+ rb 1)))))
+  (return (urun b h z 0)))
+
+(defn ^I32 authority-end [^Bytes b ^I32 s ^I32 e]
+  (comment "Past `authority` = [userinfo @] host [: port] at b[s, e), whose extent"
+           "ends at the first / ? # (or e); -1 when it is malformed.")
+  (let [^:mut z s
+        ^:mut at (neg 1)]
+    (while (and (< z e) (not (or (== (u8 b z) 47) (or (== (u8 b z) 63) (== (u8 b z) 35)))))
+      (if (and (< at 0) (== (u8 b z) 64)) (set at z))
+      (set z (+ z 1)))
+    (let [^:mut h s]
+      (if (>= at 0)
+        (do (if (!= (urun b s at 1) at) (return (neg 1)))
+            (set h (+ at 1))))
+      (let [p (host-end b h z)]
+        (if (< p 0) (return (neg 1)))
+        (if (< p z)
+          (do (if (!= (u8 b p) 58) (return (neg 1)))
+              (for [^I32 k (+ p 1) z]
+                (if (not (digit (u8 b k))) (return (neg 1))))))
+        (return z)))))
 
 (defn ^:pub ^Bool uri-ok [^Bytes b ^I32 s ^I32 e]
-  (comment "RFC 3986 `URI` over b[s, e), checked at the character level: a scheme"
-           "(ALPHA *(ALPHA / DIGIT / + / - / .)) and `:`; then only unreserved,"
-           "gen-delims and sub-delims characters or %HH escapes; at most one `#`;"
-           "`[` and `]` only before the query and the fragment. The authority,"
-           "IP-literal and path structure is not parsed (D121).")
-  (if (>= s e) (return false))
-  (if (not (alpha (u8 b s))) (return false))
-  (let [^:mut i (+ s 1)
-        ^:mut st 0]
-    (comment "st: 0 scheme, 1 hierarchical part, 2 query, 3 fragment")
-    (while (< i e)
-      (let [c (u8 b i)]
-        (if (== st 0)
-          (do (if (== c 58)
-                (set st 1)
-                (do (if (not (or (alpha c) (or (and (>= c 48) (<= c 57)) (or (== c 43) (or (== c 45) (== c 46))))))
-                      (return false)))))
-          (do (if (== c 37)
-                (do (if (> (+ i 3) e) (return false))
-                    (if (not (and (hexd (u8 b (+ i 1))) (hexd (u8 b (+ i 2))))) (return false))
-                    (set i (+ i 2)))
-                (do (if (not (uri-char c)) (return false))
-                    (if (or (== c 91) (== c 93))
-                      (if (!= st 1) (return false)))
-                    (if (== c 35)
-                      (do (if (== st 3) (return false))
-                          (set st 3)))
-                    (if (and (== c 63) (== st 1)) (set st 2)))))))
-      (set i (+ i 1)))
-    (return (>= st 1))))
-
-(defn ^Bool finite-float [^Bytes b ^I32 q]
-  (comment "Is the float item at q (major 7, ai 25..27) finite?")
-  (let [ai (bit-and (u8 b q) 31)]
-    (if (== ai 25) (return (!= (bit-and (sar (be16 b (+ q 1)) 10) 31) 31)))
-    (if (== ai 26) (return (!= (bit-and (sar (be32 b (+ q 1)) 23) 255) 255)))
-    (return (!= (bit-and (sar (be32 b (+ q 1)) 20) 2047) 2047))))
+  (comment "RFC 3986 `URI-reference` over b[s, e): `URI` when a `:` comes before any"
+           "/ ? # (the text before it must then be a scheme, ALPHA *(ALPHA / DIGIT /"
+           "+ / - / .)), else `relative-ref` (whose first segment so has no `:`);"
+           "then `//` authority, or a path of pchar and /; [? query] [# fragment]"
+           "over pchar / ? (no second #). Hosts are reg-name or IP-literal (an"
+           "IPv4address is also a reg-name).")
+  (let [^:mut k s
+        ^:mut i s]
+    (while (and (< k e) (not (or (or (== (u8 b k) 58) (== (u8 b k) 47)) (or (== (u8 b k) 63) (== (u8 b k) 35)))))
+      (set k (+ k 1)))
+    (if (and (< k e) (== (u8 b k) 58))
+      (do (if (or (== k s) (not (alpha (u8 b s)))) (return false))
+          (for [^I32 j (+ s 1) k]
+            (let [c (u8 b j)]
+              (if (not (or (or (alpha c) (digit c)) (or (== c 43) (or (== c 45) (== c 46))))) (return false))))
+          (set i (+ k 1))))
+    (if (and (< (+ i 1) e) (and (== (u8 b i) 47) (== (u8 b (+ i 1)) 47)))
+      (do (set i (authority-end b (+ i 2) e))
+          (if (< i 0) (return false))))
+    (set i (urun b i e 7))
+    (if (and (< i e) (== (u8 b i) 63)) (set i (urun b (+ i 1) e 15)))
+    (if (and (< i e) (== (u8 b i) 35)) (set i (urun b (+ i 1) e 15)))
+    (return (== i e))))
 
 (defn ^:pub ^Bool std-content-ok [^Bytes b ^I32 tag ^I32 q ^I32 stop]
   (comment "The content rule of standard tag `tag` over its well-formed content"
            "item b[q, stop): 0 a text in RFC 3339 date-time form; 1 an integer"
-           "(major 0/1) or a finite float; 24 a byte string (its content is then"
+           "(major 0/1) or a float; 24 a byte string (its content is then"
            "walked by the caller); 32 a text in URI form (uri-ok); an any-level"
            "typed array (typed-any-size) a byte string of whole elements, read from"
            "its head; 21-23, 55799 and every other tag anything (and nothing is"
@@ -210,8 +348,8 @@
     (if (> ts 0) (return (and (== major 2) (== (rem (small-arg b q) ts) 0))))
     (if (== tag 1)
       (do (if (<= major 1) (return true))
-          (if (and (== major 7) (and (>= ai 25) (<= ai 27))) (return (finite-float b q)))
-          (return false)))
+          (comment "D252: RFC 8949 §3.4.2 admits every float; non-finite ones are discouraged, not invalid.")
+          (return (and (== major 7) (and (>= ai 25) (<= ai 27))))))
     (if (== tag 24) (return (== major 2)))
     (if (or (== tag 0) (== tag 32))
       (do (if (!= major 3) (return false))

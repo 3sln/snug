@@ -401,7 +401,10 @@ export function check(schema, rule, value, { steps = STEP_LIMIT } = {}) {
       if (x.k !== 'ref') return [x, env];
       if (env.has(x.name)) { const bound = env.get(x.name); return resolve(bound.x, bound.env); }
       const r = rules.get(x.name);
-      if (!r) return [x.name.startsWith('$$') ? seq([]) : choice([]), env];
+      // RFC 8610 §3.9: an unplugged socket is an empty type choice / empty group
+      // choice -- no alternatives, so nothing matches through it (D251; it was
+      // wrongly the empty group, seq([]), which has one empty derivation).
+      if (!r) return [x.name.startsWith('$$') ? { k: 'gchoice', xs: [] } : choice([]), env];
       const next = new Map(); for (let i = 0; i < r.params.length; i++) next.set(r.params[i], { x: x.args[i], env });
       return resolve(r.body, next);
     }

@@ -282,11 +282,20 @@ keys** of binary64 patterns, `key(x) = x ≥ 0 ? x | 2^63 : ~x` (64-bit,
 unsigned order). float16/float32 data are widened to binary64 by integer
 operations before keying. Under the Bindle float rules NaN, ±∞ and −0 never
 reach a leaf (profile `float`); under the deterministic rules (D122) they
-arrive as float16 only and compare as IEEE 754 does: a NaN is in no interval,
-±∞ key as binary64 ±∞, and a zero is in a run when the key of +0 or of −0 is
-(two adjacent keys; a second binary search for −0, charged as probes).
-Exclusive bounds are normalised by stepping the key by one. Runs sorted,
-disjoint, non-adjacent [V].
+arrive as float16 only. Matching is numeric (RFC 8610 §3.8.6, D250): ±∞ key
+as binary64 ±∞; a zero is in a run when the key of +0 or of −0 is (two
+adjacent keys, `7fffffff:ffffffff` and `80000000:00000000`; a second binary
+search for −0, charged as probes); every NaN, whatever its width, sign or
+payload, is looked up as the one NaN key `fff80000:00000000` (the key of
+`f97e00`, above +∞), charged as probes. Exclusive bounds are normalised by
+stepping the key by one. Runs sorted, disjoint, non-adjacent [V].
+
+The compiler keeps the two zero keys together (D250): a run holds both or
+neither (a bound on one is widened to the other, so the literal `0.0` is the
+run `[key(−0), key(+0)]`), exclusive bounds at zero stop below key(−0) or
+start above key(+0), ordered comparisons (`.lt .le .gt .ge`) stop at
+key(±∞) so that no NaN key is inside, and `.ne` complements over the whole
+key space, so a target that admitted NaN still does.
 
 ### 4.5 LITSET members (S15)
 

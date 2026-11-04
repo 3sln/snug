@@ -30,6 +30,9 @@ pub const R_POS: i32 = 3;
 pub const R_POS_BIG: i32 = 4;
 pub const R_POS_INF: i32 = 5;
 pub const LEAF_WORDS: i32 = 16;
+pub const ZK_NEG_HI: i32 = 2147483647;
+pub const FK_NEG_INF_HI: i32 = 1048575;
+pub const FK_POS_INF_HI: i32 = -1048576;
 pub fn lk(h: &[i32], l: i32) -> i32 {
     return vget(h, T_LEAF, l * 16);
 }
@@ -855,13 +858,53 @@ pub fn mk_float_from(h: &mut [i32], widths: i32, t: i32, bounded: i32) -> i32 {
         return -2;
     }
     let first: i32 = vlen(h, T_FIV) / 4;
-    for i in 0..4 * n {
-        let x: i32 = vget(h, t, i);
-        vpush1(h, T_FIV, x);
+    let mut cnt: i32 = 0;
+    // D250: -0 and +0 are one number (RFC 8610 §3.8.6 compares numerically), so
+    // a run holds both zero keys or neither: a bound on one is widened to the
+    // other, and records that then touch are merged (the input is sorted by lo).
+    for i in 0..n {
+        let o: i32 = 4 * i;
+        let mut lh: i32 = vget(h, t, o);
+        let mut ll: i32 = vget(h, t, o + 1);
+        let mut hh: i32 = vget(h, t, o + 2);
+        let mut hl: i32 = vget(h, t, o + 3);
+        let mut merged: bool = false;
+        if (lh == (1 << 31)) && (ll == 0) {
+            lh = ZK_NEG_HI;
+            ll = -1;
+        }
+        if (hh == ZK_NEG_HI) && (hl == (-1)) {
+            hh = 1 << 31;
+            hl = 0;
+        }
+        if cnt > 0 {
+            let p: i32 = 4 * (first + (cnt - 1));
+            let ph: i32 = vget(h, T_FIV, p + 2);
+            let pl: i32 = vget(h, T_FIV, p + 3);
+            let nl: i32 = i32::wrapping_add(pl, 1);
+            let mut nh: i32 = ph;
+            if nl == 0 {
+                nh = i32::wrapping_add(ph, 1);
+            }
+            if (u64_cmp(lh, ll, ph, pl) <= 0) || ((lh == nh) && (ll == nl)) {
+                merged = true;
+                if u64_cmp(hh, hl, ph, pl) > 0 {
+                    vset(h, T_FIV, p + 2, hh);
+                    vset(h, T_FIV, p + 3, hl);
+                }
+            }
+        }
+        if !merged {
+            vpush1(h, T_FIV, lh);
+            vpush1(h, T_FIV, ll);
+            vpush1(h, T_FIV, hh);
+            vpush1(h, T_FIV, hl);
+            cnt += 1;
+        }
     }
     stage(h, K_FLOAT, widths);
     stage_d(h, 0, first);
-    stage_d(h, 1, n);
+    stage_d(h, 1, cnt);
     return stage_intern(h);
 }
 pub fn fiv_load(h: &mut [i32], t: i32, first: i32, n: i32) {

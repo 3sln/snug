@@ -382,9 +382,13 @@ pub(crate) fn lower_range(h: &mut [i32], node: i32, env: i32) -> i32 {
         if !float_point(h, hi) {
             return fail(h, ERR_RANGE, pos);
         }
-        let mut hkh: i32 = hg(h, H_R0);
-        let mut hkl: i32 = hg(h, H_R1);
+        // D250: an inclusive upper bound is the point's highest key, an
+        // exclusive one stops below its lowest (for zero: +0, and below -0).
+        let mut hkh: i32 = hg(h, H_R2);
+        let mut hkl: i32 = hg(h, H_R3);
         if incl == 0 {
+            hkh = hg(h, H_R0);
+            hkl = hg(h, H_R1);
             if hkl == 0 {
                 hkh = i32::wrapping_sub(hkh, 1);
             }
@@ -1318,8 +1322,9 @@ pub(crate) fn m_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
         if gr == (-2) {
             return fail(h, ERR_MAP_KEY, pos);
         }
+        // D251: an unplugged `$$x` is the empty group choice: no alternative.
         if gr == (-4) {
-            base = as_unit(h);
+            base = as_none(h);
         }
         if gr == (-3) {
             base = m_unwrap(h, hg(h, H_R0), env);
@@ -1544,8 +1549,9 @@ pub(crate) fn a_ent(h: &mut [i32], ent: i32, env: i32, tailfrom: i32, last: bool
             }
             child = g_node(h, G_POS, vt2, 0, 0);
         }
+        // D251: an unplugged `$$x` is the empty group choice: an empty G_ALT.
         if gr == (-4) {
-            child = g_node(h, G_EMPTY, 0, 0, 0);
+            child = g_list(h, G_ALT);
         }
         if gr == (-3) {
             child = a_unwrap(h, hg(h, H_R0), env, tf);

@@ -7,27 +7,29 @@
   "entries": {
     "snug": {
       "static": {
-        "min": 43073,
-        "gzip": 14840,
-        "brotli": 13278
+        "min": 44735,
+        "gzip": 15462,
+        "brotli": 13798
       },
       "full": {
-        "min": 43073,
-        "gzip": 14840,
-        "brotli": 13278
-      }
+        "min": 44735,
+        "gzip": 15462,
+        "brotli": 13798
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
     "snug/schema": {
       "static": {
-        "min": 93579,
-        "gzip": 34437,
-        "brotli": 29724
+        "min": 96356,
+        "gzip": 35452,
+        "brotli": 30641
       },
       "full": {
-        "min": 93579,
-        "gzip": 34437,
-        "brotli": 29724
-      }
+        "min": 96356,
+        "gzip": 35452,
+        "brotli": 30641
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
     "snug/compile": {
       "static": {
@@ -43,27 +45,29 @@
     },
     "snug/view": {
       "static": {
-        "min": 56183,
-        "gzip": 19121,
-        "brotli": 17071
+        "min": 57852,
+        "gzip": 19756,
+        "brotli": 17654
       },
       "full": {
-        "min": 56183,
-        "gzip": 19121,
-        "brotli": 17071
-      }
+        "min": 57852,
+        "gzip": 19756,
+        "brotli": 17654
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
     "snug/writer": {
       "static": {
-        "min": 39516,
-        "gzip": 13626,
-        "brotli": 12183
+        "min": 41183,
+        "gzip": 14245,
+        "brotli": 12739
       },
       "full": {
-        "min": 39516,
-        "gzip": 13626,
-        "brotli": 12183
-      }
+        "min": 41183,
+        "gzip": 14245,
+        "brotli": 12739
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
     "snug/unicode": {
       "static": {
@@ -79,15 +83,16 @@
     },
     "snug/sources": {
       "static": {
-        "min": 123710,
-        "gzip": 45900,
-        "brotli": 39091
+        "min": 126313,
+        "gzip": 46910,
+        "brotli": 39989
       },
       "full": {
-        "min": 123710,
-        "gzip": 45900,
-        "brotli": 39091
-      }
+        "min": 126313,
+        "gzip": 46910,
+        "brotli": 39989
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
     "snug/controls": {
       "static": {
@@ -103,27 +108,29 @@
     },
     "runtime": {
       "static": {
-        "min": 117986,
-        "gzip": 42385,
-        "brotli": 36232
+        "min": 120800,
+        "gzip": 43461,
+        "brotli": 37128
       },
       "full": {
-        "min": 117986,
-        "gzip": 42385,
-        "brotli": 36232
-      }
+        "min": 120800,
+        "gzip": 43461,
+        "brotli": 37128
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
     "all-runtime": {
       "static": {
-        "min": 196474,
-        "gzip": 71370,
-        "brotli": 59857
+        "min": 202202,
+        "gzip": 73413,
+        "brotli": 61479
       },
       "full": {
-        "min": 196474,
-        "gzip": 71370,
-        "brotli": 59857
-      }
+        "min": 202202,
+        "gzip": 73413,
+        "brotli": 61479
+      },
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     }
   }
 }

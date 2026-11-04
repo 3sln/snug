@@ -2,7 +2,7 @@
 // source: snug.cbor.stdtags
 
 import { PF_SUB, PF_TAGS, PF_TAGS_ANY } from './codes.mjs';
-import { be16, be32, headSize, smallArg } from './head.mjs';
+import { headSize, smallArg } from './head.mjs';
 import { typedSize } from './tags.mjs';
 
 export function anyTags(flags) {
@@ -130,12 +130,27 @@ export function mdays(y, m) {
     return 31;
 }
 
+export function leapOk(y, mo, dd, um) {
+    // um: the UTC minute of the day, local hh*60+mm minus the offset, in
+    // -1439..2878. 23:59 UTC the same day needs the last day of the month;
+    // the day before needs local day 1 (whose eve is a month end); the next
+    // day's 23:59 is out of reach of an offset under 24 hours.
+    if (um === 1439) {
+        return dd === mdays(y, mo);
+    }
+    if (um === (-1)) {
+        return dd === 1;
+    }
+    return false;
+}
+
 export function dateTimeOk(b, s, e) {
-    // RFC 3339 §5.6 `date-time` over b[s, e): YYYY-MM-DD, T, hh:mm:ss, an
-    // optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm; T and Z in
-    // either case (§5.6 NOTE). Month 01..12, day within its month (leap
-    // years), hour 00..23, minute 00..59, second 00..60, offset hour 00..23
-    // and minute 00..59.
+    // RFC 3339 §5.6 `date-time` over b[s, e), as RFC 8949 §3.4.1 asks: refined
+    // by RFC 4287 §3.3, so T and Z are upper case. YYYY-MM-DD, T, hh:mm:ss, an
+    // optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm. Month 01..12,
+    // day within its month (leap years), hour 00..23, minute 00..59, second
+    // 00..59 or a leap second 60 (leap-ok), offset hour 00..23 and minute
+    // 00..59.
     if ((e - s) < 20) {
         return false;
     }
@@ -146,15 +161,15 @@ export function dateTimeOk(b, s, e) {
     const hh = num2(b, s + 11);
     const mi = num2(b, s + 14);
     const sc = num2(b, s + 17);
-    const t = b[s + 10];
     let i = s + 19;
+    let off = 0;
     if ((y1 < 0) || (y2 < 0)) {
         return false;
     }
     if ((b[s + 4] !== 45) || (b[s + 7] !== 45)) {
         return false;
     }
-    if ((t !== 84) && (t !== 116)) {
+    if (b[s + 10] !== 84) {
         return false;
     }
     if ((b[s + 13] !== 58) || (b[s + 16] !== 58)) {
@@ -191,121 +206,324 @@ export function dateTimeOk(b, s, e) {
         return false;
     }
     const z = b[i];
-    if ((z === 90) || (z === 122)) {
-        return (i + 1) === e;
+    if (z === 90) {
+        if ((i + 1) !== e) {
+            return false;
+        }
+    } else {
+        if ((z !== 43) && (z !== 45)) {
+            return false;
+        }
+        if ((i + 6) !== e) {
+            return false;
+        }
+        if (b[i + 3] !== 58) {
+            return false;
+        }
+        const oh = num2(b, i + 1);
+        const om = num2(b, i + 4);
+        if (!(((oh >= 0) && (oh <= 23)) && ((om >= 0) && (om <= 59)))) {
+            return false;
+        }
+        off = (oh * 60) + om;
+        if (z === 45) {
+            off = -off;
+        }
     }
-    if ((z !== 43) && (z !== 45)) {
-        return false;
+    if (sc !== 60) {
+        return true;
     }
-    if ((i + 6) !== e) {
-        return false;
-    }
-    if (b[i + 3] !== 58) {
-        return false;
-    }
-    const oh = num2(b, i + 1);
-    const om = num2(b, i + 4);
-    return ((oh >= 0) && (oh <= 23)) && ((om >= 0) && (om <= 59));
+    return leapOk((y1 * 100) + y2, mo, dd, ((hh * 60) + mi) - off);
 }
 
 export function alpha(c) {
     return ((c >= 65) && (c <= 90)) || ((c >= 97) && (c <= 122));
 }
 
+export function digit(c) {
+    return (c >= 48) && (c <= 57);
+}
+
 export function hexd(c) {
-    return ((c >= 48) && (c <= 57)) || (((c >= 65) && (c <= 70)) || ((c >= 97) && (c <= 102)));
+    return digit(c) || (((c >= 65) && (c <= 70)) || ((c >= 97) && (c <= 102)));
 }
 
-export function uriChar(c) {
-    // RFC 3986 unreserved, gen-delims or sub-delims (`%` is handled apart):
-    // printable ASCII except " % < > \ ^ ` { | }.
-    if ((c < 33) || (c > 126)) {
-        return false;
+export function unreserved(c) {
+    // ALPHA / DIGIT / - . _ ~
+    if (alpha(c) || digit(c)) {
+        return true;
     }
-    if (((c === 34) || (c === 37)) || ((c === 60) || (c === 62))) {
-        return false;
-    }
-    if (((c === 92) || (c === 94)) || (c === 96)) {
-        return false;
-    }
-    return (c < 123) || (c > 125);
+    return ((c === 45) || (c === 46)) || ((c === 95) || (c === 126));
 }
 
-export function uriOk(b, s, e) {
-    // RFC 3986 `URI` over b[s, e), checked at the character level: a scheme
-    // (ALPHA *(ALPHA / DIGIT / + / - / .)) and `:`; then only unreserved,
-    // gen-delims and sub-delims characters or %HH escapes; at most one `#`;
-    // `[` and `]` only before the query and the fragment. The authority,
-    // IP-literal and path structure is not parsed (D121).
+export function subDelim(c) {
+    // ! $ & ' ( ) * + , ; =
+    if (c === 33) {
+        return true;
+    }
+    if ((c >= 36) && (c <= 44)) {
+        return c !== 37;
+    }
+    return (c === 59) || (c === 61);
+}
+
+export function uchar(b, i, e, extra) {
+    // The length of one character at b[i] (i < e) of the class: unreserved,
+    // sub-delims, a %HH escape, and by extra's bits 1 `:`, 2 `@`, 4 `/`, 8 `?`;
+    // 0 when there is none.
+    const c = b[i];
+    if (c === 37) {
+        if ((i + 3) > e) {
+            return 0;
+        }
+        if (hexd(b[i + 1]) && hexd(b[i + 2])) {
+            return 3;
+        }
+        return 0;
+    }
+    if (unreserved(c) || subDelim(c)) {
+        return 1;
+    }
+    if ((c === 58) && ((extra & 1) !== 0)) {
+        return 1;
+    }
+    if ((c === 64) && ((extra & 2) !== 0)) {
+        return 1;
+    }
+    if ((c === 47) && ((extra & 4) !== 0)) {
+        return 1;
+    }
+    if ((c === 63) && ((extra & 8) !== 0)) {
+        return 1;
+    }
+    return 0;
+}
+
+export function urun(b, i, e, extra) {
+    // Past the longest run of uchar class characters from i.
+    let j = i;
+    while (j < e) {
+        const n = uchar(b, j, e, extra);
+        if (n === 0) {
+            return j;
+        }
+        j += n;
+    }
+    return j;
+}
+
+export function ipv4Ok(b, s, e) {
+    // IPv4address: four dec-octets (0..255, no leading zero) joined by `.`.
+    let i = s;
+    let n = 0;
+    while (n < 4) {
+        if (n > 0) {
+            if ((i >= e) || (b[i] !== 46)) {
+                return false;
+            }
+            i += 1;
+        }
+        const st = i;
+        let v = 0;
+        while ((i < e) && digit(b[i])) {
+            v = (v * 10) + (b[i] - 48);
+            i += 1;
+            if ((i - st) > 3) {
+                return false;
+            }
+        }
+        if (i === st) {
+            return false;
+        }
+        if (((i - st) > 1) && (b[st] === 48)) {
+            return false;
+        }
+        if (v > 255) {
+            return false;
+        }
+        n += 1;
+    }
+    return i === e;
+}
+
+export function h16List(b, s, e, v4) {
+    // The 16-bit pieces of `h16 *(: h16)` over b[s, e) (an IPv4address last
+    // counts 2 when v4), 0 for an empty range, -1 when malformed.
+    if (s === e) {
+        return 0;
+    }
+    let i = s;
+    let n = 0;
+    for (;;) {
+        const st = i;
+        let dot = false;
+        while ((i < e) && (b[i] !== 58)) {
+            if (b[i] === 46) {
+                dot = true;
+            }
+            i += 1;
+        }
+        if (dot) {
+            if ((!v4) || (i < e)) {
+                return -1;
+            }
+            if (!ipv4Ok(b, st, i)) {
+                return -1;
+            }
+            return n + 2;
+        }
+        if ((i === st) || ((i - st) > 4)) {
+            return -1;
+        }
+        for (let k = st; k < i; k++) {
+            if (!hexd(b[k])) {
+                return -1;
+            }
+        }
+        n += 1;
+        if (i === e) {
+            return n;
+        }
+        i += 1;
+        if (i === e) {
+            return -1;
+        }
+    }
+}
+
+export function ipLiteralOk(b, s, e) {
+    // Between `[` and `]`: IPvFuture (v 1*HEXDIG . 1*(unreserved / sub-delims
+    // / :)) or IPv6address -- 8 pieces, or fewer with one `::` standing for
+    // at least one zero piece. No RFC 6874 zone identifier.
     if (s >= e) {
         return false;
     }
-    if (!alpha(b[s])) {
-        return false;
-    }
-    let i = s + 1;
-    let st = 0;
-    // st: 0 scheme, 1 hierarchical part, 2 query, 3 fragment
-    while (i < e) {
-        const c = b[i];
-        if (st === 0) {
-            if (c === 58) {
-                st = 1;
-            } else {
-                if (!(alpha(c) || (((c >= 48) && (c <= 57)) || ((c === 43) || ((c === 45) || (c === 46)))))) {
-                    return false;
-                }
-            }
-        } else {
-            if (c === 37) {
-                if ((i + 3) > e) {
-                    return false;
-                }
-                if (!(hexd(b[i + 1]) && hexd(b[i + 2]))) {
-                    return false;
-                }
-                i += 2;
-            } else {
-                if (!uriChar(c)) {
-                    return false;
-                }
-                if ((c === 91) || (c === 93)) {
-                    if (st !== 1) {
-                        return false;
-                    }
-                }
-                if (c === 35) {
-                    if (st === 3) {
-                        return false;
-                    }
-                    st = 3;
-                }
-                if ((c === 63) && (st === 1)) {
-                    st = 2;
-                }
-            }
+    const c0 = b[s];
+    if ((c0 === 118) || (c0 === 86)) {
+        let i = s + 1;
+        while ((i < e) && hexd(b[i])) {
+            i += 1;
+        }
+        if ((i === (s + 1)) || ((i >= e) || (b[i] !== 46))) {
+            return false;
         }
         i += 1;
+        if (i >= e) {
+            return false;
+        }
+        return urun(b, i, e, 1) === e;
     }
-    return st >= 1;
+    let d = -1;
+    for (let k = s; k < e - 1; k++) {
+        if ((d < 0) && ((b[k] === 58) && (b[k + 1] === 58))) {
+            d = k;
+        }
+    }
+    if (d < 0) {
+        return h16List(b, s, e, true) === 8;
+    }
+    const l = h16List(b, s, d, false);
+    const r = h16List(b, d + 2, e, true);
+    return ((l >= 0) && (r >= 0)) && ((l + r) <= 7);
 }
 
-export function finiteFloat(b, q) {
-    // Is the float item at q (major 7, ai 25..27) finite?
-    const ai = b[q] & 31;
-    if (ai === 25) {
-        return ((be16(b, q + 1) >> 10) & 31) !== 31;
+export function hostEnd(b, h, z) {
+    // Past `host` (IP-literal or reg-name) at b[h, z), or -1.
+    if ((h < z) && (b[h] === 91)) {
+        let rb = h + 1;
+        while ((rb < z) && (b[rb] !== 93)) {
+            rb += 1;
+        }
+        if (rb >= z) {
+            return -1;
+        }
+        if (!ipLiteralOk(b, h + 1, rb)) {
+            return -1;
+        }
+        return rb + 1;
     }
-    if (ai === 26) {
-        return ((be32(b, q + 1) >> 23) & 255) !== 255;
+    return urun(b, h, z, 0);
+}
+
+export function authorityEnd(b, s, e) {
+    // Past `authority` = [userinfo @] host [: port] at b[s, e), whose extent
+    // ends at the first / ? # (or e); -1 when it is malformed.
+    let z = s;
+    let at = -1;
+    while ((z < e) && (!((b[z] === 47) || ((b[z] === 63) || (b[z] === 35))))) {
+        if ((at < 0) && (b[z] === 64)) {
+            at = z;
+        }
+        z += 1;
     }
-    return ((be32(b, q + 1) >> 20) & 2047) !== 2047;
+    let h = s;
+    if (at >= 0) {
+        if (urun(b, s, at, 1) !== at) {
+            return -1;
+        }
+        h = at + 1;
+    }
+    const p = hostEnd(b, h, z);
+    if (p < 0) {
+        return -1;
+    }
+    if (p < z) {
+        if (b[p] !== 58) {
+            return -1;
+        }
+        for (let k = p + 1; k < z; k++) {
+            if (!digit(b[k])) {
+                return -1;
+            }
+        }
+    }
+    return z;
+}
+
+export function uriOk(b, s, e) {
+    // RFC 3986 `URI-reference` over b[s, e): `URI` when a `:` comes before any
+    // / ? # (the text before it must then be a scheme, ALPHA *(ALPHA / DIGIT /
+    // + / - / .)), else `relative-ref` (whose first segment so has no `:`);
+    // then `//` authority, or a path of pchar and /; [? query] [# fragment]
+    // over pchar / ? (no second #). Hosts are reg-name or IP-literal (an
+    // IPv4address is also a reg-name).
+    let k = s;
+    let i = s;
+    while ((k < e) && (!(((b[k] === 58) || (b[k] === 47)) || ((b[k] === 63) || (b[k] === 35))))) {
+        k += 1;
+    }
+    if ((k < e) && (b[k] === 58)) {
+        if ((k === s) || (!alpha(b[s]))) {
+            return false;
+        }
+        for (let j = s + 1; j < k; j++) {
+            const c = b[j];
+            if (!((alpha(c) || digit(c)) || ((c === 43) || ((c === 45) || (c === 46))))) {
+                return false;
+            }
+        }
+        i = k + 1;
+    }
+    if (((i + 1) < e) && ((b[i] === 47) && (b[i + 1] === 47))) {
+        i = authorityEnd(b, i + 2, e);
+        if (i < 0) {
+            return false;
+        }
+    }
+    i = urun(b, i, e, 7);
+    if ((i < e) && (b[i] === 63)) {
+        i = urun(b, i + 1, e, 15);
+    }
+    if ((i < e) && (b[i] === 35)) {
+        i = urun(b, i + 1, e, 15);
+    }
+    return i === e;
 }
 
 export function stdContentOk(b, tag, q, stop) {
     // The content rule of standard tag `tag` over its well-formed content
     // item b[q, stop): 0 a text in RFC 3339 date-time form; 1 an integer
-    // (major 0/1) or a finite float; 24 a byte string (its content is then
+    // (major 0/1) or a float; 24 a byte string (its content is then
     // walked by the caller); 32 a text in URI form (uri-ok); an any-level
     // typed array (typed-any-size) a byte string of whole elements, read from
     // its head; 21-23, 55799 and every other tag anything (and nothing is
@@ -325,10 +543,8 @@ export function stdContentOk(b, tag, q, stop) {
         if (major <= 1) {
             return true;
         }
-        if ((major === 7) && ((ai >= 25) && (ai <= 27))) {
-            return finiteFloat(b, q);
-        }
-        return false;
+        // D252: RFC 8949 §3.4.2 admits every float; non-finite ones are discouraged, not invalid.
+        return (major === 7) && ((ai >= 25) && (ai <= 27));
     }
     if (tag === 24) {
         return major === 2;

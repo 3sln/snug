@@ -297,7 +297,7 @@ const programBytes = s => ({ serialized: hex(s.program.serialize()), sourceKey: 
 test('compile: every schema text of the case set gives the same Program bytes or SchemaError', async () => {
   const t = tally('compile (Program bytes / SchemaError)');
   const texts = [];
-  for (const file of ['study', 'adversarial']) for (const su of json(`corpus/conformance/${file}.json`).suites)
+  for (const file of ['study', 'adversarial', 'audit-2026-11-04']) for (const su of json(`corpus/conformance/${file}.json`).suites)
     texts.push([`${file}: ${su.name}`, su.cddl ?? readFileSync(new URL(`corpus/${su.cddlFile}`, root), 'utf8'), {}]);
   for (const { cddl } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) texts.push([`oracle: ${cddl}`, cddl, {}]);
   for (const [text, kind] of EXT_SCHEMAS) texts.push([`ext ${kind}`, text, { controls: testControls, limits: { items: 1 << 20, entries: 1 << 20 } }]);

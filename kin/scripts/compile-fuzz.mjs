@@ -30,7 +30,7 @@ const ri = n => Math.floor(rnd() * n), pick = a => a[ri(a.length)], chance = p =
 
 // ---------------------------------------------------------------- seeds
 const seeds = [];
-for (const f of ['study', 'adversarial']) for (const x of JSON.parse(read(`corpus/conformance/${f}.json`)).suites) if (x.cddl) seeds.push(x.cddl);
+for (const f of ['study', 'adversarial', 'audit-2026-11-04']) for (const x of JSON.parse(read(`corpus/conformance/${f}.json`)).suites) if (x.cddl) seeds.push(x.cddl);
 for (const f of readdirSync(new URL('corpus/cddl-study/contracts/', root))) seeds.push(read('corpus/cddl-study/contracts/' + f));
 
 // ---------------------------------------------------------------- a random grammar

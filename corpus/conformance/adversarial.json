@@ -1571,7 +1571,8 @@
     {
      "rule": "r",
      "hex": "a1616101",
-     "expect": true
+     "expect": false,
+     "note": "RFC 8610 §3.9: an unplugged $$ socket is an empty group choice, so the map has no derivation (D251; was wrongly true)"
     },
     {
      "rule": "r",

@@ -55,6 +55,12 @@ export const R_POS_INF = 5;
 
 export const LEAF_WORDS = 16;
 
+export const ZK_NEG_HI = 2147483647;
+
+export const FK_NEG_INF_HI = 1048575;
+
+export const FK_POS_INF_HI = -1048576;
+
 export function lk(h, l) {
     return vget(h, T_LEAF, l * 16);
 }
@@ -928,13 +934,53 @@ export function mkFloatFrom(h, widths, t, bounded) {
         return -2;
     }
     const first = (vlen(h, T_FIV) / 4) | 0;
-    for (let i = 0; i < 4 * n; i++) {
-        const x = vget(h, t, i);
-        vpush1(h, T_FIV, x);
+    let cnt = 0;
+    // D250: -0 and +0 are one number (RFC 8610 §3.8.6 compares numerically), so
+    // a run holds both zero keys or neither: a bound on one is widened to the
+    // other, and records that then touch are merged (the input is sorted by lo).
+    for (let i = 0; i < n; i++) {
+        const o = 4 * i;
+        let lh = vget(h, t, o);
+        let ll = vget(h, t, o + 1);
+        let hh = vget(h, t, o + 2);
+        let hl = vget(h, t, o + 3);
+        let merged = false;
+        if ((lh === (1 << 31)) && (ll === 0)) {
+            lh = ZK_NEG_HI;
+            ll = -1;
+        }
+        if ((hh === ZK_NEG_HI) && (hl === (-1))) {
+            hh = 1 << 31;
+            hl = 0;
+        }
+        if (cnt > 0) {
+            const p = 4 * (first + (cnt - 1));
+            const ph = vget(h, T_FIV, p + 2);
+            const pl = vget(h, T_FIV, p + 3);
+            const nl = (pl + 1) | 0;
+            let nh = ph;
+            if (nl === 0) {
+                nh = (ph + 1) | 0;
+            }
+            if ((u64Cmp(lh, ll, ph, pl) <= 0) || ((lh === nh) && (ll === nl))) {
+                merged = true;
+                if (u64Cmp(hh, hl, ph, pl) > 0) {
+                    vset(h, T_FIV, p + 2, hh);
+                    vset(h, T_FIV, p + 3, hl);
+                }
+            }
+        }
+        if (!merged) {
+            vpush1(h, T_FIV, lh);
+            vpush1(h, T_FIV, ll);
+            vpush1(h, T_FIV, hh);
+            vpush1(h, T_FIV, hl);
+            cnt += 1;
+        }
     }
     stage(h, K_FLOAT, widths);
     stageD(h, 0, first);
-    stageD(h, 1, n);
+    stageD(h, 1, cnt);
     return stageIntern(h);
 }
 

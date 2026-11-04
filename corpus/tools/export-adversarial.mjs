@@ -91,7 +91,7 @@ suite('grammar','unqualified bytes with escaped quote and newline', 'r = \'it\\\
 function utf8Bytes(text) { return new TextEncoder().encode(text); }
 suite('grammar','star followed by a spaced numeric literal', 'r = [* 3]', [V([],true),V([3,3],true),V([2],false),V([3,2],false)]);
 suite('grammar','type socket and forward references', '$x /= small\n$x /= tstr\nsmall = 0..2\nr = [* $x]', [V([0,2,'x'],true),V([3],false),V([],true)]);
-suite('grammar','undefined sockets', 'r = {a:int, $$nothing}\ns = $nothing', [{...V({a:1},true),rule:'r'},{...V({a:1,b:2},false),rule:'r'},{...V(1,false),rule:'s'}]);
+suite('grammar','undefined sockets', 'r = {a:int, $$nothing}\ns = $nothing', [{...V({a:1},false,'RFC 8610 §3.9: an unplugged $$ socket is an empty group choice, so the map has no derivation (D251; was wrongly true)'),rule:'r'},{...V({a:1,b:2},false),rule:'r'},{...V(1,false),rule:'s'}]);
 suite('grammar','generic group and nested arguments', 'pair<A,B> = (A,B)\nlist<T> = [* T]\nr = [pair<uint,list<tstr>>]', [V([1,['x','y']],true),V([1,[2]],false),V([1],false)]);
 suite('grammar','regular recursive array group', 'g = (int, ? g)\nr = [g]', [V([],false),V([1],true),V([1,2,3],true),V([1,'x'],false)]);
 suite('grammar','recursive map', 'node = {v: int, ? children: [* node]}\nr = node', [V({v:1,children:[{v:2}]},true),V({v:1,children:[{v:'x'}]},false)]);

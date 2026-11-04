@@ -174,9 +174,13 @@ ref('a non-shortest integer key', map([uint(1).replace(/^01$/, '1801'), '00']), 
 
 // Standard tags: content rules.
 acc('tag 0 with a fraction and an offset', tag(0, tstr('1996-12-19T16:39:57.123-08:00')), T(0, '1996-12-19T16:39:57.123-08:00'), { bindle: 'tag' });
-acc('tag 0 lower-case t and z, leap day, leap second', tag(0, tstr('2024-02-29t23:59:60z')), T(0, '2024-02-29t23:59:60z'), { bindle: 'tag' });
+acc('tag 0 leap day, leap second at the month end', tag(0, tstr('2024-02-29T23:59:60Z')), T(0, '2024-02-29T23:59:60Z'), { bindle: 'tag' });
+acc('tag 0 leap second at a month end in UTC, before it locally (D252)', tag(0, tstr('1990-12-31T15:59:60-08:00')), T(0, '1990-12-31T15:59:60-08:00'), { bindle: 'tag' });
+acc('tag 0 leap second on the eve of local day 1 (D252)', tag(0, tstr('2017-01-01T00:59:60+01:00')), T(0, '2017-01-01T00:59:60+01:00'), { bindle: 'tag' });
 acc('tag 1 negative integer', tag(1, nint(-1)), T(1, -1), { bindle: 'tag' });
 acc('tag 1 -0.0', tag(1, 'f98000'), T(1, F('-0')), { bindle: 'tag' });
+acc('tag 1 with NaN: discouraged, not invalid (RFC 8949 §3.4.2, D252)', tag(1, 'f97e00'), T(1, F('NaN')), { bindle: 'tag' });
+acc('tag 1 with -Infinity: discouraged, not invalid (D252)', tag(1, 'f9fc00'), T(1, F('-Infinity')), { bindle: 'tag' });
 acc('tag 21 over an array of byte strings', tag(21, arr(bstr('00'), bstr('ff'))), T(21, [B('00'), B('ff')]), { bindle: 'tag' });
 acc('tag 22 over a map', tag(22, map([tstr('k'), bstr('01')])), T(22, { k: B('01') }), { bindle: 'tag' });
 acc('tag 23 over an integer', tag(23, uint(5)), T(23, 5), { bindle: 'tag' });
@@ -184,6 +188,8 @@ acc('tag 24 holding a map with integer keys', tag(24, bstr(map([uint(1), uint(2)
 acc('tag 24 holding tag 24', tag(24, bstr(tag(24, bstr('01')))), T(24, B(tag(24, bstr('01')))), { bindle: 'tag' });
 acc('tag 32 with query and fragment', tag(32, tstr('urn:a:b?c=d%2F#x/y?z')), T(32, 'urn:a:b?c=d%2F#x/y?z'), { bindle: 'tag' });
 acc('tag 32 with an IP literal', tag(32, tstr('http://[::1]:80/p')), T(32, 'http://[::1]:80/p'), { bindle: 'tag' });
+acc('tag 32 relative reference: URI-reference (RFC 8949 §3.4.5.3, D252)', tag(32, tstr('/a/b')), T(32, '/a/b'), { bindle: 'tag' });
+acc('tag 32 with an IPv4-embedded IPv6 literal', tag(32, tstr('http://[::ffff:192.0.2.1]/')), T(32, 'http://[::ffff:192.0.2.1]/'), { bindle: 'tag' });
 acc('tag 55799 at the top level', tag(55799, map([tstr('a'), uint(1)])), T(55799, { a: 1 }), { bindle: 'tag' });
 acc('typed array (tag 70) and decimal (tag 4) stay', arr(tag(70, bstr('01000000')), tag(4, arr(nint(-2), uint(27315)))), undefined, { bindle: 'ok' });
 ref('tag 0 with an integer', tag(0, uint(0)), 'tag', 0, { bindle: 'tag' });
@@ -194,10 +200,11 @@ ref('tag 0 with hour 24', tag(0, tstr('2013-03-21T24:00:00Z')), 'tag', 0, { bind
 ref('tag 0 with an empty fraction', tag(0, tstr('2013-03-21T20:04:00.Z')), 'tag', 0, { bindle: 'tag' });
 ref('tag 0 without an offset', tag(0, tstr('2013-03-21T20:04:00')), 'tag', 0, { bindle: 'tag' });
 ref('tag 0 with a space for T', tag(0, tstr('2013-03-21 20:04:00Z')), 'tag', 0, { bindle: 'tag' });
+ref('tag 0 lower-case t and z: RFC 4287 §3.3 refinement (D252)', tag(0, tstr('2024-02-29t23:59:60z')), 'tag', 0, { bindle: 'tag' });
+ref('tag 0 leap second at 00:00 (audit S61, D252)', tag(0, tstr('2024-01-01T00:00:60Z')), 'tag', 0, { bindle: 'tag' });
+ref('tag 0 leap second mid-month (D252)', tag(0, tstr('2024-01-15T23:59:60Z')), 'tag', 0, { bindle: 'tag' });
 ref('tag 0 with bad UTF-8: the content walk first', tag(0, '62c0af'), 'text', 2, { bindle: 'tag' });
 ref('tag 1 with text', tag(1, tstr('1')), 'tag', 0, { bindle: 'tag' });
-ref('tag 1 with NaN', tag(1, 'f97e00'), 'tag', 0, { bindle: 'tag' });
-ref('tag 1 with -Infinity', tag(1, 'f9fc00'), 'tag', 0, { bindle: 'tag' });
 ref('tag 1 with a bignum', tag(1, 'c249010000000000000000'), 'tag', 0, { bindle: 'tag' });
 ref('tag 1 with a non-shortest float: the content walk first', tag(1, 'fa3fc00000'), 'non_shortest', 1, { bindle: 'tag' });
 ref('tag 24 with text', tag(24, tstr('01')), 'tag', 0, { bindle: 'tag' });
@@ -207,7 +214,11 @@ ref('tag 24 holding a non-shortest integer', tag(24, bstr('1817')), 'non_shortes
 ref('tag 24 holding unsorted keys', tag(24, bstr(map([uint(2), '00'], [uint(1), '00']))), 'key_order', 6, { bindle: 'tag' });
 ref('tag 24 holding a truncated array', tag(24, bstr('8201')), 'truncated', 3, { bindle: 'tag' });
 ref('tag 24 holding an indefinite string', tag(24, bstr('7fff')), 'indefinite', 3, { bindle: 'tag' });
-ref('tag 32 relative reference', tag(32, tstr('/a/b')), 'tag', 0, { bindle: 'tag' });
+ref('tag 32 with an unclosed IP literal (audit S60, D252)', tag(32, tstr('http://[x')), 'tag', 0, { bindle: 'tag' });
+ref('tag 32 with nine IPv6 pieces', tag(32, tstr('http://[1:2:3:4:5:6:7:8:9]/')), 'tag', 0, { bindle: 'tag' });
+ref('tag 32 with two :: in an IP literal', tag(32, tstr('http://[1::2::3]/')), 'tag', 0, { bindle: 'tag' });
+ref('tag 32 with a non-digit port', tag(32, tstr('http://h:8x/')), 'tag', 0, { bindle: 'tag' });
+ref('tag 32 with a colon in a schemeless first segment', tag(32, tstr('1a:b')), 'tag', 0, { bindle: 'tag' });
 ref('tag 32 with a space', tag(32, tstr('http://a b')), 'tag', 0, { bindle: 'tag' });
 ref('tag 32 with a bad escape', tag(32, tstr('http://a/%2g')), 'tag', 0, { bindle: 'tag' });
 ref('tag 32 with two fragments', tag(32, tstr('a:b#c#d')), 'tag', 0, { bindle: 'tag' });

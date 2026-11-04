@@ -14,7 +14,7 @@ const refused = code => e => e instanceof ProgramError && e.code === code;
 
 test('serialised Programs: every corpus schema, every compiled rule/input, deterministic bytes', async t => {
   let accepted = 0, refusedCount = 0, cases = 0;
-  for (const file of ['study', 'adversarial']) {
+  for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
     const { suites } = JSON.parse(readFileSync(new URL(`../../../corpus/conformance/${file}.json`, import.meta.url)));
     for (const suite of suites) await t.test(`${file}: ${suite.name}`, async () => {
       const text = suite.cddl ?? readFileSync(new URL(`../../../corpus/${suite.cddlFile}`, import.meta.url), 'utf8');

@@ -3,9 +3,14 @@
 snug implements a bounded, explicit subset of RFC 8610 with RFC 9165 controls
 and RFC 9682 grammar updates. Unsupported or unprovable constructs fail at
 compile time; an accepted construct keeps its documented meaning. This is
-not a claim of complete RFC coverage. The current wire profile can make a
-perfectly valid CDDL type uninhabited: `undefined`, for example, is parsed
-from the prelude but its CBOR simple value is refused by the scanner.
+not a claim of complete RFC coverage. The wire profile decides which CBOR
+reaches the schema: the default deterministic preset (any tag, D180) gives
+every prelude name values, while `wire: 'bindle'` makes 14 of them
+uninhabited (`undefined`, for example, is parsed from the prelude but its
+simple value is refused by the scanner; [conformance §f](conformance.md)).
+The default byte check also **refuses valid but non-deterministic CBOR**
+(indefinite lengths, non-shortest heads/floats, unsorted keys); D230 makes
+valid-CBOR acceptance the default (P8.4), not yet implemented.
 
 The compiler and matcher are kin, shared by JS and Rust. This document
 describes the current implementation, informed by D010–D014, D020–D025,
@@ -20,7 +25,7 @@ D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validati
 | Maps `{}`, arrays `[]`, labelled members | Supported; array member names are labels, not matching constraints. |
 | Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. |
 | Generic type/group rules and instantiation | Supported, memoised with limits; unresolved/wrong-arity uses refused. |
-| Sockets `$name`, `$$name` and extensions | Supported in `full`; undefined type socket is empty, undefined group socket is an empty group. |
+| Sockets `$name`, `$$name` and extensions | Supported in `full`; an unplugged `$x` is the empty type choice and an unplugged `$$x` the empty group choice (RFC 8610 §3.9): nothing matches through them, so `{ a: int, $$x }` matches nothing until plugged, while `? $$x` matches by absence (D251). |
 | Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
 | Productive recursive types | Supported when recursion passes through a container/tag; depth bounded. |
 | Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`; see D036. |
@@ -39,9 +44,9 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | --- | --- |
 | `.size` | Text/bytes count UTF-8/content bytes. `uint .size n` admits 0..256ⁿ−1; a range controller uses the minimal byte-length interval (lower length 0 includes zero). |
 | `.bits` | Permitted bit positions on uint or bstr; bstr bit n is byte n>>3, bit n&7, least significant first. Zero/all-zero masks still constrain. |
-| `.lt`, `.le`, `.gt`, `.ge` | Intersect numeric intervals; exact any-size integers and float bit-pattern bounds. |
+| `.lt`, `.le`, `.gt`, `.ge` | Intersect numeric intervals; exact any-size integers; floats compare numerically (−0.0 = +0.0, so `float .lt 0.0` excludes both zeros) and NaN satisfies no ordered comparison (D250). |
 | `.eq` | Target intersected with controller, not replacement of target; `(tstr .size 1) .eq "aa"` is empty. Composite controllers lower to AND (D038). |
-| `.ne` | Numeric exclusion splits intervals; other targets exclude a literal while retaining target constraints. Composite nonliteral controllers refused. |
+| `.ne` | Numeric exclusion splits intervals: `float .ne 0.0` excludes both zeros and `float .ne 1.5` keeps NaN (NaN equals no number, D250); other targets exclude a literal while retaining target constraints. Composite nonliteral controllers refused. |
 | `.and`, `.within` | Intersections, with operands evaluated as same-item dependencies; they do not create extra accepting alternatives. |
 | `.regexp` | Whole-string RFC 9485 I-Regexp, compiled to a bounded code-point automaton; details below. |
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
@@ -51,9 +56,11 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
 | registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
-Numeric controls mixing an integer target and float controller (or vice
-versa) require exact conversion within the compiler's restricted |x|<2⁵³
-domain; otherwise `control_value` (D038). Decimal schema float literals have
+An integer target with a float controller converts the bound exactly within
+the compiler's restricted |x|<2⁵³ domain; otherwise `control_value` (D038).
+A float target needs a float controller: `float .lt 1` is refused with
+`control_value` (write `float .lt 1.0`); mixed-kind coverage is P8.5 work.
+Decimal schema float literals have
 at most 17 significant digits, must be finite, and a nonzero value may not
 round to zero. Hex floats are rounded by kin (D020/D032). Unsupported
 control targets/controllers are errors rather than ignored controls.
@@ -209,26 +216,43 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 - `float16`, `float32`, `float64` constrain **encoded width**. Shortest-form
   CBOR encodes 1.5 as float16, so `float32` refuses it. Use `float` when the
   encoded width is not a protocol constraint. Under the deterministic
-  preset NaN (only `f97e00`), ±∞, −0 and integral floats are valid floats;
-  float ranges compare as IEEE 754 (−0.0 is in `0.0..1.0`, NaN is in no
-  range, +∞ is in `float .ge 1.5`), while literals compare encodings (`0.0`
-  does not match −0.0). The Bindle profile refuses NaN, ±∞, −0 and integral
-  floats within the safe range before the schema sees them.
+  preset NaN (only `f97e00`), ±∞, −0 and integral floats are valid floats.
+  Float literals, ranges and controls compare numerically, as RFC 8610
+  §3.8.6 asks (D250): −0.0 and +0.0 are one number (`0.0` and `-0.0` each
+  match both zeros; −0.0 is in `0.0..1.0`; `-1.0...0.0` excludes both), NaN
+  is in no range and fails `.lt .le .gt .ge .eq` but passes `.ne` of any
+  number, and +∞ is in `float .ge 1.5`. An integer literal and a float
+  literal stay distinct CBOR kinds (`1` does not match `1.0`). The Bindle
+  profile refuses NaN, ±∞, −0 and integral floats within the safe range
+  before the schema sees them.
 - Text `.size` is UTF-8 byte length, not code-point or grapheme length.
   Regexps operate on code points; for a code-point length use the `.chars`
   extension control from `snug/controls` (D082, D140–D142).
-- CDDL numeric bounds compare bytes/bit patterns, not rounded JS values;
-  integers beyond Number's safe range stay exact. Literal comparisons rely
-  on the unique admitted wire encoding.
+- CDDL numeric bounds are exact (integers compare as integers of any size,
+  floats by their binary64 value), never rounded JS values. Non-float
+  literal comparisons rely on the unique admitted wire encoding.
 - The wire profile, not the schema, decides which data reach the schema:
-  under the deterministic preset (the default) integer and other non-text
-  map keys, the prelude's `tdate`, `time`, `uri`, `encoded-cbor`, `eb64url`,
-  `eb64legacy`, `eb16`, `cbor-any` and `undefined` match valid data; tags
-  outside the standard set (`bigfloat`, `b64url`, `regexp`, `mime-message`
-  …) are refused by the profile whatever the schema says. Under `wire:
-  'bindle'` the Bindle restrictions apply. Compiler `profile: 'full'` never
-  disables strict CBOR, and a compiled Program validates under either preset
-  ([profiles](profiles.md#cddl-and-schemas)).
+  under the deterministic preset (the default, `tags: 'any'`, D180) integer
+  and other non-text map keys, every prelude name and every tag number
+  except the invalid 65535, 2³²−1 and 2⁶⁴−1 (RFC 8949 §9.2) match valid
+  data. `tags: 'standard'` restores the former set, under which `bigfloat`,
+  `b64url`, `b64legacy`, `regexp` and `mime-message` have no values. Under
+  `wire: 'bindle'` the Bindle restrictions apply. Compiler `profile: 'full'`
+  never disables strict CBOR, and a compiled Program validates under either
+  preset ([profiles](profiles.md#cddl-and-schemas)).
+- **Validated versus opaque tags.** The profile checks the content of the
+  tags it knows, whatever the schema says (D252): tag 0 must be an RFC 3339
+  `date-time` refined by RFC 4287 §3.3 (upper-case `T`/`Z`; second 60 only
+  as 23:59:60 UTC on the last day of a month); tag 1 an integer or any float
+  (non-finite floats are discouraged by RFC 8949 §3.4.2, not invalid); tag
+  24 one valid item; tag 32 an RFC 3986 `URI-reference` (scheme, authority
+  with IPv6/IPvFuture literals, path, query, fragment; no RFC 6874 zone
+  identifiers); tags 2/3 (minimal bignums), 4 (normalised decimals, a local
+  rule), 40 and the RFC 8746 typed arrays (whole elements); 55799 only at
+  the top. Every other tag, including 5 (bigfloat), 21–23, 33–36, 1040
+  (column-major arrays) and unassigned numbers, is **opaque**: its content
+  is any valid item and a match proves nothing about its registered
+  meaning. A schema (`bigfloat`, `#6.1040([...])`) can still constrain it.
 - Profile errors outrank schema errors, except that budget exhaustion stops
   the walk immediately (D023/D025). Errors never echo a data value or unnamed
   map key. See [errors](api.md#errors).

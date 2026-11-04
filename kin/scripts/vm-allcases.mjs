@@ -126,7 +126,7 @@ for (const c of dc.cases) {
 
 // ---------------------------------------------------------------- 3. conformance
 const corpus = { suites: 0, compiled: 0, refusedOk: 0, refusedNot: [], notCompiled: [], later: 0, cases: 0 };
-for (const file of ['study', 'adversarial']) {
+for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
   const j = JSON.parse(readFileSync(new URL(`../../corpus/conformance/${file}.json`, import.meta.url)));
   for (const su of j.suites) {
     corpus.suites++;
@@ -144,7 +144,7 @@ for (const file of ['study', 'adversarial']) {
       if (rule < 0) { fail(`${file}: ${su.name}: no rule ${k.rule}`); continue; }
       corpus.cases++;
       const opt = su.options ?? {};
-      cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1), bytes: unhex(k.hex),
+      cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1, -1, -1, opt.wire === 'deterministic' ? 122 : 0), bytes: unhex(k.hex),
         label: `${file}: ${su.name} [${k.hex.slice(0, 40)}]`, corpus: true,
         check: o => { const ok = o.split(' ')[0] === '0'; return ok === k.expect ? null : `verdict ${ok}, expected ${k.expect} (out ${o})`; } });
     }

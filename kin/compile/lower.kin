@@ -15,7 +15,9 @@
 ;;   (snug.compile.maps), in an array into a Glushkov tree whose group
 ;;   recursion is allowed only in tail position (regular, §4.4); any other
 ;;   group recursion is ERR_GROUP_RECURSION.
-;; * Undefined sockets: `$x` is the empty type, `$$x` the empty group (§4.8).
+;; * Undefined sockets: `$x` is the empty type choice, `$$x` the empty group
+;;   choice -- no alternatives, so nothing matches through it (RFC 8610 §3.9;
+;;   D251 corrects the earlier empty-group reading; §4.8).
 ;;
 ;; Recursion depth in here is bounded by h[H_DEPTH_MAX] (ERR_LIM_NESTING).
 (ns snug.compile.lower
@@ -29,7 +31,7 @@
                                         ERR_RANGE ERR_CONTROL_VALUE ERR_UNSUPPORTED_CONTROL
                                         ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_MAP_CUT ERR_TAG ERR_MAJOR
                                         ERR_PROFILE ERR_LIM_INST ERR_LIM_NESTING
-                                        H_R0 H_R1 H_R2 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
+                                        H_R0 H_R1 H_R2 H_R3 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
                                         H_N_INST H_PROFILE H_WORK_AT
                                         T_ENV T_HENV T_MEMO T_HMEMO T_CON T_HCON T_WORK T_ASTK T_STK
                                         T_LITB T_SRC T_PSTK T_GSTACK T_LSTK T_MAP T_ARR T_TMP2 T_IV
@@ -54,7 +56,7 @@
                                       ctl-cat ctl-det ctl-plus int-point float-point single-leaf]]
             [snug.compile.maps :refer [ent-new as-single as-unit as-none as-product as-product-many as-union as-occur
                                        as-n as-aoff as-alen alt-ent ew map-finish]]
-            [snug.compile.glush :refer [g-node g-list g-add gk gset G_POS G_SEQ G_ALT G_REP G_EMPTY G_REC G_FRAME]]
+            [snug.compile.glush :refer [g-node g-list g-add gk gset G_POS G_SEQ G_ALT G_REP G_REC G_FRAME]]
             [snug.compile.arrays :refer [arr-finish]]
             [snug.compile.ext :refer [builtin-ctl ext-lookup ext-max]]))
 
@@ -310,9 +312,12 @@
     (if (float-point h lo)
       (do (let [lkh (hg h H_R0) lkl (hg h H_R1)]
             (if (not (float-point h hi)) (return (fail h ERR_RANGE pos)))
-            (let [^:mut hkh (hg h H_R0) ^:mut hkl (hg h H_R1)]
+            (comment "D250: an inclusive upper bound is the point's highest key, an"
+                     "exclusive one stops below its lowest (for zero: +0, and below -0).")
+            (let [^:mut hkh (hg h H_R2) ^:mut hkl (hg h H_R3)]
               (if (== incl 0)
-                (do (if (== hkl 0) (set hkh (sub32 hkh 1)))
+                (do (set hkh (hg h H_R0)) (set hkl (hg h H_R1))
+                    (if (== hkl 0) (set hkh (sub32 hkh 1)))
                     (set hkl (sub32 hkl 1))))
               (comment "An empty range (lo > hi, or an exclusive one with nothing in it) is"
                        "the empty type.")
@@ -903,7 +908,8 @@
         (do (let [gr (group-ref h (ent-type h ent) env)]
               (if (== gr (neg 1)) (return (neg 1)))
               (if (== gr (neg 2)) (return (fail h ERR_MAP_KEY pos)))
-              (if (== gr (neg 4)) (set base (as-unit h)))
+              (comment "D251: an unplugged `$$x` is the empty group choice: no alternative.")
+              (if (== gr (neg 4)) (set base (as-none h)))
               (if (== gr (neg 3)) (set base (m-unwrap h (hg h H_R0) env)))
               (if (>= gr 0) (set base (m-grouprule h gr (env-of h) pos))))))
       (if (< base 0) (return (neg 1)))
@@ -1056,7 +1062,8 @@
                 (do (let [^I32 vt2 (lower-type h (ent-type h ent) env)]
                       (if (< vt2 0) (return (neg 1)))
                       (set child (g-node h G_POS vt2 0 0)))))
-              (if (== gr (neg 4)) (set child (g-node h G_EMPTY 0 0 0)))
+              (comment "D251: an unplugged `$$x` is the empty group choice: an empty G_ALT.")
+              (if (== gr (neg 4)) (set child (g-list h G_ALT)))
               (if (== gr (neg 3)) (set child (a-unwrap h (hg h H_R0) env tf)))
               (if (>= gr 0) (set child (a-grouprule h gr (env-of h) tf pos))))))
       (leave h)

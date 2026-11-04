@@ -9,7 +9,7 @@
 //   2. Profile identity: the VM against `any` gives the scanner's code, error
 //      offset and item count on every scan-test input (vectors, fixed edge
 //      cases, seeded mutations under random options).
-//   3. Conformance: every case of corpus/conformance/{study,adversarial}.json
+//   3. Conformance: every case of corpus/conformance/{study,adversarial,audit-2026-11-04}.json
 //      whose schema compiles has the expected verdict. Suites marked
 //      schemaError / snugSchemaError are compile-refusal checks, not VM cases
 //      (counted separately); phase "later" suites are skipped as the corpus says.

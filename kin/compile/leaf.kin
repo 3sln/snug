@@ -64,6 +64,15 @@
 
 (defconst ^:pub ^I32 LEAF_WORDS 16)
 
+;; Ordered float keys (program.md §4.4) that the float algebra names (D250):
+;; key(-0) = 7fffffff:ffffffff (key(+0) = 80000000:00000000 is the next key);
+;; key(-inf) = 000fffff:ffffffff and key(+inf) = fff00000:00000000 bound every
+;; ordered comparison; the NaN key fff80000:00000000 (key of f97e00) lies above
+;; +inf, so only a run reaching past key(+inf) admits NaN.
+(defconst ^:pub ^I32 ZK_NEG_HI 2147483647)
+(defconst ^:pub ^I32 FK_NEG_INF_HI 1048575)
+(defconst ^:pub ^I32 FK_POS_INF_HI -1048576)
+
 (declarefn ^I32 mag-pow ^I32 enc-class ^I32 ts-off ^I32 ts-n ^Bool has-ext)
 
 ;; ------------------------------------------------------------ leaf records
@@ -594,13 +603,35 @@
     (do (stage-d h 0 0) (stage-d h 1 0) (return (stage-intern h))))
   (let [n (quot (vlen h t) 4)]
     (if (== n 0) (return (neg 2)))
-    (let [first (quot (vlen h T_FIV) 4)]
-      (for [^I32 i 0 (* 4 n)]
-        (let [x (vget h t i)]
-          (vpush1 h T_FIV x)))
+    (let [first (quot (vlen h T_FIV) 4)
+          ^:mut cnt 0]
+      (comment "D250: -0 and +0 are one number (RFC 8610 §3.8.6 compares numerically), so"
+               "a run holds both zero keys or neither: a bound on one is widened to the"
+               "other, and records that then touch are merged (the input is sorted by lo).")
+      (for [^I32 i 0 n]
+        (let [o (* 4 i)
+              ^:mut lh (vget h t o) ^:mut ll (vget h t (+ o 1))
+              ^:mut hh (vget h t (+ o 2)) ^:mut hl (vget h t (+ o 3))
+              ^:mut merged false]
+          (if (and (== lh (shl 1 31)) (== ll 0)) (do (set lh ZK_NEG_HI) (set ll (neg 1))))
+          (if (and (== hh ZK_NEG_HI) (== hl (neg 1))) (do (set hh (shl 1 31)) (set hl 0)))
+          (if (> cnt 0)
+            (do (let [p (* 4 (+ first (- cnt 1)))
+                      ph (vget h T_FIV (+ p 2))
+                      pl (vget h T_FIV (+ p 3))
+                      nl (add32 pl 1)
+                      ^:mut nh ph]
+                  (if (== nl 0) (set nh (add32 ph 1)))
+                  (if (or (<= (u64-cmp lh ll ph pl) 0) (and (== lh nh) (== ll nl)))
+                    (do (set merged true)
+                        (if (> (u64-cmp hh hl ph pl) 0)
+                          (do (vset h T_FIV (+ p 2) hh) (vset h T_FIV (+ p 3) hl))))))))
+          (if (not merged)
+            (do (vpush1 h T_FIV lh) (vpush1 h T_FIV ll) (vpush1 h T_FIV hh) (vpush1 h T_FIV hl)
+                (set cnt (+ cnt 1))))))
       (stage h K_FLOAT widths)
       (stage-d h 0 first)
-      (stage-d h 1 n)
+      (stage-d h 1 cnt)
       (return (stage-intern h)))))
 
 (defn ^:pub fiv-load [^Ints h ^I32 t ^I32 first ^I32 n]
