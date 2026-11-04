@@ -95,13 +95,15 @@ async function run(id, bytes, text, { slowRow = false, counters, ...details } = 
   assert(bytes.length <= 1500000);
   const s = await schema(text), p = schemaPrograms.get(s), rid = p.ruleIndex('r');
   // Untimed audit: the real predicates, counted.
-  const original = p.ext.call; let calls = 0, itemBytes = 0, maxItem = 0;
-  p.ext.call = (id_, pool, ao, al, b, lo, hi, room) => {
-    calls++; itemBytes += hi - lo; maxItem = Math.max(maxItem, hi - lo);
-    return original(id_, pool, ao, al, b, lo, hi, room);
-  };
-  let audit;
-  try { audit = p.run(rid, bytes, {}); } finally { p.ext.call = original; }
+  let calls = 0, itemBytes = 0, maxItem = 0, audit;
+  if (p.ext) {
+    const original = p.ext.call;
+    p.ext.call = (id_, pool, ao, al, b, lo, hi, room) => {
+      calls++; itemBytes += hi - lo; maxItem = Math.max(maxItem, hi - lo);
+      return original(id_, pool, ao, al, b, lo, hi, room);
+    };
+    try { audit = p.run(rid, bytes, {}); } finally { p.ext.call = original; }
+  } else audit = p.run(rid, bytes, {});
   const expected = reason(p.result(audit));
   assert(maxItem <= 65536, id + ': no oversized callback');
   const row = { id, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
@@ -135,6 +137,13 @@ async function run(id, bytes, text, { slowRow = false, counters, ...details } = 
   row.load = os.loadavg(); report.rows.push(row);
   console.log(JSON.stringify(row));
 }
+
+// The VM's own worst generic walk (bench/VM.md's six-way choice of maps, the
+// D046 calibration reference, ~18.5 ns/unit unloaded), run to budget refusal
+// under default limits: what 2.3 M units of ordinary VM work cost right now,
+// on this (shared) machine. Reported, not gated.
+const sixWay = ['[* msg]', 'msg = a / b / c / d / e / f', ...'abcdef'.split('').map(k => `${k} = { kind: "${k}", v: ${({ a: 'uint', b: 'tstr', c: 'bool', d: '[* int]', e: '{ * tstr => int }', f: 'bstr' })[k]} }`)].join('\n');
+await run('reference-six-way-choice', encode(Array.from({ length: 21000 }, (_, i) => ({ kind: 'a', v: i }))), sixWay, { reference: true });
 
 // Fill the default item cap, checking ASCII and every valid UTF-8 width.
 for (const [label, ch] of [['ascii', 'a'], ['utf8-2', 'é'], ['utf8-3', '€'], ['utf8-4', '\u{10ffff}']]) {
@@ -253,7 +262,13 @@ report.end = environment();
 const outAt = argv.indexOf('--out');
 if (outAt >= 0) writeFileSync(argv[outAt + 1], JSON.stringify(report, null, 2) + '\n');
 console.table(report.rows.map(({ id, bytes, steps, calls, medianMs, nsPerUnit, verdict }) => ({ id, bytes, steps, calls, medianMs, nsPerUnit, verdict })));
-const over = report.rows.filter(r => !r.hostResponsibility && r.medianMs > 50);
+const over = report.rows.filter(r => !r.hostResponsibility && !r.reference && r.medianMs > 50);
+const ref = report.rows.find(r => r.reference);
+if (ref) {
+  const worse = report.rows.filter(r => !r.hostResponsibility && !r.reference && r.steps >= 100000 && r.nsPerUnit > ref.nsPerUnit);
+  console.log(`reference: ${ref.medianMs.toFixed(1)} ms for ${ref.steps} units of plain VM work (${ref.nsPerUnit.toFixed(1)} ns/unit) under the current load; ` +
+    (worse.length ? `rows dearer per unit than it: ${worse.map(r => r.id).join(', ')}` : 'no EXT row of >= 100k units costs more per unit than it'));
+}
 console.log(over.length ? `GATE FAIL: ${over.map(r => r.id).join(', ')} over 50 ms` : 'GATE ok: every row other than the undeclared custom predicate is at most 50 ms CPU (or refused by the budget first).');
 console.log(JSON.stringify({ end: report.end, counterCheck: report.counterCheck }));
 console.log('These are adversarial measured cases, not exhaustive CPU upper bounds. An undeclared custom predicate\'s own CPU is the host\'s responsibility (D193). Rust not timed here. No stream/wasm/browser timing.');
