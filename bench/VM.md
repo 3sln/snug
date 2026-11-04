@@ -652,3 +652,118 @@ compiler, scanner, VM, host implementation or generated files were changed.
 The shared load, public API allocation policy, ASCII text, elevated limits,
 long-prefix uniqueness data, chunk-boundary first-error definition and
 approximate memory method limit extrapolation.
+
+## Extension-control worst cases under default limits — 2026-11-04
+
+**Verdict: defaults do not keep EXT validation under ~50 ms on this machine.**
+These are measured adversarial lower bounds, not proven CPU maxima. Arbitrary
+custom predicates have **no finite CPU bound enforced by the VM**, even if
+pure; provisional D140's per-byte cost assumption is insufficient.
+
+Clean HEAD **`6c3237e1a18d098516387369f730bac6c7dd78a6`**, detached in
+`.cache/unique-wt`; shared uncommitted kin/generated edits excluded. Machine:
+Apple M1 Pro, 10 logical CPUs, 32 GiB; macOS 14.6.1 / Darwin 23.6.0 arm64;
+Node v24.6.0 / V8 13.6.233.10-node.24, `--expose-gc --single-threaded-gc`.
+Public `schema.validate`, **thread CPU user + system**, medians of 7 batches
+after >=100 ms CPU warm-up and >=25 ms batch calibration; long rows use
+3 single-call samples after one warm call. Construction, compilation and
+counters are outside timing; normal allocation/result handling is included,
+with no forced GC during timing. Only JS was timed; Rust below is a source audit.
+
+Main run: **06:02:01–06:21:19 UTC**, load 1/5/15-minute **81.13/47.53/32.29 →
+22.12/25.72/29.30**. Supplementary run: 06:07:19–06:15:00 UTC,
+**42.57/44.42/35.46 → 22.29/29.92/31.94**, overlapping the main long samelen
+rows in a separate isolate/thread. Final choice run ended 06:23:46 UTC at
+**24.03/25.01/28.42**. Free RAM snapshots ranged down to 0.12 GB in these
+processes' metadata. These are snapshots, not continuous monitoring. CPU time
+excludes scheduling waits but remains sensitive to frequency, memory pressure,
+GC and JIT; these numbers are not portable deadlines.
+
+**All defaults:** input 1,500,000 B; depth 32; entries/container 65,536;
+items/message 131,072; bignum 128 B; budget 2,300,000; control maximum
+**65,536 B including the item head**. The harness asserts these compiled
+limits and default registry maxima. All schemas use default compiler limits.
+The item maximum does not cap the controller literal's bytes/name count.
+
+| Control / stress case | Message B | Calls reached | Total steps | Median CPU | Verdict |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `.chars`: 22 full two-byte UTF-8 strings | 1,441,771 | 22 | 1,464,745 | 15.54 ms | ok |
+| `.chars`: two arrays of 65,534 empty strings | 131,075 | 109,523 | 2,300,000 | 83.05 ms | budget |
+| `.unique`: 65,533 one-byte integers cycling through 24 ranks | 65,536 | 1 | 131,087 | 55.04 ms | control |
+| `.unique`: 22 arrays × 4,095 long-prefix bstrs | 1,441,507 | 22 | 1,532,043 | 138.44 ms | ok |
+| `.unique`: 35 choices over the same ranked array, different controllers | 65,536 | 34 | 2,300,000 | 991.57 ms | budget |
+| `.samelen`: 21,000 absent names, 16,400 integer keys | 65,323 | 1 | 114,537 | 4,749.30 ms | ok |
+| `.samelen`: 22 maps × 2,978 long-prefix keys, 11,300 names | 1,441,419 | 22 | 1,703,907 | 58,638.25 ms | ok |
+| `.samelen`: empty maps, 21,000 empty controller names | 131,075 | 109,523 | 2,300,000 | 50,687.43 ms | budget |
+| No-op EXT on tiny integers until budget refusal | 131,075 | 104,545 | 2,300,000 | 79.30 ms | budget |
+| Pure custom EXT: fixed 100M multiply/xor iterations on one byte | 1 | 1 | 16 | 303.51 ms | ok |
+
+**Charging versus work.** `kin/vm-eval.kin:ext-eval` charges **1 + encoded
+item bytes before calling**, once per queried EXT leaf/item. Oversized items
+cost 1 and never call. The old 65,536 × 16-byte long-prefix input (1,048,581 B)
+therefore returns `control_size`, zero callbacks, in **3.50 ms** under defaults;
+even 4,096 × 16 B plus its array head is too large. Failed targets do not call.
+The boolean port has no remaining-budget/interrupt mechanism. D143 sessions
+take fitting EXT items whole and run that same predicate; quantum cannot
+interrupt it. JS makes two subarray views per callback; Rust borrows slices.
+
+* **`.chars`: proportional.** One count pass over every UTF-8 byte, after the
+  profile scan; O(B) predicate work and O(1) argument parsing. ASCII/2/3/4-byte
+  full-string batches took **9.78/15.54/13.11/10.79 ms**. One 65,535-B two-byte
+  string took **0.716 ms**. The expensive case is dispatch/query/allocation
+  overhead: 65,536 empty strings took **49.72 ms**, and budget refusal reached
+  83.05 ms. The current calibration fails the ~50 ms target even for linear work.
+* **`.unique`: not proportional.** Span recording, heap sort, swaps, then
+  adjacent comparisons. The ranked array performs **1,837,356 comparisons and
+  compared byte pairs** for **65,537 EXT units**; duplication is detected only
+  after sorting. Distinct controller literals create distinct leaves: the
+  35-choice case sorts the same item 34 times (**62,470,104 comparisons**).
+  The 4,095-element case has 13 shared payload-prefix bytes and performs
+  **89,796 comparisons / 1,362,986 compared byte pairs** per call for 65,524
+  EXT units. Eight distinct-element sizes (64–21,844) were swept. Allocation
+  is linear: `uniqueWords(B)=2B+2`, at most **524,296 B** scratch per call;
+  JS retains it after warm-up, below its >2^20-word drop threshold, while Rust
+  allocates/zeroes a fresh Vec each time. Nominal Rust allocation volume is
+  8 bytes per EXT unit (<=18.4 MB if all budget went there), not a heap quota.
+* **`.samelen`: not proportional.** Every call reparses the entire controller
+  via `names-arg`, then scans all names per key and compares equal-length
+  prefixes. Duplicate names are legal. The 20-byte-name case uses a
+  **259,924-B schema**, a **237,303-B controller**, **131,055 message items**,
+  **740,330,800 name probes / 13,325,954,400 compared byte pairs**, all under
+  defaults. Empty maps still cause **4,600,075,523 controller-item head visits**
+  (42,001/call). These cases require a large admitted schema/controller;
+  fixed short lists are linear (two ordinary columns: **1.22 ms**).
+
+**Proposal only; no implementation change:** make generic controls cooperate
+with kin's budget. Charge span recording, comparisons, swaps and compared-byte
+chunks **inside interruptible loops**, with calibrated weights; alternatively
+use charged hashing plus charged byte comparisons on collision. Prepare/index
+samelen names once in kin and charge remaining argument/lookup work;
+deduplication alone does not fix large distinct lists. Reuse per-context Rust
+scratch, reduce JS per-call view allocations, and recalibrate tiny-item EXT
+costs. Lowering item size alone cannot fix argument amplification or arbitrary
+callbacks. Custom predicates need a trusted cost/cooperation contract or
+external isolation with enforceable termination; purity does not bound CPU.
+
+Reproduction (scratch Git metadata avoids writes to the shared `.git`):
+
+```sh
+git init --bare --template= .cache/unique-git
+printf '%s\n' "$PWD/.git/objects" > .cache/unique-git/objects/info/alternates
+git --git-dir=.cache/unique-git worktree add --detach .cache/unique-wt 6c3237e1a18d098516387369f730bac6c7dd78a6
+cp bench/ext-worst.mjs .cache/unique-wt/bench/ext-worst.mjs
+(cd .cache/unique-wt && node --expose-gc --single-threaded-gc bench/ext-worst.mjs --out ../ext-worst-results.json > ../ext-worst-results.log)
+git --git-dir=.cache/unique-git worktree remove --force .cache/unique-wt
+```
+
+**Checks run:** `node --check`; final `--check-only`, **41 cases**; all 41 timed
+cases reconciled against final fixture hashes, schemas, limits, verdicts,
+callback/step/item counts and recomputed medians; `git diff --check` on the
+three requested files. Sort counters instrument an in-memory generated-code
+copy outside timing; large samelen counts are exact fixture formulas with a
+small instrumented cross-check. `--quick` uses three rounds; `--only <substring>`
+selects cases. Raw per-run data and merged results remain locally under
+`.cache/ext-worst-{results,extra-results,slow-results,chain-results,combined}.*`.
+The worktree was removed. No kin/host/generated changes, installs, builds,
+network operations or commits; no Rust/wasm/browser/source-driver timing or
+memory-peak measurement is claimed.
