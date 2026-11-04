@@ -10,3 +10,4 @@ import './serialized.test.mjs';
 import './package.test.mjs';
 import './examples.test.mjs';
 import './unicode.test.mjs';
+import './profiles.test.mjs';

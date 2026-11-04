@@ -1,0 +1,167 @@
+;; The standard tag set's additions (D081, D121): RFC 8949 §3.4 tags 0
+;; (date/time text), 1 (epoch-based date/time), 21-23 (expected conversions),
+;; 24 (encoded CBOR data item), 32 (URI) and 55799 (self-described CBOR),
+;; allowed when the profile flags select the standard set (o[O_PROFILE] bits
+;; PF_TAGS). Their content is an ordinary item -- counted, a depth level below
+;; the tag -- walked FIRST with all its own refusals; THEN the rules here run
+;; over its bytes, which the walk has already validated as one well-formed
+;; item (so every head read here is in bounds and shortest). A tag-24 byte
+;; string's content is then walked by the caller as one item (its own walker:
+;; the scanner's, or the VM's dead walk). Integer-only (D009).
+(ns snug.cbor.stdtags
+  (:require [kin.lang :refer [defn let return set if while do comment]]
+            [snug.lang :refer [I32 Bool Bytes + - * neg rem sar ushr bit-and
+                               < > <= >= == != and or not u8]]
+            [snug.cbor.codes :refer [PF_TAGS PF_SUB]]
+            [snug.cbor.head :refer [be16 be32 head-size]]))
+
+(defn ^:pub ^Bool std-allowed [^I32 flags ^I32 tag ^I32 depth]
+  (comment "Is tag (a 32-bit argument, possibly negative as an i32) one of the"
+           "standard set's additions, allowed under profile flags at depth? 55799"
+           "only at the top level (depth 0 of a walk whose root is the document's"
+           "top: PF_SUB clear).")
+  (if (== (bit-and flags PF_TAGS) 0) (return false))
+  (if (== tag 55799) (return (and (== depth 0) (== (bit-and flags PF_SUB) 0))))
+  (if (or (== tag 0) (or (== tag 1) (== tag 32))) (return true))
+  (return (and (>= tag 21) (<= tag 24))))
+
+(defn ^:pub ^I32 std-inner [^Bytes b ^I32 q]
+  (comment "Where the content of the (valid) string item at q starts.")
+  (return (+ q (head-size (bit-and (u8 b q) 31)))))
+
+(defn ^I32 dig [^Bytes b ^I32 i]
+  (comment "The decimal digit at b[i], or -1.")
+  (let [c (u8 b i)]
+    (if (and (>= c 48) (<= c 57)) (return (- c 48)))
+    (return (neg 1))))
+
+(defn ^I32 num2 [^Bytes b ^I32 i]
+  (comment "The two-digit number at b[i, i + 2), or -1.")
+  (let [x (dig b i)
+        y (dig b (+ i 1))]
+    (if (or (< x 0) (< y 0)) (return (neg 1)))
+    (return (+ (* x 10) y))))
+
+(defn ^I32 mdays [^I32 y ^I32 m]
+  (comment "Days in month m (1..12) of year y (0..9999), Gregorian leap years.")
+  (if (== m 2)
+    (do (if (and (== (rem y 4) 0) (or (!= (rem y 100) 0) (== (rem y 400) 0))) (return 29))
+        (return 28)))
+  (if (or (or (== m 4) (== m 6)) (or (== m 9) (== m 11))) (return 30))
+  (return 31))
+
+(defn ^:pub ^Bool date-time-ok [^Bytes b ^I32 s ^I32 e]
+  (comment "RFC 3339 §5.6 `date-time` over b[s, e): YYYY-MM-DD, T, hh:mm:ss, an"
+           "optional fraction `.` 1*DIGIT, then Z or +hh:mm / -hh:mm; T and Z in"
+           "either case (§5.6 NOTE). Month 01..12, day within its month (leap"
+           "years), hour 00..23, minute 00..59, second 00..60, offset hour 00..23"
+           "and minute 00..59.")
+  (if (< (- e s) 20) (return false))
+  (let [y1 (num2 b s)
+        y2 (num2 b (+ s 2))
+        mo (num2 b (+ s 5))
+        dd (num2 b (+ s 8))
+        hh (num2 b (+ s 11))
+        mi (num2 b (+ s 14))
+        sc (num2 b (+ s 17))
+        t (u8 b (+ s 10))
+        ^:mut i (+ s 19)]
+    (if (or (< y1 0) (< y2 0)) (return false))
+    (if (or (!= (u8 b (+ s 4)) 45) (!= (u8 b (+ s 7)) 45)) (return false))
+    (if (and (!= t 84) (!= t 116)) (return false))
+    (if (or (!= (u8 b (+ s 13)) 58) (!= (u8 b (+ s 16)) 58)) (return false))
+    (if (or (< mo 1) (> mo 12)) (return false))
+    (if (or (< dd 1) (> dd (mdays (+ (* y1 100) y2) mo))) (return false))
+    (if (or (< hh 0) (> hh 23)) (return false))
+    (if (or (< mi 0) (> mi 59)) (return false))
+    (if (or (< sc 0) (> sc 60)) (return false))
+    (if (== (u8 b i) 46)
+      (do (set i (+ i 1))
+          (if (>= i e) (return false))
+          (if (< (dig b i) 0) (return false))
+          (while (and (< i e) (>= (dig b i) 0))
+            (set i (+ i 1)))))
+    (if (>= i e) (return false))
+    (let [z (u8 b i)]
+      (if (or (== z 90) (== z 122)) (return (== (+ i 1) e)))
+      (if (and (!= z 43) (!= z 45)) (return false))
+      (if (!= (+ i 6) e) (return false))
+      (if (!= (u8 b (+ i 3)) 58) (return false))
+      (let [oh (num2 b (+ i 1))
+            om (num2 b (+ i 4))]
+        (return (and (and (>= oh 0) (<= oh 23)) (and (>= om 0) (<= om 59))))))))
+
+(defn ^Bool alpha [^I32 c]
+  (return (or (and (>= c 65) (<= c 90)) (and (>= c 97) (<= c 122)))))
+
+(defn ^Bool hexd [^I32 c]
+  (return (or (and (>= c 48) (<= c 57)) (or (and (>= c 65) (<= c 70)) (and (>= c 97) (<= c 102))))))
+
+(defn ^Bool uri-char [^I32 c]
+  (comment "RFC 3986 unreserved, gen-delims or sub-delims (`%` is handled apart):"
+           "printable ASCII except \" % < > \\ ^ ` { | }.")
+  (if (or (< c 33) (> c 126)) (return false))
+  (if (or (or (== c 34) (== c 37)) (or (== c 60) (== c 62))) (return false))
+  (if (or (or (== c 92) (== c 94)) (== c 96)) (return false))
+  (return (or (< c 123) (> c 125))))
+
+(defn ^:pub ^Bool uri-ok [^Bytes b ^I32 s ^I32 e]
+  (comment "RFC 3986 `URI` over b[s, e), checked at the character level: a scheme"
+           "(ALPHA *(ALPHA / DIGIT / + / - / .)) and `:`; then only unreserved,"
+           "gen-delims and sub-delims characters or %HH escapes; at most one `#`;"
+           "`[` and `]` only before the query and the fragment. The authority,"
+           "IP-literal and path structure is not parsed (D121).")
+  (if (>= s e) (return false))
+  (if (not (alpha (u8 b s))) (return false))
+  (let [^:mut i (+ s 1)
+        ^:mut st 0]
+    (comment "st: 0 scheme, 1 hierarchical part, 2 query, 3 fragment")
+    (while (< i e)
+      (let [c (u8 b i)]
+        (if (== st 0)
+          (do (if (== c 58)
+                (set st 1)
+                (do (if (not (or (alpha c) (or (and (>= c 48) (<= c 57)) (or (== c 43) (or (== c 45) (== c 46))))))
+                      (return false)))))
+          (do (if (== c 37)
+                (do (if (> (+ i 3) e) (return false))
+                    (if (not (and (hexd (u8 b (+ i 1))) (hexd (u8 b (+ i 2))))) (return false))
+                    (set i (+ i 2)))
+                (do (if (not (uri-char c)) (return false))
+                    (if (or (== c 91) (== c 93))
+                      (if (!= st 1) (return false)))
+                    (if (== c 35)
+                      (do (if (== st 3) (return false))
+                          (set st 3)))
+                    (if (and (== c 63) (== st 1)) (set st 2)))))))
+      (set i (+ i 1)))
+    (return (>= st 1))))
+
+(defn ^Bool finite-float [^Bytes b ^I32 q]
+  (comment "Is the float item at q (major 7, ai 25..27) finite?")
+  (let [ai (bit-and (u8 b q) 31)]
+    (if (== ai 25) (return (!= (bit-and (sar (be16 b (+ q 1)) 10) 31) 31)))
+    (if (== ai 26) (return (!= (bit-and (sar (be32 b (+ q 1)) 23) 255) 255)))
+    (return (!= (bit-and (sar (be32 b (+ q 1)) 20) 2047) 2047))))
+
+(defn ^:pub ^Bool std-content-ok [^Bytes b ^I32 tag ^I32 q ^I32 stop]
+  (comment "The content rule of standard tag `tag` over its well-formed content"
+           "item b[q, stop): 0 a text in RFC 3339 date-time form; 1 an integer"
+           "(major 0/1) or a finite float; 24 a byte string (its content is then"
+           "walked by the caller); 32 a text in URI form (uri-ok); 21-23 and"
+           "55799 anything (and nothing is read: the session calls this with the"
+           "content of those tags no longer in its window).")
+  (if (not (or (or (== tag 0) (== tag 1)) (or (== tag 24) (== tag 32)))) (return true))
+  (let [ib (u8 b q)
+        major (ushr ib 5)
+        ai (bit-and ib 31)]
+    (if (== tag 1)
+      (do (if (<= major 1) (return true))
+          (if (and (== major 7) (and (>= ai 25) (<= ai 27))) (return (finite-float b q)))
+          (return false)))
+    (if (== tag 24) (return (== major 2)))
+    (if (or (== tag 0) (== tag 32))
+      (do (if (!= major 3) (return false))
+          (if (== tag 0) (return (date-time-ok b (std-inner b q) stop)))
+          (return (uri-ok b (std-inner b q) stop))))
+    (return true)))

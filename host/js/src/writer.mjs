@@ -7,10 +7,13 @@
 // grammar. Semantics of value(v) are encode()'s (D113 array policy).
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
-import { Decimal, NDArray, Float16Bytes, typedInfo } from './values.mjs';
+import { profileFlags, strictArraysOf, keysOf, standardTags, rfcFloats, undefinedOk, noncharactersOk } from './profiles.mjs';
+import { Decimal, NDArray, Float16Bytes, Tagged, typedInfo } from './values.mjs';
 import { copyTypedBytes } from './typed-bytes.mjs';
+import { scan } from './scan.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
-import { putFloat } from '../../../gen/js/snug/write/float.mjs';
+import { putFloat, putFloatRfc } from '../../../gen/js/snug/write/float.mjs';
+import { stdAllowed, stdContentOk, stdInner } from '../../../gen/js/snug/cbor/stdtags.mjs';
 import { putInt } from '../../../gen/js/snug/write/int.mjs';
 import { closeMap, sortKeys, S_BUDGET } from '../../../gen/js/snug/write/map.mjs';
 
@@ -23,6 +26,8 @@ const utf8 = new TextEncoder();
 // Noncharacters U+FDD0..U+FDEF and U+xFFFE/U+xFFFF in every plane (encode.mjs's rule).
 const NONCHARACTER = /[﷐-﷯￾￿]|[\uD83F\uD87F\uD8BF\uD8FF\uD93F\uD97F\uD9BF\uD9FF\uDA3F\uDA7F\uDABF\uDAFF\uDB3F\uDB7F\uDBBF\uDBFF][\uDFFE\uDFFF]/;
 const scalarText = s => s.isWellFormed() && !NONCHARACTER.test(s);
+const U64N = 1n << 64n;
+const intKey = k => (typeof k === 'number' ? Number.isSafeInteger(k) && !Object.is(k, -0) : typeof k === 'bigint' && k >= -U64N && k < U64N);
 const plainObject = v => { const p = Object.getPrototypeOf(v); return p === Object.prototype || p === null; };
 // The kin codes a writer primitive can answer (snug.cbor.codes), by cbor.mjs name.
 const CODES = { 4: 'malformed', 5: 'key_type', 6: 'key_order', 7: 'duplicate_key', 9: 'float', 12: 'bignum' };
@@ -53,8 +58,9 @@ function typedPayload(v, info, fail) {
  * top level, as encode takes them). Values: uint, int, bigint, float, bool, null, text, bytes, typed, decimal, ndarray,
  * value (any host value, encode's rules); containers: beginArray(n), beginMap(n), key(k), end(); finish() returns the
  * bytes once exactly one complete root has been written. Map keys may come in any order (sorted at end() by encoded
- * bytes) or, with keysSorted, must come in strictly increasing encoded order (checked at each key). Text keys only;
- * integer labels in the top-level map with cose. value() ignores extra array own properties unless strictArrays is true;
+ * bytes) or, with keysSorted, must come in strictly increasing encoded order (checked at each key). Key kinds and
+ * every other wire choice follow the profile options (D120): `profile`, `keys`, `tags`, `floats`, `undefinedValue`,
+ * `noncharacters`; integer labels in the top-level map with cose under keys 'text'. value() ignores extra array own properties unless strictArrays is true;
  * holes and undefined elements are refused in both modes. Any error throws SnugFault and leaves the writer failed for good. */
 export class Writer {
   #buf = new Uint8Array(256); #pos = 0;
@@ -66,14 +72,19 @@ export class Writer {
   #mag = null;                              // bignum magnitude scratch (lazy)
   #items = 0; #code = '';
   #cose; #sorted; #maxDepth; #maxEntries; #maxItems; #maxBytes; #omitUndefined; #strictArrays;
+  #options; #flags; #keys; #std; #rfc; #undef; #nonch;
 
   constructor(options = {}) {
     if (options === null || typeof options !== 'object') throw new TypeError('Writer options must be an object.');
     const limits = resolveLimits(options.limits ? { ...options, ...options.limits } : options);
+    this.#options = options;
+    const flags = this.#flags = profileFlags(options);
+    this.#keys = keysOf(flags); this.#std = standardTags(flags); this.#rfc = rfcFloats(flags);
+    this.#undef = undefinedOk(flags); this.#nonch = noncharactersOk(flags);
     this.#cose = options.cose === true;
     this.#sorted = options.keysSorted === true;
     this.#omitUndefined = options.omitUndefined === true;
-    this.#strictArrays = options.strictArrays === true;
+    this.#strictArrays = strictArraysOf(options) === true;
     this.#maxDepth = limits.maxDepth; this.#maxEntries = limits.maxEntries; this.#maxItems = limits.maxItems;
     const explicit = options.maxBytes ?? options.limits?.maxBytes;
     this.#maxBytes = explicit === undefined ? Infinity : limits.maxBytes;
@@ -174,9 +185,9 @@ export class Writer {
   }
   #float(v) {
     f64[0] = v;
-    const hi = f64w[HI], lo = f64w[LO];
-    let p = putFloat(this.#buf, this.#pos, hi, lo);
-    if (p < 0) { this.#short(p); p = putFloat(this.#buf, this.#pos, hi, lo); }
+    const hi = f64w[HI], lo = f64w[LO], put = this.#rfc ? putFloatRfc : putFloat;
+    let p = put(this.#buf, this.#pos, hi, lo);
+    if (p < 0) { this.#short(p); p = put(this.#buf, this.#pos, hi, lo); }
     this.#pos = p;
   }
   /** Text (code 'text') or a text key (code 'key_type'): UTF-8 with a shortest head. */
@@ -191,7 +202,7 @@ export class Writer {
       if (i === n) { this.#pos = p; return; }
       this.#pos = start;
     }
-    if (!scalarText(s)) this.#fail(code, code === 'text' ? 'Text must be well-formed Unicode without noncharacters.' : 'Map keys must be valid text strings.');
+    if (!(this.#nonch ? s.isWellFormed() : scalarText(s))) this.#fail(code, code === 'text' ? (this.#nonch ? 'Text must be well-formed Unicode.' : 'Text must be well-formed Unicode without noncharacters.') : 'Map keys must be valid text strings.');
     const max = 3 * n;
     if (this.#pos + 9 + max <= this.#buf.length) { // room for the worst case: encode in place, then fit the head
       const h = headLen(0, max), start = this.#pos;
@@ -222,7 +233,9 @@ export class Writer {
       case 'bigint': this.#bigint(v, depth); return;
       case 'string': this.#text(v, 'text'); return;
       case 'object': break;
-      default: this.#fail('unsupported', 'Value type is not encodable under the Bindle profile.');
+      case 'undefined': if (this.#undef) { this.#head(7, 0, 23); return; }
+      // fall through: undefined needs the profile's undefinedValue
+      default: this.#fail('unsupported', 'Value type is not encodable under this profile.');
     }
     if (v === null) { this.#head(7, 0, 22); return; }
     if (v instanceof Uint8Array) { this.#headN(2, v.byteLength); this.#raw(v); return; }
@@ -231,6 +244,7 @@ export class Writer {
     if (info) { const b = typedPayload(v, info, (c, m) => this.#fail(c, m)); this.#headN(6, info.tag); this.#headN(2, b.length); this.#raw(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
     if (v instanceof Decimal) { this.#headN(6, 4); this.#walk([v.exponent, v.mantissa], depth + 1); return; }
     if (v instanceof NDArray) { this.#headN(6, 40); this.#walk([v.shape, v.data], depth + 1); return; }
+    if (v instanceof Tagged) { this.#tagged(v, depth); return; }
     if (Array.isArray(v)) {
       // D113: own-key enumeration is only needed for the strict/Bindle policy.
       if (Object.getPrototypeOf(v) !== Array.prototype || (this.#strictArrays && Reflect.ownKeys(v).length !== v.length + 1)) this.#fail('unsupported', 'Arrays must be dense with no extra properties.');
@@ -244,13 +258,15 @@ export class Writer {
       return;
     }
     const keys = [], values = [];
-    if (v instanceof Map && this.#cose && depth === 0) {
+    if (v instanceof Map && (this.#keys !== 0 || (this.#cose && depth === 0))) {
+      const kinds = this.#keys;
       for (const [k, value] of v) {
-        if (typeof k === 'number' ? !Number.isSafeInteger(k) || Object.is(k, -0) : typeof k !== 'string') this.#fail('key_type', 'Map keys must be valid text strings.');
+        if (kinds === 0 ? (typeof k === 'number' ? !Number.isSafeInteger(k) || Object.is(k, -0) : typeof k !== 'string')
+          : kinds === 1 && typeof k !== 'string' && !intKey(k)) this.#fail('key_type', kinds === 1 ? 'Map keys must be text strings or integers.' : 'Map keys must be valid text strings.');
         keys.push(k); values.push(value);
       }
     } else {
-      if (!plainObject(v)) this.#fail('unsupported', 'Value type is not encodable under the Bindle profile.');
+      if (!plainObject(v)) this.#fail('unsupported', 'Value type is not encodable under this profile.');
       const omit = this.#omitUndefined;
       for (const k of Reflect.ownKeys(v)) {
         const d = Object.getOwnPropertyDescriptor(v, k);
@@ -264,7 +280,7 @@ export class Writer {
     if (n > this.#maxEntries) this.#fail('too_many_entries', 'A map exceeds the entry bound.');
     this.#headN(5, n);
     if (n === 0) return;
-    if (n === 1) { this.#key(keys[0]); this.#count(); this.#walk(values[0], depth + 1); return; }
+    if (n === 1) { this.#key(keys[0], depth); this.#count(); this.#walk(values[0], depth + 1); return; }
     // The keys are known before any value: encode them into the key scratch, let kin order them (sort-keys), then
     // write each pair in that order -- no value is ever moved. Keys are all checked before any is counted, as encode.
     const base = this.#np, xb = this.#xtop, kb0 = this.#kpos;
@@ -275,7 +291,7 @@ export class Writer {
     try {
       for (let i = 0; i < n; i++) {
         const ks = this.#pos;
-        this.#key(keys[i]);
+        this.#key(keys[i], depth);
         this.#pairs[base + 2 * i] = ks; this.#pairs[base + 2 * i + 1] = this.#pos;
       }
     } finally { this.#kbuf = this.#buf; this.#kpos = this.#pos; this.#buf = buf; this.#pos = pos; }
@@ -297,8 +313,37 @@ export class Writer {
     }
     this.#np = base; this.#xtop = xb; this.#kpos = kb0;
   }
-  /** A map key in the walk: text, or an integer label (already checked to be a safe integer). */
-  #key(k) { if (typeof k === 'string') this.#text(k, 'key_type'); else this.#intN(k); }
+  /** A map key in the walk, already admitted by the profile: text, an integer, or (any key kind) any value, encoded
+   * by a separate walk whose items count toward this writer's bound. */
+  #key(k, depth) {
+    if (typeof k === 'string') { this.#text(k, 'key_type'); return; }
+    if (typeof k === 'number' && Number.isSafeInteger(k) && !Object.is(k, -0)) { this.#intN(k); return; }
+    if (typeof k === 'bigint' && k >= -U64N && k < U64N) { this.#bigint(k, depth + 1); return; }
+    const b = this.#subValue(k, depth + 1);
+    this.#ensure(b.length); this.#buf.set(b, this.#pos); this.#pos += b.length;
+  }
+  /** v encoded by a fresh walk at `depth` under this writer's options; its items, but for the one the caller counts,
+   * are added to this writer's. Used for map keys that are containers, tags or other values. */
+  #subValue(v, depth) {
+    const sub = new Writer(this.#options);
+    sub.#walk(v, depth);
+    this.#items += sub.#items - 1;
+    if (this.#items > this.#maxItems) this.#fail('too_many_items', 'The message exceeds the item bound.');
+    return sub.#buf.subarray(0, sub.#pos);
+  }
+  /** A standard-set tag (D121): the tag number and its content are checked by kin after the content is written
+   * (snug.cbor.stdtags; a tag-24 payload by the scanner under this profile). */
+  #tagged(v, depth) {
+    if (!stdAllowed(this.#flags, v.tag, depth)) this.#fail('tag', this.#std ? 'This tag is not in the standard set here.' : 'Tagged values need the standard tag set (profile option tags).');
+    this.#headN(6, v.tag);
+    const q = this.#pos;
+    this.#walk(v.value, depth + 1);
+    if (!stdContentOk(this.#buf, v.tag, q, this.#pos)) this.#fail('tag', 'The tag content does not satisfy its tag.');
+    if (v.tag === 24) {
+      try { scan(this.#buf.subarray(stdInner(this.#buf, q), this.#pos), { ...this.#options, top: 'any' }); }
+      catch (e) { if (e instanceof SnugFault) this.#fail(e.code, 'A tag-24 payload must be one valid data item.'); throw e; }
+    }
+  }
   #xWords(words) {
     if (this.#x === null) this.#x = new Int32Array(Math.max(64, words));
     else if (words > this.#x.length) { const x = new Int32Array(Math.max(words, 2 * this.#x.length)); x.set(this.#x.subarray(0, this.#xtop)); this.#x = x; }
@@ -349,8 +394,9 @@ export class Writer {
     this.#slot(); this.#count(); this.#bigint(n, this.#depth);
     return this;
   }
-  /** A float in the shortest exact width. Refused (code float): NaN, ±∞, ±0 and integral values within ±(2^53-1),
-   * which the profile encodes only as integers; use int() or value() for those. */
+  /** A float in the shortest exact width. Under the Bindle float rules NaN, ±∞, ±0 and integral values within
+   * ±(2^53-1) are refused (code float; use int() or value() for integers); under the deterministic rules (D122)
+   * nothing is refused: NaN is written as f97e00, ±∞ and ±0 as float16, 1 as f93c00. */
   float(v) {
     if (typeof v !== 'number') this.#badArgument('float expects a number.');
     this.#slot(); this.#count(); this.#float(v);
@@ -358,6 +404,13 @@ export class Writer {
   }
   bool(v) { if (typeof v !== 'boolean') this.#badArgument('bool expects a boolean.'); this.#slot(); this.#count(); this.#head(7, 0, v ? 21 : 20); return this; }
   null() { this.#slot(); this.#count(); this.#head(7, 0, 22); return this; }
+  /** The simple value undefined (f7); needs the profile's undefinedValue. */
+  undefined() {
+    if (!this.#undef) this.#badArgument('undefined needs the profile option undefinedValue.');
+    this.#slot(); this.#count(); this.#head(7, 0, 23); return this;
+  }
+  /** A tag of the standard set with its content (as value(new Tagged(tag, content))). */
+  tagged(tag, content) { const v = new Tagged(tag, content); this.#slot(); this.#walk(v, this.#depth); return this; }
   text(s) { if (typeof s !== 'string') this.#badArgument('text expects a string.'); this.#slot(); this.#count(); this.#text(s, 'text'); return this; }
   bytes(b) { if (!(b instanceof Uint8Array)) this.#badArgument('bytes expects a Uint8Array.'); this.#slot(); this.#count(); this.#headN(2, b.byteLength); this.#raw(b); return this; }
   typed(a) { if (!typedInfo(a)) this.#badArgument('typed expects a typed array other than Uint8Array, or Float16Bytes.'); this.#slot(); this.#walk(a, this.#depth); return this; }
@@ -388,19 +441,20 @@ export class Writer {
     this.#pairWords(this.#np + 2 * n);
     return this;
   }
-  /** The next key of the open map: a string, or (cose, top-level map only) a safe integer label. */
+  /** The next key of the open map: a string; an integer (number or bigint) with keys 'integer' or 'any', or (keys
+   * 'text', cose, top-level map only) a safe integer label; any value with keys 'any'. */
   key(k) {
     const left = this.#left;
     if (this.#kind !== MAP || left === 0 || (left & 1) === 1) this.#misuse('key');
-    let label = false;
-    if (typeof k === 'number') {
-      if (!(this.#cose && this.#depth === 1 && Number.isSafeInteger(k) && !Object.is(k, -0))) this.#fail('key_type', 'Map keys must be valid text strings.');
-      label = true;
-    } else if (typeof k !== 'string') this.#fail('key_type', 'Map keys must be valid text strings.');
+    if (typeof k !== 'string') {
+      if (this.#keys === 0) {
+        if (!(typeof k === 'number' && this.#cose && this.#depth === 1 && Number.isSafeInteger(k) && !Object.is(k, -0))) this.#fail('key_type', 'Map keys must be valid text strings.');
+      } else if (this.#keys === 1 && !intKey(k)) this.#fail('key_type', 'Map keys must be text strings or integers.');
+    }
     this.#left = left - 1;
     this.#count();
     const t = this.#pairs, at = this.#np, ks = this.#pos;
-    if (label) this.#intN(k); else this.#text(k, 'key_type');
+    this.#key(k, this.#depth - 1);
     if (this.#sorted && at > this.#base) {
       const r = keyAfter(this.#buf, t[at - 2], t[at - 1], ks, this.#pos);
       if (r < 0) this.#kinCode(r);

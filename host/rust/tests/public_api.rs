@@ -88,9 +88,11 @@ fn all_profile_vectors_and_seeded_mutations_match_js() {
     let mut count = 0;
     for row in rows().iter().filter(|r| r[0] == "c") {
         let bytes = unhex(&row[2]);
+        // The fixtures are the Bindle profile's (cbor.mjs), so the Bindle preset, any root.
         let options = DecodeOptions {
             cose: row[1] == "1",
-            ..DecodeOptions::any()
+            top: Top::Any,
+            ..DecodeOptions::bindle()
         };
         match decode(&bytes, &options) {
             Ok(v) => {
@@ -100,7 +102,7 @@ fn all_profile_vectors_and_seeded_mutations_match_js() {
                         &v,
                         &EncodeOptions {
                             cose: options.cose,
-                            ..Default::default()
+                            ..EncodeOptions::bindle()
                         }
                     )
                     .unwrap(),
@@ -295,11 +297,17 @@ fn exact_specialized_values_and_typed_bits() {
         );
     }
     assert_eq!(
-        encode(&Value::Float(1.0), &EncodeOptions::default())
+        encode(&Value::Float(1.0), &EncodeOptions::bindle())
             .unwrap_err()
             .code(),
         "float"
     );
+    // The deterministic preset (the default, D122) writes integral floats, NaN, infinities and -0 as floats.
+    assert_eq!(encode(&Value::Float(1.0), &EncodeOptions::default()).unwrap(), [0xf9, 0x3c, 0x00]);
+    assert_eq!(encode(&Value::Float(f64::NAN), &EncodeOptions::default()).unwrap(), [0xf9, 0x7e, 0x00]);
+    assert_eq!(encode(&Value::Float(-0.0), &EncodeOptions::default()).unwrap(), [0xf9, 0x80, 0x00]);
+    assert_eq!(encode(&Value::Undefined, &EncodeOptions::default()).unwrap(), [0xf7]);
+    assert_eq!(encode(&Value::Undefined, &EncodeOptions::bindle()).unwrap_err().code(), "simple");
     assert_eq!(
         encode(
             &Value::TypedArray(TypedArray::F32(vec![f32::NAN])),
@@ -422,7 +430,8 @@ fn limits_and_safe_refusals() {
             &Value::Text("secret".into()),
             &EncodeOptions {
                 limits,
-                cose: false
+                cose: false,
+                ..Default::default()
             }
         )
         .unwrap_err()

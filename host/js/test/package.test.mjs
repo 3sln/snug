@@ -19,8 +19,9 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))
 test('public package metadata, entry points, profile status and blocked deep imports', async () => {
   assert.equal(pkg.name, 'snug'); assert.equal(pkg.private, true); assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.version, compilerVersion); assert.equal(SNUG_VERSION, compilerVersion);
-  assert.deepEqual(Object.keys(profiles), ['bindle']);
-  assert.ok(Object.isFrozen(profiles) && Object.isFrozen(profiles.bindle));
+  assert.deepEqual(Object.keys(profiles), ['deterministic', 'bindle']);
+  assert.ok(Object.isFrozen(profiles) && Object.isFrozen(profiles.bindle) && Object.isFrozen(profiles.deterministic));
+  assert.equal(profiles.deterministic.wire, 'deterministic'); assert.equal(profiles.bindle.wire, 'bindle');
   for (const key of Object.keys(pkg.exports)) {
     const specifier = key === '.' ? 'snug' : 'snug/' + key.slice(2);
     const module = await import(specifier);
@@ -106,7 +107,7 @@ test('self-contained staged package works away from the repository through all e
     const target = await buildPackage(join(temp, 'package'));
     const smoke = `
       import assert from 'node:assert/strict';
-      import {encode,decode,Decimal,NDArray,Float16Bytes,profiles} from 'snug';
+      import {encode,decode,Decimal,NDArray,Float16Bytes,Tagged,profiles} from 'snug';
       import {compile} from 'snug/compile';
       import {fromSerialized,validate,decode as schemaDecode,validateAt} from 'snug/schema';
       import {view,View,Cursor} from 'snug/view';
@@ -130,7 +131,9 @@ test('self-contained staged package works away from the repository through all e
       assert.deepEqual(push.finalize(),{ok:true});
       assert.deepEqual(s.session('r',b.length).step(b,0),{state:'done',result:{ok:true}});
       assert.equal(Decimal.from('1.5').toString(),'1.5');
-      assert.ok(new NDArray([1],[7]) && new Float16Bytes(new Uint8Array(2)) && profiles.bindle);
+      assert.ok(new NDArray([1],[7]) && new Float16Bytes(new Uint8Array(2)) && profiles.bindle && profiles.deterministic);
+      assert.equal(decode(encode(new Tagged(1, 7))).value, 7);
+      assert.throws(() => decode(Uint8Array.of(0x01), {wire:'bindle'}), {code:'not_map'});
       await assert.rejects(import('snug/generated/snug/vm/api.mjs'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
     `;
     await writeFile(join(target, 'smoke.mjs'), smoke);

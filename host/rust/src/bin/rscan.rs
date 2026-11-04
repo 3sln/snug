@@ -1,7 +1,8 @@
 // `bb rscan-test`'s Rust arm. One case per stdin line:
 //
-//     <top_any> <cose> <max_bytes> <max_depth> <max_entries> <max_items> <max_chunk> <quantum> <seed> <hex>
+//     <top_any> <cose> <max_bytes> <max_depth> <max_entries> <max_items> <max_chunk> <quantum> <seed> <hex> [<flags>]
 //
+// (flags: the profile flags of snug.cbor.codes, D120; absent, 0: the Bindle profile)
 // Runs the RESUMABLE scanner over windows chosen exactly as the JS driver in
 // kin/scripts/rscan-test.mjs chooses them (max_chunk 0 = the whole message as
 // one window; otherwise each window starts at the requested offset and is
@@ -9,7 +10,7 @@
 // `<code> <error offset> <items> <steps>`, or `PANIC`.
 use snug::snug::cbor::rscan::{rscan_init, rscan_need_length, rscan_need_offset, rscan_position,
                               rscan_scratch_len, rscan_step, RS_NEED, RS_YIELD};
-use snug::snug::cbor::scan::{error_offset, items_scanned, scan_options};
+use snug::snug::cbor::scan::{error_offset, items_scanned, scan_options, scan_profile};
 use std::io::{BufRead, Write};
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -30,9 +31,10 @@ impl Rng {
     }
 }
 
-fn run(bytes: &[u8], opt: [i32; 6], max_chunk: u32, quantum: i32, seed: u32) -> (i32, i32, i32, i32) {
+fn run(bytes: &[u8], opt: [i32; 6], flags: i32, max_chunk: u32, quantum: i32, seed: u32) -> (i32, i32, i32, i32) {
     let mut o = [0i32; 16];
     scan_options(&mut o, opt[0], opt[1], opt[2], opt[3], opt[4], opt[5]);
+    scan_profile(&mut o, flags);
     let total = bytes.len();
     let arena = std::cmp::min(total as i64, opt[2] as i64) as i32;
     let mut s = vec![0i32; rscan_scratch_len(opt[3], arena) as usize];
@@ -74,7 +76,8 @@ fn main() {
         let opt = [n(0) as i32, n(1) as i32, n(2) as i32, n(3) as i32, n(4) as i32, n(5) as i32];
         let (mc, q, seed) = (n(6) as u32, n(7) as i32, n(8) as u32);
         let bytes = unhex(if f.len() > 9 { f[9] } else { "" });
-        match std::panic::catch_unwind(|| run(&bytes, opt, mc, q, seed)) {
+        let flags = if f.len() > 10 { n(10) as i32 } else { 0 };
+        match std::panic::catch_unwind(|| run(&bytes, opt, flags, mc, q, seed)) {
             Ok((c, off, items, steps)) => writeln!(out, "{} {} {} {}", c, off, items, steps).unwrap(),
             Err(_) => writeln!(out, "PANIC").unwrap(),
         }

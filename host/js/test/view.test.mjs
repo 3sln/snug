@@ -12,6 +12,7 @@ import { snug, baseline, profile, oracle, expected, fromHex } from './values.mjs
 import { createRandom, randomMap, randomValue, mutate } from './corpus.mjs';
 
 const MODES = [{}, { directories: true }, { borrow: true }, { borrow: true, directories: true }];
+const B = snug.profiles.bindle;
 
 /** Rebuild a value from navigation alone (no value() except for the wrapper kinds), checking the accessors agree. */
 function walk(v, cose = false) {
@@ -161,8 +162,8 @@ test('view: refusals -- unchecked bytes throw the scanner code; shared and non-b
     const bytes = mutate(r, snug.encode(randomMap(r)));
     let code;
     try { snug.decode(bytes); } catch (e) { code = e.code; }
-    if (code === undefined) { view(bytes); continue; }
-    for (const mode of MODES) assert.throws(() => view(bytes, mode), e => e.code === code);
+    if (code === undefined) { view(bytes, B); continue; }
+    for (const mode of MODES) assert.throws(() => view(bytes, { ...B, ...mode }), e => e.code === code);
     refused++;
   }
   assert.ok(refused > 500);
@@ -172,8 +173,9 @@ test('view: refusals -- unchecked bytes throw the scanner code; shared and non-b
     assert.throws(() => view(s, { borrow: true }), TypeError);
   }
   assert.throws(() => view([0xa0]), TypeError);
-  assert.throws(() => view(fromHex('01')), e => e.code === 'not_map');
-  assert.equal(view(fromHex('01'), { top: 'any' }).int(), 1);
+  assert.throws(() => view(fromHex('01'), B), e => e.code === 'not_map');
+  assert.equal(view(fromHex('01'), { ...B, top: 'any' }).int(), 1);
+  assert.equal(view(fromHex('01')).int(), 1); // the deterministic preset's root is any item
 });
 
 test('view: owned views copy at open; borrowed views alias the caller', () => {

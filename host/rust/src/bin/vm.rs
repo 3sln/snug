@@ -65,8 +65,9 @@ fn main() {
                 let pi = n(1) as usize;
                 let rule = n(2);
                 let (start, end, d0, i0, lb) = if f[0] == "span" { (n(3), n(4), n(5), n(6), 7) } else { (0, 0, 0, 0, 3) };
-                let lim: Vec<i32> = (0..9).map(|i| n(lb + i)).collect();
-                let input = unhex(f[lb + 9]);
+                // limits words 0..9 (word 8 the generic/schedule bits, word 9 the profile flags, D120)
+                let lim: Vec<i32> = (0..10).map(|i| n(lb + i)).collect();
+                let input = unhex(f[lb + 10]);
                 let pr = &mut progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // the host protocol: cap' = max(cap, N_LEAVES); grow when short

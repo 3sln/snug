@@ -116,9 +116,10 @@ export function inIntervals(p, pool, b, s, first, count, rg, a, c, at) {
 }
 
 export function floatKey(b, s, pos, ai) {
-    // The ordered binary64 key of the profile-valid float at pos (so never NaN,
-    // an infinity or a zero) into s[O_HI], s[O_LO]: float16/32 are widened by
-    // integer operations, then key(x) = x >= 0 ? x | 2^63 : ~x (§4.4).
+    // The ordered binary64 key of the profile-valid float at pos into s[O_HI],
+    // s[O_LO]: float16/32 are widened by integer operations, then key(x) = x >= 0
+    // ? x | 2^63 : ~x (§4.4). A zero, an infinity or a NaN can only be a float16
+    // (the RFC float rules, D122) and is widened as such.
     let hi = 0;
     let lo = 0;
     let sg = 0;
@@ -153,8 +154,12 @@ export function floatKey(b, s, pos, ai) {
         const e5 = (h >> 10) & 31;
         const f = h & 1023;
         sg = (h & 0x8000) << 16;
-        if (e5 !== 0) {
+        if (e5 === 31) {
+            hi = sg | (0x7ff00000 | (f << 10));
+        } else if (e5 !== 0) {
             hi = sg | (((e5 + 1008) << 20) | (f << 10));
+        } else if (f === 0) {
+            hi = sg;
         } else {
             // Subnormal: f * 2^-24.
             const k5 = highBit(f);
@@ -380,12 +385,39 @@ export function leafInt(p, pool, b, s, lb, pos, cs, ce, cls, hi, lo) {
 }
 
 export function leafFloat(p, b, s, lb, pos) {
-    // FLOAT: the width is exact by mask; then the interval list, if any.
+    // FLOAT: the width is exact by mask; then the interval list, if any. Under
+    // the RFC float rules (D122) a NaN is in no interval, and a zero compares
+    // as IEEE does (-0 = +0): it is in the list when the key of +0 or of -0 is
+    // (the two keys are adjacent), a second search for -0.
     const count = p[lb + 3];
+    const ai = b[pos] & 31;
     if (count === 0) {
         return 0;
     }
-    floatKey(b, s, pos, b[pos] & 31);
+    if (ai === 25) {
+        const h = be16(b, pos + 1);
+        if (((h & 0x7c00) === 0x7c00) && ((h & 0x3ff) !== 0)) {
+            return R_RANGE;
+        }
+        if ((h & 0x7fff) === 0) {
+            const rz = inFintervals(p, s, p[lb + 2], count, 1 << 31, 0, pos);
+            if (rz < 0) {
+                return rz;
+            }
+            if (rz === 1) {
+                return 0;
+            }
+            const rn = inFintervals(p, s, p[lb + 2], count, 0x7fffffff, -1, pos);
+            if (rn < 0) {
+                return rn;
+            }
+            if (rn === 1) {
+                return 0;
+            }
+            return R_RANGE;
+        }
+    }
+    floatKey(b, s, pos, ai);
     const khi = s[O_HI];
     const klo = s[O_LO];
     const r = inFintervals(p, s, p[lb + 2], count, khi, klo, pos);

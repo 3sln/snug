@@ -11,6 +11,10 @@ export declare class Writer {
   float(value: number): this;
   bool(value: boolean): this;
   null(): this;
+  /** f7; needs the profile's undefinedValue. */
+  undefined(): this;
+  /** A standard-set tag and its content: value(new Tagged(tag, content)). */
+  tagged(tag: number, content: unknown): this;
   text(value: string): this;
   bytes(value: Uint8Array): this;
   typed(value: TypedArray | Float16Bytes): this;
@@ -18,7 +22,8 @@ export declare class Writer {
   ndarray(value: NDArray): this;
   beginArray(count: number): this;
   beginMap(count: number): this;
-  key(key: string | number): this;
+  /** A string; an integer with keys 'integer' / 'any' (or a cose label under keys 'text'); any value with keys 'any'. */
+  key(key: unknown): this;
   end(): this;
   finish(): Uint8Array;
 }

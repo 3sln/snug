@@ -65,7 +65,25 @@ export const O_LO = 9;
 
 export const O_CSTART = 10;
 
+export const O_PROFILE = 11;
+
 export const SCAN_OPTS_LEN = 16;
+
+export const PF_KEYS = 3;
+
+export const PF_TAGS = 12;
+
+export const PF_FLOATS = 16;
+
+export const PF_UNDEFINED = 32;
+
+export const PF_NONCHAR = 64;
+
+export const PF_HOST = 127;
+
+export const PF_SUB = 128;
+
+export const PF_DETERMINISTIC = 118;
 
 export const MAX_BIGNUM_BYTES = 128;
 

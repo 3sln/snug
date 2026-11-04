@@ -96,6 +96,8 @@ pub enum Value {
     Bool(bool),
     /// Null.
     Null,
+    /// The simple value undefined (f7; profiles with `undefined_value`).
+    Undefined,
     /// Binary64 host value; kin selects the shortest exact wire width.
     Float(f64),
 }

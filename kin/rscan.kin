@@ -34,13 +34,14 @@
                                      CODE_DECIMAL CODE_TYPED_ARRAY CODE_NDARRAY
                                      CODE_TRAILING CODE_DEPTH CODE_TOO_LARGE CODE_NOT_MAP
                                      O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH O_ERR_POS O_ITEMS
-                                     O_HI O_LO O_CSTART MAX_BIGNUM_BYTES MAX_DIMENSIONS]]
+                                     O_HI O_LO O_CSTART O_PROFILE MAX_BIGNUM_BYTES MAX_DIMENSIONS]]
             [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
                                     enter-container bytes-content head-size small-arg]]
             [snug.cbor.text :refer [utf8-window]]
-            [snug.cbor.keys :refer [compare-spans]]
+            [snug.cbor.keys :refer [compare-spans key-end-any]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok mod10]]
-            [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]))
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc scan-one scan-item]]
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]))
 
 ;; ------------------------------------------------------------- layout
 
@@ -85,11 +86,13 @@
 (defconst ^:pub ^I32 F_COUNT 17)
 (defconst ^:pub ^I32 F_TPOS 18)
 (defconst ^:pub ^I32 F_DIMS 19)
+(defconst ^:pub ^I32 F_STAG 27)
 
 (defconst ^:pub ^I32 K_ARRAY 1)
 (defconst ^:pub ^I32 K_MAP 2)
 (defconst ^:pub ^I32 K_DEC 3)
 (defconst ^:pub ^I32 K_ND 4)
+(defconst ^:pub ^I32 K_STD 5)
 
 (defconst ^:pub ^I32 PH_START 0)
 (defconst ^:pub ^I32 PH_ITEM 1)
@@ -102,6 +105,7 @@
 (defconst ^:pub ^I32 PH_TYPEDHEAD 8)
 (defconst ^:pub ^I32 PH_PAIR 9)
 (defconst ^:pub ^I32 PH_END 10)
+(defconst ^:pub ^I32 PH_KSKIP 11)
 
 (defconst ^:pub ^I32 RS_NEED -1)
 (defconst ^:pub ^I32 RS_YIELD -2)
@@ -278,6 +282,17 @@
   (let [tb (+ S_FRAMES (* (- sp 1) FW))
         kind (ia s (+ tb F_KIND))
         elem (ia s (+ tb F_STATE))]
+    (if (== kind K_STD)
+      (do (comment "A standard-set tag's content (D121): the verdict its head decides --"
+                   "tag 1's whole rule (a float's payload is part of its head), the"
+                   "major type for 0, 24 and 32 (their content is checked whole at the end).")
+          (let [stag (ia s (+ tb F_STAG))
+                ^:mut ok 1]
+            (if (== stag 1) (if (not (std-content-ok b 1 pos p)) (set ok 0)))
+            (if (and (or (== stag 0) (== stag 32)) (!= major 3)) (set ok 0))
+            (if (and (== stag 24) (!= major 2)) (set ok 0))
+            (iset s (+ tb F_EXPOK) ok))
+          (return 0)))
     (if (== kind K_DEC)
       (do (if (== elem 0)
             (if (exponent-ok b pos) (iset s (+ tb F_EXPOK) 1) (iset s (+ tb F_EXPOK) 0)))
@@ -335,6 +350,31 @@
   (let [tf (+ S_FRAMES (* (- sp 1) FW))]
     (return (or (>= (ia s (+ tf F_KIND)) K_DEC) (== (ia s (+ tf F_SHAPE)) 1)))))
 
+(defn ^I32 std-want [^Bytes b ^IntsR s ^I32 sp ^I32 pos ^I32 tend]
+  (comment "Where the window must reach before the item at pos (its head in the"
+           "window) is walked: past its end when it is the text content of a tag 0"
+           "or 32, or the byte-string content of a tag 24 -- the content is checked"
+           "whole when its walk ends (D121), so it is asked for whole first; else pos.")
+  (if (== sp 0) (return pos))
+  (let [tb (+ S_FRAMES (* (- sp 1) FW))]
+    (if (!= (ia s (+ tb F_KIND)) K_STD) (return pos))
+    (let [stag (ia s (+ tb F_STAG))
+          ib (u8 b pos)
+          major (ushr ib 5)
+          ai (bit-and ib 31)
+          ^:mut len ai]
+      (if (not (or (and (== major 3) (or (== stag 0) (== stag 32))) (and (== major 2) (== stag 24))))
+        (return pos))
+      (if (> ai 26) (return pos))
+      (let [h (head-size ai)]
+        (if (> (+ pos h) tend) (return pos))
+        (if (== ai 24) (set len (u8 b (+ pos 1))))
+        (if (== ai 25) (set len (be16 b (+ pos 1))))
+        (if (== ai 26) (set len (be32 b (+ pos 1))))
+        (if (< len 0) (return pos))
+        (if (> len (- tend (+ pos h))) (return pos))
+        (return (+ (+ pos h) len))))))
+
 (defn ^:pub ^I32 rscan-step [^Bytes b ^Ints o ^Ints s ^I32 base-hi ^I32 base-lo]
   (comment "Run the walk over the window b, whose first byte is message offset"
            "base-hi:base-lo, until it accepts (0), refuses (a code; the error offset"
@@ -371,6 +411,9 @@
                  (if (and (<= (+ pos h) tend) (> (+ pos h) wend))
                    (return (suspend b s base phase pos cend sp pos h))))))
          (if (<= work 0) (return (pause b s base phase pos cend sp RS_YIELD)))
+         (if (and cnotes (< pos tend))
+           (do (let [swant (std-want b s sp pos tend)]
+                 (if (> swant wend) (return (suspend b s base phase pos cend sp pos (- swant pos)))))))
          (set work (- work 1))
          (set r (count-item o pos))
          (if (< r 0) (break))
@@ -402,6 +445,8 @@
              (if (== major 2)
                (do (set r (take-len o pos p hi lo tend))
                    (if (< r 0) (break))
+                   (if (and (!= (ia s S_KACT) 0) (> r wend))
+                     (do (set cend r) (set pos p) (set phase PH_KSKIP) (continue)))
                    (set pos r) (set phase PH_DONE) (continue)))
              (if (== major 3)
                (do (set r (take-len o pos p hi lo tend))
@@ -433,7 +478,23 @@
                    (if (or (== lo 2) (== lo 3)) (do (set phase PH_BIGNUM) (continue)))
                    (if (or (== lo 4) (== lo 40)) (do (set phase PH_PAIR) (continue)))
                    (let [size (typed-size lo)]
-                     (if (== size 0) (do (set r (fail o (- (ia s S_TPOS) base) CODE_TAG)) (break)))
+                     (if (== size 0)
+                       (do (if (not (std-allowed (ia o O_PROFILE) lo depth))
+                             (do (set r (fail o (- (ia s S_TPOS) base) CODE_TAG)) (break)))
+                           (comment "A standard-set tag (D121): one frame, its content one item"
+                                    "at depth + 1, checked when it ends.")
+                           (let [xb (+ S_FRAMES (* sp FW))]
+                             (iset s (+ xb F_KIND) K_STD)
+                             (iset s (+ xb F_CDEPTH) (+ depth 1))
+                             (iset s (+ xb F_REM) 1)
+                             (iset s (+ xb F_STATE) 0)
+                             (iset s (+ xb F_TPOS) (ia s S_TPOS))
+                             (iset s (+ xb F_STAG) lo)
+                             (iset s (+ xb F_EXPOK) 0)
+                             (iset s (+ xb F_COUNT) (+ pos base)))
+                           (set sp (+ sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
+                           (set phase PH_ITEM)
+                           (continue)))
                      (iset s S_TSIZE size))
                    (set phase PH_TYPEDHEAD)
                    (continue)))
@@ -476,7 +537,7 @@
                          palen (ia s (+ tb F_PALEN))
                          pw0 (ia s (+ tb F_PW0))]
                      (if (<= km 1)
-                       (if (not (cose-label-ok b ks km)) (do (set r (fail o ks CODE_KEY_TYPE)) (break))))
+                       (if (not (key-label b o ks km)) (do (set r (fail o ks CODE_KEY_TYPE)) (break))))
                      (if (>= plen 0)
                        (do (local ^I32 order)
                            (do
@@ -498,6 +559,21 @@
                      (iset s (+ tb F_STATE) 2)
                      (set phase PH_ITEM)
                      (continue))))
+             (if (== kind K_STD)
+               (do (comment "A standard-set tag's content ended: its head verdict, then a"
+                            "tag-0/32 text's form or a tag-24 payload walked as one item, the"
+                            "content whole in the window (asked for before its walk).")
+                   (let [stp (- (ia s (+ tb F_TPOS)) base)
+                         stag (ia s (+ tb F_STAG))
+                         scq (- (ia s (+ tb F_COUNT)) base)]
+                     (if (== (ia s (+ tb F_EXPOK)) 0) (do (set r (fail o stp CODE_TAG)) (break)))
+                     (if (or (== stag 0) (== stag 32))
+                       (if (not (std-content-ok b stag scq pos)) (do (set r (fail o stp CODE_TAG)) (break))))
+                     (if (== stag 24)
+                       (do (set r (scan-one b o (std-inner b scq) (+ (ia s (+ tb F_CDEPTH)) 1) pos))
+                           (if (< r 0) (break)))))
+                   (set sp (- sp 1)) (set cdep (top-cdepth s sp)) (set cnotes (top-notes s sp))
+                   (continue)))
              (if (== (ia s (+ tb F_STATE)) 0)
                (do (iset s (+ tb F_STATE) 1) (set phase PH_ITEM) (continue)))
              (comment "Tag 4 / tag 40 pair complete: the semantics, then the tag ends.")
@@ -525,7 +601,17 @@
                      kmaj (ushr (u8 b pos) 5)
                      cose (and (== (ia s (+ kb2 F_CDEPTH)) 1) (!= (ia o O_COSE) 0))]
                  (if (!= kmaj 3)
-                   (if (not (and cose (<= kmaj 1))) (do (set r (fail o pos CODE_KEY_TYPE)) (break))))
+                   (if (not (key-peek o kmaj cose)) (do (set r (fail o pos CODE_KEY_TYPE)) (break))))
+                 (comment "A key that is a container or a tag (PF_KEYS any, D124) holds keys,"
+                          "strings and tags of its own: it is asked for whole and walked by the"
+                          "recursive scanner, so no inner state crosses a window.")
+                 (if (and (>= kmaj 4) (<= kmaj 6))
+                   (do (let [kx (key-end-any b pos tend wend)]
+                         (if (< kx (neg 1))
+                           (do (let [kwant (- (- (neg 2) kx) pos)
+                                     ktwice (* 2 (- wend pos))]
+                                 (if (> ktwice kwant) (return (suspend b s base phase pos cend sp pos ktwice)))
+                                 (return (suspend b s base phase pos cend sp pos kwant))))))))
                  (iset s (+ kb2 F_KSTART) (+ pos base))
                  (iset s (+ kb2 F_KMAJ) kmaj)
                  (iset s (+ kb2 F_STATE) 1)
@@ -533,19 +619,36 @@
                  (iset s S_KA (+ (ia s (+ kb2 F_PA)) (ia s (+ kb2 F_PALEN))))
                  (iset s S_KALEN 0)
                  (iset s S_KW0 (+ pos base))
+                 (if (and (>= kmaj 4) (<= kmaj 6))
+                   (do (set r (scan-item b o pos (ia s (+ kb2 F_CDEPTH)) tend))
+                       (if (< r 0) (break))
+                       (set pos r)
+                       (set phase PH_DONE)
+                       (continue)))
                  (set phase PH_ITEM)
                  (continue)))
-             (if (== phase PH_TEXT)
+             (if (or (== phase PH_TEXT) (== phase PH_KSKIP))
                (do
+                 (if (== phase PH_KSKIP)
+                   (do (comment "Byte content inside an active map key (a byte string, a bignum's"
+                                "or integer typed array's content -- keys of any kind, D124) is not"
+                                "checked but goes through the windows, so the key arena gets it.")
+                       (if (< cend wend) (set pos cend) (set pos wend))
+                       (if (== pos cend) (do (set phase PH_DONE) (continue)))
+                       (return (suspend b s base phase pos cend sp pos 1))))
                  (comment "Text content, incrementally; a sequence is never split, and the"
                           "work quantum may stop the scan at any sequence boundary.")
                  (let [^:mut stop cend]
                    (if (> stop wend) (set stop wend))
                    (comment "At least one whole sequence per step, so a tiny quantum still advances.")
                    (if (< work 4) (set work 4))
+                   (comment "A tag-0/32 text is in the window whole: scanned in this step.")
+                   (if (> sp 0)
+                     (if (== (ia s (+ (+ S_FRAMES (* (- sp 1) FW)) F_KIND)) K_STD)
+                       (if (< work (- stop pos)) (set work (- stop pos)))))
                    (local ^I32 qstop)
                    (if (< work (- stop pos)) (set qstop (+ pos work)) (set qstop stop))
-                   (let [t (utf8-window b pos qstop cend)]
+                   (let [t (utf8-window b pos qstop cend (text-nc o))]
                      (if (< t 0) (do (set r (fail o (- (neg 1) t) CODE_TEXT)) (break)))
                      (set work (- work (- t pos)))
                      (set pos t)
@@ -632,6 +735,8 @@
                                  (do (let [^:mut m10 (mod10 b cs ce)]
                                        (if (== (ia s S_TTAG) 3) (set m10 (rem (+ m10 1) 10)))
                                        (if (!= m10 0) (iset s (+ tb2 F_MANT) 1) (iset s (+ tb2 F_MANT) 0)))))
+                               (if (and (!= (ia s S_KACT) 0) (> ce wend))
+                                 (do (set cend ce) (set pos cs) (set phase PH_KSKIP) (continue)))
                                (set pos ce)
                                (set phase PH_DONE)
                                (continue)))
@@ -640,6 +745,8 @@
                            (if (and (== parent K_ND) (== pelem 1)) (iset s (+ tb2 F_COUNT) (quot clen esize)))
                            (if (>= (ia s S_TTAG) 84)
                              (do (set cend ce) (set pos cs) (set phase PH_TYPED) (continue)))
+                           (if (and (!= (ia s S_KACT) 0) (> ce wend))
+                             (do (set cend ce) (set pos cs) (set phase PH_KSKIP) (continue)))
                            (set pos ce)
                            (set phase PH_DONE)
                            (continue)))))

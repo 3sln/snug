@@ -113,3 +113,84 @@ pub fn put_float(out: &mut [u8], at: i32, hi: i32, lo: i32) -> i32 {
     out[(at + 2) as usize] = (h) as u8;
     return at + 3;
 }
+pub fn float_width_rfc(hi: i32, lo: i32) -> i32 {
+    // 2, 4 or 8: the shortest encoded width of binary64 hi:lo under the RFC
+    // rules (NaN, infinities and zeros: 2).
+    let e: i32 = (hi >> 20) & 0x7ff;
+    let mh: i32 = hi & 0xfffff;
+    if e == 2047 {
+        return 2;
+    }
+    if e == 0 {
+        if (mh == 0) && (lo == 0) {
+            return 2;
+        }
+        return 8;
+    }
+    let x: i32 = e - 1023;
+    if (x >= (-14)) && (x <= 15) {
+        if (lo == 0) && low_zero(mh, 10) {
+            return 2;
+        }
+    }
+    if (x >= (-24)) && (x <= (-15)) {
+        if low_zero64(mh, lo, 28 - x) {
+            return 2;
+        }
+    }
+    if (x >= (-126)) && (x <= 127) {
+        if low_zero(lo, 29) {
+            return 4;
+        }
+    }
+    if (x >= (-149)) && (x <= (-127)) {
+        if low_zero64(mh, lo, (-97) - x) {
+            return 4;
+        }
+    }
+    return 8;
+}
+pub fn f16_bits_rfc(hi: i32, lo: i32) -> i32 {
+    // The float16 pattern float-width-rfc chose 2 for: f16-bits, or a NaN
+    // (0x7e00), an infinity or a zero with its sign.
+    let s: i32 = (i32::cast_unsigned(hi) >> 16).cast_signed() & 0x8000;
+    let e: i32 = (hi >> 20) & 0x7ff;
+    let mh: i32 = hi & 0xfffff;
+    if e == 2047 {
+        if (mh != 0) || (lo != 0) {
+            return 0x7e00;
+        }
+        return s | 0x7c00;
+    }
+    if (e == 0) && ((mh == 0) && (lo == 0)) {
+        return s;
+    }
+    return f16_bits(hi);
+}
+pub fn put_float_rfc(out: &mut [u8], at: i32, hi: i32, lo: i32) -> i32 {
+    // put-float under the RFC rules: the shortest float for binary64 hi:lo at
+    // `at`, never refused: the position after it, or `(too-short need)`.
+    if (at < 0) || (at > (out.len() as i32)) {
+        return -CODE_MALFORMED;
+    }
+    let w: i32 = float_width_rfc(hi, lo);
+    if (w + 1) > ((out.len() as i32) - at) {
+        return too_short(w + 1);
+    }
+    if w == 8 {
+        out[(at) as usize] = (0xfb) as u8;
+        put32(out, at + 1, hi);
+        put32(out, at + 5, lo);
+        return at + 9;
+    }
+    if w == 4 {
+        out[(at) as usize] = (0xfa) as u8;
+        put32(out, at + 1, f32_bits(hi, lo));
+        return at + 5;
+    }
+    let h: i32 = f16_bits_rfc(hi, lo);
+    out[(at) as usize] = (0xf9) as u8;
+    out[(at + 1) as usize] = ((i32::cast_unsigned(h) >> 8).cast_signed()) as u8;
+    out[(at + 2) as usize] = (h) as u8;
+    return at + 3;
+}

@@ -29,7 +29,8 @@
 (defconst ^:pub ^I32 CODE_NOT_MAP 21)
 
 ;; The options / scratch array. Slots 0..5 are INPUT (set them with
-;; `snug.cbor.scan/scan-options`); 6..7 are OUTPUT; 8..10 are scratch.
+;; `snug.cbor.scan/scan-options`); 6..7 are OUTPUT; 8..10 are scratch; 11 is
+;; INPUT (the profile flags, `scan-profile`).
 ;; FROZEN: docs/program.md §12 makes these 16 words the first 16 of the VM's
 ;; scratch, as they are; a change here is a Program format change (D025).
 (defconst ^:pub ^I32 O_TOP 0)
@@ -43,7 +44,34 @@
 (defconst ^:pub ^I32 O_HI 8)
 (defconst ^:pub ^I32 O_LO 9)
 (defconst ^:pub ^I32 O_CSTART 10)
+;; Word 11 (scanner-reserved in the frozen block, program.md §12.1) holds the
+;; PROFILE FLAGS (D120): INPUT, written by `scan-options` (0) and
+;; `scan-profile`, or by the VM's setup from limits word 9.
+(defconst ^:pub ^I32 O_PROFILE 11)
 (defconst ^:pub ^I32 SCAN_OPTS_LEN 16)
+
+;; Profile flags (D120, docs/profiles.md "Option model"). ZERO IS THE BINDLE
+;; PROFILE, and every set bit admits more, so an unfilled word is the
+;; strictest policy. Every value only removes acceptance relative to RFC 8949
+;; §4.2.1 core deterministic encoding.
+;;   bits 0-1 PF_KEYS     map keys: 0 text (+ cose labels), 1 text and
+;;                        integer (major 0/1), 2 or 3 any item
+;;   bits 2-3 PF_TAGS     0 the Bindle tag set, 1..3 the standard set (adds
+;;                        0, 1, 21-24, 32, 55799 with RFC 8949 content checks)
+;;   bit 4    PF_FLOATS   RFC 8949 deterministic scalar floats (canonical NaN,
+;;                        infinities, -0, integral floats) instead of Bindle's
+;;   bit 5    PF_UNDEFINED  simple value 23 (undefined)
+;;   bit 6    PF_NONCHAR  text may hold Unicode noncharacters
+;;   bit 7    PF_SUB      internal (never from a host): the walk's root is not
+;;                        the document's top, so 55799 is refused at depth 0
+(defconst ^:pub ^I32 PF_KEYS 3)
+(defconst ^:pub ^I32 PF_TAGS 12)
+(defconst ^:pub ^I32 PF_FLOATS 16)
+(defconst ^:pub ^I32 PF_UNDEFINED 32)
+(defconst ^:pub ^I32 PF_NONCHAR 64)
+(defconst ^:pub ^I32 PF_HOST 127)
+(defconst ^:pub ^I32 PF_SUB 128)
+(defconst ^:pub ^I32 PF_DETERMINISTIC 118)
 
 ;; Profile bounds that are not options (cbor.mjs LIMITS).
 (defconst ^:pub ^I32 MAX_BIGNUM_BYTES 128)

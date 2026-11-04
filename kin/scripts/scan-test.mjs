@@ -20,7 +20,10 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { decode, CBORFault } from '../../bench/baseline/cbor-3sln.mjs';
 import { buildCases, hex, DEF, ANY } from './scan-cases.mjs';
-import { scan, scanOptions, errorOffset, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { scan, scanOptions, scanProfile, errorOffset, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { buildDetCases, optWords, DDEF } from './det-cases.mjs';
+import { loadCbor2, acceptanceDiff, encodeDiff } from './det-diff.mjs';
+import { encode as snugEncode } from '../../host/js/src/encode.mjs';
 // The hand-written P1.4 yardstick is held to the same arbiter, so the
 // benchmark compares two correct scanners.
 import { scanHand } from '../../bench/scan-hand.mjs';
@@ -129,5 +132,49 @@ console.log(`  ${handOk === cases.length ? 'ok  ' : 'FAIL'} bench/scan-hand.mjs 
 console.log(`  ${fails ? 'FAIL' : 'ok  '} JS bounds: ${guarded} cases re-run with a throwing out-of-bounds trap on the input`);
 console.log(rustLine);
 console.log(wasmLine);
+// ---------------------------------------------------------------- the profile options (P7.1, D120-D125)
+// The deterministic vectors (hand-written codes and offsets, and the Bindle code of the same bytes), fixed edge
+// cases of the new rules and seeded cases under random profile flags: JS == the vector, JS == Rust (code and
+// offset), and the deterministic preset against cbor2 (kin/scripts/det-diff.mjs).
+const DET_MUT = Math.max(2000, Math.round(MUTATIONS * 2 / 3));
+const dc = buildDetCases(DET_MUT, SEED);
+const o2 = new Int32Array(16);
+const detRun = (bytes, opt) => { scanOptions(o2, ...optWords(opt)); scanProfile(o2, opt.flags); const c = scan(bytes, o2); return { code: c, name: codeName(c), offset: errorOffset(o2) }; };
+const dj = dc.cases.map(c => detRun(c.bytes, c.opt));
+let detVec = 0, detFail = 0;
+dc.cases.forEach((c, i) => {
+  if (!c.want) return;
+  detVec++;
+  if (dj[i].name !== c.want.code || (c.want.offset !== undefined && dj[i].offset !== c.want.offset)) { detFail++; fail(`${c.label}: JS ${dj[i].name}@${dj[i].offset}, vector ${c.want.code}@${c.want.offset}`); }
+});
+console.log(`  ${detFail ? 'FAIL' : 'ok  '} profile options: ${detVec - detFail}/${detVec} deterministic vectors (and their Bindle column) give the hand-written code and offset; ${dc.nFixed} fixed and ${DET_MUT} seeded cases under random profile flags`);
+const detCounts = {};
+for (const g of dj) detCounts[g.name] = (detCounts[g.name] ?? 0) + 1;
+console.log(`  info profile-option codes: ${Object.entries(detCounts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+if (rustBin) {
+  const input = dc.cases.map(c => [...optWords(c.opt), c.bytes.length ? hex(c.bytes) : '', c.opt.flags].join(' ')).join('\n') + '\n';
+  const p = spawnSync(rustBin, [], { input, maxBuffer: 1 << 30, encoding: 'utf8' });
+  const lines = p.stdout.trim().split('\n');
+  let agree = 0;
+  if (p.status !== 0 || lines.length !== dc.cases.length) fail(`Rust profile-option run: status ${p.status}, ${lines.length} of ${dc.cases.length} lines`);
+  lines.forEach((line, i) => {
+    if (line === 'PANIC') { fail(`${dc.cases[i].label}: Rust PANICKED`); return; }
+    const [code, off] = line.split(' ').map(Number);
+    if (code !== dj[i].code || off !== dj[i].offset) fail(`${dc.cases[i].label}: JS ${dj[i].code}@${dj[i].offset}, Rust ${code}@${off}`); else agree++;
+  });
+  console.log(`  ${agree === dc.cases.length ? 'ok  ' : 'FAIL'} profile options JS == Rust (debug): ${agree}/${dc.cases.length} cases, code and offset, no panic`);
+}
+const cbor2 = await loadCbor2();
+if (cbor2) {
+  const isDef = o => o.flags === DDEF.flags && o.top === 'any' && !o.cose && o.maxBytes === DDEF.maxBytes && o.maxDepth === DDEF.maxDepth && o.maxEntries === DDEF.maxEntries && o.maxItems === DDEF.maxItems;
+  const pool = [...dc.cases.filter(c => isDef(c.opt)), ...cases.map(c => ({ label: c.label, bytes: c.bytes, opt: DDEF }))];
+  const ad = acceptanceDiff(cbor2, pool, b => { const g = detRun(b, DDEF); return { code: g.name, offset: g.offset }; });
+  for (const u of ad.unexplained.slice(0, 20)) fail(`cbor2: unexplained ${u}`);
+  console.log(`  ${ad.unexplained.length ? 'FAIL' : 'ok  '} deterministic preset vs cbor2 (CDE + rejectDuplicateKeys/LongLoundNaN/Simple): ${ad.agree}/${ad.compared} same verdict; the rest by documented class: ${Object.entries(ad.classes).map(([k, v]) => `${k} ${v}`).join(', ')}; ${ad.unexplained.length} unexplained`);
+  const ed = encodeDiff(cbor2, v => snugEncode(v), 4000, SEED);
+  for (const d of ed.differ.slice(0, 20)) fail(`cbor2 encode: ${d}`);
+  console.log(`  ${ed.differ.length ? 'FAIL' : 'ok  '} encode (deterministic preset) == cbor2 encode({cde: true}): ${ed.equal}/${ed.values} seeded values byte for byte`);
+} else console.log('  SKIP cbor2 differential (bench/compare/node_modules/cbor2 not installed)');
+
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
 console.log('  ok   generated JS and Rust agree with cbor.mjs on every case');

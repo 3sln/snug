@@ -111,9 +111,10 @@ pub fn in_intervals(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], first: i32,
     return 0;
 }
 pub fn float_key(b: &[u8], s: &mut [i32], pos: i32, ai: i32) {
-    // The ordered binary64 key of the profile-valid float at pos (so never NaN,
-    // an infinity or a zero) into s[O_HI], s[O_LO]: float16/32 are widened by
-    // integer operations, then key(x) = x >= 0 ? x | 2^63 : ~x (§4.4).
+    // The ordered binary64 key of the profile-valid float at pos into s[O_HI],
+    // s[O_LO]: float16/32 are widened by integer operations, then key(x) = x >= 0
+    // ? x | 2^63 : ~x (§4.4). A zero, an infinity or a NaN can only be a float16
+    // (the RFC float rules, D122) and is widened as such.
     let mut hi: i32 = 0;
     let mut lo: i32 = 0;
     let mut sg: i32 = 0;
@@ -148,8 +149,12 @@ pub fn float_key(b: &[u8], s: &mut [i32], pos: i32, ai: i32) {
         let e5: i32 = (h >> 10) & 31;
         let f: i32 = h & 1023;
         sg = (h & 0x8000) << 16;
-        if e5 != 0 {
+        if e5 == 31 {
+            hi = sg | (0x7ff00000 | (f << 10));
+        } else if e5 != 0 {
             hi = sg | (((e5 + 1008) << 20) | (f << 10));
+        } else if f == 0 {
+            hi = sg;
         } else {
             // Subnormal: f * 2^-24.
             let k5: i32 = high_bit(f);
@@ -367,12 +372,39 @@ pub fn leaf_int(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos: i
     return R_RANGE;
 }
 pub fn leaf_float(p: &[i32], b: &[u8], s: &mut [i32], lb: i32, pos: i32) -> i32 {
-    // FLOAT: the width is exact by mask; then the interval list, if any.
+    // FLOAT: the width is exact by mask; then the interval list, if any. Under
+    // the RFC float rules (D122) a NaN is in no interval, and a zero compares
+    // as IEEE does (-0 = +0): it is in the list when the key of +0 or of -0 is
+    // (the two keys are adjacent), a second search for -0.
     let count: i32 = p[(lb + 3) as usize];
+    let ai: i32 = (b[(pos) as usize] as i32) & 31;
     if count == 0 {
         return 0;
     }
-    float_key(b, s, pos, (b[(pos) as usize] as i32) & 31);
+    if ai == 25 {
+        let h: i32 = be16(b, pos + 1);
+        if ((h & 0x7c00) == 0x7c00) && ((h & 0x3ff) != 0) {
+            return R_RANGE;
+        }
+        if (h & 0x7fff) == 0 {
+            let rz: i32 = in_fintervals(p, s, p[(lb + 2) as usize], count, 1 << 31, 0, pos);
+            if rz < 0 {
+                return rz;
+            }
+            if rz == 1 {
+                return 0;
+            }
+            let rn: i32 = in_fintervals(p, s, p[(lb + 2) as usize], count, 0x7fffffff, -1, pos);
+            if rn < 0 {
+                return rn;
+            }
+            if rn == 1 {
+                return 0;
+            }
+            return R_RANGE;
+        }
+    }
+    float_key(b, s, pos, ai);
     let khi: i32 = s[(O_HI) as usize];
     let klo: i32 = s[(O_LO) as usize];
     let r: i32 = in_fintervals(p, s, p[(lb + 2) as usize], count, khi, klo, pos);

@@ -15,7 +15,7 @@ pub mod view;
 pub mod api;
 pub use value::{Value, Integer, TypedArray};
 pub use error::Error;
-pub use decode::{decode, DecodeOptions, Limits, Top};
+pub use decode::{decode, DecodeOptions, Floats, Keys, Limits, Profile, Tags, Top};
 pub use encode::{encode, EncodeOptions};
 pub use writer::Writer;
 pub use program::Program;

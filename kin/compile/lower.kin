@@ -733,7 +733,13 @@
                   (if (< kbid 0) (set never true))))
             (if (or (== tk TK_BYTES) (== tk TK_FLOAT)) (set never true))
             (comment "bindle and bus: text and integer keys only")
-            (if (and never (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos))))))
+            (if (and never (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
+            (comment "D125: a byte-string, float or beyond-64-bit integer value before `:` is"
+                     "a literal key with a cut, which only text and integer literal keys"
+                     "support; it is refused, never assumed absent (a wire profile may carry"
+                     "any key kind, and the Program must not depend on one). `value => T`"
+                     "is the uncut form.")
+            (if never (return (fail h ERR_MAP_CUT pos))))))
     (if (== kk KEY_TYPE)
       (do (if (and (== cut 1) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
           (set kts (lower-type h (nc h key) env))
@@ -747,11 +753,6 @@
                     (return (fail h ERR_PROFILE pos))))))))
     (let [^I32 val (lower-type h (nd h m) env)]
       (if (< val 0) (return (neg 1)))
-      (if never
-        (do (comment "A key the profile cannot carry: an optional member is absent, a"
-                     "required one makes the alternative unsatisfiable.")
-            (if (== lo 0) (return (as-unit h)))
-            (return (as-none h))))
       (if (>= kbid 0)
         (do (if (> lo 1) (return (as-none h)))
             (if (== hi 0) (return (as-unit h)))

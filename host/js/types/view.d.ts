@@ -1,7 +1,7 @@
 import type { Value, TypedArray, Float16Bytes, Decimal, NDArray } from './index.js';
 import type { Schema, ValidationOptions, ValidationResult } from './schema.js';
-export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' |
-  'array' | 'map' | 'decimal' | 'ndarray' | 'typed';
+export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' |
+  'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged';
 export interface ViewOptions extends ValidationOptions {
   schema?: Schema; rule?: string; borrow?: boolean;
   /** Experimental, opt-in per-container offset directories (D053). */
@@ -15,10 +15,11 @@ export declare class View {
   readonly offset: number;
   readonly depth: number;
   readonly borrowed: boolean;
-  get(key: string | number | bigint): View | undefined;
+  /** Any key the view's profile admits; non-text, non-integer keys compare by their encoding (keys 'any'). */
+  get(key: unknown): View | undefined;
   at(index: number): View | undefined;
-  entries(): IterableIterator<[string | number | bigint, View]>;
-  keys(): IterableIterator<string | number | bigint>;
+  entries(): IterableIterator<[Value, View]>;
+  keys(): IterableIterator<Value>;
   values(): IterableIterator<View>;
   number(): number;
   bigint(): bigint;
@@ -26,6 +27,11 @@ export declare class View {
   text(): string;
   bool(): boolean;
   isNull(): boolean;
+  isUndefined(): boolean;
+  /** A tagged item's tag number, else undefined. */
+  readonly tag: number | undefined;
+  /** A View of a tagged item's content. */
+  content(): View;
   /** Read-only aliases by contract; JS cannot enforce that contract. */
   bytes(): Uint8Array;
   raw(): Uint8Array;
@@ -44,12 +50,12 @@ export declare class Cursor {
   readonly offset: number;
   readonly kind: Kind;
   readonly length: number | undefined;
-  readonly key: string | number | bigint | undefined;
+  readonly key: Value;
   keyIs(key: string): boolean;
   enter(): boolean;
   next(): boolean;
   up(): boolean;
-  find(key: string | number | bigint): boolean;
+  find(key: unknown): boolean;
   number(): number;
   bigint(): bigint;
   int(): number | bigint;

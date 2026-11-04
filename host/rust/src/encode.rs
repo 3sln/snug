@@ -7,25 +7,45 @@
 //! ```
 use crate::snug::{
     cbor::scan::code_name,
-    write::{float::put_float, int::put_int, map::close_map, out::put_head},
+    write::{float::{put_float, put_float_rfc}, int::put_int, map::close_map, out::put_head},
 };
-use crate::{DecodeOptions, Error, Integer, Limits, Top, TypedArray, Value};
+use crate::{DecodeOptions, Error, Floats, Integer, Limits, Profile, Top, TypedArray, Value};
 
 /// Encoder options. Encoding permits any root. Output bytes are bounded during
-/// growth, unlike JS's finish-only maxBytes check; kin checks the final profile.
-#[derive(Debug, Clone, Copy, Default)]
+/// growth, unlike JS's finish-only maxBytes check; kin checks the final result
+/// against the profile (the deterministic preset by default, D081).
+#[derive(Debug, Clone, Copy)]
 pub struct EncodeOptions {
-    /// Permit safe integer labels in the top-level map.
+    /// Under `Keys::Text`: permit safe integer labels in the top-level map.
     pub cose: bool,
     /// Output, nesting, entry and item bounds.
     pub limits: Limits,
+    /// The wire profile: it decides float forms and what the final check admits.
+    pub profile: Profile,
+}
+impl Default for EncodeOptions {
+    fn default() -> Self {
+        Self {
+            cose: false,
+            limits: Limits::default(),
+            profile: Profile::DETERMINISTIC,
+        }
+    }
 }
 impl EncodeOptions {
+    /// The Bindle profile.
+    pub fn bindle() -> Self {
+        Self {
+            profile: Profile::BINDLE,
+            ..Self::default()
+        }
+    }
     pub(crate) fn decode_options(self) -> DecodeOptions {
         DecodeOptions {
             top: Top::Any,
             cose: self.cose,
             limits: self.limits,
+            profile: self.profile,
         }
     }
 }
@@ -192,10 +212,15 @@ impl Output {
             Value::NDArray { shape, data } => self.ndarray(shape, data, depth),
             Value::Bool(v) => self.head(7, if *v { 21 } else { 20 }),
             Value::Null => self.head(7, 22),
+            Value::Undefined => self.head(7, 23),
             Value::Float(n) => {
                 let bits = n.to_bits();
                 let mut b = [0; 9];
-                let r = put_float(&mut b, 0, (bits >> 32) as i32, bits as i32);
+                let r = if self.options.profile.floats == Floats::Deterministic {
+                    put_float_rfc(&mut b, 0, (bits >> 32) as i32, bits as i32)
+                } else {
+                    put_float(&mut b, 0, (bits >> 32) as i32, bits as i32)
+                };
                 self.written(&b, r)
             }
         }

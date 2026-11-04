@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
-import * as snug from '../src/index.mjs';
+import * as index from '../src/index.mjs';
 import * as baseline from '../../../bench/baseline/cbor-3sln.mjs';
 
-export { snug, baseline };
+// These tests hold the codec to cbor.mjs (the Bindle profile's arbiter), so the codec calls run under the Bindle
+// preset (D120): every option a test passes still overrides it, exactly as it did the old defaults.
+const B = index.profiles.bindle;
+const snug = Object.freeze({ ...index, decode: (bytes, options = {}) => index.decode(bytes, { ...B, ...options }),
+  encode: (value, options = {}) => index.encode(value, { ...B, ...options }) });
+export { snug, baseline, index };
 export const profile = JSON.parse(readFileSync(new URL('../../../corpus/cbor-vectors/cbor-profile.json', import.meta.url)));
 export const oracle = JSON.parse(readFileSync(new URL('../../../corpus/cbor-vectors/cbor-cborg-oracle.json', import.meta.url)));
 export const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));

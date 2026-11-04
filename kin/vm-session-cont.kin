@@ -16,10 +16,12 @@
                                rem < > <= >= == != and or not u8 blen ia iset bcopy]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TAG CODE_DEPTH CODE_DECIMAL
                                      CODE_NDARRAY CODE_TYPED_ARRAY O_COSE O_MAX_DEPTH O_ERR_POS O_HI
-                                     O_LO O_CSTART]]
+                                     O_LO O_CSTART O_PROFILE]]
             [snug.cbor.head :refer [fail head-size enter-container bytes-content]]
             [snug.cbor.tags :refer [typed-size]]
-            [snug.cbor.scan :refer [cose-label-ok]]
+            [snug.cbor.scan :refer [key-peek key-label]]
+            [snug.cbor.stdtags :refer [std-allowed]]
+            [snug.cbor.keys :refer [key-end-any]]
             [snug.vm.layout :refer [H_S_LEAVES VM_POS VM_Q1 VM_GENERIC VM_FASTM K_INT K_TEXT K_ARRAY K_MAP K_TAG K_TAGSET F_ADMITTED
                                     F_MATCHED F_EVAL R_TYPE R_MISSING R_UNEXPECTED R_VALUE R_TAG R_BUDGET
                                     R_INCONSISTENT P_INDEX P_KEY P_ANYKEY P_TAG CTX_KEY CTX_SIMPLE]]
@@ -27,7 +29,8 @@
                                   q-flag q-set-flag q-kind q-leaf-base cset-rec next-ck cset-width
                                   cset-frame wit-empty wit-clear wit-set path-put rule1]]
             [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64]]
-            [snug.vm.dead :refer [dead-item dead-int-streak dead-pair-body pair-check decimal-check ndarray-check]]
+            [snug.vm.dead :refer [dead-item dead-int-streak dead-pair-body pair-check decimal-check ndarray-check
+                                  dead-std-check]]
             [snug.vm.map :refer [leaf-map block-mt map-block-init key-span-end key-search map-cursor
                                  map-key-query map-key-phase cand-vts cand-vts-mt block-named map-update
                                  map-satisfied map-missing simple-struct key-phase-struct update-struct]]
@@ -65,6 +68,9 @@
 (defconst ^:pub ^I32 T_PAIR 5)
 (defconst ^:pub ^I32 T_PAIRRET 6)
 (defconst ^:pub ^I32 T_FIN 7)
+(defconst ^:pub ^I32 T_STD 8)
+(defconst ^:pub ^I32 T_STDRET 9)
+(defconst ^:pub ^I32 T_STDCHK 10)
 
 (defn ^:pub mark-pair [^Ints ss ^I32 pair]
   (comment "The content of tag frame `pair` is framed: its verdict will come from notes.")
@@ -615,7 +621,7 @@
             (set kq0 (dead-item b s kks (+ d 1) kend)))
           (if (< kq0 0) (return (err ss kq0)))
           (if (<= km 1)
-            (if (not (cose-label-ok b start km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
+            (if (not (key-label b s start km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
           (let [ko (key-order-s b ka s ss f base start inka kks (- kq0 start))]
             (if (< ko 0) (return (err ss ko))))
           (if (== inka 1)
@@ -693,7 +699,7 @@
           (set kq (dead-item b s kks (+ d 1) kend))))
       (if (< kq 0) (return (err ss kq)))
       (if (<= km 1)
-        (if (not (cose-label-ok b start km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
+        (if (not (key-label b s start km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
       (let [ko2 (key-order-s b ka s ss f base start inka kks (- kq start))]
         (if (< ko2 0) (return (err ss ko2))))
       (if (== inka 1)
@@ -759,13 +765,23 @@
           ai (bit-and ib 31)
           ^:mut h 1]
       (if (!= km 3)
-        (if (not (and (== (ia ss (+ f F_COSE)) 1) (<= km 1)))
+        (if (not (key-peek s km (== (ia ss (+ f F_COSE)) 1)))
           (return (err ss (fail s start CODE_KEY_TYPE)))))
       (if (<= ai 27) (set h (head-size ai)))
       (let [hh (imin h (- end start))]
         (if (> (+ start hh) wend) (return (need ss base start hh))))
       (if (cut-yield s ss (+ start base)) (return (yld ss base start)))
-      (let [ke (key-span-end b start end)]
+      (let [^:mut ke (key-span-end b start end)]
+        (comment "A key of any other kind (PF_KEYS any) is asked for whole: its end"
+                 "is known only once all its heads are in the window (D124).")
+        (if (and (< ke 0) (and (> km 1) (!= km 3)))
+          (do (let [kx (key-end-any b start end wend)]
+                (if (< kx (neg 1))
+                  (do (let [want (- (- (neg 2) kx) start)
+                            twice (* 2 (- wend start))]
+                        (if (> twice want) (return (need ss base start twice)))
+                        (return (need ss base start want)))))
+                (set ke kx))))
         (iset ss (+ f F_START) (+ start base))
         (iset ss (+ f F_KM) km)
         (if (>= ke 0) (iset ss (+ f F_KE) (+ ke base)) (iset ss (+ f F_KE) (neg 1)))
@@ -813,18 +829,20 @@
 
 (defn ^:pub ^I32 open-tag [^IntsR p ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 pos ^I32 d ^I32 fb
                            ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
-  (comment "A tag item whose content crosses the window (tags 4/40 and typed"
-           "arrays; a bignum is always asked whole): eval-tag's / dead-tag's checks,"
-           "filter and TAG/TAGSET tests up to the content.")
+  (comment "A tag item whose content crosses the window (tags 4/40, typed arrays"
+           "and the standard set's tags; a bignum is always asked whole):"
+           "eval-tag's / dead-tag's checks, filter and TAG/TAGSET tests up to the"
+           "content.")
   (let [live (if-live nq)
         q (prologue p b s pos end ck live)]
     (if (< q 0) (return (err ss q)))
     (let [hi (ia s O_HI)
           lo (ia s O_LO)
-          tsize (typed-size lo)]
+          tsize (typed-size lo)
+          std (and (and (!= lo 4) (and (!= lo 40) (== tsize 0))) (std-allowed (ia s O_PROFILE) lo d))]
       (if (>= d (ia s O_MAX_DEPTH)) (return (err ss (fail s pos CODE_DEPTH))))
       (if (!= hi 0) (return (err ss (fail s pos CODE_TAG))))
-      (if (and (!= lo 4) (and (!= lo 40) (== tsize 0))) (return (err ss (fail s pos CODE_TAG))))
+      (if (and (!= lo 4) (and (!= lo 40) (and (== tsize 0) (not std)))) (return (err ss (fail s pos CODE_TAG))))
       (let [f (fpush b ss ka base FK_TAG)]
         (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
         (frame-item ss f base pos end d fb ck nq ctx)
@@ -869,7 +887,26 @@
           (do (if (== live 1)
                 (if (not (charge s 1 q)) (return (err ss (neg R_BUDGET)))))
               (return (cont ss f T_CHEAD))))
+        (if std
+          (do (comment "tags 0, 1, 24, 32 read their content again after its walk:"
+                       "pinned until then (D094 replay)")
+                (if (or (or (== lo 0) (== lo 1)) (or (== lo 24) (== lo 32))) (iset ss (+ f F_PIN) (+ q base)))
+                (return (cont ss f T_STD))))
         (return (cont ss f T_PAIR))))))
+
+(defn ^:pub ^I32 std-need [^Bytes b ^I32 tag ^I32 q ^I32 stop ^I32 wend]
+  (comment "How far from q a standard tag's content b[q, stop) must be in the window"
+           "for dead-std-check: nothing for tags 21-23 and 55799 (q); else its first"
+           "byte, then the whole of a text (tags 0, 32) or byte string (24), at most 9"
+           "bytes for tag 1 (these four are pinned). Ask again once the window holds"
+           "the answer.")
+  (if (not (or (or (== tag 0) (== tag 1)) (or (== tag 24) (== tag 32)))) (return q))
+  (if (or (< q 0) (>= q wend)) (return (+ q 1)))
+  (let [major (ushr (u8 b q) 5)]
+    (if (== tag 1) (return (imin stop (+ q 9))))
+    (if (and (== major 3) (or (== tag 0) (== tag 32))) (return stop))
+    (if (and (== major 2) (== tag 24)) (return stop))
+    (return (+ q 1))))
 
 (defn ^:pub ^I32 tail-need [^IntsR p ^IntsR s ^Ints ss ^I32 f]
   (comment "Does the typed array's content query read its content (bstr-tail's"
@@ -946,6 +983,29 @@
                     (let [rb-t (bstr-tail p pool b s q cs-t stop-t (+ d 1) cfb-t cck-t cnq 0)]
                       (if (< rb-t 0) (return (err ss rb-t)))))))
             (return (cont ss f T_FIN)))))
+    (if (== ph T_STD)
+      (do (comment "A standard-set tag's content: the child item (live or dead) at d + 1.")
+          (iset ss (+ f F_PH) T_STDRET)
+          (if (and (== live 1) (> cnq 0))
+            (do (let [crs (cset-rec p s ck)
+                      cfbs (+ fb (cset-frame p crs))
+                      ccks (next-ck p s ck)]
+                  (return (call ss base q (+ d 1) cfbs ccks cnq end 0 MODE_ITEM (neg 1) (neg 1))))))
+          (return (call ss base q (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1)))))
+    (if (== ph T_STDCHK)
+      (do (comment "dead-std-check over the content, read again (pinned).")
+          (let [stop-s (- (ia ss (+ f F_TSTOP)) base)
+                rq1 (std-need b lo q stop-s wend)
+                g1 (ensure ss base wend q rq1)]
+            (if (suspended g1) (return g1))
+            (let [rq2 (std-need b lo q stop-s wend)
+                  g2 (ensure ss base wend q rq2)]
+              (if (suspended g2) (return g2)))
+            (let [vs (dead-std-check b s pos lo q stop-s d)]
+              (if (< vs 0) (return (err ss vs))))
+            (iset ss (+ f F_PIN) (neg 1))
+            (iset ss (+ f F_TCS) (+ q base))
+            (return (cont ss f T_FIN)))))
     (if (== ph T_PAIR)
       (do (if (< q end)
             (if (or (< q 0) (>= q wend)) (return (need ss base q 1))))
@@ -995,6 +1055,9 @@
 (defn ^:pub ^I32 tag-ret [^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 r]
   (comment "The tag's content (or its typed array's tail) ended at r (absolute).")
   (if (== (ia ss (+ f F_PH)) T_TAILRET) (return (cont ss f T_FIN)))
+  (if (== (ia ss (+ f F_PH)) T_STDRET)
+    (do (iset ss (+ f F_TSTOP) r)
+        (return (cont ss f T_STDCHK))))
   (let [pos (- (ia ss (+ f F_POS)) base)
         q (- (ia ss (+ f F_Q)) base)
         lo (ia ss (+ f F_TNUM))

@@ -8,25 +8,45 @@ export interface Float16ArrayLike {
   readonly length: number;
   readonly [index: number]: number;
 }
-export type Value = null | boolean | number | bigint | string | Uint8Array | TypedArray |
-  Decimal | NDArray | Float16Bytes | Value[] | { [key: string]: Value } | Map<string | number, Value>;
+/** A map with only text keys decodes to an object; a map with any other key (or a top-level map under cose) to a
+ * Map whose keys are decoded values (D123). `undefined` and Tagged arise only under profiles that admit them. */
+export type Value = null | undefined | boolean | number | bigint | string | Uint8Array | TypedArray |
+  Decimal | NDArray | Float16Bytes | Tagged | Value[] | { [key: string]: Value } | Map<Value, Value>;
 export interface Limits {
   maxBytes?: number;
   maxDepth?: number;
   maxEntries?: number;
   maxItems?: number;
 }
-export interface DecodeOptions extends Limits {
-  /** Codec default: 'map'. Schema default: 'any'. */
+/** Wire profile options (D120): `wire` picks a preset, any other option overrides it. (`profile` is the compiler's
+ * separate restriction set.) Every value only removes
+ * acceptance relative to RFC 8949 §4.2.1 core deterministic encoding. */
+export interface ProfileOptions {
+  /** Default 'deterministic'. */
+  wire?: 'deterministic' | 'bindle';
+  /** Map key kinds: text only, text and integers (major 0/1), or any item. deterministic: 'any'; bindle: 'text'. */
+  keys?: 'text' | 'integer' | 'any';
+  /** The Bindle tag set, or the standard set adding 0, 1, 21-24, 32, 55799. deterministic: 'standard'. */
+  tags?: 'bindle' | 'standard';
+  /** Bindle refuses NaN, ±∞, −0 and safe-range integral floats; deterministic is RFC 8949 (canonical NaN f97e00). */
+  floats?: 'bindle' | 'deterministic';
+  /** The simple value undefined (f7). deterministic: true; bindle: false. */
+  undefinedValue?: boolean;
+  /** Unicode noncharacters in text. deterministic: true; bindle: false. */
+  noncharacters?: boolean;
+}
+export interface DecodeOptions extends Limits, ProfileOptions {
+  /** Codec, view and profile-source default: the preset's ('any' for deterministic, 'map' for bindle). Schema default: 'any'. */
   top?: 'map' | 'any';
-  /** Safe integer labels in the top-level map; materialises that map as Map. */
+  /** Under keys 'text': safe integer labels in the top-level map; materialises that map as Map. */
   cose?: boolean;
   objects?: 'null' | 'plain';
 }
-export interface EncodeOptions extends Limits {
+export interface EncodeOptions extends Limits, ProfileOptions {
   cose?: boolean;
   omitUndefined?: boolean;
-  /** Default false: ignore extra array own properties. True keeps the strict own-key count check. Holes are refused in both modes. */
+  /** Default: the preset's (deterministic false: ignore extra array own properties; bindle true: the strict own-key
+   * count check). Holes are refused in both modes. */
   strictArrays?: boolean;
 }
 export type ProfileCode = 'truncated' | 'non_shortest' | 'indefinite' | 'malformed' |
@@ -49,8 +69,13 @@ export declare const LIMITS: Readonly<{
   maxBytes: 1500000; maxDepth: 32; maxEntries: 65536; maxItems: 131072;
   maxBignumBytes: 128; minDecimalExponent: -1024; maxDimensions: 8;
 }>;
-/** D081's general deterministic preset is planned, and is not exported yet. */
-export declare const profiles: Readonly<{ bindle: Readonly<{ top: 'map'; cose: false; strictArrays: true }> }>;
+/** The two presets spelled out as frozen option objects (D120). */
+export declare const profiles: Readonly<{
+  deterministic: Readonly<{ wire: 'deterministic'; top: 'any'; cose: false; keys: 'any'; tags: 'standard';
+    floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
+  bindle: Readonly<{ wire: 'bindle'; top: 'map'; cose: false; keys: 'text'; tags: 'bindle'; floats: 'bindle';
+    undefinedValue: false; noncharacters: false; strictArrays: true }>;
+}>;
 export declare function decode(bytes: Uint8Array, options?: DecodeOptions): Value;
 /** maxBytes is enforced at finish only when explicitly supplied. */
 export declare function encode(value: unknown, options?: EncodeOptions): Uint8Array;
@@ -64,6 +89,12 @@ export declare class Decimal {
   valueOf(): never;
   [Symbol.toPrimitive](hint: string): string;
   toJSON(): never;
+}
+/** A standard-set tag (D121): 0, 1, 21, 22, 23, 24 (value: the payload bytes), 32 or 55799. Frozen. */
+export declare class Tagged {
+  constructor(tag: number, value: Value);
+  readonly tag: number;
+  readonly value: Value;
 }
 export declare class Float16Bytes {
   constructor(bytes: Uint8Array);

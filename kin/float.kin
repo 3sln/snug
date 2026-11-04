@@ -77,3 +77,53 @@
       (if (and (>= x (neg 149)) (<= x (neg 127)))
         (if (low-zero64 mh lo (- (neg 97) x)) (return CODE_NON_SHORTEST)))
       (return 0))))
+
+;; RFC 8949 deterministic scalar floats (profile flag PF_FLOATS, D122): no
+;; value is refused for being NaN, infinite, zero or integral; every float
+;; must be in its shortest exact width, so +-0, +-inf and NaN only as float16;
+;; and a NaN must be the canonical quiet NaN 0x7e00 (RFC 8949 §4.2.2): any
+;; other NaN is `float`, the canonical one in a wider width `non_shortest`.
+
+(defn ^:pub ^I32 rfc-f16 [^I32 h]
+  (comment "A float16 pattern under RFC rules: 0, or float for a non-canonical NaN.")
+  (if (and (== (bit-and h (hex 31744)) (hex 31744)) (!= (bit-and h (hex 1023)) 0))
+    (if (!= h (hex 32256)) (return CODE_FLOAT)))
+  (return 0))
+
+(defn ^:pub ^I32 rfc-f32 [^I32 w]
+  (comment "A float32 pattern under RFC rules: 0, or the refusal.")
+  (let [e (bit-and (sar w 23) 255)
+        m (bit-and w (hex 8388607))]
+    (if (== e 255)
+      (do (if (== m 0) (return CODE_NON_SHORTEST))
+          (if (== w (hex 2143289344)) (return CODE_NON_SHORTEST))
+          (return CODE_FLOAT)))
+    (if (== e 0)
+      (do (if (== m 0) (return CODE_NON_SHORTEST))
+          (return 0)))
+    (let [x (- e 127)]
+      (if (and (>= x (neg 14)) (<= x 15))
+        (do (if (low-zero m 13) (return CODE_NON_SHORTEST))
+            (return 0)))
+      (if (and (>= x (neg 24)) (<= x (neg 15)))
+        (if (low-zero m (- (neg 1) x)) (return CODE_NON_SHORTEST)))
+      (return 0))))
+
+(defn ^:pub ^I32 rfc-f64 [^I32 hi ^I32 lo]
+  (comment "A float64 pattern under RFC rules, as two halves: 0, or the refusal.")
+  (let [e (bit-and (sar hi 20) (hex 2047))
+        mh (bit-and hi (hex 1048575))]
+    (if (== e 2047)
+      (do (if (and (== mh 0) (== lo 0)) (return CODE_NON_SHORTEST))
+          (if (and (== hi (hex 2146959360)) (== lo 0)) (return CODE_NON_SHORTEST))
+          (return CODE_FLOAT)))
+    (if (== e 0)
+      (do (if (and (== mh 0) (== lo 0)) (return CODE_NON_SHORTEST))
+          (return 0)))
+    (let [x (- e 1023)]
+      (if (and (>= x (neg 126)) (<= x 127))
+        (do (if (low-zero lo 29) (return CODE_NON_SHORTEST))
+            (return 0)))
+      (if (and (>= x (neg 149)) (<= x (neg 127)))
+        (if (low-zero64 mh lo (- (neg 97) x)) (return CODE_NON_SHORTEST)))
+      (return 0))))

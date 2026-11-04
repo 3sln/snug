@@ -1,15 +1,18 @@
-;; The Bindle CBOR profile scanner: one forward pass over the bytes that
-;; accepts exactly what 3sln.me's cbor.mjs `decode` accepts and refuses
-;; everything it refuses WITH THE SAME CODE, deciding nothing on host numbers
-;; or strings (D003, D009). The order of checks is cbor.mjs's and is written
-;; down in docs/scanner.md; bb scan-test holds both targets to cbor.mjs's code
-;; on every vector and on seeded mutations.
+;; The CBOR profile scanner: one forward pass over the bytes that checks RFC
+;; 8949 §4.2.1 core deterministic encoding under the profile flags in
+;; o[O_PROFILE] (D120), deciding nothing on host numbers or strings (D003,
+;; D009). With the flags at 0 -- the Bindle profile -- it accepts exactly what
+;; 3sln.me's cbor.mjs `decode` accepts and refuses everything it refuses WITH
+;; THE SAME CODE. The order of checks is cbor.mjs's, extended for the other
+;; flags, and is written down in docs/scanner.md; bb scan-test holds both
+;; targets to cbor.mjs's code on every vector and on seeded mutations, and to
+;; the deterministic vectors under the deterministic preset.
 ;;
 ;; Every walk function answers a position (>= 0) or a NEGATED code, and
 ;; records the offset a refusal was decided at in o[O_ERR_POS].
 (ns snug.cbor.scan
   (:require [kin.lang :refer [defn let return set if while for do comment doc case declarefn]]
-            [snug.lang :refer [I32 Bool Bytes Ints Str + - neg rem sar ushr bit-and bit-or
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - neg rem sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 blen ia iset hex]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_NON_SHORTEST CODE_INDEFINITE
                                      CODE_MALFORMED CODE_KEY_TYPE CODE_KEY_ORDER
@@ -20,50 +23,63 @@
                                      CODE_TOO_MANY_ITEMS CODE_TOO_LARGE CODE_NOT_MAP
                                      O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH
                                      O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS O_ITEMS
-                                     O_HI O_LO O_CSTART MAX_BIGNUM_BYTES]]
+                                     O_HI O_LO O_CSTART O_PROFILE MAX_BIGNUM_BYTES
+                                     PF_KEYS PF_FLOATS PF_UNDEFINED PF_NONCHAR PF_HOST]]
             [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
                                     enter-container bytes-content]]
             [snug.cbor.text :refer [utf8-invalid-at]]
-            [snug.cbor.float :refer [check-f16 check-f32 check-f64]]
+            [snug.cbor.float :refer [check-f16 check-f32 check-f64 rfc-f16 rfc-f32 rfc-f64]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count
-                                    shape-ok]]))
+                                    shape-ok]]
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]))
 
-(declarefn item)
+(declarefn item scan-one)
 
 ;; ------------------------------------------------------------- leaves
 
+(defn ^:pub ^I32 text-nc [^IntsR o]
+  (comment "The noncharacter argument of the UTF-8 checks: non-zero when the profile"
+           "admits noncharacters in text (PF_NONCHAR).")
+  (return (bit-and (ia o O_PROFILE) PF_NONCHAR)))
+
 (defn ^:pub ^I32 scan-float [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
   (comment "A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then"
-           "`non_shortest` (cbor.mjs `simple`).")
+           "`non_shortest` (cbor.mjs `simple`); under PF_FLOATS the RFC 8949"
+           "deterministic rules of snug.cbor.float instead (D122).")
   (let [left (- end (+ pos 1))
+        rfc (!= (bit-and (ia o O_PROFILE) PF_FLOATS) 0)
         ^:mut c 0
         ^:mut w 0]
     (if (== ai 25)
       (do (set w 2)
           (if (< left 2) (return (fail o pos CODE_TRUNCATED)))
-          (set c (check-f16 (be16 b (+ pos 1))))))
+          (if rfc (set c (rfc-f16 (be16 b (+ pos 1)))) (set c (check-f16 (be16 b (+ pos 1)))))))
     (if (== ai 26)
       (do (set w 4)
           (if (< left 4) (return (fail o pos CODE_TRUNCATED)))
-          (set c (check-f32 (be32 b (+ pos 1))))))
+          (if rfc (set c (rfc-f32 (be32 b (+ pos 1)))) (set c (check-f32 (be32 b (+ pos 1)))))))
     (if (== ai 27)
       (do (set w 8)
           (if (< left 8) (return (fail o pos CODE_TRUNCATED)))
-          (set c (check-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5))))))
+          (if rfc
+            (set c (rfc-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5))))
+            (set c (check-f64 (be32 b (+ pos 1)) (be32 b (+ pos 5)))))))
     (if (!= c 0) (return (fail o pos c)))
     (return (+ (+ pos 1) w))))
 
 (defn ^:pub ^I32 scan-simple [^Ints o ^I32 pos ^I32 ai]
-  (comment "Major 7 other than a float: false, true and null only. ai 24 reaches"
-           "here only after its argument passed the shortest-form check.")
+  (comment "Major 7 other than a float: false, true and null; undefined (ai 23)"
+           "under PF_UNDEFINED. ai 24 reaches here only after its argument passed"
+           "the shortest-form check; unassigned simple values are always refused.")
   (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
+  (if (and (== ai 23) (!= (bit-and (ia o O_PROFILE) PF_UNDEFINED) 0)) (return (+ pos 1)))
   (return (fail o pos CODE_SIMPLE)))
 
 (defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
   (let [stop (take-len o pos p hi lo end)]
     (if (< stop 0) (return stop))
-    (let [bad (utf8-invalid-at b p stop)]
+    (let [bad (utf8-invalid-at b p stop (text-nc o))]
       (if (>= bad 0) (return (fail o bad CODE_TEXT)))
       (return stop))))
 
@@ -90,6 +106,21 @@
     (if (== major 0) (return (and (>= hi 0) (<= hi top))))
     (return (and (>= hi 0) (or (< hi top) (and (== hi top) (!= lo (neg 1))))))))
 
+(defn ^:pub ^Bool key-peek [^IntsR o ^I32 km ^Bool cose]
+  (comment "May a key whose major type km is NOT 3 (text keys never ask) start a"
+           "pair? PF_KEYS 2/3 admits any major, 1 majors 0/1; under text keys only"
+           "a cose map (the top-level map with the cose option) admits 0/1.")
+  (let [kk (bit-and (ia o O_PROFILE) PF_KEYS)]
+    (if (>= kk 2) (return true))
+    (if (> km 1) (return false))
+    (return (or (== kk 1) cose))))
+
+(defn ^:pub ^Bool key-label [^Bytes b ^IntsR o ^I32 s ^I32 km]
+  (comment "After the walk of an integer key (km 0/1) at s: under text keys it was"
+           "admitted as a cose label, so it must be a safe integer.")
+  (if (!= (bit-and (ia o O_PROFILE) PF_KEYS) 0) (return true))
+  (return (cose-label-ok b s km)))
+
 (defn ^I32 scan-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (comment "Per pair: the key's major type is PEEKED (key_type) before the key is"
            "scanned; order and duplicates are decided after it, by its encoded bytes.")
@@ -106,11 +137,11 @@
         (if (>= start n) (return (fail o start CODE_TRUNCATED)))
         (let [km (ushr (u8 b start) 5)]
           (if (!= km 3)
-            (if (not (and cose (<= km 1))) (return (fail o start CODE_KEY_TYPE))))
+            (if (not (key-peek o km cose)) (return (fail o start CODE_KEY_TYPE))))
           (set q (item b o start inner end))
           (if (< q 0) (return q))
           (if (<= km 1)
-            (if (not (cose-label-ok b start km)) (return (fail o start CODE_KEY_TYPE))))
+            (if (not (key-label b o start km)) (return (fail o start CODE_KEY_TYPE))))
           (if (>= prev-start 0)
             (do (let [order (compare-spans b prev-start prev-end start q)]
                   (if (== order 0) (return (fail o start CODE_DUPLICATE_KEY)))
@@ -209,6 +240,20 @@
       (if (not (shape-ok b (+ p 1) count)) (return (fail o pos CODE_NDARRAY)))
       (return stop))))
 
+(defn ^I32 scan-std [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 tag ^I32 depth ^I32 end]
+  (comment "A standard-set tag (snug.cbor.stdtags, D121): its content is an item at"
+           "depth + 1, walked first; then the content rule (tag); then a tag-24 byte"
+           "string's content as one item at depth + 2, bounded by its end (trailing"
+           "after it).")
+  (let [^I32 q (item b o p (+ depth 1) end)]
+    (if (< q 0) (return q))
+    (if (not (std-content-ok b tag p q)) (return (fail o pos CODE_TAG)))
+    (if (== tag 24)
+      (do (let [cs (std-inner b p)
+                ^I32 r (scan-one b o cs (+ depth 2) q)]
+            (if (< r 0) (return r)))))
+    (return q)))
+
 (defn ^I32 scan-tag [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (comment "A tag is a depth level, checked before its number is looked at.")
   (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
@@ -217,8 +262,9 @@
   (if (== lo 4) (return (scan-decimal b o pos p depth end)))
   (if (== lo 40) (return (scan-ndarray b o pos p depth end)))
   (let [size (typed-size lo)]
-    (if (== size 0) (return (fail o pos CODE_TAG)))
-    (return (scan-typed b o pos p lo size end))))
+    (if (> size 0) (return (scan-typed b o pos p lo size end)))
+    (if (std-allowed (ia o O_PROFILE) lo depth) (return (scan-std b o pos p lo depth end)))
+    (return (fail o pos CODE_TAG))))
 
 ;; ------------------------------------------------------------- the item
 
@@ -252,6 +298,21 @@
 
 ;; ------------------------------------------------------------- the API
 
+(defn ^:pub ^I32 scan-item [^Bytes b ^Ints o ^I32 pos ^I32 depth ^I32 end]
+  (comment "One item at pos and depth (the walk of `scan`), bounded by end: its end,"
+           "or a negated code. The resumable scanner walks a map key of a container"
+           "or tag kind with it, whole (D124).")
+  (return (item b o pos depth end)))
+
+(defn ^:pub ^I32 scan-one [^Bytes b ^Ints o ^I32 cs ^I32 depth ^I32 ce]
+  (comment "One item at cs, depth `depth`, that must end exactly at ce (a tag-24"
+           "payload, D121): ce, or a negated code -- truncated when it runs past"
+           "ce, trailing after it.")
+  (let [r (item b o cs depth ce)]
+    (if (< r 0) (return r))
+    (if (!= r ce) (return (fail o r CODE_TRAILING)))
+    (return r)))
+
 (defn ^:pub scan-options [^Ints o ^I32 top-any ^I32 cose ^I32 max-bytes ^I32 max-depth
                           ^I32 max-entries ^I32 max-items]
   (comment "Fill the options slots of o (length >= SCAN_OPTS_LEN). top-any: 0 the"
@@ -264,7 +325,15 @@
   (iset o O_MAX_BYTES max-bytes)
   (iset o O_MAX_DEPTH max-depth)
   (iset o O_MAX_ENTRIES max-entries)
-  (iset o O_MAX_ITEMS max-items))
+  (iset o O_MAX_ITEMS max-items)
+  (iset o O_PROFILE 0))
+
+(defn ^:pub scan-profile [^Ints o ^I32 flags]
+  (comment "Select the profile (D120): the flags of snug.cbor.codes (PF_*), only"
+           "the host bits (PF_HOST) kept. 0, as scan-options leaves it, is the"
+           "Bindle profile; PF_DETERMINISTIC the deterministic preset. Call after"
+           "scan-options.")
+  (iset o O_PROFILE (bit-and flags PF_HOST)))
 
 (doc "Scan `b` (length < 2^31) under the options in `o` (see `scanOptions` /"
      "`scan_options`). Answers 0 when cbor.mjs `decode` would accept, else"

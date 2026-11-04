@@ -3,6 +3,7 @@
 
 use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
+use crate::snug::cbor::scan::*;
 use crate::snug::cbor::text::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::dead::*;
@@ -224,7 +225,7 @@ pub fn text_scan(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, 
             return yld(ss, base, i);
         }
         let e: i32 = chunk_end(s, ss, i, stop, wend);
-        let t: i32 = utf8_window(b, i, e, stop);
+        let t: i32 = utf8_window(b, i, e, stop, text_nc(s));
         if t < 0 {
             return fail(s, (-1) - t, CODE_TEXT);
         }

@@ -3,7 +3,9 @@
 
 use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
+use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
+use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::vm::array::*;
 use crate::snug::vm::base::*;
@@ -30,6 +32,9 @@ pub const T_TAILRET: i32 = 4;
 pub const T_PAIR: i32 = 5;
 pub const T_PAIRRET: i32 = 6;
 pub const T_FIN: i32 = 7;
+pub const T_STD: i32 = 8;
+pub const T_STDRET: i32 = 9;
+pub const T_STDCHK: i32 = 10;
 pub fn mark_pair(ss: &mut [i32], pair: i32) {
     // The content of tag frame `pair` is framed: its verdict will come from notes.
     if pair >= 0 {
@@ -761,7 +766,7 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
             return err(ss, kq0);
         }
         if km <= 1 {
-            if !cose_label_ok(b, start, km) {
+            if !key_label(b, s, start, km) {
                 return err(ss, fail(s, start, CODE_KEY_TYPE));
             }
         }
@@ -881,7 +886,7 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
         return err(ss, kq);
     }
     if km <= 1 {
-        if !cose_label_ok(b, start, km) {
+        if !key_label(b, s, start, km) {
             return err(ss, fail(s, start, CODE_KEY_TYPE));
         }
     }
@@ -986,7 +991,7 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     let ai: i32 = ib & 31;
     let mut h: i32 = 1;
     if km != 3 {
-        if !((ss[(f + F_COSE) as usize] == 1) && (km <= 1)) {
+        if !key_peek(s, km, ss[(f + F_COSE) as usize] == 1) {
             return err(ss, fail(s, start, CODE_KEY_TYPE));
         }
     }
@@ -1000,7 +1005,21 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     if cut_yield(s, ss, start + base) {
         return yld(ss, base, start);
     }
-    let ke: i32 = key_span_end(b, start, end);
+    let mut ke: i32 = key_span_end(b, start, end);
+    // A key of any other kind (PF_KEYS any) is asked for whole: its end
+    // is known only once all its heads are in the window (D124).
+    if (ke < 0) && ((km > 1) && (km != 3)) {
+        let kx: i32 = key_end_any(b, start, end, wend);
+        if kx < (-1) {
+            let want: i32 = ((-2) - kx) - start;
+            let twice: i32 = 2 * (wend - start);
+            if twice > want {
+                return need(ss, base, start, twice);
+            }
+            return need(ss, base, start, want);
+        }
+        ke = kx;
+    }
     ss[(f + F_START) as usize] = start + base;
     ss[(f + F_KM) as usize] = km;
     if ke >= 0 {
@@ -1065,9 +1084,10 @@ pub fn ret_direct(ss: &mut [i32], base: i32, st: i32) -> i32 {
     return GO;
 }
 pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32) -> i32 {
-    // A tag item whose content crosses the window (tags 4/40 and typed
-    // arrays; a bignum is always asked whole): eval-tag's / dead-tag's checks,
-    // filter and TAG/TAGSET tests up to the content.
+    // A tag item whose content crosses the window (tags 4/40, typed arrays
+    // and the standard set's tags; a bignum is always asked whole):
+    // eval-tag's / dead-tag's checks, filter and TAG/TAGSET tests up to the
+    // content.
     let live: i32 = if_live(nq);
     let q: i32 = prologue(p, b, s, pos, end, ck, live);
     if q < 0 {
@@ -1076,13 +1096,14 @@ pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     let hi: i32 = s[(O_HI) as usize];
     let lo: i32 = s[(O_LO) as usize];
     let tsize: i32 = typed_size(lo);
+    let std: bool = ((lo != 4) && ((lo != 40) && (tsize == 0))) && std_allowed(s[(O_PROFILE) as usize], lo, d);
     if d >= s[(O_MAX_DEPTH) as usize] {
         return err(ss, fail(s, pos, CODE_DEPTH));
     }
     if hi != 0 {
         return err(ss, fail(s, pos, CODE_TAG));
     }
-    if (lo != 4) && ((lo != 40) && (tsize == 0)) {
+    if (lo != 4) && ((lo != 40) && ((tsize == 0) && (!std))) {
         return err(ss, fail(s, pos, CODE_TAG));
     }
     let f: i32 = fpush(b, ss, ka, base, FK_TAG);
@@ -1147,7 +1168,39 @@ pub fn open_tag(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
         }
         return cont(ss, f, T_CHEAD);
     }
+    if std {
+        // tags 0, 1, 24, 32 read their content again after its walk:
+        // pinned until then (D094 replay)
+        if ((lo == 0) || (lo == 1)) || ((lo == 24) || (lo == 32)) {
+            ss[(f + F_PIN) as usize] = q + base;
+        }
+        return cont(ss, f, T_STD);
+    }
     return cont(ss, f, T_PAIR);
+}
+pub fn std_need(b: &[u8], tag: i32, q: i32, stop: i32, wend: i32) -> i32 {
+    // How far from q a standard tag's content b[q, stop) must be in the window
+    // for dead-std-check: nothing for tags 21-23 and 55799 (q); else its first
+    // byte, then the whole of a text (tags 0, 32) or byte string (24), at most 9
+    // bytes for tag 1 (these four are pinned). Ask again once the window holds
+    // the answer.
+    if !(((tag == 0) || (tag == 1)) || ((tag == 24) || (tag == 32))) {
+        return q;
+    }
+    if (q < 0) || (q >= wend) {
+        return q + 1;
+    }
+    let major: i32 = (i32::cast_unsigned(b[(q) as usize] as i32) >> 5).cast_signed();
+    if tag == 1 {
+        return imin(stop, q + 9);
+    }
+    if (major == 3) && ((tag == 0) || (tag == 32)) {
+        return stop;
+    }
+    if (major == 2) && (tag == 24) {
+        return stop;
+    }
+    return q + 1;
 }
 pub fn tail_need(p: &[i32], s: &[i32], ss: &mut [i32], f: i32) -> i32 {
     // Does the typed array's content query read its content (bstr-tail's
@@ -1265,6 +1318,38 @@ pub fn tag_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         }
         return cont(ss, f, T_FIN);
     }
+    if ph == T_STD {
+        // A standard-set tag's content: the child item (live or dead) at d + 1.
+        ss[(f + F_PH) as usize] = T_STDRET;
+        if (live == 1) && (cnq > 0) {
+            let crs: i32 = cset_rec(p, s, ck);
+            let cfbs: i32 = fb + cset_frame(p, crs);
+            let ccks: i32 = next_ck(p, s, ck);
+            return call(ss, base, q, d + 1, cfbs, ccks, cnq, end, 0, MODE_ITEM, -1, -1);
+        }
+        return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
+    }
+    if ph == T_STDCHK {
+        // dead-std-check over the content, read again (pinned).
+        let stop_s: i32 = ss[(f + F_TSTOP) as usize] - base;
+        let rq1: i32 = std_need(b, lo, q, stop_s, wend);
+        let g1: i32 = ensure(ss, base, wend, q, rq1);
+        if suspended(g1) {
+            return g1;
+        }
+        let rq2: i32 = std_need(b, lo, q, stop_s, wend);
+        let g2: i32 = ensure(ss, base, wend, q, rq2);
+        if suspended(g2) {
+            return g2;
+        }
+        let vs: i32 = dead_std_check(b, s, pos, lo, q, stop_s, d);
+        if vs < 0 {
+            return err(ss, vs);
+        }
+        ss[(f + F_PIN) as usize] = -1;
+        ss[(f + F_TCS) as usize] = q + base;
+        return cont(ss, f, T_FIN);
+    }
     if ph == T_PAIR {
         if q < end {
             if (q < 0) || (q >= wend) {
@@ -1341,6 +1426,10 @@ pub fn tag_ret(b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i3
     // The tag's content (or its typed array's tail) ended at r (absolute).
     if ss[(f + F_PH) as usize] == T_TAILRET {
         return cont(ss, f, T_FIN);
+    }
+    if ss[(f + F_PH) as usize] == T_STDRET {
+        ss[(f + F_TSTOP) as usize] = r;
+        return cont(ss, f, T_STDCHK);
     }
     let pos: i32 = ss[(f + F_POS) as usize] - base;
     let q: i32 = ss[(f + F_Q) as usize] - base;

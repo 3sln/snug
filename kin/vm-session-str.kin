@@ -27,6 +27,7 @@
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ERR_POS O_ITEMS O_HI O_LO]]
             [snug.cbor.head :refer [fail read-arg take-len]]
             [snug.cbor.text :refer [utf8-window]]
+            [snug.cbor.scan :refer [text-nc]]
             [snug.vm.layout :refer [H_FLAGS H_S_LEAVES H_S_REGEX_INDEX FL_EMBED K_TEXT K_BYTES K_EMBED
                                     F_ADMITTED F_MATCHED F_EVAL VM_REGEX VM_REGCAP VM_EMBED VM_DLIM VM_D
                                     VM_BUDGET VM_W_REASON VM_W_SUB R_SIZE R_PATTERN R_BITS R_EMBEDDED
@@ -209,7 +210,7 @@
         (if (or (< i 0) (>= i wend)) (return (need ss base i 1)))
         (if (must-yield s ss) (return (yld ss base i)))
         (let [e (chunk-end s ss i stop wend)
-              t (utf8-window b i e stop)]
+              t (utf8-window b i e stop (text-nc s))]
           (if (< t 0) (return (fail s (- (neg 1) t) CODE_TEXT)))
           (if (and (== live 1) (== (ia ss (+ f F_RXOFF)) 0))
             (do (let [ra (rx-advance p b s ss f i t pos)]

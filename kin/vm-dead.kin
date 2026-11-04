@@ -16,12 +16,13 @@
                                      CODE_DUPLICATE_KEY CODE_TEXT CODE_TAG CODE_DECIMAL
                                      CODE_TYPED_ARRAY CODE_NDARRAY CODE_DEPTH CODE_TOO_MANY_ITEMS
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
-                                     CODE_BIGNUM MAX_BIGNUM_BYTES]]
+                                     O_PROFILE CODE_BIGNUM CODE_TRAILING MAX_BIGNUM_BYTES]]
             [snug.cbor.head :refer [fail read-arg take-len count-item enter-container bytes-content]]
             [snug.cbor.text :refer [utf8-invalid-at]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok]]
-            [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc]]
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner]]
             [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC]]
             [snug.vm.base :refer [charge c64 c64min]]))
 
@@ -32,7 +33,7 @@
   (let [stop (take-len s pos p hi lo end)]
     (if (< stop 0) (return stop))
     (if (not (charge s (c64 (- stop p)) pos)) (return (neg R_BUDGET)))
-    (let [bad (utf8-invalid-at b p stop)]
+    (let [bad (utf8-invalid-at b p stop (text-nc s))]
       (if (>= bad 0) (return (fail s bad CODE_TEXT)))
       (return stop))))
 
@@ -108,11 +109,11 @@
         (if (>= start end) (return (fail s start CODE_TRUNCATED)))
         (let [km (ushr (u8 b start) 5)]
           (if (!= km 3)
-            (if (not (and cose (<= km 1))) (return (fail s start CODE_KEY_TYPE))))
+            (if (not (key-peek s km cose)) (return (fail s start CODE_KEY_TYPE))))
           (set q (dead-item b s start inner end))
           (if (< q 0) (return q))
           (if (<= km 1)
-            (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+            (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
           (let [ko (key-order b s ps pe start q)]
             (if (< ko 0) (return ko)))
           (set ps start)
@@ -229,6 +230,24 @@
     (if (not (shape-ok b (+ p 1) count)) (return (fail s pos CODE_NDARRAY)))
     (return stop)))
 
+(defn ^:pub ^I32 dead-std-check [^Bytes b ^Ints s ^I32 pos ^I32 tag ^I32 q ^I32 stop ^I32 depth]
+  (comment "A standard-set tag at pos (depth `depth`) whose content item b[q, stop)"
+           "was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/64) for the"
+           "syntax scan of a tag-0/32 text; the content rule (tag); then a tag-24"
+           "byte string's content walked dead as one item at depth + 2, bounded by"
+           "its end (trailing after it). Answers stop, or a negated code. Shared by"
+           "the dead walk, the live walk and the resumable session.")
+  (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+  (if (and (or (== tag 0) (== tag 32)) (== (ushr (u8 b q) 5) 3))
+    (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET))))
+  (if (not (std-content-ok b tag q stop)) (return (fail s pos CODE_TAG)))
+  (if (== tag 24)
+    (do (let [cs (std-inner b q)
+              ^I32 r (dead-item b s cs (+ depth 2) stop)]
+          (if (< r 0) (return r))
+          (if (!= r stop) (return (fail s r CODE_TRAILING))))))
+  (return stop))
+
 (defn ^:pub ^I32 dead-tag [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (if (>= depth (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
   (if (!= hi 0) (return (fail s pos CODE_TAG)))
@@ -246,8 +265,12 @@
           (if (< st40 0) (return st40))
           (return (ndarray-check b s pos p st40)))))
   (let [size (typed-size lo)]
-    (if (== size 0) (return (fail s pos CODE_TAG)))
-    (return (dead-typed b s pos p lo size end))))
+    (if (> size 0) (return (dead-typed b s pos p lo size end)))
+    (if (std-allowed (ia s O_PROFILE) lo depth)
+      (do (let [^I32 qs (dead-item b s p (+ depth 1) end)]
+            (if (< qs 0) (return qs))
+            (return (dead-std-check b s pos lo p qs depth)))))
+    (return (fail s pos CODE_TAG))))
 
 (defn ^:pub ^I32 dead-item [^Bytes b ^Ints s ^I32 pos ^I32 depth ^I32 end]
   (comment "One dead item at pos: visit charged, counted, then its head (scan.kin `item`).")

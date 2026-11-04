@@ -5,6 +5,7 @@ use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
 use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
+use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
 use crate::snug::vm::array::*;
@@ -569,7 +570,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
             if left < cost {
                 break;
             }
-            if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
+            if utf8_invalid_at(b, q + h, (q + h) + lo, text_nc(s)) >= 0 {
                 break;
             }
             left -= cost;
@@ -707,7 +708,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         if !charge(s, c64(stop - q), pos) {
             return -R_BUDGET;
         }
-        let bad: i32 = utf8_invalid_at(b, q, stop);
+        let bad: i32 = utf8_invalid_at(b, q, stop, text_nc(s));
         if bad >= 0 {
             return fail(s, bad, CODE_TEXT);
         }
@@ -771,7 +772,8 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     // TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried
     // with the content typesets of the leaves whose number matched (bignum and
     // typed-array content: a schema child, not an item; tag 4/40: the inner
-    // array as an item), the scanner's tag semantics, then the leaves.
+    // array as an item; a standard-set tag: its content item, D121), the
+    // scanner's tag semantics, then the leaves.
     if d >= s[(O_MAX_DEPTH) as usize] {
         return fail(s, pos, CODE_DEPTH);
     }
@@ -780,6 +782,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     }
     let big: bool = (lo == 2) || (lo == 3);
     let tsize: i32 = typed_size(lo);
+    let std: bool = ((!big) && ((lo != 4) && ((lo != 40) && (tsize == 0)))) && std_allowed(s[(O_PROFILE) as usize], lo, d);
     let cr: i32 = cset_rec(p, s, ck);
     let w: i32 = cset_width(p, cr);
     let fw: i32 = cset_frame(p, cr);
@@ -790,7 +793,7 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     let mut cnq: i32 = 0;
     let mut cs: i32 = q;
     let mut stop: i32;
-    if (!big) && ((lo != 4) && ((lo != 40) && (tsize == 0))) {
+    if (!big) && ((lo != 4) && ((lo != 40) && ((tsize == 0) && (!std)))) {
         return fail(s, pos, CODE_TAG);
     }
     if big {
@@ -847,6 +850,19 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
             if rb < 0 {
                 return rb;
             }
+        }
+    } else if std {
+        if cnq > 0 {
+            stop = eval_item(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0);
+        } else {
+            stop = dead_item(b, s, q, d + 1, end);
+        }
+        if stop < 0 {
+            return stop;
+        }
+        stop = dead_std_check(b, s, pos, lo, q, stop, d);
+        if stop < 0 {
+            return stop;
         }
     } else {
         let pc: i32 = pair_check(b, s, pos, q, if_code(lo), end);
@@ -1276,7 +1292,7 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
         return kq;
     }
     if km <= 1 {
-        if !cose_label_ok(b, start, km) {
+        if !key_label(b, s, start, km) {
             return fail(s, start, CODE_KEY_TYPE);
         }
     }
@@ -1467,7 +1483,7 @@ pub fn pre_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], q: i32, end: 
         if (lo < p[(lb + 2) as usize]) || (lo > p[(lb + 3) as usize]) {
             return -1;
         }
-        if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
+        if utf8_invalid_at(b, q + h, (q + h) + lo, text_nc(s)) >= 0 {
             return -1;
         }
         s[(O_LO) as usize] = 3 + c64(lo);
@@ -1560,7 +1576,7 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         if (s[(O_ITEMS) as usize] + 2) > maxit {
             break;
         }
-        if utf8_invalid_at(b, start + kh, (start + kh) + kl) >= 0 {
+        if utf8_invalid_at(b, start + kh, (start + kh) + kl, text_nc(s)) >= 0 {
             break;
         }
         let kend: i32 = (start + kh) + kl;
@@ -1789,7 +1805,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
             }
             let km: i32 = (i32::cast_unsigned(b[(start) as usize] as i32) >> 5).cast_signed();
             if km != 3 {
-                if !(cose && (km <= 1)) {
+                if !key_peek(s, km, cose) {
                     return fail(s, start, CODE_KEY_TYPE);
                 }
             }
@@ -1799,7 +1815,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     return q;
                 }
                 if km <= 1 {
-                    if !cose_label_ok(b, start, km) {
+                    if !key_label(b, s, start, km) {
                         return fail(s, start, CODE_KEY_TYPE);
                     }
                 }
@@ -1903,7 +1919,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                         return kq;
                     }
                     if km <= 1 {
-                        if !cose_label_ok(b, start, km) {
+                        if !key_label(b, s, start, km) {
                             return fail(s, start, CODE_KEY_TYPE);
                         }
                     }
@@ -2178,7 +2194,7 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
         if !charge(s, c64(stop - q), pos) {
             return -R_BUDGET;
         }
-        let bad: i32 = utf8_invalid_at(b, q, stop);
+        let bad: i32 = utf8_invalid_at(b, q, stop, text_nc(s));
         if bad >= 0 {
             return fail(s, bad, CODE_TEXT);
         }

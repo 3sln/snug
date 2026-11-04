@@ -21,7 +21,7 @@
             [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_MAX_BYTES O_ERR_POS
-                                     O_HI O_LO]]
+                                     O_HI O_LO O_PROFILE]]
             [snug.cbor.head :refer [fail head-size be16 be32]]
             [snug.cbor.tags :refer [typed-size]]
             [snug.vm.layout :refer [HEADER_WORDS H_POOL_BYTES H_S_RULES VM_BUDGET VM_POS VM_FRAMES VM_RULE R_TYPE
@@ -34,7 +34,7 @@
                                    SS_QUANTUM SS_SP SS_RET SS_KEEP SS_ATOP SS_FRAMES SS_MAXF SS_CODE SS_WB0
                                    SS_WORK SS_CUT SS_CHN SS_CHAIN SS_PSTK SS_PCAP SS_PROG SS_RTS SS_RNQ
                                    SS_STEPS IT_POS IT_D IT_FB IT_CK IT_NQ IT_END IT_CTX IT_MODE IT_NOTE
-                                   IT_PAIR SS_ABYTES SS_HDR PH_START PH_ITEM PH_RET PH_FRAME PH_DONE
+                                   IT_PAIR SS_ABYTES SS_PROF SS_HDR PH_START PH_ITEM PH_RET PH_FRAME PH_DONE
                                    MODE_ITEM MODE_VSEQ MODE_DSEQ MODE_FRAME FW FK_ARR FK_MAP FK_TAG FK_TEXT
                                    FK_BSTR FK_DARR FK_DMAP FK_DTEXT FK_DSEQ F_KIND F_PH F_PIN F_N F_EL
                                    nframes vms-session-words vms-arena-bytes fbase ftop fpop ret ensure
@@ -87,7 +87,8 @@
     (iset ss SS_CHAIN (+ (+ SS_HDR (* nf FW)) (* 2 nf)))
     (iset ss SS_CHN (neg 1))
     (iset ss SS_ATOP 0)
-    (iset ss SS_ABYTES (blen ka)))
+    (iset ss SS_ABYTES (blen ka))
+    (iset ss SS_PROF (ia s O_PROFILE)))
   (return 0))
 
 (defn ^:pub ^I32 vms-need-offset [^IntsR ss]

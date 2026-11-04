@@ -1,5 +1,5 @@
-// Views and a cursor over CHECKED Bindle CBOR (architecture §16, owner
-// decision D026; first slice, DEVLOG P5.2, D050-D054).
+// Views and a cursor over CHECKED CBOR (architecture §16, owner decision D026;
+// first slice, DEVLOG P5.2, D050-D054), under any profile (D120).
 //
 //   view(bytes, { schema, rule, borrow, directories, ...decodeOptions }) -> View
 //
@@ -29,6 +29,8 @@ import { navInit, navHead, navSkip, navLength, navChild, navFind, navDir, navDir
 import { scan } from './scan.mjs';
 import { build } from './build.mjs';
 import { TYPED_BY_TAG } from './values.mjs';
+import { profileFlags, keysOf } from './profiles.mjs';
+import { Writer } from './writer.mjs';
 
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const encoder = new TextEncoder();
@@ -46,7 +48,10 @@ class Message {
     this.cose = opts.cose === true;
     this.objects = opts.objects;
     this.schema = opts.schema;
-    this.limits = { maxBytes: opts.maxBytes, maxDepth: opts.maxDepth, maxEntries: opts.maxEntries,
+    this.keys = keysOf(profileFlags(opts));
+    this.profile = { wire: opts.wire, keys: opts.keys, tags: opts.tags, floats: opts.floats,
+      undefinedValue: opts.undefinedValue, noncharacters: opts.noncharacters };
+    this.limits = { ...this.profile, maxBytes: opts.maxBytes, maxDepth: opts.maxDepth, maxEntries: opts.maxEntries,
       maxItems: opts.maxItems, maxBignumBytes: opts.maxBignumBytes, budget: opts.budget, cose: this.cose };
     this.dirs = opts.directories === true ? new Map() : null;
     this.dirWords = 0;
@@ -87,8 +92,8 @@ function kindAt(m, p) {
     case 3: return 'text';
     case 4: return 'array';
     case 5: return 'map';
-    case 6: { const t = o[N_LO]; return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : 'typed'; }
-    default: { const ai = o[N_AI]; return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : 'float'; }
+    case 6: { const t = o[N_LO]; return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : TYPED_BY_TAG.has(t) ? 'typed' : 'tagged'; }
+    default: { const ai = o[N_AI]; return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : 'float'; }
   }
 }
 
@@ -181,16 +186,17 @@ function payloadAt(m, p) {
   return [s, s + m.o[N_LO]];
 }
 
-/** The decoded key at q (text, or an integer label in the top-level map of a cose view). */
+/** The decoded key at q: text, an integer, or (any key kind) the key's value as the builder makes it. */
 function keyAt(m, q) {
-  const c = m.head(q), o = m.o;
-  if (o[N_MAJOR] === 3) return textOf(m.b, c, o[N_LO]);
-  return intAt(m, q);
+  const c = m.head(q), o = m.o, major = o[N_MAJOR];
+  if (major === 3) return textOf(m.b, c, o[N_LO]);
+  if (major <= 1) return intAt(m, q);
+  return build(m.b.subarray(q, m.skip(q)), { objects: m.objects });
 }
 
 // The encoded form of a lookup key, in a reused scratch (synchronous use only).
 let keyBuf = new Uint8Array(64);
-function encodeKey(key, cose) {
+function encodeKey(key, cose, m) {
   if (typeof key === 'string') {
     // short ASCII keys (the common case) without the encoder
     const len = key.length;
@@ -212,8 +218,7 @@ function encodeKey(key, cose) {
     else { keyBuf[s] = 0x7a; keyBuf[s + 1] = written >>> 24; keyBuf[s + 2] = (written >> 16) & 255; keyBuf[s + 3] = (written >> 8) & 255; keyBuf[s + 4] = written & 255; }
     return [s, 9 + written];
   }
-  if (cose && (typeof key === 'number' || typeof key === 'bigint')) {
-    if (typeof key === 'number' && !Number.isSafeInteger(key)) return null;
+  if ((cose || (m !== undefined && m.keys !== 0)) && (typeof key === 'bigint' || (typeof key === 'number' && Number.isSafeInteger(key) && !Object.is(key, -0)))) {
     let n = BigInt(key), major = 0;
     if (n < 0n) { major = 1; n = -1n - n; }
     if (n >= 1n << 64n) return null;
@@ -224,14 +229,22 @@ function encodeKey(key, cose) {
     for (let i = w; i >= 1; i--) { keyBuf[i] = Number(n & 255n); n >>= 8n; }
     return [0, 1 + w];
   }
+  if (m !== undefined && m.keys >= 2) {
+    // any key kind: the key's deterministic encoding under the view's profile (an unencodable key finds nothing)
+    let b;
+    try { b = new Writer({ ...m.profile, keysSorted: false }).value(key).finish(); } catch { return null; }
+    if (keyBuf.length < b.length) keyBuf = new Uint8Array(Math.max(b.length, keyBuf.length * 2));
+    keyBuf.set(b, 0);
+    return [0, b.length];
+  }
   return null;
 }
 
 /** The value position of `key` in the map at p (with n pairs), or -1. */
 function findIn(m, p, n, key, cose) {
-  const span = encodeKey(key, cose);
+  const span = encodeKey(key, cose, m);
   if (span === null) {
-    if (typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') throw new TypeError('snug view: a map key is a string (or an integer label in a cose view)');
+    if (m.keys < 2 && typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') throw new TypeError('snug view: a map key is a string or an integer here');
     return -1;
   }
   const d = m.dir(p, n);
@@ -258,7 +271,8 @@ function valueAt(m, p, depth) {
 /** An item of a checked message. Immutable; cheap (message + offset + depth). */
 export class View {
   constructor(m, p, depth) { this._m = m; this._p = p; this._d = depth; }
-  /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'array' | 'map' | 'decimal' | 'ndarray' | 'typed' */
+  /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'array' | 'map' | 'decimal' | 'ndarray' |
+   * 'typed' | 'tagged' (a standard-set tag, D121) */
   get kind() { return kindAt(this._m, this._p); }
   /** Entries of an array or map, bytes of a bytes/text item, elements of a typed array; else undefined. */
   get length() { return lengthAt(this._m, this._p); }
@@ -268,7 +282,8 @@ export class View {
   /** Was the message borrowed (true) or copied at open (false)? */
   get borrowed() { return this._m.borrowed; }
 
-  /** The value under `key` in a map (a string; an integer label in the top-level map of a cose view), or undefined. */
+  /** The value under `key` in a map, or undefined: a string; an integer (number or bigint) when the profile admits
+   * integer keys (or in the top-level map of a cose view); any value with keys 'any', compared by its encoding. */
   get(key) {
     const m = this._m, p = this._p;
     m.head(p); want(m.o[N_MAJOR] === 5, 'a map');
@@ -308,6 +323,15 @@ export class View {
   text() { return textAt(this._m, this._p); }
   bool() { return boolAt(this._m, this._p); }
   isNull() { return isNullAt(this._m, this._p); }
+  isUndefined() { const m = this._m; m.head(this._p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 23; }
+  /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays), else undefined. */
+  get tag() { const m = this._m; m.head(this._p); return m.o[N_MAJOR] === 6 ? m.o[N_LO] >>> 0 : undefined; }
+  /** A View of a tagged item's content. */
+  content() {
+    const m = this._m, c = m.head(this._p);
+    want(m.o[N_MAJOR] === 6, 'a tagged item');
+    return new View(m, c, this._d + 1);
+  }
   /** A byte string's content (or a typed array's little-endian payload) as a zero-copy alias; read-only by contract. */
   bytes() { const [s, e] = payloadAt(this._m, this._p); return this._m.b.subarray(s, e); }
   /** The same bytes, copied. */
@@ -381,7 +405,7 @@ export class Cursor {
   /** Does the current entry's key equal this string, compared as encoded bytes (no allocation)? */
   keyIs(s) {
     if (this._k < 0) return false;
-    const m = this._m, e = m.skip(this._k), span = encodeKey(s, false);
+    const m = this._m, e = m.skip(this._k), span = encodeKey(s, false, undefined);
     if (span === null || e - this._k !== span[1] - span[0]) return false;
     for (let i = 0; i < e - this._k; i++) if (m.b[this._k + i] !== keyBuf[span[0] + i]) return false;
     return true;

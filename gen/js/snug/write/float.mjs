@@ -116,3 +116,87 @@ export function putFloat(out, at, hi, lo) {
     out[at + 2] = h;
     return at + 3;
 }
+
+export function floatWidthRfc(hi, lo) {
+    // 2, 4 or 8: the shortest encoded width of binary64 hi:lo under the RFC
+    // rules (NaN, infinities and zeros: 2).
+    const e = (hi >> 20) & 0x7ff;
+    const mh = hi & 0xfffff;
+    if (e === 2047) {
+        return 2;
+    }
+    if (e === 0) {
+        if ((mh === 0) && (lo === 0)) {
+            return 2;
+        }
+        return 8;
+    }
+    const x = e - 1023;
+    if ((x >= (-14)) && (x <= 15)) {
+        if ((lo === 0) && lowZero(mh, 10)) {
+            return 2;
+        }
+    }
+    if ((x >= (-24)) && (x <= (-15))) {
+        if (lowZero64(mh, lo, 28 - x)) {
+            return 2;
+        }
+    }
+    if ((x >= (-126)) && (x <= 127)) {
+        if (lowZero(lo, 29)) {
+            return 4;
+        }
+    }
+    if ((x >= (-149)) && (x <= (-127))) {
+        if (lowZero64(mh, lo, (-97) - x)) {
+            return 4;
+        }
+    }
+    return 8;
+}
+
+export function f16BitsRfc(hi, lo) {
+    // The float16 pattern float-width-rfc chose 2 for: f16-bits, or a NaN
+    // (0x7e00), an infinity or a zero with its sign.
+    const s = ((hi >>> 16) | 0) & 0x8000;
+    const e = (hi >> 20) & 0x7ff;
+    const mh = hi & 0xfffff;
+    if (e === 2047) {
+        if ((mh !== 0) || (lo !== 0)) {
+            return 0x7e00;
+        }
+        return s | 0x7c00;
+    }
+    if ((e === 0) && ((mh === 0) && (lo === 0))) {
+        return s;
+    }
+    return f16Bits(hi);
+}
+
+export function putFloatRfc(out, at, hi, lo) {
+    // put-float under the RFC rules: the shortest float for binary64 hi:lo at
+    // `at`, never refused: the position after it, or `(too-short need)`.
+    if ((at < 0) || (at > out.length)) {
+        return -CODE_MALFORMED;
+    }
+    const w = floatWidthRfc(hi, lo);
+    if ((w + 1) > (out.length - at)) {
+        return tooShort(w + 1);
+    }
+    if (w === 8) {
+        out[at] = 0xfb;
+        put32(out, at + 1, hi);
+        put32(out, at + 5, lo);
+        return at + 9;
+    }
+    if (w === 4) {
+        out[at] = 0xfa;
+        put32(out, at + 1, f32Bits(hi, lo));
+        return at + 5;
+    }
+    const h = f16BitsRfc(hi, lo);
+    out[at] = 0xf9;
+    out[at + 1] = (h >>> 8) | 0;
+    out[at + 2] = h;
+    return at + 3;
+}

@@ -49,7 +49,7 @@ function runJs(c, trap = false, generic = false, s1 = false) {
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
-  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0)]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default)
+  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0), c.lim[9] ?? 0]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default); word 9: the profile flags (D120)
   const code = c.span
     ? vmValidateSpan(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out)
     : vmValidate(p, b, c.rule, input, lim, s, out);
@@ -126,7 +126,7 @@ if (rustBin) {
   const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
   const caseLine = (c, w8) => {
     const h = c.bytes.length ? hex(c.bytes) : '-';
-    const l = [...c.lim.slice(0, 8), w8].join(' ');
+    const l = [...c.lim.slice(0, 8), w8, c.lim[9] ?? 0].join(' ');
     return c.span ? `span ${c.prog} ${c.rule} ${c.span.join(' ')} ${l} ${h}` : `case ${c.prog} ${c.rule} ${l} ${h}`;
   };
   for (const c of cases) lines.push(caseLine(c, 0));
@@ -134,7 +134,7 @@ if (rustBin) {
   // host-rendering parity: corpus and assembled cases with default limits
   const hostCases = [];
   cases.forEach((c, i) => {
-    if (c.span || !(c.corpus || i >= asmStart) || c.lim.slice(2, 8).some(x => x !== -1)) return;
+    if (c.span || !(c.corpus || i >= asmStart) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[9] ?? 0) !== 0) return;
     hostCases.push(i);
     lines.push(`host ${c.prog} ${c.rule} ${c.lim[0] === 0 ? 1 : 0} ${c.lim[1]} ${c.bytes.length ? hex(c.bytes) : '-'}`);
   });
@@ -186,7 +186,7 @@ if (process.env.SNUG_VM_WASM) {
     }
     tried++;
     new Uint8Array(mem.buffer, ex.snug_buf(), c.bytes.length).set(c.bytes);
-    new Int32Array(mem.buffer, ex.snug_lim_buf(), 9).set([...c.lim.slice(0, 8), 0]);
+    new Int32Array(mem.buffer, ex.snug_lim_buf(), 10).set([...c.lim.slice(0, 8), 0, c.lim[9] ?? 0]);
     const code = ex.snug_vm_validate(c.bytes.length, c.rule);
     const o = new Int32Array(mem.buffer, ex.snug_out_buf(), 8 + 2 * 257);
     const got = code < 0 ? `ERR ${code}` : Array.from(o.slice(0, 8 + 2 * o[6])).join(' ');

@@ -9,6 +9,8 @@ import { createRandom, randomValue, randomMap } from './corpus.mjs';
 // encode() is the walk over the Writer since P5.4; the Phase 2 encoder (frozen) and cbor.mjs are the oracles.
 import { encode as encodeP2 } from '../../../bench/baseline/encode-p2.mjs';
 const { encode, decode, SnugFault, Decimal, NDArray, Float16Bytes, profiles } = snug;
+// Tests held to cbor.mjs / the P2 encoder assert the Bindle profile (D120): the Writer gets the preset explicitly.
+const B = profiles.bindle;
 
 const keyBytes = k => encode(k, { top: 'any' });
 const byEncoded = (a, b) => Buffer.compare(Buffer.from(keyBytes(a)), Buffer.from(keyBytes(b)));
@@ -101,7 +103,7 @@ test('value() refuses what encode refuses, with its code, never echoing the valu
   for (const [value, code, options] of refusals) {
     assert.throws(() => encodeP2(value), { code });
     assert.throws(() => encode(value, options), { code });
-    const w = new Writer(options);
+    const w = new Writer({ ...B, ...options });
     assert.throws(() => w.value(value), e => e instanceof SnugFault && e.code === code && !e.message.includes('private'));
     assert.equal(w.failure, code);
     assert.throws(() => w.null(), { code: 'writer_failed' });
@@ -133,7 +135,7 @@ test('limits: depth, entries, items, bytes and the cycle match encode', () => {
 });
 
 test('typed calls: integers, floats and bigints choose the profile form; bad arguments are refused', () => {
-  const one = f => { const w = new Writer(); f(w); return toHex(w.finish()); };
+  const one = f => { const w = new Writer(B); f(w); return toHex(w.finish()); };
   assert.equal(one(w => w.uint(0)), '00');
   assert.equal(one(w => w.uint(2 ** 32)), '1b0000000100000000');
   assert.equal(one(w => w.uint(2n ** 64n - 1n)), '1bffffffffffffffff');
@@ -146,10 +148,10 @@ test('typed calls: integers, floats and bigints choose the profile form; bad arg
   assert.equal(one(w => w.float(5e-324)), 'fb0000000000000001');
   for (const x of [2 ** -149, 3 * 2 ** -140, 2 ** -127, 2 ** -126, 2 ** -24, 3 * 2 ** -20, 2 ** -15, 2 ** -14, 65503.5, 65504.5, 2 ** -1074, 2 ** -1022, 3.4028234663852886e38, 1e-310])
     for (const y of [x, -x]) assert.equal(one(w => w.float(y)), toHex(baseline.encode(y)));
-  for (const x of [1, 0, -0, NaN, Infinity, 2 ** 53 - 1]) assert.throws(() => new Writer().float(x), { code: 'float' });
+  for (const x of [1, 0, -0, NaN, Infinity, 2 ** 53 - 1]) assert.throws(() => new Writer(B).float(x), { code: 'float' });
   for (const [m, x] of [['uint', -1], ['uint', 1.5], ['uint', 2n ** 64n], ['uint', -1n], ['int', 1.5], ['int', -0], ['int', 2 ** 53], ['int', '1'],
     ['bigint', 1], ['float', 1n], ['bool', 0], ['text', 1], ['bytes', [1]], ['typed', new Uint8Array(1)], ['decimal', 1.5], ['ndarray', [1]]]) {
-    const w = new Writer();
+    const w = new Writer(B);
     assert.throws(() => w[m](x), { code: 'unsupported' }, `${m}`);
     assert.throws(() => w.null(), { code: 'writer_failed' });
   }
@@ -190,7 +192,7 @@ test('grammar: counts, keys before values, closed containers, one root; misuse f
 });
 
 test('map keys: duplicates, keysSorted verification, text keys only, cose labels in the top-level map', () => {
-  const run = (options, f) => { const w = new Writer(options); f(w); return toHex(w.finish()); };
+  const run = (options, f) => { const w = new Writer({ ...B, ...options }); f(w); return toHex(w.finish()); };
   assert.throws(() => run({}, w => w.beginMap(2).key('a').uint(1).key('a').uint(2).end()), { code: 'duplicate_key' });
   assert.throws(() => run({}, w => w.beginMap(3).key('b').uint(1).key('c').uint(1).key('b').uint(2).end()), { code: 'duplicate_key' });
   assert.throws(() => run({ keysSorted: true }, w => w.beginMap(2).key('b').uint(1).key('a')), { code: 'key_order' });
@@ -206,9 +208,9 @@ test('map keys: duplicates, keysSorted verification, text keys only, cose labels
   const want = toHex(encode(cose, { cose: true }));
   assert.equal(run({ cose: true }, w => drive(w, cose, 'given')), want);
   assert.equal(run({ cose: true, keysSorted: true }, w => drive(w, cose, 'sorted')), want);
-  assert.equal(toHex(writeValue(cose, { cose: true })), want);
-  assert.throws(() => writeValue(new Map([[1.5, 1]]), { cose: true }), { code: 'key_type' });
-  assert.throws(() => writeValue({ a: new Map([[1, 1]]) }, { cose: true }), { code: 'unsupported' });
+  assert.equal(toHex(writeValue(cose, { ...B, cose: true })), want);
+  assert.throws(() => writeValue(new Map([[1.5, 1]]), { ...B, cose: true }), { code: 'key_type' });
+  assert.throws(() => writeValue({ a: new Map([[1, 1]]) }, { ...B, cose: true }), { code: 'unsupported' });
 });
 
 test('value() mixes with typed calls; omitUndefined as encode', () => {

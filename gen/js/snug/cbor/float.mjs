@@ -118,3 +118,81 @@ export function checkF64(hi, lo) {
     }
     return 0;
 }
+
+export function rfcF16(h) {
+    // A float16 pattern under RFC rules: 0, or float for a non-canonical NaN.
+    if (((h & 0x7c00) === 0x7c00) && ((h & 0x3ff) !== 0)) {
+        if (h !== 0x7e00) {
+            return CODE_FLOAT;
+        }
+    }
+    return 0;
+}
+
+export function rfcF32(w) {
+    // A float32 pattern under RFC rules: 0, or the refusal.
+    const e = (w >> 23) & 255;
+    const m = w & 0x7fffff;
+    if (e === 255) {
+        if (m === 0) {
+            return CODE_NON_SHORTEST;
+        }
+        if (w === 0x7fc00000) {
+            return CODE_NON_SHORTEST;
+        }
+        return CODE_FLOAT;
+    }
+    if (e === 0) {
+        if (m === 0) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    const x = e - 127;
+    if ((x >= (-14)) && (x <= 15)) {
+        if (lowZero(m, 13)) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    if ((x >= (-24)) && (x <= (-15))) {
+        if (lowZero(m, (-1) - x)) {
+            return CODE_NON_SHORTEST;
+        }
+    }
+    return 0;
+}
+
+export function rfcF64(hi, lo) {
+    // A float64 pattern under RFC rules, as two halves: 0, or the refusal.
+    const e = (hi >> 20) & 0x7ff;
+    const mh = hi & 0xfffff;
+    if (e === 2047) {
+        if ((mh === 0) && (lo === 0)) {
+            return CODE_NON_SHORTEST;
+        }
+        if ((hi === 0x7ff80000) && (lo === 0)) {
+            return CODE_NON_SHORTEST;
+        }
+        return CODE_FLOAT;
+    }
+    if (e === 0) {
+        if ((mh === 0) && (lo === 0)) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    const x = e - 1023;
+    if ((x >= (-126)) && (x <= 127)) {
+        if (lowZero(lo, 29)) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    if ((x >= (-149)) && (x <= (-127))) {
+        if (lowZero64(mh, lo, (-97) - x)) {
+            return CODE_NON_SHORTEST;
+        }
+    }
+    return 0;
+}

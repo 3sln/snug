@@ -5,6 +5,7 @@ use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
 use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
+use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
 
@@ -48,10 +49,12 @@ pub const F_NDSEEN: i32 = 16;
 pub const F_COUNT: i32 = 17;
 pub const F_TPOS: i32 = 18;
 pub const F_DIMS: i32 = 19;
+pub const F_STAG: i32 = 27;
 pub const K_ARRAY: i32 = 1;
 pub const K_MAP: i32 = 2;
 pub const K_DEC: i32 = 3;
 pub const K_ND: i32 = 4;
+pub const K_STD: i32 = 5;
 pub const PH_START: i32 = 0;
 pub const PH_ITEM: i32 = 1;
 pub const PH_DONE: i32 = 2;
@@ -63,6 +66,7 @@ pub const PH_BIGNUM: i32 = 7;
 pub const PH_TYPEDHEAD: i32 = 8;
 pub const PH_PAIR: i32 = 9;
 pub const PH_END: i32 = 10;
+pub const PH_KSKIP: i32 = 11;
 pub const RS_NEED: i32 = -1;
 pub const RS_YIELD: i32 = -2;
 pub fn rscan_scratch_len(max_depth: i32, max_bytes: i32) -> i32 {
@@ -257,6 +261,26 @@ pub fn note_head(b: &[u8], s: &mut [i32], sp: i32, pos: i32, p: i32, major: i32,
     let tb: i32 = S_FRAMES + ((sp - 1) * FW);
     let kind: i32 = s[(tb + F_KIND) as usize];
     let elem: i32 = s[(tb + F_STATE) as usize];
+    if kind == K_STD {
+        // A standard-set tag's content (D121): the verdict its head decides --
+        // tag 1's whole rule (a float's payload is part of its head), the
+        // major type for 0, 24 and 32 (their content is checked whole at the end).
+        let stag: i32 = s[(tb + F_STAG) as usize];
+        let mut ok: i32 = 1;
+        if stag == 1 {
+            if !std_content_ok(b, 1, pos, p) {
+                ok = 0;
+            }
+        }
+        if ((stag == 0) || (stag == 32)) && (major != 3) {
+            ok = 0;
+        }
+        if (stag == 24) && (major != 2) {
+            ok = 0;
+        }
+        s[(tb + F_EXPOK) as usize] = ok;
+        return 0;
+    }
     if kind == K_DEC {
         if elem == 0 {
             if exponent_ok(b, pos) {
@@ -353,6 +377,50 @@ pub(crate) fn top_notes(s: &[i32], sp: i32) -> bool {
     let tf: i32 = S_FRAMES + ((sp - 1) * FW);
     return (s[(tf + F_KIND) as usize] >= K_DEC) || (s[(tf + F_SHAPE) as usize] == 1);
 }
+pub(crate) fn std_want(b: &[u8], s: &[i32], sp: i32, pos: i32, tend: i32) -> i32 {
+    // Where the window must reach before the item at pos (its head in the
+    // window) is walked: past its end when it is the text content of a tag 0
+    // or 32, or the byte-string content of a tag 24 -- the content is checked
+    // whole when its walk ends (D121), so it is asked for whole first; else pos.
+    if sp == 0 {
+        return pos;
+    }
+    let tb: i32 = S_FRAMES + ((sp - 1) * FW);
+    if s[(tb + F_KIND) as usize] != K_STD {
+        return pos;
+    }
+    let stag: i32 = s[(tb + F_STAG) as usize];
+    let ib: i32 = b[(pos) as usize] as i32;
+    let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+    let ai: i32 = ib & 31;
+    let mut len: i32 = ai;
+    if !(((major == 3) && ((stag == 0) || (stag == 32))) || ((major == 2) && (stag == 24))) {
+        return pos;
+    }
+    if ai > 26 {
+        return pos;
+    }
+    let h: i32 = head_size(ai);
+    if (pos + h) > tend {
+        return pos;
+    }
+    if ai == 24 {
+        len = b[(pos + 1) as usize] as i32;
+    }
+    if ai == 25 {
+        len = be16(b, pos + 1);
+    }
+    if ai == 26 {
+        len = be32(b, pos + 1);
+    }
+    if len < 0 {
+        return pos;
+    }
+    if len > (tend - (pos + h)) {
+        return pos;
+    }
+    return (pos + h) + len;
+}
 pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo: i32) -> i32 {
     // Run the walk over the window b, whose first byte is message offset
     // base-hi:base-lo, until it accepts (0), refuses (a code; the error offset
@@ -400,6 +468,12 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
             }
             if work <= 0 {
                 return pause(b, s, base, phase, pos, cend, sp, RS_YIELD);
+            }
+            if cnotes && (pos < tend) {
+                let swant: i32 = std_want(b, s, sp, pos, tend);
+                if swant > wend {
+                    return suspend(b, s, base, phase, pos, cend, sp, pos, swant - pos);
+                }
             }
             work -= 1;
             r = count_item(o, pos);
@@ -452,6 +526,12 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                 r = take_len(o, pos, p, hi, lo, tend);
                 if r < 0 {
                     break;
+                }
+                if (s[(S_KACT) as usize] != 0) && (r > wend) {
+                    cend = r;
+                    pos = p;
+                    phase = PH_KSKIP;
+                    continue;
                 }
                 pos = r;
                 phase = PH_DONE;
@@ -515,8 +595,26 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                 }
                 let size: i32 = typed_size(lo);
                 if size == 0 {
-                    r = fail(o, s[(S_TPOS) as usize] - base, CODE_TAG);
-                    break;
+                    if !std_allowed(o[(O_PROFILE) as usize], lo, depth) {
+                        r = fail(o, s[(S_TPOS) as usize] - base, CODE_TAG);
+                        break;
+                    }
+                    // A standard-set tag (D121): one frame, its content one item
+                    // at depth + 1, checked when it ends.
+                    let xb: i32 = S_FRAMES + (sp * FW);
+                    s[(xb + F_KIND) as usize] = K_STD;
+                    s[(xb + F_CDEPTH) as usize] = depth + 1;
+                    s[(xb + F_REM) as usize] = 1;
+                    s[(xb + F_STATE) as usize] = 0;
+                    s[(xb + F_TPOS) as usize] = s[(S_TPOS) as usize];
+                    s[(xb + F_STAG) as usize] = lo;
+                    s[(xb + F_EXPOK) as usize] = 0;
+                    s[(xb + F_COUNT) as usize] = pos + base;
+                    sp += 1;
+                    cdep = top_cdepth(s, sp);
+                    cnotes = top_notes(s, sp);
+                    phase = PH_ITEM;
+                    continue;
                 }
                 s[(S_TSIZE) as usize] = size;
                 phase = PH_TYPEDHEAD;
@@ -577,7 +675,7 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                 let palen: i32 = s[(tb + F_PALEN) as usize];
                 let pw0: i32 = s[(tb + F_PW0) as usize];
                 if km <= 1 {
-                    if !cose_label_ok(b, ks, km) {
+                    if !key_label(b, o, ks, km) {
                         r = fail(o, ks, CODE_KEY_TYPE);
                         break;
                     }
@@ -612,6 +710,34 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                 s[(S_KALEN) as usize] = 0;
                 s[(tb + F_STATE) as usize] = 2;
                 phase = PH_ITEM;
+                continue;
+            }
+            if kind == K_STD {
+                // A standard-set tag's content ended: its head verdict, then a
+                // tag-0/32 text's form or a tag-24 payload walked as one item, the
+                // content whole in the window (asked for before its walk).
+                let stp: i32 = s[(tb + F_TPOS) as usize] - base;
+                let stag: i32 = s[(tb + F_STAG) as usize];
+                let scq: i32 = s[(tb + F_COUNT) as usize] - base;
+                if s[(tb + F_EXPOK) as usize] == 0 {
+                    r = fail(o, stp, CODE_TAG);
+                    break;
+                }
+                if (stag == 0) || (stag == 32) {
+                    if !std_content_ok(b, stag, scq, pos) {
+                        r = fail(o, stp, CODE_TAG);
+                        break;
+                    }
+                }
+                if stag == 24 {
+                    r = scan_one(b, o, std_inner(b, scq), s[(tb + F_CDEPTH) as usize] + 1, pos);
+                    if r < 0 {
+                        break;
+                    }
+                }
+                sp -= 1;
+                cdep = top_cdepth(s, sp);
+                cnotes = top_notes(s, sp);
                 continue;
             }
             if s[(tb + F_STATE) as usize] == 0 {
@@ -669,9 +795,23 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
             let kmaj: i32 = (i32::cast_unsigned(b[(pos) as usize] as i32) >> 5).cast_signed();
             let cose: bool = (s[(kb2 + F_CDEPTH) as usize] == 1) && (o[(O_COSE) as usize] != 0);
             if kmaj != 3 {
-                if !(cose && (kmaj <= 1)) {
+                if !key_peek(o, kmaj, cose) {
                     r = fail(o, pos, CODE_KEY_TYPE);
                     break;
+                }
+            }
+            // A key that is a container or a tag (PF_KEYS any, D124) holds keys,
+            // strings and tags of its own: it is asked for whole and walked by the
+            // recursive scanner, so no inner state crosses a window.
+            if (kmaj >= 4) && (kmaj <= 6) {
+                let kx: i32 = key_end_any(b, pos, tend, wend);
+                if kx < (-1) {
+                    let kwant: i32 = ((-2) - kx) - pos;
+                    let ktwice: i32 = 2 * (wend - pos);
+                    if ktwice > kwant {
+                        return suspend(b, s, base, phase, pos, cend, sp, pos, ktwice);
+                    }
+                    return suspend(b, s, base, phase, pos, cend, sp, pos, kwant);
                 }
             }
             s[(kb2 + F_KSTART) as usize] = pos + base;
@@ -681,9 +821,33 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
             s[(S_KA) as usize] = s[(kb2 + F_PA) as usize] + s[(kb2 + F_PALEN) as usize];
             s[(S_KALEN) as usize] = 0;
             s[(S_KW0) as usize] = pos + base;
+            if (kmaj >= 4) && (kmaj <= 6) {
+                r = scan_item(b, o, pos, s[(kb2 + F_CDEPTH) as usize], tend);
+                if r < 0 {
+                    break;
+                }
+                pos = r;
+                phase = PH_DONE;
+                continue;
+            }
             phase = PH_ITEM;
             continue;
-        } else if phase == PH_TEXT {
+        } else if (phase == PH_TEXT) || (phase == PH_KSKIP) {
+            if phase == PH_KSKIP {
+                // Byte content inside an active map key (a byte string, a bignum's
+                // or integer typed array's content -- keys of any kind, D124) is not
+                // checked but goes through the windows, so the key arena gets it.
+                if cend < wend {
+                    pos = cend;
+                } else {
+                    pos = wend;
+                }
+                if pos == cend {
+                    phase = PH_DONE;
+                    continue;
+                }
+                return suspend(b, s, base, phase, pos, cend, sp, pos, 1);
+            }
             // Text content, incrementally; a sequence is never split, and the
             // work quantum may stop the scan at any sequence boundary.
             let mut stop: i32 = cend;
@@ -694,13 +858,21 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
             if work < 4 {
                 work = 4;
             }
+            // A tag-0/32 text is in the window whole: scanned in this step.
+            if sp > 0 {
+                if s[((S_FRAMES + ((sp - 1) * FW)) + F_KIND) as usize] == K_STD {
+                    if work < (stop - pos) {
+                        work = stop - pos;
+                    }
+                }
+            }
             let qstop: i32;
             if work < (stop - pos) {
                 qstop = pos + work;
             } else {
                 qstop = stop;
             }
-            let t: i32 = utf8_window(b, pos, qstop, cend);
+            let t: i32 = utf8_window(b, pos, qstop, cend, text_nc(o));
             if t < 0 {
                 r = fail(o, (-1) - t, CODE_TEXT);
                 break;
@@ -847,6 +1019,12 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                         s[(tb2 + F_MANT) as usize] = 0;
                     }
                 }
+                if (s[(S_KACT) as usize] != 0) && (ce > wend) {
+                    cend = ce;
+                    pos = cs;
+                    phase = PH_KSKIP;
+                    continue;
+                }
                 pos = ce;
                 phase = PH_DONE;
                 continue;
@@ -863,6 +1041,12 @@ pub fn rscan_step(b: &[u8], o: &mut [i32], s: &mut [i32], base_hi: i32, base_lo:
                 cend = ce;
                 pos = cs;
                 phase = PH_TYPED;
+                continue;
+            }
+            if (s[(S_KACT) as usize] != 0) && (ce > wend) {
+                cend = ce;
+                pos = cs;
+                phase = PH_KSKIP;
                 continue;
             }
             pos = ce;

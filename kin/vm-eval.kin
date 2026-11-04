@@ -21,12 +21,13 @@
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TEXT CODE_TAG CODE_DEPTH
                                      CODE_TOO_MANY_ITEMS CODE_DECIMAL CODE_NDARRAY CODE_TRAILING
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
-                                     O_ERR_POS]]
+                                     O_ERR_POS O_PROFILE]]
             [snug.cbor.head :refer [fail read-arg take-len enter-container be16 be32]]
             [snug.cbor.text :refer [utf8-invalid-at]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size]]
-            [snug.cbor.scan :refer [scan-float scan-simple cose-label-ok]]
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc]]
+            [snug.cbor.stdtags :refer [std-allowed]]
             [snug.vm.layout :refer [H_FLAGS H_S_LEAVES FL_EMBED FL_COMB K_TAG K_TAGSET K_EMBED
                                     K_ARRAY K_MAP K_AND K_NOT F_ANSWER F_ADMITTED F_MATCHED F_EVAL
                                     VM_QIDX VM_Q1 VM_BIGNUM_MAX VM_EMBED VM_D VM_DLIM VM_W_STATE
@@ -40,7 +41,7 @@
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
                                   wit-empty wit-clear wit-set path-put rule1]]
             [snug.vm.dead :refer [dead-item dead-seq key-order dead-int-streak dead-map-pairs dead-array-elems dead-typed dead-bignum dead-pair-body
-                                  pair-check decimal-check ndarray-check]]
+                                  pair-check decimal-check ndarray-check dead-std-check]]
             [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64 eval-leaf cmp-point]]
             [snug.vm.map :refer [leaf-map block-mt map-block-init key-span-end key-search map-cursor
                                  m-pools m-alts m-lits m-keys m-names group-rec named-rec key-probe
@@ -451,7 +452,7 @@
               (comment "schedule 2: visit + UTF-8 only")
               (set cost (+ (- 11 (* 10 s2)) (c64 lo)))
               (if (< left cost) (break))
-              (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (break))
+              (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo) (text-nc s)) 0) (break))
               (set left (- left cost))
               (set q (+ (+ q h) lo))))
         (set items (+ items 1))
@@ -540,7 +541,7 @@
         (do (set stop (take-len s pos q hi lo end))
             (if (< stop 0) (return stop))
             (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
-            (let [bad (utf8-invalid-at b q stop)]
+            (let [bad (utf8-invalid-at b q stop (text-nc s))]
               (if (>= bad 0) (return (fail s bad CODE_TEXT))))))
       (if (and (== major 7) (or (< ai 25) (> ai 27)))
         (do (let [r7 (scan-simple s pos ai)]
@@ -576,11 +577,14 @@
            "TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried"
            "with the content typesets of the leaves whose number matched (bignum and"
            "typed-array content: a schema child, not an item; tag 4/40: the inner"
-           "array as an item), the scanner's tag semantics, then the leaves.")
+           "array as an item; a standard-set tag: its content item, D121), the"
+           "scanner's tag semantics, then the leaves.")
   (if (>= d (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
   (if (!= hi 0) (return (fail s pos CODE_TAG)))
   (let [big (or (== lo 2) (== lo 3))
         tsize (typed-size lo)
+        std (and (and (not big) (and (!= lo 4) (and (!= lo 40) (== tsize 0))))
+                 (std-allowed (ia s O_PROFILE) lo d))
         cr (cset-rec p s ck)
         w (cset-width p cr)
         fw (cset-frame p cr)
@@ -591,7 +595,7 @@
         ^:mut cnq 0
         ^:mut cs q]
     (local ^:mut ^I32 stop)
-    (if (and (not big) (and (!= lo 4) (and (!= lo 40) (== tsize 0)))) (return (fail s pos CODE_TAG)))
+    (if (and (not big) (and (!= lo 4) (and (!= lo 40) (and (== tsize 0) (not std))))) (return (fail s pos CODE_TAG)))
     (if big (set cls 2048))
     (let [na (q-filter-x p s fb w nq cls pos ctx)]
       (if (< na 0) (return na)))
@@ -625,16 +629,23 @@
           (if (> cnq 0)
             (do (let [rb (bstr-tail p pool b s q cs stop (+ d 1) cfb cck cnq 0)]
                   (if (< rb 0) (return rb))))))
-      (do (let [pc (pair-check b s pos q (if-code lo) end)]
-            (if (< pc 0) (return pc)))
-          (if (> cnq 0)
-            (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0))
-            (set stop (dead-pair-body b s q d end)))
-          (if (< stop 0) (return stop))
-          (if (== lo 4)
-            (set stop (decimal-check b s pos q stop))
-            (set stop (ndarray-check b s pos q stop)))
-          (if (< stop 0) (return stop))))
+      (if std
+        (do (if (> cnq 0)
+              (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0))
+              (set stop (dead-item b s q (+ d 1) end)))
+            (if (< stop 0) (return stop))
+            (set stop (dead-std-check b s pos lo q stop d))
+            (if (< stop 0) (return stop)))
+        (do (let [pc (pair-check b s pos q (if-code lo) end)]
+              (if (< pc 0) (return pc)))
+            (if (> cnq 0)
+              (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0))
+              (set stop (dead-pair-body b s q d end)))
+            (if (< stop 0) (return stop))
+            (if (== lo 4)
+              (set stop (decimal-check b s pos q stop))
+              (set stop (ndarray-check b s pos q stop)))
+            (if (< stop 0) (return stop)))))
     (let [ec (q-stamp s cfb cw cnq pos)]
       (if (< ec 0) (return ec))
       (for [^I32 j 0 nq]
@@ -908,7 +919,7 @@
                                 (bit-or CTX_KEY (simple-leaf p ps2 kl1)))))))
     (if (< kq 0) (return kq))
     (if (<= km 1)
-      (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+      (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
     (let [ko (key-order b s ps pe start kq)]
       (if (< ko 0) (return ko)))
     (iset s VM_FASTK kq)
@@ -1015,7 +1026,7 @@
       (do (if (or (!= hi 0) (< lo 0)) (return (neg 1)))
           (if (> lo (- end (+ q h))) (return (neg 1)))
           (if (or (< lo (ia p (+ lb 2))) (> lo (ia p (+ lb 3)))) (return (neg 1)))
-          (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (return (neg 1)))
+          (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo) (text-nc s)) 0) (return (neg 1)))
           (iset s O_LO (+ 3 (c64 lo)))
           (return (+ (+ q h) lo))))
     (return (neg 1))))
@@ -1086,7 +1097,7 @@
               (if (and (== ai 25) (< kl 256)) (break))))
         (if (> kl (- end (+ start kh))) (break))
         (if (> (+ (ia s O_ITEMS) 2) maxit) (break))
-        (if (>= (utf8-invalid-at b (+ start kh) (+ (+ start kh) kl)) 0) (break))
+        (if (>= (utf8-invalid-at b (+ start kh) (+ (+ start kh) kl) (text-nc s)) 0) (break))
         (let [kend (+ (+ start kh) kl)]
           (if (>= ps 0) (if (>= (compare-spans b ps pe start kend) 0) (break)))
           (let [kid (key-probe p pool b s start kend klo)
@@ -1240,12 +1251,12 @@
           (if (>= start end) (return (fail s start CODE_TRUNCATED)))
           (let [km (ushr (u8 b start) 5)]
             (if (!= km 3)
-              (if (not (and cose (<= km 1))) (return (fail s start CODE_KEY_TYPE))))
+              (if (not (key-peek s km cose)) (return (fail s start CODE_KEY_TYPE))))
             (if (== nalive 0)
               (do (set q (dead-item b s start (+ d 1) end))
                   (if (< q 0) (return q))
                   (if (<= km 1)
-                    (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+                    (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
                   (let [kod (key-order b s ps pe start q)]
                     (if (< kod 0) (return kod)))
                   (set ps start)
@@ -1315,7 +1326,7 @@
                       (set kq (dead-item b s start (+ d 1) end)))
                     (if (< kq 0) (return kq))
                     (if (<= km 1)
-                      (if (not (cose-label-ok b start km)) (return (fail s start CODE_KEY_TYPE))))
+                      (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
                     (let [ko (key-order b s ps pe start kq)]
                       (if (< ko 0) (return ko)))
                     (set ps start)
@@ -1478,7 +1489,7 @@
       (do (set stop (take-len s pos q hi lo end))
           (if (< stop 0) (return stop))
           (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
-          (let [bad (utf8-invalid-at b q stop)]
+          (let [bad (utf8-invalid-at b q stop (text-nc s))]
             (if (>= bad 0) (return (fail s bad CODE_TEXT))))))
     (if (== major 7)
       (do (let [r7 (scan-simple s pos ai)]

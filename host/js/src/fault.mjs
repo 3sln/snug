@@ -1,6 +1,6 @@
 /** Profile failures never include payload data. */
 export class SnugFault extends Error {
-  constructor(code = 'malformed', message = 'The CBOR data is not valid under the Bindle profile.') {
+  constructor(code = 'malformed', message = 'The CBOR data is not valid under the selected profile.') {
     super(message); this.name = 'SnugFault'; this.code = code;
   }
 }

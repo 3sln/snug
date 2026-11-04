@@ -3,6 +3,7 @@
 
 import { CODE_DEPTH, CODE_TEXT, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TYPED_ARRAY, O_COSE, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ITEMS } from '../cbor/codes.mjs';
 import { fail, readArg, takeLen } from '../cbor/head.mjs';
+import { textNc } from '../cbor/scan.mjs';
 import { utf8Window } from '../cbor/text.mjs';
 import { c64, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, popcount, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { typedBadAt } from './dead.mjs';
@@ -234,7 +235,7 @@ export function textScan(p, b, s, ss, base, wend, f, live) {
             return yld(ss, base, i);
         }
         const e = chunkEnd(s, ss, i, stop, wend);
-        const t = utf8Window(b, i, e, stop);
+        const t = utf8Window(b, i, e, stop, textNc(s));
         if (t < 0) {
             return fail(s, (-1) - t, CODE_TEXT);
         }

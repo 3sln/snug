@@ -5,6 +5,7 @@ use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
 use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
+use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
 use crate::snug::vm::base::*;
@@ -19,7 +20,7 @@ pub fn dead_text(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, en
     if !charge(s, c64(stop - p), pos) {
         return -R_BUDGET;
     }
-    let bad: i32 = utf8_invalid_at(b, p, stop);
+    let bad: i32 = utf8_invalid_at(b, p, stop, text_nc(s));
     if bad >= 0 {
         return fail(s, bad, CODE_TEXT);
     }
@@ -132,7 +133,7 @@ pub fn dead_map_pairs(b: &[u8], s: &mut [i32], p: i32, lo: i32, depth: i32, end:
         }
         let km: i32 = (i32::cast_unsigned(b[(start) as usize] as i32) >> 5).cast_signed();
         if km != 3 {
-            if !(cose && (km <= 1)) {
+            if !key_peek(s, km, cose) {
                 return fail(s, start, CODE_KEY_TYPE);
             }
         }
@@ -141,7 +142,7 @@ pub fn dead_map_pairs(b: &[u8], s: &mut [i32], p: i32, lo: i32, depth: i32, end:
             return q;
         }
         if km <= 1 {
-            if !cose_label_ok(b, start, km) {
+            if !key_label(b, s, start, km) {
                 return fail(s, start, CODE_KEY_TYPE);
             }
         }
@@ -323,6 +324,36 @@ pub fn ndarray_check(b: &[u8], s: &mut [i32], pos: i32, p: i32, stop: i32) -> i3
     }
     return stop;
 }
+pub fn dead_std_check(b: &[u8], s: &mut [i32], pos: i32, tag: i32, q: i32, stop: i32, depth: i32) -> i32 {
+    // A standard-set tag at pos (depth `depth`) whose content item b[q, stop)
+    // was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/64) for the
+    // syntax scan of a tag-0/32 text; the content rule (tag); then a tag-24
+    // byte string's content walked dead as one item at depth + 2, bounded by
+    // its end (trailing after it). Answers stop, or a negated code. Shared by
+    // the dead walk, the live walk and the resumable session.
+    if !charge(s, 1, pos) {
+        return -R_BUDGET;
+    }
+    if ((tag == 0) || (tag == 32)) && ((i32::cast_unsigned(b[(q) as usize] as i32) >> 5).cast_signed() == 3) {
+        if !charge(s, c64(stop - q), pos) {
+            return -R_BUDGET;
+        }
+    }
+    if !std_content_ok(b, tag, q, stop) {
+        return fail(s, pos, CODE_TAG);
+    }
+    if tag == 24 {
+        let cs: i32 = std_inner(b, q);
+        let r: i32 = dead_item(b, s, cs, depth + 2, stop);
+        if r < 0 {
+            return r;
+        }
+        if r != stop {
+            return fail(s, r, CODE_TRAILING);
+        }
+    }
+    return stop;
+}
 pub fn dead_tag(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     if depth >= s[(O_MAX_DEPTH) as usize] {
         return fail(s, pos, CODE_DEPTH);
@@ -356,10 +387,17 @@ pub fn dead_tag(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, dep
         return ndarray_check(b, s, pos, p, st40);
     }
     let size: i32 = typed_size(lo);
-    if size == 0 {
-        return fail(s, pos, CODE_TAG);
+    if size > 0 {
+        return dead_typed(b, s, pos, p, lo, size, end);
     }
-    return dead_typed(b, s, pos, p, lo, size, end);
+    if std_allowed(s[(O_PROFILE) as usize], lo, depth) {
+        let qs: i32 = dead_item(b, s, p, depth + 1, end);
+        if qs < 0 {
+            return qs;
+        }
+        return dead_std_check(b, s, pos, lo, p, qs, depth);
+    }
+    return fail(s, pos, CODE_TAG);
 }
 pub fn dead_item(b: &[u8], s: &mut [i32], pos: i32, depth: i32, end: i32) -> i32 {
     // One dead item at pos: visit charged, counted, then its head (scan.kin `item`).

@@ -41,7 +41,8 @@
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { scan } from './scan.mjs';
-import { scanOptions, codeName } from '../../../gen/js/snug/cbor/scan.mjs';
+import { profileFlags, codecTop } from './profiles.mjs';
+import { scanOptions, scanProfile, codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { rscanInit, rscanStep, rscanNeedOffset, rscanNeedLength, rscanPosition, rscanScratchLen,
   RS_NEED, RS_YIELD } from '../../../gen/js/snug/cbor/rscan.mjs';
 
@@ -88,11 +89,12 @@ export class ScanSession {
   constructor(length, options = {}, { quantum = 0 } = {}) {
     if (!Number.isSafeInteger(length) || length < 0 || length > I32_MAX) throw new TypeError('length must be an integer in 0..2^31-1.');
     if (!Number.isSafeInteger(quantum) || quantum < 0) throw new TypeError('quantum must be a non-negative integer.');
-    const top = options.top ?? 'map'; if (top !== 'map' && top !== 'any') throw new TypeError("top must be 'map' or 'any'.");
+    const top = codecTop(options), flags = profileFlags(options);
     const limits = resolveLimits(options);
     this.length = length;
     this.o = new Int32Array(16);
     scanOptions(this.o, top === 'any' ? 1 : 0, options.cose === true ? 1 : 0, clamp(limits.maxBytes), clamp(limits.maxDepth), clamp(limits.maxEntries), clamp(limits.maxItems));
+    scanProfile(this.o, flags);
     // Keys are disjoint spans of the message: the arena never needs more than min(length, maxBytes) bytes.
     this.s = new Int32Array(rscanScratchLen(clamp(limits.maxDepth), Math.min(length, clamp(limits.maxBytes))));
     rscanInit(this.o, this.s, length, quantum);

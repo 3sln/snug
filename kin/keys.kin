@@ -2,8 +2,9 @@
 ;; keys (shorter first when one is a prefix), which is cbor.mjs's
 ;; `compareBytes` over the two key spans.
 (ns snug.cbor.keys
-  (:require [kin.lang :refer [defn let return set if while comment]]
-            [snug.lang :refer [I32 Bytes + - < == != u8]]))
+  (:require [kin.lang :refer [defn let return set if while do comment]]
+            [snug.lang :refer [I32 Bytes + - * neg ushr bit-and < > <= >= == != and or u8]]
+            [snug.cbor.head :refer [head-size be16 be32]]))
 
 (defn ^:pub ^I32 compare-spans [^Bytes b ^I32 s1 ^I32 e1 ^I32 s2 ^I32 e2]
   (comment "<0, 0 or >0 as b[s1..e1) sorts before, equal to or after b[s2..e2).")
@@ -18,3 +19,46 @@
         (if (!= x y) (return (- x y)))
         (set i (+ i 1))))
     (return (- l1 l2))))
+
+(defn ^:pub ^I32 key-end-any [^Bytes b ^I32 start ^I32 end ^I32 wend]
+  (comment "The end of a map key at start that is not text or an integer (PF_KEYS"
+           "any, D124), by a structural walk of its heads with no recursion: >= 0"
+           "its end, when every byte of it lies in the window; -1 when a head is"
+           "malformed or indefinite, or a length or count runs past end (the key's"
+           "own walk then refuses it, inside the window); else -(2 + x): the window"
+           "must reach x before more is known. Reads nothing at or past wend.")
+  (let [^:mut i start
+        ^:mut rem 1]
+    (while (> rem 0)
+      (if (>= i end) (return (neg 1)))
+      (if (>= i wend) (return (- (neg 2) (+ i 1))))
+      (let [ib (u8 b i)
+            major (ushr ib 5)
+            ai (bit-and ib 31)
+            ^:mut hi 0
+            ^:mut lo ai]
+        (if (> ai 27) (return (neg 1)))
+        (let [h (head-size ai)
+              p (+ i h)]
+          (if (> p end) (return (neg 1)))
+          (if (> p wend) (return (- (neg 2) p)))
+          (if (== ai 24) (set lo (u8 b (+ i 1))))
+          (if (== ai 25) (set lo (be16 b (+ i 1))))
+          (if (== ai 26) (set lo (be32 b (+ i 1))))
+          (if (== ai 27) (do (set hi (be32 b (+ i 1))) (set lo (be32 b (+ i 5)))))
+          (set i p)
+          (set rem (- rem 1))
+          (if (and (>= major 2) (<= major 3))
+            (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return (neg 1)))
+                (if (> (+ p lo) wend) (return (- (neg 2) (+ p lo))))
+                (set i (+ p lo))))
+          (if (== major 4)
+            (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return (neg 1)))
+                (set rem (+ rem lo))))
+          (if (== major 5)
+            (do (if (or (!= hi 0) (or (< lo 0) (> lo (ushr (- end p) 1)))) (return (neg 1)))
+                (set rem (+ rem (* 2 lo)))))
+          (if (== major 6)
+            (do (if (!= hi 0) (return (neg 1)))
+                (set rem (+ rem 1)))))))
+    (return i)))

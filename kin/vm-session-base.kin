@@ -18,6 +18,7 @@
             [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg quot rem shl sar ushr bit-and bit-or
                                bit-xor < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
             [snug.cbor.codes :refer [CODE_DUPLICATE_KEY CODE_KEY_ORDER CODE_DECIMAL CODE_NDARRAY O_ERR_POS]]
+            [snug.cbor.stdtags :refer [std-allowed]]
             [snug.cbor.head :refer [fail head-size small-arg be16 be32]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok]]
             [snug.vm.layout :refer [H_LIM_DEPTH H_LIM_INPUT H_S_LEAVES H_S_LITREFS H_FLAGS FL_EMBED
@@ -71,6 +72,8 @@
 (defconst ^:pub ^I32 SS_ABYTES 34)
 (defconst ^:pub ^I32 SS_CSTART 35)
 (defconst ^:pub ^I32 SS_CPT 36)
+;; the profile flags of the session's run (S[O_PROFILE] at vms-init), for the prescan
+(defconst ^:pub ^I32 SS_PROF 37)
 (defconst ^:pub ^I32 SS_HDR 40)
 
 (defconst ^:pub ^I32 PH_START 0)
@@ -542,7 +545,7 @@
                         (set n (* 2 lo))))
                   (if (== major 6)
                     (do (if (and (!= lo 2) (and (!= lo 3) (and (!= lo 4) (and (!= lo 40) (== (typed-size lo) 0)))))
-                          (return 1))
+                          (if (not (std-allowed (ia ss SS_PROF) lo 0)) (return 1)))
                         (set n 1)))
                   (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return 0)))
                   (iset ss (+ pst (* 2 lvl)) (+ i base))
@@ -613,7 +616,7 @@
                         (set n (* 2 lo))))
                   (if (== major 6)
                     (do (if (and (!= lo 2) (and (!= lo 3) (and (!= lo 4) (and (!= lo 40) (== (typed-size lo) 0)))))
-                          (return (cpt-at ss (+ i 1) base)))
+                          (if (not (std-allowed (ia ss SS_PROF) lo 0)) (return (cpt-at ss (+ i 1) base))))
                         (set n 1)))
                   (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return (neg 1))))
                   (iset ss (+ pst (* 2 lvl)) (+ i base))
@@ -635,6 +638,7 @@
   (return (chain-has ss at)))
 
 ;; ------------------------------------------------------------ bounded asks (D090)
+
 
 (defn ^:pub ^I32 str-stop [^Bytes b ^I32 pos ^I32 end]
   (comment "The end of the text or byte string at pos (its head in the window), or"

@@ -62,18 +62,31 @@ test('array extras are ignored by default and refused by strictArrays and Bindle
   assert.throws(() => encode(empty, profiles.bindle), { code: 'unsupported' });
 });
 
-test('holes and present undefined array elements remain refused in both array modes', () => {
-  const values = [new Array(3), [, 2, 3], [1, , 3], [1, 2, ,],
-    Object.assign([1, , 3], { extra: 1 }), [undefined], [1, undefined, 3],
-    Object.defineProperty([1], '0', { get: () => undefined })];
-  for (const policy of [{}, { strictArrays: false }, { strictArrays: true }, profiles.bindle]) {
+test('holes are refused in both array modes; present undefined elements need undefinedValue', () => {
+  const holes = [new Array(3), [, 2, 3], [1, , 3], [1, 2, ,], Object.assign([1, , 3], { extra: 1 })];
+  const present = [[undefined], [1, undefined, 3], Object.defineProperty([1], '0', { get: () => undefined })];
+  const presentHex = ['81f7', '8301f703', '81f7'];
+  for (const policy of [{}, { strictArrays: false }, { strictArrays: true }, profiles.bindle,
+    { undefinedValue: false }, { strictArrays: true, undefinedValue: false }]) {
+    const undefinedOk = policy.undefinedValue ?? policy.wire !== 'bindle';
     for (const omitUndefined of [false, true]) {
       const options = { ...policy, omitUndefined };
-      for (const value of values) {
+      for (const value of holes) {
         assert.throws(() => encode(value, options), { code: 'unsupported' });
         assert.throws(() => new Writer(options).value(value), { code: 'unsupported' });
         assert.throws(() => encode({ items: value }, options), { code: 'unsupported' });
       }
+      present.forEach((value, i) => {
+        if (undefinedOk) {
+          // D121: the deterministic preset encodes a present undefined element as f7 (a hole stays refused).
+          assert.equal(Buffer.from(encode(value, options)).toString('hex'), presentHex[i]);
+          assert.equal(Buffer.from(new Writer(options).value(value).finish()).toString('hex'), presentHex[i]);
+          return;
+        }
+        assert.throws(() => encode(value, options), { code: 'unsupported' });
+        assert.throws(() => new Writer(options).value(value), { code: 'unsupported' });
+        assert.throws(() => encode({ items: value }, options), { code: 'unsupported' });
+      });
       // Present undefined still enters the normal value walk and its item check.
       assert.throws(() => encode([undefined], { ...options, maxItems: 1 }), { code: 'too_many_items' });
     }

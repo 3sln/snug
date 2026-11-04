@@ -1120,6 +1120,14 @@ export function mMember(h, m, env) {
         if (never && (hg(h, H_PROFILE) > 0)) {
             return fail(h, ERR_PROFILE, pos);
         }
+        // D125: a byte-string, float or beyond-64-bit integer value before `:` is
+        // a literal key with a cut, which only text and integer literal keys
+        // support; it is refused, never assumed absent (a wire profile may carry
+        // any key kind, and the Program must not depend on one). `value => T`
+        // is the uncut form.
+        if (never) {
+            return fail(h, ERR_MAP_CUT, pos);
+        }
     }
     if (kk === KEY_TYPE) {
         if ((cut === 1) && (hg(h, H_PROFILE) > 0)) {
@@ -1145,14 +1153,6 @@ export function mMember(h, m, env) {
     const val = lowerType(h, nd(h, m), env);
     if (val < 0) {
         return -1;
-    }
-    if (never) {
-        // A key the profile cannot carry: an optional member is absent, a
-        // required one makes the alternative unsatisfiable.
-        if (lo === 0) {
-            return asUnit(h);
-        }
-        return asNone(h);
     }
     if (kbid >= 0) {
         if (lo > 1) {

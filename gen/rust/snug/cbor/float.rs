@@ -114,3 +114,78 @@ pub fn check_f64(hi: i32, lo: i32) -> i32 {
     }
     return 0;
 }
+pub fn rfc_f16(h: i32) -> i32 {
+    // A float16 pattern under RFC rules: 0, or float for a non-canonical NaN.
+    if ((h & 0x7c00) == 0x7c00) && ((h & 0x3ff) != 0) {
+        if h != 0x7e00 {
+            return CODE_FLOAT;
+        }
+    }
+    return 0;
+}
+pub fn rfc_f32(w: i32) -> i32 {
+    // A float32 pattern under RFC rules: 0, or the refusal.
+    let e: i32 = (w >> 23) & 255;
+    let m: i32 = w & 0x7fffff;
+    if e == 255 {
+        if m == 0 {
+            return CODE_NON_SHORTEST;
+        }
+        if w == 0x7fc00000 {
+            return CODE_NON_SHORTEST;
+        }
+        return CODE_FLOAT;
+    }
+    if e == 0 {
+        if m == 0 {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    let x: i32 = e - 127;
+    if (x >= (-14)) && (x <= 15) {
+        if low_zero(m, 13) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    if (x >= (-24)) && (x <= (-15)) {
+        if low_zero(m, (-1) - x) {
+            return CODE_NON_SHORTEST;
+        }
+    }
+    return 0;
+}
+pub fn rfc_f64(hi: i32, lo: i32) -> i32 {
+    // A float64 pattern under RFC rules, as two halves: 0, or the refusal.
+    let e: i32 = (hi >> 20) & 0x7ff;
+    let mh: i32 = hi & 0xfffff;
+    if e == 2047 {
+        if (mh == 0) && (lo == 0) {
+            return CODE_NON_SHORTEST;
+        }
+        if (hi == 0x7ff80000) && (lo == 0) {
+            return CODE_NON_SHORTEST;
+        }
+        return CODE_FLOAT;
+    }
+    if e == 0 {
+        if (mh == 0) && (lo == 0) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    let x: i32 = e - 1023;
+    if (x >= (-126)) && (x <= 127) {
+        if low_zero(lo, 29) {
+            return CODE_NON_SHORTEST;
+        }
+        return 0;
+    }
+    if (x >= (-149)) && (x <= (-127)) {
+        if low_zero64(mh, lo, (-97) - x) {
+            return CODE_NON_SHORTEST;
+        }
+    }
+    return 0;
+}

@@ -33,15 +33,17 @@ for (const category of categories) test(`Unicode ${category}: range boundaries, 
   for (const cp of samples) if (scalar(cp)) {
     const text = String.fromCodePoint(cp), bytes = textBytes(text);
     const a = normal.validate(bytes, 'r'), b = complement.validate(bytes, 'r');
-    // The current wire profile rejects noncharacters before regexp matching.
-    // Exercise and count those refusals; do not call them regexp mismatches.
+    // The Bindle profile rejects noncharacters before regexp matching: exercise and count
+    // those refusals. The deterministic preset (the default, D121) admits them, so every
+    // scalar value -- noncharacters included -- is compared with the oracle.
     if (noncharacter(cp)) {
-      assert.equal(a.reason, 'cbor/text'); assert.equal(b.reason, 'cbor/text'); profileRefusals++;
-    } else {
-      assert.equal(a.ok, re.test(text), `${category} U+${cp.toString(16)}`);
-      assert.equal(b.ok, !re.test(text), `complement ${category} U+${cp.toString(16)}`);
-      compared++;
+      const B = { wire: 'bindle' };
+      assert.equal(normal.validate(bytes, 'r', B).reason, 'cbor/text'); assert.equal(complement.validate(bytes, 'r', B).reason, 'cbor/text');
+      profileRefusals++;
     }
+    assert.equal(a.ok, re.test(text), `${category} U+${cp.toString(16)}`);
+    assert.equal(b.ok, !re.test(text), `complement ${category} U+${cp.toString(16)}`);
+    compared++;
   }
   assert.equal(normal.validate(textBytes(''), 'r').ok, false);
   assert.equal(normal.validate(textBytes('AA'), 'r').ok, false);

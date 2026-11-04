@@ -86,6 +86,18 @@ export class NDArray {
 Object.freeze(NDArray.prototype);
 
 
+/** A tagged item of the standard tag set (D121, D123): tag 0 (RFC 3339 date/time text), 1 (epoch number), 21-23
+ * (expected base64url / base64 / base16 conversions), 24 (an encoded CBOR data item: `value` is its bytes), 32 (URI
+ * text) or 55799 (self-described CBOR, top level only). `value` is the decoded content. Immutable (shallowly: a byte
+ * string value is a Uint8Array). The tag number and the content are checked against the profile when encoded. */
+export class Tagged {
+  constructor(tag, value) {
+    if (!Number.isSafeInteger(tag) || tag < 0 || tag > 0xffffffff) throw new TypeError('A tag number is an integer in 0..2^32-1.');
+    this.tag = tag; this.value = value; Object.freeze(this);
+  }
+}
+Object.freeze(Tagged.prototype);
+
 // Internal factories for the trusted builder. The scanner has established all
 // invariants; do not call validating public constructors in the building pass.
 export function decimalValue(mantissa, exponent) {
@@ -96,6 +108,11 @@ export function decimalValue(mantissa, exponent) {
 export function ndarrayValue(shape, data) {
   const out = Object.create(NDArray.prototype);
   out.shape = Object.freeze(shape); out.data = data;
+  return Object.freeze(out);
+}
+export function taggedValue(tag, value) {
+  const out = Object.create(Tagged.prototype);
+  out.tag = tag; out.value = value;
   return Object.freeze(out);
 }
 export function float16Value(bytes) {

@@ -15,7 +15,7 @@
 // b<hex> bytes, p<hexmag> / q<hexmag> integer (argument magnitude; q negative),
 // f<hi>,<lo> float bits, T true, F false, N null, S (keysSorted, first op only).
 // A panic prints PANIC.
-use snug::snug::write::float::{float_width, put_float};
+use snug::snug::write::float::{float_width, float_width_rfc, put_float, put_float_rfc};
 use snug::snug::write::int::{int_len, put_int};
 use snug::snug::write::map::{close_map, sort_keys, S_BUDGET, S_COMPARES};
 use snug::snug::write::out::{key_after, put_head};
@@ -80,6 +80,13 @@ fn main() {
                 let w = float_width(hi, lo);
                 let a = put_float(&mut b, num(parts.get(1).copied()), hi, lo);
                 format!("f {} {} {}", w, a, hex(&b))
+            }
+            "R" => {
+                let mut b = vec![0u8; num(parts.get(2).copied()).max(0) as usize];
+                let (hi, lo) = (num(parts.get(3).copied()), num(parts.get(4).copied()));
+                let w = float_width_rfc(hi, lo);
+                let a = put_float_rfc(&mut b, num(parts.get(1).copied()), hi, lo);
+                format!("r {} {} {}", w, a, hex(&b))
             }
             "I" => {
                 let mut b = vec![0u8; num(parts.get(2).copied()).max(0) as usize];

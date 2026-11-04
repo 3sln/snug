@@ -89,3 +89,62 @@
       (bset out (+ at 1) (ushr h 8))
       (bset out (+ at 2) h)
       (return (+ at 3)))))
+
+;; RFC 8949 deterministic floats (profile flag PF_FLOATS, D122): nothing is
+;; refused. NaN (any payload or sign) is written as the canonical quiet NaN
+;; f9 7e00, an infinity and a zero as float16 with their sign, every other
+;; value -- integral ones included -- in its shortest exact width. The exact
+;; inverse of snug.cbor.float's rfc-* checks.
+
+(defn ^:pub ^I32 float-width-rfc [^I32 hi ^I32 lo]
+  (comment "2, 4 or 8: the shortest encoded width of binary64 hi:lo under the RFC"
+           "rules (NaN, infinities and zeros: 2).")
+  (let [e (bit-and (sar hi 20) (hex 2047))
+        mh (bit-and hi (hex 1048575))]
+    (if (== e 2047) (return 2))
+    (if (== e 0)
+      (do (if (and (== mh 0) (== lo 0)) (return 2))
+          (return 8)))
+    (let [x (- e 1023)]
+      (if (and (>= x (neg 14)) (<= x 15))
+        (if (and (== lo 0) (low-zero mh 10)) (return 2)))
+      (if (and (>= x (neg 24)) (<= x (neg 15)))
+        (if (low-zero64 mh lo (- 28 x)) (return 2)))
+      (if (and (>= x (neg 126)) (<= x 127))
+        (if (low-zero lo 29) (return 4)))
+      (if (and (>= x (neg 149)) (<= x (neg 127)))
+        (if (low-zero64 mh lo (- (neg 97) x)) (return 4)))
+      (return 8))))
+
+(defn ^:pub ^I32 f16-bits-rfc [^I32 hi ^I32 lo]
+  (comment "The float16 pattern float-width-rfc chose 2 for: f16-bits, or a NaN"
+           "(0x7e00), an infinity or a zero with its sign.")
+  (let [s (bit-and (ushr hi 16) (hex 32768))
+        e (bit-and (sar hi 20) (hex 2047))
+        mh (bit-and hi (hex 1048575))]
+    (if (== e 2047)
+      (do (if (or (!= mh 0) (!= lo 0)) (return (hex 32256)))
+          (return (bit-or s (hex 31744)))))
+    (if (and (== e 0) (and (== mh 0) (== lo 0))) (return s))
+    (return (f16-bits hi))))
+
+(defn ^:pub ^I32 put-float-rfc [^BytesW out ^I32 at ^I32 hi ^I32 lo]
+  (comment "put-float under the RFC rules: the shortest float for binary64 hi:lo at"
+           "`at`, never refused: the position after it, or `(too-short need)`.")
+  (if (or (< at 0) (> at (blen out))) (return (neg CODE_MALFORMED)))
+  (let [w (float-width-rfc hi lo)]
+    (if (> (+ w 1) (- (blen out) at)) (return (too-short (+ w 1))))
+    (if (== w 8)
+      (do (bset out at (hex 251))
+          (put32 out (+ at 1) hi)
+          (put32 out (+ at 5) lo)
+          (return (+ at 9))))
+    (if (== w 4)
+      (do (bset out at (hex 250))
+          (put32 out (+ at 1) (f32-bits hi lo))
+          (return (+ at 5))))
+    (let [h (f16-bits-rfc hi lo)]
+      (bset out at (hex 249))
+      (bset out (+ at 1) (ushr h 8))
+      (bset out (+ at 2) h)
+      (return (+ at 3)))))

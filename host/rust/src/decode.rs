@@ -5,17 +5,103 @@
 //! assert_eq!(decode(&[0x18, 42], &DecodeOptions::any())?, Value::Uint(42));
 //! # Ok::<(), snug::Error>(())
 //! ```
-use crate::snug::cbor::scan::{code_name, error_offset, scan, scan_options};
+use crate::snug::cbor::scan::{code_name, error_offset, scan, scan_options, scan_profile};
 use crate::{Error, Integer, TypedArray, Value};
 
-/// Permitted root shape; separate from the future wire-profile presets.
+/// Permitted root shape. [`DecodeOptions::default`] (the deterministic preset)
+/// permits any item; [`DecodeOptions::bindle`] requires a map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Top {
-    /// Require a map at the codec boundary (current default).
+    /// Require a map at the codec boundary.
     #[default]
     Map,
     /// Permit any profile-valid item.
     Any,
+}
+/// Map key kinds a profile admits (D120).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keys {
+    /// Text keys only (plus top-level safe integer labels with `cose`).
+    Text,
+    /// Text and integer (major 0/1) keys.
+    Integer,
+    /// Any item as a key, ordered by its complete encoding.
+    Any,
+}
+/// Tag sets (D121).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tags {
+    /// 2, 3, 4, 40 and the little-endian typed arrays.
+    Bindle,
+    /// The Bindle set plus 0, 1, 21-24, 32 and 55799 with RFC 8949 content checks.
+    Standard,
+}
+/// Scalar float rules (D122).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Floats {
+    /// NaN, infinities, -0 and integral floats within ±(2^53-1) refused.
+    Bindle,
+    /// RFC 8949 §4.2.1: shortest form only; the canonical NaN 0x7e00.
+    Deterministic,
+}
+/// Wire profile options (D120). Every value only removes acceptance relative
+/// to RFC 8949 §4.2.1 core deterministic encoding; kin decides every byte.
+///
+/// ```
+/// use snug::{decode, DecodeOptions, Profile, Keys, Value};
+/// let int_keys = [0xa1, 0x01, 0x02];
+/// assert_eq!(decode(&int_keys, &DecodeOptions::default())?, Value::Map(vec![(Value::Uint(1), Value::Uint(2))]));
+/// let text_only = DecodeOptions { profile: Profile { keys: Keys::Text, ..Profile::DETERMINISTIC }, ..DecodeOptions::default() };
+/// assert_eq!(decode(&int_keys, &text_only).unwrap_err().code(), "key_type");
+/// # Ok::<(), snug::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Profile {
+    /// Map key kinds.
+    pub keys: Keys,
+    /// Tag set.
+    pub tags: Tags,
+    /// Scalar float rules.
+    pub floats: Floats,
+    /// The simple value undefined (f7).
+    pub undefined_value: bool,
+    /// Unicode noncharacters in text.
+    pub noncharacters: bool,
+}
+impl Profile {
+    /// The deterministic preset (the default).
+    pub const DETERMINISTIC: Profile = Profile {
+        keys: Keys::Any,
+        tags: Tags::Standard,
+        floats: Floats::Deterministic,
+        undefined_value: true,
+        noncharacters: true,
+    };
+    /// The Bindle profile, bit for bit as before P7.1.
+    pub const BINDLE: Profile = Profile {
+        keys: Keys::Text,
+        tags: Tags::Bindle,
+        floats: Floats::Bindle,
+        undefined_value: false,
+        noncharacters: false,
+    };
+    /// The kin profile flags (snug.cbor.codes PF_*).
+    pub fn flags(&self) -> i32 {
+        let keys = match self.keys {
+            Keys::Text => 0,
+            Keys::Integer => 1,
+            Keys::Any => 2,
+        };
+        keys | if self.tags == Tags::Standard { 4 } else { 0 }
+            | if self.floats == Floats::Deterministic { 16 } else { 0 }
+            | if self.undefined_value { 32 } else { 0 }
+            | if self.noncharacters { 64 } else { 0 }
+    }
+}
+impl Default for Profile {
+    fn default() -> Self {
+        Self::DETERMINISTIC
+    }
 }
 /// Resource limits. Depth is capped at 256, all counts/lengths at i32::MAX−1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,29 +137,46 @@ impl Limits {
         Ok(())
     }
 }
-/// Decode/profile options. This facade selects the restricted Bindle scanner
-/// policy. Root shape, COSE labels and limits remain independent settings so
-/// future deterministic/bindle presets can use the same API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Decode/profile options. The default is the deterministic preset with any
+/// root (D081); [`DecodeOptions::bindle`] is the Bindle profile with a map root.
+/// Root shape, COSE labels and limits stay independent settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeOptions {
     /// Required root shape.
     pub top: Top,
-    /// Permit safe integer labels in the top-level map.
+    /// Under `Keys::Text`: permit safe integer labels in the top-level map.
     pub cose: bool,
     /// Bounded scan resources.
     pub limits: Limits,
+    /// The wire profile.
+    pub profile: Profile,
 }
-impl DecodeOptions {
-    /// Current Bindle preset (including map root).
-    pub fn bindle() -> Self {
-        Self::default()
-    }
-    /// Current wire policy with any root shape.
-    pub fn any() -> Self {
+impl Default for DecodeOptions {
+    fn default() -> Self {
         Self {
             top: Top::Any,
+            cose: false,
+            limits: Limits::default(),
+            profile: Profile::DETERMINISTIC,
+        }
+    }
+}
+impl DecodeOptions {
+    /// The Bindle preset (including map root).
+    pub fn bindle() -> Self {
+        Self {
+            top: Top::Map,
+            profile: Profile::BINDLE,
             ..Self::default()
         }
+    }
+    /// The deterministic preset (the default; any root shape).
+    pub fn deterministic() -> Self {
+        Self::default()
+    }
+    /// The deterministic preset with any root shape (the default).
+    pub fn any() -> Self {
+        Self::default()
     }
 }
 pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<(), Error> {
@@ -92,6 +195,7 @@ pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<(), Error> 
         l.max_entries as i32,
         l.max_items as i32,
     );
+    scan_profile(&mut o, options.profile.flags());
     let code = scan(bytes, &mut o);
     if code == 0 {
         Ok(())
@@ -245,6 +349,7 @@ impl<'a> Builder<'a> {
                 20 => Value::Bool(false),
                 21 => Value::Bool(true),
                 22 => Value::Null,
+                23 => Value::Undefined,
                 25 => Value::Float(half(n as u16)),
                 26 => Value::Float(f32::from_bits(n as u32) as f64),
                 27 => Value::Float(f64::from_bits(n)),

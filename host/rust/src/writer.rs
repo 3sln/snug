@@ -109,7 +109,8 @@ impl Writer {
         self.record(r)?;
         Ok(self)
     }
-    /// Write a binary64 host value; kin chooses width or refuses `float`.
+    /// Write a binary64 host value; kin chooses the width (and, under the Bindle
+    /// float rules, refuses NaN, infinities, -0 and safe-range integers: `float`).
     pub fn float(&mut self, n: f64) -> Result<&mut Self, Error> {
         self.value(&Value::Float(n))
     }
@@ -120,6 +121,10 @@ impl Writer {
     /// Write null.
     pub fn null(&mut self) -> Result<&mut Self, Error> {
         self.value(&Value::Null)
+    }
+    /// Write undefined (f7); the profile's `undefined_value` decides at finish.
+    pub fn undefined(&mut self) -> Result<&mut Self, Error> {
+        self.value(&Value::Undefined)
     }
     /// Write UTF-8 text. Noncharacters are refused by kin at finish.
     pub fn text(&mut self, v: &str) -> Result<&mut Self, Error> {
@@ -188,8 +193,8 @@ impl Writer {
     pub fn key(&mut self, key: &str) -> Result<&mut Self, Error> {
         self.key_value(&Value::Text(key.to_owned()))
     }
-    /// Write a key using the value model. The current profile permits text,
-    /// plus top-level safe integer labels with `cose`; kin decides at finish.
+    /// Write a key using the value model. The profile's key kinds (and, under
+    /// `Keys::Text`, top-level safe integer labels with `cose`) decide at finish.
     pub fn key_value(&mut self, key: &Value) -> Result<&mut Self, Error> {
         self.slot(true)?;
         let start = self.output.bytes.len() as i32;

@@ -3,6 +3,7 @@
 
 import { CODE_DECIMAL, CODE_DUPLICATE_KEY, CODE_KEY_ORDER, CODE_NDARRAY, O_ERR_POS } from '../cbor/codes.mjs';
 import { be16, be32, fail, headSize, smallArg } from '../cbor/head.mjs';
+import { stdAllowed } from '../cbor/stdtags.mjs';
 import { exponentOk, mantissaOk, typedSize } from '../cbor/tags.mjs';
 import { lim } from './api.mjs';
 import { c64min, charge } from './base.mjs';
@@ -87,6 +88,8 @@ export const SS_ABYTES = 34;
 export const SS_CSTART = 35;
 
 export const SS_CPT = 36;
+
+export const SS_PROF = 37;
 
 export const SS_HDR = 40;
 
@@ -771,7 +774,9 @@ export function prescan(b, ss, base, pos, end, cut) {
             }
             if (major === 6) {
                 if ((lo !== 2) && ((lo !== 3) && ((lo !== 4) && ((lo !== 40) && (typedSize(lo) === 0))))) {
-                    return 1;
+                    if (!stdAllowed(ss[SS_PROF], lo, 0)) {
+                        return 1;
+                    }
                 }
                 n = 1;
             }
@@ -892,7 +897,9 @@ export function prescanRun(b, ss, base, pos, end, cut, rem0) {
             }
             if (major === 6) {
                 if ((lo !== 2) && ((lo !== 3) && ((lo !== 4) && ((lo !== 40) && (typedSize(lo) === 0))))) {
-                    return cptAt(ss, i + 1, base);
+                    if (!stdAllowed(ss[SS_PROF], lo, 0)) {
+                        return cptAt(ss, i + 1, base);
+                    }
                 }
                 n = 1;
             }

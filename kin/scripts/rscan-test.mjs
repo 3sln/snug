@@ -19,7 +19,8 @@
 // overflow checks on): JS and Rust must agree on code, offset, items and the
 // number of steps, with no panic.
 import { spawnSync } from 'node:child_process';
-import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { scan, scanOptions, scanProfile, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { buildDetCases } from './det-cases.mjs';
 import { rscanInit, rscanStep, rscanNeedOffset, rscanNeedLength, rscanPosition, rscanScratchLen,
   RS_NEED, RS_YIELD } from '../../gen/js/snug/cbor/rscan.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
@@ -32,6 +33,7 @@ const optArr = opt => [opt.top === 'any' ? 1 : 0, opt.cose ? 1 : 0, clamp(opt.ma
 function recursive(bytes, opt) {
   const o = new Int32Array(16);
   scanOptions(o, ...optArr(opt));
+  scanProfile(o, opt.flags ?? 0);
   const c = scan(bytes, o);
   return { code: c, offset: errorOffset(o), items: itemsScanned(o) };
 }
@@ -44,6 +46,7 @@ const trapped = b => new Proxy(b, { get(t, k) {
 function resumable(bytes, opt, maxChunk, quantum, seed, { firstCut = -1, trap = false } = {}) {
   const o = new Int32Array(16), oa = optArr(opt);
   scanOptions(o, ...oa);
+  scanProfile(o, opt.flags ?? 0);
   const total = bytes.length;
   const s = new Int32Array(rscanScratchLen(oa[3], Math.min(total, oa[2])));
   rscanInit(o, s, total, quantum);
@@ -96,6 +99,11 @@ const { cases, nVectors, nFixed } = buildCases(MUTATIONS, SEED);
   };
   for (let i = 0; i < 600; i++) cases.push({ label: `arena map ${i}`, bytes: Uint8Array.from(map(0)), opt: { top: 'map', cose: false, maxBytes: 1_500_000, maxDepth: 32, maxEntries: 65_536, maxItems: 131_072 } });
 }
+// The profile options (P7.1, D120): the deterministic vectors, their fixed edge cases and seeded cases under random
+// profile flags (kin/scripts/det-cases.mjs), through every policy as well.
+const DET_MUT = Math.max(1500, Math.round(MUTATIONS / 2));
+const dc = buildDetCases(DET_MUT, SEED);
+for (const c of dc.cases) cases.push(c);
 let fails = 0, runs = 0, everyRuns = 0, trapRuns = 0;
 const fail = m => { if (fails < 30) console.log('  FAIL ' + m); fails++; };
 const same = (a, b) => a.code === b.code && a.offset === b.offset && a.items === b.items;
@@ -112,7 +120,7 @@ cases.forEach((c, ci) => {
     const got = resumable(c.bytes, c.opt, mc, q, seed, { trap });
     runs++; if (trap) trapRuns++;
     if (!same(got, want)) fail(`${c.label} [${hex(c.bytes).slice(0, 60)}] policy ${mc}/${q}: resumable ${show(got)}, recursive ${show(want)}`);
-    if (c.bytes.length <= 4096) { rustLines.push([...optArr(c.opt), mc, q, seed, hex(c.bytes)].join(' ')); rustWant.push({ ...got, label: c.label, mc, q }); }
+    if (c.bytes.length <= 4096) { rustLines.push([...optArr(c.opt), mc, q, seed, hex(c.bytes), c.opt.flags ?? 0].join(' ')); rustWant.push({ ...got, label: c.label, mc, q }); }
   });
   if (c.bytes.length <= 48) for (let k = 0; k <= c.bytes.length; k++) {
     let got;
@@ -122,7 +130,7 @@ cases.forEach((c, ci) => {
   }
 });
 const tJs = performance.now() - t0;
-console.log(`  cases: ${cases.length} (${nVectors} vectors, ${nFixed} fixed, ${MUTATIONS} mutations, seed ${SEED}); policies max_chunk/quantum ${POLICIES.map(p => p.join('/')).join(', ')}`);
+console.log(`  cases: ${cases.length} (${nVectors} vectors, ${nFixed} fixed, ${MUTATIONS} mutations, seed ${SEED}; profile options: ${dc.nVectors} vector runs, ${dc.nFixed} fixed, ${DET_MUT} seeded under random flags); policies max_chunk/quantum ${POLICIES.map(p => p.join('/')).join(', ')}`);
 console.log(`  ${fails ? 'FAIL' : 'ok  '} JS resumable == recursive (code, offset, items): ${runs} policy runs (${trapRuns} behind an out-of-bounds trap) + ${everyRuns} split-at-every-offset runs (${(tJs / 1000).toFixed(1)} s)`);
 
 if (rustBin) {

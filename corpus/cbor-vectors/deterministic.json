@@ -1,0 +1,1606 @@
+{
+ "profile": "snug deterministic preset (D081, D120-D125): docs/profiles.md",
+ "format": "hex is the full input, decoded with { profile: \"deterministic\" } (top any). Accept vectors give the decoded value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: cbor-profile.json's, plus {\"$map\": [[key, value], ...]} a Map, {\"$tag\": n, \"value\": v} a Tagged, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\" | \"-0\"} and {\"$undefined\": true}; a missing value is not checked. Refuse vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of the same bytes under { profile: \"bindle\", top: \"any\" } (cbor.mjs's).",
+ "generator": "corpus/tools/export-deterministic.mjs",
+ "accept": [
+  {
+   "name": "A: 0",
+   "hex": "00",
+   "value": 0,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 1",
+   "hex": "01",
+   "value": 1,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 10",
+   "hex": "0a",
+   "value": 10,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 23",
+   "hex": "17",
+   "value": 23,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 24",
+   "hex": "1818",
+   "value": 24,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 25",
+   "hex": "1819",
+   "value": 25,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 100",
+   "hex": "1864",
+   "value": 100,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 1000",
+   "hex": "1903e8",
+   "value": 1000,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 1000000",
+   "hex": "1a000f4240",
+   "value": 1000000,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 1000000000000",
+   "hex": "1b000000e8d4a51000",
+   "value": 1000000000000,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -1",
+   "hex": "20",
+   "value": -1,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -10",
+   "hex": "29",
+   "value": -10,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -100",
+   "hex": "3863",
+   "value": -100,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -1000",
+   "hex": "3903e7",
+   "value": -1000,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 18446744073709551615",
+   "hex": "1bffffffffffffffff",
+   "value": {
+    "$int": "18446744073709551615"
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 18446744073709551616",
+   "hex": "c249010000000000000000",
+   "value": {
+    "$int": "18446744073709551616"
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -18446744073709551616",
+   "hex": "3bffffffffffffffff",
+   "value": {
+    "$int": "-18446744073709551616"
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -18446744073709551617",
+   "hex": "c349010000000000000000",
+   "value": {
+    "$int": "-18446744073709551617"
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 0.0",
+   "hex": "f90000",
+   "value": 0,
+   "rfc": true,
+   "reencode": "00",
+   "bindle": "float"
+  },
+  {
+   "name": "A: -0.0",
+   "hex": "f98000",
+   "value": {
+    "$float": "-0"
+   },
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: 1.0",
+   "hex": "f93c00",
+   "value": 1,
+   "rfc": true,
+   "reencode": "01",
+   "bindle": "float"
+  },
+  {
+   "name": "A: 1.1",
+   "hex": "fb3ff199999999999a",
+   "value": 1.1,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 1.5",
+   "hex": "f93e00",
+   "value": 1.5,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 65504.0",
+   "hex": "f97bff",
+   "value": 65504,
+   "rfc": true,
+   "reencode": "19ffe0",
+   "bindle": "float"
+  },
+  {
+   "name": "A: 100000.0",
+   "hex": "fa47c35000",
+   "value": 100000,
+   "rfc": true,
+   "reencode": "1a000186a0",
+   "bindle": "float"
+  },
+  {
+   "name": "A: 3.4028234663852886e+38",
+   "hex": "fa7f7fffff",
+   "value": 3.4028234663852886e+38,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 1.0e+300",
+   "hex": "fb7e37e43c8800759c",
+   "value": 1e+300,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 5.960464477539063e-8",
+   "hex": "f90001",
+   "value": 5.960464477539063e-8,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: 0.00006103515625",
+   "hex": "f90400",
+   "value": 0.00006103515625,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: -4.0",
+   "hex": "f9c400",
+   "value": -4,
+   "rfc": true,
+   "reencode": "23",
+   "bindle": "float"
+  },
+  {
+   "name": "A: -4.1",
+   "hex": "fbc010666666666666",
+   "value": -4.1,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: Infinity",
+   "hex": "f97c00",
+   "value": {
+    "$float": "Infinity"
+   },
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: NaN",
+   "hex": "f97e00",
+   "value": {
+    "$float": "NaN"
+   },
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: -Infinity",
+   "hex": "f9fc00",
+   "value": {
+    "$float": "-Infinity"
+   },
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: false",
+   "hex": "f4",
+   "value": false,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: true",
+   "hex": "f5",
+   "value": true,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: null",
+   "hex": "f6",
+   "value": null,
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: undefined",
+   "hex": "f7",
+   "value": {
+    "$undefined": true
+   },
+   "rfc": true,
+   "bindle": "simple"
+  },
+  {
+   "name": "A: 0(\"2013-03-21T20:04:00Z\")",
+   "hex": "c074323031332d30332d32315432303a30343a30305a",
+   "value": {
+    "$tag": 0,
+    "value": "2013-03-21T20:04:00Z"
+   },
+   "rfc": true,
+   "bindle": "tag"
+  },
+  {
+   "name": "A: 1(1363896240)",
+   "hex": "c11a514b67b0",
+   "value": {
+    "$tag": 1,
+    "value": 1363896240
+   },
+   "rfc": true,
+   "bindle": "tag"
+  },
+  {
+   "name": "A: 1(1363896240.5)",
+   "hex": "c1fb41d452d9ec200000",
+   "value": {
+    "$tag": 1,
+    "value": 1363896240.5
+   },
+   "rfc": true,
+   "bindle": "tag"
+  },
+  {
+   "name": "A: 23(h'01020304')",
+   "hex": "d74401020304",
+   "value": {
+    "$tag": 23,
+    "value": {
+     "$bytes": "01020304"
+    }
+   },
+   "rfc": true,
+   "bindle": "tag"
+  },
+  {
+   "name": "A: 24(h'6449455446')",
+   "hex": "d818456449455446",
+   "value": {
+    "$tag": 24,
+    "value": {
+     "$bytes": "6449455446"
+    }
+   },
+   "rfc": true,
+   "bindle": "tag"
+  },
+  {
+   "name": "A: 32(\"http://www.example.com\")",
+   "hex": "d82076687474703a2f2f7777772e6578616d706c652e636f6d",
+   "value": {
+    "$tag": 32,
+    "value": "http://www.example.com"
+   },
+   "rfc": true,
+   "bindle": "tag"
+  },
+  {
+   "name": "A: h''",
+   "hex": "40",
+   "value": {
+    "$bytes": ""
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: h'01020304'",
+   "hex": "4401020304",
+   "value": {
+    "$bytes": "01020304"
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"\"",
+   "hex": "60",
+   "value": "",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"a\"",
+   "hex": "6161",
+   "value": "a",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"IETF\"",
+   "hex": "6449455446",
+   "value": "IETF",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"\\\"\\\\\"",
+   "hex": "62225c",
+   "value": "\"\\",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"\\u00fc\"",
+   "hex": "62c3bc",
+   "value": "ü",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"\\u6c34\"",
+   "hex": "63e6b0b4",
+   "value": "水",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: \"\\ud800\\udd51\"",
+   "hex": "64f0908591",
+   "value": "𐅑",
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: []",
+   "hex": "80",
+   "value": [],
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: [1, 2, 3]",
+   "hex": "83010203",
+   "value": [
+    1,
+    2,
+    3
+   ],
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: [1, [2, 3], [4, 5]]",
+   "hex": "8301820203820405",
+   "value": [
+    1,
+    [
+     2,
+     3
+    ],
+    [
+     4,
+     5
+    ]
+   ],
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: [1, ..., 25]",
+   "hex": "98190102030405060708090a0b0c0d0e0f101112131415161718181819",
+   "value": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25
+   ],
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: {}",
+   "hex": "a0",
+   "value": {},
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: {1: 2, 3: 4}",
+   "hex": "a201020304",
+   "value": {
+    "$map": [
+     [
+      1,
+      2
+     ],
+     [
+      3,
+      4
+     ]
+    ]
+   },
+   "rfc": true,
+   "bindle": "key_type"
+  },
+  {
+   "name": "A: {\"a\": 1, \"b\": [2, 3]}",
+   "hex": "a26161016162820203",
+   "value": {
+    "a": 1,
+    "b": [
+     2,
+     3
+    ]
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: [\"a\", {\"b\": \"c\"}]",
+   "hex": "826161a161626163",
+   "value": [
+    "a",
+    {
+     "b": "c"
+    }
+   ],
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "A: {\"a\": \"A\", ..., \"e\": \"E\"}",
+   "hex": "a56161614161626142616361436164614461656145",
+   "value": {
+    "a": "A",
+    "b": "B",
+    "c": "C",
+    "d": "D",
+    "e": "E"
+   },
+   "rfc": true,
+   "bindle": "ok"
+  },
+  {
+   "name": "float16 smallest subnormal negative",
+   "hex": "f98001",
+   "value": -5.960464477539063e-8,
+   "bindle": "ok"
+  },
+  {
+   "name": "integral float32 2^24",
+   "hex": "fa4b800000",
+   "value": 16777216,
+   "reencode": "1a01000000",
+   "bindle": "float"
+  },
+  {
+   "name": "integral float32 2^53",
+   "hex": "fa5a000000",
+   "value": 9007199254740992,
+   "bindle": "ok"
+  },
+  {
+   "name": "integral float64 2^53+2",
+   "hex": "fb4340000000000001",
+   "value": 9007199254740994,
+   "bindle": "ok"
+  },
+  {
+   "name": "float32 subnormal 2^-149",
+   "hex": "fa00000001",
+   "value": 1.401298464324817e-45,
+   "bindle": "ok"
+  },
+  {
+   "name": "float64 subnormal",
+   "hex": "fb0000000000000001",
+   "value": 5e-324,
+   "bindle": "ok"
+  },
+  {
+   "name": "-0 in an array with NaN and infinities",
+   "hex": "84f98000f97e00f97c00f9fc00",
+   "value": [
+    {
+     "$float": "-0"
+    },
+    {
+     "$float": "NaN"
+    },
+    {
+     "$float": "Infinity"
+    },
+    {
+     "$float": "-Infinity"
+    }
+   ],
+   "bindle": "float"
+  },
+  {
+   "name": "undefined in an array and as a map value",
+   "hex": "82f7a16175f7",
+   "value": [
+    {
+     "$undefined": true
+    },
+    {
+     "u": {
+      "$undefined": true
+     }
+    }
+   ],
+   "bindle": "simple"
+  },
+  {
+   "name": "noncharacter U+FFFF",
+   "hex": "63efbfbf",
+   "value": "￿",
+   "bindle": "text"
+  },
+  {
+   "name": "noncharacter U+FDD0 as a key",
+   "hex": "a163efb79001",
+   "value": {
+    "﷐": 1
+   },
+   "bindle": "text"
+  },
+  {
+   "name": "noncharacter U+10FFFF",
+   "hex": "64f48fbfbf",
+   "value": "􏿿",
+   "bindle": "text"
+  },
+  {
+   "name": "integer keys incl. negative and 64-bit",
+   "hex": "a6000117021818031bffffffffffffffff0420053bffffffffffffffff06",
+   "value": {
+    "$map": [
+     [
+      0,
+      1
+     ],
+     [
+      23,
+      2
+     ],
+     [
+      24,
+      3
+     ],
+     [
+      {
+       "$int": "18446744073709551615"
+      },
+      4
+     ],
+     [
+      -1,
+      5
+     ],
+     [
+      {
+       "$int": "-18446744073709551616"
+      },
+      6
+     ]
+    ]
+   },
+   "bindle": "key_type"
+  },
+  {
+   "name": "RFC 8392 A.1 CWT claims",
+   "hex": "a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71",
+   "value": {
+    "$map": [
+     [
+      1,
+      "coap://as.example.com"
+     ],
+     [
+      2,
+      "erikw"
+     ],
+     [
+      3,
+      "coap://light.example.com"
+     ],
+     [
+      4,
+      1444064944
+     ],
+     [
+      5,
+      1443944944
+     ],
+     [
+      6,
+      1443944944
+     ],
+     [
+      7,
+      {
+       "$bytes": "0b71"
+      }
+     ]
+    ]
+   },
+   "bindle": "key_type"
+  },
+  {
+   "name": "CWT cnf holding a COSE_Key (nested integer keys)",
+   "hex": "a20162617308a101a4010220012150d7cc072de2205bdc1537a543d53c60a62248acb7deae3a8d4e8f",
+   "value": {
+    "$map": [
+     [
+      1,
+      "as"
+     ],
+     [
+      8,
+      {
+       "$map": [
+        [
+         1,
+         {
+          "$map": [
+           [
+            1,
+            2
+           ],
+           [
+            -1,
+            1
+           ],
+           [
+            -2,
+            {
+             "$bytes": "d7cc072de2205bdc1537a543d53c60a6"
+            }
+           ],
+           [
+            -3,
+            {
+             "$bytes": "acb7deae3a8d4e8f"
+            }
+           ]
+          ]
+         }
+        ]
+       ]
+      }
+     ]
+    ]
+   },
+   "bindle": "key_type"
+  },
+  {
+   "name": "mixed key kinds in bytewise order",
+   "hex": "a800002000410000616100810000a000f400f93e0000",
+   "value": {
+    "$map": [
+     [
+      0,
+      0
+     ],
+     [
+      -1,
+      0
+     ],
+     [
+      {
+       "$bytes": "00"
+      },
+      0
+     ],
+     [
+      "a",
+      0
+     ],
+     [
+      [
+       0
+      ],
+      0
+     ],
+     [
+      {},
+      0
+     ],
+     [
+      false,
+      0
+     ],
+     [
+      1.5,
+      0
+     ]
+    ]
+   },
+   "bindle": "key_type"
+  },
+  {
+   "name": "length-first order is not used: 10, 100, -1",
+   "hex": "a30a001864002000",
+   "value": {
+    "$map": [
+     [
+      10,
+      0
+     ],
+     [
+      100,
+      0
+     ],
+     [
+      -1,
+      0
+     ]
+    ]
+   },
+   "bindle": "key_type"
+  },
+  {
+   "name": "tag, undefined and null keys",
+   "hex": "a3c10001f602f703",
+   "value": {
+    "$map": [
+     [
+      {
+       "$tag": 1,
+       "value": 0
+      },
+      1
+     ],
+     [
+      null,
+      2
+     ],
+     [
+      {
+       "$undefined": true
+      },
+      3
+     ]
+    ]
+   },
+   "bindle": "key_type"
+  },
+  {
+   "name": "tag 0 with a fraction and an offset",
+   "hex": "c0781d313939362d31322d31395431363a33393a35372e3132332d30383a3030",
+   "value": {
+    "$tag": 0,
+    "value": "1996-12-19T16:39:57.123-08:00"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 lower-case t and z, leap day, leap second",
+   "hex": "c074323032342d30322d32397432333a35393a36307a",
+   "value": {
+    "$tag": 0,
+    "value": "2024-02-29t23:59:60z"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 negative integer",
+   "hex": "c120",
+   "value": {
+    "$tag": 1,
+    "value": -1
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 -0.0",
+   "hex": "c1f98000",
+   "value": {
+    "$tag": 1,
+    "value": {
+     "$float": "-0"
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 21 over an array of byte strings",
+   "hex": "d582410041ff",
+   "value": {
+    "$tag": 21,
+    "value": [
+     {
+      "$bytes": "00"
+     },
+     {
+      "$bytes": "ff"
+     }
+    ]
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 22 over a map",
+   "hex": "d6a1616b4101",
+   "value": {
+    "$tag": 22,
+    "value": {
+     "k": {
+      "$bytes": "01"
+     }
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 23 over an integer",
+   "hex": "d705",
+   "value": {
+    "$tag": 23,
+    "value": 5
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding a map with integer keys",
+   "hex": "d81843a10102",
+   "value": {
+    "$tag": 24,
+    "value": {
+     "$bytes": "a10102"
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding tag 24",
+   "hex": "d81844d8184101",
+   "value": {
+    "$tag": 24,
+    "value": {
+     "$bytes": "d8184101"
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with query and fragment",
+   "hex": "d8207475726e3a613a623f633d6425324623782f793f7a",
+   "value": {
+    "$tag": 32,
+    "value": "urn:a:b?c=d%2F#x/y?z"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with an IP literal",
+   "hex": "d82071687474703a2f2f5b3a3a315d3a38302f70",
+   "value": {
+    "$tag": 32,
+    "value": "http://[::1]:80/p"
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 55799 at the top level",
+   "hex": "d9d9f7a1616101",
+   "value": {
+    "$tag": 55799,
+    "value": {
+     "a": 1
+    }
+   },
+   "bindle": "tag"
+  },
+  {
+   "name": "typed array (tag 70) and decimal (tag 4) stay",
+   "hex": "82d8464401000000c48221196ab3",
+   "bindle": "ok"
+  }
+ ],
+ "refuse": [
+  {
+   "name": "A: Infinity as float32",
+   "hex": "fa7f800000",
+   "code": "non_shortest",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: NaN as float32",
+   "hex": "fa7fc00000",
+   "code": "non_shortest",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: -Infinity as float32",
+   "hex": "faff800000",
+   "code": "non_shortest",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: Infinity as float64",
+   "hex": "fb7ff0000000000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: NaN as float64",
+   "hex": "fb7ff8000000000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: -Infinity as float64",
+   "hex": "fbfff0000000000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "float"
+  },
+  {
+   "name": "A: simple(16)",
+   "hex": "f0",
+   "code": "simple",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "simple"
+  },
+  {
+   "name": "A: simple(255)",
+   "hex": "f8ff",
+   "code": "simple",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "simple"
+  },
+  {
+   "name": "A: (_ h'0102', h'030405')",
+   "hex": "5f42010243030405ff",
+   "code": "indefinite",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "indefinite"
+  },
+  {
+   "name": "A: (_ \"strea\", \"ming\")",
+   "hex": "7f657374726561646d696e67ff",
+   "code": "indefinite",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "indefinite"
+  },
+  {
+   "name": "A: [_ ]",
+   "hex": "9fff",
+   "code": "indefinite",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "indefinite"
+  },
+  {
+   "name": "A: [_ 1, [2, 3], [_ 4, 5]]",
+   "hex": "9f018202039f0405ffff",
+   "code": "indefinite",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "indefinite"
+  },
+  {
+   "name": "A: {_ \"a\": 1, \"b\": [_ 2, 3]}",
+   "hex": "bf61610161629f0203ffff",
+   "code": "indefinite",
+   "offset": 0,
+   "rfc": true,
+   "bindle": "indefinite"
+  },
+  {
+   "name": "NaN with a payload (float16)",
+   "hex": "f97e01",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "signalling NaN (float16)",
+   "hex": "f97c01",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "negative quiet NaN (float16)",
+   "hex": "f9fe00",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "NaN with a payload (float32)",
+   "hex": "fa7fc00001",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "negative NaN (float32)",
+   "hex": "faffc00000",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "NaN with a payload (float64)",
+   "hex": "fb7ff8000000000001",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "negative NaN (float64)",
+   "hex": "fbfff8000000000000",
+   "code": "float",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "0.0 as float32",
+   "hex": "fa00000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "-0.0 as float32",
+   "hex": "fa80000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "-0.0 as float64",
+   "hex": "fb8000000000000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "1.0 as float32",
+   "hex": "fa3f800000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "float"
+  },
+  {
+   "name": "1.5 as float64",
+   "hex": "fb3ff8000000000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "2^53 as float64",
+   "hex": "fb4340000000000000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "float16 subnormal as float32",
+   "hex": "fa33800000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "a float truncated",
+   "hex": "fa7f80",
+   "code": "truncated",
+   "offset": 0,
+   "bindle": "truncated"
+  },
+  {
+   "name": "simple(24): unassigned",
+   "hex": "f818",
+   "code": "simple",
+   "offset": 0,
+   "bindle": "simple"
+  },
+  {
+   "name": "f8 17: non-shortest simple",
+   "hex": "f817",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "simple(19): unassigned",
+   "hex": "f3",
+   "code": "simple",
+   "offset": 0,
+   "bindle": "simple"
+  },
+  {
+   "name": "surrogate in text",
+   "hex": "63eda080",
+   "code": "text",
+   "offset": 1,
+   "bindle": "text"
+  },
+  {
+   "name": "overlong in text",
+   "hex": "62c0af",
+   "code": "text",
+   "offset": 1,
+   "bindle": "text"
+  },
+  {
+   "name": "truncated sequence in text",
+   "hex": "62e282",
+   "code": "text",
+   "offset": 1,
+   "bindle": "text"
+  },
+  {
+   "name": "length-first order (10, -1, 100)",
+   "hex": "a30a002000186400",
+   "code": "key_order",
+   "offset": 5,
+   "bindle": "key_type"
+  },
+  {
+   "name": "text before integer",
+   "hex": "a26161010102",
+   "code": "key_order",
+   "offset": 4,
+   "bindle": "key_type"
+  },
+  {
+   "name": "duplicate integer key",
+   "hex": "a201000100",
+   "code": "duplicate_key",
+   "offset": 3,
+   "bindle": "key_type"
+  },
+  {
+   "name": "duplicate array key",
+   "hex": "a2810100810100",
+   "code": "duplicate_key",
+   "offset": 4,
+   "bindle": "key_type"
+  },
+  {
+   "name": "float keys out of order",
+   "hex": "a2f93e0000f93c0000",
+   "code": "key_order",
+   "offset": 5,
+   "bindle": "key_type"
+  },
+  {
+   "name": "an array key truncated",
+   "hex": "a1830102",
+   "code": "truncated",
+   "offset": 1,
+   "bindle": "key_type"
+  },
+  {
+   "name": "a non-shortest integer key",
+   "hex": "a1180100",
+   "code": "non_shortest",
+   "offset": 1,
+   "bindle": "key_type"
+  },
+  {
+   "name": "tag 0 with an integer",
+   "hex": "c000",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with a date only",
+   "hex": "c06a323031332d30332d3231",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with month 13",
+   "hex": "c074323031332d31332d32315432303a30343a30305a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with Feb 29 in a common year",
+   "hex": "c074323032332d30322d32395432303a30343a30305a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with hour 24",
+   "hex": "c074323031332d30332d32315432343a30303a30305a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with an empty fraction",
+   "hex": "c075323031332d30332d32315432303a30343a30302e5a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 without an offset",
+   "hex": "c073323031332d30332d32315432303a30343a3030",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with a space for T",
+   "hex": "c074323031332d30332d32312032303a30343a30305a",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 0 with bad UTF-8: the content walk first",
+   "hex": "c062c0af",
+   "code": "text",
+   "offset": 2,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with text",
+   "hex": "c16131",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with NaN",
+   "hex": "c1f97e00",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with -Infinity",
+   "hex": "c1f9fc00",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with a bignum",
+   "hex": "c1c249010000000000000000",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 1 with a non-shortest float: the content walk first",
+   "hex": "c1fa3fc00000",
+   "code": "non_shortest",
+   "offset": 1,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 with text",
+   "hex": "d818623031",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 empty",
+   "hex": "d81840",
+   "code": "truncated",
+   "offset": 3,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding two items",
+   "hex": "d818420102",
+   "code": "trailing",
+   "offset": 4,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding a non-shortest integer",
+   "hex": "d818421817",
+   "code": "non_shortest",
+   "offset": 3,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding unsorted keys",
+   "hex": "d81845a202000100",
+   "code": "key_order",
+   "offset": 6,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding a truncated array",
+   "hex": "d818428201",
+   "code": "truncated",
+   "offset": 3,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 24 holding an indefinite string",
+   "hex": "d818427fff",
+   "code": "indefinite",
+   "offset": 3,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 relative reference",
+   "hex": "d820642f612f62",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with a space",
+   "hex": "d8206a687474703a2f2f612062",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with a bad escape",
+   "hex": "d8206c687474703a2f2f612f253267",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with two fragments",
+   "hex": "d82067613a6223632364",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with a bracket in the query",
+   "hex": "d82067613a623f5b635d",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 32 with an empty scheme",
+   "hex": "d820623a62",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 55799 nested",
+   "hex": "81d9d9f700",
+   "code": "tag",
+   "offset": 1,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 55799 twice",
+   "hex": "d9d9f7d9d9f700",
+   "code": "tag",
+   "offset": 3,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 5 (bigfloat) is not in the standard set",
+   "hex": "c5820103",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 18 (COSE_Sign1) is not in the standard set",
+   "hex": "d280",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 33 is not in the standard set",
+   "hex": "d821624141",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 64 stays refused",
+   "hex": "d8404100",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "a 64-bit tag number",
+   "hex": "db000000010000000000",
+   "code": "tag",
+   "offset": 0,
+   "bindle": "tag"
+  },
+  {
+   "name": "a non-shortest tag head",
+   "hex": "d80000",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "non-shortest integer",
+   "hex": "1817",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "non-shortest 16-bit integer",
+   "hex": "1900ff",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "non-shortest byte string length",
+   "hex": "5801ff",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "non-shortest array length",
+   "hex": "9800",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "non-shortest map length",
+   "hex": "b800",
+   "code": "non_shortest",
+   "offset": 0,
+   "bindle": "non_shortest"
+  },
+  {
+   "name": "reserved additional information",
+   "hex": "1c",
+   "code": "malformed",
+   "offset": 0,
+   "bindle": "malformed"
+  },
+  {
+   "name": "a stray break",
+   "hex": "ff",
+   "code": "indefinite",
+   "offset": 0,
+   "bindle": "indefinite"
+  },
+  {
+   "name": "trailing bytes",
+   "hex": "0000",
+   "code": "trailing",
+   "offset": 1,
+   "bindle": "trailing"
+  },
+  {
+   "name": "empty input",
+   "hex": "",
+   "code": "truncated",
+   "offset": 0,
+   "bindle": "truncated"
+  }
+ ]
+}

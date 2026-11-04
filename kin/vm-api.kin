@@ -6,11 +6,11 @@
 ;; verified before it is validated against.
 (ns snug.vm.api
   (:require [kin.lang :refer [defn let local return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem ushr bit-and < > <= >= == != and or not
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem ushr bit-and bit-or < > <= >= == != and or not
                                u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_COSE
                                      O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS
-                                     O_ITEMS MAX_BIGNUM_BYTES]]
+                                     O_ITEMS O_PROFILE MAX_BIGNUM_BYTES PF_HOST PF_SUB]]
             [snug.cbor.head :refer [fail]]
             [snug.vm.layout :refer [MAGIC FORMAT_VERSION HEADER_WORDS H_FORMAT H_HEADER_WORDS
                                     H_PROGRAM_WORDS H_POOL_BYTES H_N_RULES H_N_LEAVES H_LIM_DEPTH
@@ -135,6 +135,17 @@
   (if (== (ia limits i) 1) (return 1))
   (return 0))
 
+(defn ^:pub ^I32 prof [^IntsR limits ^I32 depth0]
+  (comment "The profile flags of a run (D120): limits word 9 (a VM extension"
+           "beyond program.md §12.3's 8 words), host bits only; absent (fewer than"
+           "10 words) or negative is 0, the Bindle profile. A run whose root is not"
+           "the document's top (depth0 > 0) adds PF_SUB.")
+  (let [^:mut f 0]
+    (if (> (ilen limits) 9)
+      (if (> (ia limits 9) 0) (set f (bit-and (ia limits 9) PF_HOST))))
+    (if (!= depth0 0) (set f (bit-or f PF_SUB)))
+    (return f)))
+
 (defn ^:pub ^I32 vm-output [^Ints s ^Ints out ^I32 code ^I32 sub ^I32 offset]
   (comment "Fill out (§13.2) and answer the code.")
   (let [start (ia s VM_BUDGET_START)
@@ -203,6 +214,7 @@
       (if (< dl 0) (set dl 0))
       (iset s O_TOP (opt01 limits 0))
       (if (== depth0 0) (iset s O_COSE (opt01 limits 1)) (iset s O_COSE 0))
+      (iset s O_PROFILE (prof limits depth0))
       (iset s O_MAX_BYTES (lim limits 2 (ia p H_LIM_INPUT)))
       (iset s O_MAX_DEPTH dl)
       (iset s O_MAX_ENTRIES (lim limits 4 (ia p H_LIM_ENTRIES)))
@@ -293,7 +305,8 @@
                               ^Ints out]
   (comment "Validate input against rule of the verified Program (p, pool), under"
            "limits (8 words, -1 = compiled default; per-call values only lower the"
-           "compiled ones), with scratch s (see vm-scratch-words). Answers the reason"
+           "compiled ones; word 8 the generic/schedule bits, word 9 the profile"
+           "flags, D120), with scratch s (see vm-scratch-words). Answers the reason"
            "code (0 ok; profile 1..21; schema 32..41; 48 budget), also in out[0],"
            "with out per program.md §13.2; or -1 Program inconsistent, -2 scratch too"
            "small, -3 rule out of range, -4 out shorter than 8 words. Allocates"

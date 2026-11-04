@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
 import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
 import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan } from '../../gen/js/snug/vm/api.mjs';
-import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { scan, scanOptions, scanProfile, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { buildDetCases, optWords } from './det-cases.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
 import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
 import { assembledCases } from './vm-cases.mjs';
@@ -16,7 +17,8 @@ import { compile as oracleCompile, check as oracleCheck } from '../../corpus/too
 import { oracleSchemas } from './vm-oracle-gen.mjs';
 
 export const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
-export const LIM = (top, cose, mb = -1, md = -1, me = -1, mi = -1, bn = -1, bu = -1) => [top, cose, mb, md, me, mi, bn, bu, 0];
+// limits words (program.md §12.3): 0..7, word 8 the VM's generic/schedule bits, word 9 the profile flags (D120)
+export const LIM = (top, cose, mb = -1, md = -1, me = -1, mi = -1, bn = -1, bu = -1, pf = 0) => [top, cose, mb, md, me, mi, bn, bu, 0, pf];
 
 /** Every vm-test case: {programs: [{P, B, label}], cases: [{prog, rule, lim, bytes, label, check, span?, identity?, corpus?, oracle?}], ...}. */
 export function buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail }) {
@@ -87,6 +89,35 @@ for (const c of sc.cases) {
       if (code !== 0 && w[2] !== off) return `offset VM ${w[2]} scanner ${off}`;
       if (w[4] !== items) return `items VM ${w[4]} scanner ${items}`;
       return null; } });
+}
+
+// 2c. the profile options (P7.1, D120): the deterministic vectors, fixed edge cases and seeded cases under random
+// profile flags (kin/scripts/det-cases.mjs) through the VM against `any` and against a schema that keeps the new
+// shapes live (any keys, the standard tags, undefined, every float), limits word 9 = the flags: the scanner's code,
+// offset and item count under the same flags.
+const LIVE2 = `r = v
+v = [* v] / { * any => v } / int / integer / float / tstr / bstr / bool / null / undefined /
+    tdate / time / eb64url / eb64legacy / eb16 / encoded-cbor / uri / cbor-any /
+    #6.24(bytes .cbor v) / #6.4([int, integer]) / #6.40([[* uint], [* v] / typed]) / typed / bstr .cbor v /
+    float16 .ge 0.0 / (-1.0 .. 1.0) / (1.5 .. 100000.0)
+typed = #6.69(bstr) / #6.70(bstr) / #6.71(bstr) / #6.72(bstr) / #6.77(bstr) / #6.78(bstr) /
+        #6.79(bstr) / #6.84(bstr) / #6.85(bstr) / #6.86(bstr)`;
+const live2C = compile(LIVE2, { limits: { depth: 256, inputBytes: 0x7fffffff, entries: 1 << 24, items: 1 << 24, budget: 0x7fffffff } });
+const live2P = addProgram(live2C.program, live2C.pool, 'live profile options');
+const live2Rule = live2C.rules.indexOf('r');
+const dc = buildDetCases(Math.max(1500, Math.round(MUTATIONS / 2)), SEED);
+for (const c of dc.cases) {
+  const opt = c.opt;
+  scanOptions(o16, ...optWords(opt)); scanProfile(o16, opt.flags);
+  const code = scan(c.bytes, o16), off = errorOffset(o16), items = itemsScanned(o16);
+  const lim = LIM(...optWords(opt), -1, -1, opt.flags);
+  for (const [prog, rule, tag] of [[anyP, 0, 'det identity'], [live2P, live2Rule, 'det live identity']])
+    cases.push({ prog, rule, lim, bytes: c.bytes, label: `${tag} ${c.label}`, identity: true,
+      check: o => { const w = o.split(' ').map(Number);
+        if (w[0] !== code) return `VM ${w[0]} scanner ${code} (${codeName(code)})`;
+        if (code !== 0 && w[2] !== off) return `offset VM ${w[2]} scanner ${off}`;
+        if (w[4] !== items) return `items VM ${w[4]} scanner ${items}`;
+        return null; } });
 }
 
 // ---------------------------------------------------------------- 3. conformance

@@ -149,6 +149,22 @@ pub fn opt01(limits: &[i32], i: i32) -> i32 {
     }
     return 0;
 }
+pub fn prof(limits: &[i32], depth0: i32) -> i32 {
+    // The profile flags of a run (D120): limits word 9 (a VM extension
+    // beyond program.md §12.3's 8 words), host bits only; absent (fewer than
+    // 10 words) or negative is 0, the Bindle profile. A run whose root is not
+    // the document's top (depth0 > 0) adds PF_SUB.
+    let mut f: i32 = 0;
+    if (limits.len() as i32) > 9 {
+        if limits[(9) as usize] > 0 {
+            f = limits[(9) as usize] & PF_HOST;
+        }
+    }
+    if depth0 != 0 {
+        f |= PF_SUB;
+    }
+    return f;
+}
 pub fn vm_output(s: &mut [i32], out: &mut [i32], code: i32, sub: i32, offset: i32) -> i32 {
     // Fill out (§13.2) and answer the code.
     let start: i32 = s[(VM_BUDGET_START) as usize];
@@ -240,6 +256,7 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     } else {
         s[(O_COSE) as usize] = 0;
     }
+    s[(O_PROFILE) as usize] = prof(limits, depth0);
     s[(O_MAX_BYTES) as usize] = lim(limits, 2, p[(H_LIM_INPUT) as usize]);
     s[(O_MAX_DEPTH) as usize] = dl;
     s[(O_MAX_ENTRIES) as usize] = lim(limits, 4, p[(H_LIM_ENTRIES) as usize]);
@@ -370,7 +387,8 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
 pub fn vm_validate(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
     // Validate input against rule of the verified Program (p, pool), under
     // limits (8 words, -1 = compiled default; per-call values only lower the
-    // compiled ones), with scratch s (see vm-scratch-words). Answers the reason
+    // compiled ones; word 8 the generic/schedule bits, word 9 the profile
+    // flags, D120), with scratch s (see vm-scratch-words). Answers the reason
     // code (0 ok; profile 1..21; schema 32..41; 48 budget), also in out[0],
     // with out per program.md §13.2; or -1 Program inconsistent, -2 scratch too
     // small, -3 rule out of range, -4 out shorter than 8 words. Allocates

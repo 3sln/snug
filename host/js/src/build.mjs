@@ -1,6 +1,9 @@
-// Trusted second pass over scanner-approved Bindle CBOR. Invalid input is
-// outside this module's contract; all profile decisions belong to the scanner.
-import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value } from './values.mjs';
+// Trusted second pass over scanner-approved CBOR (any profile, D123). Invalid
+// input is outside this module's contract; all profile decisions belong to the
+// scanner. Maps with only text keys become objects, maps with any other key a Map
+// (a cose top-level map always); standard-set tags become Tagged; f7 undefined.
+import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue } from './values.mjs';
+import { fail } from './fault.mjs';
 
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
@@ -56,10 +59,12 @@ class Builder {
       if (ai === 20) return false;
       if (ai === 21) return true;
       if (ai === 22) return null;
+      if (ai === 23) return undefined;
       const p = this.pos;
       if (ai === 25) {
         this.pos = p + 2;
         const h = this.b[p] * 256 + this.b[p + 1], exp = (h >>> 10) & 31, frac = h & 1023;
+        if (exp === 31) return frac ? NaN : h & 32768 ? -Infinity : Infinity;
         return (h & 32768 ? -1 : 1) * (exp === 0 ? frac * 2 ** -24 : (1 + frac / 1024) * 2 ** (exp - 15));
       }
       if (ai === 26) { this.pos = p + 4; return this.view.getFloat32(p); }
@@ -77,12 +82,15 @@ class Builder {
         return out;
       }
       case 5: {
-        const cose = top && this.cose;
-        const out = cose ? new Map() : this.plain ? {} : Object.create(null);
+        if (top && this.cose) return this.map(n);
+        const start = this.pos, b = this.b;
+        const out = this.plain ? {} : Object.create(null);
         for (let i = 0; i < n; i++) {
+          // A non-text key makes the whole map a Map; text keys sort first only before
+          // major 4..7 keys, so the rare restart rebuilds the map in its encoded order.
+          if (b[this.pos] >> 5 !== 3) { this.pos = start; return this.map(n); }
           const key = this.item(), value = this.item();
-          if (cose) out.set(key, value);
-          else if (this.plain && key === '__proto__') {
+          if (this.plain && key === '__proto__') {
             Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
           } else out[key] = value;
         }
@@ -91,7 +99,15 @@ class Builder {
       case 6: return this.tag(n);
     }
   }
+  map(n) {
+    const out = new Map();
+    for (let i = 0; i < n; i++) { const key = this.item(); out.set(key, this.item()); }
+    // Distinct CBOR keys that are one JS Map key (1 and 1.0, 0 and -0.0): no JS value holds the map (D123).
+    if (out.size !== n) fail('unsupported', 'Two map keys decode to the same JavaScript value (such as 1 and 1.0); read this map through a view.');
+    return out;
+  }
   tag(tag) {
+    if (tag === 0 || tag === 1 || tag === 32 || tag === 55799 || (tag >= 21 && tag <= 24)) return taggedValue(tag, this.item());
     if (tag === 4) {
       this.pos++; // scanner proved the two-element array head
       const exponent = this.item(), mantissa = this.item();

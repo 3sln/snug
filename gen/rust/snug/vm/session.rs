@@ -65,6 +65,7 @@ pub fn vms_init(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32]
     ss[(SS_CHN) as usize] = -1;
     ss[(SS_ATOP) as usize] = 0;
     ss[(SS_ABYTES) as usize] = ka.len() as i32;
+    ss[(SS_PROF) as usize] = s[(O_PROFILE) as usize];
     return 0;
 }
 pub fn vms_need_offset(ss: &[i32]) -> i32 {

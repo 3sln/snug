@@ -5,13 +5,21 @@ use crate::snug::cbor::codes::*;
 use crate::snug::cbor::float::*;
 use crate::snug::cbor::head::*;
 use crate::snug::cbor::keys::*;
+use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::cbor::text::*;
 
+pub fn text_nc(o: &[i32]) -> i32 {
+    // The noncharacter argument of the UTF-8 checks: non-zero when the profile
+    // admits noncharacters in text (PF_NONCHAR).
+    return o[(O_PROFILE) as usize] & PF_NONCHAR;
+}
 pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     // A float16/32/64 (major 7, ai 25..27): the bytes, then `float`, then
-    // `non_shortest` (cbor.mjs `simple`).
+    // `non_shortest` (cbor.mjs `simple`); under PF_FLOATS the RFC 8949
+    // deterministic rules of snug.cbor.float instead (D122).
     let left: i32 = end - (pos + 1);
+    let rfc: bool = (o[(O_PROFILE) as usize] & PF_FLOATS) != 0;
     let mut c: i32 = 0;
     let mut w: i32 = 0;
     if ai == 25 {
@@ -19,21 +27,33 @@ pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
         if left < 2 {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        c = check_f16(be16(b, pos + 1));
+        if rfc {
+            c = rfc_f16(be16(b, pos + 1));
+        } else {
+            c = check_f16(be16(b, pos + 1));
+        }
     }
     if ai == 26 {
         w = 4;
         if left < 4 {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        c = check_f32(be32(b, pos + 1));
+        if rfc {
+            c = rfc_f32(be32(b, pos + 1));
+        } else {
+            c = check_f32(be32(b, pos + 1));
+        }
     }
     if ai == 27 {
         w = 8;
         if left < 8 {
             return fail(o, pos, CODE_TRUNCATED);
         }
-        c = check_f64(be32(b, pos + 1), be32(b, pos + 5));
+        if rfc {
+            c = rfc_f64(be32(b, pos + 1), be32(b, pos + 5));
+        } else {
+            c = check_f64(be32(b, pos + 1), be32(b, pos + 5));
+        }
     }
     if c != 0 {
         return fail(o, pos, c);
@@ -41,9 +61,13 @@ pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     return (pos + 1) + w;
 }
 pub fn scan_simple(o: &mut [i32], pos: i32, ai: i32) -> i32 {
-    // Major 7 other than a float: false, true and null only. ai 24 reaches
-    // here only after its argument passed the shortest-form check.
+    // Major 7 other than a float: false, true and null; undefined (ai 23)
+    // under PF_UNDEFINED. ai 24 reaches here only after its argument passed
+    // the shortest-form check; unassigned simple values are always refused.
     if (ai >= 20) && (ai <= 22) {
+        return pos + 1;
+    }
+    if (ai == 23) && ((o[(O_PROFILE) as usize] & PF_UNDEFINED) != 0) {
         return pos + 1;
     }
     return fail(o, pos, CODE_SIMPLE);
@@ -53,7 +77,7 @@ pub(crate) fn scan_text(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: 
     if stop < 0 {
         return stop;
     }
-    let bad: i32 = utf8_invalid_at(b, p, stop);
+    let bad: i32 = utf8_invalid_at(b, p, stop, text_nc(o));
     if bad >= 0 {
         return fail(o, bad, CODE_TEXT);
     }
@@ -89,6 +113,27 @@ pub fn cose_label_ok(b: &[u8], s: i32, major: i32) -> bool {
     }
     return (hi >= 0) && ((hi < top) || ((hi == top) && (lo != (-1))));
 }
+pub fn key_peek(o: &[i32], km: i32, cose: bool) -> bool {
+    // May a key whose major type km is NOT 3 (text keys never ask) start a
+    // pair? PF_KEYS 2/3 admits any major, 1 majors 0/1; under text keys only
+    // a cose map (the top-level map with the cose option) admits 0/1.
+    let kk: i32 = o[(O_PROFILE) as usize] & PF_KEYS;
+    if kk >= 2 {
+        return true;
+    }
+    if km > 1 {
+        return false;
+    }
+    return (kk == 1) || cose;
+}
+pub fn key_label(b: &[u8], o: &[i32], s: i32, km: i32) -> bool {
+    // After the walk of an integer key (km 0/1) at s: under text keys it was
+    // admitted as a cose label, so it must be a safe integer.
+    if (o[(O_PROFILE) as usize] & PF_KEYS) != 0 {
+        return true;
+    }
+    return cose_label_ok(b, s, km);
+}
 pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     // Per pair: the key's major type is PEEKED (key_type) before the key is
     // scanned; order and duplicates are decided after it, by its encoded bytes.
@@ -109,7 +154,7 @@ pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
         }
         let km: i32 = (i32::cast_unsigned(b[(start) as usize] as i32) >> 5).cast_signed();
         if km != 3 {
-            if !(cose && (km <= 1)) {
+            if !key_peek(o, km, cose) {
                 return fail(o, start, CODE_KEY_TYPE);
             }
         }
@@ -118,7 +163,7 @@ pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
             return q;
         }
         if km <= 1 {
-            if !cose_label_ok(b, start, km) {
+            if !key_label(b, o, start, km) {
                 return fail(o, start, CODE_KEY_TYPE);
             }
         }
@@ -269,6 +314,27 @@ pub(crate) fn scan_ndarray(b: &[u8], o: &mut [i32], pos: i32, p: i32, depth: i32
     }
     return stop;
 }
+pub(crate) fn scan_std(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, depth: i32, end: i32) -> i32 {
+    // A standard-set tag (snug.cbor.stdtags, D121): its content is an item at
+    // depth + 1, walked first; then the content rule (tag); then a tag-24 byte
+    // string's content as one item at depth + 2, bounded by its end (trailing
+    // after it).
+    let q: i32 = item(b, o, p, depth + 1, end);
+    if q < 0 {
+        return q;
+    }
+    if !std_content_ok(b, tag, p, q) {
+        return fail(o, pos, CODE_TAG);
+    }
+    if tag == 24 {
+        let cs: i32 = std_inner(b, p);
+        let r: i32 = scan_one(b, o, cs, depth + 2, q);
+        if r < 0 {
+            return r;
+        }
+    }
+    return q;
+}
 pub(crate) fn scan_tag(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     // A tag is a depth level, checked before its number is looked at.
     if depth >= o[(O_MAX_DEPTH) as usize] {
@@ -287,10 +353,13 @@ pub(crate) fn scan_tag(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
         return scan_ndarray(b, o, pos, p, depth, end);
     }
     let size: i32 = typed_size(lo);
-    if size == 0 {
-        return fail(o, pos, CODE_TAG);
+    if size > 0 {
+        return scan_typed(b, o, pos, p, lo, size, end);
     }
-    return scan_typed(b, o, pos, p, lo, size, end);
+    if std_allowed(o[(O_PROFILE) as usize], lo, depth) {
+        return scan_std(b, o, pos, p, lo, depth, end);
+    }
+    return fail(o, pos, CODE_TAG);
 }
 pub(crate) fn item(b: &[u8], o: &mut [i32], pos: i32, depth: i32, end: i32) -> i32 {
     // One data item at pos (cbor.mjs `item`): counted first, then its head.
@@ -331,6 +400,25 @@ pub(crate) fn item(b: &[u8], o: &mut [i32], pos: i32, depth: i32, end: i32) -> i
         _ => scan_simple(o, pos, ai),
     };
 }
+pub fn scan_item(b: &[u8], o: &mut [i32], pos: i32, depth: i32, end: i32) -> i32 {
+    // One item at pos and depth (the walk of `scan`), bounded by end: its end,
+    // or a negated code. The resumable scanner walks a map key of a container
+    // or tag kind with it, whole (D124).
+    return item(b, o, pos, depth, end);
+}
+pub fn scan_one(b: &[u8], o: &mut [i32], cs: i32, depth: i32, ce: i32) -> i32 {
+    // One item at cs, depth `depth`, that must end exactly at ce (a tag-24
+    // payload, D121): ce, or a negated code -- truncated when it runs past
+    // ce, trailing after it.
+    let r: i32 = item(b, o, cs, depth, ce);
+    if r < 0 {
+        return r;
+    }
+    if r != ce {
+        return fail(o, r, CODE_TRAILING);
+    }
+    return r;
+}
 pub fn scan_options(o: &mut [i32], top_any: i32, cose: i32, max_bytes: i32, max_depth: i32, max_entries: i32, max_items: i32) {
     // Fill the options slots of o (length >= SCAN_OPTS_LEN). top-any: 0 the
     // top-level item must be a map (cbor.mjs top 'map'), 1 any item. cose: 1
@@ -343,6 +431,14 @@ pub fn scan_options(o: &mut [i32], top_any: i32, cose: i32, max_bytes: i32, max_
     o[(O_MAX_DEPTH) as usize] = max_depth;
     o[(O_MAX_ENTRIES) as usize] = max_entries;
     o[(O_MAX_ITEMS) as usize] = max_items;
+    o[(O_PROFILE) as usize] = 0;
+}
+pub fn scan_profile(o: &mut [i32], flags: i32) {
+    // Select the profile (D120): the flags of snug.cbor.codes (PF_*), only
+    // the host bits (PF_HOST) kept. 0, as scan-options leaves it, is the
+    // Bindle profile; PF_DETERMINISTIC the deterministic preset. Call after
+    // scan-options.
+    o[(O_PROFILE) as usize] = flags & PF_HOST;
 }
 /// Scan `b` (length < 2^31) under the options in `o` (see `scanOptions` /
 /// `scan_options`). Answers 0 when cbor.mjs `decode` would accept, else

@@ -1,12 +1,13 @@
 // `bb scan-test`'s Rust arm. Reads cases on stdin, one per line:
 //
-//     <top_any> <cose> <max_bytes> <max_depth> <max_entries> <max_items> <hex>
+//     <top_any> <cose> <max_bytes> <max_depth> <max_entries> <max_items> <hex> [<profile flags>]
 //
+// (the flags are snug.cbor.codes PF_*, D120; absent, 0: the Bindle profile).
 // and prints `<code> <error offset>` per case. A panic is caught per case and
 // printed as `PANIC` -- the scanner must never panic on any input, and this
 // binary is built in debug (overflow checks on) so a broken arithmetic
 // guarantee is a panic here rather than a silent wrap.
-use snug::snug::cbor::scan::{error_offset, scan, scan_options};
+use snug::snug::cbor::scan::{error_offset, scan, scan_options, scan_profile};
 use std::io::{BufRead, Write};
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -33,9 +34,11 @@ fn main() {
         let n = |i: usize| -> i32 { f[i].parse().expect("number") };
         let (top, cose, mb, md, me, mi) = (n(0), n(1), n(2), n(3), n(4), n(5));
         let bytes = unhex(if f.len() > 6 { f[6] } else { "" });
+        let flags = if f.len() > 7 { n(7) } else { 0 };
         let r = std::panic::catch_unwind(|| {
             let mut o = [0i32; 16];
             scan_options(&mut o, top, cose, mb, md, me, mi);
+            scan_profile(&mut o, flags);
             let c = scan(&bytes, &mut o);
             (c, error_offset(&mut o))
         });

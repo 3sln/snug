@@ -3,6 +3,7 @@
 
 use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
+use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::vm::api::*;
 use crate::snug::vm::base::*;
@@ -48,6 +49,7 @@ pub const IT_PAIR: i32 = 33;
 pub const SS_ABYTES: i32 = 34;
 pub const SS_CSTART: i32 = 35;
 pub const SS_CPT: i32 = 36;
+pub const SS_PROF: i32 = 37;
 pub const SS_HDR: i32 = 40;
 pub const PH_START: i32 = 0;
 pub const PH_ITEM: i32 = 1;
@@ -598,7 +600,9 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
             }
             if major == 6 {
                 if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
-                    return 1;
+                    if !std_allowed(ss[(SS_PROF) as usize], lo, 0) {
+                        return 1;
+                    }
                 }
                 n = 1;
             }
@@ -717,7 +721,9 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
             }
             if major == 6 {
                 if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
-                    return cpt_at(ss, i + 1, base);
+                    if !std_allowed(ss[(SS_PROF) as usize], lo, 0) {
+                        return cpt_at(ss, i + 1, base);
+                    }
                 }
                 n = 1;
             }

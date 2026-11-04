@@ -78,7 +78,7 @@ const rnd = n => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st
 const runs = [];   // {ci, lim, policy, want, rust}
 const counts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, rnd4096: 0, quanta: 0, split: 0, budget: 0, generic: 0, sched1: 0 };
 cases.forEach((c, ci) => {
-  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0]);
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
   const want0 = buffer(c, lim0);
   const n = c.bytes.length;
   const add = (lim, want, policy, tag, rust) => { runs.push({ ci, lim, want, policy, rust }); counts[tag]++; };
@@ -151,7 +151,7 @@ const hostRuns = [];   // {ci, chunk, quantum, js}
 const hostProgs = new Map();
 const render = r => r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
 cases.forEach((c, ci) => {
-  if (!(c.corpus || c.stress) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0) return;
+  if (!(c.corpus || c.stress) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0 || (c.lim[9] ?? 0) !== 0) return;
   if (!hostProgs.has(c.prog)) {
     let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify }); } catch { hp = null; }
     hostProgs.set(c.prog, hp);

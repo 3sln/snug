@@ -1,8 +1,10 @@
-//! A minimal Rust view over checked Bindle CBOR (architecture §16, P5 first
-//! slice): open = the full profile scan, then navigation by the generated kin
-//! primitives (`snug::nav::walk`). Borrowed only: the view holds `&[u8]`, so
+//! A minimal Rust view over checked CBOR (architecture §16, P5 first slice):
+//! open = the full profile scan (the deterministic preset by default, as the JS
+//! view's; D120), then navigation by the generated kin primitives
+//! (`snug::nav::walk`). Borrowed only: the view holds `&[u8]`, so
 //! the borrow checker enforces the no-mutation contract the JS host documents.
-use crate::snug::cbor::scan::{scan, scan_options};
+use crate::snug::cbor::codes::PF_DETERMINISTIC;
+use crate::snug::cbor::scan::{scan, scan_options, scan_profile};
 use crate::snug::nav::walk::{
     nav_child, nav_find, nav_head, nav_init, nav_length, nav_skip, N_HI, N_LO, N_MAJOR,
     NAV_WORDS,
@@ -25,13 +27,19 @@ pub struct View<'a> {
 pub struct Refused(pub i32);
 
 impl<'a> View<'a> {
-    /// Check `b` in full (top-level map unless `top_any`), then view its root.
+    /// Check `b` in full under the deterministic preset (top-level map unless
+    /// `top_any`), then view its root.
     pub fn open(b: &'a [u8], top_any: bool) -> Result<View<'a>, Refused> {
+        View::open_profile(b, top_any, PF_DETERMINISTIC)
+    }
+    /// The same under explicit profile flags (snug.cbor.codes PF_*; 0 Bindle).
+    pub fn open_profile(b: &'a [u8], top_any: bool, flags: i32) -> Result<View<'a>, Refused> {
         if b.len() >= i32::MAX as usize {
             return Err(Refused(20));
         }
         let mut o = [0i32; 16];
         scan_options(&mut o, top_any as i32, 0, MAX_BYTES, MAX_DEPTH, MAX_ENTRIES, MAX_ITEMS);
+        scan_profile(&mut o, flags);
         let c = scan(b, &mut o);
         if c != 0 {
             return Err(Refused(c));

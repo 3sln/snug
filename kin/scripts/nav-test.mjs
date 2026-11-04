@@ -38,7 +38,9 @@ function rust(lines) {
   if (r.status !== 0) throw new Error('nav-test binary failed: ' + r.stderr);
   return r.stdout.toString().trimEnd().split('\n');
 }
-const accepts = (b, top = 'any') => { try { scan(b, { top }); return true; } catch { return false; } };
+// The deterministic preset (the default since P7.1, D120): documents with integer and other keys, the standard
+// tags and RFC floats are traced too; the Rust View opens with the same preset.
+const accepts = (b, top = 'any') => { try { scan(b, { top, wire: 'deterministic' }); return true; } catch { return false; } };
 
 // ---------------------------------------------------------------- documents
 const docs = [];
@@ -46,6 +48,8 @@ const profile = JSON.parse(readFileSync(new URL('../../corpus/cbor-vectors/cbor-
 for (const v of profile.accept) docs.push(unhex(v.hex));
 const oracle = JSON.parse(readFileSync(new URL('../../corpus/cbor-vectors/cbor-cborg-oracle.json', import.meta.url)));
 for (const c of oracle.cases) if (c.accept) { const b = unhex(c.hex); if (accepts(b)) docs.push(b); }
+const det = JSON.parse(readFileSync(new URL('../../corpus/cbor-vectors/deterministic.json', import.meta.url)));
+for (const v of det.accept) docs.push(unhex(v.hex));
 const r = createRandom(SEED);
 for (let i = 0; i < N; i++) docs.push(encode(i % 2 ? randomMap(r, { maxDepth: 6 }) : randomValue(r, { maxDepth: 6 }), { top: 'any' }));
 // a few wide maps, so directories and binary search see depth
@@ -119,7 +123,7 @@ const paths = [], wantRaw = [];
 const r3 = createRandom(SEED + 2000);
 for (const b of checked) {
   if (b[0] >> 5 !== 5) continue;
-  const v = view(b, { top: 'any' });
+  const v = view(b, { top: 'any', wire: 'deterministic' });
   const path = [];
   let x = v;
   while (x && x.kind === 'map' && x.length > 0 && r3.chance(0.8)) {

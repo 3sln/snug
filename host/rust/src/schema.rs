@@ -86,10 +86,13 @@ impl Scratch {
 }
 
 /// Per-call options; a limit only lowers the compiled one (None = compiled).
-#[derive(Debug, Clone, Default)]
+/// `profile` is the kin profile flags (snug.cbor.codes PF_*, D120): the
+/// deterministic preset by default, 0 the Bindle profile.
+#[derive(Debug, Clone)]
 pub struct Options {
     pub top_map: bool,
     pub cose: bool,
+    pub profile: i32,
     pub max_bytes: Option<i32>,
     pub max_depth: Option<i32>,
     pub max_entries: Option<i32>,
@@ -98,11 +101,19 @@ pub struct Options {
     pub budget: Option<i32>,
 }
 
+impl Default for Options {
+    fn default() -> Self {
+        Options { top_map: false, cose: false, profile: crate::snug::cbor::codes::PF_DETERMINISTIC, max_bytes: None,
+                  max_depth: None, max_entries: None, max_items: None, max_bignum_bytes: None, budget: None }
+    }
+}
+
 impl Options {
-    fn words(&self) -> [i32; 8] {
+    /// limits words 0..7 (program.md §12.3), word 8 (generic/schedule bits, 0), word 9 the profile flags.
+    fn words(&self) -> [i32; 10] {
         let l = |v: Option<i32>| v.map(|x| x.max(0)).unwrap_or(-1);
         [if self.top_map { 0 } else { 1 }, self.cose as i32, l(self.max_bytes), l(self.max_depth),
-         l(self.max_entries), l(self.max_items), l(self.max_bignum_bytes), l(self.budget)]
+         l(self.max_entries), l(self.max_items), l(self.max_bignum_bytes), l(self.budget), 0, self.profile]
     }
 }
 
