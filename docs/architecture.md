@@ -1123,43 +1123,99 @@ in wire order: a key below its predecessor restarts the key-table search bound
 and every map block's cursor (uncharged), so the map matching of program.md §8.3
 needs no sorted input; the session does the same.
 
-### 19.5 The canonical copy and the canonical path (D264)
+### 19.5 The canonical copy and the canonical path (D264, D277, D280)
 
 **Two passes, both kin.** A valid-CBOR check is the scanner's walk (`scan-cb`;
 `scan-x` for a span or a session's whole item). When the walk admitted an
 encoding that changes bytes in the DC form (`o[12]` bit `VC_NONDET`), a second,
-trusted pass over the checked input writes its **canonical copy**
-(`canon-build`, `kin/vcopy.kin`, over the writers of `kin/canon.kin`). Input
-that is only out of key order, or holds NaN payloads or bignum leading zeros, is
-its own copy: nothing is written.
+trusted pass writes the item's **canonical copy** (`canon-build`,
+`kin/vcopy.kin`, over the writers of `kin/canon.kin`). Input that is only out
+of key order, or holds NaN payloads or bignum leading zeros, is its own copy:
+decode and views read it in place. The VM's canonical path (below) always
+builds the copy, for a refused input too.
 
-**Content.** The DC form of the item in wire order, written sequentially:
-definite heads in shortest form, strings concatenated, floats shortened,
-everything else byte for byte (byte-string and text content, bignum content,
-tag-24 payloads). Size ≤ n + ⌊n/128⌋ + 16 for an n-byte item (strings, heads
-and floats never grow; an indefinite container of k ≥ 256 elements grows by
-at most 3 bytes and holds ≥ k bytes).
+**Layout and content.** The input item is copied to the start of the buffer
+(`cb[0, n)`, the *source*) and the copy written after it (from `cb[n]`,
+`o[O_S_CBASE]`): the DC form of the item in wire order — definite heads in
+shortest form, strings concatenated, floats shortened, everything else byte
+for byte (byte-string and text content, bignum content, tag-24 payloads).
+Size ≤ n + ⌊n/128⌋ + 16 for a complete n-byte item (strings, heads and floats
+never grow; an indefinite container of k ≥ 256 elements grows by at most 3
+bytes and holds ≥ k bytes); a refused item's copy adds at most n + 64 bytes of
+planting and padding (below).
+
+**The prefix writer.** The copy is written by `pw`, which checks what the
+scanner checks for well-formedness, in the scanner's order (end of input,
+reserved AI, indefinite on a major that has none, head bytes, length claims,
+the depth and entry bounds, an indefinite string's chunks), and stops at the
+first item that fails. Everything else the scanner refuses — a definite
+text's UTF-8, key types, tag rules, floats and simple values, item counts —
+the copy carries byte for byte and the VM's own walk refuses it there. So a
+refused input has an executable **partial copy**:
+
+* an **item stop** — an item that cannot be read — leaves its place
+  *planted* with bytes on which the VM's walk reaches the same check phase as
+  on the input and refuses: a malformed head of the source byte's major type
+  (so key-type peeks, a tag's content kind and the visit and count come
+  first, as on the input); where the source has no byte, a byte string whose
+  length runs past any end (truncated after the visit and count, or, as tag
+  content, before any visit — as on the input); for an indefinite text
+  refused for a chunk's UTF-8, a text of the chunks' bytes up to and including
+  that chunk with an invalid byte at the refused byte's content offset, so
+  the text's scan charge precedes the refusal and the offset maps back to the
+  refused byte;
+* a **container stop** — the input ends where a map key or an indefinite
+  container's entry would begin, which every route refuses before any visit,
+  or an indefinite container reaches `maxEntries` with another entry — gives
+  the container the count of its complete entries and an end event that
+  refuses at its end, before its end-run;
+* containers open at a stop keep their heads: a definite one its own count,
+  an indefinite one the count of the entries begun;
+* zero bytes, never walked, pad the copy after the stop (and after an item
+  that more input bytes follow), so every length claim the input passed —
+  a definite container's minimum-byte check, a string's length — still passes
+  in the copy, and the walk meets the stop before any padding.
+
+**Events.** Seven words each, sorted by position then kind, in the scanner's
+options array past its header, then in the VM scratch past the rule's own
+words (`S[36]` their offset during the run). A container's events sit at its
+content start (the position after its head), which no other container shares.
+
+| event | at | meaning |
+|---|---|---|
+| `EV_HEAD` | a stop | the recorded code and offset, the code the planting makes the VM find, the planted length, the stopped item's source start |
+| `EV_UNITS` | a map's content start | a complete marked map's deferred duplicate check, in units (D277), charged at the map's position |
+| `EV_END` | a container's content start | a refusal at its end, before its end-run: a duplicate the deferred check found, too many entries in an indefinite container, a container stop |
+| `EV_KEY` | a key | a refusal after the key's key-order comparison: an immediate duplicate, or (deterministic profiles on the canonical path) `key_order` |
+| `EV_EMB` | byte-string content | the content's own copy (start, end, its stop) |
+
+The scanner notes its key refusals (kind, the key's or the map's first key's
+position, the refused key's offset, the code) in its scratch header; the
+writer finds their copy positions as it writes.
 
 **Embedded CBOR.** Byte strings whose content the VM may walk as CBOR — every
-tag-24 payload, and, when the Program has `.cbor`/`.cborseq` controls
-(`FL_EMBED`), every byte string — are checked as a CBOR sequence under the same
-profile; content that is valid but not its own DC form gets its own canonical
-copy, appended after the main copy (and visited in turn), and every such
-content and every refused one gets an entry in the **embedded table**: content
-start and end, copy start and end, the refusal's code and offset. The VM,
-walking embedded content under `PF_CANON`, looks the content up and walks the
-copy instead (or reports the recorded refusal where its own walk would have
-found one). Content in an indefinite-length byte string is gathered into the
-buffer first: the table is built over the main copy, where every string is
-definite.
+tag-24 payload the profile walks (a standard-set tag 24), and, when the
+Program has `.cbor`/`.cborseq` controls (`FL_EMBED`), every byte string — are
+checked as a CBOR sequence under the same profile, in the copy and,
+recursively, inside content walked in place. Content that is valid and its own
+DC form is walked in place; any other content — not its own DC form, or
+refused — gets its own copy region after the main copy, written by the same
+prefix writer (a refused one partial, planted and padded, with its key
+refusals' events), and an `EV_EMB` event. The VM walking such content looks
+the event up and walks the copy instead; its refusals happen there, by the
+same rules. Content in an indefinite-length byte string is checked on the main
+copy, where every string is definite.
 
 **Offsets.** The copy keeps the input's item structure one for one, so a copy
-offset maps back by a lockstep walk of the two (`map-back`: an item's head
-maps to the item's start, a string's content byte to the matching byte of the
-matching chunk, a child recursively; embedded copies first map to their
-content). Every offset the VM reports on the canonical path (error, witness,
-budget position) is mapped once, at the end; paths are unchanged (they name
-schema keys and indices, never bytes). No offset table is kept.
+offset maps back by a lockstep walk of the two (`map-back-p`: an item's head
+to the item's start, a string's content byte to the matching byte of the
+matching chunk, a child recursively, the stop to the stopped item's start, an
+embedded copy first to its content). The walk never enters a planted item: an
+item that holds the stop is incomplete. A refusal the VM finds at a stop with
+the planted code is reported with the stop's own code and offset — the run's
+code, or the sub-code of a witness when embedded content's refusal became
+one. Every other offset (error, witness, budget position) is mapped once, at
+the end; paths are unchanged.
 
 **Deferred checks in the scanner.** The scanner's walk takes no byte buffer of
 its own (its hot path stays as it was), so three rare checks that need one are
@@ -1171,40 +1227,90 @@ whose keys need EC forms, the text rule of tag 0/32 and the payload walk of tag
 a gathered payload map back into its chunks; a payload's items are counted as
 they would be in walk order, a replay of the walk settling `maxItems` when
 payload items could pass it). The records sit at the end of the options
-array's scratch (`o[16..]`, D264's protocol below), the records of a running
-duplicate check at its start.
+array's scratch, the records of a running duplicate check at its start.
 
 **The scratch protocol.** `scan-cb(b, o, cb)`: `o` is the scanner's options
-array, now any length — words 16–23 a scratch header (record stack top,
-deferral bottom, duplicate-check units, buffer scratch top, deferral count,
-source, payload items, embedded-table count), the rest records and
+array, now any length — words 16–47 a scratch header (record stack, deferral
+bottom, duplicate-check units, buffer top, deferral count, source, payload
+items; the copy's build: source base and end, event count, stop and planting,
+the key refusal and its copy positions), the rest events, records and
 deferrals — and `cb` the byte buffer. `o[12]` carries the outcomes
 (`VC_NONDET`; `VC_UNSORTED`: some map's keys may be out of canonical order;
 `VC_ECS`: the VM saw an EC-sensitive key), `o[13]`/`o[14]` the words and bytes
-needed, `o[15]` the copy's length or −1. A buffer that is too small ends the
-call with the internal code `scratch` (22), never seen by a user: the host
-grows the buffer and calls again (D033's rule). `scan(b, o)` stays for callers
-without a buffer and answers `scratch` when a deferred check is needed. The
-VM's `vm-validate-v` / `vm-validate-span-v` take `vs` (the scanner's options
-array for the canonical path, which also holds the embedded table) and `cb`;
-too small, they answer −5 with the words, bytes and VM-scratch words needed in
-`out[5..7]`; the embedded table is copied to the VM scratch past the rule's own
-words (`S[36]` its offset during the run). Hosts keep one leased set per
-isolate, as for the VM scratch.
+needed, `o[15]` the copy's end or −1. A buffer that is too small ends the call
+with the internal code `scratch` (22), never seen by a user: the host grows the
+buffer and calls again (D033's rule). `scan(b, o)` stays for callers without a
+buffer and answers `scratch` when a deferred check is needed. The VM's
+`vm-validate-v` / `vm-validate-span-v` take `vs` (the scanner's options array
+for the canonical path, which also holds the events) and `cb`; too small, they
+answer −5 with the words, bytes and VM-scratch words needed in `out[5..7]`.
+Hosts keep one leased set per isolate, as for the VM scratch.
 
-**Charges (D277).** The canonical pass (reading the input, writing the copy and
-the table) is not metered: it is linear in the input, like the codec's scan.
-The attempt's units are discarded. The VM's run over the copy is charged by
-the table as for any input, the key-order comparison of every key included
-(`PF_CANON` compares, charges and never refuses). A marked map's deferred
-duplicate check (§19.4) is charged **at that map's logical end**, before the
-map's own end charges, on every route: the scanner records each marked map's
-units with the map's position, the copy writer translates the position into
-the copy, and the VM charges the units when it reaches that map's end — as the
-session does when it runs the check there. A non-deterministic input therefore
-costs what its canonical copy costs plus its duplicate checks, charged at the
-same points as on the session's route, so the exhaustion point is the same.
-CPU per call is bounded by twice the budget plus the linear passes.
+**The canonical path and its charges (D277, D280).** The VM attempts every
+valid-CBOR run deterministically (D262); when the attempt meets an encoding
+only valid CBOR has, or a key whose duplicates are not bytewise, the run
+takes the canonical path: the scanner checks the item, `canon-build` writes
+the (possibly partial) copy, the events and the embedded copies, and the VM
+walks the copy under `PF_CANON` with a fresh budget. Refusals decided before
+any walk on every route (`too_large`, `not_map`) are reported at once;
+everything else is reached by the walk. The canonical pass (reading the input,
+writing the copy, the events and the units) is not metered: it is linear in
+the input, like the codec's scan. The VM's run over the copy is charged by the
+table as for any input, the key-order comparison of every key included
+(`PF_CANON` compares, charges and never refuses — a recorded `key_order` is an
+`EV_KEY`). A marked map's deferred duplicate check (§19.4) is charged **at
+that map's logical end**, before anything else there, on every route: the
+copy's units pass computes each complete marked map's units over the copy (the
+same records and comparisons as the scanner's) and the VM charges them when
+its walk reaches that map's end — as the session does when it runs the check
+there. The VM's fast paths leave every container end, every key that breaks
+the ascending order and every stop to the generic walk, so they need no hooks
+of their own. A non-deterministic input therefore costs what its canonical
+copy costs plus its duplicate checks, charged at the same points as on the
+session's route; CPU per call is bounded by twice the budget plus the linear
+passes. When the scanner and the replay ever disagree (never expected: the
+gates hold them equal), the scanner's verdict stands.
+
+**Refusal replay (D280).** A refused input is walked, not reported from the
+scanner: the VM's walk over the partial copy reaches the refusal at its own
+check phase, after exactly the charges, item counts and schema work that
+precede it on the input, so a budget that runs out earlier — or at that very
+event — and profile-only continuation after a schema failure (D023) act as on
+every other route. F2 (docs/reviews/2026-11-04-peg-final-check.md), point by
+point:
+
+* *An executable partial-copy representation* — the prefix writer above: the
+  valid prefix in DC form, open containers' heads, the planted stop or the
+  container stop, padding.
+* *Check phases, not locations* — the stop is planted so that the walk's own
+  checks reach it: visit, count and the items limit; a key's type peek; a
+  tag's content-kind check; a text's scan charge before its `text` refusal;
+  container stops, deferred duplicates and too many entries at the container's
+  end before its end-run; immediate duplicates after the key's key-order
+  charge; deferred units before the duplicate refusal they precede.
+* *Original length and end claims, open containers, refused-item metadata* —
+  definite containers keep their counts and padding keeps their minimum-byte
+  checks true; the stop's code, offset and item start travel in its event.
+* *The same item counting and every preceding charge, including a budget
+  that fails at the same logical event* — the planted item is visited and
+  counted as the input's item is; charges at the refusal's own position come
+  first, so a budget one unit short reports `budget` there.
+* *No synthetic truncation or end-run* — padding means no premature
+  `truncated`; a container stop refuses before its end-run; the walk stops at
+  the stop and never reads the padding.
+* *No live schema charges after D023* — the walk is the VM's ordinary walk:
+  after a schema failure the rest is dead, so the planted item is walked dead,
+  as the input's would be.
+* *Embedded and deferred-duplicate cases* — embedded content is checked and,
+  refused, copied by the same writer (its own stop, planting and key events);
+  deferred duplicates are end events of their maps, after their units.
+* *Gates* — the valid-CBOR gate (§19.9, `bb valid-test`) runs invalid text
+  (definite and indefinite), malformed and truncated partial containers
+  (definite and indefinite, keys and values, tag content), immediate and
+  deferred duplicates and embedded content (tag 24 and `.cbor`) at every
+  budget from 0 to the run's total and compares the whole out array with the
+  session (whole item and framed, every window split) and with the expected
+  native verdict.
 
 ### 19.6 Application rules move to the Bindle tag set (D265; audit rank 9)
 

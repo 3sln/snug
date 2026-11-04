@@ -4492,15 +4492,21 @@ embedded content.
 **Alternatives**: making the session pre-scan whole items (breaks
 streaming); accepting route-dependent codes (breaks R6/§17.5).
 - [ ] **Signed off** (owner)
-- [x] **Agreed** (P8.4 / §19 owner, 2026-11-04): §19.5 amended. Implementation:
-  the scanner's innermost item frame records the refusal's event (that item's
-  head) as the walk unwinds; a duplicate check's event is its map's end (a flag
-  on the map's D277 units entry); the copy writer writes the valid prefix with
-  each open container's count one past its complete children, so the VM's walk
-  meets the end of the copy exactly at the event (after the item's visit and
-  count, as on every route) and the driver reports the recorded refusal there.
-  Refusals the VM sees itself on the copy (tag rules, embedded content) need no
-  record.
+- [x] **Agreed** (P8.4 / §19 owner, 2026-11-04): §19.5 amended with an F2
+  checklist. Implementation: a refused input's canonical copy is a partial
+  copy written by a prefix writer that checks well-formedness in the scanner's
+  order and stops at the first item that cannot be read; the stop is planted
+  (a malformed head of the source's major type; a string running past the end
+  where the source has no byte; a text of an indefinite text's chunks with the
+  invalid byte at its offset), so the VM's ordinary walk reaches the refusal
+  at its own check phase after the same visits, counts and charges; the end
+  of input where a key or indefinite entry would begin, too many entries in
+  an indefinite container and deferred duplicates are end events of their
+  container (after its D277 units, before its end-run); immediate duplicates
+  (and `key_order` under deterministic profiles) are key events after the
+  key-order charge; definite containers keep their counts and zero padding
+  keeps every length claim true. Embedded content is copied by the same writer.
+  A planted refusal is reported with the stop's own code and offset.
 
 ### D281 — PEG group arena: 16 MiB default cap with compile warning W7 (manager)
 **Decision** (manager, provisional; answers architecture §20.16's arena
