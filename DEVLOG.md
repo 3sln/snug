@@ -3137,6 +3137,163 @@ skipped verification (change behaviour). An options-only openSession bag adds
 an unnecessary option shape; positional arguments preserve existing checking.
 - [ ] **Signed off** (owner)
 
+### D170 — The wasm SDK asks host predicates through one import (P7.9 follow-up)
+**Decision** (wasm SDK engineer, provisional; implements D140 for the SDK):
+the SDK runtime module (`host/wasm/src/sdk.rs`) imports exactly one function,
+`env.snug_ext(id, argPtr, argLen, itemPtr, itemLen) -> i32`, and passes kin's
+`-x` entry points (`vm-validate-x`, `vm-validate-span-x`, `vms-step-x`) a
+closure that answers each EXT query through it. The JS side
+(`runtime.mjs withExt`) sets the Program's bound predicate (the native
+`ext.mjs bindControls`, so `missing_control`, the strict `true`, the recorded
+throw and `rethrow` are the native code) for the duration of that one wasm
+call, hands the predicate COPIES of the argument and the item, and replaces
+the export object with a guard while the predicate runs, so a predicate that
+calls back into the SDK throws (recorded and rethrown after the call, as
+"extension control .x threw") instead of re-entering an instance whose Rust
+state is borrowed. A session whose predicate threw is void, as natively.
+**Why**: the VM decides an EXT inside the combinator pass at the item's end
+(D140); the buffer walk cannot suspend, so the predicate has to be callable
+from inside the walk. One import is the whole cost; Programs without controls
+never call it (the hot path tests header word 30 once). Copies, because an
+alias into linear memory changes under the predicate's feet at the next SDK
+call (D132's rule for every alias); items are bounded by the control's
+maximum (65,536 B default).
+**Alternatives**: no import and D032's two-round call (the recursive walk
+restarts per query: quadratic on arrays of controlled items); a JS
+post-validation pass (D082 rejected it: no single derivation); wasm-bindgen
+(a glue layer for one function); passing views into linear memory (a silent
+use-after-grow class, rejected in D132); a Rust host-port change (none was
+needed: `host/rust/src/schema.rs`'s closure shape is reused, the generated
+`-x` functions take `&dyn Fn`).
+- [ ] **Signed off** (owner)
+
+### D171 — The generic controls run inside wasm, recognised by their check function (P7.9 follow-up)
+**Decision** (provisional): at load the SDK binds each control id of a format
+1.1 Program to a kind: 1 `.chars`, 2 `.unique`, 3 `.samelen` when the
+registry entry's `check` IS the function of the native `snug/controls`
+object (also when spread with another `maxBytes`, as `{...controls.chars,
+maxBytes: 8}`), else 0, the import (`sdk_prog_bind`). Kinds 1–3 call kin's
+Rust (`snug::vm::controls`, the same functions `snug::controls` wraps) with no
+boundary crossing; `.unique` keeps one scratch, dropped past 4 MiB. The SDK's
+`snug/controls` re-exports the native objects, so one registry serves both
+packages. Kinds are re-bound after instance loss.
+**Why**: verdicts are kin's either way (D142), so running them where the VM
+runs is exact and saves a copy and a crossing per item (measured: `.chars` on
+100 strings 43 µs wasm vs 91 µs native). Identity, not name: a user may
+register their own `.chars`.
+**Alternatives**: always the import (correct, slower); recognise by name
+(would silently replace a user's predicate); a wasm-side registry API (more
+ABI for the same three functions).
+- [ ] **Signed off** (owner)
+
+### D172 — The SDK reuses the native host modules for everything that is not a boundary (P7.9 follow-up)
+**Decision** (provisional): the SDK imports, rather than restates, the native
+option validator (`options.mjs`, D150: every bag, same allowlists and
+messages), the profile resolution (`profiles.mjs`: flags, `codecTop`,
+`strictArraysOf`), `ext.mjs` (registry words, Program control tables,
+binding, argument checks), `serialized.mjs`, the builder, the values, the
+public `SchemaError` class (`instanceof` works across both packages) and the
+public `Writer` (the typed-call Writer has no batch for a tape to win, so
+`snug-wasm-sdk/writer` is the native one). ABI changes, all additive to P7.9's
+or rewritten in place (no external users): the profile flags are the last
+argument of `sdk_scan`, `sdk_validate`, `sdk_validate_span`, `sdk_rs_new`,
+`sdk_vs_new`; `sdk_enc_run(flags, cose, maxBytes, maxDepth, maxEntries,
+maxItems)` with tape op 7 (a tag: hi, lo, rule tag, content; kin's
+std-content-ok and, for tag 24, the scanner under the encode options) and map
+keys that are any item; `sdk_enc_keys` orders a Map's keys before its values
+are walked when two or more of them are not text (so a duplicate is refused
+where the native walk refuses it); the compiler module takes the option words
+plus kin's registry words (`cc_opt(n)`), the Unicode tables (`cc_unicode`),
+and reports the unknown control's name and the tables flag (`cc_error`). The
+JS walk computes the rule tag and calls kin's `std-allowed` (JS) for tag
+membership, with the native messages (D180, D184).
+**Why**: one validator means one set of TypeErrors (the gate checks 298
+option cases across 14 entry points); restating them was the P7.9 SDK's main
+drift risk. The tape keeps one wasm call per encode (D131).
+**Alternatives**: restated validators (drift); per-head wasm writes (D131
+measured them slower); porting the Writer over the tape (no batch to gain).
+- [ ] **Signed off** (owner)
+
+### D173 — SDK sessions: openSession, drain mode and fail-fast in linear memory (P7.9 follow-up)
+**Decision** (provisional): the SDK's `snug/sources` has the native surface
+after D160 -- `openSession(schema, rule, length?, options, scheduling)` (a
+frozen facade with `length`, `limit`, `bytesHeld`, `step`, `end`), no
+`Schema.session` -- and the native drivers including `streamSource`,
+`validateStream`, `scanStream`, unknown-length `pushValidator` /
+`pushScanner` with `failFast`, and D151's snapshot handles. `sdk_vs_new` with
+a negative total starts `vms-init-unknown` (its limit in INFO[0]); a step may
+answer held (out copied); `sdk_ses_eof` is `vms-eof` (resume or verdict).
+Unknown-length profile scans run the VM against the built-in `r = any`
+Program loaded into wasm (D146). Push buffers are the session's window in
+linear memory for both kinds. A session is freed at its verdict, before a
+scan's settle throws its refusal, and on every driver error; a feed after
+instance loss throws before writing (a stale pointer would land in the new
+instance's memory). `bytesHeld` counts the session's window only (the kin
+arrays are inside wasm).
+**Why**: the native protocol (D144–D147) is kin's, so the drivers are the
+native loops over another buffer; linear memory is not collected, so every
+exit path frees (found by the gate: unfreed refused scans grew memory past
+2 GiB, where i32 pointers turn negative -- pointers are now read unsigned).
+**Alternatives**: a JS-side push buffer copied into wasm per step (a copy per
+step); relying on the FinalizationRegistry alone (memory grows until GC).
+- [ ] **Signed off** (owner)
+
+### D174 — The SDK parity test is a gate on vm-test's case set (P7.9 follow-up)
+**Decision** (provisional): `bb wasm-sdk-test [mutations seed schemas]`
+(`host/wasm-sdk/test/run`) builds the sdk and cc modules -- without the
+nightly wasm toolchain it prints SKIP, says parity was not run, and exits 0
+-- and runs `host/wasm-sdk/test/parity.test.mjs`, which takes bb vm-test's
+cases (`kin/scripts/vm-allcases.mjs`, defaults 20,000 / 1 / 400: 73,691 cases,
+706 Programs, the extension-control cases under the test registry) and
+requires wasm SDK == native JS through the public API on: Program loading;
+validate (whole result; validateAt for spans); schema.decode and codec decode
+(values or the whole fault: name, code, reason, path, offset, message); encode
+of every decoded value under the case's profile and of a value set (Maps of
+every key kind, Tagged incl. 64-bit and refused tags, undefined, NaN, -0,
+noncharacters) × 18 option sets; views (open with profile and schema check,
+walks with lookups, cursor, values, raw); sessions (one VM session per case,
+rotating handle / declared push / unknown-length push, seeded chunk 1 B–64 KiB,
+quantum 0–50, failFast; a profile scan session every fourth case);
+openSession, async handles, streams; compile of every schema text of the case
+set plus seeded truncations, bindle/bus profiles, registries, arguments and
+Unicode tables (serialised Program bytes, source key, rules, controls, or the
+SchemaError with its message); extension-control binding and errors;
+option validation; instance loss. Messages are compared too.
+**Why**: the SDK restates the view, the drivers and the encode walk (D130's
+cost of offering both); this holds them to the native package on the same
+breadth as the VM gate. A session costs 0.3–1.7 ms to set up on either side
+(an unknown-length one sizes its arena for the input limit), so every flavour
+on every case took 16 minutes; rotating keeps 2.5 minutes.
+**Alternatives**: the P7.9 six-test sample (too narrow to see drift); every
+session flavour on every case (16 min).
+- [ ] **Signed off** (owner)
+
+### D175 — D130 still holds with the new features (P7.9 follow-up)
+**Decision** (recommendation; measurement in bench/D005.md "Re-measured at
+898434f"): keep D130 unchanged -- native default, the SDK opt-in by the same
+three conditions and the same "stay native" list. At 898434f the SDK is 0.39–0.47
+of native's time on validate (3.22× on the 1 MiB bstr body: the copy), 0.17–0.21
+on compile, 0.51–0.62 on schema.decode, 0.65–1.10 on codec decode; extension
+controls and drain mode do not change the picture (host predicate 0.72, in-wasm
+generic `.chars` 0.47, unknown-length push 0.43–0.45). The runtime module grew
+from 83 to 94 KB gzip (any-tag level, extension controls, drain mode).
+**Why**: every key ratio moved by at most 0.05 against 93f8718's.
+**Alternatives**: none raised by the data.
+- [ ] **Signed off** (owner)
+
+### D176 — The SDK's remaining API differences (amends D132) (P7.9 follow-up)
+**Decision** (provisional): D132's list stands except: the public `Writer`
+is the native one (ported by re-export) and Unicode compile tables work.
+Added or restated: a predicate receives copies of its argument and item (the
+native host passes aliases of the caller's bytes and the Program's pool);
+`bytesHeld` of an SDK session is its window in linear memory; `view(…, {
+batch })` and `view.path()` / `release()` are SDK extras (`batch` is checked
+by the SDK, every other view option by the native validator); with several
+faults in one encoded value the reported one may differ (map values walked in
+host order, writer-primitive and tag-content faults found when the tape
+runs), every single fault and every accepted value matching the native.
+- [ ] **Signed off** (owner)
+
 ### D180 — An "any tag" level, and the deterministic preset uses it (P7.12)
 **Decision** (profile engineer, provisional; answers D121's open "any tag"
 level): `PF_TAGS` 2 or 3 (`PF_TAGS_ANY` = 8; JS `tags: 'any'`, Rust
@@ -4194,6 +4351,61 @@ are answered as provisional decisions D082–D085. None is open now.
     - wasm-opt was unavailable offline.
   - **Not done:** a decode tape, SharedArrayBuffer memory, a codec-only
     module, Firefox and Safari, Cloudflare production.
+- [x] **P7.9b — The wasm SDK level with the native API** (follow-up to P7.9;
+  owner direction 2026-11-03). *Done 2026-11-04 by the wasm SDK engineer
+  (Claude); commits `d8baee9`, `898434f` and the DEVLOG/bench commit after
+  them.* Decisions **D170–D176**.
+  - **What changed:** profile options (D120–D127, D180–D184) through every
+    wasm scanner / VM / writer export as an explicit flags argument; the
+    encode tape gained tags (rule tag, kin's content checks, tag 24 by the
+    scanner), Maps of every key kind, undefined, deterministic floats and the
+    native messages; views gained the `tagged`/`undefined` kinds, any-kind
+    keys, `tag`/`content()`/`isUndefined()`; extension controls through one
+    import with the generic controls in wasm (D170, D171); format 1.1 and the
+    registry in the compiler module, control arguments, Unicode tables,
+    `controlsInBus`; unknown-length sessions, fail-fast, streams and
+    `openSession` (D173, after D160); the native option validator and profile
+    resolution everywhere (D172); `snug-wasm-sdk/controls` and `/writer`.
+  - **Gate:** `bb wasm-sdk-test` (D174).
+  - **Gates (actual runs, clean worktree of `898434f` in the scratch
+    directory with `../kin` linked; Node v24.6.0, rustc 1.100.0-nightly
+    2026-09-15 for wasm):** **bb wasm-sdk-test** defaults ok: 73,691 cases
+    over 706 Programs, every section wasm == native (validate 73,691,
+    schema.decode 73,688, codec decode 73,691, encode 22,702 + 3,204, views
+    73,688 + 73,688, sessions 24,563 handle / 24,563 declared / 24,562
+    unknown / 18,422 scans, compile 1,695, extension controls 14, options
+    298, instance loss), 2 min 27 s; **bb vm-test** ok (JS == wasm 72,222/72,222
+    on the older shim, JS == Rust 73,691/73,691); **bb scan-test** ok (wasm
+    31,360/31,360; cbor2 differential SKIP, not installed); **host/js npm
+    test 1,346 passed / 0 failed**. Also green at `d8baee9` (P7.12 not yet
+    in): vm-test, scan-test, npm test 1,346/1,346; wasm-sdk-test then
+    failed 6 handle cases, fixed in `898434f` (below).
+  - **Measured:** bench/D005.md "Re-measured at 898434f" (D175).
+  - **Learnt:**
+    - Linear memory is not the GC's: the first full gate run grew the SDK
+      instance past 2 GiB, because a refused unknown-length scan threw from
+      its settle step before the session was freed; past 2 GiB the i32
+      pointers wasm returns are negative in JS. Every exit path now frees and
+      pointers are read `>>> 0`.
+    - A session step can grow memory (key arena copies, the EXT window), so
+      the JS views must be re-derived after every step, not only after
+      allocations; a stale view reads a detached buffer as length 0.
+    - A push buffer pointer that outlives an instance writes into the next
+      instance's memory unless every feed checks liveness first (the
+      instance-loss test caught it).
+    - Session set-up dominates small inputs on both sides (0.3–1.7 ms per
+      session; an unknown-length session's arena is sized for the input
+      limit, 1.5 MB by default), so gate time is set by session count.
+    - The concurrently landing any-tag level and session move needed only
+      host-side mirroring (rule tags, messages, openSession); no kin source
+      or generated code was edited, and the Rust host port (`&dyn Fn`) needed
+      no change.
+  - **Open:** the SDK is still experimental and unpublished (D130); a `Writer`
+    over the tape, a codec-only module, wasm-opt, Firefox/Safari and
+    workerd re-runs of the new rows were not done; EXT CPU bounds (the
+    2026-11-04 worst-case analysis) apply to the SDK exactly as to native,
+    since the predicates are kin's or the host's; `bytesHeld` does not count
+    the session's kin arrays inside wasm.
 - [x] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
   ciborium, minicbor (Rust) and the `cddl` crate. Done 2026-11-03 by the P7.8
   benchmark engineer; `bench/compare/README.md` (method, versions/licences,
