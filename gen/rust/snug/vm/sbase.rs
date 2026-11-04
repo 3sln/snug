@@ -11,6 +11,8 @@ use crate::snug::vm::layout::*;
 
 pub const VMS_NEED: i32 = -64;
 pub const VMS_YIELD: i32 = -65;
+pub const VMS_HELD: i32 = -67;
+pub const VMS_RESUME: i32 = -68;
 pub const GO: i32 = 0;
 pub const SS_PH: i32 = 0;
 pub const SS_TOTAL: i32 = 1;
@@ -50,12 +52,17 @@ pub const SS_ABYTES: i32 = 34;
 pub const SS_CSTART: i32 = 35;
 pub const SS_CPT: i32 = 36;
 pub const SS_PROF: i32 = 37;
-pub const SS_HDR: i32 = 40;
+pub const SS_UNK: i32 = 38;
+pub const SS_NPEND: i32 = 39;
+pub const SS_PEND: i32 = 40;
+pub const PW: i32 = 4;
+pub const SS_HDR: i32 = 44;
 pub const PH_START: i32 = 0;
 pub const PH_ITEM: i32 = 1;
 pub const PH_RET: i32 = 2;
 pub const PH_FRAME: i32 = 3;
 pub const PH_DONE: i32 = 4;
+pub const PH_HELD: i32 = 5;
 pub const MODE_ITEM: i32 = 0;
 pub const MODE_VSEQ: i32 = 1;
 pub const MODE_DSEQ: i32 = 2;
@@ -156,7 +163,7 @@ pub fn vms_session_words(p: &[i32]) -> i32 {
     // Words of the session array (Ints) for any message: the header, the
     // frames, the prescan stack and the crossing chain.
     let nf: i32 = nframes(p);
-    return (SS_HDR + (nf * FW)) + (3 * nf);
+    return ((SS_HDR + (nf * FW)) + (3 * nf)) + (PW * (nf + 2));
 }
 pub fn vms_arena_bytes(p: &[i32], limits: &[i32], total: i32) -> i32 {
     // Bytes of the key arena (BytesW) for a message of `total` bytes under
@@ -171,6 +178,163 @@ pub fn vms_arena_bytes(p: &[i32], limits: &[i32], total: i32) -> i32 {
         n = 0;
     }
     return n;
+}
+pub fn pend_raw(ss: &mut [i32], claim: i32, off: i32, used: i32, items: i32) {
+    // Record a pending end check (absolute): if the message ends before claim,
+    // the buffer walk answers truncated at off with this budget used and items.
+    let n: i32 = ss[(SS_NPEND) as usize];
+    let at: i32 = ss[(SS_PEND) as usize] + (PW * n);
+    if (at + PW) > (ss.len() as i32) {
+        return;
+    }
+    ss[(at) as usize] = claim;
+    ss[(at + 1) as usize] = off;
+    ss[(at + 2) as usize] = used;
+    ss[(at + 3) as usize] = items;
+    ss[(SS_NPEND) as usize] = n + 1;
+}
+pub fn pend_note(b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, claim: i32, off: i32) {
+    // D085: in an unknown-length session, a length or count check has just passed
+    // against the provisional end with a claim (window-relative) beyond the
+    // window: whether it holds depends on where the message ends, so record what
+    // the buffer walk answers if it ends before the claim -- truncated at off,
+    // with the budget used and the items counted NOW (the check's moment).
+    if ss[(SS_UNK) as usize] != 1 {
+        return;
+    }
+    if claim <= (b.len() as i32) {
+        return;
+    }
+    let used: i32 = s[(VM_BUDGET_START) as usize] - s[(VM_BUDGET) as usize];
+    let items: i32 = s[(O_ITEMS) as usize];
+    pend_raw(ss, claim + base, off + base, used, items);
+}
+pub fn pend_count(b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, q: i32, hi: i32, lo: i32, depth: i32, pairs: i32, end: i32) {
+    // enter-container's count check (n bytes an entry, 2n a pair) as a pending
+    // claim: only when its depth check passes first and the count fits the
+    // provisional end (otherwise the walk refuses the same way for any end).
+    if ss[(SS_UNK) as usize] != 1 {
+        return;
+    }
+    if depth >= s[(O_MAX_DEPTH) as usize] {
+        return;
+    }
+    if (hi != 0) || (lo < 0) {
+        return;
+    }
+    let left: i32 = end - q;
+    if pairs == 0 {
+        if lo > left {
+            return;
+        }
+        pend_note(b, s, ss, base, q + lo, pos);
+    } else {
+        if lo > (i32::cast_unsigned(left) >> 1).cast_signed() {
+            return;
+        }
+        pend_note(b, s, ss, base, q + (2 * lo), pos);
+    }
+}
+pub fn enter_pend(b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, q: i32, hi: i32, lo: i32, depth: i32, pairs: i32, end: i32) -> i32 {
+    // enter-container, after noting its count check as pending (pend-count).
+    pend_count(b, s, ss, base, pos, q, hi, lo, depth, pairs, end);
+    return enter_container(s, pos, q, hi, lo, depth, pairs, end);
+}
+pub fn pend_drop(ss: &mut [i32], known: i32) {
+    // The bytes up to `known` (absolute) exist: settle the checks they cover,
+    // keeping the rest in walk order.
+    let n: i32 = ss[(SS_NPEND) as usize];
+    let b0: i32 = ss[(SS_PEND) as usize];
+    let mut k: i32 = 0;
+    for i in 0..n {
+        let at: i32 = b0 + (PW * i);
+        if ss[(at) as usize] > known {
+            if k != i {
+                for w in 0..PW {
+                    let v: i32 = ss[(at + w) as usize];
+                    ss[((b0 + (PW * k)) + w) as usize] = v;
+                }
+            }
+            k += 1;
+        }
+    }
+    ss[(SS_NPEND) as usize] = k;
+}
+pub fn key_max_claim(b: &[u8], start: i32, end: i32, wend: i32) -> i32 {
+    // D085: key-end-any refused a key (-1) inside the window; its walk would refuse
+    // it there unless a count checked first claims past the bytes seen. The
+    // largest count claim (array n, map 2n) on the way to the refusal, or -1
+    // (the walk of key-end-any, reading nothing at or past wend).
+    let mut i: i32 = start;
+    let mut rem: i32 = 1;
+    let mut mc: i32 = -1;
+    while rem > 0 {
+        if (i >= end) || (i >= wend) {
+            return mc;
+        }
+        let ib: i32 = b[(i) as usize] as i32;
+        let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+        let ai: i32 = ib & 31;
+        let mut hi: i32 = 0;
+        let mut lo: i32 = ai;
+        if ai > 27 {
+            return mc;
+        }
+        let h: i32 = head_size(ai);
+        let p: i32 = i + h;
+        if (p > end) || (p > wend) {
+            return mc;
+        }
+        if ai == 24 {
+            lo = b[(i + 1) as usize] as i32;
+        }
+        if ai == 25 {
+            lo = be16(b, i + 1);
+        }
+        if ai == 26 {
+            lo = be32(b, i + 1);
+        }
+        if ai == 27 {
+            hi = be32(b, i + 1);
+            lo = be32(b, i + 5);
+        }
+        i = p;
+        rem -= 1;
+        if (major >= 2) && (major <= 3) {
+            if (hi != 0) || ((lo < 0) || (lo > (end - p))) {
+                return mc;
+            }
+            if (p + lo) > wend {
+                return mc;
+            }
+            i = p + lo;
+        }
+        if major == 4 {
+            if (hi != 0) || ((lo < 0) || (lo > (end - p))) {
+                return mc;
+            }
+            if (p + lo) > mc {
+                mc = p + lo;
+            }
+            rem += lo;
+        }
+        if major == 5 {
+            if (hi != 0) || ((lo < 0) || (lo > (i32::cast_unsigned(end - p) >> 1).cast_signed())) {
+                return mc;
+            }
+            if (p + (2 * lo)) > mc {
+                mc = p + (2 * lo);
+            }
+            rem += 2 * lo;
+        }
+        if major == 6 {
+            if hi != 0 {
+                return mc;
+            }
+            rem += 1;
+        }
+    }
+    return mc;
 }
 pub fn imin(a: i32, b: i32) -> i32 {
     if a < b {
@@ -508,6 +672,17 @@ pub fn chain_has(ss: &[i32], at: i32) -> bool {
     }
     return false;
 }
+pub(crate) fn pstop(ss: &mut [i32], lvl: i32) -> i32 {
+    // prescan met a refusal the walk cannot get past. D085: in an unknown-length
+    // session an enclosing container (lvl > 0) has had its count checked only
+    // against the provisional end, so it is no whole item: it crosses (frames
+    // note that check as pending); otherwise 1.
+    if (lvl > 0) && (ss[(SS_UNK) as usize] == 1) {
+        chain_put(ss, lvl, -1);
+        return 0;
+    }
+    return 1;
+}
 pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32) -> i32 {
     // May the buffer walk take the item at pos (bounded by end) from this
     // window? 1 when every byte it can read lies before cut -- the item ends
@@ -542,12 +717,12 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
         let mut hi: i32 = 0;
         let mut lo: i32 = ai;
         if ai >= 28 {
-            return 1;
+            return pstop(ss, lvl);
         }
         let h: i32 = head_size(ai);
         let p: i32 = i + h;
         if p > end {
-            return 1;
+            return pstop(ss, lvl);
         }
         if p > cut {
             chain_put(ss, lvl, i + base);
@@ -572,7 +747,7 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
             rem -= 1;
         } else if major <= 3 {
             if (hi != 0) || ((lo < 0) || (lo > (end - p))) {
-                return 1;
+                return pstop(ss, lvl);
             }
             if (p + lo) > cut {
                 chain_put(ss, lvl, i + base);
@@ -584,24 +759,24 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
         } else {
             let mut n: i32;
             if (hi != 0) || (lo < 0) {
-                return 1;
+                return pstop(ss, lvl);
             }
             n = lo;
             if major == 4 {
                 if lo > (end - p) {
-                    return 1;
+                    return pstop(ss, lvl);
                 }
             }
             if major == 5 {
                 if lo > (i32::cast_unsigned(end - p) >> 1).cast_signed() {
-                    return 1;
+                    return pstop(ss, lvl);
                 }
                 n = 2 * lo;
             }
             if major == 6 {
                 if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
                     if !std_allowed(ss[(SS_PROF) as usize], lo, 0) {
-                        return 1;
+                        return pstop(ss, lvl);
                     }
                 }
                 n = 1;
@@ -621,6 +796,14 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
 pub fn cpt_at(ss: &mut [i32], at: i32, base: i32) -> i32 {
     ss[(SS_CPT) as usize] = at + base;
     return 0;
+}
+pub(crate) fn rstop(ss: &mut [i32], lvl: i32, at: i32, base: i32) -> i32 {
+    // prescan-run met a refusal: the crossing point is just past it. D085: in an
+    // unknown-length session the open levels around it cross (pstop).
+    if (lvl > 0) && (ss[(SS_UNK) as usize] == 1) {
+        chain_put(ss, lvl, -1);
+    }
+    return cpt_at(ss, at, base);
 }
 pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32, rem0: i32) -> i32 {
     // The prescan over the item at pos and its rem0 - 1 following siblings
@@ -663,12 +846,12 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
         let mut hi: i32 = 0;
         let mut lo: i32 = ai;
         if ai >= 28 {
-            return cpt_at(ss, i + 1, base);
+            return rstop(ss, lvl, i + 1, base);
         }
         let h: i32 = head_size(ai);
         let p: i32 = i + h;
         if p > end {
-            return cpt_at(ss, i + 1, base);
+            return rstop(ss, lvl, i + 1, base);
         }
         if p > cut {
             chain_put(ss, lvl, i + base);
@@ -693,7 +876,7 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
             rem -= 1;
         } else if major <= 3 {
             if (hi != 0) || ((lo < 0) || (lo > (end - p))) {
-                return cpt_at(ss, i + 1, base);
+                return rstop(ss, lvl, i + 1, base);
             }
             if (p + lo) > cut {
                 chain_put(ss, lvl, i + base);
@@ -705,24 +888,24 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
         } else {
             let mut n: i32;
             if (hi != 0) || (lo < 0) {
-                return cpt_at(ss, i + 1, base);
+                return rstop(ss, lvl, i + 1, base);
             }
             n = lo;
             if major == 4 {
                 if lo > (end - p) {
-                    return cpt_at(ss, i + 1, base);
+                    return rstop(ss, lvl, i + 1, base);
                 }
             }
             if major == 5 {
                 if lo > (i32::cast_unsigned(end - p) >> 1).cast_signed() {
-                    return cpt_at(ss, i + 1, base);
+                    return rstop(ss, lvl, i + 1, base);
                 }
                 n = 2 * lo;
             }
             if major == 6 {
                 if (lo != 2) && ((lo != 3) && ((lo != 4) && ((lo != 40) && (typed_size(lo) == 0)))) {
                     if !std_allowed(ss[(SS_PROF) as usize], lo, 0) {
-                        return cpt_at(ss, i + 1, base);
+                        return rstop(ss, lvl, i + 1, base);
                     }
                 }
                 n = 1;

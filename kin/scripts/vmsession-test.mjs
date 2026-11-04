@@ -24,7 +24,7 @@ import { extFor, testControls } from './ext-cases.mjs';
 import { controlEntries } from '../../host/js/src/ext.mjs';
 import { buildVmCases } from './vm-allcases.mjs';
 import { sessionCases } from './vmsession-cases.mjs';
-import { runSession, sessionSteps } from './vmsession-run.mjs';
+import { runSession, sessionSteps, runUnknown } from './vmsession-run.mjs';
 import { hex } from './scan-cases.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
 import { validateHandleSync, bufferHandle } from '../../host/js/src/sources.mjs';
@@ -149,6 +149,62 @@ for (let i = 0; i + 2 < runs.length; i += 3 * 97) {
   group.forEach((r, k) => { inter++; if (res[k] !== r.want) { interFails++; fail(`${desc(r)}: interleaved ${res[k]} vs ${r.want}`); } });
 }
 
+// ---------------------------------------------------------------- unknown length (D085)
+// Every case again as a stream whose length the session is never told: drain mode
+// must give the buffer's whole out array (code, offset, budget, items, path) under
+// random chunking and quanta; fail-fast never accepts what the buffer refuses nor
+// refuses what it accepts (only its code may differ, and only when it answers early).
+const uruns = [];   // {ci, lim, want, policy, ff, rust}
+const ucounts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, split: 0, budget: 0, failfast: 0 };
+cases.forEach((c, ci) => {
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
+  const want0 = buffer(c, lim0), n = c.bytes.length;
+  const add = (lim, want, policy, tag, rust, ff = false) => { uruns.push({ ci, lim, want, policy, ff, rust }); ucounts[tag]++; };
+  add(lim0, want0, { kind: 0, w: 0, q: 0, seed: 1, k: 0 }, 'whole', ci % 3 === 0);
+  add(lim0, want0, { kind: 1, w: 1, q: 0, seed: 1, k: 0 }, 'byte', ci % 3 === 1);
+  add(lim0, want0, { kind: 2, w: 7, q: rnd(3), seed: 1 + rnd(1 << 30), k: 0 }, 'rnd7', ci % 3 === 2);
+  add(lim0, want0, { kind: 2, w: 300, q: rnd(2), seed: 1 + rnd(1 << 30), k: 0 }, 'rnd300', false);
+  if (n <= 24) for (let k = 1; k < n; k += 1 + rnd(3)) add(lim0, want0, { kind: 3, w: 0, q: 0, seed: 1, k }, 'split', false);
+  if (ci % 5 === 0) {
+    const free = Int32Array.from(lim0); free[7] = -1;
+    const full = buffer(c, free).split(' '), used = full[0].startsWith('ERR') ? 0 : Number(full[3]);
+    const lb = Int32Array.from(lim0); lb[7] = rnd(used + 2);
+    add(lb, buffer(c, lb), { kind: 2, w: 7, q: rnd(3), seed: 1 + rnd(1 << 30), k: 0 }, 'budget', ci % 10 === 0);
+  }
+  add(lim0, want0, { kind: 2, w: 9, q: rnd(2), seed: 1 + rnd(1 << 30), k: 0 }, 'failfast', ci % 4 === 0, true);
+});
+const tU = performance.now();
+const ujs = uruns.map(r => {
+  const c = cases[r.ci], { P, B } = programs[c.prog];
+  try { const x = runUnknown(P, B, c.rule, r.lim, c.bytes, r.policy, { failFast: r.ff }); return x.error ? 'E ' + x.error : x.out; }
+  catch (e) { return 'THROW ' + e.message; }
+});
+const tUjs = performance.now() - tU;
+let uagree = 0, ffRuns = 0, ffEarly = 0, ffSameCode = 0, ffBad = 0;
+const code0 = o => o.split(' ')[0];
+uruns.forEach((r, i) => {
+  if (!r.ff) { if (ujs[i] === r.want) uagree++; else fail(`unknown ${desc(r)}: buffer ${r.want} | drain ${ujs[i]}`); return; }
+  ffRuns++;
+  const g = ujs[i];
+  if (g.startsWith('E') || g.startsWith('THROW')) { ffBad++; fail(`fail-fast ${desc(r)}: ${g}`); return; }
+  const acceptB = code0(r.want) === '0', acceptF = code0(g) === '0';
+  if (acceptB !== acceptF) { ffBad++; fail(`fail-fast ${desc(r)}: buffer ${r.want} | fail-fast ${g}`); return; }
+  if (acceptF && g !== r.want) { ffBad++; fail(`fail-fast accepted differently ${desc(r)}: ${g} vs ${r.want}`); return; }
+  if (g !== r.want) ffEarly++; else ffSameCode++;
+});
+// a sample behind traps
+let uguarded = 0, utrapFails = 0;
+uruns.forEach((r, i) => {
+  const c = cases[r.ci];
+  if (r.ff || !(i % 11 === 0 && c.bytes.length <= 2048 && r.policy.kind !== 0)) return;
+  uguarded++;
+  const { P, B } = programs[c.prog];
+  let g;
+  try { const x = runUnknown(P, B, c.rule, r.lim, c.bytes, r.policy, { guard }); g = x.error ? 'E ' + x.error : x.out; }
+  catch (e) { g = 'THROW ' + e.message; }
+  if (g !== r.want) { utrapFails++; fail(`unknown ${desc(r)}: trapped ${g} vs ${r.want}`); }
+});
+
 // ---------------------------------------------------------------- hosts: JS sources == Rust validate_blob
 const hostRuns = [];   // {ci, chunk, quantum, js}
 const hostProgs = new Map();
@@ -176,7 +232,7 @@ cases.forEach((c, ci) => {
 });
 
 // ---------------------------------------------------------------- Rust
-let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts';
+let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts', urustLine = '  SKIP unknown length Rust';
 if (rustBin) {
   const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
   const sel = [];
@@ -185,6 +241,13 @@ if (rustBin) {
     const c = cases[r.ci], pol = r.policy;
     sel.push(i);
     lines.push(`case ${c.prog} ${c.rule} ${Array.from(r.lim).join(' ')} ${pol.kind} ${pol.w} ${pol.q} ${pol.seed >>> 0} ${pol.k} ${c.bytes.length ? hex(c.bytes) : '-'}`);
+  });
+  const usel = [];
+  uruns.forEach((r, i) => {
+    if (!r.rust) return;
+    const c = cases[r.ci], pol = r.policy;
+    usel.push(i);
+    lines.push(`ucase ${c.prog} ${c.rule} ${Array.from(r.lim).join(' ')} ${pol.kind} ${pol.w} ${pol.q} ${pol.seed >>> 0} ${pol.k} ${r.ff ? 1 : 0} ${c.bytes.length ? hex(c.bytes) : '-'}`);
   });
   for (const h of hostRuns) {
     const c = cases[h.ci];
@@ -195,8 +258,15 @@ if (rustBin) {
   const tRs = performance.now() - t2;
   if (p.status !== 0) fail(`the Rust binary exited ${p.status}: ${p.stderr.slice(0, 400)}`);
   const all = p.stdout.trim().split('\n');
-  const rs = all.slice(0, sel.length), hs = all.slice(sel.length);
-  if (all.length !== sel.length + hostRuns.length) fail(`Rust answered ${all.length} lines, expected ${sel.length + hostRuns.length}`);
+  const rs = all.slice(0, sel.length), urs = all.slice(sel.length, sel.length + usel.length), hs = all.slice(sel.length + usel.length);
+  if (all.length !== sel.length + usel.length + hostRuns.length) fail(`Rust answered ${all.length} lines, expected ${sel.length + usel.length + hostRuns.length}`);
+  let ua = 0;
+  usel.forEach((i, k) => {
+    if (urs[k] === 'PANIC') { fail(`unknown ${desc(uruns[i])}: Rust PANICKED`); return; }
+    if (urs[k] !== ujs[i]) { fail(`unknown ${desc(uruns[i])}: JS ${ujs[i]} | Rust ${urs[k]}`); return; }
+    ua++;
+  });
+  urustLine = `  ${ua === usel.length ? 'ok  ' : 'FAIL'} unknown length JS == Rust: ${ua}/${usel.length} drain and fail-fast runs, whole out array`;
   let ha = 0;
   hostRuns.forEach((h, k) => { if (hs[k] === h.js) ha++; else fail(`${cases[h.ci].label} chunk ${h.chunk} q ${h.quantum}: JS host ${h.js} | Rust host ${hs[k]}`); });
   hostLine = `  ${ha === hostRuns.length ? 'ok  ' : 'FAIL'} hosts: JS validateHandleSync == Rust snug::schema::validate_blob on ${ha}/${hostRuns.length} corpus and stress runs (chunks 1, 5 with quantum 2, 4096), both == Schema.validate`;
@@ -216,7 +286,10 @@ console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).
 line(trapFails === 0, `JS bounds: ${guarded} runs behind throwing out-of-bounds traps on P, B, window, scratch, session array, key arena, out`);
 line(interFails === 0, `interleaved sessions: ${inter} sessions run three at a time, a step each in turn, on one Program`);
 console.log(rustLine);
+line(uagree === uruns.length - ffRuns, `unknown length (D085, drain): ${uagree}/${uruns.length - ffRuns} streams of an untold length give the buffer's whole out array (${Object.entries(ucounts).filter(([k]) => k !== 'failfast').map(([k, v]) => `${k} ${v}`).join(', ')}); ${uguarded} behind traps`);
+line(ffBad === 0, `fail-fast: ${ffRuns - ffBad}/${ffRuns} streams accept iff the buffer accepts (${ffSameCode} with the buffer's out, ${ffEarly} refused early with another code or offset)`);
+console.log(urustLine);
 console.log(hostLine);
-console.log(`  info ${programs.length} programs; JS ran ${runs.length} sessions in ${(tJs / 1000).toFixed(1)} s (all ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
+console.log(`  info ${programs.length} programs; JS ran ${runs.length} sessions in ${(tJs / 1000).toFixed(1)} s and ${uruns.length} unknown-length streams in ${(tUjs / 1000).toFixed(1)} s (all ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
 console.log('  ok   vmsession-test');

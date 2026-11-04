@@ -298,6 +298,28 @@ impl Schema {
     }
 }
 /// Validate a known-length snapshot through a Schema's session driver.
+impl Schema {
+    /// D085: validate a message of UNKNOWN length read from `reader` until EOF
+    /// (drain mode: the verdict equals the buffer's of the same bytes, holding at
+    /// most what the session asks for plus `chunk`). `fail_fast` answers a certain
+    /// refusal at once; its code may then differ from the buffer's
+    /// (`cbor/truncated` or `cbor/too_large`), its accept/refuse never does.
+    pub fn validate_reader(
+        &self,
+        reader: &mut dyn std::io::Read,
+        rule: &str,
+        options: &ValidationOptions,
+        chunk: usize,
+        fail_fast: bool,
+    ) -> Result<Result<(), Failure>, Error> {
+        let r = self.rule(rule).map_err(Error::Validation)?;
+        if chunk == 0 {
+            return Err(Error::Usage("options"));
+        }
+        schema::validate_reader(self.program.host(), r, reader, &options.host(), chunk, 0, fail_fast)
+            .map_err(|_| Error::Source("read"))
+    }
+}
 pub fn validate_blob(
     schema: &Schema,
     blob: &dyn Blob,

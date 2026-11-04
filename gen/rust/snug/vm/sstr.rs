@@ -67,6 +67,7 @@ pub fn open_text(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32]
     if stop < 0 {
         return err(ss, stop);
     }
+    pend_note(b, s, ss, base, stop, pos);
     if !charge(s, c64(stop - q), pos) {
         return err(ss, -R_BUDGET);
     }
@@ -329,6 +330,7 @@ pub fn open_bstr(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32]
         if stop < 0 {
             return err(ss, stop);
         }
+        pend_note(b, s, ss, base, stop, pos);
     } else {
         cs = cs0;
         stop = stop0;

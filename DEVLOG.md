@@ -1158,10 +1158,7 @@ slower); allocated head tuples; validating wrapper constructors in build
   refusal the walk stops at — an embedded document's refusal is caught and
   the outer walk goes on past it (a bug the gate found); (6) stream notes
   (tag 4/40) forbid streaks over a pair's elements.
-  **Open**: D085's unknown-length drain mode (the end-dependent checks are
-  `doc-start`'s `too_large`, `root-end`'s trailing and the `end` every item
-  inherits from the root's `IT_END`: a drain session would carry an open end
-  and pending checks); arena pooling and a bound on live sessions (each
+  **Open**: ~~D085's unknown-length drain mode~~ (done: P6.4b, D144–D147); arena pooling and a bound on live sessions (each
   session allocates its arrays; JS `VmSession.bytesHeld` reports them); handle
   version pinning (W12) is the handle's contract, not checked; no Rust async
   driver and no wasm session exports; frames do not yet run `map-streak`, so a
@@ -1225,6 +1222,74 @@ slower); allocated head tuples; validating wrapper constructors in build
 - [ ] **P6.3 — Stream source** (ReadableStream/AsyncIterable, push `feed`),
   backpressure, fused stream decode.
 - [ ] **P6.4 — Benchmarks** §12 items 9–11.
+- [x] **P6.4b — Unknown-length streams (D085)**: drain mode in the session
+  VM, fail-fast, host APIs. *Done 2026-11-03 by the VM-features engineer
+  (Claude); the commit after `48ed8ea`.* Decisions **D144–D147**.
+  - **kin** (`vm-session*.kin`): `vms-init-unknown` (provisional end = the
+    input limit), `vms-eof`, `vms-held-code`, `vms-unknown-total`,
+    `VMS_HELD` (-67) / `VMS_RESUME` (-68), `PH_HELD`; session header words 38
+    `SS_UNK`, 39/40 the pending area (4 words a check, frames + 2 entries;
+    `SS_HDR` 40 -> 44). Pending checks at `open-text`, `open-bstr`,
+    `enter-pend` (4 container frames), a typed array's content (tag frames)
+    and `skip-bstr` (byte strings walked from their head); held verdicts via
+    `settle`; root-end's trailing probe; prescan refusal stops inside a
+    container make it cross in unknown mode (`pstop`, `rstop`); no dead-typed
+    shortcut; at EOF the ends equal to the provisional one become the real one
+    and a crossing key being copied finishes over its arena copy (D144).
+  - **JS:** `schema.session(rule, undefined)` (`held`, `end(n)`, `limit`),
+    `pushValidator(schema, undefined, …)` / `pushScanner(undefined, …)` with
+    `failFast`, `end()`, `bytesHeld`; `streamSource`, `validateStream`,
+    `scanStream` (an early verdict cancels the stream); the scanner's drain
+    mode runs the VM against a built-in `any` Program (`any-program.mjs`,
+    checked against the compiler by a test) (D146); `failFast` admitted in
+    options.mjs; types. **Rust:** `Session::new_unknown`, `Session::end`,
+    `Session::limit`, `Step::Held`, `schema::validate_reader`,
+    `Schema::validate_reader` (any `std::io::Read`).
+  - **Gates (actual runs, Node v24.6.0, rustc 1.92, this tree, defaults
+    unless noted):** **vmsession-test** (seed 1) session == buffer
+    969,521/969,521, traps 91,201, interleaved 9,501, JS == Rust 628,417, hosts
+    8,247; **unknown length (drain) 474,486/474,486 streams give the buffer's
+    whole out array** (whole / byte / rnd7 / rnd300 73,834 each, split 164,383,
+    part-way budgets 14,767; 36,351 behind traps); **fail-fast 73,834/73,834
+    accept iff the buffer accepts** (71,440 with the buffer's out, 2,394 refused
+    early with another code / offset); **unknown length JS == Rust
+    99,677/99,677**; seed 7 also green (476,082 drain, 99,677 JS == Rust).
+    The runner never tells the session the length, gives no window past the
+    bytes "delivered" and fails any ask before a keep already given. `bb
+    check`, scan-test, rscan-test, compile-test, compile-fuzz, nav-test,
+    write-test, unicode-test, **rust-api-test** (new `tests/streams.rs`:
+    `validate_reader` == buffer under read sizes 1/2/3/64, fail-fast verdicts,
+    too_large past `max_bytes`; the docs/rust.md doctest), **vm-test**
+    (unchanged numbers) all ok; **npm test 1,298 passed / 0 failed** (6 new in
+    `stream.test.mjs`: every chunking == buffer and fail-fast accept/refuse,
+    ReadableStream sources and early cancellation, drain reads to the end,
+    too_large at once, ≤ 2 KiB held while a 200 KB byte string streams, the
+    built-in `any` Program == the compiler's and unknown-length scanning == the
+    scanner); `bb drift` ok after the commit.
+  - **Learnt:** (1) "an item the window holds whole cannot diverge" is the
+    whole argument, but "whole" had two leaks -- a byte string walked from its
+    head (its content claim passes against the provisional end), and a
+    prescan that stops at a refusal *inside* a container (the container's
+    count was checked against the provisional end, not the bytes); both found
+    by the runner on mutated inputs. (2) A forward-only stream must never be
+    asked for a byte before a `keep` it was given: the first EOF handling of a
+    crossing key reset the pair to its start and asked for its head again --
+    bytes a real stream had dropped; finishing the pair over the arena copy
+    needs nothing dropped. The gate's runner now enforces the keep rule. (3) A
+    window is a claim that its bytes exist (D147): an empty window past the
+    end silently settled a pending check. (4) Three more leaks the full gate
+    found: a bignum decided from its content's head (its content claim; live
+    ones take the check's moment from a trial walk ending at the window, since
+    the tag's filter and number tests come first, and a depth refusal
+    precedes it), a non-text map key refused inside after a count that claims
+    past the window (`key-max-claim`: the window must reach the claim), and an
+    out-of-window head read the Rust debug build caught (JS reads `undefined`).
+  - **Open:** the unknown-length key arena is sized for the input limit
+    (1.5 MB by default per session) -- an on-demand arena would need a grow
+    protocol at every arena write; no Rust async driver; the wasm shim and
+    SDK have no unknown-length or extension-control port; unknown-length
+    profile scanning costs the VM's dead walk, not the resumable scanner's;
+    no benchmark of drain mode yet (P6.4).
 
 ---
 
@@ -2943,6 +3008,73 @@ leaf reads is otherwise walked from its head alone, so the rule runs whatever
 split (gated); a stream buffers at most the control's maximum for it.
 **Alternatives**: retaining every crossing item's bytes (unbounded); a
 per-item EXT byte cursor (predicates take whole items).
+- [ ] **Signed off** (owner)
+
+### D144 — Drain mode: a provisional end, pending end checks, held verdicts, settled at EOF (D085)
+**Decision** (VM-features engineer, provisional; implements D085): an
+unknown-length session (`vms-init-unknown`) is a known-length session whose
+end is the effective input limit P. Every check whose outcome depends on the
+real end n is either (a) re-run once n is known, or (b) recorded as a
+**pending check** when it passes against P with a claim beyond the window:
+`(claim, offset, budget used, items)` -- exactly what the buffer walk answers
+(`cbor/truncated`) if n < claim. (b) is needed only where the walk commits to
+a claim before reading it: the length / count checks of items that cross the
+window (`open-text`, `open-bstr`, `enter-pend` before `enter-container` in the
+four container frames, a typed array's content in tag frames) and a byte
+string the walk skips from its head (`skip-bstr`, its snapshot taken from the
+prologue's known charges). An item the window holds whole cannot diverge; a
+prescan that stops at a refusal inside an item no longer calls that item whole
+(its enclosing levels cross: `pstop`/`rstop`), and the dead-typed shortcut is
+off. A verdict is **held** (`VMS_HELD`, out filled); the root's trailing check
+asks for one byte past the root; doc-start's `not_map` for n = 0 waits for the
+first byte. `vms-eof(n)`: n > P -> `too_large`; else drop the pending checks n
+covers; the earliest left -> its truncated; else a held verdict stands; else
+(the walk was waiting) every end equal to P becomes n and the walk resumes
+(`VMS_RESUME`) -- a crossing map key being copied past n finishes its pair over
+the arena copy (head included), so no dropped byte is ever asked again. Each
+step drops pending checks its window covers. The key arena is sized for P.
+**Why**: codes equal a buffer of the same bytes (D085's requirement) with no
+retention beyond what the session asks for; the only divergence points are a
+handful of frame checks, so the walk itself is unchanged.
+**Alternatives**: replay from a checkpoint at EOF (needs the dropped bytes);
+re-validating the retained message (unbounded memory); a different documented
+precedence (rejected by D085).
+- [ ] **Signed off** (owner)
+
+### D145 — Fail-fast reports a held refusal at once (D085)
+**Decision** (provisional): with `failFast`, a held verdict that is a refusal
+is answered immediately and the source is no longer read; acceptance always
+waits for the end; more bytes than the limit is `too_large` at once in both
+modes. Guarantee: fail-fast never accepts what the buffer refuses and never
+refuses what it accepts (a held refusal means the buffer answers it, or the
+earlier pending `truncated`, or `too_large`); only its code / offset may
+differ, and only when it answers early (gated: accept iff the buffer accepts,
+equal out whenever it accepts).
+- [ ] **Signed off** (owner)
+
+### D146 — Unknown-length host APIs; the scanner's drain mode is the VM against `any` (D085)
+**Decision** (provisional): JS -- `schema.session(rule, undefined)` (`step` may
+answer `held`, `end(n)` settles, `limit`), `pushValidator(schema, undefined,
+rule, options, { quantum, failFast })` / `pushScanner(undefined, …)` (`feed`,
+`resume`, `finalize` = `end()`, `bytesHeld`), `streamSource(ReadableStream |
+AsyncIterable | Iterable)`, `validateStream`, `scanStream` (an early verdict
+stops reading). Rust -- `schema::Session::new_unknown`, `Session::end`,
+`Step::Held`, `schema::validate_reader(… impl Read …)`,
+`Schema::validate_reader`. Unknown-length profile scanning runs the VM's drain
+session against a built-in `r = any` Program (largest limits; a test checks it
+against the compiler), which gives the scanner's code on every input (vm-test's
+profile identity), instead of a second drain mode in `rscan`.
+**Why**: one drain implementation, gated once. **Alternatives**: drain mode in
+the resumable scanner too (a second set of pending checks to keep equal).
+- [ ] **Signed off** (owner)
+
+### D147 — In an unknown-length session a window asserts its bytes exist (D085)
+**Decision** (provisional): a window `[base, base + length)` given to an
+unknown-length session claims that those bytes were delivered (pending checks
+it covers are dropped). A driver must not offer a window starting past the
+bytes delivered -- a need or yield past them waits for data or is the end
+(`vms-eof`). The gate's runner and both host drivers enforce it, and check that
+no byte before a `keep` already given is asked for again.
 - [ ] **Signed off** (owner)
 
 ### D150 — One host option validator with per-operation allowlists (P7.10)

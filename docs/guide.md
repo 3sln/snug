@@ -399,10 +399,10 @@ try {
 }
 ```
 
-**Known length is required**, in bytes, before validation starts: handle
+**Handles need a known length**, in bytes, before validation starts: handle
 `size`, Content-Length or an application framing header. It must be an exact
-integer in 0..2^31−1, subject to the schema's input limit. Unknown-length
-streams remain pending D085; drain/failFast are not implemented options.
+integer in 0..2^31−1, subject to the schema's input limit. A stream whose
+length is not known is validated in drain mode instead (below).
 Source decoding is unavailable; these APIs validate without materialising.
 
 A handle is `{ size, read(offset, length) }`, with reads returning a Uint8Array
@@ -484,6 +484,49 @@ transport errors before logging. Unknown rules/API misuse use TypeError.
 The profile-only `scanBuffer`, `scanHandle`, `scanHandleSync`, `pushScanner`
 remain available: profile refusals throw SnugFault, buffer success returns
 undefined, and handle scanning / push finalize return true.
+
+### Streams of unknown length
+
+```js
+import { streamSource, validateStream, scanStream, pushValidator } from 'snug/sources';
+const res = await fetch(url);                       // no Content-Length needed
+const result = await validateStream(schema, streamSource(res.body), 'message');
+// the same ValidationResult as schema.validate(allTheBytes, 'message')
+
+const quick = await validateStream(schema, streamSource(res2.body), 'message', {},
+  { failFast: true });                              // a refusal as soon as it is certain
+await scanStream(streamSource(chunks));             // profile only: true or SnugFault
+const push = pushValidator(schema, undefined, 'message');   // feed(chunk) ... end()
+```
+
+Pass `undefined` as the length (or use `validateStream` / `scanStream` with a
+`streamSource` of a ReadableStream, an AsyncIterable or an Iterable of
+Uint8Array). snug then validates in **drain mode** (D085): it walks the bytes
+as they come, exactly as with a known length, but every check that depends on
+where the message ends — a length or count reaching past the bytes seen,
+trailing bytes after the root, `too_large` — is held until the stream ends.
+A verdict found earlier is held too, and the rest of the stream is read and
+dropped (never kept). So the result is **identical to a buffer of the same
+bytes**: code, offset, path, budget and items (gated on every corpus and
+mutation input under random chunking). More bytes than `maxBytes` end the
+stream at once with `cbor/too_large`, and a stream ending inside an item is
+`cbor/truncated` where the buffer would say so. EOF is the stream's end (or
+`push.end()` / `finalize()`); an empty chunk is not EOF.
+
+`failFast: true` answers a **certain refusal** as soon as it is found and
+stops reading. It never accepts what the buffer refuses and never refuses what
+it accepts, but its code may differ: the whole stream might have been
+`cbor/too_large`, or ended inside an enclosing item (`cbor/truncated`), and
+the buffer reports that first. Acceptance always waits for the end.
+
+Memory stays bounded: the driver holds only what the session asks for (a
+head, a key, a bounded piece, an extension control's item) plus a chunk; a
+long byte string is dropped as it streams. The session's own key arena is
+sized for the input limit (`maxBytes`, default 1,500,000 bytes) because the
+length is unknown — lower `maxBytes` for many concurrent streams. A raw
+`schema.session(rule, undefined)` exposes the protocol: `step` may answer
+`{state: 'held', result}`, and `end(n)` settles the verdict (or answers a
+`yield` to step on over the bytes it still holds).
 
 Standard Blob/File/HTTP Range adapters and fused source decode remain pending.
 

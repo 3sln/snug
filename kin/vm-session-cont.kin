@@ -39,7 +39,7 @@
             [snug.vm.eval :refer [eval-item unit-of simple-of q-filter-x finish-comb finish-scalar
                                   count-pending single-leaf count-matched map-fast-mode map-pair-ok
                                   bstr-tail array-streak if-limit]]
-            [snug.vm.sbase :refer [GO SS_PH SS_RET PH_RET IT_PAIR FW FK_ARR FK_MAP FK_TAG FK_DARR FK_DMAP FK_DSEQ SS_ATOP SS_CUT
+            [snug.vm.sbase :refer [key-max-claim SS_UNK enter-pend pend-note GO SS_PH SS_RET PH_RET IT_PAIR FW FK_ARR FK_MAP FK_TAG FK_DARR FK_DMAP FK_DSEQ SS_ATOP SS_CUT
                                    F_KIND F_PH F_POS F_END F_D F_FB F_CK F_NQ F_CTX F_Q F_N F_EL F_Q0 F_PIN
                                    F_NB F_S2 F_CX F_PEND F_NALIVE F_Q1 F_CNQ F_PAIR F_CL F_CCAP F_SMAP F_KLO
                                    F_COSE F_PS F_PE F_START F_KID F_MCNQ F_NC F_NAMED F_VNQ F_PS2 F_KM F_KE
@@ -162,7 +162,7 @@
     (if (< q 0) (return (err ss q)))
     (let [lo (ia s O_LO)
           hi (ia s O_HI)
-          ra (enter-container s pos q hi lo d 0 end)]
+          ra (enter-pend b s ss base pos q hi lo d 0 end)]
       (if (< ra 0) (return (err ss ra)))
       (return (arr-start p b s ss ka base pos q lo d fb ck nq end ctx pair)))))
 
@@ -342,7 +342,7 @@
     (if (< q 0) (return (err ss q)))
     (let [lo (ia s O_LO)
           hi (ia s O_HI)
-          ra (enter-container s pos q hi lo d 0 end)]
+          ra (enter-pend b s ss base pos q hi lo d 0 end)]
       (if (< ra 0) (return (err ss ra)))
       (let [f (fpush b ss ka base FK_DARR)]
         (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
@@ -450,7 +450,7 @@
     (if (< q 0) (return (err ss q)))
     (let [lo (ia s O_LO)
           hi (ia s O_HI)
-          rm (enter-container s pos q hi lo d 1 end)]
+          rm (enter-pend b s ss base pos q hi lo d 1 end)]
       (if (< rm 0) (return (err ss rm)))
       (return (map-start p b s ss ka base pos q lo d fb ck nq end ctx)))))
 
@@ -459,7 +459,7 @@
     (if (< q 0) (return (err ss q)))
     (let [lo (ia s O_LO)
           hi (ia s O_HI)
-          rm (enter-container s pos q hi lo d 1 end)]
+          rm (enter-pend b s ss base pos q hi lo d 1 end)]
       (if (< rm 0) (return (err ss rm)))
       (let [f (fpush b ss ka base FK_DMAP)]
         (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
@@ -609,6 +609,8 @@
         ^:mut kend end
         ^:mut delta 0]
     (if (>= kea 0) (set klen (- kea (ia ss (+ f F_START)))))
+    (comment "D085: a key the message ended inside (vms-eof): what was copied, ending there")
+    (if (and (< kea 0) (== inka 1)) (set klen (ia ss (+ f F_KGOT))))
     (if (== inka 1)
       (do (set kks ka0)
           (set kend (+ ka0 klen))
@@ -776,6 +778,11 @@
                  "is known only once all its heads are in the window (D124).")
         (if (and (< ke 0) (and (> km 1) (!= km 3)))
           (do (let [kx (key-end-any b start end wend)]
+                (comment "D085: a refusal inside the key, after a count that claims past the"
+                         "window: the window must reach the claim first")
+                (if (and (== kx (neg 1)) (== (ia ss SS_UNK) 1))
+                  (do (let [mc (key-max-claim b start end wend)]
+                        (if (> mc wend) (return (need ss base start (- mc start)))))))
                 (if (< kx (neg 1))
                   (do (let [want (- (- (neg 2) kx) start)
                             twice (* 2 (- wend start))]
@@ -797,7 +804,9 @@
 
 (defn ^:pub ^I32 map-key [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend
                           ^I32 f ^Ext ext]
-  (comment "Copy the crossing key into the arena, a window at a time (D092).")
+  (comment "Copy the crossing key into the arena, a window at a time (D092). D085:"
+           "F_KE -1 is a key the message ended inside -- its pair goes on over the copy.")
+  (if (< (ia ss (+ f F_KE)) 0) (return (map-pair p pool b s ss ka base f 1 ext)))
   (let [start (ia ss (+ f F_START))
         klen (- (ia ss (+ f F_KE)) start)
         got (ia ss (+ f F_KGOT))
@@ -948,6 +957,7 @@
                     (if (> (+ q hh-h) wend) (return (need ss base q hh-h)))))))
           (let [stop-h (bytes-content b s q CODE_TYPED_ARRAY end)]
             (if (< stop-h 0) (return (err ss stop-h)))
+            (pend-note b s ss base stop-h q)
             (let [cs-h (ia s O_CSTART)
                   size-h (ia ss (+ f F_TSIZE))]
               (if (!= (rem (- stop-h cs-h) size-h) 0) (return (err ss (fail s pos CODE_TYPED_ARRAY))))

@@ -10,7 +10,7 @@ import { typedBadAt } from './dead.mjs';
 import { countMatchedScalars, embedKill, embedLive, finishScalar, qFilterX, unitOf } from './eval.mjs';
 import { FL_EMBED, F_ADMITTED, F_EVAL, F_MATCHED, H_FLAGS, H_S_LEAVES, H_S_REGEX_INDEX, K_BYTES, K_EMBED, K_TEXT, P_EMBED, R_BITS, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_PATTERN, R_SIZE, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_REGCAP, VM_REGEX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { bitsOk, evalLeaf, rxAccepts, rxCp, scalarKind, utf8Len } from './leaf.mjs';
-import { FK_BSTR, FK_DTEXT, FK_TEXT, F_BITS, F_BITSOK, F_CK, F_CLS, F_CS, F_CTX, F_D, F_DEFER, F_ECNQ, F_END, F_EPH, F_FB, F_I, F_KIND, F_NQ, F_PH, F_PIN, F_POS, F_RXCP, F_RXOFF, F_SCOSE, F_SEQ, F_SERR, F_SITEMS, F_SMAXD, F_STOP, F_TAIL, F_TI, F_TNUM, F_TSIZE, F_TSTOP, GO, MODE_DSEQ, MODE_ITEM, MODE_VSEQ, b01, call, chunkEnd, cont, done, dryBegin, dryEnd, err, fpush, mustYield, need, progress, suspended, yld } from './sbase.mjs';
+import { FK_BSTR, FK_DTEXT, FK_TEXT, F_BITS, F_BITSOK, F_CK, F_CLS, F_CS, F_CTX, F_D, F_DEFER, F_ECNQ, F_END, F_EPH, F_FB, F_I, F_KIND, F_NQ, F_PH, F_PIN, F_POS, F_RXCP, F_RXOFF, F_SCOSE, F_SEQ, F_SERR, F_SITEMS, F_SMAXD, F_STOP, F_TAIL, F_TI, F_TNUM, F_TSIZE, F_TSTOP, GO, MODE_DSEQ, MODE_ITEM, MODE_VSEQ, b01, call, chunkEnd, cont, done, dryBegin, dryEnd, err, fpush, mustYield, need, pendNote, progress, suspended, yld } from './sbase.mjs';
 
 export const S_SCAN = 1;
 
@@ -74,6 +74,7 @@ export function openText(p, pool, b, s, ss, ka, base, pos, d, fb, ck, nq, end, c
     if (stop < 0) {
         return err(ss, stop);
     }
+    pendNote(b, s, ss, base, stop, pos);
     if (!charge(s, c64(stop - q), pos)) {
         return err(ss, -R_BUDGET);
     }
@@ -341,6 +342,7 @@ export function openBstr(p, pool, b, s, ss, ka, base, pos, d, fb, ck, nq, end, c
         if (stop < 0) {
             return err(ss, stop);
         }
+        pendNote(b, s, ss, base, stop, pos);
     } else {
         cs = cs0;
         stop = stop0;

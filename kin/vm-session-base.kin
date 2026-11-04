@@ -17,13 +17,14 @@
   (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
             [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg quot rem shl sar ushr bit-and bit-or
                                bit-xor < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
-            [snug.cbor.codes :refer [CODE_DUPLICATE_KEY CODE_KEY_ORDER CODE_DECIMAL CODE_NDARRAY O_ERR_POS]]
+            [snug.cbor.codes :refer [CODE_DUPLICATE_KEY CODE_KEY_ORDER CODE_DECIMAL CODE_NDARRAY O_ERR_POS
+                                     O_ITEMS O_MAX_DEPTH]]
             [snug.cbor.stdtags :refer [std-allowed]]
-            [snug.cbor.head :refer [fail head-size small-arg be16 be32]]
+            [snug.cbor.head :refer [fail head-size small-arg be16 be32 enter-container]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok]]
             [snug.vm.layout :refer [H_LIM_DEPTH H_LIM_INPUT H_S_LEAVES H_S_LITREFS H_FLAGS FL_EMBED
                                     K_LIT K_LITSET K_BYTES K_EMBED VM_BUDGET VM_POS VM_W_OFFSET
-                                    VM_BIGNUM_MAX R_BUDGET INF]]
+                                    VM_BIGNUM_MAX R_BUDGET INF VM_BUDGET_START]]
             [snug.vm.base :refer [charge c64min]]
             [snug.vm.api :refer [lim]]))
 
@@ -31,6 +32,10 @@
 
 (defconst ^:pub ^I32 VMS_NEED -64)
 (defconst ^:pub ^I32 VMS_YIELD -65)
+;; D085: an unknown-length session's verdict is held until the end is known (vms-eof)
+(defconst ^:pub ^I32 VMS_HELD -67)
+;; D085: vms-eof took the end; step again (windows below it)
+(defconst ^:pub ^I32 VMS_RESUME -68)
 (defconst ^:pub ^I32 GO 0)
 
 ;; ------------------------------------------------------------ the session array header
@@ -74,13 +79,23 @@
 (defconst ^:pub ^I32 SS_CPT 36)
 ;; the profile flags of the session's run (S[O_PROFILE] at vms-init), for the prescan
 (defconst ^:pub ^I32 SS_PROF 37)
-(defconst ^:pub ^I32 SS_HDR 40)
+;; D085: 0 a declared length; 1 an unknown length (SS_TOTAL is the provisional end, the
+;; effective input limit); 2 an unknown length whose end vms-eof has given
+(defconst ^:pub ^I32 SS_UNK 38)
+;; D085: pending end checks -- how many, and where (PW words each: claim, offset, budget
+;; used, items, all absolute)
+(defconst ^:pub ^I32 SS_NPEND 39)
+(defconst ^:pub ^I32 SS_PEND 40)
+(defconst ^:pub ^I32 PW 4)
+(defconst ^:pub ^I32 SS_HDR 44)
 
 (defconst ^:pub ^I32 PH_START 0)
 (defconst ^:pub ^I32 PH_ITEM 1)
 (defconst ^:pub ^I32 PH_RET 2)
 (defconst ^:pub ^I32 PH_FRAME 3)
 (defconst ^:pub ^I32 PH_DONE 4)
+;; D085: the verdict is in `out` but waits for the end (an unknown-length session)
+(defconst ^:pub ^I32 PH_HELD 5)
 
 ;; item modes (IT_MODE)
 (defconst ^:pub ^I32 MODE_ITEM 0)
@@ -195,7 +210,7 @@
   (comment "Words of the session array (Ints) for any message: the header, the"
            "frames, the prescan stack and the crossing chain.")
   (let [nf (nframes p)]
-    (return (+ (+ SS_HDR (* nf FW)) (* 3 nf)))))
+    (return (+ (+ (+ SS_HDR (* nf FW)) (* 3 nf)) (* PW (+ nf 2))))))
 
 (defn ^:pub ^I32 vms-arena-bytes [^IntsR p ^IntsR limits ^I32 total]
   (comment "Bytes of the key arena (BytesW) for a message of `total` bytes under"
@@ -206,6 +221,111 @@
     (if (> n mb) (set n mb))
     (if (< n 0) (set n 0))
     (return n)))
+
+;; ------------------------------------------------------------ pending end checks (D085)
+
+(defn ^:pub pend-raw [^Ints ss ^I32 claim ^I32 off ^I32 used ^I32 items]
+  (comment "Record a pending end check (absolute): if the message ends before claim,"
+           "the buffer walk answers truncated at off with this budget used and items.")
+  (let [n (ia ss SS_NPEND)
+        at (+ (ia ss SS_PEND) (* PW n))]
+    (if (> (+ at PW) (ilen ss)) (return))
+    (iset ss at claim)
+    (iset ss (+ at 1) off)
+    (iset ss (+ at 2) used)
+    (iset ss (+ at 3) items)
+    (iset ss SS_NPEND (+ n 1))))
+
+(defn ^:pub pend-note [^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 claim ^I32 off]
+  (comment "D085: in an unknown-length session, a length or count check has just passed"
+           "against the provisional end with a claim (window-relative) beyond the"
+           "window: whether it holds depends on where the message ends, so record what"
+           "the buffer walk answers if it ends before the claim -- truncated at off,"
+           "with the budget used and the items counted NOW (the check's moment).")
+  (if (!= (ia ss SS_UNK) 1) (return))
+  (if (<= claim (blen b)) (return))
+  (let [used (- (ia s VM_BUDGET_START) (ia s VM_BUDGET))
+        items (ia s O_ITEMS)]
+    (pend-raw ss (+ claim base) (+ off base) used items)))
+
+(defn ^:pub pend-count [^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 pos ^I32 q ^I32 hi ^I32 lo ^I32 depth
+                        ^I32 pairs ^I32 end]
+  (comment "enter-container's count check (n bytes an entry, 2n a pair) as a pending"
+           "claim: only when its depth check passes first and the count fits the"
+           "provisional end (otherwise the walk refuses the same way for any end).")
+  (if (!= (ia ss SS_UNK) 1) (return))
+  (if (>= depth (ia s O_MAX_DEPTH)) (return))
+  (if (or (!= hi 0) (< lo 0)) (return))
+  (let [left (- end q)]
+    (if (== pairs 0)
+      (do (if (> lo left) (return))
+          (pend-note b s ss base (+ q lo) pos))
+      (do (if (> lo (ushr left 1)) (return))
+          (pend-note b s ss base (+ q (* 2 lo)) pos)))))
+
+(defn ^:pub ^I32 enter-pend [^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 pos ^I32 q ^I32 hi ^I32 lo ^I32 depth
+                             ^I32 pairs ^I32 end]
+  (comment "enter-container, after noting its count check as pending (pend-count).")
+  (pend-count b s ss base pos q hi lo depth pairs end)
+  (return (enter-container s pos q hi lo depth pairs end)))
+
+(defn ^:pub pend-drop [^Ints ss ^I32 known]
+  (comment "The bytes up to `known` (absolute) exist: settle the checks they cover,"
+           "keeping the rest in walk order.")
+  (let [n (ia ss SS_NPEND)
+        b0 (ia ss SS_PEND)
+        ^:mut k 0]
+    (for [^I32 i 0 n]
+      (let [at (+ b0 (* PW i))]
+        (if (> (ia ss at) known)
+          (do (if (!= k i)
+                (for [^I32 w 0 PW]
+                  (let [v (ia ss (+ at w))]
+                    (iset ss (+ (+ b0 (* PW k)) w) v))))
+              (set k (+ k 1))))))
+    (iset ss SS_NPEND k)))
+
+(defn ^:pub ^I32 key-max-claim [^Bytes b ^I32 start ^I32 end ^I32 wend]
+  (comment "D085: key-end-any refused a key (-1) inside the window; its walk would refuse"
+           "it there unless a count checked first claims past the bytes seen. The"
+           "largest count claim (array n, map 2n) on the way to the refusal, or -1"
+           "(the walk of key-end-any, reading nothing at or past wend).")
+  (let [^:mut i start
+        ^:mut rem 1
+        ^:mut mc (neg 1)]
+    (while (> rem 0)
+      (if (or (>= i end) (>= i wend)) (return mc))
+      (let [ib (u8 b i)
+            major (ushr ib 5)
+            ai (bit-and ib 31)
+            ^:mut hi 0
+            ^:mut lo ai]
+        (if (> ai 27) (return mc))
+        (let [h (head-size ai)
+              p (+ i h)]
+          (if (or (> p end) (> p wend)) (return mc))
+          (if (== ai 24) (set lo (u8 b (+ i 1))))
+          (if (== ai 25) (set lo (be16 b (+ i 1))))
+          (if (== ai 26) (set lo (be32 b (+ i 1))))
+          (if (== ai 27) (do (set hi (be32 b (+ i 1))) (set lo (be32 b (+ i 5)))))
+          (set i p)
+          (set rem (- rem 1))
+          (if (and (>= major 2) (<= major 3))
+            (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return mc))
+                (if (> (+ p lo) wend) (return mc))
+                (set i (+ p lo))))
+          (if (== major 4)
+            (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return mc))
+                (if (> (+ p lo) mc) (set mc (+ p lo)))
+                (set rem (+ rem lo))))
+          (if (== major 5)
+            (do (if (or (!= hi 0) (or (< lo 0) (> lo (ushr (- end p) 1)))) (return mc))
+                (if (> (+ p (* 2 lo)) mc) (set mc (+ p (* 2 lo))))
+                (set rem (+ rem (* 2 lo)))))
+          (if (== major 6)
+            (do (if (!= hi 0) (return mc))
+                (set rem (+ rem 1)))))))
+    (return mc)))
 
 ;; ------------------------------------------------------------ small helpers
 
@@ -495,6 +615,16 @@
       (if (== (ia ss (+ ch k)) at) (return true)))
     (return false)))
 
+(defn ^I32 pstop [^Ints ss ^I32 lvl]
+  (comment "prescan met a refusal the walk cannot get past. D085: in an unknown-length"
+           "session an enclosing container (lvl > 0) has had its count checked only"
+           "against the provisional end, so it is no whole item: it crosses (frames"
+           "note that check as pending); otherwise 1.")
+  (if (and (> lvl 0) (== (ia ss SS_UNK) 1))
+    (do (chain-put ss lvl (neg 1))
+        (return 0)))
+  (return 1))
+
 (defn ^:pub ^I32 prescan [^Bytes b ^Ints ss ^I32 base ^I32 pos ^I32 end ^I32 cut]
   (comment "May the buffer walk take the item at pos (bounded by end) from this"
            "window? 1 when every byte it can read lies before cut -- the item ends"
@@ -519,10 +649,10 @@
             ai (bit-and ib 31)
             ^:mut hi 0
             ^:mut lo ai]
-        (if (>= ai 28) (return 1))
+        (if (>= ai 28) (return (pstop ss lvl)))
         (let [h (head-size ai)
               p (+ i h)]
-          (if (> p end) (return 1))
+          (if (> p end) (return (pstop ss lvl)))
           (if (> p cut) (do (chain-put ss lvl (+ i base)) (chain-span ss pos i base) (return 0)))
           (if (== ai 24) (set lo (u8 b (+ i 1))))
           (if (== ai 25) (set lo (be16 b (+ i 1))))
@@ -532,20 +662,20 @@
             (do (set i p)
                 (set rem (- rem 1)))
             (if (<= major 3)
-              (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return 1))
+              (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return (pstop ss lvl)))
                   (if (> (+ p lo) cut) (do (chain-put ss lvl (+ i base)) (chain-span ss pos i base) (return 0)))
                   (set i (+ p lo))
                   (set rem (- rem 1)))
               (do (local ^:mut ^I32 n)
-                  (if (or (!= hi 0) (< lo 0)) (return 1))
+                  (if (or (!= hi 0) (< lo 0)) (return (pstop ss lvl)))
                   (set n lo)
-                  (if (== major 4) (if (> lo (- end p)) (return 1)))
+                  (if (== major 4) (if (> lo (- end p)) (return (pstop ss lvl))))
                   (if (== major 5)
-                    (do (if (> lo (ushr (- end p) 1)) (return 1))
+                    (do (if (> lo (ushr (- end p) 1)) (return (pstop ss lvl)))
                         (set n (* 2 lo))))
                   (if (== major 6)
                     (do (if (and (!= lo 2) (and (!= lo 3) (and (!= lo 4) (and (!= lo 40) (== (typed-size lo) 0)))))
-                          (if (not (std-allowed (ia ss SS_PROF) lo 0)) (return 1)))
+                          (if (not (std-allowed (ia ss SS_PROF) lo 0)) (return (pstop ss lvl))))
                         (set n 1)))
                   (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return 0)))
                   (iset ss (+ pst (* 2 lvl)) (+ i base))
@@ -559,6 +689,12 @@
 (defn ^:pub ^I32 cpt-at [^Ints ss ^I32 at ^I32 base]
   (iset ss SS_CPT (+ at base))
   (return 0))
+
+(defn ^I32 rstop [^Ints ss ^I32 lvl ^I32 at ^I32 base]
+  (comment "prescan-run met a refusal: the crossing point is just past it. D085: in an"
+           "unknown-length session the open levels around it cross (pstop).")
+  (if (and (> lvl 0) (== (ia ss SS_UNK) 1)) (chain-put ss lvl (neg 1)))
+  (return (cpt-at ss at base)))
 
 (defn ^:pub ^I32 prescan-run [^Bytes b ^Ints ss ^I32 base ^I32 pos ^I32 end ^I32 cut ^I32 rem0]
   (comment "The prescan over the item at pos and its rem0 - 1 following siblings"
@@ -589,10 +725,10 @@
             ai (bit-and ib 31)
             ^:mut hi 0
             ^:mut lo ai]
-        (if (>= ai 28) (return (cpt-at ss (+ i 1) base)))
+        (if (>= ai 28) (return (rstop ss lvl (+ i 1) base)))
         (let [h (head-size ai)
               p (+ i h)]
-          (if (> p end) (return (cpt-at ss (+ i 1) base)))
+          (if (> p end) (return (rstop ss lvl (+ i 1) base)))
           (if (> p cut) (do (chain-put ss lvl (+ i base)) (iset ss SS_CPT (+ i base)) (return 0)))
           (if (== ai 24) (set lo (u8 b (+ i 1))))
           (if (== ai 25) (set lo (be16 b (+ i 1))))
@@ -602,21 +738,21 @@
             (do (set i p)
                 (set rem (- rem 1)))
             (if (<= major 3)
-              (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return (cpt-at ss (+ i 1) base)))
+              (do (if (or (!= hi 0) (or (< lo 0) (> lo (- end p)))) (return (rstop ss lvl (+ i 1) base)))
                   (if (> (+ p lo) cut)
                     (do (chain-put ss lvl (+ i base)) (iset ss SS_CPT (+ i base)) (return 0)))
                   (set i (+ p lo))
                   (set rem (- rem 1)))
               (do (local ^:mut ^I32 n)
-                  (if (or (!= hi 0) (< lo 0)) (return (cpt-at ss (+ i 1) base)))
+                  (if (or (!= hi 0) (< lo 0)) (return (rstop ss lvl (+ i 1) base)))
                   (set n lo)
-                  (if (== major 4) (if (> lo (- end p)) (return (cpt-at ss (+ i 1) base))))
+                  (if (== major 4) (if (> lo (- end p)) (return (rstop ss lvl (+ i 1) base))))
                   (if (== major 5)
-                    (do (if (> lo (ushr (- end p) 1)) (return (cpt-at ss (+ i 1) base)))
+                    (do (if (> lo (ushr (- end p) 1)) (return (rstop ss lvl (+ i 1) base)))
                         (set n (* 2 lo))))
                   (if (== major 6)
                     (do (if (and (!= lo 2) (and (!= lo 3) (and (!= lo 4) (and (!= lo 40) (== (typed-size lo) 0)))))
-                          (if (not (std-allowed (ia ss SS_PROF) lo 0)) (return (cpt-at ss (+ i 1) base))))
+                          (if (not (std-allowed (ia ss SS_PROF) lo 0)) (return (rstop ss lvl (+ i 1) base))))
                         (set n 1)))
                   (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return (neg 1))))
                   (iset ss (+ pst (* 2 lvl)) (+ i base))

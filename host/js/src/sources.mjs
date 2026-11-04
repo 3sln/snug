@@ -1,5 +1,7 @@
-// Sources for profile validation (P6.1 spike, D027, architecture §17; scope per
-// the s17 review: KNOWN-LENGTH sessions only).
+// Sources for profile validation (P6.1 spike, D027, architecture §17): known-length
+// sessions, and (D085, at the end of this file) messages of unknown length in drain
+// mode -- pushScanner/pushValidator with no length, streamSource, validateStream,
+// scanStream.
 //
 //   scanBuffer(bytes, options)            a Uint8Array: the monomorphic fast path,
 //                                         the recursive generated scanner directly
@@ -46,6 +48,8 @@ import { profileFlags, codecTop } from './profiles.mjs';
 import { scanOptions, scanProfile, codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { rscanInit, rscanStep, rscanNeedOffset, rscanNeedLength, rscanPosition, rscanScratchLen,
   RS_NEED, RS_YIELD } from '../../../gen/js/snug/cbor/rscan.mjs';
+import { Program as HostProgram } from './schema.mjs';
+import { ANY_P, ANY_B } from './any-program.mjs';
 
 export class SourceError extends Error {
   constructor(code, message) { super(message); this.name = 'SourceError'; this.code = code; }
@@ -242,6 +246,7 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
  *  {state:'done'}; finalize() checks the declared length was delivered. It holds only
  *  the bytes from the scanner's current position on (bounded by what it asks for). */
 export function pushScanner(length, options = {}, scheduling = {}) {
+  if (length === undefined) return pushUnknown(scanUnknown(options, scheduling), scheduling, scanResult);
   const session = new ScanSession(length, options, scheduling);
   return pushSession(session, length, want => Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
 }
@@ -252,7 +257,152 @@ export function pushScanner(length, options = {}, scheduling = {}) {
 export function pushValidator(schema, length, rule, options = {}, scheduling = {}) {
   validateOptions(options, 'validation');
   validateOptions(scheduling, 'scheduling');
-  return pushSession(schema.session(rule, length, options, scheduling), length, want => want.keep);
+  const { failFast, ...sessionScheduling } = scheduling;
+  if (length === undefined) return pushUnknown(schema.session(rule, undefined, options, sessionScheduling), scheduling, r => r);
+  if (failFast !== undefined) throw new TypeError('failFast is for a message of unknown length.');
+  return pushSession(schema.session(rule, length, options, sessionScheduling), length, want => want.keep);
+}
+
+// ---------------------------------------------------------------- unknown length (D085)
+//
+// A message whose length is not declared: the session runs as a known-length one
+// ending at the input limit, holds every check that depends on the end, and settles
+// them at EOF (finalize/end) -- or as soon as more bytes than the limit arrive
+// (too_large) -- so verdicts are a buffer's of the same bytes. Bytes after a held
+// verdict are counted and dropped (drain). failFast answers a certain refusal at once:
+// it never accepts what the buffer refuses nor refuses what it accepts, but its code
+// may differ (the buffer would say cbor/truncated or cbor/too_large instead).
+
+/** The VM against `any` (largest limits), standing in for the scanner on an
+ *  unknown-length message: it gives the scanner's code on every input. */
+let anyProgram = null;
+function scanUnknown(options, scheduling) {
+  validateOptions(options, 'decode');
+  validateOptions(scheduling, 'scheduling');
+  anyProgram ??= new HostProgram(ANY_P, ANY_B);
+  const limits = resolveLimits(options);
+  const opts = { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'cose']),
+    top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
+    maxEntries: limits.maxEntries, maxItems: limits.maxItems };
+  return anyProgram.session(0, undefined, opts, { quantum: scheduling.quantum ?? 0 });
+}
+const pick = (o, keys) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
+function scanResult(r) {
+  if (r.ok) return true;
+  throw new SnugFault(r.reason.startsWith('cbor/') ? r.reason.slice(5) : r.reason);
+}
+
+function pushUnknown(session, scheduling, settle) {
+  const failFast = scheduling.failFast === true, limit = session.limit;
+  let buf = new Uint8Array(4096), bufBase = 0, bufLen = 0, delivered = 0;
+  let want = null, result = null, held = false;
+  const done = r => { result = r; return { state: 'done', result: r }; };
+  const final = s => done(settle(s.result));
+  const holds = () => {
+    const at = want.state === 'need' ? want.offset : want.position;
+    const need = want.state === 'need' ? want.length : 1;
+    return at >= bufBase && at + need <= bufBase + bufLen;
+  };
+  const run = () => {
+    for (;;) {
+      if (want && !holds()) return { state: 'need' };
+      want = session.step(buf.subarray(0, bufLen), bufBase);
+      if (want.state === 'done') return final(want);
+      if (want.state === 'held') {
+        if (failFast && !want.result.ok) return done(settle(want.result));
+        held = true; bufLen = 0; bufBase = delivered;
+        return { state: 'need' };
+      }
+      const keep = want.keep;
+      if (keep > bufBase) {
+        if (keep >= bufBase + bufLen) bufLen = 0;
+        else { buf.copyWithin(0, keep - bufBase, bufLen); bufLen -= keep - bufBase; }
+        bufBase = keep;
+      }
+      if (want.state === 'yield') return { state: 'yield' };
+    }
+  };
+  const settleEnd = () => {
+    let r = session.end(delivered);
+    // the walk was waiting for bytes: it goes on over what it holds, never past the end
+    while (r.state === 'yield') r = session.step(buf.subarray(0, bufLen), bufBase);
+    if (r.state !== 'done') throw new SourceError('length_mismatch', 'The session asked for bytes past the end.');
+    return final(r);
+  };
+  return {
+    feed(chunk) {
+      if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
+      if (result) return { state: 'done', result };
+      const start = delivered;
+      delivered += chunk.length;
+      // more than the input limit: too_large, whatever comes before it
+      if (delivered > limit) return settleEnd();
+      if (chunk.length === 0) return want && want.state === 'yield' ? { state: 'yield' } : { state: 'need' };  // never EOF
+      if (held || bufBase >= delivered) { if (held) bufBase = delivered; return { state: 'need' }; }
+      if (bufBase > start) chunk = chunk.subarray(bufBase - start);
+      if (bufLen + chunk.length > buf.length) {
+        const grown = new Uint8Array(Math.max(buf.length * 2, bufLen + chunk.length));
+        grown.set(buf.subarray(0, bufLen)); buf = grown;
+      }
+      buf.set(chunk, bufLen); bufLen += chunk.length;
+      if (want && want.state === 'yield') return { state: 'yield' };
+      return run();
+    },
+    resume() { return result ? { state: 'done', result } : run(); },
+    /** The end of the message (EOF): settles every pending check; answers the result. */
+    finalize() {
+      if (result) return result;
+      if (!held) { const r = run(); if (r.state === 'done') return result; }
+      return settleEnd().result;
+    },
+    end() { return this.finalize(); },
+    /** Bytes held now (the window from the session's keep on), for the bounded-memory contract. */
+    get bytesHeld() { return bufLen; },
+  };
+}
+
+/** An unknown-length source: a ReadableStream, an AsyncIterable or an Iterable of
+ *  Uint8Array chunks, read once, in order, until it ends (its end is the message's). */
+export function streamSource(input) {
+  if (input && typeof input.getReader === 'function') {
+    return Object.freeze({ async *[Symbol.asyncIterator]() {
+      const reader = input.getReader();
+      try { for (;;) { const { value, done } = await reader.read(); if (done) return; yield value; } }
+      finally { await reader.cancel().catch(() => {}); reader.releaseLock?.(); }
+    } });
+  }
+  if (input && (typeof input[Symbol.asyncIterator] === 'function' || typeof input[Symbol.iterator] === 'function'))
+    return Object.freeze({ async *[Symbol.asyncIterator]() { for await (const value of input) yield value; } });
+  throw new TypeError('streamSource takes a ReadableStream, an AsyncIterable or an Iterable of Uint8Array.');
+}
+
+async function drainSource(push, source) {
+  const src = source && typeof source.getReader === 'function' ? streamSource(source) : source;
+  if (!src || typeof src[Symbol.asyncIterator] !== 'function' && typeof src[Symbol.iterator] !== 'function')
+    throw new TypeError('a source is a streamSource(), a ReadableStream or an (Async)Iterable of Uint8Array.');
+  for await (const chunk of src) {
+    if (!(chunk instanceof Uint8Array)) throw new SourceError('bad_chunk', 'A stream chunk must be a Uint8Array.');
+    let r = push.feed(chunk);
+    while (r.state === 'yield') { await nextTurn(); r = push.resume(); }
+    if (r.state === 'done') return r.result;   // early: the rest is not read (the stream is cancelled)
+  }
+  return push.finalize();
+}
+
+/** Validate a message of unknown length from a stream against schema's rule (D085).
+ *  opts: { quantum, failFast }. Resolves Schema.validate's result. */
+export async function validateStream(schema, source, rule, options = {}, opts = {}) {
+  validateOptions(options, 'validation');
+  validateOptions(opts, 'scheduling');
+  return drainSource(pushValidator(schema, undefined, rule, options, opts), source);
+}
+
+/** Profile-check a message of unknown length from a stream (D085). Resolves true or
+ *  rejects with SnugFault (the scanner's code) / SourceError. */
+export async function scanStream(source, options = {}, opts = {}) {
+  validateOptions(options, 'decode');
+  validateOptions(opts, 'scheduling');
+  return drainSource(pushScanner(undefined, options, opts), source);
 }
 
 function pushSession(session, length, keepOf) {

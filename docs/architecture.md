@@ -841,10 +841,21 @@ W21):
   (`Content-Length`, a framing header). All existing checks that depend on the
   end (`truncated` precedence, `too_large`, `trailing`, minimum remaining
   lengths) use it, so codes are identical across sources. Delivered bytes that
-  do not match the declared length are a source failure. **Unknown-length
-  streams are out of scope** until their refusal precedence is decided (an
-  owner question: drain-to-EOF preserving codes, or a documented different
-  precedence); an empty chunk is never EOF.
+  do not match the declared length are a source failure; an empty chunk is
+  never EOF.
+* **Unknown length** (D085, D144–D146): the session runs with the input limit
+  as a provisional end. A length or count check that passes against it with a
+  claim beyond the bytes seen is recorded as a *pending check* (claim, offset,
+  budget used, items: what the buffer walk answers if the message ends before
+  the claim); the root's trailing check asks for one more byte; a verdict is
+  *held*. At EOF (or past the limit) the pending checks settle: too_large past
+  the limit, else the earliest unsatisfied check's truncated, else the held
+  verdict — or, when the walk was waiting for bytes, its ends become the real
+  one and it finishes. Codes are therefore identical to a buffer of the same
+  bytes; an opt-in fail-fast reports a held refusal at once (its code may
+  differ). Divergences can only start at a check of a crossing item (frames
+  note them) or of a byte string skipped from its head; a prescan stopping at
+  a refusal inside an item no longer makes that item "whole".
 * **Exclusive state** (W9): a live session owns its scratch arena from start
   to a terminal state, across every `await`. Programs (immutable) are shared;
   arenas come from a pool of idle ones with a bound on live sessions and on
@@ -922,7 +933,7 @@ synchronous handle, genuinely async mock handle) plus a push source with a
 declared length; the split/EOF/lifetime/interleaving gates; benchmarks (a)
 and (b). Then the VM's scratch/API/charging amendment for sessions, with
 worked executions of long `LITSET` keys, key-typeset entries and nested
-`EMBED`. Deferred: unknown-length streams, fused stream decode, remote views
+`EMBED`. Deferred: fused stream decode, remote views
 and indexes, cache/read-ahead policy, sequences, 64-bit offsets.
 
 ### 17.8 Review disposition

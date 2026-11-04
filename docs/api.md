@@ -397,8 +397,9 @@ Map comparison budget is currently internal (D073).
 
 ## Sources: `snug/sources`
 
-Schema validators and profile-only scanners support known-length handles and
-declared-length push sources. Validation builds no decoded value tree. The
+Schema validators and profile-only scanners support known-length handles,
+declared-length push sources and (D085) streams of unknown length in drain
+mode. Validation builds no decoded value tree. The
 adapters read on demand; push retention follows the session's replay needs
 and can grow with the document, bounded by its declared length.
 
@@ -426,10 +427,13 @@ with top defaulting to any and limits only lowering the compiled values.
 | `scanHandleSync(handle, options?, sourceOptions?)` | true; Promise reads refused |
 | `validateHandle(schema, handle, rule, options?, sourceOptions?)` | Promise resolving ValidationResult; sync or async reads, one in flight |
 | `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` | ValidationResult; Promise reads refused |
-| `pushValidator(schema, length, rule, options?, { quantum? }?)` | PushValidator with `feed`, `resume`, `finalize` |
+| `pushValidator(schema, length, rule, options?, { quantum?, failFast? }?)` | PushValidator with `feed`, `resume`, `finalize`; `length` undefined: unknown length (drain mode; `end()` = finalize; `failFast` allowed only then; `bytesHeld`) |
+| `streamSource(input)` | AsyncIterable over a ReadableStream, AsyncIterable or Iterable of Uint8Array (D085) |
+| `validateStream(schema, source, rule, options?, { quantum?, failFast? }?)` | Promise resolving ValidationResult for a message of unknown length: the buffer's result (drain), or with failFast a certain refusal at once (accept/refuse equal, code may differ) |
+| `scanStream(source, options?, { quantum?, failFast? }?)` | Promise resolving true / rejecting SnugFault, unknown length (the VM against `any`, D146) |
 | `bufferHandle(bytes)` | SyncHandle; owns a copy of Uint8Array or Node Buffer input; each read returns an independent copy |
 | `asyncHandle(bytes, { delay? }?)` | Handle; same snapshot ownership as bufferHandle; delay is a non-negative safe integer in milliseconds, default 0 (Promise microtask), positive delay uses a timer |
-| `pushScanner(length, options?, { quantum? }?)` | `{ feed(chunk), resume(), finalize() }` |
+| `pushScanner(length, options?, { quantum?, failFast? }?)` | `{ feed(chunk), resume(), finalize() }`; `length` undefined: unknown length (drain mode, `end()`) |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
 
@@ -443,8 +447,15 @@ in-memory helpers own independent copies, including for Node Buffer subranges;
 mutating the input or a returned read cannot change subsequent reads. Their
 handles are frozen and SharedArrayBuffer input is refused. Each custom read
 must return exactly the requested range as a Uint8Array, stable while used.
-Unknown-length streams remain pending D085; no drain/failFast option exists.
-Source decoding is unavailable. Default helper reads alone do not give the
+**Unknown length (D085):** every check that depends on the end (a length or
+count past the bytes seen, trailing bytes, `too_large`) is held, a verdict found
+earlier is held while the rest is read and dropped, and the end (stream end,
+`end()` / `finalize()`) settles them: results equal the buffer's of the same
+bytes (code, offset, path, budget, items). More bytes than `maxBytes` answer
+`cbor/too_large` at once. `failFast` answers a certain refusal at once (its
+code may be another than the buffer's `cbor/truncated` / `cbor/too_large`);
+acceptance waits for the end. Unknown-length sessions allocate their key arena
+for the input limit (`maxBytes`). Source decoding is unavailable. Default helper reads alone do not give the
 event loop a turn per read; positive quantum enables cooperative scheduling.
 Start with the [minimal schema-handle recipe](guide.md#validating-remote-objects-and-streams)
 and known-length AsyncIterable adapter before implementing custom sessions.
@@ -452,6 +463,11 @@ and known-length AsyncIterable adapter before implementing custom sessions.
 Profile `ScanSession.step` returns
 `{state:'need', offset, length}`, `{state:'yield', position}`, or
 `{state:'done'}`. Push scanners return these states without range metadata.
+`schema.session(rule, undefined, …)` is the raw unknown-length session: `step`
+may also return `{state:'held', result}` (a verdict waiting for the end), and
+`end(n)` returns `{state:'done', result}` or a `yield` to step on over the bytes
+still held; a window `[base, base + length)` asserts those bytes exist, and
+`limit` is the input limit.
 Push validators' `feed(chunk)` / `resume()` return `{state:'need'}`,
 `{state:'yield'}`, or `{state:'done', result: ValidationResult}`. Feed chunks
 in order on `need`; on `yield`, resume on a later turn before feeding more.

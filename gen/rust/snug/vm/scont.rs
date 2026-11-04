@@ -145,7 +145,7 @@ pub fn open_arr(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     }
     let lo: i32 = s[(O_LO) as usize];
     let hi: i32 = s[(O_HI) as usize];
-    let ra: i32 = enter_container(s, pos, q, hi, lo, d, 0, end);
+    let ra: i32 = enter_pend(b, s, ss, base, pos, q, hi, lo, d, 0, end);
     if ra < 0 {
         return err(ss, ra);
     }
@@ -391,7 +391,7 @@ pub fn open_darr(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     }
     let lo: i32 = s[(O_LO) as usize];
     let hi: i32 = s[(O_HI) as usize];
-    let ra: i32 = enter_container(s, pos, q, hi, lo, d, 0, end);
+    let ra: i32 = enter_pend(b, s, ss, base, pos, q, hi, lo, d, 0, end);
     if ra < 0 {
         return err(ss, ra);
     }
@@ -533,7 +533,7 @@ pub fn open_map(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8
     }
     let lo: i32 = s[(O_LO) as usize];
     let hi: i32 = s[(O_HI) as usize];
-    let rm: i32 = enter_container(s, pos, q, hi, lo, d, 1, end);
+    let rm: i32 = enter_pend(b, s, ss, base, pos, q, hi, lo, d, 1, end);
     if rm < 0 {
         return err(ss, rm);
     }
@@ -546,7 +546,7 @@ pub fn open_dmap(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     }
     let lo: i32 = s[(O_LO) as usize];
     let hi: i32 = s[(O_HI) as usize];
-    let rm: i32 = enter_container(s, pos, q, hi, lo, d, 1, end);
+    let rm: i32 = enter_pend(b, s, ss, base, pos, q, hi, lo, d, 1, end);
     if rm < 0 {
         return err(ss, rm);
     }
@@ -748,6 +748,10 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     let mut delta: i32 = 0;
     if kea >= 0 {
         klen = kea - ss[(f + F_START) as usize];
+    }
+    // D085: a key the message ended inside (vms-eof): what was copied, ending there
+    if (kea < 0) && (inka == 1) {
+        klen = ss[(f + F_KGOT) as usize];
     }
     if inka == 1 {
         kks = ka0;
@@ -1010,6 +1014,14 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     // is known only once all its heads are in the window (D124).
     if (ke < 0) && ((km > 1) && (km != 3)) {
         let kx: i32 = key_end_any(b, start, end, wend);
+        // D085: a refusal inside the key, after a count that claims past the
+        // window: the window must reach the claim first
+        if (kx == (-1)) && (ss[(SS_UNK) as usize] == 1) {
+            let mc: i32 = key_max_claim(b, start, end, wend);
+            if mc > wend {
+                return need(ss, base, start, mc - start);
+            }
+        }
         if kx < (-1) {
             let want: i32 = ((-2) - kx) - start;
             let twice: i32 = 2 * (wend - start);
@@ -1039,7 +1051,11 @@ pub fn map_next(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     return map_pair(p, pool, b, s, ss, ka, base, f, 0, ext);
 }
 pub fn map_key(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
-    // Copy the crossing key into the arena, a window at a time (D092).
+    // Copy the crossing key into the arena, a window at a time (D092). D085:
+    // F_KE -1 is a key the message ended inside -- its pair goes on over the copy.
+    if ss[(f + F_KE) as usize] < 0 {
+        return map_pair(p, pool, b, s, ss, ka, base, f, 1, ext);
+    }
     let start: i32 = ss[(f + F_START) as usize];
     let klen: i32 = ss[(f + F_KE) as usize] - start;
     let got: i32 = ss[(f + F_KGOT) as usize];
@@ -1259,6 +1275,7 @@ pub fn tag_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         if stop_h < 0 {
             return err(ss, stop_h);
         }
+        pend_note(b, s, ss, base, stop_h, q);
         let cs_h: i32 = s[(O_CSTART) as usize];
         let size_h: i32 = ss[(f + F_TSIZE) as usize];
         if ((stop_h - cs_h) % size_h) != 0 {

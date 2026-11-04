@@ -16,8 +16,8 @@
 // and key arena.
 use snug::schema::{validate_blob, BytesBlob, Options, Program, Segment};
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
-use snug::snug::vm::session::{vms_arena, vms_init, vms_need_length, vms_need_offset, vms_position, vms_step, vms_step_x,
-                               vms_words};
+use snug::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_unknown, vms_keep, vms_need_length,
+                               vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
 use snug::controls::{program_controls, Control, Controls};
 use std::io::{BufRead, Write};
 use std::sync::Arc;
@@ -39,6 +39,8 @@ fn test_controls() -> Controls {
 
 const VMS_NEED: i32 = -64;
 const VMS_YIELD: i32 = -65;
+const VMS_HELD: i32 = -67;
+const VMS_RESUME: i32 = -68;
 
 fn unhex(s: &str) -> Vec<u8> {
     if s == "-" {
@@ -134,6 +136,129 @@ fn run(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Polic
     }
 }
 
+/// D085: kin/scripts/vmsession-run.mjs `runUnknown`, the same loop: an unknown-length
+/// session never told the message's length; a need past it, a yield past it or a held
+/// verdict ends the stream (vms-eof). `ff`: a held refusal is answered at once.
+fn run_unknown(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Policy, ff: bool) -> String {
+    let n = input.len() as i32;
+    let cap = p[16].max(1);
+    let total = vms_unknown_total(p, lim);
+    let mut s = vec![0i32; vm_scratch_words(p, rule, cap) as usize];
+    vm_scratch_init(&mut s, cap);
+    let mut ss = vec![0i32; vms_words(p) as usize];
+    let mut ka = vec![0u8; vms_arena(p, lim, total).max(0) as usize];
+    let mut out = vec![0i32; 8 + 2 * 257];
+    let reg = test_controls();
+    let ext: Vec<Arc<dyn Control>> = program_controls(p, pool).iter().filter_map(|n| reg.get(n).cloned()).collect();
+    let xf = |id: i32, pl: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| -> bool {
+        ext[id as usize].check(&pl[ao as usize..(ao + al) as usize], &b[st as usize..e as usize])
+    };
+    let ci = vms_init_unknown(p, pool, rule, lim, &mut s, &mut ss, &mut ka, pol.q);
+    if ci < 0 {
+        return format!("E vms-init-unknown {}", ci);
+    }
+    let mut x: u32 = if pol.seed == 0 { 0x9e3779b9 } else { pol.seed };
+    let mut rnd = move || {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        x
+    };
+    let words = |out: &[i32]| out[..8 + 2 * out[6] as usize].iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ");
+    let limit = 200000 + 64 * n as i64;
+    let (mut off, mut len, mut steps, mut first, mut eofed, mut last_keep) = (0i32, 1i32, 0i64, true, false, 0i32);
+    loop {
+        let l = if first && pol.kind == 3 {
+            pol.k.min(n)
+        } else if pol.kind == 0 || pol.kind == 3 {
+            n - off
+        } else if pol.kind == 1 {
+            len.max(pol.w)
+        } else {
+            len.max(1 + (rnd() % pol.w as u32) as i32)
+        };
+        first = false;
+        let e = n.min(total).min(off.saturating_add(l)).max(off);
+        let win: Vec<u8> = input[off as usize..e as usize].to_vec();
+        let mut r = if ext.is_empty() {
+            vms_step(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off)
+        } else {
+            vms_step_x(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &xf)
+        };
+        steps += 1;
+        if r == VMS_HELD {
+            if ff && vms_held_code(&ss) != 0 {
+                return words(&out);
+            }
+            if eofed {
+                return "E held after vms-eof".to_string();
+            }
+            eofed = true;
+            r = vms_eof(&mut ss, &mut out, n);
+            if r < 0 {
+                return format!("E vms-eof {} after held", r);
+            }
+        }
+        if r >= 0 {
+            return words(&out);
+        }
+        if r == VMS_NEED {
+            let (no, nl) = (vms_need_offset(&ss), vms_need_length(&ss));
+            if vms_keep(&ss) > no {
+                return format!("E keep past the need offset {}", no);
+            }
+            if no < last_keep || vms_keep(&ss) < last_keep {
+                return format!("E NEED({}) before a keep already given ({})", no, last_keep);
+            }
+            last_keep = vms_keep(&ss);
+            if no + nl > n.min(total) || (n > total && no + nl >= total) {
+                if eofed {
+                    return format!("E NEED({}, {}) past the end {} after vms-eof", no, nl, n);
+                }
+                eofed = true;
+                let r2 = vms_eof(&mut ss, &mut out, n);
+                if r2 >= 0 {
+                    return words(&out);
+                }
+                if r2 != VMS_RESUME {
+                    return format!("E vms-eof {}", r2);
+                }
+            }
+            off = no;
+            len = nl;
+        } else if r == VMS_YIELD {
+            off = vms_position(&ss);
+            len = 1;
+            if off < last_keep || vms_keep(&ss) < last_keep {
+                return format!("E YIELD at {} before a keep already given ({})", off, last_keep);
+            }
+            last_keep = vms_keep(&ss);
+            if off > n {
+                if eofed {
+                    return format!("E YIELD at {} past the end {} after vms-eof", off, n);
+                }
+                eofed = true;
+                let r3 = vms_eof(&mut ss, &mut out, n);
+                if r3 >= 0 {
+                    return words(&out);
+                }
+                if r3 != VMS_RESUME {
+                    return format!("E vms-eof {}", r3);
+                }
+                off = vms_position(&ss);
+            }
+            if off >= n {
+                len = 0;
+            }
+        } else {
+            return format!("E vms-step {}", r);
+        }
+        if steps > limit {
+            return format!("E no verdict after {} steps", steps);
+        }
+    }
+}
+
 fn main() {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -157,6 +282,20 @@ fn main() {
                 let input = unhex(f[18]);
                 let (p, pool) = &progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(p, pool, rule, &lim, &input, &pol)));
+                match r {
+                    Ok(t) => writeln!(out, "{}", t).unwrap(),
+                    Err(_) => writeln!(out, "PANIC").unwrap(),
+                }
+            }
+            "ucase" => {
+                let n = |i: usize| -> i32 { f[i].parse().expect("number") };
+                let (pi, rule) = (n(1) as usize, n(2));
+                let lim: Vec<i32> = (0..10).map(|i| n(3 + i)).collect();
+                let pol = Policy { kind: n(13), w: n(14), q: n(15), seed: f[16].parse().expect("seed"), k: n(17) };
+                let ff = n(18) == 1;
+                let input = unhex(f[19]);
+                let (p, pool) = &progs[pi];
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_unknown(p, pool, rule, &lim, &input, &pol, ff)));
                 match r {
                     Ok(t) => writeln!(out, "{}", t).unwrap(),
                     Err(_) => writeln!(out, "PANIC").unwrap(),

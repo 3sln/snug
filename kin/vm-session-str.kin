@@ -38,7 +38,7 @@
             [snug.vm.leaf :refer [eval-leaf scalar-kind rx-cp rx-accepts utf8-len bits-ok]]
             [snug.vm.dead :refer [typed-bad-at]]
             [snug.vm.eval :refer [unit-of q-filter-x finish-scalar embed-kill embed-live count-matched-scalars]]
-            [snug.vm.sbase :refer [GO FW FK_TEXT FK_BSTR FK_DTEXT F_KIND F_PH F_POS F_END F_D F_FB F_CK F_NQ
+            [snug.vm.sbase :refer [pend-note GO FW FK_TEXT FK_BSTR FK_DTEXT F_KIND F_PH F_POS F_END F_D F_FB F_CK F_NQ
                                    F_CTX F_PIN F_MAJ F_CS F_STOP F_I F_CLS F_DEFER F_RXOFF F_RXCP F_BITS
                                    F_BITSOK F_EPH F_ECNQ F_SITEMS F_SMAXD F_SCOSE F_SERR F_SEQ F_TAIL
                                    F_TSTOP F_TSIZE F_TI F_TNUM MODE_ITEM MODE_VSEQ MODE_DSEQ
@@ -96,6 +96,7 @@
           lo (ia s O_LO)
           stop (take-len s pos q hi lo end)]
       (if (< stop 0) (return (err ss stop)))
+      (pend-note b s ss base stop pos)
       (if (not (charge s (c64 (- stop q)) pos)) (return (err ss (neg R_BUDGET))))
       (let [^:mut ^I32 kind FK_DTEXT]
         (if (== live 1) (set kind FK_TEXT))
@@ -286,7 +287,8 @@
           (if (< q 0) (return (err ss q)))
           (set cs q)
           (set stop (take-len s pos q (ia s O_HI) (ia s O_LO) end))
-          (if (< stop 0) (return (err ss stop)))))
+          (if (< stop 0) (return (err ss stop)))
+          (pend-note b s ss base stop pos)))
     (do (set cs cs0)
         (set stop stop0)))
   (let [f (fpush b ss ka base FK_BSTR)

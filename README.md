@@ -176,11 +176,11 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | Codec, exact integers, decimals, typed arrays, ndarrays | Implemented in JS under the current restrictive wire policy |
 | Checked views, cursor, detached subtree validation | Implemented; owned by default, borrowing is an explicit lifetime contract |
 | Typed Writer, deterministic map ordering | Implemented in JS; failures are sticky |
-| Serialised Programs and runtime-only loading | Implemented; format 1.0, digest plus structural verification |
-| Known-length handles and push sources | CDDL validation over handles and declared-length push sources implemented; unknown-length streams pending D085 |
+| Serialised Programs and runtime-only loading | Implemented; format 1.0 (1.1 for a Program using extension controls), digest plus structural verification |
+| Handles, push sources and streams | CDDL validation over known-length handles and push sources; streams of unknown length in drain mode (results equal the buffer's) with opt-in fail-fast (D085, D144–D147); JS, minimal Rust |
 | Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
 | Wire profiles | Deterministic preset (default) and Bindle preset with per-option overrides, P7.1 (D120–D127); JS and Rust |
-| Extension controls | Pending P7.2 |
+| Extension controls | Implemented (P7.2, D140–D143): registered `.name` controls decided by pure host predicates; generic `.chars`, `.unique`, `.samelen` in `snug/controls` / `snug::controls`; [guide](docs/guide.md#custom-controls) |
 | Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
 | Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
 | Runtime ≤20 KB min+gzip | Target missed in the recorded runtime measurement; P7.6 remains open |

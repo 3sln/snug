@@ -11,8 +11,9 @@ compiler, verifier, scanner and buffer VM work, with JS codec, schema API,
 checked views/cursor, Writer, profile-only source adapters and serialised
 Programs. Rust/wasm core and test hosts exist; public host coverage is less
 complete. The deterministic and Bindle wire presets (P7.1) are implemented
-in JS and Rust. Extensions, unknown-length streams, current package evidence
-in browsers/Workers and the bundle size target remain work in progress. See the [feature matrix](README.md#features-and-status).
+in JS and Rust, as are extension controls (P7.2) and unknown-length streams in
+drain mode (D085). Current package evidence in browsers/Workers and the bundle
+size target remain work in progress. See the [feature matrix](README.md#features-and-status).
 `DEVLOG.md` is the live tracker; this file is what the tracker derives from
 and changes only when a decision changes. Decisions are `D###` in `DEVLOG.md`
 and are provisional until signed off. The design is in

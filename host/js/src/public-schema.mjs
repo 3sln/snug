@@ -64,13 +64,18 @@ class VmSession {
   #host;
   constructor(host) { this.#host = host; Object.freeze(this); }
   get length() { return this.#host.length; }
+  /** An unknown-length session's input limit (more bytes is too_large); undefined otherwise. */
+  get limit() { return this.#host.limit; }
   get bytesHeld() { return this.#host.bytesHeld; }
   step(window, base) {
     bytesInput(window);
-    if (!Number.isSafeInteger(base) || base < 0 || base + window.length > this.length)
+    const bound = this.length ?? this.limit;
+    if (!Number.isSafeInteger(base) || base < 0 || base + window.length > bound)
       throw new TypeError('snug: invalid window span');
     return this.#host.step(window, base);
   }
+  /** D085: the end of an unknown-length message (n bytes). */
+  end(n) { return this.#host.end(n); }
 }
 
 export class Schema {

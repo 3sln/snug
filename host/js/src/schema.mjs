@@ -6,7 +6,8 @@
 // and the rendering of results (reason names, paths rendered from the
 // Program's key table only, §9.3).
 import { vmScratchWords, vmScratchInit, vmRuleIndex, vmValidate, vmValidateSpan, vmValidateX, vmValidateSpanX } from '../../../gen/js/snug/vm/api.mjs';
-import { vmsWords, vmsArena, vmsInit, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../../gen/js/snug/vm/session.mjs';
+import { vmsWords, vmsArena, vmsInit, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
+  vmsInitUnknown, vmsUnknownTotal, vmsEof } from '../../../gen/js/snug/vm/session.mjs';
 import { bindControls, rethrow } from './ext.mjs';
 import { codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { build } from './build.mjs';
@@ -130,7 +131,7 @@ export class Program {
 }
 
 // ---------------------------------------------------------------- sessions
-const VMS_NEED = -64, VMS_YIELD = -65;
+const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68;
 /** One resumable validation (P6.2, D027): the kin session over windows of a message of
  *  a declared length. It owns its scratch, session array and key arena from start to
  *  verdict (§17.1 W9: interleaved async sessions never share state); the Program is
@@ -139,7 +140,9 @@ const VMS_NEED = -64, VMS_YIELD = -65;
  *  Schema.validate's). `keep`: no byte before it will be asked for again. */
 export class VmSession {
   constructor(program, rule, length, opts = {}, quantum = 0) {
-    if (!Number.isSafeInteger(length) || length < 0 || length > 0x7fffffff) throw new TypeError('snug: length must be an integer in 0..2^31-1');
+    // D085: no length (undefined) is an unknown-length session (drain mode)
+    const unknown = length === undefined;
+    if (!unknown && (!Number.isSafeInteger(length) || length < 0 || length > 0x7fffffff)) throw new TypeError('snug: length must be an integer in 0..2^31-1');
     if (!Number.isSafeInteger(quantum) || quantum < 0 || quantum > 0x7fffffff) throw new TypeError('snug: quantum must be a non-negative integer');
     if (!Number.isInteger(rule) || rule < 0 || rule >= program.P[15]) throw new TypeError('snug: rule index out of range');
     const { P, B } = program;
@@ -147,11 +150,33 @@ export class VmSession {
     const limits = limitWords(opts), cap = Math.max(P[16], 1);
     this.s = new Int32Array(vmScratchWords(P, rule, cap)); vmScratchInit(this.s, cap);
     this.ss = new Int32Array(vmsWords(P));
-    this.ka = new Uint8Array(vmsArena(P, limits, length));
     this.out = new Int32Array(8 + 2 * 257);
-    const c = vmsInit(P, B, rule, limits, this.s, this.ss, this.ka, length, quantum);
+    let c;
+    if (unknown) {
+      // the key arena of an unknown-length session is sized for the input limit
+      this.limit = vmsUnknownTotal(P, limits);
+      this.ka = new Uint8Array(vmsArena(P, limits, this.limit));
+      c = vmsInitUnknown(P, B, rule, limits, this.s, this.ss, this.ka, quantum);
+    } else {
+      this.ka = new Uint8Array(vmsArena(P, limits, length));
+      c = vmsInit(P, B, rule, limits, this.s, this.ss, this.ka, length, quantum);
+    }
     if (c < 0) throw new Error(`snug: vms-init answered ${c}`);
     this.busy = false; this.verdict = null;
+  }
+  /** D085, an unknown-length session: the message ended after `n` bytes (or passed the
+   *  input limit `limit`: any n above it). Answers {state: 'done', result}, or
+   *  {state: 'yield', position, keep} when the walk must go on over the bytes from
+   *  `position` to n (step again; it never asks past n). */
+  end(n) {
+    if (this.verdict) return this.verdict;
+    if (this.length !== undefined) throw new TypeError('snug: end() is for a session of unknown length');
+    if (!Number.isSafeInteger(n) || n < 0) throw new TypeError('snug: end(n) takes the byte count');
+    const r = vmsEof(this.ss, this.out, Math.min(n, 0x7fffffff));
+    if (r === VMS_RESUME) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
+    if (r < 0) throw new Error(`snug: vms-eof answered ${r}`);
+    this.verdict = { state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
+    return this.verdict;
   }
   /** Bytes this session holds beyond the Program (its exclusive arrays). */
   get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length) + this.ka.length; }
@@ -171,6 +196,8 @@ export class VmSession {
     try { rethrow(x); } catch (e) { this.dead = e; throw e; }
     if (r === VMS_NEED) return { state: 'need', offset: vmsNeedOffset(this.ss), length: vmsNeedLength(this.ss), keep: vmsKeep(this.ss) };
     if (r === VMS_YIELD) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
+    // D085: a verdict waiting for the end of an unknown-length message (end(n) settles it)
+    if (r === VMS_HELD) return { state: 'held', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
     if (r < 0) throw new Error(`snug: vms-step answered ${r}`);
     this.verdict = { state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
     return this.verdict;

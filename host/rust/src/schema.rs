@@ -253,11 +253,13 @@ pub fn validate_at(prog: &Program, rule: i32, bytes: &[u8], start: i32, end: i32
 
 // ---------------------------------------------------------------- sessions (P6.2)
 
-use crate::snug::vm::session::{vms_arena, vms_init, vms_keep, vms_need_length, vms_need_offset, vms_position, vms_step,
-                               vms_step_x, vms_words};
+use crate::snug::vm::session::{vms_arena, vms_eof, vms_init, vms_init_unknown, vms_keep, vms_need_length,
+                               vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
 
 const VMS_NEED: i32 = -64;
 const VMS_YIELD: i32 = -65;
+const VMS_HELD: i32 = -67;
+const VMS_RESUME: i32 = -68;
 
 /// What one [`Session::step`] answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,6 +270,10 @@ pub enum Step {
     Yield { position: i32, keep: i32 },
     /// The verdict, as [`validate`]'s.
     Done(Result<(), Failure>),
+    /// D085, an unknown-length session: this verdict waits for the end
+    /// ([`Session::end`]); an `Err` is certainly a refusal (the final code may be
+    /// `cbor/truncated` or `cbor/too_large` instead), an `Ok` may still become one.
+    Held(Result<(), Failure>),
 }
 
 /// A resumable validation (architecture §17, P6.2) of one message of a declared
@@ -296,6 +302,42 @@ impl<'p> Session<'p> {
         assert!(c >= 0, "snug: vms-init answered {} for a verified Program", c);
         Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
     }
+    /// D085: a session over a message of UNKNOWN length (drain mode). Step it as a
+    /// known-length one; [`Step::Held`] is a verdict waiting for the end; call
+    /// [`Session::end`] with the byte count once the source is exhausted (or as soon
+    /// as it passes the input limit). Verdicts equal a buffer's of the same bytes.
+    pub fn new_unknown(prog: &'p Program, rule: i32, opts: &Options, quantum: i32) -> Session<'p> {
+        let lim = opts.words();
+        let cap = prog.p[16].max(1);
+        let mut s = vec![0i32; vm_scratch_words(&prog.p, rule, cap) as usize];
+        vm_scratch_init(&mut s, cap);
+        let mut ss = vec![0i32; vms_words(&prog.p) as usize];
+        let total = vms_unknown_total(&prog.p, &lim);
+        let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
+        let c = vms_init_unknown(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
+        assert!(c >= 0, "snug: vms-init-unknown answered {} for a verified Program", c);
+        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
+    }
+    /// The input limit of an unknown-length session: more bytes than this is `too_large`.
+    pub fn limit(&self) -> usize {
+        self.ss[1].max(0) as usize
+    }
+    /// D085: the message ended after `n` bytes (any `n` above [`Session::limit`]
+    /// once it passed it). Answers the verdict, or a [`Step::Yield`] when the walk
+    /// must go on over the bytes from `position` to `n` (step again).
+    pub fn end(&mut self, n: usize) -> Step {
+        if let Some(d) = &self.done {
+            return Step::Done(d.clone());
+        }
+        let r = vms_eof(&mut self.ss, &mut self.out, n.min(i32::MAX as usize) as i32);
+        if r == VMS_RESUME {
+            return Step::Yield { position: vms_position(&self.ss), keep: vms_keep(&self.ss) };
+        }
+        assert!(r >= 0, "snug: vms-eof answered {}", r);
+        let d = result(self.prog, &self.out);
+        self.done = Some(d.clone());
+        Step::Done(d)
+    }
     /// Run over `window`, the message's bytes from `base`.
     pub fn step(&mut self, window: &[u8], base: i32) -> Step {
         if let Some(d) = &self.done {
@@ -313,6 +355,9 @@ impl<'p> Session<'p> {
         }
         if r == VMS_YIELD {
             return Step::Yield { position: vms_position(&self.ss), keep: vms_keep(&self.ss) };
+        }
+        if r == VMS_HELD {
+            return Step::Held(result(self.prog, &self.out));
         }
         assert!(r >= 0, "snug: vms-step answered {}", r);
         let d = result(self.prog, &self.out);
@@ -380,6 +425,101 @@ pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options,
                 at = position as usize;
                 need = 1;
             }
+            Step::Held(d) => return Ok(d),
         }
+    }
+}
+
+/// D085: validate a message of unknown length read from `reader` until EOF,
+/// holding at most what the session asks for (plus `chunk`). Drain mode: the
+/// verdict equals the buffer's of the same bytes; with `fail_fast` a certain
+/// refusal is answered at once (its code may then differ: the buffer might say
+/// `cbor/truncated` or `cbor/too_large`). Transport errors are `SourceError::Read`.
+pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read, opts: &Options, chunk: usize,
+                       quantum: i32, fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
+    let mut session = Session::new_unknown(prog, rule, opts, quantum);
+    let limit = session.limit();
+    let mut src = Stream { reader, tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0, delivered: 0, eof: false };
+    let mut step = session.step(&src.buf, 0);
+    loop {
+        // what the session wants: [at, at + len)
+        let (at, len) = match step {
+            Step::Done(d) => return Ok(d),
+            Step::Held(d) => {
+                if fail_fast && d.is_err() {
+                    return Ok(d);
+                }
+                // drain: the verdict waits for the end (or the input limit)
+                while !src.eof && src.delivered <= limit {
+                    let d = src.delivered;
+                    src.drop_to(d);
+                    src.read()?;
+                }
+                step = session.end(src.delivered);
+                continue;
+            }
+            Step::Need { offset, len, keep } => {
+                src.drop_to(keep as usize);
+                (offset as usize, len as usize)
+            }
+            Step::Yield { position, keep } => {
+                src.drop_to(keep as usize);
+                (position as usize, 1)
+            }
+        };
+        while !src.eof && src.delivered <= limit && src.base + src.buf.len() < at + len {
+            src.read()?;
+        }
+        if src.delivered > limit || src.base + src.buf.len() < at + len {
+            // past the input limit (too_large), or the message ended before what is asked
+            step = session.end(src.delivered);
+            if let Step::Yield { .. } = step {
+                step = session.step(&src.buf, src.base as i32);
+            }
+        } else {
+            step = session.step(&src.buf, src.base as i32);
+        }
+    }
+}
+
+/// A forward-only byte source for [`validate_reader`]: the bytes from `base` on.
+struct Stream<'r> {
+    reader: &'r mut dyn std::io::Read,
+    tmp: Vec<u8>,
+    buf: Vec<u8>,
+    base: usize,
+    delivered: usize,
+    eof: bool,
+}
+impl Stream<'_> {
+    /// Drop what precedes `keep` (it may lie ahead of what arrived: a skipped byte string).
+    fn drop_to(&mut self, keep: usize) {
+        let keep = keep.max(self.base);
+        let k = (keep - self.base).min(self.buf.len());
+        self.buf.drain(..k);
+        self.base += k;
+        if keep > self.base {
+            self.base = keep;
+        }
+    }
+    fn read(&mut self) -> Result<(), SourceError> {
+        let got = loop {
+            match self.reader.read(&mut self.tmp) {
+                Ok(n) => break n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err(SourceError::Read),
+            }
+        };
+        if got == 0 {
+            self.eof = true;
+            return Ok(());
+        }
+        let start = self.delivered;
+        self.delivered += got;
+        if self.delivered > self.base {
+            let from = self.base.saturating_sub(start);
+            self.buf.extend_from_slice(&self.tmp[from..got]);
+        }
+        Ok(())
     }
 }

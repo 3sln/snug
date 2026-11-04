@@ -62,11 +62,38 @@ pub fn vms_init(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32]
     ss[(SS_PSTK) as usize] = SS_HDR + (nf * FW);
     ss[(SS_PCAP) as usize] = nf;
     ss[(SS_CHAIN) as usize] = (SS_HDR + (nf * FW)) + (2 * nf);
+    ss[(SS_PEND) as usize] = (SS_HDR + (nf * FW)) + (3 * nf);
     ss[(SS_CHN) as usize] = -1;
     ss[(SS_ATOP) as usize] = 0;
     ss[(SS_ABYTES) as usize] = ka.len() as i32;
     ss[(SS_PROF) as usize] = s[(O_PROFILE) as usize];
     return 0;
+}
+pub fn vms_unknown_total(p: &[i32], limits: &[i32]) -> i32 {
+    // D085: the provisional end of an unknown-length session -- the effective input
+    // limit (more bytes than that is too_large); size its key arena for it.
+    return lim(limits, 2, p[(H_LIM_INPUT) as usize]);
+}
+pub fn vms_init_unknown(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], quantum: i32) -> i32 {
+    // D085: a session over a message of UNKNOWN length (drain mode). It runs as
+    // a known-length session ending at the input limit, but every check that
+    // depends on the end is held: a length or count beyond the bytes seen is a
+    // pending check, a verdict is held (vms-step answers VMS_HELD, out filled),
+    // and vms-eof(n) settles both once the end is known -- so codes, offsets,
+    // budget and items are a buffer's of the same bytes. ka: vms-arena bytes for
+    // vms-unknown-total. Results as vms-init's.
+    let r: i32 = vms_init(p, pool, rule, limits, s, ss, ka, vms_unknown_total(p, limits), quantum);
+    if r < 0 {
+        return r;
+    }
+    ss[(SS_UNK) as usize] = 1;
+    return 0;
+}
+pub fn vms_held_code(ss: &[i32]) -> i32 {
+    // D085: after VMS_HELD, the held verdict's code (out holds it). A nonzero one
+    // is certainly a refusal of the whole message, though the buffer's code may
+    // then be truncated or too_large instead (fail-fast reports it at once).
+    return ss[(SS_CODE) as usize];
 }
 pub fn vms_need_offset(ss: &[i32]) -> i32 {
     return ss[(SS_NEED_OFF) as usize];
@@ -87,13 +114,21 @@ pub fn vms_keep(ss: &[i32]) -> i32 {
 pub fn vms_steps(ss: &[i32]) -> i32 {
     return ss[(SS_STEPS) as usize];
 }
+pub(crate) fn settle(ss: &mut [i32]) {
+    // The verdict is in out: done, or held while an unknown end is (D085).
+    if ss[(SS_UNK) as usize] == 1 {
+        ss[(SS_PH) as usize] = PH_HELD;
+    } else {
+        ss[(SS_PH) as usize] = PH_DONE;
+    }
+}
 pub(crate) fn fin(s: &mut [i32], ss: &mut [i32], out: &mut [i32], base: i32, code: i32, sub: i32, off: i32) -> i32 {
     // The verdict: the scratch back to absolute offsets, out filled (off is
     // window-relative), the session done.
     rebase(s, base);
     vm_output(s, out, code, sub, off + base);
     ss[(SS_CODE) as usize] = code;
-    ss[(SS_PH) as usize] = PH_DONE;
+    settle(ss);
     return FIN;
 }
 pub(crate) fn fin_bad(s: &mut [i32], ss: &mut [i32], base: i32) -> i32 {
@@ -155,7 +190,7 @@ pub(crate) fn doc_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out:
     ss[(SS_PH) as usize] = PH_ITEM;
     return GO;
 }
-pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32], base: i32) -> i32 {
+pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32], base: i32, wend: i32) -> i32 {
     // vm-run's end: a code, trailing bytes, else the root's typeset test and
     // the witness.
     let r: i32 = ss[(SS_RET) as usize];
@@ -171,6 +206,15 @@ pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32]
     if r < 0 {
         let ep: i32 = s[(O_ERR_POS) as usize];
         return fin(s, ss, out, base, -r, 0, ep);
+    }
+    // D085: with the end unknown, a byte after the root is trailing; with none
+    // in the window yet, ask for one -- vms-eof tells it is the end.
+    if (ss[(SS_UNK) as usize] == 1) && (r != n) {
+        if (r - base) < wend {
+            fail(s, r - base, CODE_TRAILING);
+            return fin(s, ss, out, base, CODE_TRAILING, 0, r - base);
+        }
+        return need(ss, base, r - base, 1);
     }
     if r != n {
         fail(s, r - base, CODE_TRAILING);
@@ -199,8 +243,84 @@ pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32]
     rebase(s, base);
     let code: i32 = vm_witness_output(s, out);
     ss[(SS_CODE) as usize] = code;
-    ss[(SS_PH) as usize] = PH_DONE;
+    settle(ss);
     return FIN;
+}
+pub(crate) fn bstr_claim(b: &[u8], s: &mut [i32], pos: i32, end: i32) -> i32 {
+    // D085: the content end the byte string's head at pos (in the window) claims,
+    // when the walk's take-len passes it against the provisional end, else -1.
+    // Touches only O_HI/O_LO/O_ERR_POS, which the walk then sets again.
+    if (pos >= end) || (pos >= (b.len() as i32)) {
+        return -1;
+    }
+    let ai: i32 = (b[(pos) as usize] as i32) & 31;
+    let mut q: i32 = pos + 1;
+    let mut hi: i32 = 0;
+    let mut lo: i32 = ai;
+    if ai > 27 {
+        return -1;
+    }
+    if (pos + head_size(ai)) > (b.len() as i32) {
+        return -1;
+    }
+    if (i32::cast_unsigned(b[(pos) as usize] as i32) >> 5).cast_signed() != 2 {
+        return -1;
+    }
+    if ai >= 24 {
+        q = read_arg(b, s, pos, ai, end);
+        if q < 0 {
+            return -1;
+        }
+        hi = s[(O_HI) as usize];
+        lo = s[(O_LO) as usize];
+    }
+    if (hi != 0) || (lo < 0) {
+        return -1;
+    }
+    if lo > (end - q) {
+        return -1;
+    }
+    return q + lo;
+}
+pub(crate) fn skip_bstr(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, pos: i32, hp: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
+    // D085: a byte string the walk takes from its head alone (no leaf reads its
+    // content), in an unknown-length session: as the buffer walk, plus the
+    // pending check of its length when its content passes the window. The walk's
+    // prologue (visit, count, head) comes first: the check is reached exactly
+    // when the visit's unit is there and the item count stays in its limit.
+    // hp: the byte string's head -- pos, or pos + 1 for a bignum's content.
+    let claim: i32 = bstr_claim(b, s, hp, end);
+    let used0: i32 = s[(VM_BUDGET_START) as usize] - s[(VM_BUDGET) as usize];
+    let items0: i32 = s[(O_ITEMS) as usize];
+    let reach: bool = ((s[(VM_BUDGET) as usize] >= 1) && ((items0 + 1) <= s[(O_MAX_ITEMS) as usize])) && ((hp == pos) || (d < s[(O_MAX_DEPTH) as usize]));
+    let r: i32;
+    if (claim > (b.len() as i32)) && ((nq > 0) && (hp != pos)) {
+        // a live bignum: its tag's filter and number tests come first, so take
+        // the check's moment from a trial walk ending at the window (it stops at
+        // the content's length, truncated), then undo what the trial changed
+        // (the query flags it sets are set again alike)
+        let bud: i32 = s[(VM_BUDGET) as usize];
+        let vpos: i32 = s[(VM_POS) as usize];
+        let epos: i32 = s[(O_ERR_POS) as usize];
+        let tr: i32 = eval_item(p, pool, b, s, pos, d, fb, ck, nq, b.len() as i32, ctx, ext);
+        if (tr == (-CODE_TRUNCATED)) && (s[(O_ERR_POS) as usize] == hp) {
+            pend_raw(ss, claim + base, hp + base, s[(VM_BUDGET_START) as usize] - s[(VM_BUDGET) as usize], s[(O_ITEMS) as usize]);
+        }
+        s[(VM_BUDGET) as usize] = bud;
+        s[(VM_POS) as usize] = vpos;
+        s[(O_ERR_POS) as usize] = epos;
+        s[(O_ITEMS) as usize] = items0;
+        return ret(ss, base, eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext));
+    }
+    if nq > 0 {
+        r = eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext);
+    } else {
+        r = dead_item(b, s, pos, d, end);
+    }
+    if reach && (claim > (b.len() as i32)) {
+        pend_raw(ss, claim + base, hp + base, used0 + 1, items0 + 1);
+    }
+    return ret(ss, base, r);
 }
 pub(crate) fn ext_need(p: &[i32], s: &[i32], fb: i32, nq: i32) -> i32 {
     // D140: the largest maximum item size of the EXT leaves in the query list
@@ -334,7 +454,7 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
         }
         direct = 1;
     }
-    if (direct == 0) && ((major == 6) && ((nq == 0) && (ai == 24))) {
+    if (direct == 0) && ((major == 6) && (((nq == 0) && (ai == 24)) && (ss[(SS_UNK) as usize] != 1))) {
         let tn: i32 = tag_number(b, pos);
         let x: i32 = pos + 2;
         if (typed_size(tn) > 0) && (tn < 84) {
@@ -430,6 +550,13 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
         }
     }
     progress(ss, 1);
+    if (direct == 1) && ((major == 2) && (ss[(SS_UNK) as usize] == 1)) {
+        return skip_bstr(p, pool, b, s, ss, base, pos, pos, d, fb, ck, nq, end, ctx, ext);
+    }
+    // D085: a bignum decided from its content's head (big-req) claims its content too
+    if (direct == 1) && (((major == 6) && ((ib == 194) || (ib == 195))) && (ss[(SS_UNK) as usize] == 1)) {
+        return skip_bstr(p, pool, b, s, ss, base, pos, pos + 1, d, fb, ck, nq, end, ctx, ext);
+    }
     if direct == 1 {
         if nq > 0 {
             return ret(ss, base, eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext));
@@ -456,7 +583,7 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     }
     return open_tag(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx);
 }
-pub(crate) fn deliver(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out: &mut [i32], base: i32) -> i32 {
+pub(crate) fn deliver(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out: &mut [i32], base: i32, wend: i32) -> i32 {
     // An item returned (SS_RET): to the top frame, or the root's end. A
     // negated code unwinds frame by frame, as every caller of the buffer walk
     // returns it at once, except that a byte string running an EMBED
@@ -464,7 +591,7 @@ pub(crate) fn deliver(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out: &
     let sp: i32 = ss[(SS_SP) as usize];
     let r: i32 = ss[(SS_RET) as usize];
     if sp == 0 {
-        return root_end(p, s, ss, out, base);
+        return root_end(p, s, ss, out, base, wend);
     }
     let f: i32 = ftop(ss);
     let kind: i32 = ss[(f + F_KIND) as usize];
@@ -543,8 +670,14 @@ pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32
     if ss[(SS_PH) as usize] == PH_DONE {
         return ss[(SS_CODE) as usize];
     }
+    if ss[(SS_PH) as usize] == PH_HELD {
+        return VMS_HELD;
+    }
     if base < 0 {
         return -1;
+    }
+    if ss[(SS_UNK) as usize] == 1 {
+        pend_drop(ss, base + (b.len() as i32));
     }
     let wend: i32 = b.len() as i32;
     let q: i32 = ss[(SS_QUANTUM) as usize];
@@ -572,7 +705,7 @@ pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32
         if ph == PH_ITEM {
             r = item_begin(p, pool, b, s, ss, ka, base, wend, ext);
         } else if ph == PH_RET {
-            r = deliver(p, b, s, ss, out, base);
+            r = deliver(p, b, s, ss, out, base, wend);
         } else if ph == PH_FRAME {
             r = frame_run(p, pool, b, s, ss, ka, base, wend, ext);
         } else if ph == PH_START {
@@ -581,6 +714,9 @@ pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32
             return ss[(SS_CODE) as usize];
         }
         if r == FIN {
+            if ss[(SS_PH) as usize] == PH_HELD {
+                return VMS_HELD;
+            }
             return ss[(SS_CODE) as usize];
         }
         if suspended(r) {
@@ -594,4 +730,73 @@ pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32
 pub fn vms_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32) -> i32 {
     // vms-step-x with no extension controls (D140).
     return vms_step_x(p, pool, b, s, ss, ka, out, base, &|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false);
+}
+pub fn vms_eof(ss: &mut [i32], out: &mut [i32], n: i32) -> i32 {
+    // D085: the message of an unknown-length session ended after n bytes (or has
+    // passed the input limit: n is then any count above it). Settles what was
+    // pending: too_large past the limit; else the earliest check whose claim n
+    // does not cover (truncated, as the buffer walk answers there); else a held
+    // verdict stands. Answers the code (out filled), or VMS_RESUME when the walk
+    // was waiting for bytes: the ends it carries become n -- step again over the
+    // bytes from vms-keep to n, and it finishes without asking past n.
+    if (out.len() as i32) < 8 {
+        return -4;
+    }
+    if ss[(SS_PH) as usize] == PH_DONE {
+        return ss[(SS_CODE) as usize];
+    }
+    if ss[(SS_UNK) as usize] != 1 {
+        return -1;
+    }
+    let total: i32 = ss[(SS_TOTAL) as usize];
+    if (n < 0) || (n > total) {
+        for z in 0..8 {
+            out[(z) as usize] = 0;
+        }
+        out[(0) as usize] = CODE_TOO_LARGE;
+        ss[(SS_CODE) as usize] = CODE_TOO_LARGE;
+        ss[(SS_PH) as usize] = PH_DONE;
+        return CODE_TOO_LARGE;
+    }
+    pend_drop(ss, n);
+    if ss[(SS_NPEND) as usize] > 0 {
+        let at: i32 = ss[(SS_PEND) as usize];
+        for z2 in 0..8 {
+            out[(z2) as usize] = 0;
+        }
+        out[(0) as usize] = CODE_TRUNCATED;
+        out[(2) as usize] = ss[(at + 1) as usize];
+        out[(3) as usize] = ss[(at + 2) as usize];
+        out[(4) as usize] = ss[(at + 3) as usize];
+        ss[(SS_CODE) as usize] = CODE_TRUNCATED;
+        ss[(SS_PH) as usize] = PH_DONE;
+        return CODE_TRUNCATED;
+    }
+    if ss[(SS_PH) as usize] == PH_HELD {
+        ss[(SS_PH) as usize] = PH_DONE;
+        return ss[(SS_CODE) as usize];
+    }
+    // waiting for bytes: every end that was the provisional one is now n
+    let sp: i32 = ss[(SS_SP) as usize];
+    for i in 0..sp {
+        let fi: i32 = fbase(ss, i);
+        if ss[(fi + F_END) as usize] == total {
+            ss[(fi + F_END) as usize] = n;
+        }
+    }
+    if ss[(IT_END) as usize] == total {
+        ss[(IT_END) as usize] = n;
+    }
+    // a crossing map key being copied past n: its pair goes on over the copy
+    // (head included), ending at n -- the buffer walk's key past its end
+    if sp > 0 {
+        let f: i32 = ftop(ss);
+        let kind: i32 = ss[(f + F_KIND) as usize];
+        if ((kind == FK_MAP) || (kind == FK_DMAP)) && ((ss[(f + F_PH) as usize] == M_KEY) && (ss[(f + F_KE) as usize] > n)) {
+            ss[(f + F_KE) as usize] = -1;
+        }
+    }
+    ss[(SS_TOTAL) as usize] = n;
+    ss[(SS_UNK) as usize] = 2;
+    return VMS_RESUME;
 }

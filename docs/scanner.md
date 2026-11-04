@@ -240,3 +240,10 @@ but walked through the windows (`PH_KSKIP`, 11) so the key arena receives it.
 **Yields**: one unit per item and per byte of text or typed-array content
 scanned (at least one whole UTF-8 sequence per step, so any quantum
 progresses); yield points are item starts and sequence / element boundaries.
+
+**Unknown length (D085, D146).** `pushScanner(undefined, …)` and `scanStream`
+do not use this scanner: they run the validator VM's drain-mode session
+against a built-in `r = any` Program compiled with the largest limits
+(`host/js/src/any-program.mjs`), which gives this scanner's code, offset and
+items on every input (`bb vm-test`, profile identity). The resumable scanner
+stays known-length only.

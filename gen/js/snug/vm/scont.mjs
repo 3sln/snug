@@ -2,7 +2,7 @@
 // source: snug.vm.scont
 
 import { CODE_DECIMAL, CODE_DEPTH, CODE_KEY_TYPE, CODE_NDARRAY, CODE_TAG, CODE_TRUNCATED, CODE_TYPED_ARRAY, O_COSE, O_CSTART, O_ERR_POS, O_HI, O_LO, O_MAX_DEPTH, O_PROFILE } from '../cbor/codes.mjs';
-import { bytesContent, enterContainer, fail, headSize } from '../cbor/head.mjs';
+import { bytesContent, fail, headSize } from '../cbor/head.mjs';
 import { keyEndAny } from '../cbor/keys.mjs';
 import { keyLabel, keyPeek } from '../cbor/scan.mjs';
 import { stdAllowed } from '../cbor/stdtags.mjs';
@@ -14,7 +14,7 @@ import { arrayStreak, bstrTail, countMatched, countPending, evalItem, finishComb
 import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, H_S_LEAVES, K_ARRAY, K_INT, K_MAP, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_INCONSISTENT, R_MISSING, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1 } from './layout.mjs';
 import { cmpU64, evalScalars, scalarKind } from './leaf.mjs';
 import { blockMt, blockNamed, candVts, candVtsMt, keyPhaseStruct, keySearch, keySpanEnd, leafMap, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, simpleStruct, updateStruct } from './map.mjs';
-import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLO, F_KM, F_MCNQ, F_N, F_NALIVE, F_NAMED, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VNQ, GO, IT_PAIR, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, bstrReads, call, cont, cutYield, done, ensure, err, fbase, fidx, fitsKnown, fpush, imin, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
+import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLO, F_KM, F_MCNQ, F_N, F_NALIVE, F_NAMED, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VNQ, GO, IT_PAIR, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, SS_UNK, bstrReads, call, cont, cutYield, done, ensure, enterPend, err, fbase, fidx, fitsKnown, fpush, imin, keyMaxClaim, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, pendNote, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
 import { frameItem, openBstr, prologue, typedScan } from './sstr.mjs';
 
 export const F_SLEAF = 24;
@@ -167,7 +167,7 @@ export function openArr(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx, pai
     }
     const lo = s[O_LO];
     const hi = s[O_HI];
-    const ra = enterContainer(s, pos, q, hi, lo, d, 0, end);
+    const ra = enterPend(b, s, ss, base, pos, q, hi, lo, d, 0, end);
     if (ra < 0) {
         return err(ss, ra);
     }
@@ -417,7 +417,7 @@ export function openDarr(p, b, s, ss, ka, base, pos, d, end, pair) {
     }
     const lo = s[O_LO];
     const hi = s[O_HI];
-    const ra = enterContainer(s, pos, q, hi, lo, d, 0, end);
+    const ra = enterPend(b, s, ss, base, pos, q, hi, lo, d, 0, end);
     if (ra < 0) {
         return err(ss, ra);
     }
@@ -564,7 +564,7 @@ export function openMap(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx) {
     }
     const lo = s[O_LO];
     const hi = s[O_HI];
-    const rm = enterContainer(s, pos, q, hi, lo, d, 1, end);
+    const rm = enterPend(b, s, ss, base, pos, q, hi, lo, d, 1, end);
     if (rm < 0) {
         return err(ss, rm);
     }
@@ -578,7 +578,7 @@ export function openDmap(p, b, s, ss, ka, base, pos, d, end) {
     }
     const lo = s[O_LO];
     const hi = s[O_HI];
-    const rm = enterContainer(s, pos, q, hi, lo, d, 1, end);
+    const rm = enterPend(b, s, ss, base, pos, q, hi, lo, d, 1, end);
     if (rm < 0) {
         return err(ss, rm);
     }
@@ -784,6 +784,10 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka, ext) {
     let delta = 0;
     if (kea >= 0) {
         klen = kea - ss[f + F_START];
+    }
+    // D085: a key the message ended inside (vms-eof): what was copied, ending there
+    if ((kea < 0) && (inka === 1)) {
+        klen = ss[f + F_KGOT];
     }
     if (inka === 1) {
         kks = ka0;
@@ -1047,6 +1051,14 @@ export function mapNext(p, pool, b, s, ss, ka, base, wend, f, ext) {
     // is known only once all its heads are in the window (D124).
     if ((ke < 0) && ((km > 1) && (km !== 3))) {
         const kx = keyEndAny(b, start, end, wend);
+        // D085: a refusal inside the key, after a count that claims past the
+        // window: the window must reach the claim first
+        if ((kx === (-1)) && (ss[SS_UNK] === 1)) {
+            const mc = keyMaxClaim(b, start, end, wend);
+            if (mc > wend) {
+                return need(ss, base, start, mc - start);
+            }
+        }
         if (kx < (-1)) {
             const want = ((-2) - kx) - start;
             const twice = 2 * (wend - start);
@@ -1077,7 +1089,11 @@ export function mapNext(p, pool, b, s, ss, ka, base, wend, f, ext) {
 }
 
 export function mapKey(p, pool, b, s, ss, ka, base, wend, f, ext) {
-    // Copy the crossing key into the arena, a window at a time (D092).
+    // Copy the crossing key into the arena, a window at a time (D092). D085:
+    // F_KE -1 is a key the message ended inside -- its pair goes on over the copy.
+    if (ss[f + F_KE] < 0) {
+        return mapPair(p, pool, b, s, ss, ka, base, f, 1, ext);
+    }
     const start = ss[f + F_START];
     const klen = ss[f + F_KE] - start;
     const got = ss[f + F_KGOT];
@@ -1304,6 +1320,7 @@ export function tagRun(p, pool, b, s, ss, ka, base, wend, f, ext) {
         if (stopH < 0) {
             return err(ss, stopH);
         }
+        pendNote(b, s, ss, base, stopH, q);
         const csH = s[O_CSTART];
         const sizeH = ss[f + F_TSIZE];
         if ((((stopH - csH) % sizeH) | 0) !== 0) {

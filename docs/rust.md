@@ -180,8 +180,30 @@ validation verdicts. Use a positive chunk size; needs may exceed that size.
 A positive quantum creates VM yields, which this synchronous driver resumes
 immediately. The driver does not buffer the entire document as an API shortcut.
 Pin a remote object's version in the Blob implementation and return exactly
-the requested bytes on every read. Unknown-length sources, async adapters,
-source decode, view directories and Writer sorted-key mode remain unavailable.
+the requested bytes on every read. Async adapters, source decode, view
+directories and Writer sorted-key mode remain unavailable.
+
+A message of **unknown length** (D085) is read from any `std::io::Read` until
+EOF in drain mode -- the verdict equals the buffer's of the same bytes:
+
+```rust
+use snug::{Schema, CompileOptions, ValidationOptions};
+let schema = Schema::compile("r = [* uint]", &CompileOptions::default())?;
+let mut stream: &[u8] = &[0x83, 1, 2, 3];               // any std::io::Read
+let verdict = schema.validate_reader(&mut stream, "r", &ValidationOptions::default(), 4096, false)?;
+assert!(verdict.is_ok());
+let mut cut: &[u8] = &[0x83, 1, 2];                       // ends inside the array
+let truncated = schema.validate_reader(&mut cut, "r", &ValidationOptions::default(), 4096, false)?;
+assert_eq!(truncated.unwrap_err().reason, "cbor/truncated");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The last argument is fail-fast: a certain refusal is answered at once (its
+code may then be another than the buffer's `cbor/truncated` / `cbor/too_large`;
+accept and refuse never differ). Only what the session asks for is held, plus a
+chunk; the session's key arena is sized for the input limit. The low-level
+`schema::Session::new_unknown`, `Step::Held` and `Session::end(n)` expose the
+protocol.
 
 ## Extension controls
 

@@ -13,7 +13,8 @@ const preset = {
 const decode = { ...preset, ...limits, objects: enumeration('null', 'plain') };
 const validation = { ...decode, maxBignumBytes: integer, budget: integer };
 const encode = { ...preset, ...limits, objects: decode.objects, omitUndefined: boolean };
-const scheduling = { quantum: value => integer(value) && value <= 0x7fffffff };
+// failFast (D085): answer an unknown-length message's certain refusal at once
+const scheduling = { quantum: value => integer(value) && value <= 0x7fffffff, failFast: boolean };
 const controlsShape = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const schema = value => value !== null && typeof value === 'object' &&
   typeof value.validate === 'function' && typeof value.validateAt === 'function';
