@@ -3863,6 +3863,37 @@ are answered as provisional decisions D082–D085. None is open now.
     and known push must still deliver/finalize after early done. Full method,
     timings, memory caveats and reproduction: [bench/VM.md](bench/VM.md#extension-controls-and-drain-mode-p72d085--2026-11-03),
     harness `bench/ext-drain-bench.mjs`. Worktree removed; no commit made.
+  - **Default-limit EXT worst-case analysis, 2026-11-04:** clean HEAD
+    `6c3237e1a18d098516387369f730bac6c7dd78a6` in `.cache/unique-wt`;
+    Apple M1 Pro/macOS 14.6.1/Node v24.6.0, thread CPU medians (7 batches;
+    3 single calls for long predicates), heavily shared machine (initial
+    1/5/15-minute load 81.13/47.53/32.29). All compiler/runtime limits and
+    the 65,536-B per-control maximum left at defaults. `.chars` 22 full
+    UTF-8 strings: **15.54 ms**; tiny strings reach **83.05 ms** before
+    budget refusal. `.unique`: **55.04 ms** for a single 65,536-B repeated-rank
+    array (1,837,356 comparisons, only 131,087 total steps); **138.44 ms**
+    for 22 capped long-prefix arrays, and **991.57 ms** / 34 sorts of one
+    capped item under 35 distinct EXT choices before budget refusal.
+    `.samelen`: **58,638.25 ms** for 22 long-prefix maps (1,703,907 steps); empty
+    maps take **50,687.43 ms** before budget refusal through repeated argument
+    parsing (4.60 billion controller-item heads). No-op EXT reaches
+    **79.30 ms** at budget exhaustion; a pure fixed-loop custom predicate
+    takes **303.51 ms** on one byte for just 16 total steps.
+    **Learnt/verdict:** defaults do **not** bound EXT CPU near 50 ms. D140's
+    byte precharge tracks `.chars`' linear scan, but ignores `.unique`'s sort
+    comparisons/prefix bytes and `.samelen`'s per-call argument validation
+    and keys × names × prefix search. Custom predicate CPU is not bounded
+    by purity or VM steps. Default JS uniqueness scratch is retained after
+    warm-up (~0.5 MiB); Rust allocates it per call. **Proposal only:** charge
+    generic comparisons/byte chunks/argument work inside interruptible kin
+    loops (or charged hashing with collision compares), prepare/index names
+    once, reuse per-context scratch, and recalibrate tiny-item dispatch costs;
+    lowering item size alone cannot fix argument amplification/custom code.
+    Details, fixtures, counters, load and reproduction: [bench/VM.md](bench/VM.md#extension-control-worst-cases-under-default-limits--2026-11-04),
+    new harness `bench/ext-worst.mjs`. **Checks run:** node syntax, final
+    check-only (41 cases), all timed fixture hashes/charges/counts/medians
+    reconciled, scoped diff check. Worktree removed; no kin/host/generated
+    changes, installs, network operations or commit.
 - [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
   *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.
   Offline Node v24.6.0 / ICU 77.1 / Unicode 16.0 generation produces the same
@@ -3924,37 +3955,6 @@ are answered as provisional decisions D082–D085. None is open now.
   refused; targeted corruption tests include rehashed malformed Programs,
   major/newer-minor refusal, cross-snug-version acceptance, offset Buffer
   views, claimed-length bombs, trailing bytes, ownership and independent
-  - **Default-limit EXT worst-case analysis, 2026-11-04:** clean HEAD
-    `6c3237e1a18d098516387369f730bac6c7dd78a6` in `.cache/unique-wt`;
-    Apple M1 Pro/macOS 14.6.1/Node v24.6.0, thread CPU medians (7 batches;
-    3 single calls for long predicates), heavily shared machine (initial
-    1/5/15-minute load 81.13/47.53/32.29). All compiler/runtime limits and
-    the 65,536-B per-control maximum left at defaults. `.chars` 22 full
-    UTF-8 strings: **15.54 ms**; tiny strings reach **83.05 ms** before
-    budget refusal. `.unique`: **55.04 ms** for a single 65,536-B repeated-rank
-    array (1,837,356 comparisons, only 131,087 total steps); **138.44 ms**
-    for 22 capped long-prefix arrays, and **991.57 ms** / 34 sorts of one
-    capped item under 35 distinct EXT choices before budget refusal.
-    `.samelen`: **58,638.25 ms** for 22 long-prefix maps (1,703,907 steps); empty
-    maps take **50,687.43 ms** before budget refusal through repeated argument
-    parsing (4.60 billion controller-item heads). No-op EXT reaches
-    **79.30 ms** at budget exhaustion; a pure fixed-loop custom predicate
-    takes **303.51 ms** on one byte for just 16 total steps.
-    **Learnt/verdict:** defaults do **not** bound EXT CPU near 50 ms. D140's
-    byte precharge tracks `.chars`' linear scan, but ignores `.unique`'s sort
-    comparisons/prefix bytes and `.samelen`'s per-call argument validation
-    and keys × names × prefix search. Custom predicate CPU is not bounded
-    by purity or VM steps. Default JS uniqueness scratch is retained after
-    warm-up (~0.5 MiB); Rust allocates it per call. **Proposal only:** charge
-    generic comparisons/byte chunks/argument work inside interruptible kin
-    loops (or charged hashing with collision compares), prepare/index names
-    once, reuse per-context scratch, and recalibrate tiny-item dispatch costs;
-    lowering item size alone cannot fix argument amplification/custom code.
-    Details, fixtures, counters, load and reproduction: [bench/VM.md](bench/VM.md#extension-control-worst-cases-under-default-limits--2026-11-04),
-    new harness `bench/ext-worst.mjs`. **Checks run:** node syntax, final
-    check-only (41 cases), all timed fixture hashes/charges/counts/medians
-    reconciled, scoped diff check. Worktree removed; no kin/host/generated
-    changes, installs, network operations or commit.
   node:crypto SHA-256 comparison.
   *Learnt*: D084 supersedes program.md §13.3's exact producer-version check;
   the 1.0 word spelling can be preserved with major in the low 16 bits.
