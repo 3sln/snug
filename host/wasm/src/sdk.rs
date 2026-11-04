@@ -21,7 +21,8 @@ use crate::snug::nav::walk::{nav_child, nav_dir, nav_dir_find, nav_find, nav_hea
 use crate::snug::program::verify::vm_verify;
 use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span,
                            vm_validate_span_x, vm_validate_x};
-use crate::snug::vm::controls::{chars_ok, samelen_ok, unique_ok, unique_words};
+use crate::snug::vm::controls::{chars_prep, chars_run, meter_init, samelen_prep, samelen_run, samelen_words,
+                                unique_run, unique_words, M_WORDS};
 use crate::snug::vm::session::{vms_arena, vms_eof, vms_init, vms_init_unknown, vms_keep, vms_need_length,
                                vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
 use crate::snug::write::float::{put_float, put_float_rfc};
@@ -30,6 +31,7 @@ use crate::snug::write::map::{sort_keys, S_BUDGET};
 use crate::snug::write::out::{put_head, WR_NEED};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cell::UnsafeCell;
+use std::collections::BTreeMap;
 
 const OUTW: usize = 8 + 2 * 257;
 
@@ -40,37 +42,50 @@ struct Prog {
     /// 1 `.chars`, 2 `.unique`, 3 `.samelen` (kin's generic controls, D142).
     /// Empty: the Program uses no control, or is not bound yet.
     ext: Vec<i32>,
+    /// Generic-control arguments prepared once at bind (D192), by (id, argument
+    /// offset): `.chars` 2 words (`[1, 0]` if refused), `.samelen` its table
+    /// (empty if refused).
+    preps: BTreeMap<(i32, i32), Vec<i32>>,
 }
 
 #[link(wasm_import_module = "env")]
 extern "C" {
     /// The host predicate for control `id` of the Program in the current call:
     /// the argument's encoding at [ap, ap+al), the item's at [ip, ip+il), both
-    /// in linear memory and valid only during the call. 1 matches.
-    fn snug_ext(id: i32, ap: *const u8, al: i32, ip: *const u8, il: i32) -> i32;
+    /// in linear memory and valid only during the call; `room` the budget left.
+    /// Answers kin's verdict word (D190): u >= 0 matched after u units, -2 - u
+    /// refused after u units, -1 more than `room`.
+    fn snug_ext(id: i32, ap: *const u8, al: i32, ip: *const u8, il: i32, room: i32) -> i32;
 }
 
 struct Uniq(UnsafeCell<Vec<i32>>);
 unsafe impl Sync for Uniq {}
 static UNIQ: Uniq = Uniq(UnsafeCell::new(Vec::new()));
 
-/// One extension-control query (D140): a generic control in kin, else the import.
-fn ext_call(kinds: &[i32], id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32) -> bool {
-    match kinds.get(id as usize).copied().unwrap_or(0) {
-        1 => chars_ok(pool, ao, al, b, s, e),
-        2 => {
-            // SAFETY: single-threaded; only this arm touches UNIQ, never re-entered.
-            let t = unsafe { &mut *UNIQ.0.get() };
-            let need = unique_words(e - s) as usize;
-            if t.len() < need { t.resize(need, 0); }
-            let ok = unique_ok(&b[..e as usize], s, e, t);
-            if t.len() > 1 << 20 { *t = Vec::new(); }
-            ok
-        }
-        3 => samelen_ok(pool, ao, al, b, s, e),
+/// One extension-control query (D140, D190): a generic control metered in kin
+/// (D191), else the import; kin's verdict word either way.
+#[allow(clippy::too_many_arguments)]
+fn ext_call(pr: &Prog, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32, room: i32) -> i32 {
+    let kind = pr.ext.get(id as usize).copied().unwrap_or(0);
+    if kind == 0 {
         // SAFETY: the pointers are in bounds of live slices for the call's duration.
-        _ => unsafe { snug_ext(id, pool.as_ptr().add(ao as usize), al, b.as_ptr().add(s as usize), e - s) == 1 },
+        return unsafe { snug_ext(id, pool.as_ptr().add(ao as usize), al, b.as_ptr().add(s as usize), e - s, room) };
     }
+    let t: &[i32] = match pr.preps.get(&(id, ao)) { Some(t) => t, None => &[] };
+    if kind == 3 && t.is_empty() { return -2; }
+    // SAFETY: single-threaded; only this function touches UNIQ, and kin never re-enters a run.
+    let m = unsafe { &mut *UNIQ.0.get() };
+    let need = if kind == 2 { unique_words(b, s, e) } else { M_WORDS } as usize;
+    if m.len() < need { m.resize(need, 0); }
+    meter_init(m, room);
+    let r = match kind {
+        1 => chars_run(if t.is_empty() { &[1, 0] } else { t }, b, s, e, m),
+        2 => unique_run(b, s, e, m),
+        3 => samelen_run(pool, ao, t, b, s, e, m),
+        _ => -2,
+    };
+    if m.len() > 1 << 20 { *m = Vec::new(); }
+    r
 }
 
 enum Sess {
@@ -243,14 +258,36 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
         return -1;
     }
     let slot = st.progs.iter().position(|x| x.is_none()).unwrap_or_else(|| { st.progs.push(None); st.progs.len() - 1 });
-    st.progs[slot] = Some(Prog { p, b, ext: Vec::new() });
+    st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new() });
     slot as i32
 }
 /// Bind Program h's extension controls: n kinds (see `Prog::ext`) at kp.
 #[no_mangle]
 pub extern "C" fn sdk_prog_bind(h: usize, kp: *const i32, n: usize) {
     let kinds = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(kp, n) }.to_vec() };
-    if let Some(Some(pr)) = st().progs.get_mut(h) { pr.ext = kinds; }
+    if let Some(Some(pr)) = st().progs.get_mut(h) {
+        let mut preps = BTreeMap::new();
+        let (at, n) = (pr.p[43], pr.p[16]);
+        for l in 0..n {
+            let o = (at + 8 * l) as usize;
+            if pr.p[o] & 255 != 18 { continue; }
+            let (id, ao, al) = (pr.p[o + 2], pr.p[o + 3], pr.p[o + 4]);
+            if preps.contains_key(&(id, ao)) { continue; }
+            match kinds.get(id as usize).copied().unwrap_or(0) {
+                1 => {
+                    let mut t = vec![0; 2];
+                    preps.insert((id, ao), if chars_prep(&pr.b, ao, al, &mut t) == 0 { t } else { vec![1, 0] });
+                }
+                3 => {
+                    let mut t = vec![0; samelen_words(&pr.b, ao, al) as usize];
+                    preps.insert((id, ao), if samelen_prep(&pr.b, ao, al, &mut t) == 0 { t } else { Vec::new() });
+                }
+                _ => {}
+            }
+        }
+        pr.ext = kinds;
+        pr.preps = preps;
+    }
 }
 #[no_mangle]
 pub extern "C" fn sdk_prog_free(h: usize) {
@@ -290,8 +327,7 @@ pub extern "C" fn sdk_validate(h: usize, rule: i32, p: *const u8, n: usize, l0: 
     let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
     let input = unsafe { bytes(p, n) };
     if pr.p[30] > 0 {
-        let k = &pr.ext;
-        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| ext_call(k, id, pool, ao, al, b, st, e);
+        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
         vm_validate_x(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out, &f)
     } else {
         vm_validate(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out)
@@ -309,8 +345,7 @@ pub extern "C" fn sdk_validate_span(h: usize, rule: i32, p: *const u8, n: usize,
     let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
     let input = unsafe { bytes(p, n) };
     if pr.p[30] > 0 {
-        let k = &pr.ext;
-        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| ext_call(k, id, pool, ao, al, b, st, e);
+        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
         vm_validate_span_x(&pr.p, &pr.b, rule, input, start, end, depth, items, &lim, &mut s.scratch, &mut s.out, &f)
     } else {
         vm_validate_span(&pr.p, &pr.b, rule, input, start, end, depth, items, &lim, &mut s.scratch, &mut s.out)
@@ -530,8 +565,7 @@ pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 {
         Some(Some(Sess::Vm { prog, s, ss, ka, out, w })) => {
             let pr = match progs.get(*prog) { Some(Some(pr)) => pr, _ => return -100 };
             let r = if pr.p[30] > 0 {
-                let k = &pr.ext;
-                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| ext_call(k, id, pool, ao, al, b, st, e);
+                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
                 vms_step_x(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base, &f)
             } else {
                 vms_step(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base)

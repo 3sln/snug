@@ -42,13 +42,13 @@ export class InstanceLost extends Error {
 // recorded by bindControls and rethrown after the call (ext.mjs rethrow).
 let current = null;
 const GUARD = new Proxy({}, { get() { throw new Error('snug wasm: an extension control called back into snug'); } });
-function snugExt(id, ap, al, ip, il) {
+function snugExt(id, ap, al, ip, il, room) {
   const bound = current;
-  if (bound === null || bound.failure) return 0;
+  if (bound === null || bound.failure) return -2;
   refresh();
   const arg = u8.slice(ap, ap + al), item = u8.slice(ip, ip + il), saved = x;
   x = GUARD;
-  try { return bound.call(id, arg, 0, al, item, 0, il) ? 1 : 0; } finally { x = saved; }
+  try { return bound.call(id, arg, 0, al, item, 0, il, room); } finally { x = saved; }
 }
 /** Run f (one wasm call) with `bound` answering the Program's extension controls. */
 export function withExt(bound, f) {
