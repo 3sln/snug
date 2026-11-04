@@ -6,9 +6,9 @@ import { encode } from 'snug';
 import * as sources from 'snug/sources';
 
 test('public entry points expose schema source validation and advanced sessions', () => {
-  for (const name of ['validateHandle', 'validateHandleSync', 'pushValidator'])
+  for (const name of ['openSession', 'validateHandle', 'validateHandleSync', 'pushValidator'])
     assert.equal(typeof sources[name], 'function', name);
-  assert.equal(typeof Schema.prototype.session, 'function');
+  assert.equal(typeof Schema.prototype.session, 'undefined');
 });
 
 test('public schema sources match buffer success, schema refusal, profile refusal and budget', async () => {
@@ -68,14 +68,14 @@ test('public schema source errors remain distinct from verdicts and read errors 
 test('public advanced sessions drive windows without exposing verified Program or scratch', async () => {
   const schema = await compile('r = { id: uint, body: tstr }');
   const bytes = encode({ id: 7, body: 'a'.repeat(100) });
-  const session = schema.session('r', bytes.length, {}, { quantum: 1 });
+  const session = sources.openSession(schema, 'r', bytes.length, {}, { quantum: 1 });
   assert.equal(session.length, bytes.length);
   assert.ok(session.bytesHeld > 0);
   assert.deepEqual(Object.keys(session), []);
   assert.equal(session.program, undefined);
-  assert.throws(() => schema.session('private-rule', bytes.length), e =>
+  assert.throws(() => sources.openSession(schema, 'private-rule', bytes.length), e =>
     e instanceof TypeError && !e.message.includes('private-rule'));
-  assert.throws(() => schema.session('r', -1), TypeError);
+  assert.throws(() => sources.openSession(schema, 'r', -1), TypeError);
   assert.throws(() => session.step(bytes, -1), TypeError);
   assert.throws(() => session.step(new Uint8Array(new SharedArrayBuffer(1)), 0), TypeError);
   let window = new Uint8Array(), base = 0, yields = 0, needs = 0;
@@ -96,4 +96,51 @@ test('public advanced sessions drive windows without exposing verified Program o
     }
   }
   assert.ok(needs > 0 && yields > 0);
+});
+
+test('openSession uses the owned verified Program after loading, without trusting lookalikes', async () => {
+  const { fromSerialized } = await import('snug/schema');
+  const { chars } = await import('snug/controls');
+  const compiled = await compile('r = tstr .chars 2', { controls: { chars } });
+  const schema = await fromSerialized(compiled.program.serialize(), { controls: { chars } });
+  const copy = schema.program.P; copy.fill(0);
+  for (const value of ['éx', 'abc']) {
+    const bytes = encode(value);
+    assert.deepEqual(sources.openSession(schema, 'r', bytes.length).step(bytes, 0),
+      { state: 'done', result: schema.validate(bytes, 'r') });
+  }
+  for (const fake of [null, undefined, {}, { program: schema.program }, Object.create(schema)])
+    assert.throws(() => sources.openSession(fake, 'r', 1), TypeError);
+  assert.throws(() => sources.openSession(schema, 1, 1), TypeError);
+});
+
+test('raw unknown-length sessions settle pending checks at EOF and preserve held verdicts', async () => {
+  const schema = await compile('r = [bstr, uint]');
+  for (const bytes of [Uint8Array.of(0x82, 0x42, 1), encode([new Uint8Array([1, 2]), 3]),
+    encode([new Uint8Array([1]), 'private-value']), Uint8Array.of(0x82, 0x41, 1, 2, 0)]) {
+    for (const quantum of [0, 1, 3]) {
+      const session = sources.openSession(schema, 'r', undefined, { maxBytes: 32 }, { quantum });
+      assert.equal(session.length, undefined); assert.equal(session.limit, 32);
+      let step;
+      do { step = session.step(bytes, 0); } while (step.state === 'yield');
+      assert.notEqual(step.state, 'done', 'unknown length waits for EOF');
+      step = session.end(bytes.length);
+      while (step.state === 'yield') step = session.step(bytes, 0);
+      assert.deepEqual(step, { state: 'done', result: schema.validate(bytes, 'r', { maxBytes: 32 }) });
+      assert.deepEqual(session.end(bytes.length), step);
+    }
+  }
+});
+
+test('a throwing control poisons only its session; independent sessions can continue', async () => {
+  const cause = new Error('predicate failure');
+  let fail = true;
+  const schema = await compile('r = tstr .check 0', { controls: { check() { if (fail) throw cause; return true; } } });
+  const bytes = encode('x'), a = sources.openSession(schema, 'r', bytes.length), b = sources.openSession(schema, 'r', bytes.length);
+  let failure;
+  assert.throws(() => a.step(bytes, 0), e => { failure = e; return e.cause === cause; });
+  fail = false;
+  assert.deepEqual(b.step(bytes, 0), { state: 'done', result: { ok: true } });
+  assert.throws(() => a.step(bytes, 0), e => e === failure);
+  assert.deepEqual(schema.validate(bytes, 'r'), { ok: true });
 });

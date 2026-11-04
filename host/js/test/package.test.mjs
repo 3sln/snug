@@ -112,7 +112,7 @@ test('self-contained staged package works away from the repository through all e
       import {fromSerialized,validate,decode as schemaDecode,validateAt} from 'snug/schema';
       import {view,View,Cursor} from 'snug/view';
       import {Writer} from 'snug/writer';
-      import {asyncHandle,bufferHandle,scanHandle,validateHandle,validateHandleSync,pushValidator} from 'snug/sources';
+      import {asyncHandle,bufferHandle,scanHandle,validateHandle,validateHandleSync,pushValidator,openSession} from 'snug/sources';
       const s = await compile('r = { id: uint }');
       const b = encode({id:7});
       assert.deepEqual(validate(s,b,'r'),{ok:true});
@@ -129,7 +129,7 @@ test('self-contained staged package works away from the repository through all e
       const push=pushValidator(s,b.length,'r');
       push.feed(b);
       assert.deepEqual(push.finalize(),{ok:true});
-      assert.deepEqual(s.session('r',b.length).step(b,0),{state:'done',result:{ok:true}});
+      assert.deepEqual(openSession(s,'r',b.length).step(b,0),{state:'done',result:{ok:true}});
       assert.equal(Decimal.from('1.5').toString(),'1.5');
       assert.ok(new NDArray([1],[7]) && new Float16Bytes(new Uint8Array(2)) && profiles.bindle && profiles.deterministic);
       assert.equal(decode(encode(new Tagged(1, 7))).value, 7);
@@ -148,4 +148,28 @@ test('self-contained staged package works away from the repository through all e
     await assert.rejects(buildPackage(target), { code: 'EEXIST' });
     assert.ok(readdirSync(join(target, 'generated', 'snug')).includes('vm'));
   } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test('schema static graph excludes session drivers; sources excludes verifier and compiler loaders', () => {
+  function closure(entry) {
+    const seen = new Set();
+    function visit(url) {
+      if (seen.has(url.pathname)) return;
+      seen.add(url.pathname);
+      const code = readFileSync(url, 'utf8');
+      for (const [, specifier] of code.matchAll(/\b(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]/g))
+        if (specifier.startsWith('.')) visit(new URL(specifier, url));
+    }
+    visit(new URL('../src/' + entry, import.meta.url));
+    return [...seen];
+  }
+  const schema = closure('public-schema.mjs'), sources = closure('public-sources.mjs');
+  for (const path of schema) {
+    assert.ok(!/\/gen\/js\/snug\/vm\/(?:session[^/]*|sbase|scont|sstr)\.mjs$/.test(path), path);
+    assert.ok(!/\/(?:vm-session|open-session|sources|public-sources|controls)\.mjs$/.test(path), path);
+    assert.ok(!path.endsWith('/src/schema.mjs'), path);
+  }
+  assert.ok(schema.some(p => p.endsWith('/program/verify.mjs')), 'synchronous Program verifies before returning');
+  assert.ok(sources.some(p => p.endsWith('/vm/session.mjs')), 'sources retains the real kin session');
+  assert.ok(!sources.some(p => p.endsWith('/program/verify.mjs') || p.endsWith('/src/schema.mjs')));
 });

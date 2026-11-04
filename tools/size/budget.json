@@ -1,68 +1,68 @@
 {
-  "description": "Ceil(current.json bytes * 1.02), static and full closure independently. Regression caps; R9 remains a separate 20 KB runtime gzip target.",
-  "recorded": "2026-11-04T02:58:37.960Z",
-  "sourceHash": "d25ff5e3d4416131a1d69e828afc883c0608a4bb401038d1a1ef8768e4c0b23c",
+  "description": "Ceil(P7.6 phase 2 current shared-tree bytes * 1.02), static and full closure independently. Paired and later concurrent-tag evidence: tools/size/phase2.json. Regression caps; R9 remains a separate 20 KB runtime gzip target.",
+  "recorded": "2026-11-04T05:34:45.101Z",
+  "sourceHash": "9eee972b5376ae6714d2187849dd40de35d0b6a85b0dc2d048bf4cf99c11c657",
   "esbuild": "0.28.2",
   "margin": 0.02,
   "entries": {
     "snug": {
       "static": {
-        "min": 42063,
-        "gzip": 14458,
-        "brotli": 12943
+        "min": 43073,
+        "gzip": 14840,
+        "brotli": 13278
       },
       "full": {
-        "min": 42063,
-        "gzip": 14458,
-        "brotli": 12943
+        "min": 43073,
+        "gzip": 14840,
+        "brotli": 13278
       }
     },
     "snug/schema": {
       "static": {
-        "min": 128029,
-        "gzip": 47386,
-        "brotli": 40397
+        "min": 93579,
+        "gzip": 34437,
+        "brotli": 29724
       },
       "full": {
-        "min": 128220,
-        "gzip": 47440,
-        "brotli": 40586
+        "min": 93579,
+        "gzip": 34437,
+        "brotli": 29724
       }
     },
     "snug/compile": {
       "static": {
-        "min": 2426,
-        "gzip": 1268,
-        "brotli": 1124
+        "min": 2586,
+        "gzip": 1322,
+        "brotli": 1178
       },
       "full": {
-        "min": 256854,
-        "gzip": 88609,
-        "brotli": 74900
+        "min": 222502,
+        "gzip": 75536,
+        "brotli": 64181
       }
     },
     "snug/view": {
       "static": {
-        "min": 55068,
-        "gzip": 18695,
-        "brotli": 16661
+        "min": 56183,
+        "gzip": 19121,
+        "brotli": 17071
       },
       "full": {
-        "min": 55068,
-        "gzip": 18695,
-        "brotli": 16661
+        "min": 56183,
+        "gzip": 19121,
+        "brotli": 17071
       }
     },
     "snug/writer": {
       "static": {
-        "min": 38505,
-        "gzip": 13256,
-        "brotli": 11873
+        "min": 39516,
+        "gzip": 13626,
+        "brotli": 12183
       },
       "full": {
-        "min": 38505,
-        "gzip": 13256,
-        "brotli": 11873
+        "min": 39516,
+        "gzip": 13626,
+        "brotli": 12183
       }
     },
     "snug/unicode": {
@@ -79,38 +79,50 @@
     },
     "snug/sources": {
       "static": {
-        "min": 31024,
-        "gzip": 11526,
-        "brotli": 10230
+        "min": 123710,
+        "gzip": 45900,
+        "brotli": 39091
       },
       "full": {
-        "min": 31024,
-        "gzip": 11526,
-        "brotli": 10230
+        "min": 123710,
+        "gzip": 45900,
+        "brotli": 39091
+      }
+    },
+    "snug/controls": {
+      "static": {
+        "min": 3498,
+        "gzip": 1406,
+        "brotli": 1287
+      },
+      "full": {
+        "min": 3498,
+        "gzip": 1406,
+        "brotli": 1287
       }
     },
     "runtime": {
       "static": {
-        "min": 151980,
-        "gzip": 54948,
-        "brotli": 46732
+        "min": 117986,
+        "gzip": 42385,
+        "brotli": 36232
       },
       "full": {
-        "min": 152187,
-        "gzip": 55133,
-        "brotli": 46934
+        "min": 117986,
+        "gzip": 42385,
+        "brotli": 36232
       }
     },
     "all-runtime": {
       "static": {
-        "min": 180160,
-        "gzip": 64995,
-        "brotli": 55228
+        "min": 196474,
+        "gzip": 71370,
+        "brotli": 59857
       },
       "full": {
-        "min": 180376,
-        "gzip": 65031,
-        "brotli": 55288
+        "min": 196474,
+        "gzip": 71370,
+        "brotli": 59857
       }
     }
   }

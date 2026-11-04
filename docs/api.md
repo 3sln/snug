@@ -47,7 +47,7 @@ The following named sets are the complete option-key lists used below:
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
-| `Schema.session` | ValidationOptions | scheduling: `quantum` |
+| `openSession` (`snug/sources`) | ValidationOptions | scheduling: `quantum` |
 | `view` | ValidationOptions + `schema`, `rule`, `borrow`, `directories` | none |
 | `View.validateAt` | `schema` | none |
 | `scanBuffer` | DecodeOptions | none |
@@ -255,7 +255,6 @@ false is valid in the second branch. The message as a whole fits neither.
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
 | `schema.validate(bytes, rule, options?)` | ValidationResult; default top any. |
-| `schema.session(rule, length, options?, { quantum? }?)` | Advanced `VmSession` over an exact known-length document; default top any. |
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
 | `fromProgram(P, B, { controls? }?): Promise<Schema>` | Copies and verifies, without loading the compiler. |
@@ -281,34 +280,6 @@ synchronously, with no scheduling, background execution or cancellation
 guarantee. `new Program` verifies and throws synchronously. Compile trusted
 schemas ahead of time and load once at startup; isolate hostile compilation
 in a worker/process. See the [worked isolation recipe](guide.md#programs-caching-and-compatibility).
-
-`VmSession` is a public interface obtained through `schema.session`, with no
-public constructor. It exposes readonly `length`, `bytesHeld` (exclusive VM
-array bytes, excluding the shared Program and supplied windows), and
-`step(window: Uint8Array, base: number): VmStep`. Scratch and Program storage
-remain private. Each session owns exclusive state across suspensions; share
-Programs, use separate sessions for independent validations, and never resume
-one session concurrently. There is no session pool or live-session cap.
-
-`VmStep` is one of:
-
-```ts
-type VmStep =
-  { state: 'need'; offset: number; length: number; keep: number } |
-  { state: 'yield'; position: number; keep: number } |
-  { state: 'done'; result: ValidationResult };
-```
-
-Start with an empty window at base 0. On `need`, supply a window containing
-the entire requested absolute range; the request can exceed your preferred
-chunk size. `base` is the window's absolute offset, and its span must stay
-within the declared document. On `yield`, give the event loop a turn, then
-resume with the current window. `keep` means no earlier byte will be requested
-again; retain bytes from there for forward-only sources, since some checks
-replay content. Keep every supplied byte immutable, including across awaits;
-SharedArrayBuffer windows are refused. `done.result` has exactly buffer
-validation's meaning. Discard sessions after completion or failure.
-Prefer the source drivers below unless implementing a custom window driver.
 
 ## Views: `snug/view`
 
@@ -422,6 +393,7 @@ with top defaulting to any and limits only lowering the compiled values.
 
 | Function / class | Result |
 | --- | --- |
+| `openSession(schema, rule, length, options?, { quantum? }?)` | Synchronous advanced `VmSession`; length undefined selects drain mode; replaces Schema.session (D160) |
 | `scanBuffer(bytes, options?)` | void, or SnugFault; specialised contiguous-buffer path |
 | `scanHandle(handle, options?, sourceOptions?)` | Promise resolving true; demand-driven, one read in flight |
 | `scanHandleSync(handle, options?, sourceOptions?)` | true; Promise reads refused |
@@ -437,8 +409,40 @@ with top defaulting to any and limits only lowering the compiled values.
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
 
+`VmSession` is a public interface obtained through `openSession` from
+`snug/sources`, with no public constructor. It exposes readonly `length`
+(undefined for unknown length), `limit` (the unknown-length input limit),
+`bytesHeld` (exclusive VM array bytes, excluding the shared Program and
+supplied windows), and
+`step(window: Uint8Array, base: number): VmStep`. Scratch and Program storage
+remain private. Each session owns exclusive state across suspensions; share
+Programs, use separate sessions for independent validations, and never resume
+one session concurrently. There is no session pool or live-session cap.
+
+`VmStep` is one of:
+
+```ts
+type VmStep =
+  { state: 'need'; offset: number; length: number; keep: number } |
+  { state: 'yield'; position: number; keep: number } |
+  { state: 'held'; result: ValidationResult } |
+  { state: 'done'; result: ValidationResult };
+```
+
+Start with an empty window at base 0. On `need`, supply a window containing
+the entire requested absolute range; the request can exceed your preferred
+chunk size. `base` is the window's absolute offset, and its span must stay
+within the declared document (or input limit for unknown length). On `yield`,
+give the event loop a turn, then resume with the current window. `keep` means no earlier byte will be requested
+again; retain bytes from there for forward-only sources, since some checks
+replay content. Keep every supplied byte immutable, including across awaits;
+SharedArrayBuffer windows are refused. `done.result` has exactly buffer
+validation's meaning. Discard sessions after completion or failure.
+Prefer the source drivers below unless implementing a custom window driver.
+
 Lengths are exact non-negative int32 document lengths (0..2^31−1), required
-before validation starts. A handle must represent an **immutable snapshot**:
+before validation starts for handles and known-length push sources. A handle
+must represent an **immutable snapshot**:
 size and every read must refer to the same bytes throughout the operation,
 including repeated reads. Pin remote object versions/generations or ETags in
 the caller's handle implementation and enforce the pin on every read. The
@@ -463,7 +467,7 @@ and known-length AsyncIterable adapter before implementing custom sessions.
 Profile `ScanSession.step` returns
 `{state:'need', offset, length}`, `{state:'yield', position}`, or
 `{state:'done'}`. Push scanners return these states without range metadata.
-`schema.session(rule, undefined, …)` is the raw unknown-length session: `step`
+`openSession(schema, rule, undefined, …)` is the raw unknown-length session: `step`
 may also return `{state:'held', result}` (a verdict waiting for the end), and
 `end(n)` returns `{state:'done', result}` or a `yield` to step on over the bytes
 still held; a window `[base, base + length)` asserts those bytes exist, and

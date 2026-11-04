@@ -470,9 +470,9 @@ Each validation has exclusive session state across every await. Immutable
 Programs can be shared, and independent sessions can interleave; never resume
 one session concurrently. There is no live-session quota or pool, so bound
 concurrency in the application. Advanced custom drivers can call
-`schema.session(rule, length, options?, { quantum? }?)` for a `VmSession`
-with `step(window, base)`, `length` and `bytesHeld`; its need/yield/keep protocol
-is in the [API reference](api.md#schemas-and-programs-snugschema). Scratch
+`openSession(schema, rule, length, options?, { quantum? }?)` from `snug/sources`
+for a `VmSession` with `step(window, base)`, `length` and `bytesHeld`; its need/yield/keep protocol
+is in the [API reference](api.md#sources-snugsources). Scratch
 and verified Program arrays stay private. Discard sessions after completion
 or failure.
 
@@ -524,7 +524,8 @@ head, a key, a bounded piece, an extension control's item) plus a chunk; a
 long byte string is dropped as it streams. The session's own key arena is
 sized for the input limit (`maxBytes`, default 1,500,000 bytes) because the
 length is unknown — lower `maxBytes` for many concurrent streams. A raw
-`schema.session(rule, undefined)` exposes the protocol: `step` may answer
+`openSession(schema, rule, undefined)` from `snug/sources` exposes the
+protocol: `step` may answer
 `{state: 'held', result}`, and `end(n)` settles the verdict (or answers a
 `yield` to step on over the bytes it still holds).
 

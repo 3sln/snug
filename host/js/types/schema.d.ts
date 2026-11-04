@@ -12,28 +12,6 @@ export interface SpanOptions extends ValidationOptions { depth?: number; items?:
 export type ValidationResult = { ok: true } | {
   ok: false; reason: Reason; path: (string | number)[]; offset: number; subcode?: Reason;
 };
-/** quantum defaults to 0 (no scheduling yields); otherwise 1..2^31-1. */
-/** failFast (D085) applies to messages of unknown length only. */
-export interface SessionOptions { quantum?: number; failFast?: boolean }
-/** 'held' (D085, unknown length): a verdict waiting for end(n); an ok:false one is a
- *  certain refusal whose final code may still become cbor/truncated or cbor/too_large. */
-export type VmStep = { state: 'need'; offset: number; length: number; keep: number } |
-  { state: 'yield'; position: number; keep: number } |
-  { state: 'held'; result: ValidationResult } |
-  { state: 'done'; result: ValidationResult };
-/** Advanced exclusive window session, obtained only from Schema.session(). */
-export interface VmSession {
-  /** undefined for a session of unknown length (D085). */
-  readonly length: number | undefined;
-  /** An unknown-length session's input limit: more bytes than this is too_large. */
-  readonly limit: number | undefined;
-  /** Bytes in exclusive VM arrays, excluding the Program and supplied windows. */
-  readonly bytesHeld: number;
-  /** In an unknown-length session a window [base, base + length) asserts that those bytes exist. */
-  step(window: Uint8Array, base: number): VmStep;
-  /** D085: the unknown-length message ended after n bytes; 'yield' means step again from position. */
-  end(n: number): VmStep;
-}
 export type ProgramErrorCode = 'magic' | 'container_version' | 'format_version' |
   'length' | 'version' | 'reserved' | 'digest' | 'verify' | 'too_large' | 'missing_control';
 export declare class ProgramError extends Error {
@@ -56,8 +34,6 @@ export declare class Schema {
   constructor(program: Program);
   readonly program: Program;
   validate(bytes: Uint8Array, rule: string, options?: ValidationOptions): ValidationResult;
-  /** length undefined: a message of unknown length (D085 drain mode). */
-  session(rule: string, length: number | undefined, options?: ValidationOptions, scheduling?: SessionOptions): VmSession;
   validateAt(bytes: Uint8Array, start: number, end: number, rule: string, options?: SpanOptions): ValidationResult;
   decode(bytes: Uint8Array, rule: string, options?: ValidationOptions): Value;
 }

@@ -16,7 +16,7 @@
 //                                         or genuinely async (each read resolves later)
 //
 // Schema validation over the same sources (P6.2): the resumable kin VM session
-// (Schema.session, host/js/src/schema.mjs VmSession) driven by the same loops:
+// (openSession, host/js/src/vm-session.mjs VmSession) driven by the same loops:
 //
 //   validateHandle(schema, handle, rule, options, opts)      handle reads may be Promises
 //   validateHandleSync(schema, handle, rule, options, opts)  handle reads are synchronous
@@ -48,7 +48,10 @@ import { profileFlags, codecTop } from './profiles.mjs';
 import { scanOptions, scanProfile, codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { rscanInit, rscanStep, rscanNeedOffset, rscanNeedLength, rscanPosition, rscanScratchLen,
   RS_NEED, RS_YIELD } from '../../../gen/js/snug/cbor/rscan.mjs';
-import { Program as HostProgram } from './schema.mjs';
+import { Program as HostProgram } from './schema-core.mjs';
+import { VmSession } from './vm-session.mjs';
+import { openSession } from './open-session.mjs';
+export { openSession } from './open-session.mjs';
 import { ANY_P, ANY_B } from './any-program.mjs';
 
 export class SourceError extends Error {
@@ -229,7 +232,7 @@ export async function validateHandle(schema, handle, rule, options = {}, opts = 
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
   checkHandle(handle);
-  return runAsync(driveSession(schema.session(rule, handle.size, options, { quantum }), handle, chunk));
+  return runAsync(driveSession(openSession(schema, rule, handle.size, options, { quantum }), handle, chunk));
 }
 
 /** The same through a handle whose read returns bytes synchronously. */
@@ -238,7 +241,7 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
   checkHandle(handle);
-  return runSync(driveSession(schema.session(rule, handle.size, options, { quantum }), handle, chunk), 'validateHandleSync');
+  return runSync(driveSession(openSession(schema, rule, handle.size, options, { quantum }), handle, chunk), 'validateHandleSync');
 }
 
 /** Bytes pushed in order, for a message of a DECLARED length. feed(chunk) answers
@@ -258,9 +261,9 @@ export function pushValidator(schema, length, rule, options = {}, scheduling = {
   validateOptions(options, 'validation');
   validateOptions(scheduling, 'scheduling');
   const { failFast, ...sessionScheduling } = scheduling;
-  if (length === undefined) return pushUnknown(schema.session(rule, undefined, options, sessionScheduling), scheduling, r => r);
+  if (length === undefined) return pushUnknown(openSession(schema, rule, undefined, options, sessionScheduling), scheduling, r => r);
   if (failFast !== undefined) throw new TypeError('failFast is for a message of unknown length.');
-  return pushSession(schema.session(rule, length, options, sessionScheduling), length, want => want.keep);
+  return pushSession(openSession(schema, rule, length, options, sessionScheduling), length, want => want.keep);
 }
 
 // ---------------------------------------------------------------- unknown length (D085)
@@ -284,7 +287,7 @@ function scanUnknown(options, scheduling) {
   const opts = { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'cose']),
     top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
     maxEntries: limits.maxEntries, maxItems: limits.maxItems };
-  return anyProgram.session(0, undefined, opts, { quantum: scheduling.quantum ?? 0 });
+  return new VmSession(anyProgram, 0, undefined, opts, scheduling.quantum ?? 0);
 }
 const pick = (o, keys) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
 function scanResult(r) {

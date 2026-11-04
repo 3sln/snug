@@ -1,11 +1,12 @@
-// Stable package facade. Do not change schema.mjs's session/scratch contracts.
-import { Program as HostProgram, Schema as HostSchema } from './schema.mjs';
+// Buffer/Program package facade; all session construction lives in snug/sources.
+import { Program as HostProgram, Schema as HostSchema } from './schema-core.mjs';
 import { vmVerify } from '../../../gen/js/snug/program/verify.mjs';
 import { parseSerialized, serializeProgram, ProgramError } from './serialized.mjs';
 import { validationFault } from './public-errors.mjs';
 import { SNUG_VERSION } from './version.mjs';
 import { controlEntries, programControls } from './ext.mjs';
 import { validateOptions } from './options.mjs';
+import { schemaPrograms } from './schema-state.mjs';
 
 export { ProgramError };
 const internals = new WeakMap(), versions = new WeakMap();
@@ -58,32 +59,13 @@ function bytesInput(bytes) {
     throw new TypeError('snug: copy SharedArrayBuffer input first');
 }
 
-// Advanced window protocol without exposing the host session's Program/scratch.
-// Obtain sessions through Schema.session(); there is no public constructor.
-class VmSession {
-  #host;
-  constructor(host) { this.#host = host; Object.freeze(this); }
-  get length() { return this.#host.length; }
-  /** An unknown-length session's input limit (more bytes is too_large); undefined otherwise. */
-  get limit() { return this.#host.limit; }
-  get bytesHeld() { return this.#host.bytesHeld; }
-  step(window, base) {
-    bytesInput(window);
-    const bound = this.length ?? this.limit;
-    if (!Number.isSafeInteger(base) || base < 0 || base + window.length > bound)
-      throw new TypeError('snug: invalid window span');
-    return this.#host.step(window, base);
-  }
-  /** D085: the end of an unknown-length message (n bytes). */
-  end(n) { return this.#host.end(n); }
-}
-
 export class Schema {
   #host;
   constructor(program) {
     if (!internals.has(program)) throw new TypeError('snug: Schema needs a verified Program');
     this.program = program;
     this.#host = new HostSchema(internals.get(program));
+    schemaPrograms.set(this, internals.get(program));
     Object.freeze(this);
   }
   #rule(rule) {
@@ -93,10 +75,6 @@ export class Schema {
   validate(bytes, rule, options = {}) {
     bytesInput(bytes); this.#rule(rule);
     return this.#host.validate(bytes, rule, options);
-  }
-  session(rule, length, options = {}, scheduling = {}) {
-    this.#rule(rule);
-    return new VmSession(this.#host.session(rule, length, options, scheduling));
   }
   validateAt(bytes, start, end, rule, options = {}) {
     bytesInput(bytes); this.#rule(rule);

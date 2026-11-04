@@ -108,7 +108,7 @@ hand-written TypeScript declarations:
 | `snug/compile` | lazy asynchronous `compile`, `SchemaError` |
 | `snug/view` | `view`, `View`, `Cursor` |
 | `snug/writer` | `Writer` |
-| `snug/sources` | CDDL validation over handles and push sources; profile scanners, in-memory handles, `SourceError` |
+| `snug/sources` | Sessions via `openSession(schema, rule, length, options?, scheduling?)` (replaces `Schema.session`); CDDL handle/push/stream validation, profile scanners, in-memory handles, `SourceError` |
 | `snug/unicode` | optional Unicode 16.0 regexp category `tables` and provenance metadata; compile-time only |
 
 In a checkout, host code imports the committed `gen/js` tree by relative

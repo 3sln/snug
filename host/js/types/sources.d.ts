@@ -1,5 +1,30 @@
 import type { DecodeOptions } from './index.js';
-import type { Schema, ValidationOptions, ValidationResult, SessionOptions } from './schema.js';
+import type { Schema, ValidationOptions, ValidationResult } from './schema.js';
+/** quantum defaults to 0 (no scheduling yields); otherwise 1..2^31-1. */
+/** failFast (D085) applies to messages of unknown length only. */
+export interface SessionOptions { quantum?: number; failFast?: boolean }
+/** 'held' (D085, unknown length): a verdict waiting for end(n); an ok:false one is a
+ *  certain refusal whose final code may still become cbor/truncated or cbor/too_large. */
+export type VmStep = { state: 'need'; offset: number; length: number; keep: number } |
+  { state: 'yield'; position: number; keep: number } |
+  { state: 'held'; result: ValidationResult } |
+  { state: 'done'; result: ValidationResult };
+/** Advanced exclusive window session, obtained only from openSession(). */
+export interface VmSession {
+  /** undefined for a session of unknown length (D085). */
+  readonly length: number | undefined;
+  /** An unknown-length session's input limit: more bytes than this is too_large. */
+  readonly limit: number | undefined;
+  /** Bytes in exclusive VM arrays, excluding the Program and supplied windows. */
+  readonly bytesHeld: number;
+  /** In an unknown-length session a window [base, base + length) asserts that those bytes exist. */
+  step(window: Uint8Array, base: number): VmStep;
+  /** D085: the unknown-length message ended after n bytes; 'yield' means step again from position. */
+  end(n: number): VmStep;
+}
+/** length undefined: a message of unknown length (D085 drain mode).
+ *  Synchronous; replaces Schema.session (D160). */
+export declare function openSession(schema: Schema, rule: string, length: number | undefined, options?: ValidationOptions, scheduling?: SessionOptions): VmSession;
 /** Immutable snapshot: size and every range stay fixed for the operation. */
 export interface Handle {
   readonly size: number;

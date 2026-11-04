@@ -43,8 +43,8 @@ const entries = [
   ['validate helper', validationKeys, o => validate(schema, bytes, 'r', o)],
   ['decode helper', validationKeys, o => schemaDecode(schema, bytes, 'r', o)],
   ['validateAt helper', [...validationKeys, 'depth', 'items'], o => validateAt(schema, bytes, 0, bytes.length, 'r', o)],
-  ['Schema.session', validationKeys, o => schema.session('r', bytes.length, o)],
-  ['Schema.session scheduling', ['quantum'], o => schema.session('r', bytes.length, {}, o)],
+  ['openSession', validationKeys, o => sources.openSession(schema, 'r', bytes.length, o)],
+  ['openSession scheduling', ['quantum'], o => sources.openSession(schema, 'r', bytes.length, {}, o)],
   ['view', [...validationKeys, 'schema', 'rule', 'borrow', 'directories'], o => view(bytes, o)],
   ['schema view', [...validationKeys, 'schema', 'rule', 'borrow', 'directories'], o => view(bytes,
     Object.defineProperties({ schema, rule: 'r' }, Object.getOwnPropertyDescriptors(o)))],
@@ -125,7 +125,7 @@ test('options: valid presets, defaults, zero bounds, compiled caps and Writer pr
     assert.equal(view(bytes, preset).get('id').int(), 7);
     assert.equal(sources.scanHandleSync(handle, preset), true);
     assert.deepEqual(await sources.validateHandle(schema, handle, 'r', preset), { ok: true });
-    assert.deepEqual(schema.session('r', bytes.length, preset).step(bytes, 0).result, { ok: true });
+    assert.deepEqual(sources.openSession(schema, 'r', bytes.length, preset).step(bytes, 0).result, { ok: true });
   }
   assert.equal(schema.validate(bytes, 'r', { maxBytes: 0 }).reason, 'cbor/too_large');
   assert.equal(schema.validate(bytes, 'r', { budget: 0 }).reason, 'budget');

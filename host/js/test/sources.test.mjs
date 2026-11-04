@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { scanBuffer, scanHandle, scanHandleSync, pushScanner, bufferHandle, asyncHandle, SourceError } from '../src/sources.mjs';
+import { openSession, scanBuffer, scanHandle, scanHandleSync, pushScanner, bufferHandle, asyncHandle, SourceError } from '../src/sources.mjs';
 import { encode } from '../../../bench/baseline/cbor-3sln.mjs';
 
 const vectors = JSON.parse(readFileSync(new URL('../../../corpus/cbor-vectors/cbor-profile.json', import.meta.url)));
@@ -221,8 +221,10 @@ test('P6.2: a declared-length mismatch is a SourceError, not a verdict; an empty
 test('P6.2: a session owns its arrays; after the verdict it answers the verdict again', async () => {
   const schema = await compileSchema('r = [* tstr]');
   const bytes = encode(['a', 'bb', 'ccc']);
-  const a = schema.session('r', bytes.length), b = schema.session('r', bytes.length);
-  assert.notEqual(a.ss, b.ss); assert.notEqual(a.s, b.s); assert.notEqual(a.ka, b.ka);
+  const a = openSession(schema, 'r', bytes.length), b = openSession(schema, 'r', bytes.length);
+  assert.notEqual(a, b);
+  assert.equal(a.bytesHeld, b.bytesHeld);
+  for (const session of [a, b]) for (const key of ['ss', 's', 'ka', 'program']) assert.equal(session[key], undefined);
   let r = a.step(bytes.subarray(0, 2), 0);
   assert.equal(r.state, 'need');
   r = b.step(bytes, 0);

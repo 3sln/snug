@@ -3113,6 +3113,30 @@ flag and lifetime promise; return mutable aliases of the private copy. The
 extra range copy makes immutability enforceable for these testing helpers.
 - [ ] **Signed off** (owner)
 
+### D160 — Partition sessions behind snug/sources (P7.6 phase 2)
+**Decision** (manager; supersedes D108's JS entry placement): remove
+`Schema.session()` and expose synchronous
+`openSession(schema, rule, length, options?, scheduling?)` from `snug/sources`.
+Keep the existing positional rule/length/options/scheduling order after the
+schema argument, matching the former method and minimising driver migration.
+All session APIs and their types live behind sources; `snug/schema` keeps
+buffer validate/decode/validateAt, Programs and synchronous verification and
+serialisation. Extract a buffer core without internal async loader wrappers;
+a private WeakMap bridge supplies the already verified Program to sources.
+No public mutable Program/scratch access or global factory registration.
+**Why**: D108 is days old and pre-release; moving its method boundary removes
+the session drivers from schema's static graph without making synchronous
+operations async. Keep the kin session implementation and its SS_UNK/pending
+area, held/EOF protocol, extension controls and fail-fast driver unchanged.
+Public synchronous Program construction still requires vm-verify; move other
+host dependencies only where measurement and synchronous contracts allow it.
+**Alternatives**: retain Schema.session (keeps the session graph); a new
+buffer-only entry (duplicates the public Schema contract); async sessions or
+constructors, deferred input snapshots, side-effect factory registration or
+skipped verification (change behaviour). An options-only openSession bag adds
+an unnecessary option shape; positional arguments preserve existing checking.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-03 (P7.1): snug's own JS target (`kin/src/snug/js.cljc`) emits no
@@ -3480,7 +3504,7 @@ are answered as provisional decisions D082–D085. None is open now.
   (3) reconcile program.md §13.3's older exact-version text with D084/D100,
   including the major/minor word spelling; that document is outside this
   task's write set. Browser/Worker and broader release evidence remain P7.7.
-- [ ] **P7.6 — Bundle size** (R9: current codec + schema **53,870 B** vs 20 KB gzip).
+- [ ] **P7.6 — Bundle size** (R9: current codec + schema **41,553 B** vs 20 KB gzip).
   *Phase 1 completed 2026-11-03; R9 remains open. No kin/generated edits,
   network, installs or commits by this task.* Offline esbuild 0.28.2; full
   machine/method and before/after tables: [bench](bench/README.md#bundle-size-p76-phase-1--2026-11-03).
@@ -3543,7 +3567,8 @@ are answered as provisional decisions D082–D085. None is open now.
   module sizes are in the report. The analysis/proposals below use the paired
   baseline, not the other engineer's subsequent additions.
 
-  **D160 — Preserve synchronous APIs while splitting the async compiler.**
+  **Phase 1 decision — Preserve synchronous APIs while splitting the async compiler.**
+  *Session placement below is superseded by D160 (phase 2).*
   **Decision:** defer compiler + its schema facade together through the new
   compile-runtime re-export adapter; mark the package sideEffects:false.
   Keep vm-verify, serializer/SHA and session imports synchronous where the
@@ -3653,7 +3678,8 @@ are answered as provisional decisions D082–D085. None is open now.
   generic, no-verifier probe leaves codec+schema at **31,061 gzip B**, above
   R9. Meeting 20 KB needs additional kin/host implementation reductions and
   an explicit definition of which prepared/loading operations count; lazy
-  imports alone cannot establish it. The Phase 2 plan remains outstanding.
+  imports alone cannot establish it. Phase 2 was outstanding at this point
+  (completed below).
 
   **Gates actually run:** host/js npm test **1,284 passed, 0 failed/skipped**;
   all seven examples executed; npm run build staged successfully (also
@@ -3662,7 +3688,121 @@ are answered as provisional decisions D082–D085. None is open now.
   runtime unions. A scratch budget with snug.static.gzip = 0 exits **1**,
   reporting 14,174 > 0. Babashka 1.3.190's sandbox shutdown hook additionally
   prints a process-enumeration permission warning after success; direct Node
-  avoids it. No drift/emit, Rust, wasm or browser gates were run by P7.6.
+  avoids it. No drift/emit, Rust, wasm or browser gates were run by phase 1.
+
+  **Phase 2 — Session partitioning (completed 2026-11-03, D160).**
+  `openSession(schema, rule, length, options?, scheduling?)` in `snug/sources`
+  replaces `Schema.session`; positional arguments keep rule/length/options
+  checking and synchronous construction. Session types moved to sources.
+  `schema-core.mjs` holds buffer validation, decode, validateAt and Programs;
+  `schema.mjs` remains an internal compatibility entry for async compile/load
+  helpers. Public schema imports the core directly. A private WeakMap supplies
+  the same owned, verified Program to source sessions, without exposing arrays
+  or importing the public constructor/verifier from sources. No factory
+  registration, top-level await or dynamic session import.
+
+  The host VmSession class was moved **byte-for-byte unchanged** to
+  `vm-session.mjs`; the protective public window facade moved to
+  `open-session.mjs`. Handle and known/unknown push drivers now call the
+  factory. Unknown-length profile scanning constructs the same raw session
+  against ANY_P/ANY_B. SS_UNK/pending-area sizing still comes from kin's
+  vmsWords/vmsInitUnknown; held/EOF/keep/replay and fail-fast paths are
+  unchanged. Buffer, detached, encode/view and Rust/wasm implementations were
+  not edited. The default gate harness uses internal HostSchema through the
+  migrated source drivers and needed no edit.
+
+  **Additional host split:** extracting the buffer core removes the unused
+  internal compile/fromProgram lazy edges and their orphan emitted chunks.
+  Schema split initial/reachable/emitted gzip is now **33,575 B each**
+  (before: 50,475 / 50,475 / 91,245 B). Compile's actual reachable split gzip
+  falls **89,886 → 73,095 B**; its initial stub is 1,438 → 1,435 B.
+  Synchronous public `new Program(P,B)` still must verify before returning:
+  the verifier remains **19,732 retained minified B** in schema. No further
+  verifier/serializer loading move can preserve that constructor and
+  synchronous serialize while retaining this entry's complete public surface.
+  Verification and the fromSerialized input snapshot still run before the
+  Promise is returned. No verification was skipped or made asynchronous.
+
+  **Measurements:** Apple M1 Pro, Darwin 23.6.0 arm64; Node v24.6.0,
+  V8 13.6.233.10-node.24, esbuild 0.28.2, zlib 1.3.1-470d3a2,
+  brotli 1.1.0. Offline `tools/size/size.mjs`, browser ESM/ES2022,
+  minification and tree shaking, all exports retained; gzip 9, brotli 11.
+  Before uses a frozen source snapshot taken immediately before these edits;
+  generated module hashes common to both snapshots are identical. This
+  baseline includes the already landed drain/control additions and differs
+  from phase 1's older snapshots. Static excludes dynamic edges; full inlines
+  reachable dynamic imports. Both runtime unions exclude compiler/Unicode.
+  Persistent metrics, module hashes, ranked attribution, static graph edges
+  and split totals: `tools/size/phase2.json`. Measurements are recorded here
+  and there because this task's explicit write set excludes bench/README.md.
+  `tools/size/budget.json` now caps every min/gzip/brotli metric, static and
+  full independently, at **ceil(current shared-tree bytes × 1.02)**, including the
+  controls entry added since phase 1.
+
+  | Entry | Static min before → after | Static gzip before → after | Static brotli before → after | Full gzip before → after |
+  | --- | ---: | ---: | ---: | ---: |
+  | snug | 41,353 → 41,353 | 14,213 → 14,213 | 12,739 → 12,739 | 14,213 → 14,213 |
+  | snug/schema | 132,411 → 91,184 | 48,794 → 33,575 | 41,742 → 28,916 | 49,065 → 33,575 |
+  | snug/compile | 2,535 → 2,535 | 1,296 → 1,296 | 1,154 → 1,154 | 89,692 → 73,853 |
+  | snug/view | 54,103 → 54,103 | 18,366 → 18,366 | 16,406 → 16,406 | 18,366 → 18,366 |
+  | snug/writer | 37,865 → 37,865 | 13,035 → 13,035 | 11,662 → 11,662 | 13,035 → 13,035 |
+  | snug/unicode | 19,377 → 19,377 | 9,287 → 9,287 | 8,817 → 8,817 | 9,287 → 9,287 |
+  | snug/sources | 119,575 → 120,430 | 44,115 → 44,641 | 37,833 → 38,012 | 44,310 → 44,641 |
+  | snug/controls | 3,429 → 3,429 | 1,378 → 1,378 | 1,259 → 1,259 | 1,378 → 1,378 |
+  | runtime | 155,893 → 114,666 | 56,413 → 41,224 | 47,925 → 35,139 | 56,624 → 41,224 |
+  | all-runtime | 190,741 → 191,126 | 68,663 → 69,338 | 58,105 → 58,253 | 68,828 → 69,338 |
+
+  Schema saves **15,219 gzip B**; codec + schema saves **15,189 B**.
+  Sources grows **526 B**, and all-runtime grows **675 B** (static gzip);
+  partitioning relocates the drivers rather than deleting them. R9 remains
+  open at **41,224 B** codec + schema versus 20 KB.
+
+  **Validation:** `cd host/js && npm test` **1,303 passed, 0 failed/skipped**;
+  all eight examples ran independently and from the staged package;
+  `npm run build` produced a self-contained scratch package. Its existing
+  copy/rewrite staging includes the new core/session files automatically;
+  the package smoke test now calls openSession through the public export.
+  Added regression checks for the complete schema static graph (no
+  session*/sbase/scont/sstr or session facades), source graph without verifier
+  or internal loaders, raw unknown-length pending/held EOF settlement,
+  loaded-control Program ownership, forged schemas, private arrays and a
+  throwing predicate's session isolation. Declaration syntax/exports/imports
+  passed; offline TypeScript was unavailable (no semantic TS check claimed).
+  `bb size` **exit 0**, all +2% caps passed. `bb rust-api-test` **exit 0**,
+  public API/JS parity, stream/control tests, doctests and offline clippy;
+  no Rust API source/test edits. Babashka prints its known sandbox
+  process-enumeration shutdown warning after these successful gates.
+  `bb vmsession-test` **exit 0 at defaults** (20,000 mutations, seed 1,
+  400 oracle schemas, 60 stress): **969,521/969,521** whole-out-array matches,
+  91,201 trapped runs, 9,501 interleaved; JS == Rust **628,417/628,417**,
+  0 panics; hosts **8,247/8,247**. Unknown-length arm: drain
+  **474,486/474,486**, 36,351 behind traps; fail-fast **73,834/73,834**
+  (2,394 early refusals with another code/offset); unknown JS == Rust
+  **99,677/99,677**. Total 403.2 s. These full differential and Rust API gates
+  ran on the phase 2 paired snapshot, before the other engineer's subsequent
+  tag-level regeneration; no claim is made that they gate those later edits.
+
+  **Concurrent changes after the paired gates:** the tag-level engineer
+  subsequently regenerated kin and edited the host profile/value/view/Writer
+  paths. `tools/size/phase2.json.current` measures that later shared tree;
+  final caps use it +2%, without attributing those additions to this split.
+  Static gzip now: snug **14,549**, schema **33,761**, compile **1,296**,
+  view **18,746**, Writer **13,358**, Unicode **9,287**, sources **45,000**,
+  controls **1,378**, runtime **41,553**, all-runtime **69,970 B**.
+  A fresh npm test on that in-progress tag tree reported **1,294 pass / 9
+  fail**: old profile tests expecting newly admitted tags to be refused, and
+  the option allowlist still rejecting the new default `tags: 'any'` preset.
+  These changes belong to the concurrent tag task; they were not reverted or
+  repaired as part of session partitioning. The paired phase 2 suite above
+  passed before those edits.
+
+  **What was learnt:** a synchronous factory in sources can preserve verified
+  Program identity and private session storage while making schema genuinely
+  buffer-only. Removing the internal loader edges also removes real split
+  chunk overhead; the static byte reduction alone understates the startup
+  transfer change. The synchronous Program constructor keeps the verifier in
+  schema, and the all-runtime measurement makes the small relocation overhead
+  visible. No kin implementation optimization is claimed by this phase.
 - [x] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
   *Done 2026-11-03 by the P7.7 runtime engineer.* Harness and full record:
   `tools/runtime/` (`run.mjs`, `README.md`).
