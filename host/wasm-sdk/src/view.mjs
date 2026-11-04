@@ -15,6 +15,12 @@
 // ignored (the bytes must be in linear memory); a view's memory is freed by a
 // FinalizationRegistry, so it is held until the JS objects are collected, or
 // at once by view.release() (SDK extra).
+//
+// Profiles (D120, D123): the check runs under the view's profile flags; kinds
+// 'tagged' and 'undefined', keys of any kind (decoded by the native builder;
+// lookups encode the key with the native Writer under the view's profile, as
+// the native view does), tag/content()/isUndefined(); options through the
+// native validator (D150).
 import * as rt from './runtime.mjs';
 import { innerOf } from './schema.mjs';
 import { resolveLimits } from '../../js/src/limits.mjs';
@@ -22,6 +28,9 @@ import { SnugFault } from '../../js/src/fault.mjs';
 import { validationFault } from '../../js/src/public-errors.mjs';
 import { build } from '../../js/src/build.mjs';
 import { TYPED_BY_TAG } from '../../js/src/values.mjs';
+import { validateOptions, selectOptions } from '../../js/src/options.mjs';
+import { profileFlags, codecTop, keysOf } from '../../js/src/profiles.mjs';
+import { Writer } from '../../js/src/writer.mjs';
 
 const N_MAJOR = 0, N_AI = 1, N_HI = 2, N_LO = 3, NAV_NOT_FOUND = -3;
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
@@ -43,7 +52,10 @@ class Message {
     this.allocs = [[ptr, Math.max(n, 1)]];
     this.cose = opts.cose === true; this.objects = opts.objects; this.schema = opts.schema;
     this.batch = opts.batch !== false;
-    this.limits = { maxBytes: opts.maxBytes, maxDepth: opts.maxDepth, maxEntries: opts.maxEntries,
+    this.keys = keysOf(profileFlags(opts));
+    this.profile = { wire: opts.wire, keys: opts.keys, tags: opts.tags, floats: opts.floats,
+      undefinedValue: opts.undefinedValue, noncharacters: opts.noncharacters };
+    this.limits = { ...this.profile, maxBytes: opts.maxBytes, maxDepth: opts.maxDepth, maxEntries: opts.maxEntries,
       maxItems: opts.maxItems, maxBignumBytes: opts.maxBignumBytes, budget: opts.budget, cose: this.cose };
     this.dirs = opts.directories === true ? new Map() : null;
     this.dirWords = 0;
@@ -80,6 +92,8 @@ function ok(r) {
   throw new Error(`snug view: navigation failed (${r})`);
 }
 const nv = i => rt.i32[rt.NAV + i];
+// The tag whose kind a tag head has (D180): its number, or -2 (no known tag) beyond 32 bits.
+const ruleTag = () => (nv(N_HI) === 0 ? nv(N_LO) >>> 0 : -2);
 
 function kindAt(m, p) {
   m.head(p);
@@ -90,14 +104,14 @@ function kindAt(m, p) {
     case 3: return 'text';
     case 4: return 'array';
     case 5: return 'map';
-    case 6: { const t = nv(N_LO); return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : 'typed'; }
-    default: { const ai = nv(N_AI); return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : 'float'; }
+    case 6: { const t = ruleTag(); return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : TYPED_BY_TAG.has(t) ? 'typed' : 'tagged'; }
+    default: { const ai = nv(N_AI); return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : 'float'; }
   }
 }
 function lengthAt(m, p) {
   const c = m.head(p), major = nv(N_MAJOR);
   if (major >= 2 && major <= 5) return nv(N_LO);
-  if (major === 6) { const info = TYPED_BY_TAG.get(nv(N_LO)); if (info) { m.head(c); return nv(N_LO) / info.size; } }
+  if (major === 6) { const info = TYPED_BY_TAG.get(ruleTag()); if (info) { m.head(c); return nv(N_LO) / info.size; } }
   return undefined;
 }
 function textOf(m, start, n) {
@@ -116,8 +130,9 @@ function bigintAt(m, p) {
     const n = (BigInt(nv(N_HI) >>> 0) << 32n) | BigInt(nv(N_LO) >>> 0);
     return major === 0 ? n : -1n - n;
   }
-  want(major === 6 && (nv(N_LO) === 2 || nv(N_LO) === 3), 'an integer');
-  const tag = nv(N_LO), s = m.head(c), n = nv(N_LO);
+  const tag = ruleTag();
+  want(major === 6 && (tag === 2 || tag === 3), 'an integer');
+  const s = m.head(c), n = nv(N_LO);
   let v = 0n;
   for (let i = s; i < s + n; i++) v = (v << 8n) | BigInt(m.byte(i));
   return tag === 2 ? v : -1n - v;
@@ -147,14 +162,20 @@ function isNullAt(m, p) { m.head(p); return nv(N_MAJOR) === 7 && nv(N_AI) === 22
 function payloadAt(m, p) {
   const c = m.head(p);
   if (nv(N_MAJOR) === 2) return [c, c + nv(N_LO)];
-  want(nv(N_MAJOR) === 6 && TYPED_BY_TAG.has(nv(N_LO)), 'bytes');
+  want(nv(N_MAJOR) === 6 && TYPED_BY_TAG.has(ruleTag()), 'bytes');
   const s = m.head(c);
   return [s, s + nv(N_LO)];
 }
-function keyAt(m, q) { const c = m.head(q); if (nv(N_MAJOR) === 3) return textOf(m, c, nv(N_LO)); return intAt(m, q); }
+/** The decoded key at q: text, an integer, or (any key kind) the key's value as the builder makes it. */
+function keyAt(m, q) {
+  const c = m.head(q), major = nv(N_MAJOR);
+  if (major === 3) return textOf(m, c, nv(N_LO));
+  if (major <= 1) return intAt(m, q);
+  return build(m.sub(q, m.skip(q)).slice(), { objects: m.objects });
+}
 
 /** The encoded lookup key written into the wasm key scratch at `at`: [start, end) there, or null. */
-function encodeKey(key, cose, at = 0) {
+function encodeKey(key, cose, at = 0, m) {
   if (typeof key === 'string') {
     const len = key.length;
     if (len < 24) {
@@ -173,8 +194,7 @@ function encodeKey(key, cose, at = 0) {
     else { u[s] = 0x7a; u[s + 1] = written >>> 24; u[s + 2] = (written >> 16) & 255; u[s + 3] = (written >> 8) & 255; u[s + 4] = written & 255; }
     return [s - k, at + 9 + written];
   }
-  if (cose && (typeof key === 'number' || typeof key === 'bigint')) {
-    if (typeof key === 'number' && !Number.isSafeInteger(key)) return null;
+  if ((cose || (m !== undefined && m.keys !== 0)) && (typeof key === 'bigint' || (typeof key === 'number' && Number.isSafeInteger(key) && !Object.is(key, -0)))) {
     let n = BigInt(key), major = 0;
     if (n < 0n) { major = 1; n = -1n - n; }
     if (n >= 1n << 64n) return null;
@@ -185,14 +205,22 @@ function encodeKey(key, cose, at = 0) {
     for (let i = w; i >= 1; i--) { u[k + at + i] = Number(n & 255n); n >>= 8n; }
     return [at, at + 1 + w];
   }
+  if (m !== undefined && m.keys >= 2) {
+    // any key kind: the key's deterministic encoding under the view's profile (an unencodable key finds nothing)
+    let b;
+    try { b = new Writer({ ...m.profile, keysSorted: false }).value(key).finish(); } catch { return null; }
+    const k = rt.kbuf(at + b.length);
+    rt.u8.set(b, k + at);
+    return [at, at + b.length];
+  }
   return null;
 }
-function badKey(key) {
-  if (typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') throw new TypeError('snug view: a map key is a string (or an integer label in a cose view)');
+function badKey(key, m) {
+  if (m.keys < 2 && typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') throw new TypeError('snug view: a map key is a string or an integer here');
 }
 function findIn(m, p, n, key, cose) {
-  const span = encodeKey(key, cose);
-  if (span === null) { badKey(key); return -1; }
+  const span = encodeKey(key, cose, 0, m);
+  if (span === null) { badKey(key, m); return -1; }
   const d = m.dir(p, n);
   return ok(d !== null ? rt.x.sdk_nav_dir_find(m.ptr, m.end, d, n, span[0], span[1]) : rt.x.sdk_nav_find(m.ptr, m.end, p, span[0], span[1]));
 }
@@ -248,8 +276,8 @@ export class View {
         if (!Number.isInteger(s)) throw new TypeError('snug view: an index is an integer');
         rt.i32[w] = 0; rt.i32[w + 1] = s; rt.i32[w + 2] = 0;
       } else {
-        const span = encodeKey(s, m.cose && this._d === 0 && k === 0, at);
-        if (span === null) { badKey(s); return undefined; }
+        const span = encodeKey(s, m.cose && this._d === 0 && k === 0, at, m);
+        if (span === null) { badKey(s, m); return undefined; }
         rt.i32[w] = 1; rt.i32[w + 1] = span[0]; rt.i32[w + 2] = span[1]; at = span[1];
       }
     }
@@ -287,6 +315,21 @@ export class View {
   text() { return textAt(this._m, this._p); }
   bool() { return boolAt(this._m, this._p); }
   isNull() { return isNullAt(this._m, this._p); }
+  isUndefined() { this._m.head(this._p); return nv(N_MAJOR) === 7 && nv(N_AI) === 23; }
+  /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays; a bigint beyond 2^53 - 1), else
+   * undefined. */
+  get tag() {
+    this._m.head(this._p);
+    if (nv(N_MAJOR) !== 6) return undefined;
+    const hi = nv(N_HI) >>> 0, lo = nv(N_LO) >>> 0;
+    return hi <= 0x1fffff ? hi * 4294967296 + lo : (BigInt(hi) << 32n) | BigInt(lo);
+  }
+  /** A View of a tagged item's content. */
+  content() {
+    const m = this._m, c = m.head(this._p);
+    want(nv(N_MAJOR) === 6, 'a tagged item');
+    return new View(m, c, this._d + 1);
+  }
   /** A copy (an alias into linear memory would not survive memory growth). */
   bytes() { const [s, e] = payloadAt(this._m, this._p); return this._m.sub(s, e).slice(); }
   copyBytes() { return this.bytes(); }
@@ -310,8 +353,9 @@ export class View {
   raw() { return this._m.sub(this._p, this._m.skip(this._p)).slice(); }
   value() { return valueAt(this._m, this._p, this._d); }
   cursor() { return new Cursor(this); }
-  validateAt(rule, { schema } = {}) {
-    const m = this._m, s = schema ?? m.schema;
+  validateAt(rule, options = {}) {
+    validateOptions(options, 'viewSpan');
+    const m = this._m, s = options.schema ?? m.schema;
     if (!s) throw new TypeError('snug view: validateAt needs a schema');
     const e = m.skip(this._p), inner = innerOf(s.program), ri = s.ruleIndex(rule);
     try {
@@ -344,7 +388,7 @@ export class Cursor {
   }
   keyIs(s) {
     if (this._k < 0) return false;
-    const m = this._m, e = m.skip(this._k), span = encodeKey(s, false);
+    const m = this._m, e = m.skip(this._k), span = encodeKey(s, false, 0, undefined);
     if (span === null || e - this._k !== span[1] - span[0]) return false;
     const u = rt.u8, k = rt.kbuf(0);
     for (let i = 0; i < e - this._k; i++) if (u[m.ptr + this._k + i] !== u[k + span[0] + i]) return false;
@@ -411,6 +455,14 @@ export class Cursor {
 /** Open a checked view: the bytes are copied into linear memory and checked there (the schema VM with a schema,
  * else the profile scanner). Options as the native view's, plus `batch` (default true). */
 export function view(bytes, opts = {}) {
+  // `batch` (SDK extra) is checked here; every other key by the native validator
+  let rest = opts;
+  if (opts !== null && typeof opts === 'object' && Object.hasOwn(opts, 'batch')) {
+    const { batch, ...others } = opts;
+    rest = others;
+    if (opts.batch !== undefined && typeof opts.batch !== 'boolean') throw new TypeError('Invalid options.batch option.');
+  }
+  validateOptions(rest, 'view');
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug view: bytes must be a Uint8Array');
   if (isShared(bytes)) throw new TypeError('snug view: SharedArrayBuffer-backed input is refused (architecture §16.2)');
   rt.ready();
@@ -421,11 +473,10 @@ export function view(bytes, opts = {}) {
     rt.u8.set(bytes, ptr);
     if (opts.schema) {
       if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
-      r = innerOf(opts.schema.program).runAt(opts.schema.ruleIndex(opts.rule), ptr, n, opts);
+      r = innerOf(opts.schema.program).runAt(opts.schema.ruleIndex(opts.rule), ptr, n, selectOptions(opts, 'validation'));
     } else {
-      const top = opts.top ?? 'map'; if (top !== 'map' && top !== 'any') throw new TypeError("top must be 'map' or 'any'.");
-      const limits = resolveLimits(opts);
-      const code = rt.x.sdk_scan(ptr, n, top === 'any' ? 1 : 0, opts.cose === true ? 1 : 0, clamp(limits.maxBytes), clamp(limits.maxDepth), clamp(limits.maxEntries), clamp(limits.maxItems));
+      const o = selectOptions(opts, 'decode'), top = codecTop(o), limits = resolveLimits(o);
+      const code = rt.x.sdk_scan(ptr, n, top === 'any' ? 1 : 0, o.cose === true ? 1 : 0, clamp(limits.maxBytes), clamp(limits.maxDepth), clamp(limits.maxEntries), clamp(limits.maxItems), profileFlags(o));
       if (code !== 0) r = { code };
     }
   } catch (e) {

@@ -1,7 +1,9 @@
 // P7.9 (D005 re-take): the wasm instance behind the SDK. snug's Rust build
 // (host/wasm/src/sdk.rs, `kin/scripts/wasm-build sdk`) exports a plain integer
-// ABI: no wasm-bindgen, no imports. This module owns the one instance per
-// isolate, the views over its memory, and instance loss.
+// ABI: no wasm-bindgen, one import (D170): `env.snug_ext`, which asks the
+// extension-control predicate of the Program in the current call (`withExt`).
+// This module owns the one instance per isolate, the views over its memory,
+// and instance loss.
 //
 //   await init(source?)   source: a WebAssembly.Module (workerd imports .wasm
 //                         modules), bytes, a Response, a URL; in Node with no
@@ -30,8 +32,34 @@ export class InstanceLost extends Error {
   constructor(cause) { super('snug wasm: the instance trapped and was reset; no verdict was reached'); this.name = 'InstanceLost'; this.cause = cause; }
 }
 
+// ---------------------------------------------------------------- extension controls (D170)
+// The VM asks a host predicate through the import while a validate or session
+// step is inside wasm. The bound predicate (ext.mjs bindControls) is set for the
+// duration of that one call; the predicate gets COPIES of the argument and the
+// item (an alias into linear memory would change under it), and any SDK call it
+// makes meets a guard instead of re-entering the instance (whose Rust state is
+// borrowed for the call): that error, like any other the predicate throws, is
+// recorded by bindControls and rethrown after the call (ext.mjs rethrow).
+let current = null;
+const GUARD = new Proxy({}, { get() { throw new Error('snug wasm: an extension control called back into snug'); } });
+function snugExt(id, ap, al, ip, il) {
+  const bound = current;
+  if (bound === null || bound.failure) return 0;
+  refresh();
+  const arg = u8.slice(ap, ap + al), item = u8.slice(ip, ip + il), saved = x;
+  x = GUARD;
+  try { return bound.call(id, arg, 0, al, item, 0, il) ? 1 : 0; } finally { x = saved; }
+}
+/** Run f (one wasm call) with `bound` answering the Program's extension controls. */
+export function withExt(bound, f) {
+  if (bound === null) return f();
+  const before = current;
+  current = bound;
+  try { return f(); } finally { current = before; }
+}
+
 function start() {
-  inst = new WebAssembly.Instance(mod, {});
+  inst = new WebAssembly.Instance(mod, { env: { snug_ext: snugExt } });
   x = inst.exports;
   buf = null; refresh();
   OUT = x.sdk_out() >> 2; INFO = x.sdk_info() >> 2; NAV = x.sdk_nav_words() >> 2;
@@ -55,7 +83,10 @@ export function lost(e) {
   throw e;
 }
 
-export function ready() { if (x === null) throw new Error('snug wasm: call init() first'); }
+export function ready() {
+  if (x === GUARD) throw new Error('snug wasm: an extension control called back into snug');
+  if (x === null) throw new Error('snug wasm: call init() first');
+}
 
 const DEFAULT = '../../../.cache/snug-wasm-sdk/target/wasm32-unknown-unknown/release/snug_wasm.wasm';
 

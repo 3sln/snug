@@ -36,5 +36,6 @@
               :task (apply shell "kin/scripts/write-test" *command-line-args*)}
   proptest   {:doc "P4.2: the property-based campaign (schema x value vs the oracle, codec, views, serialised Programs, robustness, Rust-parity gates); findings in tools/proptest/findings/."
               :task (apply shell "node" "tools/proptest/campaign.mjs" *command-line-args*)}
+  wasm-sdk-test {:doc "P7.9 follow-up: build the wasm SDK modules (SKIP without the nightly toolchain); the SDK == native JS on vm-test's case set (validate, decode, encode, views, sessions, compile) + instance loss." :task (apply shell "sh" "host/wasm-sdk/test/run" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

@@ -6,10 +6,11 @@
 #![allow(dead_code)]
 pub mod snug;
 
-// P7.9 (D005 re-take): the SDK runtime exports (sdk.rs, growable memory) and
+// P7.9 (D005 re-take): the SDK runtime exports (sdk.rs, growable memory; one
+// import since D170, `env.snug_ext`, for extension-control predicates) and
 // the compiler module (cc.rs over host/rust/src/compile.rs), each its own
 // build (`kin/scripts/wasm-build sdk|sdk-size|cc`, cargo features). The
-// default build is the P1.4/P3.4 module below, unchanged.
+// default build is the P1.4/P3.4 module below, unchanged (no imports).
 #[cfg(feature = "sdk")]
 mod sdk;
 #[cfg(feature = "compiler")]

@@ -1,0 +1,15 @@
+#!/bin/sh
+# bb wasm-sdk-test [mutations] [seed] [schemas]: build the SDK runtime and
+# compiler modules (kin/scripts/wasm-build sdk, cc) and run the parity gate
+# (host/wasm-sdk/test/parity.test.mjs) on bb vm-test's case set. Without the
+# nightly wasm toolchain the build answers SKIP (exit 3): this says SKIP loudly
+# and exits 0, never claiming a pass.
+cd "$(dirname "$0")/../../.."
+for mode in sdk cc; do
+  kin/scripts/wasm-build "$mode" > /dev/null
+  status=$?
+  if [ "$status" -eq 3 ]; then echo "SKIP bb wasm-sdk-test -- the wasm toolchain is missing (kin/scripts/wasm-build $mode); parity NOT run"; exit 0; fi
+  if [ "$status" -ne 0 ]; then echo "FAIL kin/scripts/wasm-build $mode exited $status"; exit "$status"; fi
+done
+SNUG_PARITY_MUTATIONS="${1:-20000}" SNUG_PARITY_SEED="${2:-1}" SNUG_PARITY_SCHEMAS="${3:-400}" \
+  exec node --test --test-reporter=spec host/wasm-sdk/test/parity.test.mjs

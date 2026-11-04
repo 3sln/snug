@@ -1,6 +1,10 @@
 //! P7.9 (D005 re-take): the runtime exports a JS SDK needs to put the whole
-//! public API over wasm (host/wasm-sdk). Still a plain integer ABI: no
-//! wasm-bindgen, no imports. Unlike the P1.4/P3.4 exports in lib.rs (static
+//! public API over wasm (host/wasm-sdk). Still a plain integer ABI and no
+//! wasm-bindgen; ONE import (D170): `env.snug_ext(id, argPtr, argLen,
+//! itemPtr, itemLen) -> i32`, the host predicate of an extension control a
+//! Program binds to the host (the generic controls run here, in kin's Rust).
+//! Profile flags (D120) are an explicit argument of every scanner, VM and
+//! writer export. Unlike the P1.4/P3.4 exports in lib.rs (static
 //! buffers sized for the default bounds), memory here is std's allocator, so
 //! the module starts small and grows on demand (linear memory never shrinks;
 //! the SDK measures that and can drop the instance).
@@ -11,12 +15,16 @@
 //! o[8]) into `sdk_nav_words()`. Nothing here decides accept or refuse: every
 //! verdict, head, order and float width is a generated kin function (D003).
 use crate::snug::cbor::rscan::{rscan_init, rscan_need_length, rscan_need_offset, rscan_position, rscan_scratch_len, rscan_step};
-use crate::snug::cbor::scan::{code_name, error_offset, scan, scan_options};
+use crate::snug::cbor::scan::{code_name, error_offset, scan, scan_options, scan_profile};
+use crate::snug::cbor::stdtags::{std_content_ok, std_inner};
 use crate::snug::nav::walk::{nav_child, nav_dir, nav_dir_find, nav_find, nav_head, nav_init, nav_skip, N_LO, N_MAJOR, N_STEPS};
 use crate::snug::program::verify::vm_verify;
-use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span};
-use crate::snug::vm::session::{vms_arena, vms_init, vms_keep, vms_need_length, vms_need_offset, vms_position, vms_step, vms_words};
-use crate::snug::write::float::put_float;
+use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span,
+                           vm_validate_span_x, vm_validate_x};
+use crate::snug::vm::controls::{chars_ok, samelen_ok, unique_ok, unique_words};
+use crate::snug::vm::session::{vms_arena, vms_eof, vms_init, vms_init_unknown, vms_keep, vms_need_length,
+                               vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
+use crate::snug::write::float::{put_float, put_float_rfc};
 use crate::snug::write::int::put_int;
 use crate::snug::write::map::{sort_keys, S_BUDGET};
 use crate::snug::write::out::{put_head, WR_NEED};
@@ -28,6 +36,41 @@ const OUTW: usize = 8 + 2 * 257;
 struct Prog {
     p: Vec<i32>,
     b: Vec<u8>,
+    /// Per extension-control id (D141): 0 the host predicate (the import),
+    /// 1 `.chars`, 2 `.unique`, 3 `.samelen` (kin's generic controls, D142).
+    /// Empty: the Program uses no control, or is not bound yet.
+    ext: Vec<i32>,
+}
+
+#[link(wasm_import_module = "env")]
+extern "C" {
+    /// The host predicate for control `id` of the Program in the current call:
+    /// the argument's encoding at [ap, ap+al), the item's at [ip, ip+il), both
+    /// in linear memory and valid only during the call. 1 matches.
+    fn snug_ext(id: i32, ap: *const u8, al: i32, ip: *const u8, il: i32) -> i32;
+}
+
+struct Uniq(UnsafeCell<Vec<i32>>);
+unsafe impl Sync for Uniq {}
+static UNIQ: Uniq = Uniq(UnsafeCell::new(Vec::new()));
+
+/// One extension-control query (D140): a generic control in kin, else the import.
+fn ext_call(kinds: &[i32], id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32) -> bool {
+    match kinds.get(id as usize).copied().unwrap_or(0) {
+        1 => chars_ok(pool, ao, al, b, s, e),
+        2 => {
+            // SAFETY: single-threaded; only this arm touches UNIQ, never re-entered.
+            let t = unsafe { &mut *UNIQ.0.get() };
+            let need = unique_words(e - s) as usize;
+            if t.len() < need { t.resize(need, 0); }
+            let ok = unique_ok(&b[..e as usize], s, e, t);
+            if t.len() > 1 << 20 { *t = Vec::new(); }
+            ok
+        }
+        3 => samelen_ok(pool, ao, al, b, s, e),
+        // SAFETY: the pointers are in bounds of live slices for the call's duration.
+        _ => unsafe { snug_ext(id, pool.as_ptr().add(ao as usize), al, b.as_ptr().add(s as usize), e - s) == 1 },
+    }
 }
 
 enum Sess {
@@ -164,13 +207,15 @@ unsafe fn bytes<'a>(p: *const u8, n: usize) -> &'a [u8] {
 
 // ---------------------------------------------------------------- profile scan
 
-/// Scan [p, p+n): 0 or a profile code; the error offset in INFO[0].
+/// Scan [p, p+n) under the profile flags: 0 or a profile code; the error offset in INFO[0].
 #[no_mangle]
+#[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_scan(p: *const u8, n: usize, top_any: i32, cose: i32, max_bytes: i32, max_depth: i32,
-                           max_entries: i32, max_items: i32) -> i32 {
+                           max_entries: i32, max_items: i32, flags: i32) -> i32 {
     let b = unsafe { bytes(p, n) };
     let mut o = [0i32; 16];
     scan_options(&mut o, top_any, cose, max_bytes, max_depth, max_entries, max_items);
+    scan_profile(&mut o, flags);
     let c = scan(b, &mut o);
     st().info[0] = error_offset(&mut o);
     c
@@ -198,8 +243,14 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
         return -1;
     }
     let slot = st.progs.iter().position(|x| x.is_none()).unwrap_or_else(|| { st.progs.push(None); st.progs.len() - 1 });
-    st.progs[slot] = Some(Prog { p, b });
+    st.progs[slot] = Some(Prog { p, b, ext: Vec::new() });
     slot as i32
+}
+/// Bind Program h's extension controls: n kinds (see `Prog::ext`) at kp.
+#[no_mangle]
+pub extern "C" fn sdk_prog_bind(h: usize, kp: *const i32, n: usize) {
+    let kinds = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(kp, n) }.to_vec() };
+    if let Some(Some(pr)) = st().progs.get_mut(h) { pr.ext = kinds; }
 }
 #[no_mangle]
 pub extern "C" fn sdk_prog_free(h: usize) {
@@ -227,28 +278,43 @@ fn lease(s: &mut State, h: usize, rule: i32) -> bool {
     true
 }
 
-/// vm-validate over [p, p+n) against `rule` of Program h; the out words in OUT.
+/// vm-validate over [p, p+n) against `rule` of Program h, limits words 0..7
+/// and the profile flags (word 9); the out words in OUT.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_validate(h: usize, rule: i32, p: *const u8, n: usize, l0: i32, l1: i32, l2: i32, l3: i32,
-                               l4: i32, l5: i32, l6: i32, l7: i32) -> i32 {
+                               l4: i32, l5: i32, l6: i32, l7: i32, flags: i32) -> i32 {
     let s = st();
     if !lease(s, h, rule) { return -100; }
     let pr = s.progs[h].as_ref().unwrap();
-    let lim = [l0, l1, l2, l3, l4, l5, l6, l7];
-    vm_validate(&pr.p, &pr.b, rule, unsafe { bytes(p, n) }, &lim, &mut s.scratch, &mut s.out)
+    let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
+    let input = unsafe { bytes(p, n) };
+    if pr.p[30] > 0 {
+        let k = &pr.ext;
+        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| ext_call(k, id, pool, ao, al, b, st, e);
+        vm_validate_x(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out, &f)
+    } else {
+        vm_validate(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out)
+    }
 }
 /// vm-validate-span: the span [start, end) of [p, p+n) as its own document.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_validate_span(h: usize, rule: i32, p: *const u8, n: usize, start: i32, end: i32, depth: i32,
                                     items: i32, l0: i32, l1: i32, l2: i32, l3: i32, l4: i32, l5: i32, l6: i32,
-                                    l7: i32) -> i32 {
+                                    l7: i32, flags: i32) -> i32 {
     let s = st();
     if !lease(s, h, rule) { return -100; }
     let pr = s.progs[h].as_ref().unwrap();
-    let lim = [l0, l1, l2, l3, l4, l5, l6, l7];
-    vm_validate_span(&pr.p, &pr.b, rule, unsafe { bytes(p, n) }, start, end, depth, items, &lim, &mut s.scratch, &mut s.out)
+    let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
+    let input = unsafe { bytes(p, n) };
+    if pr.p[30] > 0 {
+        let k = &pr.ext;
+        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| ext_call(k, id, pool, ao, al, b, st, e);
+        vm_validate_span_x(&pr.p, &pr.b, rule, input, start, end, depth, items, &lim, &mut s.scratch, &mut s.out, &f)
+    } else {
+        vm_validate_span(&pr.p, &pr.b, rule, input, start, end, depth, items, &lim, &mut s.scratch, &mut s.out)
+    }
 }
 
 // ---------------------------------------------------------------- navigation over checked bytes at [m, m+n)
@@ -400,27 +466,39 @@ fn put_session(s: &mut State, x: Sess) -> i32 {
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_rs_new(total: i32, quantum: i32, top_any: i32, cose: i32, max_bytes: i32, max_depth: i32,
-                             max_entries: i32, max_items: i32) -> i32 {
+                             max_entries: i32, max_items: i32, flags: i32) -> i32 {
     let mut o = [0i32; 16];
     scan_options(&mut o, top_any, cose, max_bytes, max_depth, max_entries, max_items);
+    scan_profile(&mut o, flags);
     let mut s = vec![0i32; rscan_scratch_len(max_depth, total.min(max_bytes)) as usize];
     rscan_init(&mut o, &mut s, total, quantum);
     put_session(st(), Sess::Scan { o, s, w: Vec::new() })
 }
-/// A resumable VM validation (vms) of `total` bytes against `rule` of Program h; -1 on a bad handle.
+/// A resumable VM validation (vms) of `total` bytes against `rule` of Program h,
+/// or (total < 0, D085) of unknown length in drain mode, its input limit in
+/// INFO[0]; -1 on a bad handle.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: i32, l1: i32, l2: i32, l3: i32,
-                             l4: i32, l5: i32, l6: i32, l7: i32) -> i32 {
+                             l4: i32, l5: i32, l6: i32, l7: i32, flags: i32) -> i32 {
     let st = st();
     let pr = match st.progs.get(h) { Some(Some(pr)) => pr, _ => return -1 };
-    let lim = [l0, l1, l2, l3, l4, l5, l6, l7];
+    let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
     let cap = pr.p[16].max(1);
     let mut s = vec![0i32; vm_scratch_words(&pr.p, rule, cap) as usize];
     vm_scratch_init(&mut s, cap);
     let mut ss = vec![0i32; vms_words(&pr.p) as usize];
-    let mut ka = vec![0u8; vms_arena(&pr.p, &lim, total) as usize];
-    let c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
+    let c;
+    let mut ka;
+    if total < 0 {
+        let limit = vms_unknown_total(&pr.p, &lim);
+        st.info[0] = limit;
+        ka = vec![0u8; vms_arena(&pr.p, &lim, limit) as usize];
+        c = vms_init_unknown(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
+    } else {
+        ka = vec![0u8; vms_arena(&pr.p, &lim, total) as usize];
+        c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
+    }
     if c < 0 { return -2; }
     put_session(st, Sess::Vm { prog: h, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
 }
@@ -434,8 +512,8 @@ pub extern "C" fn sdk_ses_window(h: usize, n: usize) -> *mut u8 {
 }
 /// One step over window[0..n) holding message bytes from `base`. Answers the
 /// session's code (rscan: 0, a profile code, -1 need, -2 yield; vms: >= 0 done
-/// with out words copied to OUT, -64 need, -65 yield). INFO: need offset, need
-/// length, position, keep.
+/// or -67 held, with out words copied to OUT, -64 need, -65 yield). INFO: need
+/// offset, need length, position, keep.
 #[no_mangle]
 pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 {
     let st = st();
@@ -451,9 +529,32 @@ pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 {
         }
         Some(Some(Sess::Vm { prog, s, ss, ka, out, w })) => {
             let pr = match progs.get(*prog) { Some(Some(pr)) => pr, _ => return -100 };
-            let r = vms_step(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base);
+            let r = if pr.p[30] > 0 {
+                let k = &pr.ext;
+                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32| ext_call(k, id, pool, ao, al, b, st, e);
+                vms_step_x(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base, &f)
+            } else {
+                vms_step(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base)
+            };
             st.info[0] = vms_need_offset(ss);
             st.info[1] = vms_need_length(ss);
+            st.info[2] = vms_position(ss);
+            st.info[3] = vms_keep(ss);
+            if r >= 0 || r == -67 { st.out.copy_from_slice(&out[..OUTW]); }
+            r
+        }
+        _ => -100,
+    }
+}
+/// D085: the end of an unknown-length message after n bytes (vms-eof). Answers
+/// >= 0 done (OUT), -68 resume (INFO[2] position, INFO[3] keep), or another
+/// negative vms answer.
+#[no_mangle]
+pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
+    let st = st();
+    match st.sessions.get_mut(h) {
+        Some(Some(Sess::Vm { ss, out, .. })) => {
+            let r = vms_eof(ss, out, n);
             st.info[2] = vms_position(ss);
             st.info[3] = vms_keep(ss);
             if r >= 0 { st.out.copy_from_slice(&out[..OUTW]); }
@@ -469,15 +570,23 @@ pub extern "C" fn sdk_ses_free(h: usize) {
 
 // ---------------------------------------------------------------- encode: a tape the JS walk wrote
 //
-// The JS walk (host-value admission, items/depth/entries bounds) writes ops;
-// this turns them into deterministic CBOR with kin's writer primitives.
-//   [1, major, hi, lo]   a head; major 4 is followed by lo items, major 6 by one
-//   [2, hi, lo]          a float from binary64 bits (kin picks the width or refuses)
+// The JS walk (host-value admission, items/depth/entries bounds, key kinds,
+// the standard tag set's membership) writes ops; this turns them into
+// deterministic CBOR with kin's writer primitives under the profile flags.
+//   [1, major, hi, lo]   a head; major 4 is followed by lo items
+//   [2, hi, lo]          a float from binary64 bits (kin picks the width or
+//                        refuses; the deterministic rules under PF_FLOATS)
 //   [3, off, len]        text, UTF-8 in the byte area
 //   [4, off, len]        a byte string from the byte area
 //   [5, neg, off, len]   an integer from big-endian magnitude bytes (bignums)
-//   [6, n, key ops (n of [3,..] or [1,..]), n value-start indices, values]
-//                         a map: kin orders the keys before any value is written
+//   [6, n, n key items, n value-start indices, values]
+//                        a map: each key is any item (encoded into the key
+//                        scratch); kin orders the keys before any value is written
+//   [7, hi, lo, rule, content]
+//                        a tag outside the Bindle set (D121, D180): the number
+//                        hi:lo, its rule tag (the number, or -1/-2 beyond 32
+//                        bits); kin checks the content after writing it
+//                        (std-content-ok on the rule tag; a tag-24 payload by the scanner)
 
 /// The tape, at least n words (contents kept).
 #[no_mangle]
@@ -495,6 +604,10 @@ pub extern "C" fn sdk_enc_out() -> *const u8 {
 }
 
 const ENC_DEPTH: i32 = 4096;
+/// A tag's content refused by kin (`tag`).
+const ENC_TAG: i32 = -1001;
+/// A tag-24 payload refused by the scanner: ENC_SCAN - code.
+const ENC_SCAN: i32 = -2000;
 
 fn ensure(v: &mut Vec<u8>, at: usize, need: usize) {
     if at + need > v.len() {
@@ -524,6 +637,9 @@ struct Enc<'a> {
     pairs: &'a mut Vec<i32>,
     x: &'a mut Vec<i32>,
     ws: &'a mut [i32; 4],
+    /// The profile flags, and the tag-24 payload scan's options (D121).
+    flags: i32,
+    scan: [i32; 5],
 }
 
 impl Enc<'_> {
@@ -537,21 +653,31 @@ impl Enc<'_> {
         self.out[self.pos..self.pos + len].copy_from_slice(&self.bytes[off..off + len]);
         self.pos += len;
     }
-    /// One key op at i into the key scratch: its span there, and the next op.
-    fn key(&mut self, i: usize) -> Result<(usize, usize, usize), i32> {
-        let t = self.tape;
-        let ks = self.kpos;
-        if t[i] == 3 {
-            let (off, len) = (t[i + 1] as usize, t[i + 2] as usize);
-            self.kpos = kin_put(self.keys, ks, |o| put_head(o, ks as i32, 3, 0, len as i32))?;
-            ensure(self.keys, self.kpos, len);
-            self.keys[self.kpos..self.kpos + len].copy_from_slice(&self.bytes[off..off + len]);
-            self.kpos += len;
-            Ok((ks, self.kpos, i + 3))
-        } else {
-            self.kpos = kin_put(self.keys, ks, |o| put_head(o, ks as i32, t[i + 1], t[i + 2], t[i + 3]))?;
-            Ok((ks, self.kpos, i + 4))
+    /// The n key items from tape index j, each written at the output's end and
+    /// moved into the key scratch, then ordered by kin (sort-keys: duplicates
+    /// refused). Answers the index after them, the key scratch and pair-table
+    /// marks, and the order's position in x.
+    fn keys_sorted(&mut self, mut j: usize, n: usize, depth: i32) -> Result<(usize, usize, usize, usize), i32> {
+        let (kb0, base) = (self.kpos, self.pairs.len());
+        for _ in 0..n {
+            let start = self.pos;
+            j = self.item(j, depth + 1)?;
+            let len = self.pos - start;
+            let ks = self.kpos;
+            ensure(self.keys, ks, len);
+            self.keys[ks..ks + len].copy_from_slice(&self.out[start..start + len]);
+            self.kpos = ks + len;
+            self.pos = start;
+            self.pairs.push(ks as i32);
+            self.pairs.push(self.kpos as i32);
         }
+        let xb = self.x.len();
+        self.x.resize(xb + 2 * n, 0);
+        self.ws[0] = 0;
+        self.ws[S_BUDGET as usize] = i32::MAX;
+        let r = sort_keys(self.keys, self.pairs, base as i32, n as i32, self.x, xb as i32, self.ws);
+        if r != 0 { return Err(r); }
+        Ok((j, kb0, base, xb))
     }
     /// The item at tape index i; answers the index after it.
     fn item(&mut self, i: usize, depth: i32) -> Result<usize, i32> {
@@ -572,7 +698,8 @@ impl Enc<'_> {
             2 => {
                 let at = self.pos;
                 let (hi, lo) = (t[i + 1], t[i + 2]);
-                self.pos = kin_put(self.out, at, |o| put_float(o, at as i32, hi, lo))?;
+                let rfc = self.flags & 16 != 0;
+                self.pos = kin_put(self.out, at, |o| if rfc { put_float_rfc(o, at as i32, hi, lo) } else { put_float(o, at as i32, hi, lo) })?;
                 Ok(i + 3)
             }
             3 | 4 => {
@@ -591,23 +718,8 @@ impl Enc<'_> {
             6 => {
                 let n = t[i + 1] as usize;
                 self.head(5, 0, n as i32)?;
-                let mut j = i + 2;
-                if n == 0 { return Ok(j); }
-                // the keys, encoded into the key scratch; kin orders them
-                let (kb0, base) = (self.kpos, self.pairs.len());
-                for _ in 0..n {
-                    let (ks, ke, next) = self.key(j)?;
-                    self.pairs.push(ks as i32);
-                    self.pairs.push(ke as i32);
-                    j = next;
-                }
-                let slots = j;
-                let xb = self.x.len();
-                self.x.resize(xb + 2 * n, 0);
-                self.ws[0] = 0;
-                self.ws[S_BUDGET as usize] = i32::MAX;
-                let r = sort_keys(self.keys, self.pairs, base as i32, n as i32, self.x, xb as i32, self.ws);
-                if r != 0 { return Err(r); }
+                if n == 0 { return Ok(i + 2); }
+                let (slots, kb0, base, xb) = self.keys_sorted(i + 2, n, depth)?;
                 let mut end = slots + n;
                 for k in 0..n {
                     let p = self.x[xb + k] as usize;
@@ -624,21 +736,64 @@ impl Enc<'_> {
                 self.kpos = kb0;
                 Ok(end)
             }
+            7 => {
+                let (hi, lo, tag) = (t[i + 1], t[i + 2], t[i + 3]);
+                self.head(6, hi, lo)?;
+                let q = self.pos;
+                let j = self.item(i + 4, depth + 1)?;
+                let end = self.pos;
+                if !std_content_ok(&self.out[..end], tag, q as i32, end as i32) { return Err(ENC_TAG); }
+                if tag == 24 {
+                    let inner = std_inner(&self.out[..end], q as i32) as usize;
+                    let mut o = [0i32; 16];
+                    let c = self.scan;
+                    scan_options(&mut o, 1, c[0], c[1], c[2], c[3], c[4]);
+                    scan_profile(&mut o, self.flags);
+                    let code = scan(&self.out[inner..end], &mut o);
+                    if code != 0 { return Err(ENC_SCAN - code); }
+                }
+                Ok(j)
+            }
             _ => Err(-4),
         }
     }
 }
 
-/// Encode the tape's first item: the output length (bytes at `sdk_enc_out()`),
-/// or a negative kin code (-7 duplicate_key, -9 float, -12 bignum, ...).
+/// The n map keys written on the tape from index `at`, encoded and ordered as
+/// the map op would (D172): 0, or the negative code the run would answer for
+/// them. The JS walk asks this for a Map whose keys could collide in encoding
+/// before it walks the values, as the native walk refuses duplicate keys there.
 #[no_mangle]
-pub extern "C" fn sdk_enc_run() -> i32 {
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn sdk_enc_keys(at: usize, n: usize, flags: i32, cose: i32, max_bytes: i32, max_depth: i32,
+                               max_entries: i32, max_items: i32) -> i32 {
     let s = st();
     s.pairs.clear();
     s.x.clear();
     let mut e = Enc {
         tape: &s.tape, bytes: &s.bytes, out: &mut s.eout, pos: 0, keys: &mut s.keys, kpos: 0,
-        pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws,
+        pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws, flags,
+        scan: [cose, max_bytes, max_depth, max_entries, max_items],
+    };
+    match e.keys_sorted(at, n, 0) { Ok(_) => 0, Err(r) => r }
+}
+
+/// Encode the tape's first item under the profile flags: the output length
+/// (bytes at `sdk_enc_out()`), or a negative code: a kin writer code (-7
+/// duplicate_key, -9 float, -12 bignum, ...), -1000 too deep, -1001 a tag's
+/// content (`tag`), -2000 - c a tag-24 payload the scanner refused with c
+/// (scanned with cose and the limits given, top any).
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn sdk_enc_run(flags: i32, cose: i32, max_bytes: i32, max_depth: i32, max_entries: i32,
+                              max_items: i32) -> i32 {
+    let s = st();
+    s.pairs.clear();
+    s.x.clear();
+    let mut e = Enc {
+        tape: &s.tape, bytes: &s.bytes, out: &mut s.eout, pos: 0, keys: &mut s.keys, kpos: 0,
+        pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws, flags,
+        scan: [cose, max_bytes, max_depth, max_entries, max_items],
     };
     match e.item(0, 0) {
         Ok(_) => { s.epos = e.pos; e.pos as i32 }
