@@ -131,7 +131,7 @@ if (process.env.SEQ_DRY) {
 for (const q of manySmall) { seqs.push(q); runs.push({ si: seqs.length - 1, policy: { kind: 0, q: 0 }, skip: false, ff: false, rust: true }); counts.whole++; }
 const t1 = performance.now();
 let late = 0, lateMsgs = 0;
-const js = runs.map(r => {
+const js = process.env.SEQ_HOSTONLY ? runs.map(() => '') : runs.map(r => {
   const q = seqs[r.si], { P, B } = programs[q.prog];
   try {
     const x = runSequence(P, B, q.rule, q.lim, q.S, r.policy, { skip: r.skip, failFast: r.ff });
@@ -145,6 +145,7 @@ console.log(`  info kin runs done in ${(tJs / 1000).toFixed(1)} s`);
 const desc = r => { const q = seqs[r.si]; return `${q.label} policy ${JSON.stringify(r.policy)}${r.skip ? ' skip' : ''}${r.ff ? ' failFast' : ''} lim ${Array.from(q.lim).join(',')} [${hex(q.S).slice(0, 80)}]`; };
 let agree = 0, ffRuns = 0, ffBad = 0, ffEarly = 0;
 runs.forEach((r, i) => {
+  if (process.env.SEQ_HOSTONLY) return;
   const want = oracle(r.si, r.skip), got = js[i];
   if (!r.ff) { if (got === want) agree++; else fail(`${desc(r)}:\n      oracle ${want}\n      kin    ${got}`); return; }
   ffRuns++;
@@ -174,7 +175,7 @@ function guard(arr, name) {
 let guarded = 0;
 runs.forEach((r, i) => {
   const q = seqs[r.si];
-  if (r.ff || i % 97 !== 0 || q.S.length > 256 || r.policy.kind === 0) return;
+  if (process.env.SEQ_HOSTONLY || r.ff || i % 97 !== 0 || q.S.length > 256 || r.policy.kind === 0) return;
   guarded++;
   const { P, B } = programs[q.prog];
   let g;
@@ -205,7 +206,7 @@ function hostWant(hp, oracleLines, borrowed) {
   return oracleLines.split(' | ').map(l => {
     const f = l.split(' ');
     if (f[0] === 'end') return 'end';
-    if (f[0] === 'm') return `m ${f[1]} ${f[2]} ${f[3]} ${borrowed(Number(f[2]), Number(f[3])) ? 'b' : 'o'}`;
+    if (f[0] === 'm') return `m ${f[1]} ${f[2]} ${f[3]}`;
     const words = f.slice(f[0] === 's' ? 4 : 3).filter(x => x !== 'early').map(Number);
     const r = hp.result(Int32Array.from(words));
     // a schema refusal always comes from a complete message (the walk reached the root's end)
@@ -242,14 +243,20 @@ async function hostRun(q, policy, skip) {
   if (anyCase) { const d = [1500000, 32, 65536, 131072]; oLim = Int32Array.from(lim); for (let k = 0; k < 4; k++) if (oLim[2 + k] < 0) oLim[2 + k] = d[k]; }
   const want0 = oracleSequence(oP, oB, q.rule, oLim, q.S, { skip }).lines.join(' | ');
   const ends = chunkEnds(q.S.length, policy);
-  const inOne = (o, len) => { let from = 0; for (const e of ends) { if (o >= from && o + len <= e) return true; if (e > o) return false; from = e; } return false; };
+  // D215's rule: a message is borrowed iff it lies inside one chunk AND is released while that
+  // chunk is being read (a message completed in a later feed -- after an item whose walk asked
+  // past its end -- is an assembly: a chunk is never retained after its feed returned)
+  const chunkOf = at => { for (let k = 0; k < ends.length; k++) if (at < ends[k]) return k; return -1; };
+  const borrowRule = (m, current) => (chunkOf(m.offset) === chunkOf(m.offset + m.length - 1) && chunkOf(m.offset) === current);
   const renderer = anyCase ? anyHost : hp;
-  const want = hostWant(renderer, want0, inOne), wantAlways = hostWant(renderer, want0, () => false);
+  const want = hostWant(renderer, want0), wantAlways = want;
+  let pulled = -1;   // the chunk being read (readSequence pulls one chunk per feed); ends.length at the end
   const chunks = () => { const a = []; let from = 0; for (const e of ends) { a.push(q.S.slice(from, e)); from = e; } return a; };
+  const counted = function* () { const a = chunks(); for (let k = 0; k < a.length; k++) { pulled = k; yield a[k]; } pulled = ends.length; };
   // readSequence (copy spanning)
   const got = [];
   try {
-    for await (const m of readSequence(chunks(), { ...opts })) {
+    for await (const m of readSequence(counted(), { ...opts })) {
       hostMsgs++;
       const ok = m.length === m.bytes.length && hex(m.bytes) === hex(q.S.subarray(m.offset, m.offset + m.length));
       if (m.borrowed) borrowedMsgs++; else assembledMsgs++;
@@ -260,7 +267,8 @@ async function hostRun(q, policy, skip) {
         const v2 = openView(m.bytes.slice(), schema ? { ...vo, schema, rule: rr, maxBytes: maxMessageBytes } : { ...vo, maxBytes: maxMessageBytes });
         if (walk(m.view) !== walk(v2)) hfail(`${q.label}: message ${m.index} view walk differs from a View opened on its bytes`);
       }
-      got.push(`m ${m.index} ${m.offset} ${m.length} ${m.borrowed ? 'b' : 'o'}`);
+      if (m.borrowed !== borrowRule(m, pulled)) hfail(`readSequence ${q.label} ${JSON.stringify(policy)}: message ${m.index} borrowed ${m.borrowed}, but the rule says ${!m.borrowed}`);
+      got.push(`m ${m.index} ${m.offset} ${m.length}`);
     }
     got.push('end');
   } catch (e) {
@@ -269,13 +277,14 @@ async function hostRun(q, policy, skip) {
   // skipped refusals are not yielded by readSequence: compare with the oracle less its s lines
   const wantRead = want.split(' | ').filter(l => !l.startsWith('s ')).join(' | ');
   const g = got.join(' | ');
-  if (g !== wantRead) hfail(`readSequence ${q.label} ${JSON.stringify(policy)}${skip ? ' skip' : ''}:\n      want ${wantRead}\n      got  ${g}`);
+  if (g !== wantRead) hfail(`readSequence ${q.label} ${JSON.stringify(policy)}${skip ? ' skip' : ''} [${hex(q.S).slice(0, 120)}]:\n      want ${wantRead}\n      got  ${g}`);
   // sequenceReader (copy always): the push API's messages, skipped and error, in index order
   const pushed = [];
   try {
     const rd = sequenceReader({ ...opts, copy: 'always' });
     const take = res => {
-      const items = [...res.messages.map(m => ({ i: m.index, s: `m ${m.index} ${m.offset} ${m.length} ${m.borrowed ? 'b' : 'o'}` })),
+      if (res.messages.some(m => m.borrowed)) hfail(`sequenceReader ${q.label}: a message borrowed under copy 'always'`);
+      const items = [...res.messages.map(m => ({ i: m.index, s: `m ${m.index} ${m.offset} ${m.length}` })),
         ...res.skipped.map(e => ({ i: e.index, s: renderFault('s', e) }))].sort((a, b) => a.i - b.i);
       for (const x of items) pushed.push(x.s);
       if (res.error) { pushed.push(renderFault('x', res.error)); return true; }

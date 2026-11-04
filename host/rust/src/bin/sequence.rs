@@ -347,8 +347,10 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
                     let borrowed = m.is_borrowed();
                     // the view walks the same bytes as a View opened on them
                     let vw = m.view().raw().len() == len;
-                    lines.push(format!("m {} {} {} {}{}{}", m.index, o, len, if borrowed { "b" } else { "o" },
-                                       if good && vw { "" } else { " BAD" }, if borrowed && !inside { " BADBORROW" } else { "" }));
+                    // D215: borrowed iff inside the chunk this feed was given (a message completed in a
+                    // later feed owns its assembly)
+                    lines.push(format!("m {} {} {}{}{}", m.index, o, len, if good && vw { "" } else { " BAD" },
+                                       if borrowed != inside { " BADBORROW" } else { "" }));
                 }
                 Err(e) => {
                     let stop = !matches!(&e, Error::Sequence(f) if f.skippable && opts.on_invalid == OnInvalid::Skip);

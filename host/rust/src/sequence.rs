@@ -212,8 +212,9 @@ pub struct Sequence<'p> {
     end: i64,
     eofed: bool,
     dropping: bool,
+    held: bool,
     r: i32,
-    fresh: bool,
+    asserted: i64,
 }
 
 /// Where the bytes a step reads come from.
@@ -259,8 +260,9 @@ impl<'p> Sequence<'p> {
             end: 0,
             eofed: false,
             dropping: false,
+            held: false,
             r: 0,
-            fresh: false,
+            asserted: 0,
         })
     }
 
@@ -323,15 +325,18 @@ impl<'p> Sequence<'p> {
                     self.dropping = true;
                     self.mb = Vec::new();
                 }
+                // from now on a step only asserts the frontier (an empty window there)
+                self.held = true;
+                // bytes beyond what the last step asserted first release the claims they cover
+                if self.asserted < self.end.min(avail) {
+                    self.r = self.step(c);
+                    continue;
+                }
                 if avail > self.total || fin {
                     self.r = self.eof();
                     continue;
                 }
-                if !self.fresh {
-                    return self.drained(c);
-                }
-                self.r = self.step(c);
-                continue;
+                return self.drained(c);
             }
             if r >= 0 {
                 if !self.verdict(c, out) {
@@ -376,6 +381,8 @@ impl<'p> Sequence<'p> {
         self.end = self.total;
         self.eofed = false;
         self.dropping = false;
+        self.held = false;
+        self.asserted = 0;
         // bytes after the previous message that it had already assembled start this one,
         // unless the chunk being read holds them too (then the message may borrow it)
         let left = self.left.take();
@@ -400,8 +407,8 @@ impl<'p> Sequence<'p> {
     fn step(&mut self, c: Option<Chunk<'_>>) -> i32 {
         let o = self.msg.unwrap_or(0);
         let end = self.end.min((self.delivered - o) as i64);
-        self.fresh = false;
-        if self.dropping {
+        if self.dropping || self.held {
+            self.asserted = end;
             return self.prog.session_step(&[], &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, end as i32);
         }
         let at = i64::from(self.at);
@@ -410,6 +417,7 @@ impl<'p> Sequence<'p> {
                 let from = (o + at as u64 - ch.base) as usize;
                 let to = ((o as i64 + end) as u64).saturating_sub(ch.base).min(ch.bytes.len() as u64) as usize;
                 let w = &ch.bytes[from..to.max(from)];
+                self.asserted = at + w.len() as i64;
                 return self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at);
             }
             if (self.mb.len() as i64) < end {
@@ -419,7 +427,9 @@ impl<'p> Sequence<'p> {
             }
         }
         let to = (self.mb.len() as i64).min(end) as usize;
-        let w = &self.mb[(at as usize).min(to)..to];
+        let lo = (at as usize).min(to);
+        let w = &self.mb[lo..to];
+        self.asserted = to as i64;
         self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at)
     }
 
@@ -440,7 +450,6 @@ impl<'p> Sequence<'p> {
                 self.absorb(c, upto);
             }
         }
-        self.fresh = true;
     }
 
     /// The verdict for the message in progress: deliver, skip or stop (false).

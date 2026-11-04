@@ -3695,7 +3695,10 @@ caught), JS behind out-of-bounds traps, and the JS and Rust host APIs
 - [ ] **Signed off** (owner)
 
 ### D219 — The wasm SDK's sequence reader is deferred (P7.13; waits on P7.9c)
-**Decision**: `host/wasm*/` is not changed in this item. The SDK will need
+**Decision**: `host/wasm*/` is not changed in this item. *Update 2026-11-04:*
+P7.9c is done, but the edit was refused by this session's permissions
+pending the owner's authorisation (P7.13w lists the exact edits); the native
+driver now takes a backend (`sequence-core.mjs`) so the SDK can reuse it. The SDK will need
 the `vms-init-seq` / `vms-message-length` exports, the native sequence host
 driven through its session wrapper (D173: views re-derived after every step,
 windows copied into linear memory), and views minted over a JS-side copy of
@@ -5922,7 +5925,29 @@ are answered as provisional decisions D082–D085. None is open now.
     `Schema::sequence`, `SequenceOptions`, `OnInvalid`, `MessageFailure`,
     `Error::Sequence`; `schema::Program::{words, pool, session_step}`.
   - **Gate:** `bb sequence-test` (D218; kin/scripts/sequence-{run,test}.mjs,
-    host/rust/src/bin/sequence.rs). Results: see below.
+    host/rust/src/bin/sequence.rs). Actual run (defaults: 6,000 mutations,
+    200 oracle schemas, seed 1; 31,063 vm-test cases → 70,445 sequences,
+    651,598 runs; 5 min on a shared M1 Pro): kin sequence mode == D211's
+    oracle on 637,516/637,516 runs (every line and out word; 3,108,385
+    messages, 29,898 skipped, 106,780 stops, 34,108 clean ends); fail-fast
+    14,084/14,084 (2,116 stopped early with another code); 5,429 runs behind
+    out-of-bounds traps clean; JS == Rust (debug, overflow checks)
+    154,608/154,608, 0 panics; JS hosts (readSequence spanning, sequenceReader
+    always) == oracle on 31,310 host runs (3,021,635 messages: 3,014,544
+    borrowed, 7,091 assembled; 604,327 view walks equal to a View on the
+    bytes); Rust `Sequence` == oracle 31,310/31,310. Release latency: 1,481 of
+    50,185 accepted messages in 1-byte runs waited for a byte past their end.
+  - **Host fixes after the first commit** (the gate's host section was red
+    at 8d78f1e): a held verdict is stepped with an empty window at the
+    frontier, and before deciding `too_large` whenever bytes arrived since
+    its last step (a held complete message was released a chunk late, and a
+    held refusal could turn into `too_large`); a leftover assembly is dropped
+    when the chunk being read holds those bytes; the gate checks D215's exact
+    borrow rule — borrowed iff inside one chunk **and** released during that
+    chunk's feed (a message completed later, after an item whose walk asked
+    past its end, owns its assembly: a chunk is never retained after `feed`
+    returns). The driver is now `host/js/src/sequence-core.mjs` (backend-
+    agnostic) + `sequence.mjs` (gen-JS backend), ready for the wasm SDK.
   - **Docs:** guide "CBOR sequences and SSE", api.md `snug/sequence`, Rust
     guide "CBOR sequences", README feature row, architecture §18;
     `examples/sequence-sse.mjs` (a simulated `fetch` Response, run by the
@@ -5940,6 +5965,24 @@ are answered as provisional decisions D082–D085. None is open now.
   - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
     exports and the native sequence host driven through the SDK session
     wrapper; views over a JS-side copy of each message.
+- [!] **P7.13w — wasm SDK sequence reader: BLOCKED pending owner authorisation**
+  (2026-11-04). P7.9c landed (88263f1) and the manager asked for the SDK
+  reader, but this session's permission system refused the edit to
+  `host/wasm/src/sdk.rs` (the brief reserved `host/wasm*/` for an owner
+  authorisation); not worked around. Ready: the native driver is split into
+  `host/js/src/sequence-core.mjs` (backend-agnostic) and `sequence.mjs` (the
+  gen-JS backend). The SDK needs exactly: `sdk_vs_new` with total −2 →
+  `vms_init_seq` (input limit in INFO[0], as total −1); a `sdk_vs_reseq(h,
+  quantum)` export re-running `vms_init_seq` on the session's arrays (the
+  session keeps its rule and limit words); after each `sdk_ses_step`
+  INFO[4] = `vms_held_code`, INFO[5] = `vms_message_length` (and INFO[5]
+  after `sdk_ses_eof`); an SDK backend over `WasmSession` (begin = reseq,
+  step = window copy + `sdk_ses_step`, eof = `sdk_ses_eof`, result =
+  `Inner.result()`); an internal `mintView` module (the SDK's view.mjs is
+  itself the public entry, so its Message/View internals move to a
+  non-exported module that view.mjs re-exports from); a `./sequence` export
+  in host/wasm-sdk/package.json; parity in `bb wasm-sdk-test` (sequence
+  results identical to native under chunk splits, views walk-equal).
 
 ## P7.11 — Rust public API
 
