@@ -1117,3 +1117,68 @@ identity; explicit retained AND/NOT opcodes; seven projected valid-message
 acceptances and fast/generic unit equalities; `node --check` on the delivered
 JS scripts; Rust release compilation and rustfmt check; `git diff --check`.
 No repository conformance/emit gates were run for this measurement-only work.
+
+## Calibration 2026-11-04 — D253/D254 confirmation
+
+Did the D241 repricing move the per-unit CPU ratios the way the proposal
+predicted? The same harness (`bench/calibrate.mjs`, nine interleaved rounds,
+every sample bracketed by the six-way map-choice reference) was run twice in
+clean detached worktrees on the same machine, the same afternoon:
+
+* **before**: `bc4bdbd` (P8.2 fixes 1–3, old prices), timing from 18:25:49
+  UTC, load 20.2–28.6 (1-minute);
+* **after**: `b1e05fd` (D253 prices, D254 forced generic on schedule 1; the
+  only harness change attributes the new `C_FIRST` spend in the untimed tick
+  audit), timing from 20:17:14 UTC, load 58–115.
+
+Apple M1 Pro, 10 cores, 32 GiB, macOS 14.6.1, Darwin 23.6.0 arm64; Node
+v24.6.0 (V8 13.6.233.10-node.24, `--expose-gc --single-threaded-gc`); rustc
+1.92.0, `-O`. The machine was shared and heavily loaded throughout (other
+engineers' gates; load peaked above 200 between the two runs), so **absolute
+nanoseconds are not comparable and are not claimed**; the ratios below are
+per-host row medians divided by that run's unweighted median kind, as in the
+table above. Every row agreed on verdict and charged units in JS and Rust
+before timing, in both runs. Raw records:
+[before](calibration-2026-11-04-d253-before.json),
+[after](calibration-2026-11-04-d253-after.json).
+
+| Kind | Units before → after | JS /med before → after | Rust /med before → after |
+| --- | ---: | ---: | ---: |
+| text-ascii (fixed input) | 21,881 → 175,006 | 7.62 → **1.17** | 4.40 → **0.67** |
+| text-utf8 (fixed input) | 21,881 → 175,006 | 10.92 → **1.57** | 6.13 → **0.84** |
+| literal-long-compare | 43,786 → 350,036 | 6.11 → **1.00** | 5.49 → **0.78** |
+| key-long-prefix-search | 185,872 → 1,385,532 | 4.84 → **0.75** | 5.85 → **0.92** |
+| bytes-bits-scan (fixed input) | 21,881 → 116,673 | 4.76 → **1.07** | 6.41 → **1.26** |
+| bytes-bits-rescan | 2.3 M | 4.78 → **0.99** | 6.46 → **1.24** |
+| array-generic-same-charges (forced) | 2.3 M | 4.25 → **0.81** | 5.48 → **1.00** |
+| map-struct-generic (forced) | 2.3 M | 3.32 → **1.50** | 3.27 → **1.58** |
+| map-table-generic (forced) | 2.3 M | 4.21 → **1.54** | 4.26 → **1.63** |
+| unique-record-element | 2.3 M | 1.66 → 1.39 | 1.66 → 1.22 |
+| unique-sort | 2.3 M | 0.63 → 0.92 | 0.74 → 1.04 |
+| samelen-short-probes | 2.3 M | 0.36 → 0.98 | 0.43 → 1.20 |
+| samelen-long-probes | 2.3 M | 1.01 → 1.29 | 1.04 → 1.23 |
+| EXT-chars (end to end) | 113,439 → 271,135 | 2.98 → 1.52 | 1.31 → 0.63 |
+| EXT_CALL (unchanged price) | 2.3 M | 0.53 → 0.70 | 0.42 → 0.45 |
+| array-fast | 2.3 M | 0.19 → 0.22 | 0.22 → 0.24 |
+| array-automaton (natural generic) | 2.3 M | 0.70 → 0.77 | 0.85 → 0.92 |
+| map-struct | 2.3 M | 1.24 → 1.48 | 1.14 → 1.31 |
+| map-table | 2.3 M | 1.49 → 1.88 | 1.33 → 1.59 |
+| reference-map-choice | 2.3 M | 1.26 → 1.42 | 1.19 → 1.40 |
+| embedded | 2.3 M | 1.48 → 1.57 | 1.26 → 1.35 |
+
+**Findings.** Every repriced kind moved as predicted, from 4.8–10.9× the
+median (JS) to 0.75–1.57×, and in Rust from 4.4–6.5× to 0.67–1.26×. The
+forced generic rows, charged by schedule 1 under D254, fell from 3.3–5.5× to
+0.81–1.63×. The probes and the one-element `.unique` record landed near the
+median, as D240 modelled. Unchanged kinds rose by roughly 10–25% relative to
+the median because the median itself moved down: the expensive rows now buy
+more units for the same work. The map shapes are now the dearest per unit
+under normal dispatch (map-table 1.88× JS, 1.59× Rust). Taking map-table
+against its own run's paired reference (53.04 / 40.20 = 1.32×, against
+1.18× before) at P3.6's historical 18.5 ns quiet reference gives about
+24.4 ns per unit, so **~55 ms for the 2.25 M default**. That is an estimate,
+not a quiet measurement: the after run had 2–4× the load of the before
+run, and the reference ratio itself moved by 12%. The 50 ms figure in D240
+remains a modelled target, not a confirmed bound. Unresolved, as D240 said:
+`.chars`' JS/Rust per-unit gap (JS 1.15×, Rust 0.22×) and `unique-hash`'s
+opposite gap cannot both be fitted by one portable price.

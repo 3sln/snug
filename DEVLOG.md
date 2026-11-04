@@ -5941,12 +5941,56 @@ Plan (manager, 2026-11-04), in the owner's order: audit (done, `docs/conformance
 Every item is gated by the oracle, JS == Rust (and wasm when P7.9c is
 authorised), the existing gate set, and conformance-corpus vectors.
 
-- [ ] **P8.2 — Correctness fixes and repricing** (audit ranks 1–4; D241):
+- [x] **P8.2 — Correctness fixes and repricing** (audit ranks 1–4; D241):
   float comparison/exclusion lowering for ±0 and NaN (S15, S16, D038);
   unplugged group sockets are empty choices, not empty groups (S32; repair
   the oracle and corpus assumption); known-tag validity — RFC 3339 leap-second
   rules for tag 0, RFC 3986 grammar for tag 32 (S61, D121); documentation
   drift (S74); adopt the calibration repricing D241.
+  **Done 2026-11-04** (compliance engineer; bc4bdbd, 88d6352, b1e05fd and
+  the calibration-record commit). Decisions D250–D254, sign-offs unticked.
+  1. **Floats (D250)**: numeric comparison — one zero, NaN unordered but
+     unequal; bounded == unbounded spellings; no format change. 198 vectors
+     equal Ruby 0.12.14's verdicts (Rust 0.10.7 differs on NaN `.ne`, bounded
+     ranges and `.and`: its bugs).
+  2. **Sockets (D251)**: unplugged `$$x` = empty group choice. Repaired:
+     corpus/tools/oracle.mjs (empty `gchoice`, was `seq([])`) and one
+     adversarial verdict (`{a:1}` against `r = {a:int, $$nothing}` → false);
+     no other corpus, proptest or oracle-differential expectation depended on
+     it. architecture §4.8 amended with a dated note; no D-decision had
+     stated the old reading.
+  3. **Known tags (D252)**: tag 0 upper-case T/Z (RFC 4287 §3.3) and second
+     60 only at 23:59:60 UTC on a month end (no leap table: time-dependent);
+     tag 1 any float incl. non-finite; tag 32 full RFC 3986 URI-reference.
+     Quotations checked against corpus/rfc. Ruby refuses every leap second
+     (RFC wins). Opaque vs validated tags (incl. 1040, opaque) documented.
+  4. **Repricing (D253) and schedules by path (D254)**: D241's prices, 2.25 M
+     default, EXT_CALL 16; forced generic charged by schedule 1. Before/after
+     calibration (bench/VM.md "Calibration 2026-11-04 — D253/D254
+     confirmation"): repriced kinds 4.8–10.9× → 0.75–1.57× of the JS median
+     kind (Rust 4.4–6.5× → 0.67–1.26×); forced generic 3.3–5.5× →
+     0.81–1.63×; ~55 ms estimated at 2.25 M (load-affected, not quiet).
+  5. **Docs (S74)**: SPEC §1/§3, README, cddl-support (prelude witnesses,
+     tag scope, float/socket notes, mixed numeric controllers), program
+     §4.4/§8.4/§13/§14/§15, api loader 1.1, architecture §4.1/§4.8/§7,
+     guide; the default's refusal of valid non-deterministic CBOR and
+     D230/P8.4 stated plainly in README and SPEC.
+  Regression corpus: corpus/conformance/audit-2026-11-04.json (40 suites,
+  300 cases, deterministic wire; consumed by vm-test, compile-test,
+  compile-fuzz, JS serialized/sources tests and the wasm parity test);
+  deterministic.json vectors updated for D252.
+  **Gates** (on the committed trees, in scratch worktrees): check, drift,
+  scan-test, rscan-test, vm-test, vmsession-test, compile-test, compile-fuzz,
+  nav-test, write-test, unicode-test, rust-api-test, size, host/js npm test,
+  and wasm-sdk-test (11/11, after P7.9c) green. sequence-test is not in
+  HEAD's bb.edn (uncommitted sequences work); a main-tree run with everyone's
+  changes was stopped at 30 min under load ~200 and is not claimed.
+  **Learnt / open**: a reference tool is evidence, not a verdict (Ruby has
+  no leap seconds, checks no URI syntax and takes the first rule as root);
+  dispatch-dependent prices would make budget verdicts chunk-dependent
+  (D254); the size gate grew ~2 KB min for the URI recogniser (caps raised
+  with justification); `.chars`/hash cross-host fit still unresolved (D240);
+  a quiet-machine timing confirmation of the 2.25 M default is still owed.
 - [ ] **P8.3 — Regexp: XSD and I-Regexp options** (audit rank 8): XSD regexps
   (RFC 8610 §3.8.3 → XSD Appendix F) compiled at compile time into the same
   bounded automata (class subtraction, `\i \c \d \w \s` and their

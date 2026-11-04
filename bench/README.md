@@ -13,6 +13,8 @@ binding/IPC excluded. `uptime` before every engine/row batch. Waited 180 s
 before a full preliminary pass and 60 s before the final pass; load never
 fell below 2, final timing load 10.71–13.93. **No quiet-machine result.**
 Raw samples and reference ratios: [JSON](calibration-2026-11-04.json).
+D253/D254 before/after confirmation (P8.2): [VM.md](VM.md#calibration-2026-11-04--d253d254-confirmation),
+[before](calibration-2026-11-04-d253-before.json) and [after](calibration-2026-11-04-d253-after.json) records.
 
 Do not blanket-raise EXT prices 1.5×: proposal targets profile scans and
 specific control steps, with a conditional 2.25 M public-dispatch default
