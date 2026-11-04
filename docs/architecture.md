@@ -136,11 +136,12 @@ its operands' results, and only `M ∩ Q` is returned. So
 `([uint] .and [tstr]) / [bool]` does not accept `[1]` because `[uint]`
 matched as an internal operand.
 
-**Every leaf that accepts an item without examining children still gives the
-children a query set**: `ANY` gives `{ANY}`, `MAJOR 4` gives `{ANY}` to
-elements, an `INT` leaf admitting bignums gives the content `{BSTR}`.
-Children are always walked (the profile requires it); the query set only says
-what is being asked of them.
+**A leaf that accepts an item without examining its children asks nothing
+of them** (D043, which replaced this section's original "ANY gives {ANY}"):
+the children of an item matched by `ANY` or a bare `MAJOR 4/5/6` are walked
+dead — profile checks only — unless another candidate queries them; the
+closure still lists `TS_ANY` for them. Children are always walked (the
+profile requires it); a query set only says what is being asked of them.
 
 ### 4.2 Leaves and typesets
 
@@ -533,7 +534,7 @@ content. Schema compile errors are `{code, line, column, rule}`.
 | entries per container | 65 536 | 2^24 | validate |
 | items per message | 131 072 | 2^24 | validate |
 | bignum content bytes | 128 | 4 096 | validate |
-| step budget | 2 300 000 | 2^31 − 1 | validate |
+| step budget | 2 250 000 (D253) | 2^31 − 1 | validate |
 
 Per-call validation limits may only **lower** the compiled ones (A8): depth
 and state capacity were sized at compile time.
@@ -545,7 +546,7 @@ every loop whose trip count depends on input or schema charges per trip:
 | --- | --- |
 | item head + major-mask filter | 1 + \|Q\| |
 | leaf evaluation (scalar) | 1 per leaf |
-| content scans (UTF-8, `.bits`, typed-array NaN, literal compare) | 1 per 64 bytes per scan |
+| content scans (UTF-8, `.bits`, typed-array NaN, literal compare) | per scan: UTF-8 and byte comparisons 1 per 8 bytes, `.bits` 1 per 12, typed-array NaN 1 per 64 (D253) |
 | regexp step | `(active + 1) × ⌈P/32⌉` per code point, plus the class search |
 | key binary search | ⌈log2 keys⌉ |
 | map pair | 1 per candidate entry tested + 1 per live alternative group updated |
@@ -556,11 +557,13 @@ every loop whose trip count depends on input or schema charges per trip:
 
 Budget arithmetic saturates. The exact, normative per-event schedule (so
 that hosts agree on the exhaustion point) is `docs/program.md` §14; this table
-is its summary. The default 2.3 M units (D046, under program.md §14's
-schedule 2, D045; both provisional) is calibrated so that the worst
-budget-bounded input measured stays near 50 ms in Node on the reference
-machine (bench/VM.md P3.6); the workerd measurement is still to be taken
-(Phase 4).
+is its summary. The default 2.25 M units (D046 as repriced by D253, under
+program.md §14's schedule 2, D045; provisional) is calibrated so that the
+worst budget-bounded input measured under normal dispatch stays near 50 ms in
+Node on the reference machine (bench/VM.md, "Calibration 2026-11-04" and the
+D253 confirmation); the workerd measurement is still to be taken (Phase 4).
+The reference VM's forced-generic diagnostic mode is charged by schedule 1
+(D254).
 
 ---
 

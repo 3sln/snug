@@ -68,7 +68,7 @@ pub fn open_text(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32]
         return err(ss, stop);
     }
     pend_note(b, s, ss, base, stop, pos);
-    if !charge(s, c64(stop - q), pos) {
+    if !charge(s, c8(stop - q), pos) {
         return err(ss, -R_BUDGET);
     }
     let mut kind: i32 = FK_DTEXT;
@@ -367,7 +367,7 @@ pub fn open_bstr(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32]
                     return err(ss, -R_BUDGET);
                 }
                 if (lk == K_BYTES) && ((p[(lb + 5) as usize] != 0) && ((len >= p[(lb + 2) as usize]) && (len <= p[(lb + 3) as usize]))) {
-                    if !charge(s, c64(len), pos) {
+                    if !charge(s, c12(len), pos) {
                         return err(ss, -R_BUDGET);
                     }
                     bits = i;

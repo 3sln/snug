@@ -648,9 +648,14 @@ and every factor is satisfied.
   (not the input end; §17 Q21). `.cbor`: one item at physical depth d + 1
   (segment `EMBED`) with the union of the content typesets of admitted EMBED
   leaves, then it must end exactly at e (else inner `cbor/trailing`).
-  `.cborseq`: items until e (segment `EMBEDSEQ i`), each queried with the
-  content typesets of the still-live EMBED leaves; a `.cbor` leaf dies at a
-  second item. An inner profile or limit failure kills every EMBED leaf of
+  `.cborseq` (D040; this replaces the original per-item model): the content
+  typeset — the controller's array type — is the query of a **virtual array**
+  at physical depth d + 1 (segment `EMBED`, not an item: not counted, no visit
+  unit; its filter, blocks and elements charged as an array's) whose elements
+  are the sequence's items at d + 2 (segments `INDEX i`, rendered `cbor, i`),
+  so positions and occurrences apply; the inner depth limit is
+  `min(limit, D − d − 2)`. `.cbor` and `.cborseq` leaves on one byte string
+  run as two sub-validations. An inner profile or limit failure kills every EMBED leaf of
   the item and never the outer document; the outer counter is restored
   afterwards. An EMBED leaf matches iff the sub-validation succeeded for it.
 * **Combinators.** When an item's evaluation ends, its matched leaves are
@@ -1080,7 +1085,8 @@ Little-endian bytes:
 Total `96 + 4·words + pool`. **Compatibility note, 2026-11-03:** apply
 [D084](../DEVLOG.md#d084--a-stable-versioned-serialised-program-with-a-compatibility-rule),
 made concrete by D100: format major must equal the loader's and format minor
-must be no newer (currently 1.0; low 16 bits major, high 16 bits minor).
+must be no newer (currently 1.1, D141 — a 1.0 Program loads unchanged; low
+16 bits major, high 16 bits minor).
 Producer snug version is provenance, not an equality gate. A loader refuses
 wrong magic/container version, incompatible format, malformed producer
 metadata, nonzero reserved bytes, length or digest mismatch; then runs
@@ -1142,16 +1148,16 @@ exceeds the remainder. These are the arch §7 rows, restated for this format
 | Event | Units |
 | --- | --- |
 | item visit (every `eval`: live or dead item, map key, tag content, embedded item) | 1 |
-| text item UTF-8 validation (profile; live or dead) | ⌈len/64⌉ |
-| map key order comparison (each key after the first) | ⌈min(len₁, len₂)/64⌉, at least 1 |
-| typed-array float NaN scan (profile) | ⌈len/64⌉ |
-| standard-set tag check after its content (profile, D121) | 1, + ⌈len/64⌉ for a tag-0/32 text's form scan; a tag-24 payload is walked as dead items |
+| text item UTF-8 validation (profile; live or dead) | ⌈len/8⌉ (D253; was ⌈len/64⌉) |
+| map key order comparison (each key after the first) | ⌈min(len₁, len₂)/8⌉, at least 1 (D253) |
+| typed-array float NaN scan (profile) | ⌈len/64⌉ (unchanged by D253) |
+| standard-set tag check after its content (profile, D121) | 1, + ⌈len/8⌉ for a tag-0/32 text's form scan (D252/D253); a tag-24 payload is walked as dead items |
 | query construction: each typeset element scanned (eval list, or answers when `n_eval = 0`) | 1 |
 | mask filter, at a live item | \|Q′\| |
 | scalar/TAG/TAGSET/EMBED leaf evaluated (admitted) | 1 |
 | interval, LITSET, key-table, regexp-atom binary search | 1 per probe |
-| byte comparison (literal, LITSET member, key) | ⌈len/64⌉, at least 1, per comparison |
-| `.bits` scan | ⌈len/64⌉ |
+| byte comparison (literal, LITSET member, key) | ⌈len/8⌉, at least 1, per comparison (D253) |
+| `.bits` scan | ⌈len/12⌉ (D253) |
 | regexp, per code point, per live regexp | W · (\|active\| + 1) + atom probes |
 | combinator (AND, NOT) | 2 |
 | EXT leaf decided (1.1, once per item, when its combinator needs it) | 1; when the item is no longer than its maximum, + `EXT_CALL` (16) and then the predicate's units u (below) |
@@ -1195,13 +1201,15 @@ Program and the item, so hosts agree on the exhaustion point:
 | --- | --- |
 | `.chars`: the text content's code-point count | 8 per 16 content bytes (⌈len/16⌉ units), before the count |
 | skipping an element, key or value (`.unique`, `.samelen`) | 3 per item head visited |
-| `.unique`: recording an element (span and FNV-1a hash) | 5, + 1 per byte hashed |
-| `.unique`: comparing two records (heap sort, then neighbours) | 8, + on equal hashes 8 per 8 bytes examined (the first 8 up front) |
+| `.unique`: recording an element (span and FNV-1a hash) | 10, + 1 per byte hashed (D253; was 5) |
+| `.unique`: comparing two records (heap sort, then neighbours) | 6, + on equal hashes 2 for the first 8 bytes (up front) and 8 per further 8 bytes examined (D253; was 8 and 8 up front) |
 | `.samelen`: a map pair | 5 |
-| `.samelen`: a text key's binary search, per probe | 4, + 8 per 8 bytes examined (the first 8 up front) |
+| `.samelen`: a text key's binary search, per probe | 3, + 2 for the first 8 bytes (up front) and 8 per further 8 bytes examined (D253; was 4 and 8 up front) |
 
   The weights were set so that each kind of generic work costs no more CPU per
-  unit than the VM's own worst generic walk (bench/VM.md, 2026-11-05).
+  unit than the VM's own worst generic walk (bench/VM.md, 2026-11-05), and
+  repriced by D253 from the 2026-11-04 calibration (bench/VM.md, "Calibration
+  2026-11-04"); `EXT_CALL` stays 16.
   `.unique` stops (refused) at the first comparison that finds two equal
   encodings. `.samelen`'s names are parsed, de-duplicated and sorted once,
   when the host binds the Program, and are not charged per item. An item that
@@ -1242,6 +1250,18 @@ non-simple pair, a dead block) is charged by the table. The legacy schedule
 (the table alone, "schedule 1") remains selectable per call for comparison
 (the reference VM's `limits` word 8 bit 1, a VM extension); it changes only
 the budget used.
+
+**Schedules by path (D254).** Schedule 2's free bookkeeping prices what the
+fast paths do for the simple shapes, decided by shape (Program and item),
+never by window or chunk, so the buffer and session drivers charge the same
+input identically on every host. The reference VM's diagnostic switch that
+forces every item onto the generic walk (`limits` word 8 bit 0, a VM
+extension, not public API) charges that walk by its own schedule, the table
+(schedule 1): the walk does the table's bookkeeping, at 4–25× the fast
+paths' CPU per unit under schedule 2 (bench/VM.md, calibration). A forced
+run therefore equals the schedule-1 run of the same input word for word,
+and equals the default run except for the budget used (and, when either
+hits the budget, the exhaustion point).
 
 ---
 
@@ -1309,7 +1329,7 @@ order), bignum magnitudes, `.bits` masks; identical byte strings share.
  34  65536        LIM_ENTRIES
  35  131072       LIM_ITEMS
  36  128          LIM_BIGNUM_BYTES
- 37  2300000      LIM_BUDGET
+ 37  2250000      LIM_BUDGET
  38  8388608      LIM_TOTAL_BYTES (8 MiB)
  39  0
  40  181          SCRATCH_MAX
@@ -1482,7 +1502,10 @@ brackets.
 `out = [0, 0, 0, 55, 6, 0, 0, 0]`: ok, 55 units, 6 items. (Under the legacy
 schedule 1 the element costs 9 more — L5 block 1 + W · (0 + 1) and 1
 candidate, query 1, filter 1, leaf 1, stamp 1, candidate 1 + test 1 — for 64
-units.)
+units, which is also what a reference VM forced onto its generic path reports:
+D254 charges that path by schedule 1.) The 2,250,000 repricing of D253 leaves
+these totals unchanged: every text here is under 8 bytes and every comparison
+under 8 bytes, so each still costs 1.
 
 ### 15.4 Invalid input: `{"kind": "a"}`
 

@@ -9,17 +9,19 @@ export const TPU = 8;
 
 export const T_HEAD = 3;
 
-export const T_ELEM = 5;
+export const T_ELEM = 10;
 
-export const T_CMP = 8;
+export const T_CMP = 6;
 
-export const T_PROBE = 4;
+export const T_PROBE = 3;
 
 export const T_PAIR = 5;
 
 export const C_BYTES = 8;
 
 export const C_TICKS = 8;
+
+export const C_FIRST = 2;
 
 export const B_HASH = 1;
 
@@ -218,13 +220,14 @@ export function bytesCmp(x, xs, xl, y, ys, yl) {
 }
 
 export function mcmp(x, xs, xl, y, ys, yl, m) {
-    // `bytes-cmp` charging C_TICKS per chunk of C_BYTES bytes examined, as it
-    // goes, the first chunk up front; BIG: the meter ran out.
+    // `bytes-cmp` charging C_FIRST for the first chunk of C_BYTES bytes, up
+    // front, then C_TICKS per further chunk examined, as it goes (D253: most
+    // probes end in the first chunk); BIG: the meter ran out.
     let n = xl;
     if (yl < n) {
         n = yl;
     }
-    if (!spend(m, C_TICKS)) {
+    if (!spend(m, C_FIRST)) {
         return BIG;
     }
     for (let i = 0; i < n; i++) {
@@ -446,7 +449,7 @@ export function uniqueRun(b, s, e, m) {
     // An array whose elements' encodings are pairwise distinct. m holds the
     // meter and `unique-words` of scratch. Charges: per element T_ELEM, its
     // heads (T_HEAD each) and its bytes hashed (1 tick per B_HASH); per record
-    // comparison T_CMP, + C_TICKS per C_BYTES bytes examined on a hash tie.
+    // comparison T_CMP, + on a hash tie C_FIRST, then C_TICKS per further C_BYTES.
     // O(n log n) comparisons, no allocation.
     if ((s >= e) || (((b[s] >>> 5) | 0) !== 4)) {
         return verdict(m, false);
@@ -625,8 +628,8 @@ export function countOf(b, v, e) {
 
 export function named(a, ao, t, b, ks, ke, m) {
     // Is the key b[ks, ke) one of the prepared names? 1 yes, 0 no, -1 the
-    // meter ran out. Binary search: T_PROBE per probe + C_TICKS per C_BYTES bytes
-    // examined.
+    // meter ran out. Binary search: T_PROBE per probe + C_FIRST, then C_TICKS per
+    // further C_BYTES bytes examined.
     let lo = 0;
     let hi = t[0];
     const kl = ke - ks;

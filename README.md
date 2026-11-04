@@ -29,7 +29,11 @@ Why snug:
 The default wire policy is the **deterministic preset** (P7.1, D081, D120):
 RFC 8949 §4.2.1 core deterministic CBOR, verified on read, with any map key
 kind, any tag number (the known tags content-checked, D180) and RFC floats.
-The **Bindle** preset (`wire:
+**It refuses valid but non-deterministic CBOR** (indefinite lengths,
+non-shortest heads or floats, unsorted keys), even against `any`: that is a
+scope limit of the current default, not an RFC validity verdict. Owner
+direction D230 makes valid-CBOR acceptance the default (P8.4, not yet
+implemented). The **Bindle** preset (`wire:
 'bindle'`) keeps the pre-P7.1 restrictions bit for bit; Bindle is one optional
 consumer profile in the standalone design (D080), not snug's purpose. See
 [profiles](docs/profiles.md) for every option.
@@ -39,11 +43,12 @@ consumer profile in the standalone design (D080), not snug's purpose. See
 | Your data | Deterministic preset (default) | `wire: 'bindle'` |
 | --- | --- | --- |
 | Producer emits shortest forms, definite lengths, keys sorted by encoded bytes (RFC 8949 §4.2.1 / CDE) | yes | yes |
-| Producer emits non-shortest heads or floats, indefinite lengths, unsorted or length-first-sorted keys | **no**: there is no lenient mode | no |
+| Producer emits non-shortest heads or floats, indefinite lengths, unsorted or length-first-sorted keys | **no** yet: valid CBOR, refused by the current default; D230/P8.4 changes the default | no |
 | Integer map keys at any depth (COSE, CWT `cnf` holding a COSE_Key) | yes (decodes to `Map`) | no (`cose` admits safe integer labels in the top-level map only) |
 | Keys that are byte strings, arrays, maps, tags, floats, `null`... | yes | no |
-| Tags 0 (date/time text), 1 (epoch time), 21–23, 24 (embedded CBOR), 32 (URI), 55799 | yes, content checked (`Tagged`) | no |
-| Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 64-bit numbers, ...) | yes, any content (`Tagged`); `tags: 'standard'` refuses them | no |
+| Tags 0 (RFC 3339 date/time text), 1 (epoch time), 24 (embedded CBOR), 32 (RFC 3986 URI-reference), 55799 | yes, content checked (`Tagged`, D252) | no |
+| Tags 21–23 (conversion hints) | yes, any content (`Tagged`) | no |
+| Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 1040, 64-bit numbers, ...) | yes, opaque: any valid content, its registered meaning unchecked (`Tagged`); `tags: 'standard'` refuses them | no |
 | `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (NaN only as `f97e00`) | no |
 | Unicode noncharacters in text | yes | no |
 | Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes, normalised forms only | yes |
@@ -215,7 +220,7 @@ with other keys decode to `Map` ([values](docs/profiles.md#javascript-values-d12
 
 Default input cap: **1,500,000 bytes**, depth **32**, entries per container
 **65,536**, items **131,072**, bignum content **128 bytes**; compiled schemas
-default to a **2,300,000-unit validation budget**. Per-call schema limits can
+default to a **2,250,000-unit validation budget**. Per-call schema limits can
 only lower compiled limits. Encoding enforces `maxBytes` **only when supplied,
 at finish**; it is not an allocation cap while writing. See the
 [guide](docs/guide.md#limits) for compile bounds and the remaining caveats.

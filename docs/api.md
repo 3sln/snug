@@ -277,7 +277,7 @@ validateAt(schema: Schema, bytes: Uint8Array, start: number, end: number,
 
 `ProgramError` extends Error with `code`; constructor `(code)`.
 Load compatibility is equal format major and minor ≤ loader minor (D084),
-currently 1.0. Container version is 1. Producer snug version is informational,
+currently 1.1 (D141; format 1.0 Programs load unchanged). Container version is 1. Producer snug version is informational,
 retained on reserialisation. The four-byte format word stores major in low
 16 bits, minor in high 16 bits. P and B must remain semantically trustworthy;
 SHA-256 is a corruption check, not authentication. See [caching](guide.md#programs-caching-and-compatibility).

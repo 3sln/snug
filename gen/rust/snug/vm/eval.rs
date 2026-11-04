@@ -647,7 +647,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
                 break;
             }
             // schedule 2: visit + UTF-8 only
-            cost = (11 - (10 * s2)) + c64(lo);
+            cost = (11 - (10 * s2)) + c8(lo);
             if left < cost {
                 break;
             }
@@ -786,7 +786,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         if stop < 0 {
             return stop;
         }
-        if !charge(s, c64(stop - q), pos) {
+        if !charge(s, c8(stop - q), pos) {
             return -R_BUDGET;
         }
         let bad: i32 = utf8_invalid_at(b, q, stop);
@@ -1573,7 +1573,7 @@ pub fn pre_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], q: i32, end: 
         if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
             return -1;
         }
-        s[(O_LO) as usize] = 3 + c64(lo);
+        s[(O_LO) as usize] = 3 + c8(lo);
         return (q + h) + lo;
     }
     return -1;
@@ -1714,7 +1714,7 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         // commit, in the generic order
         let mut ko: i32 = 0;
         let mut ka: i32 = (sk + 1) + steps;
-        let mut kb: i32 = 1 + c64(kl);
+        let mut kb: i32 = 1 + c8(kl);
         if ps >= 0 {
             ko = c64min(pe - ps, kend - start);
         }
@@ -2278,7 +2278,7 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
         if stop < 0 {
             return stop;
         }
-        if !charge(s, c64(stop - q), pos) {
+        if !charge(s, c8(stop - q), pos) {
             return -R_BUDGET;
         }
         let bad: i32 = utf8_invalid_at(b, q, stop);

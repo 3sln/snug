@@ -241,9 +241,14 @@
       (comment "limits word 8 (a VM extension beyond program.md §12.3's 8 words):"
                "bit 0 forces the generic path (the fast == generic gate);")
       (comment "bit 1 selects the legacy schedule 1; schedule 2 (D045) is the default"
-               "(s[VM_GENERIC] bit 1 set = schedule 2).")
+               "(s[VM_GENERIC] bit 1 set = schedule 2). D254: the forced generic path"
+               "is charged by the generic walk's own schedule, the table (schedule 1):"
+               "schedule 2's free bookkeeping prices the fast paths' CPU, not its.")
       (if (> (ilen limits) 8)
-        (iset s VM_GENERIC (- (+ (bit-and (ia limits 8) 1) 2) (bit-and (ia limits 8) 2)))
+        (do (let [w8 (ia limits 8)]
+              (if (!= (bit-and w8 3) 0)
+                (iset s VM_GENERIC (bit-and w8 1))
+                (iset s VM_GENERIC 2))))
         (iset s VM_GENERIC 2))
       (return 0))))
 

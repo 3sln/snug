@@ -9,7 +9,7 @@ import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
-import { c64, c64min, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
+import { c64min, c8, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadPairBody, deadSeq, deadStdCheck, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
 import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
@@ -672,7 +672,7 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf, s2) {
                 break;
             }
             // schedule 2: visit + UTF-8 only
-            cost = (11 - (10 * s2)) + c64(lo);
+            cost = (11 - (10 * s2)) + c8(lo);
             if (left < cost) {
                 break;
             }
@@ -812,7 +812,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx, ex
         if (stop < 0) {
             return stop;
         }
-        if (!charge(s, c64(stop - q), pos)) {
+        if (!charge(s, c8(stop - q), pos)) {
             return -R_BUDGET;
         }
         const bad = utf8InvalidAt(b, q, stop);
@@ -1608,7 +1608,7 @@ export function preScalar(p, pool, b, s, q, end, lb, kind) {
         if (utf8InvalidAt(b, q + h, (q + h) + lo) >= 0) {
             return -1;
         }
-        s[O_LO] = 3 + c64(lo);
+        s[O_LO] = 3 + c8(lo);
         return (q + h) + lo;
     }
     return -1;
@@ -1751,7 +1751,7 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
         // commit, in the generic order
         let ko = 0;
         let ka = (sk + 1) + steps;
-        let kb = 1 + c64(kl);
+        let kb = 1 + c8(kl);
         if (ps >= 0) {
             ko = c64min(pe - ps, kend - start);
         }
@@ -2318,7 +2318,7 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext) {
         if (stop < 0) {
             return stop;
         }
-        if (!charge(s, c64(stop - q), pos)) {
+        if (!charge(s, c8(stop - q), pos)) {
             return -R_BUDGET;
         }
         const bad = utf8InvalidAt(b, q, stop);

@@ -123,7 +123,7 @@ the predicate's **cost**, charged *before* it runs: by default one unit per
 item byte, or what `cost(itemBytes)` answers (a non-negative integer). When
 the cost is more than the budget has left, validation stops with `budget` and
 the predicate is not called. snug cannot interrupt or measure host code, so
-the cost is the host's promise: the default budget (2.3 M units) is sized for
+the cost is the host's promise: the default budget (2.25 M units) is sized for
 about 20 ns of CPU per unit, and a predicate that does more work per byte
 should declare it, or a hostile message can spend more CPU in it than the
 budget suggests.
@@ -627,7 +627,7 @@ wire presets belong on validation/codec/view/Writer/source calls.
 | Depth | 32 | 256 |
 | Entries per container / items per document | 65,536 / 131,072 | 2²⁴ each |
 | Bignum content bytes | 128 | Currently fixed at 128 |
-| Validation work units | 2,300,000 | 2³¹−1 |
+| Validation work units | 2,250,000 | 2³¹−1 |
 
 Root depth is 0. Entering an array, map or tag consumes a level; their
 children are at depth +1. With maxDepth 1 a root array of scalars is allowed,

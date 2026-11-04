@@ -6,12 +6,13 @@ use crate::snug::cbor::tags::*;
 pub(crate) const BIG: i32 = 2147483647;
 pub const TPU: i32 = 8;
 pub const T_HEAD: i32 = 3;
-pub const T_ELEM: i32 = 5;
-pub const T_CMP: i32 = 8;
-pub const T_PROBE: i32 = 4;
+pub const T_ELEM: i32 = 10;
+pub const T_CMP: i32 = 6;
+pub const T_PROBE: i32 = 3;
 pub const T_PAIR: i32 = 5;
 pub const C_BYTES: i32 = 8;
 pub const C_TICKS: i32 = 8;
+pub const C_FIRST: i32 = 2;
 pub const B_HASH: i32 = 1;
 pub const B_TEXT: i32 = 16;
 pub const M_WORDS: i32 = 2;
@@ -196,13 +197,14 @@ pub(crate) fn bytes_cmp(x: &[u8], xs: i32, xl: i32, y: &[u8], ys: i32, yl: i32) 
     return xl - yl;
 }
 pub(crate) fn mcmp(x: &[u8], xs: i32, xl: i32, y: &[u8], ys: i32, yl: i32, m: &mut [i32]) -> i32 {
-    // `bytes-cmp` charging C_TICKS per chunk of C_BYTES bytes examined, as it
-    // goes, the first chunk up front; BIG: the meter ran out.
+    // `bytes-cmp` charging C_FIRST for the first chunk of C_BYTES bytes, up
+    // front, then C_TICKS per further chunk examined, as it goes (D253: most
+    // probes end in the first chunk); BIG: the meter ran out.
     let mut n: i32 = xl;
     if yl < n {
         n = yl;
     }
-    if !spend(m, C_TICKS) {
+    if !spend(m, C_FIRST) {
         return BIG;
     }
     for i in 0..n {
@@ -412,7 +414,7 @@ pub fn unique_run(b: &[u8], s: i32, e: i32, m: &mut [i32]) -> i32 {
     // An array whose elements' encodings are pairwise distinct. m holds the
     // meter and `unique-words` of scratch. Charges: per element T_ELEM, its
     // heads (T_HEAD each) and its bytes hashed (1 tick per B_HASH); per record
-    // comparison T_CMP, + C_TICKS per C_BYTES bytes examined on a hash tie.
+    // comparison T_CMP, + on a hash tie C_FIRST, then C_TICKS per further C_BYTES.
     // O(n log n) comparisons, no allocation.
     if (s >= e) || ((i32::cast_unsigned(b[(s) as usize] as i32) >> 5).cast_signed() != 4) {
         return verdict(m, false);
@@ -584,8 +586,8 @@ pub(crate) fn count_of(b: &[u8], v: i32, e: i32) -> i32 {
 }
 pub(crate) fn named(a: &[u8], ao: i32, t: &[i32], b: &[u8], ks: i32, ke: i32, m: &mut [i32]) -> i32 {
     // Is the key b[ks, ke) one of the prepared names? 1 yes, 0 no, -1 the
-    // meter ran out. Binary search: T_PROBE per probe + C_TICKS per C_BYTES bytes
-    // examined.
+    // meter ran out. Binary search: T_PROBE per probe + C_FIRST, then C_TICKS per
+    // further C_BYTES bytes examined.
     let mut lo: i32 = 0;
     let mut hi: i32 = t[(0) as usize];
     let kl: i32 = ke - ks;

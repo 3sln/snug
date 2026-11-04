@@ -287,9 +287,16 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
     // bit 0 forces the generic path (the fast == generic gate);
     // bit 1 selects the legacy schedule 1; schedule 2 (D045) is the default
-    // (s[VM_GENERIC] bit 1 set = schedule 2).
+    // (s[VM_GENERIC] bit 1 set = schedule 2). D254: the forced generic path
+    // is charged by the generic walk's own schedule, the table (schedule 1):
+    // schedule 2's free bookkeeping prices the fast paths' CPU, not its.
     if (limits.len() as i32) > 8 {
-        s[(VM_GENERIC) as usize] = ((limits[(8) as usize] & 1) + 2) - (limits[(8) as usize] & 2);
+        let w8: i32 = limits[(8) as usize];
+        if (w8 & 3) != 0 {
+            s[(VM_GENERIC) as usize] = w8 & 1;
+        } else {
+            s[(VM_GENERIC) as usize] = 2;
+        }
     } else {
         s[(VM_GENERIC) as usize] = 2;
     }

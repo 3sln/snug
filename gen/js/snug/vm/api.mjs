@@ -300,9 +300,16 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
     // bit 0 forces the generic path (the fast == generic gate);
     // bit 1 selects the legacy schedule 1; schedule 2 (D045) is the default
-    // (s[VM_GENERIC] bit 1 set = schedule 2).
+    // (s[VM_GENERIC] bit 1 set = schedule 2). D254: the forced generic path
+    // is charged by the generic walk's own schedule, the table (schedule 1):
+    // schedule 2's free bookkeeping prices the fast paths' CPU, not its.
     if (limits.length > 8) {
-        s[VM_GENERIC] = ((limits[8] & 1) + 2) - (limits[8] & 2);
+        const w8 = limits[8];
+        if ((w8 & 3) !== 0) {
+            s[VM_GENERIC] = w8 & 1;
+        } else {
+            s[VM_GENERIC] = 2;
+        }
     } else {
         s[VM_GENERIC] = 2;
     }

@@ -153,7 +153,7 @@ export function assembledCases() {
       { label: `invalid at the last element, ${bad.length} B: "v" sorts first, only {kind:"b", v: tstr} survives it and dies at the value of "kind" (rule 1 at the value, kept by rule 3) -> value at [23999, "kind"]`,
         bytes: bad, check: expect({ code: 35, path: [[0, 23999], [1, KEY(six.P, six.B, 'kind')]], offset: bad.length - 2 }) },
       { label: 'the valid input under a 1 M budget: budget, at the same point on both hosts', bytes: good, lim: lim({ budget: 1000000 }), check: expect({ code: 48, used: 1000000 }) },
-      { label: 'the valid input under the 2.3 M default (D046): budget, a recorded refusal', bytes: good, lim: lim({ budget: 2300000 }), check: expect({ code: 48, used: 2300000 }) },
+      { label: 'the valid input under the 2.25 M default (D046, D253): budget, a recorded refusal', bytes: good, lim: lim({ budget: 2250000 }), check: expect({ code: 48, used: 2250000 }) },
     ]);
     const s = C('r = bstr / tstr / [* any] / { * tstr => any }');
     add('hostile declared lengths', s, ['5bffffffffffffffff', '9bffffffffffffffff', 'bbffffffffffffffff', '7bffffffffffffffff', '5a7fffffff', '9a7fffffff', 'ba7fffffff', 'b9ffff', '9a00010000' + '00'.repeat(10)]

@@ -36,12 +36,13 @@
 
 (defconst ^:pub ^I32 TPU 8)          ;; ticks per budget unit
 (defconst ^:pub ^I32 T_HEAD 3)       ;; a head visited while skipping an item
-(defconst ^:pub ^I32 T_ELEM 5)       ;; .unique: an element recorded (its span and hash)
-(defconst ^:pub ^I32 T_CMP 8)        ;; .unique: a comparison of two records (and its swap)
-(defconst ^:pub ^I32 T_PROBE 4)      ;; .samelen: a name probe (binary search)
+(defconst ^:pub ^I32 T_ELEM 10)      ;; .unique: an element recorded (its span and hash; D253)
+(defconst ^:pub ^I32 T_CMP 6)        ;; .unique: a comparison of two records (and its swap; D253)
+(defconst ^:pub ^I32 T_PROBE 3)      ;; .samelen: a name probe (binary search; D253)
 (defconst ^:pub ^I32 T_PAIR 5)       ;; .samelen: a map pair
 (defconst ^:pub ^I32 C_BYTES 8)      ;; bytes compared per chunk (a power of two)...
-(defconst ^:pub ^I32 C_TICKS 8)      ;; ...and the chunk's ticks
+(defconst ^:pub ^I32 C_TICKS 8)      ;; ...and the chunk's ticks, after the first
+(defconst ^:pub ^I32 C_FIRST 2)      ;; the first chunk's ticks, charged up front (D253)
 (defconst ^:pub ^I32 B_HASH 1)       ;; .unique: bytes hashed per tick
 (defconst ^:pub ^I32 B_TEXT 16)      ;; .chars: content bytes counted per unit
 (defconst ^:pub ^I32 M_WORDS 2)      ;; meter words before a run's own scratch
@@ -164,11 +165,12 @@
     (return (- xl yl))))
 
 (defn ^I32 mcmp [^Bytes x ^I32 xs ^I32 xl ^Bytes y ^I32 ys ^I32 yl ^Ints m]
-  (comment "`bytes-cmp` charging C_TICKS per chunk of C_BYTES bytes examined, as it"
-           "goes, the first chunk up front; BIG: the meter ran out.")
+  (comment "`bytes-cmp` charging C_FIRST for the first chunk of C_BYTES bytes, up"
+           "front, then C_TICKS per further chunk examined, as it goes (D253: most"
+           "probes end in the first chunk); BIG: the meter ran out.")
   (let [^:mut n xl]
     (if (< yl n) (set n yl))
-    (if (not (spend m C_TICKS)) (return BIG))
+    (if (not (spend m C_FIRST)) (return BIG))
     (for [^I32 i 0 n]
       (if (and (> i 0) (== (bit-and i (- C_BYTES 1)) 0))
         (if (not (spend m C_TICKS)) (return BIG)))
@@ -312,7 +314,7 @@
   (comment "An array whose elements' encodings are pairwise distinct. m holds the"
            "meter and `unique-words` of scratch. Charges: per element T_ELEM, its"
            "heads (T_HEAD each) and its bytes hashed (1 tick per B_HASH); per record"
-           "comparison T_CMP, + C_TICKS per C_BYTES bytes examined on a hash tie."
+           "comparison T_CMP, + on a hash tie C_FIRST, then C_TICKS per further C_BYTES."
            "O(n log n) comparisons, no allocation.")
   (if (or (>= s e) (!= (ushr (u8 b s) 5) 4)) (return (verdict m false)))
   (let [n (harg b s)
@@ -429,8 +431,8 @@
 
 (defn ^I32 named [^Bytes a ^I32 ao ^IntsR t ^Bytes b ^I32 ks ^I32 ke ^Ints m]
   (comment "Is the key b[ks, ke) one of the prepared names? 1 yes, 0 no, -1 the"
-           "meter ran out. Binary search: T_PROBE per probe + C_TICKS per C_BYTES bytes"
-           "examined.")
+           "meter ran out. Binary search: T_PROBE per probe + C_FIRST, then C_TICKS per"
+           "further C_BYTES bytes examined.")
   (let [^:mut lo 0
         ^:mut hi (ia t 0)
         kl (- ke ks)]

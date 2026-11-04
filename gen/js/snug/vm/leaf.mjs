@@ -3,7 +3,7 @@
 
 import { O_HI, O_LO } from '../cbor/codes.mjs';
 import { be16, be32 } from '../cbor/head.mjs';
-import { c64, c64min, charge, highBit, lowBit, popcount } from './base.mjs';
+import { c12, c64min, charge, highBit, lowBit, popcount } from './base.mjs';
 import { F_ADMITTED, F_MATCHED, H_S_FINTERVALS, H_S_INTERVALS, H_S_LEAVES, H_S_LITREFS, H_S_REGEX_INDEX, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_BITS, R_BUDGET, R_INCONSISTENT, R_PATTERN, R_RANGE, R_SIZE, R_TYPE, R_VALUE, VM_REGCAP, VM_REGEX } from './layout.mjs';
 
 export function cmpU64(ahi, alo, bhi, blo) {
@@ -545,7 +545,7 @@ export function bitsOk(pool, b, moff, mlen, cs, i0, stop) {
 
 export function leafBytes(p, pool, b, s, lb, pos, cs, ce) {
     // BYTES: size, then `.bits` (data[i] & ~mask[i] = 0, mask 0 past its
-    // length; charged ceil(len/64)).
+    // length; charged ceil(len/12), D253).
     const len = ce - cs;
     const moff = p[lb + 4];
     const mlen = p[lb + 5];
@@ -555,7 +555,7 @@ export function leafBytes(p, pool, b, s, lb, pos, cs, ce) {
     if (mlen === 0) {
         return 0;
     }
-    if (!charge(s, c64(len), pos)) {
+    if (!charge(s, c12(len), pos)) {
         return -R_BUDGET;
     }
     if (bitsOk(pool, b, moff, mlen, cs, cs, ce)) {

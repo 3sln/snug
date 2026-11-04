@@ -87,16 +87,18 @@ cases.forEach((c, i) => {
   const r = js[i].startsWith('THROW') || js[i].startsWith('ERR') ? js[i] : c.check(js[i]);
   if (r) fail(`${c.label}: JS ${r}`); else stats[which][0]++;
 });
-// fast paths == the generic path (D044): every case again with them off
+// legacy schedule 1 (limits word 8 bit 1; schedule 2, D045, is the default)
+const js2 = cases.map(c => { try { return runJs(c, false, false, true); } catch (e) { return 'THROW ' + e.message; } });
+// fast paths == the generic path (D044 as amended by D254): every case again with them off. The forced
+// generic path is charged by its own schedule, the table (schedule 1), so it must give the schedule-1
+// fast run's whole out array; against the default schedule only the budget used may differ (below).
 let genericAgree = 0;
 cases.forEach((c, i) => {
   let g; try { g = runJs(c, false, true); } catch (e) { g = 'THROW ' + e.message; }
-  if (g === js[i]) genericAgree++; else fail(`${c.label}: fast ${js[i]} | generic ${g}`);
+  if (g === js2[i]) genericAgree++; else fail(`${c.label}: schedule-1 fast ${js2[i]} | generic ${g}`);
 });
-// legacy schedule 1 (limits word 8 bit 1; schedule 2, D045, is the default):
-// fast == generic exactly; and it changes nothing but the budget used (every other out word equal unless a run hit the budget)
+// fast == generic exactly under schedule 1; and schedule 1 changes nothing but the budget used (every other out word equal unless a run hit the budget)
 let s2Agree = 0, s2Same = 0;
-const js2 = cases.map(c => { try { return runJs(c, false, false, true); } catch (e) { return 'THROW ' + e.message; } });
 cases.forEach((c, i) => {
   let g; try { g = runJs(c, false, true, true); } catch (e) { g = 'THROW ' + e.message; }
   if (g === js2[i]) s2Agree++; else fail(`${c.label}: schedule 1 fast ${js2[i]} | generic ${g}`);
@@ -210,7 +212,7 @@ if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length
 line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.oracle[0]}/${stats.oracle[1]} values agree with corpus/tools/oracle.mjs on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}); ${diff.unknown} oracle-unknown skipped`);
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `§15, assembled and extension-control programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled, ${nExt} extension-control cases incl. ${cases.filter(c => c.ext && c.label.includes('fixed')).length} with fixed verdicts; they run in every section below except wasm)`);
-line(genericAgree === cases.length, `fast paths == generic path (D044): ${genericAgree}/${cases.length} cases give the same whole out array with the fast paths forced off`);
+line(genericAgree === cases.length, `fast paths == generic path (D044, D254): ${genericAgree}/${cases.length} cases give the schedule-1 fast run's whole out array with the fast paths forced off (the generic path is charged by schedule 1; verdict, reason, offset, items and path equal the default run's unless either hit the budget)`);
 line(s2Agree === cases.length, `legacy schedule 1 (word 8 bit 1): fast == generic on ${s2Agree}/${cases.length} cases`);
 line(s2Same === cases.length, `schedule 1 vs the default schedule 2 (D045) changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);
 line(epochFails === 0, `epochs: ${epochRuns} cases re-run from an epoch just below the restart threshold give the same out array`);

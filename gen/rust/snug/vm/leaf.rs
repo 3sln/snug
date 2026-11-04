@@ -526,7 +526,7 @@ pub fn bits_ok(pool: &[u8], b: &[u8], moff: i32, mlen: i32, cs: i32, i0: i32, st
 }
 pub fn leaf_bytes(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos: i32, cs: i32, ce: i32) -> i32 {
     // BYTES: size, then `.bits` (data[i] & ~mask[i] = 0, mask 0 past its
-    // length; charged ceil(len/64)).
+    // length; charged ceil(len/12), D253).
     let len: i32 = ce - cs;
     let moff: i32 = p[(lb + 4) as usize];
     let mlen: i32 = p[(lb + 5) as usize];
@@ -536,7 +536,7 @@ pub fn leaf_bytes(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos:
     if mlen == 0 {
         return 0;
     }
-    if !charge(s, c64(len), pos) {
+    if !charge(s, c12(len), pos) {
         return -R_BUDGET;
     }
     if bits_ok(pool, b, moff, mlen, cs, cs, ce) {

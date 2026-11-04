@@ -32,7 +32,7 @@
                                     F_ADMITTED F_MATCHED F_EVAL VM_REGEX VM_REGCAP VM_EMBED VM_DLIM VM_D
                                     VM_BUDGET VM_W_REASON VM_W_SUB R_SIZE R_PATTERN R_BITS R_EMBEDDED
                                     R_BUDGET R_INCONSISTENT P_EMBED]]
-            [snug.vm.base :refer [charge c64 popcount new-epoch q-add q-stamp ts-test q-flag q-set-flag
+            [snug.vm.base :refer [charge c8 c12 popcount new-epoch q-add q-stamp ts-test q-flag q-set-flag
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame wit-empty
                                   wit-clear wit-set path-put]]
             [snug.vm.leaf :refer [eval-leaf scalar-kind rx-cp rx-accepts utf8-len bits-ok]]
@@ -97,7 +97,7 @@
           stop (take-len s pos q hi lo end)]
       (if (< stop 0) (return (err ss stop)))
       (pend-note b s ss base stop pos)
-      (if (not (charge s (c64 (- stop q)) pos)) (return (err ss (neg R_BUDGET))))
+      (if (not (charge s (c8 (- stop q)) pos)) (return (err ss (neg R_BUDGET))))
       (let [^:mut ^I32 kind FK_DTEXT]
         (if (== live 1) (set kind FK_TEXT))
         (let [f (fpush b ss ka base kind)]
@@ -318,7 +318,7 @@
                 (do (if (not (charge s (unit-of ctx) pos)) (return (err ss (neg R_BUDGET))))
                     (if (and (== lk K_BYTES)
                              (and (!= (ia p (+ lb 5)) 0) (and (>= len (ia p (+ lb 2))) (<= len (ia p (+ lb 3))))))
-                      (do (if (not (charge s (c64 len) pos)) (return (err ss (neg R_BUDGET))))
+                      (do (if (not (charge s (c12 len) pos)) (return (err ss (neg R_BUDGET))))
                           (set bits i))
                       (do (let [r (eval-leaf p pool b s lb lk pos cs stop 4 0 0)]
                             (if (< r 0) (return (err ss r)))

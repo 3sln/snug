@@ -8,7 +8,7 @@ that never echo the payload.
 
 Status: **experimental implementation, updated 2026-11-03**. The generated
 compiler, verifier, scanner and buffer VM work, with JS codec, schema API,
-checked views/cursor, Writer, profile-only source adapters and serialised
+checked views/cursor, Writer, source adapters (profile and schema) and serialised
 Programs. Rust/wasm core and test hosts exist; public host coverage is less
 complete. The deterministic and Bindle wire presets (P7.1) are implemented
 in JS and Rust, as are extension controls (P7.2) and unknown-length streams in
@@ -39,8 +39,9 @@ Validation works on CBOR bytes. Host values are validated by encoding them
 first. Checked views and a cursor expose selected values without materialising
 the entire message (D026, D050–D054); `validateAt` checks a detached span, not
 ancestor constraints. Typed Writer calls produce deterministic bytes directly
-(D070–D074). Known-length handle/push adapters currently check the CBOR profile;
-the broader resumable schema/source direction is D027/D085.
+(D070–D074). Handles, push sources and unknown-length streams validate the
+profile or a schema through the resumable session VM (D027, D085, D095,
+D160), with the buffer driver's verdicts.
 
 JS package entry points, declarations, errors, ownership and examples are in
 [README](README.md), [guide](docs/guide.md) and [API](docs/api.md).
@@ -52,8 +53,9 @@ loading through a versioned, hashed and structurally verified container
 ### 1.1 What snug is not
 
 * Not a JSON validator. CDDL over JSON is out of scope (revision 1).
-* Not a lenient decoder. There is no mode that accepts non-deterministic or
-  out-of-profile CBOR (§3).
+* Not (yet) a general CBOR decoder: no current mode accepts valid
+  non-deterministic CBOR (§3); D230/P8.4 will make that the default. It will
+  never accept invalid CBOR (duplicate keys, malformed UTF-8 or items).
 * Not a code generator for CDDL types.
 * Not a complete RFC 8610 implementation: `.pcre`, `.abnf`, `.abnfb`,
   and non-I-Regexp regexps are refused (D013, D014), and maps the
@@ -85,15 +87,26 @@ these precise choices (each with a decision):
 
 Every path verifies RFC 8949 §4.2.1 core deterministic encoding on decode
 (definite lengths, shortest arguments and floats, bytewise encoded-key order,
-no duplicates, one root) and produces only that. A wire profile narrows
+no duplicates, one root) and produces only that. **The current default
+therefore refuses valid but non-deterministic CBOR** — indefinite lengths,
+non-shortest heads or floats, unsorted map keys, NaN payloads — even against
+`any`; such input is valid RFC 8949 CBOR, and the refusal is a scope limit,
+not a validity verdict. Owner direction D230 makes general valid-CBOR
+acceptance the default, keeping deterministic checking as an option (Phase 8,
+P8.4); it is not implemented yet. A wire profile narrows
 acceptance further; every option only removes acceptance (D081, D120). Two
 presets (P7.1):
 
-* **`deterministic`** (default): any map key kind; tags 2, 3, 4, 40, the
-  RFC 8746 little-endian typed arrays and the standard additions 0, 1, 21–24,
-  32, 55799 with RFC 8949 content checks; RFC 8949 floats (canonical NaN
-  `f97e00`, ±∞, −0, integral floats); `false`, `true`, `null`, `undefined`;
-  any well-formed UTF-8 text.
+* **`deterministic`** (default): any map key kind; **any tag number**
+  except the invalid 65535, 2³²−1 and 2⁶⁴−1 (`tags: 'any'`, D180;
+  `tags: 'standard'` keeps the former set of 2, 3, 4, 40, the RFC 8746
+  little-endian typed arrays and 0, 1, 21–24, 32, 55799). Known tags have
+  their content checked — 0 (RFC 3339/RFC 4287 date-time, leap seconds only
+  at a UTC month end), 1 (integer or float), 24, 32 (RFC 3986
+  URI-reference), 2/3/4/40 and the typed arrays — and every other tag is
+  opaque (D252); RFC 8949 floats (canonical NaN `f97e00`, ±∞, −0, integral
+  floats); `false`, `true`, `null`, `undefined`; any well-formed UTF-8
+  text.
 * **`bindle`**: text map keys (a `cose` option allows safe integer labels in
   the top-level map); the tags above without the standard additions;
   `false`, `true`, `null` and shortest floats only, with scalar NaN, ±∞, −0

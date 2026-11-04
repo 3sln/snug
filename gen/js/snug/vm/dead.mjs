@@ -8,16 +8,16 @@ import { keyLabel, keyPeek, scanFloat, scanSimple, textBad } from '../cbor/scan.
 import { ruleTag, stdAllowed, stdContentOk, stdInner } from '../cbor/stdtags.mjs';
 import { dataCount, exponentOk, mantissaOk, shapeOk, typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
-import { c64, c64min, charge } from './base.mjs';
+import { c64, c64min, c8, charge } from './base.mjs';
 import { R_BUDGET, VM_BIGNUM_MAX, VM_BUDGET, VM_FASTM, VM_GENERIC, VM_Q1 } from './layout.mjs';
 
 export function deadText(b, s, pos, p, hi, lo, end) {
-    // Text: its length, then UTF-8 (charged ceil(len/64) before the scan).
+    // Text: its length, then UTF-8 (charged ceil(len/8) before the scan, D253).
     const stop = takeLen(s, pos, p, hi, lo, end);
     if (stop < 0) {
         return stop;
     }
-    if (!charge(s, c64(stop - p), pos)) {
+    if (!charge(s, c8(stop - p), pos)) {
         return -R_BUDGET;
     }
     const bad = utf8InvalidAt(b, p, stop);
@@ -340,7 +340,7 @@ export function ndarrayCheck(b, s, pos, p, stop) {
 
 export function deadStdCheck(b, s, pos, tag, q, stop, depth) {
     // A standard-set tag at pos (depth `depth`) whose content item b[q, stop)
-    // was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/64) for the
+    // was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/8) (D253) for the
     // syntax scan of a tag-0/32 text; the content rule (tag); then a tag-24
     // byte string's content walked dead as one item at depth + 2, bounded by
     // its end (trailing after it). Answers stop, or a negated code. Shared by
@@ -349,7 +349,7 @@ export function deadStdCheck(b, s, pos, tag, q, stop, depth) {
         return -R_BUDGET;
     }
     if (((tag === 0) || (tag === 32)) && (((b[q] >>> 5) | 0) === 3)) {
-        if (!charge(s, c64(stop - q), pos)) {
+        if (!charge(s, c8(stop - q), pos)) {
             return -R_BUDGET;
         }
     }

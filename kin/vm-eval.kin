@@ -37,7 +37,7 @@
                                     INF H_S_TS_INDEX H_S_GROUP_INDEX H_S_INTERVALS K_INT K_TEXT
                                     R_RANGE R_SIZE VM_BUDGET VM_FASTK MODE_ABSORB K_ANY K_MAJOR
                                     VM_FASTP VM_FASTL VM_POS]]
-            [snug.vm.base :refer [charge c64 c64min new-epoch sched2 free-on free-off q-add q-filter q-stamp ts-test q-flag q-set-flag
+            [snug.vm.base :refer [charge c8 c64min new-epoch sched2 free-on free-off q-add q-filter q-stamp ts-test q-flag q-set-flag
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
                                   wit-empty wit-clear wit-set path-put rule1]]
             [snug.vm.dead :refer [dead-item dead-seq key-order dead-int-streak dead-map-pairs dead-array-elems dead-typed dead-bignum dead-pair-body
@@ -508,7 +508,7 @@
               (if (> lo (- end (+ q h))) (break))
               (if (or (< lo tlo) (> lo thi)) (break))
               (comment "schedule 2: visit + UTF-8 only")
-              (set cost (+ (- 11 (* 10 s2)) (c64 lo)))
+              (set cost (+ (- 11 (* 10 s2)) (c8 lo)))
               (if (< left cost) (break))
               (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (break))
               (set left (- left cost))
@@ -598,7 +598,7 @@
       (if (== major 3)
         (do (set stop (take-len s pos q hi lo end))
             (if (< stop 0) (return stop))
-            (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
+            (if (not (charge s (c8 (- stop q)) pos)) (return (neg R_BUDGET)))
             (let [bad (utf8-invalid-at b q stop)]
               (if (>= bad 0)
                 (do (let [tbad (text-bad b s bad stop)]
@@ -1090,7 +1090,7 @@
           (if (> lo (- end (+ q h))) (return (neg 1)))
           (if (or (< lo (ia p (+ lb 2))) (> lo (ia p (+ lb 3)))) (return (neg 1)))
           (if (>= (utf8-invalid-at b (+ q h) (+ (+ q h) lo)) 0) (return (neg 1)))
-          (iset s O_LO (+ 3 (c64 lo)))
+          (iset s O_LO (+ 3 (c8 lo)))
           (return (+ (+ q h) lo))))
     (return (neg 1))))
 
@@ -1190,7 +1190,7 @@
               (comment "commit, in the generic order")
               (let [^:mut ko 0
                     ^:mut ka (+ (+ sk 1) steps)
-                    ^:mut kb (+ 1 (c64 kl))]
+                    ^:mut kb (+ 1 (c8 kl))]
                 (if (>= ps 0) (set ko (c64min (- pe ps) (- kend start))))
                 (if (== mode 2) (do (set ka (+ ka 1)) (set kb (+ kb 2))))
                 (comment "schedule 2 (D045): the pair costs 1 (no steps, no key element),"
@@ -1551,7 +1551,7 @@
     (if (== major 3)
       (do (set stop (take-len s pos q hi lo end))
           (if (< stop 0) (return stop))
-          (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET)))
+          (if (not (charge s (c8 (- stop q)) pos)) (return (neg R_BUDGET)))
           (let [bad (utf8-invalid-at b q stop)]
             (if (>= bad 0)
               (do (let [tbad2 (text-bad b s bad stop)]

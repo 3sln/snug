@@ -10,16 +10,32 @@ pub fn c64(n: i32) -> i32 {
     }
     return (n >> 6) + 1;
 }
+pub fn c8(n: i32) -> i32 {
+    // ceil(n / 8): the UTF-8 profile scan and the tag-0/32 form scan (D253).
+    if (n & 7) == 0 {
+        return n >> 3;
+    }
+    return (n >> 3) + 1;
+}
+pub fn c12(n: i32) -> i32 {
+    // ceil(n / 12): the `.bits` scan (D253).
+    let q: i32 = n / 12;
+    if (q * 12) == n {
+        return q;
+    }
+    return q + 1;
+}
 pub fn c64min(a: i32, b: i32) -> i32 {
-    // A byte comparison's charge: ceil(min(a, b) / 64), at least 1.
+    // A byte comparison's charge: ceil(min(a, b) / 8), at least 1 (D253: the
+    // quantum was 64 bytes; the name is historical).
     let mut m: i32 = a;
     if b < m {
         m = b;
     }
-    if m <= 64 {
+    if m <= 8 {
         return 1;
     }
-    return c64(m);
+    return c8(m);
 }
 pub fn c16(n: i32) -> i32 {
     // ceil(n / 16): a container block's initialisation charge.

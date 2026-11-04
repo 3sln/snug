@@ -5,7 +5,7 @@ import { CODE_DEPTH, CODE_TEXT, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TYPED_A
 import { fail, readArg, takeLen } from '../cbor/head.mjs';
 import { textNc } from '../cbor/scan.mjs';
 import { utf8Window } from '../cbor/text.mjs';
-import { c64, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, popcount, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, tsTest, witClear, witEmpty, witSet } from './base.mjs';
+import { c12, c8, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, popcount, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { typedBadAt } from './dead.mjs';
 import { countMatchedScalars, embedKill, embedLive, finishScalar, qFilterX, unitOf } from './eval.mjs';
 import { FL_EMBED, F_ADMITTED, F_EVAL, F_MATCHED, H_FLAGS, H_S_LEAVES, H_S_REGEX_INDEX, K_BYTES, K_EMBED, K_TEXT, P_EMBED, R_BITS, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_PATTERN, R_SIZE, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_REGCAP, VM_REGEX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
@@ -75,7 +75,7 @@ export function openText(p, pool, b, s, ss, ka, base, pos, d, fb, ck, nq, end, c
         return err(ss, stop);
     }
     pendNote(b, s, ss, base, stop, pos);
-    if (!charge(s, c64(stop - q), pos)) {
+    if (!charge(s, c8(stop - q), pos)) {
         return err(ss, -R_BUDGET);
     }
     let kind = FK_DTEXT;
@@ -379,7 +379,7 @@ export function openBstr(p, pool, b, s, ss, ka, base, pos, d, fb, ck, nq, end, c
                     return err(ss, -R_BUDGET);
                 }
                 if ((lk === K_BYTES) && ((p[lb + 5] !== 0) && ((len >= p[lb + 2]) && (len <= p[lb + 3])))) {
-                    if (!charge(s, c64(len), pos)) {
+                    if (!charge(s, c12(len), pos)) {
                         return err(ss, -R_BUDGET);
                     }
                     bits = i;

@@ -11,16 +11,34 @@ export function c64(n) {
     return (n >> 6) + 1;
 }
 
+export function c8(n) {
+    // ceil(n / 8): the UTF-8 profile scan and the tag-0/32 form scan (D253).
+    if ((n & 7) === 0) {
+        return n >> 3;
+    }
+    return (n >> 3) + 1;
+}
+
+export function c12(n) {
+    // ceil(n / 12): the `.bits` scan (D253).
+    const q = (n / 12) | 0;
+    if ((q * 12) === n) {
+        return q;
+    }
+    return q + 1;
+}
+
 export function c64min(a, b) {
-    // A byte comparison's charge: ceil(min(a, b) / 64), at least 1.
+    // A byte comparison's charge: ceil(min(a, b) / 8), at least 1 (D253: the
+    // quantum was 64 bytes; the name is historical).
     let m = a;
     if (b < m) {
         m = b;
     }
-    if (m <= 64) {
+    if (m <= 8) {
         return 1;
     }
-    return c64(m);
+    return c8(m);
 }
 
 export function c16(n) {

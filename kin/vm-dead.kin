@@ -24,15 +24,15 @@
             [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad]]
             [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag]]
             [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC]]
-            [snug.vm.base :refer [charge c64 c64min]]))
+            [snug.vm.base :refer [charge c8 c64 c64min]]))
 
 (declarefn dead-item)
 
 (defn ^:pub ^I32 dead-text [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
-  (comment "Text: its length, then UTF-8 (charged ceil(len/64) before the scan).")
+  (comment "Text: its length, then UTF-8 (charged ceil(len/8) before the scan, D253).")
   (let [stop (take-len s pos p hi lo end)]
     (if (< stop 0) (return stop))
-    (if (not (charge s (c64 (- stop p)) pos)) (return (neg R_BUDGET)))
+    (if (not (charge s (c8 (- stop p)) pos)) (return (neg R_BUDGET)))
     (let [bad (utf8-invalid-at b p stop)]
       (if (>= bad 0) (return (text-bad b s bad stop)))
       (return stop))))
@@ -232,14 +232,14 @@
 
 (defn ^:pub ^I32 dead-std-check [^Bytes b ^Ints s ^I32 pos ^I32 tag ^I32 q ^I32 stop ^I32 depth]
   (comment "A standard-set tag at pos (depth `depth`) whose content item b[q, stop)"
-           "was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/64) for the"
+           "was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/8) (D253) for the"
            "syntax scan of a tag-0/32 text; the content rule (tag); then a tag-24"
            "byte string's content walked dead as one item at depth + 2, bounded by"
            "its end (trailing after it). Answers stop, or a negated code. Shared by"
            "the dead walk, the live walk and the resumable session.")
   (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
   (if (and (or (== tag 0) (== tag 32)) (== (ushr (u8 b q) 5) 3))
-    (if (not (charge s (c64 (- stop q)) pos)) (return (neg R_BUDGET))))
+    (if (not (charge s (c8 (- stop q)) pos)) (return (neg R_BUDGET))))
   (if (not (std-content-ok b tag q stop)) (return (fail s pos CODE_TAG)))
   (if (== tag 24)
     (do (let [cs (std-inner b q)

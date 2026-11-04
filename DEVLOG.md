@@ -4278,6 +4278,76 @@ epochs as the default (a local rule; the Bindle preset already refuses
 non-finite floats outright).
 - [ ] **Signed off** (owner)
 
+### D253 — D241 implemented: the repriced schedule and the 2.25 M default (P8.2)
+**Decision** (compliance engineer, provisional, 2026-11-04; implements D241):
+the UTF-8 profile scan (live, dead, session, the streak and pre-scalar key
+charges) costs ⌈len/8⌉ (was ⌈len/64⌉); every byte comparison (`c64min`:
+literal, LITSET member, key, key order; the name is kept, the quantum is now
+8 bytes, minimum 1) ⌈min/8⌉; the `.bits` scan ⌈len/12⌉; `.unique` records
+T_ELEM 10 (was 5) and compares T_CMP 6 (was 8); `.samelen` probes T_PROBE 3
+(was 4); the generic controls' byte comparison charges its first 8-byte
+chunk C_FIRST 2 ticks up front (was C_TICKS 8), later chunks 8; the compiled
+default budget (option 17) is 2,250,000 (was 2,300,000). `EXT_CALL` stays 16
+(D241). Also repriced, by analogy and not separately measured: the tag-0/32
+form scan after its content, ⌈len/8⌉ (was ⌈len/64⌉) — D252 made the URI scan
+a full RFC 3986 recogniser, byte-wise work of the UTF-8 scan's kind. Kept:
+the typed-array float NaN scan ⌈len/64⌉, TPU 8, T_HEAD 3, T_PAIR 5, C_BYTES 8,
+B_HASH 1, B_TEXT 16. program.md §14 restated; §15's worked totals are
+unchanged (every text and comparison there is under 8 bytes); the §15 header
+word LIM_BUDGET is 2,250,000. Budget-used expectations changed only where they
+are budget numbers (vm-cases' D046 case now runs at the 2.25 M default).
+**Why**: D241 (the owner delegated calibration, D230.1). Before/after
+calibration: P8.2 and bench/VM.md "Calibration 2026-11-04 — D253/D254
+confirmation".
+**Alternatives**: as D240/D241.
+- [ ] **Signed off** (owner) — calibration was delegated; recorded for review.
+
+### D254 — The forced generic path is charged by its own schedule, the table (amends D044, D045) (P8.2; manager's D241 follow-up)
+**Decision** (compliance engineer, provisional, 2026-11-04): schedule 2's free
+bookkeeping (D045) prices what the fast paths do for the simple shapes; the
+reference VM's diagnostic switch that forces every item onto the generic walk
+(`limits` word 8 bit 0, not public API) now selects schedule 1 — the table,
+which is the bookkeeping that walk actually does. One line in vm-api: word 8
+bit 0 or 1 → schedule 1. D044's identity becomes: **the same input under the
+same schedule gives identical charges on every host and driver** (buffer and
+session, every window split and quantum, JS, Rust and wasm), and the fast
+paths equal the generic walk under schedule 1 word for word. vm-test's
+fast == generic arm now compares the forced run with the schedule-1 fast run
+(whole out array) and keeps the existing check that schedule 1 differs from
+the default only in the budget used (verdict, reason, offset, items and path
+equal unless either run hits the budget).
+**Not done, and why**: charging *natural* generic dispatch by a second
+schedule. In this VM the fast paths are streaks inside the same walk, taken
+or not per element; in the resumable session whether a streak runs depends
+on the window and the quantum's cut (D091, D093). Example: `r = [* uint]`
+over 100,000 small integers. Through the buffer driver every element after
+the first runs in the integer streak; through a push source fed 1-byte
+chunks, the streak stops at each window end and the element straddling it
+takes the generic step, about 100,000 times; fed 64 KiB chunks, a handful of
+times. With per-path prices the units used would differ across those three
+runs, and a budget set between them would refuse the 1-byte-chunked stream
+with `budget` while accepting the same bytes from a buffer — a verdict that
+depends on chunking, breaking the buffer == session identity vmsession-test
+holds under every split and yield.
+**Compile-time-known generic paths**: these can carry their own price
+without that dependence, because the choice is a property of the Program
+(and the item's query), not of the window — and they already do. Schedule 2
+rules 1–3 apply only to the shapes the fast paths serve (a `[* T]` block with
+a one-answer typeset; a closed-struct or pure-table map leaf; one scalar
+leaf); a map whose table is neither (`map-fast-mode` 0), or an array whose
+group is not one self-looping position, can never take a fast path in any
+driver and is always charged by the table, which is the generic walk's own
+schedule. No *further* surcharge is applied to them: their measured CPU per
+unit is already in band (array automaton 0.68×, six-way map choice 1.21× of
+the JS kind median; Rust 0.82×, 1.14×; bench/VM.md calibration), so a
+separate price would have no measurement behind it. The 4–25× outliers were
+the fast-path shapes forced onto the generic walk under schedule 2 — exactly
+what this decision reprices.
+**Alternatives**: per-element dispatch-dependent charges (chunk-dependent
+verdicts); leave forced generic on schedule 2 (its units would mean 4–25× the
+CPU of everything else; harmless for users, misleading for calibration).
+- [ ] **Signed off** (owner)
+
 ### D272 — PEG group semantics for arrays and maps, with R1–R19 resolved (P8.5)
 **Decision** (designer, provisional; architecture §20.2–§20.3 rev 2): adopt
 the `run` definitions for arrays and maps. Arrays: prioritised `//` that

@@ -12,12 +12,12 @@ use crate::snug::vm::base::*;
 use crate::snug::vm::layout::*;
 
 pub fn dead_text(b: &[u8], s: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, end: i32) -> i32 {
-    // Text: its length, then UTF-8 (charged ceil(len/64) before the scan).
+    // Text: its length, then UTF-8 (charged ceil(len/8) before the scan, D253).
     let stop: i32 = take_len(s, pos, p, hi, lo, end);
     if stop < 0 {
         return stop;
     }
-    if !charge(s, c64(stop - p), pos) {
+    if !charge(s, c8(stop - p), pos) {
         return -R_BUDGET;
     }
     let bad: i32 = utf8_invalid_at(b, p, stop);
@@ -326,7 +326,7 @@ pub fn ndarray_check(b: &[u8], s: &mut [i32], pos: i32, p: i32, stop: i32) -> i3
 }
 pub fn dead_std_check(b: &[u8], s: &mut [i32], pos: i32, tag: i32, q: i32, stop: i32, depth: i32) -> i32 {
     // A standard-set tag at pos (depth `depth`) whose content item b[q, stop)
-    // was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/64) for the
+    // was walked (snug.cbor.stdtags, D121): 1 unit, + ceil(len/8) (D253) for the
     // syntax scan of a tag-0/32 text; the content rule (tag); then a tag-24
     // byte string's content walked dead as one item at depth + 2, bounded by
     // its end (trailing after it). Answers stop, or a negated code. Shared by
@@ -335,7 +335,7 @@ pub fn dead_std_check(b: &[u8], s: &mut [i32], pos: i32, tag: i32, q: i32, stop:
         return -R_BUDGET;
     }
     if ((tag == 0) || (tag == 32)) && ((i32::cast_unsigned(b[(q) as usize] as i32) >> 5).cast_signed() == 3) {
-        if !charge(s, c64(stop - q), pos) {
+        if !charge(s, c8(stop - q), pos) {
             return -R_BUDGET;
         }
     }

@@ -9,7 +9,7 @@
 ;; code 1..21, R_BUDGET (48) or R_INCONSISTENT (100).
 (ns snug.vm.base
   (:require [kin.lang :refer [defn let return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-xor
                                add32 sub32 mul32 < > <= >= == != and or not ia iset hex]]
             [snug.vm.layout :refer [VM_GENERIC VM_BUDGET VM_POS VM_EPOCH VM_MARK_CAP VM_QIDX VM_CHAIN VM_PATH
                                     VM_W_STATE VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_XKIND VM_W_XVAL
@@ -24,12 +24,24 @@
   (if (== (bit-and n 63) 0) (return (sar n 6)))
   (return (+ (sar n 6) 1)))
 
+(defn ^:pub ^I32 c8 [^I32 n]
+  (comment "ceil(n / 8): the UTF-8 profile scan and the tag-0/32 form scan (D253).")
+  (if (== (bit-and n 7) 0) (return (sar n 3)))
+  (return (+ (sar n 3) 1)))
+
+(defn ^:pub ^I32 c12 [^I32 n]
+  (comment "ceil(n / 12): the `.bits` scan (D253).")
+  (let [q (quot n 12)]
+    (if (== (* q 12) n) (return q))
+    (return (+ q 1))))
+
 (defn ^:pub ^I32 c64min [^I32 a ^I32 b]
-  (comment "A byte comparison's charge: ceil(min(a, b) / 64), at least 1.")
+  (comment "A byte comparison's charge: ceil(min(a, b) / 8), at least 1 (D253: the"
+           "quantum was 64 bytes; the name is historical).")
   (let [^:mut m a]
     (if (< b m) (set m b))
-    (if (<= m 64) (return 1))
-    (return (c64 m))))
+    (if (<= m 8) (return 1))
+    (return (c8 m))))
 
 (defn ^:pub ^I32 c16 [^I32 n]
   (comment "ceil(n / 16): a container block's initialisation charge.")

@@ -18,7 +18,7 @@
                                     K_LITSET K_TEXT K_BYTES K_UINTX F_ADMITTED F_MATCHED
                                     R_TYPE R_VALUE R_SIZE R_RANGE R_PATTERN R_BITS R_BUDGET
                                     R_INCONSISTENT INF]]
-            [snug.vm.base :refer [charge c64 c64min popcount low-bit high-bit]]))
+            [snug.vm.base :refer [charge c12 c64min popcount low-bit high-bit]]))
 
 ;; ------------------------------------------------------------ comparisons
 
@@ -377,13 +377,13 @@
 
 (defn ^:pub ^I32 leaf-bytes [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 lb ^I32 pos ^I32 cs ^I32 ce]
   (comment "BYTES: size, then `.bits` (data[i] & ~mask[i] = 0, mask 0 past its"
-           "length; charged ceil(len/64)).")
+           "length; charged ceil(len/12), D253).")
   (let [len (- ce cs)
         moff (ia p (+ lb 4))
         mlen (ia p (+ lb 5))]
     (if (or (< len (ia p (+ lb 2))) (> len (ia p (+ lb 3)))) (return R_SIZE))
     (if (== mlen 0) (return 0))
-    (if (not (charge s (c64 len) pos)) (return (neg R_BUDGET)))
+    (if (not (charge s (c12 len) pos)) (return (neg R_BUDGET)))
     (if (bits-ok pool b moff mlen cs cs ce) (return 0))
     (return R_BITS)))
 
