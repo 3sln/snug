@@ -1836,8 +1836,10 @@ input bytes. The compiler evaluates this at the compiled limits and warns
 lease.
 
 * **Buffer route:** a re-run per doubling. Charges are a pure function of
-  the run. CPU ≤ (1 + number of doublings) × one run, and EXT predicates may
-  be called again on a re-run (they must be pure, D140).
+  the run. CPU ≤ (1 + number of doublings) × one run: ≤ 10 doublings
+  (11 runs) at the default cap, ≤ 12 (13 runs) at the 2^24-word hard cap,
+  from the default 4 096-word lease. EXT predicates may be called again on
+  a re-run (they must be pure, D140).
 * **Session route:** `VMS_GROW` with the relocation above, no re-run.
 
 The arena never exceeds its **cap**: the explicit `groupWords` limit if one
@@ -1964,8 +1966,10 @@ the block that died last reports, ties to the lowest leaf id.
 
 **Forced-tier gate** (C8; program-2 §8). In a test mode that forces every
 map to T and every array to A2, verdict, reason, subcode, path and offset
-must equal the natural run on every vm-test case. Only the budget used may
-differ.
+must equal the natural run on every vm-test case that has sufficient budget
+and arena. Only the budget used may differ. Under a tight budget or explicit
+arena limit, each mode's `budget`/`group_limit` outcome is gated against
+that mode's own charge and allocation schedule (N7).
 
 **Relaxed queries** (C9, X Q15) can degrade nothing in a verdict. They can
 add EXT calls, nested evaluations, charges, and resource refusals for
@@ -2073,9 +2077,13 @@ equivalent, and W1 warns about it.
     resource outcome is gated against its own charge and allocation
     schedule (N7);
   * **metamorphic encodings**: every valid re-encoding gives the same
-    verdict and the same wire-independent witness parts (reason, schema
-    path). Diagnostic pair choice and offsets are wire-ordered by design and
-    may change (N7);
+    verdict. Witnesses are compared only where the witness rules do not
+    depend on wire order: array witnesses, and map `missing` witnesses.
+    Pair-attributed map witnesses (the first unacceptable pair, the
+    diagnostic cut pair, the first leftover) choose by wire order, so their
+    reason, key segment and offset may change with the encoding. On
+    `r = {a: int}`, `{a:"x", b:1}` reports `value` at `a` but `{b:1, a:"x"}`
+    reports `unexpected` at `*` (N7);
   * **splits**: every split, quantum and `VMS_GROW` point gives the same
     out array;
   * **resource boundaries**: the budget immediately before, at and after
@@ -2193,7 +2201,7 @@ raises the following, answered in revision 3):
 | N4 MAJOR: unbounded cut members make scores and steps order-sensitive | A: T always visits records in pick order (sorted whenever the map is unordered or EC-sensitive, not only with order-sensitive members); F/S scores are order-independent (argued in program-2 §8); CHOICE re-raising `cut` passes its best event | program-2 §6.2, §6.5, §8 |
 | N5 MAJOR: FAIL has no failure event | A: `FAIL` records an event (arrays E4; maps kind `fail` with score); folded `FAIL` carries provenance (the member whose iteration it replaces) so it reports what the unfolded REP would; unplugged sockets report `missing`/`unexpected` without a key | program-2 §3, §8 |
 | N6 BLOCKER: early scanner refusals not deferred | A: D280 refusal replay — the scanner records refusal and logical event, the copy covers the valid prefix, the VM reports the refusal on reaching the event; needs P8.4's §19.5 amendment (requested via the manager) | §20.6, D280 |
-| N7 MINOR: gates need resource and wire-order qualifications | A: forced-tier equality under sufficient resources; resource outcomes gated against their own schedules; encoding invariance only for the verdict and the wire-independent parts of witnesses | §20.12 |
+| N7 MINOR: gates need resource and wire-order qualifications | A: forced-tier equality under sufficient resources; resource outcomes gated against their own schedules; encoding invariance only for the verdict and the wire-independent parts of witnesses (revision 3.1: §20.9/§20.12 wording aligned; pair-attributed map witnesses excluded) | §20.9, §20.12 |
 | N8 MINOR: proofs vs established bounds | A: verifier cost and the A0/A1 bound labelled proof obligations | §20.7, program-2 §3.1, §20.16 |
 | N9 MINOR: wording | A: D277 marked done; §20.2's §3.5.4 claim qualified; App. C occurrence-expansion exception recorded in R9 | §20.2, §20.3 |
 

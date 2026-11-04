@@ -655,8 +655,10 @@ Program/pool/scratch cap, which is unchanged. A miss at the cap is
   validation again.
   * Charges are a pure function of the run, so the final run's out array is
     the answer.
-  * CPU is at most (1 + number of doublings) × one run, the doublings being
-    ≤ log₂(cap/lease) ≤ 10.
+  * CPU is at most (1 + number of doublings) × one run. With the default
+    4 096-word lease there are at most log₂(cap/lease) doublings: ≤ 10
+    (11 runs) at the default 16 MiB cap, and ≤ 12 (13 runs) at the 64 MiB
+    hard cap.
   * EXT predicates may be called again on a re-run. They must be pure
     (D140), so the outcome is unchanged.
 * **Session route.** On a miss the session suspends with `VMS_GROW`. The
