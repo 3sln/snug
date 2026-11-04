@@ -884,7 +884,13 @@ slower); allocated head tuples; validating wrapper constructors in build
     units), `[\p{L}\p{N}]` × 80 376–378 ms (4,778,582 units), `\p{L}` × 80
     335 ms; every one compiled inside the default compile budget. The
     vmsession-test run was killed by another agent's `pkill` (SIGTERM, empty
-    log) and is not counted; GATE_RERUN.
+    log) and is not counted. Standalone at `3551d7a` (session VM committed):
+    `vmsession-test 60000 1001 1200 180` **ok** in 1,488 s (1,841,136 session
+    runs == vm-validate's whole out array, 1,205,083 JS == Rust, 8,028
+    validateHandleSync == validate_blob == Schema.validate); the 10× run
+    (200000/1001/4000/600) was stopped by P4.2 after 5,497 s without
+    output at load average 60–130. `compile-fuzz 30000 1001` **ok** in 344 s
+    (4,491 compiled / 25,509 refused; slowest 1,838 ms, the same chain).
   * **harness bugs found and fixed while building** (not snug): an unbounded
     structural reader on mutated bytes (worker OOM), ANY-schema comparisons
     without the codec's map root, a COSE subtree built without `cose`, and
@@ -896,7 +902,7 @@ slower); allocated head tuples; validating wrapper constructors in build
 
   *Checks actually run*: the 66.9-min campaign above; the 15-min
   confirmation campaign at `3551d7a`; standalone gate re-runs at `3551d7a`
-  (GATE_RERUN_LIST); `node --check` on every tools/proptest module.
+  (vmsession-test 60000/1001/1200/180 ok, compile-fuzz 30000/1001 ok, write-test 3000/1005 and 3000/1009 FAIL by the harness trailing-space bug above, reproduced exactly); `node --check` on every tools/proptest module.
   `npm test` was not run: P4.2 changes no SDK/core/host code. *Learnt*: the
   shared checkout changes under a long run (HEAD moved eight commits during
   P4.2 and an uncommitted encoder change briefly made `encode` throw), so a

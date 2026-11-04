@@ -33,6 +33,6 @@
  },
  "triage": {
   "class": "environment",
-  "analysis": "compile-fuzz 30000 1001 under the campaign load: two texts (the a_i chain) took 2,078 and 2,280 ms against the gate’s 2 s wall-time criterion; every other assertion of the gate passed. See the standalone re-run in DEVLOG P4.2."
+  "analysis": "compile-fuzz 30000 1001 under the campaign load: two texts (the a_i chain) took 2,078 and 2,280 ms against the gate’s 2 s wall-time criterion; every other assertion of the gate passed. See the standalone re-run in DEVLOG P4.2. Standalone at 3551d7a: compile-fuzz 30000 1001 ok in 344 s, slowest 1,838 ms (same chain, load average ~70)."
  }
 }

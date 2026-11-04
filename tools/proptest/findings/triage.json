@@ -16,7 +16,7 @@
  },
  "P6/write-test": {
   "class": "generator bug",
-  "analysis": "kin/scripts/write-test.mjs compare(): rs = stdout.trimEnd().split('\\n') strips the trailing space of the LAST Rust line only, while the JS line keeps it; whenever the last of N cases prints an empty final field (e.g. 'm 0 0 ', 'h -69 ', 'f -9 -4 '), the gate reports N-1/N identical. Seen at seeds 1005 (close-map), 1009 (put-head), 1011 (robustness) with 3000 cases. Not a host difference."
+  "analysis": "kin/scripts/write-test.mjs compare(): rs = stdout.trimEnd().split('\\n') strips the trailing space of the LAST Rust line only, while the JS line keeps it; whenever the last of N cases prints an empty final field (e.g. 'm 0 0 ', 'h -69 ', 'f -9 -4 '), the gate reports N-1/N identical. Seen at seeds 1005 (close-map), 1009 (put-head), 1011 (robustness) with 3000 cases. Not a host difference. Reproduced at 3551d7a: write-test 3000 1005 (close-map) and 3000 1009 (put-head) each FAIL 2999/3000 with only the trailing space differing."
  },
  "P5/slow-compile": {
   "class": "environment",
@@ -24,10 +24,10 @@
  },
  "P6/compile-fuzz": {
   "class": "environment",
-  "analysis": "compile-fuzz 30000 1001 under the campaign load: two texts (the a_i chain) took 2,078 and 2,280 ms against the gate’s 2 s wall-time criterion; every other assertion of the gate passed. See the standalone re-run in DEVLOG P4.2."
+  "analysis": "compile-fuzz 30000 1001 under the campaign load: two texts (the a_i chain) took 2,078 and 2,280 ms against the gate’s 2 s wall-time criterion; every other assertion of the gate passed. See the standalone re-run in DEVLOG P4.2. Standalone at 3551d7a: compile-fuzz 30000 1001 ok in 344 s, slowest 1,838 ms (same chain, load average ~70)."
  },
  "P6/vmsession-test": {
   "class": "environment",
-  "analysis": "vmsession-test 200000 1001 4000 600 was ended by an external SIGTERM after 873 s with no output (the campaign only SIGKILLs at 3600 s); see the standalone re-run in DEVLOG P4.2."
+  "analysis": "vmsession-test 200000 1001 4000 600 was ended after 873 s by another agent’s pkill -f vmsession-test.mjs (manager confirmed); not counted. Standalone at 3551d7a: vmsession-test 60000 1001 1200 180 ok in 1,488 s (1,841,136 session runs == vm-validate, 1,205,083 JS == Rust runs, 0 panics)."
  }
 }

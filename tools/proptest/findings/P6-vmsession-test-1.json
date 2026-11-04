@@ -21,6 +21,6 @@
  },
  "triage": {
   "class": "environment",
-  "analysis": "vmsession-test 200000 1001 4000 600 was ended by an external SIGTERM after 873 s with no output (the campaign only SIGKILLs at 3600 s); see the standalone re-run in DEVLOG P4.2."
+  "analysis": "vmsession-test 200000 1001 4000 600 was ended after 873 s by another agent’s pkill -f vmsession-test.mjs (manager confirmed); not counted. Standalone at 3551d7a: vmsession-test 60000 1001 1200 180 ok in 1,488 s (1,841,136 session runs == vm-validate, 1,205,083 JS == Rust runs, 0 panics)."
  }
 }
