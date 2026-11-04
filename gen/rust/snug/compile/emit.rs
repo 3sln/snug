@@ -6,19 +6,18 @@ use crate::snug::compile::bytes::*;
 use crate::snug::compile::ext::*;
 use crate::snug::compile::leaf::*;
 use crate::snug::compile::parse::*;
+use crate::snug::compile::peg::*;
 use crate::snug::compile::regexp::*;
 use crate::snug::compile::rules::*;
 
 pub fn mark_dead(h: &mut [i32]) {
-    // A map with no satisfiable alternative is dead; so is an AND with a dead
-    // operand and a NOT with a dead target. Operands are always older leaves,
-    // so one pass in creation order settles it. The flag is leaf word 9.
+    // An AND with a dead operand and a NOT with a dead target are dead (format
+    // 2.0 maps are never dead: an unsatisfiable group is a PEG that fails).
+    // Operands are always older leaves, so one pass in creation order settles
+    // it. The flag is leaf word 9.
     for l in 0..nleaves(h) {
         let k: i32 = lk(h, l);
         let mut dead: i32 = 0;
-        if (k == K_MAP) && (ld(h, l, 2) == 1) {
-            dead = 1;
-        }
         if (k == K_AND) && ((lw(h, ld(h, l, 0), 9) != 0) || (lw(h, ld(h, l, 1), 9) != 0)) {
             dead = 1;
         }
@@ -78,44 +77,27 @@ pub fn children(h: &mut [i32], l: i32, dst: i32) -> i32 {
     }
     if k == K_ARRAY {
         let blob: i32 = vget(h, T_ARR, ld(h, l, 0));
-        let npos: i32 = vget(h, T_ARRD, blob);
-        let w: i32 = vget(h, T_ARRD, blob + 1);
-        let pb: i32 = (blob + 4) + (2 * w);
+        let npos: i32 = vget(h, T_ARRD, blob + 1);
+        let w: i32 = vget(h, T_ARRD, blob + 2);
+        let pb: i32 = (blob + ARR_HDR) + w;
         for p in 0..npos {
-            push2(h, dst, 0, vget(h, T_ARRD, pb + (2 * p)));
+            push2(h, dst, 0, vget(h, T_ARRD, pb + p));
         }
     }
     if k == K_MAP {
+        // each member's key typeset (non-literal keys) then value typeset; key_ts
         let mblob: i32 = vget(h, T_MAP, ld(h, l, 0));
-        let nf: i32 = vget(h, T_MAPD, mblob);
-        let np: i32 = vget(h, T_MAPD, mblob + 1);
-        let fb: i32 = mblob + 4;
-        let mpb: i32 = fb + (3 * nf);
-        let ab: i32 = mpb + (5 * np);
-        for f in 0..nf {
-            let pf: i32 = vget(h, T_MAPD, fb + ((3 * f) + 1));
-            let pc: i32 = vget(h, T_MAPD, fb + ((3 * f) + 2));
-            for p2 in pf..pf + pc {
-                let prec: i32 = mpb + (5 * p2);
-                let af: i32 = vget(h, T_MAPD, prec + 3);
-                let ac: i32 = vget(h, T_MAPD, prec + 4);
-                for a2 in af..af + ac {
-                    let arec: i32 = ab + (3 * a2);
-                    let lo: i32 = mblob + vget(h, T_MAPD, arec + 1);
-                    let ln: i32 = vget(h, T_MAPD, arec + 2);
-                    for i in 0..ln {
-                        push2(h, dst, 0, vget(h, T_MAPD, lo + ((4 * i) + 1)));
-                    }
-                }
-                let go: i32 = vget(h, T_MAPD, prec + 1);
-                let gn: i32 = vget(h, T_MAPD, prec + 2);
-                if go >= 0 {
-                    for g in 0..gn {
-                        push2(h, dst, 0, vget(h, T_MAPD, (mblob + go) + (4 * g)));
-                        push2(h, dst, 0, vget(h, T_MAPD, (mblob + go) + ((4 * g) + 1)));
-                    }
-                }
+        let nm: i32 = vget(h, T_MAPD, mblob + 1);
+        let kts: i32 = vget(h, T_MAPD, mblob + 2);
+        for m in 0..nm {
+            let mo: i32 = (mblob + MAP_HDR) + (5 * m);
+            if vget(h, T_MAPD, mo) == 1 {
+                push2(h, dst, 0, vget(h, T_MAPD, mo + 1));
             }
+            push2(h, dst, 0, vget(h, T_MAPD, mo + 2));
+        }
+        if kts >= 0 {
+            push2(h, dst, 0, kts);
         }
     }
     return (vlen(h, dst) - start) / 2;
@@ -342,62 +324,6 @@ pub fn fts_of(h: &[i32], ts: i32) -> i32 {
     // The final id of an internal typeset (set by pass 2).
     return ts_w(h, ts, 3);
 }
-pub(crate) fn group_intern(h: &mut [i32], blob: i32, go: i32, gn: i32) -> i32 {
-    // The group id of the entries T_MAPD[blob+go ..] (gn x 4: key ts, value
-    // ts, min, max), with typesets made final. T_GRP: offsets into T_GRPD
-    // records (n_entries, n_constrained, entries x 4).
-    let at: i32 = vlen(h, T_GRPD);
-    let mut nc: i32 = 0;
-    vpush1(h, T_GRPD, gn);
-    vpush1(h, T_GRPD, 0);
-    for i in 0..gn {
-        let e: i32 = (blob + go) + (4 * i);
-        let kt: i32 = fts_of(h, vget(h, T_MAPD, e));
-        let vt: i32 = fts_of(h, vget(h, T_MAPD, e + 1));
-        let mn: i32 = vget(h, T_MAPD, e + 2);
-        let mx: i32 = vget(h, T_MAPD, e + 3);
-        vpush1(h, T_GRPD, kt);
-        vpush1(h, T_GRPD, vt);
-        vpush1(h, T_GRPD, mn);
-        vpush1(h, T_GRPD, mx);
-        if !((mn == 0) && (mx == INF)) {
-            nc += 1;
-        }
-    }
-    vset(h, T_GRPD, at + 1, nc);
-    let len: i32 = 2 + (4 * gn);
-    let mut hsh: i32 = mix(11, len);
-    for j in 0..len {
-        hsh = mix(hsh, vget(h, T_GRPD, at + j));
-    }
-    let mut s: i32 = ht_start(h, T_HGRP, hsh);
-    loop {
-        let id: i32 = ht_id(h, T_HGRP, s);
-        if id < 0 {
-            break;
-        }
-        let go2: i32 = vget(h, T_GRP, id);
-        if vget(h, T_GRPD, go2) == gn {
-            let mut same: bool = true;
-            for q in 0..len {
-                if vget(h, T_GRPD, go2 + q) != vget(h, T_GRPD, at + q) {
-                    same = false;
-                }
-            }
-            if same {
-                vtrunc(h, T_GRPD, at);
-                return id;
-            }
-        }
-        s = ht_next(h, T_HGRP, s);
-    }
-    let nid: i32 = vlen(h, T_GRP);
-    vpush1(h, T_GRP, at);
-    if !ht_put(h, T_HGRP, s, nid, hsh) {
-        return -1;
-    }
-    return nid;
-}
 pub(crate) fn pool_place(h: &mut [i32], bid: i32) -> i32 {
     // The pool offset of bid's bytes, placing them on first use.
     let cur: i32 = vget(h, T_POOLOFF, bid);
@@ -464,46 +390,9 @@ pub(crate) fn child_leaves(h: &mut [i32], l: i32) -> i32 {
     return vlen(h, T_CHILD) - start;
 }
 pub(crate) fn array_bounded(h: &mut [i32], a: i32) -> bool {
-    // Does the array automaton accept only bounded lengths? (no counter with an
-    // unbounded maximum and no cycle in the follow graph: Kahn's peeling, T_TMP
-    // as the in-degree table)
-    let blob: i32 = vget(h, T_ARR, a);
-    let npos: i32 = vget(h, T_ARRD, blob);
-    let w: i32 = vget(h, T_ARRD, blob + 1);
-    let nc: i32 = vget(h, T_ARRD, blob + 2);
-    let cb: i32 = ((blob + 4) + (2 * w)) + (2 * npos);
-    let fb: i32 = cb + (2 * nc);
-    for c in 0..nc {
-        if vget(h, T_ARRD, cb + ((2 * c) + 1)) == INF {
-            return false;
-        }
-    }
-    // peel positions with no incoming edge from a live position
-    let mut removed: i32 = 0;
-    let mut progress: bool = true;
-    vtrunc(h, T_EPOCHS, 0);
-    for _i in 0..npos {
-        vpush1(h, T_EPOCHS, 0);
-    }
-    while progress {
-        progress = false;
-        for q in 0..npos {
-            if vget(h, T_EPOCHS, q) == 0 {
-                let mut incoming: bool = false;
-                for p in 0..npos {
-                    if (vget(h, T_EPOCHS, p) == 0) && (((vget(h, T_ARRD, fb + ((p * w) + (q >> 5))) >> (q & 31)) & 1) != 0) {
-                        incoming = true;
-                    }
-                }
-                if !incoming {
-                    vset(h, T_EPOCHS, q, 1);
-                    removed += 1;
-                    progress = true;
-                }
-            }
-        }
-    }
-    return removed == npos;
+    // Does the array's group accept only bounded lengths (no INF maximum, no
+    // recursion)?
+    return !prog_unbounded(h, vget(h, T_ARRD, vget(h, T_ARR, a)));
 }
 pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
     // The `bus` profile (architecture §5.3): every string and container
@@ -524,22 +413,8 @@ pub(crate) fn check_bus(h: &mut [i32]) -> i32 {
         if (k == K_ARRAY) && (!array_bounded(h, ld(h, l, 0))) {
             return bus_fail(h, f);
         }
-        if k == K_MAP {
-            let blob: i32 = map_blob_of(h, l);
-            let nf: i32 = vget(h, T_MAPD, blob);
-            let np: i32 = vget(h, T_MAPD, blob + 1);
-            let pb: i32 = (blob + 4) + (3 * nf);
-            for p in 0..np {
-                let go: i32 = vget(h, T_MAPD, (pb + (5 * p)) + 1);
-                let gn: i32 = vget(h, T_MAPD, (pb + (5 * p)) + 2);
-                if go >= 0 {
-                    for g in 0..gn {
-                        if vget(h, T_MAPD, (blob + go) + ((4 * g) + 3)) == INF {
-                            return bus_fail(h, f);
-                        }
-                    }
-                }
-            }
+        if (k == K_MAP) && prog_unbounded(h, vget(h, T_MAPD, map_blob_of(h, l))) {
+            return bus_fail(h, f);
         }
         if (k == K_AND) && ((lk(h, ld(h, l, 0)) == K_EMBED) || (lk(h, ld(h, l, 1)) == K_EMBED)) {
             // an embedded document needs a bounded byte string beside it
@@ -625,60 +500,41 @@ pub(crate) fn shape_sig(h: &mut [i32], l: i32) {
         }
     }
     if k == K_ARRAY {
+        // everything but the positions' typesets
         let ablob: i32 = vget(h, T_ARR, ld(h, l, 0));
-        let npos: i32 = vget(h, T_ARRD, ablob);
-        let w: i32 = vget(h, T_ARRD, ablob + 1);
-        let nc: i32 = vget(h, T_ARRD, ablob + 2);
-        let apb: i32 = (ablob + 4) + (2 * w);
-        let n: i32 = (4 + (2 * w)) + ((2 * npos) + ((2 * nc) + (npos * w)));
-        for i2 in 0..n {
-            // every word but the positions' typesets
-            let at: i32 = ablob + i2;
-            if (at < apb) || ((at >= (apb + (2 * npos))) || (((at - apb) & 1) == 1)) {
-                vpush1(h, T_CSIG, vget(h, T_ARRD, at));
-            }
+        let npos: i32 = vget(h, T_ARRD, ablob + 1);
+        let w: i32 = vget(h, T_ARRD, ablob + 2);
+        let fb: i32 = ((ablob + ARR_HDR) + w) + npos;
+        for ai in 0..ARR_HDR + w {
+            vpush1(h, T_CSIG, vget(h, T_ARRD, ablob + ai));
+        }
+        for i2 in 0..npos * w {
+            vpush1(h, T_CSIG, vget(h, T_ARRD, fb + i2));
         }
     }
     if k == K_MAP {
+        // the program, member count, key_ts presence; per member its key kind,
+        // literal key, class and cut (not its typesets)
         let blob: i32 = vget(h, T_MAP, ld(h, l, 0));
-        let nf: i32 = vget(h, T_MAPD, blob);
-        let np: i32 = vget(h, T_MAPD, blob + 1);
-        let na: i32 = vget(h, T_MAPD, blob + 2);
-        let fb: i32 = blob + 4;
-        let pb: i32 = fb + (3 * nf);
-        let ab: i32 = pb + (5 * np);
-        vpush1(h, T_CSIG, nf);
-        vpush1(h, T_CSIG, np);
-        vpush1(h, T_CSIG, na);
-        for f in 0..3 * nf {
-            vpush1(h, T_CSIG, vget(h, T_MAPD, fb + f));
+        let nm: i32 = vget(h, T_MAPD, blob + 1);
+        vpush1(h, T_CSIG, vget(h, T_MAPD, blob));
+        vpush1(h, T_CSIG, nm);
+        if vget(h, T_MAPD, blob + 2) >= 0 {
+            vpush1(h, T_CSIG, 1);
+        } else {
+            vpush1(h, T_CSIG, 0);
         }
-        for p in 0..np {
-            let prec: i32 = pb + (5 * p);
-            let go: i32 = vget(h, T_MAPD, prec + 1);
-            let gn: i32 = vget(h, T_MAPD, prec + 2);
-            vpush1(h, T_CSIG, vget(h, T_MAPD, prec));
-            vpush1(h, T_CSIG, gn);
-            vpush1(h, T_CSIG, vget(h, T_MAPD, prec + 3));
-            vpush1(h, T_CSIG, vget(h, T_MAPD, prec + 4));
-            if go >= 0 {
-                for g in 0..gn {
-                    vpush1(h, T_CSIG, vget(h, T_MAPD, (blob + go) + ((4 * g) + 2)));
-                    vpush1(h, T_CSIG, vget(h, T_MAPD, (blob + go) + ((4 * g) + 3)));
-                }
+        for m in 0..nm {
+            let mo: i32 = (blob + MAP_HDR) + (5 * m);
+            let kind: i32 = vget(h, T_MAPD, mo);
+            vpush1(h, T_CSIG, kind);
+            if kind == 0 {
+                vpush1(h, T_CSIG, vget(h, T_MAPD, mo + 1));
+            } else {
+                vpush1(h, T_CSIG, -1);
             }
-        }
-        for a in 0..na {
-            let arec: i32 = ab + (3 * a);
-            let lo: i32 = blob + vget(h, T_MAPD, arec + 1);
-            let ln: i32 = vget(h, T_MAPD, arec + 2);
-            vpush1(h, T_CSIG, vget(h, T_MAPD, arec));
-            vpush1(h, T_CSIG, ln);
-            for i3 in 0..ln {
-                vpush1(h, T_CSIG, vget(h, T_MAPD, lo + (4 * i3)));
-                vpush1(h, T_CSIG, vget(h, T_MAPD, lo + ((4 * i3) + 2)));
-                vpush1(h, T_CSIG, vget(h, T_MAPD, lo + ((4 * i3) + 3)));
-            }
+            vpush1(h, T_CSIG, vget(h, T_MAPD, mo + 3));
+            vpush1(h, T_CSIG, vget(h, T_MAPD, mo + 4));
         }
     }
 }
@@ -908,90 +764,99 @@ pub fn plan(h: &mut [i32]) -> i32 {
     }
     return 0;
 }
+pub(crate) const LAUX_W: i32 = 8;
 pub(crate) fn laux(h: &[i32], f: i32, w: i32) -> i32 {
-    return vget(h, T_LAUX, (f * 4) + w);
+    return vget(h, T_LAUX, (f * LAUX_W) + w);
 }
 pub(crate) fn laux_set(h: &mut [i32], f: i32, w: i32, v: i32) {
-    vset(h, T_LAUX, (f * 4) + w, v);
+    vset(h, T_LAUX, (f * LAUX_W) + w, v);
 }
 pub(crate) fn map_blob(h: &[i32], l: i32) -> i32 {
     return vget(h, T_MAP, ld(h, l, 0));
 }
-pub(crate) fn map_keys_into(h: &mut [i32], blob: i32, dst: i32) -> i32 {
-    // Push the distinct key ids of the map's literal entries, ascending, onto
-    // dst; answers how many (sort, then drop repeats: n log n).
-    let start: i32 = vlen(h, dst);
-    let nf: i32 = vget(h, T_MAPD, blob);
-    let np: i32 = vget(h, T_MAPD, blob + 1);
-    let na: i32 = vget(h, T_MAPD, blob + 2);
-    let ab: i32 = ((blob + 4) + (3 * nf)) + (5 * np);
-    for a in 0..na {
-        let lo: i32 = blob + vget(h, T_MAPD, (ab + (3 * a)) + 1);
-        let ln: i32 = vget(h, T_MAPD, (ab + (3 * a)) + 2);
-        for i in 0..ln {
-            vpush1(h, dst, vget(h, T_KEYID, vget(h, T_MAPD, lo + (4 * i))));
-        }
-    }
-    let n: i32 = vlen(h, dst) - start;
-    let mut w: i32 = start;
-    if !sort_records(h, dst, start, n, 1) {
-        return -1;
-    }
-    for r in start..start + n {
-        if (r == start) || (vget(h, dst, r) != vget(h, dst, r - 1)) {
-            vset(h, dst, w, vget(h, dst, r));
-            w += 1;
-        }
-    }
-    vtrunc(h, dst, w);
-    return w - start;
-}
-pub(crate) fn key_triples(h: &mut [i32], blob: i32) -> i32 {
-    // T_KEYTRI: (key id, alternative, literal index) for every literal entry of
-    // the map, sorted stably by key id: grouped by key, alternatives ascending
-    // within a key. Answers the count.
-    let nf: i32 = vget(h, T_MAPD, blob);
-    let np: i32 = vget(h, T_MAPD, blob + 1);
-    let na: i32 = vget(h, T_MAPD, blob + 2);
-    let ab: i32 = ((blob + 4) + (3 * nf)) + (5 * np);
-    let mut lidx: i32 = 0;
+pub(crate) fn lit_pairs(h: &mut [i32], blob: i32) -> i32 {
+    // T_KEYTRI: (key id, member id) of every literal member of the map, sorted
+    // stably by key id (members ascending within a key). Answers the count.
+    let nm: i32 = vget(h, T_MAPD, blob + 1);
     vtrunc(h, T_KEYTRI, 0);
-    for a in 0..na {
-        let lo: i32 = blob + vget(h, T_MAPD, (ab + (3 * a)) + 1);
-        let ln: i32 = vget(h, T_MAPD, (ab + (3 * a)) + 2);
-        for i in 0..ln {
-            vpush1(h, T_KEYTRI, vget(h, T_KEYID, vget(h, T_MAPD, lo + (4 * i))));
-            vpush1(h, T_KEYTRI, a);
-            vpush1(h, T_KEYTRI, lidx + i);
+    for m in 0..nm {
+        let mo: i32 = (blob + MAP_HDR) + (5 * m);
+        if vget(h, T_MAPD, mo) == 0 {
+            vpush1(h, T_KEYTRI, vget(h, T_KEYID, vget(h, T_MAPD, mo + 1)));
+            vpush1(h, T_KEYTRI, m);
         }
-        lidx += ln;
     }
-    let n: i32 = vlen(h, T_KEYTRI) / 3;
-    if !msort_records(h, T_KEYTRI, 0, n, 3) {
+    let n: i32 = vlen(h, T_KEYTRI) / 2;
+    if !msort_records(h, T_KEYTRI, 0, n, 2) {
         return -1;
     }
     return n;
 }
+pub(crate) fn named_count(h: &[i32], n: i32) -> i32 {
+    // Distinct keys among the n sorted (key, member) pairs of T_KEYTRI.
+    let mut c: i32 = 0;
+    for q in 0..n {
+        if (q == 0) || (vget(h, T_KEYTRI, 2 * q) != vget(h, T_KEYTRI, 2 * (q - 1))) {
+            c += 1;
+        }
+    }
+    return c;
+}
+pub(crate) fn namers_max(h: &[i32], n: i32) -> i32 {
+    // The most members naming one key, over the n sorted pairs of T_KEYTRI.
+    let mut run: i32 = 0;
+    let mut mx: i32 = 0;
+    for q in 0..n {
+        if (q > 0) && (vget(h, T_KEYTRI, 2 * q) == vget(h, T_KEYTRI, 2 * (q - 1))) {
+            run += 1;
+        } else {
+            run = 1;
+        }
+        if run > mx {
+            mx = run;
+        }
+    }
+    return mx;
+}
+pub(crate) fn root_count(h: &[i32], blob: i32) -> i32 {
+    let nm: i32 = vget(h, T_MAPD, blob + 1);
+    let mut c: i32 = 0;
+    for m in 0..nm {
+        if vget(h, T_MAPD, ((blob + MAP_HDR) + (5 * m)) + 3) == 1 {
+            c += 1;
+        }
+    }
+    return c;
+}
+pub(crate) fn container_prog(h: &[i32], l: i32) -> i32 {
+    // The internal PEG program of a MAP or ARRAY leaf.
+    if lk(h, l) == K_MAP {
+        return vget(h, T_MAPD, map_blob(h, l));
+    }
+    return vget(h, T_ARRD, vget(h, T_ARR, ld(h, l, 0)));
+}
 pub fn assign_sections(h: &mut [i32]) -> i32 {
-    // Map, array, regexp, interval, float-interval and LITSET ids in leaf
-    // order; residual groups; the key table; the pool.
+    // Map, array, PEG program, regexp, interval, float-interval and LITSET ids
+    // in leaf order (a program by its first user); the key table; the pool.
     let nl: i32 = hg(h, H_N_FIN);
+    let np: i32 = nprogs(h);
     let mut nmaps: i32 = 0;
     let mut narrays: i32 = 0;
+    let mut npegs: i32 = 0;
     let mut nrx: i32 = 0;
     let mut niv: i32 = 0;
     let mut nfiv: i32 = 0;
     let mut nlr: i32 = 0;
     vtrunc(h, T_LAUX, 0);
-    if vpush(h, T_LAUX, 4 * nl) < 0 {
+    if vpush(h, T_LAUX, LAUX_W * nl) < 0 {
         return -1;
     }
-    vtrunc(h, T_GRP, 0);
-    vtrunc(h, T_GRPD, 0);
-    vtrunc(h, T_POOLG, 0);
-    if !ht_init(h, T_HGRP, 64) {
+    vtrunc(h, T_PROGF, 0);
+    if vpush(h, T_PROGF, np) < 0 {
         return -1;
     }
+    vfill(h, T_PROGF, 0, np, -1);
+    vtrunc(h, T_MNAME, 0);
     vtrunc(h, T_RXF, 0);
     let nrxi: i32 = rx_count(h);
     if vpush(h, T_RXF, nrxi) < 0 {
@@ -1001,34 +866,20 @@ pub fn assign_sections(h: &mut [i32]) -> i32 {
     for f in 0..nl {
         let l: i32 = fin_internal(h, f);
         let k: i32 = lk(h, l);
-        if k == K_MAP {
-            let blob: i32 = map_blob(h, l);
-            let np: i32 = vget(h, T_MAPD, blob + 1);
-            let nf: i32 = vget(h, T_MAPD, blob);
-            let pb: i32 = (blob + 4) + (3 * nf);
-            let pg: i32 = vlen(h, T_POOLG);
-            laux_set(h, f, 0, nmaps);
-            laux_set(h, f, 1, pg);
-            nmaps += 1;
-            for p in 0..np {
-                let prec: i32 = pb + (5 * p);
-                if vget(h, T_MAPD, prec) == 0 {
-                    let g: i32 = group_intern(h, blob, vget(h, T_MAPD, prec + 1), vget(h, T_MAPD, prec + 2));
-                    if g < 0 {
-                        return -1;
-                    }
-                    vpush1(h, T_POOLG, g);
-                } else {
-                    vpush1(h, T_POOLG, -1);
-                }
+        if (k == K_MAP) || (k == K_ARRAY) {
+            let prog: i32 = container_prog(h, l);
+            if k == K_MAP {
+                laux_set(h, f, 0, nmaps);
+                nmaps += 1;
+            } else {
+                laux_set(h, f, 0, narrays);
+                narrays += 1;
             }
-        }
-        if k == K_ARRAY {
-            let ab: i32 = vget(h, T_ARR, ld(h, l, 0));
-            laux_set(h, f, 0, narrays);
-            laux_set(h, f, 1, vget(h, T_ARRD, ab + 1));
-            laux_set(h, f, 2, vget(h, T_ARRD, ab + 2));
-            narrays += 1;
+            if vget(h, T_PROGF, prog) < 0 {
+                vset(h, T_PROGF, prog, npegs);
+                vpush1(h, T_MNAME, prog);
+                npegs += 1;
+            }
         }
         if (k == K_TEXT) && (ld(h, l, 2) >= 0) {
             let rx: i32 = ld(h, l, 2);
@@ -1068,7 +919,8 @@ pub fn assign_sections(h: &mut [i32]) -> i32 {
     vpush1(h, T_CLS2, niv);
     vpush1(h, T_CLS2, nfiv);
     vpush1(h, T_CLS2, nlr);
-    // The key table: every literal key of a live map, sorted by encoding.
+    vpush1(h, T_CLS2, npegs);
+    // The key table: every literal key of a live map's members, sorted by encoding.
     let nb: i32 = nbids(h);
     vtrunc(h, T_KEYID, 0);
     if vpush(h, T_KEYID, nb) < 0 {
@@ -1080,15 +932,11 @@ pub fn assign_sections(h: &mut [i32]) -> i32 {
         let l2: i32 = fin_internal(h, f2);
         if lk(h, l2) == K_MAP {
             let blob2: i32 = map_blob(h, l2);
-            let nf2: i32 = vget(h, T_MAPD, blob2);
-            let np2: i32 = vget(h, T_MAPD, blob2 + 1);
-            let na2: i32 = vget(h, T_MAPD, blob2 + 2);
-            let ab2: i32 = ((blob2 + 4) + (3 * nf2)) + (5 * np2);
-            for a in 0..na2 {
-                let lo: i32 = blob2 + vget(h, T_MAPD, (ab2 + (3 * a)) + 1);
-                let ln: i32 = vget(h, T_MAPD, (ab2 + (3 * a)) + 2);
-                for i in 0..ln {
-                    let kb: i32 = vget(h, T_MAPD, lo + (4 * i));
+            let nm2: i32 = vget(h, T_MAPD, blob2 + 1);
+            for m in 0..nm2 {
+                let mo: i32 = (blob2 + MAP_HDR) + (5 * m);
+                if vget(h, T_MAPD, mo) == 0 {
+                    let kb: i32 = vget(h, T_MAPD, mo + 1);
                     if vget(h, T_KEYID, kb) == (-1) {
                         vset(h, T_KEYID, kb, -2);
                         vpush1(h, T_KEYS, kb);
@@ -1266,47 +1114,99 @@ pub fn build_pool(h: &mut [i32]) -> i32 {
 pub(crate) fn ceil32(n: i32) -> i32 {
     return (n + 31) >> 5;
 }
-pub fn plan_maps(h: &mut [i32]) -> i32 {
-    // state_words and cand_max (program.md §7.3, §12.2) of every live map:
-    // T_LAUX words 2 and 3 of its leaf.
+pub(crate) fn act_words(ncalls: i32, depth: i32) -> i32 {
+    // Per-element activation chunk words of a recursive leaf, program-2 §5.3:
+    // ceil(n_calls * (3 + 8 depth) * 64 / 54), saturating.
+    let a: i32 = sat_add(3, sat_mul(8, depth));
+    let x: i32 = sat_mul(sat_mul(ncalls, a), 64);
+    if x == INF {
+        return INF;
+    }
+    return (x + 53) / 54;
+}
+pub fn plan_containers(h: &mut [i32]) -> i32 {
+    // Per live map and array (T_LAUX words): 1 its block words (MAPWORDS /
+    // ARRWORDS, program-2 §5.2, §6.3), 2 map candidates (n_members + the
+    // largest naming count) or array W, 3 its record words when it is A2 / T
+    // (else 0), 4 1 if recursive, 5 its activation words (§5.3).
     let nl: i32 = hg(h, H_N_FIN);
     for f in 0..nl {
         let l: i32 = fin_internal(h, f);
-        if lk(h, l) == K_MAP {
+        let k: i32 = lk(h, l);
+        if k == K_MAP {
             let blob: i32 = map_blob(h, l);
-            let nf: i32 = vget(h, T_MAPD, blob);
-            let np: i32 = vget(h, T_MAPD, blob + 1);
-            let na: i32 = vget(h, T_MAPD, blob + 2);
-            let pb: i32 = (blob + 4) + (3 * nf);
-            let ab: i32 = pb + (5 * np);
-            let mut sw: i32 = 4 + nf;
-            let mut groupsum: i32 = 0;
-            let mut maxnames: i32 = 0;
-            for p in 0..np {
-                let gn: i32 = vget(h, T_MAPD, (pb + (5 * p)) + 2);
-                sw += 4 + gn;
-                if vget(h, T_MAPD, pb + (5 * p)) == 0 {
-                    groupsum += gn;
-                }
+            let prog: i32 = vget(h, T_MAPD, blob);
+            let nm: i32 = vget(h, T_MAPD, blob + 1);
+            let tier: i32 = prog_w(h, prog, 3);
+            let depth: i32 = prog_w(h, prog, 6);
+            let nc: i32 = prog_w(h, prog, 8);
+            let np: i32 = lit_pairs(h, blob);
+            let nn: i32 = named_count(h, np);
+            let nmx: i32 = namers_max(h, np);
+            let nr: i32 = root_count(h, blob);
+            let mut mw: i32 = 16 + (4 * nm);
+            if np < 0 {
+                return -1;
             }
-            for a in 0..na {
-                sw += 3 + ceil32(vget(h, T_MAPD, (ab + (3 * a)) + 2));
+            if nc == 0 {
+                mw += 8 * depth;
             }
-            // the most naming records of one key: the longest run of one key
-            let nt: i32 = key_triples(h, blob);
-            let mut run: i32 = 0;
-            for q in 0..nt {
-                if (q > 0) && (vget(h, T_KEYTRI, 3 * q) == vget(h, T_KEYTRI, 3 * (q - 1))) {
-                    run += 1;
-                } else {
-                    run = 1;
-                }
-                if run > maxnames {
-                    maxnames = run;
-                }
+            if tier == TIER_S {
+                mw += nn * ((2 + ceil32(nmx)) + (2 * ceil32(nr)));
             }
-            laux_set(h, f, 2, sw);
-            laux_set(h, f, 3, groupsum + maxnames);
+            if tier == TIER_T {
+                mw += nn;
+            }
+            laux_set(h, f, 1, mw);
+            laux_set(h, f, 2, nm + nmx);
+            if tier == TIER_T {
+                laux_set(h, f, 3, 2 + ceil32(2 * nm));
+            } else {
+                laux_set(h, f, 3, 0);
+            }
+            if nc > 0 {
+                laux_set(h, f, 4, 1);
+            } else {
+                laux_set(h, f, 4, 0);
+            }
+            if nc > 0 {
+                laux_set(h, f, 5, act_words(nc, depth));
+            } else {
+                laux_set(h, f, 5, 0);
+            }
+        }
+        if k == K_ARRAY {
+            let ablob: i32 = vget(h, T_ARR, ld(h, l, 0));
+            let aprog: i32 = vget(h, T_ARRD, ablob);
+            let w: i32 = vget(h, T_ARRD, ablob + 2);
+            let atier: i32 = prog_w(h, aprog, 3);
+            let ab: i32 = prog_w(h, aprog, 4);
+            let adepth: i32 = prog_w(h, aprog, 6);
+            let anc: i32 = prog_w(h, aprog, 8);
+            let mut aw: i32 = 14 + (2 * w);
+            if anc == 0 {
+                aw += 4 * adepth;
+            }
+            if atier == TIER_A1 {
+                aw += (ab + 1) * w;
+            }
+            laux_set(h, f, 1, aw);
+            laux_set(h, f, 2, w);
+            if atier == TIER_A2 {
+                laux_set(h, f, 3, w);
+            } else {
+                laux_set(h, f, 3, 0);
+            }
+            if anc > 0 {
+                laux_set(h, f, 4, 1);
+            } else {
+                laux_set(h, f, 4, 0);
+            }
+            if anc > 0 {
+                laux_set(h, f, 5, act_words(anc, adepth));
+            } else {
+                laux_set(h, f, 5, 0);
+            }
         }
     }
     if erred(h) {
@@ -1338,18 +1238,25 @@ pub(crate) fn add_eval_set(h: &mut [i32], t: i32, ep: i32) -> i32 {
     return 0;
 }
 pub(crate) fn frame_words(h: &[i32], from: i32, n: i32) -> i32 {
+    // program-2 §9.2: 2|R| + max(MAPAREA, ARRAREA); MAPAREA = the maps' block
+    // words + 4 cand_max(R), ARRAREA = the arrays' block words.
     let mut maparea: i32 = 0;
+    let mut candmax: i32 = 0;
     let mut arrarea: i32 = 0;
     for i in 0..n {
         let f: i32 = vget(h, T_CLS, from + i);
         let k: i32 = lk(h, fin_internal(h, f));
         if k == K_MAP {
-            maparea += laux(h, f, 2) + (4 * laux(h, f, 3));
+            maparea += laux(h, f, 1);
+            if laux(h, f, 2) > candmax {
+                candmax = laux(h, f, 2);
+            }
         }
         if k == K_ARRAY {
-            arrarea += 3 + ((2 * laux(h, f, 1)) + laux(h, f, 2));
+            arrarea += laux(h, f, 1);
         }
     }
+    maparea += 4 * candmax;
     if arrarea > maparea {
         maparea = arrarea;
     }
@@ -1561,21 +1468,27 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
     return ch;
 }
 pub const MAGIC: i32 = 1735749235;
-pub const FORMAT_VERSION: i32 = 1;
-pub const FORMAT_V11: i32 = 65537;
+pub const FORMAT_VERSION: i32 = 131072;
+pub const FLAG_CUTS_RFC: i32 = 32;
+pub const FLAG_ARENA: i32 = 64;
 pub(crate) fn out(h: &mut [i32], v: i32) {
     vpush1(h, T_OUT, v);
 }
 pub(crate) fn map_size(h: &mut [i32], l: i32) -> i32 {
+    // program-2 §6: header 8, members 5 each, named 3 each, namers, root.
     let blob: i32 = map_blob(h, l);
-    let nf: i32 = vget(h, T_MAPD, blob);
-    let np: i32 = vget(h, T_MAPD, blob + 1);
-    let na: i32 = vget(h, T_MAPD, blob + 2);
-    let nl: i32 = vget(h, T_MAPD, blob + 3);
-    let st: i32 = vlen(h, T_TMP2);
-    let nk: i32 = map_keys_into(h, blob, T_TMP2);
-    vtrunc(h, T_TMP2, st);
-    return ((8 + (4 * nf)) + ((5 * np) + (5 * na))) + ((4 * nl) + ((4 * nk) + (2 * nl)));
+    let nm: i32 = vget(h, T_MAPD, blob + 1);
+    let np: i32 = lit_pairs(h, blob);
+    let nn: i32 = named_count(h, np);
+    let nr: i32 = root_count(h, blob);
+    return ((8 + (5 * nm)) + (3 * nn)) + (np + nr);
+}
+pub(crate) fn array_size(h: &[i32], l: i32) -> i32 {
+    // program-2 §4: header 4, first W, pos npos, follow npos x W.
+    let blob: i32 = vget(h, T_ARR, ld(h, l, 0));
+    let npos: i32 = vget(h, T_ARRD, blob + 1);
+    let w: i32 = vget(h, T_ARRD, blob + 2);
+    return (4 + w) + (npos + (npos * w));
 }
 pub(crate) fn rx_final_list(h: &mut [i32]) -> i32 {
     // T_TMP: internal regexp ids in final order; answers the count.
@@ -1690,121 +1603,113 @@ pub(crate) fn write_leaf(h: &mut [i32], f: i32) {
     out(h, 0);
 }
 pub(crate) fn write_map(h: &mut [i32], f: i32) {
+    // program-2 §6: header (peg, n_members, n_named, key_ts, slot_words,
+    // rec_words, n_root, flags), members, named, namers, root.
     let l: i32 = fin_internal(h, f);
     let blob: i32 = map_blob(h, l);
-    let nf: i32 = vget(h, T_MAPD, blob);
-    let np: i32 = vget(h, T_MAPD, blob + 1);
-    let na: i32 = vget(h, T_MAPD, blob + 2);
-    let nl: i32 = vget(h, T_MAPD, blob + 3);
-    let fb: i32 = blob + 4;
-    let pb: i32 = fb + (3 * nf);
-    let ab: i32 = pb + (5 * np);
-    let pg: i32 = laux(h, f, 1);
-    let ks: i32 = vlen(h, T_TMP2);
-    let nk: i32 = map_keys_into(h, blob, T_TMP2);
-    out(h, nf);
-    out(h, np);
-    out(h, na);
-    out(h, nl);
-    out(h, nk);
-    out(h, nl);
-    out(h, laux(h, f, 2));
-    out(h, laux(h, f, 3));
-    // factors
-    for i in 0..nf {
-        let mode: i32 = vget(h, T_MAPD, fb + (3 * i));
-        out(h, mode);
-        if mode == 2 {
-            out(h, 0);
+    let prog: i32 = vget(h, T_MAPD, blob);
+    let nm: i32 = vget(h, T_MAPD, blob + 1);
+    let kts: i32 = vget(h, T_MAPD, blob + 2);
+    let tier: i32 = vget(h, T_MAPD, blob + 3);
+    let np: i32 = lit_pairs(h, blob);
+    let nn: i32 = named_count(h, np);
+    let nmx: i32 = namers_max(h, np);
+    let nr: i32 = root_count(h, blob);
+    let pflags: i32 = prog_w(h, prog, 7);
+    let mut sw: i32 = 0;
+    let mut rw2: i32 = 0;
+    let mut ktsf: i32 = -1;
+    let mut mflags: i32 = 0;
+    if tier == TIER_S {
+        sw = (2 + ceil32(nmx)) + (2 * ceil32(nr));
+    }
+    if tier == TIER_T {
+        rw2 = 2 + ceil32(2 * nm);
+    }
+    if kts >= 0 {
+        ktsf = fts_of(h, kts);
+    }
+    if (pflags & 2) != 0 {
+        mflags = 1;
+    }
+    if (pflags & 4) != 0 {
+        mflags |= 2;
+    }
+    out(h, vget(h, T_PROGF, prog));
+    out(h, nm);
+    out(h, nn);
+    out(h, ktsf);
+    out(h, sw);
+    out(h, rw2);
+    out(h, nr);
+    out(h, mflags);
+    for m in 0..nm {
+        let mo: i32 = (blob + MAP_HDR) + (5 * m);
+        let kind: i32 = vget(h, T_MAPD, mo);
+        let key: i32 = vget(h, T_MAPD, mo + 1);
+        if kind == 0 {
+            out(h, vget(h, T_KEYID, key));
+            out(h, -1);
         } else {
             out(h, -1);
+            out(h, fts_of(h, key));
         }
-        out(h, vget(h, T_MAPD, fb + ((3 * i) + 1)));
-        out(h, vget(h, T_MAPD, fb + ((3 * i) + 2)));
+        out(h, fts_of(h, vget(h, T_MAPD, mo + 2)));
+        out(h, vget(h, T_MAPD, mo + 3));
+        out(h, vget(h, T_MAPD, mo + 4));
     }
-    // pools, with state offsets
-    let mut so: i32 = 4 + nf;
-    for p in 0..np {
-        let prec: i32 = pb + (5 * p);
-        out(h, vget(h, T_MAPD, prec));
-        out(h, vget(h, T_POOLG, pg + p));
-        out(h, vget(h, T_MAPD, prec + 3));
-        out(h, vget(h, T_MAPD, prec + 4));
-        out(h, so);
-        so += 4 + vget(h, T_MAPD, prec + 2);
-    }
-    // alternatives
-    let mut lf: i32 = 0;
-    for a in 0..na {
-        let arec: i32 = ab + (3 * a);
-        let lo: i32 = blob + vget(h, T_MAPD, arec + 1);
-        let ln: i32 = vget(h, T_MAPD, arec + 2);
-        let mut req: i32 = 0;
-        for i2 in 0..ln {
-            if vget(h, T_MAPD, lo + ((4 * i2) + 2)) == 1 {
-                req += 1;
-            }
-        }
-        out(h, vget(h, T_MAPD, arec));
-        out(h, lf);
-        out(h, ln);
-        out(h, req);
-        out(h, so);
-        so += 3 + ceil32(ln);
-        lf += ln;
-    }
-    // literal entries
-    for a2 in 0..na {
-        let arec2: i32 = ab + (3 * a2);
-        let lo2: i32 = blob + vget(h, T_MAPD, arec2 + 1);
-        let ln2: i32 = vget(h, T_MAPD, arec2 + 2);
-        for i3 in 0..ln2 {
-            let e: i32 = lo2 + (4 * i3);
-            out(h, vget(h, T_KEYID, vget(h, T_MAPD, e)));
-            out(h, fts_of(h, vget(h, T_MAPD, e + 1)));
-            out(h, vget(h, T_MAPD, e + 2));
-            out(h, vget(h, T_MAPD, e + 3));
-        }
-    }
-    // key index (key, owner, names run) and naming records, from the key
-    // triples: grouped by key, alternatives ascending
-    let nt: i32 = key_triples(h, blob);
+    // named (key id, first namer, count; by key id), namers, root members
     let mut q: i32 = 0;
-    while q < nt {
-        let kid: i32 = vget(h, T_KEYTRI, 3 * q);
+    while q < np {
+        let kid: i32 = vget(h, T_KEYTRI, 2 * q);
         let mut qe: i32 = q;
-        while (qe < nt) && (vget(h, T_KEYTRI, 3 * qe) == kid) {
+        while (qe < np) && (vget(h, T_KEYTRI, 2 * qe) == kid) {
             qe += 1;
         }
         out(h, kid);
-        out(h, vget(h, T_MAPD, pb + (5 * vget(h, T_MAPD, ab + (3 * vget(h, T_KEYTRI, (3 * q) + 1))))));
         out(h, q);
         out(h, qe - q);
         q = qe;
     }
-    for r in 0..nt {
-        out(h, vget(h, T_KEYTRI, (3 * r) + 1));
-        out(h, vget(h, T_KEYTRI, (3 * r) + 2));
+    for r in 0..np {
+        out(h, vget(h, T_KEYTRI, (2 * r) + 1));
     }
-    vtrunc(h, T_TMP2, ks);
+    for m2 in 0..nm {
+        if vget(h, T_MAPD, ((blob + MAP_HDR) + (5 * m2)) + 3) == 1 {
+            out(h, m2);
+        }
+    }
 }
 pub(crate) fn write_array(h: &mut [i32], f: i32) {
+    // program-2 §4: npos, W, peg, 0, first[W], pos[npos], follow[npos x W].
     let l: i32 = fin_internal(h, f);
     let blob: i32 = vget(h, T_ARR, ld(h, l, 0));
-    let npos: i32 = vget(h, T_ARRD, blob);
-    let w: i32 = vget(h, T_ARRD, blob + 1);
-    let nc: i32 = vget(h, T_ARRD, blob + 2);
-    let n: i32 = (4 + (2 * w)) + ((2 * npos) + ((2 * nc) + (npos * w)));
-    let pb: i32 = (blob + 4) + (2 * w);
+    let prog: i32 = vget(h, T_ARRD, blob);
+    let npos: i32 = vget(h, T_ARRD, blob + 1);
+    let w: i32 = vget(h, T_ARRD, blob + 2);
+    let fb: i32 = blob + ARR_HDR;
+    let pb: i32 = fb + w;
+    let flb: i32 = pb + npos;
+    out(h, npos);
+    out(h, w);
+    out(h, vget(h, T_PROGF, prog));
+    out(h, 0);
+    for i in 0..w {
+        out(h, vget(h, T_ARRD, fb + i));
+    }
+    for p in 0..npos {
+        out(h, fts_of(h, vget(h, T_ARRD, pb + p)));
+    }
+    for q in 0..npos * w {
+        out(h, vget(h, T_ARRD, flb + q));
+    }
+}
+pub(crate) fn write_peg(h: &mut [i32], prog: i32) {
+    // A PEG program record (program-2 §3), as interned.
+    let o: i32 = prog_at(h, prog);
+    let n: i32 = prog_len(h, prog);
     for i in 0..n {
-        let x: i32 = vget(h, T_ARRD, blob + i);
-        let mut y: i32 = x;
-        if (i >= (pb - blob)) && (i < ((pb - blob) + (2 * npos))) {
-            if rem2(i - (pb - blob), 2) == 0 {
-                y = fts_of(h, x);
-            }
-        }
-        out(h, y);
+        out(h, vget(h, T_PROGD, o + i));
     }
 }
 pub(crate) fn write_regexp(h: &mut [i32], r: i32) {
@@ -1832,17 +1737,14 @@ pub(crate) fn write_bound(h: &mut [i32], o: i32) {
     }
 }
 pub(crate) fn ext_word(h: &[i32], which: i32) -> i32 {
-    // D141's header words once the pool is built: 0 the format word (1.1 when
-    // a control is used), 1 N_EXTS, 2 the names' pool offset, 3 their length.
+    // D141's header words once the pool is built: 0 the format word (2.0), 1
+    // N_EXTS, 2 the names' pool offset, 3 their length.
     let eb: i32 = hg(h, H_EXT_BID);
-    if eb < 0 {
-        if which == 0 {
-            return FORMAT_VERSION;
-        }
-        return 0;
-    }
     if which == 0 {
-        return FORMAT_V11;
+        return FORMAT_VERSION;
+    }
+    if eb < 0 {
+        return 0;
     }
     if which == 2 {
         return vget(h, T_POOLOFF, eb);
@@ -1873,7 +1775,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     if build_pool(h) < 0 {
         return -1;
     }
-    if plan_maps(h) < 0 {
+    if plan_containers(h) < 0 {
         return -1;
     }
     // closure chains, in rule-table order
@@ -1907,7 +1809,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     let nl: i32 = hg(h, H_N_FIN);
     let nts: i32 = fts_n(h);
     let nkeys: i32 = vlen(h, T_KEYS);
-    let ngr: i32 = vlen(h, T_GRP);
+    let ngr: i32 = vget(h, T_CLS2, 6);
     let nmaps: i32 = vget(h, T_CLS2, 0);
     let narr: i32 = vget(h, T_CLS2, 1);
     let nrx: i32 = rx_final_list(h);
@@ -1927,7 +1829,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
         tsdata += 2 + (fts_w(h, t, 1) + fts_w(h, t, 3));
     }
     for g in 0..ngr {
-        gdata += 2 + (4 * vget(h, T_GRPD, vget(h, T_GRP, g)));
+        gdata += prog_len(h, vget(h, T_MNAME, g));
     }
     for f in 0..nl {
         let l: i32 = fin_internal(h, f);
@@ -1936,11 +1838,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
             mdata += map_size(h, l);
         }
         if k == K_ARRAY {
-            let blob: i32 = vget(h, T_ARR, ld(h, l, 0));
-            let np: i32 = vget(h, T_ARRD, blob);
-            let w: i32 = vget(h, T_ARRD, blob + 1);
-            let nc: i32 = vget(h, T_ARRD, blob + 2);
-            adata += (4 + (2 * w)) + ((2 * np) + ((2 * nc) + (np * w)));
+            adata += array_size(h, l);
         }
     }
     for x in 0..nrx {
@@ -1977,6 +1875,40 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     let send: i32 = s19 + chdata;
     let pool: i32 = vlen(h, T_POOL);
     let total: i32 = hg(h, H_LIM_TOTAL);
+    let mut ritem: i32 = 0;
+    let mut reclmax: i32 = 0;
+    let mut actsum: i32 = 0;
+    // program-2 §2, §9.4: over closure sets, the largest sum of A2 / T
+    // record words, count of recursive leaves and sum of activation words
+    for cq in 0..ncs {
+        let cqo: i32 = vget(h, T_CSET, cq);
+        let cn: i32 = vget(h, T_CSD, cqo);
+        let mut rs: i32 = 0;
+        let mut rc: i32 = 0;
+        let mut asum: i32 = 0;
+        for cqi in 0..cn {
+            let cf: i32 = vget(h, T_CSD, cqo + (3 + cqi));
+            rs = sat_add(rs, laux(h, cf, 3));
+            rc += laux(h, cf, 4);
+            asum = sat_add(asum, laux(h, cf, 5));
+        }
+        if rs > ritem {
+            ritem = rs;
+        }
+        if rc > reclmax {
+            reclmax = rc;
+        }
+        if asum > actsum {
+            actsum = asum;
+        }
+    }
+    // W7 (D281): the worst-case arena at the compiled limits, items = the input
+    // limit, against the cap (program-2 §9.4)
+    let d1: i32 = hg(h, H_LIM_DEPTH) + 1;
+    let need: i32 = sat_add(sat_mul(hg(h, H_LIM_INPUT), sat_add(ritem, actsum)), sat_add(sat_mul(d1, sat_add(actsum, sat_mul(64, reclmax))), sat_mul(2, hg(h, H_LIM_ENTRIES))));
+    if need > hg(h, H_LIM_GROUP) {
+        warn_global(h, 7);
+    }
     // Program + pool + scratch, refused before anything is written.
     if (smax > (total / 4)) || (send > (((total - pool) - (4 * smax)) / 4)) {
         return fail(h, ERR_LIM_TOTAL, -1);
@@ -1988,7 +1920,6 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     // ---- header
     let mut flags: i32 = 0;
     let mut tsany: i32 = -1;
-    let mut gempty: i32 = -1;
     for kq in 0..nkeys {
         if (bid_byte(h, vget(h, T_KEYS, kq), 0) >> 5) <= 1 {
             flags |= 1;
@@ -2009,16 +1940,21 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
         if k2 == K_EXT {
             flags |= 16;
         }
+        if (k2 == K_ARRAY) && (vget(h, T_ARRD, vget(h, T_ARR, ld(h, l2, 0)) + 3) == TIER_A2) {
+            flags |= FLAG_ARENA;
+        }
+        if (k2 == K_MAP) && (vget(h, T_MAPD, map_blob(h, l2) + 3) == TIER_T) {
+            flags |= FLAG_ARENA;
+        }
         if (k2 == K_ANY) || ((k2 == K_MAJOR) && ((ld(h, l2, 0) >= 4) && (ld(h, l2, 0) <= 6))) {
             tsany = fts_of(h, hg(h, H_TS_ANY));
         }
     }
-    for g2 in 0..ngr {
-        if (gempty < 0) && (vget(h, T_GRPD, vget(h, T_GRP, g2)) == 0) {
-            gempty = g2;
-        }
+    if hg(h, H_CUTS) == 1 {
+        flags |= FLAG_CUTS_RFC;
     }
-    // D141: format 1.1 and the extension table only when a control is used
+    // format 2.0 header (program-2 §2): word 19 N_PEGS, 29 R_ITEM_MAX, 41
+    // LIM_GROUP_WORDS, 62 RECLEAF_MAX (S_END is PROGRAM_WORDS), 63 ACT_SUM
     out(h, MAGIC);
     out(h, ext_word(h, 0));
     out(h, 64);
@@ -2043,7 +1979,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     out(h, ncs);
     out(h, nch);
     out(h, tsany);
-    out(h, gempty);
+    out(h, ritem);
     out(h, ext_word(h, 1));
     out(h, ext_word(h, 2));
     out(h, hg(h, H_LIM_DEPTH));
@@ -2055,7 +1991,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     out(h, total);
     out(h, ext_word(h, 3));
     out(h, smax);
-    out(h, 0);
+    out(h, hg(h, H_LIM_GROUP));
     out(h, s0);
     out(h, s1);
     out(h, s2);
@@ -2076,8 +2012,8 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     out(h, s17);
     out(h, s18);
     out(h, s19);
-    out(h, send);
-    out(h, 0);
+    out(h, reclmax);
+    out(h, actsum);
     // ---- rules
     for i2 in 0..nr {
         let r3: i32 = vget(h, T_RORD, i2);
@@ -2114,18 +2050,14 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
         out(h, vget(h, T_POOLOFF, kb));
         out(h, bid_len(h, kb));
     }
-    // ---- groups
+    // ---- PEG programs (S5/S6), in first-use order
     let mut at2: i32 = s6;
     for g3 in 0..ngr {
         out(h, at2);
-        at2 += 2 + (4 * vget(h, T_GRPD, vget(h, T_GRP, g3)));
+        at2 += prog_len(h, vget(h, T_MNAME, g3));
     }
     for g4 in 0..ngr {
-        let go: i32 = vget(h, T_GRP, g4);
-        let gn: i32 = vget(h, T_GRPD, go);
-        for gi in 0..2 + (4 * gn) {
-            out(h, vget(h, T_GRPD, go + gi));
-        }
+        write_peg(h, vget(h, T_MNAME, g4));
     }
     // ---- maps
     let mut at3: i32 = s8;
@@ -2146,12 +2078,8 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     for f6 in 0..nl {
         let l6: i32 = fin_internal(h, f6);
         if lk(h, l6) == K_ARRAY {
-            let blob6: i32 = vget(h, T_ARR, ld(h, l6, 0));
-            let np6: i32 = vget(h, T_ARRD, blob6);
-            let w6: i32 = vget(h, T_ARRD, blob6 + 1);
-            let nc6: i32 = vget(h, T_ARRD, blob6 + 2);
             out(h, at4);
-            at4 += (4 + (2 * w6)) + ((2 * np6) + ((2 * nc6) + (np6 * w6)));
+            at4 += array_size(h, l6);
         }
     }
     for f7 in 0..nl {

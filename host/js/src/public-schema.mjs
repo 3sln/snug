@@ -1,6 +1,6 @@
 // Buffer/Program package facade; all session construction lives in snug/sources.
 import { Program as HostProgram, Schema as HostSchema } from './schema-core.mjs';
-import { vmVerify } from '../../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../../gen/js/snug/program/verify.mjs';
 import { parseSerialized, serializeProgram, ProgramError } from './serialized.mjs';
 import { validationFault } from './public-errors.mjs';
 import { SNUG_VERSION } from './version.mjs';
@@ -24,7 +24,7 @@ export class Program {
       throw new TypeError('snug: copy SharedArrayBuffer input first');
     if (P.byteLength + B.length > 64 * 1024 * 1024) throw new ProgramError('too_large');
     let inner;
-    try { inner = new HostProgram(P, B, { verify: vmVerify, controls }); }
+    try { inner = new HostProgram(P, B, { verify: vmVerify, verifyWords: vmVerifyWords, controls }); }
     catch (e) { if (e instanceof ProgramError) throw e; throw new ProgramError('verify'); }
     internals.set(this, inner); versions.set(this, SNUG_VERSION);
     Object.freeze(this);

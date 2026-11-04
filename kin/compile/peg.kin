@@ -1,0 +1,975 @@
+;; PEG groups (architecture §20, docs/program-2.md format 2.0): the group of
+;; an array or map type, lowered by snug.compile.lower into a BUILDER tree,
+;; becomes one PEG program plus the container's table.
+;;
+;; BUILDER nodes (T_PB, 7 words): op, a, b, c, next sibling, source offset,
+;; last child (lists). Ops are program-2 §3's: EMPTY, FAIL (a = provenance
+;; member record or -1), ENTRY (a = internal typeset), MEMBER (a = member
+;; record, b..c = occurrence), SEQ / CHOICE (a = first child, b = count),
+;; REP (a = child, b = min, c = max), CALL (a = the builder node it runs).
+;; MEMBER records (T_PMEM, 6 words): key kind (0 literal bid, 1 key
+;; typeset), key, value typeset, cut, source offset, final member index.
+;;
+;; `peg-finish`:
+;; 1. SIMPLIFY (postorder; T_PA word 0 = replacement): SEQ drops EMPTY kids,
+;;    SEQ and CHOICE splice same-op kids and collapse to their only kid
+;;    (none: EMPTY / FAIL), a REP of EMPTY is EMPTY, and in maps the exact
+;;    fold table of program-2 §3.3. A CALL target is never spliced away.
+;; 2. NUMBER in preorder from the root (node 0); positions (ENTRY) and members
+;;    (MEMBER) are numbered in node order; CALLs point at their target's id.
+;; 3. ANALYSE: syntactic lengths ml / FL and B (§3.2), depth, n_calls, the
+;;    nullable / first / last least fixed points and the relaxed follow rows
+;;    (§4, arch §20.5), left recursion (refused, ERR_GROUP_RECURSION), map
+;;    classes and tiers (§3.3), compile warnings W1-W6 (arch §20.11).
+;; 4. INTERN the program (exact Program record, hash-consed in T_PROG) and
+;;    write the container: T_ARR / T_ARRD or T_MAP / T_MAPD (see below).
+(ns snug.compile.peg
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break declarefn]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl sar ushr bit-and bit-or bit-not
+                               < > <= >= == != and or not]]
+            [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vpop
+                                        mix ht-init ht-start ht-id ht-next ht-put
+                                        INF ERR_INTERNAL ERR_LIM_PEG ERR_LIM_APOS ERR_GROUP_RECURSION
+                                        H_LIM_ALTS H_LIM_APOS H_CUR_RULE H_NSRC H_PMODE
+                                        T_PB T_PMEM T_PGS T_PKID T_PN T_PK T_PA T_PROG T_PROGD T_HPROG
+                                        T_WARN T_PSET T_PFOL T_PSTACK T_ARR T_ARRD T_MAP T_MAPD T_STK]]
+            [snug.compile.leaf :refer [lk ld ts-n ts-leaf ts-member ts-overlap has-ext ts-union ts-push-leaves
+                                       K_ANY K_LIT]]))
+
+(defconst ^:pub ^I32 P_EMPTY 0)
+(defconst ^:pub ^I32 P_FAIL 1)
+(defconst ^:pub ^I32 P_ENTRY 2)
+(defconst ^:pub ^I32 P_MEMBER 3)
+(defconst ^:pub ^I32 P_SEQ 4)
+(defconst ^:pub ^I32 P_CHOICE 5)
+(defconst ^:pub ^I32 P_REP 6)
+(defconst ^:pub ^I32 P_CALL 7)
+;; minima saturate here (arch §20.2 "Counts")
+(defconst ^:pub ^I32 COUNT_SAT 16777216)
+;; A1 ring words, (B + 1) * W (program-2 §11, D292: fixed at the default)
+(defconst ^:pub ^I32 RING_WORDS 4096)
+;; Program record header words (program-2 §3)
+(defconst ^:pub ^I32 PROG_HDR 9)
+;; tiers
+(defconst ^:pub ^I32 TIER_A0 0)
+(defconst ^:pub ^I32 TIER_A1 1)
+(defconst ^:pub ^I32 TIER_A2 2)
+(defconst ^:pub ^I32 TIER_F 0)
+(defconst ^:pub ^I32 TIER_S 1)
+(defconst ^:pub ^I32 TIER_T 2)
+;; container blob headers (internal): arrays prog npos W tier; maps prog n_members key_ts tier
+(defconst ^:pub ^I32 ARR_HDR 4)
+(defconst ^:pub ^I32 MAP_HDR 4)
+
+(declarefn ^I32 sat-add ^I32 sat-mul)
+
+;; ------------------------------------------------------------ warnings
+
+(defn ^:pub warn [^Ints h ^I32 code ^I32 pos]
+  (comment "Compile warning W<code> at source offset pos, in the rule being lowered."
+           "Places outside the schema text (the prelude) are dropped.")
+  (if (or (< pos 0) (> pos (hg h H_NSRC))) (return))
+  (vpush1 h T_WARN code)
+  (vpush1 h T_WARN pos)
+  (vpush1 h T_WARN (hg h H_CUR_RULE))
+  (vpush1 h T_WARN 0))
+
+(defn ^:pub warn-global [^Ints h ^I32 code]
+  (comment "A schema-wide warning (W7): no rule, no place.")
+  (vpush1 h T_WARN code)
+  (vpush1 h T_WARN (neg 1))
+  (vpush1 h T_WARN (neg 1))
+  (vpush1 h T_WARN 0))
+
+;; ------------------------------------------------------------ builder
+
+(defn ^:pub ^I32 pbw [^IntsR h ^I32 n ^I32 w] (return (vget h T_PB (+ (* n 7) w))))
+(defn ^:pub pbset [^Ints h ^I32 n ^I32 w ^I32 v] (vset h T_PB (+ (* n 7) w) v))
+
+(defn ^:pub ^Bool peg-init [^Ints h]
+  (comment "Once per compile: the program table and the warnings.")
+  (vtrunc h T_PROG 0)
+  (vtrunc h T_PROGD 0)
+  (vtrunc h T_WARN 0)
+  (return (ht-init h T_HPROG 64)))
+
+(defn ^:pub peg-begin [^Ints h ^I32 mode]
+  (comment "A fresh builder for one container's group (mode 0 array, 1 map).")
+  (vtrunc h T_PB 0)
+  (vtrunc h T_PMEM 0)
+  (vtrunc h T_PGS 0)
+  (vtrunc h T_PKID 0)
+  (hs h H_PMODE mode))
+
+(defn ^:pub ^I32 pb-node [^Ints h ^I32 op ^I32 a ^I32 b ^I32 c ^I32 pos]
+  (comment "A builder node. A group whose builder outgrows 8 x the PEG node limit +"
+           "1024 is refused (ERR_LIM_PEG) before it can exhaust the arena.")
+  (if (not (charge h 1)) (return (neg 1)))
+  (let [n (quot (vlen h T_PB) 7)
+        cap (+ (* 8 (hg h H_LIM_ALTS)) 1024)]
+    (if (>= n cap) (return (fail h ERR_LIM_PEG pos)))
+    (let [at (vpush h T_PB 7)]
+      (if (< at 0) (return (neg 1)))
+      (vset h T_PB at op)
+      (vset h T_PB (+ at 1) a)
+      (vset h T_PB (+ at 2) b)
+      (vset h T_PB (+ at 3) c)
+      (vset h T_PB (+ at 4) (neg 1))
+      (vset h T_PB (+ at 5) pos)
+      (vset h T_PB (+ at 6) (neg 1))
+      (return n))))
+
+(defn ^:pub ^I32 pb-list [^Ints h ^I32 op ^I32 pos]
+  (comment "An empty SEQ or CHOICE; children are appended with pb-add.")
+  (return (pb-node h op (neg 1) 0 0 pos)))
+
+(defn ^:pub pb-add [^Ints h ^I32 list ^I32 child]
+  (let [last (pbw h list 6)
+        cnt (pbw h list 2)]
+    (if (< last 0) (pbset h list 1 child) (pbset h last 4 child))
+    (pbset h list 6 child)
+    (pbset h list 2 (+ cnt 1))))
+
+(defn ^:pub ^I32 pb-rep [^Ints h ^I32 child ^I32 lo ^I32 hi ^I32 pos]
+  (comment "child with occurrence lo..hi (hi >= lo, INF unbounded): minima saturate"
+           "at 2^24, maxima >= 2^24 are INF, 1*1 is the child itself and 0*0 is"
+           "EMPTY (arch §20.2 Counts; program-2 §3).")
+  (if (< child 0) (return (neg 1)))
+  (let [^:mut l lo
+        ^:mut u hi]
+    (if (> l COUNT_SAT) (set l COUNT_SAT))
+    (if (>= u COUNT_SAT) (set u INF))
+    (if (and (== l 1) (== u 1)) (return child))
+    (if (== u 0) (return (pb-node h P_EMPTY 0 0 0 pos)))
+    (return (pb-node h P_REP child l u pos))))
+
+(defn ^:pub ^I32 pmw [^IntsR h ^I32 m ^I32 w] (return (vget h T_PMEM (+ (* m 6) w))))
+
+(defn ^:pub ^I32 pm-new [^Ints h ^I32 kind ^I32 key ^I32 val ^I32 cut ^I32 pos]
+  (comment "A member record: key kind (0 literal bid, 1 key typeset), key, value"
+           "typeset, cut, source offset.")
+  (let [at (vpush h T_PMEM 6)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_PMEM at kind)
+    (vset h T_PMEM (+ at 1) key)
+    (vset h T_PMEM (+ at 2) val)
+    (vset h T_PMEM (+ at 3) cut)
+    (vset h T_PMEM (+ at 4) pos)
+    (vset h T_PMEM (+ at 5) (neg 1))
+    (return (quot at 6))))
+
+;; ------------------------------------------------------------ expansion stack
+;; (key, env, node): key = a group rule (>= 0) or -2 - the group node of an
+;; unwrapped container; node = the builder node a recursive reference CALLs.
+
+(defn ^:pub ^I32 pgs-find [^IntsR h ^I32 key ^I32 env]
+  (let [n (quot (vlen h T_PGS) 3)]
+    (for [^I32 i 0 n]
+      (if (and (== (vget h T_PGS (* 3 i)) key) (== (vget h T_PGS (+ (* 3 i) 1)) env))
+        (return (vget h T_PGS (+ (* 3 i) 2)))))
+    (return (neg 1))))
+
+(defn ^:pub pgs-push [^Ints h ^I32 key ^I32 env ^I32 node]
+  (vpush1 h T_PGS key)
+  (vpush1 h T_PGS env)
+  (vpush1 h T_PGS node))
+
+(defn ^:pub pgs-pop [^Ints h]
+  (let [n (vlen h T_PGS)]
+    (vtrunc h T_PGS (- n 3))))
+
+;; ------------------------------------------------------------ arithmetic
+
+(defn ^:pub ^I32 sat-add [^I32 a ^I32 b]
+  (if (or (== a INF) (== b INF)) (return INF))
+  (if (> a (- INF b)) (return INF))
+  (return (+ a b)))
+
+(defn ^:pub ^I32 sat-mul [^I32 a ^I32 b]
+  (comment "a * b saturating at INF, with 0 * INF = 0 (program-2 §3.2).")
+  (if (or (== a 0) (== b 0)) (return 0))
+  (if (or (== a INF) (== b INF)) (return INF))
+  (if (> a (quot INF b)) (return INF))
+  (return (* a b)))
+
+(defn ^I32 imax [^I32 a ^I32 b]
+  (if (> a b) (return a))
+  (return b))
+
+;; ------------------------------------------------------------ 1. simplify
+
+(defn ^I32 paw [^IntsR h ^I32 n ^I32 w] (return (vget h T_PA (+ (* n 8) w))))
+(defn paset [^Ints h ^I32 n ^I32 w ^I32 v] (vset h T_PA (+ (* n 8) w) v))
+
+(defn ^I32 pb-fresh [^Ints h ^I32 op ^I32 a ^I32 b ^I32 c ^I32 pos]
+  (comment "A builder node made while simplifying: its own replacement.")
+  (let [n (pb-node h op a b c pos)]
+    (if (< n 0) (return (neg 1)))
+    (let [at (vpush h T_PA 8)]
+      (if (< at 0) (return (neg 1)))
+      (vset h T_PA at n)
+      (vset h T_PA (+ at 4) (neg 1))
+      (return n))))
+
+(defn ^I32 simplify-list [^Ints h ^I32 n]
+  (comment "A SEQ or CHOICE: its simplified kids (replacements, same-op non-target"
+           "kids spliced, EMPTY dropped from a SEQ) as a run in T_PKID; answers the"
+           "node itself, its only kid, or a fresh EMPTY (SEQ) / FAIL (CHOICE).")
+  (let [op (pbw h n 0)
+        start (vlen h T_PKID)
+        ^:mut k (pbw h n 1)]
+    (while (>= k 0)
+      (let [r (paw h k 0)
+            rop (pbw h r 0)]
+        (if (not (and (== op P_SEQ) (== rop P_EMPTY)))
+          (if (and (== rop op) (== (paw h r 1) 0))
+            (do (let [ko (paw h r 2)
+                      kc (paw h r 3)]
+                  (if (not (charge h kc)) (return (neg 1)))
+                  (for [^I32 i 0 kc]
+                    (let [x (vget h T_PKID (+ ko i))]
+                      (vpush1 h T_PKID x)))))
+            (vpush1 h T_PKID r))))
+      (set k (pbw h k 4)))
+    (let [cnt (- (vlen h T_PKID) start)
+          ^:mut res n]
+      (if (== cnt 0)
+        (if (== op P_SEQ)
+          (set res (pb-fresh h P_EMPTY 0 0 0 (pbw h n 5)))
+          (set res (pb-fresh h P_FAIL (neg 1) 0 0 (pbw h n 5)))))
+      (if (== cnt 1) (set res (vget h T_PKID start)))
+      (if (>= cnt 2)
+        (do (paset h n 2 start)
+            (paset h n 3 cnt)))
+      (return res))))
+
+(defn ^I32 simplify-rep [^Ints h ^I32 n ^I32 mode]
+  (comment "A REP: of EMPTY it is EMPTY; W4; in maps the fold table (program-2 §3.3)"
+           "on a direct MEMBER child that no CALL targets.")
+  (let [c (paw h (pbw h n 1) 0)
+        cop (pbw h c 0)
+        lo (pbw h n 2)
+        hi (pbw h n 3)
+        pos (pbw h n 5)]
+    (if (== cop P_EMPTY) (return c))
+    (if (and (>= lo 2) (and (or (== cop P_REP) (== cop P_MEMBER)) (== (pbw h c 3) INF)))
+      (warn h 4 pos))
+    (if (and (== mode 1) (and (== cop P_MEMBER) (== (paw h c 1) 0)))
+      (do (let [k (pbw h c 2)
+                m (pbw h c 3)
+                mem (pbw h c 1)
+                mpos (pbw h c 5)]
+            (if (and (== k 1) (== m 1)) (return (pb-fresh h P_MEMBER mem lo hi mpos)))
+            (if (and (== k 0) (== m INF)) (return c))
+            (if (and (== k 1) (== m INF))
+              (do (if (== lo 0) (return (pb-fresh h P_MEMBER mem 0 INF mpos)))
+                  (if (== lo 1) (return c))))
+            (if (and (== m INF) (and (>= k 1) (>= lo 2)))
+              (do (let [fl (pb-fresh h P_FAIL mem 0 0 pos)
+                        sq (pb-fresh h P_SEQ (neg 1) 0 0 pos)]
+                    (if (or (< fl 0) (< sq 0)) (return (neg 1)))
+                    (let [st (vlen h T_PKID)]
+                      (vpush1 h T_PKID c)
+                      (vpush1 h T_PKID fl)
+                      (paset h sq 2 st)
+                      (paset h sq 3 2))
+                    (return sq)))))))
+    (pbset h n 1 c)
+    (return n)))
+
+(defn ^I32 simplify-tree [^Ints h ^I32 root ^I32 mode]
+  (comment "Postorder over the builder tree from root (CALLs are leaves); T_PA"
+           "word 0 = each node's replacement, word 1 = 1 for a CALL target (passed"
+           "on to its replacement). Answers the root's replacement.")
+  (vtrunc h T_PSTACK 0)
+  (vpush1 h T_PSTACK root)
+  (vpush1 h T_PSTACK 0)
+  (while (> (vlen h T_PSTACK) 0)
+    (if (not (charge h 1)) (return (neg 1)))
+    (let [top (- (vlen h T_PSTACK) 2)
+          n (vget h T_PSTACK top)
+          ph (vget h T_PSTACK (+ top 1))
+          op (pbw h n 0)]
+      (if (== ph 0)
+        (do (vset h T_PSTACK (+ top 1) 1)
+            (if (or (== op P_SEQ) (== op P_CHOICE))
+              (do (let [^:mut k (pbw h n 1)]
+                    (while (>= k 0)
+                      (vpush1 h T_PSTACK k)
+                      (vpush1 h T_PSTACK 0)
+                      (set k (pbw h k 4))))))
+            (if (== op P_REP)
+              (do (let [ch (pbw h n 1)]
+                    (vpush1 h T_PSTACK ch)
+                    (vpush1 h T_PSTACK 0)))))
+        (do (vtrunc h T_PSTACK top)
+            (let [^:mut r n]
+              (if (or (== op P_SEQ) (== op P_CHOICE)) (set r (simplify-list h n)))
+              (if (== op P_REP) (set r (simplify-rep h n mode)))
+              (if (< r 0) (return (neg 1)))
+              (paset h n 0 r)
+              (if (and (!= r n) (!= (paw h n 1) 0)) (paset h r 1 1))))))
+    (if (erred h) (return (neg 1))))
+  (return (paw h root 0)))
+
+;; ------------------------------------------------------------ 2. number
+;; Final nodes (T_PN, 6 words): op, a, b, c, source offset, x (ENTRY: its
+;; typeset; MEMBER: its member record; else the builder node). Kid runs of
+;; SEQ / CHOICE in T_PK (a = run offset, b = count), as in the Program.
+
+(defn ^:pub ^I32 pnw [^IntsR h ^I32 i ^I32 w] (return (vget h T_PN (+ (* i 6) w))))
+(defn ^:pub ^I32 pkid [^IntsR h ^I32 i ^I32 j] (return (vget h T_PK (+ (pnw h i 1) j))))
+
+(defn ^I32 pn-push [^Ints h ^I32 op ^I32 a ^I32 b ^I32 c ^I32 pos ^I32 x]
+  (let [at (vpush h T_PN 6)]
+    (if (< at 0) (return (neg 1)))
+    (vset h T_PN at op)
+    (vset h T_PN (+ at 1) a)
+    (vset h T_PN (+ at 2) b)
+    (vset h T_PN (+ at 3) c)
+    (vset h T_PN (+ at 4) pos)
+    (vset h T_PN (+ at 5) x)
+    (return 0)))
+
+(defn ^I32 number-tree [^Ints h ^I32 r0 ^I32 mode]
+  (comment "Preorder ids from r0 (T_PA word 4; the order kept in T_PFOL), then the"
+           "final nodes, positions and members numbered in node order. Answers the"
+           "node count.")
+  (vtrunc h T_PSTACK 0)
+  (vtrunc h T_PFOL 0)
+  (vpush1 h T_PSTACK r0)
+  (let [^:mut next 0]
+    (while (> (vlen h T_PSTACK) 0)
+      (if (not (charge h 1)) (return (neg 1)))
+      (let [n (vpop h T_PSTACK)
+            op (pbw h n 0)]
+        (paset h n 4 next)
+        (set next (+ next 1))
+        (vpush1 h T_PFOL n)
+        (if (or (== op P_SEQ) (== op P_CHOICE))
+          (do (let [ko (paw h n 2)
+                    kc (paw h n 3)
+                    ^:mut j (- kc 1)]
+                (while (>= j 0)
+                  (let [kn (vget h T_PKID (+ ko j))]
+                    (vpush1 h T_PSTACK kn))
+                  (set j (- j 1))))))
+        (if (== op P_REP)
+          (do (let [ch (pbw h n 1)]
+                (vpush1 h T_PSTACK ch)))))
+      (if (erred h) (return (neg 1))))
+    (vtrunc h T_PN 0)
+    (vtrunc h T_PK 0)
+    (let [^:mut npos 0
+          ^:mut nmem 0]
+      (for [^I32 i 0 next]
+        (let [b (vget h T_PFOL i)
+              op2 (pbw h b 0)
+              pa (pbw h b 1)
+              pb (pbw h b 2)
+              pc (pbw h b 3)
+              pos (pbw h b 5)]
+          (if (== op2 P_EMPTY) (pn-push h P_EMPTY 0 0 0 pos b))
+          (if (== op2 P_FAIL)
+            (do (let [^:mut prov (neg 1)]
+                  (if (and (== mode 1) (>= pa 0)) (set prov (pmw h pa 5)))
+                  (pn-push h P_FAIL 0 prov 0 pos b))))
+          (if (== op2 P_ENTRY)
+            (do (pn-push h P_ENTRY npos 0 0 pos pa)
+                (set npos (+ npos 1))))
+          (if (== op2 P_MEMBER)
+            (do (vset h T_PMEM (+ (* pa 6) 5) nmem)
+                (pn-push h P_MEMBER nmem pb pc pos pa)
+                (set nmem (+ nmem 1))))
+          (if (or (== op2 P_SEQ) (== op2 P_CHOICE))
+            (do (let [ko2 (paw h b 2)
+                      kc2 (paw h b 3)
+                      at (vlen h T_PK)]
+                  (for [^I32 j2 0 kc2]
+                    (let [kb (vget h T_PKID (+ ko2 j2))
+                          kf (paw h kb 4)]
+                      (vpush1 h T_PK kf)))
+                  (pn-push h op2 at kc2 0 pos b))))
+          (if (== op2 P_REP)
+            (do (let [cf (paw h pa 4)]
+                  (pn-push h P_REP cf pb pc pos b))))
+          (if (== op2 P_CALL)
+            (do (let [t (paw h pa 0)
+                      tf (paw h t 4)]
+                  (comment "a target is always an ancestor, so already numbered -- unless it"
+                           "simplified to this very CALL (`g = (g, 0*0 x)`): left recursion")
+                  (if (< tf 0) (return (fail h ERR_INTERNAL pos)))
+                  (if (>= tf i) (return (fail h ERR_GROUP_RECURSION pos)))
+                  (pn-push h P_CALL tf 0 0 pos b))))))
+      (if (erred h) (return (neg 1)))
+      (return next))))
+
+;; ------------------------------------------------------------ 3. analyses
+;; T_PA, re-used per final node (8 words): 0 nullable, 1 ml, 2 FL (-1 for
+;; "cannot fail"), 3 height, 4 DFS colour, 5 DFS edge cursor.
+
+(defn ^I32 lengths [^Ints h ^I32 n]
+  (comment "ml, FL and height of every node (children have larger ids); answers B,"
+           "the largest FL over backtrack attempts (program-2 §3.2).")
+  (let [^:mut bmax 0]
+    (if (not (charge h n)) (return (neg 1)))
+    (let [^:mut i (- n 1)]
+      (while (>= i 0)
+        (let [op (pnw h i 0)
+              ^:mut ml 0
+              ^:mut fl 0
+              ^:mut ht 1]
+          (if (== op P_EMPTY) (set fl (neg 1)))
+          (if (or (== op P_ENTRY) (== op P_MEMBER)) (set ml 1))
+          (if (and (== op P_MEMBER) (== (pnw h i 2) 0)) (set fl (neg 1)))
+          (if (== op P_CALL) (do (set ml INF) (set fl INF)))
+          (if (== op P_SEQ)
+            (do (let [kc (pnw h i 2)
+                      ^:mut pre 0]
+                  (set fl (neg 1))
+                  (for [^I32 j 0 kc]
+                    (let [k (pkid h i j)
+                          kfl (paw h k 2)]
+                      (if (!= kfl (neg 1)) (set fl (imax fl (sat-add pre kfl))))
+                      (set pre (sat-add pre (paw h k 1)))
+                      (set ht (imax ht (+ 1 (paw h k 3))))))
+                  (set ml pre))))
+          (if (== op P_CHOICE)
+            (do (let [kc2 (pnw h i 2)
+                      ^:mut nofail false]
+                  (for [^I32 j2 0 kc2]
+                    (let [k2 (pkid h i j2)
+                          kfl2 (paw h k2 2)]
+                      (set ml (imax ml (paw h k2 1)))
+                      (if (== kfl2 (neg 1)) (set nofail true) (set fl (imax fl kfl2)))
+                      (if (and (< j2 (- kc2 1)) (!= kfl2 (neg 1))) (set bmax (imax bmax kfl2)))
+                      (set ht (imax ht (+ 1 (paw h k2 3))))))
+                  (if nofail (set fl (neg 1))))))
+          (if (== op P_REP)
+            (do (let [c (pnw h i 1)
+                      lo (pnw h i 2)
+                      hi (pnw h i 3)
+                      cml (paw h c 1)
+                      cfl (paw h c 2)]
+                  (set ml (sat-mul hi cml))
+                  (if (or (== lo 0) (== cfl (neg 1)))
+                    (set fl (neg 1))
+                    (set fl (sat-add (sat-mul (- lo 1) cml) cfl)))
+                  (if (!= cfl (neg 1)) (set bmax (imax bmax cfl)))
+                  (set ht (+ 1 (paw h c 3))))))
+          (paset h i 1 ml)
+          (paset h i 2 fl)
+          (paset h i 3 ht))
+        (set i (- i 1))))
+    (return bmax)))
+
+(defn ^Bool set-or [^Ints h ^I32 dst ^I32 src ^I32 w]
+  (comment "T_PSET[dst..dst+w) |= T_PSET[src..src+w); did it grow?")
+  (let [^:mut grew false]
+    (for [^I32 k 0 w]
+      (let [a (vget h T_PSET (+ dst k))
+            b (vget h T_PSET (+ src k))
+            c (bit-or a b)]
+        (if (!= c a)
+          (do (vset h T_PSET (+ dst k) c)
+              (set grew true)))))
+    (return grew)))
+
+(defn ^Bool set-bit [^Ints h ^I32 dst ^I32 p]
+  (let [at (+ dst (sar p 5))
+        a (vget h T_PSET at)
+        c (bit-or a (shl 1 (bit-and p 31)))]
+    (if (== c a) (return false))
+    (vset h T_PSET at c)
+    (return true)))
+
+(defn ^Bool fixpoint [^Ints h ^I32 n ^I32 w ^I32 ncalls]
+  (comment "nullable (T_PA word 0) and, with w > 0, first / last (T_PSET, 2w words"
+           "per node) as least fixed points: rounds over the nodes in reverse id"
+           "order until nothing grows; a CALL reads its target's values (an ancestor,"
+           "so the previous round's). One round is exact without CALLs.")
+  (forever
+   (let [^:mut changed false]
+     (if (not (charge h (* n (+ 1 (* 2 w))))) (return false))
+     (let [^:mut i (- n 1)]
+       (while (>= i 0)
+         (let [op (pnw h i 0)
+               fo (* i (* 2 w))
+               lo (+ fo w)
+               ^:mut nu 0]
+           (if (== op P_EMPTY) (set nu 1))
+           (if (and (== op P_MEMBER) (== (pnw h i 2) 0)) (set nu 1))
+           (if (and (== op P_ENTRY) (> w 0))
+             (do (let [p (pnw h i 1)]
+                   (if (set-bit h fo p) (set changed true))
+                   (if (set-bit h lo p) (set changed true)))))
+           (if (== op P_CALL)
+             (do (let [t (pnw h i 1)]
+                   (set nu (paw h t 0))
+                   (if (> w 0)
+                     (do (if (set-or h fo (* t (* 2 w)) w) (set changed true))
+                         (if (set-or h lo (+ (* t (* 2 w)) w) w) (set changed true)))))))
+           (if (== op P_REP)
+             (do (let [c (pnw h i 1)]
+                   (if (or (== (pnw h i 2) 0) (!= (paw h c 0) 0)) (set nu 1))
+                   (if (> w 0)
+                     (do (if (set-or h fo (* c (* 2 w)) w) (set changed true))
+                         (if (set-or h lo (+ (* c (* 2 w)) w) w) (set changed true)))))))
+           (if (== op P_CHOICE)
+             (do (let [kc (pnw h i 2)]
+                   (for [^I32 j 0 kc]
+                     (let [k (pkid h i j)]
+                       (if (!= (paw h k 0) 0) (set nu 1))
+                       (if (> w 0)
+                         (do (if (set-or h fo (* k (* 2 w)) w) (set changed true))
+                             (if (set-or h lo (+ (* k (* 2 w)) w) w) (set changed true)))))))))
+           (if (== op P_SEQ)
+             (do (let [kc2 (pnw h i 2)
+                       ^:mut all 1
+                       ^:mut fdone false
+                       ^:mut j2 0]
+                   (while (< j2 kc2)
+                     (let [k2 (pkid h i j2)]
+                       (if (and (> w 0) (not fdone))
+                         (if (set-or h fo (* k2 (* 2 w)) w) (set changed true)))
+                       (if (== (paw h k2 0) 0) (do (set all 0) (set fdone true))))
+                     (set j2 (+ j2 1)))
+                   (set nu all)
+                   (if (> w 0)
+                     (do (let [^:mut j3 (- kc2 1)]
+                           (while (>= j3 0)
+                             (let [k3 (pkid h i j3)]
+                               (if (set-or h lo (+ (* k3 (* 2 w)) w) w) (set changed true))
+                               (if (== (paw h k3 0) 0) (set j3 0)))
+                             (set j3 (- j3 1)))))))))
+           (if (and (!= nu 0) (== (paw h i 0) 0))
+             (do (paset h i 0 1)
+                 (set changed true))))
+         (set i (- i 1))))
+     (if (erred h) (return false))
+     (if (or (not changed) (== ncalls 0)) (return true)))))
+
+(defn ^Bool add-edges [^Ints h ^I32 src ^I32 dst ^I32 w]
+  (comment "follow[p] |= T_PSET[dst..dst+w) for every p in T_PSET[src..src+w).")
+  (for [^I32 k 0 w]
+    (let [v (vget h T_PSET (+ src k))]
+      (if (!= v 0)
+        (for [^I32 bit 0 32]
+          (if (!= (bit-and (ushr v bit) 1) 0)
+            (do (let [p (+ (* k 32) bit)]
+                  (if (not (charge h w)) (return false))
+                  (for [^I32 q 0 w]
+                    (let [fa (+ (* p w) q)
+                          old (vget h T_PFOL fa)
+                          add (vget h T_PSET (+ dst q))]
+                      (vset h T_PFOL fa (bit-or old add)))))))))))
+  (return (not (erred h))))
+
+(defn ^Bool follow-rows [^Ints h ^I32 n ^I32 npos ^I32 w]
+  (comment "The relaxed follow rows (T_PFOL, npos x w): every SEQ adds last(kid i)"
+           "-> first(kid j) across nullable kids between them, every REP with max"
+           ">= 2 adds last(child) -> first(child); a CALL's sets are its target's, so"
+           "callee-last positions reach each call site's follow (program-2 §4).")
+  (vtrunc h T_PFOL 0)
+  (if (< (vpush h T_PFOL (* npos w)) 0) (return false))
+  (let [acc (* n (* 2 w))]
+    (for [^I32 i 0 n]
+      (let [op (pnw h i 0)]
+        (if (== op P_SEQ)
+          (do (let [kc (pnw h i 2)
+                    k0 (pkid h i 0)]
+                (for [^I32 z 0 w] (vset h T_PSET (+ acc z) 0))
+                (set-or h acc (+ (* k0 (* 2 w)) w) w)
+                (for [^I32 j 1 kc]
+                  (let [kj (pkid h i j)
+                        kp (pkid h i (- j 1))]
+                    (comment "acc = last of kids before j reachable over nullable kids")
+                    (if (> j 1)
+                      (do (if (== (paw h kp 0) 0)
+                            (for [^I32 z2 0 w] (vset h T_PSET (+ acc z2) 0)))
+                          (set-or h acc (+ (* kp (* 2 w)) w) w)))
+                    (if (not (add-edges h acc (* kj (* 2 w)) w)) (return false)))))))
+        (if (and (== op P_REP) (>= (pnw h i 3) 2))
+          (do (let [c (pnw h i 1)]
+                (if (not (add-edges h (+ (* c (* 2 w)) w) (* c (* 2 w)) w)) (return false))))))))
+  (return (not (erred h))))
+
+(defn ^I32 dfs-edge [^IntsR h ^I32 u ^I32 j]
+  (comment "Edge j of node u in the left graph (what u may run at its start without"
+           "consuming): SEQ kids up to the first non-nullable one, every CHOICE kid,"
+           "a REP's child, a CALL's target; -1 past the last.")
+  (let [op (pnw h u 0)]
+    (if (== op P_SEQ)
+      (do (if (>= j (pnw h u 2)) (return (neg 1)))
+          (if (and (> j 0) (== (paw h (pkid h u (- j 1)) 0) 0)) (return (neg 1)))
+          (return (pkid h u j))))
+    (if (== op P_CHOICE)
+      (do (if (>= j (pnw h u 2)) (return (neg 1)))
+          (return (pkid h u j))))
+    (if (and (or (== op P_REP) (== op P_CALL)) (== j 0)) (return (pnw h u 1)))
+    (return (neg 1))))
+
+(defn ^Bool left-recursion-free [^Ints h ^I32 n]
+  (comment "Refuse a CALL cycle reachable through nullable prefixes (program-2 §5.3,"
+           "R16): a cycle in the left graph, found by an iterative DFS; reported at"
+           "the CALL on the cycle nearest the top of the stack.")
+  (for [^I32 s 0 n]
+    (if (== (paw h s 4) 0)
+      (do (vtrunc h T_PSTACK 0)
+          (vpush1 h T_PSTACK s)
+          (paset h s 4 1)
+          (paset h s 5 0)
+          (while (> (vlen h T_PSTACK) 0)
+            (if (not (charge h 1)) (return false))
+            (let [u (vget h T_PSTACK (- (vlen h T_PSTACK) 1))
+                  j (paw h u 5)
+                  v (dfs-edge h u j)]
+              (if (< v 0)
+                (do (paset h u 4 2)
+                    (vpop h T_PSTACK))
+                (do (paset h u 5 (+ j 1))
+                    (if (== (paw h v 4) 1)
+                      (do (let [^:mut q (- (vlen h T_PSTACK) 1)
+                                ^:mut at (pnw h u 4)]
+                            (while (>= q 0)
+                              (let [x (vget h T_PSTACK q)]
+                                (if (== (pnw h x 0) P_CALL) (do (set at (pnw h x 4)) (set q 0)))
+                                (if (== x v) (set q 0)))
+                              (set q (- q 1)))
+                            (fail h ERR_GROUP_RECURSION at)
+                            (return false))))
+                    (if (== (paw h v 4) 0)
+                      (do (paset h v 4 1)
+                          (paset h v 5 0)
+                          (vpush1 h T_PSTACK v))))))))))
+  (return (not (erred h))))
+
+;; ------------------------------------------------------------ warnings W1-W3, W5, W6
+
+(defn ^Bool ts-is-any [^IntsR h ^I32 ts]
+  (return (and (== (ts-n h ts) 1) (== (lk h (ts-leaf h ts 0)) K_ANY))))
+
+(defn ^Bool ts-ext [^IntsR h ^I32 ts]
+  (for [^I32 i 0 (ts-n h ts)]
+    (if (has-ext h (ts-leaf h ts i)) (return true)))
+  (return false))
+
+(defn ^Bool ts-subsumes [^Ints h ^I32 big ^I32 small]
+  (comment "Proven only between identical typesets, `any`, or a literal tested"
+           "exactly (arch §20.11); extension controls prove nothing.")
+  (if (== big small) (return true))
+  (if (ts-is-any h big) (return true))
+  (if (and (== (ts-n h small) 1) (== (lk h (ts-leaf h small 0)) K_LIT))
+    (do (if (ts-ext h big) (return false))
+        (let [bid (ld h (ts-leaf h small 0) 0)]
+          (return (ts-member h big bid)))))
+  (return false))
+
+(defn warn-choices [^Ints h ^I32 n]
+  (comment "W5: an alternative follows one that cannot fail (syntactic FL = -inf).")
+  (for [^I32 i 0 n]
+    (if (== (pnw h i 0) P_CHOICE)
+      (do (let [kc (pnw h i 2)
+                ^:mut j 0]
+            (while (< j (- kc 1))
+              (let [k (pkid h i j)]
+                (if (== (paw h k 2) (neg 1))
+                  (do (let [nxt (pkid h i (+ j 1))]
+                        (warn h 5 (pnw h nxt 4)))
+                      (set j kc))))
+              (set j (+ j 1))))))))
+
+(defn warn-arrays [^Ints h ^I32 n]
+  (comment "W3: a greedy unbounded repetition of one entry directly followed by a"
+           "required entry whose type it subsumes (`[* uint, uint]`).")
+  (for [^I32 i 0 n]
+    (if (== (pnw h i 0) P_SEQ)
+      (for [^I32 j 1 (pnw h i 2)]
+        (let [a (pkid h i (- j 1))
+              b (pkid h i j)
+              ^:mut t2 (neg 1)]
+          (if (== (pnw h b 0) P_ENTRY) (set t2 (pnw h b 5)))
+          (if (and (and (== (pnw h b 0) P_REP) (>= (pnw h b 2) 1)) (== (pnw h (pnw h b 1) 0) P_ENTRY))
+            (set t2 (pnw h (pnw h b 1) 5)))
+          (if (and (>= t2 0) (and (== (pnw h a 0) P_REP) (== (pnw h a 3) INF)))
+            (do (let [ac (pnw h a 1)]
+                  (if (== (pnw h ac 0) P_ENTRY)
+                    (if (ts-subsumes h (pnw h ac 5) t2) (warn h 3 (pnw h b 4))))))))))))
+
+(defn ^Bool member-key-covers [^Ints h ^I32 e ^I32 m]
+  (comment "Does member record e's key domain contain all of member record m's?")
+  (let [ek (pmw h e 0)
+        mk (pmw h m 0)]
+    (if (== ek 0) (return (and (== mk 0) (== (pmw h e 1) (pmw h m 1)))))
+    (let [ets (pmw h e 1)]
+      (if (ts-is-any h ets) (return true))
+      (if (== mk 0)
+        (do (if (ts-ext h ets) (return false))
+            (return (ts-member h ets (pmw h m 1)))))
+      (return (== ets (pmw h m 1))))))
+
+(defn warn-maps [^Ints h ^I32 n ^I32 root]
+  (comment "W1 / W2 over the root sequence: an earlier unbounded member with an `any`"
+           "value already takes the member's key domain. W6: an order-sensitive"
+           "member (non-literal key, finite max) whose key overlaps another member's.")
+  (let [rop (pnw h root 0)]
+    (if (== rop P_SEQ)
+      (for [^I32 j 1 (pnw h root 2)]
+        (let [m (pkid h root j)]
+          (if (== (pnw h m 0) P_MEMBER)
+            (do (let [^:mut q 0]
+                  (while (< q j)
+                    (let [e (pkid h root q)]
+                      (if (and (== (pnw h e 0) P_MEMBER) (== (pnw h e 3) INF))
+                        (if (and (ts-is-any h (pmw h (pnw h e 5) 2)) (member-key-covers h (pnw h e 5) (pnw h m 5)))
+                          (do (if (>= (pnw h m 2) 1) (warn h 1 (pnw h m 4)) (warn h 2 (pnw h m 4)))
+                              (set q j)))))
+                    (set q (+ q 1)))))))))
+    (for [^I32 i 0 n]
+      (if (and (== (pnw h i 0) P_MEMBER) (and (== (pmw h (pnw h i 5) 0) 1) (!= (pnw h i 3) INF)))
+        (do (let [mr (pnw h i 5)
+                  kts (pmw h mr 1)
+                  ^:mut hit false]
+              (if (not (charge h n)) (return))
+              (for [^I32 i2 0 n]
+                (if (and (and (!= i2 i) (== (pnw h i2 0) P_MEMBER)) (not hit))
+                  (do (let [o (pnw h i2 5)]
+                        (if (== (pmw h o 0) 0)
+                          (if (ts-member h kts (pmw h o 1)) (set hit true))
+                          (if (ts-overlap h kts (pmw h o 1)) (set hit true)))))))
+              (if hit (warn h 6 (pnw h i 4)))))))))
+
+;; ------------------------------------------------------------ 4. programs
+
+(defn ^:pub ^I32 prog-at [^IntsR h ^I32 id] (return (vget h T_PROG id)))
+(defn ^:pub ^I32 prog-w [^IntsR h ^I32 id ^I32 w] (return (vget h T_PROGD (+ (vget h T_PROG id) w))))
+(defn ^:pub ^I32 prog-len [^IntsR h ^I32 id]
+  (return (+ (+ PROG_HDR (* 5 (prog-w h id 1))) (prog-w h id 2))))
+(defn ^:pub ^I32 prog-node [^IntsR h ^I32 id ^I32 i ^I32 w]
+  (return (vget h T_PROGD (+ (+ (vget h T_PROG id) PROG_HDR) (+ (* 5 i) w)))))
+(defn ^:pub ^I32 nprogs [^IntsR h] (return (vlen h T_PROG)))
+
+(defn ^I32 prog-intern [^Ints h ^I32 len]
+  (comment "The program whose record is T_PSTACK[0..len), hash-consed.")
+  (let [^:mut hsh (mix 29 len)]
+    (if (not (charge h len)) (return (neg 1)))
+    (for [^I32 i 0 len]
+      (set hsh (mix hsh (vget h T_PSTACK i))))
+    (let [^:mut s (ht-start h T_HPROG hsh)]
+      (forever
+       (let [id (ht-id h T_HPROG s)]
+         (if (< id 0) (break))
+         (if (== (prog-len h id) len)
+           (do (let [o (prog-at h id)
+                     ^:mut same true]
+                 (for [^I32 j 0 len]
+                   (if (!= (vget h T_PROGD (+ o j)) (vget h T_PSTACK j)) (set same false)))
+                 (if same (return id)))))
+         (set s (ht-next h T_HPROG s))))
+      (let [nid (vlen h T_PROG)
+            at (vlen h T_PROGD)]
+        (vpush1 h T_PROG at)
+        (for [^I32 k 0 len]
+          (let [x (vget h T_PSTACK k)]
+            (vpush1 h T_PROGD x)))
+        (if (erred h) (return (neg 1)))
+        (if (not (ht-put h T_HPROG s nid hsh)) (return (neg 1)))
+        (return nid)))))
+
+(defn ^:pub ^Bool prog-unbounded [^IntsR h ^I32 id]
+  (comment "Can the group match unboundedly many entries (a REP or MEMBER with an"
+           "INF maximum, or recursion)? The `bus` profile refuses that.")
+  (for [^I32 i 0 (prog-w h id 1)]
+    (let [op (prog-node h id i 0)]
+      (if (== op P_CALL) (return true))
+      (if (and (or (== op P_REP) (== op P_MEMBER)) (== (prog-node h id i 3) INF)) (return true))))
+  (return false))
+
+(defn ^I32 write-prog [^Ints h ^I32 kind ^I32 n ^I32 tier ^I32 b ^I32 flags ^I32 ncalls]
+  (comment "Program record (program-2 §3) of the final nodes into T_PSTACK; interned.")
+  (vtrunc h T_PSTACK 0)
+  (let [nk (vlen h T_PK)]
+    (comment "depth = the root's height: every path of one activation is a suffix of"
+             "a root path, CALLs counting as leaves (D295)")
+    (vpush1 h T_PSTACK kind)
+    (vpush1 h T_PSTACK n)
+    (vpush1 h T_PSTACK nk)
+    (vpush1 h T_PSTACK tier)
+    (vpush1 h T_PSTACK b)
+    (vpush1 h T_PSTACK 0)
+    (vpush1 h T_PSTACK (paw h 0 3))
+    (vpush1 h T_PSTACK flags)
+    (vpush1 h T_PSTACK ncalls)
+    (for [^I32 j 0 n]
+      (let [op (pnw h j 0)
+            a (pnw h j 1)
+            bb (pnw h j 2)
+            c (pnw h j 3)]
+        (vpush1 h T_PSTACK op)
+        (vpush1 h T_PSTACK a)
+        (vpush1 h T_PSTACK bb)
+        (vpush1 h T_PSTACK c)
+        (vpush1 h T_PSTACK (neg 1))))
+    (for [^I32 k 0 nk]
+      (let [x (vget h T_PK k)]
+        (vpush1 h T_PSTACK x)))
+    (if (erred h) (return (neg 1)))
+    (return (prog-intern h (vlen h T_PSTACK)))))
+
+;; ------------------------------------------------------------ finishing
+
+(defn ^I32 finish-array [^Ints h ^I32 n ^I32 pos ^I32 ncalls ^I32 b]
+  (comment "Positions, the relaxed automaton, the tier; the array container:"
+           "T_ARRD blob [prog, npos, W, tier, first[W], pos[npos] (typesets),"
+           "follow[npos x W]]. Answers its id.")
+  (let [^:mut npos 0]
+    (for [^I32 i 0 n]
+      (if (== (pnw h i 0) P_ENTRY) (set npos (+ npos 1))))
+    (if (> npos (hg h H_LIM_APOS)) (return (fail h ERR_LIM_APOS pos)))
+    (let [w (sar (+ npos 31) 5)]
+      (comment "first / last per node, plus one accumulator row")
+      (vtrunc h T_PSET 0)
+      (if (not (charge h (* (+ n 1) (* 2 w)))) (return (neg 1)))
+      (if (< (vpush h T_PSET (* (+ n 1) (* 2 w))) 0) (return (neg 1)))
+      (if (not (fixpoint h n w ncalls)) (return (neg 1)))
+      (if (not (follow-rows h n npos w)) (return (neg 1)))
+      (if (not (left-recursion-free h n)) (return (neg 1)))
+      (warn-choices h n)
+      (warn-arrays h n)
+      (let [^:mut ^I32 tier TIER_A2
+            ^:mut bs 0]
+        (if (== ncalls 0)
+          (do (if (== b 0) (set tier TIER_A0))
+              (if (and (> b 0) (and (< b RING_WORDS) (<= (* (+ b 1) w) RING_WORDS)))
+                (do (set tier TIER_A1) (set bs b)))))
+        (let [^:mut flags 0]
+          (if (> ncalls 0) (set flags 1))
+          (let [prog (write-prog h 0 n tier bs flags ncalls)]
+            (if (< prog 0) (return (neg 1)))
+            (let [blob (vlen h T_ARRD)]
+              (vpush1 h T_ARRD prog)
+              (vpush1 h T_ARRD npos)
+              (vpush1 h T_ARRD w)
+              (vpush1 h T_ARRD tier)
+              (for [^I32 k 0 w]
+                (let [fw (vget h T_PSET k)]
+                  (vpush1 h T_ARRD fw)))
+              (for [^I32 i2 0 n]
+                (if (== (pnw h i2 0) P_ENTRY)
+                  (do (let [ts (pnw h i2 5)]
+                        (vpush1 h T_ARRD ts)))))
+              (for [^I32 q 0 (* npos w)]
+                (let [rw (vget h T_PFOL q)]
+                  (vpush1 h T_ARRD rw)))
+              (if (erred h) (return (neg 1)))
+              (let [id (vlen h T_ARR)]
+                (vpush1 h T_ARR blob)
+                (return id)))))))))
+
+(defn ^I32 finish-map [^Ints h ^I32 n ^I32 ncalls]
+  (comment "Member classes, order sensitivity, key_ts and the tier (program-2 §3.3,"
+           "§6); the map container: T_MAPD blob [prog, n_members, key_ts, tier,"
+           "members x 5 (key kind, key bid or typeset, value typeset, class, cut)].")
+  (if (not (fixpoint h n 0 ncalls)) (return (neg 1)))
+  (if (not (left-recursion-free h n)) (return (neg 1)))
+  (warn-choices h n)
+  (warn-maps h n 0)
+  (let [rop (pnw h 0 0)
+        ^:mut flat (or (== rop P_EMPTY) (== rop P_MEMBER))
+        ^:mut anyos false
+        ^:mut anycut false
+        ^:mut class2 false
+        ^:mut nonlit false
+        ^:mut nmem 0
+        from (vlen h T_STK)]
+    (if (== rop P_SEQ)
+      (do (set flat true)
+          (for [^I32 j 0 (pnw h 0 2)]
+            (if (!= (pnw h (pkid h 0 j) 0) P_MEMBER) (set flat false)))))
+    (comment "class R: a non-literal member at the root (or the root sequence) with an"
+             "INF maximum; T_PA word 6 = class per node")
+    (for [^I32 i 0 n]
+      (paset h i 6 0))
+    (if (== rop P_MEMBER) (paset h 0 6 1))
+    (if (== rop P_SEQ)
+      (for [^I32 j2 0 (pnw h 0 2)]
+        (paset h (pkid h 0 j2) 6 1)))
+    (for [^I32 i2 0 n]
+      (if (== (pnw h i2 0) P_MEMBER)
+        (do (let [mr (pnw h i2 5)
+                  lit (== (pmw h mr 0) 0)
+                  ^:mut cls 0]
+              (set nmem (+ nmem 1))
+              (if (!= (pmw h mr 3) 0) (set anycut true))
+              (if (not lit)
+                (do (set nonlit true)
+                    (let [kts (pmw h mr 1)] (ts-push-leaves h kts))
+                    (if (!= (pnw h i2 3) INF) (set anyos true))
+                    (if (and (== (paw h i2 6) 1) (== (pnw h i2 3) INF)) (set cls 1) (set cls 2))
+                    (if (== cls 2) (set class2 true))))
+              (paset h i2 7 cls)))))
+    (let [^:mut keyts (neg 1)
+          ^:mut ^I32 mtier TIER_T]
+      (comment "a non-literal member makes key_ts a typeset, even an empty one")
+      (if nonlit
+        (do (set keyts (ts-union h from))
+            (if (< keyts 0) (return (neg 1)))))
+      (if (and (not class2) (and (not anyos) (== ncalls 0))) (set mtier TIER_S))
+      (if (and flat (not anyos)) (set mtier TIER_F))
+      (let [^:mut flags 0]
+        (if (> ncalls 0) (set flags 1))
+        (if anyos (set flags (bit-or flags 2)))
+        (if anycut (set flags (bit-or flags 4)))
+        (let [prog (write-prog h 1 n mtier 0 flags ncalls)]
+          (if (< prog 0) (return (neg 1)))
+          (let [blob (vlen h T_MAPD)]
+            (vpush1 h T_MAPD prog)
+            (vpush1 h T_MAPD nmem)
+            (vpush1 h T_MAPD keyts)
+            (vpush1 h T_MAPD mtier)
+            (for [^I32 i3 0 n]
+              (if (== (pnw h i3 0) P_MEMBER)
+                (do (let [mr3 (pnw h i3 5)
+                          k (pmw h mr3 0)
+                          key (pmw h mr3 1)
+                          val (pmw h mr3 2)
+                          cls3 (paw h i3 7)
+                          cut (pmw h mr3 3)]
+                      (vpush1 h T_MAPD k)
+                      (vpush1 h T_MAPD key)
+                      (vpush1 h T_MAPD val)
+                      (vpush1 h T_MAPD cls3)
+                      (vpush1 h T_MAPD cut)))))
+            (if (erred h) (return (neg 1)))
+            (let [id (vlen h T_MAP)]
+              (vpush1 h T_MAP blob)
+              (return id))))))))
+
+(defn ^:pub ^I32 peg-finish [^Ints h ^I32 root ^I32 pos]
+  (comment "The container of the group built from root (see the namespace doc);"
+           "answers its array or map id (H_PMODE), or -1.")
+  (if (< root 0) (return (neg 1)))
+  (let [mode (hg h H_PMODE)
+        nb (quot (vlen h T_PB) 7)]
+    (vtrunc h T_PA 0)
+    (if (not (charge h nb)) (return (neg 1)))
+    (if (< (vpush h T_PA (* 8 nb)) 0) (return (neg 1)))
+    (for [^I32 i 0 nb]
+      (paset h i 0 i)
+      (paset h i 4 (neg 1)))
+    (for [^I32 j 0 nb]
+      (if (== (pbw h j 0) P_CALL) (paset h (pbw h j 1) 1 1)))
+    (let [r0 (simplify-tree h root mode)]
+      (if (< r0 0) (return (neg 1)))
+      (let [n (number-tree h r0 mode)]
+        (if (< n 0) (return (neg 1)))
+        (if (> n (hg h H_LIM_ALTS)) (return (fail h ERR_LIM_PEG pos)))
+        (vtrunc h T_PA 0)
+        (if (< (vpush h T_PA (* 8 n)) 0) (return (neg 1)))
+        (let [^:mut ncalls 0]
+          (for [^I32 k 0 n]
+            (if (== (pnw h k 0) P_CALL) (set ncalls (+ ncalls 1))))
+          (let [b (lengths h n)]
+            (if (< b 0) (return (neg 1)))
+            (if (== mode 0) (return (finish-array h n pos ncalls b)))
+            (return (finish-map h n ncalls))))))))

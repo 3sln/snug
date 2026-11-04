@@ -21,13 +21,27 @@ pub struct SchemaError {
     pub detail: Option<String>,
 }
 
-/// A compiled schema: the Program words and pool (docs/program.md, format 1)
-/// and the rule names in RULES order.
+/// A compiled schema: the Program words and pool (docs/program.md with the
+/// format 2.0 delta of docs/program-2.md), the rule names in RULES order and
+/// the compile warnings (architecture §20.11; they never refuse).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Compiled {
     pub program: Vec<i32>,
     pub pool: Vec<u8>,
     pub rules: Vec<String>,
+    pub warnings: Vec<Warning>,
+}
+
+/// A compile warning: its stable code (`W1`..`W7`), the rule it is in (None for
+/// a schema-wide warning), its 1-based line and column (0 when about no place)
+/// and a fixed message. Identical on every host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    pub code: &'static str,
+    pub rule: Option<String>,
+    pub line: i32,
+    pub column: i32,
+    pub message: &'static str,
 }
 
 /// The snug version (kin's, so both hosts agree).
@@ -37,7 +51,7 @@ pub fn snug_version() -> &'static str {
 
 /// Option order: program.md §13.3's source key, then the leaf limit.
 pub const COMPILE_OPTIONS: [&str; 18] = [
-    "schemaBytes", "nesting", "astNodes", "instantiations", "alternatives", "arrayPositions",
+    "schemaBytes", "nesting", "astNodes", "instantiations", "pegNodes", "arrayPositions",
     "regexpPositions", "width", "poolBytes", "totalBytes", "compileBudget", "depth", "inputBytes",
     "entries", "items", "bignumBytes", "budget", "leaves",
 ];
@@ -60,12 +74,24 @@ pub enum Regexp {
     IRegexp,
 }
 
+/// Cut semantics (D273): rule A (`reference`, the default) or commitment epochs (`rfc`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Cuts {
+    #[default]
+    Reference,
+    Rfc,
+}
+
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
 /// and extension controls (D141; none by default).
 #[derive(Default)]
 pub struct CompileOptions<'a> {
     pub profile: i32,
     pub regexp: Regexp,
+    /// Format 2.0: the cut mode (D273).
+    pub cuts: Cuts,
+    /// Format 2.0: the PEG group arena cap in words (D276, D281); None = the default.
+    pub group_words: Option<i32>,
     pub limits: &'a [i32],
     pub unicode: Option<&'a [i32]>,
     pub controls: Option<&'a dyn Registry>,
@@ -90,13 +116,15 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
 }
 
 pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
-    let CompileOptions { profile, limits, unicode, controls, regexp } = options;
+    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, group_words } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
     opt[0] = *profile;
     for (i, v) in limits.iter().enumerate().take(COMPILE_OPTIONS.len()) {
         opt[i + 1] = *v;
     }
     opt[kc::OPT_REGEXP as usize] = if *regexp == Regexp::IRegexp { 1 } else { 0 };
+    opt[kc::OPT_CUTS as usize] = if *cuts == Cuts::Rfc { 1 } else { 0 };
+    opt[kc::OPT_GROUP_WORDS as usize] = group_words.unwrap_or(-1);
     // D141: the extension-control registry rides after the OPT_WORDS options
     if let Some(c) = controls {
         opt.extend(c.words());
@@ -160,7 +188,21 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                 check_arguments(&program, &pool, *c)?;
             }
             let rules = rule_names(&program, &pool);
-            return Ok(Compiled { program, pool, rules });
+            let warnings = (0..kc::warning_count(&h))
+                .map(|i| {
+                    let code = kc::warning_code(&h, i);
+                    let rs = kc::warning_rule_start(&h, i);
+                    let rule = if rs >= 0 {
+                        let s = rs as usize;
+                        bytes.get(s..s + kc::warning_rule_len(&h, i) as usize).map(|b| String::from_utf8_lossy(b).into_owned())
+                    } else {
+                        None
+                    };
+                    Warning { code: kc::warning_name(code), rule, line: kc::warning_line(&h, i), column: kc::warning_column(&h, i),
+                        message: kc::warning_message(code) }
+                })
+                .collect();
+            return Ok(Compiled { program, pool, rules, warnings });
         }
     });
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the thread's life.

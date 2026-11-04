@@ -5,7 +5,7 @@
 //! architecture §8), the limit words and the shape of the result. Paths are
 //! rendered from the Program's key table only (program.md §9.3).
 use crate::snug::cbor::scan::code_name;
-use crate::snug::program::verify::vm_verify;
+use crate::snug::program::verify::{vm_verify, vm_verify_words};
 use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
 use crate::snug::cbor::codes::{O_S_CBASE, VC_NONDET, VC_UNSORTED};
 use crate::controls::{port, prepare_all, program_controls, Control, Controls};
@@ -47,7 +47,8 @@ impl Program {
     /// between verification and validation).
     pub fn new(p: &[i32], b: &[u8]) -> Result<Program, Refused> {
         let nl = if p.len() > 16 { p[16].clamp(0, 1 << 20) } else { 0 };
-        let mut s = vec![0i32; 48 + 2 * nl as usize + 64];
+        // format 2.0: marks plus the PEG working area (vm-verify-words, clamped by the hard maxima)
+        let mut s = vec![0i32; (48 + 2 * nl as usize + 64).max(vm_verify_words(p, nl).max(0) as usize + 16)];
         s[16] = 1;
         s[17] = nl;
         if vm_verify(p, b, &mut s) != 0 {

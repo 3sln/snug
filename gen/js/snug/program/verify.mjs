@@ -33,7 +33,7 @@ export const C_TYPESET = 8;
 
 export const C_KEY = 9;
 
-export const C_GROUP = 10;
+export const C_PEG = 10;
 
 export const C_MAP = 11;
 
@@ -63,6 +63,10 @@ export const C_UTF8 = 23;
 
 export const C_EXT = 24;
 
+export const C_VERSION = 25;
+
+export const C_RECURSION = 26;
+
 export const W_N_RULES = 15;
 
 export const W_N_LEAVES = 16;
@@ -71,7 +75,7 @@ export const W_N_TYPESETS = 17;
 
 export const W_N_KEYS = 18;
 
-export const W_N_GROUPS = 19;
+export const W_N_PEGS = 19;
 
 export const W_N_MAPS = 20;
 
@@ -91,7 +95,13 @@ export const W_N_CHAINS = 27;
 
 export const W_TS_ANY = 28;
 
-export const W_G_EMPTY = 29;
+export const W_R_ITEM_MAX = 29;
+
+export const W_LIM_GROUP = 41;
+
+export const W_RECLEAF_MAX = 62;
+
+export const W_ACT_SUM = 63;
 
 export const W_SEC = 42;
 
@@ -101,7 +111,41 @@ export const W_EXT_NAMES = 31;
 
 export const W_EXT_NAMES_LEN = 39;
 
-export const FORMAT_V11 = 65537;
+export const FORMAT_V2 = 131072;
+
+export const PEG_HDR = 9;
+
+export const COUNT_SAT = 16777216;
+
+export const RING_WORDS = 4096;
+
+export const P_EMPTY = 0;
+
+export const P_FAIL = 1;
+
+export const P_ENTRY = 2;
+
+export const P_MEMBER = 3;
+
+export const P_SEQ = 4;
+
+export const P_CHOICE = 5;
+
+export const P_REP = 6;
+
+export const P_CALL = 7;
+
+export const TIER_A0 = 0;
+
+export const TIER_A1 = 1;
+
+export const TIER_A2 = 2;
+
+export const TIER_F = 0;
+
+export const TIER_S = 1;
+
+export const TIER_T = 2;
 
 export function bad(s, at, check) {
     // Record the first refusal (word or byte offset, check id); answers 0.
@@ -139,12 +183,11 @@ export function pw(p, i) {
     return 0;
 }
 
-export function v11(p) {
-    // Is this a format 1.1 Program (extension controls admitted)?
-    return pw(p, 1) === FORMAT_V11;
-}
-
 export function sec(p, k) {
+    // Section k's first word; section 20 is the end (PROGRAM_WORDS, format 2.0).
+    if (k === 20) {
+        return p.length;
+    }
     return pw(p, W_SEC + k);
 }
 
@@ -365,8 +408,8 @@ export function checkHeader(p, b, s) {
     if (!want(s, p[0] === 1735749235, 0, C_HEADER)) {
         return false;
     }
-    // format 1.0 (word value 1) or 1.1 (minor 1 in the high 16 bits, D084/D141)
-    if (!want(s, (p[1] === 1) || (p[1] === FORMAT_V11), 1, C_HEADER)) {
+    // format 2.0 only: D084's major-version rule refuses 1.x (and anything else)
+    if (!want(s, p[1] === FORMAT_V2, 1, C_VERSION)) {
         return false;
     }
     if (!want(s, p[2] === 64, 2, C_HEADER)) {
@@ -392,17 +435,10 @@ export function checkHeader(p, b, s) {
     if (!want(s, (p[W_TS_ANY] >= (-1)) && (p[W_TS_ANY] < p[W_N_TYPESETS]), W_TS_ANY, C_HEADER)) {
         return false;
     }
-    if (!want(s, (p[W_G_EMPTY] >= (-1)) && (p[W_G_EMPTY] < p[W_N_GROUPS]), W_G_EMPTY, C_HEADER)) {
+    // format 2.0: the arena cap (41) within its hard maximum; 29, 62 and 63 are
+    // derived (check-csets); 30, 31 and 39 are the extension table (check-exts)
+    if (!want(s, (p[W_LIM_GROUP] >= 0) && (p[W_LIM_GROUP] <= COUNT_SAT), W_LIM_GROUP, C_HEADER)) {
         return false;
-    }
-    // reserved words (30, 31 and 39 are the extension table's under 1.1, checked by check-exts)
-    if (!want(s, (p[41] === 0) && (p[63] === 0), 41, C_HEADER)) {
-        return false;
-    }
-    if (!v11(p)) {
-        if (!want(s, (p[30] === 0) && ((p[31] === 0) && (p[39] === 0)), 30, C_HEADER)) {
-            return false;
-        }
     }
     if (!want(s, (p[30] >= 0) && (p[30] <= 65536), 30, C_HEADER)) {
         return false;
@@ -432,16 +468,17 @@ export function checkHeader(p, b, s) {
     if (!want(s, p[40] >= 0, 40, C_HEADER)) {
         return false;
     }
-    // sections: S_RULES = 64, monotone, S_END = PROGRAM_WORDS
+    // sections: S_RULES = 64, monotone, ending at PROGRAM_WORDS (format 2.0 has
+    // no S_END word)
     if (!want(s, p[W_SEC] === 64, W_SEC, C_SECTIONS)) {
         return false;
     }
-    for (let k = 0; k < 20; k++) {
+    for (let k = 0; k < 19; k++) {
         if (!want(s, p[W_SEC + k] <= p[W_SEC + (k + 1)], W_SEC + k, C_SECTIONS)) {
             return false;
         }
     }
-    if (!want(s, p[62] === p.length, 62, C_SECTIONS)) {
+    if (!want(s, p[W_SEC + 19] <= p.length, W_SEC + 19, C_SECTIONS)) {
         return false;
     }
     // fixed-width sections and index sections against the counts
@@ -457,7 +494,7 @@ export function checkHeader(p, b, s) {
     if (!want(s, (p[47] - p[46]) === (2 * p[W_N_KEYS]), 46, C_SECTIONS)) {
         return false;
     }
-    if (!want(s, (p[48] - p[47]) === p[W_N_GROUPS], 47, C_SECTIONS)) {
+    if (!want(s, (p[48] - p[47]) === p[W_N_PEGS], 47, C_SECTIONS)) {
         return false;
     }
     if (!want(s, (p[50] - p[49]) === p[W_N_MAPS], 49, C_SECTIONS)) {
@@ -489,7 +526,7 @@ export function checkHeader(p, b, s) {
 
 export function recordLen(p, kind, at, end) {
     // The length of the variable-length record at `at` (kind 0 typeset, 1
-    // group, 2 map, 3 array, 4 regexp, 5 cset, 6 chain), or -1 if it does not
+    // PEG program, 2 map, 3 array, 4 regexp, 5 cset, 6 chain), or -1 if it does not
     // fit before `end`. Every count is bounded by the room left before it is
     // multiplied, so nothing overflows.
     const room = end - at;
@@ -514,58 +551,68 @@ export function recordLen(p, kind, at, end) {
         return 2 + (tna + tne);
     }
     if (kind === 1) {
-        const gn = pw(p, at);
-        if ((gn < 0) || (gn > ((room / 4) | 0))) {
+        // a PEG program: 9 + 5 n_nodes + n_kids (1 <= n_nodes <= 16384)
+        if (room < PEG_HDR) {
             return -1;
         }
-        if ((2 + (4 * gn)) > room) {
+        const pn = pw(p, at + 1);
+        const pk = pw(p, at + 2);
+        if ((pn < 1) || (pn > 16384)) {
             return -1;
         }
-        return 2 + (4 * gn);
+        if (pn > (((room - PEG_HDR) / 5) | 0)) {
+            return -1;
+        }
+        if ((pk < 0) || (pk > ((room - PEG_HDR) - (5 * pn)))) {
+            return -1;
+        }
+        return (PEG_HDR + (5 * pn)) + pk;
     }
     if (kind === 2) {
+        // a map table: 8 + 5 n_members + 3 n_named + namers (one per literal
+        // member) + n_root
         if (room < 8) {
             return -1;
         }
-        const nf = pw(p, at);
-        const np = pw(p, at + 1);
-        const mna = pw(p, at + 2);
-        const nl = pw(p, at + 3);
-        const nk = pw(p, at + 4);
-        const nn = pw(p, at + 5);
+        const nm = pw(p, at + 1);
+        const nn = pw(p, at + 2);
+        const nr = pw(p, at + 6);
         const q = (room / 5) | 0;
-        if (((nf < 1) || (nf > q)) || ((np < 1) || (np > q))) {
+        if (((nm < 0) || (nm > q)) || ((nn < 0) || (nn > q))) {
             return -1;
         }
-        if (((mna < 1) || (mna > q)) || ((nl < 0) || (nl > q))) {
+        if ((nr < 0) || (nr > q)) {
             return -1;
         }
-        if (((nk < 0) || (nk > q)) || ((nn < 0) || (nn > q))) {
+        if ((8 + (5 * nm)) > room) {
             return -1;
         }
-        const mlen = ((8 + (4 * nf)) + ((5 * np) + (5 * mna))) + ((4 * nl) + ((4 * nk) + (2 * nn)));
+        let nlit = 0;
+        for (let i = 0; i < nm; i++) {
+            if (pw(p, (at + 8) + (5 * i)) >= 0) {
+                nlit += 1;
+            }
+        }
+        const mlen = ((8 + (5 * nm)) + (3 * nn)) + (nlit + nr);
         if ((mlen < 0) || (mlen > room)) {
             return -1;
         }
         return mlen;
     }
     if (kind === 3) {
+        // an array table: 4 + W + npos + npos W
         if (room < 4) {
             return -1;
         }
         const anpos = pw(p, at);
         const aw = pw(p, at + 1);
-        const anc = pw(p, at + 2);
         if ((anpos < 0) || (anpos > 4096)) {
             return -1;
         }
         if (aw !== ((anpos + 31) >> 5)) {
             return -1;
         }
-        if ((anc < 0) || (anc > anpos)) {
-            return -1;
-        }
-        const alen = (4 + (2 * aw)) + ((2 * anpos) + ((2 * anc) + (anpos * aw)));
+        const alen = (4 + aw) + (anpos + (anpos * aw));
         if (alen > room) {
             return -1;
         }
@@ -1142,9 +1189,6 @@ export function checkLeaf(p, b, s, l) {
     if (((k < 1) || (k > 18)) || ((w0 >> 16) !== 0)) {
         return want(s, false, o, C_LEAF);
     }
-    if ((k === 18) && (!v11(p))) {
-        return want(s, false, o, C_LEAF);
-    }
     if (pw(p, o + 7) !== 0) {
         return want(s, false, o, C_LEAF);
     }
@@ -1334,47 +1378,6 @@ export function checkKeys(p, b, s) {
     return !failed(s);
 }
 
-export function checkGroups(p, s) {
-    const ng = pw(p, W_N_GROUPS);
-    const nt = pw(p, W_N_TYPESETS);
-    let empty = -1;
-    for (let g = 0; g < ng; g++) {
-        const o = rec(p, 5, g);
-        const n = pw(p, o);
-        let nc = 0;
-        if (!spend(s, 1 + n)) {
-            return false;
-        }
-        if ((n === 0) && (empty < 0)) {
-            empty = g;
-        }
-        for (let i = 0; i < n; i++) {
-            const e = o + (2 + (4 * i));
-            const mn = pw(p, e + 2);
-            const mx = pw(p, e + 3);
-            if ((!inRange(pw(p, e), nt)) || (!inRange(pw(p, e + 1), nt))) {
-                return want(s, false, e, C_GROUP);
-            }
-            if ((mn < 0) || ((mn > mx) || (mx < 1))) {
-                return want(s, false, e, C_GROUP);
-            }
-            if ((mx !== INF) && (mx >= 16777216)) {
-                return want(s, false, e, C_GROUP);
-            }
-            if (!((mn === 0) && (mx === INF))) {
-                nc += 1;
-            }
-        }
-        if (pw(p, o + 1) !== nc) {
-            return want(s, false, o + 1, C_DERIVED);
-        }
-    }
-    if (pw(p, W_G_EMPTY) !== empty) {
-        return want(s, false, W_G_EMPTY, C_HEADER);
-    }
-    return !failed(s);
-}
-
 export function checkRules(p, b, s) {
     const base = sec(p, 0);
     const n = pw(p, W_N_RULES);
@@ -1406,226 +1409,734 @@ export function checkRules(p, b, s) {
     return !failed(s);
 }
 
+export function tb(s) {
+    return MARKS + (2 * s[VM_MARK_CAP]);
+}
+
+export function tg(s, i) {
+    return s[tb(s) + i];
+}
+
+export function tset(s, i, v) {
+    s[tb(s) + i] = v;
+}
+
+export function sadd(a, b) {
+    if ((a === INF) || (b === INF)) {
+        return INF;
+    }
+    if (a > (INF - b)) {
+        return INF;
+    }
+    return a + b;
+}
+
+export function smul(a, b) {
+    if ((a === 0) || (b === 0)) {
+        return 0;
+    }
+    if ((a === INF) || (b === INF)) {
+        return INF;
+    }
+    if (a > ((INF / b) | 0)) {
+        return INF;
+    }
+    return a * b;
+}
+
+export function imax(a, b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+export function moreBudget(s, units) {
+    // Raise the verify budget by units (saturating) before a fixed point.
+    s[V_BUDGET] = sadd(s[V_BUDGET], units);
+    return true;
+}
+
+export function pegAt(p, g) {
+    return rec(p, 5, g);
+}
+
+export function pnw(p, o, i, w) {
+    return pw(p, (o + PEG_HDR) + ((5 * i) + w));
+}
+
+export function pkid(p, o, i, j) {
+    // Kid j of SEQ / CHOICE node i of the program at o.
+    return pw(p, ((o + PEG_HDR) + (5 * pw(p, o + 1))) + (pnw(p, o, i, 1) + j));
+}
+
+export function countsOk(lo, hi) {
+    // program-2 §3 Counts: 0 <= min <= 2^24, 1 <= max, max INF or below 2^24,
+    // min <= max.
+    if ((lo < 0) || (lo > COUNT_SAT)) {
+        return false;
+    }
+    if (hi < 1) {
+        return false;
+    }
+    if ((hi !== INF) && (hi >= COUNT_SAT)) {
+        return false;
+    }
+    return lo <= hi;
+}
+
+export function pegCount(p, o, op) {
+    // Nodes of the program at o with this op.
+    let c = 0;
+    for (let i = 0; i < pw(p, o + 1); i++) {
+        if (pnw(p, o, i, 0) === op) {
+            c += 1;
+        }
+    }
+    return c;
+}
+
+export function pegNullable(p, s, o, n, calls) {
+    // nullable as a least fixed point (TEMP[0, n)): rounds in reverse id order
+    // until nothing changes; one round without CALLs.
+    for (let z = 0; z < n; z++) {
+        tset(s, z, 0);
+    }
+    for (;;) {
+        let changed = false;
+        if (!spend(s, n)) {
+            return false;
+        }
+        let i = n - 1;
+        while (i >= 0) {
+            const op = pnw(p, o, i, 0);
+            let nu = 0;
+            if (op === P_EMPTY) {
+                nu = 1;
+            }
+            if ((op === P_MEMBER) && (pnw(p, o, i, 2) === 0)) {
+                nu = 1;
+            }
+            if (op === P_CALL) {
+                nu = tg(s, pnw(p, o, i, 1));
+            }
+            if (op === P_REP) {
+                if ((pnw(p, o, i, 2) === 0) || (tg(s, pnw(p, o, i, 1)) !== 0)) {
+                    nu = 1;
+                }
+            }
+            if (op === P_CHOICE) {
+                for (let j = 0; j < pnw(p, o, i, 2); j++) {
+                    if (tg(s, pkid(p, o, i, j)) !== 0) {
+                        nu = 1;
+                    }
+                }
+            }
+            if (op === P_SEQ) {
+                nu = 1;
+                for (let j2 = 0; j2 < pnw(p, o, i, 2); j2++) {
+                    if (tg(s, pkid(p, o, i, j2)) === 0) {
+                        nu = 0;
+                    }
+                }
+            }
+            if ((nu !== 0) && (tg(s, i) === 0)) {
+                tset(s, i, 1);
+                changed = true;
+            }
+            i -= 1;
+        }
+        if ((!changed) || (calls === 0)) {
+            return true;
+        }
+    }
+}
+
+export function leftEdge(p, s, o, u, j) {
+    // Edge j of node u in the left graph (program-2 §5.3), or -1.
+    const op = pnw(p, o, u, 0);
+    if (op === P_SEQ) {
+        if (j >= pnw(p, o, u, 2)) {
+            return -1;
+        }
+        if ((j > 0) && (tg(s, pkid(p, o, u, j - 1)) === 0)) {
+            return -1;
+        }
+        return pkid(p, o, u, j);
+    }
+    if (op === P_CHOICE) {
+        if (j >= pnw(p, o, u, 2)) {
+            return -1;
+        }
+        return pkid(p, o, u, j);
+    }
+    if (((op === P_REP) || (op === P_CALL)) && (j === 0)) {
+        return pnw(p, o, u, 1);
+    }
+    return -1;
+}
+
+export function noLeftRecursion(p, s, o, n) {
+    // No cycle in the left graph (CALL cycles reachable through nullable
+    // prefixes): iterative DFS, colours TEMP[4n..), cursors TEMP[5n..), stack
+    // TEMP[6n..). Needs the nullable words.
+    for (let z = 0; z < n; z++) {
+        tset(s, (4 * n) + z, 0);
+    }
+    for (let st = 0; st < n; st++) {
+        if (tg(s, (4 * n) + st) === 0) {
+            let sp = 1;
+            tset(s, 6 * n, st);
+            tset(s, (4 * n) + st, 1);
+            tset(s, (5 * n) + st, 0);
+            while (sp > 0) {
+                if (!spend(s, 1)) {
+                    return false;
+                }
+                const u = tg(s, (6 * n) + (sp - 1));
+                const j = tg(s, (5 * n) + u);
+                const v = leftEdge(p, s, o, u, j);
+                if (v < 0) {
+                    tset(s, (4 * n) + u, 2);
+                    sp -= 1;
+                } else {
+                    tset(s, (5 * n) + u, j + 1);
+                    if (tg(s, (4 * n) + v) === 1) {
+                        return false;
+                    }
+                    if (tg(s, (4 * n) + v) === 0) {
+                        if (sp >= n) {
+                            return false;
+                        }
+                        tset(s, (4 * n) + v, 1);
+                        tset(s, (5 * n) + v, 0);
+                        tset(s, (6 * n) + sp, v);
+                        sp += 1;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+export function checkPeg(p, s, g) {
+    // One program: node fields and counts, a tree through kids and REP children
+    // (each non-root node referenced once, by a smaller id), positions and
+    // members numbered in node order, the map normal form (no foldable REP of
+    // a MEMBER, §3.3), no left recursion, and the derived fields: n_calls,
+    // flags bit 0, depth, B and the array tier (map tiers: check-map).
+    const o = pegAt(p, g);
+    const kind = pw(p, o);
+    const n = pw(p, o + 1);
+    const nk = pw(p, o + 2);
+    let npos = 0;
+    let nmem = 0;
+    let calls = 0;
+    let sumk = 0;
+    if (!spend(s, (5 * n) + nk)) {
+        return false;
+    }
+    if ((kind < 0) || (kind > 1)) {
+        return want(s, false, o, C_PEG);
+    }
+    if (pw(p, o + 5) !== 0) {
+        return want(s, false, o + 5, C_PEG);
+    }
+    for (let z = 0; z < n; z++) {
+        tset(s, (4 * n) + z, 0);
+    }
+    for (let i = 0; i < n; i++) {
+        const at = (o + PEG_HDR) + (5 * i);
+        const op = pw(p, at);
+        const a = pw(p, at + 1);
+        const b = pw(p, at + 2);
+        const c = pw(p, at + 3);
+        if (pw(p, at + 4) !== (-1)) {
+            return want(s, false, at, C_PEG);
+        }
+        if ((op < 0) || (op > 7)) {
+            return want(s, false, at, C_PEG);
+        }
+        if (op === P_EMPTY) {
+            if ((a !== 0) || ((b !== 0) || (c !== 0))) {
+                return want(s, false, at, C_PEG);
+            }
+        }
+        if (op === P_FAIL) {
+            if ((a !== 0) || ((b < (-1)) || (c !== 0))) {
+                return want(s, false, at, C_PEG);
+            }
+        }
+        if (op === P_ENTRY) {
+            if ((kind !== 0) || ((a !== npos) || ((b !== 0) || (c !== 0)))) {
+                return want(s, false, at, C_PEG);
+            }
+            npos += 1;
+        }
+        if (op === P_MEMBER) {
+            if ((kind !== 1) || ((a !== nmem) || (!countsOk(b, c)))) {
+                return want(s, false, at, C_PEG);
+            }
+            nmem += 1;
+        }
+        if ((op === P_SEQ) || (op === P_CHOICE)) {
+            if (((c !== 0) || (b < 2)) || ((a < 0) || (a > (nk - b)))) {
+                return want(s, false, at, C_PEG);
+            }
+            sumk += b;
+            for (let j = 0; j < b; j++) {
+                const k = pkid(p, o, i, j);
+                if ((!inRange(k, n)) || (k <= i)) {
+                    return want(s, false, at, C_PEG);
+                }
+                tset(s, (4 * n) + k, tg(s, (4 * n) + k) + 1);
+            }
+        }
+        if (op === P_REP) {
+            if ((!countsOk(b, c)) || ((!inRange(a, n)) || (a <= i))) {
+                return want(s, false, at, C_PEG);
+            }
+            tset(s, (4 * n) + a, tg(s, (4 * n) + a) + 1);
+            if ((kind === 1) && (pnw(p, o, a, 0) === P_MEMBER)) {
+                // the fold table leaves no REP of a MEMBER(1, 1) or MEMBER(k, INF)
+                // it would rewrite
+                const mk = pnw(p, o, a, 2);
+                const mm = pnw(p, o, a, 3);
+                if ((mk === 1) && (mm === 1)) {
+                    return want(s, false, at, C_PEG);
+                }
+                if ((mm === INF) && ((mk === 0) || (((mk === 1) && (b <= 1)) || ((mk >= 1) && (b >= 2))))) {
+                    return want(s, false, at, C_PEG);
+                }
+            }
+        }
+        if (op === P_CALL) {
+            if (((b !== 0) || (c !== 0)) || (!inRange(a, n))) {
+                return want(s, false, at, C_PEG);
+            }
+            calls += 1;
+        }
+    }
+    if (sumk !== nk) {
+        return want(s, false, o + 2, C_PEG);
+    }
+    for (let i2 = 1; i2 < n; i2++) {
+        if (tg(s, (4 * n) + i2) !== 1) {
+            return want(s, false, (o + PEG_HDR) + (5 * i2), C_PEG);
+        }
+    }
+    // derived: n_calls, flags (arrays: bit 0 only; maps: bits 1-2 by check-map)
+    if (pw(p, o + 8) !== calls) {
+        return want(s, false, o + 8, C_DERIVED);
+    }
+    const fl = pw(p, o + 7);
+    let rbit = 0;
+    if (calls > 0) {
+        rbit = 1;
+    }
+    if ((fl & 1) !== rbit) {
+        return want(s, false, o + 7, C_DERIVED);
+    }
+    if ((kind === 0) && (fl !== rbit)) {
+        return want(s, false, o + 7, C_DERIVED);
+    }
+    if ((kind === 1) && ((fl & (~7)) !== 0)) {
+        return want(s, false, o + 7, C_DERIVED);
+    }
+    // lengths (TEMP: ml at n.., FL at 2n.., height at 3n..), B, depth
+    let bmax = 0;
+    if (!spend(s, 2 * n)) {
+        return false;
+    }
+    let i3 = n - 1;
+    while (i3 >= 0) {
+        const op3 = pnw(p, o, i3, 0);
+        let ml = 0;
+        let flv = 0;
+        let ht = 1;
+        if (op3 === P_EMPTY) {
+            flv = -1;
+        }
+        if ((op3 === P_ENTRY) || (op3 === P_MEMBER)) {
+            ml = 1;
+        }
+        if ((op3 === P_MEMBER) && (pnw(p, o, i3, 2) === 0)) {
+            flv = -1;
+        }
+        if (op3 === P_CALL) {
+            ml = INF;
+            flv = INF;
+        }
+        if (op3 === P_SEQ) {
+            let pre = 0;
+            flv = -1;
+            for (let j3 = 0; j3 < pnw(p, o, i3, 2); j3++) {
+                const k3 = pkid(p, o, i3, j3);
+                const kfl = tg(s, (2 * n) + k3);
+                if (kfl !== (-1)) {
+                    flv = imax(flv, sadd(pre, kfl));
+                }
+                pre = sadd(pre, tg(s, n + k3));
+                ht = imax(ht, 1 + tg(s, (3 * n) + k3));
+            }
+            ml = pre;
+        }
+        if (op3 === P_CHOICE) {
+            const kc = pnw(p, o, i3, 2);
+            let nofail = false;
+            for (let j4 = 0; j4 < kc; j4++) {
+                const k4 = pkid(p, o, i3, j4);
+                const kfl4 = tg(s, (2 * n) + k4);
+                ml = imax(ml, tg(s, n + k4));
+                if (kfl4 === (-1)) {
+                    nofail = true;
+                } else {
+                    flv = imax(flv, kfl4);
+                }
+                if ((j4 < (kc - 1)) && (kfl4 !== (-1))) {
+                    bmax = imax(bmax, kfl4);
+                }
+                ht = imax(ht, 1 + tg(s, (3 * n) + k4));
+            }
+            if (nofail) {
+                flv = -1;
+            }
+        }
+        if (op3 === P_REP) {
+            const ch = pnw(p, o, i3, 1);
+            const lo = pnw(p, o, i3, 2);
+            const hi = pnw(p, o, i3, 3);
+            const cml = tg(s, n + ch);
+            const cfl = tg(s, (2 * n) + ch);
+            ml = smul(hi, cml);
+            if ((lo === 0) || (cfl === (-1))) {
+                flv = -1;
+            } else {
+                flv = sadd(smul(lo - 1, cml), cfl);
+            }
+            if (cfl !== (-1)) {
+                bmax = imax(bmax, cfl);
+            }
+            ht = 1 + tg(s, (3 * n) + ch);
+        }
+        tset(s, n + i3, ml);
+        tset(s, (2 * n) + i3, flv);
+        tset(s, (3 * n) + i3, ht);
+        i3 -= 1;
+    }
+    if (pw(p, o + 6) !== tg(s, 3 * n)) {
+        return want(s, false, o + 6, C_DERIVED);
+    }
+    // nullable and left recursion (budget raised by the fixed point's bound)
+    moreBudget(s, smul(4, smul(calls + 2, n)));
+    if (!pegNullable(p, s, o, n, calls)) {
+        return false;
+    }
+    if (!noLeftRecursion(p, s, o, n)) {
+        return want(s, false, o, C_RECURSION);
+    }
+    // the array tier and B; maps keep B = 0
+    const w = (npos + 31) >> 5;
+    let tier = TIER_A2;
+    let bs = 0;
+    if (calls === 0) {
+        if (bmax === 0) {
+            tier = TIER_A0;
+        }
+        if ((bmax > 0) && ((bmax < RING_WORDS) && (((bmax + 1) * w) <= RING_WORDS))) {
+            tier = TIER_A1;
+            bs = bmax;
+        }
+    }
+    if (kind === 1) {
+        bs = 0;
+    }
+    if (pw(p, o + 4) !== bs) {
+        return want(s, false, o + 4, C_DERIVED);
+    }
+    if ((kind === 0) && (pw(p, o + 3) !== tier)) {
+        return want(s, false, o + 3, C_DERIVED);
+    }
+    return !failed(s);
+}
+
+export function checkPegs(p, s) {
+    for (let g = 0; g < pw(p, W_N_PEGS); g++) {
+        if (!checkPeg(p, s, g)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+export function failProvOk(p, o, lim) {
+    // Every FAIL's provenance of the program at o is -1 or below lim.
+    for (let i = 0; i < pw(p, o + 1); i++) {
+        if ((pnw(p, o, i, 0) === P_FAIL) && (pnw(p, o, i, 2) >= lim)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 export function ceil32(n) {
     return (n + 31) >> 5;
 }
 
+export function mapLits(p, o) {
+    // Literal members (key id >= 0) of the map table at o.
+    let c = 0;
+    for (let i = 0; i < pw(p, o + 1); i++) {
+        if (pw(p, (o + 8) + (5 * i)) >= 0) {
+            c += 1;
+        }
+    }
+    return c;
+}
+
+export function mapNamersMax(p, o) {
+    const nm = pw(p, o + 1);
+    const nn = pw(p, o + 2);
+    const nb = (o + 8) + (5 * nm);
+    let mx = 0;
+    for (let q = 0; q < nn; q++) {
+        if (pw(p, nb + ((3 * q) + 2)) > mx) {
+            mx = pw(p, nb + ((3 * q) + 2));
+        }
+    }
+    return mx;
+}
+
 export function checkMap(p, s, m) {
     const o = rec(p, 7, m);
-    const nf = pw(p, o);
-    const np = pw(p, o + 1);
-    const na = pw(p, o + 2);
-    const nl = pw(p, o + 3);
-    const nk = pw(p, o + 4);
-    const nn = pw(p, o + 5);
-    const fb = o + 8;
-    const pb = fb + (4 * nf);
-    const ab = pb + (5 * np);
-    const lb = ab + (5 * na);
-    const kb = lb + (4 * nl);
-    const nb = kb + (4 * nk);
-    const ng = pw(p, W_N_GROUPS);
+    const peg = pw(p, o);
+    const nm = pw(p, o + 1);
+    const nn = pw(p, o + 2);
+    const kts = pw(p, o + 3);
+    const nr = pw(p, o + 6);
+    const mb = o + 8;
+    const nb = mb + (5 * nm);
+    const nlit = mapLits(p, o);
+    const rb = (nb + (3 * nn)) + nlit;
     const nt = pw(p, W_N_TYPESETS);
     const nkeys = pw(p, W_N_KEYS);
-    let sw = 4 + nf;
-    let groupsum = 0;
-    let maxnames = 0;
-    if (!spend(s, (nf + np) + ((2 * na) + ((2 * nl) + (2 * nk))))) {
+    if (!spend(s, (5 * nm) + ((3 * nn) + (nlit + nr)))) {
         return false;
     }
-    // factors: 0 is RESIDUAL with pools from 0; the others own one pool each
-    let nextpool = 0;
-    for (let f = 0; f < nf; f++) {
-        const fo = fb + (4 * f);
-        const mode = pw(p, fo);
-        const pp = pw(p, fo + 1);
-        const pf = pw(p, fo + 2);
-        const pc = pw(p, fo + 3);
-        if (f === 0) {
-            if ((mode !== 0) || (pc < 1)) {
-                return want(s, false, fo, C_MAP);
-            }
-        } else {
-            if ((mode < 1) || (mode > 2)) {
-                return want(s, false, fo, C_MAP);
-            }
-            if (pc !== 1) {
-                return want(s, false, fo, C_MAP);
-            }
-        }
-        if (pf !== nextpool) {
-            return want(s, false, fo, C_MAP);
-        }
-        if (mode === 2) {
-            if ((pp !== 0) || (pw(p, fb + 3) !== 1)) {
-                return want(s, false, fo, C_MAP);
-            }
-            if (pw(p, pb + 3) !== 1) {
-                return want(s, false, fo, C_MAP);
-            }
-        } else if (pp !== (-1)) {
-            return want(s, false, fo, C_MAP);
-        }
-        nextpool = pf + pc;
-    }
-    if (nextpool !== np) {
-        return want(s, false, fb, C_MAP);
-    }
-    // pools: owners, groups, alternative runs partitioning alts; state offsets
-    let nextalt = 0;
-    let fi = 0;
-    for (let q = 0; q < np; q++) {
-        const po = pb + (5 * q);
-        const f2 = pw(p, po);
-        const g = pw(p, po + 1);
-        const af = pw(p, po + 2);
-        const ac = pw(p, po + 3);
-        while ((fi < nf) && (q >= (pw(p, fb + ((4 * fi) + 2)) + pw(p, fb + ((4 * fi) + 3))))) {
-            fi += 1;
-        }
-        if (f2 !== fi) {
-            return want(s, false, po, C_MAP);
-        }
-        if (f2 === 0) {
-            if (!inRange(g, ng)) {
-                return want(s, false, po, C_MAP);
-            }
-            const gn = pw(p, rec(p, 5, g));
-            if (pw(p, po + 4) !== sw) {
-                return want(s, false, po + 4, C_DERIVED);
-            }
-            sw += 4 + gn;
-            groupsum += gn;
-        } else {
-            if (g !== (-1)) {
-                return want(s, false, po, C_MAP);
-            }
-            if (pw(p, po + 4) !== sw) {
-                return want(s, false, po + 4, C_DERIVED);
-            }
-            sw += 4;
-        }
-        if ((af !== nextalt) || (ac < 1)) {
-            return want(s, false, po, C_MAP);
-        }
-        nextalt = af + ac;
-    }
-    if (nextalt !== na) {
-        return want(s, false, pb, C_MAP);
-    }
-    // alternatives: owners, literal runs (in range, not overlapping), req_count
-    let pi = 0;
-    for (let a = 0; a < na; a++) {
-        const ao = ab + (5 * a);
-        const lf = pw(p, ao + 1);
-        const lc = pw(p, ao + 2);
-        let req = 0;
-        while ((pi < np) && (a >= (pw(p, pb + ((5 * pi) + 2)) + pw(p, pb + ((5 * pi) + 3))))) {
-            pi += 1;
-        }
-        if (pw(p, ao) !== pi) {
-            return want(s, false, ao, C_MAP);
-        }
-        if (((lf < 0) || (lc < 0)) || (lc > (nl - lf))) {
-            return want(s, false, ao, C_MAP);
-        }
-        // runs do not overlap: each run starts at or after the previous one's end
-        if (a > 0) {
-            const pa = ao - 5;
-            const pend = pw(p, pa + 1) + pw(p, pa + 2);
-            if ((lf < pend) && (lc > 0)) {
-                return want(s, false, ao, C_MAP);
-            }
-        }
-        // (keys distinct within an alternative follows from the naming records:
-        // each key's records name strictly ascending alternatives, and every
-        // literal entry is named exactly once)
-        for (let i = 0; i < lc; i++) {
-            const le = lb + (4 * (lf + i));
-            if (pw(p, le + 2) === 1) {
-                req += 1;
-            }
-        }
-        if (pw(p, ao + 3) !== req) {
-            return want(s, false, ao + 3, C_DERIVED);
-        }
-        if (pw(p, ao + 4) !== sw) {
-            return want(s, false, ao + 4, C_DERIVED);
-        }
-        sw += 3 + ceil32(lc);
-    }
-    // literal entries
-    for (let i2 = 0; i2 < nl; i2++) {
-        const le2 = lb + (4 * i2);
-        if ((!inRange(pw(p, le2), nkeys)) || (!inRange(pw(p, le2 + 1), nt))) {
-            return want(s, false, le2, C_MAP);
-        }
-        if (((pw(p, le2 + 2) < 0) || (pw(p, le2 + 2) > 1)) || ((pw(p, le2 + 3) < 0) || (pw(p, le2 + 3) > 1))) {
-            return want(s, false, le2, C_MAP);
-        }
-    }
-    // key index: ascending keys, naming runs partitioning names; each naming
-    // record names its own key, in an alternative of the owner, ascending
-    if (nn !== nl) {
+    if (!inRange(peg, pw(p, W_N_PEGS))) {
         return want(s, false, o, C_MAP);
     }
-    let nextname = 0;
-    for (let kq = 0; kq < nk; kq++) {
-        const ko = kb + (4 * kq);
-        const key = pw(p, ko);
-        const owner = pw(p, ko + 1);
-        const nf2 = pw(p, ko + 2);
-        const nc2 = pw(p, ko + 3);
-        if (!inRange(key, nkeys)) {
-            return want(s, false, ko, C_MAP);
-        }
-        if ((kq > 0) && (key <= pw(p, ko - 4))) {
-            return want(s, false, ko, C_MAP);
-        }
-        if (!inRange(owner, nf)) {
-            return want(s, false, ko, C_MAP);
-        }
-        if ((nf2 !== nextname) || ((nc2 < 1) || (nc2 > (nn - nf2)))) {
-            return want(s, false, ko, C_MAP);
-        }
-        if (nc2 > maxnames) {
-            maxnames = nc2;
-        }
-        for (let r = 0; r < nc2; r++) {
-            const no = nb + (2 * (nf2 + r));
-            const alt = pw(p, no);
-            const lit = pw(p, no + 1);
-            if (!inRange(alt, na)) {
-                return want(s, false, no, C_MAP);
-            }
-            if ((r > 0) && (alt <= pw(p, no - 2))) {
-                return want(s, false, no, C_MAP);
-            }
-            const ao2 = ab + (5 * alt);
-            const lf2 = pw(p, ao2 + 1);
-            const lc2 = pw(p, ao2 + 2);
-            if ((lit < lf2) || (lit >= (lf2 + lc2))) {
-                return want(s, false, no, C_MAP);
-            }
-            if (pw(p, lb + (4 * lit)) !== key) {
-                return want(s, false, no, C_MAP);
-            }
-            // the owner is the alternative's pool's factor
-            if (pw(p, pb + (5 * pw(p, ao2))) !== owner) {
-                return want(s, false, no, C_MAP);
-            }
-        }
-        nextname = nf2 + nc2;
+    const po = pegAt(p, peg);
+    const pn = pw(p, po + 1);
+    if (pw(p, po) !== 1) {
+        return want(s, false, o, C_MAP);
     }
-    if (nextname !== nn) {
-        return want(s, false, kb, C_MAP);
+    if (pegCount(p, po, P_MEMBER) !== nm) {
+        return want(s, false, o + 1, C_MAP);
     }
-    // every key named by some literal entry is in the index: the counts agree
-    if (pw(p, o + 6) !== sw) {
+    if (!failProvOk(p, po, nm)) {
+        return want(s, false, o, C_MAP);
+    }
+    // members: key id or key typeset, value typeset, cut
+    for (let i = 0; i < nm; i++) {
+        const e = mb + (5 * i);
+        const kid = pw(p, e);
+        const kt = pw(p, e + 1);
+        if (kid >= 0) {
+            if ((!inRange(kid, nkeys)) || (kt !== (-1))) {
+                return want(s, false, e, C_MAP);
+            }
+        } else if ((kid !== (-1)) || (!inRange(kt, nt))) {
+            return want(s, false, e, C_MAP);
+        }
+        if (!inRange(pw(p, e + 2), nt)) {
+            return want(s, false, e, C_MAP);
+        }
+        if ((pw(p, e + 4) < 0) || (pw(p, e + 4) > 1)) {
+            return want(s, false, e, C_MAP);
+        }
+    }
+    // classes [D]: the root (or the root SEQ's kids) marked in TEMP
+    for (let z = 0; z < pn; z++) {
+        tset(s, z, 0);
+    }
+    const rop = pnw(p, po, 0, 0);
+    let flat = (rop === P_EMPTY) || (rop === P_MEMBER);
+    if (rop === P_MEMBER) {
+        tset(s, 0, 1);
+    }
+    if (rop === P_SEQ) {
+        flat = true;
+        for (let j = 0; j < pnw(p, po, 0, 2); j++) {
+            const k = pkid(p, po, 0, j);
+            tset(s, k, 1);
+            if (pnw(p, po, k, 0) !== P_MEMBER) {
+                flat = false;
+            }
+        }
+    }
+    let anyos = false;
+    let anycut = false;
+    let class2 = false;
+    let ri = 0;
+    for (let i2 = 0; i2 < pn; i2++) {
+        if (pnw(p, po, i2, 0) === P_MEMBER) {
+            const mi = pnw(p, po, i2, 1);
+            const e2 = mb + (5 * mi);
+            const lit = pw(p, e2) >= 0;
+            const mx = pnw(p, po, i2, 3);
+            let cls = 0;
+            if (pw(p, e2 + 4) !== 0) {
+                anycut = true;
+            }
+            if (!lit) {
+                if (mx !== INF) {
+                    anyos = true;
+                }
+                if ((tg(s, i2) === 1) && (mx === INF)) {
+                    cls = 1;
+                } else {
+                    cls = 2;
+                }
+            }
+            if (cls === 2) {
+                class2 = true;
+            }
+            if (pw(p, e2 + 3) !== cls) {
+                return want(s, false, e2, C_DERIVED);
+            }
+            if (cls === 1) {
+                if ((ri >= nr) || (pw(p, rb + ri) !== mi)) {
+                    return want(s, false, o + 6, C_DERIVED);
+                }
+                ri += 1;
+            }
+        }
+    }
+    if (ri !== nr) {
         return want(s, false, o + 6, C_DERIVED);
     }
-    if (pw(p, o + 7) !== (groupsum + maxnames)) {
+    // tier and flags [D]
+    let tier = TIER_T;
+    let pf = 0;
+    let mf = 0;
+    if ((!class2) && ((!anyos) && (pw(p, po + 8) === 0))) {
+        tier = TIER_S;
+    }
+    if (flat && (!anyos)) {
+        tier = TIER_F;
+    }
+    if (anyos) {
+        pf |= 2;
+        mf |= 1;
+    }
+    if (anycut) {
+        pf |= 4;
+        mf |= 2;
+    }
+    if (pw(p, po + 3) !== tier) {
+        return want(s, false, po + 3, C_DERIVED);
+    }
+    if ((pw(p, po + 7) & 6) !== pf) {
+        return want(s, false, po + 7, C_DERIVED);
+    }
+    if (pw(p, o + 7) !== mf) {
         return want(s, false, o + 7, C_DERIVED);
+    }
+    // named: by key id; namers ascending, naming their key; all literal members
+    let next = 0;
+    let nmax = 0;
+    for (let q = 0; q < nn; q++) {
+        const qo = nb + (3 * q);
+        const key = pw(p, qo);
+        const first = pw(p, qo + 1);
+        const cnt = pw(p, qo + 2);
+        if (!inRange(key, nkeys)) {
+            return want(s, false, qo, C_MAP);
+        }
+        if ((q > 0) && (key <= pw(p, qo - 3))) {
+            return want(s, false, qo, C_MAP);
+        }
+        if ((first !== next) || ((cnt < 1) || (cnt > (nlit - first)))) {
+            return want(s, false, qo, C_MAP);
+        }
+        if (cnt > nmax) {
+            nmax = cnt;
+        }
+        for (let r = 0; r < cnt; r++) {
+            const na = (nb + (3 * nn)) + (first + r);
+            const mid = pw(p, na);
+            if (!inRange(mid, nm)) {
+                return want(s, false, na, C_MAP);
+            }
+            if ((r > 0) && (mid <= pw(p, na - 1))) {
+                return want(s, false, na, C_MAP);
+            }
+            if (pw(p, mb + (5 * mid)) !== key) {
+                return want(s, false, na, C_MAP);
+            }
+        }
+        next = first + cnt;
+    }
+    if (next !== nlit) {
+        return want(s, false, o + 2, C_MAP);
+    }
+    // slot_words, rec_words [D]
+    let sw = 0;
+    let rw = 0;
+    if (tier === TIER_S) {
+        sw = (2 + ceil32(nmax)) + (2 * ceil32(nr));
+    }
+    if (tier === TIER_T) {
+        rw = 2 + ceil32(2 * nm);
+    }
+    if (pw(p, o + 4) !== sw) {
+        return want(s, false, o + 4, C_DERIVED);
+    }
+    if (pw(p, o + 5) !== rw) {
+        return want(s, false, o + 5, C_DERIVED);
+    }
+    // key_ts [D]: the union of the non-literal members' key typesets, or -1
+    const e3 = epoch(s);
+    let distinct = 0;
+    let any = false;
+    for (let i3 = 0; i3 < nm; i3++) {
+        const kt3 = pw(p, (mb + (5 * i3)) + 1);
+        if (kt3 >= 0) {
+            any = true;
+            const to = rec(p, 2, kt3);
+            const tn = pw(p, to);
+            if (!spend(s, tn)) {
+                return false;
+            }
+            for (let a = 0; a < tn; a++) {
+                const l = pw(p, to + (2 + a));
+                if (markGet(s, l) !== e3) {
+                    markSet(s, l, e3);
+                    distinct += 1;
+                }
+            }
+        }
+    }
+    if (!any) {
+        if (kts !== (-1)) {
+            return want(s, false, o + 3, C_DERIVED);
+        }
+    } else {
+        if (!inRange(kts, nt)) {
+            return want(s, false, o + 3, C_DERIVED);
+        }
+        const ko = rec(p, 2, kts);
+        const kn = pw(p, ko);
+        if (kn !== distinct) {
+            return want(s, false, o + 3, C_DERIVED);
+        }
+        for (let a2 = 0; a2 < kn; a2++) {
+            if (markGet(s, pw(p, ko + (2 + a2))) !== e3) {
+                return want(s, false, o + 3, C_DERIVED);
+            }
+        }
     }
     return !failed(s);
 }
@@ -1637,6 +2148,320 @@ export function checkMaps(p, s) {
         }
     }
     return true;
+}
+
+export function vsetOr(s, dst, src, w) {
+    // TEMP[dst..dst+w) |= TEMP[src..src+w); did it grow?
+    let grew = false;
+    for (let k = 0; k < w; k++) {
+        const a = tg(s, dst + k);
+        const c = a | tg(s, src + k);
+        if (c !== a) {
+            tset(s, dst + k, c);
+            grew = true;
+        }
+    }
+    return grew;
+}
+
+export function vsetBit(s, dst, q) {
+    const at = dst + (q >> 5);
+    const a = tg(s, at);
+    const c = a | (1 << (q & 31));
+    if (c === a) {
+        return false;
+    }
+    tset(s, at, c);
+    return true;
+}
+
+export function arraySets(p, s, o, n, w, base, calls) {
+    // first / last (2w words per node at TEMP[base..)) and nullable (TEMP[0, n))
+    // as least fixed points, exactly as the compiler builds them.
+    for (let z = 0; z < n; z++) {
+        tset(s, z, 0);
+    }
+    for (let z2 = 0; z2 < (n + 1) * (2 * w); z2++) {
+        tset(s, base + z2, 0);
+    }
+    for (;;) {
+        let changed = false;
+        if (!spend(s, n * (1 + (2 * w)))) {
+            return false;
+        }
+        let i = n - 1;
+        while (i >= 0) {
+            const op = pnw(p, o, i, 0);
+            const fo = base + (i * (2 * w));
+            const lo = fo + w;
+            let nu = 0;
+            if (op === P_EMPTY) {
+                nu = 1;
+            }
+            if (op === P_ENTRY) {
+                if (vsetBit(s, fo, pnw(p, o, i, 1))) {
+                    changed = true;
+                }
+                if (vsetBit(s, lo, pnw(p, o, i, 1))) {
+                    changed = true;
+                }
+            }
+            if ((op === P_CALL) || (op === P_REP)) {
+                const t = pnw(p, o, i, 1);
+                const tf = base + (t * (2 * w));
+                if (op === P_CALL) {
+                    nu = tg(s, t);
+                }
+                if ((op === P_REP) && ((pnw(p, o, i, 2) === 0) || (tg(s, t) !== 0))) {
+                    nu = 1;
+                }
+                if (vsetOr(s, fo, tf, w)) {
+                    changed = true;
+                }
+                if (vsetOr(s, lo, tf + w, w)) {
+                    changed = true;
+                }
+            }
+            if (op === P_CHOICE) {
+                for (let j = 0; j < pnw(p, o, i, 2); j++) {
+                    const k = pkid(p, o, i, j);
+                    const kf = base + (k * (2 * w));
+                    if (tg(s, k) !== 0) {
+                        nu = 1;
+                    }
+                    if (vsetOr(s, fo, kf, w)) {
+                        changed = true;
+                    }
+                    if (vsetOr(s, lo, kf + w, w)) {
+                        changed = true;
+                    }
+                }
+            }
+            if (op === P_SEQ) {
+                const kc = pnw(p, o, i, 2);
+                let fdone = false;
+                nu = 1;
+                for (let j2 = 0; j2 < kc; j2++) {
+                    const k2 = pkid(p, o, i, j2);
+                    if (!fdone) {
+                        if (vsetOr(s, fo, base + (k2 * (2 * w)), w)) {
+                            changed = true;
+                        }
+                    }
+                    if (tg(s, k2) === 0) {
+                        nu = 0;
+                        fdone = true;
+                    }
+                }
+                let j3 = kc - 1;
+                while (j3 >= 0) {
+                    const k3 = pkid(p, o, i, j3);
+                    if (vsetOr(s, lo, (base + (k3 * (2 * w))) + w, w)) {
+                        changed = true;
+                    }
+                    if (tg(s, k3) === 0) {
+                        j3 = 0;
+                    }
+                    j3 -= 1;
+                }
+            }
+            if ((nu !== 0) && (tg(s, i) === 0)) {
+                tset(s, i, 1);
+                changed = true;
+            }
+            i -= 1;
+        }
+        if ((!changed) || (calls === 0)) {
+            return true;
+        }
+    }
+}
+
+export function varrEdges(s, src, dst, w, fol) {
+    // follow[q] |= TEMP[dst..) for every q in TEMP[src..).
+    for (let k = 0; k < w; k++) {
+        const v = tg(s, src + k);
+        if (v !== 0) {
+            for (let bit = 0; bit < 32; bit++) {
+                if ((((v >>> bit) | 0) & 1) !== 0) {
+                    const q = (k * 32) + bit;
+                    if (!spend(s, w)) {
+                        return false;
+                    }
+                    for (let x = 0; x < w; x++) {
+                        const fa = fol + ((q * w) + x);
+                        tset(s, fa, tg(s, fa) | tg(s, dst + x));
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+export function checkArrays(p, s) {
+    const na = pw(p, W_N_ARRAYS);
+    const nt = pw(p, W_N_TYPESETS);
+    for (let a = 0; a < na; a++) {
+        const o = rec(p, 9, a);
+        const npos = pw(p, o);
+        const w = pw(p, o + 1);
+        const peg = pw(p, o + 2);
+        const fb = o + 4;
+        const pb = fb + w;
+        const flb = pb + npos;
+        if (!spend(s, npos + (npos * w))) {
+            return false;
+        }
+        if (pw(p, o + 3) !== 0) {
+            return want(s, false, o + 3, C_ARRAY);
+        }
+        if (!inRange(peg, pw(p, W_N_PEGS))) {
+            return want(s, false, o + 2, C_ARRAY);
+        }
+        const po = pegAt(p, peg);
+        const n = pw(p, po + 1);
+        const calls = pw(p, po + 8);
+        const base = 7 * n;
+        const fol = base + ((n + 1) * (2 * w));
+        if (pw(p, po) !== 0) {
+            return want(s, false, o + 2, C_ARRAY);
+        }
+        if (pegCount(p, po, P_ENTRY) !== npos) {
+            return want(s, false, o, C_ARRAY);
+        }
+        if (!failProvOk(p, po, npos)) {
+            return want(s, false, o + 2, C_ARRAY);
+        }
+        for (let q = 0; q < npos; q++) {
+            if (!inRange(pw(p, pb + q), nt)) {
+                return want(s, false, pb + q, C_ARRAY);
+            }
+        }
+        // first and follow [D]: the relaxed automaton recomputed (program-2 §4)
+        moreBudget(s, smul(4, sadd(smul(calls + 2, smul(n, 2 + (2 * w))), smul(n, smul(npos, w)))));
+        if (!arraySets(p, s, po, n, w, base, calls)) {
+            return false;
+        }
+        for (let z = 0; z < npos * w; z++) {
+            tset(s, fol + z, 0);
+        }
+        const acc = base + (n * (2 * w));
+        for (let i = 0; i < n; i++) {
+            const op = pnw(p, po, i, 0);
+            if (op === P_SEQ) {
+                const kc = pnw(p, po, i, 2);
+                const k0 = pkid(p, po, i, 0);
+                for (let z2 = 0; z2 < w; z2++) {
+                    tset(s, acc + z2, 0);
+                }
+                vsetOr(s, acc, (base + (k0 * (2 * w))) + w, w);
+                for (let j = 1; j < kc; j++) {
+                    const kj = pkid(p, po, i, j);
+                    const kp = pkid(p, po, i, j - 1);
+                    if (j > 1) {
+                        if (tg(s, kp) === 0) {
+                            for (let z3 = 0; z3 < w; z3++) {
+                                tset(s, acc + z3, 0);
+                            }
+                        }
+                        vsetOr(s, acc, (base + (kp * (2 * w))) + w, w);
+                    }
+                    if (!varrEdges(s, acc, base + (kj * (2 * w)), w, fol)) {
+                        return false;
+                    }
+                }
+            }
+            if ((op === P_REP) && (pnw(p, po, i, 3) >= 2)) {
+                const ch = pnw(p, po, i, 1);
+                const cf = base + (ch * (2 * w));
+                if (!varrEdges(s, cf + w, cf, w, fol)) {
+                    return false;
+                }
+            }
+        }
+        for (let k = 0; k < w; k++) {
+            if (pw(p, fb + k) !== tg(s, base + k)) {
+                return want(s, false, fb + k, C_DERIVED);
+            }
+        }
+        for (let k2 = 0; k2 < npos * w; k2++) {
+            if (pw(p, flb + k2) !== tg(s, fol + k2)) {
+                return want(s, false, flb + k2, C_DERIVED);
+            }
+        }
+    }
+    return !failed(s);
+}
+
+export function actWords(ncalls, depth) {
+    const a = sadd(3, smul(8, depth));
+    const x = smul(smul(ncalls, a), 64);
+    if (x === INF) {
+        return INF;
+    }
+    return ((x + 53) / 54) | 0;
+}
+
+export function leafPeg(p, l) {
+    // The program offset of a (verified) ARRAY or MAP leaf.
+    const o = leafAt(p, l);
+    const k = pw(p, o) & 255;
+    if (k === 15) {
+        return pegAt(p, pw(p, rec(p, 7, pw(p, o + 2))));
+    }
+    return pegAt(p, pw(p, rec(p, 9, pw(p, o + 2)) + 2));
+}
+
+export function leafBlock(p, l) {
+    // MAPWORDS / ARRWORDS (program-2 §5.2, §6.3) of a verified leaf.
+    const o = leafAt(p, l);
+    const k = pw(p, o) & 255;
+    const po = leafPeg(p, l);
+    const tier = pw(p, po + 3);
+    const depth = pw(p, po + 6);
+    const calls = pw(p, po + 8);
+    if (k === 15) {
+        const mo = rec(p, 7, pw(p, o + 2));
+        const nm = pw(p, mo + 1);
+        const nn = pw(p, mo + 2);
+        let mw = 16 + (4 * nm);
+        if (calls === 0) {
+            mw += 8 * depth;
+        }
+        if (tier === TIER_S) {
+            mw += nn * pw(p, mo + 4);
+        }
+        if (tier === TIER_T) {
+            mw += nn;
+        }
+        return mw;
+    }
+    const ao = rec(p, 9, pw(p, o + 2));
+    const w = pw(p, ao + 1);
+    let aw = 14 + (2 * w);
+    if (calls === 0) {
+        aw += 4 * depth;
+    }
+    if (tier === TIER_A1) {
+        aw += (pw(p, po + 4) + 1) * w;
+    }
+    return aw;
+}
+
+export function leafRecwords(p, l) {
+    // Record words of an A2 array (W) or T map (rec_words), else 0.
+    const o = leafAt(p, l);
+    const k = pw(p, o) & 255;
+    const po = leafPeg(p, l);
+    const tier = pw(p, po + 3);
+    if ((k === 15) && (tier === TIER_T)) {
+        return pw(p, rec(p, 7, pw(p, o + 2)) + 5);
+    }
+    if ((k === 14) && (tier === TIER_A2)) {
+        return pw(p, rec(p, 9, pw(p, o + 2)) + 1);
+    }
+    return 0;
 }
 
 export function rowClean(p, at, w, npos) {
@@ -1652,69 +2477,6 @@ export function rowClean(p, at, w, npos) {
         }
     }
     return true;
-}
-
-export function checkArrays(p, s) {
-    const na = pw(p, W_N_ARRAYS);
-    const nt = pw(p, W_N_TYPESETS);
-    for (let a = 0; a < na; a++) {
-        const o = rec(p, 9, a);
-        const npos = pw(p, o);
-        const w = pw(p, o + 1);
-        const nc = pw(p, o + 2);
-        const nul = pw(p, o + 3);
-        const fo = o + 4;
-        const po = fo + (2 * w);
-        const co = po + (2 * npos);
-        const fl = co + (2 * nc);
-        if (!spend(s, (npos * (w + 2)) + (nc * npos))) {
-            return false;
-        }
-        if ((nul < 0) || (nul > 1)) {
-            return want(s, false, o, C_ARRAY);
-        }
-        if ((!rowClean(p, fo, w, npos)) || (!rowClean(p, fo + w, w, npos))) {
-            return want(s, false, fo, C_ARRAY);
-        }
-        for (let q = 0; q < npos; q++) {
-            const ts = pw(p, po + (2 * q));
-            const c = pw(p, po + ((2 * q) + 1));
-            if (!inRange(ts, nt)) {
-                return want(s, false, po + (2 * q), C_ARRAY);
-            }
-            if ((c < (-1)) || (c >= nc)) {
-                return want(s, false, po + (2 * q), C_ARRAY);
-            }
-            if (!rowClean(p, fl + (q * w), w, npos)) {
-                return want(s, false, fl + (q * w), C_ARRAY);
-            }
-            if (c >= 0) {
-                // a counted position never has its own follow bit
-                const word = pw(p, (fl + (q * w)) + (q >> 5));
-                if ((((word >>> (q & 31)) | 0) & 1) !== 0) {
-                    return want(s, false, fl + (q * w), C_ARRAY);
-                }
-            }
-        }
-        // each counter is used by exactly one position; 0 <= min, 1 <= max
-        for (let ci = 0; ci < nc; ci++) {
-            const cmin = pw(p, co + (2 * ci));
-            const cmax = pw(p, co + ((2 * ci) + 1));
-            let users = 0;
-            if ((cmin < 0) || (cmax < 1)) {
-                return want(s, false, co + (2 * ci), C_ARRAY);
-            }
-            for (let q2 = 0; q2 < npos; q2++) {
-                if (pw(p, po + ((2 * q2) + 1)) === ci) {
-                    users += 1;
-                }
-            }
-            if (users !== 1) {
-                return want(s, false, co + (2 * ci), C_ARRAY);
-            }
-        }
-    }
-    return !failed(s);
 }
 
 export function checkRegexps(p, s) {
@@ -1811,35 +2573,59 @@ export function childTs(p, l, i) {
         if (i >= npos) {
             return -2;
         }
-        return pw(p, ((ao + 4) + (2 * w)) + (2 * i));
+        return pw(p, ((ao + 4) + w) + i);
     }
-    if (k === 15) {
-        const mo = rec(p, 7, d0);
-        const nf = pw(p, mo);
-        const np = pw(p, mo + 1);
-        const na = pw(p, mo + 2);
-        const nl = pw(p, mo + 3);
-        const pb = (mo + 8) + (4 * nf);
-        const lb = (pb + (5 * np)) + (5 * na);
-        if (i < nl) {
-            return pw(p, (lb + (4 * i)) + 1);
+    // maps (kind 15): see map-children-within / map-has-children
+    return -2;
+}
+
+export function mapChildrenWithin(p, s, l, e) {
+    // Every member's key typeset (non-literal keys) and value typeset, and
+    // key_ts, marked e (program-2 §7's closure children).
+    const mo = rec(p, 7, pw(p, leafAt(p, l) + 2));
+    const nm = pw(p, mo + 1);
+    const kts = pw(p, mo + 3);
+    const nt = pw(p, W_N_TYPESETS);
+    for (let i = 0; i < nm; i++) {
+        const e2 = (mo + 8) + (5 * i);
+        const kt = pw(p, e2 + 1);
+        const vt = pw(p, e2 + 2);
+        if (!spend(s, 2)) {
+            return false;
         }
-        // then every key and value typeset of every residual pool's group
-        let j = i - nl;
-        for (let q = 0; q < np; q++) {
-            const g = pw(p, (pb + (5 * q)) + 1);
-            if (g >= 0) {
-                const go = rec(p, 5, g);
-                const gn = pw(p, go);
-                if (j < (2 * gn)) {
-                    return pw(p, (go + 2) + ((4 * (j >> 1)) + (j & 1)));
-                }
-                j -= 2 * gn;
+        if (kt >= 0) {
+            if ((!inRange(kt, nt)) || (!tsWithin(p, s, kt, e))) {
+                return false;
             }
         }
-        return -2;
+        if ((!inRange(vt, nt)) || (!tsWithin(p, s, vt, e))) {
+            return false;
+        }
     }
-    return -2;
+    if (kts >= 0) {
+        if ((!inRange(kts, nt)) || (!tsWithin(p, s, kts, e))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+export function mapHasChildren(p, l) {
+    const mo = rec(p, 7, pw(p, leafAt(p, l) + 2));
+    const nm = pw(p, mo + 1);
+    const nt = pw(p, W_N_TYPESETS);
+    for (let i = 0; i < nm; i++) {
+        const e2 = (mo + 8) + (5 * i);
+        const kt = pw(p, e2 + 1);
+        const vt = pw(p, e2 + 2);
+        if (inRange(kt, nt) && (tsEvalN(p, kt) > 0)) {
+            return true;
+        }
+        if (inRange(vt, nt) && (tsEvalN(p, vt) > 0)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 export function childrenWithin(p, s, cs, e) {
@@ -1849,6 +2635,11 @@ export function childrenWithin(p, s, cs, e) {
     for (let i = 0; i < n; i++) {
         const l = pw(p, co + (3 + i));
         let j = 0;
+        if (leafKind(p, l) === 15) {
+            if (!mapChildrenWithin(p, s, l, e)) {
+                return false;
+            }
+        }
         for (;;) {
             if (!spend(s, 1)) {
                 return false;
@@ -1874,6 +2665,9 @@ export function hasChildren(p, cs) {
     const n = pw(p, co);
     for (let i = 0; i < n; i++) {
         const l = pw(p, co + (3 + i));
+        if ((leafKind(p, l) === 15) && mapHasChildren(p, l)) {
+            return true;
+        }
         if (childTs(p, l, 0) !== (-2)) {
             const t0 = childTs(p, l, 0);
             // a child typeset that is empty is no child at all
@@ -1897,8 +2691,11 @@ export function hasChildren(p, cs) {
 }
 
 export function csetFrame(p, co, n) {
-    // frame_words of the cset at co (program.md §12.2).
+    // frame_words of the cset at co (program-2 §9.2): 2n + max(MAPAREA, ARRAREA),
+    // MAPAREA = the maps' block words + 4 cand_max (n_members + the largest
+    // naming count), ARRAREA = the arrays' block words.
     let maparea = 0;
+    let candmax = 0;
     let arrarea = 0;
     for (let i = 0; i < n; i++) {
         const l = pw(p, co + (3 + i));
@@ -1906,13 +2703,17 @@ export function csetFrame(p, co, n) {
         const k = pw(p, o) & 255;
         if (k === 15) {
             const mo = rec(p, 7, pw(p, o + 2));
-            maparea += pw(p, mo + 6) + (4 * pw(p, mo + 7));
+            const cand = pw(p, mo + 1) + mapNamersMax(p, mo);
+            maparea += leafBlock(p, l);
+            if (cand > candmax) {
+                candmax = cand;
+            }
         }
         if (k === 14) {
-            const ao = rec(p, 9, pw(p, o + 2));
-            arrarea += 3 + ((2 * pw(p, ao + 1)) + pw(p, ao + 2));
+            arrarea += leafBlock(p, l);
         }
     }
+    maparea += 4 * candmax;
     if (arrarea > maparea) {
         maparea = arrarea;
     }
@@ -1970,6 +2771,58 @@ export function checkCsets(p, s) {
         }
     }
     return !failed(s);
+}
+
+export function checkArenaWords(p, s) {
+    // Header words 29 R_ITEM_MAX, 62 RECLEAF_MAX and 63 ACT_SUM [D]: over closure
+    // sets, the largest sum of A2 / T record words, count of recursive
+    // ARRAY / MAP leaves and sum of their activation words (program-2 §2, §5.3).
+    const nc = pw(p, W_N_CSETS);
+    let ritem = 0;
+    let reclmax = 0;
+    let actsum = 0;
+    for (let c = 0; c < nc; c++) {
+        const co = rec(p, 16, c);
+        const n = pw(p, co);
+        let rs = 0;
+        let rc = 0;
+        let asum = 0;
+        if (!spend(s, 1 + n)) {
+            return false;
+        }
+        for (let i = 0; i < n; i++) {
+            const l = pw(p, co + (3 + i));
+            const k = leafKind(p, l);
+            if ((k === 14) || (k === 15)) {
+                const po = leafPeg(p, l);
+                const calls = pw(p, po + 8);
+                rs = sadd(rs, leafRecwords(p, l));
+                if (calls > 0) {
+                    rc += 1;
+                    asum = sadd(asum, actWords(calls, pw(p, po + 6)));
+                }
+            }
+        }
+        if (rs > ritem) {
+            ritem = rs;
+        }
+        if (rc > reclmax) {
+            reclmax = rc;
+        }
+        if (asum > actsum) {
+            actsum = asum;
+        }
+    }
+    if (pw(p, W_R_ITEM_MAX) !== ritem) {
+        return want(s, false, W_R_ITEM_MAX, C_DERIVED);
+    }
+    if (pw(p, W_RECLEAF_MAX) !== reclmax) {
+        return want(s, false, W_RECLEAF_MAX, C_DERIVED);
+    }
+    if (pw(p, W_ACT_SUM) !== actsum) {
+        return want(s, false, W_ACT_SUM, C_DERIVED);
+    }
+    return true;
 }
 
 export function checkChains(p, s) {
@@ -2120,11 +2973,18 @@ export function checkFlags(p, b, s) {
         if (k === 18) {
             f |= 16;
         }
+        if ((k === 14) && (pw(p, leafPeg(p, l) + 3) === TIER_A2)) {
+            f |= 64;
+        }
+        if ((k === 15) && (pw(p, leafPeg(p, l) + 3) === TIER_T)) {
+            f |= 64;
+        }
         if ((k === 1) || ((k === 2) && ((pw(p, o + 2) >= 4) && (pw(p, o + 2) <= 6)))) {
             needsAny = true;
         }
     }
-    if (pw(p, 6) !== f) {
+    // bit 5 (CUTS_RFC) is the compile option [V]; bit 6 (ARENA) is derived
+    if ((pw(p, 6) & (~32)) !== f) {
         return want(s, false, 6, C_DERIVED);
     }
     if (needsAny && (pw(p, W_TS_ANY) < 0)) {
@@ -2207,8 +3067,8 @@ export function checkExts(p, b, s) {
 
 export function vmVerify(p, b, s) {
     // 0 valid; -1 refused (detail in S[35], S[36]); -2 the scratch is too small
-    // for the verifier's marks (len(S) >= 48 + 2 * VM_MARK_CAP, VM_MARK_CAP >=
-    // N_LEAVES).
+    // for the verifier's marks and PEG working area (len(S) >= vm-verify-words,
+    // VM_MARK_CAP >= N_LEAVES).
     if (s.length < 48) {
         return -2;
     }
@@ -2223,6 +3083,9 @@ export function vmVerify(p, b, s) {
     if ((m < nl) || ((m < 0) || ((48 + (2 * m)) > s.length))) {
         return -2;
     }
+    if (((48 + (2 * m)) + vmVerifyTemp(p)) > s.length) {
+        return -2;
+    }
     // the verify budget: 64 * (PROGRAM_WORDS + POOL_BYTES / 4 + 1)
     const units = (p.length + ((b.length / 4) | 0)) + 1;
     if (units > ((INF / 64) | 0)) {
@@ -2233,7 +3096,7 @@ export function vmVerify(p, b, s) {
     if (!checkIndex(p, s, 2, 3, pw(p, W_N_TYPESETS), 0)) {
         return -1;
     }
-    if (!checkIndex(p, s, 5, 6, pw(p, W_N_GROUPS), 1)) {
+    if (!checkIndex(p, s, 5, 6, pw(p, W_N_PEGS), 1)) {
         return -1;
     }
     if (!checkIndex(p, s, 7, 8, pw(p, W_N_MAPS), 2)) {
@@ -2266,10 +3129,10 @@ export function vmVerify(p, b, s) {
     if (!checkKeys(p, b, s)) {
         return -1;
     }
-    if (!checkGroups(p, s)) {
+    if (!checkRules(p, b, s)) {
         return -1;
     }
-    if (!checkRules(p, b, s)) {
+    if (!checkPegs(p, s)) {
         return -1;
     }
     if (!checkMaps(p, s)) {
@@ -2293,8 +3156,66 @@ export function vmVerify(p, b, s) {
     if (!checkRuleClosure(p, s)) {
         return -1;
     }
+    if (!checkArenaWords(p, s)) {
+        return -1;
+    }
     if (failed(s)) {
         return -1;
     }
     return 0;
+}
+
+export function vmVerifyTemp(p) {
+    // Words of PEG working area vm-verify needs after the marks: the largest
+    // 7 n + 2 W (n + 1) + npos W over the programs (n <= 16384) and arrays
+    // (npos <= 4096, so W <= 128), read defensively (checked reads, clamped), so
+    // an unverified Program can ask for at most the hard maxima's worth.
+    if (p.length < 64) {
+        return 0;
+    }
+    const lim = p.length;
+    let nmax = 1;
+    let npmax = 0;
+    let np = pw(p, W_N_PEGS);
+    let na = pw(p, W_N_ARRAYS);
+    if ((np < 0) || (np > lim)) {
+        np = 0;
+    }
+    if ((na < 0) || (na > lim)) {
+        na = 0;
+    }
+    for (let g = 0; g < np; g++) {
+        const n = pw(p, (pw(p, (pw(p, W_SEC + 5) + g) | 0) + 1) | 0);
+        if ((n > nmax) && (n <= 16384)) {
+            nmax = n;
+        }
+    }
+    for (let a = 0; a < na; a++) {
+        const npos = pw(p, pw(p, (pw(p, W_SEC + 9) + a) | 0));
+        if ((npos > npmax) && (npos <= 4096)) {
+            npmax = npos;
+        }
+    }
+    const w = (npmax + 31) >> 5;
+    return ((7 * nmax) + ((2 * w) * (nmax + 1))) + ((npmax * w) + 16);
+}
+
+export function vmVerifyWords(p, markCap) {
+    // The scratch length vm-verify needs with VM_MARK_CAP = max(mark-cap,
+    // N_LEAVES clamped to 2^20): 48 + 2 M + the PEG working area.
+    let m = markCap;
+    let nl = 0;
+    if (p.length >= 64) {
+        nl = pw(p, W_N_LEAVES);
+    }
+    if ((nl < 0) || (nl > 1048576)) {
+        nl = 1048576;
+    }
+    if (nl > m) {
+        m = nl;
+    }
+    if (m < 1) {
+        m = 1;
+    }
+    return (48 + (2 * m)) + vmVerifyTemp(p);
 }

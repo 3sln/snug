@@ -9,13 +9,19 @@
 ;;     else             -> schema error: code, line, column, rule name span
 ;;
 ;; `opt` (OPT_WORDS words, -1 = default) is every compile option, in the order
-;; of program.md §13.3's source key, then the leaf limit; words from OPT_WORDS
-;; on, when present, are the extension-control registry (snug.compile.ext, D141).
+;; of program.md §13.3's source key, then the leaf limit, the regexp dialect
+;; (D242), the cut mode and the group arena cap (format 2.0, program-2 §1);
+;; words from OPT_WORDS on, when present, are the extension-control registry
+;; (snug.compile.ext, D141).
+;;
+;; A compiled schema may carry compile WARNINGS (architecture §20.11, W1-W7):
+;; `warning-count` and the `warning-*` accessors, deterministic on every host.
 (ns snug.compile.main
   (:require [kin.lang :refer [defn let return set if while for do comment defconst case declarefn]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - * neg quot bit-and < > <= >= == != and or not
                                u8 blen ia iset ilen]]
-            [snug.compile.arena :refer [hg hs erred fail charge vinit vlen vpush1 vget vset vtrunc vbase
+            [snug.compile.arena :refer [hg hs erred fail charge vinit vlen vpush1 vget vset vtrunc vbase msort-records
+                                        H_CUTS H_LIM_GROUP H_GROUP_GIVEN T_WARN
                                         INF H_TOP H_ERR H_ERR_POS H_ERR_RULE H_BUDGET H_DEPTH H_NSRC
                                         H_CUR_RULE H_ERR_LINE H_ERR_COL H_ERR_RNAME H_ERR_RNAME_LEN
                                         H_LIM_TEXT H_LIM_NEST H_LIM_AST H_LIM_INST H_LIM_ALTS H_LIM_APOS
@@ -31,15 +37,22 @@
             [snug.compile.bytes :refer [bytes-init head-push]]
             [snug.compile.leaf :refer [leaf-init]]
             [snug.compile.regexp :refer [rx-init unicode-init]]
-            [snug.compile.rules :refer [build-rules nrules rw]]
+            [snug.compile.rules :refer [build-rules nrules rw def-next]]
+            [snug.compile.parse :refer [npos]]
             [snug.compile.lower :refer [lower-init lower-rules]]
             [snug.compile.emit :refer [emit-program]]
             [snug.compile.ext :refer [ext-init n-exts ext-name-len ext-name-byte ext-max]]))
 
-(defconst ^:pub ^I32 OPT_WORDS 20)
+(defconst ^:pub ^I32 OPT_WORDS 22)
 (defconst ^:pub ^I32 OPT_REGEXP 19)
+;; format 2.0: 0 `reference` (rule A, default), 1 `rfc` (D273)
+(defconst ^:pub ^I32 OPT_CUTS 20)
+;; format 2.0: the group arena cap in words (D276, D281; -1 = the default)
+(defconst ^:pub ^I32 OPT_GROUP_WORDS 21)
+(defconst ^:pub ^I32 GROUP_WORDS_DEFAULT 4194304)
+(defconst ^:pub ^I32 GROUP_WORDS_MAX 16777216)
 
-(declarefn build-key-preimage ^I32 if-limit)
+(declarefn build-key-preimage ^I32 if-limit warnings-finish)
 (defconst ^:pub ^I32 OPT_PROFILE 0)
 
 (defn ^I32 opt-limit [^IntsR opt ^I32 i ^I32 dflt ^I32 hard]
@@ -56,6 +69,10 @@
         ^:mut text-default 262144]
     (hs h H_PROFILE profile)
     (hs h H_REGEXP (opt-limit opt OPT_REGEXP 0 1))
+    (hs h H_CUTS (opt-limit opt OPT_CUTS 0 1))
+    (let [gw (opt-limit opt OPT_GROUP_WORDS (neg 1) GROUP_WORDS_MAX)]
+      (hs h H_GROUP_GIVEN gw)
+      (if (< gw 0) (hs h H_LIM_GROUP GROUP_WORDS_DEFAULT) (hs h H_LIM_GROUP gw)))
     (if (== profile 2) (set text-default 16384))
     (hs h H_LIM_TEXT (opt-limit opt 1 text-default 1048576))
     (comment "bus: schema text at most 16 KiB whatever the option says (§5.3).")
@@ -63,7 +80,8 @@
     (hs h H_LIM_NEST (opt-limit opt 2 64 256))
     (hs h H_LIM_AST (opt-limit opt 3 65536 1048576))
     (hs h H_LIM_INST (opt-limit opt 4 1024 16384))
-    (hs h H_LIM_ALTS (opt-limit opt 5 64 1024))
+    (comment "format 2.0 (D292): option 5 limits PEG nodes per group (was alternatives)")
+    (hs h H_LIM_ALTS (opt-limit opt 5 1024 16384))
     (hs h H_LIM_APOS (opt-limit opt 6 256 4096))
     (hs h H_LIM_RPOS (opt-limit opt 7 256 512))
     (hs h H_LIM_WIDTH (opt-limit opt 8 256 4096))
@@ -193,6 +211,8 @@
           (comment "Belt and braces: a phase that swallowed an error (an arena that"
                    "ran out mid-way) must not pass for a Program.")
           (if (< (hg h H_OUT_PN) 64) (return (bail h)))
+          (warnings-finish h)
+          (if (erred h) (return (bail h)))
           (build-key-preimage h)
           (if (erred h) (return (bail h)))
           (return 0))))))
@@ -214,9 +234,10 @@
 
 (defn ^:pub build-key-preimage [^Ints h]
   (comment "program.md §13.3's source-key preimage, deterministic CBOR, into T_KEYPRE"
-           "(one byte per word): [\"snug/program-key\", 1, version, profile, [17"
-           "effective limits], schema text as bytes]. The host hashes it (SHA-256)"
-           "into header words 7..14.")
+           "(one byte per word): [\"snug/program-key\", 2, version, profile, [17"
+           "effective limits, cuts, groupWords or -1], schema text as bytes, ...]"
+           "(format 2.0: program-2 §1). The host hashes it (SHA-256) into header"
+           "words 7..14.")
   (vtrunc h T_KEYPRE 0)
   (comment "6 elements; 7 with Unicode tables (D110); 8 with registered controls (D141),"
            "the seventh then the tables' words or an empty array.")
@@ -231,15 +252,19 @@
   (vpush1 h T_KEYPRE 47) (vpush1 h T_KEYPRE 112) (vpush1 h T_KEYPRE 114) (vpush1 h T_KEYPRE 111)
   (vpush1 h T_KEYPRE 103) (vpush1 h T_KEYPRE 114) (vpush1 h T_KEYPRE 97) (vpush1 h T_KEYPRE 109)
   (vpush1 h T_KEYPRE 45) (vpush1 h T_KEYPRE 107) (vpush1 h T_KEYPRE 101) (vpush1 h T_KEYPRE 121)
-  (push-uint h T_KEYPRE 1)
+  (push-uint h T_KEYPRE 2)
   (head-push h T_KEYPRE 3 0 SNUG_VERSION_LEN)
   (for [^I32 i 0 SNUG_VERSION_LEN]
     (vpush1 h T_KEYPRE (version-byte i)))
   (let [pr (hg h H_PROFILE)] (push-uint h T_KEYPRE pr))
-  (head-push h T_KEYPRE 4 0 17)
+  (head-push h T_KEYPRE 4 0 19)
   (for [^I32 k 0 17]
     (let [v (hg h (if-limit k))]
       (push-uint h T_KEYPRE v)))
+  (let [cm (hg h H_CUTS)
+        gw (hg h H_GROUP_GIVEN)]
+    (push-uint h T_KEYPRE cm)
+    (if (< gw 0) (head-push h T_KEYPRE 1 0 0) (push-uint h T_KEYPRE gw)))
   (let [n (hg h H_NSRC)]
     (head-push h T_KEYPRE 2 0 n)
     (for [^I32 j 0 n]
@@ -307,7 +332,7 @@
     [13] "limit_nesting"
     [14] "limit_ast_nodes"
     [15] "limit_instantiations"
-    [16] "limit_alternatives"
+    [16] "limit_peg_nodes"
     [17] "limit_array_positions"
     [18] "limit_regexp_positions"
     [19] "limit_width"
@@ -335,9 +360,6 @@
     [55] "control_registry"
     [56] "regexp"
     [45] "map_key"
-    [46] "map_group_occurrence"
-    [47] "map_cut"
-    [48] "map_overlap"
     [49] "tag"
     [50] "major"
     [51] "profile"
@@ -374,3 +396,108 @@
 (defn ^:pub ^I32 budget-used [^IntsR h]
   (comment "Compile budget units the last call spent (for benchmarks and the fuzz gate).")
   (return (- (hg h H_LIM_BUDGET) (hg h H_BUDGET))))
+
+;; ------------------------------------------------------------ warnings (architecture §20.11)
+;; T_WARN records (4 words): sort key, code, source offset (-1: none), rule.
+
+(defn ^I32 rule-at [^IntsR h ^I32 pos]
+  (comment "The schema rule whose definition holds source offset pos: the definition"
+           "(N_RULE, at its name) with the largest offset <= pos; -1 if none.")
+  (if (< pos 0) (return (neg 1)))
+  (let [^:mut best (neg 1)
+        ^:mut at (neg 1)]
+    (for [^I32 r 0 (nrules h)]
+      (if (== (rw h r 7) 0)
+        (do (let [^:mut d (rw h r 2)]
+              (while (>= d 0)
+                (let [dp (npos h d)]
+                  (if (and (<= dp pos) (> dp at)) (do (set at dp) (set best r))))
+                (set d (def-next h d)))))))
+    (return best)))
+
+(defn ^:pub warnings-finish [^Ints h]
+  (comment "Sort the warnings by (offset, code), drop repeats (one AST node lowered in"
+           "several generic environments warns once) and name each one's rule.")
+  (let [n (quot (vlen h T_WARN) 4)]
+    (if (not (charge h (+ 1 (* 4 n)))) (return))
+    (for [^I32 i 0 n]
+      (let [code (vget h T_WARN (* 4 i))
+            pos (vget h T_WARN (+ (* 4 i) 1))]
+        (vset h T_WARN (+ (* 4 i) 2) code)
+        (vset h T_WARN (+ (* 4 i) 3) pos)
+        (vset h T_WARN (* 4 i) (+ (* pos 8) code))
+        (vset h T_WARN (+ (* 4 i) 1) code)))
+    (if (not (msort-records h T_WARN 0 n 4)) (return))
+    (let [^:mut w 0]
+      (for [^I32 j 0 n]
+        (let [key (vget h T_WARN (* 4 j))]
+          (if (or (== j 0) (!= key (vget h T_WARN (* 4 (- w 1)))))
+            (do (let [c2 (vget h T_WARN (+ (* 4 j) 1))
+                      p2 (vget h T_WARN (+ (* 4 j) 3))
+                      r2 (rule-at h p2)]
+                  (vset h T_WARN (* 4 w) key)
+                  (vset h T_WARN (+ (* 4 w) 1) c2)
+                  (vset h T_WARN (+ (* 4 w) 2) p2)
+                  (vset h T_WARN (+ (* 4 w) 3) r2))
+                (set w (+ w 1))))))
+      (vtrunc h T_WARN (* 4 w)))))
+
+(defn ^:pub ^I32 warning-count [^IntsR h] (return (quot (vlen h T_WARN) 4)))
+(defn ^:pub ^I32 warning-code [^IntsR h ^I32 i] (return (vget h T_WARN (+ (* 4 i) 1))))
+(defn ^:pub ^I32 warning-offset [^IntsR h ^I32 i] (return (vget h T_WARN (+ (* 4 i) 2))))
+
+(defn ^:pub ^I32 warning-line [^IntsR h ^I32 i]
+  (comment "1-based line of warning i, 0 when it is about no place (W7).")
+  (let [pos (warning-offset h i)
+        ^:mut line 1]
+    (if (or (< pos 0) (> pos (hg h H_NSRC))) (return 0))
+    (for [^I32 k 0 pos]
+      (if (== (vget h T_SRC k) 10) (set line (+ line 1))))
+    (return line)))
+
+(defn ^:pub ^I32 warning-column [^IntsR h ^I32 i]
+  (comment "1-based column (code points) of warning i, 0 when it is about no place.")
+  (let [pos (warning-offset h i)
+        ^:mut col 1]
+    (if (or (< pos 0) (> pos (hg h H_NSRC))) (return 0))
+    (for [^I32 k 0 pos]
+      (let [c (vget h T_SRC k)]
+        (if (== c 10)
+          (set col 1)
+          (if (!= (bit-and c 192) 128) (set col (+ col 1))))))
+    (return col)))
+
+(defn ^:pub ^I32 warning-rule-start [^IntsR h ^I32 i]
+  (comment "Offset of the name of warning i's rule, or -1.")
+  (let [r (vget h T_WARN (+ (* 4 i) 3))]
+    (if (< r 0) (return (neg 1)))
+    (return (rw h r 0))))
+
+(defn ^:pub ^I32 warning-rule-len [^IntsR h ^I32 i]
+  (let [r (vget h T_WARN (+ (* 4 i) 3))]
+    (if (< r 0) (return 0))
+    (return (rw h r 1))))
+
+(defn ^:pub ^Str warning-name [^I32 code]
+  (comment "The stable code of a warning (the API's warning.code).")
+  (case code
+    [1] "W1"
+    [2] "W2"
+    [3] "W3"
+    [4] "W4"
+    [5] "W5"
+    [6] "W6"
+    [7] "W7"
+    :else "W0"))
+
+(defn ^:pub ^Str warning-message [^I32 code]
+  (comment "The fixed text of a warning (architecture §20.11).")
+  (case code
+    [1] "required member can never match: an earlier unbounded member with an any value takes its keys"
+    [2] "optional member is ineffective: an earlier unbounded member with an any value takes its keys"
+    [3] "greedy unbounded repetition is followed by a required entry it subsumes, which can never match"
+    [4] "repetition with a minimum of 2 or more wraps a body that consumes all it matches"
+    [5] "choice alternative follows one that cannot fail and is never tried"
+    [6] "order-sensitive member overlaps another member (RFC 8610 section 3.5.3)"
+    [7] "worst-case group arena at the compiled limits can exceed the arena cap"
+    :else ""))

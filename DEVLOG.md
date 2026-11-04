@@ -4825,6 +4825,155 @@ before deviating. Supersedes the interim default in D271 and the naming
 question in D273.
 - [x] **Decided by the owner** (2026-11-10, via coordinator).
 
+### D290 — P8.5 phase 1: the compiler and verifier move to format 2.0 on a branch; a reference interpreter checks semantics before the VM (P8.5)
+**Decision** (P8.5 compiler engineer, provisional): branch `p85-peg` replaces
+the format 1 group lowering (map normal form, factors, pools, counters,
+unrolling, the determinism and overlap rules) by PEG lowering
+(`kin/compile/peg.kin`) and writes only format 2.0 Programs; `vm-verify`
+accepts only format 2.0. The VM is untouched, so every VM-running gate is
+red on the branch until phase 2 lands the VM with the compiler. The phase 1
+gate is `bb compile2-test`; it includes a test-only interpreter of the
+compiled Programs (`kin/scripts/peg2-ref.mjs`, architecture §20.2's `run`
+read off the PEG programs and tables, scalar leaves matched directly) whose
+verdicts must equal §20.15's and the independent oracle's.
+**Why**: the owner asked for compiler and VM to switch main together; the
+interpreter gives semantic evidence for the Programs (3266 oracle verdicts,
+234 probe verdicts, 52 targeted ones) before a VM exists, and an executable
+reading of program-2 for phase 2.
+**Alternatives**: a format 1.2 keeping both engines (rejected in D279);
+gating phase 1 on structure only (would not catch fold, cut or recursion
+lowering bugs: mutants 1 and 2 of the phase 1 record are caught only
+semantically).
+- [ ] **Signed off** (owner)
+
+### D291 — PEG lowering: one MAP leaf per map type, CALLs to open expansions, structural simplification, node-order numbering (P8.5)
+**Decision**: a map type is one MAP leaf whose top-level `//` is a PEG
+`CHOICE` (R5), no longer one leaf per alternative. A group rule (with its
+generic environment) or an unwrapped container being expanded is a CALL of
+its open expansion, so guarded recursion of any shape lowers; left recursion
+(a CALL cycle through nullable prefixes, including a target that simplifies
+to the very CALL, `g = (g, 0*0 x)`) is `group_recursion`. Simplification is
+structural only: SEQ drops EMPTY kids, SEQ and CHOICE splice same-op kids
+that no CALL targets and collapse to an only kid (none: EMPTY / FAIL), a REP
+of EMPTY is EMPTY; then, in maps, program-2 §3.3's fold table. Nodes are
+numbered in preorder; positions and members in node order (the verifier
+checks this canonical numbering). An unwrap's alternatives follow the
+typeset's creation order, as format 1 did.
+**Why**: these keep every failure event (no FAIL is created or removed except
+the fold's and the empty CHOICE's), make Programs canonical, and give a
+CALL target an ancestor id.
+**Alternatives**: lowering recursion by unrolling (unbounded); flattening a
+CALL target (breaks the CALL).
+- [ ] **Signed off** (owner)
+
+### D292 — Format 2.0 compile limits: `pegNodes` replaces `alternatives`; members and depth bounded through it; ring words fixed (P8.5)
+**Decision**: compile option 5 (source-key slot 4) is `pegNodes`, PEG nodes
+per group after inlining (default 1024, hard 16384; error
+`limit_peg_nodes`, code 16, which was `limit_alternatives`). Members per map
+and frames per activation have no separate options: both are at most the
+node count. The A1 ring limit is fixed at program-2 §11's default (4096
+words). A group's builder tree is refused at 8 x `pegNodes` + 1024 nodes, so
+a pathological expansion fails on the limit, not on memory.
+**Why**: program-2 §1 adds only `cuts` and `groupWords` to SOURCE_KEY; §20.11
+removes the alternatives limit; the node bound already bounds members and
+depth.
+**Alternatives**: three new options (members, depth, ring words) in the
+SOURCE_KEY preimage.
+- [ ] **Signed off** (owner)
+
+### D293 — `n*m` with m < n is refused as `syntax` (P8.5)
+**Decision**: an occurrence whose maximum is below its minimum is a schema
+error (`syntax`, at the entry).
+**Why**: such a repetition can never succeed (its count stops at m < n, and a
+zero-length iteration sets the count to m), program-2 §3 requires
+min <= max, and the independent oracle refuses it too.
+**Alternatives**: lowering it to FAIL (a FAIL no source spells).
+- [ ] **Signed off** (owner)
+
+### D294 — Byte-string, float and big-integer `:` keys are cut key typesets (withdraws D125's refusal) (P8.5)
+**Decision**: a byte-string, float or beyond-64-bit integer value before `:`
+is a member whose key is the typeset of that value, with the cut (R11); under
+`bindle`/`bus` it stays `profile`. A map's `key_ts` is the exact union of its
+non-literal members' key typesets (no ANY absorption or merging), so every
+member's own key leaves are evaluated.
+**Why**: D125 refused these because format 1 had no cut on key typesets;
+§20.11 withdraws `map_cut`. A normalised union would query merged leaves the
+members' typeset tests never see.
+**Alternatives**: keep the refusal; extend KEYS to every key kind.
+- [ ] **Signed off** (owner)
+
+### D295 — Derived fields program-2 leaves open (P8.5)
+**Decision**: `depth` is the root's height in nodes, every node counting and
+a CALL a leaf (every activation's paths are suffixes of root paths); a map's
+`named` record stores the offset of its run in `namers`; `B` is stored only
+for A1 (0 otherwise, maps 0); per-leaf activation words are program-2 §5.3's
+ceil(n_calls (3 + 8 depth) 64 / 54); R_ITEM_MAX / RECLEAF_MAX / ACT_SUM are
+maxima over the S16/S17 closure sets.
+**Why**: each is the conservative reading of the text; the verifier
+recomputes all of them.
+**Alternatives**: frames only for composite nodes (one frame less, phase 2 may
+tighten it with a minor version).
+- [ ] **Signed off** (owner)
+
+### D296 — Format 2.0 header: word 62 is RECLEAF_MAX, the section end is PROGRAM_WORDS (P8.5)
+**Decision**: program-2 §2 calls word 62 "reserved" in format 1.1; it was
+`S_END`. Format 2.0 drops `S_END` (the last section ends at PROGRAM_WORDS,
+word 3) and uses word 62 for RECLEAF_MAX as program-2 numbers it. The format
+word is always 0x00020000; format 1.1's extension table (words 30, 31, 39)
+is part of 2.0. The serialisation loaders (JS, Rust) accept major 2, minor 0
+only.
+**Why**: keeps program-2's numbering and removes a redundant word.
+**Alternatives**: move RECLEAF_MAX elsewhere and keep `S_END`.
+- [ ] **Signed off** (owner)
+
+### D297 — Format 2.0 verifier: a sized working area, per-fixed-point budget, new check ids (P8.5)
+**Decision**: `vm-verify` keeps its PEG working arrays after the marks; the new
+`vm-verify-words(P, mark_cap)` gives the scratch length (read defensively,
+bounded by the hard maxima), and the hosts size the verifier scratch with
+it. The verify budget is 64 (PROGRAM_WORDS + POOL_BYTES / 4 + 1), raised
+before each fixed point by 4 (n_calls + 2) n (2W + 2) + 4 n npos W per array
+table and 4 (n_calls + 2) n per program (instead of program-2 §3.1's
+npos W (n_calls + 1) term: rounds iterate over nodes, and rounds <= targets
++ 2; still a proof obligation, N8). Check ids: 25 C_VERSION (any format word
+but 0x00020000, D084), 26 C_RECURSION (left recursion), 10 is C_PEG.
+Canonical form is verified: a tree through kids and REP children with
+children of larger id, node-order numbering of positions and members, no
+REP of a MEMBER the fold table would rewrite.
+**Why**: the derived fields need per-node sets; the budget must cover what a
+valid Program needs.
+**Alternatives**: recomputing lazily per CALL target (less memory, more code).
+- [ ] **Signed off** (owner)
+
+### D298 — Compile warnings W1-W7: analyses, attribution, API (P8.5)
+**Decision**: W1/W2 look along the root sequence (an earlier unbounded member
+with an `any` value whose key domain contains the member's: identical
+typesets, `any`, or the literal tested exactly; extension controls prove
+nothing); W3 looks at adjacent SEQ kids (`REP(_, INF, ENTRY t1)` then a
+required ENTRY t2 subsumed by t1); W4 is a REP with minimum >= 2 whose child
+is a REP or MEMBER with an INF maximum; W5 is a CHOICE alternative after one
+with FL = -inf (cuts ignored); W6 is an order-sensitive member whose key
+overlaps another member's (conservative overlap); W7 compares program-2
+§9.4's bound with the compiled cap LIM_GROUP_WORDS. A warning names the rule
+whose definition holds its offset; repeats (one AST node in several generic
+environments) are dropped; the order is (offset, code). Hosts expose
+`warnings: [{code, rule, line, column, message}]` on the compile result (JS)
+and `Compiled::warnings` (Rust).
+**Why**: cheap, conservative, deterministic on every host (gated).
+**Alternatives**: whole-group subsumption analyses (costly, not needed).
+- [ ] **Signed off** (owner)
+
+### D299 — Compile options `cuts` and `groupWords`; SOURCE_KEY version 2 (P8.5)
+**Decision**: JS `compile(text, {cuts: 'reference' | 'rfc', groupWords})`,
+Rust `CompileOptions { cuts: Cuts, group_words: Option<i32> }`, the wasm
+compiler's option words 20 and 21; kin's option words are 22 (`cuts` 20,
+`groupWords` 21), the extension registry starts at word 22. `groupWords`
+(<= 2^24) sets LIM_GROUP_WORDS (default 4,194,304). The SOURCE_KEY preimage's
+version element is 2 and its limits array gains `cuts` and `groupWords` (-1
+when not given), as program-2 §1 says.
+**Why**: program-2 §1; D273, D276, D281.
+**Alternatives**: none considered.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -6994,3 +7143,102 @@ versus the RFC's implied `.ne`. JS regexp matching is explicitly an
 approximation; non-enumerable controllers and bounds can return unknown.
 This oracle does not certify production tiers, resources or witnesses.
 No new semantic decision or owner sign-off is asserted.
+
+## P8.5 — PEG groups, phase 1: compiler and verifier, format 2.0 (2026-11-04, branch `p85-peg`)
+
+Implements architecture §20 rev 3.1 / program-2 rev 3.1 on the compiler side
+(D270–D281; decisions D290–D299). The VM is unchanged: the branch writes and
+verifies only format 2.0 Programs, so the VM-running gates (vm-test,
+vmsession-test, sequence-test, rust-api-test, proptest, wasm-sdk-test) and
+compile-test's format 1 expectations are red on it until phase 2.
+
+* **Compiler** (`kin/compile/peg.kin`, new; `lower.kin`, `emit.kin`,
+  `main.kin`; `maps.kin` and `arrays.kin` removed): PEG builder lowering,
+  CALLs to open expansions, the fold table with FAIL provenance, `0*0` →
+  EMPTY, minima saturation, ml / FL / B, depth, n_calls, nullable / first /
+  last least fixed points and relaxed follow rows, left-recursion refusal,
+  map classes / F-S-T tiers / key_ts / slots / records, A0-A1-A2, hash-consed
+  programs, header words 19 / 29 / 41 / 62 / 63, FLAGS bits 5-6, ACT_SUM /
+  RECLEAF_MAX / R_ITEM_MAX, W1–W7, options `cuts` / `groupWords`, SOURCE_KEY
+  version 2. Withdrawn refusals gone (map_overlap, map_group_occurrence,
+  map_cut incl. D125's, counters/unrolling, non-tail group recursion).
+* **Verifier** (`kin/program/verify.kin`): format 2.0 only (1.x refused,
+  check C_VERSION); PEG records, map and array tables, every derived field
+  recomputed (incl. the relaxed automata), left recursion (C_RECURSION),
+  `vm-verify-words`.
+* **Hosts**: JS / Rust / wasm compile options and warnings; verifier scratch
+  sized by `vm-verify-words`; serialisation loaders accept major 2 only.
+* **Gates**: `bb compile2-test` (new; `kin/scripts/compile2-test.mjs`, Rust
+  `compile2-test` bin, test-only reference interpreter
+  `kin/scripts/peg2-ref.mjs`).
+
+Checks actually run (on the branch, macOS, node 24.6, cargo debug):
+
+* `bb compile2-test`: all ok — 308/308 corpus schemas compile (both cut
+  modes, both hosts); 26/26 suites that expected a withdrawn refusal now
+  compile; 5/5 remaining expected refusals; RFC corpus 68/108 compile (2
+  newly: indeterminate-map, reputon-verbose; 40 refused exactly as observed
+  before; no withdrawn refusal left); 164/164 §20.15 probe schemas compile;
+  10/10 remaining refusals; 12/12 formerly refused schemas compile; 976/976
+  JS == Rust comparisons (Programs, pools, warnings) identical; 916/916
+  compiled Programs verified (JS and Rust); 8796 seeded corruptions refused, 1215
+  format 1.0 / 1.1 / 2.1 Programs refused with C_VERSION, 9720 random
+  corruptions with no crash and identical verdicts; 165/165 SOURCE_KEYs;
+  341/341 arena-size independent; 234/234 §20.15 probe verdicts and 52/52
+  targeted lowering cases (26 schemas, both modes, against the oracle)
+  reproduced by the compiled Programs; 3266/3266
+  corpus verdicts equal the independent oracle's (both modes; 96 undecided:
+  regexps, extension controls, oracle unknowns).
+* `bb compile-fuzz` (3000, default seed) and 12000 texts each at seeds 7,
+  99, 2026, 31337: ok (only SchemaError, no panic, JS == Rust, vm-verify
+  accepts). The larger seeds found two compiler bugs, fixed: an empty
+  non-literal key typeset left key_ts at -1, and a group rule simplifying to
+  its own CALL was an internal error instead of `group_recursion`.
+* Full Rust crate (`kin/scripts/rust-crate`, lib + bins, `-D warnings`) and
+  the wasm `cc` / `sdk` modules build.
+* Mutation: 6 targeted mutants — cuts dropped, REP loop edges dropped, F tier
+  ignoring order sensitivity: red at once; the fold's FAIL dropped and an
+  off-by-one minimum saturation first SURVIVED (no corpus data exercised
+  them), so targeted semantic cases and verification of the gate-9 Programs
+  were added; both are now red.
+
+**Tier census** (compiled Programs, live leaves after canonicalisation, the
+design's file set: adversarial, study, rfc*.json; 336 distinct schemas):
+arrays 130 A0 / 25 A1 / 0 A2 (+1 recursive, A2); maps 63 F / 41 S / 24 T.
+On the 332 schemas the design's script (`.cache/peg/tiers.mjs`) parses:
+128 A0 / 25 A1 / 0 A2 (+1) and 59 F / 41 S / 24 T against its 799 / 25 / 0
+(+1) and 61 / 37 / 26. A1, A2 and recursion agree exactly. A0: the script
+counts syntactic nodes, duplicates across rules and nodes that are not arrays
+(e.g. `{ 1*2 (2*2 tstr => uint) }` adds 2 A0), 663 in all; compiled leaves
+are deduplicated. Maps, per schema: two single non-literal members with max 1
+(`{int => int, int => 6}`) are order-sensitive by program-2 §3.3 (T, the
+script said F); `{a: int, $$x}`'s root has a FAIL (S, not F); 4 schemas
+whose only non-literal member is `0*0` (EMPTY once lowered) are S, not T;
+`reputon-verbose` folds `? conf-value` to MEMBER(0, 1) and is F (the design
+text predicts "the published T cases are F once normalised"); generic
+instantiations count once per instance.
+
+**Warnings over the corpus** (reference mode): W2 1, W5 1, W6 19, W7 26.
+Finding: W7 fires on every T map and recursive group at default limits —
+any R_ITEM_MAX >= 3 times 1,500,000 input bytes exceeds the 4 Mi-word cap —
+so it is a worst-case notice, not a signal of an unusual schema (D281/§20.6
+may want the bound per document size or the warning reworded).
+Finding: byte-string and float literal keys are non-literal members, so
+`{h'01': int}` is order-sensitive and T; a one-value key typeset could be
+treated as literal-like (a phase 2 / design question).
+Finding: DEVLOG has two D280 entries (P8.5 refusal replay, P8.6 corpus).
+
+Learnt: semantic agreement with the oracle is the gate that catches lowering
+mistakes; structure, verification and JS/Rust identity cannot. Programs
+whose CALL target collapses into the CALL, empty key typesets and corrupted
+section words near 2^31 (an `i32` add overflow in `vm-verify-words`, fixed
+with wrapping adds) were found only by fuzzing and random corruption.
+
+Phase 2 (VM) needs: program-2 §5–§10 in the VM (machines per tier, records,
+rings, the arena with chunk heap and growth, map F/S/T with the T sort,
+witnesses incl. FAIL events and provenance, forced-tier mode), the charging
+order of §10, D280's replay (P8.4), `vm-scratch-words` with ARRWORDS /
+MAPWORDS (the compiler's cset frame words already use them), the limits word
+10 arena limit, `group_limit` (code 44), and the wasm SDK's warnings. The
+reference interpreter (`peg2-ref.mjs`) is the semantic baseline the VM's
+verdicts can be compared with.

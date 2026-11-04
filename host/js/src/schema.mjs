@@ -7,15 +7,15 @@ export { Program, Schema, reasonName, releaseScratch } from './schema-core.mjs';
  * (host/js/src/compile.mjs; throws its SchemaError). The Program is verified
  * by vm-verify before use. */
 export async function compile(text, opts = {}) {
-  const [{ compile: compileCddl }, { vmVerify }] = await Promise.all([
+  const [{ compile: compileCddl }, { vmVerify, vmVerifyWords }] = await Promise.all([
     import('./compile.mjs'), import('../../../gen/js/snug/program/verify.mjs')]);
   const { program, pool, controls } = compileCddl(text, opts);
-  return new Schema(new Program(program, pool, { verify: vmVerify, controls }));
+  return new Schema(new Program(program, pool, { verify: vmVerify, verifyWords: vmVerifyWords, controls }));
 }
 
 /** fromProgram(P, B) -> Schema, for a Program compiled elsewhere (a trusted store). */
 export async function fromProgram(P, B, { controls } = {}) {
-  const [{ vmVerify }, { controlEntries }] = await Promise.all([
+  const [{ vmVerify, vmVerifyWords }, { controlEntries }] = await Promise.all([
     import('../../../gen/js/snug/program/verify.mjs'), import('./ext.mjs')]);
-  return new Schema(new Program(P, B, { verify: vmVerify, controls: controlEntries(controls) }));
+  return new Schema(new Program(P, B, { verify: vmVerify, verifyWords: vmVerifyWords, controls: controlEntries(controls) }));
 }

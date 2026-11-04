@@ -59,8 +59,11 @@ export async function compile(text, options = {}) {
   const bytes = typeof text === 'string' ? te.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const registry = registryWords(entries, controlsInBus);
-  const opt = new Int32Array(20 + registry.length).fill(-1);
-  opt.set(registry, 20);
+  // format 2.0: options 20 (cuts) and 21 (groupWords) precede the registry
+  const opt = new Int32Array(22 + registry.length).fill(-1);
+  opt.set(registry, 22);
+  opt[20] = options.cuts === 'rfc' ? 1 : 0;
+  if (options.groupWords !== undefined) opt[21] = Math.min(options.groupWords, 0x7fffffff);
   opt[0] = PROFILES[profile];
   opt[19] = regexp === 'iregexp' ? 1 : 0;
   for (const [i, k] of COMPILE_OPTIONS.entries()) if (limits[k] !== undefined) opt[i + 1] = Math.min(limits[k], 0x7fffffff);

@@ -71,10 +71,12 @@ export function validateSequenceOptions(options, stream) {
 /** Compile admission is separate so runtime entries carry no compiler options. */
 export function validateCompileOptions(options) {
   const compileLimits = Object.fromEntries(['schemaBytes', 'nesting', 'astNodes', 'instantiations',
-    'alternatives', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes',
+    'pegNodes', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes',
     'compileBudget', 'leaves', 'depth', 'inputBytes', 'entries', 'items', 'bignumBytes', 'budget']
     .map(name => [name, integer]));
   const shape = { profile: enumeration('full', 'bindle', 'bus'), regexp: enumeration('xsd', 'iregexp'),
+    // format 2.0: the cut mode (D273) and the group arena cap in words (D276, D281; at most 2^24)
+    cuts: enumeration('reference', 'rfc'), groupWords: value => integer(value) && value <= 16777216,
     limits: value => checked(value, compileLimits, 'limits'),
     unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
     // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`

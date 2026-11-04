@@ -1465,7 +1465,26 @@ pub fn ts_make(h: &mut [i32], from: i32) -> i32 {
     if group_lits(h, from) < 0 {
         return -1;
     }
-    // dedupe (first occurrence), keeping creation order
+    return ts_intern_run(h, from);
+}
+pub fn ts_union(h: &mut [i32], from: i32) -> i32 {
+    // The typeset of exactly the leaves in T_STK[from..] (deduplicated, no
+    // normalisation: no ANY absorption, no merging), so each contributing
+    // typeset's own leaves are in it -- format 2.0's map key_ts (program-2 §6).
+    // T_STK is cut back to from.
+    let n0: i32 = vlen(h, T_STK);
+    if !charge(h, 1 + (n0 - from)) {
+        return -1;
+    }
+    return ts_intern_run(h, from);
+}
+pub(crate) fn ts_intern_run(h: &mut [i32], from: i32) -> i32 {
+    // Deduplicate T_STK[from..] (first occurrence, creation order kept), then
+    // hash-cons by the sorted content. T_STK is cut back to from.
+    let n00: i32 = vlen(h, T_STK);
+    if n00 < from {
+        return fail(h, ERR_INTERNAL, -1);
+    }
     let e: i32 = next_epoch(h);
     let n: i32 = vlen(h, T_STK);
     let order: i32 = vlen(h, T_STK);

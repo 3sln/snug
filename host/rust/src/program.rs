@@ -186,8 +186,8 @@ impl Program {
             return Err(Error::Program("container_version"));
         }
         let format = word(bytes, 12)?;
-        // D084/D141: major 1, minor up to 1 (extension controls)
-        if format & 0xffff != 1 || format >> 16 > 1 {
+        // D084/D279: major 2, minor 0 (format 2.0, PEG groups); 1.x is refused
+        if format & 0xffff != 2 || format >> 16 > 0 {
             return Err(Error::Program("format_version"));
         }
         let (nw, nb) = (word(bytes, 16)? as usize, word(bytes, 20)? as usize);

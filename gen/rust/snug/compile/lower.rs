@@ -2,15 +2,13 @@
 // source: snug.compile.lower
 
 use crate::snug::compile::arena::*;
-use crate::snug::compile::arrays::*;
 use crate::snug::compile::bytes::*;
 use crate::snug::compile::ctl::*;
 use crate::snug::compile::ext::*;
-use crate::snug::compile::glush::*;
 use crate::snug::compile::leaf::*;
 use crate::snug::compile::lex::*;
-use crate::snug::compile::maps::*;
 use crate::snug::compile::parse::*;
+use crate::snug::compile::peg::*;
 use crate::snug::compile::rules::*;
 
 pub(crate) fn enter(h: &mut [i32], pos: i32) -> bool {
@@ -180,6 +178,9 @@ pub fn lower_init(h: &mut [i32]) -> bool {
         return false;
     }
     if !ht_init(h, T_HMEMO, 64) {
+        return false;
+    }
+    if !peg_init(h) {
         return false;
     }
     return ht_init(h, T_HCON, 128);
@@ -882,27 +883,18 @@ pub(crate) fn content_ts(h: &mut [i32], cn: i32, env: i32) -> i32 {
     return lower_type(h, cn, env);
 }
 pub(crate) fn lower_map(h: &mut [i32], node: i32, env: i32) -> i32 {
-    // One MAP leaf per top-level group choice (§4.3.1 (1)).
+    // One MAP leaf per map type: a top-level `//` is the PEG CHOICE of its
+    // group, prioritised and locking in (D270, R5), not separate leaves.
     let memo: i32 = con_find(h, node, env);
     if memo >= 0 {
         return memo;
     }
-    let g: i32 = na(h, node);
-    let from: i32 = vlen(h, T_STK);
-    let mut ci: i32 = 0;
-    let mut c: i32 = na(h, g);
-    while c >= 0 {
-        let ml: i32 = container(h, K_MAP, 0, g, env);
-        if ml < 0 {
-            return -1;
-        }
-        lsetd(h, ml, 0, -1);
-        lsetd(h, ml, 1, ci);
-        vpush1(h, T_STK, ml);
-        ci += 1;
-        c = nnext(h, c);
+    let ml: i32 = container(h, K_MAP, 0, na(h, node), env);
+    if ml < 0 {
+        return -1;
     }
-    let ts: i32 = ts_make(h, from);
+    lsetd(h, ml, 0, -1);
+    let ts: i32 = ts_of1(h, ml);
     con_find(h, node, env);
     return con_put(h, node, env, ts);
 }
@@ -1150,20 +1142,18 @@ pub(crate) fn if_neg(r: i32) -> i32 {
     }
     return 0;
 }
-pub(crate) fn m_member(h: &mut [i32], m: i32, env: i32) -> i32 {
-    // A member's altset: one entry (literal key or key typeset).
+pub(crate) fn p_member(h: &mut [i32], m: i32, env: i32) -> i32 {
+    // A member (map context): MEMBER(1, 1) over its record; p-ent applies the
+    // occurrence. A text or integer literal key is a key id; any other key (a
+    // typeset, or a byte-string, float or beyond-64-bit value before `:`, D294)
+    // is a key typeset, with or without a cut (R11).
     let key: i32 = nc(h, m);
     let kk: i32 = na(h, key);
     let pos: i32 = npos(h, m);
-    let lo: i32 = na(h, m);
-    let mut hi: i32 = nb(h, m);
     let mut kbid: i32 = -1;
     let mut kts: i32 = -1;
     let cut: i32 = nb(h, key);
     let mut never: bool = false;
-    if hi < 0 {
-        hi = INF;
-    }
     if kk == KEY_BARE {
         let t: i32 = ntok(h, key);
         let s: i32 = tk_start(h, t);
@@ -1188,13 +1178,14 @@ pub(crate) fn m_member(h: &mut [i32], m: i32, env: i32) -> i32 {
         if never && (hg(h, H_PROFILE) > 0) {
             return fail(h, ERR_PROFILE, pos);
         }
-        // D125: a byte-string, float or beyond-64-bit integer value before `:` is
-        // a literal key with a cut, which only text and integer literal keys
-        // support; it is refused, never assumed absent (a wire profile may carry
-        // any key kind, and the Program must not depend on one). `value => T`
-        // is the uncut form.
+        // D294 (withdraws D125's map_cut refusal): the value is a key typeset
+        // with the cut, matched by the key's actual representation.
         if never {
-            return fail(h, ERR_MAP_CUT, pos);
+            kbid = -1;
+            kts = lower_value(h, key);
+            if kts < 0 {
+                return -1;
+            }
         }
     }
     if kk == KEY_TYPE {
@@ -1222,330 +1213,149 @@ pub(crate) fn m_member(h: &mut [i32], m: i32, env: i32) -> i32 {
     if val < 0 {
         return -1;
     }
+    let mut mkind: i32 = 1;
+    let mut mkey: i32 = kts;
     if kbid >= 0 {
-        if lo > 1 {
-            return as_none(h);
-        }
-        if hi == 0 {
-            return as_unit(h);
-        }
-        let e: i32 = ent_new(h, 0, kbid, val, lo, 1, cut, pos);
-        if e < 0 {
-            return -1;
-        }
-        return as_single(h, e);
+        mkind = 0;
+        mkey = kbid;
     }
-    if cut == 1 {
-        return fail(h, ERR_MAP_CUT, pos);
-    }
-    let e2: i32 = ent_new(h, 1, kts, val, lo, hi, 0, pos);
-    if e2 < 0 {
+    let mr: i32 = pm_new(h, mkind, mkey, val, cut, pos);
+    if mr < 0 {
         return -1;
     }
-    return as_single(h, e2);
+    return pb_node(h, P_MEMBER, mr, 1, 1, pos);
 }
-pub(crate) fn m_unwrap(h: &mut [i32], un: i32, env: i32) -> i32 {
-    // `~name` in a group: the groups of the named map/array type(s), as choices.
+pub(crate) fn p_grouprule(h: &mut [i32], r: i32, env: i32, pos: i32) -> i32 {
+    // A group rule: its definitions as a CHOICE in rule order (App. C), or a
+    // CALL of the expansion of (rule, env) already open -- group recursion
+    // (R16; left recursion is refused once the group is complete).
+    let open: i32 = pgs_find(h, r, env);
+    if open >= 0 {
+        return pb_node(h, P_CALL, open, 0, 0, pos);
+    }
+    let node: i32 = pb_list(h, P_CHOICE, pos);
+    if node < 0 {
+        return -1;
+    }
+    pgs_push(h, r, env, node);
+    let mut d: i32 = rw(h, r, 2);
+    while d >= 0 {
+        let s: i32 = p_ent(h, nd(h, d), env);
+        if s < 0 {
+            return -1;
+        }
+        pb_add(h, node, s);
+        d = def_next(h, d);
+    }
+    pgs_pop(h);
+    return node;
+}
+pub(crate) fn p_unwrap(h: &mut [i32], un: i32, env: i32) -> i32 {
+    // `~name` in a group: the groups of the named map / array types as a CHOICE
+    // in the typeset's (creation) order; in an array, a tag's content as an
+    // entry (R17, X14). Unwrapping a container whose group is being expanded
+    // is a CALL of that expansion.
     if hg(h, H_PROFILE) > 0 {
         return fail(h, ERR_PROFILE, npos(h, un));
     }
     let ts: i32 = lower_name(h, un, env);
     let pos: i32 = npos(h, un);
+    let mode: i32 = hg(h, H_PMODE);
     if ts < 0 {
         return -1;
     }
-    let mut acc: i32 = as_none(h);
-    for i in 0..ts_n(h, ts) {
-        let l: i32 = ts_leaf(h, ts, i);
-        let k: i32 = lk(h, l);
-        if k == K_MAP {
-            let g: i32 = m_group(h, lw(h, l, 12), ld(h, l, 1), lw(h, l, 13));
-            if g < 0 {
-                return -1;
-            }
-            acc = as_union(h, acc, g, pos);
-        } else if k == K_ARRAY {
-            let g2: i32 = m_group(h, lw(h, l, 12), -1, lw(h, l, 13));
-            if g2 < 0 {
-                return -1;
-            }
-            acc = as_union(h, acc, g2, pos);
-        } else {
-            return fail(h, ERR_UNWRAP, pos);
-        }
-        if acc < 0 {
-            return -1;
-        }
-    }
-    return acc;
-}
-pub(crate) fn m_grouprule(h: &mut [i32], r: i32, env: i32, pos: i32) -> i32 {
-    // A group rule's altset: the choice of its definitions' entries.
-    if gstack_find(h, r, env) >= 0 {
-        return fail(h, ERR_GROUP_RECURSION, pos);
-    }
-    gstack_push(h, r, env);
-    let saved: i32 = hg(h, H_CUR_RULE);
-    let mut acc: i32 = as_none(h);
-    let mut d: i32 = rw(h, r, 2);
-    while d >= 0 {
-        let s: i32 = m_ent(h, nd(h, d), env);
-        if s < 0 {
-            return -1;
-        }
-        acc = as_union(h, acc, s, pos);
-        if acc < 0 {
-            return -1;
-        }
-        d = def_next(h, d);
-    }
-    hs(h, H_CUR_RULE, saved);
-    gstack_pop(h);
-    return acc;
-}
-pub(crate) fn m_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
-    // The altset of one group entry in a map context, occurrence applied.
-    let pos: i32 = npos(h, ent);
-    if !enter(h, pos) {
-        return -1;
-    }
-    let k: i32 = nk(h, ent);
-    let lo: i32 = ent_lo(h, ent);
-    let mut hi: i32 = ent_hi(h, ent);
-    let mut base: i32 = -1;
-    if hi < 0 {
-        hi = INF;
-    }
-    if k == N_MEMBER {
-        let mm: i32 = m_member(h, ent, env);
-        leave(h);
-        return mm;
-    }
-    if k == N_SUBGRP {
-        base = m_group(h, nc(h, ent), -1, env);
-    }
-    if (k == N_ENT) || (k == N_TYPE) {
-        let gr: i32 = group_ref(h, ent_type(h, ent), env);
-        if gr == (-1) {
-            return -1;
-        }
-        if gr == (-2) {
-            return fail(h, ERR_MAP_KEY, pos);
-        }
-        // D251: an unplugged `$$x` is the empty group choice: no alternative.
-        if gr == (-4) {
-            base = as_none(h);
-        }
-        if gr == (-3) {
-            base = m_unwrap(h, hg(h, H_R0), env);
-        }
-        if gr >= 0 {
-            base = m_grouprule(h, gr, env_of(h), pos);
-        }
-    }
-    if base < 0 {
-        return -1;
-    }
-    leave(h);
-    return as_occur(h, base, lo, hi, pos);
-}
-pub(crate) fn m_seq(h: &mut [i32], gc: i32, env: i32) -> i32 {
-    // A sequence's altset: the n-ary product of its entries' altsets.
-    let from: i32 = vlen(h, T_PSTK);
-    let mut n: i32 = 0;
-    let mut e: i32 = na(h, gc);
-    while e >= 0 {
-        let s: i32 = m_ent(h, e, env);
-        if s < 0 {
-            return -1;
-        }
-        vpush1(h, T_PSTK, s);
-        n += 1;
-        e = nnext(h, e);
-    }
-    let r: i32 = as_product_many(h, from, n, npos(h, gc));
-    vtrunc(h, T_PSTK, from);
-    return r;
-}
-pub(crate) fn m_group(h: &mut [i32], g: i32, choice: i32, env: i32) -> i32 {
-    // The altset of group g (every choice, or only `choice` >= 0).
-    let mut acc: i32 = as_none(h);
-    let mut c: i32 = na(h, g);
-    let mut i: i32 = 0;
-    while c >= 0 {
-        if (choice < 0) || (choice == i) {
-            let s: i32 = m_seq(h, c, env);
-            if s < 0 {
-                return -1;
-            }
-            acc = as_union(h, acc, s, npos(h, c));
-            if acc < 0 {
-                return -1;
-            }
-        }
-        i += 1;
-        c = nnext(h, c);
-    }
-    return acc;
-}
-pub(crate) fn literal_only_choice(h: &[i32], a: i32) -> bool {
-    // Two or more alternatives, none with a key-typeset entry: a factor candidate.
-    if as_n(h, a) < 2 {
-        return false;
-    }
-    for i in 0..as_n(h, a) {
-        let off: i32 = as_aoff(h, a, i);
-        for j in 0..as_alen(h, a, i) {
-            if ew(h, alt_ent(h, off, j), 0) == 1 {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-pub(crate) fn process_map(h: &mut [i32], l: i32) -> i32 {
-    let g: i32 = lw(h, l, 12);
-    let choice: i32 = ld(h, l, 1);
-    let env: i32 = lw(h, l, 13);
-    let pos: i32 = npos(h, g);
-    let from: i32 = vlen(h, T_PSTK);
-    let mut gc: i32 = na(h, g);
-    let mut n: i32 = 0;
-    for _i in 0..choice {
-        gc = nnext(h, gc);
-    }
-    let mut e: i32 = na(h, gc);
-    while e >= 0 {
-        let s: i32 = m_ent(h, e, env);
-        if s < 0 {
-            return -1;
-        }
-        vpush1(h, T_PSTK, s);
-        if (nk(h, e) != N_MEMBER) && literal_only_choice(h, s) {
-            vpush1(h, T_PSTK, 1);
-        } else {
-            vpush1(h, T_PSTK, 0);
-        }
-        n += 1;
-        e = nnext(h, e);
-    }
-    let id: i32 = map_finish(h, from, n, pos);
-    vtrunc(h, T_PSTK, from);
-    if id == (-1) {
-        return -1;
-    }
-    if id == (-2) {
-        // No satisfiable alternative: the map leaf is dead (dropped at lowering).
-        lsetd(h, l, 2, 1);
-        return 0;
-    }
-    lsetd(h, l, 0, id);
-    return 0;
-}
-pub(crate) fn counterable(lo: i32, hi: i32) -> bool {
-    return (lo >= 2) || ((hi >= 2) && (hi != INF));
-}
-pub(crate) fn a_wrap(h: &mut [i32], child: i32, lo: i32, hi: i32) -> i32 {
-    // child with occurrence lo*hi: itself, or a repetition (a tentative counter
-    // when it is a single position, snug.compile.arrays decides).
-    if (child < 0) || ((lo == 1) && (hi == 1)) {
-        return child;
-    }
-    let rp: i32 = g_node(h, G_REP, child, lo, hi);
-    if rp < 0 {
-        return -1;
-    }
-    if (gk(h, child) == G_POS) && counterable(lo, hi) {
-        gset(h, rp, 4, 1);
-    }
-    return rp;
-}
-pub(crate) fn a_grouprule(h: &mut [i32], r: i32, env: i32, tailfrom: i32, pos: i32) -> i32 {
-    // A group rule inside an array: a frame its tail may re-enter, or a
-    // tail-recursive reference to a frame already open (regular recursion).
-    let open: i32 = gstack_find(h, r, env);
-    if open >= 0 {
-        if open < tailfrom {
-            return fail(h, ERR_GROUP_RECURSION, pos);
-        }
-        return g_node(h, G_REC, open, 0, 0);
-    }
-    let frame: i32 = vlen(h, T_GSTACK) / 2;
-    let alt: i32 = g_list(h, G_ALT);
+    let alt: i32 = pb_list(h, P_CHOICE, pos);
     if alt < 0 {
         return -1;
     }
-    gstack_push(h, r, env);
-    let mut d: i32 = rw(h, r, 2);
-    while d >= 0 {
-        let s: i32 = a_ent(h, nd(h, d), env, tailfrom, true);
-        if s < 0 {
-            return -1;
-        }
-        g_add(h, alt, s);
-        d = def_next(h, d);
-    }
-    gstack_pop(h);
-    return g_node(h, G_FRAME, alt, frame, 0);
-}
-pub(crate) fn a_unwrap(h: &mut [i32], un: i32, env: i32, tailfrom: i32) -> i32 {
-    if hg(h, H_PROFILE) > 0 {
-        return fail(h, ERR_PROFILE, npos(h, un));
-    }
-    let ts: i32 = lower_name(h, un, env);
-    let pos: i32 = npos(h, un);
-    let alt: i32 = g_list(h, G_ALT);
-    if (ts < 0) || (alt < 0) {
-        return -1;
-    }
     for i in 0..ts_n(h, ts) {
         let l: i32 = ts_leaf(h, ts, i);
         let k: i32 = lk(h, l);
-        let mut choice: i32 = -1;
-        if k == K_MAP {
-            choice = ld(h, l, 1);
+        let mut child: i32 = -1;
+        if (k == K_MAP) || (k == K_ARRAY) {
+            let g: i32 = lw(h, l, 12);
+            let e: i32 = lw(h, l, 13);
+            let ukey: i32 = (-2) - g;
+            let open: i32 = pgs_find(h, ukey, e);
+            if open >= 0 {
+                child = pb_node(h, P_CALL, open, 0, 0, pos);
+            } else {
+                let frame: i32 = pb_list(h, P_CHOICE, pos);
+                if frame < 0 {
+                    return -1;
+                }
+                pgs_push(h, ukey, e, frame);
+                let sub: i32 = p_group(h, g, e);
+                if sub < 0 {
+                    return -1;
+                }
+                pb_add(h, frame, sub);
+                pgs_pop(h);
+                child = frame;
+            }
         }
-        if (k != K_MAP) && (k != K_ARRAY) {
+        if (k == K_TAG) || (k == K_TAGSET) {
+            if mode == 1 {
+                return fail(h, ERR_MAP_KEY, pos);
+            }
+            let cts: i32 = content_ts(h, lw(h, l, 12), lw(h, l, 13));
+            if cts < 0 {
+                return -1;
+            }
+            child = pb_node(h, P_ENTRY, cts, 0, 0, pos);
+        }
+        if (k == K_INT) && (lflags(h, l) != 0) {
+            if mode == 1 {
+                return fail(h, ERR_MAP_KEY, pos);
+            }
+            // an unconstrained bignum tag: its content is a byte string
+            let bl: i32 = mk_bytes(h, 0, INF, -1);
+            let bts: i32 = ts_of1(h, bl);
+            child = pb_node(h, P_ENTRY, bts, 0, 0, pos);
+        }
+        if child < 0 {
+            if erred(h) {
+                return -1;
+            }
             return fail(h, ERR_UNWRAP, pos);
         }
-        let g: i32 = a_group(h, lw(h, l, 12), choice, lw(h, l, 13), tailfrom);
-        if g < 0 {
-            return -1;
-        }
-        g_add(h, alt, g);
+        pb_add(h, alt, child);
     }
     return alt;
 }
-pub(crate) fn a_ent(h: &mut [i32], ent: i32, env: i32, tailfrom: i32, last: bool) -> i32 {
-    // One group entry in an array context. Keys are labels. tailfrom: frames
-    // with an index >= tailfrom may be re-entered from here (tail position).
+pub(crate) fn p_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
+    // One group entry: ENTRY (arrays: member keys are labels) or MEMBER (maps),
+    // a parenthesised group, a group rule, an unwrap, or an unplugged `$$`
+    // socket (FAIL, R14 / D251); the occurrence applied by pb-rep. `n*m` with
+    // m < n is refused (D293).
     let pos: i32 = npos(h, ent);
     let k: i32 = nk(h, ent);
     let lo: i32 = ent_lo(h, ent);
     let mut hi: i32 = ent_hi(h, ent);
-    let mut tf: i32 = tailfrom;
+    let mode: i32 = hg(h, H_PMODE);
     if !enter(h, pos) {
         return -1;
     }
     if hi < 0 {
         hi = INF;
     }
-    if !last {
-        tf = vlen(h, T_GSTACK) / 2;
-    }
-    if (hi > 1) || (lo > 1) {
-        tf = vlen(h, T_GSTACK) / 2;
+    if hi < lo {
+        return fail(h, ERR_SYNTAX, pos);
     }
     let mut child: i32 = -1;
     if k == N_MEMBER {
-        let vt: i32 = lower_type(h, nd(h, ent), env);
-        if vt < 0 {
-            return -1;
+        if mode == 0 {
+            let vt: i32 = lower_type(h, nd(h, ent), env);
+            if vt < 0 {
+                return -1;
+            }
+            child = pb_node(h, P_ENTRY, vt, 0, 0, pos);
+        } else {
+            child = p_member(h, ent, env);
         }
-        child = g_node(h, G_POS, vt, 0, 0);
     }
     if k == N_SUBGRP {
-        child = a_group(h, nc(h, ent), -1, env, tf);
+        child = p_group(h, nc(h, ent), env);
     }
     if (k == N_ENT) || (k == N_TYPE) {
         let gr: i32 = group_ref(h, ent_type(h, ent), env);
@@ -1553,66 +1363,68 @@ pub(crate) fn a_ent(h: &mut [i32], ent: i32, env: i32, tailfrom: i32, last: bool
             return -1;
         }
         if gr == (-2) {
+            if mode == 1 {
+                return fail(h, ERR_MAP_KEY, pos);
+            }
             let vt2: i32 = lower_type(h, ent_type(h, ent), env);
             if vt2 < 0 {
                 return -1;
             }
-            child = g_node(h, G_POS, vt2, 0, 0);
+            child = pb_node(h, P_ENTRY, vt2, 0, 0, pos);
         }
-        // D251: an unplugged `$$x` is the empty group choice: an empty G_ALT.
         if gr == (-4) {
-            child = g_list(h, G_ALT);
+            child = pb_node(h, P_FAIL, -1, 0, 0, pos);
         }
         if gr == (-3) {
-            child = a_unwrap(h, hg(h, H_R0), env, tf);
+            child = p_unwrap(h, hg(h, H_R0), env);
         }
         if gr >= 0 {
-            child = a_grouprule(h, gr, env_of(h), tf, pos);
+            child = p_grouprule(h, gr, env_of(h), pos);
         }
     }
     leave(h);
     if child < 0 {
         return -1;
     }
-    return a_wrap(h, child, lo, hi);
+    return pb_rep(h, child, lo, hi, pos);
 }
-pub(crate) fn a_group(h: &mut [i32], g: i32, choice: i32, env: i32, tailfrom: i32) -> i32 {
-    let alt: i32 = g_list(h, G_ALT);
+pub(crate) fn p_group(h: &mut [i32], g: i32, env: i32) -> i32 {
+    // A group: a CHOICE, in source order, of SEQs of its entries.
+    let alt: i32 = pb_list(h, P_CHOICE, npos(h, g));
     let mut c: i32 = na(h, g);
-    let mut i: i32 = 0;
     if alt < 0 {
         return -1;
     }
     while c >= 0 {
-        if (choice < 0) || (choice == i) {
-            let sq: i32 = g_list(h, G_SEQ);
-            let mut e: i32 = na(h, c);
-            if sq < 0 {
+        let sq: i32 = pb_list(h, P_SEQ, npos(h, c));
+        let mut e: i32 = na(h, c);
+        if sq < 0 {
+            return -1;
+        }
+        while e >= 0 {
+            let s: i32 = p_ent(h, e, env);
+            if s < 0 {
                 return -1;
             }
-            while e >= 0 {
-                let s: i32 = a_ent(h, e, env, tailfrom, nnext(h, e) < 0);
-                if s < 0 {
-                    return -1;
-                }
-                g_add(h, sq, s);
-                e = nnext(h, e);
-            }
-            g_add(h, alt, sq);
+            pb_add(h, sq, s);
+            e = nnext(h, e);
         }
-        i += 1;
+        pb_add(h, alt, sq);
         c = nnext(h, c);
     }
     return alt;
 }
-pub(crate) fn process_array(h: &mut [i32], l: i32) -> i32 {
+pub(crate) fn process_group(h: &mut [i32], l: i32, mode: i32) -> i32 {
+    // Fill an ARRAY (mode 0) or MAP (mode 1) leaf: its group's PEG program and
+    // table (snug.compile.peg).
     let g: i32 = lw(h, l, 12);
     let env: i32 = lw(h, l, 13);
-    let root: i32 = a_group(h, g, -1, env, 0);
+    peg_begin(h, mode);
+    let root: i32 = p_group(h, g, env);
     if root < 0 {
         return -1;
     }
-    let id: i32 = arr_finish(h, root, npos(h, g));
+    let id: i32 = peg_finish(h, root, npos(h, g));
     if id < 0 {
         return -1;
     }
@@ -1755,12 +1567,12 @@ pub fn process_work(h: &mut [i32]) -> i32 {
             }
         }
         if k == K_ARRAY {
-            if process_array(h, l) < 0 {
+            if process_group(h, l, 0) < 0 {
                 return -1;
             }
         }
         if k == K_MAP {
-            if process_map(h, l) < 0 {
+            if process_group(h, l, 1) < 0 {
                 return -1;
             }
         }

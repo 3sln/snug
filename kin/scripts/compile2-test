@@ -1,0 +1,17 @@
+#!/bin/sh
+# The format 2.0 compiler and verifier gates (P8.5 phase 1, D270; compile-only
+# until the VM lands in phase 2), JS and Rust:
+#     kin/scripts/compile2-test [corruptions per program] [seed]
+#
+# Emits the compiler's own sources (kin/scripts/compile-emit) so the gate runs
+# what the sources say, then builds the Rust subset crate in DEBUG (overflow
+# checks on: a broken arithmetic guarantee is a panic, which fails the gate).
+set -e
+cd "$(dirname "$0")/../.."
+bb -cp kin/src:../kin/src kin/scripts/compile-emit > /dev/null
+crate=.cache/snug-compile-gate
+kin/scripts/compile-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin compile2-test 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/compile2-test.mjs "$crate/target/debug/compile2-test" "$@"

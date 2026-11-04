@@ -57,14 +57,15 @@ function lim(v) { return v === undefined ? -1 : Math.min(v, 0x7fffffff); }
 const td = new TextDecoder('utf-8', { fatal: true });
 /** A Program (P: Int32Array, B: Uint8Array) the host trusts (architecture §5.2). */
 export class Program {
-  constructor(P, B, { verify, controls } = {}) {
+  constructor(P, B, { verify, verifyWords, controls } = {}) {
     // copy on load: P and B stay private after verification (program.md §11)
     this.P = Int32Array.from(P); this.B = Uint8Array.from(B);
     if (verify) {
-      // the verifier's scratch: epoch and marks (program.md §11, §12.1); a
-      // corrupt Program's words never size more than 2^20 marks
+      // the verifier's scratch: epoch, marks and (format 2.0) the PEG working area
+      // (program.md §11, §12.1; vm-verify-words); a corrupt Program's words never
+      // size more than 2^20 marks or the PEG hard maxima
       const m = Math.min(Math.max(0, this.P[16] | 0), 1 << 20);
-      const S = new Int32Array(64 + 2 * m);
+      const S = new Int32Array(Math.max(64 + 2 * m, verifyWords ? verifyWords(this.P, m) + 16 : 0));
       S[16] = 1; S[17] = m;
       const r = verify(this.P, this.B, S);
       if (r !== 0) throw new Error(`snug: Program refused by vm-verify (word ${S[35]}, check ${S[36]})`);
