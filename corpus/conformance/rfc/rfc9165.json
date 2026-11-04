@@ -1,0 +1,470 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug conformance corpus v1; compileObservation is evidence, never schemaError expectation; context is labelled harness text; ruby is differential evidence",
+  "generator": "corpus/tools/export-rfc.mjs",
+  "rfc": 9165,
+  "suites": [
+    {
+      "name": "RFC 9165 figure-1",
+      "cddl": "interval<BASE> = (\n  BASE => int             ; lower bound\n  (BASE .plus 1) => int   ; upper bound\n  ? (BASE .plus 2) => int ; tolerance\n)\n\nX = 0\nY = 3\nrect = {\n  interval<X>\n  interval<Y>\n}\n",
+      "source": {
+        "rfc": 9165,
+        "section": "2.1.  Numeric Addition",
+        "logicalLines": [
+          148,
+          159
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "rect",
+          "hex": "a40001010203030404",
+          "expect": true,
+          "note": "§2.1 expanded X/Y interval labels",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "rect",
+          "hex": "a200010102",
+          "expect": false,
+          "note": "Y interval mandatory",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-1",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9165 figure-2",
+      "cddl": "c = \"foo\" .cat '\n  bar\n  baz\n'\n; on a system where the newline is \\n, is the same string as:\nb = \"foo\\n  bar\\n  baz\\n\"\n",
+      "source": {
+        "rfc": 9165,
+        "section": "2.2.  String Concatenation",
+        "logicalLines": [
+          184,
+          189
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "c",
+          "hex": "70666f6f0a20206261720a202062617a0a",
+          "expect": true,
+          "note": "§2.2 exact bytes of multiline literal",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "c",
+          "hex": "69666f6f62617262617a",
+          "expect": false,
+          "note": "newlines and spaces significant",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-2",
+      "compileObservation": {
+        "ok": false,
+        "code": "control_value",
+        "line": 1,
+        "column": 11
+      }
+    },
+    {
+      "name": "RFC 9165 figure-3",
+      "cddl": "oid = bytes .abnfb (\"oid\" .det cbor-tags-oid)\nroid = bytes .abnfb (\"roid\" .det cbor-tags-oid)\n\ncbor-tags-oid = '\n  oid = 1*arc\n  roid = *arc\n  arc = [nlsb] %x00-7f\n  nlsb = %x81-ff *%x80-ff\n'\n",
+      "source": {
+        "rfc": 9165,
+        "section": "2.3.  String Concatenation with Dedenting",
+        "logicalLines": [
+          207,
+          215
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "oid",
+          "hex": "4100",
+          "expect": true,
+          "note": "§2.3 one terminating arc",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "oid",
+          "hex": "40",
+          "expect": false,
+          "note": "oid requires 1*arc",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "oid",
+          "hex": "4181",
+          "expect": false,
+          "note": "unterminated arc",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-3",
+      "compileObservation": {
+        "ok": false,
+        "code": "unsupported_control",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "RFC 9165 figure-4",
+      "cddl": "oid = bytes .abnfb 'oid\noid = 1*arc\nroid = *arc\narc = [nlsb] %x00-7f\nnlsb = %x81-ff *%x80-ff\n'\n",
+      "source": {
+        "rfc": 9165,
+        "section": "2.3.  String Concatenation with Dedenting",
+        "logicalLines": [
+          225,
+          230
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "oid",
+          "hex": "4100",
+          "expect": true,
+          "note": "§2.3 one terminating arc",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "oid",
+          "hex": "40",
+          "expect": false,
+          "note": "oid requires 1*arc",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "oid",
+          "hex": "4181",
+          "expect": false,
+          "note": "unterminated arc",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-4",
+      "compileObservation": {
+        "ok": false,
+        "code": "unsupported_control",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "RFC 9165 figure-5",
+      "cddl": "; for RFC 8943\nTag1004 = #6.1004(text .abnf full-date)\n; for RFC 8949\nTag0 = #6.0(text .abnf date-time)\n\nfull-date = \"full-date\" .cat rfc3339\ndate-time = \"date-time\" .cat rfc3339\n\n; Note the trick of idiomatically starting with a newline, separating\n;   off the element in the concatenations above from the rule-list\nrfc3339 = '\n   date-fullyear   = 4DIGIT\n   date-month      = 2DIGIT  ; 01-12\n   date-mday       = 2DIGIT  ; 01-28, 01-29, 01-30, 01-31 based on\n                             ; month/year\n   time-hour       = 2DIGIT  ; 00-23\n   time-minute     = 2DIGIT  ; 00-59\n   time-second     = 2DIGIT  ; 00-58, 00-59, 00-60 based on leap sec\n                             ; rules\n   time-secfrac    = \".\" 1*DIGIT\n   time-numoffset  = (\"+\" / \"-\") time-hour \":\" time-minute\n   time-offset     = \"Z\" / time-numoffset\n\n   partial-time    = time-hour \":\" time-minute \":\" time-second\n                     [time-secfrac]\n   full-date       = date-fullyear \"-\" date-month \"-\" date-mday\n   full-time       = partial-time time-offset\n\n   date-time       = full-date \"T\" full-time\n' .det rfc5234-core\n\nrfc5234-core = '\n   DIGIT          =  %x30-39 ; 0-9\n   ; abbreviated here\n'\n",
+      "source": {
+        "rfc": 9165,
+        "section": "3.  Embedded ABNF",
+        "logicalLines": [
+          312,
+          346
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "Tag1004",
+          "hex": "d903ec6a323032342d30312d3031",
+          "expect": true,
+          "note": "§3 full-date ABNF",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Tag1004",
+          "hex": "d903ec6a6e6f742d612d64617465",
+          "expect": false,
+          "note": "ABNF shape fails",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Tag0",
+          "hex": "c074323031332d30332d32315432303a30343a30305a",
+          "expect": true,
+          "note": "§3 date-time ABNF",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-5",
+      "compileObservation": {
+        "ok": false,
+        "code": "unsupported_control",
+        "line": 2,
+        "column": 24
+      }
+    },
+    {
+      "name": "RFC 9165 figure-6-ellipsis",
+      "cddl": "foo = {\n  kind: bar / baz .feature ([\"foo-extensions\", \"bazify\"])\n}\nbar = ...\nbaz = ... ; complex stuff that doesn't all need to be in the detail\n",
+      "source": {
+        "rfc": 9165,
+        "section": "4.  Features",
+        "logicalLines": [
+          379,
+          383
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [],
+      "id": "figure-6-ellipsis",
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 4,
+        "column": 7
+      },
+      "noCasesReason": "RFC leaves bar/baz as ellipses; no data membership defined"
+    },
+    {
+      "name": "RFC 9165 figure-7",
+      "cddl": "person = {\n  ? name: text\n  ? organization: text\n  $$person-extensions\n  * (text .feature \"further-person-extension\") => any\n}\n\n$$person-extensions //= (? bloodgroup: text)\n",
+      "source": {
+        "rfc": 9165,
+        "section": "4.  Features",
+        "logicalLines": [
+          404,
+          411
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a3646e616d65614166667574757265016a626c6f6f6467726f7570614f",
+          "expect": true,
+          "note": "§4 feature annotations do not restrict wildcard",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a1646e616d6500",
+          "expect": false,
+          "note": "known member retains text type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-7",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9165 figure-8",
+      "cddl": "allowed-types = number / text / bool / null\n              / [* number] / [* text] / [* bool]\n              / (any .feature \"allowed-type-extension\")\n",
+      "source": {
+        "rfc": 9165,
+        "section": "4.  Features",
+        "logicalLines": [
+          418,
+          420
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "allowed-types",
+          "hex": "a0",
+          "expect": true,
+          "note": "§4 any extension alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "allowed-types",
+          "hex": "d903e800",
+          "expect": true,
+          "note": "§4 any includes tagged item; no invalid CBOR",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-8",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9165 figure-9",
+      "cddl": "SenML-Record = {\n; ...\n  ? v => number\n; ...\n}\nv = JC<\"v\", 2>\nJC<J,C> = J .feature \"json\" / C .feature \"cbor\"\n",
+      "source": {
+        "rfc": 9165,
+        "section": "4.  Features",
+        "logicalLines": [
+          433,
+          439
+        ],
+        "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "SenML-Record",
+          "hex": "a1617601",
+          "expect": true,
+          "note": "§4 JSON feature enabled (annotation-only)",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "SenML-Record",
+          "hex": "a10201",
+          "expect": true,
+          "note": "CBOR feature annotation",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "SenML-Record",
+          "hex": "a1026178",
+          "expect": false,
+          "note": "measurement value number",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-9",
+      "compileObservation": {
+        "ok": true
+      }
+    }
+  ]
+}

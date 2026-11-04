@@ -1,0 +1,89 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "sources": [
+    {
+      "rfc": 8949,
+      "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+    },
+    {
+      "rfc": 8610,
+      "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+    },
+    {
+      "rfc": 9165,
+      "sha256": "94f86116c04fde0f11d54576465181090ec33983d78db82527c0703a41976774"
+    },
+    {
+      "rfc": 9682,
+      "sha256": "d35602e7f784e509a5984283ea8d998adfee23f086ad0d77bd22f98c6cdea89c"
+    },
+    {
+      "rfc": 8392,
+      "sha256": "9021ff7c4d274cf34873fe4f4fb17c4fe323247dd0f96bfcab54909bfcdc5f13"
+    },
+    {
+      "rfc": 9052,
+      "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+    },
+    {
+      "rfc": 8746,
+      "sha256": "26d0f7d0ee9d2e7dedc382cff6ad1dfe74d25f28fb66b20157a3bbd78baf4fe8"
+    },
+    {
+      "rfc": 8742,
+      "sha256": "4462966836b60f42ebae9b5f1d2a479c328e16f0380a3434311a083bccbce30e"
+    }
+  ],
+  "summary": [
+    {
+      "rfc": 8610,
+      "suites": 68,
+      "cases": 286,
+      "rawCompileFailures": 13,
+      "effectiveCompileFailures": 5,
+      "rubyDisagreements": 7,
+      "rubyUnavailable": 79,
+      "rubyNotRun": 0
+    },
+    {
+      "rfc": 9052,
+      "suites": 25,
+      "cases": 68,
+      "rawCompileFailures": 22,
+      "effectiveCompileFailures": 0,
+      "rubyDisagreements": 0,
+      "rubyUnavailable": 0,
+      "rubyNotRun": 0
+    },
+    {
+      "rfc": 9165,
+      "suites": 9,
+      "cases": 20,
+      "rawCompileFailures": 5,
+      "effectiveCompileFailures": 5,
+      "rubyDisagreements": 0,
+      "rubyUnavailable": 0,
+      "rubyNotRun": 0
+    },
+    {
+      "rfc": 9682,
+      "suites": 5,
+      "cases": 11,
+      "rawCompileFailures": 2,
+      "effectiveCompileFailures": 2,
+      "rubyDisagreements": 0,
+      "rubyUnavailable": 2,
+      "rubyNotRun": 0
+    },
+    {
+      "rfc": 8392,
+      "suites": 1,
+      "cases": 16,
+      "rawCompileFailures": 0,
+      "effectiveCompileFailures": 0,
+      "rubyDisagreements": 0,
+      "rubyUnavailable": 0,
+      "rubyNotRun": 0
+    }
+  ]
+}

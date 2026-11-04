@@ -1,0 +1,227 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "RFC diagnostic examples; structural, not cryptographic validation",
+  "examples": [
+    {
+      "hex": "d8608443a10101a1054c02d1f7e6f26c43d4868d87ce582464f84d913ba60a76070a9a48f26e97e863e2852948658f0811139868826e89218a75715b818440a101225818dbd43c4e9d719c27c6275c67d628d493f090593db8218f11818344a1013818a220a401022001215820b2add44368ea6d641f9ca9af308b4079aeb519f11e9b8a55a600b21233e86e6822f40458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c6540",
+      "diagnostic": "96(\n  [ / COSE_Encrypt /\n    / protected h'a10101' / << {\n        / alg / 1:1 / AES-GCM 128 /\n      } >>,\n    / unprotected / {\n      / iv / 5:h'02d1f7e6f26c43d4868d87ce'\n    },\n    / ciphertext / h'64f84d913ba60a76070a9a48f26e97e863e2852948658f0\n811139868826e89218a75715b',\n    / recipients / [\n      [ / COSE_Recipient /\n        / protected / h'',\n        / unprotected / {\n          / alg / 1:-3 / A128KW /\n        },\n        / ciphertext / h'dbd43c4e9d719c27c6275c67d628d493f090593db82\n18f11',\n        / recipients / [\n          [ / COSE_Recipient /\n            / protected h'a1013818' / << {\n                / alg / 1:-25 / ECDH-ES + HKDF-256 /\n              } >> ,\n            / unprotected / {\n              / ephemeral / -1:{\n                / kty / 1:2,\n                / crv / -1:1,\n                / x / -2:h'b2add44368ea6d641f9ca9af308b4079aeb519f11\ne9b8a55a600b21233e86e68',\n                / y / -3:false\n              },\n              / kid / 4:'meriadoc.brandybuck@buckland.example'\n            },\n            / ciphertext / h''\n          ]\n        ]\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "Appendix B.  Two Layers of Recipient Information",
+        "lines": [
+          2860,
+          2899
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8628440a054546869732069732074686520636f6e74656e742e818343a10126a1044231315840e2aeafd40d69d19dfe6e52077c5d7ff4e408282cbefb5d06cbf414af2e19d982ac45ac98b8544c908b4507de1e90b717c3d34816fe926a2b98f53afd2fa0f30a",
+      "diagnostic": "98(\n  [\n    / protected / h'',\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / signatures / [\n      [\n        / protected h'a10126' / << {\n            / alg / 1:-7 / ECDSA 256 /\n          } >>,\n        / unprotected / {\n          / kid / 4:'11'\n        },\n        / signature / h'e2aeafd40d69d19dfe6e52077c5d7ff4e408282cbefb\n5d06cbf414af2e19d982ac45ac98b8544c908b4507de1e90b717c3d34816fe926a2b\n98f53afd2fa0f30a'\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.1.1.  Single Signature",
+        "lines": [
+          2950,
+          2969
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8628440a054546869732069732074686520636f6e74656e742e828343a10126a1044231315840e2aeafd40d69d19dfe6e52077c5d7ff4e408282cbefb5d06cbf414af2e19d982ac45ac98b8544c908b4507de1e90b717c3d34816fe926a2b98f53afd2fa0f30a8344a1013823a104581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c65588400a2d28a7c2bdb1587877420f65adf7d0b9a06635dd1de64bb62974c863f0b160dd2163734034e6ac003b01e8705524c5c4ca479a952f0247ee8cb0b4fb7397ba08d009e0c8bf482270cc5771aa143966e5a469a09f613488030c5b07ec6d722e3835adb5b2d8c44e95ffb13877dd2582866883535de3bb03d01753f83ab87bb4f7a0297",
+      "diagnostic": "98(\n  [\n    / protected / h'',\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / signatures / [\n      [\n        / protected h'a10126' / << {\n            / alg / 1:-7 / ECDSA 256 /\n          } >>,\n        / unprotected / {\n          / kid / 4:'11'\n        },\n        / signature / h'e2aeafd40d69d19dfe6e52077c5d7ff4e408282cbefb\n5d06cbf414af2e19d982ac45ac98b8544c908b4507de1e90b717c3d34816fe926a2b\n98f53afd2fa0f30a'\n      ],\n      [\n        / protected h'a1013823' / << {\n            / alg / 1:-36 / ECDSA 521 /\n          } >> ,\n        / unprotected / {\n          / kid / 4:'bilbo.baggins@hobbiton.example'\n        },\n        / signature / h'00a2d28a7c2bdb1587877420f65adf7d0b9a06635dd1\nde64bb62974c863f0b160dd2163734034e6ac003b01e8705524c5c4ca479a952f024\n7ee8cb0b4fb7397ba08d009e0c8bf482270cc5771aa143966e5a469a09f613488030\nc5b07ec6d722e3835adb5b2d8c44e95ffb13877dd2582866883535de3bb03d01753f\n83ab87bb4f7a0297'\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.1.2.  Multiple Signers",
+        "lines": [
+          2981,
+          3013
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8628456a2687265736572766564f40281687265736572766564a054546869732069732074686520636f6e74656e742e818343a10126a10442313158403fc54702aa56e1b2cb20284294c9106a63f91bac658d69351210a031d8fc7c5ff3e4be39445b1a3e83e1510d1aca2f2e8a7c081c7645042b18aba9d1fad1bd9c",
+      "diagnostic": "98(\n  [\n    / protected h'a2687265736572766564f40281687265736572766564' /\n    << {\n        \"reserved\":false,\n        / crit / 2:[\n          \"reserved\"\n        ]\n      } >>,\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / signatures / [\n      [\n        / protected h'a10126' / << {\n            / alg / 1:-7 / ECDSA 256 /\n          } >>,\n        / unprotected / {\n          / kid / 4:'11'\n        },\n        / signature / h'3fc54702aa56e1b2cb20284294c9106a63f91bac658d\n69351210a031d8fc7c5ff3e4be39445b1a3e83e1510d1aca2f2e8a7c081c7645042b\n18aba9d1fad1bd9c'\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.1.3.  Signature with Criticality",
+        "lines": [
+          3025,
+          3050
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d28443a10126a10442313154546869732069732074686520636f6e74656e742e58408eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36",
+      "diagnostic": "18(\n  [\n    / protected h'a10126' / << {\n        / alg / 1:-7 / ECDSA 256 /\n      } >>,\n    / unprotected / {\n      / kid / 4:'11'\n    },\n    / payload / 'This is the content.',\n    / signature / h'8eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4\nd25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5\na4c345cacb36'\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.2.1.  Single ECDSA Signature",
+        "lines": [
+          3062,
+          3075
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8608443a10101a1054cc9cf4df2fe6c632bf788641358247adbe2709ca818fb415f1e5df66f4e1a51053ba6d65a1a0c52a357da7a644b8070a151b0818344a1013818a220a40102200121582098f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91d628022f50458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c6540",
+      "diagnostic": "96(\n  [\n    / protected h'a10101' / << {\n        / alg / 1:1 / AES-GCM 128 /\n      } >>,\n    / unprotected / {\n      / iv / 5:h'c9cf4df2fe6c632bf7886413'\n    },\n    / ciphertext / h'7adbe2709ca818fb415f1e5df66f4e1a51053ba6d65a1a0\nc52a357da7a644b8070a151b0',\n    / recipients / [\n      [\n        / protected h'a1013818' / << {\n            / alg / 1:-25 / ECDH-ES + HKDF-256 /\n          } >>,\n        / unprotected / {\n          / ephemeral / -1:{\n            / kty / 1:2,\n            / crv / -1:1,\n            / x / -2:h'98f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbf\nbf054e1c7b4d91d6280',\n            / y / -3:true\n          },\n          / kid / 4:'meriadoc.brandybuck@buckland.example'\n        },\n        / ciphertext / h''\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.3.1.  Direct ECDH",
+        "lines": [
+          3089,
+          3118
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8608443a1010aa1054d89f52f65a1c580933b5261a76c581c753548a19b1307084ca7b2056924ed95f2e3b17006dfe931b687b847818343a10129a2335061616262636364646565666667676868044a6f75722d73656372657440",
+      "diagnostic": "96(\n  [\n    / protected h'a1010a' / << {\n        / alg / 1:10 / AES-CCM-16-64-128 /\n      } >>,\n    / unprotected / {\n      / iv / 5:h'89f52f65a1c580933b5261a76c'\n    },\n    / ciphertext / h'753548a19b1307084ca7b2056924ed95f2e3b17006dfe93\n1b687b847',\n    / recipients / [\n      [\n        / protected h'a10129' / << {\n            / alg / 1:-10\n          } >>,\n        / unprotected / {\n          / salt / -20:'aabbccddeeffgghh',\n          / kid / 4:'our-secret'\n        },\n        / ciphertext / h''\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.3.2.  Direct Plus Key Derivation",
+        "lines": [
+          3139,
+          3162
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8608443a10101a1054c02d1f7e6f26c43d4868d87ce582464f84d913ba60a76070a9a48f26e97e863e28529d8f5335e5f0165eee976b4a5f6c6f09d818344a101381fa3225821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c650458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c6535420101581841e0d76f579dbd0d936a662d54d8582037de2e366fde1c62",
+      "diagnostic": "96(\n  [\n    / protected h'a10101' / << {\n        / alg / 1:1 / AES-GCM 128 /\n      } >> ,\n    / unprotected / {\n      / iv / 5:h'02d1f7e6f26c43d4868d87ce'\n    },\n    / ciphertext / h'64f84d913ba60a76070a9a48f26e97e863e28529d8f5335\ne5f0165eee976b4a5f6c6f09d',\n    / recipients / [\n      [\n        / protected / h'a101381f' / {\n            \\ alg \\ 1:-32 \\ ECDH-SS+A128KW \\\n          } / ,\n        / unprotected / {\n          / static kid / -3:'peregrin.took@tuckborough.example',\n          / kid / 4:'meriadoc.brandybuck@buckland.example',\n          / U nonce / -22:h'0101'\n        },\n        / ciphertext / h'41e0d76f579dbd0d936a662d54d8582037de2e366fd\ne1c62'\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.3.3.  Encrypted Content with External Data",
+        "lines": [
+          3176,
+          3201
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d08343a1010aa1054d89f52f65a1c580933b5261a78c581c5974e1b99a3a4cc09a659aa2e9e7fff161d38ce71cb45ce460ffb569",
+      "diagnostic": "16(\n  [\n    / protected h'a1010a' / << {\n        / alg / 1:10 / AES-CCM-16-64-128 /\n      } >> ,\n    / unprotected / {\n      / iv / 5:h'89f52f65a1c580933b5261a78c'\n    },\n    / ciphertext / h'5974e1b99a3a4cc09a659aa2e9e7fff161d38ce71cb45ce\n460ffb569'\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.4.1.  Simple Encrypted Message",
+        "lines": [
+          3213,
+          3224
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d08343a1010aa1064261a7581c252a8911d465c125b6764739700f0141ed09192de139e053bd09abca",
+      "diagnostic": "16(\n  [\n    / protected h'a1010a' / << {\n        / alg / 1:10 / AES-CCM-16-64-128 /\n      } >> ,\n    / unprotected / {\n      / partial iv / 6:h'61a7'\n    },\n    / ciphertext / h'252a8911d465c125b6764739700f0141ed09192de139e05\n3bd09abca'\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.4.2.  Encrypted Message with a Partial IV",
+        "lines": [
+          3236,
+          3247
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8618543a1010fa054546869732069732074686520636f6e74656e742e489e1226ba1f81b848818340a20125044a6f75722d73656372657440",
+      "diagnostic": "97(\n  [\n    / protected h'a1010f' / << {\n        / alg / 1:15 / AES-CBC-MAC-256//64 /\n      } >> ,\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / tag / h'9e1226ba1f81b848',\n    / recipients / [\n      [\n        / protected / h'',\n        / unprotected / {\n          / alg / 1:-6 / direct /,\n          / kid / 4:'our-secret'\n        },\n        / ciphertext / h''\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.5.1.  Shared Secret Direct MAC",
+        "lines": [
+          3261,
+          3280
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8618543a10105a054546869732069732074686520636f6e74656e742e582081a03448acd3d305376eaa11fb3fe416a955be2cbe7ec96f012c994bc3f16a41818344a101381aa3225821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c650458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c653558404d8553e7e74f3c6a3a9dd3ef286a8195cbf8a23d19558ccfec7d34b824f42d92bd06bd2c7f0271f0214e141fb779ae2856abf585a58368b017e7f2a9e5ce4db540",
+      "diagnostic": "97(\n  [\n    / protected h'a10105' / << {\n        / alg / 1:5 / HMAC 256//256 /\n      } >> ,\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / tag / h'81a03448acd3d305376eaa11fb3fe416a955be2cbe7ec96f012c99\n4bc3f16a41',\n    / recipients / [\n      [\n        / protected h'a101381a' / << {\n            / alg / 1:-27 / ECDH-SS + HKDF-256 /\n          } >> ,\n        / unprotected / {\n          / static kid / -3:'peregrin.took@tuckborough.example',\n          / kid / 4:'meriadoc.brandybuck@buckland.example',\n          / U nonce / -22:h'4d8553e7e74f3c6a3a9dd3ef286a8195cbf8a23d\n19558ccfec7d34b824f42d92bd06bd2c7f0271f0214e141fb779ae2856abf585a583\n68b017e7f2a9e5ce4db5'\n        },\n        / ciphertext / h''\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.5.2.  ECDH Direct MAC",
+        "lines": [
+          3293,
+          3318
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8618543a1010ea054546869732069732074686520636f6e74656e742e4836f5afaf0bab5d43818340a2012404582430313863306165352d346439622d343731622d626664362d6565663331346263373033375818711ab0dc2fc4585dce27effa6781c8093eba906f227b6eb0",
+      "diagnostic": "97(\n  [\n    / protected h'a1010e' / << {\n        / alg / 1:14 / AES-CBC-MAC-128//64 /\n      } >> ,\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / tag / h'36f5afaf0bab5d43',\n    / recipients / [\n      [\n        / protected / h'',\n        / unprotected / {\n          / alg / 1:-5 / A256KW /,\n          / kid / 4:'018c0ae5-4d9b-471b-bfd6-eef314bc7037'\n        },\n        / ciphertext / h'711ab0dc2fc4585dce27effa6781c8093eba906f227\nb6eb0'\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.5.3.  Wrapped MAC",
+        "lines": [
+          3330,
+          3350
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d8618543a10105a054546869732069732074686520636f6e74656e742e5820bf48235e809b5c42e995f2b7d5fa13620e7ed834e337f6aa43df161e49e9323e828344a101381ca220a4010220032158420043b12669acac3fd27898ffba0bcd2e6c366d53bc4db71f909a759304acfb5e18cdc7ba0b13ff8c7636271a6924b1ac63c02688075b55ef2d613574e7dc242f79c322f504581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c655828339bc4f79984cdc6b3e6ce5f315a4c7d2b0ac466fcea69e8c07dfbca5bb1f661bc5f8e0df9e3eff58340a2012404582430313863306165352d346439622d343731622d626664362d65656633313462633730333758280b2c7cfce04e98276342d6476a7723c090dfdd15f9a518e7736549e998370695e6d6a83b4ae507bb",
+      "diagnostic": "97(\n  [\n    / protected h'a10105' / << {\n        / alg / 1:5 / HMAC 256//256 /\n      } >> ,\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / tag / h'bf48235e809b5c42e995f2b7d5fa13620e7ed834e337f6aa43df16\n1e49e9323e',\n    / recipients / [\n      [\n        / protected h'a101381c' / << {\n            / alg / 1:-29 / ECDH-ES+A128KW /\n          } >> ,\n        / unprotected / {\n          / ephemeral / -1:{\n            / kty / 1:2,\n            / crv / -1:3,\n            / x / -2:h'0043b12669acac3fd27898ffba0bcd2e6c366d53bc4db\n71f909a759304acfb5e18cdc7ba0b13ff8c7636271a6924b1ac63c02688075b55ef2\nd613574e7dc242f79c3',\n            / y / -3:true\n          },\n          / kid / 4:'bilbo.baggins@hobbiton.example'\n        },\n        / ciphertext / h'339bc4f79984cdc6b3e6ce5f315a4c7d2b0ac466fce\na69e8c07dfbca5bb1f661bc5f8e0df9e3eff5'\n      ],\n      [\n        / protected / h'',\n        / unprotected / {\n          / alg / 1:-5 / A256KW /,\n          / kid / 4:'018c0ae5-4d9b-471b-bfd6-eef314bc7037'\n        },\n        / ciphertext / h'0b2c7cfce04e98276342d6476a7723c090dfdd15f9a\n518e7736549e998370695e6d6a83b4ae507bb'\n      ]\n    ]\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.5.4.  Multi-Recipient MACed Message",
+        "lines": [
+          3367,
+          3406
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "d18443a1010fa054546869732069732074686520636f6e74656e742e48726043745027214f",
+      "diagnostic": "17(\n  [\n    / protected h'a1010f' / << {\n        / alg / 1:15 / AES-CBC-MAC-256//64 /\n      } >> ,\n    / unprotected / {},\n    / payload / 'This is the content.',\n    / tag / h'726043745027214f'\n  ]\n)",
+      "source": {
+        "rfc": 9052,
+        "section": "C.6.1.  Shared-Secret Direct MAC",
+        "lines": [
+          3420,
+          3429
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "84a5200121582065eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c08551d2258201e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd0084d19c01020258246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c65a52001215820bac5b11cad8f99f9c72b05cf4b9e26d244dc189f745228255a219a86d6a09eff22582020138bf82dc1b6d562be0fa54ab7804a3a64b6d72ccfed6b6fb6ed28bbfc117e010202423131a520032158420072992cb3ac08ecf3e5c63dedec0d51a8c1f79ef2f82f94f3c737bf5de7986671eac625fe8257bbd0394644caaa3aaf8f27a4585fbbcad0f2457620085e5c8f42ad22584201dca6947bce88bc5790485ac97427342bc35f887d86d65a089377e247e60baa55e4e8501e2ada5724ac51d6909008033ebc10ac999b9d7f5cc2519f3fe1ea1d9475010202581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c65a5200121582098f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91d6280225820f01400b089867804b8e9fc96c3932161f1934f4223069170d924b7e03bf822bb0102025821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c65",
+      "diagnostic": "[\n  {\n    -1:1,\n    -2:h'65eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c0\n8551d',\n    -3:h'1e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd008\n4d19c',\n    1:2,\n    2:'meriadoc.brandybuck@buckland.example'\n  },\n  {\n    -1:1,\n    -2:h'bac5b11cad8f99f9c72b05cf4b9e26d244dc189f745228255a219a86d6a\n09eff',\n    -3:h'20138bf82dc1b6d562be0fa54ab7804a3a64b6d72ccfed6b6fb6ed28bbf\nc117e',\n    1:2,\n    2:'11'\n  },\n  {\n    -1:3,\n    -2:h'0072992cb3ac08ecf3e5c63dedec0d51a8c1f79ef2f82f94f3c737bf5de\n7986671eac625fe8257bbd0394644caaa3aaf8f27a4585fbbcad0f2457620085e5c8\nf42ad',\n    -3:h'01dca6947bce88bc5790485ac97427342bc35f887d86d65a089377e247e\n60baa55e4e8501e2ada5724ac51d6909008033ebc10ac999b9d7f5cc2519f3fe1ea1\nd9475',\n    1:2,\n    2:'bilbo.baggins@hobbiton.example'\n  },\n  {\n    -1:1,\n    -2:h'98f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91\nd6280',\n    -3:h'f01400b089867804b8e9fc96c3932161f1934f4223069170d924b7e03bf\n822bb',\n    1:2,\n    2:'peregrin.took@tuckborough.example'\n  }\n]",
+      "source": {
+        "rfc": 9052,
+        "section": "C.7.1.  Public Keys",
+        "lines": [
+          3452,
+          3491
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    },
+    {
+      "hex": "87a601020258246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c65200121582065eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c08551d2258201e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd0084d19c235820aff907c99f9ad3aae6c4cdf21122bce2bd68b5283e6907154ad911840fa208cfa60102024231312001215820bac5b11cad8f99f9c72b05cf4b9e26d244dc189f745228255a219a86d6a09eff22582020138bf82dc1b6d562be0fa54ab7804a3a64b6d72ccfed6b6fb6ed28bbfc117e23582057c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3a6010202581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c6520032158420072992cb3ac08ecf3e5c63dedec0d51a8c1f79ef2f82f94f3c737bf5de7986671eac625fe8257bbd0394644caaa3aaf8f27a4585fbbcad0f2457620085e5c8f42ad22584201dca6947bce88bc5790485ac97427342bc35f887d86d65a089377e247e60baa55e4e8501e2ada5724ac51d6909008033ebc10ac999b9d7f5cc2519f3fe1ea1d947523584200085138ddabf5ca975f5860f91a08e91d6d5f9a76ad4018766a476680b55cd339e8ab6c72b5facdb2a2a50ac25bd086647dd3e2e6e99e84ca2c3609fdf177feb26da30104024a6f75722d736563726574205820849b57219dae48de646d07dbb533566e976686457c1491be3a76dcea6c427188a601022001025821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c6521582098f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91d6280225820f01400b089867804b8e9fc96c3932161f1934f4223069170d924b7e03bf822bb23582002d1f7e6f26c43d4868d87ceb2353161740aacf1f7163647984b522a848df1c3a30104024b6f75722d736563726574322050849b5786457c1491be3a76dcea6c4271a3010402582430313863306165352d346439622d343731622d626664362d656566333134626337303337205820849b57219dae48de646d07dbb533566e976686457c1491be3a76dcea6c427188",
+      "diagnostic": "[\n  {\n    1:2,\n    2:'meriadoc.brandybuck@buckland.example',\n    -1:1,\n    -2:h'65eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c0\n8551d',\n    -3:h'1e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd008\n4d19c',\n    -4:h'aff907c99f9ad3aae6c4cdf21122bce2bd68b5283e6907154ad911840fa\n208cf'\n  },\n  {\n    1:2,\n    2:'11',\n    -1:1,\n    -2:h'bac5b11cad8f99f9c72b05cf4b9e26d244dc189f745228255a219a86d6a\n09eff',\n    -3:h'20138bf82dc1b6d562be0fa54ab7804a3a64b6d72ccfed6b6fb6ed28bbf\nc117e',\n    -4:h'57c92077664146e876760c9520d054aa93c3afb04e306705db609030850\n7b4d3'\n  },\n  {\n    1:2,\n    2:'bilbo.baggins@hobbiton.example',\n    -1:3,\n    -2:h'0072992cb3ac08ecf3e5c63dedec0d51a8c1f79ef2f82f94f3c737bf5de\n7986671eac625fe8257bbd0394644caaa3aaf8f27a4585fbbcad0f2457620085e5c8\nf42ad',\n    -3:h'01dca6947bce88bc5790485ac97427342bc35f887d86d65a089377e247e\n60baa55e4e8501e2ada5724ac51d6909008033ebc10ac999b9d7f5cc2519f3fe1ea1\nd9475',\n    -4:h'00085138ddabf5ca975f5860f91a08e91d6d5f9a76ad4018766a476680b\n55cd339e8ab6c72b5facdb2a2a50ac25bd086647dd3e2e6e99e84ca2c3609fdf177f\neb26d'\n  },\n  {\n    1:4,\n    2:'our-secret',\n    -1:h'849b57219dae48de646d07dbb533566e976686457c1491be3a76dcea6c4\n27188'\n  },\n  {\n    1:2,\n    -1:1,\n    2:'peregrin.took@tuckborough.example',\n    -2:h'98f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91\nd6280',\n    -3:h'f01400b089867804b8e9fc96c3932161f1934f4223069170d924b7e03bf\n822bb',\n    -4:h'02d1f7e6f26c43d4868d87ceb2353161740aacf1f7163647984b522a848\ndf1c3'\n  },\n  {\n    1:4,\n    2:'our-secret2',\n    -1:h'849b5786457c1491be3a76dcea6c4271'\n  },\n  {\n    1:4,\n    2:'018c0ae5-4d9b-471b-bfd6-eef314bc7037',\n    -1:h'849b57219dae48de646d07dbb533566e976686457c1491be3a76dcea6c4\n27188'\n  }\n]",
+      "source": {
+        "rfc": 9052,
+        "section": "C.7.2.  Private Keys",
+        "lines": [
+          3517,
+          3582
+        ]
+      },
+      "origin": "printed EDN converted by installed cbor-diag (preserves printed map order)"
+    }
+  ]
+}

@@ -1,0 +1,5058 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug conformance corpus v1; compileObservation is evidence, never schemaError expectation; context is labelled harness text; ruby is differential evidence",
+  "generator": "corpus/tools/export-rfc.mjs",
+  "rfc": 8610,
+  "suites": [
+    {
+      "name": "RFC 8610 figure-1",
+      "cddl": "person = {\n  age: int,\n  name: tstr,\n  employer: tstr,\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.1.  Groups and Composition in CDDL",
+        "logicalLines": [
+          380,
+          384
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 29,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a36361676501646e616d65614168656d706c6f7965726142",
+          "expect": true,
+          "note": "§2.1: all three required named members",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a16361676501",
+          "expect": false,
+          "note": "§2.1: required text members missing",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-1",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-2",
+      "cddl": "pii = (\n  age: int,\n  name: tstr,\n  employer: tstr,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.1.  Groups and Composition in CDDL",
+        "logicalLines": [
+          409,
+          413
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 29,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "830161416142",
+          "expect": true,
+          "note": "§2.1: group in array context",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "80",
+          "expect": false,
+          "note": "three entries required",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-2",
+      "context": "probe = [pii]\n",
+      "compileObservation": {
+        "ok": true
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-3",
+      "cddl": "person = {\n  pii\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.1.  Groups and Composition in CDDL",
+        "logicalLines": [
+          420,
+          422
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 32,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a36361676501646e616d65614168656d706c6f7965726142",
+          "expect": true,
+          "note": "§2.1: all three required named members",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a16361676501",
+          "expect": false,
+          "note": "§2.1: required text members missing",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-3",
+      "context": "pii = (\n  age: int,\n  name: tstr,\n  employer: tstr,\n)\n",
+      "compileObservation": {
+        "ok": false,
+        "code": "map_key",
+        "line": 2,
+        "column": 3
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-4",
+      "cddl": "person = {(\n  age: int,\n  name: tstr,\n  employer: tstr,\n)}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.1.  Groups and Composition in CDDL",
+        "logicalLines": [
+          435,
+          439
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 29,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a36361676501646e616d65614168656d706c6f7965726142",
+          "expect": true,
+          "note": "§2.1: all three required named members",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a16361676501",
+          "expect": false,
+          "note": "§2.1: required text members missing",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-4",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-5",
+      "cddl": "person = {\n  age: int,\n  name: tstr,\n  employer: tstr,\n}\n\ndog = {\n  age: int,\n  name: tstr,\n  leash-length: float,\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.1.  Groups and Composition in CDDL",
+        "logicalLines": [
+          469,
+          479
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 26,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a36361676501646e616d65614168656d706c6f7965726142",
+          "expect": true,
+          "note": "§2.1: all three required named members",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a16361676501",
+          "expect": false,
+          "note": "§2.1: required text members missing",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-5",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-6",
+      "cddl": "person = {\n  identity,\n  employer: tstr,\n}\n\ndog = {\n  identity,\n  leash-length: float,\n}\n\nidentity = (\n  age: int,\n  name: tstr,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.1.  Groups and Composition in CDDL",
+        "logicalLines": [
+          483,
+          496
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 26,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a36361676501646e616d65614168656d706c6f7965726142",
+          "expect": true,
+          "note": "§2.1: all three required named members",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a16361676501",
+          "expect": false,
+          "note": "§2.1: required text members missing",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-6",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 choices",
+      "cddl": "attire = \"bow tie\" / \"necktie\" / \"Internet attire\"\nprotocol = 6 / 17\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.  Choices",
+        "logicalLines": [
+          605,
+          606
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 12,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "attire",
+          "hex": "67626f7720746965",
+          "expect": true,
+          "note": "§2.2.2 literal alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "attire",
+          "hex": "65626f6f7473",
+          "expect": false,
+          "note": "not an alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "protocol",
+          "hex": "11",
+          "expect": true,
+          "note": "literal protocol",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "protocol",
+          "hex": "07",
+          "expect": false,
+          "note": "not an alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "choices",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 delivery",
+      "cddl": "address = { delivery }\n\ndelivery = (\nstreet: tstr, ? number: uint, city //\npo-box: uint, city //\nper-pickup: true )\n\ncity = (\nname: tstr, zip-code: uint\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.  Choices",
+        "logicalLines": [
+          614,
+          623
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 19,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "address",
+          "hex": "a16a7065722d7069636b7570f5",
+          "expect": true,
+          "note": "§2.2.2 third delivery choice; no earlier cut key present",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "address",
+          "hex": "a0",
+          "expect": false,
+          "note": "no delivery alternative matches",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "delivery",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 choice-extensions",
+      "cddl": "attire /= \"swimwear\"\n\ndelivery //= (\nlat: float, long: float, drone-type: tstr\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.  Choices",
+        "logicalLines": [
+          641,
+          645
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 17,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "attire",
+          "hex": "687377696d77656172",
+          "expect": true,
+          "note": "§2.2.2 extension alone creates choice",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "attire",
+          "hex": "65626f6f7473",
+          "expect": false,
+          "note": "not in extension",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "a3636c6174f93e00646c6f6e67f93e006a64726f6e652d747970656178",
+          "expect": true,
+          "note": "§2.2.2 extended delivery group",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "a0",
+          "expect": false,
+          "note": "delivery extension requires all three members",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "choice-extensions",
+      "context": "probe = {delivery}\n",
+      "compileObservation": {
+        "ok": true
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 ranges",
+      "cddl": "device-address = byte\nmax-byte = 255\nbyte = 0..max-byte ; inclusive range\nfirst-non-byte = 256\nbyte1 = 0...first-non-byte ; byte1 is equivalent to byte\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.1.  Ranges",
+        "logicalLines": [
+          662,
+          666
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 9,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "device-address",
+          "hex": "18ff",
+          "expect": true,
+          "note": "inclusive endpoint",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "device-address",
+          "hex": "190100",
+          "expect": false,
+          "note": "outside byte range",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "byte1",
+          "hex": "18ff",
+          "expect": true,
+          "note": "exclusive upper bound",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "byte1",
+          "hex": "190100",
+          "expect": false,
+          "note": "excluded upper bound",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "ranges",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 mixed-ranges-undefined",
+      "cddl": "int-range = 0..10 ; only integers match\nfloat-range = 0.0..10.0 ; only floats match\nBAD-range1 = 0..10.0 ; NOT DEFINED\nBAD-range2 = 0.0..10 ; NOT DEFINED\nnumeric-range = int-range / float-range\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.1.  Ranges",
+        "logicalLines": [
+          673,
+          677
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 16,
+        "pageArtifactFixes": []
+      },
+      "cases": [],
+      "id": "mixed-ranges-undefined",
+      "compileObservation": {
+        "ok": false,
+        "code": "range",
+        "line": 3,
+        "column": 15
+      },
+      "noCasesReason": "RFC explicitly labels two ranges NOT DEFINED; not a valid standalone data model"
+    },
+    {
+      "name": "RFC 8610 name-with-dots",
+      "cddl": "min..max\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.1.  Ranges",
+        "logicalLines": [
+          693,
+          693
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "07",
+          "expect": true,
+          "note": "§2.2.2.1 dots form one identifier",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "08",
+          "expect": false,
+          "note": "identifier definition is literal7",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "name-with-dots",
+      "context": {
+        "kind": "instantiate-printed-expression",
+        "cddl": "probe = min..max\nmin..max = 7\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 2,
+        "column": 1
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 named-range",
+      "cddl": "min .. max\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.1.  Ranges",
+        "logicalLines": [
+          698,
+          698
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "02",
+          "expect": true,
+          "note": "§2.2.2.1 spaces delimit range",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "04",
+          "expect": false,
+          "note": "outside bounds",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "named-range",
+      "context": {
+        "kind": "instantiate-printed-expression",
+        "cddl": "probe = min .. max\nmin = 1\nmax = 3\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 1,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 group-enumeration",
+      "cddl": "terminal-color = &basecolors\nbasecolors = (\n  black: 0,  red: 1,  green: 2,  yellow: 3,\n  blue: 4,  magenta: 5,  cyan: 6,  white: 7,\n)\nextended-color = &(\n  basecolors,\n  orange: 8,  pink: 9,  purple: 10,  brown: 11,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.2.2.  Turning a Group into a Choice",
+        "logicalLines": [
+          710,
+          718
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 14,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "terminal-color",
+          "hex": "07",
+          "expect": true,
+          "note": "§2.2.2.2 group values",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "terminal-color",
+          "hex": "08",
+          "expect": false,
+          "note": "outside base colors",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extended-color",
+          "hex": "0b",
+          "expect": true,
+          "note": "extended value",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extended-color",
+          "hex": "0c",
+          "expect": false,
+          "note": "outside extended values",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "group-enumeration",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 breakfast",
+      "cddl": "my_breakfast = #6.55799(breakfast)   ; cbor-any is too general!\nbreakfast = cereal / porridge\ncereal = #6.998(tstr)\nporridge = #6.999([liquid, solid])\nliquid = milk / water\nmilk = 0\nwater = 1\nsolid = tstr\n",
+      "source": {
+        "rfc": 8610,
+        "section": "2.2.3.  Representation Types",
+        "logicalLines": [
+          762,
+          769
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "my_breakfast",
+          "hex": "d9d9f7d903e6646f617473",
+          "expect": true,
+          "note": "§2.2.3 tagged cereal",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "my_breakfast",
+          "hex": "d9d9f700",
+          "expect": false,
+          "note": "breakfast requires tag 998 or 999",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "breakfast",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 conventions",
+      "cddl": "; This is a comment\nperson = { g }\n\ng = (\n  \"name\": tstr,\n  age: int,  ; \"age\" is a bareword\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.1.  General Conventions",
+        "logicalLines": [
+          885,
+          891
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 20,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "person",
+          "hex": "a26361676501646e616d656141",
+          "expect": true,
+          "note": "§3.1 bareword key",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "person",
+          "hex": "a26361676501646e616d6501",
+          "expect": false,
+          "note": "name must be text",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "conventions",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 occurrence",
+      "cddl": "apartment = {\n  kitchen: size,\n  * bedroom: size,\n}\nsize = float ; in m2\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.2.  Occurrence",
+        "logicalLines": [
+          930,
+          934
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 27,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "apartment",
+          "hex": "a1676b69746368656ef93e00",
+          "expect": true,
+          "note": "§3.2 zero bedrooms",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "apartment",
+          "hex": "a267626564726f6f6df93e00676b69746368656ef93e00",
+          "expect": true,
+          "note": "one bedroom",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "apartment",
+          "hex": "a0",
+          "expect": false,
+          "note": "kitchen mandatory",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "occurrence",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 bedroom-fragment",
+      "cddl": "? bedroom: size,\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.2.  Occurrence",
+        "logicalLines": [
+          941,
+          941
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 29,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "a0",
+          "expect": true,
+          "note": "§3.2 optional member",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "a167626564726f6f6d01",
+          "expect": false,
+          "note": "bedroom must be float",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "bedroom-fragment",
+      "context": {
+        "kind": "wrap-fragment",
+        "cddl": "probe = {\n? bedroom: size,\n}\nsize = float\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 1,
+        "column": 1
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 people",
+      "cddl": "unlimited-people = [* person]\none-or-two-people = [1*2 person]\nat-least-two-people = [2* person]\nperson = (\n    name: tstr,\n    age: uint,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.4.  Arrays",
+        "logicalLines": [
+          1000,
+          1006
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 21,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "unlimited-people",
+          "hex": "80",
+          "expect": true,
+          "note": "§3.4 printed empty instance",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "unlimited-people",
+          "hex": "8668726f756e646c65741904176970737963687572677919089c6f657874726172687974686d6963616c1908b7",
+          "expect": true,
+          "note": "§3.4 first printed instance",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "unlimited-people",
+          "hex": "8469616c756d696e697a6518d46a636c696d6f677261706819101c",
+          "expect": true,
+          "note": "§3.4 third printed instance",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "unlimited-people",
+          "hex": "886970656e696e74696d651905e96c656e646f6361726469746973190ff46b696d7065726d6561746f721906856b636f657874656e73696f6e190361",
+          "expect": true,
+          "note": "§3.4 fourth printed instance",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "one-or-two-people",
+          "hex": "80",
+          "expect": false,
+          "note": "minimum one pair",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "at-least-two-people",
+          "hex": "82614101",
+          "expect": false,
+          "note": "minimum two pairs",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "people",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 geography",
+      "cddl": "Geography = [\n  city           : tstr,\n  gpsCoordinates : GpsCoordinates,\n]\n\nGpsCoordinates = {\n  longitude      : uint,            ; degrees, scaled by 10^7\n  latitude       : uint,            ; degrees, scaled by 10^7\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.1.  Structs",
+        "logicalLines": [
+          1065,
+          1073
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 7,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "Geography",
+          "hex": "826158a2686c6174697475646502696c6f6e67697475646501",
+          "expect": true,
+          "note": "§3.5.1 record with embedded struct",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Geography",
+          "hex": "826158a0",
+          "expect": false,
+          "note": "coordinates required",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "geography",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 samples-colon",
+      "cddl": "located-samples = {\n  sample-point: int,\n  samples: [+ float],\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.1.  Structs",
+        "logicalLines": [
+          1094,
+          1097
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 27,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "located-samples",
+          "hex": "a26773616d706c657381f93e006c73616d706c652d706f696e7401",
+          "expect": true,
+          "note": "§3.5.1 nonempty float sample vector",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "located-samples",
+          "hex": "a26773616d706c6573806c73616d706c652d706f696e7401",
+          "expect": false,
+          "note": "+ requires at least one sample",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "samples-colon",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 samples-arrow",
+      "cddl": "located-samples = {\n  \"sample-point\" => int,\n  \"samples\" => [+ float],\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.1.  Structs",
+        "logicalLines": [
+          1123,
+          1126
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 25,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "located-samples",
+          "hex": "a26773616d706c657381f93e006c73616d706c652d706f696e7401",
+          "expect": true,
+          "note": "§3.5.1 nonempty float sample vector",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "located-samples",
+          "hex": "a26773616d706c6573806c73616d706c652d706f696e7401",
+          "expect": false,
+          "note": "+ requires at least one sample",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "samples-arrow",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 samples-equipment",
+      "cddl": "located-samples = {\n  sample-point: int,\n  samples: [+ float],\n  * equipment-type => equipment-tolerances,\n}\nequipment-type = [name: tstr, manufacturer: tstr]\nequipment-tolerances = [+ [float, float]]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.1.  Structs",
+        "logicalLines": [
+          1152,
+          1158
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 13,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "located-samples",
+          "hex": "a26773616d706c657381f93e006c73616d706c652d706f696e7401",
+          "expect": true,
+          "note": "§3.5.1 nonempty float sample vector",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "located-samples",
+          "hex": "a26773616d706c6573806c73616d706c652d706f696e7401",
+          "expect": false,
+          "note": "+ requires at least one sample",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "samples-equipment",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 personal-data",
+      "cddl": "PersonalData = {\n  ? displayName: tstr,\n  NameComponents,\n  ? age: uint,\n}\n\nNameComponents = (\n  ? firstName: tstr,\n  ? familyName: tstr,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.1.  Structs",
+        "logicalLines": [
+          1164,
+          1173
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 26,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "PersonalData",
+          "hex": "a263616765026966697273744e616d656141",
+          "expect": true,
+          "note": "§3.5.1 optional fields",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "PersonalData",
+          "hex": "a163616765636f6c64",
+          "expect": false,
+          "note": "age uint even in extensible map (cut)",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "personal-data",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-7",
+      "cddl": "PersonalData = {\n  ? displayName: tstr,\n  NameComponents,\n  ? age: uint,\n  * tstr => any\n}\n\nNameComponents = (\n  ? firstName: tstr,\n  ? familyName: tstr,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.1.  Structs",
+        "logicalLines": [
+          1207,
+          1217
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 26,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "PersonalData",
+          "hex": "a263616765026966697273744e616d656141",
+          "expect": true,
+          "note": "§3.5.1 optional fields",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "PersonalData",
+          "hex": "a163616765636f6c64",
+          "expect": false,
+          "note": "age uint even in extensible map (cut)",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "PersonalData",
+          "hex": "a5676578757669616569657068656d657269736a66616d696c794e616d656561677573746a737072696e676275636b6e696c6c756d696e6174696e676c796b6b696c6f6d6574726167656866726f67666973686e616e7469666f726569676e69736d67707265747a656c",
+          "expect": true,
+          "note": "§3.5.1 printed generated instance",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-7",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 square-roots",
+      "cddl": "square-roots = {* x => y}\nx = int\ny = float\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.2.  Tables",
+        "logicalLines": [
+          1236,
+          1238
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 25,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "square-roots",
+          "hex": "a101f93e00",
+          "expect": true,
+          "note": "§3.5.2 integer to float table",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "square-roots",
+          "hex": "a16178f93e00",
+          "expect": false,
+          "note": "key must be integer",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "square-roots",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 tostring",
+      "cddl": "tostring = {* mynumber => tstr}\nmynumber = int / float\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.2.  Tables",
+        "logicalLines": [
+          1264,
+          1265
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 22,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "tostring",
+          "hex": "a101636f6e65",
+          "expect": true,
+          "note": "§3.5.2 number to text",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tostring",
+          "hex": "a10101",
+          "expect": false,
+          "note": "value must be text",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "tostring",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 labeled-values",
+      "cddl": "labeled-values = {\n  ? fritz: number,\n  * label => value\n}\nlabel = text\nvalue = number\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.3.  Non-deterministic Order",
+        "logicalLines": [
+          1277,
+          1282
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 28,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "labeled-values",
+          "hex": "a261780265667269747a01",
+          "expect": true,
+          "note": "§3.5.3 named member followed by absorber",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "labeled-values",
+          "hex": "a165667269747a6178",
+          "expect": false,
+          "note": "number required",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "labeled-values",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 indeterminate-map",
+      "cddl": "do-not-do-this = {\n  int => int,\n  int => 6,\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.3.  Non-deterministic Order",
+        "logicalLines": [
+          1292,
+          1295
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 28,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "do-not-do-this",
+          "hex": "a0",
+          "expect": false,
+          "note": "§3.5.3 both required entries absent; ambiguous positive example deliberately not assigned a Boolean",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "do-not-do-this",
+          "hex": "a10106",
+          "expect": false,
+          "note": "two distinct pairs required",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "indeterminate-map",
+      "compileObservation": {
+        "ok": false,
+        "code": "map_overlap",
+        "line": 3,
+        "column": 3
+      }
+    },
+    {
+      "name": "RFC 8610 cut-free",
+      "cddl": "extensible-map-example = {\n  ? \"optional-key\" => int,\n  * tstr => any\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.4.  Cuts in Maps",
+        "logicalLines": [
+          1332,
+          1335
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 24,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b6579686e6f6e73656e7365",
+          "expect": true,
+          "note": "§3.5.4 printed instance: cut-free wildcard accepts, cut commits to int",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": false,
+            "explanation": "RFC 8610 §3.5.4 explicitly accepts optional-key:nonsense without a cut. Ruby commits to the matching key before trying the wildcard."
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b657901",
+          "expect": true,
+          "note": "§3.5.4 optional int present",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a0",
+          "expect": true,
+          "note": "optional member absent",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "cut-free",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 explicit-cut",
+      "cddl": "extensible-map-example = {\n  ? \"optional-key\" ^ => int,\n  * tstr => any\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.4.  Cuts in Maps",
+        "logicalLines": [
+          1353,
+          1356
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 23,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b6579686e6f6e73656e7365",
+          "expect": false,
+          "note": "§3.5.4 printed instance: cut-free wildcard accepts, cut commits to int",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b657901",
+          "expect": true,
+          "note": "§3.5.4 optional int present",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a0",
+          "expect": true,
+          "note": "optional member absent",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "explicit-cut",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 quoted-cut",
+      "cddl": "extensible-map-example = {\n  ? \"optional-key\": int,\n  * tstr => any\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.4.  Cuts in Maps",
+        "logicalLines": [
+          1384,
+          1387
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 24,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b6579686e6f6e73656e7365",
+          "expect": false,
+          "note": "§3.5.4 printed instance: cut-free wildcard accepts, cut commits to int",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b657901",
+          "expect": true,
+          "note": "§3.5.4 optional int present",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a0",
+          "expect": true,
+          "note": "optional member absent",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "quoted-cut",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 bareword-cut",
+      "cddl": "extensible-map-example = {\n  ? optional-key: int,\n  * tstr => any\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.5.4.  Cuts in Maps",
+        "logicalLines": [
+          1391,
+          1394
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 24,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b6579686e6f6e73656e7365",
+          "expect": false,
+          "note": "§3.5.4 printed instance: cut-free wildcard accepts, cut commits to int",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a16c6f7074696f6e616c2d6b657901",
+          "expect": true,
+          "note": "§3.5.4 optional int present",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "extensible-map-example",
+          "hex": "a0",
+          "expect": true,
+          "note": "optional member absent",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "bareword-cut",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 biguint",
+      "cddl": "biguint = #6.2(bstr)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.6.  Tags",
+        "logicalLines": [
+          1406,
+          1406
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 27,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "biguint",
+          "hex": "c249010000000000000000",
+          "expect": true,
+          "note": "§3.6 unsigned bignum",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "biguint",
+          "hex": "00",
+          "expect": false,
+          "note": "requires tag 2",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": false,
+            "explanation": "RFC 8610 §3.6 / Appendix D biguint explicitly uses tag 2. Ruby cddl.rb synthesizes a tag-2 bstr when validating any nonnegative decoded Integer, so it also accepts untagged integer 0. The RFC-derived tag expectation is retained."
+          }
+        }
+      ],
+      "id": "biguint",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 buuid",
+      "cddl": "buuid = #6.37(bstr)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.6.  Tags",
+        "logicalLines": [
+          1414,
+          1414
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 28,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "buuid",
+          "hex": "d8255000000000000000000000000000000000",
+          "expect": true,
+          "note": "§3.6 tagged UUID bytes",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "buuid",
+          "hex": "d8256178",
+          "expect": false,
+          "note": "content must be bytes",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "buuid",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 my-uri",
+      "cddl": "my_uri = #6.32(tstr) / tstr\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.6.  Tags",
+        "logicalLines": [
+          1418,
+          1418
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 24,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "my_uri",
+          "hex": "6872656c6174697665",
+          "expect": true,
+          "note": "§3.6 untagged text alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "my_uri",
+          "hex": "d8207368747470733a2f2f6578616d706c652e636f6d",
+          "expect": true,
+          "note": "tagged URI",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "my_uri",
+          "hex": "00",
+          "expect": false,
+          "note": "neither text alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "my-uri",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 basic-header-group",
+      "cddl": "basic-header-group = (\n  field1: int,\n  field2: text,\n)\n\nbasic-header = [ basic-header-group ]\n\nadvanced-header = [\n  basic-header-group,\n  field3: bytes,\n  field4: number, ; as in the tagged type \"time\"\n]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.7.  Unwrapping",
+        "logicalLines": [
+          1450,
+          1462
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 13,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "advanced-header",
+          "hex": "840161584002",
+          "expect": true,
+          "note": "§3.7 flattened header; ~time exposes number",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "advanced-header",
+          "hex": "83820161584002",
+          "expect": false,
+          "note": "unwrap does not nest basic header",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "basic-header-group",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 unwrap-header",
+      "cddl": "basic-header = [\n  field1: int,\n  field2: text,\n]\n\nadvanced-header = [\n  ~basic-header,\n  field3: bytes,\n  field4: ~time,\n]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.7.  Unwrapping",
+        "logicalLines": [
+          1465,
+          1475
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 28,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "advanced-header",
+          "hex": "840161584002",
+          "expect": true,
+          "note": "§3.7 flattened header; ~time exposes number",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "advanced-header",
+          "hex": "83820161584002",
+          "expect": false,
+          "note": "unwrap does not nest basic header",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "unwrap-header",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-8",
+      "cddl": "full-address = [[+ label], ip4, ip6]\nip4 = bstr .size 4\nip6 = bstr .size 16\nlabel = bstr .size (1..63)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.1.  Control Operator .size",
+        "logicalLines": [
+          1518,
+          1521
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 19,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "full-address",
+          "hex": "8381410144000000005000000000000000000000000000000000",
+          "expect": true,
+          "note": "§3.8.1 sizes and nonempty labels",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "ip4",
+          "hex": "43000000",
+          "expect": false,
+          "note": "four bytes required",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-8",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-9",
+      "cddl": "audio_sample = uint .size 3 ; 24-bit, equivalent to 0...16777216\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.1.  Control Operator .size",
+        "logicalLines": [
+          1531,
+          1531
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 5,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "audio_sample",
+          "hex": "1a00ffffff",
+          "expect": true,
+          "note": "§3.8.1 maximal 24-bit magnitude",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "audio_sample",
+          "hex": "1a01000000",
+          "expect": false,
+          "note": "outside 24-bit magnitude",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-9",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-10",
+      "cddl": "tcpflagbytes = bstr .bits flags\nflags = &(\n  fin: 8,\n  syn: 9,\n  rst: 10,\n  psh: 11,\n  ack: 12,\n  urg: 13,\n  ece: 14,\n  cwr: 15,\n  ns: 0,\n) / (4..7) ; data offset bits\n\nrwxbits = uint .bits rwx\nrwx = &(r: 2, w: 1, x: 0)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.2.  Control Operator .bits",
+        "logicalLines": [
+          1563,
+          1577
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 22,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "tcpflagbytes",
+          "hex": "42906d",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "4201fc",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "428145",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "4201b7",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "42013d",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "42409f",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "42018e",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "42c05f",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "4201fa",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "4201fe",
+          "expect": true,
+          "note": "§3.8.2 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "40",
+          "expect": true,
+          "note": "all-clear empty string explicitly permitted",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcpflagbytes",
+          "hex": "4102",
+          "expect": false,
+          "note": "bit 1 not allowed",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "rwxbits",
+          "hex": "07",
+          "expect": true,
+          "note": "rwx bits 0..2",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "rwxbits",
+          "hex": "08",
+          "expect": false,
+          "note": "bit 3 not allowed",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-10",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-11",
+      "cddl": "nai = tstr .regexp \"[A-Za-z0-9]+@[A-Za-z0-9]+(\\\\.[A-Za-z0-9]+)+\"\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.3.  Control Operator .regexp",
+        "logicalLines": [
+          1610,
+          1610
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 5,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "nai",
+          "hex": "781b4e31404348353748462e345a6e7165302e64594a524e2e69676a66",
+          "expect": true,
+          "note": "§3.8.3 printed example",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "nai",
+          "hex": "6a6e6f2d61742d7369676e",
+          "expect": false,
+          "note": "required @ and domain",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-11",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 within-message",
+      "cddl": "message = $message .within message-structure\nmessage-structure = [message_type, *message_option]\nmessage_type = 0..255\nmessage_option = any\n\n$message /= [3, dough: text, topping: [* text]]\n$message /= [4, noodles: text, sauce: text, parmesan: bool]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.5.  Control Operators .within and .and",
+        "logicalLines": [
+          1728,
+          1734
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 8,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "message",
+          "hex": "830365627265616480",
+          "expect": true,
+          "note": "§3.8.5 socket plug inside message structure",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "message",
+          "hex": "840465706173746163726564f5",
+          "expect": true,
+          "note": "second plug",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "message",
+          "hex": "8105",
+          "expect": false,
+          "note": "no socket plug",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "within-message",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 speed",
+      "cddl": "speed = number .ge 0  ; unit: m/s\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.6.  Control Operators .lt, .le, .gt, .ge, .eq, .ne, and .default",
+        "logicalLines": [
+          1750,
+          1750
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 21,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "speed",
+          "hex": "00",
+          "expect": true,
+          "note": "§3.8.6 >=0",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "speed",
+          "hex": "20",
+          "expect": false,
+          "note": "negative speed",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "speed",
+      "compileObservation": {
+        "ok": false,
+        "code": "control_value",
+        "line": 1,
+        "column": 16
+      }
+    },
+    {
+      "name": "RFC 8610 cbor-expression",
+      "cddl": "\"bytes .cbor type1\"\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.4.  Control Operators .cbor and .cborseq",
+        "logicalLines": [
+          1682,
+          1682
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "4101",
+          "expect": true,
+          "note": "§3.8.4 one encoded uint",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "420102",
+          "expect": false,
+          "note": "two items not one",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "cbor-expression",
+      "context": {
+        "kind": "instantiate-printed-expression",
+        "cddl": "probe = bytes .cbor type1\ntype1 = uint\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 1,
+        "column": 1
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 cborseq-expression",
+      "cddl": "\"bytes .cborseq type2\"\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.4.  Control Operators .cbor and .cborseq",
+        "logicalLines": [
+          1689,
+          1689
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "420102",
+          "expect": true,
+          "note": "§3.8.4 items form virtual uint array",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "426161",
+          "expect": false,
+          "note": "text not uint",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "cborseq-expression",
+      "context": {
+        "kind": "instantiate-printed-expression",
+        "cddl": "probe = bytes .cborseq type2\ntype2 = [* uint]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 1,
+        "column": 1
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 and-expression",
+      "cddl": "\"type1 .and type2\"\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.5.  Control Operators .within and .and",
+        "logicalLines": [
+          1703,
+          1703
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "02",
+          "expect": true,
+          "note": "§3.8.5 intersection",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "04",
+          "expect": false,
+          "note": "outside intersection",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "and-expression",
+      "context": {
+        "kind": "instantiate-printed-expression",
+        "cddl": "probe = type1 .and type2\ntype1 = uint\ntype2 = 1..3\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 1,
+        "column": 1
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 within-expression",
+      "cddl": "\"type1 .within type2\"\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.5.  Control Operators .within and .and",
+        "logicalLines": [
+          1721,
+          1721
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "02",
+          "expect": true,
+          "note": "§3.8.5 intersection",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "04",
+          "expect": false,
+          "note": "outside left type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "within-expression",
+      "context": {
+        "kind": "instantiate-printed-expression",
+        "cddl": "probe = type1 .within type2\ntype1 = 1..3\ntype2 = uint\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "syntax",
+        "line": 1,
+        "column": 1
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 default-timer",
+      "cddl": "timer = {\n  time: uint,\n  ? displayed-step: (number .gt 0) .default 1\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.8.6.  Control Operators .lt, .le, .gt, .ge, .eq, .ne, and .default",
+        "logicalLines": [
+          1787,
+          1790
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 15,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "timer",
+          "hex": "a16474696d6500",
+          "expect": true,
+          "note": "§3.8.6 optional default omitted",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "timer",
+          "hex": "a26474696d65006e646973706c617965642d7374657001",
+          "expect": false,
+          "note": "published §3.8.6 implied .ne; erratum 9229 contested",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": false,
+            "explanation": "Published RFC 8610 §3.8.6 implies .ne. Ruby implements annotation-only .default, as proposed by unverified erratum 9229."
+          }
+        },
+        {
+          "rule": "timer",
+          "hex": "a26474696d65006e646973706c617965642d7374657002",
+          "expect": true,
+          "note": "positive nondefault step",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "default-timer",
+      "compileObservation": {
+        "ok": false,
+        "code": "control_value",
+        "line": 3,
+        "column": 29
+      }
+    },
+    {
+      "name": "RFC 8610 socket-tcp",
+      "cddl": "tcp-header = {seq: uint, ack: uint, * $$tcp-option}\n\n; later, in a different file\n\n$$tcp-option //= (\nsack: [+(left: uint, right: uint)]\n)\n\n; and, maybe in another file\n\n$$tcp-option //= (\nsack-permitted: true\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.9.  Socket/Plug",
+        "logicalLines": [
+          1805,
+          1817
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 12,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "tcp-header",
+          "hex": "a26361636b026373657101",
+          "expect": true,
+          "note": "§3.9 zero options",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcp-header",
+          "hex": "a36361636b0263736571016e7361636b2d7065726d6974746564f5",
+          "expect": true,
+          "note": "plugged option",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tcp-header",
+          "hex": "a16373657101",
+          "expect": false,
+          "note": "ack required",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "socket-tcp",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 figure-12",
+      "cddl": "PersonalData = {\n  ? displayName: tstr,\n  NameComponents,\n  ? age: uint,\n  * $$personaldata-extensions\n}\n\nNameComponents = (\n  ? firstName: tstr,\n  ? familyName: tstr,\n)\n\n; The above already works as is.\n; But then, we can add later:\n\n$$personaldata-extensions //= (\n  favorite-salsa: tstr,\n)\n\n; and again, somewhere else:\n\n$$personaldata-extensions //= (\n  shoesize: uint,\n)\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.9.  Socket/Plug",
+        "logicalLines": [
+          1842,
+          1865
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 21,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "PersonalData",
+          "hex": "a263616765026966697273744e616d656141",
+          "expect": true,
+          "note": "§3.5.1 optional fields",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "PersonalData",
+          "hex": "a163616765636f6c64",
+          "expect": false,
+          "note": "age uint even in extensible map (cut)",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "figure-12",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 generics",
+      "cddl": "messages = message<\"reboot\", \"now\"> / message<\"sleep\", 1..100>\nmessage<t, v> = {type: t, value: v}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.10.  Generics",
+        "logicalLines": [
+          1874,
+          1875
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "messages",
+          "hex": "a26474797065667265626f6f746576616c7565636e6f77",
+          "expect": true,
+          "note": "§3.10 parameter substitution",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "messages",
+          "hex": "a2647479706565736c6565706576616c75651864",
+          "expect": true,
+          "note": "inclusive bound",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "messages",
+          "hex": "a2647479706565736c6565706576616c75651865",
+          "expect": false,
+          "note": "outside argument type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "generics",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 precedence-1",
+      "cddl": "t = [group1]\ngroup1 = (a / b // c / d)\na = 1 b = 2 c = 3 d = 4\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.11.  Operator Precedence",
+        "logicalLines": [
+          1913,
+          1915
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "t",
+          "hex": "8101",
+          "expect": true,
+          "note": "§3.11 group choice of types",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "820102",
+          "expect": false,
+          "note": "one element required",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "precedence-1",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 precedence-2",
+      "cddl": "t = {group2}\ngroup2 = (? ab: a / b // cd: c / d)\na = 1 b = 2 c = 3 d = 4\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.11.  Operator Precedence",
+        "logicalLines": [
+          1921,
+          1923
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "t",
+          "hex": "a0",
+          "expect": true,
+          "note": "§3.11 optional first branch",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "a162636403",
+          "expect": false,
+          "note": "PEG locks empty first branch; remaining map member causes failure",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "precedence-2",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 precedence-3",
+      "cddl": "t = [group3]\ngroup3 = (+ a / b / c)\na = 1 b = 2 c = 3\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.11.  Operator Precedence",
+        "logicalLines": [
+          1947,
+          1949
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "t",
+          "hex": "820101",
+          "expect": true,
+          "note": "§3.11 repeated a",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "820202",
+          "expect": true,
+          "note": "§3.11 + applies to entire type choice only in group3",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "80",
+          "expect": false,
+          "note": "no empty alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "precedence-3",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 precedence-4",
+      "cddl": "t = [group4]\ngroup4 = (+ a // b / c)\na = 1 b = 2 c = 3\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.11.  Operator Precedence",
+        "logicalLines": [
+          1955,
+          1957
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "t",
+          "hex": "820101",
+          "expect": true,
+          "note": "§3.11 repeated a",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "820202",
+          "expect": false,
+          "note": "§3.11 + applies to entire type choice only in group3",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "80",
+          "expect": false,
+          "note": "no empty alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "precedence-4",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 precedence-4a",
+      "cddl": "t = [group4a]\ngroup4a = ((+ a) // (b / c))\na = 1 b = 2 c = 3\n",
+      "source": {
+        "rfc": 8610,
+        "section": "3.11.  Operator Precedence",
+        "logicalLines": [
+          1967,
+          1969
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "t",
+          "hex": "820101",
+          "expect": true,
+          "note": "§3.11 repeated a",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "820202",
+          "expect": false,
+          "note": "§3.11 + applies to entire type choice only in group3",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "t",
+          "hex": "80",
+          "expect": false,
+          "note": "no empty alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "precedence-4a",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 prelude",
+      "cddl": "any = #\n\nuint = #0\nnint = #1\nint = uint / nint\n\nbstr = #2\nbytes = bstr\ntstr = #3\ntext = tstr\n\ntdate = #6.0(tstr)\ntime = #6.1(number)\nnumber = int / float\nbiguint = #6.2(bstr)\nbignint = #6.3(bstr)\nbigint = biguint / bignint\ninteger = int / bigint\nunsigned = uint / biguint\ndecfrac = #6.4([e10: int, m: integer])\nbigfloat = #6.5([e2: int, m: integer])\neb64url = #6.21(any)\neb64legacy = #6.22(any)\neb16 = #6.23(any)\nencoded-cbor = #6.24(bstr)\nuri = #6.32(tstr)\nb64url = #6.33(tstr)\nb64legacy = #6.34(tstr)\nregexp = #6.35(tstr)\nmime-message = #6.36(tstr)\ncbor-any = #6.55799(any)\n\nfloat16 = #7.25\nfloat32 = #7.26\nfloat64 = #7.27\nfloat16-32 = float16 / float32\nfloat32-64 = float32 / float64\nfloat = float16-32 / float64\n\nfalse = #7.20\ntrue = #7.21\nbool = false / true\nnil = #7.22\nnull = nil\nundefined = #7.23\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix D.  Standard Prelude",
+        "logicalLines": [
+          2927,
+          2983
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 18,
+        "pageArtifactFixes": [
+          {
+            "logicalLine": 2965,
+            "removed": "Birkholz, et al.             Standards Track                   [Page 52]"
+          },
+          {
+            "logicalLine": 2968,
+            "removed": "RFC 8610                          CDDL                         June 2019"
+          }
+        ]
+      },
+      "cases": [
+        {
+          "rule": "any",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix D definition of any",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "uint",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix D definition of uint",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "uint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "nint",
+          "hex": "20",
+          "expect": true,
+          "note": "Appendix D definition of nint",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "nint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "int",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix D definition of int",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "int",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bstr",
+          "hex": "40",
+          "expect": true,
+          "note": "Appendix D definition of bstr",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bstr",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bytes",
+          "hex": "40",
+          "expect": true,
+          "note": "Appendix D definition of bytes",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bytes",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "tstr",
+          "hex": "60",
+          "expect": true,
+          "note": "Appendix D definition of tstr",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "tstr",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "text",
+          "hex": "60",
+          "expect": true,
+          "note": "Appendix D definition of text",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "text",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "tdate",
+          "hex": "c074323031332d30332d32315432303a30343a30305a",
+          "expect": true,
+          "note": "Appendix D definition of tdate",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "tdate",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "time",
+          "hex": "c100",
+          "expect": true,
+          "note": "Appendix D definition of time",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "time",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "number",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix D definition of number",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "number",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "biguint",
+          "hex": "c249010000000000000000",
+          "expect": true,
+          "note": "Appendix D definition of biguint",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "biguint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bignint",
+          "hex": "c349010000000000000000",
+          "expect": true,
+          "note": "Appendix D definition of bignint",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bignint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bigint",
+          "hex": "c249010000000000000000",
+          "expect": true,
+          "note": "Appendix D definition of bigint",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bigint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "integer",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix D definition of integer",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "integer",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "unsigned",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix D definition of unsigned",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "unsigned",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "decfrac",
+          "hex": "c48221196ab3",
+          "expect": true,
+          "note": "Appendix D definition of decfrac",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "decfrac",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bigfloat",
+          "hex": "c5822003",
+          "expect": true,
+          "note": "Appendix D definition of bigfloat",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bigfloat",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "eb64url",
+          "hex": "d500",
+          "expect": true,
+          "note": "Appendix D definition of eb64url",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "eb64url",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "eb64legacy",
+          "hex": "d600",
+          "expect": true,
+          "note": "Appendix D definition of eb64legacy",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "eb64legacy",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "eb16",
+          "hex": "d700",
+          "expect": true,
+          "note": "Appendix D definition of eb16",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "eb16",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "encoded-cbor",
+          "hex": "d8184100",
+          "expect": true,
+          "note": "Appendix D definition of encoded-cbor",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "encoded-cbor",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "uri",
+          "hex": "d8207368747470733a2f2f6578616d706c652e636f6d",
+          "expect": true,
+          "note": "Appendix D definition of uri",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "uri",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "b64url",
+          "hex": "d82160",
+          "expect": true,
+          "note": "Appendix D definition of b64url",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "b64url",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "b64legacy",
+          "hex": "d82260",
+          "expect": true,
+          "note": "Appendix D definition of b64legacy",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "b64legacy",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "regexp",
+          "hex": "d82360",
+          "expect": true,
+          "note": "Appendix D definition of regexp",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "regexp",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "mime-message",
+          "hex": "d82460",
+          "expect": true,
+          "note": "Appendix D definition of mime-message",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "mime-message",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "cbor-any",
+          "hex": "d9d9f700",
+          "expect": true,
+          "note": "Appendix D definition of cbor-any",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "cbor-any",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float16",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix D definition of float16",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float16",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float32",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix D definition of float32",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float32",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float64",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix D definition of float64",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float64",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float16-32",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix D definition of float16-32",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float16-32",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float32-64",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix D definition of float32-64",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float32-64",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix D definition of float",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "float",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "false",
+          "hex": "f4",
+          "expect": true,
+          "note": "Appendix D definition of false",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "false",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "true",
+          "hex": "f5",
+          "expect": true,
+          "note": "Appendix D definition of true",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "true",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bool",
+          "hex": "f5",
+          "expect": true,
+          "note": "Appendix D definition of bool",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "bool",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "nil",
+          "hex": "f6",
+          "expect": true,
+          "note": "Appendix D definition of nil",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "nil",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "null",
+          "hex": "f6",
+          "expect": true,
+          "note": "Appendix D definition of null",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "null",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "undefined",
+          "hex": "f7",
+          "expect": true,
+          "note": "Appendix D definition of undefined",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        },
+        {
+          "rule": "undefined",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "unavailable",
+            "exitCode": 1,
+            "finding": "reference schema/runtime error"
+          }
+        }
+      ],
+      "id": "prelude",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 json-prelude",
+      "cddl": "any = #\n\nuint = #0\nnint = #1\nint = uint / nint\n\ntstr = #3\ntext = tstr\n\nnumber = int / float\n\nfloat16 = #7.25\nfloat32 = #7.26\nfloat64 = #7.27\nfloat16-32 = float16 / float32\nfloat32-64 = float32 / float64\nfloat = float16-32 / float64\n\nfalse = #7.20\ntrue = #7.21\nbool = false / true\nnil = #7.22\nnull = nil\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix E.  Use with JSON",
+        "logicalLines": [
+          3028,
+          3050
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 22,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "any",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix E definition of any",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "uint",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix E definition of uint",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "uint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "nint",
+          "hex": "20",
+          "expect": true,
+          "note": "Appendix E definition of nint",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "nint",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "int",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix E definition of int",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "int",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tstr",
+          "hex": "60",
+          "expect": true,
+          "note": "Appendix E definition of tstr",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "tstr",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "text",
+          "hex": "60",
+          "expect": true,
+          "note": "Appendix E definition of text",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "text",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "number",
+          "hex": "00",
+          "expect": true,
+          "note": "Appendix E definition of number",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "number",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float16",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix E definition of float16",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float16",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float32",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix E definition of float32",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": false,
+            "explanation": "RFC 8610 §2.2.3 defines representable value sets. Ruby cddl.rb validates #7.25/26/27 by re-encoding the float and comparing its shortest encoded width exactly; 1.5 therefore fails float32/float64 although representable in both."
+          }
+        },
+        {
+          "rule": "float32",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float64",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix E definition of float64",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": false,
+            "explanation": "RFC 8610 §2.2.3 defines representable value sets. Ruby cddl.rb validates #7.25/26/27 by re-encoding the float and comparing its shortest encoded width exactly; 1.5 therefore fails float32/float64 although representable in both."
+          }
+        },
+        {
+          "rule": "float64",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float16-32",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix E definition of float16-32",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float16-32",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float32-64",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix E definition of float32-64",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": false,
+            "explanation": "RFC 8610 §2.2.3 defines representable value sets. Ruby cddl.rb validates #7.25/26/27 by re-encoding the float and comparing its shortest encoded width exactly; 1.5 therefore fails float32/float64 although representable in both."
+          }
+        },
+        {
+          "rule": "float32-64",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float",
+          "hex": "f93e00",
+          "expect": true,
+          "note": "Appendix E definition of float",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "float",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "false",
+          "hex": "f4",
+          "expect": true,
+          "note": "Appendix E definition of false",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "false",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "true",
+          "hex": "f5",
+          "expect": true,
+          "note": "Appendix E definition of true",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "true",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "bool",
+          "hex": "f5",
+          "expect": true,
+          "note": "Appendix E definition of bool",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "bool",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "nil",
+          "hex": "f6",
+          "expect": true,
+          "note": "Appendix E definition of nil",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "nil",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "null",
+          "hex": "f6",
+          "expect": true,
+          "note": "Appendix E definition of null",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "null",
+          "hex": "80",
+          "expect": false,
+          "note": "array is outside this scalar/tag prelude type",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "json-prelude",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 ijson-integers",
+      "cddl": "ij-uint = 0..9007199254740991\nij-nint = -9007199254740991..-1\nij-int = -9007199254740991..9007199254740991\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix E.  Use with JSON",
+        "logicalLines": [
+          3104,
+          3106
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 15,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "ij-uint",
+          "hex": "1b001fffffffffffff",
+          "expect": true,
+          "note": "Appendix E I-JSON exact integer limit",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "ij-uint",
+          "hex": "1b0020000000000000",
+          "expect": false,
+          "note": "above exact limit",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "ijson-integers",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 json-bignums",
+      "cddl": "biguint = #6.2(bstr)\nbignint = #6.3(bstr)\nbigint = biguint / bignint\ninteger = int / bigint\nunsigned = uint / biguint\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix E.  Use with JSON",
+        "logicalLines": [
+          3117,
+          3121
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 6,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "integer",
+          "hex": "c249010000000000000000",
+          "expect": true,
+          "note": "Appendix E bignum alternative",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "integer",
+          "hex": "6131",
+          "expect": false,
+          "note": "text is not an integer",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "json-bignums",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 reputon-verbose",
+      "cddl": "reputation-object = {\n  reputation-context,\n  reputon-list\n}\n\nreputation-context = (\n  application: text\n)\n\nreputon-list = (\n  reputons: reputon-array\n)\n\nreputon-array = [* reputon]\n\nreputon = {\n  rater-value,\n  assertion-value,\n  rated-value,\n  rating-value,\n  ? conf-value,\n  ? normal-value,\n  ? sample-value,\n  ? gen-value,\n  ? expire-value,\n  * ext-value,\n}\n\nrater-value = ( rater: text )\nassertion-value = ( assertion: text )\nrated-value = ( rated: text )\nrating-value = ( rating: float16 )\nconf-value = ( confidence: float16 )\nnormal-value = ( normal-rating: float16 )\nsample-value = ( sample-size: uint )\ngen-value = ( generated: uint )\nexpire-value = ( expires: uint )\next-value = ( text => any )\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix H.  Examples",
+        "logicalLines": [
+          3389,
+          3436
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 17,
+        "pageArtifactFixes": [
+          {
+            "logicalLine": 3421,
+            "removed": "Birkholz, et al.             Standards Track                   [Page 60]"
+          },
+          {
+            "logicalLine": 3424,
+            "removed": "RFC 8610                          CDDL                         June 2019"
+          }
+        ]
+      },
+      "cases": [
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e73806b6170706c69636174696f6e6178",
+          "expect": true,
+          "note": "Appendix H empty reputon vector",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e7381a46572617465646163657261746572616166726174696e67f93e0069617373657274696f6e61626b6170706c69636174696f6e6178",
+          "expect": true,
+          "note": "Appendix H required reputon fields",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e7381a06b6170706c69636174696f6e6178",
+          "expect": false,
+          "note": "required reputon fields absent",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e7383a76572617465646c7370686165726f6c697469636572617465726b457068746869616e75726166726174696e67fb3fd5d86da2579582676578706972657319062069617373657274696f6e67636f6464696e6769756e706c6173746572666772617373796a636f6e666964656e6365fb3fee57a3f987a398a965726174656468616c69656e6167656572617465726d6e6f6e63686172676561626c6566726174696e67fb3fe251a176e8e273667363686f726c644361726f68707572756c6f69646c696d706572736f6e61626c6569416c6465626172616e6a756e636875726368656469617373657274696f6e667261676c616e6b73616d706c652d73697a65190dba6b756e696e667261637465646d70657269636172706f6964616caa6572617465646d746865726d6f6e6174726974656572617465726e707265636f6c6c65637461626c6566726174696e67fb3fc887a95e1bb520667370656564796c736f6c6964756e67756c617268636865636b726f776965706964696374696369617373657274696f6e654d657261746967656e6572617465641903836a636f6e666964656e6365fb3fe368a78ed364ee6a6e6f7669636573686970686d65646963696e656d6e6f726d616c2d726174696e67fb3fe099d2ff4467126b6170706c69636174696f6e6b636f6e63686f6d65747279",
+          "expect": false,
+          "note": "Appendix H printed generated JSON example: ratings are not binary16 representable; preserve decimal values without rounding",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "reputon-verbose",
+      "compileObservation": {
+        "ok": false,
+        "code": "map_group_occurrence",
+        "line": 26,
+        "column": 3
+      }
+    },
+    {
+      "name": "RFC 8610 reputon-compact",
+      "cddl": "reputation-object = {\n  application: text\n  reputons: [* reputon]\n}\n\nreputon = {\n  rater: text\n  assertion: text\n  rated: text\n  rating: float16\n  ? confidence: float16\n  ? normal-rating: float16\n  ? sample-size: uint\n  ? generated: uint\n  ? expires: uint\n  * text => any\n}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix H.  Examples",
+        "logicalLines": [
+          3440,
+          3456
+        ],
+        "sha256": "3713f2a50e23a2bea0a6147ad6c4433605a00c3d00a868bfa86a42b204997089"
+      },
+      "extraction": {
+        "indentRemoved": 24,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e73806b6170706c69636174696f6e6178",
+          "expect": true,
+          "note": "Appendix H empty reputon vector",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e7381a46572617465646163657261746572616166726174696e67f93e0069617373657274696f6e61626b6170706c69636174696f6e6178",
+          "expect": true,
+          "note": "Appendix H required reputon fields",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e7381a06b6170706c69636174696f6e6178",
+          "expect": false,
+          "note": "required reputon fields absent",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "reputation-object",
+          "hex": "a26872657075746f6e7383a76572617465646c7370686165726f6c697469636572617465726b457068746869616e75726166726174696e67fb3fd5d86da2579582676578706972657319062069617373657274696f6e67636f6464696e6769756e706c6173746572666772617373796a636f6e666964656e6365fb3fee57a3f987a398a965726174656468616c69656e6167656572617465726d6e6f6e63686172676561626c6566726174696e67fb3fe251a176e8e273667363686f726c644361726f68707572756c6f69646c696d706572736f6e61626c6569416c6465626172616e6a756e636875726368656469617373657274696f6e667261676c616e6b73616d706c652d73697a65190dba6b756e696e667261637465646d70657269636172706f6964616caa6572617465646d746865726d6f6e6174726974656572617465726e707265636f6c6c65637461626c6566726174696e67fb3fc887a95e1bb520667370656564796c736f6c6964756e67756c617268636865636b726f776965706964696374696369617373657274696f6e654d657261746967656e6572617465641903836a636f6e666964656e6365fb3fe368a78ed364ee6a6e6f7669636573686970686d65646963696e656d6e6f726d616c2d726174696e67fb3fe099d2ff4467126b6170706c69636174696f6e6b636f6e63686f6d65747279",
+          "expect": false,
+          "note": "Appendix H printed generated JSON example: ratings are not binary16 representable; preserve decimal values without rounding",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "reputon-compact",
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 Appendix A greedy star",
+      "id": "peg-star",
+      "cddl": "r = [* uint, uint]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix A"
+      },
+      "origin": "derived instantiation of *a a",
+      "cases": [
+        {
+          "rule": "r",
+          "hex": "8101",
+          "expect": false,
+          "note": "greedy star consumes final uint",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "r",
+          "hex": "80",
+          "expect": false,
+          "note": "required final uint absent",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 Appendix A optional and bounded occurrence",
+      "id": "peg-optional",
+      "cddl": "r = [? uint, 2*3 uint, tstr]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix A / §3.2"
+      },
+      "origin": "derived",
+      "cases": [
+        {
+          "rule": "r",
+          "hex": "8301026178",
+          "expect": false,
+          "note": "optional consumes first uint; minimum two remain",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "r",
+          "hex": "840102036178",
+          "expect": true,
+          "note": "greedy optional plus two uints",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 Appendix A prioritised group choice",
+      "id": "peg-choice",
+      "cddl": "r = [(uint // uint, uint), tstr]\n",
+      "source": {
+        "rfc": 8610,
+        "section": "Appendix A"
+      },
+      "origin": "derived",
+      "cases": [
+        {
+          "rule": "r",
+          "hex": "82016178",
+          "expect": true,
+          "note": "first choice then text",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "r",
+          "hex": "8301026178",
+          "expect": false,
+          "note": "first successful choice locks one uint",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 literal cut scope D271",
+      "id": "cut-scope",
+      "cddl": "r = {kind: \"a\", x: uint // kind: \"b\", y: tstr}\n",
+      "source": {
+        "rfc": 8610,
+        "section": "§3.5.4 / Appendix A"
+      },
+      "origin": "derived; literal RFC expectation staged pending D271",
+      "cases": [
+        {
+          "rule": "r",
+          "hex": "a2617801646b696e646161",
+          "expect": true,
+          "note": "first branch matches",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "r",
+          "hex": "a26179617a646b696e646162",
+          "expect": false,
+          "note": "failed cut disables enclosing choice in literal RFC reading",
+          "dependsOn": [
+            "D271"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": false,
+            "explanation": "RFC 8610 §3.5.4 / Appendix A cut disables enclosing choice; Ruby follows D021 branch-local cuts. D271 remains an owner question."
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 8610 byte representation invariance",
+      "id": "wire-invariance",
+      "cddl": "r = {a: 1}\ns = float16\n",
+      "source": {
+        "rfc": 8610,
+        "section": "§§2.2.3, 3.2, 3.8.1"
+      },
+      "origin": "derived",
+      "cases": [
+        {
+          "rule": "r",
+          "hex": "bf61611801ff",
+          "expect": true,
+          "note": "indefinite map and nonpreferred integer still same value",
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "s",
+          "hex": "fa3fc00000",
+          "expect": true,
+          "note": "1.5 representable as half even when serialized single",
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    }
+  ]
+}

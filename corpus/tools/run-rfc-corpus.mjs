@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+// Run expectations without rewriting them. Report mode exits 0 with findings;
+// --gate exits 1 for any failure. --depends=P8.4 selects that exact group;
+// --depends=baseline excludes all staged dependencies. Default includes all.
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { compile } from '../../host/js/src/public-compile.mjs';
+import { decode } from '../../host/js/src/index.mjs';
+import { readSequence } from '../../host/js/src/public-sequence.mjs';
+
+const location = new URL('../conformance/rfc/', import.meta.url);
+function fingerprint() {
+  const result={};
+  for(const path of ['../../host/js/src/','../../gen/js/']) {
+    const dir=new URL(path,import.meta.url);
+    for(const file of readdirSync(dir,{recursive:true}).filter(f=>f.endsWith('.mjs')).sort())
+      result[path+file]=createHash('sha256').update(readFileSync(new URL(file,dir))).digest('hex');
+  }
+  return result;
+}
+const runtimeStart=fingerprint();
+const read = url => JSON.parse(readFileSync(url,'utf8'));
+const groupOf = c => c.dependsOn?.length ? [...c.dependsOn].sort().join('+') : 'baseline';
+const selected = process.argv.find(x=>x.startsWith('--depends='))?.slice(10);
+const rows=[]; const compilation=[]; const groups={};
+function record(suite, kind, id, expectation, observed, dependsOn=[], detail={}) {
+  const group=groupOf({dependsOn});
+  if(selected && selected!==group)return;
+  const pass=expectation===observed;
+  (groups[group]??={pass:0,fail:0})[pass?'pass':'fail']++;
+  rows.push({suite,kind,id,group,expect:expectation,observed,pass,...detail});
+}
+function fault(error) {return error.code||error.reason||error.name;}
+function observedClass(code) {
+  if(['truncated','malformed','trailing'].includes(code))return 'not-well-formed';
+  if(['text','duplicate_key','tag','bignum'].includes(code))return 'invalid';
+  return code?'profile-or-resource-refusal':undefined;
+}
+const validSupported = (()=>{try{decode(Uint8Array.of(0),{wire:'valid',top:'any'});return true;}catch{return false;}})();
+async function wireCase(name,vector,index,sequence=false) {
+  const buffer=Buffer.from(vector.hex,'hex');
+  for(const policy of ['valid','deterministic','bindle']) {
+    const options={wire:policy,top:'any'};
+    // Before P8.4 lands, default behaviour is the measured current behaviour
+    // for valid expectations. Never silently label it as wire:'valid' support.
+    if(policy==='valid'&&!validSupported)delete options.wire;
+    let observed=true,code,count=0;
+    try {
+      if(sequence)for await(const message of readSequence([buffer],options))count++;
+      else decode(buffer,options);
+    } catch(error) {observed=false;code=fault(error);}
+    const dependsOn=policy==='valid'?['P8.4']:[];
+    record(name,sequence?'sequence':'wire',`${index}:${policy}`,vector.expect[policy],observed,dependsOn,{code,
+      ...(policy==='valid'&&!validSupported?{mode:'current default (wire:valid unavailable)'}:{}),
+      ...(sequence?{itemCount:count}:{}),expectedClass:vector.expectedClass,observedClass:observedClass(code)});
+    if(sequence && (vector.expect[policy] || vector.expectedClass))record(name,'item-count',`${index}:${policy}`,vector.itemCount,count,dependsOn);
+  }
+}
+const a=read(new URL('../cbor-vectors/rfc8949-appendix-a.json',import.meta.url));
+for(let i=0;i<a.vectors.length;i++)await wireCase('RFC 8949 Appendix A',a.vectors[i],i);
+for(const file of readdirSync(location).filter(x=>/^rfc\d+.*\.json$/.test(x)).sort()) {
+  const doc=read(new URL(file,location));
+  if(doc.vectors)for(let i=0;i<doc.vectors.length;i++)await wireCase(file,doc.vectors[i],i,file==='rfc8742.json');
+  for(const suite of doc.suites||[]) {
+    let schema;
+    const cddl=typeof suite.context==='string'?suite.context+'\n'+suite.cddl:suite.context?.cddl||suite.cddl;
+    try {await compile(suite.cddl);compilation.push({suite:suite.name,kind:'extracted',ok:true});}
+    catch(error){compilation.push({suite:suite.name,kind:'extracted',ok:false,code:fault(error),line:error.line,column:error.column});}
+    try{schema=await compile(cddl);}
+    catch(error){compilation.push({suite:suite.name,kind:'effective',ok:false,code:fault(error),line:error.line,column:error.column});}
+    if(schema)compilation.push({suite:suite.name,kind:'effective',ok:true});
+    const extracted=compilation.findLast(c=>c.suite===suite.name&&c.kind==='extracted');
+    if(!extracted.ok)console.log(`COMPILE FINDING ${suite.name}: ${extracted.code}${suite.noCasesReason?' (illustrative/incomplete excerpt)':''}`);
+    // Compile failures remain failures, including cases expecting invalid data:
+    // no data verdict exists when the schema could not be compiled.
+    for(let i=0;i<suite.cases.length;i++) {
+      const test=suite.cases[i];let observed=null,code;
+      if(schema)try {
+        const result=schema.validate(Buffer.from(test.hex,'hex'),test.rule,validSupported?{wire:'valid'}:{});
+        observed=result.ok;code=result.reason;
+      }catch(error){code=fault(error);}
+      record(suite.name,'cddl',i,test.expect,observed,test.dependsOn,{rule:test.rule,code:code||(!schema?'compile-failure':undefined),ruby:test.ruby});
+    }
+  }
+}
+for(const name of new Set(rows.map(r=>r.suite))) {
+  const cases=rows.filter(r=>r.suite===name);
+  const counts={};for(const test of cases){const g=counts[test.group]??={pass:0,fail:0};g[test.pass?'pass':'fail']++;}
+  const failed=cases.filter(c=>!c.pass);
+  console.log(`${failed.length?'FAIL':'PASS'} ${name}: ${JSON.stringify(counts)}`);
+  if(process.argv.includes('--verbose'))for(const row of failed)console.log(`  ${row.kind} ${row.id} [${row.group}] expected ${row.expect}, observed ${row.observed} (${row.code||'verdict'})`);
+}
+const ruby=rows.filter(r=>r.kind==='cddl').map(r=>r.ruby);
+const runtimeEnd=fingerprint();
+const summary={validSupported,runtimeStable:JSON.stringify(runtimeStart)===JSON.stringify(runtimeEnd),groups,checks:rows.length,pass:rows.filter(r=>r.pass).length,fail:rows.filter(r=>!r.pass).length,
+  compilation:{extracted:compilation.filter(c=>c.kind==='extracted').length,rawFailures:compilation.filter(c=>c.kind==='extracted'&&!c.ok).length,effectiveFailures:compilation.filter(c=>c.kind==='effective'&&!c.ok).length},
+  ruby:{checked:ruby.filter(r=>r?.status==='checked').length,disagreements:ruby.filter(r=>r?.agrees===false).length,unavailable:ruby.filter(r=>r?.status==='unavailable').length}};
+console.log('SUMMARY '+JSON.stringify(summary));
+const output=process.argv.find(x=>x.startsWith('--json='))?.slice(7);
+if(output)writeFileSync(output,JSON.stringify({summary,runtimeStart,runtimeEnd,compilation,results:rows},null,2)+'\n');
+if(process.argv.includes('--gate')&&summary.fail)process.exitCode=1;

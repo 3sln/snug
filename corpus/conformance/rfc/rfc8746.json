@@ -1,0 +1,120 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug RFC CBOR vectors v1",
+  "vectors": [
+    {
+      "hex": "d82882820203d8414c000200040008000400100100",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8746,
+        "section": "§3 Figure 1",
+        "sha256": "26d0f7d0ee9d2e7dedc382cff6ad1dfe74d25f28fb66b20157a3bbd78baf4fe8"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "tag"
+      },
+      "origin": "printed annotated hex; <Tag N> expanded to preferred tag head",
+      "sourceLines": [
+        282,
+        294
+      ]
+    },
+    {
+      "hex": "d82882820203860204080410190100",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8746,
+        "section": "§3 Figure 2",
+        "sha256": "26d0f7d0ee9d2e7dedc382cff6ad1dfe74d25f28fb66b20157a3bbd78baf4fe8"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": true
+      },
+      "bindleObservation": {
+        "ok": true
+      },
+      "origin": "printed annotated hex; <Tag N> expanded to preferred tag head",
+      "sourceLines": [
+        303,
+        314
+      ]
+    },
+    {
+      "hex": "d9041082820203860204041008190100",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8746,
+        "section": "§3 Figure 3",
+        "sha256": "26d0f7d0ee9d2e7dedc382cff6ad1dfe74d25f28fb66b20157a3bbd78baf4fe8"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "tag"
+      },
+      "origin": "printed annotated hex; <Tag N> expanded to preferred tag head",
+      "sourceLines": [
+        332,
+        343
+      ]
+    },
+    {
+      "hex": "d82982f5f4",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8746,
+        "section": "§3 Figure 4",
+        "sha256": "26d0f7d0ee9d2e7dedc382cff6ad1dfe74d25f28fb66b20157a3bbd78baf4fe8"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "tag"
+      },
+      "origin": "printed annotated hex; <Tag N> expanded to preferred tag head",
+      "sourceLines": [
+        372,
+        375
+      ]
+    },
+    {
+      "hex": "d8298282f50382f523",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8746,
+        "section": "§3 Figure 5",
+        "sha256": "26d0f7d0ee9d2e7dedc382cff6ad1dfe74d25f28fb66b20157a3bbd78baf4fe8"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "tag"
+      },
+      "origin": "printed annotated hex; <Tag N> expanded to preferred tag head",
+      "sourceLines": [
+        387,
+        394
+      ]
+    }
+  ]
+}

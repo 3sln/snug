@@ -1,0 +1,3771 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "every displayed assignment-like line; CDDL selections versus explicit non-CDDL exclusions",
+  "entries": [
+    {
+      "rfc": 8610,
+      "logicalLine": 380,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "person = {",
+      "selections": [
+        "figure-1"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 409,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "pii = (",
+      "selections": [
+        "figure-2"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 420,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "person = {",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 435,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "person = {(",
+      "selections": [
+        "figure-4"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 469,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "person = {",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 475,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "dog = {",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 483,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "person = {",
+      "selections": [
+        "figure-6"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 488,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "dog = {",
+      "selections": [
+        "figure-6"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 493,
+      "section": "2.1.  Groups and Composition in CDDL",
+      "text": "identity = (",
+      "selections": [
+        "figure-6"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 605,
+      "section": "2.2.2.  Choices",
+      "text": "attire = \"bow tie\" / \"necktie\" / \"Internet attire\"",
+      "selections": [
+        "choices"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 606,
+      "section": "2.2.2.  Choices",
+      "text": "protocol = 6 / 17",
+      "selections": [
+        "choices"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 614,
+      "section": "2.2.2.  Choices",
+      "text": "address = { delivery }",
+      "selections": [
+        "delivery"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 616,
+      "section": "2.2.2.  Choices",
+      "text": "delivery = (",
+      "selections": [
+        "delivery"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 621,
+      "section": "2.2.2.  Choices",
+      "text": "city = (",
+      "selections": [
+        "delivery"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 641,
+      "section": "2.2.2.  Choices",
+      "text": "attire /= \"swimwear\"",
+      "selections": [
+        "choice-extensions"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 643,
+      "section": "2.2.2.  Choices",
+      "text": "delivery //= (",
+      "selections": [
+        "choice-extensions"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 662,
+      "section": "2.2.2.1.  Ranges",
+      "text": "device-address = byte",
+      "selections": [
+        "ranges"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 663,
+      "section": "2.2.2.1.  Ranges",
+      "text": "max-byte = 255",
+      "selections": [
+        "ranges"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 664,
+      "section": "2.2.2.1.  Ranges",
+      "text": "byte = 0..max-byte ; inclusive range",
+      "selections": [
+        "ranges"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 665,
+      "section": "2.2.2.1.  Ranges",
+      "text": "first-non-byte = 256",
+      "selections": [
+        "ranges"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 666,
+      "section": "2.2.2.1.  Ranges",
+      "text": "byte1 = 0...first-non-byte ; byte1 is equivalent to byte",
+      "selections": [
+        "ranges"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 673,
+      "section": "2.2.2.1.  Ranges",
+      "text": "int-range = 0..10 ; only integers match",
+      "selections": [
+        "mixed-ranges-undefined"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 674,
+      "section": "2.2.2.1.  Ranges",
+      "text": "float-range = 0.0..10.0 ; only floats match",
+      "selections": [
+        "mixed-ranges-undefined"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 675,
+      "section": "2.2.2.1.  Ranges",
+      "text": "BAD-range1 = 0..10.0 ; NOT DEFINED",
+      "selections": [
+        "mixed-ranges-undefined"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 676,
+      "section": "2.2.2.1.  Ranges",
+      "text": "BAD-range2 = 0.0..10 ; NOT DEFINED",
+      "selections": [
+        "mixed-ranges-undefined"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 677,
+      "section": "2.2.2.1.  Ranges",
+      "text": "numeric-range = int-range / float-range",
+      "selections": [
+        "mixed-ranges-undefined"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 710,
+      "section": "2.2.2.2.  Turning a Group into a Choice",
+      "text": "terminal-color = &basecolors",
+      "selections": [
+        "group-enumeration"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 711,
+      "section": "2.2.2.2.  Turning a Group into a Choice",
+      "text": "basecolors = (",
+      "selections": [
+        "group-enumeration"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 715,
+      "section": "2.2.2.2.  Turning a Group into a Choice",
+      "text": "extended-color = &(",
+      "selections": [
+        "group-enumeration"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 762,
+      "section": "2.2.3.  Representation Types",
+      "text": "my_breakfast = #6.55799(breakfast)   ; cbor-any is too general!",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 763,
+      "section": "2.2.3.  Representation Types",
+      "text": "breakfast = cereal / porridge",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 764,
+      "section": "2.2.3.  Representation Types",
+      "text": "cereal = #6.998(tstr)",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 765,
+      "section": "2.2.3.  Representation Types",
+      "text": "porridge = #6.999([liquid, solid])",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 766,
+      "section": "2.2.3.  Representation Types",
+      "text": "liquid = milk / water",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 767,
+      "section": "2.2.3.  Representation Types",
+      "text": "milk = 0",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 768,
+      "section": "2.2.3.  Representation Types",
+      "text": "water = 1",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 769,
+      "section": "2.2.3.  Representation Types",
+      "text": "solid = tstr",
+      "selections": [
+        "breakfast"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 886,
+      "section": "3.1.  General Conventions",
+      "text": "person = { g }",
+      "selections": [
+        "conventions"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 888,
+      "section": "3.1.  General Conventions",
+      "text": "g = (",
+      "selections": [
+        "conventions"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 930,
+      "section": "3.2.  Occurrence",
+      "text": "apartment = {",
+      "selections": [
+        "occurrence"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 934,
+      "section": "3.2.  Occurrence",
+      "text": "size = float ; in m2",
+      "selections": [
+        "occurrence"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1000,
+      "section": "3.4.  Arrays",
+      "text": "unlimited-people = [* person]",
+      "selections": [
+        "people"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1001,
+      "section": "3.4.  Arrays",
+      "text": "one-or-two-people = [1*2 person]",
+      "selections": [
+        "people"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1002,
+      "section": "3.4.  Arrays",
+      "text": "at-least-two-people = [2* person]",
+      "selections": [
+        "people"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1003,
+      "section": "3.4.  Arrays",
+      "text": "person = (",
+      "selections": [
+        "people"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1065,
+      "section": "3.5.1.  Structs",
+      "text": "Geography = [",
+      "selections": [
+        "geography"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1070,
+      "section": "3.5.1.  Structs",
+      "text": "GpsCoordinates = {",
+      "selections": [
+        "geography"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1094,
+      "section": "3.5.1.  Structs",
+      "text": "located-samples = {",
+      "selections": [
+        "samples-colon"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1123,
+      "section": "3.5.1.  Structs",
+      "text": "located-samples = {",
+      "selections": [
+        "samples-arrow"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1152,
+      "section": "3.5.1.  Structs",
+      "text": "located-samples = {",
+      "selections": [
+        "samples-equipment"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1157,
+      "section": "3.5.1.  Structs",
+      "text": "equipment-type = [name: tstr, manufacturer: tstr]",
+      "selections": [
+        "samples-equipment"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1158,
+      "section": "3.5.1.  Structs",
+      "text": "equipment-tolerances = [+ [float, float]]",
+      "selections": [
+        "samples-equipment"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1164,
+      "section": "3.5.1.  Structs",
+      "text": "PersonalData = {",
+      "selections": [
+        "personal-data"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1170,
+      "section": "3.5.1.  Structs",
+      "text": "NameComponents = (",
+      "selections": [
+        "personal-data"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1207,
+      "section": "3.5.1.  Structs",
+      "text": "PersonalData = {",
+      "selections": [
+        "figure-7"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1214,
+      "section": "3.5.1.  Structs",
+      "text": "NameComponents = (",
+      "selections": [
+        "figure-7"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1236,
+      "section": "3.5.2.  Tables",
+      "text": "square-roots = {* x => y}",
+      "selections": [
+        "square-roots"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1237,
+      "section": "3.5.2.  Tables",
+      "text": "x = int",
+      "selections": [
+        "square-roots"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1238,
+      "section": "3.5.2.  Tables",
+      "text": "y = float",
+      "selections": [
+        "square-roots"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1264,
+      "section": "3.5.2.  Tables",
+      "text": "tostring = {* mynumber => tstr}",
+      "selections": [
+        "tostring"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1265,
+      "section": "3.5.2.  Tables",
+      "text": "mynumber = int / float",
+      "selections": [
+        "tostring"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1277,
+      "section": "3.5.3.  Non-deterministic Order",
+      "text": "labeled-values = {",
+      "selections": [
+        "labeled-values"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1281,
+      "section": "3.5.3.  Non-deterministic Order",
+      "text": "label = text",
+      "selections": [
+        "labeled-values"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1282,
+      "section": "3.5.3.  Non-deterministic Order",
+      "text": "value = number",
+      "selections": [
+        "labeled-values"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1292,
+      "section": "3.5.3.  Non-deterministic Order",
+      "text": "do-not-do-this = {",
+      "selections": [
+        "indeterminate-map"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1332,
+      "section": "3.5.4.  Cuts in Maps",
+      "text": "extensible-map-example = {",
+      "selections": [
+        "cut-free"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1353,
+      "section": "3.5.4.  Cuts in Maps",
+      "text": "extensible-map-example = {",
+      "selections": [
+        "explicit-cut"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1384,
+      "section": "3.5.4.  Cuts in Maps",
+      "text": "extensible-map-example = {",
+      "selections": [
+        "quoted-cut"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1391,
+      "section": "3.5.4.  Cuts in Maps",
+      "text": "extensible-map-example = {",
+      "selections": [
+        "bareword-cut"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1406,
+      "section": "3.6.  Tags",
+      "text": "biguint = #6.2(bstr)",
+      "selections": [
+        "biguint"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1414,
+      "section": "3.6.  Tags",
+      "text": "buuid = #6.37(bstr)",
+      "selections": [
+        "buuid"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1418,
+      "section": "3.6.  Tags",
+      "text": "my_uri = #6.32(tstr) / tstr",
+      "selections": [
+        "my-uri"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1450,
+      "section": "3.7.  Unwrapping",
+      "text": "basic-header-group = (",
+      "selections": [
+        "basic-header-group"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1455,
+      "section": "3.7.  Unwrapping",
+      "text": "basic-header = [ basic-header-group ]",
+      "selections": [
+        "basic-header-group"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1457,
+      "section": "3.7.  Unwrapping",
+      "text": "advanced-header = [",
+      "selections": [
+        "basic-header-group"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1465,
+      "section": "3.7.  Unwrapping",
+      "text": "basic-header = [",
+      "selections": [
+        "unwrap-header"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1470,
+      "section": "3.7.  Unwrapping",
+      "text": "advanced-header = [",
+      "selections": [
+        "unwrap-header"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1518,
+      "section": "3.8.1.  Control Operator .size",
+      "text": "full-address = [[+ label], ip4, ip6]",
+      "selections": [
+        "figure-8"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1519,
+      "section": "3.8.1.  Control Operator .size",
+      "text": "ip4 = bstr .size 4",
+      "selections": [
+        "figure-8"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1520,
+      "section": "3.8.1.  Control Operator .size",
+      "text": "ip6 = bstr .size 16",
+      "selections": [
+        "figure-8"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1521,
+      "section": "3.8.1.  Control Operator .size",
+      "text": "label = bstr .size (1..63)",
+      "selections": [
+        "figure-8"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1531,
+      "section": "3.8.1.  Control Operator .size",
+      "text": "audio_sample = uint .size 3 ; 24-bit, equivalent to 0...16777216",
+      "selections": [
+        "figure-9"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1563,
+      "section": "3.8.2.  Control Operator .bits",
+      "text": "tcpflagbytes = bstr .bits flags",
+      "selections": [
+        "figure-10"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1564,
+      "section": "3.8.2.  Control Operator .bits",
+      "text": "flags = &(",
+      "selections": [
+        "figure-10"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1576,
+      "section": "3.8.2.  Control Operator .bits",
+      "text": "rwxbits = uint .bits rwx",
+      "selections": [
+        "figure-10"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1577,
+      "section": "3.8.2.  Control Operator .bits",
+      "text": "rwx = &(r: 2, w: 1, x: 0)",
+      "selections": [
+        "figure-10"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1610,
+      "section": "3.8.3.  Control Operator .regexp",
+      "text": "nai = tstr .regexp \"[A-Za-z0-9]+@[A-Za-z0-9]+(\\\\.[A-Za-z0-9]+)+\"",
+      "selections": [
+        "figure-11"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1728,
+      "section": "3.8.5.  Control Operators .within and .and",
+      "text": "message = $message .within message-structure",
+      "selections": [
+        "within-message"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1729,
+      "section": "3.8.5.  Control Operators .within and .and",
+      "text": "message-structure = [message_type, *message_option]",
+      "selections": [
+        "within-message"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1730,
+      "section": "3.8.5.  Control Operators .within and .and",
+      "text": "message_type = 0..255",
+      "selections": [
+        "within-message"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1731,
+      "section": "3.8.5.  Control Operators .within and .and",
+      "text": "message_option = any",
+      "selections": [
+        "within-message"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1733,
+      "section": "3.8.5.  Control Operators .within and .and",
+      "text": "$message /= [3, dough: text, topping: [* text]]",
+      "selections": [
+        "within-message"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1734,
+      "section": "3.8.5.  Control Operators .within and .and",
+      "text": "$message /= [4, noodles: text, sauce: text, parmesan: bool]",
+      "selections": [
+        "within-message"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1750,
+      "section": "3.8.6.  Control Operators .lt, .le, .gt, .ge, .eq, .ne, and .default",
+      "text": "speed = number .ge 0  ; unit: m/s",
+      "selections": [
+        "speed"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1787,
+      "section": "3.8.6.  Control Operators .lt, .le, .gt, .ge, .eq, .ne, and .default",
+      "text": "timer = {",
+      "selections": [
+        "default-timer"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1805,
+      "section": "3.9.  Socket/Plug",
+      "text": "tcp-header = {seq: uint, ack: uint, * $$tcp-option}",
+      "selections": [
+        "socket-tcp"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1809,
+      "section": "3.9.  Socket/Plug",
+      "text": "$$tcp-option //= (",
+      "selections": [
+        "socket-tcp"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1815,
+      "section": "3.9.  Socket/Plug",
+      "text": "$$tcp-option //= (",
+      "selections": [
+        "socket-tcp"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1842,
+      "section": "3.9.  Socket/Plug",
+      "text": "PersonalData = {",
+      "selections": [
+        "figure-12"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1849,
+      "section": "3.9.  Socket/Plug",
+      "text": "NameComponents = (",
+      "selections": [
+        "figure-12"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1857,
+      "section": "3.9.  Socket/Plug",
+      "text": "$$personaldata-extensions //= (",
+      "selections": [
+        "figure-12"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1863,
+      "section": "3.9.  Socket/Plug",
+      "text": "$$personaldata-extensions //= (",
+      "selections": [
+        "figure-12"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1874,
+      "section": "3.10.  Generics",
+      "text": "messages = message<\"reboot\", \"now\"> / message<\"sleep\", 1..100>",
+      "selections": [
+        "generics"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1875,
+      "section": "3.10.  Generics",
+      "text": "message<t, v> = {type: t, value: v}",
+      "selections": [
+        "generics"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1891,
+      "section": "3.10.  Generics",
+      "text": "parameter = argument).",
+      "excluded": "inline prose explaining generic substitution"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1913,
+      "section": "3.11.  Operator Precedence",
+      "text": "t = [group1]",
+      "selections": [
+        "precedence-1"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1914,
+      "section": "3.11.  Operator Precedence",
+      "text": "group1 = (a / b // c / d)",
+      "selections": [
+        "precedence-1"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1915,
+      "section": "3.11.  Operator Precedence",
+      "text": "a = 1 b = 2 c = 3 d = 4",
+      "selections": [
+        "precedence-1"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1921,
+      "section": "3.11.  Operator Precedence",
+      "text": "t = {group2}",
+      "selections": [
+        "precedence-2"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1922,
+      "section": "3.11.  Operator Precedence",
+      "text": "group2 = (? ab: a / b // cd: c / d)",
+      "selections": [
+        "precedence-2"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1923,
+      "section": "3.11.  Operator Precedence",
+      "text": "a = 1 b = 2 c = 3 d = 4",
+      "selections": [
+        "precedence-2"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1947,
+      "section": "3.11.  Operator Precedence",
+      "text": "t = [group3]",
+      "selections": [
+        "precedence-3"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1948,
+      "section": "3.11.  Operator Precedence",
+      "text": "group3 = (+ a / b / c)",
+      "selections": [
+        "precedence-3"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1949,
+      "section": "3.11.  Operator Precedence",
+      "text": "a = 1 b = 2 c = 3",
+      "selections": [
+        "precedence-3"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1955,
+      "section": "3.11.  Operator Precedence",
+      "text": "t = [group4]",
+      "selections": [
+        "precedence-4"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1956,
+      "section": "3.11.  Operator Precedence",
+      "text": "group4 = (+ a // b / c)",
+      "selections": [
+        "precedence-4"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1957,
+      "section": "3.11.  Operator Precedence",
+      "text": "a = 1 b = 2 c = 3",
+      "selections": [
+        "precedence-4"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1967,
+      "section": "3.11.  Operator Precedence",
+      "text": "t = [group4a]",
+      "selections": [
+        "precedence-4a"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1968,
+      "section": "3.11.  Operator Precedence",
+      "text": "group4a = ((+ a) // (b / c))",
+      "selections": [
+        "precedence-4a"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 1969,
+      "section": "3.11.  Operator Precedence",
+      "text": "a = 1 b = 2 c = 3",
+      "selections": [
+        "precedence-4a"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2433,
+      "section": "Appendix A.  Parsing Expression Grammars (PEGs)",
+      "text": "A = \"a\" \"b\" / \"a\"    (1)",
+      "excluded": "ABNF/PEG explanatory production, not CDDL"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2437,
+      "section": "Appendix A.  Parsing Expression Grammars (PEGs)",
+      "text": "A = \"a\" / \"a\" \"b\"    (2)",
+      "excluded": "ABNF/PEG explanatory production, not CDDL"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2524,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "cddl = S 1*(rule S)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2525,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "rule = typename [genericparm] S assignt S type",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2528,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "typename = id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2529,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "groupname = id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2531,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "assignt = \"=\" / \"/=\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2532,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "assigng = \"=\" / \"//=\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2534,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "genericparm = \"<\" S id S *(\",\" S id S ) \">\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2535,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "genericarg = \"<\" S type1 S *(\",\" S type1 S ) \">\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2537,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "type = type1 *(S \"/\" S type1)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2539,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "type1 = type2 [S (rangeop / ctlop) S type2]",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2542,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "type2 = value",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2554,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "rangeop = \"...\" / \"..\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2556,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "ctlop = \".\" id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2558,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "group = grpchoice *(S \"//\" S grpchoice)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2560,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "grpchoice = *(grpent optcom)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2572,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "grpent = [occur S] [memberkey S] type",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2576,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "memberkey = type1 S [\"^\" S] \"=>\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2580,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "bareword = id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2582,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "optcom = S [\",\" S]",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2584,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "occur = [uint] \"*\" [uint]",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2588,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "uint = DIGIT1 *DIGIT",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2593,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "value = number",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2597,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "int = [\"-\"] uint",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2600,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "number = hexfloat / (int [\".\" fraction] [\"e\" exponent ])",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2601,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "hexfloat = [\"-\"] \"0x\" 1*HEXDIG [\".\" 1*HEXDIG] \"p\" exponent",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2602,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "fraction = 1*DIGIT",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2603,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "exponent = [\"+\"/\"-\"] 1*DIGIT",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2605,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "text = %x22 *SCHAR %x22",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2606,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "SCHAR = %x20-21 / %x23-5B / %x5D-7E / %x80-10FFFD / SESC",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2607,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "SESC = \"\\\" (%x20-7E / %x80-10FFFD)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2609,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "bytes = [bsqual] %x27 *BCHAR %x27",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2610,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "BCHAR = %x20-26 / %x28-5B / %x5D-10FFFD / SESC / CRLF",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2611,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "bsqual = \"h\" / \"b64\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2629,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "id = EALPHA *(*(\"-\" / \".\") (EALPHA / DIGIT))",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2630,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "ALPHA = %x41-5A / %x61-7A",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2631,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "EALPHA = ALPHA / \"@\" / \"_\" / \"$\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2632,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "DIGIT = %x30-39",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2633,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "DIGIT1 = %x31-39",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2634,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "HEXDIG = DIGIT / \"A\" / \"B\" / \"C\" / \"D\" / \"E\" / \"F\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2635,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "BINDIG = %x30-31",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2637,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "S = *WS",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2638,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "WS = SP / NL",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2639,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "SP = %x20",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2640,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "NL = COMMENT / CRLF",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2641,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "COMMENT = \";\" *PCHAR CRLF",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2642,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "PCHAR = %x20-7E / %x80-10FFFD",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2643,
+      "section": "Appendix B.  ABNF Grammar",
+      "text": "CRLF = %x0A / %x0D.0A",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2661,
+      "section": "Appendix C.  Matching Rules",
+      "text": "cddl = S 1*(rule S)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2690,
+      "section": "Appendix C.  Matching Rules",
+      "text": "rule = typename [genericparm] S assignt S type",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2693,
+      "section": "Appendix C.  Matching Rules",
+      "text": "typename = id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2694,
+      "section": "Appendix C.  Matching Rules",
+      "text": "groupname = id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2713,
+      "section": "Appendix C.  Matching Rules",
+      "text": "assignt = \"=\" / \"/=\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2714,
+      "section": "Appendix C.  Matching Rules",
+      "text": "assigng = \"=\" / \"//=\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2726,
+      "section": "Appendix C.  Matching Rules",
+      "text": "genericparm = \"<\" S id S *(\",\" S id S ) \">\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2727,
+      "section": "Appendix C.  Matching Rules",
+      "text": "genericarg = \"<\" S type1 S *(\",\" S type1 S ) \">\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2733,
+      "section": "Appendix C.  Matching Rules",
+      "text": "type = type1 *(S \"/\" S type1)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2750,
+      "section": "Appendix C.  Matching Rules",
+      "text": "type1 = type2 [S (rangeop / ctlop) S type2]",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2755,
+      "section": "Appendix C.  Matching Rules",
+      "text": "type2 = value",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2817,
+      "section": "Appendix C.  Matching Rules",
+      "text": "rangeop = \"...\" / \"..\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2825,
+      "section": "Appendix C.  Matching Rules",
+      "text": "ctlop = \".\" id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2832,
+      "section": "Appendix C.  Matching Rules",
+      "text": "group = grpchoice *(S \"//\" S grpchoice)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2837,
+      "section": "Appendix C.  Matching Rules",
+      "text": "grpchoice = *(grpent optcom)",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2843,
+      "section": "Appendix C.  Matching Rules",
+      "text": "grpent = [occur S] [memberkey S] type",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2870,
+      "section": "Appendix C.  Matching Rules",
+      "text": "memberkey = type1 S [\"^\" S] \"=>\"",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2882,
+      "section": "Appendix C.  Matching Rules",
+      "text": "bareword = id",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2888,
+      "section": "Appendix C.  Matching Rules",
+      "text": "optcom = S [\",\" S]",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2892,
+      "section": "Appendix C.  Matching Rules",
+      "text": "occur = [uint] \"*\" [uint]",
+      "excluded": "ABNF defining CDDL syntax, not CDDL schema"
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2927,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "any = #",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2929,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "uint = #0",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2930,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "nint = #1",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2931,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "int = uint / nint",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2933,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "bstr = #2",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2934,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "bytes = bstr",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2935,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "tstr = #3",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2936,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "text = tstr",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2938,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "tdate = #6.0(tstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2939,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "time = #6.1(number)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2940,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "number = int / float",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2941,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "biguint = #6.2(bstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2942,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "bignint = #6.3(bstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2943,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "bigint = biguint / bignint",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2944,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "integer = int / bigint",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2945,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "unsigned = uint / biguint",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2946,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "decfrac = #6.4([e10: int, m: integer])",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2947,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "bigfloat = #6.5([e2: int, m: integer])",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2948,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "eb64url = #6.21(any)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2949,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "eb64legacy = #6.22(any)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2950,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "eb16 = #6.23(any)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2951,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "encoded-cbor = #6.24(bstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2952,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "uri = #6.32(tstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2953,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "b64url = #6.33(tstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2954,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "b64legacy = #6.34(tstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2955,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "regexp = #6.35(tstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2956,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "mime-message = #6.36(tstr)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2957,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "cbor-any = #6.55799(any)",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2971,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "float16 = #7.25",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2972,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "float32 = #7.26",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2973,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "float64 = #7.27",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2974,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "float16-32 = float16 / float32",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2975,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "float32-64 = float32 / float64",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2976,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "float = float16-32 / float64",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2978,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "false = #7.20",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2979,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "true = #7.21",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2980,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "bool = false / true",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2981,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "nil = #7.22",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2982,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "null = nil",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 2983,
+      "section": "Appendix D.  Standard Prelude",
+      "text": "undefined = #7.23",
+      "selections": [
+        "prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3028,
+      "section": "Appendix E.  Use with JSON",
+      "text": "any = #",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3030,
+      "section": "Appendix E.  Use with JSON",
+      "text": "uint = #0",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3031,
+      "section": "Appendix E.  Use with JSON",
+      "text": "nint = #1",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3032,
+      "section": "Appendix E.  Use with JSON",
+      "text": "int = uint / nint",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3034,
+      "section": "Appendix E.  Use with JSON",
+      "text": "tstr = #3",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3035,
+      "section": "Appendix E.  Use with JSON",
+      "text": "text = tstr",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3037,
+      "section": "Appendix E.  Use with JSON",
+      "text": "number = int / float",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3039,
+      "section": "Appendix E.  Use with JSON",
+      "text": "float16 = #7.25",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3040,
+      "section": "Appendix E.  Use with JSON",
+      "text": "float32 = #7.26",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3041,
+      "section": "Appendix E.  Use with JSON",
+      "text": "float64 = #7.27",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3042,
+      "section": "Appendix E.  Use with JSON",
+      "text": "float16-32 = float16 / float32",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3043,
+      "section": "Appendix E.  Use with JSON",
+      "text": "float32-64 = float32 / float64",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3044,
+      "section": "Appendix E.  Use with JSON",
+      "text": "float = float16-32 / float64",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3046,
+      "section": "Appendix E.  Use with JSON",
+      "text": "false = #7.20",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3047,
+      "section": "Appendix E.  Use with JSON",
+      "text": "true = #7.21",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3048,
+      "section": "Appendix E.  Use with JSON",
+      "text": "bool = false / true",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3049,
+      "section": "Appendix E.  Use with JSON",
+      "text": "nil = #7.22",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3050,
+      "section": "Appendix E.  Use with JSON",
+      "text": "null = nil",
+      "selections": [
+        "json-prelude"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3104,
+      "section": "Appendix E.  Use with JSON",
+      "text": "ij-uint = 0..9007199254740991",
+      "selections": [
+        "ijson-integers"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3105,
+      "section": "Appendix E.  Use with JSON",
+      "text": "ij-nint = -9007199254740991..-1",
+      "selections": [
+        "ijson-integers"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3106,
+      "section": "Appendix E.  Use with JSON",
+      "text": "ij-int = -9007199254740991..9007199254740991",
+      "selections": [
+        "ijson-integers"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3117,
+      "section": "Appendix E.  Use with JSON",
+      "text": "biguint = #6.2(bstr)",
+      "selections": [
+        "json-bignums"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3118,
+      "section": "Appendix E.  Use with JSON",
+      "text": "bignint = #6.3(bstr)",
+      "selections": [
+        "json-bignums"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3119,
+      "section": "Appendix E.  Use with JSON",
+      "text": "bigint = biguint / bignint",
+      "selections": [
+        "json-bignums"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3120,
+      "section": "Appendix E.  Use with JSON",
+      "text": "integer = int / bigint",
+      "selections": [
+        "json-bignums"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3121,
+      "section": "Appendix E.  Use with JSON",
+      "text": "unsigned = uint / biguint",
+      "selections": [
+        "json-bignums"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3389,
+      "section": "Appendix H.  Examples",
+      "text": "reputation-object = {",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3394,
+      "section": "Appendix H.  Examples",
+      "text": "reputation-context = (",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3398,
+      "section": "Appendix H.  Examples",
+      "text": "reputon-list = (",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3402,
+      "section": "Appendix H.  Examples",
+      "text": "reputon-array = [* reputon]",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3404,
+      "section": "Appendix H.  Examples",
+      "text": "reputon = {",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3427,
+      "section": "Appendix H.  Examples",
+      "text": "rater-value = ( rater: text )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3428,
+      "section": "Appendix H.  Examples",
+      "text": "assertion-value = ( assertion: text )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3429,
+      "section": "Appendix H.  Examples",
+      "text": "rated-value = ( rated: text )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3430,
+      "section": "Appendix H.  Examples",
+      "text": "rating-value = ( rating: float16 )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3431,
+      "section": "Appendix H.  Examples",
+      "text": "conf-value = ( confidence: float16 )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3432,
+      "section": "Appendix H.  Examples",
+      "text": "normal-value = ( normal-rating: float16 )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3433,
+      "section": "Appendix H.  Examples",
+      "text": "sample-value = ( sample-size: uint )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3434,
+      "section": "Appendix H.  Examples",
+      "text": "gen-value = ( generated: uint )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3435,
+      "section": "Appendix H.  Examples",
+      "text": "expire-value = ( expires: uint )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3436,
+      "section": "Appendix H.  Examples",
+      "text": "ext-value = ( text => any )",
+      "selections": [
+        "reputon-verbose"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3440,
+      "section": "Appendix H.  Examples",
+      "text": "reputation-object = {",
+      "selections": [
+        "reputon-compact"
+      ]
+    },
+    {
+      "rfc": 8610,
+      "logicalLine": 3445,
+      "section": "Appendix H.  Examples",
+      "text": "reputon = {",
+      "selections": [
+        "reputon-compact"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 148,
+      "section": "2.1.  Numeric Addition",
+      "text": "interval<BASE> = (",
+      "selections": [
+        "figure-1"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 154,
+      "section": "2.1.  Numeric Addition",
+      "text": "X = 0",
+      "selections": [
+        "figure-1"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 155,
+      "section": "2.1.  Numeric Addition",
+      "text": "Y = 3",
+      "selections": [
+        "figure-1"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 156,
+      "section": "2.1.  Numeric Addition",
+      "text": "rect = {",
+      "selections": [
+        "figure-1"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 184,
+      "section": "2.2.  String Concatenation",
+      "text": "c = \"foo\" .cat '",
+      "selections": [
+        "figure-2"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 189,
+      "section": "2.2.  String Concatenation",
+      "text": "b = \"foo\\n  bar\\n  baz\\n\"",
+      "selections": [
+        "figure-2"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 207,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "oid = bytes .abnfb (\"oid\" .det cbor-tags-oid)",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 208,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "roid = bytes .abnfb (\"roid\" .det cbor-tags-oid)",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 210,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "cbor-tags-oid = '",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 211,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "oid = 1*arc",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 212,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "roid = *arc",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 213,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "arc = [nlsb] %x00-7f",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 214,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "nlsb = %x81-ff *%x80-ff",
+      "selections": [
+        "figure-3"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 225,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "oid = bytes .abnfb 'oid",
+      "selections": [
+        "figure-4"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 226,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "oid = 1*arc",
+      "selections": [
+        "figure-4"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 227,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "roid = *arc",
+      "selections": [
+        "figure-4"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 228,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "arc = [nlsb] %x00-7f",
+      "selections": [
+        "figure-4"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 229,
+      "section": "2.3.  String Concatenation with Dedenting",
+      "text": "nlsb = %x81-ff *%x80-ff",
+      "selections": [
+        "figure-4"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 298,
+      "section": "3.  Embedded ABNF",
+      "text": "CRLF = %x0A / %x0D.0A",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 313,
+      "section": "3.  Embedded ABNF",
+      "text": "Tag1004 = #6.1004(text .abnf full-date)",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 315,
+      "section": "3.  Embedded ABNF",
+      "text": "Tag0 = #6.0(text .abnf date-time)",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 317,
+      "section": "3.  Embedded ABNF",
+      "text": "full-date = \"full-date\" .cat rfc3339",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 318,
+      "section": "3.  Embedded ABNF",
+      "text": "date-time = \"date-time\" .cat rfc3339",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 322,
+      "section": "3.  Embedded ABNF",
+      "text": "rfc3339 = '",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 323,
+      "section": "3.  Embedded ABNF",
+      "text": "date-fullyear   = 4DIGIT",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 324,
+      "section": "3.  Embedded ABNF",
+      "text": "date-month      = 2DIGIT  ; 01-12",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 325,
+      "section": "3.  Embedded ABNF",
+      "text": "date-mday       = 2DIGIT  ; 01-28, 01-29, 01-30, 01-31 based on",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 327,
+      "section": "3.  Embedded ABNF",
+      "text": "time-hour       = 2DIGIT  ; 00-23",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 328,
+      "section": "3.  Embedded ABNF",
+      "text": "time-minute     = 2DIGIT  ; 00-59",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 329,
+      "section": "3.  Embedded ABNF",
+      "text": "time-second     = 2DIGIT  ; 00-58, 00-59, 00-60 based on leap sec",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 331,
+      "section": "3.  Embedded ABNF",
+      "text": "time-secfrac    = \".\" 1*DIGIT",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 332,
+      "section": "3.  Embedded ABNF",
+      "text": "time-numoffset  = (\"+\" / \"-\") time-hour \":\" time-minute",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 333,
+      "section": "3.  Embedded ABNF",
+      "text": "time-offset     = \"Z\" / time-numoffset",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 335,
+      "section": "3.  Embedded ABNF",
+      "text": "partial-time    = time-hour \":\" time-minute \":\" time-second",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 337,
+      "section": "3.  Embedded ABNF",
+      "text": "full-date       = date-fullyear \"-\" date-month \"-\" date-mday",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 338,
+      "section": "3.  Embedded ABNF",
+      "text": "full-time       = partial-time time-offset",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 340,
+      "section": "3.  Embedded ABNF",
+      "text": "date-time       = full-date \"T\" full-time",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 343,
+      "section": "3.  Embedded ABNF",
+      "text": "rfc5234-core = '",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 344,
+      "section": "3.  Embedded ABNF",
+      "text": "DIGIT          =  %x30-39 ; 0-9",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 379,
+      "section": "4.  Features",
+      "text": "foo = {",
+      "selections": [
+        "figure-6-ellipsis"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 382,
+      "section": "4.  Features",
+      "text": "bar = ...",
+      "selections": [
+        "figure-6-ellipsis"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 383,
+      "section": "4.  Features",
+      "text": "baz = ... ; complex stuff that doesn't all need to be in the detail",
+      "selections": [
+        "figure-6-ellipsis"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 404,
+      "section": "4.  Features",
+      "text": "person = {",
+      "selections": [
+        "figure-7"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 411,
+      "section": "4.  Features",
+      "text": "$$person-extensions //= (? bloodgroup: text)",
+      "selections": [
+        "figure-7"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 418,
+      "section": "4.  Features",
+      "text": "allowed-types = number / text / bool / null",
+      "selections": [
+        "figure-8"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 433,
+      "section": "4.  Features",
+      "text": "SenML-Record = {",
+      "selections": [
+        "figure-9"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 438,
+      "section": "4.  Features",
+      "text": "v = JC<\"v\", 2>",
+      "selections": [
+        "figure-9"
+      ]
+    },
+    {
+      "rfc": 9165,
+      "logicalLine": 439,
+      "section": "4.  Features",
+      "text": "JC<J,C> = J .feature \"json\" / C .feature \"cbor\"",
+      "selections": [
+        "figure-9"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 124,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "text = %x22 *SCHAR %x22",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 125,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "SCHAR = %x20-21 / %x23-5B / %x5D-7E / %x80-10FFFD / SESC",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 126,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "SESC = \"\\\" (%x20-7E / %x80-10FFFD)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 146,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "SESC = \"\\\" ( %x22 / \"/\" / \"\\\" /                 ; \\\" \\/ \\\\",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 149,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "hexchar = \"{\" (1*\"0\" [ hexscalar ] / hexscalar) \"}\" /",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 151,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "non-surrogate = ((DIGIT / \"A\"/\"B\"/\"C\" / \"E\"/\"F\") 3HEXDIG) /",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 153,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "high-surrogate = \"D\" (\"8\"/\"9\"/\"A\"/\"B\") 2HEXDIG",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 154,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "low-surrogate = \"D\" (\"C\"/\"D\"/\"E\"/\"F\") 2HEXDIG",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 155,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "hexscalar = \"10\" 4HEXDIG / HEXDIG1 4HEXDIG",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 157,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "HEXDIG1 = DIGIT1 / \"A\" / \"B\" / \"C\" / \"D\" / \"E\" / \"F\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 172,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "bytes = [bsqual] %x27 *BCHAR %x27",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 173,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "BCHAR = %x20-26 / %x28-5B / %x5D-10FFFD / SESC / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 174,
+      "section": "2.1.1.  Erratum ID 6527 (Text String Literals)",
+      "text": "bsqual = \"h\" / \"b64\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 195,
+      "section": "2.1.2.  Erratum ID 6278 (Consistent String Literals)",
+      "text": "SCHAR = %x20-21 / %x23-5B / %x5D-7E / NONASCII / SESC",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 196,
+      "section": "2.1.2.  Erratum ID 6278 (Consistent String Literals)",
+      "text": "BCHAR = %x20-26 / %x28-5B / %x5D-7E / NONASCII / SESC / \"\\'\" / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 197,
+      "section": "2.1.2.  Erratum ID 6278 (Consistent String Literals)",
+      "text": "PCHAR = %x20-7E / NONASCII",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 198,
+      "section": "2.1.2.  Erratum ID 6278 (Consistent String Literals)",
+      "text": "NONASCII = %xA0-D7FF / %xE000-10FFFD",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 226,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "start = [a, b, c, x, y, z]",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 230,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "a = \"D\\u{6f}mino's \\u{1F073} + \\u{2318}\"      ; \\u{}-escape 3 chars",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 231,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "b = \"Domino's \\uD83C\\uDC73 + \\u2318\"          ; escape JSON-like",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 232,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "c = \"Domino's 🁳 + ⌘\"                          ; unescaped",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 235,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "x = 'D\\u{6f}mino\\u{27}s \\u{1F073} + \\u{2318}' ; \\u{}-escape 4 chars",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 236,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "y = 'Domino\\'s \\uD83C\\uDC73 + \\u2318'         ; escape JSON-like",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 237,
+      "section": "2.2.  Examples Demonstrating the Updated String Syntaxes",
+      "text": "z = 'Domino\\'s 🁳 + ⌘'                         ; escape ' only",
+      "selections": [
+        "figure-5"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 280,
+      "section": "3.1.  Empty Data Models",
+      "text": "cddl = S 1*(rule S)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 299,
+      "section": "3.1.  Empty Data Models",
+      "text": "cddl = S *(rule S)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 308,
+      "section": "3.2.  Non-Literal Tag Numbers and Simple Values",
+      "text": "type2 =/ \"#\" \"6\" [\".\" uint] \"(\" S type S \")\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 322,
+      "section": "3.2.  Non-Literal Tag Numbers and Simple Values",
+      "text": "type2 =/ \"#\" \"6\" [\".\" head-number] \"(\" S type S \")\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 324,
+      "section": "3.2.  Non-Literal Tag Numbers and Simple Values",
+      "text": "head-number = uint / (\"<\" type \">\")",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 338,
+      "section": "3.2.  Non-Literal Tag Numbers and Simple Values",
+      "text": "ct-tag<content> = #6.<ct-tag-number>(content)",
+      "selections": [
+        "tag-range"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 339,
+      "section": "3.2.  Non-Literal Tag Numbers and Simple Values",
+      "text": "ct-tag-number = 1668546817..1668612095",
+      "selections": [
+        "tag-range"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 482,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "cddl = S *(rule S)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 483,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "rule = typename [genericparm] S assignt S type",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 486,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "typename = id",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 487,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "groupname = id",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 489,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "assignt = \"=\" / \"/=\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 490,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "assigng = \"=\" / \"//=\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 492,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "genericparm = \"<\" S id S *(\",\" S id S ) \">\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 493,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "genericarg = \"<\" S type1 S *(\",\" S type1 S ) \">\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 495,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "type = type1 *(S \"/\" S type1)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 497,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "type1 = type2 [S (rangeop / ctlop) S type2]",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 500,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "type2 = value",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 512,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "head-number = uint / (\"<\" type \">\")",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 514,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "rangeop = \"...\" / \"..\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 516,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "ctlop = \".\" id",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 518,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "group = grpchoice *(S \"//\" S grpchoice)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 520,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "grpchoice = *(grpent optcom)",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 522,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "grpent = [occur S] [memberkey S] type",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 526,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "memberkey = type1 S [\"^\" S] \"=>\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 530,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "bareword = id",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 532,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "optcom = S [\",\" S]",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 534,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "occur = [uint] \"*\" [uint]",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 538,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "uint = DIGIT1 *DIGIT",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 543,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "value = number",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 547,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "int = [\"-\"] uint",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 550,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "number = hexfloat / (int [\".\" fraction] [\"e\" exponent ])",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 551,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "hexfloat = [\"-\"] \"0x\" 1*HEXDIG [\".\" 1*HEXDIG] \"p\" exponent",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 552,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "fraction = 1*DIGIT",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 553,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "exponent = [\"+\"/\"-\"] 1*DIGIT",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 555,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "text = %x22 *SCHAR %x22",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 556,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "SCHAR = %x20-21 / %x23-5B / %x5D-7E / NONASCII / SESC",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 558,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "SESC = \"\\\" ( %x22 / \"/\" / \"\\\" /                 ; \\\" \\/ \\\\",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 562,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "hexchar = \"{\" (1*\"0\" [ hexscalar ] / hexscalar) \"}\" /",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 564,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "non-surrogate = ((DIGIT / \"A\"/\"B\"/\"C\" / \"E\"/\"F\") 3HEXDIG) /",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 566,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "high-surrogate = \"D\" (\"8\"/\"9\"/\"A\"/\"B\") 2HEXDIG",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 567,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "low-surrogate = \"D\" (\"C\"/\"D\"/\"E\"/\"F\") 2HEXDIG",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 568,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "hexscalar = \"10\" 4HEXDIG / HEXDIG1 4HEXDIG",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 571,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "bytes = [bsqual] %x27 *BCHAR %x27",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 572,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "BCHAR = %x20-26 / %x28-5B / %x5D-7E / NONASCII / SESC / \"\\'\" / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 573,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "bsqual = \"h\" / \"b64\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 575,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "id = EALPHA *(*(\"-\" / \".\") (EALPHA / DIGIT))",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 576,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "ALPHA = %x41-5A / %x61-7A",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 577,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "EALPHA = ALPHA / \"@\" / \"_\" / \"$\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 578,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "DIGIT = %x30-39",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 579,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "DIGIT1 = %x31-39",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 580,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "HEXDIG = DIGIT / \"A\" / \"B\" / \"C\" / \"D\" / \"E\" / \"F\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 581,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "HEXDIG1 = DIGIT1 / \"A\" / \"B\" / \"C\" / \"D\" / \"E\" / \"F\"",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 582,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "BINDIG = %x30-31",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 584,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "S = *WS",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 585,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "WS = SP / NL",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 586,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "SP = %x20",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 587,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "NL = COMMENT / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 588,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "COMMENT = \";\" *PCHAR CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 589,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "PCHAR = %x20-7E / NONASCII",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 590,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "NONASCII = %xA0-D7FF / %xE000-10FFFD",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 591,
+      "section": "Appendix A.  Updated Collected ABNF for CDDL",
+      "text": "CRLF = %x0A / %x0D.0A",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 605,
+      "section": "Appendix B.  Details about Covering Erratum ID 6543",
+      "text": "bytes = [bsqual] %x27 *BCHAR %x27",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 606,
+      "section": "Appendix B.  Details about Covering Erratum ID 6543",
+      "text": "BCHAR = %x20-26 / %x28-5B / %x5D-10FFFD / SESC / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 617,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "bytes = %x27 *BCHAR %x27",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 619,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "BCHAR = %x20-26 / %x28-5B / %x5D-10FFFD / SESC / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 620,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "QCHAR = DIGIT / ALPHA / \"+\" / \"/\" / \"-\" / \"_\" / \"=\" / WS",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 629,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "WS = SP / NL",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 630,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "SP = %x20",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 631,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "NL = COMMENT / CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 632,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "COMMENT = \";\" *PCHAR CRLF",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 633,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "PCHAR = %x20-7E / %x80-10FFFD",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 634,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "CRLF = %x0A / %x0D.0A",
+      "excluded": "ABNF grammar (including old/proposed forms), not CDDL schema"
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 641,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "foo = h'",
+      "selections": [
+        "hex-comments-unescaped"
+      ]
+    },
+    {
+      "rfc": 9682,
+      "logicalLine": 649,
+      "section": "B.1.  Change Proposed by Erratum ID 6543",
+      "text": "foo = h'",
+      "selections": [
+        "hex-comments-escaped"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 350,
+      "section": "1.4.  CDDL Grammar for CBOR Data Structures",
+      "text": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types",
+      "selections": [
+        "start"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 353,
+      "section": "1.4.  CDDL Grammar for CBOR Data Structures",
+      "text": "Internal_Types = Sig_structure / Enc_structure / MAC_structure",
+      "selections": [
+        "internal-types"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 380,
+      "section": "1.5.  CBOR-Related Terminology",
+      "text": "label = int / tstr",
+      "selections": [
+        "labels"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 381,
+      "section": "1.5.  CBOR-Related Terminology",
+      "text": "values = any",
+      "selections": [
+        "labels"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 535,
+      "section": "2.  Basic COSE Structure",
+      "text": "COSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message",
+      "selections": [
+        "messages"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 537,
+      "section": "2.  Basic COSE Structure",
+      "text": "COSE_Untagged_Message = COSE_Sign / COSE_Sign1 /",
+      "selections": [
+        "messages"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 541,
+      "section": "2.  Basic COSE Structure",
+      "text": "COSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /",
+      "selections": [
+        "messages"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 627,
+      "section": "3.  Header Parameters",
+      "text": "Headers = (",
+      "selections": [
+        "headers"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 632,
+      "section": "3.  Header Parameters",
+      "text": "header_map = {",
+      "selections": [
+        "headers"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 637,
+      "section": "3.  Header Parameters",
+      "text": "empty_or_serialized_map = bstr .cbor header_map / bstr .size 0",
+      "selections": [
+        "headers"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 781,
+      "section": "3.1.  Common COSE Header Parameters",
+      "text": "Generic_Headers = (",
+      "selections": [
+        "generic-headers"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 837,
+      "section": "4.1.  Signing with One or More Signers",
+      "text": "COSE_Sign_Tagged = #6.98(COSE_Sign)",
+      "selections": [
+        "sign-tag"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 876,
+      "section": "4.1.  Signing with One or More Signers",
+      "text": "COSE_Sign = [",
+      "selections": [
+        "sign"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 896,
+      "section": "4.1.  Signing with One or More Signers",
+      "text": "COSE_Signature =  [",
+      "selections": [
+        "signature"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 913,
+      "section": "4.2.  Signing with One Signer",
+      "text": "COSE_Sign1_Tagged = #6.18(COSE_Sign1)",
+      "selections": [
+        "sign1-tag"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 935,
+      "section": "4.2.  Signing with One Signer",
+      "text": "COSE_Sign1 = [",
+      "selections": [
+        "sign1"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1024,
+      "section": "4.4.  Signing and Verification Process",
+      "text": "Sig_structure = [",
+      "selections": [
+        "sig-structure"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1103,
+      "section": "5.1.  Enveloped COSE Structure",
+      "text": "COSE_Encrypt_Tagged = #6.96(COSE_Encrypt)",
+      "selections": [
+        "encrypt-tag"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1123,
+      "section": "5.1.  Enveloped COSE Structure",
+      "text": "COSE_Encrypt = [",
+      "selections": [
+        "encrypt"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1150,
+      "section": "5.1.  Enveloped COSE Structure",
+      "text": "COSE_recipient = [",
+      "selections": [
+        "recipient"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1200,
+      "section": "5.2.  Single Recipient Encrypted",
+      "text": "COSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)",
+      "selections": [
+        "encrypt0-tag"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1214,
+      "section": "5.2.  Single Recipient Encrypted",
+      "text": "COSE_Encrypt0 = [",
+      "selections": [
+        "encrypt0"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1256,
+      "section": "5.3.  How to Encrypt and Decrypt for AEAD Algorithms",
+      "text": "Enc_structure = [",
+      "selections": [
+        "enc-structure"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1426,
+      "section": "6.1.  MACed Message with Recipients",
+      "text": "COSE_Mac_Tagged = #6.97(COSE_Mac)",
+      "selections": [
+        "mac-tag"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1451,
+      "section": "6.1.  MACed Message with Recipients",
+      "text": "COSE_Mac = [",
+      "selections": [
+        "mac"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1473,
+      "section": "6.2.  MACed Messages with Implicit Key",
+      "text": "COSE_Mac0_Tagged = #6.17(COSE_Mac0)",
+      "selections": [
+        "mac0-tag"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1488,
+      "section": "6.2.  MACed Messages with Implicit Key",
+      "text": "COSE_Mac0 = [",
+      "selections": [
+        "mac0"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1519,
+      "section": "6.3.  How to Compute and Verify a MAC",
+      "text": "MAC_structure = [",
+      "selections": [
+        "mac-structure"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1585,
+      "section": "7.  Key Objects",
+      "text": "COSE_Key = {",
+      "selections": [
+        "keys"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1594,
+      "section": "7.  Key Objects",
+      "text": "COSE_KeySet = [+COSE_Key]",
+      "selections": [
+        "keys"
+      ]
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1741,
+      "section": "8.1.  Signature Algorithms",
+      "text": "signature = Sign(message content, key)",
+      "excluded": "cryptographic algorithm pseudocode, not CDDL schema"
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1743,
+      "section": "8.1.  Signature Algorithms",
+      "text": "valid = Verification(message content, key, signature)",
+      "excluded": "cryptographic algorithm pseudocode, not CDDL schema"
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1833,
+      "section": "8.2.  Message Authentication Code (MAC) Algorithms",
+      "text": "tag = MAC_Create(message content, key)",
+      "excluded": "cryptographic algorithm pseudocode, not CDDL schema"
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1835,
+      "section": "8.2.  Message Authentication Code (MAC) Algorithms",
+      "text": "valid = MAC_Verify(message content, key, tag)",
+      "excluded": "cryptographic algorithm pseudocode, not CDDL schema"
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 1862,
+      "section": "8.3.  Content Encryption Algorithms",
+      "text": "ciphertext = Encrypt(message content, key, additional data)",
+      "excluded": "cryptographic algorithm pseudocode, not CDDL schema"
+    },
+    {
+      "rfc": 9052,
+      "logicalLine": 2042,
+      "section": "8.5.5.  Key Agreement with Key Wrap",
+      "text": "encryptedKey = KeyWrap(KDF(DH-Shared, context), CEK)",
+      "excluded": "cryptographic algorithm pseudocode, not CDDL schema"
+    }
+  ]
+}

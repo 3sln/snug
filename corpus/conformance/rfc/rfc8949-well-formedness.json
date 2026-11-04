@@ -1,0 +1,1510 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug RFC CBOR vectors v1",
+  "vectors": [
+    {
+      "hex": "18",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "19",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1a",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1b",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1901",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1a0102",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1b01020304050607",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "38",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "58",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "78",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "98",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9a01ff00",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "b8",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "d8",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "f8",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "f900",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "fa0000",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "fb000000",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "End of input in a head",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "41",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length strings with short data",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "61",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length strings with short data",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5affffffff00",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length strings with short data",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5bffffffffffffffff010203",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length strings with short data",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7affffffff00",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length strings with short data",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7b7fffffffffffffff010203",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length strings with short data",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "81",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "818181818181818181",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "8200",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a1",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a20102",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a100",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a2000000",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Definite-length maps and arrays not closed with enough items",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "c0",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Tag number not followed by tag content",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5f4100",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length strings not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7f6100",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length strings not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f0102",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "bf",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "bf01020102",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "819f",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f8000",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f9f9f9f9fffffffff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f819f819f9fffffff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length maps and arrays not closed by a \"break\" stop code",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1c",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1d",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1e",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "3c",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "3d",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "3e",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5c",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5d",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5e",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7c",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7d",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7e",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9c",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9d",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9e",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "bc",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "bd",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "be",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "dc",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "dd",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "de",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "fc",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "fd",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "fe",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved additional information values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "f800",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved two-byte encodings of simple values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "f801",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved two-byte encodings of simple values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "f818",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved two-byte encodings of simple values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "f81f",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Reserved two-byte encodings of simple values",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5f00ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5f21ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5f6100ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5f80ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5fa0ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5fc000ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5fe0ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7f4100ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not of the correct type",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "5f5f4100ffff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not definite length",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "7f7f6100ffff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Indefinite-length string chunks not definite length",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring on its own outside of an indefinite-length item",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "81ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "8200ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a1ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a1ff00",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a100ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "a20000ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f81ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "9f829f819f9fffffffff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break occurring in a definite-length array or map or a tag",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "bf00ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break in an indefinite-length map that would lead to an odd number of items (break in a value position)",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "bf000000ff",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Break in an indefinite-length map that would lead to an odd number of items (break in a value position)",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1f",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Major type 0, 1, 6 with additional information 31",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "3f",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Major type 0, 1, 6 with additional information 31",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "df",
+      "diagnostic": null,
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "note": "Major type 0, 1, 6 with additional information 31",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    }
+  ]
+}

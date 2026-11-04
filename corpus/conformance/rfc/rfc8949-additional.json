@@ -1,0 +1,247 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug RFC CBOR vectors v1; §4.2.2 restrictions are not core deterministic",
+  "vectors": [
+    {
+      "hex": "a201000101",
+      "diagnostic": null,
+      "note": "duplicate map key",
+      "source": {
+        "rfc": 8949,
+        "section": "§5.3.1"
+      },
+      "origin": "hand-made from RFC rule",
+      "expectedClass": "invalid",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "62c0af",
+      "diagnostic": null,
+      "note": "invalid UTF-8",
+      "source": {
+        "rfc": 8949,
+        "section": "§5.3.1"
+      },
+      "origin": "hand-made from RFC rule",
+      "expectedClass": "invalid",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "c000",
+      "diagnostic": null,
+      "note": "tag 0 integer content",
+      "source": {
+        "rfc": 8949,
+        "section": "§3.4.1"
+      },
+      "origin": "hand-made from RFC rule",
+      "expectedClass": "invalid",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "c26131",
+      "diagnostic": null,
+      "note": "tag 2 text content",
+      "source": {
+        "rfc": 8949,
+        "section": "§3.4.3"
+      },
+      "origin": "hand-made from RFC rule",
+      "expectedClass": "invalid",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "d8184100ff",
+      "diagnostic": null,
+      "note": "trailing byte after tag 24 item",
+      "source": {
+        "rfc": 8949,
+        "section": "Appendix F kind 1"
+      },
+      "origin": "hand-made from RFC rule",
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      }
+    },
+    {
+      "hex": "1817",
+      "diagnostic": "23",
+      "source": {
+        "rfc": 8949,
+        "section": "§4.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": false,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "non_shortest"
+      },
+      "note": "§4.1 nonpreferred integer head",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    },
+    {
+      "hex": "580100",
+      "diagnostic": "h'00'",
+      "source": {
+        "rfc": 8949,
+        "section": "§4.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": false,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "non_shortest"
+      },
+      "note": "§4.1 nonpreferred string head",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    },
+    {
+      "hex": "a202000100",
+      "diagnostic": "{2:0,1:0}",
+      "source": {
+        "rfc": 8949,
+        "section": "§4.2.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": false,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "key_type"
+      },
+      "note": "§4.2.1 unsorted keys",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    },
+    {
+      "hex": "f97e01",
+      "diagnostic": "NaN",
+      "source": {
+        "rfc": 8949,
+        "section": "§4.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "float"
+      },
+      "note": "§4.1 shortest payload-preserving NaN; canonical-NaN-only is additional §4.2.2 policy",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    },
+    {
+      "hex": "faffc00001",
+      "diagnostic": "NaN",
+      "source": {
+        "rfc": 8949,
+        "section": "§4.1",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "float"
+      },
+      "note": "§4.1 NaN payload cannot narrow by zero-padding",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    },
+    {
+      "hex": "c24101",
+      "diagnostic": "2(h'01')",
+      "source": {
+        "rfc": 8949,
+        "section": "§3.4.3",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": false,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "bignum"
+      },
+      "note": "§3.4.3 preferred serialization uses basic integer",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    },
+    {
+      "hex": "c482001864",
+      "diagnostic": "4([0,100])",
+      "source": {
+        "rfc": 8949,
+        "section": "§4.2.2",
+        "sha256": "f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a"
+      },
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": false
+      },
+      "bindleObservation": {
+        "ok": false,
+        "code": "decimal"
+      },
+      "note": "§4.2.2 decimal normalization requires an additional protocol rule",
+      "origin": "hand-made from RFC rule",
+      "dependsOn": [
+        "P8.4"
+      ]
+    }
+  ]
+}

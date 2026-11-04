@@ -1,0 +1,67 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug RFC sequence vectors v1; concatenated items without enclosing array",
+  "vectors": [
+    {
+      "hex": "010203",
+      "diagnostic": "1, 2, 3",
+      "itemCount": 3,
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": true
+      },
+      "source": {
+        "rfc": 8742,
+        "section": "§4.2 both printed notations"
+      },
+      "origin": "encoded from printed diagnostic sequence"
+    },
+    {
+      "hex": "",
+      "itemCount": 0,
+      "expect": {
+        "valid": true,
+        "deterministic": true,
+        "bindle": true
+      },
+      "source": {
+        "rfc": 8742,
+        "section": "§2 empty sequence"
+      },
+      "origin": "hand-made from rule"
+    },
+    {
+      "hex": "019fff1817",
+      "itemCount": 3,
+      "expect": {
+        "valid": true,
+        "deterministic": false,
+        "bindle": false
+      },
+      "dependsOn": [
+        "P8.4"
+      ],
+      "source": {
+        "rfc": 8742,
+        "section": "§2"
+      },
+      "origin": "hand-made: concatenated RFC-valid items"
+    },
+    {
+      "hex": "010218",
+      "itemCount": 2,
+      "expectedClass": "not-well-formed",
+      "expect": {
+        "valid": false,
+        "deterministic": false,
+        "bindle": false
+      },
+      "source": {
+        "rfc": 8742,
+        "section": "§2 truncation"
+      },
+      "origin": "hand-made: two complete items and truncated third"
+    }
+  ]
+}

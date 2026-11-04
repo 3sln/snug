@@ -5416,3 +5416,69 @@ authorised), the existing gate set, and conformance-corpus vectors.
 - Explicit-stack, resumable VM for chunked input (D016).
 - Go/Java/C# targets (D006).
 - CDDL over JSON.
+
+
+## P8.6 — RFC corpus (2026-11-04, requested offline slice delivered)
+
+- **Artifacts:** corpus/conformance/rfc/ (README, exact extracts, inventory,
+  compile/reference observations and current-results.json),
+  corpus/cbor-vectors/rfc8949-appendix-a.json, and new tools
+  corpus/tools/{export-rfc,run-rfc-corpus,rfc-fixtures}.mjs. No existing corpus
+  file or implementation source was edited by this item. The Phase 8 master
+  checkbox is left unchanged; RFCs for full CoSWID/EAT/SenML were not supplied.
+- **Counts:** RFC 8949: 81 Appendix A + 94 Appendix F.1 + 12 additional
+  wire vectors; RFC 8746: all 5 annotated CBOR figures; RFC 8742: 4 sequence
+  vectors. CDDL suites/cases: RFC 8610 68/286, 9165 9/20, 9682 5/11,
+  8392 1/16, 9052 25/68: **108 suites / 401 cases**. Published data includes
+  all 9 CWT hex blocks and 17 COSE EDN examples (included in case counts).
+- **Compile findings:** 42 extracted-text refusals, 12 after labelled context;
+  three of those 12 are deliberately undefined/illustrative excerpts, nine
+  are models with data expectations. No compile refusal is a schemaError
+  expectation. Mixed numeric controls, verbose Appendix H repetition,
+  RFC 9165 controls and simple-head grammar expose P8.2/P8.5 work.
+- **Current JS findings:** full run **999 checks: 913 pass / 86 fail**. Exact
+  dependsOn groups, pass/fail: baseline **731/29**, P8.4 **179/45**,
+  D270 **3/11**, D271 **0/1**. Includes 25 cases with no snug data verdict
+  because effective compilation failed. wire:'valid' was unavailable, so
+  its group measures the explicitly labelled current default fallback.
+  Both explicit strict selectors were exercised; runtime fingerprints were
+  identical before/after the run. This is a working-tree observation, not
+  certification or JS/Rust/wasm parity.
+- **Ruby:** supplied cddl 0.12.14 wrapper attempted every case: 320 data
+  verdicts, **7 disagreements**, **81 reference errors**, zero not-run.
+  Disagreements (all RFC 8610): cut-free wildcard fallback; synthetic
+  bignum-tag matching of an untagged integer; annotation-only .default;
+  three representable-float-width cases; D271 global cut. Explanations
+  accompany each case. Errors: 79 exact-prelude cases conflict with Ruby's
+  builtin regexp-restricted tdate; one escaped-hex ArgumentError; one
+  #7.24 RuntimeError. Errors were not counted as invalid data.
+- **Learnt:** RFC 8392 contains no CDDL; its claims schema must be labelled
+  derived from prose (including audience arrays despite the summary table).
+  Core deterministic CBOR does not impose unique-NaN/decimal normalization.
+  RFC 9052's literal Sig_structure has a greedy optional-bstr/prose conflict;
+  RFC 8610 Appendix H prints ratings not representable in its float16 type.
+  The original bytes/definitions and resulting expectations are retained.
+  All displayed rule-like lines are inventoried, with ABNF/pseudocode
+  exclusions rather than passing them off as CDDL.
+- **Checks actually run:** exporter with reference checks; regeneration with
+  identical completed reference evidence reused; full runner/JSON report;
+  D271-only --gate (exit 1, expected finding); Node syntax checks; eight RFC
+  SHA-256 matches; 81 A rows / 94 unique F examples / no residual page
+  furniture. Node v24.6.0, Ruby cddl 0.12.14 / Ruby 2.6. No product edits,
+  emission, implementation gates, performance measurements, installs,
+  network, remotes, pushes or commits. Concurrent DEVLOG edits preserved
+  by appending this item only.
+
+### D280 — RFC corpus expectations and observations stay separate (P8.6)
+**Decision** (contributor, provisional): preserve exact RFC excerpts and
+page-furniture fixes, label added contexts/derived schemas, and retain
+RFC-derived PEG expectations independently of snug or Ruby. Compilation
+errors and reference exceptions are findings, never expected refusals.
+Core deterministic and additional application restrictions are separate;
+D271 uses staged literal-RFC witnesses without changing the interim engine.
+**Why:** a corpus that learns expectations from the implementation or treats
+reference errors as invalid data cannot expose conformance gaps.
+**Alternatives:** normalize published examples to the current profile,
+replace refused schemas, or adopt Ruby verdicts as truth; rejected because
+these conceal the byte, coverage and semantic differences being tested.
+- [ ] **Signed off** (owner)

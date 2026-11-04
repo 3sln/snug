@@ -1,0 +1,2031 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug conformance corpus v1; compileObservation is evidence, never schemaError expectation; context is labelled harness text; ruby is differential evidence",
+  "generator": "corpus/tools/export-rfc.mjs",
+  "rfc": 9052,
+  "suites": [
+    {
+      "name": "RFC 9052 start",
+      "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n",
+      "source": {
+        "rfc": 9052,
+        "section": "1.4.  CDDL Grammar for CBOR Data Structures",
+        "logicalLines": [
+          350,
+          350
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "start",
+          "hex": "d28440a0f640",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "start",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "start",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 9
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 internal-types",
+      "cddl": "Internal_Types = Sig_structure / Enc_structure / MAC_structure\n",
+      "source": {
+        "rfc": 9052,
+        "section": "1.4.  CDDL Grammar for CBOR Data Structures",
+        "logicalLines": [
+          353,
+          353
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "Internal_Types",
+          "hex": "8368456e6372797074304040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Internal_Types",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "internal-types",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 18
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 labels",
+      "cddl": "label = int / tstr\nvalues = any\n",
+      "source": {
+        "rfc": 9052,
+        "section": "1.5.  CBOR-Related Terminology",
+        "logicalLines": [
+          380,
+          381
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "label",
+          "hex": "01",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "label",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "labels",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": true
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 messages",
+      "cddl": "COSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n",
+      "source": {
+        "rfc": 9052,
+        "section": "2.  Basic COSE Structure",
+        "logicalLines": [
+          535,
+          543
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Messages",
+          "hex": "d28440a0f640",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "messages",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 3,
+        "column": 25
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 headers",
+      "cddl": "Headers = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n",
+      "source": {
+        "rfc": 9052,
+        "section": "3.  Header Parameters",
+        "logicalLines": [
+          627,
+          637
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "8240a0",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "headers",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "probe = [Headers]\nstart = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "map_key",
+        "line": 7,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 generic-headers",
+      "cddl": "Generic_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "3.1.  Common COSE Header Parameters",
+        "logicalLines": [
+          781,
+          788
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "probe",
+          "hex": "80",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "probe",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "generic-headers",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "probe = [Generic_Headers]\nstart = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": true
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 sign-tag",
+      "cddl": "COSE_Sign_Tagged = #6.98(COSE_Sign)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "4.1.  Signing with One or More Signers",
+        "logicalLines": [
+          837,
+          837
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Sign_Tagged",
+          "hex": "d8628440a0f6818340a040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Sign_Tagged",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "sign-tag",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 26
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 sign",
+      "cddl": "COSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "4.1.  Signing with One or More Signers",
+        "logicalLines": [
+          876,
+          880
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Sign",
+          "hex": "8440a0f6818340a040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Sign",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "sign",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 signature",
+      "cddl": "COSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "4.1.  Signing with One or More Signers",
+        "logicalLines": [
+          896,
+          899
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Signature",
+          "hex": "8340a040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Signature",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "signature",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 sign1-tag",
+      "cddl": "COSE_Sign1_Tagged = #6.18(COSE_Sign1)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "4.2.  Signing with One Signer",
+        "logicalLines": [
+          913,
+          913
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Sign1_Tagged",
+          "hex": "d28440a0f640",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Sign1_Tagged",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "sign1-tag",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 27
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 sign1",
+      "cddl": "COSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "4.2.  Signing with One Signer",
+        "logicalLines": [
+          935,
+          939
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Sign1",
+          "hex": "8440a0f640",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Sign1",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "sign1",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 sig-structure",
+      "cddl": "Sig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "4.4.  Signing and Verification Process",
+        "logicalLines": [
+          1024,
+          1031
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "Sig_structure",
+          "hex": "85695369676e617475726540404040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Sig_structure",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Sig_structure",
+          "hex": "846a5369676e617475726531404040",
+          "expect": false,
+          "note": "§4.4 printed CDDL greedy optional sign_protected consumes a required bstr; prose describes four fields",
+          "dependsOn": [
+            "D270"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "sig-structure",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 3,
+        "column": 22
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 encrypt-tag",
+      "cddl": "COSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "5.1.  Enveloped COSE Structure",
+        "logicalLines": [
+          1103,
+          1103
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Encrypt_Tagged",
+          "hex": "d8608440a0f6818340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Encrypt_Tagged",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "encrypt-tag",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 29
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 encrypt",
+      "cddl": "COSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "5.1.  Enveloped COSE Structure",
+        "logicalLines": [
+          1123,
+          1127
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Encrypt",
+          "hex": "8440a0f6818340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Encrypt",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "encrypt",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 recipient",
+      "cddl": "COSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "5.1.  Enveloped COSE Structure",
+        "logicalLines": [
+          1150,
+          1154
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_recipient",
+          "hex": "8340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_recipient",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "recipient",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 encrypt0-tag",
+      "cddl": "COSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "5.2.  Single Recipient Encrypted",
+        "logicalLines": [
+          1200,
+          1200
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Encrypt0_Tagged",
+          "hex": "d08340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Encrypt0_Tagged",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "encrypt0-tag",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 30
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 encrypt0",
+      "cddl": "COSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "5.2.  Single Recipient Encrypted",
+        "logicalLines": [
+          1214,
+          1217
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Encrypt0",
+          "hex": "8340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Encrypt0",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "encrypt0",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 5
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 enc-structure",
+      "cddl": "Enc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "5.3.  How to Encrypt and Decrypt for AEAD Algorithms",
+        "logicalLines": [
+          1256,
+          1261
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "Enc_structure",
+          "hex": "8368456e6372797074304040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "Enc_structure",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "enc-structure",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 4,
+        "column": 17
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 mac-tag",
+      "cddl": "COSE_Mac_Tagged = #6.97(COSE_Mac)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "6.1.  MACed Message with Recipients",
+        "logicalLines": [
+          1426,
+          1426
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Mac_Tagged",
+          "hex": "d8618540a0f640818340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Mac_Tagged",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "mac-tag",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 25
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 mac",
+      "cddl": "COSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "6.1.  MACed Message with Recipients",
+        "logicalLines": [
+          1451,
+          1456
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Mac",
+          "hex": "8540a0f640818340a0f6",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Mac",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "mac",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 4
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 mac0-tag",
+      "cddl": "COSE_Mac0_Tagged = #6.17(COSE_Mac0)\n",
+      "source": {
+        "rfc": 9052,
+        "section": "6.2.  MACed Messages with Implicit Key",
+        "logicalLines": [
+          1473,
+          1473
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Mac0_Tagged",
+          "hex": "d18440a0f640",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Mac0_Tagged",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "mac0-tag",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 1,
+        "column": 26
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 mac0",
+      "cddl": "COSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "6.2.  MACed Messages with Implicit Key",
+        "logicalLines": [
+          1488,
+          1492
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Mac0",
+          "hex": "8440a0f640",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Mac0",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "mac0",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 2,
+        "column": 4
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 mac-structure",
+      "cddl": "MAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "6.3.  How to Compute and Verify a MAC",
+        "logicalLines": [
+          1519,
+          1524
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "MAC_structure",
+          "hex": "84644d414330404040",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "MAC_structure",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "mac-structure",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 3,
+        "column": 18
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 keys",
+      "cddl": "COSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n",
+      "source": {
+        "rfc": 9052,
+        "section": "7.  Key Objects",
+        "logicalLines": [
+          1585,
+          1594
+        ],
+        "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+      },
+      "extraction": {
+        "indentRemoved": 3,
+        "pageArtifactFixes": []
+      },
+      "cases": [
+        {
+          "rule": "COSE_Key",
+          "hex": "a10104",
+          "expect": true,
+          "note": "RFC 9052 printed CDDL shape; structural validation only",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Key",
+          "hex": "f5",
+          "expect": false,
+          "note": "Boolean does not match this structure or label",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_KeySet",
+          "hex": "81a10104",
+          "expect": true,
+          "note": "§7 nonempty key set",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_KeySet",
+          "hex": "80",
+          "expect": false,
+          "note": "+ requires at least one key",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        }
+      ],
+      "id": "keys",
+      "context": {
+        "kind": "assembled-rfc-definitions",
+        "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n"
+      },
+      "compileObservation": {
+        "ok": false,
+        "code": "undefined_name",
+        "line": 7,
+        "column": 7
+      },
+      "contextCompileObservation": {
+        "ok": true
+      }
+    },
+    {
+      "name": "RFC 9052 assembled definitions and Appendix B/C/D examples",
+      "id": "assembled",
+      "cddl": "start = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n",
+      "source": {
+        "rfc": 9052,
+        "sections": [
+          {
+            "rfc": 9052,
+            "section": "1.4.  CDDL Grammar for CBOR Data Structures",
+            "logicalLines": [
+              350,
+              350
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "1.4.  CDDL Grammar for CBOR Data Structures",
+            "logicalLines": [
+              353,
+              353
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "1.5.  CBOR-Related Terminology",
+            "logicalLines": [
+              380,
+              381
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "2.  Basic COSE Structure",
+            "logicalLines": [
+              535,
+              543
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "3.  Header Parameters",
+            "logicalLines": [
+              627,
+              637
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "3.1.  Common COSE Header Parameters",
+            "logicalLines": [
+              781,
+              788
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "4.1.  Signing with One or More Signers",
+            "logicalLines": [
+              837,
+              837
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "4.1.  Signing with One or More Signers",
+            "logicalLines": [
+              876,
+              880
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "4.1.  Signing with One or More Signers",
+            "logicalLines": [
+              896,
+              899
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "4.2.  Signing with One Signer",
+            "logicalLines": [
+              913,
+              913
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "4.2.  Signing with One Signer",
+            "logicalLines": [
+              935,
+              939
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "4.4.  Signing and Verification Process",
+            "logicalLines": [
+              1024,
+              1031
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "5.1.  Enveloped COSE Structure",
+            "logicalLines": [
+              1103,
+              1103
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "5.1.  Enveloped COSE Structure",
+            "logicalLines": [
+              1123,
+              1127
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "5.1.  Enveloped COSE Structure",
+            "logicalLines": [
+              1150,
+              1154
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "5.2.  Single Recipient Encrypted",
+            "logicalLines": [
+              1200,
+              1200
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "5.2.  Single Recipient Encrypted",
+            "logicalLines": [
+              1214,
+              1217
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "5.3.  How to Encrypt and Decrypt for AEAD Algorithms",
+            "logicalLines": [
+              1256,
+              1261
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "6.1.  MACed Message with Recipients",
+            "logicalLines": [
+              1426,
+              1426
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "6.1.  MACed Message with Recipients",
+            "logicalLines": [
+              1451,
+              1456
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "6.2.  MACed Messages with Implicit Key",
+            "logicalLines": [
+              1473,
+              1473
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "6.2.  MACed Messages with Implicit Key",
+            "logicalLines": [
+              1488,
+              1492
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "6.3.  How to Compute and Verify a MAC",
+            "logicalLines": [
+              1519,
+              1524
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          },
+          {
+            "rfc": 9052,
+            "section": "7.  Key Objects",
+            "logicalLines": [
+              1585,
+              1594
+            ],
+            "sha256": "01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45"
+          }
+        ]
+      },
+      "cases": [
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8608443a10101a1054c02d1f7e6f26c43d4868d87ce582464f84d913ba60a76070a9a48f26e97e863e2852948658f0811139868826e89218a75715b818440a101225818dbd43c4e9d719c27c6275c67d628d493f090593db8218f11818344a1013818a220a401022001215820b2add44368ea6d641f9ca9af308b4079aeb519f11e9b8a55a600b21233e86e6822f40458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c6540",
+          "expect": true,
+          "note": "Appendix B.  Two Layers of Recipient Information",
+          "source": {
+            "rfc": 9052,
+            "section": "Appendix B.  Two Layers of Recipient Information",
+            "lines": [
+              2860,
+              2899
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8628440a054546869732069732074686520636f6e74656e742e818343a10126a1044231315840e2aeafd40d69d19dfe6e52077c5d7ff4e408282cbefb5d06cbf414af2e19d982ac45ac98b8544c908b4507de1e90b717c3d34816fe926a2b98f53afd2fa0f30a",
+          "expect": true,
+          "note": "C.1.1.  Single Signature",
+          "source": {
+            "rfc": 9052,
+            "section": "C.1.1.  Single Signature",
+            "lines": [
+              2950,
+              2969
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8628440a054546869732069732074686520636f6e74656e742e828343a10126a1044231315840e2aeafd40d69d19dfe6e52077c5d7ff4e408282cbefb5d06cbf414af2e19d982ac45ac98b8544c908b4507de1e90b717c3d34816fe926a2b98f53afd2fa0f30a8344a1013823a104581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c65588400a2d28a7c2bdb1587877420f65adf7d0b9a06635dd1de64bb62974c863f0b160dd2163734034e6ac003b01e8705524c5c4ca479a952f0247ee8cb0b4fb7397ba08d009e0c8bf482270cc5771aa143966e5a469a09f613488030c5b07ec6d722e3835adb5b2d8c44e95ffb13877dd2582866883535de3bb03d01753f83ab87bb4f7a0297",
+          "expect": true,
+          "note": "C.1.2.  Multiple Signers",
+          "source": {
+            "rfc": 9052,
+            "section": "C.1.2.  Multiple Signers",
+            "lines": [
+              2981,
+              3013
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8628456a2687265736572766564f40281687265736572766564a054546869732069732074686520636f6e74656e742e818343a10126a10442313158403fc54702aa56e1b2cb20284294c9106a63f91bac658d69351210a031d8fc7c5ff3e4be39445b1a3e83e1510d1aca2f2e8a7c081c7645042b18aba9d1fad1bd9c",
+          "expect": true,
+          "note": "C.1.3.  Signature with Criticality",
+          "source": {
+            "rfc": 9052,
+            "section": "C.1.3.  Signature with Criticality",
+            "lines": [
+              3025,
+              3050
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d28443a10126a10442313154546869732069732074686520636f6e74656e742e58408eb33e4ca31d1c465ab05aac34cc6b23d58fef5c083106c4d25a91aef0b0117e2af9a291aa32e14ab834dc56ed2a223444547e01f11d3b0916e5a4c345cacb36",
+          "expect": true,
+          "note": "C.2.1.  Single ECDSA Signature",
+          "source": {
+            "rfc": 9052,
+            "section": "C.2.1.  Single ECDSA Signature",
+            "lines": [
+              3062,
+              3075
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8608443a10101a1054cc9cf4df2fe6c632bf788641358247adbe2709ca818fb415f1e5df66f4e1a51053ba6d65a1a0c52a357da7a644b8070a151b0818344a1013818a220a40102200121582098f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91d628022f50458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c6540",
+          "expect": true,
+          "note": "C.3.1.  Direct ECDH",
+          "source": {
+            "rfc": 9052,
+            "section": "C.3.1.  Direct ECDH",
+            "lines": [
+              3089,
+              3118
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8608443a1010aa1054d89f52f65a1c580933b5261a76c581c753548a19b1307084ca7b2056924ed95f2e3b17006dfe931b687b847818343a10129a2335061616262636364646565666667676868044a6f75722d73656372657440",
+          "expect": true,
+          "note": "C.3.2.  Direct Plus Key Derivation",
+          "source": {
+            "rfc": 9052,
+            "section": "C.3.2.  Direct Plus Key Derivation",
+            "lines": [
+              3139,
+              3162
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8608443a10101a1054c02d1f7e6f26c43d4868d87ce582464f84d913ba60a76070a9a48f26e97e863e28529d8f5335e5f0165eee976b4a5f6c6f09d818344a101381fa3225821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c650458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c6535420101581841e0d76f579dbd0d936a662d54d8582037de2e366fde1c62",
+          "expect": true,
+          "note": "C.3.3.  Encrypted Content with External Data",
+          "source": {
+            "rfc": 9052,
+            "section": "C.3.3.  Encrypted Content with External Data",
+            "lines": [
+              3176,
+              3201
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d08343a1010aa1054d89f52f65a1c580933b5261a78c581c5974e1b99a3a4cc09a659aa2e9e7fff161d38ce71cb45ce460ffb569",
+          "expect": true,
+          "note": "C.4.1.  Simple Encrypted Message",
+          "source": {
+            "rfc": 9052,
+            "section": "C.4.1.  Simple Encrypted Message",
+            "lines": [
+              3213,
+              3224
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d08343a1010aa1064261a7581c252a8911d465c125b6764739700f0141ed09192de139e053bd09abca",
+          "expect": true,
+          "note": "C.4.2.  Encrypted Message with a Partial IV",
+          "source": {
+            "rfc": 9052,
+            "section": "C.4.2.  Encrypted Message with a Partial IV",
+            "lines": [
+              3236,
+              3247
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8618543a1010fa054546869732069732074686520636f6e74656e742e489e1226ba1f81b848818340a20125044a6f75722d73656372657440",
+          "expect": true,
+          "note": "C.5.1.  Shared Secret Direct MAC",
+          "source": {
+            "rfc": 9052,
+            "section": "C.5.1.  Shared Secret Direct MAC",
+            "lines": [
+              3261,
+              3280
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8618543a10105a054546869732069732074686520636f6e74656e742e582081a03448acd3d305376eaa11fb3fe416a955be2cbe7ec96f012c994bc3f16a41818344a101381aa3225821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c650458246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c653558404d8553e7e74f3c6a3a9dd3ef286a8195cbf8a23d19558ccfec7d34b824f42d92bd06bd2c7f0271f0214e141fb779ae2856abf585a58368b017e7f2a9e5ce4db540",
+          "expect": true,
+          "note": "C.5.2.  ECDH Direct MAC",
+          "source": {
+            "rfc": 9052,
+            "section": "C.5.2.  ECDH Direct MAC",
+            "lines": [
+              3293,
+              3318
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8618543a1010ea054546869732069732074686520636f6e74656e742e4836f5afaf0bab5d43818340a2012404582430313863306165352d346439622d343731622d626664362d6565663331346263373033375818711ab0dc2fc4585dce27effa6781c8093eba906f227b6eb0",
+          "expect": true,
+          "note": "C.5.3.  Wrapped MAC",
+          "source": {
+            "rfc": 9052,
+            "section": "C.5.3.  Wrapped MAC",
+            "lines": [
+              3330,
+              3350
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d8618543a10105a054546869732069732074686520636f6e74656e742e5820bf48235e809b5c42e995f2b7d5fa13620e7ed834e337f6aa43df161e49e9323e828344a101381ca220a4010220032158420043b12669acac3fd27898ffba0bcd2e6c366d53bc4db71f909a759304acfb5e18cdc7ba0b13ff8c7636271a6924b1ac63c02688075b55ef2d613574e7dc242f79c322f504581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c655828339bc4f79984cdc6b3e6ce5f315a4c7d2b0ac466fcea69e8c07dfbca5bb1f661bc5f8e0df9e3eff58340a2012404582430313863306165352d346439622d343731622d626664362d65656633313462633730333758280b2c7cfce04e98276342d6476a7723c090dfdd15f9a518e7736549e998370695e6d6a83b4ae507bb",
+          "expect": true,
+          "note": "C.5.4.  Multi-Recipient MACed Message",
+          "source": {
+            "rfc": 9052,
+            "section": "C.5.4.  Multi-Recipient MACed Message",
+            "lines": [
+              3367,
+              3406
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Messages",
+          "hex": "d18443a1010fa054546869732069732074686520636f6e74656e742e48726043745027214f",
+          "expect": true,
+          "note": "C.6.1.  Shared-Secret Direct MAC",
+          "source": {
+            "rfc": 9052,
+            "section": "C.6.1.  Shared-Secret Direct MAC",
+            "lines": [
+              3420,
+              3429
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_KeySet",
+          "hex": "84a5200121582065eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c08551d2258201e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd0084d19c01020258246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c65a52001215820bac5b11cad8f99f9c72b05cf4b9e26d244dc189f745228255a219a86d6a09eff22582020138bf82dc1b6d562be0fa54ab7804a3a64b6d72ccfed6b6fb6ed28bbfc117e010202423131a520032158420072992cb3ac08ecf3e5c63dedec0d51a8c1f79ef2f82f94f3c737bf5de7986671eac625fe8257bbd0394644caaa3aaf8f27a4585fbbcad0f2457620085e5c8f42ad22584201dca6947bce88bc5790485ac97427342bc35f887d86d65a089377e247e60baa55e4e8501e2ada5724ac51d6909008033ebc10ac999b9d7f5cc2519f3fe1ea1d9475010202581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c65a5200121582098f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91d6280225820f01400b089867804b8e9fc96c3932161f1934f4223069170d924b7e03bf822bb0102025821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c65",
+          "expect": true,
+          "note": "C.7.1.  Public Keys",
+          "source": {
+            "rfc": 9052,
+            "section": "C.7.1.  Public Keys",
+            "lines": [
+              3452,
+              3491
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_KeySet",
+          "hex": "87a601020258246d65726961646f632e6272616e64796275636b406275636b6c616e642e6578616d706c65200121582065eda5a12577c2bae829437fe338701a10aaa375e1bb5b5de108de439c08551d2258201e52ed75701163f7f9e40ddf9f341b3dc9ba860af7e0ca7ca7e9eecd0084d19c235820aff907c99f9ad3aae6c4cdf21122bce2bd68b5283e6907154ad911840fa208cfa60102024231312001215820bac5b11cad8f99f9c72b05cf4b9e26d244dc189f745228255a219a86d6a09eff22582020138bf82dc1b6d562be0fa54ab7804a3a64b6d72ccfed6b6fb6ed28bbfc117e23582057c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3a6010202581e62696c626f2e62616767696e7340686f626269746f6e2e6578616d706c6520032158420072992cb3ac08ecf3e5c63dedec0d51a8c1f79ef2f82f94f3c737bf5de7986671eac625fe8257bbd0394644caaa3aaf8f27a4585fbbcad0f2457620085e5c8f42ad22584201dca6947bce88bc5790485ac97427342bc35f887d86d65a089377e247e60baa55e4e8501e2ada5724ac51d6909008033ebc10ac999b9d7f5cc2519f3fe1ea1d947523584200085138ddabf5ca975f5860f91a08e91d6d5f9a76ad4018766a476680b55cd339e8ab6c72b5facdb2a2a50ac25bd086647dd3e2e6e99e84ca2c3609fdf177feb26da30104024a6f75722d736563726574205820849b57219dae48de646d07dbb533566e976686457c1491be3a76dcea6c427188a601022001025821706572656772696e2e746f6f6b407475636b626f726f7567682e6578616d706c6521582098f50a4ff6c05861c8860d13a638ea56c3f5ad7590bbfbf054e1c7b4d91d6280225820f01400b089867804b8e9fc96c3932161f1934f4223069170d924b7e03bf822bb23582002d1f7e6f26c43d4868d87ceb2353161740aacf1f7163647984b522a848df1c3a30104024b6f75722d736563726574322050849b5786457c1491be3a76dcea6c4271a3010402582430313863306165352d346439622d343731622d626664362d656566333134626337303337205820849b57219dae48de646d07dbb533566e976686457c1491be3a76dcea6c427188",
+          "expect": true,
+          "note": "C.7.2.  Private Keys",
+          "source": {
+            "rfc": 9052,
+            "section": "C.7.2.  Private Keys",
+            "lines": [
+              3517,
+              3582
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    }
+  ]
+}

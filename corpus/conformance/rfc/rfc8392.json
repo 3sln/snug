@@ -1,0 +1,297 @@
+{
+  "license": "RFC extracts: corpus/conformance/rfc/README.md and accompanying BSD license texts",
+  "format": "snug conformance corpus v1; compileObservation is evidence, never schemaError expectation; context is labelled harness text; ruby is differential evidence",
+  "generator": "corpus/tools/export-rfc.mjs",
+  "rfc": 8392,
+  "suites": [
+    {
+      "name": "RFC 8392 derived claims and Appendix A",
+      "id": "claims",
+      "cddl": "claims = {\n ? 1 ^ => tstr, ? 2 ^ => tstr, ? 3 ^ => tstr / [* tstr],\n ? 4 ^ => number, ? 5 ^ => number, ? 6 ^ => number, ? 7 ^ => bstr,\n * (int / tstr) => any\n}\n\ncwt-envelope = COSE_Messages / #6.61(COSE_Messages)\nstart = COSE_Messages / COSE_Key / COSE_KeySet / Internal_Types\n\nInternal_Types = Sig_structure / Enc_structure / MAC_structure\n\nlabel = int / tstr\nvalues = any\n\nCOSE_Messages = COSE_Untagged_Message / COSE_Tagged_Message\n\nCOSE_Untagged_Message = COSE_Sign / COSE_Sign1 /\n    COSE_Encrypt / COSE_Encrypt0 /\n    COSE_Mac / COSE_Mac0\n\nCOSE_Tagged_Message = COSE_Sign_Tagged / COSE_Sign1_Tagged /\n    COSE_Encrypt_Tagged / COSE_Encrypt0_Tagged /\n    COSE_Mac_Tagged / COSE_Mac0_Tagged\n\nHeaders = (\n    protected : empty_or_serialized_map,\n    unprotected : header_map\n)\n\nheader_map = {\n    Generic_Headers,\n    * label => values\n}\n\nempty_or_serialized_map = bstr .cbor header_map / bstr .size 0\n\nGeneric_Headers = (\n    ? 1 => int / tstr,  ; algorithm identifier\n    ? 2 => [+label],    ; criticality\n    ? 3 => tstr / int,  ; content type\n    ? 4 => bstr,        ; key identifier\n    ? ( 5 => bstr //    ; IV\n        6 => bstr )     ; Partial IV\n)\n\nCOSE_Sign_Tagged = #6.98(COSE_Sign)\n\nCOSE_Sign = [\n    Headers,\n    payload : bstr / nil,\n    signatures : [+ COSE_Signature]\n]\n\nCOSE_Signature =  [\n    Headers,\n    signature : bstr\n]\n\nCOSE_Sign1_Tagged = #6.18(COSE_Sign1)\n\nCOSE_Sign1 = [\n    Headers,\n    payload : bstr / nil,\n    signature : bstr\n]\n\nSig_structure = [\n    context : \"Signature\" / \"Signature1\",\n    body_protected : empty_or_serialized_map,\n    ? sign_protected : empty_or_serialized_map,\n    external_aad : bstr,\n    payload : bstr\n]\n\nCOSE_Encrypt_Tagged = #6.96(COSE_Encrypt)\n\nCOSE_Encrypt = [\n    Headers,\n    ciphertext : bstr / nil,\n    recipients : [+COSE_recipient]\n]\n\nCOSE_recipient = [\n    Headers,\n    ciphertext : bstr / nil,\n    ? recipients : [+COSE_recipient]\n]\n\nCOSE_Encrypt0_Tagged = #6.16(COSE_Encrypt0)\n\nCOSE_Encrypt0 = [\n    Headers,\n    ciphertext : bstr / nil,\n]\n\nEnc_structure = [\n    context : \"Encrypt\" / \"Encrypt0\" / \"Enc_Recipient\" /\n        \"Mac_Recipient\" / \"Rec_Recipient\",\n    protected : empty_or_serialized_map,\n    external_aad : bstr\n]\n\nCOSE_Mac_Tagged = #6.97(COSE_Mac)\n\nCOSE_Mac = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n   recipients : [+COSE_recipient]\n]\n\nCOSE_Mac0_Tagged = #6.17(COSE_Mac0)\n\nCOSE_Mac0 = [\n   Headers,\n   payload : bstr / nil,\n   tag : bstr,\n]\n\nMAC_structure = [\n     context : \"MAC\" / \"MAC0\",\n     protected : empty_or_serialized_map,\n     external_aad : bstr,\n     payload : bstr\n]\n\nCOSE_Key = {\n    1 => tstr / int,          ; kty\n    ? 2 => bstr,              ; kid\n    ? 3 => tstr / int,        ; alg\n    ? 4 => [+ (tstr / int) ], ; key_ops\n    ? 5 => bstr,              ; Base IV\n    * label => values\n}\n\nCOSE_KeySet = [+COSE_Key]\n",
+      "source": {
+        "rfc": 8392,
+        "section": "§§3–5; Appendix A",
+        "sha256": "9021ff7c4d274cf34873fe4f4fb17c4fe323247dd0f96bfcab54909bfcdc5f13"
+      },
+      "origin": "DERIVED: RFC 8392 contains no CDDL. Claims typing follows prose §3.1; assembled RFC 9052 envelope definitions added.",
+      "cases": [
+        {
+          "rule": "claims",
+          "hex": "a0",
+          "expect": true,
+          "note": "§3 claims optional",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a20401074101",
+          "expect": true,
+          "note": "§3.1 NumericDate and cti",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a10468746f6d6f72726f77",
+          "expect": false,
+          "note": "NumericDate must be integer/float",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a106c100",
+          "expect": false,
+          "note": "§5 registered claims MUST NOT be tagged",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a1038261616162",
+          "expect": true,
+          "note": "§3.1.3 audience array allowed despite §4 table summary",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a107626964",
+          "expect": false,
+          "note": "cti bytes",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a10101",
+          "expect": false,
+          "note": "issuer text",
+          "ruby": {
+            "status": "checked",
+            "exitCode": 1,
+            "verdict": false,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "claims",
+          "hex": "a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b71",
+          "expect": true,
+          "note": "A.1.  Example CWT Claims Set",
+          "source": {
+            "rfc": 8392,
+            "section": "A.1.  Example CWT Claims Set",
+            "lines": [
+              923,
+              925
+            ]
+          },
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Key",
+          "hex": "a42050231f4c4d4d3051fdc2ec0a3851d5b3830104024c53796d6d6574726963313238030a",
+          "expect": true,
+          "note": "A.2.1.  128-Bit Symmetric Key",
+          "source": {
+            "rfc": 8392,
+            "section": "A.2.1.  128-Bit Symmetric Key",
+            "lines": [
+              961,
+              962
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Key",
+          "hex": "a4205820403697de87af64611c1d32a05dab0fe1fcb715a86ab435f1ec99192d795693880104024c53796d6d6574726963323536030a",
+          "expect": true,
+          "note": "A.2.2.  256-Bit Symmetric Key",
+          "source": {
+            "rfc": 8392,
+            "section": "A.2.2.  256-Bit Symmetric Key",
+            "lines": [
+              977,
+              978
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "COSE_Key",
+          "hex": "a72358206c1382765aec5358f117733d281c1c7bdc39884d04a45a1e6c67c858bc206c1922582060f7f1a780d8a783bfb7a2dd6b2796e8128dbbcef9d3d168db9529971a36e7b9215820143329cce7868e416927599cf65a34f3ce2ffda55a7eca69ed8919a394d42f0f2001010202524173796d6d657472696345434453413235360326",
+          "expect": true,
+          "note": "A.2.3.  Elliptic Curve Digital Signature Algorithm (ECDSA) P-256 256-Bit",
+          "source": {
+            "rfc": 8392,
+            "section": "A.2.3.  Elliptic Curve Digital Signature Algorithm (ECDSA) P-256 256-Bit",
+            "lines": [
+              1018,
+              1022
+            ]
+          },
+          "dependsOn": [
+            "P8.4"
+          ],
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "cwt-envelope",
+          "hex": "d28443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7158405427c1ff28d23fbad1f29c4c7c6a555e601d6fa29f9179bc3d7438bacaca5acd08c8d4d4f96131680c429a01f85951ecee743a52b9b63632c57209120e1c9e30",
+          "expect": true,
+          "note": "A.3.  Example Signed CWT",
+          "source": {
+            "rfc": 8392,
+            "section": "A.3.  Example Signed CWT",
+            "lines": [
+              1051,
+              1056
+            ]
+          },
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "cwt-envelope",
+          "hex": "d83dd18443a10104a1044c53796d6d65747269633235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b7148093101ef6d789200",
+          "expect": true,
+          "note": "A.4.  Example MACed CWT",
+          "source": {
+            "rfc": 8392,
+            "section": "A.4.  Example MACed CWT",
+            "lines": [
+              1107,
+              1110
+            ]
+          },
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "cwt-envelope",
+          "hex": "d08343a1010aa2044c53796d6d6574726963313238054d99a0d7846e762c49ffe8a63e0b5858b918a11fd81e438b7f973d9e2e119bcb22424ba0f38a80f27562f400ee1d0d6c0fdb559c02421fd384fc2ebe22d7071378b0ea7428fff157444d45f7e6afcda1aae5f6495830c58627087fc5b4974f319a8707a635dd643b",
+          "expect": true,
+          "note": "A.5.  Example Encrypted CWT",
+          "source": {
+            "rfc": 8392,
+            "section": "A.5.  Example Encrypted CWT",
+            "lines": [
+              1161,
+              1164
+            ]
+          },
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "cwt-envelope",
+          "hex": "d08343a1010aa2044c53796d6d6574726963313238054d4a0694c0e69ee6b5956655c7b258b7f6b0914f993de822cc47e5e57a188d7960b528a747446fe12f0e7de05650dec74724366763f167a29c002dfd15b34d8993391cf49bc91127f545dba8703d66f5b7f1ae91237503d371e6333df9708d78c4fb8a8386c8ff09dc49af768b23179deab78d96490a66d5724fb33900c60799d9872fac6da3bdb89043d67c2a05414ce331b5b8f1ed8ff7138f45905db2c4d5bc8045ab372bff142631610a7e0f677b7e9b0bc73adefdcee16d9d5d284c616abeab5d8c291ce0",
+          "expect": true,
+          "note": "A.6.  Example Nested CWT",
+          "source": {
+            "rfc": 8392,
+            "section": "A.6.  Example Nested CWT",
+            "lines": [
+              1219,
+              1225
+            ]
+          },
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        },
+        {
+          "rule": "cwt-envelope",
+          "hex": "d18443a10104a1044c53796d6d65747269633235364ba106fb41d584367c20000048b8816f34c0542892",
+          "expect": true,
+          "note": "A.7.  Example MACed CWT with a Floating-Point Value",
+          "source": {
+            "rfc": 8392,
+            "section": "A.7.  Example MACed CWT with a Floating-Point Value",
+            "lines": [
+              1271,
+              1272
+            ]
+          },
+          "ruby": {
+            "status": "checked",
+            "exitCode": 0,
+            "verdict": true,
+            "agrees": true
+          }
+        }
+      ],
+      "compileObservation": {
+        "ok": true
+      }
+    }
+  ]
+}
