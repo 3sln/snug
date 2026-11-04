@@ -18,7 +18,7 @@
 ;; machine; only the walk's control flow is duplicated.
 (ns snug.vm.session
   (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
-            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
+            [snug.lang :refer [I32 Ext ext-none Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_MAX_BYTES O_ERR_POS
                                      O_HI O_LO O_PROFILE]]
@@ -232,7 +232,7 @@
     (if (== ai 25) (return (be16 b (+ pos 1))))
     (return (neg 1))))
 
-(defn ^I32 item-begin [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend]
+(defn ^I32 item-begin [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend ^Ext ext]
   (comment "The pending item: its head (and any note or bounded piece it must have"
            "whole) in the window, then whole by the buffer walk when the window"
            "holds everything it can read, else a frame.")
@@ -253,7 +253,7 @@
     (if (cut-yield s ss (+ pos base)) (return (yld ss base pos)))
     (if (>= pos end)
       (do (progress ss 1)
-          (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx))))
+          (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx ext))))
           (return (ret ss base (dead-item b s pos d end)))))
     (if (or (< pos 0) (>= pos wend)) (return (need ss base pos 1)))
     (let [ib (u8 b pos)
@@ -323,7 +323,7 @@
                         (if (fits-known ss at) (set direct 1) (set direct (neg 1))))))))))
       (progress ss 1)
       (if (== direct 1)
-        (do (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx))))
+        (do (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx ext))))
             (return (ret ss base (dead-item b s pos d end)))))
       (if (== major 2) (return (open-bstr p pool b s ss ka base pos d fb ck nq end ctx 0 0 0)))
       (if (== major 3) (return (open-text p pool b s ss ka base pos d fb ck nq end ctx)))
@@ -360,17 +360,17 @@
       (if (== kind FK_BSTR) (return (embed-ret p s ss base f r)))
       (return (fin-bad s ss base)))))
 
-(defn ^I32 frame-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend]
+(defn ^I32 frame-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend ^Ext ext]
   (let [f (ftop ss)
         kind (ia ss (+ f F_KIND))]
-    (if (== kind FK_ARR) (return (arr-run p pool b s ss base f)))
-    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run p pool b s ss base f)))
+    (if (== kind FK_ARR) (return (arr-run p pool b s ss base f ext)))
+    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run p pool b s ss base f ext)))
     (if (or (== kind FK_MAP) (== kind FK_DMAP))
-      (do (if (== (ia ss (+ f F_PH)) M_KEY) (return (map-key p pool b s ss ka base wend f)))
-          (return (map-next p pool b s ss ka base wend f))))
-    (if (== kind FK_TAG) (return (tag-run p pool b s ss ka base wend f)))
-    (if (or (== kind FK_TEXT) (== kind FK_DTEXT)) (return (text-run p b s ss base wend f)))
-    (if (== kind FK_BSTR) (return (bstr-run p pool b s ss base wend f)))
+      (do (if (== (ia ss (+ f F_PH)) M_KEY) (return (map-key p pool b s ss ka base wend f ext)))
+          (return (map-next p pool b s ss ka base wend f ext))))
+    (if (== kind FK_TAG) (return (tag-run p pool b s ss ka base wend f ext)))
+    (if (or (== kind FK_TEXT) (== kind FK_DTEXT)) (return (text-run p pool b s ss base wend f ext)))
+    (if (== kind FK_BSTR) (return (bstr-run p pool b s ss base wend f ext)))
     (return (fin-bad s ss base))))
 
 (defn ^I32 keep-of [^IntsR ss]
@@ -382,7 +382,7 @@
         (if (and (>= pin 0) (< pin k)) (set k pin))))
     (return k)))
 
-(defn ^:pub ^I32 vms-step [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base]
+(defn ^:pub ^I32 vms-step-x [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base ^Ext ext]
   (comment "Run the session over the window b, message bytes from base. Answers the"
            "verdict's code (>= 0; out filled as by vm-validate: absolute offsets),"
            "VMS_NEED (give a window holding [vms-need-offset, + vms-need-length)),"
@@ -411,11 +411,11 @@
       (let [ph (ia ss SS_PH)]
         (local ^I32 r)
         (if (== ph PH_ITEM)
-          (set r (item-begin p pool b s ss ka base wend))
+          (set r (item-begin p pool b s ss ka base wend ext))
           (if (== ph PH_RET)
             (set r (deliver p b s ss out base))
             (if (== ph PH_FRAME)
-              (set r (frame-run p pool b s ss ka base wend))
+              (set r (frame-run p pool b s ss ka base wend ext))
               (if (== ph PH_START)
                 (set r (doc-start p b s ss out base wend))
                 (return (ia ss SS_CODE))))))
@@ -425,3 +425,7 @@
               (rebase s base)
               (iset ss SS_KEEP (keep-of ss))
               (return r)))))))
+
+(defn ^:pub ^I32 vms-step [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base]
+  (comment "vms-step-x with no extension controls (D140).")
+  (return (vms-step-x p pool b s ss ka out base (ext-none))))

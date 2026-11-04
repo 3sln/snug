@@ -21,7 +21,7 @@
 ;; tail reads content replays it: its frame pins vms-keep at the content start.
 (ns snug.vm.sstr
   (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
-            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
+            [snug.lang :refer [I32 Ext Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
                                rem < > <= >= == != and or not u8 blen ia iset]]
             [snug.cbor.codes :refer [CODE_TEXT CODE_TYPED_ARRAY CODE_TRAILING CODE_DEPTH CODE_TOO_MANY_ITEMS
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ERR_POS O_ITEMS O_HI O_LO]]
@@ -224,7 +224,7 @@
                   (if (>= c 240) (set l 4))
                   (return (need ss base t l))))))))))
 
-(defn ^:pub ^I32 text-run [^IntsR p ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f]
+(defn ^:pub ^I32 text-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f ^Ext ext]
   (comment "A text frame: the scan; then (live) the regexp verdicts, the deferred"
            "charges as one sum at the item's offset, and finish-scalar.")
   (let [live (b01 (== (ia ss (+ f F_KIND)) FK_TEXT))
@@ -265,7 +265,7 @@
                         (iset s (+ fl0 k) (bit-or (bit-xor fk F_EVAL) (shl R_PATTERN 8))))
                       (set slot (+ slot (* 2 w)))))))))
         (if (not (charge s defer pos)) (return (err ss (neg R_BUDGET))))
-        (let [r3 (finish-scalar p s fb w0 nq d pos ctx)]
+        (let [r3 (finish-scalar p pool b s fb w0 nq d pos stop ctx ext)]
           (if (< r3 0) (return (err ss r3))))
         (return (done ss base stop))))))
 
@@ -505,7 +505,7 @@
                 (iset s VM_W_REASON R_EMBEDDED)))))
       (return (cont ss f S_FIN)))))
 
-(defn ^:pub ^I32 bstr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f]
+(defn ^:pub ^I32 bstr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f ^Ext ext]
   (let [ph (ia ss (+ f F_PH))
         pos (- (ia ss (+ f F_POS)) base)
         d (ia ss (+ f F_D))
@@ -530,7 +530,7 @@
               (if (> ne 0) (return (cont ss f S_EMBED)))
               (return (cont ss f S_FIN))))))
     (if (== ph S_EMBED) (return (bstr-embed p s ss base f)))
-    (let [r3 (finish-scalar p s fb w nq d pos ctx)]
+    (let [r3 (finish-scalar p pool b s fb w nq d pos (- (ia ss (+ f F_STOP)) base) ctx ext)]
       (if (< r3 0) (return (err ss r3)))
       (return (done ss base (- (ia ss (+ f F_STOP)) base))))))
 

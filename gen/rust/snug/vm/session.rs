@@ -240,7 +240,7 @@ pub(crate) fn tag_number(b: &[u8], pos: i32) -> i32 {
     }
     return -1;
 }
-pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32) -> i32 {
+pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
     // The pending item: its head (and any note or bounded piece it must have
     // whole) in the window, then whole by the buffer walk when the window
     // holds everything it can read, else a frame.
@@ -267,7 +267,7 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     if pos >= end {
         progress(ss, 1);
         if nq > 0 {
-            return ret(ss, base, eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx));
+            return ret(ss, base, eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext));
         }
         return ret(ss, base, dead_item(b, s, pos, d, end));
     }
@@ -396,7 +396,7 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     progress(ss, 1);
     if direct == 1 {
         if nq > 0 {
-            return ret(ss, base, eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx));
+            return ret(ss, base, eval_item(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext));
         }
         return ret(ss, base, dead_item(b, s, pos, d, end));
     }
@@ -456,29 +456,29 @@ pub(crate) fn deliver(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out: &
     }
     return fin_bad(s, ss, base);
 }
-pub(crate) fn frame_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32) -> i32 {
+pub(crate) fn frame_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, wend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
     let f: i32 = ftop(ss);
     let kind: i32 = ss[(f + F_KIND) as usize];
     if kind == FK_ARR {
-        return arr_run(p, pool, b, s, ss, base, f);
+        return arr_run(p, pool, b, s, ss, base, f, ext);
     }
     if (kind == FK_DARR) || (kind == FK_DSEQ) {
-        return darr_run(p, pool, b, s, ss, base, f);
+        return darr_run(p, pool, b, s, ss, base, f, ext);
     }
     if (kind == FK_MAP) || (kind == FK_DMAP) {
         if ss[(f + F_PH) as usize] == M_KEY {
-            return map_key(p, pool, b, s, ss, ka, base, wend, f);
+            return map_key(p, pool, b, s, ss, ka, base, wend, f, ext);
         }
-        return map_next(p, pool, b, s, ss, ka, base, wend, f);
+        return map_next(p, pool, b, s, ss, ka, base, wend, f, ext);
     }
     if kind == FK_TAG {
-        return tag_run(p, pool, b, s, ss, ka, base, wend, f);
+        return tag_run(p, pool, b, s, ss, ka, base, wend, f, ext);
     }
     if (kind == FK_TEXT) || (kind == FK_DTEXT) {
-        return text_run(p, b, s, ss, base, wend, f);
+        return text_run(p, pool, b, s, ss, base, wend, f, ext);
     }
     if kind == FK_BSTR {
-        return bstr_run(p, pool, b, s, ss, base, wend, f);
+        return bstr_run(p, pool, b, s, ss, base, wend, f, ext);
     }
     return fin_bad(s, ss, base);
 }
@@ -494,7 +494,7 @@ pub(crate) fn keep_of(ss: &[i32]) -> i32 {
     }
     return k;
 }
-pub fn vms_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32) -> i32 {
+pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
     // Run the session over the window b, message bytes from base. Answers the
     // verdict's code (>= 0; out filled as by vm-validate: absolute offsets),
     // VMS_NEED (give a window holding [vms-need-offset, + vms-need-length)),
@@ -534,11 +534,11 @@ pub fn vms_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
         let ph: i32 = ss[(SS_PH) as usize];
         let r: i32;
         if ph == PH_ITEM {
-            r = item_begin(p, pool, b, s, ss, ka, base, wend);
+            r = item_begin(p, pool, b, s, ss, ka, base, wend, ext);
         } else if ph == PH_RET {
             r = deliver(p, b, s, ss, out, base);
         } else if ph == PH_FRAME {
-            r = frame_run(p, pool, b, s, ss, ka, base, wend);
+            r = frame_run(p, pool, b, s, ss, ka, base, wend, ext);
         } else if ph == PH_START {
             r = doc_start(p, b, s, ss, out, base, wend);
         } else {
@@ -554,4 +554,8 @@ pub fn vms_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
             return r;
         }
     }
+}
+pub fn vms_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32) -> i32 {
+    // vms-step-x with no extension controls (D140).
+    return vms_step_x(p, pool, b, s, ss, ka, out, base, &|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false);
 }

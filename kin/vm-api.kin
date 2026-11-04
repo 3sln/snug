@@ -6,13 +6,13 @@
 ;; verified before it is validated against.
 (ns snug.vm.api
   (:require [kin.lang :refer [defn let local return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg quot rem ushr bit-and bit-or < > <= >= == != and or not
+            [snug.lang :refer [I32 Ext ext-none Bool Bytes Ints IntsR + - * neg quot rem ushr bit-and bit-or < > <= >= == != and or not
                                u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_COSE
                                      O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS
                                      O_ITEMS O_PROFILE MAX_BIGNUM_BYTES PF_HOST PF_SUB]]
             [snug.cbor.head :refer [fail]]
-            [snug.vm.layout :refer [MAGIC FORMAT_VERSION HEADER_WORDS H_FORMAT H_HEADER_WORDS
+            [snug.vm.layout :refer [MAGIC FORMAT_VERSION FORMAT_V11 HEADER_WORDS H_FORMAT H_HEADER_WORDS
                                     H_PROGRAM_WORDS H_POOL_BYTES H_N_RULES H_N_LEAVES H_LIM_DEPTH
                                     H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS H_LIM_BIGNUM H_LIM_BUDGET
                                     H_S_RULES H_S_CSET_INDEX H_S_CHAIN_INDEX VM_EPOCH VM_MARK_CAP
@@ -193,7 +193,7 @@
            "-2 scratch too small, -3 rule out of range. Shared by the buffer walk"
            "and the resumable session (snug.vm.session).")
   (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
-  (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_VERSION)
+  (if (or (!= (ia p 0) MAGIC) (or (and (!= (ia p H_FORMAT) FORMAT_VERSION) (!= (ia p H_FORMAT) FORMAT_V11))
                                   (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
     (return (neg 1)))
   (if (!= (ia p H_PROGRAM_WORDS) (ilen p)) (return (neg 1)))
@@ -248,12 +248,12 @@
       (return 0))))
 
 (defn ^:pub ^I32 vm-run [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
-                         ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
+                         ^I32 items0 ^IntsR limits ^Ints s ^Ints out ^Ext ext]
   (comment "Validate the single item b[start, end) against rule, its depth and item"
            "accounting starting at depth0 / items0. See vm-validate for results.")
   (if (< (ilen out) 8) (return (neg 4)))
   (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
-  (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_VERSION)
+  (if (or (!= (ia p 0) MAGIC) (or (and (!= (ia p H_FORMAT) FORMAT_VERSION) (!= (ia p H_FORMAT) FORMAT_V11))
                                   (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
     (return (neg 1)))
   (if (or (!= (ia p H_PROGRAM_WORDS) (ilen p)) (!= (ia p H_POOL_BYTES) (blen pool))) (return (neg 1)))
@@ -281,7 +281,7 @@
       (if (< nq 0) (return (neg 1)))
       (local ^I32 r)
       (if (> nq 0)
-        (set r (eval-item p pool b s start 0 frames 0 nq end 0))
+        (set r (eval-item p pool b s start 0 frames 0 nq end 0 ext))
         (set r (dead-item b s start 0 end)))
       (if (== r (neg R_BUDGET))
         (do (let [at2 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at2)))))
@@ -301,8 +301,8 @@
           (if (wit-empty s) (wit-set s R_TYPE 0 0 (neg 1) 0 start))
           (return (vm-witness-output s out)))))))
 
-(defn ^:pub ^I32 vm-validate [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
-                              ^Ints out]
+(defn ^:pub ^I32 vm-validate-x [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
+                                ^Ints out ^Ext ext]
   (comment "Validate input against rule of the verified Program (p, pool), under"
            "limits (8 words, -1 = compiled default; per-call values only lower the"
            "compiled ones; word 8 the generic/schedule bits, word 9 the profile"
@@ -310,14 +310,26 @@
            "code (0 ok; profile 1..21; schema 32..41; 48 budget), also in out[0],"
            "with out per program.md §13.2; or -1 Program inconsistent, -2 scratch too"
            "small, -3 rule out of range, -4 out shorter than 8 words. Allocates"
-           "nothing; calls no host code.")
-  (return (vm-run p pool rule input 0 (blen input) 0 0 limits s out)))
+           "nothing; calls no host code except x, the extension-control predicate"
+           "(D140), for an EXT leaf it queries.")
+  (return (vm-run p pool rule input 0 (blen input) 0 0 limits s out ext)))
 
-(defn ^:pub ^I32 vm-validate-span [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^I32 start ^I32 end
-                                   ^I32 depth0 ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
+(defn ^:pub ^I32 vm-validate [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
+                              ^Ints out]
+  (comment "vm-validate-x with no extension controls: an EXT leaf never matches"
+           "(hosts refuse to run such a Program without its predicates, D141).")
+  (return (vm-validate-x p pool rule input limits s out (ext-none))))
+
+(defn ^:pub ^I32 vm-validate-span-x [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^I32 start ^I32 end
+                                     ^I32 depth0 ^I32 items0 ^IntsR limits ^Ints s ^Ints out ^Ext ext]
   (comment "architecture §16.3: validate the item spanning input[start, end) as its"
            "own document against rule (it must be exactly one item ending at end),"
            "with depth and item accounting continuing from depth0 / items0 (the"
            "enclosing position). Offsets in out are absolute. cose applies only at"
            "depth0 = 0.")
-  (return (vm-run p pool rule input start end depth0 items0 limits s out)))
+  (return (vm-run p pool rule input start end depth0 items0 limits s out ext)))
+
+(defn ^:pub ^I32 vm-validate-span [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^I32 start ^I32 end
+                                   ^I32 depth0 ^I32 items0 ^IntsR limits ^Ints s ^Ints out]
+  (comment "vm-validate-span-x with no extension controls.")
+  (return (vm-validate-span-x p pool rule input start end depth0 items0 limits s out (ext-none))))

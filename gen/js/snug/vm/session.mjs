@@ -255,7 +255,7 @@ export function tagNumber(b, pos) {
     return -1;
 }
 
-export function itemBegin(p, pool, b, s, ss, ka, base, wend) {
+export function itemBegin(p, pool, b, s, ss, ka, base, wend, ext) {
     // The pending item: its head (and any note or bounded piece it must have
     // whole) in the window, then whole by the buffer walk when the window
     // holds everything it can read, else a frame.
@@ -282,7 +282,7 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend) {
     if (pos >= end) {
         progress(ss, 1);
         if (nq > 0) {
-            return ret(ss, base, evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx));
+            return ret(ss, base, evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext));
         }
         return ret(ss, base, deadItem(b, s, pos, d, end));
     }
@@ -411,7 +411,7 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend) {
     progress(ss, 1);
     if (direct === 1) {
         if (nq > 0) {
-            return ret(ss, base, evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx));
+            return ret(ss, base, evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext));
         }
         return ret(ss, base, deadItem(b, s, pos, d, end));
     }
@@ -473,29 +473,29 @@ export function deliver(p, b, s, ss, out, base) {
     return finBad(s, ss, base);
 }
 
-export function frameRun(p, pool, b, s, ss, ka, base, wend) {
+export function frameRun(p, pool, b, s, ss, ka, base, wend, ext) {
     const f = ftop(ss);
     const kind = ss[f + F_KIND];
     if (kind === FK_ARR) {
-        return arrRun(p, pool, b, s, ss, base, f);
+        return arrRun(p, pool, b, s, ss, base, f, ext);
     }
     if ((kind === FK_DARR) || (kind === FK_DSEQ)) {
-        return darrRun(p, pool, b, s, ss, base, f);
+        return darrRun(p, pool, b, s, ss, base, f, ext);
     }
     if ((kind === FK_MAP) || (kind === FK_DMAP)) {
         if (ss[f + F_PH] === M_KEY) {
-            return mapKey(p, pool, b, s, ss, ka, base, wend, f);
+            return mapKey(p, pool, b, s, ss, ka, base, wend, f, ext);
         }
-        return mapNext(p, pool, b, s, ss, ka, base, wend, f);
+        return mapNext(p, pool, b, s, ss, ka, base, wend, f, ext);
     }
     if (kind === FK_TAG) {
-        return tagRun(p, pool, b, s, ss, ka, base, wend, f);
+        return tagRun(p, pool, b, s, ss, ka, base, wend, f, ext);
     }
     if ((kind === FK_TEXT) || (kind === FK_DTEXT)) {
-        return textRun(p, b, s, ss, base, wend, f);
+        return textRun(p, pool, b, s, ss, base, wend, f, ext);
     }
     if (kind === FK_BSTR) {
-        return bstrRun(p, pool, b, s, ss, base, wend, f);
+        return bstrRun(p, pool, b, s, ss, base, wend, f, ext);
     }
     return finBad(s, ss, base);
 }
@@ -513,7 +513,7 @@ export function keepOf(ss) {
     return k;
 }
 
-export function vmsStep(p, pool, b, s, ss, ka, out, base) {
+export function vmsStepX(p, pool, b, s, ss, ka, out, base, ext) {
     // Run the session over the window b, message bytes from base. Answers the
     // verdict's code (>= 0; out filled as by vm-validate: absolute offsets),
     // VMS_NEED (give a window holding [vms-need-offset, + vms-need-length)),
@@ -553,11 +553,11 @@ export function vmsStep(p, pool, b, s, ss, ka, out, base) {
         const ph = ss[SS_PH];
         let r;
         if (ph === PH_ITEM) {
-            r = itemBegin(p, pool, b, s, ss, ka, base, wend);
+            r = itemBegin(p, pool, b, s, ss, ka, base, wend, ext);
         } else if (ph === PH_RET) {
             r = deliver(p, b, s, ss, out, base);
         } else if (ph === PH_FRAME) {
-            r = frameRun(p, pool, b, s, ss, ka, base, wend);
+            r = frameRun(p, pool, b, s, ss, ka, base, wend, ext);
         } else if (ph === PH_START) {
             r = docStart(p, b, s, ss, out, base, wend);
         } else {
@@ -573,4 +573,9 @@ export function vmsStep(p, pool, b, s, ss, ka, out, base) {
             return r;
         }
     }
+}
+
+export function vmsStep(p, pool, b, s, ss, ka, out, base) {
+    // vms-step-x with no extension controls (D140).
+    return vmsStepX(p, pool, b, s, ss, ka, out, base, (_i, _p, _ao, _al, _b, _s, _e) => false);
 }

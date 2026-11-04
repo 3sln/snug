@@ -11,7 +11,7 @@ import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c64, c64min, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadPairBody, deadSeq, deadStdCheck, deadTyped, decimalCheck, keyOrder, ndarrayCheck, pairCheck } from './dead.mjs';
-import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_EMBED, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_INCONSISTENT, R_MISSING, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_Q1, VM_QIDX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
 import { blockMt, blockNamed, candVts, candVtsMt, groupRec, keyPhaseStruct, keyProbe, keySearch, keySpanEnd, leafMap, mAlts, mKeys, mLits, mNames, mPools, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, namedRec, simpleStruct, updateStruct } from './map.mjs';
 
@@ -64,10 +64,58 @@ export function qFilterX(p, s, fb, w, nq, cls, pos, ctx) {
     return qFilter(p, s, fb, w, nq, cls, pos);
 }
 
-export function finishComb(p, s, fb, w, nq, pos) {
+export function extEval(p, pool, b, s, fb, w, l, pos, end, e, ext) {
+    // EXT leaf l (D140) on the item [pos, end) of b, once per item, when a
+    // combinator needs it: longer than its maximum (d3) -> R_CONTROL_SIZE for 1
+    // unit, without asking; else 1 + one unit per item byte, then the host
+    // predicate (id d0, argument pool[d1, d1 + d2)) -> MATCHED (stamped in epoch
+    // e) or R_CONTROL. A walk that cannot hold the item whole never gets here
+    // with one that fits (the session asks for it whole); -inconsistent if so.
+    // 0 or a negated code.
+    const qi = s[VM_QIDX];
+    const j = s[qi + l];
+    const fl0 = fb + w;
+    const f = s[fl0 + j];
+    const lb = p[H_S_LEAVES] + (8 * l);
+    const n = end - pos;
+    if ((f & (F_MATCHED | (255 << 8))) !== 0) {
+        return 0;
+    }
+    if ((f & F_ADMITTED) === 0) {
+        return 0;
+    }
+    if (!charge(s, 1, pos)) {
+        return -R_BUDGET;
+    }
+    if (n > p[lb + 5]) {
+        s[fl0 + j] = f | (R_CONTROL_SIZE << 8);
+        return 0;
+    }
+    if ((pos < 0) || (end > b.length)) {
+        return -R_INCONSISTENT;
+    }
+    if (!charge(s, n, pos)) {
+        return -R_BUDGET;
+    }
+    if (ext(p[lb + 2], pool, p[lb + 3], p[lb + 4], b, pos, end) === true) {
+        s[fl0 + j] = f | F_MATCHED;
+        s[SCRATCH_MARK + l] = e;
+    } else {
+        s[fl0 + j] = f | (R_CONTROL << 8);
+    }
+    return 0;
+}
+
+export function leafKindOf(p, l) {
+    return p[p[H_S_LEAVES] + (8 * l)] & 255;
+}
+
+export function finishComb(p, pool, b, s, fb, w, nq, pos, end, ext) {
     // Combinators of the item (§8.4): stamp its matched leaves in a fresh
     // epoch, then one pass in query order evaluates each admitted AND
     // (both operands) and NOT (target and not the literal), 2 units each.
+    // An EXT operand (D140) is decided when first needed: an AND's first
+    // operand, and its second only once the first matched; a NOT's target.
     // Answers 1 if some answer leaf matched, 0 if none, or a code.
     if ((p[H_FLAGS] & FL_COMB) !== 0) {
         const e = newEpoch(s);
@@ -86,6 +134,23 @@ export function finishComb(p, s, fb, w, nq, pos) {
             if (((kind === K_AND) || (kind === K_NOT)) && ((f & F_ADMITTED) !== 0)) {
                 if (!charge(s, 2, pos)) {
                     return -R_BUDGET;
+                }
+                if ((p[H_FLAGS] & FL_EXT) !== 0) {
+                    const lb0 = qLeafBase(p, s, fb, j);
+                    const a0 = p[lb0 + 2];
+                    const c0 = p[lb0 + 3];
+                    if (leafKindOf(p, a0) === K_EXT) {
+                        const ra0 = extEval(p, pool, b, s, fb, w, a0, pos, end, e, ext);
+                        if (ra0 < 0) {
+                            return ra0;
+                        }
+                    }
+                    if ((kind === K_AND) && ((s[SCRATCH_MARK + a0] === e) && (leafKindOf(p, c0) === K_EXT))) {
+                        const rc0 = extEval(p, pool, b, s, fb, w, c0, pos, end, e, ext);
+                        if (rc0 < 0) {
+                            return rc0;
+                        }
+                    }
                 }
                 const lb = qLeafBase(p, s, fb, j);
                 const a = p[lb + 2];
@@ -124,10 +189,10 @@ export function finishComb(p, s, fb, w, nq, pos) {
     return 0;
 }
 
-export function finishScalar(p, s, fb, w, nq, d, pos, ctx) {
+export function finishScalar(p, pool, b, s, fb, w, nq, d, pos, end, ctx, ext) {
     // End of an item that is not a container: combinators, then witness rule 1
     // if no answer matched (never for a map key, §9.2 rule 6).
-    const m = finishComb(p, s, fb, w, nq, pos);
+    const m = finishComb(p, pool, b, s, fb, w, nq, pos, end, ext);
     if (m < 0) {
         return m;
     }
@@ -151,7 +216,7 @@ export function countPending(p, s, fb, w, nq) {
     return k;
 }
 
-export function bstrTail(p, pool, b, s, pos, cs, ce, d, fb, ck, nq, ctx) {
+export function bstrTail(p, pool, b, s, pos, cs, ce, d, fb, ck, nq, ctx, ext) {
     // A byte string item at pos (content [cs, ce)) at depth d, after its
     // profile checks: filter, scalar leaves, EMBED sub-validations, end.
     const cr = csetRec(p, s, ck);
@@ -172,13 +237,13 @@ export function bstrTail(p, pool, b, s, pos, cs, ce, d, fb, ck, nq, ctx) {
             }
         }
         if (ne > 0) {
-            const r2 = evalEmbed(p, pool, b, s, pos, cs, ce, d, fb, ck, nq);
+            const r2 = evalEmbed(p, pool, b, s, pos, cs, ce, d, fb, ck, nq, ext);
             if (r2 < 0) {
                 return r2;
             }
         }
     }
-    return finishScalar(p, s, fb, w, nq, d, pos, ctx);
+    return finishScalar(p, pool, b, s, fb, w, nq, d, pos, ce, ctx, ext);
 }
 
 export function embedKill(p, s, fb, w, nq, seq) {
@@ -222,7 +287,7 @@ export function embedLive(p, s, fb, w, nq, seq) {
     return k;
 }
 
-export function embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, seq, pos) {
+export function embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, seq, pos, ext) {
     // One sub-validation of the content [cs, ce) for the live EMBED leaves of
     // one kind. `.cbor` (seq 0): one item at physical depth d + 1 queried with
     // their content typesets, which must end at ce (else inner trailing).
@@ -277,12 +342,12 @@ export function embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, seq, pos) {
     let r;
     if (seq === 1) {
         if (cnq > 0) {
-            r = evalArray(p, pool, b, s, cs, cs, -1, d + 1, cfb, cck, cnq, ce, 0);
+            r = evalArray(p, pool, b, s, cs, cs, -1, d + 1, cfb, cck, cnq, ce, 0, ext);
         } else {
             r = deadSeq(b, s, cs, d + 2, ce);
         }
     } else if (cnq > 0) {
-        r = evalItem(p, pool, b, s, cs, d + 1, cfb, cck, cnq, ce, 0);
+        r = evalItem(p, pool, b, s, cs, d + 1, cfb, cck, cnq, ce, 0, ext);
     } else {
         r = deadItem(b, s, cs, d + 1, ce);
     }
@@ -327,7 +392,7 @@ export function embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, seq, pos) {
     return 0;
 }
 
-export function evalEmbed(p, pool, b, s, pos, cs, ce, d, fb, ck, nq) {
+export function evalEmbed(p, pool, b, s, pos, cs, ce, d, fb, ck, nq, ext) {
     // §8.4 EMBED on a byte string item at depth d with content [cs, ce): 1 unit
     // per admitted EMBED leaf, then a sub-validation for the `.cbor` leaves and
     // one for the `.cborseq` leaves (D040). Survivors match; with no other
@@ -345,7 +410,7 @@ export function evalEmbed(p, pool, b, s, pos, cs, ce, d, fb, ck, nq) {
         }
     }
     if (embedLive(p, s, fb, w, nq, 0) > 0) {
-        const r0 = embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, 0, pos);
+        const r0 = embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, 0, pos, ext);
         if (r0 < 0) {
             return r0;
         }
@@ -354,7 +419,7 @@ export function evalEmbed(p, pool, b, s, pos, cs, ce, d, fb, ck, nq) {
         }
     }
     if (embedLive(p, s, fb, w, nq, 1) > 0) {
-        const r1 = embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, 1, pos);
+        const r1 = embedRun(p, pool, b, s, cs, ce, d, fb, ck, nq, 1, pos, ext);
         if (r1 < 0) {
             return r1;
         }
@@ -610,7 +675,7 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf, s2) {
     return q;
 }
 
-export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
+export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx, ext) {
     // P3.6 (D044): eval-item on a query list of exactly ONE answer leaf
     // `leaf` without building the list: for a scalar kind on a scalar major,
     // the same profile checks, charges (consecutive charges at one offset
@@ -674,7 +739,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
     if ((major < 0) || ((!scalarKind(kind)) || ((major === 4) || ((major === 5) || (major === 6))))) {
         s[cfb] = leaf;
         s[cfb + cw] = F_ANSWER;
-        const rg = evalItem(p, pool, b, s, pos, d, cfb, ck, 1, end, ctx);
+        const rg = evalItem(p, pool, b, s, pos, d, cfb, ck, 1, end, ctx, ext);
         const fq = s[cfb + cw];
         if (rg < 0) {
             return rg;
@@ -794,7 +859,7 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx) {
     return stop;
 }
 
-export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) {
+export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, ext) {
     // A tag item (§8.4): the scanner's depth and number checks, the filter,
     // TAG/TAGSET number tests (1 unit each), the content at depth d + 1 queried
     // with the content typesets of the leaves whose number matched (bignum and
@@ -873,14 +938,14 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) 
         }
         cs = s[O_CSTART];
         if (cnq > 0) {
-            const rb = bstrTail(p, pool, b, s, q, cs, stop, d + 1, cfb, cck, cnq, 0);
+            const rb = bstrTail(p, pool, b, s, q, cs, stop, d + 1, cfb, cck, cnq, 0, ext);
             if (rb < 0) {
                 return rb;
             }
         }
     } else if (std) {
         if (cnq > 0) {
-            stop = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0);
+            stop = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0, ext);
         } else {
             stop = deadItem(b, s, q, d + 1, end);
         }
@@ -897,7 +962,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) 
             return pc;
         }
         if (cnq > 0) {
-            stop = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0);
+            stop = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0, ext);
         } else {
             stop = deadPairBody(b, s, q, d, end);
         }
@@ -943,7 +1008,7 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx) 
     if (countMatched(p, s, fb, w, nq) > 0) {
         witClear(s);
     }
-    const r3 = finishScalar(p, s, fb, w, nq, d, pos, ctx);
+    const r3 = finishScalar(p, pool, b, s, fb, w, nq, d, pos, stop, ctx, ext);
     if (r3 < 0) {
         return r3;
     }
@@ -957,7 +1022,7 @@ export function ifLimit(n, el) {
     return n - el;
 }
 
-export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx) {
+export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext) {
     // P3.6 (D044): one element of a `[* T]` array (one block, one uncounted
     // self-looping position, T one answer): the generic element step's
     // charges merged per offset -- block 1 + W(|A|+1) + candidate 1 + T's
@@ -969,7 +1034,7 @@ export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, f
         return -R_BUDGET;
     }
     pathPut(s, d + 1, P_INDEX, el);
-    const rf = fastChild(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, cx);
+    const rf = fastChild(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, cx, ext);
     if (rf < 0) {
         return rf;
     }
@@ -1010,7 +1075,7 @@ export function arrayAlive(p, s, fb, area, nb) {
     return k;
 }
 
-export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
+export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ext) {
     // An array item (§8.1) after its head and container checks: a block per
     // admitted ARRAY leaf; per element the candidate positions of the live
     // blocks give the element's query; at the end, acceptance. n < 0: a
@@ -1115,7 +1180,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 q = qs;
                 el += ks - 1;
             } else {
-                const rf2 = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx);
+                const rf2 = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext);
                 if (rf2 < 0) {
                     return rf2;
                 }
@@ -1125,7 +1190,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                 }
             }
         } else if (fleaf >= 0) {
-            const rf = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx);
+            const rf = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext);
             if (rf < 0) {
                 return rf;
             }
@@ -1161,7 +1226,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
             freeOff(s);
             pathPut(s, d + 1, P_INDEX, el);
             if (cnq > 0) {
-                r = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, cx);
+                r = evalItem(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, cx, ext);
             } else {
                 r = deadItem(b, s, q, d + 1, end);
             }
@@ -1238,7 +1303,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     if (rs < 0) {
         return rs;
     }
-    const m = finishComb(p, s, fb, w, nq, pos);
+    const m = finishComb(p, pool, b, s, fb, w, nq, pos, q, ext);
     if (m < 0) {
         return m;
     }
@@ -1297,7 +1362,7 @@ export function mapPairOk(p, s, bo, mt, kid, mode) {
     return singleLeaf(p, p[(mLits(p, mt) + (4 * lit)) + 1]) >= 0;
 }
 
-export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, bo, mt, cfb, cck, cw, kid, pend, mode, ps2) {
+export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, bo, mt, cfb, cck, cw, kid, pend, mode, ps2, ext) {
     // P3.6 (D044): one pair of a single-block map in a fast mode, after the
     // shared key search and cursor step: the generic pair's charges merged
     // per offset, its pool/alternative state updates and witness. The key's
@@ -1320,7 +1385,7 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
         }
         const go = groupRec(p, p[pools + 1]);
         const kl1 = singleLeaf(p, p[go + 2]);
-        kq = fastChild(p, pool, b, s, start, d + 1, cfb, cck, cw, kl1, end, CTX_KEY | simpleLeaf(p, ps2, kl1));
+        kq = fastChild(p, pool, b, s, start, d + 1, cfb, cck, cw, kl1, end, CTX_KEY | simpleLeaf(p, ps2, kl1), ext);
     }
     if (kq < 0) {
         return kq;
@@ -1348,7 +1413,7 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
             }
             pathPut(s, d + 1, P_KEY, kid);
             const vl1 = singleLeaf(p, p[lrec + 1]);
-            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl1, end, simpleLeaf(p, ps2, vl1));
+            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl1, end, simpleLeaf(p, ps2, vl1), ext);
             if (vq < 0) {
                 return vq;
             }
@@ -1392,7 +1457,7 @@ export function mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w
         pathPut(s, d + 1, P_ANYKEY, 0);
         if (kmatch) {
             const vl2 = singleLeaf(p, p[go2 + 3]);
-            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl2, end, simpleLeaf(p, ps2, vl2));
+            vq = fastChild(p, pool, b, s, kq, d + 1, cfb, cck, cw, vl2, end, simpleLeaf(p, ps2, vl2), ext);
             if (vq < 0) {
                 return vq;
             }
@@ -1537,7 +1602,7 @@ export function streakKind(p, leaf) {
     return ((kind === K_INT) && (p[lb + 3] === 1)) || ((kind === K_TEXT) && (p[lb + 4] < 0));
 }
 
-export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cfb, cck, cw, ps0, pe0, klo0, s2) {
+export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cfb, cck, cw, ps0, pe0, klo0, s2, ext) {
     // P3.6 (D044): consecutive SUCCESSFUL pairs of a single-block map in a fast
     // mode (1 struct: a named key whose value is an INT/TEXT leaf; 2 table:
     // a TEXT key leaf and an `any` or INT/TEXT value leaf). The key (text,
@@ -1696,7 +1761,7 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
             return -R_BUDGET;
         }
         if (vany) {
-            const rv = fastChild(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, simpleLeaf(p, s2, vlf));
+            const rv = fastChild(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, simpleLeaf(p, s2, vlf), ext);
             if (rv < 0) {
                 return rv;
             }
@@ -1750,7 +1815,7 @@ export function mapAlive(p, s, fb, area, nb) {
     return k;
 }
 
-export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
+export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ext) {
     // A map item (§8.3) after its head and container checks. Per pair: the
     // scanner's key checks; the key search, cursors, the key's query (key
     // typesets of live residual pools), the key, its order; the key phase
@@ -1824,7 +1889,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     const pend = countPending(p, s, fb, w, nq);
     while (pk < n) {
         if ((smode > 0) && (nalive > 0)) {
-            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo, ifS2(s));
+            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smode, cfb, cck, cw, ps, pe, klo, ifS2(s), ext);
             const km2 = s[VM_FASTM];
             if (qm < 0) {
                 return qm;
@@ -1910,7 +1975,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     }
                 }
                 if ((fmode > 0) && mapPairOk(p, s, area, blockMt(p, s, fb, area), kid, fmode)) {
-                    const vf = mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, blockMt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode, ps2);
+                    const vf = mapPairFast(p, pool, b, s, pos, start, km, ps, pe, end, d, fb, w, area, blockMt(p, s, fb, area), cfb, cck, cw, kid, pend, fmode, ps2, ext);
                     if (vf < 0) {
                         return vf;
                     }
@@ -1950,7 +2015,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     }
                     freeOff(s);
                     if (cnq > 0) {
-                        kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY | simpleOf(p, s, ps2, cfb, cnq));
+                        kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY | simpleOf(p, s, ps2, cfb, cnq), ext);
                     } else {
                         kq = deadItem(b, s, start, d + 1, end);
                     }
@@ -2012,7 +2077,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
                     }
                     freeOff(s);
                     if (vnq > 0) {
-                        vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, simpleOf(p, s, ps2, cfb, vnq));
+                        vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, simpleOf(p, s, ps2, cfb, vnq), ext);
                     } else {
                         vq = deadItem(b, s, kq, d + 1, end);
                     }
@@ -2120,7 +2185,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     if (rs < 0) {
         return rs;
     }
-    const m = finishComb(p, s, fb, w, nq, pos);
+    const m = finishComb(p, pool, b, s, fb, w, nq, pos, q, ext);
     if (m < 0) {
         return m;
     }
@@ -2141,7 +2206,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx) {
     return q;
 }
 
-export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
+export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext) {
     // One LIVE item at pos, physical depth d, query list (nq > 0 entries) in the
     // frame at fb: visit (1 unit), counted, then its head -- the scanner's
     // `item`, with the schema evaluated alongside.
@@ -2183,7 +2248,7 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
                 if (rf < 0) {
                     return rf;
                 }
-                const ff = finishScalar(p, s, fb, w, nq, d, pos, ctx);
+                const ff = finishScalar(p, pool, b, s, fb, w, nq, d, pos, stop, ctx, ext);
                 if (ff < 0) {
                     return ff;
                 }
@@ -2202,17 +2267,17 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
         if (ra < 0) {
             return ra;
         }
-        return evalArray(p, pool, b, s, pos, q, lo, d, fb, ck, nq, end, ctx);
+        return evalArray(p, pool, b, s, pos, q, lo, d, fb, ck, nq, end, ctx, ext);
     }
     if (major === 5) {
         const rm = enterContainer(s, pos, q, hi, lo, d, 1, end);
         if (rm < 0) {
             return rm;
         }
-        return evalMap(p, pool, b, s, pos, q, lo, d, fb, ck, nq, end, ctx);
+        return evalMap(p, pool, b, s, pos, q, lo, d, fb, ck, nq, end, ctx, ext);
     }
     if (major === 6) {
-        return evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx);
+        return evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, ext);
     }
     stop = q;
     if (major === 2) {
@@ -2220,7 +2285,7 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
         if (stop < 0) {
             return stop;
         }
-        const rb = bstrTail(p, pool, b, s, pos, q, stop, d, fb, ck, nq, ctx);
+        const rb = bstrTail(p, pool, b, s, pos, q, stop, d, fb, ck, nq, ctx, ext);
         if (rb < 0) {
             return rb;
         }
@@ -2257,7 +2322,7 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx) {
     if (r2 < 0) {
         return r2;
     }
-    const f2 = finishScalar(p, s, fb, w, nq, d, pos, ctx);
+    const f2 = finishScalar(p, pool, b, s, fb, w, nq, d, pos, stop, ctx, ext);
     if (f2 < 0) {
         return f2;
     }

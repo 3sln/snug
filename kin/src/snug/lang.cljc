@@ -94,6 +94,16 @@
   `Bytes` is taken (Rust reborrows `&mut [u8]` as `&[u8]`)."
   {:name 'BytesW :types {:js "Uint8Array" :rust "&mut [u8]"}})
 
+(def Ext
+  "An EXTENSION-CONTROL predicate (D082, D140): the host's verdict for an `EXT`
+  leaf, `(ext id pool arg-off arg-len b item-start item-end) -> bool`, called by
+  the VM only when such a leaf is queried and the item is whole in `b`. A JS
+  function (only a strict `true` matches) / a Rust `&dyn Fn` trait object. The
+  predicate must be a pure function of its inputs; the VM charges it per item
+  byte and never calls it on a dead item."
+  {:name 'Ext :types {:js "Function"
+                      :rust "&dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool"}})
+
 ;; ---------------------------------------------------------------- the forms
 
 (defn- op
@@ -202,12 +212,18 @@
    'iset iset-form
    'bset bset-form
    'bcopy bcopy-form
-   'hex hex-form})
+   'hex hex-form
+   ;; extension controls (D140): call a predicate; the predicate that never matches
+   'ext-call (op "({0}({1}, {2}, {3}, {4}, {5}, {6}, {7}) === true)"
+                 "{0}({1}, {2}, {3}, {4}, {5}, {6}, {7})" Bool)
+   'ext-none (kl/call {:js "((_i, _p, _ao, _al, _b, _s, _e) => false)"
+                       :rust "&|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false"}
+                      {:tag Ext :arity 0})})
 
 (def vocabulary
   {:namespace 'snug.lang
    :targets #{:js :rust}
-   :tags {'I32 I32 'Bool Bool 'Bytes Bytes 'BytesW BytesW 'Ints Ints 'IntsR IntsR 'Str Str}
+   :tags {'I32 I32 'Bool Bool 'Bytes Bytes 'BytesW BytesW 'Ints Ints 'IntsR IntsR 'Str Str 'Ext Ext}
    :names {}
    :forms forms
    ;; An unannotated integer literal is an I32 and `true`/`false` a Bool, so a

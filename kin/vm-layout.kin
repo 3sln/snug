@@ -10,6 +10,8 @@
 ;; ------------------------------------------------------------ header (§2)
 (defconst ^:pub ^I32 MAGIC 1735749235)
 (defconst ^:pub ^I32 FORMAT_VERSION 1)
+;; format 1.1 (D084, D141): major in the low 16 bits, minor in the high 16 bits
+(defconst ^:pub ^I32 FORMAT_V11 65537)
 (defconst ^:pub ^I32 HEADER_WORDS 64)
 (defconst ^:pub ^I32 H_FORMAT 1)
 (defconst ^:pub ^I32 H_HEADER_WORDS 2)
@@ -19,6 +21,10 @@
 (defconst ^:pub ^I32 H_N_RULES 15)
 (defconst ^:pub ^I32 H_N_LEAVES 16)
 (defconst ^:pub ^I32 H_N_KEYS 18)
+;; format 1.1 (D141): the extension-control table -- count, pool offset and byte length of its names
+(defconst ^:pub ^I32 H_N_EXTS 30)
+(defconst ^:pub ^I32 H_EXT_NAMES 31)
+(defconst ^:pub ^I32 H_EXT_NAMES_LEN 39)
 (defconst ^:pub ^I32 H_LIM_DEPTH 32)
 (defconst ^:pub ^I32 H_LIM_INPUT 33)
 (defconst ^:pub ^I32 H_LIM_ENTRIES 34)
@@ -42,6 +48,7 @@
 ;; FLAGS bits
 (defconst ^:pub ^I32 FL_EMBED 4)
 (defconst ^:pub ^I32 FL_COMB 8)
+(defconst ^:pub ^I32 FL_EXT 16)
 
 (defconst ^:pub ^I32 INF 2147483647)
 
@@ -63,6 +70,8 @@
 (defconst ^:pub ^I32 K_MAP 15)
 (defconst ^:pub ^I32 K_AND 16)
 (defconst ^:pub ^I32 K_NOT 17)
+;; format 1.1 (D141): an extension control, decided by a host predicate (D082, D140)
+(defconst ^:pub ^I32 K_EXT 18)
 
 ;; map factor modes (§7.3)
 (defconst ^:pub ^I32 MODE_ABSORB 2)
@@ -122,6 +131,9 @@
 (defconst ^:pub ^I32 R_TAG 39)
 (defconst ^:pub ^I32 R_BITS 40)
 (defconst ^:pub ^I32 R_EMBEDDED 41)
+;; D140: an extension control's predicate refused the item / the item is longer than the control's maximum
+(defconst ^:pub ^I32 R_CONTROL 42)
+(defconst ^:pub ^I32 R_CONTROL_SIZE 43)
 (defconst ^:pub ^I32 R_BUDGET 48)
 ;; internal only: the Program is inconsistent with its scratch (vm-validate -1)
 (defconst ^:pub ^I32 R_INCONSISTENT 100)

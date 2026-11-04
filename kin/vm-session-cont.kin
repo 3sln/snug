@@ -12,7 +12,7 @@
 ;; / dead-item) over that copy; the copy then becomes the map's previous key.
 (ns snug.vm.scont
   (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
-            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
+            [snug.lang :refer [I32 Ext Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
                                rem < > <= >= == != and or not u8 blen ia iset bcopy]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TAG CODE_DEPTH CODE_DECIMAL
                                      CODE_NDARRAY CODE_TYPED_ARRAY O_COSE O_MAX_DEPTH O_ERR_POS O_HI
@@ -83,7 +83,7 @@
 (defconst ^:pub ^I32 NOINL -1000)
 
 (defn ^:pub ^I32 inline-child [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 pos ^I32 d
-                               ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx ^I32 note]
+                               ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx ^I32 note ^Ext ext]
   (comment "A child the step's prescan knows to lie before the cut, evaluated by the"
            "buffer walk at once (no round trip through the session loop): its end"
            "or code, or NOINL (take the item path: a note, a yield, or unknown).")
@@ -92,7 +92,7 @@
     (if (cut-yield s ss at) (return NOINL))
     (if (not (fits-known ss at)) (return NOINL)))
   (progress ss 1)
-  (if (> nq 0) (return (eval-item p pool b s pos d fb ck nq end ctx)))
+  (if (> nq 0) (return (eval-item p pool b s pos d fb ck nq end ctx ext)))
   (return (dead-item b s pos d end)))
 
 (defn ^:pub ^I32 arr-start [^IntsR p ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 pos ^I32 q0 ^I32 n
@@ -166,7 +166,7 @@
       (if (< ra 0) (return (err ss ra)))
       (return (arr-start p b s ss ka base pos q lo d fb ck nq end ctx pair)))))
 
-(defn ^:pub ^I32 arr-end [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f]
+(defn ^:pub ^I32 arr-end [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f ^Ext ext]
   (let [pos (- (ia ss (+ f F_POS)) base)
         d (ia ss (+ f F_D))
         fb (ia ss (+ f F_FB))
@@ -196,7 +196,7 @@
             (iset s VM_Q1 q1))))
     (let [rs (eval-scalars p pool b s fb w nq pos q0 q 16 0 el (unit-of ctx))]
       (if (< rs 0) (return (err ss rs))))
-    (let [m (finish-comb p s fb w nq pos)]
+    (let [m (finish-comb p pool b s fb w nq pos q ext)]
       (if (< m 0) (return (err ss m)))
       (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
         (if (> unacc 0)
@@ -254,7 +254,7 @@
 ;; ------------------------------------------------------------ dead arrays and sequences
 
 
-(defn ^:pub ^I32 arr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f]
+(defn ^:pub ^I32 arr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f ^Ext ext]
   (comment "The next element: its query from the live blocks (charged), then the"
            "element as a child item; or the end.")
   (let [pos (- (ia ss (+ f F_POS)) base)
@@ -270,7 +270,7 @@
         cx (ia ss (+ f F_CX))
         note (pair-note ss (ia ss (+ f F_PAIR)) el)]
     (if (not (or (and (< n 0) (< q end)) (and (>= n 0) (< el n))))
-      (return (arr-end p pool b s ss base f)))
+      (return (arr-end p pool b s ss base f ext)))
     (comment "eval-array's streaks over the elements the window (and the quantum's"
              "cut) holds: each checks an element whole before charging it and stops"
              "before one that would not do, so a cut short `end` only ends them sooner")
@@ -297,7 +297,7 @@
                                   (return (cont ss f A_NEXT)))))))))))))
     (if (== (ia ss (+ f F_NALIVE)) 0)
       (do (iset ss (+ f F_PH) A_DEAD)
-          (let [ir0 (inline-child p pool b s ss base q (+ d 1) 0 0 0 end 0 note)]
+          (let [ir0 (inline-child p pool b s ss base q (+ d 1) 0 0 0 end 0 note ext)]
             (if (>= ir0 0) (return (arr-ret p s ss base f (+ ir0 base))))
             (if (!= ir0 NOINL) (return (ret ss base ir0))))
           (return (call ss base q (+ d 1) 0 0 0 end 0 MODE_ITEM note (neg 1)))))
@@ -327,8 +327,8 @@
       (let []
         (local ^I32 ir)
         (if (> cnq 0)
-          (set ir (inline-child p pool b s ss base q (+ d 1) cfb cck cnq end cx note))
-          (set ir (inline-child p pool b s ss base q (+ d 1) 0 0 0 end 0 note)))
+          (set ir (inline-child p pool b s ss base q (+ d 1) cfb cck cnq end cx note ext))
+          (set ir (inline-child p pool b s ss base q (+ d 1) 0 0 0 end 0 note ext)))
         (if (< ir 0)
           (if (!= ir NOINL) (return (ret ss base ir))))
         (if (>= ir 0) (return (arr-ret p s ss base f (+ ir base)))))
@@ -369,7 +369,7 @@
 ;; ------------------------------------------------------------ maps (FK_MAP, FK_DMAP)
 
 
-(defn ^:pub ^I32 darr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f]
+(defn ^:pub ^I32 darr-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f ^Ext ext]
   (comment "The next dead element (or sequence item), or the end.")
   (let [el (ia ss (+ f F_EL))
         q (- (ia ss (+ f F_Q)) base)
@@ -378,7 +378,7 @@
     (if (== kind FK_DSEQ)
       (do (if (>= q end) (return (done ss base q)))
           (let [sd (ia ss (+ f F_D))
-                ir2 (inline-child p pool b s ss base q sd 0 0 0 end 0 (neg 1))]
+                ir2 (inline-child p pool b s ss base q sd 0 0 0 end 0 (neg 1) ext)]
             (if (>= ir2 0) (return (darr-ret ss f (+ ir2 base))))
             (if (!= ir2 NOINL) (return (ret ss base ir2)))
             (return (call ss base q sd 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1))))))
@@ -395,7 +395,7 @@
                     (return (cont ss f A_NEXT))))))))
     (let [dnote (pair-note ss (ia ss (+ f F_PAIR)) el)
           dd (+ (ia ss (+ f F_D)) 1)
-          ir1 (inline-child p pool b s ss base q dd 0 0 0 end 0 dnote)]
+          ir1 (inline-child p pool b s ss base q dd 0 0 0 end 0 dnote ext)]
       (if (>= ir1 0) (return (darr-ret ss f (+ ir1 base))))
       (if (!= ir1 NOINL) (return (ret ss base ir1)))
       (return (call ss base q dd 0 0 0 end 0 MODE_ITEM dnote (neg 1))))))
@@ -471,7 +471,7 @@
         (if (and (== d 0) (!= (ia s O_COSE) 0)) (iset ss (+ f F_COSE) 1))
         (return (cont ss f M_NEXT))))))
 
-(defn ^:pub ^I32 map-end [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f]
+(defn ^:pub ^I32 map-end [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 f ^Ext ext]
   (let [pos (- (ia ss (+ f F_POS)) base)
         d (ia ss (+ f F_D))
         fb (ia ss (+ f F_FB))
@@ -502,7 +502,7 @@
         (set be (+ be (ia p (+ mtm 6))))))
     (let [rs (eval-scalars p pool b s fb w nq pos q0 q 32 0 n (unit-of ctx))]
       (if (< rs 0) (return (err ss rs))))
-    (let [m (finish-comb p s fb w nq pos)]
+    (let [m (finish-comb p pool b s fb w nq pos q ext)]
       (if (< m 0) (return (err ss m)))
       (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
         (if (> unsat 0)
@@ -592,7 +592,7 @@
 
 
 (defn ^:pub ^I32 map-pair [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 f
-                           ^I32 inka]
+                           ^I32 inka ^Ext ext]
   (comment "A pair whose key is whole -- in the window (inka 0) or copied into the"
            "arena (inka 1) -- after the key's first checks: dead (a dead map, or no"
            "live block) or live (eval-map's generic pair up to the value), then the"
@@ -628,7 +628,7 @@
             (set-prev-arena ss ka f ka0 klen)
             (set-prev ss f (+ start base) (+ kq0 base)))
           (iset ss (+ f F_PH) M_DVAL)
-          (let [ir3 (inline-child p pool b s ss base kq0 (+ d 1) 0 0 0 end 0 (neg 1))]
+          (let [ir3 (inline-child p pool b s ss base kq0 (+ d 1) 0 0 0 end 0 (neg 1) ext)]
             (if (>= ir3 0) (return (map-ret p s ss base f (+ ir3 base))))
             (if (!= ir3 NOINL) (return (ret ss base ir3))))
           (return (call ss base kq0 (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1)))))
@@ -690,9 +690,9 @@
       (if (> cnq 0)
         (do (let [kctx (bit-or CTX_KEY (simple-of p s ps2 cfb cnq))]
               (if (== inka 1)
-                (do (let [kr1 (eval-item p pool ka s kks (+ d 1) cfb cck cnq kend kctx)]
+                (do (let [kr1 (eval-item p pool ka s kks (+ d 1) cfb cck cnq kend kctx ext)]
                       (set kq (key-fix s kr1 delta))))
-                (set kq (eval-item p pool b s kks (+ d 1) cfb cck cnq kend kctx)))))
+                (set kq (eval-item p pool b s kks (+ d 1) cfb cck cnq kend kctx ext)))))
         (if (== inka 1)
           (do (let [kr2 (dead-item ka s kks (+ d 1) kend)]
                 (set kq (key-fix s kr2 delta))))
@@ -739,8 +739,8 @@
       (let [vctx (simple-of p s ps2 cfb vnq)]
         (local ^I32 ir4)
         (if (> vnq 0)
-          (set ir4 (inline-child p pool b s ss base kq (+ d 1) cfb cck vnq end vctx (neg 1)))
-          (set ir4 (inline-child p pool b s ss base kq (+ d 1) 0 0 0 end 0 (neg 1))))
+          (set ir4 (inline-child p pool b s ss base kq (+ d 1) cfb cck vnq end vctx (neg 1) ext))
+          (set ir4 (inline-child p pool b s ss base kq (+ d 1) 0 0 0 end 0 (neg 1) ext)))
         (if (>= ir4 0) (return (map-ret p s ss base f (+ ir4 base))))
         (if (!= ir4 NOINL) (return (ret ss base ir4)))
         (if (> vnq 0)
@@ -748,14 +748,14 @@
         (return (call ss base kq (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1)))))))
 
 (defn ^:pub ^I32 map-next [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend
-                           ^I32 f]
+                           ^I32 f ^Ext ext]
   (comment "A pair starts (or the map ends): the key's first byte, major type and"
            "head; then the key whole -- in the window, or copied into the arena"
            "across windows (phase M_KEY) when it crosses.")
   (if (>= (ia ss (+ f F_EL)) (ia ss (+ f F_N)))
     (do (if (== (ia ss (+ f F_KIND)) FK_DMAP)
           (return (done ss base (- (ia ss (+ f F_Q)) base))))
-        (return (map-end p pool b s ss base f))))
+        (return (map-end p pool b s ss base f ext))))
   (let [start (- (ia ss (+ f F_Q)) base)
         end (- (ia ss (+ f F_END)) base)]
     (if (>= start end) (return (err ss (fail s start CODE_TRUNCATED))))
@@ -793,10 +793,10 @@
                 (iset ss (+ f F_KGOT) 0)
                 (iset ss SS_ATOP (+ top (- ke start))))
               (return (cont ss f M_KEY))))
-        (return (map-pair p pool b s ss ka base f 0))))))
+        (return (map-pair p pool b s ss ka base f 0 ext))))))
 
 (defn ^:pub ^I32 map-key [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend
-                          ^I32 f]
+                          ^I32 f ^Ext ext]
   (comment "Copy the crossing key into the arena, a window at a time (D092).")
   (let [start (ia ss (+ f F_START))
         klen (- (ia ss (+ f F_KE)) start)
@@ -810,7 +810,7 @@
       (iset ss (+ f F_KGOT) (+ got n))
       (progress ss (+ 1 (sar n 6)))
       (if (< (+ got n) klen) (return (need ss base (+ x n) 1)))
-      (return (map-pair p pool b s ss ka base f 1)))))
+      (return (map-pair p pool b s ss ka base f 1 ext)))))
 
 (defn ^:pub ^I32 if-live [^I32 nq]
   (if (> nq 0) (return 1))
@@ -925,7 +925,7 @@
       (if (bstr-reads p s cfb cnq (- stop cs)) (return 1))
       (return 0))))
 
-(defn ^:pub ^I32 tag-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend ^I32 f]
+(defn ^:pub ^I32 tag-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend ^I32 f ^Ext ext]
   (let [ph (ia ss (+ f F_PH))
         pos (- (ia ss (+ f F_POS)) base)
         end (- (ia ss (+ f F_END)) base)
@@ -980,7 +980,7 @@
                           (if (bstr-reads p s cfb-t cnq (- stop-t cs-t))
                             (do (iset ss (+ f F_PH) T_TAILRET)
                                 (return (open-bstr p pool b s ss ka base q (+ d 1) cfb-t cck-t cnq end 0 1 cs-t stop-t))))))
-                    (let [rb-t (bstr-tail p pool b s q cs-t stop-t (+ d 1) cfb-t cck-t cnq 0)]
+                    (let [rb-t (bstr-tail p pool b s q cs-t stop-t (+ d 1) cfb-t cck-t cnq 0 ext)]
                       (if (< rb-t 0) (return (err ss rb-t)))))))
             (return (cont ss f T_FIN)))))
     (if (== ph T_STD)
@@ -1048,7 +1048,7 @@
         (let [r2-f (eval-scalars p pool b s fb w-f nq-f pos cs-f stop-f 64 0 lo (unit-of ctx-f))]
           (if (< r2-f 0) (return (err ss r2-f))))
         (if (> (count-matched p s fb w-f nq-f) 0) (wit-clear s))
-        (let [r3-f (finish-scalar p s fb w-f nq-f d pos ctx-f)]
+        (let [r3-f (finish-scalar p pool b s fb w-f nq-f d pos stop-f ctx-f ext)]
           (if (< r3-f 0) (return (err ss r3-f))))
         (return (done ss base stop-f))))))
 

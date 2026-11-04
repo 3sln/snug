@@ -63,7 +63,7 @@ export function markPair(ss, pair) {
 
 export const NOINL = -1000;
 
-export function inlineChild(p, pool, b, s, ss, base, pos, d, fb, ck, nq, end, ctx, note) {
+export function inlineChild(p, pool, b, s, ss, base, pos, d, fb, ck, nq, end, ctx, note, ext) {
     // A child the step's prescan knows to lie before the cut, evaluated by the
     // buffer walk at once (no round trip through the session loop): its end
     // or code, or NOINL (take the item path: a note, a yield, or unknown).
@@ -79,7 +79,7 @@ export function inlineChild(p, pool, b, s, ss, base, pos, d, fb, ck, nq, end, ct
     }
     progress(ss, 1);
     if (nq > 0) {
-        return evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx);
+        return evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext);
     }
     return deadItem(b, s, pos, d, end);
 }
@@ -174,7 +174,7 @@ export function openArr(p, b, s, ss, ka, base, pos, d, fb, ck, nq, end, ctx, pai
     return arrStart(p, b, s, ss, ka, base, pos, q, lo, d, fb, ck, nq, end, ctx, pair);
 }
 
-export function arrEnd(p, pool, b, s, ss, base, f) {
+export function arrEnd(p, pool, b, s, ss, base, f, ext) {
     const pos = ss[f + F_POS] - base;
     const d = ss[f + F_D];
     const fb = ss[f + F_FB];
@@ -215,7 +215,7 @@ export function arrEnd(p, pool, b, s, ss, base, f) {
     if (rs < 0) {
         return err(ss, rs);
     }
-    const m = finishComb(p, s, fb, w, nq, pos);
+    const m = finishComb(p, pool, b, s, fb, w, nq, pos, q, ext);
     if (m < 0) {
         return err(ss, m);
     }
@@ -298,7 +298,7 @@ export function arrRet(p, s, ss, base, f, r) {
     return cont(ss, f, A_NEXT);
 }
 
-export function arrRun(p, pool, b, s, ss, base, f) {
+export function arrRun(p, pool, b, s, ss, base, f, ext) {
     // The next element: its query from the live blocks (charged), then the
     // element as a child item; or the end.
     const pos = ss[f + F_POS] - base;
@@ -314,7 +314,7 @@ export function arrRun(p, pool, b, s, ss, base, f) {
     const cx = ss[f + F_CX];
     const note = pairNote(ss, ss[f + F_PAIR], el);
     if (!(((n < 0) && (q < end)) || ((n >= 0) && (el < n)))) {
-        return arrEnd(p, pool, b, s, ss, base, f);
+        return arrEnd(p, pool, b, s, ss, base, f, ext);
     }
     // eval-array's streaks over the elements the window (and the quantum's
     // cut) holds: each checks an element whole before charging it and stops
@@ -348,7 +348,7 @@ export function arrRun(p, pool, b, s, ss, base, f) {
     }
     if (ss[f + F_NALIVE] === 0) {
         ss[f + F_PH] = A_DEAD;
-        const ir0 = inlineChild(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note);
+        const ir0 = inlineChild(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note, ext);
         if (ir0 >= 0) {
             return arrRet(p, s, ss, base, f, ir0 + base);
         }
@@ -392,9 +392,9 @@ export function arrRun(p, pool, b, s, ss, base, f) {
     ss[f + F_PH] = A_LIVE;
     let ir;
     if (cnq > 0) {
-        ir = inlineChild(p, pool, b, s, ss, base, q, d + 1, cfb, cck, cnq, end, cx, note);
+        ir = inlineChild(p, pool, b, s, ss, base, q, d + 1, cfb, cck, cnq, end, cx, note, ext);
     } else {
-        ir = inlineChild(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note);
+        ir = inlineChild(p, pool, b, s, ss, base, q, d + 1, 0, 0, 0, end, 0, note, ext);
     }
     if (ir < 0) {
         if (ir !== NOINL) {
@@ -450,7 +450,7 @@ export function darrRet(ss, f, r) {
     return cont(ss, f, A_NEXT);
 }
 
-export function darrRun(p, pool, b, s, ss, base, f) {
+export function darrRun(p, pool, b, s, ss, base, f, ext) {
     // The next dead element (or sequence item), or the end.
     const el = ss[f + F_EL];
     const q = ss[f + F_Q] - base;
@@ -461,7 +461,7 @@ export function darrRun(p, pool, b, s, ss, base, f) {
             return done(ss, base, q);
         }
         const sd = ss[f + F_D];
-        const ir2 = inlineChild(p, pool, b, s, ss, base, q, sd, 0, 0, 0, end, 0, -1);
+        const ir2 = inlineChild(p, pool, b, s, ss, base, q, sd, 0, 0, 0, end, 0, -1, ext);
         if (ir2 >= 0) {
             return darrRet(ss, f, ir2 + base);
         }
@@ -487,7 +487,7 @@ export function darrRun(p, pool, b, s, ss, base, f) {
     }
     const dnote = pairNote(ss, ss[f + F_PAIR], el);
     const dd = ss[f + F_D] + 1;
-    const ir1 = inlineChild(p, pool, b, s, ss, base, q, dd, 0, 0, 0, end, 0, dnote);
+    const ir1 = inlineChild(p, pool, b, s, ss, base, q, dd, 0, 0, 0, end, 0, dnote, ext);
     if (ir1 >= 0) {
         return darrRet(ss, f, ir1 + base);
     }
@@ -597,7 +597,7 @@ export function openDmap(p, b, s, ss, ka, base, pos, d, end) {
     return cont(ss, f, M_NEXT);
 }
 
-export function mapEnd(p, pool, b, s, ss, base, f) {
+export function mapEnd(p, pool, b, s, ss, base, f, ext) {
     const pos = ss[f + F_POS] - base;
     const d = ss[f + F_D];
     const fb = ss[f + F_FB];
@@ -640,7 +640,7 @@ export function mapEnd(p, pool, b, s, ss, base, f) {
     if (rs < 0) {
         return err(ss, rs);
     }
-    const m = finishComb(p, s, fb, w, nq, pos);
+    const m = finishComb(p, pool, b, s, fb, w, nq, pos, q, ext);
     if (m < 0) {
         return err(ss, m);
     }
@@ -766,7 +766,7 @@ export function mapRet(p, s, ss, base, f, r) {
     return cont(ss, f, M_NEXT);
 }
 
-export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
+export function mapPair(p, pool, b, s, ss, ka, base, f, inka, ext) {
     // A pair whose key is whole -- in the window (inka 0) or copied into the
     // arena (inka 1) -- after the key's first checks: dead (a dead map, or no
     // live block) or live (eval-map's generic pair up to the value), then the
@@ -816,7 +816,7 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
             setPrev(ss, f, start + base, kq0 + base);
         }
         ss[f + F_PH] = M_DVAL;
-        const ir3 = inlineChild(p, pool, b, s, ss, base, kq0, d + 1, 0, 0, 0, end, 0, -1);
+        const ir3 = inlineChild(p, pool, b, s, ss, base, kq0, d + 1, 0, 0, 0, end, 0, -1, ext);
         if (ir3 >= 0) {
             return mapRet(p, s, ss, base, f, ir3 + base);
         }
@@ -907,10 +907,10 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
     if (cnq > 0) {
         const kctx = CTX_KEY | simpleOf(p, s, ps2, cfb, cnq);
         if (inka === 1) {
-            const kr1 = evalItem(p, pool, ka, s, kks, d + 1, cfb, cck, cnq, kend, kctx);
+            const kr1 = evalItem(p, pool, ka, s, kks, d + 1, cfb, cck, cnq, kend, kctx, ext);
             kq = keyFix(s, kr1, delta);
         } else {
-            kq = evalItem(p, pool, b, s, kks, d + 1, cfb, cck, cnq, kend, kctx);
+            kq = evalItem(p, pool, b, s, kks, d + 1, cfb, cck, cnq, kend, kctx, ext);
         }
     } else if (inka === 1) {
         const kr2 = deadItem(ka, s, kks, d + 1, kend);
@@ -989,9 +989,9 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
     const vctx = simpleOf(p, s, ps2, cfb, vnq);
     let ir4;
     if (vnq > 0) {
-        ir4 = inlineChild(p, pool, b, s, ss, base, kq, d + 1, cfb, cck, vnq, end, vctx, -1);
+        ir4 = inlineChild(p, pool, b, s, ss, base, kq, d + 1, cfb, cck, vnq, end, vctx, -1, ext);
     } else {
-        ir4 = inlineChild(p, pool, b, s, ss, base, kq, d + 1, 0, 0, 0, end, 0, -1);
+        ir4 = inlineChild(p, pool, b, s, ss, base, kq, d + 1, 0, 0, 0, end, 0, -1, ext);
     }
     if (ir4 >= 0) {
         return mapRet(p, s, ss, base, f, ir4 + base);
@@ -1005,7 +1005,7 @@ export function mapPair(p, pool, b, s, ss, ka, base, f, inka) {
     return call(ss, base, kq, d + 1, 0, 0, 0, end, 0, MODE_ITEM, -1, -1);
 }
 
-export function mapNext(p, pool, b, s, ss, ka, base, wend, f) {
+export function mapNext(p, pool, b, s, ss, ka, base, wend, f, ext) {
     // A pair starts (or the map ends): the key's first byte, major type and
     // head; then the key whole -- in the window, or copied into the arena
     // across windows (phase M_KEY) when it crosses.
@@ -1013,7 +1013,7 @@ export function mapNext(p, pool, b, s, ss, ka, base, wend, f) {
         if (ss[f + F_KIND] === FK_DMAP) {
             return done(ss, base, ss[f + F_Q] - base);
         }
-        return mapEnd(p, pool, b, s, ss, base, f);
+        return mapEnd(p, pool, b, s, ss, base, f, ext);
     }
     const start = ss[f + F_Q] - base;
     const end = ss[f + F_END] - base;
@@ -1073,10 +1073,10 @@ export function mapNext(p, pool, b, s, ss, ka, base, wend, f) {
         ss[SS_ATOP] = top + (ke - start);
         return cont(ss, f, M_KEY);
     }
-    return mapPair(p, pool, b, s, ss, ka, base, f, 0);
+    return mapPair(p, pool, b, s, ss, ka, base, f, 0, ext);
 }
 
-export function mapKey(p, pool, b, s, ss, ka, base, wend, f) {
+export function mapKey(p, pool, b, s, ss, ka, base, wend, f, ext) {
     // Copy the crossing key into the arena, a window at a time (D092).
     const start = ss[f + F_START];
     const klen = ss[f + F_KE] - start;
@@ -1096,7 +1096,7 @@ export function mapKey(p, pool, b, s, ss, ka, base, wend, f) {
     if ((got + n) < klen) {
         return need(ss, base, x + n, 1);
     }
-    return mapPair(p, pool, b, s, ss, ka, base, f, 1);
+    return mapPair(p, pool, b, s, ss, ka, base, f, 1, ext);
 }
 
 export function ifLive(nq) {
@@ -1272,7 +1272,7 @@ export function tailNeed(p, s, ss, f) {
     return 0;
 }
 
-export function tagRun(p, pool, b, s, ss, ka, base, wend, f) {
+export function tagRun(p, pool, b, s, ss, ka, base, wend, f, ext) {
     const ph = ss[f + F_PH];
     const pos = ss[f + F_POS] - base;
     const end = ss[f + F_END] - base;
@@ -1356,7 +1356,7 @@ export function tagRun(p, pool, b, s, ss, ka, base, wend, f) {
                     return openBstr(p, pool, b, s, ss, ka, base, q, d + 1, cfbT, cckT, cnq, end, 0, 1, csT, stopT);
                 }
             }
-            const rbT = bstrTail(p, pool, b, s, q, csT, stopT, d + 1, cfbT, cckT, cnq, 0);
+            const rbT = bstrTail(p, pool, b, s, q, csT, stopT, d + 1, cfbT, cckT, cnq, 0, ext);
             if (rbT < 0) {
                 return err(ss, rbT);
             }
@@ -1461,7 +1461,7 @@ export function tagRun(p, pool, b, s, ss, ka, base, wend, f) {
     if (countMatched(p, s, fb, wF, nqF) > 0) {
         witClear(s);
     }
-    const r3F = finishScalar(p, s, fb, wF, nqF, d, pos, ctxF);
+    const r3F = finishScalar(p, pool, b, s, fb, wF, nqF, d, pos, stopF, ctxF, ext);
     if (r3F < 0) {
         return err(ss, r3F);
     }

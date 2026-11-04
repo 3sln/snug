@@ -261,7 +261,7 @@ export function textScan(p, b, s, ss, base, wend, f, live) {
     }
 }
 
-export function textRun(p, b, s, ss, base, wend, f) {
+export function textRun(p, pool, b, s, ss, base, wend, f, ext) {
     // A text frame: the scan; then (live) the regexp verdicts, the deferred
     // charges as one sum at the item's offset, and finish-scalar.
     const live = b01(ss[f + F_KIND] === FK_TEXT);
@@ -316,7 +316,7 @@ export function textRun(p, b, s, ss, base, wend, f) {
     if (!charge(s, defer, pos)) {
         return err(ss, -R_BUDGET);
     }
-    const r3 = finishScalar(p, s, fb, w0, nq, d, pos, ctx);
+    const r3 = finishScalar(p, pool, b, s, fb, w0, nq, d, pos, stop, ctx, ext);
     if (r3 < 0) {
         return err(ss, r3);
     }
@@ -636,7 +636,7 @@ export function bstrEmbed(p, s, ss, base, f) {
     return cont(ss, f, S_FIN);
 }
 
-export function bstrRun(p, pool, b, s, ss, base, wend, f) {
+export function bstrRun(p, pool, b, s, ss, base, wend, f, ext) {
     const ph = ss[f + F_PH];
     const pos = ss[f + F_POS] - base;
     const d = ss[f + F_D];
@@ -673,7 +673,7 @@ export function bstrRun(p, pool, b, s, ss, base, wend, f) {
     if (ph === S_EMBED) {
         return bstrEmbed(p, s, ss, base, f);
     }
-    const r3 = finishScalar(p, s, fb, w, nq, d, pos, ctx);
+    const r3 = finishScalar(p, pool, b, s, fb, w, nq, d, pos, ss[f + F_STOP] - base, ctx, ext);
     if (r3 < 0) {
         return err(ss, r3);
     }

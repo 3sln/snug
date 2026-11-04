@@ -5,6 +5,8 @@ export const MAGIC = 1735749235;
 
 export const FORMAT_VERSION = 1;
 
+export const FORMAT_V11 = 65537;
+
 export const HEADER_WORDS = 64;
 
 export const H_FORMAT = 1;
@@ -22,6 +24,12 @@ export const H_N_RULES = 15;
 export const H_N_LEAVES = 16;
 
 export const H_N_KEYS = 18;
+
+export const H_N_EXTS = 30;
+
+export const H_EXT_NAMES = 31;
+
+export const H_EXT_NAMES_LEN = 39;
 
 export const H_LIM_DEPTH = 32;
 
@@ -65,6 +73,8 @@ export const FL_EMBED = 4;
 
 export const FL_COMB = 8;
 
+export const FL_EXT = 16;
+
 export const INF = 2147483647;
 
 export const K_ANY = 1;
@@ -100,6 +110,8 @@ export const K_MAP = 15;
 export const K_AND = 16;
 
 export const K_NOT = 17;
+
+export const K_EXT = 18;
 
 export const MODE_ABSORB = 2;
 
@@ -196,6 +208,10 @@ export const R_TAG = 39;
 export const R_BITS = 40;
 
 export const R_EMBEDDED = 41;
+
+export const R_CONTROL = 42;
+
+export const R_CONTROL_SIZE = 43;
 
 export const R_BUDGET = 48;
 

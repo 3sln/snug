@@ -219,7 +219,7 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     if (p.len() as i32) < HEADER_WORDS {
         return -1;
     }
-    if (p[(0) as usize] != MAGIC) || ((p[(H_FORMAT) as usize] != FORMAT_VERSION) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
+    if (p[(0) as usize] != MAGIC) || (((p[(H_FORMAT) as usize] != FORMAT_VERSION) && (p[(H_FORMAT) as usize] != FORMAT_V11)) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
         return -1;
     }
     if p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32) {
@@ -295,7 +295,7 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     }
     return 0;
 }
-pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
+pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
     // Validate the single item b[start, end) against rule, its depth and item
     // accounting starting at depth0 / items0. See vm-validate for results.
     if (out.len() as i32) < 8 {
@@ -304,7 +304,7 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     if (p.len() as i32) < HEADER_WORDS {
         return -1;
     }
-    if (p[(0) as usize] != MAGIC) || ((p[(H_FORMAT) as usize] != FORMAT_VERSION) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
+    if (p[(0) as usize] != MAGIC) || (((p[(H_FORMAT) as usize] != FORMAT_VERSION) && (p[(H_FORMAT) as usize] != FORMAT_V11)) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
         return -1;
     }
     if (p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32)) || (p[(H_POOL_BYTES) as usize] != (pool.len() as i32)) {
@@ -347,7 +347,7 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     }
     let r: i32;
     if nq > 0 {
-        r = eval_item(p, pool, b, s, start, 0, frames, 0, nq, end, 0);
+        r = eval_item(p, pool, b, s, start, 0, frames, 0, nq, end, 0, ext);
     } else {
         r = dead_item(b, s, start, 0, end);
     }
@@ -384,7 +384,7 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     }
     return vm_witness_output(s, out);
 }
-pub fn vm_validate(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
+pub fn vm_validate_x(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
     // Validate input against rule of the verified Program (p, pool), under
     // limits (8 words, -1 = compiled default; per-call values only lower the
     // compiled ones; word 8 the generic/schedule bits, word 9 the profile
@@ -392,14 +392,24 @@ pub fn vm_validate(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i3
     // code (0 ok; profile 1..21; schema 32..41; 48 budget), also in out[0],
     // with out per program.md §13.2; or -1 Program inconsistent, -2 scratch too
     // small, -3 rule out of range, -4 out shorter than 8 words. Allocates
-    // nothing; calls no host code.
-    return vm_run(p, pool, rule, input, 0, input.len() as i32, 0, 0, limits, s, out);
+    // nothing; calls no host code except x, the extension-control predicate
+    // (D140), for an EXT leaf it queries.
+    return vm_run(p, pool, rule, input, 0, input.len() as i32, 0, 0, limits, s, out, ext);
 }
-pub fn vm_validate_span(p: &[i32], pool: &[u8], rule: i32, input: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
+pub fn vm_validate(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
+    // vm-validate-x with no extension controls: an EXT leaf never matches
+    // (hosts refuse to run such a Program without its predicates, D141).
+    return vm_validate_x(p, pool, rule, input, limits, s, out, &|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false);
+}
+pub fn vm_validate_span_x(p: &[i32], pool: &[u8], rule: i32, input: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32) -> bool) -> i32 {
     // architecture §16.3: validate the item spanning input[start, end) as its
     // own document against rule (it must be exactly one item ending at end),
     // with depth and item accounting continuing from depth0 / items0 (the
     // enclosing position). Offsets in out are absolute. cose applies only at
     // depth0 = 0.
-    return vm_run(p, pool, rule, input, start, end, depth0, items0, limits, s, out);
+    return vm_run(p, pool, rule, input, start, end, depth0, items0, limits, s, out, ext);
+}
+pub fn vm_validate_span(p: &[i32], pool: &[u8], rule: i32, input: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32]) -> i32 {
+    // vm-validate-span-x with no extension controls.
+    return vm_validate_span_x(p, pool, rule, input, start, end, depth0, items0, limits, s, out, &|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32| false);
 }

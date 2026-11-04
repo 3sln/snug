@@ -6,7 +6,7 @@ import { fail } from '../cbor/head.mjs';
 import { csetRec, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { FORMAT_VERSION, HEADER_WORDS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_BUDGET, R_INCONSISTENT, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_EXH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
+import { FORMAT_V11, FORMAT_VERSION, HEADER_WORDS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_BUDGET, R_INCONSISTENT, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_EXH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
 import { cmpBytes } from './leaf.mjs';
 
 export function chainOf(p, rule) {
@@ -232,7 +232,7 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     if (p.length < HEADER_WORDS) {
         return -1;
     }
-    if ((p[0] !== MAGIC) || ((p[H_FORMAT] !== FORMAT_VERSION) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
+    if ((p[0] !== MAGIC) || (((p[H_FORMAT] !== FORMAT_VERSION) && (p[H_FORMAT] !== FORMAT_V11)) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
         return -1;
     }
     if (p[H_PROGRAM_WORDS] !== p.length) {
@@ -309,7 +309,7 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     return 0;
 }
 
-export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, out) {
+export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext) {
     // Validate the single item b[start, end) against rule, its depth and item
     // accounting starting at depth0 / items0. See vm-validate for results.
     if (out.length < 8) {
@@ -318,7 +318,7 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     if (p.length < HEADER_WORDS) {
         return -1;
     }
-    if ((p[0] !== MAGIC) || ((p[H_FORMAT] !== FORMAT_VERSION) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
+    if ((p[0] !== MAGIC) || (((p[H_FORMAT] !== FORMAT_VERSION) && (p[H_FORMAT] !== FORMAT_V11)) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
         return -1;
     }
     if ((p[H_PROGRAM_WORDS] !== p.length) || (p[H_POOL_BYTES] !== pool.length)) {
@@ -361,7 +361,7 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     }
     let r;
     if (nq > 0) {
-        r = evalItem(p, pool, b, s, start, 0, frames, 0, nq, end, 0);
+        r = evalItem(p, pool, b, s, start, 0, frames, 0, nq, end, 0, ext);
     } else {
         r = deadItem(b, s, start, 0, end);
     }
@@ -399,7 +399,7 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     return vmWitnessOutput(s, out);
 }
 
-export function vmValidate(p, pool, rule, input, limits, s, out) {
+export function vmValidateX(p, pool, rule, input, limits, s, out, ext) {
     // Validate input against rule of the verified Program (p, pool), under
     // limits (8 words, -1 = compiled default; per-call values only lower the
     // compiled ones; word 8 the generic/schedule bits, word 9 the profile
@@ -407,15 +407,27 @@ export function vmValidate(p, pool, rule, input, limits, s, out) {
     // code (0 ok; profile 1..21; schema 32..41; 48 budget), also in out[0],
     // with out per program.md §13.2; or -1 Program inconsistent, -2 scratch too
     // small, -3 rule out of range, -4 out shorter than 8 words. Allocates
-    // nothing; calls no host code.
-    return vmRun(p, pool, rule, input, 0, input.length, 0, 0, limits, s, out);
+    // nothing; calls no host code except x, the extension-control predicate
+    // (D140), for an EXT leaf it queries.
+    return vmRun(p, pool, rule, input, 0, input.length, 0, 0, limits, s, out, ext);
 }
 
-export function vmValidateSpan(p, pool, rule, input, start, end, depth0, items0, limits, s, out) {
+export function vmValidate(p, pool, rule, input, limits, s, out) {
+    // vm-validate-x with no extension controls: an EXT leaf never matches
+    // (hosts refuse to run such a Program without its predicates, D141).
+    return vmValidateX(p, pool, rule, input, limits, s, out, (_i, _p, _ao, _al, _b, _s, _e) => false);
+}
+
+export function vmValidateSpanX(p, pool, rule, input, start, end, depth0, items0, limits, s, out, ext) {
     // architecture §16.3: validate the item spanning input[start, end) as its
     // own document against rule (it must be exactly one item ending at end),
     // with depth and item accounting continuing from depth0 / items0 (the
     // enclosing position). Offsets in out are absolute. cose applies only at
     // depth0 = 0.
-    return vmRun(p, pool, rule, input, start, end, depth0, items0, limits, s, out);
+    return vmRun(p, pool, rule, input, start, end, depth0, items0, limits, s, out, ext);
+}
+
+export function vmValidateSpan(p, pool, rule, input, start, end, depth0, items0, limits, s, out) {
+    // vm-validate-span-x with no extension controls.
+    return vmValidateSpanX(p, pool, rule, input, start, end, depth0, items0, limits, s, out, (_i, _p, _ao, _al, _b, _s, _e) => false);
 }
