@@ -3190,7 +3190,189 @@ are answered as provisional decisions D082–D085. None is open now.
   (3) reconcile program.md §13.3's older exact-version text with D084/D100,
   including the major/minor word spelling; that document is outside this
   task's write set. Browser/Worker and broader release evidence remain P7.7.
-- [ ] **P7.6 — Bundle size** (R9: runtime 33 KB vs 20 KB gzip).
+- [ ] **P7.6 — Bundle size** (R9: current codec + schema **53,870 B** vs 20 KB gzip).
+  *Phase 1 completed 2026-11-03; R9 remains open. No kin/generated edits,
+  network, installs or commits by this task.* Offline esbuild 0.28.2; full
+  machine/method and before/after tables: [bench](bench/README.md#bundle-size-p76-phase-1--2026-11-03).
+  Exact source hashes, static/full/split metafiles, isolated per-module sizes
+  and ranked attribution: `tools/size/{before,after}.json`,
+  [rendered report](tools/size/report.md). The same generated-module hashes
+  occur before and after; only public-compile, its new import adapter and
+  package sideEffects metadata changed. This is a shared worktree snapshot,
+  not a clean-revision benchmark; historical 11/41/56 KB figures have older
+  revisions/entry sets and are not substituted for this baseline.
+
+  **Static graph findings (all public exports retained):**
+  - `snug`: scanner + trusted builder + encode -> Writer. Writer's class
+    methods retain kin write/{out,int,float,map}, CBOR profile primitives,
+    values, limits and option validation. Standard tag 24 encoding scans the
+    embedded bytes (`Writer` line containing `scan`); this is a real scanner
+    dependency even in `snug/writer`. Profiles/values implement the selected
+    wire representation and value classes, not accidental compiler imports.
+  - `snug/schema`: public-schema -> schema -> vm/api and vm/session.
+    Synchronous Program construction imports vm-verify; synchronous
+    serialize imports framing + SHA-256. Schema.decode needs the trusted
+    builder and values. Session pulls sbase/scont/sstr, sharing eval, leaf,
+    map, array, dead and base with the buffer driver. No compiler host,
+    generated compiler or Unicode table is retained in the static bundle.
+    cbor/scan contributes **1,480 minified B** of codeName/profile helpers;
+    there are not two copies of a recursive scanner. rscan is absent.
+    Different VM/session walkers duplicate some traversal logic, not module
+    instances. The 31 retained modules are listed in the report.
+  - `snug/compile` originally imported Program/Schema statically: **45,754 B
+    gzip** before any compile call. Now it imports only options and its
+    public error class (**1,243 B gzip**); first compile imports
+    compile-runtime, a narrow re-export of the compiler and public classes.
+    Public constructor/error identities, verification and synchronous
+    instance methods are preserved. The adapter exports only the four
+    bindings needed, avoiding a dynamic namespace over the entire schema API.
+  - `snug/view`: scanner + navigation + builder/values + Writer (encode
+    lookup keys of arbitrary admitted kinds). `snug/writer`: Writer and its
+    primitives/checks above. Neither imports schema or its session VM.
+    `snug/sources`: source loops + recursive scanner + rscan; schema drivers
+    receive a schema and call its session, without importing schema/VM.
+    `snug/unicode`: optional packed data and decoder, imported by no runtime
+    entry; the compiler receives tables as an explicit port.
+  - esbuild splitting emits **orphan compiler/verifier chunks** because
+    unused internal schema.compile/fromProgram contain dynamic imports.
+    The public schema output has no import edge to those outputs. Report
+    `split.total` traverses reachable chunks; `split.emitted` also counts
+    orphans. Actual compile startup gzip is **46,746 -> 1,371 B**; reachable
+    split transfer after calling compile is **84,612 -> 84,779 B** (+167 B).
+    One-file compiler+runtime gzip is **84,074 -> 85,118 B** (+1,044 B),
+    explicitly recorded rather than presented as a total-size saving.
+
+  **Concurrent regeneration after the paired measurement:** another engineer
+  regenerated compiler, verifier and session modules during the final audit.
+  `tools/size/current.json` records these separately: codec is still **14,174
+  gzip B**, schema **46,456 B**, codec+schema **53,870 B**, all-runtime
+  **63,720 B**; compile's static stub stays **1,243 B**, full closure is
+  **86,871 B**. Before/after above continue to isolate the host-only change;
+  final budget caps use **ceil(current.json bytes × 1.02)** instead of the
+  earlier paired after values. Full current module hashes/graphs and changed
+  module sizes are in the report. The analysis/proposals below use the paired
+  baseline, not the other engineer's subsequent additions.
+
+  **D160 — Preserve synchronous APIs while splitting the async compiler.**
+  **Decision:** defer compiler + its schema facade together through the new
+  compile-runtime re-export adapter; mark the package sideEffects:false.
+  Keep vm-verify, serializer/SHA and session imports synchronous where the
+  public API requires them. Add `bb size` and recorded +2% regression caps.
+  **Why:** Program(P,B) verifies before returning; serialize() returns bytes;
+  Schema.session() returns a session. Lazy-importing any of those changes
+  the contract. fromSerialized is async but currently snapshots and parses
+  input before returning its Promise: adding an await lets caller mutations
+  affect loading. No such timing change is shipped. Top-level runtime work
+  only creates/freezes module-owned values/prototypes/scratch, or checks the
+  fixed kin profile constant; it has no independent global registration or
+  required bare-import effect. Used exports retain their initialization;
+  sideEffects:false allows unused modules to disappear. Existing modules
+  already share scanner/VM/hash helpers through named imports.
+  **Alternatives:** asynchronous constructors/serialize/session, deferring the
+  input snapshot, side-effect registration of session factories, or skipping
+  verification (all change behavior); a broad schema-core extraction now
+  (collides with the concurrent schema/extension/stream work, deferred below).
+  - [ ] **Signed off** (owner)
+
+  **Prioritised kin/emitter and subsequent API plan (not implemented):**
+  `tools/size/analyze.mjs` and `analysis.json` rank generated functions and
+  run in-memory size probes on the frozen baseline. Stub/constant probes
+  are never executed and are not verified implementations. Compression is
+  nonadditive; the following savings cannot be summed without rebuilding.
+  1. **Separate buffer core from sessions at the source/API boundary.**
+     Session-only generated modules contribute **33,917 minified B** in the
+     schema bundle (session 4,876; sbase 7,730; scont 14,664; sstr 6,647).
+     Stubbing session exports reduces schema **46,042 -> 32,893 gzip B**
+     (13,149 B); codec+schema **53,452 -> 40,458 B** (12,994 B). Expected
+     initial-graph opportunity **12–13 KB gzip**, with real drivers still
+     downloaded when used. Keep predicates/charges in kin and shared across
+     drivers. Preserve existing Schema.session on the full entry; a new
+     buffer-only entry or async prepared facade needs an explicit API
+     decision. Moving all sessions to snug/sources cannot preserve today's
+     independent synchronous Schema.session. First extract a shared schema
+     core with the other engineer; leave internal async compiler/loader
+     wrappers outside it. This also avoids orphan outputs and their shared
+     chunk overhead (~**968 B gzip** for schema startup in this bundler).
+  2. **Offer a kin-emitted generic VM variant (`snug/schema-small`).**
+     Keep schedule 2 and exact verdict/path/budget accounting; omit array/
+     map streaks, fastChild and specialised pair/element helpers at emit
+     time. On the no-session probe, generic specialisation reduces schema
+     **32,893 -> 29,765 gzip B** (3,128 B; 7,945 minified B), codec+schema
+     **40,458 -> 37,334 B** (3,124 B). Estimate **3–4 KB gzip**, then run
+     bb vm-test's complete out-array equality, both hosts, plus throughput/
+     budget calibration; do not replace the default fast VM without those
+     measurements. Biggest runtime functions by isolated minified bytes:
+     rscanStep **7,603**; evalMap **4,364**; scont.mapPair **2,946**;
+     scont.tagRun **2,804**; evalArray **2,725**; verifier.checkMap **2,359**;
+     fastChild **1,988**; mapPairFast **1,870**; mapStreak **1,711**;
+     arrayStreak is also separately ranked. Session code shares evalItem,
+     arrayStreak and leaf checks but implements resumable container/tag
+     phases separately; merge repeated scans/checks before merging whole
+     drivers (D030/D091 deliberately retain two performance tiers).
+  3. **Verifier size/loading design.** Generated verify is **61,862 source /
+     18,903 retained minified B**. Stubbing it saves **6,459 gzip B** for
+     schema and **6,245 B** for codec+schema: this is a ceiling for removal
+     from the initial graph, not a safe optimization. It MUST run for every
+     untrusted Program, including direct synchronous public construction.
+     A new async-loader-only small entry can fetch it before exposing a
+     verified schema; full entry must retain it. For a behavior-preserving
+     kin refactor, target repeated header/section/range/record checks, using
+     checkMap/checkLeaf/checkHeader rankings; **1–2 KB gzip** is an engineering
+     estimate, not measured savings. Moving it never removes end-to-end
+     verification bytes or authenticates Program provenance.
+  4. **Rare leaf groups only after a prepared-schema design.** Regexp,
+     embedded-CBOR, bits and extended leaves are synchronous decisions today.
+     A kin-owned feature partition could load required evaluators while an
+     async loader prepares a verified Program, then keep validate synchronous.
+     Shared leaf functions, flag interpretation and failure precedence must
+     remain kin-owned. Conservatively expect **0.1–1 KB gzip** per useful
+     partition, not the sum of isolated functions. Stubbing rxMatch/bitsOk
+     alone saved only **106 B schema / 74 B runtime gzip** because sessions
+     still need shared regexp/bit primitives; first remove session coupling.
+     Do not lazy-load Unicode here: no runtime entry includes it already.
+  5. **Low priority: remove legacy schedule 1 / generic-selection switch.**
+     D045 was provisionally accepted and schedule 2 is the default. limits
+     word 8 bit 1 still selects schedule 1 (vmSetup flips it into VM_GENERIC
+     bit 1); bit 0 forces generic; bit 2 is transient free-bookkeeping state.
+     Hosts pass 0, so production specialization is possible, but the low-level
+     ABI and program.md document schedule 1 and bb vm-test compares both.
+     A schedule-2-only probe saves just **70 B schema / 79 B runtime gzip**;
+     eliminating the force-generic branch saves **36 B / 15 B**. Budget
+     **under 0.5 KB gzip** pending a proper emitter implementation. Keep the
+     generic oracle and legacy-schedule tests in test builds; retiring the
+     selectable schedule is a compatibility decision, not a host import fix.
+  6. **Emitter naming/tables: establish the actual opportunity first.**
+     js.cljc delegates parameter/local spelling to kin/local-name and
+     function spelling to kl/target-name; the camelCase namers are actually
+     in **kin/src/snug/targets.cljc:83–84**, not js.cljc. esbuild already
+     mangles locals and bundled internal names. Disabling identifier
+     minification increases schema gzip **46,042 -> 50,181 B** and runtime
+     **53,452 -> 58,948 B**; shorter source locals would not recover those
+     bytes again. Expected extra saving from merely shortening locals:
+     **approximately zero**. No per-function long constant tables were found;
+     layout constants are module-level primitive exports, and numeric data
+     tables use module-level Int32Array.of. Consider emitter control-flow/
+     coercion factoring and share actual duplicate numeric tables only after
+     an attributed prototype; no numerical saving is claimed for an unseen
+     table problem. The compiler's largest function, emitProgram (**5,025
+     isolated minified B**), stays entirely outside the runtime graph.
+
+  **What was learnt:** the largest removable initial dependency is the
+  synchronous session API, not Unicode, repeated module instances, long local
+  names or the legacy bit. Even the deliberately unsafe combined no-session,
+  generic, no-verifier probe leaves codec+schema at **31,061 gzip B**, above
+  R9. Meeting 20 KB needs additional kin/host implementation reductions and
+  an explicit definition of which prepared/loading operations count; lazy
+  imports alone cannot establish it. The Phase 2 plan remains outstanding.
+
+  **Gates actually run:** host/js npm test **1,284 passed, 0 failed/skipped**;
+  all seven examples executed; npm run build staged successfully (also
+  exercised by package tests). bb size exits **0** against **ceil(current
+  bytes × 1.02)** for min/gzip/brotli, static and full, every entry and both
+  runtime unions. A scratch budget with snug.static.gzip = 0 exits **1**,
+  reporting 14,174 > 0. Babashka 1.3.190's sandbox shutdown hook additionally
+  prints a process-enumeration permission warning after success; direct Node
+  avoids it. No drift/emit, Rust, wasm or browser gates were run by P7.6.
 - [x] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
   *Done 2026-11-03 by the P7.7 runtime engineer.* Harness and full record:
   `tools/runtime/` (`run.mjs`, `README.md`).

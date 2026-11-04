@@ -3,7 +3,8 @@
 ;; form of the same thing.
 {:paths ["kin/src" "../kin/src"]
  :tasks
- {gen        {:doc "Print what one source generates.   bb gen kin/hello.kin"
+ {size       {:doc "Public entry min/gzip/brotli regression budgets (offline esbuild)." :task (apply shell "node" "tools/size/size.mjs" *command-line-args*)}
+  gen        {:doc "Print what one source generates.   bb gen kin/hello.kin"
               :task (apply shell "kin/scripts/gen" *command-line-args*)}
   emit       {:doc "Write every source's modules into gen/ (all or nothing)."
               :task (shell "kin/scripts/emit")}

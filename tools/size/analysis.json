@@ -1,0 +1,8044 @@
+{
+  "functions": [
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rscanStep",
+      "source": 26258,
+      "min": 7603,
+      "gzip": 2585,
+      "brotli": 2414
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "emitProgram",
+      "source": 10740,
+      "min": 5025,
+      "gzip": 1695,
+      "brotli": 1521
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "evalMap",
+      "source": 15244,
+      "min": 4364,
+      "gzip": 1928,
+      "brotli": 1777
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "mapFinish",
+      "source": 8890,
+      "min": 3414,
+      "gzip": 1107,
+      "brotli": 1028
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "mapPair",
+      "source": 7372,
+      "min": 2946,
+      "gzip": 1245,
+      "brotli": 1136
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "tagRun",
+      "source": 6800,
+      "min": 2804,
+      "gzip": 1219,
+      "brotli": 1125
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "evalArray",
+      "source": 8119,
+      "min": 2725,
+      "gzip": 1296,
+      "brotli": 1177
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkMap",
+      "source": 7362,
+      "min": 2359,
+      "gzip": 892,
+      "brotli": 809
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlBits",
+      "source": 5284,
+      "min": 2125,
+      "gzip": 877,
+      "brotli": 816
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "itemBegin",
+      "source": 5865,
+      "min": 2067,
+      "gzip": 899,
+      "brotli": 842
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkLeaf",
+      "source": 4212,
+      "min": 2045,
+      "gzip": 714,
+      "brotli": 655
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "assignSections",
+      "source": 4451,
+      "min": 2012,
+      "gzip": 747,
+      "brotli": 693
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "fastChild",
+      "source": 5733,
+      "min": 1988,
+      "gzip": 922,
+      "brotli": 853
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "evalTag",
+      "source": 5005,
+      "min": 1934,
+      "gzip": 956,
+      "brotli": 895
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkHeader",
+      "source": 3936,
+      "min": 1930,
+      "gzip": 642,
+      "brotli": 538
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "meet",
+      "source": 3929,
+      "min": 1914,
+      "gzip": 679,
+      "brotli": 628
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lexNumber",
+      "source": 4920,
+      "min": 1901,
+      "gzip": 745,
+      "brotli": 714
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "mapPairFast",
+      "source": 4895,
+      "min": 1870,
+      "gzip": 827,
+      "brotli": 751
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlCompare",
+      "source": 4902,
+      "min": 1796,
+      "gzip": 777,
+      "brotli": 716
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlEq",
+      "source": 4152,
+      "min": 1748,
+      "gzip": 695,
+      "brotli": 649
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "mapStreak",
+      "source": 6353,
+      "min": 1711,
+      "gzip": 995,
+      "brotli": 921
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapUpdate",
+      "source": 5782,
+      "min": 1628,
+      "gzip": 856,
+      "brotli": 795
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "arrRun",
+      "source": 3957,
+      "min": 1595,
+      "gzip": 785,
+      "brotli": 716
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "checkBus",
+      "source": 3945,
+      "min": 1581,
+      "gzip": 647,
+      "brotli": 600
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "evalItem",
+      "source": 3662,
+      "min": 1469,
+      "gzip": 654,
+      "brotli": 593
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "writeMap",
+      "source": 3074,
+      "min": 1448,
+      "gzip": 530,
+      "brotli": 509
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "embedRun",
+      "source": 3748,
+      "min": 1394,
+      "gzip": 676,
+      "brotli": 646
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerTag",
+      "source": 3020,
+      "min": 1373,
+      "gzip": 584,
+      "brotli": 537
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "openTag",
+      "source": 3399,
+      "min": 1350,
+      "gzip": 748,
+      "brotli": 717
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmRun",
+      "source": 2709,
+      "min": 1341,
+      "gzip": 634,
+      "brotli": 596
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "shapeSig",
+      "source": 2822,
+      "min": 1304,
+      "gzip": 429,
+      "brotli": 397
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxStore",
+      "source": 2819,
+      "min": 1280,
+      "gzip": 516,
+      "brotli": 487
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "ruleChain",
+      "source": 3005,
+      "min": 1279,
+      "gzip": 610,
+      "brotli": 581
+    },
+    {
+      "path": "gen/js/snug/compile/arrays.mjs",
+      "name": "arrFinish",
+      "source": 2596,
+      "min": 1269,
+      "gzip": 471,
+      "brotli": 434
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsMake",
+      "source": 2801,
+      "min": 1248,
+      "gzip": 504,
+      "brotli": 473
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "errorName",
+      "source": 2285,
+      "min": 1246,
+      "gzip": 462,
+      "brotli": 343
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "canonicalise",
+      "source": 2418,
+      "min": 1173,
+      "gzip": 441,
+      "brotli": 393
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmSetup",
+      "source": 2673,
+      "min": 1169,
+      "gzip": 611,
+      "brotli": 559
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lexOne",
+      "source": 2419,
+      "min": 1141,
+      "gzip": 501,
+      "brotli": 470
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "arrStart",
+      "source": 2530,
+      "min": 1103,
+      "gzip": 666,
+      "brotli": 627
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "mapRet",
+      "source": 3118,
+      "min": 1100,
+      "gzip": 645,
+      "brotli": 606
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "openBstr",
+      "source": 3171,
+      "min": 1100,
+      "gzip": 662,
+      "brotli": 636
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "leafMask",
+      "source": 2625,
+      "min": 1090,
+      "gzip": 503,
+      "brotli": 473
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseGrpent",
+      "source": 2434,
+      "min": 1074,
+      "gzip": 500,
+      "brotli": 465
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "bstrEmbed",
+      "source": 2248,
+      "min": 1070,
+      "gzip": 507,
+      "brotli": 460
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "buildKeyPreimage",
+      "source": 1997,
+      "min": 1068,
+      "gzip": 369,
+      "brotli": 332
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "mMember",
+      "source": 2830,
+      "min": 1065,
+      "gzip": 529,
+      "brotli": 491
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "children",
+      "source": 2566,
+      "min": 1064,
+      "gzip": 446,
+      "brotli": 425
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerCtl",
+      "source": 2894,
+      "min": 1064,
+      "gzip": 513,
+      "brotli": 463
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkTypesets",
+      "source": 3234,
+      "min": 1049,
+      "gzip": 495,
+      "brotli": 457
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "embedStart",
+      "source": 2301,
+      "min": 1041,
+      "gzip": 573,
+      "brotli": 563
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "buildPool",
+      "source": 2133,
+      "min": 1035,
+      "gzip": 449,
+      "brotli": 423
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "setupLimits",
+      "source": 1934,
+      "min": 1026,
+      "gzip": 408,
+      "brotli": 385
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "notePut",
+      "source": 3728,
+      "min": 1021,
+      "gzip": 567,
+      "brotli": 545
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asUnions",
+      "source": 2899,
+      "min": 1019,
+      "gzip": 513,
+      "brotli": 475
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "finishComb",
+      "source": 3203,
+      "min": 1016,
+      "gzip": 534,
+      "brotli": 489
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "prescanRun",
+      "source": 3683,
+      "min": 1016,
+      "gzip": 504,
+      "brotli": 469
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxMatch",
+      "source": 2591,
+      "min": 1009,
+      "gzip": 497,
+      "brotli": 468
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "writeLeaf",
+      "source": 1980,
+      "min": 994,
+      "gzip": 384,
+      "brotli": 362
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "openText",
+      "source": 2754,
+      "min": 977,
+      "gzip": 600,
+      "brotli": 572
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlSize",
+      "source": 2663,
+      "min": 975,
+      "gzip": 526,
+      "brotli": 485
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "finalTs",
+      "source": 2217,
+      "min": 950,
+      "gzip": 459,
+      "brotli": 425
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lexBytes",
+      "source": 2594,
+      "min": 935,
+      "gzip": 416,
+      "brotli": 385
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "recordLen",
+      "source": 3375,
+      "min": 905,
+      "gzip": 370,
+      "brotli": 342
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseRule",
+      "source": 2265,
+      "min": 902,
+      "gzip": 434,
+      "brotli": 404
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "embedRet",
+      "source": 1990,
+      "min": 898,
+      "gzip": 520,
+      "brotli": 489
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "evalEmbed",
+      "source": 2058,
+      "min": 889,
+      "gzip": 422,
+      "brotli": 390
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asProductMany",
+      "source": 2419,
+      "min": 880,
+      "gzip": 446,
+      "brotli": 423
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lexEscape",
+      "source": 2098,
+      "min": 877,
+      "gzip": 405,
+      "brotli": 379
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "prescan",
+      "source": 3187,
+      "min": 877,
+      "gzip": 471,
+      "brotli": 454
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "litMember",
+      "source": 1961,
+      "min": 871,
+      "gzip": 424,
+      "brotli": 388
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "vmVerify",
+      "source": 2158,
+      "min": 869,
+      "gzip": 429,
+      "brotli": 355
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parseProperty",
+      "source": 1909,
+      "min": 868,
+      "gzip": 392,
+      "brotli": 367
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "mapEnd",
+      "source": 1957,
+      "min": 866,
+      "gzip": 508,
+      "brotli": 468
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "mapStart",
+      "source": 1832,
+      "min": 863,
+      "gzip": 520,
+      "brotli": 485
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "arrayStreak",
+      "source": 3987,
+      "min": 862,
+      "gzip": 559,
+      "brotli": 518
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "leavesOverlap",
+      "source": 1715,
+      "min": 861,
+      "gzip": 350,
+      "brotli": 316
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "codeName",
+      "source": 1473,
+      "min": 858,
+      "gzip": 393,
+      "brotli": 329
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "mapNext",
+      "source": 2271,
+      "min": 858,
+      "gzip": 517,
+      "brotli": 493
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "stagedEqual",
+      "source": 1539,
+      "min": 839,
+      "gzip": 319,
+      "brotli": 285
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "arrEnd",
+      "source": 1757,
+      "min": 836,
+      "gzip": 505,
+      "brotli": 468
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "factorCollides",
+      "source": 1794,
+      "min": 833,
+      "gzip": 327,
+      "brotli": 301
+    },
+    {
+      "path": "gen/js/snug/nav/trace.mjs",
+      "name": "navTrace",
+      "source": 2290,
+      "min": 829,
+      "gzip": 409,
+      "brotli": 378
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseHash",
+      "source": 2174,
+      "min": 819,
+      "gzip": 439,
+      "brotli": 407
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "classCommit",
+      "source": 2081,
+      "min": 814,
+      "gzip": 369,
+      "brotli": 337
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "plan",
+      "source": 1622,
+      "min": 811,
+      "gzip": 440,
+      "brotli": 422
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "arrRet",
+      "source": 2130,
+      "min": 807,
+      "gzip": 498,
+      "brotli": 462
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "walkRep",
+      "source": 2331,
+      "min": 803,
+      "gzip": 391,
+      "brotli": 369
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "categoryValid",
+      "source": 1769,
+      "min": 802,
+      "gzip": 206,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rebuild",
+      "source": 2385,
+      "min": 801,
+      "gzip": 397,
+      "brotli": 375
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "rxCp",
+      "source": 2593,
+      "min": 801,
+      "gzip": 475,
+      "brotli": 447
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapMissing",
+      "source": 2907,
+      "min": 800,
+      "gzip": 457,
+      "brotli": 424
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "floatToInt",
+      "source": 2958,
+      "min": 797,
+      "gzip": 404,
+      "brotli": 381
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkArrays",
+      "source": 2260,
+      "min": 785,
+      "gzip": 408,
+      "brotli": 375
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "textRun",
+      "source": 2003,
+      "min": 784,
+      "gzip": 500,
+      "brotli": 449
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerRange",
+      "source": 1677,
+      "min": 781,
+      "gzip": 346,
+      "brotli": 329
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseType2",
+      "source": 1717,
+      "min": 775,
+      "gzip": 357,
+      "brotli": 328
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerType",
+      "source": 1725,
+      "min": 773,
+      "gzip": 406,
+      "brotli": 395
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "groupIntern",
+      "source": 1744,
+      "min": 768,
+      "gzip": 373,
+      "brotli": 353
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "docStart",
+      "source": 1506,
+      "min": 758,
+      "gzip": 431,
+      "brotli": 398
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "updateStruct",
+      "source": 2206,
+      "min": 756,
+      "gzip": 441,
+      "brotli": 412
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkChains",
+      "source": 1745,
+      "min": 753,
+      "gzip": 362,
+      "brotli": 334
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlRegexp",
+      "source": 1531,
+      "min": 744,
+      "gzip": 435,
+      "brotli": 399
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "groupClass",
+      "source": 1626,
+      "min": 741,
+      "gzip": 386,
+      "brotli": 357
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asOccur",
+      "source": 1548,
+      "min": 737,
+      "gzip": 386,
+      "brotli": 363
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "noteHead",
+      "source": 2662,
+      "min": 734,
+      "gzip": 423,
+      "brotli": 394
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "evalList",
+      "source": 2004,
+      "min": 725,
+      "gzip": 349,
+      "brotli": 326
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "darrRun",
+      "source": 1667,
+      "min": 717,
+      "gzip": 406,
+      "brotli": 370
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "compileSchema",
+      "source": 1611,
+      "min": 716,
+      "gzip": 376,
+      "brotli": 337
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapKeyPhase",
+      "source": 2300,
+      "min": 716,
+      "gzip": 408,
+      "brotli": 378
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "roundBinary64",
+      "source": 2329,
+      "min": 715,
+      "gzip": 401,
+      "brotli": 391
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "rootEnd",
+      "source": 1373,
+      "min": 715,
+      "gzip": 380,
+      "brotli": 349
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parseAtom",
+      "source": 1489,
+      "min": 699,
+      "gzip": 318,
+      "brotli": 276
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "isSucc",
+      "source": 1766,
+      "min": 699,
+      "gzip": 321,
+      "brotli": 276
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "rxAdvance",
+      "source": 2437,
+      "min": 691,
+      "gzip": 477,
+      "brotli": 448
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsStepX",
+      "source": 1885,
+      "min": 683,
+      "gzip": 408,
+      "brotli": 364
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "arrayCandidates",
+      "source": 2402,
+      "min": 682,
+      "gzip": 394,
+      "brotli": 365
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "bstrRun",
+      "source": 1393,
+      "min": 672,
+      "gzip": 427,
+      "brotli": 398
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lexPunct",
+      "source": 1167,
+      "min": 671,
+      "gzip": 238,
+      "brotli": 206
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "walk",
+      "source": 1558,
+      "min": 667,
+      "gzip": 349,
+      "brotli": 305
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivNormalize",
+      "source": 2039,
+      "min": 666,
+      "gzip": 365,
+      "brotli": 345
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "ctlCode",
+      "source": 1931,
+      "min": 663,
+      "gzip": 312,
+      "brotli": 288
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "envIntern",
+      "source": 1550,
+      "min": 654,
+      "gzip": 353,
+      "brotli": 326
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadTag",
+      "source": 1298,
+      "min": 653,
+      "gzip": 336,
+      "brotli": 297
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "aEnt",
+      "source": 1607,
+      "min": 652,
+      "gzip": 384,
+      "brotli": 359
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "setup",
+      "source": 1297,
+      "min": 640,
+      "gzip": 380,
+      "brotli": 355
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxCompile",
+      "source": 1508,
+      "min": 635,
+      "gzip": 362,
+      "brotli": 328
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerMajor",
+      "source": 1208,
+      "min": 630,
+      "gzip": 312,
+      "brotli": 272
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "enumEnt",
+      "source": 1426,
+      "min": 629,
+      "gzip": 345,
+      "brotli": 342
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "leafMaskOf",
+      "source": 1653,
+      "min": 629,
+      "gzip": 337,
+      "brotli": 317
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkRegexps",
+      "source": 1482,
+      "min": 627,
+      "gzip": 319,
+      "brotli": 316
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "childSig",
+      "source": 1365,
+      "min": 624,
+      "gzip": 317,
+      "brotli": 297
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkCsets",
+      "source": 1329,
+      "min": 611,
+      "gzip": 328,
+      "brotli": 297
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "childTs",
+      "source": 1803,
+      "min": 608,
+      "gzip": 332,
+      "brotli": 322
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanTyped",
+      "source": 1588,
+      "min": 602,
+      "gzip": 294,
+      "brotli": 254
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "checkAlt",
+      "source": 1645,
+      "min": 601,
+      "gzip": 316,
+      "brotli": 282
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parseBracket",
+      "source": 1508,
+      "min": 597,
+      "gzip": 325,
+      "brotli": 289
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "selftest",
+      "source": 1270,
+      "min": 597,
+      "gzip": 321,
+      "brotli": 286
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "dateTimeOk",
+      "source": 1977,
+      "min": 596,
+      "gzip": 349,
+      "brotli": 329
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "expandOptional",
+      "source": 1506,
+      "min": 594,
+      "gzip": 355,
+      "brotli": 332
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "intern",
+      "source": 1359,
+      "min": 592,
+      "gzip": 348,
+      "brotli": 327
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "item",
+      "source": 1293,
+      "min": 589,
+      "gzip": 333,
+      "brotli": 304
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "csetIntern",
+      "source": 1334,
+      "min": 588,
+      "gzip": 313,
+      "brotli": 304
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "groupRef",
+      "source": 1408,
+      "min": 585,
+      "gzip": 340,
+      "brotli": 302
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerRule",
+      "source": 1361,
+      "min": 582,
+      "gzip": 351,
+      "brotli": 326
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerName",
+      "source": 1295,
+      "min": 582,
+      "gzip": 335,
+      "brotli": 296
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivIntersect",
+      "source": 1663,
+      "min": 579,
+      "gzip": 332,
+      "brotli": 308
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "chainIntern",
+      "source": 1233,
+      "min": 573,
+      "gzip": 305,
+      "brotli": 280
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "floatKey",
+      "source": 1888,
+      "min": 573,
+      "gzip": 349,
+      "brotli": 340
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkKeys",
+      "source": 1293,
+      "min": 571,
+      "gzip": 326,
+      "brotli": 310
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseOccur",
+      "source": 1234,
+      "min": 570,
+      "gzip": 257,
+      "brotli": 230
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "buildRules",
+      "source": 1581,
+      "min": 567,
+      "gzip": 318,
+      "brotli": 289
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "planMaps",
+      "source": 1692,
+      "min": 566,
+      "gzip": 339,
+      "brotli": 324
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanMap",
+      "source": 1538,
+      "min": 565,
+      "gzip": 330,
+      "brotli": 298
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "orderRules",
+      "source": 1222,
+      "min": 565,
+      "gzip": 288,
+      "brotli": 265
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "addDef",
+      "source": 1423,
+      "min": 565,
+      "gzip": 317,
+      "brotli": 286
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkRuleClosure",
+      "source": 1302,
+      "min": 564,
+      "gzip": 370,
+      "brotli": 347
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerValue",
+      "source": 939,
+      "min": 559,
+      "gzip": 313,
+      "brotli": 288
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "stagedHash",
+      "source": 923,
+      "min": 553,
+      "gzip": 259,
+      "brotli": 221
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "htPut",
+      "source": 1359,
+      "min": 552,
+      "gzip": 295,
+      "brotli": 274
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "fivNormalize",
+      "source": 1613,
+      "min": 552,
+      "gzip": 305,
+      "brotli": 289
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lexQuoted",
+      "source": 1416,
+      "min": 552,
+      "gzip": 328,
+      "brotli": 299
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadItem",
+      "source": 1361,
+      "min": 552,
+      "gzip": 340,
+      "brotli": 303
+    },
+    {
+      "path": "gen/js/snug/cbor/keys.mjs",
+      "name": "keyEndAny",
+      "source": 2159,
+      "min": 550,
+      "gzip": 299,
+      "brotli": 276
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "preScalar",
+      "source": 2132,
+      "min": 542,
+      "gzip": 355,
+      "brotli": 327
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "boundSucc",
+      "source": 1157,
+      "min": 536,
+      "gzip": 263,
+      "brotli": 237
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "boundPred",
+      "source": 1154,
+      "min": 536,
+      "gzip": 266,
+      "brotli": 241
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "fivIntersect",
+      "source": 1264,
+      "min": 536,
+      "gzip": 297,
+      "brotli": 275
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlPlus",
+      "source": 1072,
+      "min": 525,
+      "gzip": 302,
+      "brotli": 284
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "headPush",
+      "source": 1105,
+      "min": 524,
+      "gzip": 172,
+      "brotli": 155
+    },
+    {
+      "path": "gen/js/snug/cbor/text.mjs",
+      "name": "utf8Seq",
+      "source": 2039,
+      "min": 514,
+      "gzip": 273,
+      "brotli": 247
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "enumNode",
+      "source": 993,
+      "min": 514,
+      "gzip": 312,
+      "brotli": 290
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsInit",
+      "source": 1456,
+      "min": 511,
+      "gzip": 344,
+      "brotli": 299
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "sigIntern",
+      "source": 1322,
+      "min": 508,
+      "gzip": 301,
+      "brotli": 281
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkGroups",
+      "source": 1235,
+      "min": 505,
+      "gzip": 342,
+      "brotli": 312
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "msortRecords",
+      "source": 1800,
+      "min": 500,
+      "gzip": 316,
+      "brotli": 301
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "arrayBounded",
+      "source": 1485,
+      "min": 498,
+      "gzip": 285,
+      "brotli": 270
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "walkFrame",
+      "source": 1240,
+      "min": 496,
+      "gzip": 301,
+      "brotli": 297
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "textScan",
+      "source": 1352,
+      "min": 493,
+      "gzip": 334,
+      "brotli": 309
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "mEnt",
+      "source": 1113,
+      "min": 492,
+      "gzip": 328,
+      "brotli": 299
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "arrayAdvance",
+      "source": 1809,
+      "min": 491,
+      "gzip": 337,
+      "brotli": 317
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "floatMerge2",
+      "source": 914,
+      "min": 490,
+      "gzip": 251,
+      "brotli": 223
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "processWork",
+      "source": 1213,
+      "min": 486,
+      "gzip": 287,
+      "brotli": 251
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "ifLimit",
+      "source": 936,
+      "min": 485,
+      "gzip": 212,
+      "brotli": 171
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlCat",
+      "source": 780,
+      "min": 483,
+      "gzip": 276,
+      "brotli": 246
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "cpAt",
+      "source": 1300,
+      "min": 480,
+      "gzip": 246,
+      "brotli": 213
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asProduct",
+      "source": 1219,
+      "min": 479,
+      "gzip": 301,
+      "brotli": 275
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "mUnwrap",
+      "source": 1024,
+      "min": 475,
+      "gzip": 274,
+      "brotli": 238
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "evalLeaf",
+      "source": 997,
+      "min": 475,
+      "gzip": 229,
+      "brotli": 206
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkLeaves",
+      "source": 1236,
+      "min": 474,
+      "gzip": 255,
+      "brotli": 227
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "decodePattern",
+      "source": 877,
+      "min": 472,
+      "gzip": 241,
+      "brotli": 216
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navSkipN",
+      "source": 1744,
+      "min": 470,
+      "gzip": 292,
+      "brotli": 268
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "ruleKind",
+      "source": 1337,
+      "min": 468,
+      "gzip": 284,
+      "brotli": 259
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerUnwrap",
+      "source": 990,
+      "min": 462,
+      "gzip": 308,
+      "brotli": 300
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "mapKeysInto",
+      "source": 1052,
+      "min": 457,
+      "gzip": 281,
+      "brotli": 272
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivSort",
+      "source": 1573,
+      "min": 455,
+      "gzip": 304,
+      "brotli": 284
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "fivSort",
+      "source": 1543,
+      "min": 455,
+      "gzip": 302,
+      "brotli": 288
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseGroup",
+      "source": 1318,
+      "min": 455,
+      "gzip": 290,
+      "brotli": 262
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafFloat",
+      "source": 1367,
+      "min": 454,
+      "gzip": 280,
+      "brotli": 252
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "closeMap",
+      "source": 1393,
+      "min": 451,
+      "gzip": 282,
+      "brotli": 260
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "bstrContent",
+      "source": 1074,
+      "min": 449,
+      "gzip": 266,
+      "brotli": 232
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "bstrTail",
+      "source": 1031,
+      "min": 447,
+      "gzip": 302,
+      "brotli": 285
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "processMap",
+      "source": 987,
+      "min": 445,
+      "gzip": 293,
+      "brotli": 266
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "deliver",
+      "source": 1229,
+      "min": 442,
+      "gzip": 276,
+      "brotli": 257
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "readArg",
+      "source": 1422,
+      "min": 441,
+      "gzip": 294,
+      "brotli": 267
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadMapPairs",
+      "source": 1105,
+      "min": 441,
+      "gzip": 282,
+      "brotli": 267
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "arrayStep",
+      "source": 1465,
+      "min": 441,
+      "gzip": 318,
+      "brotli": 269
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parsePiece",
+      "source": 969,
+      "min": 432,
+      "gzip": 246,
+      "brotli": 217
+    },
+    {
+      "path": "gen/js/snug/write/int.mjs",
+      "name": "putInt",
+      "source": 1314,
+      "min": 431,
+      "gzip": 323,
+      "brotli": 316
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "ruleAdd",
+      "source": 871,
+      "min": 429,
+      "gzip": 253,
+      "brotli": 237
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkRules",
+      "source": 947,
+      "min": 428,
+      "gzip": 283,
+      "brotli": 245
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "unicodeInit",
+      "source": 927,
+      "min": 427,
+      "gzip": 297,
+      "brotli": 262
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mergeInts",
+      "source": 990,
+      "min": 423,
+      "gzip": 267,
+      "brotli": 265
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "sortBids",
+      "source": 1246,
+      "min": 422,
+      "gzip": 271,
+      "brotli": 255
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "keyTriples",
+      "source": 978,
+      "min": 419,
+      "gzip": 246,
+      "brotli": 223
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mergeFloats",
+      "source": 1034,
+      "min": 416,
+      "gzip": 250,
+      "brotli": 232
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkFlags",
+      "source": 902,
+      "min": 416,
+      "gzip": 288,
+      "brotli": 259
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "bigReq",
+      "source": 1425,
+      "min": 412,
+      "gzip": 274,
+      "brotli": 266
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "frameRun",
+      "source": 921,
+      "min": 411,
+      "gzip": 228,
+      "brotli": 204
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlDet",
+      "source": 725,
+      "min": 410,
+      "gzip": 263,
+      "brotli": 229
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "keyPhaseStruct",
+      "source": 1165,
+      "min": 408,
+      "gzip": 293,
+      "brotli": 280
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qAdd",
+      "source": 1351,
+      "min": 405,
+      "gzip": 308,
+      "brotli": 288
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "mergePass",
+      "source": 1530,
+      "min": 405,
+      "gzip": 273,
+      "brotli": 241
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadIntStreak",
+      "source": 1547,
+      "min": 403,
+      "gzip": 288,
+      "brotli": 260
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkIvRecords",
+      "source": 807,
+      "min": 400,
+      "gzip": 248,
+      "brotli": 218
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "checkFactorCuts",
+      "source": 981,
+      "min": 397,
+      "gzip": 248,
+      "brotli": 218
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "aUnwrap",
+      "source": 777,
+      "min": 396,
+      "gzip": 279,
+      "brotli": 248
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "extEval",
+      "source": 1390,
+      "min": 395,
+      "gzip": 307,
+      "brotli": 275
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "emitLits",
+      "source": 836,
+      "min": 394,
+      "gzip": 224,
+      "brotli": 207
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "sortKeys",
+      "source": 1331,
+      "min": 392,
+      "gzip": 246,
+      "brotli": 218
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "childLeaves",
+      "source": 879,
+      "min": 391,
+      "gzip": 242,
+      "brotli": 219
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "typedBadAt",
+      "source": 1267,
+      "min": 386,
+      "gzip": 213,
+      "brotli": 189
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "openDmap",
+      "source": 692,
+      "min": 386,
+      "gzip": 276,
+      "brotli": 250
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "uriOk",
+      "source": 1780,
+      "min": 385,
+      "gzip": 262,
+      "brotli": 246
+    },
+    {
+      "path": "gen/js/snug/cbor/text.mjs",
+      "name": "utf8SeqNc",
+      "source": 1650,
+      "min": 384,
+      "gzip": 213,
+      "brotli": 189
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanTag",
+      "source": 783,
+      "min": 382,
+      "gzip": 240,
+      "brotli": 209
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "seq2",
+      "source": 712,
+      "min": 382,
+      "gzip": 207,
+      "brotli": 195
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "node",
+      "source": 702,
+      "min": 380,
+      "gzip": 223,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "tagRet",
+      "source": 838,
+      "min": 379,
+      "gzip": 253,
+      "brotli": 232
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "typedScan",
+      "source": 964,
+      "min": 379,
+      "gzip": 280,
+      "brotli": 260
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "stageIntern",
+      "source": 774,
+      "min": 378,
+      "gzip": 261,
+      "brotli": 236
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "dedentInto",
+      "source": 1262,
+      "min": 376,
+      "gzip": 246,
+      "brotli": 230
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gCount",
+      "source": 746,
+      "min": 376,
+      "gzip": 235,
+      "brotli": 209
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "numberFrom",
+      "source": 917,
+      "min": 371,
+      "gzip": 233,
+      "brotli": 204
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navFind",
+      "source": 1003,
+      "min": 370,
+      "gzip": 233,
+      "brotli": 201
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "sameGroup",
+      "source": 891,
+      "min": 362,
+      "gzip": 220,
+      "brotli": 197
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "keyOrderS",
+      "source": 1136,
+      "min": 362,
+      "gzip": 284,
+      "brotli": 261
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "utf8Ok",
+      "source": 1278,
+      "min": 361,
+      "gzip": 244,
+      "brotli": 233
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "aGrouprule",
+      "source": 842,
+      "min": 360,
+      "gzip": 263,
+      "brotli": 242
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmWitnessOutput",
+      "source": 811,
+      "min": 359,
+      "gzip": 261,
+      "brotli": 222
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magAdd",
+      "source": 779,
+      "min": 358,
+      "gzip": 244,
+      "brotli": 230
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navHead",
+      "source": 1050,
+      "min": 355,
+      "gzip": 243,
+      "brotli": 215
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "floatWidth",
+      "source": 1451,
+      "min": 354,
+      "gzip": 232,
+      "brotli": 209
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magAdd1",
+      "source": 758,
+      "min": 353,
+      "gzip": 229,
+      "brotli": 214
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "openDarr",
+      "source": 627,
+      "min": 352,
+      "gzip": 259,
+      "brotli": 233
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanFloat",
+      "source": 926,
+      "min": 351,
+      "gzip": 215,
+      "brotli": 183
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "stdWant",
+      "source": 1205,
+      "min": 349,
+      "gzip": 265,
+      "brotli": 238
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapBlockInit",
+      "source": 932,
+      "min": 349,
+      "gzip": 249,
+      "brotli": 223
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "filterLits",
+      "source": 1044,
+      "min": 347,
+      "gzip": 251,
+      "brotli": 225
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vreserve",
+      "source": 834,
+      "min": 342,
+      "gzip": 257,
+      "brotli": 244
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "putUtf8",
+      "source": 646,
+      "min": 341,
+      "gzip": 158,
+      "brotli": 135
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "hasChildren",
+      "source": 802,
+      "min": 341,
+      "gzip": 224,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "pairVerdict",
+      "source": 963,
+      "min": 341,
+      "gzip": 239,
+      "brotli": 212
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "evalScalars",
+      "source": 1169,
+      "min": 339,
+      "gzip": 267,
+      "brotli": 241
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "sortRecords",
+      "source": 894,
+      "min": 338,
+      "gzip": 228,
+      "brotli": 204
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "intPoint",
+      "source": 618,
+      "min": 336,
+      "gzip": 200,
+      "brotli": 183
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "putFloat",
+      "source": 849,
+      "min": 332,
+      "gzip": 232,
+      "brotli": 219
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkFloatFrom",
+      "source": 739,
+      "min": 330,
+      "gzip": 211,
+      "brotli": 193
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "mapKey",
+      "source": 743,
+      "min": 330,
+      "gzip": 245,
+      "brotli": 224
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "factorDisjoint",
+      "source": 807,
+      "min": 329,
+      "gzip": 204,
+      "brotli": 174
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magFrom64",
+      "source": 559,
+      "min": 328,
+      "gzip": 151,
+      "brotli": 122
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "putFloatRfc",
+      "source": 774,
+      "min": 327,
+      "gzip": 229,
+      "brotli": 217
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "bytesContent",
+      "source": 841,
+      "min": 325,
+      "gzip": 236,
+      "brotli": 210
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "rfcF64",
+      "source": 864,
+      "min": 324,
+      "gzip": 218,
+      "brotli": 195
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "keyLit",
+      "source": 695,
+      "min": 324,
+      "gzip": 230,
+      "brotli": 209
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "factorAbsorbable",
+      "source": 815,
+      "min": 323,
+      "gzip": 209,
+      "brotli": 192
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "putHead",
+      "source": 996,
+      "min": 322,
+      "gzip": 230,
+      "brotli": 199
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magSub",
+      "source": 730,
+      "min": 318,
+      "gzip": 229,
+      "brotli": 212
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "enterContainer",
+      "source": 811,
+      "min": 317,
+      "gzip": 198,
+      "brotli": 161
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "fivRunOk",
+      "source": 805,
+      "min": 317,
+      "gzip": 240,
+      "brotli": 220
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "instanceEnv",
+      "source": 787,
+      "min": 314,
+      "gzip": 243,
+      "brotli": 209
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parseAlt",
+      "source": 563,
+      "min": 313,
+      "gzip": 230,
+      "brotli": 209
+    },
+    {
+      "path": "gen/js/snug/cbor/tags.mjs",
+      "name": "shapeOk",
+      "source": 1016,
+      "min": 312,
+      "gzip": 232,
+      "brotli": 203
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "keySpanEnd",
+      "source": 1196,
+      "min": 312,
+      "gzip": 222,
+      "brotli": 203
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadStdCheck",
+      "source": 1098,
+      "min": 311,
+      "gzip": 241,
+      "brotli": 212
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "litsNeed",
+      "source": 1244,
+      "min": 311,
+      "gzip": 247,
+      "brotli": 231
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "checkF64",
+      "source": 996,
+      "min": 309,
+      "gzip": 222,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanPair",
+      "source": 905,
+      "min": 309,
+      "gzip": 213,
+      "brotli": 190
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerMap",
+      "source": 649,
+      "min": 309,
+      "gzip": 217,
+      "brotli": 201
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "ruleScratch",
+      "source": 859,
+      "min": 308,
+      "gzip": 236,
+      "brotli": 219
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "keysSave",
+      "source": 879,
+      "min": 308,
+      "gzip": 226,
+      "brotli": 206
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "mGrouprule",
+      "source": 633,
+      "min": 305,
+      "gzip": 235,
+      "brotli": 215
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gBuild",
+      "source": 758,
+      "min": 304,
+      "gzip": 219,
+      "brotli": 181
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "sift",
+      "source": 967,
+      "min": 303,
+      "gzip": 187,
+      "brotli": 170
+    },
+    {
+      "path": "gen/js/snug/cbor/tags.mjs",
+      "name": "mantissaOk",
+      "source": 987,
+      "min": 302,
+      "gzip": 225,
+      "brotli": 205
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navDir",
+      "source": 835,
+      "min": 302,
+      "gzip": 235,
+      "brotli": 210
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "bcmp",
+      "source": 679,
+      "min": 301,
+      "gzip": 155,
+      "brotli": 136
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "magSucc",
+      "source": 769,
+      "min": 301,
+      "gzip": 189,
+      "brotli": 180
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "factorSat",
+      "source": 951,
+      "min": 301,
+      "gzip": 228,
+      "brotli": 211
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "writeArray",
+      "source": 645,
+      "min": 300,
+      "gzip": 216,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "memoFind",
+      "source": 636,
+      "min": 300,
+      "gzip": 203,
+      "brotli": 188
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rscanInit",
+      "source": 803,
+      "min": 299,
+      "gzip": 197,
+      "brotli": 189
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "aGroup",
+      "source": 732,
+      "min": 299,
+      "gzip": 203,
+      "brotli": 179
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlCbor",
+      "source": 688,
+      "min": 296,
+      "gzip": 224,
+      "brotli": 204
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadTyped",
+      "source": 670,
+      "min": 295,
+      "gzip": 225,
+      "brotli": 194
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "bitsScan",
+      "source": 758,
+      "min": 295,
+      "gzip": 222,
+      "brotli": 193
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "checkF32",
+      "source": 942,
+      "min": 293,
+      "gzip": 209,
+      "brotli": 192
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "floatWidthRfc",
+      "source": 896,
+      "min": 293,
+      "gzip": 204,
+      "brotli": 188
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkIndex",
+      "source": 684,
+      "min": 292,
+      "gzip": 205,
+      "brotli": 185
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "floatPoint",
+      "source": 591,
+      "min": 290,
+      "gzip": 196,
+      "brotli": 185
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "rfcF32",
+      "source": 774,
+      "min": 289,
+      "gzip": 202,
+      "brotli": 183
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "prologue",
+      "source": 707,
+      "min": 289,
+      "gzip": 236,
+      "brotli": 215
+    },
+    {
+      "path": "gen/js/snug/cbor/text.mjs",
+      "name": "utf8Window",
+      "source": 1434,
+      "min": 286,
+      "gzip": 209,
+      "brotli": 186
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "encArgLo",
+      "source": 545,
+      "min": 286,
+      "gzip": 150,
+      "brotli": 151
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "checkPairs",
+      "source": 800,
+      "min": 286,
+      "gzip": 209,
+      "brotli": 183
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "chainFrames",
+      "source": 849,
+      "min": 283,
+      "gzip": 215,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "keySearch",
+      "source": 994,
+      "min": 283,
+      "gzip": 231,
+      "brotli": 205
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "entNew",
+      "source": 545,
+      "min": 282,
+      "gzip": 167,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "keyProbe",
+      "source": 873,
+      "min": 282,
+      "gzip": 224,
+      "brotli": 217
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "rxMatch",
+      "source": 800,
+      "min": 280,
+      "gzip": 232,
+      "brotli": 214
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadPairBody",
+      "source": 740,
+      "min": 279,
+      "gzip": 198,
+      "brotli": 167
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafLitset",
+      "source": 841,
+      "min": 277,
+      "gzip": 241,
+      "brotli": 217
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "markKeys",
+      "source": 701,
+      "min": 276,
+      "gzip": 203,
+      "brotli": 181
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "inIntervals",
+      "source": 868,
+      "min": 276,
+      "gzip": 223,
+      "brotli": 199
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "stdContentOk",
+      "source": 1196,
+      "min": 274,
+      "gzip": 212,
+      "brotli": 194
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerRules",
+      "source": 733,
+      "min": 273,
+      "gzip": 207,
+      "brotli": 189
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "groupLits",
+      "source": 784,
+      "min": 272,
+      "gzip": 211,
+      "brotli": 194
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "csetFrame",
+      "source": 666,
+      "min": 272,
+      "gzip": 196,
+      "brotli": 175
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "inFintervals",
+      "source": 749,
+      "min": 272,
+      "gzip": 231,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "childrenWithin",
+      "source": 697,
+      "min": 271,
+      "gzip": 214,
+      "brotli": 187
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "arrayAccepts",
+      "source": 872,
+      "min": 271,
+      "gzip": 221,
+      "brotli": 203
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "tailNeed",
+      "source": 682,
+      "min": 270,
+      "gzip": 201,
+      "brotli": 182
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scan",
+      "source": 479,
+      "min": 269,
+      "gzip": 225,
+      "brotli": 198
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asUnion",
+      "source": 419,
+      "min": 267,
+      "gzip": 186,
+      "brotli": 187
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "finishMember",
+      "source": 584,
+      "min": 267,
+      "gzip": 216,
+      "brotli": 197
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafInt",
+      "source": 882,
+      "min": 263,
+      "gzip": 222,
+      "brotli": 197
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "finishError",
+      "source": 696,
+      "min": 260,
+      "gzip": 200,
+      "brotli": 179
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "reachLeaf",
+      "source": 566,
+      "min": 258,
+      "gzip": 196,
+      "brotli": 175
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "addEvalSet",
+      "source": 630,
+      "min": 258,
+      "gzip": 195,
+      "brotli": 176
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "conFind",
+      "source": 614,
+      "min": 258,
+      "gzip": 183,
+      "brotli": 172
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapKeyQuery",
+      "source": 765,
+      "min": 258,
+      "gzip": 210,
+      "brotli": 196
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadArray",
+      "source": 566,
+      "min": 257,
+      "gzip": 207,
+      "brotli": 184
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "headEnd",
+      "source": 999,
+      "min": 256,
+      "gzip": 178,
+      "brotli": 160
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "rule1",
+      "source": 797,
+      "min": 253,
+      "gzip": 221,
+      "brotli": 191
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navDirFind",
+      "source": 788,
+      "min": 251,
+      "gzip": 212,
+      "brotli": 187
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "sortOrder",
+      "source": 910,
+      "min": 250,
+      "gzip": 190,
+      "brotli": 176
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "floatBad",
+      "source": 864,
+      "min": 248,
+      "gzip": 197,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivMeets",
+      "source": 457,
+      "min": 245,
+      "gzip": 169,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "encIntKey",
+      "source": 813,
+      "min": 244,
+      "gzip": 181,
+      "brotli": 173
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "bstrReads",
+      "source": 738,
+      "min": 244,
+      "gzip": 216,
+      "brotli": 197
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivContains",
+      "source": 445,
+      "min": 242,
+      "gzip": 163,
+      "brotli": 152
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "ivRunOk",
+      "source": 697,
+      "min": 242,
+      "gzip": 209,
+      "brotli": 180
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseName",
+      "source": 721,
+      "min": 240,
+      "gzip": 180,
+      "brotli": 169
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "alt2",
+      "source": 347,
+      "min": 239,
+      "gzip": 159,
+      "brotli": 140
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "pointOf",
+      "source": 564,
+      "min": 239,
+      "gzip": 170,
+      "brotli": 147
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "idEnd",
+      "source": 618,
+      "min": 238,
+      "gzip": 163,
+      "brotli": 147
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "rxFinalList",
+      "source": 496,
+      "min": 236,
+      "gzip": 169,
+      "brotli": 147
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "markDead",
+      "source": 698,
+      "min": 235,
+      "gzip": 175,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "strStop",
+      "source": 966,
+      "min": 235,
+      "gzip": 187,
+      "brotli": 168
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "mapSize",
+      "source": 423,
+      "min": 234,
+      "gzip": 176,
+      "brotli": 153
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "mapFastMode",
+      "source": 723,
+      "min": 234,
+      "gzip": 180,
+      "brotli": 183
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "frameWords",
+      "source": 506,
+      "min": 233,
+      "gzip": 198,
+      "brotli": 174
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkIntFrom",
+      "source": 606,
+      "min": 231,
+      "gzip": 192,
+      "brotli": 173
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "openArr",
+      "source": 434,
+      "min": 231,
+      "gzip": 178,
+      "brotli": 159
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "bidCmp",
+      "source": 568,
+      "min": 230,
+      "gzip": 178,
+      "brotli": 168
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ctlAnd",
+      "source": 448,
+      "min": 230,
+      "gzip": 181,
+      "brotli": 181
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "pushTok",
+      "source": 438,
+      "min": 230,
+      "gzip": 157,
+      "brotli": 132
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "magMulAdd",
+      "source": 513,
+      "min": 230,
+      "gzip": 187,
+      "brotli": 164
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "classHas",
+      "source": 589,
+      "min": 229,
+      "gzip": 174,
+      "brotli": 161
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafUintx",
+      "source": 560,
+      "min": 227,
+      "gzip": 188,
+      "brotli": 161
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "openMap",
+      "source": 422,
+      "min": 227,
+      "gzip": 177,
+      "brotli": 152
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "mapPairOk",
+      "source": 544,
+      "min": 226,
+      "gzip": 177,
+      "brotli": 158
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "reachTs",
+      "source": 448,
+      "min": 222,
+      "gzip": 187,
+      "brotli": 170
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "writeBound",
+      "source": 335,
+      "min": 222,
+      "gzip": 153,
+      "brotli": 135
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "mSeq",
+      "source": 463,
+      "min": 222,
+      "gzip": 179,
+      "brotli": 160
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "fpush",
+      "source": 520,
+      "min": 222,
+      "gzip": 187,
+      "brotli": 164
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseChoiceTail",
+      "source": 504,
+      "min": 220,
+      "gzip": 187,
+      "brotli": 165
+    },
+    {
+      "path": "gen/js/snug/compile/arrays.mjs",
+      "name": "counterOk",
+      "source": 487,
+      "min": 219,
+      "gzip": 172,
+      "brotli": 143
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qFilter",
+      "source": 576,
+      "min": 219,
+      "gzip": 202,
+      "brotli": 169
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magPow256",
+      "source": 485,
+      "min": 218,
+      "gzip": 160,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerInit",
+      "source": 347,
+      "min": 218,
+      "gzip": 150,
+      "brotli": 143
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanStd",
+      "source": 665,
+      "min": 215,
+      "gzip": 172,
+      "brotli": 157
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "leafNew",
+      "source": 426,
+      "min": 215,
+      "gzip": 151,
+      "brotli": 134
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "busFail",
+      "source": 566,
+      "min": 214,
+      "gzip": 187,
+      "brotli": 164
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseArgs",
+      "source": 687,
+      "min": 213,
+      "gzip": 189,
+      "brotli": 168
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parseClassChar",
+      "source": 520,
+      "min": 213,
+      "gzip": 169,
+      "brotli": 155
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navChild",
+      "source": 636,
+      "min": 213,
+      "gzip": 179,
+      "brotli": 148
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "inlineChild",
+      "source": 683,
+      "min": 213,
+      "gzip": 176,
+      "brotli": 169
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "ivMask",
+      "source": 591,
+      "min": 210,
+      "gzip": 174,
+      "brotli": 153
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "embedKill",
+      "source": 462,
+      "min": 210,
+      "gzip": 190,
+      "brotli": 180
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "f32Bits",
+      "source": 560,
+      "min": 210,
+      "gzip": 179,
+      "brotli": 161
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "intWith",
+      "source": 373,
+      "min": 208,
+      "gzip": 158,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "keyOrder",
+      "source": 555,
+      "min": 208,
+      "gzip": 184,
+      "brotli": 152
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "edges",
+      "source": 463,
+      "min": 207,
+      "gzip": 169,
+      "brotli": 156
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseType1Tail",
+      "source": 483,
+      "min": 207,
+      "gzip": 166,
+      "brotli": 144
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "paramIndex",
+      "source": 457,
+      "min": 206,
+      "gzip": 168,
+      "brotli": 157
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "ndOk",
+      "source": 670,
+      "min": 205,
+      "gzip": 170,
+      "brotli": 153
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gNode",
+      "source": 351,
+      "min": 205,
+      "gzip": 150,
+      "brotli": 129
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "lowerArray",
+      "source": 352,
+      "min": 205,
+      "gzip": 162,
+      "brotli": 141
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "ruleFind",
+      "source": 420,
+      "min": 205,
+      "gzip": 164,
+      "brotli": 156
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "writeRegexp",
+      "source": 354,
+      "min": 204,
+      "gzip": 164,
+      "brotli": 147
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "magFlush",
+      "source": 477,
+      "min": 202,
+      "gzip": 167,
+      "brotli": 166
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "candVts",
+      "source": 416,
+      "min": 202,
+      "gzip": 166,
+      "brotli": 149
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseRules",
+      "source": 687,
+      "min": 201,
+      "gzip": 176,
+      "brotli": 169
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmRuleIndex",
+      "source": 567,
+      "min": 201,
+      "gzip": 184,
+      "brotli": 165
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "highBit",
+      "source": 513,
+      "min": 201,
+      "gzip": 129,
+      "brotli": 99
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "lex",
+      "source": 586,
+      "min": 199,
+      "gzip": 171,
+      "brotli": 168
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkIntRange",
+      "source": 407,
+      "min": 198,
+      "gzip": 169,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "sibRem",
+      "source": 619,
+      "min": 198,
+      "gzip": 168,
+      "brotli": 161
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "encString",
+      "source": 447,
+      "min": 197,
+      "gzip": 163,
+      "brotli": 150
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "bitsPass",
+      "source": 400,
+      "min": 197,
+      "gzip": 160,
+      "brotli": 151
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "poolPlace",
+      "source": 390,
+      "min": 197,
+      "gzip": 163,
+      "brotli": 146
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "countMatched",
+      "source": 483,
+      "min": 197,
+      "gzip": 169,
+      "brotli": 147
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "altCommit",
+      "source": 474,
+      "min": 196,
+      "gzip": 162,
+      "brotli": 148
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "call",
+      "source": 690,
+      "min": 196,
+      "gzip": 161,
+      "brotli": 132
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "bitsOk",
+      "source": 478,
+      "min": 195,
+      "gzip": 159,
+      "brotli": 151
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "namesParam",
+      "source": 435,
+      "min": 195,
+      "gzip": 159,
+      "brotli": 140
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadBignum",
+      "source": 589,
+      "min": 195,
+      "gzip": 179,
+      "brotli": 169
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsOverlap",
+      "source": 343,
+      "min": 194,
+      "gzip": 152,
+      "brotli": 139
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "lowBit",
+      "source": 541,
+      "min": 194,
+      "gzip": 136,
+      "brotli": 129
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "literalOnlyChoice",
+      "source": 441,
+      "min": 192,
+      "gzip": 158,
+      "brotli": 144
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "stdNeed",
+      "source": 822,
+      "min": 192,
+      "gzip": 161,
+      "brotli": 136
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmScratchWordsSlow",
+      "source": 418,
+      "min": 191,
+      "gzip": 180,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qStamp",
+      "source": 571,
+      "min": 191,
+      "gzip": 182,
+      "brotli": 165
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "entCopyOcc",
+      "source": 382,
+      "min": 190,
+      "gzip": 155,
+      "brotli": 149
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanBignum",
+      "source": 524,
+      "min": 188,
+      "gzip": 175,
+      "brotli": 152
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "leafInit",
+      "source": 278,
+      "min": 188,
+      "gzip": 121,
+      "brotli": 101
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "smallUint",
+      "source": 484,
+      "min": 188,
+      "gzip": 174,
+      "brotli": 163
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "parseBranch",
+      "source": 371,
+      "min": 188,
+      "gzip": 162,
+      "brotli": 136
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "csetRegex",
+      "source": 337,
+      "min": 188,
+      "gzip": 163,
+      "brotli": 148
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanDecimal",
+      "source": 533,
+      "min": 187,
+      "gzip": 164,
+      "brotli": 151
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "mGroup",
+      "source": 538,
+      "min": 187,
+      "gzip": 163,
+      "brotli": 142
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadText",
+      "source": 429,
+      "min": 187,
+      "gzip": 166,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "checkOrder",
+      "source": 628,
+      "min": 187,
+      "gzip": 176,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/cbor/tags.mjs",
+      "name": "dataCount",
+      "source": 549,
+      "min": 186,
+      "gzip": 161,
+      "brotli": 131
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "frag",
+      "source": 324,
+      "min": 186,
+      "gzip": 133,
+      "brotli": 111
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "skipSpace",
+      "source": 466,
+      "min": 186,
+      "gzip": 148,
+      "brotli": 119
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "tsTest",
+      "source": 500,
+      "min": 186,
+      "gzip": 177,
+      "brotli": 152
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanNdarray",
+      "source": 548,
+      "min": 185,
+      "gzip": 163,
+      "brotli": 143
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "arenaMove",
+      "source": 471,
+      "min": 184,
+      "gzip": 138,
+      "brotli": 136
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "altFlags",
+      "source": 552,
+      "min": 184,
+      "gzip": 160,
+      "brotli": 141
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "cmpPoint",
+      "source": 649,
+      "min": 184,
+      "gzip": 156,
+      "brotli": 143
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanArray",
+      "source": 362,
+      "min": 183,
+      "gzip": 148,
+      "brotli": 130
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "countMatchedScalars",
+      "source": 337,
+      "min": 182,
+      "gzip": 161,
+      "brotli": 131
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "checkF16",
+      "source": 617,
+      "min": 180,
+      "gzip": 157,
+      "brotli": 141
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "atomOf",
+      "source": 483,
+      "min": 180,
+      "gzip": 163,
+      "brotli": 146
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "keyFix",
+      "source": 478,
+      "min": 180,
+      "gzip": 148,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "groupAsType",
+      "source": 434,
+      "min": 179,
+      "gzip": 140,
+      "brotli": 122
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmOutput",
+      "source": 400,
+      "min": 179,
+      "gzip": 167,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "need",
+      "source": 457,
+      "min": 179,
+      "gzip": 140,
+      "brotli": 123
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "keyAfter",
+      "source": 635,
+      "min": 179,
+      "gzip": 169,
+      "brotli": 131
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "candVtsMt",
+      "source": 381,
+      "min": 178,
+      "gzip": 155,
+      "brotli": 148
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapCursor",
+      "source": 488,
+      "min": 177,
+      "gzip": 168,
+      "brotli": 150
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafText",
+      "source": 435,
+      "min": 176,
+      "gzip": 167,
+      "brotli": 150
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "boundOk",
+      "source": 545,
+      "min": 175,
+      "gzip": 159,
+      "brotli": 142
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "embedLive",
+      "source": 453,
+      "min": 175,
+      "gzip": 169,
+      "brotli": 143
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafBytes",
+      "source": 542,
+      "min": 175,
+      "gzip": 173,
+      "brotli": 153
+    },
+    {
+      "path": "gen/js/snug/cbor/tags.mjs",
+      "name": "typedSize",
+      "source": 469,
+      "min": 174,
+      "gzip": 126,
+      "brotli": 89
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "encClass",
+      "source": 622,
+      "min": 174,
+      "gzip": 155,
+      "brotli": 135
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "pointMag",
+      "source": 424,
+      "min": 173,
+      "gzip": 132,
+      "brotli": 133
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "boundCmp",
+      "source": 444,
+      "min": 173,
+      "gzip": 141,
+      "brotli": 132
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "conPut",
+      "source": 303,
+      "min": 173,
+      "gzip": 143,
+      "brotli": 114
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "poolCountsOk",
+      "source": 364,
+      "min": 173,
+      "gzip": 156,
+      "brotli": 142
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "altSatisfiable",
+      "source": 387,
+      "min": 172,
+      "gzip": 153,
+      "brotli": 132
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "noteReq",
+      "source": 738,
+      "min": 172,
+      "gzip": 146,
+      "brotli": 123
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "compareKeys",
+      "source": 468,
+      "min": 171,
+      "gzip": 146,
+      "brotli": 121
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "processArray",
+      "source": 312,
+      "min": 170,
+      "gzip": 151,
+      "brotli": 128
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadArrayElems",
+      "source": 516,
+      "min": 170,
+      "gzip": 162,
+      "brotli": 139
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "regexWords",
+      "source": 297,
+      "min": 169,
+      "gzip": 164,
+      "brotli": 147
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "tsWithin",
+      "source": 326,
+      "min": 169,
+      "gzip": 158,
+      "brotli": 138
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "chainPut",
+      "source": 482,
+      "min": 169,
+      "gzip": 157,
+      "brotli": 138
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "openDseq",
+      "source": 338,
+      "min": 169,
+      "gzip": 161,
+      "brotli": 142
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "popcount",
+      "source": 273,
+      "min": 168,
+      "gzip": 157,
+      "brotli": 141
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "headLenArg",
+      "source": 510,
+      "min": 167,
+      "gzip": 144,
+      "brotli": 120
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navLength",
+      "source": 454,
+      "min": 166,
+      "gzip": 158,
+      "brotli": 130
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "newPos",
+      "source": 297,
+      "min": 165,
+      "gzip": 128,
+      "brotli": 109
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "finishScalar",
+      "source": 463,
+      "min": 165,
+      "gzip": 149,
+      "brotli": 139
+    },
+    {
+      "path": "gen/js/snug/write/int.mjs",
+      "name": "intLen",
+      "source": 606,
+      "min": 164,
+      "gzip": 165,
+      "brotli": 138
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "pow256Word",
+      "source": 818,
+      "min": 162,
+      "gzip": 142,
+      "brotli": 121
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "encClass",
+      "source": 488,
+      "min": 162,
+      "gzip": 146,
+      "brotli": 130
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "singleScalar",
+      "source": 408,
+      "min": 161,
+      "gzip": 159,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafLit",
+      "source": 492,
+      "min": 161,
+      "gzip": 161,
+      "brotli": 158
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "hex4",
+      "source": 354,
+      "min": 160,
+      "gzip": 127,
+      "brotli": 113
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "enter",
+      "source": 315,
+      "min": 160,
+      "gzip": 146,
+      "brotli": 128
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "suspend",
+      "source": 419,
+      "min": 159,
+      "gzip": 141,
+      "brotli": 116
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "f16BitsRfc",
+      "source": 503,
+      "min": 159,
+      "gzip": 152,
+      "brotli": 129
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "coseLabelOk",
+      "source": 543,
+      "min": 158,
+      "gzip": 152,
+      "brotli": 131
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "container",
+      "source": 390,
+      "min": 158,
+      "gzip": 149,
+      "brotli": 124
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "gstackFind",
+      "source": 332,
+      "min": 158,
+      "gzip": 144,
+      "brotli": 125
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "aWrap",
+      "source": 469,
+      "min": 158,
+      "gzip": 153,
+      "brotli": 144
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "rxAccepts",
+      "source": 383,
+      "min": 158,
+      "gzip": 158,
+      "brotli": 149
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "markAll",
+      "source": 291,
+      "min": 157,
+      "gzip": 143,
+      "brotli": 126
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "qFilterX",
+      "source": 337,
+      "min": 157,
+      "gzip": 132,
+      "brotli": 109
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vpush",
+      "source": 365,
+      "min": 156,
+      "gzip": 145,
+      "brotli": 125
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "newEpoch",
+      "source": 396,
+      "min": 156,
+      "gzip": 153,
+      "brotli": 156
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "finiteFloat",
+      "source": 337,
+      "min": 155,
+      "gzip": 139,
+      "brotli": 114
+    },
+    {
+      "path": "gen/js/snug/cbor/keys.mjs",
+      "name": "compareSpans",
+      "source": 424,
+      "min": 152,
+      "gzip": 142,
+      "brotli": 125
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanOptions",
+      "source": 619,
+      "min": 152,
+      "gzip": 137,
+      "brotli": 108
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "recCmpLo",
+      "source": 273,
+      "min": 152,
+      "gzip": 116,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "compareKey",
+      "source": 522,
+      "min": 152,
+      "gzip": 143,
+      "brotli": 140
+    },
+    {
+      "path": "gen/js/snug/cbor/text.mjs",
+      "name": "utf8InvalidAtNc",
+      "source": 388,
+      "min": 151,
+      "gzip": 145,
+      "brotli": 145
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gEdge",
+      "source": 396,
+      "min": 151,
+      "gzip": 138,
+      "brotli": 122
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "int1",
+      "source": 344,
+      "min": 151,
+      "gzip": 144,
+      "brotli": 118
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "enumGroup",
+      "source": 301,
+      "min": 150,
+      "gzip": 125,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "chainRegex",
+      "source": 513,
+      "min": 150,
+      "gzip": 143,
+      "brotli": 124
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "witSet",
+      "source": 253,
+      "min": 150,
+      "gzip": 132,
+      "brotli": 103
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "epoch",
+      "source": 312,
+      "min": 149,
+      "gzip": 152,
+      "brotli": 137
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "compareIn",
+      "source": 568,
+      "min": 149,
+      "gzip": 141,
+      "brotli": 122
+    },
+    {
+      "path": "gen/js/snug/write/float.mjs",
+      "name": "f16Bits",
+      "source": 574,
+      "min": 148,
+      "gzip": 146,
+      "brotli": 126
+    },
+    {
+      "path": "gen/js/snug/cbor/text.mjs",
+      "name": "utf8InvalidAt",
+      "source": 409,
+      "min": 147,
+      "gzip": 142,
+      "brotli": 136
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "frameItem",
+      "source": 265,
+      "min": 147,
+      "gzip": 132,
+      "brotli": 105
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanText",
+      "source": 279,
+      "min": 146,
+      "gzip": 135,
+      "brotli": 113
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "chainCset",
+      "source": 353,
+      "min": 146,
+      "gzip": 153,
+      "brotli": 149
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "countPending",
+      "source": 384,
+      "min": 146,
+      "gzip": 147,
+      "brotli": 120
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "chunkEnd",
+      "source": 499,
+      "min": 145,
+      "gzip": 150,
+      "brotli": 132
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "textBad",
+      "source": 558,
+      "min": 143,
+      "gzip": 135,
+      "brotli": 130
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "socketSpelling",
+      "source": 330,
+      "min": 143,
+      "gzip": 125,
+      "brotli": 115
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "stage",
+      "source": 206,
+      "min": 142,
+      "gzip": 103,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "singleEsc",
+      "source": 458,
+      "min": 141,
+      "gzip": 127,
+      "brotli": 99
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "tsEvalAt",
+      "source": 369,
+      "min": 141,
+      "gzip": 126,
+      "brotli": 115
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "isContainer",
+      "source": 206,
+      "min": 140,
+      "gzip": 116,
+      "brotli": 100
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsPushLeaves",
+      "source": 279,
+      "min": 139,
+      "gzip": 136,
+      "brotli": 122
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "bitsOk",
+      "source": 553,
+      "min": 139,
+      "gzip": 141,
+      "brotli": 124
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "quantNum",
+      "source": 356,
+      "min": 138,
+      "gzip": 132,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseType1",
+      "source": 220,
+      "min": 137,
+      "gzip": 119,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "parseType",
+      "source": 290,
+      "min": 137,
+      "gzip": 123,
+      "brotli": 90
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "streakKind",
+      "source": 334,
+      "min": 137,
+      "gzip": 143,
+      "brotli": 116
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "arrayBlockInit",
+      "source": 250,
+      "min": 136,
+      "gzip": 142,
+      "brotli": 119
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "charge",
+      "source": 654,
+      "min": 136,
+      "gzip": 135,
+      "brotli": 120
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "cmpMag",
+      "source": 403,
+      "min": 136,
+      "gzip": 135,
+      "brotli": 133
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "setPrevArena",
+      "source": 361,
+      "min": 136,
+      "gzip": 134,
+      "brotli": 107
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vpush1",
+      "source": 300,
+      "min": 135,
+      "gzip": 131,
+      "brotli": 114
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivCommit",
+      "source": 304,
+      "min": 135,
+      "gzip": 132,
+      "brotli": 119
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "encArgHi",
+      "source": 317,
+      "min": 135,
+      "gzip": 111,
+      "brotli": 98
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asEnd",
+      "source": 227,
+      "min": 135,
+      "gzip": 124,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "keepOf",
+      "source": 320,
+      "min": 135,
+      "gzip": 137,
+      "brotli": 120
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "sameName",
+      "source": 255,
+      "min": 134,
+      "gzip": 127,
+      "brotli": 112
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "kindNow",
+      "source": 331,
+      "min": 134,
+      "gzip": 125,
+      "brotli": 116
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "classify",
+      "source": 263,
+      "min": 134,
+      "gzip": 117,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "cmpBytes",
+      "source": 430,
+      "min": 134,
+      "gzip": 132,
+      "brotli": 124
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsMember",
+      "source": 294,
+      "min": 133,
+      "gzip": 130,
+      "brotli": 115
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "arrayAlive",
+      "source": 258,
+      "min": 133,
+      "gzip": 135,
+      "brotli": 115
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "altsDisjoint",
+      "source": 246,
+      "min": 132,
+      "gzip": 108,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "bytesCmp",
+      "source": 356,
+      "min": 132,
+      "gzip": 132,
+      "brotli": 121
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magWord",
+      "source": 358,
+      "min": 131,
+      "gzip": 136,
+      "brotli": 110
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "copyRun",
+      "source": 273,
+      "min": 131,
+      "gzip": 125,
+      "brotli": 112
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "genericAncestor",
+      "source": 356,
+      "min": 131,
+      "gzip": 132,
+      "brotli": 113
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "stdAllowed",
+      "source": 578,
+      "min": 129,
+      "gzip": 130,
+      "brotli": 125
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "enter",
+      "source": 208,
+      "min": 129,
+      "gzip": 131,
+      "brotli": 117
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "aliasTarget",
+      "source": 396,
+      "min": 129,
+      "gzip": 129,
+      "brotli": 115
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "rebase",
+      "source": 385,
+      "min": 129,
+      "gzip": 110,
+      "brotli": 90
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "decimalCheck",
+      "source": 261,
+      "min": 128,
+      "gzip": 141,
+      "brotli": 116
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mapSatisfied",
+      "source": 241,
+      "min": 128,
+      "gzip": 125,
+      "brotli": 103
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "charge",
+      "source": 363,
+      "min": 127,
+      "gzip": 122,
+      "brotli": 121
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "alloc",
+      "source": 317,
+      "min": 127,
+      "gzip": 131,
+      "brotli": 112
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "pushFrame",
+      "source": 168,
+      "min": 127,
+      "gzip": 96,
+      "brotli": 96
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "rangedAst",
+      "source": 330,
+      "min": 127,
+      "gzip": 121,
+      "brotli": 111
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkBytes",
+      "source": 209,
+      "min": 126,
+      "gzip": 119,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "ndarrayCheck",
+      "source": 267,
+      "min": 126,
+      "gzip": 140,
+      "brotli": 112
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "smallArg",
+      "source": 457,
+      "min": 125,
+      "gzip": 121,
+      "brotli": 99
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "mdays",
+      "source": 380,
+      "min": 125,
+      "gzip": 124,
+      "brotli": 105
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magSmall",
+      "source": 275,
+      "min": 125,
+      "gzip": 131,
+      "brotli": 114
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivPush",
+      "source": 188,
+      "min": 125,
+      "gzip": 87,
+      "brotli": 69
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkText",
+      "source": 203,
+      "min": 124,
+      "gzip": 117,
+      "brotli": 99
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "checkUtf8",
+      "source": 407,
+      "min": 124,
+      "gzip": 129,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "itemCls",
+      "source": 434,
+      "min": 124,
+      "gzip": 127,
+      "brotli": 105
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asSingle",
+      "source": 165,
+      "min": 123,
+      "gzip": 126,
+      "brotli": 118
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "countItem",
+      "source": 268,
+      "min": 122,
+      "gzip": 118,
+      "brotli": 113
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanSimple",
+      "source": 469,
+      "min": 122,
+      "gzip": 139,
+      "brotli": 109
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "anyTs",
+      "source": 249,
+      "min": 122,
+      "gzip": 124,
+      "brotli": 110
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "typeOpFollows",
+      "source": 244,
+      "min": 122,
+      "gzip": 114,
+      "brotli": 98
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "spend",
+      "source": 271,
+      "min": 122,
+      "gzip": 115,
+      "brotli": 91
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "mapAlive",
+      "source": 248,
+      "min": 122,
+      "gzip": 132,
+      "brotli": 117
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmValidateSpan",
+      "source": 289,
+      "min": 121,
+      "gzip": 105,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadMap",
+      "source": 216,
+      "min": 121,
+      "gzip": 115,
+      "brotli": 112
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "countAscii",
+      "source": 353,
+      "min": 120,
+      "gzip": 128,
+      "brotli": 123
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "blockNamed",
+      "source": 319,
+      "min": 120,
+      "gzip": 126,
+      "brotli": 105
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "topNotes",
+      "source": 283,
+      "min": 119,
+      "gzip": 131,
+      "brotli": 123
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "uriChar",
+      "source": 430,
+      "min": 119,
+      "gzip": 103,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "pause",
+      "source": 281,
+      "min": 118,
+      "gzip": 120,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gAdd",
+      "source": 327,
+      "min": 117,
+      "gzip": 104,
+      "brotli": 93
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "magBitlen",
+      "source": 289,
+      "min": 117,
+      "gzip": 127,
+      "brotli": 111
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmScratchWords",
+      "source": 440,
+      "min": 117,
+      "gzip": 135,
+      "brotli": 121
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "namedRec",
+      "source": 323,
+      "min": 116,
+      "gzip": 129,
+      "brotli": 111
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "makeDot",
+      "source": 199,
+      "min": 115,
+      "gzip": 123,
+      "brotli": 105
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "cutYield",
+      "source": 389,
+      "min": 115,
+      "gzip": 126,
+      "brotli": 119
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "chainHas",
+      "source": 291,
+      "min": 115,
+      "gzip": 123,
+      "brotli": 101
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vpop",
+      "source": 227,
+      "min": 114,
+      "gzip": 107,
+      "brotli": 93
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "b64val",
+      "source": 393,
+      "min": 114,
+      "gzip": 119,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "firstZero",
+      "source": 308,
+      "min": 114,
+      "gzip": 120,
+      "brotli": 98
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "altLive",
+      "source": 309,
+      "min": 114,
+      "gzip": 122,
+      "brotli": 116
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "notesInit",
+      "source": 173,
+      "min": 114,
+      "gzip": 103,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/cbor/tags.mjs",
+      "name": "exponentOk",
+      "source": 471,
+      "min": 113,
+      "gzip": 129,
+      "brotli": 117
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "errorRuleStart",
+      "source": 331,
+      "min": 113,
+      "gzip": 126,
+      "brotli": 102
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "satMul",
+      "source": 305,
+      "min": 113,
+      "gzip": 106,
+      "brotli": 88
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "rowClean",
+      "source": 350,
+      "min": 113,
+      "gzip": 121,
+      "brotli": 98
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "simpleOf",
+      "source": 364,
+      "min": 112,
+      "gzip": 129,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "simpleStruct",
+      "source": 239,
+      "min": 112,
+      "gzip": 110,
+      "brotli": 104
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "copyRange",
+      "source": 369,
+      "min": 112,
+      "gzip": 122,
+      "brotli": 107
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "packName",
+      "source": 303,
+      "min": 111,
+      "gzip": 126,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "fin",
+      "source": 308,
+      "min": 111,
+      "gzip": 121,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "fail",
+      "source": 304,
+      "min": 109,
+      "gzip": 101,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "runsEqual",
+      "source": 196,
+      "min": 109,
+      "gzip": 112,
+      "brotli": 100
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "frecCmp",
+      "source": 146,
+      "min": 109,
+      "gzip": 90,
+      "brotli": 88
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "csetRec",
+      "source": 252,
+      "min": 109,
+      "gzip": 125,
+      "brotli": 107
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "vmsArenaBytes",
+      "source": 441,
+      "min": 109,
+      "gzip": 125,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "comparePairs",
+      "source": 221,
+      "min": 107,
+      "gzip": 106,
+      "brotli": 89
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxInit",
+      "source": 136,
+      "min": 106,
+      "gzip": 94,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanOne",
+      "source": 394,
+      "min": 105,
+      "gzip": 116,
+      "brotli": 95
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "nameHash",
+      "source": 168,
+      "min": 105,
+      "gzip": 118,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "simpleLeaf",
+      "source": 284,
+      "min": 105,
+      "gzip": 125,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magOf",
+      "source": 267,
+      "min": 104,
+      "gzip": 113,
+      "brotli": 88
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "normalChar",
+      "source": 384,
+      "min": 104,
+      "gzip": 106,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "checkMaps",
+      "source": 176,
+      "min": 103,
+      "gzip": 109,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "arenaPut",
+      "source": 188,
+      "min": 102,
+      "gzip": 119,
+      "brotli": 99
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vset",
+      "source": 220,
+      "min": 102,
+      "gzip": 114,
+      "brotli": 106
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "encHeadLen",
+      "source": 270,
+      "min": 102,
+      "gzip": 111,
+      "brotli": 93
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "propertyEscape",
+      "source": 132,
+      "min": 102,
+      "gzip": 97,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "bad",
+      "source": 248,
+      "min": 102,
+      "gzip": 102,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "pairCheck",
+      "source": 282,
+      "min": 102,
+      "gzip": 116,
+      "brotli": 96
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "contentTs",
+      "source": 237,
+      "min": 101,
+      "gzip": 108,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "makeClass1",
+      "source": 137,
+      "min": 101,
+      "gzip": 114,
+      "brotli": 95
+    },
+    {
+      "path": "gen/js/snug/vm/dead.mjs",
+      "name": "deadSeq",
+      "source": 264,
+      "min": 101,
+      "gzip": 105,
+      "brotli": 86
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "fivLoad",
+      "source": 163,
+      "min": 100,
+      "gzip": 117,
+      "brotli": 100
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "prof",
+      "source": 513,
+      "min": 100,
+      "gzip": 114,
+      "brotli": 101
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "singleLeaf",
+      "source": 302,
+      "min": 100,
+      "gzip": 115,
+      "brotli": 104
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "loneName",
+      "source": 291,
+      "min": 99,
+      "gzip": 101,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "fitsKnown",
+      "source": 275,
+      "min": 99,
+      "gzip": 107,
+      "brotli": 103
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "single",
+      "source": 144,
+      "min": 98,
+      "gzip": 108,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ivLoad",
+      "source": 230,
+      "min": 98,
+      "gzip": 115,
+      "brotli": 100
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "nextCk",
+      "source": 279,
+      "min": 98,
+      "gzip": 114,
+      "brotli": 102
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "mustYield",
+      "source": 429,
+      "min": 98,
+      "gzip": 112,
+      "brotli": 96
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "crossKnown",
+      "source": 269,
+      "min": 98,
+      "gzip": 106,
+      "brotli": 102
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "tagNumber",
+      "source": 320,
+      "min": 98,
+      "gzip": 111,
+      "brotli": 92
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "bytesInit",
+      "source": 120,
+      "min": 97,
+      "gzip": 98,
+      "brotli": 81
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "singleLit",
+      "source": 225,
+      "min": 97,
+      "gzip": 106,
+      "brotli": 88
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkAnd",
+      "source": 127,
+      "min": 97,
+      "gzip": 99,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkNot",
+      "source": 141,
+      "min": 97,
+      "gzip": 99,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmValidate",
+      "source": 320,
+      "min": 97,
+      "gzip": 95,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magCmp",
+      "source": 223,
+      "min": 96,
+      "gzip": 97,
+      "brotli": 89
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "runHash",
+      "source": 160,
+      "min": 96,
+      "gzip": 107,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmValidateSpanX",
+      "source": 525,
+      "min": 96,
+      "gzip": 91,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qAnyMatch",
+      "source": 284,
+      "min": 96,
+      "gzip": 110,
+      "brotli": 93
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "ptGe",
+      "source": 273,
+      "min": 96,
+      "gzip": 102,
+      "brotli": 93
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "ptLe",
+      "source": 209,
+      "min": 96,
+      "gzip": 102,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "setPrev",
+      "source": 256,
+      "min": 96,
+      "gzip": 99,
+      "brotli": 84
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "htInit",
+      "source": 245,
+      "min": 95,
+      "gzip": 104,
+      "brotli": 93
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "errorRuleLen",
+      "source": 155,
+      "min": 95,
+      "gzip": 111,
+      "brotli": 95
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsStep",
+      "source": 210,
+      "min": 95,
+      "gzip": 94,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "bail",
+      "source": 266,
+      "min": 94,
+      "gzip": 105,
+      "brotli": 92
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "pairNote",
+      "source": 296,
+      "min": 94,
+      "gzip": 108,
+      "brotli": 95
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "contentLenIn",
+      "source": 134,
+      "min": 93,
+      "gzip": 101,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsOf1",
+      "source": 195,
+      "min": 93,
+      "gzip": 107,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "magBit",
+      "source": 286,
+      "min": 93,
+      "gzip": 111,
+      "brotli": 97
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "optLimit",
+      "source": 304,
+      "min": 93,
+      "gzip": 105,
+      "brotli": 80
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "ruleFindTok",
+      "source": 133,
+      "min": 93,
+      "gzip": 98,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "arenaMove",
+      "source": 233,
+      "min": 93,
+      "gzip": 106,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "takeLen",
+      "source": 384,
+      "min": 92,
+      "gzip": 106,
+      "brotli": 90
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "keyPeek",
+      "source": 427,
+      "min": 92,
+      "gzip": 112,
+      "brotli": 96
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vget",
+      "source": 244,
+      "min": 92,
+      "gzip": 102,
+      "brotli": 96
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "chainOf",
+      "source": 179,
+      "min": 91,
+      "gzip": 107,
+      "brotli": 95
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmValidateX",
+      "source": 820,
+      "min": 91,
+      "gzip": 95,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "retDirect",
+      "source": 288,
+      "min": 91,
+      "gzip": 96,
+      "brotli": 82
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "keyLabel",
+      "source": 285,
+      "min": 90,
+      "gzip": 104,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "hexval",
+      "source": 262,
+      "min": 90,
+      "gzip": 104,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asUnit",
+      "source": 151,
+      "min": 90,
+      "gzip": 106,
+      "brotli": 94
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "zeroFrom",
+      "source": 231,
+      "min": 90,
+      "gzip": 102,
+      "brotli": 84
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "blockAo",
+      "source": 181,
+      "min": 90,
+      "gzip": 110,
+      "brotli": 91
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "rfcF16",
+      "source": 257,
+      "min": 89,
+      "gzip": 105,
+      "brotli": 88
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "plusMag",
+      "source": 310,
+      "min": 89,
+      "gzip": 89,
+      "brotli": 81
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "fpop",
+      "source": 202,
+      "min": 89,
+      "gzip": 96,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "darrRet",
+      "source": 127,
+      "min": 89,
+      "gzip": 93,
+      "brotli": 83
+    },
+    {
+      "path": "gen/js/snug/vm/sstr.mjs",
+      "name": "areaPop",
+      "source": 144,
+      "min": 89,
+      "gzip": 102,
+      "brotli": 84
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "ifEmbedOther",
+      "source": 194,
+      "min": 88,
+      "gzip": 93,
+      "brotli": 91
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "u64Cmp",
+      "source": 302,
+      "min": 88,
+      "gzip": 94,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "u64Cmp",
+      "source": 302,
+      "min": 88,
+      "gzip": 94,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "cmpU64",
+      "source": 395,
+      "min": 88,
+      "gzip": 94,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "blockMt",
+      "source": 191,
+      "min": 88,
+      "gzip": 108,
+      "brotli": 84
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "charge",
+      "source": 174,
+      "min": 88,
+      "gzip": 95,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "oob",
+      "source": 287,
+      "min": 87,
+      "gzip": 96,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vtrunc",
+      "source": 219,
+      "min": 87,
+      "gzip": 102,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkSimple",
+      "source": 109,
+      "min": 87,
+      "gzip": 96,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "endsChoice",
+      "source": 128,
+      "min": 87,
+      "gzip": 97,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/cbor/tags.mjs",
+      "name": "mod10",
+      "source": 221,
+      "min": 86,
+      "gzip": 104,
+      "brotli": 80
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "lim",
+      "source": 328,
+      "min": 86,
+      "gzip": 100,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkMajor",
+      "source": 107,
+      "min": 85,
+      "gzip": 96,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "ret",
+      "source": 247,
+      "min": 85,
+      "gzip": 90,
+      "brotli": 86
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "finBad",
+      "source": 195,
+      "min": 85,
+      "gzip": 100,
+      "brotli": 84
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gList",
+      "source": 202,
+      "min": 84,
+      "gzip": 100,
+      "brotli": 88
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "joinRuns",
+      "source": 189,
+      "min": 84,
+      "gzip": 89,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "put32",
+      "source": 228,
+      "min": 84,
+      "gzip": 85,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "headLen",
+      "source": 355,
+      "min": 84,
+      "gzip": 92,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "lowZero64",
+      "source": 214,
+      "min": 83,
+      "gzip": 89,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "num2",
+      "source": 215,
+      "min": 83,
+      "gzip": 93,
+      "brotli": 73
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gFollows",
+      "source": 163,
+      "min": 83,
+      "gzip": 103,
+      "brotli": 87
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "arenaGet",
+      "source": 190,
+      "min": 82,
+      "gzip": 102,
+      "brotli": 86
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "tsEvalN",
+      "source": 230,
+      "min": 82,
+      "gzip": 98,
+      "brotli": 83
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkLit",
+      "source": 107,
+      "min": 81,
+      "gzip": 92,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "syntax",
+      "source": 142,
+      "min": 81,
+      "gzip": 101,
+      "brotli": 85
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rangePush",
+      "source": 108,
+      "min": 81,
+      "gzip": 87,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "fillSquares",
+      "source": 213,
+      "min": 81,
+      "gzip": 101,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vinit",
+      "source": 161,
+      "min": 80,
+      "gzip": 86,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "adv",
+      "source": 122,
+      "min": 80,
+      "gzip": 95,
+      "brotli": 84
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magHi",
+      "source": 147,
+      "min": 79,
+      "gzip": 86,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "magLo",
+      "source": 93,
+      "min": 79,
+      "gzip": 86,
+      "brotli": 74
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "nextEpoch",
+      "source": 103,
+      "min": 79,
+      "gzip": 91,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "opt",
+      "source": 96,
+      "min": 79,
+      "gzip": 80,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "nextEpoch",
+      "source": 103,
+      "min": 79,
+      "gzip": 91,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qKind",
+      "source": 147,
+      "min": 79,
+      "gzip": 99,
+      "brotli": 81
+    },
+    {
+      "path": "gen/js/snug/write/int.mjs",
+      "name": "firstNonzero",
+      "source": 202,
+      "min": 79,
+      "gzip": 97,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "mix",
+      "source": 185,
+      "min": 78,
+      "gzip": 98,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "gstackPop",
+      "source": 97,
+      "min": 78,
+      "gzip": 89,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asAlen",
+      "source": 103,
+      "min": 78,
+      "gzip": 90,
+      "brotli": 82
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "sumRange",
+      "source": 213,
+      "min": 78,
+      "gzip": 95,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "vmsSessionWords",
+      "source": 240,
+      "min": 78,
+      "gzip": 96,
+      "brotli": 82
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "ensure",
+      "source": 278,
+      "min": 78,
+      "gzip": 95,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "dryEnd",
+      "source": 174,
+      "min": 78,
+      "gzip": 88,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "topCdepth",
+      "source": 202,
+      "min": 77,
+      "gzip": 97,
+      "brotli": 81
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "gstackPush",
+      "source": 99,
+      "min": 77,
+      "gzip": 81,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "combinator",
+      "source": 103,
+      "min": 77,
+      "gzip": 90,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "keyByte",
+      "source": 222,
+      "min": 76,
+      "gzip": 95,
+      "brotli": 80
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "magPow",
+      "source": 121,
+      "min": 76,
+      "gzip": 93,
+      "brotli": 78
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asAoff",
+      "source": 97,
+      "min": 76,
+      "gzip": 88,
+      "brotli": 80
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qLeafBase",
+      "source": 158,
+      "min": 76,
+      "gzip": 96,
+      "brotli": 80
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "dryBegin",
+      "source": 312,
+      "min": 76,
+      "gzip": 86,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "markPair",
+      "source": 216,
+      "min": 76,
+      "gzip": 93,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "bidByte",
+      "source": 92,
+      "min": 75,
+      "gzip": 86,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "smallOf",
+      "source": 279,
+      "min": 75,
+      "gzip": 91,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "rep",
+      "source": 232,
+      "min": 75,
+      "gzip": 86,
+      "brotli": 79
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "hexd",
+      "source": 123,
+      "min": 74,
+      "gzip": 84,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "be32",
+      "source": 202,
+      "min": 73,
+      "gzip": 87,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rscanScratchLen",
+      "source": 253,
+      "min": 73,
+      "gzip": 93,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "expect",
+      "source": 137,
+      "min": 73,
+      "gzip": 89,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "be32",
+      "source": 213,
+      "min": 73,
+      "gzip": 87,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "pathPut",
+      "source": 186,
+      "min": 73,
+      "gzip": 93,
+      "brotli": 77
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "headSize",
+      "source": 287,
+      "min": 72,
+      "gzip": 83,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "budgetUsed",
+      "source": 167,
+      "min": 72,
+      "gzip": 81,
+      "brotli": 62
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "magCmp",
+      "source": 136,
+      "min": 72,
+      "gzip": 80,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "leafSimple",
+      "source": 128,
+      "min": 72,
+      "gzip": 92,
+      "brotli": 76
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "satMul",
+      "source": 165,
+      "min": 71,
+      "gzip": 88,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "isEalpha",
+      "source": 100,
+      "min": 71,
+      "gzip": 75,
+      "brotli": 68
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "mv",
+      "source": 93,
+      "min": 71,
+      "gzip": 78,
+      "brotli": 75
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vfill",
+      "source": 159,
+      "min": 70,
+      "gzip": 86,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "singleLeaf",
+      "source": 119,
+      "min": 70,
+      "gzip": 80,
+      "brotli": 74
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "targetError",
+      "source": 84,
+      "min": 70,
+      "gzip": 90,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "csetW",
+      "source": 85,
+      "min": 70,
+      "gzip": 81,
+      "brotli": 73
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "put3",
+      "source": 96,
+      "min": 70,
+      "gzip": 75,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "absorbing",
+      "source": 92,
+      "min": 70,
+      "gzip": 80,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "pc",
+      "source": 172,
+      "min": 70,
+      "gzip": 83,
+      "brotli": 74
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "gcd",
+      "source": 170,
+      "min": 70,
+      "gzip": 88,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "c64min",
+      "source": 216,
+      "min": 70,
+      "gzip": 90,
+      "brotli": 74
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "ifClose",
+      "source": 163,
+      "min": 69,
+      "gzip": 79,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "freeOff",
+      "source": 95,
+      "min": 69,
+      "gzip": 78,
+      "brotli": 73
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "cont",
+      "source": 143,
+      "min": 69,
+      "gzip": 85,
+      "brotli": 73
+    },
+    {
+      "path": "gen/js/snug/cbor/float.mjs",
+      "name": "lowZero",
+      "source": 178,
+      "min": 68,
+      "gzip": 86,
+      "brotli": 72
+    },
+    {
+      "path": "gen/js/snug/compile/arrays.mjs",
+      "name": "arrNpos",
+      "source": 80,
+      "min": 68,
+      "gzip": 78,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "punct",
+      "source": 99,
+      "min": 68,
+      "gzip": 73,
+      "brotli": 62
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asAdd",
+      "source": 94,
+      "min": 68,
+      "gzip": 74,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "sumTo",
+      "source": 119,
+      "min": 68,
+      "gzip": 85,
+      "brotli": 69
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "leafArray",
+      "source": 82,
+      "min": 68,
+      "gzip": 88,
+      "brotli": 72
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "work",
+      "source": 85,
+      "min": 68,
+      "gzip": 84,
+      "brotli": 72
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "progress",
+      "source": 99,
+      "min": 68,
+      "gzip": 76,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "dig",
+      "source": 168,
+      "min": 67,
+      "gzip": 87,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vadd",
+      "source": 131,
+      "min": 67,
+      "gzip": 76,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "byteRange",
+      "source": 110,
+      "min": 67,
+      "gzip": 82,
+      "brotli": 69
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "vmScratchInit",
+      "source": 164,
+      "min": 67,
+      "gzip": 83,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "freeOn",
+      "source": 85,
+      "min": 67,
+      "gzip": 76,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qSetFlag",
+      "source": 110,
+      "min": 67,
+      "gzip": 80,
+      "brotli": 69
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "chainSpan",
+      "source": 110,
+      "min": 67,
+      "gzip": 83,
+      "brotli": 71
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "leave",
+      "source": 85,
+      "min": 66,
+      "gzip": 77,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "floatRequestStart",
+      "source": 78,
+      "min": 66,
+      "gzip": 84,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "floatRequestEnd",
+      "source": 82,
+      "min": 66,
+      "gzip": 86,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "adjacent",
+      "source": 136,
+      "min": 66,
+      "gzip": 80,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "leave",
+      "source": 85,
+      "min": 66,
+      "gzip": 77,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "ifCode",
+      "source": 110,
+      "min": 66,
+      "gzip": 82,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "ifCode",
+      "source": 110,
+      "min": 66,
+      "gzip": 82,
+      "brotli": 70
+    },
+    {
+      "path": "gen/js/snug/write/map.mjs",
+      "name": "pairEnd",
+      "source": 204,
+      "min": 66,
+      "gzip": 86,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "mkAny",
+      "source": 79,
+      "min": 65,
+      "gzip": 82,
+      "brotli": 69
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsLeaf",
+      "source": 81,
+      "min": 65,
+      "gzip": 82,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "leafKindOf",
+      "source": 81,
+      "min": 65,
+      "gzip": 85,
+      "brotli": 69
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "suspended",
+      "source": 82,
+      "min": 65,
+      "gzip": 78,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "entType",
+      "source": 294,
+      "min": 64,
+      "gzip": 77,
+      "brotli": 68
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "keyInEnt",
+      "source": 151,
+      "min": 64,
+      "gzip": 84,
+      "brotli": 68
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "utf8Len",
+      "source": 251,
+      "min": 64,
+      "gzip": 79,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "leafMap",
+      "source": 136,
+      "min": 64,
+      "gzip": 84,
+      "brotli": 68
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "err",
+      "source": 143,
+      "min": 64,
+      "gzip": 78,
+      "brotli": 68
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "mapBlobOf",
+      "source": 75,
+      "min": 63,
+      "gzip": 81,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "isAlpha",
+      "source": 96,
+      "min": 63,
+      "gzip": 79,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "shortNeed",
+      "source": 197,
+      "min": 63,
+      "gzip": 76,
+      "brotli": 67
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "entLo",
+      "source": 113,
+      "min": 62,
+      "gzip": 75,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "entHi",
+      "source": 113,
+      "min": 62,
+      "gzip": 75,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "npos",
+      "source": 155,
+      "min": 62,
+      "gzip": 79,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "auxGet",
+      "source": 76,
+      "min": 62,
+      "gzip": 79,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/vm/api.mjs",
+      "name": "opt01",
+      "source": 155,
+      "min": 62,
+      "gzip": 82,
+      "brotli": 66
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "groupRec",
+      "source": 72,
+      "min": 62,
+      "gzip": 82,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "alpha",
+      "source": 94,
+      "min": 61,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "mapBlob",
+      "source": 73,
+      "min": 61,
+      "gzip": 79,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "envOf",
+      "source": 165,
+      "min": 61,
+      "gzip": 81,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "counterable",
+      "source": 92,
+      "min": 61,
+      "gzip": 81,
+      "brotli": 65
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navSkip",
+      "source": 138,
+      "min": 61,
+      "gzip": 68,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsArena",
+      "source": 161,
+      "min": 61,
+      "gzip": 67,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanItem",
+      "source": 292,
+      "min": 60,
+      "gzip": 68,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "hs",
+      "source": 150,
+      "min": 60,
+      "gzip": 77,
+      "brotli": 62
+    },
+    {
+      "path": "gen/js/snug/compile/ctl.mjs",
+      "name": "ifNegRegion",
+      "source": 110,
+      "min": 60,
+      "gzip": 77,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "push2",
+      "source": 79,
+      "min": 60,
+      "gzip": 64,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "ld",
+      "source": 79,
+      "min": 60,
+      "gzip": 80,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "lsetd",
+      "source": 81,
+      "min": 60,
+      "gzip": 80,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "envArg",
+      "source": 75,
+      "min": 60,
+      "gzip": 80,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "floatRequests",
+      "source": 147,
+      "min": 60,
+      "gzip": 80,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/nav/trace.mjs",
+      "name": "put",
+      "source": 197,
+      "min": 60,
+      "gzip": 80,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "leafKind",
+      "source": 72,
+      "min": 60,
+      "gzip": 74,
+      "brotli": 64
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "keyPreimageAt",
+      "source": 67,
+      "min": 59,
+      "gzip": 79,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "keyPreimageLen",
+      "source": 67,
+      "min": 59,
+      "gzip": 76,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxNullable",
+      "source": 75,
+      "min": 59,
+      "gzip": 79,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "auxSet",
+      "source": 76,
+      "min": 59,
+      "gzip": 76,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/vm/leaf.mjs",
+      "name": "scalarKind",
+      "source": 204,
+      "min": 59,
+      "gzip": 79,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "yld",
+      "source": 87,
+      "min": 59,
+      "gzip": 79,
+      "brotli": 63
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "textNc",
+      "source": 197,
+      "min": 58,
+      "gzip": 78,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/cbor/stdtags.mjs",
+      "name": "stdInner",
+      "source": 135,
+      "min": 58,
+      "gzip": 78,
+      "brotli": 62
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "hg",
+      "source": 261,
+      "min": 58,
+      "gzip": 75,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "lflags",
+      "source": 74,
+      "min": 58,
+      "gzip": 78,
+      "brotli": 62
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "outProgramWords",
+      "source": 66,
+      "min": 58,
+      "gzip": 78,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "pw",
+      "source": 335,
+      "min": 58,
+      "gzip": 75,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/vm/array.mjs",
+      "name": "arrayWords",
+      "source": 83,
+      "min": 58,
+      "gzip": 75,
+      "brotli": 62
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rscanNeedOffset",
+      "source": 64,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rscanNeedLength",
+      "source": 64,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "scanProfile",
+      "source": 325,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "bidLen",
+      "source": 73,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "finInternal",
+      "source": 67,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "laux",
+      "source": 74,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "lauxSet",
+      "source": 76,
+      "min": 57,
+      "gzip": 71,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "repCopies",
+      "source": 238,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "tkStart",
+      "source": 73,
+      "min": 57,
+      "gzip": 75,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "envParent",
+      "source": 69,
+      "min": 57,
+      "gzip": 75,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "altEnt",
+      "source": 74,
+      "min": 57,
+      "gzip": 75,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxNatoms",
+      "source": 73,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/hello.mjs",
+      "name": "bothSmall",
+      "source": 83,
+      "min": 57,
+      "gzip": 77,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navInit",
+      "source": 152,
+      "min": 57,
+      "gzip": 74,
+      "brotli": 61
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "ftsW",
+      "source": 73,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "lw",
+      "source": 73,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "envNargs",
+      "source": 68,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/prelude.mjs",
+      "name": "preludeByte",
+      "source": 121,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxPattern",
+      "source": 68,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "rw",
+      "source": 73,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "unitOf",
+      "source": 182,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mAlts",
+      "source": 76,
+      "min": 56,
+      "gzip": 72,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mNames",
+      "source": 76,
+      "min": 56,
+      "gzip": 72,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsNeedOffset",
+      "source": 65,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsNeedLength",
+      "source": 65,
+      "min": 56,
+      "gzip": 76,
+      "brotli": 60
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "bidOff",
+      "source": 67,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gnext",
+      "source": 71,
+      "min": 55,
+      "gzip": 73,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "emptyFrag",
+      "source": 67,
+      "min": 55,
+      "gzip": 67,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "lset",
+      "source": 74,
+      "min": 55,
+      "gzip": 68,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "nleaves",
+      "source": 69,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "tkEnd",
+      "source": 71,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "errorColumn",
+      "source": 63,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "outPoolBytes",
+      "source": 63,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "nnext",
+      "source": 71,
+      "min": 55,
+      "gzip": 73,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxNpos",
+      "source": 71,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxData",
+      "source": 71,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "rset",
+      "source": 74,
+      "min": 55,
+      "gzip": 68,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "defNext",
+      "source": 69,
+      "min": 55,
+      "gzip": 73,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "c64",
+      "source": 164,
+      "min": 55,
+      "gzip": 72,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "c16",
+      "source": 170,
+      "min": 55,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "sched2",
+      "source": 67,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mLits",
+      "source": 75,
+      "min": 55,
+      "gzip": 70,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mKeys",
+      "source": 75,
+      "min": 55,
+      "gzip": 71,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "fidx",
+      "source": 121,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "done",
+      "source": 151,
+      "min": 55,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "kbyte",
+      "source": 108,
+      "min": 55,
+      "gzip": 75,
+      "brotli": 59
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsWords",
+      "source": 172,
+      "min": 55,
+      "gzip": 65,
+      "brotli": 47
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "fail",
+      "source": 146,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "htId",
+      "source": 135,
+      "min": 54,
+      "gzip": 71,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "htNext",
+      "source": 71,
+      "min": 54,
+      "gzip": 70,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "fNull",
+      "source": 66,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "fFo",
+      "source": 70,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "fFl",
+      "source": 70,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "fLo",
+      "source": 70,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "fLl",
+      "source": 70,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsOff",
+      "source": 72,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsW",
+      "source": 73,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsSetw",
+      "source": 75,
+      "min": 54,
+      "gzip": 72,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "tkKind",
+      "source": 66,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "versionByte",
+      "source": 169,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "errorLine",
+      "source": 62,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "outProgramAt",
+      "source": 62,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "ew",
+      "source": 71,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asN",
+      "source": 70,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asNone",
+      "source": 62,
+      "min": 54,
+      "gzip": 72,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "ntok",
+      "source": 70,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "ck1",
+      "source": 65,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/rules.mjs",
+      "name": "nrules",
+      "source": 68,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "want",
+      "source": 105,
+      "min": 54,
+      "gzip": 71,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "witEmpty",
+      "source": 63,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "absorbing",
+      "source": 84,
+      "min": 54,
+      "gzip": 74,
+      "brotli": 58
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "htStart",
+      "source": 70,
+      "min": 53,
+      "gzip": 69,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gset",
+      "source": 80,
+      "min": 53,
+      "gzip": 66,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "tkA",
+      "source": 69,
+      "min": 53,
+      "gzip": 73,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "tkB",
+      "source": 69,
+      "min": 53,
+      "gzip": 73,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "tkC",
+      "source": 69,
+      "min": 53,
+      "gzip": 73,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "envRule",
+      "source": 63,
+      "min": 53,
+      "gzip": 73,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "pushUint",
+      "source": 66,
+      "min": 53,
+      "gzip": 69,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "nset",
+      "source": 109,
+      "min": 53,
+      "gzip": 66,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "fbase",
+      "source": 69,
+      "min": 53,
+      "gzip": 73,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "cptAt",
+      "source": 81,
+      "min": 53,
+      "gzip": 73,
+      "brotli": 57
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "errorOffset",
+      "source": 59,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vlen",
+      "source": 71,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vcap",
+      "source": 71,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/bytes.mjs",
+      "name": "nbids",
+      "source": 66,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "ga",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gb",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gc",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gd",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "satAdd",
+      "source": 101,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "lk",
+      "source": 64,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "tsN",
+      "source": 70,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "na",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "nb",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "nc",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "nd",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "ne",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxW",
+      "source": 68,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "rxCount",
+      "source": 66,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "rec",
+      "source": 148,
+      "min": 52,
+      "gzip": 68,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "csetFrame",
+      "source": 100,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "nframes",
+      "source": 202,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "ftop",
+      "source": 65,
+      "min": 52,
+      "gzip": 72,
+      "brotli": 56
+    },
+    {
+      "path": "gen/js/snug/cbor/scan.mjs",
+      "name": "itemsScanned",
+      "source": 58,
+      "min": 51,
+      "gzip": 71,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "vbase",
+      "source": 66,
+      "min": 51,
+      "gzip": 71,
+      "brotli": 55
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "fin",
+      "source": 62,
+      "min": 51,
+      "gzip": 65,
+      "brotli": 55
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "stageD",
+      "source": 65,
+      "min": 51,
+      "gzip": 69,
+      "brotli": 55
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "outPoolAt",
+      "source": 59,
+      "min": 51,
+      "gzip": 71,
+      "brotli": 55
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "ck",
+      "source": 60,
+      "min": 51,
+      "gzip": 71,
+      "brotli": 55
+    },
+    {
+      "path": "gen/js/snug/cbor/rscan.mjs",
+      "name": "rscanPosition",
+      "source": 195,
+      "min": 50,
+      "gzip": 67,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "ftsN",
+      "source": 64,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gk",
+      "source": 62,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "fkeyHi",
+      "source": 169,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/compile/maps.mjs",
+      "name": "asBegin",
+      "source": 58,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "nk",
+      "source": 62,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "failed",
+      "source": 59,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "csetWidth",
+      "source": 96,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "room",
+      "source": 133,
+      "min": 50,
+      "gzip": 70,
+      "brotli": 54
+    },
+    {
+      "path": "gen/js/snug/cbor/head.mjs",
+      "name": "be16",
+      "source": 134,
+      "min": 49,
+      "gzip": 69,
+      "brotli": 53
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "leafAt",
+      "source": 64,
+      "min": 49,
+      "gzip": 69,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "ifLimit",
+      "source": 96,
+      "min": 49,
+      "gzip": 69,
+      "brotli": 53
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsPosition",
+      "source": 127,
+      "min": 49,
+      "gzip": 66,
+      "brotli": 53
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "dead",
+      "source": 60,
+      "min": 48,
+      "gzip": 65,
+      "brotli": 52
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "nts",
+      "source": 62,
+      "min": 48,
+      "gzip": 68,
+      "brotli": 52
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "sc",
+      "source": 101,
+      "min": 48,
+      "gzip": 68,
+      "brotli": 52
+    },
+    {
+      "path": "gen/js/snug/compile/lex.mjs",
+      "name": "isDigit",
+      "source": 65,
+      "min": 48,
+      "gzip": 68,
+      "brotli": 52
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "markGet",
+      "source": 58,
+      "min": 48,
+      "gzip": 68,
+      "brotli": 52
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "qFlag",
+      "source": 66,
+      "min": 48,
+      "gzip": 68,
+      "brotli": 52
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsSteps",
+      "source": 57,
+      "min": 48,
+      "gzip": 68,
+      "brotli": 49
+    },
+    {
+      "path": "gen/js/snug/compile/lower.mjs",
+      "name": "ifNeg",
+      "source": 89,
+      "min": 47,
+      "gzip": 67,
+      "brotli": 51
+    },
+    {
+      "path": "gen/js/snug/compile/regexp.mjs",
+      "name": "at",
+      "source": 56,
+      "min": 47,
+      "gzip": 67,
+      "brotli": 51
+    },
+    {
+      "path": "gen/js/snug/nav/walk.mjs",
+      "name": "navSteps",
+      "source": 54,
+      "min": 47,
+      "gzip": 67,
+      "brotli": 51
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "sec",
+      "source": 58,
+      "min": 47,
+      "gzip": 67,
+      "brotli": 51
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "inRange",
+      "source": 65,
+      "min": 47,
+      "gzip": 67,
+      "brotli": 51
+    },
+    {
+      "path": "gen/js/snug/vm/map.mjs",
+      "name": "mPools",
+      "source": 68,
+      "min": 47,
+      "gzip": 67,
+      "brotli": 51
+    },
+    {
+      "path": "gen/js/snug/compile/arena.mjs",
+      "name": "erred",
+      "source": 55,
+      "min": 46,
+      "gzip": 66,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "ftsOf",
+      "source": 118,
+      "min": 46,
+      "gzip": 63,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "rem2",
+      "source": 66,
+      "min": 46,
+      "gzip": 66,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/compile/leaf.mjs",
+      "name": "fkeyLo",
+      "source": 94,
+      "min": 46,
+      "gzip": 66,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/vm/eval.mjs",
+      "name": "ifS2",
+      "source": 86,
+      "min": 46,
+      "gzip": 64,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/vm/session.mjs",
+      "name": "vmsKeep",
+      "source": 275,
+      "min": 46,
+      "gzip": 66,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/write/out.mjs",
+      "name": "tooShort",
+      "source": 142,
+      "min": 46,
+      "gzip": 66,
+      "brotli": 50
+    },
+    {
+      "path": "gen/js/snug/compile/main.mjs",
+      "name": "snugVersion",
+      "source": 188,
+      "min": 45,
+      "gzip": 65,
+      "brotli": 49
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "markSet",
+      "source": 58,
+      "min": 45,
+      "gzip": 65,
+      "brotli": 49
+    },
+    {
+      "path": "gen/js/snug/vm/base.mjs",
+      "name": "witClear",
+      "source": 54,
+      "min": 45,
+      "gzip": 65,
+      "brotli": 49
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "out",
+      "source": 54,
+      "min": 44,
+      "gzip": 64,
+      "brotli": 48
+    },
+    {
+      "path": "gen/js/snug/compile/emit.mjs",
+      "name": "ceil32",
+      "source": 55,
+      "min": 42,
+      "gzip": 62,
+      "brotli": 46
+    },
+    {
+      "path": "gen/js/snug/compile/parse.mjs",
+      "name": "cur",
+      "source": 50,
+      "min": 42,
+      "gzip": 62,
+      "brotli": 46
+    },
+    {
+      "path": "gen/js/snug/nav/trace.mjs",
+      "name": "ifLt",
+      "source": 114,
+      "min": 42,
+      "gzip": 62,
+      "brotli": 46
+    },
+    {
+      "path": "gen/js/snug/program/verify.mjs",
+      "name": "ceil32",
+      "source": 55,
+      "min": 42,
+      "gzip": 62,
+      "brotli": 46
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "imin",
+      "source": 85,
+      "min": 42,
+      "gzip": 62,
+      "brotli": 46
+    },
+    {
+      "path": "gen/js/snug/vm/scont.mjs",
+      "name": "ifLive",
+      "source": 86,
+      "min": 42,
+      "gzip": 62,
+      "brotli": 46
+    },
+    {
+      "path": "gen/js/snug/compile/prelude.mjs",
+      "name": "preludeLen",
+      "source": 48,
+      "min": 41,
+      "gzip": 61,
+      "brotli": 45
+    },
+    {
+      "path": "gen/js/snug/compile/glush.mjs",
+      "name": "gW",
+      "source": 57,
+      "min": 38,
+      "gzip": 58,
+      "brotli": 42
+    },
+    {
+      "path": "gen/js/snug/vm/sbase.mjs",
+      "name": "b01",
+      "source": 77,
+      "min": 37,
+      "gzip": 57,
+      "brotli": 41
+    }
+  ],
+  "ablations": [
+    {
+      "entry": "schema",
+      "mode": "baseline",
+      "min": 124376,
+      "gzip": 46042,
+      "brotli": 39293,
+      "changed": []
+    },
+    {
+      "entry": "schema",
+      "mode": "no-sessions",
+      "min": 89834,
+      "gzip": 32893,
+      "brotli": 28269,
+      "changed": [
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "no-verifier",
+      "min": 105462,
+      "gzip": 39583,
+      "brotli": 34088,
+      "changed": [
+        "gen/js/snug/program/verify.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "no-sessions-or-verifier",
+      "min": 70935,
+      "gzip": 26496,
+      "brotli": 23109,
+      "changed": [
+        "gen/js/snug/program/verify.mjs",
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "schedule2-only",
+      "min": 124200,
+      "gzip": 45972,
+      "brotli": 39236,
+      "changed": [
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/scont.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "no-force-generic-flag",
+      "min": 124270,
+      "gzip": 46006,
+      "brotli": 39221,
+      "changed": [
+        "gen/js/snug/vm/dead.mjs",
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/scont.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "buffer-generic-only",
+      "min": 81889,
+      "gzip": 29765,
+      "brotli": 25765,
+      "changed": [
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "buffer-generic-no-verifier",
+      "min": 63079,
+      "gzip": 23436,
+      "brotli": 20533,
+      "changed": [
+        "gen/js/snug/program/verify.mjs",
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "no-rare-leaf-helpers",
+      "min": 124085,
+      "gzip": 45936,
+      "brotli": 39138,
+      "changed": [
+        "gen/js/snug/vm/leaf.mjs"
+      ]
+    },
+    {
+      "entry": "schema",
+      "mode": "long-identifiers",
+      "min": 167084,
+      "gzip": 50181,
+      "brotli": 42053,
+      "changed": []
+    },
+    {
+      "entry": "runtime",
+      "mode": "baseline",
+      "min": 147857,
+      "gzip": 53452,
+      "brotli": 45473,
+      "changed": []
+    },
+    {
+      "entry": "runtime",
+      "mode": "no-sessions",
+      "min": 113315,
+      "gzip": 40458,
+      "brotli": 34553,
+      "changed": [
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "no-verifier",
+      "min": 128977,
+      "gzip": 47207,
+      "brotli": 40363,
+      "changed": [
+        "gen/js/snug/program/verify.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "no-sessions-or-verifier",
+      "min": 94416,
+      "gzip": 34126,
+      "brotli": 29348,
+      "changed": [
+        "gen/js/snug/program/verify.mjs",
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "schedule2-only",
+      "min": 147681,
+      "gzip": 53373,
+      "brotli": 45435,
+      "changed": [
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/scont.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "no-force-generic-flag",
+      "min": 147751,
+      "gzip": 53437,
+      "brotli": 45492,
+      "changed": [
+        "gen/js/snug/vm/dead.mjs",
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/scont.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "buffer-generic-only",
+      "min": 105411,
+      "gzip": 37334,
+      "brotli": 32021,
+      "changed": [
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "buffer-generic-no-verifier",
+      "min": 86560,
+      "gzip": 31061,
+      "brotli": 26777,
+      "changed": [
+        "gen/js/snug/program/verify.mjs",
+        "gen/js/snug/vm/eval.mjs",
+        "gen/js/snug/vm/session.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "no-rare-leaf-helpers",
+      "min": 147566,
+      "gzip": 53378,
+      "brotli": 45468,
+      "changed": [
+        "gen/js/snug/vm/leaf.mjs"
+      ]
+    },
+    {
+      "entry": "runtime",
+      "mode": "long-identifiers",
+      "min": 198070,
+      "gzip": 58948,
+      "brotli": 49308,
+      "changed": []
+    }
+  ]
+}

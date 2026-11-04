@@ -5,6 +5,7 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": { "types": "./types/index.d.ts", "default": "./src/index.mjs" },
     "./schema": { "types": "./types/schema.d.ts", "default": "./src/public-schema.mjs" },

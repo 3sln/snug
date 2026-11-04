@@ -9,6 +9,7 @@ record supplies one; “worktree” is not a reproducible clean revision.
 
 | Date / revision | Operation or artifact measured | Ownership / boundary | Runtime and record |
 | --- | --- | --- | --- |
+| 2026-11-03 / P7.6 hashed worktree snapshots | Every public entry and module, static/full/split graphs; codec + schema 53,452 gzip B; compile static 45,754 → 1,243 gzip B | All exports retained; generated inputs identical before/after; no timing claims | Node v24.6.0, esbuild 0.28.2; [P7.6 below](#bundle-size-p76-phase-1--2026-11-03) |
 | 2026-11-03 / `f1a78c0` | P7.1 profile options: this tree under each preset vs the pre-P7.1 tree `c37eaaf` (decode, scan, encode; 8 workloads) | Same public calls on both arms; one preset per process; Bindle arm with `strictArrays: false` (D113 measured separately) | Node v24.6.0, thread CPU; [P7.1 below](#profile-options-p71) |
 | 2026-11-03 / `f275938` | **Full public runtime bundle:** codec + schema + view + writer + sources, no compiler; 155,193 minified / **56,226 gzip-9 bytes** | Staged package, all five runtime entries together; no fixtures; esbuild 0.28.2, not an internal-core size | Node v24.6.0; [P7.7 sizes/method](../tools/runtime/README.md#sizes-esbuild---minify-bytes) |
 | 2026-11-03 / `f275938` | Public decode, encode, validate, schema.decode, checked view + lookup, Program load, compile, profile handle scan; 976 conformance checks per arm | Decode builds copies; checked view owned by default; staged package in fresh consumers; compiler/precompiled arms separate | Node v24.6.0, Chrome 156.0.8078.80, workerd 2026-11-02 and repeat 2025-12-17; [P7.7](../tools/runtime/README.md). Later Unicode/schema sources not tested there |
@@ -282,3 +283,116 @@ ratios to the in-process baseline are meaningful: decode speedups 0.84–4.84×
 Bindle 120000-integer encode (33.8 ms vs 8.6 ms deterministic) is the
 `strictArrays` own-key check that the Bindle preset keeps (D113), not P7.1.
 
+
+## Bundle size (P7.6 Phase 1) — 2026-11-03
+
+Machine: Apple M1 Pro, arm64, 32 GiB; macOS 14.6.1 (23G93), Darwin
+23.6.0. Node v24.6.0, V8 13.6.233.10-node.24, zlib 1.3.1-470d3a2,
+brotli 1.1.0; esbuild 0.28.2 from bench/compare/node_modules, read-only;
+Babashka 1.3.190. No installs/network. Size measurements only, no timing
+or throughput inference. Local date 2026-11-03 (report timestamps are UTC
+2026-11-04). This was a shared worktree, not a clean revision; baseline was
+captured before the host edit, and exact source hashes/metafiles are saved.
+Only public-compile and its new compile-runtime module differ among hashed
+inputs; package sideEffects:false is also included in the aggregate hash.
+All generated-module hashes match before/after.
+
+```sh
+node tools/size/size.mjs --no-gate --report=tools/size/before.json # before host changes
+bb size --report=tools/size/after.json
+node tools/size/size.mjs --details
+node tools/size/analyze.mjs --report=/private/tmp/analysis.json
+```
+
+Method: every package export, all bindings retained, one ESM/browser/ES2022
+bundle per entry; esbuild minify + tree shaking + metafile, ASCII charset,
+no legal comments/source maps. Static measurement leaves dynamic imports
+external; gzip level 9 and brotli quality 11 compress the complete minified
+output with Node zlib. Runtime unions retain both entry namespaces; sizes
+are not sums of individual entries. Unicode is optional compile-time data
+and outside both runtime unions. Module compression is measured separately
+with imports retained; only metafile bytesInOutput are attributed within
+each bundle. Compressed module figures cannot be added. Every module size,
+import edge and a proportional ranked list is in [the report](../tools/size/report.md).
+
+| Entry | Before min B | After min B | Before gzip-9 B | After gzip-9 B | Before brotli-11 B | After brotli-11 B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| snug | 41,238 | 41,238 | 14,174 | 14,174 | 12,689 | 12,689 |
+| snug/schema | 124,376 | 124,376 | 46,042 | 46,042 | 39,293 | 39,293 |
+| snug/compile | 123,471 | 2,378 | 45,754 | 1,243 | 39,065 | 1,101 |
+| snug/view | 53,988 | 53,988 | 18,328 | 18,328 | 16,334 | 16,334 |
+| snug/writer | 37,750 | 37,750 | 12,996 | 12,996 | 11,640 | 11,640 |
+| snug/unicode | 19,377 | 19,377 | 9,287 | 9,287 | 8,817 | 8,817 |
+| snug/sources | 30,415 | 30,415 | 11,300 | 11,300 | 10,029 | 10,029 |
+| runtime | 147,858 | 147,858 | 53,452 | 53,452 | 45,485 | 45,485 |
+| all-runtime | 175,485 | 175,485 | 63,284 | 63,284 | 53,707 | 53,707 |
+
+`runtime` = codec + public schema; `all-runtime` adds views, Writer and
+sources. These are current all-export measurements; older ~11 KB codec,
+~41 KB schema and ~56 KB full-runtime records used earlier revisions and/or
+different retained exports. No regression ratio against those records is
+claimed. R9 still misses its 20 KB target.
+
+Host restructuring defers the compiler and public schema classes together
+behind compile-runtime.mjs; the class/error identities and synchronous
+Program verification, serialization and session methods remain intact.
+Options still validate before the first await. Runtime modules have no
+independent registration effects, so sideEffects:false is appropriate.
+
+Full-closure bundles inline reachable lazy code: compile gzip grows from
+84,074 to 85,118 B (+1,044), while runtime remains 53,626 B. Real code
+splitting compresses each chunk separately: compile initial transfer is
+46,746 → 1,371 gzip B; reachable total after compile is 84,612 → 84,779 B
+(+167). Schema split initial/total is 47,010 B. esbuild emits orphan compiler
+and verifier chunks from unused internal schema loader functions; schema
+has no edge to them. The JSON reports distinguish initial, reachable total
+and all emitted output, avoiding a false claim that orphan files are loaded.
+
+Largest schema minified contributions: eval 19,391 B, verifier 18,903 B,
+scont 14,664 B, sbase 7,730 B, map 6,700 B, sstr 6,647 B. Codec is led by
+Writer 14,192 B, scanner 4,490 B, values 3,772 B and builder 2,866 B.
+[DEVLOG P7.6](../DEVLOG.md) records why each dependency is present and the
+prioritised kin plan: session partition (~13 KB marginal gzip), generic
+buffer VM (~3.1 KB after session removal), verifier refactor (1–2 KB estimate;
+~6.3 KB removal ceiling), rare leaves (~0.1–1 KB per useful partition), then
+legacy schedule/generic flags (tens of bytes in the conservative probes).
+Shorter source identifiers add approximately zero after existing mangling.
+All probes change code only in memory and are never executed; their numbers
+are size estimates, not validated replacements or additive predictions.
+
+Budget caps in tools/size/budget.json are ceil(current bytes × 1.02) for min,
+gzip and brotli, independently for static and full closure, all public
+entries and both unions. bb size passed (exit 0); a scratch zero-gzip cap
+failed (exit 1, 14,174 > 0). Babashka printed a sandbox process-enumeration
+warning in its shutdown hook after the successful gate; Node invocation
+avoids it. This regression gate does not mark R9 achieved.
+
+Gates: host/js npm test 1,284 passed, zero failed/skipped; seven examples
+executed successfully; npm run build staged successfully, and staged-package
+examples also ran in the host suite. No emit/drift, Rust/wasm or browser
+checks were run for this phase. No commits were made by this task.
+
+Input hashes:
+
+- Before: `0e00c8c9746d0cf44daa0771bbd2822534b828fe9e48bcc887e466d6b0441feb`.
+- After: `16789fc85177e8d4063cbd6d1c278d14488118e47492b8dfeede1e33df3b6622`.
+
+The other engineer regenerated compiler/verifier/session modules after the
+paired measurements. Current.json preserves that later snapshot separately;
+these additions are not host import savings or regressions. Final budgets
+use this current snapshot +2%. Static min/gzip/brotli bytes:
+
+| Entry | Current min | Current gzip-9 | Current brotli-11 |
+| --- | ---: | ---: | ---: |
+| snug | 41,238 | 14,174 | 12,689 |
+| snug/schema | 125,518 | 46,456 | 39,604 |
+| snug/compile | 2,378 | 1,243 | 1,101 |
+| snug/view | 53,988 | 18,328 | 16,334 |
+| snug/writer | 37,750 | 12,996 | 11,640 |
+| snug/unicode | 19,377 | 9,287 | 8,817 |
+| snug/sources | 30,415 | 11,300 | 10,029 |
+| runtime | 149,000 | 53,870 | 45,815 |
+| all-runtime | 176,627 | 63,720 | 54,145 |
+
+Current input hash: `d25ff5e3d4416131a1d69e828afc883c0608a4bb401038d1a1ef8768e4c0b23c`. Full graphs and changed
+module measurements: [report](../tools/size/report.md#current-shared-tree-after-concurrent-regeneration).

@@ -1,0 +1,117 @@
+{
+  "description": "Ceil(current.json bytes * 1.02), static and full closure independently. Regression caps; R9 remains a separate 20 KB runtime gzip target.",
+  "recorded": "2026-11-04T02:58:37.960Z",
+  "sourceHash": "d25ff5e3d4416131a1d69e828afc883c0608a4bb401038d1a1ef8768e4c0b23c",
+  "esbuild": "0.28.2",
+  "margin": 0.02,
+  "entries": {
+    "snug": {
+      "static": {
+        "min": 42063,
+        "gzip": 14458,
+        "brotli": 12943
+      },
+      "full": {
+        "min": 42063,
+        "gzip": 14458,
+        "brotli": 12943
+      }
+    },
+    "snug/schema": {
+      "static": {
+        "min": 128029,
+        "gzip": 47386,
+        "brotli": 40397
+      },
+      "full": {
+        "min": 128220,
+        "gzip": 47440,
+        "brotli": 40586
+      }
+    },
+    "snug/compile": {
+      "static": {
+        "min": 2426,
+        "gzip": 1268,
+        "brotli": 1124
+      },
+      "full": {
+        "min": 256854,
+        "gzip": 88609,
+        "brotli": 74900
+      }
+    },
+    "snug/view": {
+      "static": {
+        "min": 55068,
+        "gzip": 18695,
+        "brotli": 16661
+      },
+      "full": {
+        "min": 55068,
+        "gzip": 18695,
+        "brotli": 16661
+      }
+    },
+    "snug/writer": {
+      "static": {
+        "min": 38505,
+        "gzip": 13256,
+        "brotli": 11873
+      },
+      "full": {
+        "min": 38505,
+        "gzip": 13256,
+        "brotli": 11873
+      }
+    },
+    "snug/unicode": {
+      "static": {
+        "min": 19765,
+        "gzip": 9473,
+        "brotli": 8994
+      },
+      "full": {
+        "min": 19765,
+        "gzip": 9473,
+        "brotli": 8994
+      }
+    },
+    "snug/sources": {
+      "static": {
+        "min": 31024,
+        "gzip": 11526,
+        "brotli": 10230
+      },
+      "full": {
+        "min": 31024,
+        "gzip": 11526,
+        "brotli": 10230
+      }
+    },
+    "runtime": {
+      "static": {
+        "min": 151980,
+        "gzip": 54948,
+        "brotli": 46732
+      },
+      "full": {
+        "min": 152187,
+        "gzip": 55133,
+        "brotli": 46934
+      }
+    },
+    "all-runtime": {
+      "static": {
+        "min": 180160,
+        "gzip": 64995,
+        "brotli": 55228
+      },
+      "full": {
+        "min": 180376,
+        "gzip": 65031,
+        "brotli": 55288
+      }
+    }
+  }
+}
