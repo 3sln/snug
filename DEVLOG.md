@@ -6039,3 +6039,52 @@ reference errors as invalid data cannot expose conformance gaps.
 replace refused schemas, or adopt Ruby verdicts as truth; rejected because
 these conceal the byte, coverage and semantic differences being tested.
 - [ ] **Signed off** (owner)
+
+
+## P8.5 — Independent PEG reference oracle (2026-11-04)
+
+Delivered `corpus/tools/peg-oracle.mjs`, `peg-oracle.test.mjs` and
+`peg-oracle.README.md`. This is an independent semantic interpreter for
+D270 / architecture §20 revision 3.1, with a fresh RFC 9682 parser,
+Appendix D prelude, direct PEG array/map evaluation, both D273 cut modes,
+EC key order, guarded group recursion, unwrap (including tag content),
+sockets, inherited controls and a permissive generic CBOR decoder behind
+baseline decoding with `top: 'any'`. No prototype, existing oracle logic,
+kin/generated matcher or JS host source was read/imported. No production
+implementation, corpus expectation, design text or decision was changed.
+
+Checks actually run:
+
+* 117 documented probes (the table is §20.15, while §20.13 lists migration)
+  agree in both modes: 234/234 verdicts, zero design-probe discrepancies.
+* All 910 non-schema-error adversarial cases checked: exactly the 33
+  documented true-to-false flips (11 structural, 22 rule A), no others.
+* Final local `node --test --test-skip-pattern='Ruby differential'
+  --test-reporter=tap corpus/tools/peg-oracle.test.mjs`: 470 passed, zero
+  failed. Includes 103 individually named migration cases and 126 focused
+  semantic/wire regressions, plus EC/decoder/compile/budget checks.
+* Completed full test command with the supplied offline Ruby wrapper:
+  467/467 passed before four final regression additions; those additions
+  passed in the final local run. The same seeded 300-pair Ruby sample
+  completed with rc 0/1 for 285 pairs: 116 agreements, 169 classified
+  disagreements; 15 further attempts were rc-65 parse errors (RX), never
+  refusals. Counts: RC 14, RL 42, RK 30, RI 15, RZ 30, RR 27, RO 11,
+  RX 15, new 0, unknown 0, timeout 0. Seed `0x86109165`, 20 stratified
+  families; rates are not estimates of arbitrary-schema agreement.
+* Syntax checks for both modules and path-scoped whitespace diff check ran.
+  No installs, network access, emission, publishing or commits were done.
+
+Learnt: direct immutable remaining-pair state makes failed-iteration undo
+and per-attempt cut commitment straightforward to audit. A broader corpus
+check caught spaced-occurrence parsing, subnormal hex-float rounding and
+bignum numeric comparison gaps; these were corrected from the RFC/semantic
+rules and regression-tested. A preliminary four-second Ruby timeout was
+inconclusive; rerunning with a 60-second invocation allowance completed
+without timeouts. README findings F1–F6 distinguish zero probe mismatches
+from the RFC/design tensions: union versus lock-in, existential versus EC
+picks, cut scope/occurrence expansion, empty iteration, inherited encoded
+float widths versus representability, and inherited no-op `.default`
+versus the RFC's implied `.ne`. JS regexp matching is explicitly an
+approximation; non-enumerable controllers and bounds can return unknown.
+This oracle does not certify production tiers, resources or witnesses.
+No new semantic decision or owner sign-off is asserted.
