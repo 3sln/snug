@@ -1,0 +1,259 @@
+;; The GENERIC extension controls (D082, D142): `.chars`, `.unique` and
+;; `.samelen` as pure predicates over an item's encoded bytes, written in kin so
+;; that every host computes the same verdict. Hosts wrap them as ordinary
+;; registered controls (JS `snug/controls`, Rust `snug::controls`); the VM
+;; calls them, like any extension control, only for an item that is whole and
+;; has already passed the profile walk -- so every head read here is
+;; well-formed, definite and in bounds of [s, e).
+;;
+;; Arguments are the CBOR encodings the compiler made of the control's
+;; controller (snug.compile.lower `ext-arg`): an unsigned integer n, a range
+;; `lo..hi` as the array [lo, hi], a text string, or an array of those.
+;;
+;;   .chars n | lo..hi     a text string of n / lo..hi Unicode code points
+;;   .unique <any>         an array whose elements' encodings are pairwise distinct
+;;   .samelen "a" | [...]  a map whose named members that are present all hold
+;;                         arrays or typed arrays of one element count
+(ns snug.vm.controls
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst]]
+            [snug.lang :refer [I32 Bool Bytes Ints + - * neg quot shl ushr bit-and bit-or
+                               < > <= >= == != and or not u8 blen ia iset ilen]]
+            [snug.cbor.tags :refer [typed-size]]))
+
+(defconst ^I32 BIG 2147483647)
+
+;; ------------------------------------------------------------ heads
+
+(defn ^:pub ^I32 hlen [^Bytes b ^I32 i]
+  (comment "The length of the head at i (ai 0..27).")
+  (let [ai (bit-and (u8 b i) 31)]
+    (if (< ai 24) (return 1))
+    (if (== ai 24) (return 2))
+    (if (== ai 25) (return 3))
+    (if (== ai 26) (return 5))
+    (return 9)))
+
+(defn ^:pub ^I32 harg [^Bytes b ^I32 i]
+  (comment "The head argument at i as a non-negative i32, BIG when it does not fit.")
+  (let [ai (bit-and (u8 b i) 31)]
+    (if (< ai 24) (return ai))
+    (if (== ai 24) (return (u8 b (+ i 1))))
+    (if (== ai 25) (return (bit-or (shl (u8 b (+ i 1)) 8) (u8 b (+ i 2)))))
+    (if (== ai 26)
+      (do (if (>= (u8 b (+ i 1)) 128) (return BIG))
+          (return (bit-or (bit-or (shl (u8 b (+ i 1)) 24) (shl (u8 b (+ i 2)) 16))
+                          (bit-or (shl (u8 b (+ i 3)) 8) (u8 b (+ i 4)))))))
+    (return BIG)))
+
+(defn ^:pub ^I32 skip [^Bytes b ^I32 i ^I32 e]
+  (comment "The end of the (well-formed, definite) item at i, or -1 if it would pass"
+           "e. One counter of items still owed is enough: a container adds its"
+           "children, a tag its content.")
+  (let [^:mut at i
+        ^:mut owe 1]
+    (while (> owe 0)
+      (if (>= at e) (return (neg 1)))
+      (let [ib (u8 b at)
+            major (ushr ib 5)
+            ai (bit-and ib 31)]
+        (if (> ai 27) (return (neg 1)))
+        (let [h (hlen b at)
+              n (harg b at)]
+          (set owe (- owe 1))
+          (if (> h (- e at)) (return (neg 1)))
+          (set at (+ at h))
+          (if (or (== major 2) (== major 3))
+            (do (if (> n (- e at)) (return (neg 1)))
+                (set at (+ at n))))
+          (if (== major 4)
+            (do (if (> n (- e at)) (return (neg 1)))
+                (set owe (+ owe n))))
+          (if (== major 5)
+            (do (if (> n (quot (- e at) 2)) (return (neg 1)))
+                (set owe (+ owe (* 2 n)))))
+          (if (== major 6) (set owe (+ owe 1))))))
+    (return at)))
+
+(defn ^Bool span-eq [^Bytes x ^I32 xs ^I32 xe ^Bytes y ^I32 ys ^I32 ye]
+  (if (!= (- xe xs) (- ye ys)) (return false))
+  (for [^I32 i 0 (- xe xs)]
+    (if (!= (u8 x (+ xs i)) (u8 y (+ ys i))) (return false)))
+  (return true))
+
+;; ------------------------------------------------------------ arguments
+
+(defn ^:pub ^I32 range-lo [^Bytes a ^I32 ao ^I32 al]
+  (comment "The lower bound of a `.chars` argument (n, or [lo, hi] of unsigned"
+           "integers, nothing after it), or -1 when it is not one.")
+  (if (< al 1) (return (neg 1)))
+  (let [ib (u8 a ao)
+        e (+ ao al)]
+    (if (== (ushr ib 5) 0)
+      (do (if (!= (skip a ao e) e) (return (neg 1)))
+          (return (harg a ao))))
+    (if (!= ib 130) (return (neg 1)))
+    (let [x (+ ao 1)]
+      (if (or (>= x e) (!= (ushr (u8 a x) 5) 0)) (return (neg 1)))
+      (let [y (skip a x e)]
+        (if (or (< y 0) (or (>= y e) (!= (ushr (u8 a y) 5) 0))) (return (neg 1)))
+        (if (!= (skip a y e) e) (return (neg 1)))
+        (if (> (harg a x) (harg a y)) (return (neg 1)))
+        (return (harg a x))))))
+
+(defn ^:pub ^I32 range-hi [^Bytes a ^I32 ao ^I32 al]
+  (comment "The upper bound of a `.chars` argument (range-lo checked it).")
+  (if (== (ushr (u8 a ao) 5) 0) (return (harg a ao)))
+  (let [y (skip a (+ ao 1) (+ ao al))]
+    (return (harg a y))))
+
+(defn ^:pub ^Bool chars-arg [^Bytes a ^I32 ao ^I32 al]
+  (return (>= (range-lo a ao al) 0)))
+
+(defn ^:pub ^Bool names-arg [^Bytes a ^I32 ao ^I32 al]
+  (comment "A `.samelen` argument: one text string, or an array of text strings.")
+  (if (< al 1) (return false))
+  (let [e (+ ao al)
+        ib (u8 a ao)]
+    (if (!= (skip a ao e) e) (return false))
+    (if (== (ushr ib 5) 3) (return true))
+    (if (!= (ushr ib 5) 4) (return false))
+    (let [n (harg a ao)
+          ^:mut x (+ ao (hlen a ao))]
+      (for [^I32 _k 0 n]
+        (if (!= (ushr (u8 a x) 5) 3) (return false))
+        (set x (skip a x e)))
+      (return true))))
+
+(defn ^:pub ^Bool any-arg [^Bytes a ^I32 ao ^I32 al]
+  (comment "`.unique` takes any one item (conventionally `true`).")
+  (return (and (>= al 1) (== (skip a ao (+ ao al)) (+ ao al)))))
+
+;; ------------------------------------------------------------ .chars
+
+(defn ^:pub ^Bool chars-ok [^Bytes a ^I32 ao ^I32 al ^Bytes b ^I32 s ^I32 e]
+  (comment "A text string whose code points number within the argument's range"
+           "(UTF-8 already checked by the profile: count the non-continuation bytes).")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 3)) (return false))
+  (let [lo (range-lo a ao al)]
+    (if (< lo 0) (return false))
+    (let [hi (range-hi a ao al)
+          ^:mut n 0
+          ^:mut i (+ s (hlen b s))]
+      (while (< i e)
+        (if (!= (bit-and (u8 b i) 192) 128) (set n (+ n 1)))
+        (set i (+ i 1)))
+      (return (and (>= n lo) (<= n hi))))))
+
+;; ------------------------------------------------------------ .unique
+
+(defn ^I32 span-cmp [^Bytes b ^Ints t ^I32 x ^I32 y]
+  (comment "Order of the spans recorded at pairs x and y of t (start, length):"
+           "bytewise, a proper prefix first.")
+  (let [xs (ia t (* 2 x))
+        xl (ia t (+ (* 2 x) 1))
+        ys (ia t (* 2 y))
+        yl (ia t (+ (* 2 y) 1))
+        ^:mut m xl]
+    (if (< yl m) (set m yl))
+    (for [^I32 i 0 m]
+      (let [c (u8 b (+ xs i))
+            d (u8 b (+ ys i))]
+        (if (!= c d) (return (- c d)))))
+    (return (- xl yl))))
+
+(defn span-swap [^Ints t ^I32 x ^I32 y]
+  (let [a (ia t (* 2 x))
+        al (ia t (+ (* 2 x) 1))
+        c (ia t (* 2 y))
+        cl (ia t (+ (* 2 y) 1))]
+    (iset t (* 2 x) c)
+    (iset t (+ (* 2 x) 1) cl)
+    (iset t (* 2 y) a)
+    (iset t (+ (* 2 y) 1) al)))
+
+(defn sift [^Bytes b ^Ints t ^I32 root0 ^I32 n]
+  (let [^:mut root root0]
+    (while (< (+ (* 2 root) 1) n)
+      (let [^:mut c (+ (* 2 root) 1)]
+        (if (and (< (+ c 1) n) (< (span-cmp b t c (+ c 1)) 0)) (set c (+ c 1)))
+        (if (< (span-cmp b t root c) 0)
+          (do (span-swap t root c) (set root c))
+          (set root n))))))
+
+(defn ^:pub ^I32 unique-words [^I32 n]
+  (comment "Words of scratch `unique-ok` needs for an item of n bytes.")
+  (return (+ (* 2 n) 2)))
+
+(defn ^:pub ^Bool unique-ok [^Bytes b ^I32 s ^I32 e ^Ints t]
+  (comment "An array whose elements' encodings are pairwise distinct: record each"
+           "element's span in t (unique-words of the item's length), heap-sort the"
+           "spans, compare neighbours. O(n log n) comparisons, no allocation.")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 4)) (return false))
+  (let [n (harg b s)
+        ^:mut x (+ s (hlen b s))]
+    (if (< (quot (ilen t) 2) n) (return false))
+    (for [^I32 k 0 n]
+      (let [y (skip b x e)]
+        (if (< y 0) (return false))
+        (iset t (* 2 k) x)
+        (iset t (+ (* 2 k) 1) (- y x))
+        (set x y)))
+    (let [^:mut i (- (quot n 2) 1)]
+      (while (>= i 0)
+        (sift b t i n)
+        (set i (- i 1))))
+    (let [^:mut j (- n 1)]
+      (while (> j 0)
+        (span-swap t 0 j)
+        (sift b t 0 j)
+        (set j (- j 1))))
+    (for [^I32 k2 1 n]
+      (if (== (span-cmp b t (- k2 1) k2) 0) (return false)))
+    (return true)))
+
+;; ------------------------------------------------------------ .samelen
+
+(defn ^I32 count-of [^Bytes b ^I32 v ^I32 e]
+  (comment "The element count of the array or (allowed) typed array at v, or -1.")
+  (let [ib (u8 b v)
+        major (ushr ib 5)]
+    (if (== major 4) (return (harg b v)))
+    (if (!= major 6) (return (neg 1)))
+    (let [sz (typed-size (harg b v))
+          c (+ v (hlen b v))]
+      (if (or (== sz 0) (>= c e)) (return (neg 1)))
+      (if (!= (ushr (u8 b c) 5) 2) (return (neg 1)))
+      (return (quot (harg b c) sz)))))
+
+(defn ^Bool named [^Bytes a ^I32 ao ^I32 al ^Bytes b ^I32 ks ^I32 ke]
+  (comment "Is the key encoded at b[ks, ke) one of the argument's names?")
+  (let [e (+ ao al)]
+    (if (== (ushr (u8 a ao) 5) 3) (return (span-eq a ao e b ks ke)))
+    (let [n (harg a ao)
+          ^:mut x (+ ao (hlen a ao))]
+      (for [^I32 _k 0 n]
+        (let [y (skip a x e)]
+          (if (span-eq a x y b ks ke) (return true))
+          (set x y)))
+      (return false))))
+
+(defn ^:pub ^Bool samelen-ok [^Bytes a ^I32 ao ^I32 al ^Bytes b ^I32 s ^I32 e]
+  (comment "A map whose members named by the argument, where present, all hold"
+           "arrays or typed arrays with one element count.")
+  (if (or (>= s e) (!= (ushr (u8 b s) 5) 5)) (return false))
+  (if (not (names-arg a ao al)) (return false))
+  (let [n (harg b s)
+        ^:mut x (+ s (hlen b s))
+        ^:mut len (neg 1)]
+    (for [^I32 _k 0 n]
+      (let [ke (skip b x e)]
+        (if (< ke 0) (return false))
+        (let [ve (skip b ke e)]
+          (if (< ve 0) (return false))
+          (if (named a ao al b x ke)
+            (do (let [c (count-of b ke ve)]
+                  (if (< c 0) (return false))
+                  (if (and (>= len 0) (!= c len)) (return false))
+                  (set len c))))
+          (set x ve))))
+    (return true)))

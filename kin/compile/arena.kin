@@ -67,6 +67,8 @@
 (defconst ^:pub ^I32 ERR_EMPTY 52)
 (defconst ^:pub ^I32 ERR_ARRAY_KEY 53)
 (defconst ^:pub ^I32 ERR_NEED_UNICODE 54)
+;; D141: the extension-control registry the host passed is malformed
+(defconst ^:pub ^I32 ERR_CONTROL_REGISTRY 55)
 
 ;; ------------------------------------------------------------ the header
 (defconst ^:pub ^I32 H_TOP 0)
@@ -127,6 +129,10 @@
 (defconst ^:pub ^I32 H_G1 53)
 (defconst ^:pub ^I32 H_G2 54)
 (defconst ^:pub ^I32 H_G3 55)
+;; D141: extension registry flags (bit 0: admitted under the `bus` profile)
+(defconst ^:pub ^I32 H_EXT_FLAGS 62)
+;; D141: the bid of the used controls' names blob (-1: none used)
+(defconst ^:pub ^I32 H_EXT_BID 63)
 (defconst ^:pub ^I32 H_TAB 64)
 (defconst ^:pub ^I32 N_TABLES 128)
 (defconst ^:pub ^I32 H_DATA 512)
@@ -252,6 +258,12 @@
 (defconst ^:pub ^I32 T_NCLS 113)
 (defconst ^:pub ^I32 T_CONT 114)
 (defconst ^:pub ^I32 T_UNICODE 115)
+;; D141: extension controls -- registry records (name start in T_EXTB, length, max item bytes),
+;; their name bytes, the used controls' Program ids, an argument being encoded
+(defconst ^:pub ^I32 T_EXT 116)
+(defconst ^:pub ^I32 T_EXTB 117)
+(defconst ^:pub ^I32 T_EXTUSE 118)
+(defconst ^:pub ^I32 T_EXTARG 119)
 (defconst ^:pub ^I32 H_WALK_RULE 61)
 (defconst ^:pub ^I32 H_TS_ANY 59)
 (defconst ^:pub ^I32 H_N_FIN 60)

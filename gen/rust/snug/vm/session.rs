@@ -202,6 +202,22 @@ pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32]
     ss[(SS_PH) as usize] = PH_DONE;
     return FIN;
 }
+pub(crate) fn ext_need(p: &[i32], s: &[i32], fb: i32, nq: i32) -> i32 {
+    // D140: the largest maximum item size of the EXT leaves in the query list
+    // (their mask admits every item), or -1 when it has none.
+    if (p[(H_FLAGS) as usize] & FL_EXT) == 0 {
+        return -1;
+    }
+    let lv: i32 = p[(H_S_LEAVES) as usize];
+    let mut m: i32 = -1;
+    for i in 0..nq {
+        let lb: i32 = lv + (8 * s[(fb + i) as usize]);
+        if ((p[(lb) as usize] & 255) == K_EXT) && (p[(lb + 5) as usize] > m) {
+            m = p[(lb + 5) as usize];
+        }
+    }
+    return m;
+}
 pub(crate) fn sib_rem(ss: &[i32]) -> i32 {
     // The items the top frame still owes from the pending one on (it
     // included), for the sibling prescan; -1: up to the end.
@@ -391,6 +407,24 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
             } else {
                 direct = -1;
             }
+        }
+    }
+    // D140: an item an EXT leaf may judge is taken whole when it is no longer
+    // than the leaves' largest maximum: ask for that much from its start;
+    // if it still crosses, it is longer, every such leaf fails by size, and
+    // frames take it as usual.
+    if (direct != 1) && (nq > 0) {
+        let xm: i32 = ext_need(p, s, fb, nq);
+        if xm >= 0 {
+            let xreq: i32 = pos + imin(xm, end - pos);
+            let g7: i32 = ensure(ss, base, wend, pos, xreq);
+            if suspended(g7) {
+                return g7;
+            }
+            if prescan(b, ss, base, pos, end, xreq) == 1 {
+                direct = 1;
+            }
+            ss[(SS_CHN) as usize] = -1;
         }
     }
     progress(ss, 1);

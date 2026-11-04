@@ -3,6 +3,7 @@
 
 use crate::snug::compile::arena::*;
 use crate::snug::compile::bytes::*;
+use crate::snug::compile::ext::*;
 use crate::snug::compile::leaf::*;
 use crate::snug::compile::parse::*;
 use crate::snug::compile::regexp::*;
@@ -1141,9 +1142,52 @@ pub fn order_rules(h: &mut [i32]) -> i32 {
     }
     return n;
 }
+pub(crate) fn ext_names(h: &mut [i32]) -> i32 {
+    // D141: number the extension controls the final leaves use, in registry
+    // (name) order, into T_EXTUSE, and intern their names as back-to-back CBOR
+    // text strings (H_EXT_BID, -1 when none). Answers the count or -1.
+    let nl: i32 = hg(h, H_N_FIN);
+    let ne: i32 = n_exts(h);
+    let mut used: i32 = 0;
+    hs(h, H_EXT_BID, -1);
+    for i in 0..ne {
+        vset(h, T_EXTUSE, i, -1);
+    }
+    for f in 0..nl {
+        let l: i32 = fin_internal(h, f);
+        if lk(h, l) == K_EXT {
+            vset(h, T_EXTUSE, ld(h, l, 0), 0);
+        }
+    }
+    vtrunc(h, T_EXTARG, 0);
+    for j in 0..ne {
+        if vget(h, T_EXTUSE, j) == 0 {
+            vset(h, T_EXTUSE, j, used);
+            used += 1;
+            let len: i32 = ext_name_len(h, j);
+            head_push(h, T_EXTARG, 3, 0, len);
+            for c in 0..len {
+                let x: i32 = ext_name_byte(h, j, c);
+                vpush1(h, T_EXTARG, x);
+            }
+        }
+    }
+    if used > 0 {
+        let bid: i32 = intern(h, T_EXTARG, 0, vlen(h, T_EXTARG));
+        if bid < 0 {
+            return -1;
+        }
+        hs(h, H_EXT_BID, bid);
+    }
+    return used;
+}
 pub fn build_pool(h: &mut [i32]) -> i32 {
     // Pool order (program.md §15.1): rule names, keys, literals, bignum
-    // magnitudes, .bits masks; identical byte strings share.
+    // magnitudes, .bits masks, extension arguments, the extension names;
+    // identical byte strings share.
+    if ext_names(h) < 0 {
+        return -1;
+    }
     let nb: i32 = nbids(h);
     let nl: i32 = hg(h, H_N_FIN);
     vtrunc(h, T_POOL, 0);
@@ -1197,6 +1241,15 @@ pub fn build_pool(h: &mut [i32]) -> i32 {
         if (lk(h, l3) == K_BYTES) && (ld(h, l3, 2) >= 0) {
             pool_place(h, ld(h, l3, 2));
         }
+    }
+    for f4 in 0..nl {
+        let l4: i32 = fin_internal(h, f4);
+        if lk(h, l4) == K_EXT {
+            pool_place(h, ld(h, l4, 1));
+        }
+    }
+    if hg(h, H_EXT_BID) >= 0 {
+        pool_place(h, hg(h, H_EXT_BID));
     }
     if vlen(h, T_POOL) > hg(h, H_LIM_POOL) {
         return fail(h, ERR_LIM_POOL, -1);
@@ -1509,6 +1562,7 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
 }
 pub const MAGIC: i32 = 1735749235;
 pub const FORMAT_VERSION: i32 = 1;
+pub const FORMAT_V11: i32 = 65537;
 pub(crate) fn out(h: &mut [i32], v: i32) {
     vpush1(h, T_OUT, v);
 }
@@ -1619,6 +1673,12 @@ pub(crate) fn write_leaf(h: &mut [i32], f: i32) {
     if (k == K_AND) || (k == K_NOT) {
         d0 = fin(h, ld(h, l, 0));
         d1 = fin(h, ld(h, l, 1));
+    }
+    if k == K_EXT {
+        d0 = vget(h, T_EXTUSE, ld(h, l, 0));
+        d1 = vget(h, T_POOLOFF, ld(h, l, 1));
+        d2 = bid_len(h, ld(h, l, 1));
+        d3 = ld(h, l, 2);
     }
     out(h, k | (fl << 8));
     out(h, leaf_mask(h, l));
@@ -1771,6 +1831,33 @@ pub(crate) fn write_bound(h: &mut [i32], o: i32) {
         out(h, vget(h, T_IV, o + 2));
     }
 }
+pub(crate) fn ext_word(h: &[i32], which: i32) -> i32 {
+    // D141's header words once the pool is built: 0 the format word (1.1 when
+    // a control is used), 1 N_EXTS, 2 the names' pool offset, 3 their length.
+    let eb: i32 = hg(h, H_EXT_BID);
+    if eb < 0 {
+        if which == 0 {
+            return FORMAT_VERSION;
+        }
+        return 0;
+    }
+    if which == 0 {
+        return FORMAT_V11;
+    }
+    if which == 2 {
+        return vget(h, T_POOLOFF, eb);
+    }
+    if which == 3 {
+        return bid_len(h, eb);
+    }
+    let mut nx: i32 = 0;
+    for i in 0..n_exts(h) {
+        if vget(h, T_EXTUSE, i) >= 0 {
+            nx += 1;
+        }
+    }
+    return nx;
+}
 pub fn emit_program(h: &mut [i32]) -> i32 {
     // The whole of step 1-4; the Program in T_OUT, the pool in T_POOL.
     if plan(h) < 0 {
@@ -1919,6 +2006,9 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
         if (k2 == K_AND) || (k2 == K_NOT) {
             flags |= 8;
         }
+        if k2 == K_EXT {
+            flags |= 16;
+        }
         if (k2 == K_ANY) || ((k2 == K_MAJOR) && ((ld(h, l2, 0) >= 4) && (ld(h, l2, 0) <= 6))) {
             tsany = fts_of(h, hg(h, H_TS_ANY));
         }
@@ -1928,8 +2018,9 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
             gempty = g2;
         }
     }
+    // D141: format 1.1 and the extension table only when a control is used
     out(h, MAGIC);
-    out(h, FORMAT_VERSION);
+    out(h, ext_word(h, 0));
     out(h, 64);
     out(h, send);
     out(h, pool);
@@ -1953,8 +2044,8 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     out(h, nch);
     out(h, tsany);
     out(h, gempty);
-    out(h, 0);
-    out(h, 0);
+    out(h, ext_word(h, 1));
+    out(h, ext_word(h, 2));
     out(h, hg(h, H_LIM_DEPTH));
     out(h, hg(h, H_LIM_INPUT));
     out(h, hg(h, H_LIM_ENTRIES));
@@ -1962,7 +2053,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
     out(h, hg(h, H_LIM_BIGNUM));
     out(h, hg(h, H_LIM_VBUDGET));
     out(h, total);
-    out(h, 0);
+    out(h, ext_word(h, 3));
     out(h, smax);
     out(h, 0);
     out(h, s0);

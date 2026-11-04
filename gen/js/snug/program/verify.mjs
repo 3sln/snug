@@ -61,6 +61,8 @@ export const C_TOTAL = 22;
 
 export const C_UTF8 = 23;
 
+export const C_EXT = 24;
+
 export const W_N_RULES = 15;
 
 export const W_N_LEAVES = 16;
@@ -92,6 +94,14 @@ export const W_TS_ANY = 28;
 export const W_G_EMPTY = 29;
 
 export const W_SEC = 42;
+
+export const W_N_EXTS = 30;
+
+export const W_EXT_NAMES = 31;
+
+export const W_EXT_NAMES_LEN = 39;
+
+export const FORMAT_V11 = 65537;
 
 export function bad(s, at, check) {
     // Record the first refusal (word or byte offset, check id); answers 0.
@@ -127,6 +137,11 @@ export function pw(p, i) {
         return p[i];
     }
     return 0;
+}
+
+export function v11(p) {
+    // Is this a format 1.1 Program (extension controls admitted)?
+    return pw(p, 1) === FORMAT_V11;
 }
 
 export function sec(p, k) {
@@ -350,7 +365,8 @@ export function checkHeader(p, b, s) {
     if (!want(s, p[0] === 1735749235, 0, C_HEADER)) {
         return false;
     }
-    if (!want(s, p[1] === 1, 1, C_HEADER)) {
+    // format 1.0 (word value 1) or 1.1 (minor 1 in the high 16 bits, D084/D141)
+    if (!want(s, (p[1] === 1) || (p[1] === FORMAT_V11), 1, C_HEADER)) {
         return false;
     }
     if (!want(s, p[2] === 64, 2, C_HEADER)) {
@@ -379,8 +395,16 @@ export function checkHeader(p, b, s) {
     if (!want(s, (p[W_G_EMPTY] >= (-1)) && (p[W_G_EMPTY] < p[W_N_GROUPS]), W_G_EMPTY, C_HEADER)) {
         return false;
     }
-    // reserved words
-    if (!want(s, ((p[30] === 0) && (p[31] === 0)) && (((p[39] === 0) && (p[41] === 0)) && (p[63] === 0)), 30, C_HEADER)) {
+    // reserved words (30, 31 and 39 are the extension table's under 1.1, checked by check-exts)
+    if (!want(s, (p[41] === 0) && (p[63] === 0), 41, C_HEADER)) {
+        return false;
+    }
+    if (!v11(p)) {
+        if (!want(s, (p[30] === 0) && ((p[31] === 0) && (p[39] === 0)), 30, C_HEADER)) {
+            return false;
+        }
+    }
+    if (!want(s, (p[30] >= 0) && (p[30] <= 65536), 30, C_HEADER)) {
         return false;
     }
     // limits within their hard maxima
@@ -652,6 +676,11 @@ export function checkTypesets(p, s) {
                 return false;
             }
             if ((ne === 0) && combinator(p, a)) {
+                bad(s, o + (2 + i), C_TYPESET);
+                return false;
+            }
+            // D141: an EXT leaf only ever answers through a combinator
+            if (leafKind(p, a) === 18) {
                 bad(s, o + (2 + i), C_TYPESET);
                 return false;
             }
@@ -1089,6 +1118,9 @@ export function leafMaskOf(p, b, l) {
     if (k === 15) {
         return 32;
     }
+    if (k === 18) {
+        return 4095;
+    }
     return 0;
 }
 
@@ -1107,7 +1139,10 @@ export function checkLeaf(p, b, s, l) {
     if (!spend(s, 8)) {
         return false;
     }
-    if (((k < 1) || (k > 17)) || ((w0 >> 16) !== 0)) {
+    if (((k < 1) || (k > 18)) || ((w0 >> 16) !== 0)) {
+        return want(s, false, o, C_LEAF);
+    }
+    if ((k === 18) && (!v11(p))) {
         return want(s, false, o, C_LEAF);
     }
     if (pw(p, o + 7) !== 0) {
@@ -1208,6 +1243,10 @@ export function checkLeaf(p, b, s, l) {
     }
     if (k === 16) {
         return want(s, (inRange(d0, nl) && inRange(d1, nl)) && zeroFrom(p, o, 2), o, C_LEAF);
+    }
+    if (k === 18) {
+        // EXT (D140): control id, argument bytes (at least one), maximum item bytes
+        return want(s, (inRange(d0, pw(p, W_N_EXTS)) && (byteRange(b, d1, d2) && (d2 >= 1))) && ((d3 >= 0) && zeroFrom(p, o, 4)), o, C_LEAF);
     }
     if (inRange(d0, nl) && inRange(d1, nl)) {
         return want(s, (leafKind(p, d1) === 6) && zeroFrom(p, o, 2), o, C_LEAF);
@@ -2078,6 +2117,9 @@ export function checkFlags(p, b, s) {
         if ((k === 16) || (k === 17)) {
             f |= 8;
         }
+        if (k === 18) {
+            f |= 16;
+        }
         if ((k === 1) || ((k === 2) && ((pw(p, o + 2) >= 4) && (pw(p, o + 2) <= 6)))) {
             needsAny = true;
         }
@@ -2089,6 +2131,78 @@ export function checkFlags(p, b, s) {
         return want(s, false, W_TS_ANY, C_HEADER);
     }
     return true;
+}
+
+export function nameByteOk(c, first) {
+    // A control name: ASCII letters and `_`, then also digits and `-`.
+    if (((c >= 65) && (c <= 90)) || (((c >= 97) && (c <= 122)) || (c === 95))) {
+        return true;
+    }
+    if (first) {
+        return false;
+    }
+    return ((c >= 48) && (c <= 57)) || (c === 45);
+}
+
+export function checkExts(p, b, s) {
+    // The names of the N_EXTS extension controls: deterministic CBOR text
+    // strings of 1..64 name bytes, strictly ascending bytewise, back to back
+    // filling pool[W_EXT_NAMES, + W_EXT_NAMES_LEN) exactly; none without any.
+    const n = pw(p, W_N_EXTS);
+    const off = pw(p, W_EXT_NAMES);
+    const len = pw(p, W_EXT_NAMES_LEN);
+    if (n === 0) {
+        return want(s, (off === 0) && (len === 0), W_EXT_NAMES, C_EXT);
+    }
+    if (!want(s, byteRange(b, off, len), W_EXT_NAMES, C_EXT)) {
+        return false;
+    }
+    if (!spend(s, n + ((len / 4) | 0))) {
+        return false;
+    }
+    const end = off + len;
+    let i = off;
+    let po = -1;
+    let pl = 0;
+    for (let _k = 0; _k < n; _k++) {
+        if (i >= end) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        const ib = b[i];
+        let nl = ib & 31;
+        let c = i + 1;
+        if (((ib >>> 5) | 0) !== 3) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        if (nl > 24) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        if (nl === 24) {
+            if (c >= end) {
+                return want(s, false, W_EXT_NAMES, C_EXT);
+            }
+            nl = b[c];
+            if (nl < 24) {
+                return want(s, false, W_EXT_NAMES, C_EXT);
+            }
+            c += 1;
+        }
+        if ((nl < 1) || ((nl > 64) || (nl > (end - c)))) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        for (let j = 0; j < nl; j++) {
+            if (!nameByteOk(b[c + j], j === 0)) {
+                return want(s, false, W_EXT_NAMES, C_EXT);
+            }
+        }
+        if ((po >= 0) && (bytesCmp(b, po, pl, c, nl) >= 0)) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        po = c;
+        pl = nl;
+        i = c + nl;
+    }
+    return want(s, i === end, W_EXT_NAMES, C_EXT);
 }
 
 export function vmVerify(p, b, s) {
@@ -2135,6 +2249,9 @@ export function vmVerify(p, b, s) {
         return -1;
     }
     if (!checkIndex(p, s, 18, 19, pw(p, W_N_CHAINS), 6)) {
+        return -1;
+    }
+    if (!checkExts(p, b, s)) {
         return -1;
     }
     if (!checkIvRecords(p, b, s)) {

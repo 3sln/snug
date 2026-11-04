@@ -8,7 +8,7 @@ import { vmOutput, vmSetup, vmWitnessOutput } from './api.mjs';
 import { csetRec, csetWidth, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { HEADER_WORDS, H_POOL_BYTES, H_S_RULES, R_BUDGET, R_INCONSISTENT, R_TYPE, VM_BUDGET, VM_FRAMES, VM_POS, VM_RULE } from './layout.mjs';
+import { FL_EXT, HEADER_WORDS, H_FLAGS, H_POOL_BYTES, H_S_LEAVES, H_S_RULES, K_EXT, R_BUDGET, R_INCONSISTENT, R_TYPE, VM_BUDGET, VM_FRAMES, VM_POS, VM_RULE } from './layout.mjs';
 import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_EL, F_KIND, F_N, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_HDR, SS_KEEP, SS_MAXF, SS_NEED_LEN, SS_NEED_OFF, SS_PCAP, SS_PH, SS_POS, SS_PROF, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SP, SS_STEPS, SS_TOTAL, SS_WB0, SS_WORK, bigReq, bstrReads, crossKnown, cutYield, ensure, fbase, fitsKnown, fpop, ftop, imin, keysSave, litsNeed, need, nframes, notePut, noteReq, prescan, prescanRun, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
 import { M_KEY, arrRet, arrRun, arrStart, darrRet, darrRun, mapKey, mapNext, mapRet, openArr, openDarr, openDmap, openDseq, openMap, openTag, tagRet, tagRun } from './scont.mjs';
 import { S_EMBRUN, bstrRun, embedRet, openBstr, openText, textRun } from './sstr.mjs';
@@ -215,6 +215,23 @@ export function rootEnd(p, s, ss, out, base) {
     return FIN;
 }
 
+export function extNeed(p, s, fb, nq) {
+    // D140: the largest maximum item size of the EXT leaves in the query list
+    // (their mask admits every item), or -1 when it has none.
+    if ((p[H_FLAGS] & FL_EXT) === 0) {
+        return -1;
+    }
+    const lv = p[H_S_LEAVES];
+    let m = -1;
+    for (let i = 0; i < nq; i++) {
+        const lb = lv + (8 * s[fb + i]);
+        if (((p[lb] & 255) === K_EXT) && (p[lb + 5] > m)) {
+            m = p[lb + 5];
+        }
+    }
+    return m;
+}
+
 export function sibRem(ss) {
     // The items the top frame still owes from the pending one on (it
     // included), for the sibling prescan; -1: up to the end.
@@ -406,6 +423,24 @@ export function itemBegin(p, pool, b, s, ss, ka, base, wend, ext) {
             } else {
                 direct = -1;
             }
+        }
+    }
+    // D140: an item an EXT leaf may judge is taken whole when it is no longer
+    // than the leaves' largest maximum: ask for that much from its start;
+    // if it still crosses, it is longer, every such leaf fails by size, and
+    // frames take it as usual.
+    if ((direct !== 1) && (nq > 0)) {
+        const xm = extNeed(p, s, fb, nq);
+        if (xm >= 0) {
+            const xreq = pos + imin(xm, end - pos);
+            const g7 = ensure(ss, base, wend, pos, xreq);
+            if (suspended(g7)) {
+                return g7;
+            }
+            if (prescan(b, ss, base, pos, end, xreq) === 1) {
+                direct = 1;
+            }
+            ss[SS_CHN] = -1;
         }
     }
     progress(ss, 1);

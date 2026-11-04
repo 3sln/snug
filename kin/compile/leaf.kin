@@ -52,6 +52,8 @@
 (defconst ^:pub ^I32 K_MAP 15)
 (defconst ^:pub ^I32 K_AND 16)
 (defconst ^:pub ^I32 K_NOT 17)
+;; D141: an extension control (d0 registry index, d1 argument bid, d2 max item bytes)
+(defconst ^:pub ^I32 K_EXT 18)
 
 (defconst ^:pub ^I32 R_NEG_INF 0)
 (defconst ^:pub ^I32 R_NEG_BIG 1)
@@ -62,7 +64,7 @@
 
 (defconst ^:pub ^I32 LEAF_WORDS 16)
 
-(declarefn ^I32 mag-pow ^I32 enc-class ^I32 ts-off ^I32 ts-n)
+(declarefn ^I32 mag-pow ^I32 enc-class ^I32 ts-off ^I32 ts-n ^Bool has-ext)
 
 ;; ------------------------------------------------------------ leaf records
 
@@ -657,7 +659,17 @@
     (if (== k K_MAP) (return 32))
     (if (== k K_AND) (return (bit-and (leaf-mask h (ld h l 0)) (leaf-mask h (ld h l 1)))))
     (if (== k K_NOT) (return (leaf-mask h (ld h l 0))))
+    (if (== k K_EXT) (return 4095))
     (return 0)))
+
+(defn ^:pub ^Bool has-ext [^IntsR h ^I32 l]
+  (comment "Does leaf l decide through an extension control (an EXT, or a combinator"
+           "over one)? Such a leaf's literal membership is not known at compile time.")
+  (let [k (lk h l)]
+    (if (== k K_EXT) (return true))
+    (if (== k K_AND) (return (or (has-ext h (ld h l 0)) (has-ext h (ld h l 1)))))
+    (if (== k K_NOT) (return (has-ext h (ld h l 0))))
+    (return false)))
 
 (defn ^:pub ^I32 enc-class [^IntsR h ^I32 bid]
   (comment "The class bit of the item encoded by bid (text, bytes or integer).")
@@ -747,6 +759,9 @@
       (return (and (lit-member h (ld h l 0) bid) (lit-member h (ld h l 1) bid))))
     (if (== k K_NOT)
       (return (and (lit-member h (ld h l 0) bid) (not (lit-member h (ld h l 1) bid)))))
+    (comment "D141: an extension control may match any literal -- a conservative yes, so"
+             "overlap tests stay sound; folding callers check has-ext first.")
+    (if (== k K_EXT) (return true))
     (return false)))
 
 ;; ------------------------------------------------------------ overlap

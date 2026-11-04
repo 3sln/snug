@@ -3,7 +3,7 @@
 
 import { ERR_CONTROL_TARGET, ERR_CONTROL_VALUE, ERR_LIM_POOL, ERR_UNSUPPORTED_CONTROL, H_LIM_POOL, H_R0, H_R1, H_R2, H_R3, INF, T_FIV, T_IV, T_IVA, T_IVB, T_IVC, T_LST, T_STK, T_TMP2, charge, erred, fail, hg, hs, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
 import { bidByte, bidLen, encString, intern, magAdd, magAdd1, magCmp, magFrom64, magSub } from './bytes.mjs';
-import { K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
+import { K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
 import { rxCompile } from './regexp.mjs';
 
 export function singleLeaf(h, ts) {
@@ -726,6 +726,16 @@ export function ctlEq(h, target, ctl, ne, pos) {
             fivIntersect(h, T_IVA, T_IVB, T_IVC);
             const nf = mkFloatFrom(h, lflags(h, t), T_IVC, 1);
             vpush1(h, T_STK, nf);
+        } else if ((lit >= 0) && hasExt(h, t)) {
+            // D141: membership unknown -- .eq is target AND the literal, .ne target AND NOT it
+            const lx = mkLit(h, lit);
+            if (ne === 0) {
+                const ax = mkAnd(h, t, lx);
+                vpush1(h, T_STK, ax);
+            } else {
+                const nx = mkNot(h, t, lx);
+                vpush1(h, T_STK, nx);
+            }
         } else if (lit >= 0) {
             if ((k === K_LIT) || (k === K_LITSET)) {
                 filterLits(h, t, 3 + (1 - ne), lit, 0);
@@ -771,6 +781,12 @@ export function meet(h, a, b) {
     const ka = lk(h, a);
     const kb = lk(h, b);
     if ((ma & mb) === 0) {
+        return 0;
+    }
+    // D141: what an extension control matches is unknown here, so no folding
+    if (hasExt(h, a) || hasExt(h, b)) {
+        const ax = mkAnd(h, a, b);
+        vpush1(h, T_STK, ax);
         return 0;
     }
     if (ka === K_ANY) {

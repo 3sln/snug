@@ -39,6 +39,8 @@ export const K_AND = 16;
 
 export const K_NOT = 17;
 
+export const K_EXT = 18;
+
 export const R_NEG_INF = 0;
 
 export const R_NEG_BIG = 1;
@@ -1035,7 +1037,26 @@ export function leafMask(h, l) {
     if (k === K_NOT) {
         return leafMask(h, ld(h, l, 0));
     }
+    if (k === K_EXT) {
+        return 4095;
+    }
     return 0;
+}
+
+export function hasExt(h, l) {
+    // Does leaf l decide through an extension control (an EXT, or a combinator
+    // over one)? Such a leaf's literal membership is not known at compile time.
+    const k = lk(h, l);
+    if (k === K_EXT) {
+        return true;
+    }
+    if (k === K_AND) {
+        return hasExt(h, ld(h, l, 0)) || hasExt(h, ld(h, l, 1));
+    }
+    if (k === K_NOT) {
+        return hasExt(h, ld(h, l, 0));
+    }
+    return false;
 }
 
 export function encClass(h, bid) {
@@ -1181,6 +1202,11 @@ export function litMember(h, l, bid) {
     }
     if (k === K_NOT) {
         return litMember(h, ld(h, l, 0), bid) && (!litMember(h, ld(h, l, 1), bid));
+    }
+    // D141: an extension control may match any literal -- a conservative yes, so
+    // overlap tests stay sound; folding callers check has-ext first.
+    if (k === K_EXT) {
+        return true;
     }
     return false;
 }

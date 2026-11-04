@@ -5,6 +5,7 @@ use crate::snug::compile::arena::*;
 use crate::snug::compile::arrays::*;
 use crate::snug::compile::bytes::*;
 use crate::snug::compile::ctl::*;
+use crate::snug::compile::ext::*;
 use crate::snug::compile::glush::*;
 use crate::snug::compile::leaf::*;
 use crate::snug::compile::lex::*;
@@ -428,85 +429,179 @@ pub(crate) fn pack_name(h: &[i32], s: i32, len: i32, from: i32) -> i32 {
 }
 pub(crate) fn ctl_code(h: &[i32], tok: i32) -> i32 {
     // The control's code from its name (TK_CTL: a = name start), or 0.
-    // Names are matched as two packed words and the length.
+    // Names are matched as two packed words and the length (snug.compile.ext).
     let s: i32 = tk_a(h, tok);
     let len: i32 = tk_end(h, tok) - s;
     let w1: i32 = pack_name(h, s, len, 0);
     let w2: i32 = pack_name(h, s, len, 4);
-    if len > 7 {
+    return builtin_ctl(len, w1, w2);
+}
+pub(crate) fn ext_entries(h: &[i32], g: i32) -> i32 {
+    // The entry count of an array's group when it is one choice of plain
+    // entries (no key, occurrence exactly one), else -1.
+    if (g < 0) || (nb(h, g) != 1) {
+        return -1;
+    }
+    let gc: i32 = na(h, g);
+    let mut e: i32 = na(h, gc);
+    let mut n: i32 = 0;
+    while e >= 0 {
+        if nk(h, e) != N_ENT {
+            return -1;
+        }
+        if (na(h, e) != 1) || (nb(h, e) != 1) {
+            return -1;
+        }
+        n += 1;
+        e = nnext(h, e);
+    }
+    return n;
+}
+pub(crate) fn ext_arg_leaf(h: &mut [i32], l: i32, pos: i32) -> i32 {
+    // Append the CBOR of a literal leaf to T_EXTARG: a LIT's encoding, a
+    // simple value, an integer, or an integer range lo..hi as [lo, hi]. 0 or -1.
+    let k: i32 = lk(h, l);
+    if k == K_LIT {
+        let bid: i32 = ld(h, l, 0);
+        for i in 0..bid_len(h, bid) {
+            let c: i32 = bid_byte(h, bid, i);
+            vpush1(h, T_EXTARG, c);
+        }
         return 0;
     }
-    if (len == 4) && (w1 == 1702521203) {
-        return 1;
+    if k == K_SIMPLE {
+        let v: i32 = ld(h, l, 0);
+        vpush1(h, T_EXTARG, 224 | v);
+        return 0;
     }
-    if (len == 4) && (w1 == 1937008994) {
-        return 2;
+    if (k == K_INT) && (ld(h, l, 1) == 1) {
+        let o: i32 = 6 * ld(h, l, 0);
+        let lr: i32 = vget(h, T_IV, o);
+        let la: i32 = vget(h, T_IV, o + 1);
+        let lb: i32 = vget(h, T_IV, o + 2);
+        let hr: i32 = vget(h, T_IV, o + 3);
+        let ha: i32 = vget(h, T_IV, o + 4);
+        let hb: i32 = vget(h, T_IV, o + 5);
+        if ((lr < R_NEG) || (lr > R_POS)) || ((hr < R_NEG) || (hr > R_POS)) {
+            return fail(h, ERR_CONTROL_VALUE, pos);
+        }
+        if !((lr == hr) && ((la == ha) && (lb == hb))) {
+            vpush1(h, T_EXTARG, 130);
+        }
+        if lr == R_POS {
+            head_push(h, T_EXTARG, 0, la, lb);
+        } else {
+            head_push(h, T_EXTARG, 1, la, lb);
+        }
+        if !((lr == hr) && ((la == ha) && (lb == hb))) {
+            if hr == R_POS {
+                head_push(h, T_EXTARG, 0, ha, hb);
+            } else {
+                head_push(h, T_EXTARG, 1, ha, hb);
+            }
+        }
+        return 0;
     }
-    if (len == 2) && (w1 == 29804) {
-        return 3;
+    return fail(h, ERR_CONTROL_VALUE, pos);
+}
+pub(crate) fn ext_arg(h: &mut [i32], node: i32, env: i32) -> i32 {
+    // Append the CBOR encoding of an extension control's argument to T_EXTARG:
+    // a literal (text, bytes, an integer, a named simple value such as true),
+    // an integer range (as the array [lo, hi], inclusive), or an array of
+    // those. Anything else is ERR_CONTROL_VALUE. 0 or -1.
+    let pos: i32 = npos(h, node);
+    if !enter(h, pos) {
+        return -1;
     }
-    if (len == 2) && (w1 == 25964) {
-        return 4;
+    if nk(h, node) == N_TYPE {
+        if nb(h, node) != 1 {
+            return fail(h, ERR_CONTROL_VALUE, pos);
+        }
+        let r: i32 = ext_arg(h, na(h, node), env);
+        leave(h);
+        return r;
     }
-    if (len == 2) && (w1 == 29799) {
-        return 5;
+    if nk(h, node) == N_ARRAY {
+        let n: i32 = ext_entries(h, na(h, node));
+        if n < 0 {
+            return fail(h, ERR_CONTROL_VALUE, pos);
+        }
+        head_push(h, T_EXTARG, 4, 0, n);
+        let mut e: i32 = na(h, na(h, na(h, node)));
+        while e >= 0 {
+            if ext_arg(h, nc(h, e), env) < 0 {
+                return -1;
+            }
+            e = nnext(h, e);
+        }
+        leave(h);
+        return 0;
     }
-    if (len == 2) && (w1 == 25959) {
-        return 6;
+    let ts: i32 = lower_type(h, node, env);
+    if ts < 0 {
+        return -1;
     }
-    if (len == 2) && (w1 == 29029) {
-        return 7;
+    if ts_n(h, ts) != 1 {
+        return fail(h, ERR_CONTROL_VALUE, pos);
     }
-    if (len == 2) && (w1 == 25966) {
-        return 8;
+    let r2: i32 = ext_arg_leaf(h, ts_leaf(h, ts, 0), pos);
+    leave(h);
+    return r2;
+}
+pub(crate) fn lower_ext(h: &mut [i32], node: i32, env: i32, id: i32, pos: i32) -> i32 {
+    // `target .name argument` for registered control id: one EXT leaf (id,
+    // the argument's encoding, the control's maximum item bytes) and, for each
+    // target leaf, AND(target leaf, EXT) -- the EXT never answers alone (D141).
+    if (hg(h, H_PROFILE) == 2) && (hg(h, H_EXT_FLAGS) == 0) {
+        return fail(h, ERR_PROFILE, pos);
     }
-    if (len == 3) && (w1 == 6581857) {
-        return 9;
+    let target: i32 = lower_type(h, na(h, node), env);
+    if target < 0 {
+        return -1;
     }
-    if (len == 6) && ((w1 == 1752459639) && (w2 == 28265)) {
-        return 10;
+    vtrunc(h, T_EXTARG, 0);
+    if ext_arg(h, nb(h, node), env) < 0 {
+        return -1;
     }
-    if (len == 6) && ((w1 == 1701274994) && (w2 == 28792)) {
-        return 11;
+    let bid: i32 = intern(h, T_EXTARG, 0, vlen(h, T_EXTARG));
+    if bid < 0 {
+        return -1;
     }
-    if (len == 4) && (w1 == 1919902307) {
-        return 12;
+    stage(h, K_EXT, 0);
+    stage_d(h, 0, id);
+    stage_d(h, 1, bid);
+    stage_d(h, 2, ext_max(h, id));
+    let x: i32 = stage_intern(h);
+    let from: i32 = vlen(h, T_STK);
+    if x < 0 {
+        return -1;
     }
-    if (len == 7) && ((w1 == 1919902307) && (w2 == 7431539)) {
-        return 13;
+    if !charge(h, ts_n(h, target)) {
+        return -1;
     }
-    if (len == 7) && ((w1 == 1634100580) && (w2 == 7629941)) {
-        return 14;
+    for i in 0..ts_n(h, target) {
+        let a: i32 = mk_and(h, ts_leaf(h, target, i), x);
+        if a < 0 {
+            return -1;
+        }
+        vpush1(h, T_STK, a);
     }
-    if (len == 7) && ((w1 == 1952540006) && (w2 == 6648437)) {
-        return 15;
+    if erred(h) {
+        return -1;
     }
-    if (len == 3) && (w1 == 7627107) {
-        return 16;
-    }
-    if (len == 3) && (w1 == 7628132) {
-        return 17;
-    }
-    if (len == 4) && (w1 == 1937075312) {
-        return 18;
-    }
-    if (len == 4) && (w1 == 1701995376) {
-        return 19;
-    }
-    if (len == 4) && (w1 == 1718510177) {
-        return 20;
-    }
-    if (len == 5) && ((w1 == 1718510177) && (w2 == 98)) {
-        return 21;
-    }
-    return 0;
+    return ts_make(h, from);
 }
 pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
     let tok: i32 = nc(h, node);
     let code: i32 = ctl_code(h, tok);
     let pos: i32 = npos(h, node);
     if code == 0 {
-        return fail(h, ERR_UNKNOWN_CONTROL, pos);
+        let nt: i32 = tk_a(h, tok);
+        let id: i32 = ext_lookup(h, nt, tk_end(h, tok) - nt);
+        if id < 0 {
+            return fail(h, ERR_UNKNOWN_CONTROL, pos);
+        }
+        return lower_ext(h, node, env, id, pos);
     }
     // .pcre, .abnf, .abnfb: refused before anything is lowered (D013).
     if code >= 19 {

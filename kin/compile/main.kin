@@ -9,7 +9,8 @@
 ;;     else             -> schema error: code, line, column, rule name span
 ;;
 ;; `opt` (OPT_WORDS words, -1 = default) is every compile option, in the order
-;; of program.md §13.3's source key, then the leaf limit.
+;; of program.md §13.3's source key, then the leaf limit; words from OPT_WORDS
+;; on, when present, are the extension-control registry (snug.compile.ext, D141).
 (ns snug.compile.main
   (:require [kin.lang :refer [defn let return set if while for do comment defconst case declarefn]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - * neg quot bit-and < > <= >= == != and or not
@@ -23,7 +24,7 @@
                                         H_LIM_VBUDGET H_LIM_LEAVES H_PROFILE H_FL_GIVEN H_PRELUDE_AT
                                         H_DATA N_TABLES H_DEPTH_MAX H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
                                         ERR_LIM_TEXT ERR_SYNTAX ERR_NEED_FLOATS ERR_EMPTY ERR_ARENA ERR_INTERNAL H_G1 H_G2
-                                        T_UNICODE T_SRC T_FLREQ T_STK6 T_KEYPRE]]
+                                        T_UNICODE T_SRC T_FLREQ T_STK6 T_KEYPRE H_EXT_FLAGS]]
             [snug.compile.prelude :refer [prelude-len prelude-byte]]
             [snug.compile.lex :refer [lex check-utf8 tk-start]]
             [snug.compile.parse :refer [parse-rules]]
@@ -32,7 +33,8 @@
             [snug.compile.regexp :refer [rx-init unicode-init]]
             [snug.compile.rules :refer [build-rules nrules rw]]
             [snug.compile.lower :refer [lower-init lower-rules]]
-            [snug.compile.emit :refer [emit-program]]))
+            [snug.compile.emit :refer [emit-program]]
+            [snug.compile.ext :refer [ext-init n-exts ext-name-len ext-name-byte ext-max]]))
 
 (defconst ^:pub ^I32 OPT_WORDS 19)
 
@@ -118,6 +120,8 @@
                   (let [w (ia fl (+ q 1))]
                     (vpush1 h T_FLREQ w))))))))
   (if (not (unicode-init h unicode)) (return false))
+  (comment "D141: the extension-control registry after the OPT_WORDS options")
+  (if (not (ext-init h opt)) (return false))
   (return (not (erred h))))
 
 (defn ^:pub ^I32 float-requests [^IntsR h]
@@ -212,7 +216,11 @@
            "effective limits], schema text as bytes]. The host hashes it (SHA-256)"
            "into header words 7..14.")
   (vtrunc h T_KEYPRE 0)
-  (if (> (vlen h T_UNICODE) 0) (vpush1 h T_KEYPRE 135) (vpush1 h T_KEYPRE 134))
+  (comment "6 elements; 7 with Unicode tables (D110); 8 with registered controls (D141),"
+           "the seventh then the tables' words or an empty array.")
+  (if (> (n-exts h) 0)
+    (vpush1 h T_KEYPRE 136)
+    (if (> (vlen h T_UNICODE) 0) (vpush1 h T_KEYPRE 135) (vpush1 h T_KEYPRE 134)))
   (head-push h T_KEYPRE 3 0 16)
   (comment "\"snug/program-key\"")
   (vpush1 h T_KEYPRE 115) (vpush1 h T_KEYPRE 110) (vpush1 h T_KEYPRE 117) (vpush1 h T_KEYPRE 103)
@@ -236,12 +244,28 @@
   (comment "D110: optional seventh element binds the source key to table contents."
            "The no-table preimage stays byte-identical to D039.")
   (let [un (vlen h T_UNICODE)]
-    (if (> un 0)
+    (if (or (> un 0) (> (n-exts h) 0))
       (do (if (not (charge h un)) (return))
           (head-push h T_KEYPRE 4 0 un)
           (for [^I32 j2 0 un]
             (let [uv (vget h T_UNICODE j2)]
-              (push-uint h T_KEYPRE uv)))))))
+              (push-uint h T_KEYPRE uv))))))
+  (comment "D141: [flags, [name, max item bytes]...] in registry (name) order, so a"
+           "cached Program is never reused under another registry.")
+  (let [ne (n-exts h)]
+    (if (> ne 0)
+      (do (head-push h T_KEYPRE 4 0 2)
+          (let [xf (hg h H_EXT_FLAGS)] (push-uint h T_KEYPRE xf))
+          (head-push h T_KEYPRE 4 0 ne)
+          (for [^I32 k2 0 ne]
+            (let [len (ext-name-len h k2)
+                  mx (ext-max h k2)]
+              (if (not (charge h (+ 2 len))) (return))
+              (head-push h T_KEYPRE 4 0 2)
+              (head-push h T_KEYPRE 3 0 len)
+              (for [^I32 xc 0 len]
+                (let [xb (ext-name-byte h k2 xc)] (vpush1 h T_KEYPRE xb)))
+              (push-uint h T_KEYPRE mx)))))))
 
 (defn ^I32 if-limit [^I32 k]
   (comment "The header word of compile option k (source-key order).")
@@ -302,6 +326,7 @@
     [43] "unknown_control"
     [44] "regexp"
     [54] "regexp"
+    [55] "control_registry"
     [45] "map_key"
     [46] "map_group_occurrence"
     [47] "map_cut"

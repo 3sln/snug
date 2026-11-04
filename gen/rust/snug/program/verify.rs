@@ -31,6 +31,7 @@ pub const C_POOL: i32 = 20;
 pub const C_BUDGET: i32 = 21;
 pub const C_TOTAL: i32 = 22;
 pub const C_UTF8: i32 = 23;
+pub const C_EXT: i32 = 24;
 pub(crate) const W_N_RULES: i32 = 15;
 pub(crate) const W_N_LEAVES: i32 = 16;
 pub(crate) const W_N_TYPESETS: i32 = 17;
@@ -47,6 +48,10 @@ pub(crate) const W_N_CHAINS: i32 = 27;
 pub(crate) const W_TS_ANY: i32 = 28;
 pub(crate) const W_G_EMPTY: i32 = 29;
 pub(crate) const W_SEC: i32 = 42;
+pub(crate) const W_N_EXTS: i32 = 30;
+pub(crate) const W_EXT_NAMES: i32 = 31;
+pub(crate) const W_EXT_NAMES_LEN: i32 = 39;
+pub(crate) const FORMAT_V11: i32 = 65537;
 pub(crate) fn bad(s: &mut [i32], at: i32, check: i32) -> i32 {
     // Record the first refusal (word or byte offset, check id); answers 0.
     if s[(V_FAILED) as usize] == 0 {
@@ -78,6 +83,10 @@ pub(crate) fn pw(p: &[i32], i: i32) -> i32 {
         return p[(i) as usize];
     }
     return 0;
+}
+pub(crate) fn v11(p: &[i32]) -> bool {
+    // Is this a format 1.1 Program (extension controls admitted)?
+    return pw(p, 1) == FORMAT_V11;
 }
 pub(crate) fn sec(p: &[i32], k: i32) -> i32 {
     return pw(p, W_SEC + k);
@@ -286,7 +295,8 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     if !want(s, p[(0) as usize] == 1735749235, 0, C_HEADER) {
         return false;
     }
-    if !want(s, p[(1) as usize] == 1, 1, C_HEADER) {
+    // format 1.0 (word value 1) or 1.1 (minor 1 in the high 16 bits, D084/D141)
+    if !want(s, (p[(1) as usize] == 1) || (p[(1) as usize] == FORMAT_V11), 1, C_HEADER) {
         return false;
     }
     if !want(s, p[(2) as usize] == 64, 2, C_HEADER) {
@@ -315,8 +325,16 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     if !want(s, (p[(W_G_EMPTY) as usize] >= (-1)) && (p[(W_G_EMPTY) as usize] < p[(W_N_GROUPS) as usize]), W_G_EMPTY, C_HEADER) {
         return false;
     }
-    // reserved words
-    if !want(s, ((p[(30) as usize] == 0) && (p[(31) as usize] == 0)) && (((p[(39) as usize] == 0) && (p[(41) as usize] == 0)) && (p[(63) as usize] == 0)), 30, C_HEADER) {
+    // reserved words (30, 31 and 39 are the extension table's under 1.1, checked by check-exts)
+    if !want(s, (p[(41) as usize] == 0) && (p[(63) as usize] == 0), 41, C_HEADER) {
+        return false;
+    }
+    if !v11(p) {
+        if !want(s, (p[(30) as usize] == 0) && ((p[(31) as usize] == 0) && (p[(39) as usize] == 0)), 30, C_HEADER) {
+            return false;
+        }
+    }
+    if !want(s, (p[(30) as usize] >= 0) && (p[(30) as usize] <= 65536), 30, C_HEADER) {
         return false;
     }
     // limits within their hard maxima
@@ -581,6 +599,11 @@ pub(crate) fn check_typesets(p: &[i32], s: &mut [i32]) -> bool {
                 return false;
             }
             if (ne == 0) && combinator(p, a) {
+                bad(s, o + (2 + i), C_TYPESET);
+                return false;
+            }
+            // D141: an EXT leaf only ever answers through a combinator
+            if leaf_kind(p, a) == 18 {
                 bad(s, o + (2 + i), C_TYPESET);
                 return false;
             }
@@ -1004,6 +1027,9 @@ pub(crate) fn leaf_mask_of(p: &[i32], b: &[u8], l: i32) -> i32 {
     if k == 15 {
         return 32;
     }
+    if k == 18 {
+        return 4095;
+    }
     return 0;
 }
 pub(crate) fn check_leaf(p: &[i32], b: &[u8], s: &mut [i32], l: i32) -> bool {
@@ -1021,7 +1047,10 @@ pub(crate) fn check_leaf(p: &[i32], b: &[u8], s: &mut [i32], l: i32) -> bool {
     if !spend(s, 8) {
         return false;
     }
-    if ((k < 1) || (k > 17)) || ((w0 >> 16) != 0) {
+    if ((k < 1) || (k > 18)) || ((w0 >> 16) != 0) {
+        return want(s, false, o, C_LEAF);
+    }
+    if (k == 18) && (!v11(p)) {
         return want(s, false, o, C_LEAF);
     }
     if pw(p, o + 7) != 0 {
@@ -1122,6 +1151,10 @@ pub(crate) fn check_leaf(p: &[i32], b: &[u8], s: &mut [i32], l: i32) -> bool {
     }
     if k == 16 {
         return want(s, (in_range(d0, nl) && in_range(d1, nl)) && zero_from(p, o, 2), o, C_LEAF);
+    }
+    if k == 18 {
+        // EXT (D140): control id, argument bytes (at least one), maximum item bytes
+        return want(s, (in_range(d0, pw(p, W_N_EXTS)) && (byte_range(b, d1, d2) && (d2 >= 1))) && ((d3 >= 0) && zero_from(p, o, 4)), o, C_LEAF);
     }
     if in_range(d0, nl) && in_range(d1, nl) {
         return want(s, (leaf_kind(p, d1) == 6) && zero_from(p, o, 2), o, C_LEAF);
@@ -1971,6 +2004,9 @@ pub(crate) fn check_flags(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
         if (k == 16) || (k == 17) {
             f |= 8;
         }
+        if k == 18 {
+            f |= 16;
+        }
         if (k == 1) || ((k == 2) && ((pw(p, o + 2) >= 4) && (pw(p, o + 2) <= 6))) {
             needs_any = true;
         }
@@ -1982,6 +2018,76 @@ pub(crate) fn check_flags(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
         return want(s, false, W_TS_ANY, C_HEADER);
     }
     return true;
+}
+pub(crate) fn name_byte_ok(c: i32, first: bool) -> bool {
+    // A control name: ASCII letters and `_`, then also digits and `-`.
+    if ((c >= 65) && (c <= 90)) || (((c >= 97) && (c <= 122)) || (c == 95)) {
+        return true;
+    }
+    if first {
+        return false;
+    }
+    return ((c >= 48) && (c <= 57)) || (c == 45);
+}
+pub(crate) fn check_exts(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
+    // The names of the N_EXTS extension controls: deterministic CBOR text
+    // strings of 1..64 name bytes, strictly ascending bytewise, back to back
+    // filling pool[W_EXT_NAMES, + W_EXT_NAMES_LEN) exactly; none without any.
+    let n: i32 = pw(p, W_N_EXTS);
+    let off: i32 = pw(p, W_EXT_NAMES);
+    let len: i32 = pw(p, W_EXT_NAMES_LEN);
+    if n == 0 {
+        return want(s, (off == 0) && (len == 0), W_EXT_NAMES, C_EXT);
+    }
+    if !want(s, byte_range(b, off, len), W_EXT_NAMES, C_EXT) {
+        return false;
+    }
+    if !spend(s, n + (len / 4)) {
+        return false;
+    }
+    let end: i32 = off + len;
+    let mut i: i32 = off;
+    let mut po: i32 = -1;
+    let mut pl: i32 = 0;
+    for _k in 0..n {
+        if i >= end {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        let ib: i32 = b[(i) as usize] as i32;
+        let mut nl: i32 = ib & 31;
+        let mut c: i32 = i + 1;
+        if (i32::cast_unsigned(ib) >> 5).cast_signed() != 3 {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        if nl > 24 {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        if nl == 24 {
+            if c >= end {
+                return want(s, false, W_EXT_NAMES, C_EXT);
+            }
+            nl = b[(c) as usize] as i32;
+            if nl < 24 {
+                return want(s, false, W_EXT_NAMES, C_EXT);
+            }
+            c += 1;
+        }
+        if (nl < 1) || ((nl > 64) || (nl > (end - c))) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        for j in 0..nl {
+            if !name_byte_ok(b[(c + j) as usize] as i32, j == 0) {
+                return want(s, false, W_EXT_NAMES, C_EXT);
+            }
+        }
+        if (po >= 0) && (bytes_cmp(b, po, pl, c, nl) >= 0) {
+            return want(s, false, W_EXT_NAMES, C_EXT);
+        }
+        po = c;
+        pl = nl;
+        i = c + nl;
+    }
+    return want(s, i == end, W_EXT_NAMES, C_EXT);
 }
 pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
     // 0 valid; -1 refused (detail in S[35], S[36]); -2 the scratch is too small
@@ -2027,6 +2133,9 @@ pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
         return -1;
     }
     if !check_index(p, s, 18, 19, pw(p, W_N_CHAINS), 6) {
+        return -1;
+    }
+    if !check_exts(p, b, s) {
         return -1;
     }
     if !check_iv_records(p, b, s) {

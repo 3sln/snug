@@ -25,7 +25,7 @@
             [snug.cbor.head :refer [fail head-size be16 be32]]
             [snug.cbor.tags :refer [typed-size]]
             [snug.vm.layout :refer [HEADER_WORDS H_POOL_BYTES H_S_RULES VM_BUDGET VM_POS VM_FRAMES VM_RULE R_TYPE
-                                    R_BUDGET R_INCONSISTENT]]
+                                    R_BUDGET R_INCONSISTENT H_FLAGS H_S_LEAVES FL_EXT K_EXT]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec cset-width wit-empty wit-set]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.eval :refer [eval-item]]
@@ -209,6 +209,18 @@
 
 ;; ------------------------------------------------------------ one item
 
+(defn ^I32 ext-need [^IntsR p ^IntsR s ^I32 fb ^I32 nq]
+  (comment "D140: the largest maximum item size of the EXT leaves in the query list"
+           "(their mask admits every item), or -1 when it has none.")
+  (if (== (bit-and (ia p H_FLAGS) FL_EXT) 0) (return (neg 1)))
+  (let [lv (ia p H_S_LEAVES)
+        ^:mut m (neg 1)]
+    (for [^I32 i 0 nq]
+      (let [lb (+ lv (* 8 (ia s (+ fb i))))]
+        (if (and (== (bit-and (ia p lb) 255) K_EXT) (> (ia p (+ lb 5)) m))
+          (set m (ia p (+ lb 5))))))
+    (return m)))
+
 (defn ^I32 sib-rem [^IntsR ss]
   (comment "The items the top frame still owes from the pending one on (it"
            "included), for the sibling prescan; -1: up to the end.")
@@ -321,6 +333,18 @@
                         (do (if (== (prescan b ss base pos end cut) 1) (set direct 1) (set direct (neg 1)))
                             (iset ss SS_CHN (neg 1)))
                         (if (fits-known ss at) (set direct 1) (set direct (neg 1))))))))))
+      (comment "D140: an item an EXT leaf may judge is taken whole when it is no longer"
+               "than the leaves' largest maximum: ask for that much from its start;"
+               "if it still crosses, it is longer, every such leaf fails by size, and"
+               "frames take it as usual.")
+      (if (and (!= direct 1) (> nq 0))
+        (do (let [xm (ext-need p s fb nq)]
+              (if (>= xm 0)
+                (do (let [xreq (+ pos (imin xm (- end pos)))
+                          g7 (ensure ss base wend pos xreq)]
+                      (if (suspended g7) (return g7))
+                      (if (== (prescan b ss base pos end xreq) 1) (set direct 1))
+                      (iset ss SS_CHN (neg 1))))))))
       (progress ss 1)
       (if (== direct 1)
         (do (if (> nq 0) (return (ret ss base (eval-item p pool b s pos d fb ck nq end ctx ext))))

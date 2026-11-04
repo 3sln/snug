@@ -53,6 +53,8 @@
 (defconst ^:pub ^I32 C_BUDGET 21)
 (defconst ^:pub ^I32 C_TOTAL 22)
 (defconst ^:pub ^I32 C_UTF8 23)
+;; format 1.1 (D141): the extension-control table
+(defconst ^:pub ^I32 C_EXT 24)
 
 ;; header words
 (defconst ^I32 W_N_RULES 15)
@@ -71,6 +73,12 @@
 (defconst ^I32 W_TS_ANY 28)
 (defconst ^I32 W_G_EMPTY 29)
 (defconst ^I32 W_SEC 42)
+;; format 1.1 (D141): extension controls -- count, names' pool offset and byte length
+(defconst ^I32 W_N_EXTS 30)
+(defconst ^I32 W_EXT_NAMES 31)
+(defconst ^I32 W_EXT_NAMES_LEN 39)
+(defconst ^I32 FORMAT_V11 65537)
+
 
 ;; ------------------------------------------------------------ failure, budget
 
@@ -98,6 +106,10 @@
            "only the guarantee that a mistake can never read out of bounds.")
   (if (ult i (ilen p)) (return (ia p i)))
   (return 0))
+
+(defn ^Bool v11 [^IntsR p]
+  (comment "Is this a format 1.1 Program (extension controls admitted)?")
+  (return (== (pw p 1) FORMAT_V11)))
 
 (defn ^I32 sec [^IntsR p ^I32 k] (return (pw p (+ W_SEC k))))
 
@@ -218,7 +230,8 @@
   (if (or (< (ilen p) 64) (> (ilen p) 16777216)) (do (bad s 0 C_HEADER) (return false)))
   (if (> (blen b) 67108864) (do (bad s 4 C_HEADER) (return false)))
   (if (not (want s (== (ia p 0) 1735749235) 0 C_HEADER)) (return false))
-  (if (not (want s (== (ia p 1) 1) 1 C_HEADER)) (return false))
+  (comment "format 1.0 (word value 1) or 1.1 (minor 1 in the high 16 bits, D084/D141)")
+  (if (not (want s (or (== (ia p 1) 1) (== (ia p 1) FORMAT_V11)) 1 C_HEADER)) (return false))
   (if (not (want s (== (ia p 2) 64) 2 C_HEADER)) (return false))
   (if (not (want s (== (ia p 3) (ilen p)) 3 C_HEADER)) (return false))
   (if (not (want s (== (ia p 4) (blen b)) 4 C_HEADER)) (return false))
@@ -230,9 +243,12 @@
     (return false))
   (if (not (want s (and (>= (ia p W_G_EMPTY) (neg 1)) (< (ia p W_G_EMPTY) (ia p W_N_GROUPS))) W_G_EMPTY C_HEADER))
     (return false))
-  (comment "reserved words")
-  (if (not (want s (and (and (== (ia p 30) 0) (== (ia p 31) 0)) (and (and (== (ia p 39) 0) (== (ia p 41) 0)) (== (ia p 63) 0))) 30 C_HEADER))
-    (return false))
+  (comment "reserved words (30, 31 and 39 are the extension table's under 1.1, checked by check-exts)")
+  (if (not (want s (and (== (ia p 41) 0) (== (ia p 63) 0)) 41 C_HEADER)) (return false))
+  (if (not (v11 p))
+    (if (not (want s (and (== (ia p 30) 0) (and (== (ia p 31) 0) (== (ia p 39) 0))) 30 C_HEADER))
+      (return false)))
+  (if (not (want s (and (>= (ia p 30) 0) (<= (ia p 30) 65536)) 30 C_HEADER)) (return false))
   (comment "limits within their hard maxima")
   (if (not (want s (and (>= (ia p 32) 0) (<= (ia p 32) 256)) 32 C_HEADER)) (return false))
   (if (not (want s (>= (ia p 33) 0) 33 C_HEADER)) (return false))
@@ -361,7 +377,9 @@
           (let [a (pw p (+ o (+ 2 i)))]
             (if (not (in-range a nl)) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))
             (if (and (> i 0) (<= a (pw p (+ o (+ 1 i))))) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))
-            (if (and (== ne 0) (combinator p a)) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))))
+            (if (and (== ne 0) (combinator p a)) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))
+            (comment "D141: an EXT leaf only ever answers through a combinator")
+            (if (== (leaf-kind p a) 18) (do (bad s (+ o (+ 2 i)) C_TYPESET) (return false)))))
         (if (> ne 0)
           (do (comment "each answer once as itself, nothing twice, operands earlier")
               (let [e (epoch s)
@@ -597,6 +615,7 @@
             (return m))))
     (if (== k 14) (return 16))
     (if (== k 15) (return 32))
+    (if (== k 18) (return 4095))
     (return 0)))
 
 (defn ^Bool check-leaf [^IntsR p ^Bytes b ^Ints s ^I32 l]
@@ -612,7 +631,8 @@
         nl (pw p W_N_LEAVES)
         nt (pw p W_N_TYPESETS)]
     (if (not (spend s 8)) (return false))
-    (if (or (or (< k 1) (> k 17)) (!= (sar w0 16) 0)) (return (want s false o C_LEAF)))
+    (if (or (or (< k 1) (> k 18)) (!= (sar w0 16) 0)) (return (want s false o C_LEAF)))
+    (if (and (== k 18) (not (v11 p))) (return (want s false o C_LEAF)))
     (if (!= (pw p (+ o 7)) 0) (return (want s false o C_LEAF)))
     (if (and (and (!= k 3) (!= k 4)) (and (!= k 13) (!= fl 0))) (return (want s false o C_LEAF)))
     (if (== k 1) (return (want s (zero-from p o 0) o C_LEAF)))
@@ -660,6 +680,10 @@
     (if (== k 14) (return (want s (and (in-range d0 (pw p W_N_ARRAYS)) (zero-from p o 1)) o C_LEAF)))
     (if (== k 15) (return (want s (and (in-range d0 (pw p W_N_MAPS)) (zero-from p o 1)) o C_LEAF)))
     (if (== k 16) (return (want s (and (and (in-range d0 nl) (in-range d1 nl)) (zero-from p o 2)) o C_LEAF)))
+    (if (== k 18)
+      (do (comment "EXT (D140): control id, argument bytes (at least one), maximum item bytes")
+          (return (want s (and (and (in-range d0 (pw p W_N_EXTS)) (and (byte-range b d1 d2) (>= d2 1)))
+                               (and (>= d3 0) (zero-from p o 4))) o C_LEAF))))
     (if (and (in-range d0 nl) (in-range d1 nl))
       (return (want s (and (== (leaf-kind p d1) 6) (zero-from p o 2)) o C_LEAF)))
     (return (want s false o C_LEAF))))
@@ -1183,11 +1207,55 @@
         (if (and (== k 8) (>= (pw p (+ o 4)) 0)) (set f (bit-or f 2)))
         (if (== k 13) (set f (bit-or f 4)))
         (if (or (== k 16) (== k 17)) (set f (bit-or f 8)))
+        (if (== k 18) (set f (bit-or f 16)))
         (if (or (== k 1) (and (== k 2) (and (>= (pw p (+ o 2)) 4) (<= (pw p (+ o 2)) 6))))
           (set needs-any true))))
     (if (!= (pw p 6) f) (return (want s false 6 C_DERIVED)))
     (if (and needs-any (< (pw p W_TS_ANY) 0)) (return (want s false W_TS_ANY C_HEADER)))
     (return true)))
+
+;; ------------------------------------------------------------ extension controls (D141)
+
+(defn ^Bool name-byte-ok [^I32 c ^Bool first]
+  (comment "A control name: ASCII letters and `_`, then also digits and `-`.")
+  (if (or (and (>= c 65) (<= c 90)) (or (and (>= c 97) (<= c 122)) (== c 95))) (return true))
+  (if first (return false))
+  (return (or (and (>= c 48) (<= c 57)) (== c 45))))
+
+(defn ^Bool check-exts [^IntsR p ^Bytes b ^Ints s]
+  (comment "The names of the N_EXTS extension controls: deterministic CBOR text"
+           "strings of 1..64 name bytes, strictly ascending bytewise, back to back"
+           "filling pool[W_EXT_NAMES, + W_EXT_NAMES_LEN) exactly; none without any.")
+  (let [n (pw p W_N_EXTS)
+        off (pw p W_EXT_NAMES)
+        len (pw p W_EXT_NAMES_LEN)]
+    (if (== n 0) (return (want s (and (== off 0) (== len 0)) W_EXT_NAMES C_EXT)))
+    (if (not (want s (byte-range b off len) W_EXT_NAMES C_EXT)) (return false))
+    (if (not (spend s (+ n (quot len 4)))) (return false))
+    (let [end (+ off len)
+          ^:mut i off
+          ^:mut po (neg 1)
+          ^:mut pl 0]
+      (for [^I32 _k 0 n]
+        (if (>= i end) (return (want s false W_EXT_NAMES C_EXT)))
+        (let [ib (u8 b i)
+              ^:mut nl (bit-and ib 31)
+              ^:mut c (+ i 1)]
+          (if (!= (ushr ib 5) 3) (return (want s false W_EXT_NAMES C_EXT)))
+          (if (> nl 24) (return (want s false W_EXT_NAMES C_EXT)))
+          (if (== nl 24)
+            (do (if (>= c end) (return (want s false W_EXT_NAMES C_EXT)))
+                (set nl (u8 b c))
+                (if (< nl 24) (return (want s false W_EXT_NAMES C_EXT)))
+                (set c (+ c 1))))
+          (if (or (< nl 1) (or (> nl 64) (> nl (- end c)))) (return (want s false W_EXT_NAMES C_EXT)))
+          (for [^I32 j 0 nl]
+            (if (not (name-byte-ok (u8 b (+ c j)) (== j 0))) (return (want s false W_EXT_NAMES C_EXT))))
+          (if (and (>= po 0) (>= (bytes-cmp b po pl c nl) 0)) (return (want s false W_EXT_NAMES C_EXT)))
+          (set po c)
+          (set pl nl)
+          (set i (+ c nl))))
+      (return (want s (== i end) W_EXT_NAMES C_EXT)))))
 
 ;; ------------------------------------------------------------ the entry point
 
@@ -1213,6 +1281,7 @@
   (if (not (check-index p s 11 12 (pw p W_N_REGEXPS) 4)) (return (neg 1)))
   (if (not (check-index p s 16 17 (pw p W_N_CSETS) 5)) (return (neg 1)))
   (if (not (check-index p s 18 19 (pw p W_N_CHAINS) 6)) (return (neg 1)))
+  (if (not (check-exts p b s)) (return (neg 1)))
   (if (not (check-iv-records p b s)) (return (neg 1)))
   (if (not (check-leaves p b s)) (return (neg 1)))
   (if (not (check-typesets p s)) (return (neg 1)))

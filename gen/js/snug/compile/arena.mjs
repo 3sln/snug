@@ -85,6 +85,8 @@ export const ERR_ARRAY_KEY = 53;
 
 export const ERR_NEED_UNICODE = 54;
 
+export const ERR_CONTROL_REGISTRY = 55;
+
 export const H_TOP = 0;
 
 export const H_ERR = 1;
@@ -196,6 +198,10 @@ export const H_G1 = 53;
 export const H_G2 = 54;
 
 export const H_G3 = 55;
+
+export const H_EXT_FLAGS = 62;
+
+export const H_EXT_BID = 63;
 
 export const H_TAB = 64;
 
@@ -440,6 +446,14 @@ export const T_NCLS = 113;
 export const T_CONT = 114;
 
 export const T_UNICODE = 115;
+
+export const T_EXT = 116;
+
+export const T_EXTB = 117;
+
+export const T_EXTUSE = 118;
+
+export const T_EXTARG = 119;
 
 export const H_WALK_RULE = 61;
 

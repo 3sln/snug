@@ -36,13 +36,14 @@
                                         T_LAUX T_RXF T_MAP T_MAPD T_ARR T_ARRD T_IV T_FIV T_LST T_SRC
                                         T_CSET T_CSD T_HCSET T_CHAIN T_CHD T_HCHAIN T_EPOCHS T_CLS T_CLS2
                                         T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI T_LRULE T_REP T_CLSID T_CSIG T_HSIG
-                                        T_NCLS T_CONT]]
-            [snug.compile.bytes :refer [intern bid-len bid-byte bid-cmp nbids sort-bids]]
+                                        T_NCLS T_CONT T_EXTUSE T_EXTARG H_EXT_BID]]
+            [snug.compile.bytes :refer [intern bid-len bid-byte bid-cmp nbids sort-bids head-push]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd nleaves ts-off ts-n ts-w ts-setw
                                        leaf-mask mk-any ts-of1 nts
                                        K_ANY K_MAJOR K_INT K_FLOAT K_SIMPLE K_LIT K_LITSET K_TEXT
-                                       K_BYTES K_UINTX K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP K_AND K_NOT
+                                       K_BYTES K_UINTX K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP K_AND K_NOT K_EXT
                                        R_NEG_BIG R_POS_BIG]]
+            [snug.compile.ext :refer [n-exts ext-name-len ext-name-byte]]
             [snug.compile.regexp :refer [rx-npos rx-w rx-natoms rx-nullable rx-data rx-count]]
             [snug.compile.rules :refer [rw nrules RK_TYPE]]
             [snug.compile.parse :refer [npos]]))
@@ -896,9 +897,38 @@
         (vpush1 h T_RORD (vget h T_KEYTRI (vget h T_RSCR j2))))
       (return n))))
 
+(defn ^I32 ext-names [^Ints h]
+  (comment "D141: number the extension controls the final leaves use, in registry"
+           "(name) order, into T_EXTUSE, and intern their names as back-to-back CBOR"
+           "text strings (H_EXT_BID, -1 when none). Answers the count or -1.")
+  (let [nl (hg h H_N_FIN)
+        ne (n-exts h)
+        ^:mut used 0]
+    (hs h H_EXT_BID (neg 1))
+    (for [^I32 i 0 ne] (vset h T_EXTUSE i (neg 1)))
+    (for [^I32 f 0 nl]
+      (let [l (fin-internal h f)]
+        (if (== (lk h l) K_EXT) (vset h T_EXTUSE (ld h l 0) 0))))
+    (vtrunc h T_EXTARG 0)
+    (for [^I32 j 0 ne]
+      (if (== (vget h T_EXTUSE j) 0)
+        (do (vset h T_EXTUSE j used)
+            (set used (+ used 1))
+            (let [len (ext-name-len h j)]
+              (head-push h T_EXTARG 3 0 len)
+              (for [^I32 c 0 len]
+                (let [x (ext-name-byte h j c)] (vpush1 h T_EXTARG x)))))))
+    (if (> used 0)
+      (do (let [bid (intern h T_EXTARG 0 (vlen h T_EXTARG))]
+            (if (< bid 0) (return (neg 1)))
+            (hs h H_EXT_BID bid))))
+    (return used)))
+
 (defn ^:pub ^I32 build-pool [^Ints h]
   (comment "Pool order (program.md §15.1): rule names, keys, literals, bignum"
-           "magnitudes, .bits masks; identical byte strings share.")
+           "magnitudes, .bits masks, extension arguments, the extension names;"
+           "identical byte strings share.")
+  (if (< (ext-names h) 0) (return (neg 1)))
   (let [nb (nbids h)
         nl (hg h H_N_FIN)]
     (vtrunc h T_POOL 0)
@@ -928,6 +958,10 @@
     (for [^I32 f3 0 nl]
       (let [l3 (fin-internal h f3)]
         (if (and (== (lk h l3) K_BYTES) (>= (ld h l3 2) 0)) (pool-place h (ld h l3 2)))))
+    (for [^I32 f4 0 nl]
+      (let [l4 (fin-internal h f4)]
+        (if (== (lk h l4) K_EXT) (pool-place h (ld h l4 1)))))
+    (if (>= (hg h H_EXT_BID) 0) (pool-place h (hg h H_EXT_BID)))
     (if (> (vlen h T_POOL) (hg h H_LIM_POOL)) (return (fail h ERR_LIM_POOL (neg 1))))
     (comment "§5.1: pool bytes are charged too.")
     (if (not (charge h (vlen h T_POOL))) (return (neg 1)))
@@ -1147,6 +1181,8 @@
 
 (defconst ^:pub ^I32 MAGIC 1735749235)
 (defconst ^:pub ^I32 FORMAT_VERSION 1)
+;; D141: format 1.1 (minor 1 in the high 16 bits), written only when an EXT leaf is used
+(defconst ^:pub ^I32 FORMAT_V11 65537)
 
 (defn out [^Ints h ^I32 v] (vpush1 h T_OUT v))
 
@@ -1201,6 +1237,11 @@
     (if (== k K_EMBED) (set d0 (fts-of h (ld h l 0))))
     (if (or (== k K_ARRAY) (== k K_MAP)) (set d0 (laux h f 0)))
     (if (or (== k K_AND) (== k K_NOT)) (do (set d0 (fin h (ld h l 0))) (set d1 (fin h (ld h l 1)))))
+    (if (== k K_EXT)
+      (do (set d0 (vget h T_EXTUSE (ld h l 0)))
+          (set d1 (vget h T_POOLOFF (ld h l 1)))
+          (set d2 (bid-len h (ld h l 1)))
+          (set d3 (ld h l 2))))
     (out h (bit-or k (shl fl 8)))
     (out h (leaf-mask h l))
     (out h d0) (out h d1) (out h d2) (out h d3) (out h d4) (out h 0)))
@@ -1315,6 +1356,19 @@
       (do (out h (vget h T_IV (+ o 1)))
           (out h (vget h T_IV (+ o 2)))))))
 
+(defn ^I32 ext-word [^IntsR h ^I32 which]
+  (comment "D141's header words once the pool is built: 0 the format word (1.1 when"
+           "a control is used), 1 N_EXTS, 2 the names' pool offset, 3 their length.")
+  (let [eb (hg h H_EXT_BID)]
+    (if (< eb 0) (do (if (== which 0) (return FORMAT_VERSION)) (return 0)))
+    (if (== which 0) (return FORMAT_V11))
+    (if (== which 2) (return (vget h T_POOLOFF eb)))
+    (if (== which 3) (return (bid-len h eb)))
+    (let [^:mut nx 0]
+      (for [^I32 i 0 (n-exts h)]
+        (if (>= (vget h T_EXTUSE i) 0) (set nx (+ nx 1))))
+      (return nx))))
+
 (defn ^:pub ^I32 emit-program [^Ints h]
   (comment "The whole of step 1-4; the Program in T_OUT, the pool in T_POOL.")
   (if (< (plan h) 0) (return (neg 1)))
@@ -1420,19 +1474,21 @@
                 (if (and (== k2 K_TEXT) (>= (ld h l2 2) 0)) (set flags (bit-or flags 2)))
                 (if (== k2 K_EMBED) (set flags (bit-or flags 4)))
                 (if (or (== k2 K_AND) (== k2 K_NOT)) (set flags (bit-or flags 8)))
+                (if (== k2 K_EXT) (set flags (bit-or flags 16)))
                 (if (or (== k2 K_ANY) (and (== k2 K_MAJOR) (and (>= (ld h l2 0) 4) (<= (ld h l2 0) 6))))
                   (set tsany (fts-of h (hg h H_TS_ANY))))))
             (for [^I32 g2 0 ngr]
               (if (and (< gempty 0) (== (vget h T_GRPD (vget h T_GRP g2)) 0)) (set gempty g2)))
-            (out h MAGIC) (out h FORMAT_VERSION) (out h 64) (out h send) (out h pool)
+            (comment "D141: format 1.1 and the extension table only when a control is used")
+            (out h MAGIC) (out h (ext-word h 0)) (out h 64) (out h send) (out h pool)
             (out h (hg h H_PROFILE)) (out h flags)
             (for [^I32 _z 0 8] (out h 0))
             (out h nr) (out h nl) (out h nts) (out h nkeys) (out h ngr) (out h nmaps) (out h narr)
             (out h nrx) (out h niv) (out h nfiv) (out h nlr) (out h ncs) (out h nch)
-            (out h tsany) (out h gempty) (out h 0) (out h 0)
+            (out h tsany) (out h gempty) (out h (ext-word h 1)) (out h (ext-word h 2))
             (out h (hg h H_LIM_DEPTH)) (out h (hg h H_LIM_INPUT)) (out h (hg h H_LIM_ENTRIES))
             (out h (hg h H_LIM_ITEMS)) (out h (hg h H_LIM_BIGNUM)) (out h (hg h H_LIM_VBUDGET))
-            (out h total) (out h 0) (out h smax) (out h 0)
+            (out h total) (out h (ext-word h 3)) (out h smax) (out h 0)
             (out h s0) (out h s1) (out h s2) (out h s3) (out h s4) (out h s5) (out h s6) (out h s7)
             (out h s8) (out h s9) (out h s10) (out h s11) (out h s12) (out h s13) (out h s14) (out h s15)
             (out h s16) (out h s17) (out h s18) (out h s19) (out h send) (out h 0))

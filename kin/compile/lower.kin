@@ -32,7 +32,8 @@
                                         H_R0 H_R1 H_R2 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
                                         H_N_INST H_PROFILE H_WORK_AT
                                         T_ENV T_HENV T_MEMO T_HMEMO T_CON T_HCON T_WORK T_ASTK T_STK
-                                        T_LITB T_SRC T_PSTK T_GSTACK T_LSTK T_MAP T_ARR T_TMP2 T_IV]]
+                                        T_LITB T_SRC T_PSTK T_GSTACK T_LSTK T_MAP T_ARR T_TMP2 T_IV
+                                        T_EXTARG H_EXT_FLAGS]]
             [snug.compile.lex :refer [tk-kind tk-start tk-end tk-a tk-b tk-c
                                       TK_INT TK_FLOAT TK_TEXT TK_BYTES]]
             [snug.compile.parse :refer [nk ntok nnext na nb nc nd ne npos
@@ -45,17 +46,19 @@
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd leaf-new ts-make ts-of1 ts-push-leaves
                                        ts-n ts-leaf leaf-mask mk-any mk-major mk-simple mk-lit mk-text
                                        mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow u64-cmp
-                                       stage stage-d stage-intern
+                                       stage stage-d stage-intern mk-and
                                        K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
+                                       K_SIMPLE K_EXT
                                        R_NEG_INF R_NEG_BIG R_NEG R_POS R_POS_BIG R_POS_INF]]
             [snug.compile.ctl :refer [ctl-size ctl-bits ctl-compare ctl-eq ctl-and ctl-regexp ctl-cbor
                                       ctl-cat ctl-det ctl-plus int-point float-point single-leaf]]
             [snug.compile.maps :refer [ent-new as-single as-unit as-none as-product as-product-many as-union as-occur
                                        as-n as-aoff as-alen alt-ent ew map-finish]]
             [snug.compile.glush :refer [g-node g-list g-add gk gset G_POS G_SEQ G_ALT G_REP G_EMPTY G_REC G_FRAME]]
-            [snug.compile.arrays :refer [arr-finish]]))
+            [snug.compile.arrays :refer [arr-finish]]
+            [snug.compile.ext :refer [builtin-ctl ext-lookup ext-max]]))
 
-(declarefn ^I32 lower-type ^I32 m-ent ^I32 m-group ^I32 a-group ^I32 a-ent ^I32 enum-group ^I32 enum-node ^I32 if-neg)
+(declarefn ^I32 ext-arg ^I32 lower-type ^I32 m-ent ^I32 m-group ^I32 a-group ^I32 a-ent ^I32 enum-group ^I32 enum-node ^I32 if-neg)
 
 ;; ------------------------------------------------------------ depth
 
@@ -341,40 +344,119 @@
 
 (defn ^I32 ctl-code [^IntsR h ^I32 tok]
   (comment "The control's code from its name (TK_CTL: a = name start), or 0."
-           "Names are matched as two packed words and the length.")
+           "Names are matched as two packed words and the length (snug.compile.ext).")
   (let [s (tk-a h tok)
         len (- (tk-end h tok) s)
         w1 (pack-name h s len 0)
         w2 (pack-name h s len 4)]
-    (if (> len 7) (return 0))
-    (if (and (== len 4) (== w1 1702521203)) (return 1))
-    (if (and (== len 4) (== w1 1937008994)) (return 2))
-    (if (and (== len 2) (== w1 29804)) (return 3))
-    (if (and (== len 2) (== w1 25964)) (return 4))
-    (if (and (== len 2) (== w1 29799)) (return 5))
-    (if (and (== len 2) (== w1 25959)) (return 6))
-    (if (and (== len 2) (== w1 29029)) (return 7))
-    (if (and (== len 2) (== w1 25966)) (return 8))
-    (if (and (== len 3) (== w1 6581857)) (return 9))
-    (if (and (== len 6) (and (== w1 1752459639) (== w2 28265))) (return 10))
-    (if (and (== len 6) (and (== w1 1701274994) (== w2 28792))) (return 11))
-    (if (and (== len 4) (== w1 1919902307)) (return 12))
-    (if (and (== len 7) (and (== w1 1919902307) (== w2 7431539))) (return 13))
-    (if (and (== len 7) (and (== w1 1634100580) (== w2 7629941))) (return 14))
-    (if (and (== len 7) (and (== w1 1952540006) (== w2 6648437))) (return 15))
-    (if (and (== len 3) (== w1 7627107)) (return 16))
-    (if (and (== len 3) (== w1 7628132)) (return 17))
-    (if (and (== len 4) (== w1 1937075312)) (return 18))
-    (if (and (== len 4) (== w1 1701995376)) (return 19))
-    (if (and (== len 4) (== w1 1718510177)) (return 20))
-    (if (and (== len 5) (and (== w1 1718510177) (== w2 98))) (return 21))
-    (return 0)))
+    (return (builtin-ctl len w1 w2))))
+
+;; ------------------------------------------------------------ extension controls (D140, D141)
+
+(defn ^I32 ext-entries [^IntsR h ^I32 g]
+  (comment "The entry count of an array's group when it is one choice of plain"
+           "entries (no key, occurrence exactly one), else -1.")
+  (if (or (< g 0) (!= (nb h g) 1)) (return (neg 1)))
+  (let [gc (na h g)
+        ^:mut e (na h gc)
+        ^:mut n 0]
+    (while (>= e 0)
+      (if (!= (nk h e) N_ENT) (return (neg 1)))
+      (if (or (!= (na h e) 1) (!= (nb h e) 1)) (return (neg 1)))
+      (set n (+ n 1))
+      (set e (nnext h e)))
+    (return n)))
+
+(defn ^I32 ext-arg-leaf [^Ints h ^I32 l ^I32 pos]
+  (comment "Append the CBOR of a literal leaf to T_EXTARG: a LIT's encoding, a"
+           "simple value, an integer, or an integer range lo..hi as [lo, hi]. 0 or -1.")
+  (let [k (lk h l)]
+    (if (== k K_LIT)
+      (do (let [bid (ld h l 0)]
+            (for [^I32 i 0 (bid-len h bid)]
+              (let [c (bid-byte h bid i)] (vpush1 h T_EXTARG c))))
+          (return 0)))
+    (if (== k K_SIMPLE)
+      (do (let [v (ld h l 0)] (vpush1 h T_EXTARG (bit-or 224 v)))
+          (return 0)))
+    (if (and (== k K_INT) (== (ld h l 1) 1))
+      (do (let [o (* 6 (ld h l 0))
+                lr (vget h T_IV o) la (vget h T_IV (+ o 1)) lb (vget h T_IV (+ o 2))
+                hr (vget h T_IV (+ o 3)) ha (vget h T_IV (+ o 4)) hb (vget h T_IV (+ o 5))]
+            (if (or (or (< lr R_NEG) (> lr R_POS)) (or (< hr R_NEG) (> hr R_POS)))
+              (return (fail h ERR_CONTROL_VALUE pos)))
+            (if (not (and (== lr hr) (and (== la ha) (== lb hb))))
+              (vpush1 h T_EXTARG 130))
+            (if (== lr R_POS) (head-push h T_EXTARG 0 la lb) (head-push h T_EXTARG 1 la lb))
+            (if (not (and (== lr hr) (and (== la ha) (== lb hb))))
+              (if (== hr R_POS) (head-push h T_EXTARG 0 ha hb) (head-push h T_EXTARG 1 ha hb)))
+            (return 0))))
+    (return (fail h ERR_CONTROL_VALUE pos))))
+
+(defn ^I32 ext-arg [^Ints h ^I32 node ^I32 env]
+  (comment "Append the CBOR encoding of an extension control's argument to T_EXTARG:"
+           "a literal (text, bytes, an integer, a named simple value such as true),"
+           "an integer range (as the array [lo, hi], inclusive), or an array of"
+           "those. Anything else is ERR_CONTROL_VALUE. 0 or -1.")
+  (let [pos (npos h node)]
+    (if (not (enter h pos)) (return (neg 1)))
+    (if (== (nk h node) N_TYPE)
+      (do (if (!= (nb h node) 1) (return (fail h ERR_CONTROL_VALUE pos)))
+          (let [r (ext-arg h (na h node) env)]
+            (leave h)
+            (return r))))
+    (if (== (nk h node) N_ARRAY)
+      (do (let [n (ext-entries h (na h node))]
+            (if (< n 0) (return (fail h ERR_CONTROL_VALUE pos)))
+            (head-push h T_EXTARG 4 0 n)
+            (let [^:mut e (na h (na h (na h node)))]
+              (while (>= e 0)
+                (if (< (ext-arg h (nc h e) env) 0) (return (neg 1)))
+                (set e (nnext h e))))
+            (leave h)
+            (return 0))))
+    (let [^I32 ts (lower-type h node env)]
+      (if (< ts 0) (return (neg 1)))
+      (if (!= (ts-n h ts) 1) (return (fail h ERR_CONTROL_VALUE pos)))
+      (let [r2 (ext-arg-leaf h (ts-leaf h ts 0) pos)]
+        (leave h)
+        (return r2)))))
+
+(defn ^I32 lower-ext [^Ints h ^I32 node ^I32 env ^I32 id ^I32 pos]
+  (comment "`target .name argument` for registered control id: one EXT leaf (id,"
+           "the argument's encoding, the control's maximum item bytes) and, for each"
+           "target leaf, AND(target leaf, EXT) -- the EXT never answers alone (D141).")
+  (if (and (== (hg h H_PROFILE) 2) (== (hg h H_EXT_FLAGS) 0)) (return (fail h ERR_PROFILE pos)))
+  (let [^I32 target (lower-type h (na h node) env)]
+    (if (< target 0) (return (neg 1)))
+    (vtrunc h T_EXTARG 0)
+    (if (< (ext-arg h (nb h node) env) 0) (return (neg 1)))
+    (let [bid (intern h T_EXTARG 0 (vlen h T_EXTARG))]
+      (if (< bid 0) (return (neg 1)))
+      (stage h K_EXT 0)
+      (stage-d h 0 id)
+      (stage-d h 1 bid)
+      (stage-d h 2 (ext-max h id))
+      (let [x (stage-intern h)
+            from (vlen h T_STK)]
+        (if (< x 0) (return (neg 1)))
+        (if (not (charge h (ts-n h target))) (return (neg 1)))
+        (for [^I32 i 0 (ts-n h target)]
+          (let [a (mk-and h (ts-leaf h target i) x)]
+            (if (< a 0) (return (neg 1)))
+            (vpush1 h T_STK a)))
+        (if (erred h) (return (neg 1)))
+        (return (ts-make h from))))))
 
 (defn ^I32 lower-ctl [^Ints h ^I32 node ^I32 env]
   (let [tok (nc h node)
         code (ctl-code h tok)
         pos (npos h node)]
-    (if (== code 0) (return (fail h ERR_UNKNOWN_CONTROL pos)))
+    (if (== code 0)
+      (do (let [nt (tk-a h tok)
+                id (ext-lookup h nt (- (tk-end h tok) nt))]
+            (if (< id 0) (return (fail h ERR_UNKNOWN_CONTROL pos)))
+            (return (lower-ext h node env id pos)))))
     (comment ".pcre, .abnf, .abnfb: refused before anything is lowered (D013).")
     (if (>= code 19) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
     (let [^I32 target (lower-type h (na h node) env)]

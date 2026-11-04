@@ -1,0 +1,144 @@
+;; Extension controls (D082, D140, D141): the registry of custom control
+;; operators a host passes to the compiler, and the built-in control names it
+;; may not shadow.
+;;
+;; The registry rides after the OPT_WORDS compile options (snug.compile.main):
+;;
+;;     opt[19]      n, the number of registered controls (0..256)
+;;     opt[20]      flags: bit 0 admits them under the `bus` profile
+;;     then n records: name length (1..64), max item bytes (>= 0), the name's
+;;     bytes one per word -- names strictly ascending bytewise, each
+;;     [A-Za-z_][A-Za-z0-9_-]*, none a built-in control's name.
+;;
+;; A shorter opt (the 19 words of every earlier host) registers nothing.
+(ns snug.compile.ext
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl bit-or < > <= >= == != and or not ia ilen]]
+            [snug.compile.arena :refer [hg hs fail charge vlen vpush1 vget vtrunc
+                                        ERR_CONTROL_REGISTRY H_EXT_FLAGS T_EXT T_EXTB T_EXTUSE T_SRC]]))
+
+(defconst ^:pub ^I32 EXT_OPT_AT 19)
+(defconst ^:pub ^I32 EXT_MAX_CONTROLS 256)
+(defconst ^:pub ^I32 EXT_MAX_NAME 64)
+
+(defn ^:pub ^I32 builtin-ctl [^I32 len ^I32 w1 ^I32 w2]
+  (comment "The code of the built-in control whose name is len bytes packed"
+           "little-endian into w1 (bytes 0..3) and w2 (4..7), or 0.")
+  (if (> len 7) (return 0))
+  (if (and (== len 4) (== w1 1702521203)) (return 1))
+  (if (and (== len 4) (== w1 1937008994)) (return 2))
+  (if (and (== len 2) (== w1 29804)) (return 3))
+  (if (and (== len 2) (== w1 25964)) (return 4))
+  (if (and (== len 2) (== w1 29799)) (return 5))
+  (if (and (== len 2) (== w1 25959)) (return 6))
+  (if (and (== len 2) (== w1 29029)) (return 7))
+  (if (and (== len 2) (== w1 25966)) (return 8))
+  (if (and (== len 3) (== w1 6581857)) (return 9))
+  (if (and (== len 6) (and (== w1 1752459639) (== w2 28265))) (return 10))
+  (if (and (== len 6) (and (== w1 1701274994) (== w2 28792))) (return 11))
+  (if (and (== len 4) (== w1 1919902307)) (return 12))
+  (if (and (== len 7) (and (== w1 1919902307) (== w2 7431539))) (return 13))
+  (if (and (== len 7) (and (== w1 1634100580) (== w2 7629941))) (return 14))
+  (if (and (== len 7) (and (== w1 1952540006) (== w2 6648437))) (return 15))
+  (if (and (== len 3) (== w1 7627107)) (return 16))
+  (if (and (== len 3) (== w1 7628132)) (return 17))
+  (if (and (== len 4) (== w1 1937075312)) (return 18))
+  (if (and (== len 4) (== w1 1701995376)) (return 19))
+  (if (and (== len 4) (== w1 1718510177)) (return 20))
+  (if (and (== len 5) (and (== w1 1718510177) (== w2 98))) (return 21))
+  (return 0))
+
+(defn ^Bool name-byte-ok [^I32 c ^Bool first]
+  (if (or (and (>= c 65) (<= c 90)) (or (and (>= c 97) (<= c 122)) (== c 95))) (return true))
+  (if first (return false))
+  (return (or (and (>= c 48) (<= c 57)) (== c 45))))
+
+(defn ^I32 pack-opt [^IntsR opt ^I32 at ^I32 len ^I32 from]
+  (comment "Name bytes from..from+3 (opt words at at..) as one little-endian word.")
+  (let [^:mut w 0]
+    (for [^I32 i 0 4]
+      (if (< (+ from i) len)
+        (set w (bit-or w (shl (ia opt (+ at (+ from i))) (* 8 i))))))
+    (return w)))
+
+(defn ^:pub ^I32 n-exts [^IntsR h] (return (quot (vlen h T_EXT) 3)))
+(defn ^:pub ^I32 ext-name-at [^IntsR h ^I32 i] (return (vget h T_EXT (* 3 i))))
+(defn ^:pub ^I32 ext-name-len [^IntsR h ^I32 i] (return (vget h T_EXT (+ (* 3 i) 1))))
+(defn ^:pub ^I32 ext-max [^IntsR h ^I32 i] (return (vget h T_EXT (+ (* 3 i) 2))))
+(defn ^:pub ^I32 ext-name-byte [^IntsR h ^I32 i ^I32 j] (return (vget h T_EXTB (+ (ext-name-at h i) j))))
+
+(defn ^I32 bad-registry [^Ints h]
+  (fail h ERR_CONTROL_REGISTRY (neg 1))
+  (return (neg 1)))
+
+(defn ^:pub ^Bool ext-init [^Ints h ^IntsR opt]
+  (comment "Read and check the registry (see the namespace doc) into T_EXT/T_EXTB.")
+  (vtrunc h T_EXT 0)
+  (vtrunc h T_EXTB 0)
+  (vtrunc h T_EXTUSE 0)
+  (hs h H_EXT_FLAGS 0)
+  (let [m (ilen opt)]
+    (if (<= m EXT_OPT_AT) (return true))
+    (let [n (ia opt EXT_OPT_AT)]
+      (if (or (< n 0) (> n EXT_MAX_CONTROLS)) (do (bad-registry h) (return false)))
+      (if (== n 0) (return true))
+      (if (< m (+ EXT_OPT_AT 2)) (do (bad-registry h) (return false)))
+      (let [fl (ia opt (+ EXT_OPT_AT 1))]
+        (if (or (< fl 0) (> fl 1)) (do (bad-registry h) (return false)))
+        (hs h H_EXT_FLAGS fl))
+      (let [^:mut at (+ EXT_OPT_AT 2)]
+        (for [^I32 k 0 n]
+          (if (> (+ at 2) m) (do (bad-registry h) (return false)))
+          (let [len (ia opt at)
+                mx (ia opt (+ at 1))
+                c0 (+ at 2)]
+            (if (or (< len 1) (or (> len EXT_MAX_NAME) (< mx 0))) (do (bad-registry h) (return false)))
+            (if (> len (- m c0)) (do (bad-registry h) (return false)))
+            (if (not (charge h (+ 1 len))) (return false))
+            (for [^I32 j 0 len]
+              (let [c (ia opt (+ c0 j))]
+                (if (not (name-byte-ok c (== j 0))) (do (bad-registry h) (return false)))))
+            (if (!= (builtin-ctl len (pack-opt opt c0 len 0) (pack-opt opt c0 len 4)) 0)
+              (do (bad-registry h) (return false)))
+            (comment "strictly ascending after the previous name")
+            (if (> k 0)
+              (do (let [pk (- k 1)
+                        po (ext-name-at h pk)
+                        pl (ext-name-len h pk)
+                        ^:mut order (- pl len)
+                        ^:mut j2 0
+                        ^:mut lim pl]
+                    (if (< len lim) (set lim len))
+                    (while (< j2 lim)
+                      (let [x (vget h T_EXTB (+ po j2))
+                            y (ia opt (+ c0 j2))]
+                        (if (!= x y)
+                          (do (set order (- x y)) (set j2 lim))
+                          (set j2 (+ j2 1)))))
+                    (if (>= order 0) (do (bad-registry h) (return false))))))
+            (vpush1 h T_EXT (vlen h T_EXTB))
+            (vpush1 h T_EXT len)
+            (vpush1 h T_EXT mx)
+            (for [^I32 j3 0 len]
+              (let [c3 (ia opt (+ c0 j3))]
+                (vpush1 h T_EXTB c3)))
+            (vpush1 h T_EXTUSE (neg 1))
+            (set at (+ c0 len))))
+        (if (!= at m) (do (bad-registry h) (return false)))))
+    (return true)))
+
+(defn ^:pub ^I32 ext-lookup [^Ints h ^I32 s ^I32 len]
+  (comment "The registry index of the control named by schema text T_SRC[s, s+len),"
+           "or -1. Charged one unit per name compared.")
+  (let [n (n-exts h)]
+    (if (not (charge h (+ 1 n))) (return (neg 1)))
+    (for [^I32 i 0 n]
+      (if (== (ext-name-len h i) len)
+        (do (let [o (ext-name-at h i)
+                  ^:mut same true
+                  ^:mut j 0]
+              (while (and same (< j len))
+                (if (!= (vget h T_EXTB (+ o j)) (vget h T_SRC (+ s j))) (set same false))
+                (set j (+ j 1)))
+              (if same (return i))))))
+    (return (neg 1))))

@@ -30,7 +30,7 @@
                                        stage stage-d stage-intern mk-lit mk-text mk-bytes mk-and mk-not
                                        iv-push iv-load iv-normalize iv-intersect mk-int-from bound-cmp
                                        bound-succ bound-pred fiv-load fiv-normalize fiv-intersect
-                                       mk-float-from u64-cmp lit-member enc-head-len point-of mk-int-range
+                                       mk-float-from u64-cmp lit-member has-ext enc-head-len point-of mk-int-range
                                        K_ANY K_MAJOR K_INT K_FLOAT K_SIMPLE K_LIT K_LITSET K_TEXT
                                        K_BYTES K_UINTX K_TAG K_EMBED K_AND K_NOT
                                        R_NEG_INF R_NEG R_POS R_POS_INF]]))
@@ -469,6 +469,12 @@
                 (fiv-intersect h T_IVA T_IVB T_IVC)
                 (let [nf (mk-float-from h (lflags h t) T_IVC 1)]
                   (vpush1 h T_STK nf)))
+            (if (and (>= lit 0) (has-ext h t))
+              (do (comment "D141: membership unknown -- .eq is target AND the literal, .ne target AND NOT it")
+                  (let [lx (mk-lit h lit)]
+                    (if (== ne 0)
+                      (do (let [ax (mk-and h t lx)] (vpush1 h T_STK ax)))
+                      (do (let [nx (mk-not h t lx)] (vpush1 h T_STK nx))))))
             (if (>= lit 0)
               (do (if (or (== k K_LIT) (== k K_LITSET))
                     (filter-lits h t (+ 3 (- 1 ne)) lit 0)
@@ -485,7 +491,7 @@
                 (do (comment "A composite controller: .eq is an AND; .ne has no lowering.")
                     (if (== ne 1) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
                     (if (!= (bit-and (leaf-mask h t) (leaf-mask h cl)) 0)
-                      (do (let [an (mk-and h t cl)] (vpush1 h T_STK an)))))))))))
+                      (do (let [an (mk-and h t cl)] (vpush1 h T_STK an))))))))))))
     (if (erred h) (return (neg 1)))
     (return (ts-make h from))))
 
@@ -499,6 +505,8 @@
         ka (lk h a)
         kb (lk h b)]
     (if (== (bit-and ma mb) 0) (return 0))
+    (comment "D141: what an extension control matches is unknown here, so no folding")
+    (if (or (has-ext h a) (has-ext h b)) (do (let [ax (mk-and h a b)] (vpush1 h T_STK ax)) (return 0)))
     (if (== ka K_ANY) (do (vpush1 h T_STK b) (return 0)))
     (if (== kb K_ANY) (do (vpush1 h T_STK a) (return 0)))
     (if (and (== ka K_MAJOR) (== (bit-and mb (bit-not ma)) 0)) (do (vpush1 h T_STK b) (return 0)))

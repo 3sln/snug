@@ -4,6 +4,7 @@
 use crate::snug::compile::arena::*;
 use crate::snug::compile::bytes::*;
 use crate::snug::compile::emit::*;
+use crate::snug::compile::ext::*;
 use crate::snug::compile::leaf::*;
 use crate::snug::compile::lex::*;
 use crate::snug::compile::lower::*;
@@ -114,6 +115,10 @@ pub fn setup(text: &[u8], opt: &[i32], fl: &[i32], unicode: &[i32], h: &mut [i32
         }
     }
     if !unicode_init(h, unicode) {
+        return false;
+    }
+    // D141: the extension-control registry after the OPT_WORDS options
+    if !ext_init(h, opt) {
         return false;
     }
     return !erred(h);
@@ -245,7 +250,11 @@ pub fn build_key_preimage(h: &mut [i32]) {
     // effective limits], schema text as bytes]. The host hashes it (SHA-256)
     // into header words 7..14.
     vtrunc(h, T_KEYPRE, 0);
-    if vlen(h, T_UNICODE) > 0 {
+    // 6 elements; 7 with Unicode tables (D110); 8 with registered controls (D141),
+    // the seventh then the tables' words or an empty array.
+    if n_exts(h) > 0 {
+        vpush1(h, T_KEYPRE, 136);
+    } else if vlen(h, T_UNICODE) > 0 {
         vpush1(h, T_KEYPRE, 135);
     } else {
         vpush1(h, T_KEYPRE, 134);
@@ -289,7 +298,7 @@ pub fn build_key_preimage(h: &mut [i32]) {
     // D110: optional seventh element binds the source key to table contents.
     // The no-table preimage stays byte-identical to D039.
     let un: i32 = vlen(h, T_UNICODE);
-    if un > 0 {
+    if (un > 0) || (n_exts(h) > 0) {
         if !charge(h, un) {
             return;
         }
@@ -297,6 +306,29 @@ pub fn build_key_preimage(h: &mut [i32]) {
         for j2 in 0..un {
             let uv: i32 = vget(h, T_UNICODE, j2);
             push_uint(h, T_KEYPRE, uv);
+        }
+    }
+    // D141: [flags, [name, max item bytes]...] in registry (name) order, so a
+    // cached Program is never reused under another registry.
+    let ne: i32 = n_exts(h);
+    if ne > 0 {
+        head_push(h, T_KEYPRE, 4, 0, 2);
+        let xf: i32 = hg(h, H_EXT_FLAGS);
+        push_uint(h, T_KEYPRE, xf);
+        head_push(h, T_KEYPRE, 4, 0, ne);
+        for k2 in 0..ne {
+            let len: i32 = ext_name_len(h, k2);
+            let mx: i32 = ext_max(h, k2);
+            if !charge(h, 2 + len) {
+                return;
+            }
+            head_push(h, T_KEYPRE, 4, 0, 2);
+            head_push(h, T_KEYPRE, 3, 0, len);
+            for xc in 0..len {
+                let xb: i32 = ext_name_byte(h, k2, xc);
+                vpush1(h, T_KEYPRE, xb);
+            }
+            push_uint(h, T_KEYPRE, mx);
         }
     }
 }
@@ -363,6 +395,7 @@ pub fn error_name(code: i32) -> &'static str {
         43 => "unknown_control",
         44 => "regexp",
         54 => "regexp",
+        55 => "control_registry",
         45 => "map_key",
         46 => "map_group_occurrence",
         47 => "map_cut",

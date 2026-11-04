@@ -711,6 +711,16 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
             fiv_intersect(h, T_IVA, T_IVB, T_IVC);
             let nf: i32 = mk_float_from(h, lflags(h, t), T_IVC, 1);
             vpush1(h, T_STK, nf);
+        } else if (lit >= 0) && has_ext(h, t) {
+            // D141: membership unknown -- .eq is target AND the literal, .ne target AND NOT it
+            let lx: i32 = mk_lit(h, lit);
+            if ne == 0 {
+                let ax: i32 = mk_and(h, t, lx);
+                vpush1(h, T_STK, ax);
+            } else {
+                let nx: i32 = mk_not(h, t, lx);
+                vpush1(h, T_STK, nx);
+            }
         } else if lit >= 0 {
             if (k == K_LIT) || (k == K_LITSET) {
                 filter_lits(h, t, 3 + (1 - ne), lit, 0);
@@ -755,6 +765,12 @@ pub(crate) fn meet(h: &mut [i32], a: i32, b: i32) -> i32 {
     let ka: i32 = lk(h, a);
     let kb: i32 = lk(h, b);
     if (ma & mb) == 0 {
+        return 0;
+    }
+    // D141: what an extension control matches is unknown here, so no folding
+    if has_ext(h, a) || has_ext(h, b) {
+        let ax: i32 = mk_and(h, a, b);
+        vpush1(h, T_STK, ax);
         return 0;
     }
     if ka == K_ANY {

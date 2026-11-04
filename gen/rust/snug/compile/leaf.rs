@@ -22,6 +22,7 @@ pub const K_ARRAY: i32 = 14;
 pub const K_MAP: i32 = 15;
 pub const K_AND: i32 = 16;
 pub const K_NOT: i32 = 17;
+pub const K_EXT: i32 = 18;
 pub const R_NEG_INF: i32 = 0;
 pub const R_NEG_BIG: i32 = 1;
 pub const R_NEG: i32 = 2;
@@ -961,7 +962,25 @@ pub fn leaf_mask(h: &[i32], l: i32) -> i32 {
     if k == K_NOT {
         return leaf_mask(h, ld(h, l, 0));
     }
+    if k == K_EXT {
+        return 4095;
+    }
     return 0;
+}
+pub fn has_ext(h: &[i32], l: i32) -> bool {
+    // Does leaf l decide through an extension control (an EXT, or a combinator
+    // over one)? Such a leaf's literal membership is not known at compile time.
+    let k: i32 = lk(h, l);
+    if k == K_EXT {
+        return true;
+    }
+    if k == K_AND {
+        return has_ext(h, ld(h, l, 0)) || has_ext(h, ld(h, l, 1));
+    }
+    if k == K_NOT {
+        return has_ext(h, ld(h, l, 0));
+    }
+    return false;
 }
 pub fn enc_class(h: &[i32], bid: i32) -> i32 {
     // The class bit of the item encoded by bid (text, bytes or integer).
@@ -1101,6 +1120,11 @@ pub fn lit_member(h: &mut [i32], l: i32, bid: i32) -> bool {
     }
     if k == K_NOT {
         return lit_member(h, ld(h, l, 0), bid) && (!lit_member(h, ld(h, l, 1), bid));
+    }
+    // D141: an extension control may match any literal -- a conservative yes, so
+    // overlap tests stay sound; folding callers check has-ext first.
+    if k == K_EXT {
+        return true;
     }
     return false;
 }
