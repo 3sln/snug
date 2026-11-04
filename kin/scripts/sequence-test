@@ -1,0 +1,13 @@
+#!/bin/sh
+# CBOR sequences (P7.13, D218): the session VM's sequence mode and both hosts
+# against D211's oracle, on generated JS and a DEBUG Rust build.
+#     kin/scripts/sequence-test [mutations] [seed] [schemas]
+set -e
+cd "$(dirname "$0")/../.."
+bb -cp kin/src:../kin/src kin/scripts/vm-emit > /dev/null
+crate=.cache/snug-sequence
+./kin/scripts/rust-crate "$crate"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --offline --quiet --bin sequence 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/sequence-test.mjs "$crate/target/debug/sequence" "$@"

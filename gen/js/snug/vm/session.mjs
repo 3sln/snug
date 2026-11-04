@@ -9,7 +9,7 @@ import { csetRec, csetWidth, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } 
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
 import { FL_EXT, HEADER_WORDS, H_FLAGS, H_LIM_INPUT, H_POOL_BYTES, H_S_LEAVES, H_S_RULES, K_EXT, R_BUDGET, R_INCONSISTENT, R_TYPE, VM_BUDGET, VM_BUDGET_START, VM_FRAMES, VM_POS, VM_RULE } from './layout.mjs';
-import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_EL, F_END, F_KE, F_KIND, F_N, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_HELD, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_HDR, SS_KEEP, SS_MAXF, SS_NEED_LEN, SS_NEED_OFF, SS_NPEND, SS_PCAP, SS_PEND, SS_PH, SS_POS, SS_PROF, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SP, SS_STEPS, SS_TOTAL, SS_UNK, SS_WB0, SS_WORK, VMS_HELD, VMS_RESUME, bigReq, bstrReads, crossKnown, cutYield, ensure, fbase, fitsKnown, fpop, ftop, imin, keysSave, litsNeed, need, nframes, notePut, noteReq, pendDrop, pendRaw, prescan, prescanRun, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
+import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_EL, F_END, F_KE, F_KIND, F_N, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_HELD, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_HDR, SS_KEEP, SS_MAXF, SS_MLEN, SS_NEED_LEN, SS_NEED_OFF, SS_NPEND, SS_PCAP, SS_PEND, SS_PH, SS_POS, SS_PROF, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SEQ, SS_SP, SS_STEPS, SS_TOTAL, SS_UNK, SS_WB0, SS_WORK, VMS_HELD, VMS_RESUME, bigReq, bstrReads, crossKnown, cutYield, ensure, fbase, fitsKnown, fpop, ftop, imin, keysSave, litsNeed, need, nframes, notePut, noteReq, pendDrop, pendRaw, prescan, prescanRun, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
 import { M_KEY, arrRet, arrRun, arrStart, darrRet, darrRun, mapKey, mapNext, mapRet, openArr, openDarr, openDmap, openDseq, openMap, openTag, tagRet, tagRun } from './scont.mjs';
 import { S_EMBRUN, bstrRun, embedRet, openBstr, openText, textRun } from './sstr.mjs';
 
@@ -95,6 +95,33 @@ export function vmsInitUnknown(p, pool, rule, limits, s, ss, ka, quantum) {
     return 0;
 }
 
+export function vmsInitSeq(p, pool, rule, limits, s, ss, ka, quantum) {
+    // D212: a session over ONE MESSAGE OF A CBOR SEQUENCE (RFC 8742): an
+    // unknown-length session whose root's end is a boundary, not a trailing
+    // check. Offsets are relative to the message start. The verdict is held
+    // (VMS_HELD) while a pending end check is open or while it is truncated;
+    // later steps drop the checks their windows cover and answer it; vms-eof
+    // settles as in drain mode. vms-message-length: the root's end once it
+    // completed. Re-run on the same arrays for the next message. ka: vms-arena
+    // bytes for vms-unknown-total. Results as vms-init's.
+    const r = vmsInitUnknown(p, pool, rule, limits, s, ss, ka, quantum);
+    if (r < 0) {
+        return r;
+    }
+    ss[SS_SEQ] = 1;
+    ss[SS_MLEN] = -1;
+    return 0;
+}
+
+export function vmsMessageLength(ss) {
+    // D212: in a sequence session, the message's length (its root's end) once
+    // the root completed -- the next message starts there -- else -1.
+    if (ss[SS_SEQ] !== 1) {
+        return -1;
+    }
+    return ss[SS_MLEN];
+}
+
 export function vmsHeldCode(ss) {
     // D085: after VMS_HELD, the held verdict's code (out holds it). A nonzero one
     // is certainly a refusal of the whole message, though the buffer's code may
@@ -126,8 +153,23 @@ export function vmsSteps(ss) {
     return ss[SS_STEPS];
 }
 
+export function seqHolds(ss) {
+    // D212: a sequence message's verdict waits while a pending end check is open
+    // or while it is truncated (is the input longer than the provisional end?).
+    return (ss[SS_NPEND] > 0) || (ss[SS_CODE] === CODE_TRUNCATED);
+}
+
 export function settle(ss) {
-    // The verdict is in out: done, or held while an unknown end is (D085).
+    // The verdict is in out: done, or held while an unknown end is (D085); in a
+    // sequence only while seq-holds (D212).
+    if ((ss[SS_SEQ] === 1) && (ss[SS_UNK] === 1)) {
+        if (seqHolds(ss)) {
+            ss[SS_PH] = PH_HELD;
+        } else {
+            ss[SS_PH] = PH_DONE;
+        }
+        return;
+    }
     if (ss[SS_UNK] === 1) {
         ss[SS_PH] = PH_HELD;
     } else {
@@ -223,16 +265,21 @@ export function rootEnd(p, s, ss, out, base, wend) {
         const ep = s[O_ERR_POS];
         return fin(s, ss, out, base, -r, 0, ep);
     }
+    // D212: in a sequence the root's end is the message's boundary: no trailing
+    // check, nothing read or asked past it.
+    if (ss[SS_SEQ] === 1) {
+        ss[SS_MLEN] = r;
+    }
     // D085: with the end unknown, a byte after the root is trailing; with none
     // in the window yet, ask for one -- vms-eof tells it is the end.
-    if ((ss[SS_UNK] === 1) && (r !== n)) {
+    if (((ss[SS_UNK] === 1) && (r !== n)) && (ss[SS_SEQ] !== 1)) {
         if ((r - base) < wend) {
             fail(s, r - base, CODE_TRAILING);
             return fin(s, ss, out, base, CODE_TRAILING, 0, r - base);
         }
         return need(ss, base, r - base, 1);
     }
-    if (r !== n) {
+    if ((r !== n) && (ss[SS_SEQ] !== 1)) {
         fail(s, r - base, CODE_TRAILING);
         return fin(s, ss, out, base, CODE_TRAILING, 0, r - base);
     }
@@ -695,6 +742,14 @@ export function vmsStepX(p, pool, b, s, ss, ka, out, base, ext) {
     }
     if (ss[SS_PH] === PH_DONE) {
         return ss[SS_CODE];
+    }
+    if ((ss[SS_PH] === PH_HELD) && ((ss[SS_SEQ] === 1) && (base >= 0))) {
+        // D212: the window's bytes exist; once no claim is open the verdict stands
+        pendDrop(ss, base + b.length);
+        if (!seqHolds(ss)) {
+            ss[SS_PH] = PH_DONE;
+            return ss[SS_CODE];
+        }
     }
     if (ss[SS_PH] === PH_HELD) {
         return VMS_HELD;

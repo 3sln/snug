@@ -493,6 +493,48 @@ identifies adapter protocol failures (`bad_chunk`, `short_read`,
 propagate unchanged; sanitise them before logging. Wrong arguments/unknown
 rules use TypeError. Session reuse after completion/failure is unsupported.
 
+## CBOR sequences: `snug/sequence`
+
+`readSequence(source, options?)` and `sequenceReader(options?)` read an RFC 8742
+sequence (D210–D217, [guide](guide.md#cbor-sequences-and-sse)). Each message is
+one root, checked in the pass that finds its end: the profile, plus the schema
+rule when `schema` and `rule` are given. A separate entry from `snug/sources`
+because it carries the View.
+
+| Function | Result |
+| --- | --- |
+| `readSequence(source, options?)` | `SequenceIterator`: an async generator of `SequenceMessage`, with `stats` `{ messages, skipped, bytes, lastSkipped }`; `source` is a ReadableStream, AsyncIterable or Iterable of Uint8Array; leaving the loop cancels it |
+| `sequenceReader(options?)` | `{ feed(chunk), end(), done, bytesHeld }`; `feed`/`end` answer `{ messages, skipped, error }`; after `error` (or `end`) the reader is done and `feed` throws TypeError |
+
+`SequenceOptions`: the ValidationOptions (profile, `top`, `cose`, `maxDepth`,
+`maxEntries`, `maxItems`, `maxBignumBytes`, `budget`, `objects`) with
+`maxMessageBytes` instead of `maxBytes` (refused), `schema` + `rule`,
+`onInvalid` (`'stop'` default | `'skip'`), `copy` (`'spanning'` default |
+`'always'`), `failFast`; `readSequence` also takes `quantum`. Every limit
+applies to each message from zero; `maxMessageBytes` defaults to the input
+limit (1,500,000 profile-only, the schema's compiled one otherwise). Top
+defaults as for the codec without a schema and to `'any'` with one.
+
+`SequenceMessage` is `{ index, offset, length, bytes, borrowed, view }`:
+`offset` is absolute; `bytes` is the exact encoding, a subarray of the chunk
+it lay in when `borrowed` (one chunk held it and `copy` is `'spanning'`), else
+a fresh buffer; `view` is a checked `View` minted from the reader's verdict
+(there is no public way to mint one). Do not change a chunk while a borrowed
+message or its view is used; use `copy: 'always'` for reused buffers.
+
+A message's verdict equals the buffer validation of its window — the bytes
+from its start, at most `maxMessageBytes` — with the root's end as the
+boundary (architecture §18.1): exactly `schema.validate` / the codec check of
+the message's own bytes when it is accepted. Refusals are `SnugFault`s with
+`code`, `reason`, `path`, `subcode`, `offset` (absolute), `index`,
+`messageOffset` and `skippable`. Skippable (`onInvalid: 'skip'`): schema
+reasons of a complete message. Not skippable: `cbor/*` codes (incl.
+`truncated` at EOF inside a message and `too_large` for a message not ending
+within `maxMessageBytes`) and `budget`. `failFast` answers a held refusal at
+once (D145's contract). An empty source is an empty sequence. Non-Uint8Array
+chunks reject with SourceError `bad_chunk`; SharedArrayBuffer chunks with
+TypeError.
+
 ## Errors
 
 No library-produced refusal contains received values, bytes or unnamed data

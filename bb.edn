@@ -26,6 +26,8 @@
               :task (apply shell "kin/scripts/vm-test" *command-line-args*)}
   vmsession-test {:doc "P6.2: the resumable session VM == the buffer driver (whole out array) under window splits, yields and budgets; JS and Rust."
                   :task (apply shell "kin/scripts/vmsession-test" *command-line-args*)}
+  sequence-test {:doc "P7.13: CBOR sequences (RFC 8742) -- the session's sequence mode and the JS/Rust hosts == D211's oracle under every chunking; JS == Rust."
+                 :task (apply shell "kin/scripts/sequence-test" *command-line-args*)}
   compile-fuzz {:doc "P3.2/P3.3: seeded random/mutated CDDL; only SchemaError, no panic, budget kept, JS == Rust, vm-verify accepts."
                 :task (apply shell "kin/scripts/compile-fuzz" *command-line-args*)}
   crate-diff {:doc "P4.1: seeded differential vs the native cddl crate 0.10.7."

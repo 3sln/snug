@@ -64,3 +64,15 @@ export function selectOptions(options, kind) {
   return Object.fromEntries(Object.keys(shapes[kind]).filter(key => Object.hasOwn(options, key))
     .map(key => [key, options[key]]));
 }
+
+/** D213: a CBOR sequence's options (snug/sequence). Its limits are per message, so maxBytes
+ *  (ambiguous there) is refused in favour of maxMessageBytes. Built here, lazily, so the
+ *  other entries' option tables do not carry it. */
+export function validateSequenceOptions(options, stream) {
+  const { maxBytes: _perDocument, ...perMessage } = validation;
+  const shape = { ...perMessage, maxMessageBytes: integer, schema, rule: value => typeof value === 'string',
+    onInvalid: enumeration('stop', 'skip'), copy: enumeration('spanning', 'always'), failFast: boolean };
+  if (stream) shape.quantum = scheduling.quantum;
+  checked(options, shape, 'options');
+  return options;
+}

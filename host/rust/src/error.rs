@@ -32,6 +32,9 @@ pub enum Error {
     /// A Program uses extension controls the registry lacks (D141); their
     /// names, from the Program (schema text, never payload).
     MissingControls(Vec<String>),
+    /// A message of a CBOR sequence was refused (D216): its index, absolute
+    /// offsets and verdict (`code()` as for [`Error::Validation`]).
+    Sequence(crate::sequence::MessageFailure),
     /// A host/generated invariant failed, never a fabricated CBOR verdict.
     Internal,
 }
@@ -46,7 +49,7 @@ impl Error {
             | Self::Source(code) => code,
             Self::Compile(e) => e.code,
             Self::MissingControls(_) => "missing_control",
-            Self::Validation(e) => match e.reason {
+            Self::Validation(e) | Self::Sequence(crate::sequence::MessageFailure { failure: e, .. }) => match e.reason {
                 "type" => "schema/type",
                 "missing" => "schema/missing",
                 "unexpected" => "schema/unexpected",
@@ -78,6 +81,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Validation(e) => Some(e),
+            Self::Sequence(e) => Some(&e.failure),
             Self::Compile(e) => Some(e),
             _ => None,
         }

@@ -550,6 +550,90 @@ protocol: `step` may answer
 
 Standard Blob/File/HTTP Range adapters and fused source decode remain pending.
 
+## CBOR sequences and SSE
+
+A CBOR sequence (RFC 8742, media type `application/cbor-seq`) is messages
+written back to back with no framing: the natural body for a long-lived,
+server-sent-events-like HTTP response. `readSequence` reads one and hands you
+each message as soon as its last byte has arrived, already checked, as a lazy
+View:
+
+```js
+import { readSequence } from 'snug/sequence';
+const schema = await compile('event = { type: tstr, seq: uint, ? text: tstr }');
+
+const res = await fetch(url, { headers: { accept: 'application/cbor-seq' } });
+for await (const m of readSequence(res.body, { schema, rule: 'event' })) {
+  switch (m.view.get('type').text()) {          // reads two fields, decodes nothing else
+    case 'note': show(m.view.get('text').text()); break;
+    case 'tick': tick(m.view.get('seq').number()); break;
+  }
+}
+```
+
+The [runnable example](../examples/sequence-sse.mjs) simulates such a response
+locally. Each message `m` is `{ index, offset, length, bytes, borrowed, view }`:
+its position in the sequence, the absolute byte offset of its first byte, its
+exact encoding, and a View (`m.view.value()` materialises it when you want a
+plain value).
+
+**One pass per message.** The same walk finds where a message ends and checks
+it — the wire profile, and the schema rule when you give one — so the View is
+opened from that verdict without scanning again. Without `schema` each message
+is profile-checked only. A message's verdict is exactly what `schema.validate`
+(or `decode`'s check) gives for that message's bytes, offsets made absolute
+(gated by `bb sequence-test` under every chunking). Single-document APIs
+(`decode`, `view`, `validateStream`, …) still refuse a second root as
+`cbor/trailing`; sequences are only read by these functions.
+
+**Limits are per message.** `maxMessageBytes` (default 1,500,000 bytes, or the
+schema's compiled input limit) bounds each message: one that does not end
+within it is `cbor/too_large`, decided without buffering it. `maxDepth`,
+`maxEntries`, `maxItems`, `maxBignumBytes` and `budget` start from zero for
+every message. `maxBytes` is refused (it would be ambiguous). There is no
+total cap: stop by leaving the loop, which cancels the stream. Each reader
+holds a key arena of `maxMessageBytes` bytes, so lower it for many concurrent
+readers.
+
+**Refusals.** By default (`onInvalid: 'stop'`) the first refused message ends
+the sequence: every earlier message has been yielded, then the loop throws a
+`SnugFault` with `code`, `reason`, `path`, `offset` (absolute), `index`,
+`messageOffset` and `skippable` — never payload. Messages already yielded
+are not revoked. `onInvalid: 'skip'` skips a message only when its framing is
+intact: the whole message passed the profile check and failed the schema
+(`skippable: true`). A profile refusal (`cbor/*`, including truncation and the
+limits) or `budget` always stops: CBOR has no safe point to resynchronise
+after a malformed item. The iterator's `stats` (`messages`, `skipped`,
+`bytes`, `lastSkipped`) tell you what was skipped.
+
+**End of input.** The stream ending at a message boundary ends the loop —
+an empty body is an empty sequence. Ending inside a message is
+`cbor/truncated` with that message's index. `failFast: true` reports a
+refusal as soon as it is certain (a message whose head already claims more
+than `maxMessageBytes` is then `cbor/truncated` instead of waiting to tell it
+from `too_large`).
+
+**Borrowed bytes.** A message lying wholly inside one chunk is a subarray of
+that chunk (`borrowed: true`, no copy); one spanning chunks is assembled into
+a single fresh buffer, each byte copied once. snug never writes to a chunk,
+but a borrowed message and its View alias it, so the chunk must not change
+while you use them. `fetch` bodies, `ReadableStream` default readers, Node
+streams and generators of new arrays hand over fresh chunks: the default
+`copy: 'spanning'` is safe. With a BYOB reader, a pooled buffer, or a push
+caller that reuses its chunk after `feed` returns, use `copy: 'always'`.
+SharedArrayBuffer chunks are refused.
+
+**Push.** Without an async source, `sequenceReader(options)` gives
+`feed(chunk)` and `end()`, each answering `{ messages, skipped, error }`;
+after an `error` the reader is done. `quantum` (readSequence only) adds
+scheduling yields inside long messages.
+
+Rust has the same reader: `snug::read_sequence(reader, &SequenceOptions)` /
+`Schema::read_sequence(reader, rule, &options)` iterate owned messages over
+any `Read`, and `Schema::sequence` / `Sequence::new` give a push reader whose
+`feed(&chunk)` answers messages borrowing the chunk (`Cow::Borrowed`) or
+owning their assembly ([Rust guide](rust.md#cbor-sequences)).
+
 ## Limits
 
 Configure compile-time policy inside `limits`, then optionally lower it per

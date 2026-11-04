@@ -235,6 +235,51 @@ An unregistered `.name` is `Error::Compile` with code `unknown_control` and
 `Error::MissingControls(names)` (code `missing_control`); `Controls::in_bus`
 admits them under the `bus` profile.
 
+## CBOR sequences
+
+A CBOR sequence (RFC 8742) is messages written back to back, for example a
+long-lived HTTP response body. Each message is checked in the one pass that
+finds where it ends; its `View` borrows the message's bytes (architecture §18):
+
+```rust
+use snug::{CompileOptions, Error, OnInvalid, Schema, SequenceOptions};
+let schema = Schema::compile("event = { type: tstr }", &CompileOptions::default())?;
+// {"type": "a"} {"type": 5} {"type": "c"}: the middle one fails the schema
+let body: &[u8] = &[0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'a',
+                    0xa1, 0x64, b't', b'y', b'p', b'e', 0x05,
+                    0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'c'];
+let skip = SequenceOptions { on_invalid: OnInvalid::Skip, ..SequenceOptions::default() };
+let mut types = Vec::new();
+for item in schema.read_sequence(body, "event", &skip)? {   // any std::io::Read
+    match item {
+        Ok(m) => types.push(m.view().get("type").and_then(|v| v.text()).unwrap_or("").to_string()),
+        Err(Error::Sequence(f)) if f.skippable => assert_eq!((f.index, f.failure.reason), (1, "type")),
+        Err(e) => return Err(e.into()),
+    }
+}
+assert_eq!(types, ["a", "c"]);
+
+// Push: messages inside the fed chunk borrow it; those spanning chunks own an assembly.
+let mut seq = schema.sequence("event", &SequenceOptions::default())?;
+let first = seq.feed(&body[..12]);
+assert!(first[0].as_ref().is_ok_and(|m| m.is_borrowed() && m.offset == 0));
+let rest = seq.feed(&body[12..]);
+assert!(rest[0].is_err());   // OnInvalid::Stop: the refusal ends the sequence
+assert!(seq.is_done());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`SequenceOptions` carries the per-message limits (`max_message_bytes`, depth,
+entries, items, bignum bytes, budget), the profile, `top`, `cose`,
+`on_invalid` (`Stop` by default; `Skip` skips only schema refusals of complete
+messages), `fail_fast` and the read `chunk`. A refusal is
+`Error::Sequence(MessageFailure { index, message_offset, offset, failure,
+skippable })` with absolute offsets; EOF inside a message is
+`cbor/truncated`, a message not ending within `max_message_bytes` is
+`cbor/too_large`. `snug::read_sequence` / `Sequence::new` check the profile
+only. The `Read` iterator copies each message out of its read buffer; the push
+API borrows the caller's chunk instead.
+
 ## Handle errors safely
 
 `Error` implements Display and `std::error::Error`. Match its family and use

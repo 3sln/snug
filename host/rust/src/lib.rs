@@ -14,6 +14,7 @@ pub mod program;
 pub mod view;
 pub mod api;
 pub mod controls;
+pub mod sequence;
 pub use value::{Value, Integer, TypedArray};
 pub use error::Error;
 pub use decode::{decode, DecodeOptions, Floats, Keys, Limits, Profile, Tags, Top};
@@ -23,3 +24,4 @@ pub use program::Program;
 pub use view::{View, Cursor, TypedView, TypedElement};
 pub use api::{Schema, CompileOptions, CompileLimits, CompilerProfile, ValidationOptions,
     Scratch, Failure, Segment, Blob, BytesBlob, validate_blob};
+pub use sequence::{read_sequence, Message, MessageFailure, OnInvalid, Sequence, SequenceOptions, SequenceReader};

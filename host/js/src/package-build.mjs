@@ -36,7 +36,8 @@ export async function buildPackage(destination) {
   await cp(resolve(root, '../../examples'), join(target, 'examples'), { recursive: true });
   const entries = { 'index.mjs': 'snug', 'public-compile.mjs': 'snug/compile',
     'public-schema.mjs': 'snug/schema', 'public-view.mjs': 'snug/view',
-    'public-writer.mjs': 'snug/writer', 'public-sources.mjs': 'snug/sources', 'controls.mjs': 'snug/controls' };
+    'public-writer.mjs': 'snug/writer', 'public-sources.mjs': 'snug/sources', 'public-sequence.mjs': 'snug/sequence',
+    'controls.mjs': 'snug/controls' };
   for (const name of await readdir(join(target, 'examples'))) {
     if (!name.endsWith('.mjs')) continue;
     const path = join(target, 'examples', name);

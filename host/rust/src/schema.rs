@@ -75,6 +75,24 @@ impl Program {
         self.ext = Some(Bound(bound, Arc::new(preps)));
         Ok(())
     }
+    /// The Program's words and pool (the sequence reader drives sessions itself, D212).
+    pub fn words(&self) -> &[i32] {
+        &self.p
+    }
+    pub fn pool(&self) -> &[u8] {
+        &self.b
+    }
+    /// One `vms-step` of a session on this Program, through its bound extension controls.
+    #[allow(clippy::too_many_arguments)]
+    pub fn session_step(&self, w: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32) -> i32 {
+        match &self.ext {
+            Some(x) => {
+                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
+                crate::snug::vm::session::vms_step_x(&self.p, &self.b, w, s, ss, ka, out, base, &f)
+            }
+            None => crate::snug::vm::session::vms_step(&self.p, &self.b, w, s, ss, ka, out, base),
+        }
+    }
     /// A rule's index (its position in RULES), or None.
     pub fn rule(&self, name: &str) -> Option<i32> {
         let i = vm_rule_index(&self.p, &self.b, name.as_bytes());
@@ -194,7 +212,7 @@ pub fn reason_name(code: i32) -> &'static str {
     }
 }
 
-fn result(prog: &Program, out: &[i32]) -> Result<(), Failure> {
+pub(crate) fn result(prog: &Program, out: &[i32]) -> Result<(), Failure> {
     if out[0] == 0 {
         return Ok(());
     }

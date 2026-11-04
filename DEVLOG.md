@@ -3551,8 +3551,8 @@ opportunistic, not required.
 
 ### D210 — CBOR sequences are an explicit mode over the session VM; profile-only runs it against `any` (P7.13, W21)
 **Decision** (sequences engineer, provisional): RFC 8742 sequences get their
-own entry points (`readSequence`, `sequenceReader`; Rust `read_sequence`,
-`Sequence`); every single-document API keeps refusing `trailing`. Each
+own entry points (`readSequence`, `sequenceReader` in a new package entry
+`snug/sequence`; Rust `read_sequence`, `Sequence`); every single-document API keeps refusing `trailing`. Each
 message is one root validated in ONE fused pass (profile + optional schema
 rule) by the resumable session VM in a new sequence mode (D212); boundaries
 come from that walk, not from a separate framing pass. Without a schema the
@@ -3604,6 +3604,14 @@ already held identical to the buffer (bb vmsession-test).
 **Alternatives**: a `vms-next` that keeps the session array across messages
 (re-init is cheap next to a message's walk; one more state to gate); 64-bit
 offsets in kin (a later ABI change; per-message offsets suffice).
+*Note (D230, 2026-11-04):* the sequence layer assumes nothing about the
+wire profile: a boundary is wherever the session's walk completes the root,
+and the bytes of a message are the bytes received (never a re-encoding), so
+when P8.4 gives the session VM a valid-CBOR mode (indefinite lengths ended by
+a break, unsorted keys), sequences pick it up through the same options with
+no change here — an indefinite item simply has no length claim to hold, and
+its end is the break the walk reads. The View's key-order early exits are
+the view module's concern under P8.4, not the reader's.
 - [ ] **Signed off** (owner)
 
 ### D213 — Limits apply per message; no per-sequence cap in this slice (P7.13)
@@ -5861,6 +5869,48 @@ are answered as provisional decisions D082–D085. None is open now.
     full RFC 3986 URI parsing (D121); cut keys of byte-string/float kinds
     (a format 1.2 decision, D188); incremental automata for whole reads
     (D186); bignum content cap under the any level stays 128 bytes (D181).
+
+- [ ] **P7.13 — CBOR sequences (RFC 8742; review W21)** (2026-11-04, sequences
+  engineer; architecture §18, decisions D210–D219). Owner use case: an
+  SSE-like HTTP response whose body is a CBOR sequence, each message checked
+  and handed out as a lazy View as soon as its last byte arrives.
+  - **kin:** the session VM's sequence mode (`vms-init-seq`,
+    `vms-message-length`; `SS_SEQ` 41, `SS_MLEN` 42): an unknown-length
+    session whose root end is a boundary (no trailing check), the verdict held
+    while a pending end claim is open or while it is `truncated`, released by
+    a later window that covers the claims; `vms-eof` unchanged. Profile-only
+    sequences run it against the built-in `any` Program (D146's reasoning);
+    `rscan` is unchanged (D210).
+  - **JS:** new entry `snug/sequence` — `readSequence(source, options)` (async
+    iterator, `stats`, cancels the source when the loop is left) and
+    `sequenceReader(options)` (`feed`/`end` → `{messages, skipped, error}`);
+    messages `{index, offset, length, bytes, borrowed, view}`; borrowed
+    subarrays inside a chunk, one assembly across chunks, `copy: 'always'`;
+    views minted by `view.mjs`'s unexported `mintView` (D215);
+    `validateSequenceOptions` (maxBytes refused for maxMessageBytes, D213).
+    **Rust:** `snug::sequence` — `Sequence` (push, `Cow` messages),
+    `read_sequence` / `Schema::read_sequence` (iterator over `Read`),
+    `Schema::sequence`, `SequenceOptions`, `OnInvalid`, `MessageFailure`,
+    `Error::Sequence`; `schema::Program::{words, pool, session_step}`.
+  - **Gate:** `bb sequence-test` (D218; kin/scripts/sequence-{run,test}.mjs,
+    host/rust/src/bin/sequence.rs). Results: see below.
+  - **Docs:** guide "CBOR sequences and SSE", api.md `snug/sequence`, Rust
+    guide "CBOR sequences", README feature row, architecture §18;
+    `examples/sequence-sse.mjs` (a simulated `fetch` Response, run by the
+    examples test). **Size:** `snug/sequence` budget added and `all-runtime`
+    re-capped (`tools/size/budget.json` `p7_13`); `snug/sources` unchanged
+    because sequences live in their own entry (they carry the View).
+  - **Learnt:** the test runner must not re-slice from the walk's position
+    while a verdict is held (an oversize message waits for P bytes: quadratic
+    copying); one 1,500,001-zero-byte vector is 1.5 million messages as a
+    sequence, so the gate cuts sequences at 2,000 messages and keeps one uncut
+    run. Release latency: an accepted message waits for a byte past its end
+    only when the walk asks for more than the item (tag-40 notes, non-text
+    keys crossing a window, extension-control whole reads) — counted by the
+    gate, zero for text-keyed events.
+  - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
+    exports and the native sequence host driven through the SDK session
+    wrapper; views over a JS-side copy of each message.
 
 ## P7.11 — Rust public API
 

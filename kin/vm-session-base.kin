@@ -87,6 +87,10 @@
 (defconst ^:pub ^I32 SS_NPEND 39)
 (defconst ^:pub ^I32 SS_PEND 40)
 (defconst ^:pub ^I32 PW 4)
+;; D212: 1 a message of a CBOR sequence (vms-init-seq): the root's end is a boundary,
+;; not a trailing check; its offset (the message length) once the root completed, else -1
+(defconst ^:pub ^I32 SS_SEQ 41)
+(defconst ^:pub ^I32 SS_MLEN 42)
 (defconst ^:pub ^I32 SS_HDR 44)
 
 (defconst ^:pub ^I32 PH_START 0)

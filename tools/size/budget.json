@@ -94,6 +94,19 @@
       },
       "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
     },
+    "snug/sequence": {
+      "static": {
+        "min": 153730,
+        "gzip": 54981,
+        "brotli": 47716
+      },
+      "full": {
+        "min": 153730,
+        "gzip": 54981,
+        "brotli": 47716
+      },
+      "justification": "P7.13 (CBOR sequences, D210-D219): a new public entry -- readSequence/sequenceReader over the session VM's sequence mode, with the View (minted from the verdict). Ceil(measured * 1.02)."
+    },
     "snug/controls": {
       "static": {
         "min": 6320,
@@ -121,16 +134,16 @@
     },
     "all-runtime": {
       "static": {
-        "min": 202202,
-        "gzip": 73413,
-        "brotli": 61479
+        "min": 211058,
+        "gzip": 75908,
+        "brotli": 63814
       },
       "full": {
-        "min": 202202,
-        "gzip": 73413,
-        "brotli": 61479
+        "min": 211058,
+        "gzip": 75908,
+        "brotli": 63814
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2. P7.13 (CBOR sequences, D210-D219): all-runtime now also retains the new snug/sequence entry; re-capped at ceil(measured * 1.02) on 1193611 + P7.13."
     }
   }
 }

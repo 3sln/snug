@@ -89,6 +89,31 @@ pub fn vms_init_unknown(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &m
     ss[(SS_UNK) as usize] = 1;
     return 0;
 }
+pub fn vms_init_seq(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], quantum: i32) -> i32 {
+    // D212: a session over ONE MESSAGE OF A CBOR SEQUENCE (RFC 8742): an
+    // unknown-length session whose root's end is a boundary, not a trailing
+    // check. Offsets are relative to the message start. The verdict is held
+    // (VMS_HELD) while a pending end check is open or while it is truncated;
+    // later steps drop the checks their windows cover and answer it; vms-eof
+    // settles as in drain mode. vms-message-length: the root's end once it
+    // completed. Re-run on the same arrays for the next message. ka: vms-arena
+    // bytes for vms-unknown-total. Results as vms-init's.
+    let r: i32 = vms_init_unknown(p, pool, rule, limits, s, ss, ka, quantum);
+    if r < 0 {
+        return r;
+    }
+    ss[(SS_SEQ) as usize] = 1;
+    ss[(SS_MLEN) as usize] = -1;
+    return 0;
+}
+pub fn vms_message_length(ss: &[i32]) -> i32 {
+    // D212: in a sequence session, the message's length (its root's end) once
+    // the root completed -- the next message starts there -- else -1.
+    if ss[(SS_SEQ) as usize] != 1 {
+        return -1;
+    }
+    return ss[(SS_MLEN) as usize];
+}
 pub fn vms_held_code(ss: &[i32]) -> i32 {
     // D085: after VMS_HELD, the held verdict's code (out holds it). A nonzero one
     // is certainly a refusal of the whole message, though the buffer's code may
@@ -114,8 +139,22 @@ pub fn vms_keep(ss: &[i32]) -> i32 {
 pub fn vms_steps(ss: &[i32]) -> i32 {
     return ss[(SS_STEPS) as usize];
 }
+pub(crate) fn seq_holds(ss: &[i32]) -> bool {
+    // D212: a sequence message's verdict waits while a pending end check is open
+    // or while it is truncated (is the input longer than the provisional end?).
+    return (ss[(SS_NPEND) as usize] > 0) || (ss[(SS_CODE) as usize] == CODE_TRUNCATED);
+}
 pub(crate) fn settle(ss: &mut [i32]) {
-    // The verdict is in out: done, or held while an unknown end is (D085).
+    // The verdict is in out: done, or held while an unknown end is (D085); in a
+    // sequence only while seq-holds (D212).
+    if (ss[(SS_SEQ) as usize] == 1) && (ss[(SS_UNK) as usize] == 1) {
+        if seq_holds(ss) {
+            ss[(SS_PH) as usize] = PH_HELD;
+        } else {
+            ss[(SS_PH) as usize] = PH_DONE;
+        }
+        return;
+    }
     if ss[(SS_UNK) as usize] == 1 {
         ss[(SS_PH) as usize] = PH_HELD;
     } else {
@@ -207,16 +246,21 @@ pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32]
         let ep: i32 = s[(O_ERR_POS) as usize];
         return fin(s, ss, out, base, -r, 0, ep);
     }
+    // D212: in a sequence the root's end is the message's boundary: no trailing
+    // check, nothing read or asked past it.
+    if ss[(SS_SEQ) as usize] == 1 {
+        ss[(SS_MLEN) as usize] = r;
+    }
     // D085: with the end unknown, a byte after the root is trailing; with none
     // in the window yet, ask for one -- vms-eof tells it is the end.
-    if (ss[(SS_UNK) as usize] == 1) && (r != n) {
+    if ((ss[(SS_UNK) as usize] == 1) && (r != n)) && (ss[(SS_SEQ) as usize] != 1) {
         if (r - base) < wend {
             fail(s, r - base, CODE_TRAILING);
             return fin(s, ss, out, base, CODE_TRAILING, 0, r - base);
         }
         return need(ss, base, r - base, 1);
     }
-    if r != n {
+    if (r != n) && (ss[(SS_SEQ) as usize] != 1) {
         fail(s, r - base, CODE_TRAILING);
         return fin(s, ss, out, base, CODE_TRAILING, 0, r - base);
     }
@@ -669,6 +713,14 @@ pub fn vms_step_x(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32
     }
     if ss[(SS_PH) as usize] == PH_DONE {
         return ss[(SS_CODE) as usize];
+    }
+    if (ss[(SS_PH) as usize] == PH_HELD) && ((ss[(SS_SEQ) as usize] == 1) && (base >= 0)) {
+        // D212: the window's bytes exist; once no claim is open the verdict stands
+        pend_drop(ss, base + (b.len() as i32));
+        if !seq_holds(ss) {
+            ss[(SS_PH) as usize] = PH_DONE;
+            return ss[(SS_CODE) as usize];
+        }
     }
     if ss[(SS_PH) as usize] == PH_HELD {
         return VMS_HELD;

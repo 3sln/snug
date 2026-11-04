@@ -970,6 +970,199 @@ the pass), W19 (`YIELD`), W20 (sync reads, monomorphic buffer path), W23–W24
 
 ---
 
+## 18. CBOR sequences (RFC 8742; review item W21) — design 2026-11-04, provisional
+
+The owner's use case: an HTTP response (SSE-like, long-lived, unknown total
+length, served as `application/cbor-seq`) whose body is a CBOR sequence of
+messages. The consumer wants each message as soon as its last byte arrives,
+checked (profile, and optionally a schema rule), as a lazy View that does not
+materialise or re-scan it. W21 asked for exactly this as an **explicit mode**,
+never as a fallback of the single-document APIs, which stay strict about
+`trailing`. Decisions D210–D219.
+
+### 18.1 What a message's verdict is (D211)
+
+For a sequence S and a message starting at absolute offset o, let P be the
+per-message size limit (`maxMessageBytes`, at most the input limit) and
+R = |S| − o the bytes that follow (not known for a stream until it ends).
+The **message window** is W = S[o, o + min(R, P)). The verdict is defined by
+the buffer driver (`vm-validate`, or the scanner for profile-only) over W
+with the `trailing` check replaced by a boundary:
+
+1. **The root ends at t < |W|** (the buffer reports `cbor/trailing` at t):
+   the message is S[o, o + t) and its verdict is the buffer driver's over
+   exactly those bytes — accepted, a schema failure, or `budget` — with
+   every offset made absolute (+ o). The next message starts at o + t.
+2. **The root ends exactly at |W|**: as 1 with t = |W|.
+3. **`cbor/truncated` and R > P**: `cbor/too_large` at o (budget 0, items 0,
+   as the buffer reports `too_large`): the message does not end within P
+   bytes. With R ≤ P it stays `cbor/truncated` (the input ended inside the
+   message).
+4. **Any other refusal**: that verdict (profile code or `budget`), offsets
+   absolute. The message has no known end.
+
+For a valid message, case 1/2 equals the buffer driver over the message's
+own bytes in every word (code, offset, budget used, items, path): every claim
+of a completed root lies inside it, so no check depends on what follows.
+For an invalid one "its own bytes" is undefined; W makes the answer a pure
+function of (S, o, P) — independent of chunking — and never needs the input
+past o + P. Two consequences, both deliberate: a refusal other than
+truncation is answered as soon as no earlier length claim is still open
+(there is no drain to the end of the stream, unlike D085, whose `too_large`
+counts the whole input); and an embedded payload truncated inside its byte
+string is reported `too_large` when more than P bytes follow (case 3 cannot
+tell which end a truncation was against; the code is still a refusal and
+still a function of the bytes).
+
+### 18.2 One pass: the session VM's sequence mode (D210, D212)
+
+A sequence is a series of roots, each validated by the resumable session
+(§17) in a new **sequence mode** (`vms-init-seq`): an unknown-length session
+(D144, provisional end P, pending end checks) whose root end is a boundary.
+
+* At the root's end the walk does not look for `trailing` (it neither reads
+  nor asks for the next byte): it records the message length
+  (`vms-message-length`) and finishes the root's typeset test and witness as
+  the buffer walk does at its end.
+* The verdict is **held** while a pending end check remains (a length or
+  count claim beyond the bytes delivered — e.g. a byte string skipped from
+  its head whose content has not arrived) or while it is `truncated` (case 3:
+  is the input longer than P?). Each later step drops the pending checks its
+  window covers (a window asserts its bytes exist, D147) and answers the
+  verdict once none is left; `vms-eof(n)` settles as in drain mode (n > P:
+  `too_large`; an uncovered claim: `truncated`; else the held verdict).
+* Offsets inside a session are relative to the message start; the host adds
+  o, so a sequence may run past 2^31 bytes (a message may not).
+* Per-message reset is a re-initialisation of the same arrays (scratch,
+  session array, key arena sized for P): items, depth, budget and the
+  witness start fresh for every message; nothing is allocated per message.
+* Profile-only sequences run the same session against the built-in
+  `r = any` Program (largest limits), as unknown-length scanning already does
+  (D146): one implementation of end-dependent checks, gated once. The
+  resumable scanner (`rscan`) stays known-length; a second sequence mode
+  there would be a second set of pending checks to keep equal.
+
+The View of an accepted message is opened **without a scan**: the host mints
+it from the session's verdict through an internal capability (§18.5).
+
+### 18.3 Limits (D213)
+
+Per message, each starting from zero: `maxMessageBytes` (P; default the input
+limit — 1,500,000 bytes profile-only, the schema's compiled input limit with
+a schema), `maxDepth`, `maxEntries`, `maxItems`, `maxBignumBytes`, `budget`
+(each only lowers the compiled value, as everywhere). `maxBytes` is refused
+in sequence options (its meaning — message or stream? — would be a guess).
+Per sequence: nothing in this slice. A consumer bounds a sequence by leaving
+the loop (which cancels the source); total CPU is bounded per message by the
+budget, so per byte of input. The key arena is sized for P, so many
+concurrent readers should lower `maxMessageBytes`.
+
+### 18.4 Invalid messages: stop or skip (D214)
+
+`onInvalid: 'stop'` (default) ends the sequence at the first refused message:
+every earlier message has been delivered, the refusal is reported, the
+source is not read further (and is cancelled). Earlier messages cannot be
+revoked (W21). `onInvalid: 'skip'` skips a message **only when its framing
+is intact**: its root completed (the whole message passed the profile
+check, its end is known and its bytes were delivered) and the reason is a
+schema reason (`type`, `missing`, `unexpected`, `value`, `size`, `range`,
+`pattern`, `tag`, `bits`, `embedded`, `control`, `control_size`). Never
+skippable: every `cbor/*` code (including `truncated`, `too_large` and the
+depth/entries/items limits: a profile refusal leaves no safe resynchronisation
+point in CBOR), `budget` (wherever the allowance ran out), an extension
+predicate that threw, and source failures. A refusal carries `skippable` so
+a consumer can see which kind it got.
+
+### 18.5 Bytes, views and ownership (D215)
+
+* A message lying wholly inside one delivered chunk is a **borrowed
+  subarray** of that chunk (zero copy). A message spanning chunks is
+  **assembled** into one fresh buffer, each of its bytes copied once (the
+  assembly copies a chunk's part only once the walk has moved past it or
+  the message's end is known).
+* `copy: 'spanning'` (default) borrows when it can; `copy: 'always'` gives
+  every message a fresh buffer. Borrowing is safe when the source hands over
+  fresh chunks it never touches again — a `ReadableStream` default reader,
+  `fetch` bodies, Node streams, an async generator yielding new arrays. Use
+  `'always'` with a BYOB reader, a pooled or reused buffer, or a push caller
+  that recycles its chunk after `feed` returns. snug never writes to a chunk;
+  a borrowed message (and its View) aliases the chunk, so the chunk must not
+  change while either is used. SharedArrayBuffer chunks are refused.
+* A message's View is minted from its verdict by an internal function of the
+  view module that no package entry exports: only the sequence reader holds
+  the capability. There is no public "trust me" opener (§16.2, V1/V2): a
+  View still always means "these bytes passed the full check".
+* Rust: the borrow checker carries the contract. The push API answers
+  messages that borrow the fed chunk (`Cow::Borrowed`) or own their assembly
+  (`Cow::Owned`); the `Read` iterator yields owned messages. `View` borrows
+  the message.
+
+### 18.6 Errors (D216)
+
+A refused message is reported with its **index** (0-based), the absolute
+offset of the message (`messageOffset`) and of the failure (`offset`), the
+code / reason / path / subcode of the per-message verdict, and `skippable` —
+never payload. JS: a `SnugFault` (D103's family: `code` unprefixed for CBOR,
+`schema/<reason>` otherwise). Rust: `Error::Sequence(MessageFailure)`.
+Source failures stay `SourceError` / `Error::Source`.
+
+### 18.7 End of input (D217)
+
+EOF at a boundary ends the sequence, including the empty sequence (no
+message, no error). EOF inside a message is `cbor/truncated` with the
+message's index (case 3, or a pending claim the input never covered).
+`trailing` does not exist in a sequence. `too_large` is answered as soon as
+more than P bytes follow the message start while the walk still needs one,
+counting the bytes without buffering them. The drain machinery is used only
+within a message, for its own pending claims; no check needs the stream's
+end except a truncation's. `failFast: true` reports a held refusal at once
+(D145's contract: the accept/refuse decision is the same; the code may be the
+walk's `truncated` where case 3 would say `too_large`, or the refusal where
+an earlier open claim would have been `truncated`); an accepted message is
+never released before its bytes are complete.
+
+### 18.8 API
+
+JS (`snug/sequence`, its own entry so that `snug/sources` does not carry the View):
+
+```js
+for await (const m of readSequence(source, { schema, rule: 'event', maxMessageBytes: 65536 }))
+  m.view.get('type').text();   // m: { index, offset, length, bytes, borrowed, view }
+const reader = sequenceReader({ schema, rule: 'event' });   // push
+const { messages, skipped, error } = reader.feed(chunk);     // ... reader.end()
+```
+
+`source`: a ReadableStream, an AsyncIterable or an Iterable of Uint8Array.
+Options: the validation options (profile, top, cose, per-message limits)
+with `maxMessageBytes`, plus `schema` + `rule`, `onInvalid`, `copy`,
+`failFast`, and (readSequence) `quantum`. Rust: `snug::read_sequence(reader,
+&SequenceOptions)` / `Schema::read_sequence(reader, rule, &SequenceOptions)`
+(an `Iterator<Item = Result<Message, Error>>`), and `snug::Sequence`
+(`feed(&[u8]) -> Vec<Result<Message<'_>, Error>>`, `finish()`).
+
+### 18.9 Gate and benchmarks (D218)
+
+`bb sequence-test`: every vm-test case set (corpus, oracle schemas,
+mutations, profile identity) and the scanner's vectors and mutations, built
+into sequences of 0–8 messages (valid and invalid at random positions,
+oversize under a small P, truncated tails), delivered under whole, 1-byte,
+random-size and (small inputs) every-offset chunkings: the per-message
+results equal §18.1's oracle in every word, the stop/skip outcome is as
+specified, JS == Rust (kin level, debug build, panics caught); hosts: JS
+`readSequence`/`sequenceReader` and Rust `read_sequence`/`Sequence` give the
+oracle's messages, borrowed exactly when a message lies in one chunk under
+`'spanning'` and never under `'always'`, with views walk-equal to a View
+opened on the message's bytes; JS behind out-of-bounds traps (a sample).
+Benchmarks in `bench/SEQUENCE.md`.
+
+### 18.10 Deferred
+
+The wasm SDK's sequence reader (D219, waiting on P7.9c); per-sequence caps;
+a reader that resynchronises after a profile error (not possible in general
+for CBOR); fused materialisation of messages (use `view.value()`).
+
+---
+
 ## 19. Valid CBOR input (RFC 8949 §5.3; owner direction D230.2) — design 2026-11-04, provisional
 
 D230 makes snug a general CBOR decoder: by default every decoder path —

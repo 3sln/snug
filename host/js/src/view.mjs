@@ -511,5 +511,14 @@ export function view(bytes, opts = {}) {
   return new View(m, 0, 0);
 }
 
+/** INTERNAL (D215): the View of bytes the caller has just CHECKED under `opts` -- the sequence
+ * reader, from its session's verdict. No package entry exports this: it is a capability of
+ * the modules that ran the check, never a public trusted opener (§16.2, V1/V2). */
+export function mintView(b, opts, borrowed) {
+  const m = new Message(b, opts);
+  m.borrowed = borrowed;
+  return new View(m, 0, 0);
+}
+
 /** Directory words a view's message holds (for measurements). */
 export function directoryWords(v) { return v._m.dirWords; }

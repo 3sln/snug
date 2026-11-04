@@ -1,0 +1,121 @@
+//! CBOR sequences (P7.13, D210–D217) on the Rust host. The exhaustive
+//! differential is `bb sequence-test`; these pin the public contract.
+use snug::{read_sequence, CompileLimits, CompileOptions, Error, OnInvalid, Schema, Sequence, SequenceOptions};
+
+fn event_schema() -> Schema {
+    Schema::compile("event = { type: tstr, ? n: uint }", &CompileOptions::default()).unwrap()
+}
+// {"n": 1, "type": "a"}, {"type": "bb"}, {"type": "c"}
+fn body() -> (Vec<u8>, Vec<usize>) {
+    let parts: Vec<Vec<u8>> = vec![
+        vec![0xa2, 0x61, b'n', 0x01, 0x64, b't', b'y', b'p', b'e', 0x61, b'a'],
+        vec![0xa1, 0x64, b't', b'y', b'p', b'e', 0x62, b'b', b'b'],
+        vec![0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'c'],
+    ];
+    let mut offsets = vec![0];
+    for p in &parts {
+        offsets.push(offsets.last().unwrap() + p.len());
+    }
+    (parts.concat(), offsets)
+}
+
+#[test]
+fn the_builtin_any_program_is_the_compilers() {
+    let limits = CompileLimits { depth: Some(256), input_bytes: Some(i32::MAX as u32), entries: Some(1 << 24),
+                                 items: Some(1 << 24), budget: Some(i32::MAX as u32), ..CompileLimits::default() };
+    let s = Schema::compile("r = any", &CompileOptions { limits, ..CompileOptions::default() }).unwrap();
+    let w = s.program().words();
+    // The public CompileLimits clamp at 2^31 - 2, so the input limit and budget words (33,
+    // 37) say so and the source key (7..14) differs; JS's stream test compares every word.
+    let same = w.len() == snug::sequence::ANY_P.len()
+        && w.iter().zip(snug::sequence::ANY_P.iter()).enumerate().all(|(i, (a, b))| {
+            (7..=14).contains(&i) || a == b || ((i == 33 || i == 37) && *a == i32::MAX - 1 && *b == i32::MAX)
+        });
+    assert!(same, "ANY_P differs from the compiled `r = any`");
+    assert_eq!(s.program().pool(), &snug::sequence::ANY_B);
+}
+
+#[test]
+fn push_messages_borrow_inside_a_chunk_and_own_across_chunks() {
+    let schema = event_schema();
+    let (bytes, offsets) = body();
+    let mut seq = schema.sequence("event", &SequenceOptions::default()).unwrap();
+    let (a, b) = bytes.split_at(offsets[1] + 3);
+    let first: Vec<_> = seq.feed(a).into_iter().map(Result::unwrap).collect();
+    assert_eq!(first.len(), 1);
+    assert!(first[0].is_borrowed());
+    assert_eq!((first[0].index, first[0].offset, first[0].bytes()), (0, 0, &bytes[..offsets[1]]));
+    let rest: Vec<_> = seq.feed(b).into_iter().map(Result::unwrap).collect();
+    assert_eq!(rest.len(), 2);
+    assert!(!rest[0].is_borrowed() && rest[1].is_borrowed());
+    assert_eq!(rest[0].offset, offsets[1] as u64);
+    assert_eq!(rest[0].view().get("type").and_then(|v| v.text()), Some("bb"));
+    assert!(seq.finish().is_empty());
+    assert!(seq.is_done());
+}
+
+#[test]
+fn read_sequence_yields_owned_messages_and_ends_cleanly() {
+    let (bytes, offsets) = body();
+    for chunk in [1usize, 4, 1000] {
+        let opts = SequenceOptions { chunk, ..SequenceOptions::default() };
+        let got: Vec<_> = read_sequence(&bytes[..], &opts).map(Result::unwrap).collect();
+        assert_eq!(got.iter().map(|m| m.offset as usize).collect::<Vec<_>>(), offsets[..3].to_vec());
+        assert_eq!(got[2].view().get("type").and_then(|v| v.text()), Some("c"));
+    }
+    assert_eq!(read_sequence(&[][..], &SequenceOptions::default()).count(), 0);
+}
+
+#[test]
+fn refusals_carry_index_and_absolute_offsets() {
+    let schema = event_schema();
+    let (bytes, offsets) = body();
+    // a truncated tail
+    let got: Vec<_> = read_sequence(&bytes[..offsets[2] + 2], &SequenceOptions::default()).collect();
+    assert_eq!(got.len(), 3);
+    match &got[2] {
+        Err(Error::Sequence(f)) => {
+            assert_eq!((f.index, f.message_offset, f.failure.reason, f.skippable), (2, offsets[2] as u64, "cbor/truncated", false));
+        }
+        other => panic!("{:?}", other),
+    }
+    // oversize
+    let small = SequenceOptions { max_message_bytes: Some(10), ..SequenceOptions::default() };
+    let e = read_sequence(&bytes[..], &small).find_map(Result::err).unwrap();
+    assert_eq!(e.code(), "too_large");
+    // a schema refusal: stop, or skip and go on
+    let mut bad = bytes.clone();
+    bad.splice(offsets[1]..offsets[1], [0xa1, 0x64, b't', b'y', b'p', b'e', 0x05]);
+    let stop: Vec<_> = schema.read_sequence(&bad[..], "event", &SequenceOptions::default()).unwrap().collect();
+    assert_eq!(stop.len(), 2);
+    let Err(Error::Sequence(f)) = &stop[1] else { panic!("{:?}", stop[1]) };
+    assert_eq!((f.index, f.failure.reason, f.skippable, f.offset), (1, "type", true, offsets[1] as u64 + 6));
+    assert_eq!(stop[1].as_ref().unwrap_err().code(), "schema/type");
+    let skip = SequenceOptions { on_invalid: OnInvalid::Skip, ..SequenceOptions::default() };
+    let all: Vec<_> = schema.read_sequence(&bad[..], "event", &skip).unwrap().collect();
+    assert_eq!(all.iter().filter(|r| r.is_ok()).count(), 3);
+    assert_eq!(all.iter().filter(|r| r.is_err()).count(), 1);
+    // a profile refusal is never skipped
+    let mut broken = bytes.clone();
+    broken.insert(offsets[1], 0xff);
+    let mut seq = Sequence::new(&skip).unwrap();
+    let items = seq.feed(&broken);
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1].as_ref().unwrap_err().code(), "indefinite");
+    assert!(seq.is_done());
+    assert!(schema.sequence("nope", &skip).is_err());
+}
+
+#[test]
+fn an_accepted_message_is_released_by_its_last_byte() {
+    let schema = event_schema();
+    let (bytes, offsets) = body();
+    let mut seq = schema.sequence("event", &SequenceOptions::default()).unwrap();
+    let mut seen = Vec::new();
+    for i in 0..bytes.len() {
+        for m in seq.feed(&bytes[i..i + 1]) {
+            seen.push((m.unwrap().index, i + 1));
+        }
+    }
+    assert_eq!(seen, vec![(0, offsets[1]), (1, offsets[2]), (2, offsets[3])]);
+}

@@ -103,6 +103,10 @@ export const SS_PEND = 40;
 
 export const PW = 4;
 
+export const SS_SEQ = 41;
+
+export const SS_MLEN = 42;
+
 export const SS_HDR = 44;
 
 export const PH_START = 0;
