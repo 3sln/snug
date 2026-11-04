@@ -20,7 +20,8 @@
 //    tables): no panic, no throw, JS == Rust.
 import { spawnSync } from 'node:child_process';
 import { putHead, keyAfter } from '../../gen/js/snug/write/out.mjs';
-import { floatWidth, putFloat } from '../../gen/js/snug/write/float.mjs';
+import { floatWidth, putFloat, floatWidthRfc, putFloatRfc } from '../../gen/js/snug/write/float.mjs';
+import { scan as scanKin, scanOptions, scanProfile } from '../../gen/js/snug/cbor/scan.mjs';
 import { intLen, putInt } from '../../gen/js/snug/write/int.mjs';
 import { closeMap, sortKeys, S_BUDGET, S_COMPARES } from '../../gen/js/snug/write/map.mjs';
 import { encode } from '../../host/js/src/encode.mjs';
@@ -38,13 +39,13 @@ const ok = (good, msg) => { console.log(`  ${good ? 'ok  ' : 'FAIL'} ${msg}`); i
 function rust(lines) {
   const r = spawnSync(bin, { input: lines.join('\n') + '\n', maxBuffer: 1 << 30 });
   if (r.status !== 0) throw new Error('write-test binary failed: ' + r.stderr);
-  return r.stdout.toString().trimEnd().split('\n');
+  return r.stdout.toString().replace(/\n$/, '').split('\n'); // keep empty last lines; compare() trims per line
 }
 function compare(name, lines, js) {
   const rs = rust(lines);
   let same = 0, shown = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (rs[i] === js[i]) same++;
+    if ((rs[i] ?? '').trimEnd() === (js[i] ?? '').trimEnd()) same++;
     else if (shown++ < 3) console.log(`    differs: ${lines[i].slice(0, 100)}\n      js ${js[i]?.slice(0, 120)}\n      rs ${rs[i]?.slice(0, 120)}`);
   }
   const panics = rs.filter(s => s === 'PANIC').length;
@@ -116,13 +117,39 @@ const numberOf = (hi, lo) => { if (LE) { u32[1] = hi >>> 0; u32[0] = lo >>> 0; }
       accepted++;
       const bytes = b.subarray(at, ans);
       let good = hex(bytes) === hex(baseline.encode(x)) && ans - at === w + 1;
-      try { scan(bytes, { top: 'any' }); } catch { good = false; }
+      try { scan(bytes, { top: 'any', wire: 'bindle' }); } catch { good = false; }
       if (good) agree++;
     }
   }
   compare('float-width/put-float', lines, js);
   ok(agree === accepted, `floats: ${agree}/${accepted} written floats equal cbor.mjs's encoding and pass the scanner`);
   ok(refusedOk === refused, `floats: ${refusedOk}/${refused} refusals are numbers cbor.mjs encodes as integers or refuses (float)`);
+
+  // 2b. RFC 8949 deterministic floats (D122): put-float-rfc refuses nothing; every pattern is written in a width the
+  // RFC float rules of the SCANNER (snug.cbor.float rfc-*, independent kin code) accept, decodes to the same number
+  // (any NaN to the canonical NaN f97e00), and equals put-float wherever the Bindle rules write it.
+  const lr = [], jr = [];
+  const o = new Int32Array(16), dv = b => new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const decodeFloat = b => b[0] === 0xf9 ? (() => { const h = dv(b).getUint16(1), e = (h >> 10) & 31, f = h & 1023, s = h & 32768 ? -1 : 1;
+    return e === 31 ? (f ? NaN : s * Infinity) : s * (e === 0 ? f * 2 ** -24 : (1 + f / 1024) * 2 ** (e - 15)); })() : b[0] === 0xfa ? dv(b).getFloat32(1) : dv(b).getFloat64(1);
+  let rfcOk = 0, rfcAll = 0, rfcSame = 0, rfcBoth = 0;
+  for (const [hi, lo] of pats) {
+    const cap = r.chance(0.2) ? r.int(10) : 9, at = cap === 9 ? 0 : r.int(cap + 1);
+    const b = new Uint8Array(cap), w = floatWidthRfc(hi, lo), ans = putFloatRfc(b, at, hi, lo);
+    lr.push(`R ${at} ${cap} ${hi} ${lo}`);
+    jr.push(`r ${w} ${ans} ${hex(b)}`);
+    if (ans < 0) continue;
+    rfcAll++;
+    const bytes = b.subarray(at, ans), x = numberOf(hi, lo), y = decodeFloat(bytes);
+    scanOptions(o, 1, 0, 1500000, 32, 65536, 131072); scanProfile(o, 118);
+    const nanOk = x !== x ? hex(bytes) === 'f97e00' : Object.is(x, y);
+    if (scanKin(bytes, o) === 0 && nanOk && ans - at === w + 1) rfcOk++;
+    const bw = floatWidth(hi, lo);
+    if (bw > 0) { rfcBoth++; const b2 = new Uint8Array(9); const a2 = putFloat(b2, 0, hi, lo); if (hex(b2.subarray(0, a2)) === hex(bytes)) rfcSame++; }
+  }
+  compare('float-width-rfc/put-float-rfc', lr, jr);
+  ok(rfcOk === rfcAll, `RFC floats: ${rfcOk}/${rfcAll} written floats pass the scanner's RFC float rules and decode to the same number (NaN as f97e00)`);
+  ok(rfcSame === rfcBoth, `RFC floats: ${rfcSame}/${rfcBoth} equal put-float wherever the Bindle rules write the pattern`);
 }
 
 // ---------------------------------------------------------------- 3. integers
