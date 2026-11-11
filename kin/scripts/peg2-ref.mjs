@@ -29,6 +29,17 @@ function head(m, n) {
   const b = []; for (let i = 0; i < size; i++, n >>= 8n) b.unshift(Number(n & 255n));
   return a.concat(b);
 }
+// D327 (RFC 8610 §3.3): is the float value exact in binary16 / binary32? (NaN, ±inf, ±0: yes)
+function fitsSingle(x) { return Number.isNaN(x) || !Number.isFinite(x) || Math.fround(x) === x; }
+function fitsHalf(x) {
+  if (Number.isNaN(x) || !Number.isFinite(x) || x === 0) return true;
+  const a = Math.abs(x);
+  if (a > 65504) return false;
+  let e = Math.floor(Math.log2(a));
+  while (2 ** e > a) e--;
+  while (2 ** (e + 1) <= a) e++;
+  return Number.isInteger(a / 2 ** (Math.max(e, -14) - 10));
+}
 function enc(it) {
   switch (it.kind) {
     case 'int': return it.value < 0n ? head(1, -1n - it.value) : head(0, it.value);
@@ -109,7 +120,8 @@ export function check(P, B, rule, item, { cuts = 'rfc', steps = 2000000 } = {}) 
       case 3: { const v = intValue(it, fl & 1); return v !== null && inIntervals(d(0), d(1), v); }
       case 4: {
         if (it.kind !== 'float') return false;
-        if (!(fl & ({ 16: 1, 32: 2, 64: 4 }[it.width]))) return false;
+        // D327: the widths that represent the value exactly, whatever width encodes it
+        if (!(fl & ((fitsHalf(it.value) ? 1 : 0) | (fitsSingle(it.value) ? 2 : 0) | 4))) return false;
         if (d(1) === 0) return true;
         const key = fkey(it);
         for (let i = 0; i < d(1); i++) { const q = sec(14) + 4 * (d(0) + i); if (u64(P[q], P[q + 1]) <= key && key <= u64(P[q + 2], P[q + 3])) return true; }

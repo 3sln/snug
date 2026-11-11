@@ -391,7 +391,10 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
     // The integer bound a float controller (ordered key khi:klo) gives an
     // integer target under op (0 lt, 1 le, 2 gt, 3 ge): the bound in
     // h[H_R0..H_R2] as an INCLUSIVE bound for le/ge semantics (see
-    // ctl-compare). Only |x| < 2^53; false otherwise.
+    // ctl-compare). Every finite x (D328: exact int/float comparison); h[H_R3]
+    // 1 when x was not integral (the bound moved inside), 2 when every integer
+    // satisfies the comparison, 3 when none does (|x| >= 2^64); false for NaN
+    // and the infinities.
     let mut hi: i32 = khi & 2147483647;
     let mut lo: i32 = klo;
     let mut negative: bool = false;
@@ -402,8 +405,24 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
         negative = true;
     }
     let e: i32 = ((hi >> 20) & 2047) - 1023;
-    if e > 52 {
+    if e > 1023 {
         return false;
+    }
+    if e >= 64 {
+        // |x| >= 2^64: past every integer (-2^64 itself is the least nint)
+        if negative && ((e == 64) && (((hi & 1048575) == 0) && (lo == 0))) {
+            hs(h, H_R0, R_NEG);
+            hs(h, H_R1, -1);
+            hs(h, H_R2, -1);
+            hs(h, H_R3, 0);
+            return true;
+        }
+        if negative == ((op == 2) || (op == 3)) {
+            hs(h, H_R3, 2);
+        } else {
+            hs(h, H_R3, 3);
+        }
+        return true;
     }
     if e < 0 {
         // |x| < 1 (x != 0 unless the pattern is zero)
@@ -411,9 +430,11 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
         hs(h, H_R0, R_POS);
         hs(h, H_R1, 0);
         hs(h, H_R2, 0);
+        hs(h, H_R3, 0);
         if !nonzero {
             return true;
         }
+        hs(h, H_R3, 1);
         // floor(x) is 0 (x > 0) or -1 (x < 0); ceil(x) is 1 or 0
         if negative {
             if (op == 0) || (op == 1) {
@@ -441,6 +462,10 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
         ilo = (i32::cast_unsigned(lo) >> sh).cast_signed() | (mhi << (32 - sh));
         ihi = (i32::cast_unsigned(mhi) >> sh).cast_signed();
         frac = (lo & ((1 << sh) - 1)) != 0;
+    } else if sh < 0 {
+        // 2^53 <= |x| < 2^64: integral, the significand shifted left
+        ihi = (mhi << (-sh)) | (i32::cast_unsigned(lo) >> (32 + sh)).cast_signed();
+        ilo = lo << (-sh);
     }
     // Round toward the inside of the half-line when x is not integral.
     if negative {
@@ -485,6 +510,114 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
     }
     return true;
 }
+pub(crate) fn hibit(x: i32) -> i32 {
+    // The index of x's highest set bit (x != 0).
+    let mut i: i32 = 31;
+    while ((i32::cast_unsigned(x) >> i).cast_signed() & 1) == 0 {
+        i -= 1;
+    }
+    return i;
+}
+pub(crate) fn if_hi(mh: i32, ml: i32) -> i32 {
+    // The index of the highest set bit of the non-zero 64-bit mh:ml.
+    if mh != 0 {
+        return 32 + hibit(mh);
+    }
+    return hibit(ml);
+}
+pub(crate) fn if_carry(dh: i32, dl: i32) -> i32 {
+    // dh after adding 1 to the 64-bit dh:dl.
+    if i32::wrapping_add(dl, 1) == 0 {
+        return i32::wrapping_add(dh, 1);
+    }
+    return dh;
+}
+pub(crate) fn dbl_key(h: &mut [i32], negative: bool, dh: i32, dl: i32) {
+    // The ordered key (D250) of the binary64 +-(dh:dl, sign bit clear) into
+    // h[H_R0], h[H_R1].
+    if negative {
+        hs(h, H_R0, !(dh | (1 << 31)));
+        hs(h, H_R1, !dl);
+    } else {
+        hs(h, H_R0, dh | (1 << 31));
+        hs(h, H_R1, dl);
+    }
+}
+pub(crate) fn int_fkey(h: &mut [i32], r: i32, a: i32, b: i32, op: i32) -> i32 {
+    // D328: an integer controller (region r, a:b as int-point gives it) against a
+    // FLOAT target under op (0 lt, 1 le, 2 gt, 3 ge). Its low and high keys into
+    // h[H_R0..H_R3] as float-point gives a float's (zero: the keys of -0 and +0);
+    // answers the op to use. An integer no binary64 holds (|n| > 2^53, not a
+    // multiple of its ulp) becomes the nearest binary64 inside the half-line:
+    // x > n and x >= n are x >= ceil(n), x < n and x <= n are x <= floor(n).
+    let negative: bool = r == R_NEG;
+    let mut mh: i32 = a;
+    let mut ml: i32 = b;
+    let mut dh: i32 = 0;
+    let mut dl: i32 = 0;
+    let mut exact: bool = true;
+    if (!negative) && ((a == 0) && (b == 0)) {
+        hs(h, H_R0, ZK_NEG_HI);
+        hs(h, H_R1, -1);
+        hs(h, H_R2, 1 << 31);
+        hs(h, H_R3, 0);
+        return op;
+    }
+    // the magnitude: a nint's argument n stands for -1 - n
+    if negative {
+        ml = i32::wrapping_add(b, 1);
+        if ml == 0 {
+            mh = i32::wrapping_add(a, 1);
+        }
+    }
+    if negative && ((a == (-1)) && (b == (-1))) {
+        // -2^64
+        dh = 1087 << 20;
+        dl = 0;
+    } else {
+        let p: i32 = if_hi(mh, ml);
+        if p <= 52 {
+            let s: i32 = 52 - p;
+            let mut sh: i32 = mh;
+            let mut sl: i32 = ml;
+            if s >= 32 {
+                sh = ml << (s - 32);
+                sl = 0;
+            } else if s > 0 {
+                sh = (mh << s) | (i32::cast_unsigned(ml) >> (32 - s)).cast_signed();
+                sl = ml << s;
+            }
+            dh = ((p + 1023) << 20) | (sh & 1048575);
+            dl = sl;
+        } else {
+            let s2: i32 = p - 52;
+            exact = (ml & ((1 << s2) - 1)) == 0;
+            dh = ((p + 1023) << 20) | ((i32::cast_unsigned(mh) >> s2).cast_signed() & 1048575);
+            dl = (i32::cast_unsigned(ml) >> s2).cast_signed() | (mh << (32 - s2));
+        }
+    }
+    if exact {
+        dbl_key(h, negative, dh, dl);
+        hs(h, H_R2, hg(h, H_R0));
+        hs(h, H_R3, hg(h, H_R1));
+        return op;
+    }
+    // inexact: the binary64 just above the magnitude's truncation
+    let uh: i32 = if_carry(dh, dl);
+    let ul: i32 = i32::wrapping_add(dl, 1);
+    let up: bool = ((!negative) && ((op == 2) || (op == 3))) || (negative && ((op == 0) || (op == 1)));
+    if up {
+        dbl_key(h, negative, uh, ul);
+    } else {
+        dbl_key(h, negative, dh, dl);
+    }
+    hs(h, H_R2, hg(h, H_R0));
+    hs(h, H_R3, hg(h, H_R1));
+    if (op == 2) || (op == 3) {
+        return 3;
+    }
+    return 1;
+}
 pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i32 {
     // op: 0 .lt, 1 .le, 2 .gt, 3 .ge.
     let from: i32 = vlen(h, T_STK);
@@ -523,99 +656,122 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
                         eop = 3;
                     }
                 }
+                // |x| >= 2^64: every integer (4) or none (5) satisfies it
+                if hg(h, H_R3) == 2 {
+                    eop = 4;
+                }
+                if hg(h, H_R3) == 3 {
+                    eop = 5;
+                }
+            }
+            if eop == 4 {
+                vpush1(h, T_STK, t);
             }
             // The half-line as an inclusive interval.
-            let mut lr: i32 = R_NEG_INF;
-            let mut la: i32 = 0;
-            let mut lb: i32 = 0;
-            let mut hr: i32 = R_POS_INF;
-            let mut ha: i32 = 0;
-            let mut hb: i32 = 0;
-            if eop == 0 {
-                bound_pred(h, r, a, b);
-                hr = hg(h, H_R0);
-                ha = hg(h, H_R1);
-                hb = hg(h, H_R2);
-            }
-            if eop == 1 {
-                hr = r;
-                ha = a;
-                hb = b;
-            }
-            if eop == 2 {
-                bound_succ(h, r, a, b);
-                lr = hg(h, H_R0);
-                la = hg(h, H_R1);
-                lb = hg(h, H_R2);
-            }
-            if eop == 3 {
-                lr = r;
-                la = a;
-                lb = b;
-            }
-            if k == K_INT {
-                let nl: i32 = int_with(h, t, lr, la, lb, hr, ha, hb);
-                if nl == (-1) {
-                    return -1;
+            if eop < 4 {
+                let mut lr: i32 = R_NEG_INF;
+                let mut la: i32 = 0;
+                let mut lb: i32 = 0;
+                let mut hr: i32 = R_POS_INF;
+                let mut ha: i32 = 0;
+                let mut hb: i32 = 0;
+                if eop == 0 {
+                    bound_pred(h, r, a, b);
+                    hr = hg(h, H_R0);
+                    ha = hg(h, H_R1);
+                    hb = hg(h, H_R2);
                 }
-                vpush1(h, T_STK, nl);
-            } else {
-                // UINTX: intersect its interval list (none = all of uint).
-                vtrunc(h, T_IVA, 0);
-                if ld(h, t, 3) == 0 {
-                    iv_push(h, T_IVA, R_POS, 0, 0, R_POS, -1, -1);
-                } else {
-                    iv_load(h, T_IVA, ld(h, t, 2), ld(h, t, 3));
+                if eop == 1 {
+                    hr = r;
+                    ha = a;
+                    hb = b;
                 }
-                vtrunc(h, T_IVB, 0);
-                iv_push(h, T_IVB, lr, la, lb, hr, ha, hb);
-                iv_intersect(h, T_IVA, T_IVB, T_IVC);
-                if vlen(h, T_IVC) > 0 {
-                    let first: i32 = vlen(h, T_IV) / 6;
-                    for c in 0..vlen(h, T_IVC) {
-                        vpush1(h, T_IV, vget(h, T_IVC, c));
+                if eop == 2 {
+                    bound_succ(h, r, a, b);
+                    lr = hg(h, H_R0);
+                    la = hg(h, H_R1);
+                    lb = hg(h, H_R2);
+                }
+                if eop == 3 {
+                    lr = r;
+                    la = a;
+                    lb = b;
+                }
+                if k == K_INT {
+                    let nl: i32 = int_with(h, t, lr, la, lb, hr, ha, hb);
+                    if nl == (-1) {
+                        return -1;
                     }
-                    stage(h, K_UINTX, 0);
-                    stage_d(h, 0, ld(h, t, 0));
-                    stage_d(h, 1, ld(h, t, 1));
-                    stage_d(h, 2, first);
-                    stage_d(h, 3, vlen(h, T_IVC) / 6);
-                    let ux: i32 = stage_intern(h);
-                    vpush1(h, T_STK, ux);
+                    vpush1(h, T_STK, nl);
+                } else {
+                    // UINTX: intersect its interval list (none = all of uint).
+                    vtrunc(h, T_IVA, 0);
+                    if ld(h, t, 3) == 0 {
+                        iv_push(h, T_IVA, R_POS, 0, 0, R_POS, -1, -1);
+                    } else {
+                        iv_load(h, T_IVA, ld(h, t, 2), ld(h, t, 3));
+                    }
+                    vtrunc(h, T_IVB, 0);
+                    iv_push(h, T_IVB, lr, la, lb, hr, ha, hb);
+                    iv_intersect(h, T_IVA, T_IVB, T_IVC);
+                    if vlen(h, T_IVC) > 0 {
+                        let first: i32 = vlen(h, T_IV) / 6;
+                        for c in 0..vlen(h, T_IVC) {
+                            vpush1(h, T_IV, vget(h, T_IVC, c));
+                        }
+                        stage(h, K_UINTX, 0);
+                        stage_d(h, 0, ld(h, t, 0));
+                        stage_d(h, 1, ld(h, t, 1));
+                        stage_d(h, 2, first);
+                        stage_d(h, 3, vlen(h, T_IVC) / 6);
+                        let ux: i32 = stage_intern(h);
+                        vpush1(h, T_STK, ux);
+                    }
                 }
             }
         } else if k == K_FLOAT {
-            if !isflt {
-                return fail(h, ERR_CONTROL_VALUE, pos);
-            }
             // D250: an ordered comparison is false for NaN, so the half-line stops
             // at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,
-            // so lt stops below -0, le at +0, gt starts above +0 and ge at -0.
+            // so lt stops below -0, le at +0, gt starts above +0 and ge at -0. An
+            // integer controller (D328) is the float key of its exact value, or, when
+            // no binary64 holds it, the nearest one inside the half-line.
+            let mut fop: i32 = op;
+            let mut fkh: i32 = kh;
+            let mut fkl: i32 = kl;
+            let mut fxh: i32 = xh;
+            let mut fxl: i32 = xl;
+            if !isflt {
+                fop = int_fkey(h, pr, pa, pb, op);
+                fkh = hg(h, H_R0);
+                fkl = hg(h, H_R1);
+                fxh = hg(h, H_R2);
+                fxl = hg(h, H_R3);
+            }
             let mut lh: i32 = FK_NEG_INF_HI;
             let mut ll: i32 = -1;
             let mut hh: i32 = FK_POS_INF_HI;
             let mut hl: i32 = 0;
-            if op == 0 {
-                hh = kh;
-                hl = i32::wrapping_sub(kl, 1);
-                if kl == 0 {
-                    hh = i32::wrapping_sub(kh, 1);
+            if fop == 0 {
+                hh = fkh;
+                hl = i32::wrapping_sub(fkl, 1);
+                if fkl == 0 {
+                    hh = i32::wrapping_sub(fkh, 1);
                 }
             }
-            if op == 1 {
-                hh = xh;
-                hl = xl;
+            if fop == 1 {
+                hh = fxh;
+                hl = fxl;
             }
-            if op == 2 {
-                lh = xh;
-                ll = i32::wrapping_add(xl, 1);
+            if fop == 2 {
+                lh = fxh;
+                ll = i32::wrapping_add(fxl, 1);
                 if ll == 0 {
-                    lh = i32::wrapping_add(xh, 1);
+                    lh = i32::wrapping_add(fxh, 1);
                 }
             }
-            if op == 3 {
-                lh = kh;
-                ll = kl;
+            if fop == 3 {
+                lh = fkh;
+                ll = fkl;
             }
             vtrunc(h, T_IVA, 0);
             if ld(h, t, 1) == 0 {
@@ -657,27 +813,59 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
     let xl: i32 = hg(h, H_R3);
     let lit: i32 = single_lit(h, ctl);
     let cl: i32 = single_leaf(h, ctl);
+    let mut fexact: bool = false;
+    let mut iexact: bool = false;
+    let mut ekh: i32 = kh;
+    let mut ekl: i32 = kl;
+    let mut exh: i32 = xh;
+    let mut exl: i32 = xl;
+    let mut er: i32 = pr;
+    let mut ea: i32 = pa;
+    let mut eb: i32 = pb;
     if cl < 0 {
         return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    // D328: a number equals a number of the other kind with the same value: an
+    // integer controller is a float point when a binary64 holds it exactly, an
+    // integral float controller an integer point; otherwise it equals nothing of
+    // that kind (and .ne keeps all of it).
+    if isint {
+        if int_fkey(h, pr, pa, pb, 0) == 0 {
+            fexact = true;
+            ekh = hg(h, H_R0);
+            ekl = hg(h, H_R1);
+            exh = hg(h, H_R2);
+            exl = hg(h, H_R3);
+        }
+    }
+    if isflt {
+        if float_to_int(h, kh, kl, 1) {
+            if hg(h, H_R3) == 0 {
+                iexact = true;
+                er = hg(h, H_R0);
+                ea = hg(h, H_R1);
+                eb = hg(h, H_R2);
+            }
+        }
     }
     for i in 0..ts_n(h, target) {
         let t: i32 = ts_leaf(h, target, i);
         let k: i32 = lk(h, t);
-        if isint && (k == K_INT) {
+        if (isint || iexact) && (k == K_INT) {
             if ne == 0 {
-                let nl: i32 = int_with(h, t, pr, pa, pb, pr, pa, pb);
+                let nl: i32 = int_with(h, t, er, ea, eb, er, ea, eb);
                 vpush1(h, T_STK, nl);
             } else {
                 // split around the point: [-inf, p-1] and [p+1, +inf]
                 vtrunc(h, T_IVA, 0);
                 iv_load(h, T_IVA, ld(h, t, 0), ld(h, t, 1));
                 vtrunc(h, T_IVB, 0);
-                bound_pred(h, pr, pa, pb);
+                bound_pred(h, er, ea, eb);
                 let qr: i32 = hg(h, H_R0);
                 let qa: i32 = hg(h, H_R1);
                 let qb: i32 = hg(h, H_R2);
                 iv_push(h, T_IVB, R_NEG_INF, 0, 0, qr, qa, qb);
-                bound_succ(h, pr, pa, pb);
+                bound_succ(h, er, ea, eb);
                 let sr: i32 = hg(h, H_R0);
                 let sa: i32 = hg(h, H_R1);
                 let sb: i32 = hg(h, H_R2);
@@ -686,7 +874,7 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
                 let nl2: i32 = mk_int_from(h, T_IVC, 0);
                 vpush1(h, T_STK, nl2);
             }
-        } else if isflt && (k == K_FLOAT) {
+        } else if (isflt || fexact) && (k == K_FLOAT) {
             vtrunc(h, T_IVA, 0);
             if ld(h, t, 1) == 0 {
                 vpush1(h, T_IVA, 0);
@@ -700,17 +888,17 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
             // D250: .eq is the point (both zero keys for a zero); .ne its complement
             // over every key, NaN's included: NaN is not equal to any number.
             if ne == 0 {
-                vpush1(h, T_IVB, kh);
-                vpush1(h, T_IVB, kl);
-                vpush1(h, T_IVB, xh);
-                vpush1(h, T_IVB, xl);
+                vpush1(h, T_IVB, ekh);
+                vpush1(h, T_IVB, ekl);
+                vpush1(h, T_IVB, exh);
+                vpush1(h, T_IVB, exl);
             } else {
-                let pl: i32 = i32::wrapping_sub(kl, 1);
-                let mut ph: i32 = kh;
-                let nl3: i32 = i32::wrapping_add(xl, 1);
-                let mut nh: i32 = xh;
-                if kl == 0 {
-                    ph = i32::wrapping_sub(kh, 1);
+                let pl: i32 = i32::wrapping_sub(ekl, 1);
+                let mut ph: i32 = ekh;
+                let nl3: i32 = i32::wrapping_add(exl, 1);
+                let mut nh: i32 = exh;
+                if ekl == 0 {
+                    ph = i32::wrapping_sub(ekh, 1);
                 }
                 if nl3 == 0 {
                     nh = i32::wrapping_add(xh, 1);
@@ -994,7 +1182,70 @@ pub fn ctl_cbor(h: &mut [i32], target: i32, embed: i32, pos: i32) -> i32 {
     }
     return ts_make(h, from);
 }
+pub(crate) fn vcont(h: &mut [i32], t: i32, i: i32, lo: i32, hi: i32) -> i32 {
+    // 1 when T[t][i] is a continuation byte in lo..hi, else 0.
+    if i >= vlen(h, t) {
+        return 0;
+    }
+    let c: i32 = vget(h, t, i);
+    if (c >= lo) && (c <= hi) {
+        return 1;
+    }
+    return 0;
+}
+pub(crate) fn vec_utf8(h: &mut [i32], t: i32) -> bool {
+    // Are the bytes of vector t well-formed UTF-8 (RFC 3629)?
+    let n: i32 = vlen(h, t);
+    let mut i: i32 = 0;
+    while i < n {
+        let c: i32 = vget(h, t, i);
+        let mut lo: i32 = 128;
+        let mut hi: i32 = 191;
+        let mut more: i32 = 0;
+        if c < 128 {
+            i += 1;
+        } else {
+            if (c >= 194) && (c <= 223) {
+                more = 1;
+            }
+            if (c >= 224) && (c <= 239) {
+                more = 2;
+            }
+            if (c >= 240) && (c <= 244) {
+                more = 3;
+            }
+            if more == 0 {
+                return false;
+            }
+            if c == 224 {
+                lo = 160;
+            }
+            if c == 237 {
+                hi = 159;
+            }
+            if c == 240 {
+                lo = 144;
+            }
+            if c == 244 {
+                hi = 143;
+            }
+            if vcont(h, t, i + 1, lo, hi) == 0 {
+                return false;
+            }
+            for k in 2..more + 1 {
+                if vcont(h, t, i + k, 128, 191) == 0 {
+                    return false;
+                }
+            }
+            i = (i + more) + 1;
+        }
+    }
+    return true;
+}
 pub fn ctl_cat(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
+    // RFC 9165 §2.2: the target's bytes then the controller's, both strings of
+    // either kind (D329); the result has the target's type and, as text, must be
+    // valid UTF-8.
     let a: i32 = single_lit(h, target);
     let b: i32 = single_lit(h, ctl);
     if (a < 0) || (b < 0) {
@@ -1002,7 +1253,7 @@ pub fn ctl_cat(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
     }
     let ma: i32 = bid_byte(h, a, 0) >> 5;
     let mb: i32 = bid_byte(h, b, 0) >> 5;
-    if (ma != mb) || ((ma < 2) || (ma > 3)) {
+    if ((ma < 2) || (ma > 3)) || ((mb < 2) || (mb > 3)) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
     let ha: i32 = enc_head_len(h, a);
@@ -1013,6 +1264,9 @@ pub fn ctl_cat(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
     }
     for j in hb..bid_len(h, b) {
         vpush1(h, T_TMP2, bid_byte(h, b, j));
+    }
+    if (ma == 3) && (!vec_utf8(h, T_TMP2)) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
     }
     let enc: i32 = enc_string(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
     let l: i32 = mk_lit(h, enc);
@@ -1145,7 +1399,7 @@ pub fn ctl_det(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
     }
     let ma: i32 = bid_byte(h, a, 0) >> 5;
     let mb: i32 = bid_byte(h, b, 0) >> 5;
-    if (ma != mb) || ((ma < 2) || (ma > 3)) {
+    if ((ma < 2) || (ma > 3)) || ((mb < 2) || (mb > 3)) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
     if !charge(h, bid_len(h, a) + bid_len(h, b)) {
@@ -1154,6 +1408,9 @@ pub fn ctl_det(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
     vtrunc(h, T_TMP2, 0);
     dedent_into(h, a, T_TMP2);
     dedent_into(h, b, T_TMP2);
+    if (ma == 3) && (!vec_utf8(h, T_TMP2)) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
     let enc: i32 = enc_string(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
     let l: i32 = mk_lit(h, enc);
     return ts_of1(h, l);

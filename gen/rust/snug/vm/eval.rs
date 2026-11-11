@@ -497,8 +497,87 @@ pub fn count_matched(p: &[i32], s: &[i32], fb: i32, w: i32, nq: i32) -> i32 {
     }
     return k;
 }
+pub(crate) fn low_zero(hi: i32, lo: i32, k: i32) -> i32 {
+    // Are the low k bits (k <= 64) of the 64-bit word hi:lo all zero?
+    if k < 32 {
+        if (lo & ((1 << k) - 1)) == 0 {
+            return 1;
+        }
+        return 0;
+    }
+    if lo != 0 {
+        return 0;
+    }
+    if k == 32 {
+        return 1;
+    }
+    if (hi & ((1 << (k - 32)) - 1)) == 0 {
+        return 1;
+    }
+    return 0;
+}
+pub(crate) fn fits(e: i32, mbits: i32, mhi: i32, mlo: i32, emin: i32, emax: i32, tbits: i32) -> i32 {
+    // Is the finite non-zero value 1.m x 2^e (m of mbits bits in mhi:mlo) exact in
+    // a binary format of tbits fraction bits, normal exponents emin..emax? A
+    // normal needs the low mbits - tbits bits of m zero; a subnormal (emin - tbits
+    // <= e < emin) shift more.
+    if e > emax {
+        return 0;
+    }
+    if e >= emin {
+        return low_zero(mhi, mlo, mbits - tbits);
+    }
+    if e < (emin - tbits) {
+        return 0;
+    }
+    return low_zero(mhi, mlo, (mbits - tbits) + (emin - e));
+}
+pub fn float_cls(b: &[u8], pos: i32, ai: i32) -> i32 {
+    // A float's class (§4.1) under RFC 8610 §3.3 (D327): the widths whose prelude
+    // type it belongs to are those that can represent its value exactly, whatever
+    // width encodes it -- 256 binary16, 512 binary32, 1024 binary64. A narrower
+    // encoding is exact in every wider format; NaN, the infinities and the zeros
+    // are in every width.
+    if ai == 25 {
+        return 1792;
+    }
+    if ai == 26 {
+        let w: i32 = be32(b, pos + 1);
+        let ex: i32 = (i32::cast_unsigned(w) >> 23).cast_signed() & 255;
+        let m: i32 = w & 8388607;
+        if (ex == 255) || ((ex == 0) && (m == 0)) {
+            return 1792;
+        }
+        if ex == 0 {
+            return 1536;
+        }
+        if fits(ex - 127, 23, 0, m, -14, 15, 10) == 1 {
+            return 1792;
+        }
+        return 1536;
+    }
+    let wh: i32 = be32(b, pos + 1);
+    let wl: i32 = be32(b, pos + 5);
+    let ex2: i32 = (i32::cast_unsigned(wh) >> 20).cast_signed() & 2047;
+    let mh: i32 = wh & 1048575;
+    let mut c: i32 = 1024;
+    if (ex2 == 2047) || ((ex2 == 0) && ((mh == 0) && (wl == 0))) {
+        return 1792;
+    }
+    if ex2 == 0 {
+        return 1024;
+    }
+    if fits(ex2 - 1023, 52, mh, wl, -126, 127, 23) == 1 {
+        c |= 512;
+    }
+    if fits(ex2 - 1023, 52, mh, wl, -14, 15, 10) == 1 {
+        c |= 256;
+    }
+    return c;
+}
 pub fn item_cls(major: i32, ai: i32, hi: i32, lo: i32) -> i32 {
-    // The item's class bit (§4.1).
+    // The item's class bit (§4.1); a float's by encoded width (float-cls answers
+    // the classes of its value).
     if major < 6 {
         return 1 << major;
     }
@@ -834,8 +913,11 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
             return r7;
         }
     }
-    let cls: i32 = item_cls(major, ai, hi, lo);
+    let mut cls: i32 = item_cls(major, ai, hi, lo);
     let mut r: i32 = R_TYPE;
+    if (major == 7) && ((ai >= 25) && (ai <= 27)) {
+        cls = float_cls(b, pos, ai);
+    }
     if (p[(lb + 1) as usize] & cls) != 0 {
         if (kind == K_INT) && ((cls <= 2) && (p[(lb + 3) as usize] == 1)) {
             // INT over one interval: filter 1 + leaf 1 + its one probe
@@ -2328,11 +2410,12 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
                 if stop < 0 {
                     return stop;
                 }
-                let nf: i32 = q_filter_x(p, s, fb, w, nq, item_cls(7, ai, 0, 0), pos, ctx);
+                let fc: i32 = float_cls(b, pos, ai);
+                let nf: i32 = q_filter_x(p, s, fb, w, nq, fc, pos, ctx);
                 if nf < 0 {
                     return nf;
                 }
-                let rf: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, item_cls(7, ai, 0, 0), 0, 0, unit_of(ctx));
+                let rf: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, fc, 0, 0, unit_of(ctx));
                 if rf < 0 {
                     return rf;
                 }

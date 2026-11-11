@@ -147,7 +147,7 @@ for (const c of dc.cases) {
 // ---------------------------------------------------------------- 3. conformance
 const corpus = { suites: 0, compiled: 0, refusedOk: 0, refusedNot: [], notCompiled: [], later: 0, cases: 0 };
 const corpusOracle = [];
-for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
+for (const file of ['study', 'adversarial', 'audit-2026-11-04', 'numbers']) {
   const j = JSON.parse(readFileSync(new URL(`../../corpus/conformance/${file}.json`, import.meta.url)));
   for (const su of j.suites) {
     corpus.suites++;

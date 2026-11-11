@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Run expectations without rewriting them. Report mode exits 0 with findings;
-// --gate exits 1 for any failure. --depends=P8.4 selects that exact group;
+// --gate exits 1 for any unexplained failure (one without a classification, P9.2)
+// or a stale classification. --depends=P8.4 selects that exact group;
 // --depends=baseline excludes all staged dependencies. Default includes all.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -25,12 +26,16 @@ const read = url => JSON.parse(readFileSync(url,'utf8'));
 const groupOf = c => c.dependsOn?.length ? [...c.dependsOn].sort().join('+') : 'baseline';
 const selected = process.argv.find(x=>x.startsWith('--depends='))?.slice(10);
 const rows=[]; const compilation=[]; const groups={};
-function record(suite, kind, id, expectation, observed, dependsOn=[], detail={}) {
+// P9.2: a failing check may carry a classification ({kind, decision, reason}: a documented
+// deviation, a contested reading, or work pending a checklist item); it is then explained.
+// A classified check that passes is stale (its classification must be removed).
+function record(suite, kind, id, expectation, observed, dependsOn=[], detail={}, classification) {
   const group=groupOf({dependsOn});
   if(selected && selected!==group)return;
   const pass=expectation===observed;
   (groups[group]??={pass:0,fail:0})[pass?'pass':'fail']++;
-  rows.push({suite,kind,id,group,expect:expectation,observed,pass,...detail});
+  rows.push({suite,kind,id,group,expect:expectation,observed,pass,...detail,
+    ...(classification?{classification,status:pass?'stale':'classified'}:{status:pass?'pass':'unexplained'})});
 }
 function fault(error) {return error.code||error.reason||error.name;}
 function observedClass(code) {
@@ -54,7 +59,7 @@ async function wireCase(name,vector,index,sequence=false) {
     const dependsOn=policy==='valid'?['P8.4']:[];
     record(name,sequence?'sequence':'wire',`${index}:${policy}`,vector.expect[policy],observed,dependsOn,{code,
       ...(policy==='valid'&&!validSupported?{mode:'current default (wire:valid unavailable)'}:{}),
-      ...(sequence?{itemCount:count}:{}),expectedClass:vector.expectedClass,observedClass:observedClass(code)});
+      ...(sequence?{itemCount:count}:{}),expectedClass:vector.expectedClass,observedClass:observedClass(code)},vector.classification?.[policy]);
     if(sequence && (vector.expect[policy] || vector.expectedClass))record(name,'item-count',`${index}:${policy}`,vector.itemCount,count,dependsOn);
   }
 }
@@ -81,23 +86,27 @@ for(const file of readdirSync(location).filter(x=>/^rfc\d+.*\.json$/.test(x)).so
         const result=schema.validate(Buffer.from(test.hex,'hex'),test.rule,validSupported?{wire:'valid'}:{});
         observed=result.ok;code=result.reason;
       }catch(error){code=fault(error);}
-      record(suite.name,'cddl',i,test.expect,observed,test.dependsOn,{rule:test.rule,code:code||(!schema?'compile-failure':undefined),ruby:test.ruby});
+      record(suite.name,'cddl',i,test.expect,observed,test.dependsOn,{rule:test.rule,code:code||(!schema?'compile-failure':undefined),ruby:test.ruby},test.classification);
     }
   }
 }
 for(const name of new Set(rows.map(r=>r.suite))) {
   const cases=rows.filter(r=>r.suite===name);
   const counts={};for(const test of cases){const g=counts[test.group]??={pass:0,fail:0};g[test.pass?'pass':'fail']++;}
-  const failed=cases.filter(c=>!c.pass);
-  console.log(`${failed.length?'FAIL':'PASS'} ${name}: ${JSON.stringify(counts)}`);
-  if(process.argv.includes('--verbose'))for(const row of failed)console.log(`  ${row.kind} ${row.id} [${row.group}] expected ${row.expect}, observed ${row.observed} (${row.code||'verdict'})`);
+  const failed=cases.filter(c=>!c.pass), unexplained=cases.filter(c=>c.status==='unexplained'||c.status==='stale');
+  const label=unexplained.length?'FAIL':failed.length?'CLASSIFIED':'PASS';
+  console.log(`${label} ${name}: ${JSON.stringify(counts)}${failed.length&&!unexplained.length?` -- ${failed.length} classified (${[...new Set(failed.map(c=>c.classification.decision))].join(', ')})`:''}`);
+  for(const row of cases.filter(c=>c.status==='stale'))console.log(`  STALE ${row.kind} ${row.id}: passes, but is classified ${row.classification.decision}; remove the classification`);
+  if(process.argv.includes('--verbose'))for(const row of failed)console.log(`  ${row.kind} ${row.id} [${row.group}] expected ${row.expect}, observed ${row.observed} (${row.code||'verdict'})${row.classification?` -- ${row.classification.kind} ${row.classification.decision}`:' -- UNEXPLAINED'}`);
 }
 const ruby=rows.filter(r=>r.kind==='cddl').map(r=>r.ruby);
 const runtimeEnd=fingerprint();
 const summary={validSupported,runtimeStable:JSON.stringify(runtimeStart)===JSON.stringify(runtimeEnd),groups,checks:rows.length,pass:rows.filter(r=>r.pass).length,fail:rows.filter(r=>!r.pass).length,
+  classified:rows.filter(r=>r.status==='classified').length,unexplained:rows.filter(r=>r.status==='unexplained').length,stale:rows.filter(r=>r.status==='stale').length,
   compilation:{extracted:compilation.filter(c=>c.kind==='extracted').length,rawFailures:compilation.filter(c=>c.kind==='extracted'&&!c.ok).length,effectiveFailures:compilation.filter(c=>c.kind==='effective'&&!c.ok).length},
   ruby:{checked:ruby.filter(r=>r?.status==='checked').length,disagreements:ruby.filter(r=>r?.agrees===false).length,unavailable:ruby.filter(r=>r?.status==='unavailable').length}};
 console.log('SUMMARY '+JSON.stringify(summary));
 const output=process.argv.find(x=>x.startsWith('--json='))?.slice(7);
 if(output)writeFileSync(output,JSON.stringify({summary,runtimeStart,runtimeEnd,compilation,results:rows},null,2)+'\n');
-if(process.argv.includes('--gate')&&summary.fail)process.exitCode=1;
+// --gate: every failure must be classified (P9.2), and no classification may be stale
+if(process.argv.includes('--gate')&&(summary.unexplained||summary.stale))process.exitCode=1;

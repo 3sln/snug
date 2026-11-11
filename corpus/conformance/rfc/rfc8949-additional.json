@@ -172,7 +172,14 @@
       "origin": "hand-made from RFC rule",
       "dependsOn": [
         "P8.4"
-      ]
+      ],
+      "classification": {
+        "deterministic": {
+          "kind": "deviation",
+          "decision": "D122",
+          "reason": "snug's deterministic preset is RFC 8949 §4.2.1 plus §4.2.2's choice of one NaN: \"If NaN is an allowed value, and there is no intent to support NaN payloads or signaling NaNs, the protocol needs to pick a single representation, typically 0xf97e00.\" §4.2.1 alone is not offered as a preset; the default valid preset accepts this NaN."
+        }
+      }
     },
     {
       "hex": "faffc00001",
@@ -195,7 +202,14 @@
       "origin": "hand-made from RFC rule",
       "dependsOn": [
         "P8.4"
-      ]
+      ],
+      "classification": {
+        "deterministic": {
+          "kind": "deviation",
+          "decision": "D122",
+          "reason": "snug's deterministic preset is RFC 8949 §4.2.1 plus §4.2.2's choice of one NaN: \"If NaN is an allowed value, and there is no intent to support NaN payloads or signaling NaNs, the protocol needs to pick a single representation, typically 0xf97e00.\" §4.2.1 alone is not offered as a preset; the default valid preset accepts this NaN."
+        }
+      }
     },
     {
       "hex": "c24101",

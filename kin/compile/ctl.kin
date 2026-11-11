@@ -301,7 +301,10 @@
   (comment "The integer bound a float controller (ordered key khi:klo) gives an"
            "integer target under op (0 lt, 1 le, 2 gt, 3 ge): the bound in"
            "h[H_R0..H_R2] as an INCLUSIVE bound for le/ge semantics (see"
-           "ctl-compare). Only |x| < 2^53; false otherwise.")
+           "ctl-compare). Every finite x (D328: exact int/float comparison); h[H_R3]"
+           "1 when x was not integral (the bound moved inside), 2 when every integer"
+           "satisfies the comparison, 3 when none does (|x| >= 2^64); false for NaN"
+           "and the infinities.")
   (let [^:mut hi (bit-and khi 2147483647)
         ^:mut lo klo
         ^:mut negative false]
@@ -309,12 +312,20 @@
     (if (>= khi 0)
       (do (set hi (bit-not khi)) (set lo (bit-not klo)) (set negative true)))
     (let [e (- (bit-and (sar hi 20) 2047) 1023)]
-      (if (> e 52) (return false))
+      (if (> e 1023) (return false))
+      (if (>= e 64)
+        (do (comment "|x| >= 2^64: past every integer (-2^64 itself is the least nint)")
+            (if (and negative (and (== e 64) (and (== (bit-and hi 1048575) 0) (== lo 0))))
+              (do (hs h H_R0 R_NEG) (hs h H_R1 (neg 1)) (hs h H_R2 (neg 1)) (hs h H_R3 0)
+                  (return true)))
+            (if (== negative (or (== op 2) (== op 3))) (hs h H_R3 2) (hs h H_R3 3))
+            (return true)))
       (if (< e 0)
         (do (comment "|x| < 1 (x != 0 unless the pattern is zero)")
             (let [nonzero (or (!= (bit-and hi 2147483647) 0) (!= lo 0))]
-              (hs h H_R0 R_POS) (hs h H_R1 0) (hs h H_R2 0)
+              (hs h H_R0 R_POS) (hs h H_R1 0) (hs h H_R2 0) (hs h H_R3 0)
               (if (not nonzero) (return true))
+              (hs h H_R3 1)
               (comment "floor(x) is 0 (x > 0) or -1 (x < 0); ceil(x) is 1 or 0")
               (if negative
                 (do (if (or (== op 0) (== op 1)) (do (hs h H_R0 R_NEG) (hs h H_R2 0))))
@@ -333,7 +344,11 @@
           (if (> sh 0)
             (do (set ilo (bit-or (ushr lo sh) (shl mhi (- 32 sh))))
                 (set ihi (ushr mhi sh))
-                (set frac (!= (bit-and lo (- (shl 1 sh) 1)) 0)))))
+                (set frac (!= (bit-and lo (- (shl 1 sh) 1)) 0)))
+            (if (< sh 0)
+              (do (comment "2^53 <= |x| < 2^64: integral, the significand shifted left")
+                  (set ihi (bit-or (shl mhi (neg sh)) (ushr lo (+ 32 sh))))
+                  (set ilo (shl lo (neg sh)))))))
         (comment "Round toward the inside of the half-line when x is not integral.")
         (if negative
           (do (comment "x = -(i + f): floor = -(i+1) when f > 0, ceil = -i")
@@ -353,6 +368,82 @@
         (if frac (hs h H_R3 1) (hs h H_R3 0))
         (return true)))))
 
+(defn ^I32 hibit [^I32 x]
+  (comment "The index of x's highest set bit (x != 0).")
+  (let [^:mut i 31]
+    (while (== (bit-and (ushr x i) 1) 0)
+      (set i (- i 1)))
+    (return i)))
+
+(defn ^I32 if-hi [^I32 mh ^I32 ml]
+  (comment "The index of the highest set bit of the non-zero 64-bit mh:ml.")
+  (if (!= mh 0) (return (+ 32 (hibit mh))))
+  (return (hibit ml)))
+
+(defn ^I32 if-carry [^I32 dh ^I32 dl]
+  (comment "dh after adding 1 to the 64-bit dh:dl.")
+  (if (== (add32 dl 1) 0) (return (add32 dh 1)))
+  (return dh))
+
+(defn dbl-key [^Ints h ^Bool negative ^I32 dh ^I32 dl]
+  (comment "The ordered key (D250) of the binary64 +-(dh:dl, sign bit clear) into"
+           "h[H_R0], h[H_R1].")
+  (if negative
+    (do (hs h H_R0 (bit-not (bit-or dh (shl 1 31)))) (hs h H_R1 (bit-not dl)))
+    (do (hs h H_R0 (bit-or dh (shl 1 31))) (hs h H_R1 dl))))
+
+(defn ^I32 int-fkey [^Ints h ^I32 r ^I32 a ^I32 b ^I32 op]
+  (comment "D328: an integer controller (region r, a:b as int-point gives it) against a"
+           "FLOAT target under op (0 lt, 1 le, 2 gt, 3 ge). Its low and high keys into"
+           "h[H_R0..H_R3] as float-point gives a float's (zero: the keys of -0 and +0);"
+           "answers the op to use. An integer no binary64 holds (|n| > 2^53, not a"
+           "multiple of its ulp) becomes the nearest binary64 inside the half-line:"
+           "x > n and x >= n are x >= ceil(n), x < n and x <= n are x <= floor(n).")
+  (let [negative (== r R_NEG)
+        ^:mut mh a
+        ^:mut ml b
+        ^:mut dh 0
+        ^:mut dl 0
+        ^:mut exact true]
+    (if (and (not negative) (and (== a 0) (== b 0)))
+      (do (hs h H_R0 ZK_NEG_HI) (hs h H_R1 (neg 1)) (hs h H_R2 (shl 1 31)) (hs h H_R3 0)
+          (return op)))
+    (comment "the magnitude: a nint's argument n stands for -1 - n")
+    (if negative
+      (do (set ml (add32 b 1))
+          (if (== ml 0) (set mh (add32 a 1)))))
+    (if (and negative (and (== a (neg 1)) (== b (neg 1))))
+      (do (comment "-2^64")
+          (set dh (shl 1087 20)) (set dl 0))
+      (do (let [p (if-hi mh ml)]
+            (if (<= p 52)
+              (do (let [s (- 52 p)
+                        ^:mut sh mh
+                        ^:mut sl ml]
+                    (if (>= s 32)
+                      (do (set sh (shl ml (- s 32))) (set sl 0))
+                      (if (> s 0)
+                        (do (set sh (bit-or (shl mh s) (ushr ml (- 32 s)))) (set sl (shl ml s)))))
+                    (set dh (bit-or (shl (+ p 1023) 20) (bit-and sh 1048575)))
+                    (set dl sl)))
+              (do (let [s2 (- p 52)]
+                    (set exact (== (bit-and ml (- (shl 1 s2) 1)) 0))
+                    (set dh (bit-or (shl (+ p 1023) 20) (bit-and (ushr mh s2) 1048575)))
+                    (set dl (bit-or (ushr ml s2) (shl mh (- 32 s2))))))))))
+    (if exact
+      (do (dbl-key h negative dh dl)
+          (hs h H_R2 (hg h H_R0)) (hs h H_R3 (hg h H_R1))
+          (return op)))
+    (comment "inexact: the binary64 just above the magnitude's truncation")
+    (let [uh (if-carry dh dl)
+          ul (add32 dl 1)
+          up (or (and (not negative) (or (== op 2) (== op 3)))
+                 (and negative (or (== op 0) (== op 1))))]
+      (if up (dbl-key h negative uh ul) (dbl-key h negative dh dl))
+      (hs h H_R2 (hg h H_R0)) (hs h H_R3 (hg h H_R1))
+      (if (or (== op 2) (== op 3)) (return 3))
+      (return 1))))
+
 (defn ^:pub ^I32 ctl-compare [^Ints h ^I32 target ^I32 ctl ^I32 op ^I32 pos]
   (comment "op: 0 .lt, 1 .le, 2 .gt, 3 .ge.")
   (let [from (vlen h T_STK)
@@ -370,8 +461,13 @@
                   (do (if (not (float-to-int h kh kl op)) (return (fail h ERR_CONTROL_VALUE pos)))
                       (set r (hg h H_R0)) (set a (hg h H_R1)) (set b (hg h H_R2))
                       (if (== (hg h H_R3) 1)
-                        (do (if (== op 0) (set eop 1)) (if (== op 2) (set eop 3))))))
+                        (do (if (== op 0) (set eop 1)) (if (== op 2) (set eop 3))))
+                      (comment "|x| >= 2^64: every integer (4) or none (5) satisfies it")
+                      (if (== (hg h H_R3) 2) (set eop 4))
+                      (if (== (hg h H_R3) 3) (set eop 5))))
+                (if (== eop 4) (vpush1 h T_STK t))
                 (comment "The half-line as an inclusive interval.")
+                (if (< eop 4)
                 (let [^:mut ^I32 lr R_NEG_INF ^:mut la 0 ^:mut lb 0
                       ^:mut ^I32 hr R_POS_INF ^:mut ha 0 ^:mut hb 0]
                   (if (== eop 0) (do (bound-pred h r a b) (set hr (hg h H_R0)) (set ha (hg h H_R1)) (set hb (hg h H_R2))))
@@ -400,17 +496,22 @@
                                 (stage-d h 2 first)
                                 (stage-d h 3 (quot (vlen h T_IVC) 6))
                                 (let [ux (stage-intern h)]
-                                  (vpush1 h T_STK ux))))))))))
+                                  (vpush1 h T_STK ux)))))))))))
           (if (== k K_FLOAT)
-            (do (if (not isflt) (return (fail h ERR_CONTROL_VALUE pos)))
-                (comment "D250: an ordered comparison is false for NaN, so the half-line stops"
+            (do (comment "D250: an ordered comparison is false for NaN, so the half-line stops"
                          "at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,"
-                         "so lt stops below -0, le at +0, gt starts above +0 and ge at -0.")
+                         "so lt stops below -0, le at +0, gt starts above +0 and ge at -0. An"
+                         "integer controller (D328) is the float key of its exact value, or, when"
+                         "no binary64 holds it, the nearest one inside the half-line.")
+                (let [^:mut fop op ^:mut fkh kh ^:mut fkl kl ^:mut fxh xh ^:mut fxl xl]
+                  (if (not isflt)
+                    (do (set fop (int-fkey h pr pa pb op))
+                        (set fkh (hg h H_R0)) (set fkl (hg h H_R1)) (set fxh (hg h H_R2)) (set fxl (hg h H_R3))))
                 (let [^:mut ^I32 lh FK_NEG_INF_HI ^:mut ll (neg 1) ^:mut ^I32 hh FK_POS_INF_HI ^:mut hl 0]
-                  (if (== op 0) (do (set hh kh) (set hl (sub32 kl 1)) (if (== kl 0) (set hh (sub32 kh 1)))))
-                  (if (== op 1) (do (set hh xh) (set hl xl)))
-                  (if (== op 2) (do (set lh xh) (set ll (add32 xl 1)) (if (== ll 0) (set lh (add32 xh 1)))))
-                  (if (== op 3) (do (set lh kh) (set ll kl)))
+                  (if (== fop 0) (do (set hh fkh) (set hl (sub32 fkl 1)) (if (== fkl 0) (set hh (sub32 fkh 1)))))
+                  (if (== fop 1) (do (set hh fxh) (set hl fxl)))
+                  (if (== fop 2) (do (set lh fxh) (set ll (add32 fxl 1)) (if (== ll 0) (set lh (add32 fxh 1)))))
+                  (if (== fop 3) (do (set lh fkh) (set ll fkl)))
                   (vtrunc h T_IVA 0)
                   (if (== (ld h t 1) 0)
                     (do (vpush1 h T_IVA 0) (vpush1 h T_IVA 0) (vpush1 h T_IVA (neg 1)) (vpush1 h T_IVA (neg 1)))
@@ -419,7 +520,7 @@
                   (vpush1 h T_IVB lh) (vpush1 h T_IVB ll) (vpush1 h T_IVB hh) (vpush1 h T_IVB hl)
                   (fiv-intersect h T_IVA T_IVB T_IVC)
                   (let [nf (mk-float-from h (lflags h t) T_IVC 1)]
-                    (vpush1 h T_STK nf))))
+                    (vpush1 h T_STK nf)))))
             (return (target-error h pos))))))
     (if (erred h) (return (neg 1)))
     (return (ts-make h from))))
@@ -434,29 +535,46 @@
         isflt (float-point h ctl)
         kh (hg h H_R0) kl (hg h H_R1) xh (hg h H_R2) xl (hg h H_R3)
         lit (single-lit h ctl)
-        cl (single-leaf h ctl)]
+        cl (single-leaf h ctl)
+        ^:mut ^Bool fexact false
+        ^:mut ^Bool iexact false
+        ^:mut ekh kh ^:mut ekl kl ^:mut exh xh ^:mut exl xl
+        ^:mut er pr ^:mut ea pa ^:mut eb pb]
     (if (< cl 0) (return (fail h ERR_CONTROL_VALUE pos)))
+    (comment "D328: a number equals a number of the other kind with the same value: an"
+             "integer controller is a float point when a binary64 holds it exactly, an"
+             "integral float controller an integer point; otherwise it equals nothing of"
+             "that kind (and .ne keeps all of it).")
+    (if isint
+      (do (if (== (int-fkey h pr pa pb 0) 0)
+            (do (set fexact true)
+                (set ekh (hg h H_R0)) (set ekl (hg h H_R1)) (set exh (hg h H_R2)) (set exl (hg h H_R3))))))
+    (if isflt
+      (do (if (float-to-int h kh kl 1)
+            (if (== (hg h H_R3) 0)
+              (do (set iexact true)
+                  (set er (hg h H_R0)) (set ea (hg h H_R1)) (set eb (hg h H_R2)))))))
     (for [^I32 i 0 (ts-n h target)]
       (let [t (ts-leaf h target i)
             k (lk h t)]
-        (if (and isint (== k K_INT))
+        (if (and (or isint iexact) (== k K_INT))
           (do (if (== ne 0)
-                (do (let [nl (int-with h t pr pa pb pr pa pb)]
+                (do (let [nl (int-with h t er ea eb er ea eb)]
                       (vpush1 h T_STK nl)))
                 (do (comment "split around the point: [-inf, p-1] and [p+1, +inf]")
                     (vtrunc h T_IVA 0)
                     (iv-load h T_IVA (ld h t 0) (ld h t 1))
                     (vtrunc h T_IVB 0)
-                    (bound-pred h pr pa pb)
+                    (bound-pred h er ea eb)
                     (let [qr (hg h H_R0) qa (hg h H_R1) qb (hg h H_R2)]
                       (iv-push h T_IVB R_NEG_INF 0 0 qr qa qb))
-                    (bound-succ h pr pa pb)
+                    (bound-succ h er ea eb)
                     (let [sr (hg h H_R0) sa (hg h H_R1) sb (hg h H_R2)]
                       (iv-push h T_IVB sr sa sb R_POS_INF 0 0))
                     (iv-intersect h T_IVA T_IVB T_IVC)
                     (let [nl2 (mk-int-from h T_IVC 0)]
                       (vpush1 h T_STK nl2)))))
-          (if (and isflt (== k K_FLOAT))
+          (if (and (or isflt fexact) (== k K_FLOAT))
             (do (vtrunc h T_IVA 0)
                 (if (== (ld h t 1) 0)
                   (do (vpush1 h T_IVA 0) (vpush1 h T_IVA 0) (vpush1 h T_IVA (neg 1)) (vpush1 h T_IVA (neg 1)))
@@ -465,12 +583,12 @@
                 (comment "D250: .eq is the point (both zero keys for a zero); .ne its complement"
                          "over every key, NaN's included: NaN is not equal to any number.")
                 (if (== ne 0)
-                  (do (vpush1 h T_IVB kh) (vpush1 h T_IVB kl) (vpush1 h T_IVB xh) (vpush1 h T_IVB xl))
-                  (do (let [pl (sub32 kl 1)
-                            ^:mut ph kh
-                            nl3 (add32 xl 1)
-                            ^:mut nh xh]
-                        (if (== kl 0) (set ph (sub32 kh 1)))
+                  (do (vpush1 h T_IVB ekh) (vpush1 h T_IVB ekl) (vpush1 h T_IVB exh) (vpush1 h T_IVB exl))
+                  (do (let [pl (sub32 ekl 1)
+                            ^:mut ph ekh
+                            nl3 (add32 exl 1)
+                            ^:mut nh exh]
+                        (if (== ekl 0) (set ph (sub32 ekh 1)))
                         (if (== nl3 0) (set nh (add32 xh 1)))
                         (vpush1 h T_IVB 0) (vpush1 h T_IVB 0) (vpush1 h T_IVB ph) (vpush1 h T_IVB pl)
                         (vpush1 h T_IVB nh) (vpush1 h T_IVB nl3) (vpush1 h T_IVB (neg 1)) (vpush1 h T_IVB (neg 1)))))
@@ -642,18 +760,54 @@
 
 ;; ------------------------------------------------------------ .cat
 
+(defn ^I32 vcont [^Ints h ^I32 t ^I32 i ^I32 lo ^I32 hi]
+  (comment "1 when T[t][i] is a continuation byte in lo..hi, else 0.")
+  (if (>= i (vlen h t)) (return 0))
+  (let [c (vget h t i)]
+    (if (and (>= c lo) (<= c hi)) (return 1))
+    (return 0)))
+
+(defn ^Bool vec-utf8 [^Ints h ^I32 t]
+  (comment "Are the bytes of vector t well-formed UTF-8 (RFC 3629)?")
+  (let [n (vlen h t)
+        ^:mut i 0]
+    (while (< i n)
+      (let [c (vget h t i)
+            ^:mut lo 128
+            ^:mut hi 191
+            ^:mut more 0]
+        (if (< c 128)
+          (set i (+ i 1))
+          (do (if (and (>= c 194) (<= c 223)) (set more 1))
+              (if (and (>= c 224) (<= c 239)) (set more 2))
+              (if (and (>= c 240) (<= c 244)) (set more 3))
+              (if (== more 0) (return false))
+              (if (== c 224) (set lo 160))
+              (if (== c 237) (set hi 159))
+              (if (== c 240) (set lo 144))
+              (if (== c 244) (set hi 143))
+              (if (== (vcont h t (+ i 1) lo hi) 0) (return false))
+              (for [^I32 k 2 (+ more 1)]
+                (if (== (vcont h t (+ i k) 128 191) 0) (return false)))
+              (set i (+ (+ i more) 1))))))
+    (return true)))
+
 (defn ^:pub ^I32 ctl-cat [^Ints h ^I32 target ^I32 ctl ^I32 pos]
+  (comment "RFC 9165 §2.2: the target's bytes then the controller's, both strings of"
+           "either kind (D329); the result has the target's type and, as text, must be"
+           "valid UTF-8.")
   (let [a (single-lit h target)
         b (single-lit h ctl)]
     (if (or (< a 0) (< b 0)) (return (fail h ERR_CONTROL_VALUE pos)))
     (let [ma (sar (bid-byte h a 0) 5)
           mb (sar (bid-byte h b 0) 5)]
-      (if (or (!= ma mb) (or (< ma 2) (> ma 3))) (return (fail h ERR_CONTROL_VALUE pos)))
+      (if (or (or (< ma 2) (> ma 3)) (or (< mb 2) (> mb 3))) (return (fail h ERR_CONTROL_VALUE pos)))
       (let [ha (enc-head-len h a)
             hb (enc-head-len h b)]
         (vtrunc h T_TMP2 0)
         (for [^I32 i ha (bid-len h a)] (vpush1 h T_TMP2 (bid-byte h a i)))
         (for [^I32 j hb (bid-len h b)] (vpush1 h T_TMP2 (bid-byte h b j)))
+        (if (and (== ma 3) (not (vec-utf8 h T_TMP2))) (return (fail h ERR_CONTROL_VALUE pos)))
         (let [enc (enc-string h ma T_TMP2 0 (vlen h T_TMP2))
               l (mk-lit h enc)]
           (return (ts-of1 h l)))))))
@@ -736,11 +890,12 @@
     (if (or (< a 0) (< b 0)) (return (fail h ERR_CONTROL_VALUE pos)))
     (let [ma (sar (bid-byte h a 0) 5)
           mb (sar (bid-byte h b 0) 5)]
-      (if (or (!= ma mb) (or (< ma 2) (> ma 3))) (return (fail h ERR_CONTROL_VALUE pos)))
+      (if (or (or (< ma 2) (> ma 3)) (or (< mb 2) (> mb 3))) (return (fail h ERR_CONTROL_VALUE pos)))
       (if (not (charge h (+ (bid-len h a) (bid-len h b)))) (return (neg 1)))
       (vtrunc h T_TMP2 0)
       (dedent-into h a T_TMP2)
       (dedent-into h b T_TMP2)
+      (if (and (== ma 3) (not (vec-utf8 h T_TMP2))) (return (fail h ERR_CONTROL_VALUE pos)))
       (let [enc (enc-string h ma T_TMP2 0 (vlen h T_TMP2))
             l (mk-lit h enc)]
         (return (ts-of1 h l))))))

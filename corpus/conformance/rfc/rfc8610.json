@@ -1562,10 +1562,7 @@
       ],
       "id": "indeterminate-map",
       "compileObservation": {
-        "ok": false,
-        "code": "map_overlap",
-        "line": 3,
-        "column": 3
+        "ok": true
       }
     },
     {
@@ -2488,10 +2485,7 @@
       ],
       "id": "speed",
       "compileObservation": {
-        "ok": false,
-        "code": "control_value",
-        "line": 1,
-        "column": 16
+        "ok": true
       }
     },
     {
@@ -2756,6 +2750,11 @@
           "hex": "a26474696d65006e646973706c617965642d7374657001",
           "expect": false,
           "note": "published §3.8.6 implied .ne; erratum 9229 contested",
+          "classification": {
+            "kind": "contested",
+            "decision": "S46",
+            "reason": "RFC 8610 §3.8.6 gives .default an \"implied .ne control\"; snug treats .default as an annotation only, as Erratum 9229 (status Reported) proposes and the Ruby reference does (docs/conformance.md S46)."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 0,
@@ -2779,10 +2778,7 @@
       ],
       "id": "default-timer",
       "compileObservation": {
-        "ok": false,
-        "code": "control_value",
-        "line": 3,
-        "column": 29
+        "ok": true
       }
     },
     {
@@ -4754,10 +4750,7 @@
       ],
       "id": "reputon-verbose",
       "compileObservation": {
-        "ok": false,
-        "code": "map_group_occurrence",
-        "line": 26,
-        "column": 3
+        "ok": true
       }
     },
     {

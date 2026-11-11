@@ -36,7 +36,25 @@ is generated with reference checks enabled.
 The runner prints compile findings and pass/fail per suite, then exact
 dependency groups (`baseline`, `D270`, `D301`, `P8.4`, or combinations).
 Default report mode exits 0 even with findings; `--gate` exits 1 when a
-selected expectation fails. `--depends=baseline` selects unstaged cases;
+selected expectation fails without a classification, or when a classified
+check passes (a stale classification).
+
+**Classifications (P9.2).** An expectation snug does not meet is either fixed
+or carries `classification: {kind, decision, reason}`. The exporter writes it
+(`corpus/tools/export-rfc.mjs`); a wire vector carries one per preset. Kinds:
+`deviation` (a documented deviation with its D-entry), `contested` (an RFC
+reading under an open erratum) and `pending` (work assigned to a checklist
+item). As of 2026-11-11:
+
+| Checks | Classification | Reason |
+| --- | --- | --- |
+| rfc8949-additional `f97e01`, `faffc00001` under `deterministic` | deviation, D122 | The `deterministic` preset is RFC 8949 §4.2.1 plus §4.2.2's single NaN ("the protocol needs to pick a single representation, typically 0xf97e00"); the default `valid` preset accepts both |
+| RFC 8610 default-timer #1 | contested, S46 | §3.8.6's "implied .ne control" for `.default`; snug, like the Ruby reference, follows Erratum 9229 (Reported): `.default` is an annotation |
+| RFC 9165 figures 3–5 (9 checks) | pending, P9.14 | `.abnf`/`.abnfb` arrive with the optional ABNF module |
+
+The runner prints a suite whose failures are all classified as `CLASSIFIED`,
+and counts `classified`, `unexplained` and `stale` in its summary.
+`--depends=baseline` selects unstaged cases;
 `--depends=P8.4` selects that exact group. The complete default report runs
 every group. An invalid-data case whose schema cannot compile is a failure,
 not a successful refusal. Compile findings are reported separately as well.

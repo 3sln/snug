@@ -1,0 +1,77 @@
+{
+  "format": "snug conformance corpus v1",
+  "source": "P9.2 (2026-11-11): float widths by value (RFC 8610 §3.3, D327), numeric controls across int and float (RFC 8610 §3.8.6, D328) and .cat of text with bytes (RFC 9165 §2.2, D329). Expectations are hand-reasoned from the RFC texts; vm-test also checks each against corpus/tools/peg-oracle.mjs.",
+  "notes": [
+    "float16/float32/float64 (#7.25/26/27) are sets of values: a float matches a width when that IEEE format represents its value exactly, whatever width encodes it; NaN, the infinities and the zeros are in every width (RFC 8610 §3.3: \"it does not mandate that these values also do have to be serialized as half-precision floats\").",
+    "The Ruby cddl gem 0.12.14 reads float32/float64 as 'needs at least that width' (1.5 is not float32); the cddl crate 0.10.7 admits every float in every width. Both disagree with the RFC's set-of-values reading on some cases here."
+  ],
+  "suites": [
+    {
+      "category": "rfc", "name": "float widths by value (D327)",
+      "cddl": "f16 = float16\nf32 = float32\nf64 = float64\nf1632 = float16-32\nf3264 = float32-64\nfl = float\n",
+      "cases": [
+        {"rule": "f32", "hex": "f93e00", "expect": true, "note": "1.5 as binary16 is a binary32 value"},
+        {"rule": "f64", "hex": "f93e00", "expect": true, "note": "every float is a binary64 value"},
+        {"rule": "f16", "hex": "fa3fc00000", "expect": true, "note": "1.5 as binary32 is exact in binary16"},
+        {"rule": "f16", "hex": "fb3ff8000000000000", "expect": true, "note": "1.5 as binary64 is exact in binary16"},
+        {"rule": "f16", "hex": "fa3f800001", "expect": false, "note": "1 + 2^-23: binary32 only"},
+        {"rule": "f32", "hex": "fa3f800001", "expect": true},
+        {"rule": "f1632", "hex": "fb3ff0000000000001", "expect": false, "note": "1 + 2^-52: binary64 only"},
+        {"rule": "f3264", "hex": "fb3ff0000000000001", "expect": true},
+        {"rule": "f16", "hex": "f97c00", "expect": true, "note": "+inf"},
+        {"rule": "f16", "hex": "fbfff0000000000000", "expect": true, "note": "-inf encoded as binary64"},
+        {"rule": "f16", "hex": "fb7ff8000000000000", "expect": true, "note": "NaN encoded as binary64"},
+        {"rule": "f16", "hex": "fb8000000000000000", "expect": true, "note": "-0.0 encoded as binary64"},
+        {"rule": "f16", "hex": "fa00000001", "expect": false, "note": "the least binary32 subnormal"},
+        {"rule": "f32", "hex": "fa00000001", "expect": true},
+        {"rule": "f16", "hex": "fb3e70000000000000", "expect": true, "note": "2^-24, the least binary16 subnormal"},
+        {"rule": "f16", "hex": "fb3e60000000000000", "expect": false, "note": "2^-25"},
+        {"rule": "f32", "hex": "fb3e60000000000000", "expect": true},
+        {"rule": "f16", "hex": "fa477fe000", "expect": true, "note": "65504, the greatest binary16"},
+        {"rule": "f16", "hex": "fa477ff000", "expect": false, "note": "65520 rounds to +inf in binary16"},
+        {"rule": "f32", "hex": "fb36a0000000000000", "expect": true, "note": "2^-149, the least binary32 subnormal"},
+        {"rule": "f32", "hex": "fb3690000000000000", "expect": false, "note": "2^-150"},
+        {"rule": "f32", "hex": "fb47efffffe0000000", "expect": true, "note": "the greatest binary32"},
+        {"rule": "f32", "hex": "fb47efffffe0000001", "expect": false},
+        {"rule": "fl", "hex": "00", "expect": false, "note": "an integer is not a float"}
+      ]
+    },
+    {
+      "category": "rfc", "name": "numeric controls across int and float (D328)",
+      "cddl": "speed = number .ge 0\nhalf = int .gt 0.5\nneg = int .lt -0.5\nbig = float .ge 9007199254740993\nbigle = float .le 9007199254740993\none = float .eq 1\nonei = int .eq 1.0\nfrac = int .eq 1.5\nnz = number .ne 0\nhuge = int .ge -1.8446744073709552e19\n",
+      "cases": [
+        {"rule": "speed", "hex": "00", "expect": true},
+        {"rule": "speed", "hex": "20", "expect": false},
+        {"rule": "speed", "hex": "f90000", "expect": true},
+        {"rule": "speed", "hex": "f98000", "expect": true, "note": "-0.0 = 0"},
+        {"rule": "speed", "hex": "f9bc00", "expect": false},
+        {"rule": "speed", "hex": "f97e00", "expect": false, "note": "NaN is not ordered"},
+        {"rule": "half", "hex": "01", "expect": true},
+        {"rule": "half", "hex": "00", "expect": false},
+        {"rule": "neg", "hex": "20", "expect": true},
+        {"rule": "neg", "hex": "00", "expect": false},
+        {"rule": "big", "hex": "fb4340000000000001", "expect": true, "note": "2^53 + 2 >= 2^53 + 1"},
+        {"rule": "big", "hex": "fb4340000000000000", "expect": false, "note": "2^53 < 2^53 + 1"},
+        {"rule": "bigle", "hex": "fb4340000000000000", "expect": true},
+        {"rule": "bigle", "hex": "fb4340000000000001", "expect": false},
+        {"rule": "one", "hex": "f93c00", "expect": true},
+        {"rule": "onei", "hex": "01", "expect": true},
+        {"rule": "frac", "hex": "01", "expect": false},
+        {"rule": "nz", "hex": "00", "expect": false},
+        {"rule": "nz", "hex": "f98000", "expect": false},
+        {"rule": "nz", "hex": "01", "expect": true},
+        {"rule": "huge", "hex": "3bffffffffffffffff", "expect": true, "note": "-2^64 >= -2^64"}
+      ]
+    },
+    {
+      "category": "rfc", "name": ".cat of a text and a byte string (D329)",
+      "cddl": "c = \"foo\" .cat '\n  bar\n  baz\n'\nd = h'01' .cat \"x\"\n",
+      "cases": [
+        {"rule": "c", "hex": "70666f6f0a20206261720a202062617a0a", "expect": true, "note": "RFC 9165 Figure 2"},
+        {"rule": "c", "hex": "69666f6f62617262617a", "expect": false},
+        {"rule": "d", "hex": "420178", "expect": true, "note": "the result has the target's type"},
+        {"rule": "d", "hex": "620178", "expect": false}
+      ]
+    }
+  ]
+}

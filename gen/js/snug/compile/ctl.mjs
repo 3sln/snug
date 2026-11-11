@@ -404,7 +404,10 @@ export function floatToInt(h, khi, klo, op) {
     // The integer bound a float controller (ordered key khi:klo) gives an
     // integer target under op (0 lt, 1 le, 2 gt, 3 ge): the bound in
     // h[H_R0..H_R2] as an INCLUSIVE bound for le/ge semantics (see
-    // ctl-compare). Only |x| < 2^53; false otherwise.
+    // ctl-compare). Every finite x (D328: exact int/float comparison); h[H_R3]
+    // 1 when x was not integral (the bound moved inside), 2 when every integer
+    // satisfies the comparison, 3 when none does (|x| >= 2^64); false for NaN
+    // and the infinities.
     let hi = khi & 2147483647;
     let lo = klo;
     let negative = false;
@@ -415,8 +418,24 @@ export function floatToInt(h, khi, klo, op) {
         negative = true;
     }
     const e = ((hi >> 20) & 2047) - 1023;
-    if (e > 52) {
+    if (e > 1023) {
         return false;
+    }
+    if (e >= 64) {
+        // |x| >= 2^64: past every integer (-2^64 itself is the least nint)
+        if (negative && ((e === 64) && (((hi & 1048575) === 0) && (lo === 0)))) {
+            hs(h, H_R0, R_NEG);
+            hs(h, H_R1, -1);
+            hs(h, H_R2, -1);
+            hs(h, H_R3, 0);
+            return true;
+        }
+        if (negative === ((op === 2) || (op === 3))) {
+            hs(h, H_R3, 2);
+        } else {
+            hs(h, H_R3, 3);
+        }
+        return true;
     }
     if (e < 0) {
         // |x| < 1 (x != 0 unless the pattern is zero)
@@ -424,9 +443,11 @@ export function floatToInt(h, khi, klo, op) {
         hs(h, H_R0, R_POS);
         hs(h, H_R1, 0);
         hs(h, H_R2, 0);
+        hs(h, H_R3, 0);
         if (!nonzero) {
             return true;
         }
+        hs(h, H_R3, 1);
         // floor(x) is 0 (x > 0) or -1 (x < 0); ceil(x) is 1 or 0
         if (negative) {
             if ((op === 0) || (op === 1)) {
@@ -454,6 +475,10 @@ export function floatToInt(h, khi, klo, op) {
         ilo = ((lo >>> sh) | 0) | (mhi << (32 - sh));
         ihi = (mhi >>> sh) | 0;
         frac = (lo & ((1 << sh) - 1)) !== 0;
+    } else if (sh < 0) {
+        // 2^53 <= |x| < 2^64: integral, the significand shifted left
+        ihi = (mhi << (-sh)) | ((lo >>> (32 + sh)) | 0);
+        ilo = lo << (-sh);
     }
     // Round toward the inside of the half-line when x is not integral.
     if (negative) {
@@ -499,6 +524,119 @@ export function floatToInt(h, khi, klo, op) {
     return true;
 }
 
+export function hibit(x) {
+    // The index of x's highest set bit (x != 0).
+    let i = 31;
+    while ((((x >>> i) | 0) & 1) === 0) {
+        i -= 1;
+    }
+    return i;
+}
+
+export function ifHi(mh, ml) {
+    // The index of the highest set bit of the non-zero 64-bit mh:ml.
+    if (mh !== 0) {
+        return 32 + hibit(mh);
+    }
+    return hibit(ml);
+}
+
+export function ifCarry(dh, dl) {
+    // dh after adding 1 to the 64-bit dh:dl.
+    if (((dl + 1) | 0) === 0) {
+        return (dh + 1) | 0;
+    }
+    return dh;
+}
+
+export function dblKey(h, negative, dh, dl) {
+    // The ordered key (D250) of the binary64 +-(dh:dl, sign bit clear) into
+    // h[H_R0], h[H_R1].
+    if (negative) {
+        hs(h, H_R0, ~(dh | (1 << 31)));
+        hs(h, H_R1, ~dl);
+    } else {
+        hs(h, H_R0, dh | (1 << 31));
+        hs(h, H_R1, dl);
+    }
+}
+
+export function intFkey(h, r, a, b, op) {
+    // D328: an integer controller (region r, a:b as int-point gives it) against a
+    // FLOAT target under op (0 lt, 1 le, 2 gt, 3 ge). Its low and high keys into
+    // h[H_R0..H_R3] as float-point gives a float's (zero: the keys of -0 and +0);
+    // answers the op to use. An integer no binary64 holds (|n| > 2^53, not a
+    // multiple of its ulp) becomes the nearest binary64 inside the half-line:
+    // x > n and x >= n are x >= ceil(n), x < n and x <= n are x <= floor(n).
+    const negative = r === R_NEG;
+    let mh = a;
+    let ml = b;
+    let dh = 0;
+    let dl = 0;
+    let exact = true;
+    if ((!negative) && ((a === 0) && (b === 0))) {
+        hs(h, H_R0, ZK_NEG_HI);
+        hs(h, H_R1, -1);
+        hs(h, H_R2, 1 << 31);
+        hs(h, H_R3, 0);
+        return op;
+    }
+    // the magnitude: a nint's argument n stands for -1 - n
+    if (negative) {
+        ml = (b + 1) | 0;
+        if (ml === 0) {
+            mh = (a + 1) | 0;
+        }
+    }
+    if (negative && ((a === (-1)) && (b === (-1)))) {
+        // -2^64
+        dh = 1087 << 20;
+        dl = 0;
+    } else {
+        const p = ifHi(mh, ml);
+        if (p <= 52) {
+            const s = 52 - p;
+            let sh = mh;
+            let sl = ml;
+            if (s >= 32) {
+                sh = ml << (s - 32);
+                sl = 0;
+            } else if (s > 0) {
+                sh = (mh << s) | ((ml >>> (32 - s)) | 0);
+                sl = ml << s;
+            }
+            dh = ((p + 1023) << 20) | (sh & 1048575);
+            dl = sl;
+        } else {
+            const s2 = p - 52;
+            exact = (ml & ((1 << s2) - 1)) === 0;
+            dh = ((p + 1023) << 20) | (((mh >>> s2) | 0) & 1048575);
+            dl = ((ml >>> s2) | 0) | (mh << (32 - s2));
+        }
+    }
+    if (exact) {
+        dblKey(h, negative, dh, dl);
+        hs(h, H_R2, hg(h, H_R0));
+        hs(h, H_R3, hg(h, H_R1));
+        return op;
+    }
+    // inexact: the binary64 just above the magnitude's truncation
+    const uh = ifCarry(dh, dl);
+    const ul = (dl + 1) | 0;
+    const up = ((!negative) && ((op === 2) || (op === 3))) || (negative && ((op === 0) || (op === 1)));
+    if (up) {
+        dblKey(h, negative, uh, ul);
+    } else {
+        dblKey(h, negative, dh, dl);
+    }
+    hs(h, H_R2, hg(h, H_R0));
+    hs(h, H_R3, hg(h, H_R1));
+    if ((op === 2) || (op === 3)) {
+        return 3;
+    }
+    return 1;
+}
+
 export function ctlCompare(h, target, ctl, op, pos) {
     // op: 0 .lt, 1 .le, 2 .gt, 3 .ge.
     const from = vlen(h, T_STK);
@@ -537,99 +675,122 @@ export function ctlCompare(h, target, ctl, op, pos) {
                         eop = 3;
                     }
                 }
+                // |x| >= 2^64: every integer (4) or none (5) satisfies it
+                if (hg(h, H_R3) === 2) {
+                    eop = 4;
+                }
+                if (hg(h, H_R3) === 3) {
+                    eop = 5;
+                }
+            }
+            if (eop === 4) {
+                vpush1(h, T_STK, t);
             }
             // The half-line as an inclusive interval.
-            let lr = R_NEG_INF;
-            let la = 0;
-            let lb = 0;
-            let hr = R_POS_INF;
-            let ha = 0;
-            let hb = 0;
-            if (eop === 0) {
-                boundPred(h, r, a, b);
-                hr = hg(h, H_R0);
-                ha = hg(h, H_R1);
-                hb = hg(h, H_R2);
-            }
-            if (eop === 1) {
-                hr = r;
-                ha = a;
-                hb = b;
-            }
-            if (eop === 2) {
-                boundSucc(h, r, a, b);
-                lr = hg(h, H_R0);
-                la = hg(h, H_R1);
-                lb = hg(h, H_R2);
-            }
-            if (eop === 3) {
-                lr = r;
-                la = a;
-                lb = b;
-            }
-            if (k === K_INT) {
-                const nl = intWith(h, t, lr, la, lb, hr, ha, hb);
-                if (nl === (-1)) {
-                    return -1;
+            if (eop < 4) {
+                let lr = R_NEG_INF;
+                let la = 0;
+                let lb = 0;
+                let hr = R_POS_INF;
+                let ha = 0;
+                let hb = 0;
+                if (eop === 0) {
+                    boundPred(h, r, a, b);
+                    hr = hg(h, H_R0);
+                    ha = hg(h, H_R1);
+                    hb = hg(h, H_R2);
                 }
-                vpush1(h, T_STK, nl);
-            } else {
-                // UINTX: intersect its interval list (none = all of uint).
-                vtrunc(h, T_IVA, 0);
-                if (ld(h, t, 3) === 0) {
-                    ivPush(h, T_IVA, R_POS, 0, 0, R_POS, -1, -1);
-                } else {
-                    ivLoad(h, T_IVA, ld(h, t, 2), ld(h, t, 3));
+                if (eop === 1) {
+                    hr = r;
+                    ha = a;
+                    hb = b;
                 }
-                vtrunc(h, T_IVB, 0);
-                ivPush(h, T_IVB, lr, la, lb, hr, ha, hb);
-                ivIntersect(h, T_IVA, T_IVB, T_IVC);
-                if (vlen(h, T_IVC) > 0) {
-                    const first = (vlen(h, T_IV) / 6) | 0;
-                    for (let c = 0; c < vlen(h, T_IVC); c++) {
-                        vpush1(h, T_IV, vget(h, T_IVC, c));
+                if (eop === 2) {
+                    boundSucc(h, r, a, b);
+                    lr = hg(h, H_R0);
+                    la = hg(h, H_R1);
+                    lb = hg(h, H_R2);
+                }
+                if (eop === 3) {
+                    lr = r;
+                    la = a;
+                    lb = b;
+                }
+                if (k === K_INT) {
+                    const nl = intWith(h, t, lr, la, lb, hr, ha, hb);
+                    if (nl === (-1)) {
+                        return -1;
                     }
-                    stage(h, K_UINTX, 0);
-                    stageD(h, 0, ld(h, t, 0));
-                    stageD(h, 1, ld(h, t, 1));
-                    stageD(h, 2, first);
-                    stageD(h, 3, (vlen(h, T_IVC) / 6) | 0);
-                    const ux = stageIntern(h);
-                    vpush1(h, T_STK, ux);
+                    vpush1(h, T_STK, nl);
+                } else {
+                    // UINTX: intersect its interval list (none = all of uint).
+                    vtrunc(h, T_IVA, 0);
+                    if (ld(h, t, 3) === 0) {
+                        ivPush(h, T_IVA, R_POS, 0, 0, R_POS, -1, -1);
+                    } else {
+                        ivLoad(h, T_IVA, ld(h, t, 2), ld(h, t, 3));
+                    }
+                    vtrunc(h, T_IVB, 0);
+                    ivPush(h, T_IVB, lr, la, lb, hr, ha, hb);
+                    ivIntersect(h, T_IVA, T_IVB, T_IVC);
+                    if (vlen(h, T_IVC) > 0) {
+                        const first = (vlen(h, T_IV) / 6) | 0;
+                        for (let c = 0; c < vlen(h, T_IVC); c++) {
+                            vpush1(h, T_IV, vget(h, T_IVC, c));
+                        }
+                        stage(h, K_UINTX, 0);
+                        stageD(h, 0, ld(h, t, 0));
+                        stageD(h, 1, ld(h, t, 1));
+                        stageD(h, 2, first);
+                        stageD(h, 3, (vlen(h, T_IVC) / 6) | 0);
+                        const ux = stageIntern(h);
+                        vpush1(h, T_STK, ux);
+                    }
                 }
             }
         } else if (k === K_FLOAT) {
-            if (!isflt) {
-                return fail(h, ERR_CONTROL_VALUE, pos);
-            }
             // D250: an ordered comparison is false for NaN, so the half-line stops
             // at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,
-            // so lt stops below -0, le at +0, gt starts above +0 and ge at -0.
+            // so lt stops below -0, le at +0, gt starts above +0 and ge at -0. An
+            // integer controller (D328) is the float key of its exact value, or, when
+            // no binary64 holds it, the nearest one inside the half-line.
+            let fop = op;
+            let fkh = kh;
+            let fkl = kl;
+            let fxh = xh;
+            let fxl = xl;
+            if (!isflt) {
+                fop = intFkey(h, pr, pa, pb, op);
+                fkh = hg(h, H_R0);
+                fkl = hg(h, H_R1);
+                fxh = hg(h, H_R2);
+                fxl = hg(h, H_R3);
+            }
             let lh = FK_NEG_INF_HI;
             let ll = -1;
             let hh = FK_POS_INF_HI;
             let hl = 0;
-            if (op === 0) {
-                hh = kh;
-                hl = (kl - 1) | 0;
-                if (kl === 0) {
-                    hh = (kh - 1) | 0;
+            if (fop === 0) {
+                hh = fkh;
+                hl = (fkl - 1) | 0;
+                if (fkl === 0) {
+                    hh = (fkh - 1) | 0;
                 }
             }
-            if (op === 1) {
-                hh = xh;
-                hl = xl;
+            if (fop === 1) {
+                hh = fxh;
+                hl = fxl;
             }
-            if (op === 2) {
-                lh = xh;
-                ll = (xl + 1) | 0;
+            if (fop === 2) {
+                lh = fxh;
+                ll = (fxl + 1) | 0;
                 if (ll === 0) {
-                    lh = (xh + 1) | 0;
+                    lh = (fxh + 1) | 0;
                 }
             }
-            if (op === 3) {
-                lh = kh;
-                ll = kl;
+            if (fop === 3) {
+                lh = fkh;
+                ll = fkl;
             }
             vtrunc(h, T_IVA, 0);
             if (ld(h, t, 1) === 0) {
@@ -672,27 +833,59 @@ export function ctlEq(h, target, ctl, ne, pos) {
     const xl = hg(h, H_R3);
     const lit = singleLit(h, ctl);
     const cl = singleLeaf(h, ctl);
+    let fexact = false;
+    let iexact = false;
+    let ekh = kh;
+    let ekl = kl;
+    let exh = xh;
+    let exl = xl;
+    let er = pr;
+    let ea = pa;
+    let eb = pb;
     if (cl < 0) {
         return fail(h, ERR_CONTROL_VALUE, pos);
+    }
+    // D328: a number equals a number of the other kind with the same value: an
+    // integer controller is a float point when a binary64 holds it exactly, an
+    // integral float controller an integer point; otherwise it equals nothing of
+    // that kind (and .ne keeps all of it).
+    if (isint) {
+        if (intFkey(h, pr, pa, pb, 0) === 0) {
+            fexact = true;
+            ekh = hg(h, H_R0);
+            ekl = hg(h, H_R1);
+            exh = hg(h, H_R2);
+            exl = hg(h, H_R3);
+        }
+    }
+    if (isflt) {
+        if (floatToInt(h, kh, kl, 1)) {
+            if (hg(h, H_R3) === 0) {
+                iexact = true;
+                er = hg(h, H_R0);
+                ea = hg(h, H_R1);
+                eb = hg(h, H_R2);
+            }
+        }
     }
     for (let i = 0; i < tsN(h, target); i++) {
         const t = tsLeaf(h, target, i);
         const k = lk(h, t);
-        if (isint && (k === K_INT)) {
+        if ((isint || iexact) && (k === K_INT)) {
             if (ne === 0) {
-                const nl = intWith(h, t, pr, pa, pb, pr, pa, pb);
+                const nl = intWith(h, t, er, ea, eb, er, ea, eb);
                 vpush1(h, T_STK, nl);
             } else {
                 // split around the point: [-inf, p-1] and [p+1, +inf]
                 vtrunc(h, T_IVA, 0);
                 ivLoad(h, T_IVA, ld(h, t, 0), ld(h, t, 1));
                 vtrunc(h, T_IVB, 0);
-                boundPred(h, pr, pa, pb);
+                boundPred(h, er, ea, eb);
                 const qr = hg(h, H_R0);
                 const qa = hg(h, H_R1);
                 const qb = hg(h, H_R2);
                 ivPush(h, T_IVB, R_NEG_INF, 0, 0, qr, qa, qb);
-                boundSucc(h, pr, pa, pb);
+                boundSucc(h, er, ea, eb);
                 const sr = hg(h, H_R0);
                 const sa = hg(h, H_R1);
                 const sb = hg(h, H_R2);
@@ -701,7 +894,7 @@ export function ctlEq(h, target, ctl, ne, pos) {
                 const nl2 = mkIntFrom(h, T_IVC, 0);
                 vpush1(h, T_STK, nl2);
             }
-        } else if (isflt && (k === K_FLOAT)) {
+        } else if ((isflt || fexact) && (k === K_FLOAT)) {
             vtrunc(h, T_IVA, 0);
             if (ld(h, t, 1) === 0) {
                 vpush1(h, T_IVA, 0);
@@ -715,17 +908,17 @@ export function ctlEq(h, target, ctl, ne, pos) {
             // D250: .eq is the point (both zero keys for a zero); .ne its complement
             // over every key, NaN's included: NaN is not equal to any number.
             if (ne === 0) {
-                vpush1(h, T_IVB, kh);
-                vpush1(h, T_IVB, kl);
-                vpush1(h, T_IVB, xh);
-                vpush1(h, T_IVB, xl);
+                vpush1(h, T_IVB, ekh);
+                vpush1(h, T_IVB, ekl);
+                vpush1(h, T_IVB, exh);
+                vpush1(h, T_IVB, exl);
             } else {
-                const pl = (kl - 1) | 0;
-                let ph = kh;
-                const nl3 = (xl + 1) | 0;
-                let nh = xh;
-                if (kl === 0) {
-                    ph = (kh - 1) | 0;
+                const pl = (ekl - 1) | 0;
+                let ph = ekh;
+                const nl3 = (exl + 1) | 0;
+                let nh = exh;
+                if (ekl === 0) {
+                    ph = (ekh - 1) | 0;
                 }
                 if (nl3 === 0) {
                     nh = (xh + 1) | 0;
@@ -1014,7 +1207,72 @@ export function ctlCbor(h, target, embed, pos) {
     return tsMake(h, from);
 }
 
+export function vcont(h, t, i, lo, hi) {
+    // 1 when T[t][i] is a continuation byte in lo..hi, else 0.
+    if (i >= vlen(h, t)) {
+        return 0;
+    }
+    const c = vget(h, t, i);
+    if ((c >= lo) && (c <= hi)) {
+        return 1;
+    }
+    return 0;
+}
+
+export function vecUtf8(h, t) {
+    // Are the bytes of vector t well-formed UTF-8 (RFC 3629)?
+    const n = vlen(h, t);
+    let i = 0;
+    while (i < n) {
+        const c = vget(h, t, i);
+        let lo = 128;
+        let hi = 191;
+        let more = 0;
+        if (c < 128) {
+            i += 1;
+        } else {
+            if ((c >= 194) && (c <= 223)) {
+                more = 1;
+            }
+            if ((c >= 224) && (c <= 239)) {
+                more = 2;
+            }
+            if ((c >= 240) && (c <= 244)) {
+                more = 3;
+            }
+            if (more === 0) {
+                return false;
+            }
+            if (c === 224) {
+                lo = 160;
+            }
+            if (c === 237) {
+                hi = 159;
+            }
+            if (c === 240) {
+                lo = 144;
+            }
+            if (c === 244) {
+                hi = 143;
+            }
+            if (vcont(h, t, i + 1, lo, hi) === 0) {
+                return false;
+            }
+            for (let k = 2; k < more + 1; k++) {
+                if (vcont(h, t, i + k, 128, 191) === 0) {
+                    return false;
+                }
+            }
+            i = (i + more) + 1;
+        }
+    }
+    return true;
+}
+
 export function ctlCat(h, target, ctl, pos) {
+    // RFC 9165 §2.2: the target's bytes then the controller's, both strings of
+    // either kind (D329); the result has the target's type and, as text, must be
+    // valid UTF-8.
     const a = singleLit(h, target);
     const b = singleLit(h, ctl);
     if ((a < 0) || (b < 0)) {
@@ -1022,7 +1280,7 @@ export function ctlCat(h, target, ctl, pos) {
     }
     const ma = bidByte(h, a, 0) >> 5;
     const mb = bidByte(h, b, 0) >> 5;
-    if ((ma !== mb) || ((ma < 2) || (ma > 3))) {
+    if (((ma < 2) || (ma > 3)) || ((mb < 2) || (mb > 3))) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
     const ha = encHeadLen(h, a);
@@ -1033,6 +1291,9 @@ export function ctlCat(h, target, ctl, pos) {
     }
     for (let j = hb; j < bidLen(h, b); j++) {
         vpush1(h, T_TMP2, bidByte(h, b, j));
+    }
+    if ((ma === 3) && (!vecUtf8(h, T_TMP2))) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
     }
     const enc = encString(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
     const l = mkLit(h, enc);
@@ -1171,7 +1432,7 @@ export function ctlDet(h, target, ctl, pos) {
     }
     const ma = bidByte(h, a, 0) >> 5;
     const mb = bidByte(h, b, 0) >> 5;
-    if ((ma !== mb) || ((ma < 2) || (ma > 3))) {
+    if (((ma < 2) || (ma > 3)) || ((mb < 2) || (mb > 3))) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
     if (!charge(h, bidLen(h, a) + bidLen(h, b))) {
@@ -1180,6 +1441,9 @@ export function ctlDet(h, target, ctl, pos) {
     vtrunc(h, T_TMP2, 0);
     dedentInto(h, a, T_TMP2);
     dedentInto(h, b, T_TMP2);
+    if ((ma === 3) && (!vecUtf8(h, T_TMP2))) {
+        return fail(h, ERR_CONTROL_VALUE, pos);
+    }
     const enc = encString(h, ma, T_TMP2, 0, vlen(h, T_TMP2));
     const l = mkLit(h, enc);
     return tsOf1(h, l);

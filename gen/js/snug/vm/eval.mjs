@@ -516,8 +516,90 @@ export function countMatched(p, s, fb, w, nq) {
     return k;
 }
 
+export function lowZero(hi, lo, k) {
+    // Are the low k bits (k <= 64) of the 64-bit word hi:lo all zero?
+    if (k < 32) {
+        if ((lo & ((1 << k) - 1)) === 0) {
+            return 1;
+        }
+        return 0;
+    }
+    if (lo !== 0) {
+        return 0;
+    }
+    if (k === 32) {
+        return 1;
+    }
+    if ((hi & ((1 << (k - 32)) - 1)) === 0) {
+        return 1;
+    }
+    return 0;
+}
+
+export function fits(e, mbits, mhi, mlo, emin, emax, tbits) {
+    // Is the finite non-zero value 1.m x 2^e (m of mbits bits in mhi:mlo) exact in
+    // a binary format of tbits fraction bits, normal exponents emin..emax? A
+    // normal needs the low mbits - tbits bits of m zero; a subnormal (emin - tbits
+    // <= e < emin) shift more.
+    if (e > emax) {
+        return 0;
+    }
+    if (e >= emin) {
+        return lowZero(mhi, mlo, mbits - tbits);
+    }
+    if (e < (emin - tbits)) {
+        return 0;
+    }
+    return lowZero(mhi, mlo, (mbits - tbits) + (emin - e));
+}
+
+export function floatCls(b, pos, ai) {
+    // A float's class (§4.1) under RFC 8610 §3.3 (D327): the widths whose prelude
+    // type it belongs to are those that can represent its value exactly, whatever
+    // width encodes it -- 256 binary16, 512 binary32, 1024 binary64. A narrower
+    // encoding is exact in every wider format; NaN, the infinities and the zeros
+    // are in every width.
+    if (ai === 25) {
+        return 1792;
+    }
+    if (ai === 26) {
+        const w = be32(b, pos + 1);
+        const ex = ((w >>> 23) | 0) & 255;
+        const m = w & 8388607;
+        if ((ex === 255) || ((ex === 0) && (m === 0))) {
+            return 1792;
+        }
+        if (ex === 0) {
+            return 1536;
+        }
+        if (fits(ex - 127, 23, 0, m, -14, 15, 10) === 1) {
+            return 1792;
+        }
+        return 1536;
+    }
+    const wh = be32(b, pos + 1);
+    const wl = be32(b, pos + 5);
+    const ex2 = ((wh >>> 20) | 0) & 2047;
+    const mh = wh & 1048575;
+    let c = 1024;
+    if ((ex2 === 2047) || ((ex2 === 0) && ((mh === 0) && (wl === 0)))) {
+        return 1792;
+    }
+    if (ex2 === 0) {
+        return 1024;
+    }
+    if (fits(ex2 - 1023, 52, mh, wl, -126, 127, 23) === 1) {
+        c |= 512;
+    }
+    if (fits(ex2 - 1023, 52, mh, wl, -14, 15, 10) === 1) {
+        c |= 256;
+    }
+    return c;
+}
+
 export function itemCls(major, ai, hi, lo) {
-    // The item's class bit (§4.1).
+    // The item's class bit (§4.1); a float's by encoded width (float-cls answers
+    // the classes of its value).
     if (major < 6) {
         return 1 << major;
     }
@@ -860,8 +942,11 @@ export function fastChild(p, pool, b, s, pos, d, cfb, ck, cw, leaf, end, ctx, ex
             return r7;
         }
     }
-    const cls = itemCls(major, ai, hi, lo);
+    let cls = itemCls(major, ai, hi, lo);
     let r = R_TYPE;
+    if ((major === 7) && ((ai >= 25) && (ai <= 27))) {
+        cls = floatCls(b, pos, ai);
+    }
     if ((p[lb + 1] & cls) !== 0) {
         if ((kind === K_INT) && ((cls <= 2) && (p[lb + 3] === 1))) {
             // INT over one interval: filter 1 + leaf 1 + its one probe
@@ -2383,11 +2468,12 @@ export function evalItem(p, pool, b, s, pos, d, fb, ck, nq, end, ctx, ext) {
                 if (stop < 0) {
                     return stop;
                 }
-                const nf = qFilterX(p, s, fb, w, nq, itemCls(7, ai, 0, 0), pos, ctx);
+                const fc = floatCls(b, pos, ai);
+                const nf = qFilterX(p, s, fb, w, nq, fc, pos, ctx);
                 if (nf < 0) {
                     return nf;
                 }
-                const rf = evalScalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, itemCls(7, ai, 0, 0), 0, 0, unitOf(ctx));
+                const rf = evalScalars(p, pool, b, s, fb, w, nq, pos, pos + 1, stop, fc, 0, 0, unitOf(ctx));
                 if (rf < 0) {
                     return rf;
                 }
