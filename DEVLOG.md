@@ -4683,6 +4683,9 @@ are answered as provisional decisions D082–D085. None is open now.
   `vms_init_seq`; new `sdk_vs_reseq(h, quantum)`; `INFO[4]` = `vms_held_code`,
   `INFO[5]` = `vms_message_length`; an SDK sequence backend over WasmSession;
   an internal `mintView` module. Native side ready (`host/js/src/sequence-core.mjs`).
+- [ ] **P8.5w — authorise a wasm SDK edit for format 2.0 Programs**: size the
+  verifier scratch in `host/wasm/src/sdk.rs` with `vm-verify-words` (needed
+  before `p85-peg` merges, else the SDK cannot load 2.0 Programs).
 - [ ] **P8.4w (likely) — authorise wasm SDK edits for the valid-CBOR default**
   if P8.4's edit is refused the same way; until then the SDK stays on an
   explicit profile and `bb wasm-sdk-test` stays green.
@@ -6311,6 +6314,36 @@ authorised), the existing gate set, and conformance-corpus vectors.
     * `FAIL` events with provenance.
     * D280 refusal replay, pending P8.4's agreement.
     * Gate wording qualified; proof obligations labelled.
+  - **Merge plan for `p85-peg` (manager, 2026-11-10).** Phase 1 (compiler +
+    verifier, format 2.0) is on local branch `p85-peg` (40af89c, befbbf8,
+    dcc1d82; `bb compile2-test` green, 3,266 corpus verdicts equal the
+    independent PEG oracle in both cut modes). Main switches to format 2.0
+    only when compiler and VM land together:
+    1. P8.4 (valid-CBOR default; session support D266, D277/D280 replay) lands
+       on main first.
+    2. `p85-peg` is rebased onto that main (expected conflicts: host option
+       admission, Rust compile/api, DEVLOG text — compiler files are disjoint
+       from P8.4's scanner/VM files).
+    3. Phase 2 on the branch: the VM PEG machines (program-2 §5–§10: per-tier
+       array/map machines, records and rings, chunked arena with growth and
+       session relocation, T self-sort, FAIL events and witnesses, forced-tier
+       mode, §10 charging order), D280 replay integration, `vm-scratch-words`
+       from ARRWORDS/MAPWORDS, limits word 10 (`groupWords`) and
+       `group_limit`; W7 tuned so it fires only when the compiled-limits bound
+       actually exceeds the cap (phase 1 found it fires on every T map and
+       recursive group — noise); the old `compile-test` and VM harnesses moved
+       to format 2.0.
+    4. Gates on the branch before merge: compile2-test, vm-test,
+       vmsession-test, sequence-test, scan/rscan, nav, write, unicode,
+       rust-api-test, size, npm, drift, the PEG oracle differential (new
+       vm-level arm), the RFC corpus runner (D270-dependent cases flip to
+       pass), and `bb wasm-sdk-test`.
+    5. **Wasm dependency (P8.5w):** loading format 2.0 Programs in the wasm
+       SDK needs `host/wasm/src/sdk.rs` to size the verifier scratch with
+       `vm-verify-words` — an owner-gated wasm edit (with P7.13w/P8.4w); if
+       not authorised by merge time, the SDK cannot load 2.0 Programs and
+       `wasm-sdk-test` would go red, so the merge waits for that answer or
+       the SDK is explicitly marked unsupported for 2.0 by an owner decision.
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
