@@ -147,7 +147,10 @@ pub fn map_block_init(p: &[i32], s: &mut [i32], bo: i32, qindex: i32, mt: i32, w
     if !charge(s, c16(words), at) {
         return -R_BUDGET;
     }
-    for j in 0..words {
+    // only the header and the member words need zeros: the frame stack is
+    // written before it is read, every slot / index entry's first word is set
+    // below and the rest of a slot (and S's trail) is written before it is read
+    for j in 0..msbase(p, bo, mt) - bo {
         s[(bo + j) as usize] = 0;
     }
     s[(bo + MB_Q) as usize] = qindex;
@@ -912,6 +915,14 @@ pub(crate) fn perm_at(s: &[i32], bo: i32, j: i32) -> i32 {
     }
     return s[(arena_body(s) + (pm + j)) as usize];
 }
+pub(crate) fn t_pos(s: &[i32], bo: i32, r: i32) -> i32 {
+    // Record r's pick-order position: r in wire order, else what t-sort wrote in
+    // its flags word above the consumed bit.
+    if s[(bo + MB_PERM) as usize] < 0 {
+        return r;
+    }
+    return (i32::cast_unsigned(s[(rec_at(s, bo, r) + 1) as usize]) >> 1).cast_signed();
+}
 pub(crate) fn t_cmp(kb: &[u8], s: &mut [i32], bo: i32, ra: i32, rb: i32, at: i32) -> i32 {
     // Records ra, rb by their keys' EC forms, ceil(min(len)/8) units first.
     let xa: i32 = rec_at(s, bo, ra);
@@ -1010,6 +1021,13 @@ pub(crate) fn t_sort(s: &mut [i32], bo: i32, kb: &[u8], n: i32, at: i32) -> i32 
         }
         k -= 1;
     }
+    // each record's pick position into its flags word (above bit 0), for the
+    // non-literal members' cursors (D322); uncharged, linear after the sort
+    for j in 0..n {
+        let x: i32 = rec_at(s, bo, s[((base + pm) + j) as usize]) + 1;
+        let f: i32 = s[(x) as usize];
+        s[(x) as usize] = (f & 1) | (j << 1);
+    }
     s[(O_HI) as usize] = h;
     s[(O_LO) as usize] = l;
     s[(O_CSTART) as usize] = c;
@@ -1075,9 +1093,32 @@ pub(crate) fn m_rewind(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32, ma
         return -R_BUDGET;
     }
     let tb: i32 = trail_at(p, s, bo, mt);
+    let mut low: i32 = -1;
     for i in 0..popped {
         let r: i32 = s[(tb + ((len - 1) - i)) as usize];
+        if tier == TIER_T {
+            let pr: i32 = t_pos(s, bo, r);
+            if (low < 0) || (pr < low) {
+                low = pr;
+            }
+        }
         m_set_consumed(p, s, bo, mt, tier, r, 0);
+    }
+    // T (D322): a record given back may lie below a non-literal member's
+    // cursor; every such cursor moves back to the lowest one, ceil(members/16)
+    if low >= 0 {
+        let nm: i32 = p[(mt + 1) as usize];
+        if !charge(s, c16(nm), at) {
+            return -R_BUDGET;
+        }
+        for m in 0..nm {
+            if p[(m_member(mt, m)) as usize] < 0 {
+                let cw: i32 = mword(bo, m) + 2;
+                if s[(cw) as usize] > low {
+                    s[(cw) as usize] = low;
+                }
+            }
+        }
     }
     if s[(bo + MB_TRAIL) as usize] < 0 {
         s[(bo + MB_TLEN) as usize] = mark;
@@ -1201,7 +1242,12 @@ pub(crate) fn m_member_run(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32
     } else if tier == TIER_T {
         // a non-literal member: records in pick order until count = max, 1
         // step each, consumed or not
-        let mut j: i32 = 0;
+        // D322: from the member's cursor (mword +2): every record before it is
+        // consumed or can never be taken or cut by this member (its key or, for a
+        // member without a cut, its value does not match), so the scan reads what
+        // a scan from 0 would and charges only what it reads
+        let cur: i32 = mword(bo, m) + 2;
+        let mut j: i32 = s[(cur) as usize];
         while (j < n) && (c < hi) {
             if !charge(s, 1, at) {
                 return -R_BUDGET;
@@ -1218,6 +1264,7 @@ pub(crate) fn m_member_run(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32
                     }
                     c += 1;
                 } else if cut {
+                    s[(cur) as usize] = j;
                     let dg: i32 = t_diag(s, bo, m, j, c, hi, n, at);
                     if dg < (-1) {
                         return dg;
@@ -1231,6 +1278,7 @@ pub(crate) fn m_member_run(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32
             }
             j += 1;
         }
+        s[(cur) as usize] = j;
     } else {
         // S, a class-R member: its unnamed pairs' state, then the named
         // slots, 1 step each

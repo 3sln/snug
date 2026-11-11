@@ -10,7 +10,7 @@ import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arenaSetUp, arenaUpTop } from './arena.mjs';
 import { AB_ALIVE, AB_DIED, AB_EVK, AB_HDR, AB_IDX, AB_MODE, AB_NACT, AB_PC, AB_SP, AB_STATUS, aRun, aev, apeg, arrayAdvance, arrayBlockInit, arrayCandidates, arrayEnd, arrayMark, arrayRecords, arrayWitness, arrayWords, blockAo, leafArray } from './array.mjs';
-import { c8, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
+import { c64min, c8, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadSeq, deadStdCheck, deadTyped, decimalCheck, headFail, keyOrder, ndarrayCheck, pairCheck, pairCount, pairWalk, replayEnd, replayKey, vtabFind } from './dead.mjs';
 import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, G_FORCED, G_NOSTREAK, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, PEG_HDR, P_ANYKEY, P_EMBED, P_ENTRY, P_INDEX, P_KEY, P_MEMBER, P_REP, P_TAG, R_AGROW, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_GROUP_LIMIT, R_INCONSISTENT, R_MISSING, R_NONDET, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, TIER_F, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_VTAB, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
@@ -1162,6 +1162,17 @@ export function streakKind(p, leaf) {
     return ((kind === K_INT) && (p[lb + 3] === 1)) || ((kind === K_TEXT) && (p[lb + 4] < 0));
 }
 
+export function streakValue(p, leaf) {
+    // A map streak's value leaf: a streak leaf, or `any` (walked by fast-child).
+    if (streakKind(p, leaf)) {
+        return true;
+    }
+    if (leaf < 0) {
+        return false;
+    }
+    return (p[p[H_S_LEAVES] + (8 * leaf)] & 255) === K_ANY;
+}
+
 export function starSteady(s, area, el) {
     // Is the single `[* T]` block at area in its steady state before element el:
     // alive, |A| = 1, its machine waiting at ENTRY (node 1) for record el inside
@@ -1879,7 +1890,7 @@ export function mapClose(p, pool, b, kb, s, fb, w, area, nb, d, n, pos, q0, q, n
     return 0;
 }
 
-export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cl, ps0, pe0, klo0) {
+export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cl, ps0, pe0, klo0, cfb, cck, cw, ext) {
     // P3.6 (D044) under program-2 §6, schedule 2 only: consecutive SUCCESSFUL
     // pairs of a single-block tier-F map in a simple shape (map-fast-mode: 1 a
     // closed struct, the key named by one member whose value typeset is one
@@ -1910,7 +1921,7 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
     if (mode === 2) {
         kleaf = singleLeaf(p, p[mt + 9]);
         vleaf2 = singleLeaf(p, p[mt + 10]);
-        if ((!streakKind(p, kleaf)) || (!streakKind(p, vleaf2))) {
+        if ((!streakKind(p, kleaf)) || (!streakValue(p, vleaf2))) {
             return q0;
         }
         if ((p[p[H_S_LEAVES] + (8 * kleaf)] & 255) !== K_TEXT) {
@@ -1959,14 +1970,15 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
             break;
         }
         const kend = (start + kh) + kl;
+        // a table's TEXT key leaf (no regexp): its length bounds, as pre-scalar
         if (mode === 2) {
-            if (preScalar(p, pool, b, s, start, end, p[H_S_LEAVES] + (8 * kleaf), K_TEXT) < 0) {
+            const klb = p[H_S_LEAVES] + (8 * kleaf);
+            if ((kl < p[klb + 2]) || (kl > p[klb + 3])) {
                 break;
             }
-        } else {
-            if (utf8InvalidAt(b, start + kh, kend) >= 0) {
-                break;
-            }
+        }
+        if (utf8InvalidAt(b, start + kh, kend) >= 0) {
+            break;
         }
         if (ps >= 0) {
             if (compareSpans(b, ps, pe, start, kend) >= 0) {
@@ -1992,7 +2004,7 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
             nj = cur;
             m = p[namers + p[(named + (3 * cur)) + 1]];
             vlf = singleLeaf(p, p[mMember(mt, m) + 2]);
-            if (!streakKind(p, vlf)) {
+            if (!streakValue(p, vlf)) {
                 break;
             }
         } else {
@@ -2003,8 +2015,16 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
             vlf = vleaf2;
         }
         const mw = (bo + MB_HDR) + (MW * m);
-        const vend = preScalar(p, pool, b, s, kend, end, p[H_S_LEAVES] + (8 * vlf), p[p[H_S_LEAVES] + (8 * vlf)] & 255);
-        const vunits = s[O_LO];
+        const vkind = p[p[H_S_LEAVES] + (8 * vlf)] & 255;
+        const vany = vkind === K_ANY;
+        let vend = kend;
+        let vunits = 0;
+        // the value: a streak leaf checked here, uncharged; `any` takes
+        // every item, walked by fast-child after the key's charges
+        if (!vany) {
+            vend = preScalar(p, pool, b, s, kend, end, p[H_S_LEAVES] + (8 * vlf), vkind);
+            vunits = s[O_LO];
+        }
         if (vend < 0) {
             break;
         }
@@ -2022,16 +2042,27 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
         if (!charge(s, c8(kl), start)) {
             return -R_BUDGET;
         }
-        const ko = keyOrder(b, s, ps, pe, start, kend);
-        if (ko < 0) {
-            return ko;
+        // key-order's charge (the order itself is checked above; a text key
+        // is never EC-sensitive)
+        if (ps >= 0) {
+            if (!charge(s, c64min(pe - ps, kend - start), start)) {
+                return -R_BUDGET;
+            }
         }
-        if (!charge(s, 1, kend)) {
-            return -R_BUDGET;
-        }
-        s[O_ITEMS] = s[O_ITEMS] + 1;
-        if (!charge(s, vunits - 3, kend)) {
-            return -R_BUDGET;
+        if (vany) {
+            const rv = fastChild(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, simpleLeaf(p, 1, vlf), ext);
+            if (rv < 0) {
+                return rv;
+            }
+            vend = rv;
+        } else {
+            if (!charge(s, 1, kend)) {
+                return -R_BUDGET;
+            }
+            s[O_ITEMS] = s[O_ITEMS] + 1;
+            if (!charge(s, vunits - 3, kend)) {
+                return -R_BUDGET;
+            }
         }
         // the block, as the walk leaves it
         s[bo + MB_CUR] = cur;
@@ -2106,7 +2137,7 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ext)
     while (pk < n) {
         // a streak of simple pairs first (D044), when the shape and state allow
         if (((smap > 0) && (sched2(s) && (nalive === 1))) && (((s[VM_GENERIC] & ((1 | G_FORCED) | G_NOSTREAK)) === 0) && ((s[VM_VTAB] === 0) && (!mapIsUnordered(s, area, nb))))) {
-            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smap, cl, ps, pe, klo);
+            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smap, cl, ps, pe, klo, cfb, cck, cw, ext);
             const km2 = s[VM_FASTM];
             if (qm < 0) {
                 return qm;
