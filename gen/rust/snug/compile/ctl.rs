@@ -510,28 +510,6 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
     }
     return true;
 }
-pub(crate) fn hibit(x: i32) -> i32 {
-    // The index of x's highest set bit (x != 0).
-    let mut i: i32 = 31;
-    while ((i32::cast_unsigned(x) >> i).cast_signed() & 1) == 0 {
-        i -= 1;
-    }
-    return i;
-}
-pub(crate) fn if_hi(mh: i32, ml: i32) -> i32 {
-    // The index of the highest set bit of the non-zero 64-bit mh:ml.
-    if mh != 0 {
-        return 32 + hibit(mh);
-    }
-    return hibit(ml);
-}
-pub(crate) fn if_carry(dh: i32, dl: i32) -> i32 {
-    // dh after adding 1 to the 64-bit dh:dl.
-    if i32::wrapping_add(dl, 1) == 0 {
-        return i32::wrapping_add(dh, 1);
-    }
-    return dh;
-}
 pub(crate) fn dbl_key(h: &mut [i32], negative: bool, dh: i32, dl: i32) {
     // The ordered key (D250) of the binary64 +-(dh:dl, sign bit clear) into
     // h[H_R0], h[H_R1].
@@ -570,49 +548,36 @@ pub(crate) fn int_fkey(h: &mut [i32], r: i32, a: i32, b: i32, op: i32) -> i32 {
             mh = i32::wrapping_add(a, 1);
         }
     }
-    if negative && ((a == (-1)) && (b == (-1))) {
-        // -2^64
+    if (mh == 0) && (ml == 0) {
+        // -2^64 (its magnitude wrapped to 0)
         dh = 1087 << 20;
-        dl = 0;
     } else {
-        let p: i32 = if_hi(mh, ml);
-        if p <= 52 {
-            let s: i32 = 52 - p;
-            let mut sh: i32 = mh;
-            let mut sl: i32 = ml;
-            if s >= 32 {
-                sh = ml << (s - 32);
-                sl = 0;
-            } else if s > 0 {
-                sh = (mh << s) | (i32::cast_unsigned(ml) >> (32 - s)).cast_signed();
-                sl = ml << s;
-            }
-            dh = ((p + 1023) << 20) | (sh & 1048575);
-            dl = sl;
-        } else {
-            let s2: i32 = p - 52;
-            exact = (ml & ((1 << s2) - 1)) == 0;
-            dh = ((p + 1023) << 20) | ((i32::cast_unsigned(mh) >> s2).cast_signed() & 1048575);
-            dl = (i32::cast_unsigned(ml) >> s2).cast_signed() | (mh << (32 - s2));
+        // normalise: shift until bit 63 is set; e is then the exponent and
+        // the top 53 bits the significand
+        let mut e: i32 = 63;
+        while mh >= 0 {
+            mh = (mh << 1) | (i32::cast_unsigned(ml) >> 31).cast_signed();
+            ml = ml << 1;
+            e -= 1;
+        }
+        exact = (ml & 2047) == 0;
+        dh = ((e + 1023) << 20) | ((i32::cast_unsigned(mh) >> 11).cast_signed() & 1048575);
+        dl = (mh << 21) | (i32::cast_unsigned(ml) >> 11).cast_signed();
+    }
+    // inexact: the binary64 just above the truncated magnitude when the
+    // half-line's inside is away from zero
+    if (!exact) && (!(negative == ((op == 2) || (op == 3)))) {
+        dl = i32::wrapping_add(dl, 1);
+        if dl == 0 {
+            dh = i32::wrapping_add(dh, 1);
         }
     }
-    if exact {
-        dbl_key(h, negative, dh, dl);
-        hs(h, H_R2, hg(h, H_R0));
-        hs(h, H_R3, hg(h, H_R1));
-        return op;
-    }
-    // inexact: the binary64 just above the magnitude's truncation
-    let uh: i32 = if_carry(dh, dl);
-    let ul: i32 = i32::wrapping_add(dl, 1);
-    let up: bool = ((!negative) && ((op == 2) || (op == 3))) || (negative && ((op == 0) || (op == 1)));
-    if up {
-        dbl_key(h, negative, uh, ul);
-    } else {
-        dbl_key(h, negative, dh, dl);
-    }
+    dbl_key(h, negative, dh, dl);
     hs(h, H_R2, hg(h, H_R0));
     hs(h, H_R3, hg(h, H_R1));
+    if exact {
+        return op;
+    }
     if (op == 2) || (op == 3) {
         return 3;
     }
@@ -901,7 +866,7 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
                     ph = i32::wrapping_sub(ekh, 1);
                 }
                 if nl3 == 0 {
-                    nh = i32::wrapping_add(xh, 1);
+                    nh = i32::wrapping_add(exh, 1);
                 }
                 vpush1(h, T_IVB, 0);
                 vpush1(h, T_IVB, 0);

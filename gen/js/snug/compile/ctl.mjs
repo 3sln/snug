@@ -524,31 +524,6 @@ export function floatToInt(h, khi, klo, op) {
     return true;
 }
 
-export function hibit(x) {
-    // The index of x's highest set bit (x != 0).
-    let i = 31;
-    while ((((x >>> i) | 0) & 1) === 0) {
-        i -= 1;
-    }
-    return i;
-}
-
-export function ifHi(mh, ml) {
-    // The index of the highest set bit of the non-zero 64-bit mh:ml.
-    if (mh !== 0) {
-        return 32 + hibit(mh);
-    }
-    return hibit(ml);
-}
-
-export function ifCarry(dh, dl) {
-    // dh after adding 1 to the 64-bit dh:dl.
-    if (((dl + 1) | 0) === 0) {
-        return (dh + 1) | 0;
-    }
-    return dh;
-}
-
 export function dblKey(h, negative, dh, dl) {
     // The ordered key (D250) of the binary64 +-(dh:dl, sign bit clear) into
     // h[H_R0], h[H_R1].
@@ -588,49 +563,36 @@ export function intFkey(h, r, a, b, op) {
             mh = (a + 1) | 0;
         }
     }
-    if (negative && ((a === (-1)) && (b === (-1)))) {
-        // -2^64
+    if ((mh === 0) && (ml === 0)) {
+        // -2^64 (its magnitude wrapped to 0)
         dh = 1087 << 20;
-        dl = 0;
     } else {
-        const p = ifHi(mh, ml);
-        if (p <= 52) {
-            const s = 52 - p;
-            let sh = mh;
-            let sl = ml;
-            if (s >= 32) {
-                sh = ml << (s - 32);
-                sl = 0;
-            } else if (s > 0) {
-                sh = (mh << s) | ((ml >>> (32 - s)) | 0);
-                sl = ml << s;
-            }
-            dh = ((p + 1023) << 20) | (sh & 1048575);
-            dl = sl;
-        } else {
-            const s2 = p - 52;
-            exact = (ml & ((1 << s2) - 1)) === 0;
-            dh = ((p + 1023) << 20) | (((mh >>> s2) | 0) & 1048575);
-            dl = ((ml >>> s2) | 0) | (mh << (32 - s2));
+        // normalise: shift until bit 63 is set; e is then the exponent and
+        // the top 53 bits the significand
+        let e = 63;
+        while (mh >= 0) {
+            mh = (mh << 1) | ((ml >>> 31) | 0);
+            ml = ml << 1;
+            e -= 1;
+        }
+        exact = (ml & 2047) === 0;
+        dh = ((e + 1023) << 20) | (((mh >>> 11) | 0) & 1048575);
+        dl = (mh << 21) | ((ml >>> 11) | 0);
+    }
+    // inexact: the binary64 just above the truncated magnitude when the
+    // half-line's inside is away from zero
+    if ((!exact) && (!(negative === ((op === 2) || (op === 3))))) {
+        dl = (dl + 1) | 0;
+        if (dl === 0) {
+            dh = (dh + 1) | 0;
         }
     }
-    if (exact) {
-        dblKey(h, negative, dh, dl);
-        hs(h, H_R2, hg(h, H_R0));
-        hs(h, H_R3, hg(h, H_R1));
-        return op;
-    }
-    // inexact: the binary64 just above the magnitude's truncation
-    const uh = ifCarry(dh, dl);
-    const ul = (dl + 1) | 0;
-    const up = ((!negative) && ((op === 2) || (op === 3))) || (negative && ((op === 0) || (op === 1)));
-    if (up) {
-        dblKey(h, negative, uh, ul);
-    } else {
-        dblKey(h, negative, dh, dl);
-    }
+    dblKey(h, negative, dh, dl);
     hs(h, H_R2, hg(h, H_R0));
     hs(h, H_R3, hg(h, H_R1));
+    if (exact) {
+        return op;
+    }
     if ((op === 2) || (op === 3)) {
         return 3;
     }
@@ -921,7 +883,7 @@ export function ctlEq(h, target, ctl, ne, pos) {
                     ph = (ekh - 1) | 0;
                 }
                 if (nl3 === 0) {
-                    nh = (xh + 1) | 0;
+                    nh = (exh + 1) | 0;
                 }
                 vpush1(h, T_IVB, 0);
                 vpush1(h, T_IVB, 0);

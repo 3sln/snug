@@ -368,23 +368,6 @@
         (if frac (hs h H_R3 1) (hs h H_R3 0))
         (return true)))))
 
-(defn ^I32 hibit [^I32 x]
-  (comment "The index of x's highest set bit (x != 0).")
-  (let [^:mut i 31]
-    (while (== (bit-and (ushr x i) 1) 0)
-      (set i (- i 1)))
-    (return i)))
-
-(defn ^I32 if-hi [^I32 mh ^I32 ml]
-  (comment "The index of the highest set bit of the non-zero 64-bit mh:ml.")
-  (if (!= mh 0) (return (+ 32 (hibit mh))))
-  (return (hibit ml)))
-
-(defn ^I32 if-carry [^I32 dh ^I32 dl]
-  (comment "dh after adding 1 to the 64-bit dh:dl.")
-  (if (== (add32 dl 1) 0) (return (add32 dh 1)))
-  (return dh))
-
 (defn dbl-key [^Ints h ^Bool negative ^I32 dh ^I32 dl]
   (comment "The ordered key (D250) of the binary64 +-(dh:dl, sign bit clear) into"
            "h[H_R0], h[H_R1].")
@@ -412,37 +395,27 @@
     (if negative
       (do (set ml (add32 b 1))
           (if (== ml 0) (set mh (add32 a 1)))))
-    (if (and negative (and (== a (neg 1)) (== b (neg 1))))
-      (do (comment "-2^64")
-          (set dh (shl 1087 20)) (set dl 0))
-      (do (let [p (if-hi mh ml)]
-            (if (<= p 52)
-              (do (let [s (- 52 p)
-                        ^:mut sh mh
-                        ^:mut sl ml]
-                    (if (>= s 32)
-                      (do (set sh (shl ml (- s 32))) (set sl 0))
-                      (if (> s 0)
-                        (do (set sh (bit-or (shl mh s) (ushr ml (- 32 s)))) (set sl (shl ml s)))))
-                    (set dh (bit-or (shl (+ p 1023) 20) (bit-and sh 1048575)))
-                    (set dl sl)))
-              (do (let [s2 (- p 52)]
-                    (set exact (== (bit-and ml (- (shl 1 s2) 1)) 0))
-                    (set dh (bit-or (shl (+ p 1023) 20) (bit-and (ushr mh s2) 1048575)))
-                    (set dl (bit-or (ushr ml s2) (shl mh (- 32 s2))))))))))
-    (if exact
-      (do (dbl-key h negative dh dl)
-          (hs h H_R2 (hg h H_R0)) (hs h H_R3 (hg h H_R1))
-          (return op)))
-    (comment "inexact: the binary64 just above the magnitude's truncation")
-    (let [uh (if-carry dh dl)
-          ul (add32 dl 1)
-          up (or (and (not negative) (or (== op 2) (== op 3)))
-                 (and negative (or (== op 0) (== op 1))))]
-      (if up (dbl-key h negative uh ul) (dbl-key h negative dh dl))
-      (hs h H_R2 (hg h H_R0)) (hs h H_R3 (hg h H_R1))
-      (if (or (== op 2) (== op 3)) (return 3))
-      (return 1))))
+    (if (and (== mh 0) (== ml 0))
+      (do (comment "-2^64 (its magnitude wrapped to 0)")
+          (set dh (shl 1087 20)))
+      (do (comment "normalise: shift until bit 63 is set; e is then the exponent and"
+                   "the top 53 bits the significand")
+          (let [^:mut e 63]
+            (while (>= mh 0)
+              (set mh (bit-or (shl mh 1) (ushr ml 31))) (set ml (shl ml 1)) (set e (- e 1)))
+            (set exact (== (bit-and ml 2047) 0))
+            (set dh (bit-or (shl (+ e 1023) 20) (bit-and (ushr mh 11) 1048575)))
+            (set dl (bit-or (shl mh 21) (ushr ml 11))))))
+    (comment "inexact: the binary64 just above the truncated magnitude when the"
+             "half-line's inside is away from zero")
+    (if (and (not exact) (not (== negative (or (== op 2) (== op 3)))))
+      (do (set dl (add32 dl 1))
+          (if (== dl 0) (set dh (add32 dh 1)))))
+    (dbl-key h negative dh dl)
+    (hs h H_R2 (hg h H_R0)) (hs h H_R3 (hg h H_R1))
+    (if exact (return op))
+    (if (or (== op 2) (== op 3)) (return 3))
+    (return 1)))
 
 (defn ^:pub ^I32 ctl-compare [^Ints h ^I32 target ^I32 ctl ^I32 op ^I32 pos]
   (comment "op: 0 .lt, 1 .le, 2 .gt, 3 .ge.")
@@ -589,7 +562,7 @@
                             nl3 (add32 exl 1)
                             ^:mut nh exh]
                         (if (== ekl 0) (set ph (sub32 ekh 1)))
-                        (if (== nl3 0) (set nh (add32 xh 1)))
+                        (if (== nl3 0) (set nh (add32 exh 1)))
                         (vpush1 h T_IVB 0) (vpush1 h T_IVB 0) (vpush1 h T_IVB ph) (vpush1 h T_IVB pl)
                         (vpush1 h T_IVB nh) (vpush1 h T_IVB nl3) (vpush1 h T_IVB (neg 1)) (vpush1 h T_IVB (neg 1)))))
                 (fiv-intersect h T_IVA T_IVB T_IVC)

@@ -5607,6 +5607,113 @@ drivers while P9.7 changes them, and loses the independent reference); a
   as the reference. This goes to P9.13 review and does not block the
   release candidate.
 
+### D328 — The prelude float widths are sets of values: `float16`/`float32`/`float64` match by value, not by encoded width (P9.2; VISIBLE CHANGE)
+**Decision** (P8.5 VM engineer, provisional; coordinator's P9.2 triage): a
+float matches `float16` (`#7.25`) when IEEE binary16 represents its value
+exactly, `float32` (`#7.26`) when binary32 does, and `float64` (`#7.27`)
+always, whatever width encodes it. NaN, ±∞ and ±0 are in every width.
+Before, a float matched only the width it was encoded in, so a
+deterministic encoder's 1.5 (`f93e00`) was not a `float32`, and `float64`
+refused every shortest-form float that fits in a narrower width.
+* The VM: `float-cls` (vm-eval.kin) gives a float item the class bits of
+  every width that holds its value (256 binary16, 512 binary32, 1024
+  binary64), from its exponent and the trailing zero bits of its
+  significand (`fits`, `low-zero`). The leaf filter already tests
+  `class & leaf-mask`, so a multi-bit class needs no other change. It is a
+  constant amount of work per float item, inside the item's existing
+  charge; no price changes.
+* The oracles: the PEG oracle (`fitsWidth`), `peg2-ref.mjs` and the
+  independent oracle (`corpus/tools/oracle.mjs`, with
+  `export-adversarial.mjs`'s reasoned verdicts) all read widths by value.
+* Corpus: `corpus/conformance/numbers.json` "float widths by value (D328)",
+  24 cases: subnormals of both narrow formats, ±∞, NaN and −0.0 encoded
+  wide, 65504 and 65520, the binary32 extremes, values exact in binary32
+  but not binary16, and binary64-only values. The adversarial "Appendix D:
+  float32 / float64 / float32-64" cases on `f93e00` and `fa3f8ccccd` are
+  migrated from false to true, with a D328 note on each.
+* Docs: the guide's "Changed 2026-11-11" callout, README's features table,
+  `profiles.md`'s Floats row, `cddl-support.md`'s semantic note, and a
+  correction note (not a deletion) on `conformance.md`'s old argument that
+  "`float32` refusing 1.5 is correct encoded-width semantics".
+
+**Why**: RFC 8610 §3.3: “"#7.25" specifies the set of values that can be
+represented as half-precision floats; it does not mandate that these values
+also do have to be serialized as half-precision floats: CDDL does not
+provide any language means to restrict the choice of serialization
+variants.” A schema that cares about encoded width uses a wire preset.
+**Other implementations** (measured on `numbers.json`):
+* The Ruby cddl gem 0.12.14 reads `float16` by value, but `float32` and
+  `float64` as "needs at least this width": it refuses `f93e00` for both.
+* The cddl crate 0.10.7 accepts every float for every width, so it accepts
+  the 7 cases here that no narrower format holds.
+
+Neither matches §3.3, so snug follows the RFC text.
+**Alternatives**: keep encoded widths and classify the RFC 8610 cases as a
+deviation (rejected by the coordinator's triage: §3.3 is explicit); the
+Ruby reading (contradicts the same sentence).
+- [ ] **Signed off** (owner): a visible semantic change.
+
+### D329 — Numeric controls compare int and float values exactly, across kinds (P9.2)
+**Decision** (P8.5 VM engineer, provisional): `.lt .le .gt .ge .eq .ne` with
+a numeric controller now apply to every numeric branch of the target, with
+the controller converted to the branch's kind, exactly:
+* **An integer controller on a float branch** (`number .ge 0`,
+  `float .ge 9007199254740993`) becomes the binary64 ordered key of its
+  value (`int-fkey`, ctl.kin). When no binary64 holds the integer, it is the
+  nearest one inside the half-line: `x > n` and `x >= n` become
+  `x >= ceil(n)`, and `x < n` and `x <= n` become `x <= floor(n)`. −2^64
+  is exact.
+* **A float controller on an integer branch** (`int .gt 0.5`,
+  `int .ge -1.8446744073709552e19`) goes through `float-to-int`, which now
+  covers every finite float:
+  - 2^53 ≤ |x| < 2^64: the significand shifted left;
+  - |x| ≥ 2^64: every integer satisfies the comparison, or none does
+    (exactly −2^64 is a point);
+  - a fractional x moves the bound inside.
+* **`.eq`/`.ne` across kinds** match only an exact value: an integer
+  controller is a float point when binary64 holds it exactly, and an
+  integral float controller is an integer point. Otherwise the controller
+  equals nothing of the other kind, and `.ne` keeps the whole branch.
+
+Before, a numeric control on `number` was a compile error unless controller
+and target had the same kind. This also fixes an existing bug: `int .gt
+0.5` refused 1, because `float-to-int` left `H_R3` stale on the |x| < 1
+path. A second bug, found by a new vector while writing this entry, is
+also fixed: `.ne` with a float key whose low word is all ones carried into
+the wrong high word (`nebig` in the corpus).
+Corpus: `numbers.json` "numeric controls across int and float (D329)", 24
+cases, and 36 hand-reasoned checks during development. RFC 8610 default-timer
+case 1 stays classified on S46 (`.default` adds no `.ne`).
+**Why**: RFC 8610 §3.8.6's controls compare numeric values. `number = int
+/ float` (Appendix D), so `number .ge 0` is the RFC's own idiom.
+**Other implementations**: the Ruby gem agrees on all 24 cases. The cddl
+crate refuses all 11 cases that should match across kinds.
+**Alternatives**: compare in binary64 (wrong above 2^53); refuse
+mixed-kind controls (the old behaviour, which rejects the RFC idiom).
+- [ ] **Signed off** (owner)
+
+### D330 — `.cat` and `.det` join a text and a byte string; the result has the target's type (P9.2)
+**Decision** (P8.5 VM engineer, provisional): `ctl-cat` and `ctl-det`
+accept any mix of text and byte strings. The result is the target's bytes
+followed by the controller's, with the target's major type. A text result
+must be well-formed UTF-8 (`vec-utf8`, RFC 3629); otherwise compiling
+fails with `control_value`. Before, mixed kinds were a compile error.
+Corpus: `numbers.json` ".cat of a text and a byte string (D330)", 4 cases,
+including RFC 9165 Figure 2's text-with-bytes example. The RFC 9165 Figure 2
+corpus suite passes.
+**Why**: RFC 9165 §2.2: "The target and controller both MUST be strings.
+The result of the operation has the same type as the target. The
+concatenation is performed on the bytes in both strings. If the target is
+a text string, the result of that concatenation MUST be valid UTF-8." Its
+Figure 2 joins a text target with a byte-string controller.
+**Other implementations**: the Ruby gem also lets `h'01' .cat "x"` match
+the text string "\u0001x". The cddl crate refuses `h'01' .cat "x"` in both
+types.
+**Alternatives**: a text result from any text operand (contradicts "the
+same type as the target"); accepting ill-formed UTF-8 text literals
+(contradicts the MUST, and they could never match a valid text item).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
