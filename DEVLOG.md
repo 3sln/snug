@@ -5557,7 +5557,11 @@ the wall cap the guarantee.
 **Alternatives**: caps inside each harness (many places, and the cargo builds
 and Rust binaries would escape them); `timeout(1)` (not on macOS by default,
 no CPU cap, and it kills only its child).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-11). This is test infrastructure, so
+  no owner decision is needed. Verified on main at `d903515`: drift is ok,
+  and the engineer ran `bb watchdog-test` 7/7, which includes a real
+  `scan-test 300 1` tripping its cap. (The P9.7 pooling entry, approved
+  earlier as "D326", is renumbered D327 because this entry landed first.)
 
 ## Findings
 
