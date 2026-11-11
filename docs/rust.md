@@ -195,8 +195,9 @@ validation verdicts. Use a positive chunk size; needs may exceed that size.
 A positive quantum creates VM yields, which this synchronous driver resumes
 immediately. The driver does not buffer the entire document as an API shortcut.
 Pin a remote object's version in the Blob implementation and return exactly
-the requested bytes on every read. Async adapters, source decode, view
-directories and Writer sorted-key mode remain unavailable.
+the requested bytes on every read. The async forms are under
+[Async sources](#async-sources); source decode, view directories and Writer
+sorted-key mode remain unavailable.
 
 A message of **unknown length** (D085) is read from any `std::io::Read` until
 EOF in drain mode -- the verdict equals the buffer's of the same bytes:
@@ -294,6 +295,111 @@ skippable })` with absolute offsets; EOF inside a message is
 `cbor/too_large`. `snug::read_sequence` / `Sequence::new` check the profile
 only. The `Read` iterator copies each message out of its read buffer; the push
 API borrows the caller's chunk instead.
+
+## Async sources
+
+The blob, stream and sequence drivers have async forms (P9.6, D027) over the
+same resumable session: the VM never awaits; each driver asks the session what
+it needs, awaits that one read and steps again. Verdicts, codes, offsets,
+paths and budget are the sync forms' for every chunking (gated in `bb
+rust-api-test`, `tests/async_sources.rs`). The crate stays dependency-free and
+runtime-agnostic: any executor drives the futures (tokio, async-std, smol, or
+the few lines of `block_on` hidden in this example).
+
+```rust
+use snug::{AsyncSource, CompileOptions, Schema, SequenceOptions, ValidationOptions};
+# fn block_on<F: std::future::Future>(f: F) -> F::Output {
+#     struct W; impl std::task::Wake for W { fn wake(self: std::sync::Arc<Self>) {} }
+#     let waker = std::task::Waker::from(std::sync::Arc::new(W));
+#     let mut cx = std::task::Context::from_waker(&waker);
+#     let mut f = std::pin::pin!(f);
+#     loop { if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) { return v; } }
+# }
+let schema = Schema::compile("event = { type: tstr }", &CompileOptions::default())?;
+block_on(async {
+    // a message of unknown length (drain mode); `&[u8]` is an AsyncSource
+    let mut body: &[u8] = &[0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'a'];
+    let verdict = schema.validate_reader_async(&mut body, "event", &ValidationOptions::default(),
+                                               4096, 1024, false).await?;
+    assert!(verdict.is_ok());
+
+    // a CBOR sequence: next() answers what the sync iterator yields
+    let two: &[u8] = &[0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'a',
+                       0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'b'];
+    let mut messages = schema.read_sequence_async(two, "event", &SequenceOptions::default())?;
+    let mut types = Vec::new();
+    while let Some(m) = messages.next().await {
+        types.push(m?.view().get("type").and_then(|v| v.text()).unwrap_or("").to_string());
+    }
+    assert_eq!(types, ["a", "b"]);
+    Ok::<(), Box<dyn std::error::Error>>(())
+})?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+| Sync | Async | JS |
+| --- | --- | --- |
+| `Schema::validate_blob(&dyn Blob, rule, options, chunk, quantum)` | `Schema::validate_blob_async(&impl AsyncBlob, rule, options, chunk, quantum).await` | `validateHandle` |
+| `Schema::validate_reader(&mut dyn Read, rule, options, chunk, fail_fast)` | `Schema::validate_reader_async(&mut impl AsyncSource, rule, options, chunk, quantum, fail_fast).await` | `validateStream` |
+| `read_sequence(impl Read, options)`, `Schema::read_sequence` | `read_sequence_async(impl AsyncSource, options)`, `Schema::read_sequence_async` → `AsyncSequenceReader::next().await` | `readSequence` |
+| `schema::validate_blob`, `schema::validate_reader` (low level) | `async_source::validate_blob`, `async_source::validate_reader` | — |
+
+The results are the sync forms': `Result<Result<(), Failure>, Error>` (source
+and API errors outside, verdicts inside) and `Option<Result<Message<'static>,
+Error>>` per sequence item, with the same argument checks (`chunk` 0 or a
+quantum above 2^31−1 is `Error::Usage("options")`) and source errors
+(`short_read`, `read`, `too_large`).
+
+**Sources.** `AsyncSource` is a forward-only stream with the signature of
+`futures_io::AsyncRead::poll_read` (`Ready(Ok(0))` is the end; `Interrupted`
+is retried; any other error is `Error::Source("read")`). It is implemented for
+`&[u8]`, `&mut S`, `Box<S>` and `Pin<P>`; the drivers take `S: Unpin` (pin a
+`!Unpin` source in a `Box`). `AsyncBlob` is the async `Blob`: `size()` and
+`read(offset, len)` returning any future (write `async fn read`), exactly
+`len` bytes of an immutable snapshot. Adapters for other runtimes are a
+newtype, for example:
+
+```rust,ignore
+// futures-io (async-std, smol): same signature
+struct Futures<T>(T);
+impl<T: futures_io::AsyncRead + Unpin> snug::AsyncSource for Futures<T> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+}
+// tokio: through a ReadBuf
+struct Tokio<T>(T);
+impl<T: tokio::io::AsyncRead + Unpin> snug::AsyncSource for Tokio<T> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+        let mut rb = tokio::io::ReadBuf::new(buf);
+        match Pin::new(&mut self.0).poll_read(cx, &mut rb) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(rb.filled().len())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+```
+
+**Scheduling and backpressure.** One read is in flight, issued only when the
+session asks for bytes its window lacks. A positive `quantum` makes the
+session yield after about that many work units; the async driver then answers
+`Pending` once, having woken itself, so a long validation shares its executor
+thread (JS's `nextTurn`). Quantum 0 never yields. Neither changes a verdict or
+the budget. A blob holds one window of `max(need, chunk)` bytes; a stream holds
+what the session keeps plus one `chunk` (the key arena is sized for the input
+limit, as sync); a sequence holds the message in progress (its
+`max_message_bytes` bounds it) plus a `chunk` read buffer
+(`AsyncSequenceReader::bytes_held`). A sequence feeds each read synchronously,
+so its work per poll is bounded by `chunk`.
+
+**Cancellation.** Dropping a validation future drops its session; nothing
+else is left behind, and the Schema stays usable. The source is then at an
+unspecified position (bytes already read are consumed). `next()` is
+cancel-safe: a read that completes is fed before it returns and a `Pending`
+read consumed nothing, so dropping a `next()` future loses no message.
+`AsyncSequenceReader::poll_next` is the hook for a `Stream` adapter. The
+futures are `Send` when the source, the blob and its read future are.
 
 ## Handle errors safely
 

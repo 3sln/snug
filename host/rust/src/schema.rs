@@ -556,6 +556,9 @@ pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read
     let limit = session.limit();
     let mut src = Stream { reader, tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0, delivered: 0, eof: false };
     let mut step = session.step(&src.buf, 0);
+    // the session was given the end and resumed: it goes on over what is held, never
+    // asking past the end (a yield at the end needs no byte); vms-eof is called once
+    let mut ended = false;
     loop {
         // what the session wants: [at, at + len)
         let (at, len) = match step {
@@ -571,6 +574,7 @@ pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read
                     src.read()?;
                 }
                 step = session.end(src.delivered);
+                ended = true;
                 continue;
             }
             Step::Need { offset, len, keep } => {
@@ -579,13 +583,17 @@ pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read
             }
             Step::Yield { position, keep } => {
                 src.drop_to(keep as usize);
-                (position as usize, 1)
+                (position as usize, if ended { 0 } else { 1 })
             }
         };
         while !src.eof && src.delivered <= limit && src.base + src.buf.len() < at + len {
             src.read()?;
         }
-        if src.delivered > limit || src.base + src.buf.len() < at + len {
+        if ended {
+            assert!(src.base + src.buf.len() >= at + len, "snug: the session asked past the end");
+            step = session.step(&src.buf, src.base as i32);
+        } else if src.delivered > limit || src.base + src.buf.len() < at + len {
+            ended = true;
             // past the input limit (too_large), or the message ended before what is asked
             step = session.end(src.delivered);
             if let Step::Yield { .. } = step {
