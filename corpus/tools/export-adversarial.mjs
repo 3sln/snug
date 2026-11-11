@@ -102,14 +102,15 @@ suite('grammar','type and group extensions', 't = int\nt /= tstr\ng = (a:int)\ng
 
 // Exactly the names in the embedded Appendix D, with profile inhabitance noted.
 const f16 = 1.5, f32 = Math.fround(1.1), f64 = 1.1;
+const D328_32 = 'D328: 1.5 is a binary32 value whatever width encodes it', D328_64 = 'D328: every float is a binary64 value';
 const preludeVectors = {
  any:[V(null,true),V([dec],true)], uint:[V(U64-1n,true),V(U64,false),V(-1,false)], nint:[V(-U64,true),V(-U64-1n,false),V(0,false)],
  int:[V(-U64,true),V(U64,false)], bstr:[V(B(1),true),V('x',false)], bytes:[V(B(),true),V('',false)], tstr:[V('x',true),V(B(1),false)], text:[V('',true),V(B(),false)],
  number:[V(1,true),V(f16,true),V(U64,false),V(dec,false)], biguint:[V(U64,true),V(U64-1n,false),V(-U64-1n,false)],
  bignint:[V(-U64-1n,true),V(-U64,false),V(U64,false)], bigint:[V(U64,true),V(-U64-1n,true),V(1,false)],
  integer:[V(U64,true),V(-U64-1n,true),V(1,true),V(f16,false)], unsigned:[V(U64,true),V(U64-1n,true),V(-1,false)], decfrac:[V(dec,true),V(new BindleDecimal(U64+1n,-3),true),V(f16,false)],
- float16:[V(f16,true),V(f32,false),V(f64,false),V(1,false)], float32:[V(f32,true),V(f16,false),V(f64,false)], float64:[V(f64,true),V(f16,false),V(f32,false)],
- 'float16-32':[V(f16,true),V(f32,true),V(f64,false)], 'float32-64':[V(f32,true),V(f64,true),V(f16,false)], float:[V(f16,true),V(f32,true),V(f64,true),V(1,false)],
+ float16:[V(f16,true),V(f32,false),V(f64,false),V(1,false)], float32:[V(f32,true),V(f16,true,D328_32),V(f64,false)], float64:[V(f64,true),V(f16,true,D328_64),V(f32,true,D328_64)],
+ 'float16-32':[V(f16,true),V(f32,true),V(f64,false)], 'float32-64':[V(f32,true),V(f64,true),V(f16,true,D328_32)], float:[V(f16,true),V(f32,true),V(f64,true),V(1,false)],
  false:[V(false,true),V(true,false)], true:[V(true,true),V(false,false)], bool:[V(true,true),V(false,true),V(0,false)], nil:[V(null,true),V(false,false)], null:[V(null,true),V(false,false)]
 };
 const impossible = new Set(['tdate','time','bigfloat','eb64url','eb64legacy','eb16','encoded-cbor','uri','b64url','b64legacy','regexp','mime-message','cbor-any','undefined']);

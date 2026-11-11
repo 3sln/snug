@@ -518,8 +518,9 @@ export function countMatched(p, s, fb, w, nq) {
 
 export function lowZero(hi, lo, k) {
     // Are the low k bits (k <= 64) of the 64-bit word hi:lo all zero?
+    // 1 <= k: the mask of the low k bits is all ones shifted right by 32 - k
     if (k < 32) {
-        if ((lo & ((1 << k) - 1)) === 0) {
+        if ((lo & (((-1) >>> (32 - k)) | 0)) === 0) {
             return 1;
         }
         return 0;
@@ -530,7 +531,7 @@ export function lowZero(hi, lo, k) {
     if (k === 32) {
         return 1;
     }
-    if ((hi & ((1 << (k - 32)) - 1)) === 0) {
+    if ((hi & (((-1) >>> (64 - k)) | 0)) === 0) {
         return 1;
     }
     return 0;
@@ -554,7 +555,7 @@ export function fits(e, mbits, mhi, mlo, emin, emax, tbits) {
 }
 
 export function floatCls(b, pos, ai) {
-    // A float's class (§4.1) under RFC 8610 §3.3 (D327): the widths whose prelude
+    // A float's class (§4.1) under RFC 8610 §3.3 (D328): the widths whose prelude
     // type it belongs to are those that can represent its value exactly, whatever
     // width encodes it -- 256 binary16, 512 binary32, 1024 binary64. A narrower
     // encoding is exact in every wider format; NaN, the infinities and the zeros

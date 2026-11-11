@@ -53,12 +53,12 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
 | `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only (D040). |
 | `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). |
-| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2, D329); `.det` dedents each literal first. |
+| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2, D330); `.det` dedents each literal first. |
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
 | registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
 The numeric controls compare values exactly across integers and floats
-(D328): an integer target with a float controller takes the nearest integer
+(D329): an integer target with a float controller takes the nearest integer
 inside the half-line (|x| ≥ 2⁶⁴ admits every integer or none); a float target
 with an integer controller takes the controller's binary64 value, or, when no
 binary64 holds it, the nearest binary64 inside the half-line. So `number .ge
@@ -268,14 +268,14 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
   tag-2 bignums and `integer` includes tag-2/3 bignums. `number` is `int / float`,
   so it does not include decimal fractions or arbitrary bignums.
 - **`float16`, `float32`, `float64` are sets of values (changed 2026-11-11,
-  D327).** As RFC 8610 §3.3 says, "#7.25 specifies the set of values that
+  D328).** As RFC 8610 §3.3 says, "#7.25 specifies the set of values that
   can be represented as half-precision floats; it does not mandate that these
   values also do have to be serialized as half-precision floats". So a float
   matches `float16` when binary16 represents its value exactly, and `float32`
   when binary32 does, whatever width encodes it. `float64` admits every
   float. NaN, ±∞ and ±0 are in every width. 1.5 encoded as float16 (the
   shortest form) now matches `float32`, and 1.5 encoded as float64 matches
-  `float16`; 1 + 2⁻²³ matches `float32` but not `float16`. Before D327 these
+  `float16`; 1 + 2⁻²³ matches `float32` but not `float16`. Before D328 these
   names constrained the encoded width, so `float32` refused a shortest-form
   1.5. (The Ruby cddl gem reads them as "needs at least this width"; the cddl
   crate ignores the width.) Under the deterministic
@@ -286,11 +286,11 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
   is in no range and fails `.lt .le .gt .ge .eq` but passes `.ne` of any
   number, and +∞ is in `float .ge 1.5`. An integer literal and a float
   literal stay distinct CBOR kinds (`1` does not match `1.0`), but the
-  numeric controls compare values across the kinds exactly (D328): `number
+  numeric controls compare values across the kinds exactly (D329): `number
   .ge 0` admits `0`, `0.0` and `-0.0`; `int .gt 0.5` admits `1`; `float .ge
   9007199254740993` (2⁵³ + 1, which no binary64 holds) admits 2⁵³ + 2 and
   refuses 2⁵³; `int .eq 1.0` admits `1`. `.cat` and `.det` join a text and a
-  byte string, the result taking the target's type (RFC 9165 §2.2, D329). The Bindle
+  byte string, the result taking the target's type (RFC 9165 §2.2, D330). The Bindle
   profile refuses NaN, ±∞, −0 and integral floats within the safe range
   before the schema sees them.
 - Text `.size` is UTF-8 byte length, not code-point or grapheme length.

@@ -404,7 +404,7 @@ export function floatToInt(h, khi, klo, op) {
     // The integer bound a float controller (ordered key khi:klo) gives an
     // integer target under op (0 lt, 1 le, 2 gt, 3 ge): the bound in
     // h[H_R0..H_R2] as an INCLUSIVE bound for le/ge semantics (see
-    // ctl-compare). Every finite x (D328: exact int/float comparison); h[H_R3]
+    // ctl-compare). Every finite x (D329: exact int/float comparison); h[H_R3]
     // 1 when x was not integral (the bound moved inside), 2 when every integer
     // satisfies the comparison, 3 when none does (|x| >= 2^64); false for NaN
     // and the infinities.
@@ -562,7 +562,7 @@ export function dblKey(h, negative, dh, dl) {
 }
 
 export function intFkey(h, r, a, b, op) {
-    // D328: an integer controller (region r, a:b as int-point gives it) against a
+    // D329: an integer controller (region r, a:b as int-point gives it) against a
     // FLOAT target under op (0 lt, 1 le, 2 gt, 3 ge). Its low and high keys into
     // h[H_R0..H_R3] as float-point gives a float's (zero: the keys of -0 and +0);
     // answers the op to use. An integer no binary64 holds (|n| > 2^53, not a
@@ -752,7 +752,7 @@ export function ctlCompare(h, target, ctl, op, pos) {
             // D250: an ordered comparison is false for NaN, so the half-line stops
             // at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,
             // so lt stops below -0, le at +0, gt starts above +0 and ge at -0. An
-            // integer controller (D328) is the float key of its exact value, or, when
+            // integer controller (D329) is the float key of its exact value, or, when
             // no binary64 holds it, the nearest one inside the half-line.
             let fop = op;
             let fkh = kh;
@@ -845,7 +845,7 @@ export function ctlEq(h, target, ctl, ne, pos) {
     if (cl < 0) {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
-    // D328: a number equals a number of the other kind with the same value: an
+    // D329: a number equals a number of the other kind with the same value: an
     // integer controller is a float point when a binary64 holds it exactly, an
     // integral float controller an integer point; otherwise it equals nothing of
     // that kind (and .ne keeps all of it).
@@ -1271,7 +1271,7 @@ export function vecUtf8(h, t) {
 
 export function ctlCat(h, target, ctl, pos) {
     // RFC 9165 §2.2: the target's bytes then the controller's, both strings of
-    // either kind (D329); the result has the target's type and, as text, must be
+    // either kind (D330); the result has the target's type and, as text, must be
     // valid UTF-8.
     const a = singleLit(h, target);
     const b = singleLit(h, ctl);

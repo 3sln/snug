@@ -1,13 +1,13 @@
 {
   "format": "snug conformance corpus v1",
-  "source": "P9.2 (2026-11-11): float widths by value (RFC 8610 §3.3, D327), numeric controls across int and float (RFC 8610 §3.8.6, D328) and .cat of text with bytes (RFC 9165 §2.2, D329). Expectations are hand-reasoned from the RFC texts; vm-test also checks each against corpus/tools/peg-oracle.mjs.",
+  "source": "P9.2 (2026-11-11): float widths by value (RFC 8610 §3.3, D328), numeric controls across int and float (RFC 8610 §3.8.6, D329) and .cat of text with bytes (RFC 9165 §2.2, D330). Expectations are hand-reasoned from the RFC texts; vm-test also checks each against corpus/tools/peg-oracle.mjs.",
   "notes": [
     "float16/float32/float64 (#7.25/26/27) are sets of values: a float matches a width when that IEEE format represents its value exactly, whatever width encodes it; NaN, the infinities and the zeros are in every width (RFC 8610 §3.3: \"it does not mandate that these values also do have to be serialized as half-precision floats\").",
     "The Ruby cddl gem 0.12.14 reads float32/float64 as 'needs at least that width' (1.5 is not float32); the cddl crate 0.10.7 admits every float in every width. Both disagree with the RFC's set-of-values reading on some cases here."
   ],
   "suites": [
     {
-      "category": "rfc", "name": "float widths by value (D327)",
+      "category": "rfc", "name": "float widths by value (D328)", "options": {"wire": "valid"},
       "cddl": "f16 = float16\nf32 = float32\nf64 = float64\nf1632 = float16-32\nf3264 = float32-64\nfl = float\n",
       "cases": [
         {"rule": "f32", "hex": "f93e00", "expect": true, "note": "1.5 as binary16 is a binary32 value"},
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "category": "rfc", "name": "numeric controls across int and float (D328)",
+      "category": "rfc", "name": "numeric controls across int and float (D329)", "options": {"wire": "valid"},
       "cddl": "speed = number .ge 0\nhalf = int .gt 0.5\nneg = int .lt -0.5\nbig = float .ge 9007199254740993\nbigle = float .le 9007199254740993\none = float .eq 1\nonei = int .eq 1.0\nfrac = int .eq 1.5\nnz = number .ne 0\nhuge = int .ge -1.8446744073709552e19\n",
       "cases": [
         {"rule": "speed", "hex": "00", "expect": true},
@@ -64,7 +64,7 @@
       ]
     },
     {
-      "category": "rfc", "name": ".cat of a text and a byte string (D329)",
+      "category": "rfc", "name": ".cat of a text and a byte string (D330)", "options": {"wire": "valid"},
       "cddl": "c = \"foo\" .cat '\n  bar\n  baz\n'\nd = h'01' .cat \"x\"\n",
       "cases": [
         {"rule": "c", "hex": "70666f6f0a20206261720a202062617a0a", "expect": true, "note": "RFC 9165 Figure 2"},

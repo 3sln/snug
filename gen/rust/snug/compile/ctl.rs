@@ -391,7 +391,7 @@ pub(crate) fn float_to_int(h: &mut [i32], khi: i32, klo: i32, op: i32) -> bool {
     // The integer bound a float controller (ordered key khi:klo) gives an
     // integer target under op (0 lt, 1 le, 2 gt, 3 ge): the bound in
     // h[H_R0..H_R2] as an INCLUSIVE bound for le/ge semantics (see
-    // ctl-compare). Every finite x (D328: exact int/float comparison); h[H_R3]
+    // ctl-compare). Every finite x (D329: exact int/float comparison); h[H_R3]
     // 1 when x was not integral (the bound moved inside), 2 when every integer
     // satisfies the comparison, 3 when none does (|x| >= 2^64); false for NaN
     // and the infinities.
@@ -544,7 +544,7 @@ pub(crate) fn dbl_key(h: &mut [i32], negative: bool, dh: i32, dl: i32) {
     }
 }
 pub(crate) fn int_fkey(h: &mut [i32], r: i32, a: i32, b: i32, op: i32) -> i32 {
-    // D328: an integer controller (region r, a:b as int-point gives it) against a
+    // D329: an integer controller (region r, a:b as int-point gives it) against a
     // FLOAT target under op (0 lt, 1 le, 2 gt, 3 ge). Its low and high keys into
     // h[H_R0..H_R3] as float-point gives a float's (zero: the keys of -0 and +0);
     // answers the op to use. An integer no binary64 holds (|n| > 2^53, not a
@@ -733,7 +733,7 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
             // D250: an ordered comparison is false for NaN, so the half-line stops
             // at -inf/+inf (NaN keys lie outside); a zero controller is both zero keys,
             // so lt stops below -0, le at +0, gt starts above +0 and ge at -0. An
-            // integer controller (D328) is the float key of its exact value, or, when
+            // integer controller (D329) is the float key of its exact value, or, when
             // no binary64 holds it, the nearest one inside the half-line.
             let mut fop: i32 = op;
             let mut fkh: i32 = kh;
@@ -825,7 +825,7 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
     if cl < 0 {
         return fail(h, ERR_CONTROL_VALUE, pos);
     }
-    // D328: a number equals a number of the other kind with the same value: an
+    // D329: a number equals a number of the other kind with the same value: an
     // integer controller is a float point when a binary64 holds it exactly, an
     // integral float controller an integer point; otherwise it equals nothing of
     // that kind (and .ne keeps all of it).
@@ -1244,7 +1244,7 @@ pub(crate) fn vec_utf8(h: &mut [i32], t: i32) -> bool {
 }
 pub fn ctl_cat(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
     // RFC 9165 §2.2: the target's bytes then the controller's, both strings of
-    // either kind (D329); the result has the target's type and, as text, must be
+    // either kind (D330); the result has the target's type and, as text, must be
     // valid UTF-8.
     let a: i32 = single_lit(h, target);
     let b: i32 = single_lit(h, ctl);

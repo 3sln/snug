@@ -179,7 +179,7 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | Capability | Current state |
 | --- | --- |
 | CDDL rules, choices, groups, occurrences, generics, productive recursion | Implemented; exact supported subset in [CDDL support](docs/cddl-support.md) |
-| Prelude float widths (**changed 2026-11-11**) | `float16`/`float32`/`float64` are sets of values, as RFC 8610 §3.3 says, not encoded widths: `float32` matches a shortest-form 1.5 (encoded as float16), and `float64` matches every float (D327). Numeric controls compare across int and float exactly (`number .ge 0` compiles, D328) |
+| Prelude float widths (**changed 2026-11-11**) | `float16`/`float32`/`float64` are sets of values, as RFC 8610 §3.3 says, not encoded widths: `float32` matches a shortest-form 1.5 (encoded as float16), and `float64` matches every float (D328). Numeric controls compare across int and float exactly (`number .ge 0` compiles, D329) |
 | Direct schema validation of CBOR buffers | Implemented; strict profile fused with matching |
 | Codec, exact integers, decimals, typed arrays, ndarrays | Implemented in JS under the current restrictive wire policy |
 | Checked views, cursor, detached subtree validation | Implemented; owned by default, borrowing is an explicit lifetime contract |

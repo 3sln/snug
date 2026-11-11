@@ -96,7 +96,7 @@ and sequences take such items whole (D283). Costs: bench/README.md
 | Determinism | RFC 8949 §4.2.1, verified on read: definite lengths, shortest arguments, one root, no trailing bytes (`valid`: one root, no trailing bytes) |
 | Map ordering | Complete encoded-key bytes, lexicographic (not §4.2.3's length-first order); duplicates refused (`valid`: any order, duplicates by value refused) |
 | Integers | Major 0/1 for −2⁶⁴..2⁶⁴−1; beyond that a bignum (tags 2/3) of 9..128 content bytes, no leading zero (RFC 8949 §3.4.3 preferred serialization; `valid`: any bignum of at most 128 content bytes) |
-| Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64; `valid`: any width). In schemas the prelude names `float16`/`float32`/`float64` are sets of values, not widths (D327): `float32` admits any float binary32 represents exactly, in any encoding, and `float64` every float |
+| Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64; `valid`: any width). In schemas the prelude names `float16`/`float32`/`float64` are sets of values, not widths (D328): `float32` admits any float binary32 represents exactly, in any encoding, and `float64` every float |
 | Text | Well-formed UTF-8: no overlong, no surrogate, nothing above U+10FFFF |
 | Simple values | `false`, `true`, `null`; `deterministic` (and `valid`) also `undefined` and the unassigned values 0–19 and 32–255 (`undefinedValue`, D284), Bindle refuses them (`simple`); `f8` with a value below 32 is not well-formed (`malformed`; Bindle: `simple`, or `non_shortest` below 24) |
 | Limits | `maxBytes` 1,500,000; `maxDepth` 32; `maxEntries` 65,536; `maxItems` 131,072; bignum content 128 bytes |

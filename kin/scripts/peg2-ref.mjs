@@ -29,7 +29,7 @@ function head(m, n) {
   const b = []; for (let i = 0; i < size; i++, n >>= 8n) b.unshift(Number(n & 255n));
   return a.concat(b);
 }
-// D327 (RFC 8610 §3.3): is the float value exact in binary16 / binary32? (NaN, ±inf, ±0: yes)
+// D328 (RFC 8610 §3.3): is the float value exact in binary16 / binary32? (NaN, ±inf, ±0: yes)
 function fitsSingle(x) { return Number.isNaN(x) || !Number.isFinite(x) || Math.fround(x) === x; }
 function fitsHalf(x) {
   if (Number.isNaN(x) || !Number.isFinite(x) || x === 0) return true;
@@ -120,7 +120,7 @@ export function check(P, B, rule, item, { cuts = 'rfc', steps = 2000000 } = {}) 
       case 3: { const v = intValue(it, fl & 1); return v !== null && inIntervals(d(0), d(1), v); }
       case 4: {
         if (it.kind !== 'float') return false;
-        // D327: the widths that represent the value exactly, whatever width encodes it
+        // D328: the widths that represent the value exactly, whatever width encodes it
         if (!(fl & ((fitsHalf(it.value) ? 1 : 0) | (fitsSingle(it.value) ? 2 : 0) | 4))) return false;
         if (d(1) === 0) return true;
         const key = fkey(it);

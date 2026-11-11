@@ -425,12 +425,13 @@
 
 (defn ^I32 low-zero [^I32 hi ^I32 lo ^I32 k]
   (comment "Are the low k bits (k <= 64) of the 64-bit word hi:lo all zero?")
+  (comment "1 <= k: the mask of the low k bits is all ones shifted right by 32 - k")
   (if (< k 32)
-    (do (if (== (bit-and lo (- (shl 1 k) 1)) 0) (return 1))
+    (do (if (== (bit-and lo (ushr (neg 1) (- 32 k))) 0) (return 1))
         (return 0)))
   (if (!= lo 0) (return 0))
   (if (== k 32) (return 1))
-  (if (== (bit-and hi (- (shl 1 (- k 32)) 1)) 0) (return 1))
+  (if (== (bit-and hi (ushr (neg 1) (- 64 k))) 0) (return 1))
   (return 0))
 
 (defn ^I32 fits [^I32 e ^I32 mbits ^I32 mhi ^I32 mlo ^I32 emin ^I32 emax ^I32 tbits]
@@ -444,7 +445,7 @@
   (return (low-zero mhi mlo (+ (- mbits tbits) (- emin e)))))
 
 (defn ^:pub ^I32 float-cls [^Bytes b ^I32 pos ^I32 ai]
-  (comment "A float's class (§4.1) under RFC 8610 §3.3 (D327): the widths whose prelude"
+  (comment "A float's class (§4.1) under RFC 8610 §3.3 (D328): the widths whose prelude"
            "type it belongs to are those that can represent its value exactly, whatever"
            "width encodes it -- 256 binary16, 512 binary32, 1024 binary64. A narrower"
            "encoding is exact in every wider format; NaN, the infinities and the zeros"

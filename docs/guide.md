@@ -26,7 +26,7 @@ columns count code points, and 0 means the error has no source position.
 by UTF-8 name. Groups, generic definitions and prelude rules are not
 validation roots. [Supported CDDL](cddl-support.md) is an explicit subset.
 
-> **Changed 2026-11-11 (D327):** the prelude's `float16`, `float32` and
+> **Changed 2026-11-11 (D328):** the prelude's `float16`, `float32` and
 > `float64` are sets of values, as RFC 8610 §3.3 defines them, not encoded
 > widths. `float32` matches 1.5 however it is encoded (a deterministic
 > encoder writes it as float16), `float16` matches 1.5 written as float64,

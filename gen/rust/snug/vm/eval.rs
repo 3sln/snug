@@ -499,8 +499,9 @@ pub fn count_matched(p: &[i32], s: &[i32], fb: i32, w: i32, nq: i32) -> i32 {
 }
 pub(crate) fn low_zero(hi: i32, lo: i32, k: i32) -> i32 {
     // Are the low k bits (k <= 64) of the 64-bit word hi:lo all zero?
+    // 1 <= k: the mask of the low k bits is all ones shifted right by 32 - k
     if k < 32 {
-        if (lo & ((1 << k) - 1)) == 0 {
+        if (lo & (i32::cast_unsigned(-1) >> (32 - k)).cast_signed()) == 0 {
             return 1;
         }
         return 0;
@@ -511,7 +512,7 @@ pub(crate) fn low_zero(hi: i32, lo: i32, k: i32) -> i32 {
     if k == 32 {
         return 1;
     }
-    if (hi & ((1 << (k - 32)) - 1)) == 0 {
+    if (hi & (i32::cast_unsigned(-1) >> (64 - k)).cast_signed()) == 0 {
         return 1;
     }
     return 0;
@@ -533,7 +534,7 @@ pub(crate) fn fits(e: i32, mbits: i32, mhi: i32, mlo: i32, emin: i32, emax: i32,
     return low_zero(mhi, mlo, (mbits - tbits) + (emin - e));
 }
 pub fn float_cls(b: &[u8], pos: i32, ai: i32) -> i32 {
-    // A float's class (§4.1) under RFC 8610 §3.3 (D327): the widths whose prelude
+    // A float's class (§4.1) under RFC 8610 §3.3 (D328): the widths whose prelude
     // type it belongs to are those that can represent its value exactly, whatever
     // width encodes it -- 256 binary16, 512 binary32, 1024 binary64. A narrower
     // encoding is exact in every wider format; NaN, the infinities and the zeros
