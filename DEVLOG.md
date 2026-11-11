@@ -7650,11 +7650,26 @@ the final code, then documentation, then the size audit, then the final
 review.
 
 **Correctness and coverage**
-- [ ] **P9.1 — Gate watchdog.** Every gate script under `kin/scripts/` and
+- [x] **P9.1 — Gate watchdog.** Every gate script under `kin/scripts/` and
   `tools/` gets a CPU-time cap and a wall-clock cap, with sensible defaults
   per gate that can be overridden. A gate that hits a cap fails loudly,
   naming the gate, its arguments and the cap; it never hangs silently.
   Background: the 6.5-day `scan-test 300 1` (dec5975).
+  *Done 2026-11-11 (D326):* `kin/scripts/watchdog.mjs`, with every sh, node
+  and bb gate under it. Gates run on the final tree (on `0d52521`, plus
+  `cf7093a`'s DEVLOG):
+  * `bb watchdog-test` 7/7: the CPU cap, the wall cap, the group kill and
+    pass-through, plus a real `scan-test 300 1` and `size` tripping.
+  * `vm-test`: all ok, including PEG oracle 8600/8600, JS == Rust 80,545 and
+    JS == wasm 78,251.
+  * `vmsession-test 2000 1 100 60`: 304,747 runs. `sequence-test 300 1`:
+    441,806 runs. `wasm-sdk-test` 15/15.
+  * `compile-test`, `scan-test`, `rscan-test`, `valid-test`, `nav-test`,
+    `write-test`, `unicode-test`, `rust-api-test`, `npm test` 1450/1450,
+    `compile-fuzz`, the RFC runner, `size`, `proptest` (2 min, P1–P5, no
+    failure), `check` and `drift`: all ok.
+  * Interrupting a running gate's watchdog with SIGTERM left no process of
+    its group behind.
 - [ ] **P9.2 — RFC corpus all passing or classified.** Regenerate
   `corpus/conformance/rfc/current-results.json` (it predates P8.4). Then
   work through each remaining failure (27 at `920a3e1`), fixing it or
