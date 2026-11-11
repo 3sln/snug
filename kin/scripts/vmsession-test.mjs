@@ -89,7 +89,7 @@ const rnd = n => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st
 const runs = [];   // {ci, lim, policy, want, rust}
 const counts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, rnd4096: 0, quanta: 0, split: 0, budget: 0, generic: 0, sched1: 0 };
 cases.forEach((c, ci) => {
-  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0, c.lim[10] ?? -1]);
   const want0 = buffer(c, lim0);
   const n = c.bytes.length;
   const add = (lim, want, policy, tag, rust) => { runs.push({ ci, lim, want, policy, rust }); counts[tag]++; };
@@ -165,7 +165,7 @@ for (let i = 0; i + 2 < runs.length; i += 3 * 97) {
 const uruns = [];   // {ci, lim, want, policy, ff, rust}
 const ucounts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, split: 0, budget: 0, failfast: 0 };
 cases.forEach((c, ci) => {
-  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0, c.lim[10] ?? -1]);
   const want0 = buffer(c, lim0), n = c.bytes.length;
   const add = (lim, want, policy, tag, rust, ff = false) => { uruns.push({ ci, lim, want, policy, ff, rust }); ucounts[tag]++; };
   add(lim0, want0, { kind: 0, w: 0, q: 0, seed: 1, k: 0 }, 'whole', ci % 3 === 0);

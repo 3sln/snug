@@ -276,6 +276,46 @@ for (const { file, su, k, text, opt } of corpusOracle) {
   }
 }
 
+// ---------------------------------------------------------------- 3d. the group arena (P8.5, program-2 §9.4)
+// A2 arrays, T maps (sorted under the valid preset), recursion (chunks): inputs that outgrow the
+// default lease (the buffer route grows S and runs again, the session suspends with VMS_GROW),
+// and explicit arena limits (limits word 10) at and around each push: `group_limit` (44), or
+// the verdict. JS == Rust == session (bb vmsession-test) hold them to one schedule.
+{
+  let st = (SEED * 40503) >>> 0 || 1;
+  const rnd = n => { st ^= st << 13; st ^= st >>> 17; st ^= st << 5; return (st >>> 0) % n; };
+  const enc = v => Uint8Array.from((function e(x) {
+    const h = (m, n) => n < 24 ? [m * 32 + n] : n < 256 ? [m * 32 + 24, n] : n < 65536 ? [m * 32 + 25, n >> 8, n & 255] : [m * 32 + 26, n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+    if (typeof x === 'number') return x < 0 ? h(1, -1 - x) : h(0, x);
+    if (typeof x === 'string') { const b = [...new TextEncoder().encode(x)]; return h(3, b.length).concat(b); }
+    if (Array.isArray(x)) return h(4, x.length).concat(...x.map(e));
+    const pairs = [...x.entries()];
+    return h(5, pairs.length).concat(...pairs.map(([k, v]) => e(k).concat(e(v))));
+  })(v));
+  const shapes = [
+    ['r = { * (int => int // tstr => tstr) }', n => new Map(Array.from({ length: n }, (_, i) => (i % 3 ? [i, i] : ['k' + i, 'v'])))],
+    ['r = { int => int, int => 6, * int => any }', n => new Map(Array.from({ length: n }, (_, i) => [i, i % 7 === 0 ? 6 : i]))],
+    ['r = [ (* int, tstr) // (* int) ]', n => [...Array.from({ length: n }, (_, i) => i), ...(n % 2 ? ['t'] : [])]],
+    ['r = [ g ]\ng = (uint, ? g)', n => Array.from({ length: n }, (_, i) => i)],
+    ['r = [ g ]\ng = (uint, ? g, tstr)', n => [...Array.from({ length: n }, (_, i) => i), ...Array.from({ length: n - (n % 3 === 0 ? 1 : 0) }, () => 's')]],
+    ['r = [* { * (int => int // tstr => tstr) }]', n => Array.from({ length: Math.max(1, n >> 4) }, (_, j) => new Map(Array.from({ length: 16 }, (_, i) => [i + j, i])))],
+  ];
+  for (const [text, gen] of shapes) {
+    const c = compile(text, { limits: { items: 1 << 20, entries: 1 << 20, depth: 256 } });
+    const pi = addProgram(c.program, c.pool, `arena: ${text}`);
+    const rule = c.rules.indexOf('r');
+    for (const n of [0, 1, 5, 40, 700, 3000]) {
+      let v = gen(n);
+      if (v instanceof Map && rnd(2)) v = new Map([...v.entries()].reverse());   // unsorted keys: the valid preset's T sort
+      const bytes = enc(v);
+      for (const gw of [-1, 0, 3, 17, 64, 300, 4096]) {
+        cases.push({ prog: pi, rule, lim: [...LIM(1, 0, -1, -1, -1, -1, -1, -1, 378), gw], bytes, label: `arena: ${text} n ${n} groupWords ${gw}`,
+          check: o => { const w = o.split(' '); return (w[0] === '0' || Number(w[0]) >= 32) ? null : `unexpected profile code ${o}`; } });
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 3b. extension controls (P7.2)
 const extStart = cases.length;
 addExtCases({ compile, encode, addProgram, LIM, cases, seed: SEED });

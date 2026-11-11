@@ -9,10 +9,10 @@ import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arenaSetUp, arenaUpTop } from './arena.mjs';
-import { AB_ALIVE, AB_EVK, apeg, arrayAdvance, arrayBlockInit, arrayCandidates, arrayEnd, arrayMark, arrayRecords, arrayWitness, arrayWords, blockAo, leafArray } from './array.mjs';
+import { AB_ALIVE, AB_DIED, AB_EVK, AB_HDR, AB_IDX, AB_MODE, AB_NACT, AB_PC, AB_SP, AB_STATUS, aRun, aev, apeg, arrayAdvance, arrayBlockInit, arrayCandidates, arrayEnd, arrayMark, arrayRecords, arrayWitness, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c8, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadSeq, deadStdCheck, deadTyped, decimalCheck, headFail, keyOrder, ndarrayCheck, pairCheck, pairCount, pairWalk, replayEnd, replayKey, vtabFind } from './dead.mjs';
-import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, PEG_HDR, P_ANYKEY, P_EMBED, P_ENTRY, P_INDEX, P_KEY, P_MEMBER, P_REP, P_TAG, R_AGROW, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_GROUP_LIMIT, R_INCONSISTENT, R_MISSING, R_NONDET, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, TIER_F, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_VTAB, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, G_FORCED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, PEG_HDR, P_ANYKEY, P_EMBED, P_ENTRY, P_INDEX, P_KEY, P_MEMBER, P_REP, P_TAG, R_AGROW, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_GROUP_LIMIT, R_INCONSISTENT, R_MISSING, R_NONDET, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, TIER_F, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_VTAB, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
 import { MB_ALIVE, MB_E0, MB_E1, MB_E2, MB_NC, MB_NJ, blockMt, candVts, keySearch, keySpanEnd, leafMap, mMember, mNamed, mNamers, mapBlockInit, mapCursor, mapEndBlock, mapIsUnordered, mapKeyEcs, mapKeyPhase, mapKeyQuery, mapMark, mapRecords, mapUnordered, mapUpdate, mapValues, mapWords, mpeg } from './map.mjs';
 
@@ -600,8 +600,9 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf, s2) {
     // checked first -- items limit, head (shortest form, bytes present),
     // UTF-8, the leaf -- and only then charged, in the generic order: 5 at
     // the array (block 1 + W(|A|+1) 2 + candidate 1 + element 1), visit 1
-    // [+ UTF-8 ceil(len/64)] + filter 1 + leaf 1 [+ probe 1] at the element,
-    // 3 at the array (stamp, candidate, test). An element that would fail,
+    // [+ UTF-8 ceil(len/8)] + filter 1 + leaf 1 [+ probe 1] at the element,
+    // 4 at the array (stamp, candidate, test, the machine's one step, P8.5);
+    // schedule 2 leaves the visit [+ UTF-8] [+ probe]. An element that would fail,
     // need anything else or exceed the budget stops the streak BEFORE it is
     // touched. No path write is needed: no witness can be recorded inside
     // a successful streak. Answers the next position; the element count goes
@@ -631,7 +632,7 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf, s2) {
         let hi = 0;
         let lo = ai;
         let h = 1;
-        let cost = 12 - (10 * s2);
+        let cost = 13 - (11 * s2);
         if (items >= maxit) {
             break;
         }
@@ -701,7 +702,7 @@ export function arrayStreak(p, b, s, q0, limit, end, leaf, s2) {
                 break;
             }
             // schedule 2: visit + UTF-8 only
-            cost = (11 - (10 * s2)) + c8(lo);
+            cost = (12 - (11 * s2)) + c8(lo);
             if (left < cost) {
                 break;
             }
@@ -1070,6 +1071,117 @@ export function evalTag(p, pool, b, s, pos, q, hi, lo, d, fb, ck, nq, end, ctx, 
     return stop;
 }
 
+export function preScalar(p, pool, b, s, q, end, lb, kind) {
+    // P3.6 streaks: does the item at q certainly pass the profile and match
+    // leaf lb -- an INT over one interval or a TEXT without a regexp?
+    // Checked without charging: its end, with the units its generic
+    // evaluation charges (visit, UTF-8, filter, leaf, probe) in s[O_LO]; or
+    // -1 when it would not, or it is anything else.
+    if (q >= end) {
+        return -1;
+    }
+    const ib = b[q];
+    const major = (ib >>> 5) | 0;
+    const ai = ib & 31;
+    let hi = 0;
+    let lo = ai;
+    let h = 1;
+    if (ai > 27) {
+        return -1;
+    }
+    if (ai >= 24) {
+        h = 1 + (1 << (ai - 24));
+        if (h > (end - q)) {
+            return -1;
+        }
+        if (ai === 24) {
+            lo = b[q + 1];
+        }
+        if (ai === 25) {
+            lo = be16(b, q + 1);
+        }
+        if (ai === 26) {
+            lo = be32(b, q + 1);
+        }
+        if (ai === 27) {
+            hi = be32(b, q + 1);
+            lo = be32(b, q + 5);
+        }
+        if ((ai === 24) && (lo < 24)) {
+            return -1;
+        }
+        if ((ai === 25) && (lo < 256)) {
+            return -1;
+        }
+        if ((ai === 26) && (((lo >>> 16) | 0) === 0)) {
+            return -1;
+        }
+        if ((ai === 27) && (hi === 0)) {
+            return -1;
+        }
+    }
+    if (kind === K_INT) {
+        if ((major > 1) || (p[lb + 3] !== 1)) {
+            return -1;
+        }
+        if ((p[lb + 1] & (1 << major)) === 0) {
+            return -1;
+        }
+        if (!int1(p, pool, b, p[lb + 2], major + 1, hi, lo)) {
+            return -1;
+        }
+        s[O_LO] = 4;
+        return q + h;
+    }
+    if ((kind === K_TEXT) && (major === 3)) {
+        if ((hi !== 0) || (lo < 0)) {
+            return -1;
+        }
+        if (lo > (end - (q + h))) {
+            return -1;
+        }
+        if ((lo < p[lb + 2]) || (lo > p[lb + 3])) {
+            return -1;
+        }
+        if (utf8InvalidAt(b, q + h, (q + h) + lo) >= 0) {
+            return -1;
+        }
+        s[O_LO] = 3 + c8(lo);
+        return (q + h) + lo;
+    }
+    return -1;
+}
+
+export function streakKind(p, leaf) {
+    // Leaves pre-scalar decides: INT over one interval, TEXT without a regexp.
+    if (leaf < 0) {
+        return false;
+    }
+    const lb = p[H_S_LEAVES] + (8 * leaf);
+    const kind = p[lb] & 255;
+    return ((kind === K_INT) && (p[lb + 3] === 1)) || ((kind === K_TEXT) && (p[lb + 4] < 0));
+}
+
+export function starSteady(s, area, el) {
+    // Is the single `[* T]` block at area in its steady state before element el:
+    // alive, |A| = 1, its machine waiting at ENTRY (node 1) for record el inside
+    // the REP's frame (program-2 §5.3)? Then each matching element is one step.
+    return ((s[area + AB_ALIVE] !== 0) && (s[area + AB_NACT] === 1)) && (((s[area + AB_STATUS] === 0) && (s[area + AB_MODE] === 3)) && (((s[area + AB_SP] === 1) && (s[area + AB_PC] === 1)) && (s[area + AB_IDX] === el)));
+}
+
+export function starAdvance(p, s, fb, area, k) {
+    // k matching elements of a steady `[* T]` block (star-steady), all at once:
+    // the waiting ENTRY moves on k records, the REP frame counts k more
+    // iterations, the active set stays the position.
+    const ao = blockAo(p, s, fb, area);
+    const fr = (area + AB_HDR) + (2 * p[ao + 1]);
+    const idx = s[area + AB_IDX] + k;
+    const cnt = s[fr + 2] + k;
+    s[area + AB_IDX] = idx;
+    s[fr + 2] = cnt;
+    s[fr + 3] = idx;
+}
+
 export function ifLimit(n, el) {
     if (n < 0) {
         return INF;
@@ -1196,6 +1308,69 @@ export function arrAfter(p, s, fb, w, area, nb, el, q, r, cfb, cw, cnq, pos) {
     return still;
 }
 
+export function arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext) {
+    // P3.6 (D044): one element of a `[* T]` array (one block, one position, T
+    // one answer, tier A0): the generic element's charges merged per offset --
+    // block 1 + W(|A|+1) + candidate 1 + T's element 1 at the array, the child
+    // (fast-child), then stamp 1 + candidate 1 + test 1 -- the record (the
+    // block's active set) and the machine (a-run) as array-advance has them.
+    // Schedule 2 (D045) frees the bookkeeping and the machine's steps.
+    // Answers the element's end (the block's alive word tells a death).
+    if (!charge(s, (1 - s2) * (s[area + AB_NACT] + 4), pos)) {
+        return -R_BUDGET;
+    }
+    pathPut(s, d + 1, P_INDEX, el);
+    const rf = fastChild(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, cx, ext);
+    if (rf < 0) {
+        return rf;
+    }
+    if (!charge(s, (1 - s2) * 3, pos)) {
+        return -R_BUDGET;
+    }
+    const ao = blockAo(p, s, fb, area);
+    const m = s[VM_FASTM];
+    s[area + AB_HDR] = m;
+    s[area + AB_NACT] = m;
+    if (s2 === 1) {
+        freeOn(s);
+    }
+    const rm = aRun(p, s, area, ao, el, 0, q, rf, pos);
+    freeOff(s);
+    if (rm < 0) {
+        return rm;
+    }
+    const st = s[area + AB_STATUS];
+    let alive = 0;
+    if ((st === 0) || ((st === 2) && (s[area + AB_IDX] > el))) {
+        alive = 1;
+    }
+    if ((alive === 0) && (st === 2)) {
+        const e3 = s[area + AB_IDX];
+        let o3 = pos;
+        if (e3 === el) {
+            o3 = q;
+        }
+        aev(s, area, 3, e3, o3);
+    }
+    if (alive === 1) {
+        witClear(s);
+    } else {
+        s[area + AB_ALIVE] = 0;
+        s[area + AB_DIED] = el;
+        const qi = s[area];
+        const k = s[area + AB_EVK] & 255;
+        let why = R_TYPE;
+        if (k >= 3) {
+            why = R_UNEXPECTED;
+        }
+        qSetFlag(s, fb, w, qi, why << 8);
+        if (pend > 0) {
+            witClear(s);
+        }
+    }
+    return rf;
+}
+
 export function arrClose(p, pool, b, s, fb, w, area, nb, d, n, pos, q0, q, nq, ctx, pend, ext) {
     // The array's end (program-2 §5.1, §8): 1 unit per block, a live block's end
     // run (array-end); its records popped; the scalar leaves and combinators;
@@ -1268,6 +1443,8 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ex
     let el = 0;
     let s2 = 0;
     let cx = 0;
+    let fleaf = -1;
+    let sleaf = -1;
     let nalive;
     const na = qFilterX(p, s, fb, w, nq, 16, pos, ctx);
     if (na < 0) {
@@ -1279,12 +1456,19 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ex
     }
     nalive = nb;
     // Schedule 2 (D045 i, iii): a simple [* T] block's element steps are free
-    // and a one-scalar-leaf element loses its filter and leaf units.
+    // and a one-scalar-leaf element loses its filter and leaf units. The fast
+    // paths (D044) take its elements unless forced off, or tiers forced.
     const sl = arrStarLeaf(p, s, fb, area, nb);
     if (sched2(s) && (sl >= 0)) {
         s2 = 1;
         if (scalarKind(p[p[H_S_LEAVES] + (8 * sl)] & 255)) {
             cx = CTX_SIMPLE;
+        }
+    }
+    if (((s[VM_GENERIC] & (1 | G_FORCED)) === 0) && (sl >= 0)) {
+        fleaf = sl;
+        if (streakKind(p, sl)) {
+            sleaf = sl;
         }
     }
     const pend = countPending(p, s, fb, w, nq);
@@ -1309,6 +1493,32 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ex
                 if (q < 0) {
                     return q;
                 }
+            }
+        } else if ((sleaf >= 0) && ((el >= 1) && starSteady(s, area, el))) {
+            const qs = arrayStreak(p, b, s, q, ifLimit(n, el), end, sleaf, s2);
+            const ks = s[VM_FASTM];
+            if (ks > 0) {
+                starAdvance(p, s, fb, area, ks);
+                q = qs;
+                el += ks - 1;
+            } else {
+                const rf2 = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext);
+                if (rf2 < 0) {
+                    return rf2;
+                }
+                q = rf2;
+                if (s[area + AB_ALIVE] === 0) {
+                    nalive = 0;
+                }
+            }
+        } else if (fleaf >= 0) {
+            const rf = arrayStep(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext);
+            if (rf < 0) {
+                return rf;
+            }
+            q = rf;
+            if (s[area + AB_ALIVE] === 0) {
+                nalive = 0;
             }
         } else {
             const e = newEpoch(s);
@@ -1364,97 +1574,6 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ex
         return rc;
     }
     return q;
-}
-
-export function preScalar(p, pool, b, s, q, end, lb, kind) {
-    // P3.6 streaks: does the item at q certainly pass the profile and match
-    // leaf lb -- an INT over one interval or a TEXT without a regexp?
-    // Checked without charging: its end, with the units its generic
-    // evaluation charges (visit, UTF-8, filter, leaf, probe) in s[O_LO]; or
-    // -1 when it would not, or it is anything else.
-    if (q >= end) {
-        return -1;
-    }
-    const ib = b[q];
-    const major = (ib >>> 5) | 0;
-    const ai = ib & 31;
-    let hi = 0;
-    let lo = ai;
-    let h = 1;
-    if (ai > 27) {
-        return -1;
-    }
-    if (ai >= 24) {
-        h = 1 + (1 << (ai - 24));
-        if (h > (end - q)) {
-            return -1;
-        }
-        if (ai === 24) {
-            lo = b[q + 1];
-        }
-        if (ai === 25) {
-            lo = be16(b, q + 1);
-        }
-        if (ai === 26) {
-            lo = be32(b, q + 1);
-        }
-        if (ai === 27) {
-            hi = be32(b, q + 1);
-            lo = be32(b, q + 5);
-        }
-        if ((ai === 24) && (lo < 24)) {
-            return -1;
-        }
-        if ((ai === 25) && (lo < 256)) {
-            return -1;
-        }
-        if ((ai === 26) && (((lo >>> 16) | 0) === 0)) {
-            return -1;
-        }
-        if ((ai === 27) && (hi === 0)) {
-            return -1;
-        }
-    }
-    if (kind === K_INT) {
-        if ((major > 1) || (p[lb + 3] !== 1)) {
-            return -1;
-        }
-        if ((p[lb + 1] & (1 << major)) === 0) {
-            return -1;
-        }
-        if (!int1(p, pool, b, p[lb + 2], major + 1, hi, lo)) {
-            return -1;
-        }
-        s[O_LO] = 4;
-        return q + h;
-    }
-    if ((kind === K_TEXT) && (major === 3)) {
-        if ((hi !== 0) || (lo < 0)) {
-            return -1;
-        }
-        if (lo > (end - (q + h))) {
-            return -1;
-        }
-        if ((lo < p[lb + 2]) || (lo > p[lb + 3])) {
-            return -1;
-        }
-        if (utf8InvalidAt(b, q + h, (q + h) + lo) >= 0) {
-            return -1;
-        }
-        s[O_LO] = 3 + c8(lo);
-        return (q + h) + lo;
-    }
-    return -1;
-}
-
-export function streakKind(p, leaf) {
-    // Leaves pre-scalar decides: INT over one interval, TEXT without a regexp.
-    if (leaf < 0) {
-        return false;
-    }
-    const lb = p[H_S_LEAVES] + (8 * leaf);
-    const kind = p[lb] & 255;
-    return ((kind === K_INT) && (p[lb + 3] === 1)) || ((kind === K_TEXT) && (p[lb + 4] < 0));
 }
 
 export function mapFastMode(p, mt) {

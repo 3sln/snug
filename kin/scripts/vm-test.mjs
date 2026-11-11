@@ -204,7 +204,8 @@ if (process.env.SNUG_VM_WASM) {
   let loaded = -1, agree = 0, tried = 0;
   cases.forEach((c, i) => {
     // the wasm shim has no extension-control port (P7.2 open item): EXT Programs are not run there
-    if (c.span || c.ext || c.bytes.length > cap) return;
+    // ... nor an explicit group-arena limit (limits word 10): the shim takes 10 limit words
+    if (c.span || c.ext || c.bytes.length > cap || (c.lim[10] ?? -1) >= 0) return;
     if (loaded !== c.prog) {
       const { P, B } = programs[c.prog];
       new Int32Array(mem.buffer, ex.snug_prog_buf(), P.length).set(P);

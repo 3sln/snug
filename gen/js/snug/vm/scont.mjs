@@ -10,8 +10,8 @@ import { anyTags, ruleTag, stdAllowed, stdContentOk, typedAnySize } from '../cbo
 import { typedSize } from '../cbor/tags.mjs';
 import { c64, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadIntStreak, deadItem, deadPairBody, deadStdCheck, decimalCheck, ndarrayCheck, pairCheck } from './dead.mjs';
-import { arrAfter, arrAlive, arrClose, arrOpen, arrQuery, arrStarLeaf, arrayStreak, bstrTail, countMatched, countPending, evalItem, finishScalar, ifLimit, mapAfter, mapCands, mapCcap, mapCl, mapClose, mapKeyq, mapNamedOf, mapOpen, mapPre, mapSmode, mapValq, qFilterX, simpleOf, unitOf } from './eval.mjs';
-import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, H_S_LEAVES, K_TAG, K_TAGSET, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
+import { arrAfter, arrAlive, arrClose, arrOpen, arrQuery, arrStarLeaf, arrayStreak, bstrTail, countMatched, countPending, evalItem, finishScalar, ifLimit, mapAfter, mapCands, mapCcap, mapCl, mapClose, mapKeyq, mapNamedOf, mapOpen, mapPre, mapSmode, mapValq, qFilterX, simpleOf, starAdvance, starSteady, streakKind, unitOf } from './eval.mjs';
+import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, G_FORCED, H_S_LEAVES, K_TAG, K_TAGSET, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
 import { cmpU64, evalScalars, scalarKind } from './leaf.mjs';
 import { keySearch, keySpanEnd, mapIsUnordered, mapKeyEcs, mapUnordered } from './map.mjs';
 import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_FLOOR, F_IND, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLEN, F_KLO, F_KM, F_KPOS, F_MCNQ, F_N, F_NALIVE, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VLAST, F_VMARK, F_VN, F_VNQ, GO, IND, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, SS_UNK, SS_VNEED, VMS_GROW, VMS_NEED, arenaGate, arenaItems, bstrReads, call, cont, cutYield, done, ensure, enterPend, err, fbase, fidx, fitsKnown, fpush, ftop, imin, keyMaxClaim, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, pendNote, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
@@ -108,6 +108,7 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
     const area = fb + (2 * w);
     let s2 = 0;
     let cx = 0;
+    let sleaf = -1;
     const na = qFilterX(p, s, fb, w, nq, 16, pos, ctx);
     if (na < 0) {
         return err(ss, na);
@@ -122,6 +123,11 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
         if (scalarKind(p[p[H_S_LEAVES] + (8 * sl)] & 255)) {
             cx = CTX_SIMPLE;
         }
+    }
+    // eval-array's streak leaf: an INT over one interval or a TEXT without a
+    // regexp, fast paths on, natural tiers (D044)
+    if (((sl >= 0) && streakKind(p, sl)) && ((s[VM_GENERIC] & (1 | G_FORCED)) === 0)) {
+        sleaf = sl;
     }
     const pend = countPending(p, s, fb, w, nq);
     const f = fpush(b, ss, ka, base, FK_ARR);
@@ -139,7 +145,7 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
     ss[f + F_PEND] = pend;
     ss[f + F_NALIVE] = nb;
     ss[f + F_PAIR] = pair;
-    ss[f + F_SLEAF] = -1;
+    ss[f + F_SLEAF] = sleaf;
     markPair(ss, pair);
     return cont(ss, f, A_NEXT);
 }
@@ -342,10 +348,11 @@ export function arrRun(p, pool, b, s, ss, vs, cb, base, f, ext) {
         } else {
             const sleaf = ss[f + F_SLEAF];
             const area0 = fb + (2 * csetWidth(p, csetRec(p, s, ck)));
-            if ((sleaf >= 0) && (s[area0 + 2] === 1)) {
+            if ((sleaf >= 0) && starSteady(s, area0, el)) {
                 const qs = arrayStreak(p, b, s, q, indLimit(s, ss, f, ifLimit(n, el), el), cutend, sleaf, s2);
                 const ks = s[VM_FASTM];
                 if (ks > 0) {
+                    starAdvance(p, s, fb, area0, ks);
                     ss[f + F_Q] = qs + base;
                     ss[f + F_EL] = el + ks;
                     progress(ss, ks);

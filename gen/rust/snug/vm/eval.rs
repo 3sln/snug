@@ -575,8 +575,9 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
     // checked first -- items limit, head (shortest form, bytes present),
     // UTF-8, the leaf -- and only then charged, in the generic order: 5 at
     // the array (block 1 + W(|A|+1) 2 + candidate 1 + element 1), visit 1
-    // [+ UTF-8 ceil(len/64)] + filter 1 + leaf 1 [+ probe 1] at the element,
-    // 3 at the array (stamp, candidate, test). An element that would fail,
+    // [+ UTF-8 ceil(len/8)] + filter 1 + leaf 1 [+ probe 1] at the element,
+    // 4 at the array (stamp, candidate, test, the machine's one step, P8.5);
+    // schedule 2 leaves the visit [+ UTF-8] [+ probe]. An element that would fail,
     // need anything else or exceed the budget stops the streak BEFORE it is
     // touched. No path write is needed: no witness can be recorded inside
     // a successful streak. Answers the next position; the element count goes
@@ -606,7 +607,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
         let mut hi: i32 = 0;
         let mut lo: i32 = ai;
         let mut h: i32 = 1;
-        let mut cost: i32 = 12 - (10 * s2);
+        let mut cost: i32 = 13 - (11 * s2);
         if items >= maxit {
             break;
         }
@@ -676,7 +677,7 @@ pub fn array_streak(p: &[i32], b: &[u8], s: &mut [i32], q0: i32, limit: i32, end
                 break;
             }
             // schedule 2: visit + UTF-8 only
-            cost = (11 - (10 * s2)) + c8(lo);
+            cost = (12 - (11 * s2)) + c8(lo);
             if left < cost {
                 break;
             }
@@ -1042,6 +1043,113 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
     }
     return stop;
 }
+pub fn pre_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], q: i32, end: i32, lb: i32, kind: i32) -> i32 {
+    // P3.6 streaks: does the item at q certainly pass the profile and match
+    // leaf lb -- an INT over one interval or a TEXT without a regexp?
+    // Checked without charging: its end, with the units its generic
+    // evaluation charges (visit, UTF-8, filter, leaf, probe) in s[O_LO]; or
+    // -1 when it would not, or it is anything else.
+    if q >= end {
+        return -1;
+    }
+    let ib: i32 = b[(q) as usize] as i32;
+    let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
+    let ai: i32 = ib & 31;
+    let mut hi: i32 = 0;
+    let mut lo: i32 = ai;
+    let mut h: i32 = 1;
+    if ai > 27 {
+        return -1;
+    }
+    if ai >= 24 {
+        h = 1 + (1 << (ai - 24));
+        if h > (end - q) {
+            return -1;
+        }
+        if ai == 24 {
+            lo = b[(q + 1) as usize] as i32;
+        }
+        if ai == 25 {
+            lo = be16(b, q + 1);
+        }
+        if ai == 26 {
+            lo = be32(b, q + 1);
+        }
+        if ai == 27 {
+            hi = be32(b, q + 1);
+            lo = be32(b, q + 5);
+        }
+        if (ai == 24) && (lo < 24) {
+            return -1;
+        }
+        if (ai == 25) && (lo < 256) {
+            return -1;
+        }
+        if (ai == 26) && ((i32::cast_unsigned(lo) >> 16).cast_signed() == 0) {
+            return -1;
+        }
+        if (ai == 27) && (hi == 0) {
+            return -1;
+        }
+    }
+    if kind == K_INT {
+        if (major > 1) || (p[(lb + 3) as usize] != 1) {
+            return -1;
+        }
+        if (p[(lb + 1) as usize] & (1 << major)) == 0 {
+            return -1;
+        }
+        if !int1(p, pool, b, p[(lb + 2) as usize], major + 1, hi, lo) {
+            return -1;
+        }
+        s[(O_LO) as usize] = 4;
+        return q + h;
+    }
+    if (kind == K_TEXT) && (major == 3) {
+        if (hi != 0) || (lo < 0) {
+            return -1;
+        }
+        if lo > (end - (q + h)) {
+            return -1;
+        }
+        if (lo < p[(lb + 2) as usize]) || (lo > p[(lb + 3) as usize]) {
+            return -1;
+        }
+        if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
+            return -1;
+        }
+        s[(O_LO) as usize] = 3 + c8(lo);
+        return (q + h) + lo;
+    }
+    return -1;
+}
+pub fn streak_kind(p: &[i32], leaf: i32) -> bool {
+    // Leaves pre-scalar decides: INT over one interval, TEXT without a regexp.
+    if leaf < 0 {
+        return false;
+    }
+    let lb: i32 = p[(H_S_LEAVES) as usize] + (8 * leaf);
+    let kind: i32 = p[(lb) as usize] & 255;
+    return ((kind == K_INT) && (p[(lb + 3) as usize] == 1)) || ((kind == K_TEXT) && (p[(lb + 4) as usize] < 0));
+}
+pub fn star_steady(s: &[i32], area: i32, el: i32) -> bool {
+    // Is the single `[* T]` block at area in its steady state before element el:
+    // alive, |A| = 1, its machine waiting at ENTRY (node 1) for record el inside
+    // the REP's frame (program-2 §5.3)? Then each matching element is one step.
+    return ((s[(area + AB_ALIVE) as usize] != 0) && (s[(area + AB_NACT) as usize] == 1)) && (((s[(area + AB_STATUS) as usize] == 0) && (s[(area + AB_MODE) as usize] == 3)) && (((s[(area + AB_SP) as usize] == 1) && (s[(area + AB_PC) as usize] == 1)) && (s[(area + AB_IDX) as usize] == el)));
+}
+pub fn star_advance(p: &[i32], s: &mut [i32], fb: i32, area: i32, k: i32) {
+    // k matching elements of a steady `[* T]` block (star-steady), all at once:
+    // the waiting ENTRY moves on k records, the REP frame counts k more
+    // iterations, the active set stays the position.
+    let ao: i32 = block_ao(p, s, fb, area);
+    let fr: i32 = (area + AB_HDR) + (2 * p[(ao + 1) as usize]);
+    let idx: i32 = s[(area + AB_IDX) as usize] + k;
+    let cnt: i32 = s[(fr + 2) as usize] + k;
+    s[(area + AB_IDX) as usize] = idx;
+    s[(fr + 2) as usize] = cnt;
+    s[(fr + 3) as usize] = idx;
+}
 pub fn if_limit(n: i32, el: i32) -> i32 {
     if n < 0 {
         return INF;
@@ -1162,6 +1270,68 @@ pub fn arr_after(p: &[i32], s: &mut [i32], fb: i32, w: i32, area: i32, nb: i32, 
     }
     return still;
 }
+pub fn array_step(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i32, d: i32, fb: i32, w: i32, area: i32, cfb: i32, cck: i32, cw: i32, fleaf: i32, el: i32, pend: i32, end: i32, s2: i32, cx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
+    // P3.6 (D044): one element of a `[* T]` array (one block, one position, T
+    // one answer, tier A0): the generic element's charges merged per offset --
+    // block 1 + W(|A|+1) + candidate 1 + T's element 1 at the array, the child
+    // (fast-child), then stamp 1 + candidate 1 + test 1 -- the record (the
+    // block's active set) and the machine (a-run) as array-advance has them.
+    // Schedule 2 (D045) frees the bookkeeping and the machine's steps.
+    // Answers the element's end (the block's alive word tells a death).
+    if !charge(s, (1 - s2) * (s[(area + AB_NACT) as usize] + 4), pos) {
+        return -R_BUDGET;
+    }
+    path_put(s, d + 1, P_INDEX, el);
+    let rf: i32 = fast_child(p, pool, b, s, q, d + 1, cfb, cck, cw, fleaf, end, cx, ext);
+    if rf < 0 {
+        return rf;
+    }
+    if !charge(s, (1 - s2) * 3, pos) {
+        return -R_BUDGET;
+    }
+    let ao: i32 = block_ao(p, s, fb, area);
+    let m: i32 = s[(VM_FASTM) as usize];
+    s[(area + AB_HDR) as usize] = m;
+    s[(area + AB_NACT) as usize] = m;
+    if s2 == 1 {
+        free_on(s);
+    }
+    let rm: i32 = a_run(p, s, area, ao, el, 0, q, rf, pos);
+    free_off(s);
+    if rm < 0 {
+        return rm;
+    }
+    let st: i32 = s[(area + AB_STATUS) as usize];
+    let mut alive: i32 = 0;
+    if (st == 0) || ((st == 2) && (s[(area + AB_IDX) as usize] > el)) {
+        alive = 1;
+    }
+    if (alive == 0) && (st == 2) {
+        let e3: i32 = s[(area + AB_IDX) as usize];
+        let mut o3: i32 = pos;
+        if e3 == el {
+            o3 = q;
+        }
+        aev(s, area, 3, e3, o3);
+    }
+    if alive == 1 {
+        wit_clear(s);
+    } else {
+        s[(area + AB_ALIVE) as usize] = 0;
+        s[(area + AB_DIED) as usize] = el;
+        let qi: i32 = s[(area) as usize];
+        let k: i32 = s[(area + AB_EVK) as usize] & 255;
+        let mut why: i32 = R_TYPE;
+        if k >= 3 {
+            why = R_UNEXPECTED;
+        }
+        q_set_flag(s, fb, w, qi, why << 8);
+        if pend > 0 {
+            wit_clear(s);
+        }
+    }
+    return rf;
+}
 pub fn arr_close(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, area: i32, nb: i32, d: i32, n: i32, pos: i32, q0: i32, q: i32, nq: i32, ctx: i32, pend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // The array's end (program-2 §5.1, §8): 1 unit per block, a live block's end
     // run (array-end); its records popped; the scalar leaves and combinators;
@@ -1233,6 +1403,8 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     let mut el: i32 = 0;
     let mut s2: i32 = 0;
     let mut cx: i32 = 0;
+    let mut fleaf: i32 = -1;
+    let mut sleaf: i32 = -1;
     let mut nalive: i32;
     let na: i32 = q_filter_x(p, s, fb, w, nq, 16, pos, ctx);
     if na < 0 {
@@ -1244,12 +1416,19 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     }
     nalive = nb;
     // Schedule 2 (D045 i, iii): a simple [* T] block's element steps are free
-    // and a one-scalar-leaf element loses its filter and leaf units.
+    // and a one-scalar-leaf element loses its filter and leaf units. The fast
+    // paths (D044) take its elements unless forced off, or tiers forced.
     let sl: i32 = arr_star_leaf(p, s, fb, area, nb);
     if sched2(s) && (sl >= 0) {
         s2 = 1;
         if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * sl)) as usize] & 255) {
             cx = CTX_SIMPLE;
+        }
+    }
+    if ((s[(VM_GENERIC) as usize] & (1 | G_FORCED)) == 0) && (sl >= 0) {
+        fleaf = sl;
+        if streak_kind(p, sl) {
+            sleaf = sl;
         }
     }
     let pend: i32 = count_pending(p, s, fb, w, nq);
@@ -1274,6 +1453,32 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
                 if q < 0 {
                     return q;
                 }
+            }
+        } else if (sleaf >= 0) && ((el >= 1) && star_steady(s, area, el)) {
+            let qs: i32 = array_streak(p, b, s, q, if_limit(n, el), end, sleaf, s2);
+            let ks: i32 = s[(VM_FASTM) as usize];
+            if ks > 0 {
+                star_advance(p, s, fb, area, ks);
+                q = qs;
+                el += ks - 1;
+            } else {
+                let rf2: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext);
+                if rf2 < 0 {
+                    return rf2;
+                }
+                q = rf2;
+                if s[(area + AB_ALIVE) as usize] == 0 {
+                    nalive = 0;
+                }
+            }
+        } else if fleaf >= 0 {
+            let rf: i32 = array_step(p, pool, b, s, pos, q, d, fb, w, area, cfb, cck, cw, fleaf, el, pend, end, s2, cx, ext);
+            if rf < 0 {
+                return rf;
+            }
+            q = rf;
+            if s[(area + AB_ALIVE) as usize] == 0 {
+                nalive = 0;
             }
         } else {
             let e: i32 = new_epoch(s);
@@ -1329,95 +1534,6 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         return rc;
     }
     return q;
-}
-pub fn pre_scalar(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], q: i32, end: i32, lb: i32, kind: i32) -> i32 {
-    // P3.6 streaks: does the item at q certainly pass the profile and match
-    // leaf lb -- an INT over one interval or a TEXT without a regexp?
-    // Checked without charging: its end, with the units its generic
-    // evaluation charges (visit, UTF-8, filter, leaf, probe) in s[O_LO]; or
-    // -1 when it would not, or it is anything else.
-    if q >= end {
-        return -1;
-    }
-    let ib: i32 = b[(q) as usize] as i32;
-    let major: i32 = (i32::cast_unsigned(ib) >> 5).cast_signed();
-    let ai: i32 = ib & 31;
-    let mut hi: i32 = 0;
-    let mut lo: i32 = ai;
-    let mut h: i32 = 1;
-    if ai > 27 {
-        return -1;
-    }
-    if ai >= 24 {
-        h = 1 + (1 << (ai - 24));
-        if h > (end - q) {
-            return -1;
-        }
-        if ai == 24 {
-            lo = b[(q + 1) as usize] as i32;
-        }
-        if ai == 25 {
-            lo = be16(b, q + 1);
-        }
-        if ai == 26 {
-            lo = be32(b, q + 1);
-        }
-        if ai == 27 {
-            hi = be32(b, q + 1);
-            lo = be32(b, q + 5);
-        }
-        if (ai == 24) && (lo < 24) {
-            return -1;
-        }
-        if (ai == 25) && (lo < 256) {
-            return -1;
-        }
-        if (ai == 26) && ((i32::cast_unsigned(lo) >> 16).cast_signed() == 0) {
-            return -1;
-        }
-        if (ai == 27) && (hi == 0) {
-            return -1;
-        }
-    }
-    if kind == K_INT {
-        if (major > 1) || (p[(lb + 3) as usize] != 1) {
-            return -1;
-        }
-        if (p[(lb + 1) as usize] & (1 << major)) == 0 {
-            return -1;
-        }
-        if !int1(p, pool, b, p[(lb + 2) as usize], major + 1, hi, lo) {
-            return -1;
-        }
-        s[(O_LO) as usize] = 4;
-        return q + h;
-    }
-    if (kind == K_TEXT) && (major == 3) {
-        if (hi != 0) || (lo < 0) {
-            return -1;
-        }
-        if lo > (end - (q + h)) {
-            return -1;
-        }
-        if (lo < p[(lb + 2) as usize]) || (lo > p[(lb + 3) as usize]) {
-            return -1;
-        }
-        if utf8_invalid_at(b, q + h, (q + h) + lo) >= 0 {
-            return -1;
-        }
-        s[(O_LO) as usize] = 3 + c8(lo);
-        return (q + h) + lo;
-    }
-    return -1;
-}
-pub fn streak_kind(p: &[i32], leaf: i32) -> bool {
-    // Leaves pre-scalar decides: INT over one interval, TEXT without a regexp.
-    if leaf < 0 {
-        return false;
-    }
-    let lb: i32 = p[(H_S_LEAVES) as usize] + (8 * leaf);
-    let kind: i32 = p[(lb) as usize] & 255;
-    return ((kind == K_INT) && (p[(lb + 3) as usize] == 1)) || ((kind == K_TEXT) && (p[(lb + 4) as usize] < 0));
 }
 pub fn map_fast_mode(p: &[i32], mt: i32) -> i32 {
     // Schedule 2's simple shapes (D045 ii) under PEG semantics (tier F): 1 a

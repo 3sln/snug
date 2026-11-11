@@ -87,6 +87,7 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     let area: i32 = fb + (2 * w);
     let mut s2: i32 = 0;
     let mut cx: i32 = 0;
+    let mut sleaf: i32 = -1;
     let na: i32 = q_filter_x(p, s, fb, w, nq, 16, pos, ctx);
     if na < 0 {
         return err(ss, na);
@@ -101,6 +102,11 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
         if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * sl)) as usize] & 255) {
             cx = CTX_SIMPLE;
         }
+    }
+    // eval-array's streak leaf: an INT over one interval or a TEXT without a
+    // regexp, fast paths on, natural tiers (D044)
+    if ((sl >= 0) && streak_kind(p, sl)) && ((s[(VM_GENERIC) as usize] & (1 | G_FORCED)) == 0) {
+        sleaf = sl;
     }
     let pend: i32 = count_pending(p, s, fb, w, nq);
     let f: i32 = fpush(b, ss, ka, base, FK_ARR);
@@ -118,7 +124,7 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     ss[(f + F_PEND) as usize] = pend;
     ss[(f + F_NALIVE) as usize] = nb;
     ss[(f + F_PAIR) as usize] = pair;
-    ss[(f + F_SLEAF) as usize] = -1;
+    ss[(f + F_SLEAF) as usize] = sleaf;
     mark_pair(ss, pair);
     return cont(ss, f, A_NEXT);
 }
@@ -313,10 +319,11 @@ pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         } else {
             let sleaf: i32 = ss[(f + F_SLEAF) as usize];
             let area0: i32 = fb + (2 * cset_width(p, cset_rec(p, s, ck)));
-            if (sleaf >= 0) && (s[(area0 + 2) as usize] == 1) {
+            if (sleaf >= 0) && star_steady(s, area0, el) {
                 let qs: i32 = array_streak(p, b, s, q, ind_limit(s, ss, f, if_limit(n, el), el), cutend, sleaf, s2);
                 let ks: i32 = s[(VM_FASTM) as usize];
                 if ks > 0 {
+                    star_advance(p, s, fb, area0, ks);
                     ss[(f + F_Q) as usize] = qs + base;
                     ss[(f + F_EL) as usize] = el + ks;
                     progress(ss, ks);
