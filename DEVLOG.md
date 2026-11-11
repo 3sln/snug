@@ -7991,3 +7991,53 @@ buffer cheap to keep; every session-only divergence found (S's trail, the
 valid path's `group_limit` offset) was state or mapping outside those
 functions. A streak needs its own gate against the item-by-item walk under
 the *same* schedule — D254's fast == generic gate compares schedule 1 only.
+
+## P8.5 follow-up — linear T maps, the D286 map regression, the sequence scratch bound (2026-11-11, branch `p85-tlin`)
+
+D323 (T maps' non-literal member cursors; the map streak takes `any`; block
+init trimmed; `map-pair-fast` not restored) and D324 (a session's arena
+starts at the lease), both unsigned, on main `e3fa424` (after D286 B+C, the
+tag-4 fix and D286 D).
+
+Measured on the final tree (in-process interleaved, best of 7, ms per call;
+load 25–45):
+
+| workload | cfbdda3 | main e3fa424 | p85-tlin | units (main = p85-tlin) |
+| --- | ---: | ---: | ---: | ---: |
+| 2000 maps × 8 keys `[* {* tstr => any}]` | 4.53 | 18.00 | 5.15 | 96,010 (cfbdda3 94,008) |
+| map-heavy typed (2000 records) | 10.61 | 12.18 | 11.47 | 214,023 (194,020) |
+| reference-map-choice (2000) | 11.72 | 16.23 | 15.66 | 268,011 (254,007) |
+
+T table `{* (tstr => uint // tstr => tstr)}`, units in order / reversed: 1k
+34,016 / 67,945; 3k 102,016 / 223,089; 10k 340,016 / 813,379; 30k 1,020,016
+/ 2,631,389 (main: 3k 9.1 M; 10k 100 M). Units per n log₂ n fall with n.
+The sequence scratch stays at 1,554 words over 1000 canonical-path messages;
+main grows it to 469,086.
+
+Checks actually run on the final tree (macOS 14.6.1, M1 Pro, Node 24.6.0,
+rustc 1.92.0):
+
+* `bb vm-test`: all ok — 80,545 cases, including the 36 large-T cases; PEG
+  oracle differential 8600/8600 (both cut modes); forced tiers 80,249/80,249;
+  streaks == item by item 80,545; JS == Rust 80,545; JS == wasm 78,251.
+* `bb vmsession-test 2000 1 100 60`: ok — session == buffer 304,747 runs,
+  untold length 147,181, JS == Rust 193,966.
+* `bb sequence-test 300 1`: ok — 441,806 runs == the oracle, scratch bound
+  1,554 words after 5 and after 1000 messages. `bb valid-test`: ok.
+* `bb wasm-sdk-test`: 15/15. `bb rust-api-test`: ok (50 tests, including
+  `sequence::scratch_tests`; clippy). `npm test`: 1450/1450.
+* `bb compile-test` (3266/3266 corpus verdicts == the oracle; W7 1),
+  `scan-test 300 1`, `rscan-test 300 1`, `nav-test`, `write-test`,
+  `unicode-test`, `compile-fuzz`, `drift`: ok.
+* RFC corpus runner: D270 14/14, D301 1/1; P8.4 222/2 and baseline 735/25 as
+  on main.
+* `bb size`: passes with D323's provisional caps (`runtime`, `snug/schema`,
+  `snug/sequence`; unsigned).
+* `bb proptest --minutes=2 --props=1,2,3,4,5`: P1 25,053, P2 31,757, P3
+  13,404, P4 11,107, P5 10,488 cases, no failure signature.
+
+Learnt: a gate that accepts any code ≥ 32 (the arena section's 3,000-pair T
+maps) hid a budget exhaustion on valid data. Large-input gates need to assert
+the verdict and a unit bound, not just that a verdict exists. And a loop
+bound in kin is re-evaluated per trip in the emitted JS, so a function-call
+bound in a hot loop costs a call per iteration.
