@@ -49,11 +49,16 @@ export function prepareTree(mode, scratch) {
 function run(dir, gate, args, logFile, timeoutMs) {
   return new Promise(resolve => {
     const t0 = Date.now();
-    const child = spawn(join(dir, 'kin/scripts', gate), args.map(String), { cwd: dir, env: { ...process.env, CARGO_NET_OFFLINE: 'true' } });
+    // P9.1: each gate under its own watchdog (its own caps and process group), so a gate
+    // killed for time takes its cargo builds and Rust binaries with it
+    const env = { ...process.env, CARGO_NET_OFFLINE: 'true' };
+    delete env.SNUG_WATCHDOG;
+    const child = spawn(join(dir, 'kin/scripts', gate), args.map(String), { cwd: dir, env });
     let out = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { out += d; });
-    const timer = setTimeout(() => { out += `\n[proptest] gate killed after ${timeoutMs} ms\n`; child.kill('SIGKILL'); }, timeoutMs);
+    // SIGTERM reaches the gate's watchdog, which ends the gate's whole group; SIGKILL after a grace period
+    const timer = setTimeout(() => { out += `\n[proptest] gate killed after ${timeoutMs} ms\n`; child.kill('SIGTERM'); setTimeout(() => child.kill('SIGKILL'), 10000).unref(); }, timeoutMs);
     child.on('close', (code, signal) => {
       clearTimeout(timer);
       mkdirSync(dirname(logFile), { recursive: true });

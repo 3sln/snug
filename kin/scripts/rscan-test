@@ -1,6 +1,7 @@
 #!/bin/sh
 # The resumable scanner against the recursive one, under window splits and
 # yield quanta, on JS and a debug Rust build.   kin/scripts/rscan-test [mutations] [seed]
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" rscan-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 ./kin/scripts/emit > /dev/null

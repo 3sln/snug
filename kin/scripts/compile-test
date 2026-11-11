@@ -5,6 +5,7 @@
 # §15's Program, the D011/D012 refusals, format 1 verification) is retired; the
 # compiler's gate is kin/scripts/compile2-test (bb compile2-test), run here,
 # followed by the regexp gate on the compile-test binary.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" compile-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 kin/scripts/compile2-test "$@"

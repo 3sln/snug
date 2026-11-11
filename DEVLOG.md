@@ -5519,6 +5519,46 @@ remaining 12 B is left to the P8.7 size pass.
 - [x] **Signed off** (coordinator, 2026-11-11, under owner delegation D303:
   +12 B brotli over cap, for 1.38–1.55× on reordered-map sessions)
 
+### D326 — Every gate runs under a watchdog: per-gate CPU and wall caps, process-group kill (P9.1)
+**Decision** (P8.5 VM engineer, provisional): `kin/scripts/watchdog.mjs` runs
+a gate in its own process group, samples the group's CPU time once a second
+(`ps`: the gate's node, its cargo builds and Rust binaries), and on reaching
+a cap prints `WATCHDOG FAIL <gate> exceeded its <wall-clock|CPU-time> cap`
+with the gate, its command and arguments, the caps and how to override them.
+It then kills only that group (SIGTERM, SIGKILL after 5 s) and exits 124.
+Otherwise it passes the gate's status through. Every gate is under it:
+* the sh gates (`scan-test`, `rscan-test`, `compile-test`, `compile2-test`,
+  `unicode-test`, `vm-test`, `vmsession-test`, `sequence-test`,
+  `compile-fuzz`, `nav-test`, `write-test`, `drift`, `check`, and the
+  `rust-api-test` and `wasm-sdk-test` runners) re-execute themselves under it
+  unless `SNUG_WATCHDOG` is set;
+* the node gates (`valid-test.mjs`, `regexp-test.mjs`, `tools/size/size.mjs`,
+  `tools/proptest/campaign.mjs`, `tools/unicode/check.mjs`,
+  `tools/runtime/run.mjs`, `corpus/tools/crate-diff.mjs`,
+  `corpus/tools/run-rfc-corpus.mjs`) call `selfWatch` first;
+* the bb `js-target-test` re-executes itself under it.
+
+So a direct run and a `bb` run are both watched. Defaults are per gate
+(`DEFAULTS` in watchdog.mjs; e.g. `scan-test` 2400 s wall / 4800 s CPU,
+`vmsession-test` 7200 / 14400, `proptest` 10800 / 43200). They can be
+overridden by `SNUG_GATE_WALL`/`SNUG_GATE_CPU`, by
+`SNUG_GATE_<GATE>_WALL`/`_CPU`, or by `--gate-wall=S`/`--gate-cpu=S` on the
+gate's command line; the watchdog removes those flags before the gate sees
+its arguments. proptest's property-6 gates each run under their own watchdog
+(`SNUG_WATCHDOG` removed for them), and a campaign timeout now ends a gate's
+whole group, not only its shell. `bb watchdog-test` proves it: a busy loop
+trips the CPU cap; `sleep 60 --gate-wall=2` trips the wall cap; a gate's
+grandchild is killed with it; status and arguments pass through; and a real
+`scan-test 300 1` (the 6.5-day run's arguments, dec5975) and a node gate
+(`size`) trip.
+**Why**: a gate must fail, never hang silently. The CPU sum misses a process
+that lives less than one sampling period, so the CPU cap is a backstop and
+the wall cap the guarantee.
+**Alternatives**: caps inside each harness (many places, and the cargo builds
+and Rust binaries would escape them); `timeout(1)` (not on macOS by default,
+no CPU cap, and it kills only its child).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -7610,11 +7650,26 @@ the final code, then documentation, then the size audit, then the final
 review.
 
 **Correctness and coverage**
-- [ ] **P9.1 — Gate watchdog.** Every gate script under `kin/scripts/` and
+- [x] **P9.1 — Gate watchdog.** Every gate script under `kin/scripts/` and
   `tools/` gets a CPU-time cap and a wall-clock cap, with sensible defaults
   per gate that can be overridden. A gate that hits a cap fails loudly,
   naming the gate, its arguments and the cap; it never hangs silently.
   Background: the 6.5-day `scan-test 300 1` (dec5975).
+  *Done 2026-11-11 (D326):* `kin/scripts/watchdog.mjs`, with every sh, node
+  and bb gate under it. Gates run on the final tree (on `0d52521`, plus
+  `cf7093a`'s DEVLOG):
+  * `bb watchdog-test` 7/7: the CPU cap, the wall cap, the group kill and
+    pass-through, plus a real `scan-test 300 1` and `size` tripping.
+  * `vm-test`: all ok, including PEG oracle 8600/8600, JS == Rust 80,545 and
+    JS == wasm 78,251.
+  * `vmsession-test 2000 1 100 60`: 304,747 runs. `sequence-test 300 1`:
+    441,806 runs. `wasm-sdk-test` 15/15.
+  * `compile-test`, `scan-test`, `rscan-test`, `valid-test`, `nav-test`,
+    `write-test`, `unicode-test`, `rust-api-test`, `npm test` 1450/1450,
+    `compile-fuzz`, the RFC runner, `size`, `proptest` (2 min, P1–P5, no
+    failure), `check` and `drift`: all ok.
+  * Interrupting a running gate's watchdog with SIGTERM left no process of
+    its group behind.
 - [ ] **P9.2 — RFC corpus all passing or classified.** Regenerate
   `corpus/conformance/rfc/current-results.json` (it predates P8.4). Then
   work through each remaining failure (27 at `920a3e1`), fixing it or

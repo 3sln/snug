@@ -9,6 +9,8 @@ import { tables } from '../../host/js/src/unicode-tables.mjs';
 import { encode } from '../../bench/baseline/cbor-3sln.mjs';
 import { encode as encodeText } from '../../host/js/src/index.mjs';
 import { vmScratchWords, vmScratchInit, vmValidate } from '../../gen/js/snug/vm/api.mjs';
+import { selfWatch } from './watchdog.mjs';
+selfWatch('regexp-test', import.meta.url);   // P9.1 caps
 const vectors = JSON.parse(readFileSync(new URL('../../corpus/conformance/xsd-regexp.json', import.meta.url)));
 const schema = pattern => `r = tstr .regexp ${JSON.stringify(pattern).replaceAll(String.fromCodePoint(0x10ffff), '\\u{10ffff}')}`;
 const hex = b => Buffer.from(b).toString('hex');

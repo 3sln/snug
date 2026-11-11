@@ -4,6 +4,7 @@
 # (host/wasm-sdk/test/parity.test.mjs) on bb vm-test's case set. Without the
 # nightly wasm toolchain the build answers SKIP (exit 3): this says SKIP loudly
 # and exits 0, never claiming a pass.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/../../../kin/scripts/watchdog.mjs" wasm-sdk-test -- sh "$0" "$@"   # P9.1 caps
 cd "$(dirname "$0")/../../.."
 for mode in sdk cc; do
   kin/scripts/wasm-build "$mode" > /dev/null

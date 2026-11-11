@@ -14,6 +14,7 @@
 #
 # ORDER MATTERS: hash the tree BEFORE emitting, because re-emitting
 # overwrites a hand edit and a gate that destroys its evidence reports ok.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" drift -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 fails=0

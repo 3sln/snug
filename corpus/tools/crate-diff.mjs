@@ -13,6 +13,8 @@ import { encode } from '../../host/js/src/encode.mjs';
 import { Decimal, NDArray } from '../../host/js/src/values.mjs';
 import { decode as baselineDecode, encode as baselineEncode } from '../../bench/baseline/cbor-3sln.mjs';
 import { compile as oracleCompile, check as oracleCheck } from './oracle.mjs';
+import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+selfWatch('crate-diff', import.meta.url);   // P9.1 caps
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const args = Object.fromEntries(process.argv.slice(2).map(x => {

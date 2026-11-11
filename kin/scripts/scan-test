@@ -5,6 +5,7 @@
 #
 # The Rust build is DEBUG (overflow checks on): the scanner must never panic,
 # and a broken no-overflow guarantee in the source shows up here as a panic.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" scan-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 ./kin/scripts/emit > /dev/null

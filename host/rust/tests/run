@@ -1,5 +1,6 @@
 #!/bin/sh
 # Assemble and test the public Rust API offline; Node supplies the JS oracle.
+[ -n "${SNUG_WATCHDOG:-}" ] || exec node "$(dirname "$0")/../../../kin/scripts/watchdog.mjs" rust-api-test -- sh "$0" "$@"   # P9.1 caps
 set -eu
 cd "$(dirname "$0")/../../.."
 kin/scripts/rust-crate .cache/snug-rs

@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 import { compile } from '../../host/js/src/public-compile.mjs';
 import { decode } from '../../host/js/src/index.mjs';
 import { readSequence } from '../../host/js/src/public-sequence.mjs';
+import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+selfWatch('rfc-corpus', import.meta.url);   // P9.1 caps
 
 const location = new URL('../conformance/rfc/', import.meta.url);
 function fingerprint() {

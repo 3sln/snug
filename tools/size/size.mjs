@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { cpus, platform, release, arch } from 'node:os';
 import { createHash } from 'node:crypto';
 import { gzipSync, brotliCompressSync, constants } from 'node:zlib';
+import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+selfWatch('size', import.meta.url);   // P9.1 caps
 
 const here = dirname(fileURLToPath(import.meta.url));
 const argument = name => process.argv.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3);
