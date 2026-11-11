@@ -4895,6 +4895,11 @@ raises."
 - P8.7 becomes an owner requirement: a binary-size audit before release
   across every entry point.
 - First use: D323 (+620 B min), approved by the coordinator on 2026-11-11.
+- *Coordinator's rule of thumb (2026-11-11):* a raise under about 1 KB,
+  paid for by a measured correctness or speed gain, needs no hunt for cuts
+  first: record it in a D-entry, land it, and tell the coordinator. A larger
+  raise, or one with no measured gain, goes to the coordinator before it
+  lands. P8.7 catches small growth. D325 was approved on these terms.
 - [x] **Decided by the owner** (2026-11-11, via coordinator).
 
 ### D290 — P8.5 phase 1: the compiler and verifier move to format 2.0 on a branch; a reference interpreter checks semantics before the VM (P8.5)
