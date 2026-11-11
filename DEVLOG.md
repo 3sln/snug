@@ -4686,6 +4686,39 @@ the attempt is (2.3-6.9x), a separate scanner is not.
 deterministic-only scanner (larger, no faster).
 - [ ] **Signed off** (owner)
 
+**D286 open item analysed (2026-11-11, performance analyst;
+[bench/D286-analysis.md](bench/D286-analysis.md)).** The sessions' 23x is mostly
+grow-restart amplification, not the canonical path: every session host (JS
+`VmSession` and `sequence.mjs`, Rust `Session`, wasm SDK) starts its valid
+buffers at 512 words / 1024 bytes, and each `VMS_GROW` reruns the item's
+scanner pass and copy from scratch -- 7 full passes for a 72 KB root (events
+grow `vs` by doubling; S grows in its own round). With the buffers kept the
+session equals the buffer driver (maps `rev` 88.3 -> 24.7 ms; buffer 24.0).
+The canonical path itself (both drivers, 4-8x the deterministic walk) goes to:
+the prefix writer re-walking every child (`tskip` per child at every depth),
+`visit`/`uvisit` walking copies with no tag 24 / no marked map, the units pass
+redoing the scanner's duplicate-check sorts, copying input whose bytes do not
+change (reordered keys only), and the PF_CANON walk over unsorted maps.
+Prototyped in `.cache/d286wt` (kin edits, emitted; `valid-test` and
+`bb vmsession-test` ok, budgets equal on every route): B -- `pw` returns the
+source end, `visit` only with a tag 24 or `.cbor`, `uvisit` skipped when the
+scanner charged no units: 1.2-1.8x on indefinite / non-shortest / indefinite
+strings; C -- no prefix writer for an accepted item that is its own DC form:
+1.15-1.25x on reordered keys; +314 B min / +150 B gzip `runtime`, inside D285's
+caps. Estimated: D -- the scanner's per-map units reused instead of re-sorting
+over the copy, 1.25-1.35x on reordered keys. Not recommended now: a tolerant
+attempt with per-map duplicate checks over the input (E, ~2x on `rev`) -- it
+adds charging hooks to every map walk, which `p85-peg` is rewriting.
+**Recommendation** (for the owner's call; nothing landed): (1) now, host-only:
+lease the sessions' `vs`/`cb` per isolate as `schema-core.mjs` does (no kin,
+no contract change; 3.3-3.6x on these sessions); after the PEG merge, size
+`vs`, `cb` and S in one round from a scanner count of marked maps (`vbuild`,
+which `p85-peg` changed). (2) B + C as one P8.4 follow-up in
+`vcopy.kin`/`scan.kin` -- no file shared with `p85-peg`, so before or after the
+merge -- then D. (3) E only after PEG phase 2, re-measured on its map machine.
+Expected after (1)+(2)+D: sessions on maps `rev` ~23x -> ~4x the deterministic
+buffer run, indefinite/non-shortest input ~4-8x -> ~2.5-4x.
+
 ### D300 — Standing approval for wasm edits (OWNER DECISION, 2026-11-10)
 **Decision** (owner, in session via the coordinator): agents may edit
 `host/wasm*/` in the snug repository for the rest of this project — covering
