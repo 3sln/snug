@@ -546,7 +546,7 @@ export function intFkey(h, r, a, b, op) {
     const negative = r === R_NEG;
     let mh = a;
     let ml = b;
-    let dh = 0;
+    let dh = 1087 << 20;
     let dl = 0;
     let exact = true;
     if ((!negative) && ((a === 0) && (b === 0))) {
@@ -556,17 +556,15 @@ export function intFkey(h, r, a, b, op) {
         hs(h, H_R3, 0);
         return op;
     }
-    // the magnitude: a nint's argument n stands for -1 - n
+    // the magnitude: a nint's argument n stands for -1 - n; dh:dl starts as
+    // 2^64, the magnitude of -2^64, which wraps to 0 here
     if (negative) {
         ml = (b + 1) | 0;
         if (ml === 0) {
             mh = (a + 1) | 0;
         }
     }
-    if ((mh === 0) && (ml === 0)) {
-        // -2^64 (its magnitude wrapped to 0)
-        dh = 1087 << 20;
-    } else {
+    if ((mh !== 0) || (ml !== 0)) {
         // normalise: shift until bit 63 is set; e is then the exponent and
         // the top 53 bits the significand
         let e = 63;

@@ -385,19 +385,18 @@
   (let [negative (== r R_NEG)
         ^:mut mh a
         ^:mut ml b
-        ^:mut dh 0
+        ^:mut dh (shl 1087 20)
         ^:mut dl 0
         ^:mut exact true]
     (if (and (not negative) (and (== a 0) (== b 0)))
       (do (hs h H_R0 ZK_NEG_HI) (hs h H_R1 (neg 1)) (hs h H_R2 (shl 1 31)) (hs h H_R3 0)
           (return op)))
-    (comment "the magnitude: a nint's argument n stands for -1 - n")
+    (comment "the magnitude: a nint's argument n stands for -1 - n; dh:dl starts as"
+             "2^64, the magnitude of -2^64, which wraps to 0 here")
     (if negative
       (do (set ml (add32 b 1))
           (if (== ml 0) (set mh (add32 a 1)))))
-    (if (and (== mh 0) (== ml 0))
-      (do (comment "-2^64 (its magnitude wrapped to 0)")
-          (set dh (shl 1087 20)))
+    (if (or (!= mh 0) (!= ml 0))
       (do (comment "normalise: shift until bit 63 is set; e is then the exponent and"
                    "the top 53 bits the significand")
           (let [^:mut e 63]

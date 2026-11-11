@@ -531,7 +531,7 @@ pub(crate) fn int_fkey(h: &mut [i32], r: i32, a: i32, b: i32, op: i32) -> i32 {
     let negative: bool = r == R_NEG;
     let mut mh: i32 = a;
     let mut ml: i32 = b;
-    let mut dh: i32 = 0;
+    let mut dh: i32 = 1087 << 20;
     let mut dl: i32 = 0;
     let mut exact: bool = true;
     if (!negative) && ((a == 0) && (b == 0)) {
@@ -541,17 +541,15 @@ pub(crate) fn int_fkey(h: &mut [i32], r: i32, a: i32, b: i32, op: i32) -> i32 {
         hs(h, H_R3, 0);
         return op;
     }
-    // the magnitude: a nint's argument n stands for -1 - n
+    // the magnitude: a nint's argument n stands for -1 - n; dh:dl starts as
+    // 2^64, the magnitude of -2^64, which wraps to 0 here
     if negative {
         ml = i32::wrapping_add(b, 1);
         if ml == 0 {
             mh = i32::wrapping_add(a, 1);
         }
     }
-    if (mh == 0) && (ml == 0) {
-        // -2^64 (its magnitude wrapped to 0)
-        dh = 1087 << 20;
-    } else {
+    if (mh != 0) || (ml != 0) {
         // normalise: shift until bit 63 is set; e is then the exponent and
         // the top 53 bits the significand
         let mut e: i32 = 63;
