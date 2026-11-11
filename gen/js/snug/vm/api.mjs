@@ -623,9 +623,14 @@ export function vmRunV(p, pool, rule, b, start, end, depth0, items0, limits, s, 
         return r;
     }
     const pf = prof(limits, depth0);
-    const nd = ((pf & PF_VALID) !== 0) && nondetCode(out[0]);
+    const valid = (pf & PF_VALID) !== 0;
+    const nd = valid && nondetCode(out[0]);
     const ecs = (s[O_VCTL] & VC_ECS) !== 0;
-    if ((!nd) && (!ecs)) {
+    const bud = valid && (out[0] === R_BUDGET);
+    // An attempt that ran out of budget may have stopped before the encoding
+    // only valid CBOR has: the canonical path decides, as the session's whole-item
+    // check does (D277; over a deterministic input its copy is the input).
+    if (((!nd) && (!ecs)) && (!bud)) {
         return r;
     }
     return vmCanon(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext, vs, cb);

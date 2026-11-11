@@ -385,6 +385,27 @@ function shifted(outStr, at, k) {
   line(ok === n, `fixed regressions (tag-24 payloads past the depth bound, deferred-check items, tag 4/40 under valid with the Bindle tags): ${ok}/${n} buffer == scanner (any: code, offset, items) and sessions (declared and untold length) == buffer`);
 }
 
+// ---------------------------------------------------------------- 3c. budget before the first non-deterministic encoding (D321)
+// The buffer's deterministic attempt can run out of budget before it reaches the input's first non-deterministic
+// encoding; the canonical path then decides, as the session's whole-item check does: buffer == sessions on every
+// budget (code, offset, budget used, items), and over the same bytes made deterministic the attempt's result stands.
+{
+  const S1 = compile('r = { ? a: any, * tstr => any }', { limits: BIG });
+  const S2 = compile('r = [* { ? a: any, * tstr => any }]', { limits: BIG });
+  const REG = [[S1, 'a2616b006161a0'], [S1, 'a26161a0616b00'], [S2, '82a2616b006161a0a1616100']];
+  let n = 0, ok = 0;
+  for (const [prog, h] of REG) for (let budget = 1; budget <= 48; budget++) {
+    const bytes = unhex(h), lim = LIM(PF_VALID, budget), want = buffer(prog, bytes, lim);
+    const sess = [{ w: 0 }, { w: 1 }, { w: -5, seed: 3 }].map(pol => session(prog, bytes, lim, pol));
+    const x = runUnknown(prog.program, prog.pool, prog.rules.indexOf('r'), Int32Array.from(lim), bytes, { kind: 1, w: 1, q: 0, seed: 1, k: 0 });
+    sess.push(x.error ? 'E ' + x.error : x.out);
+    n++;
+    if (sess.every(s => s === want)) ok++;
+    else fail(`D321 ${h} budget ${budget}: buffer ${want}, sessions ${sess.join(' | ')}`);
+  }
+  line(ok === n, `budget before the first non-deterministic encoding (D321): ${ok}/${n} runs, sessions (declared and untold length) == buffer`);
+}
+
 // ---------------------------------------------------------------- 4. cbor2's default decoding
 {
   const CBOR2 = new URL('../../bench/compare/node_modules/cbor2/lib/index.js', import.meta.url);

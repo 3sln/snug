@@ -600,9 +600,14 @@ pub fn vm_run_v(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i3
         return r;
     }
     let pf: i32 = prof(limits, depth0);
-    let nd: bool = ((pf & PF_VALID) != 0) && nondet_code(out[(0) as usize]);
+    let valid: bool = (pf & PF_VALID) != 0;
+    let nd: bool = valid && nondet_code(out[(0) as usize]);
     let ecs: bool = (s[(O_VCTL) as usize] & VC_ECS) != 0;
-    if (!nd) && (!ecs) {
+    let bud: bool = valid && (out[(0) as usize] == R_BUDGET);
+    // An attempt that ran out of budget may have stopped before the encoding
+    // only valid CBOR has: the canonical path decides, as the session's whole-item
+    // check does (D277; over a deterministic input its copy is the input).
+    if ((!nd) && (!ecs)) && (!bud) {
         return r;
     }
     return vm_canon(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext, vs, cb);

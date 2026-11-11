@@ -5193,6 +5193,41 @@ reference.
 examples compiled by the real compiler cover what it did).
 - [ ] **Signed off** (owner)
 
+### D321 — A valid-CBOR buffer attempt that runs out of budget takes the canonical path (amends P8.4's `vm-run-v`; D277, D286) (P8.5)
+**Decision** (P8.5 VM engineer, provisional; the manager assigned it to
+P8.5): under `PF_VALID`, the buffer route's deterministic attempt (D286)
+that ends with `budget` no longer returns its own result: the canonical path
+(`vm-canon`) decides, as for an attempt that met a non-deterministic
+encoding. **The rule now**: on wire `valid` a budget-exhausted attempt falls
+back to the canonical walk, so the buffer's code, offset, budget used and
+items equal the session's on every split (vmsession-test, valid-test §3c).
+**CPU**: the canonical walk restarts the budget (`vm-canon` runs `vm-setup`,
+which sets `VM_BUDGET` from the limits), so it is bounded by the same
+budget and charges exactly what the session charges (its walk is the
+session's canonical walk); the reported budget used is the canonical walk's.
+Worst case per call: one exhausted attempt, one scanner pass and copy, one
+canonical walk — at most about twice the budget's CPU bound plus the scan,
+on hostile valid input. Over deterministic input the copy is the input, so
+only the cost changes, and only on a `budget` refusal.
+Repro (main `3c10a83` and the branch before the fix): `r = { ? a: any, *
+tstr => any }` over `a2616b006161a0` (keys unsorted), profile flags 378,
+budget 27: buffer `48 0 4 27 3`, session `48 0 0 27 3`; after: both `48 0 0
+27 3` (budget 28: buffer was `48 0 4 28 4`, now both `48 0 0 28 3`); 0
+differences over budgets 1–79 for this schema and for the vmsession-test
+schema that found it.
+**Why**: the attempt can run out of budget before reaching the input's first
+non-deterministic encoding; it then reported the original order's offset and
+item count while the session (whole items checked by the scanner first,
+D283) walks the canonical copy. D277 requires one charging order on every
+route.
+**Alternatives**: aborting the attempt early once the scanner has flagged the
+input as non-deterministic — not available: on the buffer route the scanner
+runs only after the attempt (D286 keeps the attempt precisely to avoid a
+pre-scan), so there is no flag to consult; a structural pre-check before every
+attempt (the cost D286 measured and rejected); the session walking the
+original order until a refusal (its canonical events are per whole item).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

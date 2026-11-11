@@ -481,9 +481,14 @@
   (let [r (vm-run p pool rule b start end depth0 items0 limits s out ext)]
     (if (< r 0) (return r))
     (let [pf (prof limits depth0)
-          nd (and (!= (bit-and pf PF_VALID) 0) (nondet-code (ia out 0)))
-          ecs (!= (bit-and (ia s O_VCTL) VC_ECS) 0)]
-      (if (and (not nd) (not ecs)) (return r))
+          valid (!= (bit-and pf PF_VALID) 0)
+          nd (and valid (nondet-code (ia out 0)))
+          ecs (!= (bit-and (ia s O_VCTL) VC_ECS) 0)
+          bud (and valid (== (ia out 0) R_BUDGET))]
+      (comment "An attempt that ran out of budget may have stopped before the encoding"
+               "only valid CBOR has: the canonical path decides, as the session's whole-item"
+               "check does (D277; over a deterministic input its copy is the input).")
+      (if (and (and (not nd) (not ecs)) (not bud)) (return r))
       (return (vm-canon p pool rule b start end depth0 items0 limits s out ext vs cb)))))
 
 (defn ^:pub ^I32 vm-validate-v [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
