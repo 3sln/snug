@@ -4857,6 +4857,1312 @@ are answered as provisional decisions D082–D085. None is open now.
   reference tools' per-alternative cut, refined to rule A) and the name of the
   reference mode.
 
+- [ ] **P7.13x — permission refusal despite D300 (2026-11-11).** Adding the
+  scaled-run sequence regression case (input `a1 61 61 59 ffff` + zeros to
+  1,500,000 bytes, then `a0`; limits `0,0,1500000,…`; whole window, split at
+  65,536, random chunks, fail-fast) to the wasm SDK parity test
+  (`host/wasm-sdk/test/parity.test.mjs`) was refused by the session's
+  permission system. Not worked around. D300 authorises it; a settings rule is
+  needed. The native JS/Rust tests and `bb sequence-test` already cover the
+  case (5365939); the SDK shares the native driver.
+
+## Phase 7 — Standalone library (D080, 2026-11-03)
+
+- [x] **P7.1 — General default profile** (D081): key kinds, standard tag set,
+  presets `deterministic` (default) and `bindle`; scanner, VM, builder, writer.
+  D113 array-policy follow-up done: default ignores extras, strictArrays/Bindle retain the old check; **Learnt**: enumeration dominates 120k integers (paired CPU 29.6960 → 4.7339 ms); npm test 1,051 passed / 0 failed; method and evidence in bench/WRITER.md.
+  *Done 2026-11-03 by the P7.1 profile engineer; commits `20fe2e6`, `aaabb57`
+  and the docs/bench commit after them.* Decisions **D120–D127**;
+  [profiles](docs/profiles.md) is the user-facing description.
+  - **Option model (D120):** one kin flags word, `O_PROFILE` = scanner word 11
+    (`scan-profile`) and VM limits word 9; zero = Bindle, every bit admits
+    more (`PF_KEYS` 2 bits, `PF_TAGS` 2 bits, `PF_FLOATS`, `PF_UNDEFINED`,
+    `PF_NONCHAR`; internal `PF_SUB`); deterministic = 118. No Program,
+    container or SOURCE_KEY change; Programs validate under either preset.
+  - **kin:** key kinds (`key-peek`/`key-label`); `kin/stdtags.kin` (RFC 3339
+    date-time, finite epoch numbers, URI characters, 55799 at the top only,
+    the tag-24 payload walked as one item) in the scanner, dead walk, live
+    walk and session (D121); RFC floats with the canonical NaN, consulted
+    only after a Bindle float refusal (`float-bad`), and `put-float-rfc`
+    (D122); `undefined`; noncharacters through `utf8-*-nc`, consulted only
+    after a strict failure (`text-bad`, D127); float ranges compare as IEEE
+    (NaN in none, −0 = +0). Resumable: rscan `K_STD` frames with whole reads
+    for tags 0/24/32, container/tag keys walked whole, `PH_KSKIP` streams
+    byte content of an active key into the arena; session `T_STD`/`T_STDCHK`
+    with a pinned re-read, `key-end-any` for non-text keys, the prescan
+    admits standard tags (D124). Compiler: `h'00': T`-style cut keys are now
+    `map_cut`, not silently never present (D125).
+  - **JS:** `wire`, `keys`, `tags`, `floats`, `undefinedValue`,
+    `noncharacters` on every operation; `profiles.{deterministic,bindle}`;
+    Map for non-text keys (collisions refused), `Tagged`, `undefined`;
+    Writer `undefined()`, `tagged()`, any keys, RFC floats; views with any
+    keys and `tagged`/`undefined` kinds; declarations (D123, D126).
+    **Rust:** `snug::Profile` in `DecodeOptions`/`EncodeOptions`/
+    `ValidationOptions`, `Value::Undefined`, `schema::Options.profile`,
+    deterministic by default, `bindle()` constructors; bins and the wasm
+    shim's limits buffer take the flags. Rust API tests that compare with
+    Bindle fixtures select the Bindle preset explicitly.
+  - **Vectors:** `corpus/cbor-vectors/deterministic.json` (generator
+    `corpus/tools/export-deterministic.mjs`): **92 accept / 85 refuse** with
+    hand-written codes and offsets — RFC 8949 Appendix A (deterministic
+    examples accepted; non-shortest ±∞/NaN, unassigned simple values and
+    indefinite examples refused), integer/negative/64-bit keys, the RFC 8392
+    A.1 CWT, a CWT `cnf` holding a COSE_Key, mixed key kinds in bytewise
+    order and the length-first trap, tags 0/1/21–24/32/55799 valid and
+    invalid, undefined, every NaN/±∞/±0 form, non-shortest heads/lengths —
+    each with the Bindle code of the same bytes (checked against cbor.mjs).
+  - **Gates (actual runs, Node v24.6.0, rustc 1.92, the final tree):**
+    `bb check` ok; **scan-test** 31,360/31,360 Bindle cases = cbor.mjs on JS,
+    Rust and wasm; profile options 354/354 vector runs (code and offset) +
+    92 fixed + 20,000 seeded cases under random flags, JS == Rust 20,446/20,446;
+    **rscan-test** 259,081 policy runs + 267,541 every-offset splits ==
+    recursive, Rust 259,032/259,032 identical (incl. the profile-option
+    cases); **vm-test** profile identity 63,612/63,612 (VM against `any` and a
+    schema keeping the new shapes live, under the flags), 983/983 conformance,
+    71,471/71,471 JS == Rust == fast/generic, wasm 71,468/71,468;
+    **vmsession-test** 949,035/949,035 session runs == buffer, 612,517/612,517
+    JS == Rust, 0 panics, traps clean; **compile-test** 301/301 identical,
+    270/270 verified, §15 unchanged, 55/55 SOURCE_KEYs; **nav-test** 1,106/1,106
+    traces (deterministic documents included), 670/670 Rust View paths;
+    **write-test** incl. 5,213/5,213 RFC float patterns JS == Rust, 4,371/4,371
+    pass the scanner's RFC rules, 3,980/3,980 equal put-float where Bindle
+    writes them; **unicode-test** ok (noncharacters compared with the Node
+    oracle under the deterministic preset); **rust-api-test** ok (12
+    integration, 10 doc, 5 + 1 docs/README doctests, clippy); **cd host/js &&
+    npm test 1,241 passed / 0 failed / 0 skipped** (183 new profile tests);
+    **bb drift** ok (88 destinations).
+  - **Differential (cbor2 2.4.1, CDE + rejectDuplicateKeys/LongLoundNaN/
+    Simple):** 38,086/40,420 inputs same verdict; every other one in a
+    documented class (tag 621, snugtags 1,211, floatwidth 391 confirmed by
+    rejectLongFloats, tag24 56, nan 41, limits 12, cbor2tag1 2), 0
+    unexplained; `encode()` == cbor2 `encode({cde:true})` on 4,000/4,000
+    seeded values byte for byte.
+  - **Learnt:** a Program must not encode a wire-profile assumption — the
+    compiler's "never present" lowering of non-text cut keys only looked
+    correct because Bindle refused such keys (D125). Nested keys need either
+    whole-key reads or a stack of key arenas; whole reads were simpler and
+    bounded (D124). V8's inlining budget is the scanner's cost model: new
+    behaviour belongs in separate functions consulted after the hot path
+    refuses (Findings). A file two agents edit is not safe to commit by path
+    (Findings).
+  - **Bench** ([bench/README.md](bench/README.md#profile-options-p71),
+    `bench/profiles-bench.mjs`, thread CPU, one preset per process, 3 × 11
+    trials vs `c37eaaf`, shared M1 Pro, Node v24.6.0): Bindle scan medians
+    0.96–1.03 of the base on all 8 workloads (no regression); decode/encode
+    medians 0.87–1.13 with single-run outliers both ways on a loaded machine.
+    Deterministic float scan median 1.046 (the `float-bad` re-check);
+    `bench/codec.mjs` takes `bindle|deterministic`.
+  - **Open:** an "any tag" level (COSE/CWT tags) and full RFC 3986 URI
+    parsing (D121); cut literal keys of byte-string/float kinds (KEYS majors
+    2/7, a D084 minor; D125); the deterministic float scan is ~5% slower than
+    the Bindle one (the `float-bad` re-check); host/wasm-sdk (D130–D132) and the wasm
+    scan shim have no profile option yet; `wire` should be added to P7.10's
+    option-key admission; cbor2's `rejectLongFloats` cannot separate float
+    width from integral floats, so that class is confirmed, not compared.
+- [x] **P7.2 — Extension controls** (D082) and the generic controls module.
+  *Done 2026-11-03 by the VM-features engineer (Claude); commits `6d63892`,
+  `0012463` and the host/docs commit after them.* Decisions **D140–D143**.
+  - **kin:** snug.lang tag `Ext` + forms `ext-call` / `ext-none`; the predicate
+    is threaded as the last argument of the 30 live-walk and session functions
+    reaching `finish-comb` (a rewrite-clj script; `vm-validate`,
+    `vm-validate-span`, `vms-step` keep their signatures, `-x` variants take
+    one). EXT leaves (kind 18) are decided lazily in the combinator pass at the
+    item's end, once per item: 1 unit, + 1 per item byte and the predicate, or
+    `control_size` (43) past the leaf's maximum; `control` (42) when refused
+    (D140). Compiler: registry after the 19 option words (snug.compile.ext,
+    `control_registry` 55), `lower-ext` (AND per target leaf), argument
+    literals (`ext-arg`), `.eq`/`.ne`/`.and` never fold through an EXT,
+    `lit-member` answers a conservative yes; emit writes format 1.1 only for a
+    Program using a control (header words 30/31/39, names table, FLAGS bit 4);
+    SOURCE_KEY's 8th element is the whole registry; `error-offset` for hosts
+    to name an unknown control (D141). vm-verify: 1.0/1.1 format word, the
+    names table (check 24), EXT fields, no EXT answer. Session: an item whose
+    query holds an EXT is asked for whole up to the largest maximum (D143).
+    Generic `.chars`/`.unique`/`.samelen` in `snug.vm.controls` (D142).
+  - **Hosts:** JS `snug/controls` (new export; `controls.mjs`, `ext.mjs`),
+    `compile(text, { controls, controlsInBus })`, `new Program(P, B, {
+    controls })`, `fromProgram`/`fromSerialized(bytes, { controls })`,
+    `program.controls`, `ProgramError('missing_control')` naming them, reasons
+    `control` / `control_size`, a throwing predicate makes the call throw
+    (`cause`), loader minor 1, options admitted in options.mjs, types. Rust
+    `snug::controls` (`Control` trait objects, closures included,
+    `Controls::generic()`, `in_bus`), `CompileOptions::controls`,
+    `Program::{from_parts_with, deserialize_with, controls}`,
+    `Schema::from_serialized_with`, `Error::MissingControls`, `SchemaError::detail`;
+    the compiler sees a registry through `compile::Registry` (the compile crate
+    builds without the VM).
+  - **Gates (actual runs, Node v24.6.0, rustc 1.92, this tree, defaults):**
+    `bb check` ok; **scan-test** 31,360/31,360 + profile options ok;
+    **rscan-test** 259,081 policy + 267,541 split runs, Rust 259,032 identical;
+    **compile-test** 301/301 identical, 270/270 verified, §15 unchanged, 55/55
+    SOURCE_KEYs (format 1.0 Programs byte-identical); **compile-fuzz** 3,000
+    texts, 441/2,559, ok; **nav-test** ok; **write-test** ok; **unicode-test**
+    ok (574 JS == Rust); **rust-api-test** ok (incl. the new
+    `tests/controls.rs`: shared table, compile/serialise/refuse, closures and
+    `max_bytes`; clippy; docs/rust.md doctest of the controls example);
+    **vm-test** profile identity 63,612/63,612, conformance 983/983, oracle
+    3,200/3,200, 5,142/5,142 §15 + assembled + **1,466 extension-control cases
+    (26 with fixed verdicts: exactness under choices, keys, `.ne`, size bound,
+    embedded)**, fast == generic 72,937/72,937 (both schedules), JS == Rust
+    72,937/72,937, hosts 2,215/2,215, wasm 71,468/71,468 (EXT cases excluded:
+    no wasm port); **vmsession-test** 969,521/969,521 session runs == buffer
+    over 72,934 vm-test cases (the EXT ones included) and 900 stress, traps
+    91,201, interleaved 9,501, JS == Rust 628,417/628,417, hosts 8,247/8,247;
+    **npm test 1,292 passed / 0 failed** (8 new in `controls.test.mjs`: shared
+    table + an independent decode-based oracle, exactness, `maxBytes` under
+    every source, every split and budget, unknown/argument/registry errors,
+    `bus`, format 1.1 + source key + serialised loading, encoded arguments and
+    a throwing predicate); **bb drift** ok after the commit.
+  - **Learnt:** the first session run went red on `{x: …, y: [* (bstr .even
+    0)]}` under 1-byte windows: `direct = 1` does not mean "whole in the
+    window" -- a byte string no leaf reads is walked from its head alone, so
+    the EXT rule has to run whatever routing decided (D143). Rust: a generic
+    `&dyn Fn` port needs no host module in any of the five crates; a trait
+    reference in `compile.rs` must not name host modules the compile crate
+    lacks. Exactness needed nothing new: AND already made an EXT an ordinary
+    same-item dependency.
+  - **Open:** the wasm shim and host/wasm-sdk have no extension-control port
+    (EXT Programs are excluded from the wasm comparison); per-call lowering of
+    a control's maximum is not offered (the Program carries it); predicates
+    are trusted to be pure -- a host could memoise by (id, argument, item) but
+    snug does not; `.unique` compares encodings (so `1` and `1.0` differ, as
+    documented).
+  - [x] **P7.2 hardening: extension controls charged for their work** (R2;
+    D190–D194; 2026-11-04, commits `b0a7233`, `e1a7910`). Brief: the
+    2026-11-04 analysis below (and bench/VM.md). *Done*:
+    * The kin `Ext` port now takes `room` and answers a verdict word (D190).
+      `ext-eval` charges 1 + `EXT_CALL` 16, then the units the port reports.
+    * `.chars`, `.unique` and `.samelen` are metered in kin, in ticks charged
+      before each step (D191). `.unique` hashes elements, heap-sorts by
+      (hash, bytes) and stops at the first equal pair. `.samelen` makes one
+      pass with a binary search over names prepared and de-duplicated once at
+      bind (D192). `.chars` is one count at ⌈len/16⌉ units.
+    * Host predicates are charged `cost(itemBytes)` (default `itemBytes`)
+      before the call, and are not called when it exceeds `room`. Their own
+      CPU is documented as the host's responsibility (D193).
+    * Scratch is reused: a JS module array, and a Rust `thread_local`.
+    * program.md §14 has the normative EXT schedule. No Program format change.
+    * Docs: guide (custom controls), api, rust.md, architecture (lowering table, §7).
+    * vm-test and vmsession-test EXT arms add `.costly` (declared 3n + 5),
+      `.huge` (refused unasked), a big `.unique`, an 8-name `.samelen` with
+      duplicates, and a `.chars` budget sweep. Part-way budgets up to 6,000
+      exercise refusals inside a metered run.
+    * The snug/controls size budget is now 2,460 B gzip (+2% over the
+      measured 2,412 B, for the metered kin code).
+    **Gates run 2026-11-04, all ok:** check, drift, scan-test, rscan-test,
+    vm-test (JS == Rust == wasm-vm on 74,300 cases, whole out array incl.
+    budget; 2,075 EXT cases), vmsession-test (989,773 session runs; JS ==
+    Rust 643,044), compile-test, compile-fuzz, nav-test, write-test,
+    unicode-test, rust-api-test, host/js npm test (1,346), size.
+    **Not ok:** `bb wasm-sdk-test` fails to build the SDK module (P7.9c,
+    blocked).
+    **Benchmark** (bench/VM.md, 2026-11-04 metered section): `.samelen`
+    58.6 s → 33.5 ms, `.unique` 35 choices 992 ms → 70.9 ms (budget), no-op
+    tiny calls 79 → 46.6 ms (budget). A declared-cost slow predicate is
+    refused unasked. **The absolute 50 ms gate failed** on six budget-bounded
+    rows (53–72 ms), on a machine where 2.3 M units of plain VM work took
+    114.9 ms (load ~10). Per unit, every EXT row costs at most that
+    reference, so the scaled worst is ~27 ms. A quiet-machine run is open.
+    **Learnt:** a bool port cannot be made R2-compliant: the work has to be
+    reported, and to be stoppable it needs `room`. A fixed per-byte charge
+    overcharges `.chars` by 64× and undercharges `.unique` sorts. Measured
+    under load, CPU per unit moves ~2.7× (E-cores, contention), so the
+    weights were set as ratios to a VM reference measured at the same time.
+  - **Calibration follow-up 2026-11-04 (measurement/proposal only; D240):**
+    clean detached `df612f5fdabbf38b05fd3f89e5913472ab7791b3` under
+    `.cache/calib-wt`; 40 charged-work cases, JS/native verdict-and-unit
+    parity, nine rotated interleaved thread-CPU rounds, per-batch uptime and
+    paired map-reference ratios. Apple M1 Pro / macOS 14.6.1 / Node 24.6.0 /
+    rustc 1.92.0 -O. Waited 180 s before a preliminary pass and 60 s before
+    the final pass; never load <2, final 10.71–13.93. Results, all concrete
+    proposed prices and the conditional 2.25 M default are in
+    [bench/VM.md, Calibration 2026-11-04](bench/VM.md#calibration-2026-11-04)
+    and `bench/calibration-2026-11-04.json`. No broad 1.5× EXT increase:
+    dispatch 8.03 ns/unit versus map reference 19.83; expensive `.chars`
+    totals are substantially the profile's UTF-8 scan. A 1.4 MB `.bits`
+    rescan fits other default caps and spends 2.3 M units in 189.97 ms;
+    its paired-reference-normalised estimate is 175.43 ms. Proposed targeted
+    scan prices fix that imbalance; an untimed in-memory price projection
+    leaves the largest valid budget requirement at 1,450,008 (64.44% of
+    2.25 M), including seven fast/generic unit equalities. **Exact ±25%
+    equalisation across all hosts/paths is infeasible with common constants;
+    no quiet confirmation or universal 50 ms bound is claimed.**
+    **Checks run:** benchmark parity/retained-combinator/tick-sum assertions,
+    native release build and rustfmt, JS syntax, projected valid-message
+    acceptance/unit parity, diff whitespace. No emit/conformance gates,
+    network, installs, commits or protected-source edits. Worktree removed.
+    **Learnt:** constant multipliers cannot correct fast/generic CPU ratios
+    when D044 requires equal charges, or disjoint relative-host costs. An
+    early CBOR length-head mismatch can hide the intended common-prefix
+    work; long-probe fixtures must have equal encoded lengths. Compiler
+    folding can erase AND examples; assert retained opcodes. Separating
+    first-byte comparison overhead from continuation chunks improves probe
+    pricing; lowering the default alone loses valid-message headroom.
+  - **P7.2/D085 benchmark, 2026-11-03:** clean detached HEAD
+    `aa7dd560491e7c733015562029be1562be37d56d` (shared kin/scanner edits
+    excluded), Apple M1 Pro/macOS 14.6.1/Node v24.6.0. Median CPU over 11
+    interleaved rounds after warm-up: 287 B RPC + always-true EXT
+    **+0.86 µs/call**; long-prefix `.unique` on 65,536 elements
+    (1,048,581 B) **176.0 ms**.
+    Valid 1.4 MB / 64 KiB known/drain/fast **25.48 / 25.78 / 26.01 ms**;
+    early-refusal drain reads **1,334,464–1,398,976 B** more than fail-fast
+    (64/16/1 KiB chunks). Unknown session arrays use **100,000 B** more
+    than known at the 1.5 MB cap; sampled process memory is approximate.
+    **387** session comparisons: no verdict mismatches; **6** permitted D145
+    early-code differences (3 truncated precedence, 3 too_large precedence).
+    **Learnt:** per-item EXT includes query/fast-path changes; large-root no-op
+    deltas can be noise, `.unique` includes per-call large-scratch allocation,
+    and known push must still deliver/finalize after early done. Full method,
+    timings, memory caveats and reproduction: [bench/VM.md](bench/VM.md#extension-controls-and-drain-mode-p72d085--2026-11-03),
+    harness `bench/ext-drain-bench.mjs`. Worktree removed; no commit made.
+  - **Default-limit EXT worst-case analysis, 2026-11-04:** clean HEAD
+    `6c3237e1a18d098516387369f730bac6c7dd78a6` in `.cache/unique-wt`;
+    Apple M1 Pro/macOS 14.6.1/Node v24.6.0, thread CPU medians (7 batches;
+    3 single calls for long predicates), heavily shared machine (initial
+    1/5/15-minute load 81.13/47.53/32.29). All compiler/runtime limits and
+    the 65,536-B per-control maximum left at defaults. `.chars` 22 full
+    UTF-8 strings: **15.54 ms**; tiny strings reach **83.05 ms** before
+    budget refusal. `.unique`: **55.04 ms** for a single 65,536-B repeated-rank
+    array (1,837,356 comparisons, only 131,087 total steps); **138.44 ms**
+    for 22 capped long-prefix arrays, and **991.57 ms** / 34 sorts of one
+    capped item under 35 distinct EXT choices before budget refusal.
+    `.samelen`: **58,638.25 ms** for 22 long-prefix maps (1,703,907 steps); empty
+    maps take **50,687.43 ms** before budget refusal through repeated argument
+    parsing (4.60 billion controller-item heads). No-op EXT reaches
+    **79.30 ms** at budget exhaustion; a pure fixed-loop custom predicate
+    takes **303.51 ms** on one byte for just 16 total steps.
+    **Learnt/verdict:** defaults do **not** bound EXT CPU near 50 ms. D140's
+    byte precharge tracks `.chars`' linear scan, but ignores `.unique`'s sort
+    comparisons/prefix bytes and `.samelen`'s per-call argument validation
+    and keys × names × prefix search. Custom predicate CPU is not bounded
+    by purity or VM steps. Default JS uniqueness scratch is retained after
+    warm-up (~0.5 MiB); Rust allocates it per call. **Proposal only:** charge
+    generic comparisons/byte chunks/argument work inside interruptible kin
+    loops (or charged hashing with collision compares), prepare/index names
+    once, reuse per-context scratch, and recalibrate tiny-item dispatch costs;
+    lowering item size alone cannot fix argument amplification/custom code.
+    Details, fixtures, counters, load and reproduction: [bench/VM.md](bench/VM.md#extension-control-worst-cases-under-default-limits--2026-11-04),
+    new harness `bench/ext-worst.mjs`. **Checks run:** node syntax, final
+    check-only (41 cases), all timed fixture hashes/charges/counts/medians
+    reconciled, scoped diff check. Worktree removed; no kin/host/generated
+    changes, installs, network operations or commit.
+- [x] **P7.3 — Unicode `\p{…}` / `\P{…}` table module** (D083).
+  *Done 2026-11-03; manager commit pending; no commit made.* D110–D111.
+  Offline Node v24.6.0 / ICU 77.1 / Unicode 16.0 generation produces the same
+  **6,419 ranges across 37 category names** (empty Cs included) for both
+  hosts. Optional `snug/unicode` export and types; JS/Rust explicit compile
+  options; kin-owned property parsing, complements, class unions, canonical
+  table checks and compile-budget charging. No VM/source-adapter changes,
+  no Program format change, no implicit runtime or compiler table import.
+  Complete table data binds the opted-in SOURCE_KEY; no-table keys remain
+  unchanged. Headers preserve generator/runtime/Unicode provenance.
+
+  *Sizes*: JS **19,875 source / 19,377 minified / 9,287 gzip-9 bytes**;
+  Rust source **37,361 bytes**; packed shared data **14,109 bytes**; decoded
+  Int32 triples **77,028 bytes**. Machine, versions and reproducible method
+  are in `bench/README.md` (Apple M1 Pro, arm64, macOS 14.6.1, esbuild 0.28.2).
+
+  *Checks actually run*: compiler-only `kin/scripts/compile-emit`;
+  **bb unicode-test**: exact offline regeneration, **1 Rust API test**, **574
+  JS == Rust outcomes (368 complete verified Programs / 206 errors)**,
+  including **400 seeded Unicode schema mutations**, malformed table inputs,
+  float-port retries, **1,037 arena-growth retries** across starting sizes
+  and low budgets, independent baseline-CBOR/node:crypto source-key check;
+  **40 JS VM/API tests**, **51,548 category/complement scalar comparisons**
+  against Node and **270 noncharacter profile refusals** checked separately.
+  **bb compile-test**: **301/301 identical outcomes**, **270/270 verified
+  Programs**, unchanged §15 example (286 words / 14-byte pool), **55/55
+  independently recomputed no-table source keys**, **13,229/13,229 corruption
+  verdicts identical**. **bb compile-fuzz**: **3,000 texts**, seed 24,301,
+  **441 compiled / 2,559 refused**, no crash/internal failure/budget overrun;
+  **375** arena-size checks agree. **cd host/js && npm test**: **1,036 passed,
+  0 failed, 0 skipped**, including Unicode tests, all seven export/declaration
+  checks and existing staged-package checks. Unicode guide example and a scratch-staged bare
+  `snug/unicode` import/compile/stored-Program validation executed
+  successfully. Offline TypeScript was absent; no semantic tsc claim.
+  Babashka printed a sandbox-denied process-descendant cleanup stack trace
+  after successful gates; gate assertions completed successfully.
+
+  *Learnt*: optional table semantics must be in the cache key, even without
+  changing the Program format. Large category classes require charging each
+  class probe as well as copying/sorting ranges. Cs must be empty before
+  grouping C; complements can contain unreachable surrogate intervals in
+  the automaton but no UTF-8 text can reach them. The current profile rejects
+  noncharacters independently of I-Regexp; those are not category mismatches.
+  Node's explicit `test/` runner uses `test/index.js`, so the new tests must
+  be imported there. Tables are compile-time inputs; their decoded-size
+  figure excludes temporary decode storage and compiler arena peak memory.
+
+- [x] **P7.4 — Serialised Program API** (D084), JS host side.
+  *Done 2026-11-03; manager commit pending; no commit made.* Public
+  program.serialize() returns deterministic Uint8Array; fromSerialized checks
+  magic, versions, lengths, producer metadata, reserved bytes and digest,
+  then kin vm-verify. D100 specifies D084's compatibility rule over the
+  existing format word. Runtime-only loading never imports the compiler.
+  Arrays are owned/private through the new public Program facade (D102).
+  Corpus round trips cover all 295 suites: **264 schemas loaded, 31 annotated
+  refusal/later schemas refused**, **987 validation results preserved**.
+  Recompilation and reserialisation are byte-identical. **3,848 single-bit
+  mutations (every bit of every byte) and 481 truncations** of a small Program
+  refused; targeted corruption tests include rehashed malformed Programs,
+  major/newer-minor refusal, cross-snug-version acceptance, offset Buffer
+  views, claimed-length bombs, trailing bytes, ownership and independent
+  node:crypto SHA-256 comparison.
+  *Learnt*: D084 supersedes program.md §13.3's exact producer-version check;
+  the 1.0 word spelling can be preserved with major in the low 16 bits.
+  Integrity checks do not prove semantic compiler properties: a cache still
+  needs trusted origin. Copying with new Uint8Array avoids Buffer#slice aliases.
+
+- [x] **P7.5 — Public package**: entry points, TypeScript declarations, docs,
+  examples, a worked consumer example, README.
+  *Done 2026-11-03; manager commit pending; no commit made.* D101–D107.
+  Six explicit exports with declarations; lazy asynchronous public compile;
+  safe coherent faults/results; a compiler-free runtime import graph; a
+  scratch-only self-contained build containing generated dependencies; six
+  runnable examples, also checked after staging. README, SPEC and four
+  consumer docs describe snug as standalone, distinguish current/planned
+  wire profiles and explain exact CDDL support, errors, limits and ownership.
+  *Checks actually run*: **cd host/js && npm test — 996 passed, 0 failed,
+  0 skipped**, Node v24.6.0. Includes the existing 684 host tests, all new
+  corpus/container/public-package tests, six examples and isolated staged
+  package execution through every entry point. Node parsed all declarations
+  and checked runtime export/declaration imports; offline TypeScript was
+  absent, so **no semantic TypeScript check is claimed**. All README/guide JS
+  snippets executed through Node; local links in the new/updated consumer
+  docs checked; npm run build produced a self-contained scratch package;
+  git diff --check clean. Evidence is against HEAD
+  677b9410efbe9ae33d244915f749032d3df9589e plus this uncommitted worktree;
+  unrelated parallel work is not part of the package change. No fresh
+  bb emit/drift, Rust/wasm, fuzz, browser/Worker or bundle measurement run.
+  *Learnt*: host/js alone cannot be copied away from the tree while its
+  imports point at gen/js; staged copies solve that without touching shared
+  hosts/generated files. Public source support is still profile-only. The
+  default wire policy still has Bindle restrictions despite D080's standalone
+  direction; an exported deterministic alias would conceal that gap.
+  *Requests to the schema/source owners and manager (not changed here)*:
+  (1) expose the finished resumable CDDL session API through the public facade
+  and declarations once its contract/gates settle; (2) harden
+  bufferHandle/asyncHandle snapshot construction for Buffer inputs
+  (Buffer#slice aliases), and clarify read-result immutability/session reuse;
+  (3) reconcile program.md §13.3's older exact-version text with D084/D100,
+  including the major/minor word spelling; that document is outside this
+  task's write set. Browser/Worker and broader release evidence remain P7.7.
+- [x] **P7.6 — Bundle size.** R9 restated at the measured sizes and gated by `bb size` (owner decision D200, 2026-11-04).
+  *Phase 1 completed 2026-11-03; R9 remains open. No kin/generated edits,
+  network, installs or commits by this task.* Offline esbuild 0.28.2; full
+  machine/method and before/after tables: [bench](bench/README.md#bundle-size-p76-phase-1--2026-11-03).
+  Exact source hashes, static/full/split metafiles, isolated per-module sizes
+  and ranked attribution: `tools/size/{before,after}.json`,
+  [rendered report](tools/size/report.md). The same generated-module hashes
+  occur before and after; only public-compile, its new import adapter and
+  package sideEffects metadata changed. This is a shared worktree snapshot,
+  not a clean-revision benchmark; historical 11/41/56 KB figures have older
+  revisions/entry sets and are not substituted for this baseline.
+
+  **Static graph findings (all public exports retained):**
+  - `snug`: scanner + trusted builder + encode -> Writer. Writer's class
+    methods retain kin write/{out,int,float,map}, CBOR profile primitives,
+    values, limits and option validation. Standard tag 24 encoding scans the
+    embedded bytes (`Writer` line containing `scan`); this is a real scanner
+    dependency even in `snug/writer`. Profiles/values implement the selected
+    wire representation and value classes, not accidental compiler imports.
+  - `snug/schema`: public-schema -> schema -> vm/api and vm/session.
+    Synchronous Program construction imports vm-verify; synchronous
+    serialize imports framing + SHA-256. Schema.decode needs the trusted
+    builder and values. Session pulls sbase/scont/sstr, sharing eval, leaf,
+    map, array, dead and base with the buffer driver. No compiler host,
+    generated compiler or Unicode table is retained in the static bundle.
+    cbor/scan contributes **1,480 minified B** of codeName/profile helpers;
+    there are not two copies of a recursive scanner. rscan is absent.
+    Different VM/session walkers duplicate some traversal logic, not module
+    instances. The 31 retained modules are listed in the report.
+  - `snug/compile` originally imported Program/Schema statically: **45,754 B
+    gzip** before any compile call. Now it imports only options and its
+    public error class (**1,243 B gzip**); first compile imports
+    compile-runtime, a narrow re-export of the compiler and public classes.
+    Public constructor/error identities, verification and synchronous
+    instance methods are preserved. The adapter exports only the four
+    bindings needed, avoiding a dynamic namespace over the entire schema API.
+  - `snug/view`: scanner + navigation + builder/values + Writer (encode
+    lookup keys of arbitrary admitted kinds). `snug/writer`: Writer and its
+    primitives/checks above. Neither imports schema or its session VM.
+    `snug/sources`: source loops + recursive scanner + rscan; schema drivers
+    receive a schema and call its session, without importing schema/VM.
+    `snug/unicode`: optional packed data and decoder, imported by no runtime
+    entry; the compiler receives tables as an explicit port.
+  - esbuild splitting emits **orphan compiler/verifier chunks** because
+    unused internal schema.compile/fromProgram contain dynamic imports.
+    The public schema output has no import edge to those outputs. Report
+    `split.total` traverses reachable chunks; `split.emitted` also counts
+    orphans. Actual compile startup gzip is **46,746 -> 1,371 B**; reachable
+    split transfer after calling compile is **84,612 -> 84,779 B** (+167 B).
+    One-file compiler+runtime gzip is **84,074 -> 85,118 B** (+1,044 B),
+    explicitly recorded rather than presented as a total-size saving.
+
+  **Concurrent regeneration after the paired measurement:** another engineer
+  regenerated compiler, verifier and session modules during the final audit.
+  `tools/size/current.json` records these separately: codec is still **14,174
+  gzip B**, schema **46,456 B**, codec+schema **53,870 B**, all-runtime
+  **63,720 B**; compile's static stub stays **1,243 B**, full closure is
+  **86,871 B**. Before/after above continue to isolate the host-only change;
+  final budget caps use **ceil(current.json bytes × 1.02)** instead of the
+  earlier paired after values. Full current module hashes/graphs and changed
+  module sizes are in the report. The analysis/proposals below use the paired
+  baseline, not the other engineer's subsequent additions.
+
+  **Phase 1 decision — Preserve synchronous APIs while splitting the async compiler.**
+  *Session placement below is superseded by D160 (phase 2).*
+  **Decision:** defer compiler + its schema facade together through the new
+  compile-runtime re-export adapter; mark the package sideEffects:false.
+  Keep vm-verify, serializer/SHA and session imports synchronous where the
+  public API requires them. Add `bb size` and recorded +2% regression caps.
+  **Why:** Program(P,B) verifies before returning; serialize() returns bytes;
+  Schema.session() returns a session. Lazy-importing any of those changes
+  the contract. fromSerialized is async but currently snapshots and parses
+  input before returning its Promise: adding an await lets caller mutations
+  affect loading. No such timing change is shipped. Top-level runtime work
+  only creates/freezes module-owned values/prototypes/scratch, or checks the
+  fixed kin profile constant; it has no independent global registration or
+  required bare-import effect. Used exports retain their initialization;
+  sideEffects:false allows unused modules to disappear. Existing modules
+  already share scanner/VM/hash helpers through named imports.
+  **Alternatives:** asynchronous constructors/serialize/session, deferring the
+  input snapshot, side-effect registration of session factories, or skipping
+  verification (all change behavior); a broad schema-core extraction now
+  (collides with the concurrent schema/extension/stream work, deferred below).
+  - [ ] **Signed off** (owner)
+
+  **Prioritised kin/emitter and subsequent API plan (not implemented):**
+  `tools/size/analyze.mjs` and `analysis.json` rank generated functions and
+  run in-memory size probes on the frozen baseline. Stub/constant probes
+  are never executed and are not verified implementations. Compression is
+  nonadditive; the following savings cannot be summed without rebuilding.
+  1. **Separate buffer core from sessions at the source/API boundary.**
+     Session-only generated modules contribute **33,917 minified B** in the
+     schema bundle (session 4,876; sbase 7,730; scont 14,664; sstr 6,647).
+     Stubbing session exports reduces schema **46,042 -> 32,893 gzip B**
+     (13,149 B); codec+schema **53,452 -> 40,458 B** (12,994 B). Expected
+     initial-graph opportunity **12–13 KB gzip**, with real drivers still
+     downloaded when used. Keep predicates/charges in kin and shared across
+     drivers. Preserve existing Schema.session on the full entry; a new
+     buffer-only entry or async prepared facade needs an explicit API
+     decision. Moving all sessions to snug/sources cannot preserve today's
+     independent synchronous Schema.session. First extract a shared schema
+     core with the other engineer; leave internal async compiler/loader
+     wrappers outside it. This also avoids orphan outputs and their shared
+     chunk overhead (~**968 B gzip** for schema startup in this bundler).
+  2. **Offer a kin-emitted generic VM variant (`snug/schema-small`).**
+     Keep schedule 2 and exact verdict/path/budget accounting; omit array/
+     map streaks, fastChild and specialised pair/element helpers at emit
+     time. On the no-session probe, generic specialisation reduces schema
+     **32,893 -> 29,765 gzip B** (3,128 B; 7,945 minified B), codec+schema
+     **40,458 -> 37,334 B** (3,124 B). Estimate **3–4 KB gzip**, then run
+     bb vm-test's complete out-array equality, both hosts, plus throughput/
+     budget calibration; do not replace the default fast VM without those
+     measurements. Biggest runtime functions by isolated minified bytes:
+     rscanStep **7,603**; evalMap **4,364**; scont.mapPair **2,946**;
+     scont.tagRun **2,804**; evalArray **2,725**; verifier.checkMap **2,359**;
+     fastChild **1,988**; mapPairFast **1,870**; mapStreak **1,711**;
+     arrayStreak is also separately ranked. Session code shares evalItem,
+     arrayStreak and leaf checks but implements resumable container/tag
+     phases separately; merge repeated scans/checks before merging whole
+     drivers (D030/D091 deliberately retain two performance tiers).
+  3. **Verifier size/loading design.** Generated verify is **61,862 source /
+     18,903 retained minified B**. Stubbing it saves **6,459 gzip B** for
+     schema and **6,245 B** for codec+schema: this is a ceiling for removal
+     from the initial graph, not a safe optimization. It MUST run for every
+     untrusted Program, including direct synchronous public construction.
+     A new async-loader-only small entry can fetch it before exposing a
+     verified schema; full entry must retain it. For a behavior-preserving
+     kin refactor, target repeated header/section/range/record checks, using
+     checkMap/checkLeaf/checkHeader rankings; **1–2 KB gzip** is an engineering
+     estimate, not measured savings. Moving it never removes end-to-end
+     verification bytes or authenticates Program provenance.
+  4. **Rare leaf groups only after a prepared-schema design.** Regexp,
+     embedded-CBOR, bits and extended leaves are synchronous decisions today.
+     A kin-owned feature partition could load required evaluators while an
+     async loader prepares a verified Program, then keep validate synchronous.
+     Shared leaf functions, flag interpretation and failure precedence must
+     remain kin-owned. Conservatively expect **0.1–1 KB gzip** per useful
+     partition, not the sum of isolated functions. Stubbing rxMatch/bitsOk
+     alone saved only **106 B schema / 74 B runtime gzip** because sessions
+     still need shared regexp/bit primitives; first remove session coupling.
+     Do not lazy-load Unicode here: no runtime entry includes it already.
+  5. **Low priority: remove legacy schedule 1 / generic-selection switch.**
+     D045 was provisionally accepted and schedule 2 is the default. limits
+     word 8 bit 1 still selects schedule 1 (vmSetup flips it into VM_GENERIC
+     bit 1); bit 0 forces generic; bit 2 is transient free-bookkeeping state.
+     Hosts pass 0, so production specialization is possible, but the low-level
+     ABI and program.md document schedule 1 and bb vm-test compares both.
+     A schedule-2-only probe saves just **70 B schema / 79 B runtime gzip**;
+     eliminating the force-generic branch saves **36 B / 15 B**. Budget
+     **under 0.5 KB gzip** pending a proper emitter implementation. Keep the
+     generic oracle and legacy-schedule tests in test builds; retiring the
+     selectable schedule is a compatibility decision, not a host import fix.
+  6. **Emitter naming/tables: establish the actual opportunity first.**
+     js.cljc delegates parameter/local spelling to kin/local-name and
+     function spelling to kl/target-name; the camelCase namers are actually
+     in **kin/src/snug/targets.cljc:83–84**, not js.cljc. esbuild already
+     mangles locals and bundled internal names. Disabling identifier
+     minification increases schema gzip **46,042 -> 50,181 B** and runtime
+     **53,452 -> 58,948 B**; shorter source locals would not recover those
+     bytes again. Expected extra saving from merely shortening locals:
+     **approximately zero**. No per-function long constant tables were found;
+     layout constants are module-level primitive exports, and numeric data
+     tables use module-level Int32Array.of. Consider emitter control-flow/
+     coercion factoring and share actual duplicate numeric tables only after
+     an attributed prototype; no numerical saving is claimed for an unseen
+     table problem. The compiler's largest function, emitProgram (**5,025
+     isolated minified B**), stays entirely outside the runtime graph.
+
+  **What was learnt:** the largest removable initial dependency is the
+  synchronous session API, not Unicode, repeated module instances, long local
+  names or the legacy bit. Even the deliberately unsafe combined no-session,
+  generic, no-verifier probe leaves codec+schema at **31,061 gzip B**, above
+  R9. Meeting 20 KB needs additional kin/host implementation reductions and
+  an explicit definition of which prepared/loading operations count; lazy
+  imports alone cannot establish it. Phase 2 was outstanding at this point
+  (completed below).
+
+  **Gates actually run:** host/js npm test **1,284 passed, 0 failed/skipped**;
+  all seven examples executed; npm run build staged successfully (also
+  exercised by package tests). bb size exits **0** against **ceil(current
+  bytes × 1.02)** for min/gzip/brotli, static and full, every entry and both
+  runtime unions. A scratch budget with snug.static.gzip = 0 exits **1**,
+  reporting 14,174 > 0. Babashka 1.3.190's sandbox shutdown hook additionally
+  prints a process-enumeration permission warning after success; direct Node
+  avoids it. No drift/emit, Rust, wasm or browser gates were run by phase 1.
+
+  **Phase 2 — Session partitioning (completed 2026-11-03, D160).**
+  `openSession(schema, rule, length, options?, scheduling?)` in `snug/sources`
+  replaces `Schema.session`; positional arguments keep rule/length/options
+  checking and synchronous construction. Session types moved to sources.
+  `schema-core.mjs` holds buffer validation, decode, validateAt and Programs;
+  `schema.mjs` remains an internal compatibility entry for async compile/load
+  helpers. Public schema imports the core directly. A private WeakMap supplies
+  the same owned, verified Program to source sessions, without exposing arrays
+  or importing the public constructor/verifier from sources. No factory
+  registration, top-level await or dynamic session import.
+
+  The host VmSession class was moved **byte-for-byte unchanged** to
+  `vm-session.mjs`; the protective public window facade moved to
+  `open-session.mjs`. Handle and known/unknown push drivers now call the
+  factory. Unknown-length profile scanning constructs the same raw session
+  against ANY_P/ANY_B. SS_UNK/pending-area sizing still comes from kin's
+  vmsWords/vmsInitUnknown; held/EOF/keep/replay and fail-fast paths are
+  unchanged. Buffer, detached, encode/view and Rust/wasm implementations were
+  not edited. The default gate harness uses internal HostSchema through the
+  migrated source drivers and needed no edit.
+
+  **Additional host split:** extracting the buffer core removes the unused
+  internal compile/fromProgram lazy edges and their orphan emitted chunks.
+  Schema split initial/reachable/emitted gzip is now **33,575 B each**
+  (before: 50,475 / 50,475 / 91,245 B). Compile's actual reachable split gzip
+  falls **89,886 → 73,095 B**; its initial stub is 1,438 → 1,435 B.
+  Synchronous public `new Program(P,B)` still must verify before returning:
+  the verifier remains **19,732 retained minified B** in schema. No further
+  verifier/serializer loading move can preserve that constructor and
+  synchronous serialize while retaining this entry's complete public surface.
+  Verification and the fromSerialized input snapshot still run before the
+  Promise is returned. No verification was skipped or made asynchronous.
+
+  **Measurements:** Apple M1 Pro, Darwin 23.6.0 arm64; Node v24.6.0,
+  V8 13.6.233.10-node.24, esbuild 0.28.2, zlib 1.3.1-470d3a2,
+  brotli 1.1.0. Offline `tools/size/size.mjs`, browser ESM/ES2022,
+  minification and tree shaking, all exports retained; gzip 9, brotli 11.
+  Before uses a frozen source snapshot taken immediately before these edits;
+  generated module hashes common to both snapshots are identical. This
+  baseline includes the already landed drain/control additions and differs
+  from phase 1's older snapshots. Static excludes dynamic edges; full inlines
+  reachable dynamic imports. Both runtime unions exclude compiler/Unicode.
+  Persistent metrics, module hashes, ranked attribution, static graph edges
+  and split totals: `tools/size/phase2.json`. Measurements are recorded here
+  and there because this task's explicit write set excludes bench/README.md.
+  `tools/size/budget.json` now caps every min/gzip/brotli metric, static and
+  full independently, at **ceil(current shared-tree bytes × 1.02)**, including the
+  controls entry added since phase 1.
+
+  | Entry | Static min before → after | Static gzip before → after | Static brotli before → after | Full gzip before → after |
+  | --- | ---: | ---: | ---: | ---: |
+  | snug | 41,353 → 41,353 | 14,213 → 14,213 | 12,739 → 12,739 | 14,213 → 14,213 |
+  | snug/schema | 132,411 → 91,184 | 48,794 → 33,575 | 41,742 → 28,916 | 49,065 → 33,575 |
+  | snug/compile | 2,535 → 2,535 | 1,296 → 1,296 | 1,154 → 1,154 | 89,692 → 73,853 |
+  | snug/view | 54,103 → 54,103 | 18,366 → 18,366 | 16,406 → 16,406 | 18,366 → 18,366 |
+  | snug/writer | 37,865 → 37,865 | 13,035 → 13,035 | 11,662 → 11,662 | 13,035 → 13,035 |
+  | snug/unicode | 19,377 → 19,377 | 9,287 → 9,287 | 8,817 → 8,817 | 9,287 → 9,287 |
+  | snug/sources | 119,575 → 120,430 | 44,115 → 44,641 | 37,833 → 38,012 | 44,310 → 44,641 |
+  | snug/controls | 3,429 → 3,429 | 1,378 → 1,378 | 1,259 → 1,259 | 1,378 → 1,378 |
+  | runtime | 155,893 → 114,666 | 56,413 → 41,224 | 47,925 → 35,139 | 56,624 → 41,224 |
+  | all-runtime | 190,741 → 191,126 | 68,663 → 69,338 | 58,105 → 58,253 | 68,828 → 69,338 |
+
+  Schema saves **15,219 gzip B**; codec + schema saves **15,189 B**.
+  Sources grows **526 B**, and all-runtime grows **675 B** (static gzip);
+  partitioning relocates the drivers rather than deleting them. R9 remains
+  open at **41,224 B** codec + schema versus 20 KB.
+
+  **Validation:** `cd host/js && npm test` **1,303 passed, 0 failed/skipped**;
+  all eight examples ran independently and from the staged package;
+  `npm run build` produced a self-contained scratch package. Its existing
+  copy/rewrite staging includes the new core/session files automatically;
+  the package smoke test now calls openSession through the public export.
+  Added regression checks for the complete schema static graph (no
+  session*/sbase/scont/sstr or session facades), source graph without verifier
+  or internal loaders, raw unknown-length pending/held EOF settlement,
+  loaded-control Program ownership, forged schemas, private arrays and a
+  throwing predicate's session isolation. Declaration syntax/exports/imports
+  passed; offline TypeScript was unavailable (no semantic TS check claimed).
+  `bb size` **exit 0**, all +2% caps passed. `bb rust-api-test` **exit 0**,
+  public API/JS parity, stream/control tests, doctests and offline clippy;
+  no Rust API source/test edits. Babashka prints its known sandbox
+  process-enumeration shutdown warning after these successful gates.
+  `bb vmsession-test` **exit 0 at defaults** (20,000 mutations, seed 1,
+  400 oracle schemas, 60 stress): **969,521/969,521** whole-out-array matches,
+  91,201 trapped runs, 9,501 interleaved; JS == Rust **628,417/628,417**,
+  0 panics; hosts **8,247/8,247**. Unknown-length arm: drain
+  **474,486/474,486**, 36,351 behind traps; fail-fast **73,834/73,834**
+  (2,394 early refusals with another code/offset); unknown JS == Rust
+  **99,677/99,677**. Total 403.2 s. These full differential and Rust API gates
+  ran on the phase 2 paired snapshot, before the other engineer's subsequent
+  tag-level regeneration; no claim is made that they gate those later edits.
+
+  **Concurrent changes after the paired gates:** the tag-level engineer
+  subsequently regenerated kin and edited the host profile/value/view/Writer
+  paths. `tools/size/phase2.json.current` measures that later shared tree;
+  final caps use it +2%, without attributing those additions to this split.
+  Static gzip now: snug **14,549**, schema **33,761**, compile **1,296**,
+  view **18,746**, Writer **13,358**, Unicode **9,287**, sources **45,000**,
+  controls **1,378**, runtime **41,553**, all-runtime **69,970 B**.
+  A fresh npm test on that in-progress tag tree reported **1,294 pass / 9
+  fail**: old profile tests expecting newly admitted tags to be refused, and
+  the option allowlist still rejecting the new default `tags: 'any'` preset.
+  These changes belong to the concurrent tag task; they were not reverted or
+  repaired as part of session partitioning. The paired phase 2 suite above
+  passed before those edits.
+
+  **What was learnt:** a synchronous factory in sources can preserve verified
+  Program identity and private session storage while making schema genuinely
+  buffer-only. Removing the internal loader edges also removes real split
+  chunk overhead; the static byte reduction alone understates the startup
+  transfer change. The synchronous Program constructor keeps the verifier in
+  schema, and the all-runtime measurement makes the small relocation overhead
+  visible. No kin implementation optimization is claimed by this phase.
+- [x] **P7.7 — Runtime evidence**: Node, a real browser, workerd.
+  *Done 2026-11-03 by the P7.7 runtime engineer.* Harness and full record:
+  `tools/runtime/` (`run.mjs`, `README.md`).
+  - **What was tested**: the package staged by `package-build.mjs` from a
+    clean worktree of **f275938**. The session-VM edits in the working tree
+    were not in it.
+  - **The suite**: 976 checks:
+    - profile vectors (74 accept, 142 refuse) and 327 cborg-oracle inputs;
+    - the six study contracts (45 cases) and 64 study probes;
+    - serialise / fromSerialized / fromProgram;
+    - a checked View plus Cursor walk;
+    - the Writer;
+    - `scanHandle` over `asyncHandle`.
+
+    Each check runs twice: compiling the CDDL in the runtime, and loading
+    Programs serialised in Node with `fromSerialized` and no compiler.
+  - **Checks actually run**, all **976 / 0** in both arms:
+    - **Node v24.6.0**, from a fresh temporary consumer directory
+      (`node_modules/snug` copied from the staged package).
+    - **Headless Chrome 156.0.8078.80**, as an esbuild 0.28.2 ESM bundle with
+      code splitting, served on loopback with
+      `Content-Security-Policy: default-src 'self'; script-src 'self'`.
+      A control script confirmed that the policy blocks `eval` and
+      `new Function`. Its two blocked probes were the only CSP violations.
+    - **workerd 2026-11-02**, locally, with three module-syntax bundles:
+      split (lazy compiler chunks), one file (compiler inlined), and no
+      compiler.
+    - **workerd 2025-12-17**: the same three bundles passed in a repeat run.
+
+    Every verdict, value, encoding and Program container byte was identical
+    across the runtimes.
+  - **Dynamic code**: none. The 38 produced bundle files and the package's
+    `src/` and `generated/` contain 0 `eval(`, `new Function`, `Function(`,
+    `WebAssembly.*` compile/instantiate calls, string timers, or non-literal
+    `import()`.
+  - **Lazy compiler in Workers works**:
+    - esbuild `--splitting` makes the compiler separate chunks.
+    - workerd resolves `import()` of those chunks during a request when each
+      chunk is listed as an `esModule`.
+    - A one-file bundle inlines the compiler: still lazily initialised, but
+      always shipped.
+  - **Sizes** (min+gzip):
+
+    | bundle | gzip |
+    | --- | ---: |
+    | runtime without the compiler | **56.2 KB** |
+    | runtime + compiler, one file | **94.5 KB** |
+    | split: loaded at import | 57.5 KB |
+    | split: loaded by the first `compile()` | 38.9 KB |
+    | `snug/schema` alone | 41.0 KB |
+    | codec alone | 11.0 KB |
+
+    For Workers: precompile Programs at build time, load them with
+    `fromSerialized`, and leave `snug/compile` out of the bundle. That
+    worker passed the full precompiled arm.
+  - **CPU per warm call** is the same in Node, workerd and Chrome:
+
+    | op | Node | workerd |
+    | --- | ---: | ---: |
+    | validate | 16.5 µs | 14.0 µs |
+    | decode | 3.1 µs | 3.3 µs |
+    | fromSerialized | 264 µs | 273 µs |
+    | compile | 3.2 ms | 4.1 ms |
+
+    Inputs: the object-storage `put` request and its 8,785-byte Program.
+  - **workerd cold start** (21 interleaved samples, spawn to first response;
+    load average 60–120, so wall figures are inflated):
+
+    | worker | median wall − empty | CPU at first response − empty |
+    | --- | ---: | ---: |
+    | import only | +19 ms | +10 ms |
+    | first request loads a Program and validates | +78 ms | **+40 ms** |
+    | first request compiles | +281 ms | **+140 ms** |
+
+    The first call runs cold generated code. A fresh Node process shows the
+    same shape: first `fromSerialized` ≈ 10–14 ms, second ≈ 2 ms. On a Workers
+    plan with a 10 ms CPU limit per request, the first `fromSerialized` in a
+    request would exceed the limit. Calling it at module scope, where it runs
+    synchronously during startup, is a likely mitigation; it was not measured.
+  - **Incompatibility found** (performance only; not fixed here, since
+    `host/js/src` is outside this item):
+    - **Where**: cooperative yields in `src/sources.mjs`. The code is
+      `nextTurn = setImmediate ? … : setTimeout(r, 0)`.
+    - **Cause**: browsers and workerd without `nodejs_compat` have no
+      `setImmediate`. Chained `setTimeout(0)` is clamped to ≥ 4 ms after five
+      levels.
+    - **Reproduction**:
+      ```js
+      scanHandle(bufferHandle(doc), {}, { chunk: doc.length, quantum: 1000 })
+      ```
+      `doc` is a ~200 KB document; the call yields 130 times.
+    - **Measured** (no quantum → quantum 1000):
+
+      | runtime | no quantum | quantum 1000 |
+      | --- | ---: | ---: |
+      | Chrome | 1.8 ms | **651 ms** |
+      | workerd, wall per request | 4.6 ms | 263 ms |
+      | workerd, CPU | 2.3 ms | 18.7 ms |
+      | Node, CPU | 2.8 ms | 3.9 ms |
+
+    - **Chrome cost per yield**: `setTimeout` 4.77 ms, `MessageChannel`
+      0.010 ms, `scheduler.yield()` 0.021 ms.
+    - **asyncHandle**: the test helper resolves each read through
+      `setTimeout`, so it is clamped the same way.
+    - **Proposed fix**: choose `scheduler.yield`, then `setImmediate`, then a
+      shared `MessageChannel`, with `setTimeout` last. The session-VM drivers
+      share `nextTurn`, so `validateHandle` will inherit the fix.
+  - **Learnt**:
+    - The npm `workerd/bin/workerd` is a Node launcher. Killing it leaves the
+      native workerd running, so the harness resolves the native binary and
+      kills process groups.
+    - `../3sln.me/node_modules` is gone on this machine. workerd came from
+      other read-only installs; set `SNUG_WORKERD`.
+    - The repository's baseline codec accepts the NaN float32 typed-array
+      oracle input labelled `profile:typed_array`, and mis-decodes it to
+      1.6e19. snug refuses it, as labelled. `codec.test.mjs` therefore never
+      checks that refusal.
+    - Public sources are still profile-only (D106). Schema validation over
+      handles is not covered.
+- [x] **P7.9 — Re-take D005** (owner directions 2026-11-03): on the full library
+  once the VM is stable, compare the native-JS build against a **wasm build
+  wrapped in a JS SDK with the same public API** — what a real JS user gets
+  either way. Count the boundary: per-call overhead (fine-grained view/cursor
+  navigation and per-field access), copying into linear memory and results out
+  (and the zero-copy alternatives: reading wasm memory views,
+  SharedArrayBuffer where allowed, streaming chunks into a reusable wasm
+  buffer), materialising JS values from wasm output, TextDecoder over wasm
+  memory, memory growth that never shrinks, instantiation/cold start (Node,
+  browsers, Workers), bundle size including SDK glue, trap recovery. The SDK
+  must be designed fairly (batched calls, no needless copies). Workloads:
+  validate-only small RPC and ~1 MB messages, decode-to-values, encode, lazy
+  navigation of a few fields from a large message, blob-handle/stream
+  sources, refusal-heavy input. Deliver a matrix with environment details and
+  a recommendation (native JS, wasm+SDK, or both with a rule for choosing),
+  recorded as the D005 re-take.
+  *Done 2026-11-03 by the P7.9 engineer.*
+  - **Result:** both, with a rule (**D130**). D131 records the SDK design
+    and D132 its unavoidable API differences.
+  - **Record:** `bench/D005.md` holds the matrix, environment and method.
+    `bench/d005-node.mjs` (Node CPU), `d005-memory.mjs` (memory and cold
+    start), `d005-runtimes.mjs` (Chrome, workerd, sizes), `d005-ops.mjs` and
+    `d005-inputs.mjs` reproduce it.
+  - **What was built:**
+    - The SDK, `host/wasm-sdk/` (about 1,300 lines of JS). Its
+      `host/wasm-sdk/test/parity.test.mjs` passes 6/6. Each test compares
+      the same inputs through the SDK and the native package:
+      - the 216 profile vectors;
+      - encodings;
+      - byte-identical Programs for the six study contracts;
+      - whole validation results;
+      - views, cursor and `path()`;
+      - handle and push sources over 1 B–64 KiB chunks;
+      - instance-loss recovery.
+    - Additive wasm exports: `host/wasm/src/sdk.rs` and `cc.rs`, under cargo
+      features.
+    - `kin/scripts/wasm-build` modes `sdk|sdk-size|sdk-s|cc|cc-size|cc-s`.
+  - **Measured at:** a worktree of **93f8718** (P7.1's in-flight edits not
+    included).
+  - **Gates:** `bb vm-test` passed (JS == wasm on 50,576 cases) and
+    `bb scan-test` passed (wasm on 31,360 cases), with the gated `lib.rs`.
+  - **Learnt:**
+    - wasm is 1.6–2.5× faster on all VM work in Node, Chrome and workerd,
+      and compile is 4–10× faster. The JS builder and walk cap decode and
+      encode near parity.
+    - A wasm call costs about 5–8 ns more than the same kin function in JS,
+      so batching navigation buys nothing measurable. An unpaged batch is
+      10× worse when iteration stops early.
+    - The input copy costs 61 µs per MiB, which is decisive for large
+      byte-string bodies.
+    - Chrome blocks wasm under `script-src 'self'`; it needs
+      `'wasm-unsafe-eval'`.
+    - workerd refuses `WebAssembly.compile` and `new WebAssembly.Module` on
+      bytes ("disallowed by embedder"). The module must be a `wasm` module
+      binding.
+    - V8 reports stack exhaustion inside wasm as a RangeError, not a trap.
+    - Linear memory keeps 136 MiB after 100 dropped 1.4 MB views, until
+      `reset()`. A hostile schema leaves the compiler instance at 66 MiB
+      until it is dropped.
+    - The SDK runtime module is 83 KB gzip at opt-level 3 and 60 KB at z.
+      It is much larger than the scanner + VM module (33 KB), because of
+      vm-verify, both session machines, nav, the writer and the allocator.
+    - wasm-opt was unavailable offline.
+  - **Not done:** a decode tape, SharedArrayBuffer memory, a codec-only
+    module, Firefox and Safari, Cloudflare production.
+- [x] **P7.9b — The wasm SDK level with the native API** (follow-up to P7.9;
+  owner direction 2026-11-03). *Done 2026-11-04 by the wasm SDK engineer
+  (Claude); commits `d8baee9`, `898434f` and the DEVLOG/bench commit after
+  them.* Decisions **D170–D176**.
+  - **What changed:** profile options (D120–D127, D180–D184) through every
+    wasm scanner / VM / writer export as an explicit flags argument; the
+    encode tape gained tags (rule tag, kin's content checks, tag 24 by the
+    scanner), Maps of every key kind, undefined, deterministic floats and the
+    native messages; views gained the `tagged`/`undefined` kinds, any-kind
+    keys, `tag`/`content()`/`isUndefined()`; extension controls through one
+    import with the generic controls in wasm (D170, D171); format 1.1 and the
+    registry in the compiler module, control arguments, Unicode tables,
+    `controlsInBus`; unknown-length sessions, fail-fast, streams and
+    `openSession` (D173, after D160); the native option validator and profile
+    resolution everywhere (D172); `snug-wasm-sdk/controls` and `/writer`.
+  - **Gate:** `bb wasm-sdk-test` (D174).
+  - **Gates (actual runs, clean worktree of `898434f` in the scratch
+    directory with `../kin` linked; Node v24.6.0, rustc 1.100.0-nightly
+    2026-09-15 for wasm):** **bb wasm-sdk-test** defaults ok: 73,691 cases
+    over 706 Programs, every section wasm == native (validate 73,691,
+    schema.decode 73,688, codec decode 73,691, encode 22,702 + 3,204, views
+    73,688 + 73,688, sessions 24,563 handle / 24,563 declared / 24,562
+    unknown / 18,422 scans, compile 1,695, extension controls 14, options
+    298, instance loss), 2 min 27 s; **bb vm-test** ok (JS == wasm 72,222/72,222
+    on the older shim, JS == Rust 73,691/73,691); **bb scan-test** ok (wasm
+    31,360/31,360; cbor2 differential SKIP, not installed); **host/js npm
+    test 1,346 passed / 0 failed**. Also green at `d8baee9` (P7.12 not yet
+    in): vm-test, scan-test, npm test 1,346/1,346; wasm-sdk-test then
+    failed 6 handle cases, fixed in `898434f` (below).
+  - **Measured:** bench/D005.md "Re-measured at 898434f" (D175).
+  - **Learnt:**
+    - Linear memory is not the GC's: the first full gate run grew the SDK
+      instance past 2 GiB, because a refused unknown-length scan threw from
+      its settle step before the session was freed; past 2 GiB the i32
+      pointers wasm returns are negative in JS. Every exit path now frees and
+      pointers are read `>>> 0`.
+    - A session step can grow memory (key arena copies, the EXT window), so
+      the JS views must be re-derived after every step, not only after
+      allocations; a stale view reads a detached buffer as length 0.
+    - A push buffer pointer that outlives an instance writes into the next
+      instance's memory unless every feed checks liveness first (the
+      instance-loss test caught it).
+    - Session set-up dominates small inputs on both sides (0.3–1.7 ms per
+      session; an unknown-length session's arena is sized for the input
+      limit, 1.5 MB by default), so gate time is set by session count.
+    - The concurrently landing any-tag level and session move needed only
+      host-side mirroring (rule tags, messages, openSession); no kin source
+      or generated code was edited, and the Rust host port (`&dyn Fn`) needed
+      no change.
+  - **Open:** the SDK is still experimental and unpublished (D130); a `Writer`
+    over the tape, a codec-only module, wasm-opt, Firefox/Safari and
+    workerd re-runs of the new rows were not done; EXT CPU bounds (the
+    2026-11-04 worst-case analysis) apply to the SDK exactly as to native,
+    since the predicates are kin's or the host's; `bytesHeld` does not count
+    the session's kin arrays inside wasm.
+- [x] **P7.9c — wasm SDK EXT port adaptation.** *Done 2026-11-04 (commit
+  `88263f1`): the owner explicitly authorised both edits in session, and the
+  coordinator made them (only `host/wasm/src/sdk.rs` and
+  `host/wasm-sdk/src/runtime.mjs`); `bb wasm-sdk-test` passes 11/11, extension
+  controls 14/14 wasm == native, unknown-length sessions included. The new
+  metered EXT cases (costly, huge, unique-big, samelen-many, chars-budget) are
+  in the parity set through `kin/scripts/vm-allcases.mjs` → `addExtCases`.
+  The wasm parts of sequences (D219) and Phase 8 are unblocked.* Original
+  entry (2026-11-05 dating as written): D190–D193 changed the kin `Ext` port, so the
+  wasm SDK module does not compile any more: `bb wasm-sdk-test` was run on
+  2026-11-05 and failed at `kin/scripts/wasm-build sdk` (5 rustc errors in
+  `sdk.rs`: the `kc::*_ok` imports and the closures' signature). It stays red
+  until these edits land. The P7.2 hardening engineer was given
+  ownership of these files by the manager, but the session's permission
+  classifier refused the edit; it was not worked around. The exact edits:
+  * `host/wasm/src/sdk.rs`: the import becomes `fn snug_ext(id, ap, al, ip,
+    il, room: i32) -> i32`, returning kin's verdict word as it is. `use` changes
+    from `chars_ok, samelen_ok, unique_ok, unique_words` to `chars_prep,
+    chars_run, meter_init, samelen_prep, samelen_run, samelen_words,
+    unique_run, unique_words, M_WORDS`. `Prog` gains `preps:
+    BTreeMap<(i32, i32), Vec<i32>>`, filled in `sdk_prog_bind`. For every
+    leaf with kind 18 (P[43] + 8l: id P[o+2], ao P[o+3], al P[o+4]) whose
+    kind is 1 it takes `chars_prep` into 2 words (`[1, 0]` if it refuses);
+    for kind 3 it takes `samelen_prep` into `samelen_words` words (empty if
+    it refuses). `ext_call(pr, id, pool, ao, al, b, s, e, room) -> i32`:
+    kind 0 calls the import with `room`. Otherwise it sizes UNIQ to
+    `unique_words(b, s, e)` (kind 2) or `M_WORDS`, runs `meter_init(m,
+    room)`, then `chars_run(t, b, s, e, m)` / `unique_run(b, s, e, m)` /
+    `samelen_run(pool, ao, t, b, s, e, m)` (-2 if the prepared table is
+    missing), and frees UNIQ past 2^20 words. All three closures (validate,
+    validate_span, ses_step) gain the `room: i32` parameter and return i32.
+  * `host/wasm-sdk/src/runtime.mjs`: `snugExt(id, ap, al, ip, il, room)`
+    answers `-2` (not 0) when unbound or failed, and returns `bound.call(id,
+    arg, 0, al, item, 0, il, room)` as it is (the native binding charges the
+    declared cost, D193).
+  * `host/wasm-sdk/src/schema.mjs` needs no change: its `GENERIC` map by
+    `check` still recognises the generic controls, since `{...chars,
+    maxBytes}` keeps `check` and the `Symbol.for('snug.metered')` key.
+  Done when: `kin/scripts/wasm-build sdk` builds, and `bb wasm-sdk-test` is
+  green, including the new EXT cases (`costly`, `huge`, `unique-big`,
+  `samelen-many`, `chars-budget`).
+- [x] **P7.8 — Comparison benchmarks** vs cbor-x, cborg, cbor (JS) and
+  ciborium, minicbor (Rust) and the `cddl` crate. Done 2026-11-03 by the P7.8
+  benchmark engineer; `bench/compare/README.md` (method, versions/licences,
+  lockfile hashes, all tables), raw output in `bench/compare/results/`.
+  Measured on an Apple M1 Pro (macOS 14.6.1), Node 24.6.0, rustc 1.92.0 native
+  and 1.100-nightly for wasm, as thread CPU time on a shared machine (load
+  7–12). Each JS library ran in its own isolate.
+  - **Decode.** Packages: cbor-x 1.6.9, cborg 6.2.1, cbor2 2.4.1, node-cbor
+    10.0.12 and @levischuck/tiny-cbor 0.3.6.
+    - **cbor-x is 2–3.5× faster than snug** on every structured workload, and
+      5.3× faster on typed arrays. It checks nothing beyond well-formedness.
+    - **snug is 2–7× faster than cbor2 in its CDE configuration**
+      (+ rejectDuplicateKeys + rejectLongFloats). That is the only JS decoder
+      that verifies RFC 8949 §4.2.1 key order and shortest forms as snug does.
+    - **cborg strict** checks less (no key order or float form). Against it,
+      snug ranges from 1.32× slower (typed arrays) and 1.27× slower (text) to
+      2.26× faster (integers).
+    - **1 MiB bstr:** cbor-x, cbor2 and node-cbor alias the input buffer and
+      snug copies it, so that row shows representation, not speed.
+    - **Where the time goes:** snug's check pass is 14–41% of its decode (D017).
+  - **Encode.** snug `encode()` is mid-pack.
+    - On large integer arrays it is 6× slower than cbor2 CDE. The cause is the
+      known dense-array check; the typed Writer does the same array in
+      1.35 ms, against `encode()`'s 27.7 ms.
+    - On typed arrays and the 1 MiB bstr it is 3–5× slower. Not profiled.
+    - The typed Writer is the fastest deterministic producer on all five
+      workloads that have a builder.
+    - Every deterministic encoder's output was byte-equal to snug's, except
+      cborg's typed arrays (untagged) and node-cbor's `Uint8Array` (tag 64).
+  - **Found in other libraries:** node-cbor's `encode()`/`encodeCanonical()`
+    silently truncate output at ~64 KiB, and `encodeCanonical` retains about
+    170 MB per call on 10k maps.
+  - **What snug's strict profile refuses that the others accept** (the probe
+    table in the README):
+    - output of cbor-x (16-bit map heads, float64), of cbor2, node-cbor and
+      tiny-cbor defaults (key order), and node-cbor's tag 64;
+    - tags 1 and 18, nested integer keys (COSE_Key in a CWT `cnf`),
+      undefined, NaN and ±∞.
+
+    D081/P7.1 is where the profile part of that changes.
+  - **CDDL validation** (study probes, then the large workloads):
+    - **The `cddl` crate 0.10.7:** snug is 7–197× faster in a JS host, where
+      both run as wasm; the crate's wasm build was redone here with a plain
+      ABI. It is 17–388× faster native. On the workloads: 1.2–91× (JS host)
+      and 3.3–437× (native). The crate still gets the same two study verdicts
+      wrong.
+    - **@cbortech/cbor 0.27.3** is the only maintained JS CDDL validator over
+      bytes. It agrees on all 22 probes. snug JS is 2.6–18× faster on the
+      probes and 6–13× on the workloads, but 1.25× slower on the typed-array
+      schema. @cbortech/cbor overflows the stack on a 120k-element `[* int]`.
+    - **cddl.js 1.0.10** (Zod) parses none of the study contracts and has open
+      maps.
+    - The npm packages `cddl` and `@grinstead/cddl` only check CDDL syntax.
+  - **Rust.** snug has no Rust value builder, so the comparison is limited.
+    - snug's strict scan takes 0.84–1.43× the time of minicbor 2.3.1's
+      unchecked `skip`.
+    - ciborium 0.2.2, serde_cbor 0.11.2 and cbor4ii 1.2.4 Value decodes take
+      1.3–11× the scan's time. Exceptions: the 1 MiB bstr, which they copy,
+      and typed arrays, where snug reads every element.
+  - **wasm vs JS.** snug wasm is 1.6–2× faster than JS for the scan and
+    1.8–3.3× for the VM, input copy included. The exception is a large
+    byte-string body, where the copy costs more than the JS scan.
+  - **Sizes**, gzip:
+    - snug codec 10.7 KB, against cbor-x 11.3, cborg 8.1, cbor2 14.5 and
+      tiny-cbor 2.1 KB.
+    - snug runtime 35.4 KB.
+    - snug compile entry 67 KB, against @cbortech/cbor's CDDL module at 61 KB.
+    - snug wasm 32.7 KB, against the crate's wasm at 832 KB (not stripped).
+  - **Learnt (benchmark hygiene):** one library's leftovers distort the next
+    library's numbers if they share a V8 isolate, and `process.cpuUsage` under
+    parallel GC charges one library's garbage to another. Isolates per library
+    plus `threadCpuUsage` with `--single-threaded-gc` fixed this.
+  - **Caveats** (all in the README):
+    - The machine was shared.
+    - The JS runs used the working tree between `0f85e8e` and `d034d68`; Rust
+      and wasm are pinned to `0f85e8e`. The working tree's
+      `gen/rust/snug/vm/session.rs` did not compile mid-run.
+    - Strict configurations are mine, taken from each library's documentation.
+    - Not measured: browsers, workerd, cold start, memory, and hostile inputs
+      against the other libraries.
+
+- [ ] **P7.10 — usability API fixes** (2026-11-03; engineering follow-up
+  to `docs/reviews/2026-11-03-usability.md`; host fixes implemented, gate
+  held on one legacy assertion requiring permission to update).
+  Decisions D150–D151; no kin/generated edits in this work.
+  - **Finding 1 — consistent schema option admission:** validate documented
+    limit/budget types (finite non-negative integers) and `top`/`objects`
+    enums at all public schema boundaries: validate, decode, validateAt,
+    schema-backed view, session, sync/async handle and push validation.
+    Reject bad configuration with safe TypeError before inspecting bytes;
+    retain ordinary resource exhaustion as ValidationResult. Cross-facade
+    regression cases: `maxBytes: 'x'`, negative limits, string budget,
+    `maxDepth: 1.5`, `maxBytes: Infinity`, `top: 'banana'` and invalid objects.
+  - **Finding 2 — Buffer snapshot ownership:** make both bufferHandle and
+    asyncHandle copy accepted byte input without dispatching to Buffer.slice
+    (e.g. new Uint8Array(bytes)); retain stable independent reads. Regress
+    both Buffer and ordinary Uint8Array inputs by mutating the original
+    after construction and verifying unchanged read bytes/validation.
+    Implemented for both helpers, with frozen handles and independent reads;
+    removed the obsolete Buffer workaround from API/guide.
+  - **Finding 10 — alternative diagnostics:** preserve the existing
+    deterministic witness contract by default. Investigate an explicit
+    diagnostic mode preferring a matching literal discriminator, with a
+    reviewed rule and cross-host tests before changing diagnostic semantics.
+    Reproducer: `response = { ok: true, id: uint } /
+    { ok: false, error: tstr .size (1..120) }`; `{ ok: false, id: 7 }`
+    currently reports value at ['ok'], offset 8, while `{ ok: false }`
+    reports missing error. Refusal is correct; document single-witness limits
+    (done), do not treat this as an acceptance bug or silently change defaults.
+    **Proposal/analysis (no VM change):** an opt-in diagnostic could report a
+    bounded, deterministically sorted set of named schema rules/alternatives
+    considered at the choice, plus a schema location or stable alternative
+    index for anonymous branches. Those are Program metadata, independent of
+    payload values; never include observed discriminator values, bytes or
+    unnamed keys. Reporting which branch matched a literal discriminator
+    would require an explicit kin witness rule, tie-breaks, work/memory bounds
+    and cross-host tests. Even schema names need caller logging policy. The
+    current result carries only one witness, so the host cannot reconstruct
+    the actual candidate set at failure reliably from reason/path alone.
+    A future Program/VM diagnostic extension should carry that provenance;
+    preserve the existing witness and accept/refuse behavior by default.
+  - **Finding 13 — option-key admission:** reject unknown keys consistently
+    in compile, codec, schema/view/source and Writer options, while permitting
+    documented preset fields when spread across operations. Regress misplaced
+    compile `maxBytes` versus `limits.inputBytes`, `maxByets` at codec/schema
+    calls, and unknown grouped limits. Preserve/document Writer grouped-limit
+    precedence; review any unified/named options design separately. Compile
+    limits and runtime spellings are mapped in the guide. Implemented one
+    shared validator with allowlists for each public bag, including wire
+    options and compile, and documented every entry point's accepted keys.
+
+  **Host checks/learnt (2026-11-03):** new table-driven package-boundary
+  regression tests cover malformed values and unknown keys across 33 option
+  bags, safe diagnostics, no source reads before rejection, preset spreading,
+  limits/cap semantics and Writer precedence. Buffer and Uint8Array subrange
+  tests mutate inputs and returned reads, covering sync, microtask and timer
+  helpers. The new option/snapshot suite plus codec differential suite passed
+  592/592, including non-enumerable limit forwarding. First full npm test: 1,281 passed,
+  2 failed, 0 skipped: existing round-trip tests reuse objects on encode
+  (now retained as a checked no-op); a legacy omitUndefined: 1 assertion
+  expects a data fault and conflicts with the requested TypeError contract.
+  Requested permission for that one assertion because existing test edits
+  were scoped to index.js. **Learnt:** validating outer option bags requires
+  filtering internal forwarding (view metadata and Writer knobs are not
+  schema/scanner options), and Buffer copying alone is insufficient if reads
+  still expose the helper's private storage. Latest full gate on Node v24.6.0 /
+  npm 11.5.1: 1,283 passed, 1 failed, 0 skipped (the legacy omitUndefined
+  assertion alone). git diff --check passed. Permission for that assertion
+  update remains pending; P7.10 is not marked complete while this gate fails.
+
+  *Documentation completed 2026-11-03*: findings 3–6, 7 checklist, 8–9,
+  11–12, 14–27 in the authorised files only. Decimal Writer example uses
+  value() for integral factory results; Unicode/seven exports and schema
+  sources reconciled; errors/recovery and current exceptions, limits,
+  ownership/numerics/Map/regexp/source contracts, TypeScript, local package
+  handoff and browser/Worker recipes documented. Program §13.3 changes only
+  its compatibility paragraph to D084/D100; benchmark additions are the top
+  evidence index and archival banners. Historical records remain historical.
+  No accept/refuse implementation, host/kin/gen/tools files or declarations
+  changed; no commits, dependency installs, publishing or network operations.
+
+  *Checks actually run*: README staging/consumer recipe executed under
+  `.cache/docfix/` (new TMPDIR-backed destination, separate ESM project with
+  a copied node_modules/snug, file: dependency and producing-revision file);
+  consumer printed 7 and all seven bare exports loaded. No npm install.
+  The documented main.ts + strict ES2022/NodeNext configuration passed
+  semantic checking with offline TypeScript **5.8.3**, read-only from
+  `/Users/raystubbs/.nvm/versions/node/v18.20.5/lib/node_modules/@vtsls/language-server/node_modules/typescript/bin/tsc`;
+  `bench/compare/node_modules/.bin/tsc` and PATH tsc were absent.
+  Final guide snippets checked Decimal factory cases, Unicode and regexp
+  escaping/matching, limits, ownership mutation, choice witness, known-length
+  AsyncIterable validation and isolated compilation. Browser ESM split
+  bundle retained dynamic imports; compiler-free Worker output contained
+  no compiler/Unicode table contribution (esbuild 0.28.2 metafiles checked),
+  and its handler validated a request in Node. No fresh Chrome/workerd run:
+  their matrix remains scoped to f275938. Local doc links/anchors and
+  git diff --check passed. Final **cd host/js && npm test: 1,058 passed,
+  0 failed, 0 skipped**, Node v24.6.0 / npm 11.5.1, at c15a722 plus this
+  worktree; includes all seven examples and isolated staged-package tests.
+  Log: `.cache/docfix/npm-test.log`. Existing unrelated DEVLOG/bb.edn/
+  tools/proptest work was preserved.
+  *Learnt*: capability evidence must name its revision and API boundary:
+  P7.7 tested f275938 before Unicode/schema sources; a Promise-shaped loader
+  still verifies synchronously. Build destinations are guarded by runtime
+  temporary roots, not gitignore status. Decimal factories preserve exact
+  numeric values but discard scale and can return integers. Current schema
+  option coercion and Writer sticky argument faults require explicit public
+  caveats until the separate engineering fixes land.
+
+- [x] **P7.12 — Tag levels and small items** (follow-up to P7.1's open list).
+  *Done 2026-11-04 by the profile engineer (Claude); commits `f734753` (any
+  tag) and the small-items commit after it.* Decisions **D180–D188**.
+  - **Any tag (D180–D184):** `PF_TAGS` 2/3 = any tag number (JS `tags:
+    'any'`, Rust `Tags::Any`), now the deterministic preset (flags 122; 118 =
+    `tags: 'standard'`). Known tags keep their rules (2/3/4/40/LE typed
+    arrays, the standard set, 55799 only at the top); RFC 8949 §9.2's
+    invalid 65535, 2^32−1, 2^64−1 refused; RFC 8746 tags outside the Bindle
+    set need a byte string of whole elements; everything else any content,
+    an item one level below. Bignum minimality kept (D181). One *rule tag*
+    per head (`rule-tag`: the number, −2 beyond 32 bits, −1 for 2^64−1) keeps
+    the scanner, dead walk, live walk, resumable scanner and session on the
+    `std-allowed`/`std-content-ok` path; schema `TAG`/`TAGSET` tests compare
+    the whole 64-bit number (they compared the high word with 0). Session:
+    the typed-array head rule is decided at `T_STD` from the head and held
+    (`F_TNOTED`), never pinned; `key-end-any`/`key-max-claim` treat tag heads
+    structurally (D183). JS: builder `Tagged` for every non-Bindle tag,
+    `Tagged.tag` number|bigint (D184), Writer/encode any number (bigint
+    heads), views read 64-bit numbers; CDDL `#6.n(T)` for any n matches.
+  - **Small items:** (a) the "~5%" deterministic float scan cost does not
+    reproduce one preset per process (deterministic = Bindle = 172.9 µs,
+    pre-P7.1 169.8 µs; no change, D185, bench/README.md). (b) D124's whole
+    reads stay — bounded by `maxBytes`/the key arena, documented; D180 adds
+    none (D186). (c) The snug.js `declarefn` import bug is fixed in snug's JS
+    target (`js-declarefn`), with `kin/scripts/js-target-test` in `bb check`
+    (fails on the old target) and one source workaround removed (D187).
+    (d) Byte-string/float cut keys stay `map_cut`: they need major 2/7 KEYS,
+    which `vm-verify` refuses — a Program format change (D188).
+  - **Vectors:** `corpus/cbor-vectors/deterministic.json` **117 accept / 102
+    refuse** (was 92/85): COSE_Sign1 (RFC 9052 C.2.1), CWT = 61(18(...)) over
+    the RFC 8392 A.1 claims, COSE 16/17/96/97/98, 55799 over COSE_Sign1,
+    nested unknown tags, tag numbers 256, 65534, 65536, 2^32−2, 2^32,
+    2^53−1, 2^63+2^32−1, 2^64−2, 2^32+2 (not a bignum), 2^32+24 (not tag
+    24), unknown and 64-bit tags as map keys, tag 24 over an unknown tag,
+    typed arrays 64/65/82/87 and 76; refused: the invalid numbers (also
+    nested), odd/short BE typed arrays, tag 64 over text, content-first
+    precedence, non-shortest tag heads (1/2/4/8-byte), an indefinite tag
+    head, truncated 64-bit heads, 55799 nested in an unknown tag, unknown
+    tags past maxDepth, non-preferred bignums. New `standard` column (the
+    code under `tags: 'standard'`), checked by the gates. det-cases: seeded
+    tags of 35 numbers (COSE/CWT, 64–87, 2^32±, 2^64−1) and fixed depth/item/
+    key/typed cases under 9 flag values. vm-test's live schema holds
+    `#6.18(v)`, `#6.4294967296(v)`, `#6.18446744073709551614(v)`, `#6`.
+  - **Differential (cbor2 2.4.1 CDE + rejectDuplicateKeys/LongLoundNaN/
+    Simple):** 38,563/40,503 same verdict, the rest in documented classes
+    (floatwidth 412, nan 44, tag 196, tag24 41, limits 20, snugtags 1226,
+    cbor2tags 1), 0 unexplained. The `tag` class now fails the gate unless
+    the refused tag has a rule (0, 1, 24, 32, 55799, the any-level typed
+    arrays), so snug refuses no rule-free tag number cbor2 accepts; new
+    `cbor2tags` (cbor2's own tag decoders, e.g. 33 base64url, confirmed with
+    `ignoreGlobalTags`). `encode()` == cbor2 `encode({cde: true})` on
+    4,000/4,000 seeded values, 945 holding `Tagged` of rule-free numbers
+    (64-bit included) against cbor2 `Tag`.
+  - **Gates (actual runs, Node v24.6.0, the final tree):** `bb check` ok
+    (incl. js-target-test); **scan-test** 31,360/31,360 Bindle cases on JS,
+    Rust, wasm; 657/657 profile vector runs, 20,823/20,823 JS == Rust;
+    **rscan-test** 262,097 policy + 272,354 split runs == recursive, Rust
+    262,048/262,048; **vm-test** profile identity 64,366/64,366, 983/983
+    conformance, 73,691/73,691 JS == Rust == fast/generic; **vmsession-test**
+    982,778/982,778 session runs == buffer,
+    638,986/638,986 JS == Rust, 481,536/481,536 unknown-length streams, 0 panics; **compile-test** 301/301
+    identical, 270/270 verified, 55/55 SOURCE_KEYs; **nav-test** 1,131/1,131;
+    **write-test** ok; **unicode-test** ok; **rust-api-test** ok (13
+    integration incl. `any_tag_level_d180`, doctests, clippy); **host/js npm
+    test 1,346 passed / 0 failed / 0 skipped**; **bb size** within budgets;
+    **bb drift** ok after each commit.
+  - **Sizes** (esbuild min / gzip vs `6c3237e`): snug 42,312 / 14,586 B
+    (+959 / +373), snug/schema +620 / +216, snug/view +1,062 / +411,
+    snug/writer +960 / +351, snug/sources +928 / +384, runtime +1,103 / +369,
+    all-runtime +1,592 / +673; under the P7.6 budgets, no budget change.
+  - **Learnt:** a 64-bit tag head must not take a 32-bit tag's path — the
+    walkers had refused hi ≠ 0 before looking at lo, so nothing noticed that
+    the VM's tag tests compared the high word with 0. An explanation in a
+    bench record ("float-bad re-check") must be checked against the workload's
+    data: the floats never reached the re-check. kin's deferred calls render
+    after the module header, so a target that computes imports while
+    rendering must not let calls defer.
+  - **Open:** README/guide/architecture tag sentences were corrected in
+    passing; host/wasm-sdk and the wasm scan shim still take no profile
+    option (their defaults follow `Profile::DETERMINISTIC`, now 122);
+    full RFC 3986 URI parsing (D121); cut keys of byte-string/float kinds
+    (a format 1.2 decision, D188); incremental automata for whole reads
+    (D186); bignum content cap under the any level stays 128 bytes (D181).
+
+- [ ] **P7.13 — CBOR sequences (RFC 8742; review W21)** (2026-11-04, sequences
+  engineer; architecture §18, decisions D210–D219). Owner use case: an
+  SSE-like HTTP response whose body is a CBOR sequence, each message checked
+  and handed out as a lazy View as soon as its last byte arrives.
+  - **kin:** the session VM's sequence mode (`vms-init-seq`,
+    `vms-message-length`; `SS_SEQ` 41, `SS_MLEN` 42): an unknown-length
+    session whose root end is a boundary (no trailing check), the verdict held
+    while a pending end claim is open or while it is `truncated`, released by
+    a later window that covers the claims; `vms-eof` unchanged. Profile-only
+    sequences run it against the built-in `any` Program (D146's reasoning);
+    `rscan` is unchanged (D210).
+  - **JS:** new entry `snug/sequence` — `readSequence(source, options)` (async
+    iterator, `stats`, cancels the source when the loop is left) and
+    `sequenceReader(options)` (`feed`/`end` → `{messages, skipped, error}`);
+    messages `{index, offset, length, bytes, borrowed, view}`; borrowed
+    subarrays inside a chunk, one assembly across chunks, `copy: 'always'`;
+    views minted by `view.mjs`'s unexported `mintView` (D215);
+    `validateSequenceOptions` (maxBytes refused for maxMessageBytes, D213).
+    **Rust:** `snug::sequence` — `Sequence` (push, `Cow` messages),
+    `read_sequence` / `Schema::read_sequence` (iterator over `Read`),
+    `Schema::sequence`, `SequenceOptions`, `OnInvalid`, `MessageFailure`,
+    `Error::Sequence`; `schema::Program::{words, pool, session_step}`.
+  - **Gate:** `bb sequence-test` (D218; kin/scripts/sequence-{run,test}.mjs,
+    host/rust/src/bin/sequence.rs). Actual run (defaults: 6,000 mutations,
+    200 oracle schemas, seed 1; 31,063 vm-test cases → 70,445 sequences,
+    651,598 runs; 5 min on a shared M1 Pro): kin sequence mode == D211's
+    oracle on 637,516/637,516 runs (every line and out word; 3,108,385
+    messages, 29,898 skipped, 106,780 stops, 34,108 clean ends); fail-fast
+    14,084/14,084 (2,116 stopped early with another code); 5,429 runs behind
+    out-of-bounds traps clean; JS == Rust (debug, overflow checks)
+    154,608/154,608, 0 panics; JS hosts (readSequence spanning, sequenceReader
+    always) == oracle on 31,310 host runs (3,021,635 messages: 3,014,544
+    borrowed, 7,091 assembled; 604,327 view walks equal to a View on the
+    bytes); Rust `Sequence` == oracle 31,310/31,310. Release latency: 1,481 of
+    50,185 accepted messages in 1-byte runs waited for a byte past their end.
+  - **Host fixes after the first commit** (the gate's host section was red
+    at 8d78f1e): a held verdict is stepped with an empty window at the
+    frontier, and before deciding `too_large` whenever bytes arrived since
+    its last step (a held complete message was released a chunk late, and a
+    held refusal could turn into `too_large`); a leftover assembly is dropped
+    when the chunk being read holds those bytes; the gate checks D215's exact
+    borrow rule — borrowed iff inside one chunk **and** released during that
+    chunk's feed (a message completed later, after an item whose walk asked
+    past its end, owns its assembly: a chunk is never retained after `feed`
+    returns). The driver is now `host/js/src/sequence-core.mjs` (backend-
+    agnostic) + `sequence.mjs` (gen-JS backend), ready for the wasm SDK.
+  - **Docs:** guide "CBOR sequences and SSE", api.md `snug/sequence`, Rust
+    guide "CBOR sequences", README feature row, architecture §18;
+    `examples/sequence-sse.mjs` (a simulated `fetch` Response, run by the
+    examples test). **Size:** `snug/sequence` budget added and `all-runtime`
+    re-capped (`tools/size/budget.json` `p7_13`); `snug/sources` unchanged
+    because sequences live in their own entry (they carry the View).
+  - **Learnt:** the test runner must not re-slice from the walk's position
+    while a verdict is held (an oversize message waits for P bytes: quadratic
+    copying); one 1,500,001-zero-byte vector is 1.5 million messages as a
+    sequence, so the gate cuts sequences at 2,000 messages and keeps one uncut
+    run. Release latency: an accepted message waited for a byte past its end
+    whenever the walk asked for more than the item (tag-40 notes, non-text
+    keys crossing a window, extension-control whole reads — including
+    text-keyed events using a control such as `.chars`); the first commits
+    only counted it. Fixed after the review (below): now asserted zero.
+  - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
+    exports and the native sequence host driven through the SDK session
+    wrapper; views over a JS-side copy of each message.
 - [!] **P7.13x — wasm SDK parity regression case: edit REFUSED by the permission
   system (2026-11-11).** File `host/wasm-sdk/test/parity.test.mjs`; the edit
   (appending one test) was refused by this session's auto-mode permission
