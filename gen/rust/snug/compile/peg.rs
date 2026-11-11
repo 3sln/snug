@@ -994,6 +994,83 @@ pub(crate) fn warn_maps(h: &mut [i32], n: i32, root: i32) {
         }
     }
 }
+pub(crate) fn lead_member(h: &mut [i32], n: i32, at: i32) -> i32 {
+    // The member a map alternative starts with: through a SEQ's first kid, a
+    // REP's child and a CALL's target (at most n steps, each charged); -1 if
+    // it starts with anything else.
+    let mut u: i32 = at;
+    let mut steps: i32 = 0;
+    while steps <= n {
+        if !charge(h, 1) {
+            return -1;
+        }
+        let op: i32 = pnw(h, u, 0);
+        if op == P_MEMBER {
+            return u;
+        }
+        if (op == P_SEQ) && (pnw(h, u, 2) > 0) {
+            u = pkid(h, u, 0);
+        } else if (op == P_REP) || (op == P_CALL) {
+            u = pnw(h, u, 1);
+        } else {
+            return -1;
+        }
+        steps += 1;
+    }
+    return -1;
+}
+pub(crate) fn lit_cut(h: &[i32], m: i32) -> bool {
+    // A member node with a literal key and a cut (`name:`, `"k": v`, `"k" ^=> v`).
+    let mr: i32 = pnw(h, m, 5);
+    return (pmw(h, mr, 0) == 0) && (pmw(h, mr, 3) != 0);
+}
+pub(crate) fn warn_cut_unions(h: &mut [i32], n: i32) {
+    // W8 (D301): a CHOICE in a map whose later alternative starts with a cut
+    // member on the same literal key as an earlier alternative's first member
+    // (`{kind: "a", x: int // kind: "b", y: tstr}`). Under the default literal
+    // RFC cut the earlier alternative's cut fails the whole map when the key is
+    // present with another value, so the later alternative cannot match through
+    // that key (docs/guide.md, "Discriminated unions under the RFC cut").
+    // Silent under `cuts: 'branch'` (rule A), where the idiom works.
+    if hg(h, H_CUTS) != 0 {
+        return;
+    }
+    for i in 0..n {
+        if pnw(h, i, 0) == P_CHOICE {
+            let kc: i32 = pnw(h, i, 2);
+            let base: i32 = vlen(h, T_PSTACK);
+            for j in 0..kc {
+                let m: i32 = lead_member(h, n, pkid(h, i, j));
+                if (m >= 0) && lit_cut(h, m) {
+                    vpush1(h, T_PSTACK, m);
+                } else {
+                    vpush1(h, T_PSTACK, -1);
+                }
+            }
+            if erred(h) {
+                return;
+            }
+            if !charge(h, kc * kc) {
+                return;
+            }
+            for j2 in 1..kc {
+                let mj: i32 = vget(h, T_PSTACK, base + j2);
+                let mut q: i32 = 0;
+                if mj >= 0 {
+                    while q < j2 {
+                        let mq: i32 = vget(h, T_PSTACK, base + q);
+                        if (mq >= 0) && (pmw(h, pnw(h, mq, 5), 1) == pmw(h, pnw(h, mj, 5), 1)) {
+                            warn(h, 8, pnw(h, mj, 4));
+                            q = j2;
+                        }
+                        q += 1;
+                    }
+                }
+            }
+            vtrunc(h, T_PSTACK, base);
+        }
+    }
+}
 pub fn prog_at(h: &[i32], id: i32) -> i32 {
     return vget(h, T_PROG, id);
 }
@@ -1192,6 +1269,7 @@ pub(crate) fn finish_map(h: &mut [i32], n: i32, ncalls: i32) -> i32 {
     }
     warn_choices(h, n);
     warn_maps(h, n, 0);
+    warn_cut_unions(h, n);
     let rop: i32 = pnw(h, 0, 0);
     let mut flat: bool = (rop == P_EMPTY) || (rop == P_MEMBER);
     let mut anyos: bool = false;

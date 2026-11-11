@@ -62,7 +62,7 @@ export async function compile(text, options = {}) {
   // format 2.0: options 20 (cuts) and 21 (groupWords) precede the registry
   const opt = new Int32Array(22 + registry.length).fill(-1);
   opt.set(registry, 22);
-  opt[20] = options.cuts === 'rfc' ? 1 : 0;
+  opt[20] = options.cuts === 'branch' ? 1 : 0; // D301: 0 rfc (default), 1 branch
   if (options.groupWords !== undefined) opt[21] = Math.min(options.groupWords, 0x7fffffff);
   opt[0] = PROFILES[profile];
   opt[19] = regexp === 'iregexp' ? 1 : 0;

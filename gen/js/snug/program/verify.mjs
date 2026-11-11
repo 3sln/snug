@@ -2983,7 +2983,7 @@ export function checkFlags(p, b, s) {
             needsAny = true;
         }
     }
-    // bit 5 (CUTS_RFC) is the compile option [V]; bit 6 (ARENA) is derived
+    // bit 5 (CUTS_BRANCH, D301) is the compile option [V]; bit 6 (ARENA) is derived
     if ((pw(p, 6) & (~32)) !== f) {
         return want(s, false, 6, C_DERIVED);
     }

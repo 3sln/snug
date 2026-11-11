@@ -22,14 +22,21 @@
 //      Programs (check C_VERSION) and seeded corruptions, and on random corruptions never
 //      crashes and agrees across hosts;
 //   6. SOURCE_KEY = SHA-256 of program-2 §1's preimage (version element 2, cuts and
-//      groupWords appended to the limits), recomputed independently;
+//      groupWords appended to the limits), recomputed independently; the effective cut
+//      mode is in the preimage whether given or defaulted (D301: no option = 'rfc');
+//      'reference' is no longer a cut mode (no alias);
 //   7. outcomes do not depend on the starting arena size;
 //   8. the tier census of the corpus (arrays A0/A1/A2, maps F/S/T), printed against the
 //      design's syntactic census (architecture §20.5);
 //   9. semantics, before the phase 2 VM exists: a test-only reference interpreter of the
 //      compiled Programs (kin/scripts/peg2-ref.mjs, §20.2's `run`) gives §20.15's verdicts
 //      on its probes and the independent oracle's (corpus/tools/peg-oracle.mjs) on every
-//      corpus case it can decide, in both cut modes.
+//      corpus case it can decide, in both cut modes;
+//  10. warning W8 (D301): a map choice whose alternatives start with the same literal cut
+//      key warns under the default RFC cut, never under `cuts: 'branch'`, and not for the
+//      documented working forms (a type choice of maps, `=>` discriminators).
+//
+// Cut modes are numbered as kin's option word 20: 0 'rfc' (the default), 1 'branch'.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile, SchemaError, SNUG_VERSION } from '../../host/js/src/compile.mjs';
@@ -93,7 +100,7 @@ const NOW_COMPILE = [
 // ---------------------------------------------------------------- JS and Rust runners
 function jsRun(text, cuts, gw) {
   try {
-    const opts = { cuts: cuts ? 'rfc' : 'reference' };
+    const opts = cuts === undefined ? {} : { cuts: cuts ? 'branch' : 'rfc' };
     if (gw >= 0) opts.groupWords = gw;
     const c = compile(text, opts);
     return { ok: true, program: c.program, pool: c.pool, warnings: c.warnings };
@@ -345,8 +352,15 @@ for (const { label, P, B } of programs) {
       else fail(`${c.label} [cuts ${cuts}, groupWords ${gw}]: SOURCE_KEY is not SHA-256 of program-2 §1's preimage`);
       if (gw >= 0 && j.program[41] !== gw) fail(`${c.label}: LIM_GROUP_WORDS ${j.program[41]} is not the groupWords option`);
       if (((j.program[6] >> 5) & 1) !== cuts) fail(`${c.label}: FLAGS bit 5 is not the cut mode`);
+      if (cuts === 0 && gw < 0) {
+        // D301: no option is 'rfc', and the default's effective mode (0) is in the preimage
+        const d0 = jsRun(c.text, undefined, -1);
+        if (!d0.ok || wordsHex(d0.program) !== wordsHex(j.program)) fail(`${c.label}: the default cut mode is not 'rfc'`);
+      }
     }
   }
+  try { compile('r = {a: int}', { cuts: 'reference' }); fail(`cuts: 'reference' was accepted (D301: no alias)`); }
+  catch (e) { if (!(e instanceof TypeError)) fail(`cuts: 'reference' threw ${e}, not a TypeError`); }
   console.log(`  ${good === n ? 'ok  ' : 'FAIL'} ${good}/${n} SOURCE_KEYs equal SHA-256 of program-2 §1's preimage (cuts, groupWords; baseline encoder, node:crypto)`);
 }
 
@@ -414,7 +428,7 @@ for (const { label, P, B } of programs) {
   console.log(`       arrays A0 ${sum.A0}, A1 ${sum.A1}, A2 ${sum.A2} (+ ${sum.AR} recursive, A2); maps F ${sum.F}, S ${sum.S}, T ${sum.T} (+ ${sum.TR} recursive, T)`);
   console.log(`       design (syntactic, architecture §20.5): arrays 799 A0 / 25 A1 / 0 A2 (+1 recursive); maps 61 F / 37 S / 26 T`);
   for (const k of ['A1', 'A2', 'S', 'T']) if (examples[k].length) console.log(`       ${k} e.g. ${examples[k].join('; ')}`);
-  console.log(`  info warnings over the corpus (reference mode): ${Object.entries(warnCount).sort().map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
+  console.log(`  info warnings over the corpus (default rfc cut mode): ${Object.entries(warnCount).sort().map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
 }
 
 // ---------------------------------------------------------------- 9: semantics vs the oracle
@@ -457,7 +471,7 @@ for (const { label, P, B } of programs) {
   };
   const rows = probeBlock.split('\n').filter(l => /^\| [A-Z]\d\d\.\d \|/.test(l)).map(l => {
     const c = l.split('|').slice(1, -1).map(x => x.trim());
-    return { id: c[0], cddl: c[1].slice(1, -1).replace(/;\s*/g, '\n'), data: c[2].slice(1, -1), reference: c[3] === '✓', rfc: c[4] === '✓' };
+    return { id: c[0], cddl: c[1].slice(1, -1).replace(/;\s*/g, '\n'), data: c[2].slice(1, -1), branch: c[3] === '✓', rfc: c[4] === '✓' };
   });
   const compiled = new Map();
   const programOf = (text, cuts) => {
@@ -474,9 +488,9 @@ for (const { label, P, B } of programs) {
     pTotal++;
     const j = programOf(r.cddl, cuts);
     if (!j) { fail(`probe ${r.id}: does not compile`); continue; }
-    const got = ref.check(j.program, j.pool, 'r', oracle.decode(diag(r.data)), { cuts: cuts ? 'rfc' : 'reference' });
-    const want = cuts ? r.rfc : r.reference;
-    if (got === want) pAgree++; else fail(`probe ${r.id} [${cuts ? 'rfc' : 'reference'}] ${r.cddl.replace(/\n/g, '; ')} on ${r.data}: Program says ${got}, §20.15 says ${want}`);
+    const got = ref.check(j.program, j.pool, 'r', oracle.decode(diag(r.data)), { cuts: cuts ? 'branch' : 'rfc' });
+    const want = cuts ? r.branch : r.rfc;
+    if (got === want) pAgree++; else fail(`probe ${r.id} [${cuts ? 'branch' : 'rfc'}] ${r.cddl.replace(/\n/g, '; ')} on ${r.data}: Program says ${got}, §20.15 says ${want}`);
   }
   console.log(`  ${pAgree === pTotal ? 'ok  ' : 'FAIL'} ${pAgree}/${pTotal} §20.15 probe verdicts reproduced by the compiled Programs (reference interpreter; both cut modes)`);
   // Targeted regressions for the lowering (fold rows, cuts on non-text keys, recursion,
@@ -508,6 +522,13 @@ for (const { label, P, B } of programs) {
     ['r = {kind: "a", x: int // kind: "b", ? y: [* tstr]}', ['{"kind":"b","y":["p"]}', '{"kind":"a"}', '{"kind":"b","x":1}']],
     ['r = [(int, tstr) // (int, int), * int]', ['[1,2,3]', '[1,"x",3]']],
     ['r = {(a: int, b: int) // (a: tstr), * tstr => any}', ['{"a":"x","b":1}', '{"a":1}']],
+    // D301: the discriminated-union forms of docs/guide.md, both modes
+    ['r = {kind: "a", x: int // kind: "b", y: tstr}', ['{"kind":"a","x":1}', '{"kind":"b","y":"z"}', '{"kind":"a","x":"z"}']],
+    ['r = {kind: "a", x: int} / {kind: "b", y: tstr}', ['{"kind":"a","x":1}', '{"kind":"b","y":"z"}', '{"kind":"a","x":"z"}', '{"kind":"c"}']],
+    ['r = {"kind" => "a", x: int // "kind" => "b", y: tstr}', ['{"kind":"a","x":1}', '{"kind":"b","y":"z"}', '{"kind":"a","x":"z"}', '{"kind":"c"}']],
+    ['r = {id: tstr, token: tstr // id: tstr}', ['{"id":"a"}', '{"id":"a","token":"t"}']],
+    ['r = {"id" => tstr, token: tstr // "id" => tstr}', ['{"id":"a"}', '{"id":"a","token":"t"}', '{"id":"a","token":1}']],
+    ['r = {? (a: int, b: int), * tstr => any}', ['{"a":1}', '{"a":1,"b":2}', '{"c":1}']],
   ];
   for (const [text, data] of TARGETED) for (const cuts of [0, 1]) {
     pTotal++;
@@ -515,7 +536,7 @@ for (const { label, P, B } of programs) {
     if (!j || os.error) { fail(`targeted ${JSON.stringify(text)}: does not compile (snug ${!!j}, oracle ${os.error})`); continue; }
     let ok = true;
     for (const d of data) {
-      const item = oracle.decode(diag(d)), mode = cuts ? 'rfc' : 'reference';
+      const item = oracle.decode(diag(d)), mode = cuts ? 'branch' : 'rfc';
       const want = oracle.check(os, 'r', item, { cuts: mode }), got = ref.check(j.program, j.pool, 'r', item, { cuts: mode });
       if (want !== got || want === 'unknown') { ok = false; fail(`targeted ${JSON.stringify(text)} [${mode}] on ${d}: Program says ${got}, oracle says ${want}`); }
     }
@@ -535,7 +556,7 @@ for (const { label, P, B } of programs) {
       for (const c of s.cases) {
         if (typeof c.hex !== 'string') continue;
         let item; try { item = oracle.decode(bytesOf(c.hex)); } catch { continue; }
-        const mode = cuts ? 'rfc' : 'reference';
+        const mode = cuts ? 'branch' : 'rfc';
         const want = oracle.check(os, c.rule ?? 'r', item, { cuts: mode });
         const got = ref.check(j.program, j.pool, c.rule ?? 'r', item, { cuts: mode });
         if (want === 'unknown' || got === 'unknown') { unknown++; continue; }
@@ -545,6 +566,36 @@ for (const { label, P, B } of programs) {
     }
   }
   console.log(`  ${agree === decided ? 'ok  ' : 'FAIL'} ${agree}/${decided} corpus verdicts of the compiled Programs equal the independent oracle's (both cut modes; ${unknown} undecided: regexps, extension controls, or the oracle's own unknowns)`);
+}
+
+// ---------------------------------------------------------------- 10: warning W8 (D301)
+{
+  const W8 = [
+    // [schema, W8 positions under the default 'rfc' (line:column of the later alternative's member)]
+    ['r = {kind: "a", x: int // kind: "b", y: tstr}', ['1:27']],
+    ['r = {kind: "a", x: int // kind: "b", y: tstr // kind: "c"}', ['1:27', '1:49']],
+    ['r = {id: tstr, token: tstr // id: tstr}', ['1:31']],
+    ['r = {ga // gb}\nga = (kind: "a", x: int)\ngb = (kind: "b", y: tstr)', ['3:7']],
+    ['r = {"kind" ^=> "a", x: int // "kind": "b", y: tstr}', ['1:32']],
+    ['r = {t: int, (kind: "a", x: int // kind: "b", y: tstr)}', ['1:36']],
+    ['r = {kind: "a", x: int} / {kind: "b", y: tstr}', []],
+    ['r = {"kind" => "a", x: int // "kind" => "b", y: tstr}', []],
+    ['r = {kind: "a", x: int // other: "b", y: tstr}', []],
+    ['r = [kind: "a", x: int // kind: "b", y: tstr]', []],
+  ];
+  const items = [];
+  for (const [t] of W8) for (const cuts of [0, 1]) items.push({ text: t, cuts, gw: -1 });
+  const res = both(items);
+  let good = 0;
+  res.forEach(({ j, same, why }, i) => {
+    const it = items[i], want = it.cuts === 0 ? W8[i >> 1][1] : [];
+    if (!same) { fail(`W8 ${JSON.stringify(it.text)} [cuts ${it.cuts}]: ${why}`); return; }
+    if (!j.ok) { fail(`W8 ${JSON.stringify(it.text)}: does not compile (${j.code})`); return; }
+    const got = j.warnings.filter(w => w.code === 'W8').map(w => `${w.line}:${w.column}`);
+    if (JSON.stringify(got) === JSON.stringify(want)) good++;
+    else fail(`W8 ${JSON.stringify(it.text)} [${it.cuts ? 'branch' : 'rfc'}]: warned at ${got.join(', ') || 'nothing'}, want ${want.join(', ') || 'nothing'}`);
+  });
+  console.log(`  ${good === items.length ? 'ok  ' : 'FAIL'} ${good}/${items.length} W8 cases (D301: same leading cut key across map alternatives warns under 'rfc' only; JS == Rust)`);
 }
 
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }

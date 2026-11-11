@@ -1090,7 +1090,8 @@
 ;; format 2.0 (D279; program-2 §1): major 2 in the low 16 bits, minor 0. The
 ;; extension table of format 1.1 (D141) is part of 2.0 unchanged.
 (defconst ^:pub ^I32 FORMAT_VERSION 131072)
-(defconst ^:pub ^I32 FLAG_CUTS_RFC 32)
+;; D301: set under `cuts: 'branch'` (rule A); clear for the default literal RFC cut
+(defconst ^:pub ^I32 FLAG_CUTS_BRANCH 32)
 (defconst ^:pub ^I32 FLAG_ARENA 64)
 
 (defn out [^Ints h ^I32 v] (vpush1 h T_OUT v))
@@ -1394,7 +1395,7 @@
                   (set flags (bit-or flags FLAG_ARENA)))
                 (if (or (== k2 K_ANY) (and (== k2 K_MAJOR) (and (>= (ld h l2 0) 4) (<= (ld h l2 0) 6))))
                   (set tsany (fts-of h (hg h H_TS_ANY))))))
-            (if (== (hg h H_CUTS) 1) (set flags (bit-or flags FLAG_CUTS_RFC)))
+            (if (== (hg h H_CUTS) 1) (set flags (bit-or flags FLAG_CUTS_BRANCH)))
             (comment "format 2.0 header (program-2 §2): word 19 N_PEGS, 29 R_ITEM_MAX, 41"
                      "LIM_GROUP_WORDS, 62 RECLEAF_MAX (S_END is PROGRAM_WORDS), 63 ACT_SUM")
             (out h MAGIC) (out h (ext-word h 0)) (out h 64) (out h send) (out h pool)

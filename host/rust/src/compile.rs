@@ -32,7 +32,7 @@ pub struct Compiled {
     pub warnings: Vec<Warning>,
 }
 
-/// A compile warning: its stable code (`W1`..`W7`), the rule it is in (None for
+/// A compile warning: its stable code (`W1`..`W8`), the rule it is in (None for
 /// a schema-wide warning), its 1-based line and column (0 when about no place)
 /// and a fixed message. Identical on every host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,12 +74,13 @@ pub enum Regexp {
     IRegexp,
 }
 
-/// Cut semantics (D273): rule A (`reference`, the default) or commitment epochs (`rfc`).
+/// Cut semantics (D301): the literal RFC 8610 cut (`Rfc`, the default; commitment
+/// epochs, D273) or rule A (`Branch`: a failed cut fails only its choice branch).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Cuts {
     #[default]
-    Reference,
     Rfc,
+    Branch,
 }
 
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
@@ -88,7 +89,7 @@ pub enum Cuts {
 pub struct CompileOptions<'a> {
     pub profile: i32,
     pub regexp: Regexp,
-    /// Format 2.0: the cut mode (D273).
+    /// Format 2.0: the cut mode (D301: `Rfc` by default, `Branch` = rule A, D273).
     pub cuts: Cuts,
     /// Format 2.0: the PEG group arena cap in words (D276, D281); None = the default.
     pub group_words: Option<i32>,
@@ -123,7 +124,7 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
         opt[i + 1] = *v;
     }
     opt[kc::OPT_REGEXP as usize] = if *regexp == Regexp::IRegexp { 1 } else { 0 };
-    opt[kc::OPT_CUTS as usize] = if *cuts == Cuts::Rfc { 1 } else { 0 };
+    opt[kc::OPT_CUTS as usize] = if *cuts == Cuts::Branch { 1 } else { 0 };
     opt[kc::OPT_GROUP_WORDS as usize] = group_words.unwrap_or(-1);
     // D141: the extension-control registry rides after the OPT_WORDS options
     if let Some(c) = controls {

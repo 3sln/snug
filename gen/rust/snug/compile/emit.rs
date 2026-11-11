@@ -1469,7 +1469,7 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
 }
 pub const MAGIC: i32 = 1735749235;
 pub const FORMAT_VERSION: i32 = 131072;
-pub const FLAG_CUTS_RFC: i32 = 32;
+pub const FLAG_CUTS_BRANCH: i32 = 32;
 pub const FLAG_ARENA: i32 = 64;
 pub(crate) fn out(h: &mut [i32], v: i32) {
     vpush1(h, T_OUT, v);
@@ -1951,7 +1951,7 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
         }
     }
     if hg(h, H_CUTS) == 1 {
-        flags |= FLAG_CUTS_RFC;
+        flags |= FLAG_CUTS_BRANCH;
     }
     // format 2.0 header (program-2 §2): word 19 N_PEGS, 29 R_ITEM_MAX, 41
     // LIM_GROUP_WORDS, 62 RECLEAF_MAX (S_END is PROGRAM_WORDS), 63 ACT_SUM

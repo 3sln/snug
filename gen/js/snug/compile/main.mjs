@@ -720,6 +720,8 @@ export function warningName(code) {
             return "W6";
         case 7:
             return "W7";
+        case 8:
+            return "W8";
         default:
             return "W0";
     }
@@ -742,6 +744,8 @@ export function warningMessage(code) {
             return "order-sensitive member overlaps another member (RFC 8610 section 3.5.3)";
         case 7:
             return "worst-case group arena at the compiled limits can exceed the arena cap";
+        case 8:
+            return "choice alternative starts with the same cut key as an earlier one: under the default RFC cuts the earlier alternative's cut fails the whole map (see the guide, Discriminated unions under the RFC cut)";
         default:
             return "";
     }

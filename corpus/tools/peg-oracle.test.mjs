@@ -60,11 +60,11 @@ function wireVerdict(cddl, encoded, options) {
 const probes = architecture.split('\n').filter(line => /^\| [AFHMNR]\d+\.\d+ \|/.test(line)).map(line => {
   const cells = line.split('|').slice(1, -1).map(s => s.trim());
   const unquote = x => { assert.ok(x.startsWith('`') && x.endsWith('`')); return x.slice(1, -1); };
-  return { id: cells[0], cddl: unquote(cells[1]).replace(/;\s*/g, '\n'), data: unquote(cells[2]), reference: cells[3] === '✓', rfc: cells[4] === '✓' };
+  return { id: cells[0], cddl: unquote(cells[1]).replace(/;\s*/g, '\n'), data: unquote(cells[2]), branch: cells[3] === '✓', rfc: cells[4] === '✓' };
 });
 
 test('design table has exactly 117 documented probes', () => assert.equal(probes.length, 117));
-for (const p of probes) for (const cuts of ['reference', 'rfc']) test(`design ${p.id} ${cuts}`, () => {
+for (const p of probes) for (const cuts of ['branch', 'rfc']) test(`design ${p.id} ${cuts}`, () => {
   assert.equal(verdict(p.cddl, p.data, { cuts }), p[cuts], `${p.id} ${cuts}: design mismatch`);
 });
 
@@ -81,6 +81,18 @@ const flips = new Map([
   ['seeded-028', [1, 2, 3]], ['seeded-044', [2]], ['seeded-048', [2]],
   ['seeded-052', [2]], ['seeded-056', [1, 2, 3]], ['seeded-068', [1]],
 ]);
+// D301: the default is the literal RFC cut. Under it, 12 further adversarial cases flip
+// (true before migration, false now): a cut that matched inside a failed `?(...)` group or
+// `//` alternative still commits (the map fails), so a later wildcard or alternative can no
+// longer take that key. Rule A (`cuts: 'branch'`) keeps the 33 flips above.
+const rfcFlips = new Map([
+  ['C3/A1: absent optional factor forwards to residual', [0, 3]],
+  ['A1: choices correlate optional factor with residual', [2]],
+  ['A1c: top-level group choices stay closed', [3]],
+  ['D021: cut is alternative local', [0]],
+  ['seeded-008', [1]], ['seeded-012', [1]], ['seeded-020', [1]], ['seeded-024', [3]],
+  ['seeded-036', [3]], ['seeded-052', [1, 3]],
+]);
 test('migration specifies 11 structural + 22 rule-A flips', () => {
   assert.equal([...flips.values()].reduce((n, xs) => n + xs.length, 0), 33);
   for (const name of flips.keys()) assert.ok(suites.some(s => s.name === name), name);
@@ -90,23 +102,31 @@ for (const [name, changed] of flips) {
   for (const [i, c] of s.cases.entries()) test(`corpus ${name} #${i}${changed.includes(i) ? ' flips' : ''}`, () => {
     const schema = compile(s.cddl); assert.equal(schema.error, undefined);
     if (changed.includes(i)) assert.equal(c.expect, true, 'old verdict before migration');
-    assert.equal(check(schema, c.rule, decode(hex(c.hex))), changed.includes(i) ? false : c.expect);
+    assert.equal(check(schema, c.rule, decode(hex(c.hex)), { cuts: 'branch' }), changed.includes(i) ? false : c.expect);
   });
 }
-test('complete adversarial corpus: precisely the 33 documented flips', () => {
-  const differences = []; let checked = 0;
-  for (const s of suites) {
-    if (s.schemaError) continue;
-    const schema = compile(s.cddl); assert.equal(schema.error, undefined, s.name);
-    for (const [i, c] of s.cases.entries()) {
-      const actual = check(schema, c.rule, decode(hex(c.hex))); checked++;
-      assert.notEqual(actual, 'unknown', s.name + ' #' + i);
-      if (actual !== c.expect) differences.push(s.name + ' #' + i);
+for (const [cuts, lists] of [['branch', [flips]], ['rfc', [flips, rfcFlips]]])
+  test(`complete adversarial corpus (cuts: '${cuts}'): precisely the ${cuts === 'rfc' ? '33 + 12' : '33'} documented flips`, () => {
+    const differences = []; let checked = 0;
+    for (const s of suites) {
+      if (s.schemaError) continue;
+      const schema = compile(s.cddl); assert.equal(schema.error, undefined, s.name);
+      for (const [i, c] of s.cases.entries()) {
+        const actual = check(schema, c.rule, decode(hex(c.hex)), cuts === 'rfc' ? undefined : { cuts }); checked++;
+        assert.notEqual(actual, 'unknown', s.name + ' #' + i);
+        if (actual !== c.expect) { assert.equal(c.expect, true, s.name + ' #' + i + ' flips true to false only'); differences.push(s.name + ' #' + i); }
+      }
     }
-  }
-  const expected = [...flips].flatMap(([name, indices]) => indices.map(i => name + ' #' + i));
-  assert.deepEqual(differences.sort(), expected.sort());
-  assert.equal(checked, 910);
+    const expected = lists.flatMap(l => [...l].flatMap(([name, indices]) => indices.map(i => name + ' #' + i)));
+    assert.deepEqual(differences.sort(), expected.sort());
+    assert.equal(checked, 910);
+  });
+test('cut modes are named rfc (default) and branch; no alias', () => {
+  const s = compile('r = {kind: "a", x: int // kind: "b", y: tstr}'), v = decode(hex('a2646b696e6461626179617a'));
+  assert.equal(check(s, 'r', v), false);
+  assert.equal(check(s, 'r', v, { cuts: 'rfc' }), false);
+  assert.equal(check(s, 'r', v, { cuts: 'branch' }), true);
+  assert.throws(() => check(s, 'r', v, { cuts: 'reference' }), TypeError);
 });
 
 const semantics = [
@@ -120,6 +140,17 @@ const semantics = [
   ['r = {((a: int // b: int), c: int) // (* tstr => any)}', '{"a":1}', false, 'rfc'],
   ['r = {((a: int // b: int), c: int) // (* tstr => any)}', '{"a":1}', true],
   ['r = {a: int, b: int} / {* tstr => any}', '{"a":"x"}', true, 'rfc'],
+  // D301: discriminated unions under the default RFC cut (docs/guide.md)
+  ['r = {kind: "a", x: int // kind: "b", y: tstr}', '{"kind":"b","y":"z"}', false, 'rfc'],
+  ['r = {kind: "a", x: int // kind: "b", y: tstr}', '{"kind":"b","y":"z"}', true, 'branch'],
+  ['r = {kind: "a", x: int} / {kind: "b", y: tstr}', '{"kind":"b","y":"z"}', true, 'rfc'],
+  ['r = {kind: "a", x: int} / {kind: "b", y: tstr}', '{"kind":"a","x":"z"}', false, 'rfc'],
+  ['r = {kind: "a", x: int} / {kind: "b", y: tstr}', '{"kind":"a","x":1}', true, 'rfc'],
+  ['r = {"kind" => "a", x: int // "kind" => "b", y: tstr}', '{"kind":"b","y":"z"}', true, 'rfc'],
+  ['r = {"kind" => "a", x: int // "kind" => "b", y: tstr}', '{"kind":"a","x":"z"}', false, 'rfc'],
+  ['r = {"kind" => "a", x: int // "kind" => "b", y: tstr}', '{"kind":"c"}', false, 'rfc'],
+  ['r = {id: tstr, token: tstr // id: tstr}', '{"id":"a"}', false, 'rfc'],
+  ['r = {"id" => tstr, token: tstr // "id" => tstr}', '{"id":"a"}', true, 'rfc'],
   ['r = [16777216*16777216 (? int)]', '[]', true],
   ['r = {16777216*16777216 (? a: int)}', '{}', true],
   ['r = [0*0 $$g]', '[]', true],
@@ -168,7 +199,8 @@ const semantics = [
   ['r = \'a\\\'b\'', "h'612762'", true],
   ['r = 0x1.8p1', '3', false], // A float literal does not match an integer.
 ];
-semantics.forEach(([cddl, data, expected, cuts], i) => test(`semantic supplement ${i}`, () => assert.equal(verdict(cddl, data, { cuts }), expected)));
+// A supplement without a mode was written for rule A (the pre-D301 default).
+semantics.forEach(([cddl, data, expected, cuts], i) => test(`semantic supplement ${i}`, () => assert.equal(verdict(cddl, data, { cuts: cuts ?? 'branch' }), expected)));
 const wireCases = [
   ['r = uint', '1801', true], ['r = [int]', '9f01ff', true],
   ['r = #0.24', '01', true], ['r = #0.24', '18ff', true], ['r = #0.24', '190100', false],
@@ -310,7 +342,8 @@ test('Ruby differential: seed 0x86109165, 300 small schema/value pairs', async t
       while (cursor < samples.length) {
         const sample = samples[cursor++], schema = compile(sample.cddl);
         assert.equal(schema.error, undefined, 'seeded schema ' + sample.id);
-        const oracle = check(schema, 'r', decode(sample.encoded));
+        // Ruby's deviation classes (RC, RL, ...) are defined against rule A.
+        const oracle = check(schema, 'r', decode(sample.encoded), { cuts: 'branch' });
         const schemaPath = join(scratch, `${sample.id}.cddl`), dataPath = join(scratch, `${sample.id}.cbor`);
         writeFileSync(schemaPath, sample.cddl); writeFileSync(dataPath, sample.encoded);
         const status = await runRuby(wrapper, schemaPath, dataPath);

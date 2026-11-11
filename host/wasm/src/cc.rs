@@ -73,7 +73,8 @@ pub extern "C" fn cc_compile(n: usize) -> i32 {
     let options = CompileOptions {
         profile: s.opt[0],
         regexp: if s.opt[19] == 1 { crate::compile::Regexp::IRegexp } else { crate::compile::Regexp::Xsd },
-        cuts: if s.opt.get(20) == Some(&1) { crate::compile::Cuts::Rfc } else { crate::compile::Cuts::Reference },
+        // D301: option word 20 is 0 (or -1, absent) for the default literal RFC cut, 1 for rule A
+        cuts: if s.opt.get(20) == Some(&1) { crate::compile::Cuts::Branch } else { crate::compile::Cuts::Rfc },
         group_words: s.opt.get(21).copied().filter(|&g| g >= 0),
         limits: &s.opt[1..19],
         unicode: if s.unicode.is_empty() { None } else { Some(&s.unicode) },

@@ -189,7 +189,7 @@ impl Schema {
             &crate::compile::CompileOptions {
                 profile,
                 regexp: options.regexp,
-                cuts: crate::compile::Cuts::Reference,
+                cuts: crate::compile::Cuts::Rfc,
                 group_words: None,
                 limits: &limits,
                 unicode: options.unicode,

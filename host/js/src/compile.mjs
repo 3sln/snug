@@ -69,7 +69,7 @@ function floats(h, bytes) {
 export function compile(text, opts = {}) {
   validateCompileOptions(opts);
   const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd',
-    cuts = 'reference', groupWords } = opts;
+    cuts = 'rfc', groupWords } = opts;
   const entries = controlEntries(controls);
   try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp, cuts, groupWords); }
   finally {
@@ -84,8 +84,9 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const opt = options(profile, limits, registryWords(entries, inBus));
   opt[OPT_REGEXP] = regexp === 'iregexp' ? 1 : 0;
-  // D273: rule A (`reference`, the default) or commitment epochs (`rfc`); D276/D281: the arena cap.
-  opt[OPT_CUTS] = cuts === 'rfc' ? 1 : 0;
+  // D301: the literal RFC 8610 cut (`rfc`, the default: commitment epochs, D273) is 0, rule A (`branch`) 1;
+  // D276/D281: the arena cap.
+  opt[OPT_CUTS] = cuts === 'branch' ? 1 : 0;
   opt[OPT_GROUP_WORDS] = groupWords === undefined ? -1 : Math.min(groupWords, 0x7fffffff);
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))

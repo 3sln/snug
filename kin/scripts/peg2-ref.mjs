@@ -8,6 +8,9 @@
 //
 //   check(P, B, rule, item, { cuts }) -> true | false | 'unknown'
 //
+// `cuts` (D301): 'rfc' (the default, the literal RFC 8610 cut) or 'branch' (rule A);
+// any other value throws. It must match the mode the Program was compiled in (FLAGS bit 5).
+//
 // `item` is the oracle's decoded representation (peg-oracle.mjs `decode`).
 // Unsupported leaves (regexps, EXT) and step exhaustion answer 'unknown'; EMBED
 // content is decoded with the oracle's decoder (no inner profile or limits).
@@ -48,8 +51,10 @@ function enc(it) {
 const u64 = (hi, lo) => (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
 const mag = (B, off, len) => { let v = 0n; for (let i = 0; i < len; i++) v = (v << 8n) | BigInt(B[off + i]); return v; };
 
-export function check(P, B, rule, item, { cuts = 'reference', steps = 2000000 } = {}) {
+export function check(P, B, rule, item, { cuts = 'rfc', steps = 2000000 } = {}) {
+  if (cuts !== 'rfc' && cuts !== 'branch') throw new TypeError(`cuts: 'rfc' or 'branch', not ${cuts}`);
   const rfc = cuts === 'rfc';
+  if (((P[6] >> 5) & 1) !== (rfc ? 0 : 1)) throw new TypeError(`the Program was compiled for the other cut mode (FLAGS bit 5)`);
   const sec = k => P[42 + k];
   const leafAt = l => sec(1) + 8 * l;
   const tsAt = t => P[sec(2) + t];

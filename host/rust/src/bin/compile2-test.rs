@@ -1,7 +1,7 @@
 // `bb compile2-test`'s Rust arm (format 2.0, P8.5 phase 1). Reads cases on
 // stdin, one per line:
 //
-//     C <profile> <cuts 0|1> <groupWords or -1> <hex of the schema's UTF-8 text>
+//     C <profile> <cuts 0 rfc|1 branch> <groupWords or -1> <hex of the schema's UTF-8 text>
 //
 // and prints, per case, either
 //
@@ -80,7 +80,7 @@ fn main() {
         let r = std::panic::catch_unwind(|| {
             let options = CompileOptions {
                 profile,
-                cuts: if cuts == 1 { Cuts::Rfc } else { Cuts::Reference },
+                cuts: if cuts == 1 { Cuts::Branch } else { Cuts::Rfc },
                 group_words: if gw >= 0 { Some(gw) } else { None },
                 ..Default::default()
             };

@@ -1715,7 +1715,7 @@
         (if (and (== k 15) (== (pw p (+ (leaf-peg p l) 3)) TIER_T)) (set f (bit-or f 64)))
         (if (or (== k 1) (and (== k 2) (and (>= (pw p (+ o 2)) 4) (<= (pw p (+ o 2)) 6))))
           (set needs-any true))))
-    (comment "bit 5 (CUTS_RFC) is the compile option [V]; bit 6 (ARENA) is derived")
+    (comment "bit 5 (CUTS_BRANCH, D301) is the compile option [V]; bit 6 (ARENA) is derived")
     (if (!= (bit-and (pw p 6) (bit-not 32)) f) (return (want s false 6 C_DERIVED)))
     (if (and needs-any (< (pw p W_TS_ANY) 0)) (return (want s false W_TS_ANY C_HEADER)))
     (return true)))

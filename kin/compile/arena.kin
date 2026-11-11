@@ -131,7 +131,7 @@
 (defconst ^:pub ^I32 H_G3 55)
 ;; D242: compile-time dialect only, 0 XSD (default), 1 I-Regexp.
 (defconst ^:pub ^I32 H_REGEXP 448)
-;; format 2.0 (D270-D281): the cut mode (0 reference = rule A, 1 rfc), the
+;; format 2.0 (D270-D281, D301): the cut mode (0 rfc, the default; 1 branch = rule A), the
 ;; group arena cap in words (LIM_GROUP_WORDS) and the explicit `groupWords`
 ;; option as given (-1 when absent; SOURCE_KEY)
 (defconst ^:pub ^I32 H_CUTS 449)

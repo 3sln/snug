@@ -20,7 +20,7 @@
 ;; 3. ANALYSE: syntactic lengths ml / FL and B (§3.2), depth, n_calls, the
 ;;    nullable / first / last least fixed points and the relaxed follow rows
 ;;    (§4, arch §20.5), left recursion (refused, ERR_GROUP_RECURSION), map
-;;    classes and tiers (§3.3), compile warnings W1-W6 (arch §20.11).
+;;    classes and tiers (§3.3), compile warnings W1-W6 and W8 (arch §20.11).
 ;; 4. INTERN the program (exact Program record, hash-consed in T_PROG) and
 ;;    write the container: T_ARR / T_ARRD or T_MAP / T_MAPD (see below).
 (ns snug.compile.peg
@@ -30,7 +30,7 @@
             [snug.compile.arena :refer [hg hs erred fail charge vlen vpush vpush1 vget vset vtrunc vpop
                                         mix ht-init ht-start ht-id ht-next ht-put
                                         INF ERR_INTERNAL ERR_LIM_PEG ERR_LIM_APOS ERR_GROUP_RECURSION
-                                        H_LIM_ALTS H_LIM_APOS H_CUR_RULE H_NSRC H_PMODE
+                                        H_LIM_ALTS H_LIM_APOS H_CUR_RULE H_NSRC H_PMODE H_CUTS
                                         T_PB T_PMEM T_PGS T_PKID T_PN T_PK T_PA T_PROG T_PROGD T_HPROG
                                         T_WARN T_PSET T_PFOL T_PSTACK T_ARR T_ARRD T_MAP T_MAPD T_STK]]
             [snug.compile.leaf :refer [lk ld ts-n ts-leaf ts-member ts-overlap has-ext ts-union ts-push-leaves
@@ -739,6 +739,63 @@
                           (if (ts-overlap h kts (pmw h o 1)) (set hit true)))))))
               (if hit (warn h 6 (pnw h i 4)))))))))
 
+;; ------------------------------------------------------------ warning W8 (D301)
+
+(defn ^I32 lead-member [^Ints h ^I32 n ^I32 at]
+  (comment "The member a map alternative starts with: through a SEQ's first kid, a"
+           "REP's child and a CALL's target (at most n steps, each charged); -1 if"
+           "it starts with anything else.")
+  (let [^:mut u at
+        ^:mut steps 0]
+    (while (<= steps n)
+      (if (not (charge h 1)) (return (neg 1)))
+      (let [op (pnw h u 0)]
+        (if (== op P_MEMBER) (return u))
+        (if (and (== op P_SEQ) (> (pnw h u 2) 0))
+          (set u (pkid h u 0))
+          (if (or (== op P_REP) (== op P_CALL))
+            (set u (pnw h u 1))
+            (return (neg 1)))))
+      (set steps (+ steps 1)))
+    (return (neg 1))))
+
+(defn ^Bool lit-cut [^IntsR h ^I32 m]
+  (comment "A member node with a literal key and a cut (`name:`, `\"k\": v`, `\"k\" ^=> v`).")
+  (let [mr (pnw h m 5)]
+    (return (and (== (pmw h mr 0) 0) (!= (pmw h mr 3) 0)))))
+
+(defn warn-cut-unions [^Ints h ^I32 n]
+  (comment "W8 (D301): a CHOICE in a map whose later alternative starts with a cut"
+           "member on the same literal key as an earlier alternative's first member"
+           "(`{kind: \"a\", x: int // kind: \"b\", y: tstr}`). Under the default literal"
+           "RFC cut the earlier alternative's cut fails the whole map when the key is"
+           "present with another value, so the later alternative cannot match through"
+           "that key (docs/guide.md, \"Discriminated unions under the RFC cut\")."
+           "Silent under `cuts: 'branch'` (rule A), where the idiom works.")
+  (if (!= (hg h H_CUTS) 0) (return))
+  (for [^I32 i 0 n]
+    (if (== (pnw h i 0) P_CHOICE)
+      (do (let [kc (pnw h i 2)
+                base (vlen h T_PSTACK)]
+            (for [^I32 j 0 kc]
+              (let [m (lead-member h n (pkid h i j))]
+                (if (and (>= m 0) (lit-cut h m))
+                  (vpush1 h T_PSTACK m)
+                  (vpush1 h T_PSTACK (neg 1)))))
+            (if (erred h) (return))
+            (if (not (charge h (* kc kc))) (return))
+            (for [^I32 j2 1 kc]
+              (let [mj (vget h T_PSTACK (+ base j2))
+                    ^:mut q 0]
+                (if (>= mj 0)
+                  (while (< q j2)
+                    (let [mq (vget h T_PSTACK (+ base q))]
+                      (if (and (>= mq 0) (== (pmw h (pnw h mq 5) 1) (pmw h (pnw h mj 5) 1)))
+                        (do (warn h 8 (pnw h mj 4))
+                            (set q j2))))
+                    (set q (+ q 1))))))
+            (vtrunc h T_PSTACK base))))))
+
 ;; ------------------------------------------------------------ 4. programs
 
 (defn ^:pub ^I32 prog-at [^IntsR h ^I32 id] (return (vget h T_PROG id)))
@@ -874,6 +931,7 @@
   (if (not (left-recursion-free h n)) (return (neg 1)))
   (warn-choices h n)
   (warn-maps h n 0)
+  (warn-cut-unions h n)
   (let [rop (pnw h 0 0)
         ^:mut flat (or (== rop P_EMPTY) (== rop P_MEMBER))
         ^:mut anyos false
