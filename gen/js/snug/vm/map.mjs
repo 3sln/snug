@@ -199,7 +199,8 @@ export function mapBlockInit(p, s, bo, qindex, mt, words, at) {
     // only the header and the member words need zeros: the frame stack is
     // written before it is read, every slot / index entry's first word is set
     // below and the rest of a slot (and S's trail) is written before it is read
-    for (let j = 0; j < msbase(p, bo, mt) - bo; j++) {
+    const zw = msbase(p, bo, mt) - bo;
+    for (let j = 0; j < zw; j++) {
         s[bo + j] = 0;
     }
     s[bo + MB_Q] = qindex;

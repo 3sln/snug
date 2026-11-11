@@ -175,8 +175,9 @@
   (comment "only the header and the member words need zeros: the frame stack is"
            "written before it is read, every slot / index entry's first word is set"
            "below and the rest of a slot (and S's trail) is written before it is read")
-  (for [^I32 j 0 (- (msbase p bo mt) bo)]
-    (iset s (+ bo j) 0))
+  (let [zw (- (msbase p bo mt) bo)]
+    (for [^I32 j 0 zw]
+      (iset s (+ bo j) 0)))
   (iset s (+ bo MB_Q) qindex)
   (iset s (+ bo MB_ALIVE) 1)
   (iset s (+ bo MB_ACT) (neg 1))

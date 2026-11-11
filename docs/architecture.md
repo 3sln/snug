@@ -2262,7 +2262,7 @@ charged.
 | Arrays A2, recursive | No bound beyond the budget. Rescans are polynomial for fixed non-recursive groups and can be exponential with recursion. |
 | Maps F | Per pair O(members); end O(members) |
 | Maps S | Per pair O(members); one end-run bounded by a constant K_S(G) independent of n. Slots number n_named, and every successful group iteration consumes a slot. |
-| Maps T | No polynomial bound claimed. Lower bound Θ(n²) for `{* (int => int // tstr => tstr)}` (X10, C10). Budget-bounded. |
+| Maps T | No polynomial bound claimed in general; budget-bounded. Since D322 (non-literal members' cursors, program-2 §6.4) X10's `{* (int => int // tstr => tstr)}`, formerly Θ(n²), is the T sort's O(n log n) comparisons plus O(n) steps: no member re-reads a record before its cursor, and only a rewind that gives records back moves a cursor back. Measured: 3,000 pairs 102k units sorted / 223k reversed (was 9.1 M); 30,000 pairs 1.0 M / 2.6 M. |
 
 *Sketch for A0/A1.* Between two successive record requests the machine
 works inside a window of B + 1 records. An attempt is fixed by its node, its

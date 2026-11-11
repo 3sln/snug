@@ -150,7 +150,8 @@ pub fn map_block_init(p: &[i32], s: &mut [i32], bo: i32, qindex: i32, mt: i32, w
     // only the header and the member words need zeros: the frame stack is
     // written before it is read, every slot / index entry's first word is set
     // below and the rest of a slot (and S's trail) is written before it is read
-    for j in 0..msbase(p, bo, mt) - bo {
+    let zw: i32 = msbase(p, bo, mt) - bo;
+    for j in 0..zw {
         s[(bo + j) as usize] = 0;
     }
     s[(bo + MB_Q) as usize] = qindex;

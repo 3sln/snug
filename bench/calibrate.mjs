@@ -76,6 +76,12 @@ vm('array-A2', 'r = [* (* uint, tstr)]', Array.from({ length: 400000 }, (_, i) =
 vm('map-S-choice', 'r = [* {("a" => uint, "b" => tstr) // ("a" => tstr, "b" => uint)}]', Array.from({ length: 100000 }, () => ({ a: 'x', b: 1 })));
 vm('map-T-choice', 'r = [* {* (tstr => uint // tstr => tstr)}]', recs);
 vm('map-T-sort', 'r = {* (any => uint // any => tstr)}', new Map(Array.from({ length: 60000 }, (_, i) => [[i, 0.0], i])));
+// the D286 workloads (bench/valid-vm-bench.mjs): small `any`-valued tables and a typed record document
+// (the T table at the end: a 3,000-pair T map, linear since the non-literal members' cursors)
+vm('maps8-any', 'r = [* { * tstr => any }]', Array.from({ length: 12000 }, (_, i) => ({ h: true, f: 'short', d: i, b: 2, g: null, e: i % 10, c: 'text', a: 1 })));
+vm('map-heavy-typed', 'r = { records: [* rec] }\nrec = { id: uint, kind: tstr, title: tstr, meta: { owner: tstr, size: uint, active: bool }, body: tstr }',
+  { records: Array.from({ length: 12000 }, (_, i) => ({ id: i, kind: 'note', title: 'A small benchmark document', meta: { owner: 'person', size: 128, active: true }, body: 'x'.repeat(35) })) });
+vm('map-T-large', 'r = {* (tstr => uint // tstr => tstr)}', Object.fromEntries(Array.from({ length: 3000 }, (_, i) => [`k${String(i).padStart(5, '0')}`, i % 2 ? i : 'v'])));
 vm('scalar-leaves', 'r = [* (bool / null / uint / nint / tstr)]', Array(150000).fill(true));
 vm('text-ascii', 'r = tstr', 'a'.repeat(1_400_000));
 vm('literal-long-compare', 'r = [* ' + JSON.stringify('a'.repeat(100000)) + ']', Array(14).fill('a'.repeat(100000)));
