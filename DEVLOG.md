@@ -6389,7 +6389,7 @@ authorised), the existing gate set, and conformance-corpus vectors.
   network, remotes, pushes or commits. Concurrent DEVLOG edits preserved
   by appending this item only.
 
-### D280 — RFC corpus expectations and observations stay separate (P8.6)
+### D282 — RFC corpus expectations and observations stay separate (P8.6; renumbered from a duplicate D280 on 2026-11-10)
 **Decision** (contributor, provisional): preserve exact RFC excerpts and
 page-furniture fixes, label added contexts/derived schemas, and retain
 RFC-derived PEG expectations independently of snug or Ruby. Compilation
