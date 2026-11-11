@@ -261,33 +261,35 @@ D044 streaks step the machine per element, exactly as above. A streak stops
 before any element whose machine run is anything other than the `[* T]`
 no-op (C16).
 
-### 5.2 Array block layout (X2)
+### 5.2 Array block layout (X2; as built, D311)
 
 | Offset | Field |
 | --- | --- |
 | +0 | `qindex` |
 | +1 | `alive` |
 | +2 | `nactive` (\|A\|) |
-| +3 | `status`: 0 running, 1 suspended, 2 succeeded, 3 failed |
+| +3 | `status`: 0 running, 2 succeeded at `idx`, 3 failed |
 | +4 | `pc`: current node |
 | +5 | `idx`: current element index |
 | +6 | `sp`: frame count of the current activation |
-| +7 | `want`: index the machine waits for, or −1 |
+| +7 | `mode`: 0 enter `pc`, 1 returned ok, 2 returned fail, 3 the `ENTRY` at `pc` waits for record `idx` |
 | +8 | `ev_idx`: farthest failure index, −1 for none |
-| +9 | `ev_kind`: 0 none, 1 E1, 2 E2, 3 E3; bit 8 set for E1 with an empty record |
+| +9 | `ev_kind`: 1 E1, 2 E2, 3 E3, 4 E4; +256 for E1 with an empty record |
 | +10 | `ev_off`: input offset of the event's element head (E1/E3), else the array head |
-| +11 | `act`: arena offset of the current activation record, −1 at top level |
-| +12 | `rec0`: arena offset of record 0 (A2) or the ring origin (A1); −1 for A0 |
-| +13 | `head`: the array's head offset (used for end-run and resource offsets) |
-| +14 | `active[W]`, then `cand[W]` |
+| +11 | `act`: the top chunk of a recursive program's frames, −1 for none |
+| +12 | `rbase`: the container's record base in the arena (A2) |
+| +13 | `stride`: the item's record stride Rₜ (A2) |
+| +14 | `died`: the element the block died at (−1 alive) |
+| +15 | `roff`: this block's word offset in the stride (A2) |
+| +16 | `active[W]`, then `cand[W]` |
 | … | `stack[4 · depth]` (non-recursive programs only) |
 | … | `ring[(B + 1) · W]` (A1 only) |
 
 An array frame is 4 words: `node, start, counter, aux`. `counter` is the SEQ
 kid, the CHOICE alternative or the REP count. `aux` is the REP iteration
-start.
+start. The array's head offset is the walk's own, not a block word.
 
-`ARRWORDS(a) = 14 + 2W + (recursive ? 0 : 4·depth) + (A1 ? (B+1)·W : 0)`.
+`ARRWORDS(a) = 16 + 2W + (recursive ? 0 : 4·depth) + (A1 ? (B+1)·W : 0)`.
 
 ### 5.3 The machine and recursive activations (X1)
 
@@ -401,33 +403,41 @@ root[n_root]:            class-R members, source order
   §19.2), the machine first sorts its records (§6.5), whatever its members
   (N4). Then it runs (§6.4) and checks closedness.
 
-### 6.3 Map block layout (X2)
+### 6.3 Map block layout (X2; as built, D311)
 
 | Offset | Field |
 | --- | --- |
 | +0 | `qindex` |
 | +1 | `alive` |
-| +2 | `cursor` (format-1 naming cursor) |
-| +3 | `status` |
-| +4 | `pc` |
-| +5 | `mark`: trail top of the current attempt |
+| +2 | `cursor` (the named table, while keys ascend) |
+| +3, +4 | the block's first candidate in the pair's candidate list; its candidate count |
+| +5 | the end's result (1 matched, 2 failed) |
 | +6 | `sp` |
 | +7 | `commits`: the rfc commitment epoch counter |
 | +8 | `npairs` |
 | +9 | bit 0 `unordered`, bit 1 `ecsens` |
-| +10, +11, +12 | the reported failure (§8): `fail_score`; `fail_evA` (kind << 16 \| member); `fail_evB` (pair index, or −1) |
-| +13, +14, +15 | `act` (recursive programs); `rec0` (T); `head` (map head offset) |
-| +16 | 4 words per member: `count`, `cutpair` (wire index or −1), `ucount`, `uflags` (bit 0 `ukey`; bits 8 and up hold `ucut` + 1) |
+| +10, +11, +12 | the reported failure (§8): `fail_score`; `fail_evA` (kind << 16 \| member); `fail_evB` (pair index, or −1); after the end, the witness |
+| +13 | `act`: the top chunk of a recursive program's frames, −1 for none |
+| +14, +15, +16 | T: the container's record base, the stride, this block's offset in it |
+| +17 | the trail's base (T, in the arena) |
+| +18 | the pick-order permutation (T, in the arena; −1 wire order) |
+| +19 | the current pair's `named` index (−1 none) |
+| +20 | S: the trail's length; +21 spare |
+| +22 | 6 words per member: `count`, `cutpair` (wire index or −1), `ucount` (F: the cut pair's key id), `uflags` (bit 0 `ukey`; bits 8 and up hold `ucut` + 1), `min`, `max` |
 | … | `stack[8 · depth]` (non-recursive programs) |
-| … | S: `slots[n_named · slot_words]`; T: `index[n_named]` (key id → record, −1 if absent) |
+| … | S: `slots[n_named · slot_words]` and the trail `[n_named]`; T and F: `index[n_named]` (key id → record, −1 if absent; F keeps it for the forced-tier mode) |
 
 A map frame is 8 words: `node, mark, counter, aux, commits0, score, evA,
 evB`. `commits0` is the epoch at the attempt's start (rfc). `score`, `evA`
 and `evB` hold the best failure seen among the frame's failed sub-attempts
-(§8).
+(§8). S keeps its undo trail in the block (at most one entry per named slot),
+so an S map never allocates arena words; T's trail and permutation are in the
+arena.
 
-`MAPWORDS(m) = 16 + 4·n_members + (recursive ? 0 : 8·depth) + (S ?
-n_named·slot_words : 0) + (T ? n_named : 0)`.
+`MAPWORDS(m) = 22 + 6·n_members + (recursive ? 0 : 8·depth) + (S ?
+n_named·(slot_words + 1) : n_named)`. A T record is `rec_words = 4 +
+⌈2·n_members/32⌉` words: key id, flags (bit 0 consumed), key offset, key
+length, then two bits per member (key matched, value matched).
 
 ### 6.4 The map machine
 
@@ -578,10 +588,15 @@ where the natural tier finishes (N7).
 
 ### 9.1 VM block
 
-Words 37–40 are `VM_ARENA` (offset), `VM_ARENA_UP`, `VM_CHUNK_TOP` (chunks
-carved) and `VM_ARENA_END`. Word 41 is `VM_ARENA_CAP` (the effective cap).
-Word 42 is `VM_CHUNK_FREE` (free-list head, −1). Word 43 is
-`VM_GROUP_ITEMS` (the global item counter, never reset by EMBED).
+As built (D311): word 39 `VM_ARENA` is the scratch offset of the arena's
+8-word header, which holds the upward top, the chunks carved, the body's end,
+the effective cap, the free-list head (−1) and, after a miss, the size asked
+for; the body follows the header. The arena sits after the fixed scratch
+words (`vm-scratch-words` = fixed + 8 + the lease). Word 35 `VM_PBASE` is the
+absolute input offset of the window (0 on the buffer route), so events record
+absolute offsets on every route. No global item counter is kept: growth
+follows demand, and the bound below is only W7's (and a recursive session's
+up-front growth, D314).
 
 ### 9.2 Frames
 
@@ -591,7 +606,9 @@ MAPAREA(R) = Σ over MAP leaves m ∈ R of MAPWORDS(m) + 4·cand_max(R)
 ```
 
 `cand_max` is the maximum, over MAP leaves, of n_members plus the largest
-naming count.
+naming count. As built (D311) the candidate list is sized per container as
+the sum of n_members over its admitted MAP blocks, so MAPAREA(R) = Σ
+MAPWORDS(m) + 4·Σ n_members.
 
 ### 9.3 Limits array
 
@@ -660,9 +677,11 @@ Program/pool/scratch cap, which is unchanged. A miss at the cap is
 **Growth (N3).** Allocation follows demand, never the bound.
 
 * **Buffer route.** The VM starts with the host's lease (default 4 096
-  words). On a miss below the cap it ends with the internal code `scratch`
-  (22). The host doubles the arena (at most to the cap) and runs the
-  validation again.
+  words). On a miss below the cap it ends with the hosts' growth answer −5
+  (P8.4's canonical-path protocol; D313, replacing the internal code 22),
+  out word 7 holding the scratch words it asks for (the arena doubled, at
+  most to the cap). The host grows the scratch and runs the validation
+  again.
   * Charges are a pure function of the run, so the final run's out array is
     the answer.
   * CPU is at most (1 + number of doublings) × one run. With the default
@@ -671,9 +690,14 @@ Program/pool/scratch cap, which is unchanged. A miss at the cap is
     hard cap.
   * EXT predicates may be called again on a re-run. They must be pure
     (D140), so the outcome is unchanged.
-* **Session route.** On a miss the session suspends with `VMS_GROW`. The
-  host allocates a scratch array with the arena doubled (at most to the cap)
-  and relocates:
+* **Session route.** The session suspends with `VMS_GROW` *before* any
+  charged work that could miss (as built, D314): an item that will open
+  A2/T blocks first checks headroom for its records, a T map's end for its
+  permutation and trail (2·pairs), and a recursive Program grows once at the
+  message's start to the bound below (items ≤ bytes, at most the cap), since
+  one machine run can rebuild an activation chain. A machine therefore never
+  yields mid-run. The host allocates a scratch array with the arena doubled
+  (at most to the cap) and relocates (the VM adopts it at the next step):
   1. copy the words below `VM_ARENA_UP` to the same offsets;
   2. copy the chunk heap so that each chunk keeps its index counted from the
      new end, i.e. it moves by the growth amount;
@@ -810,3 +834,35 @@ D290–D299, all unsigned):
   default 4096 words (D292).
 * **Keys.** A byte-string, float or beyond-64-bit integer before `:` is a cut
   key typeset (withdraws D125's `map_cut`, D294).
+
+## 15. Implementation notes (P8.5 phase 2, branch `p85-peg`, 2026-11-11)
+
+The VM runs this format on both routes (buffer and session, sequences,
+EMBED and `.cborseq`); format 1 is gone from the VM, compiler and harnesses.
+Decisions D310–D319 (DEVLOG, unsigned) record where the build departs from
+or fills in the draft:
+
+* **Layouts (§5.2, §6.3, §9.1, §9.2; D311).** The block tables above are the
+  built ones: a 16-word array header, a 22-word map header with 6 words per
+  member, S's trail in the block (MAPWORDS + n_named), `rec_words = 4 +
+  ⌈2·n_members/32⌉`. The compiler's frame sizes and the verifier use the same
+  formulas; `vm-scratch-words` adds the arena header and the lease.
+* **T sort (§6.5; D312).** A heap sort of a permutation in the arena, by an
+  in-VM EC comparator over the checked DC key bytes (nested maps compared by
+  selecting each side's next key in EC order); each comparison is charged
+  ⌈min(len)/8⌉, at least 1, before it is made.
+* **Growth (§9.4; D313, D314).** The buffer route answers −5 with out word 7
+  (the hosts' existing growth loop); the session gates before charged work and
+  relocates at the next step. `group_limit` (44) is a miss at the effective cap
+  (D276 as amended), with the offset of the item or container whose work
+  missed.
+* **Limits word 8.** Bit 2 is the forced-tier mode (every array A2, every map
+  T); bit 3 turns off the multi-item streaks with the schedule unchanged
+  (D315), for the gate that a streak charges what the item-by-item walk
+  charges.
+* **Streaks (D315).** D044's `[* T]` element streak (A0, steady at its
+  `ENTRY`) and the map pair streak (a single-block tier-F map in a simple
+  shape, schedule 2) are kept; everything else runs the machines.
+* **Format word (§1; D318)** is 2, D100's spelling of 2.0; W7 (D317) fires
+  only when the bound at the compiled limits exceeds the cap.
+

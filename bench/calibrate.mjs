@@ -44,11 +44,14 @@ const registry = { ...controls, pass: { check: () => true, cost: () => 0 },
 const rows = [];
 function vm(id, schema, value, flags = 0, bytes = false) {
   const b = bytes ? value : enc(value), c = compile(schema, { limits: BIG, controls: registry });
-  const p = c.program, pool = c.pool, rule = c.rules.indexOf('r'), s = new Int32Array(vmScratchWords(p, rule, p[16]));
+  const p = c.program, pool = c.pool, rule = c.rules.indexOf('r');
+  let s = new Int32Array(vmScratchWords(p, rule, p[16]));
   vmScratchInit(s, p[16]);
   const o = new Int32Array(600), lim = Int32Array.of(1, 0, -1, -1, -1, -1, -1, budget, flags, 122);
   const ext = bindControls(p, pool, controlEntries(registry));
   const call = ext ? ext.call.bind(ext) : () => -2;
+  // program-2 §9.4 (D313): an A2/T row grows its group arena once, as the hosts do on -5
+  for (;;) { if (vmValidateX(p, pool, rule, b, lim, s, o, call) !== -5) break; s = new Int32Array(o[7]); vmScratchInit(s, p[16]); }
   const fn = () => { vmValidateX(p, pool, rule, b, lim, s, o, call); return [o[0], o[3]]; };
   const audit = fn(); assert([0, 48].includes(audit[0]), `${id}: ${audit}`);
   if (id === 'AND' || id === 'NOT') assert(Array.from({ length: p[16] }, (_, i) => p[p[43] + 8 * i] & 255).includes(id === 'AND' ? 16 : 17), id + ': compiler must retain the combinator');
