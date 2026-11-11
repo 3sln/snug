@@ -872,7 +872,11 @@ or fills in the draft:
   charges.
 * **Streaks (D315).** D044's `[* T]` element streak (A0, steady at its
   `ENTRY`) and the map pair streak (a single-block tier-F map in a simple
-  shape, schedule 2) are kept; everything else runs the machines.
+  shape, schedule 2) are kept; everything else runs the machines. The pair
+  streak takes `any` values (D323) and, over a canonical copy, keys that do
+  not ascend: they make the map unordered exactly as the pair-by-pair walk
+  does. It never takes a pair with a recorded event (D280) inside it; the
+  pair-by-pair walk replays those.
 * **Format word (§1; D318)** is 2, D100's spelling of 2.0; W7 (D317) fires
   only when the bound at the compiled limits exceeds the cap.
 

@@ -12,53 +12,48 @@ use crate::snug::cbor::text::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::layout::*;
 
-pub fn rfind(s: &[i32], pos: i32, kind: i32) -> i32 {
-    // The word offset in s of the event (pos, kind), or -1 (a binary search:
-    // the events are sorted by position, then kind).
+pub(crate) fn ev_lb(s: &[i32], pos: i32, kind: i32) -> i32 {
+    // The word offset in s of the first event at or after (pos, kind), or -1
+    // (none, or no event table): a binary search, the events being sorted by
+    // position, then kind.
     let base: i32 = s[(VM_VTAB) as usize];
     if base == 0 {
         return -1;
     }
+    let n: i32 = s[(base) as usize];
     let mut lo: i32 = 0;
-    let mut hi: i32 = s[(base) as usize];
+    let mut hi: i32 = n;
     while lo < hi {
         let mid: i32 = (lo + hi) >> 1;
         let e: i32 = (base + 4) + (EV_WORDS * mid);
         let v: i32 = s[(e) as usize];
-        let k: i32 = s[(e + 1) as usize];
-        if (v == pos) && (k == kind) {
-            return e;
-        }
-        if (v < pos) || ((v == pos) && (k < kind)) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    return -1;
-}
-pub fn ev_next(s: &[i32], pos: i32) -> i32 {
-    // The position of the first recorded event at or after pos, or 2^31 - 1
-    // (none, or no event table): a streak takes no item an event lies in.
-    let base: i32 = s[(VM_VTAB) as usize];
-    if base == 0 {
-        return 2147483647;
-    }
-    let mut lo: i32 = 0;
-    let n: i32 = s[(base) as usize];
-    let mut hi: i32 = s[(base) as usize];
-    while lo < hi {
-        let mid: i32 = (lo + hi) >> 1;
-        if s[((base + 4) + (EV_WORDS * mid)) as usize] < pos {
+        if (v < pos) || ((v == pos) && (s[(e + 1) as usize] < kind)) {
             lo = mid + 1;
         } else {
             hi = mid;
         }
     }
     if lo >= n {
+        return -1;
+    }
+    return (base + 4) + (EV_WORDS * lo);
+}
+pub fn rfind(s: &[i32], pos: i32, kind: i32) -> i32 {
+    // The word offset in s of the event (pos, kind), or -1.
+    let e: i32 = ev_lb(s, pos, kind);
+    if (e >= 0) && ((s[(e) as usize] == pos) && (s[(e + 1) as usize] == kind)) {
+        return e;
+    }
+    return -1;
+}
+pub fn ev_next(s: &[i32], pos: i32) -> i32 {
+    // The position of the first recorded event at or after pos, or 2^31 - 1
+    // (none, or no event table): a streak takes no item an event lies in.
+    let e: i32 = ev_lb(s, pos, 0);
+    if e < 0 {
         return 2147483647;
     }
-    return s[((base + 4) + (EV_WORDS * lo)) as usize];
+    return s[(e) as usize];
 }
 pub fn head_fail(b: &[u8], s: &mut [i32], pos: i32, ai: i32, depth: i32, r: i32) -> i32 {
     // read-arg answered r < 0 at pos. Over a canonical copy a definite array or

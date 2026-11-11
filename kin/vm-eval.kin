@@ -48,12 +48,12 @@
             [snug.cbor.canon :refer [tskip]]
             [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64 eval-leaf cmp-point]]
             [snug.vm.arena :refer [arena-up-top arena-set-up]]
-            [snug.vm.array :refer [AB_ALIVE AB_EVK AB_NACT AB_STATUS AB_MODE AB_SP AB_PC AB_IDX AB_HDR AB_DIED
+            [snug.vm.array :refer [AB_ALIVE AB_RBASE AB_EVK AB_NACT AB_STATUS AB_MODE AB_SP AB_PC AB_IDX AB_HDR AB_DIED
                                    a-run aev leaf-array block-ao apeg array-words array-block-init
-                                   array-records array-mark array-candidates array-advance array-end
+                                   array-records array-candidates array-advance array-end
                                    array-witness]]
-            [snug.vm.map :refer [MB_ALIVE MB_NC MB_NJ MB_CUR MB_CF MB_NP MB_HDR MW MB_BITS BIT_UNORD named-index key-probe MB_E0 MB_E1 MB_E2 leaf-map block-mt mpeg m-named m-namers
-                                 m-member map-words map-block-init map-records map-mark map-unordered
+            [snug.vm.map :refer [MB_ALIVE MB_NC MB_NJ MB_CUR MB_CF MB_NP MB_HDR MW MB_BITS MB_RBASE BIT_UNORD named-index key-probe MB_E0 MB_E1 MB_E2 leaf-map block-mt mpeg m-named m-namers
+                                 m-member map-words map-block-init map-records map-unordered
                                  map-is-unordered map-key-ecs key-span-end key-search map-cursor
                                  map-key-query map-key-phase cand-vts map-values map-update
                                  map-end-block]]))
@@ -973,11 +973,13 @@
            "run (array-end); its records popped; the scalar leaves and combinators;"
            "then, with no answer matched, witness rule 5' (array-witness) when an"
            "ARRAY block failed, else rule 1. 0 or a code.")
-  (let [mark (array-mark p s fb area nb)
+  (let [^:mut mark (neg 1)
         ^:mut be area
         ^:mut unacc 0]
     (for [^I32 _bk 0 nb]
       (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+      (comment "the container's record base (the first A2 block's), popped back to below")
+      (if (< mark 0) (set mark (ia s (+ be AB_RBASE))))
       (let [aok (block-ao p s fb be)]
         (if (!= (ia s (+ be AB_ALIVE)) 0)
           (do (let [ra (array-end p s be aok n pos)
@@ -1130,7 +1132,9 @@
   (comment "A map's blocks (program-2 §6): one per admitted MAP leaf, in query order,"
            "then the T blocks' record stride; the frame must also hold the pair's"
            "candidate list (4 words per member of each block). The block count or"
-           "a code.")
+           "a code; the candidate list's offset (past the blocks) in s[VM_FASTK] and"
+           "its capacity (a member is a pair's candidate at most once) in s[VM_FASTL],"
+           "for the caller to read at once.")
   (let [area (+ fb (* 2 w))
         ^:mut nb 0
         ^:mut used 0
@@ -1147,24 +1151,9 @@
               (set nb (+ nb 1))))))
     (if (> (+ used (* 4 ccap)) cap) (return (neg R_INCONSISTENT)))
     (map-records p s fb area nb)
+    (iset s VM_FASTK (+ area used))
+    (iset s VM_FASTL ccap)
     (return nb)))
-
-(defn ^:pub ^I32 map-cl [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
-  (comment "The candidate list's word offset: past the blocks.")
-  (let [^:mut bo area]
-    (for [^I32 _i 0 nb]
-      (set bo (+ bo (map-words p (block-mt p s fb bo)))))
-    (return bo)))
-
-(defn ^:pub ^I32 map-ccap [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
-  (comment "The candidate list's capacity: a member is a pair's candidate at most once.")
-  (let [^:mut bo area
-        ^:mut k 0]
-    (for [^I32 _i 0 nb]
-      (let [mt (block-mt p s fb bo)]
-        (set k (+ k (ia p (+ mt 1))))
-        (set bo (+ bo (map-words p mt)))))
-    (return k)))
 
 (defn ^:pub ^I32 map-smode [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
   (if (!= nb 1) (return 0))
@@ -1272,12 +1261,14 @@
            "keys); its records popped; the scalar leaves and combinators; then with"
            "no answer matched the witness of the lowest leaf that failed at the end"
            "(program-2 §8 rule 4'), else rule 1. 0 or a code.")
-  (let [mark (map-mark p s fb area nb)
+  (let [^:mut mark (neg 1)
         ^:mut be area
         ^:mut best (neg 1)
         ^:mut bestbo 0]
     (for [^I32 _bm 0 nb]
       (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
+      (comment "the container's record base (the first T block's), popped back to below")
+      (if (< mark 0) (set mark (ia s (+ be MB_RBASE))))
       (let [mtm (block-mt p s fb be)]
         (if (!= (ia s (+ be MB_ALIVE)) 0)
           (do (let [rm (map-end-block p s be mtm kb pos)
@@ -1349,7 +1340,6 @@
             ai (bit-and ib 31)
             ^:mut kh 1
             ^:mut kl ai
-            ^:mut cur (ia s (+ bo MB_CUR))
             ^:mut nj (neg 1)
             ^:mut m 0]
         (local ^I32 vlf)
@@ -1387,12 +1377,11 @@
                 sk (ia s O_LO)
                 nlo (ia s O_HI)]
             (if (== mode 1)
-              (do (if (< kid 0) (break))
-                  (if uo
-                    (set nj (named-index p mt kid))
-                    (do (while (and (< cur nn) (< (ia p (+ named (* 3 cur))) kid))
-                          (set cur (+ cur 1)))
-                        (if (and (< cur nn) (== (ia p (+ named (* 3 cur))) kid)) (set nj cur))))
+              (do (comment "the named table: the ascending cursor stops at the key's"
+                           "entry, so a search answers what it would; unordered, the walk"
+                           "searches too and leaves the cursor")
+                  (if (< kid 0) (break))
+                  (set nj (named-index p mt kid))
                   (if (< nj 0) (break))
                   (if (!= (ia p (+ (+ named (* 3 nj)) 2)) 1) (break))
                   (set m (ia p (+ namers (ia p (+ (+ named (* 3 nj)) 1)))))
@@ -1439,7 +1428,7 @@
               (if (and uo (not unord))
                 (do (set unord true)
                     (iset s (+ bo MB_BITS) (bit-or (ia s (+ bo MB_BITS)) BIT_UNORD))))
-              (iset s (+ bo MB_CUR) cur)
+              (if (and (== mode 1) (not uo)) (iset s (+ bo MB_CUR) nj))
               (iset s (+ bo MB_NJ) nj)
               (iset s (+ bo MB_CF) 0)
               (iset s (+ bo MB_NC) 1)
@@ -1493,8 +1482,8 @@
     (let [nb (map-open p s fb w (- fw (* 2 w)) nq pos)]
       (if (< nb 0) (return nb))
       (set nalive nb)
-      (let [cl (map-cl p s fb area nb)
-            ccap (map-ccap p s fb area nb)
+      (let [cl (ia s VM_FASTK)
+            ccap (ia s VM_FASTL)
             smap (map-smode p s fb area nb)
             pend (count-pending p s fb w nq)]
         (while (< pk n)

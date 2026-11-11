@@ -12,28 +12,38 @@ import { utf8InvalidAt } from '../cbor/text.mjs';
 import { c64, c64min, c8, charge } from './base.mjs';
 import { R_BUDGET, VM_BIGNUM_MAX, VM_BUDGET, VM_FASTM, VM_GENERIC, VM_Q1, VM_VTAB } from './layout.mjs';
 
-export function rfind(s, pos, kind) {
-    // The word offset in s of the event (pos, kind), or -1 (a binary search:
-    // the events are sorted by position, then kind).
+export function evLb(s, pos, kind) {
+    // The word offset in s of the first event at or after (pos, kind), or -1
+    // (none, or no event table): a binary search, the events being sorted by
+    // position, then kind.
     const base = s[VM_VTAB];
     if (base === 0) {
         return -1;
     }
+    const n = s[base];
     let lo = 0;
-    let hi = s[base];
+    let hi = n;
     while (lo < hi) {
         const mid = (lo + hi) >> 1;
         const e = (base + 4) + (EV_WORDS * mid);
         const v = s[e];
-        const k = s[e + 1];
-        if ((v === pos) && (k === kind)) {
-            return e;
-        }
-        if ((v < pos) || ((v === pos) && (k < kind))) {
+        if ((v < pos) || ((v === pos) && (s[e + 1] < kind))) {
             lo = mid + 1;
         } else {
             hi = mid;
         }
+    }
+    if (lo >= n) {
+        return -1;
+    }
+    return (base + 4) + (EV_WORDS * lo);
+}
+
+export function rfind(s, pos, kind) {
+    // The word offset in s of the event (pos, kind), or -1.
+    const e = evLb(s, pos, kind);
+    if ((e >= 0) && ((s[e] === pos) && (s[e + 1] === kind))) {
+        return e;
     }
     return -1;
 }
@@ -41,25 +51,11 @@ export function rfind(s, pos, kind) {
 export function evNext(s, pos) {
     // The position of the first recorded event at or after pos, or 2^31 - 1
     // (none, or no event table): a streak takes no item an event lies in.
-    const base = s[VM_VTAB];
-    if (base === 0) {
+    const e = evLb(s, pos, 0);
+    if (e < 0) {
         return 2147483647;
     }
-    let lo = 0;
-    const n = s[base];
-    let hi = s[base];
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (s[(base + 4) + (EV_WORDS * mid)] < pos) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    if (lo >= n) {
-        return 2147483647;
-    }
-    return s[(base + 4) + (EV_WORDS * lo)];
+    return s[e];
 }
 
 export function headFail(b, s, pos, ai, depth, r) {

@@ -266,19 +266,6 @@ export function mapRecords(p, s, fb, area, nb) {
     }
 }
 
-export function mapMark(p, s, fb, area, nb) {
-    // The container's record base (popped back to at its end), or -1.
-    let bo = area;
-    for (let _i = 0; _i < nb; _i++) {
-        const mt = blockMt(p, s, fb, bo);
-        if (s[bo + MB_RBASE] >= 0) {
-            return s[bo + MB_RBASE];
-        }
-        bo += mapWords(p, mt);
-    }
-    return -1;
-}
-
 export function mapUnordered(p, s, fb, area, nb) {
     // The map's keys stopped ascending (program-2 §6.1 step 1): every block
     // looks its keys up by binary search from now on.

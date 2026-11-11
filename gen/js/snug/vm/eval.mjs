@@ -10,12 +10,12 @@ import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
 import { utf8InvalidAt } from '../cbor/text.mjs';
 import { arenaSetUp, arenaUpTop } from './arena.mjs';
-import { AB_ALIVE, AB_DIED, AB_EVK, AB_HDR, AB_IDX, AB_MODE, AB_NACT, AB_PC, AB_SP, AB_STATUS, aRun, aev, apeg, arrayAdvance, arrayBlockInit, arrayCandidates, arrayEnd, arrayMark, arrayRecords, arrayWitness, arrayWords, blockAo, leafArray } from './array.mjs';
+import { AB_ALIVE, AB_DIED, AB_EVK, AB_HDR, AB_IDX, AB_MODE, AB_NACT, AB_PC, AB_RBASE, AB_SP, AB_STATUS, aRun, aev, apeg, arrayAdvance, arrayBlockInit, arrayCandidates, arrayEnd, arrayRecords, arrayWitness, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c64min, c8, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadSeq, deadStdCheck, deadTyped, decimalCheck, evNext, headFail, keyOrder, ndarrayCheck, pairCheck, pairCount, pairWalk, replayEnd, replayKey, vtabFind } from './dead.mjs';
 import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, G_FORCED, G_NOSTREAK, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, PEG_HDR, P_ANYKEY, P_EMBED, P_ENTRY, P_INDEX, P_KEY, P_MEMBER, P_REP, P_TAG, R_AGROW, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_GROUP_LIMIT, R_INCONSISTENT, R_MISSING, R_NONDET, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, TIER_F, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_VTAB, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
-import { BIT_UNORD, MB_ALIVE, MB_BITS, MB_CF, MB_CUR, MB_E0, MB_E1, MB_E2, MB_HDR, MB_NC, MB_NJ, MB_NP, MW, blockMt, candVts, keyProbe, keySearch, keySpanEnd, leafMap, mMember, mNamed, mNamers, mapBlockInit, mapCursor, mapEndBlock, mapIsUnordered, mapKeyEcs, mapKeyPhase, mapKeyQuery, mapMark, mapRecords, mapUnordered, mapUpdate, mapValues, mapWords, mpeg, namedIndex } from './map.mjs';
+import { BIT_UNORD, MB_ALIVE, MB_BITS, MB_CF, MB_CUR, MB_E0, MB_E1, MB_E2, MB_HDR, MB_NC, MB_NJ, MB_NP, MB_RBASE, MW, blockMt, candVts, keyProbe, keySearch, keySpanEnd, leafMap, mMember, mNamed, mNamers, mapBlockInit, mapCursor, mapEndBlock, mapIsUnordered, mapKeyEcs, mapKeyPhase, mapKeyQuery, mapRecords, mapUnordered, mapUpdate, mapValues, mapWords, mpeg, namedIndex } from './map.mjs';
 
 export function unitOf(ctx) {
     // The per-leaf unit of eval-scalars: 0 for schedule 2's one-leaf child.
@@ -1388,12 +1388,16 @@ export function arrClose(p, pool, b, s, fb, w, area, nb, d, n, pos, q0, q, nq, c
     // run (array-end); its records popped; the scalar leaves and combinators;
     // then, with no answer matched, witness rule 5' (array-witness) when an
     // ARRAY block failed, else rule 1. 0 or a code.
-    const mark = arrayMark(p, s, fb, area, nb);
+    let mark = -1;
     let be = area;
     let unacc = 0;
     for (let _bk = 0; _bk < nb; _bk++) {
         if (!charge(s, 1, pos)) {
             return -R_BUDGET;
+        }
+        // the container's record base (the first A2 block's), popped back to below
+        if (mark < 0) {
+            mark = s[be + AB_RBASE];
         }
         const aok = blockAo(p, s, fb, be);
         if (s[be + AB_ALIVE] !== 0) {
@@ -1635,7 +1639,9 @@ export function mapOpen(p, s, fb, w, cap, nq, pos) {
     // A map's blocks (program-2 §6): one per admitted MAP leaf, in query order,
     // then the T blocks' record stride; the frame must also hold the pair's
     // candidate list (4 words per member of each block). The block count or
-    // a code.
+    // a code; the candidate list's offset (past the blocks) in s[VM_FASTK] and
+    // its capacity (a member is a pair's candidate at most once) in s[VM_FASTL],
+    // for the caller to read at once.
     const area = fb + (2 * w);
     let nb = 0;
     let used = 0;
@@ -1660,28 +1666,9 @@ export function mapOpen(p, s, fb, w, cap, nq, pos) {
         return -R_INCONSISTENT;
     }
     mapRecords(p, s, fb, area, nb);
+    s[VM_FASTK] = area + used;
+    s[VM_FASTL] = ccap;
     return nb;
-}
-
-export function mapCl(p, s, fb, area, nb) {
-    // The candidate list's word offset: past the blocks.
-    let bo = area;
-    for (let _i = 0; _i < nb; _i++) {
-        bo += mapWords(p, blockMt(p, s, fb, bo));
-    }
-    return bo;
-}
-
-export function mapCcap(p, s, fb, area, nb) {
-    // The candidate list's capacity: a member is a pair's candidate at most once.
-    let bo = area;
-    let k = 0;
-    for (let _i = 0; _i < nb; _i++) {
-        const mt = blockMt(p, s, fb, bo);
-        k += p[mt + 1];
-        bo += mapWords(p, mt);
-    }
-    return k;
 }
 
 export function mapSmode(p, s, fb, area, nb) {
@@ -1836,13 +1823,17 @@ export function mapClose(p, pool, b, kb, s, fb, w, area, nb, d, n, pos, q0, q, n
     // keys); its records popped; the scalar leaves and combinators; then with
     // no answer matched the witness of the lowest leaf that failed at the end
     // (program-2 §8 rule 4'), else rule 1. 0 or a code.
-    const mark = mapMark(p, s, fb, area, nb);
+    let mark = -1;
     let be = area;
     let best = -1;
     let bestbo = 0;
     for (let _bm = 0; _bm < nb; _bm++) {
         if (!charge(s, 1, pos)) {
             return -R_BUDGET;
+        }
+        // the container's record base (the first T block's), popped back to below
+        if (mark < 0) {
+            mark = s[be + MB_RBASE];
         }
         const mtm = blockMt(p, s, fb, be);
         if (s[be + MB_ALIVE] !== 0) {
@@ -1938,7 +1929,6 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
         const ai = ib & 31;
         let kh = 1;
         let kl = ai;
-        let cur = s[bo + MB_CUR];
         let nj = -1;
         let m = 0;
         let vlf;
@@ -2010,19 +2000,13 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
         const sk = s[O_LO];
         const nlo = s[O_HI];
         if (mode === 1) {
+            // the named table: the ascending cursor stops at the key's
+            // entry, so a search answers what it would; unordered, the walk
+            // searches too and leaves the cursor
             if (kid < 0) {
                 break;
             }
-            if (uo) {
-                nj = namedIndex(p, mt, kid);
-            } else {
-                while ((cur < nn) && (p[named + (3 * cur)] < kid)) {
-                    cur += 1;
-                }
-                if ((cur < nn) && (p[named + (3 * cur)] === kid)) {
-                    nj = cur;
-                }
-            }
+            nj = namedIndex(p, mt, kid);
             if (nj < 0) {
                 break;
             }
@@ -2109,7 +2093,9 @@ export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, c
             unord = true;
             s[bo + MB_BITS] = s[bo + MB_BITS] | BIT_UNORD;
         }
-        s[bo + MB_CUR] = cur;
+        if ((mode === 1) && (!uo)) {
+            s[bo + MB_CUR] = nj;
+        }
         s[bo + MB_NJ] = nj;
         s[bo + MB_CF] = 0;
         s[bo + MB_NC] = 1;
@@ -2174,8 +2160,8 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ext)
         return nb;
     }
     nalive = nb;
-    const cl = mapCl(p, s, fb, area, nb);
-    const ccap = mapCcap(p, s, fb, area, nb);
+    const cl = s[VM_FASTK];
+    const ccap = s[VM_FASTL];
     const smap = mapSmode(p, s, fb, area, nb);
     const pend = countPending(p, s, fb, w, nq);
     while (pk < n) {

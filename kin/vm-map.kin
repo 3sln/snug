@@ -228,15 +228,6 @@
                       (iset s (+ bo2 MB_STRIDE) stride)))
                 (set bo2 (+ bo2 (map-words p mt2))))))))))
 
-(defn ^:pub ^I32 map-mark [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
-  (comment "The container's record base (popped back to at its end), or -1.")
-  (let [^:mut bo area]
-    (for [^I32 _i 0 nb]
-      (let [mt (block-mt p s fb bo)]
-        (if (>= (ia s (+ bo MB_RBASE)) 0) (return (ia s (+ bo MB_RBASE))))
-        (set bo (+ bo (map-words p mt)))))
-    (return (neg 1))))
-
 (defn ^:pub map-unordered [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb]
   (comment "The map's keys stopped ascending (program-2 §6.1 step 1): every block"
            "looks its keys up by binary search from now on.")

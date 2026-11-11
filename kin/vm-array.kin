@@ -149,15 +149,6 @@
                       (iset s (+ bo2 AB_STRIDE) stride)))
                 (set bo2 (+ bo2 (array-words p ao2))))))))))
 
-(defn ^:pub ^I32 array-mark [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
-  (comment "The container's record base (the arena top to pop back to at its end),"
-           "or -1 when it has no A2 block.")
-  (let [^:mut bo area]
-    (for [^I32 _i 0 nb]
-      (let [ao (block-ao p s fb bo)]
-        (if (>= (ia s (+ bo AB_RBASE)) 0) (return (ia s (+ bo AB_RBASE))))
-        (set bo (+ bo (array-words p ao)))))
-    (return (neg 1))))
 
 (defn ^:pub aev [^Ints s ^I32 bo ^I32 kind ^I32 idx ^I32 off]
   (comment "Record a failure event: the farthest index wins, ties the first in run"

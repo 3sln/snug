@@ -11,7 +11,7 @@
 //   sess-det, sess-valid        the session (whole windows, bench driver kin/scripts/vmsession-run.mjs runSession)
 //   scan-nondet, vm-nondet, sess-nondet   valid flags over the non-deterministic re-encoding
 //   vm-rev, sess-rev            valid flags over the deterministic encoding with every map's keys reversed
-//                               (only the order is non-deterministic: the canonical path, the map streak over it, D325)
+//                               (only the order is non-deterministic: the canonical path and the map streak over it)
 // A tree before P8.4 has the *-det arms only. vm arms also report the units used.
 import os from 'node:os';
 import path from 'node:path';

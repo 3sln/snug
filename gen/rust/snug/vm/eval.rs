@@ -1348,12 +1348,16 @@ pub fn arr_close(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i3
     // run (array-end); its records popped; the scalar leaves and combinators;
     // then, with no answer matched, witness rule 5' (array-witness) when an
     // ARRAY block failed, else rule 1. 0 or a code.
-    let mark: i32 = array_mark(p, s, fb, area, nb);
+    let mut mark: i32 = -1;
     let mut be: i32 = area;
     let mut unacc: i32 = 0;
     for _bk in 0..nb {
         if !charge(s, 1, pos) {
             return -R_BUDGET;
+        }
+        // the container's record base (the first A2 block's), popped back to below
+        if mark < 0 {
+            mark = s[(be + AB_RBASE) as usize];
         }
         let aok: i32 = block_ao(p, s, fb, be);
         if s[(be + AB_ALIVE) as usize] != 0 {
@@ -1591,7 +1595,9 @@ pub fn map_open(p: &[i32], s: &mut [i32], fb: i32, w: i32, cap: i32, nq: i32, po
     // A map's blocks (program-2 §6): one per admitted MAP leaf, in query order,
     // then the T blocks' record stride; the frame must also hold the pair's
     // candidate list (4 words per member of each block). The block count or
-    // a code.
+    // a code; the candidate list's offset (past the blocks) in s[VM_FASTK] and
+    // its capacity (a member is a pair's candidate at most once) in s[VM_FASTL],
+    // for the caller to read at once.
     let area: i32 = fb + (2 * w);
     let mut nb: i32 = 0;
     let mut used: i32 = 0;
@@ -1616,26 +1622,9 @@ pub fn map_open(p: &[i32], s: &mut [i32], fb: i32, w: i32, cap: i32, nq: i32, po
         return -R_INCONSISTENT;
     }
     map_records(p, s, fb, area, nb);
+    s[(VM_FASTK) as usize] = area + used;
+    s[(VM_FASTL) as usize] = ccap;
     return nb;
-}
-pub fn map_cl(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
-    // The candidate list's word offset: past the blocks.
-    let mut bo: i32 = area;
-    for _i in 0..nb {
-        bo += map_words(p, block_mt(p, s, fb, bo));
-    }
-    return bo;
-}
-pub fn map_ccap(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
-    // The candidate list's capacity: a member is a pair's candidate at most once.
-    let mut bo: i32 = area;
-    let mut k: i32 = 0;
-    for _i in 0..nb {
-        let mt: i32 = block_mt(p, s, fb, bo);
-        k += p[(mt + 1) as usize];
-        bo += map_words(p, mt);
-    }
-    return k;
 }
 pub fn map_smode(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
     if nb != 1 {
@@ -1782,13 +1771,17 @@ pub fn map_close(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], fb:
     // keys); its records popped; the scalar leaves and combinators; then with
     // no answer matched the witness of the lowest leaf that failed at the end
     // (program-2 §8 rule 4'), else rule 1. 0 or a code.
-    let mark: i32 = map_mark(p, s, fb, area, nb);
+    let mut mark: i32 = -1;
     let mut be: i32 = area;
     let mut best: i32 = -1;
     let mut bestbo: i32 = 0;
     for _bm in 0..nb {
         if !charge(s, 1, pos) {
             return -R_BUDGET;
+        }
+        // the container's record base (the first T block's), popped back to below
+        if mark < 0 {
+            mark = s[(be + MB_RBASE) as usize];
         }
         let mtm: i32 = block_mt(p, s, fb, be);
         if s[(be + MB_ALIVE) as usize] != 0 {
@@ -1883,7 +1876,6 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         let ai: i32 = ib & 31;
         let mut kh: i32 = 1;
         let mut kl: i32 = ai;
-        let mut cur: i32 = s[(bo + MB_CUR) as usize];
         let mut nj: i32 = -1;
         let mut m: i32 = 0;
         let vlf: i32;
@@ -1955,19 +1947,13 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         let sk: i32 = s[(O_LO) as usize];
         let nlo: i32 = s[(O_HI) as usize];
         if mode == 1 {
+            // the named table: the ascending cursor stops at the key's
+            // entry, so a search answers what it would; unordered, the walk
+            // searches too and leaves the cursor
             if kid < 0 {
                 break;
             }
-            if uo {
-                nj = named_index(p, mt, kid);
-            } else {
-                while (cur < nn) && (p[(named + (3 * cur)) as usize] < kid) {
-                    cur += 1;
-                }
-                if (cur < nn) && (p[(named + (3 * cur)) as usize] == kid) {
-                    nj = cur;
-                }
-            }
+            nj = named_index(p, mt, kid);
             if nj < 0 {
                 break;
             }
@@ -2054,7 +2040,9 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             unord = true;
             s[(bo + MB_BITS) as usize] = s[(bo + MB_BITS) as usize] | BIT_UNORD;
         }
-        s[(bo + MB_CUR) as usize] = cur;
+        if (mode == 1) && (!uo) {
+            s[(bo + MB_CUR) as usize] = nj;
+        }
         s[(bo + MB_NJ) as usize] = nj;
         s[(bo + MB_CF) as usize] = 0;
         s[(bo + MB_NC) as usize] = 1;
@@ -2118,8 +2106,8 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
         return nb;
     }
     nalive = nb;
-    let cl: i32 = map_cl(p, s, fb, area, nb);
-    let ccap: i32 = map_ccap(p, s, fb, area, nb);
+    let cl: i32 = s[(VM_FASTK) as usize];
+    let ccap: i32 = s[(VM_FASTL) as usize];
     let smap: i32 = map_smode(p, s, fb, area, nb);
     let pend: i32 = count_pending(p, s, fb, w, nq);
     while pk < n {
