@@ -566,14 +566,14 @@ pub fn leaf_bytes(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos:
     return R_BITS;
 }
 pub fn leaf_simple(p: &[i32], b: &[u8], lb: i32, pos: i32) -> i32 {
-    // #7.v: v 0..23 is the head's ai; v 32..255 (D284) the f8 head's argument.
-    let v: i32 = p[(lb + 2) as usize];
+    // The simple values d0..d1 (P9.3): the value is the head's ai below 24, the
+    // f8 head's argument (32..255, D284) otherwise.
     let ib: i32 = b[(pos) as usize] as i32;
-    if v < 24 {
-        if (ib & 31) == v {
-            return 0;
-        }
-    } else if (ib == 248) && ((b[(pos + 1) as usize] as i32) == v) {
+    let mut v: i32 = ib & 31;
+    if ib == 248 {
+        v = b[(pos + 1) as usize] as i32;
+    }
+    if ((ib >> 5) == 7) && (((v < 24) || (ib == 248)) && ((v >= p[(lb + 2) as usize]) && (v <= p[(lb + 3) as usize]))) {
         return 0;
     }
     return R_VALUE;

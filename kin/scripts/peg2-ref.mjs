@@ -127,7 +127,7 @@ export function check(P, B, rule, item, { cuts = 'rfc', steps = 2000000 } = {}) 
         for (let i = 0; i < d(1); i++) { const q = sec(14) + 4 * (d(0) + i); if (u64(P[q], P[q + 1]) <= key && key <= u64(P[q + 2], P[q + 3])) return true; }
         return false;
       }
-      case 5: return it.kind === 'simple' && it.value === d(0);
+      case 5: return it.kind === 'simple' && it.value >= d(0) && it.value <= d(1); // P9.3: d0..d1
       case 6: return bytesEq(enc(it), d(0), d(1));
       case 7: { const e = enc(it); for (let i = 0; i < d(1); i++) { const q = sec(15) + 2 * (d(0) + i); if (bytesEq(e, P[q], P[q + 1])) return true; } return false; }
       case 8: {

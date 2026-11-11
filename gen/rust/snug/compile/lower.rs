@@ -474,7 +474,7 @@ pub(crate) fn ext_arg_leaf(h: &mut [i32], l: i32, pos: i32) -> i32 {
         }
         return 0;
     }
-    if k == K_SIMPLE {
+    if (k == K_SIMPLE) && (ld(h, l, 0) == ld(h, l, 1)) {
         let v: i32 = ld(h, l, 0);
         if v < 24 {
             vpush1(h, T_EXTARG, 224 | v);
@@ -827,7 +827,89 @@ pub(crate) fn lower_tag(h: &mut [i32], node: i32, env: i32) -> i32 {
     con_find(h, node, env);
     return con_put(h, node, env, ts5);
 }
-pub(crate) fn lower_major(h: &mut [i32], node: i32) -> i32 {
+pub(crate) fn head7(h: &mut [i32], a: i32, b: i32, mode: i32) -> i32 {
+    // RFC 9682 §3.2: the #7 head-numbers a..b (0 <= a <= b <= 255). 0..23 and
+    // 32..255 are simple values; 24 stands for ai 24, i.e. every simple value
+    // 32..255 (D284 makes f8 00..f8 1f malformed); 25..27 for the floats (D328:
+    // by value); 28..31 for nothing (no such data item). Answers bit 0 for 24 and
+    // bits 1..3 for 25..27. mode 1 pushes the simple ranges onto T_STK, mode 2
+    // only the one below 24 (24 is in, so 32..255 comes whole), mode 0 none.
+    let mut f: i32 = 0;
+    for w in 24..28 {
+        if (a <= w) && (b >= w) {
+            f |= 1 << (w - 24);
+        }
+    }
+    if (mode > 0) && (a <= 23) {
+        let mut b1: i32 = b;
+        if b1 > 23 {
+            b1 = 23;
+        }
+        let l1: i32 = mk_simple_range(h, a, b1);
+        vpush1(h, T_STK, l1);
+    }
+    if (mode == 1) && (b >= 32) {
+        let mut a2: i32 = a;
+        if a2 < 32 {
+            a2 = 32;
+        }
+        let l2: i32 = mk_simple_range(h, a2, b);
+        vpush1(h, T_STK, l2);
+    }
+    return f;
+}
+pub(crate) fn head7_end(h: &mut [i32], f: i32, from: i32) -> i32 {
+    // head7's floats and ai 24 onto T_STK; the typeset of T_STK[from..].
+    let lf: i32 = mk_float_from(h, f >> 1, T_TMP2, 0);
+    vpush1(h, T_STK, lf);
+    if (f & 1) != 0 {
+        let l24: i32 = mk_simple_range(h, 32, 255);
+        vpush1(h, T_STK, l24);
+    }
+    return ts_make(h, from);
+}
+pub(crate) fn lower_head7(h: &mut [i32], nts: i32, pos: i32) -> i32 {
+    // #7.<T> (RFC 9682 §3.2): T's integers in 0..255 as head-numbers (head7);
+    // the rest of T matches nothing, as #6.<T> keeps only 0..2^64-1.
+    let tl: i32 = single_leaf(h, nts);
+    let from: i32 = vlen(h, T_STK);
+    let mut f: i32 = 0;
+    if (tl < 0) || (lk(h, tl) != K_INT) {
+        return fail(h, ERR_MAJOR, pos);
+    }
+    // pass 0 learns whether 24 is in; pass 1 pushes the simple ranges
+    for pass in 0..2 {
+        for i in 0..ld(h, tl, 1) {
+            let o: i32 = 6 * (ld(h, tl, 0) + i);
+            let lr: i32 = vget(h, T_IV, o);
+            let la: i32 = vget(h, T_IV, o + 1);
+            let lb: i32 = vget(h, T_IV, o + 2);
+            let hr: i32 = vget(h, T_IV, o + 3);
+            let ha: i32 = vget(h, T_IV, o + 4);
+            let hb: i32 = vget(h, T_IV, o + 5);
+            let mut a: i32 = lb;
+            let mut b: i32 = hb;
+            // clip the interval to 0..255 (b -1: nothing there)
+            if lr < R_POS {
+                a = 0;
+            }
+            if (hr > R_POS) || ((ha != 0) || ((hb < 0) || (hb > 255))) {
+                b = 255;
+            }
+            if hr < R_POS {
+                b = -1;
+            }
+            if (lr > R_POS) || ((lr == R_POS) && ((la != 0) || ((lb < 0) || (lb > 255)))) {
+                b = -1;
+            }
+            if a <= b {
+                f |= head7(h, a, b, pass * (1 + (f & 1)));
+            }
+        }
+    }
+    return head7_end(h, f, from);
+}
+pub(crate) fn lower_major(h: &mut [i32], node: i32, env: i32) -> i32 {
     let m: i32 = na(h, node);
     let mode: i32 = nb(h, node);
     let hi: i32 = nc(h, node);
@@ -853,26 +935,20 @@ pub(crate) fn lower_major(h: &mut [i32], node: i32) -> i32 {
         let lm: i32 = mk_major(h, m);
         return ts_of1(h, lm);
     }
-    if (m != 7) || (hi != 0) {
+    if mode == 1 {
+        let nts:  = lower_type(h, ne(h, node), env);
+        if nts < 0 {
+            return -1;
+        }
+        return lower_head7(h, nts, pos);
+    }
+    if ((m != 7) || (hi != 0)) || ((lo < 0) || (lo > 255)) {
         return fail(h, ERR_MAJOR, pos);
     }
-    if (lo == 25) || ((lo == 26) || (lo == 27)) {
-        let lf: i32 = mk_float_from(h, 1 << (lo - 25), T_TMP2, 0);
-        return ts_of1(h, lf);
-    }
-    if (lo >= 0) && (lo <= 23) {
-        let ls: i32 = mk_simple(h, lo);
-        return ts_of1(h, ls);
-    }
-    if (lo >= 0) && (lo <= 31) {
-        return ts_of1(h, -2);
-    }
-    // RFC 9682 §3.2: #7.32 .. #7.255 are the two-byte simple values (D284)
-    if (lo >= 32) && (lo <= 255) {
-        let ls2: i32 = mk_simple(h, lo);
-        return ts_of1(h, ls2);
-    }
-    return fail(h, ERR_MAJOR, pos);
+    let from: i32 = vlen(h, T_STK);
+    let f: i32 = head7(h, lo, lo, 0);
+    head7(h, lo, lo, 1 + (f & 1));
+    return head7_end(h, f, from);
 }
 pub(crate) fn content_ts(h: &mut [i32], cn: i32, env: i32) -> i32 {
     // A tag's or embedded document's content: the type at node cn (-1: any).
@@ -1004,7 +1080,7 @@ pub fn lower_type(h: &mut [i32], node: i32, env: i32) -> i32 {
         r = lower_tag(h, node, env);
     }
     if k == N_MAJOR {
-        r = lower_major(h, node);
+        r = lower_major(h, node, env);
     }
     if k == N_ANY {
         let al: i32 = mk_any(h);

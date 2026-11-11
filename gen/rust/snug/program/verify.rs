@@ -1102,7 +1102,8 @@ pub(crate) fn check_leaf(p: &[i32], b: &[u8], s: &mut [i32], l: i32) -> bool {
         return want(s, fiv_run_ok(p, d0, d1) && zero_from(p, o, 2), o, C_LEAF);
     }
     if k == 5 {
-        return want(s, (((d0 >= 0) && (d0 <= 23)) || ((d0 >= 32) && (d0 <= 255))) && zero_from(p, o, 1), o, C_LEAF);
+        // SIMPLE d0..d1: both in 0..23 or both in 32..255 (P9.3)
+        return want(s, ((d0 <= d1) && (((d0 >= 0) && (d1 <= 23)) || ((d0 >= 32) && (d1 <= 255)))) && zero_from(p, o, 2), o, C_LEAF);
     }
     if k == 6 {
         return want(s, (byte_range(b, d0, d1) && (d1 >= 1)) && zero_from(p, o, 2), o, C_LEAF);

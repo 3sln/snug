@@ -546,7 +546,12 @@ export function check(schema, rule, value, { cuts = 'rfc', steps = 100000 } = {}
     tick(); t = deref(t);
     if (t.k === 'lit') return [t.value];
     if (t.k === 'tchoice') return t.xs.flatMap(constants);
-    if (t.k === 'major' && t.major === 7 && t.arg) return constants(t.arg).filter(v => v.kind === 'int' && (v.value < 24n || v.value >= 32n && v.value <= 255n)).map(v => ({ kind: 'simple', value: Number(v.value) }));
+    if (t.k === 'major' && t.major === 7 && t.arg) {
+      const vs = constants(t.arg);
+      // RFC 9682 §3.2: #7.24..#7.27 stand for sets (ai 24, the floats), not constants
+      if (vs.some(v => v.kind === 'int' && v.value >= 24n && v.value <= 27n)) throw UNKNOWN;
+      return vs.filter(v => v.kind === 'int' && (v.value < 24n || v.value >= 32n && v.value <= 255n)).map(v => ({ kind: 'simple', value: Number(v.value) }));
+    }
     if (t.k === 'array') {
       function list(g) {
         tick(); g = deref(g);
@@ -638,6 +643,8 @@ export function check(schema, rule, value, { cuts = 'rfc', steps = 100000 } = {}
         if (ai.value <= 27n) return BigInt(arg) < 1n << (8n * (1n << (ai.value - 24n)));
         return ai.value === 31n && t.major >= 2;
       }
+      // RFC 9682 §3.2: #7.24 (ai 24) is every simple value 32..255
+      if (v.kind === 'simple' && v.value >= 32 && type(t.arg, I(24))) return true;
       return type(t.arg, I(arg));
     }
     if (t.k === 'tag') return v.kind === 'tag' && (!t.arg || type(t.arg, I(v.tag))) && type(t.t, v.item);

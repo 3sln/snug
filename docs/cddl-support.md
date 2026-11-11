@@ -31,7 +31,7 @@ D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validati
 | Productive recursive types | Supported when recursion passes through a container/tag; depth bounded. |
 | Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`; see D036. |
 | Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison, encoded-width floats; hexadecimal/decimal floats and h'/b64'/byte literals supported. |
-| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, RFC 9682 tag constraints supported where well formed. Runtime profile still restricts actual tags/simple values. |
+| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value, D328); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing (D334). Runtime profile still restricts actual tags/simple values. |
 | Appendix D prelude | Compiled from CDDL text; includes exact bignum integer types. Some names have no value under the current wire profile. |
 | UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
 

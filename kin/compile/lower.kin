@@ -46,7 +46,7 @@
                                         nrules RK_TYPE RK_GROUP]]
             [snug.compile.bytes :refer [intern enc-string enc-int-key mag-of bid-byte bid-len head-push]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd leaf-new ts-make ts-of1 ts-push-leaves
-                                       ts-n ts-leaf leaf-mask mk-any mk-major mk-simple mk-lit mk-text
+                                       ts-n ts-leaf leaf-mask mk-any mk-major mk-simple-range mk-lit mk-text
                                        mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow u64-cmp
                                        stage stage-d stage-intern mk-and
                                        K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
@@ -380,7 +380,7 @@
             (for [^I32 i 0 (bid-len h bid)]
               (let [c (bid-byte h bid i)] (vpush1 h T_EXTARG c))))
           (return 0)))
-    (if (== k K_SIMPLE)
+    (if (and (== k K_SIMPLE) (== (ld h l 0) (ld h l 1)))
       (do (let [v (ld h l 0)]
             (if (< v 24)
               (vpush1 h T_EXTARG (bit-or 224 v))
@@ -593,7 +593,59 @@
             (con-find h node env)
             (return (con-put h node env ts5))))))))
 
-(defn ^I32 lower-major [^Ints h ^I32 node]
+(defn ^I32 head7 [^Ints h ^I32 a ^I32 b ^I32 mode]
+  (comment "RFC 9682 §3.2: the #7 head-numbers a..b (0 <= a <= b <= 255). 0..23 and"
+           "32..255 are simple values; 24 stands for ai 24, i.e. every simple value"
+           "32..255 (D284 makes f8 00..f8 1f malformed); 25..27 for the floats (D328:"
+           "by value); 28..31 for nothing (no such data item). Answers bit 0 for 24 and"
+           "bits 1..3 for 25..27. mode 1 pushes the simple ranges onto T_STK, mode 2"
+           "only the one below 24 (24 is in, so 32..255 comes whole), mode 0 none.")
+  (let [^:mut f 0]
+    (for [^I32 w 24 28]
+      (if (and (<= a w) (>= b w)) (set f (bit-or f (shl 1 (- w 24))))))
+    (if (and (> mode 0) (<= a 23))
+      (do (let [^:mut b1 b]
+            (if (> b1 23) (set b1 23))
+            (let [l1 (mk-simple-range h a b1)] (vpush1 h T_STK l1)))))
+    (if (and (== mode 1) (>= b 32))
+      (do (let [^:mut a2 a]
+            (if (< a2 32) (set a2 32))
+            (let [l2 (mk-simple-range h a2 b)] (vpush1 h T_STK l2)))))
+    (return f)))
+
+(defn ^I32 head7-end [^Ints h ^I32 f ^I32 from]
+  (comment "head7's floats and ai 24 onto T_STK; the typeset of T_STK[from..].")
+  (let [lf (mk-float-from h (sar f 1) T_TMP2 0)] (vpush1 h T_STK lf))
+  (if (!= (bit-and f 1) 0)
+    (do (let [l24 (mk-simple-range h 32 255)] (vpush1 h T_STK l24))))
+  (return (ts-make h from)))
+
+(defn ^I32 lower-head7 [^Ints h ^I32 nts ^I32 pos]
+  (comment "#7.<T> (RFC 9682 §3.2): T's integers in 0..255 as head-numbers (head7);"
+           "the rest of T matches nothing, as #6.<T> keeps only 0..2^64-1.")
+  (let [tl (single-leaf h nts)
+        from (vlen h T_STK)
+        ^:mut f 0]
+    (if (or (< tl 0) (!= (lk h tl) K_INT)) (return (fail h ERR_MAJOR pos)))
+    (comment "pass 0 learns whether 24 is in; pass 1 pushes the simple ranges")
+    (for [^I32 pass 0 2]
+      (for [^I32 i 0 (ld h tl 1)]
+        (let [o (* 6 (+ (ld h tl 0) i))
+              lr (vget h T_IV o) la (vget h T_IV (+ o 1)) lb (vget h T_IV (+ o 2))
+              hr (vget h T_IV (+ o 3)) ha (vget h T_IV (+ o 4)) hb (vget h T_IV (+ o 5))
+              ^:mut a lb
+              ^:mut b hb]
+          (comment "clip the interval to 0..255 (b -1: nothing there)")
+          (if (< lr R_POS) (set a 0))
+          (if (or (> hr R_POS) (or (!= ha 0) (or (< hb 0) (> hb 255)))) (set b 255))
+          (if (< hr R_POS) (set b (neg 1)))
+          (if (or (> lr R_POS) (and (== lr R_POS) (or (!= la 0) (or (< lb 0) (> lb 255)))))
+            (set b (neg 1)))
+          (if (<= a b)
+            (set f (bit-or f (head7 h a b (* pass (+ 1 (bit-and f 1))))))))))
+    (return (head7-end h f from))))
+
+(defn ^I32 lower-major [^Ints h ^I32 node ^I32 env]
   (let [m (na h node)
         mode (nb h node)
         hi (nc h node)
@@ -607,16 +659,15 @@
           (if (== m 2) (do (let [l2 (mk-bytes h 0 INF (neg 1))] (return (ts-of1 h l2)))))
           (if (== m 3) (do (let [l3 (mk-text h 0 INF (neg 1))] (return (ts-of1 h l3)))))
           (let [lm (mk-major h m)] (return (ts-of1 h lm)))))
-    (if (or (!= m 7) (!= hi 0)) (return (fail h ERR_MAJOR pos)))
-    (if (or (== lo 25) (or (== lo 26) (== lo 27)))
-      (do (let [lf (mk-float-from h (shl 1 (- lo 25)) T_TMP2 0)] (return (ts-of1 h lf)))))
-    (if (and (>= lo 0) (<= lo 23))
-      (do (let [ls (mk-simple h lo)] (return (ts-of1 h ls)))))
-    (if (and (>= lo 0) (<= lo 31)) (return (ts-of1 h (neg 2))))
-    (comment "RFC 9682 §3.2: #7.32 .. #7.255 are the two-byte simple values (D284)")
-    (if (and (>= lo 32) (<= lo 255))
-      (do (let [ls2 (mk-simple h lo)] (return (ts-of1 h ls2)))))
-    (return (fail h ERR_MAJOR pos))))
+    (if (== mode 1)
+      (do (let [nts (lower-type h (ne h node) env)]
+            (if (< nts 0) (return (neg 1)))
+            (return (lower-head7 h nts pos)))))
+    (if (or (or (!= m 7) (!= hi 0)) (or (< lo 0) (> lo 255))) (return (fail h ERR_MAJOR pos)))
+    (let [from (vlen h T_STK)
+          f (head7 h lo lo 0)]
+      (head7 h lo lo (+ 1 (bit-and f 1)))
+      (return (head7-end h f from)))))
 
 ;; ------------------------------------------------------------ containers
 
@@ -696,7 +747,7 @@
         (do (let [from2 (vlen h T_STK)]
               (if (>= (enum-node h node env) 0) (set r (ts-make h from2)) (vtrunc h T_STK from2)))))
       (if (== k N_TAG) (set r (lower-tag h node env)))
-      (if (== k N_MAJOR) (set r (lower-major h node)))
+      (if (== k N_MAJOR) (set r (lower-major h node env)))
       (if (== k N_ANY) (do (let [al (mk-any h)] (set r (ts-of1 h al)))))
       (leave h)
       (if (erred h) (return (neg 1)))

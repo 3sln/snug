@@ -27,7 +27,7 @@
             [snug.compile.bytes :refer [bid-len bid-byte bid-off intern enc-string mag-add mag-sub mag-cmp mag-from64 mag-add1]]
             [snug.compile.regexp :refer [rx-compile]]
             [snug.compile.leaf :refer [lk lflags ld ts-n ts-leaf ts-make ts-of1 leaf-mask
-                                       stage stage-d stage-intern mk-lit mk-text mk-bytes mk-and mk-not
+                                       stage stage-d stage-intern mk-lit mk-text mk-bytes mk-and mk-not mk-simple-range
                                        iv-push iv-load iv-normalize iv-intersect mk-int-from bound-cmp
                                        bound-succ bound-pred fiv-load fiv-normalize fiv-intersect
                                        mk-float-from u64-cmp lit-member has-ext enc-head-len point-of mk-int-range
@@ -635,14 +635,14 @@
             (fiv-intersect h T_IVA T_IVB T_IVC)
             (let [nf (mk-float-from h w T_IVC 1)] (vpush1 h T_STK nf))
             (return 0))))
-    (if (and (== ka K_SIMPLE) (== kb K_SIMPLE))
-      (do (if (== (ld h a 0) (ld h b 0)) (vpush1 h T_STK a)) (return 0)))
-    (if (or (and (== ka K_TEXT) (== kb K_TEXT)) (and (== ka K_BYTES) (== kb K_BYTES)))
+    (if (and (== ka kb) (or (or (== ka K_TEXT) (== ka K_BYTES)) (== ka K_SIMPLE)))
       (do (let [^:mut lo (ld h a 0)
                 ^:mut hi (ld h a 1)]
             (if (> (ld h b 0) lo) (set lo (ld h b 0)))
             (if (< (ld h b 1) hi) (set hi (ld h b 1)))
             (if (> lo hi) (return 0))
+            (if (== ka K_SIMPLE)
+              (do (let [ns (mk-simple-range h lo hi)] (vpush1 h T_STK ns)) (return 0)))
             (let [xa (ld h a 2)
                   xb (ld h b 2)]
               (if (== ka K_TEXT)

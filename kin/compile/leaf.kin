@@ -5,7 +5,8 @@
 ;;     14 state  15 mark
 ;; with the kinds of program.md §4.2 and kind-specific data:
 ;;   MAJOR d0 major | INT flags BIGOK, d0/d1 interval run | FLOAT flags widths,
-;;   d0/d1 float-interval run (count 0 = unbounded) | SIMPLE d0 v | LIT d0 bid of
+;;   d0/d1 float-interval run (count 0 = unbounded) | SIMPLE d0..d1 values (both
+;;   in 0..23 or both in 32..255) | LIT d0 bid of
 ;;   the encoding | LITSET d0/d1 run of member bids in T_LST (sorted by bytes) |
 ;;   TEXT d0 lo, d1 hi, d2 regexp or -1 | BYTES d0 lo, d1 hi, d2 bits-mask bid or
 ;;   -1 | UINTX d0/d1 allowed bits hi/lo, d2/d3 interval run | TAG d0/d1 number,
@@ -208,8 +209,9 @@
 (defn ^:pub ^I32 mk-major [^Ints h ^I32 m]
   (stage h K_MAJOR 0) (stage-d h 0 m) (return (stage-intern h)))
 
-(defn ^:pub ^I32 mk-simple [^Ints h ^I32 v]
-  (stage h K_SIMPLE 0) (stage-d h 0 v) (return (stage-intern h)))
+(defn ^:pub ^I32 mk-simple-range [^Ints h ^I32 lo ^I32 hi]
+  (comment "The simple values lo..hi (P9.3: both in 0..23 or both in 32..255).")
+  (stage h K_SIMPLE 0) (stage-d h 0 lo) (stage-d h 1 hi) (return (stage-intern h)))
 
 (defn ^:pub ^I32 mk-lit [^Ints h ^I32 bid]
   (stage h K_LIT 0) (stage-d h 0 bid) (return (stage-intern h)))
@@ -821,9 +823,8 @@
                             (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5)))
                 (return true))))
           (return false)))
-    (if (or (and (== ka K_TEXT) (== kb K_TEXT)) (and (== ka K_BYTES) (== kb K_BYTES)))
+    (if (and (== ka kb) (or (or (== ka K_TEXT) (== ka K_BYTES)) (== ka K_SIMPLE)))
       (return (and (<= (ld h a 0) (ld h b 1)) (<= (ld h b 0) (ld h a 1)))))
-    (if (and (== ka K_SIMPLE) (== kb K_SIMPLE)) (return (== (ld h a 0) (ld h b 0))))
     (if (and (== ka K_TAG) (== kb K_TAG))
       (return (and (== (ld h a 0) (ld h b 0)) (== (ld h a 1) (ld h b 1)))))
     (return true)))

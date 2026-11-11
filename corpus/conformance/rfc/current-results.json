@@ -4,12 +4,12 @@
     "runtimeStable": true,
     "groups": {
       "P8.4": {
-        "pass": 222,
-        "fail": 2
+        "pass": 224,
+        "fail": 0
       },
       "baseline": {
-        "pass": 747,
-        "fail": 13
+        "pass": 748,
+        "fail": 12
       },
       "D270": {
         "pass": 14,
@@ -21,15 +21,15 @@
       }
     },
     "checks": 999,
-    "pass": 984,
-    "fail": 15,
-    "classified": 15,
+    "pass": 987,
+    "fail": 12,
+    "classified": 12,
     "unexplained": 0,
     "stale": 0,
     "compilation": {
       "extracted": 108,
-      "rawFailures": 37,
-      "effectiveFailures": 7
+      "rawFailures": 36,
+      "effectiveFailures": 6
     },
     "ruby": {
       "checked": 320,
@@ -88,15 +88,15 @@
     "../../gen/js/snug/cbor/vcopy.mjs": "dbcc5348ce2959e2f30986866f084c1cef3da61221aea2d446ee6d0705dbcca4",
     "../../gen/js/snug/compile/arena.mjs": "b95e033780427d3030563bd550feb363ea23eaaa0c444fbb674b250a24581c46",
     "../../gen/js/snug/compile/bytes.mjs": "4f43004446b4cc5e9ed28aa7d10ff119d398de0812230a26abb70edf860d5749",
-    "../../gen/js/snug/compile/ctl.mjs": "3efabfdc8a64c0e32ea212c41798d34fc17a14cf21c19233afe0acd095d68305",
-    "../../gen/js/snug/compile/emit.mjs": "b418f3c9f711a8680fa7a6fd45d3fcf593aa2671ad1ae762fd2ad0e5b211ffe7",
+    "../../gen/js/snug/compile/ctl.mjs": "1c887a4fd0a6db5c3a12ed26b751dd297c268daec0bf2312611ee611927befa0",
+    "../../gen/js/snug/compile/emit.mjs": "863f35b2b176e8c548838db8baa88151fea689511b40a27356c3068d9f639d8c",
     "../../gen/js/snug/compile/ext.mjs": "c86e31f3024ce9164cf607246a0513a6954769f7975b6d94254b4ccbf15208c9",
     "../../gen/js/snug/compile/glush.mjs": "941463d9f49c82b9b24fa1265309d00f3f63d3e0695fa0e1e493a945c8b2cf8d",
-    "../../gen/js/snug/compile/leaf.mjs": "5624fca2208a8e4a1300afff15d1d17e109ced8ee3f7258937374611a6f788bc",
+    "../../gen/js/snug/compile/leaf.mjs": "ebb05c0771ddb6098239e513dfcb05e2ce3266a86c33ab66d7ac1bccefbfc8b5",
     "../../gen/js/snug/compile/lex.mjs": "dde6510489430666a6d306e52defc42539179ceb03508d89a5cfae49ded0e7bd",
-    "../../gen/js/snug/compile/lower.mjs": "c2c81243383c8d4588916fa2860355fcf2d9978e145f4d0f54cf9fe90614a767",
+    "../../gen/js/snug/compile/lower.mjs": "f34d5625b272f217cbbdc1a4b8ab947c5347777bb9524c81e278c676c8c98329",
     "../../gen/js/snug/compile/main.mjs": "00f366950f31601ea7b18f8aa3b82cd551e227203d9f14b9f7ccb00c6b08f3bf",
-    "../../gen/js/snug/compile/parse.mjs": "1efb8e8fb7216c156ca6a23566a59ac0a34f66b0a0d4bd785e623a63bfb2054b",
+    "../../gen/js/snug/compile/parse.mjs": "72cebc958773b4310c99194f39392b7154d41387f95caaa7be99f81270fa601a",
     "../../gen/js/snug/compile/peg.mjs": "0bf3a90fa128644d63513433f9b6236dfc9f4f35f827c9e30768a00b326e96dd",
     "../../gen/js/snug/compile/prelude.mjs": "06147c95fe040db2e6fe714cde73ead93db898d7cf7113c62cbdabd24207124f",
     "../../gen/js/snug/compile/regexp.mjs": "b18e046be19a6cc1a06e89d751ffbac2a47cdc117ac5c1d4fe11fd79499a913f",
@@ -104,7 +104,7 @@
     "../../gen/js/snug/hello.mjs": "cff41de65bcff281bb4c1665c6dccb71da31529879272ca8397bf519613a1967",
     "../../gen/js/snug/nav/trace.mjs": "81a8a25261ec772c801631536a5888724d94072c6a196dfbf696efee1baec2ab",
     "../../gen/js/snug/nav/walk.mjs": "20901d64d4c8f7e0f7d4b1f5ecda8492f3963b3902763b2f6fdad72a691cfd73",
-    "../../gen/js/snug/program/verify.mjs": "7fc9867b7433b741c912baca8475a2150f356d83fa50f986095d56df854db2f8",
+    "../../gen/js/snug/program/verify.mjs": "0c140bfcd92b8bd5fb5df7d89def62907a56cb7227f44213ff1a32464283335a",
     "../../gen/js/snug/vm/api.mjs": "f96530c3966a38e1b140f196682bddad5314e08caf48a64dadba97c2303718ba",
     "../../gen/js/snug/vm/arena.mjs": "67daeca371449d19e457d0031a73d2cadb4b4d88e3cc7867a465b7feef4e3b64",
     "../../gen/js/snug/vm/array.mjs": "a761100a55189e8124bb0e180b0f033c26b1c09caabd19340f281ba197b4a94d",
@@ -113,7 +113,7 @@
     "../../gen/js/snug/vm/dead.mjs": "6856f114772f52a380ec3515fb8e8b1b4c77d9135588185211254c31bbea08c1",
     "../../gen/js/snug/vm/eval.mjs": "02921c1c46ddf1a435fee9e7aa37249006e1b6fe820e7ef3157426aba4b11f09",
     "../../gen/js/snug/vm/layout.mjs": "152866b1b16cb58d75b86426bf501e3985403f92fb403e491c014b8fe200db14",
-    "../../gen/js/snug/vm/leaf.mjs": "d6904322ee43b420a53a03fc247715d5af5f3946b61d53da1932d0320805bac3",
+    "../../gen/js/snug/vm/leaf.mjs": "f7755a1157f234b8b36b2b6fd4f35555b7ebcd58807eec95658d0b78810d793f",
     "../../gen/js/snug/vm/map.mjs": "35eeca58887c2579ee84cf9055a92814779deab332ca42bc0d949f281b0a0e82",
     "../../gen/js/snug/vm/sbase.mjs": "4dec40abce32eb3c9909874be228f2f5d99b9cf9517b722d2e60df2a3ace3c02",
     "../../gen/js/snug/vm/scont.mjs": "4aabca85b671028a716cb296f68160062657d9a81b60ffe4180b9d12aa7f5cab",
@@ -176,15 +176,15 @@
     "../../gen/js/snug/cbor/vcopy.mjs": "dbcc5348ce2959e2f30986866f084c1cef3da61221aea2d446ee6d0705dbcca4",
     "../../gen/js/snug/compile/arena.mjs": "b95e033780427d3030563bd550feb363ea23eaaa0c444fbb674b250a24581c46",
     "../../gen/js/snug/compile/bytes.mjs": "4f43004446b4cc5e9ed28aa7d10ff119d398de0812230a26abb70edf860d5749",
-    "../../gen/js/snug/compile/ctl.mjs": "3efabfdc8a64c0e32ea212c41798d34fc17a14cf21c19233afe0acd095d68305",
-    "../../gen/js/snug/compile/emit.mjs": "b418f3c9f711a8680fa7a6fd45d3fcf593aa2671ad1ae762fd2ad0e5b211ffe7",
+    "../../gen/js/snug/compile/ctl.mjs": "1c887a4fd0a6db5c3a12ed26b751dd297c268daec0bf2312611ee611927befa0",
+    "../../gen/js/snug/compile/emit.mjs": "863f35b2b176e8c548838db8baa88151fea689511b40a27356c3068d9f639d8c",
     "../../gen/js/snug/compile/ext.mjs": "c86e31f3024ce9164cf607246a0513a6954769f7975b6d94254b4ccbf15208c9",
     "../../gen/js/snug/compile/glush.mjs": "941463d9f49c82b9b24fa1265309d00f3f63d3e0695fa0e1e493a945c8b2cf8d",
-    "../../gen/js/snug/compile/leaf.mjs": "5624fca2208a8e4a1300afff15d1d17e109ced8ee3f7258937374611a6f788bc",
+    "../../gen/js/snug/compile/leaf.mjs": "ebb05c0771ddb6098239e513dfcb05e2ce3266a86c33ab66d7ac1bccefbfc8b5",
     "../../gen/js/snug/compile/lex.mjs": "dde6510489430666a6d306e52defc42539179ceb03508d89a5cfae49ded0e7bd",
-    "../../gen/js/snug/compile/lower.mjs": "c2c81243383c8d4588916fa2860355fcf2d9978e145f4d0f54cf9fe90614a767",
+    "../../gen/js/snug/compile/lower.mjs": "f34d5625b272f217cbbdc1a4b8ab947c5347777bb9524c81e278c676c8c98329",
     "../../gen/js/snug/compile/main.mjs": "00f366950f31601ea7b18f8aa3b82cd551e227203d9f14b9f7ccb00c6b08f3bf",
-    "../../gen/js/snug/compile/parse.mjs": "1efb8e8fb7216c156ca6a23566a59ac0a34f66b0a0d4bd785e623a63bfb2054b",
+    "../../gen/js/snug/compile/parse.mjs": "72cebc958773b4310c99194f39392b7154d41387f95caaa7be99f81270fa601a",
     "../../gen/js/snug/compile/peg.mjs": "0bf3a90fa128644d63513433f9b6236dfc9f4f35f827c9e30768a00b326e96dd",
     "../../gen/js/snug/compile/prelude.mjs": "06147c95fe040db2e6fe714cde73ead93db898d7cf7113c62cbdabd24207124f",
     "../../gen/js/snug/compile/regexp.mjs": "b18e046be19a6cc1a06e89d751ffbac2a47cdc117ac5c1d4fe11fd79499a913f",
@@ -192,7 +192,7 @@
     "../../gen/js/snug/hello.mjs": "cff41de65bcff281bb4c1665c6dccb71da31529879272ca8397bf519613a1967",
     "../../gen/js/snug/nav/trace.mjs": "81a8a25261ec772c801631536a5888724d94072c6a196dfbf696efee1baec2ab",
     "../../gen/js/snug/nav/walk.mjs": "20901d64d4c8f7e0f7d4b1f5ecda8492f3963b3902763b2f6fdad72a691cfd73",
-    "../../gen/js/snug/program/verify.mjs": "7fc9867b7433b741c912baca8475a2150f356d83fa50f986095d56df854db2f8",
+    "../../gen/js/snug/program/verify.mjs": "0c140bfcd92b8bd5fb5df7d89def62907a56cb7227f44213ff1a32464283335a",
     "../../gen/js/snug/vm/api.mjs": "f96530c3966a38e1b140f196682bddad5314e08caf48a64dadba97c2303718ba",
     "../../gen/js/snug/vm/arena.mjs": "67daeca371449d19e457d0031a73d2cadb4b4d88e3cc7867a465b7feef4e3b64",
     "../../gen/js/snug/vm/array.mjs": "a761100a55189e8124bb0e180b0f033c26b1c09caabd19340f281ba197b4a94d",
@@ -201,7 +201,7 @@
     "../../gen/js/snug/vm/dead.mjs": "6856f114772f52a380ec3515fb8e8b1b4c77d9135588185211254c31bbea08c1",
     "../../gen/js/snug/vm/eval.mjs": "02921c1c46ddf1a435fee9e7aa37249006e1b6fe820e7ef3157426aba4b11f09",
     "../../gen/js/snug/vm/layout.mjs": "152866b1b16cb58d75b86426bf501e3985403f92fb403e491c014b8fe200db14",
-    "../../gen/js/snug/vm/leaf.mjs": "d6904322ee43b420a53a03fc247715d5af5f3946b61d53da1932d0320805bac3",
+    "../../gen/js/snug/vm/leaf.mjs": "f7755a1157f234b8b36b2b6fd4f35555b7ebcd58807eec95658d0b78810d793f",
     "../../gen/js/snug/vm/map.mjs": "35eeca58887c2579ee84cf9055a92814779deab332ca42bc0d949f281b0a0e82",
     "../../gen/js/snug/vm/sbase.mjs": "4dec40abce32eb3c9909874be228f2f5d99b9cf9517b722d2e60df2a3ace3c02",
     "../../gen/js/snug/vm/scont.mjs": "4aabca85b671028a716cb296f68160062657d9a81b60ffe4180b9d12aa7f5cab",
@@ -1413,18 +1413,12 @@
     {
       "suite": "RFC 9682 simple head numbers",
       "kind": "extracted",
-      "ok": false,
-      "code": "syntax",
-      "line": 1,
-      "column": 8
+      "ok": true
     },
     {
       "suite": "RFC 9682 simple head numbers",
       "kind": "effective",
-      "ok": false,
-      "code": "syntax",
-      "line": 1,
-      "column": 8
+      "ok": true
     }
   ],
   "results": [
@@ -15400,22 +15394,16 @@
       "id": 0,
       "group": "P8.4",
       "expect": true,
-      "observed": null,
-      "pass": false,
+      "observed": true,
+      "pass": true,
       "rule": "r",
-      "code": "compile-failure",
       "ruby": {
         "status": "checked",
         "exitCode": 0,
         "verdict": true,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.3",
-        "reason": "RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9682 simple head numbers",
@@ -15423,22 +15411,17 @@
       "id": 1,
       "group": "baseline",
       "expect": false,
-      "observed": null,
-      "pass": false,
+      "observed": false,
+      "pass": true,
       "rule": "r",
-      "code": "compile-failure",
+      "code": "value",
       "ruby": {
         "status": "checked",
         "exitCode": 1,
         "verdict": false,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.3",
-        "reason": "RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9682 simple head numbers",
@@ -15446,21 +15429,15 @@
       "id": 2,
       "group": "P8.4",
       "expect": true,
-      "observed": null,
-      "pass": false,
+      "observed": true,
+      "pass": true,
       "rule": "s",
-      "code": "compile-failure",
       "ruby": {
         "status": "unavailable",
         "exitCode": 1,
         "finding": "reference schema/runtime error"
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.3",
-        "reason": "RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error."
-      },
-      "status": "classified"
+      "status": "pass"
     }
   ]
 }
