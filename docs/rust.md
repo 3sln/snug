@@ -230,11 +230,13 @@ abandoned session releases its slot as soon as it goes out of scope. Each array
 is zero-filled before reuse, so nothing of one session is visible to another.
 
 While `max_live` sessions are live in the process, creating one more fails with
-`Error::SessionLimit`, whose code is `sessions/limit`. `Session::new` and
-`Session::new_unknown` return it as `Err`: since P9.7 they return
-`Result<Session, Error>`, a breaking change made before the first release
-(noted for P9.11's version policy). `validate_blob` and `validate_reader`
-report it as `schema::SourceError::SessionLimit`.
+`Error::SessionLimit`, whose code is `sessions/limit`. The low-level
+`schema::Session::new` and `Session::new_unknown` return
+`Result<Session, sessions::SessionError>`, with `SessionError::Limit`, which
+converts into `Error::SessionLimit`. This changed in P9.7: it is a breaking
+change, made before the first release and noted for P9.11's version policy.
+`validate_blob` and `validate_reader` report the limit as
+`schema::SourceError::SessionLimit`.
 
 Idle arrays are kept up to `max_pooled_bytes` in all. One entry above 1 MiB, or
 above a quarter of that, is dropped instead. `release_pool()` drops every idle

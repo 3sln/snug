@@ -128,7 +128,7 @@ impl Program {
     /// P9.7 (D326): a new session's arrays from the pool, zeroed, under the live bound: S
     /// at least `rule`'s scratch words and (D286 A3) as large as earlier sessions needed
     /// (a session's arena starts at the lease, D324), the key arena `kab` bytes.
-    pub(crate) fn session_arrays(&self, rule: i32, kab: i32) -> Result<crate::sessions::Arrays, crate::Error> {
+    pub(crate) fn session_arrays(&self, rule: i32, kab: i32) -> Result<crate::sessions::Arrays, crate::sessions::SessionError> {
         let cap = self.p[16].max(1);
         let sw = (vm_scratch_words(&self.p, rule, cap).max(0) as usize)
             .max(self.session_words.load(std::sync::atomic::Ordering::Relaxed));
@@ -424,9 +424,9 @@ pub struct Session<'p> {
 impl<'p> Session<'p> {
     /// A session on `rule` over a message of exactly `total` bytes; `quantum` > 0
     /// yields after about that many work units per step. Fails with
-    /// [`crate::Error::SessionLimit`] while the process has its maximum of live
-    /// sessions ([`crate::sessions`]).
-    pub fn new(prog: &'p Program, rule: i32, total: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::Error> {
+    /// `SessionError::Limit` (`sessions/limit`) while the process has its maximum of
+    /// live sessions (`crate::sessions`; P9.7: a `Result` since then).
+    pub fn new(prog: &'p Program, rule: i32, total: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::sessions::SessionError> {
         let lim = opts.words();
         let a = prog.session_arrays(rule, vms_arena(&prog.p, &lim, total))?;
         let mut session = Session { prog, s: a.s, ss: a.ss, ka: a.ka, out: vec![0i32; 8 + 2 * 257], done: None, limit: 0, live: true };
@@ -439,7 +439,7 @@ impl<'p> Session<'p> {
     /// known-length one; [`Step::Held`] is a verdict waiting for the end; call
     /// [`Session::end`] with the byte count once the source is exhausted (or as soon
     /// as it passes the input limit). Verdicts equal a buffer's of the same bytes.
-    pub fn new_unknown(prog: &'p Program, rule: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::Error> {
+    pub fn new_unknown(prog: &'p Program, rule: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::sessions::SessionError> {
         let lim = opts.words();
         let total = vms_unknown_total(&prog.p, &lim);
         let a = prog.session_arrays(rule, vms_arena(&prog.p, &lim, total))?;

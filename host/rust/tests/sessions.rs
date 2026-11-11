@@ -30,8 +30,10 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     let held: Vec<Session<'_>> = (0..3).map(|_| Session::new(host, rule, b.len() as i32, &hopts, 0).unwrap()).collect();
     assert_eq!(sessions::counts().live, 3);
     let e = Session::new(host, rule, b.len() as i32, &hopts, 0).err().unwrap();
-    assert_eq!(e, Error::SessionLimit);
+    assert_eq!(e, sessions::SessionError::Limit);
     assert_eq!(e.code(), "sessions/limit");
+    assert_eq!(Error::from(e), Error::SessionLimit);
+    assert_eq!(Error::from(e).code(), "sessions/limit");
     assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, 4, 0).unwrap_err().code(), "sessions/limit");
     assert_eq!(Sequence::new(&SequenceOptions::default()).err().unwrap().code(), "sessions/limit");
     drop(held);

@@ -104,6 +104,14 @@ impl From<SchemaError> for Error {
         Self::Compile(e)
     }
 }
+impl From<crate::sessions::SessionError> for Error {
+    fn from(e: crate::sessions::SessionError) -> Self {
+        match e {
+            crate::sessions::SessionError::Limit => Self::SessionLimit,
+            crate::sessions::SessionError::BadLimits => Self::Usage("session_limits"),
+        }
+    }
+}
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "snug: validation refused ({})", self.reason)

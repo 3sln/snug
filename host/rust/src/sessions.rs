@@ -6,8 +6,9 @@
 //! when it is dropped. Every array is zero-filled before reuse: a pooled session starts
 //! from exactly the bytes a fresh one does, so no byte crosses from one session to
 //! another and units, events and verdicts are those of fresh arrays. Creating a session
-//! while [`SessionLimits::max_live`] are live fails with [`crate::Error::SessionLimit`]
-//! (`code()` `sessions/limit`); dropping a session releases its slot.
+//! while [`SessionLimits::max_live`] are live fails with [`SessionError::Limit`]
+//! ([`crate::Error::SessionLimit`] through the public API, `code()` `sessions/limit`);
+//! dropping a session releases its slot.
 //!
 //! ```
 //! let before = snug::sessions::limits();
@@ -15,7 +16,6 @@
 //! assert_eq!(snug::sessions::limits().max_live, 64);
 //! snug::sessions::set_limits(before).unwrap();
 //! ```
-use crate::Error;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
@@ -50,11 +50,41 @@ pub fn limits() -> SessionLimits {
     SessionLimits { max_live: MAX_LIVE.load(SeqCst), max_pooled_bytes: MAX_POOLED.load(SeqCst) }
 }
 
+/// Why a session could not start, or limits were refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionError {
+    /// `max_live` sessions are live: drop (or finish) one to release its slot.
+    Limit,
+    /// [`set_limits`] with `max_live` 0.
+    BadLimits,
+}
+
+impl SessionError {
+    /// `sessions/limit`, or `session_limits` for a refused [`set_limits`].
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Limit => "sessions/limit",
+            Self::BadLimits => "session_limits",
+        }
+    }
+}
+
+impl std::fmt::Display for SessionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "snug: {}", match self {
+            Self::Limit => "the process has its maximum of live sessions; finish or drop one to release its slot",
+            Self::BadLimits => "max_live must be at least 1",
+        })
+    }
+}
+
+impl std::error::Error for SessionError {}
+
 /// Set the limits (`max_live` at least 1). Lowering them affects only what comes next:
 /// live sessions are not ended and idle arrays are dropped as they are next released.
-pub fn set_limits(l: SessionLimits) -> Result<(), Error> {
+pub fn set_limits(l: SessionLimits) -> Result<(), SessionError> {
     if l.max_live == 0 {
-        return Err(Error::Usage("session_limits"));
+        return Err(SessionError::BadLimits);
     }
     MAX_LIVE.store(l.max_live, SeqCst);
     MAX_POOLED.store(l.max_pooled_bytes, SeqCst);
@@ -127,11 +157,11 @@ pub fn release_pool() {
 
 /// Arrays for a new session (S at least `sw` words, SS exactly `ssw`, the arena at least
 /// `kab` bytes), all zero, and a live slot; or `sessions/limit`.
-pub(crate) fn acquire(pool: &Pool, sw: usize, ssw: usize, kab: usize) -> Result<Arrays, Error> {
+pub(crate) fn acquire(pool: &Pool, sw: usize, ssw: usize, kab: usize) -> Result<Arrays, SessionError> {
     let mut cur = LIVE.load(SeqCst);
     loop {
         if cur >= MAX_LIVE.load(SeqCst) {
-            return Err(Error::SessionLimit);
+            return Err(SessionError::Limit);
         }
         match LIVE.compare_exchange(cur, cur + 1, SeqCst, SeqCst) {
             Ok(_) => break,
