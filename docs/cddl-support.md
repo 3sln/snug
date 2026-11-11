@@ -268,9 +268,9 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
   tag-2 bignums and `integer` includes tag-2/3 bignums. `number` is `int / float`,
   so it does not include decimal fractions or arbitrary bignums.
 - **`float16`, `float32`, `float64` are sets of values (changed 2026-11-11,
-  D328).** As RFC 8610 §3.3 says, "#7.25 specifies the set of values that
+  D328).** As RFC 8610 §3.3 says, “"#7.25" specifies the set of values that
   can be represented as half-precision floats; it does not mandate that these
-  values also do have to be serialized as half-precision floats". So a float
+  values also do have to be serialized as half-precision floats”. So a float
   matches `float16` when binary16 represents its value exactly, and `float32`
   when binary32 does, whatever width encodes it. `float64` admits every
   float. NaN, ±∞ and ±0 are in every width. 1.5 encoded as float16 (the

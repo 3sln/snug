@@ -319,6 +319,8 @@ for(const test of byId(8610,'default-timer').cases)if(test.expect===false)test.c
   reason:'RFC 8610 §3.8.6 gives .default an "implied .ne control"; snug treats .default as an annotation only, as Erratum 9229 (status Reported) proposes and the Ruby reference does (docs/conformance.md S46).'};
 for(const id of ['figure-3','figure-4','figure-5'])for(const test of byId(9165,id).cases)test.classification={kind:'pending',decision:'P9.14',
   reason:'.abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control.'};
+for(const test of byId(9682,'simple-heads').cases)test.classification={kind:'pending',decision:'P9.3',
+  reason:'RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error.'};
 
 // An auditable census of every displayed rule-like line, including all ABNF
 // figures that must not be misrepresented as CDDL schemas.
