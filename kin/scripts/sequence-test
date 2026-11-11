@@ -11,4 +11,9 @@ crate=.cache/snug-sequence
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --offline --quiet --bin sequence 2>&1); then
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi
+# P9.5: the independent RFC 8742 framer's own vectors, before it serves as an oracle
+if ! out=$(node --test corpus/tools/rfc8742-framer.test.mjs 2>&1); then
+  echo "  FAIL RFC 8742 framer unit vectors (corpus/tools/rfc8742-framer.test.mjs):"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
+fi
+echo "  ok   RFC 8742 framer unit vectors: $(printf '%s\n' "$out" | grep -E '^. (pass|fail) ' | tr '\n' ' ')(corpus/tools/rfc8742-framer.test.mjs)"
 node kin/scripts/sequence-test.mjs "$crate/target/debug/sequence" "$@"

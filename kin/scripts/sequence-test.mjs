@@ -18,6 +18,7 @@
 //
 //     node kin/scripts/sequence-test.mjs <rust-sequence-binary> [mutations] [seed] [schemas]
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { buildVmCases } from './vm-allcases.mjs';
 import { runSequence, oracleSequence, chunkEnds, skippableCode } from './sequence-run.mjs';
 import { hex } from './scan-cases.mjs';
@@ -29,6 +30,8 @@ import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 import { readSequence, sequenceReader } from '../../host/js/src/sequence.mjs';
 import { view as openView } from '../../host/js/src/view.mjs';
 import { ANY_P, ANY_B } from '../../host/js/src/any-program.mjs';
+import { vmsUnknownTotal } from '../../gen/js/snug/vm/session.mjs';
+import { framerCheck, PAST_STOP } from './sequence-framer.mjs';
 
 const [rustBin, mutArg, seedArg, schemaArg] = process.argv.slice(2);
 const MUTATIONS = Number(mutArg ?? 6000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 200);
@@ -82,6 +85,25 @@ cases.forEach((c, ci) => {
     const c = { label: `fixed: 65,541-byte message then 1.5 MB (flags ${flags})`, prog: anyIndex, rule: 0, bytes: big, fixed: true };
     seqs.push({ prog: anyIndex, rule: 0, lim: Int32Array.of(0, 0, 1500000, 32, 65536, 131072, -1, -1, 0, flags), S: big, label: c.label, c, fixed: true });
   }
+}
+
+// P9.5: every not-well-formed example of RFC 8949 Appendix F.1, each after a well-formed message and
+// before another, under the deterministic, valid and valid + bindle-flag wires: the vm-test cases
+// rarely reach the framer's syntax-error classes (a break out of place, a bad chunk, ai 31 on major
+// type 0/1/6) under the valid wire, where snug calls them malformed. The RFC 8742 vectors run under
+// the deterministic wire only: under the valid wire `01 9fff 1817` found that this gate's own D211
+// oracle (oracleSequence's root end comes from snug.nav.walk, which walks no indefinite item) answers
+// `trailing` after an indefinite root where the session, both hosts and the framer find a boundary
+// (DEVLOG P9.5; held back until the oracle is fixed, not skipped silently).
+{
+  const anyIndex = programs.findIndex(p => p.label === 'any');
+  const rfc = name => JSON.parse(readFileSync(new URL(`../../corpus/conformance/rfc/${name}.json`, import.meta.url))).vectors;
+  const vectors = flags => [...rfc('rfc8949-well-formedness'), ...(flags === 0 ? rfc('rfc8742') : [])].map(v => Uint8Array.from(Buffer.from(v.hex, 'hex')));
+  for (const flags of [0, 256, 378])
+    for (const v of vectors(flags)) {
+      const S = cat([FILLERS[1], v, FILLERS[2]]);
+      seqs.push({ prog: anyIndex, rule: 0, lim: Int32Array.of(1, 0, 1500000, 32, 65536, 131072, -1, -1, 0, flags), S, label: `RFC vector ${hex(v)} in 3 (flags ${flags})`, c: { label: 'rfc' } });
+    }
 }
 
 // A sequence of more than MAX_MESSAGES messages (the 1,500,001 zero bytes vector is 1.5 M
@@ -181,6 +203,19 @@ runs.forEach((r, i) => {
 const outcome = { m: 0, s: 0, x: 0, end: 0 };
 for (const [, v] of oracleCache) for (const l of v.split(' | ')) outcome[l.split(' ')[0]]++;
 
+// P9.5: every oracle answer the gate holds the runs to, against the independent RFC 8742 framer
+// (corpus/tools/rfc8742-framer.mjs; the mapping is in sequence-framer.mjs)
+const framerTally = new Map();
+let framerChecked = 0, framerBad = 0, tFramer = 0;
+function framerOne(q, lim, lines, label) {
+  const t = performance.now();
+  framerChecked++;
+  const d = framerCheck(q.S, vmsUnknownTotal(programs[q.prog].P, lim), lines.split(' | '), framerTally);
+  if (d) { framerBad++; fail(`framer (P9.5) ${label} lim ${Array.from(lim).join(',')}: ${d}\n      oracle ${lines.slice(0, 300)}\n      [${hex(q.S).slice(0, 160)}]`); }
+  tFramer += performance.now() - t;
+}
+for (const [k, v] of oracleCache) { const q = seqs[Math.floor(k / 2)]; framerOne(q, q.lim, v, `${q.label}${k % 2 ? ' skip' : ''}`); }
+
 // JS bounds: a sample behind traps
 function guard(arr, name) {
   return new Proxy(arr, {
@@ -263,6 +298,7 @@ async function hostRun(q, policy, skip) {
   let oLim = lim, oP = programs[q.prog].P, oB = programs[q.prog].B;
   if (anyCase) { const d = [1500000, 32, 65536, 131072]; oLim = Int32Array.from(lim); for (let k = 0; k < 4; k++) if (oLim[2 + k] < 0) oLim[2 + k] = d[k]; }
   const want0 = oracleSequence(oP, oB, q.rule, oLim, q.S, { skip }).lines.join(' | ');
+  if (anyCase) framerOne(q, oLim, want0, `host ${q.label}${skip ? ' skip' : ''}`);   // the others are the kin-level oracle's
   const ends = chunkEnds(q.S.length, policy);
   // D215's rule: a message is borrowed iff it lies inside one chunk -- it is then released while
   // that chunk is read (D212 liveness: no walk asks past its item's end), so the chunk is never
@@ -398,6 +434,11 @@ line(late === 0, `release latency (D212 liveness): ${late} of ${lateMsgs} accept
 line(hostFails === 0, `JS hosts: readSequence (spanning) and sequenceReader (always) == the oracle on ${hostRuns.length} host runs; ${hostMsgs} messages (${borrowedMsgs} borrowed, ${assembledMsgs} assembled), ${walks} view walks equal to a View on the bytes (${(tHost / 1000).toFixed(1)} s)`);
 console.log(rustLine);
 console.log(rustHostLine);
+line(framerBad === 0, `independent RFC 8742 framer (P9.5): ${framerChecked - framerBad}/${framerChecked} oracle answers agree with it on every boundary, clean end and stop (${(tFramer / 1000).toFixed(1)} s)`);
+{
+  const rows = [...framerTally].filter(([k]) => !k.startsWith('#')).sort((a, b) => b[1] - a[1]);
+  console.log(`  info framer classes: ${rows.map(([k, v]) => `${k} ${v}`).join('; ')}; ${framerTally.get(PAST_STOP) ?? 0} items the framer reads past snug's stops (not compared: a sequence ends at its first refusal, D214)`);
+}
 console.log(`  info ${programs.length} programs; JS ran ${runs.length} sequence runs in ${(tJs / 1000).toFixed(1)} s (all ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }
 console.log('  ok   sequence-test');
