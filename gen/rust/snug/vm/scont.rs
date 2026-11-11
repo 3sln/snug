@@ -503,6 +503,8 @@ pub fn map_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
         return err(ss, na);
     }
     let nb: i32 = map_open(p, s, fb, w, fw - (2 * w), nq, pos);
+    let cl: i32 = s[(VM_FASTK) as usize];
+    let ccap: i32 = s[(VM_FASTL) as usize];
     if nb < 0 {
         return err(ss, nb);
     }
@@ -516,8 +518,8 @@ pub fn map_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     ss[(f + F_Q0) as usize] = q0 + base;
     ss[(f + F_N) as usize] = n;
     ss[(f + F_NB) as usize] = nb;
-    ss[(f + F_CL) as usize] = map_cl(p, s, fb, area, nb);
-    ss[(f + F_CCAP) as usize] = map_ccap(p, s, fb, area, nb);
+    ss[(f + F_CL) as usize] = cl;
+    ss[(f + F_CCAP) as usize] = ccap;
     ss[(f + F_PEND) as usize] = pend;
     ss[(f + F_NALIVE) as usize] = nb;
     ss[(f + F_SMAP) as usize] = map_smode(p, s, fb, area, nb);

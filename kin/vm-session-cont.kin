@@ -26,7 +26,7 @@
                                     VM_W_SUB VM_W_OFFSET K_INT K_TEXT K_ARRAY K_MAP K_TAG K_TAGSET F_ADMITTED
                                     F_MATCHED F_EVAL R_TYPE R_MISSING R_UNEXPECTED R_VALUE R_TAG R_BUDGET
                                     R_INCONSISTENT P_INDEX P_KEY P_ANYKEY P_TAG CTX_KEY CTX_SIMPLE
-                                    R_GROUP_LIMIT R_AGROW G_FORCED G_NOSTREAK]]
+                                    R_GROUP_LIMIT R_AGROW G_FORCED G_NOSTREAK VM_FASTK VM_FASTL]]
             [snug.vm.base :refer [charge c64 new-epoch sched2 free-on free-off q-add q-stamp ts-test
                                   q-flag q-set-flag q-kind q-leaf-base cset-rec next-ck cset-width
                                   cset-frame wit-empty wit-clear wit-set path-put rule1]]
@@ -38,7 +38,7 @@
                                   count-pending single-leaf count-matched bstr-tail array-streak if-limit
                                   streak-kind star-steady star-advance
                                   arr-open arr-star-leaf arr-alive arr-query arr-after arr-close
-                                  map-open map-cl map-ccap map-smode map-pre map-keyq map-cands map-named-of
+                                  map-open map-smode map-pre map-keyq map-cands map-named-of
                                   map-valq map-after map-close]]
             [snug.vm.sbase :refer [key-max-claim SS_UNK enter-pend pend-note GO SS_PH SS_RET PH_RET IT_PAIR FW FK_ARR FK_MAP FK_TAG FK_DARR FK_DMAP FK_DSEQ SS_ATOP SS_CUT
                                    VMS_NEED VMS_GROW SS_VNEED IND F_IND F_VN F_VLAST F_VMARK F_FLOOR ftop
@@ -424,7 +424,9 @@
         area (+ fb (* 2 w))]
     (let [na (q-filter-x p s fb w nq 32 pos ctx)]
       (if (< na 0) (return (err ss na))))
-    (let [nb (map-open p s fb w (- fw (* 2 w)) nq pos)]
+    (let [nb (map-open p s fb w (- fw (* 2 w)) nq pos)
+          cl (ia s VM_FASTK)
+          ccap (ia s VM_FASTL)]
       (if (< nb 0) (return (err ss nb)))
       (let [pend (count-pending p s fb w nq)
             f (fpush b ss ka base FK_MAP)]
@@ -434,8 +436,8 @@
         (iset ss (+ f F_Q0) (+ q0 base))
         (iset ss (+ f F_N) n)
         (iset ss (+ f F_NB) nb)
-        (iset ss (+ f F_CL) (map-cl p s fb area nb))
-        (iset ss (+ f F_CCAP) (map-ccap p s fb area nb))
+        (iset ss (+ f F_CL) cl)
+        (iset ss (+ f F_CCAP) ccap)
         (iset ss (+ f F_PEND) pend)
         (iset ss (+ f F_NALIVE) nb)
         (iset ss (+ f F_SMAP) (map-smode p s fb area nb))

@@ -132,19 +132,6 @@ pub fn array_records(p: &[i32], s: &mut [i32], fb: i32, area: i32, nb: i32) {
         }
     }
 }
-pub fn array_mark(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
-    // The container's record base (the arena top to pop back to at its end),
-    // or -1 when it has no A2 block.
-    let mut bo: i32 = area;
-    for _i in 0..nb {
-        let ao: i32 = block_ao(p, s, fb, bo);
-        if s[(bo + AB_RBASE) as usize] >= 0 {
-            return s[(bo + AB_RBASE) as usize];
-        }
-        bo += array_words(p, ao);
-    }
-    return -1;
-}
 pub fn aev(s: &mut [i32], bo: i32, kind: i32, idx: i32, off: i32) {
     // Record a failure event: the farthest index wins, ties the first in run
     // order (program-2 §8 rule 5'). Its offset is kept absolute (VM_PBASE).

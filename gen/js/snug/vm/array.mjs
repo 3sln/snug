@@ -171,20 +171,6 @@ export function arrayRecords(p, s, fb, area, nb) {
     }
 }
 
-export function arrayMark(p, s, fb, area, nb) {
-    // The container's record base (the arena top to pop back to at its end),
-    // or -1 when it has no A2 block.
-    let bo = area;
-    for (let _i = 0; _i < nb; _i++) {
-        const ao = blockAo(p, s, fb, bo);
-        if (s[bo + AB_RBASE] >= 0) {
-            return s[bo + AB_RBASE];
-        }
-        bo += arrayWords(p, ao);
-    }
-    return -1;
-}
-
 export function aev(s, bo, kind, idx, off) {
     // Record a failure event: the farthest index wins, ties the first in run
     // order (program-2 §8 rule 5'). Its offset is kept absolute (VM_PBASE).

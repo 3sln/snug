@@ -35,21 +35,35 @@
 ;; Over a canonical copy the driver puts the copy's events (vcopy.kin) in S at
 ;; s[VM_VTAB] (0: none): s[base] their count, the events from base + 4.
 
-(defn ^:pub ^I32 rfind [^IntsR s ^I32 pos ^I32 kind]
-  (comment "The word offset in s of the event (pos, kind), or -1 (a binary search:"
-           "the events are sorted by position, then kind).")
+(defn ^I32 ev-lb [^IntsR s ^I32 pos ^I32 kind]
+  (comment "The word offset in s of the first event at or after (pos, kind), or -1"
+           "(none, or no event table): a binary search, the events being sorted by"
+           "position, then kind.")
   (let [base (ia s VM_VTAB)]
     (if (== base 0) (return (neg 1)))
-    (let [^:mut lo 0
-          ^:mut hi (ia s base)]
+    (let [n (ia s base)
+          ^:mut lo 0
+          ^:mut hi n]
       (while (< lo hi)
         (let [mid (sar (+ lo hi) 1)
               e (+ (+ base 4) (* EV_WORDS mid))
-              v (ia s e)
-              k (ia s (+ e 1))]
-          (if (and (== v pos) (== k kind)) (return e))
-          (if (or (< v pos) (and (== v pos) (< k kind))) (set lo (+ mid 1)) (set hi mid))))
-      (return (neg 1)))))
+              v (ia s e)]
+          (if (or (< v pos) (and (== v pos) (< (ia s (+ e 1)) kind))) (set lo (+ mid 1)) (set hi mid))))
+      (if (>= lo n) (return (neg 1)))
+      (return (+ (+ base 4) (* EV_WORDS lo))))))
+
+(defn ^:pub ^I32 rfind [^IntsR s ^I32 pos ^I32 kind]
+  (comment "The word offset in s of the event (pos, kind), or -1.")
+  (let [e (ev-lb s pos kind)]
+    (if (and (>= e 0) (and (== (ia s e) pos) (== (ia s (+ e 1)) kind))) (return e))
+    (return (neg 1))))
+
+(defn ^:pub ^I32 ev-next [^IntsR s ^I32 pos]
+  (comment "The position of the first recorded event at or after pos, or 2^31 - 1"
+           "(none, or no event table): a streak takes no item an event lies in.")
+  (let [e (ev-lb s pos 0)]
+    (if (< e 0) (return 2147483647))
+    (return (ia s e))))
 
 (defn ^:pub ^I32 head-fail [^Bytes b ^Ints s ^I32 pos ^I32 ai ^I32 depth ^I32 r]
   (comment "read-arg answered r < 0 at pos. Over a canonical copy a definite array or"

@@ -215,18 +215,6 @@ pub fn map_records(p: &[i32], s: &mut [i32], fb: i32, area: i32, nb: i32) {
         }
     }
 }
-pub fn map_mark(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
-    // The container's record base (popped back to at its end), or -1.
-    let mut bo: i32 = area;
-    for _i in 0..nb {
-        let mt: i32 = block_mt(p, s, fb, bo);
-        if s[(bo + MB_RBASE) as usize] >= 0 {
-            return s[(bo + MB_RBASE) as usize];
-        }
-        bo += map_words(p, mt);
-    }
-    return -1;
-}
 pub fn map_unordered(p: &[i32], s: &mut [i32], fb: i32, area: i32, nb: i32) {
     // The map's keys stopped ascending (program-2 §6.1 step 1): every block
     // looks its keys up by binary search from now on.
