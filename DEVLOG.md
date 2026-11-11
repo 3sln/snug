@@ -7220,6 +7220,24 @@ authorised), the existing gate set, and conformance-corpus vectors.
     agrees with JS, so the defect is in the kin session VM. Harness input:
     seed 1005, `detmut 17994`, `a4181845c756adefb3182138fb1827c48221196ab3f97c00fa7fc00000`,
     limits `1,0,36,4,5,7,-1,-1,0,2`, byte windows or a split at 17.
+    **Fixed 2026-11-11 (D286 perf analyst).** Cause: keys of any kind put
+    the session's whole items through the valid machinery (`vitem`). The
+    scanner refused this item with `too_many_items` before reading past the
+    window, so the item was walked over its canonical copy. There the array
+    whose declared length ran past the window was planted as a malformed head
+    (`pw-bad-df`, byte 0x9c), and the Bindle-level pair check (0x82 exactly)
+    refused `decimal` on the planted byte, where the input passes it and
+    counts the array first. The valid preset's pair check only tests the
+    major type, so it never showed. Fix: the planted head's EV_HEAD word 7
+    carries `1 + 2 * the source byte` (`vcopy.kin` `plant`); `head-fail`
+    tests its low bit; `pair-check` over a copy checks the source byte
+    (`vm-dead.kin`). Both reproducers are fixed cases in vmsession-test (18
+    failures without the fix in a small run). Gates (clean worktree on
+    `920a3e1` + D286 B+C): vmsession-test (1,059,067 session runs == buffer;
+    JS == Rust 692,470; 523,510 untold-length streams; hosts 10,140),
+    sequence-test (735,997; JS == Rust 182,190), valid-test, vm-test,
+    scan-test, rscan-test, drift, rust-api-test, wasm-sdk-test 14/14, npm
+    1,450/1,450, size: ok.
 - [ ] **P8.5 — CDDL coverage, rescoped by D270 (PEG group semantics)** (audit ranks 6, 7, 10; D230): budget-metered
   general map assignment where D011 cannot prove greedy exact (bounded
   search / bipartite matching), coupled and non-interval group repetitions,

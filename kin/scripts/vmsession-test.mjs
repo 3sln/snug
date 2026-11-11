@@ -50,6 +50,17 @@ for (const c of sessionCases(STRESS, SEED)) {
   const { prog, rule } = stressProg.get(c.cddl);
   cases.push({ prog, rule, lim: c.lim, bytes: c.bytes, label: c.label, stress: true });
 }
+// fixed cases: a tag-4 pair whose content array passes maxItems, split across windows, under the Bindle tag set with
+// keys of any kind (the session's canonical copy planted the array's head and the pair check read the planted byte:
+// decimal at 0 where the buffer driver says too_many_items at 1; the 10x run, seed 1005)
+{
+  const k = compile('r = any', {});
+  programs.push({ P: k.program, B: k.pool, label: 'r = any (fixed cases)' });
+  const prog = programs.length - 1, rule = k.rules.indexOf('r');
+  for (const [h, lim] of [['c48221196ab3', [1, 0, -1, -1, -1, 1, -1, -1, 0, 2]],
+    ['a4181845c756adefb3182138fb1827c48221196ab3f97c00fa7fc00000', [1, 0, 36, 4, 5, 7, -1, -1, 0, 2]]])
+    cases.push({ prog, rule, lim, bytes: Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16))), label: `fixed ${h.slice(0, 16)}`, stress: true });
+}
 
 // ---------------------------------------------------------------- the oracle
 const out = new Int32Array(8 + 2 * 257);

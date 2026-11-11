@@ -595,8 +595,11 @@ export function plant(cb, o, y) {
     const e = evLast(o);
     o[e + 5] = z - y;
     o[e + 6] = o[O_S_STOPX];
+    // word 7: 1 + 2 * the source head byte, which a tag-4/40 pair check reads
+    // (at the Bindle tag level it must be 0x82 exactly, and the planted byte
+    // is not)
     if (kind === 4) {
-        o[e + 7] = 1;
+        o[e + 7] = 1 + (2 * cb[o[O_S_STOPX]]);
     }
     return z;
 }

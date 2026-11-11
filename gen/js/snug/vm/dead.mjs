@@ -41,7 +41,7 @@ export function rfind(s, pos, kind) {
 export function headFail(b, s, pos, ai, depth, r) {
     // read-arg answered r < 0 at pos. Over a canonical copy a definite array or
     // map head is planted malformed where the scanner refused it after its
-    // depth check (a declared length past the end: EV_HEAD word 7 = 1); a walk
+    // depth check (a declared length past the end: EV_HEAD word 7 odd); a walk
     // whose own depth bound it reaches refuses depth there first, as
     // enter-container would (a tag-24 payload's walk may be bounded tighter
     // than the copy's, D264). r otherwise.
@@ -56,7 +56,7 @@ export function headFail(b, s, pos, ai, depth, r) {
         return r;
     }
     const e = rfind(s, pos, EV_HEAD);
-    if ((e < 0) || (s[e + 7] !== 1)) {
+    if ((e < 0) || ((s[e + 7] & 1) === 0)) {
         return r;
     }
     return fail(s, pos, CODE_DEPTH);
@@ -435,13 +435,24 @@ export function pairCheck(b, s, pos, p, shapeCode, end) {
     if ((s[VM_VTAB] !== 0) && replayTrunc(s, p)) {
         return fail(s, p, CODE_TRUNCATED);
     }
+    let hb;
+    hb = b[p];
+    // over a canonical copy, a content head planted for a declared length past
+    // the end is checked as its source byte (D280: the check phase the input
+    // reaches)
+    if (s[VM_VTAB] !== 0) {
+        const e = rfind(s, p, EV_HEAD);
+        if ((e >= 0) && ((s[e + 7] & 1) !== 0)) {
+            hb = (s[e + 7] >>> 1) | 0;
+        }
+    }
     if (pairV(s)) {
-        if (((b[p] >>> 5) | 0) !== 4) {
+        if (((hb >>> 5) | 0) !== 4) {
             return fail(s, pos, shapeCode);
         }
         return 0;
     }
-    if (b[p] !== 0x82) {
+    if (hb !== 0x82) {
         return fail(s, pos, shapeCode);
     }
     return 0;

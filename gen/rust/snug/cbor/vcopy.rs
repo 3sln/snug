@@ -575,8 +575,11 @@ pub(crate) fn plant(cb: &mut [u8], o: &mut [i32], y: i32) -> i32 {
     let e: i32 = ev_last(o);
     o[(e + 5) as usize] = z - y;
     o[(e + 6) as usize] = o[(O_S_STOPX) as usize];
+    // word 7: 1 + 2 * the source head byte, which a tag-4/40 pair check reads
+    // (at the Bindle tag level it must be 0x82 exactly, and the planted byte
+    // is not)
     if kind == 4 {
-        o[(e + 7) as usize] = 1;
+        o[(e + 7) as usize] = 1 + (2 * (cb[(o[(O_S_STOPX) as usize]) as usize] as i32));
     }
     return z;
 }

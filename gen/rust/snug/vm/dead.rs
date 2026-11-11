@@ -40,7 +40,7 @@ pub fn rfind(s: &[i32], pos: i32, kind: i32) -> i32 {
 pub fn head_fail(b: &[u8], s: &mut [i32], pos: i32, ai: i32, depth: i32, r: i32) -> i32 {
     // read-arg answered r < 0 at pos. Over a canonical copy a definite array or
     // map head is planted malformed where the scanner refused it after its
-    // depth check (a declared length past the end: EV_HEAD word 7 = 1); a walk
+    // depth check (a declared length past the end: EV_HEAD word 7 odd); a walk
     // whose own depth bound it reaches refuses depth there first, as
     // enter-container would (a tag-24 payload's walk may be bounded tighter
     // than the copy's, D264). r otherwise.
@@ -55,7 +55,7 @@ pub fn head_fail(b: &[u8], s: &mut [i32], pos: i32, ai: i32, depth: i32, r: i32)
         return r;
     }
     let e: i32 = rfind(s, pos, EV_HEAD);
-    if (e < 0) || (s[(e + 7) as usize] != 1) {
+    if (e < 0) || ((s[(e + 7) as usize] & 1) == 0) {
         return r;
     }
     return fail(s, pos, CODE_DEPTH);
@@ -417,13 +417,24 @@ pub fn pair_check(b: &[u8], s: &mut [i32], pos: i32, p: i32, shape_code: i32, en
     if (s[(VM_VTAB) as usize] != 0) && replay_trunc(s, p) {
         return fail(s, p, CODE_TRUNCATED);
     }
+    let mut hb: i32;
+    hb = b[(p) as usize] as i32;
+    // over a canonical copy, a content head planted for a declared length past
+    // the end is checked as its source byte (D280: the check phase the input
+    // reaches)
+    if s[(VM_VTAB) as usize] != 0 {
+        let e: i32 = rfind(s, p, EV_HEAD);
+        if (e >= 0) && ((s[(e + 7) as usize] & 1) != 0) {
+            hb = (i32::cast_unsigned(s[(e + 7) as usize]) >> 1).cast_signed();
+        }
+    }
     if pair_v(s) {
-        if (i32::cast_unsigned(b[(p) as usize] as i32) >> 5).cast_signed() != 4 {
+        if (i32::cast_unsigned(hb) >> 5).cast_signed() != 4 {
             return fail(s, pos, shape_code);
         }
         return 0;
     }
-    if (b[(p) as usize] as i32) != 0x82 {
+    if hb != 0x82 {
         return fail(s, pos, shape_code);
     }
     return 0;

@@ -487,7 +487,10 @@
       (let [e (ev-last o)]
         (iset o (+ e 5) (- z y))
         (iset o (+ e 6) (ia o O_S_STOPX))
-        (if (== kind 4) (iset o (+ e 7) 1))))
+        (comment "word 7: 1 + 2 * the source head byte, which a tag-4/40 pair check reads"
+                 "(at the Bindle tag level it must be 0x82 exactly, and the planted byte"
+                 "is not)")
+        (if (== kind 4) (iset o (+ e 7) (+ 1 (* 2 (u8 cb (ia o O_S_STOPX))))))))
     (return z)))
 
 (defn ^I32 region [^BytesW cb ^Ints o ^I32 src ^I32 send ^I32 y ^I32 seq ^I32 pad]

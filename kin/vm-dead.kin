@@ -9,7 +9,7 @@
 ;;
 ;; `s` is the VM scratch; its first 16 words are the scanner's `o`.
 (ns snug.vm.dead
-  (:require [kin.lang :refer [defn let return set if while for do comment declarefn break]]
+  (:require [kin.lang :refer [defn let local return set if while for do comment declarefn break]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg rem shl sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 ia iset hex]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_KEY_ORDER
@@ -54,7 +54,7 @@
 (defn ^:pub ^I32 head-fail [^Bytes b ^Ints s ^I32 pos ^I32 ai ^I32 depth ^I32 r]
   (comment "read-arg answered r < 0 at pos. Over a canonical copy a definite array or"
            "map head is planted malformed where the scanner refused it after its"
-           "depth check (a declared length past the end: EV_HEAD word 7 = 1); a walk"
+           "depth check (a declared length past the end: EV_HEAD word 7 odd); a walk"
            "whose own depth bound it reaches refuses depth there first, as"
            "enter-container would (a tag-24 payload's walk may be bounded tighter"
            "than the copy's, D264). r otherwise.")
@@ -63,7 +63,7 @@
     (if (and (!= major 4) (!= major 5)) (return r)))
   (if (< depth (ia s O_MAX_DEPTH)) (return r))
   (let [e (rfind s pos EV_HEAD)]
-    (if (or (< e 0) (!= (ia s (+ e 7)) 1)) (return r))
+    (if (or (< e 0) (== (bit-and (ia s (+ e 7)) 1) 0)) (return r))
     (return (fail s pos CODE_DEPTH))))
 
 (defn ^:pub ^I32 rfail [^Ints s ^I32 e]
@@ -301,10 +301,18 @@
            "and counted after (pair-count).")
   (if (>= p end) (return (fail s p CODE_TRUNCATED)))
   (if (and (!= (ia s VM_VTAB) 0) (replay-trunc s p)) (return (fail s p CODE_TRUNCATED)))
+  (local ^:mut ^I32 hb)
+  (set hb (u8 b p))
+  (comment "over a canonical copy, a content head planted for a declared length past"
+           "the end is checked as its source byte (D280: the check phase the input"
+           "reaches)")
+  (if (!= (ia s VM_VTAB) 0)
+    (do (let [e (rfind s p EV_HEAD)]
+          (if (and (>= e 0) (!= (bit-and (ia s (+ e 7)) 1) 0)) (set hb (ushr (ia s (+ e 7)) 1))))))
   (if (pair-v s)
-    (do (if (!= (ushr (u8 b p) 5) 4) (return (fail s pos shape-code)))
+    (do (if (!= (ushr hb 5) 4) (return (fail s pos shape-code)))
         (return 0)))
-  (if (!= (u8 b p) (hex 130)) (return (fail s pos shape-code)))
+  (if (!= hb (hex 130)) (return (fail s pos shape-code)))
   (return 0))
 
 (defn ^:pub ^I32 pair-count [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 shape-code ^I32 stop]
