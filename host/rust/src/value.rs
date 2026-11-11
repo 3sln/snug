@@ -99,6 +99,11 @@ pub enum Value {
     Null,
     /// The simple value undefined (f7; profiles with `undefined_value`).
     Undefined,
+    /// Any other simple value (RFC 8949 §3.3, D284): 0..=19 or 32..=255
+    /// (20..=23 are `Bool`/`Null`/`Undefined`, 24..=31 are reserved and refused
+    /// on encode, code `simple`). Written in its shortest form; admitted by
+    /// profiles with `undefined_value` (the valid and deterministic presets).
+    Simple(u8),
     /// Binary64 host value; kin selects the shortest exact wire width.
     Float(f64),
 }

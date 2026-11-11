@@ -1,4 +1,4 @@
-import type { EncodeOptions, Limits, TypedArray, Float16Bytes, Decimal, NDArray } from './index.js';
+import type { EncodeOptions, Limits, TypedArray, Float16Bytes, Decimal, NDArray, Simple } from './index.js';
 /** Grouped limits override top-level limits; both are checked. maxBytes bounds finish-time acceptance, not peak allocation.
  * Unknown keys/malformed values throw TypeError at construction, before any value is written. */
 export interface WriterOptions extends EncodeOptions { keysSorted?: boolean; limits?: Limits }
@@ -15,6 +15,8 @@ export declare class Writer {
   null(): this;
   /** f7; needs the profile's undefinedValue. */
   undefined(): this;
+  /** A simple value 0..19 or 32..255 (or a Simple), shortest form; needs undefinedValue (D284). */
+  simple(value: number | Simple): this;
   /** A standard-set tag and its content: value(new Tagged(tag, content)). */
   tagged(tag: number | bigint, content: unknown): this;
   text(value: string): this;

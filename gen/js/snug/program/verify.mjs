@@ -1171,7 +1171,7 @@ export function checkLeaf(p, b, s, l) {
         return want(s, fivRunOk(p, d0, d1) && zeroFrom(p, o, 2), o, C_LEAF);
     }
     if (k === 5) {
-        return want(s, ((d0 >= 0) && (d0 <= 23)) && zeroFrom(p, o, 1), o, C_LEAF);
+        return want(s, (((d0 >= 0) && (d0 <= 23)) || ((d0 >= 32) && (d0 <= 255))) && zeroFrom(p, o, 1), o, C_LEAF);
     }
     if (k === 6) {
         return want(s, (byteRange(b, d0, d1) && (d1 >= 1)) && zeroFrom(p, o, 2), o, C_LEAF);

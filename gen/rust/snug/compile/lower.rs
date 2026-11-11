@@ -475,7 +475,12 @@ pub(crate) fn ext_arg_leaf(h: &mut [i32], l: i32, pos: i32) -> i32 {
     }
     if k == K_SIMPLE {
         let v: i32 = ld(h, l, 0);
-        vpush1(h, T_EXTARG, 224 | v);
+        if v < 24 {
+            vpush1(h, T_EXTARG, 224 | v);
+        } else {
+            vpush1(h, T_EXTARG, 248);
+            vpush1(h, T_EXTARG, v);
+        }
         return 0;
     }
     if (k == K_INT) && (ld(h, l, 1) == 1) {
@@ -860,6 +865,11 @@ pub(crate) fn lower_major(h: &mut [i32], node: i32) -> i32 {
     }
     if (lo >= 0) && (lo <= 31) {
         return ts_of1(h, -2);
+    }
+    // RFC 9682 §3.2: #7.32 .. #7.255 are the two-byte simple values (D284)
+    if (lo >= 32) && (lo <= 255) {
+        let ls2: i32 = mk_simple(h, lo);
+        return ts_of1(h, ls2);
     }
     return fail(h, ERR_MAJOR, pos);
 }

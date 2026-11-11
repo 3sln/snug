@@ -9,7 +9,7 @@ import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { validateOptions, selectOptions } from './options.mjs';
 import { profileFlags, strictArraysOf, keysOf, standardTags, anyTags, rfcFloats, undefinedOk, noncharactersOk } from './profiles.mjs';
-import { Decimal, NDArray, Float16Bytes, Tagged, typedInfo } from './values.mjs';
+import { Decimal, NDArray, Float16Bytes, Tagged, Simple, simpleOk, typedInfo } from './values.mjs';
 import { copyTypedBytes } from './typed-bytes.mjs';
 import { scan } from './scan.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
@@ -58,7 +58,7 @@ function typedPayload(v, info, fail, nanOk = false) {
 }
 
 /** Deterministic CBOR from typed calls. `new Writer({cose, keysSorted, strictArrays, limits})` (limit names may also be given at the
- * top level, as encode takes them). Values: uint, int, bigint, float, bool, null, text, bytes, typed, decimal, ndarray,
+ * top level, as encode takes them). Values: uint, int, bigint, float, bool, null, undefined, simple, text, bytes, typed, decimal, ndarray,
  * value (any host value, encode's rules); containers: beginArray(n), beginMap(n), key(k), end(); finish() returns the
  * bytes once exactly one complete root has been written. Map keys may come in any order (sorted at end() by encoded
  * bytes) or, with keysSorted, must come in strictly increasing encoded order (checked at each key). Key kinds and
@@ -249,6 +249,7 @@ export class Writer {
     if (v instanceof Decimal) { this.#headN(6, 4); this.#walk([v.exponent, v.mantissa], depth + 1); return; }
     if (v instanceof NDArray) { this.#headN(6, 40); this.#walk([v.shape, v.data], depth + 1); return; }
     if (v instanceof Tagged) { this.#tagged(v, depth); return; }
+    if (v instanceof Simple) { this.#simple(v.value); return; }
     if (Array.isArray(v)) {
       // D113: own-key enumeration is only needed for the strict/Bindle policy.
       if (Object.getPrototypeOf(v) !== Array.prototype || (this.#strictArrays && Reflect.ownKeys(v).length !== v.length + 1)) this.#fail('unsupported', 'Arrays must be dense with no extra properties.');
@@ -429,6 +430,17 @@ export class Writer {
   undefined() {
     if (!this.#undef) this.#badArgument('undefined needs the profile option undefinedValue.');
     this.#slot(); this.#count(); this.#head(7, 0, 23); return this;
+  }
+  /** A simple value other than false/true/null/undefined (D284): n in 0..19 or 32..255, or a Simple; written in its
+   * shortest form (one byte below 24, else f8 n). Needs the profile's undefinedValue (code simple otherwise). */
+  simple(n) {
+    const v = n instanceof Simple ? n : new Simple(n);
+    this.#slot(); this.#count(); this.#simple(v.value); return this;
+  }
+  #simple(n) {
+    if (!simpleOk(n)) this.#fail('simple', 'A simple value is an integer in 0..19 or 32..255.');
+    if (!this.#undef) this.#fail('simple', 'Simple values other than false, true and null need the profile option undefinedValue.');
+    this.#headN(7, n);
   }
   /** A tag outside the Bindle set with its content (as value(new Tagged(tag, content))); tag a number or bigint. */
   tagged(tag, content) { const v = new Tagged(tag, content); this.#slot(); this.#walk(v, this.#depth); return this; }

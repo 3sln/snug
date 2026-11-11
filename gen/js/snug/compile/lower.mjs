@@ -498,7 +498,12 @@ export function extArgLeaf(h, l, pos) {
     }
     if (k === K_SIMPLE) {
         const v = ld(h, l, 0);
-        vpush1(h, T_EXTARG, 224 | v);
+        if (v < 24) {
+            vpush1(h, T_EXTARG, 224 | v);
+        } else {
+            vpush1(h, T_EXTARG, 248);
+            vpush1(h, T_EXTARG, v);
+        }
         return 0;
     }
     if ((k === K_INT) && (ld(h, l, 1) === 1)) {
@@ -889,6 +894,11 @@ export function lowerMajor(h, node) {
     }
     if ((lo >= 0) && (lo <= 31)) {
         return tsOf1(h, -2);
+    }
+    // RFC 9682 §3.2: #7.32 .. #7.255 are the two-byte simple values (D284)
+    if ((lo >= 32) && (lo <= 255)) {
+        const ls2 = mkSimple(h, lo);
+        return tsOf1(h, ls2);
     }
     return fail(h, ERR_MAJOR, pos);
 }

@@ -51,7 +51,7 @@ for every option.
 | Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 1040, 64-bit numbers, ...) | yes, opaque: any valid content, its registered meaning unchecked (`Tagged`); `tags: 'standard'` refuses them | yes | no |
 | `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (any NaN; JS numbers keep no payload) | yes (NaN only as `f97e00`) | no |
 | Unicode noncharacters in text | yes | yes | no |
-| Unassigned simple values (`f0`–`f3`, `f8 20`–`f8 ff`) | no (`simple`; D284) | no | no |
+| Unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) | yes (`Simple`, D284) | yes | no |
 | Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes (RFC 8949 / RFC 8746 rules) | yes, the same rules (D265) | yes, normalised forms only |
 
 Compiler `profile: 'full'` does not relax any wire restriction; it is a

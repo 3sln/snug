@@ -105,9 +105,13 @@ same offset (gated).
      number); t ≥ 2^32 → **tag** unless `PF_TAGS` is 2/3 **[flag]** (then
      its *rule tag*: −2, or −1 for 2^64 − 1, D180); then by t (below); any
      other t → **tag** unless `PF_TAGS` is 2/3.
-   * 7: `ai` 20, 21, 22 (false, true, null) accepted; `f7` undefined
-     accepted under `PF_UNDEFINED` **[flag]**; anything else (unassigned
-     simple values, `f8 xx` with xx ≥ 24) → **simple**.
+   * 7 (after the head: `f8 xx` with xx < 24 is **non_shortest** first, as
+     every head): `ai` 20, 21, 22 (false, true, null) accepted; then, under
+     `PF_UNDEFINED` (or `PF_VALID`) **[flag]**, `f8 xx` with xx < 32 →
+     **malformed** (RFC 8949 §3.3, Appendix F); under `PF_UNDEFINED`
+     **[flag]** every other simple value is accepted — `f7` undefined and the
+     unassigned `e0`–`f3` and `f8 20`–`f8 ff` (D284); anything else → **simple**
+     (Bindle: every simple value but false, true and null).
    * 3, text: noncharacters are refused unless `PF_NONCHAR` **[flag]**.
 
 ## Under `PF_VALID` (P8.4, D260–D264)

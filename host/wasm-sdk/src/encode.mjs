@@ -27,7 +27,7 @@ import { SnugFault } from '../../js/src/fault.mjs';
 import { resolveLimits } from '../../js/src/limits.mjs';
 import { validateOptions } from '../../js/src/options.mjs';
 import { profileFlags, strictArraysOf, keysOf, standardTags, undefinedOk, noncharactersOk } from '../../js/src/profiles.mjs';
-import { Decimal, NDArray, Float16Bytes, Tagged, typedInfo } from '../../js/src/values.mjs';
+import { Decimal, NDArray, Float16Bytes, Tagged, Simple, simpleOk, typedInfo } from '../../js/src/values.mjs';
 import { copyTypedBytes } from '../../js/src/typed-bytes.mjs';
 import { stdAllowed } from '../../../gen/js/snug/cbor/stdtags.mjs';
 import { typedSize } from '../../../gen/js/snug/cbor/tags.mjs';
@@ -147,6 +147,13 @@ function walk(v, depth) {
   if (info) { const b = typedPayload(v, info, (flags & 12) !== 0); headN(6, info.tag); bytes(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
   if (v instanceof Decimal) { headN(6, 4); walk([v.exponent, v.mantissa], depth + 1); return; }
   if (v instanceof NDArray) { headN(6, 40); walk([v.shape, v.data], depth + 1); return; }
+  if (v instanceof Simple) {
+    // D284: shortest form; the profile's undefinedValue admits it, as the native Writer
+    if (!simpleOk(v.value)) fail('simple', 'A simple value is an integer in 0..19 or 32..255.');
+    if (!undef) fail('simple', 'Simple values other than false, true and null need the profile option undefinedValue.');
+    op4(1, 7, 0, v.value);
+    return;
+  }
   if (v instanceof Tagged) {
     // the rule tag (D180): the number; beyond 32 bits -2, or -1 for 2^64 - 1
     const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;

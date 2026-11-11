@@ -77,7 +77,7 @@ encode(value: unknown, options?: EncodeOptions): Uint8Array
 
 `Value` is the decoded union: null, undefined, boolean, number, bigint,
 string, Uint8Array, admitted native typed arrays, Decimal, Float16Bytes,
-NDArray, Tagged, arrays, string-keyed objects (maps with only text keys), or
+NDArray, Tagged, Simple (an unassigned simple value, D284), arrays, string-keyed objects (maps with only text keys), or
 `Map` (maps with any other key, and a top-level map with `cose`).
 The recursive union cannot express every root-only admission restriction;
 see the [host compatibility and integer tables](guide.md#decode-after-checking).
@@ -89,7 +89,7 @@ CDDL validation does not infer a narrower TS type.
 | `keys: 'text' \| 'integer' \| 'any'` | preset (`'any'`; bindle `'text'`) | Map key kinds |
 | `tags: 'bindle' \| 'standard' \| 'any'` | preset (`'any'`) | Tag level: the Bindle set, the standard set, or any tag number with the known tags' content rules (D180) |
 | `floats: 'bindle' \| 'deterministic'` | preset (`'deterministic'`) | Scalar float rules |
-| `undefinedValue: boolean` | preset (true) | `f7` |
+| `undefinedValue: boolean` | preset (true) | `f7` and the unassigned simple values (`Simple`, D284) |
 | `noncharacters: boolean` | preset (true) | Unicode noncharacters in text |
 | `top: 'map' \| 'any'` | codec/view/source: the preset's (`'any'`; bindle `'map'`); schema: `'any'` | Decode/check root policy |
 | `cose: boolean` | false | Under `keys: 'text'`: safe integer labels as well as text, top-level map only |
@@ -301,9 +301,10 @@ detect it. Owned copying protects against the original input only.
 
 | View member | Signature / meaning |
 | --- | --- |
-| `kind` | int, float, bytes, text, bool, null, undefined, array, map, decimal, ndarray, typed, tagged |
+| `kind` | int, float, bytes, text, bool, null, undefined, simple, array, map, decimal, ndarray, typed, tagged |
 | `tag`, `content()` | A tagged item's tag number (else undefined); a View of its content |
 | `isUndefined()` | boolean |
+| `simple()` | a simple value's number (kind `simple`: 0–19 or 32–255), else TypeError; `value()` gives the interned `Simple` |
 | `length` | number or undefined; entries/bytes/elements according to kind |
 | `offset`, `depth`, `borrowed` | Absolute item position, physical depth, ownership flag |
 | `get(key: unknown)` | View or undefined; map only. Strings; integers (number or bigint) when the profile admits integer keys or in a top-level cose map; any value under `keys: 'any'`, compared by its deterministic encoding (a view of non-deterministic input reads its canonical copy) |
@@ -329,7 +330,7 @@ Cursor members:
 | `key` | string, number, bigint, or undefined at its root |
 | `keyIs(text: string): boolean` | Compare encoded map key |
 | `enter()`, `next()`, `up()`, `find(key)` | boolean; false leaves position unchanged |
-| `number()`, `bigint()`, `int()`, `text()`, `bool()`, `isNull()`, `value()` | Same scalar/materialisation semantics as View |
+| `number()`, `bigint()`, `int()`, `text()`, `bool()`, `isNull()`, `simple()`, `value()` | Same scalar/materialisation semantics as View |
 | `view()` | Small View object at the current item |
 
 Conversion accessors on the wrong kind throw TypeError. `isNull()` is a
@@ -357,6 +358,7 @@ All methods return `this` except `finish`; `failure` is the first code or ''.
 | `float(x)` | number; shortest width. Deterministic floats: NaN → `f97e00`, ±∞/±0 float16, `float(1)` → `f93c00`; Bindle floats refuse NaN, ±∞, ±0 and safe-range integers (`float`) |
 | `bool(b)`, `null()`, `text(s)`, `bytes(b)` | boolean, no argument, string, Uint8Array |
 | `undefined()` | `f7`; needs `undefinedValue` |
+| `simple(n)` | number 0–19 or 32–255, or a `Simple`; shortest form (`f0`, `f8 ff`); needs `undefinedValue` (else `simple`) |
 | `tagged(tag, content)` | `value(new Tagged(tag, content))` |
 | `typed(a)`, `decimal(d)`, `ndarray(a)` | admitted typed array/Float16Bytes, known non-integral Decimal, NDArray; use value(Decimal.from(text)) for integral-or-decimal results |
 | `beginArray(n)`, `beginMap(n)` | non-negative safe count, checked against entry bound |

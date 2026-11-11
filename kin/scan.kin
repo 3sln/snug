@@ -179,15 +179,18 @@
     (return (+ (+ pos 1) w))))
 
 (defn ^:pub ^I32 scan-simple [^Ints o ^I32 pos ^I32 ai]
-  (comment "Major 7 other than a float: false, true and null; undefined (ai 23)"
-           "under PF_UNDEFINED. ai 24 reaches here only after its argument passed"
-           "the shortest-form check; unassigned simple values are always refused.")
+  (comment "Major 7 other than a float: false, true and null; under PF_UNDEFINED"
+           "(D284) every other simple value -- undefined (ai 23) and the unassigned"
+           "0..19 (one byte) and 32..255 (f8 xx). ai 24 reaches here only after its"
+           "argument passed the head check (O_LO is the value).")
   (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
-  (if (and (== ai 23) (!= (bit-and (ia o O_PROFILE) PF_UNDEFINED) 0)) (return (+ pos 1)))
-  (comment "RFC 8949 Appendix F: f8 with a value below 32 is not well-formed")
-  (if (and (== ai 24) (and (!= (bit-and (ia o O_PROFILE) (bit-or PF_VALID PF_VREL)) 0) (< (ia o O_LO) 32)))
-    (return (fail o pos CODE_MALFORMED)))
-  (return (fail o pos CODE_SIMPLE)))
+  (let [pf (ia o O_PROFILE)]
+    (comment "RFC 8949 §3.3 / Appendix F: f8 with a value below 32 is not well-formed")
+    (if (and (== ai 24) (and (!= (bit-and pf (bit-or PF_UNDEFINED (bit-or PF_VALID PF_VREL))) 0) (< (ia o O_LO) 32)))
+      (return (fail o pos CODE_MALFORMED)))
+    (if (and (< ai 24) (!= (bit-and pf PF_UNDEFINED) 0)) (return (+ pos 1)))
+    (if (and (== ai 24) (!= (bit-and pf PF_UNDEFINED) 0)) (return (+ pos 2)))
+    (return (fail o pos CODE_SIMPLE))))
 
 (defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
   (let [stop (take-len o pos p hi lo end)]

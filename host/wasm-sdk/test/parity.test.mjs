@@ -187,7 +187,7 @@ function walk(v, out, budget = { left: 3000 }) {
       if (budget.left < 0) break;
     }
   } else if (kind === 'tagged') { out.push(v.tag); walk(v.content(), out, budget); }
-  else out.push(outcome(() => v.value()), hex(v.raw()), outcome(() => v.isUndefined()));
+  else out.push(outcome(() => v.value()), hex(v.raw()), outcome(() => v.isUndefined()), outcome(() => v.simple()));
   return out;
 }
 function cursorWalk(v) {

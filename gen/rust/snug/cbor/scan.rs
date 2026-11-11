@@ -186,18 +186,23 @@ pub fn scan_float(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
     return (pos + 1) + w;
 }
 pub fn scan_simple(o: &mut [i32], pos: i32, ai: i32) -> i32 {
-    // Major 7 other than a float: false, true and null; undefined (ai 23)
-    // under PF_UNDEFINED. ai 24 reaches here only after its argument passed
-    // the shortest-form check; unassigned simple values are always refused.
+    // Major 7 other than a float: false, true and null; under PF_UNDEFINED
+    // (D284) every other simple value -- undefined (ai 23) and the unassigned
+    // 0..19 (one byte) and 32..255 (f8 xx). ai 24 reaches here only after its
+    // argument passed the head check (O_LO is the value).
     if (ai >= 20) && (ai <= 22) {
         return pos + 1;
     }
-    if (ai == 23) && ((o[(O_PROFILE) as usize] & PF_UNDEFINED) != 0) {
+    let pf: i32 = o[(O_PROFILE) as usize];
+    // RFC 8949 §3.3 / Appendix F: f8 with a value below 32 is not well-formed
+    if (ai == 24) && (((pf & (PF_UNDEFINED | (PF_VALID | PF_VREL))) != 0) && (o[(O_LO) as usize] < 32)) {
+        return fail(o, pos, CODE_MALFORMED);
+    }
+    if (ai < 24) && ((pf & PF_UNDEFINED) != 0) {
         return pos + 1;
     }
-    // RFC 8949 Appendix F: f8 with a value below 32 is not well-formed
-    if (ai == 24) && (((o[(O_PROFILE) as usize] & (PF_VALID | PF_VREL)) != 0) && (o[(O_LO) as usize] < 32)) {
-        return fail(o, pos, CODE_MALFORMED);
+    if (ai == 24) && ((pf & PF_UNDEFINED) != 0) {
+        return pos + 2;
     }
     return fail(o, pos, CODE_SIMPLE);
 }

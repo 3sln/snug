@@ -34,12 +34,14 @@ const tag = (t, content) => head(6, t) + content;
 // ------------------------------------------------------------------ the vectors
 // accept: [name, hex, value, {rfc, reencode, bindle, standard}]   refuse: [name, hex, code, offset, {bindle, standard}]
 // value notation (docs: the format field): JSON scalars; {"$int"}; {"$bytes"}; {"$map": [[k, v], ...]} a Map;
-// {"$tag": n, "value": v} a Tagged; {"$float": "NaN" | "Infinity" | "-Infinity" | "-0"}; {"$undefined": true}.
+// {"$tag": n, "value": v} a Tagged; {"$float": "NaN" | "Infinity" | "-Infinity" | "-0"}; {"$undefined": true};
+// {"$simple": n} a Simple (D284).
 const A = [], R = [];
 const acc = (name, hex, value, o = {}) => A.push({ name, hex, value, ...o });
 const ref = (name, hex, code, offset, o = {}) => R.push({ name, hex, code, offset, ...o });
 const F = s => ({ $float: s });
 const U = { $undefined: true };
+const S = n => ({ $simple: n });
 const T = (n, value) => ({ $tag: n, value });
 const M = (...pairs) => ({ $map: pairs });
 const B = h => ({ $bytes: h });
@@ -73,6 +75,9 @@ acc('A: false', 'f4', false, { rfc: true, bindle: 'ok' });
 acc('A: true', 'f5', true, { rfc: true, bindle: 'ok' });
 acc('A: null', 'f6', null, { rfc: true, bindle: 'ok' });
 acc('A: undefined', 'f7', U, { rfc: true, bindle: 'simple' });
+// unassigned simple values are valid and deterministic (RFC 8949 §3.3, §4.2.1; D284)
+acc('A: simple(16)', 'f0', S(16), { rfc: true, bindle: 'simple' });
+acc('A: simple(255)', 'f8ff', S(255), { rfc: true, bindle: 'simple' });
 acc('A: 0("2013-03-21T20:04:00Z")', 'c074323031332d30332d32315432303a30343a30305a', T(0, '2013-03-21T20:04:00Z'), { rfc: true, bindle: 'tag' });
 acc('A: 1(1363896240)', 'c11a514b67b0', T(1, 1363896240), { rfc: true, bindle: 'tag' });
 acc('A: 1(1363896240.5)', 'c1fb41d452d9ec200000', T(1, 1363896240.5), { rfc: true, bindle: 'tag' });
@@ -105,8 +110,6 @@ ref('A: -Infinity as float32', 'faff800000', 'non_shortest', 0, { rfc: true, bin
 ref('A: Infinity as float64', 'fb7ff0000000000000', 'non_shortest', 0, { rfc: true, bindle: 'float' });
 ref('A: NaN as float64', 'fb7ff8000000000000', 'non_shortest', 0, { rfc: true, bindle: 'float' });
 ref('A: -Infinity as float64', 'fbfff0000000000000', 'non_shortest', 0, { rfc: true, bindle: 'float' });
-ref('A: simple(16)', 'f0', 'simple', 0, { rfc: true, bindle: 'simple' });
-ref('A: simple(255)', 'f8ff', 'simple', 0, { rfc: true, bindle: 'simple' });
 ref("A: (_ h'0102', h'030405')", '5f42010243030405ff', 'indefinite', 0, { rfc: true, bindle: 'indefinite' });
 ref('A: (_ "strea", "ming")', '7f657374726561646d696e67ff', 'indefinite', 0, { rfc: true, bindle: 'indefinite' });
 ref('A: [_ ]', '9fff', 'indefinite', 0, { rfc: true, bindle: 'indefinite' });
@@ -139,9 +142,22 @@ ref('a float truncated', 'fa7f80', 'truncated', 0, { bindle: 'truncated' });
 
 // Simple values.
 acc('undefined in an array and as a map value', arr('f7', map([tstr('u'), 'f7'])), [U, { u: U }], { bindle: 'simple' });
-ref('simple(24): unassigned', 'f818', 'simple', 0, { bindle: 'simple' });
 ref('f8 17: non-shortest simple', 'f817', 'non_shortest', 0, { bindle: 'non_shortest' });
-ref('simple(19): unassigned', 'f3', 'simple', 0, { bindle: 'simple' });
+
+// Simple values (RFC 8949 §3.3, D284): 0..19 in one byte, 32..255 as f8 xx; f8 with a value below 32 is not
+// well-formed; Bindle refuses every one but false/true/null (simple).
+acc('simple(0)', 'e0', S(0), { bindle: 'simple' });
+acc('simple(19)', 'f3', S(19), { bindle: 'simple' });
+acc('simple(32): the smallest two-byte simple value', 'f820', S(32), { bindle: 'simple' });
+acc('simple values in an array', arr('f0', 'f8ff'), [S(16), S(255)], { bindle: 'simple' });
+acc('simple values as map keys', map(['f0', '01'], ['f8ff', '02']), M([S(16), 1], [S(255), 2]), { bindle: 'key_type' });
+acc('a simple value as a map value', map([tstr('s'), 'f820']), { s: S(32) }, { bindle: 'simple' });
+ref('f8 18: simple(24) is not well-formed', 'f818', 'malformed', 0, { bindle: 'simple' });
+ref('f8 1f: simple(31) is not well-formed', 'f81f', 'malformed', 0, { bindle: 'simple' });
+ref('f8 18 in an array', arr('f0', 'f818'), 'malformed', 2, { bindle: 'simple' });
+ref('f8 truncated', 'f8', 'truncated', 0, { bindle: 'truncated' });
+ref('simple keys out of order', map(['f8ff', '01'], ['f0', '02']), 'key_order', 4, { bindle: 'key_type' });
+ref('duplicate simple keys', map(['f0', '01'], ['f0', '02']), 'duplicate_key', 3, { bindle: 'key_type' });
 
 // Text: noncharacters are admitted; malformed UTF-8 is not.
 acc('noncharacter U+FFFF', '63efbfbf', '￿', { bindle: 'text' });
@@ -307,7 +323,7 @@ const doc = {
   format: 'hex is the full input, decoded with { profile: "deterministic" } (top any). Accept vectors give the decoded '
     + 'value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: '
     + 'cbor-profile.json\'s, plus {"$map": [[key, value], ...]} a Map, {"$tag": n, "value": v} a Tagged, {"$float": '
-    + '"NaN" | "Infinity" | "-Infinity" | "-0"} and {"$undefined": true}; a missing value is not checked. Refuse '
+    + '"NaN" | "Infinity" | "-Infinity" | "-0"}, {"$undefined": true} and {"$simple": n} a Simple (D284); a missing value is not checked. Refuse '
     + 'vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of '
     + 'the same bytes under { profile: "bindle", top: "any" } (cbor.mjs\'s). standard, when given, is the code of '
     + 'the same bytes under { tags: "standard" } (D180; else the vector\'s own verdict). A $tag number beyond 2^53 - 1 '

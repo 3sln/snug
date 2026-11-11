@@ -84,7 +84,10 @@ decoding bignums produces their canonical bytes. There is no decimal string
 parser/normalizer yet: supply normalized parts. Decimal values do not retain
 presentation scale. `Float(1.0)` encodes as the float `f93c00` under the
 valid and deterministic presets and is refused under `Profile::BINDLE`; choose
-`Uint(1)` for the integer. `Value::Undefined` is `f7`. NaN is refused in typed arrays under the Bindle tag set (D265); typed infinities
+`Uint(1)` for the integer. `Value::Undefined` is `f7`; `Value::Simple(n)` is
+any other simple value (D284), n in 0..=19 or 32..=255 (20..=31 are refused,
+`simple`), written in its shortest form (`f0`, `f8ff`) and admitted under
+`undefined_value` (`View::simple` reads it). NaN is refused in typed arrays under the Bindle tag set (D265); typed infinities
 and signed zero retain their bits. Byte strings use `Bytes`, not typed U8.
 
 `DecodeOptions::default()` (also `any()` and `valid()`) is the valid preset

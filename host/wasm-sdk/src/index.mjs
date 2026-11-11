@@ -15,7 +15,7 @@ import { build } from '../../js/src/build.mjs';
 
 export { init, initSync, reset, trim, memoryBytes, InstanceLost } from './runtime.mjs';
 export { encode } from './encode.mjs';
-export { Decimal, NDArray, Float16Bytes, Tagged } from '../../js/src/values.mjs';
+export { Decimal, NDArray, Float16Bytes, Tagged, Simple } from '../../js/src/values.mjs';
 export { SnugFault } from '../../js/src/fault.mjs';
 export { LIMITS } from '../../js/src/limits.mjs';
 export { profiles } from '../../js/src/profiles.mjs';

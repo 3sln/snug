@@ -586,7 +586,14 @@ export function leafBytes(p, pool, b, s, lb, pos, cs, ce) {
 }
 
 export function leafSimple(p, b, lb, pos) {
-    if ((b[pos] & 31) === p[lb + 2]) {
+    // #7.v: v 0..23 is the head's ai; v 32..255 (D284) the f8 head's argument.
+    const v = p[lb + 2];
+    const ib = b[pos];
+    if (v < 24) {
+        if ((ib & 31) === v) {
+            return 0;
+        }
+    } else if ((ib === 248) && (b[pos + 1] === v)) {
         return 0;
     }
     return R_VALUE;

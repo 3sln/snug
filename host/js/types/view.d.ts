@@ -1,6 +1,6 @@
 import type { Value, TypedArray, Float16Bytes, Decimal, NDArray } from './index.js';
 import type { Schema, ValidationOptions, ValidationResult } from './schema.js';
-export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' |
+export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'simple' |
   'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged';
 /** Unknown keys/malformed values throw TypeError before bytes are checked or copied. */
 export interface ViewOptions extends ValidationOptions {
@@ -29,6 +29,8 @@ export declare class View {
   bool(): boolean;
   isNull(): boolean;
   isUndefined(): boolean;
+  /** A simple value's number (kind 'simple': 0..19 or 32..255). */
+  simple(): number;
   /** A tagged item's tag number (a bigint beyond 2^53 - 1), else undefined. */
   readonly tag: number | bigint | undefined;
   /** A View of a tagged item's content. */
@@ -63,6 +65,7 @@ export declare class Cursor {
   text(): string;
   bool(): boolean;
   isNull(): boolean;
+  simple(): number;
   view(): View;
   value(): Value;
 }

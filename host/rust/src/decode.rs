@@ -429,6 +429,7 @@ impl<'a> Builder<'a> {
                 21 => Value::Bool(true),
                 22 => Value::Null,
                 23 => Value::Undefined,
+                0..=19 | 24 => Value::Simple(n as u8),
                 25 => Value::Float(half(n as u16)),
                 26 => Value::Float(f32::from_bits(n as u32) as f64),
                 27 => Value::Float(f64::from_bits(n)),

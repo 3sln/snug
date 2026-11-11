@@ -1,8 +1,8 @@
 // Trusted second pass over scanner-approved CBOR (any profile, D123). Invalid
 // input is outside this module's contract; all profile decisions belong to the
 // scanner. Maps with only text keys become objects, maps with any other key a Map
-// (a cose top-level map always); every tag outside the Bindle set becomes Tagged (D180); f7 undefined.
-import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue, typedInfo } from './values.mjs';
+// (a cose top-level map always); every tag outside the Bindle set becomes Tagged (D180); f7 undefined; other simple values Simple (D284).
+import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue, simpleValue, typedInfo } from './values.mjs';
 import { LIMITS } from './limits.mjs';
 import { fail } from './fault.mjs';
 
@@ -62,7 +62,10 @@ class Builder {
       if (ai === 21) return true;
       if (ai === 22) return null;
       if (ai === 23) return undefined;
+      // the other simple values (D284): one byte below 20, f8 xx with xx 32..255 (checked by the scanner)
+      if (ai < 20) return simpleValue(ai);
       const p = this.pos;
+      if (ai === 24) { this.pos = p + 1; return simpleValue(this.b[p]); }
       if (ai === 25) {
         this.pos = p + 2;
         const h = this.b[p] * 256 + this.b[p + 1], exp = (h >>> 10) & 31, frac = h & 1023;

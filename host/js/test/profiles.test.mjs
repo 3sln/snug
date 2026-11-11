@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { decode, encode, Tagged, profiles, SnugFault, Decimal } from '../src/index.mjs';
+import { decode, encode, Tagged, Simple, profiles, SnugFault, Decimal } from '../src/index.mjs';
 import { profileFlags, codecTop } from '../src/profiles.mjs';
 import { Writer } from '../src/writer.mjs';
 import { view } from '../src/view.mjs';
@@ -21,6 +21,7 @@ function value(v) {
   if (Array.isArray(v)) return v.map(value);
   if (v === null || typeof v !== 'object') return v;
   if ('$undefined' in v) return undefined;
+  if ('$simple' in v) return new Simple(v.$simple);
   if ('$float' in v) return { NaN: NaN, Infinity: Infinity, '-Infinity': -Infinity, '-0': -0 }[v.$float];
   if ('$int' in v) { const n = BigInt(v.$int); return n >= -BigInt(Number.MAX_SAFE_INTEGER) && n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : n; }
   if ('$bytes' in v) return fromHex(v.$bytes);
@@ -288,4 +289,44 @@ test('any tag (D180): decode, encode, Writer, views and schemas over tags of any
     assert.deepEqual(validateHandleSync(s, bufferHandle(fromHex(hex)), rule, {}, { chunk: 1, quantum: 1 }), { ok: true });
   assert.equal(validateHandleSync(s, bufferHandle(fromHex('d84143000102')), 'anytag', {}, { chunk: 1, quantum: 1 }).reason, 'cbor/tag');
   assert.equal(scanHandleSync(bufferHandle(fromHex('d8414401000200')), {}, { chunk: 1 }), true);
+});
+
+// D284: unassigned simple values (RFC 8949 §3.3) under the valid and deterministic presets; Bindle refuses them.
+test('Simple values: class, codec, Writer, views and #7.n', async () => {
+  assert.equal(new Simple(16), new Simple(16));                      // interned
+  assert.ok(Object.isFrozen(new Simple(0)) && String(new Simple(255)) === 'simple(255)');
+  for (const n of [-1, 20, 23, 24, 31, 256, 1.5, '16']) assert.throws(() => new Simple(n), { name: 'SnugFault', code: 'simple' });
+  for (const [n, h] of [[0, 'e0'], [19, 'f3'], [32, 'f820'], [255, 'f8ff']]) {
+    assert.equal(toHex(encode(new Simple(n))), h);
+    assert.equal(toHex(encode(new Simple(n), { wire: 'deterministic' })), h);
+    assert.equal(decode(fromHex(h)), new Simple(n));
+    assert.throws(() => encode(new Simple(n), B), { name: 'SnugFault', code: 'simple' });
+    assert.throws(() => encode(new Simple(n), { undefinedValue: false }), { name: 'SnugFault', code: 'simple' });
+    assert.throws(() => decode(fromHex(h), { undefinedValue: false }), { name: 'SnugFault', code: 'simple' });
+  }
+  for (const h of ['f818', 'f81f']) for (const w of ['valid', 'deterministic'])
+    assert.throws(() => decode(fromHex(h), { wire: w }), { name: 'SnugFault', code: 'malformed' });
+  assert.equal(toHex(new Writer().beginArray(2).simple(16).simple(new Simple(255)).end().finish()), '82f0f8ff');
+  assert.throws(() => new Writer().simple(24), { name: 'SnugFault', code: 'simple' });
+  assert.throws(() => new Writer(B).simple(16), { name: 'SnugFault', code: 'simple' });
+  // a Map keyed by Simple values: interning makes lookups by value; key order is the encoded order
+  const m = decode(fromHex('a2f8ff01f002'));
+  assert.equal(m.get(new Simple(255)), 1);
+  assert.equal(toHex(encode(m)), 'a2f002f8ff01');
+  const v = view(fromHex('a3f001f8ff0261739f20f3ff'));
+  assert.equal(v.get(new Simple(16)).number(), 1);
+  const keys = [...v.keys()];
+  assert.equal(keys[0], new Simple(16));
+  const arr = v.get('s');
+  assert.deepEqual([...arr.values()].map(x => [x.kind, x.kind === 'simple' ? x.simple() : x.number()]), [['int', -1], ['simple', 19]]);
+  assert.throws(() => arr.at(0).simple(), TypeError);
+  const c = v.cursor(); c.enter(); assert.equal(c.kind, 'int'); c.next(); c.next(); c.enter(); c.next(); assert.equal(c.simple(), 19);
+  // #7.n (RFC 9682 §3.2): 0..23 one byte, 32..255 two bytes
+  const s = await compile('r = [#7.16, #7.255, ? #7.32]\nu = #7.23');
+  assert.deepEqual(s.validate(fromHex('82f0f8ff'), 'r'), { ok: true });
+  assert.deepEqual(s.validate(fromHex('9ff0f8fff820ff'), 'r'), { ok: true });
+  assert.equal(s.validate(fromHex('82f0f820'), 'r').reason, 'value');
+  assert.equal(s.validate(fromHex('82f0f8ff'), 'r', { wire: 'bindle' }).reason, 'cbor/simple');
+  assert.equal(s.validate(fromHex('f818'), 'u').reason, 'cbor/malformed');
+  await assert.rejects(compile('r = #7.256'));
 });

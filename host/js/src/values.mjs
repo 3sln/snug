@@ -103,6 +103,25 @@ export class Tagged {
 }
 Object.freeze(Tagged.prototype);
 
+/** A CBOR simple value other than false, true, null and undefined (RFC 8949 §3.3, D284): `value` is 0..19 or
+ * 32..255 (20..23 are false/true/null/undefined, 24..31 are reserved and never well-formed). Interned: `new Simple(n)`
+ * answers the one frozen instance for n, so `===` and Map keys compare by value. Encoded in its shortest form (one
+ * byte below 24, else f8 n) under profiles with undefinedValue (the valid and deterministic presets); Bindle refuses it
+ * (code simple). */
+const SIMPLES = [];
+export const simpleOk = n => Number.isInteger(n) && n >= 0 && n <= 255 && (n < 20 || n > 31);
+export class Simple {
+  constructor(value) {
+    if (!simpleOk(value)) fail('simple', 'A simple value is an integer in 0..19 or 32..255 (20..23 are false, true, null and undefined; 24..31 are reserved).');
+    const known = SIMPLES[value];
+    if (known !== undefined) return known;
+    this.value = value; Object.freeze(this);
+    SIMPLES[value] = this;
+  }
+  toString() { return `simple(${this.value})`; }
+}
+Object.freeze(Simple.prototype);
+
 // Internal factories for the trusted builder. The scanner has established all
 // invariants; do not call validating public constructors in the building pass.
 export function decimalValue(mantissa, exponent) {
@@ -120,6 +139,7 @@ export function taggedValue(tag, value) {
   out.tag = tag; out.value = value;
   return Object.freeze(out);
 }
+export const simpleValue = n => SIMPLES[n] ?? new Simple(n);
 export function float16Value(bytes) {
   const out = Object.create(Float16Bytes.prototype);
   out.bytes = bytes; out.length = bytes.length / 2;

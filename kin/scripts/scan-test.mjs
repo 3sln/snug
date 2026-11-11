@@ -182,7 +182,7 @@ if (cbor2) {
   const pool = [...dc.cases.filter(c => isDef(c.opt)), ...cases.map(c => ({ label: c.label, bytes: c.bytes, opt: DDEF }))];
   const ad = acceptanceDiff(cbor2, pool, b => { const g = detRun(b, DDEF); return { code: g.name, offset: g.offset }; });
   for (const u of ad.unexplained.slice(0, 20)) fail(`cbor2: unexplained ${u}`);
-  console.log(`  ${ad.unexplained.length ? 'FAIL' : 'ok  '} deterministic preset vs cbor2 (CDE + rejectDuplicateKeys/LongLoundNaN/Simple): ${ad.agree}/${ad.compared} same verdict; the rest by documented class: ${Object.entries(ad.classes).map(([k, v]) => `${k} ${v}`).join(', ')}; ${ad.unexplained.length} unexplained`);
+  console.log(`  ${ad.unexplained.length ? 'FAIL' : 'ok  '} deterministic preset vs cbor2 (CDE + rejectDuplicateKeys/LongLoundNaN): ${ad.agree}/${ad.compared} same verdict; the rest by documented class: ${Object.entries(ad.classes).map(([k, v]) => `${k} ${v}`).join(', ')}; ${ad.unexplained.length} unexplained`);
   const ed = encodeDiff(cbor2, v => snugEncode(v), 4000, SEED, { Tagged: SnugTagged });
   for (const d of ed.differ.slice(0, 20)) fail(`cbor2 encode: ${d}`);
   console.log(`  ${ed.differ.length ? 'FAIL' : 'ok  '} encode (deterministic preset) == cbor2 encode({cde: true}): ${ed.equal}/${ed.values} seeded values byte for byte (${ed.tags} holding tags of any number)`);

@@ -260,6 +260,16 @@ impl<'a> View<'a> {
             _ => None,
         }
     }
+    /// A simple value other than false/true/null/undefined (D284): 0..=19 or
+    /// 32..=255; every other kind answers None.
+    pub fn simple(&self) -> Option<u8> {
+        let (_, m, ai, n) = self.head()?;
+        match (m, ai) {
+            (7, 0..=19) => Some(ai),
+            (7, 24) => Some(n as u8),
+            _ => None,
+        }
+    }
     /// Null predicate, false for every other kind.
     pub fn is_null(&self) -> bool {
         self.raw().first() == Some(&0xf6)

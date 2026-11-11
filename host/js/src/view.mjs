@@ -100,7 +100,7 @@ function kindAt(m, p) {
     case 4: return 'array';
     case 5: return 'map';
     case 6: { const t = ruleTag(o); return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : TYPED_BY_TAG.has(t) ? 'typed' : 'tagged'; }
-    default: { const ai = o[N_AI]; return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : 'float'; }
+    default: { const ai = o[N_AI]; return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : ai < 20 || ai === 24 ? 'simple' : 'float'; }
   }
 }
 
@@ -184,6 +184,12 @@ function boolAt(m, p) {
 }
 
 function isNullAt(m, p) { m.head(p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 22; }
+
+// A simple value other than false/true/null/undefined (D284): its number, 0..19 or 32..255.
+function simpleAt(m, p) {
+  want(kindAt(m, p) === 'simple', 'a simple value');
+  return m.o[N_AI] === 24 ? m.o[N_LO] : m.o[N_AI];
+}
 
 /** [start, end) of a byte string's content, or of a typed array's little-endian payload. */
 function payloadAt(m, p) {
@@ -289,8 +295,8 @@ export class View {
     this.#m = m; this.#p = p; this.#d = depth;
   }
   static { viewParts = v => (#m in v ? [v.#m, v.#p, v.#d] : null); }
-  /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'array' | 'map' | 'decimal' | 'ndarray' |
-   * 'typed' | 'tagged' (any other tag the profile admits, D121, D180) */
+  /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'simple' (any other simple value, D284) |
+   * 'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged' (any other tag the profile admits, D121, D180) */
   get kind() { return kindAt(this.#m, this.#p); }
   /** Entries of an array or map, bytes of a bytes/text item, elements of a typed array; else undefined. */
   get length() { return lengthAt(this.#m, this.#p); }
@@ -342,6 +348,8 @@ export class View {
   bool() { return boolAt(this.#m, this.#p); }
   isNull() { return isNullAt(this.#m, this.#p); }
   isUndefined() { const m = this.#m; m.head(this.#p); return m.o[N_MAJOR] === 7 && m.o[N_AI] === 23; }
+  /** A simple value's number (kind 'simple': 0..19 or 32..255; value() gives the Simple). */
+  simple() { return simpleAt(this.#m, this.#p); }
   /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays; a bigint beyond 2^53 - 1), else
    * undefined. */
   get tag() {
@@ -501,6 +509,7 @@ export class Cursor {
   text() { return textAt(this.#m, this.#p); }
   bool() { return boolAt(this.#m, this.#p); }
   isNull() { return isNullAt(this.#m, this.#p); }
+  simple() { return simpleAt(this.#m, this.#p); }
   /** A View of the current item (allocates one small object). */
   view() { return new View(this.#m, this.#p, this.depth); }
   value() { return valueAt(this.#m, this.#p, this.depth); }

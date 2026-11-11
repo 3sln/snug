@@ -4592,16 +4592,60 @@ keep the step free of allocation (D033).
 (a second form to canonicalise).
 - [ ] **Signed off** (owner)
 
-### D284 — Unassigned simple values stay refused under every preset (P8.4; owner question)
-**Decision** (P8.4, provisional): RFC 8949's unassigned simple values
-(`f0`–`f3`, `f8 20`–`f8 ff`) are well-formed and valid, but snug's value model
-has no value for them, so every preset — `valid` included — refuses them
-(`simple`), as before. The valid-CBOR gate records this against the corpus's
-expectation (Appendix A `f0`, `f8ff`), with the deterministic preset's kept
-§4.2.2 canonical NaN (`f97e01`, `faffc00001` refused `float`).
-**Owner question**: admit them under `valid` with a `Simple(n)` value class
-(decode, views, encode, the VM's `#7.n`)? That is a value-model addition, not
-P8.4's scope.
+### D284 — Unassigned simple values are values: `Simple(n)`, admitted under `valid` and `deterministic` (P8.4 follow-up; coordinator under the owner's standing rule)
+**Decision** (coordinator, 2026-11-11, applying the owner's standing rule
+"spec conformance is the default", D230.2; supersedes the provisional
+"refused under every preset" of P8.4): RFC 8949 §3.3's unassigned simple
+values — `e0`–`f3` (0..19) and `f8 20`–`f8 ff` (32..255) — are well-formed,
+valid and deterministic (§4.2.1 does not exclude them), so the `valid` and
+`deterministic` presets accept them and `bindle` keeps refusing them
+(`simple`). `f8 xx` with xx < 32 is not well-formed (§3.3, Appendix F):
+`malformed` under every preset but Bindle (which keeps `simple`, and
+`non_shortest` below 24 under the deterministic head rule as before).
+- **Flag**: the existing `PF_UNDEFINED` (bit 5) now admits every simple value
+  other than false/true/null — `undefined` and the unassigned ones — and makes
+  `f8 18`–`f8 1f` `malformed`; no new bit, so the presets (378, 122, 0) and
+  every flag word keep their numbers. JS `undefinedValue` / Rust
+  `undefined_value` govern both.
+- **kin**: `scan-simple` (scanner, rscan, VM attempt, dead walk, session via
+  the eval walk); the VM's SIMPLE leaf matches `#7.n` for n 32..255 by the
+  `f8` argument; the compiler lowers `#7.32`..`#7.255` (RFC 9682 §3.2) to a
+  SIMPLE leaf (`#7.24`..`#7.31` stay the empty type; RFC 9682's `#7.<type>`
+  head numbers are not parsed) and writes `f8 n` for one in a control
+  argument; `vm-verify` admits SIMPLE leaves 0..23 and 32..255. The canonical
+  copy, DC/EC forms and duplicate detection needed no change: a simple value
+  has one encoding, so keys compare by value bytewise (`{f0: 1, f0: 2}` is
+  `duplicate_key`, `{f8ff: 1, f0: 2}` `key_order` under `deterministic`).
+- **Values**: JS `Simple` (exported; `value` 0..19 or 32..255, else
+  SnugFault `simple`; interned and frozen, so `===` and `Map` keys compare by
+  value); decode builds it; `encode`/`Writer#value` and the new
+  `Writer#simple(n)` write the shortest form, `simple` without
+  `undefinedValue`; views report kind `'simple'` with `simple()` (View and
+  Cursor). Rust `Value::Simple(u8)` (encode refuses 20..=31 with `simple`),
+  `Writer::simple`, `View::simple`. The wasm SDK shares the native builder and
+  gains the same encoder branch and view accessor (D300).
+- **Not a Program format change** (D084 left at its version): a SIMPLE leaf
+  above 23 was unrepresentable before (`#7.32` was `ERR_MAJOR`); an older
+  verifier refuses such a Program (`C_LEAF`) rather than misreading it. The
+  format-2.0 branch (`p85-peg`) inherits the widened check when it rebases.
+**Why**: the standing rule; RFC 8949 Appendix A's `f0` and `f8ff` must
+decode under the default; cbor2's default decoder agrees on every one of
+these inputs (it refuses `f818`–`f81f` and accepts the rest).
+**Alternatives**: a new profile bit (renumbers every preset that gates,
+hosts and stored callers carry); a non-interned class (Map keys by identity
+would make `get(new Simple(16))` miss); returning a bare number (collides
+with integers); admitting them under `valid` only (§4.2.1 does not exclude
+them, so `deterministic` would refuse deterministic CBOR).
+*Done 2026-11-11* (the D284 engineer): vectors — deterministic.json's
+Appendix A `f0`/`f8ff` move to accept and a simple-values section (accept
+`e0`, `f3`, `f820`, arrays, keys, values; refuse `f818`/`f81f` `malformed`,
+`f8` truncated, out-of-order and duplicate simple keys); valid-test's two
+kept differences for them are gone (RFC 8949 Appendix A now 243/243 in the
+RFC runner, which had expected this all along); the cbor2 differential drops
+`rejectSimple` (cbor2 then agrees on every simple input); vm-allcases' live
+schema lists the 244 `#7.n`. **Learnt**: `scan-simple`'s answer is the item's
+end, so the two-byte form needed `pos + 2` (every walker returns it); RFC 9682's
+`#7.<32..255>` suite still fails on the unparsed `#7.<type>` syntax.
 - [ ] **Signed off** (owner)
 
 ### D285 — Bundle growth for valid CBOR, attributed and cut; caps at measured + 2% (P8.4; R9 per D200, owner sign-off)
@@ -4718,6 +4762,24 @@ which `p85-peg` changed). (2) B + C as one P8.4 follow-up in
 merge -- then D. (3) E only after PEG phase 2, re-measured on its map machine.
 Expected after (1)+(2)+D: sessions on maps `rev` ~23x -> ~4x the deterministic
 buffer run, indefinite/non-shortest input ~4-8x -> ~2.5-4x.
+
+### D287 — Bundle growth for `Simple` values (D284; R9 per D200)
+**Decision** (D284's engineer, provisional): no cap changes; every entry stays
+within D285's caps. Measured with `node tools/size/size.mjs` (esbuild 0.28.2,
+Node 24.6.0), main `3c10a83` → the D284 change, minified / gzip bytes:
+`snug` 61,238 / 21,000 → 62,107 / 21,304 (+869 / +304); `snug/view` +1,041 /
++348; `snug/writer` +764 / +269; `snug/schema` +592 / +231; `snug/sequence`
++1,113 / +377; `snug/sources` +107 / +42; `runtime` +957 / +338;
+`all-runtime` +1,144 / +362; `snug/compile` (full) +684 / +262; `controls`
+and `unicode` unchanged. **Attribution**: the `Simple` class with its intern
+table and validity check (`values.mjs`, about 0.5 KB minified, in every entry
+that builds or writes values), the builder's two branches, the Writer's
+`simple()`/`#simple`, the views' `simple()` and kind, and the kin changes
+(`scan-simple`, the SIMPLE leaf, the `#7.n` lowering, `vm-verify`), each a
+few lines.
+**Why**: a value class is the smallest form of D284's model change; no cut
+available without dropping the public API it asks for.
+- [ ] **Signed off** (owner)
 
 ### D300 — Standing approval for wasm edits (OWNER DECISION, 2026-11-10)
 **Decision** (owner, in session via the coordinator): agents may edit
@@ -4901,12 +4963,11 @@ are answered as provisional decisions D082–D085. None is open now.
 
 **Open as of 2026-11-11 (P8.4):**
 
-- [ ] **D284 — unassigned simple values under `valid`.** RFC 8949's unassigned
-  simple values (`f0`–`f3`, `f8 20`–`f8 ff`) are valid CBOR; snug refuses them
-  under every preset (`simple`) because its value model has no value for them.
-  Admit them under `valid` with a `Simple(n)` value class (decode, views,
-  encode, the VM's `#7.n`)? The RFC vectors and the cbor2 differential record
-  the difference as a documented class until then.
+- [ ] **D284 — unassigned simple values under `valid`.** *Applied 2026-11-11
+  by the coordinator under the owner's standing rule (spec conformance is the
+  default): `Simple(n)` admitted under `valid` and `deterministic`, Bindle
+  refuses; owner sign-off on D284 still open.* RFC 8949's unassigned simple
+  values (`e0`–`f3`, `f8 20`–`f8 ff`) are valid CBOR.
 
 ## Phase 7 — Standalone library (D080, 2026-11-03)
 

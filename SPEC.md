@@ -96,8 +96,8 @@ selects what is accepted (D081, D120, D260). Three presets:
   lengths, non-shortest heads and floats, keys in any order, NaN payloads —
   with the `deterministic` preset's other options. Refused: duplicate map keys
   compared by value (their canonical encodings, §5.6.1), invalid UTF-8,
-  invalid content of the tags snug knows, unassigned simple values (no value
-  in snug's model, D284), `f8` below 32 and everything not well-formed.
+  invalid content of the tags snug knows, `f8` below 32 and everything not
+  well-formed (unassigned simple values are accepted as `Simple`, D284).
   Non-deterministic input is read through its canonical copy (views, decode)
   and validated by the schema VM over that copy with the input's refusals
   replayed at their own positions (D262, D264, D280).
@@ -111,8 +111,8 @@ selects what is accepted (D081, D120, D260). Three presets:
   at a UTC month end), 1 (integer or float), 24, 32 (RFC 3986
   URI-reference), 2/3/4/40 and the typed arrays — and every other tag is
   opaque (D252); RFC 8949 floats (canonical NaN `f97e00`, ±∞, −0, integral
-  floats); `false`, `true`, `null`, `undefined`; any well-formed UTF-8
-  text.
+  floats); `false`, `true`, `null`, `undefined` and the unassigned simple
+  values (D284); any well-formed UTF-8 text.
 * **`bindle`**: text map keys (a `cose` option allows safe integer labels in
   the top-level map); the tags above without the standard additions;
   `false`, `true`, `null` and shortest floats only, with scalar NaN, ±∞, −0
@@ -121,7 +121,7 @@ selects what is accepted (D081, D120, D260). Three presets:
 
 `deterministic` and `bindle`: bignums beyond 64 bits only (9..128 bytes,
 no leading zero); `bindle` also normalised decimal fractions and its typed-
-array and ndarray rules (D265). All three refuse unassigned simple values; resource
+array and ndarray rules (D265). Only `bindle` refuses unassigned simple values; resource
 bounds are defaults (§5). Refusal codes retain the imported vector
 vocabulary. Programs do not depend on the wire profile: it is a run-time
 option of each call. Compiler profiles are a separate axis. See

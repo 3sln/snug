@@ -214,6 +214,12 @@ impl Output {
             Value::Bool(v) => self.head(7, if *v { 21 } else { 20 }),
             Value::Null => self.head(7, 22),
             Value::Undefined => self.head(7, 23),
+            Value::Simple(n) => {
+                if (20..=31).contains(n) {
+                    return Err(Error::cbor("simple"));
+                }
+                self.head(7, u64::from(*n))
+            }
             Value::Float(n) => {
                 let bits = n.to_bits();
                 let mut b = [0; 9];

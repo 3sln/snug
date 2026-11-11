@@ -11,7 +11,7 @@ export interface Float16ArrayLike {
 /** A map with only text keys decodes to an object; a map with any other key (or a top-level map under cose) to a
  * Map whose keys are decoded values (D123). `undefined` and Tagged arise only under profiles that admit them. */
 export type Value = null | undefined | boolean | number | bigint | string | Uint8Array | TypedArray |
-  Decimal | NDArray | Float16Bytes | Tagged | Value[] | { [key: string]: Value } | Map<Value, Value>;
+  Decimal | NDArray | Float16Bytes | Tagged | Simple | Value[] | { [key: string]: Value } | Map<Value, Value>;
 /** Finite non-negative safe integers. Zero is a real bound; malformed/unknown options throw TypeError. */
 export interface Limits {
   maxBytes?: number;
@@ -32,7 +32,8 @@ export interface ProfileOptions {
   tags?: 'bindle' | 'standard' | 'any';
   /** Bindle refuses NaN, ±∞, −0 and safe-range integral floats; deterministic is RFC 8949 (canonical NaN f97e00). */
   floats?: 'bindle' | 'deterministic';
-  /** The simple value undefined (f7). deterministic: true; bindle: false. */
+  /** The simple values other than false/true/null: undefined (f7) and the unassigned ones (Simple, D284).
+   * valid/deterministic: true; bindle: false. */
   undefinedValue?: boolean;
   /** Unicode noncharacters in text. deterministic: true; bindle: false. */
   noncharacters?: boolean;
@@ -104,6 +105,13 @@ export declare class Tagged {
   constructor(tag: number | bigint, value: Value);
   readonly tag: number | bigint;
   readonly value: Value;
+}
+/** A simple value other than false/true/null/undefined (D284): value 0..19 or 32..255 (else SnugFault code simple).
+ * Interned: one frozen instance per value, so === and Map keys compare by value. */
+export declare class Simple {
+  constructor(value: number);
+  readonly value: number;
+  toString(): string;
 }
 export declare class Float16Bytes {
   constructor(bytes: Uint8Array);

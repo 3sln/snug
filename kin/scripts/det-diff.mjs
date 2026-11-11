@@ -1,6 +1,7 @@
 // The deterministic preset against an independent decoder/encoder (P7.1): cbor2 2.4.1 (bench/compare/node_modules,
-// MIT, hildjj/cbor2) in its CDE mode (draft-ietf-cbor-cde) plus rejectDuplicateKeys, rejectLongLoundNaN and
-// rejectSimple ("C1"), and C1 + rejectLongFloats ("C2"). cbor2 is not a dependency of snug: absent, this module
+// MIT, hildjj/cbor2) in its CDE mode (draft-ietf-cbor-cde) plus rejectDuplicateKeys and rejectLongLoundNaN ("C1";
+// no rejectSimple since D284: both admit the unassigned simple values and refuse f8 below 32), and C1 +
+// rejectLongFloats ("C2"). cbor2 is not a dependency of snug: absent, this module
 // reports SKIP. Every disagreement on ACCEPTANCE must fall in a documented class (docs/profiles.md, "Against cbor2"):
 //
 //   tag         snug's tag content checks (RFC 8949 standard tags, RFC 8746 typed-array lengths, 55799 only at the
@@ -29,7 +30,7 @@ export async function loadCbor2() {
   return import(CBOR2.href);
 }
 
-const C1 = { cde: true, rejectDuplicateKeys: true, rejectLongLoundNaN: true, rejectSimple: true };
+const C1 = { cde: true, rejectDuplicateKeys: true, rejectLongLoundNaN: true };
 const C2 = { ...C1, rejectLongFloats: true };
 
 function verdict(cbor2, bytes, opts) {

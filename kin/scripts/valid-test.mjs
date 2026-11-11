@@ -101,11 +101,9 @@ const LIM = (flags, budget = -1, extra = {}) => [1, 0, extra.maxBytes ?? -1, ext
   const wfCodes = {}, kept = {};
   // documented differences from the corpus's expectations (docs/profiles.md): the deterministic preset keeps RFC
   // 8949 §4.2.2's canonical NaN, so a NaN with a payload is refused there (the corpus asks only §4.2.1)
+  // (unassigned simple values are admitted under valid and deterministic since D284: no longer a difference)
   const KNOWN = new Map([['f97e01 deterministic', { code: 9, why: 'deterministic preset: canonical NaN (§4.2.2)' }],
-    ['faffc00001 deterministic', { code: 9, why: 'deterministic preset: canonical NaN (§4.2.2)' }],
-    // unassigned simple values are well-formed and valid, but snug's value model has none: refused (simple) in
-    // every preset (docs/profiles.md; an owner question in DEVLOG P8.4)
-    ...['f0', 'f8ff'].flatMap(h => ['valid', 'deterministic'].map(p => [`${h} ${p}`, { code: 10, why: 'unassigned simple values (no value)' }]))]);
+    ['faffc00001 deterministic', { code: 9, why: 'deterministic preset: canonical NaN (§4.2.2)' }]]);
   for (const f of files) {
     const j = JSON.parse(readFileSync(new URL('../../' + f, import.meta.url)));
     for (const v of j.vectors) {
@@ -409,7 +407,6 @@ function shifted(outStr, at, k) {
       if (s.code !== 0) {
         if (['tag', 'bignum', 'decimal', 'typed_array', 'ndarray'].includes(sc)) { note('tag rules (snug checks known tags\' contents, D121/D180/D265)'); continue; }
         if (['depth', 'too_many_items', 'too_many_entries', 'too_large'].includes(sc)) { note('limits'); continue; }
-        if (sc === 'simple') { note('simple values (snug admits false/true/null/undefined only)'); continue; }
         if (sc === 'text') { note('text (noncharacters, or UTF-8 cbor2 does not check)'); continue; }
         if (sc === 'float') { note('floats (deterministic float rules kept by the valid preset)'); continue; }
         if (sc === 'duplicate_key') { note('duplicates by value (RFC 8949 §5.6.1; cbor2 compares decoded JS keys)'); continue; }

@@ -115,7 +115,7 @@ function kindAt(m, p) {
     case 4: return 'array';
     case 5: return 'map';
     case 6: { const t = ruleTag(); return t === 2 || t === 3 ? 'int' : t === 4 ? 'decimal' : t === 40 ? 'ndarray' : TYPED_BY_TAG.has(t) ? 'typed' : 'tagged'; }
-    default: { const ai = nv(N_AI); return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : 'float'; }
+    default: { const ai = nv(N_AI); return ai === 20 || ai === 21 ? 'bool' : ai === 22 ? 'null' : ai === 23 ? 'undefined' : ai < 20 || ai === 24 ? 'simple' : 'float'; }
   }
 }
 function lengthAt(m, p) {
@@ -169,6 +169,8 @@ const intAt = (m, p) => { const n = safeAt(m, p); return n !== undefined ? n : b
 function textAt(m, p) { const c = m.head(p); want(nv(N_MAJOR) === 3, 'text'); return textOf(m, c, nv(N_LO)); }
 function boolAt(m, p) { m.head(p); want(nv(N_MAJOR) === 7 && (nv(N_AI) === 20 || nv(N_AI) === 21), 'a bool'); return nv(N_AI) === 21; }
 function isNullAt(m, p) { m.head(p); return nv(N_MAJOR) === 7 && nv(N_AI) === 22; }
+// D284: a simple value's number (kind 'simple')
+function simpleAt(m, p) { want(kindAt(m, p) === 'simple', 'a simple value'); return nv(N_AI) === 24 ? nv(N_LO) : nv(N_AI); }
 function payloadAt(m, p) {
   const c = m.head(p);
   if (nv(N_MAJOR) === 2) return [c, c + nv(N_LO)];
@@ -333,6 +335,7 @@ export class View {
   bool() { return boolAt(this.#m, this.#p); }
   isNull() { return isNullAt(this.#m, this.#p); }
   isUndefined() { this.#m.head(this.#p); return nv(N_MAJOR) === 7 && nv(N_AI) === 23; }
+  simple() { return simpleAt(this.#m, this.#p); }
   /** A tagged item's tag number (any tag, including 2/3/4/40 and typed arrays; a bigint beyond 2^53 - 1), else
    * undefined. */
   get tag() {
@@ -468,6 +471,7 @@ export class Cursor {
   text() { return textAt(this.#m, this.#p); }
   bool() { return boolAt(this.#m, this.#p); }
   isNull() { return isNullAt(this.#m, this.#p); }
+  simple() { return simpleAt(this.#m, this.#p); }
   view() { return new View(this.#m, this.#p, this.depth); }
   value() { return valueAt(this.#m, this.#p, this.depth); }
 }

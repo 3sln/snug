@@ -126,6 +126,11 @@ impl Writer {
     pub fn undefined(&mut self) -> Result<&mut Self, Error> {
         self.value(&Value::Undefined)
     }
+    /// Write a simple value 0..=19 or 32..=255 (D284) in its shortest form;
+    /// 20..=31 answer `simple`, and the profile's `undefined_value` decides at finish.
+    pub fn simple(&mut self, n: u8) -> Result<&mut Self, Error> {
+        self.value(&Value::Simple(n))
+    }
     /// Write UTF-8 text. Noncharacters are refused by kin at finish.
     pub fn text(&mut self, v: &str) -> Result<&mut Self, Error> {
         self.slot(false)?;

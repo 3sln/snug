@@ -402,8 +402,13 @@
     (return R_BITS)))
 
 (defn ^:pub ^I32 leaf-simple [^IntsR p ^Bytes b ^I32 lb ^I32 pos]
-  (if (== (bit-and (u8 b pos) 31) (ia p (+ lb 2))) (return 0))
-  (return R_VALUE))
+  (comment "#7.v: v 0..23 is the head's ai; v 32..255 (D284) the f8 head's argument.")
+  (let [v (ia p (+ lb 2))
+        ib (u8 b pos)]
+    (if (< v 24)
+      (if (== (bit-and ib 31) v) (return 0))
+      (if (and (== ib 248) (== (u8 b (+ pos 1)) v)) (return 0)))
+    (return R_VALUE)))
 
 (defn ^:pub ^I32 leaf-uintx [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 lb ^I32 pos ^I32 cls ^I32 hi ^I32 lo]
   (comment "UINTX (`uint .bits`): intervals (if any) first, then v & ~allowed = 0.")

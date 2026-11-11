@@ -11,21 +11,23 @@ exist (D081, D120–D125, D180, D260):
   any order, NaN payloads — refusing what is not valid: a duplicate map key
   *by value* (RFC 8949 §5.6.1: `1` twice, or `"a"` in two encodings), invalid
   UTF-8, invalid content of a tag snug knows (dates, URIs, bignums, tag-24
-  payloads, typed-array lengths, …), the unassigned simple values snug has no
-  value for (D284), and everything not well-formed. Its other options are the
-  deterministic preset's.
+  payloads, typed-array lengths, …) and everything not well-formed. Its other
+  options are the deterministic preset's (unassigned simple values included,
+  D284).
 * **`deterministic`**: general deterministic CBOR, checked on read (RFC 8949
   §4.2.1): definite lengths, shortest heads and floats, keys in bytewise
   order and the §4.2.2 canonical NaN. Any map key kind, any tag number with
   the content checks of the tags snug knows, RFC 8949 scalar floats,
-  `undefined`, and any well-formed UTF-8 (noncharacters included). Choose it
+  `undefined` and the unassigned simple values (`Simple`, D284), and any
+  well-formed UTF-8 (noncharacters included). Choose it
   for signing, hashing and protocols that require deterministic encoding
   (dCBOR, CTAP2, COSE inputs to be signed).
 * **`bindle`**: the Bindle/3sln.me wire profile, bit for bit as before P7.1:
   deterministic, text keys only (safe-integer labels in the top-level map
   with `cose`), the Bindle tag set and its application rules (normalised
   decimals, ndarrays, NaN-free typed arrays, 55799 at the top only; D265), no
-  NaN/±∞/−0/safe-range integral floats, no `undefined`, no noncharacters, and
+  NaN/±∞/−0/safe-range integral floats, no simple values but `false`, `true`
+  and `null`, no noncharacters, and
   a map at the codec's root. Every 3sln.me vector gives the same code under
   it.
 
@@ -57,8 +59,9 @@ What `valid` reads, and how:
 | Duplicate keys, compared by value: their canonical (EC) encodings, so `1` / `1801`, `0.0` / `-0.0`, two NaNs | `duplicate_key` | `duplicate_key` (or `key_order`, whichever comes first) |
 | NaN with a payload or sign, any width | accepted | `float` |
 | Bignums with leading zeros or below 2⁶⁴ (tags 2/3) | accepted (the integer) | `bignum` |
-| `f8` with a value below 32 | `malformed` (RFC 8949 Appendix F) | `non_shortest` |
-| Unassigned simple values (`f0`–`f3`, `f8 20`–`f8 ff`) | `simple` (D284: no value in snug's model) | `simple` |
+| `f8` with a value below 24 | `malformed` (RFC 8949 Appendix F) | `non_shortest` |
+| `f8 18`–`f8 1f` (simple values 24–31, RFC 8949 §3.3) | `malformed` | `malformed` (Bindle: `simple`) |
+| Unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) | accepted (`Simple`, D284) | accepted (Bindle: `simple`) |
 | Invalid UTF-8, a refused known tag's content, a lone break, truncation | refused with its code | refused with its code |
 
 Values: a decoded map keeps its keys in wire order (D267); a bignum with
@@ -90,7 +93,7 @@ and sequences take such items whole (D283). Costs: bench/README.md
 | Integers | Major 0/1 for −2⁶⁴..2⁶⁴−1; beyond that a bignum (tags 2/3) of 9..128 content bytes, no leading zero (RFC 8949 §3.4.3 preferred serialization; `valid`: any bignum of at most 128 content bytes) |
 | Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64; `valid`: any width) |
 | Text | Well-formed UTF-8: no overlong, no surrogate, nothing above U+10FFFF |
-| Simple values | `false`, `true`, `null`; unassigned simple values (`e0`–`f3`, `f8 xx`) refused |
+| Simple values | `false`, `true`, `null`; `deterministic` (and `valid`) also `undefined` and the unassigned values 0–19 and 32–255 (`undefinedValue`, D284), Bindle refuses them (`simple`); `f8` with a value below 32 is not well-formed (`malformed`; Bindle: `simple`, or `non_shortest` below 24) |
 | Limits | `maxBytes` 1,500,000; `maxDepth` 32; `maxEntries` 65,536; `maxItems` 131,072; bignum content 128 bytes |
 
 Map ordering compares complete deterministic key encodings byte by byte.
@@ -106,7 +109,7 @@ and mixed keys show the difference: `{10, 100, -1}` is ordered `0a`, `1864`,
 | `keys` | `'text'`, `'integer'` (text and major 0/1), `'any'` | `'any'` | `'any'` | `'text'` |
 | `tags` | `'bindle'`, `'standard'`, `'any'` | `'any'` | `'any'` | `'bindle'` |
 | `floats` | `'bindle'`, `'deterministic'` | `'deterministic'` | `'deterministic'` | `'bindle'` |
-| `undefinedValue` | boolean (`f7`) | true | true | false |
+| `undefinedValue` | boolean: simple values other than `false`/`true`/`null` — `f7` and the unassigned ones (D284) | true | true | false |
 | `noncharacters` | boolean (U+FDD0..FDEF, U+xFFFE/xFFFF in text) | true | true | false |
 | `top` (codec, views, profile sources) | `'map'`, `'any'` | `'any'` | `'any'` | `'map'` |
 | `cose` | boolean: safe-integer labels in the top-level map under `keys: 'text'` | false | false | false |
@@ -197,7 +200,7 @@ The options are one integer of **profile flags**, decided in kin
 | 0–1 | `PF_KEYS` | text (+ `cose` labels) | 1 text + integer; 2 or 3 any |
 | 2–3 | `PF_TAGS` | the Bindle set | 1 the standard set; 2 or 3 any tag (D180) |
 | 4 | `PF_FLOATS` | Bindle float refusals | RFC 8949 deterministic floats |
-| 5 | `PF_UNDEFINED` | `f7` refused | `f7` accepted |
+| 5 | `PF_UNDEFINED` | simple values but `f4`–`f6` refused (`simple`) | `f7` and the unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) accepted; `f8 18`–`f8 1f` `malformed` (D284) |
 | 6 | `PF_NONCHAR` | noncharacters refused | noncharacters accepted |
 | 7 | `PF_SUB` | (internal, never from a host) | the walk's root is not the document's top |
 | 8 | `PF_VALID` | deterministic CBOR only | any valid CBOR (D260) |
@@ -260,15 +263,17 @@ bump.
 | Top-level map under `cose` | `Map` (as before) | top-level `Map` with `cose` |
 | Every tag but 2, 3, 4, 40 and the little-endian typed arrays | `Tagged { tag, value }` (tag 24: the payload `Uint8Array`; `decode(t.value)` reads it); `tag` a number, a bigint beyond 2⁵³−1 | `new Tagged(tag, value)` (a number or a bigint below 2⁶⁴) |
 | `f7` | `undefined` | `undefined` (array elements, map values, root; holes stay refused) |
+| Other simple values (`e0`–`f3`, `f8 20`–`f8 ff`) | `Simple { value }` (interned and frozen: `new Simple(16) === new Simple(16)`, so Map keys compare by value) | `new Simple(n)`, n in 0–19 or 32–255 (anything else: `simple`), shortest form; `Writer#simple(n)` |
 | NaN, ±∞, −0 | the number | the number |
 
 A map's representation depends on its keys: code that accepts integer keys
 must accept a `Map`. Two distinct CBOR keys that are one JavaScript `Map` key
 (`1` and `1.0`, `0.0` and `-0.0`) cannot be built: decode refuses such a map
 with `unsupported` (a view still reads it). `Tagged` is frozen; `value` is the
-decoded content. Bindle-preset decoding never produces `Tagged`, `undefined`
-or a nested `Map`. Views report `kind` `'tagged'` (with `tag` and
-`content()`) and `'undefined'` (`isUndefined()`); `get(key)` accepts any key
+decoded content. Bindle-preset decoding never produces `Tagged`, `undefined`,
+`Simple` or a nested `Map`. Views report `kind` `'tagged'` (with `tag` and
+`content()`), `'undefined'` (`isUndefined()`) and `'simple'` (`simple()`: the
+number); `get(key)` accepts any key
 the profile admits, comparing non-text, non-integer keys by their encoding.
 
 ## CDDL and schemas
@@ -277,7 +282,9 @@ The VM checks the profile on every item, whatever the schema says (profile
 errors win, D023). Under the valid and deterministic presets the prelude's `tdate`
 (`#6.0(tstr)`), `time` (`#6.1(number)`), `eb64url`/`eb64legacy`/`eb16`,
 `encoded-cbor` (`#6.24(bstr)`), `uri` (`#6.32(tstr)`), `cbor-any`
-(`#6.55799(any)`) and `undefined` (`#7.23`) match valid data, and so does
+(`#6.55799(any)`) and `undefined` (`#7.23`) match valid data, as do `#7.n`
+for the unassigned simple values (n 0–19, and 32–255 per RFC 9682 §3.2; `#7.24`–`#7.31`
+match nothing yet, and RFC 9682's `#7.<type>` head numbers are not parsed), and so does
 `#6.n(T)` for any tag number `n` (COSE_Sign1 `#6.18([...])`, `#6.61(...)`,
 64-bit numbers compared whole) and bare `#6`, as do map key
 types such as `{ * int => tstr }` nested anywhere and `bstr => T` entries.
@@ -294,7 +301,8 @@ validated through its canonical copy.
 ## Against cbor2 (an independent decoder)
 
 `bb scan-test` runs the deterministic preset against cbor2 2.4.1 (CDE mode
-plus `rejectDuplicateKeys`, `rejectLongLoundNaN`, `rejectSimple`; and
+plus `rejectDuplicateKeys`, `rejectLongLoundNaN` (not `rejectSimple`: both
+admit the unassigned simple values, D284); and
 `rejectLongFloats` to confirm float widths) on the vectors, the fixed and
 seeded profile-option cases and every Bindle-gate input, and compares
 `encode()` with cbor2's CDE encoder on seeded values (byte for byte; about a
@@ -318,8 +326,8 @@ fails:
 `bb valid-test` holds the valid preset to cbor2's default decoding (with
 `rejectDuplicateKeys`) on the RFC 8949 Appendix A, Appendix F and additional
 vectors and seeded mutations; each difference falls in a class: cbor2's tag
-decoders, snug's checks of known tags' contents (D121/D180/D265), simple
-values snug has no value for (D284), limits, and duplicates cbor2 compares as
+decoders, snug's checks of known tags' contents (D121/D180/D265), limits,
+and duplicates cbor2 compares as
 decoded JavaScript keys. The same gate runs the RFC vectors under all three
 presets, a canonical-equivalence property (a value's random valid
 re-encodings decode, validate and refuse duplicates exactly as its

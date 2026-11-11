@@ -1229,7 +1229,7 @@ Under `PF_VALID`:
 | Non-shortest heads: integers, lengths, counts, tag numbers | Duplicate map keys, by value (§19.2, §19.4) — `duplicate_key` |
 | Floats in any width, NaN with any sign, payload or signalling bit | Invalid UTF-8 in a text string or any chunk of one (a chunk boundary inside a code point is invalid, §3.2.3) — `text` |
 | Map keys in any order | Invalid content of a tag snug knows (§5.3.2): dates, epochs, URIs, tag 24, bignums, decimals, ndarrays, typed arrays (§19.6) — their codes |
-| Bignums with leading zero bytes or that fit major 0/1 (§3.4.3: decoders MUST accept leading zeros) | RFC 8949 §9.2's invalid tag numbers; unassigned simple values (a coverage gap, kept refused until P8.5); the limits |
+| Bignums with leading zero bytes or that fit major 0/1 (§3.4.3: decoders MUST accept leading zeros) | RFC 8949 §9.2's invalid tag numbers; the limits (unassigned simple values are admitted under `PF_UNDEFINED`, D284) |
 
 The other flags (keys, tags, floats, `undefined`, noncharacters, `top`, `cose`)
 keep their meaning and combine with `PF_VALID`. Refusal codes are unchanged;
