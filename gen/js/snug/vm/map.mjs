@@ -196,7 +196,11 @@ export function mapBlockInit(p, s, bo, qindex, mt, words, at) {
     if (!charge(s, c16(words), at)) {
         return -R_BUDGET;
     }
-    for (let j = 0; j < words; j++) {
+    // only the header and the member words need zeros: the frame stack is
+    // written before it is read, every slot / index entry's first word is set
+    // below and the rest of a slot (and S's trail) is written before it is read
+    const zw = msbase(p, bo, mt) - bo;
+    for (let j = 0; j < zw; j++) {
         s[bo + j] = 0;
     }
     s[bo + MB_Q] = qindex;
@@ -984,6 +988,15 @@ export function permAt(s, bo, j) {
     return s[arenaBody(s) + (pm + j)];
 }
 
+export function tPos(s, bo, r) {
+    // Record r's pick-order position: r in wire order, else what t-sort wrote in
+    // its flags word above the consumed bit.
+    if (s[bo + MB_PERM] < 0) {
+        return r;
+    }
+    return (s[recAt(s, bo, r) + 1] >>> 1) | 0;
+}
+
 export function tCmp(kb, s, bo, ra, rb, at) {
     // Records ra, rb by their keys' EC forms, ceil(min(len)/8) units first.
     const xa = recAt(s, bo, ra);
@@ -1084,6 +1097,13 @@ export function tSort(s, bo, kb, n, at) {
         }
         k -= 1;
     }
+    // each record's pick position into its flags word (above bit 0), for the
+    // non-literal members' cursors (D323); uncharged, linear after the sort
+    for (let j = 0; j < n; j++) {
+        const x = recAt(s, bo, s[(base + pm) + j]) + 1;
+        const f = s[x];
+        s[x] = (f & 1) | (j << 1);
+    }
     s[O_HI] = h;
     s[O_LO] = l;
     s[O_CSTART] = c;
@@ -1155,9 +1175,32 @@ export function mRewind(p, s, bo, mt, tier, mark, at) {
         return -R_BUDGET;
     }
     const tb = trailAt(p, s, bo, mt);
+    let low = -1;
     for (let i = 0; i < popped; i++) {
         const r = s[tb + ((len - 1) - i)];
+        if (tier === TIER_T) {
+            const pr = tPos(s, bo, r);
+            if ((low < 0) || (pr < low)) {
+                low = pr;
+            }
+        }
         mSetConsumed(p, s, bo, mt, tier, r, 0);
+    }
+    // T (D323): a record given back may lie below a non-literal member's
+    // cursor; every such cursor moves back to the lowest one, ceil(members/16)
+    if (low >= 0) {
+        const nm = p[mt + 1];
+        if (!charge(s, c16(nm), at)) {
+            return -R_BUDGET;
+        }
+        for (let m = 0; m < nm; m++) {
+            if (p[mMember(mt, m)] < 0) {
+                const cw = mword(bo, m) + 2;
+                if (s[cw] > low) {
+                    s[cw] = low;
+                }
+            }
+        }
     }
     if (s[bo + MB_TRAIL] < 0) {
         s[bo + MB_TLEN] = mark;
@@ -1286,7 +1329,12 @@ export function mMemberRun(p, s, bo, mt, tier, nd, rfc, at) {
     } else if (tier === TIER_T) {
         // a non-literal member: records in pick order until count = max, 1
         // step each, consumed or not
-        let j = 0;
+        // D323: from the member's cursor (mword +2): every record before it is
+        // consumed or can never be taken or cut by this member (its key or, for a
+        // member without a cut, its value does not match), so the scan reads what
+        // a scan from 0 would and charges only what it reads
+        const cur = mword(bo, m) + 2;
+        let j = s[cur];
         while ((j < n) && (c < hi)) {
             if (!charge(s, 1, at)) {
                 return -R_BUDGET;
@@ -1303,6 +1351,7 @@ export function mMemberRun(p, s, bo, mt, tier, nd, rfc, at) {
                     }
                     c += 1;
                 } else if (cut) {
+                    s[cur] = j;
                     const dg = tDiag(s, bo, m, j, c, hi, n, at);
                     if (dg < (-1)) {
                         return dg;
@@ -1316,6 +1365,7 @@ export function mMemberRun(p, s, bo, mt, tier, nd, rfc, at) {
             }
             j += 1;
         }
+        s[cur] = j;
     } else {
         // S, a class-R member: its unnamed pairs' state, then the named
         // slots, 1 step each

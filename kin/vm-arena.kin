@@ -66,6 +66,17 @@
     (iset s (+ a AR_FREE) (neg 1))
     (iset s (+ a AR_WANT) 0)))
 
+(defn ^:pub arena-fit [^Ints s ^I32 body]
+  (comment "A fresh (empty) arena's body cut to at most `body` words. A session starts"
+           "its arena at the lease and grows it on demand (VMS_GROW, arena-adopt), so"
+           "the words of S past it stay free for the canonical path's event table"
+           "(arena-after): a scratch reused message after message (a sequence) then"
+           "keeps its size instead of every new arena swallowing the room the last"
+           "message's events grew.")
+  (let [a (ia s VM_ARENA)]
+    (if (< body (ia s (+ a AR_END)))
+      (iset s (+ a AR_END) body))))
+
 (defn ^:pub ^I32 arena-body [^IntsR s]
   (comment "The absolute word offset of the arena's body.")
   (return (+ (ia s VM_ARENA) AR_HDR)))

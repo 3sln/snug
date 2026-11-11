@@ -82,7 +82,7 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
   const limit = 400000 + 64 * n;
   for (;;) {
     // a message starts once a byte after the boundary has arrived; EOF there ends the sequence
-    while (delivered <= o) if (!more()) { lines.push(`end ${o}`); return { lines, late }; }
+    while (delivered <= o) if (!more()) { lines.push(`end ${o}`); return { lines, late, sWords: st.s.length }; }
     const c0 = vmsInitSeq(p, b, rule, lim, st.s, ss, st.ka, policy.q ?? 0);
     if (c0 < 0) return { error: `vms-init-seq ${c0}` };
     let at = 0, eofed = false, lastKeep = 0, end = total;   // end: the session's end once vms-eof gave it

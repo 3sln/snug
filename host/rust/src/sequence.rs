@@ -638,3 +638,34 @@ impl<R: Read> Iterator for SequenceReader<'_, R> {
         }
     }
 }
+
+#[cfg(test)]
+mod scratch_tests {
+    use super::*;
+
+    // P8.5 (D324): a session's group arena starts at the lease, so a scratch reused for
+    // every message keeps its size; before, each message's arena took all of S and the
+    // canonical path's events grew S again (about 470 words per message, never reclaimed).
+    #[test]
+    fn scratch_stays_bounded_over_canonical_messages() {
+        let mut msg = vec![0x98, 50];
+        for i in 0..50u8 {
+            msg.push(0xa8);
+            for k in [b'h', b'g', b'f', b'e', b'd', b'c', b'b', b'a'] {
+                msg.extend_from_slice(&[0x61, k, i % 24]);
+            }
+        }
+        let mut seq = Sequence::new(&SequenceOptions::default()).unwrap();
+        let mut early = 0;
+        for n in 0..1000 {
+            for m in seq.feed(&msg) {
+                assert!(m.is_ok());
+            }
+            if n == 5 {
+                early = seq.s.len();
+            }
+        }
+        assert!(seq.finish().iter().all(|m| m.is_ok()));
+        assert_eq!(seq.s.len(), early, "S grew after the first messages");
+    }
+}

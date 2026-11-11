@@ -316,6 +316,47 @@ for (const { file, su, k, text, opt } of corpusOracle) {
   }
 }
 
+// ---------------------------------------------------------------- 3e. large T maps (D323)
+// Valid maps of 1k-30k pairs whose PEG program makes them T (a choice of non-literal
+// members under a REP), table / mixed / struct shapes, both cut modes, keys in order and
+// reversed (the valid preset's T sort): each must be accepted, a 3,000-pair one within
+// the default budget, and the units used must stay below 8 n log2 n (D323: the
+// non-literal members' cursors; before them a 3,000-pair table cost 9.1 M units).
+// The oracle confirms the 1,000-pair verdicts in both modes.
+const large = { cases: 0, oracle: 0 };
+{
+  const h = (m, n) => n < 24 ? [m * 32 + n] : n < 256 ? [m * 32 + 24, n] : n < 65536 ? [m * 32 + 25, n >> 8, n & 255] : [m * 32 + 26, n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const item = x => typeof x === 'number' ? h(0, x) : (b => h(3, b.length).concat(b))([...new TextEncoder().encode(x)]);
+  const shapes = [
+    ['table', 'r = {* (tstr => uint // tstr => tstr)}', i => (i % 2 ? i : 'v'), false],
+    ['mixed', 'r = { a: uint, * (tstr => uint // tstr => tstr) }', i => (i % 3 ? i : 'v'), true],
+    ['struct', 'r = { ? k00000: uint, * ("t" => uint // tstr => any) }', i => i, false],
+  ];
+  for (const [name, text, val, withA] of shapes) for (const cuts of ['rfc', 'branch']) for (const n of [1000, 3000, 10000, 30000]) {
+    const big = n > 3000;
+    const c = compile(text, { cuts, limits: big ? { items: 1 << 20, entries: 1 << 20, budget: 1 << 30 } : { items: 1 << 20, entries: 1 << 20 } });
+    const pi = addProgram(c.program, c.pool, `large T map: ${name} ${cuts} n ${n}`);
+    const pairs = Array.from({ length: n }, (_, i) => [item(`k${String(i).padStart(5, '0')}`), item(val(i))]);
+    if (withA) pairs.push([item('a'), item(1)]);
+    pairs.sort((a, b) => { for (let i = 0; i < Math.min(a[0].length, b[0].length); i++) if (a[0][i] !== b[0][i]) return a[0][i] - b[0][i]; return a[0].length - b[0].length; });
+    const orders = big ? [((n / 10000) | 0) % 2 ? 'reversed' : 'sorted'] : ['sorted', 'reversed'];
+    for (const order of orders) {
+      const ps = order === 'reversed' ? [...pairs].reverse() : pairs;
+      const bytes = Uint8Array.from([...h(5, ps.length), ...ps.flatMap(([k, v]) => [...k, ...v])]);
+      if (n === 1000) {
+        const os = pegCompile(text);
+        let o; try { o = pegCheck(os, 'r', pegDecode(bytes), { cuts, steps: 1e8 }); } catch { o = 'unknown'; }
+        large.oracle++;
+        if (o !== true) fail(`large T map ${name} ${cuts} ${order}: the oracle says ${o}`);
+      }
+      const bound = 8 * n * Math.log2(n);
+      large.cases++;
+      cases.push({ prog: pi, rule: c.rules.indexOf('r'), lim: [...LIM(1, 0, -1, -1, -1, -1, -1, -1, 378), -1], bytes, label: `large T map: ${name} ${cuts} ${order} n ${n}`,
+        check: o => { const w = o.split(' '); if (w[0] !== '0') return `refused: ${o.slice(0, 40)}`; return Number(w[3]) <= bound ? null : `units ${w[3]} > 8 n log2 n = ${bound | 0}`; } });
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 3b. extension controls (P7.2)
 const extStart = cases.length;
 addExtCases({ compile, encode, addProgram, LIM, cases, seed: SEED });
@@ -328,5 +369,5 @@ for (const a of assembledCases()) {
   for (const k of a.cases) cases.push({ prog: pi, rule: k.rule ?? 0, lim: [...(k.lim ?? LIM(1, 0)).slice(0, 8), 0], bytes: k.bytes, span: k.span, label: `${a.label}: ${k.label ?? hex(k.bytes).slice(0, 40)}`, check: k.check });
 }
 const nAsm = cases.length - asmStart;
-return { programs, cases, sc, corpus, diff, nAsm, asmStart, nIdentity, nExt };
+return { programs, cases, sc, corpus, diff, nAsm, asmStart, nIdentity, nExt, large };
 }

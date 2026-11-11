@@ -7,8 +7,8 @@ import { be16, fail, headSize, readArg } from '../cbor/head.mjs';
 import { keyEndAny } from '../cbor/keys.mjs';
 import { ruleTag, typedAnySize } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
-import { lim, vmOutput, vmSetup, vmWitnessOutput } from './api.mjs';
-import { arenaTake } from './arena.mjs';
+import { arenaLease, lim, vmOutput, vmSetup, vmWitnessOutput } from './api.mjs';
+import { arenaFit, arenaTake } from './arena.mjs';
 import { csetRec, csetWidth, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
@@ -52,6 +52,8 @@ export function vmsInit(p, pool, rule, limits, s, ss, ka, total, quantum) {
     if (su < 0) {
         return su;
     }
+    // the session's arena starts at the lease and grows on demand (arena-fit)
+    arenaFit(s, arenaLease(p));
     if (ss.length < vmsSessionWords(p)) {
         return -2;
     }

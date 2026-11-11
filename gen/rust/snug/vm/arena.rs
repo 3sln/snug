@@ -46,6 +46,18 @@ pub fn arena_init(s: &mut [i32], a: i32, cap: i32) {
     s[(a + AR_FREE) as usize] = -1;
     s[(a + AR_WANT) as usize] = 0;
 }
+pub fn arena_fit(s: &mut [i32], body: i32) {
+    // A fresh (empty) arena's body cut to at most `body` words. A session starts
+    // its arena at the lease and grows it on demand (VMS_GROW, arena-adopt), so
+    // the words of S past it stay free for the canonical path's event table
+    // (arena-after): a scratch reused message after message (a sequence) then
+    // keeps its size instead of every new arena swallowing the room the last
+    // message's events grew.
+    let a: i32 = s[(VM_ARENA) as usize];
+    if body < s[(a + AR_END) as usize] {
+        s[(a + AR_END) as usize] = body;
+    }
+}
 pub fn arena_body(s: &[i32]) -> i32 {
     // The absolute word offset of the arena's body.
     return s[(VM_ARENA) as usize] + AR_HDR;

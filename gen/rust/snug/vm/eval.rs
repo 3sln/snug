@@ -1132,6 +1132,16 @@ pub fn streak_kind(p: &[i32], leaf: i32) -> bool {
     let kind: i32 = p[(lb) as usize] & 255;
     return ((kind == K_INT) && (p[(lb + 3) as usize] == 1)) || ((kind == K_TEXT) && (p[(lb + 4) as usize] < 0));
 }
+pub fn streak_value(p: &[i32], leaf: i32) -> bool {
+    // A map streak's value leaf: a streak leaf, or `any` (walked by fast-child).
+    if streak_kind(p, leaf) {
+        return true;
+    }
+    if leaf < 0 {
+        return false;
+    }
+    return (p[(p[(H_S_LEAVES) as usize] + (8 * leaf)) as usize] & 255) == K_ANY;
+}
 pub fn star_steady(s: &[i32], area: i32, el: i32) -> bool {
     // Is the single `[* T]` block at area in its steady state before element el:
     // alive, |A| = 1, its machine waiting at ENTRY (node 1) for record el inside
@@ -1825,7 +1835,7 @@ pub fn map_close(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], fb:
     }
     return 0;
 }
-pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cl: i32, ps0: i32, pe0: i32, klo0: i32) -> i32 {
+pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, limit: i32, end: i32, d: i32, bo: i32, mt: i32, mode: i32, cl: i32, ps0: i32, pe0: i32, klo0: i32, cfb: i32, cck: i32, cw: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // P3.6 (D044) under program-2 §6, schedule 2 only: consecutive SUCCESSFUL
     // pairs of a single-block tier-F map in a simple shape (map-fast-mode: 1 a
     // closed struct, the key named by one member whose value typeset is one
@@ -1856,7 +1866,7 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
     if mode == 2 {
         kleaf = single_leaf(p, p[(mt + 9) as usize]);
         vleaf2 = single_leaf(p, p[(mt + 10) as usize]);
-        if (!streak_kind(p, kleaf)) || (!streak_kind(p, vleaf2)) {
+        if (!streak_kind(p, kleaf)) || (!streak_value(p, vleaf2)) {
             return q0;
         }
         if (p[(p[(H_S_LEAVES) as usize] + (8 * kleaf)) as usize] & 255) != K_TEXT {
@@ -1905,14 +1915,15 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             break;
         }
         let kend: i32 = (start + kh) + kl;
+        // a table's TEXT key leaf (no regexp): its length bounds, as pre-scalar
         if mode == 2 {
-            if pre_scalar(p, pool, b, s, start, end, p[(H_S_LEAVES) as usize] + (8 * kleaf), K_TEXT) < 0 {
+            let klb: i32 = p[(H_S_LEAVES) as usize] + (8 * kleaf);
+            if (kl < p[(klb + 2) as usize]) || (kl > p[(klb + 3) as usize]) {
                 break;
             }
-        } else {
-            if utf8_invalid_at(b, start + kh, kend) >= 0 {
-                break;
-            }
+        }
+        if utf8_invalid_at(b, start + kh, kend) >= 0 {
+            break;
         }
         if ps >= 0 {
             if compare_spans(b, ps, pe, start, kend) >= 0 {
@@ -1938,7 +1949,7 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             nj = cur;
             m = p[(namers + p[((named + (3 * cur)) + 1) as usize]) as usize];
             vlf = single_leaf(p, p[(m_member(mt, m) + 2) as usize]);
-            if !streak_kind(p, vlf) {
+            if !streak_value(p, vlf) {
                 break;
             }
         } else {
@@ -1949,8 +1960,16 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
             vlf = vleaf2;
         }
         let mw: i32 = (bo + MB_HDR) + (MW * m);
-        let vend: i32 = pre_scalar(p, pool, b, s, kend, end, p[(H_S_LEAVES) as usize] + (8 * vlf), p[(p[(H_S_LEAVES) as usize] + (8 * vlf)) as usize] & 255);
-        let vunits: i32 = s[(O_LO) as usize];
+        let vkind: i32 = p[(p[(H_S_LEAVES) as usize] + (8 * vlf)) as usize] & 255;
+        let vany: bool = vkind == K_ANY;
+        let mut vend: i32 = kend;
+        let mut vunits: i32 = 0;
+        // the value: a streak leaf checked here, uncharged; `any` takes
+        // every item, walked by fast-child after the key's charges
+        if !vany {
+            vend = pre_scalar(p, pool, b, s, kend, end, p[(H_S_LEAVES) as usize] + (8 * vlf), vkind);
+            vunits = s[(O_LO) as usize];
+        }
         if vend < 0 {
             break;
         }
@@ -1968,16 +1987,27 @@ pub fn map_streak(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         if !charge(s, c8(kl), start) {
             return -R_BUDGET;
         }
-        let ko: i32 = key_order(b, s, ps, pe, start, kend);
-        if ko < 0 {
-            return ko;
+        // key-order's charge (the order itself is checked above; a text key
+        // is never EC-sensitive)
+        if ps >= 0 {
+            if !charge(s, c64min(pe - ps, kend - start), start) {
+                return -R_BUDGET;
+            }
         }
-        if !charge(s, 1, kend) {
-            return -R_BUDGET;
-        }
-        s[(O_ITEMS) as usize] = s[(O_ITEMS) as usize] + 1;
-        if !charge(s, vunits - 3, kend) {
-            return -R_BUDGET;
+        if vany {
+            let rv: i32 = fast_child(p, pool, b, s, kend, d + 1, cfb, cck, cw, vlf, end, simple_leaf(p, 1, vlf), ext);
+            if rv < 0 {
+                return rv;
+            }
+            vend = rv;
+        } else {
+            if !charge(s, 1, kend) {
+                return -R_BUDGET;
+            }
+            s[(O_ITEMS) as usize] = s[(O_ITEMS) as usize] + 1;
+            if !charge(s, vunits - 3, kend) {
+                return -R_BUDGET;
+            }
         }
         // the block, as the walk leaves it
         s[(bo + MB_CUR) as usize] = cur;
@@ -2051,7 +2081,7 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
     while pk < n {
         // a streak of simple pairs first (D044), when the shape and state allow
         if ((smap > 0) && (sched2(s) && (nalive == 1))) && (((s[(VM_GENERIC) as usize] & ((1 | G_FORCED) | G_NOSTREAK)) == 0) && ((s[(VM_VTAB) as usize] == 0) && (!map_is_unordered(s, area, nb)))) {
-            let qm: i32 = map_streak(p, pool, b, s, pos, q, n - pk, end, d, area, block_mt(p, s, fb, area), smap, cl, ps, pe, klo);
+            let qm: i32 = map_streak(p, pool, b, s, pos, q, n - pk, end, d, area, block_mt(p, s, fb, area), smap, cl, ps, pe, klo, cfb, cck, cw, ext);
             let km2: i32 = s[(VM_FASTM) as usize];
             if qm < 0 {
                 return qm;

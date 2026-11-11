@@ -172,8 +172,12 @@
            "their occurrence (read off the MEMBER nodes, members being numbered in"
            "node order), no cut, no slot / index entry.")
   (if (not (charge s (c16 words) at)) (return (neg R_BUDGET)))
-  (for [^I32 j 0 words]
-    (iset s (+ bo j) 0))
+  (comment "only the header and the member words need zeros: the frame stack is"
+           "written before it is read, every slot / index entry's first word is set"
+           "below and the rest of a slot (and S's trail) is written before it is read")
+  (let [zw (- (msbase p bo mt) bo)]
+    (for [^I32 j 0 zw]
+      (iset s (+ bo j) 0)))
   (iset s (+ bo MB_Q) qindex)
   (iset s (+ bo MB_ALIVE) 1)
   (iset s (+ bo MB_ACT) (neg 1))
@@ -713,6 +717,12 @@
     (if (< pm 0) (return j))
     (return (ia s (+ (arena-body s) (+ pm j))))))
 
+(defn ^I32 t-pos [^IntsR s ^I32 bo ^I32 r]
+  (comment "Record r's pick-order position: r in wire order, else what t-sort wrote in"
+           "its flags word above the consumed bit.")
+  (if (< (ia s (+ bo MB_PERM)) 0) (return r))
+  (return (ushr (ia s (+ (rec-at s bo r) 1)) 1)))
+
 (defn ^I32 t-cmp [^Bytes kb ^Ints s ^I32 bo ^I32 ra ^I32 rb ^I32 at]
   (comment "Records ra, rb by their keys' EC forms, ceil(min(len)/8) units first.")
   (let [xa (rec-at s bo ra)
@@ -782,6 +792,12 @@
           (let [r2 (t-sift kb s bo pm 0 k at)]
             (if (< r2 0) (return r2)))
           (set k (- k 1))))
+      (comment "each record's pick position into its flags word (above bit 0), for the"
+               "non-literal members' cursors (D323); uncharged, linear after the sort")
+      (for [^I32 j 0 n]
+        (let [x (+ (rec-at s bo (ia s (+ (+ base pm) j))) 1)
+              f (ia s x)]
+          (iset s x (bit-or (bit-and f 1) (shl j 1)))))
       (iset s O_HI h)
       (iset s O_LO l)
       (iset s O_CSTART c)
@@ -833,10 +849,23 @@
   (let [len (tlen s bo)
         popped (- len mark)]
     (if (not (charge s (+ 1 popped) at)) (return (neg R_BUDGET)))
-    (let [tb (trail-at p s bo mt)]
+    (let [tb (trail-at p s bo mt)
+          ^:mut low (neg 1)]
       (for [^I32 i 0 popped]
         (let [r (ia s (+ tb (- (- len 1) i)))]
-          (m-set-consumed p s bo mt tier r 0))))
+          (if (== tier TIER_T)
+            (do (let [pr (t-pos s bo r)]
+                  (if (or (< low 0) (< pr low)) (set low pr)))))
+          (m-set-consumed p s bo mt tier r 0)))
+      (comment "T (D323): a record given back may lie below a non-literal member's"
+               "cursor; every such cursor moves back to the lowest one, ceil(members/16)")
+      (if (>= low 0)
+        (do (let [nm (ia p (+ mt 1))]
+              (if (not (charge s (c16 nm) at)) (return (neg R_BUDGET)))
+              (for [^I32 m 0 nm]
+                (if (< (ia p (m-member mt m)) 0)
+                  (do (let [cw (+ (mword bo m) 2)]
+                        (if (> (ia s cw) low) (iset s cw low))))))))))
     (if (< (ia s (+ bo MB_TRAIL)) 0)
       (iset s (+ bo MB_TLEN) mark)
       (arena-set-up s (+ (ia s (+ bo MB_TRAIL)) mark)))
@@ -928,7 +957,12 @@
       (if (== tier TIER_T)
         (do (comment "a non-literal member: records in pick order until count = max, 1"
                      "step each, consumed or not")
-            (let [^:mut j 0]
+            (comment "D323: from the member's cursor (mword +2): every record before it is"
+                     "consumed or can never be taken or cut by this member (its key or, for a"
+                     "member without a cut, its value does not match), so the scan reads what"
+                     "a scan from 0 would and charges only what it reads")
+            (let [cur (+ (mword bo m) 2)
+                  ^:mut j (ia s cur)]
               (while (and (< j n) (< c hi))
                 (if (not (charge s 1 at)) (return (neg R_BUDGET)))
                 (let [r2 (perm-at s bo j)]
@@ -940,12 +974,14 @@
                                 (if (< rc2 0) (return rc2)))
                               (set c (+ c 1)))
                           (if cut
-                            (do (let [dg (t-diag s bo m j c hi n at)]
+                            (do (iset s cur j)
+                                (let [dg (t-diag s bo m j c hi n at)]
                                   (if (< dg (neg 1)) (return dg))
                                   (mev s bo EV_CUT m dg)
                                   (if (== rfc 1) (return X_FAILX))
                                   (return X_CUT))))))))
-                (set j (+ j 1)))))
+                (set j (+ j 1)))
+              (iset s cur j)))
         (do (comment "S, a class-R member: its unnamed pairs' state, then the named"
                      "slots, 1 step each")
             (let [mw (mword bo m)

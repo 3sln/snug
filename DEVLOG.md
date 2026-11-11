@@ -5325,6 +5325,141 @@ every item), dropped for the writer's own note; a VM-side tolerant attempt
 reordered keys, and the copy needs those exact units for D277's charges.
 - [x] **Signed off** (owner, 2026-11-11, via coordinator: "yes").
 
+### D323 — T maps: non-literal members scan from a cursor (linear end runs); the map streak takes `any`; `map-pair-fast` not restored (P8.5 follow-up)
+**Decision** (P8.5 VM engineer, provisional):
+1. **T cursors.** Each non-literal member of a T block keeps a cursor (its
+   member word +2, 0 at the start). Its examination of the records in pick
+   order (program-2 §6.4) starts at the cursor and leaves the cursor where it
+   stopped. Every record before a cursor is consumed or can never be taken
+   or cut by that member: its key typeset does not match, or, for a member
+   without a cut, its value typeset does not match. So the member reads
+   what a scan from 0 would read; only the steps change. A rewind that gives
+   records back moves every cursor above the lowest returned pick position
+   back to it, charged ⌈n_members/16⌉ on top of the rewind's 1 + popped. The
+   T sort stores each record's pick position above the consumed bit of its
+   flags word (no layout change).
+2. **The map streak takes `any`.** D315's pair streak also takes a value
+   leaf `any`, walked by `fast-child` after the key's charges, so `{* tstr =>
+   any}` tables run the streak again (format 1's streak did). The streak ==
+   item-by-item gate (limits word 8 bit 3) and a 5,600-case schedule-2
+   differential with `any` values show unchanged charges. The streak's key
+   check and key-order charge are inlined (same charges).
+3. **Block init** zeroes only the header and member words (the frame stack,
+   slots and trail are written before they are read; the loop bound is
+   hoisted). The charge stays ⌈MAPWORDS/16⌉.
+4. **Format 1's per-pair `map-pair-fast` is not restored.** In
+   `reference-map-choice` each element opens six map blocks (a choice of six
+   map types), where a single-block pair fast path cannot apply. The
+   map-heavy record's remaining generic pairs are a nested map and a
+   two-leaf `bool` typeset, which are not simple pairs either.
+
+**Before/after, T maps** (units; `{* (tstr => uint // tstr => tstr)}`, keys
+in order / reversed under the `valid` preset):
+
+| pairs | before (main 920a3e1) | after |
+| ---: | ---: | ---: |
+| 1,000 | 1,034,516 / 1,068,445 | 34,016 / 67,945 |
+| 3,000 | 9,103,516 / 9,224,589 | 102,016 / 223,089 |
+| 10,000 | 100,345,016 / 100,818,379 | 340,016 / 813,379 |
+| 30,000 | not run | 1,020,016 / 2,631,389 |
+
+CPU at 10,000 pairs fell from 6.8–8.2 s to 30–200 ms (single runs at load
+30–75, so indicative only). The mixed shape `{ a: uint, * (…) }` and the
+struct-like shape `{ ? k00000: uint, * ("t" => uint // tstr => any) }` move
+the same way: at 3,000 pairs, 7.6 M → 101k and 4.6 M → 81k. **Default-budget
+limits** (2.25 M units; also in architecture §7):
+
+| shape | keys in order | unsorted (sorted by T) |
+| --- | ---: | ---: |
+| table | ~66,000 pairs (the default 65,536 entries per container comes first) | ~25,900 |
+| mixed | ~66,800 | ~25,700 |
+| struct-like | ~83,000 | ~27,000 |
+
+So the reversed 30,000-pair table (2.63 M) needs a larger `budget`. That is
+within the n log n contract.
+
+**D286's workloads** (buffer VM on deterministic input; ms per call,
+in-process interleaved, best of 7; the after-numbers are re-measured on the
+final tree in the P8.5 follow-up section below):
+
+| workload | cfbdda3 | 920a3e1 | after | units cfbdda3 → after |
+| --- | ---: | ---: | ---: | ---: |
+| 2000 maps × 8 keys `[* {* tstr => any}]` | 4.72 | 19.59 | 5.19 | 94,008 → 96,010 |
+| map-heavy typed (2000 records) | 10.77 | 13.26 | 11.60 | 194,020 → 214,023 |
+| reference-map-choice (2000) | 13.12 | 16.83 | 16.13 | 254,007 → 268,011 |
+
+**Charge change recorded (from D311, not from this decision)**: each map
+block opened is charged ⌈MAPWORDS/16⌉ with format 2.0's larger layout, so
+these workloads use +2 units per map, +10 per typed record and +7 per
+reference-choice element. D316's calibration covers those rows (map-struct
+1.53×, map-table 1.97×, reference-map-choice 1.49× the median in JS), so no
+price changes. **Size** (`node tools/size/size.mjs --details`, esbuild 0.28.2,
+main `eea15a9` → this branch with D324, minified / gzip bytes): `runtime`
+171,508 / 61,284 → 172,128 / 61,535; `snug/schema` 149,148 / 53,308 →
+149,768 / 53,549; `snug/sequence` 208,535 / 74,061 → 209,220 / 74,323.
+Attribution (`runtime`, module deltas): `vm/map` +336 (the cursors: `t-pos`,
+the positions after the sort, the rewind's cursor reset, the scan's start
+and store), `vm/eval` +306 (the streak's `any` arm, `streak-value`, the
+inlined key check and order charge); the rest is minifier noise (−25). The
+session entries carry the same deltas plus D324's `arena-fit` (`snug/sequence`
++685 in all). Main already stood within 0.3%
+of these caps after D322, so they no longer fit: the failing caps (`runtime`
+min/gzip/brotli, `snug/schema` min/gzip, `snug/sequence` gzip/brotli) rise
+to measured + 2% (Ceil), **provisional, owner sign-off pending (R9 per
+D200)**. Cuts considered: dropping the `any` arm (it is the D286 workload's
+fix) and the cursor reset (needed for correctness after rewinds). No smaller
+form was found. **Gates**: vm-test gains section 3e (36 cases, 1k–30k pairs; table,
+mixed, struct-like; rfc and branch; in order and reversed). Each must be
+accepted, a 3,000-pair one within the default budget, with units ≤ 8 n log₂ n;
+the oracle confirms the 1,000-pair verdicts in both modes. vmsession-test
+runs them under every split policy. The bench rows `maps8-any`,
+`map-heavy-typed` and `map-T-large` in bench/calibrate.mjs now track these
+workloads.
+**Why**: a valid 3,000-pair T map exhausted the default budget (9.1 M units
+against 2.25 M), and the D286 engineer measured `[* {* tstr => any}]` 3.9×
+slower after the PEG merge.
+**Alternatives**: a per-key hash index of the records (arena words per
+record, and no help to non-literal members, which match by typeset);
+repricing T's examination steps (would hide the CPU, not remove it);
+restoring `map-pair-fast` (see 4).
+- [ ] **Signed off** (owner)
+
+### D324 — A session's group arena starts at the lease, not all of S (P8.5 follow-up; found by the D286 engineer)
+**Decision** (P8.5 VM engineer, provisional): `vms-init` (and so every
+message of a sequence, `vms-init-seq`) cuts the fresh arena's body to the
+lease (`arena-fit`, `kin/vm-arena.kin`). It grows only on demand
+(`VMS_GROW`, `arena-take`/`arena-adopt`, unchanged). The buffer route keeps
+`vm-setup`'s body of all of S (its re-run after −5 needs the grown room).
+**Why**: `arena-init` gave the arena all of S, and a session's canonical
+event table sits after the arena (`arena-after`). In a sequence S is reused
+for every message: each new arena swallowed the room the previous message's
+events had grown S by, and the events asked for S + need again, repeating
+that message's scan and copy. On `920a3e1`, over 1000 messages of 50 maps
+with reversed keys, S grew from 1,554 to 469,086 words (~470 per message,
+never reclaimed). With the fix it stays at 1,554 (JS host instrumentation,
+`.cache` only; and sequence-test's new kin-level check). Units, events and
+verdicts are unchanged, since the arena's size is not charged: vmsession-test,
+sequence-test, the PEG differential and the session == buffer gates are
+green.
+**Regressions**: sequence-test "scratch bound (D324)": S after 5 and after
+1000 canonical-path messages is equal (1,554 words; 3,426 vs 469,086 before).
+The Rust unit test `sequence::scratch_tests` (run by `bb rust-api-test`) checks
+the same through `snug::Sequence`. The wasm SDK runs the same generated
+session code (`vm/session.rs`). It has no hook that exposes S, so it is
+covered by that code path and by `bb wasm-sdk-test`'s parity, not by its own
+assertion.
+**Open problem 1** (a recursive Program's session holds the whole-message
+arena bound from the start, D314) is **not** addressed: `arena-doc` still
+grows a recursive Program's arena to §9.4's bound at the message start. That
+growth now happens per message (the arena restarts at the lease), adopted
+from the S already grown, so S stays bounded by one message's bound plus its
+events.
+**Alternatives**: the event table before the arena (impossible in a session:
+the arena holds open containers' records while an item's events are built);
+re-sizing the arena from the previous message's end (reads a header across
+`vms-init`, which may meet an uninitialised S).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -7843,9 +7978,66 @@ Open problems (for the manager):
 * `embedded` is the dearest calibration row (2.15× JS); not analysed.
 * Format 1's per-pair `map-pair-fast` (single pairs outside a streak) was not
   restored; `reference-map-choice` is 1.49× the median against 1.42× before.
+* *Follow-up (2026-11-11, branch `p85-tlin`):* T maps are linear after the
+  sort (D323); `map-pair-fast` stays out (D323 item 4: its workloads are
+  multi-block maps). A further problem found by the D286 engineer is fixed:
+  a sequence's session scratch grew ~470 words per canonical-path message,
+  never reclaimed (D324: the arena now starts at the lease). The first open
+  problem (a recursive Program's whole-message arena bound) remains; D324
+  only stops it accumulating across a sequence's messages.
 
 Learnt: one set of block functions called by both walks made session ==
 buffer cheap to keep; every session-only divergence found (S's trail, the
 valid path's `group_limit` offset) was state or mapping outside those
 functions. A streak needs its own gate against the item-by-item walk under
 the *same* schedule — D254's fast == generic gate compares schedule 1 only.
+
+## P8.5 follow-up — linear T maps, the D286 map regression, the sequence scratch bound (2026-11-11, branch `p85-tlin`)
+
+D323 (T maps' non-literal member cursors; the map streak takes `any`; block
+init trimmed; `map-pair-fast` not restored) and D324 (a session's arena
+starts at the lease), both unsigned, on main `e3fa424` (after D286 B+C, the
+tag-4 fix and D286 D).
+
+Measured on the final tree (in-process interleaved, best of 7, ms per call;
+load 25–45):
+
+| workload | cfbdda3 | main e3fa424 | p85-tlin | units (main = p85-tlin) |
+| --- | ---: | ---: | ---: | ---: |
+| 2000 maps × 8 keys `[* {* tstr => any}]` | 4.53 | 18.00 | 5.15 | 96,010 (cfbdda3 94,008) |
+| map-heavy typed (2000 records) | 10.61 | 12.18 | 11.47 | 214,023 (194,020) |
+| reference-map-choice (2000) | 11.72 | 16.23 | 15.66 | 268,011 (254,007) |
+
+T table `{* (tstr => uint // tstr => tstr)}`, units in order / reversed: 1k
+34,016 / 67,945; 3k 102,016 / 223,089; 10k 340,016 / 813,379; 30k 1,020,016
+/ 2,631,389 (main: 3k 9.1 M; 10k 100 M). Units per n log₂ n fall with n.
+The sequence scratch stays at 1,554 words over 1000 canonical-path messages;
+main grows it to 469,086.
+
+Checks actually run on the final tree (macOS 14.6.1, M1 Pro, Node 24.6.0,
+rustc 1.92.0):
+
+* `bb vm-test`: all ok — 80,545 cases, including the 36 large-T cases; PEG
+  oracle differential 8600/8600 (both cut modes); forced tiers 80,249/80,249;
+  streaks == item by item 80,545; JS == Rust 80,545; JS == wasm 78,251.
+* `bb vmsession-test 2000 1 100 60`: ok — session == buffer 304,747 runs,
+  untold length 147,181, JS == Rust 193,966.
+* `bb sequence-test 300 1`: ok — 441,806 runs == the oracle, scratch bound
+  1,554 words after 5 and after 1000 messages. `bb valid-test`: ok.
+* `bb wasm-sdk-test`: 15/15. `bb rust-api-test`: ok (50 tests, including
+  `sequence::scratch_tests`; clippy). `npm test`: 1450/1450.
+* `bb compile-test` (3266/3266 corpus verdicts == the oracle; W7 1),
+  `scan-test 300 1`, `rscan-test 300 1`, `nav-test`, `write-test`,
+  `unicode-test`, `compile-fuzz`, `drift`: ok.
+* RFC corpus runner: D270 14/14, D301 1/1; P8.4 222/2 and baseline 735/25 as
+  on main.
+* `bb size`: passes with D323's provisional caps (`runtime`, `snug/schema`,
+  `snug/sequence`; unsigned).
+* `bb proptest --minutes=2 --props=1,2,3,4,5`: P1 25,053, P2 31,757, P3
+  13,404, P4 11,107, P5 10,488 cases, no failure signature.
+
+Learnt: a gate that accepts any code ≥ 32 (the arena section's 3,000-pair T
+maps) hid a budget exhaustion on valid data. Large-input gates need to assert
+the verdict and a unit bound, not just that a verdict exists. And a loop
+bound in kin is re-evaluated per trip in the emitted JS, so a function-call
+bound in a hot loop costs a call per iteration.

@@ -20,16 +20,16 @@
     },
     "snug/schema": {
       "static": {
-        "min": 149458,
-        "gzip": 53327,
+        "min": 152764,
+        "gzip": 54620,
         "brotli": 47137
       },
       "full": {
-        "min": 149458,
-        "gzip": 53327,
+        "min": 152764,
+        "gzip": 54620,
         "brotli": 47137
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min) and the canonical copy's units events from them (kin/vcopy.kin, +1,127 min); measured on main 51eb54c + D."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min) and the canonical copy's units events from them (kin/vcopy.kin, +1,127 min); measured on main 51eb54c + D. Min and gzip: D323/D324 (provisional, owner sign-off pending) -- the T maps' non-literal member cursors and the map streak's `any` arm (kin/vm-map.kin, kin/vm-eval.kin), the session arena's lease start (kin/vm-arena.kin); measured on main eea15a9 + p85-tlin."
     },
     "snug/compile": {
       "static": {
@@ -98,15 +98,15 @@
     "snug/sequence": {
       "static": {
         "min": 209286,
-        "gzip": 74300,
-        "brotli": 64377
+        "gzip": 75810,
+        "brotli": 65731
       },
       "full": {
         "min": 209286,
-        "gzip": 74300,
-        "brotli": 64377
+        "gzip": 75810,
+        "brotli": 65731
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Gzip and brotli: D323/D324 (provisional, owner sign-off pending) -- the T maps' non-literal member cursors and the map streak's `any` arm, the session arena's lease start; measured on main eea15a9 + p85-tlin."
     },
     "snug/controls": {
       "static": {
@@ -122,16 +122,16 @@
     },
     "runtime": {
       "static": {
-        "min": 171893,
-        "gzip": 61434,
-        "brotli": 52439
+        "min": 175571,
+        "gzip": 62766,
+        "brotli": 53630
       },
       "full": {
-        "min": 171893,
-        "gzip": 61434,
-        "brotli": 52439
+        "min": 175571,
+        "gzip": 62766,
+        "brotli": 53630
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. D323/D324 (provisional, owner sign-off pending): the T maps' non-literal member cursors and the map streak's `any` arm, the session arena's lease start; measured on main eea15a9 + p85-tlin."
     },
     "all-runtime": {
       "static": {

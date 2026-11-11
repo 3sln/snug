@@ -448,12 +448,22 @@ looks at the unconsumed candidates in pick order (§6.5):
   arrival, −1 if absent; X Format Q4). That costs 1 step, and consuming the
   pair costs 1 more.
 * **Non-literal member (T):** examine records in pick order until count =
-  max. It costs **1 step per record examined, consumed or not** (X10).
+  max. It costs **1 step per record examined, consumed or not** (X10). As
+  built (D323) each non-literal member keeps a cursor (its member word +2,
+  0 at the start): the examination starts there, and the cursor moves to
+  where it stopped. Every record before a cursor is consumed or can never be
+  taken or cut by that member (its key typeset, or — for a member without a
+  cut — its value typeset does not match), so the outcome is the full scan's;
+  only the steps differ. A rewind that gives back a record moves every cursor
+  above that record's pick position back to it. A record's pick position is
+  its wire index, or after the T sort the value the sort stores above the
+  consumed bit of its flags word.
 * **Class-R member (S):** first import its saved unnamed-pair state:
   `ucount` adds to count, `ukey` counts as a key match for rfc commitment,
   and `ucut` is a cut violation. Then examine the named slots, 1 step each.
 * **Consume:** push the pair on the trail (1 step). **Rewind:** pop to
-  `mark`, 1 step plus 1 per entry popped.
+  `mark`, 1 step plus 1 per entry popped; in a T map that gave a record
+  back, ⌈n_members/16⌉ more for the cursors (D323).
 
 Cut outcomes (arch §20.2):
 

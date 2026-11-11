@@ -574,6 +574,16 @@ D253 confirmation); the workerd measurement is still to be taken (Phase 4).
 The reference VM's forced-generic diagnostic mode is charged by schedule 1
 (D254).
 
+**Large T maps under the default budget (D323).** A map whose PEG program is
+T (non-literal members under a choice or REP, §20.5) costs about 27–34 units
+per pair when its keys arrive in EC order, and about 5.5–6 · n · log₂ n when
+they must be sorted (unsorted input under the `valid` preset). Measured
+limits of the default 2.25 M units: `{* (tstr => uint // tstr => tstr)}` about
+66,000 pairs in order (the default 65,536 entries per container comes first)
+and about 25,900 unsorted; `{ a: uint, * (tstr => uint // tstr => tstr) }`
+about 66,800 / 25,700; `{ ? k00000: uint, * ("t" => uint // tstr => any) }`
+about 83,000 / 27,000. Larger T maps need a larger `budget`.
+
 ---
 
 ## 8. Memory model
@@ -2262,7 +2272,7 @@ charged.
 | Arrays A2, recursive | No bound beyond the budget. Rescans are polynomial for fixed non-recursive groups and can be exponential with recursion. |
 | Maps F | Per pair O(members); end O(members) |
 | Maps S | Per pair O(members); one end-run bounded by a constant K_S(G) independent of n. Slots number n_named, and every successful group iteration consumes a slot. |
-| Maps T | No polynomial bound claimed. Lower bound Θ(n²) for `{* (int => int // tstr => tstr)}` (X10, C10). Budget-bounded. |
+| Maps T | No polynomial bound claimed in general; budget-bounded. Since D323 (non-literal members' cursors, program-2 §6.4) X10's `{* (int => int // tstr => tstr)}`, formerly Θ(n²), is the T sort's O(n log n) comparisons plus O(n) steps: no member re-reads a record before its cursor, and only a rewind that gives records back moves a cursor back. Measured: 3,000 pairs 102k units sorted / 223k reversed (was 9.1 M); 30,000 pairs 1.0 M / 2.6 M. |
 
 *Sketch for A0/A1.* Between two successive record requests the machine
 works inside a window of B + 1 records. An attempt is fixed by its node, its

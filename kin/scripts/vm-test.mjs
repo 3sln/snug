@@ -40,7 +40,7 @@ const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); if (failLog)
 process.on('exit', () => { if (failLog) writeFileSync(process.env.VMTEST_LOG, failLog.join('\n') + '\n'); });
 
 // ---------------------------------------------------------------- programs and the JS runner
-const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
+const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt, large } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
 let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
 let vvs = new Int32Array(64), vcb = new Uint8Array(64);
@@ -242,6 +242,7 @@ line(forcedSame + forcedResource === cases.length, `forced tiers (program-2 §8)
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `program-2 §12, hand-reasoned and extension-control programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} hand-reasoned, ${nExt} extension-control cases incl. ${cases.filter(c => c.ext && c.label.includes('fixed')).length} with fixed verdicts; they run in every section below except wasm)`);
 line(genericAgree === cases.length, `fast paths == generic path (D044, D254): ${genericAgree}/${cases.length} cases give the schedule-1 fast run's whole out array with the fast paths forced off (the generic path is charged by schedule 1; verdict, reason, offset, items and path equal the default run's unless either hit the budget)`);
+console.log(`  info large T maps (D323): ${large.cases} cases of 1k-30k pairs (table, mixed, struct; rfc and branch; sorted and reversed) accepted under 8 n log2 n units; ${large.oracle} oracle verdicts confirmed (in the program-2 §12 / other line above)`);
 line(streakAgree === cases.length, `streaks == item by item (word 8 bit 3): ${streakAgree}/${cases.length} cases give the default (schedule 2) run's whole out array with the multi-item streaks off`);
 line(s2Agree === cases.length, `legacy schedule 1 (word 8 bit 1): fast == generic on ${s2Agree}/${cases.length} cases`);
 line(s2Same === cases.length, `schedule 1 vs the default schedule 2 (D045) changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);
