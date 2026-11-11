@@ -7566,6 +7566,75 @@ authorised), the existing gate set, and conformance-corpus vectors.
     than before PEG. Consider the parked discriminator-first dispatch.
   Lowered caps follow the measurement. Any cap raise still follows D303.
 
+## Phase 9 — Release candidate (checklist, 2026-11-11)
+
+The coordinator asked for this phase on 2026-11-11. This checklist is what
+it takes to reach a release candidate (RC). Reaching the RC does not
+release anything: nothing is published, pushed or tagged for a registry,
+and the release itself is the owner's decision. An item is ticked only
+when its gate has actually run on main and the result is recorded here.
+The order follows dependencies: correctness first, then the long runs on
+the final code, then documentation, then the size audit, then the final
+review.
+
+**Correctness and coverage**
+- [ ] **P9.1 — Gate watchdog.** Every gate script under `kin/scripts/` and
+  `tools/` gets a CPU-time cap and a wall-clock cap, with sensible defaults
+  per gate that can be overridden. A gate that hits a cap fails loudly,
+  naming the gate, its arguments and the cap; it never hangs silently.
+  Background: the 6.5-day `scan-test 300 1` (dec5975).
+- [ ] **P9.2 — RFC corpus all passing or classified.** Regenerate
+  `corpus/conformance/rfc/current-results.json` (it predates P8.4). Then
+  work through each remaining failure (27 at `920a3e1`), fixing it or
+  classifying it with a written reason (outside scope, an RFC erratum, a
+  documented deviation with its D-entry). Done when there are no
+  unexplained failures.
+- [ ] **P9.3 — RFC 9682 head numbers.** Parse the `#7.<type>` syntax, and
+  match `#7.24`–`#7.31` as RFC 9682 §3.2 reads them, so the "RFC 9682
+  simple head numbers" suite compiles and passes.
+- [ ] **P9.4 — PEG open problem 1.** A recursive Program's session should
+  not reserve the whole-message arena bound when a message starts.
+- [ ] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
+  framer written independently of snug's own sequence code, used as the
+  oracle in `sequence-test`.
+- [ ] **P9.6 — Rust async source driver.** The async counterpart to the JS
+  stream sources (D027), over the existing session, with the same gates as
+  the sync Rust driver.
+- [ ] **P9.7 — Arena pooling and a live-session bound.** Hosts pool session
+  arenas and enforce a documented, configurable bound on live sessions.
+  This item was left open in P6.
+
+**Long runs on the final code**
+- [ ] **P9.8 — crate-diff re-run** against the rebuilt cddl crate oracle
+  (`corpus/tools/ORACLES.md`). Every difference is explained.
+- [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
+  chunks that fit under the P9.1 caps, with the seeds and chunking
+  recorded so anyone can reproduce them.
+
+**Documentation and API**
+- [ ] **P9.10 — Stranger-pass re-review of docs and API.** Independent
+  reviewers who have not seen the code use the README, docs/ and the
+  public APIs (JS, Rust, wasm SDK). Every finding is addressed or
+  explicitly deferred. This includes making the D301 idiom for
+  discriminated unions prominent.
+- [ ] **P9.11 — Release and version policy.** A written policy covering
+  versioning (semver and what counts as breaking, including the Program
+  format, error codes and the budget-unit prices), the supported runtimes,
+  the changelog, and how a release is cut. Writing this policy publishes
+  nothing.
+
+**Last**
+- [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
+  after the code above is settled.
+- [ ] **P9.13 — Final independent whole-library review** of the code,
+  spec, docs and gates by a reviewer who did not build it. Blocking
+  findings are fixed before the RC is declared.
+- [ ] **RC declared** (manager, recorded with the main commit). The release
+  itself is the owner's decision.
+
+**Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
+order. P9.5 onward are scheduled as the earlier items land.
+
 ## Parking lot
 
 - Lazy DFA cache over typesets (architecture §4.1).
