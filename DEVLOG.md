@@ -4857,6 +4857,15 @@ are answered as provisional decisions D082–D085. None is open now.
   reference tools' per-alternative cut, refined to rule A) and the name of the
   reference mode.
 
+- [ ] **P7.13x — permission refusal despite D300 (2026-11-11).** Adding the
+  scaled-run sequence regression case (input `a1 61 61 59 ffff` + zeros to
+  1,500,000 bytes, then `a0`; limits `0,0,1500000,…`; whole window, split at
+  65,536, random chunks, fail-fast) to the wasm SDK parity test
+  (`host/wasm-sdk/test/parity.test.mjs`) was refused by the session's
+  permission system. Not worked around. D300 authorises it; a settings rule is
+  needed. The native JS/Rust tests and `bb sequence-test` already cover the
+  case (5365939); the SDK shares the native driver.
+
 ## Phase 7 — Standalone library (D080, 2026-11-03)
 
 - [x] **P7.1 — General default profile** (D081): key kinds, standard tag set,
@@ -6154,6 +6163,32 @@ are answered as provisional decisions D082–D085. None is open now.
   - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
     exports and the native sequence host driven through the SDK session
     wrapper; views over a JS-side copy of each message.
+- [!] **P7.13x — wasm SDK parity regression case: edit REFUSED by the permission
+  system (2026-11-11).** File `host/wasm-sdk/test/parity.test.mjs`; the edit
+  (appending one test) was refused by this session's auto-mode permission
+  classifier and was not retried or worked around. Owner decision D300
+  authorises `host/wasm*` edits for this work; the session's settings need a
+  rule for it. Intended hunk (append at the end of the file):
+  ```js
+  test('sequences: regression 2026-11-11 -- a complete 65,541-byte message followed by more than maxMessageBytes', () => {
+    const big = new Uint8Array(1500001); big.set([0xa1, 0x61, 0x61, 0x59, 0xff, 0xff]); big[1500000] = 0xa0;
+    const run = (api, wire, cuts) => {
+      const r = api.sequenceReader({ wire, top: 'map', maxMessageBytes: 1500000 }), got = [];
+      let from = 0;
+      for (const to of cuts) {
+        const res = r.feed(big.subarray(from, to)); from = to;
+        got.push(...res.messages.map(m => `m${m.index}+${m.length}`));
+        if (res.error) { got.push(`x${res.error.index} ${res.error.code} @${res.error.offset}`); break; }
+      }
+      return got;
+    };
+    for (const wire of ['bindle', 'deterministic'])
+      for (const cuts of [[big.length], [65536, big.length], [6, 65541, big.length]]) {
+        assert.deepEqual(run(WSEQ, wire, cuts), ['m0+65541', 'x1 not_map @65541'], `wasm ${wire} ${cuts}`);
+        assert.deepEqual(run(NSEQ, wire, cuts), ['m0+65541', 'x1 not_map @65541'], `native ${wire} ${cuts}`);
+      }
+  });
+  ```
   - **2026-11-11 regression (P8.4's scaled run `sequence-test 30000 1001`):**
     `a1 61 61 59 ffff` + zeros to 1,500,000 bytes + `a0`, P = 1,500,000, one
     chunk, answered `too_large` for the complete 65,541-byte first message.
