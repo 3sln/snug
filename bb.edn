@@ -16,7 +16,7 @@
               :task (apply shell "kin/scripts/scan-test" *command-line-args*)}
   rscan-test {:doc "P6.1: the resumable scanner == the recursive one under window splits and yields, JS and Rust."
               :task (apply shell "kin/scripts/rscan-test" *command-line-args*)}
-  compile-test {:doc "P3.2/P3.3: every corpus schema through the compiler on JS and Rust; refusals, identity, program.md §15, vm-verify."
+  compile-test {:doc "The compiler's gates: compile2-test (format 2.0, P8.5) then the regexp gate; format 1's compile-test.mjs is retired."
                 :task (apply shell "kin/scripts/compile-test" *command-line-args*)}
   compile2-test {:doc "P8.5 phase 1: the format 2.0 compiler and verifier (PEG groups, D270) on JS and Rust -- corpus compiles, withdrawn refusals, JS == Rust (Programs and warnings), vm-verify, corruptions, SOURCE_KEY, tier census."
                  :task (apply shell "kin/scripts/compile2-test" *command-line-args*)}
