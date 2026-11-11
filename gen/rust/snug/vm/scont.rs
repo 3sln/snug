@@ -105,7 +105,7 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     }
     // eval-array's streak leaf: an INT over one interval or a TEXT without a
     // regexp, fast paths on, natural tiers (D044)
-    if ((sl >= 0) && streak_kind(p, sl)) && ((s[(VM_GENERIC) as usize] & (1 | G_FORCED)) == 0) {
+    if ((sl >= 0) && streak_kind(p, sl)) && ((s[(VM_GENERIC) as usize] & ((1 | G_FORCED) | G_NOSTREAK)) == 0) {
         sleaf = sl;
     }
     let pend: i32 = count_pending(p, s, fb, w, nq);

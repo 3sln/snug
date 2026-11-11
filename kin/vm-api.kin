@@ -26,7 +26,7 @@
                                     VM_W_DEPTH VM_W_XKIND VM_W_XVAL VM_W_OFFSET VM_D VM_FRAMES VM_PATH
                                     VM_REGEX VM_RULE VM_CHAIN VM_EMBED VM_BIGNUM_MAX VM_POS VM_Q1
                                     VM_REGCAP VM_QIDX VM_DLIM VM_GENERIC SCRATCH_MARK R_TYPE R_BUDGET
-                                    R_INCONSISTENT R_NONDET VM_VTAB H_FLAGS FL_EMBED FL_ARENA G_FORCED
+                                    R_INCONSISTENT R_NONDET VM_VTAB H_FLAGS FL_EMBED FL_ARENA G_FORCED G_NOSTREAK
                                     R_GROUP_LIMIT R_AGROW VM_PBASE]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec wit-empty wit-set]]
             [snug.vm.arena :refer [AR_HDR LEASE arena-cap arena-init arena-want]]
@@ -281,12 +281,15 @@
                "is charged by the generic walk's own schedule, the table (schedule 1):"
                "schedule 2's free bookkeeping prices the fast paths' CPU, not its.")
       (comment "bit 2 forces every array to tier A2 and every map to T (program-2 §8,"
-               "the forced-tier test mode): G_FORCED in s[VM_GENERIC].")
+               "the forced-tier test mode): G_FORCED in s[VM_GENERIC]. Bit 3 turns the"
+               "multi-item streaks off, the schedule unchanged (G_NOSTREAK): the streak =="
+               "item-by-item gate.")
       (if (> (ilen limits) 8)
         (do (let [w8 (ia limits 8)
                   ^:mut g 2]
               (if (!= (bit-and w8 3) 0) (set g (bit-and w8 1)))
               (if (!= (bit-and w8 4) 0) (set g (bit-or g G_FORCED)))
+              (if (!= (bit-and w8 8) 0) (set g (bit-or g G_NOSTREAK)))
               (iset s VM_GENERIC g)))
         (iset s VM_GENERIC 2))
       (comment "the group arena after the fixed words, its cap lowered by limits word 10")

@@ -37,7 +37,7 @@
                                     P_ANYKEY P_TAG P_EMBED P_EMBEDSEQ CTX_KEY CTX_SIMPLE VM_GENERIC VM_FASTM
                                     INF H_S_TS_INDEX H_S_INTERVALS K_INT K_TEXT
                                     R_RANGE R_SIZE VM_BUDGET VM_FASTK K_ANY K_MAJOR
-                                    VM_FASTP VM_FASTL VM_POS R_NONDET VM_VTAB PEG_HDR P_REP P_ENTRY R_GROUP_LIMIT R_AGROW G_FORCED
+                                    VM_FASTP VM_FASTL VM_POS R_NONDET VM_VTAB PEG_HDR P_REP P_ENTRY R_GROUP_LIMIT R_AGROW G_FORCED G_NOSTREAK
                                     P_MEMBER TIER_F]]
             [snug.vm.base :refer [charge c8 c64min new-epoch sched2 free-on free-off q-add q-filter q-stamp ts-test q-flag q-set-flag
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
@@ -51,7 +51,7 @@
                                    a-run aev leaf-array block-ao apeg array-words array-block-init
                                    array-records array-mark array-candidates array-advance array-end
                                    array-witness]]
-            [snug.vm.map :refer [MB_ALIVE MB_NC MB_NJ MB_E0 MB_E1 MB_E2 leaf-map block-mt mpeg m-named m-namers
+            [snug.vm.map :refer [MB_ALIVE MB_NC MB_NJ MB_CUR MB_CF MB_NP MB_HDR MW key-probe MB_E0 MB_E1 MB_E2 leaf-map block-mt mpeg m-named m-namers
                                  m-member map-words map-block-init map-records map-mark map-unordered
                                  map-is-unordered map-key-ecs key-span-end key-search map-cursor
                                  map-key-query map-key-phase cand-vts map-values map-update
@@ -1030,7 +1030,7 @@
               (if (scalar-kind (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 sl))) 255)) (set cx CTX_SIMPLE))))
         (if (and (== (bit-and (ia s VM_GENERIC) (bit-or 1 G_FORCED)) 0) (>= sl 0))
           (do (set fleaf sl)
-              (if (streak-kind p sl) (set sleaf sl)))))
+              (if (and (streak-kind p sl) (== (bit-and (ia s VM_GENERIC) G_NOSTREAK) 0)) (set sleaf sl)))))
       (let [pend (count-pending p s fb w nq)]
         (while (or (and (< n 0) (< q end)) (and (>= n 0) (< el n)))
           (if (== nalive 0)
@@ -1298,6 +1298,127 @@
                 (if (< r1 0) (return r1)))))))
     (return 0)))
 
+(defn ^:pub ^I32 map-streak [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q0 ^I32 limit ^I32 end
+                             ^I32 d ^I32 bo ^I32 mt ^I32 mode ^I32 cl ^I32 ps0 ^I32 pe0 ^I32 klo0]
+  (comment "P3.6 (D044) under program-2 §6, schedule 2 only: consecutive SUCCESSFUL"
+           "pairs of a single-block tier-F map in a simple shape (map-fast-mode: 1 a"
+           "closed struct, the key named by one member whose value typeset is one"
+           "streak leaf; 2 a pure table, its key and value one streak leaf each). The"
+           "key (text, a valid head, UTF-8, ascending) and the value are checked"
+           "first, uncharged; a pair that would not succeed (or would want a bound"
+           "member with no room) stops the streak before it is touched. A taken pair"
+           "is charged exactly as eval-map's pair-by-pair walk charges a simple pair"
+           "(D045 ii: the key search's units and the pair's 1 at the map, the key's"
+           "visit and UTF-8, the key order, the value's visit and probe; the"
+           "cursor, queries, candidates, value tests and F walk free) and leaves the"
+           "block as that walk does (cursor, candidate, member count, pair index)."
+           "Answers the next position; the pair count in s[VM_FASTM], the last key in"
+           "s[VM_FASTP], s[VM_FASTK], the next key-table bound in s[VM_FASTL]; the"
+           "last pair's path segment written.")
+  (let [named (m-named p mt)
+        namers (m-namers p mt)
+        nn (ia p (+ mt 2))
+        maxit (ia s O_MAX_ITEMS)
+        ^:mut kleaf (neg 1)
+        ^:mut vleaf2 (neg 1)
+        ^:mut q q0
+        ^:mut k 0
+        ^:mut ps ps0
+        ^:mut pe pe0
+        ^:mut klo klo0]
+    (iset s VM_FASTM 0)
+    (if (== mode 2)
+      (do (set kleaf (single-leaf p (ia p (+ mt 9))))
+          (set vleaf2 (single-leaf p (ia p (+ mt 10))))
+          (if (or (not (streak-kind p kleaf)) (not (streak-kind p vleaf2))) (return q0))
+          (if (!= (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 kleaf))) 255) K_TEXT) (return q0))))
+    (while (and (< k limit) (< q end))
+      (let [start q
+            ib (u8 b start)
+            ai (bit-and ib 31)
+            ^:mut kh 1
+            ^:mut kl ai
+            ^:mut cur (ia s (+ bo MB_CUR))
+            ^:mut nj (neg 1)
+            ^:mut m 0]
+        (local ^I32 vlf)
+        (comment "the key: text, a shortest head, present, UTF-8, ascending")
+        (if (!= (ushr ib 5) 3) (break))
+        (if (> ai 25) (break))
+        (if (>= ai 24)
+          (do (set kh (+ 1 (shl 1 (- ai 24))))
+              (if (> kh (- end start)) (break))
+              (if (== ai 24) (set kl (u8 b (+ start 1))))
+              (if (== ai 25) (set kl (be16 b (+ start 1))))
+              (if (and (== ai 24) (< kl 24)) (break))
+              (if (and (== ai 25) (< kl 256)) (break))))
+        (if (> kl (- end (+ start kh))) (break))
+        (if (> (+ (ia s O_ITEMS) 2) maxit) (break))
+        (let [kend (+ (+ start kh) kl)]
+          (if (== mode 2)
+            (do (if (< (pre-scalar p pool b s start end (+ (ia p H_S_LEAVES) (* 8 kleaf)) K_TEXT) 0) (break)))
+            (do (if (>= (utf8-invalid-at b (+ start kh) kend) 0) (break))))
+          (if (>= ps 0) (if (>= (compare-spans b ps pe start kend) 0) (break)))
+          (let [kid (key-probe p pool b s start kend klo)
+                sk (ia s O_LO)
+                nlo (ia s O_HI)]
+            (if (== mode 1)
+              (do (if (< kid 0) (break))
+                  (while (and (< cur nn) (< (ia p (+ named (* 3 cur))) kid))
+                    (set cur (+ cur 1)))
+                  (if (or (>= cur nn) (!= (ia p (+ named (* 3 cur))) kid)) (break))
+                  (if (!= (ia p (+ (+ named (* 3 cur)) 2)) 1) (break))
+                  (set nj cur)
+                  (set m (ia p (+ namers (ia p (+ (+ named (* 3 cur)) 1)))))
+                  (set vlf (single-leaf p (ia p (+ (m-member mt m) 2))))
+                  (if (not (streak-kind p vlf)) (break)))
+              (do (comment "a pure table's cursor: no named keys")
+                  (if (and (>= kid 0) (> nn 0)) (break))
+                  (set vlf vleaf2)))
+            (let [mw (+ (+ bo MB_HDR) (* MW m))
+                  vend (pre-scalar p pool b s kend end (+ (ia p H_S_LEAVES) (* 8 vlf))
+                                   (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 vlf))) 255))
+                  vunits (ia s O_LO)]
+              (if (< vend 0) (break))
+              (if (>= (ia s mw) (ia s (+ mw 5))) (break))
+              (comment "commit: the charges in the walk's order")
+              (if (not (charge s (+ sk 1) pos)) (return (neg R_BUDGET)))
+              (if (not (charge s 1 start)) (return (neg R_BUDGET)))
+              (iset s O_ITEMS (+ (ia s O_ITEMS) 1))
+              (if (not (charge s (c8 kl) start)) (return (neg R_BUDGET)))
+              (let [ko (key-order b s ps pe start kend)]
+                (if (< ko 0) (return ko)))
+              (if (not (charge s 1 kend)) (return (neg R_BUDGET)))
+              (iset s O_ITEMS (+ (ia s O_ITEMS) 1))
+              (if (not (charge s (- vunits 3) kend)) (return (neg R_BUDGET)))
+              (comment "the block, as the walk leaves it")
+              (iset s (+ bo MB_CUR) cur)
+              (iset s (+ bo MB_NJ) nj)
+              (iset s (+ bo MB_CF) 0)
+              (iset s (+ bo MB_NC) 1)
+              (iset s cl bo)
+              (iset s (+ cl 1) m)
+              (iset s (+ cl 2) 2)
+              (if (== mode 1)
+                (iset s (+ cl 3) 0)
+                (iset s (+ cl 3) (neg 2)))
+              (iset s (+ bo MB_NP) (+ (ia s (+ bo MB_NP)) 1))
+              (iset s mw (+ (ia s mw) 1))
+              (if (== mode 1)
+                (path-put s (+ d 1) P_KEY kid)
+                (path-put s (+ d 1) P_ANYKEY 0))
+              (set ps start)
+              (set pe kend)
+              (set klo nlo)
+              (set q vend)
+              (set k (+ k 1)))))))
+    (iset s VM_FASTM k)
+    (iset s VM_FASTP ps)
+    (iset s VM_FASTK pe)
+    (iset s VM_FASTL klo)
+    (if (> k 0) (wit-clear s))
+    (return q)))
+
 (defn ^:pub ^I32 eval-map [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q0 ^I32 n
                            ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx ^Ext ext]
   (comment "A map item (program-2 §6) after its head and container checks. Per pair:"
@@ -1330,7 +1451,21 @@
             smap (map-smode p s fb area nb)
             pend (count-pending p s fb w nq)]
         (while (< pk n)
-          (let [start q]
+          (comment "a streak of simple pairs first (D044), when the shape and state allow")
+          (if (and (and (> smap 0) (and (sched2 s) (== nalive 1)))
+                   (and (== (bit-and (ia s VM_GENERIC) (bit-or (bit-or 1 G_FORCED) G_NOSTREAK)) 0)
+                        (and (== (ia s VM_VTAB) 0) (not (map-is-unordered s area nb)))))
+            (do (let [^I32 qm (map-streak p pool b s pos q (- n pk) end d area (block-mt p s fb area) smap cl ps pe klo)
+                      km2 (ia s VM_FASTM)]
+                  (if (< qm 0) (return qm))
+                  (if (> km2 0)
+                    (do (set q qm)
+                        (set pk (+ pk km2))
+                        (set ps (ia s VM_FASTP))
+                        (set pe (ia s VM_FASTK))
+                        (set klo (ia s VM_FASTL)))))))
+          (if (< pk n)
+          (do (let [start q]
             (if (>= start end) (return (fail s start CODE_TRUNCATED)))
             (let [km (ushr (u8 b start) 5)]
               (if (!= km 3)
@@ -1416,7 +1551,7 @@
                                   (wit-set s R_VALUE 0 (+ d 1) (neg 1) 0 start)
                                   (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 start))))
                             (set q vq)))))))))
-          (set pk (+ pk 1)))
+              (set pk (+ pk 1)))))
         (comment "Over a canonical copy: the map's deferred-check units and a recorded"
                  "refusal, before its end (D277, D280).")
         (if (!= (ia s VM_VTAB) 0)

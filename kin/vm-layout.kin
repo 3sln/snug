@@ -195,6 +195,9 @@
 
 ;; VM_GENERIC's forced-tier bit
 (defconst ^:pub ^I32 G_FORCED 8)
+;; VM_GENERIC's no-streak bit: schedule unchanged, the multi-item streaks (D044's
+;; `[* T]` elements, the map pair streak) off -- the streak == pair-by-pair gate
+(defconst ^:pub ^I32 G_NOSTREAK 16)
 
 ;; eval context bits
 (defconst ^:pub ^I32 CTX_KEY 1)

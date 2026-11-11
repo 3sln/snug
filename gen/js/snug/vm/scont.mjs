@@ -11,7 +11,7 @@ import { typedSize } from '../cbor/tags.mjs';
 import { c64, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadIntStreak, deadItem, deadPairBody, deadStdCheck, decimalCheck, ndarrayCheck, pairCheck } from './dead.mjs';
 import { arrAfter, arrAlive, arrClose, arrOpen, arrQuery, arrStarLeaf, arrayStreak, bstrTail, countMatched, countPending, evalItem, finishScalar, ifLimit, mapAfter, mapCands, mapCcap, mapCl, mapClose, mapKeyq, mapNamedOf, mapOpen, mapPre, mapSmode, mapValq, qFilterX, simpleOf, starAdvance, starSteady, streakKind, unitOf } from './eval.mjs';
-import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, G_FORCED, H_S_LEAVES, K_TAG, K_TAGSET, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
+import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, G_FORCED, G_NOSTREAK, H_S_LEAVES, K_TAG, K_TAGSET, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
 import { cmpU64, evalScalars, scalarKind } from './leaf.mjs';
 import { keySearch, keySpanEnd, mapIsUnordered, mapKeyEcs, mapUnordered } from './map.mjs';
 import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_FLOOR, F_IND, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLEN, F_KLO, F_KM, F_KPOS, F_MCNQ, F_N, F_NALIVE, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VLAST, F_VMARK, F_VN, F_VNQ, GO, IND, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, SS_UNK, SS_VNEED, VMS_GROW, VMS_NEED, arenaGate, arenaItems, bstrReads, call, cont, cutYield, done, ensure, enterPend, err, fbase, fidx, fitsKnown, fpush, ftop, imin, keyMaxClaim, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, pendNote, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
@@ -126,7 +126,7 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
     }
     // eval-array's streak leaf: an INT over one interval or a TEXT without a
     // regexp, fast paths on, natural tiers (D044)
-    if (((sl >= 0) && streakKind(p, sl)) && ((s[VM_GENERIC] & (1 | G_FORCED)) === 0)) {
+    if (((sl >= 0) && streakKind(p, sl)) && ((s[VM_GENERIC] & ((1 | G_FORCED) | G_NOSTREAK)) === 0)) {
         sleaf = sl;
     }
     const pend = countPending(p, s, fb, w, nq);

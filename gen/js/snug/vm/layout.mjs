@@ -281,6 +281,8 @@ export const P_EMBEDSEQ = 5;
 
 export const G_FORCED = 8;
 
+export const G_NOSTREAK = 16;
+
 export const CTX_KEY = 1;
 
 export const CTX_SIMPLE = 2;

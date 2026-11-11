@@ -141,5 +141,6 @@ pub const P_TAG: i32 = 3;
 pub const P_EMBED: i32 = 4;
 pub const P_EMBEDSEQ: i32 = 5;
 pub const G_FORCED: i32 = 8;
+pub const G_NOSTREAK: i32 = 16;
 pub const CTX_KEY: i32 = 1;
 pub const CTX_SIMPLE: i32 = 2;

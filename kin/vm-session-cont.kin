@@ -26,7 +26,7 @@
                                     VM_W_SUB VM_W_OFFSET K_INT K_TEXT K_ARRAY K_MAP K_TAG K_TAGSET F_ADMITTED
                                     F_MATCHED F_EVAL R_TYPE R_MISSING R_UNEXPECTED R_VALUE R_TAG R_BUDGET
                                     R_INCONSISTENT P_INDEX P_KEY P_ANYKEY P_TAG CTX_KEY CTX_SIMPLE
-                                    R_GROUP_LIMIT R_AGROW G_FORCED]]
+                                    R_GROUP_LIMIT R_AGROW G_FORCED G_NOSTREAK]]
             [snug.vm.base :refer [charge c64 new-epoch sched2 free-on free-off q-add q-stamp ts-test
                                   q-flag q-set-flag q-kind q-leaf-base cset-rec next-ck cset-width
                                   cset-frame wit-empty wit-clear wit-set path-put rule1]]
@@ -131,7 +131,7 @@
               (if (scalar-kind (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 sl))) 255)) (set cx CTX_SIMPLE))))
         (comment "eval-array's streak leaf: an INT over one interval or a TEXT without a"
                  "regexp, fast paths on, natural tiers (D044)")
-        (if (and (and (>= sl 0) (streak-kind p sl)) (== (bit-and (ia s VM_GENERIC) (bit-or 1 G_FORCED)) 0))
+        (if (and (and (>= sl 0) (streak-kind p sl)) (== (bit-and (ia s VM_GENERIC) (bit-or (bit-or 1 G_FORCED) G_NOSTREAK)) 0))
           (set sleaf sl)))
       (let [pend (count-pending p s fb w nq)
             f (fpush b ss ka base FK_ARR)]

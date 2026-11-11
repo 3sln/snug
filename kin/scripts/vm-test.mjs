@@ -45,14 +45,14 @@ let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
 let vvs = new Int32Array(64), vcb = new Uint8Array(64);
 const noExt = (_i, _p, _ao, _al, _b, _s, _e, _r) => -2;
-function runJs(c, trap = false, generic = false, s1 = false, forced = false) {
+function runJs(c, trap = false, generic = false, s1 = false, forced = false, nostreak = false) {
   const { P, B } = programs[c.prog];
   const cap = Math.max(markCap, P[16]);
   const need = vmScratchWords(P, c.rule, cap);
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
-  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0) | (forced ? 4 : 0), c.lim[9] ?? 0, c.lim[10] ?? -1]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default), bit 2 forced tiers (program-2 §8); word 9: the profile flags (D120); word 10 the group arena's limit (program-2 §9.3)
+  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0) | (forced ? 4 : 0) | (nostreak ? 8 : 0), c.lim[9] ?? 0, c.lim[10] ?? -1]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default), bit 2 forced tiers (program-2 §8), bit 3 streaks off (schedule unchanged); word 9: the profile flags (D120); word 10 the group arena's limit (program-2 §9.3)
   const x = extFor(P, B) ?? noExt;   // P7.2: a Program using extension controls gets the test registry's predicates
   // P8.4 (D264): the canonical path's buffers, grown on -5 as the hosts grow them
   let code;
@@ -110,6 +110,14 @@ cases.forEach((c, i) => {
   const a = js[i].split(' '), b = js2[i].split(' ');
   if (a[0] === '48' || b[0] === '48' || (a.length === b.length && a.every((x, k) => k === 3 || x === b[k]))) s2Same++;
   else fail(`${c.label}: schedule 1 changed more than the budget: ${js[i]} | ${js2[i]}`);
+});
+// streaks == item by item under the default schedule 2 (limits word 8 bit 3): the multi-item
+// streaks (D044's `[* T]` elements, the map pair streak) are charged as the pair-by-pair and
+// element-by-element walk charges them, so the whole out array is the same with them off
+let streakAgree = 0;
+cases.forEach((c, i) => {
+  let g; try { g = runJs(c, false, false, false, false, true); } catch (e) { g = 'THROW ' + e.message; }
+  if (g === js[i]) streakAgree++; else fail(`${c.label}: schedule-2 streaks ${js[i]} | item by item ${g}`);
 });
 // forced tiers (program-2 §8, D278; limits word 8 bit 2): every array A2, every map T. With
 // sufficient resources the verdict, reason, subcode, offset, items and path equal the
@@ -234,6 +242,7 @@ line(forcedSame + forcedResource === cases.length, `forced tiers (program-2 §8)
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
 line(stats.other[0] === stats.other[1], `program-2 §12, hand-reasoned and extension-control programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} hand-reasoned, ${nExt} extension-control cases incl. ${cases.filter(c => c.ext && c.label.includes('fixed')).length} with fixed verdicts; they run in every section below except wasm)`);
 line(genericAgree === cases.length, `fast paths == generic path (D044, D254): ${genericAgree}/${cases.length} cases give the schedule-1 fast run's whole out array with the fast paths forced off (the generic path is charged by schedule 1; verdict, reason, offset, items and path equal the default run's unless either hit the budget)`);
+line(streakAgree === cases.length, `streaks == item by item (word 8 bit 3): ${streakAgree}/${cases.length} cases give the default (schedule 2) run's whole out array with the multi-item streaks off`);
 line(s2Agree === cases.length, `legacy schedule 1 (word 8 bit 1): fast == generic on ${s2Agree}/${cases.length} cases`);
 line(s2Same === cases.length, `schedule 1 vs the default schedule 2 (D045) changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);
 line(epochFails === 0, `epochs: ${epochRuns} cases re-run from an epoch just below the restart threshold give the same out array`);

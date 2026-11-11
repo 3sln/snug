@@ -66,6 +66,13 @@ vm('map-table', 'r = [* {* tstr => uint}]', recs);
 vm('map-table-generic', 'r = [* {* tstr => uint}]', recs, 1);
 const six = ['r = [* msg]', 'msg = a / b / c / d / e / f', ...'abcdef'.split('').map(k => `${k} = {kind: "${k}", v: ${{ a: 'uint', b: 'tstr', c: 'bool', d: '[* int]', e: '{* tstr => int}', f: 'bstr' }[k]}}`)].join('\n');
 vm('reference-map-choice', six, Array.from({ length: 24000 }, (_, i) => ({ kind: 'a', v: i })));
+// program-2 (P8.5): the PEG tiers -- an A1 group choice, an A2 backtracking REP, an S
+// group choice in a map, T records, and the T sort over EC-sensitive keys
+vm('array-A1-choice', 'r = [* ((uint, tstr) // (uint, uint, tstr))]', Array.from({ length: 300000 }, (_, i) => [i, i, 'x'][i % 3]));
+vm('array-A2', 'r = [* (* uint, tstr)]', Array.from({ length: 400000 }, (_, i) => i % 4 === 3 ? 'x' : i));
+vm('map-S-choice', 'r = [* {("a" => uint, "b" => tstr) // ("a" => tstr, "b" => uint)}]', Array.from({ length: 100000 }, () => ({ a: 'x', b: 1 })));
+vm('map-T-choice', 'r = [* {* (tstr => uint // tstr => tstr)}]', recs);
+vm('map-T-sort', 'r = {* (any => uint // any => tstr)}', new Map(Array.from({ length: 60000 }, (_, i) => [[i, 0.0], i])));
 vm('scalar-leaves', 'r = [* (bool / null / uint / nint / tstr)]', Array(150000).fill(true));
 vm('text-ascii', 'r = tstr', 'a'.repeat(1_400_000));
 vm('literal-long-compare', 'r = [* ' + JSON.stringify('a'.repeat(100000)) + ']', Array(14).fill('a'.repeat(100000)));

@@ -326,7 +326,9 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     // is charged by the generic walk's own schedule, the table (schedule 1):
     // schedule 2's free bookkeeping prices the fast paths' CPU, not its.
     // bit 2 forces every array to tier A2 and every map to T (program-2 §8,
-    // the forced-tier test mode): G_FORCED in s[VM_GENERIC].
+    // the forced-tier test mode): G_FORCED in s[VM_GENERIC]. Bit 3 turns the
+    // multi-item streaks off, the schedule unchanged (G_NOSTREAK): the streak ==
+    // item-by-item gate.
     if (limits.len() as i32) > 8 {
         let w8: i32 = limits[(8) as usize];
         let mut g: i32 = 2;
@@ -335,6 +337,9 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
         }
         if (w8 & 4) != 0 {
             g |= G_FORCED;
+        }
+        if (w8 & 8) != 0 {
+            g |= G_NOSTREAK;
         }
         s[(VM_GENERIC) as usize] = g;
     } else {

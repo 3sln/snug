@@ -12,9 +12,9 @@ import { arenaSetUp, arenaUpTop } from './arena.mjs';
 import { AB_ALIVE, AB_DIED, AB_EVK, AB_HDR, AB_IDX, AB_MODE, AB_NACT, AB_PC, AB_SP, AB_STATUS, aRun, aev, apeg, arrayAdvance, arrayBlockInit, arrayCandidates, arrayEnd, arrayMark, arrayRecords, arrayWitness, arrayWords, blockAo, leafArray } from './array.mjs';
 import { c8, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFilter, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadArrayElems, deadBignum, deadIntStreak, deadItem, deadMapPairs, deadSeq, deadStdCheck, deadTyped, decimalCheck, headFail, keyOrder, ndarrayCheck, pairCheck, pairCount, pairWalk, replayEnd, replayKey, vtabFind } from './dead.mjs';
-import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, G_FORCED, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, PEG_HDR, P_ANYKEY, P_EMBED, P_ENTRY, P_INDEX, P_KEY, P_MEMBER, P_REP, P_TAG, R_AGROW, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_GROUP_LIMIT, R_INCONSISTENT, R_MISSING, R_NONDET, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, TIER_F, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_VTAB, VM_W_REASON, VM_W_SUB } from './layout.mjs';
+import { CTX_KEY, CTX_SIMPLE, FL_COMB, FL_EMBED, FL_EXT, F_ADMITTED, F_ANSWER, F_EVAL, F_MATCHED, G_FORCED, G_NOSTREAK, H_FLAGS, H_S_INTERVALS, H_S_LEAVES, H_S_TS_INDEX, INF, K_AND, K_ANY, K_ARRAY, K_EMBED, K_EXT, K_INT, K_MAJOR, K_MAP, K_NOT, K_TAG, K_TAGSET, K_TEXT, PEG_HDR, P_ANYKEY, P_EMBED, P_ENTRY, P_INDEX, P_KEY, P_MEMBER, P_REP, P_TAG, R_AGROW, R_BUDGET, R_CONTROL, R_CONTROL_SIZE, R_EMBEDDED, R_GROUP_LIMIT, R_INCONSISTENT, R_MISSING, R_NONDET, R_RANGE, R_SIZE, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, SCRATCH_MARK, TIER_F, VM_BIGNUM_MAX, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_FASTK, VM_FASTL, VM_FASTM, VM_FASTP, VM_GENERIC, VM_POS, VM_Q1, VM_QIDX, VM_VTAB, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { cmpPoint, cmpU64, evalLeaf, evalScalars, scalarKind } from './leaf.mjs';
-import { MB_ALIVE, MB_E0, MB_E1, MB_E2, MB_NC, MB_NJ, blockMt, candVts, keySearch, keySpanEnd, leafMap, mMember, mNamed, mNamers, mapBlockInit, mapCursor, mapEndBlock, mapIsUnordered, mapKeyEcs, mapKeyPhase, mapKeyQuery, mapMark, mapRecords, mapUnordered, mapUpdate, mapValues, mapWords, mpeg } from './map.mjs';
+import { MB_ALIVE, MB_CF, MB_CUR, MB_E0, MB_E1, MB_E2, MB_HDR, MB_NC, MB_NJ, MB_NP, MW, blockMt, candVts, keyProbe, keySearch, keySpanEnd, leafMap, mMember, mNamed, mNamers, mapBlockInit, mapCursor, mapEndBlock, mapIsUnordered, mapKeyEcs, mapKeyPhase, mapKeyQuery, mapMark, mapRecords, mapUnordered, mapUpdate, mapValues, mapWords, mpeg } from './map.mjs';
 
 export function unitOf(ctx) {
     // The per-leaf unit of eval-scalars: 0 for schedule 2's one-leaf child.
@@ -1467,7 +1467,7 @@ export function evalArray(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ex
     }
     if (((s[VM_GENERIC] & (1 | G_FORCED)) === 0) && (sl >= 0)) {
         fleaf = sl;
-        if (streakKind(p, sl)) {
+        if (streakKind(p, sl) && ((s[VM_GENERIC] & G_NOSTREAK) === 0)) {
             sleaf = sl;
         }
     }
@@ -1879,6 +1879,196 @@ export function mapClose(p, pool, b, kb, s, fb, w, area, nb, d, n, pos, q0, q, n
     return 0;
 }
 
+export function mapStreak(p, pool, b, s, pos, q0, limit, end, d, bo, mt, mode, cl, ps0, pe0, klo0) {
+    // P3.6 (D044) under program-2 §6, schedule 2 only: consecutive SUCCESSFUL
+    // pairs of a single-block tier-F map in a simple shape (map-fast-mode: 1 a
+    // closed struct, the key named by one member whose value typeset is one
+    // streak leaf; 2 a pure table, its key and value one streak leaf each). The
+    // key (text, a valid head, UTF-8, ascending) and the value are checked
+    // first, uncharged; a pair that would not succeed (or would want a bound
+    // member with no room) stops the streak before it is touched. A taken pair
+    // is charged exactly as eval-map's pair-by-pair walk charges a simple pair
+    // (D045 ii: the key search's units and the pair's 1 at the map, the key's
+    // visit and UTF-8, the key order, the value's visit and probe; the
+    // cursor, queries, candidates, value tests and F walk free) and leaves the
+    // block as that walk does (cursor, candidate, member count, pair index).
+    // Answers the next position; the pair count in s[VM_FASTM], the last key in
+    // s[VM_FASTP], s[VM_FASTK], the next key-table bound in s[VM_FASTL]; the
+    // last pair's path segment written.
+    const named = mNamed(p, mt);
+    const namers = mNamers(p, mt);
+    const nn = p[mt + 2];
+    const maxit = s[O_MAX_ITEMS];
+    let kleaf = -1;
+    let vleaf2 = -1;
+    let q = q0;
+    let k = 0;
+    let ps = ps0;
+    let pe = pe0;
+    let klo = klo0;
+    s[VM_FASTM] = 0;
+    if (mode === 2) {
+        kleaf = singleLeaf(p, p[mt + 9]);
+        vleaf2 = singleLeaf(p, p[mt + 10]);
+        if ((!streakKind(p, kleaf)) || (!streakKind(p, vleaf2))) {
+            return q0;
+        }
+        if ((p[p[H_S_LEAVES] + (8 * kleaf)] & 255) !== K_TEXT) {
+            return q0;
+        }
+    }
+    while ((k < limit) && (q < end)) {
+        const start = q;
+        const ib = b[start];
+        const ai = ib & 31;
+        let kh = 1;
+        let kl = ai;
+        let cur = s[bo + MB_CUR];
+        let nj = -1;
+        let m = 0;
+        let vlf;
+        // the key: text, a shortest head, present, UTF-8, ascending
+        if (((ib >>> 5) | 0) !== 3) {
+            break;
+        }
+        if (ai > 25) {
+            break;
+        }
+        if (ai >= 24) {
+            kh = 1 + (1 << (ai - 24));
+            if (kh > (end - start)) {
+                break;
+            }
+            if (ai === 24) {
+                kl = b[start + 1];
+            }
+            if (ai === 25) {
+                kl = be16(b, start + 1);
+            }
+            if ((ai === 24) && (kl < 24)) {
+                break;
+            }
+            if ((ai === 25) && (kl < 256)) {
+                break;
+            }
+        }
+        if (kl > (end - (start + kh))) {
+            break;
+        }
+        if ((s[O_ITEMS] + 2) > maxit) {
+            break;
+        }
+        const kend = (start + kh) + kl;
+        if (mode === 2) {
+            if (preScalar(p, pool, b, s, start, end, p[H_S_LEAVES] + (8 * kleaf), K_TEXT) < 0) {
+                break;
+            }
+        } else {
+            if (utf8InvalidAt(b, start + kh, kend) >= 0) {
+                break;
+            }
+        }
+        if (ps >= 0) {
+            if (compareSpans(b, ps, pe, start, kend) >= 0) {
+                break;
+            }
+        }
+        const kid = keyProbe(p, pool, b, s, start, kend, klo);
+        const sk = s[O_LO];
+        const nlo = s[O_HI];
+        if (mode === 1) {
+            if (kid < 0) {
+                break;
+            }
+            while ((cur < nn) && (p[named + (3 * cur)] < kid)) {
+                cur += 1;
+            }
+            if ((cur >= nn) || (p[named + (3 * cur)] !== kid)) {
+                break;
+            }
+            if (p[(named + (3 * cur)) + 2] !== 1) {
+                break;
+            }
+            nj = cur;
+            m = p[namers + p[(named + (3 * cur)) + 1]];
+            vlf = singleLeaf(p, p[mMember(mt, m) + 2]);
+            if (!streakKind(p, vlf)) {
+                break;
+            }
+        } else {
+            // a pure table's cursor: no named keys
+            if ((kid >= 0) && (nn > 0)) {
+                break;
+            }
+            vlf = vleaf2;
+        }
+        const mw = (bo + MB_HDR) + (MW * m);
+        const vend = preScalar(p, pool, b, s, kend, end, p[H_S_LEAVES] + (8 * vlf), p[p[H_S_LEAVES] + (8 * vlf)] & 255);
+        const vunits = s[O_LO];
+        if (vend < 0) {
+            break;
+        }
+        if (s[mw] >= s[mw + 5]) {
+            break;
+        }
+        // commit: the charges in the walk's order
+        if (!charge(s, sk + 1, pos)) {
+            return -R_BUDGET;
+        }
+        if (!charge(s, 1, start)) {
+            return -R_BUDGET;
+        }
+        s[O_ITEMS] = s[O_ITEMS] + 1;
+        if (!charge(s, c8(kl), start)) {
+            return -R_BUDGET;
+        }
+        const ko = keyOrder(b, s, ps, pe, start, kend);
+        if (ko < 0) {
+            return ko;
+        }
+        if (!charge(s, 1, kend)) {
+            return -R_BUDGET;
+        }
+        s[O_ITEMS] = s[O_ITEMS] + 1;
+        if (!charge(s, vunits - 3, kend)) {
+            return -R_BUDGET;
+        }
+        // the block, as the walk leaves it
+        s[bo + MB_CUR] = cur;
+        s[bo + MB_NJ] = nj;
+        s[bo + MB_CF] = 0;
+        s[bo + MB_NC] = 1;
+        s[cl] = bo;
+        s[cl + 1] = m;
+        s[cl + 2] = 2;
+        if (mode === 1) {
+            s[cl + 3] = 0;
+        } else {
+            s[cl + 3] = -2;
+        }
+        s[bo + MB_NP] = s[bo + MB_NP] + 1;
+        s[mw] = s[mw] + 1;
+        if (mode === 1) {
+            pathPut(s, d + 1, P_KEY, kid);
+        } else {
+            pathPut(s, d + 1, P_ANYKEY, 0);
+        }
+        ps = start;
+        pe = kend;
+        klo = nlo;
+        q = vend;
+        k += 1;
+    }
+    s[VM_FASTM] = k;
+    s[VM_FASTP] = ps;
+    s[VM_FASTK] = pe;
+    s[VM_FASTL] = klo;
+    if (k > 0) {
+        witClear(s);
+    }
+    return q;
+}
+
 export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ext) {
     // A map item (program-2 §6) after its head and container checks. Per pair:
     // the scanner's key checks; the key's id, the blocks' cursors, the key's
@@ -1914,157 +2104,174 @@ export function evalMap(p, pool, b, s, pos, q0, n, d, fb, ck, nq, end, ctx, ext)
     const smap = mapSmode(p, s, fb, area, nb);
     const pend = countPending(p, s, fb, w, nq);
     while (pk < n) {
-        const start = q;
-        if (start >= end) {
-            return fail(s, start, CODE_TRUNCATED);
-        }
-        const km = (b[start] >>> 5) | 0;
-        if (km !== 3) {
-            if (!keyPeek(s, km, cose)) {
-                return fail(s, start, CODE_KEY_TYPE);
+        // a streak of simple pairs first (D044), when the shape and state allow
+        if (((smap > 0) && (sched2(s) && (nalive === 1))) && (((s[VM_GENERIC] & ((1 | G_FORCED) | G_NOSTREAK)) === 0) && ((s[VM_VTAB] === 0) && (!mapIsUnordered(s, area, nb))))) {
+            const qm = mapStreak(p, pool, b, s, pos, q, n - pk, end, d, area, blockMt(p, s, fb, area), smap, cl, ps, pe, klo);
+            const km2 = s[VM_FASTM];
+            if (qm < 0) {
+                return qm;
+            }
+            if (km2 > 0) {
+                q = qm;
+                pk += km2;
+                ps = s[VM_FASTP];
+                pe = s[VM_FASTK];
+                klo = s[VM_FASTL];
             }
         }
-        if (nalive === 0) {
-            q = deadItem(b, s, start, d + 1, end);
-            if (q < 0) {
-                return q;
+        if (pk < n) {
+            const start = q;
+            if (start >= end) {
+                return fail(s, start, CODE_TRUNCATED);
             }
-            if (km <= 1) {
-                if (!keyLabel(b, s, start, km)) {
+            const km = (b[start] >>> 5) | 0;
+            if (km !== 3) {
+                if (!keyPeek(s, km, cose)) {
                     return fail(s, start, CODE_KEY_TYPE);
                 }
             }
-            const kod = keyOrder(b, s, ps, pe, start, q);
-            if (kod < 0) {
-                return kod;
-            }
-            if (s[VM_VTAB] !== 0) {
-                const rkd = replayKey(s, start);
-                if (rkd < 0) {
-                    return rkd;
+            if (nalive === 0) {
+                q = deadItem(b, s, start, d + 1, end);
+                if (q < 0) {
+                    return q;
                 }
-            }
-            ps = start;
-            pe = q;
-            q = deadItem(b, s, q, d + 1, end);
-            if (q < 0) {
-                return q;
-            }
-        } else {
-            const ke = keySpanEnd(b, start, end);
-            let kid = -1;
-            let ps2 = 0;
-            let still;
-            let kq;
-            let vq;
-            // Over a canonical copy (PF_CANON, P8.4) keys come in wire order:
-            // from the first that does not ascend, every key search covers
-            // the whole key table and every block searches its named table
-            // (program-2 §6.1 step 1; uncharged, as the session does it).
-            if ((ke > start) && ((ps >= 0) && canon)) {
-                if (compareSpans(b, ps, pe, start, ke) >= 0) {
-                    mapUnordered(p, s, fb, area, nb);
+                if (km <= 1) {
+                    if (!keyLabel(b, s, start, km)) {
+                        return fail(s, start, CODE_KEY_TYPE);
+                    }
                 }
-            }
-            if (mapIsUnordered(s, area, nb)) {
-                klo = 0;
-            }
-            if (ke > start) {
-                kid = keySearch(p, pool, b, s, start, ke, klo, pos);
-                if (kid === (-2)) {
-                    return -R_BUDGET;
+                const kod = keyOrder(b, s, ps, pe, start, q);
+                if (kod < 0) {
+                    return kod;
                 }
-                klo = s[O_HI];
-            }
-            if (smap > 0) {
-                const pr = mapPre(p, s, fb, area, smap, kid, pos);
-                if (pr < 0) {
-                    return pr;
+                if (s[VM_VTAB] !== 0) {
+                    const rkd = replayKey(s, start);
+                    if (rkd < 0) {
+                        return rkd;
+                    }
                 }
-                ps2 = pr;
-            }
-            if (ps2 === 1) {
-                freeOn(s);
-            }
-            const e = newEpoch(s);
-            const cnq = mapKeyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos);
-            freeOff(s);
-            if (cnq < 0) {
-                return cnq;
-            }
-            if (cnq > 0) {
-                kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY | simpleOf(p, s, ps2, cfb, cnq), ext);
+                ps = start;
+                pe = q;
+                q = deadItem(b, s, q, d + 1, end);
+                if (q < 0) {
+                    return q;
+                }
             } else {
-                kq = deadItem(b, s, start, d + 1, end);
-            }
-            if (kq < 0) {
-                return kq;
-            }
-            if (km <= 1) {
-                if (!keyLabel(b, s, start, km)) {
-                    return fail(s, start, CODE_KEY_TYPE);
+                const ke = keySpanEnd(b, start, end);
+                let kid = -1;
+                let ps2 = 0;
+                let still;
+                let kq;
+                let vq;
+                // Over a canonical copy (PF_CANON, P8.4) keys come in wire order:
+                // from the first that does not ascend, every key search covers
+                // the whole key table and every block searches its named table
+                // (program-2 §6.1 step 1; uncharged, as the session does it).
+                if ((ke > start) && ((ps >= 0) && canon)) {
+                    if (compareSpans(b, ps, pe, start, ke) >= 0) {
+                        mapUnordered(p, s, fb, area, nb);
+                    }
                 }
-            }
-            const ko = keyOrder(b, s, ps, pe, start, kq);
-            if (ko < 0) {
-                return ko;
-            }
-            if (s[VM_VTAB] !== 0) {
-                const rk = replayKey(s, start);
-                if (rk < 0) {
-                    return rk;
+                if (mapIsUnordered(s, area, nb)) {
+                    klo = 0;
                 }
-            }
-            mapKeyEcs(p, s, fb, area, nb, b, start);
-            ps = start;
-            pe = kq;
-            if (ps2 === 1) {
-                freeOn(s);
-            }
-            const nc = mapCands(p, s, fb, area, nb, cfb, cw, cnq, cl, ccap, pos);
-            if (nc < 0) {
+                if (ke > start) {
+                    kid = keySearch(p, pool, b, s, start, ke, klo, pos);
+                    if (kid === (-2)) {
+                        return -R_BUDGET;
+                    }
+                    klo = s[O_HI];
+                }
+                if (smap > 0) {
+                    const pr = mapPre(p, s, fb, area, smap, kid, pos);
+                    if (pr < 0) {
+                        return pr;
+                    }
+                    ps2 = pr;
+                }
+                if (ps2 === 1) {
+                    freeOn(s);
+                }
+                const e = newEpoch(s);
+                const cnq = mapKeyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos);
                 freeOff(s);
-                return nc;
-            }
-            if (mapNamedOf(s, cl, nc) === 1) {
-                pathPut(s, d + 1, P_KEY, kid);
-            } else {
-                pathPut(s, d + 1, P_ANYKEY, 0);
-            }
-            const vnq = mapValq(p, s, fb, cl, nc, cfb, cw, pos);
-            freeOff(s);
-            if (vnq < 0) {
-                return vnq;
-            }
-            if (vnq > 0) {
-                vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, simpleOf(p, s, ps2, cfb, vnq), ext);
-            } else {
-                vq = deadItem(b, s, kq, d + 1, end);
-            }
-            if (vq < 0) {
-                return vq;
-            }
-            if (ps2 === 1) {
-                freeOn(s);
-            }
-            still = mapAfter(p, s, fb, w, area, nb, cl, cfb, cw, vnq, kid, start, kq - start, pos);
-            freeOff(s);
-            if (still < 0) {
-                return still;
-            }
-            nalive = still;
-            if ((still > 0) || (pend > 0)) {
-                witClear(s);
-            } else if (witEmpty(s)) {
-                if (nc > 0) {
-                    witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
-                } else {
-                    witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+                if (cnq < 0) {
+                    return cnq;
                 }
+                if (cnq > 0) {
+                    kq = evalItem(p, pool, b, s, start, d + 1, cfb, cck, cnq, end, CTX_KEY | simpleOf(p, s, ps2, cfb, cnq), ext);
+                } else {
+                    kq = deadItem(b, s, start, d + 1, end);
+                }
+                if (kq < 0) {
+                    return kq;
+                }
+                if (km <= 1) {
+                    if (!keyLabel(b, s, start, km)) {
+                        return fail(s, start, CODE_KEY_TYPE);
+                    }
+                }
+                const ko = keyOrder(b, s, ps, pe, start, kq);
+                if (ko < 0) {
+                    return ko;
+                }
+                if (s[VM_VTAB] !== 0) {
+                    const rk = replayKey(s, start);
+                    if (rk < 0) {
+                        return rk;
+                    }
+                }
+                mapKeyEcs(p, s, fb, area, nb, b, start);
+                ps = start;
+                pe = kq;
+                if (ps2 === 1) {
+                    freeOn(s);
+                }
+                const nc = mapCands(p, s, fb, area, nb, cfb, cw, cnq, cl, ccap, pos);
+                if (nc < 0) {
+                    freeOff(s);
+                    return nc;
+                }
+                if (mapNamedOf(s, cl, nc) === 1) {
+                    pathPut(s, d + 1, P_KEY, kid);
+                } else {
+                    pathPut(s, d + 1, P_ANYKEY, 0);
+                }
+                const vnq = mapValq(p, s, fb, cl, nc, cfb, cw, pos);
+                freeOff(s);
+                if (vnq < 0) {
+                    return vnq;
+                }
+                if (vnq > 0) {
+                    vq = evalItem(p, pool, b, s, kq, d + 1, cfb, cck, vnq, end, simpleOf(p, s, ps2, cfb, vnq), ext);
+                } else {
+                    vq = deadItem(b, s, kq, d + 1, end);
+                }
+                if (vq < 0) {
+                    return vq;
+                }
+                if (ps2 === 1) {
+                    freeOn(s);
+                }
+                still = mapAfter(p, s, fb, w, area, nb, cl, cfb, cw, vnq, kid, start, kq - start, pos);
+                freeOff(s);
+                if (still < 0) {
+                    return still;
+                }
+                nalive = still;
+                if ((still > 0) || (pend > 0)) {
+                    witClear(s);
+                } else if (witEmpty(s)) {
+                    if (nc > 0) {
+                        witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
+                    } else {
+                        witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
+                    }
+                }
+                q = vq;
             }
-            q = vq;
+            pk += 1;
         }
-        pk += 1;
     }
     // Over a canonical copy: the map's deferred-check units and a recorded
     // refusal, before its end (D277, D280).

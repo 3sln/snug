@@ -9,7 +9,7 @@ import { AR_HDR, LEASE, arenaCap, arenaInit, arenaWant } from './arena.mjs';
 import { csetRec, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { FL_ARENA, FL_EMBED, FORMAT_V2, G_FORCED, HEADER_WORDS, H_FLAGS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_NONDET, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_PBASE, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_VTAB, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
+import { FL_ARENA, FL_EMBED, FORMAT_V2, G_FORCED, G_NOSTREAK, HEADER_WORDS, H_FLAGS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_NONDET, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_PBASE, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_VTAB, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
 import { cmpBytes } from './leaf.mjs';
 
 export function chainOf(p, rule) {
@@ -342,7 +342,9 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     // is charged by the generic walk's own schedule, the table (schedule 1):
     // schedule 2's free bookkeeping prices the fast paths' CPU, not its.
     // bit 2 forces every array to tier A2 and every map to T (program-2 §8,
-    // the forced-tier test mode): G_FORCED in s[VM_GENERIC].
+    // the forced-tier test mode): G_FORCED in s[VM_GENERIC]. Bit 3 turns the
+    // multi-item streaks off, the schedule unchanged (G_NOSTREAK): the streak ==
+    // item-by-item gate.
     if (limits.length > 8) {
         const w8 = limits[8];
         let g = 2;
@@ -351,6 +353,9 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
         }
         if ((w8 & 4) !== 0) {
             g |= G_FORCED;
+        }
+        if ((w8 & 8) !== 0) {
+            g |= G_NOSTREAK;
         }
         s[VM_GENERIC] = g;
     } else {
