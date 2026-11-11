@@ -4713,7 +4713,9 @@ path also runs -- and 2.3-6.9x slower on deterministic input, D286).
 **Why**: duplicate keys by value on unsorted maps need the keys' canonical forms;
 non-deterministic input in a schema needs the canonical copy and replay for
 D277/D280; no smaller correct walk was found.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (owner, 2026-11-11, via coordinator: "sure the bundle
+  size increase is fine"). A pre-release size pass is queued as P8.7, on the
+  coordinator's recommendation.
 
 ### D286 — The deterministic-only fast path is kept: the VM attempt; sessions pre-check structurally (P8.4; D269's measurement)
 **Decision** (P8.4, provisional): the buffer driver keeps its attempt over the
@@ -4843,7 +4845,7 @@ repository. What still applies:
 - agents kill only processes they started, by PID.
 
 This direction does not cover owner sign-offs. The size-cap raises in
-D285 and D319 still wait for the owner. Outside snug, 3sln.me, emon, nome
+D285 and D319 were signed off separately, also on 2026-11-11. Outside snug, 3sln.me, emon, nome
 and kin stay read-only. First use: P7.13x (`b1a3fac`), the wasm SDK parity
 regression added with a plain edit.
 - [x] **Decided by the owner** (2026-11-11, via coordinator).
@@ -5190,7 +5192,9 @@ it); sharing the array and
 map machines' frame code (their frames differ in size and meaning, the
 shared part — `fs-push`/`fs-pop` in `vm-arena.kin` — already is).
 **Why**: PEG semantics need the machines; the growth is attributed to them.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (owner, 2026-11-11, via coordinator: "sure the bundle
+  size increase is fine"). A pre-release size pass is queued as P8.7, on the
+  coordinator's recommendation.
 
 ### D320 — Format 1's harnesses retired; the property campaign uses the PEG oracle (P8.5)
 **Decision** (P8.5 VM engineer, provisional): `kin/scripts/compile-test.mjs`,
@@ -7288,6 +7292,21 @@ authorised), the existing gate set, and conformance-corpus vectors.
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
+- [ ] **P8.7 — Pre-release size pass** (added 2026-11-11). The coordinator
+  recommended it when the owner signed off D285 and D319; it is not an owner
+  requirement. Make one dedicated pass over the bundle before release,
+  attributing every candidate and measuring it with `bb size`. Candidates:
+  - Load the Program verifier only for Programs that were not compiled
+    locally. A Program from `compile` in the same process is trusted; a
+    loaded one is not. This is the largest D319 item, `program/verify`
+    +7.3 KB min. D319 rejected loading it lazily because a synchronous load
+    cannot await an import; the pass looks for a design that keeps the
+    synchronous API.
+  - Re-check the forced-tier support. D319 found it shares its code path
+    with T and A2.
+  - Re-check D285's rejected cuts in light of P8.5.
+  Lowered caps follow the measurement. A cap rise still needs a D-entry with
+  attribution, brought to the coordinator for the owner.
 
 ## Parking lot
 
