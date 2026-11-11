@@ -7640,6 +7640,9 @@ authorised), the existing gate set, and conformance-corpus vectors.
   - Re-check D285's rejected cuts in light of P8.5.
   - Look at the reference-map-choice gap: it is still about 1.34× slower
     than before PEG. Consider the parked discriminator-first dispatch.
+  - Review the full `snug/compile` entry first: about 97 KB gzip after
+    D333. It loads lazily, but it is the largest single target for the
+    audit (coordinator, 2026-11-11).
   Lowered caps follow the measurement. Any cap raise still follows D303.
 
 ## Phase 9 — Release candidate (checklist, 2026-11-11)
