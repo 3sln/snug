@@ -4762,6 +4762,19 @@ which `p85-peg` changed). (2) B + C as one P8.4 follow-up in
 merge -- then D. (3) E only after PEG phase 2, re-measured on its map machine.
 Expected after (1)+(2)+D: sessions on maps `rev` ~23x -> ~4x the deterministic
 buffer run, indefinite/non-shortest input ~4-8x -> ~2.5-4x.
+**A1 done (2026-11-11; the coordinator accepted the recommendation).** The
+session hosts lease the valid machinery's `vs`/`cb` (step-local) per isolate /
+thread / wasm instance instead of 512 words / 1 KiB per session: JS
+`withValidBuffers` (`vm-session.mjs`, used by `VmSession` and the sequence
+backend; a re-entered step takes fresh buffers), Rust `session_step` over a
+thread-local pair (`Session` and `Sequence` lose their own; `session_step` no
+longer takes `vs`/`cb`), wasm SDK `svs`/`scb` in its state (D300). Real host,
+fresh session per call: maps `rev` 84.3 -> 40.2 ms, map-heavy `rev` 130.1 ->
+57.2 ms; deterministic and indefinite input unchanged. The rest of the gap is
+S, still grown once per session for the copy's events -- follow-ups **A2**
+(size `vs`, `cb` and S in one round from a scanner count, `vbuild`: after the
+PEG merge) and **A3** (a per-Program S size hint in the hosts). E waits for
+PEG phase 2. Gates and numbers: bench/D286-analysis.md "Implementation log".
 
 ### D287 — Bundle growth for `Simple` values (D284; R9 per D200)
 **Decision** (D284's engineer, provisional): no cap changes; every entry stays

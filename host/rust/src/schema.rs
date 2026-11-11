@@ -83,11 +83,17 @@ impl Program {
         &self.b
     }
     /// One `vms-step` of a session on this Program, through its bound extension controls.
+    /// P8.4 (D266): with the valid machinery's buffers, which are the thread's (D286: step-local, so one pair
+    /// serves every session; grown here on VMS_GROW and kept), `s` and `ka` grown keeping their contents.
+    pub fn session_step(&self, w: &[u8], s: &mut Vec<i32>, ss: &mut [i32], ka: &mut Vec<u8>, out: &mut [i32], base: i32) -> i32 {
+        let (mut vs, mut cb) = valid_take();
+        let r = self.session_step_v(w, s, ss, ka, out, base, &mut vs, &mut cb);
+        valid_put(vs, cb);
+        r
+    }
     #[allow(clippy::too_many_arguments)]
-    /// P8.4 (D266): with the valid machinery's buffers `vs` and `cb`, grown here on VMS_GROW (as `s` and `ka`,
-    /// keeping their contents).
-    pub fn session_step(&self, w: &[u8], s: &mut Vec<i32>, ss: &mut [i32], ka: &mut Vec<u8>, out: &mut [i32], base: i32,
-                        vs: &mut Vec<i32>, cb: &mut Vec<u8>) -> i32 {
+    fn session_step_v(&self, w: &[u8], s: &mut Vec<i32>, ss: &mut [i32], ka: &mut Vec<u8>, out: &mut [i32], base: i32,
+                      vs: &mut Vec<i32>, cb: &mut Vec<u8>) -> i32 {
         let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
         loop {
             let r = match &self.ext {
@@ -131,6 +137,28 @@ impl Program {
             _ => format!("-{}", arg as u128 + 1),
         }
     }
+}
+
+// D286: the session's valid-machinery buffers (the scanner's options and scratch, the canonical buffer) are
+// step-local -- nothing in them outlives one vms-step-v call -- so one pair per thread serves every session and
+// sequence step, grown on VMS_GROW and kept: a fresh session no longer regrows them from 512 words / 1 KiB,
+// rerunning a whole item's scanner pass and copy on every growth. A re-entered step (an extension predicate
+// stepping another session) finds the slot empty and takes fresh buffers.
+thread_local! {
+    static VALID_BUFS: std::cell::RefCell<(Vec<i32>, Vec<u8>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+fn valid_take() -> (Vec<i32>, Vec<u8>) {
+    let (mut vs, mut cb) = VALID_BUFS.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    if vs.len() < 512 { vs = vec![0; 512]; }
+    if cb.len() < 1024 { cb = vec![0; 1024]; }
+    (vs, cb)
+}
+fn valid_put(vs: Vec<i32>, cb: Vec<u8>) {
+    VALID_BUFS.with(|c| {
+        let mut g = c.borrow_mut();
+        if vs.len() > g.0.len() { g.0 = vs; }
+        if cb.len() > g.1.len() { g.1 = cb; }
+    });
 }
 
 /// The VM's scratch: one per validating thread or context, reused across
@@ -360,8 +388,6 @@ pub struct Session<'p> {
     ss: Vec<i32>,
     ka: Vec<u8>,
     out: Vec<i32>,
-    vs: Vec<i32>,
-    cb: Vec<u8>,
     done: Option<Result<(), Failure>>,
 }
 
@@ -377,7 +403,7 @@ impl<'p> Session<'p> {
         let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
         let c = vms_init(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
         assert!(c >= 0, "snug: vms-init answered {} for a verified Program", c);
-        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], vs: vec![0i32; 512], cb: vec![0u8; 1024], done: None }
+        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
     }
     /// D085: a session over a message of UNKNOWN length (drain mode). Step it as a
     /// known-length one; [`Step::Held`] is a verdict waiting for the end; call
@@ -393,7 +419,7 @@ impl<'p> Session<'p> {
         let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
         let c = vms_init_unknown(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
         assert!(c >= 0, "snug: vms-init-unknown answered {} for a verified Program", c);
-        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], vs: vec![0i32; 512], cb: vec![0u8; 1024], done: None }
+        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
     }
     /// The input limit of an unknown-length session: more bytes than this is `too_large`.
     pub fn limit(&self) -> usize {
@@ -420,27 +446,7 @@ impl<'p> Session<'p> {
         if let Some(d) = &self.done {
             return Step::Done(d.clone());
         }
-        let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
-        let r = loop {
-            let r = match &self.prog.ext {
-                Some(x) => {
-                    let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
-                    vms_step_v(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base, &f,
-                               &mut self.vs, &mut self.cb)
-                }
-                None => vms_step_v(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base,
-                                   &none, &mut self.vs, &mut self.cb),
-            };
-            if r != VMS_GROW {
-                break r;
-            }
-            // P8.4 (D266): a whole item's canonical path or a map's kept keys need more room
-            let (w, nb, sw, aw) = (vms_grow_words(&self.ss), vms_grow_bytes(&self.ss), vms_grow_scratch(&self.ss), vms_grow_arena(&self.ss));
-            if w as usize > self.vs.len() { self.vs = vec![0; (w as usize).max(2 * self.vs.len())]; }
-            if nb as usize > self.cb.len() { self.cb = vec![0; (nb as usize).max(2 * self.cb.len())]; }
-            if sw as usize > self.s.len() { self.s.resize(sw as usize, 0); }
-            if aw as usize > self.ka.len() { self.ka.resize(aw as usize, 0); }
-        };
+        let r = self.prog.session_step(window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base);
         if r == VMS_NEED {
             return Step::Need { offset: vms_need_offset(&self.ss), len: vms_need_length(&self.ss), keep: vms_keep(&self.ss) };
         }

@@ -94,9 +94,7 @@ fn ext_call(pr: &Prog, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32,
 enum Sess {
     Scan { o: [i32; 16], s: Vec<i32>, w: Vec<u8> },
     /// rule and lim: kept for `sdk_vs_reseq` (a sequence session re-inits per message, P7.13w).
-    /// vs, cb: the valid machinery's buffers (P8.4, D266), grown on VMS_GROW.
-    Vm { prog: usize, rule: i32, lim: [i32; 10], s: Vec<i32>, ss: Vec<i32>, ka: Vec<u8>, out: Vec<i32>, w: Vec<u8>,
-         vs: Vec<i32>, cb: Vec<u8> },
+    Vm { prog: usize, rule: i32, lim: [i32; 10], s: Vec<i32>, ss: Vec<i32>, ka: Vec<u8>, out: Vec<i32>, w: Vec<u8> },
 }
 
 struct State {
@@ -104,6 +102,10 @@ struct State {
     /// last canonical copy (`sdk_copy`): decode, views and schema.decode build from it
     vs: Vec<i32>,
     cb: Vec<u8>,
+    /// D286: the sessions' valid machinery buffers (P8.4, D266): step-local, so one pair serves every session,
+    /// grown on VMS_GROW and kept (a fresh session no longer regrows them, rerunning a whole item's copy)
+    svs: Vec<i32>,
+    scb: Vec<u8>,
     copy: Vec<u8>,
     input: Vec<u8>,
     kbuf: Vec<u8>,
@@ -137,6 +139,8 @@ fn st() -> &'static mut State {
     s.get_or_insert_with(|| State {
         vs: vec![0; 512],
         cb: vec![0; 1024],
+        svs: vec![0; 512],
+        scb: vec![0; 1024],
         copy: Vec::new(),
         input: Vec::new(),
         kbuf: Vec::new(),
@@ -602,7 +606,7 @@ pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: 
         c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
     }
     if c < 0 { return -2; }
-    put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new(), vs: vec![0; 512], cb: vec![0; 1024] })
+    put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
 }
 /// P7.13w (D212): the next message of a sequence session -- vms-init-seq again on
 /// its arrays, with its rule and limit words; the window buffer is kept. 0, or a
@@ -641,6 +645,7 @@ pub extern "C" fn sdk_ses_step_at(h: usize, off: usize, n: usize, base: i32) -> 
 fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
     let st = st();
     let progs = &st.progs;
+    let (vs, cb) = (&mut st.svs, &mut st.scb);
     match st.sessions.get_mut(h) {
         Some(Some(Sess::Scan { o, s, w })) => {
             let r = rscan_step(&w[off..off + n], o, s, 0, base);
@@ -650,7 +655,7 @@ fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
             st.info[3] = error_offset(o);
             r
         }
-        Some(Some(Sess::Vm { prog, s, ss, ka, out, w, vs, cb, .. })) => {
+        Some(Some(Sess::Vm { prog, s, ss, ka, out, w, .. })) => {
             let pr = match progs.get(*prog) { Some(Some(pr)) => pr, _ => return -100 };
             let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
             // P8.4 (D266): the valid machinery, its buffers grown on VMS_GROW (S and the arena keep their contents)

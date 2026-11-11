@@ -255,3 +255,37 @@ the 23× → session = buffer); A2 on top of the PEG merge (touches `vbuild`).
 PEG (no shared files), gated by `valid-test`, `vmsession-test` and
 `sequence-test`. (3) D after B/C, also PEG-independent. (4) E only after PEG
 phase 2, if the remaining unsorted-map cost still matters.
+
+## Implementation log
+
+### A1 — sessions lease the valid buffers (2026-11-11, on `1db9ed9`)
+
+JS `VmSession` and the sequence backend take `vs`/`cb` from one pair per isolate
+(`withValidBuffers`, `host/js/src/vm-session.mjs`; a step re-entered from an
+extension predicate gets fresh ones); Rust sessions and sequences from one pair
+per thread (`session_step`, `host/rust/src/schema.rs`); the wasm SDK from one
+pair in its state (`svs`/`scb`, `host/wasm/src/sdk.rs`). S and the key arena
+stay per session. Measured through the real host (`new VmSession(...)` and one
+whole-window `step` per call, `.cache/d286impl/bench/d286/host-sess.mjs`, three
+rotated rounds, median µs, same machine, load ~20–30):
+
+| | base (`47a5f06`) | A1 | |
+| --- | ---: | ---: | ---: |
+| 2000 maps `det` | 5,504 | 5,258 | 1.0× |
+| 2000 maps `rev` | 84,348 | 40,208 | **2.1×** |
+| 2000 maps `ind` | 14,371 | 14,143 | 1.0× |
+| map-heavy `det` | 11,237 | 11,544 | 1.0× |
+| map-heavy `rev` | 130,051 | 57,229 | **2.3×** |
+| map-heavy `ind` | 26,877 | 25,378 | 1.0× |
+
+Less than the 3.3–3.6× of the analysis harness, which also kept S: a session's
+S still grows once per session for the copy's events (one more pass over the
+item). That round goes with A2 (S sized with `vs` in one round, after the PEG
+merge) plus a per-Program S size hint in the hosts (A3, host-only; follow-up).
+Gates (on `47a5f06` + A1, the session harness scribbling `vs`/`cb` between
+steps to prove them step-local): vmsession-test (999,880 sessions == buffer,
+564,188 unknown-length streams, JS == Rust, hosts) ok, sequence-test (650,037
+runs) ok, valid-test ok (cbor2 differential run: 0 unexplained), vm-test,
+scan-test, rscan-test, drift, rust-api-test (clippy), wasm-sdk-test 14/14, npm
+1,438/1,438, size ok; re-run on `1db9ed9` + A1: npm 1,449/1,449, valid-test,
+rust-api-test ok.

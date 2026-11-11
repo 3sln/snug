@@ -223,8 +223,6 @@ pub struct Sequence<'p> {
     ss: Vec<i32>,
     ka: Vec<u8>,
     out: Vec<i32>,
-    vs: Vec<i32>,
-    cb: Vec<u8>,
     skip: bool,
     fail_fast: bool,
     delivered: u64,
@@ -278,8 +276,6 @@ impl<'p> Sequence<'p> {
             ss: vec![0i32; vms_words(p).max(0) as usize],
             ka: vec![0u8; vms_arena(p, &lim, total).max(0) as usize],
             out: vec![0i32; 8 + 2 * 257],
-            vs: vec![0i32; 512],
-            cb: vec![0u8; 1024],
             skip: options.on_invalid == OnInvalid::Skip,
             fail_fast: options.fail_fast,
             delivered: 0,
@@ -450,7 +446,7 @@ impl<'p> Sequence<'p> {
         let end = self.end.min((self.delivered - o) as i64);
         if self.dropping || self.held {
             self.asserted = end;
-            return self.prog.session_step(&[], &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, end as i32, &mut self.vs, &mut self.cb);
+            return self.prog.session_step(&[], &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, end as i32);
         }
         let at = i64::from(self.at);
         if let Some(ch) = c {
@@ -459,7 +455,7 @@ impl<'p> Sequence<'p> {
                 let to = ((o as i64 + end) as u64).saturating_sub(ch.base).min(ch.bytes.len() as u64) as usize;
                 let w = &ch.bytes[from..to.max(from)];
                 self.asserted = at + w.len() as i64;
-                return self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at, &mut self.vs, &mut self.cb);
+                return self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at);
             }
             if (self.mlen() as i64) < end {
                 // a piece that starts in the assembly and continues in the chunk: extend it that far
@@ -471,7 +467,7 @@ impl<'p> Sequence<'p> {
         let lo = (at as usize).min(to);
         let w = &self.mb[self.mb_at + lo..self.mb_at + to];
         self.asserted = to as i64;
-        self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at, &mut self.vs, &mut self.cb)
+        self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at)
     }
 
     fn eof(&mut self) -> i32 {

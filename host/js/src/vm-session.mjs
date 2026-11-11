@@ -8,6 +8,29 @@ import { limitWords } from './schema-core.mjs';
 // ---------------------------------------------------------------- sessions
 const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68, VMS_GROW = -69;
 const noExt = () => -2;
+
+// ---------------------------------------------------------------- the valid machinery's buffers (D286)
+// vs (the scanner's options and scratch) and cb (the canonical buffer) are step-local: nothing in them outlives
+// one vms-step-v call (kept keys live in the session's arena, a copy's events are copied into S). One pair per
+// isolate, grown on VMS_GROW and kept, serves every session and sequence step, as the buffer driver's lease
+// does (schema-core.mjs): a fresh session no longer regrows them from 512 words / 1 KiB, rerunning a whole
+// item's scanner pass and copy on every growth. A step re-entered from an extension predicate takes fresh ones.
+let validVs = new Int32Array(512), validCb = new Uint8Array(1024), validLeased = false;
+/** Run step(vs, cb, grow) with the isolate's valid buffers; grow(w, nb) answers the grown pair. */
+export function withValidBuffers(step) {
+  const own = !validLeased;
+  let vs = own ? validVs : new Int32Array(512), cb = own ? validCb : new Uint8Array(1024);
+  if (own) validLeased = true;
+  try {
+    return step(() => vs, () => cb, (w, nb) => {
+      if (w > vs.length) vs = new Int32Array(Math.max(w, 2 * vs.length));
+      if (nb > cb.length) cb = new Uint8Array(Math.max(nb, 2 * cb.length));
+    });
+  } finally {
+    if (own) { validVs = vs; validCb = cb; validLeased = false; }
+  }
+}
+
 /** One resumable validation (P6.2, D027): the kin session over windows of a message of
  *  a declared length. It owns its scratch, session array and key arena from start to
  *  verdict (§17.1 W9: interleaved async sessions never share state); the Program is
@@ -39,8 +62,6 @@ export class VmSession {
     }
     if (c < 0) throw new Error(`snug: vms-init answered ${c}`);
     this.busy = false; this.verdict = null;
-    // P8.4 (D266): the valid machinery's buffers (a whole item's canonical path), grown on VMS_GROW
-    this.vs = new Int32Array(512); this.cb = new Uint8Array(1024);
   }
   /** D085, an unknown-length session: the message ended after `n` bytes (or passed the
    *  input limit `limit`: any n above it). Answers {state: 'done', result}, or
@@ -57,7 +78,7 @@ export class VmSession {
     return this.verdict;
   }
   /** Bytes this session holds beyond the Program (its exclusive arrays). */
-  get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length + this.vs.length) + this.ka.length + this.cb.length; }
+  get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length) + this.ka.length; }
   step(window, base) {
     if (this.verdict) return this.verdict;
     if (this.dead) throw this.dead;
@@ -67,15 +88,16 @@ export class VmSession {
     let r;
     const x = this.program.ext;
     try {
-      for (;;) {
-        r = vmsStepV(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x ? x.call : noExt, this.vs, this.cb);
-        if (r !== VMS_GROW) break;
-        const w = vmsGrowWords(this.ss), nb = vmsGrowBytes(this.ss), sw = vmsGrowScratch(this.ss), aw = vmsGrowArena(this.ss);
-        if (w > this.vs.length) this.vs = new Int32Array(Math.max(w, 2 * this.vs.length));
-        if (nb > this.cb.length) this.cb = new Uint8Array(Math.max(nb, 2 * this.cb.length));
-        if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.s = g; }
-        if (aw > this.ka.length) { const g = new Uint8Array(aw); g.set(this.ka); this.ka = g; }
-      }
+      r = withValidBuffers((vs, cb, grow) => {
+        for (;;) {
+          const c = vmsStepV(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x ? x.call : noExt, vs(), cb());
+          if (c !== VMS_GROW) return c;
+          grow(vmsGrowWords(this.ss), vmsGrowBytes(this.ss));
+          const sw = vmsGrowScratch(this.ss), aw = vmsGrowArena(this.ss);
+          if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.s = g; }
+          if (aw > this.ka.length) { const g = new Uint8Array(aw); g.set(this.ka); this.ka = g; }
+        }
+      });
     } finally { this.busy = false; }
     // a predicate that threw voids the session (its walk went on with a false verdict)
     try { rethrow(x); } catch (e) { this.dead = e; throw e; }
