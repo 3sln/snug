@@ -25,7 +25,7 @@ const BINDLE_FLAGS = 0;
 if (PF_DETERMINISTIC !== 122 || PF_VALID !== 256 || PF_VALID_PRESET !== 378) throw new Error('snug: profile flags out of step with kin');
 
 // The preset when `wire` is not given (D267).
-export const DEFAULT_WIRE = 'deterministic';
+export const DEFAULT_WIRE = 'valid';
 function presetOf(options) {
   const p = options.wire ?? DEFAULT_WIRE;
   if (p === 'valid') return profiles.valid;

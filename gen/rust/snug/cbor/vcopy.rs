@@ -1145,25 +1145,35 @@ pub(crate) fn map_seq_p(s: &[u8], c: &[u8], o: &mut [i32], ss: i32, cs: i32, ce:
     }
     return sc;
 }
-pub fn vmap(_b: &[u8], cb: &[u8], o: &mut [i32], start: i32, x: i32) -> i32 {
+pub fn vmap(b: &[u8], cb: &[u8], o: &mut [i32], start: i32, x: i32) -> i32 {
     // A position of the canonical copy (or of an embedded copy) mapped back to
     // the input b, whose item starts at start (events sorted).
+    return vmap_x(b, cb, o, start, x, 0);
+}
+pub(crate) fn vmap_x(_b: &[u8], cb: &[u8], o: &mut [i32], start: i32, x: i32, src: i32) -> i32 {
+    // vmap; src != 0: x is a SOURCE position (an embedded region's source is
+    // the copy holding its byte string), so a position at the end of a
+    // region's content belongs to that region, not to an embedded copy that
+    // starts there -- as every position mapped out of an embedded copy is.
     let n: i32 = o[(O_S_CBASE) as usize];
     let ne: i32 = o[(O_S_NEV) as usize];
     let mut y: i32 = x;
+    let mut strict: i32 = src;
     let mut guard: i32 = 0;
     while guard < 64 {
         guard += 1;
         let mut hit: i32 = -1;
         for i in 0..ne {
             let e: i32 = O_S_FIRST + (EV_WORDS * i);
-            if (o[(e + 1) as usize] == EV_EMB) && ((y >= o[(e + 3) as usize]) && (y < o[(e + 4) as usize])) {
+            let cs: i32 = o[(e + 3) as usize];
+            if (o[(e + 1) as usize] == EV_EMB) && (((y > cs) || ((y == cs) && (strict == 0))) && (y < o[(e + 4) as usize])) {
                 hit = e;
             }
         }
         if hit < 0 {
             break;
         }
+        strict = 1;
         y = map_seq_p(cb, cb, o, o[(hit) as usize], o[(hit + 3) as usize], o[(hit + 4) as usize], y, o[(hit + 5) as usize]);
     }
     if y < n {
@@ -1189,5 +1199,5 @@ pub fn vsource(b: &[u8], cb: &[u8], o: &mut [i32], start: i32, x: i32) -> i32 {
     if x <= o[(O_S_CBASE) as usize] {
         return start + x;
     }
-    return vmap(b, cb, o, start, x);
+    return vmap_x(b, cb, o, start, x, 1);
 }

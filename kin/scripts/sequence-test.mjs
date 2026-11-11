@@ -220,7 +220,7 @@ function hostProgram(pi) {
   }
   return hostPrograms.get(pi);
 }
-const FLAG_OPTS = f => ({ keys: ['text', 'integer', 'any', 'any'][f & 3], tags: ['bindle', 'standard', 'any', 'any'][(f >> 2) & 3],
+const FLAG_OPTS = f => ({ wire: f & 256 ? 'valid' : 'deterministic', keys: ['text', 'integer', 'any', 'any'][f & 3], tags: ['bindle', 'standard', 'any', 'any'][(f >> 2) & 3],
   floats: f & 16 ? 'deterministic' : 'bindle', undefinedValue: (f & 32) !== 0, noncharacters: (f & 64) !== 0 });
 /** The oracle's lines in host rendering, `borrowed(o, len)` telling whether a message lies in one chunk. */
 function hostWant(hp, oracleLines, borrowed) {

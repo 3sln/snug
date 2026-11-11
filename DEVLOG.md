@@ -4866,6 +4866,15 @@ are answered as provisional decisions D082–D085. None is open now.
   needed. The native JS/Rust tests and `bb sequence-test` already cover the
   case (5365939); the SDK shares the native driver.
 
+**Open as of 2026-11-11 (P8.4):**
+
+- [ ] **D284 — unassigned simple values under `valid`.** RFC 8949's unassigned
+  simple values (`f0`–`f3`, `f8 20`–`f8 ff`) are valid CBOR; snug refuses them
+  under every preset (`simple`) because its value model has no value for them.
+  Admit them under `valid` with a `Simple(n)` value class (decode, views,
+  encode, the VM's `#7.n`)? The RFC vectors and the cbor2 differential record
+  the difference as a documented class until then.
+
 ## Phase 7 — Standalone library (D080, 2026-11-03)
 
 - [x] **P7.1 — General default profile** (D081): key kinds, standard tag set,
@@ -6488,7 +6497,7 @@ authorised), the existing gate set, and conformance-corpus vectors.
   runtime entries; changes to source-key construction also require updating
   embedded compiled constants. Wall-clock fuzz thresholds require a quiet
   host even when semantic outcomes and charged work are unchanged.
-- [ ] **P8.4 — Valid-CBOR default** (audit ranks 5 and 9; D230): a `valid`
+- [x] **P8.4 — Valid-CBOR default** (audit ranks 5 and 9; D230): a `valid`
   wire preset as the default — indefinite lengths, non-shortest heads and
   floats, unsorted keys, NaN payloads, decimal/typed-array/ndarray/tag-55799
   application rules moved out of the general policy; duplicate keys by value
@@ -6560,6 +6569,46 @@ authorised), the existing gate set, and conformance-corpus vectors.
     crate-diff (its native oracle binary is absent here). proptest P1/P2
     show the same five signatures on main (2-minute runs; the oracle
     predates the deterministic default) -- not P8.4's.
+  - 2026-11-11 increment 2 (*P8.4 done*): the default is `wire: 'valid'` —
+    JS `DEFAULT_WIRE`, Rust `Profile::default()` and the `Default` of
+    `DecodeOptions`, `EncodeOptions`, `ValidationOptions`, `SequenceOptions`
+    and `schema::Options` (`DecodeOptions::deterministic()` now selects the
+    deterministic preset; new `DecodeOptions::valid()`); the wasm SDK follows
+    the JS option resolution. Encoded bytes are unchanged. Docs: profiles.md
+    (three presets, "Valid CBOR" section, option table, flags), scanner.md
+    (the `PF_VALID` walk), guide.md, api.md, rust.md, host/rust/README.md,
+    cddl-support.md, README (the "Can it read my protocol?" table), SPEC §1.1
+    and §3, program.md §14 ("Valid CBOR input"), a superseded-default note
+    on conformance.md. Value fixes found with the flip: a bignum (tags 2/3)
+    holding a safe integer decodes to a number (D123's integer rule); the JS
+    encoder writes `Tagged` tag 4/40 values (decimal fractions and ndarrays
+    outside `Decimal`/`NDArray`'s invariants) above the Bindle tag set, their
+    content checked by the scanner, and typed float arrays with NaN above the
+    Bindle tag set (D265), so every value the default decodes re-encodes.
+    Engine fix: a replayed refusal's source position at a region's end is the
+    region's, not the embedded copy starting there (`vmap-x`; an embedded
+    map cut short at a key reported the content's start; valid-test
+    regression). Tests and examples now name `wire: 'deterministic'` where they
+    meant it. `tools/proptest` (P1/P2): the profile-precedence check uses
+    snug's own scanner under the call's options; the oracle (a
+    deterministic-data arbiter) is held to `wire: 'deterministic'`
+    verdicts; cbor.mjs is held to `wire: 'bindle'`; the default is held to
+    properties (a superset of Bindle acceptance with the same values, values
+    re-encode and decode to themselves, entry points agree). The five
+    signatures known on main are gone; a 3-minute campaign of properties
+    1–5 on this increment found none (P1 76,529, P2 89,973, P3 38,257, P4
+    34,955, P5 30,589 cases; 0 failure signatures). The wasm SDK's own encoder
+    got the same Tagged 4/40 and typed-NaN changes (`host/wasm-sdk/src/
+    encode.mjs`, D300). Gates on this increment: drift, check, scan-test,
+    rscan-test, vm-test, vmsession-test (999,880 session runs == buffer),
+    sequence-test (635,945 oracle runs), valid-test (regressions 103/103),
+    wasm-sdk-test 14/14, nav-test, write-test, compile-test, unicode-test,
+    rust-api-test, compile-fuzz, host/js npm test 1,438/1,438, bb size
+    (within D285's caps; runtime 53,424 gzip): all ok. For the PEG
+    engineer (p85-peg): this increment touches host option defaults (JS
+    profiles.mjs, Rust decode/encode/api/sequence/schema Default impls),
+    the JS writer, build.mjs, kin/vcopy.kin (`vmap-x`), tests, docs and
+    tools/proptest; no `host/wasm/src/sdk.rs` change; rebase onto it.
 - [ ] **P8.5 — CDDL coverage, rescoped by D270 (PEG group semantics)** (audit ranks 6, 7, 10; D230): budget-metered
   general map assignment where D011 cannot prove greedy exact (bounded
   search / bipartite matching), coupled and non-interval group repetitions,

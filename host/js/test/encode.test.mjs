@@ -165,7 +165,7 @@ test('Float16Bytes fallback with native Float16Array absent at module initializa
     assert.equal(value.length, 2);
     assert.deepStrictEqual(value.bytes, new Uint8Array([0, 0x3c, 0, 0xbc]));
     assert.deepStrictEqual(encode(value), bytes);
-    assert.throws(() => encode(new Float16Bytes(new Uint8Array([0, 0x7e]))), { code: 'typed_array' });
+    assert.throws(() => encode(new Float16Bytes(new Uint8Array([0, 0x7e])), { tags: 'bindle' }), { code: 'typed_array' });
   `], { encoding: 'utf8' });
   assert.equal(child.status, 0, child.stderr);
 });

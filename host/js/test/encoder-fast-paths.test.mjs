@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { encode } from '../src/encode.mjs';
+import { decode } from '../src/index.mjs';
 import { Writer } from '../src/writer.mjs';
 import { profiles } from '../src/profiles.mjs';
 import { Float16Bytes } from '../src/values.mjs';
@@ -138,7 +139,9 @@ test('typed and byte-string bulk copies respect subarray offsets and ownership',
     assert.deepStrictEqual(encode(a), frozenEncode(a));
     for (const i of [0, a.length - 1]) {
       const b = a.slice(); b[i] = NaN;
-      assert.throws(() => encode(b), { code: 'typed_array' });
+      // the NaN rule is the Bindle tag set's (D265); above it the array is written as it is
+      assert.throws(() => encode(b, { tags: 'bindle' }), { code: 'typed_array' });
+      assert.ok(Number.isNaN(decode(encode(b))[i]));
     }
     const decorated = new C([NaN]);
     Object.defineProperty(decorated, 'length', { value: 0 });
@@ -197,7 +200,8 @@ test('Float16Bytes stays little-endian and retains NaN refusals', () => {
   copyTypedBytes(out, 0, raw, 2, true);
   assert.deepStrictEqual(out, raw);
   for (const h of [0x7c01, 0x7e00, 0xfc01, 0xffff]) {
-    assert.throws(() => encode(new Float16Bytes(Uint8Array.of(h & 255, h >> 8))), { code: 'typed_array' });
+    assert.throws(() => encode(new Float16Bytes(Uint8Array.of(h & 255, h >> 8)), { tags: 'bindle' }), { code: 'typed_array' });
+    assert.equal(encode(new Float16Bytes(Uint8Array.of(h & 255, h >> 8))).length, 5);  // D265: written above the Bindle set
   }
 });
 

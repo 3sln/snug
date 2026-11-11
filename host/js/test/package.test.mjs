@@ -46,9 +46,13 @@ test('public error contract: safe compile failures, results, codec/schema/view f
     assert.equal(e.reason, result.reason); assert.deepEqual(e.path, result.path);
     assert.ok(!e.message.includes('private-secret')); return true;
   });
-  const malformed = Uint8Array.of(0xbf, 0xff);
+  const malformed = Uint8Array.of(0xbf, 0x61);   // an indefinite-length map cut short: not well-formed
   for (const f of [() => decode(malformed), () => s.decode(malformed, 'r'),
     () => view(malformed), () => view(malformed, { schema: s, rule: 'r' })])
+    assert.throws(f, e => e instanceof SnugFault && e.code === 'truncated');
+  const indefinite = Uint8Array.of(0xbf, 0xff);  // valid CBOR, refused by the deterministic preset
+  for (const f of [() => decode(indefinite, { wire: 'deterministic' }), () => s.decode(indefinite, 'r', { wire: 'deterministic' }),
+    () => view(indefinite, { wire: 'deterministic' }), () => view(indefinite, { schema: s, rule: 'r', wire: 'deterministic' })])
     assert.throws(f, e => e instanceof SnugFault && e.code === 'indefinite');
   assert.throws(() => s.validate(bytes, 'private-secret-rule'), e =>
     e instanceof TypeError && !e.message.includes('private-secret'));

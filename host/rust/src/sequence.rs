@@ -76,7 +76,7 @@ pub struct SequenceOptions {
     pub top: Top,
     /// Permit safe integer labels in each message's top-level map.
     pub cose: bool,
-    /// The wire profile (default: the deterministic preset).
+    /// The wire profile (default: the valid preset, D267).
     pub profile: Profile,
     /// The largest message, in bytes (P): a message that does not end within it is `too_large`.
     pub max_message_bytes: Option<u32>,
@@ -102,7 +102,7 @@ impl Default for SequenceOptions {
         Self {
             top: Top::Any,
             cose: false,
-            profile: Profile::DETERMINISTIC,
+            profile: Profile::VALID,
             max_message_bytes: None,
             max_depth: None,
             max_entries: None,

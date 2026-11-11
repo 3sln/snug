@@ -1,17 +1,18 @@
 # snug — SPECIFICATION
 
-A standalone, MIT-licensed CDDL (RFC 8610) validator and a strict deterministic
-CBOR (RFC 8949 §4.2.1) library, written once in kin and generated into
+A standalone, MIT-licensed CDDL (RFC 8610) validator and CBOR (RFC 8949)
+library — any valid CBOR read by default, deterministic CBOR (§4.2.1) checked
+on request and always written — written once in kin and generated into
 JavaScript and Rust. Sound map and choice matching, one validation pass over
 the bytes, bounded time and memory, errors
 that never echo the payload.
 
-Status: **experimental implementation, updated 2026-11-03**. The generated
+Status: **experimental implementation, updated 2026-11-11**. The generated
 compiler, verifier, scanner and buffer VM work, with JS codec, schema API,
 checked views/cursor, Writer, source adapters (profile and schema) and serialised
 Programs. Rust/wasm core and test hosts exist; public host coverage is less
-complete. The deterministic and Bindle wire presets (P7.1) are implemented
-in JS and Rust, as are extension controls (P7.2) and unknown-length streams in
+complete. The valid (default, P8.4), deterministic and Bindle wire presets
+are implemented in JS, Rust and the wasm SDK, as are extension controls (P7.2) and unknown-length streams in
 drain mode (D085). Current package evidence in browsers/Workers and the bundle
 size target remain work in progress. See the [feature matrix](README.md#features-and-status).
 `DEVLOG.md` is the live tracker; this file is what the tracker derives from
@@ -53,9 +54,9 @@ loading through a versioned, hashed and structurally verified container
 ### 1.1 What snug is not
 
 * Not a JSON validator. CDDL over JSON is out of scope (revision 1).
-* Not (yet) a general CBOR decoder: no current mode accepts valid
-  non-deterministic CBOR (§3); D230/P8.4 will make that the default. It will
-  never accept invalid CBOR (duplicate keys, malformed UTF-8 or items).
+* Not a lenient CBOR decoder: the default accepts valid CBOR, never invalid
+  CBOR (duplicate keys by value, malformed UTF-8 or items, invalid content of
+  known tags), §3.
 * Not a code generator for CDDL types.
 * Not a complete RFC 8610 implementation: `.pcre`, `.abnf`, `.abnfb`,
   and unsupported regexp constructs are refused (D013, D242–D243), and maps the
@@ -87,19 +88,22 @@ these precise choices (each with a decision):
 
 ## 3. The CBOR profile
 
-Every path verifies RFC 8949 §4.2.1 core deterministic encoding on decode
-(definite lengths, shortest arguments and floats, bytewise encoded-key order,
-no duplicates, one root) and produces only that. **The current default
-therefore refuses valid but non-deterministic CBOR** — indefinite lengths,
-non-shortest heads or floats, unsorted map keys, NaN payloads — even against
-`any`; such input is valid RFC 8949 CBOR, and the refusal is a scope limit,
-not a validity verdict. Owner direction D230 makes general valid-CBOR
-acceptance the default, keeping deterministic checking as an option (Phase 8,
-P8.4); it is not implemented yet. A wire profile narrows
-acceptance further; every option only removes acceptance (D081, D120). Two
-presets (P7.1):
+Every path reads **valid CBOR** (RFC 8949 §5.3) by default and the encoders
+produce only RFC 8949 §4.2.1 core deterministic bytes (D260). A wire profile
+selects what is accepted (D081, D120, D260). Three presets:
 
-* **`deterministic`** (default): any map key kind; **any tag number**
+* **`valid`** (default, P8.4): any well-formed, valid CBOR — indefinite
+  lengths, non-shortest heads and floats, keys in any order, NaN payloads —
+  with the `deterministic` preset's other options. Refused: duplicate map keys
+  compared by value (their canonical encodings, §5.6.1), invalid UTF-8,
+  invalid content of the tags snug knows, unassigned simple values (no value
+  in snug's model, D284), `f8` below 32 and everything not well-formed.
+  Non-deterministic input is read through its canonical copy (views, decode)
+  and validated by the schema VM over that copy with the input's refusals
+  replayed at their own positions (D262, D264, D280).
+* **`deterministic`**: verifies RFC 8949 §4.2.1 on decode (definite lengths,
+  shortest arguments and floats, bytewise encoded-key order, no duplicates,
+  one root). Any map key kind; **any tag number**
   except the invalid 65535, 2³²−1 and 2⁶⁴−1 (`tags: 'any'`, D180;
   `tags: 'standard'` keeps the former set of 2, 3, 4, 40, the RFC 8746
   little-endian typed arrays and 0, 1, 21–24, 32, 55799). Known tags have
@@ -115,14 +119,15 @@ presets (P7.1):
   and integral floats within ±(2^53−1) refused; no noncharacters. It is the
   pre-P7.1 behaviour bit for bit, and the 3sln.me vectors' arbiter.
 
-Both: bignums beyond 64 bits only (9..128 bytes, no leading zero),
-normalised decimal fractions, unassigned simple values refused; resource
+`deterministic` and `bindle`: bignums beyond 64 bits only (9..128 bytes,
+no leading zero); `bindle` also normalised decimal fractions and its typed-
+array and ndarray rules (D265). All three refuse unassigned simple values; resource
 bounds are defaults (§5). Refusal codes retain the imported vector
 vocabulary. Programs do not depend on the wire profile: it is a run-time
 option of each call. Compiler profiles are a separate axis. See
 [profiles](docs/profiles.md). The Bindle test input and its
 [consumer checklist](docs/profiles/bindle.md) do not define snug's product
-scope. Codec/view/source default to the preset's root (any for
+scope. Codec/view/source default to the preset's root (any for valid and
 deterministic, a map for bindle); schema methods default to any root; all
 accept an explicit `top` option.
 

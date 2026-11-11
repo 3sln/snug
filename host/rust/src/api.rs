@@ -122,7 +122,7 @@ pub struct ValidationOptions {
     pub max_bignum_bytes: Option<u32>,
     /// VM work budget.
     pub budget: Option<u32>,
-    /// The wire profile (default: the deterministic preset).
+    /// The wire profile (default: the valid preset, D267).
     pub profile: crate::Profile,
 }
 impl Default for ValidationOptions {
@@ -130,7 +130,7 @@ impl Default for ValidationOptions {
         Self {
             top: Top::Any,
             cose: false,
-            profile: crate::Profile::DETERMINISTIC,
+            profile: crate::Profile::VALID,
             max_bytes: None,
             max_depth: None,
             max_entries: None,

@@ -10,7 +10,7 @@ use crate::snug::cbor::canon::dc_copy;
 use crate::snug::cbor::codes::{CODE_SCRATCH, VC_NONDET, VC_UNSORTED};
 use crate::{Error, Integer, TypedArray, Value};
 
-/// Permitted root shape. [`DecodeOptions::default`] (the deterministic preset)
+/// Permitted root shape. [`DecodeOptions::default`] (the valid preset)
 /// permits any item; [`DecodeOptions::bindle`] requires a map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Top {
@@ -49,8 +49,9 @@ pub enum Floats {
     /// RFC 8949 §4.2.1: shortest form only; the canonical NaN 0x7e00.
     Deterministic,
 }
-/// Wire profile options (D120). Every value only removes acceptance relative
-/// to RFC 8949 §4.2.1 core deterministic encoding; kin decides every byte.
+/// Wire profile options (D120, D260). The `valid` flag admits any valid CBOR
+/// (RFC 8949 §5.3); without it every value only removes acceptance relative to
+/// RFC 8949 §4.2.1 core deterministic encoding. kin decides every byte.
 ///
 /// ```
 /// use snug::{decode, DecodeOptions, Profile, Keys, Value};
@@ -126,7 +127,7 @@ impl Profile {
 }
 impl Default for Profile {
     fn default() -> Self {
-        Self::DETERMINISTIC
+        Self::VALID
     }
 }
 /// Resource limits. Depth is capped at 256, all counts/lengths at i32::MAX−1.
@@ -163,8 +164,10 @@ impl Limits {
         Ok(())
     }
 }
-/// Decode/profile options. The default is the deterministic preset with any
-/// root (D081); [`DecodeOptions::bindle`] is the Bindle profile with a map root.
+/// Decode/profile options. The default is the valid preset with any root
+/// (D260, D267): any well-formed valid CBOR; [`DecodeOptions::deterministic`]
+/// checks RFC 8949 §4.2.1; [`DecodeOptions::bindle`] is the Bindle profile with
+/// a map root.
 /// Root shape, COSE labels and limits stay independent settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeOptions {
@@ -183,7 +186,7 @@ impl Default for DecodeOptions {
             top: Top::Any,
             cose: false,
             limits: Limits::default(),
-            profile: Profile::DETERMINISTIC,
+            profile: Profile::VALID,
         }
     }
 }
@@ -196,11 +199,18 @@ impl DecodeOptions {
             ..Self::default()
         }
     }
-    /// The deterministic preset (the default; any root shape).
-    pub fn deterministic() -> Self {
+    /// The valid preset (the default; any root shape).
+    pub fn valid() -> Self {
         Self::default()
     }
-    /// The deterministic preset with any root shape (the default).
+    /// The deterministic preset (RFC 8949 §4.2.1 checking; any root shape).
+    pub fn deterministic() -> Self {
+        Self {
+            profile: Profile::DETERMINISTIC,
+            ..Self::default()
+        }
+    }
+    /// The default (the valid preset) with any root shape.
     pub fn any() -> Self {
         Self::default()
     }

@@ -1,9 +1,9 @@
 # snug
 
-snug is a standalone, MIT-licensed CDDL (RFC 8610) validator and strict
-deterministic CBOR (RFC 8949 §4.2.1) library. It validates bytes directly,
-offers checked views for reading selected fields, and encodes deterministic
-bytes from JavaScript values or typed Writer calls.
+snug is a standalone, MIT-licensed CDDL (RFC 8610) validator and CBOR
+(RFC 8949) library. It validates bytes directly, offers checked views for
+reading selected fields, and encodes deterministic bytes from JavaScript
+values or typed Writer calls.
 
 The compiler, validator, profile checks and byte-writing primitives are
 written in **kin** and generated into JavaScript and Rust; WebAssembly is
@@ -26,32 +26,33 @@ Why snug:
   deterministic encoding decisions, with cross-host conformance gates.
 
 **Experimental, private package, version 0.0.0.** The JS buffer APIs work.
-The default wire policy is the **deterministic preset** (P7.1, D081, D120):
-RFC 8949 §4.2.1 core deterministic CBOR, verified on read, with any map key
-kind, any tag number (the known tags content-checked, D180) and RFC floats.
-**It refuses valid but non-deterministic CBOR** (indefinite lengths,
-non-shortest heads or floats, unsorted keys), even against `any`: that is a
-scope limit of the current default, not an RFC validity verdict. Owner
-direction D230 makes valid-CBOR acceptance the default (P8.4, not yet
-implemented). The **Bindle** preset (`wire:
-'bindle'`) keeps the pre-P7.1 restrictions bit for bit; Bindle is one optional
-consumer profile in the standalone design (D080), not snug's purpose. See
-[profiles](docs/profiles.md) for every option.
+The default wire policy is the **valid preset** (P8.4, D260): any
+well-formed, valid CBOR (RFC 8949 §5.3) — indefinite lengths, non-shortest
+heads and floats, keys in any order — refusing duplicate keys by value,
+invalid UTF-8 and invalid content of the tags snug knows. `wire:
+'deterministic'` checks RFC 8949 §4.2.1 core deterministic encoding on read
+(for signing, hashing, dCBOR/CTAP2-style protocols); the **Bindle** preset
+(`wire: 'bindle'`) keeps the pre-P7.1 restrictions bit for bit — one optional
+consumer profile in the standalone design (D080), not snug's purpose. Encoders
+write deterministic bytes under every preset. See [profiles](docs/profiles.md)
+for every option.
 
 ### Can it read my protocol?
 
-| Your data | Deterministic preset (default) | `wire: 'bindle'` |
-| --- | --- | --- |
-| Producer emits shortest forms, definite lengths, keys sorted by encoded bytes (RFC 8949 §4.2.1 / CDE) | yes | yes |
-| Producer emits non-shortest heads or floats, indefinite lengths, unsorted or length-first-sorted keys | **no** yet: valid CBOR, refused by the current default; D230/P8.4 changes the default | no |
-| Integer map keys at any depth (COSE, CWT `cnf` holding a COSE_Key) | yes (decodes to `Map`) | no (`cose` admits safe integer labels in the top-level map only) |
-| Keys that are byte strings, arrays, maps, tags, floats, `null`... | yes | no |
-| Tags 0 (RFC 3339 date/time text), 1 (epoch time), 24 (embedded CBOR), 32 (RFC 3986 URI-reference), 55799 | yes, content checked (`Tagged`, D252) | no |
-| Tags 21–23 (conversion hints) | yes, any content (`Tagged`) | no |
-| Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 1040, 64-bit numbers, ...) | yes, opaque: any valid content, its registered meaning unchecked (`Tagged`); `tags: 'standard'` refuses them | no |
-| `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (NaN only as `f97e00`) | no |
-| Unicode noncharacters in text | yes | no |
-| Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes, normalised forms only | yes |
+| Your data | Valid preset (default) | `wire: 'deterministic'` | `wire: 'bindle'` |
+| --- | --- | --- | --- |
+| Producer emits shortest forms, definite lengths, keys sorted by encoded bytes (RFC 8949 §4.2.1 / CDE) | yes | yes | yes |
+| Producer emits non-shortest heads or floats, indefinite lengths, unsorted or length-first-sorted keys | yes (read through a canonical copy; values in wire order) | no (`non_shortest`, `indefinite`, `key_order`) | no |
+| The same key twice, in the same or another encoding (`1` and `18 01`, `0.0` and `-0.0`) | no (`duplicate_key`, compared by value) | no | no |
+| Integer map keys at any depth (COSE, CWT `cnf` holding a COSE_Key) | yes (decodes to `Map`) | yes | no (`cose` admits safe integer labels in the top-level map only) |
+| Keys that are byte strings, arrays, maps, tags, floats, `null`... | yes | yes | no |
+| Tags 0 (RFC 3339 date/time text), 1 (epoch time), 24 (embedded CBOR), 32 (RFC 3986 URI-reference), 55799 | yes, content checked (`Tagged`, D252) | yes | no |
+| Tags 21–23 (conversion hints) | yes, any content (`Tagged`) | yes | no |
+| Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 1040, 64-bit numbers, ...) | yes, opaque: any valid content, its registered meaning unchecked (`Tagged`); `tags: 'standard'` refuses them | yes | no |
+| `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (any NaN; JS numbers keep no payload) | yes (NaN only as `f97e00`) | no |
+| Unicode noncharacters in text | yes | yes | no |
+| Unassigned simple values (`f0`–`f3`, `f8 20`–`f8 ff`) | no (`simple`; D284) | no | no |
+| Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes (RFC 8949 / RFC 8746 rules) | yes, the same rules (D265) | yes, normalised forms only |
 
 Compiler `profile: 'full'` does not relax any wire restriction; it is a
 separate, schema-side restriction set.
@@ -210,13 +211,14 @@ with measurements and methods under [bench](bench/README.md).
 
 ## Defaults and limits
 
-The wire profile defaults to the **deterministic preset**: any root, any map
-key kind, any tag number, RFC 8949 floats, `undefined` and
-noncharacters admitted. `{ wire: 'bindle' }` (or `...profiles.bindle`)
+The wire profile defaults to the **valid preset**: any valid CBOR, any
+root, any map key kind, any tag number, RFC 8949 floats, `undefined` and
+noncharacters admitted; `{ wire: 'deterministic' }` additionally requires
+RFC 8949 §4.2.1 deterministic encoding. `{ wire: 'bindle' }` (or `...profiles.bindle`)
 restores the Bindle profile: a top-level map required by codec decode, views
 and profile sources, text keys only (safe integer labels in the top-level map
 under `cose: true`), Bindle tags and floats. Schema validation/decode default
-to any root under both. Decoded text-keyed maps have a null prototype; maps
+to any root under every preset. Decoded text-keyed maps have a null prototype; maps
 with other keys decode to `Map` ([values](docs/profiles.md#javascript-values-d123)).
 
 Default input cap: **1,500,000 bytes**, depth **32**, entries per container

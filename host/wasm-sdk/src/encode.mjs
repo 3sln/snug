@@ -102,9 +102,10 @@ function bigint(n, depth) {
   for (let i = 0; i < len; i++) u[bp + bn + i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16);
   op4(5, negative ? 1 : 0, bn, len); bn += len;
 }
-function typedPayload(v, info) {
+function typedPayload(v, info, nanOk) {
   const raw = v instanceof Float16Bytes ? v.bytes : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
-  if (info.tag >= 84) {
+  // the NaN rule is the Bindle tag set's (D265), as the native encoder
+  if (info.tag >= 84 && !nanOk) {
     if (info.tag === 84) { for (let i = 0; i < raw.length; i += 2) { const h = LITTLE_ENDIAN || v instanceof Float16Bytes ? raw[i] | raw[i + 1] << 8 : raw[i] << 8 | raw[i + 1]; if ((h & 0x7c00) === 0x7c00 && (h & 0x3ff)) fail('typed_array', 'NaN is not allowed in a float array.'); } }
     else if (Object.hasOwn(v, 'length')) { for (let i = 0; i < v.length; i++) if (v[i] !== v[i]) fail('typed_array', 'NaN is not allowed in a float array.'); }
     else if (typedIncludes.call(v, NaN)) fail('typed_array', 'NaN is not allowed in a float array.');
@@ -143,12 +144,15 @@ function walk(v, depth) {
   if (v instanceof Uint8Array) { bytes(v, 0); return; }
   if (depth >= maxDepth) fail('depth', 'Nesting exceeds the depth bound.');
   const info = typedInfo(v);
-  if (info) { const b = typedPayload(v, info); headN(6, info.tag); bytes(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
+  if (info) { const b = typedPayload(v, info, (flags & 12) !== 0); headN(6, info.tag); bytes(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
   if (v instanceof Decimal) { headN(6, 4); walk([v.exponent, v.mantissa], depth + 1); return; }
   if (v instanceof NDArray) { headN(6, 40); walk([v.shape, v.data], depth + 1); return; }
   if (v instanceof Tagged) {
     // the rule tag (D180): the number; beyond 32 bits -2, or -1 for 2^64 - 1
     const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;
+    // above the Bindle tag set a decimal fraction or ndarray outside Decimal's / NDArray's invariants (D265, D267):
+    // written as given, its content held to the RFC rules by the final check, as the native encoder
+    if ((t === 4 || t === 40) && (flags & 12) !== 0) { headN(6, t); walk(v.value, depth + 1); return; }
     if (!stdAllowed(flags, rule, depth)) {
       if (t === 2 || t === 3 || t === 4 || t === 40 || typedSize(rule) > 0) fail('tag', 'This tag has its own value type (a bigint, Decimal, NDArray or typed array).');
       fail('tag', !std ? 'Tagged values need the standard tag set or any tags (profile option tags).'

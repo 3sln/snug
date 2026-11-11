@@ -44,9 +44,10 @@ const MAX_BUDGET = 0x7fffffff;
 // #left 0, so every value call's single check catches them too.
 const ROOT = 0, ARRAY = 1, MAP = 2, DONE = 3, FAILED = 4;
 
-function typedPayload(v, info, fail) {
+function typedPayload(v, info, fail, nanOk = false) {
   const raw = v instanceof Float16Bytes ? v.bytes : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
-  if (info.tag >= 84) { // NaN is refused in any payload; -0 and ±∞ are allowed here (encode.mjs).
+  // The NaN rule is the Bindle tag set's (D265): above it (nanOk) any float element is written.
+  if (info.tag >= 84 && !nanOk) { // NaN is refused in any payload; -0 and ±∞ are allowed here (encode.mjs).
     if (info.tag === 84) { for (let i = 0; i < raw.length; i += 2) { const h = LITTLE_ENDIAN || v instanceof Float16Bytes ? raw[i] | raw[i + 1] << 8 : raw[i] << 8 | raw[i + 1]; if ((h & 0x7c00) === 0x7c00 && (h & 0x3ff)) fail('typed_array', 'NaN is not allowed in a float array.'); } }
     else if (Object.hasOwn(v, 'length')) {
       // Retain the existing host-property behavior for unusual decorated views.
@@ -244,7 +245,7 @@ export class Writer {
     if (v instanceof Uint8Array) { this.#headN(2, v.byteLength); this.#raw(v); return; }
     if (depth >= this.#maxDepth) this.#fail('depth', 'Nesting exceeds the depth bound.');
     const info = typedInfo(v);
-    if (info) { const b = typedPayload(v, info, (c, m) => this.#fail(c, m)); this.#headN(6, info.tag); this.#headN(2, b.length); this.#raw(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
+    if (info) { const b = typedPayload(v, info, (c, m) => this.#fail(c, m), (this.#flags & 12) !== 0); this.#headN(6, info.tag); this.#headN(2, b.length); this.#raw(b, LITTLE_ENDIAN || v instanceof Float16Bytes ? 0 : info.size); return; }
     if (v instanceof Decimal) { this.#headN(6, 4); this.#walk([v.exponent, v.mantissa], depth + 1); return; }
     if (v instanceof NDArray) { this.#headN(6, 40); this.#walk([v.shape, v.data], depth + 1); return; }
     if (v instanceof Tagged) { this.#tagged(v, depth); return; }
@@ -339,6 +340,16 @@ export class Writer {
    * scanner under this profile). */
   #tagged(v, depth) {
     const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;
+    if ((t === 4 || t === 40) && (this.#flags & 12) !== 0) {
+      // above the Bindle tag set a decimal fraction or ndarray outside Decimal's / NDArray's invariants decodes to a
+      // Tagged (D265, D267): written as given, its content held to the RFC rules by the scanner
+      const start = this.#pos;
+      this.#headN(6, t);
+      this.#walk(v.value, depth + 1);
+      try { scan(this.#buf.subarray(start, this.#pos), { ...selectOptions(this.#options, 'decode'), top: 'any' }); }
+      catch (e) { if (e instanceof SnugFault) this.#fail(e.code, 'The tag content does not satisfy its tag.'); throw e; }
+      return;
+    }
     if (!stdAllowed(this.#flags, rule, depth)) {
       if (t === 2 || t === 3 || t === 4 || t === 40 || typedSize(rule) > 0) this.#fail('tag', 'This tag has its own value type (a bigint, Decimal, NDArray or typed array).');
       this.#fail('tag', !this.#std ? 'Tagged values need the standard tag set or any tags (profile option tags).'

@@ -26,10 +26,12 @@ schema.validate(&[0xa1, 0x62, b'i', b'd', 7], "message", &mut scratch)?;
 
 Compilation is synchronous. `CompilerProfile::{Full, Bindle, Bus}` restricts
 CDDL; it is independent of wire policy. The wire profile is `snug::Profile`
-in `DecodeOptions`, `EncodeOptions` and `ValidationOptions` (P7.1, D120,
-D126): `Profile::DETERMINISTIC` by default, `Profile::BINDLE` for the Bindle
-restrictions (root `cose` integer labels an option there), or the fields
-`keys`, `tags`, `floats`, `undefined_value`, `noncharacters`
+in `DecodeOptions`, `EncodeOptions`, `ValidationOptions` and
+`SequenceOptions` (P7.1, D120, D126, D260): `Profile::VALID` (any valid CBOR)
+by default, `Profile::DETERMINISTIC` to require RFC 8949 §4.2.1 encoding,
+`Profile::BINDLE` for the Bindle restrictions (root `cose` integer labels an
+option there), or the fields `keys`, `tags`, `floats`, `undefined_value`,
+`noncharacters`, `valid`
 ([profiles](profiles.md)). `CompileOptions::unicode`
 accepts `Some(&tables)` from `snug::unicode_tables::tables()` for pinned
 Unicode 16.0 category regexps. Programs contain the compiled automata and do
@@ -81,13 +83,13 @@ BigInt encoding strips leading zeroes and uses major 0/1 when possible;
 decoding bignums produces their canonical bytes. There is no decimal string
 parser/normalizer yet: supply normalized parts. Decimal values do not retain
 presentation scale. `Float(1.0)` encodes as the float `f93c00` under the
-deterministic preset and is refused under `Profile::BINDLE`; choose
-`Uint(1)` for the integer. `Value::Undefined` is `f7`. NaN is refused in typed arrays; permitted typed infinities
+valid and deterministic presets and is refused under `Profile::BINDLE`; choose
+`Uint(1)` for the integer. `Value::Undefined` is `f7`. NaN is refused in typed arrays under the Bindle tag set (D265); typed infinities
 and signed zero retain their bits. Byte strings use `Bytes`, not typed U8.
 
-`DecodeOptions::default()` (also `any()` and `deterministic()`) is the
-deterministic preset with any root; `DecodeOptions::bindle()` is the Bindle
-preset with a map root, and `EncodeOptions::bindle()` its encoder. `Top`,
+`DecodeOptions::default()` (also `any()` and `valid()`) is the valid preset
+with any root; `DecodeOptions::deterministic()` the deterministic preset with
+any root; `DecodeOptions::bindle()` is the Bindle preset with a map root, and `EncodeOptions::bindle()` its encoder. `Top`,
 `cose`, `Limits` and `profile` remain separate settings.
 
 ## Encode with typed Writer calls
@@ -141,7 +143,13 @@ assert_eq!(cursor.view().uint(), Some(7));
 `View::open` checks the complete profile. All views borrow `&[u8]`: safe Rust
 prevents mutation while views, cursors or returned byte/text slices remain
 live. Clone/copy a view without copying its document. To own a copy, retain a
-copied Vec and open a view over it. No unchecked opener is exposed.
+copied Vec and open a view over it. No unchecked opener is exposed. Valid
+input that is not its own deterministic form (indefinite lengths, longer
+heads, unsorted keys) is read through its canonical copy, which a borrowing
+view cannot alias: `View::open` and `Schema::view` answer
+`Error::Usage("owned_view")` for it, and `snug::Document::open(&bytes,
+&options)?.view()` owns the copy (D267). Sequence messages' `view()` reads the
+copy the same way.
 
 `get`, `get_key`, `at` and `entry` return optional checked views. Scalar
 accessors return Option on the wrong kind; `raw` always returns the encoded

@@ -1,8 +1,9 @@
 # snug for Rust
 
-Experimental, dependency-free Rust API for the kin compiler, strict CBOR
-scanner, schema VM, writer primitives and checked navigation. The wire policy
-is `snug::Profile`: the deterministic preset by default, `Profile::BINDLE` for
+Experimental, dependency-free Rust API for the kin compiler, CBOR scanner,
+schema VM, writer primitives and checked navigation. The wire policy is
+`snug::Profile`: the valid preset by default (any valid CBOR, P8.4),
+`Profile::DETERMINISTIC` for RFC 8949 §4.2.1 checking, `Profile::BINDLE` for
 the Bindle restrictions (P7.1). Compiler `Full` does not relax wire policy.
 
 Build from the repository root (Cargo 1.92, no network or installation):

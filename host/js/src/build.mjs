@@ -9,6 +9,7 @@ import { fail } from './fault.mjs';
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+const MAX_SAFE_N = BigInt(Number.MAX_SAFE_INTEGER);
 
 class Builder {
   constructor(bytes, options) {
@@ -129,7 +130,9 @@ class Builder {
       let value = 0n;
       const end = this.pos + n;
       while (this.pos < end) value = (value << 8n) | BigInt(this.b[this.pos++]);
-      return tag === 2 ? value : -1n - value;
+      const v = tag === 2 ? value : -1n - value;
+      // a valid-CBOR bignum (P8.4, D267) may hold a small integer: integers are numbers when safe (D123)
+      return v >= -MAX_SAFE_N && v <= MAX_SAFE_N ? Number(v) : v;
     }
     const info = TYPED_BY_TAG.get(tag), bytes = this.bytes(n);
     if (tag === 84 && !info.ctor) return float16Value(bytes);

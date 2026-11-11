@@ -81,8 +81,8 @@ or outside character classes. `String.raw` preserves CDDL's doubled backslashes
 in the example. Without the option, these escapes raise a `SchemaError`
 with code `regexp` and a message naming `snug/unicode`. `Cs` matches nothing;
 surrogates cannot occur in text. The Bindle wire profile refuses
-noncharacters before regexp matching; the deterministic preset (the default)
-admits them. [Category details](cddl-support.md#unicode-regexp-categories).
+noncharacters before regexp matching; the valid (default) and deterministic
+presets admit them. [Category details](cddl-support.md#unicode-regexp-categories).
 
 Compile where the tables are available, then serialize the Program for a
 validation-only bundle. The runtime and Program loader need no Unicode
@@ -180,15 +180,21 @@ refuses extension controls unless `controlsInBus: true`. Rust: `snug::controls`
 ## Validate hostile bytes without decoding
 
 ```js
-const result = schema.validate(Uint8Array.of(0xbf, 0xff), 'message');
+// {_ "id": 1, "id" (a longer head): 2}: valid CBOR with a duplicate key by value
+const hostile = Uint8Array.of(0xbf, 0x62, 0x69, 0x64, 0x01, 0x78, 0x02, 0x69, 0x64, 0x02, 0xff);
+const result = schema.validate(hostile, 'message');   // cbor/duplicate_key
 if (!result.ok) console.log(result.reason, result.path, result.offset);
 ```
 
 `validate` returns `{ ok: true }` or
 `{ ok: false, reason, path, offset, subcode? }`. It does not build the data
-tree. The validator checks the wire profile (the deterministic preset by
-default, `wire: 'bindle'` for the Bindle one) while matching all live CDDL
-alternatives; one compiled Program validates under either. On schema failure it continues checking the
+tree. The validator checks the wire profile (the valid preset by default:
+any well-formed valid CBOR; `wire: 'deterministic'` to require RFC 8949
+§4.2.1 deterministic encoding, `wire: 'bindle'` for the Bindle profile) while
+matching all live CDDL alternatives; one compiled Program validates under
+each. Under `valid`, literals, keys and duplicates compare by value, and
+non-deterministic input is validated through its canonical copy with the same
+reasons, offsets and budget ([profiles](profiles.md#valid-cbor-p84-d260d268)). On schema failure it continues checking the
 profile; a profile error wins, unless the global step budget runs out first.
 Missing rules, wrong argument types and SharedArrayBuffer input are API
 misuse (`TypeError`), not validation results.
@@ -233,7 +239,7 @@ with safe own data properties for names such as `__proto__`. A map with any
 other key (integer, byte string, array, ...) becomes a `Map` with decoded
 keys, at any depth; under `wire: 'bindle'`, `cose: true` makes a top-level
 map a `Map` with safe integer and text keys. Codec decode accepts any root
-under the default deterministic preset; `wire: 'bindle'` requires a map
+under the default valid preset; `wire: 'bindle'` requires a map
 unless `top: 'any'` is given. Tags outside the Bindle set (the standard
 ones, COSE/CWT and any other number, D180) decode to `Tagged`, `f7` to
 `undefined` ([profiles](profiles.md#javascript-values-d123)).
@@ -246,8 +252,9 @@ unavailable. Decimals refuse implicit numeric coercion and JSON serialisation.
 Use `toString()` and an explicit application representation. All decimal
 normalisation discards presentation scale.
 
-Encoding admits any supported root. Codec checking accepts any root under
-the deterministic preset and defaults to a map root under `wire: 'bindle'`
+Encoding admits any supported root and always writes deterministic bytes.
+Codec checking accepts any root under the valid and deterministic presets and
+defaults to a map root under `wire: 'bindle'`
 (there `decode(encode([1, 2]), { wire: 'bindle' })` throws `not_map`);
 schema decode defaults to any root. Choose `top` explicitly for your
 protocol.
@@ -323,7 +330,7 @@ The Writer writes exactly one root. Declare array item/map pair counts with
 and finishes the writer. `keysSorted: true` requires strictly increasing
 encoded key order; otherwise `end()` sorts the map. A Writer error is sticky:
 the first code is available as `failure`; later calls throw `writer_failed`.
-`float(1)` writes the float `f93c00` under the deterministic preset and is
+`float(1)` writes the float `f93c00` under the valid and deterministic presets and is
 refused under `wire: 'bindle'` (use `int(1)` or `value(1)` for the integer).
 `undefined()` writes `f7`, `tagged(tag, content)` a standard-set tag, and
 `key(k)` takes any key the profile admits. There is no raw unchecked CBOR
@@ -339,8 +346,8 @@ own-key count check and refuses extra properties with `unsupported`.
 strict behavior (`profiles` is exported by `snug`). Both modes require genuine
 arrays with exactly the local `Array.prototype`; subclassed, foreign-realm
 and null-prototype arrays remain refused. Holes are refused in both modes;
-a present undefined element encodes as `f7` under the deterministic preset
-and is refused under `wire: 'bindle'`. A missing element is checked only when
+a present undefined element encodes as `f7` under the valid and deterministic
+presets and is refused under `wire: 'bindle'`. A missing element is checked only when
 its value reads as undefined, using `i in array`.
 
 Plain/null-prototype objects with enumerable data properties, the documented

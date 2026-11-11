@@ -13,7 +13,8 @@ decides. The Bindle arbiter is cbor.mjs itself (`bench/baseline/cbor-3sln.mjs`):
 seeded mutations (architecture §4.5; review C15, C16). The other flags are
 held to the hand-written codes and offsets of
 `corpus/cbor-vectors/deterministic.json` and to cbor2 (profiles.md, "Against
-cbor2"). Rules marked **[flag]** below depend on a flag.
+cbor2"); `PF_VALID` (P8.4) to `bb valid-test`'s RFC vectors, equivalence
+property and cbor2 differential. Rules marked **[flag]** below depend on a flag.
 
 Status: implemented and gated (DEVLOG P1.3). Integer-only (D009).
 
@@ -108,6 +109,39 @@ same offset (gated).
      accepted under `PF_UNDEFINED` **[flag]**; anything else (unassigned
      simple values, `f8 xx` with xx ≥ 24) → **simple**.
    * 3, text: noncharacters are refused unless `PF_NONCHAR` **[flag]**.
+
+## Under `PF_VALID` (P8.4, D260–D264)
+
+The same walk, the same order, with these differences **[flag]**:
+
+* Heads: any width is accepted (no **non_shortest**); `ai` 31 opens an
+  indefinite-length item: a string of definite chunks of its own major type
+  (each a definite head, **malformed** otherwise; text chunks each valid
+  UTF-8), or an array / map whose entries run to a break `ff` (the depth bound
+  first; **too_many_entries** at the head before the entry that would pass
+  `maxEntries`; **truncated** at the end of input; a break where a map value
+  belongs is **malformed**). A break anywhere else, and `f8 xx` with xx < 32,
+  are **malformed** (RFC 8949 Appendix F).
+* Floats: any width, any NaN.
+* Maps: keys in any order. While the keys ascend bytewise and each is its own
+  canonical form, an equal neighbour is **duplicate_key** at once (as
+  before); a key out of order, not canonical, or EC-sensitive (a float, a
+  NaN, a zero; RFC 8949 §4.2's EC form differs from its bytes) marks the map,
+  and at its end its keys' canonical (EC) forms are sorted and compared:
+  **duplicate_key** at the second occurrence of an equal key, ceil(len/8)
+  units per comparison (D263, D277). When every key is its own comparison
+  form the check runs at the map's end; otherwise (forms must be written to
+  the canonical buffer, `scanCb`) it is recorded and run after the walk, in
+  walk order, its refusal reporting the items walked to the map's end.
+* Tags: tag 0/32 text and tag-24 payloads inside an indefinite-length string
+  are checked after their chunks are gathered (recorded, run after the walk
+  in walk order); tags 2/3 accept any bignum of at most 128 content bytes;
+  tags 4/40 take any array head (D265).
+* The scanner notes in `o[O_VCTL]` whether the input is its own deterministic
+  form (`VC_NONDET`), whether some map's keys may be out of canonical order
+  (`VC_UNSORTED`) and whether an EC-sensitive key occurred (`VC_ECS`); the
+  hosts build the canonical copy (`canon.kin dc-copy`) when the input is not
+  its own DC form, and views search unsorted maps linearly.
 
 ## Floats (major 7, `ai` 25/26/27)
 

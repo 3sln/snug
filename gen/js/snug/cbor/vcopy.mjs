@@ -1183,25 +1183,36 @@ export function mapSeqP(s, c, o, ss, cs, ce, x, lim) {
     return sc;
 }
 
-export function vmap(_b, cb, o, start, x) {
+export function vmap(b, cb, o, start, x) {
     // A position of the canonical copy (or of an embedded copy) mapped back to
     // the input b, whose item starts at start (events sorted).
+    return vmapX(b, cb, o, start, x, 0);
+}
+
+export function vmapX(_b, cb, o, start, x, src) {
+    // vmap; src != 0: x is a SOURCE position (an embedded region's source is
+    // the copy holding its byte string), so a position at the end of a
+    // region's content belongs to that region, not to an embedded copy that
+    // starts there -- as every position mapped out of an embedded copy is.
     const n = o[O_S_CBASE];
     const ne = o[O_S_NEV];
     let y = x;
+    let strict = src;
     let guard = 0;
     while (guard < 64) {
         guard += 1;
         let hit = -1;
         for (let i = 0; i < ne; i++) {
             const e = O_S_FIRST + (EV_WORDS * i);
-            if ((o[e + 1] === EV_EMB) && ((y >= o[e + 3]) && (y < o[e + 4]))) {
+            const cs = o[e + 3];
+            if ((o[e + 1] === EV_EMB) && (((y > cs) || ((y === cs) && (strict === 0))) && (y < o[e + 4]))) {
                 hit = e;
             }
         }
         if (hit < 0) {
             break;
         }
+        strict = 1;
         y = mapSeqP(cb, cb, o, o[hit], o[hit + 3], o[hit + 4], y, o[hit + 5]);
     }
     if (y < n) {
@@ -1228,5 +1239,5 @@ export function vsource(b, cb, o, start, x) {
     if (x <= o[O_S_CBASE]) {
         return start + x;
     }
-    return vmap(b, cb, o, start, x);
+    return vmapX(b, cb, o, start, x, 1);
 }

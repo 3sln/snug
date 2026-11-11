@@ -865,7 +865,7 @@ pub fn dup_forms_within(cb: &mut [u8], o: &mut [i32], q0: i32, n: i32) -> i32 {
 pub fn dup_finish(b: &[u8], cbr: &[u8], o: &mut [i32], n: i32, cb0: i32) -> i32 {
     // The top n records (built by dup-input or dup-forms, or retained by a
     // session): 1 unit each, the heap sort by form (ties by offset), then the
-    // neighbours, each comparison ceil(min/64) units (o[O_S_UNITS]); pops
+    // neighbours, each comparison ceil(min/8) units (c64m; o[O_S_UNITS]); pops
     // them and resets o[O_S_CBTOP] to cb0. 0, or duplicate_key at the
     // earliest second occurrence: the smallest offset of a key equal to an
     // earlier one. cbr holds the forms at addresses >= 0 (any buffer when

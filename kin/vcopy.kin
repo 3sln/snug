@@ -68,7 +68,7 @@
             [snug.cbor.scan :refer [scan-item run-defer scan-float]]
             [snug.cbor.stdtags :refer [std-allowed]]))
 
-(declarefn pw uvisit tskip-l map-back-p embed-check-in)
+(declarefn pw uvisit tskip-l map-back-p embed-check-in vmap-x)
 
 ;; ------------------------------------------------------------ events
 
@@ -891,21 +891,31 @@
         (set sc (tskip s o sc))))
     (return sc)))
 
-(defn ^:pub ^I32 vmap [^Bytes _b ^Bytes cb ^Ints o ^I32 start ^I32 x]
+(defn ^:pub ^I32 vmap [^Bytes b ^Bytes cb ^Ints o ^I32 start ^I32 x]
   (comment "A position of the canonical copy (or of an embedded copy) mapped back to"
            "the input b, whose item starts at start (events sorted).")
+  (return (vmap-x b cb o start x 0)))
+
+(defn ^I32 vmap-x [^Bytes _b ^Bytes cb ^Ints o ^I32 start ^I32 x ^I32 src]
+  (comment "vmap; src != 0: x is a SOURCE position (an embedded region's source is"
+           "the copy holding its byte string), so a position at the end of a"
+           "region's content belongs to that region, not to an embedded copy that"
+           "starts there -- as every position mapped out of an embedded copy is.")
   (let [n (ia o O_S_CBASE)
         ne (ia o O_S_NEV)
         ^:mut y x
+        ^:mut strict src
         ^:mut guard 0]
     (while (< guard 64)
       (set guard (+ guard 1))
       (let [^:mut hit (neg 1)]
         (for [^I32 i 0 ne]
-          (let [e (+ O_S_FIRST (* EV_WORDS i))]
-            (if (and (== (ia o (+ e 1)) EV_EMB) (and (>= y (ia o (+ e 3))) (< y (ia o (+ e 4)))))
+          (let [e (+ O_S_FIRST (* EV_WORDS i))
+                cs (ia o (+ e 3))]
+            (if (and (== (ia o (+ e 1)) EV_EMB) (and (or (> y cs) (and (== y cs) (== strict 0))) (< y (ia o (+ e 4)))))
               (set hit e))))
         (if (< hit 0) (break))
+        (set strict 1)
         (set y (map-seq-p cb cb o (ia o hit) (ia o (+ hit 3)) (ia o (+ hit 4)) y (ia o (+ hit 5))))))
     (if (< y n) (return (+ start y)))
     (comment "the main stop is the first EV_HEAD in the main region, if any")
@@ -923,4 +933,4 @@
   (comment "A replayed refusal's source offset mapped to the input: in the input's"
            "copy directly, else (embedded content's source is a copy) by vmap.")
   (if (<= x (ia o O_S_CBASE)) (return (+ start x)))
-  (return (vmap b cb o start x)))
+  (return (vmap-x b cb o start x 1)))

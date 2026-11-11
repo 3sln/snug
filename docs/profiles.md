@@ -1,46 +1,94 @@
-# Profiles and deterministic CBOR
+# Profiles: valid, deterministic and Bindle CBOR
 
-snug is a standalone library (D080). Every decoder path — the scanner, the
-resumable scanner, the schema VM and its resumable session, views and the
-builder — checks **RFC 8949 §4.2.1 core deterministic encoding** on read, and
-the encoders produce only that. A *wire profile* narrows what is accepted
-further. Two presets exist (D081, D120–D125, D180):
+snug is a standalone library (D080). A *wire profile* decides what every
+decoder path — the scanner, the resumable scanner, the schema VM and its
+resumable session, views, sources and sequences — accepts. The encoders write
+RFC 8949 §4.2.1 core deterministic bytes under every profile. Three presets
+exist (D081, D120–D125, D180, D260):
 
-* **`deterministic`** (the default): general deterministic CBOR. Any map key
-  kind, any tag number (COSE, CWT and the rest) with the content checks of
-  the tags snug knows (the standard set's RFC 8949 rules, bignums, typed
-  arrays), RFC 8949 scalar
-  floats (the canonical NaN, ±∞, −0, integral floats), `undefined`, and text
-  that is any well-formed UTF-8 (noncharacters included).
+* **`valid`** (the default, P8.4, D260): any **well-formed, valid** CBOR (RFC
+  8949 §5.3) — indefinite lengths, non-shortest heads and floats, map keys in
+  any order, NaN payloads — refusing what is not valid: a duplicate map key
+  *by value* (RFC 8949 §5.6.1: `1` twice, or `"a"` in two encodings), invalid
+  UTF-8, invalid content of a tag snug knows (dates, URIs, bignums, tag-24
+  payloads, typed-array lengths, …), the unassigned simple values snug has no
+  value for (D284), and everything not well-formed. Its other options are the
+  deterministic preset's.
+* **`deterministic`**: general deterministic CBOR, checked on read (RFC 8949
+  §4.2.1): definite lengths, shortest heads and floats, keys in bytewise
+  order and the §4.2.2 canonical NaN. Any map key kind, any tag number with
+  the content checks of the tags snug knows, RFC 8949 scalar floats,
+  `undefined`, and any well-formed UTF-8 (noncharacters included). Choose it
+  for signing, hashing and protocols that require deterministic encoding
+  (dCBOR, CTAP2, COSE inputs to be signed).
 * **`bindle`**: the Bindle/3sln.me wire profile, bit for bit as before P7.1:
-  text keys only (safe-integer labels in the top-level map with `cose`), the
-  Bindle tag set, no NaN/±∞/−0/safe-range integral floats, no `undefined`, no
-  noncharacters, and a map at the codec's root. Every 3sln.me vector gives the
-  same code under it.
+  deterministic, text keys only (safe-integer labels in the top-level map
+  with `cose`), the Bindle tag set and its application rules (normalised
+  decimals, ndarrays, NaN-free typed arrays, 55799 at the top only; D265), no
+  NaN/±∞/−0/safe-range integral floats, no `undefined`, no noncharacters, and
+  a map at the codec's root. Every 3sln.me vector gives the same code under
+  it.
 
-Every option, and so every preset, only **removes** acceptance relative to
-RFC 8949 §4.2.1; none admits a non-deterministic form (an indefinite length,
-a non-shortest head or float, unsorted or duplicate keys).
+Under `deterministic` and `bindle` every option only **removes** acceptance
+relative to RFC 8949 §4.2.1; neither admits a non-deterministic form. Under
+`valid` the same options remove acceptance relative to RFC 8949 §5.3.
 
 ```js
 import { decode, encode, profiles } from 'snug';
-decode(bytes);                                     // deterministic preset, any root
+decode(bytes);                                     // valid preset, any root
+decode(bytes, { wire: 'deterministic' });          // RFC 8949 §4.2.1 checked
 decode(bytes, { wire: 'bindle' });                 // the Bindle profile, map root
 decode(bytes, { ...profiles.bindle, top: 'any' }); // the same, any root
-decode(bytes, { keys: 'text' });                   // deterministic, text keys only
+decode(bytes, { keys: 'text' });                   // valid, text keys only
 ```
 
 The wire selector is called `wire` because `compile(text, { profile })` names
 a different thing: a compiler restriction set (below).
 
-## What both presets share
+## Valid CBOR (P8.4, D260–D268)
 
-| Property | Rule (both presets) |
+What `valid` reads, and how:
+
+| Input | Under `valid` | Under `deterministic` |
+| --- | --- | --- |
+| Indefinite-length arrays, maps, byte and text strings | accepted (chunks of the string's own major type, definite) | `indefinite` |
+| Non-shortest integer, length or tag heads; floats wider than needed | accepted | `non_shortest` |
+| Map keys out of bytewise order | accepted, read in wire order | `key_order` |
+| Duplicate keys, compared by value: their canonical (EC) encodings, so `1` / `1801`, `0.0` / `-0.0`, two NaNs | `duplicate_key` | `duplicate_key` (or `key_order`, whichever comes first) |
+| NaN with a payload or sign, any width | accepted | `float` |
+| Bignums with leading zeros or below 2⁶⁴ (tags 2/3) | accepted (the integer) | `bignum` |
+| `f8` with a value below 32 | `malformed` (RFC 8949 Appendix F) | `non_shortest` |
+| Unassigned simple values (`f0`–`f3`, `f8 20`–`f8 ff`) | `simple` (D284: no value in snug's model) | `simple` |
+| Invalid UTF-8, a refused known tag's content, a lone break, truncation | refused with its code | refused with its code |
+
+Values: a decoded map keeps its keys in wire order (D267); a bignum with
+leading zeros decodes to its integer; JavaScript numbers (and Rust's
+`Value::Float(f64)`) do not keep a NaN payload — a View's `raw()` keeps the
+bytes. `encode(decode(x))` is the deterministic encoding of `x`'s value.
+
+How: the scanner walks valid CBOR in one pass and records the keys of maps
+whose duplicates it cannot decide bytewise (keys out of order, not in their
+canonical form, or EC-sensitive such as floats); a deferred check sorts and
+compares their canonical forms within the budget (D263, D277). Views and the
+decoder of non-deterministic input read the input's canonical copy (DC form,
+wire order kept): a View's offsets are positions in that copy and `borrowed`
+is false; Rust's borrowing `View::open` answers `Error::Usage("owned_view")`
+and `snug::Document` owns the copy (D267). The schema VM first walks the
+input as deterministic CBOR; if it meets an encoding only valid CBOR has (or
+an EC-sensitive key), it validates the canonical copy instead, replaying the
+input's refusals at their own positions so that the reason, offset, budget
+and items are the same on both routes (D262, D264, D280). Resumable sessions
+and sequences take such items whole (D283). Costs: bench/README.md
+"Valid CBOR (P8.4)".
+
+## What the presets share
+
+| Property | Rule (`deterministic` and `bindle`; `valid` relaxes the first four as above) |
 | --- | --- |
-| Determinism | RFC 8949 §4.2.1, verified on read: definite lengths, shortest arguments, one root, no trailing bytes |
-| Map ordering | Complete encoded-key bytes, lexicographic (not §4.2.3's length-first order); duplicates refused |
-| Integers | Major 0/1 for −2⁶⁴..2⁶⁴−1; beyond that a bignum (tags 2/3) of 9..128 content bytes, no leading zero (RFC 8949 §3.4.3 preferred serialization) |
-| Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64) |
+| Determinism | RFC 8949 §4.2.1, verified on read: definite lengths, shortest arguments, one root, no trailing bytes (`valid`: one root, no trailing bytes) |
+| Map ordering | Complete encoded-key bytes, lexicographic (not §4.2.3's length-first order); duplicates refused (`valid`: any order, duplicates by value refused) |
+| Integers | Major 0/1 for −2⁶⁴..2⁶⁴−1; beyond that a bignum (tags 2/3) of 9..128 content bytes, no leading zero (RFC 8949 §3.4.3 preferred serialization; `valid`: any bignum of at most 128 content bytes) |
+| Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64; `valid`: any width) |
 | Text | Well-formed UTF-8: no overlong, no surrogate, nothing above U+10FFFF |
 | Simple values | `false`, `true`, `null`; unassigned simple values (`e0`–`f3`, `f8 xx`) refused |
 | Limits | `maxBytes` 1,500,000; `maxDepth` 32; `maxEntries` 65,536; `maxItems` 131,072; bignum content 128 bytes |
@@ -52,27 +100,29 @@ and mixed keys show the difference: `{10, 100, -1}` is ordered `0a`, `1864`,
 
 ## Options
 
-| Option | Values | `deterministic` | `bindle` |
-| --- | --- | --- | --- |
-| `wire` | `'deterministic'`, `'bindle'` | (the preset) | (the preset) |
-| `keys` | `'text'`, `'integer'` (text and major 0/1), `'any'` | `'any'` | `'text'` |
-| `tags` | `'bindle'`, `'standard'`, `'any'` | `'any'` | `'bindle'` |
-| `floats` | `'bindle'`, `'deterministic'` | `'deterministic'` | `'bindle'` |
-| `undefinedValue` | boolean (`f7`) | true | false |
-| `noncharacters` | boolean (U+FDD0..FDEF, U+xFFFE/xFFFF in text) | true | false |
-| `top` (codec, views, profile sources) | `'map'`, `'any'` | `'any'` | `'map'` |
-| `cose` | boolean: safe-integer labels in the top-level map under `keys: 'text'` | false | false |
-| `strictArrays` (encode, Writer) | boolean | false | true |
+| Option | Values | `valid` (default) | `deterministic` | `bindle` |
+| --- | --- | --- | --- | --- |
+| `wire` | `'valid'`, `'deterministic'`, `'bindle'` | (the preset) | (the preset) | (the preset) |
+| `keys` | `'text'`, `'integer'` (text and major 0/1), `'any'` | `'any'` | `'any'` | `'text'` |
+| `tags` | `'bindle'`, `'standard'`, `'any'` | `'any'` | `'any'` | `'bindle'` |
+| `floats` | `'bindle'`, `'deterministic'` | `'deterministic'` | `'deterministic'` | `'bindle'` |
+| `undefinedValue` | boolean (`f7`) | true | true | false |
+| `noncharacters` | boolean (U+FDD0..FDEF, U+xFFFE/xFFFF in text) | true | true | false |
+| `top` (codec, views, profile sources) | `'map'`, `'any'` | `'any'` | `'any'` | `'map'` |
+| `cose` | boolean: safe-integer labels in the top-level map under `keys: 'text'` | false | false | false |
+| `strictArrays` (encode, Writer) | boolean | false | false | true |
 
 `wire` picks the preset; any other option given explicitly overrides the
-preset's value. An unknown value is a `TypeError`. Schema methods default to
-`top: 'any'` under both presets, as before. `profiles.deterministic` and
+preset's value (`{ keys: 'text' }` is the valid preset with text keys). An
+unknown value is a `TypeError`. Schema methods default to `top: 'any'` under
+every preset, as before. `profiles.valid`, `profiles.deterministic` and
 `profiles.bindle` are frozen option objects spelling the presets out; spread
-them to override. Rust has the same model: `snug::Profile` (`DETERMINISTIC`,
-`BINDLE`, or the fields `keys`, `tags`, `floats`, `undefined_value`,
-`noncharacters`) in `DecodeOptions`, `EncodeOptions` and `ValidationOptions`,
-all defaulting to the deterministic preset (`DecodeOptions::bindle()` and
-`EncodeOptions::bindle()` select the Bindle one).
+them to override. Rust has the same model: `snug::Profile` (`VALID`,
+`DETERMINISTIC`, `BINDLE`, or the fields `keys`, `tags`, `floats`,
+`undefined_value`, `noncharacters`, `valid`) in `DecodeOptions`,
+`EncodeOptions`, `ValidationOptions` and `SequenceOptions`, all defaulting to
+the valid preset (`DecodeOptions::deterministic()` and `::bindle()`,
+`EncodeOptions::bindle()` select the others).
 
 ### Key kinds
 
@@ -149,10 +199,13 @@ The options are one integer of **profile flags**, decided in kin
 | 4 | `PF_FLOATS` | Bindle float refusals | RFC 8949 deterministic floats |
 | 5 | `PF_UNDEFINED` | `f7` refused | `f7` accepted |
 | 6 | `PF_NONCHAR` | noncharacters refused | noncharacters accepted |
-| 7 | `PF_SUB` | (internal, never from a host) | the walk's root is not the document's top: 55799 refused at depth 0 |
+| 7 | `PF_SUB` | (internal, never from a host) | the walk's root is not the document's top |
+| 8 | `PF_VALID` | deterministic CBOR only | any valid CBOR (D260) |
+| 9–10 | `PF_CANON`, `PF_VREL` | (internal) | the VM walks a canonical copy; a valid-CBOR run (the VM's translation of `PF_VALID`) |
 
-The deterministic preset is `2 | 8 | 16 | 32 | 64` = 122 (`PF_DETERMINISTIC`;
-118 with `tags: 'standard'`, the preset before D180); Bindle is 0. **Zero means the Bindle profile** and every set bit admits more,
+The valid preset is `122 | 256` = 378 (`PF_VALID_PRESET`); the deterministic
+preset is `2 | 8 | 16 | 32 | 64` = 122 (`PF_DETERMINISTIC`; 118 with
+`tags: 'standard'`, the preset before D180); Bindle is 0. **Zero means the Bindle profile** and every set bit admits more,
 so an options array a host never filled, or a caller that predates the word,
 gets the strictest policy and the pre-P7.1 behaviour: every older gate, which
 fills only the older words, runs the Bindle profile unchanged.
@@ -221,7 +274,7 @@ the profile admits, comparing non-text, non-integer keys by their encoding.
 ## CDDL and schemas
 
 The VM checks the profile on every item, whatever the schema says (profile
-errors win, D023). Under the deterministic preset the prelude's `tdate`
+errors win, D023). Under the valid and deterministic presets the prelude's `tdate`
 (`#6.0(tstr)`), `time` (`#6.1(number)`), `eb64url`/`eb64legacy`/`eb16`,
 `encoded-cbor` (`#6.24(bstr)`), `uri` (`#6.32(tstr)`), `cbor-any`
 (`#6.55799(any)`) and `undefined` (`#7.23`) match valid data, and so does
@@ -233,7 +286,10 @@ inside no range, +∞ is inside `float .ge 1.5`. Float literals still compare
 encodings: `0.0` does not equal −0.0. A `:` member whose key is a byte
 string or a float (`h'00': T`, `1.5: T`) is a `map_cut` schema error; write
 `h'00' => T`. Under `wire: 'bindle'` all of those data are refused by the
-profile before the schema sees them.
+profile before the schema sees them. Under `valid`, schema literals, keys and
+duplicate checks compare values by their canonical forms (D261), so
+`{ 1: int }` matches a key `1801`, and a non-deterministic `.cbor` payload is
+validated through its canonical copy.
 
 ## Against cbor2 (an independent decoder)
 
@@ -259,6 +315,16 @@ fails:
 | `limits` | the default limits | none |
 | `cbor2tag1` | any epoch integer | tag-1 decoder needs a JS number |
 
+`bb valid-test` holds the valid preset to cbor2's default decoding (with
+`rejectDuplicateKeys`) on the RFC 8949 Appendix A, Appendix F and additional
+vectors and seeded mutations; each difference falls in a class: cbor2's tag
+decoders, snug's checks of known tags' contents (D121/D180/D265), simple
+values snug has no value for (D284), limits, and duplicates cbor2 compares as
+decoded JavaScript keys. The same gate runs the RFC vectors under all three
+presets, a canonical-equivalence property (a value's random valid
+re-encodings decode, validate and refuse duplicates exactly as its
+deterministic encoding) and the refusal replay at every budget.
+
 ## Compiler profiles are a separate axis
 
 `compile(text, { profile })` currently accepts these restriction sets:
@@ -279,7 +345,12 @@ CBOR mode. Colon-implied cuts remain ordinary struct syntax in `bindle`.
 ## Version policy
 
 The package remains private at 0.0.0. Pin a repository revision and
-regenerate the staged package when updating it. **D180 widened the default
+regenerate the staged package when updating it. **P8.4 changed the default
+wire policy to `valid`** (D260): input the deterministic preset refused for an
+encoding reason only (indefinite lengths, non-shortest forms, key order, NaN
+payloads) is now accepted; pass `wire: 'deterministic'` (Rust
+`Profile::DETERMINISTIC`, `DecodeOptions::deterministic()`) where a protocol
+requires deterministic input. Encoded bytes are unchanged. **D180 widened the default
 tag level** from the standard set to any tag (pass `tags: 'standard'` for the
 previous preset). **P7.1 changed the default
 wire policy** from the Bindle restrictions to the deterministic preset:

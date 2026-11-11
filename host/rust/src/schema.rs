@@ -163,7 +163,7 @@ impl Scratch {
 
 /// Per-call options; a limit only lowers the compiled one (None = compiled).
 /// `profile` is the kin profile flags (snug.cbor.codes PF_*, D120): the
-/// deterministic preset by default, 0 the Bindle profile.
+/// valid preset by default (D267), 0 the Bindle profile.
 #[derive(Debug, Clone)]
 pub struct Options {
     pub top_map: bool,
@@ -179,7 +179,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { top_map: false, cose: false, profile: crate::snug::cbor::codes::PF_DETERMINISTIC, max_bytes: None,
+        Options { top_map: false, cose: false, profile: crate::snug::cbor::codes::PF_VALID_PRESET, max_bytes: None,
                   max_depth: None, max_entries: None, max_items: None, max_bignum_bytes: None, budget: None }
     }
 }

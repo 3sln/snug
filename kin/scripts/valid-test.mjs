@@ -374,6 +374,16 @@ function shifted(outStr, at, k) {
       else fail(`regression ${h} flags ${flags} ${pname}: scanner ${sc.code}@${sc.offset} (${sc.items} items), buffer ${want}, sessions ${sess.join(' | ')}`);
     }
   }
+  // an embedded (.cbor) map cut short at a key, its byte string's head wide (the canonical path) or shortest (the
+  // attempt): the same witness offset, shifted by the head (vcopy vmap-x: a source position at a region's end)
+  const EMB1 = compile('r = [* bstr .cbor any]', { limits: BIG });
+  for (const [dc, wide, k] of [['8143a16162', '815803a16162', 1], ['8243a1616201', '825803a1616201', 1]]) for (const pol of [null, { w: 1 }]) {
+    n++;
+    const lim = LIM(PF_VALID), run = h => (pol ? session(EMB1, unhex(h), lim, pol) : buffer(EMB1, unhex(h), lim)).split(' ');
+    const a = run(dc), b = run(wide);
+    if (a[0] !== '0' && a[0] === b[0] && Number(b[2]) === Number(a[2]) + k) ok++;
+    else fail(`regression embedded ${dc} / ${wide}${pol ? ' session' : ''}: ${a.slice(0, 5).join(' ')} vs ${b.slice(0, 5).join(' ')}`);
+  }
   line(ok === n, `fixed regressions (tag-24 payloads past the depth bound, deferred-check items, tag 4/40 under valid with the Bindle tags): ${ok}/${n} buffer == scanner (any: code, offset, items) and sessions (declared and untold length) == buffer`);
 }
 

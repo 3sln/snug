@@ -13,6 +13,7 @@ import { build } from '../../host/js/src/build.mjs';
 import { Writer } from '../../host/js/src/writer.mjs';
 import { typedInfo } from '../../host/js/src/values.mjs';
 import { view } from '../../host/js/src/view.mjs';
+import { codecTop } from '../../host/js/src/profiles.mjs';
 import { scanBuffer, scanHandleSync, bufferHandle, pushScanner, SourceError, validateHandleSync, pushValidator } from '../../host/js/src/sources.mjs';
 import { tables as unicodeTables } from '../../host/js/src/unicode-tables.mjs';
 import * as baseline from '../../bench/baseline/cbor-3sln.mjs';
@@ -185,18 +186,24 @@ const P1 = {
       try { res = schema.validate(bytes, rule, inp.vopts); }
       catch (x) { F.push({ cls: 'validate-throw', detail: 'validate threw', actual: errInfo(x), repro }); continue; }
       if (!validShape(res)) { F.push({ cls: 'validate-shape', detail: 'malformed ValidationResult', actual: res, repro }); continue; }
-      let bval, bcode;
-      try { bval = baseline.decode(bytes, { top: 'any' }); } catch (x) { bcode = x.code; }
+      // the profile's verdict: snug's own scanner under the options validate ran with (the default wire preset,
+      // `valid` since P8.4), any root; the oracle's values: cbor.mjs's decode (the Bindle subset) when it accepts
+      let bval, bcode, bindleCode;
+      try { scanBuffer(bytes, { ...inp.vopts, top: 'any' }); } catch (x) { bcode = x.code; }
+      try { bval = baseline.decode(bytes, { top: 'any' }); } catch (x) { bindleCode = x.code; }
       if (bcode !== undefined && plainOpts) {
         if (res.ok || res.reason !== 'cbor/' + bcode) F.push({ cls: 'profile-precedence', detail: 'a profile refusal must be the reason (D023)', expected: 'cbor/' + bcode, actual: res, repro });
-      } else if (bcode === undefined && plainOpts && !osch.error && res.reason !== 'budget') {
+      } else if (bcode === undefined && bindleCode === undefined && plainOpts && !osch.error && res.reason !== 'budget') {
+        // the oracle decides deterministic data (its `.cbor` reads deterministic content): held to the
+        // deterministic preset's verdict
         const o = oracleCheck(osch, rule, bval);
         if (typeof o === 'boolean') {
           st.oracle++;
-          if (o !== res.ok) F.push(p1Mismatch(inp, rule, bytes, o, res, copts, repro));
+          const resD = schema.validate(bytes, rule, { wire: 'deterministic' });
+          if (resD.reason !== 'budget' && o !== resD.ok) F.push(p1Mismatch(inp, rule, bytes, o, resD, copts, repro));
         } else st.oracleUnknown++;
       }
-      if (uniEval && bcode === undefined && plainOpts && res.reason !== 'budget') {
+      if (uniEval && bcode === undefined && bindleCode === undefined && plainOpts && res.reason !== 'budget') {
         st.unicodeEval++;
         const want = uniEval(decode(bytes, { top: 'any' }));
         if (want !== res.ok) F.push({ cls: 'unicode-mismatch', detail: 'verdict differs from a JS /u RegExp over Node ICU', expected: want, actual: res, repro: { ...repro, value: describe(decode(bytes, { top: 'any' })) } });
@@ -239,9 +246,11 @@ const P1 = {
             try { a = schema.validateAt(bytes, it.at, it.end, rl); b = schema.validate(slice, rl); }
             catch (x) { F.push({ cls: 'validateAt-throw', actual: errInfo(x), repro: { ...repro, span: [it.at, it.end], spanRule: rl } }); continue; }
             if (!sameResult(a, b, it.at)) F.push({ cls: 'validateAt-mismatch', detail: 'validateAt(span) differs from validate(slice) (offsets shifted)', expected: b, actual: a, repro: { ...repro, span: [it.at, it.end], spanRule: rl } });
-            if (!osch.error && plainOpts && a.reason !== 'budget') {
-              const o = oracleCheck(osch, rl, baseline.decode(slice, { top: 'any' }));
-              if (typeof o === 'boolean') { st.oracle++; if (o !== a.ok) F.push(p1Mismatch(inp, rl, slice, o, a, copts, { ...repro, rule: rl, bytes: hex(slice), viaSpan: [it.at, it.end] })); }
+            const bs = attempt(() => baseline.decode(slice, { top: 'any' }));
+            if (!osch.error && plainOpts && a.reason !== 'budget' && bs.ok) {
+              const o = oracleCheck(osch, rl, bs.value);
+              const aD = schema.validateAt(bytes, it.at, it.end, rl, { wire: 'deterministic' });
+              if (typeof o === 'boolean' && aD.reason !== 'budget') { st.oracle++; if (o !== aD.ok) F.push(p1Mismatch(inp, rl, slice, o, aD, copts, { ...repro, rule: rl, bytes: hex(slice), viaSpan: [it.at, it.end] })); }
             }
           }
         }
@@ -258,7 +267,7 @@ function p1Mismatch(inp, rule, bytes, oracleVerdict, res, copts, repro) {
     if (!s.program.rules.includes(rule)) return false;
     const o = oracleCompile(text); if (o.error) return false;
     let v; try { v = baseline.decode(b, { top: 'any' }); } catch { return false; }
-    const ov = oracleCheck(o, rule, v), sv = s.validate(b, rule);
+    const ov = oracleCheck(o, rule, v), sv = s.validate(b, rule, { wire: 'deterministic' });
     return typeof ov === 'boolean' && ov === oracleVerdict && sv.ok === res.ok && (sv.ok || sv.reason === res.reason);
   };
   return {
@@ -330,8 +339,12 @@ const P2 = {
   },
 };
 
+// cbor.mjs is the Bindle profile's arbiter: snug under `wire: 'bindle'` and the same root and limits answers as it
+// does. The default (`valid`, P8.4) is held to properties instead: it accepts what the Bindle profile accepts with the
+// same value, its values re-encode deterministically and decode again to themselves, and the entry points agree.
+const bindleOf = dopts => ({ ...dopts, wire: 'bindle' });
 export function mutationVerdicts(m, dopts) {
-  const sn = attempt(() => decode(m, dopts));
+  const sn = attempt(() => decode(m, bindleOf(dopts)));
   const bs = attempt(() => baseline.decode(m, dopts));
   return { sn, bs, csn: codeOf(sn), cbs: codeOf(bs) };
 }
@@ -344,23 +357,36 @@ function mutationCheck(m, dopts, kind, repro, st) {
     shrink: { kind: 'bytes', input: m, pred: x => { const a = attempt(() => decode(x, dopts)); return !a.ok && !(a.error instanceof SnugFault); } } });
   if (csn !== cbs) {
     const want = `${csn}|${cbs}`;
-    F.push({ cls: 'mutation-verdict', sub: `${csn === 'ok' ? 'ok' : 'code'}-vs-${cbs === 'ok' ? 'ok' : 'code'}`, detail: 'decode verdict differs from cbor.mjs', expected: cbs, actual: csn, repro: rp,
+    F.push({ cls: 'mutation-verdict', sub: `${csn === 'ok' ? 'ok' : 'code'}-vs-${cbs === 'ok' ? 'ok' : 'code'}`, detail: "wire: 'bindle' decode verdict differs from cbor.mjs", expected: cbs, actual: csn, repro: rp,
       shrink: { kind: 'bytes', input: m, pred: x => sig(x) === want } });
   }
   if (sn.ok) {
     st.mutAccepted++;
-    const re = attempt(() => encode(sn.value, { cose: dopts.cose === true }));
-    if (!re.ok || hex(re.value) !== hex(m)) F.push({ cls: 'mutation-reencode', detail: 'an accepted mutation does not re-encode to the same bytes', actual: re.ok ? hex(re.value) : codeOf(re), repro: rp });
+    const re = attempt(() => encode(sn.value, { wire: 'bindle', cose: dopts.cose === true, strictArrays: false }));
+    if (!re.ok || hex(re.value) !== hex(m)) F.push({ cls: 'mutation-reencode', detail: 'a mutation the Bindle profile accepts does not re-encode to the same bytes', actual: re.ok ? hex(re.value) : codeOf(re), repro: rp });
   } else st.mutRefused++;
-  // the other entry points agree with decode
+  // the default (valid) preset: a superset of the Bindle profile's acceptance (any root where Bindle wants a map)
+  // with the same values; its values re-encode deterministically and decode to themselves (bytes may differ: an
+  // integral float reads as a JS number, D123)
+  const dv = attempt(() => decode(m, dopts));
+  if (sn.ok && (!dv.ok || !isDeepStrictEqual(dv.value, sn.value)))
+    F.push({ cls: 'valid-superset', detail: 'the default refuses, or reads differently, what the Bindle profile accepts', actual: dv.ok ? describe(dv.value) : codeOf(dv), repro: rp });
+  if (dv.ok) {
+    const re2 = attempt(() => encode(dv.value, { cose: dopts.cose === true }));
+    const back = re2.ok ? attempt(() => decode(re2.value, dopts)) : re2;
+    if (!back.ok || !isDeepStrictEqual(back.value, dv.value))
+      F.push({ cls: 'valid-roundtrip', detail: 'a default-accepted value does not re-encode and decode to itself', actual: back.ok ? describe(back.value) : codeOf(back), repro: rp });
+  }
+  // the other entry points agree with decode under the default (decode alone refuses two keys one JS key: unsupported)
+  const csnD = codeOf(dv) === 'unsupported' ? 'ok' : codeOf(dv);
   const sc = attempt(() => scanBuffer(m, dopts)), cs = codeOf(sc) === 'ok' ? 'ok' : codeOf(sc);
   const vw = attempt(() => view(m, dopts)), cv = vw.ok ? 'ok' : codeOf(vw);
-  const an = attempt(() => ANY.validate(m, 'r', { ...dopts, top: dopts.top ?? 'map' }));
+  const an = attempt(() => ANY.validate(m, 'r', { ...dopts, top: dopts.top ?? codecTop(dopts) }));
   const ca = !an.ok ? codeOf(an) : an.value.ok ? 'ok' : an.value.reason.startsWith('cbor/') ? an.value.reason.slice(5) : 'schema/' + an.value.reason;
-  if (cs !== csn || cv !== csn || ca !== csn) F.push({ cls: 'entrypoint-verdict', detail: 'scanBuffer / view / any-schema validate disagree with decode', actual: { decode: csn, scanBuffer: cs, view: cv, anySchema: ca }, repro: rp,
+  if (cs !== csnD || cv !== csnD || ca !== csnD) F.push({ cls: 'entrypoint-verdict', detail: 'scanBuffer / view / any-schema validate disagree with decode', actual: { decode: csnD, scanBuffer: cs, view: cv, anySchema: ca }, repro: rp,
     shrink: { kind: 'bytes', input: m, pred: x => {
-      const d = codeOf(attempt(() => decode(x, dopts))), s = codeOf(attempt(() => scanBuffer(x, dopts))), w = attempt(() => view(x, dopts));
-      const a = attempt(() => ANY.validate(x, 'r', { ...dopts, top: dopts.top ?? 'map' }));
+      const d0 = codeOf(attempt(() => decode(x, dopts))), d = d0 === 'unsupported' ? 'ok' : d0, s = codeOf(attempt(() => scanBuffer(x, dopts))), w = attempt(() => view(x, dopts));
+      const a = attempt(() => ANY.validate(x, 'r', { ...dopts, top: dopts.top ?? codecTop(dopts) }));
       const aa = !a.ok ? codeOf(a) : a.value.ok ? 'ok' : a.value.reason.replace(/^cbor\//, '');
       return s !== d || (w.ok ? 'ok' : codeOf(w)) !== d || aa !== d;
     } } });

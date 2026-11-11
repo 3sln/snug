@@ -1260,6 +1260,28 @@ non-simple pair, a dead block) is charged by the table. The legacy schedule
 (the reference VM's `limits` word 8 bit 1, a VM extension); it changes only
 the budget used.
 
+**Valid CBOR input (P8.4; D262, D264, D277, D280).** Under the `valid` wire
+preset (`limits` word 9 bit 8, `PF_VALID`) the VM first walks the input as
+above. When that walk meets an encoding only valid CBOR has (`non_shortest`,
+`indefinite`, `key_order`) or a map key whose duplicates are not bytewise
+(an EC-sensitive key), the run is replaced by a walk over the input's
+canonical copy (its DC form, map pairs in wire order) with the same Program,
+limits and budget, under these charging rules: every item, key and leaf is
+charged as the table and schedule 2 charge the copy's encoding; a map whose
+keys the source walk could not decide bytewise (keys out of order, not in
+their canonical form, or EC-sensitive) adds its deferred duplicate check at
+its logical end — 1 unit per key and ceil(min(len₁, len₂) / 8) per (D253)
+comparison of the sort and of the neighbour scan over the keys' EC forms —
+before anything else charged there; and a refusal of the source input is
+replayed at the position of the copy where the source walk would have
+reached it (after the charges that precede it on every route), with the
+source's reason, offset and items. A run's verdict, reason, offset, path,
+items and budget are therefore the same for an input and for every valid
+re-encoding of it that keeps its map pairs in order, except for the deferred
+checks' units of maps whose pairs moved or whose keys were re-encoded
+(architecture §19.5). Resumable sessions take such items whole and walk them
+the same way (D283).
+
 **Schedules by path (D254).** Schedule 2's free bookkeeping prices what the
 fast paths do for the simple shapes, decided by shape (Program and item),
 never by window or chunk, so the buffer and session drivers charge the same

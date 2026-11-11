@@ -3,7 +3,9 @@
 //! ```
 //! use snug::{decode, DecodeOptions};
 //! let error = decode(&[0xff], &DecodeOptions::any()).unwrap_err();
-//! assert_eq!(error.code(), "indefinite");
+//! assert_eq!(error.code(), "malformed");  // a lone break is not well-formed
+//! let error = decode(&[0xbf, 0xff], &DecodeOptions::deterministic()).unwrap_err();
+//! assert_eq!(error.code(), "indefinite");  // valid, but not deterministic
 //! ```
 use crate::{compile::SchemaError, schema::Failure};
 use std::fmt;

@@ -85,7 +85,7 @@ CDDL validation does not infer a narrower TS type.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `wire: 'deterministic' \| 'bindle'` | `'deterministic'` | The wire preset ([profiles](profiles.md#options)); the five options below override it |
+| `wire: 'valid' \| 'deterministic' \| 'bindle'` | `'valid'` | The wire preset ([profiles](profiles.md#options)): any valid CBOR (RFC 8949 §5.3), RFC 8949 §4.2.1 deterministic CBOR, or the Bindle profile; the five options below override it |
 | `keys: 'text' \| 'integer' \| 'any'` | preset (`'any'`; bindle `'text'`) | Map key kinds |
 | `tags: 'bindle' \| 'standard' \| 'any'` | preset (`'any'`) | Tag level: the Bindle set, the standard set, or any tag number with the known tags' content rules (D180) |
 | `floats: 'bindle' \| 'deterministic'` | preset (`'deterministic'`) | Scalar float rules |
@@ -104,15 +104,16 @@ Unknown keys and malformed values throw TypeError. `encode`
 does not enforce a map root. Its `maxBytes` check happens only when supplied,
 at finish, after allocation. Invalid CBOR/profile or inadmissible host values
 throw `SnugFault`; argument misuse can throw `TypeError`.
-Encode accepts any supported root; codec decode accepts any root under the
-deterministic preset and requires a map under `wire: 'bindle'` unless
+Encode accepts any supported root and writes deterministic bytes under every
+preset; codec decode accepts any root under the valid and deterministic
+presets and requires a map under `wire: 'bindle'` unless
 `top: 'any'` is given.
 
 Arrays encode elements 0..length−1, ignoring extra named own properties
 (including hidden and symbol properties) by default. `strictArrays: true`
 retains the old own-key count check. Both modes refuse holes with
 `unsupported`; a present undefined element encodes as `f7` when the profile
-admits `undefinedValue` (the deterministic preset) and is refused with
+admits `undefinedValue` (the valid and deterministic presets) and is refused with
 `unsupported` otherwise, regardless of `omitUndefined`.
 Only when an element reads as undefined is absence checked (`!(i in array)`).
 Arrays must pass Array.isArray and have exactly the local Array.prototype;
@@ -128,7 +129,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `NDArray` | `new NDArray(shape: number[], data: Value[] \| TypedArray \| Float16Bytes)`; readonly `shape`, `data`. Positive dimensions (1..8); product equals element count. Data is retained, not deeply frozen. |
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
-| `profiles` | Frozen `{ deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
+| `profiles` | Frozen `{ valid, deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
 | `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes); encode checks the tag number and content with kin under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 2/3/4/40/typed arrays have their own value types). |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
@@ -305,7 +306,7 @@ detect it. Owned copying protects against the original input only.
 | `isUndefined()` | boolean |
 | `length` | number or undefined; entries/bytes/elements according to kind |
 | `offset`, `depth`, `borrowed` | Absolute item position, physical depth, ownership flag |
-| `get(key: unknown)` | View or undefined; map only. Strings; integers (number or bigint) when the profile admits integer keys or in a top-level cose map; any value under `keys: 'any'`, compared by its deterministic encoding |
+| `get(key: unknown)` | View or undefined; map only. Strings; integers (number or bigint) when the profile admits integer keys or in a top-level cose map; any value under `keys: 'any'`, compared by its deterministic encoding (a view of non-deterministic input reads its canonical copy) |
 | `at(index: number)` | View or undefined; array only; negative/out-of-range integer → undefined, fractional → TypeError |
 | `entries()` | IterableIterator of `[key or index, View]` |
 | `keys()`, `values()` | IterableIterator of keys/indexes or Views |
@@ -617,12 +618,12 @@ Recovery by CBOR/profile code (also applies to `cbor/<code>` reasons):
 | Code | Meaning / next action |
 | --- | --- |
 | `truncated` | Missing bytes/head/content; check framing and retransmit a complete immutable document |
-| `non_shortest` | Non-minimal argument or float width; fix the producer's deterministic encoding |
-| `indefinite` | Indefinite length/break form; produce definite lengths |
+| `non_shortest` | Non-minimal argument or float width (`wire: 'deterministic'`/`'bindle'`); fix the producer's deterministic encoding |
+| `indefinite` | Indefinite length/break form (`wire: 'deterministic'`/`'bindle'`); produce definite lengths |
 | `malformed` | Invalid CBOR head/structure; reject and fix the producer |
 | `key_type` | Key kind/label outside current policy; use text or permitted root COSE labels; check protocol compatibility |
-| `key_order` | Encoded keys out of lexicographic order; fix producer sorting |
-| `duplicate_key` | Duplicate deterministic key; reject, resolve duplicate at the producer |
+| `key_order` | Encoded keys out of lexicographic order (`wire: 'deterministic'`/`'bindle'`); fix producer sorting |
+| `duplicate_key` | Duplicate map key, compared by value (two encodings of one value are one key); reject, resolve duplicate at the producer |
 | `text` | Invalid UTF-8 scalar text or forbidden noncharacter; fix text at the producer |
 | `float` | Scalar width/value violates current policy; use shortest width, integers for safe integral values, and supported finite scalars |
 | `simple` | Unsupported simple value, including undefined; use admitted false/true/null or revise the protocol |

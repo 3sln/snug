@@ -31,17 +31,21 @@ function value(v) {
   return out;
 }
 
+// The deterministic preset's vectors, under `wire: 'deterministic'` (the default is `valid` since P8.4, D260)
+const D = { wire: 'deterministic' };
 for (const v of det.accept) test(`deterministic accept: ${v.name}`, () => {
-  const bytes = fromHex(v.hex), got = decode(bytes);
+  const bytes = fromHex(v.hex), got = decode(bytes, D);
   if ('value' in v) {
     assert.deepStrictEqual(got, value(v.value));
     assert.equal(toHex(encode(value(v.value))), v.reencode ?? v.hex);
   }
   assert.equal(toHex(encode(got)), v.reencode ?? v.hex);
-  assert.deepStrictEqual(view(bytes).value(), got);
-  assert.deepStrictEqual(view(bytes, { borrow: true, directories: true }).value(), got);
-  assert.equal(scanHandleSync(bufferHandle(bytes), {}, { chunk: 3 }), true);
-  const push = pushScanner(bytes.length, {}, { quantum: 2 });
+  assert.deepStrictEqual(view(bytes, D).value(), got);
+  assert.deepStrictEqual(view(bytes, { ...D, borrow: true, directories: true }).value(), got);
+  assert.equal(scanHandleSync(bufferHandle(bytes), D, { chunk: 3 }), true);
+  // deterministic input is valid CBOR: the default reads it alike
+  assert.deepStrictEqual(decode(bytes), got);
+  const push = pushScanner(bytes.length, D, { quantum: 2 });
   for (let i = 0; i < bytes.length; i++) { let s = push.feed(bytes.subarray(i, i + 1)); while (s.state === 'yield') s = push.resume(); }
   assert.equal(push.finalize(), true);
   if (v.bindle === 'ok') assert.deepStrictEqual(decode(bytes, { ...B, top: 'any' }), got);
@@ -50,23 +54,29 @@ for (const v of det.accept) test(`deterministic accept: ${v.name}`, () => {
 
 for (const v of det.refuse) test(`deterministic refuse: ${v.name}`, () => {
   const bytes = fromHex(v.hex);
-  assert.throws(() => decode(bytes), e => e instanceof SnugFault && e.code === v.code);
-  assert.throws(() => view(bytes), e => e instanceof SnugFault && e.code === v.code);
-  assert.throws(() => scanHandleSync(bufferHandle(bytes), {}, { chunk: 2, quantum: 1 }), e => e instanceof SnugFault && e.code === v.code);
+  assert.throws(() => decode(bytes, D), e => e instanceof SnugFault && e.code === v.code);
+  assert.throws(() => view(bytes, D), e => e instanceof SnugFault && e.code === v.code);
+  assert.throws(() => scanHandleSync(bufferHandle(bytes), D, { chunk: 2, quantum: 1 }), e => e instanceof SnugFault && e.code === v.code);
+  // the default (`valid`) answers as the valid preset does
+  const verdict = o => { try { decode(bytes, o); return 'ok'; } catch (e) { return e.code; } };
+  assert.equal(verdict(undefined), verdict({ wire: 'valid' }));
   if (v.bindle === 'ok') decode(bytes, { ...B, top: 'any' });
   else assert.throws(() => decode(bytes, { ...B, top: 'any' }), { name: 'SnugFault', code: v.bindle });
 });
 
 test('option resolution: presets, overrides, refusals of unknown values', () => {
-  assert.equal(profileFlags({}), 122);
+  assert.equal(profileFlags({}), 378);  // the valid preset (D260)
+  assert.equal(profileFlags({ wire: 'valid' }), 378);
   assert.equal(profileFlags({ wire: 'deterministic' }), 122);
   assert.equal(profileFlags(B), 0);
   assert.equal(profileFlags(profiles.deterministic), 122);
   assert.equal(profiles.deterministic.tags, 'any');
-  assert.equal(profileFlags({ tags: 'standard' }), 118);
+  assert.equal(profileFlags({ tags: 'standard' }), 374);
+  assert.equal(profileFlags({ wire: 'deterministic', tags: 'standard' }), 118);
   assert.equal(profileFlags({ wire: 'bindle', tags: 'any' }), 8);
-  assert.equal(profileFlags({ keys: 'text' }), 120);
-  assert.equal(profileFlags({ keys: 'integer' }), 121);
+  assert.equal(profileFlags({ keys: 'text' }), 376);
+  assert.equal(profileFlags({ wire: 'deterministic', keys: 'text' }), 120);
+  assert.equal(profileFlags({ wire: 'deterministic', keys: 'integer' }), 121);
   assert.equal(profileFlags({ wire: 'bindle', keys: 'any', tags: 'standard' }), 6);
   assert.equal(profileFlags({ wire: 'bindle', floats: 'deterministic', undefinedValue: true, noncharacters: true }), 112);
   assert.equal(codecTop({}), 'any'); assert.equal(codecTop(B), 'map'); assert.equal(codecTop({ wire: 'bindle', top: 'any' }), 'any');
@@ -119,9 +129,11 @@ test('encode: Maps, Tagged and undefined under each preset; the profile decides 
   assert.equal(toHex(encode(new Tagged(32, '/relative'))), 'd820692f72656c6174697665');
   for (const [v, code, opts] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(0, '2024-01-01T00:00:60Z'), 'tag'],
     [new Tagged(32, 'http://[x'), 'tag'], [new Tagged(0, '2013-03-21t20:04:00z'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, new Uint8Array(9)), 'tag'],
-    [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest'],
+    [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest', { wire: 'deterministic' }],
     [new Tagged(24, 'text'), 'tag'], [new Map([[1, 0], [1n, 1]]), 'duplicate_key']])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code}`);
+  // a tag-24 payload is valid CBOR under the default; the encoding around it is deterministic
+  assert.equal(toHex(encode(new Tagged(24, Uint8Array.of(0x18, 1)))), 'd818421801');
   assert.throws(() => encode(new Map([[[0], 1]]), { keys: 'integer' }), { code: 'key_type' });
   assert.equal(toHex(encode(new Map([[2n ** 64n - 1n, 0]]), { keys: 'integer' })), 'a11bffffffffffffffff00');
   assert.throws(() => encode(new Map([[2n ** 64n, 0]]), { keys: 'integer' }), { code: 'key_type' });
@@ -207,7 +219,8 @@ test('schemas: the prelude types the deterministic preset admits; float ranges o
     ['f97c00', false], ['f9fc00', false], ['fb3ff199999999999a', false]]) assert.equal(ok('r', hex).ok, want, hex);
   for (const [hex, want] of [['f93e00', true], ['f97c00', true], ['f97e00', false], ['f9fc00', false], ['f93c00', false]]) assert.equal(ok('g', hex).ok, want, hex);
   assert.deepEqual(ok('b', 'd81846' + 'a20101204100'), { ok: true });
-  assert.equal(ok('b', 'd81846' + 'a20101201801').reason, 'cbor/non_shortest');
+  assert.equal(ok('b', 'd81846' + 'a20101201801', { wire: 'deterministic' }).reason, 'cbor/non_shortest');
+  assert.equal(ok('b', 'd81846' + 'a20101201801').reason, 'embedded');  // valid CBOR: the payload's value is not a bstr
   // schema decode builds the same values as decode; resumable validation agrees
   const bytes = fromHex('a20101204100');
   assert.deepStrictEqual(s.decode(bytes, 'k'), new Map([[1, 1], [-1, new Uint8Array([0])]]));
@@ -235,7 +248,7 @@ test('any tag (D180): decode, encode, Writer, views and schemas over tags of any
   for (const [v, code, opts] of [[new Tagged(65535, 0), 'tag'], [new Tagged(2 ** 32 - 1, 0), 'tag'], [new Tagged(2n ** 64n - 1n, 0), 'tag'],
     [new Tagged(65, Uint8Array.of(0)), 'tag'], [new Tagged(87, Uint8Array.of(0)), 'tag'], [new Tagged(64, 'text'), 'tag'],
     [new Tagged(2, Uint8Array.of(1, 2)), 'tag'], [new Tagged(70, Uint8Array.of(0, 0, 0, 0)), 'tag'],
-    [new Tagged(4, [-1, 15]), 'tag'], [new Tagged(18, []), 'tag', { tags: 'standard' }], [new Tagged(2 ** 32, 0), 'tag', { tags: 'standard' }],
+    [new Tagged(4, [-1, 15]), 'tag', { tags: 'bindle' }], [new Tagged(4, [-1, 1.5]), 'decimal'], [new Tagged(18, []), 'tag', { tags: 'standard' }], [new Tagged(2 ** 32, 0), 'tag', { tags: 'standard' }],
     [new Tagged(1000, new Tagged(0, 'x')), 'tag'], [new Tagged(18, new Tagged(18, [])), 'depth', { maxDepth: 1 }]])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code} ${String(v.tag ?? v[0]?.tag)}`);
   // Writer

@@ -894,7 +894,7 @@ export function dupFormsWithin(cb, o, q0, n) {
 export function dupFinish(b, cbr, o, n, cb0) {
     // The top n records (built by dup-input or dup-forms, or retained by a
     // session): 1 unit each, the heap sort by form (ties by offset), then the
-    // neighbours, each comparison ceil(min/64) units (o[O_S_UNITS]); pops
+    // neighbours, each comparison ceil(min/8) units (c64m; o[O_S_UNITS]); pops
     // them and resets o[O_S_CBTOP] to cb0. 0, or duplicate_key at the
     // earliest second occurrence: the smallest offset of a key equal to an
     // earlier one. cbr holds the forms at addresses >= 0 (any buffer when

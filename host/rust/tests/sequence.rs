@@ -101,8 +101,11 @@ fn refusals_carry_index_and_absolute_offsets() {
     let mut seq = Sequence::new(&skip).unwrap();
     let items = seq.feed(&broken);
     assert_eq!(items.len(), 2);
-    assert_eq!(items[1].as_ref().unwrap_err().code(), "indefinite");
+    assert_eq!(items[1].as_ref().unwrap_err().code(), "malformed");  // a lone break (valid default)
     assert!(seq.is_done());
+    let det_skip = SequenceOptions { profile: snug::Profile::DETERMINISTIC, ..skip };
+    let mut seq = Sequence::new(&det_skip).unwrap();
+    assert_eq!(seq.feed(&broken)[1].as_ref().unwrap_err().code(), "indefinite");
     assert!(schema.sequence("nope", &skip).is_err());
 }
 
@@ -130,8 +133,7 @@ fn valid_messages_with_indefinite_items_read_through_their_canonical_copy() {
         vec![0xa1, 0x61, b't', 0x7f, 0x62, b'a', b'b', 0x61, b'c', 0xff],
     ];
     let bytes = parts.concat();
-    let valid = SequenceOptions { profile: snug::Profile::VALID, ..SequenceOptions::default() };
-    let mut seq = Sequence::new(&valid).unwrap();
+    let mut seq = Sequence::new(&SequenceOptions::default()).unwrap();  // the valid default
     let mut got = Vec::new();
     for i in 0..bytes.len() {
         for m in seq.feed(&bytes[i..i + 1]) {
@@ -146,7 +148,7 @@ fn valid_messages_with_indefinite_items_read_through_their_canonical_copy() {
     assert_eq!(got[1].0.view().get("b").and_then(|v| v.uint()), Some(2));
     assert_eq!(got[2].0.view().get("t").and_then(|v| v.text()), Some("abc"));
     // the deterministic preset refuses the first message
-    let mut det = Sequence::new(&SequenceOptions::default()).unwrap();
+    let mut det = Sequence::new(&SequenceOptions { profile: snug::Profile::DETERMINISTIC, ..SequenceOptions::default() }).unwrap();
     assert_eq!(det.feed(&bytes)[0].as_ref().unwrap_err().code(), "indefinite");
 }
 

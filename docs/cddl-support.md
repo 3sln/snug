@@ -4,13 +4,14 @@ snug implements a bounded, explicit subset of RFC 8610 with RFC 9165 controls
 and RFC 9682 grammar updates. Unsupported or unprovable constructs fail at
 compile time; an accepted construct keeps its documented meaning. This is
 not a claim of complete RFC coverage. The wire profile decides which CBOR
-reaches the schema: the default deterministic preset (any tag, D180) gives
+reaches the schema: the default valid preset (any tag, D180) gives
 every prelude name values, while `wire: 'bindle'` makes 14 of them
 uninhabited (`undefined`, for example, is parsed from the prelude but its
 simple value is refused by the scanner; [conformance §f](conformance.md)).
-The default byte check also **refuses valid but non-deterministic CBOR**
-(indefinite lengths, non-shortest heads/floats, unsorted keys); D230 makes
-valid-CBOR acceptance the default (P8.4), not yet implemented.
+Since P8.4 the default byte check accepts any valid CBOR (indefinite lengths,
+non-shortest heads/floats, keys in any order; duplicates compared by value),
+validating non-deterministic input through its canonical copy;
+`wire: 'deterministic'` refuses it ([profiles](profiles.md#valid-cbor-p84-d260d268)).
 
 The compiler and matcher are kin, shared by JS and Rust. This document
 describes the current implementation, informed by D010–D014, D020–D025,

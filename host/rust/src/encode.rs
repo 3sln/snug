@@ -13,7 +13,8 @@ use crate::{DecodeOptions, Error, Floats, Integer, Limits, Profile, Top, TypedAr
 
 /// Encoder options. Encoding permits any root. Output bytes are bounded during
 /// growth, unlike JS's finish-only maxBytes check; kin checks the final result
-/// against the profile (the deterministic preset by default, D081).
+/// against the profile (the valid preset by default, D267; the bytes are
+/// deterministic under every preset).
 #[derive(Debug, Clone, Copy)]
 pub struct EncodeOptions {
     /// Under `Keys::Text`: permit safe integer labels in the top-level map.
@@ -28,7 +29,7 @@ impl Default for EncodeOptions {
         Self {
             cose: false,
             limits: Limits::default(),
-            profile: Profile::DETERMINISTIC,
+            profile: Profile::VALID,
         }
     }
 }
