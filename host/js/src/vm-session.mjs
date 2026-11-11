@@ -48,7 +48,7 @@ export class VmSession {
     const limits = limitWords(opts), cap = Math.max(P[16], 1);
     // the key arena of an unknown-length session is sized for the input limit
     if (unknown) this.limit = vmsUnknownTotal(P, limits);
-    // P9.7 (D326): the arrays come from the Program's pool (zeroed) under the live-session bound, and go back
+    // P9.7 (D327): the arrays come from the Program's pool (zeroed) under the live-session bound, and go back
     // when the session ends, closes or is collected. D286 A3: S as large as earlier sessions on this Program
     // needed (a session's arena starts at the lease, D324, so the room past it holds a canonical item's events)
     this.lease = acquire(program, Math.max(vmScratchWords(P, rule, cap), program.sw || 0), vmsWords(P),

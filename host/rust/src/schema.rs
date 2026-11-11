@@ -21,7 +21,7 @@ pub struct Program {
     /// D286 A3: the largest VM scratch a session on this Program grew to (its room past
     /// the arena holds a canonical item's events): later sessions start that large.
     session_words: Arc<std::sync::atomic::AtomicUsize>,
-    /// P9.7 (D326): idle session arrays, shared by the Program's clones.
+    /// P9.7 (D327): idle session arrays, shared by the Program's clones.
     pool: Arc<crate::sessions::Pool>,
 }
 
@@ -125,7 +125,7 @@ impl Program {
             if ga as usize > ka.len() { ka.resize(ga as usize, 0); }
         }
     }
-    /// P9.7 (D326): a new session's arrays from the pool, zeroed, under the live bound: S
+    /// P9.7 (D327): a new session's arrays from the pool, zeroed, under the live bound: S
     /// at least `rule`'s scratch words and (D286 A3) as large as earlier sessions needed
     /// (a session's arena starts at the lease, D324), the key arena `kab` bytes.
     pub(crate) fn session_arrays(&self, rule: i32, kab: i32) -> Result<crate::sessions::Arrays, crate::sessions::SessionError> {

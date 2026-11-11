@@ -1,4 +1,4 @@
-// P9.7 (D326): the instance's session policy, as the native package's (host/js/src/session-pool.mjs). The
+// P9.7 (D327): the instance's session policy, as the native package's (host/js/src/session-pool.mjs). The
 // bound and the pool of idle session arrays live in the wasm module (sdk_vs_new answers -3 at the bound);
 // a session's arrays are zero-filled before reuse.
 import * as rt from './runtime.mjs';

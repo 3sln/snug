@@ -22,7 +22,7 @@ function openBackend(options, quantum) {
   const { program, rule, opts } = sequenceTarget(options, s => schemaPrograms.get(s), () => (anyProgram ??= new HostProgram(ANY_P, ANY_B)));
   const words = limitWords(opts), { P, B } = program, ext = program.ext, cap = Math.max(P[16], 1);
   const total = vmsUnknownTotal(P, words);
-  // P9.7 (D326): one session for the whole reader, its arrays from the Program's pool under the live bound,
+  // P9.7 (D327): one session for the whole reader, its arrays from the Program's pool under the live bound,
   // released when the sequence ends (close) or the reader is collected
   const lease = acquire(program, vmScratchWords(P, rule, cap), vmsWords(P), vmsArena(P, words, total));
   let { s, ka } = lease.e;

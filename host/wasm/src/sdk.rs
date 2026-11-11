@@ -51,7 +51,7 @@ struct Prog {
     preps: BTreeMap<(i32, i32), Vec<i32>>,
     /// D286 A3: the largest VM scratch a session on this Program grew to.
     sw: std::cell::Cell<usize>,
-    /// P9.7 (D326): idle session arrays (S, SS, key arena) for reuse, zero-filled first.
+    /// P9.7 (D327): idle session arrays (S, SS, key arena) for reuse, zero-filled first.
     idle: Vec<(Vec<i32>, Vec<i32>, Vec<u8>)>,
 }
 
@@ -127,7 +127,7 @@ struct State {
     mark_cap: i32,
     progs: Vec<Option<Prog>>,
     sessions: Vec<Option<Sess>>,
-    /// P9.7 (D326): live VM sessions and their bound; idle arrays' bytes (in the
+    /// P9.7 (D327): live VM sessions and their bound; idle arrays' bytes (in the
     /// Programs' pools) and their bound
     live: usize,
     max_live: usize,
@@ -370,14 +370,14 @@ pub extern "C" fn sdk_prog_free(h: usize) {
         *x = None;
     }
 }
-/// P9.7 (D326): drop every Program's idle session arrays now.
+/// P9.7 (D327): drop every Program's idle session arrays now.
 #[no_mangle]
 pub extern "C" fn sdk_ses_release_pool() {
     let st = st();
     for pr in st.progs.iter_mut().flatten() { pr.idle.clear(); }
     st.pooled = 0;
 }
-/// P9.7 (D326): set the session limits (max_live > 0, max_pooled >= 0; others keep
+/// P9.7 (D327): set the session limits (max_live > 0, max_pooled >= 0; others keep
 /// theirs); INFO[0..4] = max_live, max_pooled, live, pooled bytes. 0.
 #[no_mangle]
 pub extern "C" fn sdk_ses_limits(max_live: i32, max_pooled: i32) -> i32 {
@@ -633,7 +633,7 @@ pub extern "C" fn sdk_rs_new(total: i32, quantum: i32, top_any: i32, cose: i32, 
 pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: i32, l1: i32, l2: i32, l3: i32,
                              l4: i32, l5: i32, l6: i32, l7: i32, flags: i32) -> i32 {
     let st = st();
-    // P9.7 (D326): the live bound (-3), then the arrays from the Program's pool, zeroed
+    // P9.7 (D327): the live bound (-3), then the arrays from the Program's pool, zeroed
     if st.live >= st.max_live { return -3; }
     let pr = match st.progs.get_mut(h) { Some(Some(pr)) => pr, _ => return -1 };
     let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
@@ -764,7 +764,7 @@ pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
 pub extern "C" fn sdk_ses_free(h: usize) {
     let st = st();
     let taken = match st.sessions.get_mut(h) { Some(x) => x.take(), None => None };
-    // P9.7 (D326): a VM session's live slot is freed and its arrays kept for reuse unless too large
+    // P9.7 (D327): a VM session's live slot is freed and its arrays kept for reuse unless too large
     if let Some(Sess::Vm { prog, s, ss, ka, .. }) = taken {
         st.live -= 1;
         let a = (s, ss, ka);

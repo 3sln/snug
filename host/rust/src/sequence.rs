@@ -274,7 +274,7 @@ impl<'p> Sequence<'p> {
     fn start(prog: &'p schema::Program, rule: i32, lim: [i32; 10], options: &SequenceOptions) -> Result<Self, Error> {
         let p = prog.words();
         let total = vms_unknown_total(p, &lim);
-        // P9.7 (D326): the reader's arrays from the Program's pool under the live bound, back on drop
+        // P9.7 (D327): the reader's arrays from the Program's pool under the live bound, back on drop
         let a = prog.session_arrays(rule, vms_arena(p, &lim, total))?;
         Ok(Sequence {
             prog,

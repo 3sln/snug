@@ -688,7 +688,7 @@ test('sequences: regression 2026-11-11 -- a complete 65,541-byte message followe
     }
 });
 
-test('sessions (P9.7, D326): the live bound and release, as the native package', async () => {
+test('sessions (P9.7, D327): the live bound and release, as the native package', async () => {
   const w = await wcompile('r = { id: uint }'), n = await ncompile('r = { id: uint }');
   const bytes = N.encode({ id: 3 });
   for (const [lib, schema, seq] of [[WSRC, w, WSEQ], [NSRC, n, NSEQ]]) {

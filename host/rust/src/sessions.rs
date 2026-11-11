@@ -1,4 +1,4 @@
-//! P9.7 (D326): sessions' arrays pooled per Program, and a bound on live sessions
+//! P9.7 (D327): sessions' arrays pooled per Program, and a bound on live sessions
 //! per process.
 //!
 //! A session ([`crate::schema::Session`], a [`crate::Sequence`] reader) takes its VM

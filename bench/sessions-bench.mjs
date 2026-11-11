@@ -1,4 +1,4 @@
-// P9.7 (D326): session pooling, measured. One arm per process:
+// P9.7 (D327): session pooling, measured. One arm per process:
 //
 //     node --single-threaded-gc --expose-gc bench/sessions-bench.mjs <tree> <pooled|fresh> [n]
 //

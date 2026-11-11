@@ -1,4 +1,4 @@
-// P9.7 (D326): session arrays pooled per Program, a bound on live sessions per isolate.
+// P9.7 (D327): session arrays pooled per Program, a bound on live sessions per isolate.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compile } from 'snug/compile';

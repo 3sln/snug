@@ -1,4 +1,4 @@
-//! P9.7 (D326): session arrays pooled per Program, a bound on live sessions per
+//! P9.7 (D327): session arrays pooled per Program, a bound on live sessions per
 //! process. One test function: the limits and counts are process-wide.
 use snug::schema::{Session, Step};
 use snug::sessions::{self, SessionLimits};

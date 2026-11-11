@@ -50,7 +50,7 @@ const nextTurn = pickYield().turn;
 
 const sessions = new FinalizationRegistry(({ h, gen }) => { if (gen === rt.generation && rt.x) rt.x.sdk_ses_free(h); });
 
-// P9.7 (D326): the instance's session policy
+// P9.7 (D327): the instance's session policy
 export { sessionLimits, releasePool } from './session-limits.mjs';
 
 /** Common to both kinds: the handle, its window in linear memory, and the step. */

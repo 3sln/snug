@@ -423,7 +423,7 @@ with top defaulting to any and limits only lowering the compiled values.
 | `pushScanner(length, options?, { quantum?, failFast? }?)` | `{ feed(chunk), resume(), finalize() }`; `length` undefined: unknown length (drain mode, `end()`) |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
-| `sessionLimits(set?)` | The isolate's session policy (P9.7, D326): `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `snug/sequence` |
+| `sessionLimits(set?)` | The isolate's session policy (P9.7, D327): `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `snug/sequence` |
 | `releasePool()` | Drops every idle pooled session array now (P9.7), e.g. in a long-lived process trimming memory. Also exported by `snug/sequence` |
 
 The Rust host has the same drivers, sync and async (P9.6), over the same
@@ -452,7 +452,7 @@ supplied windows),
 owns exclusive state across suspensions; share Programs, use separate sessions
 for independent validations, and never resume one session concurrently.
 
-**Live sessions and pooling (P9.7, D326).** A session counts as *live* from
+**Live sessions and pooling (P9.7, D327).** A session counts as *live* from
 its creation until it finishes (a `done` step or `end`), fails (an extension
 predicate that threw, an internal error), or is closed. This covers
 `openSession`, handles, push sources, streams and sequence readers; a sequence
