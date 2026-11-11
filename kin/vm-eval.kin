@@ -44,14 +44,15 @@
                                   wit-empty wit-clear wit-set path-put rule1]]
             [snug.vm.dead :refer [head-fail dead-item dead-seq key-order dead-int-streak dead-map-pairs dead-array-elems dead-typed dead-bignum
                                   pair-check decimal-check ndarray-check dead-std-check vtab-find
-                                  pair-walk pair-count replay-end replay-key]]
+                                  pair-walk pair-count replay-end replay-key ev-next]]
+            [snug.cbor.canon :refer [tskip]]
             [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64 eval-leaf cmp-point]]
             [snug.vm.arena :refer [arena-up-top arena-set-up]]
             [snug.vm.array :refer [AB_ALIVE AB_EVK AB_NACT AB_STATUS AB_MODE AB_SP AB_PC AB_IDX AB_HDR AB_DIED
                                    a-run aev leaf-array block-ao apeg array-words array-block-init
                                    array-records array-mark array-candidates array-advance array-end
                                    array-witness]]
-            [snug.vm.map :refer [MB_ALIVE MB_NC MB_NJ MB_CUR MB_CF MB_NP MB_HDR MW key-probe MB_E0 MB_E1 MB_E2 leaf-map block-mt mpeg m-named m-namers
+            [snug.vm.map :refer [MB_ALIVE MB_NC MB_NJ MB_CUR MB_CF MB_NP MB_HDR MW MB_BITS BIT_UNORD named-index key-probe MB_E0 MB_E1 MB_E2 leaf-map block-mt mpeg m-named m-namers
                                  m-member map-words map-block-init map-records map-mark map-unordered
                                  map-is-unordered map-key-ecs key-span-end key-search map-cursor
                                  map-key-query map-key-phase cand-vts map-values map-update
@@ -1332,7 +1333,10 @@
         ^:mut k 0
         ^:mut ps ps0
         ^:mut pe pe0
-        ^:mut klo klo0]
+        ^:mut klo klo0
+        canon (!= (bit-and (ia s O_PROFILE) PF_CANON) 0)
+        ^:mut unord (!= (bit-and (ia s (+ bo MB_BITS)) BIT_UNORD) 0)
+        nev (ev-next s q0)]
     (iset s VM_FASTM 0)
     (if (== mode 2)
       (do (set kleaf (single-leaf p (ia p (+ mt 9))))
@@ -1367,18 +1371,31 @@
             (do (let [klb (+ (ia p H_S_LEAVES) (* 8 kleaf))]
                   (if (or (< kl (ia p (+ klb 2))) (> kl (ia p (+ klb 3)))) (break)))))
           (if (>= (utf8-invalid-at b (+ start kh) kend) 0) (break))
-          (if (>= ps 0) (if (>= (compare-spans b ps pe start kend) 0) (break)))
+          (comment "the order: ascending; over a canonical copy (PF_CANON) a key that does"
+                   "not ascend makes the map unordered (eval-map's map-unordered): from"
+                   "then on every key search covers the whole table and the named table"
+                   "is binary-searched, as the pair-by-pair walk does")
+          (local ^:mut ^Bool uo)
+          (set uo unord)
+          (if (>= ps 0)
+            (do (let [co (compare-spans b ps pe start kend)]
+                  (if (== co 0) (break))
+                  (if (> co 0)
+                    (if canon (set uo true) (break))))))
+          (if uo (set klo 0))
           (let [kid (key-probe p pool b s start kend klo)
                 sk (ia s O_LO)
                 nlo (ia s O_HI)]
             (if (== mode 1)
               (do (if (< kid 0) (break))
-                  (while (and (< cur nn) (< (ia p (+ named (* 3 cur))) kid))
-                    (set cur (+ cur 1)))
-                  (if (or (>= cur nn) (!= (ia p (+ named (* 3 cur))) kid)) (break))
-                  (if (!= (ia p (+ (+ named (* 3 cur)) 2)) 1) (break))
-                  (set nj cur)
-                  (set m (ia p (+ namers (ia p (+ (+ named (* 3 cur)) 1)))))
+                  (if uo
+                    (set nj (named-index p mt kid))
+                    (do (while (and (< cur nn) (< (ia p (+ named (* 3 cur))) kid))
+                          (set cur (+ cur 1)))
+                        (if (and (< cur nn) (== (ia p (+ named (* 3 cur))) kid)) (set nj cur))))
+                  (if (< nj 0) (break))
+                  (if (!= (ia p (+ (+ named (* 3 nj)) 2)) 1) (break))
+                  (set m (ia p (+ namers (ia p (+ (+ named (* 3 nj)) 1)))))
                   (set vlf (single-leaf p (ia p (+ (m-member mt m) 2))))
                   (if (not (streak-value p vlf)) (break)))
               (do (comment "a pure table's cursor: no named keys")
@@ -1396,6 +1413,12 @@
                     (set vunits (ia s O_LO))))
               (if (< vend 0) (break))
               (if (>= (ia s mw) (ia s (+ mw 5))) (break))
+              (comment "a recorded event (D280 replay, over a canonical copy) inside the pair:"
+                       "the pair-by-pair walk replays it; the streak stops before the pair")
+              (if (< nev 2147483647)
+                (do (if (< nev kend) (break))
+                    (if vany (set vend (tskip b s kend)))
+                    (if (< nev vend) (break))))
               (comment "commit: the charges in the walk's order")
               (if (not (charge s (+ sk 1) pos)) (return (neg R_BUDGET)))
               (if (not (charge s 1 start)) (return (neg R_BUDGET)))
@@ -1413,6 +1436,9 @@
                     (iset s O_ITEMS (+ (ia s O_ITEMS) 1))
                     (if (not (charge s (- vunits 3) kend)) (return (neg R_BUDGET)))))
               (comment "the block, as the walk leaves it")
+              (if (and uo (not unord))
+                (do (set unord true)
+                    (iset s (+ bo MB_BITS) (bit-or (ia s (+ bo MB_BITS)) BIT_UNORD))))
               (iset s (+ bo MB_CUR) cur)
               (iset s (+ bo MB_NJ) nj)
               (iset s (+ bo MB_CF) 0)
@@ -1474,8 +1500,7 @@
         (while (< pk n)
           (comment "a streak of simple pairs first (D044), when the shape and state allow")
           (if (and (and (> smap 0) (and (sched2 s) (== nalive 1)))
-                   (and (== (bit-and (ia s VM_GENERIC) (bit-or (bit-or 1 G_FORCED) G_NOSTREAK)) 0)
-                        (and (== (ia s VM_VTAB) 0) (not (map-is-unordered s area nb)))))
+                   (== (bit-and (ia s VM_GENERIC) (bit-or (bit-or 1 G_FORCED) G_NOSTREAK)) 0))
             (do (let [^I32 qm (map-streak p pool b s pos q (- n pk) end d area (block-mt p s fb area) smap cl ps pe klo
                                               cfb cck cw ext)
                       km2 (ia s VM_FASTM)]

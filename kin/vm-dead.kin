@@ -51,6 +51,20 @@
           (if (or (< v pos) (and (== v pos) (< k kind))) (set lo (+ mid 1)) (set hi mid))))
       (return (neg 1)))))
 
+(defn ^:pub ^I32 ev-next [^IntsR s ^I32 pos]
+  (comment "The position of the first recorded event at or after pos, or 2^31 - 1"
+           "(none, or no event table): a streak takes no item an event lies in.")
+  (let [base (ia s VM_VTAB)]
+    (if (== base 0) (return 2147483647))
+    (let [^:mut lo 0
+          n (ia s base)
+          ^:mut hi (ia s base)]
+      (while (< lo hi)
+        (let [mid (sar (+ lo hi) 1)]
+          (if (< (ia s (+ (+ base 4) (* EV_WORDS mid))) pos) (set lo (+ mid 1)) (set hi mid))))
+      (if (>= lo n) (return 2147483647))
+      (return (ia s (+ (+ base 4) (* EV_WORDS lo)))))))
+
 (defn ^:pub ^I32 head-fail [^Bytes b ^Ints s ^I32 pos ^I32 ai ^I32 depth ^I32 r]
   (comment "read-arg answered r < 0 at pos. Over a canonical copy a definite array or"
            "map head is planted malformed where the scanner refused it after its"

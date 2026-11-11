@@ -38,6 +38,30 @@ export function rfind(s, pos, kind) {
     return -1;
 }
 
+export function evNext(s, pos) {
+    // The position of the first recorded event at or after pos, or 2^31 - 1
+    // (none, or no event table): a streak takes no item an event lies in.
+    const base = s[VM_VTAB];
+    if (base === 0) {
+        return 2147483647;
+    }
+    let lo = 0;
+    const n = s[base];
+    let hi = s[base];
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (s[(base + 4) + (EV_WORDS * mid)] < pos) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo >= n) {
+        return 2147483647;
+    }
+    return s[(base + 4) + (EV_WORDS * lo)];
+}
+
 export function headFail(b, s, pos, ai, depth, r) {
     // read-arg answered r < 0 at pos. Over a canonical copy a definite array or
     // map head is planted malformed where the scanner refused it after its

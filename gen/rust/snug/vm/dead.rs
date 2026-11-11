@@ -37,6 +37,29 @@ pub fn rfind(s: &[i32], pos: i32, kind: i32) -> i32 {
     }
     return -1;
 }
+pub fn ev_next(s: &[i32], pos: i32) -> i32 {
+    // The position of the first recorded event at or after pos, or 2^31 - 1
+    // (none, or no event table): a streak takes no item an event lies in.
+    let base: i32 = s[(VM_VTAB) as usize];
+    if base == 0 {
+        return 2147483647;
+    }
+    let mut lo: i32 = 0;
+    let n: i32 = s[(base) as usize];
+    let mut hi: i32 = s[(base) as usize];
+    while lo < hi {
+        let mid: i32 = (lo + hi) >> 1;
+        if s[((base + 4) + (EV_WORDS * mid)) as usize] < pos {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo >= n {
+        return 2147483647;
+    }
+    return s[((base + 4) + (EV_WORDS * lo)) as usize];
+}
 pub fn head_fail(b: &[u8], s: &mut [i32], pos: i32, ai: i32, depth: i32, r: i32) -> i32 {
     // read-arg answered r < 0 at pos. Over a canonical copy a definite array or
     // map head is planted malformed where the scanner refused it after its

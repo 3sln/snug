@@ -10,7 +10,9 @@
 //   vm-canon                    the canonical path forced for every input (vmCanon): the cost without the attempt
 //   sess-det, sess-valid        the session (whole windows, bench driver kin/scripts/vmsession-run.mjs runSession)
 //   scan-nondet, vm-nondet, sess-nondet   valid flags over the non-deterministic re-encoding
-// A tree before P8.4 has the *-det arms only.
+//   vm-rev, sess-rev            valid flags over the deterministic encoding with every map's keys reversed
+//                               (only the order is non-deterministic: the canonical path, the map streak over it, D325)
+// A tree before P8.4 has the *-det arms only. vm arms also report the units used.
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -56,13 +58,28 @@ const nondet = v => {
   walk(v);
   return Uint8Array.from(out);
 };
+// keys reversed, everything else deterministic (definite lengths, shortest heads)
+const rev = v => {
+  const out = [];
+  const det = x => out.push(...encode(x, big));
+  const head = (maj, n) => { if (n < 24) out.push(maj << 5 | n); else if (n < 256) out.push(maj << 5 | 24, n); else out.push(maj << 5 | 25, n >> 8, n & 255); };
+  const walk = x => {
+    if (Array.isArray(x)) { head(4, x.length); x.forEach(walk); return; }
+    if (x && typeof x === 'object' && !(x instanceof Uint8Array)) {
+      const ks = Object.keys(x).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).reverse();
+      head(5, ks.length); for (const k of ks) { det(k); walk(x[k]); } return; }
+    det(x);
+  };
+  walk(v);
+  return Uint8Array.from(out);
+};
 
-const valid = arm.endsWith('valid') || arm.endsWith('nondet') || arm === 'vm-canon', flags = valid ? 378 : 122;
+const valid = arm.endsWith('valid') || arm.endsWith('nondet') || arm.endsWith('rev') || arm === 'vm-canon', flags = valid ? 378 : 122;
 const LIM = Int32Array.from([1, 0, -1, -1, -1, -1, -1, -1, 0, flags]);
 console.log(JSON.stringify({ tree: root, arm, trials, cpu: os.cpus()[0]?.model, node: process.version, v8: process.versions.v8,
   loadavg: os.loadavg().map(x => x.toFixed(1)) }));
 for (const [name, value, cddl] of workloads) {
-  const bytes = arm.endsWith('nondet') ? nondet(value) : encode(value, big);
+  const bytes = arm.endsWith('nondet') ? nondet(value) : arm.endsWith('rev') ? rev(value) : encode(value, big);
   const C = compile(cddl, { limits: BIG }), P = C.program, B = C.pool, rule = C.rules.indexOf('r'), mc = P[16] + 5;
   let s = new Int32Array(V.vmScratchWords(P, rule, mc)); V.vmScratchInit(s, mc);
   let vs = new Int32Array(512), cb = new Uint8Array(1024);
@@ -93,5 +110,5 @@ for (const [name, value, cddl] of workloads) {
   const m = Math.max(1, Math.min(5000, Math.ceil(targetUs / Math.max(1, cpu() - t0))));
   const samples = [];
   for (let r = 0; r < trials; r++) { const t = cpu(); for (let i = 0; i < m; i++) sink = f(); samples.push((cpu() - t) / m); }
-  console.log(JSON.stringify({ name, bytes: bytes.length, arm, us: +median(samples).toFixed(2) }));
+  console.log(JSON.stringify({ name, bytes: bytes.length, arm, us: +median(samples).toFixed(2), ...(arm.startsWith('vm') ? { units: out[3] } : {}) }));
 }
