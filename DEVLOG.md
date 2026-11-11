@@ -5323,7 +5323,7 @@ every item), dropped for the writer's own note; a VM-side tolerant attempt
 (analysis candidate E) -- after the PEG work, re-measured on its map machine.
 **Why**: the second sort is up to a quarter of the canonical path's cost on
 reordered keys, and the copy needs those exact units for D277's charges.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (owner, 2026-11-11, via coordinator: "yes").
 
 ## Findings
 
