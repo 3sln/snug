@@ -4827,6 +4827,24 @@ question in D273.
 
 ## Findings
 
+- 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
+  (PID 44512, killed by the owner) was not reproducible — recorded as a
+  work-in-progress-tree artefact.** It ran `node kin/scripts/scan-test.mjs ""
+  300 1` (empty Rust-binary argument, 300 mutations, seed 1) from P8.4's
+  scratch worktree `scratchpad/p84/wt`, started about 2026-11-05, which the
+  OS `/tmp` cleanup of 2026-11-09 then deleted (node kept the loaded code).
+  The same invocation finishes in seconds, every case correct, on main
+  `add16f8` and on P8.4's checkpoint `8e8016a` (2026-11-04, the closest
+  surviving state), both with and without the cbor2 differential arm
+  (`bench/compare/node_modules` linked in). The exact uncommitted state of
+  that tree is unrecoverable, so a hang in mid-edit code (e.g. a partially
+  emitted gen/ or an unfinished scanner loop) cannot be ruled in or out; no
+  committed scanner reproduces it. **Gap noted:** the scanner and VM loops are
+  synchronous, so an in-process timer cannot interrupt a real hang; gates and
+  property runs should run cases under a watchdog (a worker thread or child
+  process with a per-case CPU limit, as `tools/proptest` already does) so a
+  non-terminating input would be reported with its bytes instead of running
+  for days. Proposed as a small follow-up for the gate scripts.
 - 2026-11-04 (P8.3): quantifier counts must be compared as decimal strings
   before saturating the expansion count. The pre-P8.3 I-Regexp parser accepts
   `(){100000000001,100000000000}` (invalid decreasing bounds), and refuses
