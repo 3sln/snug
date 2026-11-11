@@ -2,12 +2,23 @@
 // source: snug.cbor.vcopy
 
 import { chunkPos, cw, dupFinish, dupFormsWithin, headShort, kclass, moveWithin, putHead, targ, tskip } from './canon.mjs';
-import { CODE_DEPTH, CODE_INDEFINITE, CODE_MALFORMED, CODE_NON_SHORTEST, CODE_SCRATCH, CODE_TEXT, CODE_TOO_MANY_ENTRIES, CODE_TRUNCATED, EV_EMB, EV_END, EV_HEAD, EV_KEY, EV_UNITS, EV_WMARK, EV_WORDS, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ENTRIES, O_MAX_ITEMS, O_PROFILE, O_S_CBASE, O_S_CBTOP, O_S_DLOW, O_S_DUPC, O_S_DUPCO, O_S_DUPK, O_S_DUPO, O_S_DUPP, O_S_EDEPTH, O_S_EXTRA, O_S_FIRST, O_S_NDEF, O_S_NEV, O_S_NSORT, O_S_PBAD, O_S_PLANT, O_S_PLEN, O_S_PMAJ, O_S_PSTOP, O_S_RTOP, O_S_SBASE, O_S_SEND, O_S_SRC, O_S_STOPC, O_S_STOPK, O_S_STOPO, O_S_STOPP, O_S_STOPX, O_S_UNITS, O_VCTL, O_VLEN, O_VNEEDB, O_VNEEDW, PF_NONCHAR, PF_VALID, VC_NONDET } from './codes.mjs';
+import { CODE_DEPTH, CODE_INDEFINITE, CODE_MALFORMED, CODE_NON_SHORTEST, CODE_SCRATCH, CODE_TEXT, CODE_TOO_MANY_ENTRIES, CODE_TRUNCATED, EV_EMB, EV_END, EV_HEAD, EV_KEY, EV_UNITS, EV_WMARK, EV_WORDS, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ENTRIES, O_MAX_ITEMS, O_PROFILE, O_S_CBASE, O_S_CBTOP, O_S_DLOW, O_S_DUPC, O_S_DUPCO, O_S_DUPK, O_S_DUPO, O_S_DUPP, O_S_EDEPTH, O_S_EXTRA, O_S_FIRST, O_S_NDEF, O_S_NEV, O_S_NSORT, O_S_PBAD, O_S_PLANT, O_S_PLEN, O_S_PMAJ, O_S_PSTOP, O_S_RTOP, O_S_SBASE, O_S_SEND, O_S_SRC, O_S_STOPC, O_S_STOPK, O_S_STOPO, O_S_STOPP, O_S_STOPX, O_S_UNITS, O_VCTL, O_VLEN, O_VNEEDB, O_VNEEDW, PF_NONCHAR, PF_VALID, VC_ECS, VC_NONDET, VC_UNSORTED } from './codes.mjs';
 import { headSize } from './head.mjs';
 import { compareSpans } from './keys.mjs';
 import { runDefer, scanFloat, scanItem } from './scan.mjs';
 import { stdAllowed } from './stdtags.mjs';
 import { utf8InvalidAt, utf8InvalidAtNc } from './text.mjs';
+
+export const O_S_XEND = 45;
+
+export const O_S_T24 = 46;
+
+export function pwLeaf(cb, o, x, y) {
+    // A leaf (or a string) in DC form, its source end in o[O_S_XEND].
+    const r = cw(cb, o, x, y, 0);
+    o[O_S_XEND] = tskip(cb, o, x);
+    return r;
+}
 
 export function evAdd(o, pos, kind, a, b2, c) {
     // Append an event (arguments a, b2, c; the last two words 0); 0, or
@@ -253,27 +264,13 @@ export function pwIstr(cb, o, x, y) {
         q = c + lo;
     }
     if (code === 0) {
-        return cw(cb, o, x, y, 0);
+        return pwLeaf(cb, o, x, y);
     }
     if (code === CODE_TEXT) {
         o[O_S_PBAD] = tl - ((c0 + lo0) - at);
         return pwStop(o, y, code, at, x, 2, 3, tl);
     }
     return pwStop(o, y, code, at, x, 0, major, 0);
-}
-
-export function pwKeysCanon(cb, o, q0, n) {
-    // Does any of the n keys of the source map's pairs from cb[q0] fail to be
-    // canonical (kclass bit 0)?
-    let q = q0;
-    for (let _i = 0; _i < n; _i++) {
-        if ((kclass(cb, o, q) & 1) !== 0) {
-            return 1;
-        }
-        const ke = tskip(cb, o, q);
-        q = tskip(cb, o, ke);
-    }
-    return 0;
 }
 
 export function pwRehead(cb, o, y, hl0, t, major, cnt, i0) {
@@ -324,6 +321,7 @@ export function pwIndef(cb, o, x, y, depth) {
     let t = y + 9;
     let k = 0;
     let r = 0;
+    let kn = 0;
     let half = 0;
     for (;;) {
         if ((half === 0) && (q >= send)) {
@@ -346,8 +344,14 @@ export function pwIndef(cb, o, x, y, depth) {
             t = o[O_S_STOPP];
             break;
         }
+        // the SOURCE key's form decides the mark, as for a definite map (D277)
+        if ((major === 5) && (half === 0)) {
+            if ((kclass(cb, o, q) & 1) !== 0) {
+                kn = 1;
+            }
+        }
         t = ty;
-        q = tskip(cb, o, q);
+        q = o[O_S_XEND];
         if ((major === 4) || (half === 1)) {
             k += 1;
             half = 0;
@@ -361,7 +365,7 @@ export function pwIndef(cb, o, x, y, depth) {
         cnt = k + 1;
     }
     if ((major === 5) && (r === 0)) {
-        if (pwKeysCanon(cb, o, y + 9, k) !== 0) {
+        if (kn !== 0) {
             const w = evAdd(o, y, EV_WMARK, 0, 0, 0);
             if (w < 0) {
                 return -1;
@@ -384,6 +388,7 @@ export function pwIndef(cb, o, x, y, depth) {
     if (r < 0) {
         return r;
     }
+    o[O_S_XEND] = q + 1;
     return cend;
 }
 
@@ -446,10 +451,10 @@ export function pw(cb, o, x, y, depth) {
         if (((ai === 24) && (cb[x + 1] < 32)) && ((o[O_PROFILE] & PF_VALID) !== 0)) {
             return pwBad(cb, o, y, CODE_MALFORMED, x);
         }
-        return cw(cb, o, x, y, 0);
+        return pwLeaf(cb, o, x, y);
     }
     if (major <= 1) {
-        return cw(cb, o, x, y, 0);
+        return pwLeaf(cb, o, x, y);
     }
     const c = targ(cb, o, x);
     const hi = o[O_HI];
@@ -459,11 +464,14 @@ export function pw(cb, o, x, y, depth) {
         if ((hi !== 0) || ((lo < 0) || (lo > left))) {
             return pwBad(cb, o, y, CODE_TRUNCATED, x);
         }
-        return cw(cb, o, x, y, 0);
+        return pwLeaf(cb, o, x, y);
     }
     if (major === 6) {
         if (depth >= o[O_MAX_DEPTH]) {
             return pwBad(cb, o, y, CODE_DEPTH, x);
+        }
+        if ((hi === 0) && (lo === 24)) {
+            o[O_S_T24] = 1;
         }
         const y6 = putHead(cb, y, 6, hi, lo);
         if (y6 < 0) {
@@ -504,6 +512,8 @@ export function pw(cb, o, x, y, depth) {
     if (major === 5) {
         kk = 2 * lo;
     }
+    let kn;
+    kn = 0;
     for (let i = 0; i < kk; i++) {
         if (((major === 5) && ((i & 1) === 0)) && (q >= send)) {
             // the end of input where a key would begin: before any visit
@@ -517,10 +527,16 @@ export function pw(cb, o, x, y, depth) {
         if (z < 0) {
             return z;
         }
-        q = tskip(cb, o, q);
+        if ((major === 5) && ((i & 1) === 0)) {
+            if ((kclass(cb, o, q) & 1) !== 0) {
+                kn = 1;
+            }
+        }
+        q = o[O_S_XEND];
     }
+    o[O_S_XEND] = q;
     if (major === 5) {
-        if (pwKeysCanon(cb, o, c, lo) !== 0) {
+        if (kn !== 0) {
             const w3 = evAdd(o, y, EV_WMARK, 0, 0, 0);
             if (w3 < 0) {
                 return -1;
@@ -606,7 +622,7 @@ export function region(cb, o, src, send, y, seq, pad) {
             stopped = true;
         } else {
             z = r;
-            q = tskip(cb, o, q);
+            q = o[O_S_XEND];
         }
     } else {
         while ((q < send) && (!stopped)) {
@@ -618,7 +634,7 @@ export function region(cb, o, src, send, y, seq, pad) {
                 stopped = true;
             } else {
                 z = r2;
-                q = tskip(cb, o, q);
+                q = o[O_S_XEND];
             }
         }
     }
@@ -984,6 +1000,50 @@ export function uvisitSeq(o, cb, y0, lim, pstop, all) {
     return 0;
 }
 
+export function mayTag24(b, start, n) {
+    // D286: can b[start, start + n) hold a tag 24 -- some head d8 18, d9 00 18,
+    // da 00 00 00 18 or db 00 .. 00 18 anywhere (a byte search for a copy the
+    // prefix writer did not write: content bytes may match too, which only costs
+    // a visit)? 1 or 0.
+    const end = start + n;
+    let i = start;
+    while (i < end) {
+        const v = b[i];
+        if ((v >= 216) && (v <= 219)) {
+            const w = 1 << (v - 216);
+            let j = 1;
+            let ok = true;
+            if ((i + w) < end) {
+                while (ok && (j < w)) {
+                    if (b[i + j] !== 0) {
+                        ok = false;
+                    }
+                    j += 1;
+                }
+                if (ok && (b[i + w] === 24)) {
+                    return 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    return 0;
+}
+
+export function buildRegion(b, o, cb, start, n, same) {
+    // The copy's region (D286): for an accepted item that is its own DC form
+    // (same != 0: only its key order or EC-sensitive keys differ from
+    // deterministic) the input's bytes again, without the prefix writer; else
+    // region's.
+    if (same === 0) {
+        return region(cb, o, 0, n, n, 0, n + 64);
+    }
+    cb.set(b.subarray(start, (start) + (n)), n);
+    o[O_S_STOPP] = -1;
+    o[O_S_PSTOP] = -1;
+    return 2 * n;
+}
+
 /**
  * The canonical copy (D264) of the CHECKED item b[start, end) under the
  * scanner's verdict `refused` (0 accepted; else its duplicate refusal, if it is
@@ -1000,6 +1060,8 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
     const dofs = o[O_S_DUPO];
     const all = embeds - 1;
     const mx0 = o[O_MAX_DEPTH];
+    const su0 = o[O_S_UNITS];
+    const vc0 = o[O_VCTL];
     o[O_S_NEV] = 0;
     o[O_S_NSORT] = 0;
     o[O_S_DLOW] = o.length;
@@ -1022,7 +1084,13 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
         o[O_S_DUPP] = -1;
         o[O_S_DUPO] = -1;
     }
-    const l = region(cb, o, 0, n, n, 0, n + 64);
+    let same;
+    same = 0;
+    o[O_S_T24] = 0;
+    if (((refused === 0) && ((vc0 & VC_NONDET) === 0)) && (embeds === 1)) {
+        same = 1;
+    }
+    const l = buildRegion(b, o, cb, start, n, same);
     const stop = o[O_S_STOPP];
     const pstop = o[O_S_PSTOP];
     const lim = limOf(stop, l);
@@ -1040,7 +1108,14 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
     o[O_S_DUPO] = -1;
     o[O_VLEN] = l;
     o[O_S_CBTOP] = l;
-    if (embeds > 0) {
+    let t24;
+    t24 = o[O_S_T24];
+    if (same === 1) {
+        t24 = mayTag24(cb, n, n);
+    }
+    // D286: an accepted item without a tag 24 under a Program without .cbor
+    // has no content to visit
+    if ((embeds > 0) && (((embeds === 2) || (refused !== 0)) || (t24 !== 0))) {
         let y = n;
         while (y < lim) {
             y = visit(b, o, cb, y, lim, all, 0, 0, mx0);
@@ -1074,6 +1149,12 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
     // D277: the units, over the main copy and every embedded copy (the
     // events so far sorted for the lookups)
     evSort(o);
+    // D286: an accepted item with no marked map (the scanner charged no units
+    // and saw no unsorted or EC-sensitive key: it marks under the same rules,
+    // and a marked map charges at least 1) and no embedded copy has no units
+    if (((refused === 0) && (su0 === 0)) && (((vc0 & (VC_UNSORTED | VC_ECS)) === 0) && (o[O_S_NEV] === 0))) {
+        return l;
+    }
     const ne = o[O_S_NEV];
     const ru = uvisitSeq(o, cb, n, lim, pstop, all);
     if (ru < 0) {

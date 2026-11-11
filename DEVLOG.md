@@ -4783,6 +4783,32 @@ S, still grown once per session for the copy's events -- follow-ups **A2**
 (size `vs`, `cb` and S in one round from a scanner count, `vbuild`: after the
 PEG merge) and **A3** (a per-Program S size hint in the hosts). E waits for
 PEG phase 2. Gates and numbers: bench/D286-analysis.md "Implementation log".
+**B+C done (2026-11-11, on the PEG merge `920a3e1`).** `kin/vcopy.kin` only:
+the prefix writer leaves each item's source end in `O_S_XEND` (no `tskip` per
+child at every depth; `pw-keys-canon` folded into the loops); `visit` runs
+only when the writer copied a tag 24 (`O_S_T24`), the Program has `.cbor`, or
+the item was refused; `uvisit` is skipped for an accepted item whose scanner
+charged no units and saw no unsorted or EC-sensitive key; an accepted item that
+is its own DC form (`VC_NONDET` clear, no `.cbor`) is copied with `bcopy`
+instead of the writer (`build-region`; a byte search, `may-tag24`, decides its
+visit). The scanner and the codec entry are untouched (a scanner tag-24 bit
+did not fit the `snug` cap). **Fixed with it (D277 budget identity):** an
+indefinite-length map with a key that is not its own DC form was never marked
+on the canonical copy (`pw-indef` tested the copied keys, always canonical),
+so the buffer driver charged no deferred-check units where the session's
+frames did (`bf 7f6161ff 01 ff`: budget 9 vs 10); 4 vectors added to
+valid-test's fixed regressions. The copy and its events equal `920a3e1` plus
+that fix on 200,000 random items (`.cache/d286d/bench/d286/units-diff.mjs`).
+Buffer driver, `920a3e1` -> B+C: integers indefinite / non-shortest 1.6-1.7x,
+maps and map-heavy indefinite / non-shortest / indefinite strings 1.2-1.4x,
+reordered keys 1.15-1.2x, deterministic unchanged; `runtime` +529 min / +206
+gzip, within the caps. Gates (clean worktree on `920a3e1`): valid-test (cbor2
+differential, D321 144/144, regressions 139/139), vmsession-test (1,059,010
+session runs == buffer; JS == Rust 692,451; 523,529 untold-length streams;
+hosts), sequence-test (735,997 oracle runs; JS == Rust 182,190; release
+latency 0/67,257), vm-test (JS == Rust 80,509, forced tiers, JS == wasm
+78,215), scan-test, rscan-test, drift, rust-api-test, wasm-sdk-test 14/14, npm
+1,450/1,450, size: ok.
 
 ### D287 — Bundle growth for `Simple` values (D284; R9 per D200)
 **Decision** (D284's engineer, provisional): no cap changes; every entry stays

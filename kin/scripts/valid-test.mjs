@@ -354,7 +354,10 @@ function shifted(outStr, at, k) {
     // tag 4 under valid with the Bindle tag set: the any-width content path on both sides
     ['c483217f196ab3', 32], ['c49221196ab3', 3],
     // an indefinite array past the entry bound in a session's frame (an integer streak stops at the bound)
-    ['a161619f00200000000000ff', 4, 2], ['9f0102030405ff', 4, 3]];
+    ['a161619f00200000000000ff', 4, 2], ['9f0102030405ff', 4, 3],
+    // D286: an indefinite map with a key not its own DC form is marked (its deferred check's units charged) on the
+    // buffer driver's canonical path as in the session's frames (the copy's writer tested the copied key before)
+    ['bf7f616163626364fff6ff', 8], ['9fbf7f616163626364fff6ffff', 8], ['bf7f6161ff01ff', 8], ['bf1801f6ff', 8]];
   let n = 0, ok = 0;
   for (const [h, md, me = 3] of REG) for (const flags of [PF_DET, PF_VALID, 256]) {
     const bytes = unhex(h), extra = { maxDepth: md, maxEntries: me, maxItems: 64 }, sc = scanOpt(bytes, flags, extra);

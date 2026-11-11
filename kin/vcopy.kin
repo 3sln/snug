@@ -47,8 +47,8 @@
 ;; it); above, a position in a copy (embedded content's source is a copy).
 ;; Integer-only (D009).
 (ns snug.cbor.vcopy
-  (:require [kin.lang :refer [defn let local return set if while for do comment doc declarefn forever break]]
-            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg sar ushr bit-and bit-or
+  (:require [kin.lang :refer [defn let local return set if while for do comment doc declarefn forever break defconst]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg sar shl ushr bit-and bit-or
                                < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
             [snug.cbor.codes :refer [CODE_SCRATCH CODE_TRUNCATED CODE_MALFORMED CODE_DEPTH CODE_TEXT
                                      CODE_NON_SHORTEST CODE_INDEFINITE PF_VALID
@@ -59,7 +59,7 @@
                                      O_S_SBASE O_S_SEND O_S_NEV O_S_STOPP O_S_STOPK O_S_STOPC O_S_STOPO
                                      O_S_DUPK O_S_DUPP O_S_DUPO O_S_DUPC O_S_PLANT O_S_PMAJ O_S_PLEN
                                      O_S_STOPX O_S_CBASE O_S_PSTOP O_S_NSORT O_S_DUPCO O_S_PBAD O_S_EDEPTH O_S_FIRST
-                                     EV_HEAD EV_END EV_KEY EV_WMARK EV_EMB EV_UNITS EV_WORDS VC_NONDET]]
+                                     EV_HEAD EV_END EV_KEY EV_WMARK EV_EMB EV_UNITS EV_WORDS VC_NONDET VC_UNSORTED VC_ECS]]
             [snug.cbor.head :refer [head-size]]
             [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
             [snug.cbor.keys :refer [compare-spans]]
@@ -69,6 +69,18 @@
             [snug.cbor.stdtags :refer [std-allowed]]))
 
 (declarefn pw uvisit tskip-l map-back-p embed-check-in vmap-x)
+
+;; D286: the source end of the item pw last wrote, so a container's loop needs no
+;; tskip per child (a byte at depth d was re-walked d + 1 times)
+(defconst ^I32 O_S_XEND 45)
+;; D286: 1 when the prefix writer copied a tag 24 (the copy's visit walks only then)
+(defconst ^I32 O_S_T24 46)
+
+(defn ^I32 pw-leaf [^BytesW cb ^Ints o ^I32 x ^I32 y]
+  (comment "A leaf (or a string) in DC form, its source end in o[O_S_XEND].")
+  (let [r (cw cb o x y 0)]
+    (iset o O_S_XEND (tskip cb o x))
+    (return r)))
 
 ;; ------------------------------------------------------------ events
 
@@ -258,21 +270,11 @@
                         (break))))))
           (set tl (+ tl lo))
           (set q (+ c lo)))))
-    (if (== code 0) (return (cw cb o x y 0)))
+    (if (== code 0) (return (pw-leaf cb o x y)))
     (if (== code CODE_TEXT)
       (do (iset o O_S_PBAD (- tl (- (+ c0 lo0) at)))
           (return (pw-stop o y code at x 2 3 tl))))
     (return (pw-stop o y code at x 0 major 0))))
-
-(defn ^I32 pw-keys-canon [^BytesW cb ^Ints o ^I32 q0 ^I32 n]
-  (comment "Does any of the n keys of the source map's pairs from cb[q0] fail to be"
-           "canonical (kclass bit 0)?")
-  (let [^:mut q q0]
-    (for [^I32 _i 0 n]
-      (if (!= (bit-and (kclass cb o q) 1) 0) (return 1))
-      (let [ke (tskip cb o q)]
-        (set q (tskip cb o ke))))
-    (return 0)))
 
 (defn ^I32 pw-rehead [^BytesW cb ^Ints o ^I32 y ^I32 hl0 ^I32 t ^I32 major ^I32 cnt ^I32 i0]
   (comment "The container at copy position y, its head hl0 bytes (reserved) and its"
@@ -314,6 +316,7 @@
         ^:mut t (+ y 9)
         ^:mut k 0
         ^:mut r 0
+        ^:mut kn 0
         ^:mut half 0]
     (forever
       (if (and (== half 0) (>= q send))
@@ -329,8 +332,11 @@
           (do (set r ty)
               (set t (ia o O_S_STOPP))
               (break)))
+        (comment "the SOURCE key's form decides the mark, as for a definite map (D277)")
+        (if (and (== major 5) (== half 0))
+          (if (!= (bit-and (kclass cb o q) 1) 0) (set kn 1)))
         (set t ty)
-        (set q (tskip cb o q))
+        (set q (ia o O_S_XEND))
         (if (or (== major 4) (== half 1))
           (do (set k (+ k 1))
               (set half 0))
@@ -339,7 +345,7 @@
     (set cnt k)
     (if (== r (neg 2)) (set cnt (+ k 1)))
     (if (and (== major 5) (== r 0))
-      (if (!= (pw-keys-canon cb o (+ y 9) k) 0)
+      (if (!= kn 0)
         (do (let [w (ev-add o y EV_WMARK 0 0 0)]
               (if (< w 0) (return (neg 1)))))))
     (let [cend (pw-rehead cb o y 9 t major cnt i0)
@@ -350,6 +356,7 @@
       (if (== r (neg 3)) (return (pw-cstop o cs cend CODE_TOO_MANY_ENTRIES x y)))
       (if (== r (neg 4)) (return (pw-cstop o cs cend CODE_TRUNCATED q cend)))
       (if (< r 0) (return r))
+      (iset o O_S_XEND (+ q 1))
       (return cend))))
 
 (defn ^:pub ^I32 pw [^BytesW cb ^Ints o ^I32 x ^I32 y ^I32 depth]
@@ -388,17 +395,18 @@
       (if (== major 7)
         (do (if (and (and (== ai 24) (< (u8 cb (+ x 1)) 32)) (!= (bit-and (ia o O_PROFILE) PF_VALID) 0))
               (return (pw-bad cb o y CODE_MALFORMED x)))
-            (return (cw cb o x y 0))))
-      (if (<= major 1) (return (cw cb o x y 0)))
+            (return (pw-leaf cb o x y))))
+      (if (<= major 1) (return (pw-leaf cb o x y)))
       (let [c (targ cb o x)
             hi (ia o O_HI)
             lo (ia o O_LO)
             left (- send c)]
         (if (<= major 3)
           (do (if (or (!= hi 0) (or (< lo 0) (> lo left))) (return (pw-bad cb o y CODE_TRUNCATED x)))
-              (return (cw cb o x y 0))))
+              (return (pw-leaf cb o x y))))
         (if (== major 6)
           (do (if (>= depth (ia o O_MAX_DEPTH)) (return (pw-bad cb o y CODE_DEPTH x)))
+              (if (and (== hi 0) (== lo 24)) (iset o O_S_T24 1))
               (let [y6 (put-head cb y 6 hi lo)]
                 (if (< y6 0) (return (neg 1)))
                 (return (pw cb o c y6 (+ depth 1))))))
@@ -420,6 +428,8 @@
               ^:mut kk lo]
           (if (< z0 0) (return (neg 1)))
           (if (== major 5) (set kk (* 2 lo)))
+          (local ^:mut ^I32 kn)
+          (set kn 0)
           (for [^I32 i 0 kk]
             (if (and (and (== major 5) (== (bit-and i 1) 0)) (>= q send))
               (do (comment "the end of input where a key would begin: before any visit")
@@ -428,9 +438,12 @@
                     (return (pw-cstop o (+ y (- (- z0 y) (- z ce))) ce CODE_TRUNCATED q ce)))))
             (set z (pw cb o q z (+ depth 1)))
             (if (< z 0) (return z))
-            (set q (tskip cb o q)))
+            (if (and (== major 5) (== (bit-and i 1) 0))
+              (if (!= (bit-and (kclass cb o q) 1) 0) (set kn 1)))
+            (set q (ia o O_S_XEND)))
+          (iset o O_S_XEND q)
           (if (== major 5)
-            (if (!= (pw-keys-canon cb o c lo) 0)
+            (if (!= kn 0)
               (do (let [w3 (ev-add o y EV_WMARK 0 0 0)]
                     (if (< w3 0) (return (neg 1)))))))
           (return z))))))
@@ -492,11 +505,11 @@
     (if (== seq 0)
       (do (let [r (pw cb o q z 0)]
             (if (== r (neg 1)) (return r))
-            (if (< r 0) (set stopped true) (do (set z r) (set q (tskip cb o q))))))
+            (if (< r 0) (set stopped true) (do (set z r) (set q (ia o O_S_XEND))))))
       (while (and (< q send) (not stopped))
         (let [r2 (pw cb o q z 0)]
           (if (== r2 (neg 1)) (return r2))
-          (if (< r2 0) (set stopped true) (do (set z r2) (set q (tskip cb o q)))))))
+          (if (< r2 0) (set stopped true) (do (set z r2) (set q (ia o O_S_XEND)))))))
     (local ^:mut ^I32 zp)
     (set zp z)
     (if stopped
@@ -751,6 +764,38 @@
 
 ;; ------------------------------------------------------------ the build
 
+(defn ^I32 may-tag24 [^Bytes b ^I32 start ^I32 n]
+  (comment "D286: can b[start, start + n) hold a tag 24 -- some head d8 18, d9 00 18,"
+           "da 00 00 00 18 or db 00 .. 00 18 anywhere (a byte search for a copy the"
+           "prefix writer did not write: content bytes may match too, which only costs"
+           "a visit)? 1 or 0.")
+  (let [end (+ start n)
+        ^:mut i start]
+    (while (< i end)
+      (let [v (u8 b i)]
+        (if (and (>= v 216) (<= v 219))
+          (do (let [w (shl 1 (- v 216))
+                    ^:mut j 1
+                    ^:mut ok true]
+                (if (< (+ i w) end)
+                  (do (while (and ok (< j w))
+                        (if (!= (u8 b (+ i j)) 0) (set ok false))
+                        (set j (+ j 1)))
+                      (if (and ok (== (u8 b (+ i w)) 24)) (return 1))))))))
+      (set i (+ i 1)))
+    (return 0)))
+
+(defn ^I32 build-region [^Bytes b ^Ints o ^BytesW cb ^I32 start ^I32 n ^I32 same]
+  (comment "The copy's region (D286): for an accepted item that is its own DC form"
+           "(same != 0: only its key order or EC-sensitive keys differ from"
+           "deterministic) the input's bytes again, without the prefix writer; else"
+           "region's.")
+  (if (== same 0) (return (region cb o 0 n n 0 (+ n 64))))
+  (bcopy cb n b start n)
+  (iset o O_S_STOPP (neg 1))
+  (iset o O_S_PSTOP (neg 1))
+  (return (* 2 n)))
+
 (doc "The canonical copy (D264) of the CHECKED item b[start, end) under the"
      "scanner's verdict `refused` (0 accepted; else its duplicate refusal, if it is"
      "one, in o[O_S_DUP*]): the input copied to cb[0, n), the copy written from"
@@ -764,7 +809,9 @@
         dp (ia o O_S_DUPP)
         dofs (ia o O_S_DUPO)
         all (- embeds 1)
-        mx0 (ia o O_MAX_DEPTH)]
+        mx0 (ia o O_MAX_DEPTH)
+        su0 (ia o O_S_UNITS)
+        vc0 (ia o O_VCTL)]
     (iset o O_S_NEV 0)
     (iset o O_S_NSORT 0)
     (iset o O_S_DLOW (ilen o))
@@ -784,7 +831,12 @@
           (iset o O_S_DUPO (- dofs start)))
       (do (iset o O_S_DUPP (neg 1))
           (iset o O_S_DUPO (neg 1))))
-    (let [l (region cb o 0 n n 0 (+ n 64))
+    (local ^:mut ^I32 same)
+    (set same 0)
+    (iset o O_S_T24 0)
+    (if (and (and (== refused 0) (== (bit-and vc0 VC_NONDET) 0)) (== embeds 1))
+      (set same 1))
+    (let [l (build-region b o cb start n same)
           stop (ia o O_S_STOPP)
           pstop (ia o O_S_PSTOP)
           lim (lim-of stop l)]
@@ -798,7 +850,12 @@
       (iset o O_S_DUPO (neg 1))
       (iset o O_VLEN l)
       (iset o O_S_CBTOP l)
-      (if (> embeds 0)
+      (local ^:mut ^I32 t24)
+      (set t24 (ia o O_S_T24))
+      (if (== same 1) (set t24 (may-tag24 cb n n)))
+      (comment "D286: an accepted item without a tag 24 under a Program without .cbor"
+               "has no content to visit")
+      (if (and (> embeds 0) (or (or (== embeds 2) (!= refused 0)) (!= t24 0)))
         (do (let [^:mut y n]
               (while (< y lim)
                 (set y (visit b o cb y lim all 0 0 mx0))
@@ -819,6 +876,12 @@
       (comment "D277: the units, over the main copy and every embedded copy (the"
                "events so far sorted for the lookups)")
       (ev-sort o)
+      (comment "D286: an accepted item with no marked map (the scanner charged no units"
+               "and saw no unsorted or EC-sensitive key: it marks under the same rules,"
+               "and a marked map charges at least 1) and no embedded copy has no units")
+      (if (and (and (== refused 0) (== su0 0))
+               (and (== (bit-and vc0 (bit-or VC_UNSORTED VC_ECS)) 0) (== (ia o O_S_NEV) 0)))
+        (return l))
       (let [ne (ia o O_S_NEV)
             ru (uvisit-seq o cb n lim pstop all)]
         (if (< ru 0) (return ru))

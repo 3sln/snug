@@ -289,3 +289,33 @@ runs) ok, valid-test ok (cbor2 differential run: 0 unexplained), vm-test,
 scan-test, rscan-test, drift, rust-api-test (clippy), wasm-sdk-test 14/14, npm
 1,438/1,438, size ok; re-run on `1db9ed9` + A1: npm 1,449/1,449, valid-test,
 rust-api-test ok.
+
+### B + C — a leaner prefix writer, no empty walks, no copy when bytes do not change (2026-11-11, on `920a3e1`)
+
+As prototyped above, with two changes. The scanner is not touched: a tag-24
+outcome bit pushed the `snug` codec entry past its cap, so the prefix writer
+notes a tag 24 itself (`O_S_T24`), and the identity copy runs a byte search
+for one. `pw-indef` now tests the source keys: this fixes a D277 budget-identity
+bug on main (an indefinite map whose key was not its own DC form charged its
+deferred check's units in the session's frames but not on the buffer driver's
+canonical copy). The copy and events equal `920a3e1` plus that fix on 200,000
+random items. Buffer driver (`bench/d286/variants.mjs vm`, five rotated
+rounds, median µs, load 27–30). The PEG merge itself changed the baseline:
+maps `det` is 18.8 ms here, against 4.6 ms on `cfbdda3` (reported to the PEG
+engineer).
+
+| | `920a3e1` | B+C | |
+| --- | ---: | ---: | ---: |
+| 20000 integers `ind` | 5,103 | 3,222 | 1.58× |
+| 20000 integers `nsh` | 4,581 | 2,639 | 1.74× |
+| 2000 maps `rev` | 37,954 | 31,341 | 1.21× |
+| 2000 maps `ind` | 30,463 | 24,721 | 1.23× |
+| 2000 maps `all` | 39,167 | 37,165 | 1.05× |
+| map-heavy `rev` | 45,326 | 38,895 | 1.17× |
+| map-heavy `ind` | 29,679 | 23,336 | 1.27× |
+| map-heavy `istr` | 30,483 | 21,691 | 1.41× |
+| 5000 strings `istr` | 4,736 | 4,154 | 1.14× |
+| deterministic (all four) | — | 0.96–1.04 | — |
+
+Size: `runtime` 169,519 / 60,583 → 170,048 / 60,789 (min / gzip); the codec
+entry is unchanged. Gates are listed in the DEVLOG note under D286.

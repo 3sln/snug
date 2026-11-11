@@ -9,6 +9,14 @@ use crate::snug::cbor::scan::*;
 use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::text::*;
 
+pub(crate) const O_S_XEND: i32 = 45;
+pub(crate) const O_S_T24: i32 = 46;
+pub(crate) fn pw_leaf(cb: &mut [u8], o: &mut [i32], x: i32, y: i32) -> i32 {
+    // A leaf (or a string) in DC form, its source end in o[O_S_XEND].
+    let r: i32 = cw(cb, o, x, y, 0);
+    o[(O_S_XEND) as usize] = tskip(cb, o, x);
+    return r;
+}
 pub fn ev_add(o: &mut [i32], pos: i32, kind: i32, a: i32, b2: i32, c: i32) -> i32 {
     // Append an event (arguments a, b2, c; the last two words 0); 0, or
     // -CODE_SCRATCH with o[O_VNEEDW] raised. The record stack (O_S_RTOP)
@@ -241,26 +249,13 @@ pub(crate) fn pw_istr(cb: &mut [u8], o: &mut [i32], x: i32, y: i32) -> i32 {
         q = c + lo;
     }
     if code == 0 {
-        return cw(cb, o, x, y, 0);
+        return pw_leaf(cb, o, x, y);
     }
     if code == CODE_TEXT {
         o[(O_S_PBAD) as usize] = tl - ((c0 + lo0) - at);
         return pw_stop(o, y, code, at, x, 2, 3, tl);
     }
     return pw_stop(o, y, code, at, x, 0, major, 0);
-}
-pub(crate) fn pw_keys_canon(cb: &mut [u8], o: &mut [i32], q0: i32, n: i32) -> i32 {
-    // Does any of the n keys of the source map's pairs from cb[q0] fail to be
-    // canonical (kclass bit 0)?
-    let mut q: i32 = q0;
-    for _i in 0..n {
-        if (kclass(cb, o, q) & 1) != 0 {
-            return 1;
-        }
-        let ke: i32 = tskip(cb, o, q);
-        q = tskip(cb, o, ke);
-    }
-    return 0;
 }
 pub(crate) fn pw_rehead(cb: &mut [u8], o: &mut [i32], y: i32, hl0: i32, t: i32, major: i32, cnt: i32, i0: i32) -> i32 {
     // The container at copy position y, its head hl0 bytes (reserved) and its
@@ -308,6 +303,7 @@ pub(crate) fn pw_indef(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32)
     let mut t: i32 = y + 9;
     let mut k: i32 = 0;
     let mut r: i32 = 0;
+    let mut kn: i32 = 0;
     let mut half: i32 = 0;
     loop {
         if (half == 0) && (q >= send) {
@@ -330,8 +326,14 @@ pub(crate) fn pw_indef(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32)
             t = o[(O_S_STOPP) as usize];
             break;
         }
+        // the SOURCE key's form decides the mark, as for a definite map (D277)
+        if (major == 5) && (half == 0) {
+            if (kclass(cb, o, q) & 1) != 0 {
+                kn = 1;
+            }
+        }
         t = ty;
-        q = tskip(cb, o, q);
+        q = o[(O_S_XEND) as usize];
         if (major == 4) || (half == 1) {
             k += 1;
             half = 0;
@@ -345,7 +347,7 @@ pub(crate) fn pw_indef(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32)
         cnt = k + 1;
     }
     if (major == 5) && (r == 0) {
-        if pw_keys_canon(cb, o, y + 9, k) != 0 {
+        if kn != 0 {
             let w: i32 = ev_add(o, y, EV_WMARK, 0, 0, 0);
             if w < 0 {
                 return -1;
@@ -368,6 +370,7 @@ pub(crate) fn pw_indef(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32)
     if r < 0 {
         return r;
     }
+    o[(O_S_XEND) as usize] = q + 1;
     return cend;
 }
 pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
@@ -429,10 +432,10 @@ pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
         if ((ai == 24) && ((cb[(x + 1) as usize] as i32) < 32)) && ((o[(O_PROFILE) as usize] & PF_VALID) != 0) {
             return pw_bad(cb, o, y, CODE_MALFORMED, x);
         }
-        return cw(cb, o, x, y, 0);
+        return pw_leaf(cb, o, x, y);
     }
     if major <= 1 {
-        return cw(cb, o, x, y, 0);
+        return pw_leaf(cb, o, x, y);
     }
     let c: i32 = targ(cb, o, x);
     let hi: i32 = o[(O_HI) as usize];
@@ -442,11 +445,14 @@ pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
         if (hi != 0) || ((lo < 0) || (lo > left)) {
             return pw_bad(cb, o, y, CODE_TRUNCATED, x);
         }
-        return cw(cb, o, x, y, 0);
+        return pw_leaf(cb, o, x, y);
     }
     if major == 6 {
         if depth >= o[(O_MAX_DEPTH) as usize] {
             return pw_bad(cb, o, y, CODE_DEPTH, x);
+        }
+        if (hi == 0) && (lo == 24) {
+            o[(O_S_T24) as usize] = 1;
         }
         let y6: i32 = put_head(cb, y, 6, hi, lo);
         if y6 < 0 {
@@ -487,6 +493,8 @@ pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
     if major == 5 {
         kk = 2 * lo;
     }
+    let mut kn: i32;
+    kn = 0;
     for i in 0..kk {
         if ((major == 5) && ((i & 1) == 0)) && (q >= send) {
             // the end of input where a key would begin: before any visit
@@ -500,10 +508,16 @@ pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
         if z < 0 {
             return z;
         }
-        q = tskip(cb, o, q);
+        if (major == 5) && ((i & 1) == 0) {
+            if (kclass(cb, o, q) & 1) != 0 {
+                kn = 1;
+            }
+        }
+        q = o[(O_S_XEND) as usize];
     }
+    o[(O_S_XEND) as usize] = q;
     if major == 5 {
-        if pw_keys_canon(cb, o, c, lo) != 0 {
+        if kn != 0 {
             let w3: i32 = ev_add(o, y, EV_WMARK, 0, 0, 0);
             if w3 < 0 {
                 return -1;
@@ -587,7 +601,7 @@ pub(crate) fn region(cb: &mut [u8], o: &mut [i32], src: i32, send: i32, y: i32, 
             stopped = true;
         } else {
             z = r;
-            q = tskip(cb, o, q);
+            q = o[(O_S_XEND) as usize];
         }
     } else {
         while (q < send) && (!stopped) {
@@ -599,7 +613,7 @@ pub(crate) fn region(cb: &mut [u8], o: &mut [i32], src: i32, send: i32, y: i32, 
                 stopped = true;
             } else {
                 z = r2;
-                q = tskip(cb, o, q);
+                q = o[(O_S_XEND) as usize];
             }
         }
     }
@@ -953,6 +967,48 @@ pub(crate) fn uvisit_seq(o: &mut [i32], cb: &mut [u8], y0: i32, lim: i32, pstop:
     }
     return 0;
 }
+pub(crate) fn may_tag24(b: &[u8], start: i32, n: i32) -> i32 {
+    // D286: can b[start, start + n) hold a tag 24 -- some head d8 18, d9 00 18,
+    // da 00 00 00 18 or db 00 .. 00 18 anywhere (a byte search for a copy the
+    // prefix writer did not write: content bytes may match too, which only costs
+    // a visit)? 1 or 0.
+    let end: i32 = start + n;
+    let mut i: i32 = start;
+    while i < end {
+        let v: i32 = b[(i) as usize] as i32;
+        if (v >= 216) && (v <= 219) {
+            let w: i32 = 1 << (v - 216);
+            let mut j: i32 = 1;
+            let mut ok: bool = true;
+            if (i + w) < end {
+                while ok && (j < w) {
+                    if (b[(i + j) as usize] as i32) != 0 {
+                        ok = false;
+                    }
+                    j += 1;
+                }
+                if ok && ((b[(i + w) as usize] as i32) == 24) {
+                    return 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    return 0;
+}
+pub(crate) fn build_region(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, n: i32, same: i32) -> i32 {
+    // The copy's region (D286): for an accepted item that is its own DC form
+    // (same != 0: only its key order or EC-sensitive keys differ from
+    // deterministic) the input's bytes again, without the prefix writer; else
+    // region's.
+    if same == 0 {
+        return region(cb, o, 0, n, n, 0, n + 64);
+    }
+    cb[(n) as usize..((n) + (n)) as usize].copy_from_slice(&b[(start) as usize..((start) + (n)) as usize]);
+    o[(O_S_STOPP) as usize] = -1;
+    o[(O_S_PSTOP) as usize] = -1;
+    return 2 * n;
+}
 /// The canonical copy (D264) of the CHECKED item b[start, end) under the
 /// scanner's verdict `refused` (0 accepted; else its duplicate refusal, if it is
 /// one, in o[O_S_DUP*]): the input copied to cb[0, n), the copy written from
@@ -967,6 +1023,8 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
     let dofs: i32 = o[(O_S_DUPO) as usize];
     let all: i32 = embeds - 1;
     let mx0: i32 = o[(O_MAX_DEPTH) as usize];
+    let su0: i32 = o[(O_S_UNITS) as usize];
+    let vc0: i32 = o[(O_VCTL) as usize];
     o[(O_S_NEV) as usize] = 0;
     o[(O_S_NSORT) as usize] = 0;
     o[(O_S_DLOW) as usize] = o.len() as i32;
@@ -989,7 +1047,13 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
         o[(O_S_DUPP) as usize] = -1;
         o[(O_S_DUPO) as usize] = -1;
     }
-    let l: i32 = region(cb, o, 0, n, n, 0, n + 64);
+    let mut same: i32;
+    same = 0;
+    o[(O_S_T24) as usize] = 0;
+    if ((refused == 0) && ((vc0 & VC_NONDET) == 0)) && (embeds == 1) {
+        same = 1;
+    }
+    let l: i32 = build_region(b, o, cb, start, n, same);
     let stop: i32 = o[(O_S_STOPP) as usize];
     let pstop: i32 = o[(O_S_PSTOP) as usize];
     let lim: i32 = lim_of(stop, l);
@@ -1007,7 +1071,14 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
     o[(O_S_DUPO) as usize] = -1;
     o[(O_VLEN) as usize] = l;
     o[(O_S_CBTOP) as usize] = l;
-    if embeds > 0 {
+    let mut t24: i32;
+    t24 = o[(O_S_T24) as usize];
+    if same == 1 {
+        t24 = may_tag24(cb, n, n);
+    }
+    // D286: an accepted item without a tag 24 under a Program without .cbor
+    // has no content to visit
+    if (embeds > 0) && (((embeds == 2) || (refused != 0)) || (t24 != 0)) {
         let mut y: i32 = n;
         while y < lim {
             y = visit(b, o, cb, y, lim, all, 0, 0, mx0);
@@ -1041,6 +1112,12 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
     // D277: the units, over the main copy and every embedded copy (the
     // events so far sorted for the lookups)
     ev_sort(o);
+    // D286: an accepted item with no marked map (the scanner charged no units
+    // and saw no unsorted or EC-sensitive key: it marks under the same rules,
+    // and a marked map charges at least 1) and no embedded copy has no units
+    if ((refused == 0) && (su0 == 0)) && (((vc0 & (VC_UNSORTED | VC_ECS)) == 0) && (o[(O_S_NEV) as usize] == 0)) {
+        return l;
+    }
     let ne: i32 = o[(O_S_NEV) as usize];
     let ru: i32 = uvisit_seq(o, cb, n, lim, pstop, all);
     if ru < 0 {
