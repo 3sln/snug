@@ -1,6 +1,6 @@
-;; The validator VM's view of docs/program.md format 1: header words, leaf
-;; kinds, the scratch carve (§12.1), reason codes (§9.1) and path segment
-;; kinds (§9.3). Program-format numbers are FROZEN (D025); the VM block words
+;; The validator VM's view of docs/program.md format 2.0 (docs/program-2.md, P8.5):
+;; header words, leaf kinds, the PEG programs' ops and tiers, the scratch carve
+;; (§12.1), reason codes (§9.1) and path segment kinds (§9.3). The VM block words
 ;; 37..47 are program.md's "reserved" scratch words, which the VM uses for its
 ;; own run state (they are scratch, not Program bytes).
 (ns snug.vm.layout
@@ -9,9 +9,9 @@
 
 ;; ------------------------------------------------------------ header (§2)
 (defconst ^:pub ^I32 MAGIC 1735749235)
-(defconst ^:pub ^I32 FORMAT_VERSION 1)
-;; format 1.1 (D084, D141): major in the low 16 bits, minor in the high 16 bits
-(defconst ^:pub ^I32 FORMAT_V11 65537)
+;; format 2.0 (program-2 §1, D279): FORMAT_VERSION is 0x00020000; a 2.0 VM runs
+;; no 1.x Program (the verifier refuses them too)
+(defconst ^:pub ^I32 FORMAT_V2 131072)
 (defconst ^:pub ^I32 HEADER_WORDS 64)
 (defconst ^:pub ^I32 H_FORMAT 1)
 (defconst ^:pub ^I32 H_HEADER_WORDS 2)
@@ -21,6 +21,13 @@
 (defconst ^:pub ^I32 H_N_RULES 15)
 (defconst ^:pub ^I32 H_N_LEAVES 16)
 (defconst ^:pub ^I32 H_N_KEYS 18)
+;; format 2.0 (program-2 §2): PEG programs; header words 29 R_ITEM_MAX, 41
+;; LIM_GROUP_WORDS, 62 RECLEAF_MAX, 63 ACT_SUM (the group arena, §9.4)
+(defconst ^:pub ^I32 H_N_PEGS 19)
+(defconst ^:pub ^I32 H_R_ITEM_MAX 29)
+(defconst ^:pub ^I32 H_LIM_GROUP 41)
+(defconst ^:pub ^I32 H_RECLEAF_MAX 62)
+(defconst ^:pub ^I32 H_ACT_SUM 63)
 ;; format 1.1 (D141): the extension-control table -- count, pool offset and byte length of its names
 (defconst ^:pub ^I32 H_N_EXTS 30)
 (defconst ^:pub ^I32 H_EXT_NAMES 31)
@@ -35,7 +42,7 @@
 (defconst ^:pub ^I32 H_S_LEAVES 43)
 (defconst ^:pub ^I32 H_S_TS_INDEX 44)
 (defconst ^:pub ^I32 H_S_KEYS 46)
-(defconst ^:pub ^I32 H_S_GROUP_INDEX 47)
+(defconst ^:pub ^I32 H_S_PEG_INDEX 47)
 (defconst ^:pub ^I32 H_S_MAP_INDEX 49)
 (defconst ^:pub ^I32 H_S_ARRAY_INDEX 51)
 (defconst ^:pub ^I32 H_S_REGEX_INDEX 53)
@@ -49,6 +56,10 @@
 (defconst ^:pub ^I32 FL_EMBED 4)
 (defconst ^:pub ^I32 FL_COMB 8)
 (defconst ^:pub ^I32 FL_EXT 16)
+;; format 2.0: bit 5 CUTS_BRANCH (rule A, `cuts: 'branch'`; clear for the default
+;; literal RFC cut, D301), bit 6 ARENA (some ARRAY leaf is A2 or some MAP leaf is T)
+(defconst ^:pub ^I32 FL_CUTS_BRANCH 32)
+(defconst ^:pub ^I32 FL_ARENA 64)
 
 (defconst ^:pub ^I32 INF 2147483647)
 
@@ -73,8 +84,25 @@
 ;; format 1.1 (D141): an extension control, decided by a host predicate (D082, D140)
 (defconst ^:pub ^I32 K_EXT 18)
 
-;; map factor modes (§7.3)
-(defconst ^:pub ^I32 MODE_ABSORB 2)
+;; ------------------------------------------------------------ PEG programs (program-2 §3)
+;; a program: +0 kind (0 array, 1 map) +1 n_nodes +2 n_kids +3 tier +4 B +5 memo
+;; (0) +6 depth +7 flags +8 n_calls, then nodes (5 words: op a b c d), then kids
+(defconst ^:pub ^I32 PEG_HDR 9)
+(defconst ^:pub ^I32 P_EMPTY 0)
+(defconst ^:pub ^I32 P_FAIL 1)
+(defconst ^:pub ^I32 P_ENTRY 2)
+(defconst ^:pub ^I32 P_MEMBER 3)
+(defconst ^:pub ^I32 P_SEQ 4)
+(defconst ^:pub ^I32 P_CHOICE 5)
+(defconst ^:pub ^I32 P_REP 6)
+(defconst ^:pub ^I32 P_CALL 7)
+;; tiers: arrays A0 / A1 / A2, maps F / S / T
+(defconst ^:pub ^I32 TIER_A0 0)
+(defconst ^:pub ^I32 TIER_A1 1)
+(defconst ^:pub ^I32 TIER_A2 2)
+(defconst ^:pub ^I32 TIER_F 0)
+(defconst ^:pub ^I32 TIER_S 1)
+(defconst ^:pub ^I32 TIER_T 2)
 
 ;; ------------------------------------------------------------ query flags (§12.2)
 (defconst ^:pub ^I32 F_ANSWER 1)
@@ -103,18 +131,26 @@
 (defconst ^:pub ^I32 VM_EMBED 33)
 (defconst ^:pub ^I32 VM_BIGNUM_MAX 34)
 (defconst ^:pub ^I32 VM_DETAIL 35)
+;; P8.5: in a VM run (VM_DETAIL is the verifier's word) the absolute offset of the
+;; walked window's first byte: 0 for the buffer driver, the window's base during a
+;; session step. Offsets kept across steps (an array block's event) are absolute.
+(defconst ^:pub ^I32 VM_PBASE 35)
 ;; P8.4 (D264): the embedded table's word offset in S during a run over a canonical
 ;; copy (0: none) -- word 36 serves the verifier only, never a validation
 (defconst ^:pub ^I32 VM_VTAB 36)
 ;; the VM's own run state, in program.md's reserved words 37..47
 (defconst ^:pub ^I32 VM_POS 37)
 (defconst ^:pub ^I32 VM_Q1 38)
-(defconst ^:pub ^I32 VM_EXH 39)
+;; P8.5: the group arena's header (an absolute word offset in S; program-2 §9.4,
+;; snug.vm.arena)
+(defconst ^:pub ^I32 VM_ARENA 39)
 (defconst ^:pub ^I32 VM_REGCAP 40)
 (defconst ^:pub ^I32 VM_QIDX 41)
 (defconst ^:pub ^I32 VM_DLIM 42)
 ;; P3.6: fast paths off (limits word 8 bit 0, for the fast == generic gate);
-;; the matched flag a fast child hands its parent
+;; the matched flag a fast child hands its parent. Its bits: 1 generic, 2
+;; schedule 2, 4 free bookkeeping (charge), 8 forced tiers (program-2 §8, limits
+;; word 8 bit 2: every array A2, every map T)
 (defconst ^:pub ^I32 VM_GENERIC 43)
 (defconst ^:pub ^I32 VM_FASTM 44)
 (defconst ^:pub ^I32 VM_FASTK 45)
@@ -137,6 +173,10 @@
 ;; D140: an extension control's predicate refused the item / the item is longer than the control's maximum
 (defconst ^:pub ^I32 R_CONTROL 42)
 (defconst ^:pub ^I32 R_CONTROL_SIZE 43)
+;; program-2 §8 (D276, D281): the group arena is at its cap (a validator code like
+;; `budget`, never skippable); R_AGROW (internal) the arena must grow below its cap
+(defconst ^:pub ^I32 R_GROUP_LIMIT 44)
+(defconst ^:pub ^I32 R_AGROW 45)
 (defconst ^:pub ^I32 R_BUDGET 48)
 ;; internal only (P8.4, D262): the deterministic attempt of a valid-CBOR run met an
 ;; encoding only valid CBOR has inside embedded content; the run takes the canonical path
@@ -151,6 +191,9 @@
 (defconst ^:pub ^I32 P_TAG 3)
 (defconst ^:pub ^I32 P_EMBED 4)
 (defconst ^:pub ^I32 P_EMBEDSEQ 5)
+
+;; VM_GENERIC's forced-tier bit
+(defconst ^:pub ^I32 G_FORCED 8)
 
 ;; eval context bits
 (defconst ^:pub ^I32 CTX_KEY 1)

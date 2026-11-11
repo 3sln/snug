@@ -1069,15 +1069,6 @@
       (if (>= (pw p (+ (+ o 8) (* 5 i))) 0) (set c (+ c 1))))
     (return c)))
 
-(defn ^I32 map-namers-max [^IntsR p ^I32 o]
-  (let [nm (pw p (+ o 1))
-        nn (pw p (+ o 2))
-        nb (+ (+ o 8) (* 5 nm))
-        ^:mut mx 0]
-    (for [^I32 q 0 nn]
-      (if (> (pw p (+ nb (+ (* 3 q) 2))) mx) (set mx (pw p (+ nb (+ (* 3 q) 2))))))
-    (return mx)))
-
 (defn ^Bool check-map [^IntsR p ^Ints s ^I32 m]
   (let [o (rec p 7 m)
         peg (pw p o)
@@ -1175,7 +1166,7 @@
               (let [^:mut sw 0
                     ^:mut rw 0]
                 (if (== tier TIER_S) (set sw (+ (+ 2 (ceil32 nmax)) (* 2 (ceil32 nr)))))
-                (if (== tier TIER_T) (set rw (+ 2 (ceil32 (* 2 nm)))))
+                (if (== tier TIER_T) (set rw (+ 4 (ceil32 (* 2 nm)))))
                 (if (!= (pw p (+ o 4)) sw) (return (want s false (+ o 4) C_DERIVED)))
                 (if (!= (pw p (+ o 5)) rw) (return (want s false (+ o 5) C_DERIVED)))))))
         (comment "key_ts [D]: the union of the non-literal members' key typesets, or -1")
@@ -1374,14 +1365,13 @@
       (do (let [mo (rec p 7 (pw p (+ o 2)))
                 nm (pw p (+ mo 1))
                 nn (pw p (+ mo 2))
-                ^:mut mw (+ 16 (* 4 nm))]
+                ^:mut mw (+ 20 (* 6 nm))]
             (if (== calls 0) (set mw (+ mw (* 8 depth))))
-            (if (== tier TIER_S) (set mw (+ mw (* nn (pw p (+ mo 4))))))
-            (if (== tier TIER_T) (set mw (+ mw nn)))
+            (if (== tier TIER_S) (set mw (+ mw (* nn (pw p (+ mo 4))))) (set mw (+ mw nn)))
             (return mw))))
     (let [ao (rec p 9 (pw p (+ o 2)))
           w (pw p (+ ao 1))
-          ^:mut aw (+ 14 (* 2 w))]
+          ^:mut aw (+ 16 (* 2 w))]
       (if (== calls 0) (set aw (+ aw (* 4 depth))))
       (if (== tier TIER_A1) (set aw (+ aw (* (+ (pw p (+ po 4)) 1) w))))
       (return aw))))
@@ -1528,23 +1518,19 @@
     (return false)))
 
 (defn ^I32 cset-frame [^IntsR p ^I32 co ^I32 n]
-  (comment "frame_words of the cset at co (program-2 §9.2): 2n + max(MAPAREA, ARRAREA),"
-           "MAPAREA = the maps' block words + 4 cand_max (n_members + the largest"
-           "naming count), ARRAREA = the arrays' block words.")
+  (comment "frame_words of the cset at co (program-2 §9.2 as amended by D311): 2n +"
+           "max(MAPAREA, ARRAREA), MAPAREA = the maps' block words + 4 words per member"
+           "of each (the pair's candidate list), ARRAREA = the arrays' block words.")
   (let [^:mut maparea 0
-        ^:mut candmax 0
         ^:mut arrarea 0]
     (for [^I32 i 0 n]
       (let [l (pw p (+ co (+ 3 i)))
             o (leaf-at p l)
             k (bit-and (pw p o) 255)]
         (if (== k 15)
-          (do (let [mo (rec p 7 (pw p (+ o 2)))
-                    cand (+ (pw p (+ mo 1)) (map-namers-max p mo))]
-                (set maparea (+ maparea (leaf-block p l)))
-                (if (> cand candmax) (set candmax cand)))))
+          (do (let [mo (rec p 7 (pw p (+ o 2)))]
+                (set maparea (+ (+ maparea (leaf-block p l)) (* 4 (pw p (+ mo 1))))))))
         (if (== k 14) (set arrarea (+ arrarea (leaf-block p l))))))
-    (set maparea (+ maparea (* 4 candmax)))
     (if (> arrarea maparea) (set maparea arrarea))
     (return (+ (* 2 n) maparea))))
 

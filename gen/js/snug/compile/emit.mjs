@@ -1172,9 +1172,10 @@ export function actWords(ncalls, depth) {
 
 export function planContainers(h) {
     // Per live map and array (T_LAUX words): 1 its block words (MAPWORDS /
-    // ARRWORDS, program-2 §5.2, §6.3), 2 map candidates (n_members + the
-    // largest naming count) or array W, 3 its record words when it is A2 / T
-    // (else 0), 4 1 if recursive, 5 its activation words (§5.3).
+    // ARRWORDS, program-2 §5.2, §6.3 as amended by D311), 2 a map's candidates
+    // per pair (n_members: a member is a candidate at most once) or array W, 3
+    // its record words when it is A2 / T (else 0), 4 1 if recursive, 5 its
+    // activation words (§5.3).
     const nl = hg(h, H_N_FIN);
     for (let f = 0; f < nl; f++) {
         const l = finInternal(h, f);
@@ -1190,7 +1191,7 @@ export function planContainers(h) {
             const nn = namedCount(h, np);
             const nmx = namersMax(h, np);
             const nr = rootCount(h, blob);
-            let mw = 16 + (4 * nm);
+            let mw = 20 + (6 * nm);
             if (np < 0) {
                 return -1;
             }
@@ -1199,14 +1200,13 @@ export function planContainers(h) {
             }
             if (tier === TIER_S) {
                 mw += nn * ((2 + ceil32(nmx)) + (2 * ceil32(nr)));
-            }
-            if (tier === TIER_T) {
+            } else {
                 mw += nn;
             }
             lauxSet(h, f, 1, mw);
-            lauxSet(h, f, 2, nm + nmx);
+            lauxSet(h, f, 2, nm);
             if (tier === TIER_T) {
-                lauxSet(h, f, 3, 2 + ceil32(2 * nm));
+                lauxSet(h, f, 3, 4 + ceil32(2 * nm));
             } else {
                 lauxSet(h, f, 3, 0);
             }
@@ -1229,7 +1229,7 @@ export function planContainers(h) {
             const ab = progW(h, aprog, 4);
             const adepth = progW(h, aprog, 6);
             const anc = progW(h, aprog, 8);
-            let aw = 14 + (2 * w);
+            let aw = 16 + (2 * w);
             if (anc === 0) {
                 aw += 4 * adepth;
             }
@@ -1286,25 +1286,21 @@ export function addEvalSet(h, t, ep) {
 }
 
 export function frameWords(h, from, n) {
-    // program-2 §9.2: 2|R| + max(MAPAREA, ARRAREA); MAPAREA = the maps' block
-    // words + 4 cand_max(R), ARRAREA = the arrays' block words.
+    // program-2 §9.2 as amended by D311: 2|R| + max(MAPAREA, ARRAREA); MAPAREA
+    // = the maps' block words + 4 words per member of each (the pair's candidate
+    // list), ARRAREA = the arrays' block words.
     let maparea = 0;
-    let candmax = 0;
     let arrarea = 0;
     for (let i = 0; i < n; i++) {
         const f = vget(h, T_CLS, from + i);
         const k = lk(h, finInternal(h, f));
         if (k === K_MAP) {
-            maparea += laux(h, f, 1);
-            if (laux(h, f, 2) > candmax) {
-                candmax = laux(h, f, 2);
-            }
+            maparea = (maparea + laux(h, f, 1)) + (4 * laux(h, f, 2));
         }
         if (k === K_ARRAY) {
             arrarea += laux(h, f, 1);
         }
     }
-    maparea += 4 * candmax;
     if (arrarea > maparea) {
         maparea = arrarea;
     }
@@ -1688,7 +1684,7 @@ export function writeMap(h, f) {
         sw = (2 + ceil32(nmx)) + (2 * ceil32(nr));
     }
     if (tier === TIER_T) {
-        rw2 = 2 + ceil32(2 * nm);
+        rw2 = 4 + ceil32(2 * nm);
     }
     if (kts >= 0) {
         ktsf = ftsOf(h, kts);

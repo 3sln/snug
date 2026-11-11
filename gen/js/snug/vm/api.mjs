@@ -5,10 +5,11 @@ import { CODE_INDEFINITE, CODE_KEY_ORDER, CODE_NON_SHORTEST, CODE_NOT_MAP, CODE_
 import { fail } from '../cbor/head.mjs';
 import { scanX } from '../cbor/scan.mjs';
 import { canonBuild, evFind, vmap, vsource } from '../cbor/vcopy.mjs';
+import { AR_HDR, LEASE, arenaCap, arenaInit, arenaWant } from './arena.mjs';
 import { csetRec, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { FL_EMBED, FORMAT_V11, FORMAT_VERSION, HEADER_WORDS, H_FLAGS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_BUDGET, R_INCONSISTENT, R_NONDET, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_EXH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_VTAB, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
+import { FL_ARENA, FL_EMBED, FORMAT_V2, G_FORCED, HEADER_WORDS, H_FLAGS, H_FORMAT, H_HEADER_WORDS, H_LIM_BIGNUM, H_LIM_BUDGET, H_LIM_DEPTH, H_LIM_ENTRIES, H_LIM_INPUT, H_LIM_ITEMS, H_N_LEAVES, H_N_RULES, H_POOL_BYTES, H_PROGRAM_WORDS, H_S_CHAIN_INDEX, H_S_CSET_INDEX, H_S_RULES, MAGIC, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_NONDET, R_TYPE, SCRATCH_MARK, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_CHAIN, VM_D, VM_DLIM, VM_EMBED, VM_EPOCH, VM_FRAMES, VM_GENERIC, VM_MARK_CAP, VM_PATH, VM_PBASE, VM_POS, VM_Q1, VM_QIDX, VM_REGCAP, VM_REGEX, VM_RULE, VM_VTAB, VM_W_DEPTH, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB, VM_W_XKIND, VM_W_XVAL } from './layout.mjs';
 import { cmpBytes } from './leaf.mjs';
 
 export function chainOf(p, rule) {
@@ -83,16 +84,34 @@ export function chainFrames(p, ch, dd) {
     return t;
 }
 
-export function vmScratchWords(p, rule, markCap) {
-    // Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)
-    // (§12.1): 48 + 2M + 2(D + 1) + regex area + frames. The rule's verified
-    // scratch_words [D] is that total with M = N_LEAVES, so this is O(1).
+export function vmFixedWords(p, rule, markCap) {
+    // The words before the group arena for this rule with MARK_CAP =
+    // max(mark-cap, N_LEAVES) (§12.1): 48 + 2M + 2(D + 1) + regex area + frames.
+    // The rule's verified scratch_words [D] is that total with M = N_LEAVES, so
+    // this is O(1).
     const nl = p[H_N_LEAVES];
     let m = markCap;
     if (m < nl) {
         m = nl;
     }
     return p[(p[H_S_RULES] + (5 * rule)) + 4] + (2 * (m - nl));
+}
+
+export function arenaLease(p) {
+    // The group arena's default lease (program-2 §9.4): 4,096 words when some
+    // ARRAY leaf is A2 or some MAP leaf is T (FLAGS bit 6), else none -- the arena
+    // then grows on its first push (the forced-tier test mode).
+    if ((p[H_FLAGS] & FL_ARENA) !== 0) {
+        return LEASE;
+    }
+    return 0;
+}
+
+export function vmScratchWords(p, rule, markCap) {
+    // Words S must have for this rule: vm-fixed-words, then the group arena's
+    // 8-word header and its default lease (program-2 §9.1, §9.4). A larger S
+    // only gives the arena more room, up to its cap.
+    return (vmFixedWords(p, rule, markCap) + AR_HDR) + arenaLease(p);
 }
 
 export function vmScratchWordsSlow(p, rule, markCap) {
@@ -105,7 +124,7 @@ export function vmScratchWordsSlow(p, rule, markCap) {
     if (m < nl) {
         m = nl;
     }
-    return (((SCRATCH_MARK + (2 * m)) + (2 * (dd + 1))) + chainRegex(p, ch, dd)) + chainFrames(p, ch, dd);
+    return ((((SCRATCH_MARK + (2 * m)) + (2 * (dd + 1))) + chainRegex(p, ch, dd)) + chainFrames(p, ch, dd)) + (AR_HDR + arenaLease(p));
 }
 
 export function vmScratchInit(s, markCap) {
@@ -149,6 +168,14 @@ export function lim(limits, i, compiled) {
         return v;
     }
     return compiled;
+}
+
+export function limOr(limits, i) {
+    // Limits word i, or -1 when absent.
+    if (i >= limits.length) {
+        return -1;
+    }
+    return limits[i];
 }
 
 export function opt01(limits, i) {
@@ -234,7 +261,7 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     if (p.length < HEADER_WORDS) {
         return -1;
     }
-    if ((p[0] !== MAGIC) || (((p[H_FORMAT] !== FORMAT_VERSION) && (p[H_FORMAT] !== FORMAT_V11)) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
+    if ((p[0] !== MAGIC) || ((p[H_FORMAT] !== FORMAT_V2) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
         return -1;
     }
     if (p[H_PROGRAM_WORDS] !== p.length) {
@@ -252,7 +279,7 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     if (mc < p[H_N_LEAVES]) {
         return -2;
     }
-    if (s.length < vmScratchWords(p, rule, mc)) {
+    if (s.length < (vmFixedWords(p, rule, mc) + AR_HDR)) {
         return -2;
     }
     const path = SCRATCH_MARK + (2 * mc);
@@ -304,8 +331,8 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
         s[VM_BIGNUM_MAX] = bmax;
     }
     s[VM_POS] = start;
+    s[VM_PBASE] = 0;
     s[VM_Q1] = 0;
-    s[VM_EXH] = 0;
     s[VM_QIDX] = SCRATCH_MARK + mc;
     s[VM_DLIM] = dl;
     // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
@@ -314,17 +341,34 @@ export function vmSetup(p, rule, start, depth0, items0, limits, s) {
     // (s[VM_GENERIC] bit 1 set = schedule 2). D254: the forced generic path
     // is charged by the generic walk's own schedule, the table (schedule 1):
     // schedule 2's free bookkeeping prices the fast paths' CPU, not its.
+    // bit 2 forces every array to tier A2 and every map to T (program-2 §8,
+    // the forced-tier test mode): G_FORCED in s[VM_GENERIC].
     if (limits.length > 8) {
         const w8 = limits[8];
+        let g = 2;
         if ((w8 & 3) !== 0) {
-            s[VM_GENERIC] = w8 & 1;
-        } else {
-            s[VM_GENERIC] = 2;
+            g = w8 & 1;
         }
+        if ((w8 & 4) !== 0) {
+            g |= G_FORCED;
+        }
+        s[VM_GENERIC] = g;
     } else {
         s[VM_GENERIC] = 2;
     }
+    // the group arena after the fixed words, its cap lowered by limits word 10
+    arenaInit(s, vmFixedWords(p, rule, mc), arenaCap(p, limOr(limits, 10)));
     return 0;
+}
+
+export function vmNeed(out, w, nb, sw) {
+    // -5: a host buffer is too small; out[5] the valid scratch's words, out[6]
+    // the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).
+    out[0] = 0;
+    out[5] = w;
+    out[6] = nb;
+    out[7] = sw;
+    return -5;
 }
 
 export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext) {
@@ -336,7 +380,7 @@ export function vmRun(p, pool, rule, b, start, end, depth0, items0, limits, s, o
     if (p.length < HEADER_WORDS) {
         return -1;
     }
-    if ((p[0] !== MAGIC) || (((p[H_FORMAT] !== FORMAT_VERSION) && (p[H_FORMAT] !== FORMAT_V11)) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
+    if ((p[0] !== MAGIC) || ((p[H_FORMAT] !== FORMAT_V2) || (p[H_HEADER_WORDS] !== HEADER_WORDS))) {
         return -1;
     }
     if ((p[H_PROGRAM_WORDS] !== p.length) || (p[H_POOL_BYTES] !== pool.length)) {
@@ -392,6 +436,15 @@ export function vmWalk(p, pool, rule, b, start, end, s, out, ext) {
         const at2 = s[VM_POS];
         return vmOutput(s, out, R_BUDGET, 0, at2);
     }
+    // program-2 §9.4: the arena must grow (the host gives S that many words and
+    // runs again, -5), or it is at its cap (group_limit at the item's head)
+    if (r === (-R_AGROW)) {
+        return vmNeed(out, 0, 0, arenaWant(s));
+    }
+    if (r === (-R_GROUP_LIMIT)) {
+        const at6 = s[VM_POS];
+        return vmOutput(s, out, R_GROUP_LIMIT, 0, at6);
+    }
     if (r === (-R_INCONSISTENT)) {
         return -1;
     }
@@ -426,16 +479,6 @@ export function nondetCode(code) {
     // Codes only an encoding valid CBOR admits can cause on the deterministic
     // attempt of a valid-CBOR run (D262), or R_NONDET from embedded content.
     return ((code === CODE_NON_SHORTEST) || (code === CODE_INDEFINITE)) || ((code === CODE_KEY_ORDER) || (code === R_NONDET));
-}
-
-export function vmNeed(out, w, nb, sw) {
-    // -5: a host buffer is too small; out[5] the valid scratch's words, out[6]
-    // the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).
-    out[0] = 0;
-    out[5] = w;
-    out[6] = nb;
-    out[7] = sw;
-    return -5;
 }
 
 export function vmRemap(b, cb, vs, start, out) {
@@ -519,9 +562,13 @@ export function vmCanon(p, pool, rule, b, start, end, depth0, items0, limits, s,
         return vmNeed(out, vs[O_VNEEDW], vs[O_VNEEDB], 0);
     }
     const n = vs[O_S_NEV];
-    const base = vmScratchWords(p, rule, s[VM_MARK_CAP]);
-    const need = (base + 4) + (EV_WORDS * n);
-    if ((n > 0) && (s.length < need)) {
+    const base = vmFixedWords(p, rule, s[VM_MARK_CAP]);
+    let vt = 0;
+    if (n > 0) {
+        vt = 4 + (EV_WORDS * n);
+    }
+    const need = ((base + vt) + AR_HDR) + arenaLease(p);
+    if (s.length < need) {
         return vmNeed(out, 0, 0, need);
     }
     if (n > 0) {
@@ -534,6 +581,8 @@ export function vmCanon(p, pool, rule, b, start, end, depth0, items0, limits, s,
         }
         s[VM_VTAB] = base;
     }
+    // the group arena after the events
+    arenaInit(s, base + vt, arenaCap(p, limOr(limits, 10)));
     s[O_PROFILE] = s[O_PROFILE] | PF_CANON;
     if (s[O_MAX_BYTES] < l) {
         s[O_MAX_BYTES] = l;

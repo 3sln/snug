@@ -1758,18 +1758,6 @@ pub(crate) fn map_lits(p: &[i32], o: i32) -> i32 {
     }
     return c;
 }
-pub(crate) fn map_namers_max(p: &[i32], o: i32) -> i32 {
-    let nm: i32 = pw(p, o + 1);
-    let nn: i32 = pw(p, o + 2);
-    let nb: i32 = (o + 8) + (5 * nm);
-    let mut mx: i32 = 0;
-    for q in 0..nn {
-        if pw(p, nb + ((3 * q) + 2)) > mx {
-            mx = pw(p, nb + ((3 * q) + 2));
-        }
-    }
-    return mx;
-}
 pub(crate) fn check_map(p: &[i32], s: &mut [i32], m: i32) -> bool {
     let o: i32 = rec(p, 7, m);
     let peg: i32 = pw(p, o);
@@ -1951,7 +1939,7 @@ pub(crate) fn check_map(p: &[i32], s: &mut [i32], m: i32) -> bool {
         sw = (2 + ceil32(nmax)) + (2 * ceil32(nr));
     }
     if tier == TIER_T {
-        rw = 2 + ceil32(2 * nm);
+        rw = 4 + ceil32(2 * nm);
     }
     if pw(p, o + 4) != sw {
         return want(s, false, o + 4, C_DERIVED);
@@ -2278,21 +2266,20 @@ pub(crate) fn leaf_block(p: &[i32], l: i32) -> i32 {
         let mo: i32 = rec(p, 7, pw(p, o + 2));
         let nm: i32 = pw(p, mo + 1);
         let nn: i32 = pw(p, mo + 2);
-        let mut mw: i32 = 16 + (4 * nm);
+        let mut mw: i32 = 20 + (6 * nm);
         if calls == 0 {
             mw += 8 * depth;
         }
         if tier == TIER_S {
             mw += nn * pw(p, mo + 4);
-        }
-        if tier == TIER_T {
+        } else {
             mw += nn;
         }
         return mw;
     }
     let ao: i32 = rec(p, 9, pw(p, o + 2));
     let w: i32 = pw(p, ao + 1);
-    let mut aw: i32 = 14 + (2 * w);
+    let mut aw: i32 = 16 + (2 * w);
     if calls == 0 {
         aw += 4 * depth;
     }
@@ -2534,11 +2521,10 @@ pub(crate) fn has_children(p: &[i32], cs: i32) -> bool {
     return false;
 }
 pub(crate) fn cset_frame(p: &[i32], co: i32, n: i32) -> i32 {
-    // frame_words of the cset at co (program-2 §9.2): 2n + max(MAPAREA, ARRAREA),
-    // MAPAREA = the maps' block words + 4 cand_max (n_members + the largest
-    // naming count), ARRAREA = the arrays' block words.
+    // frame_words of the cset at co (program-2 §9.2 as amended by D311): 2n +
+    // max(MAPAREA, ARRAREA), MAPAREA = the maps' block words + 4 words per member
+    // of each (the pair's candidate list), ARRAREA = the arrays' block words.
     let mut maparea: i32 = 0;
-    let mut candmax: i32 = 0;
     let mut arrarea: i32 = 0;
     for i in 0..n {
         let l: i32 = pw(p, co + (3 + i));
@@ -2546,17 +2532,12 @@ pub(crate) fn cset_frame(p: &[i32], co: i32, n: i32) -> i32 {
         let k: i32 = pw(p, o) & 255;
         if k == 15 {
             let mo: i32 = rec(p, 7, pw(p, o + 2));
-            let cand: i32 = pw(p, mo + 1) + map_namers_max(p, mo);
-            maparea += leaf_block(p, l);
-            if cand > candmax {
-                candmax = cand;
-            }
+            maparea = (maparea + leaf_block(p, l)) + (4 * pw(p, mo + 1));
         }
         if k == 14 {
             arrarea += leaf_block(p, l);
         }
     }
-    maparea += 4 * candmax;
     if arrarea > maparea {
         maparea = arrarea;
     }

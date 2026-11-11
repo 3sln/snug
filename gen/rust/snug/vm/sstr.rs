@@ -5,6 +5,7 @@ use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
 use crate::snug::cbor::scan::*;
 use crate::snug::cbor::text::*;
+use crate::snug::vm::arena::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::eval::*;
 use crate::snug::vm::layout::*;
@@ -488,6 +489,7 @@ pub fn embed_start(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, 
     ss[(f + F_SMAXD) as usize] = s[(O_MAX_DEPTH) as usize];
     ss[(f + F_SCOSE) as usize] = s[(O_COSE) as usize];
     ss[(f + F_SERR) as usize] = s[(O_ERR_POS) as usize] + base;
+    ss[(f + F_SAUP) as usize] = arena_up_top(s);
     s[(O_ITEMS) as usize] = 0;
     s[(O_MAX_DEPTH) as usize] = nm;
     s[(O_COSE) as usize] = 0;
@@ -528,6 +530,7 @@ pub fn embed_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r:
     s[(O_MAX_DEPTH) as usize] = ss[(f + F_SMAXD) as usize];
     s[(O_COSE) as usize] = ss[(f + F_SCOSE) as usize];
     s[(O_ERR_POS) as usize] = ss[(f + F_SERR) as usize] - base;
+    arena_set_up(s, ss[(f + F_SAUP) as usize]);
     s[(VM_EMBED) as usize] = s[(VM_EMBED) as usize] - 1;
     ss[(f + F_EPH) as usize] = 20 + seq;
     if r < 0 {

@@ -1126,9 +1126,10 @@ pub(crate) fn act_words(ncalls: i32, depth: i32) -> i32 {
 }
 pub fn plan_containers(h: &mut [i32]) -> i32 {
     // Per live map and array (T_LAUX words): 1 its block words (MAPWORDS /
-    // ARRWORDS, program-2 §5.2, §6.3), 2 map candidates (n_members + the
-    // largest naming count) or array W, 3 its record words when it is A2 / T
-    // (else 0), 4 1 if recursive, 5 its activation words (§5.3).
+    // ARRWORDS, program-2 §5.2, §6.3 as amended by D311), 2 a map's candidates
+    // per pair (n_members: a member is a candidate at most once) or array W, 3
+    // its record words when it is A2 / T (else 0), 4 1 if recursive, 5 its
+    // activation words (§5.3).
     let nl: i32 = hg(h, H_N_FIN);
     for f in 0..nl {
         let l: i32 = fin_internal(h, f);
@@ -1144,7 +1145,7 @@ pub fn plan_containers(h: &mut [i32]) -> i32 {
             let nn: i32 = named_count(h, np);
             let nmx: i32 = namers_max(h, np);
             let nr: i32 = root_count(h, blob);
-            let mut mw: i32 = 16 + (4 * nm);
+            let mut mw: i32 = 20 + (6 * nm);
             if np < 0 {
                 return -1;
             }
@@ -1153,14 +1154,13 @@ pub fn plan_containers(h: &mut [i32]) -> i32 {
             }
             if tier == TIER_S {
                 mw += nn * ((2 + ceil32(nmx)) + (2 * ceil32(nr)));
-            }
-            if tier == TIER_T {
+            } else {
                 mw += nn;
             }
             laux_set(h, f, 1, mw);
-            laux_set(h, f, 2, nm + nmx);
+            laux_set(h, f, 2, nm);
             if tier == TIER_T {
-                laux_set(h, f, 3, 2 + ceil32(2 * nm));
+                laux_set(h, f, 3, 4 + ceil32(2 * nm));
             } else {
                 laux_set(h, f, 3, 0);
             }
@@ -1183,7 +1183,7 @@ pub fn plan_containers(h: &mut [i32]) -> i32 {
             let ab: i32 = prog_w(h, aprog, 4);
             let adepth: i32 = prog_w(h, aprog, 6);
             let anc: i32 = prog_w(h, aprog, 8);
-            let mut aw: i32 = 14 + (2 * w);
+            let mut aw: i32 = 16 + (2 * w);
             if anc == 0 {
                 aw += 4 * adepth;
             }
@@ -1238,25 +1238,21 @@ pub(crate) fn add_eval_set(h: &mut [i32], t: i32, ep: i32) -> i32 {
     return 0;
 }
 pub(crate) fn frame_words(h: &[i32], from: i32, n: i32) -> i32 {
-    // program-2 §9.2: 2|R| + max(MAPAREA, ARRAREA); MAPAREA = the maps' block
-    // words + 4 cand_max(R), ARRAREA = the arrays' block words.
+    // program-2 §9.2 as amended by D311: 2|R| + max(MAPAREA, ARRAREA); MAPAREA
+    // = the maps' block words + 4 words per member of each (the pair's candidate
+    // list), ARRAREA = the arrays' block words.
     let mut maparea: i32 = 0;
-    let mut candmax: i32 = 0;
     let mut arrarea: i32 = 0;
     for i in 0..n {
         let f: i32 = vget(h, T_CLS, from + i);
         let k: i32 = lk(h, fin_internal(h, f));
         if k == K_MAP {
-            maparea += laux(h, f, 1);
-            if laux(h, f, 2) > candmax {
-                candmax = laux(h, f, 2);
-            }
+            maparea = (maparea + laux(h, f, 1)) + (4 * laux(h, f, 2));
         }
         if k == K_ARRAY {
             arrarea += laux(h, f, 1);
         }
     }
-    maparea += 4 * candmax;
     if arrarea > maparea {
         maparea = arrarea;
     }
@@ -1624,7 +1620,7 @@ pub(crate) fn write_map(h: &mut [i32], f: i32) {
         sw = (2 + ceil32(nmx)) + (2 * ceil32(nr));
     }
     if tier == TIER_T {
-        rw2 = 2 + ceil32(2 * nm);
+        rw2 = 4 + ceil32(2 * nm);
     }
     if kts >= 0 {
         ktsf = fts_of(h, kts);

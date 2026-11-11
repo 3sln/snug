@@ -1895,19 +1895,6 @@ export function mapLits(p, o) {
     return c;
 }
 
-export function mapNamersMax(p, o) {
-    const nm = pw(p, o + 1);
-    const nn = pw(p, o + 2);
-    const nb = (o + 8) + (5 * nm);
-    let mx = 0;
-    for (let q = 0; q < nn; q++) {
-        if (pw(p, nb + ((3 * q) + 2)) > mx) {
-            mx = pw(p, nb + ((3 * q) + 2));
-        }
-    }
-    return mx;
-}
-
 export function checkMap(p, s, m) {
     const o = rec(p, 7, m);
     const peg = pw(p, o);
@@ -2089,7 +2076,7 @@ export function checkMap(p, s, m) {
         sw = (2 + ceil32(nmax)) + (2 * ceil32(nr));
     }
     if (tier === TIER_T) {
-        rw = 2 + ceil32(2 * nm);
+        rw = 4 + ceil32(2 * nm);
     }
     if (pw(p, o + 4) !== sw) {
         return want(s, false, o + 4, C_DERIVED);
@@ -2425,21 +2412,20 @@ export function leafBlock(p, l) {
         const mo = rec(p, 7, pw(p, o + 2));
         const nm = pw(p, mo + 1);
         const nn = pw(p, mo + 2);
-        let mw = 16 + (4 * nm);
+        let mw = 20 + (6 * nm);
         if (calls === 0) {
             mw += 8 * depth;
         }
         if (tier === TIER_S) {
             mw += nn * pw(p, mo + 4);
-        }
-        if (tier === TIER_T) {
+        } else {
             mw += nn;
         }
         return mw;
     }
     const ao = rec(p, 9, pw(p, o + 2));
     const w = pw(p, ao + 1);
-    let aw = 14 + (2 * w);
+    let aw = 16 + (2 * w);
     if (calls === 0) {
         aw += 4 * depth;
     }
@@ -2691,11 +2677,10 @@ export function hasChildren(p, cs) {
 }
 
 export function csetFrame(p, co, n) {
-    // frame_words of the cset at co (program-2 §9.2): 2n + max(MAPAREA, ARRAREA),
-    // MAPAREA = the maps' block words + 4 cand_max (n_members + the largest
-    // naming count), ARRAREA = the arrays' block words.
+    // frame_words of the cset at co (program-2 §9.2 as amended by D311): 2n +
+    // max(MAPAREA, ARRAREA), MAPAREA = the maps' block words + 4 words per member
+    // of each (the pair's candidate list), ARRAREA = the arrays' block words.
     let maparea = 0;
-    let candmax = 0;
     let arrarea = 0;
     for (let i = 0; i < n; i++) {
         const l = pw(p, co + (3 + i));
@@ -2703,17 +2688,12 @@ export function csetFrame(p, co, n) {
         const k = pw(p, o) & 255;
         if (k === 15) {
             const mo = rec(p, 7, pw(p, o + 2));
-            const cand = pw(p, mo + 1) + mapNamersMax(p, mo);
-            maparea += leafBlock(p, l);
-            if (cand > candmax) {
-                candmax = cand;
-            }
+            maparea = (maparea + leafBlock(p, l)) + (4 * pw(p, mo + 1));
         }
         if (k === 14) {
             arrarea += leafBlock(p, l);
         }
     }
-    maparea += 4 * candmax;
     if (arrarea > maparea) {
         maparea = arrarea;
     }

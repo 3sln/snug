@@ -1,52 +1,196 @@
-;; Array automaton state (program.md §8.1, §12.2): Glushkov position bitsets
-;; with counted positions. A block (one per admitted ARRAY leaf, in query
-;; order) is  +0 qindex  +1 alive  +2 |A|  active[W]  cand[W]  cnt[ncounters].
-;; The walk itself is snug.vm.eval's.
+;; Arrays under PEG group semantics (program-2 §4-§5, architecture §20.5;
+;; D270, D272, D275, P8.5). Each admitted ARRAY leaf gets a BLOCK: the relaxed
+;; Glushkov query automaton chooses each element's candidate positions (format
+;; 1's step without counters), the element's VERDICT RECORD r_i (the candidates
+;; whose typeset matched) is stored by tier -- A0 none beyond the block's active
+;; set, A1 a ring of B + 1 rows in the block, A2 a record in the group arena --
+;; and an incremental PEG MACHINE runs `run(root, 0)` over the records until it
+;; asks for the next one or terminates. The walk itself is snug.vm.eval's (and
+;; the session's, snug.vm.scont); both call the functions here in the same
+;; order, so every route charges the same events.
+;;
+;; A block (ARRWORDS words, program-2 §5.2 as amended by D311):
+;;     +0 qindex  +1 alive  +2 |A|  +3 status (0 running, 2 succeeded at idx,
+;;     3 failed)  +4 pc  +5 idx  +6 sp  +7 mode (0 enter pc, 1 returned ok, 2
+;;     returned fail, 3 the ENTRY at pc waits for record idx)  +8 farthest
+;;     event index (-1 none)  +9 its kind (1 E1, 2 E2, 3 E3, 4 E4; +256 an E1
+;;     whose record was empty)  +10 its offset  +11 the top chunk of a recursive
+;;     program's frames (-1 none)  +12 the container's record base (A2)  +13
+;;     the item stride R_t (A2)  +14 the element the block died at (-1 alive, n
+;;     at the end)  +15 this block's word offset in the stride (A2)
+;;     +16 active[W]  cand[W]  stack[4 depth] (non-recursive)  ring[(B+1) W] (A1)
+;; A frame is 4 words: node, start, counter (SEQ kid, CHOICE alternative, REP
+;; count), aux (REP iteration start).
 (ns snug.vm.array
-  (:require [kin.lang :refer [defn let return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Ints IntsR + - * neg shl bit-and bit-or
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst forever break]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg shl sar bit-and bit-or bit-xor rem
                                sub32 < > <= >= == != and or not ia iset]]
-            [snug.vm.layout :refer [H_S_LEAVES H_S_ARRAY_INDEX R_BUDGET]]
-            [snug.vm.base :refer [charge c16 popcount low-bit ts-test q-add]]))
+            [snug.vm.layout :refer [H_S_LEAVES H_S_ARRAY_INDEX H_S_PEG_INDEX R_BUDGET R_INCONSISTENT
+                                    VM_GENERIC G_FORCED PEG_HDR P_EMPTY P_FAIL P_ENTRY P_SEQ P_CHOICE
+                                    P_REP P_CALL TIER_A0 TIER_A1 TIER_A2 R_TYPE R_MISSING R_UNEXPECTED
+                                    P_INDEX VM_PBASE]]
+            [snug.vm.base :refer [charge c16 popcount low-bit ts-test q-add wit-empty wit-set]]
+            [snug.vm.arena :refer [arena-up arena-up-top arena-body fs-push fs-top fs-pop fs-drop]]))
+
+(defconst ^:pub ^I32 AB_Q 0)
+(defconst ^:pub ^I32 AB_ALIVE 1)
+(defconst ^:pub ^I32 AB_NACT 2)
+(defconst ^:pub ^I32 AB_STATUS 3)
+(defconst ^:pub ^I32 AB_PC 4)
+(defconst ^:pub ^I32 AB_IDX 5)
+(defconst ^:pub ^I32 AB_SP 6)
+(defconst ^:pub ^I32 AB_MODE 7)
+(defconst ^:pub ^I32 AB_EVI 8)
+(defconst ^:pub ^I32 AB_EVK 9)
+(defconst ^:pub ^I32 AB_EVO 10)
+(defconst ^:pub ^I32 AB_ACT 11)
+(defconst ^:pub ^I32 AB_RBASE 12)
+(defconst ^:pub ^I32 AB_STRIDE 13)
+(defconst ^:pub ^I32 AB_DIED 14)
+(defconst ^:pub ^I32 AB_ROFF 15)
+(defconst ^:pub ^I32 AB_HDR 16)
+
+(defconst ^:pub ^I32 ST_RUN 0)
+(defconst ^:pub ^I32 ST_OK 2)
+(defconst ^:pub ^I32 ST_FAIL 3)
+(defconst ^I32 M_ENTER 0)
+(defconst ^I32 M_OK 1)
+(defconst ^I32 M_FAIL 2)
+(defconst ^I32 M_WAIT 3)
+(defconst ^I32 AFW 4)
+(defconst ^:pub ^I32 E_EMPTY 256)
+
+;; ------------------------------------------------------------ tables
 
 (defn ^:pub ^I32 leaf-array [^IntsR p ^I32 lb]
   (return (ia p (+ (ia p H_S_ARRAY_INDEX) (ia p (+ lb 2))))))
 
 (defn ^:pub ^I32 block-ao [^IntsR p ^IntsR s ^I32 fb ^I32 bo]
-  (comment "The automaton (word offset) of the array block at bo.")
+  (comment "The array table (word offset) of the block at bo.")
   (let [l (ia s (+ fb (ia s bo)))]
     (return (leaf-array p (+ (ia p H_S_LEAVES) (* 8 l))))))
 
+(defn ^:pub ^I32 peg-of [^IntsR p ^I32 g]
+  (comment "PEG program g's word offset (section S5/S6).")
+  (return (ia p (+ (ia p H_S_PEG_INDEX) g))))
+
+(defn ^:pub ^I32 apeg [^IntsR p ^I32 ao]
+  (return (peg-of p (ia p (+ ao 2)))))
+
+(defn ^:pub ^Bool peg-rec [^IntsR p ^I32 po]
+  (comment "A recursive program (it has CALL nodes): its frames live in arena chunks.")
+  (return (> (ia p (+ po 8)) 0)))
+
+(defn ^:pub ^I32 if-act [^IntsR p ^I32 po ^I32 actw]
+  (comment "The block's top-chunk word for fs-push and friends: actw for a recursive"
+           "program, -1 (the static stack) otherwise.")
+  (if (peg-rec p po) (return actw))
+  (return (neg 1)))
+
+(defn ^:pub ^Bool forced [^IntsR s]
+  (comment "The forced-tier test mode (limits word 8 bit 2, program-2 §8).")
+  (return (!= (bit-and (ia s VM_GENERIC) G_FORCED) 0)))
+
+(defn ^:pub ^I32 a-tier [^IntsR p ^IntsR s ^I32 po]
+  (if (forced s) (return TIER_A2))
+  (return (ia p (+ po 3))))
+
 (defn ^:pub ^I32 array-words [^IntsR p ^I32 ao]
-  (return (+ (+ 3 (* 2 (ia p (+ ao 1)))) (ia p (+ ao 2)))))
+  (comment "ARRWORDS(a) = 16 + 2W + (recursive ? 0 : 4 depth) + (A1 ? (B + 1) W : 0).")
+  (let [w (ia p (+ ao 1))
+        po (apeg p ao)
+        ^:mut n (+ AB_HDR (* 2 w))]
+    (if (not (peg-rec p po)) (set n (+ n (* AFW (ia p (+ po 6))))))
+    (if (== (ia p (+ po 3)) TIER_A1) (set n (+ n (* (+ (ia p (+ po 4)) 1) w))))
+    (return n)))
+
+(defn ^I32 sbase-of [^IntsR p ^I32 bo ^I32 ao]
+  (return (+ (+ bo AB_HDR) (* 2 (ia p (+ ao 1))))))
+
+(defn ^I32 ring-of [^IntsR p ^I32 bo ^I32 ao ^I32 po]
+  (return (+ (sbase-of p bo ao) (* AFW (ia p (+ po 6))))))
+
+;; ------------------------------------------------------------ blocks
 
 (defn ^:pub ^I32 array-block-init [^Ints s ^I32 bo ^I32 qindex ^I32 words ^I32 at]
+  (comment "Initialise a block (charged ceil(words/16)): alive, the machine at the"
+           "root about to be entered, no event, no frames.")
   (if (not (charge s (c16 words) at)) (return (neg R_BUDGET)))
   (for [^I32 j 0 words]
     (iset s (+ bo j) 0))
-  (iset s bo qindex)
-  (iset s (+ bo 1) 1)
+  (iset s (+ bo AB_Q) qindex)
+  (iset s (+ bo AB_ALIVE) 1)
+  (iset s (+ bo AB_EVI) (neg 1))
+  (iset s (+ bo AB_ACT) (neg 1))
+  (iset s (+ bo AB_RBASE) (neg 1))
+  (iset s (+ bo AB_DIED) (neg 1))
   (return 0))
 
-(defn ^:pub ^I32 array-candidates [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 i ^I32 cfb ^I32 cw
+(defn ^:pub array-records [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb]
+  (comment "After a container's blocks are initialised: the A2 blocks' record stride"
+           "(the sum of their W, program-2 §9.4) and their offsets in it; the records"
+           "start at the arena's upward top (nested items pop back to it).")
+  (let [^:mut stride 0
+        ^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (let [ao (block-ao p s fb bo)
+            po (apeg p ao)]
+        (if (== (a-tier p s po) TIER_A2)
+          (do (iset s (+ bo AB_ROFF) stride)
+              (set stride (+ stride (ia p (+ ao 1))))))
+        (set bo (+ bo (array-words p ao)))))
+    (if (> stride 0)
+      (do (let [base (arena-up-top s)
+                ^:mut bo2 area]
+            (for [^I32 _j 0 nb]
+              (let [ao2 (block-ao p s fb bo2)]
+                (if (== (a-tier p s (apeg p ao2)) TIER_A2)
+                  (do (iset s (+ bo2 AB_RBASE) base)
+                      (iset s (+ bo2 AB_STRIDE) stride)))
+                (set bo2 (+ bo2 (array-words p ao2))))))))))
+
+(defn ^:pub ^I32 array-mark [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
+  (comment "The container's record base (the arena top to pop back to at its end),"
+           "or -1 when it has no A2 block.")
+  (let [^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (let [ao (block-ao p s fb bo)]
+        (if (>= (ia s (+ bo AB_RBASE)) 0) (return (ia s (+ bo AB_RBASE))))
+        (set bo (+ bo (array-words p ao)))))
+    (return (neg 1))))
+
+(defn ^:pub aev [^Ints s ^I32 bo ^I32 kind ^I32 idx ^I32 off]
+  (comment "Record a failure event: the farthest index wins, ties the first in run"
+           "order (program-2 §8 rule 5'). Its offset is kept absolute (VM_PBASE).")
+  (if (> idx (ia s (+ bo AB_EVI)))
+    (do (let [abs (+ off (ia s VM_PBASE))]
+          (iset s (+ bo AB_EVI) idx)
+          (iset s (+ bo AB_EVK) kind)
+          (iset s (+ bo AB_EVO) abs)))))
+
+(defn ^:pub ^I32 array-candidates [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 i ^I32 q ^I32 cfb ^I32 cw
                                    ^I32 cnq ^I32 e ^I32 at]
-  (comment "One element of a live block (§8.1): W (|A| + 1) units, the candidate set"
-           "C (first, or the follow rows of the active positions, a counted position"
-           "contributing its follow row only once at its minimum and its self-loop"
-           "while below its maximum), then 1 unit per candidate position, whose"
-           "typeset joins the element's query. The new query length or a code.")
+  (comment "One element (i, its head q) for a live block: a block whose machine"
+           "already succeeded (at index i) dies here with E3 and adds nothing;"
+           "otherwise W (|A| + 1) units, the candidate set C (`first` for element 0,"
+           "else the follow rows of the active positions), then 1 unit per candidate"
+           "position, whose typeset joins the element's query. The new query length"
+           "or a negated code.")
+  (if (== (ia s (+ bo AB_STATUS)) ST_OK)
+    (do (let [e3i (ia s (+ bo AB_IDX))]
+          (aev s bo 3 e3i q))
+        (iset s (+ bo AB_ALIVE) 0)
+        (iset s (+ bo AB_DIED) i)
+        (return cnq)))
   (let [npos (ia p ao)
         aw (ia p (+ ao 1))
-        nc (ia p (+ ao 2))
         first (+ ao 4)
-        posb (+ (+ ao 4) (* 2 aw))
-        cntp (+ posb (* 2 npos))
-        follow (+ cntp (* 2 nc))
-        act (+ bo 3)
+        posb (+ (+ ao 4) aw)
+        follow (+ posb npos)
+        act (+ bo AB_HDR)
         cand (+ act aw)
-        cnts (+ cand aw)
         ^:mut n cnq]
-    (if (not (charge s (* aw (+ (ia s (+ bo 2)) 1)) at)) (return (neg R_BUDGET)))
+    (if (not (charge s (* aw (+ (ia s (+ bo AB_NACT)) 1)) at)) (return (neg R_BUDGET)))
     (if (== i 0)
       (for [^I32 j 0 aw]
         (iset s (+ cand j) (ia p (+ first j))))
@@ -55,89 +199,303 @@
           (for [^I32 wi 0 aw]
             (let [^:mut x (ia s (+ act wi))]
               (while (!= x 0)
-                (let [lb (low-bit x)
-                      pp (+ (* wi 32) lb)
-                      cidx (ia p (+ (+ posb (* 2 pp)) 1))
-                      ^:mut fol true]
+                (let [pp (+ (* wi 32) (low-bit x))
+                      row (+ follow (* pp aw))]
                   (set x (bit-and x (sub32 x 1)))
-                  (if (>= cidx 0)
-                    (do (let [cc (ia s (+ cnts cidx))]
-                          (if (< cc (ia p (+ cntp (* 2 cidx)))) (set fol false))
-                          (if (< cc (ia p (+ (+ cntp (* 2 cidx)) 1)))
-                            (iset s (+ cand wi) (bit-or (ia s (+ cand wi)) (shl 1 lb)))))))
-                  (if fol
-                    (do (let [row (+ follow (* pp aw))]
-                          (for [^I32 j3 0 aw]
-                            (iset s (+ cand j3) (bit-or (ia s (+ cand j3)) (ia p (+ row j3))))))))))))))
+                  (for [^I32 j3 0 aw]
+                    (let [cv (ia s (+ cand j3))]
+                      (iset s (+ cand j3) (bit-or cv (ia p (+ row j3))))))))))))
     (for [^I32 wj 0 aw]
       (let [^:mut y (ia s (+ cand wj))]
         (while (!= y 0)
           (let [pq (+ (* wj 32) (low-bit y))]
             (set y (bit-and y (sub32 y 1)))
             (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-            (set n (q-add p s cfb cw n (ia p (+ posb (* 2 pq))) e at))
+            (set n (q-add p s cfb cw n (ia p (+ posb pq)) e at))
             (if (< n 0) (return n))))))
     (return n)))
 
-(defn ^:pub ^I32 array-advance [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 ev ^I32 at]
-  (comment "After the element: each candidate position, 1 unit + its typeset test;"
-           "A' = the candidates that matched; a counted position's count becomes"
-           "cnt + 1 if it was active, else 1. 1 alive, 0 died (C was not empty), 2"
-           "died with no candidate (the element was unexpected), or a code.")
+;; ------------------------------------------------------------ records
+
+(defn ^Bool rec-ok [^IntsR p ^IntsR s ^I32 po ^I32 newest ^I32 idx]
+  (comment "Can the block's tier hold record idx now (idx <= newest)? A violated read"
+           "bound (program-2 §3.2) is an internal fault, never an out-of-range read.")
+  (if (or (> idx newest) (< idx 0)) (return false))
+  (let [tier (a-tier p s po)]
+    (if (== tier TIER_A0) (return (== idx newest)))
+    (if (== tier TIER_A1) (return (< (- newest idx) (+ (ia p (+ po 4)) 1))))
+    (return true)))
+
+(defn ^I32 rec-word [^IntsR p ^IntsR s ^I32 bo ^I32 ao ^I32 po ^I32 idx ^I32 k]
+  (comment "Word k of record idx (rec-ok holds), by tier.")
+  (let [tier (a-tier p s po)
+        aw (ia p (+ ao 1))]
+    (if (== tier TIER_A0) (return (ia s (+ (+ bo AB_HDR) k))))
+    (if (== tier TIER_A1)
+      (do (let [rows (+ (ia p (+ po 4)) 1)]
+            (return (ia s (+ (+ (ring-of p bo ao po) (* aw (rem idx rows))) k))))))
+    (let [x (+ (+ (arena-body s) (+ (ia s (+ bo AB_RBASE)) (* idx (ia s (+ bo AB_STRIDE)))))
+               (+ (ia s (+ bo AB_ROFF)) k))]
+      (return (ia s x)))))
+
+(defn ^I32 rec-store [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 po ^I32 i ^I32 at]
+  (comment "Store record i (the block's active set) by tier: A1 its ring row, A2 its"
+           "arena record, each charged ceil(W/16) first; the item's record (the"
+           "stride, all A2 blocks) is pushed by the first A2 block that stores it."
+           "0 or a negated code.")
+  (let [tier (a-tier p s po)
+        aw (ia p (+ ao 1))
+        act (+ bo AB_HDR)]
+    (if (== tier TIER_A0) (return 0))
+    (if (not (charge s (c16 aw) at)) (return (neg R_BUDGET)))
+    (if (== tier TIER_A1)
+      (do (let [rows (+ (ia p (+ po 4)) 1)
+                row (+ (ring-of p bo ao po) (* aw (rem i rows)))]
+            (for [^I32 j 0 aw]
+              (let [v (ia s (+ act j))]
+                (iset s (+ row j) v)))
+            (return 0))))
+    (let [stride (ia s (+ bo AB_STRIDE))
+          er (+ (ia s (+ bo AB_RBASE)) (* i stride))
+          up (arena-up-top s)]
+      (if (== up er)
+        (do (let [got (arena-up s stride at)]
+              (if (< got 0) (return got))
+              (if (!= got er) (return (neg R_INCONSISTENT))))))
+      (if (and (!= up er) (!= up (+ er stride))) (return (neg R_INCONSISTENT)))
+      (let [x (+ (arena-body s) (+ er (ia s (+ bo AB_ROFF))))]
+        (for [^I32 j2 0 aw]
+          (let [v2 (ia s (+ act j2))]
+            (iset s (+ x j2) v2))))
+      (return 0))))
+
+(defn ^Bool rec-empty [^IntsR p ^IntsR s ^I32 bo ^I32 ao ^I32 po ^I32 idx]
+  (let [aw (ia p (+ ao 1))]
+    (for [^I32 k 0 aw]
+      (if (!= (rec-word p s bo ao po idx k) 0) (return false)))
+    (return true)))
+
+;; ------------------------------------------------------------ the machine
+
+(defn ^I32 kid-of [^IntsR p ^I32 po ^I32 nd ^I32 j]
+  (comment "Kid j of the SEQ / CHOICE node record at nd.")
+  (return (ia p (+ (+ (+ po PEG_HDR) (* 5 (ia p (+ po 1)))) (+ (ia p (+ nd 1)) j)))))
+
+(defn ^:pub ^I32 a-run [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 newest ^I32 eof ^I32 chead ^I32 cend
+                        ^I32 at]
+  (comment "Run the block's machine (program-2 §5.3) over the records up to newest"
+           "(eof 1: the array ended after it) until it asks for record newest + 1 or"
+           "terminates. Each node entry and each rewind is a step (1 unit at `at`,"
+           "the array's head); an ENTRY is charged once, even when it then waits;"
+           "chunk links and unlinks are steps too (fs-push / fs-pop). Events: E1 an"
+           "ENTRY failed at idx < n (+256 empty record), E2 an ENTRY tested at n,"
+           "E4 a FAIL node; chead / cend are the heads of elements newest and"
+           "newest + 1, the offsets of events there. 0 or a negated code.")
+  (if (!= (ia s (+ bo AB_STATUS)) ST_RUN) (return 0))
+  (let [po (apeg p ao)
+        sbase (sbase-of p bo ao)
+        actw (if-act p po AB_ACT)]
+    (forever
+      (let [mode (ia s (+ bo AB_MODE))]
+        (if (or (== mode M_ENTER) (== mode M_WAIT))
+          (do (let [pc (ia s (+ bo AB_PC))
+                    idx (ia s (+ bo AB_IDX))
+                    nd (+ (+ po PEG_HDR) (* 5 pc))
+                    op (ia p nd)]
+                (if (== mode M_ENTER)
+                  (if (not (charge s 1 at)) (return (neg R_BUDGET))))
+                (if (== op P_ENTRY)
+                  (do (if (> idx newest)
+                        (do (if (== eof 0)
+                              (do (iset s (+ bo AB_MODE) M_WAIT)
+                                  (return 0)))
+                            (aev s bo 2 idx at)
+                            (iset s (+ bo AB_MODE) M_FAIL))
+                        (do (if (not (rec-ok p s po newest idx)) (return (neg R_INCONSISTENT)))
+                            (let [pbit (ia p (+ nd 1))
+                                  wv (rec-word p s bo ao po idx (sar pbit 5))]
+                              (if (!= (bit-and wv (shl 1 (bit-and pbit 31))) 0)
+                                (do (iset s (+ bo AB_IDX) (+ idx 1))
+                                    (iset s (+ bo AB_MODE) M_OK))
+                                (do (let [^:mut kind 1
+                                          ^:mut off at]
+                                      (if (rec-empty p s bo ao po idx) (set kind (+ 1 E_EMPTY)))
+                                      (if (== idx newest) (set off chead))
+                                      (aev s bo kind idx off)
+                                      (iset s (+ bo AB_MODE) M_FAIL))))))))
+                  (do (if (== op P_EMPTY) (iset s (+ bo AB_MODE) M_OK))
+                      (if (== op P_FAIL)
+                        (do (let [^:mut off4 at]
+                              (if (== idx newest) (set off4 chead))
+                              (if (and (== idx (+ newest 1)) (== eof 0)) (set off4 cend))
+                              (aev s bo 4 idx off4)
+                              (iset s (+ bo AB_MODE) M_FAIL))))
+                      (if (>= op P_SEQ)
+                        (do (let [f (fs-push s bo AB_SP actw sbase AFW at)]
+                              (if (< f 0) (return f))
+                              (iset s f pc)
+                              (iset s (+ f 1) idx)
+                              (iset s (+ f 2) 0)
+                              (iset s (+ f 3) idx)
+                              (if (or (== op P_SEQ) (== op P_CHOICE))
+                                (iset s (+ bo AB_PC) (kid-of p po nd 0))
+                                (iset s (+ bo AB_PC) (ia p (+ nd 1))))
+                              (iset s (+ bo AB_MODE) M_ENTER))))))))
+          (do (comment "a node returned: to its frame, or the root's result")
+              (if (== (ia s (+ bo AB_SP)) 0)
+                (do (if (== mode M_OK)
+                      (iset s (+ bo AB_STATUS) ST_OK)
+                      (iset s (+ bo AB_STATUS) ST_FAIL))
+                    (return 0)))
+              (let [fr (fs-top s bo AB_SP actw sbase AFW)
+                    node (ia s fr)
+                    ndr (+ (+ po PEG_HDR) (* 5 node))
+                    opr (ia p ndr)
+                    ok (== mode M_OK)
+                    ^:mut popit false]
+                (if (== opr P_SEQ)
+                  (if (not ok)
+                    (set popit true)
+                    (do (let [c (+ (ia s (+ fr 2)) 1)]
+                          (if (== c (ia p (+ ndr 2)))
+                            (set popit true)
+                            (do (iset s (+ fr 2) c)
+                                (iset s (+ bo AB_PC) (kid-of p po ndr c))
+                                (iset s (+ bo AB_MODE) M_ENTER)))))))
+                (if (== opr P_CHOICE)
+                  (if ok
+                    (set popit true)
+                    (do (let [c2 (+ (ia s (+ fr 2)) 1)]
+                          (if (== c2 (ia p (+ ndr 2)))
+                            (set popit true)
+                            (do (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                                (iset s (+ fr 2) c2)
+                                (iset s (+ bo AB_IDX) (ia s (+ fr 1)))
+                                (iset s (+ bo AB_PC) (kid-of p po ndr c2))
+                                (iset s (+ bo AB_MODE) M_ENTER)))))))
+                (if (== opr P_REP)
+                  (if ok
+                    (do (let [idx2 (ia s (+ bo AB_IDX))]
+                          (if (== idx2 (ia s (+ fr 3)))
+                            (set popit true)
+                            (do (let [c3 (+ (ia s (+ fr 2)) 1)]
+                                  (iset s (+ fr 2) c3)
+                                  (iset s (+ fr 3) idx2)
+                                  (if (< c3 (ia p (+ ndr 3)))
+                                    (do (iset s (+ bo AB_PC) (ia p (+ ndr 1)))
+                                        (iset s (+ bo AB_MODE) M_ENTER))
+                                    (set popit true)))))))
+                    (do (set popit true)
+                        (if (>= (ia s (+ fr 2)) (ia p (+ ndr 2)))
+                          (do (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                              (iset s (+ bo AB_IDX) (ia s (+ fr 3)))
+                              (iset s (+ bo AB_MODE) M_OK))))))
+                (if (== opr P_CALL) (set popit true))
+                (if popit
+                  (do (let [rp (fs-pop s bo AB_SP actw AFW at)]
+                        (if (< rp 0) (return rp))))))))))))
+
+;; ------------------------------------------------------------ per element and end
+
+(defn ^:pub ^I32 array-advance [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 i ^I32 ev ^I32 q ^I32 qend ^I32 at]
+  (comment "After element i (head q, end qend) for a live block: each candidate"
+           "position, 1 unit + its typeset test; r_i = the candidates that matched"
+           "becomes the active set; the record stored (rec-store); then the machine"
+           "runs until it asks for record i + 1. A failure, or a root success at an"
+           "index <= i, kills the block here (died = i). 1 alive, 0 died, or a"
+           "negated code.")
   (let [npos (ia p ao)
         aw (ia p (+ ao 1))
-        posb (+ (+ ao 4) (* 2 aw))
-        act (+ bo 3)
+        posb (+ (+ ao 4) aw)
+        act (+ bo AB_HDR)
         cand (+ act aw)
-        cnts (+ cand aw)
-        ^:mut total 0
-        ^:mut had 0]
+        po (apeg p ao)
+        ^:mut total 0]
     (for [^I32 wi 0 aw]
       (let [^:mut x (ia s (+ cand wi))
             ^:mut keep 0]
-        (if (!= x 0) (set had 1))
         (while (!= x 0)
           (let [lb (low-bit x)
-                bit (shl 1 lb)
                 pp (+ (* wi 32) lb)]
             (set x (bit-and x (sub32 x 1)))
             (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-            (let [t (ts-test p s (ia p (+ posb (* 2 pp))) ev at)]
+            (let [t (ts-test p s (ia p (+ posb pp)) ev at)]
               (if (< t 0) (return t))
-              (if (== t 1)
-                (do (set keep (bit-or keep bit))
-                    (let [cidx (ia p (+ (+ posb (* 2 pp)) 1))]
-                      (if (>= cidx 0)
-                        (if (!= (bit-and (ia s (+ act wi)) bit) 0)
-                          (iset s (+ cnts cidx) (+ (ia s (+ cnts cidx)) 1))
-                          (iset s (+ cnts cidx) 1)))))))))
-        (iset s (+ cand wi) keep)
+              (if (== t 1) (set keep (bit-or keep (shl 1 lb)))))))
+        (iset s (+ act wi) keep)
         (set total (+ total (popcount keep)))))
-    (for [^I32 j 0 aw]
-      (iset s (+ act j) (ia s (+ cand j))))
-    (iset s (+ bo 2) total)
-    (if (== npos 0) (set had 0))
-    (if (> total 0) (return 1))
-    (iset s (+ bo 1) 0)
-    (if (== had 0) (return 2))
-    (return 0)))
+    (iset s (+ bo AB_NACT) total)
+    (if (== npos 0) (iset s (+ bo AB_NACT) 0))
+    (let [rs (rec-store p s bo ao po i at)]
+      (if (< rs 0) (return rs)))
+    (let [rm (a-run p s bo ao i 0 q qend at)]
+      (if (< rm 0) (return rm)))
+    (let [st (ia s (+ bo AB_STATUS))]
+      (if (== st ST_RUN) (return 1))
+      (if (and (== st ST_OK) (> (ia s (+ bo AB_IDX)) i)) (return 1))
+      (if (== st ST_OK)
+        (do (let [e3 (ia s (+ bo AB_IDX))
+                  ^:mut o3 at]
+              (if (== e3 i) (set o3 q))
+              (aev s bo 3 e3 o3))))
+      (iset s (+ bo AB_ALIVE) 0)
+      (iset s (+ bo AB_DIED) i)
+      (fs-drop s bo AB_SP (if-act p po AB_ACT))
+      (return 0))))
 
-(defn ^:pub ^Bool array-accepts [^IntsR p ^IntsR s ^I32 bo ^I32 ao ^I32 n]
-  (comment "At the end: the empty array iff nullable; else some active accepting"
-           "position, uncounted or at its minimum.")
-  (if (== n 0) (return (== (ia p (+ ao 3)) 1)))
-  (let [npos (ia p ao)
-        aw (ia p (+ ao 1))
-        accept (+ (+ ao 4) aw)
-        posb (+ (+ ao 4) (* 2 aw))
-        cntp (+ posb (* 2 npos))
-        cnts (+ (+ bo 3) (* 2 aw))]
-    (for [^I32 wi 0 aw]
-      (let [^:mut x (bit-and (ia s (+ (+ bo 3) wi)) (ia p (+ accept wi)))]
-        (while (!= x 0)
-          (let [pp (+ (* wi 32) (low-bit x))
-                cidx (ia p (+ (+ posb (* 2 pp)) 1))]
-            (set x (bit-and x (sub32 x 1)))
-            (if (< cidx 0) (return true))
-            (if (>= (ia s (+ cnts cidx)) (ia p (+ cntp (* 2 cidx)))) (return true))))))
-    (return false)))
+(defn ^:pub ^I32 array-end [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 n ^I32 at]
+  (comment "At the array's end (n elements) for a live block: W units, then the"
+           "machine told the input ended. 1 the root succeeded at n (the leaf"
+           "matches), 0 not (died = n), or a negated code.")
+  (if (not (charge s (ia p (+ ao 1)) at)) (return (neg R_BUDGET)))
+  (let [rm (a-run p s bo ao (- n 1) 1 at at at)]
+    (if (< rm 0) (return rm)))
+  (if (and (== (ia s (+ bo AB_STATUS)) ST_OK) (== (ia s (+ bo AB_IDX)) n)) (return 1))
+  (iset s (+ bo AB_ALIVE) 0)
+  (iset s (+ bo AB_DIED) n)
+  (fs-drop s bo AB_SP (if-act p (apeg p ao) AB_ACT))
+  (return 0))
+
+(defn ^:pub ^I32 array-witness [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb ^I32 d ^I32 n ^I32 at ^I32 pend]
+  (comment "Witness rule 5' (program-2 §8): the block that died last (ties: the lowest"
+           "leaf id) reports its farthest event -- E1 at i with an empty record keeps"
+           "the slot when the block was the item's last live block at i (nothing"
+           "pending, the slot recorded there), else `type` + INDEX i; E2 `missing`"
+           "+ INDEX n; E3 `unexpected` + INDEX e; E4 `unexpected` + INDEX i when i <"
+           "n, else `missing` + INDEX n. Offsets: the element's head, or the array's"
+           "for INDEX n. 0.")
+  (let [^:mut best (neg 1)
+        ^:mut bdied (neg 2)
+        ^:mut blid 0
+        ^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (let [ao (block-ao p s fb bo)
+            dd (ia s (+ bo AB_DIED))
+            lid (ia s (+ fb (ia s (+ bo AB_Q))))]
+        (if (or (> dd bdied) (and (== dd bdied) (< lid blid)))
+          (do (set best bo) (set bdied dd) (set blid lid)))
+        (set bo (+ bo (array-words p ao)))))
+    (if (< best 0)
+      (do (wit-set s R_MISSING 0 d P_INDEX n at)
+          (return 0)))
+    (let [ei (ia s (+ best AB_EVI))
+          ek (ia s (+ best AB_EVK))
+          eo (- (ia s (+ best AB_EVO)) (ia s VM_PBASE))
+          kind (bit-and ek 255)]
+      (if (< ei 0)
+        (do (wit-set s R_MISSING 0 d P_INDEX n at)
+            (return 0)))
+      (if (== kind 1)
+        (do (if (and (and (!= (bit-and ek E_EMPTY) 0) (== ei bdied))
+                     (and (< bdied n) (and (== pend 0) (not (wit-empty s)))))
+              (return 0))
+            (wit-set s R_TYPE 0 d P_INDEX ei eo)
+            (return 0)))
+      (if (== kind 3)
+        (do (wit-set s R_UNEXPECTED 0 d P_INDEX ei eo)
+            (return 0)))
+      (if (and (== kind 4) (< ei n))
+        (do (wit-set s R_UNEXPECTED 0 d P_INDEX ei eo)
+            (return 0)))
+      (wit-set s R_MISSING 0 d P_INDEX n at)
+      (return 0))))

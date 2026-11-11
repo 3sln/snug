@@ -860,9 +860,10 @@
 
 (defn ^:pub ^I32 plan-containers [^Ints h]
   (comment "Per live map and array (T_LAUX words): 1 its block words (MAPWORDS /"
-           "ARRWORDS, program-2 §5.2, §6.3), 2 map candidates (n_members + the"
-           "largest naming count) or array W, 3 its record words when it is A2 / T"
-           "(else 0), 4 1 if recursive, 5 its activation words (§5.3).")
+           "ARRWORDS, program-2 §5.2, §6.3 as amended by D311), 2 a map's candidates"
+           "per pair (n_members: a member is a candidate at most once) or array W, 3"
+           "its record words when it is A2 / T (else 0), 4 1 if recursive, 5 its"
+           "activation words (§5.3).")
   (let [nl (hg h H_N_FIN)]
     (for [^I32 f 0 nl]
       (let [l (fin-internal h f)
@@ -878,15 +879,15 @@
                     nn (named-count h np)
                     nmx (namers-max h np)
                     nr (root-count h blob)
-                    ^:mut mw (+ 16 (* 4 nm))]
+                    ^:mut mw (+ 20 (* 6 nm))]
                 (if (< np 0) (return (neg 1)))
                 (if (== nc 0) (set mw (+ mw (* 8 depth))))
                 (if (== tier TIER_S)
-                  (set mw (+ mw (* nn (+ (+ 2 (ceil32 nmx)) (* 2 (ceil32 nr)))))))
-                (if (== tier TIER_T) (set mw (+ mw nn)))
+                  (set mw (+ mw (* nn (+ (+ 2 (ceil32 nmx)) (* 2 (ceil32 nr))))))
+                  (set mw (+ mw nn)))
                 (laux-set h f 1 mw)
-                (laux-set h f 2 (+ nm nmx))
-                (if (== tier TIER_T) (laux-set h f 3 (+ 2 (ceil32 (* 2 nm)))) (laux-set h f 3 0))
+                (laux-set h f 2 nm)
+                (if (== tier TIER_T) (laux-set h f 3 (+ 4 (ceil32 (* 2 nm)))) (laux-set h f 3 0))
                 (if (> nc 0) (laux-set h f 4 1) (laux-set h f 4 0))
                 (if (> nc 0) (laux-set h f 5 (act-words nc depth)) (laux-set h f 5 0)))))
         (if (== k K_ARRAY)
@@ -897,7 +898,7 @@
                     ab (prog-w h aprog 4)
                     adepth (prog-w h aprog 6)
                     anc (prog-w h aprog 8)
-                    ^:mut aw (+ 14 (* 2 w))]
+                    ^:mut aw (+ 16 (* 2 w))]
                 (if (== anc 0) (set aw (+ aw (* 4 adepth))))
                 (if (== atier TIER_A1) (set aw (+ aw (* (+ ab 1) w))))
                 (laux-set h f 1 aw)
@@ -927,19 +928,17 @@
     (return 0)))
 
 (defn ^I32 frame-words [^IntsR h ^I32 from ^I32 n]
-  (comment "program-2 §9.2: 2|R| + max(MAPAREA, ARRAREA); MAPAREA = the maps' block"
-           "words + 4 cand_max(R), ARRAREA = the arrays' block words.")
+  (comment "program-2 §9.2 as amended by D311: 2|R| + max(MAPAREA, ARRAREA); MAPAREA"
+           "= the maps' block words + 4 words per member of each (the pair's candidate"
+           "list), ARRAREA = the arrays' block words.")
   (let [^:mut maparea 0
-        ^:mut candmax 0
         ^:mut arrarea 0]
     (for [^I32 i 0 n]
       (let [f (vget h T_CLS (+ from i))
             k (lk h (fin-internal h f))]
         (if (== k K_MAP)
-          (do (set maparea (+ maparea (laux h f 1)))
-              (if (> (laux h f 2) candmax) (set candmax (laux h f 2)))))
+          (set maparea (+ (+ maparea (laux h f 1)) (* 4 (laux h f 2)))))
         (if (== k K_ARRAY) (set arrarea (+ arrarea (laux h f 1))))))
-    (set maparea (+ maparea (* 4 candmax)))
     (if (> arrarea maparea) (set maparea arrarea))
     (return (+ (* 2 n) maparea))))
 
@@ -1180,7 +1179,7 @@
         ^:mut ktsf (neg 1)
         ^:mut mflags 0]
     (if (== tier TIER_S) (set sw (+ (+ 2 (ceil32 nmx)) (* 2 (ceil32 nr)))))
-    (if (== tier TIER_T) (set rw2 (+ 2 (ceil32 (* 2 nm)))))
+    (if (== tier TIER_T) (set rw2 (+ 4 (ceil32 (* 2 nm)))))
     (if (>= kts 0) (set ktsf (fts-of h kts)))
     (if (!= (bit-and pflags 2) 0) (set mflags 1))
     (if (!= (bit-and pflags 4) 0) (set mflags (bit-or mflags 2)))

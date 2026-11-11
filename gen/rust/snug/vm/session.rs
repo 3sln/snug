@@ -8,6 +8,7 @@ use crate::snug::cbor::keys::*;
 use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::vm::api::*;
+use crate::snug::vm::arena::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::dead::*;
 use crate::snug::vm::eval::*;
@@ -186,6 +187,11 @@ pub(crate) fn doc_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out:
     // query; then the root item.
     let n: i32 = ss[(SS_TOTAL) as usize];
     let at: i32 = 0 - base;
+    // a recursive Program's group arena, grown once for the message (arena-doc)
+    let ga: i32 = arena_doc(p, s, ss, n);
+    if ga == VMS_GROW {
+        return ga;
+    }
     if n > s[(O_MAX_BYTES) as usize] {
         fail(s, at, CODE_TOO_LARGE);
         return fin(s, ss, out, base, CODE_TOO_LARGE, 0, at);
@@ -243,8 +249,12 @@ pub(crate) fn root_end(p: &[i32], s: &mut [i32], ss: &mut [i32], out: &mut [i32]
         let vp: i32 = s[(VM_POS) as usize];
         return fin(s, ss, out, base, R_BUDGET, 0, vp);
     }
-    if r == (-R_INCONSISTENT) {
+    if (r == (-R_INCONSISTENT)) || (r == (-R_AGROW)) {
         return fin_bad(s, ss, base);
+    }
+    if r == (-R_GROUP_LIMIT) {
+        let vg: i32 = s[(VM_POS) as usize];
+        return fin(s, ss, out, base, R_GROUP_LIMIT, 0, vg);
     }
     if r < 0 {
         let ep: i32 = s[(O_ERR_POS) as usize];
@@ -652,6 +662,14 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
             ss[(SS_CHN) as usize] = -1;
         }
     }
+    // P8.5: an item taken whole may push on the group arena up to its bytes'
+    // bound: room first (a suspension point, nothing charged yet)
+    if direct == 1 {
+        let g7: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, wend) - pos));
+        if g7 == VMS_GROW {
+            return g7;
+        }
+    }
     progress(ss, 1);
     if (direct == 1) && vsess(s, ss) {
         if !(((major == 2) && ((nq == 0) || ((p[(H_FLAGS) as usize] & FL_EMBED) == 0))) && (((ai <= 27) && ((pos + h) <= end)) && head_short(b, pos))) {
@@ -711,20 +729,20 @@ pub(crate) fn deliver(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out: &
     let f: i32 = ftop(ss);
     let kind: i32 = ss[(f + F_KIND) as usize];
     if r < 0 {
-        if ((r != (-R_BUDGET)) && (r != (-R_INCONSISTENT))) && ((kind == FK_BSTR) && (ss[(f + F_PH) as usize] == S_EMBRUN)) {
+        if (((r != (-R_BUDGET)) && (r != (-R_INCONSISTENT))) && ((r != (-R_GROUP_LIMIT)) && (r != (-R_AGROW)))) && ((kind == FK_BSTR) && (ss[(f + F_PH) as usize] == S_EMBRUN)) {
             return embed_ret(p, s, ss, base, f, r);
         }
         fpop(ss);
         return GO;
     }
     if kind == FK_ARR {
-        return arr_ret(p, s, ss, base, f, r);
+        return arr_ret(p, s, ss, base, f, r, 0);
     }
     if (kind == FK_DARR) || (kind == FK_DSEQ) {
         return darr_ret(ss, f, r);
     }
     if (kind == FK_MAP) || (kind == FK_DMAP) {
-        return map_ret(p, s, ss, base, f, r);
+        return map_ret(p, s, ss, base, f, r, 0);
     }
     if kind == FK_TAG {
         return tag_ret(b, s, ss, base, f, r);
@@ -823,6 +841,10 @@ pub(crate) fn vms_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut 
     let pos0: i32 = ss[(SS_POS) as usize] - base;
     let mut cut: i32 = wend;
     rebase(s, -base);
+    // P8.5: S grown for the group arena (VMS_GROW) -- the arena takes the words
+    // it asked for, its chunk heap moved up (program-2 §9.4 relocation)
+    arena_take(s);
+    s[(VM_PBASE) as usize] = base;
     ss[(SS_GW) as usize] = 0;
     ss[(SS_GB) as usize] = 0;
     ss[(SS_GS) as usize] = 0;

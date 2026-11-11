@@ -6,8 +6,11 @@ use crate::snug::cbor::head::*;
 use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
 use crate::snug::vm::api::*;
+use crate::snug::vm::arena::*;
+use crate::snug::vm::array::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::layout::*;
+use crate::snug::vm::map::*;
 
 pub const VMS_NEED: i32 = -64;
 pub const VMS_YIELD: i32 = -65;
@@ -131,6 +134,8 @@ pub const F_KE: i32 = 35;
 pub const F_KGOT: i32 = 36;
 pub const F_KA: i32 = 37;
 pub const F_KQ: i32 = 38;
+pub const F_KPOS: i32 = 39;
+pub const F_KLEN: i32 = 40;
 pub const F_MAJ: i32 = 15;
 pub const F_CS: i32 = 16;
 pub const F_STOP: i32 = 17;
@@ -149,6 +154,7 @@ pub const F_SCOSE: i32 = 31;
 pub const F_SERR: i32 = 32;
 pub const F_SEQ: i32 = 33;
 pub const F_TAIL: i32 = 34;
+pub const F_SAUP: i32 = 35;
 pub const F_TNUM: i32 = 15;
 pub const F_TCLS: i32 = 16;
 pub const F_TCNQ: i32 = 17;
@@ -346,6 +352,95 @@ pub fn key_max_claim(b: &[u8], start: i32, end: i32, wend: i32) -> i32 {
         }
     }
     return mc;
+}
+pub fn sat_add(a: i32, b: i32) -> i32 {
+    if (a >= INF) || (b >= INF) {
+        return INF;
+    }
+    if a > (INF - b) {
+        return INF;
+    }
+    return a + b;
+}
+pub fn sat_mul(a: i32, b: i32) -> i32 {
+    if (a <= 0) || (b <= 0) {
+        return 0;
+    }
+    if a > (INF / b) {
+        return INF;
+    }
+    return a * b;
+}
+pub fn arena_used(p: &[i32], s: &[i32]) -> bool {
+    // Can a run of this Program push anything on the group arena? (an A2 array
+    // or a T map, FLAGS bit 6; or the forced-tier test mode)
+    return ((p[(H_FLAGS) as usize] & FL_ARENA) != 0) || forced(s);
+}
+pub fn r_item(p: &[i32], s: &[i32]) -> i32 {
+    // Record words one item can push (program-2 §9.4 R_ITEM_MAX; in the forced-
+    // tier mode every array table's W and every map table's T record words).
+    if !forced(s) {
+        return p[(H_R_ITEM_MAX) as usize];
+    }
+    let mut t: i32 = 0;
+    let na: i32 = p[(21) as usize];
+    let nm: i32 = p[(20) as usize];
+    for i in 0..na {
+        t = sat_add(t, p[(p[(p[(H_S_ARRAY_INDEX) as usize] + i) as usize] + 1) as usize]);
+    }
+    for j in 0..nm {
+        t = sat_add(t, t_recw(p[(p[(p[(H_S_MAP_INDEX) as usize] + j) as usize] + 1) as usize]));
+    }
+    return t;
+}
+pub fn arena_items(p: &[i32], s: &[i32], len: i32) -> i32 {
+    // What a session step may push on the group arena before its next
+    // suspension point (program-2 §9.4's bound, applied to the work at hand): a
+    // record for the item at hand and for each item of a child of up to len
+    // bytes, and one end-run's permutation and trail per child entry.
+    // Recursive programs' frames are covered once, at the document's start
+    // (arena-doc).
+    let mut l: i32 = len;
+    if l < 0 {
+        l = 0;
+    }
+    return sat_add(sat_mul(sat_add(l, 1), r_item(p, s)), sat_mul(2, l));
+}
+pub fn arena_gate(p: &[i32], s: &mut [i32], ss: &mut [i32], words: i32) -> i32 {
+    // A session's suspension point before work that may push `words` on the
+    // group arena: GO when they fit (or the arena is at its cap, where a miss is
+    // the work's own group_limit); else VMS_GROW, the host growing S to
+    // vms-grow-scratch words (the arena takes them at the next step, arena-adopt).
+    // Nothing is charged before it, so the step that re-runs the phase is the
+    // same.
+    if !arena_used(p, s) {
+        return GO;
+    }
+    let r: i32 = arena_room(s, words);
+    if r == 0 {
+        return GO;
+    }
+    let want: i32 = arena_want(s);
+    if want > ss[(SS_GS) as usize] {
+        ss[(SS_GS) as usize] = want;
+    }
+    return VMS_GROW;
+}
+pub fn arena_doc(p: &[i32], s: &mut [i32], ss: &mut [i32], total: i32) -> i32 {
+    // At a session's start: a recursive Program's chunk heap can grow by more
+    // than any one step's records foresee (an activation chain rebuilt in one
+    // machine run), so its arena is grown once to program-2 §9.4's bound for the
+    // whole message (items <= bytes), at most to the cap. GO or VMS_GROW.
+    let act: i32 = p[(H_ACT_SUM) as usize];
+    let rl: i32 = p[(H_RECLEAF_MAX) as usize];
+    if (act <= 0) && (rl <= 0) {
+        return GO;
+    }
+    let dd: i32 = p[(H_LIM_DEPTH) as usize];
+    let per: i32 = sat_add(r_item(p, s), act);
+    let fixed: i32 = sat_mul(dd + 1, sat_add(act, sat_mul(64, rl)));
+    let need: i32 = sat_add(sat_add(sat_mul(total, per), fixed), sat_mul(2, total));
+    return arena_gate(p, s, ss, need);
 }
 pub fn imin(a: i32, b: i32) -> i32 {
     if a < b {

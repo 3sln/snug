@@ -26,12 +26,13 @@
             [snug.cbor.tags :refer [typed-size]]
             [snug.vm.layout :refer [HEADER_WORDS H_POOL_BYTES H_S_RULES VM_BUDGET VM_POS VM_FRAMES VM_RULE R_TYPE
                                     R_BUDGET R_INCONSISTENT H_FLAGS H_S_LEAVES FL_EXT FL_EMBED K_EXT VM_BUDGET_START
-                                    H_LIM_INPUT]]
+                                    H_LIM_INPUT R_GROUP_LIMIT R_AGROW VM_PBASE]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec cset-width wit-empty wit-set]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.eval :refer [eval-item]]
             [snug.vm.api :refer [vm-setup vm-output vm-witness-output lim]]
-            [snug.vm.sbase :refer [VMS_NEED VMS_YIELD GO SS_PH SS_TOTAL SS_POS SS_NEED_OFF SS_NEED_LEN
+            [snug.vm.arena :refer [arena-take]]
+            [snug.vm.sbase :refer [arena-gate arena-items arena-doc VMS_NEED VMS_YIELD GO SS_PH SS_TOTAL SS_POS SS_NEED_OFF SS_NEED_LEN
                                    SS_QUANTUM SS_SP SS_RET SS_KEEP SS_ATOP SS_FRAMES SS_MAXF SS_CODE SS_WB0
                                    SS_WORK SS_CUT SS_CHN SS_CHAIN SS_PSTK SS_PCAP SS_PROG SS_RTS SS_RNQ
                                    SS_STEPS IT_POS IT_D IT_FB IT_CK IT_NQ IT_END IT_CTX IT_MODE IT_NOTE
@@ -205,6 +206,9 @@
            "query; then the root item.")
   (let [n (ia ss SS_TOTAL)
         at (- 0 base)]
+    (comment "a recursive Program's group arena, grown once for the message (arena-doc)")
+    (let [ga (arena-doc p s ss n)]
+      (if (== ga VMS_GROW) (return ga)))
     (if (> n (ia s O_MAX_BYTES))
       (do (fail s at CODE_TOO_LARGE)
           (return (fin s ss out base CODE_TOO_LARGE 0 at))))
@@ -252,7 +256,10 @@
     (if (== r (neg R_BUDGET))
       (do (let [vp (ia s VM_POS)]
             (return (fin s ss out base R_BUDGET 0 vp)))))
-    (if (== r (neg R_INCONSISTENT)) (return (fin-bad s ss base)))
+    (if (or (== r (neg R_INCONSISTENT)) (== r (neg R_AGROW))) (return (fin-bad s ss base)))
+    (if (== r (neg R_GROUP_LIMIT))
+      (do (let [vg (ia s VM_POS)]
+            (return (fin s ss out base R_GROUP_LIMIT 0 vg)))))
     (if (< r 0)
       (do (let [ep (ia s O_ERR_POS)]
             (return (fin s ss out base (neg r) 0 ep)))))
@@ -530,6 +537,11 @@
                             (set direct 1))
                         (if (== (prescan b ss base pos end xreq) 1) (set direct 1)))
                       (iset ss SS_CHN (neg 1))))))))
+      (comment "P8.5: an item taken whole may push on the group arena up to its bytes'"
+               "bound: room first (a suspension point, nothing charged yet)")
+      (if (== direct 1)
+        (do (let [g7 (arena-gate p s ss (arena-items p s (- (imin end wend) pos)))]
+              (if (== g7 VMS_GROW) (return g7)))))
       (progress ss 1)
       (if (and (== direct 1) (vsess s ss))
         (if (not (and (and (== major 2) (or (== nq 0) (== (bit-and (ia p H_FLAGS) FL_EMBED) 0)))
@@ -569,14 +581,15 @@
     (let [f (ftop ss)
           kind (ia ss (+ f F_KIND))]
       (if (< r 0)
-        (do (if (and (and (!= r (neg R_BUDGET)) (!= r (neg R_INCONSISTENT)))
+        (do (if (and (and (and (!= r (neg R_BUDGET)) (!= r (neg R_INCONSISTENT)))
+                          (and (!= r (neg R_GROUP_LIMIT)) (!= r (neg R_AGROW))))
                      (and (== kind FK_BSTR) (== (ia ss (+ f F_PH)) S_EMBRUN)))
               (return (embed-ret p s ss base f r)))
             (fpop ss)
             (return GO)))
-      (if (== kind FK_ARR) (return (arr-ret p s ss base f r)))
+      (if (== kind FK_ARR) (return (arr-ret p s ss base f r 0)))
       (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-ret ss f r)))
-      (if (or (== kind FK_MAP) (== kind FK_DMAP)) (return (map-ret p s ss base f r)))
+      (if (or (== kind FK_MAP) (== kind FK_DMAP)) (return (map-ret p s ss base f r 0)))
       (if (== kind FK_TAG) (return (tag-ret b s ss base f r)))
       (if (== kind FK_BSTR) (return (embed-ret p s ss base f r)))
       (return (fin-bad s ss base)))))
@@ -645,6 +658,10 @@
         pos0 (- (ia ss SS_POS) base)
         ^:mut cut wend]
     (rebase s (neg base))
+    (comment "P8.5: S grown for the group arena (VMS_GROW) -- the arena takes the words"
+             "it asked for, its chunk heap moved up (program-2 §9.4 relocation)")
+    (arena-take s)
+    (iset s VM_PBASE base)
     (iset ss SS_GW 0)
     (iset ss SS_GB 0)
     (iset ss SS_GS 0)

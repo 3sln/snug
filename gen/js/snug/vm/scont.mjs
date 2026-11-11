@@ -8,14 +8,13 @@ import { keyEndAny } from '../cbor/keys.mjs';
 import { keyLabel, keyPeek } from '../cbor/scan.mjs';
 import { anyTags, ruleTag, stdAllowed, stdContentOk, typedAnySize } from '../cbor/stdtags.mjs';
 import { typedSize } from '../cbor/tags.mjs';
-import { arrayAccepts, arrayAdvance, arrayBlockInit, arrayCandidates, arrayWords, blockAo, leafArray } from './array.mjs';
-import { c64, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, rule1, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
+import { c64, charge, csetFrame, csetRec, csetWidth, freeOff, freeOn, newEpoch, nextCk, pathPut, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, sched2, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { deadIntStreak, deadItem, deadPairBody, deadStdCheck, decimalCheck, ndarrayCheck, pairCheck } from './dead.mjs';
-import { arrayStreak, bstrTail, countMatched, countPending, cursorsReset, evalItem, finishComb, finishScalar, ifLimit, mapFastMode, mapPairOk, qFilterX, simpleOf, singleLeaf, unitOf } from './eval.mjs';
-import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, H_S_LEAVES, K_ARRAY, K_INT, K_MAP, K_TAG, K_TAGSET, K_TEXT, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_BUDGET, R_INCONSISTENT, R_MISSING, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
+import { arrAfter, arrAlive, arrClose, arrOpen, arrQuery, arrStarLeaf, arrayStreak, bstrTail, countMatched, countPending, evalItem, finishScalar, ifLimit, mapAfter, mapCands, mapCcap, mapCl, mapClose, mapKeyq, mapNamedOf, mapOpen, mapPre, mapSmode, mapValq, qFilterX, simpleOf, unitOf } from './eval.mjs';
+import { CTX_KEY, CTX_SIMPLE, F_ADMITTED, F_EVAL, F_MATCHED, H_S_LEAVES, K_TAG, K_TAGSET, P_ANYKEY, P_INDEX, P_KEY, P_TAG, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_TAG, R_TYPE, R_UNEXPECTED, R_VALUE, VM_FASTM, VM_GENERIC, VM_POS, VM_Q1, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
 import { cmpU64, evalScalars, scalarKind } from './leaf.mjs';
-import { blockMt, blockNamed, candVts, candVtsMt, keyPhaseStruct, keySearch, keySpanEnd, leafMap, mapBlockInit, mapCursor, mapKeyPhase, mapKeyQuery, mapMissing, mapSatisfied, mapUpdate, simpleStruct, updateStruct } from './map.mjs';
-import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_FLOOR, F_IND, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLO, F_KM, F_MCNQ, F_N, F_NALIVE, F_NAMED, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VLAST, F_VMARK, F_VN, F_VNQ, GO, IND, IT_PAIR, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, SS_UNK, SS_VNEED, VMS_GROW, VMS_NEED, bstrReads, call, cont, cutYield, done, ensure, enterPend, err, fbase, fidx, fitsKnown, fpush, ftop, imin, keyMaxClaim, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, pendNote, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
+import { keySearch, keySpanEnd, mapIsUnordered, mapKeyEcs, mapUnordered } from './map.mjs';
+import { FK_ARR, FK_DARR, FK_DMAP, FK_DSEQ, FK_MAP, FK_TAG, F_CCAP, F_CK, F_CL, F_CNQ, F_COSE, F_CTX, F_CX, F_D, F_EL, F_END, F_FB, F_FLOOR, F_IND, F_KA, F_KE, F_KGOT, F_KID, F_KIND, F_KLEN, F_KLO, F_KM, F_KPOS, F_MCNQ, F_N, F_NALIVE, F_NB, F_NC, F_NQ, F_PAIR, F_PE, F_PEND, F_PH, F_PIN, F_POS, F_PS, F_PS2, F_Q, F_Q0, F_Q1, F_S2, F_SMAP, F_START, F_TCLS, F_TCNQ, F_TCS, F_TI, F_TLIVE, F_TNOTED, F_TNUM, F_TSIZE, F_TSTOP, F_VLAST, F_VMARK, F_VN, F_VNQ, GO, IND, MODE_FRAME, MODE_ITEM, PH_RET, SS_ATOP, SS_CUT, SS_PH, SS_RET, SS_UNK, SS_VNEED, VMS_GROW, VMS_NEED, arenaGate, arenaItems, bstrReads, call, cont, cutYield, done, ensure, enterPend, err, fbase, fidx, fitsKnown, fpush, ftop, imin, keyMaxClaim, keyOrderS, keysSave, litsNeed, mustYield, need, notesInit, pairNote, pairVerdict, pendNote, prescan, progress, ret, setPrev, setPrevArena, suspended, yld } from './sbase.mjs';
 import { frameItem, openBstr, prologue, typedScan } from './sstr.mjs';
 import { KH, VI_GROW, VI_NEED, vbuild, vclean, vdescends, vdupEnd, vfix, vgrow, vitem, vkeep, vorder, vrun, vscan, vsess } from './svalid.mjs';
 
@@ -100,61 +99,31 @@ export function inlineChild(p, pool, b, s, ss, vs, cb, base, pos, d, fb, ck, nq,
 }
 
 export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, ctx, pair) {
-    // eval-array's start (generic path): filter, blocks, the schedule-2 shape
-    // (D045 i, iii), then the frame. n < 0: a `.cborseq` virtual array (D040).
+    // eval-array's start (generic path): filter, blocks (arr-open), the
+    // schedule-2 shape (D045 i, iii), then the frame. n < 0: a `.cborseq`
+    // virtual array (D040).
     const cr = csetRec(p, s, ck);
     const w = csetWidth(p, cr);
     const fw = csetFrame(p, cr);
     const area = fb + (2 * w);
-    const cap = fw - (2 * w);
-    let nb = 0;
-    let used = 0;
-    let sl = -1;
     let s2 = 0;
     let cx = 0;
     const na = qFilterX(p, s, fb, w, nq, 16, pos, ctx);
     if (na < 0) {
         return err(ss, na);
     }
-    for (let i = 0; i < nq; i++) {
-        if (((qFlag(s, fb, w, i) & F_ADMITTED) !== 0) && (qKind(p, s, fb, i) === K_ARRAY)) {
-            const words = arrayWords(p, leafArray(p, qLeafBase(p, s, fb, i)));
-            if ((used + words) > cap) {
-                return err(ss, -R_INCONSISTENT);
-            }
-            const ri = arrayBlockInit(s, area + used, i, words, pos);
-            if (ri < 0) {
-                return err(ss, ri);
-            }
-            used += words;
-            nb += 1;
-        }
+    const nb = arrOpen(p, s, fb, w, fw - (2 * w), nq, pos);
+    if (nb < 0) {
+        return err(ss, nb);
     }
-    if (nb === 1) {
-        const ao1 = blockAo(p, s, fb, area);
-        if (((p[ao1] === 1) && (p[ao1 + 2] === 0)) && ((p[ao1 + 4] === 1) && ((p[ao1 + 8] & 1) === 1))) {
-            sl = singleLeaf(p, p[ao1 + 6]);
-        }
-    }
+    const sl = arrStarLeaf(p, s, fb, area, nb);
     if (sched2(s) && (sl >= 0)) {
         s2 = 1;
         if (scalarKind(p[p[H_S_LEAVES] + (8 * sl)] & 255)) {
             cx = CTX_SIMPLE;
         }
     }
-    // eval-array's streak leaf: an INT over one interval or a TEXT without a
-    // regexp, fast paths on (D044)
-    let sleaf = -1;
-    if ((sl >= 0) && ((s[VM_GENERIC] & 1) === 0)) {
-        const lbf = p[H_S_LEAVES] + (8 * sl);
-        const kf = p[lbf] & 255;
-        if (((kf === K_INT) && (p[lbf + 3] === 1)) || ((kf === K_TEXT) && (p[lbf + 4] < 0))) {
-            sleaf = sl;
-        }
-    }
-    ss[IT_PAIR] = sleaf;
     const pend = countPending(p, s, fb, w, nq);
-    const sleaf2 = ss[IT_PAIR];
     const f = fpush(b, ss, ka, base, FK_ARR);
     if (f < 0) {
         return err(ss, -R_INCONSISTENT);
@@ -170,7 +139,7 @@ export function arrStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
     ss[f + F_PEND] = pend;
     ss[f + F_NALIVE] = nb;
     ss[f + F_PAIR] = pair;
-    ss[f + F_SLEAF] = sleaf2;
+    ss[f + F_SLEAF] = -1;
     markPair(ss, pair);
     return cont(ss, f, A_NEXT);
 }
@@ -231,58 +200,31 @@ export function arrEnd(p, pool, b, s, ss, base, f, ext) {
     const nb = ss[f + F_NB];
     const w = csetWidth(p, csetRec(p, s, ss[f + F_CK]));
     const area = fb + (2 * w);
-    let unacc = 0;
-    let be = area;
-    for (let _bk = 0; _bk < nb; _bk++) {
-        if (!charge(s, 1, pos)) {
-            return err(ss, -R_BUDGET);
-        }
-        const aok = blockAo(p, s, fb, be);
-        if (s[be + 1] !== 0) {
-            if (!charge(s, p[aok + 1], pos)) {
-                return err(ss, -R_BUDGET);
-            }
-            if (arrayAccepts(p, s, be, aok, el)) {
-                qSetFlag(s, fb, w, s[be], F_MATCHED);
-            } else {
-                qSetFlag(s, fb, w, s[be], R_MISSING << 8);
-                unacc += 1;
-            }
-        }
-        be += arrayWords(p, aok);
-    }
     if (n === 2) {
         const q1 = ss[f + F_Q1] - base;
         s[VM_Q1] = q1;
     }
-    const rs = evalScalars(p, pool, b, s, fb, w, nq, pos, q0, q, 16, 0, el, unitOf(ctx));
-    if (rs < 0) {
-        return err(ss, rs);
-    }
-    const m = finishComb(p, pool, b, s, fb, w, nq, pos, q, ext);
-    if (m < 0) {
-        return err(ss, m);
-    }
-    if ((m === 0) && (((ctx & CTX_KEY) === 0) && witEmpty(s))) {
-        if (unacc > 0) {
-            witSet(s, R_MISSING, 0, d, P_INDEX, el, pos);
-        } else {
-            const r1 = rule1(s, fb, w, nq, d, pos);
-            if (r1 < 0) {
-                return err(ss, r1);
-            }
-        }
+    const rc = arrClose(p, pool, b, s, fb, w, area, nb, d, el, pos, q0, q, nq, ctx, ss[f + F_PEND], ext);
+    if (rc < 0) {
+        return err(ss, rc);
     }
     return done(ss, base, q);
 }
 
-export function arrRet(p, s, ss, base, f, r) {
-    // The element ended at r (absolute): after a live element, stamp and
-    // advance the live blocks, then the witness; next.
+export function arrRet(p, s, ss, base, f, r, gated) {
+    // The element ended at r (absolute): after a live element, its records and
+    // machines (arr-after), then the witness; next. Unless the caller already
+    // made room (gated 1), the group arena is made room in first (a
+    // suspension point: nothing is charged before it).
     const el = ss[f + F_EL];
     if (ss[f + F_PH] === A_LIVE) {
+        if (gated === 0) {
+            const g = arenaGate(p, s, ss, arenaItems(p, s, 0));
+            if (g === VMS_GROW) {
+                return g;
+            }
+        }
         const pos = ss[f + F_POS] - base;
-        const d = ss[f + F_D];
         const fb = ss[f + F_FB];
         const ck = ss[f + F_CK];
         const q = ss[f + F_Q] - base;
@@ -292,47 +234,19 @@ export function arrRet(p, s, ss, base, f, r) {
         const w = csetWidth(p, cr);
         const area = fb + (2 * w);
         const cw = csetWidth(p, csetRec(p, s, nextCk(p, s, ck)));
-        const ao1 = blockAo(p, s, fb, area);
-        let nalive = ss[f + F_NALIVE];
-        let still = 0;
-        let bo = area;
+        const cfb = fb + csetFrame(p, cr);
         if (ss[f + F_S2] === 1) {
             freeOn(s);
         }
-        const ev = qStamp(s, fb + csetFrame(p, cr), cw, cnq, pos);
-        if (ev < 0) {
-            return err(ss, ev);
-        }
-        for (let bj = 0; bj < nb; bj++) {
-            let aoj = ao1;
-            if (bj > 0) {
-                aoj = blockAo(p, s, fb, bo);
-            }
-            if (s[bo + 1] !== 0) {
-                const adv = arrayAdvance(p, s, bo, aoj, ev, pos);
-                if (adv < 0) {
-                    return err(ss, adv);
-                }
-                if (adv === 1) {
-                    still += 1;
-                } else {
-                    nalive -= 1;
-                    if (adv === 2) {
-                        qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
-                    } else {
-                        qSetFlag(s, fb, w, s[bo], R_TYPE << 8);
-                    }
-                }
-            }
-            bo += arrayWords(p, aoj);
-        }
+        const still = arrAfter(p, s, fb, w, area, nb, el, q, r - base, cfb, cw, cnq, pos);
         freeOff(s);
+        if (still < 0) {
+            return err(ss, still);
+        }
         if ((still > 0) || (ss[f + F_PEND] > 0)) {
             witClear(s);
-        } else if (witEmpty(s)) {
-            witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, q);
         }
-        ss[f + F_NALIVE] = nalive;
+        ss[f + F_NALIVE] = still;
     }
     ss[f + F_Q] = r;
     if (el === 0) {
@@ -444,12 +358,18 @@ export function arrRun(p, pool, b, s, ss, vs, cb, base, f, ext) {
         ss[f + F_PH] = A_DEAD;
         const ir0 = inlineChild(p, pool, b, s, ss, vs, cb, base, q, d + 1, 0, 0, 0, end, 0, note, ext);
         if (ir0 >= 0) {
-            return arrRet(p, s, ss, base, f, ir0 + base);
+            return arrRet(p, s, ss, base, f, ir0 + base, 1);
         }
         if (ir0 !== NOINL) {
             return ret(ss, base, ir0);
         }
         return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
+    }
+    // a live element: room in the group arena for its record and a child the
+    // window holds (a suspension point), then its query from the live blocks
+    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - q));
+    if (g === VMS_GROW) {
+        return g;
     }
     const cr = csetRec(p, s, ck);
     const w = csetWidth(p, cr);
@@ -458,29 +378,15 @@ export function arrRun(p, pool, b, s, ss, vs, cb, base, f, ext) {
     const cck = nextCk(p, s, ck);
     const cw = csetWidth(p, csetRec(p, s, cck));
     const e = newEpoch(s);
-    const ao1 = blockAo(p, s, fb, area);
-    let cnq = 0;
-    let bo = area;
     if (s2 === 1) {
         freeOn(s);
     }
-    for (let bi = 0; bi < nb; bi++) {
-        if (!charge(s, 1, pos)) {
-            return err(ss, -R_BUDGET);
-        }
-        let ao = ao1;
-        if (bi > 0) {
-            ao = blockAo(p, s, fb, bo);
-        }
-        if (s[bo + 1] !== 0) {
-            cnq = arrayCandidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
-            if (cnq < 0) {
-                return err(ss, cnq);
-            }
-        }
-        bo += arrayWords(p, ao);
-    }
+    const cnq = arrQuery(p, s, fb, w, area, nb, el, q, cfb, cw, e, pos);
     freeOff(s);
+    if (cnq < 0) {
+        return err(ss, cnq);
+    }
+    ss[f + F_NALIVE] = arrAlive(p, s, fb, area, nb);
     pathPut(s, d + 1, P_INDEX, el);
     ss[f + F_CNQ] = cnq;
     ss[f + F_PH] = A_LIVE;
@@ -496,7 +402,7 @@ export function arrRun(p, pool, b, s, ss, vs, cb, base, f, ext) {
         }
     }
     if (ir >= 0) {
-        return arrRet(p, s, ss, base, f, ir + base);
+        return arrRet(p, s, ss, base, f, ir + base, 1);
     }
     if (cnq > 0) {
         return call(ss, base, q, d + 1, cfb, cck, cnq, end, cx, MODE_ITEM, note, -1);
@@ -614,41 +520,18 @@ export function darrRun(p, pool, b, s, ss, vs, cb, base, f, ext) {
 }
 
 export function mapStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, ctx) {
-    // eval-map's start (generic path): filter, blocks, then the frame.
+    // eval-map's start (generic path): filter, blocks (map-open), then the frame.
     const cr = csetRec(p, s, ck);
     const w = csetWidth(p, cr);
     const fw = csetFrame(p, cr);
     const area = fb + (2 * w);
-    const cap = fw - (2 * w);
-    let nb = 0;
-    let used = 0;
-    let ccap = 0;
-    let smap = 0;
     const na = qFilterX(p, s, fb, w, nq, 32, pos, ctx);
     if (na < 0) {
         return err(ss, na);
     }
-    for (let i = 0; i < nq; i++) {
-        if (((qFlag(s, fb, w, i) & F_ADMITTED) !== 0) && (qKind(p, s, fb, i) === K_MAP)) {
-            const mt = leafMap(p, qLeafBase(p, s, fb, i));
-            const sw = p[mt + 6];
-            if ((used + sw) > cap) {
-                return err(ss, -R_INCONSISTENT);
-            }
-            const ri = mapBlockInit(p, s, area + used, i, mt, pos);
-            if (ri < 0) {
-                return err(ss, ri);
-            }
-            used += sw;
-            ccap += p[mt + 7];
-            nb += 1;
-        }
-    }
-    if ((used + (4 * ccap)) > cap) {
-        return err(ss, -R_INCONSISTENT);
-    }
-    if (nb === 1) {
-        smap = mapFastMode(p, blockMt(p, s, fb, area));
+    const nb = mapOpen(p, s, fb, w, fw - (2 * w), nq, pos);
+    if (nb < 0) {
+        return err(ss, nb);
     }
     const pend = countPending(p, s, fb, w, nq);
     const f = fpush(b, ss, ka, base, FK_MAP);
@@ -660,11 +543,11 @@ export function mapStart(p, b, s, ss, ka, base, pos, q0, n, d, fb, ck, nq, end, 
     ss[f + F_Q0] = q0 + base;
     ss[f + F_N] = n;
     ss[f + F_NB] = nb;
-    ss[f + F_CL] = area + used;
-    ss[f + F_CCAP] = ccap;
+    ss[f + F_CL] = mapCl(p, s, fb, area, nb);
+    ss[f + F_CCAP] = mapCcap(p, s, fb, area, nb);
     ss[f + F_PEND] = pend;
     ss[f + F_NALIVE] = nb;
-    ss[f + F_SMAP] = smap;
+    ss[f + F_SMAP] = mapSmode(p, s, fb, area, nb);
     ss[f + F_PS] = -1;
     ss[f + F_PE] = -1;
     ss[f + F_VLAST] = -1;
@@ -762,6 +645,14 @@ export function dmapEnd(s, ss, vs, cb, ka, base, f) {
 }
 
 export function mapEnd(p, pool, b, s, ss, vs, cb, ka, base, f, ext) {
+    // The map's end: room in the group arena for its T end-runs (a suspension
+    // point), the deferred duplicate check (D277), then map-close; a T block's
+    // records keep their keys in the key arena (the session's kept DC forms,
+    // D283) or, without the valid machinery, nothing to sort.
+    const g = arenaGate(p, s, ss, 2 * ss[f + F_EL]);
+    if (g === VMS_GROW) {
+        return g;
+    }
     const rv = vmapEnd(s, ss, vs, cb, ka, base, f);
     if (rv === VMS_GROW) {
         return rv;
@@ -780,53 +671,9 @@ export function mapEnd(p, pool, b, s, ss, vs, cb, ka, base, f, ext) {
     const nb = ss[f + F_NB];
     const w = csetWidth(p, csetRec(p, s, ss[f + F_CK]));
     const area = fb + (2 * w);
-    let be = area;
-    let best = -1;
-    let bestbo = 0;
-    let unsat = 0;
-    for (let _bm = 0; _bm < nb; _bm++) {
-        if (!charge(s, 1, pos)) {
-            return err(ss, -R_BUDGET);
-        }
-        const mtm = blockMt(p, s, fb, be);
-        if (s[be + 1] !== 0) {
-            if (!charge(s, p[mtm + 2] + p[mtm + 1], pos)) {
-                return err(ss, -R_BUDGET);
-            }
-            if (mapSatisfied(p, s, be, mtm)) {
-                qSetFlag(s, fb, w, s[be], F_MATCHED);
-            } else {
-                qSetFlag(s, fb, w, s[be], R_MISSING << 8);
-                unsat += 1;
-                const lid = s[fb + s[be]];
-                if ((best < 0) || (lid < best)) {
-                    best = lid;
-                    bestbo = be;
-                }
-            }
-        }
-        be += p[mtm + 6];
-    }
-    const rs = evalScalars(p, pool, b, s, fb, w, nq, pos, q0, q, 32, 0, n, unitOf(ctx));
-    if (rs < 0) {
-        return err(ss, rs);
-    }
-    const m = finishComb(p, pool, b, s, fb, w, nq, pos, q, ext);
-    if (m < 0) {
-        return err(ss, m);
-    }
-    if ((m === 0) && (((ctx & CTX_KEY) === 0) && witEmpty(s))) {
-        if (unsat > 0) {
-            const r4 = mapMissing(p, s, bestbo, blockMt(p, s, fb, bestbo), d, pos);
-            if (r4 < 0) {
-                return err(ss, r4);
-            }
-        } else {
-            const r1 = rule1(s, fb, w, nq, d, pos);
-            if (r1 < 0) {
-                return err(ss, r1);
-            }
-        }
+    const rc = mapClose(p, pool, b, ka, s, fb, w, area, nb, d, n, pos, q0, q, nq, ctx, ext);
+    if (rc < 0) {
+        return err(ss, rc);
     }
     return done(ss, base, q);
 }
@@ -842,6 +689,11 @@ export function keyFix(s, r, delta) {
         s[VM_POS] = vp + delta;
         return r;
     }
+    if ((r === (-R_GROUP_LIMIT)) || (r === (-R_AGROW))) {
+        const vp2 = s[VM_POS];
+        s[VM_POS] = vp2 + delta;
+        return r;
+    }
     if (r !== (-R_INCONSISTENT)) {
         const ep = s[O_ERR_POS];
         s[O_ERR_POS] = ep + delta;
@@ -849,10 +701,17 @@ export function keyFix(s, r, delta) {
     return r;
 }
 
-export function mapRet(p, s, ss, base, f, r) {
-    // The value ended at r (absolute): after a live value, each candidate's
-    // value test and each block's update, then the witness; next pair.
+export function mapRet(p, s, ss, base, f, r, gated) {
+    // The value ended at r (absolute): after a live value, each block's value
+    // tests and tier update (map-after), then the witness; next pair. Unless the
+    // caller already made room (gated 1), the group arena is made room in first.
     if (ss[f + F_PH] === M_LVAL) {
+        if (gated === 0) {
+            const g = arenaGate(p, s, ss, arenaItems(p, s, 0));
+            if (g === VMS_GROW) {
+                return g;
+            }
+        }
         const pos = ss[f + F_POS] - base;
         const d = ss[f + F_D];
         const fb = ss[f + F_FB];
@@ -862,75 +721,32 @@ export function mapRet(p, s, ss, base, f, r) {
         const kid = ss[f + F_KID];
         const nc = ss[f + F_NC];
         const vnq = ss[f + F_VNQ];
+        const kpos = ss[f + F_KPOS];
+        const klen = ss[f + F_KLEN];
         const start = ss[f + F_START] - base;
         const cr = csetRec(p, s, ck);
         const w = csetWidth(p, cr);
         const area = fb + (2 * w);
         const cfb = fb + csetFrame(p, cr);
         const cw = csetWidth(p, csetRec(p, s, nextCk(p, s, ck)));
-        let nalive = ss[f + F_NALIVE];
-        let still = 0;
-        let bo = area;
         if (ss[f + F_PS2] === 1) {
             freeOn(s);
         }
-        const ev = qStamp(s, cfb, cw, vnq, pos);
-        if (ev < 0) {
-            return err(ss, ev);
-        }
-        for (let _bl = 0; _bl < nb; _bl++) {
-            const mtl = blockMt(p, s, fb, bo);
-            if (s[bo + 1] !== 0) {
-                let c3 = s[bo + 3];
-                while ((c3 < nc) && (s[cl + (4 * c3)] === bo)) {
-                    if (!charge(s, 1, pos)) {
-                        return err(ss, -R_BUDGET);
-                    }
-                    const vts3 = candVtsMt(p, s, mtl, cl, c3);
-                    const t = tsTest(p, s, vts3, ev, pos);
-                    if (t < 0) {
-                        return err(ss, t);
-                    }
-                    if (t === 1) {
-                        const kw = (cl + (4 * c3)) + 1;
-                        const kv = s[kw];
-                        s[kw] = kv | 2;
-                    }
-                    c3 += 1;
-                }
-                let u;
-                if (simpleStruct(p, mtl)) {
-                    u = updateStruct(p, s, bo, mtl, kid, cl, nc, pos);
-                } else {
-                    u = mapUpdate(p, s, bo, mtl, kid, cl, nc, pos);
-                }
-                if (u < 0) {
-                    return err(ss, u);
-                }
-                if (u === 1) {
-                    still += 1;
-                } else {
-                    nalive -= 1;
-                    if (blockNamed(s, bo, cl, nc)) {
-                        qSetFlag(s, fb, w, s[bo], R_VALUE << 8);
-                    } else {
-                        qSetFlag(s, fb, w, s[bo], R_UNEXPECTED << 8);
-                    }
-                }
-            }
-            bo += p[mtl + 6];
-        }
+        const still = mapAfter(p, s, fb, w, area, nb, cl, cfb, cw, vnq, kid, kpos, klen, pos);
         freeOff(s);
+        if (still < 0) {
+            return err(ss, still);
+        }
         if ((still > 0) || (ss[f + F_PEND] > 0)) {
             witClear(s);
         } else if (witEmpty(s)) {
-            if (ss[f + F_NAMED] === 1) {
+            if (nc > 0) {
                 witSet(s, R_VALUE, 0, d + 1, -1, 0, start);
             } else {
                 witSet(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
             }
         }
-        ss[f + F_NALIVE] = nalive;
+        ss[f + F_NALIVE] = still;
     }
     ss[f + F_Q] = r;
     ss[f + F_EL] = ss[f + F_EL] + 1;
@@ -940,8 +756,9 @@ export function mapRet(p, s, ss, base, f, r) {
 export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
     // A pair whose key is whole -- in the window (inka 0) or copied into the
     // arena (inka 1) -- after the key's first checks: dead (a dead map, or no
-    // live block) or live (eval-map's generic pair up to the value), then the
-    // value as a child item.
+    // live block) or live (eval-map's pair up to the value), then the value as a
+    // child item. The group arena is made room in first for the key, a value the
+    // window holds and the pair's record (a suspension point).
     const start = ss[f + F_START] - base;
     const end = ss[f + F_END] - base;
     const pos = ss[f + F_POS] - base;
@@ -953,6 +770,10 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
     let kks = start;
     let kend = end;
     let delta = 0;
+    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - start));
+    if (g === VMS_GROW) {
+        return g;
+    }
     if (kea >= 0) {
         klen = kea - ss[f + F_START];
     }
@@ -993,7 +814,7 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
         ss[f + F_PH] = M_DVAL;
         const ir3 = inlineChild(p, pool, b, s, ss, vs, cb, base, kq0, d + 1, 0, 0, 0, end, 0, -1, ext);
         if (ir3 >= 0) {
-            return mapRet(p, s, ss, base, f, ir3 + base);
+            return mapRet(p, s, ss, base, f, ir3 + base, 1);
         }
         if (ir3 !== NOINL) {
             return ret(ss, base, ir3);
@@ -1015,10 +836,6 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
     let kid = -1;
     let klo = ss[f + F_KLO];
     let ps2 = 0;
-    let cnq = 0;
-    let nc = 0;
-    let named = 0;
-    let vnq = 0;
     // The key's id in the schema-wide key table.
     if (kea >= 0) {
         if (inka === 1) {
@@ -1033,51 +850,22 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
     }
     // Cursors, and schedule 2's simple pair (D045 ii).
     if (smap > 0) {
-        const c0 = s[area + 2];
-        const mt0 = blockMt(p, s, fb, area);
-        freeOn(s);
-        mapCursor(p, s, area, mt0, kid, pos);
-        freeOff(s);
-        if (sched2(s) && mapPairOk(p, s, area, mt0, kid, smap)) {
-            ps2 = 1;
-            if (!charge(s, 1, pos)) {
-                return err(ss, -R_BUDGET);
-            }
-        } else {
-            const c1 = s[area + 2];
-            if (!charge(s, 1 + (c1 - c0), pos)) {
-                return err(ss, -R_BUDGET);
-            }
+        const pr = mapPre(p, s, fb, area, smap, kid, pos);
+        if (pr < 0) {
+            return err(ss, pr);
         }
+        ps2 = pr;
     }
-    // The key, queried with the live residual key typesets.
+    // The key, queried with the live blocks' key typesets.
     if (ps2 === 1) {
         freeOn(s);
     }
     const e = newEpoch(s);
-    let bo = area;
-    for (let _bj = 0; _bj < nb; _bj++) {
-        const mtj = blockMt(p, s, fb, bo);
-        if (smap === 0) {
-            if (!charge(s, 1, pos)) {
-                return err(ss, -R_BUDGET);
-            }
-            if (s[bo + 1] !== 0) {
-                const rc2 = mapCursor(p, s, bo, mtj, kid, pos);
-                if (rc2 < 0) {
-                    return err(ss, rc2);
-                }
-            }
-        }
-        if (s[bo + 1] !== 0) {
-            cnq = mapKeyQuery(p, s, bo, mtj, cfb, cw, cnq, e, pos);
-            if (cnq < 0) {
-                return err(ss, cnq);
-            }
-        }
-        bo += p[mtj + 6];
-    }
+    const cnq = mapKeyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos);
     freeOff(s);
+    if (cnq < 0) {
+        return err(ss, cnq);
+    }
     let kq;
     if (cnq > 0) {
         const kctx = CTX_KEY | simpleOf(p, s, ps2, cfb, cnq);
@@ -1110,56 +898,33 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
     } else {
         setPrev(ss, f, start + base, kq + base);
     }
-    // Key phase: candidates.
+    // Candidates, the key's path segment, the value's query.
     if (ps2 === 1) {
         freeOn(s);
     }
-    const ek = qStamp(s, cfb, cw, cnq, pos);
-    let bo2 = area;
-    if (ek < 0) {
-        return err(ss, ek);
+    const nc = mapCands(p, s, fb, area, nb, cfb, cw, cnq, cl, ccap, pos);
+    if (nc < 0) {
+        freeOff(s);
+        return err(ss, nc);
     }
-    for (let _bk = 0; _bk < nb; _bk++) {
-        const mtk = blockMt(p, s, fb, bo2);
-        if (s[bo2 + 1] !== 0) {
-            if (simpleStruct(p, mtk)) {
-                nc = keyPhaseStruct(p, s, bo2, mtk, kid, cl, nc, ccap, pos);
-            } else {
-                nc = mapKeyPhase(p, s, bo2, mtk, kid, ek, cl, nc, ccap, pos);
-            }
-            if (nc < 0) {
-                return err(ss, nc);
-            }
-        }
-        bo2 += p[mtk + 6];
-    }
-    for (let c = 0; c < nc; c++) {
-        if ((s[(cl + (4 * c)) + 1] & 1) === 0) {
-            named = 1;
-        }
-    }
-    if (named === 1) {
+    if (mapNamedOf(s, cl, nc) === 1) {
         pathPut(s, d + 1, P_KEY, kid);
     } else {
         pathPut(s, d + 1, P_ANYKEY, 0);
     }
-    // The value, queried with the candidates' value typesets.
-    const e2 = newEpoch(s);
-    for (let c2 = 0; c2 < nc; c2++) {
-        const vts = candVts(p, s, fb, cl, c2);
-        vnq = qAdd(p, s, cfb, cw, vnq, vts, e2, pos);
-        if (vnq < 0) {
-            return err(ss, vnq);
-        }
-    }
+    const vnq = mapValq(p, s, fb, cl, nc, cfb, cw, pos);
     freeOff(s);
+    if (vnq < 0) {
+        return err(ss, vnq);
+    }
     ss[f + F_KLO] = klo;
     ss[f + F_KID] = kid;
     ss[f + F_MCNQ] = cnq;
     ss[f + F_NC] = nc;
-    ss[f + F_NAMED] = named;
     ss[f + F_VNQ] = vnq;
     ss[f + F_PS2] = ps2;
+    ss[f + F_KPOS] = 0;
+    ss[f + F_KLEN] = kq - start;
     ss[f + F_PH] = M_LVAL;
     const vctx = simpleOf(p, s, ps2, cfb, vnq);
     let ir4;
@@ -1169,7 +934,7 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
         ir4 = inlineChild(p, pool, b, s, ss, vs, cb, base, kq, d + 1, 0, 0, 0, end, 0, -1, ext);
     }
     if (ir4 >= 0) {
-        return mapRet(p, s, ss, base, f, ir4 + base);
+        return mapRet(p, s, ss, base, f, ir4 + base, 1);
     }
     if (ir4 !== NOINL) {
         return ret(ss, base, ir4);
@@ -1219,7 +984,8 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
     // map-pair for a session's valid-CBOR machinery (P8.4, D266): the key whole
     // in kb[ks, kend) (the window, or its canonical copy), searched, evaluated,
     // ordered and kept as the walk over a copy does it (vorder, vkeep); then
-    // eval-map's generic pair up to the value, as map-pair.
+    // eval-map's pair up to the value, as map-pair. A T block's record of the
+    // pair keeps the kept key's position in the key arena (its sort's keys).
     const start = ss[f + F_START] - base;
     const end = ss[f + F_END] - base;
     const pos = ss[f + F_POS] - base;
@@ -1234,6 +1000,11 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
         s[VM_VTAB] = 0;
         vgrow(ss, 0, 0, 0, (2 * ka.length) + (KH + klen));
         return VMS_GROW;
+    }
+    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - start));
+    if (g === VMS_GROW) {
+        s[VM_VTAB] = 0;
+        return g;
     }
     if ((ss[f + F_KIND] === FK_DMAP) || (ss[f + F_NALIVE] === 0)) {
         const kq0 = vkeyEval(p, pool, b, kb, s, vs, cb, start, ks, kend, copy, kr, d + 1, 0, 0, 0, 0, ext);
@@ -1274,17 +1045,16 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
     let kid = -1;
     let klo = ss[f + F_KLO];
     let ps2 = 0;
-    let cnq = 0;
-    let nc = 0;
-    let named = 0;
-    let vnq = 0;
-    // Over a copy keys come in wire order: one at or below the previous key
-    // restarts the search bound and every block's cursor (eval-map, PF_CANON).
+    // Over a copy keys come in wire order: from one at or below the previous
+    // key, every key search covers the whole key table and every block
+    // searches its named table (eval-map, PF_CANON; program-2 §6.1).
     if ((kke > ks) && ((prev >= 0) && (valid === 1))) {
         if (vdescends(kb, ka, ks, kke, prev)) {
-            klo = 0;
-            cursorsReset(p, s, fb, area, nb);
+            mapUnordered(p, s, fb, area, nb);
         }
+    }
+    if (mapIsUnordered(s, area, nb)) {
+        klo = 0;
     }
     if (kke > ks) {
         kid = keySearch(p, pool, kb, s, ks, kke, klo, pos);
@@ -1294,50 +1064,21 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
         klo = s[O_HI];
     }
     if (smap > 0) {
-        const c0 = s[area + 2];
-        const mt0 = blockMt(p, s, fb, area);
-        freeOn(s);
-        mapCursor(p, s, area, mt0, kid, pos);
-        freeOff(s);
-        if (sched2(s) && mapPairOk(p, s, area, mt0, kid, smap)) {
-            ps2 = 1;
-            if (!charge(s, 1, pos)) {
-                return err(ss, -R_BUDGET);
-            }
-        } else {
-            const c1 = s[area + 2];
-            if (!charge(s, 1 + (c1 - c0), pos)) {
-                return err(ss, -R_BUDGET);
-            }
+        const pr = mapPre(p, s, fb, area, smap, kid, pos);
+        if (pr < 0) {
+            return err(ss, pr);
         }
+        ps2 = pr;
     }
     if (ps2 === 1) {
         freeOn(s);
     }
     const e = newEpoch(s);
-    let bo = area;
-    for (let _bj = 0; _bj < nb; _bj++) {
-        const mtj = blockMt(p, s, fb, bo);
-        if (smap === 0) {
-            if (!charge(s, 1, pos)) {
-                return err(ss, -R_BUDGET);
-            }
-            if (s[bo + 1] !== 0) {
-                const rc2 = mapCursor(p, s, bo, mtj, kid, pos);
-                if (rc2 < 0) {
-                    return err(ss, rc2);
-                }
-            }
-        }
-        if (s[bo + 1] !== 0) {
-            cnq = mapKeyQuery(p, s, bo, mtj, cfb, cw, cnq, e, pos);
-            if (cnq < 0) {
-                return err(ss, cnq);
-            }
-        }
-        bo += p[mtj + 6];
-    }
+    const cnq = mapKeyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos);
     freeOff(s);
+    if (cnq < 0) {
+        return err(ss, cnq);
+    }
     const kctx = CTX_KEY | simpleOf(p, s, ps2, cfb, cnq);
     const kq = vkeyEval(p, pool, b, kb, s, vs, cb, start, ks, kend, copy, kr, d + 1, cfb, cck, cnq, kctx, ext);
     if (kq < 0) {
@@ -1348,12 +1089,15 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
             return err(ss, fail(s, start, CODE_KEY_TYPE));
         }
     }
+    mapKeyEcs(p, s, fb, area, nb, kb, ks);
     const vo2 = vorder(kb, ka, s, vs, ks, klen, prev, canon, start, valid);
     if (vo2 < 0) {
         return err(ss, vo2);
     }
     const ent2 = vkeep(kb, ss, ka, ks, klen, start + base, canon);
     ss[f + F_VLAST] = ent2;
+    ss[f + F_KPOS] = ent2 + KH;
+    ss[f + F_KLEN] = klen;
     ss[f + F_VN] = ss[f + F_VN] + 1;
     if (vo2 !== 0) {
         ss[f + F_VMARK] = 1;
@@ -1361,49 +1105,25 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
     if (ps2 === 1) {
         freeOn(s);
     }
-    const ek = qStamp(s, cfb, cw, cnq, pos);
-    let bo2 = area;
-    if (ek < 0) {
-        return err(ss, ek);
+    const nc = mapCands(p, s, fb, area, nb, cfb, cw, cnq, cl, ccap, pos);
+    if (nc < 0) {
+        freeOff(s);
+        return err(ss, nc);
     }
-    for (let _bk = 0; _bk < nb; _bk++) {
-        const mtk = blockMt(p, s, fb, bo2);
-        if (s[bo2 + 1] !== 0) {
-            if (simpleStruct(p, mtk)) {
-                nc = keyPhaseStruct(p, s, bo2, mtk, kid, cl, nc, ccap, pos);
-            } else {
-                nc = mapKeyPhase(p, s, bo2, mtk, kid, ek, cl, nc, ccap, pos);
-            }
-            if (nc < 0) {
-                return err(ss, nc);
-            }
-        }
-        bo2 += p[mtk + 6];
-    }
-    for (let c = 0; c < nc; c++) {
-        if ((s[(cl + (4 * c)) + 1] & 1) === 0) {
-            named = 1;
-        }
-    }
-    if (named === 1) {
+    if (mapNamedOf(s, cl, nc) === 1) {
         pathPut(s, d + 1, P_KEY, kid);
     } else {
         pathPut(s, d + 1, P_ANYKEY, 0);
     }
-    const e2 = newEpoch(s);
-    for (let c2 = 0; c2 < nc; c2++) {
-        const vts = candVts(p, s, fb, cl, c2);
-        vnq = qAdd(p, s, cfb, cw, vnq, vts, e2, pos);
-        if (vnq < 0) {
-            return err(ss, vnq);
-        }
-    }
+    const vnq = mapValq(p, s, fb, cl, nc, cfb, cw, pos);
     freeOff(s);
+    if (vnq < 0) {
+        return err(ss, vnq);
+    }
     ss[f + F_KLO] = klo;
     ss[f + F_KID] = kid;
     ss[f + F_MCNQ] = cnq;
     ss[f + F_NC] = nc;
-    ss[f + F_NAMED] = named;
     ss[f + F_VNQ] = vnq;
     ss[f + F_PS2] = ps2;
     ss[f + F_PH] = M_LVAL;

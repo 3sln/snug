@@ -7,7 +7,7 @@ use crate::snug::cbor::head::*;
 use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
 use crate::snug::cbor::vcopy::*;
-use crate::snug::vm::api::*;
+use crate::snug::vm::arena::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::dead::*;
 use crate::snug::vm::eval::*;
@@ -133,7 +133,7 @@ pub fn vclean(p: &[i32], s: &[i32], vs: &[i32], r: i32) -> bool {
 }
 pub fn vbuild(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], vs: &mut [i32], cb: &mut [u8], pos: i32, iend: i32, refused: i32) -> i32 {
     // The copy of the item at pos (window-relative) and its events, the events
-    // put in S past the rule's words: the copy's start in cb (its end in
+    // put in S past the group arena: the copy's start in cb (its end in
     // vs[O_VLEN] via canon-build), or VI_GROW.
     let mut embeds: i32 = 1;
     if (p[(H_FLAGS) as usize] & FL_EMBED) != 0 {
@@ -144,7 +144,7 @@ pub fn vbuild(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], vs: &mut [i32]
         return vgrow(ss, vs[(O_VNEEDW) as usize], vs[(O_VNEEDB) as usize], 0, 0);
     }
     let n: i32 = vs[(O_S_NEV) as usize];
-    let base: i32 = vm_scratch_words(p, s[(VM_RULE) as usize], s[(VM_MARK_CAP) as usize]);
+    let base: i32 = arena_after(s);
     let need: i32 = (base + 4) + (EV_WORDS * n);
     if (n > 0) && ((s.len() as i32) < need) {
         return vgrow(ss, 0, 0, need + 64, 0);

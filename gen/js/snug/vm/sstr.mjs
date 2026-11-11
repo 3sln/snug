@@ -5,11 +5,12 @@ import { CODE_DEPTH, CODE_TEXT, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TYPED_A
 import { fail, readArg, readArgV, takeLen } from '../cbor/head.mjs';
 import { textNc, typedNanAt } from '../cbor/scan.mjs';
 import { utf8Window } from '../cbor/text.mjs';
+import { arenaSetUp, arenaUpTop } from './arena.mjs';
 import { c12, c8, charge, csetFrame, csetRec, csetWidth, newEpoch, nextCk, pathPut, popcount, qAdd, qFlag, qKind, qLeafBase, qSetFlag, qStamp, tsTest, witClear, witEmpty, witSet } from './base.mjs';
 import { countMatchedScalars, embedKill, embedLive, finishScalar, qFilterX, unitOf } from './eval.mjs';
 import { FL_EMBED, F_ADMITTED, F_EVAL, F_MATCHED, H_FLAGS, H_S_LEAVES, H_S_REGEX_INDEX, K_BYTES, K_EMBED, K_TEXT, P_EMBED, R_BITS, R_BUDGET, R_EMBEDDED, R_INCONSISTENT, R_PATTERN, R_SIZE, VM_BUDGET, VM_D, VM_DLIM, VM_EMBED, VM_REGCAP, VM_REGEX, VM_W_REASON, VM_W_SUB } from './layout.mjs';
 import { bitsOk, evalLeaf, rxAccepts, rxCp, scalarKind, utf8Len } from './leaf.mjs';
-import { FK_BSTR, FK_DTEXT, FK_TEXT, F_BITS, F_BITSOK, F_CK, F_CLS, F_CS, F_CTX, F_D, F_DEFER, F_ECNQ, F_END, F_EPH, F_FB, F_I, F_KIND, F_NQ, F_PH, F_PIN, F_POS, F_RXCP, F_RXOFF, F_SCOSE, F_SEQ, F_SERR, F_SITEMS, F_SMAXD, F_STOP, F_TAIL, F_TI, F_TNUM, F_TSIZE, F_TSTOP, GO, MODE_DSEQ, MODE_ITEM, MODE_VSEQ, b01, call, chunkEnd, cont, done, dryBegin, dryEnd, err, fpush, mustYield, need, pendNote, progress, suspended, yld } from './sbase.mjs';
+import { FK_BSTR, FK_DTEXT, FK_TEXT, F_BITS, F_BITSOK, F_CK, F_CLS, F_CS, F_CTX, F_D, F_DEFER, F_ECNQ, F_END, F_EPH, F_FB, F_I, F_KIND, F_NQ, F_PH, F_PIN, F_POS, F_RXCP, F_RXOFF, F_SAUP, F_SCOSE, F_SEQ, F_SERR, F_SITEMS, F_SMAXD, F_STOP, F_TAIL, F_TI, F_TNUM, F_TSIZE, F_TSTOP, GO, MODE_DSEQ, MODE_ITEM, MODE_VSEQ, b01, call, chunkEnd, cont, done, dryBegin, dryEnd, err, fpush, mustYield, need, pendNote, progress, suspended, yld } from './sbase.mjs';
 
 export const S_SCAN = 1;
 
@@ -502,6 +503,7 @@ export function embedStart(p, s, ss, base, f, seq) {
     ss[f + F_SMAXD] = s[O_MAX_DEPTH];
     ss[f + F_SCOSE] = s[O_COSE];
     ss[f + F_SERR] = s[O_ERR_POS] + base;
+    ss[f + F_SAUP] = arenaUpTop(s);
     s[O_ITEMS] = 0;
     s[O_MAX_DEPTH] = nm;
     s[O_COSE] = 0;
@@ -543,6 +545,7 @@ export function embedRet(p, s, ss, base, f, r) {
     s[O_MAX_DEPTH] = ss[f + F_SMAXD];
     s[O_COSE] = ss[f + F_SCOSE];
     s[O_ERR_POS] = ss[f + F_SERR] - base;
+    arenaSetUp(s, ss[f + F_SAUP]);
     s[VM_EMBED] = s[VM_EMBED] - 1;
     ss[f + F_EPH] = 20 + seq;
     if (r < 0) {
