@@ -6702,12 +6702,13 @@ are answered as provisional decisions D082–D085. None is open now.
   - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
     exports and the native sequence host driven through the SDK session
     wrapper; views over a JS-side copy of each message.
-- [!] **P7.13x — wasm SDK parity regression case: edit REFUSED by the permission
-  system (2026-11-11).** File `host/wasm-sdk/test/parity.test.mjs`; the edit
-  (appending one test) was refused by this session's auto-mode permission
-  classifier and was not retried or worked around. Owner decision D300
-  authorises `host/wasm*` edits for this work; the session's settings need a
-  rule for it. Intended hunk (append at the end of the file):
+- [x] **P7.13x — wasm SDK parity regression case** (2026-11-11). First
+  attempted as a shell append, which the auto-mode permission classifier
+  refused; it was not retried or worked around. Applied by the coordinator
+  with a plain file edit after the owner gave free rein over the snug repo
+  (2026-11-11), with `'valid'` added to the wires. The new test passes:
+  wasm == native, under all three wires and every split. The hunk as
+  appended to `host/wasm-sdk/test/parity.test.mjs`:
   ```js
   test('sequences: regression 2026-11-11 -- a complete 65,541-byte message followed by more than maxMessageBytes', () => {
     const big = new Uint8Array(1500001); big.set([0xa1, 0x61, 0x61, 0x59, 0xff, 0xff]); big[1500000] = 0xa0;
