@@ -4831,6 +4831,23 @@ before deviating. Supersedes the interim default in D271 and the naming
 question in D273.
 - [x] **Decided by the owner** (2026-11-10, via coordinator).
 
+### D302 — Free rein in the snug repository; D300 extended to the whole repo (OWNER DIRECTION, 2026-11-11)
+**Decision** (owner, in session via the coordinator): "You have free rein in
+this in the snug repo, you're free to edit anything in there." D300's
+standing approval for `host/wasm*/` now covers every path in the snug
+repository. What still applies:
+- edits are plain file edits (Edit/Write), not shell rewrites of files;
+- commits name their paths explicitly (no `git commit -a`, and shared files
+  such as this DEVLOG are staged by filtered hunks);
+- nothing is pushed or published;
+- agents kill only processes they started, by PID.
+
+This direction does not cover owner sign-offs. The size-cap raises in
+D285 and D319 still wait for the owner. Outside snug, 3sln.me, emon, nome
+and kin stay read-only. First use: P7.13x (`b1a3fac`), the wasm SDK parity
+regression added with a plain edit.
+- [x] **Decided by the owner** (2026-11-11, via coordinator).
+
 ### D290 — P8.5 phase 1: the compiler and verifier move to format 2.0 on a branch; a reference interpreter checks semantics before the VM (P8.5)
 **Decision** (P8.5 compiler engineer, provisional): branch `p85-peg` replaces
 the format 1 group lowering (map normal form, factors, pools, counters,
@@ -5388,7 +5405,10 @@ are answered as provisional decisions D082–D085. None is open now.
   reference tools' per-alternative cut, refined to rule A) and the name of the
   reference mode.
 
-- [ ] **P7.13x — permission refusal despite D300 (2026-11-11).** Adding the
+- [x] **P7.13x — permission refusal despite D300 (2026-11-11).** *Resolved
+  2026-11-11:* the shell append was what got refused. The test was then
+  applied as a plain file edit under D302 (`b1a3fac`, with a `valid` wire
+  added). Original note: adding the
   scaled-run sequence regression case (input `a1 61 61 59 ffff` + zeros to
   1,500,000 bytes, then `a0`; limits `0,0,1500000,…`; whole window, split at
   65,536, random chunks, fail-fast) to the wasm SDK parity test
