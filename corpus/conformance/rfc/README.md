@@ -14,9 +14,10 @@ node corpus/tools/run-rfc-corpus.mjs --json=corpus/conformance/rfc/current-resul
 node corpus/tools/run-rfc-corpus.mjs --depends=D270 --gate
 ```
 
-The exporter uses the user-supplied `cddlproj-ruby-cddl.sh` path by default.
-Set `RFC_RUBY` to another wrapper and, if necessary, `RFC_GEM_HOME` to its
-existing gem directory. No downloads, installs or network operations occur.
+The exporter uses `.cache/oracles/ruby-cddl.sh` and `.cache/oracles/ruby-gems`
+by default (rebuild: `corpus/tools/ORACLES.md`). Set `RFC_RUBY` (or `RUBY_CDDL`)
+to another wrapper and, if necessary, `RFC_GEM_HOME` (or `RUBY_CDDL_GEM_HOME`)
+to its existing gem directory. No downloads, installs or network operations occur.
 The installed `cbor-diag` executable converts RFC 9052 diagnostic notation.
 The CDDL reference checks invoke the wrapper separately for each case:
 exit 0 is valid, exit 1 invalid; other statuses, timeouts and detected

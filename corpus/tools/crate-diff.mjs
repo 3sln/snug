@@ -1,6 +1,7 @@
 /** P4.1: offline differential against native cddl 0.10.7.
  * bb crate-diff [--cases=6000] [--seed=0x5eed8610] [--timeout=2000]
- * Override the existing binary with --oracle=/absolute/path (no builds/installs).
+ * Oracle: --oracle=/absolute/path, else $CDDL_NATIVE, else .cache/oracles/cddl-rs/bin/cddl
+ * (rebuild per corpus/tools/ORACLES.md; this script never builds or installs).
  * All transient inputs and machine-readable evidence live in .cache/p41/.
  */
 import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
@@ -18,7 +19,7 @@ const args = Object.fromEntries(process.argv.slice(2).map(x => {
   if (!/^--(?:cases|seed|timeout|oracle)=.+$/.test(x)) throw Error('Use --cases=, --seed=, --timeout=, --oracle=');
   const i = x.indexOf('='); return [x.slice(2, i), x.slice(i + 1)];
 }));
-const binary = args.oracle ?? '/private/tmp/claude-501/-Users-raystubbs-Projects--3sln-3sln-me/8f763b0e-277c-4c0c-b7f0-8c3d4fc70450/scratchpad/cddlproj-oracle/cddl-native';
+const binary = args.oracle ?? process.env.CDDL_NATIVE ?? root + '.cache/oracles/cddl-rs/bin/cddl';
 const count = Number(args.cases ?? 6000), seed = Number(args.seed ?? 0x5eed8610), timeout = Number(args.timeout ?? 2000);
 if (![count, seed, timeout].every(Number.isSafeInteger) || count < 0 || seed <= 0 || seed > 0xffffffff || timeout < 1) throw Error('Invalid numeric argument');
 const cache = root + '.cache/p41/'; mkdirSync(cache, { recursive: true });
@@ -49,7 +50,8 @@ function native(text, rule, bytes) {
   writeFileSync(cache + 'input.cbor', bytes);
   const p = spawnSync(binary, ['validate', '--cddl', cache + 'input.cddl', '--cbor', cache + 'input.cbor'],
     { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, env: { ...process.env, RUST_BACKTRACE: '0' } });
-  const output = (p.stdout ?? '') + (p.stderr ?? '');
+  // The rebuilt CLI (ORACLES.md) colours its log lines even into a pipe; strip SGR codes.
+  const output = ((p.stdout ?? '') + (p.stderr ?? '')).replace(/\x1b\[[0-9;]*m/g, '');
   if (p.error?.code === 'ETIMEDOUT') return { kind: 'timeout' };
   if (/panicked at|stack overflow|memory allocation.*failed/.test(output) || p.status === 101 || p.signal) return { kind: 'panic', site: output.match(/(?:src\/[^\s:]+:\d+:\d+|stack overflow)/)?.[0] ?? p.signal ?? 'panic' };
   if (p.error) throw Error('Native invocation failed: ' + p.error.code);

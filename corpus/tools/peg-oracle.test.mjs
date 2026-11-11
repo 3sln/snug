@@ -290,7 +290,7 @@ function classify(sample, oracle, status) {
   if (sample.candidate === 'RK' && (sample.family === 4 && oracle === true && ruby === false || sample.family === 14 && oracle === false && ruby === true)) return 'RK';
   return 'new';
 }
-const rubyDefault = '/private/tmp/claude-501/-Users-raystubbs-Projects--3sln-3sln-me/8f763b0e-277c-4c0c-b7f0-8c3d4fc70450/scratchpad/cddlproj-ruby-cddl.sh';
+const rubyDefault = process.env.RUBY_CDDL ?? join(root, '.cache/oracles/ruby-cddl.sh'); // corpus/tools/ORACLES.md
 function runRuby(wrapper, schemaPath, dataPath) {
   return new Promise(resolve => {
     const child = spawn(wrapper, [schemaPath, 'validate', dataPath], { stdio: 'ignore' });

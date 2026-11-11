@@ -316,6 +316,8 @@ CBOR hex: `45697427730a`. Snug / independent oracle: **accept / accept**; native
 
 ### undefined-group-socket — 1
 
+*2026-11-11: withdrawn.* D251 (RFC 8610 §3.9: an unplugged socket is an empty group **choice**, zero derivations) reverses the reading below; snug and the independent oracle now refuse, so the crate's refusal agrees. Kept as P4.1 history.
+
 RFC 8610 §3.9 makes an unextended group socket an empty group. Therefore a supplies all required members. The crate incorrectly demands content for $$nothing.
 
 ```cddl
@@ -422,3 +424,59 @@ CBOR hex: `a1677061796c6f6164a1677061796c6f616401`. Snug / independent oracle: *
 `bb crate-diff` completed with status 0 and no unclassified differences. Its sandboxed Babashka shutdown printed a ProcessHandle/process-tree cleanup exception after completion; Node's harness summary and exit status were successful. `node --check corpus/tools/crate-diff.mjs` passed. `node --test corpus/tools/`: 301 passed, zero failures/skips. The reduced-witness run checked all 33 examples. No performance claim, Rust-host identity claim, or raw malformed-CBOR fuzz claim is made here. Other work changed the shared tree between exploratory runs; only the final unchanged-source run is tabulated. Those unrelated files were left untouched.
 
 The crate remains useful only behind an explicit subset restriction. Nested re-entry into a generic and zero/empty .bits values must be added to its defect exclusions, while retaining these regressions in differential evidence. Native 64-bit literals remove the wasm32-only ceiling, but do not remove its native parser limits or other semantic defects.
+
+## 2026-11-11 re-run on main `3c10a83` (rebuilt oracle)
+
+Run on a `git archive` snapshot of `3c10a83` (the shared tree had other
+agents' uncommitted kin/gen/host edits), with only the harness changes of
+this item applied: oracle path from `CDDL_NATIVE`, default
+`.cache/oracles/cddl-rs/bin/cddl`, and ANSI colour stripping (the rebuilt CLI
+colours its log lines into a pipe). Same seed `0x5eed8610`, 6,000 generated
+cases, 2,000 ms timeout; Apple arm64, macOS 14.6.1, Node v24.6.0; 98 s wall.
+
+The previous binary was lost in a /tmp cleanup on 2026-11-09. The oracle was
+rebuilt from the crates.io archive (sha256 `c5251326…edbe`) with rustc 1.92.0
+and features `std,json,cbor,csv-validate,additional-controls,ast-span,ast-comments`;
+binary sha256 `1fdf32e31b8326aaf85f9cfd3814aa1a13b9f4912e006e76ffe9a8be8a052428`
+(previously `b96abfc4…`). Rebuild steps: `corpus/tools/ORACLES.md`. Across all
+6,987 cases the new binary's outcomes (verdict, schema error, panic) are
+identical to the P4.1 binary's; only the panic site string gained the cargo
+registry path prefix.
+
+| Input | Attempted | Boolean comparisons | Agree | Disagree | Crate schema error | Panic | Timeout |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| study | 201 | 198 | 183 | 15 | 3 | 0 | 0 |
+| adversarial | 786 | 717 | 585 | 132 | 67 | 2 | 0 |
+| generated | 6000 | 6000 | 5846 | 154 | 0 | 0 | 0 |
+| **Total** | **6987** | **6915** | **6614** | **301** | **70** | **2** | **0** |
+
+Exit status 0: no snug bugs (all 6,987 snug verdicts equal oracle.mjs), no
+corpus errors, no oracle unknowns, no unclassified class, sources unchanged
+during the run (fingerprint `e36e5beb6696164ec638b653516c78c093f788764a5a0608e7314a0587273bb7`;
+evidence SHA-256 `e3087aef70df067bf049883990ce7f81a19ad0aabb567fd1ba412c7c63b294c6`).
+The same 264 suites compiled and the same 31 suites / 136 cases were refused.
+
+**Changes against P4.1, row by row (keyed on suite, case, rule, bytes):**
+exactly one verdict changed.
+
+| Case | P4.1 snug / oracle / crate | Now | Classification |
+| --- | --- | --- | --- |
+| adversarial "undefined sockets" #0, `r = {a:int, $$nothing}`, `a1616101` | accept / accept / refuse | refuse / refuse / refuse | **snug change by decision D251**; class `undefined-group-socket` (1) withdrawn, the crate was right |
+
+No new disagreement class; no crate defect, snug bug or corpus error is new.
+The 31 remaining classes have the counts of the P4.1 table (bits-zero 44 =
+2 corpus + 42 generated; nested-generic-scope 112 generated).
+
+The other semantic changes since P4.1 leave this corpus unchanged:
+**valid-CBOR default** (P8.4) is not exercised, because the harness requires
+every fixture to round-trip byte-identically through the deterministic
+baseline encoder, so all inputs are deterministic; **D250 floats**,
+**D252 tags** and **XSD regexps** touch corpus cases (98 with float types or
+literals, 3 tdate, 3 time, 8 uri, 74 regexp/pcre) but no snug verdict among
+them changed, and their disagreements stay in `float-width-erased`,
+`prelude-tag-dispatch` and `regexp-unanchored`. PEG semantics (D270/D271) are
+not on main and were not measured. To cover these decisions the generator
+would need non-deterministic encodings, float-width/NaN/zero literals, tag
+0/1/32 payloads and XSD-only regexp syntax; that is a harness extension, not
+done here.
+

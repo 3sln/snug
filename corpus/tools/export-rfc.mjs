@@ -46,8 +46,10 @@ function extract(n, from, to) {
   return { cddl, source: { rfc:n, section, logicalLines:[from,to], sha256:src.sha256 },
     extraction: { indentRemoved:indent, pageArtifactFixes:fixes } };
 }
-const wrapper = process.env.RFC_RUBY || '/private/tmp/claude-501/-Users-raystubbs-Projects--3sln-3sln-me/8f763b0e-277c-4c0c-b7f0-8c3d4fc70450/scratchpad/cddlproj-ruby-cddl.sh';
-const gemHome = process.env.RFC_GEM_HOME || join(dirname(wrapper), 'cddlproj-gems');
+// Ruby reference oracle: see corpus/tools/ORACLES.md.
+const oracles = decodeURIComponent(new URL('../../.cache/oracles/', import.meta.url).pathname);
+const wrapper = process.env.RFC_RUBY || process.env.RUBY_CDDL || join(oracles, 'ruby-cddl.sh');
+const gemHome = process.env.RFC_GEM_HOME || process.env.RUBY_CDDL_GEM_HOME || join(oracles, 'ruby-gems');
 const rubyEnv = { ...process.env, GEM_HOME:gemHome, GEM_PATH:gemHome };
 function diagnosticHex(text) {
   const result = spawnSync(join(gemHome,'bin/diag2cbor.rb'), [], { input:text, env:rubyEnv, timeout:30000 });
