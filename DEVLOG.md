@@ -6716,6 +6716,36 @@ authorised), the existing gate set, and conformance-corpus vectors.
     profiles.mjs, Rust decode/encode/api/sequence/schema Default impls),
     the JS writer, build.mjs, kin/vcopy.kin (`vmap-x`), tests, docs and
     tools/proptest; no `host/wasm/src/sdk.rs` change; rebase onto it.
+  - 2026-11-11 verification note (on `3c10a83`, a `git archive` snapshot in
+    `.cache/runs/`; the shared tree held uncommitted kin/gen/host edits).
+    **Oracles** lost in the 2026-11-09 /tmp cleanup are rebuilt under
+    `.cache/oracles/` (crate 0.10.7 CLI, Ruby cddl 0.12.14; steps, hashes and
+    toolchain in `corpus/tools/ORACLES.md`); the scripts take `CDDL_NATIVE` /
+    `RUBY_CDDL`. **crate-diff** (previously not run): 6,915 compared,
+    6,614 agree, 301 disagree, 70 crate schema errors, 2 panics, 0 snug bugs;
+    the only change from P4.1 is D251's "undefined sockets" (class withdrawn;
+    `corpus/conformance/crate-diff-findings.md`). **vmsession-test at 10×**
+    (200,000 mutations / 4,000 schemas / 600 stress) as five 2× chunks
+    `40000 <seed> 800 120`, seeds 1001–1005, two at a time at load 20–60:
+    1001 ok (1,848,807 session runs == buffer, 3,601 s), 1002 ok (1,847,609,
+    3,444 s), 1003 ok (1,854,151, 3,735 s), 1004 ok (1,856,370, 3,720 s),
+    **1005 FAIL** (1,849,127/1,849,132; drain 907,273/907,276; 10 failure
+    lines, all one input; 2,999 s). Totals: 9,256,069 session runs,
+    9,256,064 == buffer; JS == Rust 6,035,559/6,035,559 (0 panics);
+    drain 4,538,330/4,538,333; host identity 56,787/56,787.
+    **Snug bug (open, not fixed here): a session misnames the refusal when
+    the item bound falls inside a tag-4 decimal split across windows.**
+    Public reproducer, still present at `cfbdda3`: `compile('r = any')`,
+    bytes `c4 82 21 19 6a b3` (4([-2, 27315]), a valid decimal), options
+    `{top:'any', wire:'deterministic', tags:'bindle', maxItems:1}`:
+    `Schema.validate` answers `cbor/too_many_items` at 1, but
+    `validateHandleSync(..., {chunk:1})` (also chunk 3) answers
+    `cbor/decimal` at 0. Not with `tags: 'standard'`/`'any'` or `wire:
+    'valid'`, nor with a whole window. Both refuse, so no verdict flips; the
+    D030 identity (reason, offset, budget, items) breaks. The Rust session
+    agrees with JS, so the defect is in the kin session VM. Harness input:
+    seed 1005, `detmut 17994`, `a4181845c756adefb3182138fb1827c48221196ab3f97c00fa7fc00000`,
+    limits `1,0,36,4,5,7,-1,-1,0,2`, byte windows or a split at 17.
 - [ ] **P8.5 — CDDL coverage, rescoped by D270 (PEG group semantics)** (audit ranks 6, 7, 10; D230): budget-metered
   general map assignment where D011 cannot prove greedy exact (bounded
   search / bipartite matching), coupled and non-interval group repetitions,
