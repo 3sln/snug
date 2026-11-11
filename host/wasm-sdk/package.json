@@ -11,6 +11,7 @@
     "./compile": "./src/compile.mjs",
     "./view": "./src/view.mjs",
     "./sources": "./src/sources.mjs",
+    "./sequence": "./src/sequence.mjs",
     "./controls": "./src/controls.mjs",
     "./writer": "./src/writer.mjs"
   },

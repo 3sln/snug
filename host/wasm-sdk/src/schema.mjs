@@ -95,9 +95,10 @@ class Inner {
     if (major === 3) return td.decode(b.subarray(h, h + arg));
     return major === 0 ? arg : -1 - arg;
   }
-  /** The out words at OUT rendered as Schema.validate's result. */
-  result() {
-    const o = rt.i32, at = rt.OUT, code = o[at];
+  /** The out words at OUT (or at `at` in `o`: a copy a sequence session kept) rendered as
+   *  Schema.validate's result. */
+  result(o = rt.i32, at = rt.OUT) {
+    const code = o[at];
     if (code === 0) return { ok: true };
     const path = [];
     for (let i = 0; i < o[at + 6]; i++) {

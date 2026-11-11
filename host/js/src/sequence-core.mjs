@@ -18,8 +18,10 @@
 // offset (D216); `onInvalid: 'skip'` drops only schema refusals of complete
 // messages (D214). Per-message verdicts are the buffer driver's over the
 // message's window (D211): bb sequence-test holds both hosts to it.
-import { validateSequenceOptions } from './options.mjs';
+import { validateSequenceOptions, selectOptions } from './options.mjs';
 import { validationFault } from './public-errors.mjs';
+import { resolveLimits } from './limits.mjs';
+import { codecTop } from './profiles.mjs';
 
 const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68;
 const STEP = -1000;   // host: step again (after a scheduling yield)
@@ -46,10 +48,32 @@ class SequenceMessage {
   toJSON() { return { index: this.#index, offset: this.#offset, length: this.#bytes.length, borrowed: this.#borrowed }; }
 }
 
+/** The Program, rule and validation options a sequence's options select (D213): a schema's
+ *  rule, or (profile only) the built-in `any` under the decode defaults (D146, D210).
+ *  programOf(schema) -> the host's program state for a Schema of that host (or undefined);
+ *  anyOf() -> the host's `any` program. Shared by both hosts (P7.13w). */
+export function sequenceTarget(options, programOf, anyOf) {
+  const { schema, rule, maxMessageBytes } = options;
+  if (schema !== undefined) {
+    const program = programOf(schema);
+    if (!program) throw new TypeError('snug: a sequence schema must be a verified Schema');
+    if (typeof rule !== 'string') throw new TypeError('snug: a sequence schema needs a rule');
+    const index = program.ruleIndex(rule);
+    if (index < 0) throw new TypeError('snug: unknown rule');
+    return { program, rule: index, opts: { ...selectOptions(options, 'validation'), maxBytes: maxMessageBytes } };
+  }
+  if (rule !== undefined) throw new TypeError('snug: a rule needs a schema');
+  const limits = resolveLimits({ ...selectOptions(options, 'limits'), maxBytes: maxMessageBytes });
+  return { program: anyOf(), rule: 0, opts: { ...selectOptions(options, 'validation'), top: codecTop(options), maxBytes: limits.maxBytes,
+    maxDepth: limits.maxDepth, maxEntries: limits.maxEntries, maxItems: limits.maxItems } };
+}
+
 /** The reader's engine: one session's arrays, re-initialised per message. */
 class SequenceCore {
   /** backend: the session of one host (begin, step, eof, needOffset, needLength, position,
-   *  heldCode, messageLength, code, result; total = the provisional end P); mint(bytes, opts,
+   *  heldCode, messageLength, code, result; total = the provisional end P; optional: chunk()
+   *  -- a new chunk arrived, so any copy of an earlier one is stale (the wasm SDK keeps one
+   *  in linear memory); close() -- the sequence ended, free the session); mint(bytes, opts,
    *  borrowed) -> View; viewOpts: what a minted View needs to know. */
   constructor(backend, options, mint, viewOpts, batch = Infinity) {
     const { onInvalid = 'stop', copy = 'spanning', failFast = false } = options;
@@ -76,6 +100,7 @@ class SequenceCore {
     try {
       if (chunk.length === 0) return res;      // never EOF
       this.chunk = chunk; this.cb = this.delivered; this.delivered += chunk.length;
+      this.b.chunk?.();
       return this.run(res);
     } catch (e) { return this.thrown(res, e); } finally { this.busy = false; }
   }
@@ -94,10 +119,12 @@ class SequenceCore {
    *  sequence; the messages and skips found before it are kept and it is reported as the
    *  result's error (review 2026-11-04 #6). */
   thrown(res, e) {
-    this.done = true; this.msg = -1; this.mb = null; this.chunk = null;
+    this.close(); this.msg = -1; this.mb = null; this.chunk = null;
     res.error = e; res.state = 'done';
     return res;
   }
+  /** The sequence ended: the backend's session (if it holds one) is freed. */
+  close() { this.done = true; this.b.close?.(); }
   enter() {
     if (this.done) throw new TypeError('snug: the sequence has ended');
     if (this.busy) throw new Error('snug: a sequence reader cannot be re-entered');
@@ -222,7 +249,7 @@ class SequenceCore {
   drained(res) {
     if (this.msg >= 0 && !this.dropping && this.chunk !== null) this.absorb(Math.min(this.delivered, this.msg + this.end));
     this.chunk = null;
-    if (this.final && this.msg < 0) { this.done = true; res.state = 'done'; }
+    if (this.final && this.msg < 0) { this.close(); res.state = 'done'; }
     return res;
   }
 
@@ -258,7 +285,7 @@ class SequenceCore {
 
   stop(res) {
     res.error = this.fault(this.msg);
-    res.state = 'done'; this.done = true; this.msg = -1; this.mb = null; this.chunk = null;
+    res.state = 'done'; this.close(); this.msg = -1; this.mb = null; this.chunk = null;
     return res;
   }
 
@@ -344,6 +371,7 @@ export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
           if (finished) return;
         }
       } finally {
+        if (!core.done) core.close();   // the loop was left: free the backend's session now
         if (!finished && typeof it.return === 'function') await it.return();
       }
     }

@@ -3728,6 +3728,12 @@ the `vms-init-seq` / `vms-message-length` exports, the native sequence host
 driven through its session wrapper (D173: views re-derived after every step,
 windows copied into linear memory), and views minted over a JS-side copy of
 each message (linear memory cannot be borrowed across steps).
+*Done 2026-11-10 (P7.13w, under D300):* the exports above plus
+`sdk_ses_step_at` (steps inside the backend's copy of a chunk, so a chunk is
+copied about once); the SDK reader is the shared driver over a wasm sequence
+session, given exactly the native windows; `message.bytes` is borrowed or
+assembled as natively, and the View copies it into linear memory on first use
+(D132's contract). `bb wasm-sdk-test` holds it to native per feed.
 - [ ] **Signed off** (owner)
 
 ### D230 — Owner directions 2026-11-04: spec compliance first (OWNER DECISION)
@@ -6038,25 +6044,75 @@ are answered as provisional decisions D082–D085. None is open now.
     assembly retention. Not done: an independent RFC framer in the gate (the
     reviewer's own 40,400-comparison parity probe is the independent check for
     now); the SDK's view.mjs has the same public-state escape (host/wasm-sdk
-    is under the P7.13w block).
-- [!] **P7.13w — wasm SDK sequence reader: BLOCKED pending owner authorisation**
-  (2026-11-04). P7.9c landed (88263f1) and the manager asked for the SDK
-  reader, but this session's permission system refused the edit to
-  `host/wasm/src/sdk.rs` (the brief reserved `host/wasm*/` for an owner
-  authorisation); not worked around. Ready: the native driver is split into
-  `host/js/src/sequence-core.mjs` (backend-agnostic) and `sequence.mjs` (the
-  gen-JS backend). The SDK needs exactly: `sdk_vs_new` with total −2 →
-  `vms_init_seq` (input limit in INFO[0], as total −1); a `sdk_vs_reseq(h,
-  quantum)` export re-running `vms_init_seq` on the session's arrays (the
-  session keeps its rule and limit words); after each `sdk_ses_step`
-  INFO[4] = `vms_held_code`, INFO[5] = `vms_message_length` (and INFO[5]
-  after `sdk_ses_eof`); an SDK backend over `WasmSession` (begin = reseq,
-  step = window copy + `sdk_ses_step`, eof = `sdk_ses_eof`, result =
-  `Inner.result()`); an internal `mintView` module (the SDK's view.mjs is
-  itself the public entry, so its Message/View internals move to a
-  non-exported module that view.mjs re-exports from); a `./sequence` export
-  in host/wasm-sdk/package.json; parity in `bb wasm-sdk-test` (sequence
-  results identical to native under chunk splits, views walk-equal).
+    is under the P7.13w block) -- *closed by P7.13w (2026-11-10).*
+- [x] **P7.13w — wasm SDK sequence reader and view privacy** (2026-11-10, wasm
+  SDK engineer; authorised by D300; earlier blocked 2026-11-04, see D219).
+  - **ABI (host/wasm/src/sdk.rs; additions only):** `sdk_vs_new` with total −2
+    → `vms_init_seq` (INFO[0] the input limit, as −1); `Sess::Vm` keeps its
+    `rule` and limit words; new `sdk_vs_reseq(h, quantum)` (vms-init-seq again
+    on the session's arrays; 0, a negative vms-init answer, −100 bad handle);
+    after every vms step and `sdk_ses_eof` INFO[4] = `vms_held_code`, INFO[5] =
+    `vms_message_length`; new `sdk_ses_step_at(h, off, n, base)` stepping over
+    window[off..off+n) (`sdk_ses_step` is `ses_step(h, 0, n, base)`). The last
+    one is beyond the 2026-11-04 list: without it every message of a large
+    chunk would recopy its window (up to maxMessageBytes) into linear memory.
+  - **JS:** `host/wasm-sdk/src/sequence.mjs` (`./sequence` export):
+    `readSequence` / `sequenceReader` from the shared driver
+    (`host/js/src/sequence-core.mjs`) over a `SequenceSession` backend. The
+    session gets exactly the native windows (a first draft handed it only
+    the copied part of a window and changed fail-fast timing on one split
+    run; the gate caught it). The backend keeps one copy per chunk: a later window
+    inside it steps at an offset, one reaching further appends only the
+    tail, and it is compacted when most of it lies behind; invalidated on each
+    feed (backend `chunk()` hook). INFO/OUT are snapshotted after every call
+    (any other SDK call overwrites them; `Inner.result(o, at)` renders a
+    copy). Sessions are freed at the end, when a readSequence loop is left
+    (core `close()` hook, also used by the native core as a no-op), or by a
+    FinalizationRegistry. `sequenceTarget` moved into sequence-core.mjs (both
+    hosts). Views: `host/wasm-sdk/src/view.mjs` → `view-core.mjs` (internal:
+    View/Cursor state in private fields, a private-brand check on Message,
+    `mintView`, `directoryWords`); the new `view.mjs` exports only `view`,
+    `View`, `Cursor`. This closes the SDK's `new View(fake)` / `_m` escape. A
+    minted View copies the message into linear memory on first use
+    (`view.borrowed` false; `message.borrowed` as native).
+  - **Gate (`bb wasm-sdk-test`, actual, defaults 20,000 mutations / seed 1 /
+    400 schemas, shared M1 Pro, 14.4 min total):** 13/13 tests pass. Sequences
+    are built from the whole case set (74,666 cases → 168,743 sequences, as
+    bb sequence-test builds them; 4 cut at 2,000 messages). The policy and
+    chunking rotate (not every combination per sequence):
+    `sequenceReader` runs on every sequence (whole / 1-byte or 4096 / random
+    1..7 / 1..300 chunks; stop, skip, copy always, failFast and combinations).
+    `readSequence` runs on every other sequence (another chunking; quantum 7/50
+    on about a quarter, 1 rarely). Every-offset splits run on every fourth
+    small sequence. Results: sequenceReader per-feed answers ==
+    native 335,853/335,853; readSequence (messages, the chunk being read at
+    each yield, fault, stats) 84,372/84,372; view walks + cursor walks on every
+    third sequence's sampled messages inside both. Release latency is 0 (wasm)
+    and 0 (native) of 33,404 accepted messages in 1-byte runs. API behaviours
+    32/32 (one message ahead, predicate exception order, Buffer copy,
+    last-byte release, option validation, cross-package schema). The privacy
+    checks pass (read-only fields, no own keys on View/Cursor, forged
+    construction refused, `snug-wasm-sdk/view` = {Cursor, View, view},
+    view-core not exported). Instance loss ends a pending reader with an error,
+    and a fresh one works. Sequence section 683 s, of which wasm 166 s and
+    native 444 s in the readers.
+  - **Fixed in the gate:** the openSession section was red at HEAD
+    (1538677): the harness called `end()` again after vms-eof's resume, and
+    both hosts answered "vms-eof answered −1". The harness now ends once (the
+    hosts agree, with real verdicts).
+  - **Other gates (actual):** bb sequence-test ok (kin == oracle
+    637,516/637,516; fail-fast 14,084/14,084; latency 0/50,185; JS hosts
+    31,310 runs; JS == Rust 154,608/154,608; Rust Sequence 31,310/31,310;
+    1,244 s); vm-test ok (JS == wasm 72,588/72,588); scan-test ok (wasm
+    31,360/31,360); host/js npm test 1,438/1,438; bb size: budgets pass
+    (snug/sequence unchanged at 151,945 / 54,323 gzip).
+  - **Size:** SDK runtime wasm (release) 268,070 → 269,042 B (+972), gzip
+    98,843 → 99,382 (+539); opt-level z build 175,735 B / 72,136 gzip (after).
+    SDK glue, esbuild min/gzip: `./sequence` 84,771 / 30,186; `./view`
+    64,171 / 22,369.
+  - **Open:** P8.4 moves session steps to `vms_step_v`; `sdk_ses_step_at`'s
+    (off, n) window semantics must survive that rebase (noted to the
+    manager). The SDK reader inherits D219's SDK view contract (D132).
 
 ## P7.11 — Rust public API
 

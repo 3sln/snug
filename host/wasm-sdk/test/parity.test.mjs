@@ -14,6 +14,13 @@
 //              seeded window splits, quanta and failFast; profile scans too
 //   compile    every schema text of the case set (and truncations, profiles,
 //              registries): the serialised Program bytes or the SchemaError
+//   sequences  (P7.13w) readSequence / sequenceReader on sequences built from
+//              the case set (as bb sequence-test builds them) under whole,
+//              1-byte, random and every-offset chunkings, every policy
+//              (onInvalid stop/skip, copy spanning/always, failFast, quanta):
+//              per-feed messages (index, offset, length, borrowed, bytes),
+//              skipped and stopping faults, stats, view walks; release
+//              latency 0 in 1-byte runs; View/Cursor/message privacy
 //
 // plus option validation (D150), extension-control binding and errors, and
 // instance-loss recovery. Run by `bb wasm-sdk-test` after building the sdk and
@@ -35,6 +42,10 @@ import * as WS from '../src/schema.mjs';
 import { compile as wcompile } from '../src/compile.mjs';
 import { view as wview } from '../src/view.mjs';
 import * as WSRC from '../src/sources.mjs';
+import * as NSEQ from '../../js/src/public-sequence.mjs';
+import * as WSEQ from '../src/sequence.mjs';
+import { View as WView, Cursor as WCursor } from '../src/view.mjs';
+import { chunkEnds } from '../../../kin/scripts/sequence-run.mjs';
 import { controls as wgeneric } from '../src/controls.mjs';
 import { Writer as WWriter } from '../src/writer.mjs';
 import { buildVmCases } from '../../../kin/scripts/vm-allcases.mjs';
@@ -260,11 +271,12 @@ test('sessions: openSession, async handles and streams', async () => {
     try {
       const s = S.openSession(schema, 'r', length, {}, { quantum: 3 });
       const out = [s.length, s.limit];
-      let r = s.step(b.subarray(0, Math.min(b.length, 17)), 0);
+      let r = s.step(b.subarray(0, Math.min(b.length, 17)), 0), ended = false;
+      // end(n) once: after it a 'yield' (vms-eof's resume) is stepped from its position, never ended again
       for (let guard = 0; guard < 100000 && r.state !== 'done'; guard++) {
-        if (r.state === 'held') { out.push('held', r.result); r = s.end(b.length); continue; }
+        if (r.state === 'held') { out.push('held', r.result); ended = true; r = s.end(b.length); continue; }
         const at = r.state === 'need' ? r.offset : r.position;
-        if (length === undefined && at >= b.length) { r = s.end(b.length); continue; }
+        if (length === undefined && at >= b.length && !ended) { ended = true; r = s.end(b.length); continue; }
         r = s.step(b.subarray(at, Math.min(b.length, at + Math.max(r.length ?? 1, 17))), at);
       }
       return { ok: [...out, r] };
@@ -288,6 +300,214 @@ test('sessions: openSession, async handles and streams', async () => {
   const snap = S => outcome(() => { const b = new Uint8Array([1, 2]); const h = S.bufferHandle(b); b[0] = 9; const r = h.read(0, 2); r[1] = 7; return [Object.isFrozen(h), Array.from(h.read(0, 2))]; });
   t.same('handle snapshots (D151)', snap(WSRC), snap(NSRC));
   t.done();
+});
+
+// ---------------------------------------------------------------- sequences (P7.13w)
+// Sequences are built from the case set as bb sequence-test builds them: each case alone,
+// and among 0..3 companions of its group (same Program, rule and limits; at most 4 KiB) or
+// small fillers before and after it, sometimes with a truncated tail; every fourth with a
+// maxMessageBytes below its longest message; one empty sequence per Program. Each sequence
+// runs on both packages through readSequence and sequenceReader, the chunking and policy
+// rotating; small sequences are also split at every offset. Every fourth case also runs
+// profile-only (no schema: the built-in `any`). The SDK must give the native per-feed
+// answers exactly; native is held to D211's oracle by bb sequence-test.
+const SEQ_FILLERS = [[0xa0], [0xa1, 0x61, 0x61, 0x01], [0x00], [0x80], [0x60], [0x18, 0x64]].map(a => Uint8Array.from(a));
+const catBytes = parts => { const t = new Uint8Array(parts.reduce((n, x) => n + x.length, 0)); let o = 0; for (const x of parts) { t.set(x, o); o += x.length; } return t; };
+const SEQ_MAX = 2000;   // messages per run (the 1,500,001-zero vector is 1.5 M one-byte messages)
+function sequenceSet() {
+  const limKey = c => `${c.prog}:${c.rule}:${Array.from(c.lim).join(',')}`, groups = new Map(), seqs = [], empty = new Set();
+  const plain = cases.filter(c => !c.span);
+  for (const c of plain) { const k = limKey(c); if (!groups.has(k)) groups.set(k, []); if (c.bytes.length <= 4096) groups.get(k).push(c.bytes); }
+  plain.forEach((c, ci) => {
+    const g = groups.get(limKey(c)), member = () => (rnd(4) === 0 || g.length === 0 ? SEQ_FILLERS[rnd(SEQ_FILLERS.length)] : g[rnd(g.length)]);
+    const profile = ci % 4 === 0;
+    seqs.push({ c, S: c.bytes, label: `${c.label} alone`, profile });
+    const parts = [];
+    for (let k = rnd(4); k > 0; k--) parts.push(member());
+    parts.push(c.bytes);
+    for (let k = rnd(4); k > 0; k--) parts.push(member());
+    if (rnd(3) === 0) { const t = member(); if (t.length > 1) parts.push(t.subarray(0, 1 + rnd(t.length - 1))); }
+    const S = catBytes(parts);
+    seqs.push({ c, S, label: `${c.label} in ${parts.length}`, profile });
+    if (ci % 4 === 0) seqs.push({ c, S, label: `${c.label} in ${parts.length}, small maxMessageBytes`, small: rnd(Math.max(...parts.map(x => x.length)) + 1) });
+    if (!empty.has(c.prog)) { empty.add(c.prog); seqs.push({ c, S: new Uint8Array(0), label: `empty (${pairs[c.prog].label})`, profile: true }); }
+  });
+  return seqs;
+}
+function seqOptions(q, side) {
+  const o = optsOf(q.c.lim), { maxBytes, ...rest } = o;
+  const opts = { ...rest };
+  if (q.small !== undefined) opts.maxMessageBytes = q.small; else if (maxBytes !== undefined) opts.maxMessageBytes = maxBytes;
+  if (!q.profile) {
+    const p = pairs[q.c.prog], rule = ruleOf(q.c);
+    if (!p.n || rule === undefined) return null;
+    opts.schema = side === 'w' ? p.w : p.n; opts.rule = rule;
+  } else { delete opts.maxBignumBytes; delete opts.budget; }
+  return opts;
+}
+const faultOf = e => (e && typeof e === 'object'
+  ? { name: e.name, code: e.code, reason: e.reason, path: e.path, offset: e.offset, subcode: e.subcode, index: e.index, messageOffset: e.messageOffset, skippable: e.skippable, message: e.message }
+  : { thrown: String(e) });
+const msgOf = m => [m.index, m.offset, m.length, m.borrowed, hex(m.bytes)];
+const chunksBy = (S, ends) => { const a = []; let from = 0; for (const e of ends) { a.push(S.subarray(from, e)); from = e; } return a; };
+/** sequenceReader: the answer of every feed and of end(); late: accepted messages of a 1-byte run not released by their own last byte. */
+function pushRun(api, opts, chunks, byteRun, walks, ends) {
+  const out = []; let late = 0;
+  try {
+    const rd = api.sequenceReader(opts);
+    let k = 0, stopped = false;
+    const take = (res, at) => {
+      out.push([res.messages.map(m => { if (byteRun && m.offset + m.length - 1 !== at) late++; return msgOf(m); }), res.skipped.map(faultOf), res.error ? faultOf(res.error) : null]);
+      for (const m of res.messages) if (walks && m.index % 5 === 0 && m.length <= 8192) out.push(viewAll(m.view));
+      return res.error !== undefined;
+    };
+    for (; k < chunks.length && !stopped; k++) stopped = take(rd.feed(chunks[k]), byteRun ? ends[k] - 1 : -1);
+    if (!stopped) take(rd.end(), -1);
+    out.push(rd.done);
+  } catch (e) { out.push(faultOf(e)); }
+  return { out, late };
+}
+/** readSequence: every message with the chunk being read when it was yielded, the end or the fault, and stats. */
+async function pullRun(api, opts, chunks, walks) {
+  const out = []; let pulled = -1;
+  const src = (function* () { for (let k = 0; k < chunks.length; k++) { pulled = k; yield chunks[k]; } pulled = chunks.length; })();
+  let it;
+  try {
+    it = api.readSequence(src, opts);
+    for await (const m of it) {
+      out.push([pulled, ...msgOf(m)]);
+      if (walks && m.index % 5 === 0 && m.length <= 8192) out.push(viewAll(m.view));
+      if (out.length > 4 * SEQ_MAX) break;
+    }
+    out.push('end');
+  } catch (e) { out.push(faultOf(e)); }
+  if (it) { const st = it.stats; out.push({ ...st, lastSkipped: st.lastSkipped && faultOf(st.lastSkipped) }); }
+  return out;
+}
+test('sequences: readSequence and sequenceReader == native under chunk splits and every policy; release latency; views', async () => {
+  const t0 = performance.now();
+  const seqs = sequenceSet();
+  const tp = tally('sequenceReader (per-feed messages, skipped, error; profile and schema)'), tr = tally('readSequence (messages, release chunk, fault, stats)');
+  let runs = 0, msgs = 0, byteMsgs = 0, wLate = 0, nLate = 0, splits = 0, cut = 0;
+  const times = new Map(), prof = (k, w, nn) => { const x = times.get(k) ?? [0, 0, 0]; x[0]++; x[1] += w; x[2] += nn; times.set(k, x); };
+  const POLICIES = [{}, { onInvalid: 'skip' }, { copy: 'always' }, { failFast: true }, { onInvalid: 'skip', copy: 'always' }, { onInvalid: 'skip', failFast: true }];
+  for (let si = 0; si < seqs.length; si++) {
+    const q = seqs[si], wo = seqOptions(q, 'w'), no = seqOptions(q, 'n');
+    if (!wo || (process.env.SNUG_PARITY_SEQ_MATCH && !q.label.includes(process.env.SNUG_PARITY_SEQ_MATCH))) continue;
+    let S = q.S;
+    if (S.length > SEQ_MAX) {
+      // cut at the boundary after the first SEQ_MAX messages (native's own framing tells where)
+      const r = NSEQ.sequenceReader({ ...no, onInvalid: 'skip' }).feed(S), last = r.messages[SEQ_MAX - 1];
+      if (last) { S = S.subarray(0, last.offset + last.length); cut++; }
+    }
+    // the rotation: sequenceReader on every sequence (chunking by si % 4, policy by si / 4 % 6);
+    // readSequence on every other one (another chunking; a quantum on one in four)
+    const n = S.length, policy = POLICIES[(si >> 2) % POLICIES.length], walks = si % 3 === 0;
+    const chunkings = [{ kind: 0 }, n <= 4096 ? { kind: 1, w: 1 } : { kind: 2, w: 4096, seed: 1 + rnd(1 << 30) },
+      { kind: 2, w: 7, seed: 1 + rnd(1 << 30) }, { kind: 2, w: 300, seed: 1 + rnd(1 << 30) }];
+    const ch = chunkings[si % 4], ch2 = chunkings[(si + 1 + (si >> 3)) % 4];
+    const label = `${q.label} ${show(policy)} ${show(ch)} [${hex(S).slice(0, 60)}]`;
+    // sequenceReader on one chunking, readSequence on another (with a quantum on some)
+    const ends = chunkEnds(n, ch), chunks = chunksBy(S, ends), byteRun = ch.kind === 1;
+    let t1 = performance.now();
+    const a = pushRun(WSEQ, { ...wo, ...policy }, chunks, byteRun, walks, ends);
+    let t2 = performance.now();
+    const b = pushRun(NSEQ, { ...no, ...policy }, chunks, byteRun, walks, ends);
+    prof(`push ${ch.kind}`, t2 - t1, performance.now() - t2);
+    tp.same(label, a.out, b.out); runs++;
+    if (byteRun) { wLate += a.late; nLate += b.late; byteMsgs += a.out.reduce((s, x) => s + (Array.isArray(x) && Array.isArray(x[0]) ? x[0].length : 0), 0); }
+    if (si % 2 === 1) continue;
+    const quantum = [0, 0, 0, 0, 0, 0, 7, 50][rnd(8)] || (si % 512 === 0 ? 1 : 0), ends2 = chunkEnds(n, ch2), chunks2 = chunksBy(S, ends2);
+    const ro = { ...policy, ...(quantum ? { quantum } : {}) };
+    t1 = performance.now();
+    const c = await pullRun(WSEQ, { ...wo, ...ro }, chunks2, walks);
+    t2 = performance.now();
+    const d = await pullRun(NSEQ, { ...no, ...ro }, chunks2, walks);
+    prof(`pull ${ch2.kind}`, t2 - t1, performance.now() - t2);
+    tr.same(`${q.label} ${show(ro)} ${show(ch2)}`, c, d); runs++;
+    msgs += c.filter(x => Array.isArray(x)).length;
+    // small sequences: split at every offset (sequenceReader, the policy rotating)
+    if (n <= 24 && si % 4 === 0) for (let k = 1; k < n; k++) {
+      const pk = POLICIES[k % POLICIES.length], sc = chunksBy(S, chunkEnds(n, { kind: 3, k }));
+      t1 = performance.now();
+      const e = pushRun(WSEQ, { ...wo, ...pk }, sc, false, false).out;
+      t2 = performance.now();
+      const f = pushRun(NSEQ, { ...no, ...pk }, sc, false, false).out;
+      prof('split', t2 - t1, performance.now() - t2);
+      tp.same(`${q.label} split ${k} ${show(pk)} ${show(no.maxMessageBytes)} [${hex(S)}]`, e, f);
+      runs++; splits++;
+    }
+  }
+  console.log(`  info sequences: ${seqs.length} sequences (${cut} cut at ${SEQ_MAX} messages), ${runs} runs (${splits} every-offset splits), ${msgs} readSequence messages, ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  console.log(`  info time (runs, wasm s, native s): ${[...times].map(([k, x]) => `${k}: ${x[0]}, ${(x[1] / 1000).toFixed(1)}, ${(x[2] / 1000).toFixed(1)}`).join('; ')}`);
+  tp.done(); tr.done();
+  console.log(`  ${wLate === 0 && nLate === 0 ? 'ok  ' : 'FAIL'} release latency: ${wLate} (wasm) / ${nLate} (native) of ${byteMsgs} accepted messages in 1-byte runs waited for a byte past their own end`);
+  assert.equal(wLate, 0); assert.equal(nLate, 0);
+});
+
+test('sequences: API behaviours and privacy (read-only messages, private View/Cursor state, no trusted opener)', async () => {
+  const t = tally('sequence API behaviours');
+  const text = 'r = uint .count 0';
+  let wc = 0, nc = 0;
+  const w = await wcompile(text, { controls: { count: { maxBytes: 1, check: () => { wc++; return true; } } } });
+  const n = await ncompile(text, { controls: { count: { maxBytes: 1, check: () => { nc++; return true; } } } });
+  // one message ahead of the consumer
+  const first = async (api, s) => { const it = api.readSequence([new Uint8Array(10000)], { schema: s, rule: 'r' }); const m = (await it.next()).value; await it.return(); return m.index; };
+  t.same('readSequence first message', await first(WSEQ, w), await first(NSEQ, n));
+  t.same('messages checked before the first was consumed', wc, nc);
+  // an exception from a predicate ends the sequence after the messages before it
+  const thrower = { check: { maxBytes: 1, check: (_a, item) => { if (item[0] === 2) throw new Error('predicate failed'); return true; } } };
+  const wt = await wcompile('r = uint .check 0', { controls: thrower }), nt = await ncompile('r = uint .check 0', { controls: thrower });
+  for (const chunks of [[Uint8Array.of(1, 2)], [Uint8Array.of(1), Uint8Array.of(2)]]) {
+    const run = async (api, s) => { const seen = []; try { for await (const m of api.readSequence(chunks, { schema: s, rule: 'r' })) seen.push(m.view.number()); return seen; } catch (e) { return [seen, e.message]; } };
+    t.same(`predicate throws ${chunks.length}`, await run(WSEQ, wt), await run(NSEQ, nt));
+  }
+  const pushThrow = (api, s) => { const r = api.sequenceReader({ schema: s, rule: 'r' }); const res = r.feed(Uint8Array.of(1, 2)); return [res.messages.length, res.error?.message, r.done]; };
+  t.same('sequenceReader predicate throws', pushThrow(WSEQ, wt), pushThrow(NSEQ, nt));
+  // copy 'always' copies Node Buffer chunks too; a View is minted from the checked bytes
+  for (const make of [b => Buffer.from(b), b => Uint8Array.from(b)]) {
+    const run = api => { const chunk = make([1, 2]); const { messages } = api.sequenceReader({ copy: 'always' }).feed(chunk); chunk[0] = 9; chunk[1] = 9; return messages.map(m => [m.borrowed, m.view.number()]); };
+    t.same('copy always', run(WSEQ), run(NSEQ));
+  }
+  // messages released by their own last byte
+  const ok = { maxBytes: 64, check: () => true };
+  for (const [txt, msgs] of [['r = uint .ok 0', [Uint8Array.of(1)]], ['r = { text: tstr .ok 0 }', [N.encode({ text: 'a' })]], [null, [Uint8Array.of(0xd8, 0x28, 0x82, 0x81, 0x01, 0x81, 0x01)]], [null, [Uint8Array.of(0xa1, 0x81, 0x01, 0x02)]]]) {
+    const ws = txt && await wcompile(txt, { controls: { ok } }), ns = txt && await ncompile(txt, { controls: { ok } });
+    const bytes = catBytes([...msgs, ...msgs]);
+    const run = (api, s) => { const r = api.sequenceReader(s ? { schema: s, rule: 'r' } : {}); const got = []; for (let i = 0; i < bytes.length; i++) got.push(r.feed(bytes.subarray(i, i + 1)).messages.length); return got; };
+    t.same(`released by its last byte ${hex(bytes)}`, run(WSEQ, ws), run(NSEQ, ns));
+  }
+  // option validation (D213) and cross-package schemas
+  for (const o of [{ maxBytes: 10 }, { onInvalid: 'x' }, { copy: 'x' }, { failFast: 1 }, { rule: 'r' }, { schema: n }, { schema: w }, { schema: {}, rule: 'r' }, { nope: 1 }, { maxMessageBytes: -1 }])
+    for (const f of ['sequenceReader', 'readSequence']) {
+      const fix = s => (o.schema === w || o.schema === n ? { ...o, schema: s } : o);
+      t.same(`${f} ${show(o)}`, outcome(() => (WSEQ[f](...(f === 'readSequence' ? [[], fix(w)] : [fix(w)])), 'ok')), outcome(() => (NSEQ[f](...(f === 'readSequence' ? [[], fix(n)] : [fix(n)])), 'ok')));
+    }
+  t.same('a native Schema given to the SDK', outcome(() => WSEQ.sequenceReader({ schema: n, rule: 'r' })), outcome(() => NSEQ.sequenceReader({ schema: w, rule: 'r' })));
+  t.done();
+  // privacy (D215, review 2026-11-04 #3): no public state, no construction outside the view module
+  const m = WSEQ.sequenceReader({}).feed(N.encode('ok')).messages[0];
+  assert.throws(() => { m.bytes = Uint8Array.of(0x62, 0xc0, 0xae); }, TypeError);
+  assert.throws(() => { m.index = 7; }, TypeError);
+  assert.equal(m.view.text(), 'ok');
+  assert.deepEqual(Object.keys(m), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(m)), { index: 0, offset: 0, length: 3, borrowed: true });
+  const v = wview(N.encode({ a: [1, 2, 3] })), cur = v.cursor();
+  assert.ok(v instanceof WView && cur instanceof WCursor);
+  assert.deepEqual(Object.keys(v), []);
+  assert.deepEqual(Object.keys(cur), []);
+  assert.deepEqual(Object.getOwnPropertyNames(v), []);
+  assert.throws(() => new WView({ ptr: 0, end: 3, allocs: [], head() {} }, 0, 0), TypeError);
+  assert.throws(() => new WView(Object.create(Object.getPrototypeOf(v)), 0, 0), TypeError);
+  assert.throws(() => new WCursor({ _m: {}, _p: 0, _d: 0 }), TypeError);
+  assert.throws(() => Reflect.construct(WView, [undefined, 0, 0]), TypeError);
+  assert.equal(v.get('a').at(2).number(), 3);
+  // the package entries: ./view is view/View/Cursor only; ./sequence the reader pair; the internals are not exported
+  const pv = await import('snug-wasm-sdk/view'), ps = await import('snug-wasm-sdk/sequence');
+  assert.deepEqual(Object.keys(pv).sort(), ['Cursor', 'View', 'view']);
+  assert.deepEqual(Object.keys(ps).sort(), ['readSequence', 'sequenceReader']);
+  await assert.rejects(import('snug-wasm-sdk/src/view-core.mjs'), e => e.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED');
+  console.log('  ok   sequence messages read-only; View/Cursor state private; mintView not exported');
 });
 
 // ---------------------------------------------------------------- compile
@@ -400,6 +620,8 @@ test('instance loss: a trap resets the instance; Programs and sessions recover; 
   const text = 'r = [* (any / tstr .chars (1..3))]';
   const w = await wcompile(text, { controls: wgeneric }), n = await ncompile(text, { controls: wgeneric });
   const pending = WSRC.pushValidator(w, 10, 'r');
+  const pendingSeq = WSEQ.sequenceReader({ schema: w, rule: 'r' });
+  pendingSeq.feed(N.encode([1]).subarray(0, 1));   // a message in progress
   // 1,000,000 nested arrays under a raised depth limit: the recursive scanner exhausts the wasm stack.
   const deep = new Uint8Array(1_000_001).fill(0x81); deep[deep.length - 1] = 0;
   const g = W.memoryBytes();
@@ -410,8 +632,11 @@ test('instance loss: a trap resets the instance; Programs and sessions recover; 
   for (const v of [[1, 2], ['ab'], ['abcd']]) assert.deepEqual(w.validate(N.encode(v), 'r'), n.validate(N.encode(v), 'r'));
   assert.deepEqual(W.decode(N.encode({ a: 1 })), N.decode(N.encode({ a: 1 })));
   assert.equal(outcome(() => pending.feed(new Uint8Array(10))).err, 'Error', 'a session from the lost instance is unusable');
+  const lostSeq = pendingSeq.feed(N.encode([1]).subarray(1));
+  assert.ok(lostSeq.error instanceof Error && pendingSeq.done, 'a sequence reader from the lost instance ends with an error');
+  assert.deepEqual(WSEQ.sequenceReader({ schema: w, rule: 'r' }).feed(catBytes([N.encode([1]), N.encode(['ab'])])).messages.map(m => m.view.value()), [[1], ['ab']]);
   const p = WSRC.pushValidator(w, 4, 'r'); p.feed(N.encode(['ab']));
   assert.deepEqual(p.finalize(), { ok: true });
   assert.ok(g > 0);
-  console.log('  ok   instance loss recovered (decode, validate with a generic control, sessions)');
+  console.log('  ok   instance loss recovered (decode, validate with a generic control, sessions, sequences)');
 });

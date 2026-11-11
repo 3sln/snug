@@ -23,8 +23,9 @@ use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_
                            vm_validate_span_x, vm_validate_x};
 use crate::snug::vm::controls::{chars_prep, chars_run, meter_init, samelen_prep, samelen_run, samelen_words,
                                 unique_run, unique_words, M_WORDS};
-use crate::snug::vm::session::{vms_arena, vms_eof, vms_init, vms_init_unknown, vms_keep, vms_need_length,
-                               vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
+use crate::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_seq, vms_init_unknown, vms_keep,
+                               vms_message_length, vms_need_length, vms_need_offset, vms_position, vms_step, vms_step_x,
+                               vms_unknown_total, vms_words};
 use crate::snug::write::float::{put_float, put_float_rfc};
 use crate::snug::write::int::put_int;
 use crate::snug::write::map::{sort_keys, S_BUDGET};
@@ -90,7 +91,8 @@ fn ext_call(pr: &Prog, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32,
 
 enum Sess {
     Scan { o: [i32; 16], s: Vec<i32>, w: Vec<u8> },
-    Vm { prog: usize, s: Vec<i32>, ss: Vec<i32>, ka: Vec<u8>, out: Vec<i32>, w: Vec<u8> },
+    /// rule and lim: kept for `sdk_vs_reseq` (a sequence session re-inits per message, P7.13w).
+    Vm { prog: usize, rule: i32, lim: [i32; 10], s: Vec<i32>, ss: Vec<i32>, ka: Vec<u8>, out: Vec<i32>, w: Vec<u8> },
 }
 
 struct State {
@@ -510,8 +512,9 @@ pub extern "C" fn sdk_rs_new(total: i32, quantum: i32, top_any: i32, cose: i32, 
     put_session(st(), Sess::Scan { o, s, w: Vec::new() })
 }
 /// A resumable VM validation (vms) of `total` bytes against `rule` of Program h,
-/// or (total < 0, D085) of unknown length in drain mode, its input limit in
-/// INFO[0]; -1 on a bad handle.
+/// or (total -1, D085) of unknown length in drain mode, or (total -2, D212,
+/// P7.13w) one message of a CBOR sequence (vms-init-seq; `sdk_vs_reseq` starts
+/// the next) -- both with the input limit in INFO[0]; -1 on a bad handle.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: i32, l1: i32, l2: i32, l3: i32,
@@ -529,13 +532,29 @@ pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: 
         let limit = vms_unknown_total(&pr.p, &lim);
         st.info[0] = limit;
         ka = vec![0u8; vms_arena(&pr.p, &lim, limit) as usize];
-        c = vms_init_unknown(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
+        c = if total == -2 { vms_init_seq(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum) }
+            else { vms_init_unknown(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum) };
     } else {
         ka = vec![0u8; vms_arena(&pr.p, &lim, total) as usize];
         c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
     }
     if c < 0 { return -2; }
-    put_session(st, Sess::Vm { prog: h, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
+    put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
+}
+/// P7.13w (D212): the next message of a sequence session -- vms-init-seq again on
+/// its arrays, with its rule and limit words; the window buffer is kept. 0, or a
+/// negative vms-init answer; -100 on a bad handle.
+#[no_mangle]
+pub extern "C" fn sdk_vs_reseq(h: usize, quantum: i32) -> i32 {
+    let st = st();
+    let progs = &st.progs;
+    match st.sessions.get_mut(h) {
+        Some(Some(Sess::Vm { prog, rule, lim, s, ss, ka, .. })) => match progs.get(*prog) {
+            Some(Some(pr)) => vms_init_seq(&pr.p, &pr.b, *rule, &lim[..], s, ss, ka, quantum),
+            _ => -100,
+        },
+        _ => -100,
+    }
 }
 /// The session's window buffer, at least n bytes (the host copies the window in).
 #[no_mangle]
@@ -548,32 +567,40 @@ pub extern "C" fn sdk_ses_window(h: usize, n: usize) -> *mut u8 {
 /// One step over window[0..n) holding message bytes from `base`. Answers the
 /// session's code (rscan: 0, a profile code, -1 need, -2 yield; vms: >= 0 done
 /// or -67 held, with out words copied to OUT, -64 need, -65 yield). INFO: need
-/// offset, need length, position, keep.
+/// offset, need length, position, keep; vms also (P7.13w) the held code and the
+/// message length (a sequence session's root end, else -1).
 #[no_mangle]
-pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 {
+pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 { ses_step(h, 0, n, base) }
+/// P7.13w: one step over window[off..off+n) (the sequence reader keeps a chunk
+/// in the window and steps at offsets inside it); otherwise as `sdk_ses_step`.
+#[no_mangle]
+pub extern "C" fn sdk_ses_step_at(h: usize, off: usize, n: usize, base: i32) -> i32 { ses_step(h, off, n, base) }
+fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
     let st = st();
     let progs = &st.progs;
     match st.sessions.get_mut(h) {
         Some(Some(Sess::Scan { o, s, w })) => {
-            let r = rscan_step(&w[..n], o, s, 0, base);
+            let r = rscan_step(&w[off..off + n], o, s, 0, base);
             st.info[0] = rscan_need_offset(s);
             st.info[1] = rscan_need_length(s);
             st.info[2] = rscan_position(s);
             st.info[3] = error_offset(o);
             r
         }
-        Some(Some(Sess::Vm { prog, s, ss, ka, out, w })) => {
+        Some(Some(Sess::Vm { prog, s, ss, ka, out, w, .. })) => {
             let pr = match progs.get(*prog) { Some(Some(pr)) => pr, _ => return -100 };
             let r = if pr.p[30] > 0 {
                 let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
-                vms_step_x(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base, &f)
+                vms_step_x(&pr.p, &pr.b, &w[off..off + n], s, ss, ka, out, base, &f)
             } else {
-                vms_step(&pr.p, &pr.b, &w[..n], s, ss, ka, out, base)
+                vms_step(&pr.p, &pr.b, &w[off..off + n], s, ss, ka, out, base)
             };
             st.info[0] = vms_need_offset(ss);
             st.info[1] = vms_need_length(ss);
             st.info[2] = vms_position(ss);
             st.info[3] = vms_keep(ss);
+            st.info[4] = vms_held_code(ss);
+            st.info[5] = vms_message_length(ss);
             if r >= 0 || r == -67 { st.out.copy_from_slice(&out[..OUTW]); }
             r
         }
@@ -582,7 +609,7 @@ pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 {
 }
 /// D085: the end of an unknown-length message after n bytes (vms-eof). Answers
 /// >= 0 done (OUT), -68 resume (INFO[2] position, INFO[3] keep), or another
-/// negative vms answer.
+/// negative vms answer; INFO[4], INFO[5] as after a step (P7.13w).
 #[no_mangle]
 pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
     let st = st();
@@ -591,6 +618,8 @@ pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
             let r = vms_eof(ss, out, n);
             st.info[2] = vms_position(ss);
             st.info[3] = vms_keep(ss);
+            st.info[4] = vms_held_code(ss);
+            st.info[5] = vms_message_length(ss);
             if r >= 0 { st.out.copy_from_slice(&out[..OUTW]); }
             r
         }

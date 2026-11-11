@@ -184,7 +184,7 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | Typed Writer, deterministic map ordering | Implemented in JS; failures are sticky |
 | Serialised Programs and runtime-only loading | Implemented; format 1.0 (1.1 for a Program using extension controls), digest plus structural verification |
 | Handles, push sources and streams | CDDL validation over known-length handles and push sources; streams of unknown length in drain mode (results equal the buffer's) with opt-in fail-fast (D085, D144–D147); JS, minimal Rust |
-| CBOR sequences (RFC 8742) | Implemented (P7.13, D210–D219): `readSequence` / `sequenceReader` in `snug/sequence`, `snug::read_sequence` / `Sequence` in Rust; one fused check per message (profile + optional schema rule), lazy Views without a re-scan, borrowed or assembled bytes, stop/skip policy; [guide](docs/guide.md#cbor-sequences-and-sse); wasm SDK pending |
+| CBOR sequences (RFC 8742) | Implemented (P7.13, D210–D219): `readSequence` / `sequenceReader` in `snug/sequence`, `snug::read_sequence` / `Sequence` in Rust; one fused check per message (profile + optional schema rule), lazy Views without a re-scan, borrowed or assembled bytes, stop/skip policy; [guide](docs/guide.md#cbor-sequences-and-sse); wasm SDK `snug-wasm-sdk/sequence` (P7.13w) |
 | Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
 | Wire profiles | Deterministic preset (default) and Bindle preset with per-option overrides, P7.1 (D120–D127); JS and Rust |
 | Extension controls | Implemented (P7.2, D140–D143): registered `.name` controls decided by pure host predicates; generic `.chars`, `.unique`, `.samelen` in `snug/controls` / `snug::controls`; [guide](docs/guide.md#custom-controls) |

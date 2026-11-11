@@ -553,6 +553,13 @@ the earlier messages (readSequence yields them, then throws; the push result
 carries it as `error`). Transport exceptions (a rejected source read) pass
 through unchanged; cancel a pending read with the fetch's AbortController.
 
+The wasm SDK (`snug-wasm-sdk/sequence`, P7.13w) has the same API, options and
+answers (`bb wasm-sdk-test` holds it to the native package per feed). Its
+differences are the SDK's view contract (D132): `message.bytes` is borrowed or
+assembled exactly as natively, but `message.view` copies the bytes into linear
+memory on first use (so `view.borrowed` is false; `view.release()` frees it at
+once); a reader whose instance was reset (`InstanceLost`) ends with an error.
+
 ## Errors
 
 No library-produced refusal contains received values, bytes or unnamed data

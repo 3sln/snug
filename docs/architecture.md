@@ -1184,7 +1184,10 @@ Benchmarks in `bench/SEQUENCE.md`.
 
 ### 18.10 Deferred
 
-The wasm SDK's sequence reader (D219, waiting on P7.9c); per-sequence caps;
+*(The wasm SDK's sequence reader landed in P7.13w: the driver of §18 over a
+wasm sequence session -- `sdk_vs_new` with total -2, `sdk_vs_reseq`, INFO[4..5]
+held code and message length, `sdk_ses_step_at` -- with the native windows
+exactly, views over a linear-memory copy; D219.)* Per-sequence caps;
 a reader that resynchronises after a profile error (not possible in general
 for CBOR); fused materialisation of messages (use `view.value()`).
 

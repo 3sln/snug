@@ -8,33 +8,13 @@ import { vmsWords, vmsArena, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vm
 import { Program as HostProgram, limitWords } from './schema-core.mjs';
 import { schemaPrograms } from './schema-state.mjs';
 import { selectOptions } from './options.mjs';
-import { resolveLimits } from './limits.mjs';
-import { codecTop } from './profiles.mjs';
 import { rethrow } from './ext.mjs';
 import { mintView } from './view.mjs';
 import { ANY_P, ANY_B } from './any-program.mjs';
 import { SourceError, pickYield } from './sources.mjs';
-import { sequenceApi } from './sequence-core.mjs';
+import { sequenceApi, sequenceTarget } from './sequence-core.mjs';
 
 let anyProgram = null;
-
-/** The Program, rule and validation options a sequence's options select (D213): a schema's
- *  rule, or (profile only) the built-in `any` under the decode defaults (D146, D210). */
-export function sequenceTarget(options, programOf, anyOf) {
-  const { schema, rule, maxMessageBytes } = options;
-  if (schema !== undefined) {
-    const program = programOf(schema);
-    if (!program) throw new TypeError('snug: a sequence schema must be a verified Schema');
-    if (typeof rule !== 'string') throw new TypeError('snug: a sequence schema needs a rule');
-    const index = program.ruleIndex(rule);
-    if (index < 0) throw new TypeError('snug: unknown rule');
-    return { program, rule: index, opts: { ...selectOptions(options, 'validation'), maxBytes: maxMessageBytes } };
-  }
-  if (rule !== undefined) throw new TypeError('snug: a rule needs a schema');
-  const limits = resolveLimits({ ...selectOptions(options, 'limits'), maxBytes: maxMessageBytes });
-  return { program: anyOf(), rule: 0, opts: { ...selectOptions(options, 'validation'), top: codecTop(options), maxBytes: limits.maxBytes,
-    maxDepth: limits.maxDepth, maxEntries: limits.maxEntries, maxItems: limits.maxItems } };
-}
 
 function openBackend(options, quantum) {
   const { program, rule, opts } = sequenceTarget(options, s => schemaPrograms.get(s), () => (anyProgram ??= new HostProgram(ANY_P, ANY_B)));
