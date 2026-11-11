@@ -4876,6 +4876,27 @@ and kin stay read-only. First use: P7.13x (`b1a3fac`), the wasm SDK parity
 regression added with a plain edit.
 - [x] **Decided by the owner** (2026-11-11, via coordinator).
 
+### D303 — Size-cap raises are delegated to the coordinator; binary-size audit before release (OWNER DECISION, 2026-11-11)
+**Decision** (owner, in session via the coordinator): "I'll allow any size
+budget increases you deem worthy; at the end we should do an audit to look
+for binary size reduction opportunities though. Yes, you approve cap
+raises."
+- The coordinator approves size-cap raises on the owner's behalf. This
+  amends how D200's R9 gate is signed off; the gate itself (`bb size`, caps
+  that do not rise freely) is unchanged.
+- Every raise still needs a D-entry that attributes the growth, lists the
+  cuts considered, and sets caps at measured + 2%.
+- A raise is signed off as "coordinator, <date>, under owner delegation
+  D303", never as "owner".
+- Engineers bring the numbers to the manager before landing. The manager
+  forwards them to the coordinator, who approves or pushes back. Small,
+  clearly attributed raises needed for correctness or speed fixes will
+  normally be approved.
+- P8.7 becomes an owner requirement: a binary-size audit before release
+  across every entry point.
+- First use: D323 (+620 B min), approved by the coordinator on 2026-11-11.
+- [x] **Decided by the owner** (2026-11-11, via coordinator).
+
 ### D290 — P8.5 phase 1: the compiler and verifier move to format 2.0 on a branch; a reference interpreter checks semantics before the VM (P8.5)
 **Decision** (P8.5 compiler engineer, provisional): branch `p85-peg` replaces
 the format 1 group lowering (map normal form, factors, pools, counters,
@@ -5422,7 +5443,8 @@ slower after the PEG merge.
 record, and no help to non-literal members, which match by typeset);
 repricing T's examination steps (would hide the CPU, not remove it);
 restoring `map-pair-fast` (see 4).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (coordinator, 2026-11-11, under owner delegation D303:
+  +620 B min, needed by both fixes).
 
 ### D324 — A session's group arena starts at the lease, not all of S (P8.5 follow-up; found by the D286 engineer)
 **Decision** (P8.5 VM engineer, provisional): `vms-init` (and so every
@@ -7519,10 +7541,13 @@ authorised), the existing gate set, and conformance-corpus vectors.
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
-- [ ] **P8.7 — Pre-release size pass** (added 2026-11-11). The coordinator
-  recommended it when the owner signed off D285 and D319; it is not an owner
-  requirement. Make one dedicated pass over the bundle before release,
-  attributing every candidate and measuring it with `bb size`. Candidates:
+- [ ] **P8.7 — Binary-size audit before release** (added 2026-11-11 on the
+  coordinator's recommendation; made an **owner requirement** the same day,
+  D303: "at the end we should do an audit to look for binary size reduction
+  opportunities"). Before release, audit every entry point (JS bundles, Rust
+  crate, wasm module and SDK) for ways to reduce size, attributing every
+  candidate and measuring it with `bb size` (and the wasm/Rust equivalents).
+  Candidates so far:
   - Load the Program verifier only for Programs that were not compiled
     locally. A Program from `compile` in the same process is trusted; a
     loaded one is not. This is the largest D319 item, `program/verify`
@@ -7532,8 +7557,9 @@ authorised), the existing gate set, and conformance-corpus vectors.
   - Re-check the forced-tier support. D319 found it shares its code path
     with T and A2.
   - Re-check D285's rejected cuts in light of P8.5.
-  Lowered caps follow the measurement. A cap rise still needs a D-entry with
-  attribution, brought to the coordinator for the owner.
+  - Look at the reference-map-choice gap: it is still about 1.34× slower
+    than before PEG. Consider the parked discriminator-first dispatch.
+  Lowered caps follow the measurement. Any cap raise still follows D303.
 
 ## Parking lot
 
