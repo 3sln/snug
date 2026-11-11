@@ -4211,6 +4211,9 @@ reference behaviour, because the literal reading makes the common
 discriminated-union idiom `{ kind: "a", … // kind: "b", … }` unmatchable and
 both reference tools agree.
 - [ ] **Owner decision pending**
+*Superseded 2026-11-10 by D301 (owner):* the default is the literal RFC cut
+(this entry's `cuts: 'rfc'`); D021's reading survives as the non-default
+`cuts: 'branch'` (rule A, D273). Implemented on `p85-peg` (P8.5 D301 note).
 
 ### D250 — Float literals, ranges and controls compare numerically: one zero, NaN unordered (P8.2, audit S15/S16/D038)
 **Decision** (compliance engineer, provisional, 2026-11-04): RFC 8610 §3.8.6
@@ -4421,7 +4424,10 @@ App. H calls its verbose and compact `reputon` forms "equivalent". Revision
 transparency. It is recorded as Ruby class RC (7 probes) and as 22 corpus
 flips.
 **Owner questions**: which mode is the default (D271), and whether to rename
-`reference`.
+`reference`. *Answered 2026-11-10 by D301 (owner):* `rfc` is the default and
+`reference` is renamed **`branch`**; no `reference` alias is accepted
+(pre-release). Kin option word 20 / SOURCE_KEY `cuts`: 0 `rfc`, 1 `branch`;
+FLAGS bit 5 is `CUTS_BRANCH` (P8.5 D301 note).
 *Amended (revision 3, 2026-11-04; re-review N9):* rule A honours §3.5.4's later-entry restriction through `?`, `*` and named groups only. An explicit `//` absorbs a cut (`{(a: int) // (), * tstr => any}` accepts `{a: "x"}` while `{? a: int, * tstr => any}` rejects it), so rule A deliberately departs from App. C's occurrence-as-choice expansion when cuts are involved. App. H transparency is satisfied by both modes and does not select rule A alone.
 - [ ] **Signed off** (owner)
 
@@ -4955,7 +4961,11 @@ with FL = -inf (cuts ignored); W6 is an order-sensitive member whose key
 overlaps another member's (conservative overlap); W7 compares program-2
 §9.4's bound with the compiled cap LIM_GROUP_WORDS. A warning names the rule
 whose definition holds its offset; repeats (one AST node in several generic
-environments) are dropped; the order is (offset, code). Hosts expose
+environments) are dropped; the order is (offset, code). *Amended 2026-11-10
+(D301):* W8, under the default `rfc` cuts only, is a map CHOICE whose later
+alternative's first member (through SEQ's first kid, REP's child, CALL's
+target) is a cut member on the same literal key as an earlier
+alternative's first member -- the `{kind: "a", ... // kind: "b", ...}` idiom. Hosts expose
 `warnings: [{code, rule, line, column, message}]` on the compile result (JS)
 and `Compiled::warnings` (Rust).
 **Why**: cheap, conservative, deterministic on every host (gated).
@@ -4965,7 +4975,10 @@ and `Compiled::warnings` (Rust).
 ### D299 — Compile options `cuts` and `groupWords`; SOURCE_KEY version 2 (P8.5)
 **Decision**: JS `compile(text, {cuts: 'reference' | 'rfc', groupWords})`,
 Rust `CompileOptions { cuts: Cuts, group_words: Option<i32> }`, the wasm
-compiler's option words 20 and 21; kin's option words are 22 (`cuts` 20,
+compiler's option words 20 and 21 (*amended 2026-11-10 by D301:*
+`cuts: 'rfc' | 'branch'`, default `'rfc'`; `Cuts::{Rfc (default), Branch}`;
+word 20 is 0 or absent for `rfc`, 1 for `branch`, and SOURCE_KEY carries
+the effective value); kin's option words are 22 (`cuts` 20,
 `groupWords` 21), the extension registry starts at word 22. `groupWords`
 (<= 2^24) sets LIM_GROUP_WORDS (default 4,194,304). The SOURCE_KEY preimage's
 version element is 2 and its limits array gains `cuts` and `groupWords` (-1
@@ -7249,3 +7262,90 @@ MAPWORDS (the compiler's cset frame words already use them), the limits word
 here (same category as f23aea0's, flagged for the owner). The
 reference interpreter (`peg2-ref.mjs`) is the semantic baseline the VM's
 verdicts can be compared with.
+
+## P8.5 — D301: the literal RFC cut is the default; rule A is `cuts: 'branch'` (2026-11-10, branch `p85-peg`)
+
+Implements owner decision D301 (recorded on main, 1538677) on the format 2.0
+compiler. D271's interim default and D273's naming question are superseded
+(amendments on D271, D273, D298, D299 above).
+
+* **Rename, no alias.** `reference` → `branch` everywhere it names the
+  option: JS `cuts: 'rfc' | 'branch'` (types, options validation; anything
+  else, `'reference'` included, is a TypeError), Rust `Cuts::{Rfc, Branch}`,
+  wasm `cc.rs` / `wasm-sdk/src/compile.mjs`, the oracle (`check` throws on an
+  unknown mode), `peg2-ref.mjs` (also refuses a mode that disagrees with the
+  Program's FLAGS bit 5), compile2-test, architecture §20, program-2.
+  Historical review records keep their names; §20 has a dated note.
+* **Default.** `rfc` on every host. The encodings were swapped so the zero
+  value is the default: kin option word 20 and the SOURCE_KEY `cuts` element
+  are 0 `rfc` / 1 `branch` (-1 or absent = `rfc`); FLAGS bit 5 is
+  `CUTS_BRANCH` (was `CUTS_RFC`). The effective mode is always in the
+  preimage; compile2-test checks that no option gives the `rfc` Program
+  byte for byte, and that `'reference'` is refused.
+* **W8** (kin/compile/peg.kin `warn-cut-unions`; "choice alternative starts
+  with the same cut key as an earlier one ... (see the guide, Discriminated
+  unions under the RFC cut)"): only under `rfc`; a map CHOICE whose
+  alternatives' first members are cut members on the same literal key. Over
+  the corpus it fires 3 times (adversarial "D021: cut is alternative local",
+  study "group choice in map //" and "dependent members: group choice //")
+  plus the RFC corpus's derived cut-scope suite; never on a printed RFC
+  schema or a cddl-study contract. Gate 10: 20/20 cases (positions, named
+  groups through CALL, `^=>`, nested choice, the working forms silent,
+  arrays silent, silent under `branch`), JS == Rust.
+* **Docs.** guide.md "Discriminated unions under the RFC cut" (after
+  "Compile once"): the failing idiom and why (`:` implies a cut; App. A
+  order; §3.5.4 "the entire map fails"), the two working forms -- a type
+  choice of maps (R19: the cut's scope is the map type; checked with the
+  oracle and the compiled Programs) and `"kind" =>` discriminators -- a
+  verdict table checked with the oracle in both modes, the
+  successful-cut case `{id: tstr, token: tstr // id: tstr}`, W8, and
+  `cuts: 'branch'`. architecture §20 (dated note, §20.2 modes, R9, W8 row,
+  §20.13 flips, §20.15 column `branch`, §20.16 Q1 answered), program-2
+  (note, §1, header word 6, cut outcomes, examples), cddl-support (format
+  2.0 cut paragraph, format 1 kept), api.md (`cuts`), conformance.md
+  (D021 bullet superseded note), oracle README (D301 re-run).
+* **Corpus.** Re-derived with the oracle in `rfc` mode (both modes over
+  1697 decided corpus cases): 15 cases differ between the modes, all
+  true under `branch`, false under `rfc`: adversarial C3/A1 #0 #3, A1 #2,
+  A1c #3, D021 #0, seeded-008 #1, -012 #1, -020 #1, -024 #3, -036 #3,
+  -052 #1 #3; study "group choice in map //" #1, "dependent members: group
+  choice //" #0; RFC 8610 cut-scope #1. Adversarial/study expectations are
+  still the pre-PEG ones (the 33 PEG flips are not migrated on the branch
+  either), so the 12 adversarial flips are recorded in the oracle test
+  (`rfcFlips`; the complete corpus is checked in both modes: 33 differences
+  under `branch`, 33 + 12 under `rfc`). The RFC suite "literal cut scope
+  D271" is renamed "literal cut scope (D301 default)", its staged case is
+  `dependsOn: ["D301"]` (runner group D301; exporter updated), and both of
+  its expectations are confirmed by the oracle's `rfc` mode;
+  `current-results.json` stays the 2026-11-04 run record.
+* **RFC-default difficulty: none found.** In the RFC corpus (390 cases the
+  oracle decides, contexts included) the only verdict that differs between
+  the modes is the derived cut-scope case, which `rfc` brings into
+  agreement with its literal-RFC expectation (380/390 → 381/390; the
+  remaining 9 are the known F5/F6 float-width and `.default` findings and
+  two P8.4 cases). No printed RFC example becomes unmatchable.
+
+Checks actually run (macOS, node 24.6, cargo debug):
+
+* `bb compile2-test`: all ok -- 976/976 JS == Rust, 916/916 verified,
+  165/165 SOURCE_KEYs (with the default-mode identity and the
+  `'reference'` refusal), 234/234 probe verdicts and 298/298
+  probe/targeted schemas (6 new targeted schemas for the union forms, both
+  modes, against the oracle), 3266/3266 corpus verdicts equal the oracle's in
+  both modes, 20/20 W8 cases. Warnings over the corpus (default `rfc`): W2 1,
+  W5 1, W6 19, W7 26, W8 3.
+* Mutant: the JS default flipped back to `branch` is red at once (gate 6).
+* `node --test corpus/tools/peg-oracle.test.mjs` (Ruby differential
+  skipped): 482/482.
+* `bb compile-fuzz` (3000, default seed): ok.
+* Full Rust crate (lib + bins, `-D warnings`) and the wasm `cc` module
+  build; the wasm compiler equals JS on 12 Programs (option word 20 absent,
+  -1, 0, 1).
+* `node corpus/tools/run-rfc-corpus.mjs --depends=D301` selects the one
+  staged case (it fails, as expected, until the phase 2 VM).
+
+Learnt: making the zero value of an option word the default keeps every
+caller that zero-fills (the Rust gate binary, the wasm option array) on the
+decided semantics without host changes; a renamed enum value needs a loud
+refusal of the old spelling, not a silent `unknown`.
+

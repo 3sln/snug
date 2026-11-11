@@ -9,6 +9,14 @@ demand-grown arena with session relocation, sorted T traversal, `FAIL`
 events, and refusal replay (D280). The disposition table is in architecture
 §20.14. Nothing here is implemented, frozen or owner-approved (D272–D280).
 
+**Note (2026-11-10, D301).** The default cut mode is `rfc`, the literal RFC
+8610 cut (commitment epochs). Rule A is the non-default option, renamed
+from `reference` to **`branch`**. The encodings follow the default: option
+word 20 and the SOURCE_KEY `cuts` element are 0 for `rfc` and 1 for
+`branch`, and FLAGS bit 5 is `CUTS_BRANCH` (set only under `branch`), so an
+absent option and a zero-filled option array both mean `rfc`. "Rule A" and
+"reference mode" below mean `cuts: 'branch'`.
+
 This document implements architecture §20 (PEG group semantics, D270, D271)
 on paper. It is a **delta** against [program.md](program.md) (format 1.1).
 Every section, field, rule and charge not mentioned here is unchanged. That
@@ -51,7 +59,8 @@ merged into program.md and this file is deleted.
   non-zero reserved field (§3), so it can never run an unsupported memo
   Program by accident.
 * **SOURCE_KEY preimage** (program.md §13.3, D039, D242). The format version
-  element becomes 2. The option list gains `cuts` (0 reference, 1 rfc) and
+  element becomes 2. The option list gains `cuts` (the effective mode,
+  always present: 0 `rfc`, the default; 1 `branch`, rule A — D301) and
   `groupWords` (−1 when not given). Old cache entries therefore never match.
 
 ## 2. Header changes
@@ -59,7 +68,7 @@ merged into program.md and this file is deleted.
 | Word | Format 1.1 | Format 2.0 | |
 | --- | --- | --- | --- |
 | 1 | `FORMAT_VERSION` | `0x00020000` | [V] |
-| 6 | `FLAGS` bits 0–4 | unchanged; **bit 5** `CUTS_RFC`; **bit 6** `ARENA` (some ARRAY leaf is A2 or some MAP leaf is T) | bit 5 [V], bit 6 [D] |
+| 6 | `FLAGS` bits 0–4 | unchanged; **bit 5** `CUTS_BRANCH` (rule A; clear for the default `rfc`, D301); **bit 6** `ARENA` (some ARRAY leaf is A2 or some MAP leaf is T) | bit 5 [V], bit 6 [D] |
 | 19 | `N_GROUPS` | `N_PEGS` | [V] |
 | 29 | `G_EMPTY` | `R_ITEM_MAX`: the maximum, over closure sets R, of the sum of the record words of the A2/T leaves in R (§9.4) | [D] |
 | 41 | reserved | `LIM_GROUP_WORDS`: the arena cap in words (default 4 194 304; ≤ 2^24; §9.4) | [V] |
@@ -437,10 +446,10 @@ looks at the unconsumed candidates in pick order (§6.5):
 
 Cut outcomes (arch §20.2):
 
-* **Rule A** (reference): the member returns `cut`. `SEQ` and `REP`
+* **Rule A** (`cuts: 'branch'`): the member returns `cut`. `SEQ` and `REP`
   propagate it. `CHOICE` absorbs it, remembers it, and tries the next
   alternative; if no alternative succeeds, it raises `cut` again.
-* **rfc:** a cut key match increments `commits`. An attempt (a CHOICE
+* **rfc** (the default, D301): a cut key match increments `commits`. An attempt (a CHOICE
   alternative or a REP iteration) that fails with `commits > commits0`
   returns `fail!`, which unwinds to the map root. A value mismatch returns
   `fail!` at once.
@@ -751,12 +760,12 @@ is the wildcard).
    undone (rewind 1, plus 1 popped). The REP ends with 0 iterations.
 4. The wildcard member imports its unnamed state (none) and consumes slot a.
    Closedness ✓.
-5. Valid in reference mode. Under rfc, `MEMBER a`'s key match raised
+5. Valid under `branch` (rule A). Under the default rfc, `MEMBER a`'s key match raised
    `commits`, so the failed iteration returns `fail!`: invalid, witness
    `missing` b.
 
-**`r = {? (a: int, b: int), * tstr => any}` on `{"a": "x"}`.** In reference
-mode (rule A), `MEMBER a`'s value fails and the member has a cut, so it
+**`r = {? (a: int, b: int), * tstr => any}` on `{"a": "x"}`.** Under `branch`
+(rule A), `MEMBER a`'s value fails and the member has a cut, so it
 returns `cut`. That passes through SEQ and REP to the root: invalid, with
 `value` at a. Format 1 and Ruby both accepted this.
 

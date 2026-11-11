@@ -31,6 +31,72 @@ It does not select the codec wire policy. The default is `full`. `bus`
 refuses recursion, regexps and unbounded structures; it is useful for
 untrusted schemas, within its supported subset. See [profiles](profiles.md).
 
+## Discriminated unions under the RFC cut
+
+> **Format 2.0 (PEG groups, branch `p85-peg`), D301.** snug follows RFC 8610's
+> cut literally by default. One common way of writing a tagged union does
+> **not** work under it.
+
+The idiom many schemas use puts the alternatives in one map, as a group
+choice:
+
+```cddl
+; DOES NOT WORK under the default: {"kind": "b", "y": "z"} is rejected
+shape = { kind: "a", x: int // kind: "b", y: tstr }
+```
+
+A `name:` key (and any `"literal": value` key) **implies a cut**
+(RFC 8610 §3.5.4). Alternatives are tried in order (Appendix A). On
+`{"kind": "b", "y": "z"}` the first alternative's `kind: "a"` finds the key
+`kind`, so it locks in that pick; the value `"b"` is not `"a"`, and then
+"the entire map fails to match" (§3.5.4). The second alternative is never
+tried. A cut that *succeeds* commits too: `{ id: tstr, token: tstr // id:
+tstr }` rejects `{"id": "a"}`, because the first alternative already
+claimed `id` before `token` was found missing.
+
+Write it in one of these forms instead; both mean what the idiom intends,
+under every cut mode:
+
+```cddl
+; 1. A type choice of maps: each map is its own type, so a cut failure fails
+;    only that map, and the next map is tried (the cut's scope is the map
+;    type, architecture §20.3 R19).
+shape = { kind: "a", x: int } / { kind: "b", y: tstr }
+
+; 2. One map, with a cut-free discriminator: `=>` without `^` has no cut, so
+;    a "kind" that does not match is skipped and the next alternative runs.
+shape = { "kind" => "a", x: int // "kind" => "b", y: tstr }
+```
+
+| Data | `kind:` group choice | type choice of maps | `"kind" =>` group choice |
+| --- | --- | --- | --- |
+| `{"kind": "a", "x": 1}` | valid | valid | valid |
+| `{"kind": "b", "y": "z"}` | **invalid** | valid | valid |
+| `{"kind": "a", "x": "z"}` | invalid | invalid | invalid |
+| `{"kind": "c"}` | invalid | invalid | invalid |
+
+The fields after the discriminator can keep their `:` keys: once the right
+alternative is chosen, a wrong value for `x` should fail the map anyway.
+With form 2, keep the discriminator first in each alternative, so no other
+cut member commits before it is tested. Named groups work the same way
+(`shape = { a-fields // b-fields }` is the idiom; `shape = a-map / b-map`
+with `a-map = { a-fields }` is form 1).
+
+The compiler warns about the idiom with **W8** ("choice alternative starts
+with the same cut key as an earlier one") when two alternatives of a map's
+group choice start with a cut member on the same literal key. The warning is
+in the compile result's `warnings` (JS) / `Compiled::warnings` (Rust).
+
+If a schema you do not control relies on the idiom, compile it with
+`cuts: 'branch'`: rule A, the reading of the Ruby and Rust reference tools
+for this case (a failed cut fails only its own `//` branch). It is not the
+default because it departs from the RFC text; the difference is not
+limited to unions: under `branch`, `{ ? (a: int, b: int), * tstr => any }`
+accepts `{"a": 1}` (the wildcard takes `a` after the optional group fails),
+while the RFC default rejects it (the group's `a:` already claimed the key).
+`cuts` is part of the Program's source key. There is no `'reference'`
+spelling (the pre-release name of `branch`).
+
 ## Regexp dialects
 
 `compile(text, { regexp: 'xsd' })` is the default, following RFC 8610's

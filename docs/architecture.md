@@ -1654,7 +1654,7 @@ option stays regardless (dCBOR, CTAP2 and signing protocols need it).
 
 ---
 
-## 20. PEG group semantics (D270–D280) — design revision 3, 2026-11-04, provisional
+## 20. PEG group semantics (D270–D280) — design revision 3, 2026-11-04, provisional; cut default amended 2026-11-10 (D301)
 
 D270 moves group matching in arrays and maps from the exact regular /
 existential semantics of §4.3–§4.4 (D010–D012, D035, D036) to the parsing
@@ -1675,6 +1675,24 @@ disposition. Revision 2 also applied the manager's decisions of 2026-11-04:
 * the group arena is sized from the limits and grown on demand;
 * memo cells are reserved, not shipped;
 * only proven complexity bounds are stated.
+
+> **Note (2026-11-10, D301; supersedes the default in D271/D273).** The owner
+> decided that the **default cut semantics is the literal RFC 8610 reading**:
+> the mode below called `rfc` (commitment epochs; a cut failure fails the
+> whole map type, R19). Rule A remains available as the non-default option,
+> **renamed from `reference` to `cuts: 'branch'`** (the failure scope is the
+> choice branch). `reference` is not accepted as an alias: snug is
+> pre-release, and an unknown mode is an option error on every host. The
+> option names in this section were renamed in place; the review records
+> (§20.14, `docs/reviews/`) keep the names they were written with. In kin's
+> option word 20 and in FLAGS bit 5 (`CUTS_BRANCH`), 0 is `rfc` and 1 is
+> `branch`, so an absent option is the default; SOURCE_KEY always carries
+> the effective mode. Consequence: the discriminated-union idiom
+> `{kind: "a", x: int // kind: "b", y: tstr}` rejects `{kind: "b", y: "z"}`
+> by default, because `kind:` implies a cut that the first alternative
+> commits to. Write a type choice of maps or `=>` discriminators instead
+> ([guide](guide.md#discriminated-unions-under-the-rfc-cut)); warning W8
+> (§20.11) flags the idiom. No RFC example changes verdict (§20.13).
 
 The decisions are D272–D280, all unsigned. The Program format is in
 [program-2.md](program-2.md) (format 2.0, revision 3). Nothing here is
@@ -1819,7 +1837,7 @@ map's value, not on its serialisation (R8). `run(g, R)` returns a new set
 R′ ⊆ R or a failure. There are three failure kinds:
 
 * `fail`, the ordinary kind;
-* `cut`, in the reference mode only;
+* `cut`, in the `branch` mode (rule A) only;
 * `fail!`, in the rfc mode only.
 
 ```
@@ -1830,7 +1848,7 @@ run(MEMBER(K, V, cut) with occurrence lo..hi, R):
         if key(p) ∉ K: continue
         [rfc] if cut: commits := commits + 1                    -- the key matched
         if value(p) ∈ V: R′ := R′ − {p}; c := c + 1             -- consume
-        elif cut: return cut [reference] | fail! [rfc]          -- §3.5.4
+        elif cut: return cut [branch] | fail! [rfc]             -- §3.5.4
         -- no cut: skip; p stays for later entries (§3.5.4, first example)
     return R′ if c ≥ lo, else fail
 run(SEQ(g₁…gₖ), R)    = thread R; the first failure (of any kind) is the result
@@ -1839,11 +1857,11 @@ run(CHOICE(g₁…gₖ), R) = saw := false
                            c₀ := commits; r := run(gₘ, R)  -- a failed gₘ's consumption is undone
                            if r is a set: return r          -- locked in
                            [rfc] if r = fail! or commits > c₀: return fail!
-                           [reference] if r = cut: saw := true
+                           [branch] if r = cut: saw := true
                         return cut if saw, else fail
 run(REP(lo,hi,g), R)  = iterate as for arrays on sets; a failed iteration is undone;
                         "zero-length" means "consumed nothing";
-                        an iteration returning cut → return cut       [reference]
+                        an iteration returning cut → return cut       [branch]
                         an iteration returning fail!, or failing with
                           commits > its c₀ (taken at the iteration's start) → fail!   [rfc]
                         otherwise a failed iteration ends the repetition
@@ -1851,9 +1869,9 @@ run(EMPTY/FAIL/CALL)  as for arrays
 map matches           ⇔ run(root, all pairs) is the empty set   -- closed (§2.1)
 ```
 
-**Cut modes (D273).**
+**Cut modes (D273; default and names D301).**
 
-* **`cuts: 'reference'` (default) is "rule A".** When a cut member meets a
+* **`cuts: 'branch'` (not the default since D301) is "rule A".** When a cut member meets a
   remaining pair whose key matches and whose value does not, before reaching
   its maximum, it returns `cut`. `SEQ` and `REP` pass `cut` through, so an
   enclosing `?(…)` or `*(…)` cannot recover by matching fewer times. Only a
@@ -1872,10 +1890,9 @@ map matches           ⇔ run(root, all pairs) is the empty set   -- closed (§2
     verbose and compact `reputon` of App. H mean the same (C1).
   * It is not what Ruby does, nor what format 1's DNF did: they let a group
     repetition absorb the failure. That is deviation class RC (§20.4).
-  * The name `reference` is kept per the manager's decision. It now names
-    D021's reading, not the reference tools' behaviour (D273 asks the owner
-    about renaming it).
-* **`cuts: 'rfc'` is commitment epochs (X9).** Each CHOICE alternative
+  * It was called `reference` until D301 renamed it `branch` (it names
+    D021's reading, not the reference tools' behaviour).
+* **`cuts: 'rfc'` (the default, D301) is commitment epochs (X9).** Each CHOICE alternative
   attempt and each REP iteration attempt records `commits` at its start. A
   cut member's key match increments `commits`. An attempt that fails after
   `commits` grew returns `fail!`, and `fail!` passes through everything to
@@ -1889,6 +1906,14 @@ map matches           ⇔ run(root, all pairs) is the empty set   -- closed (§2
     and an enclosing EMBED are outside it.
   * These lifetime rules are snug's formalisation. They are consistent with
     §3.5.4 and App. A, but they are not settled RFC text.
+  * A discriminated union written as one map with a group choice,
+    `{kind: "a", x: int // kind: "b", y: tstr}`, rejects `{kind: "b", y: "z"}`:
+    the first alternative's `kind:` matches the key, its value fails, and
+    that is `fail!`. A *successful* cut commits too: `{id: tstr, token: tstr
+    // id: tstr}` rejects `{id: "a"}`. The working forms are a type choice of
+    maps, `{kind: "a", x: int} / {kind: "b", y: tstr}` (each map is its own
+    fail scope, R19), or cut-free discriminators, `{"kind" => "a", x: int //
+    "kind" => "b", y: tstr}`. Warning W8 flags the idiom (§20.11).
 
 ### 20.3 Ambiguities resolved (D272)
 
@@ -1905,7 +1930,7 @@ policy. A policy choice is labelled as one (X R-audit).
 | R6 | Does a member consume a pair whose key matches and whose value does not? | Without a cut, no: the pair is skipped and stays for later entries. `{? "optional-key" => int, * tstr => any}` accepts `{"optional-key": "nonsense"}`. | §3.5.4's first example, verbatim; §3.5.3 "a *matching* member". Ruby deviates (RL, RK). |
 | R7 | How much does a member take? | Every remaining matching pair, up to its maximum (greedy). A 1..1 member takes one. | App. A greed; §3.5.3's "tends to consume all matches" is supporting text only (X R7) |
 | R8 | Which pairs does a member with a finite maximum take when more match? | The first in pick order (EC key order). `{int => int, int => 6}` accepts `{3:5, 4:6}` however encoded, and rejects `{3:6, 4:5}`. | **snug policy (D274).** §3.5.3 calls the pick "indeterminate, but does matter". EC order makes it determinate and independent of serialisation (§2.2.3). Warning W6 flags such members. |
-| R9 | What does a failed cut kill? | reference (rule A): the innermost enclosing choice alternative, else the map; rfc: the map type. A successful cut does not commit under rule A: `{(a: int, b: int) // (* tstr => any)}` accepts `{a: 1}`. | D273. Rule A deviates deliberately from App. A ("choices containing this choice") and from App. C's occurrence-as-choice expansion: `(a: int) // ()` absorbs a cut where `? a: int` does not. App. H transparency selects neither mode uniquely (N9). |
+| R9 | What does a failed cut kill? | rfc (the default, D301): the map type; branch (rule A): the innermost enclosing choice alternative, else the map. A successful cut does not commit under rule A: `{(a: int, b: int) // (* tstr => any)}` accepts `{a: 1}`. | D273. Rule A deviates deliberately from App. A ("choices containing this choice") and from App. C's occurrence-as-choice expansion: `(a: int) // ()` absorbs a cut where `? a: int` does not. App. H transparency selects neither mode uniquely (N9). |
 | R10 | Does a cut reach back to earlier entries? | No: earlier entries ran first. `{* tstr => any, ? a: int}` accepts `{a: "x"}`; `{* tstr => any, "a" => int}` matches no map at all (C12). | §3.5.4 "later entries"; App. A greed. Warnings W1, W2. |
 | R11 | Cuts on key types (`tstr ^=> uint`) | Allowed: the same rule for each pair examined. In rfc mode every matching key commits (C14). | App. C memberkey has no restriction. Byte/float key handling follows the actual key representation (§19), not a text/integer optimisation. |
 | R12 | `* (a: int, b: int)` in a map | Both pairs or neither; a failed iteration is undone. `{a: 1}` alone is rejected. | §3.2. Ruby leaks the consumption (RI). |
@@ -1929,7 +1954,7 @@ Tools: Ruby `cddl` 0.12.14, with rc 0 for valid, 1 for invalid and 65 for a
 *parse error*, which is not a refusal; cddl-rs 0.10.7 (`--ci`, secondary
 evidence); and snug as of the working tree.
 
-Of 117 cases, **Ruby agrees with §20.2 (reference = rule A) on 88**. The 29
+Of 117 cases, **Ruby agrees with §20.2 (rule A, now `cuts: 'branch'`) on 88**. The 29
 disagreements fall into eight classes, all explained by Ruby's source
 (`map_check`, `validate_forward`):
 
@@ -2385,6 +2410,7 @@ identical typesets, `any`, or a literal tested with the VM.
 | W5 | A choice alternative follows one that cannot fail | `{(? a: int) // (b: int)}`, §3.11's `group2` |
 | W6 | Order-sensitive overlapping members (§3.5.3's pathological case) | `{int => int, int => 6}` |
 | W7 | The worst-case group arena at the compiled limits can exceed the arena cap (§20.6) | the twenty-recursive-leaf family of N1 |
+| W8 | (D301; default `rfc` cuts only) A map choice alternative starts with a cut member on the same literal key as an earlier alternative's first member (through a `SEQ`'s first kid, a `REP`'s child and a `CALL`'s target), so the earlier alternative's cut fails the whole map before the later one is reached through that key | `{kind: "a", x: int // kind: "b", y: tstr}`, `{id: tstr, token: tstr // id: tstr}` |
 
 **Fast paths** that survive and are PEG-equivalent (both reviewers agreed
 for verdicts):
@@ -2464,16 +2490,26 @@ expectations. **33 cases flip, all from true to false:**
 
 Other changes:
 
-* The D271 suite is true under `reference` and false under `rfc`. Suites
-  gain an `options` field.
+* The D271 suite (renamed "literal cut scope (D301 default)", staged as
+  `dependsOn: ["D301"]`) is false under the default `rfc` and true under
+  `branch`. Suites gain an `options` field where they need `branch`.
+* **D301 flips (2026-11-10).** Under the default `rfc` cut, 14 further
+  cases flip from true to false (oracle, both modes re-derived): adversarial
+  C3/A1 ×2, A1 #2, A1c #3, D021 #0, seeded-008 #1, -012 #1, -020 #1,
+  -024 #3, -036 #3, -052 ×2; study "group choice in map //" #1 and
+  "dependent members: group choice //" #0. All are a cut matched inside a
+  failed `?(…)` group or `//` alternative that still commits. The RFC
+  corpus (390 decided cases) changes only the derived D301 case, which now
+  agrees with its literal-RFC expectation; no printed RFC example changes
+  verdict, and W8 fires on no RFC schema.
 * The 26 `snugSchemaError` suites now compile.
 * Staged `dependsOn: ["D270"]` cases become gated.
 
 **Migration:**
 
 * **Format 2.0**, with 1.x refused (program-2 §1).
-* **Compile options** `cuts` (default `reference`) and `groupWords`, both
-  part of SOURCE_KEY.
+* **Compile options** `cuts` (default `rfc`, D301; `branch` = rule A) and
+  `groupWords`, both part of SOURCE_KEY.
 * **Corpus additions:**
   * every probe in §20.15, each with its basis tag;
   * App. A and App. H, with the reputon verbose and compact forms on the
@@ -2567,10 +2603,10 @@ raises the following, answered in revision 3):
 
 Columns:
 
-* **ref**: §20.2 with `cuts: 'reference'` (rule A) and EC pick order. The
+* **branch**: §20.2 with `cuts: 'branch'` (rule A; `reference` before D301) and EC pick order. The
   prototype sorts keys by their encoded bytes, which equals EC order for
   these keys.
-* **rfc**: `cuts: 'rfc'` (commitment epochs).
+* **rfc**: `cuts: 'rfc'` (commitment epochs; the default since D301).
 * **DNF**: revision 1's reference mode, i.e. the D021-DNF and Ruby-like
   reading.
 * **old**: snug today (format 1).
@@ -2578,12 +2614,12 @@ Columns:
 * **Rust**: cddl-rs 0.10.7.
 
 ✓ is valid and ✗ invalid. The Notes column gives Ruby's deviation class
-(§20.4) and marks *flips* (old ≠ ref) and *was refused* (format 1 refused
+(§20.4) and marks *flips* (old ≠ branch) and *was refused* (format 1 refused
 the schema). The root rule is `r`. Data is shown in wire order, which is
 canonical except for M06.1. A10.1's Ruby run hung and was killed at the
 timeout.
 
-| Case | Schema | Data | ref | rfc | DNF | old | Ruby | Rust | Notes |
+| Case | Schema | Data | branch | rfc | DNF | old | Ruby | Rust | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A01.0 | `r = [* uint, uint]` | `[1]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
 | A01.1 | `r = [* uint, uint]` | `[1,2]` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | flips |
@@ -2705,8 +2741,9 @@ timeout.
 
 ### 20.16 Remaining questions
 
-1. **D271 (owner).** Which cut mode should be the default, and should
-   `reference` be renamed?
+1. ~~**D271 (owner).** Which cut mode should be the default, and should
+   `reference` be renamed?~~ Answered 2026-11-10 by D301: `rfc` is the
+   default; rule A is `cuts: 'branch'`.
 2. **D280 (P8.4).** Agree to refusal replay on the canonical path and amend
    §19.5.
 3. **Arena cap (manager/owner).** Is a 16 MiB default arena cap with a W7

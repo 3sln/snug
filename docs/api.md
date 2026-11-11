@@ -155,6 +155,12 @@ does. After loading, the compile is synchronous. `CompileOptions` is
 `{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits, unicode?: Int32Array, controls?: Controls, controlsInBus?: boolean }`.
 `profile` defaults to `full` and restricts accepted CDDL, not wire policy.
 Schema refusals reject with `SchemaError`; invalid API options with TypeError.
+Format 2.0 (branch `p85-peg`) adds `cuts?: 'rfc' | 'branch'` and
+`groupWords?: number`: `cuts` defaults to `'rfc'`, the literal RFC 8610 cut
+(D301); `'branch'` is rule A, where a failed cut fails only its `//` branch
+(see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
+Any other value, including the pre-release name `'reference'`, is a TypeError.
+The effective cut mode is part of the source key.
 
 `CompileLimits` names:
 

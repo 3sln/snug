@@ -4,6 +4,13 @@
 and architecture §20 revision 3.1 (D250, D251, D270, D272–D274). It is a
 semantic witness, not a production validator or a performance model.
 
+**2026-11-10 (D301):** the cut modes are now `'rfc'` (the default: the
+literal RFC 8610 cut as commitment epochs) and `'branch'` (rule A, called
+`'reference'` before D301). Any other `cuts` value, including
+`'reference'`, throws a `TypeError`. The findings and recorded runs below
+were written when rule A was the default; "reference mode" there means
+`'branch'`.
+
 Independence: the parser, decoder, canonical-key writer and matcher were
 written here from the checked-in RFCs and the design's semantic rules. No
 prototype, existing oracle matching/parser logic, `kin/`, `gen/`, or
@@ -19,7 +26,7 @@ import { compile, check, decode } from './peg-oracle.mjs';
 const schema = compile('r = [* uint, uint]');
 if (!schema.error) {
   check(schema, 'r', decode(Uint8Array.of(0x82, 1, 2)), {
-    cuts: 'reference', // default; 'rfc' is commitment epochs
+    cuts: 'rfc',      // default (D301): the literal RFC cut; 'branch' is rule A
     steps: 100000,    // default interpreter work bound
   }); // false
 }
@@ -79,7 +86,7 @@ by wire order, JS property order, decoded string order or key length alone.
 | --- | --- |
 | Groups | Source-order sequence; prioritised `//`; locked success; greedy occurrences; no retry at container completeness; failed-iteration rollback; empty success satisfies minima; count saturation; guarded recursion; unplugged sockets fail |
 | Maps | Remaining pairs in EC key order; finite maxima stop examination; non-cut wrong values skipped; closedness after root success; direct member occurrences and group repetitions kept distinct |
-| Cuts | Rule A propagates cut failure through sequence/repetition and explicit choices absorb it; RFC mode counts key-match commitments per alternative/iteration attempt, scoped to each map type |
+| Cuts | `branch` (rule A) propagates cut failure through sequence/repetition and explicit choices absorb it; `rfc` mode (the default) counts key-match commitments per alternative/iteration attempt, scoped to each map type |
 | Types | Complete Appendix D prelude; type choices; literals; integer/float ranges; `.size`, `.bits`, numeric comparisons, `.eq/.ne`, `.and/.within`, tags, bare major types, representation AI constraints, RFC 9682 head-number types |
 | Composition | Named groups/types, rule-order socket contributions, generics, array/map/tag unwrap, enum values with occurrences ignored, `.cbor`, virtual-array `.cborseq` |
 | RFC 9165 | `.feature` annotation and finite `.plus/.cat/.det` products; integer-target mixed addition floors; concatenation works on bytes; dedent removes common leading spaces |
@@ -238,3 +245,18 @@ Unknowns, timeouts, other statuses and new disagreements: **zero**.
 A preliminary four-second Ruby invocation allowance was inconclusive due
 to process-startup timeouts. Those attempts are excluded from the table;
 the completed run uses the documented 60-second allowance.
+
+## D301 re-run (2026-11-10)
+
+With the default switched to `'rfc'`, the test file names the mode wherever
+a case was written for rule A (the 117 probes run in both modes; the
+supplements without a mode, the migration flips and the Ruby differential
+use `'branch'`). The complete adversarial corpus is checked in both modes:
+`'branch'` differs from the corpus expectations in exactly the 33 flips
+above; `'rfc'` in those 33 plus 12 more (`rfcFlips`: C3/A1 #0 #3, A1 #2,
+A1c #3, D021 #0, seeded-008 #1, -012 #1, -020 #1, -024 #3, -036 #3, -052 #1
+#3), all true to false: a cut that matched inside a failed `?(…)` group or
+`//` alternative commits, so the map fails. Ten supplements cover the
+discriminated-union forms of docs/guide.md. Local run without Ruby: 482
+passed, zero failed. The Ruby differential was not re-run (no Ruby change;
+it now passes `cuts: 'branch'` explicitly, which is what it ran before).
