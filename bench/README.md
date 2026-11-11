@@ -15,6 +15,9 @@ fell below 2, final timing load 10.71–13.93. **No quiet-machine result.**
 Raw samples and reference ratios: [JSON](calibration-2026-11-04.json).
 D253/D254 before/after confirmation (P8.2): [VM.md](VM.md#calibration-2026-11-04--d253d254-confirmation),
 [before](calibration-2026-11-04-d253-before.json) and [after](calibration-2026-11-04-d253-after.json) records.
+P8.5 phase 2 (format 2.0 PEG groups, D316; 2026-11-11, `93f0520`, Apple M1 Pro,
+macOS 14.6.1, Node v24.6.0, rustc 1.92.0 `-O`, nine interleaved rounds under load 32–45):
+[VM.md](VM.md#calibration-2026-11-11--p85-phase-2-peg-groups-d316), [record](calibration-2026-11-11-p85.json).
 
 Do not blanket-raise EXT prices 1.5×: proposal targets profile scans and
 specific control steps, with a conditional 2.25 M public-dispatch default

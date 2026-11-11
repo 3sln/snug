@@ -17,7 +17,7 @@ export const ERR_LIM_AST = 14;
 
 export const ERR_LIM_INST = 15;
 
-export const ERR_LIM_ALTS = 16;
+export const ERR_LIM_PEG = 16;
 
 export const ERR_LIM_APOS = 17;
 
@@ -66,12 +66,6 @@ export const ERR_UNKNOWN_CONTROL = 43;
 export const ERR_REGEXP = 44;
 
 export const ERR_MAP_KEY = 45;
-
-export const ERR_MAP_OCCURRENCE = 46;
-
-export const ERR_MAP_CUT = 47;
-
-export const ERR_MAP_OVERLAP = 48;
 
 export const ERR_TAG = 49;
 
@@ -203,6 +197,14 @@ export const H_G3 = 55;
 
 export const H_REGEXP = 448;
 
+export const H_CUTS = 449;
+
+export const H_LIM_GROUP = 450;
+
+export const H_GROUP_GIVEN = 451;
+
+export const H_PMODE = 452;
+
 export const H_EXT_FLAGS = 62;
 
 export const H_EXT_BID = 63;
@@ -275,15 +277,9 @@ export const T_ARD = 26;
 
 export const T_MPD = 27;
 
-export const T_ALT = 28;
-
-export const T_ENT = 29;
-
 export const T_STK3 = 30;
 
 export const T_STK4 = 31;
-
-export const T_GEXP = 32;
 
 export const T_RXN = 33;
 
@@ -365,8 +361,6 @@ export const T_RULEX = 71;
 
 export const T_ALTS = 72;
 
-export const T_FACT = 73;
-
 export const T_FIN = 74;
 
 export const T_CHILD = 75;
@@ -382,10 +376,6 @@ export const T_ASTK = 79;
 export const T_CON = 80;
 
 export const T_HCON = 81;
-
-export const T_UNION = 82;
-
-export const T_NE = 83;
 
 export const T_ARRD = 84;
 
@@ -429,10 +419,6 @@ export const T_KEYTRI = 103;
 
 export const T_LITS = 104;
 
-export const T_ODO = 105;
-
-export const T_ODO2 = 106;
-
 export const T_KEYPRE = 107;
 
 export const T_LRULE = 108;
@@ -458,6 +444,38 @@ export const T_EXTB = 117;
 export const T_EXTUSE = 118;
 
 export const T_EXTARG = 119;
+
+export const T_PB = 120;
+
+export const T_PMEM = 121;
+
+export const T_PGS = 122;
+
+export const T_PKID = 123;
+
+export const T_PN = 124;
+
+export const T_PK = 125;
+
+export const T_PA = 126;
+
+export const T_PROG = 127;
+
+export const T_PROGD = 28;
+
+export const T_HPROG = 29;
+
+export const T_WARN = 32;
+
+export const T_PSET = 73;
+
+export const T_PFOL = 82;
+
+export const T_PSTACK = 83;
+
+export const T_PROGF = 105;
+
+export const T_MNAME = 106;
 
 export const H_WALK_RULE = 61;
 

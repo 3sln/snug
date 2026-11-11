@@ -18,7 +18,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile, SchemaError, COMPILE_OPTIONS } from '../../host/js/src/compile.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 
 const [rustBin, nArg, seedArg] = process.argv.slice(2);
 const N = Number(nArg ?? 3000), SEED = Number(seedArg ?? 0x5eed);
@@ -263,14 +263,14 @@ for (let i = 0; i < cases.length; i++) {
   if (j.ok) {
     okCount++;
     if (!(f[0] === 'ok' && f[2] === wordsHex(j.program) && (f[3] ?? '') === hex(j.pool))) fail(`${show}: JS and Rust Programs differ`);
-    const S = new Int32Array(48 + 2 * Math.max(j.program[16], 1) + 16); S[17] = Math.max(j.program[16], 1);
+    const S = new Int32Array(vmVerifyWords(j.program, Math.max(j.program[16], 1)) + 16); S[17] = Math.max(j.program[16], 1);
     const v = vmVerify(j.program, j.pool, S);
-    if (v !== 0 || f[1] !== '0') fail(`${show}: vm-verify ${v} / Rust ${f[1]} (detail ${S[35]} check ${S[36]})`);
+    if (v !== 0 || f[1] !== "0") { fail(`${show}: vm-verify ${v} / Rust ${f[1]} (detail ${S[35]} check ${S[36]})`); if (process.env.SNUG_FULL) console.log(JSON.stringify({ text: c.text, profile: c.profile, limits: c.limits, regexp: c.regexp })); }
   } else {
     errCount++;
     codes[j.code] = (codes[j.code] ?? 0) + 1;
     if (process.env.SNUG_SHOW && j.code === process.env.SNUG_SHOW) console.log(`  show ${j.ms.toFixed(0)}ms ${show} ${JSON.stringify(c.limits)}`);
-    if (j.code === 'internal') fail(`${show}: internal error (a compiler bug) at ${j.line}:${j.column}`);
+    if (j.code === "internal") { fail(`${show}: internal error (a compiler bug) at ${j.line}:${j.column}`); if (process.env.SNUG_FULL) console.log(JSON.stringify({ text: c.text, profile: c.profile, limits: c.limits, regexp: c.regexp })); }
     if (!(f[0] === 'err' && f[1] === j.code && Number(f[2]) === j.line && Number(f[3]) === j.column && f.slice(4).join(' ') === j.rule))
       fail(`${show}: JS ${j.code} ${j.line}:${j.column} ${j.rule} vs Rust ${r}`);
   }

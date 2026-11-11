@@ -1,0 +1,257 @@
+;; The PEG group arena (program-2 §9.4, architecture §20.6; D276, D281, P8.5):
+;; one region of the VM scratch S holding, in an UPWARD STACK, the A2 arrays'
+;; and T maps' per-element records, the T maps' end-run permutations and
+;; trails, and, in a CHUNK HEAP growing down from the region's end, the frames
+;; of recursive PEG programs in 64-word chunks (2 header words: the link, the
+;; words used; 62 payload words), per block, with a free list.
+;;
+;; S[VM_ARENA] is the absolute word offset `a` of the arena's 8-word header:
+;;     a+0 UP    the upward top (words, from the body at a+8)
+;;     a+1 CTOP  chunks carved (chunk c is body[END - 64(c+1), END - 64c))
+;;     a+2 END   the body's size in words (never above CAP)
+;;     a+3 CAP   the effective cap (program-2 §9.4: an explicit groupWords limit,
+;;               else LIM_GROUP_WORDS; at most 2^24)
+;;     a+4 FREE  the free list's first chunk, -1 for none (a free chunk's word 0
+;;               is the next one)
+;;     a+5 WANT  after a miss below the cap: the body size it asks for
+;; Every address is relative (record offsets from the body, chunk indices from
+;; its end), so the region can be copied into a larger S and relocated by moving
+;; the chunk heap up (arena-adopt) without rebasing anything else.
+;;
+;; A push that would meet the chunk heap is a MISS: below the cap the caller
+;; answers R_AGROW (the buffer route then asks the host for a larger S and runs
+;; again, the session suspends with VMS_GROW before any work that could miss);
+;; at the cap it is `group_limit` (R_GROUP_LIMIT) at the given offset. Every
+;; allocation follows its charge, so `budget` wins on the same event.
+(ns snug.vm.arena
+  (:require [kin.lang :refer [defn let return set if while for do comment defconst]]
+            [snug.lang :refer [I32 Bool Ints IntsR + - * neg sar bit-and < > <= >= == != and or not ia
+                               iset ilen]]
+            [snug.vm.layout :refer [VM_ARENA VM_POS R_GROUP_LIMIT R_AGROW R_BUDGET H_LIM_GROUP]]
+            [snug.vm.base :refer [charge]]))
+
+(defconst ^:pub ^I32 AR_UP 0)
+(defconst ^:pub ^I32 AR_CTOP 1)
+(defconst ^:pub ^I32 AR_END 2)
+(defconst ^:pub ^I32 AR_CAP 3)
+(defconst ^:pub ^I32 AR_FREE 4)
+(defconst ^:pub ^I32 AR_WANT 5)
+(defconst ^:pub ^I32 AR_HDR 8)
+(defconst ^:pub ^I32 CHUNK 64)
+(defconst ^:pub ^I32 CHUNK_PAY 62)
+;; the host's default lease (program-2 §9.4) and the hard cap (2^24 words)
+(defconst ^:pub ^I32 LEASE 4096)
+(defconst ^:pub ^I32 HARD_CAP 16777216)
+
+(defn ^:pub ^I32 arena-cap [^IntsR p ^I32 explicit]
+  (comment "The effective cap in words: LIM_GROUP_WORDS (header word 41), lowered by"
+           "an explicit per-call limit (limits word 10) >= 0, never above 2^24.")
+  (let [^:mut c (ia p H_LIM_GROUP)]
+    (if (or (< c 0) (> c HARD_CAP)) (set c HARD_CAP))
+    (if (and (>= explicit 0) (< explicit c)) (set c explicit))
+    (return c)))
+
+(defn ^:pub arena-init [^Ints s ^I32 a ^I32 cap]
+  (comment "An empty arena with its header at S[a] (S holds at least a + 8 words):"
+           "its body is the rest of S, up to the cap.")
+  (let [room (- (- (ilen s) a) AR_HDR)
+        ^:mut end room]
+    (if (> end cap) (set end cap))
+    (if (< end 0) (set end 0))
+    (iset s VM_ARENA a)
+    (iset s (+ a AR_UP) 0)
+    (iset s (+ a AR_CTOP) 0)
+    (iset s (+ a AR_END) end)
+    (iset s (+ a AR_CAP) cap)
+    (iset s (+ a AR_FREE) (neg 1))
+    (iset s (+ a AR_WANT) 0)))
+
+(defn ^:pub ^I32 arena-body [^IntsR s]
+  (comment "The absolute word offset of the arena's body.")
+  (return (+ (ia s VM_ARENA) AR_HDR)))
+
+(defn ^:pub ^I32 arena-up-top [^IntsR s]
+  (return (ia s (+ (ia s VM_ARENA) AR_UP))))
+
+(defn ^:pub arena-set-up [^Ints s ^I32 mark]
+  (comment "Pop the upward stack back to mark (an item's or a sub-validation's end).")
+  (let [a (ia s VM_ARENA)]
+    (iset s (+ a AR_UP) mark)))
+
+(defn ^:pub ^I32 arena-free-words [^IntsR s]
+  (comment "Words between the upward top and the chunk heap.")
+  (let [a (ia s VM_ARENA)]
+    (return (- (- (ia s (+ a AR_END)) (ia s (+ a AR_UP))) (* CHUNK (ia s (+ a AR_CTOP)))))))
+
+(defn ^:pub ^I32 arena-miss [^Ints s ^I32 need ^I32 at]
+  (comment "A push needs `need` body words in all: at or past the cap it is"
+           "group_limit at `at`; below it, R_AGROW asking for a body of max(need,"
+           "2 END, the lease) words, at most the cap.")
+  (let [a (ia s VM_ARENA)
+        end (ia s (+ a AR_END))
+        cap (ia s (+ a AR_CAP))]
+    (if (or (> need cap) (>= end cap))
+      (do (iset s VM_POS at)
+          (return (neg R_GROUP_LIMIT))))
+    (let [^:mut want need]
+      (if (< want LEASE) (set want LEASE))
+      (if (< want (* 2 end)) (set want (* 2 end)))
+      (if (> want cap) (set want cap))
+      (iset s (+ a AR_WANT) want)
+      (return (neg R_AGROW)))))
+
+(defn ^:pub ^I32 arena-up [^Ints s ^I32 n ^I32 at]
+  (comment "Push n words on the upward stack: their body offset, or a miss's code"
+           "(arena-miss).")
+  (let [a (ia s VM_ARENA)
+        up (ia s (+ a AR_UP))
+        need (+ (+ up n) (* CHUNK (ia s (+ a AR_CTOP))))]
+    (if (<= need (ia s (+ a AR_END)))
+      (do (iset s (+ a AR_UP) (+ up n))
+          (return up)))
+    (return (arena-miss s need at))))
+
+(defn ^:pub ^I32 chunk-at [^IntsR s ^I32 c]
+  (comment "The absolute word offset of chunk c.")
+  (let [a (ia s VM_ARENA)]
+    (return (- (+ (+ a AR_HDR) (ia s (+ a AR_END))) (* CHUNK (+ c 1))))))
+
+(defn ^:pub ^I32 arena-chunk [^Ints s ^I32 at]
+  (comment "A chunk for a block's frame list: from the free list, or carved from the"
+           "heap; its index, or a miss's code.")
+  (let [a (ia s VM_ARENA)
+        fr (ia s (+ a AR_FREE))]
+    (if (>= fr 0)
+      (do (let [nx (ia s (chunk-at s fr))]
+            (iset s (+ a AR_FREE) nx)
+            (return fr))))
+    (let [ct (ia s (+ a AR_CTOP))
+          need (+ (ia s (+ a AR_UP)) (* CHUNK (+ ct 1)))]
+      (if (<= need (ia s (+ a AR_END)))
+        (do (iset s (+ a AR_CTOP) (+ ct 1))
+            (return ct)))
+      (return (arena-miss s need at)))))
+
+(defn ^:pub arena-unchunk [^Ints s ^I32 c]
+  (comment "Return chunk c to the free list.")
+  (let [a (ia s VM_ARENA)
+        fr (ia s (+ a AR_FREE))
+        x (chunk-at s c)]
+    (iset s x fr)
+    (iset s (+ a AR_FREE) c)))
+
+(defn ^:pub ^I32 arena-room [^Ints s ^I32 words]
+  (comment "Before work that may push `words` more (a session's safe point, where"
+           "nothing has been charged yet): 0 when they fit or the arena is at its"
+           "cap (a miss there is the work's own group_limit), else R_AGROW with the"
+           "body size to grow to (the host grows S, arena-adopt moves the heap).")
+  (let [a (ia s VM_ARENA)
+        end (ia s (+ a AR_END))
+        cap (ia s (+ a AR_CAP))
+        used (+ (ia s (+ a AR_UP)) (* CHUNK (ia s (+ a AR_CTOP))))
+        ^:mut need (+ used words)]
+    (if (or (<= need end) (>= end cap)) (return 0))
+    (if (> need cap) (set need cap))
+    (return (arena-miss s need 0))))
+
+(defn ^:pub ^I32 arena-want [^IntsR s]
+  (comment "After R_AGROW: the S length the grown arena needs.")
+  (let [a (ia s VM_ARENA)]
+    (return (+ (+ a AR_HDR) (ia s (+ a AR_WANT))))))
+
+(defn ^:pub arena-adopt [^Ints s ^I32 newend]
+  (comment "S was grown (contents kept, same offsets): the body becomes newend words"
+           "(> END): the chunk heap moves up by the difference, word by word from"
+           "the top, so every chunk keeps its index counted from the new end.")
+  (let [a (ia s VM_ARENA)
+        end (ia s (+ a AR_END))
+        body (+ a AR_HDR)
+        hw (* CHUNK (ia s (+ a AR_CTOP)))
+        d (- newend end)]
+    (if (> d 0)
+      (do (let [^:mut i (- hw 1)]
+            (while (>= i 0)
+              (let [from (+ (- (+ body end) hw) i)
+                    v (ia s from)]
+                (iset s (+ from d) v))
+              (set i (- i 1))))
+          (iset s (+ a AR_END) newend)))))
+
+(defn ^:pub arena-take [^Ints s]
+  (comment "A session step's start: when a VMS_GROW asked for a larger arena and S now"
+           "holds it, the arena takes those words (arena-adopt).")
+  (let [a (ia s VM_ARENA)
+        want (ia s (+ a AR_WANT))]
+    (if (and (> want (ia s (+ a AR_END))) (>= (ilen s) (+ (+ a AR_HDR) want)))
+      (arena-adopt s want))))
+
+(defn ^:pub ^I32 arena-after [^IntsR s]
+  (comment "The first word after the arena's body (a session's transient event table"
+           "goes there).")
+  (let [a (ia s VM_ARENA)]
+    (return (+ (+ a AR_HDR) (ia s (+ a AR_END))))))
+
+;; ------------------------------------------------------------ machine frame stacks
+
+(defn ^:pub ^I32 fs-push [^Ints s ^I32 bo ^I32 spw ^I32 actw ^I32 sbase ^I32 fw ^I32 at]
+  (comment "Push a frame of fw words for the block at bo, whose frame count is"
+           "s[bo + spw]: in its static stack at sbase (actw < 0), or in its chunk"
+           "list (top chunk s[bo + actw], -1 none). A chunk link costs 1 step, charged"
+           "before the chunk is taken (program-2 §5.3). The frame's absolute word"
+           "offset, or a negated code (budget, a miss).")
+  (let [sp (ia s (+ bo spw))]
+    (if (< actw 0)
+      (do (iset s (+ bo spw) (+ sp 1))
+          (return (+ sbase (* fw sp)))))
+    (let [c (ia s (+ bo actw))]
+      (if (>= c 0)
+        (do (let [cx (chunk-at s c)
+                  used (ia s (+ cx 1))]
+              (if (<= (+ used fw) CHUNK_PAY)
+                (do (iset s (+ cx 1) (+ used fw))
+                    (iset s (+ bo spw) (+ sp 1))
+                    (return (+ (+ cx 2) used)))))))
+      (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+      (let [nc (arena-chunk s at)]
+        (if (< nc 0) (return nc))
+        (let [nx (chunk-at s nc)]
+          (iset s nx c)
+          (iset s (+ nx 1) fw)
+          (iset s (+ bo actw) nc)
+          (iset s (+ bo spw) (+ sp 1))
+          (return (+ nx 2)))))))
+
+(defn ^:pub ^I32 fs-top [^IntsR s ^I32 bo ^I32 spw ^I32 actw ^I32 sbase ^I32 fw]
+  (comment "The top frame's absolute word offset (the stack is not empty).")
+  (if (< actw 0) (return (+ sbase (* fw (- (ia s (+ bo spw)) 1)))))
+  (let [cx (chunk-at s (ia s (+ bo actw)))]
+    (return (- (+ (+ cx 2) (ia s (+ cx 1))) fw))))
+
+(defn ^:pub ^I32 fs-pop [^Ints s ^I32 bo ^I32 spw ^I32 actw ^I32 fw ^I32 at]
+  (comment "Pop the top frame; a chunk left empty is unlinked and freed (1 step,"
+           "charged first). 0 or a negated code.")
+  (let [sp (ia s (+ bo spw))]
+    (if (>= actw 0)
+      (do (let [c (ia s (+ bo actw))
+                cx (chunk-at s c)
+                used (- (ia s (+ cx 1)) fw)]
+            (if (> used 0)
+              (iset s (+ cx 1) used)
+              (do (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                  (let [prev (ia s cx)]
+                    (arena-unchunk s c)
+                    (iset s (+ bo actw) prev)))))))
+    (iset s (+ bo spw) (- sp 1))
+    (return 0)))
+
+(defn ^:pub fs-drop [^Ints s ^I32 bo ^I32 spw ^I32 actw]
+  (comment "Free every chunk of a block's list (a block abandoned with frames left);"
+           "uncharged.")
+  (if (>= actw 0)
+    (do (let [^:mut c (ia s (+ bo actw))]
+          (while (>= c 0)
+            (let [prev (ia s (chunk-at s c))]
+              (arena-unchunk s c)
+              (set c prev)))
+          (iset s (+ bo actw) (neg 1)))))
+  (iset s (+ bo spw) 0))

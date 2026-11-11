@@ -1182,3 +1182,55 @@ run, and the reference ratio itself moved by 12%. The 50 ms figure in D240
 remains a modelled target, not a confirmed bound. Unresolved, as D240 said:
 `.chars`' JS/Rust per-unit gap (JS 1.15×, Rust 0.22×) and `unique-hash`'s
 opposite gap cannot both be fitted by one portable price.
+
+## Calibration 2026-11-11 — P8.5 phase 2 (PEG groups, D316)
+
+Does format 2.0's PEG machinery keep the per-unit CPU ratios in the band D241
+and D253 left? `bench/calibrate.mjs` (nine interleaved rounds, every sample
+bracketed by the six-way map-choice reference; the JS and Rust harnesses now
+grow the group arena on −5 as the hosts do) was run in a clean detached
+worktree at `93f0520` (branch `p85-peg`), timing from 12:35 UTC, load
+32–45 (1-minute; other engineers' gates and this branch's own gates running).
+Apple M1 Pro, 10 cores, 32 GiB, macOS 14.6.1, Darwin 23.6.0 arm64; Node
+v24.6.0 (V8 13.6.233.10-node.24, `--expose-gc --single-threaded-gc`); rustc
+1.92.0, `-O`. Every row agreed on verdict and charged units in JS and Rust
+before timing. As before, absolute nanoseconds under this load are not
+claimed; ratios are per-host row medians over the run's unweighted median
+kind. Raw record: [p85](calibration-2026-11-11-p85.json).
+
+Five rows were added for the PEG tiers: `array-A1-choice` (`[* ((uint, tstr)
+// (uint, uint, tstr))]`, the A1 ring), `array-A2` (`[* (* uint, tstr)]`,
+arena records and backtracking), `map-S-choice` (a `=>` group choice in a
+struct, S slots and the end machine), `map-T-choice` (`{* (tstr => uint //
+tstr => tstr)}`, T records) and `map-T-sort` (60,000 EC-sensitive array keys
+holding a float zero: the T sort, D312).
+
+| Kind | JS /med (D253 after → P8.5) | Rust /med (D253 after → P8.5) |
+| --- | ---: | ---: |
+| array-fast | 0.22 → 0.20 | 0.24 → 0.23 |
+| array-automaton (A0 machine) | 0.77 → 1.01 | 0.92 → 1.11 |
+| array-generic-same-charges (forced) | 0.81 → 1.06 | 1.00 → 1.10 |
+| map-struct (pair streak, D315) | 1.48 → 1.53 | 1.31 → 1.36 |
+| map-struct-generic (forced) | 1.50 → 1.39 | 1.58 → 1.28 |
+| map-table (pair streak) | 1.88 → 1.97 | 1.59 → 1.72 |
+| map-table-generic (forced) | 1.54 → 1.42 | 1.63 → 1.39 |
+| reference-map-choice | 1.42 → 1.49 | 1.40 → 1.49 |
+| embedded | 1.57 → 2.15 | 1.35 → 1.65 |
+| **array-A1-choice** | — → 1.03 | — → 1.14 |
+| **array-A2** | — → 0.93 | — → 1.04 |
+| **map-S-choice** | — → 1.37 | — → 1.23 |
+| **map-T-choice** | — → 1.44 | — → 1.23 |
+| **map-T-sort** | — → 1.09 | — → 1.10 |
+
+**Findings.** The new PEG charges (one unit per machine step, records
+⌈R/16⌉, the T comparison ⌈min(len)/8⌉) land at 0.93–1.44× the median in JS
+and 1.04–1.23× in Rust: inside the 0.75–1.97× band of the existing VM rows,
+so no PEG price is changed. The A0 machine (`array-automaton`) moved from
+0.77× to 1.01× JS: elements of `[* (uint, tstr, bool, null)]` now run the
+incremental machine where format 1 stepped a counter automaton, at the same
+charges. Without D315's pair streak `map-struct` measured 2.3× main's CPU per
+unit in a quick probe (the pair machinery runs per pair); with it the map
+rows are where D253 left them. `embedded` rose (1.57 → 2.15 JS, 1.35 →
+1.65 Rust); the cause is not analysed here. It is the dearest row and the
+first candidate for a price if the band is tightened. Rows not listed moved by less than the load noise
+(see the raw record).

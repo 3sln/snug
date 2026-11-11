@@ -537,7 +537,7 @@ fn program_refusals_compatibility_and_provenance() {
     for (at, v, code) in [
         (0, 0, "magic"),
         (8, 2, "container_version"),
-        (12, 2, "format_version"),
+        (12, 3, "format_version"),
         (14, 2, "format_version"),
         (24, 0, "version"),
         (88, 1, "reserved"),
@@ -663,4 +663,31 @@ fn any_tag_level_d180() {
     // A view reads the whole tag number.
     let view = View::open(&bytes, &DecodeOptions::default()).unwrap();
     assert_eq!(view.value().unwrap(), wide);
+}
+#[test]
+fn group_arena_grows_and_group_limit_at_explicit_cap() {
+    // program-2 §9.4 (D313): 1000 T records of 5 words outgrow the 4096-word lease;
+    // an explicit groupWords cap below them is group_limit
+    let text = "r = {* (tstr => uint // tstr => tstr)}";
+    let big = Value::Map(
+        (0..1000)
+            .map(|i| (Value::Text(format!("k{i:05}")), Value::Uint(i as u64)))
+            .collect(),
+    );
+    let bytes = encode(&big, &EncodeOptions::default()).unwrap();
+    let mut scratch = Scratch::new();
+    let open = Schema::compile(text, &CompileOptions::default()).unwrap();
+    open.validate(&bytes, "r", &mut scratch).unwrap();
+    let capped = Schema::compile(
+        text,
+        &CompileOptions {
+            group_words: Some(64),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        capped.validate(&bytes, "r", &mut scratch).unwrap_err().reason,
+        "group_limit"
+    );
 }

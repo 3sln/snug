@@ -1,17 +1,17 @@
-;; Lowering to the Program (architecture §5.1 steps 6-7; docs/program.md,
-;; format 1, exactly).
+;; Lowering to the Program (architecture §5.1 steps 6-7; docs/program.md
+;; with the format 2.0 delta of docs/program-2.md, exactly).
 ;;
 ;; 1. NUMBERING (program.md §4, §17 q11): a depth-first preorder walk of the
 ;;    schema's non-generic type rules in source order numbers each live leaf
-;;    when first reached; children are visited in a fixed order (a map: its
-;;    alternatives' literal entries in source order, then its pools' group
-;;    entries, key before value; an array: its positions; a tag or embedded
+;;    when first reached; children are visited in a fixed order (a map: each
+;;    member's key typeset if it has one, then its value typeset, in member
+;;    order, then key_ts; an array: its positions; a tag or embedded
 ;;    document: its content; ANY and bare #4/#5/#6: TS_ANY; AND/NOT: their
 ;;    operands). The walk is iterative (an explicit stack), so no schema can
 ;;    exhaust a host stack. Typeset ids follow the order typesets are first
 ;;    reached (hash-consed by their final content).
-;; 2. Final typesets with evaluation lists (operands first, §5); residual
-;;    groups (hash-consed, ids by first use); the key table (sorted by
+;; 2. Final typesets with evaluation lists (operands first, §5); PEG programs
+;;    (hash-consed by snug.compile.peg, ids by first use); the key table (sorted by
 ;;    encoding); the pool in program.md §15.1's order (rule names, keys,
 ;;    literals, bignum magnitudes, .bits masks; identical strings share).
 ;; 3. CLOSURE (§10): per rule, R_0 = its typeset's evaluation list and
@@ -32,7 +32,7 @@
                                         H_LIM_LEAVES H_TS_ANY H_N_FIN H_OUT_P H_OUT_PN H_OUT_B H_OUT_BN
                                         H_EPOCH H_R0 H_WALK_RULE H_CUR_RULE
                                         T_LEAF T_TS T_TSL T_FIN T_ORD T_CHILD T_PSTK T_FTS T_FTSL T_HFTS
-                                        T_GRP T_GRPD T_HGRP T_POOLG T_KEYS T_KEYID T_POOL T_POOLOFF T_RORD
+                                        T_PROGF T_PROGD T_MNAME H_CUTS H_LIM_GROUP T_KEYS T_KEYID T_POOL T_POOLOFF T_RORD
                                         T_LAUX T_RXF T_MAP T_MAPD T_ARR T_ARRD T_IV T_FIV T_LST T_SRC
                                         T_CSET T_CSD T_HCSET T_CHAIN T_CHD T_HCHAIN T_EPOCHS T_CLS T_CLS2
                                         T_RSCR T_OUT T_TMP T_TMP2 T_STK T_FTSI T_RXD vbase T_KEYTRI T_LRULE T_REP T_CLSID T_CSIG T_HSIG
@@ -44,6 +44,8 @@
                                        K_BYTES K_UINTX K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP K_AND K_NOT K_EXT
                                        R_NEG_BIG R_POS_BIG]]
             [snug.compile.ext :refer [n-exts ext-name-len ext-name-byte]]
+            [snug.compile.peg :refer [prog-at prog-w prog-len nprogs prog-unbounded warn-global sat-add sat-mul
+                                      ARR_HDR MAP_HDR TIER_A1 TIER_A2 TIER_S TIER_T]]
             [snug.compile.regexp :refer [rx-npos rx-w rx-natoms rx-nullable rx-data rx-count]]
             [snug.compile.rules :refer [rw nrules RK_TYPE]]
             [snug.compile.parse :refer [npos]]))
@@ -51,13 +53,13 @@
 ;; ------------------------------------------------------------ liveness
 
 (defn ^:pub mark-dead [^Ints h]
-  (comment "A map with no satisfiable alternative is dead; so is an AND with a dead"
-           "operand and a NOT with a dead target. Operands are always older leaves,"
-           "so one pass in creation order settles it. The flag is leaf word 9.")
+  (comment "An AND with a dead operand and a NOT with a dead target are dead (format"
+           "2.0 maps are never dead: an unsatisfiable group is a PEG that fails)."
+           "Operands are always older leaves, so one pass in creation order settles"
+           "it. The flag is leaf word 9.")
   (for [^I32 l 0 (nleaves h)]
     (let [k (lk h l)
           ^:mut dead 0]
-      (if (and (== k K_MAP) (== (ld h l 2) 1)) (set dead 1))
       (if (and (== k K_AND) (or (!= (lw h (ld h l 0) 9) 0) (!= (lw h (ld h l 1) 9) 0))) (set dead 1))
       (if (and (== k K_NOT) (!= (lw h (ld h l 0) 9) 0)) (set dead 1))
       (lset h l 9 dead))))
@@ -100,37 +102,21 @@
           (push2 h dst 1 (ld h l 1))))
     (if (== k K_ARRAY)
       (do (let [blob (vget h T_ARR (ld h l 0))
-                npos (vget h T_ARRD blob)
-                w (vget h T_ARRD (+ blob 1))
-                pb (+ (+ blob 4) (* 2 w))]
+                npos (vget h T_ARRD (+ blob 1))
+                w (vget h T_ARRD (+ blob 2))
+                pb (+ (+ blob ARR_HDR) w)]
             (for [^I32 p 0 npos]
-              (push2 h dst 0 (vget h T_ARRD (+ pb (* 2 p))))))))
+              (push2 h dst 0 (vget h T_ARRD (+ pb p)))))))
     (if (== k K_MAP)
-      (do (let [mblob (vget h T_MAP (ld h l 0))
-                nf (vget h T_MAPD mblob)
-                np (vget h T_MAPD (+ mblob 1))
-                fb (+ mblob 4)
-                mpb (+ fb (* 3 nf))
-                ab (+ mpb (* 5 np))]
-            (for [^I32 f 0 nf]
-              (let [pf (vget h T_MAPD (+ fb (+ (* 3 f) 1)))
-                    pc (vget h T_MAPD (+ fb (+ (* 3 f) 2)))]
-                (for [^I32 p2 pf (+ pf pc)]
-                  (let [prec (+ mpb (* 5 p2))
-                        af (vget h T_MAPD (+ prec 3))
-                        ac (vget h T_MAPD (+ prec 4))]
-                    (for [^I32 a2 af (+ af ac)]
-                      (let [arec (+ ab (* 3 a2))
-                            lo (+ mblob (vget h T_MAPD (+ arec 1)))
-                            ln (vget h T_MAPD (+ arec 2))]
-                        (for [^I32 i 0 ln]
-                          (push2 h dst 0 (vget h T_MAPD (+ lo (+ (* 4 i) 1)))))))
-                    (let [go (vget h T_MAPD (+ prec 1))
-                          gn (vget h T_MAPD (+ prec 2))]
-                      (if (>= go 0)
-                        (for [^I32 g 0 gn]
-                          (push2 h dst 0 (vget h T_MAPD (+ (+ mblob go) (* 4 g))))
-                          (push2 h dst 0 (vget h T_MAPD (+ (+ mblob go) (+ (* 4 g) 1))))))))))))))
+      (do (comment "each member's key typeset (non-literal keys) then value typeset; key_ts")
+          (let [mblob (vget h T_MAP (ld h l 0))
+                nm (vget h T_MAPD (+ mblob 1))
+                kts (vget h T_MAPD (+ mblob 2))]
+            (for [^I32 m 0 nm]
+              (let [mo (+ (+ mblob MAP_HDR) (* 5 m))]
+                (if (== (vget h T_MAPD mo) 1) (push2 h dst 0 (vget h T_MAPD (+ mo 1))))
+                (push2 h dst 0 (vget h T_MAPD (+ mo 2)))))
+            (if (>= kts 0) (push2 h dst 0 kts)))))
     (return (quot (- (vlen h dst) start) 2))))
 
 ;; ------------------------------------------------------------ numbering (pass 1)
@@ -303,48 +289,6 @@
   (comment "The final id of an internal typeset (set by pass 2).")
   (return (ts-w h ts 3)))
 
-;; ------------------------------------------------------------ groups
-
-(defn ^I32 group-intern [^Ints h ^I32 blob ^I32 go ^I32 gn]
-  (comment "The group id of the entries T_MAPD[blob+go ..] (gn x 4: key ts, value"
-           "ts, min, max), with typesets made final. T_GRP: offsets into T_GRPD"
-           "records (n_entries, n_constrained, entries x 4).")
-  (let [at (vlen h T_GRPD)
-        ^:mut nc 0]
-    (vpush1 h T_GRPD gn)
-    (vpush1 h T_GRPD 0)
-    (for [^I32 i 0 gn]
-      (let [e (+ (+ blob go) (* 4 i))
-            kt (fts-of h (vget h T_MAPD e))
-            vt (fts-of h (vget h T_MAPD (+ e 1)))
-            mn (vget h T_MAPD (+ e 2))
-            mx (vget h T_MAPD (+ e 3))]
-        (vpush1 h T_GRPD kt)
-        (vpush1 h T_GRPD vt)
-        (vpush1 h T_GRPD mn)
-        (vpush1 h T_GRPD mx)
-        (if (not (and (== mn 0) (== mx INF))) (set nc (+ nc 1)))))
-    (vset h T_GRPD (+ at 1) nc)
-    (let [len (+ 2 (* 4 gn))
-          ^:mut hsh (mix 11 len)]
-      (for [^I32 j 0 len]
-        (set hsh (mix hsh (vget h T_GRPD (+ at j)))))
-      (let [^:mut s (ht-start h T_HGRP hsh)]
-        (forever
-         (let [id (ht-id h T_HGRP s)]
-           (if (< id 0) (break))
-           (let [go2 (vget h T_GRP id)]
-             (if (== (vget h T_GRPD go2) gn)
-               (do (let [^:mut same true]
-                     (for [^I32 q 0 len]
-                       (if (!= (vget h T_GRPD (+ go2 q)) (vget h T_GRPD (+ at q))) (set same false)))
-                     (if same (do (vtrunc h T_GRPD at) (return id)))))))
-           (set s (ht-next h T_HGRP s))))
-        (let [nid (vlen h T_GRP)]
-          (vpush1 h T_GRP at)
-          (if (not (ht-put h T_HGRP s nid hsh)) (return (neg 1)))
-          (return nid))))))
-
 ;; ------------------------------------------------------------ sorting bids
 
 ;; ------------------------------------------------------------ pool
@@ -401,34 +345,9 @@
     (return (- (vlen h T_CHILD) start))))
 
 (defn ^Bool array-bounded [^Ints h ^I32 a]
-  (comment "Does the array automaton accept only bounded lengths? (no counter with an"
-           "unbounded maximum and no cycle in the follow graph: Kahn's peeling, T_TMP"
-           "as the in-degree table)")
-  (let [blob (vget h T_ARR a)
-        npos (vget h T_ARRD blob)
-        w (vget h T_ARRD (+ blob 1))
-        nc (vget h T_ARRD (+ blob 2))
-        cb (+ (+ (+ blob 4) (* 2 w)) (* 2 npos))
-        fb (+ cb (* 2 nc))]
-    (for [^I32 c 0 nc]
-      (if (== (vget h T_ARRD (+ cb (+ (* 2 c) 1))) INF) (return false)))
-    (comment "peel positions with no incoming edge from a live position")
-    (let [^:mut removed 0
-          ^:mut progress true]
-      (vtrunc h T_EPOCHS 0)
-      (for [^I32 _i 0 npos] (vpush1 h T_EPOCHS 0))
-      (while progress
-        (set progress false)
-        (for [^I32 q 0 npos]
-          (if (== (vget h T_EPOCHS q) 0)
-            (do (let [^:mut incoming false]
-                  (for [^I32 p 0 npos]
-                    (if (and (== (vget h T_EPOCHS p) 0)
-                             (!= (bit-and (sar (vget h T_ARRD (+ fb (+ (* p w) (sar q 5)))) (bit-and q 31)) 1) 0))
-                      (set incoming true)))
-                  (if (not incoming)
-                    (do (vset h T_EPOCHS q 1) (set removed (+ removed 1)) (set progress true))))))))
-      (return (== removed npos)))))
+  (comment "Does the array's group accept only bounded lengths (no INF maximum, no"
+           "recursion)?")
+  (return (not (prog-unbounded h (vget h T_ARRD (vget h T_ARR a))))))
 
 (defn ^I32 check-bus [^Ints h]
   (comment "The `bus` profile (architecture §5.3): every string and container"
@@ -441,18 +360,8 @@
         (if (or (== k K_ANY) (== k K_MAJOR)) (return (bus-fail h f)))
         (if (and (or (== k K_TEXT) (== k K_BYTES)) (== (ld h l 1) INF)) (return (bus-fail h f)))
         (if (and (== k K_ARRAY) (not (array-bounded h (ld h l 0)))) (return (bus-fail h f)))
-        (if (== k K_MAP)
-          (do (let [blob (map-blob-of h l)
-                    nf (vget h T_MAPD blob)
-                    np (vget h T_MAPD (+ blob 1))
-                    pb (+ (+ blob 4) (* 3 nf))]
-                (for [^I32 p 0 np]
-                  (let [go (vget h T_MAPD (+ (+ pb (* 5 p)) 1))
-                        gn (vget h T_MAPD (+ (+ pb (* 5 p)) 2))]
-                    (if (>= go 0)
-                      (for [^I32 g 0 gn]
-                        (if (== (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 3))) INF)
-                          (return (bus-fail h f))))))))))
+        (if (and (== k K_MAP) (prog-unbounded h (vget h T_MAPD (map-blob-of h l))))
+          (return (bus-fail h f)))
         (if (and (== k K_AND) (or (== (lk h (ld h l 0)) K_EMBED) (== (lk h (ld h l 1)) K_EMBED)))
           (do (comment "an embedded document needs a bounded byte string beside it")
               (let [other (if-embed-other h l)]
@@ -524,49 +433,30 @@
     (if (== k K_TAGSET)
       (for [^I32 i 0 4] (vpush1 h T_CSIG (ld h l i))))
     (if (== k K_ARRAY)
-      (do (let [ablob (vget h T_ARR (ld h l 0))
-                npos (vget h T_ARRD ablob)
-                w (vget h T_ARRD (+ ablob 1))
-                nc (vget h T_ARRD (+ ablob 2))
-                apb (+ (+ ablob 4) (* 2 w))
-                n (+ (+ 4 (* 2 w)) (+ (* 2 npos) (+ (* 2 nc) (* npos w))))]
-            (for [^I32 i2 0 n]
-              (comment "every word but the positions' typesets")
-              (let [at (+ ablob i2)]
-                (if (or (< at apb) (or (>= at (+ apb (* 2 npos))) (== (bit-and (- at apb) 1) 1)))
-                  (vpush1 h T_CSIG (vget h T_ARRD at))))))))
+      (do (comment "everything but the positions' typesets")
+          (let [ablob (vget h T_ARR (ld h l 0))
+                npos (vget h T_ARRD (+ ablob 1))
+                w (vget h T_ARRD (+ ablob 2))
+                fb (+ (+ (+ ablob ARR_HDR) w) npos)]
+            (for [^I32 ai 0 (+ ARR_HDR w)]
+              (vpush1 h T_CSIG (vget h T_ARRD (+ ablob ai))))
+            (for [^I32 i2 0 (* npos w)]
+              (vpush1 h T_CSIG (vget h T_ARRD (+ fb i2)))))))
     (if (== k K_MAP)
-      (do (let [blob (vget h T_MAP (ld h l 0))
-                nf (vget h T_MAPD blob)
-                np (vget h T_MAPD (+ blob 1))
-                na (vget h T_MAPD (+ blob 2))
-                fb (+ blob 4)
-                pb (+ fb (* 3 nf))
-                ab (+ pb (* 5 np))]
-            (vpush1 h T_CSIG nf) (vpush1 h T_CSIG np) (vpush1 h T_CSIG na)
-            (for [^I32 f 0 (* 3 nf)] (vpush1 h T_CSIG (vget h T_MAPD (+ fb f))))
-            (for [^I32 p 0 np]
-              (let [prec (+ pb (* 5 p))
-                    go (vget h T_MAPD (+ prec 1))
-                    gn (vget h T_MAPD (+ prec 2))]
-                (vpush1 h T_CSIG (vget h T_MAPD prec))
-                (vpush1 h T_CSIG gn)
-                (vpush1 h T_CSIG (vget h T_MAPD (+ prec 3)))
-                (vpush1 h T_CSIG (vget h T_MAPD (+ prec 4)))
-                (if (>= go 0)
-                  (for [^I32 g 0 gn]
-                    (vpush1 h T_CSIG (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 2))))
-                    (vpush1 h T_CSIG (vget h T_MAPD (+ (+ blob go) (+ (* 4 g) 3))))))))
-            (for [^I32 a 0 na]
-              (let [arec (+ ab (* 3 a))
-                    lo (+ blob (vget h T_MAPD (+ arec 1)))
-                    ln (vget h T_MAPD (+ arec 2))]
-                (vpush1 h T_CSIG (vget h T_MAPD arec))
-                (vpush1 h T_CSIG ln)
-                (for [^I32 i3 0 ln]
-                  (vpush1 h T_CSIG (vget h T_MAPD (+ lo (* 4 i3))))
-                  (vpush1 h T_CSIG (vget h T_MAPD (+ lo (+ (* 4 i3) 2))))
-                  (vpush1 h T_CSIG (vget h T_MAPD (+ lo (+ (* 4 i3) 3))))))))))))
+      (do (comment "the program, member count, key_ts presence; per member its key kind,"
+                   "literal key, class and cut (not its typesets)")
+          (let [blob (vget h T_MAP (ld h l 0))
+                nm (vget h T_MAPD (+ blob 1))]
+            (vpush1 h T_CSIG (vget h T_MAPD blob))
+            (vpush1 h T_CSIG nm)
+            (if (>= (vget h T_MAPD (+ blob 2)) 0) (vpush1 h T_CSIG 1) (vpush1 h T_CSIG 0))
+            (for [^I32 m 0 nm]
+              (let [mo (+ (+ blob MAP_HDR) (* 5 m))
+                    kind (vget h T_MAPD mo)]
+                (vpush1 h T_CSIG kind)
+                (if (== kind 0) (vpush1 h T_CSIG (vget h T_MAPD (+ mo 1))) (vpush1 h T_CSIG (neg 1)))
+                (vpush1 h T_CSIG (vget h T_MAPD (+ mo 3)))
+                (vpush1 h T_CSIG (vget h T_MAPD (+ mo 4))))))))))
 
 (defn child-sig [^Ints h ^I32 l]
   (comment "Push, per child slot of l, the sorted set of its leaves' classes onto"
@@ -725,74 +615,76 @@
   (return 0))
 
 ;; ------------------------------------------------------------ sections
-;; T_LAUX per final leaf, 4 words: kind-specific (see each case below).
+;; T_LAUX per final leaf, 8 words: kind-specific (see each case below).
 
-(defn ^I32 laux [^IntsR h ^I32 f ^I32 w] (return (vget h T_LAUX (+ (* f 4) w))))
-(defn laux-set [^Ints h ^I32 f ^I32 w ^I32 v] (vset h T_LAUX (+ (* f 4) w) v))
+(defconst ^I32 LAUX_W 8)
+(defn ^I32 laux [^IntsR h ^I32 f ^I32 w] (return (vget h T_LAUX (+ (* f LAUX_W) w))))
+(defn laux-set [^Ints h ^I32 f ^I32 w ^I32 v] (vset h T_LAUX (+ (* f LAUX_W) w) v))
 
 (defn ^I32 map-blob [^IntsR h ^I32 l] (return (vget h T_MAP (ld h l 0))))
 
-(defn ^I32 map-keys-into [^Ints h ^I32 blob ^I32 dst]
-  (comment "Push the distinct key ids of the map's literal entries, ascending, onto"
-           "dst; answers how many (sort, then drop repeats: n log n).")
-  (let [start (vlen h dst)
-        nf (vget h T_MAPD blob)
-        np (vget h T_MAPD (+ blob 1))
-        na (vget h T_MAPD (+ blob 2))
-        ab (+ (+ (+ blob 4) (* 3 nf)) (* 5 np))]
-    (for [^I32 a 0 na]
-      (let [lo (+ blob (vget h T_MAPD (+ (+ ab (* 3 a)) 1)))
-            ln (vget h T_MAPD (+ (+ ab (* 3 a)) 2))]
-        (for [^I32 i 0 ln]
-          (vpush1 h dst (vget h T_KEYID (vget h T_MAPD (+ lo (* 4 i))))))))
-    (let [n (- (vlen h dst) start)
-          ^:mut w start]
-      (if (not (sort-records h dst start n 1)) (return (neg 1)))
-      (for [^I32 r start (+ start n)]
-        (if (or (== r start) (!= (vget h dst r) (vget h dst (- r 1))))
-          (do (vset h dst w (vget h dst r))
-              (set w (+ w 1)))))
-      (vtrunc h dst w)
-      (return (- w start)))))
-
-(defn ^I32 key-triples [^Ints h ^I32 blob]
-  (comment "T_KEYTRI: (key id, alternative, literal index) for every literal entry of"
-           "the map, sorted stably by key id: grouped by key, alternatives ascending"
-           "within a key. Answers the count.")
-  (let [nf (vget h T_MAPD blob)
-        np (vget h T_MAPD (+ blob 1))
-        na (vget h T_MAPD (+ blob 2))
-        ab (+ (+ (+ blob 4) (* 3 nf)) (* 5 np))
-        ^:mut lidx 0]
+(defn ^I32 lit-pairs [^Ints h ^I32 blob]
+  (comment "T_KEYTRI: (key id, member id) of every literal member of the map, sorted"
+           "stably by key id (members ascending within a key). Answers the count.")
+  (let [nm (vget h T_MAPD (+ blob 1))]
     (vtrunc h T_KEYTRI 0)
-    (for [^I32 a 0 na]
-      (let [lo (+ blob (vget h T_MAPD (+ (+ ab (* 3 a)) 1)))
-            ln (vget h T_MAPD (+ (+ ab (* 3 a)) 2))]
-        (for [^I32 i 0 ln]
-          (vpush1 h T_KEYTRI (vget h T_KEYID (vget h T_MAPD (+ lo (* 4 i)))))
-          (vpush1 h T_KEYTRI a)
-          (vpush1 h T_KEYTRI (+ lidx i)))
-        (set lidx (+ lidx ln))))
-    (let [n (quot (vlen h T_KEYTRI) 3)]
-      (if (not (msort-records h T_KEYTRI 0 n 3)) (return (neg 1)))
+    (for [^I32 m 0 nm]
+      (let [mo (+ (+ blob MAP_HDR) (* 5 m))]
+        (if (== (vget h T_MAPD mo) 0)
+          (do (vpush1 h T_KEYTRI (vget h T_KEYID (vget h T_MAPD (+ mo 1))))
+              (vpush1 h T_KEYTRI m)))))
+    (let [n (quot (vlen h T_KEYTRI) 2)]
+      (if (not (msort-records h T_KEYTRI 0 n 2)) (return (neg 1)))
       (return n))))
 
+(defn ^I32 named-count [^IntsR h ^I32 n]
+  (comment "Distinct keys among the n sorted (key, member) pairs of T_KEYTRI.")
+  (let [^:mut c 0]
+    (for [^I32 q 0 n]
+      (if (or (== q 0) (!= (vget h T_KEYTRI (* 2 q)) (vget h T_KEYTRI (* 2 (- q 1))))) (set c (+ c 1))))
+    (return c)))
+
+(defn ^I32 namers-max [^IntsR h ^I32 n]
+  (comment "The most members naming one key, over the n sorted pairs of T_KEYTRI.")
+  (let [^:mut run 0
+        ^:mut mx 0]
+    (for [^I32 q 0 n]
+      (if (and (> q 0) (== (vget h T_KEYTRI (* 2 q)) (vget h T_KEYTRI (* 2 (- q 1)))))
+        (set run (+ run 1))
+        (set run 1))
+      (if (> run mx) (set mx run)))
+    (return mx)))
+
+(defn ^I32 root-count [^IntsR h ^I32 blob]
+  (let [nm (vget h T_MAPD (+ blob 1))
+        ^:mut c 0]
+    (for [^I32 m 0 nm]
+      (if (== (vget h T_MAPD (+ (+ (+ blob MAP_HDR) (* 5 m)) 3)) 1) (set c (+ c 1))))
+    (return c)))
+
+(defn ^I32 container-prog [^IntsR h ^I32 l]
+  (comment "The internal PEG program of a MAP or ARRAY leaf.")
+  (if (== (lk h l) K_MAP) (return (vget h T_MAPD (map-blob h l))))
+  (return (vget h T_ARRD (vget h T_ARR (ld h l 0)))))
+
 (defn ^:pub ^I32 assign-sections [^Ints h]
-  (comment "Map, array, regexp, interval, float-interval and LITSET ids in leaf"
-           "order; residual groups; the key table; the pool.")
+  (comment "Map, array, PEG program, regexp, interval, float-interval and LITSET ids"
+           "in leaf order (a program by its first user); the key table; the pool.")
   (let [nl (hg h H_N_FIN)
+        np (nprogs h)
         ^:mut nmaps 0
         ^:mut narrays 0
+        ^:mut npegs 0
         ^:mut nrx 0
         ^:mut niv 0
         ^:mut nfiv 0
         ^:mut nlr 0]
     (vtrunc h T_LAUX 0)
-    (if (< (vpush h T_LAUX (* 4 nl)) 0) (return (neg 1)))
-    (vtrunc h T_GRP 0)
-    (vtrunc h T_GRPD 0)
-    (vtrunc h T_POOLG 0)
-    (if (not (ht-init h T_HGRP 64)) (return (neg 1)))
+    (if (< (vpush h T_LAUX (* LAUX_W nl)) 0) (return (neg 1)))
+    (vtrunc h T_PROGF 0)
+    (if (< (vpush h T_PROGF np) 0) (return (neg 1)))
+    (vfill h T_PROGF 0 np (neg 1))
+    (vtrunc h T_MNAME 0)
     (vtrunc h T_RXF 0)
     (let [nrxi (rx-count h)]
       (if (< (vpush h T_RXF nrxi) 0) (return (neg 1)))
@@ -800,28 +692,17 @@
     (for [^I32 f 0 nl]
       (let [l (fin-internal h f)
             k (lk h l)]
-        (if (== k K_MAP)
-          (do (let [blob (map-blob h l)
-                    np (vget h T_MAPD (+ blob 1))
-                    nf (vget h T_MAPD blob)
-                    pb (+ (+ blob 4) (* 3 nf))
-                    pg (vlen h T_POOLG)]
-                (laux-set h f 0 nmaps)
-                (laux-set h f 1 pg)
-                (set nmaps (+ nmaps 1))
-                (for [^I32 p 0 np]
-                  (let [prec (+ pb (* 5 p))]
-                    (if (== (vget h T_MAPD prec) 0)
-                      (do (let [g (group-intern h blob (vget h T_MAPD (+ prec 1)) (vget h T_MAPD (+ prec 2)))]
-                            (if (< g 0) (return (neg 1)))
-                            (vpush1 h T_POOLG g)))
-                      (vpush1 h T_POOLG (neg 1))))))))
-        (if (== k K_ARRAY)
-          (do (let [ab (vget h T_ARR (ld h l 0))]
-                (laux-set h f 0 narrays)
-                (laux-set h f 1 (vget h T_ARRD (+ ab 1)))
-                (laux-set h f 2 (vget h T_ARRD (+ ab 2)))
-                (set narrays (+ narrays 1)))))
+        (if (or (== k K_MAP) (== k K_ARRAY))
+          (do (let [prog (container-prog h l)]
+                (if (== k K_MAP)
+                  (do (laux-set h f 0 nmaps)
+                      (set nmaps (+ nmaps 1)))
+                  (do (laux-set h f 0 narrays)
+                      (set narrays (+ narrays 1))))
+                (if (< (vget h T_PROGF prog) 0)
+                  (do (vset h T_PROGF prog npegs)
+                      (vpush1 h T_MNAME prog)
+                      (set npegs (+ npegs 1)))))))
         (if (and (== k K_TEXT) (>= (ld h l 2) 0))
           (do (let [rx (ld h l 2)]
                 (if (< (vget h T_RXF rx) 0)
@@ -844,7 +725,8 @@
     (vpush1 h T_CLS2 niv)
     (vpush1 h T_CLS2 nfiv)
     (vpush1 h T_CLS2 nlr)
-    (comment "The key table: every literal key of a live map, sorted by encoding.")
+    (vpush1 h T_CLS2 npegs)
+    (comment "The key table: every literal key of a live map's members, sorted by encoding.")
     (let [nb (nbids h)]
       (vtrunc h T_KEYID 0)
       (if (< (vpush h T_KEYID nb) 0) (return (neg 1)))
@@ -854,18 +736,14 @@
         (let [l2 (fin-internal h f2)]
           (if (== (lk h l2) K_MAP)
             (do (let [blob2 (map-blob h l2)
-                      nf2 (vget h T_MAPD blob2)
-                      np2 (vget h T_MAPD (+ blob2 1))
-                      na2 (vget h T_MAPD (+ blob2 2))
-                      ab2 (+ (+ (+ blob2 4) (* 3 nf2)) (* 5 np2))]
-                  (for [^I32 a 0 na2]
-                    (let [lo (+ blob2 (vget h T_MAPD (+ (+ ab2 (* 3 a)) 1)))
-                          ln (vget h T_MAPD (+ (+ ab2 (* 3 a)) 2))]
-                      (for [^I32 i 0 ln]
-                        (let [kb (vget h T_MAPD (+ lo (* 4 i)))]
-                          (if (== (vget h T_KEYID kb) (neg 1))
-                            (do (vset h T_KEYID kb (neg 2))
-                                (vpush1 h T_KEYS kb))))))))))))
+                      nm2 (vget h T_MAPD (+ blob2 1))]
+                  (for [^I32 m 0 nm2]
+                    (let [mo (+ (+ blob2 MAP_HDR) (* 5 m))]
+                      (if (== (vget h T_MAPD mo) 0)
+                        (do (let [kb (vget h T_MAPD (+ mo 1))]
+                              (if (== (vget h T_KEYID kb) (neg 1))
+                                (do (vset h T_KEYID kb (neg 2))
+                                    (vpush1 h T_KEYS kb)))))))))))))
       (if (not (sort-bids h T_KEYS (vlen h T_KEYS))) (return (neg 1)))
       (for [^I32 q 0 (vlen h T_KEYS)]
         (vset h T_KEYID (vget h T_KEYS q) q)))
@@ -968,42 +846,66 @@
     (if (erred h) (return (neg 1)))
     (return 0)))
 
-;; ------------------------------------------------------------ map planning
+;; ------------------------------------------------------------ container planning
 
 (defn ^I32 ceil32 [^I32 n] (return (sar (+ n 31) 5)))
 
-(defn ^:pub ^I32 plan-maps [^Ints h]
-  (comment "state_words and cand_max (program.md §7.3, §12.2) of every live map:"
-           "T_LAUX words 2 and 3 of its leaf.")
+(defn ^I32 act-words [^I32 ncalls ^I32 depth]
+  (comment "Per-element activation chunk words of a recursive leaf, program-2 §5.3:"
+           "ceil(n_calls * (3 + 8 depth) * 64 / 54), saturating.")
+  (let [a (sat-add 3 (sat-mul 8 depth))
+        x (sat-mul (sat-mul ncalls a) 64)]
+    (if (== x INF) (return INF))
+    (return (quot (+ x 53) 54))))
+
+(defn ^:pub ^I32 plan-containers [^Ints h]
+  (comment "Per live map and array (T_LAUX words): 1 its block words (MAPWORDS /"
+           "ARRWORDS, program-2 §5.2, §6.3 as amended by D311), 2 a map's candidates"
+           "per pair (n_members: a member is a candidate at most once) or array W, 3"
+           "its record words when it is A2 / T (else 0), 4 1 if recursive, 5 its"
+           "activation words (§5.3).")
   (let [nl (hg h H_N_FIN)]
     (for [^I32 f 0 nl]
-      (let [l (fin-internal h f)]
-        (if (== (lk h l) K_MAP)
+      (let [l (fin-internal h f)
+            k (lk h l)]
+        (if (== k K_MAP)
           (do (let [blob (map-blob h l)
-                    nf (vget h T_MAPD blob)
-                    np (vget h T_MAPD (+ blob 1))
-                    na (vget h T_MAPD (+ blob 2))
-                    pb (+ (+ blob 4) (* 3 nf))
-                    ab (+ pb (* 5 np))
-                    ^:mut sw (+ 4 nf)
-                    ^:mut groupsum 0
-                    ^:mut maxnames 0]
-                (for [^I32 p 0 np]
-                  (let [gn (vget h T_MAPD (+ (+ pb (* 5 p)) 2))]
-                    (set sw (+ sw (+ 4 gn)))
-                    (if (== (vget h T_MAPD (+ pb (* 5 p))) 0) (set groupsum (+ groupsum gn)))))
-                (for [^I32 a 0 na]
-                  (set sw (+ sw (+ 3 (ceil32 (vget h T_MAPD (+ (+ ab (* 3 a)) 2))))))) 
-                (comment "the most naming records of one key: the longest run of one key")
-                (let [nt (key-triples h blob)
-                      ^:mut run 0]
-                  (for [^I32 q 0 nt]
-                    (if (and (> q 0) (== (vget h T_KEYTRI (* 3 q)) (vget h T_KEYTRI (* 3 (- q 1)))))
-                      (set run (+ run 1))
-                      (set run 1))
-                    (if (> run maxnames) (set maxnames run))))
-                (laux-set h f 2 sw)
-                (laux-set h f 3 (+ groupsum maxnames)))))))
+                    prog (vget h T_MAPD blob)
+                    nm (vget h T_MAPD (+ blob 1))
+                    tier (prog-w h prog 3)
+                    depth (prog-w h prog 6)
+                    nc (prog-w h prog 8)
+                    np (lit-pairs h blob)
+                    nn (named-count h np)
+                    nmx (namers-max h np)
+                    nr (root-count h blob)
+                    ^:mut mw (+ 22 (* 6 nm))]
+                (if (< np 0) (return (neg 1)))
+                (if (== nc 0) (set mw (+ mw (* 8 depth))))
+                (if (== tier TIER_S)
+                  (set mw (+ mw (* nn (+ (+ 3 (ceil32 nmx)) (* 2 (ceil32 nr))))))
+                  (set mw (+ mw nn)))
+                (laux-set h f 1 mw)
+                (laux-set h f 2 nm)
+                (if (== tier TIER_T) (laux-set h f 3 (+ 4 (ceil32 (* 2 nm)))) (laux-set h f 3 0))
+                (if (> nc 0) (laux-set h f 4 1) (laux-set h f 4 0))
+                (if (> nc 0) (laux-set h f 5 (act-words nc depth)) (laux-set h f 5 0)))))
+        (if (== k K_ARRAY)
+          (do (let [ablob (vget h T_ARR (ld h l 0))
+                    aprog (vget h T_ARRD ablob)
+                    w (vget h T_ARRD (+ ablob 2))
+                    atier (prog-w h aprog 3)
+                    ab (prog-w h aprog 4)
+                    adepth (prog-w h aprog 6)
+                    anc (prog-w h aprog 8)
+                    ^:mut aw (+ 16 (* 2 w))]
+                (if (== anc 0) (set aw (+ aw (* 4 adepth))))
+                (if (== atier TIER_A1) (set aw (+ aw (* (+ ab 1) w))))
+                (laux-set h f 1 aw)
+                (laux-set h f 2 w)
+                (if (== atier TIER_A2) (laux-set h f 3 w) (laux-set h f 3 0))
+                (if (> anc 0) (laux-set h f 4 1) (laux-set h f 4 0))
+                (if (> anc 0) (laux-set h f 5 (act-words anc adepth)) (laux-set h f 5 0)))))))
     (if (erred h) (return (neg 1)))
     (return 0)))
 
@@ -1026,13 +928,17 @@
     (return 0)))
 
 (defn ^I32 frame-words [^IntsR h ^I32 from ^I32 n]
+  (comment "program-2 §9.2 as amended by D311: 2|R| + max(MAPAREA, ARRAREA); MAPAREA"
+           "= the maps' block words + 4 words per member of each (the pair's candidate"
+           "list), ARRAREA = the arrays' block words.")
   (let [^:mut maparea 0
         ^:mut arrarea 0]
     (for [^I32 i 0 n]
       (let [f (vget h T_CLS (+ from i))
             k (lk h (fin-internal h f))]
-        (if (== k K_MAP) (set maparea (+ maparea (+ (laux h f 2) (* 4 (laux h f 3))))))
-        (if (== k K_ARRAY) (set arrarea (+ arrarea (+ 3 (+ (* 2 (laux h f 1)) (laux h f 2))))))))
+        (if (== k K_MAP)
+          (set maparea (+ (+ maparea (laux h f 1)) (* 4 (laux h f 2)))))
+        (if (== k K_ARRAY) (set arrarea (+ arrarea (laux h f 1))))))
     (if (> arrarea maparea) (set maparea arrarea))
     (return (+ (* 2 n) maparea))))
 
@@ -1180,22 +1086,30 @@
 ;; ------------------------------------------------------------ writing
 
 (defconst ^:pub ^I32 MAGIC 1735749235)
-(defconst ^:pub ^I32 FORMAT_VERSION 1)
-;; D141: format 1.1 (minor 1 in the high 16 bits), written only when an EXT leaf is used
-(defconst ^:pub ^I32 FORMAT_V11 65537)
+;; format 2.0 (D279; program-2 §1): major 2 in the low 16 bits, minor 0. The
+;; extension table of format 1.1 (D141) is part of 2.0 unchanged.
+(defconst ^:pub ^I32 FORMAT_VERSION 2)
+;; D301: set under `cuts: 'branch'` (rule A); clear for the default literal RFC cut
+(defconst ^:pub ^I32 FLAG_CUTS_BRANCH 32)
+(defconst ^:pub ^I32 FLAG_ARENA 64)
 
 (defn out [^Ints h ^I32 v] (vpush1 h T_OUT v))
 
 (defn ^I32 map-size [^Ints h ^I32 l]
+  (comment "program-2 §6: header 8, members 5 each, named 3 each, namers, root.")
   (let [blob (map-blob h l)
-        nf (vget h T_MAPD blob)
-        np (vget h T_MAPD (+ blob 1))
-        na (vget h T_MAPD (+ blob 2))
-        nl (vget h T_MAPD (+ blob 3))
-        st (vlen h T_TMP2)]
-    (let [nk (map-keys-into h blob T_TMP2)]
-      (vtrunc h T_TMP2 st)
-      (return (+ (+ (+ 8 (* 4 nf)) (+ (* 5 np) (* 5 na))) (+ (* 4 nl) (+ (* 4 nk) (* 2 nl))))))))
+        nm (vget h T_MAPD (+ blob 1))
+        np (lit-pairs h blob)
+        nn (named-count h np)
+        nr (root-count h blob)]
+    (return (+ (+ (+ 8 (* 5 nm)) (* 3 nn)) (+ np nr)))))
+
+(defn ^I32 array-size [^IntsR h ^I32 l]
+  (comment "program-2 §4: header 4, first W, pos npos, follow npos x W.")
+  (let [blob (vget h T_ARR (ld h l 0))
+        npos (vget h T_ARRD (+ blob 1))
+        w (vget h T_ARRD (+ blob 2))]
+    (return (+ (+ 4 w) (+ npos (* npos w))))))
 
 (defn ^I32 rx-final-list [^Ints h]
   (comment "T_TMP: internal regexp ids in final order; answers the count.")
@@ -1247,96 +1161,75 @@
     (out h d0) (out h d1) (out h d2) (out h d3) (out h d4) (out h 0)))
 
 (defn write-map [^Ints h ^I32 f]
+  (comment "program-2 §6: header (peg, n_members, n_named, key_ts, slot_words,"
+           "rec_words, n_root, flags), members, named, namers, root.")
   (let [l (fin-internal h f)
         blob (map-blob h l)
-        nf (vget h T_MAPD blob)
-        np (vget h T_MAPD (+ blob 1))
-        na (vget h T_MAPD (+ blob 2))
-        nl (vget h T_MAPD (+ blob 3))
-        fb (+ blob 4)
-        pb (+ fb (* 3 nf))
-        ab (+ pb (* 5 np))
-        pg (laux h f 1)
-        ks (vlen h T_TMP2)
-        nk (map-keys-into h blob T_TMP2)]
-    (out h nf) (out h np) (out h na) (out h nl) (out h nk) (out h nl)
-    (out h (laux h f 2)) (out h (laux h f 3))
-    (comment "factors")
-    (for [^I32 i 0 nf]
-      (let [mode (vget h T_MAPD (+ fb (* 3 i)))]
-        (out h mode)
-        (if (== mode 2) (out h 0) (out h (neg 1)))
-        (out h (vget h T_MAPD (+ fb (+ (* 3 i) 1))))
-        (out h (vget h T_MAPD (+ fb (+ (* 3 i) 2))))))
-    (comment "pools, with state offsets")
-    (let [^:mut so (+ 4 nf)]
-      (for [^I32 p 0 np]
-        (let [prec (+ pb (* 5 p))]
-          (out h (vget h T_MAPD prec))
-          (out h (vget h T_POOLG (+ pg p)))
-          (out h (vget h T_MAPD (+ prec 3)))
-          (out h (vget h T_MAPD (+ prec 4)))
-          (out h so)
-          (set so (+ so (+ 4 (vget h T_MAPD (+ prec 2)))))))
-      (comment "alternatives")
-      (let [^:mut lf 0]
-        (for [^I32 a 0 na]
-          (let [arec (+ ab (* 3 a))
-                lo (+ blob (vget h T_MAPD (+ arec 1)))
-                ln (vget h T_MAPD (+ arec 2))
-                ^:mut req 0]
-            (for [^I32 i2 0 ln]
-              (if (== (vget h T_MAPD (+ lo (+ (* 4 i2) 2))) 1) (set req (+ req 1))))
-            (out h (vget h T_MAPD arec))
-            (out h lf)
-            (out h ln)
-            (out h req)
-            (out h so)
-            (set so (+ so (+ 3 (ceil32 ln))))
-            (set lf (+ lf ln))))))
-    (comment "literal entries")
-    (for [^I32 a2 0 na]
-      (let [arec2 (+ ab (* 3 a2))
-            lo2 (+ blob (vget h T_MAPD (+ arec2 1)))
-            ln2 (vget h T_MAPD (+ arec2 2))]
-        (for [^I32 i3 0 ln2]
-          (let [e (+ lo2 (* 4 i3))]
-            (out h (vget h T_KEYID (vget h T_MAPD e)))
-            (out h (fts-of h (vget h T_MAPD (+ e 1))))
-            (out h (vget h T_MAPD (+ e 2)))
-            (out h (vget h T_MAPD (+ e 3)))))))
-    (comment "key index (key, owner, names run) and naming records, from the key"
-             "triples: grouped by key, alternatives ascending")
-    (let [nt (key-triples h blob)
-          ^:mut q 0]
-      (while (< q nt)
-        (let [kid (vget h T_KEYTRI (* 3 q))
+        prog (vget h T_MAPD blob)
+        nm (vget h T_MAPD (+ blob 1))
+        kts (vget h T_MAPD (+ blob 2))
+        tier (vget h T_MAPD (+ blob 3))
+        np (lit-pairs h blob)
+        nn (named-count h np)
+        nmx (namers-max h np)
+        nr (root-count h blob)
+        pflags (prog-w h prog 7)
+        ^:mut sw 0
+        ^:mut rw2 0
+        ^:mut ktsf (neg 1)
+        ^:mut mflags 0]
+    (if (== tier TIER_S) (set sw (+ (+ 2 (ceil32 nmx)) (* 2 (ceil32 nr)))))
+    (if (== tier TIER_T) (set rw2 (+ 4 (ceil32 (* 2 nm)))))
+    (if (>= kts 0) (set ktsf (fts-of h kts)))
+    (if (!= (bit-and pflags 2) 0) (set mflags 1))
+    (if (!= (bit-and pflags 4) 0) (set mflags (bit-or mflags 2)))
+    (out h (vget h T_PROGF prog)) (out h nm) (out h nn) (out h ktsf)
+    (out h sw) (out h rw2) (out h nr) (out h mflags)
+    (for [^I32 m 0 nm]
+      (let [mo (+ (+ blob MAP_HDR) (* 5 m))
+            kind (vget h T_MAPD mo)
+            key (vget h T_MAPD (+ mo 1))]
+        (if (== kind 0)
+          (do (out h (vget h T_KEYID key)) (out h (neg 1)))
+          (do (out h (neg 1)) (out h (fts-of h key))))
+        (out h (fts-of h (vget h T_MAPD (+ mo 2))))
+        (out h (vget h T_MAPD (+ mo 3)))
+        (out h (vget h T_MAPD (+ mo 4)))))
+    (comment "named (key id, first namer, count; by key id), namers, root members")
+    (let [^:mut q 0]
+      (while (< q np)
+        (let [kid (vget h T_KEYTRI (* 2 q))
               ^:mut qe q]
-          (while (and (< qe nt) (== (vget h T_KEYTRI (* 3 qe)) kid)) (set qe (+ qe 1)))
+          (while (and (< qe np) (== (vget h T_KEYTRI (* 2 qe)) kid)) (set qe (+ qe 1)))
           (out h kid)
-          (out h (vget h T_MAPD (+ pb (* 5 (vget h T_MAPD (+ ab (* 3 (vget h T_KEYTRI (+ (* 3 q) 1)))))))))
           (out h q)
           (out h (- qe q))
-          (set q qe)))
-      (for [^I32 r 0 nt]
-        (out h (vget h T_KEYTRI (+ (* 3 r) 1)))
-        (out h (vget h T_KEYTRI (+ (* 3 r) 2)))))
-    (vtrunc h T_TMP2 ks)))
+          (set q qe))))
+    (for [^I32 r 0 np]
+      (out h (vget h T_KEYTRI (+ (* 2 r) 1))))
+    (for [^I32 m2 0 nm]
+      (if (== (vget h T_MAPD (+ (+ (+ blob MAP_HDR) (* 5 m2)) 3)) 1) (out h m2)))))
 
 (defn write-array [^Ints h ^I32 f]
+  (comment "program-2 §4: npos, W, peg, 0, first[W], pos[npos], follow[npos x W].")
   (let [l (fin-internal h f)
         blob (vget h T_ARR (ld h l 0))
-        npos (vget h T_ARRD blob)
-        w (vget h T_ARRD (+ blob 1))
-        nc (vget h T_ARRD (+ blob 2))
-        n (+ (+ 4 (* 2 w)) (+ (* 2 npos) (+ (* 2 nc) (* npos w))))
-        pb (+ (+ blob 4) (* 2 w))]
-    (for [^I32 i 0 n]
-      (let [x (vget h T_ARRD (+ blob i))
-            ^:mut y x]
-        (if (and (>= i (- pb blob)) (< i (+ (- pb blob) (* 2 npos))))
-          (if (== (rem2 (- i (- pb blob)) 2) 0) (set y (fts-of h x))))
-        (out h y)))))
+        prog (vget h T_ARRD blob)
+        npos (vget h T_ARRD (+ blob 1))
+        w (vget h T_ARRD (+ blob 2))
+        fb (+ blob ARR_HDR)
+        pb (+ fb w)
+        flb (+ pb npos)]
+    (out h npos) (out h w) (out h (vget h T_PROGF prog)) (out h 0)
+    (for [^I32 i 0 w] (out h (vget h T_ARRD (+ fb i))))
+    (for [^I32 p 0 npos] (out h (fts-of h (vget h T_ARRD (+ pb p)))))
+    (for [^I32 q 0 (* npos w)] (out h (vget h T_ARRD (+ flb q))))))
+
+(defn write-peg [^Ints h ^I32 prog]
+  (comment "A PEG program record (program-2 §3), as interned.")
+  (let [o (prog-at h prog)
+        n (prog-len h prog)]
+    (for [^I32 i 0 n] (out h (vget h T_PROGD (+ o i))))))
 
 (defn write-regexp [^Ints h ^I32 r]
   (let [w (rx-w h r)
@@ -1357,11 +1250,11 @@
           (out h (vget h T_IV (+ o 2)))))))
 
 (defn ^I32 ext-word [^IntsR h ^I32 which]
-  (comment "D141's header words once the pool is built: 0 the format word (1.1 when"
-           "a control is used), 1 N_EXTS, 2 the names' pool offset, 3 their length.")
+  (comment "D141's header words once the pool is built: 0 the format word (2.0), 1"
+           "N_EXTS, 2 the names' pool offset, 3 their length.")
   (let [eb (hg h H_EXT_BID)]
-    (if (< eb 0) (do (if (== which 0) (return FORMAT_VERSION)) (return 0)))
-    (if (== which 0) (return FORMAT_V11))
+    (if (== which 0) (return FORMAT_VERSION))
+    (if (< eb 0) (return 0))
     (if (== which 2) (return (vget h T_POOLOFF eb)))
     (if (== which 3) (return (bid-len h eb)))
     (let [^:mut nx 0]
@@ -1376,7 +1269,7 @@
   (let [nr (order-rules h)]
     (if (< nr 0) (return (neg 1)))
     (if (< (build-pool h) 0) (return (neg 1)))
-    (if (< (plan-maps h) 0) (return (neg 1)))
+    (if (< (plan-containers h) 0) (return (neg 1)))
     (comment "closure chains, in rule-table order")
     (vtrunc h T_CSET 0) (vtrunc h T_CSD 0) (vtrunc h T_CHAIN 0) (vtrunc h T_CHD 0)
     (if (not (ht-init h T_HCSET 64)) (return (neg 1)))
@@ -1396,7 +1289,7 @@
       (let [nl (hg h H_N_FIN)
             nts (fts-n h)
             nkeys (vlen h T_KEYS)
-            ngr (vlen h T_GRP)
+            ngr (vget h T_CLS2 6)
             nmaps (vget h T_CLS2 0)
             narr (vget h T_CLS2 1)
             nrx (rx-final-list h)
@@ -1415,17 +1308,12 @@
         (for [^I32 t 0 nts]
           (set tsdata (+ tsdata (+ 2 (+ (fts-w h t 1) (fts-w h t 3))))))
         (for [^I32 g 0 ngr]
-          (set gdata (+ gdata (+ 2 (* 4 (vget h T_GRPD (vget h T_GRP g)))))))
+          (set gdata (+ gdata (prog-len h (vget h T_MNAME g)))))
         (for [^I32 f 0 nl]
           (let [l (fin-internal h f)
                 k (lk h l)]
             (if (== k K_MAP) (set mdata (+ mdata (map-size h l))))
-            (if (== k K_ARRAY)
-              (do (let [blob (vget h T_ARR (ld h l 0))
-                        np (vget h T_ARRD blob)
-                        w (vget h T_ARRD (+ blob 1))
-                        nc (vget h T_ARRD (+ blob 2))]
-                    (set adata (+ adata (+ (+ 4 (* 2 w)) (+ (* 2 np) (+ (* 2 nc) (* np w)))))))))))
+            (if (== k K_ARRAY) (set adata (+ adata (array-size h l))))))
         (for [^I32 x 0 nrx]
           (let [r2 (vget h T_TMP x)
                 w2 (rx-w h r2)]
@@ -1456,7 +1344,43 @@
               s19 (+ s18 nch)
               send (+ s19 chdata)
               pool (vlen h T_POOL)
-              total (hg h H_LIM_TOTAL)]
+              total (hg h H_LIM_TOTAL)
+              ^:mut ritem 0
+              ^:mut reclmax 0
+              ^:mut actsum 0]
+          (comment "program-2 §2, §9.4: over closure sets, the largest sum of A2 / T"
+                   "record words, count of recursive leaves and sum of activation words")
+          (for [^I32 cq 0 ncs]
+            (let [cqo (vget h T_CSET cq)
+                  cn (vget h T_CSD cqo)
+                  ^:mut rs 0
+                  ^:mut rc 0
+                  ^:mut asum 0]
+              (for [^I32 cqi 0 cn]
+                (let [cf (vget h T_CSD (+ cqo (+ 3 cqi)))]
+                  (set rs (sat-add rs (laux h cf 3)))
+                  (set rc (+ rc (laux h cf 4)))
+                  (set asum (sat-add asum (laux h cf 5)))))
+              (if (> rs ritem) (set ritem rs))
+              (if (> rc reclmax) (set reclmax rc))
+              (if (> asum actsum) (set actsum asum))))
+          (comment "W7 (D281, D317): the worst-case arena at the compiled limits against the"
+                   "cap (program-2 §9.4). Items are at most the item limit -- or, with"
+                   "embedded content (whose sub-validations count their own items), the input"
+                   "limit; one end-run's permutation and trail only with a T map.")
+          (let [d1 (+ (hg h H_LIM_DEPTH) 1)
+                ^:mut items (hg h H_LIM_ITEMS)
+                ^:mut tmap false]
+            (for [^I32 wf 0 nl]
+              (let [wl (fin-internal h wf)
+                    wk (lk h wl)]
+                (if (== wk K_EMBED) (set items (hg h H_LIM_INPUT)))
+                (if (and (== wk K_MAP) (> (laux h wf 3) 0)) (set tmap true))))
+            (if (> items (hg h H_LIM_INPUT)) (set items (hg h H_LIM_INPUT)))
+            (let [^:mut need (sat-add (sat-mul items (sat-add ritem actsum))
+                                      (sat-mul d1 (sat-add actsum (sat-mul 64 reclmax))))]
+              (if tmap (set need (sat-add need (sat-mul 2 (hg h H_LIM_ENTRIES)))))
+              (if (and (> need 0) (> need (hg h H_LIM_GROUP))) (warn-global h 7))))
           (comment "Program + pool + scratch, refused before anything is written.")
           (if (or (> smax (quot total 4)) (> send (quot (- (- total pool) (* 4 smax)) 4)))
             (return (fail h ERR_LIM_TOTAL (neg 1))))
@@ -1464,8 +1388,7 @@
           (vtrunc h T_OUT 0)
           (comment "---- header")
           (let [^:mut flags 0
-                ^:mut tsany (neg 1)
-                ^:mut gempty (neg 1)]
+                ^:mut tsany (neg 1)]
             (for [^I32 kq 0 nkeys]
               (if (<= (sar (bid-byte h (vget h T_KEYS kq) 0) 5) 1) (set flags (bit-or flags 1))))
             (for [^I32 f2 0 nl]
@@ -1475,23 +1398,27 @@
                 (if (== k2 K_EMBED) (set flags (bit-or flags 4)))
                 (if (or (== k2 K_AND) (== k2 K_NOT)) (set flags (bit-or flags 8)))
                 (if (== k2 K_EXT) (set flags (bit-or flags 16)))
+                (if (and (== k2 K_ARRAY) (== (vget h T_ARRD (+ (vget h T_ARR (ld h l2 0)) 3)) TIER_A2))
+                  (set flags (bit-or flags FLAG_ARENA)))
+                (if (and (== k2 K_MAP) (== (vget h T_MAPD (+ (map-blob h l2) 3)) TIER_T))
+                  (set flags (bit-or flags FLAG_ARENA)))
                 (if (or (== k2 K_ANY) (and (== k2 K_MAJOR) (and (>= (ld h l2 0) 4) (<= (ld h l2 0) 6))))
                   (set tsany (fts-of h (hg h H_TS_ANY))))))
-            (for [^I32 g2 0 ngr]
-              (if (and (< gempty 0) (== (vget h T_GRPD (vget h T_GRP g2)) 0)) (set gempty g2)))
-            (comment "D141: format 1.1 and the extension table only when a control is used")
+            (if (== (hg h H_CUTS) 1) (set flags (bit-or flags FLAG_CUTS_BRANCH)))
+            (comment "format 2.0 header (program-2 §2): word 19 N_PEGS, 29 R_ITEM_MAX, 41"
+                     "LIM_GROUP_WORDS, 62 RECLEAF_MAX (S_END is PROGRAM_WORDS), 63 ACT_SUM")
             (out h MAGIC) (out h (ext-word h 0)) (out h 64) (out h send) (out h pool)
             (out h (hg h H_PROFILE)) (out h flags)
             (for [^I32 _z 0 8] (out h 0))
             (out h nr) (out h nl) (out h nts) (out h nkeys) (out h ngr) (out h nmaps) (out h narr)
             (out h nrx) (out h niv) (out h nfiv) (out h nlr) (out h ncs) (out h nch)
-            (out h tsany) (out h gempty) (out h (ext-word h 1)) (out h (ext-word h 2))
+            (out h tsany) (out h ritem) (out h (ext-word h 1)) (out h (ext-word h 2))
             (out h (hg h H_LIM_DEPTH)) (out h (hg h H_LIM_INPUT)) (out h (hg h H_LIM_ENTRIES))
             (out h (hg h H_LIM_ITEMS)) (out h (hg h H_LIM_BIGNUM)) (out h (hg h H_LIM_VBUDGET))
-            (out h total) (out h (ext-word h 3)) (out h smax) (out h 0)
+            (out h total) (out h (ext-word h 3)) (out h smax) (out h (hg h H_LIM_GROUP))
             (out h s0) (out h s1) (out h s2) (out h s3) (out h s4) (out h s5) (out h s6) (out h s7)
             (out h s8) (out h s9) (out h s10) (out h s11) (out h s12) (out h s13) (out h s14) (out h s15)
-            (out h s16) (out h s17) (out h s18) (out h s19) (out h send) (out h 0))
+            (out h s16) (out h s17) (out h s18) (out h s19) (out h reclmax) (out h actsum))
           (comment "---- rules")
           (for [^I32 i2 0 nr]
             (let [r3 (vget h T_RORD i2)
@@ -1518,15 +1445,12 @@
             (let [kb (vget h T_KEYS kk)]
               (out h (vget h T_POOLOFF kb))
               (out h (bid-len h kb))))
-          (comment "---- groups")
+          (comment "---- PEG programs (S5/S6), in first-use order")
           (let [^:mut at2 s6]
             (for [^I32 g3 0 ngr]
               (out h at2)
-              (set at2 (+ at2 (+ 2 (* 4 (vget h T_GRPD (vget h T_GRP g3))))))))
-          (for [^I32 g4 0 ngr]
-            (let [go (vget h T_GRP g4)
-                  gn (vget h T_GRPD go)]
-              (for [^I32 gi 0 (+ 2 (* 4 gn))] (out h (vget h T_GRPD (+ go gi))))))
+              (set at2 (+ at2 (prog-len h (vget h T_MNAME g3))))))
+          (for [^I32 g4 0 ngr] (write-peg h (vget h T_MNAME g4)))
           (comment "---- maps")
           (let [^:mut at3 s8]
             (for [^I32 f4 0 nl]
@@ -1540,12 +1464,7 @@
             (for [^I32 f6 0 nl]
               (let [l6 (fin-internal h f6)]
                 (if (== (lk h l6) K_ARRAY)
-                  (do (let [blob6 (vget h T_ARR (ld h l6 0))
-                            np6 (vget h T_ARRD blob6)
-                            w6 (vget h T_ARRD (+ blob6 1))
-                            nc6 (vget h T_ARRD (+ blob6 2))]
-                        (out h at4)
-                        (set at4 (+ at4 (+ (+ 4 (* 2 w6)) (+ (* 2 np6) (+ (* 2 nc6) (* np6 w6))))))))))))
+                  (do (out h at4) (set at4 (+ at4 (array-size h l6))))))))
           (for [^I32 f7 0 nl]
             (if (== (lk h (fin-internal h f7)) K_ARRAY) (write-array h f7)))
           (comment "---- regexps")

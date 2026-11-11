@@ -522,9 +522,11 @@ function equal(a, b, topNumeric = false, tick = () => {}) {
   }
 }
 
-/** check(schema, rule, decodedValue, {cuts, steps}) -> true | false | 'unknown'. */
-export function check(schema, rule, value, { cuts = 'reference', steps = 100000 } = {}) {
-  if (!schema?.rules || !schema.rules.has(rule) || !['reference', 'rfc'].includes(cuts)) return 'unknown';
+/** check(schema, rule, decodedValue, {cuts, steps}) -> true | false | 'unknown'.
+ *  cuts (D301): 'rfc' (default; the literal RFC 8610 cut as commitment epochs) or 'branch' (rule A). */
+export function check(schema, rule, value, { cuts = 'rfc', steps = 100000 } = {}) {
+  if (!['rfc', 'branch'].includes(cuts)) throw new TypeError(`cuts: 'rfc' or 'branch' (D301), not ${String(cuts)}`);
+  if (!schema?.rules || !schema.rules.has(rule)) return 'unknown';
   let remaining = steps;
   const tick = () => { if (--remaining < 0) throw UNKNOWN; };
   function deref(t) { while (t.k === 'ref') { tick(); t = t.body; } return t; }
@@ -710,7 +712,7 @@ export function check(schema, rule, value, { cuts = 'reference', steps = 100000 
           if (!type(g.key, p.pair[0])) continue;
           if (g.cut && cuts === 'rfc') ctx.commits++;
           if (type(g.t, p.pair[1])) { taken.add(p); c++; }
-          else if (g.cut) return cuts === 'reference' ? CUT : COMMITTED;
+          else if (g.cut) return cuts === 'branch' ? CUT : COMMITTED;
         }
         return c >= g.lo ? pairs.filter(p => !taken.has(p)) : FAIL;
       }

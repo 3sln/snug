@@ -4967,14 +4967,14 @@
       }
     },
     {
-      "name": "RFC 8610 literal cut scope D271",
+      "name": "RFC 8610 literal cut scope (D301 default)",
       "id": "cut-scope",
       "cddl": "r = {kind: \"a\", x: uint // kind: \"b\", y: tstr}\n",
       "source": {
         "rfc": 8610,
         "section": "§3.5.4 / Appendix A"
       },
-      "origin": "derived; literal RFC expectation staged pending D271",
+      "origin": "derived; literal RFC expectation, the default cut semantics under D301",
       "cases": [
         {
           "rule": "r",
@@ -4994,14 +4994,14 @@
           "expect": false,
           "note": "failed cut disables enclosing choice in literal RFC reading",
           "dependsOn": [
-            "D271"
+            "D301"
           ],
           "ruby": {
             "status": "checked",
             "exitCode": 0,
             "verdict": true,
             "agrees": false,
-            "explanation": "RFC 8610 §3.5.4 / Appendix A cut disables enclosing choice; Ruby follows D021 branch-local cuts. D271 remains an owner question."
+            "explanation": "RFC 8610 §3.5.4 / Appendix A cut disables enclosing choice; Ruby follows D021 branch-local cuts. D301 makes the literal RFC cut snug's default (rule A is cuts:'branch')."
           }
         }
       ],

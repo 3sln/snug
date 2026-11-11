@@ -22,7 +22,7 @@ const limitKeys = ['maxBytes', 'maxDepth', 'maxEntries', 'maxItems'];
 const decodeKeys = [...presetKeys, ...limitKeys, 'objects'];
 const validationKeys = [...decodeKeys, 'maxBignumBytes', 'budget'];
 const encodeKeys = [...presetKeys, ...limitKeys, 'objects', 'omitUndefined'];
-const compileLimits = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives',
+const compileLimits = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'pegNodes',
   'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget',
   'leaves', 'depth', 'inputBytes', 'entries', 'items', 'bignumBytes', 'budget'];
 const badFor = key => [...limitKeys, ...compileLimits, 'maxBignumBytes', 'chunk', 'quantum', 'delay'].includes(key)
@@ -179,4 +179,18 @@ test('snapshot: helpers reject invalid/shared input rather than fabricate a snap
     for (const bytes of [null, 'private-bytes', [], new ArrayBuffer(1), new Uint8Array(new SharedArrayBuffer(1))])
       assert.throws(() => make(bytes), e => e instanceof TypeError && !e.message.includes('private-'));
   }
+});
+
+test('group arena: growth on demand, and group_limit at an explicit groupWords cap (program-2 §9.4, D313, D314)', async () => {
+  const text = 'r = {* (tstr => uint // tstr => tstr)}';
+  const big = new Map(Array.from({ length: 1000 }, (_, i) => [`k${String(i).padStart(5, '0')}`, i]));
+  const bytes = encode(big);
+  const open = await compile(text);
+  assert.deepEqual(open.validate(bytes, 'r'), { ok: true });   // 1000 records of 5 words outgrow the 4096-word lease (T is quadratic, architecture §20.7)
+  assert.deepEqual(sources.openSession(open, 'r', bytes.length).step(bytes, 0).result, { ok: true });
+  const capped = await compile(text, { groupWords: 64 });
+  const r = capped.validate(bytes, 'r');
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'group_limit');
+  assert.equal(sources.openSession(capped, 'r', bytes.length).step(bytes, 0).result.reason, 'group_limit');
 });

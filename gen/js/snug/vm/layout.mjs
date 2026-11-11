@@ -3,9 +3,7 @@
 
 export const MAGIC = 1735749235;
 
-export const FORMAT_VERSION = 1;
-
-export const FORMAT_V11 = 65537;
+export const FORMAT_V2 = 2;
 
 export const HEADER_WORDS = 64;
 
@@ -24,6 +22,16 @@ export const H_N_RULES = 15;
 export const H_N_LEAVES = 16;
 
 export const H_N_KEYS = 18;
+
+export const H_N_PEGS = 19;
+
+export const H_R_ITEM_MAX = 29;
+
+export const H_LIM_GROUP = 41;
+
+export const H_RECLEAF_MAX = 62;
+
+export const H_ACT_SUM = 63;
 
 export const H_N_EXTS = 30;
 
@@ -51,7 +59,7 @@ export const H_S_TS_INDEX = 44;
 
 export const H_S_KEYS = 46;
 
-export const H_S_GROUP_INDEX = 47;
+export const H_S_PEG_INDEX = 47;
 
 export const H_S_MAP_INDEX = 49;
 
@@ -74,6 +82,10 @@ export const FL_EMBED = 4;
 export const FL_COMB = 8;
 
 export const FL_EXT = 16;
+
+export const FL_CUTS_BRANCH = 32;
+
+export const FL_ARENA = 64;
 
 export const INF = 2147483647;
 
@@ -113,7 +125,35 @@ export const K_NOT = 17;
 
 export const K_EXT = 18;
 
-export const MODE_ABSORB = 2;
+export const PEG_HDR = 9;
+
+export const P_EMPTY = 0;
+
+export const P_FAIL = 1;
+
+export const P_ENTRY = 2;
+
+export const P_MEMBER = 3;
+
+export const P_SEQ = 4;
+
+export const P_CHOICE = 5;
+
+export const P_REP = 6;
+
+export const P_CALL = 7;
+
+export const TIER_A0 = 0;
+
+export const TIER_A1 = 1;
+
+export const TIER_A2 = 2;
+
+export const TIER_F = 0;
+
+export const TIER_S = 1;
+
+export const TIER_T = 2;
 
 export const F_ANSWER = 1;
 
@@ -163,13 +203,15 @@ export const VM_BIGNUM_MAX = 34;
 
 export const VM_DETAIL = 35;
 
+export const VM_PBASE = 35;
+
 export const VM_VTAB = 36;
 
 export const VM_POS = 37;
 
 export const VM_Q1 = 38;
 
-export const VM_EXH = 39;
+export const VM_ARENA = 39;
 
 export const VM_REGCAP = 40;
 
@@ -215,6 +257,10 @@ export const R_CONTROL = 42;
 
 export const R_CONTROL_SIZE = 43;
 
+export const R_GROUP_LIMIT = 44;
+
+export const R_AGROW = 45;
+
 export const R_BUDGET = 48;
 
 export const R_NONDET = 49;
@@ -232,6 +278,10 @@ export const P_TAG = 3;
 export const P_EMBED = 4;
 
 export const P_EMBEDSEQ = 5;
+
+export const G_FORCED = 8;
+
+export const G_NOSTREAK = 16;
 
 export const CTX_KEY = 1;
 

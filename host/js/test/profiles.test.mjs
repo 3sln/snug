@@ -213,9 +213,14 @@ test('schemas: the prelude types the deterministic preset admits; float ranges o
   assert.deepEqual(ok('k', 'a30101204100' + '4100f5'), { ok: true });
   assert.equal(ok('k', 'a20101204100', { wire: 'bindle' }).reason, 'cbor/key_type');
   assert.equal(ok('k', 'a3010120410041' + '00' + 'f6').reason, 'value');
-  // D125: a cut (`:`) on a byte-string or float literal key is refused, never compiled as an absent member
-  for (const text of ["r = { h'00': bool }", 'r = { ? 1.5: int }', 'r = { 18446744073709551616: int }'])
-    await assert.rejects(compile(text), { code: 'map_cut' });
+  // D294 (P8.5, withdraws D125's map_cut): a cut (`:`) on a byte-string, float or big-integer literal key is a cut
+  // key typeset, matched by value
+  for (const [text, hex, want] of [["r = { h'00': bool }", 'a14100f5', true], ["r = { h'00': bool }", 'a14100f6', false],
+    ['r = { ? 1.5: int }', 'a0', true], ['r = { ? 1.5: int }', 'a1f93e0001', true], ['r = { ? 1.5: int }', 'a1f93e00f6', false],
+    ['r = { 18446744073709551616: int }', 'a1c249010000000000000000' + '01', true]]) {
+    const s = await compile(text);
+    assert.equal(s.validate(Uint8Array.from(Buffer.from(hex, 'hex')), 'r').ok, want, text + ' ' + hex);
+  }
   for (const [hex, want] of [['f90000', true], ['f98000', true], ['f93c00', true], ['f93800', true], ['f9bc00', false], ['f97e00', false],
     ['f97c00', false], ['f9fc00', false], ['fb3ff199999999999a', false]]) assert.equal(ok('r', hex).ok, want, hex);
   for (const [hex, want] of [['f93e00', true], ['f97c00', true], ['f97e00', false], ['f9fc00', false], ['f93c00', false]]) assert.equal(ok('g', hex).ok, want, hex);

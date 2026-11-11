@@ -75,8 +75,9 @@ console.log(`ok regexp: ${cases.length} JS == Rust compiler outcomes (${compiled
 for (const regexp of ['xsd', 'iregexp']) for (const unicode of [undefined, tables]) {
   const text = schema(unicode ? '\\p{L}' : '[a-z]+');
   const p = compile(text, { regexp, unicode }).program;
-  const defaults = [262144,64,65536,1024,64,256,256,256,1048576,8388608,10000000,32,1500000,65536,131072,128,p[37]];
-  const pre = ['snug/program-key', 1, SNUG_VERSION, 0, defaults, Buffer.from(text)];
+  // format 2.0 (program-2 §1): version element 2, pegNodes 1024, then cuts (0, rfc) and groupWords (-1)
+  const defaults = [262144,64,65536,1024,1024,256,256,256,1048576,8388608,10000000,32,1500000,65536,131072,128,p[37], 0, -1];
+  const pre = ['snug/program-key', 2, SNUG_VERSION, 0, defaults, Buffer.from(text)];
   if (unicode || regexp === 'xsd') pre.push(Array.from(unicode ?? []));
   if (regexp === 'xsd') pre.push([], 0);
   const hash = createHash('sha256').update(encode(pre)).digest();

@@ -1,18 +1,15 @@
 #!/bin/sh
-# The CDDL compiler's gates on JS and Rust (kin/scripts/compile-test.mjs says
-# which):   kin/scripts/compile-test [corruptions per program] [seed]
+# The CDDL compiler's gates on JS and Rust:   kin/scripts/compile-test [corruptions per program] [seed]
 #
-# Emits the compiler's own sources (kin/scripts/compile-emit) so the gate runs
-# what the sources say, then builds the Rust subset crate in DEBUG (overflow
-# checks on: a broken arithmetic guarantee is a panic, which fails the gate).
+# Format 2.0 (P8.5 phase 2): format 1's gate (kin/scripts/compile-test.mjs: program.md
+# §15's Program, the D011/D012 refusals, format 1 verification) is retired; the
+# compiler's gate is kin/scripts/compile2-test (bb compile2-test), run here,
+# followed by the regexp gate on the compile-test binary.
 set -e
 cd "$(dirname "$0")/../.."
-bb -cp kin/src:../kin/src kin/scripts/compile-emit > /dev/null
+kin/scripts/compile2-test "$@"
 crate=.cache/snug-compile-gate
-kin/scripts/compile-crate "$crate"
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin compile-test 2>&1); then
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi
-node kin/scripts/compile-test.mjs "$crate/target/debug/compile-test" "$@"
-
 node kin/scripts/regexp-test.mjs "$crate/target/debug/compile-test"

@@ -22,7 +22,7 @@ import { encode, decode as cborDecode, BindleDecimal, NDArray } from './baseline
 import { inputs } from './scan-inputs.mjs';
 import { compile } from '../host/js/src/compile.mjs';
 import { Program, Schema } from '../host/js/src/schema.mjs';
-import { vmVerify } from '../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../gen/js/snug/program/verify.mjs';
 import { vmScratchWords, vmScratchInit, vmValidate } from '../gen/js/snug/vm/api.mjs';
 
 const QUICK = process.argv.includes('--quick');
@@ -42,7 +42,7 @@ const fmt = ms => ms >= 1 ? `${ms.toFixed(2)} ms` : ms >= 0.001 ? `${(ms * 1000)
 // ---------------------------------------------------------------- the three validators
 function snugJs(text, limits) {
   const c = compile(text, { limits });
-  const prog = new Program(c.program, c.pool, { verify: vmVerify });
+  const prog = new Program(c.program, c.pool, { verify: vmVerify, verifyWords: vmVerifyWords });
   const P = prog.P, B = prog.B;
   const S = new Int32Array(vmScratchWords(P, 0, P[16]) + 4096); vmScratchInit(S, P[16]);
   const out = new Int32Array(8 + 2 * 257);
@@ -236,7 +236,7 @@ for (const inp of inputs.filter(i => !i.many)) {
   const key = Object.keys(permissive).find(k => inp.name.startsWith(k));
   for (const text of ['r = any', permissive[key]]) {
     const c = compile(text, { limits: BIGL });
-    const schema = new Schema(new Program(c.program, c.pool, { verify: vmVerify }));
+    const schema = new Schema(new Program(c.program, c.pool, { verify: vmVerify, verifyWords: vmVerifyWords }));
     const opt = { ...inp.opt, maxItems: Math.min(inp.opt.maxItems, 1 << 24), maxEntries: Math.min(inp.opt.maxEntries, 1 << 24) };
     schema.decode(inp.bytes, 'r', opt);
     const tS = measure(() => schema.decode(inp.bytes, 'r', opt));

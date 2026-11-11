@@ -24,7 +24,11 @@
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok]]
             [snug.vm.layout :refer [H_LIM_DEPTH H_LIM_INPUT H_S_LEAVES H_S_LITREFS H_FLAGS FL_EMBED
                                     K_LIT K_LITSET K_BYTES K_EMBED VM_BUDGET VM_POS VM_W_OFFSET
-                                    VM_BIGNUM_MAX R_BUDGET INF VM_BUDGET_START]]
+                                    VM_BIGNUM_MAX R_BUDGET INF VM_BUDGET_START FL_ARENA H_R_ITEM_MAX
+                                    H_ACT_SUM H_RECLEAF_MAX H_S_ARRAY_INDEX H_S_MAP_INDEX]]
+            [snug.vm.arena :refer [arena-room arena-want]]
+            [snug.vm.array :refer [forced]]
+            [snug.vm.map :refer [t-recw]]
             [snug.vm.base :refer [charge c64min]]
             [snug.vm.api :refer [lim]]))
 
@@ -182,6 +186,10 @@
 (defconst ^:pub ^I32 F_KGOT 36)
 (defconst ^:pub ^I32 F_KA 37)
 (defconst ^:pub ^I32 F_KQ 38)
+;; P8.5: the pair's key for its T records -- its position in the key arena (a kept
+;; DC form, D283; 0 without the valid machinery, whose maps never sort) and length
+(defconst ^:pub ^I32 F_KPOS 39)
+(defconst ^:pub ^I32 F_KLEN 40)
 ;; strings (text, byte strings, a typed array's content tail)
 (defconst ^:pub ^I32 F_MAJ 15)
 (defconst ^:pub ^I32 F_CS 16)
@@ -201,6 +209,8 @@
 (defconst ^:pub ^I32 F_SERR 32)
 (defconst ^:pub ^I32 F_SEQ 33)
 (defconst ^:pub ^I32 F_TAIL 34)
+;; P8.5: an EMBED run's saved group-arena top (restored at its end, program-2 §9.4)
+(defconst ^:pub ^I32 F_SAUP 35)
 ;; tags
 (defconst ^:pub ^I32 F_TNUM 15)
 (defconst ^:pub ^I32 F_TCLS 16)
@@ -352,6 +362,73 @@
     (return mc)))
 
 ;; ------------------------------------------------------------ small helpers
+
+(defn ^:pub ^I32 sat-add [^I32 a ^I32 b]
+  (if (or (>= a INF) (>= b INF)) (return INF))
+  (if (> a (- INF b)) (return INF))
+  (return (+ a b)))
+
+(defn ^:pub ^I32 sat-mul [^I32 a ^I32 b]
+  (if (or (<= a 0) (<= b 0)) (return 0))
+  (if (> a (quot INF b)) (return INF))
+  (return (* a b)))
+
+(defn ^:pub ^Bool arena-used [^IntsR p ^IntsR s]
+  (comment "Can a run of this Program push anything on the group arena? (an A2 array"
+           "or a T map, FLAGS bit 6; or the forced-tier test mode)")
+  (return (or (!= (bit-and (ia p H_FLAGS) FL_ARENA) 0) (forced s))))
+
+(defn ^:pub ^I32 r-item [^IntsR p ^IntsR s]
+  (comment "Record words one item can push (program-2 §9.4 R_ITEM_MAX; in the forced-"
+           "tier mode every array table's W and every map table's T record words).")
+  (if (not (forced s)) (return (ia p H_R_ITEM_MAX)))
+  (let [^:mut t 0
+        na (ia p 21)
+        nm (ia p 20)]
+    (for [^I32 i 0 na]
+      (set t (sat-add t (ia p (+ (ia p (+ (ia p H_S_ARRAY_INDEX) i)) 1)))))
+    (for [^I32 j 0 nm]
+      (set t (sat-add t (t-recw (ia p (+ (ia p (+ (ia p H_S_MAP_INDEX) j)) 1))))))
+    (return t)))
+
+(defn ^:pub ^I32 arena-items [^IntsR p ^IntsR s ^I32 len]
+  (comment "What a session step may push on the group arena before its next"
+           "suspension point (program-2 §9.4's bound, applied to the work at hand): a"
+           "record for the item at hand and for each item of a child of up to len"
+           "bytes, and one end-run's permutation and trail per child entry."
+           "Recursive programs' frames are covered once, at the document's start"
+           "(arena-doc).")
+  (let [^:mut l len]
+    (if (< l 0) (set l 0))
+    (return (sat-add (sat-mul (sat-add l 1) (r-item p s)) (sat-mul 2 l)))))
+
+(defn ^:pub ^I32 arena-gate [^IntsR p ^Ints s ^Ints ss ^I32 words]
+  (comment "A session's suspension point before work that may push `words` on the"
+           "group arena: GO when they fit (or the arena is at its cap, where a miss is"
+           "the work's own group_limit); else VMS_GROW, the host growing S to"
+           "vms-grow-scratch words (the arena takes them at the next step, arena-adopt)."
+           "Nothing is charged before it, so the step that re-runs the phase is the"
+           "same.")
+  (if (not (arena-used p s)) (return GO))
+  (let [r (arena-room s words)]
+    (if (== r 0) (return GO))
+    (let [want (arena-want s)]
+      (if (> want (ia ss SS_GS)) (iset ss SS_GS want)))
+    (return VMS_GROW)))
+
+(defn ^:pub ^I32 arena-doc [^IntsR p ^Ints s ^Ints ss ^I32 total]
+  (comment "At a session's start: a recursive Program's chunk heap can grow by more"
+           "than any one step's records foresee (an activation chain rebuilt in one"
+           "machine run), so its arena is grown once to program-2 §9.4's bound for the"
+           "whole message (items <= bytes), at most to the cap. GO or VMS_GROW.")
+  (let [act (ia p H_ACT_SUM)
+        rl (ia p H_RECLEAF_MAX)]
+    (if (and (<= act 0) (<= rl 0)) (return GO))
+    (let [dd (ia p H_LIM_DEPTH)
+          per (sat-add (r-item p s) act)
+          fixed (sat-mul (+ dd 1) (sat-add act (sat-mul 64 rl)))
+          need (sat-add (sat-add (sat-mul total per) fixed) (sat-mul 2 total))]
+      (return (arena-gate p s ss need)))))
 
 (defn ^:pub ^I32 imin [^I32 a ^I32 b]
   (if (< a b) (return a))

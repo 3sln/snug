@@ -8,7 +8,6 @@ use crate::snug::cbor::keys::*;
 use crate::snug::cbor::scan::*;
 use crate::snug::cbor::stdtags::*;
 use crate::snug::cbor::tags::*;
-use crate::snug::vm::array::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::dead::*;
 use crate::snug::vm::eval::*;
@@ -79,42 +78,25 @@ pub fn inline_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i
     return dead_item(b, s, pos, d, end);
 }
 pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, pair: i32) -> i32 {
-    // eval-array's start (generic path): filter, blocks, the schedule-2 shape
-    // (D045 i, iii), then the frame. n < 0: a `.cborseq` virtual array (D040).
+    // eval-array's start (generic path): filter, blocks (arr-open), the
+    // schedule-2 shape (D045 i, iii), then the frame. n < 0: a `.cborseq`
+    // virtual array (D040).
     let cr: i32 = cset_rec(p, s, ck);
     let w: i32 = cset_width(p, cr);
     let fw: i32 = cset_frame(p, cr);
     let area: i32 = fb + (2 * w);
-    let cap: i32 = fw - (2 * w);
-    let mut nb: i32 = 0;
-    let mut used: i32 = 0;
-    let mut sl: i32 = -1;
     let mut s2: i32 = 0;
     let mut cx: i32 = 0;
+    let mut sleaf: i32 = -1;
     let na: i32 = q_filter_x(p, s, fb, w, nq, 16, pos, ctx);
     if na < 0 {
         return err(ss, na);
     }
-    for i in 0..nq {
-        if ((q_flag(s, fb, w, i) & F_ADMITTED) != 0) && (q_kind(p, s, fb, i) == K_ARRAY) {
-            let words: i32 = array_words(p, leaf_array(p, q_leaf_base(p, s, fb, i)));
-            if (used + words) > cap {
-                return err(ss, -R_INCONSISTENT);
-            }
-            let ri: i32 = array_block_init(s, area + used, i, words, pos);
-            if ri < 0 {
-                return err(ss, ri);
-            }
-            used += words;
-            nb += 1;
-        }
+    let nb: i32 = arr_open(p, s, fb, w, fw - (2 * w), nq, pos);
+    if nb < 0 {
+        return err(ss, nb);
     }
-    if nb == 1 {
-        let ao1: i32 = block_ao(p, s, fb, area);
-        if ((p[(ao1) as usize] == 1) && (p[(ao1 + 2) as usize] == 0)) && ((p[(ao1 + 4) as usize] == 1) && ((p[(ao1 + 8) as usize] & 1) == 1)) {
-            sl = single_leaf(p, p[(ao1 + 6) as usize]);
-        }
-    }
+    let sl: i32 = arr_star_leaf(p, s, fb, area, nb);
     if sched2(s) && (sl >= 0) {
         s2 = 1;
         if scalar_kind(p[(p[(H_S_LEAVES) as usize] + (8 * sl)) as usize] & 255) {
@@ -122,18 +104,11 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
         }
     }
     // eval-array's streak leaf: an INT over one interval or a TEXT without a
-    // regexp, fast paths on (D044)
-    let mut sleaf: i32 = -1;
-    if (sl >= 0) && ((s[(VM_GENERIC) as usize] & 1) == 0) {
-        let lbf: i32 = p[(H_S_LEAVES) as usize] + (8 * sl);
-        let kf: i32 = p[(lbf) as usize] & 255;
-        if ((kf == K_INT) && (p[(lbf + 3) as usize] == 1)) || ((kf == K_TEXT) && (p[(lbf + 4) as usize] < 0)) {
-            sleaf = sl;
-        }
+    // regexp, fast paths on, natural tiers (D044)
+    if ((sl >= 0) && streak_kind(p, sl)) && ((s[(VM_GENERIC) as usize] & ((1 | G_FORCED) | G_NOSTREAK)) == 0) {
+        sleaf = sl;
     }
-    ss[(IT_PAIR) as usize] = sleaf;
     let pend: i32 = count_pending(p, s, fb, w, nq);
-    let sleaf2: i32 = ss[(IT_PAIR) as usize];
     let f: i32 = fpush(b, ss, ka, base, FK_ARR);
     if f < 0 {
         return err(ss, -R_INCONSISTENT);
@@ -149,7 +124,7 @@ pub fn arr_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     ss[(f + F_PEND) as usize] = pend;
     ss[(f + F_NALIVE) as usize] = nb;
     ss[(f + F_PAIR) as usize] = pair;
-    ss[(f + F_SLEAF) as usize] = sleaf2;
+    ss[(f + F_SLEAF) as usize] = sleaf;
     mark_pair(ss, pair);
     return cont(ss, f, A_NEXT);
 }
@@ -206,57 +181,30 @@ pub fn arr_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     let nb: i32 = ss[(f + F_NB) as usize];
     let w: i32 = cset_width(p, cset_rec(p, s, ss[(f + F_CK) as usize]));
     let area: i32 = fb + (2 * w);
-    let mut unacc: i32 = 0;
-    let mut be: i32 = area;
-    for _bk in 0..nb {
-        if !charge(s, 1, pos) {
-            return err(ss, -R_BUDGET);
-        }
-        let aok: i32 = block_ao(p, s, fb, be);
-        if s[(be + 1) as usize] != 0 {
-            if !charge(s, p[(aok + 1) as usize], pos) {
-                return err(ss, -R_BUDGET);
-            }
-            if array_accepts(p, s, be, aok, el) {
-                q_set_flag(s, fb, w, s[(be) as usize], F_MATCHED);
-            } else {
-                q_set_flag(s, fb, w, s[(be) as usize], R_MISSING << 8);
-                unacc += 1;
-            }
-        }
-        be += array_words(p, aok);
-    }
     if n == 2 {
         let q1: i32 = ss[(f + F_Q1) as usize] - base;
         s[(VM_Q1) as usize] = q1;
     }
-    let rs: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q0, q, 16, 0, el, unit_of(ctx));
-    if rs < 0 {
-        return err(ss, rs);
-    }
-    let m: i32 = finish_comb(p, pool, b, s, fb, w, nq, pos, q, ext);
-    if m < 0 {
-        return err(ss, m);
-    }
-    if (m == 0) && (((ctx & CTX_KEY) == 0) && wit_empty(s)) {
-        if unacc > 0 {
-            wit_set(s, R_MISSING, 0, d, P_INDEX, el, pos);
-        } else {
-            let r1: i32 = rule1(s, fb, w, nq, d, pos);
-            if r1 < 0 {
-                return err(ss, r1);
-            }
-        }
+    let rc: i32 = arr_close(p, pool, b, s, fb, w, area, nb, d, el, pos, q0, q, nq, ctx, ss[(f + F_PEND) as usize], ext);
+    if rc < 0 {
+        return err(ss, rc);
     }
     return done(ss, base, q);
 }
-pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32) -> i32 {
-    // The element ended at r (absolute): after a live element, stamp and
-    // advance the live blocks, then the witness; next.
+pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32, gated: i32) -> i32 {
+    // The element ended at r (absolute): after a live element, its records and
+    // machines (arr-after), then the witness; next. Unless the caller already
+    // made room (gated 1), the group arena is made room in first (a
+    // suspension point: nothing is charged before it).
     let el: i32 = ss[(f + F_EL) as usize];
     if ss[(f + F_PH) as usize] == A_LIVE {
+        if gated == 0 {
+            let g: i32 = arena_gate(p, s, ss, arena_items(p, s, 0));
+            if g == VMS_GROW {
+                return g;
+            }
+        }
         let pos: i32 = ss[(f + F_POS) as usize] - base;
-        let d: i32 = ss[(f + F_D) as usize];
         let fb: i32 = ss[(f + F_FB) as usize];
         let ck: i32 = ss[(f + F_CK) as usize];
         let q: i32 = ss[(f + F_Q) as usize] - base;
@@ -266,47 +214,19 @@ pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
         let w: i32 = cset_width(p, cr);
         let area: i32 = fb + (2 * w);
         let cw: i32 = cset_width(p, cset_rec(p, s, next_ck(p, s, ck)));
-        let ao1: i32 = block_ao(p, s, fb, area);
-        let mut nalive: i32 = ss[(f + F_NALIVE) as usize];
-        let mut still: i32 = 0;
-        let mut bo: i32 = area;
+        let cfb: i32 = fb + cset_frame(p, cr);
         if ss[(f + F_S2) as usize] == 1 {
             free_on(s);
         }
-        let ev: i32 = q_stamp(s, fb + cset_frame(p, cr), cw, cnq, pos);
-        if ev < 0 {
-            return err(ss, ev);
-        }
-        for bj in 0..nb {
-            let mut aoj: i32 = ao1;
-            if bj > 0 {
-                aoj = block_ao(p, s, fb, bo);
-            }
-            if s[(bo + 1) as usize] != 0 {
-                let adv: i32 = array_advance(p, s, bo, aoj, ev, pos);
-                if adv < 0 {
-                    return err(ss, adv);
-                }
-                if adv == 1 {
-                    still += 1;
-                } else {
-                    nalive -= 1;
-                    if adv == 2 {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
-                    } else {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_TYPE << 8);
-                    }
-                }
-            }
-            bo += array_words(p, aoj);
-        }
+        let still: i32 = arr_after(p, s, fb, w, area, nb, el, q, r - base, cfb, cw, cnq, pos);
         free_off(s);
+        if still < 0 {
+            return err(ss, still);
+        }
         if (still > 0) || (ss[(f + F_PEND) as usize] > 0) {
             wit_clear(s);
-        } else if wit_empty(s) {
-            wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, q);
         }
-        ss[(f + F_NALIVE) as usize] = nalive;
+        ss[(f + F_NALIVE) as usize] = still;
     }
     ss[(f + F_Q) as usize] = r;
     if el == 0 {
@@ -399,10 +319,11 @@ pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         } else {
             let sleaf: i32 = ss[(f + F_SLEAF) as usize];
             let area0: i32 = fb + (2 * cset_width(p, cset_rec(p, s, ck)));
-            if (sleaf >= 0) && (s[(area0 + 2) as usize] == 1) {
+            if (sleaf >= 0) && star_steady(s, area0, el) {
                 let qs: i32 = array_streak(p, b, s, q, ind_limit(s, ss, f, if_limit(n, el), el), cutend, sleaf, s2);
                 let ks: i32 = s[(VM_FASTM) as usize];
                 if ks > 0 {
+                    star_advance(p, s, fb, area0, ks);
                     ss[(f + F_Q) as usize] = qs + base;
                     ss[(f + F_EL) as usize] = el + ks;
                     progress(ss, ks);
@@ -415,12 +336,18 @@ pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         ss[(f + F_PH) as usize] = A_DEAD;
         let ir0: i32 = inline_child(p, pool, b, s, ss, vs, cb, base, q, d + 1, 0, 0, 0, end, 0, note, ext);
         if ir0 >= 0 {
-            return arr_ret(p, s, ss, base, f, ir0 + base);
+            return arr_ret(p, s, ss, base, f, ir0 + base, 1);
         }
         if ir0 != NOINL {
             return ret(ss, base, ir0);
         }
         return call(ss, base, q, d + 1, 0, 0, 0, end, 0, MODE_ITEM, note, -1);
+    }
+    // a live element: room in the group arena for its record and a child the
+    // window holds (a suspension point), then its query from the live blocks
+    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - q));
+    if g == VMS_GROW {
+        return g;
     }
     let cr: i32 = cset_rec(p, s, ck);
     let w: i32 = cset_width(p, cr);
@@ -429,29 +356,15 @@ pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     let cck: i32 = next_ck(p, s, ck);
     let cw: i32 = cset_width(p, cset_rec(p, s, cck));
     let e: i32 = new_epoch(s);
-    let ao1: i32 = block_ao(p, s, fb, area);
-    let mut cnq: i32 = 0;
-    let mut bo: i32 = area;
     if s2 == 1 {
         free_on(s);
     }
-    for bi in 0..nb {
-        if !charge(s, 1, pos) {
-            return err(ss, -R_BUDGET);
-        }
-        let mut ao: i32 = ao1;
-        if bi > 0 {
-            ao = block_ao(p, s, fb, bo);
-        }
-        if s[(bo + 1) as usize] != 0 {
-            cnq = array_candidates(p, s, bo, ao, el, cfb, cw, cnq, e, pos);
-            if cnq < 0 {
-                return err(ss, cnq);
-            }
-        }
-        bo += array_words(p, ao);
-    }
+    let cnq: i32 = arr_query(p, s, fb, w, area, nb, el, q, cfb, cw, e, pos);
     free_off(s);
+    if cnq < 0 {
+        return err(ss, cnq);
+    }
+    ss[(f + F_NALIVE) as usize] = arr_alive(p, s, fb, area, nb);
     path_put(s, d + 1, P_INDEX, el);
     ss[(f + F_CNQ) as usize] = cnq;
     ss[(f + F_PH) as usize] = A_LIVE;
@@ -467,7 +380,7 @@ pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
         }
     }
     if ir >= 0 {
-        return arr_ret(p, s, ss, base, f, ir + base);
+        return arr_ret(p, s, ss, base, f, ir + base, 1);
     }
     if cnq > 0 {
         return call(ss, base, q, d + 1, cfb, cck, cnq, end, cx, MODE_ITEM, note, -1);
@@ -580,41 +493,18 @@ pub fn darr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     return call(ss, base, q, dd, 0, 0, 0, end, 0, MODE_ITEM, dnote, -1);
 }
 pub fn map_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], base: i32, pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32) -> i32 {
-    // eval-map's start (generic path): filter, blocks, then the frame.
+    // eval-map's start (generic path): filter, blocks (map-open), then the frame.
     let cr: i32 = cset_rec(p, s, ck);
     let w: i32 = cset_width(p, cr);
     let fw: i32 = cset_frame(p, cr);
     let area: i32 = fb + (2 * w);
-    let cap: i32 = fw - (2 * w);
-    let mut nb: i32 = 0;
-    let mut used: i32 = 0;
-    let mut ccap: i32 = 0;
-    let mut smap: i32 = 0;
     let na: i32 = q_filter_x(p, s, fb, w, nq, 32, pos, ctx);
     if na < 0 {
         return err(ss, na);
     }
-    for i in 0..nq {
-        if ((q_flag(s, fb, w, i) & F_ADMITTED) != 0) && (q_kind(p, s, fb, i) == K_MAP) {
-            let mt: i32 = leaf_map(p, q_leaf_base(p, s, fb, i));
-            let sw: i32 = p[(mt + 6) as usize];
-            if (used + sw) > cap {
-                return err(ss, -R_INCONSISTENT);
-            }
-            let ri: i32 = map_block_init(p, s, area + used, i, mt, pos);
-            if ri < 0 {
-                return err(ss, ri);
-            }
-            used += sw;
-            ccap += p[(mt + 7) as usize];
-            nb += 1;
-        }
-    }
-    if (used + (4 * ccap)) > cap {
-        return err(ss, -R_INCONSISTENT);
-    }
-    if nb == 1 {
-        smap = map_fast_mode(p, block_mt(p, s, fb, area));
+    let nb: i32 = map_open(p, s, fb, w, fw - (2 * w), nq, pos);
+    if nb < 0 {
+        return err(ss, nb);
     }
     let pend: i32 = count_pending(p, s, fb, w, nq);
     let f: i32 = fpush(b, ss, ka, base, FK_MAP);
@@ -626,11 +516,11 @@ pub fn map_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u
     ss[(f + F_Q0) as usize] = q0 + base;
     ss[(f + F_N) as usize] = n;
     ss[(f + F_NB) as usize] = nb;
-    ss[(f + F_CL) as usize] = area + used;
-    ss[(f + F_CCAP) as usize] = ccap;
+    ss[(f + F_CL) as usize] = map_cl(p, s, fb, area, nb);
+    ss[(f + F_CCAP) as usize] = map_ccap(p, s, fb, area, nb);
     ss[(f + F_PEND) as usize] = pend;
     ss[(f + F_NALIVE) as usize] = nb;
-    ss[(f + F_SMAP) as usize] = smap;
+    ss[(f + F_SMAP) as usize] = map_smode(p, s, fb, area, nb);
     ss[(f + F_PS) as usize] = -1;
     ss[(f + F_PE) as usize] = -1;
     ss[(f + F_VLAST) as usize] = -1;
@@ -723,6 +613,14 @@ pub fn dmap_end(s: &mut [i32], ss: &mut [i32], vs: &mut [i32], cb: &mut [u8], ka
     return done(ss, base, ss[(f + F_Q) as usize] - base);
 }
 pub fn map_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], vs: &mut [i32], cb: &mut [u8], ka: &mut [u8], base: i32, f: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
+    // The map's end: room in the group arena for its T end-runs (a suspension
+    // point), the deferred duplicate check (D277), then map-close; a T block's
+    // records keep their keys in the key arena (the session's kept DC forms,
+    // D283) or, without the valid machinery, nothing to sort.
+    let g: i32 = arena_gate(p, s, ss, 2 * ss[(f + F_EL) as usize]);
+    if g == VMS_GROW {
+        return g;
+    }
     let rv: i32 = vmap_end(s, ss, vs, cb, ka, base, f);
     if rv == VMS_GROW {
         return rv;
@@ -741,53 +639,9 @@ pub fn map_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     let nb: i32 = ss[(f + F_NB) as usize];
     let w: i32 = cset_width(p, cset_rec(p, s, ss[(f + F_CK) as usize]));
     let area: i32 = fb + (2 * w);
-    let mut be: i32 = area;
-    let mut best: i32 = -1;
-    let mut bestbo: i32 = 0;
-    let mut unsat: i32 = 0;
-    for _bm in 0..nb {
-        if !charge(s, 1, pos) {
-            return err(ss, -R_BUDGET);
-        }
-        let mtm: i32 = block_mt(p, s, fb, be);
-        if s[(be + 1) as usize] != 0 {
-            if !charge(s, p[(mtm + 2) as usize] + p[(mtm + 1) as usize], pos) {
-                return err(ss, -R_BUDGET);
-            }
-            if map_satisfied(p, s, be, mtm) {
-                q_set_flag(s, fb, w, s[(be) as usize], F_MATCHED);
-            } else {
-                q_set_flag(s, fb, w, s[(be) as usize], R_MISSING << 8);
-                unsat += 1;
-                let lid: i32 = s[(fb + s[(be) as usize]) as usize];
-                if (best < 0) || (lid < best) {
-                    best = lid;
-                    bestbo = be;
-                }
-            }
-        }
-        be += p[(mtm + 6) as usize];
-    }
-    let rs: i32 = eval_scalars(p, pool, b, s, fb, w, nq, pos, q0, q, 32, 0, n, unit_of(ctx));
-    if rs < 0 {
-        return err(ss, rs);
-    }
-    let m: i32 = finish_comb(p, pool, b, s, fb, w, nq, pos, q, ext);
-    if m < 0 {
-        return err(ss, m);
-    }
-    if (m == 0) && (((ctx & CTX_KEY) == 0) && wit_empty(s)) {
-        if unsat > 0 {
-            let r4: i32 = map_missing(p, s, bestbo, block_mt(p, s, fb, bestbo), d, pos);
-            if r4 < 0 {
-                return err(ss, r4);
-            }
-        } else {
-            let r1: i32 = rule1(s, fb, w, nq, d, pos);
-            if r1 < 0 {
-                return err(ss, r1);
-            }
-        }
+    let rc: i32 = map_close(p, pool, b, ka, s, fb, w, area, nb, d, n, pos, q0, q, nq, ctx, ext);
+    if rc < 0 {
+        return err(ss, rc);
     }
     return done(ss, base, q);
 }
@@ -802,16 +656,28 @@ pub fn key_fix(s: &mut [i32], r: i32, delta: i32) -> i32 {
         s[(VM_POS) as usize] = vp + delta;
         return r;
     }
+    if (r == (-R_GROUP_LIMIT)) || (r == (-R_AGROW)) {
+        let vp2: i32 = s[(VM_POS) as usize];
+        s[(VM_POS) as usize] = vp2 + delta;
+        return r;
+    }
     if r != (-R_INCONSISTENT) {
         let ep: i32 = s[(O_ERR_POS) as usize];
         s[(O_ERR_POS) as usize] = ep + delta;
     }
     return r;
 }
-pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32) -> i32 {
-    // The value ended at r (absolute): after a live value, each candidate's
-    // value test and each block's update, then the witness; next pair.
+pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i32, gated: i32) -> i32 {
+    // The value ended at r (absolute): after a live value, each block's value
+    // tests and tier update (map-after), then the witness; next pair. Unless the
+    // caller already made room (gated 1), the group arena is made room in first.
     if ss[(f + F_PH) as usize] == M_LVAL {
+        if gated == 0 {
+            let g: i32 = arena_gate(p, s, ss, arena_items(p, s, 0));
+            if g == VMS_GROW {
+                return g;
+            }
+        }
         let pos: i32 = ss[(f + F_POS) as usize] - base;
         let d: i32 = ss[(f + F_D) as usize];
         let fb: i32 = ss[(f + F_FB) as usize];
@@ -821,75 +687,32 @@ pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
         let kid: i32 = ss[(f + F_KID) as usize];
         let nc: i32 = ss[(f + F_NC) as usize];
         let vnq: i32 = ss[(f + F_VNQ) as usize];
+        let kpos: i32 = ss[(f + F_KPOS) as usize];
+        let klen: i32 = ss[(f + F_KLEN) as usize];
         let start: i32 = ss[(f + F_START) as usize] - base;
         let cr: i32 = cset_rec(p, s, ck);
         let w: i32 = cset_width(p, cr);
         let area: i32 = fb + (2 * w);
         let cfb: i32 = fb + cset_frame(p, cr);
         let cw: i32 = cset_width(p, cset_rec(p, s, next_ck(p, s, ck)));
-        let mut nalive: i32 = ss[(f + F_NALIVE) as usize];
-        let mut still: i32 = 0;
-        let mut bo: i32 = area;
         if ss[(f + F_PS2) as usize] == 1 {
             free_on(s);
         }
-        let ev: i32 = q_stamp(s, cfb, cw, vnq, pos);
-        if ev < 0 {
-            return err(ss, ev);
-        }
-        for _bl in 0..nb {
-            let mtl: i32 = block_mt(p, s, fb, bo);
-            if s[(bo + 1) as usize] != 0 {
-                let mut c3: i32 = s[(bo + 3) as usize];
-                while (c3 < nc) && (s[(cl + (4 * c3)) as usize] == bo) {
-                    if !charge(s, 1, pos) {
-                        return err(ss, -R_BUDGET);
-                    }
-                    let vts3: i32 = cand_vts_mt(p, s, mtl, cl, c3);
-                    let t: i32 = ts_test(p, s, vts3, ev, pos);
-                    if t < 0 {
-                        return err(ss, t);
-                    }
-                    if t == 1 {
-                        let kw: i32 = (cl + (4 * c3)) + 1;
-                        let kv: i32 = s[(kw) as usize];
-                        s[(kw) as usize] = kv | 2;
-                    }
-                    c3 += 1;
-                }
-                let u: i32;
-                if simple_struct(p, mtl) {
-                    u = update_struct(p, s, bo, mtl, kid, cl, nc, pos);
-                } else {
-                    u = map_update(p, s, bo, mtl, kid, cl, nc, pos);
-                }
-                if u < 0 {
-                    return err(ss, u);
-                }
-                if u == 1 {
-                    still += 1;
-                } else {
-                    nalive -= 1;
-                    if block_named(s, bo, cl, nc) {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_VALUE << 8);
-                    } else {
-                        q_set_flag(s, fb, w, s[(bo) as usize], R_UNEXPECTED << 8);
-                    }
-                }
-            }
-            bo += p[(mtl + 6) as usize];
-        }
+        let still: i32 = map_after(p, s, fb, w, area, nb, cl, cfb, cw, vnq, kid, kpos, klen, pos);
         free_off(s);
+        if still < 0 {
+            return err(ss, still);
+        }
         if (still > 0) || (ss[(f + F_PEND) as usize] > 0) {
             wit_clear(s);
         } else if wit_empty(s) {
-            if ss[(f + F_NAMED) as usize] == 1 {
+            if nc > 0 {
                 wit_set(s, R_VALUE, 0, d + 1, -1, 0, start);
             } else {
                 wit_set(s, R_UNEXPECTED, 0, d + 1, -1, 0, start);
             }
         }
-        ss[(f + F_NALIVE) as usize] = nalive;
+        ss[(f + F_NALIVE) as usize] = still;
     }
     ss[(f + F_Q) as usize] = r;
     ss[(f + F_EL) as usize] = ss[(f + F_EL) as usize] + 1;
@@ -898,8 +721,9 @@ pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
 pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], vs: &mut [i32], cb: &mut [u8], base: i32, f: i32, inka: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A pair whose key is whole -- in the window (inka 0) or copied into the
     // arena (inka 1) -- after the key's first checks: dead (a dead map, or no
-    // live block) or live (eval-map's generic pair up to the value), then the
-    // value as a child item.
+    // live block) or live (eval-map's pair up to the value), then the value as a
+    // child item. The group arena is made room in first for the key, a value the
+    // window holds and the pair's record (a suspension point).
     let start: i32 = ss[(f + F_START) as usize] - base;
     let end: i32 = ss[(f + F_END) as usize] - base;
     let pos: i32 = ss[(f + F_POS) as usize] - base;
@@ -911,6 +735,10 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     let mut kks: i32 = start;
     let mut kend: i32 = end;
     let mut delta: i32 = 0;
+    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - start));
+    if g == VMS_GROW {
+        return g;
+    }
     if kea >= 0 {
         klen = kea - ss[(f + F_START) as usize];
     }
@@ -951,7 +779,7 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
         ss[(f + F_PH) as usize] = M_DVAL;
         let ir3: i32 = inline_child(p, pool, b, s, ss, vs, cb, base, kq0, d + 1, 0, 0, 0, end, 0, -1, ext);
         if ir3 >= 0 {
-            return map_ret(p, s, ss, base, f, ir3 + base);
+            return map_ret(p, s, ss, base, f, ir3 + base, 1);
         }
         if ir3 != NOINL {
             return ret(ss, base, ir3);
@@ -973,10 +801,6 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     let mut kid: i32 = -1;
     let mut klo: i32 = ss[(f + F_KLO) as usize];
     let mut ps2: i32 = 0;
-    let mut cnq: i32 = 0;
-    let mut nc: i32 = 0;
-    let mut named: i32 = 0;
-    let mut vnq: i32 = 0;
     // The key's id in the schema-wide key table.
     if kea >= 0 {
         if inka == 1 {
@@ -991,51 +815,22 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     }
     // Cursors, and schedule 2's simple pair (D045 ii).
     if smap > 0 {
-        let c0: i32 = s[(area + 2) as usize];
-        let mt0: i32 = block_mt(p, s, fb, area);
-        free_on(s);
-        map_cursor(p, s, area, mt0, kid, pos);
-        free_off(s);
-        if sched2(s) && map_pair_ok(p, s, area, mt0, kid, smap) {
-            ps2 = 1;
-            if !charge(s, 1, pos) {
-                return err(ss, -R_BUDGET);
-            }
-        } else {
-            let c1: i32 = s[(area + 2) as usize];
-            if !charge(s, 1 + (c1 - c0), pos) {
-                return err(ss, -R_BUDGET);
-            }
+        let pr: i32 = map_pre(p, s, fb, area, smap, kid, pos);
+        if pr < 0 {
+            return err(ss, pr);
         }
+        ps2 = pr;
     }
-    // The key, queried with the live residual key typesets.
+    // The key, queried with the live blocks' key typesets.
     if ps2 == 1 {
         free_on(s);
     }
     let e: i32 = new_epoch(s);
-    let mut bo: i32 = area;
-    for _bj in 0..nb {
-        let mtj: i32 = block_mt(p, s, fb, bo);
-        if smap == 0 {
-            if !charge(s, 1, pos) {
-                return err(ss, -R_BUDGET);
-            }
-            if s[(bo + 1) as usize] != 0 {
-                let rc2: i32 = map_cursor(p, s, bo, mtj, kid, pos);
-                if rc2 < 0 {
-                    return err(ss, rc2);
-                }
-            }
-        }
-        if s[(bo + 1) as usize] != 0 {
-            cnq = map_key_query(p, s, bo, mtj, cfb, cw, cnq, e, pos);
-            if cnq < 0 {
-                return err(ss, cnq);
-            }
-        }
-        bo += p[(mtj + 6) as usize];
-    }
+    let cnq: i32 = map_keyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos);
     free_off(s);
+    if cnq < 0 {
+        return err(ss, cnq);
+    }
     let kq: i32;
     if cnq > 0 {
         let kctx: i32 = CTX_KEY | simple_of(p, s, ps2, cfb, cnq);
@@ -1068,56 +863,33 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     } else {
         set_prev(ss, f, start + base, kq + base);
     }
-    // Key phase: candidates.
+    // Candidates, the key's path segment, the value's query.
     if ps2 == 1 {
         free_on(s);
     }
-    let ek: i32 = q_stamp(s, cfb, cw, cnq, pos);
-    let mut bo2: i32 = area;
-    if ek < 0 {
-        return err(ss, ek);
+    let nc: i32 = map_cands(p, s, fb, area, nb, cfb, cw, cnq, cl, ccap, pos);
+    if nc < 0 {
+        free_off(s);
+        return err(ss, nc);
     }
-    for _bk in 0..nb {
-        let mtk: i32 = block_mt(p, s, fb, bo2);
-        if s[(bo2 + 1) as usize] != 0 {
-            if simple_struct(p, mtk) {
-                nc = key_phase_struct(p, s, bo2, mtk, kid, cl, nc, ccap, pos);
-            } else {
-                nc = map_key_phase(p, s, bo2, mtk, kid, ek, cl, nc, ccap, pos);
-            }
-            if nc < 0 {
-                return err(ss, nc);
-            }
-        }
-        bo2 += p[(mtk + 6) as usize];
-    }
-    for c in 0..nc {
-        if (s[((cl + (4 * c)) + 1) as usize] & 1) == 0 {
-            named = 1;
-        }
-    }
-    if named == 1 {
+    if map_named_of(s, cl, nc) == 1 {
         path_put(s, d + 1, P_KEY, kid);
     } else {
         path_put(s, d + 1, P_ANYKEY, 0);
     }
-    // The value, queried with the candidates' value typesets.
-    let e2: i32 = new_epoch(s);
-    for c2 in 0..nc {
-        let vts: i32 = cand_vts(p, s, fb, cl, c2);
-        vnq = q_add(p, s, cfb, cw, vnq, vts, e2, pos);
-        if vnq < 0 {
-            return err(ss, vnq);
-        }
-    }
+    let vnq: i32 = map_valq(p, s, fb, cl, nc, cfb, cw, pos);
     free_off(s);
+    if vnq < 0 {
+        return err(ss, vnq);
+    }
     ss[(f + F_KLO) as usize] = klo;
     ss[(f + F_KID) as usize] = kid;
     ss[(f + F_MCNQ) as usize] = cnq;
     ss[(f + F_NC) as usize] = nc;
-    ss[(f + F_NAMED) as usize] = named;
     ss[(f + F_VNQ) as usize] = vnq;
     ss[(f + F_PS2) as usize] = ps2;
+    ss[(f + F_KPOS) as usize] = 0;
+    ss[(f + F_KLEN) as usize] = kq - start;
     ss[(f + F_PH) as usize] = M_LVAL;
     let vctx: i32 = simple_of(p, s, ps2, cfb, vnq);
     let ir4: i32;
@@ -1127,7 +899,7 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
         ir4 = inline_child(p, pool, b, s, ss, vs, cb, base, kq, d + 1, 0, 0, 0, end, 0, -1, ext);
     }
     if ir4 >= 0 {
-        return map_ret(p, s, ss, base, f, ir4 + base);
+        return map_ret(p, s, ss, base, f, ir4 + base, 1);
     }
     if ir4 != NOINL {
         return ret(ss, base, ir4);
@@ -1175,7 +947,8 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
     // map-pair for a session's valid-CBOR machinery (P8.4, D266): the key whole
     // in kb[ks, kend) (the window, or its canonical copy), searched, evaluated,
     // ordered and kept as the walk over a copy does it (vorder, vkeep); then
-    // eval-map's generic pair up to the value, as map-pair.
+    // eval-map's pair up to the value, as map-pair. A T block's record of the
+    // pair keeps the kept key's position in the key arena (its sort's keys).
     let start: i32 = ss[(f + F_START) as usize] - base;
     let end: i32 = ss[(f + F_END) as usize] - base;
     let pos: i32 = ss[(f + F_POS) as usize] - base;
@@ -1190,6 +963,11 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
         s[(VM_VTAB) as usize] = 0;
         vgrow(ss, 0, 0, 0, (2 * (ka.len() as i32)) + (KH + klen));
         return VMS_GROW;
+    }
+    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - start));
+    if g == VMS_GROW {
+        s[(VM_VTAB) as usize] = 0;
+        return g;
     }
     if (ss[(f + F_KIND) as usize] == FK_DMAP) || (ss[(f + F_NALIVE) as usize] == 0) {
         let kq0: i32 = vkey_eval(p, pool, b, kb, s, vs, cb, start, ks, kend, copy, kr, d + 1, 0, 0, 0, 0, ext);
@@ -1230,17 +1008,16 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
     let mut kid: i32 = -1;
     let mut klo: i32 = ss[(f + F_KLO) as usize];
     let mut ps2: i32 = 0;
-    let mut cnq: i32 = 0;
-    let mut nc: i32 = 0;
-    let mut named: i32 = 0;
-    let mut vnq: i32 = 0;
-    // Over a copy keys come in wire order: one at or below the previous key
-    // restarts the search bound and every block's cursor (eval-map, PF_CANON).
+    // Over a copy keys come in wire order: from one at or below the previous
+    // key, every key search covers the whole key table and every block
+    // searches its named table (eval-map, PF_CANON; program-2 §6.1).
     if (kke > ks) && ((prev >= 0) && (valid == 1)) {
         if vdescends(kb, ka, ks, kke, prev) {
-            klo = 0;
-            cursors_reset(p, s, fb, area, nb);
+            map_unordered(p, s, fb, area, nb);
         }
+    }
+    if map_is_unordered(s, area, nb) {
+        klo = 0;
     }
     if kke > ks {
         kid = key_search(p, pool, kb, s, ks, kke, klo, pos);
@@ -1250,50 +1027,21 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
         klo = s[(O_HI) as usize];
     }
     if smap > 0 {
-        let c0: i32 = s[(area + 2) as usize];
-        let mt0: i32 = block_mt(p, s, fb, area);
-        free_on(s);
-        map_cursor(p, s, area, mt0, kid, pos);
-        free_off(s);
-        if sched2(s) && map_pair_ok(p, s, area, mt0, kid, smap) {
-            ps2 = 1;
-            if !charge(s, 1, pos) {
-                return err(ss, -R_BUDGET);
-            }
-        } else {
-            let c1: i32 = s[(area + 2) as usize];
-            if !charge(s, 1 + (c1 - c0), pos) {
-                return err(ss, -R_BUDGET);
-            }
+        let pr: i32 = map_pre(p, s, fb, area, smap, kid, pos);
+        if pr < 0 {
+            return err(ss, pr);
         }
+        ps2 = pr;
     }
     if ps2 == 1 {
         free_on(s);
     }
     let e: i32 = new_epoch(s);
-    let mut bo: i32 = area;
-    for _bj in 0..nb {
-        let mtj: i32 = block_mt(p, s, fb, bo);
-        if smap == 0 {
-            if !charge(s, 1, pos) {
-                return err(ss, -R_BUDGET);
-            }
-            if s[(bo + 1) as usize] != 0 {
-                let rc2: i32 = map_cursor(p, s, bo, mtj, kid, pos);
-                if rc2 < 0 {
-                    return err(ss, rc2);
-                }
-            }
-        }
-        if s[(bo + 1) as usize] != 0 {
-            cnq = map_key_query(p, s, bo, mtj, cfb, cw, cnq, e, pos);
-            if cnq < 0 {
-                return err(ss, cnq);
-            }
-        }
-        bo += p[(mtj + 6) as usize];
-    }
+    let cnq: i32 = map_keyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos);
     free_off(s);
+    if cnq < 0 {
+        return err(ss, cnq);
+    }
     let kctx: i32 = CTX_KEY | simple_of(p, s, ps2, cfb, cnq);
     let kq: i32 = vkey_eval(p, pool, b, kb, s, vs, cb, start, ks, kend, copy, kr, d + 1, cfb, cck, cnq, kctx, ext);
     if kq < 0 {
@@ -1304,12 +1052,15 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
             return err(ss, fail(s, start, CODE_KEY_TYPE));
         }
     }
+    map_key_ecs(p, s, fb, area, nb, kb, ks);
     let vo2: i32 = vorder(kb, ka, s, vs, ks, klen, prev, canon, start, valid);
     if vo2 < 0 {
         return err(ss, vo2);
     }
     let ent2: i32 = vkeep(kb, ss, ka, ks, klen, start + base, canon);
     ss[(f + F_VLAST) as usize] = ent2;
+    ss[(f + F_KPOS) as usize] = ent2 + KH;
+    ss[(f + F_KLEN) as usize] = klen;
     ss[(f + F_VN) as usize] = ss[(f + F_VN) as usize] + 1;
     if vo2 != 0 {
         ss[(f + F_VMARK) as usize] = 1;
@@ -1317,49 +1068,25 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
     if ps2 == 1 {
         free_on(s);
     }
-    let ek: i32 = q_stamp(s, cfb, cw, cnq, pos);
-    let mut bo2: i32 = area;
-    if ek < 0 {
-        return err(ss, ek);
+    let nc: i32 = map_cands(p, s, fb, area, nb, cfb, cw, cnq, cl, ccap, pos);
+    if nc < 0 {
+        free_off(s);
+        return err(ss, nc);
     }
-    for _bk in 0..nb {
-        let mtk: i32 = block_mt(p, s, fb, bo2);
-        if s[(bo2 + 1) as usize] != 0 {
-            if simple_struct(p, mtk) {
-                nc = key_phase_struct(p, s, bo2, mtk, kid, cl, nc, ccap, pos);
-            } else {
-                nc = map_key_phase(p, s, bo2, mtk, kid, ek, cl, nc, ccap, pos);
-            }
-            if nc < 0 {
-                return err(ss, nc);
-            }
-        }
-        bo2 += p[(mtk + 6) as usize];
-    }
-    for c in 0..nc {
-        if (s[((cl + (4 * c)) + 1) as usize] & 1) == 0 {
-            named = 1;
-        }
-    }
-    if named == 1 {
+    if map_named_of(s, cl, nc) == 1 {
         path_put(s, d + 1, P_KEY, kid);
     } else {
         path_put(s, d + 1, P_ANYKEY, 0);
     }
-    let e2: i32 = new_epoch(s);
-    for c2 in 0..nc {
-        let vts: i32 = cand_vts(p, s, fb, cl, c2);
-        vnq = q_add(p, s, cfb, cw, vnq, vts, e2, pos);
-        if vnq < 0 {
-            return err(ss, vnq);
-        }
-    }
+    let vnq: i32 = map_valq(p, s, fb, cl, nc, cfb, cw, pos);
     free_off(s);
+    if vnq < 0 {
+        return err(ss, vnq);
+    }
     ss[(f + F_KLO) as usize] = klo;
     ss[(f + F_KID) as usize] = kid;
     ss[(f + F_MCNQ) as usize] = cnq;
     ss[(f + F_NC) as usize] = nc;
-    ss[(f + F_NAMED) as usize] = named;
     ss[(f + F_VNQ) as usize] = vnq;
     ss[(f + F_PS2) as usize] = ps2;
     ss[(f + F_PH) as usize] = M_LVAL;

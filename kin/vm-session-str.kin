@@ -42,7 +42,8 @@
                                    F_BITSOK F_EPH F_ECNQ F_SITEMS F_SMAXD F_SCOSE F_SERR F_SEQ F_TAIL
                                    F_TSTOP F_TSIZE F_TI F_TNUM MODE_ITEM MODE_VSEQ MODE_DSEQ
                                    fpush done err cont call need yld suspended must-yield progress chunk-end
-                                   dry-begin dry-end b01]]))
+                                   dry-begin dry-end b01 F_SAUP]]
+            [snug.vm.arena :refer [arena-up-top arena-set-up]]))
 
 ;; string frame phases
 (defconst ^:pub ^I32 S_SCAN 1)
@@ -402,6 +403,7 @@
     (iset ss (+ f F_SMAXD) (ia s O_MAX_DEPTH))
     (iset ss (+ f F_SCOSE) (ia s O_COSE))
     (iset ss (+ f F_SERR) (+ (ia s O_ERR_POS) base))
+    (iset ss (+ f F_SAUP) (arena-up-top s))
     (iset s O_ITEMS 0)
     (iset s O_MAX_DEPTH nm)
     (iset s O_COSE 0)
@@ -438,6 +440,7 @@
     (iset s O_MAX_DEPTH (ia ss (+ f F_SMAXD)))
     (iset s O_COSE (ia ss (+ f F_SCOSE)))
     (iset s O_ERR_POS (- (ia ss (+ f F_SERR)) base))
+    (arena-set-up s (ia ss (+ f F_SAUP)))
     (iset s VM_EMBED (- (ia s VM_EMBED) 1))
     (iset ss (+ f F_EPH) (+ 20 seq))
     (if (< r 0)

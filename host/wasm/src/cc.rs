@@ -3,7 +3,8 @@
 //! integer ABI, no imports. host/rust/src/compile.rs (the Rust host's loop:
 //! arena, D020 float port, SOURCE_KEY digest) is reused unchanged; the
 //! extension-control registry (D141) arrives as kin's registry words after the
-//! 20 option words, and the optional Unicode tables (D110) as words too.
+//! 22 option words (format 2.0 adds the cut mode and the arena cap), and the
+//! optional Unicode tables (D110) as words too.
 //! Control arguments are checked by the SDK in JS afterwards (D142), as the
 //! native host does, so no import is needed here.
 use crate::compile::{compile_bytes_with_options, snug_version, CompileOptions, Compiled, Registry, SchemaError};
@@ -68,13 +69,16 @@ pub extern "C" fn cc_info() -> *mut i32 {
 #[no_mangle]
 pub extern "C" fn cc_compile(n: usize) -> i32 {
     let s = st();
-    let registry = Words(&s.opt[20..]);
+    let registry = Words(s.opt.get(22..).unwrap_or(&[]));
     let options = CompileOptions {
         profile: s.opt[0],
         regexp: if s.opt[19] == 1 { crate::compile::Regexp::IRegexp } else { crate::compile::Regexp::Xsd },
+        // D301: option word 20 is 0 (or -1, absent) for the default literal RFC cut, 1 for rule A
+        cuts: if s.opt.get(20) == Some(&1) { crate::compile::Cuts::Branch } else { crate::compile::Cuts::Rfc },
+        group_words: s.opt.get(21).copied().filter(|&g| g >= 0),
         limits: &s.opt[1..19],
         unicode: if s.unicode.is_empty() { None } else { Some(&s.unicode) },
-        controls: if s.opt.len() > 20 { Some(&registry) } else { None },
+        controls: if s.opt.len() > 22 { Some(&registry) } else { None },
     };
     let r = compile_bytes_with_options(&s.text[..n], &options);
     let code = if r.is_ok() { 0 } else { 1 };

@@ -4,10 +4,10 @@ import { SNUG_VERSION } from './version.mjs';
 
 const MAGIC = new TextEncoder().encode('snugprog');
 const HEADER = 96, MAX_BODY = 64 * 1024 * 1024;
-// Format 1.0 retains the frozen P[1] = 1 spelling. Low 16 bits: major;
-// high 16 bits: minor. D084 supersedes §13.3's exact snug-version equality.
-// 1.1 (D141) adds extension controls; the compiler writes 1.1 only for a Program using one.
-export const FORMAT_MAJOR = 1, FORMAT_MINOR = 1;
+// Low 16 bits: major; high 16 bits: minor. D084 supersedes §13.3's exact
+// snug-version equality. Format 2.0 (D279, program-2 §1: PEG groups) is the only
+// major this loader accepts: a 1.x container is refused as format_version.
+export const FORMAT_MAJOR = 2, FORMAT_MINOR = 0;
 
 export class ProgramError extends Error {
   constructor(code) { super(`snug: Program refused (${code})`); this.name = 'ProgramError'; this.code = code; }

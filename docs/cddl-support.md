@@ -209,16 +209,34 @@ constrained domains such as `{ 1*2 tstr => uint, 1*2 tstr => uint }` are
 refused with `map_overlap`.
 
 `name:` and literal colon keys imply cuts; `^ =>` makes the cut explicit.
-A matching cut key whose value fails kills **that alternative**, not all
-other alternatives (D021). This permits discriminated choices such as
-`{ kind: "a", x: uint // kind: "b", y: tstr }`.
-Cuts on key typesets and cut literals after an overlapping wildcard are
-refused (`map_cut`), because the priority transformation would otherwise
-change the source-order cut meaning. A literal colon key that is a byte
-string, a float or an integer beyond 64 bits (`h'00': T`, `1.5: T`) is a cut
-on a key that only a key typeset can hold, also refused with `map_cut`
-(D125); write `h'00' => T`. (Before P7.1 such a member silently compiled as
-never present.)
+
+*Format 2.0 (PEG groups; D270, D294, D301; the VM since P8.5 phase 2, D310), 2026-11-10:*
+the cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`). Once
+a cut member finds its key, that pick is locked in: if the value fails,
+"the entire map fails to match", whatever `//` alternatives or later
+entries remain; a cut that succeeds inside an alternative or an optional
+group that later fails also fails the map (commitment epochs, architecture
+§20.2). Its scope is the map type, so a type choice of maps is outside it.
+Consequently the discriminated-union idiom
+`{ kind: "a", x: uint // kind: "b", y: tstr }` rejects `{kind: "b", y: "z"}`;
+write `{ kind: "a", x: uint } / { kind: "b", y: tstr }` or
+`{ "kind" => "a", x: uint // "kind" => "b", y: tstr }` (see the
+[guide](guide.md#discriminated-unions-under-the-rfc-cut); compile warning W8
+flags the idiom). The previous behaviour, where a failed cut kills only its
+own alternative (D021, rule A, the reference tools' reading), is the
+non-default option `cuts: 'branch'`. Cuts on key typesets (`tstr ^=> uint`)
+and byte-string, float and beyond-64-bit colon keys (`h'00': T`) are
+supported in format 2.0 (D294); `map_cut` is withdrawn.
+
+*Format 1 (before P8.5; retired):* a matching cut key whose value fails kills **that
+alternative**, not all other alternatives (D021), so the idiom above
+works there. Cuts on key typesets and cut literals after an overlapping
+wildcard are refused (`map_cut`), because the priority transformation
+would otherwise change the source-order cut meaning. A literal colon key
+that is a byte string, a float or an integer beyond 64 bits (`h'00': T`,
+`1.5: T`) is a cut on a key that only a key typeset can hold, also refused
+with `map_cut` (D125); write `h'00' => T`. (Before P7.1 such a member
+silently compiled as never present.)
 
 Optional groups are expanded exactly. Repeated literal-only groups combine
 key-disjoint alternatives, including empty ones; duplicate literal keys

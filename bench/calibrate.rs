@@ -173,16 +173,24 @@ impl Row {
                     room,
                 )
             };
-            vm_validate_x(
-                black_box(&self.p),
-                black_box(&self.a),
-                self.rule,
-                b,
-                &lim,
-                &mut self.s,
-                &mut self.o,
-                &ext,
-            );
+            // program-2 §9.4 (D313): an A2/T row grows its group arena on -5, as the hosts do
+            loop {
+                let r = vm_validate_x(
+                    black_box(&self.p),
+                    black_box(&self.a),
+                    self.rule,
+                    b,
+                    &lim,
+                    &mut self.s,
+                    &mut self.o,
+                    &ext,
+                );
+                if r != -5 {
+                    break;
+                }
+                self.s = vec![0; self.o[7] as usize];
+                vm_scratch_init(&mut self.s, self.p[16]);
+            }
             return [self.o[0], self.o[3]];
         }
         k::meter_init(&mut self.s, self.budget);

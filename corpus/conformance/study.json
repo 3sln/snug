@@ -124,7 +124,8 @@
     {
      "rule": "r",
      "hex": "a261796173646b696e646162",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -171,7 +172,8 @@
     {
      "rule": "r",
      "hex": "a16269646161",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",

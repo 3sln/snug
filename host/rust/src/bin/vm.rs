@@ -1,10 +1,12 @@
 // `bb vm-test`'s Rust arm. Reads lines on stdin:
 //
 //     prog <words, comma-separated decimal> <pool hex or ->
-//     case <prog index> <rule> <l0> .. <l8> <input hex or ->
-//     span <prog index> <rule> <start> <end> <depth0> <items0> <l0> .. <l8> <input hex or ->
+//     case <prog index> <rule> <l0> .. <l10> <input hex or ->
+//     span <prog index> <rule> <start> <end> <depth0> <items0> <l0> .. <l10> <input hex or ->
 //
-// (l8: bit 0 forces the generic path, bit 1 selects schedule 2, D044/D045)
+// (l8: bit 0 forces the generic path, bit 1 selects schedule 1, D044/D045, bit 2
+// forces tiers A2 / T, program-2 §8; l9 the profile flags; l10 the group arena's
+// limit, program-2 §9.3)
 //     host <prog index> <rule> <top_map> <cose> <input hex or ->
 //
 // `host` goes through the Rust host API (`snug::schema`) and prints `ok` or
@@ -107,9 +109,10 @@ fn main() {
                 let pi = n(1) as usize;
                 let rule = n(2);
                 let (start, end, d0, i0, lb) = if f[0] == "span" { (n(3), n(4), n(5), n(6), 7) } else { (0, 0, 0, 0, 3) };
-                // limits words 0..9 (word 8 the generic/schedule bits, word 9 the profile flags, D120)
-                let lim: Vec<i32> = (0..10).map(|i| n(lb + i)).collect();
-                let input = unhex(f[lb + 10]);
+                // limits words 0..10 (word 8 the generic/schedule/tier bits, word 9 the profile flags, D120,
+                // word 10 the group arena's limit)
+                let lim: Vec<i32> = (0..11).map(|i| n(lb + i)).collect();
+                let input = unhex(f[lb + 11]);
                 let pr = &mut progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // the host protocol: cap' = max(cap, N_LEAVES); grow when short

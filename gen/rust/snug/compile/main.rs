@@ -13,8 +13,12 @@ use crate::snug::compile::prelude::*;
 use crate::snug::compile::regexp::*;
 use crate::snug::compile::rules::*;
 
-pub const OPT_WORDS: i32 = 20;
+pub const OPT_WORDS: i32 = 22;
 pub const OPT_REGEXP: i32 = 19;
+pub const OPT_CUTS: i32 = 20;
+pub const OPT_GROUP_WORDS: i32 = 21;
+pub const GROUP_WORDS_DEFAULT: i32 = 4194304;
+pub const GROUP_WORDS_MAX: i32 = 16777216;
 pub const OPT_PROFILE: i32 = 0;
 pub(crate) fn opt_limit(opt: &[i32], i: i32, dflt: i32, hard: i32) -> i32 {
     // Option i: the default when absent (-1 or negative), at most `hard`.
@@ -36,6 +40,14 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     let mut text_default: i32 = 262144;
     hs(h, H_PROFILE, profile);
     hs(h, H_REGEXP, opt_limit(opt, OPT_REGEXP, 0, 1));
+    hs(h, H_CUTS, opt_limit(opt, OPT_CUTS, 0, 1));
+    let gw: i32 = opt_limit(opt, OPT_GROUP_WORDS, -1, GROUP_WORDS_MAX);
+    hs(h, H_GROUP_GIVEN, gw);
+    if gw < 0 {
+        hs(h, H_LIM_GROUP, GROUP_WORDS_DEFAULT);
+    } else {
+        hs(h, H_LIM_GROUP, gw);
+    }
     if profile == 2 {
         text_default = 16384;
     }
@@ -47,7 +59,8 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     hs(h, H_LIM_NEST, opt_limit(opt, 2, 64, 256));
     hs(h, H_LIM_AST, opt_limit(opt, 3, 65536, 1048576));
     hs(h, H_LIM_INST, opt_limit(opt, 4, 1024, 16384));
-    hs(h, H_LIM_ALTS, opt_limit(opt, 5, 64, 1024));
+    // format 2.0 (D292): option 5 limits PEG nodes per group (was alternatives)
+    hs(h, H_LIM_ALTS, opt_limit(opt, 5, 1024, 16384));
     hs(h, H_LIM_APOS, opt_limit(opt, 6, 256, 4096));
     hs(h, H_LIM_RPOS, opt_limit(opt, 7, 256, 512));
     hs(h, H_LIM_WIDTH, opt_limit(opt, 8, 256, 4096));
@@ -224,6 +237,10 @@ pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], unicode: &[i32], h: 
     if hg(h, H_OUT_PN) < 64 {
         return bail(h);
     }
+    warnings_finish(h);
+    if erred(h) {
+        return bail(h);
+    }
     build_key_preimage(h);
     if erred(h) {
         return bail(h);
@@ -248,9 +265,10 @@ pub(crate) fn push_uint(h: &mut [i32], t: i32, v: i32) {
 }
 pub fn build_key_preimage(h: &mut [i32]) {
     // program.md §13.3's source-key preimage, deterministic CBOR, into T_KEYPRE
-    // (one byte per word): ["snug/program-key", 1, version, profile, [17
-    // effective limits], schema text as bytes]. The host hashes it (SHA-256)
-    // into header words 7..14.
+    // (one byte per word): ["snug/program-key", 2, version, profile, [17
+    // effective limits, cuts, groupWords or -1], schema text as bytes, ...]
+    // (format 2.0: program-2 §1). The host hashes it (SHA-256) into header
+    // words 7..14.
     vtrunc(h, T_KEYPRE, 0);
     // 6 elements; 7 with Unicode tables (D110); 8 with registered controls (D141),
     // the seventh then the tables' words or an empty array.
@@ -281,17 +299,25 @@ pub fn build_key_preimage(h: &mut [i32]) {
     vpush1(h, T_KEYPRE, 107);
     vpush1(h, T_KEYPRE, 101);
     vpush1(h, T_KEYPRE, 121);
-    push_uint(h, T_KEYPRE, 1);
+    push_uint(h, T_KEYPRE, 2);
     head_push(h, T_KEYPRE, 3, 0, SNUG_VERSION_LEN);
     for i in 0..SNUG_VERSION_LEN {
         vpush1(h, T_KEYPRE, version_byte(i));
     }
     let pr: i32 = hg(h, H_PROFILE);
     push_uint(h, T_KEYPRE, pr);
-    head_push(h, T_KEYPRE, 4, 0, 17);
+    head_push(h, T_KEYPRE, 4, 0, 19);
     for k in 0..17 {
         let v: i32 = hg(h, if_limit(k));
         push_uint(h, T_KEYPRE, v);
+    }
+    let cm: i32 = hg(h, H_CUTS);
+    let gw: i32 = hg(h, H_GROUP_GIVEN);
+    push_uint(h, T_KEYPRE, cm);
+    if gw < 0 {
+        head_push(h, T_KEYPRE, 1, 0, 0);
+    } else {
+        push_uint(h, T_KEYPRE, gw);
     }
     let n: i32 = hg(h, H_NSRC);
     head_push(h, T_KEYPRE, 2, 0, n);
@@ -379,7 +405,7 @@ pub fn error_name(code: i32) -> &'static str {
         13 => "limit_nesting",
         14 => "limit_ast_nodes",
         15 => "limit_instantiations",
-        16 => "limit_alternatives",
+        16 => "limit_peg_nodes",
         17 => "limit_array_positions",
         18 => "limit_regexp_positions",
         19 => "limit_width",
@@ -407,9 +433,6 @@ pub fn error_name(code: i32) -> &'static str {
         55 => "control_registry",
         56 => "regexp",
         45 => "map_key",
-        46 => "map_group_occurrence",
-        47 => "map_cut",
-        48 => "map_overlap",
         49 => "tag",
         50 => "major",
         51 => "profile",
@@ -466,4 +489,144 @@ pub fn out_pool_bytes(h: &[i32]) -> i32 {
 pub fn budget_used(h: &[i32]) -> i32 {
     // Compile budget units the last call spent (for benchmarks and the fuzz gate).
     return hg(h, H_LIM_BUDGET) - hg(h, H_BUDGET);
+}
+pub(crate) fn rule_at(h: &[i32], pos: i32) -> i32 {
+    // The schema rule whose definition holds source offset pos: the definition
+    // (N_RULE, at its name) with the largest offset <= pos; -1 if none.
+    if pos < 0 {
+        return -1;
+    }
+    let mut best: i32 = -1;
+    let mut at: i32 = -1;
+    for r in 0..nrules(h) {
+        if rw(h, r, 7) == 0 {
+            let mut d: i32 = rw(h, r, 2);
+            while d >= 0 {
+                let dp: i32 = npos(h, d);
+                if (dp <= pos) && (dp > at) {
+                    at = dp;
+                    best = r;
+                }
+                d = def_next(h, d);
+            }
+        }
+    }
+    return best;
+}
+pub fn warnings_finish(h: &mut [i32]) {
+    // Sort the warnings by (offset, code), drop repeats (one AST node lowered in
+    // several generic environments warns once) and name each one's rule.
+    let n: i32 = vlen(h, T_WARN) / 4;
+    if !charge(h, 1 + (4 * n)) {
+        return;
+    }
+    for i in 0..n {
+        let code: i32 = vget(h, T_WARN, 4 * i);
+        let pos: i32 = vget(h, T_WARN, (4 * i) + 1);
+        vset(h, T_WARN, (4 * i) + 2, code);
+        vset(h, T_WARN, (4 * i) + 3, pos);
+        vset(h, T_WARN, 4 * i, (pos * 8) + code);
+        vset(h, T_WARN, (4 * i) + 1, code);
+    }
+    if !msort_records(h, T_WARN, 0, n, 4) {
+        return;
+    }
+    let mut w: i32 = 0;
+    for j in 0..n {
+        let key: i32 = vget(h, T_WARN, 4 * j);
+        if (j == 0) || (key != vget(h, T_WARN, 4 * (w - 1))) {
+            let c2: i32 = vget(h, T_WARN, (4 * j) + 1);
+            let p2: i32 = vget(h, T_WARN, (4 * j) + 3);
+            let r2: i32 = rule_at(h, p2);
+            vset(h, T_WARN, 4 * w, key);
+            vset(h, T_WARN, (4 * w) + 1, c2);
+            vset(h, T_WARN, (4 * w) + 2, p2);
+            vset(h, T_WARN, (4 * w) + 3, r2);
+            w += 1;
+        }
+    }
+    vtrunc(h, T_WARN, 4 * w);
+}
+pub fn warning_count(h: &[i32]) -> i32 {
+    return vlen(h, T_WARN) / 4;
+}
+pub fn warning_code(h: &[i32], i: i32) -> i32 {
+    return vget(h, T_WARN, (4 * i) + 1);
+}
+pub fn warning_offset(h: &[i32], i: i32) -> i32 {
+    return vget(h, T_WARN, (4 * i) + 2);
+}
+pub fn warning_line(h: &[i32], i: i32) -> i32 {
+    // 1-based line of warning i, 0 when it is about no place (W7).
+    let pos: i32 = warning_offset(h, i);
+    let mut line: i32 = 1;
+    if (pos < 0) || (pos > hg(h, H_NSRC)) {
+        return 0;
+    }
+    for k in 0..pos {
+        if vget(h, T_SRC, k) == 10 {
+            line += 1;
+        }
+    }
+    return line;
+}
+pub fn warning_column(h: &[i32], i: i32) -> i32 {
+    // 1-based column (code points) of warning i, 0 when it is about no place.
+    let pos: i32 = warning_offset(h, i);
+    let mut col: i32 = 1;
+    if (pos < 0) || (pos > hg(h, H_NSRC)) {
+        return 0;
+    }
+    for k in 0..pos {
+        let c: i32 = vget(h, T_SRC, k);
+        if c == 10 {
+            col = 1;
+        } else if (c & 192) != 128 {
+            col += 1;
+        }
+    }
+    return col;
+}
+pub fn warning_rule_start(h: &[i32], i: i32) -> i32 {
+    // Offset of the name of warning i's rule, or -1.
+    let r: i32 = vget(h, T_WARN, (4 * i) + 3);
+    if r < 0 {
+        return -1;
+    }
+    return rw(h, r, 0);
+}
+pub fn warning_rule_len(h: &[i32], i: i32) -> i32 {
+    let r: i32 = vget(h, T_WARN, (4 * i) + 3);
+    if r < 0 {
+        return 0;
+    }
+    return rw(h, r, 1);
+}
+pub fn warning_name(code: i32) -> &'static str {
+    // The stable code of a warning (the API's warning.code).
+    return match code {
+        1 => "W1",
+        2 => "W2",
+        3 => "W3",
+        4 => "W4",
+        5 => "W5",
+        6 => "W6",
+        7 => "W7",
+        8 => "W8",
+        _ => "W0",
+    };
+}
+pub fn warning_message(code: i32) -> &'static str {
+    // The fixed text of a warning (architecture §20.11).
+    return match code {
+        1 => "required member can never match: an earlier unbounded member with an any value takes its keys",
+        2 => "optional member is ineffective: an earlier unbounded member with an any value takes its keys",
+        3 => "greedy unbounded repetition is followed by a required entry it subsumes, which can never match",
+        4 => "repetition with a minimum of 2 or more wraps a body that consumes all it matches",
+        5 => "choice alternative follows one that cannot fail and is never tried",
+        6 => "order-sensitive member overlaps another member (RFC 8610 section 3.5.3)",
+        7 => "worst-case group arena at the compiled limits can exceed the arena cap",
+        8 => "choice alternative starts with the same cut key as an earlier one: under the default RFC cuts the earlier alternative's cut fails the whole map (see the guide, Discriminated unions under the RFC cut)",
+        _ => "",
+    };
 }

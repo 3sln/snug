@@ -17,7 +17,10 @@ import { codecTop } from '../../host/js/src/profiles.mjs';
 import { scanBuffer, scanHandleSync, bufferHandle, pushScanner, SourceError, validateHandleSync, pushValidator } from '../../host/js/src/sources.mjs';
 import { tables as unicodeTables } from '../../host/js/src/unicode-tables.mjs';
 import * as baseline from '../../bench/baseline/cbor-3sln.mjs';
-import { compile as oracleCompile, check as oracleCheck } from '../../corpus/tools/oracle.mjs';
+import { compile as oracleCompile, check as pegCheck, decode as pegDecode } from '../../corpus/tools/peg-oracle.mjs';
+// P8.5 (D279): the independent PEG oracle (the default literal RFC cut) replaces D022's existential
+// oracle; it reads the bytes with its own decoder (kind, width and tags kept)
+const oracleCheck = (o, rule, bytes) => { try { return pegCheck(o, rule, pegDecode(bytes)); } catch { return 'unknown'; } };
 import { translate } from '../../host/js/test/values.mjs';
 import * as G from './gen.mjs';
 import { minimize, byteCandidates, textCandidates, valueCandidates } from './shrink.mjs';
@@ -194,12 +197,12 @@ const P1 = {
       if (bcode !== undefined && plainOpts) {
         if (res.ok || res.reason !== 'cbor/' + bcode) F.push({ cls: 'profile-precedence', detail: 'a profile refusal must be the reason (D023)', expected: 'cbor/' + bcode, actual: res, repro });
       } else if (bcode === undefined && bindleCode === undefined && plainOpts && !osch.error && res.reason !== 'budget') {
-        // the oracle decides deterministic data (its `.cbor` reads deterministic content): held to the
-        // deterministic preset's verdict
-        const o = oracleCheck(osch, rule, bval);
+        // the PEG oracle (P8.5) decodes valid CBOR, `.cbor` content included: held to the default
+        // `valid` preset's verdict (D022's oracle read deterministic `.cbor` content only)
+        const o = oracleCheck(osch, rule, bytes);
         if (typeof o === 'boolean') {
           st.oracle++;
-          const resD = schema.validate(bytes, rule, { wire: 'deterministic' });
+          const resD = schema.validate(bytes, rule, { wire: 'valid' });
           if (resD.reason !== 'budget' && o !== resD.ok) F.push(p1Mismatch(inp, rule, bytes, o, resD, copts, repro));
         } else st.oracleUnknown++;
       }
@@ -248,8 +251,8 @@ const P1 = {
             if (!sameResult(a, b, it.at)) F.push({ cls: 'validateAt-mismatch', detail: 'validateAt(span) differs from validate(slice) (offsets shifted)', expected: b, actual: a, repro: { ...repro, span: [it.at, it.end], spanRule: rl } });
             const bs = attempt(() => baseline.decode(slice, { top: 'any' }));
             if (!osch.error && plainOpts && a.reason !== 'budget' && bs.ok) {
-              const o = oracleCheck(osch, rl, bs.value);
-              const aD = schema.validateAt(bytes, it.at, it.end, rl, { wire: 'deterministic' });
+              const o = oracleCheck(osch, rl, slice);
+              const aD = schema.validateAt(bytes, it.at, it.end, rl, { wire: 'valid' });
               if (typeof o === 'boolean' && aD.reason !== 'budget') { st.oracle++; if (o !== aD.ok) F.push(p1Mismatch(inp, rl, slice, o, aD, copts, { ...repro, rule: rl, bytes: hex(slice), viaSpan: [it.at, it.end] })); }
             }
           }
@@ -267,11 +270,11 @@ function p1Mismatch(inp, rule, bytes, oracleVerdict, res, copts, repro) {
     if (!s.program.rules.includes(rule)) return false;
     const o = oracleCompile(text); if (o.error) return false;
     let v; try { v = baseline.decode(b, { top: 'any' }); } catch { return false; }
-    const ov = oracleCheck(o, rule, v), sv = s.validate(b, rule, { wire: 'deterministic' });
+    const ov = oracleCheck(o, rule, b), sv = s.validate(b, rule, { wire: 'valid' });
     return typeof ov === 'boolean' && ov === oracleVerdict && sv.ok === res.ok && (sv.ok || sv.reason === res.reason);
   };
   return {
-    cls: 'oracle-mismatch', sub: dir, detail: 'snug verdict differs from corpus/tools/oracle.mjs', expected: { oracle: oracleVerdict }, actual: res,
+    cls: 'oracle-mismatch', sub: dir, detail: 'snug verdict differs from corpus/tools/peg-oracle.mjs', expected: { oracle: oracleVerdict }, actual: res,
     repro: { ...repro, value: describe(decode(bytes, { top: 'any' })) },
     shrink: {
       kind: 'text+value', text: inp.text, bytes,
@@ -645,7 +648,7 @@ const P5 = {
       else { let b; try { b = encode(G.randomValue(r, { maxDepth: 4 }), { top: 'any' }); } catch { b = new Uint8Array(1); } for (let k = 1 + r.int(3); k > 0; k--) { const s = G.structuralMutation(r, b); b = s && r.chance(0.5) ? s.bytes : G.mutateOnce(r, b); } blobs.push(b); }
     }
     const texts = [G.fuzzText(r), G.fuzzText(r)];
-    const climits = texts.map(() => r.chance(0.25) ? { [r.pick(['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget', 'leaves'])]: r.pick(G.COMPILE_LIMIT_SAMPLE) } : {});
+    const climits = texts.map(() => r.chance(0.25) ? { [r.pick(['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'pegNodes', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget', 'leaves'])]: r.pick(G.COMPILE_LIMIT_SAMPLE) } : {});
     return { blobs, opts: blobs.map(() => G.randomOptions(r)), texts, climits, profiles: texts.map(() => r.pick(['full', 'full', 'bindle', 'bus'])), unicode: texts.map(() => r.chance(0.4)), seed2: r.int(0x7fffffff) + 1, publicCompile: r.chance(0.1) };
   },
   async check(inp) {

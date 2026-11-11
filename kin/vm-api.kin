@@ -18,16 +18,18 @@
             [snug.cbor.scan :refer [scan-x]]
             [snug.cbor.vcopy :refer [canon-build vmap vsource ev-find]]
             [snug.cbor.head :refer [fail]]
-            [snug.vm.layout :refer [MAGIC FORMAT_VERSION FORMAT_V11 HEADER_WORDS H_FORMAT H_HEADER_WORDS
+            [snug.vm.layout :refer [MAGIC FORMAT_V2 HEADER_WORDS H_FORMAT H_HEADER_WORDS
                                     H_PROGRAM_WORDS H_POOL_BYTES H_N_RULES H_N_LEAVES H_LIM_DEPTH
                                     H_LIM_INPUT H_LIM_ENTRIES H_LIM_ITEMS H_LIM_BIGNUM H_LIM_BUDGET
                                     H_S_RULES H_S_CSET_INDEX H_S_CHAIN_INDEX VM_EPOCH VM_MARK_CAP
                                     VM_BUDGET VM_BUDGET_START VM_W_STATE VM_W_REASON VM_W_SUB
                                     VM_W_DEPTH VM_W_XKIND VM_W_XVAL VM_W_OFFSET VM_D VM_FRAMES VM_PATH
                                     VM_REGEX VM_RULE VM_CHAIN VM_EMBED VM_BIGNUM_MAX VM_POS VM_Q1
-                                    VM_EXH VM_REGCAP VM_QIDX VM_DLIM VM_GENERIC SCRATCH_MARK R_TYPE R_BUDGET
-                                    R_INCONSISTENT R_NONDET VM_VTAB H_FLAGS FL_EMBED]]
+                                    VM_REGCAP VM_QIDX VM_DLIM VM_GENERIC SCRATCH_MARK R_TYPE R_BUDGET
+                                    R_INCONSISTENT R_NONDET VM_VTAB H_FLAGS FL_EMBED FL_ARENA G_FORCED G_NOSTREAK
+                                    R_GROUP_LIMIT R_AGROW VM_PBASE]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec wit-empty wit-set]]
+            [snug.vm.arena :refer [AR_HDR LEASE arena-cap arena-init arena-want]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.leaf :refer [cmp-bytes]]
             [snug.vm.eval :refer [eval-item]]))
@@ -89,14 +91,28 @@
             (set t (+ (+ t (* full ps)) qs)))))
     (return t)))
 
-(defn ^:pub ^I32 vm-scratch-words [^IntsR p ^I32 rule ^I32 mark-cap]
-  (comment "Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)"
-           "(§12.1): 48 + 2M + 2(D + 1) + regex area + frames. The rule's verified"
-           "scratch_words [D] is that total with M = N_LEAVES, so this is O(1).")
+(defn ^:pub ^I32 vm-fixed-words [^IntsR p ^I32 rule ^I32 mark-cap]
+  (comment "The words before the group arena for this rule with MARK_CAP ="
+           "max(mark-cap, N_LEAVES) (§12.1): 48 + 2M + 2(D + 1) + regex area + frames."
+           "The rule's verified scratch_words [D] is that total with M = N_LEAVES, so"
+           "this is O(1).")
   (let [nl (ia p H_N_LEAVES)
         ^:mut m mark-cap]
     (if (< m nl) (set m nl))
     (return (+ (ia p (+ (+ (ia p H_S_RULES) (* 5 rule)) 4)) (* 2 (- m nl))))))
+
+(defn ^:pub ^I32 arena-lease [^IntsR p]
+  (comment "The group arena's default lease (program-2 §9.4): 4,096 words when some"
+           "ARRAY leaf is A2 or some MAP leaf is T (FLAGS bit 6), else none -- the arena"
+           "then grows on its first push (the forced-tier test mode).")
+  (if (!= (bit-and (ia p H_FLAGS) FL_ARENA) 0) (return LEASE))
+  (return 0))
+
+(defn ^:pub ^I32 vm-scratch-words [^IntsR p ^I32 rule ^I32 mark-cap]
+  (comment "Words S must have for this rule: vm-fixed-words, then the group arena's"
+           "8-word header and its default lease (program-2 §9.1, §9.4). A larger S"
+           "only gives the arena more room, up to its cap.")
+  (return (+ (+ (vm-fixed-words p rule mark-cap) AR_HDR) (arena-lease p))))
 
 (defn ^:pub ^I32 vm-scratch-words-slow [^IntsR p ^I32 rule ^I32 mark-cap]
   (comment "The same total recomputed from the closure chain (the verifier's"
@@ -106,8 +122,9 @@
         dd (ia p H_LIM_DEPTH)
         ch (chain-of p rule)]
     (if (< m nl) (set m nl))
-    (return (+ (+ (+ (+ SCRATCH_MARK (* 2 m)) (* 2 (+ dd 1))) (chain-regex p ch dd))
-               (chain-frames p ch dd)))))
+    (return (+ (+ (+ (+ (+ SCRATCH_MARK (* 2 m)) (* 2 (+ dd 1))) (chain-regex p ch dd))
+                  (chain-frames p ch dd))
+               (+ AR_HDR (arena-lease p))))))
 
 (defn ^:pub vm-scratch-init [^Ints s ^I32 mark-cap]
   (comment "On a freshly zeroed S: VM_EPOCH = 1, VM_MARK_CAP = mark-cap.")
@@ -137,6 +154,11 @@
     (if (< v 0) (return compiled))
     (if (< v compiled) (return v))
     (return compiled)))
+
+(defn ^:pub ^I32 lim-or [^IntsR limits ^I32 i]
+  (comment "Limits word i, or -1 when absent.")
+  (if (>= i (ilen limits)) (return (neg 1)))
+  (return (ia limits i)))
 
 (defn ^:pub ^I32 opt01 [^IntsR limits ^I32 i]
   (if (>= i (ilen limits)) (return 0))
@@ -201,8 +223,7 @@
            "-2 scratch too small, -3 rule out of range. Shared by the buffer walk"
            "and the resumable session (snug.vm.session).")
   (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
-  (if (or (!= (ia p 0) MAGIC) (or (and (!= (ia p H_FORMAT) FORMAT_VERSION) (!= (ia p H_FORMAT) FORMAT_V11))
-                                  (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
+  (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_V2) (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
     (return (neg 1)))
   (if (!= (ia p H_PROGRAM_WORDS) (ilen p)) (return (neg 1)))
   (if (or (< rule 0) (>= rule (ia p H_N_RULES))) (return (neg 3)))
@@ -211,7 +232,7 @@
         dd (ia p H_LIM_DEPTH)
         ch (chain-of p rule)]
     (if (< mc (ia p H_N_LEAVES)) (return (neg 2)))
-    (if (< (ilen s) (vm-scratch-words p rule mc)) (return (neg 2)))
+    (if (< (ilen s) (+ (vm-fixed-words p rule mc) AR_HDR)) (return (neg 2)))
     (let [path (+ SCRATCH_MARK (* 2 mc))
           rx (+ path (* 2 (+ dd 1)))
           rxw (chain-regex p ch dd)
@@ -249,8 +270,8 @@
       (iset s VM_EMBED 0)
       (if (> bmax MAX_BIGNUM_BYTES) (iset s VM_BIGNUM_MAX MAX_BIGNUM_BYTES) (iset s VM_BIGNUM_MAX bmax))
       (iset s VM_POS start)
+      (iset s VM_PBASE 0)
       (iset s VM_Q1 0)
-      (iset s VM_EXH 0)
       (iset s VM_QIDX (+ SCRATCH_MARK mc))
       (iset s VM_DLIM dl)
       (comment "limits word 8 (a VM extension beyond program.md §12.3's 8 words):"
@@ -259,13 +280,30 @@
                "(s[VM_GENERIC] bit 1 set = schedule 2). D254: the forced generic path"
                "is charged by the generic walk's own schedule, the table (schedule 1):"
                "schedule 2's free bookkeeping prices the fast paths' CPU, not its.")
+      (comment "bit 2 forces every array to tier A2 and every map to T (program-2 §8,"
+               "the forced-tier test mode): G_FORCED in s[VM_GENERIC]. Bit 3 turns the"
+               "multi-item streaks off, the schedule unchanged (G_NOSTREAK): the streak =="
+               "item-by-item gate.")
       (if (> (ilen limits) 8)
-        (do (let [w8 (ia limits 8)]
-              (if (!= (bit-and w8 3) 0)
-                (iset s VM_GENERIC (bit-and w8 1))
-                (iset s VM_GENERIC 2))))
+        (do (let [w8 (ia limits 8)
+                  ^:mut g 2]
+              (if (!= (bit-and w8 3) 0) (set g (bit-and w8 1)))
+              (if (!= (bit-and w8 4) 0) (set g (bit-or g G_FORCED)))
+              (if (!= (bit-and w8 8) 0) (set g (bit-or g G_NOSTREAK)))
+              (iset s VM_GENERIC g)))
         (iset s VM_GENERIC 2))
+      (comment "the group arena after the fixed words, its cap lowered by limits word 10")
+      (arena-init s (vm-fixed-words p rule mc) (arena-cap p (lim-or limits 10)))
       (return 0))))
+
+(defn ^:pub ^I32 vm-need [^Ints out ^I32 w ^I32 nb ^I32 sw]
+  (comment "-5: a host buffer is too small; out[5] the valid scratch's words, out[6]"
+           "the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).")
+  (iset out 0 0)
+  (iset out 5 w)
+  (iset out 6 nb)
+  (iset out 7 sw)
+  (return (neg 5)))
 
 (defn ^:pub ^I32 vm-run [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
                          ^I32 items0 ^IntsR limits ^Ints s ^Ints out ^Ext ext]
@@ -273,8 +311,7 @@
            "accounting starting at depth0 / items0. See vm-validate for results.")
   (if (< (ilen out) 8) (return (neg 4)))
   (if (< (ilen p) HEADER_WORDS) (return (neg 1)))
-  (if (or (!= (ia p 0) MAGIC) (or (and (!= (ia p H_FORMAT) FORMAT_VERSION) (!= (ia p H_FORMAT) FORMAT_V11))
-                                  (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
+  (if (or (!= (ia p 0) MAGIC) (or (!= (ia p H_FORMAT) FORMAT_V2) (!= (ia p H_HEADER_WORDS) HEADER_WORDS)))
     (return (neg 1)))
   (if (or (!= (ia p H_PROGRAM_WORDS) (ilen p)) (!= (ia p H_POOL_BYTES) (blen pool))) (return (neg 1)))
   (if (or (< rule 0) (>= rule (ia p H_N_RULES))) (return (neg 3)))
@@ -310,6 +347,11 @@
         (set r (dead-item b s start 0 end)))
       (if (== r (neg R_BUDGET))
         (do (let [at2 (ia s VM_POS)] (return (vm-output s out R_BUDGET 0 at2)))))
+      (comment "program-2 §9.4: the arena must grow (the host gives S that many words and"
+               "runs again, -5), or it is at its cap (group_limit at the item's head)")
+      (if (== r (neg R_AGROW)) (return (vm-need out 0 0 (arena-want s))))
+      (if (== r (neg R_GROUP_LIMIT))
+        (do (let [at6 (ia s VM_POS)] (return (vm-output s out R_GROUP_LIMIT 0 at6)))))
       (if (== r (neg R_INCONSISTENT)) (return (neg 1)))
       (if (< r 0)
         (do (let [at3 (ia s O_ERR_POS)] (return (vm-output s out (neg r) 0 at3)))))
@@ -333,15 +375,6 @@
            "attempt of a valid-CBOR run (D262), or R_NONDET from embedded content.")
   (return (or (or (== code CODE_NON_SHORTEST) (== code CODE_INDEFINITE))
               (or (== code CODE_KEY_ORDER) (== code R_NONDET)))))
-
-(defn ^:pub ^I32 vm-need [^Ints out ^I32 w ^I32 nb ^I32 sw]
-  (comment "-5: a host buffer is too small; out[5] the valid scratch's words, out[6]"
-           "the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).")
-  (iset out 0 0)
-  (iset out 5 w)
-  (iset out 6 nb)
-  (iset out 7 sw)
-  (return (neg 5)))
 
 (defn ^:pub ^I32 vm-remap [^Bytes b ^Bytes cb ^Ints vs ^I32 start ^Ints out]
   (comment "The offset of a run over a canonical copy mapped back to b (D264); a"
@@ -405,9 +438,11 @@
         (let [l (canon-build b vs cb start end embeds sc)]
           (if (< l 0) (return (vm-need out (ia vs O_VNEEDW) (ia vs O_VNEEDB) 0)))
           (let [n (ia vs O_S_NEV)
-                base (vm-scratch-words p rule (ia s VM_MARK_CAP))
-                need (+ (+ base 4) (* EV_WORDS n))]
-            (if (and (> n 0) (< (ilen s) need)) (return (vm-need out 0 0 need)))
+                base (vm-fixed-words p rule (ia s VM_MARK_CAP))
+                ^:mut vt 0]
+            (if (> n 0) (set vt (+ 4 (* EV_WORDS n))))
+            (let [need (+ (+ (+ base vt) AR_HDR) (arena-lease p))]
+              (if (< (ilen s) need) (return (vm-need out 0 0 need))))
             (if (> n 0)
               (do (iset s base n)
                   (iset s (+ base 1) 0)
@@ -416,6 +451,8 @@
                   (for [^I32 i 0 (* EV_WORDS n)]
                     (iset s (+ (+ base 4) i) (ia vs (+ O_S_FIRST i))))
                   (iset s VM_VTAB base)))
+            (comment "the group arena after the events")
+            (arena-init s (+ base vt) (arena-cap p (lim-or limits 10)))
             (iset s O_PROFILE (bit-or (ia s O_PROFILE) PF_CANON))
             (if (< (ia s O_MAX_BYTES) l) (iset s O_MAX_BYTES l))
             (let [base0 (ia vs O_S_CBASE)
@@ -444,9 +481,14 @@
   (let [r (vm-run p pool rule b start end depth0 items0 limits s out ext)]
     (if (< r 0) (return r))
     (let [pf (prof limits depth0)
-          nd (and (!= (bit-and pf PF_VALID) 0) (nondet-code (ia out 0)))
-          ecs (!= (bit-and (ia s O_VCTL) VC_ECS) 0)]
-      (if (and (not nd) (not ecs)) (return r))
+          valid (!= (bit-and pf PF_VALID) 0)
+          nd (and valid (nondet-code (ia out 0)))
+          ecs (!= (bit-and (ia s O_VCTL) VC_ECS) 0)
+          bud (and valid (== (ia out 0) R_BUDGET))]
+      (comment "An attempt that ran out of budget may have stopped before the encoding"
+               "only valid CBOR has: the canonical path decides, as the session's whole-item"
+               "check does (D277; over a deterministic input its copy is the input).")
+      (if (and (and (not nd) (not ecs)) (not bud)) (return r))
       (return (vm-canon p pool rule b start end depth0 items0 limits s out ext vs cb)))))
 
 (defn ^:pub ^I32 vm-validate-v [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s

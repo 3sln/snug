@@ -2,7 +2,8 @@
 
 Expectations come from the local RFC texts and D270 PEG semantics. Observed
 snug or Ruby behaviour never changes an expectation. This is a findings
-corpus for P8.2/P8.4/P8.5, with D271 cut cases staged separately.
+corpus for P8.2/P8.4/P8.5, with the literal-RFC cut case staged separately
+(`D301`; it was `D271` before the owner's 2026-11-10 decision).
 
 ## Reproduce
 
@@ -33,7 +34,7 @@ it must not be used to claim a reference cross-check. The checked-in corpus
 is generated with reference checks enabled.
 
 The runner prints compile findings and pass/fail per suite, then exact
-dependency groups (`baseline`, `D270`, `D271`, `P8.4`, or combinations).
+dependency groups (`baseline`, `D270`, `D301`, `P8.4`, or combinations).
 Default report mode exits 0 even with findings; `--gate` exits 1 when a
 selected expectation fails. `--depends=baseline` selects unstaged cases;
 `--depends=P8.4` selects that exact group. The complete default report runs
@@ -124,8 +125,13 @@ encoder. Expectations are justified in each case's note. D270 means greedy
 occurrence and first successful group choice with no later backtracking.
 Pathological map-picking examples receive only unambiguous negative cases;
 no Boolean verdict is invented for the RFC's indeterminate positive map.
-D271 witnesses use the literal RFC cut reading and are staged, leaving the
-owner's interim D021 behaviour untouched. P8.4 covers valid non-preferred or
+The cut-scope witness uses the literal RFC cut reading. D301 (2026-11-10)
+made that reading snug's default cut semantics in the format 2.0 PEG engine
+(rule A is `cuts: 'branch'`); the case is staged as `dependsOn: ["D301"]`
+until that engine is the one the runner measures (format 1's D021 VM fails
+it). Re-derived with the independent oracle in its default `rfc` mode
+(2026-11-10): both cases of the suite keep their expectations, and no other
+RFC-corpus case changes verdict between the two cut modes. P8.4 covers valid non-preferred or
 indefinite bytes, unsorted/embedded maps and currently restricted valid
 simple/tag encodings. Reference results never determine those expectations.
 
@@ -208,13 +214,15 @@ snug data verdict because their effective schema did not compile.
 | baseline | 731 | 29 |
 | P8.4 | 179 | 45 |
 | D270 | 3 | 11 |
-| D271 | 0 | 1 |
+| D271 (now D301) | 0 | 1 |
 | Total | 913 | 86 |
 
 There are 999 checks: 401 CDDL cases, 588 wire-policy verdicts and ten
 applicable sequence item-count checks. Failure counts include unavailable
 snug data verdicts as failures, so a compiler refusal cannot hide a bad
-expectation. The D271-only `--gate` invocation exits 1 as expected.
+expectation. The D271-only `--gate` invocation exits 1 as expected. (This
+run predates D301; the same case is now selected by `--depends=D301`.
+`current-results.json` is that run's record and keeps the old group name.)
 
 Ruby returned **320 data verdicts**, of which **seven disagree** (all in
 RFC 8610): the cut-free wildcard example, accepting an untagged integer for

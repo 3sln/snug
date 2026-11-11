@@ -32,11 +32,12 @@
             [snug.cbor.canon :refer [kclass cw dup-finish targ head-short]]
             [snug.cbor.vcopy :refer [canon-build vmap vsource ev-find]]
             [snug.vm.layout :refer [H_FLAGS FL_EMBED VM_POS VM_VTAB VM_RULE VM_MARK_CAP VM_W_STATE
-                                    VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_OFFSET VM_DLIM R_BUDGET R_INCONSISTENT INF]]
+                                    VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_OFFSET VM_DLIM R_BUDGET R_INCONSISTENT INF
+                                    R_GROUP_LIMIT]]
             [snug.vm.base :refer [charge c64min]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.eval :refer [eval-item]]
-            [snug.vm.api :refer [vm-scratch-words]]
+            [snug.vm.arena :refer [arena-after]]
             [snug.vm.sbase :refer [SS_GW SS_GB SS_GS SS_GA SS_VNEED SS_ATOP SS_VOK]]))
 
 ;; vitem / vscan / vkey: the window must hold more of the item (SS_VNEED bytes from
@@ -131,14 +132,14 @@
 
 (defn ^:pub ^I32 vbuild [^IntsR p ^Bytes b ^Ints s ^Ints ss ^Ints vs ^BytesW cb ^I32 pos ^I32 iend ^I32 refused]
   (comment "The copy of the item at pos (window-relative) and its events, the events"
-           "put in S past the rule's words: the copy's start in cb (its end in"
+           "put in S past the group arena: the copy's start in cb (its end in"
            "vs[O_VLEN] via canon-build), or VI_GROW.")
   (let [^:mut embeds 1]
     (if (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0) (set embeds 2))
     (let [l (canon-build b vs cb pos iend embeds refused)]
       (if (< l 0) (return (vgrow ss (ia vs O_VNEEDW) (ia vs O_VNEEDB) 0 0)))
       (let [n (ia vs O_S_NEV)
-            base (vm-scratch-words p (ia s VM_RULE) (ia s VM_MARK_CAP))
+            base (arena-after s)
             need (+ (+ base 4) (* EV_WORDS n))]
         (if (and (> n 0) (< (ilen s) need)) (return (vgrow ss 0 0 (+ need 64) 0)))
         (iset s VM_VTAB 0)
@@ -198,7 +199,8 @@
                           (set done true)))
                     (if done (iset s VM_W_OFFSET (vsource b cb vs pos (ia vs (+ e 3))))))))
             (if (not done) (iset s VM_W_OFFSET (vmap b cb vs pos wo)))))))
-  (if (== r (neg R_BUDGET))
+  (comment "budget and group_limit (program-2 §9.4) report VM_POS: back to the input")
+  (if (or (== r (neg R_BUDGET)) (== r (neg R_GROUP_LIMIT)))
     (do (let [vp (ia s VM_POS)]
           (iset s VM_POS (vmap b cb vs pos vp)))
         (return r)))

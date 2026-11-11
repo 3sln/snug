@@ -17,7 +17,7 @@ pub const C_LEAF: i32 = 6;
 pub const C_MASK: i32 = 7;
 pub const C_TYPESET: i32 = 8;
 pub const C_KEY: i32 = 9;
-pub const C_GROUP: i32 = 10;
+pub const C_PEG: i32 = 10;
 pub const C_MAP: i32 = 11;
 pub const C_ARRAY: i32 = 12;
 pub const C_REGEXP: i32 = 13;
@@ -32,11 +32,13 @@ pub const C_BUDGET: i32 = 21;
 pub const C_TOTAL: i32 = 22;
 pub const C_UTF8: i32 = 23;
 pub const C_EXT: i32 = 24;
+pub const C_VERSION: i32 = 25;
+pub const C_RECURSION: i32 = 26;
 pub(crate) const W_N_RULES: i32 = 15;
 pub(crate) const W_N_LEAVES: i32 = 16;
 pub(crate) const W_N_TYPESETS: i32 = 17;
 pub(crate) const W_N_KEYS: i32 = 18;
-pub(crate) const W_N_GROUPS: i32 = 19;
+pub(crate) const W_N_PEGS: i32 = 19;
 pub(crate) const W_N_MAPS: i32 = 20;
 pub(crate) const W_N_ARRAYS: i32 = 21;
 pub(crate) const W_N_REGEXPS: i32 = 22;
@@ -46,12 +48,32 @@ pub(crate) const W_N_LITREFS: i32 = 25;
 pub(crate) const W_N_CSETS: i32 = 26;
 pub(crate) const W_N_CHAINS: i32 = 27;
 pub(crate) const W_TS_ANY: i32 = 28;
-pub(crate) const W_G_EMPTY: i32 = 29;
+pub(crate) const W_R_ITEM_MAX: i32 = 29;
+pub(crate) const W_LIM_GROUP: i32 = 41;
+pub(crate) const W_RECLEAF_MAX: i32 = 62;
+pub(crate) const W_ACT_SUM: i32 = 63;
 pub(crate) const W_SEC: i32 = 42;
 pub(crate) const W_N_EXTS: i32 = 30;
 pub(crate) const W_EXT_NAMES: i32 = 31;
 pub(crate) const W_EXT_NAMES_LEN: i32 = 39;
-pub(crate) const FORMAT_V11: i32 = 65537;
+pub const FORMAT_V2: i32 = 2;
+pub(crate) const PEG_HDR: i32 = 9;
+pub(crate) const COUNT_SAT: i32 = 16777216;
+pub(crate) const RING_WORDS: i32 = 4096;
+pub(crate) const P_EMPTY: i32 = 0;
+pub(crate) const P_FAIL: i32 = 1;
+pub(crate) const P_ENTRY: i32 = 2;
+pub(crate) const P_MEMBER: i32 = 3;
+pub(crate) const P_SEQ: i32 = 4;
+pub(crate) const P_CHOICE: i32 = 5;
+pub(crate) const P_REP: i32 = 6;
+pub(crate) const P_CALL: i32 = 7;
+pub(crate) const TIER_A0: i32 = 0;
+pub(crate) const TIER_A1: i32 = 1;
+pub(crate) const TIER_A2: i32 = 2;
+pub(crate) const TIER_F: i32 = 0;
+pub(crate) const TIER_S: i32 = 1;
+pub(crate) const TIER_T: i32 = 2;
 pub(crate) fn bad(s: &mut [i32], at: i32, check: i32) -> i32 {
     // Record the first refusal (word or byte offset, check id); answers 0.
     if s[(V_FAILED) as usize] == 0 {
@@ -84,11 +106,11 @@ pub(crate) fn pw(p: &[i32], i: i32) -> i32 {
     }
     return 0;
 }
-pub(crate) fn v11(p: &[i32]) -> bool {
-    // Is this a format 1.1 Program (extension controls admitted)?
-    return pw(p, 1) == FORMAT_V11;
-}
 pub(crate) fn sec(p: &[i32], k: i32) -> i32 {
+    // Section k's first word; section 20 is the end (PROGRAM_WORDS, format 2.0).
+    if k == 20 {
+        return p.len() as i32;
+    }
     return pw(p, W_SEC + k);
 }
 pub(crate) fn in_range(v: i32, n: i32) -> bool {
@@ -295,8 +317,8 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     if !want(s, p[(0) as usize] == 1735749235, 0, C_HEADER) {
         return false;
     }
-    // format 1.0 (word value 1) or 1.1 (minor 1 in the high 16 bits, D084/D141)
-    if !want(s, (p[(1) as usize] == 1) || (p[(1) as usize] == FORMAT_V11), 1, C_HEADER) {
+    // format 2.0 only: D084's major-version rule refuses 1.x (and anything else)
+    if !want(s, p[(1) as usize] == FORMAT_V2, 1, C_VERSION) {
         return false;
     }
     if !want(s, p[(2) as usize] == 64, 2, C_HEADER) {
@@ -322,17 +344,10 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     if !want(s, (p[(W_TS_ANY) as usize] >= (-1)) && (p[(W_TS_ANY) as usize] < p[(W_N_TYPESETS) as usize]), W_TS_ANY, C_HEADER) {
         return false;
     }
-    if !want(s, (p[(W_G_EMPTY) as usize] >= (-1)) && (p[(W_G_EMPTY) as usize] < p[(W_N_GROUPS) as usize]), W_G_EMPTY, C_HEADER) {
+    // format 2.0: the arena cap (41) within its hard maximum; 29, 62 and 63 are
+    // derived (check-csets); 30, 31 and 39 are the extension table (check-exts)
+    if !want(s, (p[(W_LIM_GROUP) as usize] >= 0) && (p[(W_LIM_GROUP) as usize] <= COUNT_SAT), W_LIM_GROUP, C_HEADER) {
         return false;
-    }
-    // reserved words (30, 31 and 39 are the extension table's under 1.1, checked by check-exts)
-    if !want(s, (p[(41) as usize] == 0) && (p[(63) as usize] == 0), 41, C_HEADER) {
-        return false;
-    }
-    if !v11(p) {
-        if !want(s, (p[(30) as usize] == 0) && ((p[(31) as usize] == 0) && (p[(39) as usize] == 0)), 30, C_HEADER) {
-            return false;
-        }
     }
     if !want(s, (p[(30) as usize] >= 0) && (p[(30) as usize] <= 65536), 30, C_HEADER) {
         return false;
@@ -362,16 +377,17 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     if !want(s, p[(40) as usize] >= 0, 40, C_HEADER) {
         return false;
     }
-    // sections: S_RULES = 64, monotone, S_END = PROGRAM_WORDS
+    // sections: S_RULES = 64, monotone, ending at PROGRAM_WORDS (format 2.0 has
+    // no S_END word)
     if !want(s, p[(W_SEC) as usize] == 64, W_SEC, C_SECTIONS) {
         return false;
     }
-    for k in 0..20 {
+    for k in 0..19 {
         if !want(s, p[(W_SEC + k) as usize] <= p[(W_SEC + (k + 1)) as usize], W_SEC + k, C_SECTIONS) {
             return false;
         }
     }
-    if !want(s, p[(62) as usize] == (p.len() as i32), 62, C_SECTIONS) {
+    if !want(s, p[(W_SEC + 19) as usize] <= (p.len() as i32), W_SEC + 19, C_SECTIONS) {
         return false;
     }
     // fixed-width sections and index sections against the counts
@@ -387,7 +403,7 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     if !want(s, (p[(47) as usize] - p[(46) as usize]) == (2 * p[(W_N_KEYS) as usize]), 46, C_SECTIONS) {
         return false;
     }
-    if !want(s, (p[(48) as usize] - p[(47) as usize]) == p[(W_N_GROUPS) as usize], 47, C_SECTIONS) {
+    if !want(s, (p[(48) as usize] - p[(47) as usize]) == p[(W_N_PEGS) as usize], 47, C_SECTIONS) {
         return false;
     }
     if !want(s, (p[(50) as usize] - p[(49) as usize]) == p[(W_N_MAPS) as usize], 49, C_SECTIONS) {
@@ -418,7 +434,7 @@ pub(crate) fn check_header(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
 }
 pub(crate) fn record_len(p: &[i32], kind: i32, at: i32, end: i32) -> i32 {
     // The length of the variable-length record at `at` (kind 0 typeset, 1
-    // group, 2 map, 3 array, 4 regexp, 5 cset, 6 chain), or -1 if it does not
+    // PEG program, 2 map, 3 array, 4 regexp, 5 cset, 6 chain), or -1 if it does not
     // fit before `end`. Every count is bounded by the room left before it is
     // multiplied, so nothing overflows.
     let room: i32 = end - at;
@@ -443,58 +459,68 @@ pub(crate) fn record_len(p: &[i32], kind: i32, at: i32, end: i32) -> i32 {
         return 2 + (tna + tne);
     }
     if kind == 1 {
-        let gn: i32 = pw(p, at);
-        if (gn < 0) || (gn > (room / 4)) {
+        // a PEG program: 9 + 5 n_nodes + n_kids (1 <= n_nodes <= 16384)
+        if room < PEG_HDR {
             return -1;
         }
-        if (2 + (4 * gn)) > room {
+        let pn: i32 = pw(p, at + 1);
+        let pk: i32 = pw(p, at + 2);
+        if (pn < 1) || (pn > 16384) {
             return -1;
         }
-        return 2 + (4 * gn);
+        if pn > ((room - PEG_HDR) / 5) {
+            return -1;
+        }
+        if (pk < 0) || (pk > ((room - PEG_HDR) - (5 * pn))) {
+            return -1;
+        }
+        return (PEG_HDR + (5 * pn)) + pk;
     }
     if kind == 2 {
+        // a map table: 8 + 5 n_members + 3 n_named + namers (one per literal
+        // member) + n_root
         if room < 8 {
             return -1;
         }
-        let nf: i32 = pw(p, at);
-        let np: i32 = pw(p, at + 1);
-        let mna: i32 = pw(p, at + 2);
-        let nl: i32 = pw(p, at + 3);
-        let nk: i32 = pw(p, at + 4);
-        let nn: i32 = pw(p, at + 5);
+        let nm: i32 = pw(p, at + 1);
+        let nn: i32 = pw(p, at + 2);
+        let nr: i32 = pw(p, at + 6);
         let q: i32 = room / 5;
-        if ((nf < 1) || (nf > q)) || ((np < 1) || (np > q)) {
+        if ((nm < 0) || (nm > q)) || ((nn < 0) || (nn > q)) {
             return -1;
         }
-        if ((mna < 1) || (mna > q)) || ((nl < 0) || (nl > q)) {
+        if (nr < 0) || (nr > q) {
             return -1;
         }
-        if ((nk < 0) || (nk > q)) || ((nn < 0) || (nn > q)) {
+        if (8 + (5 * nm)) > room {
             return -1;
         }
-        let mlen: i32 = ((8 + (4 * nf)) + ((5 * np) + (5 * mna))) + ((4 * nl) + ((4 * nk) + (2 * nn)));
+        let mut nlit: i32 = 0;
+        for i in 0..nm {
+            if pw(p, (at + 8) + (5 * i)) >= 0 {
+                nlit += 1;
+            }
+        }
+        let mlen: i32 = ((8 + (5 * nm)) + (3 * nn)) + (nlit + nr);
         if (mlen < 0) || (mlen > room) {
             return -1;
         }
         return mlen;
     }
     if kind == 3 {
+        // an array table: 4 + W + npos + npos W
         if room < 4 {
             return -1;
         }
         let anpos: i32 = pw(p, at);
         let aw: i32 = pw(p, at + 1);
-        let anc: i32 = pw(p, at + 2);
         if (anpos < 0) || (anpos > 4096) {
             return -1;
         }
         if aw != ((anpos + 31) >> 5) {
             return -1;
         }
-        if (anc < 0) || (anc > anpos) {
-            return -1;
-        }
-        let alen: i32 = (4 + (2 * aw)) + ((2 * anpos) + ((2 * anc) + (anpos * aw)));
+        let alen: i32 = (4 + aw) + (anpos + (anpos * aw));
         if alen > room {
             return -1;
         }
@@ -1050,9 +1076,6 @@ pub(crate) fn check_leaf(p: &[i32], b: &[u8], s: &mut [i32], l: i32) -> bool {
     if ((k < 1) || (k > 18)) || ((w0 >> 16) != 0) {
         return want(s, false, o, C_LEAF);
     }
-    if (k == 18) && (!v11(p)) {
-        return want(s, false, o, C_LEAF);
-    }
     if pw(p, o + 7) != 0 {
         return want(s, false, o, C_LEAF);
     }
@@ -1239,46 +1262,6 @@ pub(crate) fn check_keys(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     }
     return !failed(s);
 }
-pub(crate) fn check_groups(p: &[i32], s: &mut [i32]) -> bool {
-    let ng: i32 = pw(p, W_N_GROUPS);
-    let nt: i32 = pw(p, W_N_TYPESETS);
-    let mut empty: i32 = -1;
-    for g in 0..ng {
-        let o: i32 = rec(p, 5, g);
-        let n: i32 = pw(p, o);
-        let mut nc: i32 = 0;
-        if !spend(s, 1 + n) {
-            return false;
-        }
-        if (n == 0) && (empty < 0) {
-            empty = g;
-        }
-        for i in 0..n {
-            let e: i32 = o + (2 + (4 * i));
-            let mn: i32 = pw(p, e + 2);
-            let mx: i32 = pw(p, e + 3);
-            if (!in_range(pw(p, e), nt)) || (!in_range(pw(p, e + 1), nt)) {
-                return want(s, false, e, C_GROUP);
-            }
-            if (mn < 0) || ((mn > mx) || (mx < 1)) {
-                return want(s, false, e, C_GROUP);
-            }
-            if (mx != INF) && (mx >= 16777216) {
-                return want(s, false, e, C_GROUP);
-            }
-            if !((mn == 0) && (mx == INF)) {
-                nc += 1;
-            }
-        }
-        if pw(p, o + 1) != nc {
-            return want(s, false, o + 1, C_DERIVED);
-        }
-    }
-    if pw(p, W_G_EMPTY) != empty {
-        return want(s, false, W_G_EMPTY, C_HEADER);
-    }
-    return !failed(s);
-}
 pub(crate) fn check_rules(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     let base: i32 = sec(p, 0);
     let n: i32 = pw(p, W_N_RULES);
@@ -1309,225 +1292,701 @@ pub(crate) fn check_rules(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
     }
     return !failed(s);
 }
+pub(crate) fn tb(s: &[i32]) -> i32 {
+    return MARKS + (2 * s[(VM_MARK_CAP) as usize]);
+}
+pub(crate) fn tg(s: &[i32], i: i32) -> i32 {
+    return s[(tb(s) + i) as usize];
+}
+pub(crate) fn tset(s: &mut [i32], i: i32, v: i32) {
+    s[(tb(s) + i) as usize] = v;
+}
+pub(crate) fn sadd(a: i32, b: i32) -> i32 {
+    if (a == INF) || (b == INF) {
+        return INF;
+    }
+    if a > (INF - b) {
+        return INF;
+    }
+    return a + b;
+}
+pub(crate) fn smul(a: i32, b: i32) -> i32 {
+    if (a == 0) || (b == 0) {
+        return 0;
+    }
+    if (a == INF) || (b == INF) {
+        return INF;
+    }
+    if a > (INF / b) {
+        return INF;
+    }
+    return a * b;
+}
+pub(crate) fn imax(a: i32, b: i32) -> i32 {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+pub(crate) fn more_budget(s: &mut [i32], units: i32) -> bool {
+    // Raise the verify budget by units (saturating) before a fixed point.
+    s[(V_BUDGET) as usize] = sadd(s[(V_BUDGET) as usize], units);
+    return true;
+}
+pub(crate) fn peg_at(p: &[i32], g: i32) -> i32 {
+    return rec(p, 5, g);
+}
+pub(crate) fn pnw(p: &[i32], o: i32, i: i32, w: i32) -> i32 {
+    return pw(p, (o + PEG_HDR) + ((5 * i) + w));
+}
+pub(crate) fn pkid(p: &[i32], o: i32, i: i32, j: i32) -> i32 {
+    // Kid j of SEQ / CHOICE node i of the program at o.
+    return pw(p, ((o + PEG_HDR) + (5 * pw(p, o + 1))) + (pnw(p, o, i, 1) + j));
+}
+pub(crate) fn counts_ok(lo: i32, hi: i32) -> bool {
+    // program-2 §3 Counts: 0 <= min <= 2^24, 1 <= max, max INF or below 2^24,
+    // min <= max.
+    if (lo < 0) || (lo > COUNT_SAT) {
+        return false;
+    }
+    if hi < 1 {
+        return false;
+    }
+    if (hi != INF) && (hi >= COUNT_SAT) {
+        return false;
+    }
+    return lo <= hi;
+}
+pub(crate) fn peg_count(p: &[i32], o: i32, op: i32) -> i32 {
+    // Nodes of the program at o with this op.
+    let mut c: i32 = 0;
+    for i in 0..pw(p, o + 1) {
+        if pnw(p, o, i, 0) == op {
+            c += 1;
+        }
+    }
+    return c;
+}
+pub(crate) fn peg_nullable(p: &[i32], s: &mut [i32], o: i32, n: i32, calls: i32) -> bool {
+    // nullable as a least fixed point (TEMP[0, n)): rounds in reverse id order
+    // until nothing changes; one round without CALLs.
+    for z in 0..n {
+        tset(s, z, 0);
+    }
+    loop {
+        let mut changed: bool = false;
+        if !spend(s, n) {
+            return false;
+        }
+        let mut i: i32 = n - 1;
+        while i >= 0 {
+            let op: i32 = pnw(p, o, i, 0);
+            let mut nu: i32 = 0;
+            if op == P_EMPTY {
+                nu = 1;
+            }
+            if (op == P_MEMBER) && (pnw(p, o, i, 2) == 0) {
+                nu = 1;
+            }
+            if op == P_CALL {
+                nu = tg(s, pnw(p, o, i, 1));
+            }
+            if op == P_REP {
+                if (pnw(p, o, i, 2) == 0) || (tg(s, pnw(p, o, i, 1)) != 0) {
+                    nu = 1;
+                }
+            }
+            if op == P_CHOICE {
+                for j in 0..pnw(p, o, i, 2) {
+                    if tg(s, pkid(p, o, i, j)) != 0 {
+                        nu = 1;
+                    }
+                }
+            }
+            if op == P_SEQ {
+                nu = 1;
+                for j2 in 0..pnw(p, o, i, 2) {
+                    if tg(s, pkid(p, o, i, j2)) == 0 {
+                        nu = 0;
+                    }
+                }
+            }
+            if (nu != 0) && (tg(s, i) == 0) {
+                tset(s, i, 1);
+                changed = true;
+            }
+            i -= 1;
+        }
+        if (!changed) || (calls == 0) {
+            return true;
+        }
+    }
+}
+pub(crate) fn left_edge(p: &[i32], s: &[i32], o: i32, u: i32, j: i32) -> i32 {
+    // Edge j of node u in the left graph (program-2 §5.3), or -1.
+    let op: i32 = pnw(p, o, u, 0);
+    if op == P_SEQ {
+        if j >= pnw(p, o, u, 2) {
+            return -1;
+        }
+        if (j > 0) && (tg(s, pkid(p, o, u, j - 1)) == 0) {
+            return -1;
+        }
+        return pkid(p, o, u, j);
+    }
+    if op == P_CHOICE {
+        if j >= pnw(p, o, u, 2) {
+            return -1;
+        }
+        return pkid(p, o, u, j);
+    }
+    if ((op == P_REP) || (op == P_CALL)) && (j == 0) {
+        return pnw(p, o, u, 1);
+    }
+    return -1;
+}
+pub(crate) fn no_left_recursion(p: &[i32], s: &mut [i32], o: i32, n: i32) -> bool {
+    // No cycle in the left graph (CALL cycles reachable through nullable
+    // prefixes): iterative DFS, colours TEMP[4n..), cursors TEMP[5n..), stack
+    // TEMP[6n..). Needs the nullable words.
+    for z in 0..n {
+        tset(s, (4 * n) + z, 0);
+    }
+    for st in 0..n {
+        if tg(s, (4 * n) + st) == 0 {
+            let mut sp: i32 = 1;
+            tset(s, 6 * n, st);
+            tset(s, (4 * n) + st, 1);
+            tset(s, (5 * n) + st, 0);
+            while sp > 0 {
+                if !spend(s, 1) {
+                    return false;
+                }
+                let u: i32 = tg(s, (6 * n) + (sp - 1));
+                let j: i32 = tg(s, (5 * n) + u);
+                let v: i32 = left_edge(p, s, o, u, j);
+                if v < 0 {
+                    tset(s, (4 * n) + u, 2);
+                    sp -= 1;
+                } else {
+                    tset(s, (5 * n) + u, j + 1);
+                    if tg(s, (4 * n) + v) == 1 {
+                        return false;
+                    }
+                    if tg(s, (4 * n) + v) == 0 {
+                        if sp >= n {
+                            return false;
+                        }
+                        tset(s, (4 * n) + v, 1);
+                        tset(s, (5 * n) + v, 0);
+                        tset(s, (6 * n) + sp, v);
+                        sp += 1;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+pub(crate) fn check_peg(p: &[i32], s: &mut [i32], g: i32) -> bool {
+    // One program: node fields and counts, a tree through kids and REP children
+    // (each non-root node referenced once, by a smaller id), positions and
+    // members numbered in node order, the map normal form (no foldable REP of
+    // a MEMBER, §3.3), no left recursion, and the derived fields: n_calls,
+    // flags bit 0, depth, B and the array tier (map tiers: check-map).
+    let o: i32 = peg_at(p, g);
+    let kind: i32 = pw(p, o);
+    let n: i32 = pw(p, o + 1);
+    let nk: i32 = pw(p, o + 2);
+    let mut npos: i32 = 0;
+    let mut nmem: i32 = 0;
+    let mut calls: i32 = 0;
+    let mut sumk: i32 = 0;
+    if !spend(s, (5 * n) + nk) {
+        return false;
+    }
+    if (kind < 0) || (kind > 1) {
+        return want(s, false, o, C_PEG);
+    }
+    if pw(p, o + 5) != 0 {
+        return want(s, false, o + 5, C_PEG);
+    }
+    for z in 0..n {
+        tset(s, (4 * n) + z, 0);
+    }
+    for i in 0..n {
+        let at: i32 = (o + PEG_HDR) + (5 * i);
+        let op: i32 = pw(p, at);
+        let a: i32 = pw(p, at + 1);
+        let b: i32 = pw(p, at + 2);
+        let c: i32 = pw(p, at + 3);
+        if pw(p, at + 4) != (-1) {
+            return want(s, false, at, C_PEG);
+        }
+        if (op < 0) || (op > 7) {
+            return want(s, false, at, C_PEG);
+        }
+        if op == P_EMPTY {
+            if (a != 0) || ((b != 0) || (c != 0)) {
+                return want(s, false, at, C_PEG);
+            }
+        }
+        if op == P_FAIL {
+            if (a != 0) || ((b < (-1)) || (c != 0)) {
+                return want(s, false, at, C_PEG);
+            }
+        }
+        if op == P_ENTRY {
+            if (kind != 0) || ((a != npos) || ((b != 0) || (c != 0))) {
+                return want(s, false, at, C_PEG);
+            }
+            npos += 1;
+        }
+        if op == P_MEMBER {
+            if (kind != 1) || ((a != nmem) || (!counts_ok(b, c))) {
+                return want(s, false, at, C_PEG);
+            }
+            nmem += 1;
+        }
+        if (op == P_SEQ) || (op == P_CHOICE) {
+            if ((c != 0) || (b < 2)) || ((a < 0) || (a > (nk - b))) {
+                return want(s, false, at, C_PEG);
+            }
+            sumk += b;
+            for j in 0..b {
+                let k: i32 = pkid(p, o, i, j);
+                if (!in_range(k, n)) || (k <= i) {
+                    return want(s, false, at, C_PEG);
+                }
+                tset(s, (4 * n) + k, tg(s, (4 * n) + k) + 1);
+            }
+        }
+        if op == P_REP {
+            if (!counts_ok(b, c)) || ((!in_range(a, n)) || (a <= i)) {
+                return want(s, false, at, C_PEG);
+            }
+            tset(s, (4 * n) + a, tg(s, (4 * n) + a) + 1);
+            if (kind == 1) && (pnw(p, o, a, 0) == P_MEMBER) {
+                // the fold table leaves no REP of a MEMBER(1, 1) or MEMBER(k, INF)
+                // it would rewrite
+                let mk: i32 = pnw(p, o, a, 2);
+                let mm: i32 = pnw(p, o, a, 3);
+                if (mk == 1) && (mm == 1) {
+                    return want(s, false, at, C_PEG);
+                }
+                if (mm == INF) && ((mk == 0) || (((mk == 1) && (b <= 1)) || ((mk >= 1) && (b >= 2)))) {
+                    return want(s, false, at, C_PEG);
+                }
+            }
+        }
+        if op == P_CALL {
+            if ((b != 0) || (c != 0)) || (!in_range(a, n)) {
+                return want(s, false, at, C_PEG);
+            }
+            calls += 1;
+        }
+    }
+    if sumk != nk {
+        return want(s, false, o + 2, C_PEG);
+    }
+    for i2 in 1..n {
+        if tg(s, (4 * n) + i2) != 1 {
+            return want(s, false, (o + PEG_HDR) + (5 * i2), C_PEG);
+        }
+    }
+    // derived: n_calls, flags (arrays: bit 0 only; maps: bits 1-2 by check-map)
+    if pw(p, o + 8) != calls {
+        return want(s, false, o + 8, C_DERIVED);
+    }
+    let fl: i32 = pw(p, o + 7);
+    let mut rbit: i32 = 0;
+    if calls > 0 {
+        rbit = 1;
+    }
+    if (fl & 1) != rbit {
+        return want(s, false, o + 7, C_DERIVED);
+    }
+    if (kind == 0) && (fl != rbit) {
+        return want(s, false, o + 7, C_DERIVED);
+    }
+    if (kind == 1) && ((fl & (!7)) != 0) {
+        return want(s, false, o + 7, C_DERIVED);
+    }
+    // lengths (TEMP: ml at n.., FL at 2n.., height at 3n..), B, depth
+    let mut bmax: i32 = 0;
+    if !spend(s, 2 * n) {
+        return false;
+    }
+    let mut i3: i32 = n - 1;
+    while i3 >= 0 {
+        let op3: i32 = pnw(p, o, i3, 0);
+        let mut ml: i32 = 0;
+        let mut flv: i32 = 0;
+        let mut ht: i32 = 1;
+        if op3 == P_EMPTY {
+            flv = -1;
+        }
+        if (op3 == P_ENTRY) || (op3 == P_MEMBER) {
+            ml = 1;
+        }
+        if (op3 == P_MEMBER) && (pnw(p, o, i3, 2) == 0) {
+            flv = -1;
+        }
+        if op3 == P_CALL {
+            ml = INF;
+            flv = INF;
+        }
+        if op3 == P_SEQ {
+            let mut pre: i32 = 0;
+            flv = -1;
+            for j3 in 0..pnw(p, o, i3, 2) {
+                let k3: i32 = pkid(p, o, i3, j3);
+                let kfl: i32 = tg(s, (2 * n) + k3);
+                if kfl != (-1) {
+                    flv = imax(flv, sadd(pre, kfl));
+                }
+                pre = sadd(pre, tg(s, n + k3));
+                ht = imax(ht, 1 + tg(s, (3 * n) + k3));
+            }
+            ml = pre;
+        }
+        if op3 == P_CHOICE {
+            let kc: i32 = pnw(p, o, i3, 2);
+            let mut nofail: bool = false;
+            for j4 in 0..kc {
+                let k4: i32 = pkid(p, o, i3, j4);
+                let kfl4: i32 = tg(s, (2 * n) + k4);
+                ml = imax(ml, tg(s, n + k4));
+                if kfl4 == (-1) {
+                    nofail = true;
+                } else {
+                    flv = imax(flv, kfl4);
+                }
+                if (j4 < (kc - 1)) && (kfl4 != (-1)) {
+                    bmax = imax(bmax, kfl4);
+                }
+                ht = imax(ht, 1 + tg(s, (3 * n) + k4));
+            }
+            if nofail {
+                flv = -1;
+            }
+        }
+        if op3 == P_REP {
+            let ch: i32 = pnw(p, o, i3, 1);
+            let lo: i32 = pnw(p, o, i3, 2);
+            let hi: i32 = pnw(p, o, i3, 3);
+            let cml: i32 = tg(s, n + ch);
+            let cfl: i32 = tg(s, (2 * n) + ch);
+            ml = smul(hi, cml);
+            if (lo == 0) || (cfl == (-1)) {
+                flv = -1;
+            } else {
+                flv = sadd(smul(lo - 1, cml), cfl);
+            }
+            if cfl != (-1) {
+                bmax = imax(bmax, cfl);
+            }
+            ht = 1 + tg(s, (3 * n) + ch);
+        }
+        tset(s, n + i3, ml);
+        tset(s, (2 * n) + i3, flv);
+        tset(s, (3 * n) + i3, ht);
+        i3 -= 1;
+    }
+    if pw(p, o + 6) != tg(s, 3 * n) {
+        return want(s, false, o + 6, C_DERIVED);
+    }
+    // nullable and left recursion (budget raised by the fixed point's bound)
+    more_budget(s, smul(4, smul(calls + 2, n)));
+    if !peg_nullable(p, s, o, n, calls) {
+        return false;
+    }
+    if !no_left_recursion(p, s, o, n) {
+        return want(s, false, o, C_RECURSION);
+    }
+    // the array tier and B; maps keep B = 0
+    let w: i32 = (npos + 31) >> 5;
+    let mut tier: i32 = TIER_A2;
+    let mut bs: i32 = 0;
+    if calls == 0 {
+        if bmax == 0 {
+            tier = TIER_A0;
+        }
+        if (bmax > 0) && ((bmax < RING_WORDS) && (((bmax + 1) * w) <= RING_WORDS)) {
+            tier = TIER_A1;
+            bs = bmax;
+        }
+    }
+    if kind == 1 {
+        bs = 0;
+    }
+    if pw(p, o + 4) != bs {
+        return want(s, false, o + 4, C_DERIVED);
+    }
+    if (kind == 0) && (pw(p, o + 3) != tier) {
+        return want(s, false, o + 3, C_DERIVED);
+    }
+    return !failed(s);
+}
+pub(crate) fn check_pegs(p: &[i32], s: &mut [i32]) -> bool {
+    for g in 0..pw(p, W_N_PEGS) {
+        if !check_peg(p, s, g) {
+            return false;
+        }
+    }
+    return true;
+}
+pub(crate) fn fail_prov_ok(p: &[i32], o: i32, lim: i32) -> bool {
+    // Every FAIL's provenance of the program at o is -1 or below lim.
+    for i in 0..pw(p, o + 1) {
+        if (pnw(p, o, i, 0) == P_FAIL) && (pnw(p, o, i, 2) >= lim) {
+            return false;
+        }
+    }
+    return true;
+}
 pub(crate) fn ceil32(n: i32) -> i32 {
     return (n + 31) >> 5;
 }
+pub(crate) fn map_lits(p: &[i32], o: i32) -> i32 {
+    // Literal members (key id >= 0) of the map table at o.
+    let mut c: i32 = 0;
+    for i in 0..pw(p, o + 1) {
+        if pw(p, (o + 8) + (5 * i)) >= 0 {
+            c += 1;
+        }
+    }
+    return c;
+}
 pub(crate) fn check_map(p: &[i32], s: &mut [i32], m: i32) -> bool {
     let o: i32 = rec(p, 7, m);
-    let nf: i32 = pw(p, o);
-    let np: i32 = pw(p, o + 1);
-    let na: i32 = pw(p, o + 2);
-    let nl: i32 = pw(p, o + 3);
-    let nk: i32 = pw(p, o + 4);
-    let nn: i32 = pw(p, o + 5);
-    let fb: i32 = o + 8;
-    let pb: i32 = fb + (4 * nf);
-    let ab: i32 = pb + (5 * np);
-    let lb: i32 = ab + (5 * na);
-    let kb: i32 = lb + (4 * nl);
-    let nb: i32 = kb + (4 * nk);
-    let ng: i32 = pw(p, W_N_GROUPS);
+    let peg: i32 = pw(p, o);
+    let nm: i32 = pw(p, o + 1);
+    let nn: i32 = pw(p, o + 2);
+    let kts: i32 = pw(p, o + 3);
+    let nr: i32 = pw(p, o + 6);
+    let mb: i32 = o + 8;
+    let nb: i32 = mb + (5 * nm);
+    let nlit: i32 = map_lits(p, o);
+    let rb: i32 = (nb + (3 * nn)) + nlit;
     let nt: i32 = pw(p, W_N_TYPESETS);
     let nkeys: i32 = pw(p, W_N_KEYS);
-    let mut sw: i32 = 4 + nf;
-    let mut groupsum: i32 = 0;
-    let mut maxnames: i32 = 0;
-    if !spend(s, (nf + np) + ((2 * na) + ((2 * nl) + (2 * nk)))) {
+    if !spend(s, (5 * nm) + ((3 * nn) + (nlit + nr))) {
         return false;
     }
-    // factors: 0 is RESIDUAL with pools from 0; the others own one pool each
-    let mut nextpool: i32 = 0;
-    for f in 0..nf {
-        let fo: i32 = fb + (4 * f);
-        let mode: i32 = pw(p, fo);
-        let pp: i32 = pw(p, fo + 1);
-        let pf: i32 = pw(p, fo + 2);
-        let pc: i32 = pw(p, fo + 3);
-        if f == 0 {
-            if (mode != 0) || (pc < 1) {
-                return want(s, false, fo, C_MAP);
-            }
-        } else {
-            if (mode < 1) || (mode > 2) {
-                return want(s, false, fo, C_MAP);
-            }
-            if pc != 1 {
-                return want(s, false, fo, C_MAP);
-            }
-        }
-        if pf != nextpool {
-            return want(s, false, fo, C_MAP);
-        }
-        if mode == 2 {
-            if (pp != 0) || (pw(p, fb + 3) != 1) {
-                return want(s, false, fo, C_MAP);
-            }
-            if pw(p, pb + 3) != 1 {
-                return want(s, false, fo, C_MAP);
-            }
-        } else if pp != (-1) {
-            return want(s, false, fo, C_MAP);
-        }
-        nextpool = pf + pc;
-    }
-    if nextpool != np {
-        return want(s, false, fb, C_MAP);
-    }
-    // pools: owners, groups, alternative runs partitioning alts; state offsets
-    let mut nextalt: i32 = 0;
-    let mut fi: i32 = 0;
-    for q in 0..np {
-        let po: i32 = pb + (5 * q);
-        let f2: i32 = pw(p, po);
-        let g: i32 = pw(p, po + 1);
-        let af: i32 = pw(p, po + 2);
-        let ac: i32 = pw(p, po + 3);
-        while (fi < nf) && (q >= (pw(p, fb + ((4 * fi) + 2)) + pw(p, fb + ((4 * fi) + 3)))) {
-            fi += 1;
-        }
-        if f2 != fi {
-            return want(s, false, po, C_MAP);
-        }
-        if f2 == 0 {
-            if !in_range(g, ng) {
-                return want(s, false, po, C_MAP);
-            }
-            let gn: i32 = pw(p, rec(p, 5, g));
-            if pw(p, po + 4) != sw {
-                return want(s, false, po + 4, C_DERIVED);
-            }
-            sw += 4 + gn;
-            groupsum += gn;
-        } else {
-            if g != (-1) {
-                return want(s, false, po, C_MAP);
-            }
-            if pw(p, po + 4) != sw {
-                return want(s, false, po + 4, C_DERIVED);
-            }
-            sw += 4;
-        }
-        if (af != nextalt) || (ac < 1) {
-            return want(s, false, po, C_MAP);
-        }
-        nextalt = af + ac;
-    }
-    if nextalt != na {
-        return want(s, false, pb, C_MAP);
-    }
-    // alternatives: owners, literal runs (in range, not overlapping), req_count
-    let mut pi: i32 = 0;
-    for a in 0..na {
-        let ao: i32 = ab + (5 * a);
-        let lf: i32 = pw(p, ao + 1);
-        let lc: i32 = pw(p, ao + 2);
-        let mut req: i32 = 0;
-        while (pi < np) && (a >= (pw(p, pb + ((5 * pi) + 2)) + pw(p, pb + ((5 * pi) + 3)))) {
-            pi += 1;
-        }
-        if pw(p, ao) != pi {
-            return want(s, false, ao, C_MAP);
-        }
-        if ((lf < 0) || (lc < 0)) || (lc > (nl - lf)) {
-            return want(s, false, ao, C_MAP);
-        }
-        // runs do not overlap: each run starts at or after the previous one's end
-        if a > 0 {
-            let pa: i32 = ao - 5;
-            let pend: i32 = pw(p, pa + 1) + pw(p, pa + 2);
-            if (lf < pend) && (lc > 0) {
-                return want(s, false, ao, C_MAP);
-            }
-        }
-        // (keys distinct within an alternative follows from the naming records:
-        // each key's records name strictly ascending alternatives, and every
-        // literal entry is named exactly once)
-        for i in 0..lc {
-            let le: i32 = lb + (4 * (lf + i));
-            if pw(p, le + 2) == 1 {
-                req += 1;
-            }
-        }
-        if pw(p, ao + 3) != req {
-            return want(s, false, ao + 3, C_DERIVED);
-        }
-        if pw(p, ao + 4) != sw {
-            return want(s, false, ao + 4, C_DERIVED);
-        }
-        sw += 3 + ceil32(lc);
-    }
-    // literal entries
-    for i2 in 0..nl {
-        let le2: i32 = lb + (4 * i2);
-        if (!in_range(pw(p, le2), nkeys)) || (!in_range(pw(p, le2 + 1), nt)) {
-            return want(s, false, le2, C_MAP);
-        }
-        if ((pw(p, le2 + 2) < 0) || (pw(p, le2 + 2) > 1)) || ((pw(p, le2 + 3) < 0) || (pw(p, le2 + 3) > 1)) {
-            return want(s, false, le2, C_MAP);
-        }
-    }
-    // key index: ascending keys, naming runs partitioning names; each naming
-    // record names its own key, in an alternative of the owner, ascending
-    if nn != nl {
+    if !in_range(peg, pw(p, W_N_PEGS)) {
         return want(s, false, o, C_MAP);
     }
-    let mut nextname: i32 = 0;
-    for kq in 0..nk {
-        let ko: i32 = kb + (4 * kq);
-        let key: i32 = pw(p, ko);
-        let owner: i32 = pw(p, ko + 1);
-        let nf2: i32 = pw(p, ko + 2);
-        let nc2: i32 = pw(p, ko + 3);
-        if !in_range(key, nkeys) {
-            return want(s, false, ko, C_MAP);
-        }
-        if (kq > 0) && (key <= pw(p, ko - 4)) {
-            return want(s, false, ko, C_MAP);
-        }
-        if !in_range(owner, nf) {
-            return want(s, false, ko, C_MAP);
-        }
-        if (nf2 != nextname) || ((nc2 < 1) || (nc2 > (nn - nf2))) {
-            return want(s, false, ko, C_MAP);
-        }
-        if nc2 > maxnames {
-            maxnames = nc2;
-        }
-        for r in 0..nc2 {
-            let no: i32 = nb + (2 * (nf2 + r));
-            let alt: i32 = pw(p, no);
-            let lit: i32 = pw(p, no + 1);
-            if !in_range(alt, na) {
-                return want(s, false, no, C_MAP);
-            }
-            if (r > 0) && (alt <= pw(p, no - 2)) {
-                return want(s, false, no, C_MAP);
-            }
-            let ao2: i32 = ab + (5 * alt);
-            let lf2: i32 = pw(p, ao2 + 1);
-            let lc2: i32 = pw(p, ao2 + 2);
-            if (lit < lf2) || (lit >= (lf2 + lc2)) {
-                return want(s, false, no, C_MAP);
-            }
-            if pw(p, lb + (4 * lit)) != key {
-                return want(s, false, no, C_MAP);
-            }
-            // the owner is the alternative's pool's factor
-            if pw(p, pb + (5 * pw(p, ao2))) != owner {
-                return want(s, false, no, C_MAP);
-            }
-        }
-        nextname = nf2 + nc2;
+    let po: i32 = peg_at(p, peg);
+    let pn: i32 = pw(p, po + 1);
+    if pw(p, po) != 1 {
+        return want(s, false, o, C_MAP);
     }
-    if nextname != nn {
-        return want(s, false, kb, C_MAP);
+    if peg_count(p, po, P_MEMBER) != nm {
+        return want(s, false, o + 1, C_MAP);
     }
-    // every key named by some literal entry is in the index: the counts agree
-    if pw(p, o + 6) != sw {
+    if !fail_prov_ok(p, po, nm) {
+        return want(s, false, o, C_MAP);
+    }
+    // members: key id or key typeset, value typeset, cut
+    for i in 0..nm {
+        let e: i32 = mb + (5 * i);
+        let kid: i32 = pw(p, e);
+        let kt: i32 = pw(p, e + 1);
+        if kid >= 0 {
+            if (!in_range(kid, nkeys)) || (kt != (-1)) {
+                return want(s, false, e, C_MAP);
+            }
+        } else if (kid != (-1)) || (!in_range(kt, nt)) {
+            return want(s, false, e, C_MAP);
+        }
+        if !in_range(pw(p, e + 2), nt) {
+            return want(s, false, e, C_MAP);
+        }
+        if (pw(p, e + 4) < 0) || (pw(p, e + 4) > 1) {
+            return want(s, false, e, C_MAP);
+        }
+    }
+    // classes [D]: the root (or the root SEQ's kids) marked in TEMP
+    for z in 0..pn {
+        tset(s, z, 0);
+    }
+    let rop: i32 = pnw(p, po, 0, 0);
+    let mut flat: bool = (rop == P_EMPTY) || (rop == P_MEMBER);
+    if rop == P_MEMBER {
+        tset(s, 0, 1);
+    }
+    if rop == P_SEQ {
+        flat = true;
+        for j in 0..pnw(p, po, 0, 2) {
+            let k: i32 = pkid(p, po, 0, j);
+            tset(s, k, 1);
+            if pnw(p, po, k, 0) != P_MEMBER {
+                flat = false;
+            }
+        }
+    }
+    let mut anyos: bool = false;
+    let mut anycut: bool = false;
+    let mut class2: bool = false;
+    let mut ri: i32 = 0;
+    for i2 in 0..pn {
+        if pnw(p, po, i2, 0) == P_MEMBER {
+            let mi: i32 = pnw(p, po, i2, 1);
+            let e2: i32 = mb + (5 * mi);
+            let lit: bool = pw(p, e2) >= 0;
+            let mx: i32 = pnw(p, po, i2, 3);
+            let mut cls: i32 = 0;
+            if pw(p, e2 + 4) != 0 {
+                anycut = true;
+            }
+            if !lit {
+                if mx != INF {
+                    anyos = true;
+                }
+                if (tg(s, i2) == 1) && (mx == INF) {
+                    cls = 1;
+                } else {
+                    cls = 2;
+                }
+            }
+            if cls == 2 {
+                class2 = true;
+            }
+            if pw(p, e2 + 3) != cls {
+                return want(s, false, e2, C_DERIVED);
+            }
+            if cls == 1 {
+                if (ri >= nr) || (pw(p, rb + ri) != mi) {
+                    return want(s, false, o + 6, C_DERIVED);
+                }
+                ri += 1;
+            }
+        }
+    }
+    if ri != nr {
         return want(s, false, o + 6, C_DERIVED);
     }
-    if pw(p, o + 7) != (groupsum + maxnames) {
+    // tier and flags [D]
+    let mut tier: i32 = TIER_T;
+    let mut pf: i32 = 0;
+    let mut mf: i32 = 0;
+    if (!class2) && ((!anyos) && (pw(p, po + 8) == 0)) {
+        tier = TIER_S;
+    }
+    if flat && (!anyos) {
+        tier = TIER_F;
+    }
+    if anyos {
+        pf |= 2;
+        mf |= 1;
+    }
+    if anycut {
+        pf |= 4;
+        mf |= 2;
+    }
+    if pw(p, po + 3) != tier {
+        return want(s, false, po + 3, C_DERIVED);
+    }
+    if (pw(p, po + 7) & 6) != pf {
+        return want(s, false, po + 7, C_DERIVED);
+    }
+    if pw(p, o + 7) != mf {
         return want(s, false, o + 7, C_DERIVED);
+    }
+    // named: by key id; namers ascending, naming their key; all literal members
+    let mut next: i32 = 0;
+    let mut nmax: i32 = 0;
+    for q in 0..nn {
+        let qo: i32 = nb + (3 * q);
+        let key: i32 = pw(p, qo);
+        let first: i32 = pw(p, qo + 1);
+        let cnt: i32 = pw(p, qo + 2);
+        if !in_range(key, nkeys) {
+            return want(s, false, qo, C_MAP);
+        }
+        if (q > 0) && (key <= pw(p, qo - 3)) {
+            return want(s, false, qo, C_MAP);
+        }
+        if (first != next) || ((cnt < 1) || (cnt > (nlit - first))) {
+            return want(s, false, qo, C_MAP);
+        }
+        if cnt > nmax {
+            nmax = cnt;
+        }
+        for r in 0..cnt {
+            let na: i32 = (nb + (3 * nn)) + (first + r);
+            let mid: i32 = pw(p, na);
+            if !in_range(mid, nm) {
+                return want(s, false, na, C_MAP);
+            }
+            if (r > 0) && (mid <= pw(p, na - 1)) {
+                return want(s, false, na, C_MAP);
+            }
+            if pw(p, mb + (5 * mid)) != key {
+                return want(s, false, na, C_MAP);
+            }
+        }
+        next = first + cnt;
+    }
+    if next != nlit {
+        return want(s, false, o + 2, C_MAP);
+    }
+    // slot_words, rec_words [D]
+    let mut sw: i32 = 0;
+    let mut rw: i32 = 0;
+    if tier == TIER_S {
+        sw = (2 + ceil32(nmax)) + (2 * ceil32(nr));
+    }
+    if tier == TIER_T {
+        rw = 4 + ceil32(2 * nm);
+    }
+    if pw(p, o + 4) != sw {
+        return want(s, false, o + 4, C_DERIVED);
+    }
+    if pw(p, o + 5) != rw {
+        return want(s, false, o + 5, C_DERIVED);
+    }
+    // key_ts [D]: the union of the non-literal members' key typesets, or -1
+    let e3: i32 = epoch(s);
+    let mut distinct: i32 = 0;
+    let mut any: bool = false;
+    for i3 in 0..nm {
+        let kt3: i32 = pw(p, (mb + (5 * i3)) + 1);
+        if kt3 >= 0 {
+            any = true;
+            let to: i32 = rec(p, 2, kt3);
+            let tn: i32 = pw(p, to);
+            if !spend(s, tn) {
+                return false;
+            }
+            for a in 0..tn {
+                let l: i32 = pw(p, to + (2 + a));
+                if mark_get(s, l) != e3 {
+                    mark_set(s, l, e3);
+                    distinct += 1;
+                }
+            }
+        }
+    }
+    if !any {
+        if kts != (-1) {
+            return want(s, false, o + 3, C_DERIVED);
+        }
+    } else {
+        if !in_range(kts, nt) {
+            return want(s, false, o + 3, C_DERIVED);
+        }
+        let ko: i32 = rec(p, 2, kts);
+        let kn: i32 = pw(p, ko);
+        if kn != distinct {
+            return want(s, false, o + 3, C_DERIVED);
+        }
+        for a2 in 0..kn {
+            if mark_get(s, pw(p, ko + (2 + a2))) != e3 {
+                return want(s, false, o + 3, C_DERIVED);
+            }
+        }
     }
     return !failed(s);
 }
@@ -1538,6 +1997,310 @@ pub(crate) fn check_maps(p: &[i32], s: &mut [i32]) -> bool {
         }
     }
     return true;
+}
+pub(crate) fn vset_or(s: &mut [i32], dst: i32, src: i32, w: i32) -> bool {
+    // TEMP[dst..dst+w) |= TEMP[src..src+w); did it grow?
+    let mut grew: bool = false;
+    for k in 0..w {
+        let a: i32 = tg(s, dst + k);
+        let c: i32 = a | tg(s, src + k);
+        if c != a {
+            tset(s, dst + k, c);
+            grew = true;
+        }
+    }
+    return grew;
+}
+pub(crate) fn vset_bit(s: &mut [i32], dst: i32, q: i32) -> bool {
+    let at: i32 = dst + (q >> 5);
+    let a: i32 = tg(s, at);
+    let c: i32 = a | (1 << (q & 31));
+    if c == a {
+        return false;
+    }
+    tset(s, at, c);
+    return true;
+}
+pub(crate) fn array_sets(p: &[i32], s: &mut [i32], o: i32, n: i32, w: i32, base: i32, calls: i32) -> bool {
+    // first / last (2w words per node at TEMP[base..)) and nullable (TEMP[0, n))
+    // as least fixed points, exactly as the compiler builds them.
+    for z in 0..n {
+        tset(s, z, 0);
+    }
+    for z2 in 0..(n + 1) * (2 * w) {
+        tset(s, base + z2, 0);
+    }
+    loop {
+        let mut changed: bool = false;
+        if !spend(s, n * (1 + (2 * w))) {
+            return false;
+        }
+        let mut i: i32 = n - 1;
+        while i >= 0 {
+            let op: i32 = pnw(p, o, i, 0);
+            let fo: i32 = base + (i * (2 * w));
+            let lo: i32 = fo + w;
+            let mut nu: i32 = 0;
+            if op == P_EMPTY {
+                nu = 1;
+            }
+            if op == P_ENTRY {
+                if vset_bit(s, fo, pnw(p, o, i, 1)) {
+                    changed = true;
+                }
+                if vset_bit(s, lo, pnw(p, o, i, 1)) {
+                    changed = true;
+                }
+            }
+            if (op == P_CALL) || (op == P_REP) {
+                let t: i32 = pnw(p, o, i, 1);
+                let tf: i32 = base + (t * (2 * w));
+                if op == P_CALL {
+                    nu = tg(s, t);
+                }
+                if (op == P_REP) && ((pnw(p, o, i, 2) == 0) || (tg(s, t) != 0)) {
+                    nu = 1;
+                }
+                if vset_or(s, fo, tf, w) {
+                    changed = true;
+                }
+                if vset_or(s, lo, tf + w, w) {
+                    changed = true;
+                }
+            }
+            if op == P_CHOICE {
+                for j in 0..pnw(p, o, i, 2) {
+                    let k: i32 = pkid(p, o, i, j);
+                    let kf: i32 = base + (k * (2 * w));
+                    if tg(s, k) != 0 {
+                        nu = 1;
+                    }
+                    if vset_or(s, fo, kf, w) {
+                        changed = true;
+                    }
+                    if vset_or(s, lo, kf + w, w) {
+                        changed = true;
+                    }
+                }
+            }
+            if op == P_SEQ {
+                let kc: i32 = pnw(p, o, i, 2);
+                let mut fdone: bool = false;
+                nu = 1;
+                for j2 in 0..kc {
+                    let k2: i32 = pkid(p, o, i, j2);
+                    if !fdone {
+                        if vset_or(s, fo, base + (k2 * (2 * w)), w) {
+                            changed = true;
+                        }
+                    }
+                    if tg(s, k2) == 0 {
+                        nu = 0;
+                        fdone = true;
+                    }
+                }
+                let mut j3: i32 = kc - 1;
+                while j3 >= 0 {
+                    let k3: i32 = pkid(p, o, i, j3);
+                    if vset_or(s, lo, (base + (k3 * (2 * w))) + w, w) {
+                        changed = true;
+                    }
+                    if tg(s, k3) == 0 {
+                        j3 = 0;
+                    }
+                    j3 -= 1;
+                }
+            }
+            if (nu != 0) && (tg(s, i) == 0) {
+                tset(s, i, 1);
+                changed = true;
+            }
+            i -= 1;
+        }
+        if (!changed) || (calls == 0) {
+            return true;
+        }
+    }
+}
+pub(crate) fn varr_edges(s: &mut [i32], src: i32, dst: i32, w: i32, fol: i32) -> bool {
+    // follow[q] |= TEMP[dst..) for every q in TEMP[src..).
+    for k in 0..w {
+        let v: i32 = tg(s, src + k);
+        if v != 0 {
+            for bit in 0..32 {
+                if ((i32::cast_unsigned(v) >> bit).cast_signed() & 1) != 0 {
+                    let q: i32 = (k * 32) + bit;
+                    if !spend(s, w) {
+                        return false;
+                    }
+                    for x in 0..w {
+                        let fa: i32 = fol + ((q * w) + x);
+                        tset(s, fa, tg(s, fa) | tg(s, dst + x));
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+pub(crate) fn check_arrays(p: &[i32], s: &mut [i32]) -> bool {
+    let na: i32 = pw(p, W_N_ARRAYS);
+    let nt: i32 = pw(p, W_N_TYPESETS);
+    for a in 0..na {
+        let o: i32 = rec(p, 9, a);
+        let npos: i32 = pw(p, o);
+        let w: i32 = pw(p, o + 1);
+        let peg: i32 = pw(p, o + 2);
+        let fb: i32 = o + 4;
+        let pb: i32 = fb + w;
+        let flb: i32 = pb + npos;
+        if !spend(s, npos + (npos * w)) {
+            return false;
+        }
+        if pw(p, o + 3) != 0 {
+            return want(s, false, o + 3, C_ARRAY);
+        }
+        if !in_range(peg, pw(p, W_N_PEGS)) {
+            return want(s, false, o + 2, C_ARRAY);
+        }
+        let po: i32 = peg_at(p, peg);
+        let n: i32 = pw(p, po + 1);
+        let calls: i32 = pw(p, po + 8);
+        let base: i32 = 7 * n;
+        let fol: i32 = base + ((n + 1) * (2 * w));
+        if pw(p, po) != 0 {
+            return want(s, false, o + 2, C_ARRAY);
+        }
+        if peg_count(p, po, P_ENTRY) != npos {
+            return want(s, false, o, C_ARRAY);
+        }
+        if !fail_prov_ok(p, po, npos) {
+            return want(s, false, o + 2, C_ARRAY);
+        }
+        for q in 0..npos {
+            if !in_range(pw(p, pb + q), nt) {
+                return want(s, false, pb + q, C_ARRAY);
+            }
+        }
+        // first and follow [D]: the relaxed automaton recomputed (program-2 §4)
+        more_budget(s, smul(4, sadd(smul(calls + 2, smul(n, 2 + (2 * w))), smul(n, smul(npos, w)))));
+        if !array_sets(p, s, po, n, w, base, calls) {
+            return false;
+        }
+        for z in 0..npos * w {
+            tset(s, fol + z, 0);
+        }
+        let acc: i32 = base + (n * (2 * w));
+        for i in 0..n {
+            let op: i32 = pnw(p, po, i, 0);
+            if op == P_SEQ {
+                let kc: i32 = pnw(p, po, i, 2);
+                let k0: i32 = pkid(p, po, i, 0);
+                for z2 in 0..w {
+                    tset(s, acc + z2, 0);
+                }
+                vset_or(s, acc, (base + (k0 * (2 * w))) + w, w);
+                for j in 1..kc {
+                    let kj: i32 = pkid(p, po, i, j);
+                    let kp: i32 = pkid(p, po, i, j - 1);
+                    if j > 1 {
+                        if tg(s, kp) == 0 {
+                            for z3 in 0..w {
+                                tset(s, acc + z3, 0);
+                            }
+                        }
+                        vset_or(s, acc, (base + (kp * (2 * w))) + w, w);
+                    }
+                    if !varr_edges(s, acc, base + (kj * (2 * w)), w, fol) {
+                        return false;
+                    }
+                }
+            }
+            if (op == P_REP) && (pnw(p, po, i, 3) >= 2) {
+                let ch: i32 = pnw(p, po, i, 1);
+                let cf: i32 = base + (ch * (2 * w));
+                if !varr_edges(s, cf + w, cf, w, fol) {
+                    return false;
+                }
+            }
+        }
+        for k in 0..w {
+            if pw(p, fb + k) != tg(s, base + k) {
+                return want(s, false, fb + k, C_DERIVED);
+            }
+        }
+        for k2 in 0..npos * w {
+            if pw(p, flb + k2) != tg(s, fol + k2) {
+                return want(s, false, flb + k2, C_DERIVED);
+            }
+        }
+    }
+    return !failed(s);
+}
+pub(crate) fn act_words(ncalls: i32, depth: i32) -> i32 {
+    let a: i32 = sadd(3, smul(8, depth));
+    let x: i32 = smul(smul(ncalls, a), 64);
+    if x == INF {
+        return INF;
+    }
+    return (x + 53) / 54;
+}
+pub(crate) fn leaf_peg(p: &[i32], l: i32) -> i32 {
+    // The program offset of a (verified) ARRAY or MAP leaf.
+    let o: i32 = leaf_at(p, l);
+    let k: i32 = pw(p, o) & 255;
+    if k == 15 {
+        return peg_at(p, pw(p, rec(p, 7, pw(p, o + 2))));
+    }
+    return peg_at(p, pw(p, rec(p, 9, pw(p, o + 2)) + 2));
+}
+pub(crate) fn leaf_block(p: &[i32], l: i32) -> i32 {
+    // MAPWORDS / ARRWORDS (program-2 §5.2, §6.3) of a verified leaf.
+    let o: i32 = leaf_at(p, l);
+    let k: i32 = pw(p, o) & 255;
+    let po: i32 = leaf_peg(p, l);
+    let tier: i32 = pw(p, po + 3);
+    let depth: i32 = pw(p, po + 6);
+    let calls: i32 = pw(p, po + 8);
+    if k == 15 {
+        let mo: i32 = rec(p, 7, pw(p, o + 2));
+        let nm: i32 = pw(p, mo + 1);
+        let nn: i32 = pw(p, mo + 2);
+        let mut mw: i32 = 22 + (6 * nm);
+        if calls == 0 {
+            mw += 8 * depth;
+        }
+        if tier == TIER_S {
+            mw += nn * (pw(p, mo + 4) + 1);
+        } else {
+            mw += nn;
+        }
+        return mw;
+    }
+    let ao: i32 = rec(p, 9, pw(p, o + 2));
+    let w: i32 = pw(p, ao + 1);
+    let mut aw: i32 = 16 + (2 * w);
+    if calls == 0 {
+        aw += 4 * depth;
+    }
+    if tier == TIER_A1 {
+        aw += (pw(p, po + 4) + 1) * w;
+    }
+    return aw;
+}
+pub(crate) fn leaf_recwords(p: &[i32], l: i32) -> i32 {
+    // Record words of an A2 array (W) or T map (rec_words), else 0.
+    let o: i32 = leaf_at(p, l);
+    let k: i32 = pw(p, o) & 255;
+    let po: i32 = leaf_peg(p, l);
+    let tier: i32 = pw(p, po + 3);
+    if (k == 15) && (tier == TIER_T) {
+        return pw(p, rec(p, 7, pw(p, o + 2)) + 5);
+    }
+    if (k == 14) && (tier == TIER_A2) {
+        return pw(p, rec(p, 9, pw(p, o + 2)) + 1);
+    }
+    return 0;
 }
 pub(crate) fn row_clean(p: &[i32], at: i32, w: i32, npos: i32) -> bool {
     // Bits >= npos of the w-word bitset at `at` are zero.
@@ -1552,68 +2315,6 @@ pub(crate) fn row_clean(p: &[i32], at: i32, w: i32, npos: i32) -> bool {
         }
     }
     return true;
-}
-pub(crate) fn check_arrays(p: &[i32], s: &mut [i32]) -> bool {
-    let na: i32 = pw(p, W_N_ARRAYS);
-    let nt: i32 = pw(p, W_N_TYPESETS);
-    for a in 0..na {
-        let o: i32 = rec(p, 9, a);
-        let npos: i32 = pw(p, o);
-        let w: i32 = pw(p, o + 1);
-        let nc: i32 = pw(p, o + 2);
-        let nul: i32 = pw(p, o + 3);
-        let fo: i32 = o + 4;
-        let po: i32 = fo + (2 * w);
-        let co: i32 = po + (2 * npos);
-        let fl: i32 = co + (2 * nc);
-        if !spend(s, (npos * (w + 2)) + (nc * npos)) {
-            return false;
-        }
-        if (nul < 0) || (nul > 1) {
-            return want(s, false, o, C_ARRAY);
-        }
-        if (!row_clean(p, fo, w, npos)) || (!row_clean(p, fo + w, w, npos)) {
-            return want(s, false, fo, C_ARRAY);
-        }
-        for q in 0..npos {
-            let ts: i32 = pw(p, po + (2 * q));
-            let c: i32 = pw(p, po + ((2 * q) + 1));
-            if !in_range(ts, nt) {
-                return want(s, false, po + (2 * q), C_ARRAY);
-            }
-            if (c < (-1)) || (c >= nc) {
-                return want(s, false, po + (2 * q), C_ARRAY);
-            }
-            if !row_clean(p, fl + (q * w), w, npos) {
-                return want(s, false, fl + (q * w), C_ARRAY);
-            }
-            if c >= 0 {
-                // a counted position never has its own follow bit
-                let word: i32 = pw(p, (fl + (q * w)) + (q >> 5));
-                if ((i32::cast_unsigned(word) >> (q & 31)).cast_signed() & 1) != 0 {
-                    return want(s, false, fl + (q * w), C_ARRAY);
-                }
-            }
-        }
-        // each counter is used by exactly one position; 0 <= min, 1 <= max
-        for ci in 0..nc {
-            let cmin: i32 = pw(p, co + (2 * ci));
-            let cmax: i32 = pw(p, co + ((2 * ci) + 1));
-            let mut users: i32 = 0;
-            if (cmin < 0) || (cmax < 1) {
-                return want(s, false, co + (2 * ci), C_ARRAY);
-            }
-            for q2 in 0..npos {
-                if pw(p, po + ((2 * q2) + 1)) == ci {
-                    users += 1;
-                }
-            }
-            if users != 1 {
-                return want(s, false, co + (2 * ci), C_ARRAY);
-            }
-        }
-    }
-    return !failed(s);
 }
 pub(crate) fn check_regexps(p: &[i32], s: &mut [i32]) -> bool {
     let nr: i32 = pw(p, W_N_REGEXPS);
@@ -1707,35 +2408,57 @@ pub(crate) fn child_ts(p: &[i32], l: i32, i: i32) -> i32 {
         if i >= npos {
             return -2;
         }
-        return pw(p, ((ao + 4) + (2 * w)) + (2 * i));
+        return pw(p, ((ao + 4) + w) + i);
     }
-    if k == 15 {
-        let mo: i32 = rec(p, 7, d0);
-        let nf: i32 = pw(p, mo);
-        let np: i32 = pw(p, mo + 1);
-        let na: i32 = pw(p, mo + 2);
-        let nl: i32 = pw(p, mo + 3);
-        let pb: i32 = (mo + 8) + (4 * nf);
-        let lb: i32 = (pb + (5 * np)) + (5 * na);
-        if i < nl {
-            return pw(p, (lb + (4 * i)) + 1);
+    // maps (kind 15): see map-children-within / map-has-children
+    return -2;
+}
+pub(crate) fn map_children_within(p: &[i32], s: &mut [i32], l: i32, e: i32) -> bool {
+    // Every member's key typeset (non-literal keys) and value typeset, and
+    // key_ts, marked e (program-2 §7's closure children).
+    let mo: i32 = rec(p, 7, pw(p, leaf_at(p, l) + 2));
+    let nm: i32 = pw(p, mo + 1);
+    let kts: i32 = pw(p, mo + 3);
+    let nt: i32 = pw(p, W_N_TYPESETS);
+    for i in 0..nm {
+        let e2: i32 = (mo + 8) + (5 * i);
+        let kt: i32 = pw(p, e2 + 1);
+        let vt: i32 = pw(p, e2 + 2);
+        if !spend(s, 2) {
+            return false;
         }
-        // then every key and value typeset of every residual pool's group
-        let mut j: i32 = i - nl;
-        for q in 0..np {
-            let g: i32 = pw(p, (pb + (5 * q)) + 1);
-            if g >= 0 {
-                let go: i32 = rec(p, 5, g);
-                let gn: i32 = pw(p, go);
-                if j < (2 * gn) {
-                    return pw(p, (go + 2) + ((4 * (j >> 1)) + (j & 1)));
-                }
-                j -= 2 * gn;
+        if kt >= 0 {
+            if (!in_range(kt, nt)) || (!ts_within(p, s, kt, e)) {
+                return false;
             }
         }
-        return -2;
+        if (!in_range(vt, nt)) || (!ts_within(p, s, vt, e)) {
+            return false;
+        }
     }
-    return -2;
+    if kts >= 0 {
+        if (!in_range(kts, nt)) || (!ts_within(p, s, kts, e)) {
+            return false;
+        }
+    }
+    return true;
+}
+pub(crate) fn map_has_children(p: &[i32], l: i32) -> bool {
+    let mo: i32 = rec(p, 7, pw(p, leaf_at(p, l) + 2));
+    let nm: i32 = pw(p, mo + 1);
+    let nt: i32 = pw(p, W_N_TYPESETS);
+    for i in 0..nm {
+        let e2: i32 = (mo + 8) + (5 * i);
+        let kt: i32 = pw(p, e2 + 1);
+        let vt: i32 = pw(p, e2 + 2);
+        if in_range(kt, nt) && (ts_eval_n(p, kt) > 0) {
+            return true;
+        }
+        if in_range(vt, nt) && (ts_eval_n(p, vt) > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 pub(crate) fn children_within(p: &[i32], s: &mut [i32], cs: i32, e: i32) -> bool {
     // Is every child (closed) of every leaf of cset cs marked e?
@@ -1744,6 +2467,11 @@ pub(crate) fn children_within(p: &[i32], s: &mut [i32], cs: i32, e: i32) -> bool
     for i in 0..n {
         let l: i32 = pw(p, co + (3 + i));
         let mut j: i32 = 0;
+        if leaf_kind(p, l) == 15 {
+            if !map_children_within(p, s, l, e) {
+                return false;
+            }
+        }
         loop {
             if !spend(s, 1) {
                 return false;
@@ -1768,6 +2496,9 @@ pub(crate) fn has_children(p: &[i32], cs: i32) -> bool {
     let n: i32 = pw(p, co);
     for i in 0..n {
         let l: i32 = pw(p, co + (3 + i));
+        if (leaf_kind(p, l) == 15) && map_has_children(p, l) {
+            return true;
+        }
         if child_ts(p, l, 0) != (-2) {
             let t0: i32 = child_ts(p, l, 0);
             // a child typeset that is empty is no child at all
@@ -1790,7 +2521,9 @@ pub(crate) fn has_children(p: &[i32], cs: i32) -> bool {
     return false;
 }
 pub(crate) fn cset_frame(p: &[i32], co: i32, n: i32) -> i32 {
-    // frame_words of the cset at co (program.md §12.2).
+    // frame_words of the cset at co (program-2 §9.2 as amended by D311): 2n +
+    // max(MAPAREA, ARRAREA), MAPAREA = the maps' block words + 4 words per member
+    // of each (the pair's candidate list), ARRAREA = the arrays' block words.
     let mut maparea: i32 = 0;
     let mut arrarea: i32 = 0;
     for i in 0..n {
@@ -1799,11 +2532,10 @@ pub(crate) fn cset_frame(p: &[i32], co: i32, n: i32) -> i32 {
         let k: i32 = pw(p, o) & 255;
         if k == 15 {
             let mo: i32 = rec(p, 7, pw(p, o + 2));
-            maparea += pw(p, mo + 6) + (4 * pw(p, mo + 7));
+            maparea = (maparea + leaf_block(p, l)) + (4 * pw(p, mo + 1));
         }
         if k == 14 {
-            let ao: i32 = rec(p, 9, pw(p, o + 2));
-            arrarea += 3 + ((2 * pw(p, ao + 1)) + pw(p, ao + 2));
+            arrarea += leaf_block(p, l);
         }
     }
     if arrarea > maparea {
@@ -1861,6 +2593,57 @@ pub(crate) fn check_csets(p: &[i32], s: &mut [i32]) -> bool {
         }
     }
     return !failed(s);
+}
+pub(crate) fn check_arena_words(p: &[i32], s: &mut [i32]) -> bool {
+    // Header words 29 R_ITEM_MAX, 62 RECLEAF_MAX and 63 ACT_SUM [D]: over closure
+    // sets, the largest sum of A2 / T record words, count of recursive
+    // ARRAY / MAP leaves and sum of their activation words (program-2 §2, §5.3).
+    let nc: i32 = pw(p, W_N_CSETS);
+    let mut ritem: i32 = 0;
+    let mut reclmax: i32 = 0;
+    let mut actsum: i32 = 0;
+    for c in 0..nc {
+        let co: i32 = rec(p, 16, c);
+        let n: i32 = pw(p, co);
+        let mut rs: i32 = 0;
+        let mut rc: i32 = 0;
+        let mut asum: i32 = 0;
+        if !spend(s, 1 + n) {
+            return false;
+        }
+        for i in 0..n {
+            let l: i32 = pw(p, co + (3 + i));
+            let k: i32 = leaf_kind(p, l);
+            if (k == 14) || (k == 15) {
+                let po: i32 = leaf_peg(p, l);
+                let calls: i32 = pw(p, po + 8);
+                rs = sadd(rs, leaf_recwords(p, l));
+                if calls > 0 {
+                    rc += 1;
+                    asum = sadd(asum, act_words(calls, pw(p, po + 6)));
+                }
+            }
+        }
+        if rs > ritem {
+            ritem = rs;
+        }
+        if rc > reclmax {
+            reclmax = rc;
+        }
+        if asum > actsum {
+            actsum = asum;
+        }
+    }
+    if pw(p, W_R_ITEM_MAX) != ritem {
+        return want(s, false, W_R_ITEM_MAX, C_DERIVED);
+    }
+    if pw(p, W_RECLEAF_MAX) != reclmax {
+        return want(s, false, W_RECLEAF_MAX, C_DERIVED);
+    }
+    if pw(p, W_ACT_SUM) != actsum {
+        return want(s, false, W_ACT_SUM, C_DERIVED);
+    }
+    return true;
 }
 pub(crate) fn check_chains(p: &[i32], s: &mut [i32]) -> bool {
     let nch: i32 = pw(p, W_N_CHAINS);
@@ -2007,11 +2790,18 @@ pub(crate) fn check_flags(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
         if k == 18 {
             f |= 16;
         }
+        if (k == 14) && (pw(p, leaf_peg(p, l) + 3) == TIER_A2) {
+            f |= 64;
+        }
+        if (k == 15) && (pw(p, leaf_peg(p, l) + 3) == TIER_T) {
+            f |= 64;
+        }
         if (k == 1) || ((k == 2) && ((pw(p, o + 2) >= 4) && (pw(p, o + 2) <= 6))) {
             needs_any = true;
         }
     }
-    if pw(p, 6) != f {
+    // bit 5 (CUTS_BRANCH, D301) is the compile option [V]; bit 6 (ARENA) is derived
+    if (pw(p, 6) & (!32)) != f {
         return want(s, false, 6, C_DERIVED);
     }
     if needs_any && (pw(p, W_TS_ANY) < 0) {
@@ -2091,8 +2881,8 @@ pub(crate) fn check_exts(p: &[i32], b: &[u8], s: &mut [i32]) -> bool {
 }
 pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
     // 0 valid; -1 refused (detail in S[35], S[36]); -2 the scratch is too small
-    // for the verifier's marks (len(S) >= 48 + 2 * VM_MARK_CAP, VM_MARK_CAP >=
-    // N_LEAVES).
+    // for the verifier's marks and PEG working area (len(S) >= vm-verify-words,
+    // VM_MARK_CAP >= N_LEAVES).
     if (s.len() as i32) < 48 {
         return -2;
     }
@@ -2107,6 +2897,9 @@ pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
     if (m < nl) || ((m < 0) || ((48 + (2 * m)) > (s.len() as i32))) {
         return -2;
     }
+    if ((48 + (2 * m)) + vm_verify_temp(p)) > (s.len() as i32) {
+        return -2;
+    }
     // the verify budget: 64 * (PROGRAM_WORDS + POOL_BYTES / 4 + 1)
     let units: i32 = ((p.len() as i32) + ((b.len() as i32) / 4)) + 1;
     if units > (INF / 64) {
@@ -2117,7 +2910,7 @@ pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
     if !check_index(p, s, 2, 3, pw(p, W_N_TYPESETS), 0) {
         return -1;
     }
-    if !check_index(p, s, 5, 6, pw(p, W_N_GROUPS), 1) {
+    if !check_index(p, s, 5, 6, pw(p, W_N_PEGS), 1) {
         return -1;
     }
     if !check_index(p, s, 7, 8, pw(p, W_N_MAPS), 2) {
@@ -2150,10 +2943,10 @@ pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
     if !check_keys(p, b, s) {
         return -1;
     }
-    if !check_groups(p, s) {
+    if !check_rules(p, b, s) {
         return -1;
     }
-    if !check_rules(p, b, s) {
+    if !check_pegs(p, s) {
         return -1;
     }
     if !check_maps(p, s) {
@@ -2177,8 +2970,64 @@ pub fn vm_verify(p: &[i32], b: &[u8], s: &mut [i32]) -> i32 {
     if !check_rule_closure(p, s) {
         return -1;
     }
+    if !check_arena_words(p, s) {
+        return -1;
+    }
     if failed(s) {
         return -1;
     }
     return 0;
+}
+pub fn vm_verify_temp(p: &[i32]) -> i32 {
+    // Words of PEG working area vm-verify needs after the marks: the largest
+    // 7 n + 2 W (n + 1) + npos W over the programs (n <= 16384) and arrays
+    // (npos <= 4096, so W <= 128), read defensively (checked reads, clamped), so
+    // an unverified Program can ask for at most the hard maxima's worth.
+    if (p.len() as i32) < 64 {
+        return 0;
+    }
+    let lim: i32 = p.len() as i32;
+    let mut nmax: i32 = 1;
+    let mut npmax: i32 = 0;
+    let mut np: i32 = pw(p, W_N_PEGS);
+    let mut na: i32 = pw(p, W_N_ARRAYS);
+    if (np < 0) || (np > lim) {
+        np = 0;
+    }
+    if (na < 0) || (na > lim) {
+        na = 0;
+    }
+    for g in 0..np {
+        let n: i32 = pw(p, i32::wrapping_add(pw(p, i32::wrapping_add(pw(p, W_SEC + 5), g)), 1));
+        if (n > nmax) && (n <= 16384) {
+            nmax = n;
+        }
+    }
+    for a in 0..na {
+        let npos: i32 = pw(p, pw(p, i32::wrapping_add(pw(p, W_SEC + 9), a)));
+        if (npos > npmax) && (npos <= 4096) {
+            npmax = npos;
+        }
+    }
+    let w: i32 = (npmax + 31) >> 5;
+    return ((7 * nmax) + ((2 * w) * (nmax + 1))) + ((npmax * w) + 16);
+}
+pub fn vm_verify_words(p: &[i32], mark_cap: i32) -> i32 {
+    // The scratch length vm-verify needs with VM_MARK_CAP = max(mark-cap,
+    // N_LEAVES clamped to 2^20): 48 + 2 M + the PEG working area.
+    let mut m: i32 = mark_cap;
+    let mut nl: i32 = 0;
+    if (p.len() as i32) >= 64 {
+        nl = pw(p, W_N_LEAVES);
+    }
+    if (nl < 0) || (nl > 1048576) {
+        nl = 1048576;
+    }
+    if nl > m {
+        m = nl;
+    }
+    if m < 1 {
+        m = 1;
+    }
+    return (48 + (2 * m)) + vm_verify_temp(p);
 }

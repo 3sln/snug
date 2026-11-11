@@ -20,7 +20,7 @@ use crate::snug::cbor::canon::dc_copy;
 use crate::snug::cbor::codes::{O_S_CBASE, VC_NONDET};
 use crate::snug::cbor::stdtags::{std_content_ok, std_inner};
 use crate::snug::nav::walk::{nav_child, nav_dir, nav_dir_find, nav_find, nav_find_any, nav_head, nav_init, nav_skip, N_LO, N_MAJOR, N_STEPS};
-use crate::snug::program::verify::vm_verify;
+use crate::snug::program::verify::{vm_verify, vm_verify_words};
 use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
 use crate::snug::vm::controls::{chars_prep, chars_run, meter_init, samelen_prep, samelen_run, samelen_words,
                                 unique_run, unique_words, M_WORDS};
@@ -299,7 +299,9 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
     let p: Vec<i32> = unsafe { std::slice::from_raw_parts(pp, words) }.to_vec();
     let b: Vec<u8> = unsafe { bytes(bp, nb) }.to_vec();
     let m = p[16].clamp(0, 1 << 20) as usize;
-    let mut s = vec![0i32; 64 + 2 * m];
+    // format 2.0 (P8.5, D300): the verifier's marks and its PEG working area (vm-verify-words,
+    // clamped by the hard maxima), as the native hosts size it
+    let mut s = vec![0i32; (64 + 2 * m).max(vm_verify_words(&p, m as i32).max(0) as usize + 16)];
     s[16] = 1;
     s[17] = m as i32;
     let st = st();

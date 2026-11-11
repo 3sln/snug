@@ -28,7 +28,7 @@ import { runSession, sessionSteps, runUnknown } from './vmsession-run.mjs';
 import { hex } from './scan-cases.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
 import { validateHandleSync, bufferHandle } from '../../host/js/src/sources.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 
 const [rustBin, mutArg, seedArg, schemaArg, stressArg] = process.argv.slice(2);
 const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 400), STRESS = Number(stressArg ?? 60);
@@ -89,7 +89,7 @@ const rnd = n => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st
 const runs = [];   // {ci, lim, policy, want, rust}
 const counts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, rnd4096: 0, quanta: 0, split: 0, budget: 0, generic: 0, sched1: 0 };
 cases.forEach((c, ci) => {
-  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0, c.lim[10] ?? -1]);
   const want0 = buffer(c, lim0);
   const n = c.bytes.length;
   const add = (lim, want, policy, tag, rust) => { runs.push({ ci, lim, want, policy, rust }); counts[tag]++; };
@@ -165,7 +165,7 @@ for (let i = 0; i + 2 < runs.length; i += 3 * 97) {
 const uruns = [];   // {ci, lim, want, policy, ff, rust}
 const ucounts = { whole: 0, byte: 0, rnd7: 0, rnd300: 0, split: 0, budget: 0, failfast: 0 };
 cases.forEach((c, ci) => {
-  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
+  const lim0 = Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0, c.lim[10] ?? -1]);
   const want0 = buffer(c, lim0), n = c.bytes.length;
   const add = (lim, want, policy, tag, rust, ff = false) => { uruns.push({ ci, lim, want, policy, ff, rust }); ucounts[tag]++; };
   add(lim0, want0, { kind: 0, w: 0, q: 0, seed: 1, k: 0 }, 'whole', ci % 3 === 0);
@@ -220,7 +220,7 @@ const render = r => r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${
 cases.forEach((c, ci) => {
   if (!(c.corpus || c.stress || c.ext) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0 || (c.lim[9] ?? 0) !== 0) return;
   if (!hostProgs.has(c.prog)) {
-    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, controls: controlEntries(testControls) }); } catch { hp = null; }
+    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, verifyWords: vmVerifyWords, controls: controlEntries(testControls) }); } catch { hp = null; }
     hostProgs.set(c.prog, hp);
   }
   const hp = hostProgs.get(c.prog);

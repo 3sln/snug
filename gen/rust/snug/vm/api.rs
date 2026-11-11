@@ -5,6 +5,7 @@ use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
 use crate::snug::cbor::scan::*;
 use crate::snug::cbor::vcopy::*;
+use crate::snug::vm::arena::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::dead::*;
 use crate::snug::vm::eval::*;
@@ -79,16 +80,32 @@ pub fn chain_frames(p: &[i32], ch: i32, dd: i32) -> i32 {
     }
     return t;
 }
-pub fn vm_scratch_words(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
-    // Words S must have for this rule with MARK_CAP = max(mark-cap, N_LEAVES)
-    // (§12.1): 48 + 2M + 2(D + 1) + regex area + frames. The rule's verified
-    // scratch_words [D] is that total with M = N_LEAVES, so this is O(1).
+pub fn vm_fixed_words(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
+    // The words before the group arena for this rule with MARK_CAP =
+    // max(mark-cap, N_LEAVES) (§12.1): 48 + 2M + 2(D + 1) + regex area + frames.
+    // The rule's verified scratch_words [D] is that total with M = N_LEAVES, so
+    // this is O(1).
     let nl: i32 = p[(H_N_LEAVES) as usize];
     let mut m: i32 = mark_cap;
     if m < nl {
         m = nl;
     }
     return p[((p[(H_S_RULES) as usize] + (5 * rule)) + 4) as usize] + (2 * (m - nl));
+}
+pub fn arena_lease(p: &[i32]) -> i32 {
+    // The group arena's default lease (program-2 §9.4): 4,096 words when some
+    // ARRAY leaf is A2 or some MAP leaf is T (FLAGS bit 6), else none -- the arena
+    // then grows on its first push (the forced-tier test mode).
+    if (p[(H_FLAGS) as usize] & FL_ARENA) != 0 {
+        return LEASE;
+    }
+    return 0;
+}
+pub fn vm_scratch_words(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
+    // Words S must have for this rule: vm-fixed-words, then the group arena's
+    // 8-word header and its default lease (program-2 §9.1, §9.4). A larger S
+    // only gives the arena more room, up to its cap.
+    return (vm_fixed_words(p, rule, mark_cap) + AR_HDR) + arena_lease(p);
 }
 pub fn vm_scratch_words_slow(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
     // The same total recomputed from the closure chain (the verifier's
@@ -100,7 +117,7 @@ pub fn vm_scratch_words_slow(p: &[i32], rule: i32, mark_cap: i32) -> i32 {
     if m < nl {
         m = nl;
     }
-    return (((SCRATCH_MARK + (2 * m)) + (2 * (dd + 1))) + chain_regex(p, ch, dd)) + chain_frames(p, ch, dd);
+    return ((((SCRATCH_MARK + (2 * m)) + (2 * (dd + 1))) + chain_regex(p, ch, dd)) + chain_frames(p, ch, dd)) + (AR_HDR + arena_lease(p));
 }
 pub fn vm_scratch_init(s: &mut [i32], mark_cap: i32) {
     // On a freshly zeroed S: VM_EPOCH = 1, VM_MARK_CAP = mark-cap.
@@ -141,6 +158,13 @@ pub fn lim(limits: &[i32], i: i32, compiled: i32) -> i32 {
         return v;
     }
     return compiled;
+}
+pub fn lim_or(limits: &[i32], i: i32) -> i32 {
+    // Limits word i, or -1 when absent.
+    if i >= (limits.len() as i32) {
+        return -1;
+    }
+    return limits[(i) as usize];
 }
 pub fn opt01(limits: &[i32], i: i32) -> i32 {
     if i >= (limits.len() as i32) {
@@ -221,7 +245,7 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     if (p.len() as i32) < HEADER_WORDS {
         return -1;
     }
-    if (p[(0) as usize] != MAGIC) || (((p[(H_FORMAT) as usize] != FORMAT_VERSION) && (p[(H_FORMAT) as usize] != FORMAT_V11)) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
+    if (p[(0) as usize] != MAGIC) || ((p[(H_FORMAT) as usize] != FORMAT_V2) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
         return -1;
     }
     if p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32) {
@@ -239,7 +263,7 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     if mc < p[(H_N_LEAVES) as usize] {
         return -2;
     }
-    if (s.len() as i32) < vm_scratch_words(p, rule, mc) {
+    if (s.len() as i32) < (vm_fixed_words(p, rule, mc) + AR_HDR) {
         return -2;
     }
     let path: i32 = SCRATCH_MARK + (2 * mc);
@@ -291,8 +315,8 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
         s[(VM_BIGNUM_MAX) as usize] = bmax;
     }
     s[(VM_POS) as usize] = start;
+    s[(VM_PBASE) as usize] = 0;
     s[(VM_Q1) as usize] = 0;
-    s[(VM_EXH) as usize] = 0;
     s[(VM_QIDX) as usize] = SCRATCH_MARK + mc;
     s[(VM_DLIM) as usize] = dl;
     // limits word 8 (a VM extension beyond program.md §12.3's 8 words):
@@ -301,17 +325,38 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     // (s[VM_GENERIC] bit 1 set = schedule 2). D254: the forced generic path
     // is charged by the generic walk's own schedule, the table (schedule 1):
     // schedule 2's free bookkeeping prices the fast paths' CPU, not its.
+    // bit 2 forces every array to tier A2 and every map to T (program-2 §8,
+    // the forced-tier test mode): G_FORCED in s[VM_GENERIC]. Bit 3 turns the
+    // multi-item streaks off, the schedule unchanged (G_NOSTREAK): the streak ==
+    // item-by-item gate.
     if (limits.len() as i32) > 8 {
         let w8: i32 = limits[(8) as usize];
+        let mut g: i32 = 2;
         if (w8 & 3) != 0 {
-            s[(VM_GENERIC) as usize] = w8 & 1;
-        } else {
-            s[(VM_GENERIC) as usize] = 2;
+            g = w8 & 1;
         }
+        if (w8 & 4) != 0 {
+            g |= G_FORCED;
+        }
+        if (w8 & 8) != 0 {
+            g |= G_NOSTREAK;
+        }
+        s[(VM_GENERIC) as usize] = g;
     } else {
         s[(VM_GENERIC) as usize] = 2;
     }
+    // the group arena after the fixed words, its cap lowered by limits word 10
+    arena_init(s, vm_fixed_words(p, rule, mc), arena_cap(p, lim_or(limits, 10)));
     return 0;
+}
+pub fn vm_need(out: &mut [i32], w: i32, nb: i32, sw: i32) -> i32 {
+    // -5: a host buffer is too small; out[5] the valid scratch's words, out[6]
+    // the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).
+    out[(0) as usize] = 0;
+    out[(5) as usize] = w;
+    out[(6) as usize] = nb;
+    out[(7) as usize] = sw;
+    return -5;
 }
 pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // Validate the single item b[start, end) against rule, its depth and item
@@ -322,7 +367,7 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     if (p.len() as i32) < HEADER_WORDS {
         return -1;
     }
-    if (p[(0) as usize] != MAGIC) || (((p[(H_FORMAT) as usize] != FORMAT_VERSION) && (p[(H_FORMAT) as usize] != FORMAT_V11)) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
+    if (p[(0) as usize] != MAGIC) || ((p[(H_FORMAT) as usize] != FORMAT_V2) || (p[(H_HEADER_WORDS) as usize] != HEADER_WORDS)) {
         return -1;
     }
     if (p[(H_PROGRAM_WORDS) as usize] != (p.len() as i32)) || (p[(H_POOL_BYTES) as usize] != (pool.len() as i32)) {
@@ -377,6 +422,15 @@ pub fn vm_walk(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32
         let at2: i32 = s[(VM_POS) as usize];
         return vm_output(s, out, R_BUDGET, 0, at2);
     }
+    // program-2 §9.4: the arena must grow (the host gives S that many words and
+    // runs again, -5), or it is at its cap (group_limit at the item's head)
+    if r == (-R_AGROW) {
+        return vm_need(out, 0, 0, arena_want(s));
+    }
+    if r == (-R_GROUP_LIMIT) {
+        let at6: i32 = s[(VM_POS) as usize];
+        return vm_output(s, out, R_GROUP_LIMIT, 0, at6);
+    }
     if r == (-R_INCONSISTENT) {
         return -1;
     }
@@ -410,15 +464,6 @@ pub fn nondet_code(code: i32) -> bool {
     // Codes only an encoding valid CBOR admits can cause on the deterministic
     // attempt of a valid-CBOR run (D262), or R_NONDET from embedded content.
     return ((code == CODE_NON_SHORTEST) || (code == CODE_INDEFINITE)) || ((code == CODE_KEY_ORDER) || (code == R_NONDET));
-}
-pub fn vm_need(out: &mut [i32], w: i32, nb: i32, sw: i32) -> i32 {
-    // -5: a host buffer is too small; out[5] the valid scratch's words, out[6]
-    // the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).
-    out[(0) as usize] = 0;
-    out[(5) as usize] = w;
-    out[(6) as usize] = nb;
-    out[(7) as usize] = sw;
-    return -5;
 }
 pub fn vm_remap(b: &[u8], cb: &[u8], vs: &mut [i32], start: i32, out: &mut [i32]) -> i32 {
     // The offset of a run over a canonical copy mapped back to b (D264); a
@@ -500,9 +545,13 @@ pub fn vm_canon(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i3
         return vm_need(out, vs[(O_VNEEDW) as usize], vs[(O_VNEEDB) as usize], 0);
     }
     let n: i32 = vs[(O_S_NEV) as usize];
-    let base: i32 = vm_scratch_words(p, rule, s[(VM_MARK_CAP) as usize]);
-    let need: i32 = (base + 4) + (EV_WORDS * n);
-    if (n > 0) && ((s.len() as i32) < need) {
+    let base: i32 = vm_fixed_words(p, rule, s[(VM_MARK_CAP) as usize]);
+    let mut vt: i32 = 0;
+    if n > 0 {
+        vt = 4 + (EV_WORDS * n);
+    }
+    let need: i32 = ((base + vt) + AR_HDR) + arena_lease(p);
+    if (s.len() as i32) < need {
         return vm_need(out, 0, 0, need);
     }
     if n > 0 {
@@ -515,6 +564,8 @@ pub fn vm_canon(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i3
         }
         s[(VM_VTAB) as usize] = base;
     }
+    // the group arena after the events
+    arena_init(s, base + vt, arena_cap(p, lim_or(limits, 10)));
     s[(O_PROFILE) as usize] = s[(O_PROFILE) as usize] | PF_CANON;
     if s[(O_MAX_BYTES) as usize] < l {
         s[(O_MAX_BYTES) as usize] = l;
@@ -549,9 +600,14 @@ pub fn vm_run_v(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i3
         return r;
     }
     let pf: i32 = prof(limits, depth0);
-    let nd: bool = ((pf & PF_VALID) != 0) && nondet_code(out[(0) as usize]);
+    let valid: bool = (pf & PF_VALID) != 0;
+    let nd: bool = valid && nondet_code(out[(0) as usize]);
     let ecs: bool = (s[(O_VCTL) as usize] & VC_ECS) != 0;
-    if (!nd) && (!ecs) {
+    let bud: bool = valid && (out[(0) as usize] == R_BUDGET);
+    // An attempt that ran out of budget may have stopped before the encoding
+    // only valid CBOR has: the canonical path decides, as the session's whole-item
+    // check does (D277; over a deterministic input its copy is the input).
+    if ((!nd) && (!ecs)) && (!bud) {
         return r;
     }
     return vm_canon(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext, vs, cb);

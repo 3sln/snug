@@ -134,11 +134,11 @@ test('the bus profile refuses extension controls unless controlsInBus', async ()
   assert.deepEqual(s.validate(encode('ab'), 'r'), { ok: true });
 });
 
-test('format 1.1 only with a control; serialised Programs need the registry, and the source key binds it', async () => {
+test('format 2.0 with or without a control (it carries 1.1\'s control table); serialised Programs need the registry, and the source key binds it', async () => {
   const plain = await compile('r = tstr');
-  assert.equal(plain.program.P[1], 1);
+  assert.equal(plain.program.P[1], 2);
   const a = await compile('r = tstr .chars 2', { controls });
-  assert.equal(a.program.P[1], 0x10001);
+  assert.equal(a.program.P[1], 2);
   assert.deepEqual(a.program.controls, ['chars']);
   const b = await compile('r = tstr .chars 2', { controls: { chars } });
   assert.notEqual(a.program.sourceKey, b.program.sourceKey);          // the whole registry is in the key

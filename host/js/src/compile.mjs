@@ -4,11 +4,13 @@
 // arena, the decimal float-literal port (D020: Number(), at most 17
 // significant digits, checked by kin) and the shape of the result.
 //
-//   compile(text, { profile, limits }) -> { program: Int32Array, pool: Uint8Array, rules: string[] }
+//   compile(text, { profile, limits, cuts, groupWords }) -> { program: Int32Array, pool: Uint8Array, rules: string[],
+//     warnings: [{ code, rule, line, column, message }] }   (format 2.0, docs/program-2.md)
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
 import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn, errorOffset,
   errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
-  keyPreimageLen, snugVersion, OPT_WORDS, OPT_REGEXP }
+  keyPreimageLen, snugVersion, OPT_WORDS, OPT_REGEXP, OPT_CUTS, OPT_GROUP_WORDS, warningCount, warningCode,
+  warningLine, warningColumn, warningRuleStart, warningRuleLen, warningName, warningMessage }
   from '../../../gen/js/snug/compile/main.mjs';
 import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 import { sha256 } from './sha256.mjs';
@@ -28,7 +30,8 @@ export class SchemaError extends Error {
 
 const PROFILES = { full: 0, bindle: 1, bus: 2 };
 // Option order: program.md §13.3's source key, then the leaf limit (snug.compile.main OPT_WORDS).
-export const COMPILE_OPTIONS = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives',
+// Format 2.0 (D292): the fifth option limits PEG nodes per group (it was the alternatives limit).
+export const COMPILE_OPTIONS = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'pegNodes',
   'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget', 'depth', 'inputBytes',
   'entries', 'items', 'bignumBytes', 'budget', 'leaves'];
 
@@ -62,12 +65,13 @@ function floats(h, bytes) {
   return out;
 }
 
-/** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md, format 1). */
+/** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md + docs/program-2.md, format 2.0). */
 export function compile(text, opts = {}) {
   validateCompileOptions(opts);
-  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd' } = opts;
+  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd',
+    cuts = 'rfc', groupWords } = opts;
   const entries = controlEntries(controls);
-  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp); }
+  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp, cuts, groupWords); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
     if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
@@ -75,11 +79,15 @@ export function compile(text, opts = {}) {
 }
 const RETAIN_WORDS = 1 << 22;
 
-function compileOnce(text, profile, limits, unicode, entries, inBus, regexp) {
+function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cuts, groupWords) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   const opt = options(profile, limits, registryWords(entries, inBus));
   opt[OPT_REGEXP] = regexp === 'iregexp' ? 1 : 0;
+  // D301: the literal RFC 8610 cut (`rfc`, the default: commitment epochs, D273) is 0, rule A (`branch`) 1;
+  // D276/D281: the arena cap.
+  opt[OPT_CUTS] = cuts === 'branch' ? 1 : 0;
+  opt[OPT_GROUP_WORDS] = groupWords === undefined ? -1 : Math.min(groupWords, 0x7fffffff);
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
     throw new TypeError('unicode must be the Int32Array tables from snug/unicode');
@@ -110,8 +118,19 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp) {
     const key = sha256(Uint8Array.from(h.subarray(k, k + keyPreimageLen(h))));
     for (let i = 0; i < 8; i++) program[7 + i] = (key[4 * i] << 24) | (key[4 * i + 1] << 16) | (key[4 * i + 2] << 8) | key[4 * i + 3];
     checkArguments(program, pool, entries);
-    return { program, pool, rules: ruleNames(program, pool), controls: entries };
+    return { program, pool, rules: ruleNames(program, pool), controls: entries, warnings: warnings(h, bytes) };
   }
+}
+
+// Architecture §20.11: compile warnings never refuse; kin decides them, in a deterministic order.
+function warnings(h, bytes) {
+  const out = [];
+  for (let i = 0, n = warningCount(h); i < n; i++) {
+    const code = warningCode(h, i), rs = warningRuleStart(h, i);
+    out.push({ code: warningName(code), rule: rs >= 0 ? decoder.decode(bytes.subarray(rs, rs + warningRuleLen(h, i))) : null,
+      line: warningLine(h, i), column: warningColumn(h, i), message: warningMessage(code) });
+  }
+  return out;
 }
 
 // D141: name the control a schema uses but the registry lacks (schema text, never payload).

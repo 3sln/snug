@@ -7,11 +7,11 @@ import { be32, fail } from '../cbor/head.mjs';
 import { compareSpans } from '../cbor/keys.mjs';
 import { scanItemX } from '../cbor/scan.mjs';
 import { canonBuild, evFind, vmap, vsource } from '../cbor/vcopy.mjs';
-import { vmScratchWords } from './api.mjs';
+import { arenaAfter } from './arena.mjs';
 import { c64min, charge } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { FL_EMBED, H_FLAGS, INF, R_BUDGET, R_INCONSISTENT, VM_DLIM, VM_MARK_CAP, VM_POS, VM_RULE, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
+import { FL_EMBED, H_FLAGS, INF, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, VM_DLIM, VM_POS, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
 import { SS_ATOP, SS_GA, SS_GB, SS_GS, SS_GW, SS_VNEED, SS_VOK } from './sbase.mjs';
 
 export const VI_NEED = -1000001;
@@ -144,7 +144,7 @@ export function vclean(p, s, vs, r) {
 
 export function vbuild(p, b, s, ss, vs, cb, pos, iend, refused) {
     // The copy of the item at pos (window-relative) and its events, the events
-    // put in S past the rule's words: the copy's start in cb (its end in
+    // put in S past the group arena: the copy's start in cb (its end in
     // vs[O_VLEN] via canon-build), or VI_GROW.
     let embeds = 1;
     if ((p[H_FLAGS] & FL_EMBED) !== 0) {
@@ -155,7 +155,7 @@ export function vbuild(p, b, s, ss, vs, cb, pos, iend, refused) {
         return vgrow(ss, vs[O_VNEEDW], vs[O_VNEEDB], 0, 0);
     }
     const n = vs[O_S_NEV];
-    const base = vmScratchWords(p, s[VM_RULE], s[VM_MARK_CAP]);
+    const base = arenaAfter(s);
     const need = (base + 4) + (EV_WORDS * n);
     if ((n > 0) && (s.length < need)) {
         return vgrow(ss, 0, 0, need + 64, 0);
@@ -239,7 +239,8 @@ export function vfix(b, cb, s, vs, pos, r, w0, wr0, ws0, wo0) {
             }
         }
     }
-    if (r === (-R_BUDGET)) {
+    // budget and group_limit (program-2 §9.4) report VM_POS: back to the input
+    if ((r === (-R_BUDGET)) || (r === (-R_GROUP_LIMIT))) {
         const vp = s[VM_POS];
         s[VM_POS] = vmap(b, cb, vs, pos, vp);
         return r;

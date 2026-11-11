@@ -25,21 +25,21 @@
             [snug.vm.layout :refer [H_S_LEAVES VM_POS VM_Q1 VM_GENERIC VM_FASTM VM_VTAB VM_W_STATE VM_W_REASON
                                     VM_W_SUB VM_W_OFFSET K_INT K_TEXT K_ARRAY K_MAP K_TAG K_TAGSET F_ADMITTED
                                     F_MATCHED F_EVAL R_TYPE R_MISSING R_UNEXPECTED R_VALUE R_TAG R_BUDGET
-                                    R_INCONSISTENT P_INDEX P_KEY P_ANYKEY P_TAG CTX_KEY CTX_SIMPLE]]
+                                    R_INCONSISTENT P_INDEX P_KEY P_ANYKEY P_TAG CTX_KEY CTX_SIMPLE
+                                    R_GROUP_LIMIT R_AGROW G_FORCED G_NOSTREAK]]
             [snug.vm.base :refer [charge c64 new-epoch sched2 free-on free-off q-add q-stamp ts-test
                                   q-flag q-set-flag q-kind q-leaf-base cset-rec next-ck cset-width
                                   cset-frame wit-empty wit-clear wit-set path-put rule1]]
             [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64]]
             [snug.vm.dead :refer [dead-item dead-int-streak dead-pair-body pair-check decimal-check ndarray-check
                                   dead-std-check]]
-            [snug.vm.map :refer [leaf-map block-mt map-block-init key-span-end key-search map-cursor
-                                 map-key-query map-key-phase cand-vts cand-vts-mt block-named map-update
-                                 map-satisfied map-missing simple-struct key-phase-struct update-struct]]
-            [snug.vm.array :refer [leaf-array block-ao array-words array-block-init array-candidates
-                                   array-advance array-accepts]]
+            [snug.vm.map :refer [key-span-end key-search map-unordered map-is-unordered map-key-ecs]]
             [snug.vm.eval :refer [eval-item unit-of simple-of q-filter-x finish-comb finish-scalar
-                                  count-pending single-leaf count-matched map-fast-mode map-pair-ok
-                                  bstr-tail array-streak if-limit cursors-reset]]
+                                  count-pending single-leaf count-matched bstr-tail array-streak if-limit
+                                  streak-kind star-steady star-advance
+                                  arr-open arr-star-leaf arr-alive arr-query arr-after arr-close
+                                  map-open map-cl map-ccap map-smode map-pre map-keyq map-cands map-named-of
+                                  map-valq map-after map-close]]
             [snug.vm.sbase :refer [key-max-claim SS_UNK enter-pend pend-note GO SS_PH SS_RET PH_RET IT_PAIR FW FK_ARR FK_MAP FK_TAG FK_DARR FK_DMAP FK_DSEQ SS_ATOP SS_CUT
                                    VMS_NEED VMS_GROW SS_VNEED IND F_IND F_VN F_VLAST F_VMARK F_FLOOR ftop
                                    F_KIND F_PH F_POS F_END F_D F_FB F_CK F_NQ F_CTX F_Q F_N F_EL F_Q0 F_PIN
@@ -49,7 +49,8 @@
                                    F_TLIVE MODE_ITEM MODE_FRAME
                                    fbase fidx fpush done err cont call need yld ensure suspended must-yield cut-yield
                                    progress keys-save key-order-s set-prev set-prev-arena prescan imin fits-known ret
-                                   lits-need bstr-reads notes-init pair-note pair-verdict]]
+                                   lits-need bstr-reads notes-init pair-note pair-verdict
+                                   F_KPOS F_KLEN arena-gate arena-items]]
             [snug.vm.sstr :refer [prologue frame-item open-bstr typed-scan]]
             [snug.cbor.canon :refer [kclass]]
             [snug.vm.svalid :refer [VI_NEED VI_GROW KH vsess vrun vgrow vitem vscan vclean vbuild vfix vorder
@@ -110,64 +111,45 @@
 
 (defn ^:pub ^I32 arr-start [^IntsR p ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 pos ^I32 q0 ^I32 n
                             ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx ^I32 pair]
-  (comment "eval-array's start (generic path): filter, blocks, the schedule-2 shape"
-           "(D045 i, iii), then the frame. n < 0: a `.cborseq` virtual array (D040).")
+  (comment "eval-array's start (generic path): filter, blocks (arr-open), the"
+           "schedule-2 shape (D045 i, iii), then the frame. n < 0: a `.cborseq`"
+           "virtual array (D040).")
   (let [cr (cset-rec p s ck)
         w (cset-width p cr)
         fw (cset-frame p cr)
         area (+ fb (* 2 w))
-        cap (- fw (* 2 w))
-        ^:mut nb 0
-        ^:mut used 0
-        ^:mut sl (neg 1)
         ^:mut s2 0
-        ^:mut cx 0]
+        ^:mut cx 0
+        ^:mut sleaf (neg 1)]
     (let [na (q-filter-x p s fb w nq 16 pos ctx)]
       (if (< na 0) (return (err ss na))))
-    (for [^I32 i 0 nq]
-      (if (and (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0) (== (q-kind p s fb i) K_ARRAY))
-        (do (let [words (array-words p (leaf-array p (q-leaf-base p s fb i)))]
-              (if (> (+ used words) cap) (return (err ss (neg R_INCONSISTENT))))
-              (let [ri (array-block-init s (+ area used) i words pos)]
-                (if (< ri 0) (return (err ss ri))))
-              (set used (+ used words))
-              (set nb (+ nb 1))))))
-    (if (== nb 1)
-      (do (let [ao1 (block-ao p s fb area)]
-            (if (and (and (== (ia p ao1) 1) (== (ia p (+ ao1 2)) 0))
-                     (and (== (ia p (+ ao1 4)) 1) (== (bit-and (ia p (+ ao1 8)) 1) 1)))
-              (set sl (single-leaf p (ia p (+ ao1 6))))))))
-    (if (and (sched2 s) (>= sl 0))
-      (do (set s2 1)
-          (if (scalar-kind (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 sl))) 255)) (set cx CTX_SIMPLE))))
-    (comment "eval-array's streak leaf: an INT over one interval or a TEXT without a"
-             "regexp, fast paths on (D044)")
-    (let [^:mut sleaf (neg 1)]
-      (if (and (>= sl 0) (== (bit-and (ia s VM_GENERIC) 1) 0))
-        (do (let [lbf (+ (ia p H_S_LEAVES) (* 8 sl))
-                  kf (bit-and (ia p lbf) 255)]
-              (if (or (and (== kf K_INT) (== (ia p (+ lbf 3)) 1))
-                      (and (== kf K_TEXT) (< (ia p (+ lbf 4)) 0)))
-                (set sleaf sl)))))
-      (iset ss IT_PAIR sleaf))
-    (let [pend (count-pending p s fb w nq)
-          sleaf2 (ia ss IT_PAIR)
-          f (fpush b ss ka base FK_ARR)]
-      (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
-      (frame-item ss f base pos end d fb ck nq ctx)
-      (iset ss (+ f F_Q) (+ q0 base))
-      (iset ss (+ f F_Q0) (+ q0 base))
-      (iset ss (+ f F_Q1) (+ q0 base))
-      (iset ss (+ f F_N) n)
-      (iset ss (+ f F_NB) nb)
-      (iset ss (+ f F_S2) s2)
-      (iset ss (+ f F_CX) cx)
-      (iset ss (+ f F_PEND) pend)
-      (iset ss (+ f F_NALIVE) nb)
-      (iset ss (+ f F_PAIR) pair)
-      (iset ss (+ f F_SLEAF) sleaf2)
-      (mark-pair ss pair)
-      (return (cont ss f A_NEXT)))))
+    (let [nb (arr-open p s fb w (- fw (* 2 w)) nq pos)]
+      (if (< nb 0) (return (err ss nb)))
+      (let [sl (arr-star-leaf p s fb area nb)]
+        (if (and (sched2 s) (>= sl 0))
+          (do (set s2 1)
+              (if (scalar-kind (bit-and (ia p (+ (ia p H_S_LEAVES) (* 8 sl))) 255)) (set cx CTX_SIMPLE))))
+        (comment "eval-array's streak leaf: an INT over one interval or a TEXT without a"
+                 "regexp, fast paths on, natural tiers (D044)")
+        (if (and (and (>= sl 0) (streak-kind p sl)) (== (bit-and (ia s VM_GENERIC) (bit-or (bit-or 1 G_FORCED) G_NOSTREAK)) 0))
+          (set sleaf sl)))
+      (let [pend (count-pending p s fb w nq)
+            f (fpush b ss ka base FK_ARR)]
+        (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
+        (frame-item ss f base pos end d fb ck nq ctx)
+        (iset ss (+ f F_Q) (+ q0 base))
+        (iset ss (+ f F_Q0) (+ q0 base))
+        (iset ss (+ f F_Q1) (+ q0 base))
+        (iset ss (+ f F_N) n)
+        (iset ss (+ f F_NB) nb)
+        (iset ss (+ f F_S2) s2)
+        (iset ss (+ f F_CX) cx)
+        (iset ss (+ f F_PEND) pend)
+        (iset ss (+ f F_NALIVE) nb)
+        (iset ss (+ f F_PAIR) pair)
+        (iset ss (+ f F_SLEAF) sleaf)
+        (mark-pair ss pair)
+        (return (cont ss f A_NEXT))))))
 
 (defn ^:pub ^I32 indef [^Bytes b ^Ints s ^I32 pos ^I32 d]
   (comment "P8.4 (D266): an indefinite array or map whose head is at pos: its depth"
@@ -209,40 +191,25 @@
         el (ia ss (+ f F_EL))
         nb (ia ss (+ f F_NB))
         w (cset-width p (cset-rec p s (ia ss (+ f F_CK))))
-        area (+ fb (* 2 w))
-        ^:mut unacc 0
-        ^:mut be area]
-    (for [^I32 _bk 0 nb]
-      (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
-      (let [aok (block-ao p s fb be)]
-        (if (!= (ia s (+ be 1)) 0)
-          (do (if (not (charge s (ia p (+ aok 1)) pos)) (return (err ss (neg R_BUDGET))))
-              (if (array-accepts p s be aok el)
-                (q-set-flag s fb w (ia s be) F_MATCHED)
-                (do (q-set-flag s fb w (ia s be) (shl R_MISSING 8))
-                    (set unacc (+ unacc 1))))))
-        (set be (+ be (array-words p aok)))))
+        area (+ fb (* 2 w))]
     (if (== n 2)
       (do (let [q1 (- (ia ss (+ f F_Q1)) base)]
             (iset s VM_Q1 q1))))
-    (let [rs (eval-scalars p pool b s fb w nq pos q0 q 16 0 el (unit-of ctx))]
-      (if (< rs 0) (return (err ss rs))))
-    (let [m (finish-comb p pool b s fb w nq pos q ext)]
-      (if (< m 0) (return (err ss m)))
-      (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
-        (if (> unacc 0)
-          (wit-set s R_MISSING 0 d P_INDEX el pos)
-          (do (let [r1 (rule1 s fb w nq d pos)]
-                (if (< r1 0) (return (err ss r1))))))))
+    (let [rc (arr-close p pool b s fb w area nb d el pos q0 q nq ctx (ia ss (+ f F_PEND)) ext)]
+      (if (< rc 0) (return (err ss rc))))
     (return (done ss base q))))
 
-(defn ^:pub ^I32 arr-ret [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 r]
-  (comment "The element ended at r (absolute): after a live element, stamp and"
-           "advance the live blocks, then the witness; next.")
+(defn ^:pub ^I32 arr-ret [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 r ^I32 gated]
+  (comment "The element ended at r (absolute): after a live element, its records and"
+           "machines (arr-after), then the witness; next. Unless the caller already"
+           "made room (gated 1), the group arena is made room in first (a"
+           "suspension point: nothing is charged before it).")
   (let [el (ia ss (+ f F_EL))]
     (if (== (ia ss (+ f F_PH)) A_LIVE)
-      (do (let [pos (- (ia ss (+ f F_POS)) base)
-                d (ia ss (+ f F_D))
+      (do (if (== gated 0)
+            (do (let [g (arena-gate p s ss (arena-items p s 0))]
+                  (if (== g VMS_GROW) (return g)))))
+          (let [pos (- (ia ss (+ f F_POS)) base)
                 fb (ia ss (+ f F_FB))
                 ck (ia ss (+ f F_CK))
                 q (- (ia ss (+ f F_Q)) base)
@@ -252,38 +219,17 @@
                 w (cset-width p cr)
                 area (+ fb (* 2 w))
                 cw (cset-width p (cset-rec p s (next-ck p s ck)))
-                ao1 (block-ao p s fb area)
-                ^:mut nalive (ia ss (+ f F_NALIVE))
-                ^:mut still 0
-                ^:mut bo area]
+                cfb (+ fb (cset-frame p cr))]
             (if (== (ia ss (+ f F_S2)) 1) (free-on s))
-            (let [ev (q-stamp s (+ fb (cset-frame p cr)) cw cnq pos)]
-              (if (< ev 0) (return (err ss ev)))
-              (for [^I32 bj 0 nb]
-                (let [^:mut aoj ao1]
-                  (if (> bj 0) (set aoj (block-ao p s fb bo)))
-                  (if (!= (ia s (+ bo 1)) 0)
-                    (do (let [adv (array-advance p s bo aoj ev pos)]
-                          (if (< adv 0) (return (err ss adv)))
-                          (if (== adv 1)
-                            (set still (+ still 1))
-                            (do (set nalive (- nalive 1))
-                                (if (== adv 2)
-                                  (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8))
-                                  (q-set-flag s fb w (ia s bo) (shl R_TYPE 8))))))))
-                  (set bo (+ bo (array-words p aoj))))))
-            (free-off s)
-            (if (or (> still 0) (> (ia ss (+ f F_PEND)) 0))
-              (wit-clear s)
-              (if (wit-empty s) (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 q)))
-            (iset ss (+ f F_NALIVE) nalive))))
+            (let [still (arr-after p s fb w area nb el q (- r base) cfb cw cnq pos)]
+              (free-off s)
+              (if (< still 0) (return (err ss still)))
+              (if (or (> still 0) (> (ia ss (+ f F_PEND)) 0)) (wit-clear s))
+              (iset ss (+ f F_NALIVE) still)))))
     (iset ss (+ f F_Q) r)
     (if (== el 0) (iset ss (+ f F_Q1) r))
     (iset ss (+ f F_EL) (+ el 1))
     (return (cont ss f A_NEXT))))
-
-;; ------------------------------------------------------------ dead arrays and sequences
-
 
 (defn ^:pub ^I32 ind-next [^Bytes b ^Ints s ^Ints ss ^I32 base ^I32 wend ^I32 f ^I32 q ^I32 end]
   (comment "P8.4 (D266): before an entry of an indefinite container at q (the"
@@ -349,54 +295,50 @@
                           (return (cont ss f A_NEXT))))))
               (do (let [sleaf (ia ss (+ f F_SLEAF))
                         area0 (+ fb (* 2 (cset-width p (cset-rec p s ck))))]
-                    (if (and (>= sleaf 0) (== (ia s (+ area0 2)) 1))
+                    (if (and (>= sleaf 0) (star-steady s area0 el))
                       (do (let [qs (array-streak p b s q (ind-limit s ss f (if-limit n el) el) cutend sleaf s2)
                                 ks (ia s VM_FASTM)]
                             (if (> ks 0)
-                              (do (iset ss (+ f F_Q) (+ qs base))
+                              (do (star-advance p s fb area0 ks)
+                                  (iset ss (+ f F_Q) (+ qs base))
                                   (iset ss (+ f F_EL) (+ el ks))
                                   (progress ss ks)
                                   (return (cont ss f A_NEXT)))))))))))))
     (if (== (ia ss (+ f F_NALIVE)) 0)
       (do (iset ss (+ f F_PH) A_DEAD)
           (let [ir0 (inline-child p pool b s ss vs cb base q (+ d 1) 0 0 0 end 0 note ext)]
-            (if (>= ir0 0) (return (arr-ret p s ss base f (+ ir0 base))))
+            (if (>= ir0 0) (return (arr-ret p s ss base f (+ ir0 base) 1)))
             (if (!= ir0 NOINL) (return (ret ss base ir0))))
           (return (call ss base q (+ d 1) 0 0 0 end 0 MODE_ITEM note (neg 1)))))
+    (comment "a live element: room in the group arena for its record and a child the"
+             "window holds (a suspension point), then its query from the live blocks")
+    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) q)))]
+      (if (== g VMS_GROW) (return g)))
     (let [cr (cset-rec p s ck)
           w (cset-width p cr)
           area (+ fb (* 2 w))
           cfb (+ fb (cset-frame p cr))
           cck (next-ck p s ck)
           cw (cset-width p (cset-rec p s cck))
-          e (new-epoch s)
-          ao1 (block-ao p s fb area)
-          ^:mut cnq 0
-          ^:mut bo area]
+          e (new-epoch s)]
       (if (== s2 1) (free-on s))
-      (for [^I32 bi 0 nb]
-        (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
-        (let [^:mut ao ao1]
-          (if (> bi 0) (set ao (block-ao p s fb bo)))
-          (if (!= (ia s (+ bo 1)) 0)
-            (do (set cnq (array-candidates p s bo ao el cfb cw cnq e pos))
-                (if (< cnq 0) (return (err ss cnq)))))
-          (set bo (+ bo (array-words p ao)))))
-      (free-off s)
-      (path-put s (+ d 1) P_INDEX el)
-      (iset ss (+ f F_CNQ) cnq)
-      (iset ss (+ f F_PH) A_LIVE)
-      (let []
+      (let [cnq (arr-query p s fb w area nb el q cfb cw e pos)]
+        (free-off s)
+        (if (< cnq 0) (return (err ss cnq)))
+        (iset ss (+ f F_NALIVE) (arr-alive p s fb area nb))
+        (path-put s (+ d 1) P_INDEX el)
+        (iset ss (+ f F_CNQ) cnq)
+        (iset ss (+ f F_PH) A_LIVE)
         (local ^I32 ir)
         (if (> cnq 0)
           (set ir (inline-child p pool b s ss vs cb base q (+ d 1) cfb cck cnq end cx note ext))
           (set ir (inline-child p pool b s ss vs cb base q (+ d 1) 0 0 0 end 0 note ext)))
         (if (< ir 0)
           (if (!= ir NOINL) (return (ret ss base ir))))
-        (if (>= ir 0) (return (arr-ret p s ss base f (+ ir base)))))
-      (if (> cnq 0)
-        (return (call ss base q (+ d 1) cfb cck cnq end cx MODE_ITEM note (neg 1))))
-      (return (call ss base q (+ d 1) 0 0 0 end 0 MODE_ITEM note (neg 1))))))
+        (if (>= ir 0) (return (arr-ret p s ss base f (+ ir base) 1)))
+        (if (> cnq 0)
+          (return (call ss base q (+ d 1) cfb cck cnq end cx MODE_ITEM note (neg 1))))
+        (return (call ss base q (+ d 1) 0 0 0 end 0 MODE_ITEM note (neg 1)))))))
 
 (defn ^:pub ^I32 open-darr [^IntsR p ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 pos ^I32 d
                             ^I32 end ^I32 pair]
@@ -475,48 +417,33 @@
 
 (defn ^:pub ^I32 map-start [^IntsR p ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 pos ^I32 q0 ^I32 n
                             ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
-  (comment "eval-map's start (generic path): filter, blocks, then the frame.")
+  (comment "eval-map's start (generic path): filter, blocks (map-open), then the frame.")
   (let [cr (cset-rec p s ck)
         w (cset-width p cr)
         fw (cset-frame p cr)
-        area (+ fb (* 2 w))
-        cap (- fw (* 2 w))
-        ^:mut nb 0
-        ^:mut used 0
-        ^:mut ccap 0
-        ^:mut smap 0]
+        area (+ fb (* 2 w))]
     (let [na (q-filter-x p s fb w nq 32 pos ctx)]
       (if (< na 0) (return (err ss na))))
-    (for [^I32 i 0 nq]
-      (if (and (!= (bit-and (q-flag s fb w i) F_ADMITTED) 0) (== (q-kind p s fb i) K_MAP))
-        (do (let [mt (leaf-map p (q-leaf-base p s fb i))
-                  sw (ia p (+ mt 6))]
-              (if (> (+ used sw) cap) (return (err ss (neg R_INCONSISTENT))))
-              (let [ri (map-block-init p s (+ area used) i mt pos)]
-                (if (< ri 0) (return (err ss ri))))
-              (set used (+ used sw))
-              (set ccap (+ ccap (ia p (+ mt 7))))
-              (set nb (+ nb 1))))))
-    (if (> (+ used (* 4 ccap)) cap) (return (err ss (neg R_INCONSISTENT))))
-    (if (== nb 1) (set smap (map-fast-mode p (block-mt p s fb area))))
-    (let [pend (count-pending p s fb w nq)
-          f (fpush b ss ka base FK_MAP)]
-      (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
-      (frame-item ss f base pos end d fb ck nq ctx)
-      (iset ss (+ f F_Q) (+ q0 base))
-      (iset ss (+ f F_Q0) (+ q0 base))
-      (iset ss (+ f F_N) n)
-      (iset ss (+ f F_NB) nb)
-      (iset ss (+ f F_CL) (+ area used))
-      (iset ss (+ f F_CCAP) ccap)
-      (iset ss (+ f F_PEND) pend)
-      (iset ss (+ f F_NALIVE) nb)
-      (iset ss (+ f F_SMAP) smap)
-      (iset ss (+ f F_PS) (neg 1))
-      (iset ss (+ f F_PE) (neg 1))
-      (iset ss (+ f F_VLAST) (neg 1))
-      (if (and (== d 0) (!= (ia s O_COSE) 0)) (iset ss (+ f F_COSE) 1))
-      (return (cont ss f M_NEXT)))))
+    (let [nb (map-open p s fb w (- fw (* 2 w)) nq pos)]
+      (if (< nb 0) (return (err ss nb)))
+      (let [pend (count-pending p s fb w nq)
+            f (fpush b ss ka base FK_MAP)]
+        (if (< f 0) (return (err ss (neg R_INCONSISTENT))))
+        (frame-item ss f base pos end d fb ck nq ctx)
+        (iset ss (+ f F_Q) (+ q0 base))
+        (iset ss (+ f F_Q0) (+ q0 base))
+        (iset ss (+ f F_N) n)
+        (iset ss (+ f F_NB) nb)
+        (iset ss (+ f F_CL) (map-cl p s fb area nb))
+        (iset ss (+ f F_CCAP) (map-ccap p s fb area nb))
+        (iset ss (+ f F_PEND) pend)
+        (iset ss (+ f F_NALIVE) nb)
+        (iset ss (+ f F_SMAP) (map-smode p s fb area nb))
+        (iset ss (+ f F_PS) (neg 1))
+        (iset ss (+ f F_PE) (neg 1))
+        (iset ss (+ f F_VLAST) (neg 1))
+        (if (and (== d 0) (!= (ia s O_COSE) 0)) (iset ss (+ f F_COSE) 1))
+        (return (cont ss f M_NEXT))))))
 
 (defn ^:pub ^I32 open-map [^IntsR p ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 pos ^I32 d ^I32 fb
                            ^I32 ck ^I32 nq ^I32 end ^I32 ctx]
@@ -576,6 +503,12 @@
 
 (defn ^:pub ^I32 map-end [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^Ints vs ^BytesW cb ^BytesW ka
                           ^I32 base ^I32 f ^Ext ext]
+  (comment "The map's end: room in the group arena for its T end-runs (a suspension"
+           "point), the deferred duplicate check (D277), then map-close; a T block's"
+           "records keep their keys in the key arena (the session's kept DC forms,"
+           "D283) or, without the valid machinery, nothing to sort.")
+  (let [g (arena-gate p s ss (* 2 (ia ss (+ f F_EL))))]
+    (if (== g VMS_GROW) (return g)))
   (let [rv (vmap-end s ss vs cb ka base f)]
     (if (== rv VMS_GROW) (return rv))
     (if (< rv 0) (return (err ss rv))))
@@ -589,34 +522,9 @@
         n (ia ss (+ f F_N))
         nb (ia ss (+ f F_NB))
         w (cset-width p (cset-rec p s (ia ss (+ f F_CK))))
-        area (+ fb (* 2 w))
-        ^:mut be area
-        ^:mut best (neg 1)
-        ^:mut bestbo 0
-        ^:mut unsat 0]
-    (for [^I32 _bm 0 nb]
-      (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
-      (let [mtm (block-mt p s fb be)]
-        (if (!= (ia s (+ be 1)) 0)
-          (do (if (not (charge s (+ (ia p (+ mtm 2)) (ia p (+ mtm 1))) pos)) (return (err ss (neg R_BUDGET))))
-              (if (map-satisfied p s be mtm)
-                (q-set-flag s fb w (ia s be) F_MATCHED)
-                (do (q-set-flag s fb w (ia s be) (shl R_MISSING 8))
-                    (set unsat (+ unsat 1))
-                    (let [lid (ia s (+ fb (ia s be)))]
-                      (if (or (< best 0) (< lid best))
-                        (do (set best lid) (set bestbo be))))))))
-        (set be (+ be (ia p (+ mtm 6))))))
-    (let [rs (eval-scalars p pool b s fb w nq pos q0 q 32 0 n (unit-of ctx))]
-      (if (< rs 0) (return (err ss rs))))
-    (let [m (finish-comb p pool b s fb w nq pos q ext)]
-      (if (< m 0) (return (err ss m)))
-      (if (and (== m 0) (and (== (bit-and ctx CTX_KEY) 0) (wit-empty s)))
-        (if (> unsat 0)
-          (do (let [r4 (map-missing p s bestbo (block-mt p s fb bestbo) d pos)]
-                (if (< r4 0) (return (err ss r4)))))
-          (do (let [r1 (rule1 s fb w nq d pos)]
-                (if (< r1 0) (return (err ss r1))))))))
+        area (+ fb (* 2 w))]
+    (let [rc (map-close p pool b ka s fb w area nb d n pos q0 q nq ctx ext)]
+      (if (< rc 0) (return (err ss rc))))
     (return (done ss base q))))
 
 (defn ^:pub ^I32 key-fix [^Ints s ^I32 r ^I32 delta]
@@ -627,16 +535,24 @@
     (do (let [vp (ia s VM_POS)]
           (iset s VM_POS (+ vp delta)))
         (return r)))
+  (if (or (== r (neg R_GROUP_LIMIT)) (== r (neg R_AGROW)))
+    (do (let [vp2 (ia s VM_POS)]
+          (iset s VM_POS (+ vp2 delta)))
+        (return r)))
   (if (!= r (neg R_INCONSISTENT))
     (do (let [ep (ia s O_ERR_POS)]
           (iset s O_ERR_POS (+ ep delta)))))
   (return r))
 
-(defn ^:pub ^I32 map-ret [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 r]
-  (comment "The value ended at r (absolute): after a live value, each candidate's"
-           "value test and each block's update, then the witness; next pair.")
+(defn ^:pub ^I32 map-ret [^IntsR p ^Ints s ^Ints ss ^I32 base ^I32 f ^I32 r ^I32 gated]
+  (comment "The value ended at r (absolute): after a live value, each block's value"
+           "tests and tier update (map-after), then the witness; next pair. Unless the"
+           "caller already made room (gated 1), the group arena is made room in first.")
   (if (== (ia ss (+ f F_PH)) M_LVAL)
-    (do (let [pos (- (ia ss (+ f F_POS)) base)
+    (do (if (== gated 0)
+          (do (let [g (arena-gate p s ss (arena-items p s 0))]
+                (if (== g VMS_GROW) (return g)))))
+        (let [pos (- (ia ss (+ f F_POS)) base)
               d (ia ss (+ f F_D))
               fb (ia ss (+ f F_FB))
               ck (ia ss (+ f F_CK))
@@ -645,65 +561,36 @@
               kid (ia ss (+ f F_KID))
               nc (ia ss (+ f F_NC))
               vnq (ia ss (+ f F_VNQ))
+              kpos (ia ss (+ f F_KPOS))
+              klen (ia ss (+ f F_KLEN))
               start (- (ia ss (+ f F_START)) base)
               cr (cset-rec p s ck)
               w (cset-width p cr)
               area (+ fb (* 2 w))
               cfb (+ fb (cset-frame p cr))
-              cw (cset-width p (cset-rec p s (next-ck p s ck)))
-              ^:mut nalive (ia ss (+ f F_NALIVE))
-              ^:mut still 0
-              ^:mut bo area]
+              cw (cset-width p (cset-rec p s (next-ck p s ck)))]
           (if (== (ia ss (+ f F_PS2)) 1) (free-on s))
-          (let [ev (q-stamp s cfb cw vnq pos)]
-            (if (< ev 0) (return (err ss ev)))
-            (for [^I32 _bl 0 nb]
-              (let [mtl (block-mt p s fb bo)]
-                (if (!= (ia s (+ bo 1)) 0)
-                  (do (let [^:mut c3 (ia s (+ bo 3))]
-                        (while (and (< c3 nc) (== (ia s (+ cl (* 4 c3))) bo))
-                          (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
-                          (let [vts3 (cand-vts-mt p s mtl cl c3)
-                                t (ts-test p s vts3 ev pos)]
-                            (if (< t 0) (return (err ss t)))
-                            (if (== t 1)
-                              (do (let [kw (+ (+ cl (* 4 c3)) 1)
-                                        kv (ia s kw)]
-                                    (iset s kw (bit-or kv 2))))))
-                          (set c3 (+ c3 1))))
-                      (local ^I32 u)
-                      (if (simple-struct p mtl)
-                        (set u (update-struct p s bo mtl kid cl nc pos))
-                        (set u (map-update p s bo mtl kid cl nc pos)))
-                      (if (< u 0) (return (err ss u)))
-                      (if (== u 1)
-                        (set still (+ still 1))
-                        (do (set nalive (- nalive 1))
-                            (if (block-named s bo cl nc)
-                              (q-set-flag s fb w (ia s bo) (shl R_VALUE 8))
-                              (q-set-flag s fb w (ia s bo) (shl R_UNEXPECTED 8)))))))
-                (set bo (+ bo (ia p (+ mtl 6)))))))
-          (free-off s)
-          (if (or (> still 0) (> (ia ss (+ f F_PEND)) 0))
-            (wit-clear s)
-            (if (wit-empty s)
-              (if (== (ia ss (+ f F_NAMED)) 1)
-                (wit-set s R_VALUE 0 (+ d 1) (neg 1) 0 start)
-                (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 start))))
-          (iset ss (+ f F_NALIVE) nalive))))
+          (let [still (map-after p s fb w area nb cl cfb cw vnq kid kpos klen pos)]
+            (free-off s)
+            (if (< still 0) (return (err ss still)))
+            (if (or (> still 0) (> (ia ss (+ f F_PEND)) 0))
+              (wit-clear s)
+              (if (wit-empty s)
+                (if (> nc 0)
+                  (wit-set s R_VALUE 0 (+ d 1) (neg 1) 0 start)
+                  (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 start))))
+            (iset ss (+ f F_NALIVE) still)))))
   (iset ss (+ f F_Q) r)
   (iset ss (+ f F_EL) (+ (ia ss (+ f F_EL)) 1))
   (return (cont ss f M_NEXT)))
-
-;; ------------------------------------------------------------ tags (FK_TAG)
-
 
 (defn ^:pub ^I32 map-pair [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints vs ^BytesW cb
                            ^I32 base ^I32 f ^I32 inka ^Ext ext]
   (comment "A pair whose key is whole -- in the window (inka 0) or copied into the"
            "arena (inka 1) -- after the key's first checks: dead (a dead map, or no"
-           "live block) or live (eval-map's generic pair up to the value), then the"
-           "value as a child item.")
+           "live block) or live (eval-map's pair up to the value), then the value as a"
+           "child item. The group arena is made room in first for the key, a value the"
+           "window holds and the pair's record (a suspension point).")
   (let [start (- (ia ss (+ f F_START)) base)
         end (- (ia ss (+ f F_END)) base)
         pos (- (ia ss (+ f F_POS)) base)
@@ -715,6 +602,8 @@
         ^:mut kks start
         ^:mut kend end
         ^:mut delta 0]
+    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) start)))]
+      (if (== g VMS_GROW) (return g)))
     (if (>= kea 0) (set klen (- kea (ia ss (+ f F_START)))))
     (comment "D085: a key the message ended inside (vms-eof): what was copied, ending there")
     (if (and (< kea 0) (== inka 1)) (set klen (ia ss (+ f F_KGOT))))
@@ -738,7 +627,7 @@
             (set-prev ss f (+ start base) (+ kq0 base)))
           (iset ss (+ f F_PH) M_DVAL)
           (let [ir3 (inline-child p pool b s ss vs cb base kq0 (+ d 1) 0 0 0 end 0 (neg 1) ext)]
-            (if (>= ir3 0) (return (map-ret p s ss base f (+ ir3 base))))
+            (if (>= ir3 0) (return (map-ret p s ss base f (+ ir3 base) 1)))
             (if (!= ir3 NOINL) (return (ret ss base ir3))))
           (return (call ss base kq0 (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1)))))
     (let [fb (ia ss (+ f F_FB))
@@ -755,11 +644,7 @@
           cw (cset-width p (cset-rec p s cck))
           ^:mut kid (neg 1)
           ^:mut klo (ia ss (+ f F_KLO))
-          ^:mut ps2 0
-          ^:mut cnq 0
-          ^:mut nc 0
-          ^:mut named 0
-          ^:mut vnq 0]
+          ^:mut ps2 0]
       (comment "The key's id in the schema-wide key table.")
       (if (>= kea 0)
         (do (if (== inka 1)
@@ -769,92 +654,61 @@
             (set klo (ia s O_HI))))
       (comment "Cursors, and schedule 2's simple pair (D045 ii).")
       (if (> smap 0)
-        (do (let [c0 (ia s (+ area 2))
-                  mt0 (block-mt p s fb area)]
-              (free-on s)
-              (map-cursor p s area mt0 kid pos)
-              (free-off s)
-              (if (and (sched2 s) (map-pair-ok p s area mt0 kid smap))
-                (do (set ps2 1)
-                    (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET)))))
-                (do (let [c1 (ia s (+ area 2))]
-                      (if (not (charge s (+ 1 (- c1 c0)) pos)) (return (err ss (neg R_BUDGET))))))))))
-      (comment "The key, queried with the live residual key typesets.")
+        (do (let [pr (map-pre p s fb area smap kid pos)]
+              (if (< pr 0) (return (err ss pr)))
+              (set ps2 pr))))
+      (comment "The key, queried with the live blocks' key typesets.")
       (if (== ps2 1) (free-on s))
       (let [e (new-epoch s)
-            ^:mut bo area]
-        (for [^I32 _bj 0 nb]
-          (let [mtj (block-mt p s fb bo)]
-            (if (== smap 0)
-              (do (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
-                  (if (!= (ia s (+ bo 1)) 0)
-                    (do (let [rc2 (map-cursor p s bo mtj kid pos)]
-                          (if (< rc2 0) (return (err ss rc2))))))))
-            (if (!= (ia s (+ bo 1)) 0)
-              (do (set cnq (map-key-query p s bo mtj cfb cw cnq e pos))
-                  (if (< cnq 0) (return (err ss cnq)))))
-            (set bo (+ bo (ia p (+ mtj 6)))))))
-      (free-off s)
-      (local ^I32 kq)
-      (if (> cnq 0)
-        (do (let [kctx (bit-or CTX_KEY (simple-of p s ps2 cfb cnq))]
-              (if (== inka 1)
-                (do (let [kr1 (eval-item p pool ka s kks (+ d 1) cfb cck cnq kend kctx ext)]
-                      (set kq (key-fix s kr1 delta))))
-                (set kq (eval-item p pool b s kks (+ d 1) cfb cck cnq kend kctx ext)))))
+            cnq (map-keyq p s fb area nb smap kid cfb cw e pos)]
+        (free-off s)
+        (if (< cnq 0) (return (err ss cnq)))
+        (local ^I32 kq)
+        (if (> cnq 0)
+          (do (let [kctx (bit-or CTX_KEY (simple-of p s ps2 cfb cnq))]
+                (if (== inka 1)
+                  (do (let [kr1 (eval-item p pool ka s kks (+ d 1) cfb cck cnq kend kctx ext)]
+                        (set kq (key-fix s kr1 delta))))
+                  (set kq (eval-item p pool b s kks (+ d 1) cfb cck cnq kend kctx ext)))))
+          (if (== inka 1)
+            (do (let [kr2 (dead-item ka s kks (+ d 1) kend)]
+                  (set kq (key-fix s kr2 delta))))
+            (set kq (dead-item b s kks (+ d 1) kend))))
+        (if (< kq 0) (return (err ss kq)))
+        (if (<= km 1)
+          (if (not (key-label b s start km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
+        (let [ko2 (key-order-s b ka s ss f base start inka kks (- kq start))]
+          (if (< ko2 0) (return (err ss ko2))))
         (if (== inka 1)
-          (do (let [kr2 (dead-item ka s kks (+ d 1) kend)]
-                (set kq (key-fix s kr2 delta))))
-          (set kq (dead-item b s kks (+ d 1) kend))))
-      (if (< kq 0) (return (err ss kq)))
-      (if (<= km 1)
-        (if (not (key-label b s start km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
-      (let [ko2 (key-order-s b ka s ss f base start inka kks (- kq start))]
-        (if (< ko2 0) (return (err ss ko2))))
-      (if (== inka 1)
-        (set-prev-arena ss ka f ka0 klen)
-        (set-prev ss f (+ start base) (+ kq base)))
-      (comment "Key phase: candidates.")
-      (if (== ps2 1) (free-on s))
-      (let [ek (q-stamp s cfb cw cnq pos)
-            ^:mut bo2 area]
-        (if (< ek 0) (return (err ss ek)))
-        (for [^I32 _bk 0 nb]
-          (let [mtk (block-mt p s fb bo2)]
-            (if (!= (ia s (+ bo2 1)) 0)
-              (do (if (simple-struct p mtk)
-                    (set nc (key-phase-struct p s bo2 mtk kid cl nc ccap pos))
-                    (set nc (map-key-phase p s bo2 mtk kid ek cl nc ccap pos)))
-                  (if (< nc 0) (return (err ss nc)))))
-            (set bo2 (+ bo2 (ia p (+ mtk 6)))))))
-      (for [^I32 c 0 nc]
-        (if (== (bit-and (ia s (+ (+ cl (* 4 c)) 1)) 1) 0) (set named 1)))
-      (if (== named 1) (path-put s (+ d 1) P_KEY kid) (path-put s (+ d 1) P_ANYKEY 0))
-      (comment "The value, queried with the candidates' value typesets.")
-      (let [e2 (new-epoch s)]
-        (for [^I32 c2 0 nc]
-          (let [vts (cand-vts p s fb cl c2)]
-            (set vnq (q-add p s cfb cw vnq vts e2 pos)))
-          (if (< vnq 0) (return (err ss vnq)))))
-      (free-off s)
-      (iset ss (+ f F_KLO) klo)
-      (iset ss (+ f F_KID) kid)
-      (iset ss (+ f F_MCNQ) cnq)
-      (iset ss (+ f F_NC) nc)
-      (iset ss (+ f F_NAMED) named)
-      (iset ss (+ f F_VNQ) vnq)
-      (iset ss (+ f F_PS2) ps2)
-      (iset ss (+ f F_PH) M_LVAL)
-      (let [vctx (simple-of p s ps2 cfb vnq)]
-        (local ^I32 ir4)
-        (if (> vnq 0)
-          (set ir4 (inline-child p pool b s ss vs cb base kq (+ d 1) cfb cck vnq end vctx (neg 1) ext))
-          (set ir4 (inline-child p pool b s ss vs cb base kq (+ d 1) 0 0 0 end 0 (neg 1) ext)))
-        (if (>= ir4 0) (return (map-ret p s ss base f (+ ir4 base))))
-        (if (!= ir4 NOINL) (return (ret ss base ir4)))
-        (if (> vnq 0)
-          (return (call ss base kq (+ d 1) cfb cck vnq end vctx MODE_ITEM (neg 1) (neg 1))))
-        (return (call ss base kq (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1)))))))
+          (set-prev-arena ss ka f ka0 klen)
+          (set-prev ss f (+ start base) (+ kq base)))
+        (comment "Candidates, the key's path segment, the value's query.")
+        (if (== ps2 1) (free-on s))
+        (let [nc (map-cands p s fb area nb cfb cw cnq cl ccap pos)]
+          (if (< nc 0) (do (free-off s) (return (err ss nc))))
+          (if (== (map-named-of s cl nc) 1) (path-put s (+ d 1) P_KEY kid) (path-put s (+ d 1) P_ANYKEY 0))
+          (let [vnq (map-valq p s fb cl nc cfb cw pos)]
+            (free-off s)
+            (if (< vnq 0) (return (err ss vnq)))
+            (iset ss (+ f F_KLO) klo)
+            (iset ss (+ f F_KID) kid)
+            (iset ss (+ f F_MCNQ) cnq)
+            (iset ss (+ f F_NC) nc)
+            (iset ss (+ f F_VNQ) vnq)
+            (iset ss (+ f F_PS2) ps2)
+            (iset ss (+ f F_KPOS) 0)
+            (iset ss (+ f F_KLEN) (- kq start))
+            (iset ss (+ f F_PH) M_LVAL)
+            (let [vctx (simple-of p s ps2 cfb vnq)]
+              (local ^I32 ir4)
+              (if (> vnq 0)
+                (set ir4 (inline-child p pool b s ss vs cb base kq (+ d 1) cfb cck vnq end vctx (neg 1) ext))
+                (set ir4 (inline-child p pool b s ss vs cb base kq (+ d 1) 0 0 0 end 0 (neg 1) ext)))
+              (if (>= ir4 0) (return (map-ret p s ss base f (+ ir4 base) 1)))
+              (if (!= ir4 NOINL) (return (ret ss base ir4)))
+              (if (> vnq 0)
+                (return (call ss base kq (+ d 1) cfb cck vnq end vctx MODE_ITEM (neg 1) (neg 1))))
+              (return (call ss base kq (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1))))))))))
 
 (defn ^:pub ^I32 vkey-eval [^IntsR p ^Bytes pool ^Bytes b ^Bytes kb ^Ints s ^Ints vs ^Bytes cb ^I32 start
                             ^I32 ks ^I32 kend ^I32 copy ^I32 kr ^I32 d ^I32 cfb ^I32 cck ^I32 cnq ^I32 kctx ^Ext ext]
@@ -889,7 +743,8 @@
   (comment "map-pair for a session's valid-CBOR machinery (P8.4, D266): the key whole"
            "in kb[ks, kend) (the window, or its canonical copy), searched, evaluated,"
            "ordered and kept as the walk over a copy does it (vorder, vkeep); then"
-           "eval-map's generic pair up to the value, as map-pair.")
+           "eval-map's pair up to the value, as map-pair. A T block's record of the"
+           "pair keeps the kept key's position in the key arena (its sort's keys).")
   (let [start (- (ia ss (+ f F_START)) base)
         end (- (ia ss (+ f F_END)) base)
         pos (- (ia ss (+ f F_POS)) base)
@@ -902,6 +757,10 @@
       (do (iset s VM_VTAB 0)
           (vgrow ss 0 0 0 (+ (* 2 (blen ka)) (+ KH klen)))
           (return VMS_GROW)))
+    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) start)))]
+      (if (== g VMS_GROW)
+        (do (iset s VM_VTAB 0)
+            (return g))))
     (if (or (== (ia ss (+ f F_KIND)) FK_DMAP) (== (ia ss (+ f F_NALIVE)) 0))
       (do (let [kq0 (vkey-eval p pool b kb s vs cb start ks kend copy kr (+ d 1) 0 0 0 0 ext)]
             (if (< kq0 0) (return (err ss kq0)))
@@ -930,91 +789,58 @@
           kke (key-span-end kb ks kend)
           ^:mut kid (neg 1)
           ^:mut klo (ia ss (+ f F_KLO))
-          ^:mut ps2 0
-          ^:mut cnq 0
-          ^:mut nc 0
-          ^:mut named 0
-          ^:mut vnq 0]
-      (comment "Over a copy keys come in wire order: one at or below the previous key"
-               "restarts the search bound and every block's cursor (eval-map, PF_CANON).")
+          ^:mut ps2 0]
+      (comment "Over a copy keys come in wire order: from one at or below the previous"
+               "key, every key search covers the whole key table and every block"
+               "searches its named table (eval-map, PF_CANON; program-2 §6.1).")
       (if (and (> kke ks) (and (>= prev 0) (== valid 1)))
-        (if (vdescends kb ka ks kke prev)
-          (do (set klo 0)
-              (cursors-reset p s fb area nb))))
+        (if (vdescends kb ka ks kke prev) (map-unordered p s fb area nb)))
+      (if (map-is-unordered s area nb) (set klo 0))
       (if (> kke ks)
         (do (set kid (key-search p pool kb s ks kke klo pos))
             (if (== kid (neg 2)) (return (err ss (neg R_BUDGET))))
             (set klo (ia s O_HI))))
       (if (> smap 0)
-        (do (let [c0 (ia s (+ area 2))
-                  mt0 (block-mt p s fb area)]
-              (free-on s)
-              (map-cursor p s area mt0 kid pos)
-              (free-off s)
-              (if (and (sched2 s) (map-pair-ok p s area mt0 kid smap))
-                (do (set ps2 1)
-                    (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET)))))
-                (do (let [c1 (ia s (+ area 2))]
-                      (if (not (charge s (+ 1 (- c1 c0)) pos)) (return (err ss (neg R_BUDGET))))))))))
+        (do (let [pr (map-pre p s fb area smap kid pos)]
+              (if (< pr 0) (return (err ss pr)))
+              (set ps2 pr))))
       (if (== ps2 1) (free-on s))
       (let [e (new-epoch s)
-            ^:mut bo area]
-        (for [^I32 _bj 0 nb]
-          (let [mtj (block-mt p s fb bo)]
-            (if (== smap 0)
-              (do (if (not (charge s 1 pos)) (return (err ss (neg R_BUDGET))))
-                  (if (!= (ia s (+ bo 1)) 0)
-                    (do (let [rc2 (map-cursor p s bo mtj kid pos)]
-                          (if (< rc2 0) (return (err ss rc2))))))))
-            (if (!= (ia s (+ bo 1)) 0)
-              (do (set cnq (map-key-query p s bo mtj cfb cw cnq e pos))
-                  (if (< cnq 0) (return (err ss cnq)))))
-            (set bo (+ bo (ia p (+ mtj 6)))))))
-      (free-off s)
-      (let [kctx (bit-or CTX_KEY (simple-of p s ps2 cfb cnq))
-            kq (vkey-eval p pool b kb s vs cb start ks kend copy kr (+ d 1) cfb cck cnq kctx ext)]
-        (if (< kq 0) (return (err ss kq)))
-        (if (<= km 1)
-          (if (not (key-label kb s ks km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
-        (let [vo2 (vorder kb ka s vs ks klen prev canon start valid)]
-          (if (< vo2 0) (return (err ss vo2)))
-          (let [ent2 (vkeep kb ss ka ks klen (+ start base) canon)]
-            (iset ss (+ f F_VLAST) ent2)
-            (iset ss (+ f F_VN) (+ (ia ss (+ f F_VN)) 1))
-            (if (!= vo2 0) (iset ss (+ f F_VMARK) 1))))
-        (if (== ps2 1) (free-on s))
-        (let [ek (q-stamp s cfb cw cnq pos)
-              ^:mut bo2 area]
-          (if (< ek 0) (return (err ss ek)))
-          (for [^I32 _bk 0 nb]
-            (let [mtk (block-mt p s fb bo2)]
-              (if (!= (ia s (+ bo2 1)) 0)
-                (do (if (simple-struct p mtk)
-                      (set nc (key-phase-struct p s bo2 mtk kid cl nc ccap pos))
-                      (set nc (map-key-phase p s bo2 mtk kid ek cl nc ccap pos)))
-                    (if (< nc 0) (return (err ss nc)))))
-              (set bo2 (+ bo2 (ia p (+ mtk 6)))))))
-        (for [^I32 c 0 nc]
-          (if (== (bit-and (ia s (+ (+ cl (* 4 c)) 1)) 1) 0) (set named 1)))
-        (if (== named 1) (path-put s (+ d 1) P_KEY kid) (path-put s (+ d 1) P_ANYKEY 0))
-        (let [e2 (new-epoch s)]
-          (for [^I32 c2 0 nc]
-            (let [vts (cand-vts p s fb cl c2)]
-              (set vnq (q-add p s cfb cw vnq vts e2 pos)))
-            (if (< vnq 0) (return (err ss vnq)))))
+            cnq (map-keyq p s fb area nb smap kid cfb cw e pos)]
         (free-off s)
-        (iset ss (+ f F_KLO) klo)
-        (iset ss (+ f F_KID) kid)
-        (iset ss (+ f F_MCNQ) cnq)
-        (iset ss (+ f F_NC) nc)
-        (iset ss (+ f F_NAMED) named)
-        (iset ss (+ f F_VNQ) vnq)
-        (iset ss (+ f F_PS2) ps2)
-        (iset ss (+ f F_PH) M_LVAL)
-        (let [vctx (simple-of p s ps2 cfb vnq)]
-          (if (> vnq 0)
-            (return (call ss base kq (+ d 1) cfb cck vnq end vctx MODE_ITEM (neg 1) (neg 1))))
-          (return (call ss base kq (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1))))))))
+        (if (< cnq 0) (return (err ss cnq)))
+        (let [kctx (bit-or CTX_KEY (simple-of p s ps2 cfb cnq))
+              kq (vkey-eval p pool b kb s vs cb start ks kend copy kr (+ d 1) cfb cck cnq kctx ext)]
+          (if (< kq 0) (return (err ss kq)))
+          (if (<= km 1)
+            (if (not (key-label kb s ks km)) (return (err ss (fail s start CODE_KEY_TYPE)))))
+          (map-key-ecs p s fb area nb kb ks)
+          (let [vo2 (vorder kb ka s vs ks klen prev canon start valid)]
+            (if (< vo2 0) (return (err ss vo2)))
+            (let [ent2 (vkeep kb ss ka ks klen (+ start base) canon)]
+              (iset ss (+ f F_VLAST) ent2)
+              (iset ss (+ f F_KPOS) (+ ent2 KH))
+              (iset ss (+ f F_KLEN) klen)
+              (iset ss (+ f F_VN) (+ (ia ss (+ f F_VN)) 1))
+              (if (!= vo2 0) (iset ss (+ f F_VMARK) 1))))
+          (if (== ps2 1) (free-on s))
+          (let [nc (map-cands p s fb area nb cfb cw cnq cl ccap pos)]
+            (if (< nc 0) (do (free-off s) (return (err ss nc))))
+            (if (== (map-named-of s cl nc) 1) (path-put s (+ d 1) P_KEY kid) (path-put s (+ d 1) P_ANYKEY 0))
+            (let [vnq (map-valq p s fb cl nc cfb cw pos)]
+              (free-off s)
+              (if (< vnq 0) (return (err ss vnq)))
+              (iset ss (+ f F_KLO) klo)
+              (iset ss (+ f F_KID) kid)
+              (iset ss (+ f F_MCNQ) cnq)
+              (iset ss (+ f F_NC) nc)
+              (iset ss (+ f F_VNQ) vnq)
+              (iset ss (+ f F_PS2) ps2)
+              (iset ss (+ f F_PH) M_LVAL)
+              (let [vctx (simple-of p s ps2 cfb vnq)]
+                (if (> vnq 0)
+                  (return (call ss base kq (+ d 1) cfb cck vnq end vctx MODE_ITEM (neg 1) (neg 1))))
+                (return (call ss base kq (+ d 1) 0 0 0 end 0 MODE_ITEM (neg 1) (neg 1)))))))))))
 
 (defn ^:pub ^I32 vkey-start [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints vs ^BytesW cb
                              ^I32 base ^I32 wend ^I32 f ^Ext ext]

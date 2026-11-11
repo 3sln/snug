@@ -6,8 +6,11 @@ import { be16, be32, enterContainer, fail, headSize, smallArg } from '../cbor/he
 import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { exponentOk, mantissaOk, typedSize } from '../cbor/tags.mjs';
 import { lim } from './api.mjs';
+import { arenaRoom, arenaWant } from './arena.mjs';
+import { forced } from './array.mjs';
 import { c64min, charge } from './base.mjs';
-import { FL_EMBED, H_FLAGS, H_LIM_DEPTH, H_LIM_INPUT, H_S_LEAVES, H_S_LITREFS, INF, K_BYTES, K_EMBED, K_LIT, K_LITSET, R_BUDGET, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_POS, VM_W_OFFSET } from './layout.mjs';
+import { FL_ARENA, FL_EMBED, H_ACT_SUM, H_FLAGS, H_LIM_DEPTH, H_LIM_INPUT, H_RECLEAF_MAX, H_R_ITEM_MAX, H_S_ARRAY_INDEX, H_S_LEAVES, H_S_LITREFS, H_S_MAP_INDEX, INF, K_BYTES, K_EMBED, K_LIT, K_LITSET, R_BUDGET, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_POS, VM_W_OFFSET } from './layout.mjs';
+import { tRecw } from './map.mjs';
 
 export const VMS_NEED = -64;
 
@@ -253,6 +256,10 @@ export const F_KA = 37;
 
 export const F_KQ = 38;
 
+export const F_KPOS = 39;
+
+export const F_KLEN = 40;
+
 export const F_MAJ = 15;
 
 export const F_CS = 16;
@@ -288,6 +295,8 @@ export const F_SERR = 32;
 export const F_SEQ = 33;
 
 export const F_TAIL = 34;
+
+export const F_SAUP = 35;
 
 export const F_TNUM = 15;
 
@@ -513,6 +522,102 @@ export function keyMaxClaim(b, start, end, wend) {
         }
     }
     return mc;
+}
+
+export function satAdd(a, b) {
+    if ((a >= INF) || (b >= INF)) {
+        return INF;
+    }
+    if (a > (INF - b)) {
+        return INF;
+    }
+    return a + b;
+}
+
+export function satMul(a, b) {
+    if ((a <= 0) || (b <= 0)) {
+        return 0;
+    }
+    if (a > ((INF / b) | 0)) {
+        return INF;
+    }
+    return a * b;
+}
+
+export function arenaUsed(p, s) {
+    // Can a run of this Program push anything on the group arena? (an A2 array
+    // or a T map, FLAGS bit 6; or the forced-tier test mode)
+    return ((p[H_FLAGS] & FL_ARENA) !== 0) || forced(s);
+}
+
+export function rItem(p, s) {
+    // Record words one item can push (program-2 §9.4 R_ITEM_MAX; in the forced-
+    // tier mode every array table's W and every map table's T record words).
+    if (!forced(s)) {
+        return p[H_R_ITEM_MAX];
+    }
+    let t = 0;
+    const na = p[21];
+    const nm = p[20];
+    for (let i = 0; i < na; i++) {
+        t = satAdd(t, p[p[p[H_S_ARRAY_INDEX] + i] + 1]);
+    }
+    for (let j = 0; j < nm; j++) {
+        t = satAdd(t, tRecw(p[p[p[H_S_MAP_INDEX] + j] + 1]));
+    }
+    return t;
+}
+
+export function arenaItems(p, s, len) {
+    // What a session step may push on the group arena before its next
+    // suspension point (program-2 §9.4's bound, applied to the work at hand): a
+    // record for the item at hand and for each item of a child of up to len
+    // bytes, and one end-run's permutation and trail per child entry.
+    // Recursive programs' frames are covered once, at the document's start
+    // (arena-doc).
+    let l = len;
+    if (l < 0) {
+        l = 0;
+    }
+    return satAdd(satMul(satAdd(l, 1), rItem(p, s)), satMul(2, l));
+}
+
+export function arenaGate(p, s, ss, words) {
+    // A session's suspension point before work that may push `words` on the
+    // group arena: GO when they fit (or the arena is at its cap, where a miss is
+    // the work's own group_limit); else VMS_GROW, the host growing S to
+    // vms-grow-scratch words (the arena takes them at the next step, arena-adopt).
+    // Nothing is charged before it, so the step that re-runs the phase is the
+    // same.
+    if (!arenaUsed(p, s)) {
+        return GO;
+    }
+    const r = arenaRoom(s, words);
+    if (r === 0) {
+        return GO;
+    }
+    const want = arenaWant(s);
+    if (want > ss[SS_GS]) {
+        ss[SS_GS] = want;
+    }
+    return VMS_GROW;
+}
+
+export function arenaDoc(p, s, ss, total) {
+    // At a session's start: a recursive Program's chunk heap can grow by more
+    // than any one step's records foresee (an activation chain rebuilt in one
+    // machine run), so its arena is grown once to program-2 §9.4's bound for the
+    // whole message (items <= bytes), at most to the cap. GO or VMS_GROW.
+    const act = p[H_ACT_SUM];
+    const rl = p[H_RECLEAF_MAX];
+    if ((act <= 0) && (rl <= 0)) {
+        return GO;
+    }
+    const dd = p[H_LIM_DEPTH];
+    const per = satAdd(rItem(p, s), act);
+    const fixed = satMul(dd + 1, satAdd(act, satMul(64, rl)));
+    const need = satAdd(satAdd(satMul(total, per), fixed), satMul(2, total));
+    return arenaGate(p, s, ss, need);
 }
 
 export function imin(a, b) {

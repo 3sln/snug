@@ -1,37 +1,100 @@
-;; Map evaluation state (program.md §7, §8.3, §12.2): blocks, the per-pair key
-;; search and cursors, the key phase (candidates), the update (pool outcomes,
-;; naming records, O(1) pool rejection), satisfaction at the end, and witness
-;; rule 4. The walk itself (keys and values as items) is snug.vm.eval's.
+;; Maps under PEG group semantics (program-2 §6, §8, architecture §20.5; D270,
+;; D272-D275, D278, P8.5). Each admitted MAP leaf gets a BLOCK. A pair is
+;; evaluated once: its key is searched in the schema's key table, queried with
+;; the map's `key_ts`, and its CANDIDATES are the non-literal members whose key
+;; typeset matched and the literal members naming the key; the value is queried
+;; with their value typesets. A pair no candidate accepts kills the block (rule
+;; 3'). What the block keeps depends on its tier:
+;;   F  pair-major: the first member in source order that takes the pair (its
+;;      key and value match, room left) stops the walk; key-matching cut members
+;;      before it that reject the value note a cut event;
+;;   S  slots for named keys; an unnamed key runs the F walk over the class-R
+;;      members (ucount, ukey, ucut);
+;;   T  a record per pair in the group arena (key id, the members' key and value
+;;      bits), sorted into pick order (EC key order) at the end when needed.
+;; At the end F checks counts and cuts; S and T run the PEG MACHINE over the
+;; group with an undo trail, cut outcomes by mode (rfc commitment epochs, the
+;; default; `branch` rule A), failure events scored by trail length, then
+;; closedness. The walks (snug.vm.eval, snug.vm.scont) call these functions in
+;; the same order on every route.
 ;;
-;; A block (one per admitted MAP leaf, in query order) is
-;;     +0 qindex  +1 alive  +2 cursor  +3 first candidate of the current pair
-;;     +4 factor_live[F]  pools: rej live exempt outcome cnt[n_entries]
-;;     alts: dead r req_done consumed[ceil(lits/32)]
-;; A pool's `outcome` word holds its first candidate during the key phase and
-;; its outcome during the update: j >= 0 TAKE j, -1 REJECT, -2 ABSORB, -3 not
-;; involved. A candidate is 4 words: block, kind (bit 0: 1 group entry, 0
-;; literal; bit 1: value matched), pool or naming record, entry or literal.
+;; A block (MAPWORDS words, program-2 §6.3 as amended by D311):
+;;     +0 qindex  +1 alive  +2 cursor (the named table, while keys ascend)  +3
+;;     the block's first candidate in the pair's list  +4 its candidates  +5
+;;     the end's result (1 matched, 2 failed)  +6 sp  +7 commits  +8 pairs seen
+;;     +9 bits (1 keys stopped ascending, 2 an EC-sensitive key)  +10..+12 the
+;;     machine's failure event (score; kind << 16 | member; pair) and after the
+;;     end the witness (reason; extra segment kind; value)  +13 top chunk (-1)
+;;     +14 the container's record base (T)  +15 the stride  +16 this block's
+;;     offset in it  +17 the trail's base  +18 the pick-order permutation (-1
+;;     wire order)  +19 the current pair's named index (-1 none)
+;;     +20 S: the trail's length (S keeps its trail in the block)  +21 spare
+;;     +22 per member (6 words): count, cutpair (wire index, -1), ucount (F:
+;;     the cut pair's key id), uflags (bit 0 ukey; bits 8.. ucut + 1), min, max
+;;     then stack[8 depth] (non-recursive), then S slots[n_named slot_words] and
+;;     its trail[n_named], or T index[n_named] (F keeps n_named words too, for
+;;     the forced-tier mode); T's trail and permutation are in the group arena
+;; A machine frame is 8 words: node, mark (trail length), counter, aux,
+;; commits0, and the best failure event of its failed sub-attempts.
 (ns snug.vm.map
-  (:require [kin.lang :refer [defn let return set if while for do comment]]
-            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg shl sar ushr bit-and bit-or
+  (:require [kin.lang :refer [defn let local return set if while for do comment defconst forever break
+                              declarefn]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
                                < > <= >= == != and or not u8 ia iset]]
-            [snug.cbor.codes :refer [O_HI O_LO]]
+            [snug.cbor.codes :refer [O_HI O_LO O_CSTART]]
             [snug.cbor.head :refer [be16 be32]]
-            [snug.vm.layout :refer [H_S_LEAVES H_S_MAP_INDEX H_S_GROUP_INDEX H_S_KEYS H_N_KEYS
-                                    MODE_ABSORB INF R_BUDGET R_INCONSISTENT R_MISSING P_KEY P_ANYKEY]]
-            [snug.vm.base :refer [charge c16 c64min ts-test q-add wit-set]]
-            [snug.vm.leaf :refer [cmp-bytes]]))
+            [snug.cbor.canon :refer [targ tskip kclass float-ecs]]
+            [snug.vm.layout :refer [H_S_LEAVES H_S_MAP_INDEX H_S_KEYS H_N_KEYS H_FLAGS FL_CUTS_BRANCH
+                                    INF R_BUDGET R_INCONSISTENT R_MISSING R_VALUE R_UNEXPECTED P_KEY P_ANYKEY
+                                    PEG_HDR P_EMPTY P_FAIL P_MEMBER P_SEQ P_CHOICE P_REP P_CALL
+                                    TIER_F TIER_S TIER_T]]
+            [snug.vm.base :refer [charge c16 c64min ts-test q-add]]
+            [snug.vm.leaf :refer [cmp-bytes]]
+            [snug.vm.arena :refer [arena-up arena-up-top arena-set-up arena-body fs-push fs-top fs-pop fs-drop]]
+            [snug.vm.array :refer [peg-of peg-rec if-act forced]]))
+
+(declarefn ec-cmp-item)
+
+(defconst ^:pub ^I32 MB_Q 0)
+(defconst ^:pub ^I32 MB_ALIVE 1)
+(defconst ^:pub ^I32 MB_CUR 2)
+(defconst ^:pub ^I32 MB_CF 3)
+(defconst ^:pub ^I32 MB_NC 4)
+(defconst ^:pub ^I32 MB_RES 5)
+(defconst ^:pub ^I32 MB_SP 6)
+(defconst ^:pub ^I32 MB_COMM 7)
+(defconst ^:pub ^I32 MB_NP 8)
+(defconst ^:pub ^I32 MB_BITS 9)
+(defconst ^:pub ^I32 MB_E0 10)
+(defconst ^:pub ^I32 MB_E1 11)
+(defconst ^:pub ^I32 MB_E2 12)
+(defconst ^:pub ^I32 MB_ACT 13)
+(defconst ^:pub ^I32 MB_RBASE 14)
+(defconst ^:pub ^I32 MB_STRIDE 15)
+(defconst ^:pub ^I32 MB_ROFF 16)
+(defconst ^:pub ^I32 MB_TRAIL 17)
+(defconst ^:pub ^I32 MB_PERM 18)
+(defconst ^:pub ^I32 MB_NJ 19)
+(defconst ^:pub ^I32 MB_TLEN 20)
+(defconst ^:pub ^I32 MB_HDR 22)
+(defconst ^:pub ^I32 MW 6)
+(defconst ^:pub ^I32 BIT_UNORD 1)
+(defconst ^:pub ^I32 BIT_ECS 2)
+(defconst ^I32 MFW 8)
+;; machine outcomes
+(defconst ^I32 X_OK 0)
+(defconst ^I32 X_FAIL 1)
+(defconst ^I32 X_CUT 2)
+(defconst ^I32 X_FAILX 3)
+(defconst ^I32 X_ENTER 4)
+;; event kinds (high half of the A word)
+(defconst ^I32 EV_MISSING 1)
+(defconst ^I32 EV_CUT 2)
+(defconst ^I32 NO_MEMBER 65535)
+;; an EC comparison stopped by the budget
+(defconst ^:pub ^I32 EC_STOP 1000000)
 
 ;; ------------------------------------------------------------ table layout
-
-(defn ^:pub ^I32 m-pools [^IntsR p ^I32 mt] (return (+ (+ mt 8) (* 4 (ia p mt)))))
-(defn ^:pub ^I32 m-alts [^IntsR p ^I32 mt] (return (+ (m-pools p mt) (* 5 (ia p (+ mt 1))))))
-(defn ^:pub ^I32 m-lits [^IntsR p ^I32 mt] (return (+ (m-alts p mt) (* 5 (ia p (+ mt 2))))))
-(defn ^:pub ^I32 m-keys [^IntsR p ^I32 mt] (return (+ (m-lits p mt) (* 4 (ia p (+ mt 3))))))
-(defn ^:pub ^I32 m-names [^IntsR p ^I32 mt] (return (+ (m-keys p mt) (* 4 (ia p (+ mt 4))))))
-
-(defn ^:pub ^I32 group-rec [^IntsR p ^I32 g]
-  (return (ia p (+ (ia p H_S_GROUP_INDEX) g))))
 
 (defn ^:pub ^I32 leaf-map [^IntsR p ^I32 lb]
   (comment "The map table (word offset) of the MAP leaf at lb.")
@@ -42,42 +105,168 @@
   (let [l (ia s (+ fb (ia s bo)))]
     (return (leaf-map p (+ (ia p H_S_LEAVES) (* 8 l))))))
 
-(defn ^:pub ^Bool alt-live [^IntsR p ^IntsR s ^I32 bo ^I32 pools ^I32 alts ^I32 a]
-  (comment "An alternative is live iff dead = 0 and r = its pool's rej (§7.1).")
-  (let [arec (+ alts (* 5 a))
-        aso (ia p (+ arec 4))
-        pso (ia p (+ (+ pools (* 5 (ia p arec))) 4))]
-    (return (and (== (ia s (+ bo aso)) 0) (== (ia s (+ (+ bo aso) 1)) (ia s (+ bo pso)))))))
+(defn ^:pub ^I32 mpeg [^IntsR p ^I32 mt] (return (peg-of p (ia p mt))))
+(defn ^:pub ^I32 m-named [^IntsR p ^I32 mt] (return (+ (+ mt 8) (* 5 (ia p (+ mt 1))))))
+(defn ^:pub ^I32 m-namers [^IntsR p ^I32 mt] (return (+ (m-named p mt) (* 3 (ia p (+ mt 2))))))
 
-(defn ^Bool absorbing [^I32 emin ^I32 emax]
-  (return (and (== emin 0) (== emax INF))))
+(defn ^:pub ^I32 m-nlit [^IntsR p ^I32 mt]
+  (comment "Literal members: the namers' total.")
+  (let [nn (ia p (+ mt 2))]
+    (if (== nn 0) (return 0))
+    (let [last (+ (m-named p mt) (* 3 (- nn 1)))]
+      (return (+ (ia p (+ last 1)) (ia p (+ last 2)))))))
+
+(defn ^:pub ^I32 m-root [^IntsR p ^I32 mt] (return (+ (m-namers p mt) (m-nlit p mt))))
+
+(defn ^:pub ^I32 m-member [^I32 mt ^I32 m] (return (+ (+ mt 8) (* 5 m))))
+
+(defn ^:pub ^I32 t-recw [^I32 nm]
+  (comment "T record words: key id, flags (bit 0 consumed), key position, key length,"
+           "then 2 bits per member (key matched, value matched).")
+  (return (+ 4 (sar (+ (* 2 nm) 31) 5))))
+
+(defn ^:pub ^I32 m-tier [^IntsR p ^IntsR s ^I32 po]
+  (if (forced s) (return TIER_T))
+  (return (ia p (+ po 3))))
+
+(defn ^:pub ^I32 map-words [^IntsR p ^I32 mt]
+  (comment "MAPWORDS(m) = 22 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named"
+           "(slot_words + 1) : n_named).")
+  (let [po (mpeg p mt)
+        nm (ia p (+ mt 1))
+        nn (ia p (+ mt 2))
+        ^:mut n (+ MB_HDR (* MW nm))]
+    (if (not (peg-rec p po)) (set n (+ n (* MFW (ia p (+ po 6))))))
+    (if (== (ia p (+ po 3)) TIER_S)
+      (set n (+ n (* nn (+ (ia p (+ mt 4)) 1))))
+      (set n (+ n nn)))
+    (return n)))
+
+(defn ^I32 msbase [^IntsR p ^I32 bo ^I32 mt]
+  (return (+ (+ bo MB_HDR) (* MW (ia p (+ mt 1))))))
+
+(defn ^I32 mslots [^IntsR p ^I32 bo ^I32 mt]
+  (comment "The S slots / T index of the block.")
+  (let [po (mpeg p mt)
+        ^:mut x (msbase p bo mt)]
+    (if (not (peg-rec p po)) (set x (+ x (* MFW (ia p (+ po 6))))))
+    (return x)))
+
+(defn ^:pub ^I32 named-index [^IntsR p ^I32 mt ^I32 kid]
+  (comment "The named-table index of key id kid in this map, or -1 (uncharged).")
+  (if (< kid 0) (return (neg 1)))
+  (let [nb (m-named p mt)
+        ^:mut lo 0
+        ^:mut hi (ia p (+ mt 2))]
+    (while (< lo hi)
+      (let [mid (sar (+ lo hi) 1)
+            k (ia p (+ nb (* 3 mid)))]
+        (if (== k kid) (return mid))
+        (if (< k kid) (set lo (+ mid 1)) (set hi mid))))
+    (return (neg 1))))
 
 ;; ------------------------------------------------------------ blocks
 
-(defn ^:pub ^I32 map-block-init [^IntsR p ^Ints s ^I32 bo ^I32 qindex ^I32 mt ^I32 at]
-  (comment "Initialise a block: charged ceil(state_words/16); alive, factor_live ="
-           "the factor's alternatives, each pool's live = its alternatives.")
-  (let [sw (ia p (+ mt 6))
-        nf (ia p mt)
-        np (ia p (+ mt 1))
-        pools (m-pools p mt)]
-    (if (not (charge s (c16 sw) at)) (return (neg R_BUDGET)))
-    (for [^I32 j 0 sw]
-      (iset s (+ bo j) 0))
-    (iset s bo qindex)
-    (iset s (+ bo 1) 1)
-    (for [^I32 f 0 nf]
-      (let [frec (+ (+ mt 8) (* 4 f))
-            pf (ia p (+ frec 2))
-            pc (ia p (+ frec 3))
-            ^:mut live 0]
-        (for [^I32 k 0 pc]
-          (set live (+ live (ia p (+ (+ pools (* 5 (+ pf k))) 3)))))
-        (iset s (+ (+ bo 4) f) live)))
-    (for [^I32 pi 0 np]
-      (let [prec (+ pools (* 5 pi))]
-        (iset s (+ (+ bo (ia p (+ prec 4))) 1) (ia p (+ prec 3)))))
-    (return 0)))
+(defn ^:pub ^I32 map-block-init [^IntsR p ^Ints s ^I32 bo ^I32 qindex ^I32 mt ^I32 words ^I32 at]
+  (comment "Initialise a block, charged ceil(words/16): alive, members at count 0 with"
+           "their occurrence (read off the MEMBER nodes, members being numbered in"
+           "node order), no cut, no slot / index entry.")
+  (if (not (charge s (c16 words) at)) (return (neg R_BUDGET)))
+  (for [^I32 j 0 words]
+    (iset s (+ bo j) 0))
+  (iset s (+ bo MB_Q) qindex)
+  (iset s (+ bo MB_ALIVE) 1)
+  (iset s (+ bo MB_ACT) (neg 1))
+  (iset s (+ bo MB_RBASE) (neg 1))
+  (iset s (+ bo MB_PERM) (neg 1))
+  (iset s (+ bo MB_NJ) (neg 1))
+  (let [po (mpeg p mt)
+        nn (ia p (+ mt 2))
+        nodes (ia p (+ po 1))
+        mb (+ bo MB_HDR)
+        sl (mslots p bo mt)
+        ^:mut m 0]
+    (for [^I32 i 0 nodes]
+      (let [nd (+ (+ po PEG_HDR) (* 5 i))]
+        (if (== (ia p nd) P_MEMBER)
+          (do (let [mw (+ mb (* MW m))]
+                (iset s (+ mw 1) (neg 1))
+                (iset s (+ mw 4) (ia p (+ nd 2)))
+                (iset s (+ mw 5) (ia p (+ nd 3))))
+              (set m (+ m 1))))))
+    (if (and (== (ia p (+ po 3)) TIER_S) (not (forced s)))
+      (do (let [sw (ia p (+ mt 4))]
+            (for [^I32 j2 0 nn]
+              (iset s (+ sl (* sw j2)) (neg 1)))))
+      (for [^I32 j3 0 nn]
+        (iset s (+ sl j3) (neg 1)))))
+  (return 0))
+
+(defn ^:pub map-records [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb]
+  (comment "After a container's blocks are initialised: the T blocks' record stride"
+           "(the sum of their record words) and their offsets in it, from the arena's"
+           "upward top.")
+  (let [^:mut stride 0
+        ^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (let [mt (block-mt p s fb bo)]
+        (if (== (m-tier p s (mpeg p mt)) TIER_T)
+          (do (iset s (+ bo MB_ROFF) stride)
+              (set stride (+ stride (t-recw (ia p (+ mt 1)))))))
+        (set bo (+ bo (map-words p mt)))))
+    (if (> stride 0)
+      (do (let [base (arena-up-top s)
+                ^:mut bo2 area]
+            (for [^I32 _j 0 nb]
+              (let [mt2 (block-mt p s fb bo2)]
+                (if (== (m-tier p s (mpeg p mt2)) TIER_T)
+                  (do (iset s (+ bo2 MB_RBASE) base)
+                      (iset s (+ bo2 MB_STRIDE) stride)))
+                (set bo2 (+ bo2 (map-words p mt2))))))))))
+
+(defn ^:pub ^I32 map-mark [^IntsR p ^IntsR s ^I32 fb ^I32 area ^I32 nb]
+  (comment "The container's record base (popped back to at its end), or -1.")
+  (let [^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (let [mt (block-mt p s fb bo)]
+        (if (>= (ia s (+ bo MB_RBASE)) 0) (return (ia s (+ bo MB_RBASE))))
+        (set bo (+ bo (map-words p mt)))))
+    (return (neg 1))))
+
+(defn ^:pub map-unordered [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb]
+  (comment "The map's keys stopped ascending (program-2 §6.1 step 1): every block"
+           "looks its keys up by binary search from now on.")
+  (let [^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (let [mt (block-mt p s fb bo)
+            bits (ia s (+ bo MB_BITS))]
+        (iset s (+ bo MB_BITS) (bit-or bits BIT_UNORD))
+        (set bo (+ bo (map-words p mt)))))))
+
+(defn ^:pub ^Bool map-is-unordered [^IntsR s ^I32 area ^I32 nb]
+  (if (== nb 0) (return false))
+  (return (!= (bit-and (ia s (+ area MB_BITS)) BIT_UNORD) 0)))
+
+(defn ^:pub map-key-ecs [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb ^Bytes kb ^I32 ks]
+  (comment "A key that is neither text nor an integer and is EC-sensitive (its EC"
+           "form may differ from its DC form) makes the T blocks sort their records at"
+           "the end (program-2 §6.5). O_HI, O_LO and O_CSTART are kept.")
+  (let [km (ushr (u8 kb ks) 5)]
+    (if (and (> km 1) (!= km 3))
+      (do (let [h (ia s O_HI)
+                l (ia s O_LO)
+                c (ia s O_CSTART)
+                cls (kclass kb s ks)]
+            (iset s O_HI h)
+            (iset s O_LO l)
+            (iset s O_CSTART c)
+            (if (!= (bit-and cls 2) 0)
+              (do (let [^:mut bo area]
+                    (for [^I32 _i 0 nb]
+                      (let [mt (block-mt p s fb bo)
+                            bits (ia s (+ bo MB_BITS))]
+                        (iset s (+ bo MB_BITS) (bit-or bits BIT_ECS))
+                        (set bo (+ bo (map-words p mt)))))))))))))
 
 ;; ------------------------------------------------------------ the pair's key
 
@@ -111,7 +300,7 @@
   (comment "Binary search of KEYS[lo0, N_KEYS) for the encoded key b[ks, ke): its id,"
            "-1 if absent, -2 if the budget ran out. The next pair's lower bound (one"
            "past the id, or the insertion point) goes in s[O_HI]. A probe is charged"
-           "with its comparison: ceil(min(len)/64), at least 1.")
+           "with its comparison: ceil(min(len)/8), at least 1.")
   (let [kb (ia p H_S_KEYS)
         kl (- ke ks)
         ^:mut lo lo0
@@ -127,335 +316,6 @@
           (if (< c 0) (set hi mid) (set lo (+ mid 1))))))
     (iset s O_HI lo)
     (return (neg 1))))
-
-(defn ^:pub ^I32 map-cursor [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 at]
-  (comment "Advance the block's cursor over its key index to the first key >= kid;"
-           "1 unit per step. 0 or a negated code.")
-  (if (< kid 0) (return 0))
-  (let [keys (m-keys p mt)
-        nk (ia p (+ mt 4))
-        ^:mut cur (ia s (+ bo 2))]
-    (while (and (< cur nk) (< (ia p (+ keys (* 4 cur))) kid))
-      (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-      (set cur (+ cur 1)))
-    (iset s (+ bo 2) cur)
-    (return 0)))
-
-(defn ^:pub ^I32 named-rec [^IntsR p ^IntsR s ^I32 bo ^I32 mt ^I32 kid]
-  (comment "The key-index record of kid in this leaf (the cursor's), or -1.")
-  (if (< kid 0) (return (neg 1)))
-  (let [keys (m-keys p mt)
-        cur (ia s (+ bo 2))]
-    (if (and (< cur (ia p (+ mt 4))) (== (ia p (+ keys (* 4 cur))) kid)) (return cur))
-    (return (neg 1))))
-
-(defn ^:pub ^I32 map-key-query [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 cfb ^I32 cw ^I32 cnq ^I32 e ^I32 at]
-  (comment "Add the key typesets of every entry of the group of every live residual"
-           "pool of this block to the key's query list. The new length or a code.")
-  (let [pools (m-pools p mt)
-        f0c (ia p (+ mt 11))
-        ^:mut n cnq]
-    (for [^I32 pi 0 f0c]
-      (let [prec (+ pools (* 5 pi))
-            pso (ia p (+ prec 4))]
-        (if (> (ia s (+ (+ bo pso) 1)) 0)
-          (do (let [go (group-rec p (ia p (+ prec 1)))
-                    ne (ia p go)]
-                (for [^I32 j 0 ne]
-                  (set n (q-add p s cfb cw n (ia p (+ (+ go 2) (* 4 j))) e at))
-                  (if (< n 0) (return n))))))))
-    (return n)))
-
-(defn ^:pub ^I32 map-key-phase [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 ek ^I32 cl
-                                ^I32 nc0 ^I32 cap ^I32 at]
-  (comment "Candidates of this block (§8.3 step 6): each group entry of a live"
-           "residual pool whose key typeset matched (1 unit + its test), then each"
-           "naming record of the key whose alternative is live (1 unit each)."
-           "Answers the new candidate count or a negated code.")
-  (let [pools (m-pools p mt)
-        alts (m-alts p mt)
-        f0c (ia p (+ mt 11))
-        kr (named-rec p s bo mt kid)
-        ^:mut nc nc0]
-    (iset s (+ bo 3) nc0)
-    (for [^I32 pi 0 f0c]
-      (let [prec (+ pools (* 5 pi))
-            pso (ia p (+ prec 4))]
-        (if (> (ia s (+ (+ bo pso) 1)) 0)
-          (do (iset s (+ (+ bo pso) 3) nc)
-              (let [go (group-rec p (ia p (+ prec 1)))
-                    ne (ia p go)]
-                (for [^I32 j 0 ne]
-                  (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-                  (let [t (ts-test p s (ia p (+ (+ go 2) (* 4 j))) ek at)]
-                    (if (< t 0) (return t))
-                    (if (== t 1)
-                      (do (if (>= nc cap) (return (neg R_INCONSISTENT)))
-                          (iset s (+ cl (* 4 nc)) bo)
-                          (iset s (+ (+ cl (* 4 nc)) 1) 1)
-                          (iset s (+ (+ cl (* 4 nc)) 2) pi)
-                          (iset s (+ (+ cl (* 4 nc)) 3) j)
-                          (set nc (+ nc 1)))))))))))
-    (if (>= kr 0)
-      (do (let [krec (+ (m-keys p mt) (* 4 kr))
-                nf (ia p (+ krec 2))
-                ncount (ia p (+ krec 3))
-                names (m-names p mt)]
-            (for [^I32 r 0 ncount]
-              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-              (let [nr (+ nf r)
-                    a (ia p (+ names (* 2 nr)))
-                    lit (ia p (+ (+ names (* 2 nr)) 1))]
-                (if (alt-live p s bo pools alts a)
-                  (do (if (>= nc cap) (return (neg R_INCONSISTENT)))
-                      (iset s (+ cl (* 4 nc)) bo)
-                      (iset s (+ (+ cl (* 4 nc)) 1) 0)
-                      (iset s (+ (+ cl (* 4 nc)) 2) nr)
-                      (iset s (+ (+ cl (* 4 nc)) 3) lit)
-                      (set nc (+ nc 1)))))))))
-    (return nc)))
-
-(defn ^:pub ^I32 cand-vts [^IntsR p ^IntsR s ^I32 fb ^I32 cl ^I32 c]
-  (comment "The value typeset of candidate c.")
-  (let [cb (+ cl (* 4 c))
-        bo (ia s cb)
-        mt (block-mt p s fb bo)]
-    (if (== (bit-and (ia s (+ cb 1)) 1) 1)
-      (do (let [prec (+ (m-pools p mt) (* 5 (ia s (+ cb 2))))
-                go (group-rec p (ia p (+ prec 1)))]
-            (return (ia p (+ (+ (+ go 2) (* 4 (ia s (+ cb 3)))) 1))))))
-    (return (ia p (+ (+ (m-lits p mt) (* 4 (ia s (+ cb 3)))) 1)))))
-
-(defn ^:pub ^I32 cand-vts-mt [^IntsR p ^IntsR s ^I32 mt ^I32 cl ^I32 c]
-  (comment "cand-vts with the candidate's block table already known.")
-  (let [cb (+ cl (* 4 c))]
-    (if (== (bit-and (ia s (+ cb 1)) 1) 1)
-      (do (let [prec (+ (m-pools p mt) (* 5 (ia s (+ cb 2))))
-                go (group-rec p (ia p (+ prec 1)))]
-            (return (ia p (+ (+ (+ go 2) (* 4 (ia s (+ cb 3)))) 1))))))
-    (return (ia p (+ (+ (m-lits p mt) (* 4 (ia s (+ cb 3)))) 1)))))
-
-(defn ^:pub ^Bool block-named [^IntsR s ^I32 bo ^I32 cl ^I32 nc]
-  (comment "Did this block contribute a literal (naming) candidate for the pair?")
-  (let [^:mut c (ia s (+ bo 3))]
-    (while (and (< c nc) (== (ia s (+ cl (* 4 c))) bo))
-      (if (== (bit-and (ia s (+ (+ cl (* 4 c)) 1)) 1) 0) (return true))
-      (set c (+ c 1))))
-  (return false))
-
-;; ------------------------------------------------------------ the update
-
-(defn ^:pub ^I32 map-update [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 cl ^I32 nc ^I32 at]
-  (comment "§8.3 step 8 for one alive block: pool outcomes, naming records (1 unit"
-           "each), each pool (1 unit), liveness. 1 still alive, 0 died, or a code.")
-  (let [pools (m-pools p mt)
-        alts (m-alts p mt)
-        lits (m-lits p mt)
-        nf (ia p mt)
-        np (ia p (+ mt 1))
-        c0 (ia s (+ bo 3))
-        kr (named-rec p s bo mt kid)
-        ^:mut owner (neg 1)]
-    (if (>= kr 0) (set owner (ia p (+ (+ (m-keys p mt) (* 4 kr)) 1))))
-    (comment "1. Outcomes (residual pools first: they are pools 0..), exempt = 0.")
-    (for [^I32 pi 0 np]
-      (let [prec (+ pools (* 5 pi))
-            pso (ia p (+ prec 4))
-            fct (ia p prec)
-            ^:mut oc (neg 1)]
-        (iset s (+ (+ bo pso) 2) 0)
-        (if (== fct 0)
-          (do (if (> (ia s (+ (+ bo pso) 1)) 0)
-                (do (let [go (group-rec p (ia p (+ prec 1)))
-                          ^:mut ci (ia s (+ (+ bo pso) 3))
-                          ^:mut jstar (neg 1)
-                          ^:mut j2 (neg 1)]
-                      (while (and (< ci nc)
-                                  (and (== (ia s (+ cl (* 4 ci))) bo)
-                                       (and (== (bit-and (ia s (+ (+ cl (* 4 ci)) 1)) 1) 1)
-                                            (== (ia s (+ (+ cl (* 4 ci)) 2)) pi))))
-                        (if (!= (bit-and (ia s (+ (+ cl (* 4 ci)) 1)) 2) 0)
-                          (do (let [jj (ia s (+ (+ cl (* 4 ci)) 3))]
-                                (if (< jstar 0)
-                                  (set jstar jj)
-                                  (if (< j2 0) (set j2 jj))))))
-                        (set ci (+ ci 1)))
-                      (if (>= jstar 0)
-                        (do (let [erec (+ (+ go 2) (* 4 jstar))
-                                  emin (ia p (+ erec 2))
-                                  emax (ia p (+ erec 3))]
-                              (if (or (absorbing emin emax)
-                                      (< (ia s (+ (+ (+ bo pso) 4) jstar)) emax))
-                                (set oc jstar)
-                                (if (>= j2 0) (set oc j2))))))))))
-          (do (set oc (neg 3))
-              (if (== owner fct)
-                (do (let [frec (+ (+ mt 8) (* 4 fct))
-                          pp (ia p (+ frec 1))]
-                      (set oc (neg 1))
-                      (if (and (== (ia p frec) MODE_ABSORB) (>= pp 0))
-                        (if (!= (ia s (+ (+ bo (ia p (+ (+ pools (* 5 pp)) 4))) 3)) (neg 1))
-                          (set oc (neg 2)))))))))
-        (iset s (+ (+ bo pso) 3) oc)))
-    (comment "2. Naming records of the key (1 unit each).")
-    (if (>= kr 0)
-      (do (let [krec (+ (m-keys p mt) (* 4 kr))
-                nfst (ia p (+ krec 2))
-                ncount (ia p (+ krec 3))
-                names (m-names p mt)
-                ^:mut kc c0]
-            (for [^I32 r 0 ncount]
-              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-              (let [nr (+ nfst r)
-                    a (ia p (+ names (* 2 nr)))
-                    lit (ia p (+ (+ names (* 2 nr)) 1))]
-                (if (alt-live p s bo pools alts a)
-                  (do (while (and (< kc nc)
-                                  (and (== (ia s (+ cl (* 4 kc))) bo)
-                                       (== (bit-and (ia s (+ (+ cl (* 4 kc)) 1)) 1) 1)))
-                        (set kc (+ kc 1)))
-                      (if (or (>= kc nc) (!= (ia s (+ cl (* 4 kc))) bo)) (return (neg R_INCONSISTENT)))
-                      (let [matched (!= (bit-and (ia s (+ (+ cl (* 4 kc)) 1)) 2) 0)
-                            arec (+ alts (* 5 a))
-                            aso (ia p (+ arec 4))
-                            apool (ia p arec)
-                            prec2 (+ pools (* 5 apool))
-                            pso2 (ia p (+ prec2 4))
-                            lrec (+ lits (* 4 lit))]
-                        (set kc (+ kc 1))
-                        (if matched
-                          (do (let [li (- lit (ia p (+ arec 1)))
-                                    wd (+ (+ (+ bo aso) 3) (sar li 5))]
-                                (iset s wd (bit-or (ia s wd) (shl 1 (bit-and li 31))))
-                                (iset s (+ (+ bo aso) 2) (+ (ia s (+ (+ bo aso) 2)) (ia p (+ lrec 2))))
-                                (if (== (ia s (+ (+ bo pso2) 3)) (neg 1))
-                                  (do (iset s (+ (+ bo aso) 1) (+ (ia s (+ (+ bo aso) 1)) 1))
-                                      (iset s (+ (+ bo pso2) 2) (+ (ia s (+ (+ bo pso2) 2)) 1))))))
-                          (if (== (ia p (+ lrec 3)) 1)
-                            (do (iset s (+ bo aso) 1)
-                                (iset s (+ (+ bo pso2) 1) (- (ia s (+ (+ bo pso2) 1)) 1))
-                                (let [fa (+ (+ bo 4) (ia p prec2))]
-                                  (iset s fa (- (ia s fa) 1))))))))))))))
-    (comment "3. Each pool (1 unit): TAKE of a constrained entry counts; REJECT kills"
-             "every live alternative that did not consume the pair.")
-    (for [^I32 pj 0 np]
-      (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-      (let [prec3 (+ pools (* 5 pj))
-            pso3 (ia p (+ prec3 4))
-            fct3 (ia p prec3)
-            o3 (ia s (+ (+ bo pso3) 3))
-            ^:mut inv (== owner fct3)]
-        (if (== fct3 0) (set inv (<= owner 0)))
-        (if inv
-          (do (if (>= o3 0)
-                (do (let [go3 (group-rec p (ia p (+ prec3 1)))
-                          erec3 (+ (+ go3 2) (* 4 o3))]
-                      (if (not (absorbing (ia p (+ erec3 2)) (ia p (+ erec3 3))))
-                        (do (let [ca (+ (+ (+ bo pso3) 4) o3)]
-                              (iset s ca (+ (ia s ca) 1))))))))
-              (if (== o3 (neg 1))
-                (do (let [lv (ia s (+ (+ bo pso3) 1))
-                          ex (ia s (+ (+ bo pso3) 2))
-                          fa3 (+ (+ bo 4) fct3)]
-                      (iset s (+ bo pso3) (+ (ia s (+ bo pso3)) 1))
-                      (iset s fa3 (- (ia s fa3) (- lv ex)))
-                      (iset s (+ (+ bo pso3) 1) ex))))))))
-    (comment "4. Alive iff every factor still has a live alternative.")
-    (for [^I32 f 0 nf]
-      (if (== (ia s (+ (+ bo 4) f)) 0)
-        (do (iset s (+ bo 1) 0)
-            (return 0))))
-    (return 1)))
-
-;; ------------------------------------------------------------ the end
-
-(defn ^:pub ^Bool pool-counts-ok [^IntsR p ^IntsR s ^I32 bo ^I32 prec]
-  (let [g (ia p (+ prec 1))
-        pso (ia p (+ prec 4))]
-    (if (< g 0) (return true))
-    (let [go (group-rec p g)
-          ne (ia p go)]
-      (for [^I32 j 0 ne]
-        (if (< (ia s (+ (+ (+ bo pso) 4) j)) (ia p (+ (+ (+ go 2) (* 4 j)) 2))) (return false))))
-    (return true)))
-
-(defn ^:pub ^Bool factor-sat [^IntsR p ^IntsR s ^I32 bo ^I32 mt ^I32 f]
-  (comment "Has factor f a live alternative with every required literal consumed,"
-           "whose pool has every group entry at or above its minimum?")
-  (let [pools (m-pools p mt)
-        alts (m-alts p mt)
-        frec (+ (+ mt 8) (* 4 f))
-        pf (ia p (+ frec 2))
-        pc (ia p (+ frec 3))]
-    (for [^I32 k 0 pc]
-      (let [prec (+ pools (* 5 (+ pf k)))]
-        (if (pool-counts-ok p s bo prec)
-          (do (let [af (ia p (+ prec 2))
-                    ac (ia p (+ prec 3))]
-                (for [^I32 ai 0 ac]
-                  (let [a (+ af ai)
-                        arec (+ alts (* 5 a))
-                        aso (ia p (+ arec 4))]
-                    (if (alt-live p s bo pools alts a)
-                      (if (== (ia s (+ (+ bo aso) 2)) (ia p (+ arec 3))) (return true))))))))))
-    (return false)))
-
-(defn ^:pub ^Bool map-satisfied [^IntsR p ^IntsR s ^I32 bo ^I32 mt]
-  (if (== (ia s (+ bo 1)) 0) (return false))
-  (for [^I32 f 0 (ia p mt)]
-    (if (not (factor-sat p s bo mt f)) (return false)))
-  (return true))
-
-(defn ^:pub ^I32 map-missing [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 d ^I32 pos]
-  (comment "Witness rule 4 for this (alive, unsatisfied) block: its first factor"
-           "with no satisfied alternative, that factor's lowest-index live"
-           "alternative, its first unmet entry -- literal entries in source order,"
-           "then constrained group entries in priority order (§17 Q3); 1 unit per"
-           "entry examined. 0 or a negated code.")
-  (let [pools (m-pools p mt)
-        alts (m-alts p mt)
-        lits (m-lits p mt)]
-    (for [^I32 f 0 (ia p mt)]
-      (if (not (factor-sat p s bo mt f))
-        (do (let [frec (+ (+ mt 8) (* 4 f))
-                  pf (ia p (+ frec 2))
-                  pc (ia p (+ frec 3))]
-              (for [^I32 k 0 pc]
-                (let [prec (+ pools (* 5 (+ pf k)))
-                      pso (ia p (+ prec 4))
-                      af (ia p (+ prec 2))
-                      ac (ia p (+ prec 3))]
-                  (for [^I32 ai 0 ac]
-                    (let [a (+ af ai)
-                          arec (+ alts (* 5 a))
-                          aso (ia p (+ arec 4))
-                          lf (ia p (+ arec 1))
-                          lc (ia p (+ arec 2))]
-                      (if (alt-live p s bo pools alts a)
-                        (do (for [^I32 li 0 lc]
-                              (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
-                              (let [lrec (+ lits (* 4 (+ lf li)))
-                                    word (ia s (+ (+ (+ bo aso) 3) (sar li 5)))]
-                                (if (and (== (ia p (+ lrec 2)) 1)
-                                         (== (bit-and word (shl 1 (bit-and li 31))) 0))
-                                  (do (wit-set s R_MISSING 0 d P_KEY (ia p lrec) pos)
-                                      (return 0)))))
-                            (let [g (ia p (+ prec 1))]
-                              (if (>= g 0)
-                                (do (let [go (group-rec p g)
-                                          ne (ia p go)]
-                                      (for [^I32 j 0 ne]
-                                        (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
-                                        (let [erec (+ (+ go 2) (* 4 j))
-                                              emin (ia p (+ erec 2))]
-                                          (if (and (not (absorbing emin (ia p (+ erec 3))))
-                                                   (< (ia s (+ (+ (+ bo pso) 4) j)) emin))
-                                            (do (wit-set s R_MISSING 0 d P_ANYKEY 0 pos)
-                                                (return 0)))))))))
-                            (wit-set s R_MISSING 0 d (neg 1) 0 pos)
-                            (return 0)))))))))))
-    (wit-set s R_MISSING 0 d (neg 1) 0 pos)
-    (return 0)))
 
 (defn ^:pub ^I32 key-probe [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 ks ^I32 ke ^I32 lo0]
   (comment "key-search without charging (P3.6 streaks): the id or -1; the next"
@@ -479,79 +339,909 @@
     (iset s O_LO units)
     (return (neg 1))))
 
-(defn ^:pub ^Bool simple-struct [^IntsR p ^I32 mt]
-  (comment "One factor, one pool, one alternative, the empty group: a closed struct.")
-  (return (and (and (== (ia p mt) 1) (== (ia p (+ mt 1)) 1))
-               (and (== (ia p (+ mt 2)) 1) (== (ia p (group-rec p (ia p (+ (m-pools p mt) 1)))) 0)))))
-
-(defn ^:pub ^I32 key-phase-struct [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 cl ^I32 nc0 ^I32 cap ^I32 at]
-  (comment "map-key-phase for a simple-struct block (P3.6): no group entries, so only"
-           "the naming records of the key (1 unit each). Same candidates and charges.")
-  (let [kr (named-rec p s bo mt kid)
-        pso (ia p (+ (m-pools p mt) 4))
-        aso (ia p (+ (m-alts p mt) 4))
-        ^:mut nc nc0]
-    (iset s (+ bo 3) nc0)
-    (iset s (+ (+ bo pso) 3) nc0)
-    (if (>= kr 0)
-      (do (let [krec (+ (m-keys p mt) (* 4 kr))
-                nf (ia p (+ krec 2))
-                ncount (ia p (+ krec 3))
-                live (and (== (ia s (+ bo aso)) 0) (== (ia s (+ (+ bo aso) 1)) (ia s (+ bo pso))))]
-            (for [^I32 r 0 ncount]
+(defn ^:pub ^I32 map-cursor [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 at]
+  (comment "The pair's key in this map's named table (program-2 §6.1 step 1): while"
+           "keys ascend, the cursor advances to the first named key >= kid, 1 unit per"
+           "step; once they stopped ascending, a binary search, 1 unit per probe"
+           "(each also counted in s[O_LO], for schedule 2's simple pair). The index"
+           "(also s[bo + MB_NJ]) or -1; or a negated code.")
+  (iset s (+ bo MB_NJ) (neg 1))
+  (if (< kid 0) (return (neg 1)))
+  (let [nb (m-named p mt)
+        nn (ia p (+ mt 2))]
+    (if (== (bit-and (ia s (+ bo MB_BITS)) BIT_UNORD) 0)
+      (do (let [^:mut cur (ia s (+ bo MB_CUR))]
+            (while (and (< cur nn) (< (ia p (+ nb (* 3 cur))) kid))
               (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-              (if live
-                (do (if (>= nc cap) (return (neg R_INCONSISTENT)))
-                    (iset s (+ cl (* 4 nc)) bo)
-                    (iset s (+ (+ cl (* 4 nc)) 1) 0)
-                    (iset s (+ (+ cl (* 4 nc)) 2) (+ nf r))
-                    (iset s (+ (+ cl (* 4 nc)) 3) (ia p (+ (+ (m-names p mt) (* 2 (+ nf r))) 1)))
-                    (set nc (+ nc 1))))))))
+              (iset s O_LO (+ (ia s O_LO) 1))
+              (set cur (+ cur 1)))
+            (iset s (+ bo MB_CUR) cur)
+            (if (and (< cur nn) (== (ia p (+ nb (* 3 cur))) kid))
+              (do (iset s (+ bo MB_NJ) cur)
+                  (return cur)))
+            (return (neg 1)))))
+    (let [^:mut lo 0
+          ^:mut hi nn]
+      (while (< lo hi)
+        (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+        (iset s O_LO (+ (ia s O_LO) 1))
+        (let [mid (sar (+ lo hi) 1)
+              k (ia p (+ nb (* 3 mid)))]
+          (if (== k kid)
+            (do (iset s (+ bo MB_NJ) mid)
+                (return mid)))
+          (if (< k kid) (set lo (+ mid 1)) (set hi mid))))
+      (return (neg 1)))))
+
+(defn ^:pub ^I32 map-key-query [^IntsR p ^Ints s ^I32 mt ^I32 cfb ^I32 cw ^I32 cnq ^I32 e ^I32 at]
+  (comment "The key's query: the map's key_ts (the non-literal members' key"
+           "typesets), when it has one. The new length or a code.")
+  (let [kts (ia p (+ mt 3))]
+    (if (< kts 0) (return cnq))
+    (return (q-add p s cfb cw cnq kts e at))))
+
+(defn ^:pub ^I32 map-key-phase [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 ek ^I32 cl ^I32 nc0 ^I32 cap ^I32 at]
+  (comment "Candidates of this block (program-2 §6.1 step 2): each non-literal member"
+           "(the class-R list of an F or S map, every one of a T map) whose key"
+           "typeset matched, 1 unit + its test; then each member naming the key, 1"
+           "unit each. A candidate is 4 words: block, member, flags (bit 1 the value"
+           "matched), and the member's position in its key's namers run (a"
+           "non-literal one: -2 - its position in the class-R list of an F or S map,"
+           "-1 in a T map). Answers the new candidate count or a negated code.")
+  (let [po (mpeg p mt)
+        nm (ia p (+ mt 1))
+        nj (ia s (+ bo MB_NJ))
+        ^:mut nc nc0]
+    (iset s (+ bo MB_CF) nc0)
+    (if (== (ia p (+ po 3)) TIER_T)
+      (for [^I32 m 0 nm]
+        (let [mr (m-member mt m)]
+          (if (< (ia p mr) 0)
+            (do (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                (let [t (ts-test p s (ia p (+ mr 1)) ek at)]
+                  (if (< t 0) (return t))
+                  (if (== t 1)
+                    (do (if (>= nc cap) (return (neg R_INCONSISTENT)))
+                        (iset s (+ cl (* 4 nc)) bo)
+                        (iset s (+ (+ cl (* 4 nc)) 1) m)
+                        (iset s (+ (+ cl (* 4 nc)) 2) 0)
+                        (iset s (+ (+ cl (* 4 nc)) 3) (neg 1))
+                        (set nc (+ nc 1)))))))))
+      (do (let [rt (m-root p mt)
+                nr (ia p (+ mt 6))]
+            (for [^I32 r 0 nr]
+              (let [m2 (ia p (+ rt r))
+                    mr2 (m-member mt m2)]
+                (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                (let [t2 (ts-test p s (ia p (+ mr2 1)) ek at)]
+                  (if (< t2 0) (return t2))
+                  (if (== t2 1)
+                    (do (if (>= nc cap) (return (neg R_INCONSISTENT)))
+                        (iset s (+ cl (* 4 nc)) bo)
+                        (iset s (+ (+ cl (* 4 nc)) 1) m2)
+                        (iset s (+ (+ cl (* 4 nc)) 2) 0)
+                        (iset s (+ (+ cl (* 4 nc)) 3) (- (neg 2) r))
+                        (set nc (+ nc 1))))))))))
+    (if (>= nj 0)
+      (do (let [nrec (+ (m-named p mt) (* 3 nj))
+                first (ia p (+ nrec 1))
+                cnt (ia p (+ nrec 2))
+                nmr (m-namers p mt)]
+            (for [^I32 r2 0 cnt]
+              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+              (if (>= nc cap) (return (neg R_INCONSISTENT)))
+              (iset s (+ cl (* 4 nc)) bo)
+              (iset s (+ (+ cl (* 4 nc)) 1) (ia p (+ nmr (+ first r2))))
+              (iset s (+ (+ cl (* 4 nc)) 2) 0)
+              (iset s (+ (+ cl (* 4 nc)) 3) r2)
+              (set nc (+ nc 1))))))
+    (iset s (+ bo MB_NC) (- nc nc0))
     (return nc)))
 
-(defn ^:pub ^I32 update-struct [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 cl ^I32 nc ^I32 at]
-  (comment "map-update for a simple-struct block (P3.6): the pool always REJECTs (no"
-           "group entry); the naming record of the key (1 unit) consumes, or kills on"
-           "a cut; the pool (1 unit). Same state and charges as map-update.")
-  (let [pso (ia p (+ (m-pools p mt) 4))
-        arec (m-alts p mt)
-        aso (ia p (+ arec 4))
-        lits (m-lits p mt)
-        kr (named-rec p s bo mt kid)]
-    (iset s (+ (+ bo pso) 2) 0)
-    (iset s (+ (+ bo pso) 3) (neg 1))
-    (if (>= kr 0)
-      (do (let [krec (+ (m-keys p mt) (* 4 kr))
-                nfst (ia p (+ krec 2))
-                ncount (ia p (+ krec 3))
-                names (m-names p mt)
-                ^:mut kc (ia s (+ bo 3))]
-            (for [^I32 r 0 ncount]
-              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-              (let [lit (ia p (+ (+ names (* 2 (+ nfst r))) 1))
-                    lrec (+ lits (* 4 lit))]
-                (if (and (== (ia s (+ bo aso)) 0) (== (ia s (+ (+ bo aso) 1)) (ia s (+ bo pso))))
-                  (do (if (or (>= kc nc) (!= (ia s (+ cl (* 4 kc))) bo)) (return (neg R_INCONSISTENT)))
-                      (let [matched (!= (bit-and (ia s (+ (+ cl (* 4 kc)) 1)) 2) 0)]
-                        (set kc (+ kc 1))
-                        (if matched
-                          (do (let [li (- lit (ia p (+ arec 1)))
-                                    wd (+ (+ (+ bo aso) 3) (sar li 5))]
-                                (iset s wd (bit-or (ia s wd) (shl 1 (bit-and li 31))))
-                                (iset s (+ (+ bo aso) 2) (+ (ia s (+ (+ bo aso) 2)) (ia p (+ lrec 2))))
-                                (iset s (+ (+ bo aso) 1) (+ (ia s (+ (+ bo aso) 1)) 1))
-                                (iset s (+ (+ bo pso) 2) (+ (ia s (+ (+ bo pso) 2)) 1))))
-                          (if (== (ia p (+ lrec 3)) 1)
-                            (do (iset s (+ bo aso) 1)
-                                (iset s (+ (+ bo pso) 1) (- (ia s (+ (+ bo pso) 1)) 1))
-                                (iset s (+ bo 4) (- (ia s (+ bo 4)) 1)))))))))))))
-    (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-    (let [lv (ia s (+ (+ bo pso) 1))
-          ex (ia s (+ (+ bo pso) 2))]
-      (iset s (+ bo pso) (+ (ia s (+ bo pso)) 1))
-      (iset s (+ bo 4) (- (ia s (+ bo 4)) (- lv ex)))
-      (iset s (+ (+ bo pso) 1) ex))
-    (if (== (ia s (+ bo 4)) 0)
-      (do (iset s (+ bo 1) 0)
+(defn ^:pub ^I32 cand-vts [^IntsR p ^IntsR s ^I32 fb ^I32 cl ^I32 c]
+  (comment "The value typeset of candidate c.")
+  (let [cb (+ cl (* 4 c))
+        mt (block-mt p s fb (ia s cb))]
+    (return (ia p (+ (m-member mt (ia s (+ cb 1))) 2)))))
+
+(defn ^:pub ^I32 map-values [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 cl ^I32 ev ^I32 at]
+  (comment "After the value: each of this block's candidates, 1 unit + its value"
+           "typeset test (bit 1 of its flags). 0 or a negated code.")
+  (let [cf (ia s (+ bo MB_CF))
+        nc (ia s (+ bo MB_NC))]
+    (for [^I32 c 0 nc]
+      (let [cb (+ cl (* 4 (+ cf c)))]
+        (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+        (let [m (ia s (+ cb 1))
+              t (ts-test p s (ia p (+ (m-member mt m) 2)) ev at)]
+          (if (< t 0) (return t))
+          (if (== t 1) (iset s (+ cb 2) 2)))))
+    (return 0)))
+
+;; ------------------------------------------------------------ the update (per pair)
+
+(defn ^I32 mword [^I32 bo ^I32 m] (return (+ (+ bo MB_HDR) (* MW m))))
+
+(defn ^I32 fwalk [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 cl ^I32 wire ^I32 kid ^I32 sunnamed ^I32 at]
+  (comment "The pair-major walk (program-2 §6.2 F; S's unnamed keys with sunnamed 1):"
+           "the block's candidates in source (member) order, 1 unit each: the first"
+           "whose value matched with room left takes the pair and stops the walk;"
+           "before it, a cut member that rejected the value (room left) notes the"
+           "first such pair (F: cutpair and its key id; S: ucut), and S notes ukey."
+           "The taker or -1; or a negated code.")
+  (let [cf (ia s (+ bo MB_CF))
+        nc (ia s (+ bo MB_NC))
+        ^:mut a cf
+        ^:mut b cf
+        bend (+ cf nc)]
+    (comment "the non-literal run first (namers position -1), then the naming run")
+    (while (and (< b bend) (< (ia s (+ (+ cl (* 4 b)) 3)) 0))
+      (set b (+ b 1)))
+    (let [aend b]
+      (forever
+        (let [^:mut c (neg 1)]
+          (if (< a aend) (set c a))
+          (if (< b bend)
+            (if (or (< c 0) (< (ia s (+ (+ cl (* 4 b)) 1)) (ia s (+ (+ cl (* 4 c)) 1)))) (set c b)))
+          (if (< c 0) (return (neg 1)))
+          (if (== c a) (set a (+ a 1)) (set b (+ b 1)))
+          (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+          (let [cb (+ cl (* 4 c))
+                m (ia s (+ cb 1))
+                vok (!= (ia s (+ cb 2)) 0)
+                mw (mword bo m)
+                cnt (ia s mw)
+                room (< cnt (ia s (+ mw 5)))
+                cut (== (ia p (+ (m-member mt m) 4)) 1)]
+            (if (== sunnamed 1)
+              (do (let [uf (ia s (+ mw 3))]
+                    (iset s (+ mw 3) (bit-or uf 1)))))
+            (if (and vok room)
+              (do (if (== sunnamed 1)
+                    (iset s (+ mw 2) (+ (ia s (+ mw 2)) 1))
+                    (iset s mw (+ cnt 1)))
+                  (return m)))
+            (if (and (and (not vok) cut) room)
+              (if (== sunnamed 1)
+                (do (let [uf2 (ia s (+ mw 3))]
+                      (if (< uf2 256) (iset s (+ mw 3) (bit-or uf2 (shl (+ wire 1) 8))))))
+                (if (< (ia s (+ mw 1)) 0)
+                  (do (iset s (+ mw 1) wire)
+                      (iset s (+ mw 2) kid)))))))))))
+
+(defn ^I32 rec-at [^IntsR s ^I32 bo ^I32 r]
+  (comment "The absolute word offset of this block's T record r.")
+  (return (+ (arena-body s) (+ (+ (ia s (+ bo MB_RBASE)) (* r (ia s (+ bo MB_STRIDE))))
+                               (ia s (+ bo MB_ROFF))))))
+
+(defn ^:pub ^I32 map-update [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 cl ^I32 kid ^I32 kpos ^I32 klen ^I32 at]
+  (comment "§6.1 steps 4-5 for an alive block after its value tests: a pair no"
+           "candidate accepts kills it (rule 3'); otherwise the tier's action -- F"
+           "the walk; S a named key's slot (slot_words units: wire index, the naming"
+           "members' value bits, the class-R key and value bits) or an unnamed key's"
+           "walk over the class-R members; T the pair's record (ceil(rec_words/16) +"
+           "1 units: the record and its index entry; the item's stride pushed by"
+           "its first T block). 1 alive, 0 died, or a negated code.")
+  (let [cf (ia s (+ bo MB_CF))
+        nc (ia s (+ bo MB_NC))
+        wire (ia s (+ bo MB_NP))
+        po (mpeg p mt)
+        tier (m-tier p s po)
+        nj (ia s (+ bo MB_NJ))
+        ^:mut ok false]
+    (iset s (+ bo MB_NP) (+ wire 1))
+    (for [^I32 c 0 nc]
+      (if (!= (ia s (+ (+ cl (* 4 (+ cf c))) 2)) 0) (set ok true)))
+    (if (not ok)
+      (do (iset s (+ bo MB_ALIVE) 0)
           (return 0)))
-    (return 1)))
+    (if (== tier TIER_F)
+      (do (let [tf (fwalk p s bo mt cl wire kid 0 at)]
+            (if (< tf (neg 1)) (return tf)))
+          (return 1)))
+    (if (== tier TIER_S)
+      (do (if (< nj 0)
+            (do (let [ts (fwalk p s bo mt cl wire kid 1 at)]
+                  (if (< ts (neg 1)) (return ts)))
+                (return 1)))
+          (let [sw (ia p (+ mt 4))
+                nr (ia p (+ mt 6))
+                sl (+ (mslots p bo mt) (* sw nj))
+                rw (sar (+ nr 31) 5)
+                vbits (+ sl 2)
+                kbits (- (+ sl sw) (* 2 rw))
+                rbits (+ kbits rw)]
+            (if (not (charge s sw at)) (return (neg R_BUDGET)))
+            (for [^I32 z 0 sw]
+              (iset s (+ sl z) 0))
+            (iset s sl wire)
+            (for [^I32 c2 0 nc]
+              (let [cb2 (+ cl (* 4 (+ cf c2)))
+                    pos2 (ia s (+ cb2 3))
+                    v2 (!= (ia s (+ cb2 2)) 0)]
+                (if (>= pos2 0)
+                  (if v2
+                    (do (let [wx (+ vbits (sar pos2 5))
+                              wv (ia s wx)]
+                          (iset s wx (bit-or wv (shl 1 (bit-and pos2 31)))))))
+                  (do (comment "a class-R member, at its position in the root list")
+                      (let [rp (- (neg 2) pos2)
+                            kx (+ kbits (sar rp 5))
+                            kv (ia s kx)]
+                        (iset s kx (bit-or kv (shl 1 (bit-and rp 31))))
+                        (if v2
+                          (do (let [rx (+ rbits (sar rp 5))
+                                    rv (ia s rx)]
+                                (iset s rx (bit-or rv (shl 1 (bit-and rp 31))))))))))))
+            (return 1))))
+    (comment "T: the record")
+    (let [nm (ia p (+ mt 1))
+          rw2 (t-recw nm)
+          stride (ia s (+ bo MB_STRIDE))
+          er (+ (ia s (+ bo MB_RBASE)) (* wire stride))
+          up (arena-up-top s)]
+      (if (not (charge s (+ (c16 rw2) 1) at)) (return (neg R_BUDGET)))
+      (if (== up er)
+        (do (let [got (arena-up s stride at)]
+              (if (< got 0) (return got))
+              (if (!= got er) (return (neg R_INCONSISTENT))))))
+      (if (and (!= up er) (!= up (+ er stride))) (return (neg R_INCONSISTENT)))
+      (let [x (rec-at s bo wire)]
+        (for [^I32 z2 0 rw2]
+          (iset s (+ x z2) 0))
+        (iset s x kid)
+        (iset s (+ x 2) kpos)
+        (iset s (+ x 3) klen)
+        (for [^I32 c3 0 nc]
+          (let [cb3 (+ cl (* 4 (+ cf c3)))
+                m3 (ia s (+ cb3 1))
+                bit (* 2 m3)
+                wx3 (+ (+ x 4) (sar bit 5))
+                wv3 (ia s wx3)
+                ^:mut add (shl 1 (bit-and bit 31))]
+            (if (!= (ia s (+ cb3 2)) 0) (set add (bit-or add (shl 2 (bit-and bit 31)))))
+            (iset s wx3 (bit-or wv3 add))))
+        (if (>= nj 0) (iset s (+ (mslots p bo mt) nj) wire))
+        (return 1)))))
+
+;; ------------------------------------------------------------ EC order (the T sort)
+
+(defn ^I32 sgn [^I32 x]
+  (if (< x 0) (return (neg 1)))
+  (if (> x 0) (return 1))
+  (return 0))
+
+(defn ^I32 ec-min-after [^Bytes b ^Ints s ^I32 x0 ^I32 k ^I32 prev ^I32 at]
+  (comment "The key of the map content at x0 (k pairs) that comes next in EC order"
+           "after the key at prev (-1: the first): each comparison charged"
+           "ceil(min(len)/8). Its position, or -EC_STOP.")
+  (let [^:mut best (neg 1)
+        ^:mut q x0
+        ^:mut pl 0]
+    (if (>= prev 0) (set pl (- (tskip b s prev) prev)))
+    (for [^I32 _j 0 k]
+      (let [ke (tskip b s q)
+            ql (- ke q)
+            ^:mut after true]
+        (if (>= prev 0)
+          (do (if (not (charge s (c64min ql pl) at)) (return (neg EC_STOP)))
+              (let [^I32 c (ec-cmp-item b s q prev at)]
+                (if (== c EC_STOP) (return (neg EC_STOP)))
+                (if (<= c 0) (set after false)))))
+        (if after
+          (if (< best 0)
+            (set best q)
+            (do (let [bl (- (tskip b s best) best)]
+                  (if (not (charge s (c64min ql bl) at)) (return (neg EC_STOP)))
+                  (let [^I32 c2 (ec-cmp-item b s q best at)]
+                    (if (== c2 EC_STOP) (return (neg EC_STOP)))
+                    (if (< c2 0) (set best q)))))))
+        (set q (tskip b s ke))))
+    (return best)))
+
+(defn ^I32 ec-cmp-map [^Bytes b ^Ints s ^I32 x0 ^I32 y0 ^I32 k ^I32 at]
+  (comment "Two DC map contents with k pairs each, compared as their EC forms: pairs"
+           "in EC key order (selected one at a time), key then value.")
+  (let [^:mut px (neg 1)
+        ^:mut py (neg 1)]
+    (for [^I32 _i 0 k]
+      (let [nx (ec-min-after b s x0 k px at)
+            ny (ec-min-after b s y0 k py at)]
+        (if (or (== nx (neg EC_STOP)) (== ny (neg EC_STOP))) (return EC_STOP))
+        (let [^I32 c (ec-cmp-item b s nx ny at)]
+          (if (!= c 0) (return c)))
+        (let [vx (tskip b s nx)
+              vy (tskip b s ny)
+              ^I32 c2 (ec-cmp-item b s vx vy at)]
+          (if (!= c2 0) (return c2)))
+        (set px nx)
+        (set py ny)))
+    (return 0)))
+
+(defn ^I32 ec-cmp-item [^Bytes b ^Ints s ^I32 x ^I32 y ^I32 at]
+  (comment "Two CHECKED items in DC form compared bytewise as their EC forms"
+           "(architecture §19.2): a float zero or NaN with its sign cleared, a map's"
+           "pairs in EC key order; DC and EC forms have the same lengths and heads, and"
+           "single items are prefix-free, so the comparison is item by item. -1, 0,"
+           "1, or EC_STOP when a nested map's comparisons exhausted the budget.")
+  (let [bx (u8 b x)
+        by (u8 b y)]
+    (if (!= bx by) (return (sgn (- bx by))))
+    (let [major (ushr bx 5)
+          ai (bit-and bx 31)]
+      (if (and (== major 7) (and (>= ai 25) (<= ai 27)))
+        (do (let [w (shl 1 (- ai 24))
+                  ex (float-ecs b x)
+                  ey (float-ecs b y)]
+              (for [^I32 k 0 w]
+                (let [^:mut vx (u8 b (+ (+ x 1) k))
+                      ^:mut vy (u8 b (+ (+ y 1) k))]
+                  (if (== k 0)
+                    (do (if ex (set vx (bit-and vx 127)))
+                        (if ey (set vy (bit-and vy 127)))))
+                  (if (!= vx vy) (return (sgn (- vx vy))))))
+              (return 0))))
+      (let [hx (targ b s x)
+            lx (ia s O_LO)
+            hy (targ b s y)]
+        (for [^I32 k2 1 (- hx x)]
+          (let [ux (u8 b (+ x k2))
+                uy (u8 b (+ y k2))]
+            (if (!= ux uy) (return (sgn (- ux uy))))))
+        (if (or (<= major 1) (== major 7)) (return 0))
+        (if (<= major 3)
+          (do (for [^I32 k3 0 lx]
+                (let [tx (u8 b (+ hx k3))
+                      ty (u8 b (+ hy k3))]
+                  (if (!= tx ty) (return (sgn (- tx ty))))))
+              (return 0)))
+        (if (== major 6) (return (ec-cmp-item b s hx hy at)))
+        (if (== major 4)
+          (do (let [^:mut qx hx
+                    ^:mut qy hy]
+                (for [^I32 _e 0 lx]
+                  (let [c (ec-cmp-item b s qx qy at)]
+                    (if (!= c 0) (return c)))
+                  (set qx (tskip b s qx))
+                  (set qy (tskip b s qy)))
+                (return 0))))
+        (return (ec-cmp-map b s hx hy lx at))))))
+
+(defn ^I32 perm-at [^IntsR s ^I32 bo ^I32 j]
+  (comment "The record at pick-order position j.")
+  (let [pm (ia s (+ bo MB_PERM))]
+    (if (< pm 0) (return j))
+    (return (ia s (+ (arena-body s) (+ pm j))))))
+
+(defn ^I32 t-cmp [^Bytes kb ^Ints s ^I32 bo ^I32 ra ^I32 rb ^I32 at]
+  (comment "Records ra, rb by their keys' EC forms, ceil(min(len)/8) units first.")
+  (let [xa (rec-at s bo ra)
+        xb (rec-at s bo rb)
+        pa (ia s (+ xa 2))
+        la (ia s (+ xa 3))
+        pb (ia s (+ xb 2))
+        lb (ia s (+ xb 3))]
+    (if (not (charge s (c64min la lb) at)) (return EC_STOP))
+    (return (ec-cmp-item kb s pa pb at))))
+
+(defn ^I32 t-sift [^Bytes kb ^Ints s ^I32 bo ^I32 pm ^I32 i0 ^I32 n ^I32 at]
+  (comment "Sift position i0 down a max-heap of n permutation entries at body pm.")
+  (let [base (+ (arena-body s) pm)
+        ^:mut i i0]
+    (forever
+      (let [l (+ (* 2 i) 1)
+            ^:mut m i]
+        (if (>= l n) (return 0))
+        (let [rl (ia s (+ base l))
+              rm (ia s (+ base m))
+              c (t-cmp kb s bo rl rm at)]
+          (if (== c EC_STOP) (return (neg R_BUDGET)))
+          (if (> c 0) (set m l)))
+        (if (< (+ l 1) n)
+          (do (let [rl2 (ia s (+ base (+ l 1)))
+                    rm2 (ia s (+ base m))
+                    c2 (t-cmp kb s bo rl2 rm2 at)]
+                (if (== c2 EC_STOP) (return (neg R_BUDGET)))
+                (if (> c2 0) (set m (+ l 1))))))
+        (if (== m i) (return 0))
+        (let [ti (ia s (+ base i))
+              tm (ia s (+ base m))]
+          (iset s (+ base i) tm)
+          (iset s (+ base m) ti))
+        (set i m)))))
+
+(defn ^I32 t-sort [^Ints s ^I32 bo ^Bytes kb ^I32 n ^I32 at]
+  (comment "T's pick order (program-2 §6.5): when the map's keys stopped ascending or"
+           "one is EC-sensitive, a permutation of the records (n words, pushed on the"
+           "arena) heap-sorted by the keys' EC comparison, each comparison charged"
+           "ceil(min(len)/8): a function of the records alone, so every route charges"
+           "the same. O_HI, O_LO and O_CSTART are kept. 0 or a negated code.")
+  (iset s (+ bo MB_PERM) (neg 1))
+  (if (== (bit-and (ia s (+ bo MB_BITS)) (bit-or BIT_UNORD BIT_ECS)) 0) (return 0))
+  (if (< n 2) (return 0))
+  (let [pm (arena-up s n at)]
+    (if (< pm 0) (return pm))
+    (iset s (+ bo MB_PERM) pm)
+    (let [base (arena-body s)
+          h (ia s O_HI)
+          l (ia s O_LO)
+          c (ia s O_CSTART)]
+      (for [^I32 i 0 n]
+        (iset s (+ (+ base pm) i) i))
+      (let [^:mut i2 (- (sar n 1) 1)]
+        (while (>= i2 0)
+          (let [r (t-sift kb s bo pm i2 n at)]
+            (if (< r 0) (return r)))
+          (set i2 (- i2 1))))
+      (let [^:mut k (- n 1)]
+        (while (> k 0)
+          (let [t0 (ia s (+ base pm))
+                tk (ia s (+ (+ base pm) k))]
+            (iset s (+ base pm) tk)
+            (iset s (+ (+ base pm) k) t0))
+          (let [r2 (t-sift kb s bo pm 0 k at)]
+            (if (< r2 0) (return r2)))
+          (set k (- k 1))))
+      (iset s O_HI h)
+      (iset s O_LO l)
+      (iset s O_CSTART c)
+      (return 0))))
+
+;; ------------------------------------------------------------ the machine (S, T)
+
+(defn ^I32 tlen [^IntsR s ^I32 bo]
+  (comment "The trail's length: S keeps it in the block (MB_TRAIL -1), T on the arena.")
+  (if (< (ia s (+ bo MB_TRAIL)) 0) (return (ia s (+ bo MB_TLEN))))
+  (return (- (arena-up-top s) (ia s (+ bo MB_TRAIL)))))
+
+(defn ^I32 trail-at [^IntsR p ^IntsR s ^I32 bo ^I32 mt]
+  (comment "The trail's first word (absolute).")
+  (if (< (ia s (+ bo MB_TRAIL)) 0)
+    (return (+ (mslots p bo mt) (* (ia p (+ mt 2)) (ia p (+ mt 4))))))
+  (return (+ (arena-body s) (ia s (+ bo MB_TRAIL)))))
+
+(defn ^Bool m-consumed [^IntsR p ^IntsR s ^I32 bo ^I32 mt ^I32 tier ^I32 r]
+  (if (== tier TIER_T) (return (!= (bit-and (ia s (+ (rec-at s bo r) 1)) 1) 0)))
+  (return (!= (ia s (+ (+ (mslots p bo mt) (* (ia p (+ mt 4)) r)) 1)) 0)))
+
+(defn m-set-consumed [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier ^I32 r ^I32 v]
+  (if (== tier TIER_T)
+    (do (let [x (+ (rec-at s bo r) 1)
+              f (ia s x)]
+          (iset s x (bit-or (bit-and f (bit-xor 1 (neg 1))) v))))
+    (do (let [y (+ (+ (mslots p bo mt) (* (ia p (+ mt 4)) r)) 1)]
+          (iset s y v)))))
+
+(defn ^I32 m-consume [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier ^I32 r ^I32 at]
+  (comment "Consume record / slot r: 1 step, then its trail entry (S: in the block;"
+           "T: pushed on the arena). 0 or a code.")
+  (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+  (if (< (ia s (+ bo MB_TRAIL)) 0)
+    (do (let [len (ia s (+ bo MB_TLEN))
+              x0 (+ (trail-at p s bo mt) len)]
+          (iset s x0 r)
+          (iset s (+ bo MB_TLEN) (+ len 1))))
+    (do (let [t (arena-up s 1 at)]
+          (if (< t 0) (return t))
+          (let [x (+ (arena-body s) t)]
+            (iset s x r)))))
+  (m-set-consumed p s bo mt tier r 1)
+  (return 0))
+
+(defn ^I32 m-rewind [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier ^I32 mark ^I32 at]
+  (comment "Undo to trail length mark: 1 step plus 1 per entry popped.")
+  (let [len (tlen s bo)
+        popped (- len mark)]
+    (if (not (charge s (+ 1 popped) at)) (return (neg R_BUDGET)))
+    (let [tb (trail-at p s bo mt)]
+      (for [^I32 i 0 popped]
+        (let [r (ia s (+ tb (- (- len 1) i)))]
+          (m-set-consumed p s bo mt tier r 0))))
+    (if (< (ia s (+ bo MB_TRAIL)) 0)
+      (iset s (+ bo MB_TLEN) mark)
+      (arena-set-up s (+ (ia s (+ bo MB_TRAIL)) mark)))
+    (return 0)))
+
+(defn mev [^Ints s ^I32 bo ^I32 kind ^I32 m ^I32 pair]
+  (comment "A failure event, scored by the trail's length now (before any undo).")
+  (let [sc (tlen s bo)]
+    (iset s (+ bo MB_E0) sc)
+    (iset s (+ bo MB_E1) (bit-or (shl kind 16) m))
+    (iset s (+ bo MB_E2) pair)))
+
+(defn ^I32 t-bit [^IntsR s ^I32 bo ^I32 r ^I32 bit]
+  (let [x (+ (+ (rec-at s bo r) 4) (sar bit 5))]
+    (return (bit-and (ushr (ia s x) (bit-and bit 31)) 1))))
+
+(defn ^I32 s-bit [^IntsR s ^I32 x ^I32 bit]
+  (return (bit-and (ushr (ia s (+ x (sar bit 5))) (bit-and bit 31)) 1)))
+
+(defn ^I32 t-diag [^Ints s ^I32 bo ^I32 m ^I32 j0 ^I32 c0 ^I32 hi ^I32 n ^I32 at]
+  (comment "T's diagnostic scan (program-2 §8): from pick position j0 (the first cut"
+           "violation), the records member m would still examine before reaching its"
+           "max if violations were skipped, 1 step each: the smallest wire index of a"
+           "violating one. Or a negated code.")
+  (let [^:mut c c0
+        ^:mut best (neg 1)
+        ^:mut j j0]
+    (while (and (< j n) (< c hi))
+      (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+      (let [r (perm-at s bo j)]
+        (if (and (== (bit-and (ia s (+ (rec-at s bo r) 1)) 1) 0) (== (t-bit s bo r (* 2 m)) 1))
+          (if (== (t-bit s bo r (+ (* 2 m) 1)) 1)
+            (set c (+ c 1))
+            (if (or (< best 0) (< r best)) (set best r)))))
+      (set j (+ j 1)))
+    (return best)))
+
+(defn ^I32 m-member-run [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier ^I32 nd ^I32 rfc ^I32 at]
+  (comment "A MEMBER node (program-2 §6.4): X_OK, X_FAIL, X_CUT or X_FAILX (event in"
+           "the block), or a negated code.")
+  (let [m (ia p (+ nd 1))
+        lo (ia p (+ nd 2))
+        hi (ia p (+ nd 3))
+        mr (m-member mt m)
+        kid (ia p mr)
+        cut (== (ia p (+ mr 4)) 1)
+        n (ia s (+ bo MB_NP))
+        ^:mut c 0]
+    (if (>= kid 0)
+      (do (comment "a literal member: its key's slot / index entry, 1 step")
+          (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+          (let [nj (named-index p mt kid)
+                sl (mslots p bo mt)]
+            (if (< nj 0) (return (neg R_INCONSISTENT)))
+            (local ^:mut ^I32 r)
+            (local ^:mut ^I32 vok)
+            (if (== tier TIER_T)
+              (do (set r (ia s (+ sl nj)))
+                  (set vok 0)
+                  (if (>= r 0) (set vok (t-bit s bo r (+ (* 2 m) 1)))))
+              (do (let [sw (ia p (+ mt 4))
+                        x (+ sl (* sw nj))
+                        nrec (+ (m-named p mt) (* 3 nj))
+                        first (ia p (+ nrec 1))
+                        cnt (ia p (+ nrec 2))
+                        nmr (m-namers p mt)
+                        ^:mut pos (neg 1)]
+                    (for [^I32 q 0 cnt]
+                      (if (== (ia p (+ nmr (+ first q))) m) (set pos q)))
+                    (set r (neg 1))
+                    (set vok 0)
+                    (if (>= (ia s x) 0)
+                      (do (set r nj)
+                          (if (>= pos 0) (set vok (s-bit s (+ x 2) pos))))))))
+            (if (and (>= r 0) (and (not (m-consumed p s bo mt tier r)) (< c hi)))
+              (do (if (and (== rfc 1) cut)
+                    (iset s (+ bo MB_COMM) (+ (ia s (+ bo MB_COMM)) 1)))
+                  (if (== vok 1)
+                    (do (let [rc (m-consume p s bo mt tier r at)]
+                          (if (< rc 0) (return rc)))
+                        (set c 1))
+                    (if cut
+                      (do (local ^:mut ^I32 wire)
+                          (set wire r)
+                          (if (!= tier TIER_T) (set wire (ia s (+ sl (* (ia p (+ mt 4)) nj)))))
+                          (mev s bo EV_CUT m wire)
+                          (if (== rfc 1) (return X_FAILX))
+                          (return X_CUT))))))))
+      (if (== tier TIER_T)
+        (do (comment "a non-literal member: records in pick order until count = max, 1"
+                     "step each, consumed or not")
+            (let [^:mut j 0]
+              (while (and (< j n) (< c hi))
+                (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                (let [r2 (perm-at s bo j)]
+                  (if (and (not (m-consumed p s bo mt tier r2)) (== (t-bit s bo r2 (* 2 m)) 1))
+                    (do (if (and (== rfc 1) cut)
+                          (iset s (+ bo MB_COMM) (+ (ia s (+ bo MB_COMM)) 1)))
+                        (if (== (t-bit s bo r2 (+ (* 2 m) 1)) 1)
+                          (do (let [rc2 (m-consume p s bo mt tier r2 at)]
+                                (if (< rc2 0) (return rc2)))
+                              (set c (+ c 1)))
+                          (if cut
+                            (do (let [dg (t-diag s bo m j c hi n at)]
+                                  (if (< dg (neg 1)) (return dg))
+                                  (mev s bo EV_CUT m dg)
+                                  (if (== rfc 1) (return X_FAILX))
+                                  (return X_CUT))))))))
+                (set j (+ j 1)))))
+        (do (comment "S, a class-R member: its unnamed pairs' state, then the named"
+                     "slots, 1 step each")
+            (let [mw (mword bo m)
+                  uf (ia s (+ mw 3))
+                  rt (m-root p mt)
+                  nr (ia p (+ mt 6))
+                  nn (ia p (+ mt 2))
+                  sw2 (ia p (+ mt 4))
+                  sl2 (mslots p bo mt)
+                  rw (sar (+ nr 31) 5)
+                  ^:mut rp 0
+                  ^:mut diag (neg 1)]
+              (set c (ia s (+ mw 2)))
+              (if (and (and (== rfc 1) cut) (!= (bit-and uf 1) 0))
+                (iset s (+ bo MB_COMM) (+ (ia s (+ bo MB_COMM)) 1)))
+              (if (>= uf 256) (set diag (- (sar uf 8) 1)))
+              (while (and (< rp nr) (!= (ia p (+ rt rp)) m))
+                (set rp (+ rp 1)))
+              (for [^I32 j2 0 nn]
+                (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+                (let [x2 (+ sl2 (* sw2 j2))
+                      kbits (- (+ x2 sw2) (* 2 rw))]
+                  (if (and (>= (ia s x2) 0) (and (== (ia s (+ x2 1)) 0) (== (s-bit s kbits rp) 1)))
+                    (do (if (and (== rfc 1) cut)
+                          (iset s (+ bo MB_COMM) (+ (ia s (+ bo MB_COMM)) 1)))
+                        (if (== (s-bit s (+ kbits rw) rp) 1)
+                          (do (let [rc3 (m-consume p s bo mt tier j2 at)]
+                                (if (< rc3 0) (return rc3)))
+                              (set c (+ c 1)))
+                          (if cut
+                            (do (let [wv (ia s x2)]
+                                  (if (or (< diag 0) (< wv diag)) (set diag wv))))))))))
+              (if (>= diag 0)
+                (do (mev s bo EV_CUT m diag)
+                    (if (== rfc 1) (return X_FAILX))
+                    (return X_CUT)))))))
+    (if (>= c lo) (return X_OK))
+    (mev s bo EV_MISSING m (neg 1))
+    (return X_FAIL)))
+
+(defn ^I32 mkid-of [^IntsR p ^I32 po ^I32 nd ^I32 j]
+  (return (ia p (+ (+ (+ po PEG_HDR) (* 5 (ia p (+ po 1)))) (+ (ia p (+ nd 1)) j)))))
+
+(defn ^I32 m-run [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier ^I32 at]
+  (comment "The map machine (program-2 §6.4) over the group from the root: X_OK,"
+           "X_FAIL, X_CUT or X_FAILX with the root's failure event in the block, or a"
+           "negated code. Node entries, rewinds (1 + entries popped), consumptions"
+           "and chunk links are steps. Rule A (`branch`): a cut member returns cut,"
+           "SEQ and REP pass it, CHOICE absorbs it and raises it again when no"
+           "alternative succeeds. rfc (the default): a cut key match raises the"
+           "commitment epoch; an attempt failing after it grew, or a cut value"
+           "mismatch, is fail!, which unwinds to the root. A frame keeps the best"
+           "event of its failed sub-attempts (higher score; ties the earlier).")
+  (let [po (mpeg p mt)
+        actw (if-act p po MB_ACT)
+        sbase (msbase p bo mt)
+        ^:mut rfc 1
+        ^:mut pc 0
+        ^:mut ^I32 mode X_ENTER]
+    (if (!= (bit-and (ia p H_FLAGS) FL_CUTS_BRANCH) 0) (set rfc 0))
+    (forever
+      (if (== mode X_ENTER)
+        (do (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+            (let [nd (+ (+ po PEG_HDR) (* 5 pc))
+                  op (ia p nd)]
+              (if (== op P_EMPTY) (set mode X_OK))
+              (if (== op P_FAIL)
+                (do (let [pv (ia p (+ nd 2))
+                          ^:mut ^I32 pm NO_MEMBER]
+                      (if (>= pv 0) (set pm pv))
+                      (mev s bo EV_MISSING pm (neg 1))
+                      (set mode X_FAIL))))
+              (if (== op P_MEMBER)
+                (do (let [rm (m-member-run p s bo mt tier nd rfc at)]
+                      (if (< rm 0) (return rm))
+                      (set mode rm))))
+              (if (>= op P_SEQ)
+                (do (let [f (fs-push s bo MB_SP actw sbase MFW at)]
+                      (if (< f 0) (return f))
+                      (let [tl (tlen s bo)
+                            cm (ia s (+ bo MB_COMM))]
+                        (iset s f pc)
+                        (iset s (+ f 1) tl)
+                        (iset s (+ f 2) 0)
+                        (iset s (+ f 3) tl)
+                        (iset s (+ f 4) cm)
+                        (iset s (+ f 5) (neg 1))
+                        (iset s (+ f 6) 0)
+                        (iset s (+ f 7) (neg 1)))
+                      (if (or (== op P_SEQ) (== op P_CHOICE))
+                        (set pc (mkid-of p po nd 0))
+                        (set pc (ia p (+ nd 1)))))))))
+        (do (if (== (ia s (+ bo MB_SP)) 0) (return mode))
+            (let [f2 (fs-top s bo MB_SP actw sbase MFW)
+                  node (ia s f2)
+                  nd2 (+ (+ po PEG_HDR) (* 5 node))
+                  op2 (ia p nd2)
+                  ^:mut popit false]
+              (if (== op2 P_SEQ)
+                (if (!= mode X_OK)
+                  (set popit true)
+                  (do (let [c (+ (ia s (+ f2 2)) 1)]
+                        (if (== c (ia p (+ nd2 2)))
+                          (set popit true)
+                          (do (iset s (+ f2 2) c)
+                              (set pc (mkid-of p po nd2 c))
+                              (set mode X_ENTER)))))))
+              (if (== op2 P_CHOICE)
+                (if (== mode X_OK)
+                  (set popit true)
+                  (do (let [mk (ia s (+ f2 1))
+                            rw (m-rewind p s bo mt tier mk at)]
+                        (if (< rw 0) (return rw)))
+                      (let [esc (ia s (+ bo MB_E0))]
+                        (if (> esc (ia s (+ f2 5)))
+                          (do (let [ea (ia s (+ bo MB_E1))
+                                    eb (ia s (+ bo MB_E2))]
+                                (iset s (+ f2 5) esc)
+                                (iset s (+ f2 6) ea)
+                                (iset s (+ f2 7) eb)))))
+                      (if (and (== rfc 1) (or (== mode X_FAILX) (> (ia s (+ bo MB_COMM)) (ia s (+ f2 4)))))
+                        (do (set popit true)
+                            (set mode X_FAILX))
+                        (do (if (== mode X_CUT) (iset s (+ f2 3) (neg 2)))
+                            (let [c2 (+ (ia s (+ f2 2)) 1)]
+                              (if (== c2 (ia p (+ nd2 2)))
+                                (do (set popit true)
+                                    (if (== (ia s (+ f2 3)) (neg 2)) (set mode X_CUT) (set mode X_FAIL))
+                                    (let [b0 (ia s (+ f2 5))
+                                          b1 (ia s (+ f2 6))
+                                          b2 (ia s (+ f2 7))]
+                                      (iset s (+ bo MB_E0) b0)
+                                      (iset s (+ bo MB_E1) b1)
+                                      (iset s (+ bo MB_E2) b2)))
+                                (do (let [cm2 (ia s (+ bo MB_COMM))]
+                                      (iset s (+ f2 2) c2)
+                                      (iset s (+ f2 4) cm2))
+                                    (set pc (mkid-of p po nd2 c2))
+                                    (set mode X_ENTER)))))))))
+              (if (== op2 P_REP)
+                (if (== mode X_OK)
+                  (do (let [tl2 (tlen s bo)]
+                        (if (== tl2 (ia s (+ f2 3)))
+                          (set popit true)
+                          (do (let [c3 (+ (ia s (+ f2 2)) 1)
+                                    cm3 (ia s (+ bo MB_COMM))]
+                                (iset s (+ f2 2) c3)
+                                (if (< c3 (ia p (+ nd2 3)))
+                                  (do (iset s (+ f2 3) tl2)
+                                      (iset s (+ f2 4) cm3)
+                                      (set pc (ia p (+ nd2 1)))
+                                      (set mode X_ENTER))
+                                  (set popit true)))))))
+                  (do (let [mk2 (ia s (+ f2 3))
+                            rw2 (m-rewind p s bo mt tier mk2 at)]
+                        (if (< rw2 0) (return rw2)))
+                      (set popit true)
+                      (if (== mode X_CUT)
+                        (set mode X_CUT)
+                        (if (and (== rfc 1) (or (== mode X_FAILX) (> (ia s (+ bo MB_COMM)) (ia s (+ f2 4)))))
+                          (set mode X_FAILX)
+                          (if (>= (ia s (+ f2 2)) (ia p (+ nd2 2)))
+                            (set mode X_OK)
+                            (set mode X_FAIL)))))))
+              (if (== op2 P_CALL) (set popit true))
+              (if popit
+                (do (let [rp (fs-pop s bo MB_SP actw MFW at)]
+                      (if (< rp 0) (return rp)))))))))))
+
+;; ------------------------------------------------------------ the end
+
+(defn ^I32 seg-of [^IntsR p ^I32 mt ^I32 kid]
+  (comment "The extra path segment of a pair with key id kid: KEY when this map names"
+           "the key, else ANYKEY.")
+  (if (>= (named-index p mt kid) 0) (return P_KEY))
+  (return P_ANYKEY))
+
+(defn mwit [^Ints s ^I32 bo ^I32 reason ^I32 xk ^I32 xv]
+  (iset s (+ bo MB_E0) reason)
+  (iset s (+ bo MB_E1) xk)
+  (iset s (+ bo MB_E2) xv))
+
+(defn ^I32 ev-wit [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier]
+  (comment "The root's failure event as the block's witness (program-2 §8 rule 4'):"
+           "`missing` with KEY id / ANYKEY (none for an unplugged socket's FAIL); a cut"
+           "`value` at its diagnostic pair, whose key gives the segment.")
+  (let [a (ia s (+ bo MB_E1))
+        pair (ia s (+ bo MB_E2))
+        kind (sar a 16)
+        m (bit-and a 65535)]
+    (if (== kind EV_MISSING)
+      (do (if (== m NO_MEMBER)
+            (do (mwit s bo R_MISSING (neg 1) 0)
+                (return 0)))
+          (let [kid (ia p (m-member mt m))]
+            (if (>= kid 0)
+              (mwit s bo R_MISSING P_KEY kid)
+              (mwit s bo R_MISSING P_ANYKEY 0)))
+          (return 0)))
+    (local ^:mut ^I32 pk)
+    (set pk (neg 1))
+    (if (== tier TIER_T) (set pk (ia s (rec-at s bo pair))))
+    (if (== tier TIER_F) (set pk (ia s (+ (mword bo m) 2))))
+    (if (== tier TIER_S)
+      (do (let [sw (ia p (+ mt 4))
+                sl (mslots p bo mt)
+                nb (m-named p mt)]
+            (for [^I32 j 0 (ia p (+ mt 2))]
+              (if (== (ia s (+ sl (* sw j))) pair) (set pk (ia p (+ nb (* 3 j)))))))))
+    (if (< pk 0)
+      (mwit s bo R_VALUE P_ANYKEY 0)
+      (do (let [sg (seg-of p mt pk)]
+            (if (== sg P_KEY) (mwit s bo R_VALUE P_KEY pk) (mwit s bo R_VALUE P_ANYKEY 0)))))
+    (return 0)))
+
+(defn ^:pub ^I32 map-end-block [^IntsR p ^Ints s ^I32 bo ^I32 mt ^Bytes kb ^I32 at]
+  (comment "The end (program-2 §6.2, §6.4, §8) for an alive block: F 1 unit per member"
+           "and the first member in source order with a cut event or below its min"
+           "fails; S / T the T sort, the machine, then closedness (1 unit per slot /"
+           "record checked). kb holds the T records' keys. 1 matched, 0 failed (the"
+           "witness in +10..+12: reason, extra segment kind and value), or a negated"
+           "code. Its arena use (permutation, trail) is popped again.")
+  (let [po (mpeg p mt)
+        tier (m-tier p s po)
+        nm (ia p (+ mt 1))]
+    (if (== tier TIER_F)
+      (do (if (not (charge s nm at)) (return (neg R_BUDGET)))
+          (for [^I32 m 0 nm]
+            (let [mw (mword bo m)]
+              (if (>= (ia s (+ mw 1)) 0)
+                (do (let [cp (ia s (+ mw 1))]
+                      (mev s bo EV_CUT m cp))
+                    (ev-wit p s bo mt tier)
+                    (return 0)))
+              (if (< (ia s mw) (ia s (+ mw 4)))
+                (do (mev s bo EV_MISSING m (neg 1))
+                    (ev-wit p s bo mt tier)
+                    (return 0)))))
+          (return 1)))
+    (let [mark (arena-up-top s)
+          n (ia s (+ bo MB_NP))]
+      (if (== tier TIER_T)
+        (do (let [rs (t-sort s bo kb n at)]
+              (if (< rs 0) (return rs)))))
+      (if (== tier TIER_T)
+        (iset s (+ bo MB_TRAIL) (arena-up-top s))
+        (do (iset s (+ bo MB_TRAIL) (neg 1))
+            (iset s (+ bo MB_TLEN) 0)))
+      (iset s (+ bo MB_COMM) 0)
+      (let [st (m-run p s bo mt tier at)]
+        (if (< st 0) (return st))
+        (fs-drop s bo MB_SP (if-act p po MB_ACT))
+        (if (!= st X_OK)
+          (do (ev-wit p s bo mt tier)
+              (arena-set-up s mark)
+              (return 0))))
+      (comment "closedness: the first leftover in wire order")
+      (if (== tier TIER_T)
+        (do (for [^I32 r 0 n]
+              (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+              (if (not (m-consumed p s bo mt tier r))
+                (do (let [^:mut ^I32 why R_UNEXPECTED
+                          x (rec-at s bo r)
+                          kid (ia s x)]
+                      (for [^I32 m2 0 nm]
+                        (if (and (== (t-bit s bo r (* 2 m2)) 1) (== (t-bit s bo r (+ (* 2 m2) 1)) 0))
+                          (set why R_VALUE)))
+                      (if (== (seg-of p mt kid) P_KEY) (mwit s bo why P_KEY kid) (mwit s bo why P_ANYKEY 0))
+                      (arena-set-up s mark)
+                      (return 0)))))
+            (arena-set-up s mark)
+            (return 1)))
+      (let [nn (ia p (+ mt 2))
+            sw (ia p (+ mt 4))
+            sl (mslots p bo mt)
+            nr (ia p (+ mt 6))
+            rw (sar (+ nr 31) 5)
+            nb (m-named p mt)
+            ^:mut bj (neg 1)
+            ^:mut bwire (neg 1)]
+        (for [^I32 j 0 nn]
+          (if (not (charge s 1 at)) (return (neg R_BUDGET)))
+          (let [xs (+ sl (* sw j))
+                wv (ia s xs)]
+            (if (and (>= wv 0) (== (ia s (+ xs 1)) 0))
+              (if (or (< bwire 0) (< wv bwire)) (do (set bj j) (set bwire wv))))))
+        (arena-set-up s mark)
+        (if (< bj 0) (return 1))
+        (let [x2 (+ sl (* sw bj))
+              nrec (+ nb (* 3 bj))
+              cnt (ia p (+ nrec 2))
+              kbits (- (+ x2 sw) (* 2 rw))
+              ^:mut ^I32 why2 R_UNEXPECTED]
+          (for [^I32 q 0 cnt]
+            (if (== (s-bit s (+ x2 2) q) 0) (set why2 R_VALUE)))
+          (for [^I32 rp 0 nr]
+            (if (and (== (s-bit s kbits rp) 1) (== (s-bit s (+ kbits rw) rp) 0)) (set why2 R_VALUE)))
+          (mwit s bo why2 P_KEY (ia p nrec))
+          (return 0))))))

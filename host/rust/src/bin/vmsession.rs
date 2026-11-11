@@ -3,7 +3,7 @@
 // Reads lines on stdin:
 //
 //     prog <words, comma-separated decimal> <pool hex or ->
-//     case <prog index> <rule> <l0> .. <l8> <kind> <w> <q> <seed> <k> <input hex or ->
+//     case <prog index> <rule> <l0> .. <l10> <kind> <w> <q> <seed> <k> <input hex or ->
 //     host <prog index> <rule> <top_map> <cose> <chunk> <quantum> <input hex or ->
 //
 // `host` goes through the Rust host's session API (`snug::schema::validate_blob`)
@@ -320,10 +320,11 @@ fn main() {
             "case" => {
                 let n = |i: usize| -> i32 { f[i].parse().expect("number") };
                 let (pi, rule) = (n(1) as usize, n(2));
-                // limits words 0..9 (word 8 the generic/schedule bits, word 9 the profile flags, D120)
-                let lim: Vec<i32> = (0..10).map(|i| n(3 + i)).collect();
-                let pol = Policy { kind: n(13), w: n(14), q: n(15), seed: f[16].parse().expect("seed"), k: n(17) };
-                let input = unhex(f[18]);
+                // limits words 0..10 (word 8 the generic/schedule/tier bits, word 9 the profile flags, D120,
+                // word 10 the group arena's limit, program-2 §9.3)
+                let lim: Vec<i32> = (0..11).map(|i| n(3 + i)).collect();
+                let pol = Policy { kind: n(14), w: n(15), q: n(16), seed: f[17].parse().expect("seed"), k: n(18) };
+                let input = unhex(f[19]);
                 let (p, pool) = &progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(p, pool, rule, &lim, &input, &pol)));
                 match r {
@@ -334,10 +335,10 @@ fn main() {
             "ucase" => {
                 let n = |i: usize| -> i32 { f[i].parse().expect("number") };
                 let (pi, rule) = (n(1) as usize, n(2));
-                let lim: Vec<i32> = (0..10).map(|i| n(3 + i)).collect();
-                let pol = Policy { kind: n(13), w: n(14), q: n(15), seed: f[16].parse().expect("seed"), k: n(17) };
-                let ff = n(18) == 1;
-                let input = unhex(f[19]);
+                let lim: Vec<i32> = (0..11).map(|i| n(3 + i)).collect();
+                let pol = Policy { kind: n(14), w: n(15), q: n(16), seed: f[17].parse().expect("seed"), k: n(18) };
+                let ff = n(19) == 1;
+                let input = unhex(f[20]);
                 let (p, pool) = &progs[pi];
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_unknown(p, pool, rule, &lim, &input, &pol, ff)));
                 match r {
