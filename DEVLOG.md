@@ -5277,6 +5277,54 @@ attempt (the cost D286 measured and rejected); the session walking the
 original order until a refusal (its canonical events are per whole item).
 - [ ] **Signed off** (owner)
 
+### D322 — Bundle growth for D286 D (the canonical copy's units from the scanner's records); caps of the grown entries at measured + 2% (R9 per D200, owner sign-off)
+**Decision** (D286 perf analyst, provisional): the caps that D286 D pushes over
+rise to their measured size + 2% (Ceil); only those caps change (budget.json):
+`snug` min/gzip/brotli (static and full), `snug/view` min, `snug/writer`
+min/gzip, `snug/schema` brotli. Measured with `node tools/size/size.mjs
+--details` (esbuild 0.28.2, Node 24.6.0) on main `51eb54c` and on `51eb54c` + D,
+minified / gzip bytes:
+
+| Entry | before | after | delta |
+| --- | ---: | ---: | ---: |
+| `snug` (codec) | 62,107 / 21,305 | 62,329 / 21,397 | +222 / +92 |
+| `snug/view` | 75,918 / 25,728 | 76,151 / 25,818 | +233 / +90 |
+| `snug/writer` | 58,090 / 19,888 | 58,323 / 19,976 | +233 / +88 |
+| `snug/schema` | 147,799 / 52,842 | 149,148 / 53,308 | +1,349 / +466 |
+| `snug/sources`, `snug/sequence`, `runtime`, `all-runtime` | | | +1,349 / +439..461 |
+
+**Attribution** (minified module deltas): `cbor/scan` +222 in every entry
+holding the scanner: `unit-rec` (a 7-word kind-4 record per marked map, in the
+order maps end), `dup-map`'s head argument and units, `defer-map` writing a
+deferred map's units into its record, and `defer` growing the options array by
+doubling (it grew by 256 words: hundreds of retries for an item with thousands
+of marked maps). `cbor/vcopy` +1,127 in entries holding the VM: `pw-units`
+(the writer emits a completed map's EV_UNITS event from the next record),
+`units-ready`, `units-same` (the identity copy), `units-left`/`units-strip` (the
+fallback to the units pass when an item has a tag 24, or when the records and
+the writer's maps disagree, which is never expected), `ev-shift` moving the
+units events' map positions. The rest (`snug/view` +11, `snug/writer` +11) is
+the minifier's renaming.
+**Gain** (buffer driver, `920a3e1` + B+C + the tag-4 fix -> + D, five rotated
+rounds, load ~28): reordered keys 1.15-1.18x (maps `rev` 31.2 -> 26.5 ms,
+map-heavy `rev` 38.6 -> 33.1 ms), `all` 1.11-1.16x, other inputs unchanged. The
+second duplicate-check sort per marked map is gone: the copy's units are the
+scanner's (the same records and comparisons, D277). Gates and the differential
+(events and copy equal on 240,000 random items): bench/D286-analysis.md
+"Implementation log".
+**Cuts considered**: the records outside the codec entry -- not possible:
+the scanner is what computes the units, and the codec entry holds it (only a
+control bit could stop the recording, and a bit saves no code); the fallback
+(`units-left`/`units-strip`, about 300 B) -- kept: a tag 24's payload maps are
+recorded by the scanner and not written as maps, so that case needs it, and it
+is the safety net for the writer's order; deciding the tag-24 case before the
+copy with a byte search -- tried, cost 20% on text-heavy input (a pass over
+every item), dropped for the writer's own note; a VM-side tolerant attempt
+(analysis candidate E) -- after the PEG work, re-measured on its map machine.
+**Why**: the second sort is up to a quarter of the canonical path's cost on
+reordered keys, and the copy needs those exact units for D277's charges.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

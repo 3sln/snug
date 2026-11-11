@@ -7,29 +7,29 @@
   "entries": {
     "snug": {
       "static": {
-        "min": 62113,
-        "gzip": 21346,
-        "brotli": 18705
+        "min": 63576,
+        "gzip": 21825,
+        "brotli": 19083
       },
       "full": {
-        "min": 62113,
-        "gzip": 21346,
-        "brotli": 18705
+        "min": 63576,
+        "gzip": 21825,
+        "brotli": 19083
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "D322 (provisional, owner sign-off pending): D286 D -- the scanner's per-map duplicate-check unit records (kin/scan.kin unit-rec, +222 min) that the canonical copy turns into its units events; on top of P8.4 D285. Ceil(measurement * 1.02) for each grown cap; measured on main 51eb54c + D, esbuild 0.28.2."
     },
     "snug/schema": {
       "static": {
         "min": 149458,
         "gzip": 53327,
-        "brotli": 46210
+        "brotli": 47137
       },
       "full": {
         "min": 149458,
         "gzip": 53327,
-        "brotli": 46210
+        "brotli": 47137
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min) and the canonical copy's units events from them (kin/vcopy.kin, +1,127 min); measured on main 51eb54c + D."
     },
     "snug/compile": {
       "static": {
@@ -46,29 +46,29 @@
     },
     "snug/view": {
       "static": {
-        "min": 76025,
+        "min": 77675,
         "gzip": 25820,
         "brotli": 22672
       },
       "full": {
-        "min": 76025,
+        "min": 77675,
         "gzip": 25820,
         "brotli": 22672
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2. Min: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min); measured on main 51eb54c + D."
     },
     "snug/writer": {
       "static": {
-        "min": 58191,
-        "gzip": 19954,
+        "min": 59490,
+        "gzip": 20376,
         "brotli": 17467
       },
       "full": {
-        "min": 58191,
-        "gzip": 19954,
+        "min": 59490,
+        "gzip": 20376,
         "brotli": 17467
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2. Min and gzip: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min); measured on main 51eb54c + D."
     },
     "snug/unicode": {
       "static": {

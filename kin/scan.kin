@@ -82,7 +82,7 @@
         (return (neg CODE_SCRATCH))))
   (let [e (- (ia o O_S_DLOW) 7)]
     (if (< e (ia o O_S_RTOP))
-      (do (iset o O_VNEEDW (+ (ilen o) 256))
+      (do (iset o O_VNEEDW (+ (* 2 (ilen o)) 256))
           (return (neg CODE_SCRATCH))))
     (iset o e kind)
     (iset o (+ e 1) (bit-and (ia o O_S_SRC) 1))
@@ -288,10 +288,19 @@
   (let [v (ia o O_VCTL)]
     (iset o O_VCTL (bit-or v VC_UNSORTED))))
 
-(defn ^:pub ^I32 dup-map [^Bytes b ^Ints o ^I32 p ^I32 npairs]
-  (comment "A marked map's deferred check (D263) at its end, its first key at p:"
-           "here when every key is its own comparison form, else recorded for scan-cb"
-           "(it writes EC forms to the canonical buffer). 0 or a negated code.")
+(defn ^I32 unit-rec [^Ints o ^I32 pos ^I32 p ^I32 u]
+  (comment "D286: note a marked map's units (u; -1 until its deferred check runs) as a"
+           "kind-4 record (head pos, first key p) -- the main walk's only (O_S_SRC 0), in"
+           "the order its maps end, which is the order the copy's writer completes"
+           "them: canon-build turns them into EV_UNITS events without re-sorting. 0, or"
+           "-CODE_SCRATCH.")
+  (if (!= (ia o O_S_SRC) 0) (return 0))
+  (return (defer o 4 p u pos 0)))
+
+(defn ^:pub ^I32 dup-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 npairs]
+  (comment "A marked map's deferred check (D263) at its end, its head at pos, its first"
+           "key at p: here when every key is its own comparison form, else recorded for"
+           "scan-cb (it writes EC forms to the canonical buffer). 0 or a negated code.")
   (if (< (ilen o) O_S_FIRST)
     (do (iset o O_VNEEDW 256)
         (return (neg CODE_SCRATCH))))
@@ -299,11 +308,18 @@
         r (dup-input b o p n)]
     (if (< r 0) (return r))
     (if (== r 0)
-      (do (let [d (dup-finish b b o n (ia o O_S_CBTOP))]
+      (do (let [u0 (ia o O_S_UNITS)
+                d (dup-finish b b o n (ia o O_S_CBTOP))]
             (if (== d (neg CODE_DUPLICATE_KEY))
               (return (dup-note o 2 (neg 1) p (ia o O_ERR_POS) CODE_DUPLICATE_KEY)))
-            (return d))))
-    (return (defer o 1 p n (- (ia o O_ITEMS) (ia o O_S_EXTRA)) 0))))
+            (if (< d 0) (return d))
+            (return (unit-rec o pos p (- (ia o O_S_UNITS) u0))))))
+    (let [w (unit-rec o pos p (neg 1))]
+      (if (< w 0) (return w)))
+    (local ^:mut ^I32 ri)
+    (set ri (neg 1))
+    (if (== (ia o O_S_SRC) 0) (set ri (- (ia o O_S_NDEF) 1)))
+    (return (defer o 1 p n (- (ia o O_ITEMS) (ia o O_S_EXTRA)) ri))))
 
 (defn ^I32 scan-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (comment "Per pair: the key's major type is PEEKED (key_type) before the key is"
@@ -346,7 +362,7 @@
           (set q (item b o q inner end))
           (if (< q 0) (return q)))))
     (if mark
-      (do (let [dm (dup-map b o p lo)]
+      (do (let [dm (dup-map b o pos p lo)]
             (if (< dm 0) (return dm)))))
     (return q)))
 
@@ -428,7 +444,7 @@
         (if (< q 0) (return q))
         (set k (+ k 1))))
     (if mark
-      (do (let [dm (dup-map b o p (neg 1))]
+      (do (let [dm (dup-map b o pos p (neg 1))]
             (if (< dm 0) (return dm)))))
     (return (+ q 1))))
 
@@ -858,9 +874,11 @@
 
 ;; ------------------------------------------------------------- deferred checks
 
-(defn ^I32 defer-map [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 q0 ^I32 n]
-  (comment "Kind 1: a map's duplicate check, writing its keys' EC forms to cb.")
-  (let [cb0 (ia o O_S_CBTOP)]
+(defn ^I32 defer-map [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 q0 ^I32 n ^I32 ri]
+  (comment "Kind 1: a map's duplicate check, writing its keys' EC forms to cb; its units"
+           "into its kind-4 record ri (-1: none).")
+  (let [cb0 (ia o O_S_CBTOP)
+        u0 (ia o O_S_UNITS)]
     (local ^I32 d)
     (if (== src 0)
       (do (let [r (dup-forms b o cb q0 n)]
@@ -870,6 +888,8 @@
             (if (< r2 0) (return r2)))
           (set d (dup-finish cb cb o n cb0))))
     (if (== d (neg CODE_DUPLICATE_KEY)) (return (dup-note o 2 src q0 (ia o O_ERR_POS) CODE_DUPLICATE_KEY)))
+    (if (and (== d 0) (>= ri 0))
+      (iset o (+ (- (ilen o) (* 7 (+ ri 1))) 3) (- (ia o O_S_UNITS) u0)))
     (return d)))
 
 (defn ^I32 defer-text [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 tag ^I32 tpos ^I32 cpos]
@@ -941,7 +961,7 @@
             a3 (ia o (+ e 4))
             a4 (ia o (+ e 5))
             ^:mut r 0]
-        (if (== kind 1) (set r (defer-map b o cb src a1 a2)))
+        (if (== kind 1) (set r (defer-map b o cb src a1 a2 a4)))
         (if (== kind 2) (set r (defer-text b o cb src a1 a2 a3)))
         (if (== kind 3) (set r (defer-payload b o cb src e a2 a3 a4)))
         (comment "a map's or a text rule's refusal is decided where it was recorded:"

@@ -13,6 +13,32 @@ export const O_S_XEND = 45;
 
 export const O_S_T24 = 46;
 
+export const O_S_UCUR = 47;
+
+export function pwUnits(o, c, cs, y) {
+    // A complete map just written (its source content start c, its copy content
+    // start cs, head y): when the next unit record is this map's (the scanner
+    // marked it), its EV_UNITS event. 0, or -1 when o is too small.
+    const cur = o[O_S_UCUR];
+    const nd = o[O_S_NDEF];
+    let i = cur;
+    if (cur < 0) {
+        return 0;
+    }
+    while ((i < nd) && (o[o.length - (7 * (i + 1))] !== 4)) {
+        i += 1;
+    }
+    if (i >= nd) {
+        return 0;
+    }
+    const e = o.length - (7 * (i + 1));
+    if (o[e + 2] !== c) {
+        return 0;
+    }
+    o[O_S_UCUR] = i + 1;
+    return evAdd(o, cs, EV_UNITS, o[e + 3], y, 0);
+}
+
 export function pwLeaf(cb, o, x, y) {
     // A leaf (or a string) in DC form, its source end in o[O_S_XEND].
     const r = cw(cb, o, x, y, 0);
@@ -141,7 +167,7 @@ export function evShift(o, i0, delta, from) {
         if (v >= from) {
             o[e] = v - delta;
         }
-        if (((k === EV_END) || (k === EV_KEY)) && (o[e + 3] >= from)) {
+        if ((((k === EV_END) || (k === EV_KEY)) || (k === EV_UNITS)) && (o[e + 3] >= from)) {
             o[e + 3] = o[e + 3] - delta;
         }
     }
@@ -388,6 +414,11 @@ export function pwIndef(cb, o, x, y, depth) {
     if (r < 0) {
         return r;
     }
+    if ((major === 5) && (k > 0)) {
+        if (pwUnits(o, x + 1, cs, y) < 0) {
+            return -1;
+        }
+    }
     o[O_S_XEND] = q + 1;
     return cend;
 }
@@ -535,6 +566,11 @@ export function pw(cb, o, x, y, depth) {
         q = o[O_S_XEND];
     }
     o[O_S_XEND] = q;
+    if ((major === 5) && (lo > 0)) {
+        if (pwUnits(o, c, z0, y) < 0) {
+            return -1;
+        }
+    }
     if (major === 5) {
         if (kn !== 0) {
             const w3 = evAdd(o, y, EV_WMARK, 0, 0, 0);
@@ -1003,6 +1039,75 @@ export function uvisitSeq(o, cb, y0, lim, pstop, all) {
     return 0;
 }
 
+export function unitsReady(o, start) {
+    // 1 when every unit record the scanner left is complete (its deferred check
+    // ran), their positions then made relative to the item's start; else 0.
+    if (o.length < O_S_FIRST) {
+        return 0;
+    }
+    const nd = o[O_S_NDEF];
+    for (let i = 0; i < nd; i++) {
+        const e = o.length - (7 * (i + 1));
+        if ((o[e] === 4) && (o[e + 3] < 0)) {
+            return 0;
+        }
+    }
+    for (let j = 0; j < nd; j++) {
+        const e2 = o.length - (7 * (j + 1));
+        if (o[e2] === 4) {
+            o[e2 + 2] = o[e2 + 2] - start;
+            o[e2 + 4] = o[e2 + 4] - start;
+        }
+    }
+    return 1;
+}
+
+export function unitsSame(o, n) {
+    // The copy is the input's bytes at n: every unit record as its event. 0, or
+    // -CODE_SCRATCH.
+    const nd = o[O_S_NDEF];
+    for (let i = 0; i < nd; i++) {
+        const e = o.length - (7 * (i + 1));
+        if (o[e] === 4) {
+            if (evAdd(o, n + o[e + 2], EV_UNITS, o[e + 3], n + o[e + 4], 0) < 0) {
+                return -CODE_SCRATCH;
+            }
+        }
+    }
+    o[O_S_UCUR] = nd;
+    return 0;
+}
+
+export function unitsLeft(o) {
+    // Is a unit record left that the writer did not consume?
+    const nd = o[O_S_NDEF];
+    let i = o[O_S_UCUR];
+    while (i < nd) {
+        if (o[o.length - (7 * (i + 1))] === 4) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+export function unitsStrip(o) {
+    // Drop every EV_UNITS event (the units pass then computes them).
+    const n = o[O_S_NEV];
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+        const e = O_S_FIRST + (EV_WORDS * i);
+        if (o[e + 1] !== EV_UNITS) {
+            const d = O_S_FIRST + (EV_WORDS * k);
+            for (let j = 0; j < EV_WORDS; j++) {
+                o[d + j] = o[e + j];
+            }
+            k += 1;
+        }
+    }
+    o[O_S_NEV] = k;
+}
+
 export function mayTag24(b, start, n) {
     // D286: can b[start, start + n) hold a tag 24 -- some head d8 18, d9 00 18,
     // da 00 00 00 18 or db 00 .. 00 18 anywhere (a byte search for a copy the
@@ -1065,9 +1170,24 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
     const mx0 = o[O_MAX_DEPTH];
     const su0 = o[O_S_UNITS];
     const vc0 = o[O_VCTL];
+    const dl0 = o[O_S_DLOW];
+    let uf;
+    uf = 0;
+    // D286: an accepted item under a Program without .cbor whose scanner charged
+    // units takes them from its records (kept below the events: the deferral list
+    // stays); one with a tag 24 (its payloads' maps are the scanner's too) falls
+    // back to the units pass below
+    if (((refused === 0) && (embeds === 1)) && (su0 > 0)) {
+        uf = unitsReady(o, start);
+    }
     o[O_S_NEV] = 0;
     o[O_S_NSORT] = 0;
     o[O_S_DLOW] = o.length;
+    o[O_S_UCUR] = -1;
+    if (uf === 1) {
+        o[O_S_DLOW] = dl0;
+        o[O_S_UCUR] = 0;
+    }
     o[O_S_RTOP] = O_S_FIRST + 8;
     o[O_S_UNITS] = 0;
     if ((cb.length < ((3 * n) + ((n >> 6) + 1024))) || (o.length < (O_S_FIRST + 256))) {
@@ -1116,6 +1236,27 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
     if (same === 1) {
         t24 = mayTag24(cb, n, n);
     }
+    if ((uf === 1) && (t24 !== 0)) {
+        unitsStrip(o);
+        o[O_S_DLOW] = o.length;
+        uf = 0;
+    }
+    if ((uf === 1) && (same === 1)) {
+        const wu = unitsSame(o, n);
+        if (wu < 0) {
+            return wu;
+        }
+    }
+    if (uf === 1) {
+        if (unitsLeft(o)) {
+            // never expected (the writer completes maps in the scanner's
+            // order): the units pass computes them instead
+            unitsStrip(o);
+            o[O_S_DLOW] = o.length;
+            uf = 0;
+        }
+    }
+    o[O_S_UCUR] = -1;
     // D286: an accepted item without a tag 24 under a Program without .cbor
     // has no content to visit
     if ((embeds > 0) && (((embeds === 2) || (refused !== 0)) || (t24 !== 0))) {
@@ -1152,6 +1293,12 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
     // D277: the units, over the main copy and every embedded copy (the
     // events so far sorted for the lookups)
     evSort(o);
+    // D286: the scanner's units are the units pass's (the same records and
+    // comparisons, D277)
+    if (uf === 1) {
+        o[O_S_DLOW] = o.length;
+        return l;
+    }
     // D286: an accepted item with no marked map (the scanner charged no units
     // and saw no unsorted or EC-sensitive key: it marks under the same rules,
     // and a marked map charges at least 1) and no embedded copy has no units

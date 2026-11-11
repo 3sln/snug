@@ -11,6 +11,30 @@ use crate::snug::cbor::text::*;
 
 pub(crate) const O_S_XEND: i32 = 45;
 pub(crate) const O_S_T24: i32 = 46;
+pub(crate) const O_S_UCUR: i32 = 47;
+pub(crate) fn pw_units(o: &mut [i32], c: i32, cs: i32, y: i32) -> i32 {
+    // A complete map just written (its source content start c, its copy content
+    // start cs, head y): when the next unit record is this map's (the scanner
+    // marked it), its EV_UNITS event. 0, or -1 when o is too small.
+    let cur: i32 = o[(O_S_UCUR) as usize];
+    let nd: i32 = o[(O_S_NDEF) as usize];
+    let mut i: i32 = cur;
+    if cur < 0 {
+        return 0;
+    }
+    while (i < nd) && (o[((o.len() as i32) - (7 * (i + 1))) as usize] != 4) {
+        i += 1;
+    }
+    if i >= nd {
+        return 0;
+    }
+    let e: i32 = (o.len() as i32) - (7 * (i + 1));
+    if o[(e + 2) as usize] != c {
+        return 0;
+    }
+    o[(O_S_UCUR) as usize] = i + 1;
+    return ev_add(o, cs, EV_UNITS, o[(e + 3) as usize], y, 0);
+}
 pub(crate) fn pw_leaf(cb: &mut [u8], o: &mut [i32], x: i32, y: i32) -> i32 {
     // A leaf (or a string) in DC form, its source end in o[O_S_XEND].
     let r: i32 = cw(cb, o, x, y, 0);
@@ -131,7 +155,7 @@ pub(crate) fn ev_shift(o: &mut [i32], i0: i32, delta: i32, from: i32) {
         if v >= from {
             o[(e) as usize] = v - delta;
         }
-        if ((k == EV_END) || (k == EV_KEY)) && (o[(e + 3) as usize] >= from) {
+        if (((k == EV_END) || (k == EV_KEY)) || (k == EV_UNITS)) && (o[(e + 3) as usize] >= from) {
             o[(e + 3) as usize] = o[(e + 3) as usize] - delta;
         }
     }
@@ -370,6 +394,11 @@ pub(crate) fn pw_indef(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32)
     if r < 0 {
         return r;
     }
+    if (major == 5) && (k > 0) {
+        if pw_units(o, x + 1, cs, y) < 0 {
+            return -1;
+        }
+    }
     o[(O_S_XEND) as usize] = q + 1;
     return cend;
 }
@@ -516,6 +545,11 @@ pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
         q = o[(O_S_XEND) as usize];
     }
     o[(O_S_XEND) as usize] = q;
+    if (major == 5) && (lo > 0) {
+        if pw_units(o, c, z0, y) < 0 {
+            return -1;
+        }
+    }
     if major == 5 {
         if kn != 0 {
             let w3: i32 = ev_add(o, y, EV_WMARK, 0, 0, 0);
@@ -970,6 +1004,71 @@ pub(crate) fn uvisit_seq(o: &mut [i32], cb: &mut [u8], y0: i32, lim: i32, pstop:
     }
     return 0;
 }
+pub(crate) fn units_ready(o: &mut [i32], start: i32) -> i32 {
+    // 1 when every unit record the scanner left is complete (its deferred check
+    // ran), their positions then made relative to the item's start; else 0.
+    if (o.len() as i32) < O_S_FIRST {
+        return 0;
+    }
+    let nd: i32 = o[(O_S_NDEF) as usize];
+    for i in 0..nd {
+        let e: i32 = (o.len() as i32) - (7 * (i + 1));
+        if (o[(e) as usize] == 4) && (o[(e + 3) as usize] < 0) {
+            return 0;
+        }
+    }
+    for j in 0..nd {
+        let e2: i32 = (o.len() as i32) - (7 * (j + 1));
+        if o[(e2) as usize] == 4 {
+            o[(e2 + 2) as usize] = o[(e2 + 2) as usize] - start;
+            o[(e2 + 4) as usize] = o[(e2 + 4) as usize] - start;
+        }
+    }
+    return 1;
+}
+pub(crate) fn units_same(o: &mut [i32], n: i32) -> i32 {
+    // The copy is the input's bytes at n: every unit record as its event. 0, or
+    // -CODE_SCRATCH.
+    let nd: i32 = o[(O_S_NDEF) as usize];
+    for i in 0..nd {
+        let e: i32 = (o.len() as i32) - (7 * (i + 1));
+        if o[(e) as usize] == 4 {
+            if ev_add(o, n + o[(e + 2) as usize], EV_UNITS, o[(e + 3) as usize], n + o[(e + 4) as usize], 0) < 0 {
+                return -CODE_SCRATCH;
+            }
+        }
+    }
+    o[(O_S_UCUR) as usize] = nd;
+    return 0;
+}
+pub(crate) fn units_left(o: &[i32]) -> bool {
+    // Is a unit record left that the writer did not consume?
+    let nd: i32 = o[(O_S_NDEF) as usize];
+    let mut i: i32 = o[(O_S_UCUR) as usize];
+    while i < nd {
+        if o[((o.len() as i32) - (7 * (i + 1))) as usize] == 4 {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+pub(crate) fn units_strip(o: &mut [i32]) {
+    // Drop every EV_UNITS event (the units pass then computes them).
+    let n: i32 = o[(O_S_NEV) as usize];
+    let mut k: i32 = 0;
+    for i in 0..n {
+        let e: i32 = O_S_FIRST + (EV_WORDS * i);
+        if o[(e + 1) as usize] != EV_UNITS {
+            let d: i32 = O_S_FIRST + (EV_WORDS * k);
+            for j in 0..EV_WORDS {
+                o[(d + j) as usize] = o[(e + j) as usize];
+            }
+            k += 1;
+        }
+    }
+    o[(O_S_NEV) as usize] = k;
+}
 pub(crate) fn may_tag24(b: &[u8], start: i32, n: i32) -> i32 {
     // D286: can b[start, start + n) hold a tag 24 -- some head d8 18, d9 00 18,
     // da 00 00 00 18 or db 00 .. 00 18 anywhere (a byte search for a copy the
@@ -1028,9 +1127,24 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
     let mx0: i32 = o[(O_MAX_DEPTH) as usize];
     let su0: i32 = o[(O_S_UNITS) as usize];
     let vc0: i32 = o[(O_VCTL) as usize];
+    let dl0: i32 = o[(O_S_DLOW) as usize];
+    let mut uf: i32;
+    uf = 0;
+    // D286: an accepted item under a Program without .cbor whose scanner charged
+    // units takes them from its records (kept below the events: the deferral list
+    // stays); one with a tag 24 (its payloads' maps are the scanner's too) falls
+    // back to the units pass below
+    if ((refused == 0) && (embeds == 1)) && (su0 > 0) {
+        uf = units_ready(o, start);
+    }
     o[(O_S_NEV) as usize] = 0;
     o[(O_S_NSORT) as usize] = 0;
     o[(O_S_DLOW) as usize] = o.len() as i32;
+    o[(O_S_UCUR) as usize] = -1;
+    if uf == 1 {
+        o[(O_S_DLOW) as usize] = dl0;
+        o[(O_S_UCUR) as usize] = 0;
+    }
     o[(O_S_RTOP) as usize] = O_S_FIRST + 8;
     o[(O_S_UNITS) as usize] = 0;
     if ((cb.len() as i32) < ((3 * n) + ((n >> 6) + 1024))) || ((o.len() as i32) < (O_S_FIRST + 256)) {
@@ -1079,6 +1193,27 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
     if same == 1 {
         t24 = may_tag24(cb, n, n);
     }
+    if (uf == 1) && (t24 != 0) {
+        units_strip(o);
+        o[(O_S_DLOW) as usize] = o.len() as i32;
+        uf = 0;
+    }
+    if (uf == 1) && (same == 1) {
+        let wu: i32 = units_same(o, n);
+        if wu < 0 {
+            return wu;
+        }
+    }
+    if uf == 1 {
+        if units_left(o) {
+            // never expected (the writer completes maps in the scanner's
+            // order): the units pass computes them instead
+            units_strip(o);
+            o[(O_S_DLOW) as usize] = o.len() as i32;
+            uf = 0;
+        }
+    }
+    o[(O_S_UCUR) as usize] = -1;
     // D286: an accepted item without a tag 24 under a Program without .cbor
     // has no content to visit
     if (embeds > 0) && (((embeds == 2) || (refused != 0)) || (t24 != 0)) {
@@ -1115,6 +1250,12 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
     // D277: the units, over the main copy and every embedded copy (the
     // events so far sorted for the lookups)
     ev_sort(o);
+    // D286: the scanner's units are the units pass's (the same records and
+    // comparisons, D277)
+    if uf == 1 {
+        o[(O_S_DLOW) as usize] = o.len() as i32;
+        return l;
+    }
     // D286: an accepted item with no marked map (the scanner charged no units
     // and saw no unsorted or EC-sensitive key: it marks under the same rules,
     // and a marked map charges at least 1) and no embedded copy has no units

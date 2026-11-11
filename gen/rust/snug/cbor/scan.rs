@@ -55,7 +55,7 @@ pub fn defer(o: &mut [i32], kind: i32, a1: i32, a2: i32, a3: i32, a4: i32) -> i3
     }
     let e: i32 = o[(O_S_DLOW) as usize] - 7;
     if e < o[(O_S_RTOP) as usize] {
-        o[(O_VNEEDW) as usize] = (o.len() as i32) + 256;
+        o[(O_VNEEDW) as usize] = (2 * (o.len() as i32)) + 256;
         return -CODE_SCRATCH;
     }
     o[(e) as usize] = kind;
@@ -340,10 +340,21 @@ pub fn unsorted(o: &mut [i32]) {
     let v: i32 = o[(O_VCTL) as usize];
     o[(O_VCTL) as usize] = v | VC_UNSORTED;
 }
-pub fn dup_map(b: &[u8], o: &mut [i32], p: i32, npairs: i32) -> i32 {
-    // A marked map's deferred check (D263) at its end, its first key at p:
-    // here when every key is its own comparison form, else recorded for scan-cb
-    // (it writes EC forms to the canonical buffer). 0 or a negated code.
+pub(crate) fn unit_rec(o: &mut [i32], pos: i32, p: i32, u: i32) -> i32 {
+    // D286: note a marked map's units (u; -1 until its deferred check runs) as a
+    // kind-4 record (head pos, first key p) -- the main walk's only (O_S_SRC 0), in
+    // the order its maps end, which is the order the copy's writer completes
+    // them: canon-build turns them into EV_UNITS events without re-sorting. 0, or
+    // -CODE_SCRATCH.
+    if o[(O_S_SRC) as usize] != 0 {
+        return 0;
+    }
+    return defer(o, 4, p, u, pos, 0);
+}
+pub fn dup_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, npairs: i32) -> i32 {
+    // A marked map's deferred check (D263) at its end, its head at pos, its first
+    // key at p: here when every key is its own comparison form, else recorded for
+    // scan-cb (it writes EC forms to the canonical buffer). 0 or a negated code.
     if (o.len() as i32) < O_S_FIRST {
         o[(O_VNEEDW) as usize] = 256;
         return -CODE_SCRATCH;
@@ -354,13 +365,26 @@ pub fn dup_map(b: &[u8], o: &mut [i32], p: i32, npairs: i32) -> i32 {
         return r;
     }
     if r == 0 {
+        let u0: i32 = o[(O_S_UNITS) as usize];
         let d: i32 = dup_finish(b, b, o, n, o[(O_S_CBTOP) as usize]);
         if d == (-CODE_DUPLICATE_KEY) {
             return dup_note(o, 2, -1, p, o[(O_ERR_POS) as usize], CODE_DUPLICATE_KEY);
         }
-        return d;
+        if d < 0 {
+            return d;
+        }
+        return unit_rec(o, pos, p, o[(O_S_UNITS) as usize] - u0);
     }
-    return defer(o, 1, p, n, o[(O_ITEMS) as usize] - o[(O_S_EXTRA) as usize], 0);
+    let w: i32 = unit_rec(o, pos, p, -1);
+    if w < 0 {
+        return w;
+    }
+    let mut ri: i32;
+    ri = -1;
+    if o[(O_S_SRC) as usize] == 0 {
+        ri = o[(O_S_NDEF) as usize] - 1;
+    }
+    return defer(o, 1, p, n, o[(O_ITEMS) as usize] - o[(O_S_EXTRA) as usize], ri);
 }
 pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i32, depth: i32, end: i32) -> i32 {
     // Per pair: the key's major type is PEEKED (key_type) before the key is
@@ -429,7 +453,7 @@ pub(crate) fn scan_map(b: &[u8], o: &mut [i32], pos: i32, p: i32, hi: i32, lo: i
         }
     }
     if mark {
-        let dm: i32 = dup_map(b, o, p, lo);
+        let dm: i32 = dup_map(b, o, pos, p, lo);
         if dm < 0 {
             return dm;
         }
@@ -562,7 +586,7 @@ pub(crate) fn scan_imap(b: &[u8], o: &mut [i32], pos: i32, depth: i32, end: i32)
         k += 1;
     }
     if mark {
-        let dm: i32 = dup_map(b, o, p, -1);
+        let dm: i32 = dup_map(b, o, pos, p, -1);
         if dm < 0 {
             return dm;
         }
@@ -1199,9 +1223,11 @@ pub fn scan(b: &[u8], o: &mut [i32]) -> i32 {
     }
     return -r;
 }
-pub(crate) fn defer_map(b: &[u8], o: &mut [i32], cb: &mut [u8], src: i32, q0: i32, n: i32) -> i32 {
-    // Kind 1: a map's duplicate check, writing its keys' EC forms to cb.
+pub(crate) fn defer_map(b: &[u8], o: &mut [i32], cb: &mut [u8], src: i32, q0: i32, n: i32, ri: i32) -> i32 {
+    // Kind 1: a map's duplicate check, writing its keys' EC forms to cb; its units
+    // into its kind-4 record ri (-1: none).
     let cb0: i32 = o[(O_S_CBTOP) as usize];
+    let u0: i32 = o[(O_S_UNITS) as usize];
     let d: i32;
     if src == 0 {
         let r: i32 = dup_forms(b, o, cb, q0, n);
@@ -1218,6 +1244,9 @@ pub(crate) fn defer_map(b: &[u8], o: &mut [i32], cb: &mut [u8], src: i32, q0: i3
     }
     if d == (-CODE_DUPLICATE_KEY) {
         return dup_note(o, 2, src, q0, o[(O_ERR_POS) as usize], CODE_DUPLICATE_KEY);
+    }
+    if (d == 0) && (ri >= 0) {
+        o[(((o.len() as i32) - (7 * (ri + 1))) + 3) as usize] = o[(O_S_UNITS) as usize] - u0;
     }
     return d;
 }
@@ -1312,7 +1341,7 @@ pub fn run_defer(b: &[u8], o: &mut [i32], cb: &mut [u8], i0: i32, i1: i32) -> i3
         let a4: i32 = o[(e + 5) as usize];
         let mut r: i32 = 0;
         if kind == 1 {
-            r = defer_map(b, o, cb, src, a1, a2);
+            r = defer_map(b, o, cb, src, a1, a2, a4);
         }
         if kind == 2 {
             r = defer_text(b, o, cb, src, a1, a2, a3);

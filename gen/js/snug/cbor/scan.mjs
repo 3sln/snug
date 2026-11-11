@@ -57,7 +57,7 @@ export function defer(o, kind, a1, a2, a3, a4) {
     }
     const e = o[O_S_DLOW] - 7;
     if (e < o[O_S_RTOP]) {
-        o[O_VNEEDW] = o.length + 256;
+        o[O_VNEEDW] = (2 * o.length) + 256;
         return -CODE_SCRATCH;
     }
     o[e] = kind;
@@ -357,10 +357,22 @@ export function unsorted(o) {
     o[O_VCTL] = v | VC_UNSORTED;
 }
 
-export function dupMap(b, o, p, npairs) {
-    // A marked map's deferred check (D263) at its end, its first key at p:
-    // here when every key is its own comparison form, else recorded for scan-cb
-    // (it writes EC forms to the canonical buffer). 0 or a negated code.
+export function unitRec(o, pos, p, u) {
+    // D286: note a marked map's units (u; -1 until its deferred check runs) as a
+    // kind-4 record (head pos, first key p) -- the main walk's only (O_S_SRC 0), in
+    // the order its maps end, which is the order the copy's writer completes
+    // them: canon-build turns them into EV_UNITS events without re-sorting. 0, or
+    // -CODE_SCRATCH.
+    if (o[O_S_SRC] !== 0) {
+        return 0;
+    }
+    return defer(o, 4, p, u, pos, 0);
+}
+
+export function dupMap(b, o, pos, p, npairs) {
+    // A marked map's deferred check (D263) at its end, its head at pos, its first
+    // key at p: here when every key is its own comparison form, else recorded for
+    // scan-cb (it writes EC forms to the canonical buffer). 0 or a negated code.
     if (o.length < O_S_FIRST) {
         o[O_VNEEDW] = 256;
         return -CODE_SCRATCH;
@@ -371,13 +383,26 @@ export function dupMap(b, o, p, npairs) {
         return r;
     }
     if (r === 0) {
+        const u0 = o[O_S_UNITS];
         const d = dupFinish(b, b, o, n, o[O_S_CBTOP]);
         if (d === (-CODE_DUPLICATE_KEY)) {
             return dupNote(o, 2, -1, p, o[O_ERR_POS], CODE_DUPLICATE_KEY);
         }
-        return d;
+        if (d < 0) {
+            return d;
+        }
+        return unitRec(o, pos, p, o[O_S_UNITS] - u0);
     }
-    return defer(o, 1, p, n, o[O_ITEMS] - o[O_S_EXTRA], 0);
+    const w = unitRec(o, pos, p, -1);
+    if (w < 0) {
+        return w;
+    }
+    let ri;
+    ri = -1;
+    if (o[O_S_SRC] === 0) {
+        ri = o[O_S_NDEF] - 1;
+    }
+    return defer(o, 1, p, n, o[O_ITEMS] - o[O_S_EXTRA], ri);
 }
 
 export function scanMap(b, o, pos, p, hi, lo, depth, end) {
@@ -447,7 +472,7 @@ export function scanMap(b, o, pos, p, hi, lo, depth, end) {
         }
     }
     if (mark) {
-        const dm = dupMap(b, o, p, lo);
+        const dm = dupMap(b, o, pos, p, lo);
         if (dm < 0) {
             return dm;
         }
@@ -583,7 +608,7 @@ export function scanImap(b, o, pos, depth, end) {
         k += 1;
     }
     if (mark) {
-        const dm = dupMap(b, o, p, -1);
+        const dm = dupMap(b, o, pos, p, -1);
         if (dm < 0) {
             return dm;
         }
@@ -1252,9 +1277,11 @@ export function scan(b, o) {
     return -r;
 }
 
-export function deferMap(b, o, cb, src, q0, n) {
-    // Kind 1: a map's duplicate check, writing its keys' EC forms to cb.
+export function deferMap(b, o, cb, src, q0, n, ri) {
+    // Kind 1: a map's duplicate check, writing its keys' EC forms to cb; its units
+    // into its kind-4 record ri (-1: none).
     const cb0 = o[O_S_CBTOP];
+    const u0 = o[O_S_UNITS];
     let d;
     if (src === 0) {
         const r = dupForms(b, o, cb, q0, n);
@@ -1271,6 +1298,9 @@ export function deferMap(b, o, cb, src, q0, n) {
     }
     if (d === (-CODE_DUPLICATE_KEY)) {
         return dupNote(o, 2, src, q0, o[O_ERR_POS], CODE_DUPLICATE_KEY);
+    }
+    if ((d === 0) && (ri >= 0)) {
+        o[(o.length - (7 * (ri + 1))) + 3] = o[O_S_UNITS] - u0;
     }
     return d;
 }
@@ -1368,7 +1398,7 @@ export function runDefer(b, o, cb, i0, i1) {
         const a4 = o[e + 5];
         let r = 0;
         if (kind === 1) {
-            r = deferMap(b, o, cb, src, a1, a2);
+            r = deferMap(b, o, cb, src, a1, a2, a4);
         }
         if (kind === 2) {
             r = deferText(b, o, cb, src, a1, a2, a3);

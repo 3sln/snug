@@ -319,3 +319,45 @@ engineer).
 
 Size: `runtime` 169,519 / 60,583 → 170,048 / 60,789 (min / gzip); the codec
 entry is unchanged. Gates are listed in the DEVLOG note under D286.
+
+### D — the copy's units from the scanner's records (2026-11-11, on `51eb54c`)
+
+The scanner notes each marked map's units (a kind-4 record in its deferral
+list, in the order maps end; a deferred EC-form map's units filled in when its
+check runs). For an accepted item under a Program without `.cbor` whose scanner
+charged units, the prefix writer emits each completed map's EV_UNITS event
+from the next record, or the identity copy emits them all; the units pass and
+its second sort per marked map are skipped. An item with a tag 24 (its payload
+maps are the scanner's too) falls back to the units pass. On 240,000 random
+items the events and copy are equal to those without D
+(`.cache/d286d/bench/d286/units-diff.mjs`, six seeds). Buffer driver, five
+rotated rounds, median µs, load ~28 (baseline: `920a3e1` + B+C + the tag-4
+fix):
+
+| | before D | D | |
+| --- | ---: | ---: | ---: |
+| 2000 maps `rev` | 31,209 | 26,479 | 1.18× |
+| 2000 maps `all` | 35,974 | 31,068 | 1.16× |
+| map-heavy `rev` | 38,649 | 33,117 | 1.17× |
+| map-heavy `all` | 45,210 | 40,891 | 1.11× |
+| integers, strings, `ind`, `istr`, deterministic | — | 0.97–1.04 | — |
+
+Size and the cap decision: DEVLOG D322 (provisional; `snug` +222 / +92 B, VM
+entries +1,349 / +466). Gates (clean worktree on the D tree): valid-test
+(cbor2, D321 144/144, regressions 139/139), vmsession-test (1,059,067 session
+runs == buffer; JS == Rust 692,470; 523,510 untold-length streams; hosts
+10,140), sequence-test (735,997; JS == Rust 182,190; release latency 0/67,257),
+vm-test (JS == Rust 80,509; JS == wasm 78,215), scan-test, rscan-test, drift,
+rust-api-test, wasm-sdk-test 14/14, npm 1,450/1,450 ok; size ok with D322's
+caps.
+
+Overall, where the D286 open item stands. On fresh sessions over many small
+reordered maps, sessions went from 23× to about the buffer driver's cost, less
+the S round (A2/A3). The canonical path on both drivers is now 1.3–2× cheaper
+than at the analysis on non-deterministic input. Not done:
+- A2: `vs`, `cb` and S sized in one round.
+- A3: a per-Program S size hint.
+- E: a tolerant attempt, to be judged against PEG's map machine.
+
+The PEG merge's own cost on deterministic maps (`[* {* tstr => any}]` 4.6 → 18.8
+ms) went to the PEG engineer.
