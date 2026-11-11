@@ -1098,7 +1098,7 @@ export function tSort(s, bo, kb, n, at) {
         k -= 1;
     }
     // each record's pick position into its flags word (above bit 0), for the
-    // non-literal members' cursors (D322); uncharged, linear after the sort
+    // non-literal members' cursors (D323); uncharged, linear after the sort
     for (let j = 0; j < n; j++) {
         const x = recAt(s, bo, s[(base + pm) + j]) + 1;
         const f = s[x];
@@ -1186,7 +1186,7 @@ export function mRewind(p, s, bo, mt, tier, mark, at) {
         }
         mSetConsumed(p, s, bo, mt, tier, r, 0);
     }
-    // T (D322): a record given back may lie below a non-literal member's
+    // T (D323): a record given back may lie below a non-literal member's
     // cursor; every such cursor moves back to the lowest one, ceil(members/16)
     if (low >= 0) {
         const nm = p[mt + 1];
@@ -1329,7 +1329,7 @@ export function mMemberRun(p, s, bo, mt, tier, nd, rfc, at) {
     } else if (tier === TIER_T) {
         // a non-literal member: records in pick order until count = max, 1
         // step each, consumed or not
-        // D322: from the member's cursor (mword +2): every record before it is
+        // D323: from the member's cursor (mword +2): every record before it is
         // consumed or can never be taken or cut by this member (its key or, for a
         // member without a cut, its value does not match), so the scan reads what
         // a scan from 0 would and charges only what it reads

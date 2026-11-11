@@ -5325,6 +5325,92 @@ every item), dropped for the writer's own note; a VM-side tolerant attempt
 reordered keys, and the copy needs those exact units for D277's charges.
 - [x] **Signed off** (owner, 2026-11-11, via coordinator: "yes").
 
+### D323 — T maps: non-literal members scan from a cursor (linear end runs); the map streak takes `any`; `map-pair-fast` not restored (P8.5 follow-up)
+**Decision** (P8.5 VM engineer, provisional):
+1. **T cursors.** Each non-literal member of a T block keeps a cursor (its
+   member word +2, 0 at the start). Its examination of the records in pick
+   order (program-2 §6.4) starts at the cursor and leaves the cursor where it
+   stopped. Every record before a cursor is consumed or can never be taken
+   or cut by that member: its key typeset does not match, or, for a member
+   without a cut, its value typeset does not match. So the member reads
+   what a scan from 0 would read; only the steps change. A rewind that gives
+   records back moves every cursor above the lowest returned pick position
+   back to it, charged ⌈n_members/16⌉ on top of the rewind's 1 + popped. The
+   T sort stores each record's pick position above the consumed bit of its
+   flags word (no layout change).
+2. **The map streak takes `any`.** D315's pair streak also takes a value
+   leaf `any`, walked by `fast-child` after the key's charges, so `{* tstr =>
+   any}` tables run the streak again (format 1's streak did). The streak ==
+   item-by-item gate (limits word 8 bit 3) and a 5,600-case schedule-2
+   differential with `any` values show unchanged charges. The streak's key
+   check and key-order charge are inlined (same charges).
+3. **Block init** zeroes only the header and member words (the frame stack,
+   slots and trail are written before they are read; the loop bound is
+   hoisted). The charge stays ⌈MAPWORDS/16⌉.
+4. **Format 1's per-pair `map-pair-fast` is not restored.** In
+   `reference-map-choice` each element opens six map blocks (a choice of six
+   map types), where a single-block pair fast path cannot apply. The
+   map-heavy record's remaining generic pairs are a nested map and a
+   two-leaf `bool` typeset, which are not simple pairs either.
+
+**Before/after, T maps** (units; `{* (tstr => uint // tstr => tstr)}`, keys
+in order / reversed under the `valid` preset):
+
+| pairs | before (main 920a3e1) | after |
+| ---: | ---: | ---: |
+| 1,000 | 1,034,516 / 1,068,445 | 34,016 / 67,945 |
+| 3,000 | 9,103,516 / 9,224,589 | 102,016 / 223,089 |
+| 10,000 | 100,345,016 / 100,818,379 | 340,016 / 813,379 |
+| 30,000 | not run | 1,020,016 / 2,631,389 |
+
+CPU at 10,000 pairs fell from 6.8–8.2 s to 30–200 ms (single runs at load
+30–75, so indicative only). The mixed shape `{ a: uint, * (…) }` and the
+struct-like shape `{ ? k00000: uint, * ("t" => uint // tstr => any) }` move
+the same way: at 3,000 pairs, 7.6 M → 101k and 4.6 M → 81k. **Default-budget
+limits** (2.25 M units; also in architecture §7):
+
+| shape | keys in order | unsorted (sorted by T) |
+| --- | ---: | ---: |
+| table | ~66,000 pairs (the default 65,536 entries per container comes first) | ~25,900 |
+| mixed | ~66,800 | ~25,700 |
+| struct-like | ~83,000 | ~27,000 |
+
+So the reversed 30,000-pair table (2.63 M) needs a larger `budget`. That is
+within the n log n contract.
+
+**D286's workloads** (buffer VM on deterministic input; ms per call,
+in-process interleaved, best of 7; the after-numbers are re-measured on the
+final tree in the P8.5 follow-up section below):
+
+| workload | cfbdda3 | 920a3e1 | after | units cfbdda3 → after |
+| --- | ---: | ---: | ---: | ---: |
+| 2000 maps × 8 keys `[* {* tstr => any}]` | 4.72 | 19.59 | 5.19 | 94,008 → 96,010 |
+| map-heavy typed (2000 records) | 10.77 | 13.26 | 11.60 | 194,020 → 214,023 |
+| reference-map-choice (2000) | 13.12 | 16.83 | 16.13 | 254,007 → 268,011 |
+
+**Charge change recorded (from D311, not from this decision)**: each map
+block opened is charged ⌈MAPWORDS/16⌉ with format 2.0's larger layout, so
+these workloads use +2 units per map, +10 per typed record and +7 per
+reference-choice element. D316's calibration covers those rows (map-struct
+1.53×, map-table 1.97×, reference-map-choice 1.49× the median in JS), so no
+price changes. **Size**: `runtime` 169,519 → 170,136 bytes minified (+617: the
+cursor code and the streak's `any` arm), within the D319 caps; no cap
+raised. **Gates**: vm-test gains section 3e (36 cases, 1k–30k pairs; table,
+mixed, struct-like; rfc and branch; in order and reversed). Each must be
+accepted, a 3,000-pair one within the default budget, with units ≤ 8 n log₂ n;
+the oracle confirms the 1,000-pair verdicts in both modes. vmsession-test
+runs them under every split policy. The bench rows `maps8-any`,
+`map-heavy-typed` and `map-T-large` in bench/calibrate.mjs now track these
+workloads.
+**Why**: a valid 3,000-pair T map exhausted the default budget (9.1 M units
+against 2.25 M), and the D286 engineer measured `[* {* tstr => any}]` 3.9×
+slower after the PEG merge.
+**Alternatives**: a per-key hash index of the records (arena words per
+record, and no help to non-literal members, which match by typeset);
+repricing T's examination steps (would hide the CPU, not remove it);
+restoring `map-pair-fast` (see 4).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

@@ -316,11 +316,11 @@ for (const { file, su, k, text, opt } of corpusOracle) {
   }
 }
 
-// ---------------------------------------------------------------- 3e. large T maps (D322)
+// ---------------------------------------------------------------- 3e. large T maps (D323)
 // Valid maps of 1k-30k pairs whose PEG program makes them T (a choice of non-literal
 // members under a REP), table / mixed / struct shapes, both cut modes, keys in order and
 // reversed (the valid preset's T sort): each must be accepted, a 3,000-pair one within
-// the default budget, and the units used must stay below 8 n log2 n (D322: the
+// the default budget, and the units used must stay below 8 n log2 n (D323: the
 // non-literal members' cursors; before them a 3,000-pair table cost 9.1 M units).
 // The oracle confirms the 1,000-pair verdicts in both modes.
 const large = { cases: 0, oracle: 0 };

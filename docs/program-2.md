@@ -449,7 +449,7 @@ looks at the unconsumed candidates in pick order (§6.5):
   pair costs 1 more.
 * **Non-literal member (T):** examine records in pick order until count =
   max. It costs **1 step per record examined, consumed or not** (X10). As
-  built (D322) each non-literal member keeps a cursor (its member word +2,
+  built (D323) each non-literal member keeps a cursor (its member word +2,
   0 at the start): the examination starts there, and the cursor moves to
   where it stopped. Every record before a cursor is consumed or can never be
   taken or cut by that member (its key typeset, or — for a member without a
@@ -463,7 +463,7 @@ looks at the unconsumed candidates in pick order (§6.5):
   and `ucut` is a cut violation. Then examine the named slots, 1 step each.
 * **Consume:** push the pair on the trail (1 step). **Rewind:** pop to
   `mark`, 1 step plus 1 per entry popped; in a T map that gave a record
-  back, ⌈n_members/16⌉ more for the cursors (D322).
+  back, ⌈n_members/16⌉ more for the cursors (D323).
 
 Cut outcomes (arch §20.2):
 

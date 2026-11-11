@@ -793,7 +793,7 @@
             (if (< r2 0) (return r2)))
           (set k (- k 1))))
       (comment "each record's pick position into its flags word (above bit 0), for the"
-               "non-literal members' cursors (D322); uncharged, linear after the sort")
+               "non-literal members' cursors (D323); uncharged, linear after the sort")
       (for [^I32 j 0 n]
         (let [x (+ (rec-at s bo (ia s (+ (+ base pm) j))) 1)
               f (ia s x)]
@@ -857,7 +857,7 @@
             (do (let [pr (t-pos s bo r)]
                   (if (or (< low 0) (< pr low)) (set low pr)))))
           (m-set-consumed p s bo mt tier r 0)))
-      (comment "T (D322): a record given back may lie below a non-literal member's"
+      (comment "T (D323): a record given back may lie below a non-literal member's"
                "cursor; every such cursor moves back to the lowest one, ceil(members/16)")
       (if (>= low 0)
         (do (let [nm (ia p (+ mt 1))]
@@ -957,7 +957,7 @@
       (if (== tier TIER_T)
         (do (comment "a non-literal member: records in pick order until count = max, 1"
                      "step each, consumed or not")
-            (comment "D322: from the member's cursor (mword +2): every record before it is"
+            (comment "D323: from the member's cursor (mword +2): every record before it is"
                      "consumed or can never be taken or cut by this member (its key or, for a"
                      "member without a cut, its value does not match), so the scan reads what"
                      "a scan from 0 would and charges only what it reads")
