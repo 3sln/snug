@@ -2266,12 +2266,12 @@ pub(crate) fn leaf_block(p: &[i32], l: i32) -> i32 {
         let mo: i32 = rec(p, 7, pw(p, o + 2));
         let nm: i32 = pw(p, mo + 1);
         let nn: i32 = pw(p, mo + 2);
-        let mut mw: i32 = 20 + (6 * nm);
+        let mut mw: i32 = 22 + (6 * nm);
         if calls == 0 {
             mw += 8 * depth;
         }
         if tier == TIER_S {
-            mw += nn * pw(p, mo + 4);
+            mw += nn * (pw(p, mo + 4) + 1);
         } else {
             mw += nn;
         }

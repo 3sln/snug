@@ -28,7 +28,7 @@ import { runSession, sessionSteps, runUnknown } from './vmsession-run.mjs';
 import { hex } from './scan-cases.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
 import { validateHandleSync, bufferHandle } from '../../host/js/src/sources.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 
 const [rustBin, mutArg, seedArg, schemaArg, stressArg] = process.argv.slice(2);
 const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 400), STRESS = Number(stressArg ?? 60);
@@ -220,7 +220,7 @@ const render = r => r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${
 cases.forEach((c, ci) => {
   if (!(c.corpus || c.stress || c.ext) || c.lim.slice(2, 8).some(x => x !== -1) || (c.lim[8] ?? 0) !== 0 || (c.lim[9] ?? 0) !== 0) return;
   if (!hostProgs.has(c.prog)) {
-    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, controls: controlEntries(testControls) }); } catch { hp = null; }
+    let hp = null; try { hp = new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, verifyWords: vmVerifyWords, controls: controlEntries(testControls) }); } catch { hp = null; }
     hostProgs.set(c.prog, hp);
   }
   const hp = hostProgs.get(c.prog);

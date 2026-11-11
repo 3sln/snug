@@ -16,7 +16,7 @@ import { build } from '../../host/js/src/build.mjs';
 import { decode } from '../../host/js/src/index.mjs';
 import { compile } from '../../host/js/src/compile.mjs';
 import { Program } from '../../host/js/src/schema.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 import { vmScratchWords, vmScratchInit, vmValidate } from '../../gen/js/snug/vm/api.mjs';
 
 await ensureGcFlags();
@@ -40,7 +40,7 @@ for (const wl of workloads()) {
   const o = wl.opts;
   const c = cases.find(x => x.id === `workload:${wl.id}`);
   const k = compile(c.text, { limits: { budget: 0x7fffffff, items: 1 << 24, entries: 1 << 24 } });
-  const prog = new Program(k.program, k.pool, { verify: vmVerify });
+  const prog = new Program(k.program, k.pool, { verify: vmVerify, verifyWords: vmVerifyWords });
   const rule = k.rules.indexOf(c.rule);
   const S = new Int32Array(vmScratchWords(prog.P, rule, prog.P[16]) + 4096); vmScratchInit(S, prog.P[16]);
   const L = limitWords(o);

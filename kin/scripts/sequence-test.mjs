@@ -25,7 +25,7 @@ import { xorshift } from './vmsession-run.mjs';
 import { testControls } from './ext-cases.mjs';
 import { controlEntries } from '../../host/js/src/ext.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 import { readSequence, sequenceReader } from '../../host/js/src/sequence.mjs';
 import { view as openView } from '../../host/js/src/view.mjs';
 import { ANY_P, ANY_B } from '../../host/js/src/any-program.mjs';
@@ -215,7 +215,7 @@ const hostPrograms = new Map();
 function hostProgram(pi) {
   if (!hostPrograms.has(pi)) {
     let hp = null;
-    try { hp = new HostProgram(programs[pi].P, programs[pi].B, { verify: vmVerify, controls: controlEntries(testControls) }); } catch { hp = null; }
+    try { hp = new HostProgram(programs[pi].P, programs[pi].B, { verify: vmVerify, verifyWords: vmVerifyWords, controls: controlEntries(testControls) }); } catch { hp = null; }
     hostPrograms.set(pi, hp);
   }
   return hostPrograms.get(pi);

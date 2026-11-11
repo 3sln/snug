@@ -30,7 +30,8 @@ pub const MB_ROFF: i32 = 16;
 pub const MB_TRAIL: i32 = 17;
 pub const MB_PERM: i32 = 18;
 pub const MB_NJ: i32 = 19;
-pub const MB_HDR: i32 = 20;
+pub const MB_TLEN: i32 = 20;
+pub const MB_HDR: i32 = 22;
 pub const MW: i32 = 6;
 pub const BIT_UNORD: i32 = 1;
 pub const BIT_ECS: i32 = 2;
@@ -89,8 +90,8 @@ pub fn m_tier(p: &[i32], s: &[i32], po: i32) -> i32 {
     return p[(po + 3) as usize];
 }
 pub fn map_words(p: &[i32], mt: i32) -> i32 {
-    // MAPWORDS(m) = 20 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named
-    // slot_words : n_named).
+    // MAPWORDS(m) = 22 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named
+    // (slot_words + 1) : n_named).
     let po: i32 = mpeg(p, mt);
     let nm: i32 = p[(mt + 1) as usize];
     let nn: i32 = p[(mt + 2) as usize];
@@ -99,7 +100,7 @@ pub fn map_words(p: &[i32], mt: i32) -> i32 {
         n += MFW * p[(po + 6) as usize];
     }
     if p[(po + 3) as usize] == TIER_S {
-        n += nn * p[(mt + 4) as usize];
+        n += nn * (p[(mt + 4) as usize] + 1);
     } else {
         n += nn;
     }
@@ -1015,8 +1016,18 @@ pub(crate) fn t_sort(s: &mut [i32], bo: i32, kb: &[u8], n: i32, at: i32) -> i32 
     return 0;
 }
 pub(crate) fn tlen(s: &[i32], bo: i32) -> i32 {
-    // The trail's length.
+    // The trail's length: S keeps it in the block (MB_TRAIL -1), T on the arena.
+    if s[(bo + MB_TRAIL) as usize] < 0 {
+        return s[(bo + MB_TLEN) as usize];
+    }
     return arena_up_top(s) - s[(bo + MB_TRAIL) as usize];
+}
+pub(crate) fn trail_at(p: &[i32], s: &[i32], bo: i32, mt: i32) -> i32 {
+    // The trail's first word (absolute).
+    if s[(bo + MB_TRAIL) as usize] < 0 {
+        return mslots(p, bo, mt) + (p[(mt + 2) as usize] * p[(mt + 4) as usize]);
+    }
+    return arena_body(s) + s[(bo + MB_TRAIL) as usize];
 }
 pub(crate) fn m_consumed(p: &[i32], s: &[i32], bo: i32, mt: i32, tier: i32, r: i32) -> bool {
     if tier == TIER_T {
@@ -1035,16 +1046,24 @@ pub(crate) fn m_set_consumed(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i
     }
 }
 pub(crate) fn m_consume(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32, r: i32, at: i32) -> i32 {
-    // Consume record / slot r: 1 step, then its trail entry. 0 or a code.
+    // Consume record / slot r: 1 step, then its trail entry (S: in the block;
+    // T: pushed on the arena). 0 or a code.
     if !charge(s, 1, at) {
         return -R_BUDGET;
     }
-    let t: i32 = arena_up(s, 1, at);
-    if t < 0 {
-        return t;
+    if s[(bo + MB_TRAIL) as usize] < 0 {
+        let len: i32 = s[(bo + MB_TLEN) as usize];
+        let x0: i32 = trail_at(p, s, bo, mt) + len;
+        s[(x0) as usize] = r;
+        s[(bo + MB_TLEN) as usize] = len + 1;
+    } else {
+        let t: i32 = arena_up(s, 1, at);
+        if t < 0 {
+            return t;
+        }
+        let x: i32 = arena_body(s) + t;
+        s[(x) as usize] = r;
     }
-    let x: i32 = arena_body(s) + t;
-    s[(x) as usize] = r;
     m_set_consumed(p, s, bo, mt, tier, r, 1);
     return 0;
 }
@@ -1055,12 +1074,16 @@ pub(crate) fn m_rewind(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32, ma
     if !charge(s, 1 + popped, at) {
         return -R_BUDGET;
     }
-    let tb: i32 = arena_body(s) + s[(bo + MB_TRAIL) as usize];
+    let tb: i32 = trail_at(p, s, bo, mt);
     for i in 0..popped {
         let r: i32 = s[(tb + ((len - 1) - i)) as usize];
         m_set_consumed(p, s, bo, mt, tier, r, 0);
     }
-    arena_set_up(s, s[(bo + MB_TRAIL) as usize] + mark);
+    if s[(bo + MB_TRAIL) as usize] < 0 {
+        s[(bo + MB_TLEN) as usize] = mark;
+    } else {
+        arena_set_up(s, s[(bo + MB_TRAIL) as usize] + mark);
+    }
     return 0;
 }
 pub(crate) fn mev(s: &mut [i32], bo: i32, kind: i32, m: i32, pair: i32) {
@@ -1559,7 +1582,12 @@ pub fn map_end_block(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kb: &[u8], at: 
             return rs;
         }
     }
-    s[(bo + MB_TRAIL) as usize] = arena_up_top(s);
+    if tier == TIER_T {
+        s[(bo + MB_TRAIL) as usize] = arena_up_top(s);
+    } else {
+        s[(bo + MB_TRAIL) as usize] = -1;
+        s[(bo + MB_TLEN) as usize] = 0;
+    }
     s[(bo + MB_COMM) as usize] = 0;
     let st: i32 = m_run(p, s, bo, mt, tier, at);
     if st < 0 {

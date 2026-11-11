@@ -2412,12 +2412,12 @@ export function leafBlock(p, l) {
         const mo = rec(p, 7, pw(p, o + 2));
         const nm = pw(p, mo + 1);
         const nn = pw(p, mo + 2);
-        let mw = 20 + (6 * nm);
+        let mw = 22 + (6 * nm);
         if (calls === 0) {
             mw += 8 * depth;
         }
         if (tier === TIER_S) {
-            mw += nn * pw(p, mo + 4);
+            mw += nn * (pw(p, mo + 4) + 1);
         } else {
             mw += nn;
         }

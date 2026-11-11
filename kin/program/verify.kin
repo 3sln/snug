@@ -1365,9 +1365,9 @@
       (do (let [mo (rec p 7 (pw p (+ o 2)))
                 nm (pw p (+ mo 1))
                 nn (pw p (+ mo 2))
-                ^:mut mw (+ 20 (* 6 nm))]
+                ^:mut mw (+ 22 (* 6 nm))]
             (if (== calls 0) (set mw (+ mw (* 8 depth))))
-            (if (== tier TIER_S) (set mw (+ mw (* nn (pw p (+ mo 4))))) (set mw (+ mw nn)))
+            (if (== tier TIER_S) (set mw (+ mw (* nn (+ (pw p (+ mo 4)) 1)))) (set mw (+ mw nn)))
             (return mw))))
     (let [ao (rec p 9 (pw p (+ o 2)))
           w (pw p (+ ao 1))

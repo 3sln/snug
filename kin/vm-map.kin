@@ -28,10 +28,12 @@
 ;;     +14 the container's record base (T)  +15 the stride  +16 this block's
 ;;     offset in it  +17 the trail's base  +18 the pick-order permutation (-1
 ;;     wire order)  +19 the current pair's named index (-1 none)
-;;     +20 per member (6 words): count, cutpair (wire index, -1), ucount (F:
+;;     +20 S: the trail's length (S keeps its trail in the block)  +21 spare
+;;     +22 per member (6 words): count, cutpair (wire index, -1), ucount (F:
 ;;     the cut pair's key id), uflags (bit 0 ukey; bits 8.. ucut + 1), min, max
-;;     then stack[8 depth] (non-recursive), then S slots[n_named slot_words] or
-;;     T index[n_named] (F keeps n_named words too, for the forced-tier mode)
+;;     then stack[8 depth] (non-recursive), then S slots[n_named slot_words] and
+;;     its trail[n_named], or T index[n_named] (F keeps n_named words too, for
+;;     the forced-tier mode); T's trail and permutation are in the group arena
 ;; A machine frame is 8 words: node, mark (trail length), counter, aux,
 ;; commits0, and the best failure event of its failed sub-attempts.
 (ns snug.vm.map
@@ -73,7 +75,8 @@
 (defconst ^:pub ^I32 MB_TRAIL 17)
 (defconst ^:pub ^I32 MB_PERM 18)
 (defconst ^:pub ^I32 MB_NJ 19)
-(defconst ^:pub ^I32 MB_HDR 20)
+(defconst ^:pub ^I32 MB_TLEN 20)
+(defconst ^:pub ^I32 MB_HDR 22)
 (defconst ^:pub ^I32 MW 6)
 (defconst ^:pub ^I32 BIT_UNORD 1)
 (defconst ^:pub ^I32 BIT_ECS 2)
@@ -127,15 +130,15 @@
   (return (ia p (+ po 3))))
 
 (defn ^:pub ^I32 map-words [^IntsR p ^I32 mt]
-  (comment "MAPWORDS(m) = 20 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named"
-           "slot_words : n_named).")
+  (comment "MAPWORDS(m) = 22 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named"
+           "(slot_words + 1) : n_named).")
   (let [po (mpeg p mt)
         nm (ia p (+ mt 1))
         nn (ia p (+ mt 2))
         ^:mut n (+ MB_HDR (* MW nm))]
     (if (not (peg-rec p po)) (set n (+ n (* MFW (ia p (+ po 6))))))
     (if (== (ia p (+ po 3)) TIER_S)
-      (set n (+ n (* nn (ia p (+ mt 4)))))
+      (set n (+ n (* nn (+ (ia p (+ mt 4)) 1))))
       (set n (+ n nn)))
     (return n)))
 
@@ -787,8 +790,15 @@
 ;; ------------------------------------------------------------ the machine (S, T)
 
 (defn ^I32 tlen [^IntsR s ^I32 bo]
-  (comment "The trail's length.")
+  (comment "The trail's length: S keeps it in the block (MB_TRAIL -1), T on the arena.")
+  (if (< (ia s (+ bo MB_TRAIL)) 0) (return (ia s (+ bo MB_TLEN))))
   (return (- (arena-up-top s) (ia s (+ bo MB_TRAIL)))))
+
+(defn ^I32 trail-at [^IntsR p ^IntsR s ^I32 bo ^I32 mt]
+  (comment "The trail's first word (absolute).")
+  (if (< (ia s (+ bo MB_TRAIL)) 0)
+    (return (+ (mslots p bo mt) (* (ia p (+ mt 2)) (ia p (+ mt 4))))))
+  (return (+ (arena-body s) (ia s (+ bo MB_TRAIL)))))
 
 (defn ^Bool m-consumed [^IntsR p ^IntsR s ^I32 bo ^I32 mt ^I32 tier ^I32 r]
   (if (== tier TIER_T) (return (!= (bit-and (ia s (+ (rec-at s bo r) 1)) 1) 0)))
@@ -803,12 +813,18 @@
           (iset s y v)))))
 
 (defn ^I32 m-consume [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier ^I32 r ^I32 at]
-  (comment "Consume record / slot r: 1 step, then its trail entry. 0 or a code.")
+  (comment "Consume record / slot r: 1 step, then its trail entry (S: in the block;"
+           "T: pushed on the arena). 0 or a code.")
   (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-  (let [t (arena-up s 1 at)]
-    (if (< t 0) (return t))
-    (let [x (+ (arena-body s) t)]
-      (iset s x r)))
+  (if (< (ia s (+ bo MB_TRAIL)) 0)
+    (do (let [len (ia s (+ bo MB_TLEN))
+              x0 (+ (trail-at p s bo mt) len)]
+          (iset s x0 r)
+          (iset s (+ bo MB_TLEN) (+ len 1))))
+    (do (let [t (arena-up s 1 at)]
+          (if (< t 0) (return t))
+          (let [x (+ (arena-body s) t)]
+            (iset s x r)))))
   (m-set-consumed p s bo mt tier r 1)
   (return 0))
 
@@ -817,11 +833,13 @@
   (let [len (tlen s bo)
         popped (- len mark)]
     (if (not (charge s (+ 1 popped) at)) (return (neg R_BUDGET)))
-    (let [tb (+ (arena-body s) (ia s (+ bo MB_TRAIL)))]
+    (let [tb (trail-at p s bo mt)]
       (for [^I32 i 0 popped]
         (let [r (ia s (+ tb (- (- len 1) i)))]
           (m-set-consumed p s bo mt tier r 0))))
-    (arena-set-up s (+ (ia s (+ bo MB_TRAIL)) mark))
+    (if (< (ia s (+ bo MB_TRAIL)) 0)
+      (iset s (+ bo MB_TLEN) mark)
+      (arena-set-up s (+ (ia s (+ bo MB_TRAIL)) mark)))
     (return 0)))
 
 (defn mev [^Ints s ^I32 bo ^I32 kind ^I32 m ^I32 pair]
@@ -1172,7 +1190,10 @@
       (if (== tier TIER_T)
         (do (let [rs (t-sort s bo kb n at)]
               (if (< rs 0) (return rs)))))
-      (iset s (+ bo MB_TRAIL) (arena-up-top s))
+      (if (== tier TIER_T)
+        (iset s (+ bo MB_TRAIL) (arena-up-top s))
+        (do (iset s (+ bo MB_TRAIL) (neg 1))
+            (iset s (+ bo MB_TLEN) 0)))
       (iset s (+ bo MB_COMM) 0)
       (let [st (m-run p s bo mt tier at)]
         (if (< st 0) (return st))

@@ -50,7 +50,9 @@ export const MB_PERM = 18;
 
 export const MB_NJ = 19;
 
-export const MB_HDR = 20;
+export const MB_TLEN = 20;
+
+export const MB_HDR = 22;
 
 export const MW = 6;
 
@@ -133,8 +135,8 @@ export function mTier(p, s, po) {
 }
 
 export function mapWords(p, mt) {
-    // MAPWORDS(m) = 20 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named
-    // slot_words : n_named).
+    // MAPWORDS(m) = 22 + 6 n_members + (recursive ? 0 : 8 depth) + (S ? n_named
+    // (slot_words + 1) : n_named).
     const po = mpeg(p, mt);
     const nm = p[mt + 1];
     const nn = p[mt + 2];
@@ -143,7 +145,7 @@ export function mapWords(p, mt) {
         n += MFW * p[po + 6];
     }
     if (p[po + 3] === TIER_S) {
-        n += nn * p[mt + 4];
+        n += nn * (p[mt + 4] + 1);
     } else {
         n += nn;
     }
@@ -1089,8 +1091,19 @@ export function tSort(s, bo, kb, n, at) {
 }
 
 export function tlen(s, bo) {
-    // The trail's length.
+    // The trail's length: S keeps it in the block (MB_TRAIL -1), T on the arena.
+    if (s[bo + MB_TRAIL] < 0) {
+        return s[bo + MB_TLEN];
+    }
     return arenaUpTop(s) - s[bo + MB_TRAIL];
+}
+
+export function trailAt(p, s, bo, mt) {
+    // The trail's first word (absolute).
+    if (s[bo + MB_TRAIL] < 0) {
+        return mslots(p, bo, mt) + (p[mt + 2] * p[mt + 4]);
+    }
+    return arenaBody(s) + s[bo + MB_TRAIL];
 }
 
 export function mConsumed(p, s, bo, mt, tier, r) {
@@ -1112,16 +1125,24 @@ export function mSetConsumed(p, s, bo, mt, tier, r, v) {
 }
 
 export function mConsume(p, s, bo, mt, tier, r, at) {
-    // Consume record / slot r: 1 step, then its trail entry. 0 or a code.
+    // Consume record / slot r: 1 step, then its trail entry (S: in the block;
+    // T: pushed on the arena). 0 or a code.
     if (!charge(s, 1, at)) {
         return -R_BUDGET;
     }
-    const t = arenaUp(s, 1, at);
-    if (t < 0) {
-        return t;
+    if (s[bo + MB_TRAIL] < 0) {
+        const len = s[bo + MB_TLEN];
+        const x0 = trailAt(p, s, bo, mt) + len;
+        s[x0] = r;
+        s[bo + MB_TLEN] = len + 1;
+    } else {
+        const t = arenaUp(s, 1, at);
+        if (t < 0) {
+            return t;
+        }
+        const x = arenaBody(s) + t;
+        s[x] = r;
     }
-    const x = arenaBody(s) + t;
-    s[x] = r;
     mSetConsumed(p, s, bo, mt, tier, r, 1);
     return 0;
 }
@@ -1133,12 +1154,16 @@ export function mRewind(p, s, bo, mt, tier, mark, at) {
     if (!charge(s, 1 + popped, at)) {
         return -R_BUDGET;
     }
-    const tb = arenaBody(s) + s[bo + MB_TRAIL];
+    const tb = trailAt(p, s, bo, mt);
     for (let i = 0; i < popped; i++) {
         const r = s[tb + ((len - 1) - i)];
         mSetConsumed(p, s, bo, mt, tier, r, 0);
     }
-    arenaSetUp(s, s[bo + MB_TRAIL] + mark);
+    if (s[bo + MB_TRAIL] < 0) {
+        s[bo + MB_TLEN] = mark;
+    } else {
+        arenaSetUp(s, s[bo + MB_TRAIL] + mark);
+    }
     return 0;
 }
 
@@ -1648,7 +1673,12 @@ export function mapEndBlock(p, s, bo, mt, kb, at) {
             return rs;
         }
     }
-    s[bo + MB_TRAIL] = arenaUpTop(s);
+    if (tier === TIER_T) {
+        s[bo + MB_TRAIL] = arenaUpTop(s);
+    } else {
+        s[bo + MB_TRAIL] = -1;
+        s[bo + MB_TLEN] = 0;
+    }
     s[bo + MB_COMM] = 0;
     const st = mRun(p, s, bo, mt, tier, at);
     if (st < 0) {

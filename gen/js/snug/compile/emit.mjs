@@ -1191,7 +1191,7 @@ export function planContainers(h) {
             const nn = namedCount(h, np);
             const nmx = namersMax(h, np);
             const nr = rootCount(h, blob);
-            let mw = 20 + (6 * nm);
+            let mw = 22 + (6 * nm);
             if (np < 0) {
                 return -1;
             }
@@ -1199,7 +1199,7 @@ export function planContainers(h) {
                 mw += 8 * depth;
             }
             if (tier === TIER_S) {
-                mw += nn * ((2 + ceil32(nmx)) + (2 * ceil32(nr)));
+                mw += nn * ((3 + ceil32(nmx)) + (2 * ceil32(nr)));
             } else {
                 mw += nn;
             }

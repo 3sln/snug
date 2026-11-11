@@ -879,11 +879,11 @@
                     nn (named-count h np)
                     nmx (namers-max h np)
                     nr (root-count h blob)
-                    ^:mut mw (+ 20 (* 6 nm))]
+                    ^:mut mw (+ 22 (* 6 nm))]
                 (if (< np 0) (return (neg 1)))
                 (if (== nc 0) (set mw (+ mw (* 8 depth))))
                 (if (== tier TIER_S)
-                  (set mw (+ mw (* nn (+ (+ 2 (ceil32 nmx)) (* 2 (ceil32 nr))))))
+                  (set mw (+ mw (* nn (+ (+ 3 (ceil32 nmx)) (* 2 (ceil32 nr))))))
                   (set mw (+ mw nn)))
                 (laux-set h f 1 mw)
                 (laux-set h f 2 nm)

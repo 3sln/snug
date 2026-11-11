@@ -1145,7 +1145,7 @@ pub fn plan_containers(h: &mut [i32]) -> i32 {
             let nn: i32 = named_count(h, np);
             let nmx: i32 = namers_max(h, np);
             let nr: i32 = root_count(h, blob);
-            let mut mw: i32 = 20 + (6 * nm);
+            let mut mw: i32 = 22 + (6 * nm);
             if np < 0 {
                 return -1;
             }
@@ -1153,7 +1153,7 @@ pub fn plan_containers(h: &mut [i32]) -> i32 {
                 mw += 8 * depth;
             }
             if tier == TIER_S {
-                mw += nn * ((2 + ceil32(nmx)) + (2 * ceil32(nr)));
+                mw += nn * ((3 + ceil32(nmx)) + (2 * ceil32(nr)));
             } else {
                 mw += nn;
             }
