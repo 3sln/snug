@@ -28,6 +28,7 @@ import { controlEntries } from '../../host/js/src/ext.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
 import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 import { readSequence, sequenceReader } from '../../host/js/src/sequence.mjs';
+import { sessionLimits, testing as poolTesting } from '../../host/js/src/session-pool.mjs';
 import { view as openView } from '../../host/js/src/view.mjs';
 import { ANY_P, ANY_B } from '../../host/js/src/any-program.mjs';
 import { vmsUnknownTotal } from '../../gen/js/snug/vm/session.mjs';
@@ -399,6 +400,9 @@ async function hostRun(q, policy, skip) {
   hostRuns.push({ q, policy, skip, opts, rule, anyCase, want });
 }
 const tH = performance.now();
+// P9.7: readers take pooled arrays scribbled when released, so a reuse that skipped the zero-fill would
+// show against the oracle; every reader ends or closes, so none stays live
+poolTesting.scribble = true;
 for (let si = 0; si < seqs.length; si++) {
   const q = seqs[si];
   if (q.fixed) { await hostRun(q, { kind: 0 }, false); await hostRun(q, { kind: 3, k: 65536 }, false); continue; }
@@ -407,7 +411,9 @@ for (let si = 0; si < seqs.length; si++) {
   if (si % 9 === 0) await hostRun(q, { kind: 0 }, false);
 }
 const tHost = performance.now() - tH;
-console.log(`  info host runs done in ${(tHost / 1000).toFixed(1)} s`);
+poolTesting.scribble = false;
+if (sessionLimits().live !== 0) hfail(`P9.7: ${sessionLimits().live} sequence readers still live after the host runs`);
+console.log(`  info host runs done in ${(tHost / 1000).toFixed(1)} s; session pool (P9.7): arrays scribbled on release, ${sessionLimits().live} readers live after them`);
 
 // ---------------------------------------------------------------- Rust
 let rustLine = '  SKIP Rust (no binary given)', rustHostLine = '  SKIP Rust host';

@@ -333,6 +333,7 @@ impl Schema {
             schema::SourceError::ShortRead { .. } => Error::Source("short_read"),
             schema::SourceError::Read => Error::Source("read"),
             schema::SourceError::TooLarge => Error::Source("too_large"),
+            schema::SourceError::SessionLimit => Error::SessionLimit,
         })
     }
 }

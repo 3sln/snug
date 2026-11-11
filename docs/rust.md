@@ -221,6 +221,38 @@ chunk; the session's key arena is sized for the input limit. The low-level
 `schema::Session::new_unknown`, `Step::Held` and `Session::end(n)` expose the
 protocol.
 
+## Live sessions and pooling
+
+A session (`validate_blob`, `validate_reader`, `schema::Session`, a `Sequence` or
+`SequenceReader`) takes its arrays from its Program's pool. It gives them back
+at its verdict, or when it is dropped. Dropping is deterministic in Rust, so an
+abandoned session releases its slot as soon as it goes out of scope. Each array
+is zero-filled before reuse, so nothing of one session is visible to another.
+
+While `max_live` sessions are live in the process, creating one more fails with
+`Error::SessionLimit`, whose code is `sessions/limit`. `Session::new` and
+`Session::new_unknown` return it as `Err`: since P9.7 they return
+`Result<Session, Error>`, a breaking change made before the first release
+(noted for P9.11's version policy). `validate_blob` and `validate_reader`
+report it as `schema::SourceError::SessionLimit`.
+
+Idle arrays are kept up to `max_pooled_bytes` in all. One entry above 1 MiB, or
+above a quarter of that, is dropped instead. `release_pool()` drops every idle
+entry now, which suits a long-lived process trimming memory. A dropped
+Program's entries go with it.
+
+The counters and pools are thread-safe. The policy is process-wide:
+
+```rust
+use snug::sessions::{self, SessionLimits};
+let before = sessions::limits();             // max_live 1024, max_pooled_bytes 2 MiB
+sessions::set_limits(SessionLimits { max_live: 256, ..before })?;
+assert_eq!(sessions::counts().live, 0);      // live sessions and pooled bytes, for monitoring
+sessions::release_pool();
+sessions::set_limits(before)?;
+# Ok::<(), snug::Error>(())
+```
+
 ## Extension controls
 
 ```rust

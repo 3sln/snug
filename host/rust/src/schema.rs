@@ -21,6 +21,8 @@ pub struct Program {
     /// D286 A3: the largest VM scratch a session on this Program grew to (its room past
     /// the arena holds a canonical item's events): later sessions start that large.
     session_words: Arc<std::sync::atomic::AtomicUsize>,
+    /// P9.7 (D326): idle session arrays, shared by the Program's clones.
+    pool: Arc<crate::sessions::Pool>,
 }
 
 /// A Program's extension controls bound to predicates, in id order (D141), and
@@ -57,7 +59,7 @@ impl Program {
         if vm_verify(p, b, &mut s) != 0 {
             return Err(Refused { at: s[35], check: s[36] });
         }
-        Ok(Program { p: p.to_vec(), b: b.to_vec(), ext: None, session_words: Arc::default() })
+        Ok(Program { p: p.to_vec(), b: b.to_vec(), ext: None, session_words: Arc::default(), pool: crate::sessions::Pool::new() })
     }
     /// The extension controls this Program uses (format 1.1, D141), by name.
     pub fn controls(&self) -> Vec<String> {
@@ -123,11 +125,20 @@ impl Program {
             if ga as usize > ka.len() { ka.resize(ga as usize, 0); }
         }
     }
-    /// D286 A3: a new session's VM scratch grown to what earlier sessions needed, after
-    /// its init (the arena keeps its own size, as a VMS_GROW leaves it).
-    fn session_hint(&self, s: &mut Vec<i32>) {
-        let h = self.session_words.load(std::sync::atomic::Ordering::Relaxed);
-        if h > s.len() { s.resize(h, 0); }
+    /// P9.7 (D326): a new session's arrays from the pool, zeroed, under the live bound: S
+    /// at least `rule`'s scratch words and (D286 A3) as large as earlier sessions needed
+    /// (a session's arena starts at the lease, D324), the key arena `kab` bytes.
+    pub(crate) fn session_arrays(&self, rule: i32, kab: i32) -> Result<crate::sessions::Arrays, crate::Error> {
+        let cap = self.p[16].max(1);
+        let sw = (vm_scratch_words(&self.p, rule, cap).max(0) as usize)
+            .max(self.session_words.load(std::sync::atomic::Ordering::Relaxed));
+        let mut a = crate::sessions::acquire(&self.pool, sw, vms_words(&self.p).max(0) as usize, kab.max(0) as usize)?;
+        vm_scratch_init(&mut a.s, cap);
+        Ok(a)
+    }
+    /// A session's arrays back to the pool, its live slot freed.
+    pub(crate) fn session_release(&self, a: crate::sessions::Arrays) {
+        crate::sessions::release(&self.pool, a);
     }
     /// A rule's index (its position in RULES), or None.
     pub fn rule(&self, name: &str) -> Option<i32> {
@@ -397,7 +408,8 @@ pub enum Step {
 
 /// A resumable validation (architecture §17, P6.2) of one message of a declared
 /// length over windows of it. It owns its scratch, session array and key arena
-/// (never shared between sessions); the Program is borrowed.
+/// (never shared between sessions; P9.7: taken from the Program's pool, zeroed, and
+/// given back when it finishes or is dropped); the Program is borrowed.
 pub struct Session<'p> {
     prog: &'p Program,
     s: Vec<i32>,
@@ -405,43 +417,49 @@ pub struct Session<'p> {
     ka: Vec<u8>,
     out: Vec<i32>,
     done: Option<Result<(), Failure>>,
+    limit: usize,
+    live: bool,
 }
 
 impl<'p> Session<'p> {
     /// A session on `rule` over a message of exactly `total` bytes; `quantum` > 0
-    /// yields after about that many work units per step.
-    pub fn new(prog: &'p Program, rule: i32, total: i32, opts: &Options, quantum: i32) -> Session<'p> {
+    /// yields after about that many work units per step. Fails with
+    /// [`crate::Error::SessionLimit`] while the process has its maximum of live
+    /// sessions ([`crate::sessions`]).
+    pub fn new(prog: &'p Program, rule: i32, total: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::Error> {
         let lim = opts.words();
-        let cap = prog.p[16].max(1);
-        let mut s = vec![0i32; vm_scratch_words(&prog.p, rule, cap) as usize];
-        vm_scratch_init(&mut s, cap);
-        let mut ss = vec![0i32; vms_words(&prog.p) as usize];
-        let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
-        let c = vms_init(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
+        let a = prog.session_arrays(rule, vms_arena(&prog.p, &lim, total))?;
+        let mut session = Session { prog, s: a.s, ss: a.ss, ka: a.ka, out: vec![0i32; 8 + 2 * 257], done: None, limit: 0, live: true };
+        let c = vms_init(&prog.p, &prog.b, rule, &lim, &mut session.s, &mut session.ss, &mut session.ka, total, quantum);
         assert!(c >= 0, "snug: vms-init answered {} for a verified Program", c);
-        prog.session_hint(&mut s);
-        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
+        session.limit = session.ss[1].max(0) as usize;
+        Ok(session)
     }
     /// D085: a session over a message of UNKNOWN length (drain mode). Step it as a
     /// known-length one; [`Step::Held`] is a verdict waiting for the end; call
     /// [`Session::end`] with the byte count once the source is exhausted (or as soon
     /// as it passes the input limit). Verdicts equal a buffer's of the same bytes.
-    pub fn new_unknown(prog: &'p Program, rule: i32, opts: &Options, quantum: i32) -> Session<'p> {
+    pub fn new_unknown(prog: &'p Program, rule: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::Error> {
         let lim = opts.words();
-        let cap = prog.p[16].max(1);
-        let mut s = vec![0i32; vm_scratch_words(&prog.p, rule, cap) as usize];
-        vm_scratch_init(&mut s, cap);
-        let mut ss = vec![0i32; vms_words(&prog.p) as usize];
         let total = vms_unknown_total(&prog.p, &lim);
-        let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
-        let c = vms_init_unknown(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
+        let a = prog.session_arrays(rule, vms_arena(&prog.p, &lim, total))?;
+        let mut session = Session { prog, s: a.s, ss: a.ss, ka: a.ka, out: vec![0i32; 8 + 2 * 257], done: None, limit: 0, live: true };
+        let c = vms_init_unknown(&prog.p, &prog.b, rule, &lim, &mut session.s, &mut session.ss, &mut session.ka, quantum);
         assert!(c >= 0, "snug: vms-init-unknown answered {} for a verified Program", c);
-        prog.session_hint(&mut s);
-        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
+        session.limit = session.ss[1].max(0) as usize;
+        Ok(session)
     }
     /// The input limit of an unknown-length session: more bytes than this is `too_large`.
     pub fn limit(&self) -> usize {
-        self.ss[1].max(0) as usize
+        self.limit
+    }
+    /// P9.7: the arrays back to the Program's pool (once): at the verdict, or on drop.
+    fn release(&mut self) {
+        if self.live {
+            self.live = false;
+            let a = crate::sessions::Arrays { s: std::mem::take(&mut self.s), ss: std::mem::take(&mut self.ss), ka: std::mem::take(&mut self.ka) };
+            self.prog.session_release(a);
+        }
     }
     /// D085: the message ended after `n` bytes (any `n` above [`Session::limit`]
     /// once it passed it). Answers the verdict, or a [`Step::Yield`] when the walk
@@ -457,6 +475,7 @@ impl<'p> Session<'p> {
         assert!(r >= 0, "snug: vms-eof answered {}", r);
         let d = result(self.prog, &self.out);
         self.done = Some(d.clone());
+        self.release();
         Step::Done(d)
     }
     /// Run over `window`, the message's bytes from `base`.
@@ -477,7 +496,14 @@ impl<'p> Session<'p> {
         assert!(r >= 0, "snug: vms-step answered {}", r);
         let d = result(self.prog, &self.out);
         self.done = Some(d.clone());
+        self.release();
         Step::Done(d)
+    }
+}
+
+impl Drop for Session<'_> {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
@@ -494,6 +520,8 @@ pub enum SourceError {
     ShortRead { offset: usize, wanted: usize, got: usize },
     Read,
     TooLarge,
+    /// P9.7: the process has its maximum of live sessions ([`crate::sessions`]).
+    SessionLimit,
 }
 
 /// An in-memory blob (a borrowed buffer), for tests and as the simplest source.
@@ -516,7 +544,7 @@ pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options,
     if size > 0x7fff_ffff {
         return Err(SourceError::TooLarge);
     }
-    let mut session = Session::new(prog, rule, size as i32, opts, quantum);
+    let mut session = Session::new(prog, rule, size as i32, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
     let (mut base, mut window): (usize, Vec<u8>) = (0, Vec::new());
     let (mut at, mut need) = (0usize, chunk.min(size));
     loop {
@@ -552,7 +580,7 @@ pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options,
 /// `cbor/truncated` or `cbor/too_large`). Transport errors are `SourceError::Read`.
 pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read, opts: &Options, chunk: usize,
                        quantum: i32, fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
-    let mut session = Session::new_unknown(prog, rule, opts, quantum);
+    let mut session = Session::new_unknown(prog, rule, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
     let limit = session.limit();
     let mut src = Stream { reader, tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0, delivered: 0, eof: false };
     let mut step = session.step(&src.buf, 0);

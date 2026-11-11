@@ -4,6 +4,7 @@ import { vmsWords, vmsArena, vmsInit, vmsStepV, vmsNeedOffset, vmsNeedLength, vm
   vmsInitUnknown, vmsUnknownTotal, vmsEof, vmsGrowWords, vmsGrowBytes, vmsGrowScratch, vmsGrowArena } from '../../../gen/js/snug/vm/session.mjs';
 import { rethrow } from './ext.mjs';
 import { limitWords } from './schema-core.mjs';
+import { acquire, release } from './session-pool.mjs';
 
 // ---------------------------------------------------------------- sessions
 const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68, VMS_GROW = -69;
@@ -45,43 +46,48 @@ export class VmSession {
     const { P, B } = program;
     this.program = program; this.length = length;
     const limits = limitWords(opts), cap = Math.max(P[16], 1);
-    // D286 A3: S as large as earlier sessions on this Program needed (a session's arena starts at the lease, D324,
-    // so the room past it holds a canonical item's events)
-    this.s = new Int32Array(Math.max(vmScratchWords(P, rule, cap), program.sw || 0)); vmScratchInit(this.s, cap);
-    this.ss = new Int32Array(vmsWords(P));
+    // the key arena of an unknown-length session is sized for the input limit
+    if (unknown) this.limit = vmsUnknownTotal(P, limits);
+    // P9.7 (D326): the arrays come from the Program's pool (zeroed) under the live-session bound, and go back
+    // when the session ends, closes or is collected. D286 A3: S as large as earlier sessions on this Program
+    // needed (a session's arena starts at the lease, D324, so the room past it holds a canonical item's events)
+    this.lease = acquire(program, Math.max(vmScratchWords(P, rule, cap), program.sw || 0), vmsWords(P),
+      vmsArena(P, limits, unknown ? this.limit : length), this);
+    ({ s: this.s, ss: this.ss, ka: this.ka } = this.lease.e);
+    vmScratchInit(this.s, cap);
     this.out = new Int32Array(8 + 2 * 257);
-    let c;
-    if (unknown) {
-      // the key arena of an unknown-length session is sized for the input limit
-      this.limit = vmsUnknownTotal(P, limits);
-      this.ka = new Uint8Array(vmsArena(P, limits, this.limit));
-      c = vmsInitUnknown(P, B, rule, limits, this.s, this.ss, this.ka, quantum);
-    } else {
-      this.ka = new Uint8Array(vmsArena(P, limits, length));
-      c = vmsInit(P, B, rule, limits, this.s, this.ss, this.ka, length, quantum);
-    }
-    if (c < 0) throw new Error(`snug: vms-init answered ${c}`);
+    const c = unknown ? vmsInitUnknown(P, B, rule, limits, this.s, this.ss, this.ka, quantum)
+      : vmsInit(P, B, rule, limits, this.s, this.ss, this.ka, length, quantum);
+    if (c < 0) { this.close(); throw new Error(`snug: vms-init answered ${c}`); }
     this.busy = false; this.verdict = null;
   }
+  /** Release the session's arrays now (it cannot be stepped afterwards); a finished session has already. */
+  close() {
+    if (!this.verdict) this.closed = true;
+    release(this.lease);
+  }
+  [Symbol.dispose]() { this.close(); }
+  #settle(v) { this.verdict = v; release(this.lease); return v; }
   /** D085, an unknown-length session: the message ended after `n` bytes (or passed the
    *  input limit `limit`: any n above it). Answers {state: 'done', result}, or
    *  {state: 'yield', position, keep} when the walk must go on over the bytes from
    *  `position` to n (step again; it never asks past n). */
   end(n) {
     if (this.verdict) return this.verdict;
+    if (this.closed) throw new TypeError('snug: the session is closed');
     if (this.length !== undefined) throw new TypeError('snug: end() is for a session of unknown length');
     if (!Number.isSafeInteger(n) || n < 0) throw new TypeError('snug: end(n) takes the byte count');
     const r = vmsEof(this.ss, this.out, Math.min(n, 0x7fffffff));
     if (r === VMS_RESUME) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
-    if (r < 0) throw new Error(`snug: vms-eof answered ${r}`);
-    this.verdict = { state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
-    return this.verdict;
+    if (r < 0) { this.close(); throw new Error(`snug: vms-eof answered ${r}`); }
+    return this.#settle({ state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) });
   }
   /** Bytes this session holds beyond the Program (its exclusive arrays). */
   get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length) + this.ka.length; }
   step(window, base) {
     if (this.verdict) return this.verdict;
     if (this.dead) throw this.dead;
+    if (this.closed) throw new TypeError('snug: the session is closed');
     if (this.busy) throw new Error('snug: a session cannot be resumed concurrently');
     if (!(window instanceof Uint8Array)) throw new TypeError('snug: a window is a Uint8Array');
     this.busy = true;
@@ -96,20 +102,19 @@ export class VmSession {
           const sw = vmsGrowScratch(this.ss), aw = vmsGrowArena(this.ss);
           // D286 A3: the Program remembers S for later sessions (this S started at least that large), at most
           // 2^18 words: one huge item does not pre-grow every later session
-          if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.s = g; if (sw < 262144) this.program.sw = sw; }
-          if (aw > this.ka.length) { const g = new Uint8Array(aw); g.set(this.ka); this.ka = g; }
+          if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.lease.e.s = this.s = g; if (sw < 262144) this.program.sw = sw; }
+          if (aw > this.ka.length) { const g = new Uint8Array(aw); g.set(this.ka); this.lease.e.ka = this.ka = g; }
         }
       });
     } finally { this.busy = false; }
     // a predicate that threw voids the session (its walk went on with a false verdict)
-    try { rethrow(x); } catch (e) { this.dead = e; throw e; }
+    try { rethrow(x); } catch (e) { this.dead = e; release(this.lease); throw e; }
     if (r === VMS_NEED) return { state: 'need', offset: vmsNeedOffset(this.ss), length: vmsNeedLength(this.ss), keep: vmsKeep(this.ss) };
     if (r === VMS_YIELD) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
     // D085: a verdict waiting for the end of an unknown-length message (end(n) settles it)
     if (r === VMS_HELD) return { state: 'held', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
-    if (r < 0) throw new Error(`snug: vms-step answered ${r}`);
-    this.verdict = { state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) };
-    return this.verdict;
+    if (r < 0) { this.close(); throw new Error(`snug: vms-step answered ${r}`); }
+    return this.#settle({ state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) });
   }
 }
 

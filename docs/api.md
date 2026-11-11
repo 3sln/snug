@@ -423,6 +423,8 @@ with top defaulting to any and limits only lowering the compiled values.
 | `pushScanner(length, options?, { quantum?, failFast? }?)` | `{ feed(chunk), resume(), finalize() }`; `length` undefined: unknown length (drain mode, `end()`) |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
+| `sessionLimits(set?)` | The isolate's session policy (P9.7, D326): `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `snug/sequence` |
+| `releasePool()` | Drops every idle pooled session array now (P9.7), e.g. in a long-lived process trimming memory. Also exported by `snug/sequence` |
 
 The Rust host has the same drivers, sync and async (P9.6), over the same
 session, with the same verdicts for every chunking: `validateHandle` is
@@ -444,11 +446,40 @@ while let Some(m) = messages.next().await { /* m?.view() */ }           // readS
 `snug/sources`, with no public constructor. It exposes readonly `length`
 (undefined for unknown length), `limit` (the unknown-length input limit),
 `bytesHeld` (exclusive VM array bytes, excluding the shared Program and
-supplied windows), and
-`step(window: Uint8Array, base: number): VmStep`. Scratch and Program storage
-remain private. Each session owns exclusive state across suspensions; share
-Programs, use separate sessions for independent validations, and never resume
-one session concurrently. There is no session pool or live-session cap.
+supplied windows),
+`step(window: Uint8Array, base: number): VmStep`, and `close()` /
+`[Symbol.dispose]()`. Scratch and Program storage remain private. Each session
+owns exclusive state across suspensions; share Programs, use separate sessions
+for independent validations, and never resume one session concurrently.
+
+**Live sessions and pooling (P9.7, D326).** A session counts as *live* from
+its creation until it finishes (a `done` step or `end`), fails (an extension
+predicate that threw, an internal error), or is closed. This covers
+`openSession`, handles, push sources, streams and sequence readers; a sequence
+reader counts once.
+
+Creating one more session while `maxLive` sessions are live throws `SnugFault`
+with code `sessions/limit` before anything is validated. To release a session:
+
+- finish it;
+- call `close()` on it, or on a push validator/scanner or sequence reader;
+- dispose of it (`using s = openSession(...)`).
+
+**A session abandoned mid-message holds its slot until it is
+garbage-collected**, which in JavaScript can be much later. Close sessions you
+stop driving.
+
+A finished session's arrays go to its Program's pool. Every array is
+zero-filled before reuse, so no byte of one session is visible to another, and
+results are those of fresh arrays. Idle arrays are kept up to `maxPooledBytes`
+in all (default 2 MiB, about 25 small sessions' worth); an entry above 1 MiB,
+or above a quarter of `maxPooledBytes`, is dropped instead. `releasePool()`
+drops them all at once, and a collected Program's go with it. The wasm SDK
+(`snug-wasm-sdk/sources`, `/sequence`) has the same `sessionLimits`,
+`releasePool` and `close()`, counted per instance.
+
+`sessionLimits()` reports `live` and `pooledBytes` for monitoring. The limits
+are isolate-wide policy; there is no per-call override.
 
 `VmStep` is one of:
 

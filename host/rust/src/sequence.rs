@@ -22,9 +22,8 @@
 //! message; with [`OnInvalid::Skip`] a schema refusal of a complete message is
 //! an `Err` item too, and reading goes on (D214).
 use crate::schema::{self, Failure};
-use crate::snug::vm::api::{vm_scratch_init, vm_scratch_words};
 use crate::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_message_length, vms_need_length,
-                               vms_need_offset, vms_position, vms_unknown_total, vms_words};
+                               vms_need_offset, vms_position, vms_unknown_total};
 use crate::{DecodeOptions, Error, Limits, Profile, Schema, Top, View};
 use std::cell::OnceCell;
 use std::borrow::Cow;
@@ -255,6 +254,15 @@ struct Chunk<'c> {
     base: u64,
 }
 
+/// P9.7: a reader's arrays go back to its Program's pool, and its live slot is freed,
+/// when it is dropped.
+impl Drop for Sequence<'_> {
+    fn drop(&mut self) {
+        let a = crate::sessions::Arrays { s: std::mem::take(&mut self.s), ss: std::mem::take(&mut self.ss), ka: std::mem::take(&mut self.ka) };
+        self.prog.session_release(a);
+    }
+}
+
 impl Sequence<'static> {
     /// A profile-only sequence reader (the VM against `any`, D210).
     pub fn new(options: &SequenceOptions) -> Result<Self, Error> {
@@ -265,18 +273,17 @@ impl Sequence<'static> {
 impl<'p> Sequence<'p> {
     fn start(prog: &'p schema::Program, rule: i32, lim: [i32; 10], options: &SequenceOptions) -> Result<Self, Error> {
         let p = prog.words();
-        let cap = p[16].max(1);
         let total = vms_unknown_total(p, &lim);
-        let mut s = vec![0i32; vm_scratch_words(p, rule, cap).max(0) as usize];
-        vm_scratch_init(&mut s, cap);
+        // P9.7 (D326): the reader's arrays from the Program's pool under the live bound, back on drop
+        let a = prog.session_arrays(rule, vms_arena(p, &lim, total))?;
         Ok(Sequence {
             prog,
             rule,
             lim,
             total: i64::from(total),
-            s,
-            ss: vec![0i32; vms_words(p).max(0) as usize],
-            ka: vec![0u8; vms_arena(p, &lim, total).max(0) as usize],
+            s: a.s,
+            ss: a.ss,
+            ka: a.ka,
             out: vec![0i32; 8 + 2 * 257],
             skip: options.on_invalid == OnInvalid::Skip,
             fail_fast: options.fail_fast,

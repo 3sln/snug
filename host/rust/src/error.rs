@@ -37,6 +37,9 @@ pub enum Error {
     /// A message of a CBOR sequence was refused (D216): its index, absolute
     /// offsets and verdict (`code()` as for [`Error::Validation`]).
     Sequence(crate::sequence::MessageFailure),
+    /// P9.7: [`crate::sessions::SessionLimits::max_live`] sessions are live; drop (or
+    /// finish) one to release its slot. `code()` is `sessions/limit`.
+    SessionLimit,
     /// A host/generated invariant failed, never a fabricated CBOR verdict.
     Internal,
 }
@@ -68,6 +71,7 @@ impl Error {
                 "budget" => "schema/budget",
                 r => r.strip_prefix("cbor/").unwrap_or(r),
             },
+            Self::SessionLimit => "sessions/limit",
             Self::Internal => "internal",
         }
     }

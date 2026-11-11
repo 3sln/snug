@@ -21,7 +21,20 @@ export interface VmSession {
   step(window: Uint8Array, base: number): VmStep;
   /** D085: the unknown-length message ended after n bytes; 'yield' means step again from position. */
   end(n: number): VmStep;
+  /** P9.7: release the session's arrays and its live-session slot now (a finished session has
+   *  released them already); step/end then throw TypeError. */
+  close(): void;
+  [Symbol.dispose](): void;
 }
+/** P9.7: the isolate's session policy. Every session (openSession, handles, push sources,
+ *  streams, a sequence reader) counts as live until it finishes, errors or is closed; an
+ *  abandoned one holds its slot until it is garbage-collected. Creating one more than
+ *  maxLive throws SnugFault 'sessions/limit'. Idle arrays up to maxPooledBytes are kept
+ *  for reuse (zero-filled first). Defaults: maxLive 1024, maxPooledBytes 2 MiB. */
+export interface SessionLimits { maxLive: number; maxPooledBytes: number }
+export declare function sessionLimits(set?: Partial<SessionLimits>): SessionLimits & { live: number; pooledBytes: number };
+/** P9.7: drop every idle pooled array now (a long-lived process trimming memory). */
+export declare function releasePool(): void;
 /** length undefined: a message of unknown length (D085 drain mode).
  *  Synchronous; replaces Schema.session (D160). */
 export declare function openSession(schema: Schema, rule: string, length: number | undefined, options?: ValidationOptions, scheduling?: SessionOptions): VmSession;
@@ -42,6 +55,8 @@ export interface PushScanner {
   finalize(): true;
   /** finalize() (the end of an unknown-length message). */
   end?(): true;
+  /** P9.7: abandon the message, releasing its session now. */
+  close(): void;
 }
 export type PushValidationStep = { state: 'need' | 'yield' } |
   { state: 'done'; result: ValidationResult };
@@ -55,6 +70,8 @@ export interface PushValidator {
   end?(): ValidationResult;
   /** Unknown length: bytes held now (at most what the session asks for, plus a chunk). */
   readonly bytesHeld?: number;
+  /** P9.7: abandon the message, releasing its session now. */
+  close(): void;
 }
 /** A message of unknown length, read once in order until it ends (D085). */
 export type StreamInput = ReadableStream<Uint8Array> | AsyncIterable<Uint8Array> | Iterable<Uint8Array>;

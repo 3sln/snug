@@ -19,7 +19,7 @@
   },
   "types": "./types/index.d.ts",
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --expose-gc --test test/",
     "build": "node src/package-build.mjs"
   }
 }

@@ -26,6 +26,9 @@ class VmSession {
   }
   /** D085: the end of an unknown-length message (n bytes). */
   end(n) { return this.#host.end(n); }
+  /** P9.7: release the session's arrays now (a finished session has); it cannot be stepped after. */
+  close() { this.#host.close(); }
+  [Symbol.dispose]() { this.#host.close(); }
 }
 
 /** Advanced synchronous session over a verified schema (D160). */

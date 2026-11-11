@@ -25,6 +25,8 @@ import { ANY_P, ANY_B } from '../../js/src/any-program.mjs';
 import { sequenceApi, sequenceTarget } from '../../js/src/sequence-core.mjs';
 import { mintView } from './view-core.mjs';
 import { SourceError, pickYield } from './sources.mjs';
+import { sessionLimitFault } from './session-limits.mjs';
+export { sessionLimits, releasePool } from './session-limits.mjs';
 
 const VMS_HELD = -67, SEQ = -2;
 const I32_MAX = 0x7fffffff;
@@ -38,6 +40,7 @@ class SequenceSession {
     let h;
     try { h = rt.x.sdk_vs_new(inner.handle(), rule, SEQ, quantum, ...limitArgs(opts)); } catch (e) { rt.lost(e); }
     rt.refresh();
+    if (h === -3) throw sessionLimitFault();
     if (h < 0) throw new Error(`snug wasm: sequence session refused (${h})`);
     this.h = h; this.gen = rt.generation; this.token = {};
     sessions.register(this, { h, gen: this.gen }, this.token);

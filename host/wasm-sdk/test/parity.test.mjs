@@ -533,7 +533,7 @@ test('sequences: API behaviours and privacy (read-only messages, private View/Cu
   // the package entries: ./view is view/View/Cursor only; ./sequence the reader pair; the internals are not exported
   const pv = await import('snug-wasm-sdk/view'), ps = await import('snug-wasm-sdk/sequence');
   assert.deepEqual(Object.keys(pv).sort(), ['Cursor', 'View', 'view']);
-  assert.deepEqual(Object.keys(ps).sort(), ['readSequence', 'sequenceReader']);
+  assert.deepEqual(Object.keys(ps).sort(), ['readSequence', 'releasePool', 'sequenceReader', 'sessionLimits']);
   await assert.rejects(import('snug-wasm-sdk/src/view-core.mjs'), e => e.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED');
   console.log('  ok   sequence messages read-only; View/Cursor state private; mintView not exported');
 });
@@ -686,4 +686,36 @@ test('sequences: regression 2026-11-11 -- a complete 65,541-byte message followe
       assert.deepEqual(run(WSEQ, wire, cuts), ['m0+65541', 'x1 not_map @65541'], `wasm ${wire} ${cuts}`);
       assert.deepEqual(run(NSEQ, wire, cuts), ['m0+65541', 'x1 not_map @65541'], `native ${wire} ${cuts}`);
     }
+});
+
+test('sessions (P9.7, D326): the live bound and release, as the native package', async () => {
+  const w = await wcompile('r = { id: uint }'), n = await ncompile('r = { id: uint }');
+  const bytes = N.encode({ id: 3 });
+  for (const [lib, schema, seq] of [[WSRC, w, WSEQ], [NSRC, n, NSEQ]]) {
+    const base = lib.sessionLimits();
+    assert.equal(base.maxLive, 1024);
+    assert.equal(base.maxPooledBytes, 2 << 20);
+    assert.throws(() => lib.sessionLimits({ maxLive: 0 }), TypeError);
+    lib.sessionLimits({ maxLive: base.live + 2 });
+    try {
+      const a = lib.openSession(schema, 'r', bytes.length), b = lib.openSession(schema, 'r', bytes.length);
+      assert.equal(lib.sessionLimits().live, base.live + 2);
+      assert.throws(() => lib.openSession(schema, 'r', bytes.length), e => e.code === 'sessions/limit' && /close\(\)/.test(e.message));
+      assert.throws(() => seq.sequenceReader({}), e => e.code === 'sessions/limit');
+      a.close();
+      assert.throws(() => a.step(bytes, 0), TypeError);
+      assert.equal(b.step(bytes, 0).result.ok, true);
+      assert.equal(lib.sessionLimits().live, base.live);
+      for (let i = 0; i < 5000; i++) assert.equal(lib.validateHandleSync(schema, lib.bufferHandle(bytes), 'r', {}, { chunk: 1 }).ok, true);
+      const r = seq.sequenceReader({}); r.feed(bytes); r.close();
+      assert.equal(lib.sessionLimits().live, base.live);
+      // releasePool drops the idle arrays; later sessions answer the same
+      assert.ok(lib.sessionLimits().pooledBytes > 0);
+      lib.releasePool();
+      assert.equal(lib.sessionLimits().pooledBytes, 0);
+      assert.equal(lib.validateHandleSync(schema, lib.bufferHandle(bytes), 'r', {}, { chunk: 2 }).ok, true);
+      assert.equal(seq.releasePool, lib.releasePool);
+    } finally { lib.sessionLimits({ maxLive: base.maxLive }); }
+  }
+  console.log('  ok   sessions: the live bound, close(), release at the verdict, pooled reuse (wasm and native)');
 });

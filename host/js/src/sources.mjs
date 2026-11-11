@@ -131,6 +131,8 @@ export class ScanSession {
     if (r !== 0) throw new SnugFault(codeName(r));
     return { state: 'done' };
   }
+  /** Release a VM-backed session's arrays now (P9.7); the resumable scanner's need no release. */
+  close() { this.vm?.close(); }
 }
 
 /** An immutable in-memory handle (a private snapshot, with independent copied reads). */
@@ -182,7 +184,8 @@ function* drive(handle, options, opts = {}) {
 function* driveSession(session, handle, chunk) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
-  for (;;) {
+  // a read that fails ends the drive: the session's arrays are released (P9.7)
+  try { for (;;) {
     if (want.state !== 'done') {
       // The window to run over: the cached one if it holds what is asked, else one read.
       const at = want.state === 'need' ? want.offset : want.position;
@@ -196,33 +199,37 @@ function* driveSession(session, handle, chunk) {
     }
     want = session.step(window, base);
     if (want.state === 'done') return want.result ?? true;
-  }
+  } } finally { session.close?.(); }
 }
 
 function runAsync(it) {
   return (async () => {
-    let next = it.next();
-    while (!next.done) {
-      const req = next.value;
-      if (req.pause) { await nextTurn(); next = it.next(); continue; }
-      let got = req.read();
-      if (got && typeof got.then === 'function') got = await got;
-      next = it.next(got);
-    }
-    return next.value;
+    try {
+      let next = it.next();
+      while (!next.done) {
+        const req = next.value;
+        if (req.pause) { await nextTurn(); next = it.next(); continue; }
+        let got = req.read();
+        if (got && typeof got.then === 'function') got = await got;
+        next = it.next(got);
+      }
+      return next.value;
+    } finally { it.return(); }
   })();
 }
 
 function runSync(it, what) {
-  let next = it.next();
-  while (!next.done) {
-    const req = next.value;
-    if (req.pause) { next = it.next(); continue; }
-    const got = req.read();
-    if (got && typeof got.then === 'function') throw new SourceError('bad_chunk', `${what} got a Promise; use its async form.`);
-    next = it.next(got);
-  }
-  return next.value;
+  try {
+    let next = it.next();
+    while (!next.done) {
+      const req = next.value;
+      if (req.pause) { next = it.next(); continue; }
+      const got = req.read();
+      if (got && typeof got.then === 'function') throw new SourceError('bad_chunk', `${what} got a Promise; use its async form.`);
+      next = it.next(got);
+    }
+    return next.value;
+  } finally { it.return(); }
 }
 
 /** Validate through a handle whose read may return a Promise. Resolves true or rejects with SnugFault/SourceError. */
@@ -317,7 +324,8 @@ function pushUnknown(session, scheduling, settle) {
   const failFast = scheduling.failFast === true, limit = session.limit;
   let buf = new Uint8Array(4096), bufBase = 0, bufLen = 0, delivered = 0;
   let want = null, result = null, held = false;
-  const done = r => { result = r; return { state: 'done', result: r }; };
+  // a settled result releases the session's arrays (P9.7), a fail-fast one before its end too
+  const done = r => { result = r; session.close?.(); return { state: 'done', result: r }; };
   const final = s => done(settle(s.result));
   const holds = () => {
     const at = want.state === 'need' ? want.offset : want.position;
@@ -350,7 +358,7 @@ function pushUnknown(session, scheduling, settle) {
     if (r.state !== 'done') throw new SourceError('length_mismatch', 'The session asked for bytes past the end.');
     return final(r);
   };
-  return {
+  return guarded(session, {
     feed(chunk) {
       if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
       if (result) return { state: 'done', result };
@@ -370,6 +378,8 @@ function pushUnknown(session, scheduling, settle) {
       return run();
     },
     resume() { return result ? { state: 'done', result } : run(); },
+    /** Abandon the message: release its session now (P9.7); feeding it afterwards throws. */
+    close() { session.close?.(); },
     /** The end of the message (EOF): settles every pending check; answers the result. */
     finalize() {
       if (result) return result;
@@ -379,7 +389,17 @@ function pushUnknown(session, scheduling, settle) {
     end() { return this.finalize(); },
     /** Bytes held now (the window from the session's keep on), for the bounded-memory contract. */
     get bytesHeld() { return bufLen; },
-  };
+  });
+}
+
+/** P9.7: an exception out of a push source ends it: its session is released (else it would hold its
+ *  live slot until collected). */
+function guarded(session, api) {
+  for (const k of ['feed', 'resume', 'finalize']) {
+    const f = api[k];
+    api[k] = function (...a) { try { return f.apply(this, a); } catch (e) { session.close?.(); throw e; } };
+  }
+  return api;
 }
 
 /** An unknown-length source: a ReadableStream, an AsyncIterable or an Iterable of
@@ -452,7 +472,7 @@ function pushSession(session, length, keepOf) {
       if (want.state === 'yield') return { state: 'yield' };
     }
   };
-  return {
+  return guarded(session, {
     feed(chunk) {
       if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
       if (delivered + chunk.length > length) throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.');
@@ -473,6 +493,8 @@ function pushSession(session, length, keepOf) {
       return run();
     },
     resume() { return finished ? want : run(); },
+    /** Abandon the message: release its session now (P9.7); feeding it afterwards throws. */
+    close() { session.close?.(); },
     finalize() {
       if (delivered !== length) throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`);
       while (!finished) {
@@ -481,5 +503,5 @@ function pushSession(session, length, keepOf) {
       }
       return want.result ?? true;
     },
-  };
+  });
 }

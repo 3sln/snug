@@ -28,6 +28,7 @@ import { runSession, sessionSteps, runUnknown } from './vmsession-run.mjs';
 import { hex } from './scan-cases.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
 import { validateHandleSync, bufferHandle } from '../../host/js/src/sources.mjs';
+import { sessionLimits, testing as poolTesting } from '../../host/js/src/session-pool.mjs';
 import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 
 const [rustBin, mutArg, seedArg, schemaArg, stressArg] = process.argv.slice(2);
@@ -226,6 +227,7 @@ uruns.forEach((r, i) => {
 
 // ---------------------------------------------------------------- hosts: JS sources == Rust validate_blob
 const hostRuns = [];   // {ci, chunk, quantum, js}
+let poolRuns = 0, poolSame = 0;
 const hostProgs = new Map();
 const render = r => r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
 cases.forEach((c, ci) => {
@@ -242,13 +244,27 @@ cases.forEach((c, ci) => {
   const opts = { top: c.lim[0] === 0 ? 'map' : 'any', cose: c.lim[1] === 1 };
   for (const [chunk, quantum] of [[1, 0], [5, 2], [4096, 0]]) {
     let js;
+    // P9.7: pooled arrays, scribbled when released (a reuse that skipped the zero-fill shows) ...
+    poolTesting.scribble = true;
     try { js = render(validateHandleSync(schema, bufferHandle(c.bytes), names[rule], opts, { chunk, quantum })); }
     catch (e) { js = 'THROW ' + e.message; }
+    poolTesting.scribble = false;
+    // ... against fresh arrays (no pool)
+    const pooled = sessionLimits().maxPooledBytes;
+    sessionLimits({ maxPooledBytes: 0 });
+    let fresh;
+    try { fresh = render(validateHandleSync(schema, bufferHandle(c.bytes), names[rule], opts, { chunk, quantum })); }
+    catch (e) { fresh = 'THROW ' + e.message; }
+    sessionLimits({ maxPooledBytes: pooled });
+    poolRuns++;
+    if (js === fresh) poolSame++; else fail(`${c.label} chunk ${chunk} q ${quantum}: pooled ${js} | fresh ${fresh}`);
     const want = render(hp.result(hp.run(rule, c.bytes, opts)));
     if (js !== want) fail(`${c.label}: JS host session ${js} | JS host validate ${want}`);
     hostRuns.push({ ci, chunk, quantum, js });
   }
 });
+if (sessionLimits().live !== 0) fail(`P9.7: ${sessionLimits().live} sessions still live after the host runs`);
+console.log(`  ${poolSame === poolRuns ? 'ok  ' : 'FAIL'} session pool (P9.7): ${poolSame}/${poolRuns} host runs give the same result with pooled arrays (scribbled on release) and fresh ones; ${sessionLimits().live} live after them`);
 
 // ---------------------------------------------------------------- Rust
 let rustLine = '  SKIP Rust (no binary given)', hostLine = '  SKIP hosts', urustLine = '  SKIP unknown length Rust';

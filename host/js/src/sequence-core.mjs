@@ -329,6 +329,8 @@ export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
       feed(chunk) { return shape(core.feed(chunk)); },
       end() { return shape(core.finish()); },
       get done() { return core.done; },
+      /** P9.7: abandon the sequence, releasing its session now (feed and end then throw). */
+      close() { if (!core.done) core.close(); },
       /** Bytes held for the message in progress (its assembly so far). */
       get bytesHeld() { return core.mbLen + (core.left ? core.left.length : 0); },
     });

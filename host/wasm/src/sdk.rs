@@ -51,6 +51,14 @@ struct Prog {
     preps: BTreeMap<(i32, i32), Vec<i32>>,
     /// D286 A3: the largest VM scratch a session on this Program grew to.
     sw: std::cell::Cell<usize>,
+    /// P9.7 (D326): idle session arrays (S, SS, key arena) for reuse, zero-filled first.
+    idle: Vec<(Vec<i32>, Vec<i32>, Vec<u8>)>,
+}
+
+/// P9.7: one idle entry above this (or above a quarter of the pool) is dropped, not kept.
+const ENTRY_MAX: usize = 1 << 20;
+fn arrays_bytes(a: &(Vec<i32>, Vec<i32>, Vec<u8>)) -> usize {
+    4 * (a.0.len() + a.1.len()) + a.2.len()
 }
 
 #[link(wasm_import_module = "env")]
@@ -119,6 +127,12 @@ struct State {
     mark_cap: i32,
     progs: Vec<Option<Prog>>,
     sessions: Vec<Option<Sess>>,
+    /// P9.7 (D326): live VM sessions and their bound; idle arrays' bytes (in the
+    /// Programs' pools) and their bound
+    live: usize,
+    max_live: usize,
+    pooled: usize,
+    max_pooled: usize,
     // encode: the tape, its byte area, the output and the key scratch
     tape: Vec<i32>,
     bytes: Vec<u8>,
@@ -154,6 +168,10 @@ fn st() -> &'static mut State {
         mark_cap: 0,
         progs: Vec::new(),
         sessions: Vec::new(),
+        live: 0,
+        max_live: 1024,
+        pooled: 0,
+        max_pooled: 2 << 20,
         tape: Vec::new(),
         bytes: Vec::new(),
         eout: Vec::new(),
@@ -313,7 +331,7 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
         return -1;
     }
     let slot = st.progs.iter().position(|x| x.is_none()).unwrap_or_else(|| { st.progs.push(None); st.progs.len() - 1 });
-    st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new(), sw: std::cell::Cell::new(0) });
+    st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new(), sw: std::cell::Cell::new(0), idle: Vec::new() });
     slot as i32
 }
 /// Bind Program h's extension controls: n kinds (see `Prog::ext`) at kp.
@@ -346,7 +364,31 @@ pub extern "C" fn sdk_prog_bind(h: usize, kp: *const i32, n: usize) {
 }
 #[no_mangle]
 pub extern "C" fn sdk_prog_free(h: usize) {
-    if let Some(x) = st().progs.get_mut(h) { *x = None; }
+    let st = st();
+    if let Some(x) = st.progs.get_mut(h) {
+        if let Some(pr) = x { st.pooled -= pr.idle.iter().map(arrays_bytes).sum::<usize>(); }
+        *x = None;
+    }
+}
+/// P9.7 (D326): drop every Program's idle session arrays now.
+#[no_mangle]
+pub extern "C" fn sdk_ses_release_pool() {
+    let st = st();
+    for pr in st.progs.iter_mut().flatten() { pr.idle.clear(); }
+    st.pooled = 0;
+}
+/// P9.7 (D326): set the session limits (max_live > 0, max_pooled >= 0; others keep
+/// theirs); INFO[0..4] = max_live, max_pooled, live, pooled bytes. 0.
+#[no_mangle]
+pub extern "C" fn sdk_ses_limits(max_live: i32, max_pooled: i32) -> i32 {
+    let st = st();
+    if max_live > 0 { st.max_live = max_live as usize; }
+    if max_pooled >= 0 { st.max_pooled = max_pooled as usize; }
+    st.info[0] = st.max_live.min(i32::MAX as usize) as i32;
+    st.info[1] = st.max_pooled.min(i32::MAX as usize) as i32;
+    st.info[2] = st.live as i32;
+    st.info[3] = st.pooled.min(i32::MAX as usize) as i32;
+    0
 }
 /// The rule index of the name in kbuf[0..n) (vm-rule-index), or -1.
 #[no_mangle]
@@ -591,27 +633,34 @@ pub extern "C" fn sdk_rs_new(total: i32, quantum: i32, top_any: i32, cose: i32, 
 pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: i32, l1: i32, l2: i32, l3: i32,
                              l4: i32, l5: i32, l6: i32, l7: i32, flags: i32) -> i32 {
     let st = st();
-    let pr = match st.progs.get(h) { Some(Some(pr)) => pr, _ => return -1 };
+    // P9.7 (D326): the live bound (-3), then the arrays from the Program's pool, zeroed
+    if st.live >= st.max_live { return -3; }
+    let pr = match st.progs.get_mut(h) { Some(Some(pr)) => pr, _ => return -1 };
     let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
     let cap = pr.p[16].max(1);
-    let mut s = vec![0i32; vm_scratch_words(&pr.p, rule, cap) as usize];
+    let limit = if total < 0 { vms_unknown_total(&pr.p, &lim) } else { total };
+    // D286 A3: S as large as earlier sessions on this Program needed (the arena starts at the lease, D324)
+    let sw = (vm_scratch_words(&pr.p, rule, cap).max(0) as usize).max(pr.sw.get());
+    let ssw = vms_words(&pr.p).max(0) as usize;
+    let kab = vms_arena(&pr.p, &lim, limit).max(0) as usize;
+    let (mut s, mut ss, mut ka) = match pr.idle.iter().rposition(|a| a.0.len() >= sw && a.1.len() == ssw) {
+        Some(i) => {
+            let mut a = pr.idle.swap_remove(i);
+            st.pooled -= arrays_bytes(&a);
+            a.0.fill(0);
+            a.1.fill(0);
+            if a.2.len() >= kab { a.2.fill(0) } else { a.2 = vec![0; kab] }
+            a
+        }
+        None => (vec![0; sw], vec![0; ssw], vec![0u8; kab]),
+    };
     vm_scratch_init(&mut s, cap);
-    let mut ss = vec![0i32; vms_words(&pr.p) as usize];
-    let c;
-    let mut ka;
-    if total < 0 {
-        let limit = vms_unknown_total(&pr.p, &lim);
-        st.info[0] = limit;
-        ka = vec![0u8; vms_arena(&pr.p, &lim, limit) as usize];
-        c = if total == -2 { vms_init_seq(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum) }
-            else { vms_init_unknown(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum) };
-    } else {
-        ka = vec![0u8; vms_arena(&pr.p, &lim, total) as usize];
-        c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
-    }
+    let c = if total == -2 { vms_init_seq(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum) }
+        else if total < 0 { vms_init_unknown(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum) }
+        else { vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum) };
+    if total < 0 { st.info[0] = limit; }
     if c < 0 { return -2; }
-    // D286 A3: S as large as earlier sessions on this Program needed, grown after the init
-    if pr.sw.get() > s.len() { s.resize(pr.sw.get(), 0); }
+    st.live += 1;
     put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
 }
 /// P7.13w (D212): the next message of a sequence session -- vms-init-seq again on
@@ -713,7 +762,20 @@ pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
 }
 #[no_mangle]
 pub extern "C" fn sdk_ses_free(h: usize) {
-    if let Some(x) = st().sessions.get_mut(h) { *x = None; }
+    let st = st();
+    let taken = match st.sessions.get_mut(h) { Some(x) => x.take(), None => None };
+    // P9.7 (D326): a VM session's live slot is freed and its arrays kept for reuse unless too large
+    if let Some(Sess::Vm { prog, s, ss, ka, .. }) = taken {
+        st.live -= 1;
+        let a = (s, ss, ka);
+        let n = arrays_bytes(&a);
+        if n <= ENTRY_MAX && n <= st.max_pooled / 4 && st.pooled + n <= st.max_pooled {
+            if let Some(Some(pr)) = st.progs.get_mut(prog) {
+                pr.idle.push(a);
+                st.pooled += n;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- encode: a tape the JS walk wrote

@@ -13,6 +13,7 @@ import { mintView } from './view.mjs';
 import { ANY_P, ANY_B } from './any-program.mjs';
 import { SourceError, pickYield } from './sources.mjs';
 import { withValidBuffers, growValid } from './vm-session.mjs';
+import { acquire, release, own } from './session-pool.mjs';
 import { sequenceApi, sequenceTarget } from './sequence-core.mjs';
 
 let anyProgram = null;
@@ -21,12 +22,16 @@ function openBackend(options, quantum) {
   const { program, rule, opts } = sequenceTarget(options, s => schemaPrograms.get(s), () => (anyProgram ??= new HostProgram(ANY_P, ANY_B)));
   const words = limitWords(opts), { P, B } = program, ext = program.ext, cap = Math.max(P[16], 1);
   const total = vmsUnknownTotal(P, words);
-  let s = new Int32Array(vmScratchWords(P, rule, cap)); vmScratchInit(s, cap);
-  let ka = new Uint8Array(vmsArena(P, words, total));
-  const ss = new Int32Array(vmsWords(P)), out = new Int32Array(8 + 2 * 257);
+  // P9.7 (D326): one session for the whole reader, its arrays from the Program's pool under the live bound,
+  // released when the sequence ends (close) or the reader is collected
+  const lease = acquire(program, vmScratchWords(P, rule, cap), vmsWords(P), vmsArena(P, words, total));
+  let { s, ka } = lease.e;
+  const { ss } = lease.e, out = new Int32Array(8 + 2 * 257);
+  vmScratchInit(s, cap);
   const noExt = () => -2;
   const backend = {
     total, quantum,
+    close() { release(lease); },
     begin() { const c = vmsInitSeq(P, B, rule, words, s, ss, ka, quantum); if (c < 0) throw new Error(`snug: vms-init-seq answered ${c}`); },
     step(w, base) {
       // P8.4 (D266): the valid machinery's buffers are the isolate's (D286); S and the arena grow and keep their contents
@@ -36,8 +41,8 @@ function openBackend(options, quantum) {
           if (c !== -69) return c;
           growValid(v, ss);
           const gs = vmsGrowScratch(ss), ga = vmsGrowArena(ss);
-          if (gs > s.length) { const g = new Int32Array(gs); g.set(s); s = g; }
-          if (ga > ka.length) { const g = new Uint8Array(ga); g.set(ka); ka = g; }
+          if (gs > s.length) { const g = new Int32Array(gs); g.set(s); lease.e.s = s = g; }
+          if (ga > ka.length) { const g = new Uint8Array(ga); g.set(ka); lease.e.ka = ka = g; }
         }
       });
       if (ext) rethrow(ext);
@@ -49,6 +54,7 @@ function openBackend(options, quantum) {
     code: () => out[0],
     result: () => program.result(out.slice(0, 8 + 2 * out[6])),
   };
+  own(lease, backend);
   return { backend, viewOpts: { ...selectOptions(options, 'validation'), maxBytes: options.maxMessageBytes, schema: options.schema } };
 }
 

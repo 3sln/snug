@@ -16,6 +16,7 @@ pub mod api;
 pub mod controls;
 pub mod sequence;
 pub mod async_source;
+pub mod sessions;
 pub use value::{Value, Integer, TypedArray};
 pub use error::Error;
 pub use decode::{decode, DecodeOptions, Floats, Keys, Limits, Profile, Tags, Top};

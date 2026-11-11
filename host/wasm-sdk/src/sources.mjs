@@ -22,6 +22,7 @@ import { profileFlags, codecTop } from '../../js/src/profiles.mjs';
 import { rethrow } from '../../js/src/ext.mjs';
 import { ANY_P, ANY_B } from '../../js/src/any-program.mjs';
 import { innerOf, limitArgs, Program } from './schema.mjs';
+import { sessionLimitFault } from './session-limits.mjs';
 import { scan } from './index.mjs';
 
 export class SourceError extends Error {
@@ -49,9 +50,13 @@ const nextTurn = pickYield().turn;
 
 const sessions = new FinalizationRegistry(({ h, gen }) => { if (gen === rt.generation && rt.x) rt.x.sdk_ses_free(h); });
 
+// P9.7 (D326): the instance's session policy
+export { sessionLimits, releasePool } from './session-limits.mjs';
+
 /** Common to both kinds: the handle, its window in linear memory, and the step. */
 class WasmSession {
   constructor(h) {
+    if (h === -3) throw sessionLimitFault();
     if (h < 0) throw new Error(`snug wasm: session refused (${h})`);
     this.h = h; this.gen = rt.generation; this.wp = 0; this.wcap = 0; this.done = false;
     this.token = {}; sessions.register(this, { h, gen: this.gen }, this.token);
@@ -129,8 +134,11 @@ class VmSession extends WasmSession {
   }
   /** Linear-memory bytes this session holds (its window; the kin arrays are not observable from JS). */
   get bytesHeld() { return this.wcap; }
+  /** P9.7: release the session now (its arrays and live slot); step/end then throw TypeError. */
+  close() { if (!this.verdict) this.closed = true; this.free(); }
   step(window, base) {
     if (this.verdict) return this.verdict;
+    if (this.closed) throw new TypeError('snug: the session is closed');
     if (!(window instanceof Uint8Array)) throw new TypeError('snug: a window is a Uint8Array');
     this.load(window);
     return this.stepIn(window.length, base);
@@ -138,6 +146,7 @@ class VmSession extends WasmSession {
   stepIn(n, base) {
     if (this.verdict) return this.verdict;
     if (this.dead) throw this.dead;
+    if (this.closed) throw new TypeError('snug: the session is closed');
     const r = this.raw(n, base);
     // a predicate that threw voids the session (its walk went on with a false verdict)
     try { rethrow(this.ext); } catch (e) { this.dead = e; this.free(); throw e; }
@@ -152,6 +161,7 @@ class VmSession extends WasmSession {
   /** D085: the end of an unknown-length message after n bytes. */
   end(n) {
     if (this.verdict) return this.verdict;
+    if (this.closed) throw new TypeError('snug: the session is closed');
     if (this.length !== undefined) throw new TypeError('snug: end() is for a session of unknown length');
     if (!Number.isSafeInteger(n) || n < 0) throw new TypeError('snug: end(n) takes the byte count');
     this.live();
@@ -182,6 +192,9 @@ class PublicSession {
   }
   /** D085: the end of an unknown-length message (n bytes). */
   end(n) { return this.#host.end(n); }
+  /** P9.7: release the session's arrays now (a finished session has); it cannot be stepped after. */
+  close() { this.#host.close(); }
+  [Symbol.dispose]() { this.#host.close(); }
   /** Internal (the push drivers): the host session, stepping over its own window. */
   static host(s) { return s.#host; }
 }
@@ -431,6 +444,8 @@ function pushUnknown(session, scheduling, settle) {
       return run();
     },
     resume() { return result ? { state: 'done', result } : run(); },
+    /** P9.7: abandon the message, releasing its session now. */
+    close() { session.close?.() ?? session.free(); },
     finalize() {
       if (result) return result;
       if (!held) { const r = run(); if (r.state === 'done') return result; }
@@ -506,7 +521,7 @@ function pushSession(session, length, keepOf) {
   return {
     feed(chunk) {
       if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
-      if (delivered + chunk.length > length) throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.');
+      if (delivered + chunk.length > length) { session.free(); throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.'); }
       const start = delivered;
       delivered += chunk.length;
       if (finished) return want;
@@ -520,6 +535,8 @@ function pushSession(session, length, keepOf) {
       return run();
     },
     resume() { return finished ? want : run(); },
+    /** P9.7: abandon the message, releasing its session now. */
+    close() { session.close?.() ?? session.free(); },
     finalize() {
       if (delivered !== length) { session.free(); throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`); }
       while (!finished) {
