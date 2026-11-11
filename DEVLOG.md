@@ -7642,6 +7642,18 @@ review.
 - [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
   chunks that fit under the P9.1 caps, with the seeds and chunking
   recorded so anyone can reproduce them.
+- [ ] **P9.14 — `.abnf` / `.abnfb` (RFC 9165 §3).** Added 2026-11-11 by
+  the coordinator. The owner direction D230 names these controls explicitly,
+  so leaving them out is not an option. Requirements:
+  - a bounded, metered ABNF engine covering RFC 5234 plus RFC 7405's
+    case-sensitive strings, which RFC 9165 references;
+  - an optional module that loads separately, like the unicode tables, so
+    the core bundles do not grow;
+  - `prose-val` refused with a clear error;
+  - an oracle-checked gate.
+  It needs its own engineer, after P9.1–P9.4 or sooner if a slot opens
+  within the four-engineer cap. Until it lands, the 8 RFC 9165 figure 3–5
+  corpus cases are marked "pending P9.14", not "outside scope".
 
 **Documentation and API**
 - [ ] **P9.10 — Stranger-pass re-review of docs and API.** Independent
@@ -7666,6 +7678,19 @@ review.
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.
+*Update:* P9.5 and P9.6 went to new engineers and P9.7 to the D286
+engineer, in parallel (coordinator: at most 3–4 engineers live). P9.14 is
+next when a slot frees.
+*P9.2 triage, agreed with the coordinator 2026-11-11:*
+- NaN payloads under `deterministic` are classified under D122.
+- Float widths are fixed to match by value: float16 accepts values exactly
+  representable in binary16, float32 the same for binary32, and float64
+  accepts any float. This is a visible change, documented prominently in
+  the guide and in profiles.md / cddl-support.
+- Numeric controls on `number` are fixed by distributing them over the
+  numeric branches; default-timer #1 stays classified on S46.
+- `.cat` of text and bytes is fixed.
+- `.abnf` / `.abnfb` go to P9.14.
 
 ## Parking lot
 
