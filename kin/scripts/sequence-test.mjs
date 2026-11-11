@@ -70,6 +70,19 @@ cases.forEach((c, ci) => {
   }
   if (!seenEmpty.has(c.prog)) { seenEmpty.add(c.prog); seqs.push({ prog: c.prog, rule: c.rule, lim, S: new Uint8Array(0), label: `empty (${programs[c.prog].label})`, c }); }
 });
+// Fixed regressions. 2026-11-11 (the scaled run 30000/1001): a 65,541-byte map holding a
+// 65,535-byte string, then zeros up to 1,500,000 bytes and a0, maxMessageBytes 1,500,000, one
+// chunk: the runner's window (capped 64 KiB past its position) left the string's claim open,
+// and with more than P bytes delivered it settled the held verdict as too_large without first
+// asserting the delivered frontier. The message is complete: accepted, then not_map at 65,541.
+{
+  const anyIndex = programs.findIndex(p => p.label === 'any');
+  const big = new Uint8Array(1500001); big.set([0xa1, 0x61, 0x61, 0x59, 0xff, 0xff]); big[1500000] = 0xa0;
+  for (const flags of [0, 122]) {
+    const c = { label: `fixed: 65,541-byte message then 1.5 MB (flags ${flags})`, prog: anyIndex, rule: 0, bytes: big, fixed: true };
+    seqs.push({ prog: anyIndex, rule: 0, lim: Int32Array.of(0, 0, 1500000, 32, 65536, 131072, -1, -1, 0, flags), S: big, label: c.label, c, fixed: true });
+  }
+}
 
 // A sequence of more than MAX_MESSAGES messages (the 1,500,001 zero bytes vector is 1.5 M
 // one-byte messages) is cut at the boundary after its first MAX_MESSAGES: every policy of
@@ -100,6 +113,14 @@ const oracle = (si, skip) => {
 seqs.forEach((q, si) => {
   const n = q.S.length;
   const add = (policy, tag, skip = false, ff = false, rust = false) => { runs.push({ si, policy, skip, ff, rust }); counts[tag]++; if (skip) counts.skip++; if (ff) counts.failfast++; };
+  if (q.fixed) {
+    // every delivery shape that crosses the 64 KiB window cap, on both hosts
+    add({ kind: 0, q: 0 }, 'whole', false, false, true);
+    add({ kind: 3, k: 65536, q: 0 }, 'split', true, false, true);
+    add({ kind: 2, w: 4096, q: 0, seed: 7 }, 'rnd4096', false, false, true);
+    add({ kind: 2, w: 300, q: 1, seed: 11 }, 'rnd300', false, true, true);
+    return;
+  }
   add({ kind: 0, q: 0 }, 'whole', false, false, si % 3 === 0);
   if (n <= 4096) add({ kind: 1, w: 1, q: 0 }, 'byte', si % 2 === 0, false, si % 3 === 1);
   if (n <= 65536) add({ kind: 2, w: 7, q: rnd() % 4, seed: 1 + rnd() % (1 << 30) }, 'rnd7', si % 3 === 1, false, si % 3 === 2);
@@ -302,6 +323,7 @@ async function hostRun(q, policy, skip) {
 const tH = performance.now();
 for (let si = 0; si < seqs.length; si++) {
   const q = seqs[si];
+  if (q.fixed) { await hostRun(q, { kind: 0 }, false); await hostRun(q, { kind: 3, k: 65536 }, false); continue; }
   if (si % 3 !== 0) continue;
   await hostRun(q, { kind: 2, w: q.S.length <= 65536 ? 7 : 4096, seed: 1 + rnd() % (1 << 30) }, si % 2 === 0);
   if (si % 9 === 0) await hostRun(q, { kind: 0 }, false);

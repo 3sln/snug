@@ -210,3 +210,20 @@ test('splitting many messages out of one assembly copies linearly', async () => 
   const retained = [...backings].reduce((n, b) => n + b.byteLength, 0);
   assert.ok(retained <= 4 * 512, `${retained} bytes retained for 512 bytes of messages`);
 });
+
+test('regression 2026-11-11: a complete 65,541-byte message followed by more than maxMessageBytes', () => {
+  const big = new Uint8Array(1500001); big.set([0xa1, 0x61, 0x61, 0x59, 0xff, 0xff]); big[1500000] = 0xa0;
+  for (const wire of ['bindle', 'deterministic']) {
+    for (const cuts of [[big.length], [65536, big.length], [70000, big.length], [6, 65541, big.length]]) {
+      const r = sequenceReader({ wire, top: 'map', maxMessageBytes: 1500000 });
+      const got = [];
+      let from = 0;
+      for (const to of cuts) {
+        const res = r.feed(big.subarray(from, to)); from = to;
+        got.push(...res.messages.map(m => `m${m.index}+${m.length}`));
+        if (res.error) { got.push(`x${res.error.index} ${res.error.code} @${res.error.offset}`); break; }
+      }
+      assert.deepEqual(got, ['m0+65541', 'x1 not_map @65541'], `${wire} ${cuts}`);
+    }
+  }
+});

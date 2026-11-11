@@ -88,7 +88,7 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
     let at = 0, eofed = false, lastKeep = 0, end = total;   // end: the session's end once vms-eof gave it
     let r;
     let want = 1;
-    let held = false;   // a held verdict only needs the frontier asserted: an empty window there
+    let held = false, asserted = 0;   // a held verdict only needs the frontier asserted: an empty window there
     const step = () => {
       const e = Math.min(delivered - o, end);
       if (held) at = e;
@@ -96,6 +96,7 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
       // copying all that has arrived for every message would be quadratic in a long sequence
       const w = Math.min(e, at + Math.max(65536, want));
       let win = S.slice(o + at, o + Math.max(at, w));
+      asserted = at + win.length;   // a window asserts its bytes exist (D147)
       if (guard) win = guard(win, 'window');
       steps++;
       // P8.4 (D266): the valid machinery's buffers, grown on VMS_GROW
@@ -120,6 +121,9 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
         }
         if (eofed) return { error: 'held after vms-eof' };
         held = true;
+        // bytes delivered past the last window first release the claims they cover (a held
+        // complete message must not become too_large because the window was capped)
+        if (asserted < Math.min(delivered - o, end)) { r = step(); continue; }
         if (delivered - o > total || !more()) { r = eof(); if (r === VMS_RESUME) return { error: 'held then resume' }; continue; }
         r = step();
         continue;

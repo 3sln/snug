@@ -149,3 +149,28 @@ fn valid_messages_with_indefinite_items_read_through_their_canonical_copy() {
     let mut det = Sequence::new(&SequenceOptions::default()).unwrap();
     assert_eq!(det.feed(&bytes)[0].as_ref().unwrap_err().code(), "indefinite");
 }
+
+#[test]
+fn regression_complete_message_then_more_than_the_limit() {
+    // 2026-11-11: a 65,541-byte map, then zeros up to 1,500,000 bytes and a0 (P = 1,500,000)
+    let mut big = vec![0u8; 1_500_001];
+    big[..6].copy_from_slice(&[0xa1, 0x61, 0x61, 0x59, 0xff, 0xff]);
+    big[1_500_000] = 0xa0;
+    let opts = SequenceOptions { top: snug::Top::Map, max_message_bytes: Some(1_500_000), ..SequenceOptions::default() };
+    for cuts in [vec![big.len()], vec![65536, big.len()], vec![6, 65541, big.len()]] {
+        let mut seq = Sequence::new(&opts).unwrap();
+        let mut got = Vec::new();
+        let mut from = 0;
+        for to in cuts.iter().copied() {
+            for item in seq.feed(&big[from..to]) {
+                got.push(match item {
+                    Ok(m) => format!("m{}+{}", m.index, m.len()),
+                    Err(e) => format!("x {}", e.code()),
+                });
+            }
+            from = to;
+            if seq.is_done() { break; }
+        }
+        assert_eq!(got, ["m0+65541", "x not_map"], "{:?}", cuts);
+    }
+}

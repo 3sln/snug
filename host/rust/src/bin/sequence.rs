@@ -173,6 +173,7 @@ fn run_sequence(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], ki
             return format!("E vms-init-seq {}", c0);
         }
         let (mut at, mut eofed, mut last_keep, mut end, mut held, mut want) = (0usize, false, 0i32, total, false, 1usize);
+        let mut asserted: usize;   // the end the last step's window asserted (every step sets it)
         macro_rules! step {
             () => {{
                 let e = (delivered - o).min(end);
@@ -181,6 +182,7 @@ fn run_sequence(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], ki
                 }
                 let w = e.min(at + want.max(65536));
                 let win: Vec<u8> = input[o + at..o + at.max(w)].to_vec();
+                asserted = at + win.len();
                 steps += 1;
                 loop {
                     let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
@@ -228,6 +230,11 @@ fn run_sequence(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], ki
                     return "E held after vms-eof".to_string();
                 }
                 held = true;
+                // bytes delivered past the last window first release the claims they cover
+                if asserted < (delivered - o).min(end) {
+                    r = step!();
+                    continue;
+                }
                 if delivered - o > total || !more!() {
                     r = eof!();
                     if r == VMS_RESUME {

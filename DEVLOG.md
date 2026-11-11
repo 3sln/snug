@@ -6154,6 +6154,20 @@ are answered as provisional decisions D082–D085. None is open now.
   - **wasm SDK (deferred, D219):** needs `vms-init-seq` / `vms-message-length`
     exports and the native sequence host driven through the SDK session
     wrapper; views over a JS-side copy of each message.
+  - **2026-11-11 regression (P8.4's scaled run `sequence-test 30000 1001`):**
+    `a1 61 61 59 ffff` + zeros to 1,500,000 bytes + `a0`, P = 1,500,000, one
+    chunk, answered `too_large` for the complete 65,541-byte first message.
+    Root cause in the gate's kin-level runner (`sequence-run.mjs` and its Rust
+    port `bin/sequence.rs`), not kin or the hosts: the runner caps a window at
+    64 KiB past its position, so the string's length claim stayed open and the
+    verdict was held; with more than P bytes delivered it called `vms-eof`
+    (→ `too_large`) without first asserting the delivered frontier, which
+    releases the claim. Fixed as the hosts already do (9ce6310): a held
+    verdict is stepped at the frontier before too_large/EOF is decided. Kin
+    answers this input correctly for every window. Fixed case in the gate
+    (both hosts, Rust runner included), JS and Rust host tests; the SDK
+    parity test addition was refused by this session's permissions (the SDK
+    shares the native driver).
   - **Review 2026-11-04 (docs/reviews/2026-11-04-sequences.md) addressed:**
     #1 liveness in kin (`vm-session.kin` `note-live` and the EXT whole read,
     `vm-session-cont.kin` key reads; D212 amendment), gated; #2 Buffer copy;
