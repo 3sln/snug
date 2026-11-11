@@ -59,6 +59,19 @@ export function arenaInit(s, a, cap) {
     s[a + AR_WANT] = 0;
 }
 
+export function arenaFit(s, body) {
+    // A fresh (empty) arena's body cut to at most `body` words. A session starts
+    // its arena at the lease and grows it on demand (VMS_GROW, arena-adopt), so
+    // the words of S past it stay free for the canonical path's event table
+    // (arena-after): a scratch reused message after message (a sequence) then
+    // keeps its size instead of every new arena swallowing the room the last
+    // message's events grew.
+    const a = s[VM_ARENA];
+    if (body < s[a + AR_END]) {
+        s[a + AR_END] = body;
+    }
+}
+
 export function arenaBody(s) {
     // The absolute word offset of the arena's body.
     return s[VM_ARENA] + AR_HDR;

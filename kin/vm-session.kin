@@ -30,8 +30,8 @@
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec cset-width wit-empty wit-set]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.eval :refer [eval-item]]
-            [snug.vm.api :refer [vm-setup vm-output vm-witness-output lim]]
-            [snug.vm.arena :refer [arena-take]]
+            [snug.vm.api :refer [vm-setup vm-output vm-witness-output lim arena-lease]]
+            [snug.vm.arena :refer [arena-take arena-fit]]
             [snug.vm.sbase :refer [arena-gate arena-items arena-doc VMS_NEED VMS_YIELD GO SS_PH SS_TOTAL SS_POS SS_NEED_OFF SS_NEED_LEN
                                    SS_QUANTUM SS_SP SS_RET SS_KEEP SS_ATOP SS_FRAMES SS_MAXF SS_CODE SS_WB0
                                    SS_WORK SS_CUT SS_CHN SS_CHAIN SS_PSTK SS_PCAP SS_PROG SS_RTS SS_RNQ
@@ -85,6 +85,8 @@
   (if (or (< total 0) (< quantum 0)) (return (neg 1)))
   (let [su (vm-setup p rule 0 0 0 limits s)]
     (if (< su 0) (return su)))
+  (comment "the session's arena starts at the lease and grows on demand (arena-fit)")
+  (arena-fit s (arena-lease p))
   (if (< (ilen ss) (vms-session-words p)) (return (neg 2)))
   (if (< (blen ka) (vms-arena-bytes p limits total)) (return (neg 2)))
   (let [nf (nframes p)]

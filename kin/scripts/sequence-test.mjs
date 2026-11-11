@@ -368,7 +368,28 @@ if (rustBin) {
   rustHostLine = `  ${ha === hostRuns.length ? 'ok  ' : 'FAIL'} Rust snug::Sequence == the oracle on ${ha}/${hostRuns.length} host runs (messages, borrowed exactly inside one chunk, skipped and stopping refusals)`;
 }
 
+// P8.5 (D324): one scratch serves every message of a sequence; with the group arena
+// starting at the lease (not all of S) the canonical path's event table keeps fitting,
+// so S stays the size the first messages grew it to (before: ~470 words per message)
+let sBound = '', sOk = false;
+{
+  const msg = [0x98, 50];
+  for (let i = 0; i < 50; i++) { msg.push(0xa8); for (const k of 'hgfedcba') msg.push(0x61, k.charCodeAt(0), i % 24); }
+  const lim = Int32Array.of(1, 0, -1, -1, -1, -1, -1, -1, 0, 378);
+  const words = n => {
+    const S = new Uint8Array(n * msg.length); for (let i = 0; i < n; i++) S.set(msg, i * msg.length);
+    const x = runSequence(Int32Array.from(ANY_P), ANY_B, 0, lim, S, { kind: 0, w: 0, q: 0, seed: 1, k: 0 });
+    if (x.error || x.lines.length !== n + 1 || x.lines.some((l, i) => i < n && !l.startsWith('m '))) { fail(`S bound: ${x.error ?? x.lines.slice(0, 2).join(' | ')}`); return -1; }
+    return x.sWords;
+  };
+  const s5 = words(5), s1000 = words(1000);
+  sBound = `${s5} words after 5 messages, ${s1000} after 1000`;
+  sOk = s5 > 0 && s1000 === s5;
+  if (!sOk) fail(`S grew over a sequence of canonical-path messages: ${sBound}`);
+}
+
 const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
+line(sOk, `scratch bound (D324): S over a sequence of canonical-path messages (50 maps with reversed keys each) is ${sBound}`);
 line(agree === runs.length - ffRuns, `kin sequence mode == oracle (D211): ${agree}/${runs.length - ffRuns} runs over ${seqs.length} sequences from ${cases.length} vm-test cases (${MUTATIONS} mutations, ${SCHEMAS} oracle schemas, seed ${SEED}), every line and out word`);
 console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle outcomes: ${outcome.m} messages, ${outcome.s} skipped, ${outcome.x} stops, ${outcome.end} clean ends`);
 line(ffBad === 0, `fail-fast: ${ffRuns - ffBad}/${ffRuns} runs give the oracle's messages and decision (${ffEarly} stopped early with another code or offset)`);

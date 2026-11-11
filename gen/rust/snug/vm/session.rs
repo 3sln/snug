@@ -49,6 +49,8 @@ pub fn vms_init(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32]
     if su < 0 {
         return su;
     }
+    // the session's arena starts at the lease and grows on demand (arena-fit)
+    arena_fit(s, arena_lease(p));
     if (ss.len() as i32) < vms_session_words(p) {
         return -2;
     }

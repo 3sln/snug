@@ -5393,9 +5393,22 @@ block opened is charged ⌈MAPWORDS/16⌉ with format 2.0's larger layout, so
 these workloads use +2 units per map, +10 per typed record and +7 per
 reference-choice element. D316's calibration covers those rows (map-struct
 1.53×, map-table 1.97×, reference-map-choice 1.49× the median in JS), so no
-price changes. **Size**: `runtime` 169,519 → 170,136 bytes minified (+617: the
-cursor code and the streak's `any` arm), within the D319 caps; no cap
-raised. **Gates**: vm-test gains section 3e (36 cases, 1k–30k pairs; table,
+price changes. **Size** (`node tools/size/size.mjs --details`, esbuild 0.28.2,
+main `eea15a9` → this branch with D324, minified / gzip bytes): `runtime`
+171,508 / 61,284 → 172,128 / 61,535; `snug/schema` 149,148 / 53,308 →
+149,768 / 53,549; `snug/sequence` 208,535 / 74,061 → 209,220 / 74,323.
+Attribution (`runtime`, module deltas): `vm/map` +336 (the cursors: `t-pos`,
+the positions after the sort, the rewind's cursor reset, the scan's start
+and store), `vm/eval` +306 (the streak's `any` arm, `streak-value`, the
+inlined key check and order charge); the rest is minifier noise (−25). The
+session entries carry the same deltas plus D324's `arena-fit` (`snug/sequence`
++685 in all). Main already stood within 0.3%
+of these caps after D322, so they no longer fit: the failing caps (`runtime`
+min/gzip/brotli, `snug/schema` min/gzip, `snug/sequence` gzip/brotli) rise
+to measured + 2% (Ceil), **provisional, owner sign-off pending (R9 per
+D200)**. Cuts considered: dropping the `any` arm (it is the D286 workload's
+fix) and the cursor reset (needed for correctness after rewinds). No smaller
+form was found. **Gates**: vm-test gains section 3e (36 cases, 1k–30k pairs; table,
 mixed, struct-like; rfc and branch; in order and reversed). Each must be
 accepted, a 3,000-pair one within the default budget, with units ≤ 8 n log₂ n;
 the oracle confirms the 1,000-pair verdicts in both modes. vmsession-test
@@ -5409,6 +5422,42 @@ slower after the PEG merge.
 record, and no help to non-literal members, which match by typeset);
 repricing T's examination steps (would hide the CPU, not remove it);
 restoring `map-pair-fast` (see 4).
+- [ ] **Signed off** (owner)
+
+### D324 — A session's group arena starts at the lease, not all of S (P8.5 follow-up; found by the D286 engineer)
+**Decision** (P8.5 VM engineer, provisional): `vms-init` (and so every
+message of a sequence, `vms-init-seq`) cuts the fresh arena's body to the
+lease (`arena-fit`, `kin/vm-arena.kin`). It grows only on demand
+(`VMS_GROW`, `arena-take`/`arena-adopt`, unchanged). The buffer route keeps
+`vm-setup`'s body of all of S (its re-run after −5 needs the grown room).
+**Why**: `arena-init` gave the arena all of S, and a session's canonical
+event table sits after the arena (`arena-after`). In a sequence S is reused
+for every message: each new arena swallowed the room the previous message's
+events had grown S by, and the events asked for S + need again, repeating
+that message's scan and copy. On `920a3e1`, over 1000 messages of 50 maps
+with reversed keys, S grew from 1,554 to 469,086 words (~470 per message,
+never reclaimed). With the fix it stays at 1,554 (JS host instrumentation,
+`.cache` only; and sequence-test's new kin-level check). Units, events and
+verdicts are unchanged, since the arena's size is not charged: vmsession-test,
+sequence-test, the PEG differential and the session == buffer gates are
+green.
+**Regressions**: sequence-test "scratch bound (D324)": S after 5 and after
+1000 canonical-path messages is equal (1,554 words; 3,426 vs 469,086 before).
+The Rust unit test `sequence::scratch_tests` (run by `bb rust-api-test`) checks
+the same through `snug::Sequence`. The wasm SDK runs the same generated
+session code (`vm/session.rs`). It has no hook that exposes S, so it is
+covered by that code path and by `bb wasm-sdk-test`'s parity, not by its own
+assertion.
+**Open problem 1** (a recursive Program's session holds the whole-message
+arena bound from the start, D314) is **not** addressed: `arena-doc` still
+grows a recursive Program's arena to §9.4's bound at the message start. That
+growth now happens per message (the arena restarts at the lease), adopted
+from the S already grown, so S stays bounded by one message's bound plus its
+events.
+**Alternatives**: the event table before the arena (impossible in a session:
+the arena holds open containers' records while an item's events are built);
+re-sizing the arena from the previous message's end (reads a header across
+`vms-init`, which may meet an uninitialised S).
 - [ ] **Signed off** (owner)
 
 ## Findings
@@ -7929,6 +7978,13 @@ Open problems (for the manager):
 * `embedded` is the dearest calibration row (2.15× JS); not analysed.
 * Format 1's per-pair `map-pair-fast` (single pairs outside a streak) was not
   restored; `reference-map-choice` is 1.49× the median against 1.42× before.
+* *Follow-up (2026-11-11, branch `p85-tlin`):* T maps are linear after the
+  sort (D323); `map-pair-fast` stays out (D323 item 4: its workloads are
+  multi-block maps). A further problem found by the D286 engineer is fixed:
+  a sequence's session scratch grew ~470 words per canonical-path message,
+  never reclaimed (D324: the arena now starts at the lease). The first open
+  problem (a recursive Program's whole-message arena bound) remains; D324
+  only stops it accumulating across a sequence's messages.
 
 Learnt: one set of block functions called by both walks made session ==
 buffer cheap to keep; every session-only divergence found (S's trail, the
