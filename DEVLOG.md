@@ -8041,3 +8041,76 @@ maps) hid a budget exhaustion on valid data. Large-input gates need to assert
 the verdict and a unit bound, not just that a verdict exists. And a loop
 bound in kin is re-evaluated per trip in the emitted JS, so a function-call
 bound in a hot loop costs a call per iteration.
+
+## P8.5 follow-up — the map streak over canonical copies (2026-11-11, branch `p85-rev`)
+
+From the D286 engineer's analysis E: on `b25a0fe`, 2000 maps × 8 keys took
+4.2× longer with reversed keys than deterministic, 74% of it in the VM walk
+over the canonical copy. A profile confirmed the cause. The map pair streak
+was never entered there, because eval-map refused it when an event table was
+present or the map was unordered, and it stopped at any key that did not
+ascend. So every pair took the generic path.
+
+* **The streak over a canonical copy.** Under `PF_CANON` a key that does not
+  ascend sets the block's `unordered` bit, exactly as eval-map's
+  `map-unordered` does. From then on the key search starts at 0 and a
+  struct's named key is binary-searched without moving the cursor, as
+  `map-cursor` does unordered. The key-order charge stays `c64min`. The
+  streak takes no pair that has a recorded event (D280) inside it: the next
+  event's position comes from the event table's lower bound (`ev-next`), and
+  an `any` value's end from `tskip`. Those pairs, including every refused
+  duplicate key, go to the pair-by-pair walk, which replays them. No charge
+  changes.
+* **Proof of identity.**
+  * vm-test's streak == item-by-item gate: 80,545/80,545 under schedule 2,
+    the generated unsorted-key cases included.
+  * JS == Rust 80,545 and JS == wasm 78,251.
+  * A differential in `.cache` (24,000 runs: canonical-path maps with
+    unsorted and duplicate keys, non-shortest and indefinite values, nested
+    maps, random budgets): streak on == streak off == main `b25a0fe`, whole out
+    array (code, offset, units, items, path), 0 differences.
+  * Units on the workloads are unchanged: 174,010 / 274,023 / 69.
+* **Cuts, to stay within the caps** (charges and events identical, same
+  differential):
+  * one binary search (`ev-lb`) behind `rfind` and `ev-next`;
+  * the streak's struct cursor walk replaced by `named-index` (the ascending
+    cursor stops at the key's entry, so the search answers what it would);
+  * `map-open` answers the candidate list's offset and capacity (`map-cl`
+    and `map-ccap` removed);
+  * the record base found in `map-close`'s and `arr-close`'s own loops
+    (`map-mark` and `array-mark` removed).
+
+  A key-search built on key-probe saved 130 B min but cost brotli, so it was
+  dropped. Net against `b25a0fe`: `runtime` 172,128 → 171,999 min (−129);
+  `snug/sources` 179,650 → 179,513, brotli 56,307 → 56,284 (cap 56,329);
+  `snug/sequence` 209,220 → 209,083 (cap 209,286). No cap changes and no
+  D-entry. The margins are thin: D286 A2+A3's +329 B in the session entries
+  will need its own room.
+* **Bench** (`bench/valid-vm-bench.mjs`, now with `vm-rev` / `sess-rev` arms:
+  keys reversed, otherwise deterministic; vm arms report units; one process
+  per tree, 7 trials, µs, load ~30). Main `b25a0fe` → branch:
+
+  | workload | vm-rev | sess-rev | vm-det |
+  | --- | ---: | ---: | ---: |
+  | 2000 maps × 8 keys | 26,989 → 14,702 (1.84×) | 46,224 → 35,546 | 4,721 → 4,691 |
+  | map-heavy | 32,232 → 25,610 (1.26×) | 57,898 → 49,318 | 10,510 → 11,267 (noise) |
+  | RPC put | 95.7 → 74.1 | 164.8 → 131.5 | 13.4 → 15.8 |
+
+  The rest of maps-rev's time is the canonical copy and the scan (D286's
+  area). map-heavy keeps its generic pairs (a nested map, the two-leaf `bool`
+  typeset).
+
+Checks run on the final tree:
+
+* `bb vm-test`: all ok (above; PEG oracle differential 8600/8600; the 36
+  large-T cases).
+* `bb vmsession-test 2000 1 100 60`: session == buffer 304,747, JS == Rust
+  193,966.
+* `bb sequence-test 300 1`: 441,806 runs; scratch bound held.
+* `bb valid-test`, `bb compile-test`, `scan-test 300 1`, `rscan-test 300 1`,
+  `nav-test`, `write-test`, `unicode-test`, `compile-fuzz`, `drift`: ok.
+* `bb rust-api-test`: ok. `npm test`: 1450/1450. `bb size`: passes.
+* RFC runner: D270 14/14, D301 1/1, baseline 735/25 as on main.
+* `bb proptest --minutes=2 --props=1,2,3,4,5`: P1 22,599, P2 28,755, P3
+  12,006, P4 10,087, P5 9,679 cases, no failure signature.
+* `bb wasm-sdk-test`: 15/15.
