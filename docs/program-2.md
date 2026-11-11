@@ -45,7 +45,8 @@ merged into program.md and this file is deleted.
 
 ## 1. Version and compatibility (D084, D279)
 
-* `FORMAT_VERSION` (header word 1) = `0x00020000`. A format 2 loader refuses
+* `FORMAT_VERSION` (header word 1) = `2` (D100's spelling: major 2 in the low 16
+  bits, minor 0 in the high 16; written `0x00020000` before D318). A format 2 loader refuses
   every 1.x Program, and a 1.x loader refuses 2.0.
 * **Why a major version.** S5–S10 change meaning: format 1 encodes
   existential map tables and counter automata. The old engine is removed
@@ -67,7 +68,7 @@ merged into program.md and this file is deleted.
 
 | Word | Format 1.1 | Format 2.0 | |
 | --- | --- | --- | --- |
-| 1 | `FORMAT_VERSION` | `0x00020000` | [V] |
+| 1 | `FORMAT_VERSION` | `2` (D318) | [V] |
 | 6 | `FLAGS` bits 0–4 | unchanged; **bit 5** `CUTS_BRANCH` (rule A; clear for the default `rfc`, D301); **bit 6** `ARENA` (some ARRAY leaf is A2 or some MAP leaf is T) | bit 5 [V], bit 6 [D] |
 | 19 | `N_GROUPS` | `N_PEGS` | [V] |
 | 29 | `G_EMPTY` | `R_ITEM_MAX`: the maximum, over closure sets R, of the sum of the record words of the A2/T leaves in R (§9.4) | [D] |
@@ -787,7 +788,7 @@ D290–D299, all unsigned):
 
 * **§2, word 62.** Format 1.1's word 62 was `S_END`, not reserved. Format 2.0
   drops `S_END` (the last section ends at `PROGRAM_WORDS`) and word 62 is
-  `RECLEAF_MAX` (D296). `FORMAT_VERSION` is always `0x00020000`; the 1.1
+  `RECLEAF_MAX` (D296). `FORMAT_VERSION` is always 2 (D318); the 1.1
   extension table is part of 2.0.
 * **§3.** `depth` is the root's height counting every node, a `CALL` being a
   leaf (D295). `B` is stored only for A1. Positions and members are numbered

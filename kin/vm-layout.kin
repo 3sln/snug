@@ -9,9 +9,10 @@
 
 ;; ------------------------------------------------------------ header (§2)
 (defconst ^:pub ^I32 MAGIC 1735749235)
-;; format 2.0 (program-2 §1, D279): FORMAT_VERSION is 0x00020000; a 2.0 VM runs
-;; no 1.x Program (the verifier refuses them too)
-(defconst ^:pub ^I32 FORMAT_V2 131072)
+;; format 2.0 (program-2 §1, D279): FORMAT_VERSION is 2 -- D100's spelling, major in
+;; the low 16 bits, minor in the high 16 bits (D318); a 2.0 VM runs no 1.x Program
+;; (the verifier refuses them too)
+(defconst ^:pub ^I32 FORMAT_V2 2)
 (defconst ^:pub ^I32 HEADER_WORDS 64)
 (defconst ^:pub ^I32 H_FORMAT 1)
 (defconst ^:pub ^I32 H_HEADER_WORDS 2)

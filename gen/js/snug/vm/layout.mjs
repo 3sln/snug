@@ -3,7 +3,7 @@
 
 export const MAGIC = 1735749235;
 
-export const FORMAT_V2 = 131072;
+export const FORMAT_V2 = 2;
 
 export const HEADER_WORDS = 64;
 

@@ -2,7 +2,7 @@
 // source: snug.vm.layout
 
 pub const MAGIC: i32 = 1735749235;
-pub const FORMAT_V2: i32 = 131072;
+pub const FORMAT_V2: i32 = 2;
 pub const HEADER_WORDS: i32 = 64;
 pub const H_FORMAT: i32 = 1;
 pub const H_HEADER_WORDS: i32 = 2;

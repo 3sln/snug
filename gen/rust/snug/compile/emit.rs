@@ -1464,7 +1464,7 @@ pub(crate) fn rule_chain(h: &mut [i32], rts: i32) -> i32 {
     return ch;
 }
 pub const MAGIC: i32 = 1735749235;
-pub const FORMAT_VERSION: i32 = 131072;
+pub const FORMAT_VERSION: i32 = 2;
 pub const FLAG_CUTS_BRANCH: i32 = 32;
 pub const FLAG_ARENA: i32 = 64;
 pub(crate) fn out(h: &mut [i32], v: i32) {

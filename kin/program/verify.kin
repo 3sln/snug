@@ -90,7 +90,7 @@
 (defconst ^I32 W_N_EXTS 30)
 (defconst ^I32 W_EXT_NAMES 31)
 (defconst ^I32 W_EXT_NAMES_LEN 39)
-(defconst ^:pub ^I32 FORMAT_V2 131072)
+(defconst ^:pub ^I32 FORMAT_V2 2)
 (defconst ^I32 PEG_HDR 9)
 (defconst ^I32 COUNT_SAT 16777216)
 (defconst ^I32 RING_WORDS 4096)

@@ -1520,7 +1520,7 @@ export function ruleChain(h, rts) {
 
 export const MAGIC = 1735749235;
 
-export const FORMAT_VERSION = 131072;
+export const FORMAT_VERSION = 2;
 
 export const FLAG_CUTS_BRANCH = 32;
 

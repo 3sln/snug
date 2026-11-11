@@ -1088,7 +1088,7 @@
 (defconst ^:pub ^I32 MAGIC 1735749235)
 ;; format 2.0 (D279; program-2 §1): major 2 in the low 16 bits, minor 0. The
 ;; extension table of format 1.1 (D141) is part of 2.0 unchanged.
-(defconst ^:pub ^I32 FORMAT_VERSION 131072)
+(defconst ^:pub ^I32 FORMAT_VERSION 2)
 ;; D301: set under `cuts: 'branch'` (rule A); clear for the default literal RFC cut
 (defconst ^:pub ^I32 FLAG_CUTS_BRANCH 32)
 (defconst ^:pub ^I32 FLAG_ARENA 64)

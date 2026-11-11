@@ -22,7 +22,7 @@ const limitKeys = ['maxBytes', 'maxDepth', 'maxEntries', 'maxItems'];
 const decodeKeys = [...presetKeys, ...limitKeys, 'objects'];
 const validationKeys = [...decodeKeys, 'maxBignumBytes', 'budget'];
 const encodeKeys = [...presetKeys, ...limitKeys, 'objects', 'omitUndefined'];
-const compileLimits = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives',
+const compileLimits = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'pegNodes',
   'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget',
   'leaves', 'depth', 'inputBytes', 'entries', 'items', 'bignumBytes', 'budget'];
 const badFor = key => [...limitKeys, ...compileLimits, 'maxBignumBytes', 'chunk', 'quantum', 'delay'].includes(key)

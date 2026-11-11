@@ -3,7 +3,7 @@
 // items on every input (bb vm-test's profile identity), so an unknown-length
 // pushScanner/scanStream (D085) runs it as a drain-mode session. Checked against the
 // compiler by host/js/test/stream.test.mjs.
-export const ANY_P = Int32Array.of(1735749235, 131072, 64, 90, 1, 0, 0, -1153793131, -1965254075, -798592316, 844469009, -714685243, 702268175, 1552891410,
+export const ANY_P = Int32Array.of(1735749235, 2, 64, 90, 1, 0, 0, -1153793131, -1965254075, -798592316, 844469009, -714685243, 702268175, 1552891410,
   1286639795, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
   0, 0, 0, 0, 256, 2147483647, 16777216, 16777216, 128, 2147483647, 8388608, 0, 1078, 4194304,
   64, 69, 77, 78, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81,

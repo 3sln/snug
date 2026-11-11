@@ -51,7 +51,7 @@ test('container matches §13.3, explicit little endian and independent host SHA-
   const d = new DataView(bytes.buffer), P = s.program.P, B = s.program.B;
   assert.equal(new TextDecoder().decode(bytes.subarray(0, 8)), 'snugprog');
   assert.equal(d.getUint32(8, true), 1);
-  assert.equal(d.getUint32(12, true), 1);
+  assert.equal(d.getUint32(12, true), 2);   // format 2.0 (D279, D318: major in the low 16 bits)
   assert.equal(d.getUint32(16, true), P.length);
   assert.equal(d.getUint32(20, true), B.length);
   assert.equal(new TextDecoder().decode(bytes.subarray(24, 29)), '0.0.0');
@@ -87,15 +87,16 @@ test('container refusals have precise safe codes, including rehashed invalid Pro
   };
   await assert.rejects(fromSerialized(mutate(0, 0)), refused('magic'));
   await assert.rejects(fromSerialized(mutate(8, 2, true)), refused('container_version'));
-  await assert.rejects(fromSerialized(mutate(12, 2, true)), refused('format_version'));
-  await assert.rejects(fromSerialized(mutate(14, 2, true)), refused('format_version')); // major 1, minor 2 (the loader is 1.1, D141)
+  await assert.rejects(fromSerialized(mutate(12, 1, true)), refused('format_version'));  // major 1: a 2.0 loader refuses every 1.x (D279)
+  await assert.rejects(fromSerialized(mutate(12, 3, true)), refused('format_version'));
+  await assert.rejects(fromSerialized(mutate(14, 2, true)), refused('format_version')); // major 2, minor 2 (the loader is 2.0)
   await assert.rejects(fromSerialized(mutate(24, 0, true)), refused('version'));
   await assert.rejects(fromSerialized(mutate(29, 0x80, true)), refused('version'));
   await assert.rejects(fromSerialized(mutate(88, 1, true)), refused('reserved'));
   await assert.rejects(fromSerialized(mutate(56, bytes[56] ^ 1)), refused('digest'));
   await assert.rejects(fromSerialized(mutate(bytes.length - 1, bytes.at(-1) ^ 1)), refused('digest'));
   await assert.rejects(fromSerialized(mutate(96, 0, true)), refused('verify'));
-  await assert.rejects(fromSerialized(mutate(100, 2, true)), refused('format_version'));
+  await assert.rejects(fromSerialized(mutate(100, 3, true)), refused('format_version'));   // P[1] disagrees with the container's word
   const huge = bytes.slice(); new DataView(huge.buffer).setUint32(16, 0xffffffff, true);
   await assert.rejects(fromSerialized(resign(huge)), refused('length'));
   const trailing = new Uint8Array(bytes.length + 1); trailing.set(bytes);

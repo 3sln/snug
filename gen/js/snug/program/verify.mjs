@@ -111,7 +111,7 @@ export const W_EXT_NAMES = 31;
 
 export const W_EXT_NAMES_LEN = 39;
 
-export const FORMAT_V2 = 131072;
+export const FORMAT_V2 = 2;
 
 export const PEG_HDR = 9;
 
