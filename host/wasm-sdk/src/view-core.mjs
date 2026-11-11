@@ -34,7 +34,7 @@ import { validationFault } from '../../js/src/public-errors.mjs';
 import { build } from '../../js/src/build.mjs';
 import { TYPED_BY_TAG } from '../../js/src/values.mjs';
 import { validateOptions, selectOptions } from '../../js/src/options.mjs';
-import { profileFlags, codecTop, keysOf } from '../../js/src/profiles.mjs';
+import { profileFlags, codecTop, keysOf, validOk } from '../../js/src/profiles.mjs';
 import { Writer } from '../../js/src/writer.mjs';
 
 const N_MAJOR = 0, N_AI = 1, N_HI = 2, N_LO = 3, NAV_NOT_FOUND = -3;
@@ -68,6 +68,7 @@ class Message {
       maxItems: opts.maxItems, maxBignumBytes: opts.maxBignumBytes, budget: opts.budget, cose: this.cose };
     this.dirs = opts.directories === true ? new Map() : null;
     this.dirWords = 0;
+    this.unsorted = false;
     this.token = {};
     messages.register(this, { allocs: this.allocs, gen: this.gen }, this.token);
   }
@@ -230,6 +231,8 @@ function badKey(key, m) {
 function findIn(m, p, n, key, cose) {
   const span = encodeKey(key, cose, 0, m);
   if (span === null) { badKey(key, m); return -1; }
+  // keys out of canonical order (valid CBOR, P8.4): every key compared, no directory search
+  if (m.unsorted) return ok(rt.x.sdk_nav_find_any(m.ptr, m.end, p, span[0], span[1]));
   const d = m.dir(p, n);
   return ok(d !== null ? rt.x.sdk_nav_dir_find(m.ptr, m.end, d, n, span[0], span[1]) : rt.x.sdk_nav_find(m.ptr, m.end, p, span[0], span[1]));
 }
@@ -502,19 +505,50 @@ export function view(bytes, opts = {}) {
   }
   if (r && r.code !== undefined) { rt.x.sdk_free(ptr, Math.max(n, 1)); throw new SnugFault(rt.codeName(r.code)); }
   if (r && !r.ok) { rt.x.sdk_free(ptr, Math.max(n, 1)); throw validationFault(r); }
-  return new View(new Message(ptr, n, opts), 0, 0);
+  // Valid input that is not its own deterministic form is read through its canonical copy (P8.4, D262), as the
+  // native view: offsets are positions in it, raw() its canonical encodings, map order the wire's.
+  const c = rt.lastCopy();
+  let m;
+  if (c.bytes) {
+    rt.x.sdk_free(ptr, Math.max(n, 1));
+    const cn = c.bytes.length;
+    try { ptr = rt.x.sdk_alloc(Math.max(cn, 1)) >>> 0; rt.refresh(); rt.u8.set(c.bytes, ptr); } catch (e) { rt.lost(e); }
+    m = new Message(ptr, cn, opts);
+  } else m = new Message(ptr, n, opts);
+  m.unsorted = c.unsorted;
+  return new View(m, 0, 0);
 }
 /** INTERNAL (D215, P7.13w): the View of message bytes the caller has just CHECKED under
  *  `opts` -- the sequence reader, from its session's verdict -- copied into linear memory
  *  like any view's (`borrowed` is ignored: linear memory cannot borrow a JS chunk). No
  *  package entry exports this: never a public trusted opener (§16.2, V1/V2). */
+/** The profile options of a checked message's options (the sequence reader's: no schema, no limits). */
+const profileOptions = opts => Object.fromEntries(Object.entries(selectOptions(opts, 'decode'))
+  .filter(([k, v]) => v !== undefined && k !== 'schema' && k !== 'rule'));
 export function mintView(bytes, opts, _borrowed) {
   rt.ready();
   const n = bytes.length;
   let ptr;
   try { ptr = rt.x.sdk_alloc(Math.max(n, 1)) >>> 0; rt.refresh(); rt.u8.set(bytes, ptr); }
   catch (e) { rt.lost(e); }
-  return new View(new Message(ptr, n, opts), 0, 0);
+  // A valid-CBOR message that is not its own deterministic form is read through its canonical copy (P8.4, D262), as
+  // the native mintView: the profile scanner over the checked bytes, the check's limits not re-applied.
+  const o = profileOptions(opts), flags = profileFlags(o);
+  if (!validOk(flags)) return new View(new Message(ptr, n, opts), 0, 0);
+  let code;
+  try { code = rt.x.sdk_scan(ptr, n, 1, o.cose === true ? 1 : 0, clamp(n), I32_MAX, I32_MAX, I32_MAX, flags); }
+  catch (e) { rt.lost(e); }
+  if (code !== 0) { rt.x.sdk_free(ptr, Math.max(n, 1)); throw new SnugFault(rt.codeName(code)); }
+  const c = rt.lastCopy();
+  let m;
+  if (c.bytes) {
+    rt.x.sdk_free(ptr, Math.max(n, 1));
+    const cn = c.bytes.length;
+    try { ptr = rt.x.sdk_alloc(Math.max(cn, 1)) >>> 0; rt.refresh(); rt.u8.set(c.bytes, ptr); } catch (e) { rt.lost(e); }
+    m = new Message(ptr, cn, opts);
+  } else m = new Message(ptr, n, opts);
+  m.unsorted = c.unsorted;
+  return new View(m, 0, 0);
 }
 /** Directory words a view's message holds (for measurements). */
 export function directoryWords(v) { return viewParts(v)[0].dirWords; }

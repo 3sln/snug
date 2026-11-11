@@ -343,19 +343,40 @@ pub fn embed_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], cs: i32, ce: i
     s[(O_MAX_DEPTH) as usize] = nm;
     s[(O_COSE) as usize] = 0;
     s[(VM_EMBED) as usize] = s[(VM_EMBED) as usize] + 1;
-    let r: i32;
+    let mut r: i32;
+    // P8.4 (D264): over a canonical copy the content's embedded-table entry --
+    // its duplicate checks charged, then its own copy walked, or the refusal its
+    // check recorded
+    let ve: i32 = vtab_find(s, cs);
+    let mut wcs: i32 = cs;
+    let mut wce: i32 = ce;
+    if ve >= 0 {
+        wcs = s[(ve + 3) as usize];
+        wce = s[(ve + 4) as usize];
+    }
     if seq == 1 {
         if cnq > 0 {
-            r = eval_array(p, pool, b, s, cs, cs, -1, d + 1, cfb, cck, cnq, ce, 0, ext);
+            r = eval_array(p, pool, b, s, wcs, wcs, -1, d + 1, cfb, cck, cnq, wce, 0, ext);
         } else {
-            r = dead_seq(b, s, cs, d + 2, ce);
+            r = dead_seq(b, s, wcs, d + 2, wce);
         }
     } else if cnq > 0 {
-        r = eval_item(p, pool, b, s, cs, d + 1, cfb, cck, cnq, ce, 0, ext);
+        r = eval_item(p, pool, b, s, wcs, d + 1, cfb, cck, cnq, wce, 0, ext);
     } else {
-        r = dead_item(b, s, cs, d + 1, ce);
+        r = dead_item(b, s, wcs, d + 1, wce);
+    }
+    if (seq == 0) && ((r >= 0) && (r == wce)) {
+        r = ce;
     }
     if (r == (-R_BUDGET)) || (r == (-R_INCONSISTENT)) {
+        return r;
+    }
+    // the deterministic attempt of a valid-CBOR run (PF_VREL) meeting content only
+    // valid CBOR has: the run takes the canonical path (D262)
+    if ((s[(O_PROFILE) as usize] & PF_VREL) != 0) && ((r == (-CODE_NON_SHORTEST)) || ((r == (-CODE_INDEFINITE)) || (r == (-CODE_KEY_ORDER)))) {
+        return -R_NONDET;
+    }
+    if r == (-R_NONDET) {
         return r;
     }
     let ierr: i32 = s[(O_ERR_POS) as usize];
@@ -702,7 +723,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         if ai0 >= 24 {
             q0 = read_arg(b, s, pos, ai0, end);
             if q0 < 0 {
-                return q0;
+                return head_fail(b, s, pos, ai0, d, q0);
             }
             hi0 = s[(O_HI) as usize];
             lo0 = s[(O_LO) as usize];
@@ -767,7 +788,7 @@ pub fn fast_child(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: 
         } else {
             q = read_arg(b, s, pos, ai, end);
             if q < 0 {
-                return q;
+                return head_fail(b, s, pos, ai, d, q);
             }
             hi = s[(O_HI) as usize];
             lo = s[(O_LO) as usize];
@@ -959,8 +980,12 @@ pub fn eval_tag(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q: i3
         if cnq > 0 {
             stop = eval_item(p, pool, b, s, q, d + 1, cfb, cck, cnq, end, 0, ext);
         } else {
-            stop = dead_pair_body(b, s, q, d, end);
+            stop = pair_walk(b, s, q, d, end);
         }
+        if stop < 0 {
+            return stop;
+        }
+        stop = pair_count(b, s, pos, q, if_code(rt), stop);
         if stop < 0 {
             return stop;
         }
@@ -1268,6 +1293,12 @@ pub fn eval_array(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0:
         }
         el += 1;
     }
+    if s[(VM_VTAB) as usize] != 0 {
+        let rea: i32 = replay_end(s, q0);
+        if rea < 0 {
+            return rea;
+        }
+    }
     let mut be: i32 = area;
     for _bk in 0..nb {
         if !charge(s, 1, pos) {
@@ -1386,6 +1417,12 @@ pub fn map_pair_fast(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, 
     let ko: i32 = key_order(b, s, ps, pe, start, kq);
     if ko < 0 {
         return ko;
+    }
+    if s[(VM_VTAB) as usize] != 0 {
+        let rkf: i32 = replay_key(s, start);
+        if rkf < 0 {
+            return rkf;
+        }
     }
     s[(VM_FASTK) as usize] = kq;
     s[((bo + pso) + 2) as usize] = 0;
@@ -1798,6 +1835,14 @@ pub fn map_alive(p: &[i32], s: &[i32], fb: i32, area: i32, nb: i32) -> i32 {
     }
     return k;
 }
+pub fn cursors_reset(p: &[i32], s: &mut [i32], fb: i32, area: i32, nb: i32) {
+    // Every map block's key cursor back to the first key (P8.4, PF_CANON).
+    let mut bo: i32 = area;
+    for _i in 0..nb {
+        s[(bo + 2) as usize] = 0;
+        bo += p[(block_mt(p, s, fb, bo) + 6) as usize];
+    }
+}
 pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i32, n: i32, d: i32, fb: i32, ck: i32, nq: i32, end: i32, ctx: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // A map item (§8.3) after its head and container checks. Per pair: the
     // scanner's key checks; the key search, cursors, the key's query (key
@@ -1910,6 +1955,12 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                 if kod < 0 {
                     return kod;
                 }
+                if s[(VM_VTAB) as usize] != 0 {
+                    let rkd: i32 = replay_key(s, start);
+                    if rkd < 0 {
+                        return rkd;
+                    }
+                }
                 ps = start;
                 pe = q;
                 q = dead_item(b, s, q, d + 1, end);
@@ -1928,7 +1979,16 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                 let kq: i32;
                 let vq: i32;
                 let mut bo: i32;
-                // The key's id in the schema-wide key table.
+                // The key's id in the schema-wide key table. Over a canonical
+                // copy (PF_CANON, P8.4) keys come in wire order: a key below the
+                // previous one restarts the search bound and every block's
+                // cursor (uncharged; the session does the same, D266).
+                if (ke > start) && ((ps >= 0) && ((s[(O_PROFILE) as usize] & PF_CANON) != 0)) {
+                    if compare_spans(b, ps, pe, start, ke) >= 0 {
+                        klo = 0;
+                        cursors_reset(p, s, fb, area, nb);
+                    }
+                }
                 if ke > start {
                     kid = key_search(p, pool, b, s, start, ke, klo, pos);
                     if kid == (-2) {
@@ -2013,6 +2073,12 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
                     let ko: i32 = key_order(b, s, ps, pe, start, kq);
                     if ko < 0 {
                         return ko;
+                    }
+                    if s[(VM_VTAB) as usize] != 0 {
+                        let rk: i32 = replay_key(s, start);
+                        if rk < 0 {
+                            return rk;
+                        }
                     }
                     ps = start;
                     pe = kq;
@@ -2137,6 +2203,14 @@ pub fn eval_map(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, q0: i
         }
         pk += 1;
     }
+    // Over a canonical copy: the map's deferred-check units and a recorded
+    // refusal, before its end (D277, D280).
+    if s[(VM_VTAB) as usize] != 0 {
+        let rem: i32 = replay_end(s, q0);
+        if rem < 0 {
+            return rem;
+        }
+    }
     // The end: 1 unit per block; alive blocks + 1 per alternative and pool.
     let mut be: i32 = area;
     let mut best: i32 = -1;
@@ -2239,7 +2313,7 @@ pub fn eval_item(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], pos: i32, d: i
         }
         q = read_arg(b, s, pos, ai, end);
         if q < 0 {
-            return q;
+            return head_fail(b, s, pos, ai, d, q);
         }
         hi = s[(O_HI) as usize];
         lo = s[(O_LO) as usize];

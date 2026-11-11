@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { decode, CBORFault } from '../../bench/baseline/cbor-3sln.mjs';
 import { buildCases, hex, DEF, ANY } from './scan-cases.mjs';
-import { scan, scanOptions, scanProfile, errorOffset, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { scan, scanCb, scanOptions, scanProfile, errorOffset, codeName } from '../../gen/js/snug/cbor/scan.mjs';
 import { buildDetCases, optWords, DDEF } from './det-cases.mjs';
 import { loadCbor2, acceptanceDiff, encodeDiff } from './det-diff.mjs';
 import { encode as snugEncode } from '../../host/js/src/encode.mjs';
@@ -138,9 +138,20 @@ console.log(wasmLine);
 // cases of the new rules and seeded cases under random profile flags: JS == the vector, JS == Rust (code and
 // offset), and the deterministic preset against cbor2 (kin/scripts/det-diff.mjs).
 const DET_MUT = Math.max(2000, Math.round(MUTATIONS * 2 / 3));
-const dc = buildDetCases(DET_MUT, SEED);
-const o2 = new Int32Array(16);
-const detRun = (bytes, opt) => { scanOptions(o2, ...optWords(opt)); scanProfile(o2, opt.flags); const c = scan(bytes, o2); return { code: c, name: codeName(c), offset: errorOffset(o2) }; };
+const dc = buildDetCases(DET_MUT, SEED, { valid: true });
+// The profile options need the walk's scratch past o's 16 words and a canonical buffer (D264): a marked map's
+// duplicate check (an EC-sensitive key, D263) can need them under any profile. Grown on CODE_SCRATCH (22).
+let o2 = new Int32Array(16 + 64), cb2 = new Uint8Array(64);
+const detRun = (bytes, opt) => {
+  for (;;) {
+    scanOptions(o2, ...optWords(opt)); scanProfile(o2, opt.flags);
+    const c = scanCb(bytes, o2, cb2);
+    if (c !== 22) return { code: c, name: codeName(c), offset: errorOffset(o2) };
+    const nw = o2[13], nb = o2[14];
+    if (nw > o2.length) o2 = new Int32Array(Math.max(nw, 2 * o2.length));
+    if (nb > cb2.length) cb2 = new Uint8Array(Math.max(nb, 2 * cb2.length));
+  }
+};
 const dj = dc.cases.map(c => detRun(c.bytes, c.opt));
 let detVec = 0, detFail = 0;
 dc.cases.forEach((c, i) => {

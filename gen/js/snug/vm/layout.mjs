@@ -163,6 +163,8 @@ export const VM_BIGNUM_MAX = 34;
 
 export const VM_DETAIL = 35;
 
+export const VM_VTAB = 36;
+
 export const VM_POS = 37;
 
 export const VM_Q1 = 38;
@@ -214,6 +216,8 @@ export const R_CONTROL = 42;
 export const R_CONTROL_SIZE = 43;
 
 export const R_BUDGET = 48;
+
+export const R_NONDET = 49;
 
 export const R_INCONSISTENT = 100;
 

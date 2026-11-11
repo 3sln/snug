@@ -27,6 +27,16 @@ export let u8 = null, i32 = null;
 let buf = null;
 export let generation = 0;      // bumped by every new instance
 export let OUT = 0, INFO = 0, NAV = 0;   // word indexes of the static areas
+/** P8.4 (D262): after sdk_scan or sdk_validate accepted, the canonical copy to build from (a fresh Uint8Array) when
+ *  the input is valid but not its own deterministic form, else null; and whether some map's keys may be out of
+ *  canonical order (INFO[1] bit VC_UNSORTED). */
+export function lastCopy() {
+  refresh();
+  const n = i32[INFO + 2], unsorted = (i32[INFO + 1] & 1024) !== 0;
+  if (n < 0) return { bytes: null, unsorted };
+  const p = x.sdk_copy() >>> 0;
+  return { bytes: u8.slice(p, p + n), unsorted };
+}
 
 export class InstanceLost extends Error {
   constructor(cause) { super('snug wasm: the instance trapped and was reset; no verdict was reached'); this.name = 'InstanceLost'; this.cause = cause; }

@@ -11,30 +11,89 @@
 ;; Every walk function answers a position (>= 0) or a NEGATED code, and
 ;; records the offset a refusal was decided at in o[O_ERR_POS].
 (ns snug.cbor.scan
-  (:require [kin.lang :refer [defn let return set if while for do comment doc case declarefn]]
-            [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - neg rem sar ushr bit-and bit-or
-                               < > <= >= == != and or not u8 blen ia iset hex]]
+  (:require [kin.lang :refer [defn let local return set if while for do comment doc case declarefn break forever]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR Str + - * neg quot rem sar ushr bit-and bit-or
+                               < > <= >= == != and or not ult u8 blen ia iset ilen hex]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_NON_SHORTEST CODE_INDEFINITE
                                      CODE_MALFORMED CODE_KEY_TYPE CODE_KEY_ORDER
                                      CODE_DUPLICATE_KEY CODE_TEXT CODE_FLOAT
                                      CODE_SIMPLE CODE_TAG CODE_BIGNUM CODE_DECIMAL
                                      CODE_TYPED_ARRAY CODE_NDARRAY CODE_TRAILING
                                      CODE_DEPTH CODE_TOO_MANY_ENTRIES
-                                     CODE_TOO_MANY_ITEMS CODE_TOO_LARGE CODE_NOT_MAP
+                                     CODE_TOO_MANY_ITEMS CODE_TOO_LARGE CODE_NOT_MAP CODE_SCRATCH
                                      O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH
                                      O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS O_ITEMS
-                                     O_HI O_LO O_CSTART O_PROFILE MAX_BIGNUM_BYTES
-                                     PF_KEYS PF_FLOATS PF_UNDEFINED PF_NONCHAR PF_HOST]]
-            [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
+                                     O_HI O_LO O_CSTART O_PROFILE O_VCTL O_VNEEDW O_VNEEDB O_VLEN
+                                     O_S_RTOP O_S_DLOW O_S_UNITS O_S_CBTOP O_S_NDEF O_S_SRC O_S_EXTRA O_S_FIRST O_S_DUPK O_S_DUPP O_S_DUPO
+                                     MAX_BIGNUM_BYTES MAX_DIMENSIONS VC_NONDET VC_UNSORTED VC_ECS
+                                     PF_KEYS PF_TAGS PF_FLOATS PF_UNDEFINED PF_NONCHAR PF_HOST PF_VALID PF_VREL]]
+            [snug.cbor.head :refer [fail be16 be32 read-arg read-arg-v take-len count-item
                                     enter-container bytes-content]]
             [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
             [snug.cbor.float :refer [check-f16 check-f32 check-f64 rfc-f16 rfc-f32 rfc-f64]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count
-                                    shape-ok]]
-            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag]]))
+                                    shape-ok vcount decimal-v ndarray-v]]
+            [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag typed-any-size
+                                       date-time-ok uri-ok]]
+            [snug.cbor.canon :refer [targ tskip tcount tlength chunk-pos fits16 fits32 head-short
+                                     kclass dup-pairs dup-input dup-forms dup-forms-within
+                                     dup-finish gather gather-within]]))
 
-(declarefn item scan-one)
+(declarefn item scan-one item-v std-indef scan-x unsorted dup-note)
+
+;; ------------------------------------------------------------- valid CBOR (P8.4)
+
+(defn ^:pub ^Bool valid-on [^IntsR o]
+  (comment "Does the profile admit valid, non-deterministic CBOR (PF_VALID, D260)?")
+  (return (!= (bit-and (ia o O_PROFILE) PF_VALID) 0)))
+
+(defn ^:pub nondet [^Ints o]
+  (comment "Note that the input is not its own canonical (DC) form: an encoding the"
+           "deterministic profile refuses was admitted (VC_NONDET).")
+  (let [v (ia o O_VCTL)]
+    (iset o O_VCTL (bit-or v VC_NONDET))))
+
+(defn ^:pub ^I32 defer [^Ints o ^I32 kind ^I32 a1 ^I32 a2 ^I32 a3 ^I32 a4]
+  (comment "Record a check that needs the canonical buffer (scan-cb runs it after the"
+           "walk, D264): 7 words below o[O_S_DLOW] -- kind (1 a map's duplicate check"
+           "with EC forms, 2 a tag-0/32 text rule, 3 a tag-24 payload), the buffer the"
+           "walk reads (o[O_S_SRC]), four arguments (kinds 1 and 2: the items walked"
+           "to the record, less O_S_EXTRA, last) and a count (-1 until known). In a"
+           "replay (O_S_SRC bit 1) a payload adds its known count instead. 0, or"
+           "-CODE_SCRATCH.")
+  (let [src (ia o O_S_SRC)]
+    (if (!= (bit-and src 2) 0)
+      (do (if (== kind 3)
+            (do (comment "a replay: the payload's items, counted when it was checked")
+                (let [nd (ia o O_S_NDEF)
+                      ^:mut i 0]
+                  (while (< i nd)
+                    (let [ex (- (ilen o) (* 7 (+ i 1)))]
+                      (if (and (== (ia o ex) 3) (and (== (ia o (+ ex 1)) (bit-and src 1)) (== (ia o (+ ex 2)) a1)))
+                        (do (let [it (+ (ia o O_ITEMS) (ia o (+ ex 6)))]
+                              (iset o O_ITEMS it)
+                              (if (> it (ia o O_MAX_ITEMS)) (return (fail o a2 CODE_TOO_MANY_ITEMS))))
+                            (return 0))))
+                    (set i (+ i 1))))))
+          (return 0))))
+  (if (< (ilen o) O_S_FIRST)
+    (do (iset o O_VNEEDW 256)
+        (return (neg CODE_SCRATCH))))
+  (let [e (- (ia o O_S_DLOW) 7)]
+    (if (< e (ia o O_S_RTOP))
+      (do (iset o O_VNEEDW (+ (ilen o) 256))
+          (return (neg CODE_SCRATCH))))
+    (iset o e kind)
+    (iset o (+ e 1) (bit-and (ia o O_S_SRC) 1))
+    (iset o (+ e 2) a1)
+    (iset o (+ e 3) a2)
+    (iset o (+ e 4) a3)
+    (iset o (+ e 5) a4)
+    (iset o (+ e 6) (neg 1))
+    (iset o O_S_DLOW e)
+    (iset o O_S_NDEF (+ (ia o O_S_NDEF) 1))
+    (return 0)))
 
 ;; ------------------------------------------------------------- leaves
 
@@ -54,11 +113,35 @@
           (return (fail o b2 CODE_TEXT)))))
   (return (fail o bad CODE_TEXT)))
 
+(defn ^:pub ^Bool narrower [^Bytes b ^I32 pos ^I32 ai]
+  (comment "Does a narrower width hold the float at pos bit for bit (sign, NaN payload"
+           "and signalling bit included)?")
+  (if (== ai 26) (return (fits16 (be32 b (+ pos 1)))))
+  (if (== ai 27) (return (fits32 (be32 b (+ pos 1)) (be32 b (+ pos 5)))))
+  (return false))
+
 (defn ^:pub ^I32 float-bad [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 c]
   (comment "The Bindle float check refused the float at pos (its bytes present) with c."
            "Under PF_FLOATS the RFC 8949 deterministic rules decide instead (D122):"
            "they accept every float the Bindle rules accept, so they are consulted"
-           "only here and scan-float stays the Bindle hot path, unchanged.")
+           "only here and scan-float stays the Bindle hot path, unchanged. Under"
+           "PF_VALID (or the VM's PF_VREL, P8.4) every NaN is admitted in the width"
+           "its bits need; a float in a wider width than its bits need is admitted"
+           "by PF_VALID (noted: not canonical) and non_shortest otherwise.")
+  (let [pf (ia o O_PROFILE)
+        ^:mut wv 2]
+    (if (== ai 26) (set wv 4))
+    (if (== ai 27) (set wv 8))
+    (if (!= (bit-and pf PF_FLOATS) 0)
+      (if (!= (bit-and pf (bit-or PF_VALID PF_VREL)) 0)
+        (do (if (not (narrower b pos ai)) (return (+ (+ pos 1) wv)))
+            (if (!= (bit-and pf PF_VALID) 0)
+              (do (nondet o)
+                  (return (+ (+ pos 1) wv))))
+            (return (fail o pos CODE_NON_SHORTEST)))))
+    (if (and (== c CODE_NON_SHORTEST) (!= (bit-and pf PF_VALID) 0))
+      (do (nondet o)
+          (return (+ (+ pos 1) wv)))))
   (if (!= (bit-and (ia o O_PROFILE) PF_FLOATS) 0)
     (do (let [^:mut c2 0
               ^:mut w 2]
@@ -101,6 +184,9 @@
            "the shortest-form check; unassigned simple values are always refused.")
   (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
   (if (and (== ai 23) (!= (bit-and (ia o O_PROFILE) PF_UNDEFINED) 0)) (return (+ pos 1)))
+  (comment "RFC 8949 Appendix F: f8 with a value below 32 is not well-formed")
+  (if (and (== ai 24) (and (!= (bit-and (ia o O_PROFILE) (bit-or PF_VALID PF_VREL)) 0) (< (ia o O_LO) 32)))
+    (return (fail o pos CODE_MALFORMED)))
   (return (fail o pos CODE_SIMPLE)))
 
 (defn ^I32 scan-text [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
@@ -148,16 +234,89 @@
   (if (!= (bit-and (ia o O_PROFILE) PF_KEYS) 0) (return true))
   (return (cose-label-ok b s km)))
 
+(defn ^:pub ^I32 key-step [^Bytes b ^Ints o ^I32 ps ^I32 pe ^I32 pc ^I32 start ^I32 q ^I32 km]
+  (comment "D263, after the key b[start, q) of major km was walked, against the"
+           "previous key b[ps, pe) (ps < 0: none; pc 1 when it was canonical): bit 0"
+           "this key is canonical, bit 1 the map is marked for the deferred check"
+           "(the key order broke under PF_VALID, a key is not canonical, or a key is"
+           "EC-sensitive); or the refusal -- duplicate_key when two canonical"
+           "neighbours are equal, key_order when they descend without PF_VALID.")
+  (let [pf (ia o O_PROFILE)
+        ^:mut kc 0
+        ^:mut res 0]
+    (if (or (== km 3) (<= km 1))
+      (do (if (!= (bit-and pf PF_VALID) 0)
+            (if (not (head-short b start)) (set kc 1))))
+      (set kc (kclass b o start)))
+    (comment "an EC-sensitive key: the VM's deterministic attempt takes the canonical"
+             "path when it reaches one (VC_ECS), and so does the session (D266)")
+    (if (!= (bit-and kc 2) 0)
+      (do (let [v (ia o O_VCTL)]
+            (iset o O_VCTL (bit-or v VC_ECS)))))
+    (if (== (bit-and kc 1) 0) (set res 1))
+    (if (!= kc 0) (set res (bit-or res 2)))
+    (if (>= ps 0)
+      (if (and (== pc 1) (== (bit-and kc 1) 0))
+        (do (let [order (compare-spans b ps pe start q)]
+              (if (== order 0) (return (dup-note o 1 (neg 1) start start CODE_DUPLICATE_KEY)))
+              (if (> order 0)
+                (do (if (== (bit-and pf PF_VALID) 0) (return (dup-note o 1 (neg 1) start start CODE_KEY_ORDER)))
+                    (unsorted o)
+                    (set res (bit-or res 2))))))
+        (unsorted o)))
+    (return res)))
+
+(defn ^:pub ^I32 dup-note [^Ints o ^I32 kind ^I32 src ^I32 at ^I32 off ^I32 code]
+  (comment "Refuse a map key (duplicate_key, or key_order under a deterministic"
+           "profile) at off, noting it for the canonical path's replay (D280) when o"
+           "has scratch: kind 1 at the key (at = off), 2 at a map's end (at = the"
+           "map's first key), + 4 when src (-1: the walk's own, O_S_SRC bit 0):"
+           "positions in the canonical buffer; + 8 * code.")
+  (if (>= (ilen o) O_S_FIRST)
+    (do (let [^:mut sr src]
+          (if (< sr 0) (set sr (bit-and (ia o O_S_SRC) 1)))
+          (iset o O_S_DUPK (+ (+ kind (* 4 sr)) (* 8 code))))
+        (iset o O_S_DUPP at)
+        (iset o O_S_DUPO off)))
+  (return (fail o off code)))
+
+(defn ^:pub unsorted [^Ints o]
+  (comment "Note that some map's keys may not be in canonical order (VC_UNSORTED).")
+  (let [v (ia o O_VCTL)]
+    (iset o O_VCTL (bit-or v VC_UNSORTED))))
+
+(defn ^:pub ^I32 dup-map [^Bytes b ^Ints o ^I32 p ^I32 npairs]
+  (comment "A marked map's deferred check (D263) at its end, its first key at p:"
+           "here when every key is its own comparison form, else recorded for scan-cb"
+           "(it writes EC forms to the canonical buffer). 0 or a negated code.")
+  (if (< (ilen o) O_S_FIRST)
+    (do (iset o O_VNEEDW 256)
+        (return (neg CODE_SCRATCH))))
+  (let [n (dup-pairs b o p npairs)
+        r (dup-input b o p n)]
+    (if (< r 0) (return r))
+    (if (== r 0)
+      (do (let [d (dup-finish b b o n (ia o O_S_CBTOP))]
+            (if (== d (neg CODE_DUPLICATE_KEY))
+              (return (dup-note o 2 (neg 1) p (ia o O_ERR_POS) CODE_DUPLICATE_KEY)))
+            (return d))))
+    (return (defer o 1 p n (- (ia o O_ITEMS) (ia o O_S_EXTRA)) 0))))
+
 (defn ^I32 scan-map [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (comment "Per pair: the key's major type is PEEKED (key_type) before the key is"
-           "scanned; order and duplicates are decided after it, by its encoded bytes.")
+           "scanned; order and duplicates are decided after it, by its encoded bytes"
+           "(a text key of the deterministic profile inline, as always; any other key"
+           "by key-step), and a marked map's deferred check runs at its end.")
   (let [r (enter-container o pos p hi lo depth 1 end)
         cose (and (== depth 0) (!= (ia o O_COSE) 0))
         inner (+ depth 1)
         n end
+        vd (valid-on o)
         ^:mut q p
         ^:mut prev-start (neg 1)
-        ^:mut prev-end (neg 1)]
+        ^:mut prev-end (neg 1)
+        ^:mut pc 1
+        ^:mut mark false]
     (if (< r 0) (return r))
     (for [^I32 _k 0 lo]
       (let [start q]
@@ -169,21 +328,166 @@
           (if (< q 0) (return q))
           (if (<= km 1)
             (if (not (key-label b o start km)) (return (fail o start CODE_KEY_TYPE))))
-          (if (>= prev-start 0)
-            (do (let [order (compare-spans b prev-start prev-end start q)]
-                  (if (== order 0) (return (fail o start CODE_DUPLICATE_KEY)))
-                  (if (> order 0) (return (fail o start CODE_KEY_ORDER))))))
+          (if (and (== km 3) (not vd))
+            (do (if (>= prev-start 0)
+                  (do (let [order (compare-spans b prev-start prev-end start q)]
+                        (if (== order 0) (return (dup-note o 1 (neg 1) start start CODE_DUPLICATE_KEY)))
+                        (if (> order 0) (return (dup-note o 1 (neg 1) start start CODE_KEY_ORDER))))))
+                (set pc 1))
+            (do (let [ks (key-step b o prev-start prev-end pc start q km)]
+                  (if (< ks 0) (return ks))
+                  (set pc (bit-and ks 1))
+                  (if (!= (bit-and ks 2) 0) (set mark true)))))
           (set prev-start start)
           (set prev-end q)
           (set q (item b o q inner end))
           (if (< q 0) (return q)))))
+    (if mark
+      (do (let [dm (dup-map b o p lo)]
+            (if (< dm 0) (return dm)))))
     (return q)))
+
+(defn ^I32 scan-istr [^Bytes b ^Ints o ^I32 pos ^I32 major ^I32 end]
+  (comment "An indefinite-length byte or text string (PF_VALID): definite chunks of"
+           "the same major type until a break, each text chunk valid UTF-8 on its own"
+           "(a code point cannot span chunks, RFC 8949 §3.2.3). A chunk is not an item."
+           "A wrong or indefinite chunk is malformed; the end of input first,"
+           "truncated.")
+  (let [^:mut q (+ pos 1)]
+    (forever
+      (if (>= q end) (return (fail o q CODE_TRUNCATED)))
+      (let [ib (u8 b q)
+            ai (bit-and ib 31)]
+        (if (== ib 255) (return (+ q 1)))
+        (if (or (!= (ushr ib 5) major) (== ai 31)) (return (fail o q CODE_MALFORMED)))
+        (let [^:mut p (+ q 1)
+              ^:mut hi 0
+              ^:mut lo ai]
+          (if (>= ai 24)
+            (do (set p (read-arg-v b o q ai end))
+                (if (< p 0) (return p))
+                (set hi (ia o O_HI))
+                (set lo (ia o O_LO))))
+          (if (== major 2)
+            (set q (take-len o q p hi lo end))
+            (set q (scan-text b o q p hi lo end)))
+          (if (< q 0) (return q)))))))
+
+(defn ^I32 scan-iarr [^Bytes b ^Ints o ^I32 pos ^I32 depth ^I32 end]
+  (comment "An indefinite-length array (PF_VALID): the depth bound first, as for a"
+           "definite one; then items until a break, too_many_entries (at the head)"
+           "before the item that would pass maxEntries, truncated at the end of input.")
+  (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+  (let [^:mut q (+ pos 1)
+        ^:mut k 0
+        inner (+ depth 1)]
+    (forever
+      (if (>= q end) (return (fail o q CODE_TRUNCATED)))
+      (if (== (u8 b q) 255) (return (+ q 1)))
+      (if (>= k (ia o O_MAX_ENTRIES)) (return (fail o pos CODE_TOO_MANY_ENTRIES)))
+      (set q (item b o q inner end))
+      (if (< q 0) (return q))
+      (set k (+ k 1)))))
+
+(defn ^I32 scan-imap [^Bytes b ^Ints o ^I32 pos ^I32 depth ^I32 end]
+  (comment "An indefinite-length map (PF_VALID): as scan-iarr, a pair at a time with"
+           "scan-map's key rule; a break in a value's place is the value's own"
+           "refusal (malformed).")
+  (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+  (let [cose (and (== depth 0) (!= (ia o O_COSE) 0))
+        inner (+ depth 1)
+        p (+ pos 1)
+        ^:mut q p
+        ^:mut k 0
+        ^:mut prev-start (neg 1)
+        ^:mut prev-end (neg 1)
+        ^:mut pc 1
+        ^:mut mark false]
+    (forever
+      (if (>= q end) (return (fail o q CODE_TRUNCATED)))
+      (if (== (u8 b q) 255) (break))
+      (if (>= k (ia o O_MAX_ENTRIES)) (return (fail o pos CODE_TOO_MANY_ENTRIES)))
+      (let [start q
+            km (ushr (u8 b q) 5)]
+        (if (!= km 3)
+          (if (not (key-peek o km cose)) (return (fail o start CODE_KEY_TYPE))))
+        (set q (item b o start inner end))
+        (if (< q 0) (return q))
+        (if (<= km 1)
+          (if (not (key-label b o start km)) (return (fail o start CODE_KEY_TYPE))))
+        (let [ks (key-step b o prev-start prev-end pc start q km)]
+          (if (< ks 0) (return ks))
+          (set pc (bit-and ks 1))
+          (if (!= (bit-and ks 2) 0) (set mark true)))
+        (set prev-start start)
+        (set prev-end q)
+        (set q (item b o q inner end))
+        (if (< q 0) (return q))
+        (set k (+ k 1))))
+    (if mark
+      (do (let [dm (dup-map b o p (neg 1))]
+            (if (< dm 0) (return dm)))))
+    (return (+ q 1))))
 
 ;; ------------------------------------------------------------- tags
 
+(defn ^:pub ^I32 bytes-v [^Bytes b ^Ints o ^I32 p ^I32 not-bytes ^I32 end]
+  (comment "bytes-content under PF_VALID: any head width, or an indefinite byte"
+           "string whose chunks are checked as scan-istr checks them. Answers the"
+           "content's end (after the break); o[O_CSTART] its first byte, or -1 for"
+           "chunks; o[O_LO] its length.")
+  (if (>= p end) (return (fail o p CODE_TRUNCATED)))
+  (let [ib (u8 b p)
+        ai (bit-and ib 31)]
+    (if (!= (ushr ib 5) 2) (return (fail o p not-bytes)))
+    (if (== ai 31)
+      (do (nondet o)
+          (let [^:mut q (+ p 1)
+                ^:mut t 0]
+            (forever
+              (if (>= q end) (return (fail o q CODE_TRUNCATED)))
+              (let [cb (u8 b q)
+                    cai (bit-and cb 31)]
+                (if (== cb 255)
+                  (do (iset o O_CSTART (neg 1))
+                      (iset o O_LO t)
+                      (return (+ q 1))))
+                (if (or (!= (ushr cb 5) 2) (== cai 31)) (return (fail o q CODE_MALFORMED)))
+                (let [^:mut hp (+ q 1)
+                      ^:mut chi 0
+                      ^:mut clo cai]
+                  (if (>= cai 24)
+                    (do (set hp (read-arg-v b o q cai end))
+                        (if (< hp 0) (return hp))
+                        (set chi (ia o O_HI))
+                        (set clo (ia o O_LO))))
+                  (set q (take-len o q hp chi clo end))
+                  (if (< q 0) (return q))
+                  (set t (+ t clo))))))))
+    (let [^:mut q2 (+ p 1)
+          ^:mut hi 0
+          ^:mut lo ai]
+      (if (>= ai 24)
+        (do (set q2 (read-arg-v b o p ai end))
+            (if (< q2 0) (return q2))
+            (set hi (ia o O_HI))
+            (set lo (ia o O_LO))))
+      (let [e2 (take-len o p q2 hi lo end)]
+        (if (< e2 0) (return e2))
+        (iset o O_CSTART q2)
+        (iset o O_LO lo)
+        (return e2)))))
+
 (defn ^I32 scan-bignum [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 end]
   (comment "Tags 2/3: a byte string (its head may fail first) of 9..128 bytes with no"
-           "leading zero. The content is not an item.")
+           "leading zero. The content is not an item. Under PF_VALID (D265, RFC 8949"
+           "§3.4.3: decoders accept leading zeros) any byte string of at most 128"
+           "bytes, either length kind.")
+  (if (valid-on o)
+    (do (let [sv (bytes-v b o p CODE_BIGNUM end)]
+          (if (< sv 0) (return sv))
+          (if (> (ia o O_LO) MAX_BIGNUM_BYTES) (return (fail o pos CODE_BIGNUM)))
+          (return sv))))
   (let [stop (bytes-content b o p CODE_BIGNUM end)]
     (if (< stop 0) (return stop))
     (let [cs (ia o O_CSTART)
@@ -192,42 +496,94 @@
       (if (> len MAX_BIGNUM_BYTES) (return (fail o pos CODE_BIGNUM)))
       (return stop))))
 
+(defn ^I32 typed-nan-chunks [^Bytes b ^Ints o ^I32 p ^I32 size]
+  (comment "The first NaN element of a little-endian float typed array whose content"
+           "is the CHECKED indefinite byte string at p (elements may span chunks):"
+           "the position of its first byte, or -1. The tag-level-0 rule only.")
+  (let [^:mut q (targ b o p)
+        ^:mut j 0
+        ^:mut es 0
+        ^:mut acc 0
+        ^:mut b2 0]
+    (while (!= (u8 b q) 255)
+      (set q (targ b o q))
+      (let [l (ia o O_LO)]
+        (for [^I32 k 0 l]
+          (let [v (u8 b (+ q k))]
+            (if (== j 0) (do (set es (+ q k)) (set acc 0)))
+            (if (< j (- size 2)) (set acc (bit-or acc v)))
+            (if (== j (- size 2)) (set b2 v))
+            (if (== j (- size 1))
+              (do (if (== size 2)
+                    (if (and (== (bit-and v 124) 124) (!= (bit-or (bit-and v 3) b2) 0)) (return es)))
+                  (if (== size 4)
+                    (if (and (== (bit-and v 127) 127) (>= b2 128))
+                      (if (!= (bit-or (bit-and b2 127) acc) 0) (return es))))
+                  (if (== size 8)
+                    (if (and (== (bit-and v 127) 127) (>= b2 240))
+                      (if (!= (bit-or (bit-and b2 15) acc) 0) (return es))))
+                  (set j 0))
+              (set j (+ j 1)))))
+        (set q (+ q l))))
+    (return (neg 1))))
+
+(defn ^:pub ^I32 typed-nan-at [^Bytes b ^I32 cs ^I32 stop ^I32 tag]
+  (comment "The first NaN element of little-endian float typed-array content"
+           "b[cs, stop) (tags 84/85/86), or -1. Shared by the scanner, the buffer"
+           "walk and the resumable session.")
+  (let [^:mut i cs]
+    (if (== tag 84)
+      (while (< i stop)
+        (let [h1 (u8 b (+ i 1))]
+          (if (== (bit-and h1 124) 124)
+            (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0) (return i))))
+        (set i (+ i 2))))
+    (if (== tag 85)
+      (while (< i stop)
+        (let [s3 (u8 b (+ i 3))
+              s2 (u8 b (+ i 2))]
+          (if (and (== (bit-and s3 127) 127) (>= s2 128))
+            (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0) (return i))))
+        (set i (+ i 4))))
+    (if (== tag 86)
+      (while (< i stop)
+        (let [t7 (u8 b (+ i 7))
+              t6 (u8 b (+ i 6))]
+          (if (and (== (bit-and t7 127) 127) (>= t6 240))
+            (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
+                                    (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
+                            (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
+                     0)
+              (return i))))
+        (set i (+ i 8))))
+    (return (neg 1))))
+
 (defn ^I32 scan-typed [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 tag ^I32 size ^I32 end]
   (comment "An RFC 8746 little-endian typed array: a byte string whose length is a"
-           "multiple of the element size; no NaN in float arrays (-0 and +-inf are"
-           "fine there). The content is not an item.")
-  (let [stop (bytes-content b o p CODE_TYPED_ARRAY end)]
-    (if (< stop 0) (return stop))
-    (let [cs (ia o O_CSTART)
-          ^:mut i cs]
-      (if (!= (rem (- stop cs) size) 0) (return (fail o pos CODE_TYPED_ARRAY)))
-      (if (== tag 84)
-        (while (< i stop)
-          (let [h1 (u8 b (+ i 1))]
-            (if (== (bit-and h1 124) 124)
-              (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0)
-                (return (fail o i CODE_TYPED_ARRAY)))))
-          (set i (+ i 2))))
-      (if (== tag 85)
-        (while (< i stop)
-          (let [s3 (u8 b (+ i 3))
-                s2 (u8 b (+ i 2))]
-            (if (and (== (bit-and s3 127) 127) (>= s2 128))
-              (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0)
-                (return (fail o i CODE_TYPED_ARRAY)))))
-          (set i (+ i 4))))
-      (if (== tag 86)
-        (while (< i stop)
-          (let [t7 (u8 b (+ i 7))
-                t6 (u8 b (+ i 6))]
-            (if (and (== (bit-and t7 127) 127) (>= t6 240))
-              (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
-                                      (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
-                              (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
-                       0)
-                (return (fail o i CODE_TYPED_ARRAY)))))
-          (set i (+ i 8))))
-      (return stop))))
+           "multiple of the element size; at tag level 0 (the Bindle set, D265) no"
+           "NaN in float arrays (-0 and +-inf are fine there). The content is not an"
+           "item. Under PF_VALID the byte string may be indefinite.")
+  (let [nan (and (>= tag 84) (== (bit-and (ia o O_PROFILE) PF_TAGS) 0))]
+    (if (valid-on o)
+      (do (let [sv (bytes-v b o p CODE_TYPED_ARRAY end)]
+            (if (< sv 0) (return sv))
+            (if (!= (rem (ia o O_LO) size) 0) (return (fail o pos CODE_TYPED_ARRAY)))
+            (if (not nan) (return sv))
+            (let [cs (ia o O_CSTART)]
+              (local ^I32 bad)
+              (if (< cs 0)
+                (set bad (typed-nan-chunks b o p size))
+                (set bad (typed-nan-at b cs sv tag)))
+              (if (>= bad 0) (return (fail o bad CODE_TYPED_ARRAY)))
+              (return sv)))))
+    (let [stop (bytes-content b o p CODE_TYPED_ARRAY end)]
+      (if (< stop 0) (return stop))
+      (let [cs2 (ia o O_CSTART)]
+        (if (!= (rem (- stop cs2) size) 0) (return (fail o pos CODE_TYPED_ARRAY)))
+        (if (not nan) (return stop))
+        (let [bad2 (typed-nan-at b cs2 stop tag)]
+          (if (>= bad2 0) (return (fail o bad2 CODE_TYPED_ARRAY)))
+          (return stop))))))
 
 (defn ^I32 scan-pair [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 shape-code ^I32 end]
   (comment "The `[x, y]` content of tag 4 or tag 40, decoded as cbor.mjs's item()"
@@ -247,9 +603,31 @@
       (iset o O_LO q1)
       (return q2))))
 
+(defn ^I32 scan-pair-v [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 code ^I32 end]
+  (comment "Tag 4 / 40 content at tag levels 1-3 or under PF_VALID (D265): an array"
+           "(else code, at the tag), walked as an item (counted, a level, any"
+           "encoding), that must hold exactly two items (else code). Answers its end.")
+  (if (>= p end) (return (fail o p CODE_TRUNCATED)))
+  (if (!= (ushr (u8 b p) 5) 4) (return (fail o pos code)))
+  (let [^I32 q (item b o p (+ depth 1) end)]
+    (if (< q 0) (return q))
+    (if (!= (vcount b o p) 2) (return (fail o pos code)))
+    (return q)))
+
+(defn ^Bool pair-v-on [^IntsR o]
+  (comment "Do tags 4 and 40 take the any-width path: a tag level above the Bindle"
+           "set's, or PF_VALID?")
+  (return (or (!= (bit-and (ia o O_PROFILE) PF_TAGS) 0) (valid-on o))))
+
 (defn ^I32 scan-decimal [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 end]
   (comment "Tag 4: [exponent, mantissa], exponent -1024..-1, mantissa an integer or"
-           "bignum, non-zero, not divisible by 10 -- checked after both decode.")
+           "bignum, non-zero, not divisible by 10 -- checked after both decode. At"
+           "tag levels 1-3 RFC 8949 §3.4.4's rule instead (decimal-v, D265).")
+  (if (pair-v-on o)
+    (do (let [sv (scan-pair-v b o pos p depth CODE_DECIMAL end)]
+          (if (< sv 0) (return sv))
+          (if (not (decimal-v b o p (bit-and (sar (ia o O_PROFILE) 2) 3))) (return (fail o pos CODE_DECIMAL)))
+          (return sv))))
   (let [stop (scan-pair b o pos p depth CODE_DECIMAL end)]
     (if (< stop 0) (return stop))
     (let [q1 (ia o O_LO)]
@@ -259,7 +637,13 @@
 
 (defn ^I32 scan-ndarray [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 depth ^I32 end]
   (comment "Tag 40: [shape, data], shape 1..8 positive integers whose product is the"
-           "element count, data a typed array or an array -- checked after both decode.")
+           "element count, data a typed array or an array -- checked after both decode."
+           "At tag levels 1-3 RFC 8746 §3.1.1's rule instead (ndarray-v, D265).")
+  (if (pair-v-on o)
+    (do (let [sv (scan-pair-v b o pos p depth CODE_NDARRAY end)]
+          (if (< sv 0) (return sv))
+          (if (not (ndarray-v b o p (bit-and (sar (ia o O_PROFILE) 2) 3))) (return (fail o pos CODE_NDARRAY)))
+          (return sv))))
   (let [stop (scan-pair b o pos p depth CODE_NDARRAY end)]
     (if (< stop 0) (return stop))
     (let [count (data-count b (ia o O_LO))]
@@ -274,10 +658,35 @@
            "after it).")
   (let [^I32 q (item b o p (+ depth 1) end)]
     (if (< q 0) (return q))
+    (if (and (== (bit-and (u8 b p) 31) 31) (<= (ushr (u8 b p) 5) 3))
+      (return (std-indef b o pos p q tag depth)))
     (if (not (std-content-ok b tag p q)) (return (fail o pos CODE_TAG)))
     (if (== tag 24)
       (do (let [^I32 r (scan-one b o (std-inner b p) (+ depth 2) q)]
             (if (< r 0) (return r)))))
+    (return q)))
+
+(defn ^I32 std-indef [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 q ^I32 tag ^I32 depth]
+  (comment "A known tag whose content b[p, q), just walked, is an indefinite-length"
+           "string (PF_VALID): a typed array's length from its chunks; the text rule"
+           "of tags 0/32 and the payload of tag 24, which need the content in one"
+           "piece, recorded for scan-cb (defer); every other rule as std-content-ok.")
+  (let [maj (ushr (u8 b p) 5)
+        ts (typed-any-size tag)]
+    (if (> ts 0)
+      (do (if (or (!= maj 2) (!= (rem (tlength b o p) ts) 0)) (return (fail o pos CODE_TAG)))
+          (return q)))
+    (if (or (== tag 0) (== tag 32))
+      (do (if (!= maj 3) (return (fail o pos CODE_TAG)))
+          (let [d (defer o 2 tag pos p (- (ia o O_ITEMS) (ia o O_S_EXTRA)))]
+            (if (< d 0) (return d)))
+          (return q)))
+    (if (== tag 24)
+      (do (if (!= maj 2) (return (fail o pos CODE_TAG)))
+          (let [d2 (defer o 3 pos p (+ depth 2) (ia o O_ITEMS))]
+            (if (< d2 0) (return d2)))
+          (return q)))
+    (if (== tag 1) (return (fail o pos CODE_TAG)))
     (return q)))
 
 (defn ^I32 scan-tag [^Bytes b ^Ints o ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
@@ -315,7 +724,7 @@
       (do (if (== major 7)
             (if (and (>= ai 25) (<= ai 27)) (return (scan-float b o pos ai end))))
           (set p (read-arg b o pos ai end))
-          (if (< p 0) (return p))
+          (if (< p 0) (return (item-v b o pos major ai depth end p)))
           (set hi (ia o O_HI))
           (set lo (ia o O_LO))))
     (case major
@@ -326,6 +735,35 @@
       [5] (scan-map b o pos p hi lo depth end)
       [6] (scan-tag b o pos p hi lo depth end)
       :else (scan-simple o pos ai))))
+
+(defn ^I32 item-v [^Bytes b ^Ints o ^I32 pos ^I32 major ^I32 ai ^I32 depth ^I32 end ^I32 r]
+  (comment "The deterministic head reader refused the head at pos with r. Under"
+           "PF_VALID (D260) a longer head than needed is read again at any width, and"
+           "AI 31 is an indefinite string, array or map -- or not well-formed (a"
+           "break, or majors 0/1/6/7). Off the hot path.")
+  (if (not (valid-on o)) (return r))
+  (if (and (!= r (neg CODE_NON_SHORTEST)) (!= r (neg CODE_INDEFINITE))) (return r))
+  (iset o O_ERR_POS (neg 1))
+  (if (== ai 31)
+    (do (if (or (== major 4) (== major 5))
+          (do (nondet o)
+              (if (== major 4) (return (scan-iarr b o pos depth end)))
+              (return (scan-imap b o pos depth end))))
+        (if (or (== major 2) (== major 3))
+          (do (nondet o)
+              (return (scan-istr b o pos major end))))
+        (return (fail o pos CODE_MALFORMED))))
+  (let [p (read-arg-v b o pos ai end)]
+    (if (< p 0) (return p))
+    (let [hi (ia o O_HI)
+          lo (ia o O_LO)]
+      (if (<= major 1) (return p))
+      (if (== major 2) (return (take-len o pos p hi lo end)))
+      (if (== major 3) (return (scan-text b o pos p hi lo end)))
+      (if (== major 4) (return (scan-array b o pos p hi lo depth end)))
+      (if (== major 5) (return (scan-map b o pos p hi lo depth end)))
+      (if (== major 6) (return (scan-tag b o pos p hi lo depth end)))
+      (return (scan-simple o pos ai)))))
 
 ;; ------------------------------------------------------------- the API
 
@@ -366,24 +804,204 @@
            "scan-options.")
   (iset o O_PROFILE (bit-and flags PF_HOST)))
 
+(defn ^:pub scan-start [^Ints o]
+  (comment "Reset the outputs and, when o is longer than its 16 frozen words, the"
+           "walk's scratch header (O_S_*): records from O_S_FIRST up, deferrals from"
+           "the end down (P8.4, D264).")
+  (iset o O_ERR_POS (neg 1))
+  (iset o O_ITEMS 0)
+  (let [c (ia o O_VCTL)]
+    (iset o O_VCTL (bit-and c 255)))
+  (iset o O_VLEN (neg 1))
+  (if (>= (ilen o) O_S_FIRST)
+    (do (iset o O_S_RTOP O_S_FIRST)
+        (iset o O_S_DLOW (ilen o))
+        (iset o O_S_UNITS 0)
+        (iset o O_S_CBTOP 0)
+        (iset o O_S_NDEF 0)
+        (iset o O_S_SRC 0)
+        (iset o O_S_EXTRA 0)
+        (iset o O_S_DUPK 0))))
+
+(defn ^:pub ^I32 scan-root [^Bytes b ^Ints o ^I32 start ^I32 end ^I32 depth0]
+  (comment "The walk of `scan` over the item b[start, end) at depth depth0 (the whole"
+           "input at 0 for `scan`): 0 or a negated code.")
+  (let [n (- end start)]
+    (if (> n (ia o O_MAX_BYTES)) (return (fail o start CODE_TOO_LARGE)))
+    (if (== (ia o O_TOP) 0)
+      (if (or (== n 0) (!= (ushr (u8 b start) 5) 5)) (return (fail o start CODE_NOT_MAP))))
+    (let [r (item b o start depth0 end)]
+      (if (< r 0) (return r))
+      (if (!= r end) (return (fail o r CODE_TRAILING)))
+      (return 0))))
+
 (doc "Scan `b` (length < 2^31) under the options in `o` (see `scanOptions` /"
      "`scan_options`). Answers 0 when cbor.mjs `decode` would accept, else"
      "cbor.mjs's CBORFault code as an integer (`codeName` gives the string)."
      "The offset a refusal was decided at is `errorOffset(o)` (-1 when"
      "accepted); `itemsScanned(o)` is the item count. Allocates nothing; reads"
      "`b` in place; never reads out of bounds. Recursion is bounded by the"
-     "maxDepth option (hosts should keep it <= 256).")
+     "maxDepth option (hosts should keep it <= 256). A valid-CBOR walk"
+     "(PF_VALID) may need scratch past o's 16 frozen words, and a canonical"
+     "buffer (`scanCb`): without them it answers CODE_SCRATCH (22).")
 (defn ^:pub ^I32 scan [^Bytes b ^Ints o]
-  (iset o O_ERR_POS (neg 1))
-  (iset o O_ITEMS 0)
-  (let [n (blen b)]
-    (if (> n (ia o O_MAX_BYTES)) (return (neg (fail o 0 CODE_TOO_LARGE))))
-    (if (== (ia o O_TOP) 0)
-      (if (or (== n 0) (!= (ushr (u8 b 0) 5) 5)) (return (neg (fail o 0 CODE_NOT_MAP)))))
-    (let [r (item b o 0 0 n)]
-      (if (< r 0) (return (neg r)))
-      (if (!= r n) (return (neg (fail o r CODE_TRAILING))))
-      (return 0))))
+  (scan-start o)
+  (let [r (scan-root b o 0 (blen b) 0)]
+    (comment "checks recorded for a canonical buffer come before r in walk order")
+    (if (and (>= (ilen o) O_S_FIRST) (> (ia o O_S_NDEF) 0))
+      (do (iset o O_VNEEDB (+ (* 2 (blen b)) 256))
+          (return CODE_SCRATCH)))
+    (return (neg r))))
+
+;; ------------------------------------------------------------- deferred checks
+
+(defn ^I32 defer-map [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 q0 ^I32 n]
+  (comment "Kind 1: a map's duplicate check, writing its keys' EC forms to cb.")
+  (let [cb0 (ia o O_S_CBTOP)]
+    (local ^I32 d)
+    (if (== src 0)
+      (do (let [r (dup-forms b o cb q0 n)]
+            (if (< r 0) (return r)))
+          (set d (dup-finish b cb o n cb0)))
+      (do (let [r2 (dup-forms-within cb o q0 n)]
+            (if (< r2 0) (return r2)))
+          (set d (dup-finish cb cb o n cb0))))
+    (if (== d (neg CODE_DUPLICATE_KEY)) (return (dup-note o 2 src q0 (ia o O_ERR_POS) CODE_DUPLICATE_KEY)))
+    (return d)))
+
+(defn ^I32 defer-text [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 tag ^I32 tpos ^I32 cpos]
+  (comment "Kind 2: the text rule of tag 0 / 32 over its indefinite-length content,"
+           "gathered into cb (refused: tag, at the tag).")
+  (let [top (ia o O_S_CBTOP)]
+    (local ^I32 ge)
+    (if (== src 0) (set ge (gather b o cb cpos top)) (set ge (gather-within cb o cpos top)))
+    (if (< ge 0)
+      (do (iset o O_VNEEDB (+ (* 2 (blen cb)) 256))
+          (return (neg CODE_SCRATCH))))
+    (if (== tag 0)
+      (if (not (date-time-ok cb top ge)) (return (fail o tpos CODE_TAG))))
+    (if (== tag 32)
+      (if (not (uri-ok cb top ge)) (return (fail o tpos CODE_TAG))))
+    (return 0)))
+
+(declarefn run-defer)
+
+(defn ^I32 defer-payload [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 e ^I32 cpos ^I32 depth ^I32 at]
+  (comment "Kind 3: a tag-24 payload in an indefinite-length byte string, gathered into"
+           "cb and walked there as one item (scan-one) with the item count it would"
+           "have had in walk order (at, plus the items of earlier payloads); the"
+           "payload's own deferrals run next, depth first. A refusal's offset is"
+           "mapped back into the byte string's chunks. Its item count goes in the"
+           "entry and in O_S_EXTRA.")
+  (let [top (ia o O_S_CBTOP)]
+    (local ^I32 ge)
+    (if (== src 0) (set ge (gather b o cb cpos top)) (set ge (gather-within cb o cpos top)))
+    (if (< ge 0)
+      (do (iset o O_VNEEDB (+ (* 2 (blen cb)) 256))
+          (return (neg CODE_SCRATCH))))
+    (let [ssrc (ia o O_S_SRC)
+          nd0 (ia o O_S_NDEF)
+          extra (ia o O_S_EXTRA)
+          it0 (+ at extra)]
+      (iset o O_S_CBTOP ge)
+      (iset o O_S_SRC 1)
+      (iset o O_ITEMS it0)
+      (let [^:mut r (scan-one cb o top depth ge)]
+        (if (and (>= r 0) (> (ia o O_S_NDEF) nd0))
+          (set r (run-defer b o cb nd0 (ia o O_S_NDEF))))
+        (let [count (- (ia o O_ITEMS) it0)]
+          (iset o O_S_NDEF nd0)
+          (iset o O_S_DLOW (- (ilen o) (* 7 nd0)))
+          (iset o O_S_SRC ssrc)
+          (iset o O_S_CBTOP top)
+          (if (< r 0)
+            (do (if (!= r (neg CODE_SCRATCH))
+                  (do (let [k (- (ia o O_ERR_POS) top)]
+                        (local ^I32 at2)
+                        (if (== src 0) (set at2 (chunk-pos b o cpos k)) (set at2 (chunk-pos cb o cpos k)))
+                        (iset o O_ERR_POS at2))))
+                (return r)))
+          (iset o (+ e 6) count)
+          (iset o O_S_EXTRA (+ extra count))
+          (return 0))))))
+
+(defn ^:pub ^I32 run-defer [^Bytes b ^Ints o ^BytesW cb ^I32 i0 ^I32 i1]
+  (comment "Run the deferred checks i0..i1 - 1 in the order they were recorded (walk"
+           "order): the first refusal, or 0.")
+  (let [^:mut i i0]
+    (while (< i i1)
+      (let [e (- (ilen o) (* 7 (+ i 1)))
+            kind (ia o e)
+            src (ia o (+ e 1))
+            a1 (ia o (+ e 2))
+            a2 (ia o (+ e 3))
+            a3 (ia o (+ e 4))
+            a4 (ia o (+ e 5))
+            ^:mut r 0]
+        (if (== kind 1) (set r (defer-map b o cb src a1 a2)))
+        (if (== kind 2) (set r (defer-text b o cb src a1 a2 a3)))
+        (if (== kind 3) (set r (defer-payload b o cb src e a2 a3 a4)))
+        (comment "a map's or a text rule's refusal is decided where it was recorded:"
+                 "the items walked to there (plus earlier payloads' items), not the walk's"
+                 "total")
+        (if (and (< r 0) (!= r (neg CODE_SCRATCH)))
+          (do (if (== kind 1) (iset o O_ITEMS (+ a3 (ia o O_S_EXTRA))))
+              (if (== kind 2) (iset o O_ITEMS (+ a4 (ia o O_S_EXTRA))))))
+        (if (< r 0) (return r)))
+      (set i (+ i 1)))
+    (return 0)))
+
+(doc "Scan `b` under the options in `o`, like `scan`, with the canonical buffer `cb`"
+     "for the checks a valid-CBOR walk records (D264): duplicate keys that need EC"
+     "forms, tag-0/32 rules and tag-24 payloads over indefinite-length strings. 0, a"
+     "code, or CODE_SCRATCH (22) when o or cb is too small (o[O_VNEEDW] words,"
+     "o[O_VNEEDB] bytes): grow it and call again.")
+(defn ^:pub ^I32 scan-cb [^Bytes b ^Ints o ^BytesW cb]
+  (return (scan-x b o cb 0 (blen b) 0 0)))
+
+(defn ^I32 scan-walk [^Bytes b ^Ints o ^I32 start ^I32 end ^I32 depth0 ^I32 one]
+  (if (!= one 0) (return (item b o start depth0 end)))
+  (return (scan-root b o start end depth0)))
+
+(defn ^I32 scan-run [^Bytes b ^Ints o ^BytesW cb ^I32 start ^I32 end ^I32 depth0 ^I32 items0 ^I32 one]
+  (comment "The walk (one item at start when one != 0, else the document), then its"
+           "deferred checks: the walk's answer (an end or 0), or a negated code"
+           "(-CODE_SCRATCH: grow o or cb).")
+  (scan-start o)
+  (iset o O_ITEMS items0)
+  (let [r (scan-walk b o start end depth0 one)]
+    (if (== r (neg CODE_SCRATCH)) (return r))
+    (if (or (< (ilen o) O_S_FIRST) (== (ia o O_S_NDEF) 0)) (return r))
+    (let [epos (ia o O_ERR_POS)
+          items (ia o O_ITEMS)
+          nd (ia o O_S_NDEF)
+          d (run-defer b o cb 0 nd)]
+      (if (< d 0) (return d))
+      (let [extra (ia o O_S_EXTRA)]
+        (if (> (+ items extra) (ia o O_MAX_ITEMS))
+          (do (comment "payload items may pass maxItems earlier in walk order: replay"
+                       "the walk adding each payload's count where it occurs")
+              (iset o O_ERR_POS (neg 1))
+              (iset o O_ITEMS items0)
+              (iset o O_S_SRC 2)
+              (let [r2 (scan-walk b o start end depth0 one)]
+                (iset o O_S_SRC 0)
+                (return r2))))
+        (iset o O_ERR_POS epos)
+        (iset o O_ITEMS (+ items extra))
+        (return r)))))
+
+(defn ^:pub ^I32 scan-x [^Bytes b ^Ints o ^BytesW cb ^I32 start ^I32 end ^I32 depth0 ^I32 items0]
+  (comment "scan-cb over the item b[start, end) at depth depth0, its items counted from"
+           "items0 (a span, a session's whole item, D262): 0, a code, or CODE_SCRATCH.")
+  (return (neg (scan-run b o cb start end depth0 items0 0))))
+
+(defn ^:pub ^I32 scan-item-x [^Bytes b ^Ints o ^BytesW cb ^I32 start ^I32 end ^I32 depth0 ^I32 items0]
+  (comment "scan-cb's walk of ONE item at start (bounded by end, depth depth0, items"
+           "counted from items0), its deferred checks run: its end, or a negated code"
+           "(-CODE_SCRATCH: grow o or cb). Nothing is checked after it (the resumable"
+           "session's whole items, D266).")
+  (return (scan-run b o cb start end depth0 items0 1)))
 
 (defn ^:pub ^I32 error-offset [^Ints o]
   (return (ia o O_ERR_POS)))
@@ -416,4 +1034,5 @@
     [CODE_TOO_MANY_ITEMS] "too_many_items"
     [CODE_TOO_LARGE] "too_large"
     [CODE_NOT_MAP] "not_map"
+    [CODE_SCRATCH] "scratch"
     :else "unknown"))

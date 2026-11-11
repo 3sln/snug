@@ -13,6 +13,7 @@ pub const VMS_NEED: i32 = -64;
 pub const VMS_YIELD: i32 = -65;
 pub const VMS_HELD: i32 = -67;
 pub const VMS_RESUME: i32 = -68;
+pub const VMS_GROW: i32 = -69;
 pub const GO: i32 = 0;
 pub const SS_PH: i32 = 0;
 pub const SS_TOTAL: i32 = 1;
@@ -58,7 +59,14 @@ pub const SS_PEND: i32 = 40;
 pub const PW: i32 = 4;
 pub const SS_SEQ: i32 = 41;
 pub const SS_MLEN: i32 = 42;
-pub const SS_HDR: i32 = 44;
+pub const SS_GW: i32 = 44;
+pub const SS_GB: i32 = 45;
+pub const SS_GS: i32 = 46;
+pub const SS_GA: i32 = 47;
+pub const SS_VNEED: i32 = 48;
+pub const SS_VOK: i32 = 49;
+pub const SS_HDR: i32 = 52;
+pub const IND: i32 = 1073741824;
 pub const PH_START: i32 = 0;
 pub const PH_ITEM: i32 = 1;
 pub const PH_RET: i32 = 2;
@@ -156,6 +164,10 @@ pub const F_NDK: i32 = 26;
 pub const F_COUNT: i32 = 27;
 pub const F_DIMS: i32 = 28;
 pub const F_TLIVE: i32 = 36;
+pub const F_IND: i32 = 42;
+pub const F_VN: i32 = 43;
+pub const F_VLAST: i32 = 44;
+pub const F_VMARK: i32 = 45;
 pub fn nframes(p: &[i32]) -> i32 {
     // Frames (and prescan levels, chain entries) a session holds: one per
     // physical depth 0..D, a virtual `.cborseq` level and slack.
@@ -715,6 +727,25 @@ pub fn prescan(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut: i32
         let ai: i32 = ib & 31;
         let mut hi: i32 = 0;
         let mut lo: i32 = ai;
+        // P8.4 (D266): under a valid-CBOR run an indefinite string, array or
+        // map is a level its break closes (IND entries owed until then)
+        if (ib == 255) && ((lvl > 0) && (rem >= IND)) {
+            rem = 0;
+            i += 1;
+            continue;
+        }
+        if (ai == 31) && (((major >= 2) && (major <= 5)) && ((ss[(SS_PROF) as usize] & PF_VREL) != 0)) {
+            if lvl >= cap {
+                ss[(SS_CHN) as usize] = -1;
+                return 0;
+            }
+            ss[(pst + (2 * lvl)) as usize] = i + base;
+            ss[((pst + (2 * lvl)) + 1) as usize] = rem - 1;
+            lvl += 1;
+            rem = IND;
+            i += 1;
+            continue;
+        }
         if ai >= 28 {
             return pstop(ss, lvl);
         }
@@ -849,6 +880,25 @@ pub fn prescan_run(b: &[u8], ss: &mut [i32], base: i32, pos: i32, end: i32, cut:
         let ai: i32 = ib & 31;
         let mut hi: i32 = 0;
         let mut lo: i32 = ai;
+        // P8.4 (D266): under a valid-CBOR run an indefinite string, array or
+        // map is a level its break closes (IND entries owed until then)
+        if (ib == 255) && ((lvl > 0) && (rem >= IND)) {
+            rem = 0;
+            i += 1;
+            continue;
+        }
+        if (ai == 31) && (((major >= 2) && (major <= 5)) && ((ss[(SS_PROF) as usize] & PF_VREL) != 0)) {
+            if lvl >= cap {
+                ss[(SS_CHN) as usize] = -1;
+                return -1;
+            }
+            ss[(pst + (2 * lvl)) as usize] = i + base;
+            ss[((pst + (2 * lvl)) + 1) as usize] = rem - 1;
+            lvl += 1;
+            rem = IND;
+            i += 1;
+            continue;
+        }
         if ai >= 28 {
             return rstop(ss, lvl, i + 1, base);
         }

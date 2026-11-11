@@ -224,8 +224,8 @@ ref('tag 32 with a bad escape', tag(32, tstr('http://a/%2g')), 'tag', 0, { bindl
 ref('tag 32 with two fragments', tag(32, tstr('a:b#c#d')), 'tag', 0, { bindle: 'tag' });
 ref('tag 32 with a bracket in the query', tag(32, tstr('a:b?[c]')), 'tag', 0, { bindle: 'tag' });
 ref('tag 32 with an empty scheme', tag(32, tstr(':b')), 'tag', 0, { bindle: 'tag' });
-ref('tag 55799 nested', arr(tag(55799, uint(0))), 'tag', 1, { bindle: 'tag' });
-ref('tag 55799 twice', tag(55799, tag(55799, uint(0))), 'tag', 3, { bindle: 'tag' });
+acc('tag 55799 nested: any depth (RFC 8949 §3.4.6, D265)', arr(tag(55799, uint(0))), [T(55799, 0)], { bindle: 'tag' });
+acc('tag 55799 twice (D265)', tag(55799, tag(55799, uint(0))), T(55799, T(55799, 0)), { bindle: 'tag' });
 ref('a non-shortest tag head', 'd80000', 'non_shortest', 0, { bindle: 'non_shortest' });
 
 // Any tag (D180, the preset's tag level): every tag number, its content one item a level below; the known tags keep
@@ -285,7 +285,7 @@ ref('tag 18 in a 2-byte head', 'd9001280', 'non_shortest', 0, { standard: 'non_s
 ref('tag 256 in a 4-byte head', 'da0000010000', 'non_shortest', 0, { standard: 'non_shortest', bindle: 'non_shortest' });
 ref('tag 2^32 - 1 in an 8-byte head', 'db00000000ffffffff00', 'non_shortest', 0, { standard: 'non_shortest', bindle: 'non_shortest' });
 ref('an indefinite tag head', 'df00', 'indefinite', 0, { standard: 'indefinite', bindle: 'indefinite' });
-ref('tag 55799 nested under an unknown tag', tag(18, tag(55799, uint(0))), 'tag', 1, STD);
+acc('tag 55799 nested under an unknown tag (D265)', tag(18, tag(55799, uint(0))), T(18, T(55799, 0)), STD);
 ref('unknown tags past maxDepth (32)', tag(1000, '').repeat(33) + '00', 'depth', 96, STD);
 ref('tag 2 bignum that fits 64 bits (preferred serialization, D181)', tag(2, bstr('ffffffffffffffff')), 'bignum', 0, { standard: 'bignum', bindle: 'bignum' });
 ref('tag 3 bignum with a leading zero', tag(3, bstr('000100000000000000')), 'bignum', 0, { standard: 'bignum', bindle: 'bignum' });

@@ -7,7 +7,7 @@
 // printed as `PANIC` -- the scanner must never panic on any input, and this
 // binary is built in debug (overflow checks on) so a broken arithmetic
 // guarantee is a panic here rather than a silent wrap.
-use snug::snug::cbor::scan::{error_offset, scan, scan_options, scan_profile};
+use snug::snug::cbor::scan::{error_offset, scan_cb, scan_options, scan_profile};
 use std::io::{BufRead, Write};
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -36,11 +36,21 @@ fn main() {
         let bytes = unhex(if f.len() > 6 { f[6] } else { "" });
         let flags = if f.len() > 7 { n(7) } else { 0 };
         let r = std::panic::catch_unwind(|| {
-            let mut o = [0i32; 16];
-            scan_options(&mut o, top, cose, mb, md, me, mi);
-            scan_profile(&mut o, flags);
-            let c = scan(&bytes, &mut o);
-            (c, error_offset(&mut o))
+            // The walk's scratch past the 16 frozen words and a canonical buffer (P8.4, D264),
+            // grown on CODE_SCRATCH (22) as the hosts grow them.
+            let (mut w, mut nb) = (16 + 64usize, 64usize);
+            loop {
+                let mut o = vec![0i32; w];
+                let mut cb = vec![0u8; nb];
+                scan_options(&mut o, top, cose, mb, md, me, mi);
+                scan_profile(&mut o, flags);
+                let c = scan_cb(&bytes, &mut o, &mut cb);
+                if c != 22 {
+                    return (c, error_offset(&mut o));
+                }
+                w = (o[13] as usize).max(2 * w);
+                nb = (o[14] as usize).max(2 * nb);
+            }
         });
         match r {
             Ok((c, off)) => writeln!(out, "{} {}", c, off).unwrap(),

@@ -102,11 +102,15 @@ const { cases, nVectors, nFixed } = buildCases(MUTATIONS, SEED);
 // The profile options (P7.1, D120): the deterministic vectors, their fixed edge cases and seeded cases under random
 // profile flags (kin/scripts/det-cases.mjs), through every policy as well.
 const DET_MUT = Math.max(1500, Math.round(MUTATIONS / 2));
-const dc = buildDetCases(DET_MUT, SEED);
+const dc = buildDetCases(DET_MUT, SEED, { valid: true });
 for (const c of dc.cases) cases.push(c);
 let fails = 0, runs = 0, everyRuns = 0, trapRuns = 0;
 const fail = m => { if (fails < 30) console.log('  FAIL ' + m); fails++; };
-const same = (a, b) => a.code === b.code && a.offset === b.offset && a.items === b.items;
+// P8.4 (D266): the resumable scanner hands a valid-CBOR handle, or one with an EC-sensitive key (whose
+// duplicates need EC forms: the recursive scanner then needs its buffer, scratch), to the session: scratch (22)
+// is right for a valid-CBOR profile, where the recursive scanner says scratch, or where it refuses (later)
+const same = (a, b, opt = {}) => (a.code === 22 && (b.code === 22 || b.code !== 0 || ((opt.flags ?? 0) & 256) !== 0))
+  || (a.code === b.code && a.offset === b.offset && a.items === b.items);
 const show = v => `${codeName(v.code)}@${v.offset} items ${v.items}`;
 const rustLines = [], rustWant = [];
 const t0 = performance.now();
@@ -119,14 +123,14 @@ cases.forEach((c, ci) => {
     const trap = ci % 5 === 0 && c.bytes.length <= 4096;
     const got = resumable(c.bytes, c.opt, mc, q, seed, { trap });
     runs++; if (trap) trapRuns++;
-    if (!same(got, want)) fail(`${c.label} [${hex(c.bytes).slice(0, 60)}] policy ${mc}/${q}: resumable ${show(got)}, recursive ${show(want)}`);
+    if (!same(got, want, c.opt)) fail(`${c.label} [${hex(c.bytes).slice(0, 60)}] policy ${mc}/${q}: resumable ${show(got)}, recursive ${show(want)}`);
     if (c.bytes.length <= 4096) { rustLines.push([...optArr(c.opt), mc, q, seed, hex(c.bytes), c.opt.flags ?? 0].join(' ')); rustWant.push({ ...got, label: c.label, mc, q }); }
   });
   if (c.bytes.length <= 48) for (let k = 0; k <= c.bytes.length; k++) {
     let got;
     try { got = resumable(c.bytes, c.opt, 0, 0, 1, { firstCut: k, trap: true }); } catch (e) { fail(`${c.label} cut ${k}: ${e.message}`); continue; }
     everyRuns++;
-    if (!same(got, want)) fail(`${c.label} [${hex(c.bytes)}] cut at ${k}: resumable ${show(got)}, recursive ${show(want)}`);
+    if (!same(got, want, c.opt)) fail(`${c.label} [${hex(c.bytes)}] cut at ${k}: resumable ${show(got)}, recursive ${show(want)}`);
   }
 });
 const tJs = performance.now() - t0;

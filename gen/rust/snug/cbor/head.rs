@@ -170,3 +170,47 @@ pub fn small_arg(b: &[u8], x: i32) -> i32 {
     }
     return be32(b, x + 5);
 }
+pub fn read_arg_v(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
+    // read-arg under PF_VALID (P8.4, D260), for the walks that admit valid
+    // CBOR: any width (a longer head than the value needs notes VC_NONDET: the
+    // input is not its canonical form). 28..30 are malformed; 31 is the
+    // caller's (an indefinite length, or a break). read-arg itself stays as it
+    // was, small enough to inline into the deterministic walk.
+    if ai > 27 {
+        if ai == 31 {
+            return fail(o, pos, CODE_INDEFINITE);
+        }
+        return fail(o, pos, CODE_MALFORMED);
+    }
+    let p: i32 = pos + 1;
+    let w: i32 = 1 << (ai - 24);
+    if w > (end - p) {
+        return fail(o, pos, CODE_TRUNCATED);
+    }
+    let mut hi: i32 = 0;
+    let mut v: i32 = b[(p) as usize] as i32;
+    let mut short: bool = false;
+    if w == 1 {
+        short = v < 24;
+    }
+    if w == 2 {
+        v = (v << 8) | (b[(p + 1) as usize] as i32);
+        short = v < 256;
+    }
+    if w == 4 {
+        v = be32(b, p);
+        short = (i32::cast_unsigned(v) >> 16).cast_signed() == 0;
+    }
+    if w == 8 {
+        hi = be32(b, p);
+        v = be32(b, p + 4);
+        short = hi == 0;
+    }
+    if short {
+        let c: i32 = o[(O_VCTL) as usize];
+        o[(O_VCTL) as usize] = c | VC_NONDET;
+    }
+    o[(O_HI) as usize] = hi;
+    o[(O_LO) as usize] = v;
+    return p + w;
+}

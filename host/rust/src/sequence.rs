@@ -25,7 +25,8 @@ use crate::schema::{self, Failure};
 use crate::snug::vm::api::{vm_scratch_init, vm_scratch_words};
 use crate::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_message_length, vms_need_length,
                                vms_need_offset, vms_position, vms_unknown_total, vms_words};
-use crate::{Error, Limits, Profile, Schema, Top, View};
+use crate::{DecodeOptions, Error, Limits, Profile, Schema, Top, View};
+use std::cell::OnceCell;
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io::Read;
@@ -139,6 +140,10 @@ pub struct Message<'c> {
     /// Absolute offset of its first byte in the sequence.
     pub offset: u64,
     bytes: Cow<'c, [u8]>,
+    // a valid-CBOR reader's profile and cose (P8.4): the View reads the message's
+    // canonical copy when it is not its own deterministic form
+    vprof: Option<(Profile, bool)>,
+    canon: OnceCell<(Option<Vec<u8>>, bool)>,
 }
 impl<'c> Message<'c> {
     /// The message's bytes (exactly its encoding).
@@ -158,12 +163,32 @@ impl<'c> Message<'c> {
         matches!(self.bytes, Cow::Borrowed(_))
     }
     /// A View of the checked message (minted from the reader's verdict, no re-scan).
+    /// Under a valid-CBOR profile a message that is not its own deterministic form is
+    /// read through its canonical copy (P8.4, D262), made once, on the first call, by
+    /// the profile scanner (the check's limits are not re-applied).
     pub fn view(&self) -> View<'_> {
+        if let Some((profile, cose)) = self.vprof {
+            let (copy, unsorted) = self.canon.get_or_init(|| {
+                let big = (i32::MAX - 1) as u32;
+                let o = DecodeOptions {
+                    top: Top::Any,
+                    cose,
+                    profile,
+                    limits: Limits { max_bytes: big, max_depth: 256, max_entries: big, max_items: big },
+                };
+                // the message was accepted under this profile: never refused here
+                match crate::decode::check(&self.bytes, &o) {
+                    Ok(c) => (c.copy, c.unsorted),
+                    Err(_) => (None, true),
+                }
+            });
+            return crate::view::checked_keys(copy.as_deref().unwrap_or(&self.bytes), *unsorted);
+        }
         crate::view::checked(&self.bytes)
     }
     /// The same message owning its bytes.
     pub fn into_owned(self) -> Message<'static> {
-        Message { index: self.index, offset: self.offset, bytes: Cow::Owned(self.bytes.into_owned()) }
+        Message { index: self.index, offset: self.offset, bytes: Cow::Owned(self.bytes.into_owned()), vprof: self.vprof, canon: self.canon }
     }
 }
 
@@ -198,6 +223,8 @@ pub struct Sequence<'p> {
     ss: Vec<i32>,
     ka: Vec<u8>,
     out: Vec<i32>,
+    vs: Vec<i32>,
+    cb: Vec<u8>,
     skip: bool,
     fail_fast: bool,
     delivered: u64,
@@ -218,6 +245,7 @@ pub struct Sequence<'p> {
     held: bool,
     r: i32,
     asserted: i64,
+    vprof: Option<(Profile, bool)>,
 }
 
 /// Where the bytes a step reads come from.
@@ -250,6 +278,8 @@ impl<'p> Sequence<'p> {
             ss: vec![0i32; vms_words(p).max(0) as usize],
             ka: vec![0u8; vms_arena(p, &lim, total).max(0) as usize],
             out: vec![0i32; 8 + 2 * 257],
+            vs: vec![0i32; 512],
+            cb: vec![0u8; 1024],
             skip: options.on_invalid == OnInvalid::Skip,
             fail_fast: options.fail_fast,
             delivered: 0,
@@ -267,6 +297,7 @@ impl<'p> Sequence<'p> {
             held: false,
             r: 0,
             asserted: 0,
+            vprof: if options.profile.valid { Some((options.profile, options.cose)) } else { None },
         })
     }
 
@@ -419,7 +450,7 @@ impl<'p> Sequence<'p> {
         let end = self.end.min((self.delivered - o) as i64);
         if self.dropping || self.held {
             self.asserted = end;
-            return self.prog.session_step(&[], &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, end as i32);
+            return self.prog.session_step(&[], &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, end as i32, &mut self.vs, &mut self.cb);
         }
         let at = i64::from(self.at);
         if let Some(ch) = c {
@@ -428,7 +459,7 @@ impl<'p> Sequence<'p> {
                 let to = ((o as i64 + end) as u64).saturating_sub(ch.base).min(ch.bytes.len() as u64) as usize;
                 let w = &ch.bytes[from..to.max(from)];
                 self.asserted = at + w.len() as i64;
-                return self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at);
+                return self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at, &mut self.vs, &mut self.cb);
             }
             if (self.mlen() as i64) < end {
                 // a piece that starts in the assembly and continues in the chunk: extend it that far
@@ -440,7 +471,7 @@ impl<'p> Sequence<'p> {
         let lo = (at as usize).min(to);
         let w = &self.mb[self.mb_at + lo..self.mb_at + to];
         self.asserted = to as i64;
-        self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at)
+        self.prog.session_step(w, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, self.at, &mut self.vs, &mut self.cb)
     }
 
     fn eof(&mut self) -> i32 {
@@ -477,7 +508,7 @@ impl<'p> Sequence<'p> {
                 // wholly inside the chunk: borrowed (D215)
                 let from = (o - ch.base) as usize;
                 if code == 0 {
-                    Ok(Message { index: self.index, offset: o, bytes: Cow::Borrowed(&ch.bytes[from..from + ml as usize]) })
+                    Ok(Message { index: self.index, offset: o, bytes: Cow::Borrowed(&ch.bytes[from..from + ml as usize]), vprof: self.vprof, canon: OnceCell::new() })
                 } else {
                     Err(self.fault(o))
                 }
@@ -497,7 +528,7 @@ impl<'p> Sequence<'p> {
                     own
                 };
                 if code == 0 {
-                    Ok(Message { index: self.index, offset: o, bytes: Cow::Owned(bytes) })
+                    Ok(Message { index: self.index, offset: o, bytes: Cow::Owned(bytes), vprof: self.vprof, canon: OnceCell::new() })
                 } else {
                     Err(self.fault(o))
                 }

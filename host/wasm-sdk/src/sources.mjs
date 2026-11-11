@@ -278,12 +278,54 @@ function runSync(it, what) {
   }
   return next.value;
 }
+/** P8.4 (D266): valid CBOR, and keys of any kind (EC-sensitive keys' duplicates are not bytewise), are the VM
+ *  session's against `any` (it gives the scanner's code on every input), as in the native package; the resumable
+ *  scanner walks the rest. */
+function scanSession(length, options, scheduling) {
+  validateOptions(options, 'decode');
+  validateOptions(scheduling, 'scheduling');
+  const flags = profileFlags(options);
+  if ((flags & 256) !== 0 || (flags & 3) >= 2) return new ScanVm(length, options, scheduling);
+  return new ScanSession(length, options, scheduling);
+}
+class ScanVm extends VmSession {
+  constructor(length, options = {}, scheduling = {}) {
+    validateOptions(options, 'decode');
+    validateOptions(scheduling, 'scheduling');
+    const { quantum = 0 } = scheduling;
+    if (!Number.isSafeInteger(length) || length < 0 || length > I32_MAX) throw new TypeError('length must be an integer in 0..2^31-1.');
+    if (!Number.isSafeInteger(quantum) || quantum < 0) throw new TypeError('quantum must be a non-negative integer.');
+    rt.ready();
+    anyProgram ??= innerOf(new Program(ANY_P, ANY_B));
+    super(anyProgram, 0, length, scanOpts(options), quantum);
+    this.scanning = true;
+  }
+  stepIn(n, base) {
+    const w = super.stepIn(n, base);
+    if (w.state !== 'done') return w;
+    this.done = true;
+    scanResult(w.result);
+    return { state: 'done' };
+  }
+  step(window, base) {
+    if (!(window instanceof Uint8Array)) throw new TypeError('snug: a window is a Uint8Array');
+    this.load(window);
+    return this.stepIn(window.length, base);
+  }
+}
+function scanOpts(options) {
+  const limits = resolveLimits(options);
+  return { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'cose']),
+    top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
+    maxEntries: limits.maxEntries, maxItems: limits.maxItems };
+}
+
 function scanDrive(handle, options, opts) {
   validateOptions(options, 'decode');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
   checkHandle(handle);
-  return driveSession(new ScanSession(handle.size, options, { quantum }), handle, chunk);
+  return driveSession(scanSession(handle.size, options, { quantum }), handle, chunk);
 }
 function vmDrive(schema, handle, rule, options, opts) {
   validateOptions(options, 'validation');
@@ -300,8 +342,8 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
 
 export function pushScanner(length, options = {}, scheduling = {}) {
   if (length === undefined) return pushUnknown(scanUnknown(options, scheduling), scheduling, scanResult);
-  const session = new ScanSession(length, options, scheduling);
-  return pushSession(session, length, want => Math.min(want.state === 'need' ? want.offset : want.position, session.position()));
+  const session = scanSession(length, options, scheduling);
+  return pushSession(session, length, want => session.scanning ? want.keep : Math.min(want.state === 'need' ? want.offset : want.position, session.position()));
 }
 export function pushValidator(schema, length, rule, options = {}, scheduling = {}) {
   validateOptions(options, 'validation');

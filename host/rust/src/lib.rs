@@ -21,7 +21,7 @@ pub use decode::{decode, DecodeOptions, Floats, Keys, Limits, Profile, Tags, Top
 pub use encode::{encode, EncodeOptions};
 pub use writer::Writer;
 pub use program::Program;
-pub use view::{View, Cursor, TypedView, TypedElement};
+pub use view::{View, Cursor, TypedView, TypedElement, Document};
 pub use api::{Schema, CompileOptions, CompileLimits, CompilerProfile, ValidationOptions,
     Scratch, Failure, Segment, Blob, BytesBlob, validate_blob};
 pub use sequence::{read_sequence, Message, MessageFailure, OnInvalid, Sequence, SequenceOptions, SequenceReader};

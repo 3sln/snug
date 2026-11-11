@@ -43,6 +43,8 @@ export const CODE_TOO_LARGE = 20;
 
 export const CODE_NOT_MAP = 21;
 
+export const CODE_SCRATCH = 22;
+
 export const O_TOP = 0;
 
 export const O_COSE = 1;
@@ -67,7 +69,95 @@ export const O_CSTART = 10;
 
 export const O_PROFILE = 11;
 
+export const O_VCTL = 12;
+
+export const O_VNEEDW = 13;
+
+export const O_VNEEDB = 14;
+
+export const O_VLEN = 15;
+
 export const SCAN_OPTS_LEN = 16;
+
+export const VC_NONDET = 256;
+
+export const VC_ECS = 512;
+
+export const VC_UNSORTED = 1024;
+
+export const O_S_RTOP = 16;
+
+export const O_S_DLOW = 17;
+
+export const O_S_UNITS = 18;
+
+export const O_S_CBTOP = 19;
+
+export const O_S_NDEF = 20;
+
+export const O_S_SRC = 21;
+
+export const O_S_EXTRA = 22;
+
+export const O_S_NTAB = 23;
+
+export const O_S_SBASE = 24;
+
+export const O_S_SEND = 25;
+
+export const O_S_NEV = 26;
+
+export const O_S_STOPP = 27;
+
+export const O_S_STOPK = 28;
+
+export const O_S_STOPC = 29;
+
+export const O_S_STOPO = 30;
+
+export const O_S_DUPK = 31;
+
+export const O_S_DUPP = 32;
+
+export const O_S_DUPO = 33;
+
+export const O_S_DUPC = 34;
+
+export const O_S_PLANT = 35;
+
+export const O_S_PMAJ = 36;
+
+export const O_S_PLEN = 37;
+
+export const O_S_STOPX = 38;
+
+export const O_S_CBASE = 39;
+
+export const O_S_PSTOP = 40;
+
+export const O_S_NSORT = 41;
+
+export const O_S_DUPCO = 42;
+
+export const O_S_PBAD = 43;
+
+export const O_S_EDEPTH = 44;
+
+export const O_S_FIRST = 48;
+
+export const EV_HEAD = 1;
+
+export const EV_END = 2;
+
+export const EV_KEY = 3;
+
+export const EV_WMARK = 4;
+
+export const EV_EMB = 5;
+
+export const EV_UNITS = 6;
+
+export const EV_WORDS = 8;
 
 export const PF_KEYS = 3;
 
@@ -81,11 +171,19 @@ export const PF_UNDEFINED = 32;
 
 export const PF_NONCHAR = 64;
 
-export const PF_HOST = 127;
+export const PF_HOST = 383;
 
 export const PF_SUB = 128;
 
 export const PF_DETERMINISTIC = 122;
+
+export const PF_VALID = 256;
+
+export const PF_VALID_PRESET = 378;
+
+export const PF_CANON = 512;
+
+export const PF_VREL = 1024;
 
 export const MAX_BIGNUM_BYTES = 128;
 

@@ -18,7 +18,7 @@
 //! bytes[0] = 0xff;
 //! println!("{:?}", view.raw());
 //! ```
-use crate::snug::nav::walk::{nav_child, nav_find, nav_head, nav_init, nav_skip};
+use crate::snug::nav::walk::{nav_child, nav_find, nav_find_any, nav_head, nav_init, nav_skip};
 use crate::{DecodeOptions, Error, Value};
 
 fn state() -> [i32; 8] {
@@ -34,21 +34,60 @@ pub struct View<'a> {
     start: usize,
     end: usize,
     depth: usize,
+    // P8.4: some map's keys may be out of canonical order (valid CBOR); lookups compare every key
+    unsorted: bool,
 }
+#[allow(dead_code)] // the sequence reader mints its views with it (D215)
 pub(crate) fn checked(bytes: &[u8]) -> View<'_> {
+    checked_keys(bytes, false)
+}
+/// A checked document whose maps may hold keys out of canonical order (valid CBOR, P8.4).
+pub(crate) fn checked_keys(bytes: &[u8], unsorted: bool) -> View<'_> {
     View {
         bytes,
         start: 0,
         end: bytes.len(),
         depth: 0,
+        unsorted,
+    }
+}
+/// A checked document that owns its bytes (P8.4, D267): the input, or -- for
+/// valid input that is not its own deterministic form -- its canonical copy
+/// (wire order kept), which a borrowing [`View`] cannot alias.
+#[derive(Clone, Debug)]
+pub struct Document {
+    bytes: Vec<u8>,
+    unsorted: bool,
+}
+impl Document {
+    /// Check `bytes` and keep them, or their canonical copy, for viewing.
+    pub fn open(bytes: &[u8], options: &DecodeOptions) -> Result<Self, Error> {
+        let c = crate::decode::check(bytes, options)?;
+        Ok(Self { bytes: c.copy.unwrap_or_else(|| bytes.to_vec()), unsorted: c.unsorted })
+    }
+    pub(crate) fn from_checked(bytes: Vec<u8>, unsorted: bool) -> Self {
+        Self { bytes, unsorted }
+    }
+    /// The root view, borrowing this document.
+    pub fn view(&self) -> View<'_> {
+        checked_keys(&self.bytes, self.unsorted)
+    }
+    /// The checked bytes (the canonical copy when one was made).
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 }
 impl<'a> View<'a> {
     /// Scan the whole document before exposing its root. Borrowed byte/string
     /// accessors retain exactly the input lifetime and perform no copying.
+    /// Valid input that is not its own deterministic form cannot be borrowed
+    /// (`Error::Usage("owned_view")`): open a [`Document`] instead.
     pub fn open(bytes: &'a [u8], options: &DecodeOptions) -> Result<Self, Error> {
-        crate::decode::check(bytes, options)?;
-        Ok(checked(bytes))
+        let c = crate::decode::check(bytes, options)?;
+        if c.copy.is_some() {
+            return Err(Error::Usage("owned_view"));
+        }
+        Ok(checked_keys(bytes, c.unsorted))
     }
     fn head(&self) -> Option<(usize, u8, u8, u64)> {
         let mut o = state();
@@ -76,6 +115,7 @@ impl<'a> View<'a> {
             start,
             end: end as usize,
             depth: self.depth + 1,
+            unsorted: self.unsorted,
         })
     }
     /// Absolute byte offset in the original document.
@@ -154,7 +194,8 @@ impl<'a> View<'a> {
             return None;
         }
         let k = crate::encode(key, &crate::EncodeOptions::default()).ok()?;
-        let p = nav_find(
+        let find = if self.unsorted { nav_find_any } else { nav_find };
+        let p = find(
             self.bytes,
             &mut state(),
             self.start as i32,

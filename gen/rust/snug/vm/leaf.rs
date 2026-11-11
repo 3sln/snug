@@ -358,6 +358,27 @@ pub fn leaf_int(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos: i
         } else {
             rg = 1;
         }
+        // P8.4 (D265): valid CBOR admits leading zeros and small bignums;
+        // compare the magnitude without them, as an integer when it fits 64 bits
+        while (c > 0) && ((b[(a) as usize] as i32) == 0) {
+            a += 1;
+            c -= 1;
+        }
+        if c <= 8 {
+            let mut vh: i32 = 0;
+            let mut vl: i32 = 0;
+            for j in 0..c {
+                vh = (vh << 8) | (i32::cast_unsigned(vl) >> 24).cast_signed();
+                vl = (vl << 8) | (b[(a + j) as usize] as i32);
+            }
+            a = vh;
+            c = vl;
+            if rg == 4 {
+                rg = 3;
+            } else {
+                rg = 2;
+            }
+        }
     }
     if rg == 0 {
         return R_TYPE;

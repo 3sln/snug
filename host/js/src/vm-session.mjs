@@ -1,12 +1,13 @@
 // Session-only host state. Keep the kin window/EOF protocol unchanged (D144–D147).
 import { vmScratchWords, vmScratchInit } from '../../../gen/js/snug/vm/api.mjs';
-import { vmsWords, vmsArena, vmsInit, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
-  vmsInitUnknown, vmsUnknownTotal, vmsEof } from '../../../gen/js/snug/vm/session.mjs';
+import { vmsWords, vmsArena, vmsInit, vmsStepV, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
+  vmsInitUnknown, vmsUnknownTotal, vmsEof, vmsGrowWords, vmsGrowBytes, vmsGrowScratch, vmsGrowArena } from '../../../gen/js/snug/vm/session.mjs';
 import { rethrow } from './ext.mjs';
 import { limitWords } from './schema-core.mjs';
 
 // ---------------------------------------------------------------- sessions
-const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68;
+const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68, VMS_GROW = -69;
+const noExt = () => -2;
 /** One resumable validation (P6.2, D027): the kin session over windows of a message of
  *  a declared length. It owns its scratch, session array and key arena from start to
  *  verdict (§17.1 W9: interleaved async sessions never share state); the Program is
@@ -38,6 +39,8 @@ export class VmSession {
     }
     if (c < 0) throw new Error(`snug: vms-init answered ${c}`);
     this.busy = false; this.verdict = null;
+    // P8.4 (D266): the valid machinery's buffers (a whole item's canonical path), grown on VMS_GROW
+    this.vs = new Int32Array(512); this.cb = new Uint8Array(1024);
   }
   /** D085, an unknown-length session: the message ended after `n` bytes (or passed the
    *  input limit `limit`: any n above it). Answers {state: 'done', result}, or
@@ -54,7 +57,7 @@ export class VmSession {
     return this.verdict;
   }
   /** Bytes this session holds beyond the Program (its exclusive arrays). */
-  get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length) + this.ka.length; }
+  get bytesHeld() { return 4 * (this.s.length + this.ss.length + this.out.length + this.vs.length) + this.ka.length + this.cb.length; }
   step(window, base) {
     if (this.verdict) return this.verdict;
     if (this.dead) throw this.dead;
@@ -64,8 +67,15 @@ export class VmSession {
     let r;
     const x = this.program.ext;
     try {
-      r = x ? vmsStepX(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x.call)
-        : vmsStep(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base);
+      for (;;) {
+        r = vmsStepV(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x ? x.call : noExt, this.vs, this.cb);
+        if (r !== VMS_GROW) break;
+        const w = vmsGrowWords(this.ss), nb = vmsGrowBytes(this.ss), sw = vmsGrowScratch(this.ss), aw = vmsGrowArena(this.ss);
+        if (w > this.vs.length) this.vs = new Int32Array(Math.max(w, 2 * this.vs.length));
+        if (nb > this.cb.length) this.cb = new Uint8Array(Math.max(nb, 2 * this.cb.length));
+        if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.s = g; }
+        if (aw > this.ka.length) { const g = new Uint8Array(aw); g.set(this.ka); this.ka = g; }
+      }
     } finally { this.busy = false; }
     // a predicate that threw voids the session (its walk went on with a false verdict)
     try { rethrow(x); } catch (e) { this.dead = e; throw e; }

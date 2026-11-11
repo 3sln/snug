@@ -24,10 +24,10 @@
             [snug.lang :refer [I32 Ext Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or bit-xor
                                rem < > <= >= == != and or not u8 blen ia iset]]
             [snug.cbor.codes :refer [CODE_TEXT CODE_TYPED_ARRAY CODE_TRAILING CODE_DEPTH CODE_TOO_MANY_ITEMS
-                                     O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ERR_POS O_ITEMS O_HI O_LO]]
-            [snug.cbor.head :refer [fail read-arg take-len]]
+                                     O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ERR_POS O_ITEMS O_HI O_LO O_PROFILE PF_VREL]]
+            [snug.cbor.head :refer [fail read-arg read-arg-v take-len]]
             [snug.cbor.text :refer [utf8-window]]
-            [snug.cbor.scan :refer [text-nc]]
+            [snug.cbor.scan :refer [text-nc typed-nan-at]]
             [snug.vm.layout :refer [H_FLAGS H_S_LEAVES H_S_REGEX_INDEX FL_EMBED K_TEXT K_BYTES K_EMBED
                                     F_ADMITTED F_MATCHED F_EVAL VM_REGEX VM_REGCAP VM_EMBED VM_DLIM VM_D
                                     VM_BUDGET VM_W_REASON VM_W_SUB R_SIZE R_PATTERN R_BITS R_EMBEDDED
@@ -36,7 +36,6 @@
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame wit-empty
                                   wit-clear wit-set path-put]]
             [snug.vm.leaf :refer [eval-leaf scalar-kind rx-cp rx-accepts utf8-len bits-ok]]
-            [snug.vm.dead :refer [typed-bad-at]]
             [snug.vm.eval :refer [unit-of q-filter-x finish-scalar embed-kill embed-live count-matched-scalars]]
             [snug.vm.sbase :refer [pend-note GO FW FK_TEXT FK_BSTR FK_DTEXT F_KIND F_PH F_POS F_END F_D F_FB F_CK F_NQ
                                    F_CTX F_PIN F_MAJ F_CS F_STOP F_I F_CLS F_DEFER F_RXOFF F_RXCP F_BITS
@@ -64,6 +63,14 @@
     (if (> it (ia s O_MAX_ITEMS)) (return (fail s pos CODE_TOO_MANY_ITEMS))))
   (if (and (!= live 0) (< (cset-rec p s ck) 0)) (return (neg R_INCONSISTENT)))
   (let [ai (bit-and (u8 b pos) 31)]
+    (comment "P8.4 (D266): a valid-CBOR run's frames take a head of any width (an"
+             "indefinite one is the caller's: its argument reads as 0)")
+    (if (and (!= (bit-and (ia s O_PROFILE) PF_VREL) 0) (and (>= ai 24) (<= ai 27)))
+      (return (read-arg-v b s pos ai end)))
+    (if (and (!= (bit-and (ia s O_PROFILE) PF_VREL) 0) (== ai 31))
+      (do (iset s O_HI 0)
+          (iset s O_LO 0)
+          (return (+ pos 1))))
     (if (>= ai 24) (return (read-arg b s pos ai end)))
     (iset s O_HI 0)
     (iset s O_LO ai)
@@ -552,7 +559,7 @@
         (let [e0 (chunk-end s ss i stop wend)
               ^:mut e (- e0 (rem (- e0 i) size))]
           (if (== e i) (set e (+ i size)))
-          (let [bad (typed-bad-at b i e tag)]
+          (let [bad (typed-nan-at b i e tag)]
             (if (>= bad 0) (return (fail s bad CODE_TYPED_ARRAY)))
             (progress ss (+ 1 (sar (- e i) 6)))
             (iset ss (+ f F_TI) (+ e base))))))))

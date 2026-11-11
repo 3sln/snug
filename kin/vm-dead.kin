@@ -10,23 +10,92 @@
 ;; `s` is the VM scratch; its first 16 words are the scanner's `o`.
 (ns snug.vm.dead
   (:require [kin.lang :refer [defn let return set if while for do comment declarefn break]]
-            [snug.lang :refer [I32 Bool Bytes Ints + - neg rem shl ushr bit-and bit-or
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg rem shl sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 ia iset hex]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_KEY_ORDER
                                      CODE_DUPLICATE_KEY CODE_TAG CODE_DECIMAL
                                      CODE_TYPED_ARRAY CODE_NDARRAY CODE_DEPTH CODE_TOO_MANY_ITEMS
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
-                                     O_PROFILE CODE_BIGNUM CODE_TRAILING MAX_BIGNUM_BYTES]]
+                                     O_PROFILE CODE_BIGNUM CODE_TRAILING MAX_BIGNUM_BYTES
+                                     O_VCTL VC_ECS PF_CANON PF_VREL PF_TAGS
+                                     EV_HEAD EV_END EV_KEY EV_EMB EV_UNITS EV_WORDS]]
             [snug.cbor.head :refer [fail read-arg take-len count-item enter-container bytes-content]]
             [snug.cbor.text :refer [utf8-invalid-at]]
             [snug.cbor.keys :refer [compare-spans]]
-            [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok]]
-            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad]]
+            [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok decimal-v ndarray-v vcount]]
+            [snug.cbor.canon :refer [kclass]]
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad typed-nan-at]]
             [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag]]
-            [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC]]
+            [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC VM_VTAB]]
             [snug.vm.base :refer [charge c8 c64 c64min]]))
 
-(declarefn dead-item)
+(declarefn dead-item pair-walk if-pair-code)
+
+;; ------------------------------------------------------------ replay (P8.4, D277, D280)
+;; Over a canonical copy the driver puts the copy's events (vcopy.kin) in S at
+;; s[VM_VTAB] (0: none): s[base] their count, the events from base + 4.
+
+(defn ^:pub ^I32 rfind [^IntsR s ^I32 pos ^I32 kind]
+  (comment "The word offset in s of the event (pos, kind), or -1 (a binary search:"
+           "the events are sorted by position, then kind).")
+  (let [base (ia s VM_VTAB)]
+    (if (== base 0) (return (neg 1)))
+    (let [^:mut lo 0
+          ^:mut hi (ia s base)]
+      (while (< lo hi)
+        (let [mid (sar (+ lo hi) 1)
+              e (+ (+ base 4) (* EV_WORDS mid))
+              v (ia s e)
+              k (ia s (+ e 1))]
+          (if (and (== v pos) (== k kind)) (return e))
+          (if (or (< v pos) (and (== v pos) (< k kind))) (set lo (+ mid 1)) (set hi mid))))
+      (return (neg 1)))))
+
+(defn ^:pub ^I32 head-fail [^Bytes b ^Ints s ^I32 pos ^I32 ai ^I32 depth ^I32 r]
+  (comment "read-arg answered r < 0 at pos. Over a canonical copy a definite array or"
+           "map head is planted malformed where the scanner refused it after its"
+           "depth check (a declared length past the end: EV_HEAD word 7 = 1); a walk"
+           "whose own depth bound it reaches refuses depth there first, as"
+           "enter-container would (a tag-24 payload's walk may be bounded tighter"
+           "than the copy's, D264). r otherwise.")
+  (if (or (== (ia s VM_VTAB) 0) (!= ai 28)) (return r))
+  (let [major (ushr (u8 b pos) 5)]
+    (if (and (!= major 4) (!= major 5)) (return r)))
+  (if (< depth (ia s O_MAX_DEPTH)) (return r))
+  (let [e (rfind s pos EV_HEAD)]
+    (if (or (< e 0) (!= (ia s (+ e 7)) 1)) (return r))
+    (return (fail s pos CODE_DEPTH))))
+
+(defn ^:pub ^I32 rfail [^Ints s ^I32 e]
+  (comment "Refuse with the event e's code at its copy offset (which maps to the"
+           "refusal's source offset).")
+  (return (fail s (ia s (+ e 3)) (ia s (+ e 2)))))
+
+(defn ^:pub ^I32 replay-end [^Ints s ^I32 cs]
+  (comment "At the end of the container whose content starts at cs, before anything"
+           "else there: its deferred duplicate check's units (D277; a budget stop is"
+           "reported at the map), then a refusal recorded for it (D280). 0, or the"
+           "negated refusal.")
+  (let [eu (rfind s cs EV_UNITS)]
+    (if (>= eu 0)
+      (if (not (charge s (ia s (+ eu 2)) (ia s (+ eu 3)))) (return (neg R_BUDGET)))))
+  (let [ee (rfind s cs EV_END)]
+    (if (>= ee 0) (return (rfail s ee))))
+  (return 0))
+
+(defn ^:pub ^I32 replay-key [^Ints s ^I32 start]
+  (comment "After the key at start's key-order comparison: its recorded duplicate"
+           "refusal (D280). 0, or the negated refusal.")
+  (let [ek (rfind s start EV_KEY)]
+    (if (>= ek 0) (return (rfail s ek))))
+  (return 0))
+
+(defn ^:pub ^Bool replay-trunc [^IntsR s ^I32 p]
+  (comment "Is p a stop planted where the source had no byte (truncated before any"
+           "visit, as at the end of input)?")
+  (let [e (rfind s p EV_HEAD)]
+    (if (< e 0) (return false))
+    (return (== (ia s (+ e 4)) CODE_TRUNCATED))))
 
 (defn ^:pub ^I32 dead-text [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 end]
   (comment "Text: its length, then UTF-8 (charged ceil(len/8) before the scan, D253).")
@@ -85,17 +154,44 @@
         (do (set q (dead-item b s q inner end))
             (if (< q 0) (return q))
             (set i (+ i 1)))))
+    (if (!= (ia s VM_VTAB) 0)
+      (do (let [re (replay-end s p)]
+            (if (< re 0) (return re)))))
     (return q)))
+
+(defn ^:pub key-ecs [^Bytes b ^Ints s ^I32 start]
+  (comment "P8.4 (D263): a key that is not text or an integer and is EC-sensitive (it"
+           "holds a float zero or a NaN, or a map out of canonical order) notes"
+           "VC_ECS in s[O_VCTL]: its duplicates are not bytewise, so the run's verdict"
+           "takes the canonical path, whose scan checks them by value. O_HI, O_LO and"
+           "O_CSTART are kept.")
+  (let [km (ushr (u8 b start) 5)]
+    (if (and (!= km 3) (> km 1))
+      (do (let [h (ia s O_HI)
+                l (ia s O_LO)
+                c (ia s O_CSTART)]
+            (if (!= (bit-and (kclass b s start) 2) 0)
+              (do (let [v (ia s O_VCTL)]
+                    (iset s O_VCTL (bit-or v VC_ECS)))))
+            (iset s O_HI h)
+            (iset s O_LO l)
+            (iset s O_CSTART c))))))
 
 (defn ^:pub ^I32 key-order [^Bytes b ^Ints s ^I32 ps ^I32 pe ^I32 start ^I32 q]
   (comment "The key b[start, q) against the previous key b[ps, pe) (ps < 0: none):"
-           "charged ceil(min(len)/64), at least 1; 0, or the negated refusal.")
-  (if (< ps 0) (return 0))
-  (if (not (charge s (c64min (- pe ps) (- q start)) start)) (return (neg R_BUDGET)))
-  (let [order (compare-spans b ps pe start q)]
-    (if (== order 0) (return (fail s start CODE_DUPLICATE_KEY)))
-    (if (> order 0) (return (fail s start CODE_KEY_ORDER)))
-    (return 0)))
+           "charged ceil(min(len)/64), at least 1; 0, or the negated refusal. Over a"
+           "canonical copy (PF_CANON, P8.4) the order is the wire's and duplicates are"
+           "already checked: charged, never refused; elsewhere an EC-sensitive key is"
+           "noted (key-ecs).")
+  (let [canon (!= (bit-and (ia s O_PROFILE) PF_CANON) 0)]
+    (if (not canon) (key-ecs b s start))
+    (if (< ps 0) (return 0))
+    (if (not (charge s (c64min (- pe ps) (- q start)) start)) (return (neg R_BUDGET)))
+    (if canon (return 0))
+    (let [order (compare-spans b ps pe start q)]
+      (if (== order 0) (return (fail s start CODE_DUPLICATE_KEY)))
+      (if (> order 0) (return (fail s start CODE_KEY_ORDER)))
+      (return 0))))
 
 (defn ^:pub ^I32 dead-map-pairs [^Bytes b ^Ints s ^I32 p ^I32 lo ^I32 depth ^I32 end]
   (comment "The lo pairs of a map at depth (after its container checks), dead.")
@@ -116,10 +212,16 @@
             (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
           (let [ko (key-order b s ps pe start q)]
             (if (< ko 0) (return ko)))
+          (if (!= (ia s VM_VTAB) 0)
+            (do (let [rk (replay-key s start)]
+                  (if (< rk 0) (return rk)))))
           (set ps start)
           (set pe q)
           (set q (dead-item b s q inner end))
           (if (< q 0) (return q)))))
+    (if (!= (ia s VM_VTAB) 0)
+      (do (let [re (replay-end s p)]
+            (if (< re 0) (return re)))))
     (return q)))
 
 (defn ^:pub ^I32 dead-map [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
@@ -137,39 +239,11 @@
       (set q (dead-item b s q inner end))
       (if (< q 0) (return q))
       (if (== i 0) (set q1 q)))
+    (if (!= (ia s VM_VTAB) 0)
+      (do (let [re (replay-end s p)]
+            (if (< re 0) (return re)))))
     (if (== lo 2) (iset s VM_Q1 q1))
     (return q)))
-
-(defn ^:pub ^I32 typed-bad-at [^Bytes b ^I32 i0 ^I32 stop ^I32 tag]
-  (comment "The first float element of a typed array (tags 84/85/86, little-endian"
-           "float16/32/64) in b[i0, stop) that is a NaN with a payload, or -1."
-           "Shared by the buffer walk and the resumable session.")
-  (let [^:mut i i0]
-    (if (== tag 84)
-      (while (< i stop)
-        (let [h1 (u8 b (+ i 1))]
-          (if (== (bit-and h1 124) 124)
-            (if (!= (bit-or (bit-and h1 3) (u8 b i)) 0) (return i))))
-        (set i (+ i 2))))
-    (if (== tag 85)
-      (while (< i stop)
-        (let [s3 (u8 b (+ i 3))
-              s2 (u8 b (+ i 2))]
-          (if (and (== (bit-and s3 127) 127) (>= s2 128))
-            (if (!= (bit-or (bit-or (bit-and s2 127) (u8 b (+ i 1))) (u8 b i)) 0) (return i))))
-        (set i (+ i 4))))
-    (if (== tag 86)
-      (while (< i stop)
-        (let [t7 (u8 b (+ i 7))
-              t6 (u8 b (+ i 6))]
-          (if (and (== (bit-and t7 127) 127) (>= t6 240))
-            (if (!= (bit-or (bit-or (bit-or (bit-and t6 15) (u8 b (+ i 5)))
-                                    (bit-or (u8 b (+ i 4)) (u8 b (+ i 3))))
-                            (bit-or (bit-or (u8 b (+ i 2)) (u8 b (+ i 1))) (u8 b i)))
-                     0)
-              (return i))))
-        (set i (+ i 8))))
-    (return (neg 1))))
 
 (defn ^:pub ^I32 dead-typed [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 tag ^I32 size ^I32 end]
   (comment "scan-typed, with the NaN scan of float arrays charged ceil(len/64)"
@@ -178,9 +252,11 @@
     (if (< stop 0) (return stop))
     (let [cs (ia s O_CSTART)]
       (if (!= (rem (- stop cs) size) 0) (return (fail s pos CODE_TYPED_ARRAY)))
+      (comment "the NaN rule is the Bindle tag set's (tag level 0, D265)")
+      (if (!= (bit-and (ia s O_PROFILE) PF_TAGS) 0) (return stop))
       (if (>= tag 84)
         (if (not (charge s (c64 (- stop cs)) pos)) (return (neg R_BUDGET))))
-      (let [bad (typed-bad-at b cs stop tag)]
+      (let [bad (typed-nan-at b cs stop tag)]
         (if (>= bad 0) (return (fail s bad CODE_TYPED_ARRAY))))
       (return stop))))
 
@@ -192,7 +268,9 @@
     (if (< stop 0) (return stop))
     (let [cs (ia s O_CSTART)
           len (- stop cs)]
-      (if (or (< len 9) (== (u8 b cs) 0)) (return (fail s pos CODE_BIGNUM)))
+      (comment "a valid-CBOR run (PF_VREL, P8.4, D265) admits leading zeros and small values")
+      (if (== (bit-and (ia s O_PROFILE) PF_VREL) 0)
+        (if (or (< len 9) (== (u8 b cs) 0)) (return (fail s pos CODE_BIGNUM))))
       (if (or (> len MAX_BIGNUM_BYTES) (> len bmax)) (return (fail s pos CODE_BIGNUM)))
       (return stop))))
 
@@ -212,23 +290,59 @@
       (iset s VM_Q1 q1)
       (return q2))))
 
+(defn ^:pub ^Bool pair-v [^IntsR s]
+  (comment "Do tags 4 and 40 take the any-width path (scan.kin pair-v-on): a tag level"
+           "above the Bindle set's, or a valid-CBOR run (PF_VREL)?")
+  (return (!= (bit-and (ia s O_PROFILE) (bit-or PF_TAGS PF_VREL)) 0)))
+
 (defn ^:pub ^I32 pair-check [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 shape-code ^I32 end]
-  (comment "scan-pair's first two checks: a byte is left, and it is 0x82.")
+  (comment "scan-pair's first two checks: a byte is left, and it is 0x82 -- at tag"
+           "levels 1-3 or in a valid-CBOR run (D265, scan-pair-v) an array of any count, walked as an item"
+           "and counted after (pair-count).")
   (if (>= p end) (return (fail s p CODE_TRUNCATED)))
+  (if (and (!= (ia s VM_VTAB) 0) (replay-trunc s p)) (return (fail s p CODE_TRUNCATED)))
+  (if (pair-v s)
+    (do (if (!= (ushr (u8 b p) 5) 4) (return (fail s pos shape-code)))
+        (return 0)))
   (if (!= (u8 b p) (hex 130)) (return (fail s pos shape-code)))
   (return 0))
 
+(defn ^:pub ^I32 pair-count [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 shape-code ^I32 stop]
+  (comment "At tag levels 1-3, after the content array at p was walked: it holds two"
+           "items (else shape-code at the tag). stop, or the negated refusal.")
+  (if (not (pair-v s)) (return stop))
+  (if (!= (vcount b s p) 2) (return (fail s pos shape-code)))
+  (return stop))
+
 (defn ^:pub ^I32 decimal-check [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 stop]
+  (comment "Tag 4's rule over its walked [e, m] at p: the Bindle rule at tag level 0,"
+           "RFC 8949 §3.4.4's at levels 1-3 (D265).")
+  (let [lvl (bit-and (sar (ia s O_PROFILE) 2) 3)]
+    (if (pair-v s)
+      (do (if (not (decimal-v b s p lvl)) (return (fail s pos CODE_DECIMAL)))
+          (return stop))))
   (let [q1 (ia s VM_Q1)]
     (if (not (exponent-ok b (+ p 1))) (return (fail s pos CODE_DECIMAL)))
     (if (not (mantissa-ok b q1 stop)) (return (fail s pos CODE_DECIMAL)))
     (return stop)))
 
 (defn ^:pub ^I32 ndarray-check [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 stop]
+  (comment "Tag 40's rule over its walked [shape, data] at p: the Bindle rule at tag"
+           "level 0, RFC 8746 §3.1.1's at levels 1-3 (D265).")
+  (let [lvl (bit-and (sar (ia s O_PROFILE) 2) 3)]
+    (if (pair-v s)
+      (do (if (not (ndarray-v b s p lvl)) (return (fail s pos CODE_NDARRAY)))
+          (return stop))))
   (let [count (data-count b (ia s VM_Q1))]
     (if (< count 0) (return (fail s pos CODE_NDARRAY)))
     (if (not (shape-ok b (+ p 1) count)) (return (fail s pos CODE_NDARRAY)))
     (return stop)))
+
+(defn ^:pub ^I32 vtab-find [^IntsR s ^I32 cs]
+  (comment "Over a canonical copy (P8.4, D264): the EV_EMB event (word offset in s) of"
+           "the byte-string content starting at cs -- content walked in its own copy"
+           "(copy start and end at +3, +4) -- or -1.")
+  (return (rfind s cs EV_EMB)))
 
 (defn ^:pub ^I32 dead-std-check [^Bytes b ^Ints s ^I32 pos ^I32 tag ^I32 q ^I32 stop ^I32 depth]
   (comment "A standard-set tag at pos (depth `depth`) whose content item b[q, stop)"
@@ -243,10 +357,28 @@
   (if (not (std-content-ok b tag q stop)) (return (fail s pos CODE_TAG)))
   (if (== tag 24)
     (do (let [cs (std-inner b q)
-              ^I32 r (dead-item b s cs (+ depth 2) stop)]
-          (if (< r 0) (return r))
-          (if (!= r stop) (return (fail s r CODE_TRAILING))))))
+              e (vtab-find s cs)
+              ^:mut wcs cs
+              ^:mut wce stop]
+          (comment "over a canonical copy a payload that is not its own DC form, or is"
+                   "refused, is walked in its own copy (D264, D280)")
+          (if (>= e 0)
+            (do (set wcs (ia s (+ e 3)))
+                (set wce (ia s (+ e 4)))))
+          (let [^I32 r (dead-item b s wcs (+ depth 2) wce)]
+            (if (< r 0) (return r))
+            (if (!= r wce) (return (fail s r CODE_TRAILING)))))))
   (return stop))
+
+(defn ^:pub ^I32 if-pair-code [^I32 lo]
+  (if (== lo 4) (return CODE_DECIMAL))
+  (return CODE_NDARRAY))
+
+(defn ^:pub ^I32 pair-walk [^Bytes b ^Ints s ^I32 p ^I32 depth ^I32 end]
+  (comment "The content array of tag 4/40 walked dead: as dead-pair-body (two elements)"
+           "at tag level 0, as an item of any count at levels 1-3.")
+  (if (not (pair-v s)) (return (dead-pair-body b s p depth end)))
+  (return (dead-item b s p (+ depth 1) end)))
 
 (defn ^:pub ^I32 dead-tag [^Bytes b ^Ints s ^I32 pos ^I32 p ^I32 hi ^I32 lo ^I32 depth ^I32 end]
   (if (>= depth (ia s O_MAX_DEPTH)) (return (fail s pos CODE_DEPTH)))
@@ -258,18 +390,16 @@
             (if (< qh 0) (return qh))
             (return (dead-std-check b s pos rw p qh depth))))))
   (if (or (== lo 2) (== lo 3)) (return (dead-bignum b s pos p (ia s VM_BIGNUM_MAX) end)))
-  (if (== lo 4)
-    (do (let [c4 (pair-check b s pos p CODE_DECIMAL end)]
+  (if (or (== lo 4) (== lo 40))
+    (do (let [code (if-pair-code lo)
+              c4 (pair-check b s pos p code end)]
           (if (< c4 0) (return c4)))
-        (let [^I32 st4 (dead-pair-body b s p depth end)]
+        (let [^I32 st4 (pair-walk b s p depth end)]
           (if (< st4 0) (return st4))
-          (return (decimal-check b s pos p st4)))))
-  (if (== lo 40)
-    (do (let [c40 (pair-check b s pos p CODE_NDARRAY end)]
-          (if (< c40 0) (return c40)))
-        (let [^I32 st40 (dead-pair-body b s p depth end)]
-          (if (< st40 0) (return st40))
-          (return (ndarray-check b s pos p st40)))))
+          (let [st5 (pair-count b s pos p (if-pair-code lo) st4)]
+            (if (< st5 0) (return st5))
+            (if (== lo 4) (return (decimal-check b s pos p st5)))
+            (return (ndarray-check b s pos p st5))))))
   (let [size (typed-size lo)]
     (if (> size 0) (return (dead-typed b s pos p lo size end)))
     (if (std-allowed (ia s O_PROFILE) lo depth)
@@ -295,7 +425,7 @@
       (do (if (== major 7)
             (if (and (>= ai 25) (<= ai 27)) (return (scan-float b s pos ai end))))
           (set p (read-arg b s pos ai end))
-          (if (< p 0) (return p))
+          (if (< p 0) (return (head-fail b s pos ai depth p)))
           (set hi (ia s O_HI))
           (set lo (ia s O_LO))))
     (if (<= major 1) (return p))

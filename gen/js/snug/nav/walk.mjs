@@ -250,6 +250,40 @@ export function navFind(b, o, p, k, ks, ke, end) {
     return NAV_NOT_FOUND;
 }
 
+export function navFindAny(b, o, p, k, ks, ke, end) {
+    // nav-find for a map whose keys may be in any order (a message checked as
+    // valid CBOR whose scan noted keys out of canonical order, P8.4): every key
+    // is compared, no early exit. The keys are canonical (the message is its
+    // own canonical form, or a canonical copy), so equal encodings are equal
+    // keys.
+    const c = navHead(b, o, p, end);
+    if (c < 0) {
+        return c;
+    }
+    if (o[N_MAJOR] !== 5) {
+        return NAV_NOT_FOUND;
+    }
+    const n = o[N_LO];
+    let q = c;
+    if (o[N_HI] !== 0) {
+        return NAV_BAD;
+    }
+    for (let _i = 0; _i < n; _i++) {
+        const ke1 = navSkip(b, o, q, end);
+        if (ke1 < 0) {
+            return ke1;
+        }
+        if (compareKey(b, q, ke1, k, ks, ke) === 0) {
+            return ke1;
+        }
+        q = navSkip(b, o, ke1, end);
+        if (q < 0) {
+            return q;
+        }
+    }
+    return NAV_NOT_FOUND;
+}
+
 export function navDir(b, o, p, d, end) {
     // A child directory of the array or map at p: d[i] = the position of
     // element i (array) or of KEY i (map), one word per child; answers the

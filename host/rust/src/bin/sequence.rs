@@ -14,7 +14,8 @@ use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use snug::schema::Segment;
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
 use snug::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_keep, vms_message_length,
-                               vms_need_length, vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total,
+                               vms_need_length, vms_need_offset, vms_position, vms_step_v, vms_unknown_total,
+                               vms_grow_arena, vms_grow_bytes, vms_grow_scratch, vms_grow_words,
                                vms_words};
 use snug::{Error, OnInvalid, Profile, Schema, Sequence, SequenceOptions, Top};
 use std::io::{BufRead, Write};
@@ -108,6 +109,7 @@ fn profile_of(f: i32) -> Profile {
         floats: if f & 16 != 0 { Floats::Deterministic } else { Floats::Bindle },
         undefined_value: f & 32 != 0,
         noncharacters: f & 64 != 0,
+        valid: f & 256 != 0,
     }
 }
 
@@ -141,6 +143,7 @@ fn run_sequence(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], ki
     vm_scratch_init(&mut s, cap);
     let mut ss = vec![0i32; vms_words(p) as usize];
     let mut ka = vec![0u8; vms_arena(p, lim, total as i32).max(0) as usize];
+    let (mut vs, mut cb) = (vec![0i32; 512], vec![0u8; 1024]);
     let mut out = vec![0i32; 8 + 2 * 257];
     let ends = chunk_ends(n, kind, w, seed, k);
     let (mut ci, mut delivered) = (0usize, 0usize);
@@ -179,10 +182,21 @@ fn run_sequence(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], ki
                 let w = e.min(at + want.max(65536));
                 let win: Vec<u8> = input[o + at..o + at.max(w)].to_vec();
                 steps += 1;
-                if ext.is_empty() {
-                    vms_step(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, at as i32)
-                } else {
-                    vms_step_x(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, at as i32, &xf)
+                loop {
+                    let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+                    let r = if ext.is_empty() {
+                        vms_step_v(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, at as i32, &none, &mut vs, &mut cb)
+                    } else {
+                        vms_step_v(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, at as i32, &xf, &mut vs, &mut cb)
+                    };
+                    if r != -69 {
+                        break r;
+                    }
+                    let (gw, gb, gs, ga) = (vms_grow_words(&ss), vms_grow_bytes(&ss), vms_grow_scratch(&ss), vms_grow_arena(&ss));
+                    if gw as usize > vs.len() { vs = vec![0; (gw as usize).max(2 * vs.len())]; }
+                    if gb as usize > cb.len() { cb = vec![0; (gb as usize).max(2 * cb.len())]; }
+                    if gs as usize > s.len() { s.resize(gs as usize, 0); }
+                    if ga as usize > ka.len() { ka.resize(ga as usize, 0); }
                 }
             }};
         }

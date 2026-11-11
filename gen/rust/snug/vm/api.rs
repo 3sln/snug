@@ -3,6 +3,8 @@
 
 use crate::snug::cbor::codes::*;
 use crate::snug::cbor::head::*;
+use crate::snug::cbor::scan::*;
+use crate::snug::cbor::vcopy::*;
 use crate::snug::vm::base::*;
 use crate::snug::vm::dead::*;
 use crate::snug::vm::eval::*;
@@ -256,7 +258,16 @@ pub fn vm_setup(p: &[i32], rule: i32, start: i32, depth0: i32, items0: i32, limi
     } else {
         s[(O_COSE) as usize] = 0;
     }
-    s[(O_PROFILE) as usize] = prof(limits, depth0);
+    // P8.4 (D262): a valid-CBOR run walks deterministically first; PF_VREL
+    // keeps what PF_VALID admits without changing bytes
+    let pf: i32 = prof(limits, depth0);
+    if (pf & PF_VALID) != 0 {
+        s[(O_PROFILE) as usize] = (pf ^ PF_VALID) | PF_VREL;
+    } else {
+        s[(O_PROFILE) as usize] = pf;
+    }
+    s[(O_VCTL) as usize] = 0;
+    s[(VM_VTAB) as usize] = 0;
     s[(O_MAX_BYTES) as usize] = lim(limits, 2, p[(H_LIM_INPUT) as usize]);
     s[(O_MAX_DEPTH) as usize] = dl;
     s[(O_MAX_ENTRIES) as usize] = lim(limits, 4, p[(H_LIM_ENTRIES) as usize]);
@@ -327,6 +338,10 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
     if su < 0 {
         return su;
     }
+    return vm_walk(p, pool, rule, b, start, end, s, out, ext);
+}
+pub fn vm_walk(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
+    // vm-run after its checks and vm-setup: the root item b[start, end).
     let frames: i32 = s[(VM_FRAMES) as usize];
     let n: i32 = end - start;
     if n > s[(O_MAX_BYTES) as usize] {
@@ -390,6 +405,165 @@ pub fn vm_run(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32,
         wit_set(s, R_TYPE, 0, 0, -1, 0, start);
     }
     return vm_witness_output(s, out);
+}
+pub fn nondet_code(code: i32) -> bool {
+    // Codes only an encoding valid CBOR admits can cause on the deterministic
+    // attempt of a valid-CBOR run (D262), or R_NONDET from embedded content.
+    return ((code == CODE_NON_SHORTEST) || (code == CODE_INDEFINITE)) || ((code == CODE_KEY_ORDER) || (code == R_NONDET));
+}
+pub fn vm_need(out: &mut [i32], w: i32, nb: i32, sw: i32) -> i32 {
+    // -5: a host buffer is too small; out[5] the valid scratch's words, out[6]
+    // the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).
+    out[(0) as usize] = 0;
+    out[(5) as usize] = w;
+    out[(6) as usize] = nb;
+    out[(7) as usize] = sw;
+    return -5;
+}
+pub fn vm_remap(b: &[u8], cb: &[u8], vs: &mut [i32], start: i32, out: &mut [i32]) -> i32 {
+    // The offset of a run over a canonical copy mapped back to b (D264); a
+    // refusal the VM found at a planted stop with the planted code is the
+    // stop's own (code and offset, D280) -- the run's code, or the reason's
+    // sub-code when an embedded refusal became a witness.
+    let off: i32 = out[(2) as usize];
+    let e: i32 = ev_find(vs, off, EV_HEAD);
+    if e >= 0 {
+        let vc: i32 = vs[(e + 4) as usize];
+        if (vc > 0) && (out[(0) as usize] == vc) {
+            out[(0) as usize] = vs[(e + 2) as usize];
+            out[(2) as usize] = vsource(b, cb, vs, start, vs[(e + 3) as usize]);
+            return 0;
+        }
+        if (vc > 0) && ((out[(0) as usize] >= 32) && (out[(1) as usize] == vc)) {
+            out[(1) as usize] = vs[(e + 2) as usize];
+            out[(2) as usize] = vsource(b, cb, vs, start, vs[(e + 3) as usize]);
+            return 0;
+        }
+    }
+    out[(2) as usize] = vmap(b, cb, vs, start, off);
+    return 0;
+}
+pub fn vm_canon(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32, vs: &mut [i32], cb: &mut [u8]) -> i32 {
+    // The canonical path (D262, D264, D277, D280): the scanner (vs its options
+    // array and scratch, cb its buffer) checks b[start, end), then its canonical
+    // copy -- for a refused input the copy of the valid prefix, planted and
+    // padded at the stop -- and events are written into cb and vs; the events go
+    // to S past the rule's scratch; the VM walks the copy under PF_CANON (its
+    // fast paths leave every container end, every key that breaks the
+    // ascending order and every stop to the generic walk), charging each marked map's
+    // duplicate-check units at its end and reaching every recorded refusal at
+    // its own check phase, after the charges that precede it on every route.
+    // Every offset it reports is mapped back to b. -5 when vs, cb or S is too
+    // small.
+    if (vs.len() as i32) < (O_S_FIRST + 256) {
+        return vm_need(out, O_S_FIRST + 1024, (3 * (end - start)) + 4096, 0);
+    }
+    let pf: i32 = prof(limits, depth0);
+    let dd: i32 = p[(H_LIM_DEPTH) as usize];
+    let mut dl: i32 = lim(limits, 3, dd) - depth0;
+    if dl < 0 {
+        dl = 0;
+    }
+    vs[(O_TOP) as usize] = opt01(limits, 0);
+    if depth0 == 0 {
+        vs[(O_COSE) as usize] = opt01(limits, 1);
+    } else {
+        vs[(O_COSE) as usize] = 0;
+    }
+    vs[(O_MAX_BYTES) as usize] = lim(limits, 2, p[(H_LIM_INPUT) as usize]);
+    vs[(O_MAX_DEPTH) as usize] = dl;
+    vs[(O_S_EDEPTH) as usize] = dl;
+    vs[(O_MAX_ENTRIES) as usize] = lim(limits, 4, p[(H_LIM_ENTRIES) as usize]);
+    vs[(O_MAX_ITEMS) as usize] = lim(limits, 5, p[(H_LIM_ITEMS) as usize]);
+    vs[(O_PROFILE) as usize] = pf;
+    let sc: i32 = scan_x(b, vs, cb, start, end, 0, items0);
+    let serr: i32 = vs[(O_ERR_POS) as usize];
+    let sitems: i32 = vs[(O_ITEMS) as usize];
+    if sc == CODE_SCRATCH {
+        return vm_need(out, vs[(O_VNEEDW) as usize], vs[(O_VNEEDB) as usize], 0);
+    }
+    let su: i32 = vm_setup(p, rule, start, depth0, items0, limits, s);
+    if su < 0 {
+        return su;
+    }
+    // refusals decided before the walk on every route
+    if (sc == CODE_TOO_LARGE) || (sc == CODE_NOT_MAP) {
+        s[(O_ITEMS) as usize] = sitems;
+        return vm_output(s, out, sc, 0, serr);
+    }
+    let mut embeds: i32 = 1;
+    if (p[(H_FLAGS) as usize] & FL_EMBED) != 0 {
+        embeds = 2;
+    }
+    let l: i32 = canon_build(b, vs, cb, start, end, embeds, sc);
+    if l < 0 {
+        return vm_need(out, vs[(O_VNEEDW) as usize], vs[(O_VNEEDB) as usize], 0);
+    }
+    let n: i32 = vs[(O_S_NEV) as usize];
+    let base: i32 = vm_scratch_words(p, rule, s[(VM_MARK_CAP) as usize]);
+    let need: i32 = (base + 4) + (EV_WORDS * n);
+    if (n > 0) && ((s.len() as i32) < need) {
+        return vm_need(out, 0, 0, need);
+    }
+    if n > 0 {
+        s[(base) as usize] = n;
+        s[(base + 1) as usize] = 0;
+        s[(base + 2) as usize] = 0;
+        s[(base + 3) as usize] = 0;
+        for i in 0..EV_WORDS * n {
+            s[((base + 4) + i) as usize] = vs[(O_S_FIRST + i) as usize];
+        }
+        s[(VM_VTAB) as usize] = base;
+    }
+    s[(O_PROFILE) as usize] = s[(O_PROFILE) as usize] | PF_CANON;
+    if s[(O_MAX_BYTES) as usize] < l {
+        s[(O_MAX_BYTES) as usize] = l;
+    }
+    let base0: i32 = vs[(O_S_CBASE) as usize];
+    let r2: i32 = vm_walk(p, pool, rule, cb, base0, l, s, out, ext);
+    s[(VM_VTAB) as usize] = 0;
+    if (r2 >= 0) && (out[(0) as usize] != 0) {
+        vm_remap(b, cb, vs, start, out);
+    }
+    // a refused input whose replay ended otherwise (never expected:
+    // the scanner and the walk agree on every refusal): the scanner's
+    // verdict stands
+    if (r2 >= 0) && ((sc != 0) && ((out[(0) as usize] == 0) || ((out[(0) as usize] >= 32) && (out[(0) as usize] != R_BUDGET)))) {
+        s[(O_ITEMS) as usize] = sitems;
+        vm_output(s, out, sc, 0, serr);
+    }
+    vs[(O_VLEN) as usize] = l;
+    return r2;
+}
+pub fn vm_run_v(p: &[i32], pool: &[u8], rule: i32, b: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32, vs: &mut [i32], cb: &mut [u8]) -> i32 {
+    // vm-run, and the canonical path (vm-canon) when the deterministic attempt of
+    // a valid-CBOR run met an encoding only valid CBOR has, or a key whose
+    // duplicates are not bytewise (VC_ECS) under any profile. vs[O_VLEN] is the
+    // copy's end when the canonical path ran (the copy is cb[vs[O_S_CBASE], it);
+    // the input's copy precedes it), else -1.
+    if (vs.len() as i32) >= 16 {
+        vs[(O_VLEN) as usize] = -1;
+    }
+    let r: i32 = vm_run(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext);
+    if r < 0 {
+        return r;
+    }
+    let pf: i32 = prof(limits, depth0);
+    let nd: bool = ((pf & PF_VALID) != 0) && nondet_code(out[(0) as usize]);
+    let ecs: bool = (s[(O_VCTL) as usize] & VC_ECS) != 0;
+    if (!nd) && (!ecs) {
+        return r;
+    }
+    return vm_canon(p, pool, rule, b, start, end, depth0, items0, limits, s, out, ext, vs, cb);
+}
+pub fn vm_validate_v(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32, vs: &mut [i32], cb: &mut [u8]) -> i32 {
+    // vm-validate-x with valid-CBOR support (P8.4): vs and cb are the canonical
+    // path's buffers (any length; -5 asks for more, vm-need).
+    return vm_run_v(p, pool, rule, input, 0, input.len() as i32, 0, 0, limits, s, out, ext, vs, cb);
+}
+pub fn vm_validate_span_v(p: &[i32], pool: &[u8], rule: i32, input: &[u8], start: i32, end: i32, depth0: i32, items0: i32, limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32, vs: &mut [i32], cb: &mut [u8]) -> i32 {
+    // vm-validate-span-x with valid-CBOR support.
+    return vm_run_v(p, pool, rule, input, start, end, depth0, items0, limits, s, out, ext, vs, cb);
 }
 pub fn vm_validate_x(p: &[i32], pool: &[u8], rule: i32, input: &[u8], limits: &[i32], s: &mut [i32], out: &mut [i32], ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // Validate input against rule of the verified Program (p, pool), under

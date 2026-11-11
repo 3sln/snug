@@ -257,18 +257,47 @@ impl Schema {
         options: &ValidationOptions,
         scratch: &mut Scratch,
     ) -> Result<Value, Error> {
-        self.validate_with_options(bytes, rule, options, scratch)?;
-        crate::decode::build(bytes)
+        let c = self.validate_checked(bytes, rule, options, scratch)?;
+        crate::decode::build(c.copy.as_deref().unwrap_or(bytes))
+    }
+    fn validate_checked(
+        &self,
+        bytes: &[u8],
+        rule: &str,
+        options: &ValidationOptions,
+        scratch: &mut Scratch,
+    ) -> Result<schema::Checked, Failure> {
+        let r = self.rule(rule)?;
+        if bytes.len() >= i32::MAX as usize {
+            return Err(failure(20, "cbor/too_large"));
+        }
+        schema::validate_checked(self.program.host(), r, bytes, &options.host(), scratch)
     }
     /// Validate the entire document before opening a zero-copy borrowed view.
+    /// Valid input that is not its own deterministic form cannot be borrowed
+    /// (`Error::Usage("owned_view")`): use [`Schema::document`].
     pub fn view<'a>(
         &self,
         bytes: &'a [u8],
         rule: &str,
         scratch: &mut Scratch,
     ) -> Result<crate::View<'a>, Error> {
-        self.validate(bytes, rule, scratch)?;
-        Ok(crate::view::checked(bytes))
+        let c = self.validate_checked(bytes, rule, &ValidationOptions::default(), scratch)?;
+        if c.copy.is_some() {
+            return Err(Error::Usage("owned_view"));
+        }
+        Ok(crate::view::checked_keys(bytes, c.unsorted))
+    }
+    /// Validate, then keep the document (or its canonical copy, P8.4) for viewing.
+    pub fn document(
+        &self,
+        bytes: &[u8],
+        rule: &str,
+        options: &ValidationOptions,
+        scratch: &mut Scratch,
+    ) -> Result<crate::view::Document, Error> {
+        let c = self.validate_checked(bytes, rule, options, scratch)?;
+        Ok(crate::view::Document::from_checked(c.copy.unwrap_or_else(|| bytes.to_vec()), c.unsorted))
     }
     /// Validate an immutable known-length Blob through the existing session
     /// driver. `chunk` must be positive; quantum 0 disables scheduling yields.

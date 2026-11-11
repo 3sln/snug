@@ -17,7 +17,7 @@
 // (overflow checks on). One scratch per program, grown by the host protocol of
 // program.md §13.1 (`&mut` scratch, D040).
 use snug::schema::{validate, Options, Program, Segment};
-use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span, vm_validate_span_x, vm_validate_x};
+use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
 use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::sync::Arc;
 
@@ -127,16 +127,21 @@ fn main() {
                     let x = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32, room: i32| -> i32 {
                         port(&*ext[id as usize], preps.get(&(id, ao)).map(Vec::as_slice), pool, ao, al, b, s, e, room)
                     };
-                    let c = if !pr.ext.is_empty() {
-                        if f[0] == "span" {
-                            vm_validate_span_x(&pr.p, &pr.b, rule, &input, start, end, d0, i0, &lim, &mut pr.s, &mut o, &x)
+                    let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+                    let xr: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32 =
+                        if !pr.ext.is_empty() { &x } else { &none };
+                    // P8.4 (D264): the canonical path's buffers, grown on -5 as the hosts grow them
+                    let (mut vs, mut cb) = (vec![0i32; 64], vec![0u8; 64]);
+                    let c = loop {
+                        let c = if f[0] == "span" {
+                            vm_validate_span_v(&pr.p, &pr.b, rule, &input, start, end, d0, i0, &lim, &mut pr.s, &mut o, xr, &mut vs, &mut cb)
                         } else {
-                            vm_validate_x(&pr.p, &pr.b, rule, &input, &lim, &mut pr.s, &mut o, &x)
-                        }
-                    } else if f[0] == "span" {
-                        vm_validate_span(&pr.p, &pr.b, rule, &input, start, end, d0, i0, &lim, &mut pr.s, &mut o)
-                    } else {
-                        vm_validate(&pr.p, &pr.b, rule, &input, &lim, &mut pr.s, &mut o)
+                            vm_validate_v(&pr.p, &pr.b, rule, &input, &lim, &mut pr.s, &mut o, xr, &mut vs, &mut cb)
+                        };
+                        if c != -5 { break c; }
+                        if o[5] as usize > vs.len() { vs = vec![0; o[5] as usize]; }
+                        if o[6] as usize > cb.len() { cb = vec![0; o[6] as usize]; }
+                        if o[7] as usize > pr.s.len() { pr.s.resize(o[7] as usize, 0); }
                     };
                     (c, o)
                 }));

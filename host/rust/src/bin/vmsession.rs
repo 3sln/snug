@@ -17,7 +17,8 @@
 use snug::schema::{validate_blob, BytesBlob, Options, Program, Segment};
 use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
 use snug::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_unknown, vms_keep, vms_need_length,
-                               vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
+                               vms_need_offset, vms_position, vms_step_v, vms_unknown_total, vms_words,
+                               vms_grow_arena, vms_grow_bytes, vms_grow_scratch, vms_grow_words};
 use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::io::{BufRead, Write};
 use std::sync::Arc;
@@ -89,6 +90,7 @@ fn run(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Polic
     vm_scratch_init(&mut s, cap);
     let mut ss = vec![0i32; vms_words(p) as usize];
     let mut ka = vec![0u8; vms_arena(p, lim, n).max(0) as usize];
+    let (mut vs, mut cb) = (vec![0i32; 512], vec![0u8; 1024]);
     let mut out = vec![0i32; 8 + 2 * 257];
     let reg = test_controls();
     let ext: Vec<Arc<dyn Control>> = program_controls(p, pool).iter().filter_map(|n| reg.get(n).cloned()).collect();
@@ -122,10 +124,21 @@ fn run(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol: &Polic
         first = false;
         let e = n.min(off + l);
         let win: Vec<u8> = input[off as usize..e as usize].to_vec();
-        let r = if ext.is_empty() {
-            vms_step(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off)
-        } else {
-            vms_step_x(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &xf)
+        let r = loop {
+            let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+            let r = if ext.is_empty() {
+                vms_step_v(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &none, &mut vs, &mut cb)
+            } else {
+                vms_step_v(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &xf, &mut vs, &mut cb)
+            };
+            if r != -69 {
+                break r;
+            }
+            let (w, nb, sw, aw) = (vms_grow_words(&ss), vms_grow_bytes(&ss), vms_grow_scratch(&ss), vms_grow_arena(&ss));
+            if w as usize > vs.len() { vs = vec![0; (w as usize).max(2 * vs.len())]; }
+            if nb as usize > cb.len() { cb = vec![0; (nb as usize).max(2 * cb.len())]; }
+            if sw as usize > s.len() { s.resize(sw as usize, 0); }
+            if aw as usize > ka.len() { ka.resize(aw as usize, 0); }
         };
         steps += 1;
         if r >= 0 {
@@ -165,6 +178,7 @@ fn run_unknown(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol
     vm_scratch_init(&mut s, cap);
     let mut ss = vec![0i32; vms_words(p) as usize];
     let mut ka = vec![0u8; vms_arena(p, lim, total).max(0) as usize];
+    let (mut vs, mut cb) = (vec![0i32; 512], vec![0u8; 1024]);
     let mut out = vec![0i32; 8 + 2 * 257];
     let reg = test_controls();
     let ext: Vec<Arc<dyn Control>> = program_controls(p, pool).iter().filter_map(|n| reg.get(n).cloned()).collect();
@@ -199,10 +213,21 @@ fn run_unknown(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], pol
         first = false;
         let e = n.min(total).min(off.saturating_add(l)).max(off);
         let win: Vec<u8> = input[off as usize..e as usize].to_vec();
-        let mut r = if ext.is_empty() {
-            vms_step(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off)
-        } else {
-            vms_step_x(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &xf)
+        let mut r = loop {
+            let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+            let r = if ext.is_empty() {
+                vms_step_v(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &none, &mut vs, &mut cb)
+            } else {
+                vms_step_v(p, pool, &win, &mut s, &mut ss, &mut ka, &mut out, off, &xf, &mut vs, &mut cb)
+            };
+            if r != -69 {
+                break r;
+            }
+            let (w, nb, sw, aw) = (vms_grow_words(&ss), vms_grow_bytes(&ss), vms_grow_scratch(&ss), vms_grow_arena(&ss));
+            if w as usize > vs.len() { vs = vec![0; (w as usize).max(2 * vs.len())]; }
+            if nb as usize > cb.len() { cb = vec![0; (nb as usize).max(2 * cb.len())]; }
+            if sw as usize > s.len() { s.resize(sw as usize, 0); }
+            if aw as usize > ka.len() { ka.resize(aw as usize, 0); }
         };
         steps += 1;
         if r == VMS_HELD {

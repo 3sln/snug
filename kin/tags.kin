@@ -5,10 +5,11 @@
 ;; it never overflows on either target.
 (ns snug.cbor.tags
   (:require [kin.lang :refer [defn let return set if while for do comment case]]
-            [snug.lang :refer [I32 Bool Bytes + - * neg quot rem ushr bit-and bit-or
-                               < > <= >= == != and or not u8 hex]]
-            [snug.cbor.codes :refer [MAX_DIMENSIONS]]
-            [snug.cbor.head :refer [be16 be32 head-size small-arg]]))
+            [snug.lang :refer [I32 Bool Bytes Ints + - * neg quot rem ushr bit-and bit-or
+                               < > <= >= == != and or not u8 ia hex]]
+            [snug.cbor.codes :refer [MAX_DIMENSIONS O_HI O_LO]]
+            [snug.cbor.head :refer [be16 be32 head-size small-arg]]
+            [snug.cbor.canon :refer [targ tskip tcount tlength]]))
 
 (defn ^:pub ^I32 typed-size [^I32 tag]
   (comment "The element size of an allowed RFC 8746 little-endian typed-array tag,"
@@ -97,3 +98,126 @@
             (set p (* p d))
             (set x (+ x (head-size dai))))))
       (return (== p count)))))
+
+;; ------------------------------------------------------------ any head width (P8.4)
+;; The rules of tags 4 and 40 at tag levels 1-3 (RFC 8949 §3.4.4, RFC 8746 §3.1.1,
+;; D265), and the Bindle rules (level 0) for content a PF_VALID walk admitted (heads
+;; of any width, indefinite lengths): over CHECKED content, read with the canonical
+;; module's trusted readers. The functions above stay the deterministic Bindle path.
+
+(defn ^:pub ^I32 vcount [^Bytes b ^Ints o ^I32 x]
+  (comment "Elements of the CHECKED array at x (a map's pairs), either length kind.")
+  (let [ai (bit-and (u8 b x) 31)
+        q (targ b o x)]
+    (if (!= ai 31) (return (ia o O_LO)))
+    (if (== (ushr (u8 b x) 5) 5) (return (quot (tcount b o q) 2)))
+    (return (tcount b o q))))
+
+(defn ^:pub ^I32 tagnum-v [^Bytes b ^Ints o ^I32 x]
+  (comment "The number of the CHECKED tag head at x, or -2 above 2^31 - 1.")
+  (targ b o x)
+  (if (or (!= (ia o O_HI) 0) (< (ia o O_LO) 0)) (return (neg 2)))
+  (return (ia o O_LO)))
+
+(defn ^:pub ^I32 mod10-head [^Bytes b ^I32 x]
+  (comment "The argument of the CHECKED integer head at x, modulo 10, any width.")
+  (let [ai (bit-and (u8 b x) 31)]
+    (if (< ai 24) (return (rem ai 10)))
+    (return (mod10 b (+ x 1) (+ x (head-size ai))))))
+
+(defn ^:pub ^I32 mod10-str [^Bytes b ^Ints o ^I32 x]
+  (comment "The content of the CHECKED byte string at x, as a big-endian unsigned"
+           "integer, modulo 10 (its chunks in order, for an indefinite one).")
+  (let [ai (bit-and (u8 b x) 31)
+        ^:mut q (targ b o x)
+        ^:mut r 0]
+    (if (!= ai 31) (return (mod10 b q (+ q (ia o O_LO)))))
+    (while (!= (u8 b q) 255)
+      (set q (targ b o q))
+      (let [l (ia o O_LO)]
+        (for [^I32 k 0 l]
+          (set r (rem (+ (* r 256) (u8 b (+ q k))) 10)))
+        (set q (+ q l))))
+    (return r)))
+
+(defn ^:pub ^Bool decimal-v [^Bytes b ^Ints o ^I32 p ^I32 lvl]
+  (comment "Tag 4 content: the CHECKED two-element array at p. Level >= 1: an integer"
+           "exponent (major 0/1) and an integer or bignum mantissa (RFC 8949 §3.4.4)."
+           "Level 0 (Bindle): exponent -1024..-1, mantissa non-zero and not divisible"
+           "by 10, read at any width.")
+  (let [e (targ b o p)
+        m (tskip b o e)
+        em (ushr (u8 b e) 5)
+        mm (ushr (u8 b m) 5)]
+    (if (>= lvl 1)
+      (do (if (> em 1) (return false))
+          (if (<= mm 1) (return true))
+          (if (!= mm 6) (return false))
+          (let [t (tagnum-v b o m)]
+            (return (or (== t 2) (== t 3))))))
+    (if (!= em 1) (return false))
+    (targ b o e)
+    (if (or (!= (ia o O_HI) 0) (or (< (ia o O_LO) 0) (> (ia o O_LO) 1023))) (return false))
+    (if (== mm 0)
+      (do (targ b o m)
+          (if (and (== (ia o O_HI) 0) (== (ia o O_LO) 0)) (return false))
+          (return (!= (mod10-head b m) 0))))
+    (if (== mm 1) (return (!= (rem (+ (mod10-head b m) 1) 10) 0)))
+    (if (!= mm 6) (return false))
+    (let [t2 (tagnum-v b o m)
+          c (targ b o m)]
+      (if (== t2 2) (return (!= (mod10-str b o c) 0)))
+      (if (== t2 3) (return (!= (rem (+ (mod10-str b o c) 1) 10) 0)))
+      (return false))))
+
+(defn ^:pub ^I32 data-count-v [^Bytes b ^Ints o ^I32 d ^I32 lvl]
+  (comment "Elements of CHECKED tag-40 data at d: an array's length; a typed array's"
+           "byte length over its element size (level 0: the little-endian set only;"
+           "levels >= 1: any RFC 8746 typed array, and a homogeneous array, tag 41,"
+           "over an array); -1 for anything else.")
+  (let [major (ushr (u8 b d) 5)]
+    (if (== major 4) (return (vcount b o d)))
+    (if (!= major 6) (return (neg 1)))
+    (let [t (tagnum-v b o d)
+          c (targ b o d)
+          cm (ushr (u8 b c) 5)
+          ^:mut size (typed-size t)]
+      (if (and (>= lvl 1) (== t 41))
+        (do (if (!= cm 4) (return (neg 1)))
+            (return (vcount b o c))))
+      (if (and (>= lvl 1) (== size 0))
+        (do (if (and (>= t 64) (<= t 87))
+              (do (if (or (== t 64) (== t 68)) (set size 1))
+                  (if (or (== t 65) (or (== t 73) (== t 80))) (set size 2))
+                  (if (or (== t 66) (or (== t 74) (== t 81))) (set size 4))
+                  (if (or (== t 67) (or (== t 75) (== t 82))) (set size 8))
+                  (if (or (== t 83) (== t 87)) (set size 16))))))
+      (if (or (== size 0) (!= cm 2)) (return (neg 1)))
+      (return (quot (tlength b o c) size)))))
+
+(defn ^:pub ^Bool ndarray-v [^Bytes b ^Ints o ^I32 p ^I32 lvl]
+  (comment "Tag 40 content: the CHECKED two-element array at p, [shape, data]. The"
+           "shape an array of unsigned integers distinct from zero (RFC 8746 §3.1.1;"
+           "level 0 also 1..8 of them, each at most 2^53 - 1) whose product is the"
+           "data's element count (data-count-v), checked by division so it never"
+           "overflows.")
+  (let [sh (targ b o p)
+        d (tskip b o sh)
+        count (data-count-v b o d lvl)]
+    (if (< count 0) (return false))
+    (if (!= (ushr (u8 b sh) 5) 4) (return false))
+    (let [k (vcount b o sh)
+          ^:mut x (targ b o sh)
+          ^:mut prod 1]
+      (if (and (== lvl 0) (or (< k 1) (> k MAX_DIMENSIONS))) (return false))
+      (for [^I32 _j 0 k]
+        (if (!= (ushr (u8 b x) 5) 0) (return false))
+        (let [nx (targ b o x)
+              hi (ia o O_HI)
+              lo (ia o O_LO)]
+          (if (and (== hi 0) (== lo 0)) (return false))
+          (if (or (!= hi 0) (< lo 0)) (return false))
+          (if (> lo (quot count prod)) (return false))
+          (set prod (* prod lo))
+          (set x nx)))
+      (return (== prod count)))))

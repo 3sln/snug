@@ -17,15 +17,15 @@
 ;; walk and session therefore share every leaf predicate and every state
 ;; machine; only the walk's control flow is duplicated.
 (ns snug.vm.session
-  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
-            [snug.lang :refer [I32 Ext ext-none Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
+  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst declarefn]]
+            [snug.lang :refer [I32 Ext ext-none ints-none bytes-none Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
                                < > <= >= == != and or not u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING CODE_TRUNCATED O_TOP O_MAX_BYTES
-                                     O_ERR_POS O_HI O_LO O_PROFILE O_ITEMS O_MAX_ITEMS O_MAX_DEPTH]]
+                                     O_ERR_POS O_HI O_LO O_PROFILE O_ITEMS O_MAX_ITEMS O_MAX_DEPTH PF_TAGS]]
             [snug.cbor.head :refer [fail head-size be16 be32 read-arg]]
             [snug.cbor.tags :refer [typed-size]]
             [snug.vm.layout :refer [HEADER_WORDS H_POOL_BYTES H_S_RULES VM_BUDGET VM_POS VM_FRAMES VM_RULE R_TYPE
-                                    R_BUDGET R_INCONSISTENT H_FLAGS H_S_LEAVES FL_EXT K_EXT VM_BUDGET_START
+                                    R_BUDGET R_INCONSISTENT H_FLAGS H_S_LEAVES FL_EXT FL_EMBED K_EXT VM_BUDGET_START
                                     H_LIM_INPUT]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec cset-width wit-empty wit-set]]
             [snug.vm.dead :refer [dead-item]]
@@ -43,11 +43,18 @@
                                    FK_BSTR FK_DARR FK_DMAP FK_DTEXT FK_DSEQ F_KIND F_PH F_PIN F_N F_EL
                                    nframes vms-session-words vms-arena-bytes fbase ftop fpop ret ensure
                                    need yld suspended must-yield cut-yield progress keys-save rebase chain-has prescan-run fits-known cross-known
-                                   prescan str-stop big-req lits-need bstr-reads note-req note-put imin]]
+                                   prescan str-stop big-req lits-need bstr-reads note-req note-put imin
+                                   VMS_GROW SS_VNEED SS_GW SS_GB SS_GS SS_GA SS_VOK F_IND]]
             [snug.vm.sstr :refer [S_EMBRUN open-text text-run open-bstr bstr-run embed-ret]]
+            [snug.cbor.canon :refer [targ head-short]]
+            [snug.cbor.stdtags :refer [rule-tag typed-any-size]]
+            [snug.cbor.keys :refer [key-end-any]]
+            [snug.vm.svalid :refer [VI_NEED VI_GROW vsess vitem]]
             [snug.vm.scont :refer [M_KEY open-arr arr-start arr-run arr-ret open-darr open-dseq darr-run
                                    darr-ret open-map open-dmap map-next map-key map-ret open-tag tag-run
                                    tag-ret]]))
+
+(declarefn vms-run)
 
 ;; a handler's "the session has finished" (SS_CODE holds the answer)
 (defconst ^I32 FIN -66)
@@ -373,6 +380,8 @@
         kind (ia ss (+ f F_KIND))
         n (ia ss (+ f F_N))
         el (ia ss (+ f F_EL))]
+    (comment "an indefinite container (D266): its siblings run to its break")
+    (if (== (ia ss (+ f F_IND)) 1) (return (neg 1)))
     (if (or (== kind FK_ARR) (== kind FK_DARR))
       (do (if (< n 0) (return (neg 1)))
           (return (- n el))))
@@ -388,7 +397,8 @@
     (if (== ai 25) (return (be16 b (+ pos 1))))
     (return (neg 1))))
 
-(defn ^I32 item-begin [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend ^Ext ext]
+(defn ^I32 item-begin [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints vs ^BytesW cb ^I32 base
+                      ^I32 wend ^Ext ext]
   (comment "The pending item: its head (and any note or bounded piece it must have"
            "whole) in the window, then whole by the buffer walk when the window"
            "holds everything it can read, else a frame.")
@@ -432,6 +442,28 @@
       (comment "what the walk may read, decided without charging anything: 1 the"
                "buffer walk takes it whole, -1 a frame, 0 the prescan decides")
       (if (== mode MODE_FRAME) (set direct (neg 1)))
+      (comment "P8.4 (D265): above the Bindle tag set a tag 4 / 40 has the RFC rules the"
+               "buffer walk applies to its content array (any count): whole, asked for whole")
+      (if (and (and (== direct 0) (not (vsess s ss))) (and (== major 6) (and (<= ai 27) (<= (+ pos h) end))))
+        (if (!= (bit-and (ia s O_PROFILE) PF_TAGS) 0)
+          (do (targ b s pos)
+              (let [rt1 (rule-tag (ia s O_HI) (ia s O_LO))]
+                (if (or (== rt1 4) (== rt1 40))
+                  (do (let [kx1 (key-end-any b pos end wend)]
+                        (if (< kx1 (neg 1)) (return (need ss base pos (- (- (neg 2) kx1) pos)))))
+                      (set direct 1)))))))
+      (comment "P8.4 (D266): with the valid machinery, an item the frames do not take is"
+               "whole: a malformed head, an indefinite string, and the tags whose rules"
+               "read their content (bignums, 4, 40, typed arrays, 0, 24, 32)")
+      (if (and (== direct 0) (vsess s ss))
+        (do (if (or (and (>= ai 28) (<= ai 30)) (and (== ai 31) (or (<= major 3) (>= major 6))))
+              (set direct 1))
+            (if (and (== direct 0) (and (== major 6) (and (<= ai 27) (<= (+ pos h) end))))
+              (do (targ b s pos)
+                  (let [rt0 (rule-tag (ia s O_HI) (ia s O_LO))]
+                    (if (or (or (or (== rt0 0) (== rt0 24)) (or (== rt0 32) (or (== rt0 2) (== rt0 3))))
+                            (or (or (== rt0 4) (== rt0 40)) (or (> (typed-size rt0) 0) (> (typed-any-size rt0) 0))))
+                      (set direct 1)))))))
       (if (and (== direct 0) (<= end cut)) (set direct 1))
       (if (and (== direct 0) (or (<= major 1) (== major 7))) (set direct 1))
       (if (and (== direct 0) (and (== major 2) (== nq 0))) (set direct 1))
@@ -499,6 +531,13 @@
                         (if (== (prescan b ss base pos end xreq) 1) (set direct 1)))
                       (iset ss SS_CHN (neg 1))))))))
       (progress ss 1)
+      (if (and (== direct 1) (vsess s ss))
+        (if (not (and (and (== major 2) (or (== nq 0) (== (bit-and (ia p H_FLAGS) FL_EMBED) 0)))
+                      (and (and (<= ai 27) (<= (+ pos h) end)) (head-short b pos))))
+          (do (let [rv (vitem p pool b s ss vs cb pos d fb ck nq end wend ctx ext)]
+                (if (== rv VI_NEED) (return (need ss base pos (ia ss SS_VNEED))))
+                (if (== rv VI_GROW) (return VMS_GROW))
+                (return (ret ss base rv))))))
       (if (and (== direct 1) (and (== major 2) (== (ia ss SS_UNK) 1)))
         (return (skip-bstr p pool b s ss base pos pos d fb ck nq end ctx ext)))
       (comment "D085: a bignum decided from its content's head (big-req) claims its content too")
@@ -542,14 +581,15 @@
       (if (== kind FK_BSTR) (return (embed-ret p s ss base f r)))
       (return (fin-bad s ss base)))))
 
-(defn ^I32 frame-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^I32 base ^I32 wend ^Ext ext]
+(defn ^I32 frame-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints vs ^BytesW cb ^I32 base
+                     ^I32 wend ^Ext ext]
   (let [f (ftop ss)
         kind (ia ss (+ f F_KIND))]
-    (if (== kind FK_ARR) (return (arr-run p pool b s ss base f ext)))
-    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run p pool b s ss base f ext)))
+    (if (== kind FK_ARR) (return (arr-run p pool b s ss vs cb base f ext)))
+    (if (or (== kind FK_DARR) (== kind FK_DSEQ)) (return (darr-run p pool b s ss vs cb base f ext)))
     (if (or (== kind FK_MAP) (== kind FK_DMAP))
-      (do (if (== (ia ss (+ f F_PH)) M_KEY) (return (map-key p pool b s ss ka base wend f ext)))
-          (return (map-next p pool b s ss ka base wend f ext))))
+      (do (if (== (ia ss (+ f F_PH)) M_KEY) (return (map-key p pool b s ss ka vs cb base wend f ext)))
+          (return (map-next p pool b s ss ka vs cb base wend f ext))))
     (if (== kind FK_TAG) (return (tag-run p pool b s ss ka base wend f ext)))
     (if (or (== kind FK_TEXT) (== kind FK_DTEXT)) (return (text-run p pool b s ss base wend f ext)))
     (if (== kind FK_BSTR) (return (bstr-run p pool b s ss base wend f ext)))
@@ -565,6 +605,24 @@
     (return k)))
 
 (defn ^:pub ^I32 vms-step-x [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base ^Ext ext]
+  (comment "vms-step-v without the valid machinery's buffers: a valid-CBOR or any-key"
+           "run walks as before P8.4 (non-deterministic encodings refused, duplicates"
+           "bytewise). For hosts that have not moved to vms-step-v.")
+  (iset ss SS_VOK 0)
+  (return (vms-run p pool b s ss ka out base ext (ints-none) (bytes-none))))
+
+(defn ^:pub ^I32 vms-step-v [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base ^Ext ext
+                             ^Ints vs ^BytesW cb]
+  (comment "vms-step-x with the valid machinery (P8.4, D266): vs (Ints) and cb"
+           "(BytesW) are the host's buffers for whole items' canonical path, any"
+           "length. Answers as vms-step-x, and VMS_GROW: grow the arrays"
+           "vms-grow-words / -bytes / -scratch / -arena name (keeping S's and the"
+           "arena's contents), then step again over the same window.")
+  (iset ss SS_VOK 1)
+  (return (vms-run p pool b s ss ka out base ext vs cb)))
+
+(defn ^I32 vms-run [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base ^Ext ext
+                    ^Ints vs ^BytesW cb]
   (comment "Run the session over the window b, message bytes from base. Answers the"
            "verdict's code (>= 0; out filled as by vm-validate: absolute offsets),"
            "VMS_NEED (give a window holding [vms-need-offset, + vms-need-length)),"
@@ -587,6 +645,10 @@
         pos0 (- (ia ss SS_POS) base)
         ^:mut cut wend]
     (rebase s (neg base))
+    (iset ss SS_GW 0)
+    (iset ss SS_GB 0)
+    (iset ss SS_GS 0)
+    (iset ss SS_GA 0)
     (iset ss SS_WB0 (ia s VM_BUDGET))
     (iset ss SS_WORK 0)
     (iset ss SS_PROG 0)
@@ -601,18 +663,18 @@
       (let [ph (ia ss SS_PH)]
         (local ^I32 r)
         (if (== ph PH_ITEM)
-          (set r (item-begin p pool b s ss ka base wend ext))
+          (set r (item-begin p pool b s ss ka vs cb base wend ext))
           (if (== ph PH_RET)
             (set r (deliver p b s ss out base wend))
             (if (== ph PH_FRAME)
-              (set r (frame-run p pool b s ss ka base wend ext))
+              (set r (frame-run p pool b s ss ka vs cb base wend ext))
               (if (== ph PH_START)
                 (set r (doc-start p b s ss out base wend))
                 (return (ia ss SS_CODE))))))
         (if (== r FIN)
           (do (if (== (ia ss SS_PH) PH_HELD) (return VMS_HELD))
               (return (ia ss SS_CODE))))
-        (if (suspended r)
+        (if (or (suspended r) (== r VMS_GROW))
           (do (keys-save b ss ka base)
               (rebase s base)
               (iset ss SS_KEEP (keep-of ss))
@@ -621,6 +683,24 @@
 (defn ^:pub ^I32 vms-step [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^BytesW ka ^Ints out ^I32 base]
   (comment "vms-step-x with no extension controls (D140).")
   (return (vms-step-x p pool b s ss ka out base (ext-none))))
+
+(defn ^:pub ^I32 vms-grow-words [^IntsR ss]
+  (comment "P8.4 (D266): after VMS_GROW, the words the valid scratch vs must have (0:"
+           "enough).")
+  (return (ia ss SS_GW)))
+
+(defn ^:pub ^I32 vms-grow-bytes [^IntsR ss]
+  (comment "After VMS_GROW, the bytes the canonical buffer cb must have (0: enough).")
+  (return (ia ss SS_GB)))
+
+(defn ^:pub ^I32 vms-grow-scratch [^IntsR ss]
+  (comment "After VMS_GROW, the words S must have (0: enough; keep its contents).")
+  (return (ia ss SS_GS)))
+
+(defn ^:pub ^I32 vms-grow-arena [^IntsR ss]
+  (comment "After VMS_GROW, the bytes the key arena must have (0: enough; keep its"
+           "contents).")
+  (return (ia ss SS_GA)))
 
 (defn ^:pub ^I32 vms-eof [^Ints ss ^Ints out ^I32 n]
   (comment "D085: the message of an unknown-length session ended after n bytes (or has"

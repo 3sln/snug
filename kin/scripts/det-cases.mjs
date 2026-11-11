@@ -15,7 +15,7 @@ export const DDEF = { top: 'any', cose: false, maxBytes: 1_500_000, maxDepth: 32
 export const optWords = opt => [opt.top === 'any' ? 1 : 0, opt.cose ? 1 : 0, Math.min(opt.maxBytes, 0x7fffffff),
   Math.min(opt.maxDepth, 0x7fffffff), Math.min(opt.maxEntries, 0x7fffffff), Math.min(opt.maxItems, 0x7fffffff)];
 
-export function buildDetCases(MUTATIONS, SEED) {
+export function buildDetCases(MUTATIONS, SEED, { valid = false } = {}) {
   const cases = [];
   const add = (label, bytes, opt, want) => cases.push({ label, bytes, opt, want });
   const det = JSON.parse(readFileSync(new URL('../../corpus/cbor-vectors/deterministic.json', import.meta.url)));
@@ -153,7 +153,12 @@ export function buildDetCases(MUTATIONS, SEED) {
   const profile = JSON.parse(readFileSync(new URL('../../corpus/cbor-vectors/cbor-profile.json', import.meta.url)));
   const seeds = [...det.accept, ...det.refuse, ...profile.accept].map(v => unhex(v.hex));
   const randomOpt = () => {
-    const flags = r() < 0.6 ? PF_DET : r() < 0.5 ? ri(128) : pick([0, 1, 2, 4, 8, 16, 32, 64, PF_STD, PF_DET & ~8, PF_DET & ~16]);
+    // P8.4 (valid: true): PF_VALID (256) on a third of them, the valid preset (378) among the presets; without it
+    // the case set is the one before P8.4 (the wasm SDK's parity set: its host has no valid-CBOR buffers yet)
+    const flags = !valid
+      ? (r() < 0.6 ? PF_DET : r() < 0.5 ? ri(128) : pick([0, 1, 2, 4, 8, 16, 32, 64, PF_STD, PF_DET & ~8, PF_DET & ~16]))
+      : r() < 0.6 ? (r() < 0.5 ? PF_DET : PF_DET | 256) : r() < 0.5 ? ri(128) | (r() < 0.5 ? 256 : 0)
+        : pick([0, 1, 2, 4, 8, 16, 32, 64, PF_STD, PF_DET & ~8, PF_DET & ~16, 256, 16 | 256, PF_STD | 256]);
     if (r() < 0.7) return { ...DDEF, flags };
     return { top: r() < 0.8 ? 'any' : 'map', cose: r() < 0.2, maxBytes: r() < 0.85 ? 1_500_000 : ri(40), maxDepth: r() < 0.6 ? 32 : ri(6),
       maxEntries: r() < 0.6 ? 65_536 : ri(6), maxItems: r() < 0.6 ? 131_072 : ri(14), flags };

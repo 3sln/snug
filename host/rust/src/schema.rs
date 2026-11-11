@@ -6,8 +6,8 @@
 //! rendered from the Program's key table only (program.md §9.3).
 use crate::snug::cbor::scan::code_name;
 use crate::snug::program::verify::vm_verify;
-use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span,
-                           vm_validate_span_x, vm_validate_x};
+use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
+use crate::snug::cbor::codes::{O_S_CBASE, VC_NONDET, VC_UNSORTED};
 use crate::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -84,13 +84,27 @@ impl Program {
     }
     /// One `vms-step` of a session on this Program, through its bound extension controls.
     #[allow(clippy::too_many_arguments)]
-    pub fn session_step(&self, w: &[u8], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], out: &mut [i32], base: i32) -> i32 {
-        match &self.ext {
-            Some(x) => {
-                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
-                crate::snug::vm::session::vms_step_x(&self.p, &self.b, w, s, ss, ka, out, base, &f)
+    /// P8.4 (D266): with the valid machinery's buffers `vs` and `cb`, grown here on VMS_GROW (as `s` and `ka`,
+    /// keeping their contents).
+    pub fn session_step(&self, w: &[u8], s: &mut Vec<i32>, ss: &mut [i32], ka: &mut Vec<u8>, out: &mut [i32], base: i32,
+                        vs: &mut Vec<i32>, cb: &mut Vec<u8>) -> i32 {
+        let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+        loop {
+            let r = match &self.ext {
+                Some(x) => {
+                    let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
+                    vms_step_v(&self.p, &self.b, w, s, ss, ka, out, base, &f, vs, cb)
+                }
+                None => vms_step_v(&self.p, &self.b, w, s, ss, ka, out, base, &none, vs, cb),
+            };
+            if r != VMS_GROW {
+                return r;
             }
-            None => crate::snug::vm::session::vms_step(&self.p, &self.b, w, s, ss, ka, out, base),
+            let (gw, gb, gs, ga) = (vms_grow_words(ss), vms_grow_bytes(ss), vms_grow_scratch(ss), vms_grow_arena(ss));
+            if gw as usize > vs.len() { *vs = vec![0; (gw as usize).max(2 * vs.len())]; }
+            if gb as usize > cb.len() { *cb = vec![0; (gb as usize).max(2 * cb.len())]; }
+            if gs as usize > s.len() { s.resize(gs as usize, 0); }
+            if ga as usize > ka.len() { ka.resize(ga as usize, 0); }
         }
     }
     /// A rule's index (its position in RULES), or None.
@@ -125,6 +139,10 @@ impl Program {
 pub struct Scratch {
     s: Vec<i32>,
     cap: i32,
+    // P8.4 (D264): the canonical path's buffers (the scanner's options, scratch and
+    // embedded table; the canonical copy), grown when the VM answers -5.
+    vs: Vec<i32>,
+    cb: Vec<u8>,
 }
 
 impl Scratch {
@@ -238,50 +256,85 @@ pub(crate) fn result(prog: &Program, out: &[i32]) -> Result<(), Failure> {
     })
 }
 
-/// Validate `bytes` against `rule` (an index from `Program::rule`).
-pub fn validate(prog: &Program, rule: i32, bytes: &[u8], opts: &Options, scratch: &mut Scratch) -> Result<(), Failure> {
+/// What a successful validation found (P8.4): the canonical copy the VM validated
+/// when valid input is not its own deterministic form, and whether some map's keys
+/// may be out of canonical order.
+#[derive(Debug, Default)]
+pub struct Checked {
+    pub copy: Option<Vec<u8>>,
+    pub unsorted: bool,
+}
+
+fn run(prog: &Program, rule: i32, bytes: &[u8], span: Option<(i32, i32, i32, i32)>, lim: &[i32; 10],
+       scratch: &mut Scratch) -> Result<Checked, Failure> {
     let mut out = [0i32; 8 + 2 * 257];
-    let lim = opts.words();
-    let s = scratch.lease(prog, rule);
-    let c = match &prog.ext {
-        Some(x) => {
-            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
-            vm_validate_x(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out, &f)
-        }
-        None => vm_validate(&prog.p, &prog.b, rule, bytes, &lim, s, &mut out),
+    scratch.lease(prog, rule);
+    if scratch.vs.len() < 512 { scratch.vs = vec![0; 512]; }
+    if scratch.cb.len() < 1024 { scratch.cb = vec![0; 1024]; }
+    let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+    let c = loop {
+        let Scratch { s, vs, cb, .. } = &mut *scratch;
+        let c = match &prog.ext {
+            Some(x) => {
+                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
+                match span {
+                    Some((a, z, d, i)) => vm_validate_span_v(&prog.p, &prog.b, rule, bytes, a, z, d, i, lim, s, &mut out, &f, vs, cb),
+                    None => vm_validate_v(&prog.p, &prog.b, rule, bytes, lim, s, &mut out, &f, vs, cb),
+                }
+            }
+            None => match span {
+                Some((a, z, d, i)) => vm_validate_span_v(&prog.p, &prog.b, rule, bytes, a, z, d, i, lim, s, &mut out, &none, vs, cb),
+                None => vm_validate_v(&prog.p, &prog.b, rule, bytes, lim, s, &mut out, &none, vs, cb),
+            },
+        };
+        if c != -5 { break c; }
+        if out[5] as usize > vs.len() { *vs = vec![0; (out[5] as usize).max(2 * vs.len())]; }
+        if out[6] as usize > cb.len() { *cb = vec![0; (out[6] as usize).max(2 * cb.len())]; }
+        if out[7] as usize > s.len() { s.resize(out[7] as usize, 0); }
     };
     assert!(c >= 0, "snug: vm-validate answered {} for a verified Program", c);
-    result(prog, &out)
+    result(prog, &out)?;
+    let (vs, cb) = (&scratch.vs, &scratch.cb);
+    if vs[15] < 0 {
+        return Ok(Checked::default());
+    }
+    Ok(Checked {
+        copy: if vs[12] & VC_NONDET != 0 { Some(cb[vs[O_S_CBASE as usize] as usize..vs[15] as usize].to_vec()) } else { None },
+        unsorted: vs[12] & VC_UNSORTED != 0,
+    })
+}
+
+/// Validate `bytes` against `rule` (an index from `Program::rule`).
+pub fn validate(prog: &Program, rule: i32, bytes: &[u8], opts: &Options, scratch: &mut Scratch) -> Result<(), Failure> {
+    run(prog, rule, bytes, None, &opts.words(), scratch).map(|_| ())
+}
+
+/// validate, answering the canonical copy and key-order outcome (decode and views).
+pub fn validate_checked(prog: &Program, rule: i32, bytes: &[u8], opts: &Options, scratch: &mut Scratch)
+                        -> Result<Checked, Failure> {
+    run(prog, rule, bytes, None, &opts.words(), scratch)
 }
 
 /// `validateAt` (architecture §16.3): the item spanning `bytes[start..end]` as its
 /// own document, depth and item accounting continuing from `depth`, `items`.
 pub fn validate_at(prog: &Program, rule: i32, bytes: &[u8], start: i32, end: i32, depth: i32, items: i32,
                    opts: &Options, scratch: &mut Scratch) -> Result<(), Failure> {
-    let mut out = [0i32; 8 + 2 * 257];
     let mut lim = opts.words();
     lim[0] = if opts.top_map { 0 } else { 1 };
-    let s = scratch.lease(prog, rule);
-    let c = match &prog.ext {
-        Some(x) => {
-            let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
-            vm_validate_span_x(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out, &f)
-        }
-        None => vm_validate_span(&prog.p, &prog.b, rule, bytes, start, end, depth, items, &lim, s, &mut out),
-    };
-    assert!(c >= 0, "snug: vm-validate-span answered {} for a verified Program", c);
-    result(prog, &out)
+    run(prog, rule, bytes, Some((start, end, depth, items)), &lim, scratch).map(|_| ())
 }
 
 // ---------------------------------------------------------------- sessions (P6.2)
 
-use crate::snug::vm::session::{vms_arena, vms_eof, vms_init, vms_init_unknown, vms_keep, vms_need_length,
-                               vms_need_offset, vms_position, vms_step, vms_step_x, vms_unknown_total, vms_words};
+use crate::snug::vm::session::{vms_arena, vms_eof, vms_grow_arena, vms_grow_bytes, vms_grow_scratch, vms_grow_words,
+                               vms_init, vms_init_unknown, vms_keep, vms_need_length, vms_need_offset, vms_position,
+                               vms_step_v, vms_unknown_total, vms_words};
 
 const VMS_NEED: i32 = -64;
 const VMS_YIELD: i32 = -65;
 const VMS_HELD: i32 = -67;
 const VMS_RESUME: i32 = -68;
+const VMS_GROW: i32 = -69;
 
 /// What one [`Session::step`] answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -307,6 +360,8 @@ pub struct Session<'p> {
     ss: Vec<i32>,
     ka: Vec<u8>,
     out: Vec<i32>,
+    vs: Vec<i32>,
+    cb: Vec<u8>,
     done: Option<Result<(), Failure>>,
 }
 
@@ -322,7 +377,7 @@ impl<'p> Session<'p> {
         let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
         let c = vms_init(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
         assert!(c >= 0, "snug: vms-init answered {} for a verified Program", c);
-        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
+        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], vs: vec![0i32; 512], cb: vec![0u8; 1024], done: None }
     }
     /// D085: a session over a message of UNKNOWN length (drain mode). Step it as a
     /// known-length one; [`Step::Held`] is a verdict waiting for the end; call
@@ -338,7 +393,7 @@ impl<'p> Session<'p> {
         let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
         let c = vms_init_unknown(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
         assert!(c >= 0, "snug: vms-init-unknown answered {} for a verified Program", c);
-        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
+        Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], vs: vec![0i32; 512], cb: vec![0u8; 1024], done: None }
     }
     /// The input limit of an unknown-length session: more bytes than this is `too_large`.
     pub fn limit(&self) -> usize {
@@ -365,12 +420,26 @@ impl<'p> Session<'p> {
         if let Some(d) = &self.done {
             return Step::Done(d.clone());
         }
-        let r = match &self.prog.ext {
-            Some(x) => {
-                let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
-                vms_step_x(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base, &f)
+        let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+        let r = loop {
+            let r = match &self.prog.ext {
+                Some(x) => {
+                    let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| x.call(id, pool, ao, al, b, st, e, room);
+                    vms_step_v(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base, &f,
+                               &mut self.vs, &mut self.cb)
+                }
+                None => vms_step_v(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base,
+                                   &none, &mut self.vs, &mut self.cb),
+            };
+            if r != VMS_GROW {
+                break r;
             }
-            None => vms_step(&self.prog.p, &self.prog.b, window, &mut self.s, &mut self.ss, &mut self.ka, &mut self.out, base),
+            // P8.4 (D266): a whole item's canonical path or a map's kept keys need more room
+            let (w, nb, sw, aw) = (vms_grow_words(&self.ss), vms_grow_bytes(&self.ss), vms_grow_scratch(&self.ss), vms_grow_arena(&self.ss));
+            if w as usize > self.vs.len() { self.vs = vec![0; (w as usize).max(2 * self.vs.len())]; }
+            if nb as usize > self.cb.len() { self.cb = vec![0; (nb as usize).max(2 * self.cb.len())]; }
+            if sw as usize > self.s.len() { self.s.resize(sw as usize, 0); }
+            if aw as usize > self.ka.len() { self.ka.resize(aw as usize, 0); }
         };
         if r == VMS_NEED {
             return Step::Need { offset: vms_need_offset(&self.ss), len: vms_need_length(&self.ss), keep: vms_keep(&self.ss) };

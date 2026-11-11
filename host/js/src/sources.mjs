@@ -103,6 +103,9 @@ export class ScanSession {
     const top = codecTop(options), flags = profileFlags(options);
     const limits = resolveLimits(options);
     this.length = length;
+    // P8.4 (D266): valid CBOR, and keys of any kind (EC-sensitive keys' duplicates are not bytewise), are the
+    // VM session's against `any` (it gives the scanner's code on every input); the resumable scanner walks the rest
+    if ((flags & 256) !== 0 || (flags & 3) >= 2) { this.vm = scanVm(length, options, quantum); this.done = false; return; }
     this.o = new Int32Array(16);
     scanOptions(this.o, top === 'any' ? 1 : 0, options.cose === true ? 1 : 0, clamp(limits.maxBytes), clamp(limits.maxDepth), clamp(limits.maxEntries), clamp(limits.maxItems));
     scanProfile(this.o, flags);
@@ -114,6 +117,13 @@ export class ScanSession {
   /** Run over `window` (message bytes from `base`). Answers {state:'need', offset, length},
    *  {state:'yield', position} or {state:'done'}; throws SnugFault on a refusal. */
   step(window, base) {
+    if (this.vm) {
+      const w = this.vm.step(window, base);
+      if (w.state !== 'done') return w;
+      this.done = true;
+      scanResult(w.result);
+      return { state: 'done' };
+    }
     const r = rscanStep(window, this.o, this.s, 0, base);
     if (r === RS_NEED) return { state: 'need', offset: rscanNeedOffset(this.s), length: rscanNeedLength(this.s) };
     if (r === RS_YIELD) return { state: 'yield', position: rscanPosition(this.s) };
@@ -251,7 +261,7 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
 export function pushScanner(length, options = {}, scheduling = {}) {
   if (length === undefined) return pushUnknown(scanUnknown(options, scheduling), scheduling, scanResult);
   const session = new ScanSession(length, options, scheduling);
-  return pushSession(session, length, want => Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
+  return pushSession(session, length, want => session.vm ? want.keep : Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
 }
 
 /** Bytes pushed in order for schema validation of a message of a DECLARED length (P6.2):
@@ -288,6 +298,14 @@ function scanUnknown(options, scheduling) {
     top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
     maxEntries: limits.maxEntries, maxItems: limits.maxItems };
   return new VmSession(anyProgram, 0, undefined, opts, scheduling.quantum ?? 0);
+}
+function scanVm(length, options, quantum) {
+  anyProgram ??= new HostProgram(ANY_P, ANY_B);
+  const limits = resolveLimits(options);
+  const opts = { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'cose']),
+    top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
+    maxEntries: limits.maxEntries, maxItems: limits.maxItems };
+  return new VmSession(anyProgram, 0, length, opts, quantum);
 }
 const pick = (o, keys) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
 function scanResult(r) {

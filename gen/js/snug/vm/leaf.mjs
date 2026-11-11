@@ -370,6 +370,27 @@ export function leafInt(p, pool, b, s, lb, pos, cs, ce, cls, hi, lo) {
         } else {
             rg = 1;
         }
+        // P8.4 (D265): valid CBOR admits leading zeros and small bignums;
+        // compare the magnitude without them, as an integer when it fits 64 bits
+        while ((c > 0) && (b[a] === 0)) {
+            a += 1;
+            c -= 1;
+        }
+        if (c <= 8) {
+            let vh = 0;
+            let vl = 0;
+            for (let j = 0; j < c; j++) {
+                vh = (vh << 8) | ((vl >>> 24) | 0);
+                vl = (vl << 8) | b[a + j];
+            }
+            a = vh;
+            c = vl;
+            if (rg === 4) {
+                rg = 3;
+            } else {
+                rg = 2;
+            }
+        }
     }
     if (rg === 0) {
         return R_TYPE;

@@ -16,12 +16,12 @@
 //   `x <index> <offset> <out words>`            refused, the sequence stops
 // offsets absolute (the error offset in the out words too), then `end <offset>`
 // when the sequence ended cleanly at a boundary.
-import { vmScratchWords, vmScratchInit, vmValidate, vmValidateX } from '../../gen/js/snug/vm/api.mjs';
-import { vmsWords, vmsArena, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
+import { vmScratchWords, vmScratchInit, vmValidateV } from '../../gen/js/snug/vm/api.mjs';
+import { vmsWords, vmsArena, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
   vmsUnknownTotal, vmsEof, vmsHeldCode, vmsInitSeq, vmsMessageLength } from '../../gen/js/snug/vm/session.mjs';
 import { extFor } from './ext-cases.mjs';
 import { navInit, navSkip, NAV_WORDS } from '../../gen/js/snug/nav/walk.mjs';
-import { xorshift } from './vmsession-run.mjs';
+import { xorshift, stepV } from './vmsession-run.mjs';
 
 export const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68;
 const CODE_TRUNCATED = 1, CODE_TOO_LARGE = 20;
@@ -73,6 +73,7 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
   const out = new Int32Array(8 + 2 * 257);
   let p = P, b = B, ou = out;
   if (guard) { p = guard(P, 'P'); b = guard(B, 'B'); s = guard(s, 'S'); ss = guard(ss, 'SS'); ka = guard(ka, 'KA'); ou = guard(out, 'out'); }
+  const st = { s, ss, ka, vs: new Int32Array(512), cb: new Uint8Array(1024) };
   const ends = chunkEnds(n, policy);
   let ci = 0, delivered = 0;
   const more = () => { if (ci >= ends.length) return false; delivered = ends[ci++]; return true; };
@@ -82,7 +83,7 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
   for (;;) {
     // a message starts once a byte after the boundary has arrived; EOF there ends the sequence
     while (delivered <= o) if (!more()) { lines.push(`end ${o}`); return { lines, late }; }
-    const c0 = vmsInitSeq(p, b, rule, lim, s, ss, ka, policy.q ?? 0);
+    const c0 = vmsInitSeq(p, b, rule, lim, st.s, ss, st.ka, policy.q ?? 0);
     if (c0 < 0) return { error: `vms-init-seq ${c0}` };
     let at = 0, eofed = false, lastKeep = 0, end = total;   // end: the session's end once vms-eof gave it
     let r;
@@ -97,7 +98,8 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
       let win = S.slice(o + at, o + Math.max(at, w));
       if (guard) win = guard(win, 'window');
       steps++;
-      return x ? vmsStepX(p, b, win, s, ss, ka, ou, at, x) : vmsStep(p, b, win, s, ss, ka, ou, at);
+      // P8.4 (D266): the valid machinery's buffers, grown on VMS_GROW
+      return stepV(st, p, b, win, ou, at, x);
     };
     const eof = () => {
       // only once more than the provisional end has arrived (too_large) or the stream has ended
@@ -167,13 +169,21 @@ export function runSequence(P, B, rule, lim, S, policy, { skip = false, failFast
 
 // ---------------------------------------------------------------- the oracle (D211)
 const vout = new Int32Array(8 + 2 * 257);
-let oscratch = new Int32Array(0), omark = 0;
+let oscratch = new Int32Array(0), omark = 0, ovs = new Int32Array(512), ocb = new Uint8Array(1024);
 function buffer(P, B, rule, lim, bytes) {
   const cap = Math.max(omark, P[16], 1);
   const need = vmScratchWords(P, rule, cap);
   if (cap > omark || need > oscratch.length) { oscratch = new Int32Array(Math.max(need, oscratch.length)); omark = cap; vmScratchInit(oscratch, cap); }
   const x = extFor(P, B);
-  const c = x ? vmValidateX(P, B, rule, bytes, lim, oscratch, vout, x) : vmValidate(P, B, rule, bytes, lim, oscratch, vout);
+  // the buffer driver with valid-CBOR support (P8.4): its canonical path's buffers grown on -5
+  let c;
+  for (;;) {
+    c = vmValidateV(P, B, rule, bytes, lim, oscratch, vout, x || (() => -2), ovs, ocb);
+    if (c !== -5) break;
+    if (vout[5] > ovs.length) ovs = new Int32Array(Math.max(vout[5], 2 * ovs.length));
+    if (vout[6] > ocb.length) ocb = new Uint8Array(Math.max(vout[6], 2 * ocb.length));
+    if (vout[7] > oscratch.length) { const g = new Int32Array(vout[7]); g.set(oscratch); oscratch = g; }
+  }
   if (c < 0) throw new Error(`vm-validate ${c}`);
   return vout;
 }

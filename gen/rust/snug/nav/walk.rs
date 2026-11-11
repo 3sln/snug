@@ -230,6 +230,39 @@ pub fn nav_find(b: &[u8], o: &mut [i32], p: i32, k: &[u8], ks: i32, ke: i32, end
     }
     return NAV_NOT_FOUND;
 }
+pub fn nav_find_any(b: &[u8], o: &mut [i32], p: i32, k: &[u8], ks: i32, ke: i32, end: i32) -> i32 {
+    // nav-find for a map whose keys may be in any order (a message checked as
+    // valid CBOR whose scan noted keys out of canonical order, P8.4): every key
+    // is compared, no early exit. The keys are canonical (the message is its
+    // own canonical form, or a canonical copy), so equal encodings are equal
+    // keys.
+    let c: i32 = nav_head(b, o, p, end);
+    if c < 0 {
+        return c;
+    }
+    if o[(N_MAJOR) as usize] != 5 {
+        return NAV_NOT_FOUND;
+    }
+    let n: i32 = o[(N_LO) as usize];
+    let mut q: i32 = c;
+    if o[(N_HI) as usize] != 0 {
+        return NAV_BAD;
+    }
+    for _i in 0..n {
+        let ke1: i32 = nav_skip(b, o, q, end);
+        if ke1 < 0 {
+            return ke1;
+        }
+        if compare_key(b, q, ke1, k, ks, ke) == 0 {
+            return ke1;
+        }
+        q = nav_skip(b, o, ke1, end);
+        if q < 0 {
+            return q;
+        }
+    }
+    return NAV_NOT_FOUND;
+}
 pub fn nav_dir(b: &[u8], o: &mut [i32], p: i32, d: &mut [i32], end: i32) -> i32 {
     // A child directory of the array or map at p: d[i] = the position of
     // element i (array) or of KEY i (map), one word per child; answers the

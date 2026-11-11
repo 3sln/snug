@@ -13,7 +13,7 @@
                                      CODE_TOO_MANY_ITEMS CODE_DEPTH
                                      CODE_TOO_MANY_ENTRIES
                                      O_ERR_POS O_ITEMS O_MAX_ITEMS O_MAX_DEPTH
-                                     O_MAX_ENTRIES O_HI O_LO O_CSTART]]))
+                                     O_MAX_ENTRIES O_HI O_LO O_CSTART O_VCTL VC_NONDET]]))
 
 (defn ^:pub ^I32 fail [^Ints o ^I32 at ^I32 code]
   (comment "Record where a refusal was decided; answer the negated code.")
@@ -126,3 +126,36 @@
     (if (== ai 25) (return (be16 b (+ x 1))))
     (if (== ai 26) (return (be32 b (+ x 1))))
     (return (be32 b (+ x 5)))))
+
+(defn ^:pub ^I32 read-arg-v [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
+  (comment "read-arg under PF_VALID (P8.4, D260), for the walks that admit valid"
+           "CBOR: any width (a longer head than the value needs notes VC_NONDET: the"
+           "input is not its canonical form). 28..30 are malformed; 31 is the"
+           "caller's (an indefinite length, or a break). read-arg itself stays as it"
+           "was, small enough to inline into the deterministic walk.")
+  (if (> ai 27)
+    (do (if (== ai 31) (return (fail o pos CODE_INDEFINITE)))
+        (return (fail o pos CODE_MALFORMED))))
+  (let [p (+ pos 1)
+        w (shl 1 (- ai 24))]
+    (if (> w (- end p)) (return (fail o pos CODE_TRUNCATED)))
+    (let [^:mut hi 0
+          ^:mut v (u8 b p)
+          ^:mut short false]
+      (if (== w 1) (set short (< v 24)))
+      (if (== w 2)
+        (do (set v (bit-or (shl v 8) (u8 b (+ p 1))))
+            (set short (< v 256))))
+      (if (== w 4)
+        (do (set v (be32 b p))
+            (set short (== (ushr v 16) 0))))
+      (if (== w 8)
+        (do (set hi (be32 b p))
+            (set v (be32 b (+ p 4)))
+            (set short (== hi 0))))
+      (if short
+        (do (let [c (ia o O_VCTL)]
+              (iset o O_VCTL (bit-or c VC_NONDET)))))
+      (iset o O_HI hi)
+      (iset o O_LO v)
+      (return (+ p w)))))

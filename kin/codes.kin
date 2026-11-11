@@ -27,6 +27,10 @@
 (defconst ^:pub ^I32 CODE_TOO_MANY_ITEMS 19)
 (defconst ^:pub ^I32 CODE_TOO_LARGE 20)
 (defconst ^:pub ^I32 CODE_NOT_MAP 21)
+;; Internal (P8.4, D264): the options array's scratch words (past the frozen 16) or
+;; the canonical buffer is too small; o[O_VNEEDW] / o[O_VNEEDB] say how large they
+;; must be. Hosts grow and call again; a user never sees it.
+(defconst ^:pub ^I32 CODE_SCRATCH 22)
 
 ;; The options / scratch array. Slots 0..5 are INPUT (set them with
 ;; `snug.cbor.scan/scan-options`); 6..7 are OUTPUT; 8..10 are scratch; 11 is
@@ -48,12 +52,88 @@
 ;; PROFILE FLAGS (D120): INPUT, written by `scan-options` (0) and
 ;; `scan-profile`, or by the VM's setup from limits word 9.
 (defconst ^:pub ^I32 O_PROFILE 11)
+;; Words 12-15 (scanner-reserved, P8.4, D264): valid-CBOR walks. O_VCTL holds
+;; controls (in, bits 0-7) and outcomes (out, bits 8-15); O_VNEEDW / O_VNEEDB the
+;; options-array words / canonical-buffer bytes a CODE_SCRATCH answer needs; O_VLEN
+;; the canonical copy's length, -1 when the input is its own canonical form.
+(defconst ^:pub ^I32 O_VCTL 12)
+(defconst ^:pub ^I32 O_VNEEDW 13)
+(defconst ^:pub ^I32 O_VNEEDB 14)
+(defconst ^:pub ^I32 O_VLEN 15)
 (defconst ^:pub ^I32 SCAN_OPTS_LEN 16)
+;; O_VCTL outcome bits: an encoding the deterministic profile refuses was admitted
+;; (the input is not its DC form); a key's EC form may differ from its DC form.
+(defconst ^:pub ^I32 VC_NONDET 256)
+(defconst ^:pub ^I32 VC_ECS 512)
+;; ... and some map's keys may not be in canonical order (views search such maps linearly)
+(defconst ^:pub ^I32 VC_UNSORTED 1024)
+;; The options array past word 15 (when the host gives more): the walk's scratch.
+;; O_S_RTOP the record stack's top (words, growing up from O_S_FIRST); O_S_DLOW the
+;; deferral list's lowest word (growing down from the array's end); O_S_UNITS the
+;; duplicate checks' units; O_S_CBTOP the canonical buffer's scratch top (bytes).
+(defconst ^:pub ^I32 O_S_RTOP 16)
+(defconst ^:pub ^I32 O_S_DLOW 17)
+(defconst ^:pub ^I32 O_S_UNITS 18)
+(defconst ^:pub ^I32 O_S_CBTOP 19)
+(defconst ^:pub ^I32 O_S_NDEF 20)
+;; which buffer the running walk reads (0 the input, 1 the canonical buffer), and bit 1:
+;; a replay that only adds known payload counts (scan-cb)
+(defconst ^:pub ^I32 O_S_SRC 21)
+;; items found in deferred payloads so far (scan-cb)
+(defconst ^:pub ^I32 O_S_EXTRA 22)
+;; the embedded table's entries (vcopy, after the walk)
+(defconst ^:pub ^I32 O_S_NTAB 23)
+;; the canonical copy's build (vcopy, D264/D277/D280): the source being written's base
+;; and end, the event list's count, the region being written's stop (copy position,
+;; kind 1 an item / 2 a container's end / 0 none, code, source offset), and the
+;; scanner's duplicate refusal to replay (kind 1 at a key, 2 at a map's end, + 4 when
+;; found reading the canonical buffer; the key's or the map's first key's position;
+;; the refusal's offset)
+(defconst ^:pub ^I32 O_S_SBASE 24)
+(defconst ^:pub ^I32 O_S_SEND 25)
+(defconst ^:pub ^I32 O_S_NEV 26)
+(defconst ^:pub ^I32 O_S_STOPP 27)
+(defconst ^:pub ^I32 O_S_STOPK 28)
+(defconst ^:pub ^I32 O_S_STOPC 29)
+(defconst ^:pub ^I32 O_S_STOPO 30)
+(defconst ^:pub ^I32 O_S_DUPK 31)
+(defconst ^:pub ^I32 O_S_DUPP 32)
+(defconst ^:pub ^I32 O_S_DUPO 33)
+;; the copy position the writer found for the duplicate refusal's item (-1 none)
+(defconst ^:pub ^I32 O_S_DUPC 34)
+;; the stop's planting (0 a malformed head of the major O_S_PMAJ, 1 a string whose
+;; length runs past the end, 2 a text of O_S_PLEN bytes invalid at its last), the
+;; stopped item's source start, the copy region's base (the input copy is cb[0, it)),
+;; the content start of a container stopped at its end (-1 none), and how many events
+;; are sorted
+(defconst ^:pub ^I32 O_S_PLANT 35)
+(defconst ^:pub ^I32 O_S_PMAJ 36)
+(defconst ^:pub ^I32 O_S_PLEN 37)
+(defconst ^:pub ^I32 O_S_STOPX 38)
+(defconst ^:pub ^I32 O_S_CBASE 39)
+(defconst ^:pub ^I32 O_S_PSTOP 40)
+(defconst ^:pub ^I32 O_S_NSORT 41)
+;; the copy position of the duplicate refusal's offset (the refused key), and a planted
+;; text's invalid byte (its content offset)
+(defconst ^:pub ^I32 O_S_DUPCO 42)
+(defconst ^:pub ^I32 O_S_PBAD 43)
+;; the depth bound of embedded content (a nested document's own: the run's whole bound),
+;; 0: O_MAX_DEPTH's
+(defconst ^:pub ^I32 O_S_EDEPTH 44)
+(defconst ^:pub ^I32 O_S_FIRST 48)
+;; event kinds (7-word records: position, kind, five arguments; vcopy.kin)
+(defconst ^:pub ^I32 EV_HEAD 1)
+(defconst ^:pub ^I32 EV_END 2)
+(defconst ^:pub ^I32 EV_KEY 3)
+(defconst ^:pub ^I32 EV_WMARK 4)
+(defconst ^:pub ^I32 EV_EMB 5)
+(defconst ^:pub ^I32 EV_UNITS 6)
+(defconst ^:pub ^I32 EV_WORDS 8)
 
 ;; Profile flags (D120, docs/profiles.md "Option model"). ZERO IS THE BINDLE
 ;; PROFILE, and every set bit admits more, so an unfilled word is the
-;; strictest policy. Every value only removes acceptance relative to RFC 8949
-;; §4.2.1 core deterministic encoding.
+;; strictest policy. Without PF_VALID every value only removes acceptance
+;; relative to RFC 8949 §4.2.1 core deterministic encoding.
 ;;   bits 0-1 PF_KEYS     map keys: 0 text (+ cose labels), 1 text and
 ;;                        integer (major 0/1), 2 or 3 any item
 ;;   bits 2-3 PF_TAGS     0 the Bindle tag set, 1 the standard set (adds
@@ -65,16 +145,30 @@
 ;;   bit 5    PF_UNDEFINED  simple value 23 (undefined)
 ;;   bit 6    PF_NONCHAR  text may hold Unicode noncharacters
 ;;   bit 7    PF_SUB      internal (never from a host): the walk's root is not
-;;                        the document's top, so 55799 is refused at depth 0
+;;                        the document's top (55799 was refused there before P8.4)
 (defconst ^:pub ^I32 PF_KEYS 3)
 (defconst ^:pub ^I32 PF_TAGS 12)
 (defconst ^:pub ^I32 PF_TAGS_ANY 8)
 (defconst ^:pub ^I32 PF_FLOATS 16)
 (defconst ^:pub ^I32 PF_UNDEFINED 32)
 (defconst ^:pub ^I32 PF_NONCHAR 64)
-(defconst ^:pub ^I32 PF_HOST 127)
+(defconst ^:pub ^I32 PF_HOST 383)
 (defconst ^:pub ^I32 PF_SUB 128)
 (defconst ^:pub ^I32 PF_DETERMINISTIC 122)
+;;   bit 8    PF_VALID    (P8.4, D260) valid CBOR: indefinite lengths, non-shortest
+;;                        heads and floats, NaN payloads, keys in any order, bignums
+;;                        with leading zeros -- RFC 8949 §5.3's valid items, not only
+;;                        §4.2.1's deterministic ones. The VALID preset is
+;;                        PF_DETERMINISTIC | PF_VALID.
+;;   bit 9    PF_CANON    internal: the walk is over a canonical copy whose duplicate
+;;                        keys are checked; key order is not refused
+;;   bit 10   PF_VREL     internal: the VM's deterministic walk of a PF_VALID run --
+;;                        admits what PF_VALID admits without changing bytes (a NaN
+;;                        with payload in its shortest width, bignum leading zeros)
+(defconst ^:pub ^I32 PF_VALID 256)
+(defconst ^:pub ^I32 PF_VALID_PRESET 378)
+(defconst ^:pub ^I32 PF_CANON 512)
+(defconst ^:pub ^I32 PF_VREL 1024)
 
 ;; Profile bounds that are not options (cbor.mjs LIMITS).
 (defconst ^:pub ^I32 MAX_BIGNUM_BYTES 128)

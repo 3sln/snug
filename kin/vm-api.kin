@@ -5,12 +5,18 @@
 ;; compiler engineer's (kin/program, snug.program.verify); a Program must be
 ;; verified before it is validated against.
 (ns snug.vm.api
-  (:require [kin.lang :refer [defn let local return set if while for do comment]]
-            [snug.lang :refer [I32 Ext ext-none Bool Bytes Ints IntsR + - * neg quot rem ushr bit-and bit-or < > <= >= == != and or not
+  (:require [kin.lang :refer [defn let local return set if while for do comment declarefn]]
+            [snug.lang :refer [I32 Ext ext-none Bool Bytes BytesW Ints IntsR + - * neg quot rem ushr bit-and bit-or bit-xor < > <= >= == != and or not
                                u8 blen ia iset ilen]]
             [snug.cbor.codes :refer [CODE_TOO_LARGE CODE_NOT_MAP CODE_TRAILING O_TOP O_COSE
                                      O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS O_ERR_POS
-                                     O_ITEMS O_PROFILE MAX_BIGNUM_BYTES PF_HOST PF_SUB]]
+                                     O_ITEMS O_PROFILE MAX_BIGNUM_BYTES PF_HOST PF_SUB
+                                     PF_VALID PF_VREL PF_CANON O_VCTL O_VLEN O_VNEEDW O_VNEEDB
+                                     O_S_FIRST O_S_NEV O_S_CBASE O_S_EDEPTH VC_ECS CODE_SCRATCH
+                                     EV_HEAD EV_END EV_KEY EV_UNITS EV_WORDS
+                                     CODE_NON_SHORTEST CODE_INDEFINITE CODE_KEY_ORDER]]
+            [snug.cbor.scan :refer [scan-x]]
+            [snug.cbor.vcopy :refer [canon-build vmap vsource ev-find]]
             [snug.cbor.head :refer [fail]]
             [snug.vm.layout :refer [MAGIC FORMAT_VERSION FORMAT_V11 HEADER_WORDS H_FORMAT H_HEADER_WORDS
                                     H_PROGRAM_WORDS H_POOL_BYTES H_N_RULES H_N_LEAVES H_LIM_DEPTH
@@ -20,11 +26,13 @@
                                     VM_W_DEPTH VM_W_XKIND VM_W_XVAL VM_W_OFFSET VM_D VM_FRAMES VM_PATH
                                     VM_REGEX VM_RULE VM_CHAIN VM_EMBED VM_BIGNUM_MAX VM_POS VM_Q1
                                     VM_EXH VM_REGCAP VM_QIDX VM_DLIM VM_GENERIC SCRATCH_MARK R_TYPE R_BUDGET
-                                    R_INCONSISTENT]]
+                                    R_INCONSISTENT R_NONDET VM_VTAB H_FLAGS FL_EMBED]]
             [snug.vm.base :refer [new-epoch q-add q-stamp ts-test cset-rec wit-empty wit-set]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.leaf :refer [cmp-bytes]]
             [snug.vm.eval :refer [eval-item]]))
+
+(declarefn vm-walk)
 
 ;; ------------------------------------------------------------ scratch
 
@@ -214,7 +222,14 @@
       (if (< dl 0) (set dl 0))
       (iset s O_TOP (opt01 limits 0))
       (if (== depth0 0) (iset s O_COSE (opt01 limits 1)) (iset s O_COSE 0))
-      (iset s O_PROFILE (prof limits depth0))
+      (comment "P8.4 (D262): a valid-CBOR run walks deterministically first; PF_VREL"
+               "keeps what PF_VALID admits without changing bytes")
+      (let [pf (prof limits depth0)]
+        (if (!= (bit-and pf PF_VALID) 0)
+          (iset s O_PROFILE (bit-or (bit-xor pf PF_VALID) PF_VREL))
+          (iset s O_PROFILE pf)))
+      (iset s O_VCTL 0)
+      (iset s VM_VTAB 0)
       (iset s O_MAX_BYTES (lim limits 2 (ia p H_LIM_INPUT)))
       (iset s O_MAX_DEPTH dl)
       (iset s O_MAX_ENTRIES (lim limits 4 (ia p H_LIM_ENTRIES)))
@@ -266,6 +281,11 @@
   (if (or (< start 0) (or (< end start) (> end (blen b)))) (return (neg 1)))
   (let [su (vm-setup p rule start depth0 items0 limits s)]
     (if (< su 0) (return su)))
+  (return (vm-walk p pool rule b start end s out ext)))
+
+(defn ^:pub ^I32 vm-walk [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^Ints s ^Ints out
+                          ^Ext ext]
+  (comment "vm-run after its checks and vm-setup: the root item b[start, end).")
   (let [frames (ia s VM_FRAMES)
         n (- end start)]
     (if (> n (ia s O_MAX_BYTES))
@@ -305,6 +325,141 @@
           (if (== t 1) (return (vm-output s out 0 0 0)))
           (if (wit-empty s) (wit-set s R_TYPE 0 0 (neg 1) 0 start))
           (return (vm-witness-output s out)))))))
+
+;; ------------------------------------------------------------ valid CBOR (P8.4)
+
+(defn ^:pub ^Bool nondet-code [^I32 code]
+  (comment "Codes only an encoding valid CBOR admits can cause on the deterministic"
+           "attempt of a valid-CBOR run (D262), or R_NONDET from embedded content.")
+  (return (or (or (== code CODE_NON_SHORTEST) (== code CODE_INDEFINITE))
+              (or (== code CODE_KEY_ORDER) (== code R_NONDET)))))
+
+(defn ^:pub ^I32 vm-need [^Ints out ^I32 w ^I32 nb ^I32 sw]
+  (comment "-5: a host buffer is too small; out[5] the valid scratch's words, out[6]"
+           "the canonical buffer's bytes, out[7] the VM scratch's words (0: enough).")
+  (iset out 0 0)
+  (iset out 5 w)
+  (iset out 6 nb)
+  (iset out 7 sw)
+  (return (neg 5)))
+
+(defn ^:pub ^I32 vm-remap [^Bytes b ^Bytes cb ^Ints vs ^I32 start ^Ints out]
+  (comment "The offset of a run over a canonical copy mapped back to b (D264); a"
+           "refusal the VM found at a planted stop with the planted code is the"
+           "stop's own (code and offset, D280) -- the run's code, or the reason's"
+           "sub-code when an embedded refusal became a witness.")
+  (let [off (ia out 2)
+        e (ev-find vs off EV_HEAD)]
+    (if (>= e 0)
+      (do (let [vc (ia vs (+ e 4))]
+            (if (and (> vc 0) (== (ia out 0) vc))
+              (do (iset out 0 (ia vs (+ e 2)))
+                  (iset out 2 (vsource b cb vs start (ia vs (+ e 3))))
+                  (return 0)))
+            (if (and (> vc 0) (and (>= (ia out 0) 32) (== (ia out 1) vc)))
+              (do (iset out 1 (ia vs (+ e 2)))
+                  (iset out 2 (vsource b cb vs start (ia vs (+ e 3))))
+                  (return 0))))))
+    (iset out 2 (vmap b cb vs start off))
+    (return 0)))
+
+(defn ^:pub ^I32 vm-canon [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
+                           ^I32 items0 ^IntsR limits ^Ints s ^Ints out ^Ext ext ^Ints vs ^BytesW cb]
+  (comment "The canonical path (D262, D264, D277, D280): the scanner (vs its options"
+           "array and scratch, cb its buffer) checks b[start, end), then its canonical"
+           "copy -- for a refused input the copy of the valid prefix, planted and"
+           "padded at the stop -- and events are written into cb and vs; the events go"
+           "to S past the rule's scratch; the VM walks the copy under PF_CANON (its"
+           "fast paths leave every container end, every key that breaks the"
+           "ascending order and every stop to the generic walk), charging each marked map's"
+           "duplicate-check units at its end and reaching every recorded refusal at"
+           "its own check phase, after the charges that precede it on every route."
+           "Every offset it reports is mapped back to b. -5 when vs, cb or S is too"
+           "small.")
+  (if (< (ilen vs) (+ O_S_FIRST 256))
+    (return (vm-need out (+ O_S_FIRST 1024) (+ (* 3 (- end start)) 4096) 0)))
+  (let [pf (prof limits depth0)
+        dd (ia p H_LIM_DEPTH)
+        ^:mut dl (- (lim limits 3 dd) depth0)]
+    (if (< dl 0) (set dl 0))
+    (iset vs O_TOP (opt01 limits 0))
+    (if (== depth0 0) (iset vs O_COSE (opt01 limits 1)) (iset vs O_COSE 0))
+    (iset vs O_MAX_BYTES (lim limits 2 (ia p H_LIM_INPUT)))
+    (iset vs O_MAX_DEPTH dl)
+    (iset vs O_S_EDEPTH dl)
+    (iset vs O_MAX_ENTRIES (lim limits 4 (ia p H_LIM_ENTRIES)))
+    (iset vs O_MAX_ITEMS (lim limits 5 (ia p H_LIM_ITEMS)))
+    (iset vs O_PROFILE pf)
+    (let [sc (scan-x b vs cb start end 0 items0)
+          serr (ia vs O_ERR_POS)
+          sitems (ia vs O_ITEMS)]
+      (if (== sc CODE_SCRATCH) (return (vm-need out (ia vs O_VNEEDW) (ia vs O_VNEEDB) 0)))
+      (let [su (vm-setup p rule start depth0 items0 limits s)]
+        (if (< su 0) (return su)))
+      (comment "refusals decided before the walk on every route")
+      (if (or (== sc CODE_TOO_LARGE) (== sc CODE_NOT_MAP))
+        (do (iset s O_ITEMS sitems)
+            (return (vm-output s out sc 0 serr))))
+      (let [^:mut embeds 1]
+        (if (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0) (set embeds 2))
+        (let [l (canon-build b vs cb start end embeds sc)]
+          (if (< l 0) (return (vm-need out (ia vs O_VNEEDW) (ia vs O_VNEEDB) 0)))
+          (let [n (ia vs O_S_NEV)
+                base (vm-scratch-words p rule (ia s VM_MARK_CAP))
+                need (+ (+ base 4) (* EV_WORDS n))]
+            (if (and (> n 0) (< (ilen s) need)) (return (vm-need out 0 0 need)))
+            (if (> n 0)
+              (do (iset s base n)
+                  (iset s (+ base 1) 0)
+                  (iset s (+ base 2) 0)
+                  (iset s (+ base 3) 0)
+                  (for [^I32 i 0 (* EV_WORDS n)]
+                    (iset s (+ (+ base 4) i) (ia vs (+ O_S_FIRST i))))
+                  (iset s VM_VTAB base)))
+            (iset s O_PROFILE (bit-or (ia s O_PROFILE) PF_CANON))
+            (if (< (ia s O_MAX_BYTES) l) (iset s O_MAX_BYTES l))
+            (let [base0 (ia vs O_S_CBASE)
+                  r2 (vm-walk p pool rule cb base0 l s out ext)]
+              (iset s VM_VTAB 0)
+              (if (and (>= r2 0) (!= (ia out 0) 0))
+                (vm-remap b cb vs start out))
+              (comment "a refused input whose replay ended otherwise (never expected:"
+                       "the scanner and the walk agree on every refusal): the scanner's"
+                       "verdict stands")
+              (if (and (>= r2 0) (and (!= sc 0) (or (== (ia out 0) 0)
+                                                    (and (>= (ia out 0) 32) (!= (ia out 0) R_BUDGET)))))
+                (do (iset s O_ITEMS sitems)
+                    (vm-output s out sc 0 serr)))
+              (iset vs O_VLEN l)
+              (return r2))))))))
+
+(defn ^:pub ^I32 vm-run-v [^IntsR p ^Bytes pool ^I32 rule ^Bytes b ^I32 start ^I32 end ^I32 depth0
+                           ^I32 items0 ^IntsR limits ^Ints s ^Ints out ^Ext ext ^Ints vs ^BytesW cb]
+  (comment "vm-run, and the canonical path (vm-canon) when the deterministic attempt of"
+           "a valid-CBOR run met an encoding only valid CBOR has, or a key whose"
+           "duplicates are not bytewise (VC_ECS) under any profile. vs[O_VLEN] is the"
+           "copy's end when the canonical path ran (the copy is cb[vs[O_S_CBASE], it);"
+           "the input's copy precedes it), else -1.")
+  (if (>= (ilen vs) 16) (iset vs O_VLEN (neg 1)))
+  (let [r (vm-run p pool rule b start end depth0 items0 limits s out ext)]
+    (if (< r 0) (return r))
+    (let [pf (prof limits depth0)
+          nd (and (!= (bit-and pf PF_VALID) 0) (nondet-code (ia out 0)))
+          ecs (!= (bit-and (ia s O_VCTL) VC_ECS) 0)]
+      (if (and (not nd) (not ecs)) (return r))
+      (return (vm-canon p pool rule b start end depth0 items0 limits s out ext vs cb)))))
+
+(defn ^:pub ^I32 vm-validate-v [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
+                                ^Ints out ^Ext ext ^Ints vs ^BytesW cb]
+  (comment "vm-validate-x with valid-CBOR support (P8.4): vs and cb are the canonical"
+           "path's buffers (any length; -5 asks for more, vm-need).")
+  (return (vm-run-v p pool rule input 0 (blen input) 0 0 limits s out ext vs cb)))
+
+(defn ^:pub ^I32 vm-validate-span-v [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^I32 start ^I32 end
+                                     ^I32 depth0 ^I32 items0 ^IntsR limits ^Ints s ^Ints out ^Ext ext
+                                     ^Ints vs ^BytesW cb]
+  (comment "vm-validate-span-x with valid-CBOR support.")
+  (return (vm-run-v p pool rule input start end depth0 items0 limits s out ext vs cb)))
 
 (defn ^:pub ^I32 vm-validate-x [^IntsR p ^Bytes pool ^I32 rule ^Bytes input ^IntsR limits ^Ints s
                                 ^Ints out ^Ext ext]

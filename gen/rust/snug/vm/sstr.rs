@@ -6,7 +6,6 @@ use crate::snug::cbor::head::*;
 use crate::snug::cbor::scan::*;
 use crate::snug::cbor::text::*;
 use crate::snug::vm::base::*;
-use crate::snug::vm::dead::*;
 use crate::snug::vm::eval::*;
 use crate::snug::vm::layout::*;
 use crate::snug::vm::leaf::*;
@@ -33,6 +32,16 @@ pub fn prologue(p: &[i32], b: &[u8], s: &mut [i32], pos: i32, end: i32, ck: i32,
         return -R_INCONSISTENT;
     }
     let ai: i32 = (b[(pos) as usize] as i32) & 31;
+    // P8.4 (D266): a valid-CBOR run's frames take a head of any width (an
+    // indefinite one is the caller's: its argument reads as 0)
+    if ((s[(O_PROFILE) as usize] & PF_VREL) != 0) && ((ai >= 24) && (ai <= 27)) {
+        return read_arg_v(b, s, pos, ai, end);
+    }
+    if ((s[(O_PROFILE) as usize] & PF_VREL) != 0) && (ai == 31) {
+        s[(O_HI) as usize] = 0;
+        s[(O_LO) as usize] = 0;
+        return pos + 1;
+    }
     if ai >= 24 {
         return read_arg(b, s, pos, ai, end);
     }
@@ -686,7 +695,7 @@ pub fn typed_scan(b: &[u8], s: &mut [i32], ss: &mut [i32], base: i32, wend: i32,
         if e == i {
             e = i + size;
         }
-        let bad: i32 = typed_bad_at(b, i, e, tag);
+        let bad: i32 = typed_nan_at(b, i, e, tag);
         if bad >= 0 {
             return fail(s, bad, CODE_TYPED_ARRAY);
         }

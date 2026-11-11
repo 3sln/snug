@@ -220,6 +220,9 @@
    ;; extension controls (D140, D190): call a predicate (a verdict word); the one that never matches
    'ext-call (op "({0}({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) | 0)"
                  "{0}({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})" I32)
+   ;; P8.4 (D266): empty buffers, for an entry point that has none to give
+   'ints-none (kl/call {:js "(new Int32Array(0))" :rust "&mut []"} {:tag Ints :arity 0})
+   'bytes-none (kl/call {:js "(new Uint8Array(0))" :rust "&mut []"} {:tag BytesW :arity 0})
    'ext-none (kl/call {:js "((_i, _p, _ao, _al, _b, _s, _e, _r) => -2)"
                        :rust "&|_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -2"}
                       {:tag Ext :arity 0})})

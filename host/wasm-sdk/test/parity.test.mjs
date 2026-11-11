@@ -14,7 +14,7 @@
 //              seeded window splits, quanta and failFast; profile scans too
 //   compile    every schema text of the case set (and truncations, profiles,
 //              registries): the serialised Program bytes or the SchemaError
-//   sequences  (P7.13w) readSequence / sequenceReader on sequences built from
+//   sequences  (P7.13w; P8.4 adds valid-CBOR sequences of indefinite-length items) readSequence / sequenceReader on sequences built from
 //              the case set (as bb sequence-test builds them) under whole,
 //              1-byte, random and every-offset chunkings, every policy
 //              (onInvalid stop/skip, copy spanning/always, failFast, quanta):
@@ -443,6 +443,34 @@ test('sequences: readSequence and sequenceReader == native under chunk splits an
   tp.done(); tr.done();
   console.log(`  ${wLate === 0 && nLate === 0 ? 'ok  ' : 'FAIL'} release latency: ${wLate} (wasm) / ${nLate} (native) of ${byteMsgs} accepted messages in 1-byte runs waited for a byte past their own end`);
   assert.equal(wLate, 0); assert.equal(nLate, 0);
+});
+
+test('sequences under wire valid: indefinite-length items, unsorted keys, duplicates by value == native, views over the canonical copy', async () => {
+  const anyN = await ncompile('r = any'), anyW = await wcompile('r = any');
+  // P8.4: valid, non-deterministic messages ([_ 1, 2], {_ "b": 2, "a": 1}, (_ "ab", "cde"), [_ {_ 1 (wide): "x"}, (_ h'01', h'0203')])
+  // then a duplicate by value in an indefinite map, or a cut indefinite array; every view walked
+  const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
+  const good = ['9f0102ff', 'bf616202616101ff', '7f62616263636465ff', '9fbf18016178ff5f4101420203ffff'].map(unhex);
+  const t = tally('sequenceReader under wire valid (messages, views, errors)');
+  for (const tail of ['', 'bf61610178016102ff', '9f0102']) {
+    const S = catBytes([...good, unhex(tail)]);
+    for (const ch of [{ kind: 0 }, { kind: 1, w: 1 }, { kind: 2, w: 3, seed: 7 }]) for (const sch of [false, true]) {
+      const ends = chunkEnds(S.length, ch), chunks = chunksBy(S, ends);
+      const run = api => {
+        const out = [];
+        try {
+          const opts = { wire: 'valid', top: 'any' };
+          if (sch) { opts.schema = api === WSEQ ? anyW : anyN; opts.rule = 'r'; }
+          const rd = api.sequenceReader(opts);
+          for (const c of chunks) { const r = rd.feed(c); for (const m of r.messages) out.push(msgOf(m), viewAll(m.view)); if (r.error) { out.push(faultOf(r.error)); return out; } }
+          const e = rd.end(); for (const m of e.messages) out.push(msgOf(m), viewAll(m.view)); out.push(e.error ? faultOf(e.error) : null);
+        } catch (e) { out.push(faultOf(e)); }
+        return out;
+      };
+      t.same(`valid ${tail || 'good'} ${show(ch)} ${sch ? 'schema' : 'profile'}`, run(WSEQ), run(NSEQ));
+    }
+  }
+  t.done();
 });
 
 test('sequences: API behaviours and privacy (read-only messages, private View/Cursor state, no trusted opener)', async () => {

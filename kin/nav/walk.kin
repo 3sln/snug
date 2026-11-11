@@ -180,6 +180,26 @@
           (if (< q 0) (return q))))
       (return NAV_NOT_FOUND))))
 
+(defn ^:pub ^I32 nav-find-any [^Bytes b ^Ints o ^I32 p ^Bytes k ^I32 ks ^I32 ke ^I32 end]
+  (comment "nav-find for a map whose keys may be in any order (a message checked as"
+           "valid CBOR whose scan noted keys out of canonical order, P8.4): every key"
+           "is compared, no early exit. The keys are canonical (the message is its"
+           "own canonical form, or a canonical copy), so equal encodings are equal"
+           "keys.")
+  (let [c (nav-head b o p end)]
+    (if (< c 0) (return c))
+    (if (!= (ia o N_MAJOR) 5) (return NAV_NOT_FOUND))
+    (let [n (ia o N_LO)
+          ^:mut q c]
+      (if (!= (ia o N_HI) 0) (return NAV_BAD))
+      (for [^I32 _i 0 n]
+        (let [ke1 (nav-skip b o q end)]
+          (if (< ke1 0) (return ke1))
+          (if (== (compare-key b q ke1 k ks ke) 0) (return ke1))
+          (set q (nav-skip b o ke1 end))
+          (if (< q 0) (return q))))
+      (return NAV_NOT_FOUND))))
+
 ;; ------------------------------------------------------------- directories
 
 (defn ^:pub ^I32 nav-dir [^Bytes b ^Ints o ^I32 p ^Ints d ^I32 end]

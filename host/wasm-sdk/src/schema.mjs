@@ -205,7 +205,8 @@ export class Schema {
     validateOptions(options, 'validation');
     const r = this.#inner.run(ri, bytes, options);
     if (!r.ok) throw validationFault(r);
-    return build(bytes, options);
+    // P8.4 (D262): built from the canonical copy the VM validated when the input is not its own deterministic form
+    return build(rt.lastCopy().bytes ?? bytes, options);
   }
   /** Internal (views, sessions): the rule index, checked. */
   ruleIndex(rule) { return this.#rule(rule); }

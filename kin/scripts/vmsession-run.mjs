@@ -10,7 +10,20 @@
 //   q: the work quantum (0: none). Every window starts EXACTLY at the offset
 //   asked for (nothing earlier is available) and is a fresh copy.
 import { vmScratchWords, vmScratchInit } from '../../gen/js/snug/vm/api.mjs';
-import { vmsWords, vmsArena, vmsInit, vmsStep, vmsStepX, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep } from '../../gen/js/snug/vm/session.mjs';
+import { vmsWords, vmsArena, vmsInit, vmsStepV, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep, vmsGrowWords, vmsGrowBytes, vmsGrowScratch, vmsGrowArena } from '../../gen/js/snug/vm/session.mjs';
+// P8.4 (D266): one step with the valid machinery's buffers, grown on VMS_GROW (S and the arena keep their contents)
+const noExt = () => -2;
+export function stepV(st, p, b, win, o, off, x) {
+  for (;;) {
+    const r = vmsStepV(p, b, win, st.s, st.ss, st.ka, o, off, x || noExt, st.vs, st.cb);
+    if (r !== -69) return r;
+    const w = vmsGrowWords(st.ss), nb = vmsGrowBytes(st.ss), sw = vmsGrowScratch(st.ss), aw = vmsGrowArena(st.ss);
+    if (w > st.vs.length) st.vs = new Int32Array(Math.max(w, 2 * st.vs.length));
+    if (nb > st.cb.length) st.cb = new Uint8Array(Math.max(nb, 2 * st.cb.length));
+    if (sw > st.s.length) { const g = new Int32Array(sw); g.set(st.s); st.s = g; }
+    if (aw > st.ka.length) { const g = new Uint8Array(aw); g.set(st.ka); st.ka = g; }
+  }
+}
 import { extFor } from './ext-cases.mjs';
 
 export const VMS_NEED = -64, VMS_YIELD = -65;
@@ -40,6 +53,7 @@ export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, ma
   if (guard) { p = guard(P, 'P'); b = guard(B, 'B'); s = guard(s, 'S'); ss = guard(ss, 'SS'); ka = guard(ka, 'KA'); o = guard(out, 'out'); }
   const ci = vmsInit(p, b, rule, lim, s, ss, ka, n, policy.q);
   if (ci < 0) return { error: `vms-init ${ci}` };
+  const st = { s, ss, ka, vs: new Int32Array(512), cb: new Uint8Array(1024) };
   const rnd = xorshift(policy.seed ?? 1);
   const limit = maxSteps || (200000 + 64 * n);
   let off = 0, len = 1, steps = 0, needs = 0, yields = 0, first = true, lastKeep = 0;
@@ -53,7 +67,7 @@ export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, ma
     const e = Math.min(n, off + L);
     let win = bytes.slice(off, e);
     if (guard) win = guard(win, 'window');
-    const r = x ? vmsStepX(p, b, win, s, ss, ka, o, off, x) : vmsStep(p, b, win, s, ss, ka, o, off);
+    const r = stepV(st, p, b, win, o, off, x);
     steps++;
     yield r;
     if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields };
@@ -104,6 +118,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
   if (guard) { p = guard(P, 'P'); b = guard(B, 'B'); s = guard(s, 'S'); ss = guard(ss, 'SS'); ka = guard(ka, 'KA'); o = guard(out, 'out'); }
   const ci = vmsInitUnknown(p, b, rule, lim, s, ss, ka, policy.q);
   if (ci < 0) return { error: `vms-init-unknown ${ci}` };
+  const st = { s, ss, ka, vs: new Int32Array(512), cb: new Uint8Array(1024) };
   const rnd = xorshift(policy.seed ?? 1);
   const limit = 200000 + 64 * n;
   const words = () => Array.from(out.slice(0, 8 + 2 * out[6])).join(' ');
@@ -121,7 +136,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
     const e = Math.min(n, total, off + L);
     let win = bytes.slice(off, Math.max(off, e));
     if (guard) win = guard(win, 'window');
-    let r = x ? vmsStepX(p, b, win, s, ss, ka, o, off, x) : vmsStep(p, b, win, s, ss, ka, o, off);
+    let r = stepV(st, p, b, win, o, off, x);
     steps++;
     if (r === VMS_HELD) {
       if (failFast && vmsHeldCode(ss) !== 0) return { out: words(), steps, early: true };

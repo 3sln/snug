@@ -7,29 +7,29 @@
   "entries": {
     "snug": {
       "static": {
-        "min": 44735,
-        "gzip": 15462,
-        "brotli": 13798
+        "min": 62113,
+        "gzip": 21346,
+        "brotli": 18705
       },
       "full": {
-        "min": 44735,
-        "gzip": 15462,
-        "brotli": 13798
+        "min": 62113,
+        "gzip": 21346,
+        "brotli": 18705
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/schema": {
       "static": {
-        "min": 96356,
-        "gzip": 35452,
-        "brotli": 30641
+        "min": 129670,
+        "gzip": 46314,
+        "brotli": 40096
       },
       "full": {
-        "min": 96356,
-        "gzip": 35452,
-        "brotli": 30641
+        "min": 129670,
+        "gzip": 46314,
+        "brotli": 40096
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/compile": {
       "static": {
@@ -38,37 +38,37 @@
         "brotli": 1178
       },
       "full": {
-        "min": 227285,
-        "gzip": 77222,
-        "brotli": 65648
+        "min": 262744,
+        "gzip": 88920,
+        "brotli": 75693
       },
-      "justification": "P8.3 D242-D243: compile-time XSD parser, XML-name ranges, metered subtraction and exact large quantifier ordering. Ceil(final full closure * 1.02); static and runtime caps unchanged. Evidence: bench/README.md#xsd-regexp-compiler-p83; .cache/p83-size-final.json."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/view": {
       "static": {
-        "min": 57852,
-        "gzip": 19756,
-        "brotli": 17654
+        "min": 76025,
+        "gzip": 25820,
+        "brotli": 22672
       },
       "full": {
-        "min": 57852,
-        "gzip": 19756,
-        "brotli": 17654
+        "min": 76025,
+        "gzip": 25820,
+        "brotli": 22672
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/writer": {
       "static": {
-        "min": 41183,
-        "gzip": 14245,
-        "brotli": 12739
+        "min": 58191,
+        "gzip": 19954,
+        "brotli": 17467
       },
       "full": {
-        "min": 41183,
-        "gzip": 14245,
-        "brotli": 12739
+        "min": 58191,
+        "gzip": 19954,
+        "brotli": 17467
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/unicode": {
       "static": {
@@ -84,29 +84,29 @@
     },
     "snug/sources": {
       "static": {
-        "min": 126313,
-        "gzip": 46910,
-        "brotli": 39989
+        "min": 169111,
+        "gzip": 62040,
+        "brotli": 52719
       },
       "full": {
-        "min": 126313,
-        "gzip": 46910,
-        "brotli": 39989
+        "min": 169111,
+        "gzip": 62040,
+        "brotli": 52719
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/sequence": {
       "static": {
-        "min": 153730,
-        "gzip": 54981,
-        "brotli": 47716
+        "min": 197749,
+        "gzip": 70249,
+        "brotli": 60674
       },
       "full": {
-        "min": 153730,
-        "gzip": 54981,
-        "brotli": 47716
+        "min": 197749,
+        "gzip": 70249,
+        "brotli": 60674
       },
-      "justification": "P7.13 (CBOR sequences, D210-D219): a new public entry -- readSequence/sequenceReader over the session VM's sequence mode, with the View (minted from the verdict). Ceil(measured * 1.02)."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "snug/controls": {
       "static": {
@@ -122,29 +122,29 @@
     },
     "runtime": {
       "static": {
-        "min": 120800,
-        "gzip": 43461,
-        "brotli": 37128
+        "min": 151814,
+        "gzip": 54389,
+        "brotli": 46281
       },
       "full": {
-        "min": 120800,
-        "gzip": 43461,
-        "brotli": 37128
+        "min": 151814,
+        "gzip": 54389,
+        "brotli": 46281
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     },
     "all-runtime": {
       "static": {
-        "min": 211058,
-        "gzip": 75908,
-        "brotli": 63814
+        "min": 256762,
+        "gzip": 92438,
+        "brotli": 77278
       },
       "full": {
-        "min": 211058,
-        "gzip": 75908,
-        "brotli": 63814
+        "min": 256762,
+        "gzip": 92438,
+        "brotli": 77278
       },
-      "justification": "P8.2 D252: RFC 3986 URI-reference recogniser (IPv6/IPvFuture literals) and RFC 3339 leap-second placement in the scanner shared by every runtime entry (kin/stdtags.kin, ~2.0 KB min / ~0.7 KB gzip). Ceil(measurement * 1.02) for each grown cap; measured in a HEAD+P8.2 worktree, esbuild 0.28.2. P7.13 (CBOR sequences, D210-D219): all-runtime now also retains the new snug/sequence entry; re-capped at ceil(measured * 1.02) on 1193611 + P7.13."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
     }
   }
 }

@@ -94,7 +94,7 @@ test('JS values: maps by key kind, Tagged, undefined, special floats; key collis
   const t = decode(fromHex('c074323031332d30332d32315432303a30343a30305a'));
   assert.ok(t instanceof Tagged && Object.isFrozen(t)); assert.equal(t.tag, 0); assert.equal(t.value, '2013-03-21T20:04:00Z');
   assert.throws(() => decode(fromHex('a201f93c00f93c0001')), { code: 'unsupported' });  // 1 and 1.0
-  assert.throws(() => decode(fromHex('a2f90000f98000f9800001')), { code: 'unsupported' });  // 0.0 and -0.0
+  assert.throws(() => decode(fromHex('a2f90000f98000f9800001')), { code: 'duplicate_key' });  // 0.0 and -0.0: equal by value (RFC 8949 §5.6.1, P8.4)
   assert.equal(view(fromHex('a201f93c00f93c0001')).length, 2);  // a view still reads it
   assert.throws(() => new Tagged(-1, 0), TypeError);
   assert.throws(() => new Tagged(2 ** 53, 0), TypeError);
@@ -113,12 +113,13 @@ test('encode: Maps, Tagged and undefined under each preset; the profile decides 
   assert.equal(toHex(encode(new Tagged(32, 'http://www.example.com'))), 'd82076687474703a2f2f7777772e6578616d706c652e636f6d');
   assert.equal(toHex(encode(new Tagged(24, encode(new Map([[1, 2]]))))), 'd81843a10102');
   assert.equal(toHex(encode(new Tagged(55799, { a: 1 }))), 'd9d9f7a1616101');
+  assert.equal(toHex(encode([new Tagged(55799, 0)])), '81d9d9f700');  // 55799 anywhere (RFC 8949 §3.4.6, D265)
   // D252: tag 1 admits non-finite floats and tag 32 any URI-reference; leap seconds only at a UTC month end
   assert.equal(toHex(encode(new Tagged(1, NaN))), 'c1f97e00');
   assert.equal(toHex(encode(new Tagged(32, '/relative'))), 'd820692f72656c6174697665');
   for (const [v, code, opts] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(0, '2024-01-01T00:00:60Z'), 'tag'],
     [new Tagged(32, 'http://[x'), 'tag'], [new Tagged(0, '2013-03-21t20:04:00z'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, new Uint8Array(9)), 'tag'],
-    [[new Tagged(55799, 0)], 'tag'], [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest'],
+    [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest'],
     [new Tagged(24, 'text'), 'tag'], [new Map([[1, 0], [1n, 1]]), 'duplicate_key']])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code}`);
   assert.throws(() => encode(new Map([[[0], 1]]), { keys: 'integer' }), { code: 'key_type' });
@@ -192,7 +193,7 @@ test('schemas: the prelude types the deterministic preset admits; float ranges o
   assert.deepEqual(ok('e', 'd818456449455446'), { ok: true });
   assert.equal(ok('e', 'd818420102').reason, 'cbor/trailing');
   assert.deepEqual(ok('s', 'd9d9f7a0'), { ok: true });
-  assert.equal(ok('s', '81d9d9f7a0').reason, 'cbor/tag');
+  assert.equal(ok('s', '81d9d9f7a0').reason, 'type');  // 55799 anywhere (D265): the schema decides
   assert.deepEqual(ok('x', 'f7'), { ok: true });
   assert.equal(ok('x', 'f7', { wire: 'bindle' }).reason, 'cbor/simple');
   assert.deepEqual(ok('k', 'a20101204100'), { ok: true });
@@ -233,7 +234,7 @@ test('any tag (D180): decode, encode, Writer, views and schemas over tags of any
   assert.equal(toHex(encode(new Tagged(65, Uint8Array.of(0, 1)))), 'd841420001');
   for (const [v, code, opts] of [[new Tagged(65535, 0), 'tag'], [new Tagged(2 ** 32 - 1, 0), 'tag'], [new Tagged(2n ** 64n - 1n, 0), 'tag'],
     [new Tagged(65, Uint8Array.of(0)), 'tag'], [new Tagged(87, Uint8Array.of(0)), 'tag'], [new Tagged(64, 'text'), 'tag'],
-    [[new Tagged(18, new Tagged(55799, 0))], 'tag'], [new Tagged(2, Uint8Array.of(1, 2)), 'tag'], [new Tagged(70, Uint8Array.of(0, 0, 0, 0)), 'tag'],
+    [new Tagged(2, Uint8Array.of(1, 2)), 'tag'], [new Tagged(70, Uint8Array.of(0, 0, 0, 0)), 'tag'],
     [new Tagged(4, [-1, 15]), 'tag'], [new Tagged(18, []), 'tag', { tags: 'standard' }], [new Tagged(2 ** 32, 0), 'tag', { tags: 'standard' }],
     [new Tagged(1000, new Tagged(0, 'x')), 'tag'], [new Tagged(18, new Tagged(18, [])), 'depth', { maxDepth: 1 }]])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code} ${String(v.tag ?? v[0]?.tag)}`);

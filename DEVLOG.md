@@ -4563,6 +4563,129 @@ documented, explicit cap with a warning is the honest contract, like the step
 budget.
 - [ ] **Signed off** (owner)
 
+### D283 — Sessions under valid CBOR, as built: whole items checked by the scanner first, keys kept as DC forms, `vms-step-v` with `VMS_GROW` (P8.4; implements D266)
+**Decision** (P8.4, provisional): D266's session design is built with these
+choices. (1) The valid machinery runs only when a step is given its buffers
+(`vms-step-v(…, vs, cb)`); a buffer too small suspends with `VMS_GROW`
+(-69; `vms-grow-words/-bytes/-scratch/-arena`), the host grows it (S and the
+key arena keep their contents) and steps again over the same window;
+`vms-step-x`/`vms-step` (no buffers) walk as before P8.4. It runs for valid
+runs and for any-key profiles (EC-sensitive keys, D263). (2) A whole item is
+checked by the scanner over the window first (one byte more window asked while
+it may be truncated by the window, so an item is walked in the feed that
+completes it): clean (own DC form, no marked map, no EMBED content) → the
+buffer walk in place; else the canonical copy with its events (D264, D280),
+offsets mapped back; under deterministic profiles only an EC-sensitive key
+sends it to the copy. Refused items whose bounds pass the window always take
+the copy (the in-place walk may read ahead). (3) Map keys are asked for whole
+(no arena copy across windows) and kept as DC forms with a 12-byte header;
+the deferred check at the map's end recomputes the scanner's records from
+them. (4) The prescans treat indefinite items as levels closed by their break.
+(5) `rscan` answers `scratch` for valid handles and EC-sensitive keys; hosts
+route profile-only streams under `PF_VALID` or any-key profiles to the session
+against `any` (native and wasm SDK). Architecture §19.7 amended.
+**Why**: the scanner pre-check avoids rolling back a failed in-place attempt
+inside a session; asking keys whole keeps one key form; buffers by suspension
+keep the step free of allocation (D033).
+**Alternatives**: the attempt-then-canonical order of the buffer driver
+(needs a rollback of S per item); keys copied across windows into the arena
+(a second form to canonicalise).
+- [ ] **Signed off** (owner)
+
+### D284 — Unassigned simple values stay refused under every preset (P8.4; owner question)
+**Decision** (P8.4, provisional): RFC 8949's unassigned simple values
+(`f0`–`f3`, `f8 20`–`f8 ff`) are well-formed and valid, but snug's value model
+has no value for them, so every preset — `valid` included — refuses them
+(`simple`), as before. The valid-CBOR gate records this against the corpus's
+expectation (Appendix A `f0`, `f8ff`), with the deterministic preset's kept
+§4.2.2 canonical NaN (`f97e01`, `faffc00001` refused `float`).
+**Owner question**: admit them under `valid` with a `Simple(n)` value class
+(decode, views, encode, the VM's `#7.n`)? That is a value-model addition, not
+P8.4's scope.
+- [ ] **Signed off** (owner)
+
+### D285 — Bundle growth for valid CBOR, attributed and cut; caps at measured + 2% (P8.4; R9 per D200, owner sign-off)
+**Decision** (P8.4, provisional): the caps of the entries below rise to their
+measured size + 2% (Ceil, each of min/gzip/brotli, static and full), after the
+cuts listed; every other entry keeps its cap. Measured with `node
+tools/size/size.mjs --details` (esbuild 0.28.2, Node 24.6.0) on main `c48ac45`
+and on the P8.4 increment, minified bytes unless gzip is said:
+
+| Entry | before min / gzip | after min / gzip |
+| --- | ---: | ---: |
+| `snug` (codec) | 43,382 / 14,988 | 60,895 / 20,927 |
+| `snug/writer` | 39,900 / 13,800 | 57,050 / 19,562 |
+| `snug/view` | 56,483 / 19,306 | 74,534 / 25,313 |
+| `snug/schema` | 94,104 / 34,615 | 127,127 / 45,405 |
+| `snug/sources` | 123,849 / 45,985 | 165,795 / 60,823 |
+| `snug/sequence` | 151,945 / 54,323 | 193,871 / 68,871 |
+| `runtime` | 118,069 / 42,474 | 148,837 / 53,322 |
+| `all-runtime` | 208,149 / 74,901 | 251,727 / 90,625 |
+| `snug/compile` (full closure) | 224,494 / 76,287 | 257,592 / 87,176 |
+
+**Attribution** (`runtime`, minified, module deltas): `cbor/vcopy` +9,490 (the
+VM's canonical copy of non-deterministic or refused input and its replay events,
+D264/D280); `cbor/canon` +7,968 (keys' DC/EC forms for duplicate-by-value and
+EC-sensitive detection, their sort and comparison, the codec's DC copy via `cw`,
+indefinite-string gathering); `cbor/scan` +6,584 (indefinite arrays, maps and
+strings, the valid key step and records, the deferred checks of marked maps,
+tag-0/32 text and tag-24 payloads over indefinite strings, any-width tag 4/40
+content); `cbor/tags` +1,520 (RFC 8949 §3.4.4 / RFC 8746 rules above the Bindle
+tag set, D265); `vm/api` +1,370 (`-v` entries, `vm-canon`, offset remapping);
+`vm/dead` +1,103 (replay hooks, `head-fail`, `pair-v`); `vm/eval` +711; host
+glue (scan, schema-core, build, profiles) about +1,600. Sessions and sequences
+add `vm/svalid` +3,703 and `vm/scont` +4,518 (D283's whole items, kept DC keys,
+`vms-step-v`).
+
+**The codec entry** (`snug`: decode, scan, encode, no schema) holds only
+`cbor/scan`, `cbor/canon`, `cbor/tags`, `cbor/head`, `cbor/stdtags` and host
+modules: no `vcopy`, no `vm/*` module is reachable from it (the per-entry module
+list in the attribution; the codec's copy is `canon.kin dc-copy`, P8.4 changed
+it from a second writer to `cw` over a copy of the input). What a schema-free
+decode needs of the growth: the valid walk (indefinite lengths, non-shortest
+heads and floats, any key order), duplicate keys by value on unsorted maps and
+EC-sensitive keys (the keys' canonical forms, sorted), the known tags' content
+over indefinite strings, and the DC copy the trusted builder reads.
+
+**Cut** (before the caps were set): the codec's second canonical writer
+(`cw-dc`, -950 min in every entry with the codec) replaced by `cw` over a copy;
+the duplicated typed-array NaN check (one `typed-nan-at` shared by the scanner,
+the buffer walk and the session, -364 in VM entries); `scan-x` and
+`scan-item-x` as one walk (`scan-run`); dead `map-back`/`map-seq` in canon.kin.
+**Considered, not done**: loading the canonical copy (`vcopy`) lazily or from a
+separate entry (synchronous `validate` cannot await a dynamic import, and under
+the `valid` default any VM user can meet non-deterministic input); dropping the
+refusal replay (D280, agreed; it is what makes a refusal's code, offset and
+budget equal on both routes); a deterministic-only scanner beside the valid one
+(duplicates the walk in every entry that needs both); dropping the VM's
+deterministic attempt (no code saved -- the attempt is the VM walk the canonical
+path also runs -- and 2.3-6.9x slower on deterministic input, D286).
+**Why**: duplicate keys by value on unsorted maps need the keys' canonical forms;
+non-deterministic input in a schema needs the canonical copy and replay for
+D277/D280; no smaller correct walk was found.
+- [ ] **Signed off** (owner)
+
+### D286 — The deterministic-only fast path is kept: the VM attempt; sessions pre-check structurally (P8.4; D269's measurement)
+**Decision** (P8.4, provisional): the buffer driver keeps its attempt over the
+input (D262) before the canonical path: forcing the canonical path on
+deterministic input costs 2.3-6.9x (bench/README.md "Valid CBOR (P8.4)"), and
+the attempt costs no code (it is the VM walk). The scanner and `rscan` keep no
+separate deterministic path (the scanner's valid branches cost 0.8-1.2x on
+deterministic input; `rscan` answers `scratch` for valid handles). Sessions
+take a whole item through a structural pre-check (`skim`, vm-session-valid.kin:
+well-formed, definite, no EC-sensitive key, no tag-24 payload; in a valid run
+also shortest heads, ascending keys and no `.cbor` byte strings) before the
+scanner's pass; a clean item is walked in place. Measured on deterministic
+input: decode/validate/scan 0.8-1.2x of main under both presets; sessions
+1.1-1.4x (1.2-2.0x before the pre-check). Non-deterministic input: 1.2-8x
+(codec, VM), sessions up to 23x on many small reordered maps -- recorded as an
+open performance item.
+**Why**: D230: a deterministic-only path is kept only where it is material;
+the attempt is (2.3-6.9x), a separate scanner is not.
+**Alternatives**: always the canonical path (slower, no smaller); a second,
+deterministic-only scanner (larger, no faster).
+- [ ] **Signed off** (owner)
+
 ### D300 — Standing approval for wasm edits (OWNER DECISION, 2026-11-10)
 **Decision** (owner, in session via the coordinator): agents may edit
 `host/wasm*/` in the snug repository for the rest of this project — covering
@@ -6341,6 +6464,53 @@ authorised), the existing gate set, and conformance-corpus vectors.
     P8.2's float rework already covers NaN in every width, P8.4 takes it as is;
     `docs/program.md` — a new paragraph after §14's schedule-2 text ("Valid
     CBOR input"), not the table rows.
+  - 2026-11-10 increment 1 (the `valid` preset exists; the default stays
+    `deterministic` until the flip): scanner valid walk and canonical key
+    records (`kin/scan.kin`, new `kin/canon.kin`, `head.kin`, `tags.kin`,
+    `stdtags.kin`, `codes.kin`); the VM canonical path with refusal replay
+    (new `kin/vcopy.kin`, `vm-api.kin` `-v` entries, hooks in `vm-dead.kin` /
+    `vm-eval.kin`; D264, D280); sessions and sequences on `vms-step-v` (D283,
+    new `kin/vm-session-valid.kin`); `rscan` answering `scratch` for valid
+    handles; hosts (JS, Rust, wasm and the wasm SDK under D300) routing valid
+    and any-key profile-only streams to the session VM; sequence messages'
+    Views read the canonical copy (JS, SDK, Rust); D265's Bindle-only rules;
+    `bb valid-test` (RFC 8949 Appendix A/F, equivalence property, F2 replay
+    incl. sessions, cbor2 differential with classes, fixed regressions,
+    RFC 8742 sequences of indefinite-length items through `sequenceReader`).
+    `sdk_ses_step_at` keeps its (off, n) window semantics. Found and fixed
+    while gating: a tag-24 payload's copy is bounded two levels below its tag
+    (as the scanner) when only the tag-24 walk reads it, and a container
+    stop planted after its depth check lets a tighter walk refuse depth first
+    (`pw-bad-df`, `head-fail`; event word 7); a map's deferred duplicate
+    check reports the items walked to the map's end; tags 4/40 take the
+    any-width content path on the VM in a valid run under the Bindle tag
+    set, as in the scanner; a session's integer streak in an indefinite
+    array stops at the entry bound (the last four found by the scaled
+    gates). Size: D285 (attributed, cut, caps at measured + 2%; owner
+    sign-off); fast path: D286 (attempt kept; session pre-check `skim`);
+    measurements in bench/README.md "Valid CBOR (P8.4)". Open: D284, docs,
+    the default flip, session cost on non-deterministic input (D286).
+    Gates (2026-11-11, on this increment): vmsession-test (999,880 session
+    runs == buffer; drain 488,625/488,625; JS == Rust 648,515), sequence-test
+    (635,945 oracle runs; release latency 0/50,480; JS == Rust 154,170),
+    valid-test (RFC 561/561; equivalence 589/589; replay 2,720 buffer + 2,133
+    session runs; regressions 99/99; cbor2 0 unexplained; sequences 36/36),
+    wasm-sdk-test 14/14 (valid sequences 18/18), drift, check, scan-test,
+    rscan-test, vm-test, compile-test, nav-test, write-test, unicode-test,
+    rust-api-test, compile-fuzz, host/js npm test 1,438/1,438, bb size: all
+    ok. Scaled: scan-test 300000/1001, rscan-test 200000/1001, vm-test
+    200000/1001/4000 ok (proptest P6 run); vmsession-test 60000/1001/1200/180
+    ok (2,706,044 session runs; drain 1,326,118; JS == Rust 1,764,081).
+    sequence-test 30000/1001 fails one run here and not on
+    main: a pre-existing sequence-mode discrepancy its new random sequence
+    reaches -- a message stream longer than maxMessageBytes in one window
+    answers too_large for its first (complete, 65,541-byte) message where
+    D211's oracle accepts it; reproduced on main `c48ac45` with the same
+    input (`a1 61 61 59 ff ff` + zeros to 1,500,000 bytes, then `a0`, limits
+    `0,0,1500000,…`, whole window); not P8.4's, reported. Not run:
+    crate-diff (its native oracle binary is absent here). proptest P1/P2
+    show the same five signatures on main (2-minute runs; the oracle
+    predates the deterministic default) -- not P8.4's.
 - [ ] **P8.5 — CDDL coverage, rescoped by D270 (PEG group semantics)** (audit ranks 6, 7, 10; D230): budget-metered
   general map assignment where D011 cannot prove greedy exact (bounded
   search / bipartite matching), coupled and non-interval group repetitions,

@@ -308,27 +308,17 @@ fn exact_specialized_values_and_typed_bits() {
     assert_eq!(encode(&Value::Float(-0.0), &EncodeOptions::default()).unwrap(), [0xf9, 0x80, 0x00]);
     assert_eq!(encode(&Value::Undefined, &EncodeOptions::default()).unwrap(), [0xf7]);
     assert_eq!(encode(&Value::Undefined, &EncodeOptions::bindle()).unwrap_err().code(), "simple");
+    // D265: the little-endian NaN and decimal normalisation rules are the Bindle tag set's
+    assert!(encode(&Value::TypedArray(TypedArray::F32(vec![f32::NAN])), &EncodeOptions::default()).is_ok());
     assert_eq!(
-        encode(
-            &Value::TypedArray(TypedArray::F32(vec![f32::NAN])),
-            &EncodeOptions::default()
-        )
-        .unwrap_err()
-        .code(),
+        encode(&Value::TypedArray(TypedArray::F32(vec![f32::NAN])), &EncodeOptions::bindle())
+            .unwrap_err()
+            .code(),
         "typed_array"
     );
-    assert_eq!(
-        encode(
-            &Value::Decimal {
-                mantissa: Integer::Uint(150),
-                exponent: -2
-            },
-            &EncodeOptions::default()
-        )
-        .unwrap_err()
-        .code(),
-        "decimal"
-    );
+    let unnormal = Value::Decimal { mantissa: Integer::Uint(150), exponent: -2 };
+    assert!(encode(&unnormal, &EncodeOptions::default()).is_ok());
+    assert_eq!(encode(&unnormal, &EncodeOptions::bindle()).unwrap_err().code(), "decimal");
     assert_eq!(
         encode(
             &Value::Tag(0, Box::new(Value::Uint(1))),

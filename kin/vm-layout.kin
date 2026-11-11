@@ -103,6 +103,9 @@
 (defconst ^:pub ^I32 VM_EMBED 33)
 (defconst ^:pub ^I32 VM_BIGNUM_MAX 34)
 (defconst ^:pub ^I32 VM_DETAIL 35)
+;; P8.4 (D264): the embedded table's word offset in S during a run over a canonical
+;; copy (0: none) -- word 36 serves the verifier only, never a validation
+(defconst ^:pub ^I32 VM_VTAB 36)
 ;; the VM's own run state, in program.md's reserved words 37..47
 (defconst ^:pub ^I32 VM_POS 37)
 (defconst ^:pub ^I32 VM_Q1 38)
@@ -135,6 +138,9 @@
 (defconst ^:pub ^I32 R_CONTROL 42)
 (defconst ^:pub ^I32 R_CONTROL_SIZE 43)
 (defconst ^:pub ^I32 R_BUDGET 48)
+;; internal only (P8.4, D262): the deterministic attempt of a valid-CBOR run met an
+;; encoding only valid CBOR has inside embedded content; the run takes the canonical path
+(defconst ^:pub ^I32 R_NONDET 49)
 ;; internal only: the Program is inconsistent with its scratch (vm-validate -1)
 (defconst ^:pub ^I32 R_INCONSISTENT 100)
 

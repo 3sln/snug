@@ -19,7 +19,7 @@
 //     node kin/scripts/vmsession-test.mjs <rust-vmsession-binary> [mutations] [seed] [schemas] [stress]
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
-import { vmScratchWords, vmScratchInit, vmValidate, vmValidateX } from '../../gen/js/snug/vm/api.mjs';
+import { vmScratchWords, vmScratchInit, vmValidateV } from '../../gen/js/snug/vm/api.mjs';
 import { extFor, testControls } from './ext-cases.mjs';
 import { controlEntries } from '../../host/js/src/ext.mjs';
 import { buildVmCases } from './vm-allcases.mjs';
@@ -37,7 +37,7 @@ const fail = msg => { if (fails < 40) console.log('  FAIL ' + msg); fails++; };
 
 // ---------------------------------------------------------------- cases
 const t0 = performance.now();
-const { programs, cases: vmCases } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail });
+const { programs, cases: vmCases } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
 const cases = vmCases.filter(c => !c.span).map(c => ({ ...c, vm: true }));
 const nSpan = vmCases.length - cases.length;
 const stressProg = new Map();
@@ -53,14 +53,22 @@ for (const c of sessionCases(STRESS, SEED)) {
 
 // ---------------------------------------------------------------- the oracle
 const out = new Int32Array(8 + 2 * 257);
-let scratch = new Int32Array(0), markCap = 0;
+let scratch = new Int32Array(0), markCap = 0, bvs = new Int32Array(512), bcb = new Uint8Array(1024);
 function buffer(c, lim) {
   const { P, B } = programs[c.prog];
   const cap = Math.max(markCap, P[16], 1);
   const need = vmScratchWords(P, c.rule, cap);
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
   const x = extFor(P, B);
-  const code = x ? vmValidateX(P, B, c.rule, c.bytes, lim, scratch, out, x) : vmValidate(P, B, c.rule, c.bytes, lim, scratch, out);
+  // the buffer driver with valid-CBOR support (P8.4): its canonical path's buffers grown on -5
+  let code;
+  for (;;) {
+    code = vmValidateV(P, B, c.rule, c.bytes, lim, scratch, out, x || (() => -2), bvs, bcb);
+    if (code !== -5) break;
+    if (out[5] > bvs.length) bvs = new Int32Array(Math.max(out[5], 2 * bvs.length));
+    if (out[6] > bcb.length) bcb = new Uint8Array(Math.max(out[6], 2 * bcb.length));
+    if (out[7] > scratch.length) { const g = new Int32Array(out[7]); g.set(scratch); scratch = g; }
+  }
   return code < 0 ? `ERR ${code}` : Array.from(out.slice(0, 8 + 2 * out[6])).join(' ');
 }
 function guard(arr, name) {

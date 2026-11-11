@@ -19,9 +19,9 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))
 test('public package metadata, entry points, profile status and blocked deep imports', async () => {
   assert.equal(pkg.name, 'snug'); assert.equal(pkg.private, true); assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.version, compilerVersion); assert.equal(SNUG_VERSION, compilerVersion);
-  assert.deepEqual(Object.keys(profiles), ['deterministic', 'bindle']);
-  assert.ok(Object.isFrozen(profiles) && Object.isFrozen(profiles.bindle) && Object.isFrozen(profiles.deterministic));
-  assert.equal(profiles.deterministic.wire, 'deterministic'); assert.equal(profiles.bindle.wire, 'bindle');
+  assert.deepEqual(Object.keys(profiles), ['valid', 'deterministic', 'bindle']);
+  assert.ok(Object.isFrozen(profiles) && Object.isFrozen(profiles.bindle) && Object.isFrozen(profiles.deterministic) && Object.isFrozen(profiles.valid));
+  assert.equal(profiles.valid.wire, 'valid'); assert.equal(profiles.deterministic.wire, 'deterministic'); assert.equal(profiles.bindle.wire, 'bindle');
   for (const key of Object.keys(pkg.exports)) {
     const specifier = key === '.' ? 'snug' : 'snug/' + key.slice(2);
     const module = await import(specifier);

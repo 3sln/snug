@@ -24,12 +24,12 @@
 // directory of child offsets (one word per child) held by the view's message
 // state (never the VM scratch); map lookups then binary-search it and array
 // access is O(1). Without it, lookups are linear with an early exit.
-import { navInit, navHead, navSkip, navLength, navChild, navFind, navDir, navDirFind,
+import { navInit, navHead, navSkip, navLength, navChild, navFind, navFindAny, navDir, navDirFind,
   N_MAJOR, N_AI, N_HI, N_LO, N_STEPS, NAV_WORDS, NAV_NOT_FOUND } from '../../../gen/js/snug/nav/walk.mjs';
-import { scan } from './scan.mjs';
+import { scanInfo } from './scan.mjs';
 import { build } from './build.mjs';
 import { TYPED_BY_TAG } from './values.mjs';
-import { profileFlags, keysOf } from './profiles.mjs';
+import { profileFlags, keysOf, validOk } from './profiles.mjs';
 import { Writer } from './writer.mjs';
 import { validateOptions, selectOptions } from './options.mjs';
 
@@ -57,6 +57,7 @@ class Message {
     this.limits = { ...this.profile, maxBytes: opts.maxBytes, maxDepth: opts.maxDepth, maxEntries: opts.maxEntries,
       maxItems: opts.maxItems, maxBignumBytes: opts.maxBignumBytes, budget: opts.budget, cose: this.cose };
     this.dirs = opts.directories === true ? new Map() : null;
+    this.unsorted = false;
     this.dirWords = 0;
   }
   head(p) { return navHead(this.b, this.o, p, this.end); }
@@ -254,6 +255,9 @@ function findIn(m, p, n, key, cose) {
     if (m.keys < 2 && typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') throw new TypeError('snug view: a map key is a string or an integer here');
     return -1;
   }
+  m.o[N_STEPS] = 0;
+  // keys out of canonical order (valid CBOR, P8.4): every key compared, no directory search
+  if (m.unsorted) return ok(navFindAny(m.b, m.o, p, keyBuf, span[0], span[1], m.end));
   const d = m.dir(p, n);
   m.o[N_STEPS] = 0;
   return ok(d !== null ? navDirFind(m.b, m.o, d, n, keyBuf, span[0], span[1], m.end) : navFind(m.b, m.o, p, keyBuf, span[0], span[1], m.end));
@@ -511,24 +515,50 @@ export function view(bytes, opts = {}) {
   validateOptions(opts, 'view');
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug view: bytes must be a Uint8Array');
   if (isShared(bytes)) throw new TypeError('snug view: SharedArrayBuffer-backed input is refused (architecture §16.2)');
-  const borrowed = opts.borrow === true;
-  const b = borrowed ? bytes : new Uint8Array(bytes);   // owned: the check runs on the private copy
+  let borrowed = opts.borrow === true, unsorted = false;
+  let b = borrowed ? bytes : new Uint8Array(bytes);   // owned: the check runs on the private copy
+  // Valid input that is not its own deterministic form is read through its canonical copy (P8.4, D262), which the
+  // view owns: offsets are positions in it, raw() its canonical encodings, map order the wire's.
   if (opts.schema) {
     if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
-    const r = opts.schema.validate(b, opts.rule, selectOptions(opts, 'validation'));
+    const copy = {};
+    const r = typeof opts.schema.check === 'function'
+      ? opts.schema.check(b, opts.rule, selectOptions(opts, 'validation'), copy)
+      : opts.schema.validate(b, opts.rule, selectOptions(opts, 'validation'));
     if (!r.ok) { const e = new Error(`snug: ${r.reason}`); e.reason = r.reason; e.path = r.path; e.offset = r.offset; if (r.subcode) e.subcode = r.subcode; throw e; }
-  } else scan(b, selectOptions(opts, 'decode'));
+    if (copy.bytes) { b = copy.bytes; borrowed = false; }
+    unsorted = copy.unsorted === true;
+  } else {
+    const c = scanInfo(b, selectOptions(opts, 'decode'));
+    if (c.bytes !== b) { b = c.bytes; borrowed = false; }
+    unsorted = c.unsorted;
+  }
   const m = new Message(b, opts);
   m.borrowed = borrowed;
+  m.unsorted = unsorted;
   return new View(m, 0, 0);
 }
 
 /** INTERNAL (D215): the View of bytes the caller has just CHECKED under `opts` -- the sequence
  * reader, from its session's verdict. No package entry exports this: it is a capability of
  * the modules that ran the check, never a public trusted opener (§16.2, V1/V2). */
+/** The profile options of a checked message's options (the sequence reader's: no schema, no limits). */
+const profileOptions = opts => Object.fromEntries(Object.entries(selectOptions(opts, 'decode'))
+  .filter(([k, v]) => v !== undefined && k !== 'schema' && k !== 'rule'));
 export function mintView(b, opts, borrowed) {
+  // A valid-CBOR message that is not its own deterministic form is read through its canonical copy (P8.4, D262),
+  // as view() reads one: the profile scanner over the checked bytes, once, when the View is first asked for. The
+  // limits were the check's; they are not re-applied.
+  let unsorted = false;
+  if (validOk(profileFlags(opts))) {
+    const big = 0x7fffffff;
+    const c = scanInfo(b, { ...profileOptions(opts), top: 'any', maxBytes: b.length, maxDepth: big, maxEntries: big, maxItems: big });
+    if (c.bytes !== b) { b = c.bytes; borrowed = false; }
+    unsorted = c.unsorted;
+  }
   const m = new Message(b, opts);
   m.borrowed = borrowed;
+  m.unsorted = unsorted;
   return new View(m, 0, 0);
 }
 

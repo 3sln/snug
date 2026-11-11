@@ -28,6 +28,7 @@
                   :task (apply shell "kin/scripts/vmsession-test" *command-line-args*)}
   sequence-test {:doc "P7.13: CBOR sequences (RFC 8742) -- the session's sequence mode and the JS/Rust hosts == D211's oracle under every chunking; JS == Rust."
                  :task (apply shell "kin/scripts/sequence-test" *command-line-args*)}
+  valid-test {:doc "P8.4: valid CBOR -- RFC 8949 Appendix A/F, additional and RFC 8742 vectors per preset, canonical equivalence, refusal replay (D280, F2) at every budget through buffer and session, and the cbor2 differential." :task (apply shell "node" "kin/scripts/valid-test.mjs" *command-line-args*)}
   compile-fuzz {:doc "P3.2/P3.3: seeded random/mutated CDDL; only SchemaError, no panic, budget kept, JS == Rust, vm-verify accepts."
                 :task (apply shell "kin/scripts/compile-fuzz" *command-line-args*)}
   crate-diff {:doc "P4.1: seeded differential vs the native cddl crate 0.10.7."

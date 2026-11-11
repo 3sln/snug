@@ -1556,42 +1556,61 @@ with xx < 32 is `malformed` (Appendix F). Nothing else changes for the Bindle
 preset: every 3sln.me vector keeps its code. Hosts build `Decimal`/`NDArray` only from content inside those classes'
 invariants and a `Tagged` otherwise (D267).
 
-### 19.7 Sessions: handles, streams, push, sequences (D266)
+### 19.7 Sessions: handles, streams, push, sequences (D266, D283)
 
 The session (§17) walks valid CBOR natively in its frames; what it takes
-whole goes through the canonical path of §19.5:
+whole goes through the canonical path of §19.5. As implemented (D283):
 
+* **The valid machinery** runs when the step is given its buffers
+  (`vms-step-v`: `vs` the scanner's options array and scratch, `cb` the
+  canonical buffer) and the run is a valid-CBOR run (`PF_VREL`, vm-setup's
+  translation of `PF_VALID`) or admits keys of any kind (EC-sensitive keys,
+  D263). A buffer that is too small suspends the step with `VMS_GROW`
+  (`vms-grow-words`/`-bytes`/`-scratch`/`-arena`): the host grows it — S and
+  the key arena keeping their contents — and steps again over the same
+  window. `vms-step-x` (no buffers) walks as before P8.4.
 * **Heads** in frames (strings, containers, tags) may be non-shortest.
-* **Indefinite arrays and maps** are frames with count −1 (`F_N`): each step
-  that would start the next element first looks for a break (one byte, asked
-  for like any head); a break ends the frame; a break in a map's value
-  position is `malformed`; end of input inside one is `truncated` at the
-  position where the break or next item was due. Entry limits are counted as
-  elements arrive (`too_many_entries` at the element that passes
-  `maxEntries`). The carried state is the frame's element count so far and the
-  break flag; nothing else crosses a window.
-* **Indefinite strings, and any non-deterministic item the session would take
-  whole** (the D091 prescan understands indefinite items: it scans to their
-  breaks): taken whole (bounded by `maxBytes`, as D124's keys and tag contents
-  are) and validated by the attempt/canonical path, inside the session's step.
-  A deterministic item stays on the buffer walk; a non-deterministic one gives
-  the canonical path's results whichever way the windows fall — so a
-  session's out array is still a function of the input alone, and equals the
-  buffer driver's.
-* **Map frames** keep, in the key arena, every key's comparison form (its
-  bytes, or its DC/EC form when it is not canonical or is EC-sensitive) and a
-  record per key while the map is open (under `PF_VALID`; under the
-  deterministic profiles only EC-sensitive keys are retained). A key that is
-  not canonical is asked for whole and canonicalised into the arena (its DC
-  form serves the KEYS lookup and LIT comparisons). At the map's end the
-  deferred check of §19.4 runs over the records. Memory: the keys of the open
-  maps (≤ the message), which is the price of duplicate detection on a stream
-  (§5.6: streaming decoders "often do not keep the state"); the arena and the
-  record area grow on demand (a new suspension `VMS_GROW`: the host copies the
-  array into a larger one and steps again).
+* **Indefinite arrays and maps** are frames (`F_IND`; their count is a bound
+  far above any real one until the break sets it): before each entry the
+  frame reads one byte, in the scanner's order — the end of input there is
+  `truncated` before any visit, a break ends the frame, the entry bound is
+  `too_many_entries` at the container; a break in a map's value position is
+  the value's own `malformed`. The prescans (D091) treat an indefinite string,
+  array or map as a level its break closes.
+* **Whole items** (`vitem`): the scanner checks the item over the window
+  first (asking for more window, one byte past what it holds, while it may be
+  truncated by the window's end — an item is walked in the feed that completes
+  it). An item the scanner accepts as its own DC form, with no marked map and
+  no embedded content to canonicalise (FL_EMBED), is walked in place by the
+  buffer walk; any other — refused ones included, and every refused item whose
+  bounds pass the window — is walked over its canonical copy with its events,
+  exactly as the buffer driver's canonical path walks it, its offsets mapped
+  back to the window. Under the deterministic profiles (keys of any kind) an
+  item without an EC-sensitive key is walked in place, refused or not, as the
+  buffer driver's attempt walks it. Indefinite strings, malformed heads, and
+  the tags whose rules read their content (bignums, 4, 40, typed arrays, 0, 24,
+  32) are always whole. So a session's out array is a function of the input
+  alone, and equals the buffer driver's.
+* **Map frames** take each key whole (asked for whole: no key crosses a
+  window under the valid machinery), check it as a whole item, and keep its DC
+  form (the window's bytes when clean, else its canonical copy's) in the key
+  arena with a 12-byte header (DC length, key offset, canonical flag) for the
+  open map. The key's search, cursors (restarted when a key sorts at or below
+  the previous one), evaluation, key-order charge (`ceil(min/8)` on the DC
+  forms) and immediate refusals (two canonical neighbours equal:
+  `duplicate_key`; descending under a deterministic profile: `key_order`) are
+  the walk over a copy's. A map with a key that is not canonical or is
+  EC-sensitive, or with canonical keys out of order, is marked; at its end the
+  deferred check of §19.4 runs over the kept keys (the scanner's records and EC
+  forms) and charges its units at the map before the map's end-run (D277).
+  Memory: the keys of the open maps (≤ the message, plus 12 bytes a key), the
+  price of duplicate detection on a stream (§5.6).
+* **The resumable scanner** (`rscan`) stays deterministic/Bindle: a valid-CBOR
+  handle, or one that meets an EC-sensitive key, answers `scratch`, and hosts
+  run profile-only streams under `PF_VALID` or any-key profiles on the session
+  against `any`.
 * **Sequences** (§18, D210–D219): a message is still one root; an indefinite
-  root ends at its break; nothing else changes. Each message under the default
-  is validated as valid CBOR.
+  root ends at its break; sequence sessions step with `vms-step-v`.
 
 ### 19.8 Hosts (D267)
 

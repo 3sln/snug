@@ -1,0 +1,450 @@
+;; The resumable session's valid-CBOR machinery (P8.4; D266, architecture §19.7):
+;; what lets the session give the buffer driver's out array for valid CBOR -- the
+;; buffer driver's canonical path (D262, D264, D280) for every item the session
+;; takes whole, and for the map keys it takes whole, and the map frames' kept keys
+;; for the deferred duplicate check at the map's end (D263, D277).
+;;
+;; A session needs it when its run is a valid-CBOR run (PF_VREL in S, vm-setup's
+;; translation of PF_VALID) or admits keys of any kind (whose duplicates may not be
+;; bytewise). Its buffers are the host's, grown on VMS_GROW: `vs` the scanner's
+;; options array and scratch, `cb` the canonical buffer; S grows past the rule's
+;; words for the copy's events, the key arena for the kept keys.
+;;
+;; A whole item (vitem) is checked by the scanner over the window first: an item
+;; the scanner accepts that is its own DC form, with no marked map (no duplicate
+;; check units) and no embedded content to canonicalise, is walked in place by the
+;; buffer walk; any other -- refused ones included -- is copied (canon-build) and
+;; the walk runs over the copy with its events, exactly as the buffer driver's
+;; canonical path runs it, its offsets mapped back to the window. Integer-only.
+(ns snug.vm.svalid
+  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
+            [snug.lang :refer [I32 Ext Bool Bytes BytesW Ints IntsR + - * neg shl sar ushr bit-and bit-or
+                               bit-xor < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
+            [snug.cbor.codes :refer [CODE_SCRATCH CODE_TRUNCATED CODE_DUPLICATE_KEY CODE_KEY_ORDER
+                                     O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH O_MAX_ENTRIES O_MAX_ITEMS
+                                     O_ERR_POS O_ITEMS O_PROFILE O_VCTL O_VNEEDW O_VNEEDB O_VLEN O_HI O_LO
+                                     O_S_RTOP O_S_DLOW O_S_UNITS O_S_CBTOP O_S_NEV O_S_CBASE O_S_FIRST O_S_EDEPTH
+                                     PF_VALID PF_VREL PF_CANON PF_KEYS VC_NONDET VC_ECS VC_UNSORTED
+                                     EV_HEAD EV_WORDS]]
+            [snug.cbor.head :refer [fail be32]]
+            [snug.cbor.keys :refer [compare-spans]]
+            [snug.cbor.scan :refer [scan-item-x]]
+            [snug.cbor.canon :refer [kclass cw dup-finish targ head-short]]
+            [snug.cbor.vcopy :refer [canon-build vmap vsource ev-find]]
+            [snug.vm.layout :refer [H_FLAGS FL_EMBED VM_POS VM_VTAB VM_RULE VM_MARK_CAP VM_W_STATE
+                                    VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_OFFSET VM_DLIM R_BUDGET R_INCONSISTENT INF]]
+            [snug.vm.base :refer [charge c64min]]
+            [snug.vm.dead :refer [dead-item]]
+            [snug.vm.eval :refer [eval-item]]
+            [snug.vm.api :refer [vm-scratch-words]]
+            [snug.vm.sbase :refer [SS_GW SS_GB SS_GS SS_GA SS_VNEED SS_ATOP SS_VOK]]))
+
+;; vitem / vscan / vkey: the window must hold more of the item (SS_VNEED bytes from
+;; its start), or a host buffer must grow (SS_G*): never an item's own answer
+(defconst ^:pub ^I32 VI_NEED -1000001)
+(defconst ^:pub ^I32 VI_GROW -1000002)
+;; a kept key's header in the arena: its DC length, its source offset (absolute), and
+;; flags (bit 0: the source key is its own DC form), big-endian words
+(defconst ^:pub ^I32 KH 12)
+
+(defn ^:pub ^Bool vsess [^IntsR s ^IntsR ss]
+  (comment "Does this step run the valid machinery: it was given its buffers"
+           "(vms-step-v), and the run is a valid-CBOR run or admits keys of any kind"
+           "(EC-sensitive keys, D263)? (vms-step-x, given none, walks as before P8.4.)")
+  (if (!= (ia ss SS_VOK) 1) (return false))
+  (let [pf (ia s O_PROFILE)]
+    (return (or (!= (bit-and pf PF_VREL) 0) (>= (bit-and pf PF_KEYS) 2)))))
+
+(defn ^:pub ^Bool vrun [^IntsR s]
+  (comment "Is this session's run a valid-CBOR run (PF_VALID, as PF_VREL in S)?")
+  (return (!= (bit-and (ia s O_PROFILE) PF_VREL) 0)))
+
+(defn ^I32 imax [^I32 a ^I32 b]
+  (if (> a b) (return a))
+  (return b))
+
+(defn ^:pub ^I32 vgrow [^Ints ss ^I32 w ^I32 nb ^I32 sw ^I32 aw]
+  (comment "Ask for larger host buffers (each 0: enough as it is): VI_GROW.")
+  (iset ss SS_GW (imax (ia ss SS_GW) w))
+  (iset ss SS_GB (imax (ia ss SS_GB) nb))
+  (iset ss SS_GS (imax (ia ss SS_GS) sw))
+  (iset ss SS_GA (imax (ia ss SS_GA) aw))
+  (return VI_GROW))
+
+(defn ^:pub ^I32 vneed [^Ints ss ^I32 pos ^I32 end ^I32 wend]
+  (comment "The window must hold more of the item at pos (bounded by end): one byte"
+           "past what it holds, so an item is walked within the feed that completes it"
+           "(liveness: never a wait for bytes past its end). VI_NEED.")
+  (let [^:mut n (+ (- wend pos) 1)]
+    (if (> n (- end pos)) (set n (- end pos)))
+    (if (< n 1) (set n 1))
+    (iset ss SS_VNEED n)
+    (return VI_NEED)))
+
+;; ------------------------------------------------------------ the scanner over one item
+
+(defn ^:pub vopts [^IntsR s ^Ints vs ^I32 d]
+  (comment "The scanner's options for one item at depth d of the session's run: its"
+           "limits and profile (PF_VALID for PF_VREL), any top, depth relative to d.")
+  (let [pf (ia s O_PROFILE)
+        ^:mut f (bit-and pf (bit-xor (bit-or PF_VREL PF_CANON) (neg 1)))
+        ^:mut md (- (ia s O_MAX_DEPTH) d)]
+    (if (!= (bit-and pf PF_VREL) 0) (set f (bit-or f PF_VALID)))
+    (if (< md 0) (set md 0))
+    (iset vs O_TOP 1)
+    (if (== d 0) (iset vs O_COSE (ia s O_COSE)) (iset vs O_COSE 0))
+    (iset vs O_MAX_BYTES INF)
+    (iset vs O_MAX_DEPTH md)
+    (iset vs O_S_EDEPTH (ia s VM_DLIM))
+    (iset vs O_MAX_ENTRIES (ia s O_MAX_ENTRIES))
+    (iset vs O_MAX_ITEMS (ia s O_MAX_ITEMS))
+    (iset vs O_PROFILE f)))
+
+(defn ^:pub ^I32 vscan [^Bytes b ^Ints s ^Ints ss ^Ints vs ^BytesW cb ^I32 pos ^I32 end ^I32 wend ^I32 d]
+  (comment "The scanner over the item at pos (window-relative; bounded by end, read up"
+           "to the window's end): its end or a negated code (vs holds the outcomes);"
+           "VI_NEED when it may need bytes past the window; VI_GROW.")
+  (if (< (ilen vs) (+ O_S_FIRST 256)) (return (vgrow ss (+ O_S_FIRST 1024) 0 0 0)))
+  (if (< (blen cb) 1024) (return (vgrow ss 0 4096 0 0)))
+  (vopts s vs d)
+  (let [^:mut e2 end]
+    (if (> e2 wend) (set e2 wend))
+    (let [r (scan-item-x b vs cb pos e2 0 (ia s O_ITEMS))]
+      (if (== r (neg CODE_SCRATCH)) (return (vgrow ss (ia vs O_VNEEDW) (ia vs O_VNEEDB) 0 0)))
+      (if (and (== r (neg CODE_TRUNCATED)) (< e2 end)) (return (vneed ss pos end wend)))
+      (return r))))
+
+(defn ^:pub ^Bool vclean [^IntsR p ^IntsR s ^IntsR vs ^I32 r]
+  (comment "After vscan answered r: is the item walked in place as it is? In a"
+           "valid-CBOR run: accepted, its own DC form, no marked map, no embedded"
+           "content to canonicalise. Otherwise (keys of any kind): no EC-sensitive key"
+           "before its end or refusal -- as the buffer driver's deterministic attempt"
+           "walks it in place then, refused or not (D262).")
+  (if (not (vrun s)) (return (== (bit-and (ia vs O_VCTL) VC_ECS) 0)))
+  (if (< r 0) (return false))
+  (if (!= (bit-and (ia vs O_VCTL) (bit-or VC_NONDET (bit-or VC_ECS VC_UNSORTED))) 0) (return false))
+  (if (!= (ia vs O_S_UNITS) 0) (return false))
+  (if (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0) (return false))
+  (return true))
+
+;; ------------------------------------------------------------ the canonical path for one item
+
+(defn ^:pub ^I32 vbuild [^IntsR p ^Bytes b ^Ints s ^Ints ss ^Ints vs ^BytesW cb ^I32 pos ^I32 iend ^I32 refused]
+  (comment "The copy of the item at pos (window-relative) and its events, the events"
+           "put in S past the rule's words: the copy's start in cb (its end in"
+           "vs[O_VLEN] via canon-build), or VI_GROW.")
+  (let [^:mut embeds 1]
+    (if (!= (bit-and (ia p H_FLAGS) FL_EMBED) 0) (set embeds 2))
+    (let [l (canon-build b vs cb pos iend embeds refused)]
+      (if (< l 0) (return (vgrow ss (ia vs O_VNEEDW) (ia vs O_VNEEDB) 0 0)))
+      (let [n (ia vs O_S_NEV)
+            base (vm-scratch-words p (ia s VM_RULE) (ia s VM_MARK_CAP))
+            need (+ (+ base 4) (* EV_WORDS n))]
+        (if (and (> n 0) (< (ilen s) need)) (return (vgrow ss 0 0 (+ need 64) 0)))
+        (iset s VM_VTAB 0)
+        (if (> n 0)
+          (do (iset s base n)
+              (iset s (+ base 1) 0)
+              (iset s (+ base 2) 0)
+              (iset s (+ base 3) 0)
+              (for [^I32 i 0 (* EV_WORDS n)]
+                (iset s (+ (+ base 4) i) (ia vs (+ O_S_FIRST i))))
+              (iset s VM_VTAB base)))
+        (return (ia vs O_S_CBASE))))))
+
+(defn ^:pub ^I32 vmapped [^Bytes b ^Bytes cb ^Ints vs ^I32 pos ^I32 x]
+  (comment "A copy position mapped back to the window (the copy's item starts at pos).")
+  (return (vmap b cb vs pos x)))
+
+(defn ^:pub ^I32 vstop [^Ints vs ^I32 code ^I32 at]
+  (comment "A refusal the walk found in the copy with code at copy position at: the"
+           "stop's own code when the planting made it (D280; its offset into"
+           "s[O_ERR_POS] is the caller's: vstop-at), else code.")
+  (let [e (ev-find vs at EV_HEAD)]
+    (if (< e 0) (return code))
+    (let [vc (ia vs (+ e 4))]
+      (if (and (> vc 0) (== code vc)) (return (ia vs (+ e 2))))
+      (return code))))
+
+(defn ^:pub ^I32 vstop-at [^Bytes b ^Bytes cb ^Ints vs ^I32 pos ^I32 code ^I32 at]
+  (comment "vstop's offset: the stop's own source offset, or the position mapped.")
+  (let [e (ev-find vs at EV_HEAD)]
+    (if (>= e 0)
+      (do (let [vc (ia vs (+ e 4))]
+            (if (and (> vc 0) (== code vc)) (return (vsource b cb vs pos (ia vs (+ e 3))))))))
+    (return (vmap b cb vs pos at))))
+
+(defn ^:pub ^I32 vfix [^Bytes b ^Bytes cb ^Ints s ^Ints vs ^I32 pos ^I32 r ^I32 w0 ^I32 wr0 ^I32 ws0 ^I32 wo0]
+  (comment "After a walk over the copy answered r: the scratch's position words mapped"
+           "back to the window (error, budget stop, a witness set during the walk"
+           "-- w0, wr0, ws0, wo0 the witness before it), a planted refusal turned into"
+           "the stop's own. Answers r (its code the stop's own).")
+  (local ^:mut ^I32 rr)
+  (set rr r)
+  (if (or (!= (ia s VM_W_STATE) w0) (or (!= (ia s VM_W_REASON) wr0) (or (!= (ia s VM_W_SUB) ws0) (!= (ia s VM_W_OFFSET) wo0))))
+    (if (!= (ia s VM_W_STATE) 0)
+      (do (let [wo (ia s VM_W_OFFSET)
+                wr (ia s VM_W_REASON)
+                wsub (ia s VM_W_SUB)
+                e (ev-find vs wo EV_HEAD)
+                ^:mut done false]
+            (if (>= e 0)
+              (do (let [vc (ia vs (+ e 4))]
+                    (if (and (> vc 0) (== wr vc))
+                      (do (iset s VM_W_REASON (ia vs (+ e 2)))
+                          (set done true)))
+                    (if (and (and (> vc 0) (not done)) (and (>= wr 32) (== wsub vc)))
+                      (do (iset s VM_W_SUB (ia vs (+ e 2)))
+                          (set done true)))
+                    (if done (iset s VM_W_OFFSET (vsource b cb vs pos (ia vs (+ e 3))))))))
+            (if (not done) (iset s VM_W_OFFSET (vmap b cb vs pos wo)))))))
+  (if (== r (neg R_BUDGET))
+    (do (let [vp (ia s VM_POS)]
+          (iset s VM_POS (vmap b cb vs pos vp)))
+        (return r)))
+  (if (and (< r 0) (!= r (neg R_INCONSISTENT)))
+    (do (let [ep (ia s O_ERR_POS)
+              code (neg r)
+              c2 (vstop vs code ep)
+              at (vstop-at b cb vs pos code ep)]
+          (iset s O_ERR_POS at)
+          (set rr (neg c2)))))
+  (return rr))
+
+(defn ^:pub ^I32 vcanon [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^Ints vs ^BytesW cb ^I32 pos ^I32 r
+                         ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 wend ^I32 ctx ^Ext ext]
+  (comment "The canonical path for the item at pos the scanner answered r for (vscan):"
+           "its copy and events, the walk over the copy (live with nq > 0), its"
+           "offsets mapped back. The item's end (window-relative) or a negated code;"
+           "VI_GROW. A refused item whose replay ended otherwise keeps the scanner's"
+           "verdict (never expected).")
+  (let [epos (ia vs O_ERR_POS)
+        ^:mut iend r
+        ^:mut refused 0]
+    (if (< r 0)
+      (do (set refused (neg r))
+          (set iend end)
+          (if (> iend wend) (set iend wend))))
+    (let [cs (vbuild p b s ss vs cb pos iend refused)]
+      (if (== cs VI_GROW) (return cs))
+      (let [l (ia vs O_VLEN)
+            pf (ia s O_PROFILE)
+            w0 (ia s VM_W_STATE)
+            wr0 (ia s VM_W_REASON)
+            ws0 (ia s VM_W_SUB)
+            wo0 (ia s VM_W_OFFSET)]
+        (local ^I32 r2)
+        (iset s O_PROFILE (bit-or pf PF_CANON))
+        (if (> nq 0)
+          (set r2 (eval-item p pool cb s cs d fb ck nq l ctx ext))
+          (set r2 (dead-item cb s cs d l)))
+        (iset s O_PROFILE pf)
+        (iset s VM_VTAB 0)
+        (let [rr (vfix b cb s vs pos r2 w0 wr0 ws0 wo0)]
+          (if (and (>= rr 0) (< r 0))
+            (do (iset s O_ERR_POS epos)
+                (return r)))
+          (if (>= rr 0) (return r))
+          (return rr))))))
+
+(defn ^I32 if-size [^I32 ai]
+  (if (< ai 24) (return 1))
+  (return (+ 1 (shl 1 (- ai 24)))))
+
+(defn ^:pub ^I32 skim [^Bytes b ^Ints vs ^I32 x ^I32 end ^I32 depth ^I32 valid ^I32 emb]
+  (comment "A structural check of the item at x, read up to end, cheaper than the"
+           "scanner: its end when the in-place walk is certainly the buffer driver's"
+           "walk -- well-formed and definite, no map key whose EC form differs (an"
+           "EC-sensitive key), no tag-24 payload; in a valid run (valid != 0) also"
+           "every head shortest, every map's keys strictly ascending and no byte"
+           "string the program walks as CBOR (emb != 0) -- else -1 (the scanner"
+           "decides, vscan). It checks nothing the walk does not check again.")
+  (if (or (>= x end) (> depth 64)) (return (neg 1)))
+  (let [ib (u8 b x)
+        major (ushr ib 5)
+        ai (bit-and ib 31)]
+    (if (>= ai 28) (return (neg 1)))
+    (let [h (+ x (if-size ai))]
+      (if (> h end) (return (neg 1)))
+      (if (and (!= valid 0) (not (head-short b x))) (return (neg 1)))
+      (comment "f8 with a value below 32: not well-formed (the scanner's code, not"
+               "the walk's non_shortest)")
+      (if (and (== major 7) (and (== ai 24) (< (u8 b (+ x 1)) 32))) (return (neg 1)))
+      (if (or (<= major 1) (== major 7)) (return h))
+      (targ b vs x)
+      (let [hi (ia vs O_HI)
+            lo (ia vs O_LO)]
+        (if (or (!= hi 0) (< lo 0)) (return (neg 1)))
+        (if (<= major 3)
+          (do (if (> lo (- end h)) (return (neg 1)))
+              (if (and (== major 2) (and (!= valid 0) (!= emb 0))) (return (neg 1)))
+              (return (+ h lo))))
+        (if (== major 6)
+          (do (if (== lo 24) (return (neg 1)))
+              (return (skim b vs h end (+ depth 1) valid emb))))
+        (if (== major 4)
+          (do (if (> lo (- end h)) (return (neg 1)))
+              (let [^:mut q h]
+                (for [^I32 _i 0 lo]
+                  (set q (skim b vs q end (+ depth 1) valid emb))
+                  (if (< q 0) (return q)))
+                (return q))))
+        (if (> lo (sar (- end h) 1)) (return (neg 1)))
+        (let [^:mut m h
+              ^:mut ps (neg 1)
+              ^:mut pe (neg 1)]
+          (for [^I32 _j 0 lo]
+            (let [ks m
+                  ke (skim b vs m end (+ depth 1) valid emb)]
+              (if (< ke 0) (return ke))
+              (if (!= (kclass b vs ks) 0) (return (neg 1)))
+              (if (and (!= valid 0) (and (>= ps 0) (>= (compare-spans b ps pe ks ke) 0))) (return (neg 1)))
+              (set ps ks)
+              (set pe ke)
+              (set m (skim b vs ke end (+ depth 1) valid emb))
+              (if (< m 0) (return m))))
+          (return m))))))
+
+(defn ^:pub ^I32 vitem [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^Ints ss ^Ints vs ^BytesW cb ^I32 pos ^I32 d
+                        ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 wend ^I32 ctx ^Ext ext]
+  (comment "An item the session takes whole (window-relative pos and end): the buffer"
+           "walk in place when skim or the scanner finds it clean (vclean), else the"
+           "canonical path (vcanon). Its end, a negated code, VI_NEED or VI_GROW.")
+  (if (>= (ilen vs) 16)
+    (do (let [^:mut lim end
+              ^:mut vv 0]
+          (if (> lim wend) (set lim wend))
+          (if (vrun s) (set vv 1))
+          (comment "the cheap structural check first: a clean item is walked in place"
+                   "without the scanner's pass (the walk checks everything again)")
+          (if (>= (skim b vs pos lim 0 vv (bit-and (ia p H_FLAGS) FL_EMBED)) 0)
+            (do (if (> nq 0) (return (eval-item p pool b s pos d fb ck nq end ctx ext)))
+                (return (dead-item b s pos d end)))))))
+  (let [r (vscan b s ss vs cb pos end wend d)]
+    (if (or (== r VI_NEED) (== r VI_GROW)) (return r))
+    (comment "a refused item whose bounds pass the window is walked over its copy, which is"
+             "padded: the walk in place may read ahead of the refusal")
+    (if (and (vclean p s vs r) (or (>= r 0) (<= end wend)))
+      (do (if (> nq 0) (return (eval-item p pool b s pos d fb ck nq end ctx ext)))
+          (return (dead-item b s pos d end))))
+    (return (vcanon p pool b s ss vs cb pos r d fb ck nq end wend ctx ext))))
+
+;; ------------------------------------------------------------ map keys
+
+(defn ^:pub ^I32 kh-get [^Bytes ka ^I32 at ^I32 k]
+  (return (be32 ka (+ at (* 4 k)))))
+
+(defn ^:pub kh-put [^BytesW ka ^I32 at ^I32 k ^I32 v]
+  (let [x (+ at (* 4 k))]
+    (bset ka x (ushr v 24))
+    (bset ka (+ x 1) (ushr v 16))
+    (bset ka (+ x 2) (ushr v 8))
+    (bset ka (+ x 3) v)))
+
+(defn ^:pub ^I32 vkeep [^Bytes kb ^Ints ss ^BytesW ka ^I32 ks ^I32 klen ^I32 keypos ^I32 canon]
+  (comment "Keep a map key's DC form kb[ks, ks + klen) at the arena's top (the top"
+           "frame's region): its header, then its bytes. The entry's arena offset, or"
+           "VI_GROW.")
+  (let [top (ia ss SS_ATOP)
+        need (+ (+ top KH) klen)]
+    (if (> need (blen ka)) (return (vgrow ss 0 0 0 (+ (* 2 (blen ka)) (+ KH klen)))))
+    (kh-put ka top 0 klen)
+    (kh-put ka top 1 keypos)
+    (kh-put ka top 2 canon)
+    (bcopy ka (+ top KH) kb ks klen)
+    (iset ss SS_ATOP need)
+    (return top)))
+
+(defn ^:pub ^I32 vorder [^Bytes kb ^Bytes ka ^Ints s ^Ints vs ^I32 ks ^I32 klen ^I32 prev ^I32 canon
+                         ^I32 at ^I32 valid]
+  (comment "The key-order step of a kept key (DC form kb[ks, ks + klen), its source"
+           "canonical when canon != 0) against the previous kept entry prev (-1:"
+           "none), as the walk over a copy charges and the scanner refuses (D263):"
+           "ceil(min/8) units at at; two canonical neighbours equal: duplicate_key;"
+           "descending, without PF_VALID: key_order. Answers bit 1 when the map is"
+           "marked for the deferred check (the key is not canonical or is"
+           "EC-sensitive, or two canonical neighbours descend), or the negated"
+           "refusal.")
+  (let [^:mut mark 0
+        kc (kclass kb vs ks)]
+    (if (or (== canon 0) (!= kc 0)) (set mark 2))
+    (if (< prev 0) (return mark))
+    (let [plen (kh-get ka prev 0)
+          pcan (kh-get ka prev 2)
+          px (+ prev KH)]
+      (if (not (charge s (c64min plen klen) at)) (return (neg R_BUDGET)))
+      (if (and (!= pcan 0) (!= canon 0))
+        (do (local ^:mut ^I32 order)
+            (let [^:mut m plen
+                  ^:mut j 0]
+              (set order (- plen klen))
+              (if (< klen m) (set m klen))
+              (while (< j m)
+                (let [x (u8 ka (+ px j))
+                      y (u8 kb (+ ks j))]
+                  (if (!= x y) (do (set order (- x y)) (break))))
+                (set j (+ j 1))))
+            (if (== order 0) (return (fail s at CODE_DUPLICATE_KEY)))
+            (if (> order 0)
+              (do (if (== valid 0) (return (fail s at CODE_KEY_ORDER)))
+                  (set mark 2)))))
+      (return mark))))
+
+(defn ^:pub ^Bool vdescends [^Bytes kb ^Bytes ka ^I32 ks ^I32 ke ^I32 prev]
+  (comment "Does the key kb[ks, ke) sort at or before the previous kept entry (the"
+           "walk over a copy then restarts its key search and cursors)?")
+  (if (< prev 0) (return false))
+  (let [plen (kh-get ka prev 0)
+        px (+ prev KH)
+        ^:mut m plen
+        ^:mut j 0
+        ^:mut order (- plen (- ke ks))]
+    (if (< (- ke ks) m) (set m (- ke ks)))
+    (while (< j m)
+      (let [x (u8 ka (+ px j))
+            y (u8 kb (+ ks j))]
+        (if (!= x y) (do (set order (- x y)) (break))))
+      (set j (+ j 1)))
+    (return (>= order 0))))
+
+(defn ^:pub ^I32 vdup-end [^Ints s ^Ints ss ^Ints vs ^BytesW cb ^BytesW ka ^I32 reg ^I32 n
+                           ^I32 at ^I32 base]
+  (comment "A marked map's deferred duplicate check at its end over its n kept keys"
+           "(from arena offset reg): the records and EC forms the scanner would write, the"
+           "sort and the neighbours, its units charged at at (the map), then"
+           "duplicate_key at the earliest second occurrence (window-relative). 0, a"
+           "negated code, or VI_GROW.")
+  (if (< (ilen vs) (+ (+ O_S_FIRST 256) (* 3 n))) (return (vgrow ss (+ (+ O_S_FIRST 1024) (* 6 n)) 0 0 0)))
+  (comment "the n records first, so EC writing (whose own records go above) keeps them")
+  (iset vs O_S_RTOP (+ O_S_FIRST (* 3 n)))
+  (iset vs O_S_DLOW (ilen vs))
+  (iset vs O_S_UNITS 0)
+  (iset vs O_S_CBTOP 0)
+  (let [^:mut x reg
+        ^:mut ctop 0
+        ^:mut ^I32 rr O_S_FIRST]
+    (for [^I32 _i 0 n]
+      (let [kl (kh-get ka x 0)
+            kp (kh-get ka x 1)
+            kx (+ x KH)]
+        (if (== (kclass ka vs kx) 0)
+          (do (iset vs rr (- (neg 1) kx))
+              (iset vs (+ rr 1) kl))
+          (do (if (> (+ ctop (* 4 (+ kl 16))) (blen cb))
+                (return (vgrow ss 0 (+ (* 2 (blen cb)) (* 4 (+ kl 16))) 0 0)))
+              (bcopy cb ctop ka kx kl)
+              (let [fe (cw cb vs ctop (+ ctop kl) 1)]
+                (if (< fe 0) (return (vgrow ss 0 (+ (* 2 (blen cb)) (* 4 (+ kl 16))) 0 0)))
+                (iset vs rr (+ ctop kl))
+                (iset vs (+ rr 1) (- fe (+ ctop kl)))
+                (set ctop fe))))
+        (iset vs (+ rr 2) kp)
+        (set rr (+ rr 3))
+        (set x (+ kx kl))))
+    (iset vs O_S_RTOP rr)
+    (iset vs O_S_CBTOP ctop)
+    (let [dd (dup-finish ka cb vs n 0)
+          u (ia vs O_S_UNITS)]
+      (if (not (charge s u at)) (return (neg R_BUDGET)))
+      (if (< dd 0) (return (fail s (- (ia vs O_ERR_POS) base) CODE_DUPLICATE_KEY)))
+      (return 0))))

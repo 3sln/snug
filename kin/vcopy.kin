@@ -1,0 +1,926 @@
+;; The canonical copy of a checked valid item, its replay events and embedded copies
+;; (P8.4; D262, D264, D277, D280, architecture §19.5): what the VM walks when its
+;; deterministic attempt met an encoding only valid CBOR has, or met a key whose
+;; duplicates are not bytewise, and what decode and views read for such an input.
+;;
+;; LAYOUT. The input item is copied to cb[0, n) (the SOURCE); its copy is written
+;; from cb[n] (o[O_S_CBASE]) by the PREFIX WRITER `pw`, which stops at the first item
+;; that is not well-formed, so a refused input has an executable partial copy:
+;;  * an ITEM STOP (the item could not be read: malformed, truncated, a depth or
+;;    entry bound, a refused indefinite string) leaves the item's place PLANTED with
+;;    bytes on which the VM's own walk reaches the same check phase -- visit, count,
+;;    key-type peek, a text's scan charge -- and refuses: a malformed head of the
+;;    source's major type; a byte string whose length runs past the end where the
+;;    source has no byte; a text of the bytes the source's chunks held, invalid at
+;;    its last byte, for a text string refused for its chunks;
+;;  * a CONTAINER STOP (the source ended where a map key or an indefinite
+;;    container's entry would begin: refused before any visit) gives the container
+;;    the count of its complete entries and an EV_END refusal at its end;
+;;  * containers open at a stop keep their heads: a definite one its own count, an
+;;    indefinite one the count of the entries begun;
+;;  * zero bytes, never walked, pad the copy after a stop (and after an item followed
+;;    by more source bytes), so every length claim the source passed still passes.
+;;
+;; EVENTS -- seven words each (position, kind, five arguments) from o[O_S_FIRST],
+;; o[O_S_NEV] of them, sorted by position then kind at the end -- tell the VM and
+;; its driver what the copy cannot show:
+;;   EV_HEAD  [pos stop, code, source offset, VM code planted, planted length, item's
+;;            source start, 1 when the scanner refused it after its depth check]: a stop. A refusal the VM finds at the stop with the
+;;            planted code is reported as (code, source offset); any other position
+;;            reported at the stop maps to the item's source start. (A planted text
+;;            refuses natively: VM code 0.)
+;;   EV_UNITS [content start, units, the map's copy position]: a complete marked
+;;            map's deferred duplicate check, charged at its end before anything
+;;            else there (D277), at the map's position
+;;   EV_END   [content start, code, copy offset]: refused at the container's end,
+;;            before its end-run (a duplicate found by the deferred check; too many
+;;            entries in an indefinite container; a container stop)
+;;   EV_KEY   [key position, code, copy offset]: an immediate duplicate, refused
+;;            after the key's key-order comparison
+;;   EV_WMARK [map position]: the source map had a key that was not canonical
+;;   EV_EMB   [content start, content end, copy start, copy end, its stop, its
+;;            container stop, its content's depth bound]: byte-string content the VM may walk as CBOR that is not
+;;            its own DC form, or is refused, has its own copy (a region like the main
+;;            one) after the main copy
+;; A container's events sit at its CONTENT START (the position after its head),
+;; unique to it. A source offset below o[O_S_CBASE] is the input's (input start +
+;; it); above, a position in a copy (embedded content's source is a copy).
+;; Integer-only (D009).
+(ns snug.cbor.vcopy
+  (:require [kin.lang :refer [defn let local return set if while for do comment doc declarefn forever break]]
+            [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg sar ushr bit-and bit-or
+                               < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
+            [snug.cbor.codes :refer [CODE_SCRATCH CODE_TRUNCATED CODE_MALFORMED CODE_DEPTH CODE_TEXT
+                                     CODE_NON_SHORTEST CODE_INDEFINITE PF_VALID
+                                     CODE_TOO_MANY_ENTRIES CODE_DUPLICATE_KEY
+                                     O_HI O_LO O_ERR_POS O_ITEMS O_MAX_ITEMS O_MAX_DEPTH O_MAX_ENTRIES
+                                     O_PROFILE O_VCTL O_VNEEDW O_VNEEDB O_VLEN PF_NONCHAR
+                                     O_S_RTOP O_S_DLOW O_S_UNITS O_S_CBTOP O_S_NDEF O_S_SRC O_S_EXTRA
+                                     O_S_SBASE O_S_SEND O_S_NEV O_S_STOPP O_S_STOPK O_S_STOPC O_S_STOPO
+                                     O_S_DUPK O_S_DUPP O_S_DUPO O_S_DUPC O_S_PLANT O_S_PMAJ O_S_PLEN
+                                     O_S_STOPX O_S_CBASE O_S_PSTOP O_S_NSORT O_S_DUPCO O_S_PBAD O_S_EDEPTH O_S_FIRST
+                                     EV_HEAD EV_END EV_KEY EV_WMARK EV_EMB EV_UNITS EV_WORDS VC_NONDET]]
+            [snug.cbor.head :refer [head-size]]
+            [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
+            [snug.cbor.keys :refer [compare-spans]]
+            [snug.cbor.canon :refer [targ tskip cw put-head move-within kclass chunk-pos head-short
+                                     dup-forms-within dup-finish]]
+            [snug.cbor.scan :refer [scan-item run-defer scan-float]]
+            [snug.cbor.stdtags :refer [std-allowed]]))
+
+(declarefn pw uvisit tskip-l map-back-p embed-check-in)
+
+;; ------------------------------------------------------------ events
+
+(defn ^:pub ^I32 ev-add [^Ints o ^I32 pos ^I32 kind ^I32 a ^I32 b2 ^I32 c]
+  (comment "Append an event (arguments a, b2, c; the last two words 0); 0, or"
+           "-CODE_SCRATCH with o[O_VNEEDW] raised. The record stack (O_S_RTOP)"
+           "restarts above the list.")
+  (let [n (ia o O_S_NEV)
+        e (+ O_S_FIRST (* EV_WORDS n))]
+    (if (> (+ e (+ EV_WORDS 64)) (ia o O_S_DLOW))
+      (do (iset o O_VNEEDW (+ (* 2 (ilen o)) 256))
+          (return (neg CODE_SCRATCH))))
+    (iset o e pos)
+    (iset o (+ e 1) kind)
+    (iset o (+ e 2) a)
+    (iset o (+ e 3) b2)
+    (iset o (+ e 4) c)
+    (iset o (+ e 5) 0)
+    (iset o (+ e 6) 0)
+    (iset o (+ e 7) 0)
+    (iset o O_S_NEV (+ n 1))
+    (iset o O_S_RTOP (+ e (+ EV_WORDS 8)))
+    (return 0)))
+
+(defn ^I32 ev-last [^IntsR o]
+  (return (+ O_S_FIRST (* EV_WORDS (- (ia o O_S_NEV) 1)))))
+
+(defn ^Bool ev-less [^IntsR o ^I32 i ^I32 j]
+  (let [a (+ O_S_FIRST (* EV_WORDS i))
+        b2 (+ O_S_FIRST (* EV_WORDS j))]
+    (if (!= (ia o a) (ia o b2)) (return (< (ia o a) (ia o b2))))
+    (return (< (ia o (+ a 1)) (ia o (+ b2 1))))))
+
+(defn ev-swap [^Ints o ^I32 i ^I32 j]
+  (let [a (+ O_S_FIRST (* EV_WORDS i))
+        b2 (+ O_S_FIRST (* EV_WORDS j))]
+    (for [^I32 k 0 EV_WORDS]
+      (let [t (ia o (+ a k))
+            u (ia o (+ b2 k))]
+        (iset o (+ a k) u)
+        (iset o (+ b2 k) t)))))
+
+(defn ev-sift [^Ints o ^I32 i0 ^I32 n]
+  (let [^:mut i i0]
+    (forever
+      (let [l (+ (* 2 i) 1)
+            ^:mut m i]
+        (if (>= l n) (break))
+        (if (ev-less o m l) (set m l))
+        (if (and (< (+ l 1) n) (ev-less o m (+ l 1))) (set m (+ l 1)))
+        (if (== m i) (break))
+        (ev-swap o i m)
+        (set i m)))))
+
+(defn ^:pub ev-sort [^Ints o]
+  (comment "Sort the events by position, then kind (a heap sort); o[O_S_NSORT] says"
+           "all are sorted.")
+  (let [n (ia o O_S_NEV)
+        ^:mut i (- (sar n 1) 1)]
+    (while (>= i 0)
+      (ev-sift o i n)
+      (set i (- i 1)))
+    (let [^:mut k (- n 1)]
+      (while (> k 0)
+        (ev-swap o 0 k)
+        (ev-sift o 0 k)
+        (set k (- k 1))))
+    (iset o O_S_NSORT n)))
+
+(defn ^:pub ^I32 ev-find [^IntsR o ^I32 pos ^I32 kind]
+  (comment "The word offset of the event (pos, kind) among the o[O_S_NSORT] sorted"
+           "ones, or -1.")
+  (let [^:mut lo 0
+        ^:mut hi (ia o O_S_NSORT)]
+    (while (< lo hi)
+      (let [mid (sar (+ lo hi) 1)
+            e (+ O_S_FIRST (* EV_WORDS mid))
+            v (ia o e)
+            k (ia o (+ e 1))]
+        (if (and (== v pos) (== k kind)) (return e))
+        (if (or (< v pos) (and (== v pos) (< k kind))) (set lo (+ mid 1)) (set hi mid))))
+    (return (neg 1))))
+
+(defn ev-shift [^Ints o ^I32 i0 ^I32 delta ^I32 from]
+  (comment "Events i0.. at copy positions >= from move down by delta (a container's"
+           "children moved over its reserved head), as do the stop, the container"
+           "stop and the duplicate's copy position found there.")
+  (let [n (ia o O_S_NEV)]
+    (for [^I32 i i0 n]
+      (let [e (+ O_S_FIRST (* EV_WORDS i))
+            v (ia o e)
+            k (ia o (+ e 1))]
+        (if (>= v from) (iset o e (- v delta)))
+        (if (and (or (== k EV_END) (== k EV_KEY)) (>= (ia o (+ e 3)) from))
+          (iset o (+ e 3) (- (ia o (+ e 3)) delta))))))
+  (if (>= (ia o O_S_DUPCO) from)
+    (iset o O_S_DUPCO (- (ia o O_S_DUPCO) delta)))
+  (if (and (!= (ia o O_S_STOPK) 0) (>= (ia o O_S_STOPP) from))
+    (iset o O_S_STOPP (- (ia o O_S_STOPP) delta)))
+  (if (>= (ia o O_S_PSTOP) from)
+    (iset o O_S_PSTOP (- (ia o O_S_PSTOP) delta)))
+  (if (>= (ia o O_S_DUPC) from)
+    (iset o O_S_DUPC (- (ia o O_S_DUPC) delta))))
+
+;; ------------------------------------------------------------ the prefix writer
+
+(defn ^:pub ^I32 pw-stop [^Ints o ^I32 y ^I32 code ^I32 x ^I32 xi ^I32 plant ^I32 pmaj ^I32 plen]
+  (comment "Record an item stop: the item whose source starts at xi, at copy position"
+           "y, could not be read (code, at source position x); its planting. -2.")
+  (iset o O_S_STOPP y)
+  (iset o O_S_STOPK 1)
+  (iset o O_S_STOPC code)
+  (iset o O_S_STOPO x)
+  (iset o O_S_STOPX xi)
+  (iset o O_S_PLANT plant)
+  (iset o O_S_PMAJ pmaj)
+  (iset o O_S_PLEN plen)
+  (return (neg 2)))
+
+(defn ^I32 pw-bad [^BytesW cb ^Ints o ^I32 y ^I32 code ^I32 x]
+  (comment "An item stop at the item cb[x] itself, planted as a malformed head of its"
+           "major type, or, past the source's end, as a string running past the end.")
+  (if (>= x (ia o O_S_SEND)) (return (pw-stop o y code x x 1 2 0)))
+  (return (pw-stop o y code x x 0 (ushr (u8 cb x) 5) 0)))
+
+(defn ^I32 pw-bad-df [^BytesW cb ^Ints o ^I32 y ^I32 code ^I32 x]
+  (comment "pw-bad for a definite container refused after its depth check (a"
+           "declared length past the end): planted alike, its EV_HEAD marked (word 7"
+           "= 1) so a walk bounded tighter than the copy refuses depth first"
+           "(vm-dead head-fail).")
+  (if (>= x (ia o O_S_SEND)) (return (pw-stop o y code x x 1 2 0)))
+  (return (pw-stop o y code x x 4 (ushr (u8 cb x) 5) 0)))
+
+(defn ^I32 pw-text [^BytesW cb ^Ints o ^I32 q ^I32 stop]
+  (comment "The first invalid UTF-8 sequence of a text chunk cb[q, stop) under the"
+           "profile's noncharacter rule, or -1.")
+  (let [bad (utf8-invalid-at cb q stop)]
+    (if (< bad 0) (return (neg 1)))
+    (if (== (bit-and (ia o O_PROFILE) PF_NONCHAR) 0) (return bad))
+    (return (utf8-invalid-at-nc cb bad stop))))
+
+(defn ^I32 pw-istr [^BytesW cb ^Ints o ^I32 x ^I32 y]
+  (comment "An indefinite string at cb[x], its chunks checked as the scanner checks"
+           "them. Refused, it stops at its own position y: a text is planted as a"
+           "text of its chunks' bytes up to the refusal (the refused chunk's"
+           "included when its content was refused), so its scan charge precedes the"
+           "refusal as for any text; a byte string, as a malformed head.")
+  (let [send (ia o O_S_SEND)
+        major (ushr (u8 cb x) 5)
+        ^:mut q (+ x 1)
+        ^:mut tl 0
+        ^:mut code 0
+        ^:mut at 0
+        ^:mut c0 0
+        ^:mut lo0 0]
+    (forever
+      (if (>= q send)
+        (do (set code CODE_TRUNCATED)
+            (set at q)
+            (break)))
+      (let [ib (u8 cb q)
+            ai (bit-and ib 31)]
+        (if (== ib 255) (break))
+        (if (or (!= (ushr ib 5) major) (> ai 27))
+          (do (set code CODE_MALFORMED)
+              (set at q)
+              (break)))
+        (if (> (+ q (head-size ai)) send)
+          (do (set code CODE_TRUNCATED)
+              (set at q)
+              (break)))
+        (let [c (targ cb o q)
+              hi (ia o O_HI)
+              lo (ia o O_LO)]
+          (if (or (!= hi 0) (or (< lo 0) (> lo (- send c))))
+            (do (set code CODE_TRUNCATED)
+                (set at q)
+                (break)))
+          (if (== major 3)
+            (do (let [bad (pw-text cb o c (+ c lo))]
+                  (if (>= bad 0)
+                    (do (set code CODE_TEXT)
+                        (set at bad)
+                        (set tl (+ tl lo))
+                        (set c0 c)
+                        (set lo0 lo)
+                        (break))))))
+          (set tl (+ tl lo))
+          (set q (+ c lo)))))
+    (if (== code 0) (return (cw cb o x y 0)))
+    (if (== code CODE_TEXT)
+      (do (iset o O_S_PBAD (- tl (- (+ c0 lo0) at)))
+          (return (pw-stop o y code at x 2 3 tl))))
+    (return (pw-stop o y code at x 0 major 0))))
+
+(defn ^I32 pw-keys-canon [^BytesW cb ^Ints o ^I32 q0 ^I32 n]
+  (comment "Does any of the n keys of the source map's pairs from cb[q0] fail to be"
+           "canonical (kclass bit 0)?")
+  (let [^:mut q q0]
+    (for [^I32 _i 0 n]
+      (if (!= (bit-and (kclass cb o q) 1) 0) (return 1))
+      (let [ke (tskip cb o q)]
+        (set q (tskip cb o ke))))
+    (return 0)))
+
+(defn ^I32 pw-rehead [^BytesW cb ^Ints o ^I32 y ^I32 hl0 ^I32 t ^I32 major ^I32 cnt ^I32 i0]
+  (comment "The container at copy position y, its head hl0 bytes (reserved) and its"
+           "children up to t: its head rewritten for cnt entries and the children"
+           "moved to follow it (events from i0 shifted). Its new end, or -1.")
+  (let [h (put-head cb t major 0 cnt)]
+    (if (< h 0) (return (neg 1)))
+    (let [hl (- h t)
+          delta (- hl0 hl)]
+      (move-within cb t y hl)
+      (move-within cb (+ y hl0) (+ y hl) (- t (+ y hl0)))
+      (if (!= delta 0) (ev-shift o i0 delta (+ y hl0)))
+      (return (- t delta)))))
+
+(defn ^I32 pw-cstop [^Ints o ^I32 cs ^I32 end ^I32 code ^I32 x ^I32 ecopy]
+  (comment "Record a container stop: the container whose content starts at cs (its"
+           "complete entries ending at end) is refused at its end (code, at source"
+           "position x; reported at the copy position ecopy, which maps there). -2,"
+           "or -1 when o is too small.")
+  (let [w (ev-add o cs EV_END code ecopy 0)]
+    (if (< w 0) (return (neg 1))))
+  (iset o O_S_STOPP end)
+  (iset o O_S_STOPK 2)
+  (iset o O_S_STOPC code)
+  (iset o O_S_STOPO x)
+  (iset o O_S_STOPX x)
+  (iset o O_S_PSTOP cs)
+  (return (neg 2)))
+
+(defn ^I32 pw-indef [^BytesW cb ^Ints o ^I32 x ^I32 y ^I32 depth]
+  (comment "An indefinite array or map at cb[x]: children after a 9-byte reserved"
+           "head, then the head for their count and the children moved down. The"
+           "scanner's order: the end of input before an entry, the break, the entry"
+           "bound, then the entry.")
+  (let [send (ia o O_S_SEND)
+        major (ushr (u8 cb x) 5)
+        i0 (ia o O_S_NEV)
+        ^:mut q (+ x 1)
+        ^:mut t (+ y 9)
+        ^:mut k 0
+        ^:mut r 0
+        ^:mut half 0]
+    (forever
+      (if (and (== half 0) (>= q send))
+        (do (set r (neg 4))
+            (break)))
+      (if (and (== half 0) (== (u8 cb q) 255)) (break))
+      (if (and (== half 0) (>= k (ia o O_MAX_ENTRIES)))
+        (do (set r (neg 3))
+            (break)))
+      (let [^I32 ty (pw cb o q t (+ depth 1))]
+        (if (== ty (neg 1)) (return ty))
+        (if (< ty 0)
+          (do (set r ty)
+              (set t (ia o O_S_STOPP))
+              (break)))
+        (set t ty)
+        (set q (tskip cb o q))
+        (if (or (== major 4) (== half 1))
+          (do (set k (+ k 1))
+              (set half 0))
+          (set half 1))))
+    (local ^:mut ^I32 cnt)
+    (set cnt k)
+    (if (== r (neg 2)) (set cnt (+ k 1)))
+    (if (and (== major 5) (== r 0))
+      (if (!= (pw-keys-canon cb o (+ y 9) k) 0)
+        (do (let [w (ev-add o y EV_WMARK 0 0 0)]
+              (if (< w 0) (return (neg 1)))))))
+    (let [cend (pw-rehead cb o y 9 t major cnt i0)
+          cs (+ y (- 9 (- t cend)))]
+      (if (< cend 0) (return cend))
+      (comment "too many entries: refused at the end of the ones it has; the end of"
+               "input where an entry would begin: likewise, before any visit")
+      (if (== r (neg 3)) (return (pw-cstop o cs cend CODE_TOO_MANY_ENTRIES x y)))
+      (if (== r (neg 4)) (return (pw-cstop o cs cend CODE_TRUNCATED q cend)))
+      (if (< r 0) (return r))
+      (return cend))))
+
+(defn ^:pub ^I32 pw [^BytesW cb ^Ints o ^I32 x ^I32 y ^I32 depth]
+  (comment "Write the DC form of the source item at cb[x] to cb[y, ...) when it is"
+           "well-formed, checking what the scanner checks for well-formedness in its"
+           "order; answers the end, -1 when cb (or o) is too small, or -2 at a stop."
+           "Everything the copy carries -- a text's bytes, a tag's number and"
+           "content, a key's kind, item counts, definite counts -- is refused, when"
+           "it must be, by the VM's own walk of the copy. The duplicate refusal's"
+           "source item (o[O_S_DUPP]) notes its copy position in o[O_S_DUPC].")
+  (if (== x (ia o O_S_DUPP)) (iset o O_S_DUPC y))
+  (if (== x (ia o O_S_DUPO)) (iset o O_S_DUPCO y))
+  (let [send (ia o O_S_SEND)]
+    (if (>= x send) (return (pw-bad cb o y CODE_TRUNCATED x)))
+    (let [ib (u8 cb x)
+          major (ushr ib 5)
+          ai (bit-and ib 31)]
+      (if (and (> ai 27) (< ai 31)) (return (pw-bad cb o y CODE_MALFORMED x)))
+      (if (== ai 31)
+        (do (comment "without PF_VALID every indefinite head is the deterministic walk's own refusal")
+            (if (== (bit-and (ia o O_PROFILE) PF_VALID) 0) (return (pw-bad cb o y CODE_INDEFINITE x)))
+            (if (or (<= major 1) (>= major 6)) (return (pw-bad cb o y CODE_MALFORMED x)))
+            (if (<= major 3) (return (pw-istr cb o x y)))
+            (if (>= depth (ia o O_MAX_DEPTH)) (return (pw-bad cb o y CODE_DEPTH x)))
+            (return (pw-indef cb o x y depth))))
+      (if (> (+ x (head-size ai)) send) (return (pw-bad cb o y CODE_TRUNCATED x)))
+      (comment "without PF_VALID (the canonical path of an EC-sensitive key, D263) a head"
+               "that is not shortest is the walk's own refusal at the item: a stop")
+      (if (and (== (bit-and (ia o O_PROFILE) PF_VALID) 0) (and (== major 7) (and (>= ai 25) (<= ai 27))))
+        (do (comment "a float: the deterministic walk's own float checks, in their order")
+            (let [fr (scan-float cb o x ai send)]
+              (if (< fr 0) (return (pw-bad cb o y (neg fr) x))))))
+      (if (and (== (bit-and (ia o O_PROFILE) PF_VALID) 0) (and (not (and (== major 7) (and (>= ai 25) (<= ai 27))))
+                                                               (not (head-short cb x))))
+        (return (pw-bad cb o y CODE_NON_SHORTEST x)))
+      (if (== major 7)
+        (do (if (and (and (== ai 24) (< (u8 cb (+ x 1)) 32)) (!= (bit-and (ia o O_PROFILE) PF_VALID) 0))
+              (return (pw-bad cb o y CODE_MALFORMED x)))
+            (return (cw cb o x y 0))))
+      (if (<= major 1) (return (cw cb o x y 0)))
+      (let [c (targ cb o x)
+            hi (ia o O_HI)
+            lo (ia o O_LO)
+            left (- send c)]
+        (if (<= major 3)
+          (do (if (or (!= hi 0) (or (< lo 0) (> lo left))) (return (pw-bad cb o y CODE_TRUNCATED x)))
+              (return (cw cb o x y 0))))
+        (if (== major 6)
+          (do (if (>= depth (ia o O_MAX_DEPTH)) (return (pw-bad cb o y CODE_DEPTH x)))
+              (let [y6 (put-head cb y 6 hi lo)]
+                (if (< y6 0) (return (neg 1)))
+                (return (pw cb o c y6 (+ depth 1))))))
+        (comment "a definite array or map: enter-container's checks, in its order; a"
+                 "depth or entry bound refusal keeps the container's own head (the walk"
+                 "refuses it there itself, a tag-4/40 shape check seeing its real head)")
+        (if (and (>= depth (ia o O_MAX_DEPTH)) (and (== hi 0) (>= lo 0)))
+          (return (pw-stop o y CODE_DEPTH x x 3 major lo)))
+        (if (>= depth (ia o O_MAX_DEPTH)) (return (pw-bad cb o y CODE_DEPTH x)))
+        (if (or (!= hi 0) (< lo 0)) (return (pw-bad-df cb o y CODE_TRUNCATED x)))
+        (if (== major 4)
+          (if (> lo left) (return (pw-bad-df cb o y CODE_TRUNCATED x)))
+          (if (> lo (ushr left 1)) (return (pw-bad-df cb o y CODE_TRUNCATED x))))
+        (if (> lo (ia o O_MAX_ENTRIES)) (return (pw-stop o y CODE_TOO_MANY_ENTRIES x x 3 major lo)))
+        (let [i0 (ia o O_S_NEV)
+              z0 (put-head cb y major 0 lo)
+              ^:mut z z0
+              ^:mut q c
+              ^:mut kk lo]
+          (if (< z0 0) (return (neg 1)))
+          (if (== major 5) (set kk (* 2 lo)))
+          (for [^I32 i 0 kk]
+            (if (and (and (== major 5) (== (bit-and i 1) 0)) (>= q send))
+              (do (comment "the end of input where a key would begin: before any visit")
+                  (let [ce (pw-rehead cb o y (- z0 y) z 5 (sar i 1) i0)]
+                    (if (< ce 0) (return ce))
+                    (return (pw-cstop o (+ y (- (- z0 y) (- z ce))) ce CODE_TRUNCATED q ce)))))
+            (set z (pw cb o q z (+ depth 1)))
+            (if (< z 0) (return z))
+            (set q (tskip cb o q)))
+          (if (== major 5)
+            (if (!= (pw-keys-canon cb o c lo) 0)
+              (do (let [w3 (ev-add o y EV_WMARK 0 0 0)]
+                    (if (< w3 0) (return (neg 1)))))))
+          (return z))))))
+
+;; ------------------------------------------------------------ a region
+
+(defn ^I32 plant [^BytesW cb ^Ints o ^I32 y]
+  (comment "The planted bytes of the item stop at y; answers their end and adds the"
+           "stop's EV_HEAD, or -1.")
+  (let [kind (ia o O_S_PLANT)
+        ^:mut z y
+        ^:mut ^I32 vc CODE_MALFORMED]
+    (if (or (== kind 0) (== kind 4))
+      (do (bset cb y (+ (* (ia o O_S_PMAJ) 32) 28))
+          (set z (+ y 1))))
+    (if (== kind 1)
+      (do (comment "a byte string of 2^32 bytes: its length runs past any end")
+          (bset cb y 91)
+          (for [^I32 j 1 9]
+            (bset cb (+ y j) 0))
+          (bset cb (+ y 4) 1)
+          (set z (+ y 9))
+          (set vc CODE_TRUNCATED)))
+    (if (== kind 2)
+      (do (let [tl (ia o O_S_PLEN)
+                h (put-head cb y 3 0 tl)]
+            (if (< h 0) (return (neg 1)))
+            (for [^I32 j2 0 tl]
+              (bset cb (+ h j2) 0))
+            (bset cb (+ h (ia o O_S_PBAD)) 255)
+            (set z (+ h tl))
+            (set vc 0))))
+    (if (== kind 3)
+      (do (comment "the container's own definite head (shortest); the walk refuses it")
+          (let [h3 (put-head cb y (ia o O_S_PMAJ) 0 (ia o O_S_PLEN))]
+            (if (< h3 0) (return (neg 1)))
+            (set z h3)
+            (set vc 0))))
+    (let [w (ev-add o y EV_HEAD (ia o O_S_STOPC) (ia o O_S_STOPO) vc)]
+      (if (< w 0) (return (neg 1)))
+      (let [e (ev-last o)]
+        (iset o (+ e 5) (- z y))
+        (iset o (+ e 6) (ia o O_S_STOPX))
+        (if (== kind 4) (iset o (+ e 7) 1))))
+    (return z)))
+
+(defn ^I32 region [^BytesW cb ^Ints o ^I32 src ^I32 send ^I32 y ^I32 seq ^I32 pad]
+  (comment "Write the copy of the source cb[src, send) -- one item (seq 0) or the"
+           "items up to send (seq 1) -- from cb[y]: its end, pad zero bytes after a"
+           "stop (after its planting) or when source bytes follow one item; -1 when"
+           "cb or o is too small. The region's stop (-1 none) is left in"
+           "o[O_S_STOPP], its container stop in o[O_S_PSTOP].")
+  (iset o O_S_SEND send)
+  (iset o O_S_STOPK 0)
+  (iset o O_S_PSTOP (neg 1))
+  (let [^:mut q src
+        ^:mut z y
+        ^:mut stopped false]
+    (if (== seq 0)
+      (do (let [r (pw cb o q z 0)]
+            (if (== r (neg 1)) (return r))
+            (if (< r 0) (set stopped true) (do (set z r) (set q (tskip cb o q))))))
+      (while (and (< q send) (not stopped))
+        (let [r2 (pw cb o q z 0)]
+          (if (== r2 (neg 1)) (return r2))
+          (if (< r2 0) (set stopped true) (do (set z r2) (set q (tskip cb o q)))))))
+    (local ^:mut ^I32 zp)
+    (set zp z)
+    (if stopped
+      (do (set z (ia o O_S_STOPP))
+          (if (> (+ z (+ pad 16)) (blen cb)) (return (neg 1)))
+          (if (== (ia o O_S_STOPK) 1)
+            (set zp (plant cb o z))
+            (do (let [w (ev-add o z EV_HEAD (ia o O_S_STOPC) (ia o O_S_STOPO) (neg 1))]
+                  (if (< w 0) (return (neg 1)))
+                  (iset o (+ (ev-last o) 6) (ia o O_S_STOPX)))
+                (set zp z)))
+          (if (< zp 0) (return zp)))
+      (iset o O_S_STOPP (neg 1)))
+    (if (or stopped (and (== seq 0) (< q send)))
+      (do (if (> (+ zp pad) (blen cb)) (return (neg 1)))
+          (for [^I32 j 0 pad]
+            (bset cb (+ zp j) 0))
+          (return (+ zp pad))))
+    (return z)))
+
+;; ------------------------------------------------------------ embedded content
+
+(defn ^:pub ^I32 scan-seq [^Bytes b ^Ints o ^BytesW cb ^I32 cs ^I32 ce]
+  (comment "Check cb[cs, ce) -- byte-string content in a copy -- as a CBOR sequence"
+           "under o's profile with no item limit, its deferred checks run (within cb,"
+           "above o[O_S_CBTOP]). 0 (o[O_VCTL] bit VC_NONDET tells whether it is its"
+           "own DC form), a negated code, or -CODE_SCRATCH. The record stack starts at"
+           "o[O_S_RTOP], set by the caller; a duplicate refusal is noted in O_S_DUP*.")
+  (let [vc (ia o O_VCTL)
+        mi (ia o O_MAX_ITEMS)
+        ^:mut q cs
+        ^:mut r 0]
+    (iset o O_VCTL (bit-and vc 255))
+    (iset o O_MAX_ITEMS 2147483647)
+    (iset o O_ITEMS 0)
+    (iset o O_ERR_POS (neg 1))
+    (iset o O_S_DLOW (ilen o))
+    (iset o O_S_NDEF 0)
+    (iset o O_S_SRC 1)
+    (iset o O_S_EXTRA 0)
+    (iset o O_S_DUPK 0)
+    (while (and (< q ce) (>= r 0))
+      (set r (scan-item cb o q 0 ce))
+      (if (>= r 0) (set q r)))
+    (if (and (>= r 0) (> (ia o O_S_NDEF) 0))
+      (set r (run-defer b o cb 0 (ia o O_S_NDEF))))
+    (iset o O_S_NDEF 0)
+    (iset o O_S_DLOW (ilen o))
+    (iset o O_S_SRC 0)
+    (iset o O_MAX_ITEMS mi)
+    (if (> r 0) (set r 0))
+    (return r)))
+
+(defn ^I32 dup-event [^Ints o ^I32 dk]
+  (comment "The scanner's key refusal (dk: 1 at a key, 2 at a map's end; its code"
+           "dk >> 3) at the copy position the writer found (o[O_S_DUPC]: the key, or the map's first"
+           "key = its content start), reported at the refused key's copy position"
+           "(o[O_S_DUPCO]). 0, or -CODE_SCRATCH.")
+  (let [cp (ia o O_S_DUPC)
+        ^:mut co (ia o O_S_DUPCO)]
+    (if (< cp 0) (return 0))
+    (if (< co 0) (set co cp))
+    (if (== (bit-and dk 3) 1) (return (ev-add o cp EV_KEY (sar dk 3) cp 0)))
+    (return (ev-add o cp EV_END (sar dk 3) co 0))))
+
+(defn ^I32 embed-check [^Bytes b ^Ints o ^BytesW cb ^I32 cs ^I32 ce ^I32 bnd]
+  (comment "One byte string's content cb[cs, ce): content that is not its own DC form,"
+           "or is refused, gets its copy at o[O_S_CBTOP] (a region: a refused one"
+           "partial, with its duplicate refusal's event) and an EV_EMB event: 1; 0"
+           "for content walked in place (valid, its own DC form); or -CODE_SCRATCH."
+           "bnd: the content's depth bound, its first item at depth 0 (kept in the"
+           "EV_EMB event's word 7 for the embedded copy's own visit).")
+  (if (>= cs ce) (return 0))
+  (let [top (ia o O_S_CBTOP)
+        ne (ia o O_S_NEV)
+        md (ia o O_MAX_DEPTH)]
+    (iset o O_S_RTOP (+ (+ O_S_FIRST (* EV_WORDS ne)) (+ EV_WORDS 8)))
+    (iset o O_MAX_DEPTH bnd)
+    (let [^I32 r (embed-check-in b o cb cs ce top)]
+      (iset o O_MAX_DEPTH md)
+      (return r))))
+
+(defn ^I32 embed-check-in [^Bytes b ^Ints o ^BytesW cb ^I32 cs ^I32 ce ^I32 top]
+    (let [r (scan-seq b o cb cs ce)
+          dk (ia o O_S_DUPK)
+          dp (ia o O_S_DUPP)
+          dofs (ia o O_S_DUPO)]
+      (iset o O_S_CBTOP top)
+      (if (== r (neg CODE_SCRATCH)) (return r))
+      (if (and (== r 0) (== (bit-and (ia o O_VCTL) VC_NONDET) 0)) (return 0))
+      (iset o O_S_DUPC (neg 1))
+      (iset o O_S_DUPCO (neg 1))
+      (if (and (< r 0) (> dk 0))
+        (do (iset o O_S_DUPP dp)
+            (iset o O_S_DUPO dofs))
+        (do (iset o O_S_DUPP (neg 1))
+            (iset o O_S_DUPO (neg 1))))
+      (let [z (region cb o cs ce top 1 (+ (- ce cs) 64))
+            stp (ia o O_S_STOPP)
+            pst (ia o O_S_PSTOP)]
+        (iset o O_S_DUPP (neg 1))
+        (iset o O_S_DUPO (neg 1))
+        (if (< z 0)
+          (do (iset o O_VNEEDB (+ (* 2 (blen cb)) 256))
+              (return (neg CODE_SCRATCH))))
+        (if (and (< r 0) (> dk 0))
+          (do (let [w (dup-event o dk)]
+                (if (< w 0) (return w)))))
+        (let [w2 (ev-add o cs EV_EMB ce top z)]
+          (if (< w2 0) (return w2))
+          (let [e (ev-last o)]
+            (iset o (+ e 5) stp)
+            (iset o (+ e 6) pst)
+            (iset o (+ e 7) (ia o O_MAX_DEPTH))))
+        (iset o O_S_CBTOP z)
+        (return 1))))
+
+(defn ^I32 if-24 [^IntsR o ^I32 hi ^I32 lo]
+  (comment "Is the tag hi:lo 24 with its payload walked as CBOR under the profile (as"
+           "the scanner and the VM walk it: a standard-set tag)?")
+  (if (and (and (== hi 0) (== lo 24)) (std-allowed (ia o O_PROFILE) 24 0)) (return 1))
+  (return 0))
+
+(defn ^I32 emb-bound [^IntsR o ^I32 dd ^I32 mx ^I32 all ^I32 in24]
+  (comment "The depth bound of the content of the byte string at depth dd (below a"
+           "root bounded by mx), its first item at depth 0. Only a tag-24 walk (all"
+           "0): the payload's item is at dd + 1 under the same bound, as the scanner"
+           "and the VM walk it. Content the VM may also walk as `.cbor` (all != 0) is"
+           "a nested document under O_S_EDEPTH (mx when unset), the larger bound: the"
+           "copy may not stop before either walk would, and the VM's own depth checks"
+           "refuse the deeper ones in the copy.")
+  (if (or (!= all 0) (== in24 0))
+    (do (if (> (ia o O_S_EDEPTH) 0) (return (ia o O_S_EDEPTH)))
+        (return mx)))
+  (let [r (- mx (+ dd 1))]
+    (if (< r 0) (return 0))
+    (return r)))
+
+(defn ^I32 lim-of [^I32 stop ^I32 end]
+  (if (>= stop 0) (return stop))
+  (return end))
+
+(defn ^:pub ^I32 visit [^Bytes b ^Ints o ^BytesW cb ^I32 x ^I32 lim ^I32 all ^I32 in24 ^I32 dd ^I32 mx]
+  (comment "The canonical item at cb[x], walked up to the region's stop lim:"
+           "embed-check every byte string's content the VM may walk as CBOR (all != 0:"
+           "every one; else a tag-24 payload, in24). Its end; -2 at the stop;"
+           "-CODE_SCRATCH. dd: x's depth below the walk's root, mx the root's depth"
+           "bound: a tag-24 payload's first item is two levels below its tag (as the"
+           "scanner walks it), other embedded content a nested document under"
+           "O_S_EDEPTH.")
+  (if (>= x lim) (return (neg 2)))
+  (let [major (ushr (u8 cb x) 5)
+        q (targ cb o x)
+        hi (ia o O_HI)
+        lo (ia o O_LO)]
+    (if (== major 2)
+      (do (if (or (!= all 0) (!= in24 0))
+            (do (let [bnd (emb-bound o dd mx all in24)
+                      r (embed-check b o cb q (+ q lo) bnd)
+                      ce (+ q lo)
+                      ^:mut y3 q]
+                  (if (< r 0) (return r))
+                  (comment "content walked in place: its own byte strings in turn")
+                  (if (== r 0)
+                    (while (< y3 ce)
+                      (set y3 (visit b o cb y3 ce all 0 0 bnd))
+                      (if (< y3 0) (return y3)))))))
+          (return (+ q lo))))
+    (if (== major 6) (return (visit b o cb q lim all (if-24 o hi lo) (+ dd 1) mx)))
+    (if (or (== major 4) (== major 5))
+      (do (let [^:mut k lo
+                ^:mut y q]
+            (if (== major 5) (set k (* 2 lo)))
+            (for [^I32 _i 0 k]
+              (set y (visit b o cb y lim all 0 (+ dd 1) mx))
+              (if (< y 0) (return y)))
+            (return y))))
+    (return (tskip cb o x))))
+
+;; ------------------------------------------------------------ D277: units
+
+(defn ^I32 map-units [^Ints o ^BytesW cb ^I32 x ^I32 q0 ^I32 n]
+  (comment "The deferred duplicate check's units for the complete canonical map at"
+           "cb[x] (pairs from q0) when the source walk marked it -- a key not"
+           "canonical in the source (EV_WMARK), an EC-sensitive key, or keys out of"
+           "canonical order -- else 0: the same records as the source walk's, so the"
+           "same comparisons. Or -CODE_SCRATCH.")
+  (let [^:mut mark (>= (ev-find o x EV_WMARK) 0)
+        ^:mut q q0
+        ^:mut ps (neg 1)
+        ^:mut pe (neg 1)]
+    (for [^I32 _i 0 n]
+      (let [ke (tskip cb o q)]
+        (if (!= (kclass cb o q) 0) (set mark true))
+        (if (and (>= ps 0) (>= (compare-spans cb ps pe q ke) 0)) (set mark true))
+        (set ps q)
+        (set pe ke)
+        (set q (tskip cb o ke))))
+    (if (not mark) (return 0))
+    (let [u0 (ia o O_S_UNITS)
+          cb0 (ia o O_S_CBTOP)
+          r (dup-forms-within cb o q0 n)]
+      (if (< r 0) (return r))
+      (dup-finish cb cb o n cb0)
+      (let [u (- (ia o O_S_UNITS) u0)]
+        (iset o O_S_UNITS u0)
+        (return u)))))
+
+(defn ^:pub ^I32 uvisit [^Ints o ^BytesW cb ^I32 x ^I32 lim ^I32 pstop ^I32 all ^I32 in24]
+  (comment "The canonical item at cb[x], up to the stop lim: each complete marked"
+           "map's units as an EV_UNITS event at its content start (D277) -- not the"
+           "container stopped at its end (pstop) -- descending into byte-string"
+           "content the VM walks in place (content with an EV_EMB copy is visited"
+           "there). Its end; -2 at the stop; -CODE_SCRATCH.")
+  (if (>= x lim) (return (neg 2)))
+  (let [major (ushr (u8 cb x) 5)
+        q (targ cb o x)
+        hi (ia o O_HI)
+        lo (ia o O_LO)]
+    (if (== major 2)
+      (do (if (and (or (!= all 0) (!= in24 0)) (< (ev-find o q EV_EMB) 0))
+            (do (let [^:mut y2 q
+                      ce (+ q lo)]
+                  (while (< y2 ce)
+                    (set y2 (uvisit o cb y2 ce (neg 1) all 0))
+                    (if (< y2 0) (return y2))))))
+          (return (+ q lo))))
+    (if (== major 6) (return (uvisit o cb q lim pstop all (if-24 o hi lo))))
+    (if (or (== major 4) (== major 5))
+      (do (let [^:mut k lo
+                ^:mut y q]
+            (if (== major 5) (set k (* 2 lo)))
+            (for [^I32 _i 0 k]
+              (set y (uvisit o cb y lim pstop all 0))
+              (if (< y 0) (return y)))
+            (if (and (and (== major 5) (> lo 0)) (!= q pstop))
+              (do (let [u (map-units o cb x q lo)]
+                    (if (< u 0) (return u))
+                    (if (> u 0)
+                      (do (let [w (ev-add o q EV_UNITS u x 0)]
+                            (if (< w 0) (return w))))))))
+            (return y))))
+    (return (tskip cb o x))))
+
+(defn ^I32 uvisit-seq [^Ints o ^BytesW cb ^I32 y0 ^I32 lim ^I32 pstop ^I32 all]
+  (let [^:mut y y0]
+    (while (< y lim)
+      (set y (uvisit o cb y lim pstop all 0))
+      (if (== y (neg 2)) (return 0))
+      (if (< y 0) (return y)))
+    (return 0)))
+
+;; ------------------------------------------------------------ the build
+
+(doc "The canonical copy (D264) of the CHECKED item b[start, end) under the"
+     "scanner's verdict `refused` (0 accepted; else its duplicate refusal, if it is"
+     "one, in o[O_S_DUP*]): the input copied to cb[0, n), the copy written from"
+     "cb[n] (o[O_S_CBASE]), then for embeds 1 (tag-24 payloads) or 2 (every byte"
+     "string: the Program has `.cbor` controls) the embedded copies, then the units,"
+     "the events sorted. Answers the copy region's end (also o[O_VLEN]; padding"
+     "included), or -CODE_SCRATCH with o[O_VNEEDW] / o[O_VNEEDB] raised.")
+(defn ^:pub ^I32 canon-build [^Bytes b ^Ints o ^BytesW cb ^I32 start ^I32 end ^I32 embeds ^I32 refused]
+  (let [n (- end start)
+        dk (ia o O_S_DUPK)
+        dp (ia o O_S_DUPP)
+        dofs (ia o O_S_DUPO)
+        all (- embeds 1)
+        mx0 (ia o O_MAX_DEPTH)]
+    (iset o O_S_NEV 0)
+    (iset o O_S_NSORT 0)
+    (iset o O_S_DLOW (ilen o))
+    (iset o O_S_RTOP (+ O_S_FIRST 8))
+    (iset o O_S_UNITS 0)
+    (if (or (< (blen cb) (+ (* 3 n) (+ (sar n 6) 1024))) (< (ilen o) (+ O_S_FIRST 256)))
+      (do (iset o O_VNEEDB (+ (* 3 n) (+ (sar n 6) 4096)))
+          (iset o O_VNEEDW (+ O_S_FIRST 1024))
+          (return (neg CODE_SCRATCH))))
+    (bcopy cb 0 b start n)
+    (iset o O_S_SBASE 0)
+    (iset o O_S_CBASE n)
+    (iset o O_S_DUPC (neg 1))
+    (iset o O_S_DUPCO (neg 1))
+    (if (and (!= refused 0) (and (> dk 0) (== (bit-and dk 4) 0)))
+      (do (iset o O_S_DUPP (- dp start))
+          (iset o O_S_DUPO (- dofs start)))
+      (do (iset o O_S_DUPP (neg 1))
+          (iset o O_S_DUPO (neg 1))))
+    (let [l (region cb o 0 n n 0 (+ n 64))
+          stop (ia o O_S_STOPP)
+          pstop (ia o O_S_PSTOP)
+          lim (lim-of stop l)]
+      (if (< l 0)
+        (do (iset o O_VNEEDB (+ (* 2 (blen cb)) 4096))
+            (return (neg CODE_SCRATCH))))
+      (if (and (!= refused 0) (and (> dk 0) (== (bit-and dk 4) 0)))
+        (do (let [w (dup-event o dk)]
+              (if (< w 0) (return w)))))
+      (iset o O_S_DUPP (neg 1))
+      (iset o O_S_DUPO (neg 1))
+      (iset o O_VLEN l)
+      (iset o O_S_CBTOP l)
+      (if (> embeds 0)
+        (do (let [^:mut y n]
+              (while (< y lim)
+                (set y (visit b o cb y lim all 0 0 mx0))
+                (if (== y (neg 2)) (set y lim))
+                (if (< y 0) (return y))))
+            (comment "embedded copies are visited in turn (each may add more)")
+            (let [^:mut j 0]
+              (while (< j (ia o O_S_NEV))
+                (let [e (+ O_S_FIRST (* EV_WORDS j))]
+                  (if (== (ia o (+ e 1)) EV_EMB)
+                    (do (let [elim (lim-of (ia o (+ e 5)) (ia o (+ e 4)))
+                              ^:mut y2 (ia o (+ e 3))]
+                          (while (< y2 elim)
+                            (set y2 (visit b o cb y2 elim all 0 0 (ia o (+ e 7))))
+                            (if (== y2 (neg 2)) (set y2 elim))
+                            (if (< y2 0) (return y2)))))))
+                (set j (+ j 1))))))
+      (comment "D277: the units, over the main copy and every embedded copy (the"
+               "events so far sorted for the lookups)")
+      (ev-sort o)
+      (let [ne (ia o O_S_NEV)
+            ru (uvisit-seq o cb n lim pstop all)]
+        (if (< ru 0) (return ru))
+        (for [^I32 j2 0 ne]
+          (let [e2 (+ O_S_FIRST (* EV_WORDS j2))]
+            (if (== (ia o (+ e2 1)) EV_EMB)
+              (do (let [rv (uvisit-seq o cb (ia o (+ e2 3)) (lim-of (ia o (+ e2 5)) (ia o (+ e2 4)))
+                                       (ia o (+ e2 6)) all)]
+                    (if (< rv 0) (return rv))))))))
+      (ev-sort o)
+      (return l))))
+
+;; ------------------------------------------------------------ offsets
+
+(defn ^I32 tskip-l [^Bytes c ^Ints o ^I32 x ^I32 lim]
+  (comment "tskip over a copy that may be partial: 2^31 - 1 when the item holds the"
+           "region's stop lim (it is not complete there).")
+  (if (== x lim) (return 2147483647))
+  (let [major (ushr (u8 c x) 5)
+        q (targ c o x)
+        lo (ia o O_LO)]
+    (if (or (== major 4) (== major 5))
+      (do (let [^:mut k lo
+                ^:mut y q]
+            (if (== major 5) (set k (* 2 lo)))
+            (for [^I32 _i 0 k]
+              (set y (tskip-l c o y lim))
+              (if (== y 2147483647) (return y)))
+            (return y))))
+    (if (== major 6) (return (tskip-l c o q lim)))
+    (return (tskip c o x))))
+
+(defn ^I32 stop-src [^IntsR o ^I32 lim]
+  (comment "The source start of the item stopped at lim (its EV_HEAD).")
+  (let [e (ev-find o lim EV_HEAD)]
+    (if (< e 0) (return (neg 1)))
+    (return (ia o (+ e 6)))))
+
+(defn ^:pub ^I32 map-back-p [^Bytes s ^Bytes c ^Ints o ^I32 xs ^I32 xc ^I32 x ^I32 lim]
+  (comment "A position x before the region's stop lim inside the copy c[xc, ...) of"
+           "the item s[xs, ...) (the copy may be partial) mapped to the source, in"
+           "lockstep (D264); the stop itself maps to the stopped item's source start.")
+  (if (and (>= lim 0) (== x lim)) (return (stop-src o lim)))
+  (let [ce (tskip-l c o xc lim)
+        major (ushr (u8 c xc) 5)
+        ch (targ c o xc)]
+    (if (>= x ce) (return (tskip s o xs)))
+    (if (or (< x ch) (or (<= major 1) (== major 7))) (return xs))
+    (if (<= major 3) (return (chunk-pos s o xs (- x ch))))
+    (if (== major 6)
+      (do (let [sx (targ s o xs)]
+            (return (map-back-p s c o sx ch x lim)))))
+    (let [^:mut sc (targ s o xs)
+          ^:mut cc ch]
+      (forever
+        (let [cn (tskip-l c o cc lim)]
+          (if (< x cn) (return (map-back-p s c o sc cc x lim)))
+          (set cc cn)
+          (set sc (tskip s o sc)))))))
+
+(defn ^I32 map-seq-p [^Bytes s ^Bytes c ^Ints o ^I32 ss ^I32 cs ^I32 ce ^I32 x ^I32 lim]
+  (comment "map-back-p for a sequence: the copy c[cs, ce) of the items from s[ss].")
+  (if (and (>= lim 0) (== x lim)) (return (stop-src o lim)))
+  (let [^:mut sc ss
+        ^:mut cc cs]
+    (while (< cc ce)
+      (let [cn (tskip-l c o cc lim)]
+        (if (< x cn) (return (map-back-p s c o sc cc x lim)))
+        (set cc cn)
+        (set sc (tskip s o sc))))
+    (return sc)))
+
+(defn ^:pub ^I32 vmap [^Bytes _b ^Bytes cb ^Ints o ^I32 start ^I32 x]
+  (comment "A position of the canonical copy (or of an embedded copy) mapped back to"
+           "the input b, whose item starts at start (events sorted).")
+  (let [n (ia o O_S_CBASE)
+        ne (ia o O_S_NEV)
+        ^:mut y x
+        ^:mut guard 0]
+    (while (< guard 64)
+      (set guard (+ guard 1))
+      (let [^:mut hit (neg 1)]
+        (for [^I32 i 0 ne]
+          (let [e (+ O_S_FIRST (* EV_WORDS i))]
+            (if (and (== (ia o (+ e 1)) EV_EMB) (and (>= y (ia o (+ e 3))) (< y (ia o (+ e 4)))))
+              (set hit e))))
+        (if (< hit 0) (break))
+        (set y (map-seq-p cb cb o (ia o hit) (ia o (+ hit 3)) (ia o (+ hit 4)) y (ia o (+ hit 5))))))
+    (if (< y n) (return (+ start y)))
+    (comment "the main stop is the first EV_HEAD in the main region, if any")
+    (let [^:mut mlim (neg 1)
+          vlen (ia o O_VLEN)]
+      (for [^I32 i2 0 ne]
+        (let [e2 (+ O_S_FIRST (* EV_WORDS i2))]
+          (if (and (and (== (ia o (+ e2 1)) EV_HEAD) (and (>= (ia o e2) n) (< (ia o e2) vlen)))
+                   (< mlim 0))
+            (set mlim (ia o e2)))))
+      (if (>= y vlen) (return (+ start n)))
+      (return (+ start (map-back-p cb cb o 0 n y mlim))))))
+
+(defn ^:pub ^I32 vsource [^Bytes b ^Bytes cb ^Ints o ^I32 start ^I32 x]
+  (comment "A replayed refusal's source offset mapped to the input: in the input's"
+           "copy directly, else (embedded content's source is a copy) by vmap.")
+  (if (<= x (ia o O_S_CBASE)) (return (+ start x)))
+  (return (vmap b cb o start x)))

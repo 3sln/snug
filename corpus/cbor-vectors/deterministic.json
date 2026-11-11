@@ -1051,6 +1051,29 @@
    "bindle": "ok"
   },
   {
+   "name": "tag 55799 nested: any depth (RFC 8949 §3.4.6, D265)",
+   "hex": "81d9d9f700",
+   "value": [
+    {
+     "$tag": 55799,
+     "value": 0
+    }
+   ],
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 55799 twice (D265)",
+   "hex": "d9d9f7d9d9f700",
+   "value": {
+    "$tag": 55799,
+    "value": {
+     "$tag": 55799,
+     "value": 0
+    }
+   },
+   "bindle": "tag"
+  },
+  {
    "name": "tag 5 (bigfloat): no content rule",
    "hex": "c5822003",
    "value": {
@@ -1365,6 +1388,19 @@
     "$tag": 82,
     "value": {
      "$bytes": "7ff8000000000001"
+    }
+   },
+   "standard": "tag",
+   "bindle": "tag"
+  },
+  {
+   "name": "tag 55799 nested under an unknown tag (D265)",
+   "hex": "d2d9d9f700",
+   "value": {
+    "$tag": 18,
+    "value": {
+     "$tag": 55799,
+     "value": 0
     }
    },
    "standard": "tag",
@@ -1897,20 +1933,6 @@
    "bindle": "tag"
   },
   {
-   "name": "tag 55799 nested",
-   "hex": "81d9d9f700",
-   "code": "tag",
-   "offset": 1,
-   "bindle": "tag"
-  },
-  {
-   "name": "tag 55799 twice",
-   "hex": "d9d9f7d9d9f700",
-   "code": "tag",
-   "offset": 3,
-   "bindle": "tag"
-  },
-  {
    "name": "a non-shortest tag head",
    "hex": "d80000",
    "code": "non_shortest",
@@ -2052,14 +2074,6 @@
    "offset": 0,
    "standard": "indefinite",
    "bindle": "indefinite"
-  },
-  {
-   "name": "tag 55799 nested under an unknown tag",
-   "hex": "d2d9d9f700",
-   "code": "tag",
-   "offset": 1,
-   "standard": "tag",
-   "bindle": "tag"
   },
   {
    "name": "unknown tags past maxDepth (32)",

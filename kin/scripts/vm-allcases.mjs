@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
 import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
 import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan } from '../../gen/js/snug/vm/api.mjs';
-import { scan, scanOptions, scanProfile, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
+import { scanCb, scanOptions, scanProfile, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
 import { buildDetCases, optWords } from './det-cases.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
 import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
@@ -22,7 +22,7 @@ export const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
 export const LIM = (top, cose, mb = -1, md = -1, me = -1, mi = -1, bn = -1, bu = -1, pf = 0) => [top, cose, mb, md, me, mi, bn, bu, 0, pf];
 
 /** Every vm-test case: {programs: [{P, B, label}], cases: [{prog, rule, lim, bytes, label, check, span?, identity?, corpus?, oracle?}], ...}. */
-export function buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail }) {
+export function buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid = false }) {
 const programs = [];     // {P, B, label}
 const cases = [];        // {prog, rule, lim, bytes, label, check(out) -> string|null, span?}
 function addProgram(P, B, label) {
@@ -50,7 +50,17 @@ for (const [h, w] of want15) cases.push({ prog: ex, rule: 0, lim: LIM(1, 0), byt
 const anyC = compile('r = any', { limits: { depth: 256, inputBytes: 0x7fffffff, entries: 1 << 24, items: 1 << 24, budget: 0x7fffffff } });
 const anyP = addProgram(anyC.program, anyC.pool, 'any');
 const sc = buildCases(MUTATIONS, SEED);
-const o16 = new Int32Array(16);
+// The scanner with its scratch and canonical buffer (P8.4, D264), grown on CODE_SCRATCH (22).
+let o16 = new Int32Array(16 + 64), scb = new Uint8Array(64);
+function scan(bytes, o) {
+  for (;;) {
+    const c = scanCb(bytes, o16, scb);
+    if (c !== 22) return c;
+    const keep = o16.slice(0, 16);
+    if (o16[13] > o16.length) { o16 = new Int32Array(Math.max(o16[13], 2 * o16.length)); o16.set(keep); }
+    if (o16[14] > scb.length) scb = new Uint8Array(Math.max(o16[14], 2 * scb.length));
+  }
+}
 const clamp = n => Math.min(n, 0x7fffffff);
 let nIdentity = 0;
 for (const c of sc.cases) {
@@ -109,7 +119,7 @@ typed = #6.69(bstr) / #6.70(bstr) / #6.71(bstr) / #6.72(bstr) / #6.77(bstr) / #6
 const live2C = compile(LIVE2, { limits: { depth: 256, inputBytes: 0x7fffffff, entries: 1 << 24, items: 1 << 24, budget: 0x7fffffff } });
 const live2P = addProgram(live2C.program, live2C.pool, 'live profile options');
 const live2Rule = live2C.rules.indexOf('r');
-const dc = buildDetCases(Math.max(1500, Math.round(MUTATIONS / 2)), SEED);
+const dc = buildDetCases(Math.max(1500, Math.round(MUTATIONS / 2)), SEED, { valid });
 for (const c of dc.cases) {
   const opt = c.opt;
   scanOptions(o16, ...optWords(opt)); scanProfile(o16, opt.flags);

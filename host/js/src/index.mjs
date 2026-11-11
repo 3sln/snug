@@ -8,6 +8,6 @@ export { LIMITS } from './limits.mjs';
 export { profiles } from './profiles.mjs';
 
 export function decode(bytes, options = {}) {
-  scan(bytes, options);
-  return build(bytes, options);
+  // scan answers the bytes to build from: the input, or its canonical copy (P8.4, D262)
+  return build(scan(bytes, options), options);
 }

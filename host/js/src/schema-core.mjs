@@ -5,7 +5,8 @@
 // synchronous validation holds one shared scratch for the duration of a call)
 // and the rendering of results (reason names, paths rendered from the
 // Program's key table only, §9.3).
-import { vmScratchWords, vmScratchInit, vmRuleIndex, vmValidate, vmValidateSpan, vmValidateX, vmValidateSpanX } from '../../../gen/js/snug/vm/api.mjs';
+import { vmScratchWords, vmScratchInit, vmRuleIndex, vmValidateV, vmValidateSpanV } from '../../../gen/js/snug/vm/api.mjs';
+import { VC_NONDET, VC_UNSORTED, O_S_CBASE } from '../../../gen/js/snug/cbor/codes.mjs';
 import { bindControls, rethrow } from './ext.mjs';
 import { codeName } from '../../../gen/js/snug/cbor/scan.mjs';
 import { build } from './build.mjs';
@@ -26,6 +27,10 @@ export function reasonName(code) {
 // than allowing it to corrupt the shared scratch.
 let scratch = new Int32Array(0), markCap = 0, leased = false;
 const out = new Int32Array(8 + 2 * 257);
+// P8.4 (D264): the canonical path's buffers (vs: the scanner's options and scratch, and the embedded table;
+// cb: the canonical copy), grown when the VM answers -5 with the sizes it needs in out[5..7].
+let vs = new Int32Array(512), cb = new Uint8Array(1024);
+const noExt = (_i, _p, _ao, _al, _b, _s, _e, _r) => -2;
 function lease(P, rule) {
   if (leased) throw new Error('snug: scratch already leased (re-entrant validation)');
   const cap = Math.max(markCap, P[16]);
@@ -84,20 +89,30 @@ export class Program {
     if (major === 3) return td.decode(b.subarray(h, h + arg));
     return major === 0 ? arg : -1 - arg;
   }
-  /** Low level: run the VM; answers the out words (code first) as a fresh array. */
-  run(rule, bytes, opts, span) {
-    const S = lease(this.P, rule), x = this.ext;
+  /** Low level: run the VM; answers the out words (code first) as a fresh array. With `copy`, also sets
+   * copy.bytes to the canonical copy the VM validated when the input is valid but not its own deterministic form
+   * (P8.4, D262), else leaves it undefined. */
+  run(rule, bytes, opts, span, copy) {
+    let S = lease(this.P, rule);
+    const x = this.ext, call = x ? x.call : noExt, lw = limitWords(opts);
     let o;
     try {
-      const c = x
-        ? (span
-          ? vmValidateSpanX(this.P, this.B, rule, bytes, span.start, span.end, span.depth ?? 0, span.items ?? 0, limitWords(opts), S, out, x.call)
-          : vmValidateX(this.P, this.B, rule, bytes, limitWords(opts), S, out, x.call))
-        : (span
-          ? vmValidateSpan(this.P, this.B, rule, bytes, span.start, span.end, span.depth ?? 0, span.items ?? 0, limitWords(opts), S, out)
-          : vmValidate(this.P, this.B, rule, bytes, limitWords(opts), S, out));
+      let c;
+      for (;;) {
+        c = span
+          ? vmValidateSpanV(this.P, this.B, rule, bytes, span.start, span.end, span.depth ?? 0, span.items ?? 0, lw, S, out, call, vs, cb)
+          : vmValidateV(this.P, this.B, rule, bytes, lw, S, out, call, vs, cb);
+        if (c !== -5) break;
+        if (out[5] > vs.length) vs = new Int32Array(Math.max(out[5], 2 * vs.length));
+        if (out[6] > cb.length) cb = new Uint8Array(Math.max(out[6], 2 * cb.length));
+        if (out[7] > S.length) { const g = new Int32Array(out[7]); g.set(S); scratch = S = g; }
+      }
       if (c < 0 && !(x && x.failure)) throw new Error(`snug: vm-validate answered ${c}`);
       o = out.slice(0, 8 + 2 * out[6]);
+      if (copy && o[0] === 0 && vs[15] >= 0) {
+        if ((vs[12] & VC_NONDET) !== 0) copy.bytes = cb.slice(vs[O_S_CBASE], vs[15]);
+        copy.unsorted = (vs[12] & VC_UNSORTED) !== 0;
+      }
     } finally { leased = false; }
     rethrow(x);
     return o;
@@ -150,9 +165,16 @@ export class Schema {
     asBytes(bytes);
     if (typeof SharedArrayBuffer !== 'undefined' && bytes.buffer instanceof SharedArrayBuffer)
       throw new TypeError('snug: SharedArrayBuffer input is refused (architecture §8)');
-    const r = this.validate(bytes, rule, opts);
+    const copy = {};
+    const r = this.check(bytes, rule, opts, copy);
     if (!r.ok) { const e = new Error(`snug: ${r.reason}`); e.reason = r.reason; e.path = r.path; e.offset = r.offset; if (r.subcode) e.subcode = r.subcode; throw e; }
-    return build(bytes, opts);
+    return build(copy.bytes ?? bytes, opts);
+  }
+  /** INTERNAL: validate, setting copy.bytes to the canonical copy when the input is valid but not its own
+   * deterministic form (P8.4): decode and views build from it. */
+  check(bytes, rule, opts, copy) {
+    validateOptions(opts, 'validation');
+    return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), opts, undefined, copy));
   }
 }
 

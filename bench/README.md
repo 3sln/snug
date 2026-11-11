@@ -496,3 +496,64 @@ Both accepted and spent **1,572,297 compile units**. This single loaded pair
 is diagnostic evidence, not a latency estimate or a performance improvement
 claim. Raw record: `.cache/p83-fuzz-load.json`; gate logs:
 `.cache/p83-compile-fuzz-first.log`, `.cache/p83-compile-fuzz.log`.
+
+## Valid CBOR (P8.4, D269 / D286) — 2026-11-11
+
+**Question:** what does the valid-CBOR machinery cost on deterministic input,
+what does the canonical path cost, and is the deterministic-only fast path
+(the VM's attempt over the input before the canonical copy, D262) material?
+**Machine:** Apple M1 Pro (10 cores, 32 GiB), macOS 14.6.1, **shared** (1-minute
+load average 12–15 for the VM and codec runs, 8 for the session runs; other
+agents' builds). **Runtime:** Node v24.6.0 (V8 13.6.233.10-node.24),
+`--single-threaded-gc`. **Trees:** `main` = `c48ac45` (detached worktree), p84 =
+the P8.4 increment (`.cache/p84rb`). **Method:** one tree and one arm per process
+(bench/README.md#profile-options-p71), `process.threadCpuUsage`, µs per call,
+median of 9 trials; three processes per arm, arms rotated per round; the table
+gives the median of the three process medians and the ratio to `main`'s
+deterministic run. `nondet` inputs are the same values re-encoded valid but not
+deterministic (indefinite arrays and maps, keys reversed, integers 0..23 with a
+one-byte argument).
+
+VM level — `node --single-threaded-gc bench/valid-vm-bench.mjs <tree> <arm> 9`
+(scanner `scanCb`; buffer driver `vmValidateV` against a typed schema; `canon` =
+`vmCanon` forced, i.e. the canonical path without the attempt; sessions = whole
+windows through `kin/scripts/vmsession-run.mjs`):
+
+| Workload | scan main | det | valid | nondet | VM main | det | valid | canon (no attempt) | nondet | session main | det | valid | nondet |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| RPC put (small) | 0.8 | 1.45 | 1.58 | 5.29 | 8.3 | 1.05 | 1.20 | **2.29** | 5.37 | 13.2 | 1.13 | 1.27 | 3.34 |
+| 20000 integers | 409 | 1.01 | 1.02 | 1.31 | 476 | 0.96 | 0.99 | **6.92** | 7.47 | 377 | 1.44 | 1.43 | 8.23 |
+| 2000 maps × 8 keys | 808 | 0.94 | 1.17 | 4.41 | 3,177 | 1.03 | 0.94 | **3.29** | 5.96 | 2,296 | 1.39 | 1.43 | 23.0 |
+| map-heavy (2000 records) | 1,136 | 0.99 | 0.97 | 3.47 | 7,691 | 1.03 | 0.96 | **2.29** | 4.21 | 5,952 | 1.19 | 1.11 | 13.3 |
+| 5000 floats | 151 | 0.80 | 0.79 | 1.03 | 523 | 1.08 | 0.92 | **2.87** | 3.19 | 369 | 1.30 | 1.41 | 2.94 |
+| 5000 strings | 556 | 0.95 | 0.99 | 1.17 | 491 | 1.04 | 0.99 | **4.72** | 5.47 | 411 | 1.35 | 1.29 | 5.86 |
+
+(`main` columns in µs; the others are ratios to them.)
+
+Codec — `node --single-threaded-gc bench/valid-bench.mjs <tree> <preset> 9 [nondet]`
+(public `decode`, `scan`, `encode`, compiled-schema `validate`; ratios to `main`'s
+deterministic preset):
+
+| Workload | op | main µs | p84 deterministic | p84 valid | p84 valid, nondet input |
+| --- | --- | ---: | ---: | ---: | ---: |
+| RPC put (small) | decode / scan / validate | 6.4 / 2.9 / 14.6 | 1.16 / 1.04 / 0.53 | 0.97 / 1.11 / 0.71 | 1.65 / 2.97 / 1.78 |
+| 120000 integers | decode / scan / validate | 5,128 / 3,085 / 2,933 | 1.00 / 0.99 / 1.01 | 1.06 / 1.10 / 1.02 | 2.26 / 3.45 / 8.22 |
+| 10000 maps × 8 keys | decode / scan / validate | 17,907 / 3,983 / 16,512 | 0.72 / 1.10 / 1.03 | 0.88 / 1.18 / 1.01 | 2.13 / 7.74 / 5.30 |
+| map-heavy document | decode / scan / validate | 26,296 / 5,972 / 37,451 | 0.94 / 1.11 / 1.05 | 0.93 / 1.07 / 0.91 | 2.30 / 7.06 / 3.68 |
+| 5000 floats | decode / scan / validate | 202 / 117 / 555 | 1.08 / 1.09 / 1.01 | 1.16 / 1.17 / 0.98 | 2.24 / 3.19 / 2.51 |
+| 5000 strings | decode / scan / validate | 1,860 / 623 / 485 | 1.08 / 0.94 / 1.05 | 0.93 / 0.88 / 1.10 | 1.18 / 1.95 / 5.09 |
+
+Encode (deterministic output under every preset): 0.84–1.05 of `main`.
+
+**Reading.** (1) Deterministic input costs about the same as before P8.4 on the
+scanner, the buffer driver and the codec under both presets (0.8–1.2, inside
+this machine's run-to-run spread; the small RPC scan's 1.45–1.58 is 0.3 µs of
+fixed set-up in `scanCb`). (2) The deterministic-only fast path is material:
+forcing the canonical path on deterministic input (`canon`) costs 2.3–6.9× the
+attempt, so the attempt stays (D286). (3) Sessions on deterministic input cost
+1.1–1.4× `main` after the structural pre-check (`skim`, before it 1.2–2.0×): the
+session decides per whole item between the walk in place and the copy before it
+walks (D283), the buffer driver after. (4) Non-deterministic input is 1.2–8×
+(codec, VM) and up to 23× for sessions over many small reordered maps (whole
+items: the scanner pass, the copy and the deferred duplicate checks); recorded,
+not optimised in P8.4.

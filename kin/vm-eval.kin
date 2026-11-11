@@ -19,6 +19,7 @@
             [snug.lang :refer [I32 Bool Bytes Ints IntsR Ext + - * neg shl sar ushr bit-and bit-or bit-xor
                                < > <= >= == != and or not u8 ia iset blen ext-call]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_KEY_TYPE CODE_TAG CODE_DEPTH
+                                     CODE_NON_SHORTEST CODE_INDEFINITE CODE_KEY_ORDER PF_VREL PF_CANON
                                      CODE_TOO_MANY_ITEMS CODE_DECIMAL CODE_NDARRAY CODE_TRAILING
                                      O_COSE O_MAX_DEPTH O_MAX_ITEMS O_ITEMS O_HI O_LO O_CSTART
                                      O_ERR_POS O_PROFILE]]
@@ -36,12 +37,13 @@
                                     P_ANYKEY P_TAG P_EMBED P_EMBEDSEQ CTX_KEY CTX_SIMPLE VM_GENERIC VM_FASTM
                                     INF H_S_TS_INDEX H_S_GROUP_INDEX H_S_INTERVALS K_INT K_TEXT
                                     R_RANGE R_SIZE VM_BUDGET VM_FASTK MODE_ABSORB K_ANY K_MAJOR
-                                    VM_FASTP VM_FASTL VM_POS]]
+                                    VM_FASTP VM_FASTL VM_POS R_NONDET VM_VTAB]]
             [snug.vm.base :refer [charge c8 c64min new-epoch sched2 free-on free-off q-add q-filter q-stamp ts-test q-flag q-set-flag
                                   q-kind q-leaf-base cset-rec next-ck cset-width cset-frame
                                   wit-empty wit-clear wit-set path-put rule1]]
-            [snug.vm.dead :refer [dead-item dead-seq key-order dead-int-streak dead-map-pairs dead-array-elems dead-typed dead-bignum dead-pair-body
-                                  pair-check decimal-check ndarray-check dead-std-check]]
+            [snug.vm.dead :refer [head-fail dead-item dead-seq key-order dead-int-streak dead-map-pairs dead-array-elems dead-typed dead-bignum
+                                  pair-check decimal-check ndarray-check dead-std-check vtab-find
+                                  pair-walk pair-count replay-end replay-key]]
             [snug.vm.leaf :refer [eval-scalars scalar-kind cmp-u64 eval-leaf cmp-point]]
             [snug.vm.map :refer [leaf-map block-mt map-block-init key-span-end key-search map-cursor
                                  m-pools m-alts m-lits m-keys m-names group-rec named-rec key-probe
@@ -300,15 +302,31 @@
     (iset s O_MAX_DEPTH nm)
     (iset s O_COSE 0)
     (iset s VM_EMBED (+ (ia s VM_EMBED) 1))
-    (local ^I32 r)
-    (if (== seq 1)
-      (if (> cnq 0)
-        (set r (eval-array p pool b s cs cs (neg 1) (+ d 1) cfb cck cnq ce 0 ext))
-        (set r (dead-seq b s cs (+ d 2) ce)))
-      (if (> cnq 0)
-        (set r (eval-item p pool b s cs (+ d 1) cfb cck cnq ce 0 ext))
-        (set r (dead-item b s cs (+ d 1) ce))))
+    (local ^:mut ^I32 r)
+    (comment "P8.4 (D264): over a canonical copy the content's embedded-table entry --"
+             "its duplicate checks charged, then its own copy walked, or the refusal its"
+             "check recorded")
+    (let [ve (vtab-find s cs)
+          ^:mut wcs cs
+          ^:mut wce ce]
+      (if (>= ve 0)
+        (do (set wcs (ia s (+ ve 3)))
+            (set wce (ia s (+ ve 4)))))
+      (if (== seq 1)
+        (if (> cnq 0)
+          (set r (eval-array p pool b s wcs wcs (neg 1) (+ d 1) cfb cck cnq wce 0 ext))
+          (set r (dead-seq b s wcs (+ d 2) wce)))
+        (if (> cnq 0)
+          (set r (eval-item p pool b s wcs (+ d 1) cfb cck cnq wce 0 ext))
+          (set r (dead-item b s wcs (+ d 1) wce))))
+      (if (and (== seq 0) (and (>= r 0) (== r wce))) (set r ce)))
     (if (or (== r (neg R_BUDGET)) (== r (neg R_INCONSISTENT))) (return r))
+    (comment "the deterministic attempt of a valid-CBOR run (PF_VREL) meeting content only"
+             "valid CBOR has: the run takes the canonical path (D262)")
+    (if (and (!= (bit-and (ia s O_PROFILE) PF_VREL) 0)
+             (or (== r (neg CODE_NON_SHORTEST)) (or (== r (neg CODE_INDEFINITE)) (== r (neg CODE_KEY_ORDER)))))
+      (return (neg R_NONDET)))
+    (if (== r (neg R_NONDET)) (return r))
     (let [ierr (ia s O_ERR_POS)]
       (iset s O_ITEMS items)
       (iset s O_MAX_DEPTH maxd)
@@ -550,7 +568,7 @@
                 ^:mut q0 (+ pos 1)]
             (if (>= ai0 24)
               (do (set q0 (read-arg b s pos ai0 end))
-                  (if (< q0 0) (return q0))
+                  (if (< q0 0) (return (head-fail b s pos ai0 d q0)))
                   (set hi0 (ia s O_HI))
                   (set lo0 (ia s O_LO))))
             (let [rc (enter-container s pos q0 hi0 lo0 d (- major 4) end)]
@@ -587,7 +605,7 @@
           (do (set stop (scan-float b s pos ai end))
               (if (< stop 0) (return stop)))
           (do (set q (read-arg b s pos ai end))
-              (if (< q 0) (return q))
+              (if (< q 0) (return (head-fail b s pos ai d q)))
               (set hi (ia s O_HI))
               (set lo (ia s O_LO))
               (set cs q)
@@ -703,7 +721,9 @@
               (if (< pc 0) (return pc)))
             (if (> cnq 0)
               (set stop (eval-item p pool b s q (+ d 1) cfb cck cnq end 0 ext))
-              (set stop (dead-pair-body b s q d end)))
+              (set stop (pair-walk b s q d end)))
+            (if (< stop 0) (return stop))
+            (set stop (pair-count b s pos q (if-code rt) stop))
             (if (< stop 0) (return stop))
             (if (== rt 4)
               (set stop (decimal-check b s pos q stop))
@@ -907,6 +927,9 @@
                 (set q r))))))
         (if (== el 0) (set q1 q))
         (set el (+ el 1))))
+    (if (!= (ia s VM_VTAB) 0)
+      (do (let [rea (replay-end s q0)]
+            (if (< rea 0) (return rea)))))
     (let [^:mut be area]
       (for [^I32 _bk 0 nb]
         (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
@@ -985,6 +1008,9 @@
       (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
     (let [ko (key-order b s ps pe start kq)]
       (if (< ko 0) (return ko)))
+    (if (!= (ia s VM_VTAB) 0)
+      (do (let [rkf (replay-key s start)]
+            (if (< rkf 0) (return rkf)))))
     (iset s VM_FASTK kq)
     (iset s (+ (+ bo pso) 2) 0)
     (if (== mode 1)
@@ -1241,6 +1267,13 @@
       (set bo (+ bo (ia p (+ (block-mt p s fb bo) 6)))))
     (return k)))
 
+(defn ^:pub cursors-reset [^IntsR p ^Ints s ^I32 fb ^I32 area ^I32 nb]
+  (comment "Every map block's key cursor back to the first key (P8.4, PF_CANON).")
+  (let [^:mut bo area]
+    (for [^I32 _i 0 nb]
+      (iset s (+ bo 2) 0)
+      (set bo (+ bo (ia p (+ (block-mt p s fb bo) 6)))))))
+
 (defn ^:pub ^I32 eval-map [^IntsR p ^Bytes pool ^Bytes b ^Ints s ^I32 pos ^I32 q0 ^I32 n
                            ^I32 d ^I32 fb ^I32 ck ^I32 nq ^I32 end ^I32 ctx ^Ext ext]
   (comment "A map item (§8.3) after its head and container checks. Per pair: the"
@@ -1322,6 +1355,9 @@
                     (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
                   (let [kod (key-order b s ps pe start q)]
                     (if (< kod 0) (return kod)))
+                  (if (!= (ia s VM_VTAB) 0)
+                    (do (let [rkd (replay-key s start)]
+                          (if (< rkd 0) (return rkd)))))
                   (set ps start)
                   (set pe q)
                   (set q (dead-item b s q (+ d 1) end))
@@ -1337,7 +1373,14 @@
                     (local ^I32 kq)
                     (local ^I32 vq)
                     (local ^:mut ^I32 bo)
-                    (comment "The key's id in the schema-wide key table.")
+                    (comment "The key's id in the schema-wide key table. Over a canonical"
+                             "copy (PF_CANON, P8.4) keys come in wire order: a key below the"
+                             "previous one restarts the search bound and every block's"
+                             "cursor (uncharged; the session does the same, D266).")
+                    (if (and (> ke start) (and (>= ps 0) (!= (bit-and (ia s O_PROFILE) PF_CANON) 0)))
+                      (if (>= (compare-spans b ps pe start ke) 0)
+                        (do (set klo 0)
+                            (cursors-reset p s fb area nb))))
                     (if (> ke start)
                       (do (set kid (key-search p pool b s start ke klo pos))
                           (if (== kid (neg 2)) (return (neg R_BUDGET)))
@@ -1392,6 +1435,9 @@
                       (if (not (key-label b s start km)) (return (fail s start CODE_KEY_TYPE))))
                     (let [ko (key-order b s ps pe start kq)]
                       (if (< ko 0) (return ko)))
+                    (if (!= (ia s VM_VTAB) 0)
+                      (do (let [rk (replay-key s start)]
+                            (if (< rk 0) (return rk)))))
                     (set ps start)
                     (set pe kq)
                     (comment "Key phase: candidates.")
@@ -1464,6 +1510,11 @@
                           (wit-set s R_UNEXPECTED 0 (+ d 1) (neg 1) 0 start))))
                     (set q vq)))))))))
         (set pk (+ pk 1))))
+    (comment "Over a canonical copy: the map's deferred-check units and a recorded"
+             "refusal, before its end (D277, D280).")
+    (if (!= (ia s VM_VTAB) 0)
+      (do (let [rem (replay-end s q0)]
+            (if (< rem 0) (return rem)))))
     (comment "The end: 1 unit per block; alive blocks + 1 per alternative and pool.")
     (let [^:mut be area
           ^:mut best (neg 1)
@@ -1529,7 +1580,7 @@
                     (if (< ff 0) (return ff)))
                   (return stop))))
           (set q (read-arg b s pos ai end))
-          (if (< q 0) (return q))
+          (if (< q 0) (return (head-fail b s pos ai d q)))
           (set hi (ia s O_HI))
           (set lo (ia s O_LO))))
     (if (== major 4)

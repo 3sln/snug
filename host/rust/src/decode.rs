@@ -5,7 +5,9 @@
 //! assert_eq!(decode(&[0x18, 42], &DecodeOptions::any())?, Value::Uint(42));
 //! # Ok::<(), snug::Error>(())
 //! ```
-use crate::snug::cbor::scan::{code_name, error_offset, scan, scan_options, scan_profile};
+use crate::snug::cbor::scan::{code_name, error_offset, scan_cb, scan_options, scan_profile};
+use crate::snug::cbor::canon::dc_copy;
+use crate::snug::cbor::codes::{CODE_SCRATCH, VC_NONDET, VC_UNSORTED};
 use crate::{Error, Integer, TypedArray, Value};
 
 /// Permitted root shape. [`DecodeOptions::default`] (the deterministic preset)
@@ -70,15 +72,29 @@ pub struct Profile {
     pub undefined_value: bool,
     /// Unicode noncharacters in text.
     pub noncharacters: bool,
+    /// Valid, non-deterministic CBOR (P8.4, D260): indefinite lengths, longer
+    /// heads and floats than needed, NaN payloads, keys in any order.
+    pub valid: bool,
 }
 impl Profile {
-    /// The deterministic preset (the default).
+    /// The valid preset (D260): the deterministic preset's options, admitting
+    /// every valid encoding (RFC 8949 §5.3).
+    pub const VALID: Profile = Profile {
+        keys: Keys::Any,
+        tags: Tags::Any,
+        floats: Floats::Deterministic,
+        undefined_value: true,
+        noncharacters: true,
+        valid: true,
+    };
+    /// The deterministic preset (RFC 8949 §4.2.1 checking).
     pub const DETERMINISTIC: Profile = Profile {
         keys: Keys::Any,
         tags: Tags::Any,
         floats: Floats::Deterministic,
         undefined_value: true,
         noncharacters: true,
+        valid: false,
     };
     /// The Bindle profile, bit for bit as before P7.1.
     pub const BINDLE: Profile = Profile {
@@ -87,6 +103,7 @@ impl Profile {
         floats: Floats::Bindle,
         undefined_value: false,
         noncharacters: false,
+        valid: false,
     };
     /// The kin profile flags (snug.cbor.codes PF_*).
     pub fn flags(&self) -> i32 {
@@ -104,6 +121,7 @@ impl Profile {
             | if self.floats == Floats::Deterministic { 16 } else { 0 }
             | if self.undefined_value { 32 } else { 0 }
             | if self.noncharacters { 64 } else { 0 }
+            | if self.valid { 256 } else { 0 }
     }
 }
 impl Default for Profile {
@@ -187,38 +205,83 @@ impl DecodeOptions {
         Self::default()
     }
 }
-pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<(), Error> {
+/// What a successful check found (P8.4): the canonical copy when valid input is
+/// not its own deterministic form (wire order kept), and whether some map's
+/// keys may be out of canonical order.
+pub(crate) struct Checked {
+    pub(crate) copy: Option<Vec<u8>>,
+    pub(crate) unsorted: bool,
+}
+pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<Checked, Error> {
     options.limits.check()?;
     if bytes.len() >= i32::MAX as usize {
         return Err(Error::cbor("too_large"));
     }
     let l = options.limits;
-    let mut o = [0; crate::snug::cbor::codes::SCAN_OPTS_LEN as usize];
-    scan_options(
-        &mut o,
-        (options.top == Top::Any) as i32,
-        options.cose as i32,
-        l.max_bytes as i32,
-        l.max_depth as i32,
-        l.max_entries as i32,
-        l.max_items as i32,
-    );
-    scan_profile(&mut o, options.profile.flags());
-    let code = scan(bytes, &mut o);
-    if code == 0 {
-        Ok(())
-    } else {
-        Err(Error::Cbor {
-            code: code_name(code),
-            offset: usize::try_from(error_offset(&mut o)).ok(),
-        })
+    // The options array's scratch past its 16 frozen words and the canonical
+    // buffer (D264), grown on CODE_SCRATCH to the sizes kin asks for.
+    let (mut o, mut cb) = (vec![0i32; 16 + 512], vec![0u8; 1024]);
+    let grow = |o: &mut Vec<i32>, cb: &mut Vec<u8>| {
+        let keep: Vec<i32> = o[..16].to_vec();
+        if o[13] as usize > o.len() {
+            *o = vec![0; (o[13] as usize).max(2 * o.len())];
+            o[..16].copy_from_slice(&keep);
+        }
+        if o[14] as usize > cb.len() {
+            *cb = vec![0; (o[14] as usize).max(2 * cb.len())];
+        }
+    };
+    loop {
+        scan_options(
+            &mut o,
+            (options.top == Top::Any) as i32,
+            options.cose as i32,
+            l.max_bytes as i32,
+            l.max_depth as i32,
+            l.max_entries as i32,
+            l.max_items as i32,
+        );
+        scan_profile(&mut o, options.profile.flags());
+        let code = scan_cb(bytes, &mut o, &mut cb);
+        if code == CODE_SCRATCH {
+            grow(&mut o, &mut cb);
+            continue;
+        }
+        if code != 0 {
+            return Err(Error::Cbor {
+                code: code_name(code),
+                offset: usize::try_from(error_offset(&mut o)).ok(),
+            });
+        }
+        break;
+    }
+    let unsorted = o[12] & VC_UNSORTED != 0;
+    if o[12] & VC_NONDET == 0 {
+        return Ok(Checked { copy: None, unsorted });
+    }
+    // The DC form of the accepted input (canon.kin dc-copy: the input, then its form).
+    let n = bytes.len();
+    let need = 2 * n + (n >> 7) + 64;
+    if cb.len() < need {
+        cb = vec![0; need];
+    }
+    loop {
+        let l = dc_copy(bytes, &mut o, &mut cb);
+        if l >= 0 {
+            cb.truncate(l as usize);
+            cb.drain(..n);
+            return Ok(Checked { copy: Some(cb), unsorted });
+        }
+        let m = 2 * cb.len();
+        cb = vec![0; m];
     }
 }
-/// Decode one complete deterministic CBOR document. Byte strings and typed
-/// arrays are owned copies. No partial value escapes a refused document.
+/// Decode one complete CBOR document (valid input under the valid preset is
+/// read through its canonical copy). Byte strings and typed arrays are owned
+/// copies. No partial value escapes a refused document.
 pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Value, Error> {
-    check(bytes, options)?;
-    build(bytes)
+    let c = check(bytes, options)?;
+    build(c.copy.as_deref().unwrap_or(bytes))
 }
 
 pub(crate) fn build(bytes: &[u8]) -> Result<Value, Error> {
@@ -315,14 +378,12 @@ impl<'a> Builder<'a> {
                         negative: n == 3,
                         magnitude,
                     },
-                    (4, Value::Array(a)) => {
+                    // D265/D267: Decimal and NDArray only for content inside their
+                    // Bindle invariants; other valid tag-4/40 content stays a Tag.
+                    (4, Value::Array(a)) if decimal_ok(&a) => {
                         let mut it = a.into_iter();
                         let exp = match it.next() {
-                            Some(Value::Uint(e)) => {
-                                i64::try_from(e).map_err(|_| Error::Internal)?
-                            }
-                            Some(Value::Nint(e)) => i64::try_from(-1i128 - i128::from(e))
-                                .map_err(|_| Error::Internal)?,
+                            Some(Value::Nint(e)) => -1 - e as i64,
                             _ => return Err(Error::Internal),
                         };
                         Value::Decimal {
@@ -330,7 +391,7 @@ impl<'a> Builder<'a> {
                             mantissa: Self::integer(it.next().ok_or(Error::Internal)?)?,
                         }
                     }
-                    (40, Value::Array(a)) => {
+                    (40, Value::Array(a)) if ndarray_ok(&a) => {
                         let mut it = a.into_iter();
                         let shape = match it.next() {
                             Some(Value::Array(a)) => a
@@ -366,6 +427,32 @@ impl<'a> Builder<'a> {
             _ => return Err(Error::Internal),
         })
     }
+}
+fn decimal_ok(a: &[Value]) -> bool {
+    // exponent -1024..-1; mantissa an integer or bignum, non-zero, not divisible by 10
+    let e = match a.first() {
+        Some(Value::Nint(n)) if *n <= 1023 => *n,
+        _ => return false,
+    };
+    let _ = e;
+    let m10 = |b: &[u8]| b.iter().fold(0u32, |r, &x| (r * 256 + u32::from(x)) % 10);
+    match a.get(1) {
+        Some(Value::Uint(m)) => *m != 0 && m % 10 != 0,
+        Some(Value::Nint(m)) => (m % 10 + 1) % 10 != 0,
+        Some(Value::BigInt { negative, magnitude }) => {
+            let r = m10(magnitude);
+            if *negative { (r + 1) % 10 != 0 } else { magnitude.iter().any(|&x| x != 0) && r != 0 }
+        }
+        _ => false,
+    }
+}
+fn ndarray_ok(a: &[Value]) -> bool {
+    let shape_ok = match a.first() {
+        Some(Value::Array(s)) => !s.is_empty() && s.len() <= 8
+            && s.iter().all(|d| matches!(d, Value::Uint(n) if *n > 0 && *n < (1u64 << 53))),
+        _ => false,
+    };
+    shape_ok && matches!(a.get(1), Some(Value::Array(_)) | Some(Value::TypedArray(_)))
 }
 pub(crate) fn half(n: u16) -> f64 {
     let sign = if n & 0x8000 == 0 { 1.0 } else { -1.0 };

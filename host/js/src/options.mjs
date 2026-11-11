@@ -4,7 +4,7 @@ const boolean = value => typeof value === 'boolean';
 const enumeration = (...values) => value => typeof value === 'string' && values.includes(value);
 const limits = { maxBytes: integer, maxDepth: integer, maxEntries: integer, maxItems: integer };
 const preset = {
-  wire: enumeration('deterministic', 'bindle'), keys: enumeration('text', 'integer', 'any'),
+  wire: enumeration('valid', 'deterministic', 'bindle'), keys: enumeration('text', 'integer', 'any'),
   tags: enumeration('bindle', 'standard', 'any'), floats: enumeration('bindle', 'deterministic'),
   undefinedValue: boolean, noncharacters: boolean, top: enumeration('map', 'any'), cose: boolean,
   // Presets can be spread across all runtime operations; strictArrays only affects writing.

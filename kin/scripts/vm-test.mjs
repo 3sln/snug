@@ -22,7 +22,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
 import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
-import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan, vmValidateX, vmValidateSpanX } from '../../gen/js/snug/vm/api.mjs';
+import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidateV, vmValidateSpanV } from '../../gen/js/snug/vm/api.mjs';
 import { extFor, testControls } from './ext-cases.mjs';
 import { controlEntries } from '../../host/js/src/ext.mjs';
 import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
@@ -41,9 +41,11 @@ let fails = 0;
 const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); fails++; };
 
 // ---------------------------------------------------------------- programs and the JS runner
-const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail });
+const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
 let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
+let vvs = new Int32Array(64), vcb = new Uint8Array(64);
+const noExt = (_i, _p, _ao, _al, _b, _s, _e, _r) => -2;
 function runJs(c, trap = false, generic = false, s1 = false) {
   const { P, B } = programs[c.prog];
   const cap = Math.max(markCap, P[16]);
@@ -52,13 +54,17 @@ function runJs(c, trap = false, generic = false, s1 = false) {
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
   const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0), c.lim[9] ?? 0]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default); word 9: the profile flags (D120)
-  const x = extFor(P, B);   // P7.2: a Program using extension controls gets the test registry's predicates
-  const code = x
-    ? (c.span ? vmValidateSpanX(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out, x)
-      : vmValidateX(p, b, c.rule, input, lim, s, out, x))
-    : c.span
-    ? vmValidateSpan(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out)
-    : vmValidate(p, b, c.rule, input, lim, s, out);
+  const x = extFor(P, B) ?? noExt;   // P7.2: a Program using extension controls gets the test registry's predicates
+  // P8.4 (D264): the canonical path's buffers, grown on -5 as the hosts grow them
+  let code;
+  for (;;) {
+    code = c.span ? vmValidateSpanV(p, b, c.rule, input, c.span[0], c.span[1], c.span[2], c.span[3], lim, s, out, x, vvs, vcb)
+      : vmValidateV(p, b, c.rule, input, lim, s, out, x, vvs, vcb);
+    if (code !== -5) break;
+    if (out[5] > vvs.length) vvs = new Int32Array(out[5]);
+    if (out[6] > vcb.length) vcb = new Uint8Array(out[6]);
+    if (out[7] > scratch.length) { const g = new Int32Array(out[7]); g.set(scratch); scratch = g; s = trap ? guard(scratch, 'S') : scratch; }
+  }
   if (code < 0) return `ERR ${code}`;
   return Array.from(out.slice(0, 8 + 2 * out[6])).join(' ');
 }

@@ -2,7 +2,8 @@
 // input is outside this module's contract; all profile decisions belong to the
 // scanner. Maps with only text keys become objects, maps with any other key a Map
 // (a cose top-level map always); every tag outside the Bindle set becomes Tagged (D180); f7 undefined.
-import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue } from './values.mjs';
+import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue, typedInfo } from './values.mjs';
+import { LIMITS } from './limits.mjs';
 import { fail } from './fault.mjs';
 
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
@@ -110,14 +111,18 @@ class Builder {
     // Every tag but the Bindle set's own (2, 3, 4, 40, the little-endian typed arrays) is a Tagged (D121, D180).
     if (tag !== 2 && tag !== 3 && tag !== 4 && tag !== 40 && !TYPED_BY_TAG.has(tag)) return taggedValue(tag, this.item());
     if (tag === 4) {
-      this.pos++; // scanner proved the two-element array head
+      this.pos++; // scanner proved the two-element array head (canonical: 0x82)
       const exponent = this.item(), mantissa = this.item();
-      return decimalValue(BigInt(mantissa), exponent);
+      // D265/D267: a Decimal only for content inside its invariants (the Bindle rule); other valid tag-4 content
+      // (RFC 8949 §3.4.4: any integer exponent, any integer or bignum mantissa) stays a Tagged, losslessly.
+      if (decimalOk(exponent, mantissa)) return decimalValue(BigInt(mantissa), exponent);
+      return taggedValue(4, [exponent, mantissa]);
     }
     if (tag === 40) {
       this.pos++;
       const shape = this.item(), data = this.item();
-      return ndarrayValue(shape, data);
+      if (ndarrayOk(shape, data)) return ndarrayValue(shape, data);
+      return taggedValue(40, [shape, data]);
     }
     const n = this.argument(this.b[this.pos++] & 31);
     if (tag === 2 || tag === 3) {
@@ -139,6 +144,11 @@ class Builder {
     return new info.ctor(bytes.buffer, 0, n / info.size);
   }
 }
+
+const decimalOk = (e, m) => typeof e === 'number' && Number.isSafeInteger(e) && e < 0 && e >= LIMITS.minDecimalExponent &&
+  (typeof m === 'number' || typeof m === 'bigint') && BigInt(m) !== 0n && BigInt(m) % 10n !== 0n;
+const ndarrayOk = (shape, data) => Array.isArray(shape) && shape.length >= 1 && shape.length <= LIMITS.maxDimensions &&
+  shape.every(d => Number.isSafeInteger(d) && d > 0) && (Array.isArray(data) || typedInfo(data) !== undefined);
 
 /** Build only after a successful profile scan of these exact bytes and options. */
 export function build(bytes, options = {}) {

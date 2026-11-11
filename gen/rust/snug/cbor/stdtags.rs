@@ -54,20 +54,21 @@ pub fn std_reads(tag: i32) -> bool {
     }
     return typed_any_size(tag) > 0;
 }
-pub fn std_allowed(flags: i32, tag: i32, depth: i32) -> bool {
+pub fn std_allowed(flags: i32, tag: i32, _depth: i32) -> bool {
     // Is (rule) tag `tag` (a 32-bit argument, possibly negative as an i32; a
     // rule-tag for a number of more than 32 bits) one of the standard set's
     // additions, or any other tag under the any-tag level, allowed under
-    // profile flags at depth? 55799 only at the top level (depth 0 of a walk
-    // whose root is the document's top: PF_SUB clear), in every level. The
+    // profile flags (at any depth: 55799 too, D265)? The
     // Bindle set's own tags (2, 3, 4, 40, the little-endian typed arrays)
     // never take this path: false.
     let lvl: i32 = flags & PF_TAGS;
     if lvl == 0 {
         return false;
     }
+    // 55799 anywhere (RFC 8949 §3.4.6 has no nesting rule; D265: the top-only
+    // rule was Bindle's, and the Bindle set never admits 55799)
     if tag == 55799 {
-        return (depth == 0) && ((flags & PF_SUB) == 0);
+        return true;
     }
     if (tag == 0) || ((tag == 1) || (tag == 32)) {
         return true;

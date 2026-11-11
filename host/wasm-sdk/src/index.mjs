@@ -38,9 +38,10 @@ export function scan(bytes, options = {}) {
       clamp(limits.maxDepth), clamp(limits.maxEntries), clamp(limits.maxItems), flags);
   } catch (e) { rt.lost(e); }
   if (code !== 0) throw new SnugFault(rt.codeName(code));
+  // valid CBOR that is not its own deterministic form is built from its canonical copy (P8.4, D262)
+  return rt.lastCopy().bytes ?? bytes;
 }
 
 export function decode(bytes, options = {}) {
-  scan(bytes, options);
-  return build(bytes, options);
+  return build(scan(bytes, options), options);
 }

@@ -15,16 +15,18 @@
 //! o[8]) into `sdk_nav_words()`. Nothing here decides accept or refuse: every
 //! verdict, head, order and float width is a generated kin function (D003).
 use crate::snug::cbor::rscan::{rscan_init, rscan_need_length, rscan_need_offset, rscan_position, rscan_scratch_len, rscan_step};
-use crate::snug::cbor::scan::{code_name, error_offset, scan, scan_options, scan_profile};
+use crate::snug::cbor::scan::{code_name, error_offset, scan_cb, scan_options, scan_profile};
+use crate::snug::cbor::canon::dc_copy;
+use crate::snug::cbor::codes::{O_S_CBASE, VC_NONDET};
 use crate::snug::cbor::stdtags::{std_content_ok, std_inner};
-use crate::snug::nav::walk::{nav_child, nav_dir, nav_dir_find, nav_find, nav_head, nav_init, nav_skip, N_LO, N_MAJOR, N_STEPS};
+use crate::snug::nav::walk::{nav_child, nav_dir, nav_dir_find, nav_find, nav_find_any, nav_head, nav_init, nav_skip, N_LO, N_MAJOR, N_STEPS};
 use crate::snug::program::verify::vm_verify;
-use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate, vm_validate_span,
-                           vm_validate_span_x, vm_validate_x};
+use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
 use crate::snug::vm::controls::{chars_prep, chars_run, meter_init, samelen_prep, samelen_run, samelen_words,
                                 unique_run, unique_words, M_WORDS};
 use crate::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_seq, vms_init_unknown, vms_keep,
-                               vms_message_length, vms_need_length, vms_need_offset, vms_position, vms_step, vms_step_x,
+                               vms_grow_arena, vms_grow_bytes, vms_grow_scratch, vms_grow_words, vms_message_length, vms_need_length,
+                               vms_need_offset, vms_position, vms_step_v,
                                vms_unknown_total, vms_words};
 use crate::snug::write::float::{put_float, put_float_rfc};
 use crate::snug::write::int::put_int;
@@ -92,10 +94,17 @@ fn ext_call(pr: &Prog, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32,
 enum Sess {
     Scan { o: [i32; 16], s: Vec<i32>, w: Vec<u8> },
     /// rule and lim: kept for `sdk_vs_reseq` (a sequence session re-inits per message, P7.13w).
-    Vm { prog: usize, rule: i32, lim: [i32; 10], s: Vec<i32>, ss: Vec<i32>, ka: Vec<u8>, out: Vec<i32>, w: Vec<u8> },
+    /// vs, cb: the valid machinery's buffers (P8.4, D266), grown on VMS_GROW.
+    Vm { prog: usize, rule: i32, lim: [i32; 10], s: Vec<i32>, ss: Vec<i32>, ka: Vec<u8>, out: Vec<i32>, w: Vec<u8>,
+         vs: Vec<i32>, cb: Vec<u8> },
 }
 
 struct State {
+    /// P8.4 (D264): the canonical path's buffers (the scanner's options and scratch, the canonical buffer) and the
+    /// last canonical copy (`sdk_copy`): decode, views and schema.decode build from it
+    vs: Vec<i32>,
+    cb: Vec<u8>,
+    copy: Vec<u8>,
     input: Vec<u8>,
     kbuf: Vec<u8>,
     steps: Vec<i32>,
@@ -126,6 +135,9 @@ fn st() -> &'static mut State {
     // SAFETY: single-threaded; every export takes this once and holds it only for its own duration.
     let s = unsafe { &mut *STATE.0.get() };
     s.get_or_insert_with(|| State {
+        vs: vec![0; 512],
+        cb: vec![0; 1024],
+        copy: Vec::new(),
         input: Vec::new(),
         kbuf: Vec::new(),
         steps: Vec::new(),
@@ -224,19 +236,52 @@ unsafe fn bytes<'a>(p: *const u8, n: usize) -> &'a [u8] {
 
 // ---------------------------------------------------------------- profile scan
 
-/// Scan [p, p+n) under the profile flags: 0 or a profile code; the error offset in INFO[0].
+/// Scan [p, p+n) under the profile flags (with the canonical buffer: valid CBOR, D264): 0 or a profile code; the
+/// error offset in INFO[0], the outcome bits (o[12]: VC_NONDET, VC_UNSORTED) in INFO[1], and the length of the
+/// canonical copy (`sdk_copy`) the input is to be built from in INFO[2] (-1: the input itself).
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_scan(p: *const u8, n: usize, top_any: i32, cose: i32, max_bytes: i32, max_depth: i32,
                            max_entries: i32, max_items: i32, flags: i32) -> i32 {
     let b = unsafe { bytes(p, n) };
-    let mut o = [0i32; 16];
-    scan_options(&mut o, top_any, cose, max_bytes, max_depth, max_entries, max_items);
-    scan_profile(&mut o, flags);
-    let c = scan(b, &mut o);
-    st().info[0] = error_offset(&mut o);
+    let st = st();
+    let c = loop {
+        scan_options(&mut st.vs, top_any, cose, max_bytes, max_depth, max_entries, max_items);
+        scan_profile(&mut st.vs, flags);
+        let c = scan_cb(b, &mut st.vs, &mut st.cb);
+        if c != 22 { break c; }
+        grow_scan(&mut st.vs, &mut st.cb);
+    };
+    st.info[0] = error_offset(&mut st.vs);
+    st.info[1] = st.vs[12];
+    st.info[2] = -1;
+    if c == 0 && st.vs[12] & VC_NONDET != 0 {
+        let need = 2 * n + (n >> 7) + 64;
+        if st.cb.len() < need { st.cb = vec![0; need]; }
+        let l = loop {
+            let l = dc_copy(b, &mut st.vs, &mut st.cb);
+            if l >= 0 { break l; }
+            let m = 2 * st.cb.len();
+            st.cb = vec![0; m];
+        };
+        st.copy.clear();
+        st.copy.extend_from_slice(&st.cb[n..l as usize]);
+        st.info[2] = st.copy.len() as i32;
+    }
     c
 }
+fn grow_scan(o: &mut Vec<i32>, cb: &mut Vec<u8>) {
+    let (w, nb) = (o[13] as usize, o[14] as usize);
+    if w > o.len() {
+        let keep: Vec<i32> = o[..16].to_vec();
+        *o = vec![0; w.max(2 * o.len())];
+        o[..16].copy_from_slice(&keep);
+    }
+    if nb > cb.len() { *cb = vec![0; nb.max(2 * cb.len())]; }
+}
+/// The canonical copy of the last scan or validation that made one (INFO[2] bytes).
+#[no_mangle]
+pub extern "C" fn sdk_copy() -> *const u8 { st().copy.as_ptr() }
 
 // ---------------------------------------------------------------- Programs and the VM
 
@@ -317,23 +362,14 @@ fn lease(s: &mut State, h: usize, rule: i32) -> bool {
     true
 }
 
-/// vm-validate over [p, p+n) against `rule` of Program h, limits words 0..7
-/// and the profile flags (word 9); the out words in OUT.
+/// vm-validate (with the canonical path, P8.4) over [p, p+n) against `rule` of Program h, limits words 0..7
+/// and the profile flags (word 9); the out words in OUT; for an accepted input, INFO[1] the outcome bits and
+/// INFO[2] the length of the canonical copy it was validated over (`sdk_copy`; -1: the input itself).
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_validate(h: usize, rule: i32, p: *const u8, n: usize, l0: i32, l1: i32, l2: i32, l3: i32,
                                l4: i32, l5: i32, l6: i32, l7: i32, flags: i32) -> i32 {
-    let s = st();
-    if !lease(s, h, rule) { return -100; }
-    let pr = s.progs[h].as_ref().unwrap();
-    let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
-    let input = unsafe { bytes(p, n) };
-    if pr.p[30] > 0 {
-        let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
-        vm_validate_x(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out, &f)
-    } else {
-        vm_validate(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out)
-    }
+    run_v(h, rule, p, n, None, [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags])
 }
 /// vm-validate-span: the span [start, end) of [p, p+n) as its own document.
 #[no_mangle]
@@ -341,17 +377,38 @@ pub extern "C" fn sdk_validate(h: usize, rule: i32, p: *const u8, n: usize, l0: 
 pub extern "C" fn sdk_validate_span(h: usize, rule: i32, p: *const u8, n: usize, start: i32, end: i32, depth: i32,
                                     items: i32, l0: i32, l1: i32, l2: i32, l3: i32, l4: i32, l5: i32, l6: i32,
                                     l7: i32, flags: i32) -> i32 {
+    run_v(h, rule, p, n, Some((start, end, depth, items)), [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags])
+}
+fn run_v(h: usize, rule: i32, p: *const u8, n: usize, span: Option<(i32, i32, i32, i32)>, lim: [i32; 10]) -> i32 {
     let s = st();
     if !lease(s, h, rule) { return -100; }
-    let pr = s.progs[h].as_ref().unwrap();
-    let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
     let input = unsafe { bytes(p, n) };
-    if pr.p[30] > 0 {
+    let pr = s.progs[h].as_ref().unwrap();
+    let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+    let c = loop {
         let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
-        vm_validate_span_x(&pr.p, &pr.b, rule, input, start, end, depth, items, &lim, &mut s.scratch, &mut s.out, &f)
-    } else {
-        vm_validate_span(&pr.p, &pr.b, rule, input, start, end, depth, items, &lim, &mut s.scratch, &mut s.out)
+        let x: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32 = if pr.p[30] > 0 { &f } else { &none };
+        let c = match span {
+            Some((a, z, d, i)) => vm_validate_span_v(&pr.p, &pr.b, rule, input, a, z, d, i, &lim, &mut s.scratch, &mut s.out, x, &mut s.vs, &mut s.cb),
+            None => vm_validate_v(&pr.p, &pr.b, rule, input, &lim, &mut s.scratch, &mut s.out, x, &mut s.vs, &mut s.cb),
+        };
+        if c != -5 { break c; }
+        let (w, nb, sw) = (s.out[5] as usize, s.out[6] as usize, s.out[7] as usize);
+        if w > s.vs.len() { s.vs = vec![0; w.max(2 * s.vs.len())]; }
+        if nb > s.cb.len() { s.cb = vec![0; nb.max(2 * s.cb.len())]; }
+        if sw > s.scratch.len() { s.scratch.resize(sw, 0); }
+    };
+    s.info[1] = 0;
+    s.info[2] = -1;
+    if c >= 0 && s.out[0] == 0 && s.vs[15] >= 0 {
+        s.info[1] = s.vs[12];
+        if s.vs[12] & VC_NONDET != 0 {
+            s.copy.clear();
+            s.copy.extend_from_slice(&s.cb[s.vs[O_S_CBASE as usize] as usize..s.vs[15] as usize]);
+            s.info[2] = s.copy.len() as i32;
+        }
     }
+    c
 }
 
 // ---------------------------------------------------------------- navigation over checked bytes at [m, m+n)
@@ -386,6 +443,12 @@ pub extern "C" fn sdk_nav_child(m: *const u8, n: usize, p: i32, i: i32) -> i32 {
 pub extern "C" fn sdk_nav_find(m: *const u8, n: usize, p: i32, ks: i32, ke: i32) -> i32 {
     let (b, o) = nav(m, n);
     nav_find(b, o, p, &st().kbuf, ks, ke, n as i32)
+}
+/// P8.4: nav-find over a map whose keys may be out of canonical order (every key compared).
+#[no_mangle]
+pub extern "C" fn sdk_nav_find_any(m: *const u8, n: usize, p: i32, ks: i32, ke: i32) -> i32 {
+    let (b, o) = nav(m, n);
+    nav_find_any(b, o, p, &st().kbuf, ks, ke, n as i32)
 }
 /// nav-dir into the words at d (capacity cap).
 #[no_mangle]
@@ -539,7 +602,7 @@ pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: 
         c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
     }
     if c < 0 { return -2; }
-    put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
+    put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new(), vs: vec![0; 512], cb: vec![0; 1024] })
 }
 /// P7.13w (D212): the next message of a sequence session -- vms-init-seq again on
 /// its arrays, with its rule and limit words; the window buffer is kept. 0, or a
@@ -587,13 +650,20 @@ fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
             st.info[3] = error_offset(o);
             r
         }
-        Some(Some(Sess::Vm { prog, s, ss, ka, out, w, .. })) => {
+        Some(Some(Sess::Vm { prog, s, ss, ka, out, w, vs, cb, .. })) => {
             let pr = match progs.get(*prog) { Some(Some(pr)) => pr, _ => return -100 };
-            let r = if pr.p[30] > 0 {
+            let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+            // P8.4 (D266): the valid machinery, its buffers grown on VMS_GROW (S and the arena keep their contents)
+            let r = loop {
                 let f = |id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], st: i32, e: i32, room: i32| ext_call(pr, id, pool, ao, al, b, st, e, room);
-                vms_step_x(&pr.p, &pr.b, &w[off..off + n], s, ss, ka, out, base, &f)
-            } else {
-                vms_step(&pr.p, &pr.b, &w[off..off + n], s, ss, ka, out, base)
+                let x: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32 = if pr.p[30] > 0 { &f } else { &none };
+                let r = vms_step_v(&pr.p, &pr.b, &w[off..off + n], s, ss, ka, out, base, x, vs, cb);
+                if r != -69 { break r; }
+                let (gw, gb, gs, ga) = (vms_grow_words(ss) as usize, vms_grow_bytes(ss) as usize, vms_grow_scratch(ss) as usize, vms_grow_arena(ss) as usize);
+                if gw > vs.len() { *vs = vec![0; gw.max(2 * vs.len())]; }
+                if gb > cb.len() { *cb = vec![0; gb.max(2 * cb.len())]; }
+                if gs > s.len() { s.resize(gs, 0); }
+                if ga > ka.len() { ka.resize(ga, 0); }
             };
             st.info[0] = vms_need_offset(ss);
             st.info[1] = vms_need_length(ss);
@@ -808,11 +878,16 @@ impl Enc<'_> {
                 if !std_content_ok(&self.out[..end], tag, q as i32, end as i32) { return Err(ENC_TAG); }
                 if tag == 24 {
                     let inner = std_inner(&self.out[..end], q as i32) as usize;
-                    let mut o = [0i32; 16];
+                    // the payload as the decoder checks it (P8.4: with the canonical buffer, D264)
+                    let (mut o, mut cb) = (vec![0i32; 512], vec![0u8; 1024]);
                     let c = self.scan;
-                    scan_options(&mut o, 1, c[0], c[1], c[2], c[3], c[4]);
-                    scan_profile(&mut o, self.flags);
-                    let code = scan(&self.out[inner..end], &mut o);
+                    let code = loop {
+                        scan_options(&mut o, 1, c[0], c[1], c[2], c[3], c[4]);
+                        scan_profile(&mut o, self.flags);
+                        let code = scan_cb(&self.out[inner..end], &mut o, &mut cb);
+                        if code != 22 { break code; }
+                        grow_scan(&mut o, &mut cb);
+                    };
                     if code != 0 { return Err(ENC_SCAN - code); }
                 }
                 Ok(j)

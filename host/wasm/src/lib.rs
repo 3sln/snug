@@ -120,6 +120,11 @@ static PROG: Words<PCAP> = Words(UnsafeCell::new([0; PCAP]));
 static POOL: Bytes<BCAP> = Bytes(UnsafeCell::new([0; BCAP]));
 static VMS: Words<SCAP> = Words(UnsafeCell::new([0; SCAP]));
 static LIMB: Words<10> = Words(UnsafeCell::new([0; 10]));
+// P8.4 (D264): the canonical path's buffers (vs: the scanner's options and scratch, cb: the copy)
+const VSW: usize = 1 << 18;
+const CBB: usize = 1 << 21;
+static VSB: Words<VSW> = Words(UnsafeCell::new([0; VSW]));
+static CBUF: Bytes<CBB> = Bytes(UnsafeCell::new([0; CBB]));
 static OUTB: Words<OUTW> = Words(UnsafeCell::new([0; OUTW]));
 static PLEN: AtomicI32 = AtomicI32::new(0);
 static BLEN: AtomicI32 = AtomicI32::new(0);
@@ -167,6 +172,9 @@ pub extern "C" fn snug_vm_validate(len: usize, rule: i32) -> i32 {
     let s: &mut [i32] = unsafe { &mut *VMS.0.get() };
     let lim: &[i32] = unsafe { &*LIMB.0.get() };
     let out: &mut [i32] = unsafe { &mut *OUTB.0.get() };
-    snug::vm::api::vm_validate(p, b, rule, input, lim, s, out)
+    let vs: &mut [i32] = unsafe { &mut *VSB.0.get() };
+    let cb: &mut [u8] = unsafe { &mut *CBUF.0.get() };
+    let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
+    snug::vm::api::vm_validate_v(p, b, rule, input, lim, s, out, &none, vs, cb)
 }
 } // mod legacy

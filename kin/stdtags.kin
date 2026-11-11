@@ -20,7 +20,7 @@
   (:require [kin.lang :refer [defn let return set if while for do comment forever]]
             [snug.lang :refer [I32 Bool Bytes + - * neg rem sar ushr bit-and
                                < > <= >= == != and or not u8]]
-            [snug.cbor.codes :refer [PF_TAGS PF_TAGS_ANY PF_SUB]]
+            [snug.cbor.codes :refer [PF_TAGS PF_TAGS_ANY]]
             [snug.cbor.head :refer [be16 be32 head-size small-arg]]
             [snug.cbor.tags :refer [typed-size]]))
 
@@ -55,17 +55,18 @@
   (if (or (or (== tag 0) (== tag 1)) (or (== tag 24) (== tag 32))) (return true))
   (return (> (typed-any-size tag) 0)))
 
-(defn ^:pub ^Bool std-allowed [^I32 flags ^I32 tag ^I32 depth]
+(defn ^:pub ^Bool std-allowed [^I32 flags ^I32 tag ^I32 _depth]
   (comment "Is (rule) tag `tag` (a 32-bit argument, possibly negative as an i32; a"
            "rule-tag for a number of more than 32 bits) one of the standard set's"
            "additions, or any other tag under the any-tag level, allowed under"
-           "profile flags at depth? 55799 only at the top level (depth 0 of a walk"
-           "whose root is the document's top: PF_SUB clear), in every level. The"
+           "profile flags (at any depth: 55799 too, D265)? The"
            "Bindle set's own tags (2, 3, 4, 40, the little-endian typed arrays)"
            "never take this path: false.")
   (let [lvl (bit-and flags PF_TAGS)]
     (if (== lvl 0) (return false))
-    (if (== tag 55799) (return (and (== depth 0) (== (bit-and flags PF_SUB) 0))))
+    (comment "55799 anywhere (RFC 8949 §3.4.6 has no nesting rule; D265: the top-only"
+             "rule was Bindle's, and the Bindle set never admits 55799)")
+    (if (== tag 55799) (return true))
     (if (or (== tag 0) (or (== tag 1) (== tag 32))) (return true))
     (if (and (>= tag 21) (<= tag 24)) (return true))
     (if (< lvl PF_TAGS_ANY) (return false))

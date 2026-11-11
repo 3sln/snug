@@ -34,7 +34,8 @@
                                      CODE_DECIMAL CODE_TYPED_ARRAY CODE_NDARRAY
                                      CODE_TRAILING CODE_DEPTH CODE_TOO_LARGE CODE_NOT_MAP
                                      O_TOP O_COSE O_MAX_BYTES O_MAX_DEPTH O_ERR_POS O_ITEMS
-                                     O_HI O_LO O_CSTART O_PROFILE MAX_BIGNUM_BYTES MAX_DIMENSIONS]]
+                                     O_HI O_LO O_CSTART O_PROFILE MAX_BIGNUM_BYTES MAX_DIMENSIONS
+                                     CODE_SCRATCH PF_VALID PF_TAGS]]
             [snug.cbor.head :refer [fail be16 be32 read-arg take-len count-item
                                     enter-container bytes-content head-size small-arg]]
             [snug.cbor.text :refer [utf8-window]]
@@ -42,7 +43,8 @@
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok mod10]]
             [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-nc scan-one scan-item]]
             [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner any-tags rule-tag
-                                       typed-any-size]]))
+                                       typed-any-size]]
+            [snug.cbor.canon :refer [kclass float-ecs targ]]))
 
 ;; ------------------------------------------------------------- layout
 
@@ -385,6 +387,9 @@
            "rscan-need-offset / rscan-need-length) or has done its work quantum"
            "(RS_YIELD: call again with a window holding rscan-position).")
   (if (!= base-hi 0) (return (neg (fail o 0 CODE_TOO_LARGE))))
+  (comment "P8.4 (D266): the resumable scanner walks the deterministic and Bindle"
+           "profiles; a valid-CBOR handle is the session's (against any): scratch")
+  (if (!= (bit-and (ia o O_PROFILE) PF_VALID) 0) (return CODE_SCRATCH))
   (let [base base-lo
         wend (blen b)
         tend (- (ia s S_TOTAL) base)
@@ -412,7 +417,17 @@
                      ^:mut h 1]
                  (if (<= ai0 27) (set h (head-size ai0)))
                  (if (and (<= (+ pos h) tend) (> (+ pos h) wend))
-                   (return (suspend b s base phase pos cend sp pos h))))))
+                   (return (suspend b s base phase pos cend sp pos h)))
+                 (comment "P8.4 (D265, D266): above the Bindle tag set a tag 4 / 40 is"
+                          "walked whole by the recursive scanner: asked for whole first")
+                 (if (and (and (== (ushr (u8 b pos) 5) 6) (<= ai0 27))
+                          (and (<= (+ pos h) tend) (!= (bit-and (ia o O_PROFILE) PF_TAGS) 0)))
+                   (do (targ b o pos)
+                       (let [rt0 (rule-tag (ia o O_HI) (ia o O_LO))]
+                         (if (or (== rt0 4) (== rt0 40))
+                           (do (let [kx0 (key-end-any b pos tend wend)]
+                                 (if (< kx0 (neg 1))
+                                   (return (suspend b s base phase pos cend sp pos (- (- (neg 2) kx0) pos)))))))))))))
          (if (<= work 0) (return (pause b s base phase pos cend sp RS_YIELD)))
          (if (and cnotes (< pos tend))
            (do (let [swant (std-want b s sp pos tend)]
@@ -481,6 +496,15 @@
                    (iset s S_TTAG rt)
                    (set pos p)
                    (if (or (== rt 2) (== rt 3)) (do (set phase PH_BIGNUM) (continue)))
+                   (if (and (or (== rt 4) (== rt 40)) (!= (bit-and (ia o O_PROFILE) PF_TAGS) 0))
+                     (do (comment "whole (asked for above): the recursive scanner's walk of the"
+                                  "tag item, which counts it again")
+                         (iset o O_ITEMS (- (ia o O_ITEMS) 1))
+                         (set r (scan-item b o (- (ia s S_TPOS) base) depth tend))
+                         (if (< r 0) (break))
+                         (set pos r)
+                         (set phase PH_DONE)
+                         (continue)))
                    (if (or (== rt 4) (== rt 40)) (do (set phase PH_PAIR) (continue)))
                    (let [size (typed-size rt)]
                      (if (== size 0)
@@ -616,7 +640,16 @@
                            (do (let [kwant (- (- (neg 2) kx) pos)
                                      ktwice (* 2 (- wend pos))]
                                  (if (> ktwice kwant) (return (suspend b s base phase pos cend sp pos ktwice)))
-                                 (return (suspend b s base phase pos cend sp pos kwant))))))))
+                                 (return (suspend b s base phase pos cend sp pos kwant)))))
+                         (comment "P8.4 (D263, D266): an EC-sensitive key's duplicates are not"
+                                  "bytewise: the handle is the session's (scratch)")
+                         (if (>= kx 0)
+                           (if (!= (bit-and (kclass b o pos) 2) 0) (return CODE_SCRATCH))))))
+                 (if (and (== kmaj 7) (and (>= (bit-and (u8 b pos) 31) 25) (<= (bit-and (u8 b pos) 31) 27)))
+                   (do (let [fh (head-size (bit-and (u8 b pos) 31))]
+                         (if (and (<= (+ pos fh) tend) (> (+ pos fh) wend))
+                           (return (suspend b s base phase pos cend sp pos fh)))
+                         (if (and (<= (+ pos fh) wend) (float-ecs b pos)) (return CODE_SCRATCH)))))
                  (iset s (+ kb2 F_KSTART) (+ pos base))
                  (iset s (+ kb2 F_KMAJ) kmaj)
                  (iset s (+ kb2 F_STATE) 1)
@@ -750,7 +783,7 @@
                          (let [esize (ia s S_TSIZE)]
                            (if (!= (rem clen esize) 0) (do (set r (fail o tpos CODE_TYPED_ARRAY)) (break)))
                            (if (and (== parent K_ND) (== pelem 1)) (iset s (+ tb2 F_COUNT) (quot clen esize)))
-                           (if (>= (ia s S_TTAG) 84)
+                           (if (and (>= (ia s S_TTAG) 84) (== (bit-and (ia o O_PROFILE) PF_TAGS) 0))
                              (do (set cend ce) (set pos cs) (set phase PH_TYPED) (continue)))
                            (if (and (!= (ia s S_KACT) 0) (> ce wend))
                              (do (set cend ce) (set pos cs) (set phase PH_KSKIP) (continue)))

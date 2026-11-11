@@ -119,3 +119,33 @@ fn an_accepted_message_is_released_by_its_last_byte() {
     }
     assert_eq!(seen, vec![(0, offsets[1]), (1, offsets[2]), (2, offsets[3])]);
 }
+
+#[test]
+fn valid_messages_with_indefinite_items_read_through_their_canonical_copy() {
+    // P8.4: [_ 1, 2], {_ "b": 2, "a": 1}, {"t": (_ "ab", "c")} -- each released by its last
+    // byte; the View reads the canonical copy (definite lengths, wire order kept)
+    let parts: Vec<Vec<u8>> = vec![
+        vec![0x9f, 0x01, 0x02, 0xff],
+        vec![0xbf, 0x61, b'b', 0x02, 0x61, b'a', 0x01, 0xff],
+        vec![0xa1, 0x61, b't', 0x7f, 0x62, b'a', b'b', 0x61, b'c', 0xff],
+    ];
+    let bytes = parts.concat();
+    let valid = SequenceOptions { profile: snug::Profile::VALID, ..SequenceOptions::default() };
+    let mut seq = Sequence::new(&valid).unwrap();
+    let mut got = Vec::new();
+    for i in 0..bytes.len() {
+        for m in seq.feed(&bytes[i..i + 1]) {
+            got.push((m.unwrap().into_owned(), i + 1));
+        }
+    }
+    assert!(seq.finish().is_empty());
+    let ends: Vec<usize> = got.iter().map(|(_, e)| *e).collect();
+    assert_eq!(ends, vec![4, 12, 22]);
+    assert_eq!(got[0].0.view().at(1).and_then(|v| v.uint()), Some(2));
+    assert_eq!(got[1].0.view().get("a").and_then(|v| v.uint()), Some(1));
+    assert_eq!(got[1].0.view().get("b").and_then(|v| v.uint()), Some(2));
+    assert_eq!(got[2].0.view().get("t").and_then(|v| v.text()), Some("abc"));
+    // the deterministic preset refuses the first message
+    let mut det = Sequence::new(&SequenceOptions::default()).unwrap();
+    assert_eq!(det.feed(&bytes)[0].as_ref().unwrap_err().code(), "indefinite");
+}

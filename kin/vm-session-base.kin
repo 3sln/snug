@@ -14,11 +14,11 @@
 ;; window-relative (absolute - base) and may be negative or past the window
 ;; when they only label a charge or a witness.
 (ns snug.vm.sbase
-  (:require [kin.lang :refer [defn let local return set if while for do comment forever break defconst]]
+  (:require [kin.lang :refer [defn let local return set if while for do comment forever break continue defconst]]
             [snug.lang :refer [I32 Bool Bytes BytesW Ints IntsR + - * neg quot rem shl sar ushr bit-and bit-or
                                bit-xor < > <= >= == != and or not u8 blen ia iset ilen bset bcopy]]
             [snug.cbor.codes :refer [CODE_DUPLICATE_KEY CODE_KEY_ORDER CODE_DECIMAL CODE_NDARRAY O_ERR_POS
-                                     O_ITEMS O_MAX_DEPTH]]
+                                     O_ITEMS O_MAX_DEPTH PF_VREL]]
             [snug.cbor.stdtags :refer [std-allowed any-tags rule-tag]]
             [snug.cbor.head :refer [fail head-size small-arg be16 be32 enter-container]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok]]
@@ -36,6 +36,9 @@
 (defconst ^:pub ^I32 VMS_HELD -67)
 ;; D085: vms-eof took the end; step again (windows below it)
 (defconst ^:pub ^I32 VMS_RESUME -68)
+;; P8.4 (D266): a buffer is too small -- grow the arrays vms-grow-* name, step again
+;; over the same window
+(defconst ^:pub ^I32 VMS_GROW -69)
 (defconst ^:pub ^I32 GO 0)
 
 ;; ------------------------------------------------------------ the session array header
@@ -91,7 +94,19 @@
 ;; not a trailing check; its offset (the message length) once the root completed, else -1
 (defconst ^:pub ^I32 SS_SEQ 41)
 (defconst ^:pub ^I32 SS_MLEN 42)
-(defconst ^:pub ^I32 SS_HDR 44)
+;; P8.4 (D266): what a VMS_GROW suspension asks the host for -- the valid scratch's
+;; words, the canonical buffer's bytes, the VM scratch's words, the key arena's bytes
+;; (each 0: enough) -- and the window length a whole item asks for
+(defconst ^:pub ^I32 SS_GW 44)
+(defconst ^:pub ^I32 SS_GB 45)
+(defconst ^:pub ^I32 SS_GS 46)
+(defconst ^:pub ^I32 SS_GA 47)
+(defconst ^:pub ^I32 SS_VNEED 48)
+;; 1 when the step was given the valid machinery's buffers (vms-step-v)
+(defconst ^:pub ^I32 SS_VOK 49)
+(defconst ^:pub ^I32 SS_HDR 52)
+;; an indefinite level's entries owed (the prescans, D266): far more than any count
+(defconst ^:pub ^I32 IND 1073741824)
 
 (defconst ^:pub ^I32 PH_START 0)
 (defconst ^:pub ^I32 PH_ITEM 1)
@@ -202,6 +217,13 @@
 (defconst ^:pub ^I32 F_COUNT 27)
 (defconst ^:pub ^I32 F_DIMS 28)
 (defconst ^:pub ^I32 F_TLIVE 36)
+;; P8.4 (D266): an indefinite array or map (entries until its break; F_N is IND until
+;; the break sets it); a map's kept keys (count, the last one's arena offset, marked
+;; for the deferred duplicate check)
+(defconst ^:pub ^I32 F_IND 42)
+(defconst ^:pub ^I32 F_VN 43)
+(defconst ^:pub ^I32 F_VLAST 44)
+(defconst ^:pub ^I32 F_VMARK 45)
 
 ;; ------------------------------------------------------------ sizes
 
@@ -651,6 +673,20 @@
             ai (bit-and ib 31)
             ^:mut hi 0
             ^:mut lo ai]
+        (comment "P8.4 (D266): under a valid-CBOR run an indefinite string, array or"
+                 "map is a level its break closes (IND entries owed until then)")
+        (if (and (== ib 255) (and (> lvl 0) (>= rem IND)) )
+          (do (set rem 0)
+              (set i (+ i 1))
+              (continue)))
+        (if (and (== ai 31) (and (and (>= major 2) (<= major 5)) (!= (bit-and (ia ss SS_PROF) PF_VREL) 0)))
+          (do (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return 0)))
+              (iset ss (+ pst (* 2 lvl)) (+ i base))
+              (iset ss (+ (+ pst (* 2 lvl)) 1) (- rem 1))
+              (set lvl (+ lvl 1))
+              (set rem IND)
+              (set i (+ i 1))
+              (continue)))
         (if (>= ai 28) (return (pstop ss lvl)))
         (let [h (head-size ai)
               p (+ i h)]
@@ -730,6 +766,20 @@
             ai (bit-and ib 31)
             ^:mut hi 0
             ^:mut lo ai]
+        (comment "P8.4 (D266): under a valid-CBOR run an indefinite string, array or"
+                 "map is a level its break closes (IND entries owed until then)")
+        (if (and (== ib 255) (and (> lvl 0) (>= rem IND)) )
+          (do (set rem 0)
+              (set i (+ i 1))
+              (continue)))
+        (if (and (== ai 31) (and (and (>= major 2) (<= major 5)) (!= (bit-and (ia ss SS_PROF) PF_VREL) 0)))
+          (do (if (>= lvl cap) (do (iset ss SS_CHN (neg 1)) (return (neg 1))))
+              (iset ss (+ pst (* 2 lvl)) (+ i base))
+              (iset ss (+ (+ pst (* 2 lvl)) 1) (- rem 1))
+              (set lvl (+ lvl 1))
+              (set rem IND)
+              (set i (+ i 1))
+              (continue)))
         (if (>= ai 28) (return (rstop ss lvl (+ i 1) base)))
         (let [h (head-size ai)
               p (+ i h)]
