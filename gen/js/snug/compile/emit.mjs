@@ -1968,11 +1968,31 @@ export function emitProgram(h) {
             actsum = asum;
         }
     }
-    // W7 (D281): the worst-case arena at the compiled limits, items = the input
-    // limit, against the cap (program-2 §9.4)
+    // W7 (D281, D317): the worst-case arena at the compiled limits against the
+    // cap (program-2 §9.4). Items are at most the item limit -- or, with
+    // embedded content (whose sub-validations count their own items), the input
+    // limit; one end-run's permutation and trail only with a T map.
     const d1 = hg(h, H_LIM_DEPTH) + 1;
-    const need = satAdd(satMul(hg(h, H_LIM_INPUT), satAdd(ritem, actsum)), satAdd(satMul(d1, satAdd(actsum, satMul(64, reclmax))), satMul(2, hg(h, H_LIM_ENTRIES))));
-    if (need > hg(h, H_LIM_GROUP)) {
+    let items = hg(h, H_LIM_ITEMS);
+    let tmap = false;
+    for (let wf = 0; wf < nl; wf++) {
+        const wl = finInternal(h, wf);
+        const wk = lk(h, wl);
+        if (wk === K_EMBED) {
+            items = hg(h, H_LIM_INPUT);
+        }
+        if ((wk === K_MAP) && (laux(h, wf, 3) > 0)) {
+            tmap = true;
+        }
+    }
+    if (items > hg(h, H_LIM_INPUT)) {
+        items = hg(h, H_LIM_INPUT);
+    }
+    let need = satAdd(satMul(items, satAdd(ritem, actsum)), satMul(d1, satAdd(actsum, satMul(64, reclmax))));
+    if (tmap) {
+        need = satAdd(need, satMul(2, hg(h, H_LIM_ENTRIES)));
+    }
+    if ((need > 0) && (need > hg(h, H_LIM_GROUP))) {
         warnGlobal(h, 7);
     }
     // Program + pool + scratch, refused before anything is written.

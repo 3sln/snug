@@ -1898,11 +1898,31 @@ pub fn emit_program(h: &mut [i32]) -> i32 {
             actsum = asum;
         }
     }
-    // W7 (D281): the worst-case arena at the compiled limits, items = the input
-    // limit, against the cap (program-2 §9.4)
+    // W7 (D281, D317): the worst-case arena at the compiled limits against the
+    // cap (program-2 §9.4). Items are at most the item limit -- or, with
+    // embedded content (whose sub-validations count their own items), the input
+    // limit; one end-run's permutation and trail only with a T map.
     let d1: i32 = hg(h, H_LIM_DEPTH) + 1;
-    let need: i32 = sat_add(sat_mul(hg(h, H_LIM_INPUT), sat_add(ritem, actsum)), sat_add(sat_mul(d1, sat_add(actsum, sat_mul(64, reclmax))), sat_mul(2, hg(h, H_LIM_ENTRIES))));
-    if need > hg(h, H_LIM_GROUP) {
+    let mut items: i32 = hg(h, H_LIM_ITEMS);
+    let mut tmap: bool = false;
+    for wf in 0..nl {
+        let wl: i32 = fin_internal(h, wf);
+        let wk: i32 = lk(h, wl);
+        if wk == K_EMBED {
+            items = hg(h, H_LIM_INPUT);
+        }
+        if (wk == K_MAP) && (laux(h, wf, 3) > 0) {
+            tmap = true;
+        }
+    }
+    if items > hg(h, H_LIM_INPUT) {
+        items = hg(h, H_LIM_INPUT);
+    }
+    let mut need: i32 = sat_add(sat_mul(items, sat_add(ritem, actsum)), sat_mul(d1, sat_add(actsum, sat_mul(64, reclmax))));
+    if tmap {
+        need = sat_add(need, sat_mul(2, hg(h, H_LIM_ENTRIES)));
+    }
+    if (need > 0) && (need > hg(h, H_LIM_GROUP)) {
         warn_global(h, 7);
     }
     // Program + pool + scratch, refused before anything is written.

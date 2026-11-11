@@ -1364,13 +1364,23 @@
               (if (> rs ritem) (set ritem rs))
               (if (> rc reclmax) (set reclmax rc))
               (if (> asum actsum) (set actsum asum))))
-          (comment "W7 (D281): the worst-case arena at the compiled limits, items = the input"
-                   "limit, against the cap (program-2 §9.4)")
+          (comment "W7 (D281, D317): the worst-case arena at the compiled limits against the"
+                   "cap (program-2 §9.4). Items are at most the item limit -- or, with"
+                   "embedded content (whose sub-validations count their own items), the input"
+                   "limit; one end-run's permutation and trail only with a T map.")
           (let [d1 (+ (hg h H_LIM_DEPTH) 1)
-                need (sat-add (sat-mul (hg h H_LIM_INPUT) (sat-add ritem actsum))
-                              (sat-add (sat-mul d1 (sat-add actsum (sat-mul 64 reclmax)))
-                                       (sat-mul 2 (hg h H_LIM_ENTRIES))))]
-            (if (> need (hg h H_LIM_GROUP)) (warn-global h 7)))
+                ^:mut items (hg h H_LIM_ITEMS)
+                ^:mut tmap false]
+            (for [^I32 wf 0 nl]
+              (let [wl (fin-internal h wf)
+                    wk (lk h wl)]
+                (if (== wk K_EMBED) (set items (hg h H_LIM_INPUT)))
+                (if (and (== wk K_MAP) (> (laux h wf 3) 0)) (set tmap true))))
+            (if (> items (hg h H_LIM_INPUT)) (set items (hg h H_LIM_INPUT)))
+            (let [^:mut need (sat-add (sat-mul items (sat-add ritem actsum))
+                                      (sat-mul d1 (sat-add actsum (sat-mul 64 reclmax))))]
+              (if tmap (set need (sat-add need (sat-mul 2 (hg h H_LIM_ENTRIES)))))
+              (if (and (> need 0) (> need (hg h H_LIM_GROUP))) (warn-global h 7))))
           (comment "Program + pool + scratch, refused before anything is written.")
           (if (or (> smax (quot total 4)) (> send (quot (- (- total pool) (* 4 smax)) 4)))
             (return (fail h ERR_LIM_TOTAL (neg 1))))
