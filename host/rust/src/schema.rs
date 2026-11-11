@@ -18,6 +18,9 @@ pub struct Program {
     p: Vec<i32>,
     b: Vec<u8>,
     ext: Option<Bound>,
+    /// D286 A3: the largest VM scratch a session on this Program grew to (its room past
+    /// the arena holds a canonical item's events): later sessions start that large.
+    session_words: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// A Program's extension controls bound to predicates, in id order (D141), and
@@ -54,7 +57,7 @@ impl Program {
         if vm_verify(p, b, &mut s) != 0 {
             return Err(Refused { at: s[35], check: s[36] });
         }
-        Ok(Program { p: p.to_vec(), b: b.to_vec(), ext: None })
+        Ok(Program { p: p.to_vec(), b: b.to_vec(), ext: None, session_words: Arc::default() })
     }
     /// The extension controls this Program uses (format 1.1, D141), by name.
     pub fn controls(&self) -> Vec<String> {
@@ -110,9 +113,21 @@ impl Program {
             let (gw, gb, gs, ga) = (vms_grow_words(ss), vms_grow_bytes(ss), vms_grow_scratch(ss), vms_grow_arena(ss));
             if gw as usize > vs.len() { *vs = vec![0; (gw as usize).max(2 * vs.len())]; }
             if gb as usize > cb.len() { *cb = vec![0; (gb as usize).max(2 * cb.len())]; }
-            if gs as usize > s.len() { s.resize(gs as usize, 0); }
+            if gs as usize > s.len() {
+                s.resize(gs as usize, 0);
+                // at most 2^18 words remembered: one huge item does not pre-grow every later session
+                if s.len() <= 1 << 18 {
+                    self.session_words.fetch_max(s.len(), std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             if ga as usize > ka.len() { ka.resize(ga as usize, 0); }
         }
+    }
+    /// D286 A3: a new session's VM scratch grown to what earlier sessions needed, after
+    /// its init (the arena keeps its own size, as a VMS_GROW leaves it).
+    fn session_hint(&self, s: &mut Vec<i32>) {
+        let h = self.session_words.load(std::sync::atomic::Ordering::Relaxed);
+        if h > s.len() { s.resize(h, 0); }
     }
     /// A rule's index (its position in RULES), or None.
     pub fn rule(&self, name: &str) -> Option<i32> {
@@ -404,6 +419,7 @@ impl<'p> Session<'p> {
         let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
         let c = vms_init(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
         assert!(c >= 0, "snug: vms-init answered {} for a verified Program", c);
+        prog.session_hint(&mut s);
         Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
     }
     /// D085: a session over a message of UNKNOWN length (drain mode). Step it as a
@@ -420,6 +436,7 @@ impl<'p> Session<'p> {
         let mut ka = vec![0u8; vms_arena(&prog.p, &lim, total).max(0) as usize];
         let c = vms_init_unknown(&prog.p, &prog.b, rule, &lim, &mut s, &mut ss, &mut ka, quantum);
         assert!(c >= 0, "snug: vms-init-unknown answered {} for a verified Program", c);
+        prog.session_hint(&mut s);
         Session { prog, s, ss, ka, out: vec![0i32; 8 + 2 * 257], done: None }
     }
     /// The input limit of an unknown-length session: more bytes than this is `too_large`.

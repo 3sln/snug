@@ -5487,6 +5487,38 @@ re-sizing the arena from the previous message's end (reads a header across
 `vms-init`, which may meet an uninitialised S).
 - [ ] **Signed off** (owner)
 
+### D325 — Bundle growth for D286 A3 (a session's VM scratch sized from the Program's high-water mark); `snug/sources` brotli cap at measured + 2%
+**Decision** (D286 perf analyst): only the `snug/sources` brotli cap rises
+(static and full) to ceil(56,341 × 1.02) = 57,468. Measured with `node
+tools/size/size.mjs` (esbuild 0.28.2, Node 24.6.0) on `3715bdd` and on it +
+A3, minified / gzip / brotli: `snug/sources` 179,513 / 66,043 / 56,284 ->
+179,510 / 66,050 / 56,341 (-3 / +7 / +57; over its brotli cap by 12 B);
+`snug/sequence` 209,083 / 74,360 / 64,448 -> 209,038 / 74,349 / 64,513 (within
+its caps); every other entry unchanged.
+**Attribution**: `host/js/src/vm-session.mjs` only. A new session's S starts
+at `max(vm-scratch-words, program.sw)` (since D324 a session's arena starts at
+the lease, so the room past it holds a canonical item's events), and a
+`VMS_GROW` of S records `program.sw` (at most 2^18 words: one huge item does not
+pre-grow every later session). The same in Rust (`Program::session_words`, an
+`Arc<AtomicUsize>`) and the wasm SDK (`Prog::sw`, a `Cell`), outside the JS
+entries. Minified the entry shrinks; brotli moves with the reshuffle.
+**Gain**: a fresh `VmSession` per call (`bench/d286/host-sess.mjs`, three
+rotated rounds) on `3715bdd` -> + A3: maps with reversed keys 19.3 -> 12.5 ms
+(1.55x), map-heavy reversed 25.2 -> 18.2 ms (1.38x); deterministic and
+indefinite input within noise. Units, events and verdicts unchanged (S's
+size is not observable: the arena starts at the lease either way).
+**Cuts tried** (each keeping units and events identical): A2 dropped entirely
+(the session route's one-round S sizing, +174 B min in `vm/svalid`, put
+`snug/sequence` over its cap, and A3 alone gives the same gain); A1's lease
+rewritten as one `{vs, cb}` object with a shared `growValid` (the vs/cb growth
+was duplicated in `vm-session.mjs` and `sequence.mjs`); S sized at allocation
+rather than copied after the init; four encodings of the high-water update
+(the one kept compresses best); factoring the repeated result/yield objects and
+a smaller vs/cb growth rule (both smaller minified, larger under brotli). The
+remaining 12 B is left to the P8.7 size pass.
+- [x] **Signed off** (coordinator, 2026-11-11, under owner delegation D303:
+  +12 B brotli over cap, for 1.38–1.55× on reordered-map sessions)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

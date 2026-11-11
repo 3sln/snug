@@ -361,3 +361,70 @@ than at the analysis on non-deterministic input. Not done:
 
 The PEG merge's own cost on deterministic maps (`[* {* tstr => any}]` 4.6 → 18.8
 ms) went to the PEG engineer.
+
+### A2 dropped, A3 landed; S growth in sequences fixed (2026-11-11, on `8ffa72e`)
+
+**The sequence scratch bug (found here, fixed by the PEG engineer as D324).**
+A `sequenceReader` over messages that take the canonical path grew the session
+scratch S on every message without bound: 1,554 → 469,086 words over 1000
+messages of 50 reversed-key maps on `920a3e1`. Each message's new arena took
+all of S, so the canonical events after it needed S to grow again. Since D324
+the arena starts at the lease and S stays at 1,554 words. The repro is
+`.cache/d286p/seqgrow.mjs`, now a sequence-test regression.
+
+**A2 (one-round sizing), prototyped and dropped.** The full version did three
+things: `canon-build` asked for the event room up front from the scanner's
+record count, `vm-canon` grew S before the copy, and `vbuild` did the same for
+sessions. It cost +267 min / +81 gzip in `snug/schema`, over the gzip cap, for
+about 5% on a first call only, since the buffer route's leased buffers grow
+once per isolate. The session-only version (`vbuild` alone, +174 min in
+`vm/svalid`) put `snug/sequence` over its cap once D323 had used the headroom.
+A3 alone measured the same gain as A2 + A3 (maps `rev` 26.7 vs 26.8 ms on
+`b25a0fe`), so A2 was dropped.
+
+**A3 (a per-Program high-water mark for S).** Fresh `VmSession` per call
+(`.cache/d286impl/bench/d286/host-sess.mjs`, three rotated rounds, median µs):
+
+| | `3715bdd` | A3 | |
+| --- | ---: | ---: | ---: |
+| 2000 maps `rev` | 19,292 | 12,452 | 1.55× |
+| map-heavy `rev` | 25,213 | 18,245 | 1.38× |
+| `det`, `ind` | — | 0.95–1.1 | — |
+
+The size and cap decision is DEVLOG D325: `snug/sources` brotli +57, 12 B over
+its cap, signed off by the coordinator under D303. Gates, run on a clean
+worktree on `3715bdd` + A3:
+- valid-test ok: cbor2, D321 144/144.
+- vmsession-test ok: 1,059,298 session runs == buffer; JS == Rust 692,629;
+  523,615 untold-length streams; hosts 10,140. Re-run on the final files: ok.
+- sequence-test ok: D324 scratch bound; 736,198 oracle runs; JS == Rust
+  182,222; release latency 0/67,281.
+- vm-test ok: JS == Rust 80,545; JS == wasm 78,251.
+- drift, rust-api-test (clippy), npm 1,450/1,450 and wasm-sdk-test 15/15 ok.
+
+**E (a tolerant VM attempt): closed, no-go.** Measured on `b25a0fe`, buffer
+driver, three rounds:
+
+| | det | rev | rev / det |
+| --- | ---: | ---: | ---: |
+| 2000 maps | 4.96 ms | 20.7 ms | 4.2× |
+| map-heavy | 9.33 ms | 24.9 ms | 2.7× |
+
+Where maps `rev` went (profile, `vmValidateV` = 100%): the walk over the copy
+under `PF_CANON` took ~74%, about 3× the whole deterministic run. The scanner
+pass, with its sort, took ~19%, `canon-build` ~6% and the attempt ~1%. E would
+still walk descending keys through the same generic map path, so it could save
+at most the scanner and the copy (~1.3×) at the price of a new charging route.
+The gain was in the map walk. The PEG engineer's p85-rev (`3715bdd`) runs the
+map streak over canonical copies: reversed keys 1.84× on maps, with the same
+charges.
+
+**Where the D286 open item stands.**
+
+| | D286 | now |
+| --- | --- | --- |
+| a fresh session, many small reordered maps (vs deterministic) | 23× | 2.2× (maps `rev` 12.5 ms vs `det` 5.6 ms through the host) |
+| the buffer driver, same input (`variants.mjs vm`) | — | 3.0× (15.1 vs 5.1 ms) |
+
+On indefinite and non-shortest input, both drivers are 1.3–2× cheaper than at
+the analysis. Nothing is left open under D286.

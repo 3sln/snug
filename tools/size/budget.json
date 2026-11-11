@@ -86,14 +86,14 @@
       "static": {
         "min": 180242,
         "gzip": 66069,
-        "brotli": 56329
+        "brotli": 57468
       },
       "full": {
         "min": 180242,
         "gzip": 66069,
-        "brotli": 56329
+        "brotli": 57468
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D325 (D286 A3, a session's scratch sized from the Program's high-water mark; +57 B brotli, minified -3), measured on main 8ffa72e + A3."
     },
     "snug/sequence": {
       "static": {

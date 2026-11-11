@@ -15,20 +15,18 @@ const noExt = () => -2;
 // isolate, grown on VMS_GROW and kept, serves every session and sequence step, as the buffer driver's lease
 // does (schema-core.mjs): a fresh session no longer regrows them from 512 words / 1 KiB, rerunning a whole
 // item's scanner pass and copy on every growth. A step re-entered from an extension predicate takes fresh ones.
-let validVs = new Int32Array(512), validCb = new Uint8Array(1024), validLeased = false;
-/** Run step(vs, cb, grow) with the isolate's valid buffers; grow(w, nb) answers the grown pair. */
+let lease = null;
+/** Run step(v) with the isolate's valid buffers v = {vs, cb} (fresh ones when re-entered), grown by growValid. */
 export function withValidBuffers(step) {
-  const own = !validLeased;
-  let vs = own ? validVs : new Int32Array(512), cb = own ? validCb : new Uint8Array(1024);
-  if (own) validLeased = true;
-  try {
-    return step(() => vs, () => cb, (w, nb) => {
-      if (w > vs.length) vs = new Int32Array(Math.max(w, 2 * vs.length));
-      if (nb > cb.length) cb = new Uint8Array(Math.max(nb, 2 * cb.length));
-    });
-  } finally {
-    if (own) { validVs = vs; validCb = cb; validLeased = false; }
-  }
+  const v = lease ?? { vs: new Int32Array(512), cb: new Uint8Array(1024) };
+  lease = null;
+  try { return step(v); } finally { lease = v; }
+}
+/** After VMS_GROW: v's buffers grown to what the session array ss asks for. */
+export function growValid(v, ss) {
+  const w = vmsGrowWords(ss), nb = vmsGrowBytes(ss);
+  if (w > v.vs.length) v.vs = new Int32Array(Math.max(w, 2 * v.vs.length));
+  if (nb > v.cb.length) v.cb = new Uint8Array(Math.max(nb, 2 * v.cb.length));
 }
 
 /** One resumable validation (P6.2, D027): the kin session over windows of a message of
@@ -47,7 +45,9 @@ export class VmSession {
     const { P, B } = program;
     this.program = program; this.length = length;
     const limits = limitWords(opts), cap = Math.max(P[16], 1);
-    this.s = new Int32Array(vmScratchWords(P, rule, cap)); vmScratchInit(this.s, cap);
+    // D286 A3: S as large as earlier sessions on this Program needed (a session's arena starts at the lease, D324,
+    // so the room past it holds a canonical item's events)
+    this.s = new Int32Array(Math.max(vmScratchWords(P, rule, cap), program.sw || 0)); vmScratchInit(this.s, cap);
     this.ss = new Int32Array(vmsWords(P));
     this.out = new Int32Array(8 + 2 * 257);
     let c;
@@ -88,13 +88,15 @@ export class VmSession {
     let r;
     const x = this.program.ext;
     try {
-      r = withValidBuffers((vs, cb, grow) => {
+      r = withValidBuffers(v => {
         for (;;) {
-          const c = vmsStepV(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x ? x.call : noExt, vs(), cb());
+          const c = vmsStepV(this.program.P, this.program.B, window, this.s, this.ss, this.ka, this.out, base, x ? x.call : noExt, v.vs, v.cb);
           if (c !== VMS_GROW) return c;
-          grow(vmsGrowWords(this.ss), vmsGrowBytes(this.ss));
+          growValid(v, this.ss);
           const sw = vmsGrowScratch(this.ss), aw = vmsGrowArena(this.ss);
-          if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.s = g; }
+          // D286 A3: the Program remembers S for later sessions (this S started at least that large), at most
+          // 2^18 words: one huge item does not pre-grow every later session
+          if (sw > this.s.length) { const g = new Int32Array(sw); g.set(this.s); this.s = g; if (sw < 262144) this.program.sw = sw; }
           if (aw > this.ka.length) { const g = new Uint8Array(aw); g.set(this.ka); this.ka = g; }
         }
       });

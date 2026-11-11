@@ -49,6 +49,8 @@ struct Prog {
     /// offset): `.chars` 2 words (`[1, 0]` if refused), `.samelen` its table
     /// (empty if refused).
     preps: BTreeMap<(i32, i32), Vec<i32>>,
+    /// D286 A3: the largest VM scratch a session on this Program grew to.
+    sw: std::cell::Cell<usize>,
 }
 
 #[link(wasm_import_module = "env")]
@@ -311,7 +313,7 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
         return -1;
     }
     let slot = st.progs.iter().position(|x| x.is_none()).unwrap_or_else(|| { st.progs.push(None); st.progs.len() - 1 });
-    st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new() });
+    st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new(), sw: std::cell::Cell::new(0) });
     slot as i32
 }
 /// Bind Program h's extension controls: n kinds (see `Prog::ext`) at kp.
@@ -608,6 +610,8 @@ pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: 
         c = vms_init(&pr.p, &pr.b, rule, &lim, &mut s, &mut ss, &mut ka, total, quantum);
     }
     if c < 0 { return -2; }
+    // D286 A3: S as large as earlier sessions on this Program needed, grown after the init
+    if pr.sw.get() > s.len() { s.resize(pr.sw.get(), 0); }
     put_session(st, Sess::Vm { prog: h, rule, lim, s, ss, ka, out: vec![0; OUTW], w: Vec::new() })
 }
 /// P7.13w (D212): the next message of a sequence session -- vms-init-seq again on
@@ -669,7 +673,11 @@ fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
                 let (gw, gb, gs, ga) = (vms_grow_words(ss) as usize, vms_grow_bytes(ss) as usize, vms_grow_scratch(ss) as usize, vms_grow_arena(ss) as usize);
                 if gw > vs.len() { *vs = vec![0; gw.max(2 * vs.len())]; }
                 if gb > cb.len() { *cb = vec![0; gb.max(2 * cb.len())]; }
-                if gs > s.len() { s.resize(gs, 0); }
+                if gs > s.len() {
+                    s.resize(gs, 0);
+                    // at most 2^18 words remembered (D286 A3): one huge item does not pre-grow every later session
+                    if s.len() <= 1 << 18 && s.len() > pr.sw.get() { pr.sw.set(s.len()); }
+                }
                 if ga > ka.len() { ka.resize(ga, 0); }
             };
             st.info[0] = vms_need_offset(ss);
