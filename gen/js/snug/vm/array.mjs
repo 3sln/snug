@@ -293,12 +293,12 @@ export function recWord(p, s, bo, ao, po, idx, k) {
 export function recStore(p, s, bo, ao, po, i, at) {
     // Store record i (the block's active set) by tier: A1 its ring row, A2 its
     // arena record, each charged ceil(W/16) first; the item's record (the
-    // stride, all A2 blocks) is pushed by the first A2 block that stores it.
-    // 0 or a negated code.
+    // stride, all A2 blocks) is pushed by the first A2 block that stores it. A
+    // program without positions (W = 0) stores nothing. 0 or a negated code.
     const tier = aTier(p, s, po);
     const aw = p[ao + 1];
     const act = bo + AB_HDR;
-    if (tier === TIER_A0) {
+    if ((tier === TIER_A0) || (aw === 0)) {
         return 0;
     }
     if (!charge(s, c16(aw), at)) {

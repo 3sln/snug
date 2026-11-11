@@ -241,12 +241,12 @@
 (defn ^I32 rec-store [^IntsR p ^Ints s ^I32 bo ^I32 ao ^I32 po ^I32 i ^I32 at]
   (comment "Store record i (the block's active set) by tier: A1 its ring row, A2 its"
            "arena record, each charged ceil(W/16) first; the item's record (the"
-           "stride, all A2 blocks) is pushed by the first A2 block that stores it."
-           "0 or a negated code.")
+           "stride, all A2 blocks) is pushed by the first A2 block that stores it. A"
+           "program without positions (W = 0) stores nothing. 0 or a negated code.")
   (let [tier (a-tier p s po)
         aw (ia p (+ ao 1))
         act (+ bo AB_HDR)]
-    (if (== tier TIER_A0) (return 0))
+    (if (or (== tier TIER_A0) (== aw 0)) (return 0))
     (if (not (charge s (c16 aw) at)) (return (neg R_BUDGET)))
     (if (== tier TIER_A1)
       (do (let [rows (+ (ia p (+ po 4)) 1)

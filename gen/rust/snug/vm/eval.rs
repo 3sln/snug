@@ -1165,10 +1165,11 @@ pub fn arr_after(p: &[i32], s: &mut [i32], fb: i32, w: i32, area: i32, nb: i32, 
 pub fn arr_close(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i32, area: i32, nb: i32, d: i32, n: i32, pos: i32, q0: i32, q: i32, nq: i32, ctx: i32, pend: i32, ext: &dyn Fn(i32, &[u8], i32, i32, &[u8], i32, i32, i32) -> i32) -> i32 {
     // The array's end (program-2 §5.1, §8): 1 unit per block, a live block's end
     // run (array-end); its records popped; the scalar leaves and combinators;
-    // then, with no answer matched, witness rule 5' (array-witness) when there
-    // were ARRAY blocks, else rule 1. 0 or a code.
+    // then, with no answer matched, witness rule 5' (array-witness) when an
+    // ARRAY block failed, else rule 1. 0 or a code.
     let mark: i32 = array_mark(p, s, fb, area, nb);
     let mut be: i32 = area;
+    let mut unacc: i32 = 0;
     for _bk in 0..nb {
         if !charge(s, 1, pos) {
             return -R_BUDGET;
@@ -1186,6 +1187,9 @@ pub fn arr_close(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i3
                 q_set_flag(s, fb, w, qi, R_MISSING << 8);
             }
         }
+        if s[(be + AB_ALIVE) as usize] == 0 {
+            unacc += 1;
+        }
         be += array_words(p, aok);
     }
     if mark >= 0 {
@@ -1200,7 +1204,7 @@ pub fn arr_close(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], fb: i32, w: i3
         return m;
     }
     if (m == 0) && ((ctx & CTX_KEY) == 0) {
-        if nb > 0 {
+        if unacc > 0 {
             array_witness(p, s, fb, area, nb, d, n, pos, pend);
         } else if wit_empty(s) {
             let r1: i32 = rule1(s, fb, w, nq, d, pos);

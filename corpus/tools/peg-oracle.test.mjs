@@ -97,16 +97,20 @@ test('migration specifies 11 structural + 22 rule-A flips', () => {
   assert.equal([...flips.values()].reduce((n, xs) => n + xs.length, 0), 33);
   for (const name of flips.keys()) assert.ok(suites.some(s => s.name === name), name);
 });
+// P8.5 phase 2 migrated the corpus (2026-11-11): the 33 flips and the 12 rfc flips are now
+// `expect: false` with a "P8.5 migration" note, so the corpus states the default (rfc)
+// verdicts; under rule A exactly the 12 rfc flips differ again (false in the corpus, true).
+const isRfcFlip = (name, i) => rfcFlips.get(name)?.includes(i) ?? false;
 for (const [name, changed] of flips) {
   const s = suites.find(s => s.name === name);
   for (const [i, c] of s.cases.entries()) test(`corpus ${name} #${i}${changed.includes(i) ? ' flips' : ''}`, () => {
     const schema = compile(s.cddl); assert.equal(schema.error, undefined);
-    if (changed.includes(i)) assert.equal(c.expect, true, 'old verdict before migration');
-    assert.equal(check(schema, c.rule, decode(hex(c.hex)), { cuts: 'branch' }), changed.includes(i) ? false : c.expect);
+    if (changed.includes(i)) { assert.equal(c.expect, false, 'migrated verdict'); assert.match(c.note, /P8\.5 migration/); }
+    assert.equal(check(schema, c.rule, decode(hex(c.hex)), { cuts: 'branch' }), changed.includes(i) ? false : isRfcFlip(name, i) ? true : c.expect);
   });
 }
-for (const [cuts, lists] of [['branch', [flips]], ['rfc', [flips, rfcFlips]]])
-  test(`complete adversarial corpus (cuts: '${cuts}'): precisely the ${cuts === 'rfc' ? '33 + 12' : '33'} documented flips`, () => {
+for (const [cuts, lists] of [['branch', [rfcFlips]], ['rfc', []]])
+  test(`complete adversarial corpus (cuts: '${cuts}'): ${cuts === 'rfc' ? 'every migrated expectation' : 'precisely the 12 rfc flips differ (false to true)'}`, () => {
     const differences = []; let checked = 0;
     for (const s of suites) {
       if (s.schemaError) continue;
@@ -114,7 +118,7 @@ for (const [cuts, lists] of [['branch', [flips]], ['rfc', [flips, rfcFlips]]])
       for (const [i, c] of s.cases.entries()) {
         const actual = check(schema, c.rule, decode(hex(c.hex)), cuts === 'rfc' ? undefined : { cuts }); checked++;
         assert.notEqual(actual, 'unknown', s.name + ' #' + i);
-        if (actual !== c.expect) { assert.equal(c.expect, true, s.name + ' #' + i + ' flips true to false only'); differences.push(s.name + ' #' + i); }
+        if (actual !== c.expect) { assert.equal(c.expect, false, s.name + ' #' + i + ' differs false to true only'); differences.push(s.name + ' #' + i); }
       }
     }
     const expected = lists.flatMap(l => [...l].flatMap(([name, indices]) => indices.map(i => name + ' #' + i)));

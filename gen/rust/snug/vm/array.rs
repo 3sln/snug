@@ -249,12 +249,12 @@ pub(crate) fn rec_word(p: &[i32], s: &[i32], bo: i32, ao: i32, po: i32, idx: i32
 pub(crate) fn rec_store(p: &[i32], s: &mut [i32], bo: i32, ao: i32, po: i32, i: i32, at: i32) -> i32 {
     // Store record i (the block's active set) by tier: A1 its ring row, A2 its
     // arena record, each charged ceil(W/16) first; the item's record (the
-    // stride, all A2 blocks) is pushed by the first A2 block that stores it.
-    // 0 or a negated code.
+    // stride, all A2 blocks) is pushed by the first A2 block that stores it. A
+    // program without positions (W = 0) stores nothing. 0 or a negated code.
     let tier: i32 = a_tier(p, s, po);
     let aw: i32 = p[(ao + 1) as usize];
     let act: i32 = bo + AB_HDR;
-    if tier == TIER_A0 {
+    if (tier == TIER_A0) || (aw == 0) {
         return 0;
     }
     if !charge(s, c16(aw), at) {

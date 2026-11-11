@@ -7,7 +7,6 @@
 // where out is the space-separated out array (program.md §13.2).
 import { compile } from '../../host/js/src/compile.mjs';
 import { encode } from '../../bench/baseline/cbor-3sln.mjs';
-import { Asm, cbor } from './vm-asm.mjs';
 
 const unhex = h => Uint8Array.from(Buffer.from(h.replace(/\s/g, ''), 'hex'));
 const enc = v => encode(v);
@@ -66,12 +65,22 @@ export function assembledCases() {
     ]);
   }
   {
-    const p = C('r = { kind: "a", x: int // kind: "b", y: tstr }');
+    // rule A (`cuts: 'branch'`): the first alternative's cut is absorbed by the choice
+    const p = C('r = { kind: "a", x: int // kind: "b", y: tstr }', { cuts: 'branch' });
     const kind = KEY(p.P, p.B, 'kind'), y = KEY(p.P, p.B, 'y');
-    add('witness group choice', p, [
+    add('witness group choice (branch)', p, [
       { label: '{kind: "c"}: value ["kind"]', bytes: enc({ kind: 'c' }), check: expect({ code: 35, path: [[1, kind]] }) },
-      { label: '{kind: "b", y: 1}: type ["y"]', bytes: enc({ kind: 'b', y: 1 }), check: expect({ code: 32, path: [[1, y]] }) },
-      { label: '{kind: "b"}: missing ["y"]', bytes: enc({ kind: 'b' }), check: expect({ code: 33, path: [[1, y]] }) },
+      { label: '{kind: "b", y: 1}: type ["y"] (the unacceptable pair, rule 3\')', bytes: enc({ kind: 'b', y: 1 }), check: expect({ code: 32, path: [[1, y]] }) },
+      { label: '{kind: "b"}: missing ["y"] (the best event: score 1 beats the cut\'s 0)', bytes: enc({ kind: 'b' }), check: expect({ code: 33, path: [[1, y]] }) },
+    ]);
+    // the default literal RFC cut (D301): the first alternative's cut fails the map
+    const q = C('r = { kind: "a", x: int // kind: "b", y: tstr }');
+    const kind2 = KEY(q.P, q.B, 'kind'), y2 = KEY(q.P, q.B, 'y');
+    add('witness group choice (rfc)', q, [
+      { label: '{kind: "c"}: value ["kind"]', bytes: enc({ kind: 'c' }), check: expect({ code: 35, path: [[1, kind2]] }) },
+      { label: '{kind: "b", y: 1}: type ["y"] (rule 3\', at the pair)', bytes: enc({ kind: 'b', y: 1 }), check: expect({ code: 32, path: [[1, y2]] }) },
+      { label: '{kind: "b"}: value ["kind"] (fail! from the first alternative\'s cut)', bytes: enc({ kind: 'b' }), check: expect({ code: 35, path: [[1, kind2]] }) },
+      { label: '{kind: "b", y: "z"}: value ["kind"] (the discriminated-union idiom, D301)', bytes: enc({ kind: 'b', y: 'z' }), check: expect({ code: 35, path: [[1, kind2]] }) },
     ]);
   }
   {
@@ -197,13 +206,10 @@ export function assembledCases() {
     ]);
   }
 
-  // ---------------------------------------------------------------- assembler: NOT
+  // ---------------------------------------------------------------- NOT (a compiled `.ne`; format 1's assembler retired, P8.5)
   {
-    const a = new Asm();
-    const L1 = a.text(1, 1), L2 = a.lit(cbor.text('x')), L3 = a.not(L1, L2);
-    a.rule('r', a.ts([L3]));
-    const p = a.build();
-    add('assembled NOT', p, [
+    const p = C('r = (tstr .size 1) .ne "x"');
+    add('NOT (.ne)', p, [
       { label: '"y" ok', bytes: enc('y'), check: expect({ code: 0 }) },
       { label: '"x": value', bytes: enc('x'), check: expect({ code: 35 }) },
       { label: '"xy": size', bytes: enc('xy'), check: expect({ code: 36 }) },

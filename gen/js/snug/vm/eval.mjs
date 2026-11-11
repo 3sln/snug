@@ -1199,10 +1199,11 @@ export function arrAfter(p, s, fb, w, area, nb, el, q, r, cfb, cw, cnq, pos) {
 export function arrClose(p, pool, b, s, fb, w, area, nb, d, n, pos, q0, q, nq, ctx, pend, ext) {
     // The array's end (program-2 §5.1, §8): 1 unit per block, a live block's end
     // run (array-end); its records popped; the scalar leaves and combinators;
-    // then, with no answer matched, witness rule 5' (array-witness) when there
-    // were ARRAY blocks, else rule 1. 0 or a code.
+    // then, with no answer matched, witness rule 5' (array-witness) when an
+    // ARRAY block failed, else rule 1. 0 or a code.
     const mark = arrayMark(p, s, fb, area, nb);
     let be = area;
+    let unacc = 0;
     for (let _bk = 0; _bk < nb; _bk++) {
         if (!charge(s, 1, pos)) {
             return -R_BUDGET;
@@ -1220,6 +1221,9 @@ export function arrClose(p, pool, b, s, fb, w, area, nb, d, n, pos, q0, q, nq, c
                 qSetFlag(s, fb, w, qi, R_MISSING << 8);
             }
         }
+        if (s[be + AB_ALIVE] === 0) {
+            unacc += 1;
+        }
         be += arrayWords(p, aok);
     }
     if (mark >= 0) {
@@ -1234,7 +1238,7 @@ export function arrClose(p, pool, b, s, fb, w, area, nb, d, n, pos, q0, q, nq, c
         return m;
     }
     if ((m === 0) && ((ctx & CTX_KEY) === 0)) {
-        if (nb > 0) {
+        if (unacc > 0) {
             arrayWitness(p, s, fb, area, nb, d, n, pos, pend);
         } else if (witEmpty(s)) {
             const r1 = rule1(s, fb, w, nq, d, pos);

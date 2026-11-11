@@ -850,10 +850,11 @@
                             ^I32 n ^I32 pos ^I32 q0 ^I32 q ^I32 nq ^I32 ctx ^I32 pend ^Ext ext]
   (comment "The array's end (program-2 §5.1, §8): 1 unit per block, a live block's end"
            "run (array-end); its records popped; the scalar leaves and combinators;"
-           "then, with no answer matched, witness rule 5' (array-witness) when there"
-           "were ARRAY blocks, else rule 1. 0 or a code.")
+           "then, with no answer matched, witness rule 5' (array-witness) when an"
+           "ARRAY block failed, else rule 1. 0 or a code.")
   (let [mark (array-mark p s fb area nb)
-        ^:mut be area]
+        ^:mut be area
+        ^:mut unacc 0]
     (for [^I32 _bk 0 nb]
       (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
       (let [aok (block-ao p s fb be)]
@@ -864,6 +865,7 @@
                 (if (== ra 1)
                   (q-set-flag s fb w qi F_MATCHED)
                   (q-set-flag s fb w qi (shl R_MISSING 8))))))
+        (if (== (ia s (+ be AB_ALIVE)) 0) (set unacc (+ unacc 1)))
         (set be (+ be (array-words p aok)))))
     (if (>= mark 0) (arena-set-up s mark))
     (let [rs (eval-scalars p pool b s fb w nq pos q0 q 16 0 n (unit-of ctx))]
@@ -871,7 +873,7 @@
     (let [m (finish-comb p pool b s fb w nq pos q ext)]
       (if (< m 0) (return m))
       (if (and (== m 0) (== (bit-and ctx CTX_KEY) 0))
-        (if (> nb 0)
+        (if (> unacc 0)
           (array-witness p s fb area nb d n pos pend)
           (if (wit-empty s)
             (do (let [r1 (rule1 s fb w nq d pos)]

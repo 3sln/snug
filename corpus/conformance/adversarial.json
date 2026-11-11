@@ -12,7 +12,6 @@
    "category": "reviews",
    "name": "C1: attainable group counts are {2,4}",
    "cddl": "r = { 1*2 (2*2 tstr => uint) }",
-   "snugSchemaError": "map_group_occurrence: variable repetition of non-absorbing key typesets",
    "cases": [
     {
      "rule": "r",
@@ -39,7 +38,8 @@
      "hex": "a4616100616200616300616400",
      "expect": true
     }
-   ]
+   ],
+   "note": "P8.5 (D270): compiles under PEG group semantics; the refusal \"map_group_occurrence: variable repetition of non-absorbing key typesets\" is withdrawn (architecture §20.11), the cases are VM cases"
   },
   {
    "category": "reviews",
@@ -48,7 +48,6 @@
    "options": {
     "cose": true
    },
-   "snugSchemaError": "map_group_occurrence: coupled variable repetition",
    "cases": [
     {
      "rule": "r",
@@ -65,7 +64,8 @@
      "hex": "a401000200616100616200",
      "expect": true
     }
-   ]
+   ],
+   "note": "P8.5 (D270): compiles under PEG group semantics; the refusal \"map_group_occurrence: coupled variable repetition\" is withdrawn (architecture §20.11), the cases are VM cases"
   },
   {
    "category": "reviews",
@@ -152,7 +152,6 @@
    "category": "reviews",
    "name": "A2: attainable group counts are {0,2,4}",
    "cddl": "r = { 0*2 (2*2 tstr => int) }",
-   "snugSchemaError": "map_group_occurrence: count set {0,2,4} is not an interval",
    "cases": [
     {
      "rule": "r",
@@ -184,7 +183,8 @@
      "hex": "a5626b3000626b3101626b3202626b3303626b3404",
      "expect": false
     }
-   ]
+   ],
+   "note": "P8.5 (D270): compiles under PEG group semantics; the refusal \"map_group_occurrence: count set {0,2,4} is not an interval\" is withdrawn (architecture §20.11), the cases are VM cases"
   },
   {
    "category": "reviews",
@@ -221,7 +221,8 @@
     {
      "rule": "r",
      "hex": "a1616101",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -236,7 +237,8 @@
     {
      "rule": "r",
      "hex": "a261610161636178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -258,17 +260,20 @@
     {
      "rule": "r",
      "hex": "a361610161620261636178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
      "hex": "a2616101616302",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
      "hex": "a26161617861636178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -300,7 +305,8 @@
     {
      "rule": "r",
      "hex": "a26161617861626178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -313,7 +319,6 @@
    "category": "reviews",
    "name": "C4: typeset cuts commit a matched key",
    "cddl": "r = { * tstr ^ => uint, * tstr => any }",
-   "snugSchemaError": "map_cut: cuts on key typesets refused",
    "cases": [
     {
      "rule": "r",
@@ -330,13 +335,13 @@
      "hex": "a0",
      "expect": true
     }
-   ]
+   ],
+   "note": "P8.5 (D270): compiles under PEG group semantics; the refusal \"map_cut: cuts on key typesets refused\" is withdrawn (architecture §20.11), the cases are VM cases"
   },
   {
    "category": "reviews",
    "name": "C5: value-disjoint existential assignment",
    "cddl": "r = { tstr => 0, tstr => 1 }",
-   "snugSchemaError": "map_overlap: overlapping constrained key domains",
    "cases": [
     {
      "rule": "r",
@@ -358,13 +363,13 @@
      "hex": "a1616101",
      "expect": false
     }
-   ]
+   ],
+   "note": "P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: overlapping constrained key domains\" is withdrawn (architecture §20.11), the cases are VM cases"
   },
   {
    "category": "reviews",
    "name": "A6b: wildcard before cut may consume pair",
    "cddl": "r = { * tstr => any, ? \"a\": int }",
-   "snugSchemaError": "map_cut: literal cut after overlapping wildcard",
    "cases": [
     {
      "rule": "r",
@@ -381,7 +386,8 @@
      "hex": "a0",
      "expect": true
     }
-   ]
+   ],
+   "note": "P8.5 (D270): compiles under PEG group semantics; the refusal \"map_cut: literal cut after overlapping wildcard\" is withdrawn (architecture §20.11), the cases are VM cases"
   },
   {
    "category": "reviews",
@@ -391,7 +397,8 @@
     {
      "rule": "r",
      "hex": "a261796173646b696e646162",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -472,7 +479,8 @@
     {
      "rule": "r",
      "hex": "8301016178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -514,7 +522,8 @@
     {
      "rule": "r",
      "hex": "83010101",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -524,7 +533,8 @@
     {
      "rule": "r",
      "hex": "850101010101",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -534,7 +544,8 @@
     {
      "rule": "r",
      "hex": "8701010101010101",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -3548,7 +3559,8 @@
     {
      "rule": "r",
      "hex": "4401026178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -3603,17 +3615,20 @@
     {
      "rule": "r",
      "hex": "a1616120",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a2616120616203",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a2616120616303",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -3626,8 +3641,7 @@
    "category": "generated",
    "name": "seeded-001",
    "cddl": "r = { a: bool, ? b: bool // c: bool, 0*0 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 1; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 1; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -3736,7 +3750,8 @@
     {
      "rule": "r",
      "hex": "a1616100",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -3759,8 +3774,7 @@
    "category": "generated",
    "name": "seeded-005",
    "cddl": "r = { a: 0..2, ? b: tstr // c: tstr, 2*2 tstr => any }",
-   "note": "xorshift32 seed 0x5eed8610, schema 5; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 5; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -3869,17 +3883,20 @@
     {
      "rule": "r",
      "hex": "a161616179",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
      "hex": "a2616103616203",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a26161206163f4",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -3892,8 +3909,7 @@
    "category": "generated",
    "name": "seeded-009",
    "cddl": "r = { a: bool, ? b: int // c: int, 2*3 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 9; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 9; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4002,17 +4018,20 @@
     {
      "rule": "r",
      "hex": "a1616120",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
      "hex": "a26161f46162f6",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a261616179616303",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -4025,8 +4044,7 @@
    "category": "generated",
    "name": "seeded-013",
    "cddl": "r = { a: int, ? b: tstr // c: tstr, 1*3 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 13; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 13; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4135,17 +4153,20 @@
     {
      "rule": "r",
      "hex": "a16161f6",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a26161f46162f5",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a2616101616303",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -4158,8 +4179,7 @@
    "category": "generated",
    "name": "seeded-017",
    "cddl": "r = { a: 0..2, ? b: 0..2 // c: 0..2, 1*3 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 17; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 17; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4268,7 +4288,8 @@
     {
      "rule": "r",
      "hex": "a1616103",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -4291,8 +4312,7 @@
    "category": "generated",
    "name": "seeded-021",
    "cddl": "r = { a: 0..2, ? b: (uint / tstr) // c: (uint / tstr), 1*1 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 21; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 21; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4401,7 +4421,8 @@
     {
      "rule": "r",
      "hex": "a161616178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -4411,7 +4432,8 @@
     {
      "rule": "r",
      "hex": "a26161016163f6",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -4424,8 +4446,7 @@
    "category": "generated",
    "name": "seeded-025",
    "cddl": "r = { a: tstr, ? b: 0..2 // c: 0..2, 1*2 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 25; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 25; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4534,17 +4555,20 @@
     {
      "rule": "r",
      "hex": "a161616179",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a26161f6616203",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a26161f661636179",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -4557,8 +4581,7 @@
    "category": "generated",
    "name": "seeded-029",
    "cddl": "r = { a: tstr, ? b: (uint / tstr) // c: (uint / tstr), 0*0 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 29; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 29; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4690,8 +4713,7 @@
    "category": "generated",
    "name": "seeded-033",
    "cddl": "r = { a: (uint / tstr), ? b: tstr // c: tstr, 1*3 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 33; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 33; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4810,7 +4832,8 @@
     {
      "rule": "r",
      "hex": "a2616103616303",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -4823,8 +4846,7 @@
    "category": "generated",
    "name": "seeded-037",
    "cddl": "r = { a: uint, ? b: (uint / tstr) // c: (uint / tstr), 2*2 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 37; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 37; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4956,8 +4978,7 @@
    "category": "generated",
    "name": "seeded-041",
    "cddl": "r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 41; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 41; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -4982,7 +5003,8 @@
     {
      "rule": "r",
      "hex": "a261616179616300",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     }
    ]
   },
@@ -5048,7 +5070,8 @@
     {
      "rule": "r",
      "hex": "82036179",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     }
    ]
   },
@@ -5071,7 +5094,8 @@
     {
      "rule": "r",
      "hex": "a26161617861626179",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -5089,8 +5113,7 @@
    "category": "generated",
    "name": "seeded-045",
    "cddl": "r = { a: 0..2, ? b: 0..2 // c: 0..2, 2*2 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 45; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 45; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -5204,7 +5227,8 @@
     {
      "rule": "r",
      "hex": "a2616120616203",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -5222,8 +5246,7 @@
    "category": "generated",
    "name": "seeded-049",
    "cddl": "r = { a: tstr, ? b: int // c: int, 0*2 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 49; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 49; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -5248,7 +5271,8 @@
     {
      "rule": "r",
      "hex": "a261616178616301",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     }
    ]
   },
@@ -5271,7 +5295,8 @@
     {
      "rule": "r",
      "hex": "8100",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270, architecture §20.13): true -> false; PEG lock-in -- a choice keeps its first successful alternative and occurrences are greedy (App. A), so the end-of-container check cannot retry"
     },
     {
      "rule": "r",
@@ -5332,17 +5357,20 @@
     {
      "rule": "r",
      "hex": "a1616100",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
      "hex": "a2616120616203",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a2616103616300",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails"
     },
     {
      "rule": "r",
@@ -5355,8 +5383,7 @@
    "category": "generated",
    "name": "seeded-053",
    "cddl": "r = { a: 0..2, ? b: uint // c: uint, 2*2 tstr => any }",
-   "note": "xorshift32 seed 0x5eed8610, schema 53; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 53; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -5465,17 +5492,20 @@
     {
      "rule": "r",
      "hex": "a1616101",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a261610061626178",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
      "hex": "a26161f66163f5",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -5488,8 +5518,7 @@
    "category": "generated",
    "name": "seeded-057",
    "cddl": "r = { a: uint, ? b: int // c: int, 0*0 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 57; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 57; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -5621,8 +5650,7 @@
    "category": "generated",
    "name": "seeded-061",
    "cddl": "r = { a: (uint / tstr), ? b: int // c: int, 2*3 tstr => any }",
-   "note": "xorshift32 seed 0x5eed8610, schema 61; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 61; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -5754,8 +5782,7 @@
    "category": "generated",
    "name": "seeded-065",
    "cddl": "r = { a: (uint / tstr), ? b: 0..2 // c: 0..2, 0*2 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 65; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 65; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -5864,7 +5891,8 @@
     {
      "rule": "r",
      "hex": "a1616120",
-     "expect": true
+     "expect": false,
+     "note": "P8.5 migration (D270/D273, architecture §20.13): true -> false; a present member with a cut and a wrong value fails the map through `?(...)` (rule A; also under the default rfc cut)"
     },
     {
      "rule": "r",
@@ -5887,8 +5915,7 @@
    "category": "generated",
    "name": "seeded-069",
    "cddl": "r = { a: bool, ? b: int // c: int, 0*2 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 69; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 69; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -6020,8 +6047,7 @@
    "category": "generated",
    "name": "seeded-073",
    "cddl": "r = { a: 0..2, ? b: int // c: int, 1*1 tstr => tstr }",
-   "note": "xorshift32 seed 0x5eed8610, schema 73; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 73; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",
@@ -6153,8 +6179,7 @@
    "category": "generated",
    "name": "seeded-077",
    "cddl": "r = { a: 0..2, ? b: (uint / tstr) // c: (uint / tstr), 0*1 tstr => uint }",
-   "note": "xorshift32 seed 0x5eed8610, schema 77; expected verdicts computed only by oracle",
-   "snugSchemaError": "map_overlap: bounded wildcard overlaps literal c in the second alternative",
+   "note": "xorshift32 seed 0x5eed8610, schema 77; expected verdicts computed only by oracle P8.5 (D270): compiles under PEG group semantics; the refusal \"map_overlap: bounded wildcard overlaps literal c in the second alternative\" is withdrawn (architecture §20.11), the cases are VM cases",
    "cases": [
     {
      "rule": "r",

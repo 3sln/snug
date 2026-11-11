@@ -18,27 +18,26 @@
 //   5. JS == Rust on every case: the whole out array (verdict, reason,
 //      subcode, offset, budget used, items, path), no panic; JS re-run on a
 //      sample behind throwing out-of-bounds traps on P, B, input and scratch.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidateV, vmValidateSpanV } from '../../gen/js/snug/vm/api.mjs';
 import { extFor, testControls } from './ext-cases.mjs';
 import { controlEntries } from '../../host/js/src/ext.mjs';
 import { scan, scanOptions, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
-import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
 import { assembledCases } from './vm-cases.mjs';
 import { Program as HostProgram } from '../../host/js/src/schema.mjs';
 import { encode, decode } from '../../bench/baseline/cbor-3sln.mjs';
-import { compile as oracleCompile, check as oracleCheck } from '../../corpus/tools/oracle.mjs';
-import { oracleSchemas } from './vm-oracle-gen.mjs';
 
 import { buildVmCases, LIM, unhex } from './vm-allcases.mjs';
 const [rustBin, mutArg, seedArg, schemaArg] = process.argv.slice(2);
 const MUTATIONS = Number(mutArg ?? 20000), SEED = Number(seedArg ?? 1), SCHEMAS = Number(schemaArg ?? 400);
 let fails = 0;
-const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); fails++; };
+const failLog = process.env.VMTEST_LOG ? [] : null;
+const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); if (failLog) failLog.push(msg); fails++; };
+process.on('exit', () => { if (failLog) writeFileSync(process.env.VMTEST_LOG, failLog.join('\n') + '\n'); });
 
 // ---------------------------------------------------------------- programs and the JS runner
 const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
@@ -46,14 +45,14 @@ let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
 let vvs = new Int32Array(64), vcb = new Uint8Array(64);
 const noExt = (_i, _p, _ao, _al, _b, _s, _e, _r) => -2;
-function runJs(c, trap = false, generic = false, s1 = false) {
+function runJs(c, trap = false, generic = false, s1 = false, forced = false) {
   const { P, B } = programs[c.prog];
   const cap = Math.max(markCap, P[16]);
   const need = vmScratchWords(P, c.rule, cap);
   if (cap > markCap || need > scratch.length) { scratch = new Int32Array(Math.max(need, scratch.length)); markCap = cap; vmScratchInit(scratch, cap); }
   let p = P, b = B, input = c.bytes, s = scratch;
   if (trap) { p = guard(P, 'P'); b = guard(B, 'B'); input = guard(c.bytes, 'input'); s = guard(scratch, 'S'); }
-  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0), c.lim[9] ?? 0]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default); word 9: the profile flags (D120)
+  const lim = Int32Array.from([...c.lim.slice(0, 8), (c.lim[8] ?? 0) | (generic ? 1 : 0) | (s1 ? 2 : 0) | (forced ? 4 : 0), c.lim[9] ?? 0, c.lim[10] ?? -1]);   // word 8: bit 0 generic (D044), bit 1 legacy schedule 1 (schedule 2, D045, is the default), bit 2 forced tiers (program-2 §8); word 9: the profile flags (D120); word 10 the group arena's limit (program-2 §9.3)
   const x = extFor(P, B) ?? noExt;   // P7.2: a Program using extension controls gets the test registry's predicates
   // P8.4 (D264): the canonical path's buffers, grown on -5 as the hosts grow them
   let code;
@@ -112,6 +111,18 @@ cases.forEach((c, i) => {
   if (a[0] === '48' || b[0] === '48' || (a.length === b.length && a.every((x, k) => k === 3 || x === b[k]))) s2Same++;
   else fail(`${c.label}: schedule 1 changed more than the budget: ${js[i]} | ${js2[i]}`);
 });
+// forced tiers (program-2 §8, D278; limits word 8 bit 2): every array A2, every map T. With
+// sufficient resources the verdict, reason, subcode, offset, items and path equal the
+// natural run's -- only the budget used may differ; a run that hit `budget` or
+// `group_limit` is held to its own schedule instead (JS == Rust below, N7).
+let forcedSame = 0, forcedResource = 0;
+const jsForced = cases.map(c => { try { return runJs(c, false, false, false, true); } catch (e) { return 'THROW ' + e.message; } });
+cases.forEach((c, i) => {
+  const a = js[i].split(' '), b = jsForced[i].split(' ');
+  if (['48', '44'].includes(a[0]) || ['48', '44'].includes(b[0])) { forcedResource++; return; }
+  if (a.length === b.length && a.every((x, k) => k === 3 || x === b[k])) forcedSame++;
+  else fail(`${c.label}: forced tiers ${jsForced[i]} | natural ${js[i]}`);
+});
 // JS bounds: a sample behind traps
 let guarded = 0, trapFails = 0;
 cases.forEach((c, i) => {
@@ -140,11 +151,12 @@ if (rustBin) {
   const lines = programs.map(p => `prog ${Array.from(p.P).join(',')} ${p.B.length ? hex(p.B) : '-'}`);
   const caseLine = (c, w8) => {
     const h = c.bytes.length ? hex(c.bytes) : '-';
-    const l = [...c.lim.slice(0, 8), w8, c.lim[9] ?? 0].join(' ');
+    const l = [...c.lim.slice(0, 8), w8, c.lim[9] ?? 0, c.lim[10] ?? -1].join(' ');
     return c.span ? `span ${c.prog} ${c.rule} ${c.span.join(' ')} ${l} ${h}` : `case ${c.prog} ${c.rule} ${l} ${h}`;
   };
   for (const c of cases) lines.push(caseLine(c, 0));
   for (const c of cases) lines.push(caseLine(c, 2));
+  for (const c of cases) lines.push(caseLine(c, 4));
   // host-rendering parity: corpus and assembled cases with default limits
   const hostCases = [];
   cases.forEach((c, i) => {
@@ -157,16 +169,17 @@ if (rustBin) {
   const tRs = performance.now() - t1;
   if (p.status !== 0) fail(`the Rust binary exited ${p.status}: ${p.stderr.slice(0, 400)}`);
   const all = p.stdout.trim().split('\n');
-  const rs = all.slice(0, cases.length), rs2 = all.slice(cases.length, 2 * cases.length), hs = all.slice(2 * cases.length);
-  let agree2 = 0;
+  const rs = all.slice(0, cases.length), rs2 = all.slice(cases.length, 2 * cases.length), rs4 = all.slice(2 * cases.length, 3 * cases.length), hs = all.slice(3 * cases.length);
+  let agree2 = 0, agree4 = 0;
   rs2.forEach((line, i) => { if (line === js2[i]) agree2++; else fail(`${cases[i].label}: schedule 1 JS ${js2[i]} | Rust ${line}`); });
-  rust2Line = `  ${agree2 === cases.length ? 'ok  ' : 'FAIL'} schedule 1 (legacy) JS == Rust: ${agree2}/${cases.length} cases`;
-  if (all.length !== 2 * cases.length + hostCases.length) fail(`Rust answered ${all.length} lines, expected ${2 * cases.length + hostCases.length}`);
+  rs4.forEach((line, i) => { if (line === jsForced[i]) agree4++; else fail(`${cases[i].label}: forced tiers JS ${jsForced[i]} | Rust ${line}`); });
+  rust2Line = `  ${agree2 === cases.length ? 'ok  ' : 'FAIL'} schedule 1 (legacy) JS == Rust: ${agree2}/${cases.length} cases\n  ${agree4 === cases.length ? 'ok  ' : 'FAIL'} forced tiers JS == Rust: ${agree4}/${cases.length} cases (each mode's own charge and allocation schedule)`;
+  if (all.length !== 3 * cases.length + hostCases.length) fail(`Rust answered ${all.length} lines, expected ${3 * cases.length + hostCases.length}`);
   const hostProgs = new Map();
   let hostAgree = 0;
   hostCases.forEach((i, k) => {
     const c = cases[i];
-    if (!hostProgs.has(c.prog)) hostProgs.set(c.prog, new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, controls: controlEntries(testControls) }));
+    if (!hostProgs.has(c.prog)) hostProgs.set(c.prog, new HostProgram(programs[c.prog].P, programs[c.prog].B, { verify: vmVerify, verifyWords: vmVerifyWords, controls: controlEntries(testControls) }));
     const hp = hostProgs.get(c.prog);
     const r = hp.result(hp.run(c.rule, c.bytes, { top: c.lim[0] === 0 ? 'map' : 'any', cose: c.lim[1] === 1 }));
     const t = r.ok ? 'ok' : `${r.reason}|${r.subcode ?? ''}|${r.offset}|${r.path.map(x => typeof x === 'number' ? String(x) : x === '*' || x === '#tag' || x === 'cbor' ? x : JSON.stringify(String(x))).join('/')}`;
@@ -215,9 +228,10 @@ line(stats.identity[0] === stats.identity[1], `profile identity: ${stats.identit
 line(stats.corpus[0] === stats.corpus[1], `conformance: ${stats.corpus[0]}/${stats.corpus[1]} cases with the expected verdict, from ${corpus.compiled} compiled suites of ${corpus.suites} (${corpus.later} phase-later skipped)`);
 console.log(`  info refusal suites: ${corpus.refusedOk} refused by the compiler as expected; ${corpus.refusedNot.length} compiled anyway (compiler's gate)`);
 if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length} suites did not compile (not VM cases):`); for (const s of corpus.notCompiled.slice(0, 40)) console.log('       ' + s); }
-line(stats.oracle[0] === stats.oracle[1], `oracle differential (D022): ${stats.oracle[0]}/${stats.oracle[1]} values agree with corpus/tools/oracle.mjs on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}); ${diff.unknown} oracle-unknown skipped`);
+line(stats.oracle[0] === stats.oracle[1], `PEG oracle differential (D279, both cut modes): ${stats.oracle[0]}/${stats.oracle[1]} verdicts agree with corpus/tools/peg-oracle.mjs -- ${stats.oracle[1] - diff.corpus} on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}; deterministic and unsorted encodings), ${diff.corpus} on the conformance corpus; ${diff.unknown + diff.corpusUnknown} oracle-unknown skipped`);
+line(forcedSame + forcedResource === cases.length, `forced tiers (program-2 §8): ${forcedSame}/${cases.length - forcedResource} cases give the natural run's verdict, reason, subcode, offset, items and path with every array A2 and every map T (${forcedResource} that hit budget or group_limit in either mode are held to their own schedule: JS == Rust below)`);
 console.log(`  info compiler refused ${diff.refused} generated schemas: ${Object.entries(diff.refusals).map(([k, v]) => `${k} ${v}`).join(', ')}; oracle refused ${diff.oracleRefused}`);
-line(stats.other[0] === stats.other[1], `§15, assembled and extension-control programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} assembled, ${nExt} extension-control cases incl. ${cases.filter(c => c.ext && c.label.includes('fixed')).length} with fixed verdicts; they run in every section below except wasm)`);
+line(stats.other[0] === stats.other[1], `program-2 §12, hand-reasoned and extension-control programs: ${stats.other[0]}/${stats.other[1]} cases (${nAsm} hand-reasoned, ${nExt} extension-control cases incl. ${cases.filter(c => c.ext && c.label.includes('fixed')).length} with fixed verdicts; they run in every section below except wasm)`);
 line(genericAgree === cases.length, `fast paths == generic path (D044, D254): ${genericAgree}/${cases.length} cases give the schedule-1 fast run's whole out array with the fast paths forced off (the generic path is charged by schedule 1; verdict, reason, offset, items and path equal the default run's unless either hit the budget)`);
 line(s2Agree === cases.length, `legacy schedule 1 (word 8 bit 1): fast == generic on ${s2Agree}/${cases.length} cases`);
 line(s2Same === cases.length, `schedule 1 vs the default schedule 2 (D045) changes only the budget used on ${s2Same}/${cases.length} cases (verdict, reason, offset, items, path equal unless either run hit the budget)`);

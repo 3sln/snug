@@ -4,17 +4,16 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/compile.mjs';
-import { vmVerify } from '../../gen/js/snug/program/verify.mjs';
+import { vmVerify, vmVerifyWords } from '../../gen/js/snug/program/verify.mjs';
 import { vmScratchWords, vmScratchWordsSlow, vmScratchInit, vmValidate, vmValidateSpan } from '../../gen/js/snug/vm/api.mjs';
 import { scanCb, scanOptions, scanProfile, errorOffset, itemsScanned, codeName } from '../../gen/js/snug/cbor/scan.mjs';
 import { buildDetCases, optWords } from './det-cases.mjs';
 import { buildCases, hex } from './scan-cases.mjs';
-import { EXAMPLE_P, EXAMPLE_B } from './vm-example.mjs';
 import { assembledCases } from './vm-cases.mjs';
 import { Program as HostProgram } from '../../host/js/src/schema.mjs';
 import { encode, decode } from '../../bench/baseline/cbor-3sln.mjs';
-import { compile as oracleCompile, check as oracleCheck } from '../../corpus/tools/oracle.mjs';
-import { oracleSchemas } from './vm-oracle-gen.mjs';
+import { compile as pegCompile, check as pegCheck, decode as pegDecode } from '../../corpus/tools/peg-oracle.mjs';
+import { pegSchemas } from './vm-peg-gen.mjs';
 import { addExtCases } from './ext-cases.mjs';
 
 export const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
@@ -26,7 +25,9 @@ export function buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid = false }) 
 const programs = [];     // {P, B, label}
 const cases = [];        // {prog, rule, lim, bytes, label, check(out) -> string|null, span?}
 function addProgram(P, B, label) {
-  const S = new Int32Array(48 + 2 * Math.max(P[16], 1) + 64); S[16] = 1; S[17] = Math.max(P[16], 1);
+  // format 2.0 (P8.5): the verifier's marks and its PEG working area (vm-verify-words)
+  const m0 = Math.max(P[16], 1);
+  const S = new Int32Array(Math.max(48 + 2 * m0 + 64, vmVerifyWords(P, m0) + 16)); S[16] = 1; S[17] = m0;
   const v = vmVerify(P, B, S);
   if (v !== 0) fail(`${label}: vm-verify refused the Program (word ${S[35]}, check ${S[36]})`);
   for (let r = 0; r < P[15]; r++) for (const m of [0, P[16] + 5]) if (vmScratchWords(P, r, m) !== vmScratchWordsSlow(P, r, m)) fail(`${label}: scratch words of rule ${r} differ from the chain formula`);
@@ -34,16 +35,23 @@ function addProgram(P, B, label) {
   return programs.length - 1;
 }
 
-// ---------------------------------------------------------------- 1. §15
-const ex = addProgram(EXAMPLE_P, EXAMPLE_B, 'program.md §15');
-const want15 = [['a26179816170646b696e646162', '0 0 0 55 6 0 0 0'], ['a1646b696e646161', '33 0 0 47 3 1 1 0 1 0'],
-  ['a261786131646b696e646161', null]];
-for (const [h, w] of want15) cases.push({ prog: ex, rule: 0, lim: LIM(1, 0), bytes: unhex(h), label: `§15 ${h}`,
-  check: o => (w === null ? (o.startsWith('32 0 3 ') && o.endsWith(' 1 1 0 1 0') ? null : `contrast ${o}`) : (o === w ? null : `got ${o}, document says ${w}`)) });
-{
-  const c = compile('r = { kind: "a", x: int // kind: "b", ? y: [* tstr] }');
-  let d = 0; for (let i = 0; i < Math.max(c.program.length, EXAMPLE_P.length); i++) if (c.program[i] !== EXAMPLE_P[i] && !(i >= 7 && i <= 14)) d++;
-  if (d || hex(c.pool) !== hex(EXAMPLE_B)) fail(`§15: the compiler's Program differs from the document in ${d} words`);
+// ---------------------------------------------------------------- 1. program-2 §12's worked examples
+// (format 1's program.md §15 Program and its out words were retired with format 1, P8.5:
+// its group choice `{kind: "a", x: int // kind: "b", ? y: [* tstr]}` now fails the
+// document under the default literal RFC cut, D301, as the guide documents)
+const W12 = [
+  // [rule text, options, hex, expected out-word prefix or check]
+  ['r = [* uint, uint]', {}, '8101', o => o.startsWith('33 0 0 ') && o.endsWith(' 1 1 0 0 1') ? null : `want missing [1], got ${o}`],
+  ['r = {? (a: int, b: int), * tstr => any}', { cuts: 'branch' }, 'a1616101', o => o.startsWith('0 ') ? null : `want valid (rule A), got ${o}`],
+  ['r = {? (a: int, b: int), * tstr => any}', {}, 'a1616101', o => /^33 0 0 \d+ \d+ 1 1 0 1 \d+$/.test(o) ? null : `want missing b (rfc), got ${o}`],
+  ['r = {? (a: int, b: int), * tstr => any}', { cuts: 'branch' }, 'a161616178', o => /^35 0 0 \d+ \d+ 1 1 0 1 \d+$/.test(o) ? null : `want value at a (rule A), got ${o}`],
+  ['r = {kind: "a", x: int // kind: "b", y: tstr}', {}, 'a26179617a646b696e646162', o => o.startsWith('35 ') ? null : `want the RFC cut's value at kind, got ${o}`],
+  ['r = {kind: "a", x: int // kind: "b", y: tstr}', { cuts: 'branch' }, 'a26179617a646b696e646162', o => o.startsWith('0 ') ? null : `want valid (rule A), got ${o}`],
+];
+for (const [text, opts, h, check] of W12) {
+  const c = compile(text, opts);
+  const pi = addProgram(c.program, c.pool, `program-2 §12: ${text} ${JSON.stringify(opts)}`);
+  cases.push({ prog: pi, rule: c.rules.indexOf('r'), lim: LIM(1, 0), bytes: unhex(h), label: `program-2 §12 ${text} ${opts.cuts ?? 'rfc'} ${h}`, check });
 }
 
 // ---------------------------------------------------------------- 2. profile identity
@@ -138,6 +146,7 @@ for (const c of dc.cases) {
 
 // ---------------------------------------------------------------- 3. conformance
 const corpus = { suites: 0, compiled: 0, refusedOk: 0, refusedNot: [], notCompiled: [], later: 0, cases: 0 };
+const corpusOracle = [];
 for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
   const j = JSON.parse(readFileSync(new URL(`../../corpus/conformance/${file}.json`, import.meta.url)));
   for (const su of j.suites) {
@@ -145,7 +154,8 @@ for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
     if (su.phase === 'later') { corpus.later++; continue; }
     const text = su.cddl ?? readFileSync(new URL(`../../corpus/${su.cddlFile}`, import.meta.url), 'utf8');
     let c = null, err = null;
-    try { c = compile(text); } catch (e) { err = e; }
+    const copt = su.options?.cuts ? { cuts: su.options.cuts } : {};
+    try { c = compile(text, copt); } catch (e) { err = e; }
     const refusal = su.snugSchemaError ?? su.schemaError;
     if (refusal) { if (c) corpus.refusedNot.push(`${file}: ${su.name}`); else corpus.refusedOk++; continue; }
     if (!c) { corpus.notCompiled.push(`${file}: ${su.name} -- ${err?.code ?? err?.message}`); continue; }
@@ -159,27 +169,69 @@ for (const file of ['study', 'adversarial', 'audit-2026-11-04']) {
       cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1, -1, -1, opt.wire === 'deterministic' ? 122 : 0), bytes: unhex(k.hex),
         label: `${file}: ${su.name} [${k.hex.slice(0, 40)}]`, corpus: true,
         check: o => { const ok = o.split(' ')[0] === '0'; return ok === k.expect ? null : `verdict ${ok}, expected ${k.expect} (out ${o})`; } });
+      // the PEG oracle in both cut modes (P8.5, D279): the same suite's Program in each mode,
+      // the oracle's verdict where it has one (its own profile-free decoder: only where the
+      // corpus case is valid CBOR under the case's profile do the two agree by construction)
+      corpusOracle.push({ file, su, k, text, opt });
     }
   }
 }
 
-// ---------------------------------------------------------------- 3b. oracle differential (D022)
-const diff = { schemas: 0, compiled: 0, refused: 0, oracleRefused: 0, unknown: 0, cases: 0, refusals: {} };
-for (const { cddl, values } of oracleSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
+// ---------------------------------------------------------------- 3b. the PEG oracle differential (P8.5, D279)
+// generated schemas (kin/scripts/vm-peg-gen.mjs) and the corpus, in both cut modes:
+// the VM's verdict == corpus/tools/peg-oracle.mjs's wherever the oracle decides. Values
+// are deterministic encodings (the deterministic preset) or, a third of them, maps with
+// their pairs in any order (the valid preset: the canonical path and T's sort).
+const diff = { schemas: 0, compiled: 0, refused: 0, oracleRefused: 0, unknown: 0, cases: 0, refusals: {}, corpus: 0, corpusUnknown: 0 };
+const progCache = new Map();
+function progFor(text, cuts, label) {
+  const key = cuts + '\u0000' + text;
+  if (progCache.has(key)) return progCache.get(key);
+  let c = null;
+  try { c = compile(text, { cuts }); } catch (e) { diff.refused++; diff.refusals[e.code ?? e.message] = (diff.refusals[e.code ?? e.message] ?? 0) + 1; }
+  const r = c ? { pi: addProgram(c.program, c.pool, label), rules: c.rules } : null;
+  progCache.set(key, r);
+  return r;
+}
+for (const { cddl, values } of pegSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
   diff.schemas++;
-  let c;
-  try { c = compile(cddl); } catch (e) { diff.refused++; diff.refusals[e.code ?? e.message] = (diff.refusals[e.code ?? e.message] ?? 0) + 1; continue; }
-  const os = oracleCompile(cddl);
+  const os = pegCompile(cddl);
   if (os.error) { diff.oracleRefused++; continue; }
-  diff.compiled++;
-  const pi = addProgram(c.program, c.pool, `oracle: ${cddl}`);
-  for (const v of values) {
-    let bytes; try { bytes = encode(v); } catch { continue; }
-    const want = oracleCheck(os, 'r', decode(bytes, { top: 'any' }), { steps: 200000 });
-    if (want === 'unknown') { diff.unknown++; continue; }
-    diff.cases++;
-    cases.push({ prog: pi, rule: c.rules.indexOf('r'), lim: LIM(1, 0), bytes, label: `oracle: ${cddl} [${hex(bytes).slice(0, 40)}]`, oracle: true,
-      check: o => { const ok = o.split(' ')[0] === '0'; return ok === want ? null : `VM ${ok}, oracle ${want} (out ${o})`; } });
+  for (const cuts of ['rfc', 'branch']) {
+    const pr = progFor(cddl, cuts, `peg oracle (${cuts}): ${cddl}`);
+    if (!pr) continue;
+    if (cuts === 'rfc') diff.compiled++;
+    for (const { bytes, shuffled } of values) {
+      let want;
+      try { want = pegCheck(os, 'r', pegDecode(bytes), { cuts, steps: 200000 }); } catch { want = 'unknown'; }
+      if (want === 'unknown') { diff.unknown++; continue; }
+      diff.cases++;
+      cases.push({ prog: pr.pi, rule: pr.rules.indexOf('r'), lim: LIM(1, 0, -1, -1, -1, -1, -1, -1, shuffled ? 378 : 122), bytes,
+        label: `peg oracle (${cuts}): ${cddl.replace(/\n/g, '; ')} [${hex(bytes).slice(0, 40)}]`, oracle: true,
+        check: o => { const ok = o.split(' ')[0] === '0'; return ok === want ? null : `VM ${ok}, oracle ${want} (out ${o})`; } });
+    }
+  }
+}
+for (const { file, su, k, text, opt } of corpusOracle) {
+  if (opt.cose || opt.wire === 'deterministic' || opt.maxItems !== undefined) continue;
+  const os = pegCompile(text);
+  if (os.error) continue;
+  for (const cuts of ['rfc', 'branch']) {
+    let want;
+    try { want = pegCheck(os, k.rule, pegDecode(unhex(k.hex)), { cuts, steps: 200000 }); } catch { want = 'unknown'; }
+    if (want === 'unknown') { diff.corpusUnknown++; continue; }
+    const pr = progFor(text, cuts, `corpus (${cuts}): ${file}: ${su.name}`);
+    if (!pr) continue;
+    const rule = pr.rules.indexOf(k.rule);
+    if (rule < 0) continue;
+    diff.corpus++;
+    // the valid preset: the oracle decodes any valid CBOR with any keys and no Bindle rules
+    cases.push({ prog: pr.pi, rule, lim: LIM(1, 0, -1, -1, -1, -1, -1, -1, 378), bytes: unhex(k.hex),
+      label: `corpus vs peg oracle (${cuts}): ${file}: ${su.name} [${k.hex.slice(0, 40)}]`, oracle: true,
+      check: o => { const w = o.split(' '); const ok = w[0] === '0';
+        // a profile refusal the oracle's decoder does not make (an application tag rule, a simple value) is not a group verdict
+        if (!ok && Number(w[0]) < 32) return null;
+        return ok === want ? null : `VM ${ok}, oracle ${want} (out ${o})`; } });
   }
 }
 
