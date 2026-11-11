@@ -45,7 +45,7 @@ fn compile_validate_serialise_and_refuse() {
     assert!(schema.validate(b"\x6a0123456789", "r", &mut s).is_ok());
     assert_eq!(schema.validate(&[0x82, 1, 1], "u", &mut s).unwrap_err().reason, "control");
     assert_eq!(schema.program().controls(), vec!["chars", "unique"]);
-    assert_eq!(schema.program().words()[1], 0x10001);
+    assert_eq!(schema.program().words()[1], 2);  // format 2.0 (D279, D318) carries 1.1's control table
 
     // an unregistered control names itself
     let err = Schema::compile("r = tstr .nope 1", &opts).unwrap_err();

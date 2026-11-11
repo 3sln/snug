@@ -537,7 +537,7 @@ fn program_refusals_compatibility_and_provenance() {
     for (at, v, code) in [
         (0, 0, "magic"),
         (8, 2, "container_version"),
-        (12, 2, "format_version"),
+        (12, 3, "format_version"),
         (14, 2, "format_version"),
         (24, 0, "version"),
         (88, 1, "reserved"),
