@@ -4557,6 +4557,37 @@ documented, explicit cap with a warning is the honest contract, like the step
 budget.
 - [ ] **Signed off** (owner)
 
+### D300 — Standing approval for wasm edits (OWNER DECISION, 2026-11-10)
+**Decision** (owner, in session via the coordinator): agents may edit
+`host/wasm*/` in the snug repository for the rest of this project — covering
+P7.13w (SDK sequence reader and view-privacy fix), P8.4w (valid-CBOR flags),
+P8.5w (`vm-verify-words` scratch sizing) and future wasm SDK work. Edits are
+plain, reviewable file edits; if the permission system still refuses an
+edit, it is not worked around: the exact edit is recorded and reported so
+the owner can add a settings rule. The earlier review note on the
+`host/wasm/src/cc.rs` / `host/wasm-sdk/src/compile.mjs` pass-through edits
+(`f23aea0`, `p85-peg`) is closed: they are covered.
+- [x] **Decided by the owner** (2026-11-10, via coordinator).
+
+### D301 — Cut default is the literal RFC 8610 semantics; rule A is the non-default `cuts: 'branch'` (OWNER DECISION, 2026-11-10)
+**Decision** (owner, in session via the coordinator; answers D271/D273):
+the default cut semantics is **spec conformance** — RFC 8610 §3.5.4 /
+Appendix A literally: a cut commits (commitment epochs per D273–D279) and its
+failure fails the whole map type (fail scope = the map, R19). The reference
+tools' behaviour (rule A: a cut failure is absorbed by an enclosing `//`)
+stays available as the non-default option, named **`cuts: 'branch'`**
+(manager's naming: the failure scope is the choice branch). Owner's words:
+"Follow the spec, if it's not too difficult, and if the other behavior is
+somehow more intuitive or common, then it can be supported optionally via
+non-default options." The documentation must show prominently how to write a
+discriminated union that works under the RFC default — without a
+colon-implied cut, using `=>` (e.g. `{ "kind" => "a", x: int } / { "kind" =>
+"b", y: tstr }` or a type choice of maps). Default applies in the PEG engine
+(format 2.0, `p85-peg`); if the RFC default proves really difficult, report
+before deviating. Supersedes the interim default in D271 and the naming
+question in D273.
+- [x] **Decided by the owner** (2026-11-10, via coordinator).
+
 ## Findings
 
 - 2026-11-04 (P8.3): quantifier counts must be compared as decimal strings
@@ -4676,24 +4707,24 @@ are answered as provisional decisions D082–D085. None is open now.
 
 **Open as of 2026-11-04 (manager):**
 
-- [ ] **P7.13w — authorise wasm SDK edits for the sequence reader (D219).**
+- [x] **P7.13w — authorise wasm SDK edits for the sequence reader (D219).** *Authorised 2026-11-10 (D300).*
   The sequences engineer's edit to `host/wasm/src/sdk.rs` was refused by the
   session's permission system (P7.9c's authorisation covered specific edits
   only); not worked around. Needed: `sdk_vs_new` with total −2 →
   `vms_init_seq`; new `sdk_vs_reseq(h, quantum)`; `INFO[4]` = `vms_held_code`,
   `INFO[5]` = `vms_message_length`; an SDK sequence backend over WasmSession;
   an internal `mintView` module. Native side ready (`host/js/src/sequence-core.mjs`).
-- [ ] **P8.5w — authorise a wasm SDK edit for format 2.0 Programs**: size the
+- [x] **P8.5w — authorise a wasm SDK edit for format 2.0 Programs** *Authorised 2026-11-10 (D300).*: size the
   verifier scratch in `host/wasm/src/sdk.rs` with `vm-verify-words` (needed
   before `p85-peg` merges, else the SDK cannot load 2.0 Programs).
-- [ ] **P8.4w (likely) — authorise wasm SDK edits for the valid-CBOR default**
+- [x] **P8.4w (likely) — authorise wasm SDK edits for the valid-CBOR default** *Authorised 2026-11-10 (D300).*
   if P8.4's edit is refused the same way; until then the SDK stays on an
   explicit profile and `bb wasm-sdk-test` stays green.
-- [ ] **Review note:** commit `f23aea0` (P8.3) includes two small Codex edits
+- [x] **Review note (closed 2026-11-10, D300):** commit `f23aea0` (P8.3) includes two small Codex edits
   in `host/wasm/src/cc.rs` and `host/wasm-sdk/src/compile.mjs` (regexp option
   pass-through). They were not refused and are not `sdk.rs`; flagged in case
   the owner wants every wasm edit gated.
-- [ ] **D271/D273 — cut-scope default** (literal RFC global cut vs the
+- [x] **D271/D273 — cut-scope default** *Decided 2026-11-10 (D301): literal RFC default; rule A as `cuts: 'branch'`.* (literal RFC global cut vs the
   reference tools' per-alternative cut, refined to rule A) and the name of the
   reference mode.
 
