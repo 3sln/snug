@@ -23,7 +23,7 @@ import { controls as generic } from '../../js/src/controls.mjs';
 
 export { ProgramError };
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
-  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 48: 'budget' };
+  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 48: 'budget' };
 const reasonName = code => (code >= 1 && code <= 21 ? 'cbor/' + rt.codeName(code) : REASONS[code] ?? 'unknown');
 const lim = v => (v === undefined || v === null ? -1 : Math.max(0, Math.min(Number(v), 0x7fffffff)) | 0);
 const internals = new WeakMap(), versions = new WeakMap();

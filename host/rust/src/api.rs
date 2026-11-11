@@ -102,6 +102,11 @@ pub struct CompileOptions<'a> {
     pub unicode: Option<&'a [i32]>,
     /// Extension controls (D141): the `.name` operators the schema may use.
     pub controls: Option<&'a crate::controls::Controls>,
+    /// Cut semantics (D301): the literal RFC 8610 cut (default) or rule A.
+    pub cuts: crate::compile::Cuts,
+    /// The PEG group arena's cap in words (program-2 §9.4; D276, D281): `None` is the
+    /// default 4,194,304; a run that needs more refuses with `group_limit`.
+    pub group_words: Option<i32>,
 }
 /// Runtime overrides only lower the caps compiled into the Program.
 #[derive(Debug, Clone)]
@@ -189,8 +194,8 @@ impl Schema {
             &crate::compile::CompileOptions {
                 profile,
                 regexp: options.regexp,
-                cuts: crate::compile::Cuts::Rfc,
-                group_words: None,
+                cuts: options.cuts,
+                group_words: options.group_words,
                 limits: &limits,
                 unicode: options.unicode,
                 controls: options.controls.map(|c| c as &dyn crate::compile::Registry),

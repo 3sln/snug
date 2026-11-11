@@ -20,29 +20,29 @@
     },
     "snug/schema": {
       "static": {
-        "min": 129670,
-        "gzip": 46314,
-        "brotli": 40096
+        "min": 149458,
+        "gzip": 53327,
+        "brotli": 46210
       },
       "full": {
-        "min": 129670,
-        "gzip": 46314,
-        "brotli": 40096
+        "min": 149458,
+        "gzip": 53327,
+        "brotli": 46210
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
     },
     "snug/compile": {
       "static": {
-        "min": 2586,
-        "gzip": 1322,
-        "brotli": 1178
+        "min": 2662,
+        "gzip": 1374,
+        "brotli": 1227
       },
       "full": {
-        "min": 262744,
-        "gzip": 88920,
-        "brotli": 75693
+        "min": 284322,
+        "gzip": 97235,
+        "brotli": 82778
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
     },
     "snug/view": {
       "static": {
@@ -84,29 +84,29 @@
     },
     "snug/sources": {
       "static": {
-        "min": 169111,
-        "gzip": 62040,
-        "brotli": 52719
+        "min": 180242,
+        "gzip": 66069,
+        "brotli": 56329
       },
       "full": {
-        "min": 169111,
-        "gzip": 62040,
-        "brotli": 52719
+        "min": 180242,
+        "gzip": 66069,
+        "brotli": 56329
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
     },
     "snug/sequence": {
       "static": {
-        "min": 197749,
-        "gzip": 70249,
-        "brotli": 60674
+        "min": 209286,
+        "gzip": 74300,
+        "brotli": 64377
       },
       "full": {
-        "min": 197749,
-        "gzip": 70249,
-        "brotli": 60674
+        "min": 209286,
+        "gzip": 74300,
+        "brotli": 64377
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
     },
     "snug/controls": {
       "static": {
@@ -122,29 +122,29 @@
     },
     "runtime": {
       "static": {
-        "min": 151814,
-        "gzip": 54389,
-        "brotli": 46281
+        "min": 171893,
+        "gzip": 61434,
+        "brotli": 52439
       },
       "full": {
-        "min": 151814,
-        "gzip": 54389,
-        "brotli": 46281
+        "min": 171893,
+        "gzip": 61434,
+        "brotli": 52439
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
     },
     "all-runtime": {
       "static": {
-        "min": 256762,
-        "gzip": 92438,
-        "brotli": 77278
+        "min": 275814,
+        "gzip": 99063,
+        "brotli": 83218
       },
       "full": {
-        "min": 256762,
-        "gzip": 92438,
-        "brotli": 77278
+        "min": 275814,
+        "gzip": 99063,
+        "brotli": 83218
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2."
     }
   }
 }

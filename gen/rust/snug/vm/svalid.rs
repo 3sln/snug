@@ -224,7 +224,8 @@ pub fn vfix(b: &[u8], cb: &[u8], s: &mut [i32], vs: &mut [i32], pos: i32, r: i32
             }
         }
     }
-    if r == (-R_BUDGET) {
+    // budget and group_limit (program-2 §9.4) report VM_POS: back to the input
+    if (r == (-R_BUDGET)) || (r == (-R_GROUP_LIMIT)) {
         let vp: i32 = s[(VM_POS) as usize];
         s[(VM_POS) as usize] = vmap(b, cb, vs, pos, vp);
         return r;

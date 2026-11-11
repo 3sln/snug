@@ -11,7 +11,7 @@ import { arenaAfter } from './arena.mjs';
 import { c64min, charge } from './base.mjs';
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
-import { FL_EMBED, H_FLAGS, INF, R_BUDGET, R_INCONSISTENT, VM_DLIM, VM_POS, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
+import { FL_EMBED, H_FLAGS, INF, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, VM_DLIM, VM_POS, VM_VTAB, VM_W_OFFSET, VM_W_REASON, VM_W_STATE, VM_W_SUB } from './layout.mjs';
 import { SS_ATOP, SS_GA, SS_GB, SS_GS, SS_GW, SS_VNEED, SS_VOK } from './sbase.mjs';
 
 export const VI_NEED = -1000001;
@@ -239,7 +239,8 @@ export function vfix(b, cb, s, vs, pos, r, w0, wr0, ws0, wo0) {
             }
         }
     }
-    if (r === (-R_BUDGET)) {
+    // budget and group_limit (program-2 §9.4) report VM_POS: back to the input
+    if ((r === (-R_BUDGET)) || (r === (-R_GROUP_LIMIT))) {
         const vp = s[VM_POS];
         s[VM_POS] = vmap(b, cb, vs, pos, vp);
         return r;

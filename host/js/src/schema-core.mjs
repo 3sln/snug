@@ -15,7 +15,7 @@ import { validateOptions } from './options.mjs';
 import { schemaPrograms } from './schema-state.mjs';
 
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
-  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 48: 'budget' };
+  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 48: 'budget' };
 export function reasonName(code) {
   if (code >= 1 && code <= 21) return 'cbor/' + codeName(code);
   return REASONS[code] ?? 'unknown';

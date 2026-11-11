@@ -210,7 +210,7 @@ refused with `map_overlap`.
 
 `name:` and literal colon keys imply cuts; `^ =>` makes the cut explicit.
 
-*Format 2.0 (PEG groups, branch `p85-peg`; D270, D294, D301), 2026-11-10:*
+*Format 2.0 (PEG groups; D270, D294, D301; the VM since P8.5 phase 2, D310), 2026-11-10:*
 the cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`). Once
 a cut member finds its key, that pick is locked in: if the value fails,
 "the entire map fails to match", whatever `//` alternatives or later
@@ -228,7 +228,7 @@ non-default option `cuts: 'branch'`. Cuts on key typesets (`tstr ^=> uint`)
 and byte-string, float and beyond-64-bit colon keys (`h'00': T`) are
 supported in format 2.0 (D294); `map_cut` is withdrawn.
 
-*Format 1 (main):* a matching cut key whose value fails kills **that
+*Format 1 (before P8.5; retired):* a matching cut key whose value fails kills **that
 alternative**, not all other alternatives (D021), so the idiom above
 works there. Cuts on key typesets and cut literals after an overlapping
 wildcard are refused (`map_cut`), because the priority transformation

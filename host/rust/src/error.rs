@@ -64,6 +64,7 @@ impl Error {
                 "embedded" => "schema/embedded",
                 "control" => "schema/control",
                 "control_size" => "schema/control_size",
+                "group_limit" => "schema/group_limit",
                 "budget" => "schema/budget",
                 r => r.strip_prefix("cbor/").unwrap_or(r),
             },

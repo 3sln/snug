@@ -32,7 +32,8 @@
             [snug.cbor.canon :refer [kclass cw dup-finish targ head-short]]
             [snug.cbor.vcopy :refer [canon-build vmap vsource ev-find]]
             [snug.vm.layout :refer [H_FLAGS FL_EMBED VM_POS VM_VTAB VM_RULE VM_MARK_CAP VM_W_STATE
-                                    VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_OFFSET VM_DLIM R_BUDGET R_INCONSISTENT INF]]
+                                    VM_W_REASON VM_W_SUB VM_W_DEPTH VM_W_OFFSET VM_DLIM R_BUDGET R_INCONSISTENT INF
+                                    R_GROUP_LIMIT]]
             [snug.vm.base :refer [charge c64min]]
             [snug.vm.dead :refer [dead-item]]
             [snug.vm.eval :refer [eval-item]]
@@ -198,7 +199,8 @@
                           (set done true)))
                     (if done (iset s VM_W_OFFSET (vsource b cb vs pos (ia vs (+ e 3))))))))
             (if (not done) (iset s VM_W_OFFSET (vmap b cb vs pos wo)))))))
-  (if (== r (neg R_BUDGET))
+  (comment "budget and group_limit (program-2 §9.4) report VM_POS: back to the input")
+  (if (or (== r (neg R_BUDGET)) (== r (neg R_GROUP_LIMIT)))
     (do (let [vp (ia s VM_POS)]
           (iset s VM_POS (vmap b cb vs pos vp)))
         (return r)))

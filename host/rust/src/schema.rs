@@ -254,7 +254,7 @@ pub fn reason_name(code: i32) -> &'static str {
         18 => "cbor/too_many_entries", 19 => "cbor/too_many_items", 20 => "cbor/too_large", 21 => "cbor/not_map",
         32 => "type", 33 => "missing", 34 => "unexpected", 35 => "value", 36 => "size", 37 => "range",
         38 => "pattern", 39 => "tag", 40 => "bits", 41 => "embedded", 42 => "control", 43 => "control_size",
-        48 => "budget",
+        44 => "group_limit", 48 => "budget",
         _ => if code > 0 && code < 32 { code_name(code) } else { "unknown" },
     }
 }

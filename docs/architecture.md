@@ -1695,8 +1695,11 @@ disposition. Revision 2 also applied the manager's decisions of 2026-11-04:
 > (§20.11) flags the idiom. No RFC example changes verdict (§20.13).
 
 The decisions are D272–D280, all unsigned. The Program format is in
-[program-2.md](program-2.md) (format 2.0, revision 3). Nothing here is
-implemented. §4.1–§4.2 (type-set evaluation of single items) are unchanged.
+[program-2.md](program-2.md) (format 2.0, revision 3). Implemented on branch
+`p85-peg`: the compiler and verifier (phase 1, D290–D299) and the VM on
+every route (phase 2, D310–D320; program-2 §15 lists where the build fills in
+or departs from the draft: block layouts, the T comparator, −5 growth,
+session gates, the kept streaks). §4.1–§4.2 (type-set evaluation of single items) are unchanged.
 This section supersedes §4.3, §4.4, the group parts of §5.1 steps 4–5, and
 the D011/D012 refusals once it lands.
 

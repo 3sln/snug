@@ -155,7 +155,7 @@ does. After loading, the compile is synchronous. `CompileOptions` is
 `{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits, unicode?: Int32Array, controls?: Controls, controlsInBus?: boolean }`.
 `profile` defaults to `full` and restricts accepted CDDL, not wire policy.
 Schema refusals reject with `SchemaError`; invalid API options with TypeError.
-Format 2.0 (branch `p85-peg`) adds `cuts?: 'rfc' | 'branch'` and
+Format 2.0 adds `cuts?: 'rfc' | 'branch'` and
 `groupWords?: number`: `cuts` defaults to `'rfc'`, the literal RFC 8610 cut
 (D301); `'branch'` is rule A, where a failed cut fails only its `//` branch
 (see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
@@ -579,7 +579,7 @@ indexes and the markers `*`, `#tag`, `cbor` appear in paths.
 | Family | Codes |
 | --- | --- |
 | CBOR/profile (`SnugFault.code`) | `truncated`, `non_shortest`, `indefinite`, `malformed`, `key_type`, `key_order`, `duplicate_key`, `text`, `float`, `simple`, `tag`, `bignum`, `decimal`, `typed_array`, `ndarray`, `trailing`, `depth`, `too_many_entries`, `too_many_items`, `too_large`, `not_map` |
-| Validation reason | `cbor/` plus a profile code; or `type`, `missing`, `unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `control`, `control_size`, `budget` |
+| Validation reason | `cbor/` plus a profile code; or `type`, `missing`, `unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `control`, `control_size`, `group_limit`, `budget` |
 | Schema decode/checked-view SnugFault | Profile codes unchanged; schema reason prefixed `schema/`, e.g. `schema/type`, `schema/budget`; also carries reason/path/offset/subcode |
 | Host encode / Writer | Profile codes where applicable; `unsupported`, `grammar`, `writer_failed` |
 | ProgramError | `magic`, `container_version`, `format_version`, `length`, `version` (malformed producer metadata), `reserved`, `digest`, `verify`, `too_large`, `missing_control` |
@@ -666,6 +666,7 @@ help. Never raise caps automatically in response to an untrusted message.
 | `embedded` | Inner CBOR/sequence predicate failed; inspect safe subcode and fix embedded producer/schema |
 | `control` | A registered extension control's predicate refused the item |
 | `control_size` | The item is longer than the extension control's `maxBytes`; the predicate was not asked |
+| `group_limit` | The PEG group arena (A2 array records, T map records, recursive group frames) reached its cap: compile option `groupWords`, else the default 4,194,304 words (D276, D281); a memory policy, not proof of invalid data |
 | `budget` | VM work policy exhausted, not proof of invalid data; reduce complexity or review compiled/per-call budget and concurrency |
 
 | Other code / class | Meaning / next action |
