@@ -5,6 +5,7 @@
 #
 # Emits the writer sources (kin/scripts/write-emit) so the gate runs what the
 # sources say, then builds the write crate in DEBUG (overflow checks on).
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" write-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 bb -cp kin/src:../kin/src kin/scripts/write-emit > /dev/null

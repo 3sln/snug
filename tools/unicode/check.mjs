@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 import { encode } from '../../bench/baseline/cbor-3sln.mjs';
 import * as M from '../../gen/js/snug/compile/main.mjs';
 import * as A from '../../gen/js/snug/compile/arena.mjs';
+import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+selfWatch('unicode-test', import.meta.url);   // P9.1 caps (also watched as part of bb unicode-test)
 const schema = pattern => `r = tstr .regexp ${JSON.stringify(pattern)}`;
 const wordsHex = p => Array.from(p, x => (x >>> 0).toString(16).padStart(8, '0')).join('');
 const cases = [];

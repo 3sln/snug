@@ -2,6 +2,7 @@
 # Seeded random and mutated CDDL through the compiler on JS and Rust (debug):
 #   kin/scripts/compile-fuzz [cases] [seed]
 # (kin/scripts/compile-fuzz.mjs says what is generated and what is required.)
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" compile-fuzz -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 bb -cp kin/src:../kin/src kin/scripts/compile-emit > /dev/null

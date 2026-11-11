@@ -2,6 +2,7 @@
 # CBOR sequences (P7.13, D218): the session VM's sequence mode and both hosts
 # against D211's oracle, on generated JS and a DEBUG Rust build.
 #     kin/scripts/sequence-test [mutations] [seed] [schemas]
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" sequence-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 bb -cp kin/src:../kin/src kin/scripts/vm-emit > /dev/null

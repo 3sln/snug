@@ -10,6 +10,7 @@
 #    on, so an arithmetic guarantee the source broke panics here);
 # 3. TWO CHECKS: the targets agree, and they agree on the answer worked out by
 #    hand (two identically wrong answers agree perfectly).
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" check -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 fails=0

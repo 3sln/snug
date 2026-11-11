@@ -7,6 +7,7 @@
 # The Rust crate holds the generated cbor, vm and program modules, the Rust
 # schema host and the vm test binary (no compile host), so a sibling's
 # unfinished compiler cannot break it.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" vm-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 bb -cp kin/src:../kin/src kin/scripts/vm-emit > /dev/null

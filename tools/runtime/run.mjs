@@ -27,6 +27,8 @@ import { basename, extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync, brotliCompressSync, constants as Z } from 'node:zlib';
 import { buildFixtures } from './fixtures.mjs';
+import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+selfWatch('runtime', import.meta.url);   // P9.1 caps
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const repo = resolve(here, '../..');

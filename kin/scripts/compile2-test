@@ -6,6 +6,7 @@
 # Emits the compiler's own sources (kin/scripts/compile-emit) so the gate runs
 # what the sources say, then builds the Rust subset crate in DEBUG (overflow
 # checks on: a broken arithmetic guarantee is a panic, which fails the gate).
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" compile2-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 bb -cp kin/src:../kin/src kin/scripts/compile-emit > /dev/null

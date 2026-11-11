@@ -31,6 +31,8 @@ import { join } from 'node:path';
 import { cpus, totalmem } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { prepareTree, runGates, repo } from './gates.mjs';
+import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+selfWatch('proptest', import.meta.url);   // P9.1 caps (a long campaign: --gate-wall= / --gate-cpu=)
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a); if (!m) throw new Error(`bad argument ${a}`); return [m[1], m[2] ?? 'true']; }));
 const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of'];

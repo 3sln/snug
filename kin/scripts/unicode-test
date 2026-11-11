@@ -1,5 +1,6 @@
 #!/bin/sh
 # No network: the generator uses the running Node's ICU; Rust has no deps.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" unicode-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
 node tools/unicode/gen-tables.mjs --check

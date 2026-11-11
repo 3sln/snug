@@ -7,6 +7,11 @@
 ;; directory and run by node.     kin/scripts/js-target-test (part of bb check)
 (require '[kin.project :as kp] '[snug.project :as p] '[clojure.string :as str]
          '[babashka.process :refer [shell]] '[babashka.fs :as fs])
+;; P9.1: run under the gate watchdog (CPU and wall caps) unless already under it
+(when-not (System/getenv "SNUG_WATCHDOG")
+  (let [here (str (fs/parent *file*))]
+    (System/exit (:exit (shell {:continue true} "node" (str here "/watchdog.mjs") "js-target-test" "--"
+                               "bb" *file*)))))
 (def a "(ns snug.cbor.probea
   (:require [kin.lang :refer [defn return]]
             [snug.lang :refer [I32 Bytes +]]))
