@@ -5156,7 +5156,9 @@ option admission) likewise. Measured with `node tools/size/size.mjs
 | `snug/compile` (full closure) | 257,731 / 87,225 | 278,747 / 95,328 |
 
 The codec entries (`snug`, `snug/view`, `snug/writer`, `snug/unicode`,
-`snug/controls`) are unchanged. **Attribution** (`runtime` and
+`snug/controls`) are unchanged. Measured before the rebase onto `cfbdda3`;
+after it (D284's simple values, D321) `snug/schema` is 147,159 / 52,545 and
+`all-runtime` 271,594 / 97,568, inside the caps (`bb size` passes). **Attribution** (`runtime` and
 `snug/schema`, minified, module deltas, +19,264 in all): `program/verify`
 +7,292 (format 2.0's PEG program, array table and map table checks and the
 fixed points over them, D297 — a loaded Program is untrusted, so the
@@ -7257,6 +7259,11 @@ authorised), the existing gate set, and conformance-corpus vectors.
        not authorised by merge time, the SDK cannot load 2.0 Programs and
        `wasm-sdk-test` would go red, so the merge waits for that answer or
        the SDK is explicitly marked unsupported for 2.0 by an owner decision.
+  - **Phase 2 done and merged (2026-11-11):** the VM runs format 2.0 on every
+    route (D310–D321); merge steps 1–5 complete (P8.4 on main first; rebased
+    onto `cfbdda3`; the wasm SDK edit authorised by D300 and made). See
+    "P8.5 — PEG groups, phase 2" below. P8.5's other coverage items above
+    (controls, `.abnf`) were not part of this phase; the box stays open.
 - [ ] **P8.6 — Conformance corpus**: RFC 8949 Appendix A including the
   non-deterministic encodings, RFC 8610/9165/9682 examples, published
   protocol CDDL (COSE, CWT, CoSWID, EAT, SenML) as compile + validate cases.
@@ -7590,3 +7597,123 @@ caller that zero-fills (the Rust gate binary, the wasm option array) on the
 decided semantics without host changes; a renamed enum value needs a loud
 refusal of the old spelling, not a silent `unknown`.
 
+## P8.5 — PEG groups, phase 2: the VM, format 2.0 on every route; merged to main (2026-11-11)
+
+Implements program-2 §5–§10 in the VM on branch `p85-peg`, rebased onto main
+`cfbdda3` (P8.4 done, D284, D286 A1) and merged per the merge plan above.
+Decisions D310–D321 (all unsigned).
+
+* **Arrays** (`kin/vm-array.kin`): per ARRAY leaf a block; the relaxed query
+  automaton picks each element's candidates; verdict records by tier (A0 the
+  active set, A1 a ring of B + 1 rows in the block, A2 an arena record of the
+  item's stride); an incremental PEG machine (`a-run`) runs to its next
+  record request after each element; events E1–E4 with absolute offsets
+  (`VM_PBASE`), rule 5′ (`array-witness`).
+* **Maps** (`kin/vm-map.kin`): per MAP leaf a block; key search, cursor or
+  binary search of `named`, candidates (key phase), value tests; F's
+  pair-major walk, S slots (trail in the block), T records; at the end the map
+  machine (rfc commitment epochs by default, rule A under `branch`), scored
+  events, rule 4′, leftovers; T's pick order by an in-VM EC comparator and
+  heap sort (D312).
+* **Arena** (`kin/vm-arena.kin`): upward record stack and a 64-word chunk
+  heap for recursive frames, relative addresses; buffer growth by −5 (D313),
+  session gates and relocation at the step start (D314); `group_limit` (44)
+  at the effective cap; limits word 10.
+* **Walks**: `kin/vm-eval.kin` and `kin/vm-session-cont.kin` call the same
+  block functions in the same order (one charging order, §10); EMBED and
+  `.cborseq` save/restore the arena top; the valid path (D280 replay) maps
+  `group_limit`'s offset back to the input like `budget`.
+* **Streaks** (D315): D044's `[* T]` streak and the map pair streak, schedule
+  2, gated by limits word 8 bit 3 against the item-by-item walk.
+* **Compiler/verifier**: ARRWORDS/MAPWORDS/rec_words as built (D311), frame
+  sizes, W7 (D317), the format word 2 (D318).
+* **Hosts**: format 2.0 Programs everywhere (the built-in `any` Program
+  regenerated); the wasm SDK sizes the verifier scratch with
+  `vm-verify-words` (D300 authorised the `sdk.rs` edit; not refused); reason
+  44 is `group_limit` in JS, Rust and the wasm SDK; Rust `CompileOptions`
+  gains `cuts` and `group_words` (JS had them since phase 1).
+* **Harnesses** (D320): vm-test's oracle arm is the PEG oracle (generated
+  schemas and the corpus, both cut modes), plus program-2 §12's worked
+  examples, the forced-tier gate, arena cases (`groupWords`), and the new
+  streak == item-by-item gate; vmsession-test, sequence-test, the Rust gate
+  binaries and benches pass limits word 10; format 1's assembler harnesses are
+  gone; proptest checks against the PEG oracle.
+* **Corpus**: 47 adversarial/study expectations flipped true → false, each
+  with a note (11 structural, 22 rule A, 14 D301), and 26 suites lost their
+  withdrawn refusal (D320). The flips: adversarial seeded-000 #1–3, -004 #1,
+  -008 #1 (rfc) #2 #3, -012 #1 (rfc) #2 #3, -016 #1–3, -020 #1 (rfc), -024 #1
+  #3 (rfc), -028 #1–3, -036 #3 (rfc), -041 #4, -043 #4, -044 #2, -048 #2,
+  -049 #4, -050 #2, -052 #1 (rfc) #2 #3 (rfc), -056 #1–3, -068 #1; "A1:
+  choices correlate…" #1 #3 (structural) #2 (rfc); A1c #3; C3/A1 #0 #3; D021
+  #0; C6 #2; A3 #3 #5 #7; "embedded sequence with backtracking" #0; study
+  "group choice in map //" #1 and "dependent members: group choice //" #0.
+  With the RFC suite's staged D301 case these are the 33 + 15 predicted.
+* **P8.4 fix found by the rebase's gates (D321)**: on wire `valid` a buffer
+  attempt that ran out of budget before the input's first non-deterministic
+  encoding reported the original order's offset and items, the session the
+  canonical walk's; now the canonical path decides on `budget` too.
+  Pre-existing on main `3c10a83`; regression in valid-test §3c.
+* **Performance**: without the pair streak `map-struct` cost 2.3× main's CPU
+  per unit; restored (D315). Calibration (D316, bench/VM.md "Calibration
+  2026-11-11"): PEG rows 0.93–1.44× the median kind (JS), 1.04–1.23× (Rust),
+  no price changed. Bundle growth +19.3 KB min in VM entries, attributed and
+  capped per D319.
+
+Checks actually run after the rebase (macOS 14.6.1, M1 Pro, Node 24.6.0,
+rustc 1.92.0, cargo debug unless said; machine shared, load 25–45):
+
+* `bb vm-test` (20,000 mutations, 400 generated schemas, seed 1): all ok —
+  80,509 cases; conformance 1407/1407; PEG oracle differential 8600/8600
+  (6400 on 400 generated schemas, 2200 on the corpus, both cut modes);
+  forced tiers 80,212/80,212 (297 resource-bound held to their own
+  schedule); fast == generic (schedule 1) 80,509; **streaks == item by item
+  (word 8 bit 3) 80,509**; JS == Rust 80,509, schedule-1 and forced-tier JS
+  == Rust; hosts 2850/2850; JS == wasm 78,215/78,215.
+* `bb vmsession-test 2000 1 100 60`: all ok — session == buffer 304,458 runs
+  (incl. the arena cases with `groupWords`), untold length 147k streams,
+  JS == Rust 193,787. (Before D321 one untold-length stream differed; before
+  the valid path mapped `group_limit`'s offset, 60 arena runs did.)
+* `bb sequence-test 300 1`: ok (441,517/441,517 runs == D211's oracle, JS ==
+  Rust, hosts). `bb valid-test`: ok, incl. the new D321 regression 144/144.
+* `bb wasm-sdk-test`: 14/14 (Program load 1397/1397, validate 80,509,
+  sessions, sequences 364,672 — wasm == native).
+* `bb compile-test` (compile2-test + regexp): ok — 976/976 JS == Rust,
+  916/916 verified, 3266/3266 corpus verdicts == the oracle (both modes);
+  corpus warnings W2 1, W5 1, W6 19, **W7 1** (was 26, D317), W8 3.
+* `bb scan-test 300 1`, `rscan-test 300 1`, `nav-test`, `write-test`,
+  `unicode-test`, `drift`, `bb compile-fuzz` (3000): ok.
+* `npm test` (host/js): 1450/1450, incl. the new group-arena test. `bb
+  rust-api-test`: ok (public_api 14, incl. the new group-arena test; clippy).
+* `node corpus/tools/run-rfc-corpus.mjs`: D270 14/14 (main 3/14), D301 1/1;
+  P8.4 222/2 and baseline 735/25; the 27 failures are all in suites P8.5 does
+  not touch (RFC 8610 speed/default-timer/prelude, RFC 9165 figures 2–5,
+  RFC 9682 simple heads, two additional RFC 8949 vectors), as before the
+  branch.
+* `bb size`: passes with D319's caps.
+* `bb proptest --minutes=2 --props=1,2,3,4,5`: P1 16,559, P2 21,869, P3
+  9,069, P4 7,507, P5 7,163 cases; one signature, P5/slow-compile ×2 (wall
+  clock at load 50–75; the case replays without it). Two harness fixes first
+  (the PEG oracle decodes valid `.cbor` content, so P1 compares with the
+  `valid` preset; `pegNodes` replaces `alternatives` in P5's limits). The
+  property-6 gates were run directly (above), not through the campaign.
+* Calibration: bench/VM.md "Calibration 2026-11-11" (D316).
+
+Open problems (for the manager):
+
+* A recursive Program's session grows its arena to the whole message's
+  §9.4 bound at the start (D314): correct, but memory for nothing on inputs
+  that never recurse deeply.
+* D281 says `group_limit` applies only under an explicit `groupWords`; with a
+  finite default cap a miss at the default cap is `group_limit` too (D276 as
+  amended). Flagged in D313.
+* T maps are quadratic (architecture §20.7): `{* (tstr => uint // tstr =>
+  tstr)}` with 3,000 pairs exhausts the default budget.
+* `embedded` is the dearest calibration row (2.15× JS); not analysed.
+* Format 1's per-pair `map-pair-fast` (single pairs outside a streak) was not
+  restored; `reference-map-choice` is 1.49× the median against 1.42× before.
+
+Learnt: one set of block functions called by both walks made session ==
+buffer cheap to keep; every session-only divergence found (S's trail, the
+valid path's `group_limit` offset) was state or mapping outside those
+functions. A streak needs its own gate against the item-by-item walk under
+the *same* schedule — D254's fast == generic gate compares schedule 1 only.
