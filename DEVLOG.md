@@ -9657,6 +9657,13 @@ can run alongside them; its build work is post-RC unless it is cheap.
   The assessment estimates the pod (binary, protocol, manifest,
   cross-builds, and a gate running real `bb`) and Go separately. It says
   whether the cross-builds need CI runners.
+  *Superseded by the owner, same day:* the babashka pod is dropped and
+  not replaced by a Clojure target. There is no babashka or Clojure
+  distribution for now. P9.19 keeps three parts:
+  - the dist branch design and local validation, without the deps.edn
+    consumer;
+  - the GitHub Packages evaluation, without Clojars;
+  - the Go estimate.
   *Owner rule (2026-11-12):* "Stamped versions in the project files are
   never checked in."
   - main and every working branch hold placeholders only (D343, with a
