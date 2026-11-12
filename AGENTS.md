@@ -15,8 +15,14 @@ Rules for every contributor, human or agent:
   source that produced it.
 * Errors never contain payload values, input bytes, or data map keys the
   schema does not name.
-* No secrets, no network publishing, no deploys, no git remotes or pushes.
+* No secrets, no network publishing, no deploys. The repository has a
+  public remote (`origin`, github.com/3sln/snug): never push, fetch-reset
+  or change remotes; only the coordinator pushes, on the owner's say-so.
   Commit only when your task says so, by explicit path.
+* `README.md` is user-facing: keep it short, with no D-numbers, phase IDs,
+  dated gate runs or internal process. Put detail in `docs/`.
+* Version sites in project files hold the placeholder from `version.edn`.
+  Stamped versions are never checked in.
 * Record decisions as `D###` in DEVLOG (Decision / Why / Alternatives /
   sign-off line, never pre-ticked). Record what was learnt in the item you
   finished. Never claim a check passed that you did not run.
