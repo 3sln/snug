@@ -3,7 +3,9 @@
 Assemble the crate with `kin/scripts/rust-crate .cache/snug-rs`; run the full
 offline gate with `bb rust-api-test`. The [Rust host README](../host/rust/README.md)
 explains local dependencies and the assembled layout. The crate has no external
-Rust dependencies. Its examples are checked by Cargo doctests.
+Rust dependencies. Its examples are checked by Cargo doctests. The minimum
+supported Rust is 1.87 (`rust-version`); the release gates build and test the
+crate on exactly 1.87 ([release policy §2](release-policy.md#2-supported-runtimes-and-toolchains)).
 
 ## Compile once, validate bytes
 

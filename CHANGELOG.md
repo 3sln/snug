@@ -96,6 +96,10 @@ These matter only to users of pre-release builds from this repository.
 
 ### Changed
 
+- Minimum supported toolchains: `[js]` Node 20 (`engines`), `[rust]` Rust
+  1.87 (`rust-version`). Each is tested on exactly that version before a
+  release. Node 20 is past upstream end of life, so its floor may rise in
+  a minor release, with notice (D344).
 - Numeric controls compare integer and float values exactly, across kinds
   (`number .ge 0` compiles; D329).
 - `.cat` and `.det` join text with byte strings, and the result has the

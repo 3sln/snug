@@ -26,7 +26,8 @@
 ;; bench/compare/node_modules (AGENTS.md "Worktrees"); wasm-sdk-test and
 ;; wasm-size need the pinned nightly and wasm-opt from bench/compare
 ;; (kin/scripts/wasm-build); runtime needs Chrome and workerd
-;; (tools/runtime/README.md).
+;; (tools/runtime/README.md); node-oldest needs the engines Node via nvm and msrv
+;; the rust-version toolchain via rustup (P9.18).
 {:gates
  {check            {:cmd ["bb" "check"] :caps [900 1800]
                     :doc "generate, run JS and Rust, require identical output"}
@@ -71,8 +72,10 @@
                     :doc ".regexp (XSD) vs xsd-regexp.json, the Ruby gem and the cddl crate; needs both oracles (corpus/tools/ORACLES.md)"}
   runtime          {:cmd ["node" "tools/runtime/run.mjs"] :caps [2400 4800]
                     :doc "the staged package in Node, headless Chrome and workerd (P7.7)"}
-  node-oldest      {:blocked "owner decision O7: the oldest declared Node line, then npm test on it"}
-  msrv             {:blocked "owner decision O7: the declared MSRV, then cargo +MSRV test on the assembled crate"}}
+  node-oldest      {:cmd ["bb" "node-oldest"] :caps [1800 3600]
+                    :doc "npm test on the newest installed Node of engines.node's major (nvm); SKIPs without it: NOT RUN (P9.18)"}
+  msrv             {:cmd ["bb" "msrv"] :caps [2400 4800]
+                    :doc "cargo build, test and doctests of the assembled crate on rust-version (rustup); SKIPs without it: NOT RUN (P9.18)"}}
 
  ;; bb.edn tasks that are not gates
  :not-gates [gen emit bench-scan gates identity]

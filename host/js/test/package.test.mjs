@@ -4,7 +4,8 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
-import { createRequire, stripTypeScriptTypes } from 'node:module';
+import * as nodeModule from 'node:module';
+import { oracleMissing } from './oracle.mjs';
 import { spawnSync } from 'node:child_process';
 import { buildPackage, PACKAGE_FILES, packageAllows } from '../src/package-build.mjs';
 import { SNUG_VERSION } from '../src/version.mjs';
@@ -13,6 +14,8 @@ import { compile, SchemaError } from 'snug/compile';
 import { validate, decode as schemaDecode, validateAt } from 'snug/schema';
 import { encode, decode, profiles, SnugFault } from 'snug';
 import { view } from 'snug/view';
+
+const { createRequire } = nodeModule, { stripTypeScriptTypes } = nodeModule;
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
 
@@ -81,11 +84,12 @@ test('runtime entry points have no eager compiler dependency or Node builtins', 
 });
 
 test('every declaration parses with Node and matches the entry point exports', async t => {
+  const strip = stripTypeScriptTypes ?? oracleMissing(t, 'node:module stripTypeScriptTypes (Node 22.13+)', 'declarations are not parsed with Node');
   const roots = [];
   for (const [key, entry] of Object.entries(pkg.exports)) {
     const url = new URL('../' + entry.types, import.meta.url), source = readFileSync(url, 'utf8');
     roots.push(url.pathname);
-    assert.doesNotThrow(() => stripTypeScriptTypes(source));
+    if (strip) assert.doesNotThrow(() => strip(source));
     const declared = [...source.matchAll(/export declare (?:class|function|const) (\w+)/g)].map(m => m[1]).sort();
     const module = await import(key === '.' ? 'snug' : 'snug/' + key.slice(2));
     assert.deepEqual(declared, Object.keys(module).sort(), key);

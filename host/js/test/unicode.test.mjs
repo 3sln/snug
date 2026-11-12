@@ -18,11 +18,22 @@ const textBytes = text => {
 let seed = 0x1929485;
 const random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) % 0x110000; };
 
+// The oracle: Node's own \p{gc=..} when its ICU is at snug's pinned Unicode
+// version; otherwise the committed tables themselves, which are generated from
+// that version's ICU and held to it by tools/unicode/gen-tables.mjs --check (bb
+// unicode-test). A newer (or older) Node ICU must never fail npm test: it says
+// nothing about snug, whose tables stay at the pinned version (P9.18).
+const runtimeOracle = process.versions.unicode === unicodeVersion;
+const inTables = category => cp => {
+  for (let i = 0; i < tables.length; i += 3) if (tables[i] === id(category) && tables[i + 1] <= cp && cp <= tables[i + 2]) return true;
+  return false;
+};
+
 for (const category of categories) test(`Unicode ${category}: range boundaries, neighbours, randoms, complement through VM`, async t => {
-  assert.equal(process.versions.unicode, unicodeVersion, 'Node oracle must use the pinned Unicode version');
   const normal = await compile(schemaText(`\\p{${category}}`), { unicode: tables });
   const complement = await compile(schemaText(`\\P{${category}}`), { unicode: tables });
-  const re = new RegExp(`^\\p{gc=${category}}$`, 'u');
+  const re = runtimeOracle ? new RegExp(`^\\p{gc=${category}}$`, 'u') : { test: text => inTables(category)(text.codePointAt(0)) };
+  if (!runtimeOracle) t.diagnostic(`note: Node ${process.version} has Unicode ${process.versions.unicode}, snug's tables Unicode ${unicodeVersion}; comparing the VM with the pinned tables, not with Node's \\p{gc=${category}}`);
   const samples = new Set([0, 0x10ffff, 0xd7ff, 0xe000, 0x10000, 0x378, 0xfdd0, 0xfffe]);
   for (let i = 0; i < tables.length; i += 3) if (tables[i] === id(category)) {
     const lo = tables[i + 1], hi = tables[i + 2];

@@ -1,0 +1,34 @@
+#!/bin/sh
+# P9.18 (D344): the assembled Rust crate on its MSRV, host/rust/Cargo.toml's
+# `rust-version`: cargo build --lib, cargo test (the async differential on its default
+# slice, as rust-api-test) and the guide and README doctests. Clippy stays on the
+# current toolchain (rust-api-test): its lints change between releases, the MSRV does
+# not promise them. Without the toolchain (rustup toolchain install X.Y --profile
+# minimal) the gate prints SKIP: NOT RUN, which fails the release set by design.
+#
+# The toolchain's own bin directory goes first on PATH. `rustup run X.Y cargo` alone is
+# not enough: cargo then runs whatever `rustc` is first on PATH (e.g. Homebrew's), so a
+# build would silently use the wrong compiler. The gate checks `rustc --version`.
+# Watchdog caps (P9.1): 2400 s wall / 4800 s CPU.
+[ -n "${SNUG_WATCHDOG:-}" ] || exec node "$(dirname "$0")/watchdog.mjs" msrv -- "$0" "$@"
+set -eu
+cd "$(dirname "$0")/../.."
+v=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' host/rust/Cargo.toml)
+[ -n "$v" ] || { echo "msrv: host/rust/Cargo.toml has no rust-version" >&2; exit 2; }
+if ! command -v rustup >/dev/null 2>&1 || ! sysroot=$(rustup run "$v" rustc --print sysroot 2>/dev/null); then
+  echo "SKIP msrv: Rust $v is not installed. Install it with rustup: rustup toolchain install $v --profile minimal"
+  exit 0
+fi
+export PATH="$sysroot/bin:$PATH"
+unset RUSTC RUSTDOC CARGO_BUILD_RUSTC RUSTUP_TOOLCHAIN
+got=$(rustc --version)
+case "$got" in "rustc $v."*|"rustc $v "*) ;; *) echo "msrv: rustc on PATH is '$got', not Rust $v" >&2; exit 1 ;; esac
+echo "msrv: build, test and doctests on $got ($(cargo --version)), rust-version = $v"
+d=.cache/snug-rs-msrv
+kin/scripts/rust-crate "$d"
+cargo build --offline --manifest-path "$d/Cargo.toml" --lib
+SNUG_ASYNC_FULL=0 cargo test --offline --manifest-path "$d/Cargo.toml"
+for doc in docs/rust.md host/rust/README.md; do
+  rustdoc --test --edition 2021 "$doc" --extern snug="$d/target/debug/libsnug.rlib" -L dependency="$d/target/debug/deps"
+done
+echo "msrv: Rust $v passed"

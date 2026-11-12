@@ -6580,6 +6580,80 @@ DEFAULTS (3600 s wall / 7200 s CPU).
   gate is in the release set. Verifier changes are deferred past the RC.
   The +63% growth since P7.9 is attributed by phase.
 
+### D344 — Minimum supported toolchains: Node 20 and Rust 1.87, each gated on exactly that version (P9.18, O7)
+**Decision** (P9.18 engineer; floors accepted by the manager): the package
+declares `"engines": { "node": ">=20" }` and the crate
+`rust-version = "1.87"`. These are the oldest versions that pass the gates
+today. Two release-set gates, `node-oldest` and `msrv`, run on exactly
+those versions. Each reads its floor from the manifest, and each prints
+SKIP (NOT RUN, which fails the set) when the toolchain is not installed.
+The installs are local and per user (nvm, rustup), never in the
+repository. The matrix is in release-policy §2. Tried on 2026-11-12, macOS
+arm64, latest patch of each:
+- **Node 18.20.8 fails** in library code. `TypeError: s.isWellFormed is
+  not a function`: `host/js/src/writer.mjs` uses the ES2024 method without
+  a guard, and the suite aborts. A guard would make 18 pass that line, but
+  lowering the floor that way was not asked for, and Node 18 is long past
+  end of life.
+- **Node 20.20.2 passes** `npm test` (1491 tests) and `bb abnf-test`. The
+  library itself needs nothing newer. One test-only oracle is missing:
+  `node:module` `stripTypeScriptTypes` (Node 22.13+), which parses the
+  `.d.ts` files in package.test.mjs. Under `SNUG_NODE_OLDEST=1`, which
+  only `node-oldest` sets, that comparison is left out with a logged note
+  (`host/js/test/oracle.mjs`). Anywhere else a missing oracle still fails
+  the test. **Node 20 has been upstream end of life since 2026-04-30**, so
+  this floor may rise in a minor release, with notice.
+- Node 22.23.5 and 24.6.0 pass with every oracle.
+- **Rust 1.86.0 fails to build**: 516 × `E0658 use of unstable library
+  feature integer_sign_cast` (`cast_signed` / `cast_unsigned` in the
+  generated code, e.g. `abnf.rs:888`). 1.82 fails the same way. 1.75 also
+  lacks `Option::is_none_or`.
+- **Rust 1.87.0 passes** `cargo build --lib`, `cargo test` (the async
+  differential on its default slice) and the `docs/rust.md` and crate
+  README doctests. Clippy stays on the current toolchain in
+  `rust-api-test`, because its lints change between releases.
+
+Harness fixes found on the way (the manager asked for these with the floor):
+- **The Unicode category tests no longer fail on a Node whose ICU is
+  newer.** They asserted that `process.versions.unicode` equals the
+  tables' pinned 16.0. Node 20.20.2 and 22.23.5 ship 17.0, and so will
+  routine 24.x upgrades. They now compare the VM with Node's `\p{gc=…}`
+  only when the versions are equal. Otherwise they compare it with the
+  committed tables, which are generated from that Unicode version's ICU
+  and held to it by `gen-tables --check`. A note is logged in that case.
+  Regenerating the tables still needs the pinned Node v24.6.0.
+- **`npm test` ran only what `test/index.js` imports** (Node 22 and 24
+  resolve a bare `test/` to it), and index.js left out
+  `sequence.test.mjs` and `version.test.mjs`. Neither had run in the
+  npm-test gate. index.js now imports both. Its last test fails if any
+  `test/*.test.mjs` is missing from the list. The script is now
+  `node --test test/index.js`, so every Node line runs the same list
+  once; Node 20 would otherwise run each file and index.js too.
+- **A stale assertion in `sequence.test.mjs`.** A stray `ff` between
+  messages was expected to be `indefinite`. That held while
+  `deterministic` was the default. Under the `valid` default (D260) the
+  code answers `malformed`, and that is right: a break outside an
+  indefinite-length item is not well-formed (RFC 8949 §3.2.1, Appendix
+  F). docs/scanner.md says so for presets that admit `ai 31`, and the
+  independent RFC 8742 framer stops there as `malformed` / `break`. The
+  test now expects `malformed`, and `indefinite` under `wire: 'bindle'`.
+  No code changed.
+
+`msrv` puts the toolchain's own `bin` first on PATH, from `rustup run X.Y
+rustc --print sysroot`, and checks `rustc --version`. Plain `rustup run
+1.86 cargo build` ran the Homebrew rustc 1.92 found on PATH, and 1.86
+seemed to pass.
+**Why**: the owner's rule for O7 is "test which versions work today and
+pin those". The floors are what passed, not what the code suggests. The
+code-derived floors in release-policy §2 (P9.11) were Node 20 and Rust
+1.87, and the tests confirm both.
+**Alternatives**: Node 22, the oldest line still maintained upstream,
+needs no oracle exception. It was not chosen because the rule is "what
+works today". Pinning `node-oldest` to a 22.x patch with Unicode 16 was
+also rejected: ICU is a detail that moves under a patch release. For
+Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -9546,11 +9620,14 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - Build, pack and dry-run locally. Nothing is published.
   - SDK user docs (deferred in P9.10).
   - Starts after P9.12's wasm build settings land.
-- [ ] **P9.18 — Minimum supported toolchains** (O7). Find the oldest Node
+- [x] **P9.18 — Minimum supported toolchains** (O7). Find the oldest Node
   (try 18, 20 and 22) and the oldest stable Rust (bisect) that pass the
   gates today. Add gates on exactly those toolchains and set `engines` and
   `rust-version`. Toolchains are installed locally (nvm, rustup), never in
   the repo.
+  - Done (D344): Node ≥ 20 and Rust ≥ 1.87. `bb gates node-oldest msrv`,
+    both in the release set. The npm suite now runs every test file, and
+    the Unicode tests tolerate a newer Node ICU.
 - [ ] **P9.19 — Git-source consumers** (O3). Design and validate locally:
   - an orphan `dist` branch of stamped, built trees, one commit per
     release;
