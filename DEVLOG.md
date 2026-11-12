@@ -7413,7 +7413,7 @@ are answered as provisional decisions D082–D085. None is open now.
     Buffer, read-only fields, exception order, work before the first yield and
     assembly retention. Not done: an independent RFC framer in the gate (the
     reviewer's own 40,400-comparison parity probe is the independent check for
-    now); the SDK's view.mjs has the same public-state escape (host/wasm-sdk
+    now) -- *added by P9.5 (2026-11-11)*; the SDK's view.mjs has the same public-state escape (host/wasm-sdk
     is under the P7.13w block) -- *closed by P7.13w (2026-11-10).*
 - [x] **P7.13w — wasm SDK sequence reader and view privacy** (2026-11-10, wasm
   SDK engineer; authorised by D300; earlier blocked 2026-11-04, see D219).
@@ -8096,6 +8096,72 @@ review.
 - [ ] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
   framer written independently of snug's own sequence code, used as the
   oracle in `sequence-test`.
+  - **Framer:** `corpus/tools/rfc8742-framer.mjs`, from RFC 8949 Appendix C
+    and Appendix F alone. It imports nothing from snug. It frames items, stops
+    at too little data (`truncated`, with the innermost cut head) or at a
+    syntax error (`malformed` + why: reserved ai, `f8` < 0x20, ai 31 on major
+    type 0/1/6, bad chunk, misplaced break, break as a map value), and can
+    report byte-string spans and the items open at a stop. One deliberate
+    departure from Appendix C's order: a bad chunk is refused at its initial
+    byte, because adding data cannot repair it (Appendix F's kind 3). Unit
+    vectors (`rfc8742-framer.test.mjs`, run first by `bb sequence-test`):
+    Appendix A one by one, concatenated and cut at every byte; all 94 F.1
+    examples with their kind; the RFC 8742 and §5.3.1 vectors; indefinite
+    lengths, nested tags, break misuse with offsets; nesting 10^6 deep.
+  - **Mapping** (`kin/scripts/sequence-framer.mjs`, every oracle answer the
+    gate uses): accepted and skipped messages are the framer's items byte for
+    byte, and a clean end is the framer's end. A stop maps by reason class:
+    - `truncated`: the same head, or an enclosing item. snug names the
+      outermost item whose claim runs past the input; the framer names the
+      innermost cut head.
+    - `malformed`: the same head.
+    - `too_large`: the item is longer than P, or cut short or malformed only
+      past P.
+    - An open claim outranks a later syntax error (§18.1). For example,
+      `98 b6 ... 5f 7f`: an array claiming 182 items in 100 bytes is
+      `truncated` at 0, before its bad chunk at 58.
+    - Embedded payloads: a refusal inside a byte string the framer reads as
+      opaque.
+    - Every other code (validity, determinism, limits, schema, budget) must lie
+      within P and no later than where the framer stops. Schema stops need a
+      complete item, `indefinite` an ai-31 head, `not_map` the root.
+
+    Nothing is skipped silently; each class is counted. Items the framer reads
+    past a stop are counted, not compared, because a sequence ends at its first
+    refusal (D214).
+  - **Found by the framer (fixed here, gate tooling only):** the gate's D211
+    oracle took a root's end from `snug.nav.walk`, which walks definite-length
+    items only. As a result, under `valid` an indefinite root followed by more
+    bytes read as `trailing`. Repro: RFC 8742 §4.2's `01 9fff 1817`. The kin
+    session (JS and Rust), the hosts and the framer all find a boundary there.
+    `oracleSequence` now asks the framer when `navSkip` cannot walk the root.
+    The Rust host runner's view check compared `raw()` with the message length,
+    but a non-deterministic message's View reads its canonical copy (§19.3); it
+    now compares with a `Document` opened on the message's bytes. The case set
+    never held this combination. Valid-wire groups now get indefinite-root
+    fillers. The RFC 8742 and F.1 vectors run as sequences under the bindle,
+    deterministic and valid presets, with expected outcomes (F.1 under
+    `valid`: exactly `truncated`/`malformed`, except `bf01020102` and
+    `bf000000ff`, whose repeated key comes first: `duplicate_key`). No snug
+    core bug. `navSkip`'s -1 on indefinite items is its contract: architecture
+    §16.4 now says so plainly.
+  - **Gate (4cf52c5, defaults; machine load 40–100):** framer unit vectors
+    9/9; framer == oracle on 175,373/175,373 oracle answers. Classes:
+    - accepted 4,649,012; skipped 43,810; clean ends 48,584;
+    - `truncated`: same head 13,462; enclosing claim 5,166; claim before a
+      syntax error 256; embedded 96;
+    - `malformed`: same head 3,514 (reserved ai 3,332, bad simple 127, chunk
+      24, break 22, ai 31 on 0/1/6 7, break as value 2);
+    - `too_large`: 12,720 (longer than P 10,545, cut short 1,677, malformed
+      past P 431, claim past P before a syntax error 59, embedded 8);
+    - other refusals: 91,575 in 95 code × position classes.
+
+    RFC vector sequences 294/294 as expected. kin == oracle 739,566/739,566;
+    JS == Rust 183,242/183,242; JS hosts and Rust `Sequence` == oracle on
+    36,013 host runs. **Timing:** the framer comparison takes 25.0 s of a
+    2,361 s run, plus about 1 s of unit vectors (about 1%). Before it, main
+    ran 1,754 s under similar load, so run-to-run load noise is larger than
+    the framer's cost.
 - [x] **P9.6 — Rust async source driver.** The async counterpart to the JS
   stream sources (D027), over the existing session, with the same gates as
   the sync Rust driver.
