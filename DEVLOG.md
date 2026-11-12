@@ -6055,6 +6055,55 @@ fields, CHANGELOG in the npm staging, `#[non_exhaustive]` enums, no CI,
 and stale format 1.x and float-width text for P9.10.
 - [ ] **Signed off** (owner)
 
+### D339 — `#[non_exhaustive]` on the Rust error, path and option enums; the data model and the session protocol stay exhaustive (P9.15)
+**Decision** (P9.15 engineer, proposed): before the first release, these
+public enums are marked `#[non_exhaustive]`, joining `Error`:
+- **Error families:** `schema::SourceError` and `sessions::SessionError`.
+  Release-policy §1.3 makes a new error code a minor change. That holds in
+  Rust only if a new variant does not break callers' matches. P9.7 has
+  just added `SourceError::SessionLimit`.
+- **Diagnostic paths:** `Segment`. A new construct may need a new segment
+  kind, as `.cbor` / `.cborseq` once did. Old paths do not change, so it
+  should be a minor change.
+- **Options:** `Top`, `Keys`, `Tags`, `Floats` (the `Profile` fields),
+  `Cuts`, `Regexp`, `CompilerProfile` and `OnInvalid`. Callers build these
+  rather than match on them, and the policy makes a new mode or preset
+  minor. Marking them does not stop callers from naming a variant.
+
+These stay **exhaustive**:
+- `Value`, `Integer`, `TypedArray` and `TypedElement`, the decoded CBOR
+  data model. Walking a value tree needs every case, and that is the main
+  reason to have `Value`. The model is closed: RFC 8949's major types, and
+  an unknown tag decodes as `Value::Tag`. A new dedicated variant, say
+  for a newly specialised tag, would change what `decode` returns for input
+  that already decodes. That is breaking under §1.3 whatever the
+  attribute says, so `#[non_exhaustive]` would only add a fallback arm to
+  every caller and gain nothing.
+- `schema::Step`, the session protocol. A driver that sent a new step to
+  a `_` arm would hang or misbehave, so a new step must break compilation.
+
+**Cost:** a `match` on a marked enum outside the crate needs a fallback
+arm. The repository's own exhaustive matches on `Segment` (the `vm`,
+`vmsession` and `sequence` test hosts and `tests/public_api.rs`) now
+panic on an unknown kind, so a new kind still fails those gates loudly.
+docs/rust.md "Enums that may grow" lists the enums and the reasons.
+**Not covered:** public structs with all-public fields (`Profile`,
+`CompileOptions`, `CompileLimits`, `DecodeOptions`, `SequenceOptions`, …).
+Under the Cargo SemVer reference, adding a field to one of these is
+breaking. `#[non_exhaustive]` would fix that, but it would also forbid the
+documented `..Default::default()` construction outside the crate. They are
+left as they are, so a new field needs a `0.y` bump. The P9.13 review may
+reopen this.
+**Alternatives:**
+- mark every public enum (forces fallback arms on value walkers and
+  session drivers, where they are wrong);
+- mark only the error enums (a new option value would then need a `0.y`
+  bump);
+- mark nothing until 1.0 (every addition is breaking, so it would ship in
+  a `0.y` bump).
+**Gate:** `bb rust-api-test` (default mode), with Clippy, ok.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -8571,6 +8620,101 @@ review.
   - **CI / gate map.** Either create the gate map SPEC §9 describes, with
     the release gate set of policy §4 (SKIP is a failure), or correct
     SPEC. *Gate:* manager sign-off. Adding hosted CI is the owner's call.
+  *Progress 2026-11-12 (P9.15 engineer): the owner-independent parts are
+  done. The item stays open for O1–O4, O6 and O7, and for manager sign-off
+  of D339 and the gate map.*
+  - **Version sites** (97ea2f2), done:
+    - `snug-version`'s literal in `kin/compile/main.kin` is the one source.
+      The source-key preimage reads the literal's length and bytes through
+      two new `snug.lang` forms, `str-len` and `str-u8` (ASCII; semver is
+      ASCII). `SNUG_VERSION_LEN` and the `0.0.0`-only `version-byte` are
+      gone.
+    - `host/js/test/version.test.mjs` (in `npm test`) fails if either
+      `package.json`, either `Cargo.toml` or `version.mjs` disagrees with
+      kin, or if kin's string is not semver. A second test proves that a
+      mismatch at each site is caught.
+    - At `0.0.0` the preimage bytes are unchanged: `bb drift`, `bb check`,
+      `bb vm-test` and `bb compile-test` are ok, with 165/165 SOURCE_KEYs
+      equal to the independent preimage hash.
+    - Scratch run (reverted, never committed): with the literal set to the
+      36-byte `10.20.30-alpha.beta.gamma+build.2026` (a two-byte text head),
+      `bb compile2-test` and `bb check` were ok, JS == Rust with 165/165
+      SOURCE_KEYs, and the version test failed on all five other sites, as
+      it should.
+    - **Waits for O1 and O2:** the number itself. A release edits the kin
+      literal and the five sites, then runs `bb emit`.
+  - **Manifests** (098d95f), done apart from the owner's fields:
+    - descriptions, keywords and categories added;
+    - the crate gets `readme` and an `include` list;
+    - the SDK description no longer says "P7.9 experiment";
+    - `repository` is a marked placeholder,
+      `[REPOSITORY URL - OWNER TO FILL IN]`: in both package.json files,
+      and as a comment in Cargo.toml, because no URL exists in the
+      repository;
+    - `private` / `publish = false` are kept.
+    - **Waits for O7:** `engines` and `rust-version`, each with its gate.
+      Cargo.toml has a commented TODO; JSON cannot hold one, so the npm
+      `engines` gap is recorded here. **Waits for O4:** the names.
+  - **Packaging** (098d95f), done apart from the SDK:
+    - `package-build.mjs` copies `CHANGELOG.md`. The package test now
+      asserts that LICENSE, the notices, the README and CHANGELOG are
+      staged.
+    - `kin/scripts/rust-crate` copies the root README, LICENSE,
+      THIRD_PARTY_NOTICES and CHANGELOG into the crate.
+    - The `include` list leaves out `src/bin`, the test-host binaries that
+      `cargo install` would otherwise install, and `tests/`, which needs
+      Node and the repository.
+    - Review, offline, nothing published:
+      - `npm run build` then `npm pack --dry-run`: 145 files, 1.1 MB packed,
+        3.3 MB unpacked.
+      - `cargo package --list`: 80 files: the notices, `src/*.rs` and
+        `src/snug/**`.
+      - `cargo package --allow-dirty` packaged and verified the crate
+        (347,621 bytes) with the expected "ignoring binary/test" warnings.
+    - Observations for O3 / P9.13:
+      - The npm package ships DEVLOG.md (600 kB), `docs/reviews/`,
+        `docs/release-policy.md` and `bench/*.md`. Policy §4 step 6 says
+        nothing under `bench/` ships, so that rule and the staging
+        disagree.
+      - The crate README is the repository README, which is written for
+        JS users, and its relative links break. A Rust-facing README is a
+        P9.10 question.
+    - **Waits for O3:** SDK staging. It is not trivial: it needs the
+      pinned-nightly build and the module checksum.
+    - **Waits for O6:** the Unicode notice.
+  - **`#[non_exhaustive]`** (53c149b), D339, awaiting manager sign-off:
+    - marked: `SourceError`, `SessionError`, `Segment`, `Top`, `Keys`,
+      `Tags`, `Floats`, `Cuts`, `Regexp`, `CompilerProfile` and
+      `OnInvalid`;
+    - exhaustive: `Value`, `Integer`, `TypedArray`, `TypedElement` and
+      `Step`;
+    - docs/rust.md has a new section, "Enums that may grow";
+    - `bb rust-api-test` (default) and Clippy are ok.
+  - **CI / gate map** (f1c3d72), awaiting manager sign-off:
+    - `ci/gate-map.edn` lists every gate with its command, mode and
+      watchdog caps. It covers `rust-api-test` (default) and
+      `rust-api-test-full`.
+    - `bb gates --check` fails if a cap differs from
+      `kin/scripts/watchdog.mjs` DEFAULTS. It warns about a `bb` task that
+      is not in the map, so P9.14's `abnf-test` needs an entry when it
+      lands.
+    - The sets:
+      - `release` is policy §4 step 4, in order;
+      - `land` is what an engineer runs before landing;
+      - `identity` is SPEC §7.
+    - `bb gates <set|gate…>` runs each gate under the watchdog. A
+      non-zero exit, a `SKIP` line or a `:blocked` gate makes the run not
+      ok.
+    - `node-oldest` and `msrv` are `:blocked` on O7, so `bb gates
+      release` cannot pass until O7 is decided.
+    - `bb identity` runs `bb gates identity`.
+    - SPEC §7 and §9 and release-policy §1.1 and §8 now match the
+      repository.
+  - Gates on this tree: `bb gates land` was all ok (check, drift, size,
+    npm-test, rust-api-test, wasm-sdk-test with no SKIP, vm-test,
+    compile-test). `npm test`: 1,459 pass. The size budgets are unchanged.
+  - The fresh-worktree esbuild trap was fixed by P9.6a (d4b9abf), so it
+    was not touched here.
 
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
