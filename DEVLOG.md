@@ -6240,7 +6240,12 @@ Program change.
 * A hash set for duplicates: probe counts would depend on table size.
 * Parsing the ABNF in the compiler: it would grow `snug/compile`, and the
   argument hook already runs at compile time.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-12). This implements the owner
+  direction in D230; no new owner decision was needed, and no existing size
+  cap grew. Verified on main at `329e73f`: drift ok. It was checked
+  verbatim against RFC 5234 and RFC 7405 (`corpus/rfc/`, added in
+  `dd202f7`). The six widening leniencies and the two refusals that keep
+  their RFC reasons are accepted.
 
 ## Findings
 
