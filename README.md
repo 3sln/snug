@@ -168,6 +168,7 @@ has the recipe, plus TypeScript, browser and Workers setup.
 - [Guide](docs/guide.md): how to use it
 - [API reference](docs/api.md)
 - [Rust guide](docs/rust.md)
+- [wasm SDK](docs/wasm-sdk.md): the opt-in WebAssembly build, `@3sln/snug-wasm`
 - [CDDL support](docs/cddl-support.md): what's supported and how it's read
 - [Profiles](docs/profiles.md): wire options and value mapping
 - [Conformance](docs/conformance.md): how snug lines up with each RFC

@@ -1095,6 +1095,10 @@ was absent. This is the tested compiler version, not a claim for every TS releas
 
 ## Browser and Worker recipes
 
+These recipes use the native package. The opt-in WebAssembly build,
+`@3sln/snug-wasm`, has its own page, [The wasm SDK](wasm-sdk.md): init
+options, the inline entry, and a Workers recipe with `.wasm` module bindings.
+
 Use the staged consumer package; bare specifiers need a bundler (or an
 application import map). With an already available esbuild, from the consumer
 directory create `browser.mjs`:
