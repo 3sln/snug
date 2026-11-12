@@ -12,7 +12,7 @@ the same input, and the test suite checks that they do.
 
 > **Status:** pre-release. Nothing is published to npm or crates.io yet, and
 > the API may change before 0.1.0. You can build and use it from this
-> repository today.
+> repository today. Requires Node ≥ 20 and Rust ≥ 1.87.
 
 ## What it does
 

@@ -21,8 +21,9 @@
     "./abnf": { "types": "./types/abnf.d.ts", "default": "./src/abnf.mjs" }
   },
   "types": "./types/index.d.ts",
+  "engines": { "node": ">=20" },
   "scripts": {
-    "test": "node --expose-gc --test test/",
+    "test": "node --expose-gc --test test/index.js",
     "build": "node src/package-build.mjs"
   }
 }

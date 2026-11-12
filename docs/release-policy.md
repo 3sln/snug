@@ -23,8 +23,8 @@ These artefacts could be published:
 
 | Artefact | Source | Manifest today (stated) |
 | --- | --- | --- |
-| npm package (native JS, the default per D130) | `host/js`, staged by `npm run build` | `host/js/package.json`: `"name": "snug"`, `"version": "0.0.0"`, `"private": true`, no `engines` |
-| Rust crate | `host/rust` + `gen/rust`, assembled by `kin/scripts/rust-crate` into `.cache/snug-rs/` | `host/rust/Cargo.toml`: `name = "snug"`, `version = "0.0.0"`, `publish = false`, edition 2021, no `rust-version`, no dependencies |
+| npm package (native JS, the default per D130) | `host/js`, staged by `npm run build` | `host/js/package.json`: `"name": "snug"`, `"version": "0.0.0"`, `"private": true`, `"engines": { "node": ">=20" }` (§2) |
+| Rust crate | `host/rust` + `gen/rust`, assembled by `kin/scripts/rust-crate` into `.cache/snug-rs/` | `host/rust/Cargo.toml`: `name = "snug"`, `version = "0.0.0"`, `publish = false`, edition 2021, `rust-version = "1.87"` (§2), no dependencies |
 | wasm SDK (opt-in per D130; experimental) | `host/wasm-sdk` over the module built by `kin/scripts/wasm-build sdk` / `cc` | `host/wasm-sdk/package.json`: `"name": "snug-wasm-sdk"`, `"version": "0.0.0"`, `"private": true`, no build or staging script |
 
 **Proposed: one version number for all artefacts, released in lockstep.**
@@ -229,10 +229,40 @@ practice). See §2.
 
 ## 2. Supported runtimes and toolchains
 
-Today, nothing is declared in a manifest: there is no `engines`, no
-`rust-version` and no CI configuration in the repository. Gates are the
-`bb` tasks in `bb.edn`, run by engineers on one macOS machine. The values
-below are derived from the code and from what the gates actually ran.
+**Declared (O7, P9.18, D344):** `"engines": { "node": ">=20" }` in
+`host/js/package.json` and `rust-version = "1.87"` in `host/rust/Cargo.toml`.
+These are the oldest versions that pass the gates today (2026-11-12). The
+release set holds a gate on exactly each: `node-oldest` runs `npm test` on
+the newest installed Node 20.x (nvm), and `msrv` builds and tests the
+assembled crate, doctests included, on Rust 1.87 (rustup). Both read the
+floor from the manifest. Without the toolchain they answer SKIP, which
+fails the release set. There is still no hosted CI. Gates are the `bb`
+tasks in `bb.edn`, run by engineers on one macOS machine.
+
+**Node 20 has been past upstream end of life since 2026-04-30.** It is the
+floor because the library works on it today, which is the owner's rule.
+The floor may rise in a minor release, with notice in the changelog.
+
+What was tried (P9.18, macOS arm64, 2026-11-12):
+
+| Toolchain | Result |
+| --- | --- |
+| Node 18.20.8 | fails: `TypeError: s.isWellFormed is not a function` (`host/js/src/writer.mjs`, ES2024, unguarded); the suite aborts |
+| Node 20.20.2 | `npm test` passes (1491 tests) under `SNUG_NODE_OLDEST=1`, which leaves out one test-only oracle Node 20 lacks: `node:module` `stripTypeScriptTypes` (Node 22.13+), used to parse the `.d.ts` files. `bb abnf-test` also passes on it. |
+| Node 22.23.5, 24.6.0 | `npm test` passes with no oracle left out |
+| Rust 1.75, 1.82, 1.86 | `cargo build` fails: 1.86 and 1.82 with 516 × `E0658 use of unstable library feature integer_sign_cast` (`cast_signed` / `cast_unsigned` in generated code); 1.75 also lacks `Option::is_none_or` |
+| Rust 1.87.0 | `cargo build`, `cargo test` and both doctest files pass. Clippy stays on the current toolchain (`rust-api-test`), because its lints change between releases. |
+| Rust 1.92.0 | every Rust gate (unchanged) |
+
+The Unicode category tests no longer depend on the running Node's ICU.
+They compare the VM with Node's `\p{gc=…}` only when Node's Unicode
+version equals the tables' pinned one (16.0). Otherwise they compare it
+with the committed tables, with a logged note. Node 20.20.2 and 22.23.5
+ship Unicode 17.0. Regenerating the tables (`tools/unicode/gen-tables.mjs`,
+`bb unicode-test`'s `--check`) still needs the pinned Node v24.6.0.
+
+The table below is the P9.11 record, derived from the code before the
+floors were tested; the Node and Rust rows are superseded by the above.
 
 | Runtime | Floor derived from the code (stated) | Actually tested (stated) | Proposed support statement |
 | --- | --- | --- | --- |
@@ -489,6 +519,8 @@ DEVLOG under P9.15 and P9.17–P9.19.
   - Find the oldest Node and the oldest stable Rust that pass the gates.
   - Add gates on exactly those toolchains.
   - State them in the manifests (`engines`, `rust-version`).
+  - Done (P9.18, D344): Node ≥ 20 and Rust ≥ 1.87, gated by `node-oldest`
+    and `msrv` (§2).
 - [x] **O8 — Budget pricing rule of §1.3:** adopted as recommended (owner).
   Raising a price is breaking; cutting one is minor, with notice.
 
@@ -505,11 +537,10 @@ items are for the release commit or for earlier items:
 > `CHANGELOG.md` in the npm staging and the crate; a crate layout that
 > `cargo package` accepts; `#[non_exhaustive]` (D339); and
 > `ci/gate-map.edn` with `bb gates` and `bb identity`. Still open, waiting
-> for owner decisions: the version number (O1, O2), `engines` and
-> `rust-version` (O7), the SDK staging (O3), the Unicode notice (O6), the
+> for owner decisions: the version number (O1, O2), the SDK staging (O3), the Unicode notice (O6), the
 > registry names (O4) and the repository URL. The stale statements listed
 > at the end were corrected by P9.10 (2026-11-12). The text below is the
-> P9.11 record.
+> P9.11 record. `engines` and `rust-version` (O7) were set by P9.18 (D344).
 
 - **Version sites**:
   - `kin/compile/main.kin` hard-codes `"0.0.0"`, and `version-byte`
@@ -520,7 +551,7 @@ items are for the release commit or for earlier items:
     version. A check like `package.test.mjs`'s should cover them.
 - **Manifests**:
   - Remove `private` / `publish = false` only with the owner's go.
-  - Add `engines` (npm) and `rust-version` (crate).
+  - Add `engines` (npm) and `rust-version` (crate). *Done (P9.18, D344).*
   - Add `repository`, `description` and `readme` metadata (the crate has
     none), and an `include` list for the crate.
   - `host/wasm-sdk/package.json`'s description still reads "P7.9

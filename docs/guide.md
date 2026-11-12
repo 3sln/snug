@@ -4,6 +4,8 @@ The public JS package is private and experimental. Follow the repository
 [quick start and staging instructions](../README.md#package-layout-and-reproducibility).
 All imports below use public entry points. The [runnable examples](../examples/)
 use repository-relative paths to those same facades so Node needs no install.
+The package needs Node 20 or later (`engines`); `npm test` runs on Node 20 in
+the release gates ([release policy §2](release-policy.md#2-supported-runtimes-and-toolchains)).
 
 ## Compile once
 

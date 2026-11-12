@@ -89,8 +89,8 @@ conventions. The rustdoc examples are compiled and run as tests.
 
 ## Building from the repository
 
-The crate is assembled, not built in place. From the repository root, with
-Cargo 1.92 and no network:
+The crate is assembled, not built in place. It needs Rust 1.87 or later
+(`rust-version`). From the repository root, with no network:
 
 ```sh
 kin/scripts/rust-crate .cache/snug-rs

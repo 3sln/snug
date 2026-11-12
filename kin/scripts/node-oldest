@@ -1,0 +1,34 @@
+#!/bin/sh
+# P9.18 (D344): host/js's npm test on the oldest supported Node line, the major in
+# host/js/package.json's `engines.node` (">=NN"). The newest installed vNN.* under nvm
+# ($NVM_DIR, default ~/.nvm) runs it, or SNUG_NODE_OLDEST_NODE=/path/to/node (fnm,
+# volta, a system build). Without that Node the gate prints SKIP: NOT RUN, which
+# fails the release set by design (release-policy §2).
+#
+# SNUG_NODE_OLDEST=1 lets the suite leave out comparisons with test-only oracles that
+# this Node lacks (host/js/test/oracle.mjs), each with a logged note; library code
+# never depends on them. Watchdog caps (P9.1): 1800 s wall / 3600 s CPU.
+[ -n "${SNUG_WATCHDOG:-}" ] || exec node "$(dirname "$0")/watchdog.mjs" node-oldest -- "$0" "$@"
+set -eu
+cd "$(dirname "$0")/../.."
+major=$(node -e "const e = JSON.parse(require('fs').readFileSync('host/js/package.json', 'utf8')).engines?.node ?? ''; const m = /^>=(\d+)$/.exec(e); if (!m) { console.error('node-oldest: host/js/package.json engines.node must be \">=NN\", not ' + JSON.stringify(e)); process.exit(2); } console.log(m[1]);")
+bin=
+if [ -n "${SNUG_NODE_OLDEST_NODE:-}" ]; then
+  bin=$(dirname "$SNUG_NODE_OLDEST_NODE")
+else
+  best=   # the newest installed vNN.* patch (version order, not the glob's lexical order)
+  for d in "${NVM_DIR:-$HOME/.nvm}"/versions/node/v"$major".*; do
+    [ -x "$d/bin/node" ] || continue
+    v=${d##*/v}
+    if [ -z "$best" ] || [ "$(printf '%s\n%s\n' "$best" "$v" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$v" ]; then best=$v; bin="$d/bin"; fi
+  done
+fi
+if [ -z "$bin" ] || [ ! -x "$bin/node" ]; then
+  echo "SKIP node-oldest: no Node $major found. Install it with nvm (nvm install $major), or set SNUG_NODE_OLDEST_NODE=/path/to/node (Node $major.x)"
+  exit 0
+fi
+got=$("$bin/node" -p 'process.versions.node')
+[ "${got%%.*}" = "$major" ] || { echo "node-oldest: $bin/node is Node $got, not Node $major (engines.node >=$major)" >&2; exit 1; }
+echo "node-oldest: npm test on Node $got ($bin/node), the engines floor >=$major"
+cd host/js
+PATH="$bin:$PATH" SNUG_NODE_OLDEST=1 "$bin/npm" test

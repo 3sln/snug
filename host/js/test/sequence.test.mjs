@@ -74,9 +74,14 @@ test('onInvalid: skip drops schema refusals of complete messages only', async ()
   assert.deepEqual(it.stats.lastSkipped.path, ['type']);
   await assert.rejects(collect(readSequence([s], { schema, rule: 'event' })),
     e => e.code === 'schema/type' && e.index === 1 && e.skippable === true && e.offset > e.messageOffset);
-  // a profile refusal is never skipped
+  // a wire refusal is never skipped. Under the default `valid` preset (D260) a
+  // stray break is not well-formed: malformed (RFC 8949 §3.2.1, Appendix F;
+  // docs/scanner.md; the RFC 8742 framer stops there too). Under `bindle`,
+  // which refuses ai 31 at the head, the same byte is indefinite.
   const broken = cat([parts[0], Uint8Array.of(0xff), parts[2]]);
   await assert.rejects(collect(readSequence([broken], { schema, rule: 'event', onInvalid: 'skip' })),
+    e => e.code === 'malformed' && e.index === 1 && e.offset === offsets[1] && e.skippable === false);
+  await assert.rejects(collect(readSequence([broken], { schema, rule: 'event', onInvalid: 'skip', wire: 'bindle' })),
     e => e.code === 'indefinite' && e.index === 1 && e.offset === offsets[1] && e.skippable === false);
   // the push reader reports skipped refusals as they happen
   const r = sequenceReader({ schema, rule: 'event', onInvalid: 'skip' });
