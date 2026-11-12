@@ -1,13 +1,13 @@
 {
   "format": "snug conformance corpus v1",
-  "source": "P9.3 (2026-11-11): RFC 9682 §3.2 head numbers for #7 (D334). Expectations are hand-reasoned from RFC 9682 §3.2, RFC 8949 §3.3 and RFC 8610 §3.3 (D328); vm-test also checks each against corpus/tools/peg-oracle.mjs.",
+  "source": "P9.3 (2026-11-11): RFC 9682 §3.2 head numbers for #7 (D336). Expectations are hand-reasoned from RFC 9682 §3.2, RFC 8949 §3.3 and RFC 8610 §3.3 (D328); vm-test also checks each against corpus/tools/peg-oracle.mjs.",
   "notes": [
     "RFC 9682 §3.2: for #7 the head-number is the simple value in 0..23 and 32..255; 24..31 stand for the additional information: 24 is every simple value 32..255 (f8 00..f8 1f are not well-formed, RFC 8949 §3.3, D284), 25/26/27 are float16/float32/float64 (sets of values, D328), and 28..31 match nothing (no data item has that head; 31 is the break code).",
     "#7.<T> takes T's integers in 0..255; T must be an integer type, and its values outside 0..255 match nothing."
   ],
   "suites": [
     {
-      "category": "rfc", "name": "RFC 9682 #7 head numbers (D334)", "options": {"wire": "valid"},
+      "category": "rfc", "name": "RFC 9682 #7 head numbers (D336)", "options": {"wire": "valid"},
       "cddl": "r = #7.<32..255>\ns = #7.24\nf = #7.<25>\nb = #7.<20..21>\nall = #7.<0..255>\nn28 = #7.28\nn31 = #7.31\nbig = #7.<256..1000>\nmix = #7.<16..40>\nneg = #7.<-5..3>\nw = #7.<26..27>\nt = #7.<ct>\nct = 1 / 22 / 24\nlit = #7.250\nz = #7.0\ngen = g<200..201>\ng<x> = #7.<x>\nand = #7.<0..30> .and #7.<20..255>\n",
       "cases": [
         {"rule": "r", "hex": "f820", "expect": true, "note": "simple value 32"},
@@ -70,11 +70,11 @@
       ]
     },
     {
-      "category": "rfc", "name": "RFC 9682 head numbers: a non-integer #7.<T> is refused (D334)",
+      "category": "rfc", "name": "RFC 9682 head numbers: a non-integer #7.<T> is refused (D336)",
       "cddl": "r = #7.<tstr>\n", "snugSchemaError": "major", "cases": []
     },
     {
-      "category": "rfc", "name": "RFC 9682 head numbers: only #6 and #7 take <T> (D334)",
+      "category": "rfc", "name": "RFC 9682 head numbers: only #6 and #7 take <T> (D336)",
       "cddl": "r = #5.<1>\n", "snugSchemaError": "syntax", "cases": []
     }
   ]

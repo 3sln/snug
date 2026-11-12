@@ -5760,6 +5760,63 @@ New caps:
 * `float32` matches the shortest-form 1.5.
 - [x] **Signed off** (coordinator, 2026-11-11, under owner delegation D303: compile +0.77 KB gzip, VM entries +0.27 KB gzip, for RFC 8610 §3.3 float widths by value, numeric controls on `number` and RFC 9165 `.cat` text/bytes (P9.2); RFC corpus 984 pass, 0 unexplained)
 
+### D336 — RFC 9682 §3.2 head numbers for `#7`: `#7.<T>`, and `#7.24`–`#7.31` as additional information; SIMPLE leaves are ranges (P9.3)
+**Decision** (P8.5 VM engineer, provisional):
+* **Grammar.** `#7.<T>` parses like `#6.<T>`. `#m.<T>` for any other major
+  is a syntax error, as before.
+* **Meaning.** A head number `n` for `#7` is:
+  - the simple value `n` for 0..23 and 32..255;
+  - for 24, every simple value 32..255. This is additional information
+    24, whose argument is the value; `f8 00`–`f8 1f` are not well formed
+    (RFC 8949 §3.3, D284), so they never reach a schema;
+  - for 25, 26 and 27, `float16`, `float32` and `float64`, by value (D328);
+  - for 28..31, nothing. No data item has that head, and 31 is the break
+    code.
+* **`#7.<T>`** takes T's integers in 0..255 as head numbers: `#7.<0..255>`
+  is every major-7 item. T must be an integer type, otherwise compiling
+  fails with `major`. T's values outside 0..255 match nothing, as
+  `#6.<T>` keeps only 0..2^64−1. A generic argument works as T.
+* **Program format.** A SIMPLE leaf (kind 5) is now `d0..d1`, a range of
+  simple values both in 0..23 or both in 32..255. It used to be the single
+  value `d0`. The verifier checks the range, and the VM's `leaf-simple`
+  compares the item's value (its ai below 24, the `f8` argument otherwise)
+  against it. The cost is the same as before. `.and` intersects simple
+  ranges, and the overlap test compares them. An extension control's
+  argument still needs a single simple value. Format 2.0 is not released,
+  so the leaf changes in place rather than in a new format version.
+* **Corpus.**
+  - `corpus/conformance/heads.json`: 57 cases and 2 refusal suites, all
+    agreeing with the PEG oracle. That oracle (`#7.24` matches simple
+    32..255; `#7.24..27` are not constants) and the independent oracle are
+    updated to match.
+  - The RFC runner's "RFC 9682 simple head numbers" suite compiles and
+    passes; its P9.3 classification is removed.
+
+**Why**: RFC 9682 §3.2: "For #7, the head-number stands for the simple
+value if it is in the ranges 0..23 or 32..255 (as per Section 3.3 of RFC
+8949 [STD94], the simple values 24..31 are not used). For 24..31, the
+head-number stands for the "additional information", e.g., #7.25 or
+#7.<25> is a float16, etc."
+**Other implementations** (one-rule schemas):
+- The Ruby cddl gem 0.12.14 supports `#7.<T>`. It reads `#7.24` as the
+  simple value 24, so it refuses `f8ff` and `f820`.
+- The cddl crate 0.10.7 refuses `#7.<T>` (`#6.<T>` works), and also refuses
+  `f93e00` for `#7.25`.
+
+**Alternatives**:
+- One SIMPLE leaf per value: `#7.<32..255>` would become 224 leaves.
+- Refusing `#7.24`–`#7.31`: this contradicts §3.2.
+
+**Size** (D303's rule of thumb, accepted by the manager):
+- `snug/compile` full grows by +632 B min, +286 gzip and +213 brotli
+  (`head7`, `lower-head7`, the `#7.<T>` parse; the range in `.and` and
+  the overlap test are folded into the TEXT/BYTES code).
+- The VM entries change by +5 B min and at most +15 gzip.
+- Only the `snug/compile` full min cap is over. It is raised to
+  ceil(284,731 × 1.02) = 290,426.
+- Measured on `p93-heads` over main `74b903f`.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
