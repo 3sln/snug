@@ -8446,10 +8446,13 @@ review.
   the counts depend on the corpus at the commit (P9.6 at `61a090e`: 20,492
   cases; on `641f970`: 20,819 cases, 191,682 blob runs, 62,405 + 62,405
   reader runs, 62,550 sequence runs / 35,328,681 items).
-- [ ] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
+- [x] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
   2026-11-11). The default mode takes a few minutes and is for routine
   gating. A `full` mode runs the async differential at the scale it ran at
   when P9.6 landed. Assigned to the P9.6 engineer.
+  *Done 2026-11-12, merged at `d4b9abf`.* **Gate on main** (`d4b9abf`, a
+  detached worktree): `bb rust-api-test` exit 0 in 33 s and `bb
+  rust-api-test full` exit 0 in 259 s, with the counts below.
   *Built (2026-11-12, branch `p96-modes`):* `bb rust-api-test [full]`
   (`host/rust/tests/run` takes the mode, refuses anything else, and runs
   under the watchdog as `rust-api-test` or `rust-api-test-full`; bb.edn
