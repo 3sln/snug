@@ -18,6 +18,8 @@ do not edit them. Put notes, extracts and derived files beside them.
 | `rfc3986.txt` | RFC 3986 (STD 66) URI generic syntax | https://www.rfc-editor.org/rfc/rfc3986.txt | `3102dae4b68cebe40337730312fcb612297b8928547267e8b3d1ee6002b2d683` |
 | `rfc8392.txt` | RFC 8392 CBOR Web Token | https://www.rfc-editor.org/rfc/rfc8392.txt | `9021ff7c4d274cf34873fe4f4fb17c4fe323247dd0f96bfcab54909bfcdc5f13` |
 | `rfc9052.txt` | RFC 9052 (STD 96) COSE structures and process | https://www.rfc-editor.org/rfc/rfc9052.txt | `01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45` |
+| `rfc5234.txt` | RFC 5234 (STD 68) ABNF (added 2026-11-12 for P9.14) | https://www.rfc-editor.org/rfc/rfc5234.txt | `fc871020f53baa6b60fc6835c557b433f38d53c5cc41ab56d03622b084f53a12` |
+| `rfc7405.txt` | RFC 7405 Case-sensitive string support in ABNF (added 2026-11-12 for P9.14) | https://www.rfc-editor.org/rfc/rfc7405.txt | `f85c88bcf8ca8035585b39f518adfe274bb095801c95ef665b49a27b61245f17` |
 
 Errata are not included. The RFC 8610 errata page
 (https://www.rfc-editor.org/errata/rfc8610) was consulted on the same date
@@ -36,6 +38,9 @@ Revised BSD License, as each document states.
 
 RFC 3986 (2005, © The Internet Society) is likewise subject to BCP 78; its
 rights are now administered by the IETF Trust under the same provisions.
+
+RFC 5234 (January 2008) states "Copyright (C) The IETF Trust (2008)" and is
+subject to BCP 78. RFC 7405 (2014) is covered by the first paragraph.
 RFC 3339 (2002, © The Internet Society) carries the pre-BCP 78 "Full
 Copyright Statement". It allows the document to be copied and furnished to
 others provided the copyright notice and that paragraph are kept, and it
