@@ -32,7 +32,7 @@
             [snug.vm.eval :refer [eval-item]]
             [snug.vm.api :refer [vm-setup vm-output vm-witness-output lim arena-lease]]
             [snug.vm.arena :refer [arena-take arena-fit]]
-            [snug.vm.sbase :refer [arena-gate arena-items arena-doc VMS_NEED VMS_YIELD GO SS_PH SS_TOTAL SS_POS SS_NEED_OFF SS_NEED_LEN
+            [snug.vm.sbase :refer [arena-gate arena-items VMS_NEED VMS_YIELD GO SS_PH SS_TOTAL SS_POS SS_NEED_OFF SS_NEED_LEN
                                    SS_QUANTUM SS_SP SS_RET SS_KEEP SS_ATOP SS_FRAMES SS_MAXF SS_CODE SS_WB0
                                    SS_WORK SS_CUT SS_CHN SS_CHAIN SS_PSTK SS_PCAP SS_PROG SS_RTS SS_RNQ
                                    SS_STEPS IT_POS IT_D IT_FB IT_CK IT_NQ IT_END IT_CTX IT_MODE IT_NOTE
@@ -208,9 +208,6 @@
            "query; then the root item.")
   (let [n (ia ss SS_TOTAL)
         at (- 0 base)]
-    (comment "a recursive Program's group arena, grown once for the message (arena-doc)")
-    (let [ga (arena-doc p s ss n)]
-      (if (== ga VMS_GROW) (return ga)))
     (if (> n (ia s O_MAX_BYTES))
       (do (fail s at CODE_TOO_LARGE)
           (return (fin s ss out base CODE_TOO_LARGE 0 at))))
@@ -542,7 +539,7 @@
       (comment "P8.5: an item taken whole may push on the group arena up to its bytes'"
                "bound: room first (a suspension point, nothing charged yet)")
       (if (== direct 1)
-        (do (let [g7 (arena-gate p s ss (arena-items p s (- (imin end wend) pos)))]
+        (do (let [g7 (arena-gate p s ss (arena-items p s (- (imin end wend) pos)) (+ (imin end wend) base))]
               (if (== g7 VMS_GROW) (return g7)))))
       (progress ss 1)
       (if (and (== direct 1) (vsess s ss))

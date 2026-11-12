@@ -207,7 +207,7 @@
   (let [el (ia ss (+ f F_EL))]
     (if (== (ia ss (+ f F_PH)) A_LIVE)
       (do (if (== gated 0)
-            (do (let [g (arena-gate p s ss (arena-items p s 0))]
+            (do (let [g (arena-gate p s ss (arena-items p s 0) r)]
                   (if (== g VMS_GROW) (return g)))))
           (let [pos (- (ia ss (+ f F_POS)) base)
                 fb (ia ss (+ f F_FB))
@@ -312,7 +312,7 @@
           (return (call ss base q (+ d 1) 0 0 0 end 0 MODE_ITEM note (neg 1)))))
     (comment "a live element: room in the group arena for its record and a child the"
              "window holds (a suspension point), then its query from the live blocks")
-    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) q)))]
+    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) q)) (+ (imin end (blen b)) base))]
       (if (== g VMS_GROW) (return g)))
     (let [cr (cset-rec p s ck)
           w (cset-width p cr)
@@ -509,7 +509,7 @@
            "point), the deferred duplicate check (D277), then map-close; a T block's"
            "records keep their keys in the key arena (the session's kept DC forms,"
            "D283) or, without the valid machinery, nothing to sort.")
-  (let [g (arena-gate p s ss (* 2 (ia ss (+ f F_EL))))]
+  (let [g (arena-gate p s ss (* 2 (ia ss (+ f F_EL))) (+ (ia ss (+ f F_Q)) 1))]
     (if (== g VMS_GROW) (return g)))
   (let [rv (vmap-end s ss vs cb ka base f)]
     (if (== rv VMS_GROW) (return rv))
@@ -552,7 +552,7 @@
            "caller already made room (gated 1), the group arena is made room in first.")
   (if (== (ia ss (+ f F_PH)) M_LVAL)
     (do (if (== gated 0)
-          (do (let [g (arena-gate p s ss (arena-items p s 0))]
+          (do (let [g (arena-gate p s ss (arena-items p s 0) r)]
                 (if (== g VMS_GROW) (return g)))))
         (let [pos (- (ia ss (+ f F_POS)) base)
               d (ia ss (+ f F_D))
@@ -604,7 +604,7 @@
         ^:mut kks start
         ^:mut kend end
         ^:mut delta 0]
-    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) start)))]
+    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) start)) (+ (imin end (blen b)) base))]
       (if (== g VMS_GROW) (return g)))
     (if (>= kea 0) (set klen (- kea (ia ss (+ f F_START)))))
     (comment "D085: a key the message ended inside (vms-eof): what was copied, ending there")
@@ -759,7 +759,7 @@
       (do (iset s VM_VTAB 0)
           (vgrow ss 0 0 0 (+ (* 2 (blen ka)) (+ KH klen)))
           (return VMS_GROW)))
-    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) start)))]
+    (let [g (arena-gate p s ss (arena-items p s (- (imin end (blen b)) start)) (+ (imin end (blen b)) base))]
       (if (== g VMS_GROW)
         (do (iset s VM_VTAB 0)
             (return g))))

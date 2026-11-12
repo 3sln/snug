@@ -89,6 +89,11 @@
   (let [a (ia s VM_ARENA)]
     (iset s (+ a AR_UP) mark)))
 
+(defn ^:pub ^I32 arena-in-use [^IntsR s]
+  (comment "Words in use: the upward stack and the chunks carved.")
+  (let [a (ia s VM_ARENA)]
+    (return (+ (ia s (+ a AR_UP)) (* CHUNK (ia s (+ a AR_CTOP)))))))
+
 (defn ^:pub ^I32 arena-free-words [^IntsR s]
   (comment "Words between the upward top and the chunk heap.")
   (let [a (ia s VM_ARENA)]
@@ -169,6 +174,17 @@
   (comment "After R_AGROW: the S length the grown arena needs.")
   (let [a (ia s VM_ARENA)]
     (return (+ (+ a AR_HDR) (ia s (+ a AR_WANT))))))
+
+(defn ^:pub arena-want-cut [^Ints s ^I32 most ^I32 least]
+  (comment "After R_AGROW: ask for at most `most` body words (doubling past what can"
+           "ever be needed is waste), never fewer than `least` (what the work needs).")
+  (let [a (ia s VM_ARENA)
+        was (ia s (+ a AR_WANT))
+        ^:mut w was]
+    (if (> w most) (set w most))
+    (if (and (< w least) (<= least was)) (set w least))
+    (if (> least was) (set w was))
+    (iset s (+ a AR_WANT) w)))
 
 (defn ^:pub arena-adopt [^Ints s ^I32 newend]
   (comment "S was grown (contents kept, same offsets): the body becomes newend words"

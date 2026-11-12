@@ -298,7 +298,27 @@ if (rustBin) {
   rustLine = `  ${ra === sel.length ? 'ok  ' : 'FAIL'} JS == Rust (debug, overflow checks on): ${ra}/${sel.length} session runs, whole out array, ${panics} panics (${(tRs / 1000).toFixed(1)} s)`;
 }
 
+// P9.4 (D337): a recursive Program's session grows its group arena with the input read.
+// It used to grow to the whole message's bound at the start (D314): for an unknown length
+// the input limit's, 4,194,456 words of S here. The first step must not grow S at all.
+let growOk = false, growText = '';
+{
+  const k = compile('r = [* g]\ng = (int, int // tstr, g)', { limits: { items: 1 << 20, entries: 1 << 20 } });
+  programs.push({ P: k.program, B: k.pool, label: 'P9.4 recursive group' });
+  const msg = [0x98, 202]; for (let i = 0; i < 200; i++) msg.push(0x61, 0x61); msg.push(0x00, 0x01);
+  const c = { prog: programs.length - 1, rule: k.rules.indexOf('r'), bytes: Uint8Array.from(msg) };
+  const lim = Int32Array.from([1, 0, -1, -1, -1, -1, -1, -1, 0, 0, -1]);
+  const want = buffer(c, lim), s0 = vmScratchWords(k.program, c.rule, Math.max(k.program[16], 1));
+  const pol = { kind: 2, w: 7, q: 0, seed: 7, k: 0 };
+  const a = runSession(k.program, k.pool, c.rule, lim, c.bytes, pol), u = runUnknown(k.program, k.pool, c.rule, lim, c.bytes, pol);
+  growOk = !a.error && !u.error && want.startsWith('0 ') && a.out === want && u.out === want
+    && a.firstS === s0 && u.firstS === s0 && u.sWords < 65536;
+  growText = `S ${s0} words after the first step (known length ${a.firstS}, unknown ${u.firstS}), ${a.sWords} / ${u.sWords} at the end; out == the buffer's`;
+  if (!growOk) fail(`recursive arena growth (D337): ${growText}; ${a.error ?? ''} ${u.error ?? ''} want ${want} got ${a.out} | ${u.out}`);
+}
+
 const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
+line(growOk, `recursive arena growth (D337): a 202-item recursive-group array under 7-byte windows: ${growText}`);
 const nStress = cases.filter(c => c.stress).length;
 line(agree === runs.length, `session == buffer driver: ${agree}/${runs.length} runs give vm-validate's whole out array, over ${cases.length - nStress} vm-test cases (${MUTATIONS} mutations, ${SCHEMAS} oracle schemas, seed ${SEED}; ${nSpan} span cases are not sessions) and ${nStress} stress cases`);
 console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}`);

@@ -56,7 +56,7 @@ export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, ma
   const st = { s, ss, ka, vs: new Int32Array(512), cb: new Uint8Array(1024) };
   const rnd = xorshift(policy.seed ?? 1);
   const limit = maxSteps || (200000 + 64 * n);
-  let off = 0, len = 1, steps = 0, needs = 0, yields = 0, first = true, lastKeep = 0;
+  let off = 0, len = 1, steps = 0, needs = 0, yields = 0, first = true, lastKeep = 0, firstS = 0;
   for (;;) {
     let L;
     if (first && policy.kind === 3) L = Math.min(policy.k, n);
@@ -69,8 +69,10 @@ export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, ma
     if (guard) win = guard(win, 'window');
     const r = stepV(st, p, b, win, o, off, x);
     steps++;
+    if (steps === 1) firstS = st.s.length;
     yield r;
-    if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields };
+    // sWords: the scratch S's length at the end; firstS: after the first step (P9.4, D337)
+    if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields, sWords: st.s.length, firstS };
     if (r === VMS_NEED) {
       needs++;
       const no = vmsNeedOffset(ss), nl = vmsNeedLength(ss);
@@ -122,7 +124,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
   const rnd = xorshift(policy.seed ?? 1);
   const limit = 200000 + 64 * n;
   const words = () => Array.from(out.slice(0, 8 + 2 * out[6])).join(' ');
-  let off = 0, len = 1, steps = 0, first = true, eofed = false, lastKeep = 0;
+  let off = 0, len = 1, steps = 0, first = true, eofed = false, lastKeep = 0, firstS = 0;
   const eof = () => { eofed = true; return vmsEof(ss, o, n); };
   // a forward-only stream drops what precedes keep: the session may never ask for it again
   const keepOk = at => { const k = vmsKeep(ss); if (at < lastKeep || k < lastKeep) return false; lastKeep = k; return true; };
@@ -138,13 +140,14 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
     if (guard) win = guard(win, 'window');
     let r = stepV(st, p, b, win, o, off, x);
     steps++;
+    if (steps === 1) firstS = st.s.length;
     if (r === VMS_HELD) {
       if (failFast && vmsHeldCode(ss) !== 0) return { out: words(), steps, early: true };
       if (eofed) return { error: 'held after vms-eof' };
       r = eof();
       if (r < 0) return { error: `vms-eof ${r} after held` };
     }
-    if (r >= 0) return { out: words(), steps };
+    if (r >= 0) return { out: words(), steps, sWords: st.s.length, firstS };
     if (r === VMS_NEED) {
       const no = vmsNeedOffset(ss), nl = vmsNeedLength(ss);
       const keep = vmsKeep(ss);
@@ -153,7 +156,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
       if (no + nl > Math.min(n, total) || n > total && no + nl >= total) {
         if (eofed) return { error: `NEED(${no}, ${nl}) past the end ${n} after vms-eof` };
         const r2 = eof();
-        if (r2 >= 0) return { out: words(), steps };
+        if (r2 >= 0) return { out: words(), steps, sWords: st.s.length, firstS };
         if (r2 !== VMS_RESUME) return { error: `vms-eof ${r2}` };
       }
       off = no; len = nl;
@@ -164,7 +167,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
       if (off > n) {
         if (eofed) return { error: `YIELD at ${off} past the end ${n} after vms-eof` };
         const r3 = eof();
-        if (r3 >= 0) return { out: words(), steps };
+        if (r3 >= 0) return { out: words(), steps, sWords: st.s.length, firstS };
         if (r3 !== VMS_RESUME) return { error: `vms-eof ${r3}` };
         off = vmsPosition(ss);
       }

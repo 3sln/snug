@@ -5817,6 +5817,74 @@ head-number stands for the "additional information", e.g., #7.25 or
 - Measured on `p93-heads` over main `74b903f`.
 - [ ] **Signed off** (owner)
 
+### D337 — A recursive Program's session grows its group arena with the input read, not to the whole message's bound at the start (amends D314; P9.4, PEG open problem 1)
+**Decision** (P8.5 VM engineer, provisional):
+* **The gate.** Every session arena gate (`arena-gate`,
+  `kin/vm-session-base.kin`) now also gets `upto`, the furthest message
+  offset the gated work can read:
+  - the end of the window or child for an element, a pair, or an item
+    taken whole;
+  - the position just reached for `arr-ret` and `map-ret`;
+  - the map's end for `map-end`.
+
+  For a Program with recursive groups (`ACT_SUM` or `RECLEAF_MAX` > 0), the
+  gate makes sure the arena holds `arena-prefix(upto)`. That is program-2
+  §9.4's bound, which `arena-doc` applied to the whole message, applied to
+  the first `upto` bytes: `upto·(R_ITEM_MAX + ACT_SUM) + (depth+1)·(ACT_SUM +
+  64·RECLEAF_MAX) + 2·upto`. `arena-doc` and its call at the message start
+  are gone.
+* **Why the prefix bound is enough.** A machine run can rebuild an
+  activation chain only from items already read: a recursive cycle
+  consumes an item before it calls again, or it is `group_recursion`. So
+  the work read up to `upto` can never have pushed more than the bound for
+  `upto` items.
+* **Growth requests are capped** (`arena-want-cut`). For a recursive
+  Program they never exceed the whole message's bound, which is what D314
+  reserved at the start. Growth by doubling can therefore never end larger
+  than D314's single reservation.
+
+The buffer route is unchanged, as are charges, verdicts and events: the
+arena's size is not charged.
+**Evidence**:
+* A differential against the previous code on every vm-test case whose
+  Program is recursive, plus generated deep recursive messages (`[* g]` with
+  a recursive group, 1–200 deep; a recursive `[g]` and a recursive map).
+  It runs D314's sessions (P9.3's tree) and D337's side by side under 6
+  window policies: whole, 1-byte, 7-byte and 300-byte random windows, plus
+  the unknown length whole and in 7-byte windows. Result: 1050 runs, 0
+  differences in the whole out array (code, subcode, offset, budget used,
+  items, path).
+* Peak scratch S summed over those runs: 789,139,954 words before,
+  12,814,776 after. It was smaller in 198 runs and larger in none.
+* After the first step, S summed over the runs: 789,139,954 words before,
+  8,057,609 after. With an unknown length, D314 grew S to 4,194,456 words
+  (the input limit's bound) before reading anything; it now stays at
+  4,248.
+* `vmsession-test` has a new check, "recursive arena growth (D337)". A
+  202-item recursive-group array, run under 7-byte windows with known and
+  unknown length, gives the buffer's out array, and S does not grow in the
+  first step.
+* The session == buffer gates (`vmsession-test`, `sequence-test`) are the
+  standing differential.
+
+**Alternatives**:
+- Resumable machines (D310): a mid-run suspension. Much larger.
+- Gating on the current container's items only: the end-of-container runs
+  of the enclosing containers need their own items too, so the prefix
+  bound is simpler and still tight to the input read.
+
+**Size** (D303's rule of thumb, accepted by the manager):
+- The session entries grow:
+  - `snug/sources`: +283 B min, +76 gzip, +136 brotli;
+  - `snug/sequence`: +283 B min, +78 gzip, +38 brotli;
+  - `all-runtime`: +283 B min, +85 gzip, −30 brotli.
+- The cause is `arena-prefix`, `arena-gate`'s `upto`, `arena-in-use` and
+  `arena-want-cut`.
+- Only the `snug/sources` min caps are over. They are raised to
+  ceil(180,389 × 1.02) = 183,997.
+- Measured on `p94-arena` over `p93-heads`.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

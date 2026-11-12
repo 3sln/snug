@@ -199,7 +199,7 @@ pub fn arr_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
     let el: i32 = ss[(f + F_EL) as usize];
     if ss[(f + F_PH) as usize] == A_LIVE {
         if gated == 0 {
-            let g: i32 = arena_gate(p, s, ss, arena_items(p, s, 0));
+            let g: i32 = arena_gate(p, s, ss, arena_items(p, s, 0), r);
             if g == VMS_GROW {
                 return g;
             }
@@ -345,7 +345,7 @@ pub fn arr_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     }
     // a live element: room in the group arena for its record and a child the
     // window holds (a suspension point), then its query from the live blocks
-    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - q));
+    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - q), imin(end, b.len() as i32) + base);
     if g == VMS_GROW {
         return g;
     }
@@ -619,7 +619,7 @@ pub fn map_end(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32], 
     // point), the deferred duplicate check (D277), then map-close; a T block's
     // records keep their keys in the key arena (the session's kept DC forms,
     // D283) or, without the valid machinery, nothing to sort.
-    let g: i32 = arena_gate(p, s, ss, 2 * ss[(f + F_EL) as usize]);
+    let g: i32 = arena_gate(p, s, ss, 2 * ss[(f + F_EL) as usize], ss[(f + F_Q) as usize] + 1);
     if g == VMS_GROW {
         return g;
     }
@@ -675,7 +675,7 @@ pub fn map_ret(p: &[i32], s: &mut [i32], ss: &mut [i32], base: i32, f: i32, r: i
     // caller already made room (gated 1), the group arena is made room in first.
     if ss[(f + F_PH) as usize] == M_LVAL {
         if gated == 0 {
-            let g: i32 = arena_gate(p, s, ss, arena_items(p, s, 0));
+            let g: i32 = arena_gate(p, s, ss, arena_items(p, s, 0), r);
             if g == VMS_GROW {
                 return g;
             }
@@ -737,7 +737,7 @@ pub fn map_pair(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut [i32],
     let mut kks: i32 = start;
     let mut kend: i32 = end;
     let mut delta: i32 = 0;
-    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - start));
+    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - start), imin(end, b.len() as i32) + base);
     if g == VMS_GROW {
         return g;
     }
@@ -966,7 +966,7 @@ pub fn vkey_pair(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], ss:
         vgrow(ss, 0, 0, 0, (2 * (ka.len() as i32)) + (KH + klen));
         return VMS_GROW;
     }
-    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - start));
+    let g: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, b.len() as i32) - start), imin(end, b.len() as i32) + base);
     if g == VMS_GROW {
         s[(VM_VTAB) as usize] = 0;
         return g;
