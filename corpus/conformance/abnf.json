@@ -1156,14 +1156,66 @@
    "error": "incremental"
   },
   {
-   "name": "repetition max below min",
-   "abnf": "3*2\"a\"",
-   "error": "repeat"
+   "name": "repetition max below min is valid ABNF (RFC 5234 §4) and matches nothing",
+   "abnf": "3*2\"a\" / \"b\"",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "b", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "aa", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "aaa", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "", "expect": false }
+   ]
   },
   {
-   "name": "num-val range reversed",
-   "abnf": "%x39-30",
-   "error": "range"
+   "name": "max below min of a nullable element still matches nothing (not even the empty string)",
+   "abnf": "3*2[\"a\"] / \"b\"",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "a", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "b", "expect": true }
+   ]
+  },
+  {
+   "name": "a reversed num-val range is valid ABNF and an empty range",
+   "abnf": "%x39-30 / \"x\"",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "5", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "0", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "x", "expect": true }
+   ]
+  },
+  {
+   "name": "RFC 5234 §2.3 and RFC 7405 §2.1 examples: \"aBc\" / %i\"aBc\" any case, %s\"aBc\" exactly, %d97.98.99 lowercase",
+   "abnf": "x\nx = %s\"aBc\" / %d97.98.99 / %x41.42.43",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "aBc", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "abc", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "ABC", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "Abc", "expect": false }
+   ]
+  },
+  {
+   "name": "RFC 5234 §3.5: elem foo / bar blat is (elem foo) / (bar blat)",
+   "abnf": "%s\"e\" %s\"f\" / %s\"b\" %s\"t\"",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "ef", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "bt", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "et", "expect": false }
+   ]
+  },
+  {
+   "name": "RFC 5234 §4: defined-as takes c-wsp, including a continuation line, around = and =/",
+   "abnf": "r\nr\n  = \"a\"\nr =/\n  \"b\"",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "a", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "b", "expect": true }
+   ]
+  },
+  {
+   "name": "RFC 5234 §4: a line of only c-wsp and a comment between rules",
+   "abnf": "r\nr = \"a\"\n   ; an indented comment line continues r\n\t\nq = \"b\"",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "a", "expect": true }
+   ]
   },
   {
    "name": "nesting deeper than 256",

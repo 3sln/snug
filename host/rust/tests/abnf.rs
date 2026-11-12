@@ -61,7 +61,10 @@ fn refusals_name_the_abnf_place() {
     }
     assert!(check_abnf("1*DIGIT").unwrap_err().starts_with("undefined rule"));
     assert_eq!(check_abnf("a\na = a \"x\" / \"\""), Ok(()));
-    assert!(check_abnf("3*2\"a\"").is_err());
+    // valid ABNF that matches nothing (RFC 5234 §4 admits both; D334)
+    assert_eq!(check_abnf("3*2\"a\""), Ok(()));
+    assert_eq!(check_abnf("%x39-30"), Ok(()));
+    assert!(check_abnf("a\na = \"x\"\nA = \"y\"").unwrap_err().starts_with("rule defined twice"));
 }
 
 #[test]

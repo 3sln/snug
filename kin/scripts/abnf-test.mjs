@@ -142,7 +142,10 @@ function leaf(nrules) {
   }
   if (r < 0.7) {
     const kind = pick(['one', 'one', 'range', 'cat']);
-    if (kind === 'range') { const a = pick(VALUES), b = pick(VALUES); return { t: 'num', range: [Math.min(a, b), Math.max(a, b)], base: pick(['x', 'd', 'b', 'X']) }; }
+    if (kind === 'range') {   // now and then reversed: valid ABNF, an empty range (D334)
+      const a = pick(VALUES), b = pick(VALUES), lo = Math.min(a, b), hi = Math.max(a, b);
+      return { t: 'num', range: rnd() < 0.12 && lo < hi ? [hi, lo] : [lo, hi], base: pick(['x', 'd', 'b', 'X']) };
+    }
     if (kind === 'cat') return { t: 'num', cat: Array.from({ length: int(2, 3) }, () => pick(VALUES)), base: pick(['x', 'd', 'X']) };
     return { t: 'num', cat: [pick(VALUES)], base: pick(['x', 'd', 'b', 'x', 'X']) };
   }
@@ -154,7 +157,8 @@ function expr(depth, nrules) {
   if (r < 0.55) return { t: 'seq', items: Array.from({ length: int(2, 3) }, () => expr(depth + 1, nrules)) };
   if (r < 0.72) return { t: 'alt', items: Array.from({ length: int(2, 3) }, () => expr(depth + 1, nrules)) };
   if (r < 0.9) {
-    const min = int(0, 2), max = pick([min, min + 1, min + 2, Infinity]);
+    // now and then max < min: valid ABNF that matches nothing (D334)
+    const min = int(0, 2), max = min > 0 && rnd() < 0.08 ? min - 1 : pick([min, min + 1, min + 2, Infinity]);
     return { t: 'rep', min, max, item: expr(depth + 1, nrules) };
   }
   return { t: 'opt', item: expr(depth + 1, nrules) };
@@ -203,7 +207,7 @@ function sample(n, g, depth) {
       const code = c.charCodeAt(0);
       return /[A-Za-z]/.test(c) && !/^%[sS]/.test(n.mode) && rnd() < 0.5 ? code ^ 32 : code;
     });
-    case 'num': return n.range ? [int(n.range[0], n.range[1])] : [...n.cat];
+    case 'num': return n.range ? [int(Math.min(...n.range), Math.max(...n.range))] : [...n.cat];
     case 'ref': return sample(g.bodies[n.n], g, depth + 1);
     case 'seq': { const out = []; for (const x of n.items) { const s = sample(x, g, depth + 1); if (!s) return null; out.push(...s); } return out; }
     case 'alt': { for (let k = 0; k < 3; k++) { const s = sample(pick(n.items), g, depth + 1); if (s) return s; } return null; }
