@@ -46,6 +46,12 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
 - `.regexp` in the XSD dialect by default, RFC 9485 I-Regexp as an option
   (D242); Unicode categories through the optional `snug/unicode` tables
   (Unicode 16.0; D083).
+- `.abnf` / `.abnfb` (RFC 9165 §3) through the optional ABNF module:
+  `snug/abnf` (`abnf`, `abnfWith`, `checkAbnf`), Rust
+  `Controls::with_abnf()`, wasm SDK `snug-wasm-sdk/abnf`. It checks
+  RFC 5234 + RFC 7405 grammar membership with a bounded, budget-metered
+  Earley recognizer. Without the module these controls are
+  `unsupported_control` (D334).
 - RFC 9682 head numbers `#7.<T>` (D336).
 - Serialised Programs, format 2.0: `program.serialize()`,
   `fromSerialized` (verified, no compiler needed), `sourceKey` for caches

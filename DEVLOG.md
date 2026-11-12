@@ -8648,7 +8648,7 @@ review.
   must be done before P9.13, so the final review sees the deduplicated
   code. The full differential (async == sync == buffer) stays as the
   reference. Assigned to the P9.6 engineer.
-- [ ] **P9.14 — `.abnf` / `.abnfb` (RFC 9165 §3).** Added 2026-11-11 by
+- [x] **P9.14 — `.abnf` / `.abnfb` (RFC 9165 §3).** Added 2026-11-11 by
   the coordinator. The owner direction D230 names these controls explicitly,
   so leaving them out is not an option. Requirements:
   - a bounded, metered ABNF engine covering RFC 5234 plus RFC 7405's
@@ -8661,6 +8661,15 @@ review.
   within the four-engineer cap. Until it lands, the 8 RFC 9165 figure 3–5
   corpus cases are marked "pending P9.14", not "outside scope".
 
+  *Done 2026-11-12 (merged to main at `b191827`).* **Gate on main:** `bb
+  gates abnf-test drift rfc-corpus npm-test` on `b191827` (a detached
+  worktree of main): all ok. abnf-test: 67 hand grammars, 600 random
+  grammars, 44,532 runs (kin == oracle), JS == Rust on 67,612 answers. The
+  RFC runner has 0 unexplained and 0 stale checks. npm test passed. Before
+  the merge, the land set (check, drift, size, npm-test, rust-api-test,
+  wasm-sdk-test, vm-test, compile-test) and unicode-test were run on the
+  branch over main `ff888ac`. `abnf-test` is in `ci/gate-map.edn` (the
+  release and identity sets).
   *Built (2026-11-12, branch `p914-abnf`; D334, amends D013):*
   - **Engine.** `kin/abnf.kin` (`snug.abnf`): an RFC 5234 + RFC 7405 parser
     for RFC 9165 §3's controller (the start, then rules) and an Earley
