@@ -473,8 +473,9 @@ DEVLOG under P9.15 and P9.17–P9.19.
   (wasm SDK). Other targets get similar names that don't conflict. The
   Rust crate name is proposed in P9.15 (crates.io `snug` is likely
   taken).
-  - Repository URL: **assumed `https://github.com/3sln/snug`, pending the
-    owner's confirmation.**
+  - Repository URL: `https://github.com/3sln/snug`, confirmed by the owner
+    on 2026-11-12. The repository exists and is private for now;
+    visibility is the owner's choice.
 - [x] **O5 — Security contact:** `contact+security@3sln.com` (owner),
   named in `SECURITY.md`.
 - [x] **O6 — Unicode data notice:** yes (owner). The Unicode License v3

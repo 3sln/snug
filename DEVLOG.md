@@ -6070,8 +6070,12 @@ docs/release-policy.md §7 has the full text.
   Git-source consumers get an orphan distribution branch, assessed in
   P9.19.
 - O4: `@3sln/snug` and `@3sln/snug-wasm`; other targets get similar
-  names. The crate name is to be proposed. The repository URL is assumed
-  to be `https://github.com/3sln/snug` until the owner confirms it.
+  names. The crate name is to be proposed. The repository URL is
+  `https://github.com/3sln/snug`, confirmed by the owner 2026-11-12. The
+  coordinator created the repository at the owner's request: private for
+  now, main pushed at `bf17d0a`, `origin` set. Pushes are made only by the
+  coordinator, on the owner's say-so; engineers and the manager never
+  push.
 - O5: `contact+security@3sln.com`, in SECURITY.md.
 - O6: add the Unicode License v3 notice.
 - O7: pin the oldest Node and Rust that pass today, gated on exactly
@@ -9481,8 +9485,8 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - **Names:** `@3sln/snug`, which rewrites the import specifiers in docs
     and examples. A proposed crates.io name, with availability checked if
     network access is available (otherwise say so).
-  - **Metadata:** repository `https://github.com/3sln/snug`, marked as an
-    assumption. SECURITY.md with `contact+security@3sln.com`. The Unicode
+  - **Metadata:** repository `https://github.com/3sln/snug` (confirmed by
+    the owner 2026-11-12, no longer an assumption). SECURITY.md with `contact+security@3sln.com`. The Unicode
     License v3 notice in THIRD_PARTY_NOTICES.md.
 - [ ] **P9.17 — The wasm SDK ships** (O3), as `@3sln/snug-wasm`.
   - Artefacts:
@@ -9522,6 +9526,22 @@ can run alongside them; its build work is post-RC unless it is cheap.
     tree on any branch, e.g. dist trees in a separate repository, or Go
     module proxies or archives fed from the release artefacts.
   - The choice goes to the coordinator and the owner.
+  - *Settled by the owner (2026-11-12):* "dist branch with release build is
+    the intent." The orphan `dist` branch holds generated release-build
+    trees and is not source history. The design implements this; the
+    alternatives above are no longer needed.
+  - **GitHub Packages evaluation** (the owner asked for it, 2026-11-12).
+    Check the current GitHub docs if network access is available, and
+    recommend a channel for each artefact: npmjs, GitHub Packages, GitHub
+    Releases or the `dist` branch. Cover:
+    - the npm registry at npm.pkg.github.com, including whether installing
+      a public package needs auth (a major drawback for a library);
+    - Releases with attached artefacts (the raw `.wasm`, tarballs);
+    - Go through the git route or the module proxy;
+    - whether GitHub Packages supports crates at all.
+  - The remote exists now (`origin`, private). Nothing is pushed by
+    engineers or the manager; the `dist` branch is built and validated
+    locally only.
 
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
