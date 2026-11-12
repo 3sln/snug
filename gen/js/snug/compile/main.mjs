@@ -263,20 +263,24 @@ export function compileSchema(text, opt, fl, unicode, h) {
     return 0;
 }
 
-export const SNUG_VERSION_LEN = 5;
-
 export function snugVersion() {
     // The snug version: in the source key (program.md §13.3) and the
-    // serialisation container. One place, so both hosts agree.
+    // serialisation container. One place, so both hosts agree. THE source
+    // of truth for the version (P9.15): its length and bytes below are read
+    // from this literal, and host/js/test/version.test.mjs requires every
+    // manifest and host/js/src/version.mjs to equal it. A semver string,
+    // so ASCII (str-len / str-u8 need that).
     return "0.0.0";
 }
 
+export function snugVersionLen() {
+    // The version text's length in bytes.
+    return snugVersion().length;
+}
+
 export function versionByte(i) {
-    // Byte i of the version text "0.0.0" (kept beside snug-version).
-    if ((i & 1) === 1) {
-        return 46;
-    }
-    return 48;
+    // Byte i of the version text, 0 <= i < snug-version-len.
+    return snugVersion().charCodeAt(i);
 }
 
 export function pushUint(h, t, v) {
@@ -320,8 +324,9 @@ export function buildKeyPreimage(h) {
     vpush1(h, T_KEYPRE, 101);
     vpush1(h, T_KEYPRE, 121);
     pushUint(h, T_KEYPRE, 2);
-    headPush(h, T_KEYPRE, 3, 0, SNUG_VERSION_LEN);
-    for (let i = 0; i < SNUG_VERSION_LEN; i++) {
+    const vn = snugVersionLen();
+    headPush(h, T_KEYPRE, 3, 0, vn);
+    for (let i = 0; i < vn; i++) {
         vpush1(h, T_KEYPRE, versionByte(i));
     }
     const pr = hg(h, H_PROFILE);

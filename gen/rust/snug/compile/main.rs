@@ -247,18 +247,22 @@ pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], unicode: &[i32], h: 
     }
     return 0;
 }
-pub const SNUG_VERSION_LEN: i32 = 5;
 pub fn snug_version() -> &'static str {
     // The snug version: in the source key (program.md §13.3) and the
-    // serialisation container. One place, so both hosts agree.
+    // serialisation container. One place, so both hosts agree. THE source
+    // of truth for the version (P9.15): its length and bytes below are read
+    // from this literal, and host/js/test/version.test.mjs requires every
+    // manifest and host/js/src/version.mjs to equal it. A semver string,
+    // so ASCII (str-len / str-u8 need that).
     return "0.0.0";
 }
+pub(crate) fn snug_version_len() -> i32 {
+    // The version text's length in bytes.
+    return snug_version().len() as i32;
+}
 pub(crate) fn version_byte(i: i32) -> i32 {
-    // Byte i of the version text "0.0.0" (kept beside snug-version).
-    if (i & 1) == 1 {
-        return 46;
-    }
-    return 48;
+    // Byte i of the version text, 0 <= i < snug-version-len.
+    return snug_version().as_bytes()[(i) as usize] as i32;
 }
 pub(crate) fn push_uint(h: &mut [i32], t: i32, v: i32) {
     head_push(h, t, 0, 0, v);
@@ -300,8 +304,9 @@ pub fn build_key_preimage(h: &mut [i32]) {
     vpush1(h, T_KEYPRE, 101);
     vpush1(h, T_KEYPRE, 121);
     push_uint(h, T_KEYPRE, 2);
-    head_push(h, T_KEYPRE, 3, 0, SNUG_VERSION_LEN);
-    for i in 0..SNUG_VERSION_LEN {
+    let vn: i32 = snug_version_len();
+    head_push(h, T_KEYPRE, 3, 0, vn);
+    for i in 0..vn {
         vpush1(h, T_KEYPRE, version_byte(i));
     }
     let pr: i32 = hg(h, H_PROFILE);

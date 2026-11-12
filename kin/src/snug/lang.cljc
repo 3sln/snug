@@ -76,7 +76,9 @@
 (def Str
   "A string LITERAL the source returns (a name for a code): a JS string, a
   Rust `&'static str`. Never built, never compared; kin decides nothing on
-  text (D009)."
+  text (D009). The one read of one is `str-len` / `str-u8` over an ASCII
+  literal (the snug version, P9.15), so that the version's length and bytes
+  come from the one literal and cannot drift from it."
   {:name 'Str :types {:js "string" :rust "&'static str"}})
 
 (def Ints
@@ -217,6 +219,11 @@
    'bset bset-form
    'bcopy bcopy-form
    'hex hex-form
+   ;; P9.15: the length and byte i of an ASCII `Str` literal (the snug version).
+   ;; For ASCII, a UTF-16 code unit is the UTF-8 byte, so both targets agree;
+   ;; the source checks i (unchecked, like `u8`).
+   'str-len (op "{0}.length" "({0}.len() as i32)" I32)
+   'str-u8 (op "{0}.charCodeAt({1})" "({0}.as_bytes()[({1}) as usize] as i32)" I32)
    ;; extension controls (D140, D190): call a predicate (a verdict word); the one that never matches
    'ext-call (op "({0}({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) | 0)"
                  "{0}({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})" I32)

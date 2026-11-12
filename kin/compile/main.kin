@@ -19,7 +19,7 @@
 (ns snug.compile.main
   (:require [kin.lang :refer [defn let return set if while for do comment defconst case declarefn]]
             [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - * neg quot bit-and < > <= >= == != and or not
-                               u8 blen ia iset ilen]]
+                               u8 blen ia iset ilen str-len str-u8]]
             [snug.compile.arena :refer [hg hs erred fail charge vinit vlen vpush1 vget vset vtrunc vbase msort-records
                                         H_CUTS H_LIM_GROUP H_GROUP_GIVEN T_WARN
                                         INF H_TOP H_ERR H_ERR_POS H_ERR_RULE H_BUDGET H_DEPTH H_NSRC
@@ -218,17 +218,22 @@
           (if (erred h) (return (bail h)))
           (return 0))))))
 
-(defconst ^:pub ^I32 SNUG_VERSION_LEN 5)
-
 (defn ^:pub ^Str snug-version []
   (comment "The snug version: in the source key (program.md §13.3) and the"
-           "serialisation container. One place, so both hosts agree.")
+           "serialisation container. One place, so both hosts agree. THE source"
+           "of truth for the version (P9.15): its length and bytes below are read"
+           "from this literal, and host/js/test/version.test.mjs requires every"
+           "manifest and host/js/src/version.mjs to equal it. A semver string,"
+           "so ASCII (str-len / str-u8 need that).")
   (return "0.0.0"))
 
+(defn ^I32 snug-version-len []
+  (comment "The version text's length in bytes.")
+  (return (str-len (snug-version))))
+
 (defn ^I32 version-byte [^I32 i]
-  (comment "Byte i of the version text \"0.0.0\" (kept beside snug-version).")
-  (if (== (bit-and i 1) 1) (return 46))
-  (return 48))
+  (comment "Byte i of the version text, 0 <= i < snug-version-len.")
+  (return (str-u8 (snug-version) i)))
 
 (defn push-uint [^Ints h ^I32 t ^I32 v]
   (head-push h t 0 0 v))
@@ -254,9 +259,10 @@
   (vpush1 h T_KEYPRE 103) (vpush1 h T_KEYPRE 114) (vpush1 h T_KEYPRE 97) (vpush1 h T_KEYPRE 109)
   (vpush1 h T_KEYPRE 45) (vpush1 h T_KEYPRE 107) (vpush1 h T_KEYPRE 101) (vpush1 h T_KEYPRE 121)
   (push-uint h T_KEYPRE 2)
-  (head-push h T_KEYPRE 3 0 SNUG_VERSION_LEN)
-  (for [^I32 i 0 SNUG_VERSION_LEN]
-    (vpush1 h T_KEYPRE (version-byte i)))
+  (let [vn (snug-version-len)]
+    (head-push h T_KEYPRE 3 0 vn)
+    (for [^I32 i 0 vn]
+      (vpush1 h T_KEYPRE (version-byte i))))
   (let [pr (hg h H_PROFILE)] (push-uint h T_KEYPRE pr))
   (head-push h T_KEYPRE 4 0 19)
   (for [^I32 k 0 17]
