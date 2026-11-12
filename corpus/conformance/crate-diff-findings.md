@@ -714,3 +714,83 @@ RC 14, RL 42, RK 30, RI 15, RZ 30, RR 27, RO 11, RX 15, new/unknown/timeout 0
 the PEG oracle on every crate-diff case. `node corpus/tools/run-rfc-corpus.mjs --gate`: 999
 checks, 996 pass, 3 classified, 0 unexplained, 0 stale; its Ruby column is the
 checked-in evidence (320 checked, 7 known disagreements), not re-run.
+
+## 2026-11-12 P9.8 follow-up: `.regexp` differential (`bb regexp-diff`)
+
+`corpus/tools/regexp-diff.mjs` (`bb regexp-diff`, watchdog gate `regexp-diff`,
+300 s wall / 600 s CPU; 20 s here) runs snug's `.regexp` in its default XSD
+dialect (D242, D243), with the `snug/unicode` tables, beside the Ruby cddl gem
+0.12.14 and the cddl crate 0.10.7 CLI:
+
+- **`xsd-regexp.json`:** 36 cases (203 texts), checked against the file's
+  hand-derived XSD verdicts, and its 24 invalid patterns (snug must refuse
+  each at compile time; the oracles get two probe texts).
+- **Generated:** 120 seeded patterns (seed `0x5eed9898`) over `{a, b, c}`, 948
+  texts. They use only constructs whose meaning XSD, ECMAScript `v`, Onigmo
+  and Rust `regex` share: literals, simple classes, groups, `|`, `? * +`,
+  `{n}`, `{n,}`, `{n,m}`. Snug is checked against Node's `RegExp(…, 'v')`
+  anchored over the whole text.
+
+The pattern is a CDDL text literal with JSON/RFC 9682 escapes. Ruby runs one
+process per pattern (`cddl SCHEMA vv files…`, reading only the per-file
+`ann:` lines), and the crate one process per text.
+
+**Result:** 180 patterns, 1,199 texts, **snug differences 0**: 203/203 hand
+verdicts, 948/948 Node verdicts, 24/24 invalid patterns refused. Every oracle
+difference is classified (exit 0).
+
+| | Texts | Ruby agrees | Ruby differs | Crate agrees | Crate differs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| xsd-regexp cases | 203 | 138 | 65 | 118 | 85 |
+| invalid patterns (2 probes each) | 48 | 22 | 26 | 28 | 20 |
+| generated | 948 | **948** | 0 | 496 | 452 |
+| **Total** | **1199** | **1108** | **91** | **642** | **557** |
+
+**What the oracles are.** The Ruby gem compiles
+`Regexp.new("\\A(?:#{pattern})\\z")` (`lib/cddl.rb`, `REGEXP_FOR_STRING`), that
+is **Onigmo** in Ruby 2.6.10 with whole-string anchors. That makes it
+XSD-like: it agrees with snug on all 948 generated texts. It is not XSD. The
+crate calls `regex::Regex::new(format_regex(pattern)).is_match(text)`
+(`validator/cbor.rs`), which is **Rust `regex`**, unanchored. Its
+`format_regex` (`validator/mod.rs:1343`) drops the backslash before every
+character that is not a regex metacharacter, except `d`, so `\s` becomes
+`s`, `\i` becomes `i`, `\n` becomes `n` and `\p{L}` becomes `p{L}`.
+
+The standard is RFC 8610 §3.8.3. It points at XSD 1.0 Part 2 second edition
+Appendix F ("XSD regular expressions are defined in Appendix F of
+[W3C.REC-xmlschema-2-20041028]"), which D242 follows; the XSD 1.1 regex
+language is deliberately not used (D242). §3.8.3.1 adds:
+
+- "XSD regular expressions support character class subtraction, a feature
+  often not found in regular expression libraries";
+- "\w and \d is based on Unicode character properties";
+- "\s and \S do have their more conventional meanings, and '.' matches any
+  character but the line-ending characters \r or \n";
+- "XSD regular expressions do not support the usual \x or \u escapes".
+
+The XSD verdicts themselves are the hand-derived ones in `xsd-regexp.json`
+(Appendix F with the corrected class grammar, and XML 1.0 fifth edition
+productions [4]/[4a] for `\i`/`\c`).
+
+| Class | Ruby | Crate | Why the oracle is not XSD |
+| --- | ---: | ---: | --- |
+| anchor-metacharacters | 2 | 2 | Appendix F has no anchors: `^x$` matches the text `^x$` only. Onigmo and Rust treat `^`/`$` as anchors. |
+| dot-matches-cr | 1 | 1 | §3.8.3.1: `.` excludes `\r` and `\n`. Onigmo and Rust exclude only `\n`. |
+| no-class-subtraction | 14 | 17 | §3.8.3.1: subtraction `[a-z-[aeiou]]`. Onigmo reads `-[…]` as a union with a nested class (with a warning), and refuses `[\p{L}-[\p{Lu}]]` (RegexpError). Rust reads a nested class too, or fails to parse (`[a-[a]]`). |
+| host-class-escapes | 18 | – | §3.8.3.1: `\d`/`\w` are Unicode (`\d` = Nd, `\w` = not P/Z/C, D243), and `\s` is TAB/LF/CR/SPACE. Onigmo's `\d` and `\w` are ASCII (`\w` includes `_`), and its `\s` adds `\v` and `\f`. |
+| no-xml-name-escapes | 28 | – | Appendix F's `\i \I \c \C` (XML names). Onigmo reads `\i`/`\I` as letters, `\c` as a control escape, and `\C` is a RegexpError. |
+| escape-stripped | – | 54 | `format_regex` turns `\s \S \w \W \D \i \I \c \C \n \r \t \p \P` into plain letters. The crate's `\d` survives and is Unicode, so it agrees there. |
+| unanchored | – | 461 | Appendix F matches the whole string. Each case was checked: the crate accepts exactly where an unanchored search of the Node translation finds a match (9 corpus texts, 452 generated). |
+| repetition-limit | 2 | 2 | `(){999999999999,1000000000000}` is valid XSD and matches `""`. Onigmo gives "too big number for repeat range"; Rust gives "decimal literal invalid". |
+| invalid-xsd-admitted | 26 (13 patterns) | 20 (10 patterns) | Host syntax outside Appendix F. Ruby: `[a-z-[aeiou]x]`, `[a-z-[a]-[b]]`, `[a-b-c]`, `\x41`, `A`, `(?=a)`, `(?:a)`, `a*?`, `a++`, `a{,2}`, `a{2`, `\b`, `\p{Letter}`. Crate: the first six of those, minus `(?=a)`, plus `\1` (after stripping, the literal `1`), `(?:a)`, `a*?`, `a++`, `\b`. |
+
+Every difference is the oracle's host dialect against the cited text. **No
+snug bug and no new snug decision.** Snug's own I-Regexp option
+(`regexp: 'iregexp'`, D242) is not part of this run. Reproduce:
+
+```sh
+RUBY_CDDL=$PWD/.cache/oracles/ruby-cddl.sh CDDL_NATIVE=$PWD/.cache/oracles/cddl-rs/bin/cddl bb regexp-diff
+```
+
+Evidence is in `.cache/regexp-diff/results.jsonl` (every text with all
+verdicts and the class) and `summary.json`.

@@ -64,6 +64,8 @@
                     :mode "the 2-minute P1-P5 campaign on HEAD (policy §4's minimum)"}
   crate-diff       {:cmd ["bb" "crate-diff"] :caps [3600 7200]
                     :doc "differential vs the cddl crate; needs its native build (P9.8 re-runs it)"}
+  regexp-diff      {:cmd ["bb" "regexp-diff"] :caps [300 600]
+                    :doc ".regexp (XSD) vs xsd-regexp.json, the Ruby gem and the cddl crate; needs both oracles (corpus/tools/ORACLES.md)"}
   runtime          {:cmd ["node" "tools/runtime/run.mjs"] :caps [2400 4800]
                     :doc "the staged package in Node, headless Chrome and workerd (P7.7)"}
   node-oldest      {:blocked "owner decision O7: the oldest declared Node line, then npm test on it"}

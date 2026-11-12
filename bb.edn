@@ -37,6 +37,8 @@
                 :task (apply shell "kin/scripts/compile-fuzz" *command-line-args*)}
   crate-diff {:doc "P4.1: seeded differential vs the native cddl crate 0.10.7."
               :task (apply shell "node" "corpus/tools/crate-diff.mjs" *command-line-args*)}
+  regexp-diff {:doc "P9.8 follow-up: .regexp (XSD, D242) on xsd-regexp.json and seeded patterns vs the Ruby cddl gem and the cddl crate.   bb regexp-diff [--patterns=120] [--seed=..]"
+               :task (apply shell "node" "corpus/tools/regexp-diff.mjs" *command-line-args*)}
   nav-test   {:doc "P5: kin navigation primitives on JS and Rust -- trace identity, truth vs the builder, unchecked-input robustness, Rust View paths."
               :task (apply shell "kin/scripts/nav-test" *command-line-args*)}
   write-test {:doc "P5.4: kin writer primitives on JS and Rust -- heads, float widths, integers, key order, close-map, Writer streams; truth vs cbor.mjs and the scanner; robustness."

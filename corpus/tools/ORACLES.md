@@ -8,8 +8,8 @@ previous copies on 2026-11-09.
 
 | Oracle | Default path | Override | Used by |
 | --- | --- | --- | --- |
-| native `cddl` crate 0.10.7 CLI | `.cache/oracles/cddl-rs/bin/cddl` | `--oracle=` or `CDDL_NATIVE` | `bb crate-diff` (`corpus/tools/crate-diff.mjs`), reductions in `corpus/conformance/crate-diff-findings.md` |
-| Ruby `cddl` gem 0.12.14 | `.cache/oracles/ruby-cddl.sh` | `RUBY_CDDL` (also `RFC_RUBY`, `PEG_RUBY` per script) | `corpus/tools/export-rfc.mjs`, `corpus/tools/peg-oracle.test.mjs`, review cross-checks |
+| native `cddl` crate 0.10.7 CLI | `.cache/oracles/cddl-rs/bin/cddl` | `--oracle=` or `CDDL_NATIVE` | `bb crate-diff` (`corpus/tools/crate-diff.mjs`), `bb regexp-diff` (`corpus/tools/regexp-diff.mjs`), reductions in `corpus/conformance/crate-diff-findings.md` |
+| Ruby `cddl` gem 0.12.14 | `.cache/oracles/ruby-cddl.sh` | `RUBY_CDDL` (also `RFC_RUBY`, `PEG_RUBY` per script) | `corpus/tools/export-rfc.mjs`, `corpus/tools/peg-oracle.test.mjs`, `bb regexp-diff`, review cross-checks |
 | gem tree (for `diag2cbor.rb`) | `.cache/oracles/ruby-gems` | `RUBY_CDDL_GEM_HOME` (or `RFC_GEM_HOME`) | `corpus/tools/export-rfc.mjs` |
 
 The `wasm` build of the crate used by `bench/vm-bench.mjs` (`CDDL_CRATE_PKG`)

@@ -8711,10 +8711,35 @@ review.
     starts a controller at a leading rule, but the 0.10.7 CLI panics
     ("undefined rule s = 1*DIGIT"). That is reported to the coordinator;
     the D-entry is not edited here.
-  - **Not covered:** `xsd-regexp.json` and the RFC corpus (which has its
-    own runner).
+  - **Not covered:** `xsd-regexp.json` (covered by the follow-up below) and
+    the RFC corpus (which has its own runner).
   - Gates on the rebased tree: `bb crate-diff` (above), `bb check`, `bb
     drift` ok. No snug source changed; no D-entry.
+  - **Follow-up (manager, 2026-11-12): the `.regexp` differential.** New
+    `corpus/tools/regexp-diff.mjs` = `bb regexp-diff` (gate `regexp-diff` in
+    `ci/gate-map.edn`, in no set because it needs both external oracles;
+    watchdog 300 / 600 s; 20 s). It runs snug's default XSD `.regexp` (D242,
+    D243), the Ruby gem and the crate on `xsd-regexp.json` (36 cases / 203
+    texts against the hand-derived XSD verdicts, plus its 24 invalid
+    patterns) and on 120 seeded patterns over a construct subset shared by
+    XSD, ECMAScript `v`, Onigmo and Rust `regex` (948 texts, checked against
+    Node `v`, anchored).
+    **Snug differences 0**: 203/203 and 948/948 verdicts, 24/24 invalid
+    patterns refused. **Ruby** (Onigmo, Ruby 2.6.10, `\A(?:…)\z`) agrees on
+    1,108 / 1,199 texts, including all 948 generated. Its 91 differences
+    are all dialect: `^`/`$` are anchors 2, `.` matches CR 1, no class
+    subtraction 14, ASCII `\d`/`\w` and `\s` with `\v`/`\f` 18, no XML name
+    escapes 28, repeat-count limit 2, and 13 invalid XSD patterns admitted
+    (26 probe texts). **Crate** (Rust `regex`, unanchored `is_match`, after
+    a `format_regex` that drops the backslash before non-metacharacters
+    except `d`) agrees on 642. Its 557 differences: unanchored 461 (each
+    checked with an unanchored search of the Node translation),
+    escape-stripped 54, no class subtraction 17, anchors 2, `.` matches CR
+    1, repeat-count limit 2, and 10 invalid patterns admitted (20 texts).
+    Each class is cited to RFC 8610 §3.8.3 / §3.8.3.1 (XSD 1.0 Part 2
+    Appendix F, which D242 follows rather than XSD 1.1) in the
+    `crate-diff-findings.md` section "P9.8 follow-up". No snug bug, no
+    decision, no D-entry.
 - [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
   chunks that fit under the P9.1 caps, with the seeds and chunking
   recorded so anyone can reproduce them. Includes `rust-api-test` in its
