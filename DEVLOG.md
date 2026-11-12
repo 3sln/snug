@@ -6399,7 +6399,10 @@ an RFC-strict tool, and rule-first had no second implementation behind it.
   the preimage for every compile. The registry flags word is already keyed
   and already carries a per-registry option.
 - [x] **Size caps:** coordinator, 2026-11-12, under owner delegation D303: snug/abnf +0.45 KB gzip (optional module) and compile-static +3 B brotli, for strict RFC 5234/7405/9165 parsing by default with abnf: 'lenient' as an option (D340)
-- [ ] **Sign-off** (manager).
+- [x] **Sign-off** (manager, 2026-11-12). Verified on main at `d1f2da9`:
+  drift ok, size ok, no conflict markers. This follows the owner's standing
+  rule (spec is the default; other forms are options). The four
+  RFC-sanctioned forms that stay on in both modes are each cited.
 
 ## Findings
 
