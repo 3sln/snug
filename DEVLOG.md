@@ -5642,15 +5642,16 @@ its session, so the bound filled up. Fixed in `host/js/src/sources.mjs`:
 `driveSession` and the sync/async runners close in a `finally`. The SDK frees
 on its own `length_mismatch` path. Without the bound this leak would have
 held memory silently.
-**Size**: `snug/sources` 179,510 / 66,050 / 56,341 → 181,681 / 66,906 /
-57,131 (+2,171 / +856 / +790 min / gzip / brotli), `snug/sequence`
-209,038 / 74,349 / 64,513 → 210,595 / 75,063 / 65,091 (+1,557 / +714 /
-+578), `all-runtime` 274,115 / 98,612 / 83,014 → 276,376 / 99,535 / 83,788
-(+2,261 / +923 / +774). Only the session/stream entries grow, by
-`host/js/src/session-pool.mjs` and the close/release paths. The failing caps
-(`snug/sources` min and gzip, `snug/sequence` min, `all-runtime` all three)
-rise to ceil(measurement × 1.02) (esbuild 0.28.2, Node 24.6.0; on `0b302fc` +
-P9.7).
+**Size** (min / gzip / brotli, main `74b903f` → + P9.7; esbuild 0.28.2, Node
+24.6.0): `snug/sources` 180,107 / 66,331 / 56,533 → 182,278 / 67,171 /
+57,303 (+2,171 / +840 / +770), `snug/sequence` 209,635 / 74,626 / 64,618 →
+211,192 / 75,317 / 65,231 (+1,557 / +691 / +613), `all-runtime` 274,712 /
+98,867 / 83,229 → 276,973 / 99,784 / 84,031 (+2,261 / +917 / +802). Only the
+session/stream entries grow, by `host/js/src/session-pool.mjs` and the
+close/release paths. The caps that fail (`snug/sources` min, `all-runtime` min
+and gzip; D333 already left room for the rest) rise to ceil(measurement ×
+1.02): 185,924, 282,513 and 101,780. (On the earlier base `0b302fc` the
+deltas were the same to within 40 B.)
 **Alternatives**: one global pool rather than per Program (arrays differ in
 SS shape per Program, so reuse would mostly miss); no bound and pooling
 only (a leaked session would grow memory silently, as the leak above shows);
