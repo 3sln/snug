@@ -1,281 +1,187 @@
 # snug
 
-snug is a standalone, MIT-licensed CDDL (RFC 8610) validator and CBOR
-(RFC 8949) library. It validates bytes directly, offers checked views for
-reading selected fields, and encodes deterministic bytes from JavaScript
-values or typed Writer calls.
+snug reads, writes and validates CBOR (RFC 8949) against CDDL schemas
+(RFC 8610). It is built for untrusted input: every operation has explicit
+limits, errors never echo the data, and validation runs directly over the
+bytes without building a value tree.
 
-The compiler, validator, profile checks and byte-writing primitives are
-written in **kin** and generated into JavaScript and Rust; WebAssembly is
-built from Rust. Host code supplies the API, memory and value representation.
+The core (scanner, CDDL compiler, validator, encoder) is written once in kin
+and generated into JavaScript and Rust. A WebAssembly build comes from the
+Rust side. All three give the same verdicts, error codes and step counts for
+the same input, and the test suite checks that they do.
 
-Why snug:
+> **Status:** pre-release. Nothing is published to npm or crates.io yet, and
+> the API may change before 0.1.0. You can build and use it from this
+> repository today.
 
-- **RFC 8610 matching:** groups in arrays and maps follow the normative PEG
-  reading of Appendix A: `//` is a prioritised choice that locks in its first
-  match, occurrences are greedy, and map cuts apply as §3.5.4 says. Nothing
-  is retried, so work stays linear; `[* uint, uint]` matches nothing, as
-  Appendix A states ([pitfalls](docs/guide.md#group-matching-pitfalls-peg)).
-- **One validation walk:** strict CBOR checks and CDDL predicates run together.
-  `validate` builds no decoded value tree. Materialising decode checks first,
-  then builds values in a second pass.
-- **Explicit bounds:** schema complexity, scratch, input size, depth, entries,
-  items and VM work have limits. Work budgets count operations, not elapsed
-  milliseconds; callers still need transport deadlines and cache quotas.
-- **Safe diagnostics:** errors contain codes, offsets and schema-named paths,
-  never received values, bytes or arbitrary input map keys.
-- **One semantic source:** generated targets share the matching and
-  deterministic encoding decisions, with cross-host conformance gates.
+## What it does
 
-**Experimental, private package, version 0.0.0.** The JS buffer APIs work.
-The default wire policy is the **valid preset** (P8.4, D260): any
-well-formed, valid CBOR (RFC 8949 §5.3) — indefinite lengths, non-shortest
-heads and floats, keys in any order — refusing duplicate keys by value,
-invalid UTF-8 and invalid content of the tags snug knows. `wire:
-'deterministic'` checks RFC 8949 §4.2.1 core deterministic encoding on read
-(for signing, hashing, dCBOR/CTAP2-style protocols); the **Bindle** preset
-(`wire: 'bindle'`) keeps the pre-P7.1 restrictions bit for bit — one optional
-consumer profile in the standalone design (D080), not snug's purpose. Encoders
-write deterministic bytes under every preset. See [profiles](docs/profiles.md)
-for every option.
+- **Validates CBOR against CDDL in one pass.** Wire-level checks and schema
+  matching happen in the same walk over the bytes. `validate` builds no
+  values; `decode` validates first, then builds them.
+- **Follows the RFCs.** Group matching follows RFC 8610 Appendix A (ordered
+  choice, greedy repetition, no backtracking), cuts follow §3.5.4, and
+  `.regexp` uses XSD regular expressions as §3.8.3 specifies. RFC 9165
+  controls (including `.abnf` and `.abnfb`) and RFC 9682 syntax are
+  supported. [Conformance](docs/conformance.md) lists every known deviation.
+- **Bounds the work.** Input size, depth, entries, items and a step budget
+  are all capped, and the budget counts operations, not time. Hostile schemas
+  and hostile data both stop at the limit instead of eating CPU or memory.
+- **Reads lazily.** A checked `View` or `Cursor` reads a few fields out of a
+  large message without decoding the rest.
+- **Works over more than buffers.** Validate from range-readable blobs (object
+  storage, files), push streams, streams of unknown length, and CBOR
+  sequences (RFC 8742), such as an event stream where each message is
+  checked and handed over as soon as its last byte arrives.
+- **Writes deterministic CBOR.** The encoder and the typed `Writer` always
+  emit RFC 8949 §4.2.1 deterministic encoding.
 
-### Can it read my protocol?
+## Quick start: JavaScript
 
-| Your data | Valid preset (default) | `wire: 'deterministic'` | `wire: 'bindle'` |
-| --- | --- | --- | --- |
-| Producer emits shortest forms, definite lengths, keys sorted by encoded bytes (RFC 8949 §4.2.1 / CDE) | yes | yes | yes |
-| Producer emits non-shortest heads or floats, indefinite lengths, unsorted or length-first-sorted keys | yes (read through a canonical copy; values in wire order) | no (`non_shortest`, `indefinite`, `key_order`) | no |
-| The same key twice, in the same or another encoding (`1` and `18 01`, `0.0` and `-0.0`) | no (`duplicate_key`, compared by value) | no | no |
-| Integer map keys at any depth (COSE, CWT `cnf` holding a COSE_Key) | yes (decodes to `Map`) | yes | no (`cose` admits safe integer labels in the top-level map only) |
-| Keys that are byte strings, arrays, maps, tags, floats, `null`... | yes | yes | no |
-| Tags 0 (RFC 3339 date/time text), 1 (epoch time), 24 (embedded CBOR), 32 (RFC 3986 URI-reference), 55799 | yes, content checked (`Tagged`, D252) | yes | no |
-| Tags 21–23 (conversion hints) | yes, any content (`Tagged`) | yes | no |
-| Other tags (16–18/96–98 COSE, 61 CWT, 5 bigfloat, 33–36, 1040, 64-bit numbers, ...) | yes, opaque: any valid content, its registered meaning unchecked (`Tagged`); `tags: 'standard'` refuses them | yes | no |
-| `undefined`, NaN, ±∞, −0, integral floats such as 1.0 | yes (any NaN; JS numbers keep no payload) | yes (NaN only as `f97e00`) | no |
-| Unicode noncharacters in text | yes | yes | no |
-| Unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) | yes (`Simple`, D284) | yes | no |
-| Bignums, decimal fractions (tag 4), typed arrays, ndarrays | yes (RFC 8949 / RFC 8746 rules) | yes, the same rules (D265) | yes, normalised forms only |
-
-Compiler `profile: 'full'` does not relax any wire restriction; it is a
-separate, schema-side restriction set.
-
-## Quick start
-
-No dependency installation is needed. From the repository:
+No install step and no dependencies. From a checkout:
 
 ```sh
 cd host/js
 node --input-type=module
 ```
 
-Paste this JavaScript (then EOF). Package self-reference works from `host/js`:
-
 ```js
-import { encode, decode } from 'snug';
+import { encode } from 'snug';
 import { compile } from 'snug/compile';
 import { view } from 'snug/view';
 
 const schema = await compile('message = { id: uint, text: tstr .size (0..80) }');
-const bytes = encode({ text: 'hello', id: 7 }, { maxBytes: 1024 });
+const bytes = encode({ id: 7, text: 'hello' });
 
-const result = schema.validate(bytes, 'message'); // { ok: true }, no value tree
-if (!result.ok) throw new Error(result.reason);
-const message = schema.decode(bytes, 'message'); // validated, then materialised
-console.log(message.id, decode(bytes).text);
-console.log(view(bytes, { schema, rule: 'message' }).get('id').number());
-console.log(decode(encode([1, 2]))); // any root by default (Bindle requires a map)
+schema.validate(bytes, 'message');   // { ok: true }, nothing decoded
+schema.decode(bytes, 'message');     // validated, then decoded
+view(bytes, { schema, rule: 'message' }).get('id').number();   // 7, read lazily
 ```
 
-Compile once and reuse the schema. Compilation is asynchronous at the public
-boundary because the compiler loads on the first call; the compile work
-itself is synchronous. All buffer operations are synchronous. There is no
-wasm initialisation step for the pure JS package.
-The returned Promise does not make compilation or Program verification
-background or cancellable work. See [startup and isolation](docs/guide.md#programs-caching-and-compatibility).
+Compile a schema once and reuse it. `compile` is async only because the
+compiler loads on first use; everything else is synchronous.
 
-Run the worked examples from the repository root:
+A refusal says what failed and where, without repeating the input:
+
+```js
+schema.validate(encode({ id: -1, text: 'hi' }), 'message');
+// { ok: false, reason: 'type', path: ['id'], offset: 4 }
+```
+
+More examples, runnable from the repository root:
 
 ```sh
-node examples/validate-hostile.mjs
-node examples/decode.mjs
-node examples/encode-writer.mjs
-node examples/view.mjs
-node examples/program-cache.mjs
-node examples/async-handle.mjs
-node examples/validate-handle.mjs
-node examples/session.mjs
-node examples/sequence-sse.mjs
+node examples/validate-hostile.mjs   # untrusted bytes, limits, safe errors
+node examples/view.mjs               # lazy field access
+node examples/encode-writer.mjs      # the typed Writer
+node examples/sequence-sse.mjs       # a CBOR-sequence event stream over fetch
+node examples/validate-handle.mjs    # range reads from a blob
+node examples/program-cache.mjs      # compile once, ship the compiled schema
 ```
 
-### Tagged unions: write a type choice of maps
+## Quick start: Rust
 
-snug applies RFC 8610's map cut literally (§3.5.4, D301). A `name:` key
-implies a cut, so the common "one map, group choice" spelling of a tagged
-union **rejects every alternative after the first**:
+The crate has no dependencies.
+
+```rust
+use snug::{CompileOptions, EncodeOptions, Schema, Scratch, Value, encode};
+
+let schema = Schema::compile("message = { id: uint }", &CompileOptions::default())?;
+let bytes = encode(
+    &Value::Map(vec![(Value::Text("id".into()), Value::Uint(7))]),
+    &EncodeOptions::default(),
+)?;
+schema.validate(&bytes, "message", &mut Scratch::new())?;
+```
+
+Async drivers for blobs, readers and sequences work with any runtime. See
+the [Rust guide](docs/rust.md) and the [crate README](host/rust/README.md).
+
+## Watch out for tagged unions
+
+RFC 8610 says a `name:` key carries a cut. Read literally, as snug does by
+default, the usual one-map spelling of a tagged union only ever matches its
+first branch:
 
 ```cddl
-; WRONG under the default: {"kind": "b", "y": "z"} is rejected
+; Doesn't work: {"kind": "b", "y": "z"} is rejected
 shape = { kind: "a", x: int // kind: "b", y: tstr }
 
-; RIGHT: a type choice of maps (each map is its own cut scope)
+; Works: a choice between two maps
 shape = { kind: "a", x: int } / { kind: "b", y: tstr }
 
-; RIGHT: one map with a cut-free `=>` discriminator, kept first
+; Also works: a discriminator without a cut
 shape = { "kind" => "a", x: int // "kind" => "b", y: tstr }
 ```
 
-The compiler flags the wrong spelling with warning W8 internally, but no
-public API returns it yet (JS `compile` and Rust `Schema::compile` drop
-it), so use the right forms rather than wait for a warning. For a schema
-you do not control, `cuts: 'branch'` restores the reading of the Ruby and
-Rust reference tools. Details:
-[guide](docs/guide.md#discriminated-unions-under-the-rfc-cut).
+If you need to accept schemas written for other CDDL tools, compile with
+`cuts: 'branch'` to get their behaviour. The
+[guide](docs/guide.md#discriminated-unions-under-the-rfc-cut) explains why.
 
-## Package layout and reproducibility
+## What it accepts
 
-`host/js/package.json` exports only these supported entry points, each with
-hand-written TypeScript declarations:
+By default snug reads any valid CBOR: indefinite lengths, non-shortest
+encodings, keys in any order, any tag. It still refuses what the RFC calls
+invalid, such as duplicate map keys (compared by value), malformed UTF-8 and
+bad content in tags it knows.
 
-| Entry | Exports |
+Two stricter presets:
+
+- `wire: 'deterministic'` also requires RFC 8949 §4.2.1 deterministic
+  encoding. Use it for signed or hashed data, and for protocols such as
+  dCBOR or CTAP2.
+- `wire: 'bindle'` is a narrow profile kept for one existing consumer.
+
+[Profiles](docs/profiles.md) covers every option and how CBOR maps to
+JavaScript values.
+
+Default limits: 1,500,000 bytes of input, depth 32, 65,536 entries per
+container, 131,072 items, and a validation budget of 2,250,000 steps. That
+budget covers about a megabyte of typical data with room to spare. Any limit
+can be lowered per call.
+
+## Entry points
+
+| Entry | For |
 | --- | --- |
-| `snug` | `decode`, `encode`, `Decimal`, `NDArray`, `Float16Bytes`, `Tagged`, `Simple`, `SnugFault`, `LIMITS`, `profiles` |
-| `snug/schema` | `Schema`, `Program`, `ProgramError`, `validate`, `decode`, `validateAt`, `fromProgram`, `fromSerialized` |
-| `snug/compile` | lazy asynchronous `compile`, `SchemaError` |
-| `snug/view` | `view`, `View`, `Cursor` |
-| `snug/writer` | `Writer` |
-| `snug/sources` | Sessions via `openSession(schema, rule, length, options?, scheduling?)` (replaces `Schema.session`); CDDL handle/push/stream validation, profile scanners, in-memory handles, `SourceError` |
-| `snug/sequence` | CBOR sequences (RFC 8742): `readSequence`, `sequenceReader`, `sessionLimits`, `releasePool` |
-| `snug/unicode` | optional Unicode 16.0 regexp category `tables` and provenance metadata; compile-time only |
-| `snug/controls` | the generic extension controls `.chars`, `.unique`, `.samelen` |
-| `snug/abnf` | optional `.abnf` / `.abnfb` controls (RFC 9165 §3, D334), `checkAbnf`; spread into `controls` at compile and load |
+| `snug` | `encode`, `decode` and the value types |
+| `snug/compile` | `compile`; loads the compiler on first use |
+| `snug/schema` | validating and decoding with a compiled schema; loading precompiled schemas |
+| `snug/view` | lazy, checked `View` and `Cursor` |
+| `snug/writer` | the typed `Writer` |
+| `snug/sources` | blobs, push sources and streams |
+| `snug/sequence` | CBOR sequences (RFC 8742) |
+| `snug/controls` | `.chars`, `.unique`, `.samelen`, and your own controls |
+| `snug/abnf` | optional `.abnf` / `.abnfb` support |
+| `snug/unicode` | optional Unicode tables for `\p{…}` in regular expressions |
 
-In a checkout, host code imports the committed `gen/js` tree by relative
-path. To produce a **self-contained private package**, run `npm run build`
-from `host/js`. It prints a new scratch directory containing package metadata,
-host sources, declarations, generated JS, the licence, notices, README and
-changelog, the user docs (guide, API, profiles, CDDL support, conformance,
-release policy) and the examples. Nothing else ships: no DEVLOG, SPEC,
-design documents or bench records (`PACKAGE_FILES` in
-`host/js/src/package-build.mjs`). In the staged docs, a link to one of those
-becomes plain text naming its path in the repository.
-An explicit destination is also supported:
+Gzipped, the codec alone is about 21 KB and validation about 54 KB. The
+compiler is a separate chunk of about 98 KB that loads only when you
+compile; if you ship precompiled schemas, it never loads.
 
-```sh
-npm run build -- /private/tmp/snug-local-package
-```
+Until snug is on npm, `npm run build` in `host/js` produces a self-contained
+package you can depend on from another project. The [guide](docs/guide.md)
+has the recipe, plus TypeScript, browser and Workers setup.
 
-An explicit destination must not exist, its parent must exist, and its
-resolved path must be beneath Node's `os.tmpdir()`, `/private/tmp/`, or
-`/tmp/`. Being gitignored or outside the repository alone is insufficient.
-With no destination, the build creates a fresh directory under `os.tmpdir()`.
-Set `TMPDIR` to an absolute project scratch path to stage inside the checkout.
-The build copies `gen/js`
-and rewrites generated import paths in the **staged copies only**. It does
-not regenerate kin, install dependencies or publish. Point a local package
-dependency/bundler at the staged directory; pin the repository revision that
-produced it. Deep imports into generated modules are blocked by `exports`.
-The compiler stays outside the static runtime import graph, including when
-`snug/compile` is imported; bundlers must preserve the dynamic import split.
+## Documentation
 
-Here is a complete local consumer recipe, from the repository root. It
-copies the package into a separate project without running an installer or
-using the network. Use fresh `staged` and `consumer` paths on a repeat run:
+- [Guide](docs/guide.md): how to use it
+- [API reference](docs/api.md)
+- [Rust guide](docs/rust.md)
+- [CDDL support](docs/cddl-support.md): what's supported and how it's read
+- [Profiles](docs/profiles.md): wire options and value mapping
+- [Conformance](docs/conformance.md): how snug lines up with each RFC
+- [Release policy](docs/release-policy.md): versioning and what counts as breaking
+- [Changelog](CHANGELOG.md)
 
-```sh
-mkdir -p .cache/docfix
-SNUG_DOCFIX="$(pwd)/.cache/docfix"
-git rev-parse HEAD > "$SNUG_DOCFIX/producing-revision.txt"
-git status --porcelain >> "$SNUG_DOCFIX/producing-revision.txt" # empty when clean
-(cd host/js && TMPDIR="$SNUG_DOCFIX" npm run build -- "$SNUG_DOCFIX/staged")
-mkdir -p "$SNUG_DOCFIX/consumer/node_modules"
-cp -R "$SNUG_DOCFIX/staged" "$SNUG_DOCFIX/consumer/node_modules/snug"
-cp "$SNUG_DOCFIX/producing-revision.txt" "$SNUG_DOCFIX/consumer/snug-revision.txt"
-cat > "$SNUG_DOCFIX/consumer/package.json" <<'JSON'
-{"private":true,"type":"module","dependencies":{"snug":"file:../staged"}}
-JSON
-cat > "$SNUG_DOCFIX/consumer/main.mjs" <<'JS'
-import { encode } from 'snug';
-import { compile } from 'snug/compile';
-const schema = await compile('message = { id: uint }');
-console.log(schema.decode(encode({ id: 7 }), 'message').id);
-JS
-(cd "$SNUG_DOCFIX/consumer" && node main.mjs) # 7
-```
+Design: [specification](SPEC.md), [architecture](docs/architecture.md),
+[Program format](docs/program.md).
 
-The `file:` dependency records the local source for a package manager; the
-copy above supplies it immediately. Retain the complete staged directory
-(including `generated/`), and adjust the relative `file:` path if relocating
-the project. Copying `host/js` alone is insufficient. Version `0.0.0` does
-not identify the producing revision; keep `snug-revision.txt`. The build
-does not check for uncommitted changes; the `git status` lines in that file
-list any, so build from a clean tree when provenance matters. No registry installation is promised.
-See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
-[browser/Worker bundling](docs/guide.md#browser-and-worker-recipes).
+## Security
 
-## Features and status
+Report vulnerabilities privately to contact+security@3sln.com.
 
-| Capability | Current state |
-| --- | --- |
-| CDDL rules, choices, groups, occurrences, generics, productive recursion | Implemented; exact supported subset in [CDDL support](docs/cddl-support.md) |
-| Prelude float widths (**changed 2026-11-11**) | `float16`/`float32`/`float64` are sets of values, as RFC 8610 §3.3 says, not encoded widths: `float32` matches a shortest-form 1.5 (encoded as float16), and `float64` matches every float (D328). Numeric controls compare across int and float exactly (`number .ge 0` compiles, D329) |
-| Direct schema validation of CBOR buffers | Implemented; strict profile fused with matching |
-| Codec, exact integers, decimals, typed arrays, ndarrays | Implemented in JS and Rust under the selected wire profile ([values](docs/profiles.md#javascript-values-d123)) |
-| Checked views, cursor, detached subtree validation | Implemented; owned by default, borrowing is an explicit lifetime contract |
-| Typed Writer, deterministic map ordering | Implemented in JS and Rust; failures are sticky |
-| Serialised Programs and runtime-only loading | Implemented; Program format 2.0 (D318; format 1.x Programs are refused, recompile them), digest plus structural verification |
-| Handles, push sources and streams | CDDL validation over known-length handles and push sources; streams of unknown length in drain mode (results equal the buffer's) with opt-in fail-fast (D085, D144–D147); JS, and Rust with sync and async drivers ([Rust guide](docs/rust.md#async-sources)) |
-| CBOR sequences (RFC 8742) | Implemented (P7.13, D210–D219): `readSequence` / `sequenceReader` in `snug/sequence`, `snug::read_sequence` / `Sequence` in Rust; one fused check per message (profile + optional schema rule), lazy Views without a re-scan, borrowed or assembled bytes, stop/skip policy; [guide](docs/guide.md#cbor-sequences-and-sse); wasm SDK `snug-wasm-sdk/sequence` (P7.13w) |
-| Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
-| Wire profiles | Valid preset (default, D260), deterministic preset (RFC 8949 §4.2.1) and Bindle preset, each with per-option overrides (P7.1, D120–D127); JS and Rust |
-| Extension controls | Implemented (P7.2, D140–D143): registered `.name` controls decided by pure host predicates; generic `.chars`, `.unique`, `.samelen` in `snug/controls` / `snug::controls`; [guide](docs/guide.md#custom-controls) |
-| `.abnf` / `.abnfb` (RFC 9165 §3) | Implemented (P9.14, D334) as an optional module: `snug/abnf`, `snug::abnf` / `Controls::with_abnf()`, wasm SDK `snug-wasm-sdk/abnf`; strict RFC 5234 + RFC 7405 + RFC 9165 §3 parsing by default (`abnf: 'lenient'` for snug's wider forms, D340), language membership by a metered Earley recognizer in kin; [CDDL support](docs/cddl-support.md#abnf-abnf-abnfb) |
-| Rust and wasm | Rust crate: compile, validate, codec, Writer, views, sync and async blob/stream/sequence drivers ([Rust guide](docs/rust.md), [crate README](host/rust/README.md)). wasm SDK (`snug-wasm-sdk`): experimental; no user documentation or build script yet (P9.15) |
-| Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
-| Bundle size | Gated per entry by `bb size` (owner decision D200; caps raised for PEG groups by D319). Whole entries, gzip-9, measured 2026-11-12 with esbuild 0.28.2: `snug` 21.4 KB, `snug/schema` 53.9 KB, `snug/sources` 67.3 KB, `snug/compile` 1.3 KB static plus a 97.8 KB compiler chunk loaded on first call. Tree-shaking lowers these (a `decode`-only bundle is ≈ 15 KB) |
+## License
 
-Documentation gate on **2026-11-03**, Node v24.6.0, revision `c15a722`
-plus the documentation worktree: `cd host/js && npm test` recorded
-**1,058 passed, 0 failed/skipped** ([P7.10 record](DEVLOG.md)).
-Earlier gate runs on **2026-11-03**, Node v24.6.0: P7.5 ran
-`cd host/js && npm test` with **996 passed, 0 failed/skipped**
-([record](DEVLOG.md#phase-7--standalone-library-d080-2026-11-03)); the later
-D113 run recorded **1,051 passed, 0 failed/skipped**
-([record](bench/WRITER.md#d113--array-elements-by-default-strict-arrays-opt-in--2026-11-03)).
-These are dated runs, not evergreen test totals. They include examples,
-staged-package execution, declaration syntax/export checks and Program
-corruption tests. Semantic TypeScript checking was unavailable in those runs;
-the onboarding section records separate consumer evidence. These runs do
-not establish fresh Rust/wasm, fuzz, drift or current browser/Worker coverage.
-Earlier evidence and remaining work are recorded in [DEVLOG](DEVLOG.md),
-with measurements and methods under [bench](bench/README.md).
-
-## Defaults and limits
-
-The wire profile defaults to the **valid preset**: any valid CBOR, any
-root, any map key kind, any tag number, RFC 8949 floats, `undefined` and
-noncharacters admitted; `{ wire: 'deterministic' }` additionally requires
-RFC 8949 §4.2.1 deterministic encoding. `{ wire: 'bindle' }` (or `...profiles.bindle`)
-restores the Bindle profile: a top-level map required by codec decode, views
-and profile sources, text keys only (safe integer labels in the top-level map
-under `cose: true`), Bindle tags and floats. Schema validation/decode default
-to any root under every preset. Decoded text-keyed maps have a null prototype; maps
-with other keys decode to `Map` ([values](docs/profiles.md#javascript-values-d123)).
-
-Default input cap: **1,500,000 bytes**, depth **32**, entries per container
-**65,536**, items **131,072**, bignum content **128 bytes**; compiled schemas
-default to a **2,250,000-unit validation budget**. Per-call schema limits can
-only lower compiled limits. Encoding enforces `maxBytes` **only when supplied,
-at finish**; it is not an allocation cap while writing. See the
-[guide](docs/guide.md#limits) for compile bounds and the remaining caveats.
-
-Read the [guide](docs/guide.md), [API reference](docs/api.md), [Rust guide](docs/rust.md),
-[CDDL support](docs/cddl-support.md), [profiles](docs/profiles.md),
-[specification](SPEC.md), [architecture](docs/architecture.md) and
-[Program format](docs/program.md). Licence: [MIT](LICENSE);
+[MIT](LICENSE). The bundled Unicode data is under the Unicode License v3; see
 [third-party notices](THIRD_PARTY_NOTICES.md).
-
-Versioning, what counts as a breaking change (APIs, error codes, the
-Program format, budget prices, defaults, CDDL semantics), supported
-runtimes and how a release is cut: [release policy](docs/release-policy.md)
-(proposed, D338). User-facing changes: [CHANGELOG](CHANGELOG.md). Nothing
-has been released.
