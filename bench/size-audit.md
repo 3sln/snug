@@ -4,8 +4,9 @@ The owner asked for an audit of every entry point for size reductions before
 release (D303). This file holds the measurements and the method; DEVLOG D341
 holds the decisions and P9.12 the checklist state.
 
-Measured on main `b0c6d6b` (the tree P9.12 started from; later commits on
-main before landing touched DEVLOG only). Apple M1 Pro, Node v24.6.0,
+§1, §2 and §3's first table were measured on main `b0c6d6b`, the tree
+P9.12 started from. §3a and §3b were measured on `9d98f72` plus this change
+(D340 had landed in between; it does not touch the wasm runtime module). Apple M1 Pro, Node v24.6.0,
 esbuild 0.28.2, gzip -9, brotli quality 11. Rust: Homebrew rustc 1.92.0 for
 native builds; the wasm modules use `kin/scripts/wasm-build` (nightly
 2026-09-16, `-Zbuild-std`, `panic=immediate-abort`).
@@ -107,7 +108,7 @@ the async drivers) is thin loops over the sans-IO cores (D335).
 
 `kin/scripts/wasm-build <mode>`; bytes / gzip -9 / brotli 11:
 
-| module | opt-level 3 (shipped default) | "s" | "z" |
+| module | opt-level 3 (the default before D341) | "s" | "z" |
 | --- | ---: | ---: | ---: |
 | SDK runtime (`sdk`) | 350,573 / 135,876 / 111,236 | 262,030 / 106,372 / 89,652 | 243,411 / 100,785 / 85,875 |
 | compiler (`cc`) | 348,920 / 111,314 / 91,667 | 267,326 / 90,880 / 77,460 | 174,005 / 70,554 / 61,921 |
@@ -138,6 +139,70 @@ median per compile (this includes loading the result into the runtime
 module): opt-level 3 0.245 ms, "s" 0.278 ms (1.13×), "z" 0.396 ms (1.62×).
 Compiling and instantiating each module in a fresh process takes 0.8–1.4 ms
 for every profile (V8 compiles lazily).
+
+### 3a. What ships after the audit (D341)
+
+The coordinator kept the runtime at opt-level 3 because the SDK exists for
+speed (D130), so the "s"/"z" rows above are not taken. Two speed-neutral
+levers were checked:
+* No `core::fmt` or panic code is left. The name section has no `fmt` or
+  `panic` symbol (`panic=immediate-abort`).
+* `lto = true` and `codegen-units = 1` were already on.
+
+binaryen's `wasm-opt` (npm `binaryen` 132.0.0, run by Node, pinned in
+`bench/compare`) is new. `kin/scripts/wasm-build sdk | cc` now write the
+shipped modules to `.cache/snug-wasm-{sdk,cc}/snug.wasm`:
+
+| module | build | bytes | gzip -9 | brotli 11 |
+| --- | --- | ---: | ---: | ---: |
+| SDK runtime | opt-level 3 (before) | 350,573 | 135,876 | 111,236 |
+| SDK runtime | opt-level 3 + `wasm-opt -O3 --strip-debug --strip-producers` | **325,264** | **131,847** | **108,824** |
+| compiler | opt-level 3 (before) | 348,920 | 111,314 | 91,667 |
+| compiler | opt-level "z" | 174,005 | 70,554 | 61,921 |
+| compiler | opt-level "z" + `wasm-opt -Oz` | **151,007** | **68,008** | **60,645** |
+
+Speed of the shipped runtime against plain opt-level 3, from d005 `--quick`,
+five interleaved rounds per module, each row's wasm/native ratio taken as
+the median of five, 58 rows:
+
+| group | validate | view | sources | decode | scan | encode | refusals | boundary | geomean | worst row |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `wasm-opt -O3` / opt-level 3 | 0.97 | 0.99 | 0.98 | 1.02 | 1.02 | 0.96 | 0.96 | 1.03 | 0.987 | 1.13 (codec decode, 1 MiB typed arrays) |
+
+A focused re-run of the copy-bound 1 MiB rows (five rounds each, raw wasm
+time) gave 0.96–1.10×, with validate at 0.96–0.98×. The compiler, warm,
+over the six corpus contracts, 15 rounds, against opt-level 3: "z" is
+1.62× and "z" + `-Oz` about 1.4×.
+
+`bb wasm-size` (`tools/size/wasm-size.mjs`, release set) builds both
+modules and checks them against `tools/size/budget.json` `wasm`, at
+ceil(measured × 1.02). It measures gzip with Node's zlib at level 9, as
+`bb size` does, which gives slightly different numbers from the `gzip` CLI
+used in the tables here:
+* SDK runtime: 325,264 B / 131,831 gzip, capped at 331,770 / 134,468;
+* compiler: 151,007 / 68,697, capped at 154,028 / 70,071.
+
+### 3b. How the runtime module grew since P7.9
+
+Each milestone commit was built with its own `kin/scripts/wasm-build sdk`
+(opt-level 3, no `wasm-opt`, the same nightly). The `c37eaaf` build
+reproduces P7.9's recorded 226,331 B exactly. Bytes / gzip -9 (CLI):
+
+| commit | milestone | bytes | gzip | growth (gzip) |
+| --- | --- | ---: | ---: | ---: |
+| `c37eaaf` | P7.9 (D005 re-take) | 226,331 | 83,279 | |
+| `d8baee9` | P7.9 follow-up: the SDK level with the native API | 254,027 | 93,563 | +10,284 |
+| `88263f1` | P7.9c: metered extension controls | 267,062 | 98,623 | +5,060 |
+| `c48ac45` | P7.10–P7.13, P8.1–P8.3, P7.13w | 269,042 | 99,367 | +744 |
+| `3c10a83` | P8.4 valid CBOR | 319,992 | 122,995 | +23,628 |
+| `cfbdda3` | D286 A1 | 320,084 | 122,998 | +3 |
+| `920a3e1` | P8.5 PEG groups | 343,384 | 132,827 | +9,829 |
+| `3715bdd` | D286 B–D, D322–D324 | 346,656 | 134,198 | +1,371 |
+| `0d52521` | D325 | 346,866 | 134,276 | +78 |
+| `74b903f` | P9.2 | 347,478 | 134,645 | +369 |
+| `2c3c8f1` | P9.3, P9.4 | 348,237 | 134,906 | +261 |
+| `b5e9dd2` | P9.5–P9.7 | 350,571 | 135,869 | +963 |
+| `9d98f72` | P9.14, D340 | 350,573 | 135,876 | +7 |
 
 ## 4. Coverage of retained code
 

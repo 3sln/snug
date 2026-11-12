@@ -6431,107 +6431,148 @@ an RFC-strict tool, and rule-first had no second implementation behind it.
   rule (spec is the default; other forms are options). The four
   RFC-sanctioned forms that stay on in both modes are each cited.
 
-### D341 — Binary-size audit before release: what was measured, what is cut, what needs a decision (P9.12 = P8.7; D303)
-**Decision** (P9.12 engineer, provisional): the audit covered every JS
-entry, the Rust crate (consumer binaries) and both wasm modules. The
-measurements and method are in
-[bench/size-audit.md](bench/size-audit.md), taken on main `b0c6d6b`. The
-audit found **no cut that is both free of behaviour change and worth
-landing in the JS bundles or the Rust crate**. The material reductions all
-trade something: public API, a safety net or speed. They are listed below
-for a decision, and no code or cap changes with this entry. The threshold
-for "worth landing" this late before the RC was at least about 1 KB min or
-0.5% of an entry's gzip, with no risk to the identity gates.
+### D341 — Binary-size audit before release: wasm-opt on both SDK modules, the compiler module at opt-level "z", a wasm size gate; the JS cuts, verifier and others deferred (P9.12 = P8.7; D303)
+**Decision** (P9.12 engineer; the manager decided the items on 2026-11-12,
+with the coordinator's correction on item 1): the audit covered every JS
+entry, the Rust crate (consumer binaries) and both wasm modules.
+Measurements and method: [bench/size-audit.md](bench/size-audit.md),
+taken on main `b0c6d6b` (the wasm figures on `9d98f72`).
+* **Landed:**
+  * The wasm SDK's shipped modules go through binaryen's `wasm-opt`.
+  * The compiler module is built at opt-level "z".
+  * A wasm size gate, `bb wasm-size`, joins the release set.
+* **Not landed:** no JS or Rust code changed. No behaviour-free cut there
+  cleared the threshold, which was at least about 1 KB min or 0.5% of an
+  entry's gzip, with no risk to the identity gates. The JS caps are
+  unchanged.
 
-Candidates, ranked by the bytes at stake:
+**Landed.** The modules are built by `kin/scripts/wasm-build sdk | cc`, with
+the nightly pinned and binaryen 132.0.0 pinned in `bench/compare`. They are
+written to `.cache/snug-wasm-{sdk,cc}/snug.wasm`, which is what the SDK
+loads. Without `wasm-opt` the build answers SKIP. Sizes are bytes / gzip -9
+(CLI):
 
-1. **wasm SDK runtime module at opt-level "s"** (needs a decision; it
-   reverses P7.9's opt-level 3 default). 350,573 → 262,030 B (−25%), gzip
-   135,876 → 106,372 (−22%). The cost is 1.06× geomean over d005's 58 rows
-   (validate 1.07×, view 1.12×, worst row 1.46×). At "z" it is −31% / −26%
-   gzip for 1.07× geomean, but validate is 1.18×. Behaviour is identical
-   (same source, same tests). *Recommendation:* "s".
-2. **wasm compiler module at opt-level "z"** (needs a decision). 348,920 →
-   174,005 B (−50%), gzip 111,314 → 70,554 (−37%). Compiling is 1.62×
-   slower warm (0.245 → 0.396 ms for each corpus contract). It is a
-   one-off per schema, and the fetch saved is larger than the time lost.
-   *Recommendation:* "z".
-3. **The verifier outside the bundles that never load a foreign Program**
-   (D319's largest item; needs an API decision). It is 27,079 B min / 9,311
-   gzip / 7,666 brotli in every entry holding `snug/schema` (17% of its
-   gzip), 48 KB of text in a Rust load-and-validate binary, and 46 KB of
-   wasm code. A synchronous `new Program(P, B)` / `fromSerialized` must
-   verify, so `snug/schema` keeps it whatever is done. The one design that
-   keeps the synchronous API and still saves bytes is a compile-only path:
-   Programs made by `compile()` in the same process are trusted and loaded
-   without `program/verify` (`snug/compile` full −27,420 min / −8,853 gzip
-   when the application does not also import `snug/schema`'s loaders). That
-   needs a new entry or class split. It also removes the check that catches
-   a compiler bug at load (compile-test still verifies every corpus
-   Program). *Recommendation:* defer past the RC. A table-driven rewrite of
-   the verifier (estimated 15–30% of it) is also deferred: every
-   corruption must keep its first refusal (word, check) for the
-   compile2-test gate, so the risk is high this late.
-4. **The full `snug/compile` entry (97.8 KB gzip).** About half of it is
-   `snug/schema` (the compiled Program is loaded and verified). The
-   compiler proper is about 143 KB min, roughly 44 KB gzip over an
-   application that already holds the runtime. No single compiler module
-   is removable. Loading `.regexp`/`.pcre` (`compile/regexp` + `glush`,
-   15.3 KB min) as a further lazy chunk would cut transfer only for schemas
-   without them. The `full` gate would not move, and kin's static imports
-   would need a host hook. *Deferred* (transfer-only, invasive).
-5. **D285's rejected cuts, re-checked after P8.5.** They are still
-   rejected for the same reasons. A lazy or separate `vcopy` would need an
-   await, and synchronous `validate` cannot have one. The refusal replay is
-   D280. A deterministic-only scanner duplicates the walk. Dropping the
-   VM's deterministic attempt costs 2.3–6.9× (D286). P8.5 changed the
-   group machines, not the canonical path.
-6. **Forced-tier support** (D319's question): a handful of `forced` tests
-   in `vm-array`, `vm-map`, `vm-eval`, `vm-session-*`, under 100 B min in
-   all. The forced-tier gate (C8, vm-test) needs it. Not cut. The legacy
-   budget schedule 1 is likewise still the forced generic path's (D254).
-7. **Duplicated code across kin units and host modules.** 14 alpha-
-   equivalent groups, 1.4 KB min in `all-runtime` (0.5%), and 31 groups /
-   2.7 KB min over everything including the compiler. Examples: twelve
-   one-line state accessors, `bytesInput` in two host modules (235 B), three
-   unsigned 64-bit compares (207 B), a second merge sort in the compiler
-   (386 B). gzip and brotli already fold most of this. *Not done*: below the
-   threshold, and each merge touches generated JS and Rust during the RC
-   landings.
-8. **Error-message strings.** 4.3 KB (2.9%) of `snug/schema`. They are
-   public behaviour (messages, option names). Not cut.
-9. **Generated-code patterns.** There are no large constant tables in any
-   runtime entry. kin's `x >>> n | 0` on an already-small int costs about
-   370 B min in `all-runtime`. That is kin's emitter, outside this
-   repository ("Found in kin" below).
-10. **Rust crate.** No monomorphization bloat: one closure appears twice,
-    and the generated code is not generic. Per-binary costs are in
-    bench/size-audit.md §2. Nothing to cut.
-11. **The reference-map-choice gap** (about 1.34× slower than before PEG) is
-    speed, not size. Noted only; it is left to the performance work
-    (discriminator-first dispatch, parked).
-12. **No gate on the wasm modules.** The SDK runtime module grew from
-    83,419 gzip (P7.9) to 135,876 (+63%) with nothing watching it. *Proposal*
-    (needs a decision, since the gate needs the nightly toolchain): give
-    `bb size` or `wasm-sdk-test` a wasm cap at measured + 2%, with a loud
-    SKIP when the toolchain is missing.
-13. **Dead code, by coverage.** The gates were run under
-    `NODE_V8_COVERAGE`. 116 of 1,954 functions were never called, but every
-    one that a bundle keeps has a call site, so none is dead. They are
-    paths the gates do not reach. The list (bench/size-audit.md §4) goes to
-    P9.13's reviewer as a coverage observation.
+| module | before (opt-level 3) | after | change |
+| --- | ---: | ---: | ---: |
+| SDK runtime: opt-level 3 + `wasm-opt -O3 --strip-debug --strip-producers` | 350,573 / 135,876 | 325,264 / 131,847 | −7.2% / −3.0% |
+| compiler: opt-level "z" + `wasm-opt -Oz` | 348,920 / 111,314 | 151,007 / 68,008 | −56.7% / −38.9% |
 
-**Caps:** unchanged. No entry shrank: on `b0c6d6b` every entry's gzip
-headroom was 0.0–2.1%, as the D-entries set it. D340 later re-set the
-`snug/abnf` caps.
-**Why**: the JS entries are close to the floor for what they do. What
-remains is either behaviour, a public-API shape, a gate's test mode, or
-compression-neutral repetition. The real byte wins are the wasm build
-profiles and the verifier's placement, and those are trade-offs for the
-manager and the owner.
-**Alternatives**: landing the micro-merges of item 7 anyway (−0.5% min,
-less in gzip, for generated-code churn during the RC); landing items 1–2
-without a decision (each reverses a recorded default and costs speed).
+Speed was measured with d005 (`bench/d005-node.mjs --quick`), five
+interleaved rounds per module. Each row's wasm/native ratio is taken, the
+median of five, and compared with plain opt-level 3, over 58 rows:
+
+* The **SDK runtime** after `wasm-opt -O3` has a geomean of 0.987×.
+  * By group: validate 0.97×, view 0.99×, sources 0.98×, decode 1.02×,
+    scan 1.02×, encode 0.96×.
+  * The worst row was 1.13× (codec decode of 1 MiB typed arrays). A
+    focused five-round re-run of the copy-bound 1 MiB rows gave 0.96–1.10×,
+    and validate stayed at 0.96–0.98×.
+* The **compiler** at "z" compiles 1.62× slower warm than opt-level 3 (six
+  corpus contracts, 15 rounds, each compile including the load into the
+  runtime). With `wasm-opt -Oz` it is about 1.4×.
+
+**The +63% growth of the SDK runtime since P7.9, which nobody noticed.**
+It is the module built at each milestone with that commit's own
+`kin/scripts/wasm-build sdk` (opt-level 3, no `wasm-opt`). Bytes / gzip -9
+(CLI):
+
+| commit | milestone | module | growth |
+| --- | --- | ---: | ---: |
+| `c37eaaf` | P7.9: D005 re-take (D130) | 226,331 / 83,279 | |
+| `d8baee9` | P7.9 follow-up: SDK level with the native API (profile flags, extension controls, Unicode tables, unknown-length sessions, openSession; D160, D170–D176) | 254,027 / 93,563 | +27,696 / +10,284 |
+| `88263f1` | P7.9c: metered extension controls (D190–D193) | 267,062 / 98,623 | +13,035 / +5,060 |
+| `c48ac45` | P7.10–P7.13, P8.1–P8.3, wasm sequences (P7.13w) | 269,042 / 99,367 | +1,980 / +744 |
+| `3c10a83` | **P8.4 valid CBOR** (D260–D286: valid scanner walk, canonical copy and replay, session valid machinery) | 319,992 / 122,995 | **+50,950 / +23,628** |
+| `cfbdda3` | D286 A1 | 320,084 / 122,998 | +92 / +3 |
+| `920a3e1` | **P8.5 PEG groups** (D290–D321: map/array machines, arena, format 2.0 verifier) | 343,384 / 132,827 | **+23,300 / +9,829** |
+| `3715bdd` | D286 B–D, D322–D324 | 346,656 / 134,198 | +3,272 / +1,371 |
+| `0d52521` | D325 | 346,866 / 134,276 | +210 / +78 |
+| `74b903f` | P9.2 (D328–D330) | 347,478 / 134,645 | +612 / +369 |
+| `2c3c8f1` | P9.3, P9.4 (D336, D337) | 348,237 / 134,906 | +759 / +261 |
+| `b5e9dd2` | P9.5–P9.7 (D327 pooling, sans-IO drivers) | 350,571 / 135,869 | +2,334 / +963 |
+| `9d98f72` | P9.14, D340 (the module is unchanged) | 350,573 / 135,876 | +2 / +7 |
+
+In all it grew +124,242 B / +52,597 gzip (+55% / +63%). P8.4 is 45% of
+that and P8.5 19%. P7.9's own follow-ups, which brought the SDK level with
+the native API, are 29%. The JS caps recorded each step (D285, D319, D322,
+D333). The wasm module had no gate, so its share went unrecorded. The new
+gate closes that.
+
+**`bb wasm-size`** (`tools/size/wasm-size.mjs`) builds both modules and
+checks bytes and gzip (Node zlib level 9, as `bb size`) against
+`tools/size/budget.json` `wasm`. The caps are ceil(measured × 1.02):
+* SDK runtime: 331,770 B, 134,468 gzip;
+* compiler: 154,028 B, 70,071 gzip.
+
+Without the nightly or `wasm-opt` it prints SKIP, which fails the release
+set. It is in `ci/gate-map.edn` (release set) and in the watchdog's
+DEFAULTS (3600 s wall / 7200 s CPU).
+
+**Considered and not done:**
+1. **The SDK runtime at opt-level "s" or "z"** (−22% / −26% gzip; 1.06× /
+   1.07× geomean, validate 1.07× / 1.18×). Rejected by the coordinator: the
+   SDK exists for speed (D130), so the runtime stays at opt-level 3. Two
+   other speed-neutral levers were checked:
+   * No `core::fmt` or panic machinery is left in the module: the name
+     section has no `fmt` or `panic` symbol, under
+     `panic=immediate-abort`.
+   * `lto = true` (fat) and `codegen-units = 1` were already on.
+2. **The verifier: deferred past the RC.** The load-time check stays for
+   every Program. It is 27,079 B min / 9,311 gzip / 7,666 brotli in every
+   entry that holds `snug/schema` (17% of its gzip), about 48 KB of text in
+   a Rust load-and-validate binary, and about 46 KB of wasm code. Two
+   options for after the RC:
+   * a compile-only path that trusts Programs compiled in the same process
+     and leaves out `program/verify`. That saves 27,420 min / 8,853 gzip
+     from `snug/compile` full, when the application does not also load
+     Programs. It needs a new entry or class split, and it drops the
+     load-time check that would catch a compiler bug;
+   * a table-driven rewrite of the verifier. It would save an estimated
+     15–30% of the verifier, but every corruption must keep its first
+     refusal (word, check), as compile2-test requires.
+3. **The full `snug/compile` entry (97.8 KB gzip): deferred.** About half of
+   it is `snug/schema`; the compiler itself is about 143 KB min, roughly
+   44 KB gzip over the runtime. Lazy-loading `.regexp`/`.pcre` (15.3 KB
+   min) would cut transfer only, not the full-closure gate, and kin's
+   static imports would need a host hook.
+4. **D285's rejected cuts, re-checked after P8.5:** they stand.
+   * A lazy `vcopy` would need an await in synchronous `validate`.
+   * The replay is D280.
+   * A deterministic-only scanner duplicates the walk.
+   * Dropping the attempt costs 2.3–6.9× (D286).
+5. **Forced-tier support:** under 100 B. The C8 gate needs it, and budget
+   schedule 1 is the forced generic path's (D254). Kept.
+6. **Duplicated code: deferred.** It is 1.4 KB min in `all-runtime` (0.5%),
+   and gzip folds most of it. Merging touches generated JS and Rust during
+   the RC.
+7. **Error strings (4.3 KB, 2.9% of `snug/schema`):** public behaviour.
+   Kept.
+8. **kin's `x >>> n | 0`** (about 370 B min): kin's emitter. Recorded under
+   "Found in kin".
+9. **Rust crate:** no monomorphization bloat. Nothing to cut.
+10. **The reference-map-choice gap** (about 1.34×): speed, not size. Left
+    to the performance work.
+11. **Coverage:** 116 of 1,954 functions are never called by the gates.
+    Every one that a bundle keeps has a call site, so none is dead. The list
+    (bench/size-audit.md §4) goes to P9.13's reviewer.
+
+**Why:**
+* `wasm-opt -O3` cuts the shipped runtime 7% at the same speed.
+* Compiling is a one-off per schema, so the compiler module takes the
+  smallest build.
+* The JS entries are close to the floor for what they do. What is left
+  there is behaviour, a public-API shape, a gate's test mode, or repetition
+  that compression already folds.
+* The real finding is that the wasm module grew 63% with nothing watching
+  it. A gate fixes that.
+
+**Alternatives:**
+* the runtime at "s" (rejected, see 1);
+* `wasm-opt` left out of the build to avoid the new tool dependency (it
+  costs 7% of the runtime and 13% of the compiler module, and binaryen is
+  pinned beside esbuild, offline once installed);
+* a wasm cap inside `bb size` (it would make every `bb size` need the
+  nightly).
 - [ ] **Signed off** (manager)
 
 ## Findings
@@ -9544,17 +9585,26 @@ can run alongside them; its build work is post-RC unless it is cheap.
     locally only.
 
 **Last**
-- [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
+- [x] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
   after the code above is settled.
-  *Phase 1 done 2026-11-12 (D341; measurements in bench/size-audit.md):*
-  every JS entry, Rust consumer binaries and both wasm modules were
-  measured and attributed. No behaviour-free JS or Rust cut cleared the
-  threshold, so no code and no cap changed. The candidates needing a
-  decision went to the manager: the wasm runtime module at opt-level "s"
-  (−22% gzip, 1.06× slower), the wasm compiler module at "z" (−37% gzip,
-  1.62× slower compile), the verifier's placement (17% of `snug/schema`
-  gzip; needs an API change) and a wasm size gate. Not ticked until those
-  are decided or deferred.
+  *Done 2026-11-12 (D341; bench/size-audit.md):* every JS entry, Rust
+  consumer binaries and both wasm modules were measured and attributed.
+  - Landed:
+    - the SDK runtime module with `wasm-opt -O3` (−7.2% bytes, −3.0% gzip,
+      validate 0.97×);
+    - the compiler module at opt-level "z" with `wasm-opt -Oz` (−57% bytes,
+      −39% gzip);
+    - the gate `bb wasm-size` (release set).
+  - Deferred, with reasons in D341: the verifier's placement, the compile
+    entry, the duplicated code and the JS caps (unchanged).
+  - The SDK runtime's +63% growth since P7.9 is attributed by phase in
+    D341.
+  - **For P9.13:** bench/size-audit.md §4 lists the functions the gates
+    never call (coverage gaps, none dead).
+  - Gates on this tree (before the final rebase): `bb gates land wasm-size`
+    all ok. That covers check, drift, size, npm-test, rust-api-test,
+    wasm-sdk-test (no SKIP; parity on the new modules), vm-test,
+    compile-test and wasm-size.
 - [ ] **P9.13 — Final independent whole-library review** of the code,
   spec, docs and gates by a reviewer who did not build it. Blocking
   findings are fixed before the RC is declared.
