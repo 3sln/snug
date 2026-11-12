@@ -38,11 +38,11 @@
         "brotli": 1227
       },
       "full": {
-        "min": 284322,
+        "min": 290426,
         "gzip": 99313,
         "brotli": 84682
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Full gzip and brotli: D333 (P9.2, coordinator under D303) -- numeric controls across int and float and .cat/.det text with bytes (kin/compile/ctl.kin, D329/D330), float widths by value (kin/vm-eval.kin, D328); measured on p92-rfc over main 5a1bb84."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Full gzip and brotli: D333 (P9.2, coordinator under D303) -- numeric controls across int and float and .cat/.det text with bytes (kin/compile/ctl.kin, D329/D330), float widths by value (kin/vm-eval.kin, D328); measured on p92-rfc over main 5a1bb84. Full min: D336 (P9.3, D303 rule of thumb) -- RFC 9682 #7 head numbers (kin/compile/lower.kin head7, lower-head7; kin/compile/parse.kin), +632 B; measured on p93-heads over main 74b903f."
     },
     "snug/view": {
       "static": {

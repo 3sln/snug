@@ -268,9 +268,11 @@ export function mkMajor(h, m) {
     return stageIntern(h);
 }
 
-export function mkSimple(h, v) {
+export function mkSimpleRange(h, lo, hi) {
+    // The simple values lo..hi (P9.3: both in 0..23 or both in 32..255).
     stage(h, K_SIMPLE, 0);
-    stageD(h, 0, v);
+    stageD(h, 0, lo);
+    stageD(h, 1, hi);
     return stageIntern(h);
 }
 
@@ -1296,11 +1298,8 @@ export function leavesOverlap(h, a, b) {
         }
         return false;
     }
-    if (((ka === K_TEXT) && (kb === K_TEXT)) || ((ka === K_BYTES) && (kb === K_BYTES))) {
+    if ((ka === kb) && (((ka === K_TEXT) || (ka === K_BYTES)) || (ka === K_SIMPLE))) {
         return (ld(h, a, 0) <= ld(h, b, 1)) && (ld(h, b, 0) <= ld(h, a, 1));
-    }
-    if ((ka === K_SIMPLE) && (kb === K_SIMPLE)) {
-        return ld(h, a, 0) === ld(h, b, 0);
     }
     if ((ka === K_TAG) && (kb === K_TAG)) {
         return (ld(h, a, 0) === ld(h, b, 0)) && (ld(h, a, 1) === ld(h, b, 1));

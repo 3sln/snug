@@ -222,9 +222,11 @@ pub fn mk_major(h: &mut [i32], m: i32) -> i32 {
     stage_d(h, 0, m);
     return stage_intern(h);
 }
-pub fn mk_simple(h: &mut [i32], v: i32) -> i32 {
+pub fn mk_simple_range(h: &mut [i32], lo: i32, hi: i32) -> i32 {
+    // The simple values lo..hi (P9.3: both in 0..23 or both in 32..255).
     stage(h, K_SIMPLE, 0);
-    stage_d(h, 0, v);
+    stage_d(h, 0, lo);
+    stage_d(h, 1, hi);
     return stage_intern(h);
 }
 pub fn mk_lit(h: &mut [i32], bid: i32) -> i32 {
@@ -1210,11 +1212,8 @@ pub fn leaves_overlap(h: &mut [i32], a: i32, b: i32) -> bool {
         }
         return false;
     }
-    if ((ka == K_TEXT) && (kb == K_TEXT)) || ((ka == K_BYTES) && (kb == K_BYTES)) {
+    if (ka == kb) && (((ka == K_TEXT) || (ka == K_BYTES)) || (ka == K_SIMPLE)) {
         return (ld(h, a, 0) <= ld(h, b, 1)) && (ld(h, b, 0) <= ld(h, a, 1));
-    }
-    if (ka == K_SIMPLE) && (kb == K_SIMPLE) {
-        return ld(h, a, 0) == ld(h, b, 0);
     }
     if (ka == K_TAG) && (kb == K_TAG) {
         return (ld(h, a, 0) == ld(h, b, 0)) && (ld(h, a, 1) == ld(h, b, 1));

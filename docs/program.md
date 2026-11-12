@@ -168,10 +168,10 @@ match whole classes and a prefilter for the rest.
 | 4 | `0x010` | major 4 (array) |
 | 5 | `0x020` | major 5 (map) |
 | 6 | `0x040` | major 6, tag number ∉ {2, 3} |
-| 7 | `0x080` | major 7, ai < 24 (false, true, null — the profile refuses other simple values) |
-| 8 | `0x100` | float16 (ai 25) |
-| 9 | `0x200` | float32 (ai 26) |
-| 10 | `0x400` | float64 (ai 27) |
+| 7 | `0x080` | major 7, ai ≤ 24: a simple value (D284) |
+| 8 | `0x100` | a float whose value binary16 represents exactly, in any encoded width (D328) |
+| 9 | `0x200` | a float whose value binary32 represents exactly (D328) |
+| 10 | `0x400` | any float (D328); a float item has every width bit its value allows |
 | 11 | `0x800` | major 6, tag 2 or 3 (bignum) |
 
 `ALL = 0xfff`.
@@ -184,7 +184,7 @@ match whole classes and a prefilter for the rest.
 | 2 | `MAJOR` | 0 | major 0..7 | | | | | 0→`001` 1→`002` 2→`004` 3→`008` 4→`010` 5→`020` 6→`840` 7→`780` | majors 4, 5, 6: `TS_ANY` |
 | 3 | `INT` | bit 0 `BIGOK` | first interval id | interval count ≥ 1 | | | | bit 0 if an interval meets POS, bit 1 if one meets NEG, bit 11 if `BIGOK` and one meets NEG_BIG or POS_BIG | none |
 | 4 | `FLOAT` | bits 0–2: f16, f32, f64 allowed (≠ 0) | first finterval id | count (0 = unbounded) | | | | `flags << 8` | none |
-| 5 | `SIMPLE` | 0 | v (0..23) | | | | | `080` | none |
+| 5 | `SIMPLE` | 0 | lo | hi (lo ≤ hi; both in 0..23 or both in 32..255, D336) | | | | `080` | none |
 | 6 | `LIT` | 0 | byte offset of the encoding | length ≥ 1 | | | | class of the encoding | none |
 | 7 | `LITSET` | 0 | first litref id | count ≥ 2 | | | | the members' common class | none |
 | 8 | `TEXT` | 0 | size lo (bytes) | size hi (INF) | regexp id or −1 | | | `008` | none |

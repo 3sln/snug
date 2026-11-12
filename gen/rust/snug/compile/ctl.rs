@@ -1002,13 +1002,7 @@ pub(crate) fn meet(h: &mut [i32], a: i32, b: i32) -> i32 {
         vpush1(h, T_STK, nf);
         return 0;
     }
-    if (ka == K_SIMPLE) && (kb == K_SIMPLE) {
-        if ld(h, a, 0) == ld(h, b, 0) {
-            vpush1(h, T_STK, a);
-        }
-        return 0;
-    }
-    if ((ka == K_TEXT) && (kb == K_TEXT)) || ((ka == K_BYTES) && (kb == K_BYTES)) {
+    if (ka == kb) && (((ka == K_TEXT) || (ka == K_BYTES)) || (ka == K_SIMPLE)) {
         let mut lo: i32 = ld(h, a, 0);
         let mut hi: i32 = ld(h, a, 1);
         if ld(h, b, 0) > lo {
@@ -1018,6 +1012,11 @@ pub(crate) fn meet(h: &mut [i32], a: i32, b: i32) -> i32 {
             hi = ld(h, b, 1);
         }
         if lo > hi {
+            return 0;
+        }
+        if ka == K_SIMPLE {
+            let ns: i32 = mk_simple_range(h, lo, hi);
+            vpush1(h, T_STK, ns);
             return 0;
         }
         let xa: i32 = ld(h, a, 2);

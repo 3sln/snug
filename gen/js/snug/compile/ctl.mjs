@@ -3,7 +3,7 @@
 
 import { ERR_CONTROL_TARGET, ERR_CONTROL_VALUE, ERR_LIM_POOL, ERR_UNSUPPORTED_CONTROL, H_LIM_POOL, H_R0, H_R1, H_R2, H_R3, INF, T_FIV, T_IV, T_IVA, T_IVB, T_IVC, T_LST, T_STK, T_TMP2, charge, erred, fail, hg, hs, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
 import { bidByte, bidLen, encString, intern, magAdd, magAdd1, magCmp, magFrom64, magSub } from './bytes.mjs';
-import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
+import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
 import { rxCompile } from './regexp.mjs';
 
 export function singleLeaf(h, ts) {
@@ -1020,13 +1020,7 @@ export function meet(h, a, b) {
         vpush1(h, T_STK, nf);
         return 0;
     }
-    if ((ka === K_SIMPLE) && (kb === K_SIMPLE)) {
-        if (ld(h, a, 0) === ld(h, b, 0)) {
-            vpush1(h, T_STK, a);
-        }
-        return 0;
-    }
-    if (((ka === K_TEXT) && (kb === K_TEXT)) || ((ka === K_BYTES) && (kb === K_BYTES))) {
+    if ((ka === kb) && (((ka === K_TEXT) || (ka === K_BYTES)) || (ka === K_SIMPLE))) {
         let lo = ld(h, a, 0);
         let hi = ld(h, a, 1);
         if (ld(h, b, 0) > lo) {
@@ -1036,6 +1030,11 @@ export function meet(h, a, b) {
             hi = ld(h, b, 1);
         }
         if (lo > hi) {
+            return 0;
+        }
+        if (ka === K_SIMPLE) {
+            const ns = mkSimpleRange(h, lo, hi);
+            vpush1(h, T_STK, ns);
             return 0;
         }
         const xa = ld(h, a, 2);

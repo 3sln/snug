@@ -5,7 +5,7 @@ import { ERR_CONTROL_VALUE, ERR_ENUM, ERR_GENERIC, ERR_GROUP_RECURSION, ERR_INTE
 import { bidByte, bidLen, encIntKey, encString, headPush, intern, magOf } from './bytes.mjs';
 import { ctlAnd, ctlBits, ctlCat, ctlCbor, ctlCompare, ctlDet, ctlEq, ctlPlus, ctlRegexp, ctlSize, floatPoint, intPoint, singleLeaf } from './ctl.mjs';
 import { builtinCtl, extLookup, extMax } from './ext.mjs';
-import { K_ARRAY, K_EMBED, K_EXT, K_INT, K_LIT, K_MAP, K_SIMPLE, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAnd, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimple, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
+import { K_ARRAY, K_EMBED, K_EXT, K_INT, K_LIT, K_MAP, K_SIMPLE, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAnd, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
 import { TK_BYTES, TK_FLOAT, TK_INT, TK_TEXT, tkA, tkB, tkC, tkEnd, tkKind, tkStart } from './lex.mjs';
 import { KEY_BARE, KEY_TYPE, KEY_VALUE, N_ANY, N_ARRAY, N_CTL, N_ENT, N_ENUM, N_MAJOR, N_MAP, N_MEMBER, N_NAME, N_RANGE, N_SUBGRP, N_TAG, N_TYPE, N_UNWRAP, N_VALUE, na, nb, nc, nd, ne, nk, nnext, npos, ntok } from './parse.mjs';
 import { P_CALL, P_CHOICE, P_ENTRY, P_FAIL, P_MEMBER, P_SEQ, pbAdd, pbList, pbNode, pbRep, pegBegin, pegFinish, pegInit, pgsFind, pgsPop, pgsPush, pmNew } from './peg.mjs';
@@ -497,7 +497,7 @@ export function extArgLeaf(h, l, pos) {
         }
         return 0;
     }
-    if (k === K_SIMPLE) {
+    if ((k === K_SIMPLE) && (ld(h, l, 0) === ld(h, l, 1))) {
         const v = ld(h, l, 0);
         if (v < 24) {
             vpush1(h, T_EXTARG, 224 | v);
@@ -856,7 +856,92 @@ export function lowerTag(h, node, env) {
     return conPut(h, node, env, ts5);
 }
 
-export function lowerMajor(h, node) {
+export function head7(h, a, b, mode) {
+    // RFC 9682 §3.2: the #7 head-numbers a..b (0 <= a <= b <= 255). 0..23 and
+    // 32..255 are simple values; 24 stands for ai 24, i.e. every simple value
+    // 32..255 (D284 makes f8 00..f8 1f malformed); 25..27 for the floats (D328:
+    // by value); 28..31 for nothing (no such data item). Answers bit 0 for 24 and
+    // bits 1..3 for 25..27. mode 1 pushes the simple ranges onto T_STK, mode 2
+    // only the one below 24 (24 is in, so 32..255 comes whole), mode 0 none.
+    let f = 0;
+    for (let w = 24; w < 28; w++) {
+        if ((a <= w) && (b >= w)) {
+            f |= 1 << (w - 24);
+        }
+    }
+    if ((mode > 0) && (a <= 23)) {
+        let b1 = b;
+        if (b1 > 23) {
+            b1 = 23;
+        }
+        const l1 = mkSimpleRange(h, a, b1);
+        vpush1(h, T_STK, l1);
+    }
+    if ((mode === 1) && (b >= 32)) {
+        let a2 = a;
+        if (a2 < 32) {
+            a2 = 32;
+        }
+        const l2 = mkSimpleRange(h, a2, b);
+        vpush1(h, T_STK, l2);
+    }
+    return f;
+}
+
+export function head7End(h, f, from) {
+    // head7's floats and ai 24 onto T_STK; the typeset of T_STK[from..].
+    const lf = mkFloatFrom(h, f >> 1, T_TMP2, 0);
+    vpush1(h, T_STK, lf);
+    if ((f & 1) !== 0) {
+        const l24 = mkSimpleRange(h, 32, 255);
+        vpush1(h, T_STK, l24);
+    }
+    return tsMake(h, from);
+}
+
+export function lowerHead7(h, nts, pos) {
+    // #7.<T> (RFC 9682 §3.2): T's integers in 0..255 as head-numbers (head7);
+    // the rest of T matches nothing, as #6.<T> keeps only 0..2^64-1.
+    const tl = singleLeaf(h, nts);
+    const from = vlen(h, T_STK);
+    let f = 0;
+    if ((tl < 0) || (lk(h, tl) !== K_INT)) {
+        return fail(h, ERR_MAJOR, pos);
+    }
+    // pass 0 learns whether 24 is in; pass 1 pushes the simple ranges
+    for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < ld(h, tl, 1); i++) {
+            const o = 6 * (ld(h, tl, 0) + i);
+            const lr = vget(h, T_IV, o);
+            const la = vget(h, T_IV, o + 1);
+            const lb = vget(h, T_IV, o + 2);
+            const hr = vget(h, T_IV, o + 3);
+            const ha = vget(h, T_IV, o + 4);
+            const hb = vget(h, T_IV, o + 5);
+            let a = lb;
+            let b = hb;
+            // clip the interval to 0..255 (b -1: nothing there)
+            if (lr < R_POS) {
+                a = 0;
+            }
+            if ((hr > R_POS) || ((ha !== 0) || ((hb < 0) || (hb > 255)))) {
+                b = 255;
+            }
+            if (hr < R_POS) {
+                b = -1;
+            }
+            if ((lr > R_POS) || ((lr === R_POS) && ((la !== 0) || ((lb < 0) || (lb > 255))))) {
+                b = -1;
+            }
+            if (a <= b) {
+                f |= head7(h, a, b, pass * (1 + (f & 1)));
+            }
+        }
+    }
+    return head7End(h, f, from);
+}
+
+export function lowerMajor(h, node, env) {
     const m = na(h, node);
     const mode = nb(h, node);
     const hi = nc(h, node);
@@ -882,26 +967,20 @@ export function lowerMajor(h, node) {
         const lm = mkMajor(h, m);
         return tsOf1(h, lm);
     }
-    if ((m !== 7) || (hi !== 0)) {
+    if (mode === 1) {
+        const nts = lowerType(h, ne(h, node), env);
+        if (nts < 0) {
+            return -1;
+        }
+        return lowerHead7(h, nts, pos);
+    }
+    if (((m !== 7) || (hi !== 0)) || ((lo < 0) || (lo > 255))) {
         return fail(h, ERR_MAJOR, pos);
     }
-    if ((lo === 25) || ((lo === 26) || (lo === 27))) {
-        const lf = mkFloatFrom(h, 1 << (lo - 25), T_TMP2, 0);
-        return tsOf1(h, lf);
-    }
-    if ((lo >= 0) && (lo <= 23)) {
-        const ls = mkSimple(h, lo);
-        return tsOf1(h, ls);
-    }
-    if ((lo >= 0) && (lo <= 31)) {
-        return tsOf1(h, -2);
-    }
-    // RFC 9682 §3.2: #7.32 .. #7.255 are the two-byte simple values (D284)
-    if ((lo >= 32) && (lo <= 255)) {
-        const ls2 = mkSimple(h, lo);
-        return tsOf1(h, ls2);
-    }
-    return fail(h, ERR_MAJOR, pos);
+    const from = vlen(h, T_STK);
+    const f = head7(h, lo, lo, 0);
+    head7(h, lo, lo, 1 + (f & 1));
+    return head7End(h, f, from);
 }
 
 export function contentTs(h, cn, env) {
@@ -1038,7 +1117,7 @@ export function lowerType(h, node, env) {
         r = lowerTag(h, node, env);
     }
     if (k === N_MAJOR) {
-        r = lowerMajor(h, node);
+        r = lowerMajor(h, node, env);
     }
     if (k === N_ANY) {
         const al = mkAny(h);

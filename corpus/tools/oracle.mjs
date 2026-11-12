@@ -443,7 +443,7 @@ export function check(schema, rule, value, { steps = STEP_LIMIT } = {}) {
           if (n.major !== x.major) return false;
           // RFC 8610 §3.3 (D328): #7.25/26/27 are sets of values -- a float of any
           // encoded width matches each width whose IEEE format holds its value.
-          if (x.major === 7 && x.arg) { const wanted = scalar(x.arg, env); return n.width ? [25n, 26n, 27n].includes(wanted) && fitsWidth(n.value, Number(wanted)) : wanted === n.arg; }
+          if (x.major === 7 && x.arg) { const wanted = scalar(x.arg, env); return n.width ? [25n, 26n, 27n].includes(wanted) && fitsWidth(n.value, Number(wanted)) : wanted === n.arg || (wanted === 24n && n.arg >= 32n); } // RFC 9682 §3.2: #7.24 is ai 24
           if (x.arg && !test(x.arg, { major: 0, arg: n.arg, value: n.arg }, env)) return false;
           return !x.content || test(x.content, n.content, env);
         }

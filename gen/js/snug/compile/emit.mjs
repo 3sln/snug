@@ -1591,6 +1591,7 @@ export function writeLeaf(h, f) {
     }
     if (k === K_SIMPLE) {
         d0 = ld(h, l, 0);
+        d1 = ld(h, l, 1);
     }
     if (k === K_LIT) {
         d0 = vget(h, T_POOLOFF, ld(h, l, 0));

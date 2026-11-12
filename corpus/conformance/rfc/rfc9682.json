@@ -216,11 +216,6 @@
           "dependsOn": [
             "P8.4"
           ],
-          "classification": {
-            "kind": "pending",
-            "decision": "P9.3",
-            "reason": "RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error."
-          },
           "ruby": {
             "status": "checked",
             "exitCode": 0,
@@ -233,11 +228,6 @@
           "hex": "f4",
           "expect": false,
           "note": "false is value20",
-          "classification": {
-            "kind": "pending",
-            "decision": "P9.3",
-            "reason": "RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error."
-          },
           "ruby": {
             "status": "checked",
             "exitCode": 1,
@@ -253,11 +243,6 @@
           "dependsOn": [
             "P8.4"
           ],
-          "classification": {
-            "kind": "pending",
-            "decision": "P9.3",
-            "reason": "RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error."
-          },
           "ruby": {
             "status": "unavailable",
             "exitCode": 1,
@@ -266,10 +251,7 @@
         }
       ],
       "compileObservation": {
-        "ok": false,
-        "code": "syntax",
-        "line": 1,
-        "column": 8
+        "ok": true
       }
     }
   ]

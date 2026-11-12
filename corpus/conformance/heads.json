@@ -1,0 +1,81 @@
+{
+  "format": "snug conformance corpus v1",
+  "source": "P9.3 (2026-11-11): RFC 9682 §3.2 head numbers for #7 (D336). Expectations are hand-reasoned from RFC 9682 §3.2, RFC 8949 §3.3 and RFC 8610 §3.3 (D328); vm-test also checks each against corpus/tools/peg-oracle.mjs.",
+  "notes": [
+    "RFC 9682 §3.2: for #7 the head-number is the simple value in 0..23 and 32..255; 24..31 stand for the additional information: 24 is every simple value 32..255 (f8 00..f8 1f are not well-formed, RFC 8949 §3.3, D284), 25/26/27 are float16/float32/float64 (sets of values, D328), and 28..31 match nothing (no data item has that head; 31 is the break code).",
+    "#7.<T> takes T's integers in 0..255; T must be an integer type, and its values outside 0..255 match nothing."
+  ],
+  "suites": [
+    {
+      "category": "rfc", "name": "RFC 9682 #7 head numbers (D336)", "options": {"wire": "valid"},
+      "cddl": "r = #7.<32..255>\ns = #7.24\nf = #7.<25>\nb = #7.<20..21>\nall = #7.<0..255>\nn28 = #7.28\nn31 = #7.31\nbig = #7.<256..1000>\nmix = #7.<16..40>\nneg = #7.<-5..3>\nw = #7.<26..27>\nt = #7.<ct>\nct = 1 / 22 / 24\nlit = #7.250\nz = #7.0\ngen = g<200..201>\ng<x> = #7.<x>\nand = #7.<0..30> .and #7.<20..255>\n",
+      "cases": [
+        {"rule": "r", "hex": "f820", "expect": true, "note": "simple value 32"},
+        {"rule": "r", "hex": "f8ff", "expect": true},
+        {"rule": "r", "hex": "f4", "expect": false, "note": "false is simple value 20"},
+        {"rule": "r", "hex": "f93e00", "expect": false},
+        {"rule": "s", "hex": "f8ff", "expect": true, "note": "ai 24: the simple values 32..255"},
+        {"rule": "s", "hex": "f820", "expect": true},
+        {"rule": "s", "hex": "f4", "expect": false},
+        {"rule": "s", "hex": "f97e00", "expect": false},
+        {"rule": "s", "hex": "f0", "expect": false, "note": "simple value 16 has ai 16"},
+        {"rule": "f", "hex": "f93e00", "expect": true, "note": "#7.<25> is a float16"},
+        {"rule": "f", "hex": "fa3fc00000", "expect": true, "note": "1.5 by value (D328)"},
+        {"rule": "f", "hex": "fa3f800001", "expect": false},
+        {"rule": "f", "hex": "f8ff", "expect": false},
+        {"rule": "b", "hex": "f4", "expect": true},
+        {"rule": "b", "hex": "f5", "expect": true},
+        {"rule": "b", "hex": "f6", "expect": false},
+        {"rule": "all", "hex": "f4", "expect": true},
+        {"rule": "all", "hex": "f0", "expect": true},
+        {"rule": "all", "hex": "f8ff", "expect": true},
+        {"rule": "all", "hex": "fb3ff0000000000001", "expect": true},
+        {"rule": "all", "hex": "00", "expect": false},
+        {"rule": "n28", "hex": "f4", "expect": false},
+        {"rule": "n28", "hex": "f8ff", "expect": false},
+        {"rule": "n31", "hex": "f4", "expect": false},
+        {"rule": "big", "hex": "f8ff", "expect": false},
+        {"rule": "big", "hex": "f4", "expect": false},
+        {"rule": "mix", "hex": "f0", "expect": true},
+        {"rule": "mix", "hex": "f7", "expect": true},
+        {"rule": "mix", "hex": "f820", "expect": true},
+        {"rule": "mix", "hex": "f828", "expect": true},
+        {"rule": "mix", "hex": "f829", "expect": true, "note": "24 is in 16..40, so every simple value 32..255"},
+        {"rule": "mix", "hex": "f8ff", "expect": true},
+        {"rule": "mix", "hex": "f93e00", "expect": true, "note": "25 is in 16..40"},
+        {"rule": "mix", "hex": "ef", "expect": false},
+        {"rule": "neg", "hex": "e0", "expect": true},
+        {"rule": "neg", "hex": "e3", "expect": true},
+        {"rule": "neg", "hex": "e4", "expect": false},
+        {"rule": "w", "hex": "f93e00", "expect": true},
+        {"rule": "w", "hex": "fb3ff0000000000001", "expect": true},
+        {"rule": "w", "hex": "f4", "expect": false},
+        {"rule": "t", "hex": "e1", "expect": true},
+        {"rule": "t", "hex": "f6", "expect": true},
+        {"rule": "t", "hex": "f8ff", "expect": true},
+        {"rule": "t", "hex": "f5", "expect": false},
+        {"rule": "t", "hex": "f93e00", "expect": false},
+        {"rule": "lit", "hex": "f8fa", "expect": true},
+        {"rule": "lit", "hex": "f8fb", "expect": false},
+        {"rule": "z", "hex": "e0", "expect": true},
+        {"rule": "z", "hex": "e1", "expect": false},
+        {"rule": "gen", "hex": "f8c8", "expect": true, "note": "a generic argument as the head number"},
+        {"rule": "gen", "hex": "f8c9", "expect": true},
+        {"rule": "gen", "hex": "f8ca", "expect": false},
+        {"rule": "and", "hex": "f4", "expect": true, "note": "simple ranges intersect"},
+        {"rule": "and", "hex": "f7", "expect": true},
+        {"rule": "and", "hex": "f3", "expect": false},
+        {"rule": "and", "hex": "f8ff", "expect": true, "note": "both sides hold 24"},
+        {"rule": "and", "hex": "f93e00", "expect": true}
+      ]
+    },
+    {
+      "category": "rfc", "name": "RFC 9682 head numbers: a non-integer #7.<T> is refused (D336)",
+      "cddl": "r = #7.<tstr>\n", "snugSchemaError": "major", "cases": []
+    },
+    {
+      "category": "rfc", "name": "RFC 9682 head numbers: only #6 and #7 take <T> (D336)",
+      "cddl": "r = #5.<1>\n", "snugSchemaError": "syntax", "cases": []
+    }
+  ]
+}

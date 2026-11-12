@@ -1131,7 +1131,7 @@
     (if (== k K_MAJOR) (set d0 (ld h l 0)))
     (if (== k K_INT) (do (set d0 (laux h f 0)) (set d1 (ld h l 1))))
     (if (and (== k K_FLOAT) (> (ld h l 1) 0)) (do (set d0 (laux h f 0)) (set d1 (ld h l 1))))
-    (if (== k K_SIMPLE) (set d0 (ld h l 0)))
+    (if (== k K_SIMPLE) (do (set d0 (ld h l 0)) (set d1 (ld h l 1))))
     (if (== k K_LIT) (do (set d0 (vget h T_POOLOFF (ld h l 0))) (set d1 (bid-len h (ld h l 0)))))
     (if (== k K_LITSET) (do (set d0 (laux h f 0)) (set d1 (ld h l 1))))
     (if (== k K_TEXT)

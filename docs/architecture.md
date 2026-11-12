@@ -157,8 +157,8 @@ rely on.
 | `ANY` | any item |
 | `MAJOR m` | any item of major type m (`#0`…`#5`, bare `#6`, bare `#7`) |
 | `INT bounds bigok` | major 0/1 (and tag 2/3 if `bigok`) within an interval list |
-| `FLOAT widths bounds` | float of allowed encoded widths (`#7.25/26/27`, `float16`…), optional interval list |
-| `SIMPLE v` | `#7.v` for v < 24 (`false`, `true`, `null`, …) |
+| `FLOAT widths bounds` | float whose value one of the allowed widths represents exactly (`#7.25/26/27`, `float16`…; D328), optional interval list |
+| `SIMPLE lo..hi` | the simple values lo..hi, both in 0..23 or both in 32..255 (`false`, `true`, `null`, `#7.v`, `#7.24` = 32..255, `#7.<T>`; D336) |
 | `LIT k` | exactly pool literal k |
 | `LITSET t` | one of a sorted set of literals of one major type (binary search); large enums count as one leaf (A8) |
 | `TEXT size regexp` / `BYTES size bits` | string with constraints |

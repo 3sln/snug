@@ -209,7 +209,8 @@ pub(crate) fn parse_name(h: &mut [i32], kind: i32) -> i32 {
     return node(h, kind, t, -1, 0, 0);
 }
 pub(crate) fn parse_hash(h: &mut [i32]) -> i32 {
-    // `#`, `#m`, `#m.n`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on `#`).
+    // `#`, `#m`, `#m.n`, `#7.<T>`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on
+    // `#`). RFC 9682 §3.2: a head-number in angle brackets only for #6 and #7.
     let t: i32 = cur(h);
     let m: i32 = tk_a(h, t);
     adv(h);
@@ -226,7 +227,7 @@ pub(crate) fn parse_hash(h: &mut [i32]) -> i32 {
     if ck(h) == TK_DOT {
         adv(h);
         if ck(h) == TK_LT {
-            if m != 6 {
+            if m < 6 {
                 return syntax(h);
             }
             adv(h);
@@ -259,14 +260,12 @@ pub(crate) fn parse_hash(h: &mut [i32]) -> i32 {
         }
     }
     if m != 6 {
-        if mode == 1 {
-            return syntax(h);
-        }
         let mj: i32 = node(h, N_MAJOR, t, m, mode, hi);
         if mj < 0 {
             return -1;
         }
         nset(h, mj, 6, lo);
+        nset(h, mj, 7, texpr);
         return mj;
     }
     // major 6: a content type in parentheses, unless bare `#6` / `#6.n`.

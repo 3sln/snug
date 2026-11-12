@@ -183,7 +183,8 @@
     (return (node h kind t (neg 1) 0 0))))
 
 (defn ^I32 parse-hash [^Ints h]
-  (comment "`#`, `#m`, `#m.n`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on `#`).")
+  (comment "`#`, `#m`, `#m.n`, `#7.<T>`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on"
+           "`#`). RFC 9682 §3.2: a head-number in angle brackets only for #6 and #7.")
   (let [t (cur h)
         m (tk-a h t)]
     (adv h)
@@ -196,7 +197,7 @@
       (if (== (ck h) TK_DOT)
         (do (adv h)
             (if (== (ck h) TK_LT)
-              (do (if (!= m 6) (return (syntax h)))
+              (do (if (< m 6) (return (syntax h)))
                   (adv h)
                   (set texpr (parse-type h))
                   (if (< texpr 0) (return (neg 1)))
@@ -215,10 +216,10 @@
                     (adv h)
                     (set mode 0))))))
       (if (!= m 6)
-        (do (if (== mode 1) (return (syntax h)))
-            (let [mj (node h N_MAJOR t m mode hi)]
+        (do (let [mj (node h N_MAJOR t m mode hi)]
               (if (< mj 0) (return (neg 1)))
               (nset h mj 6 lo)
+              (nset h mj 7 texpr)
               (return mj))))
       (comment "major 6: a content type in parentheses, unless bare `#6` / `#6.n`.")
       (let [^:mut content (neg 1)]

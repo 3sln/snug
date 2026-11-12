@@ -255,7 +255,8 @@ export function parseName(h, kind) {
 }
 
 export function parseHash(h) {
-    // `#`, `#m`, `#m.n`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on `#`).
+    // `#`, `#m`, `#m.n`, `#7.<T>`, `#6.n(T)`, `#6.<T>(C)`, `#6(T)` (cursor on
+    // `#`). RFC 9682 §3.2: a head-number in angle brackets only for #6 and #7.
     const t = cur(h);
     const m = tkA(h, t);
     adv(h);
@@ -272,7 +273,7 @@ export function parseHash(h) {
     if (ck(h) === TK_DOT) {
         adv(h);
         if (ck(h) === TK_LT) {
-            if (m !== 6) {
+            if (m < 6) {
                 return syntax(h);
             }
             adv(h);
@@ -305,14 +306,12 @@ export function parseHash(h) {
         }
     }
     if (m !== 6) {
-        if (mode === 1) {
-            return syntax(h);
-        }
         const mj = node(h, N_MAJOR, t, m, mode, hi);
         if (mj < 0) {
             return -1;
         }
         nset(h, mj, 6, lo);
+        nset(h, mj, 7, texpr);
         return mj;
     }
     // major 6: a content type in parentheses, unless bare `#6` / `#6.n`.
