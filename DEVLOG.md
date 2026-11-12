@@ -8901,7 +8901,7 @@ review.
       grow the binary.
 
 **Documentation and API**
-- [ ] **P9.10 — Stranger-pass re-review of docs and API.** Independent
+- [x] **P9.10 — Stranger-pass re-review of docs and API.** Independent
   reviewers who have not seen the code use the README, docs/ and the
   public APIs (JS, Rust, wasm SDK). Every finding is addressed or
   explicitly deferred. This includes making the D301 idiom for
@@ -8916,6 +8916,81 @@ review.
   - SPEC §1.1 lists `.abnf` as refused (P9.14);
   - SPEC §7 names a `bb identity` gate and §9 a `ci/gate-map.edn`, and
     neither exists.
+  *Done 2026-11-12 (no D-entry; docs and declaration comments only):*
+  - **Reviews.** Three reviewers who had not seen the code, working from the
+    user docs, the declarations, the examples and rustdoc only:
+    `docs/reviews/2026-11-12-stranger-js.md` (JS/TS API payloads, Node and
+    browser Worker; 19 findings), `-rust.md` (streaming over async I/O; 21)
+    and `-protocol.md` (RFC claims and conformance; 15). Every example and
+    every runnable README/guide/rust.md snippet ran; nothing was broken in
+    the code paths the docs show. The problems were in the docs.
+  - **The main finding: the docs still described format 1's matching.**
+    README "Why snug", SPEC §2 items 1–2 and §1.1, cddl-support (map and
+    array sections, refusal table) and guide promised set semantics, "no
+    greedy matching" and the `map_overlap` / `map_cut` /
+    `map_group_occurrence` refusals. Rewritten for format 2.0's Appendix A
+    PEG semantics, with a new guide section "Group matching pitfalls (PEG)"
+    (`[* uint, uint]`, `[? uint, uint]`, wildcard-first maps, empty-first
+    choices). All the documented examples were probed.
+  - **D301 idiom made prominent:** README "Tagged unions: write a type
+    choice of maps" after the quick start, a callout at the top of
+    cddl-support, the guide section retitled and argued from §3.5.4's text
+    (not architecture §20), with the `{ kind: "a" / "b" }` enum case; a
+    pointer in rust.md.
+  - **Stale statements from P9.11 fixed:** Program format 2.0 in README,
+    api.md, guide.md, rust.md, schema.d.ts; SPEC §2 item 4 (float widths by
+    value, D328); `valid` as the default in the README features table, the
+    guide's value table and cddl-support. SPEC §1.1 (`.abnf`) and §7/§9
+    (`bb identity`, `ci/gate-map.edn`) were already current after P9.14 and
+    P9.15.
+  - **Other fixes:** api.md's compile options (all eight), limits
+    (`pegNodes`, not `alternatives`), SchemaError codes (`limit_peg_nodes`,
+    `control_registry`; the retired `map_*` codes marked), `sessions/limit`
+    and the witness-offset rule; `index.d.ts` declares `wire: 'valid'`,
+    `profiles.valid` and the `sessions/limit` fault code, `controls.d.ts`
+    the `cost` hook and its 17-unit charge; the guide's session-quota
+    sentence, browser dedicated-Worker recipe (verified bundled and
+    simulated), the Schema-not-cloneable note, a cache lookup key before
+    compiling, the limits table and `Cow::Borrowed`; profiles.md's tag table
+    (tags 0, 1, 2/3, 4, 32, 55799; RFC 8949 §3.4 not §9.2), `#7.<type>`,
+    `0.0`, `map_cut`, NaN-key and bignum-key equivalence, the `f8 <24`
+    verdicts, `valid` vs `floats`; cddl-support's `.default` deviation;
+    rust.md's default root, format, caching recipe (a doctest), compile
+    error printing, inner-module types, per-session memory, fail-fast for
+    untrusted peers, dropped transport errors, HTTP-body adapter, adapter
+    imports, the two code vocabularies; the README export table
+    (`snug/sequence`, `Simple`), Rust status rows, bundle sizes (re-measured),
+    W8 not being public; a current-status table at the top of
+    conformance.md; the release-policy §8 note; CHANGELOG's W8 lines.
+  - **Deferred, with reasons** (API or behaviour changes; recommendations
+    are with the manager):
+    - W8 is not returned by any public API (JS `compile`, Rust
+      `Schema::compile`). Recommend `schema.warnings` / `Schema::warnings()`.
+    - Rust: transport errors collapse to `Source("read")` with no
+      `source()`; root re-exports of `SchemaError`, `SourceError`, `Cuts`,
+      `Regexp`, `Controls`; `unknown_rule` reported four ways; positional
+      `chunk`/`quantum`/`fail_fast` (and `u32` vs `i32` quantum); `chunk =
+      usize::MAX` panics with capacity overflow (a bug: recommend
+      `Usage("options")` above 2³¹−1); no push validator for one
+      unknown-length message; rustdoc hygiene (format 1.0 in
+      `Program::serialize`'s doc, test-bin docs, broken intra-doc links, IDs
+      in the crate docs); a `compile_error!` when the generated tree is
+      missing. All touch `host/rust/src`, which P9.6b is refactoring.
+    - Per-session key arena ≈ `max_bytes` (1.4 MiB at the default; 1.4 GiB
+      at `max_live`): documented; recommend growing the arena with input,
+      as D337 does for recursive Programs, or a lower default.
+    - JS: Schema/Program silently structured-clone to method-less objects
+      (recommend a private-field brand so `postMessage` throws); no
+      `sourceKeyOf(text, options)`; `npm run build` does not flag a dirty
+      tree (the README recipe now records `git status`).
+    - Behaviour: `f8 00..17` is `non_shortest` (not `malformed`) under
+      deterministic and Bindle; bignum keys `1` / `2(h'01')` are distinct
+      for the duplicate check but collide in decode; witness offsets and
+      the misleading `value` / `missing` at a discriminator for the cut
+      idiom (a `cut` subcode would help). Documented as they are.
+    - wasm SDK user docs (build output, browser loading): waits for owner
+      decision O3 (whether the SDK ships), P9.15.
+    - No semantic TypeScript gate (no offline `tsc`); api.md says so.
 - [x] **P9.11 — Release and version policy.** A written policy covering
   versioning (semver and what counts as breaking, including the Program
   format, error codes and the budget-unit prices), the supported runtimes,

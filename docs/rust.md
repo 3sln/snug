@@ -45,7 +45,8 @@ Schemas and Programs clone cheaply through immutable shared storage. Share a
 Schema between threads, and use one reusable `Scratch` per concurrent caller.
 `validate` builds no decoded value tree. `validate_with_options` permits a
 `ValidationOptions` root policy and per-call caps, which only lower compiled
-limits. Schema methods default to any root; codec/view default to map root.
+limits. Schema methods, the codec and views all default to any root under
+the valid preset; `Top::Map` (or the Bindle preset) requires a map.
 
 `Failure` preserves the generated VM's code, reason, offset, path, embedded
 subcode and budget usage. It describes one deterministic witness, not all
@@ -53,7 +54,27 @@ failed alternatives. Only schema-named keys appear in paths. The requested
 `Result<(), Failure>` signature also carries a missing-rule API failure as
 `code == -1, reason == "unknown_rule"`; check rule names against
 `schema.program().rules()` when configuring an application. JS instead throws
-TypeError for this misuse.
+TypeError for this misuse. The other forms report the same misuse
+differently: `validate_blob` / `validate_reader` and `decode` / `view` as
+`Error::Validation` with reason `unknown_rule`, and the sequence forms as
+`Error::Usage("unknown_rule")`; check the rule once at startup.
+
+**Tagged unions.** Map cuts follow RFC 8610 §3.5.4 literally, so
+`{ type: "a", x: int // type: "b", y: tstr }` rejects every `"b"` message.
+Write a type choice of maps (`{ type: "a", x: int } / { type: "b", y: tstr }`)
+or a cut-free `"type" =>` discriminator; see the
+[guide](guide.md#discriminated-unions-under-the-rfc-cut) and its
+[PEG pitfalls](guide.md#group-matching-pitfalls-peg). `Schema::compile` does
+not return compile warnings (the W8 warning for this idiom is only in the
+internal `snug::compile::Compiled::warnings`).
+
+**Types from inner modules.** A few types that public signatures use are not
+re-exported at the crate root; name them by module: `snug::compile::SchemaError`
+(inside `Error::Compile`), `snug::schema::SourceError` (returned by an
+`AsyncBlob` / `Blob` read), `snug::compile::{Cuts, Regexp}` (fields of
+`CompileOptions`), `snug::controls::Controls` and
+`snug::unicode_tables::tables()`. Use those items, not the rest of those
+modules, which serve snug's own test hosts.
 
 ## Decode and exact values
 
@@ -178,15 +199,36 @@ loaded.validate_blob(&BytesBlob(&[7]), "r", &ValidationOptions::default(), 4096,
 ```
 
 Programs use the same 96-byte-header container as JS: little-endian words,
-SHA-256 integrity, format major 1 and minor 0 (1 for a Program using
-extension controls). Loading requires equal major,
-minor no newer than the loader, valid framing/digest and kin vm-verify.
+SHA-256 integrity, format 2.0 (format word `2`; a Program using extension
+controls has the same format). Loading requires major 2, a
+minor no newer than the loader (1.x Programs are refused; recompile them), valid framing/digest and kin vm-verify.
 Producer version is provenance and survives reserialization. `source_key()`
 is the source/options SHA-256 hex cache key; namespace caches by the producing
 revision while the library is experimental. **Use trusted Program origins**:
 the hash is not authentication and structural verification does not establish
 compiler semantic invariants. Raw words/pool accessors are shared read-only
 slices; `Program::from_parts` copies and verifies them.
+
+There is no compile-time (macro or `const`) compilation. To skip compiling
+at startup, serialize at build time and embed the bytes:
+
+```rust
+use snug::{Schema, CompileOptions, Program, Error};
+// build step (for example a small bin run before release):
+let bytes = Schema::compile("message = { id: uint }", &CompileOptions::default())?
+    .program().serialize()?;
+// std::fs::write("message.snugprog", &bytes)?;
+// at startup: let bytes = include_bytes!("message.snugprog");
+let schema = Schema::from_program(Program::deserialize(&bytes)?);
+assert!(schema.program().rules().iter().any(|r| r == "message"));
+
+// A compile error's Display is only its code; print the position yourself:
+match Schema::compile("message = { id: }", &CompileOptions::default()) {
+    Err(Error::Compile(e)) => eprintln!("{} at {}:{} in {:?}", e.code, e.line, e.column, e.rule),
+    other => panic!("expected a schema error, got {:?}", other.map(|_| ())),
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 `Blob` is the existing host's synchronous size/read snapshot contract.
 `validate_blob` folds in its session driver; it returns
@@ -217,7 +259,14 @@ assert_eq!(truncated.unwrap_err().reason, "cbor/truncated");
 The last argument is fail-fast: a certain refusal is answered at once (its
 code may then be another than the buffer's `cbor/truncated` / `cbor/too_large`;
 accept and refuse never differ). Only what the session asks for is held, plus a
-chunk; the session's key arena is sized for the input limit. The low-level
+chunk; but the session's key arena is sized for the input limit, so **each
+live stream session holds memory proportional to `max_bytes`** even when few
+bytes have arrived: about 1.4 MiB at the default 1,500,000-byte limit
+(measured 2026-11-12), so `max_live` (1024) idle peers can hold about
+1.4 GiB. For network streams pass a per-call `max_bytes` sized to the
+protocol (4 KiB gave about 26 KiB per session) and bound concurrent streams
+below `max_live`. For an untrusted peer prefer fail-fast: drain mode reads up
+to `max_bytes` from the peer after a refusal is already certain. The low-level
 `schema::Session::new_unknown`, `Step::Held` and `Session::end(n)` expose the
 protocol.
 
@@ -235,9 +284,8 @@ While `max_live` sessions are live in the process, creating one more fails with
 `Result<Session, sessions::SessionError>`, with `SessionError::Limit`, which
 converts into `Error::SessionLimit`. The free `snug::read_sequence` and
 `read_sequence_async` now return `Result<_, Error>` (they answered the reader
-directly), as `Schema::read_sequence` already did. These changed in P9.7: they
-are breaking changes, made before the first release and noted for P9.11's
-version policy. The low-level `schema::validate_blob` / `validate_reader` and
+directly), as `Schema::read_sequence` already did (changed before the first
+release; see the [CHANGELOG](../CHANGELOG.md)). The low-level `schema::validate_blob` / `validate_reader` and
 `async_source::validate_blob` / `validate_reader` report the limit as
 `schema::SourceError::SessionLimit`; every public driver answers
 `Error::SessionLimit`.
@@ -419,7 +467,10 @@ quantum above 2^31−1 is `Error::Usage("options")`) and source errors
 
 **Sources.** `AsyncSource` is a forward-only stream with the signature of
 `futures_io::AsyncRead::poll_read` (`Ready(Ok(0))` is the end; `Interrupted`
-is retried; any other error is `Error::Source("read")`). It is implemented for
+is retried; any other error is `Error::Source("read")`, and the original
+`io::Error` is dropped: `source()` is `None`, so record the kind in your
+adapter (for example in a field of the newtype) before returning it if you
+need to tell a reset from a timeout). It is implemented for
 `&[u8]`, `&mut S`, `Box<S>` and `Pin<P>`; the drivers take `S: Unpin` (pin a
 `!Unpin` source in a `Box`). `AsyncBlob` is the async `Blob`: `size()` and
 `read(offset, len)` returning any future (write `async fn read`), exactly
@@ -427,6 +478,7 @@ is retried; any other error is `Error::Source("read")`). It is implemented for
 newtype, for example:
 
 ```rust,ignore
+use std::{io, pin::Pin, task::{Context, Poll}};
 // futures-io (async-std, smol): same signature
 struct Futures<T>(T);
 impl<T: futures_io::AsyncRead + Unpin> snug::AsyncSource for Futures<T> {
@@ -447,6 +499,11 @@ impl<T: tokio::io::AsyncRead + Unpin> snug::AsyncSource for Tokio<T> {
     }
 }
 ```
+
+**HTTP bodies.** A body that arrives as a `Stream` of `Bytes` frames (hyper,
+axum) becomes an `AsyncRead` through `tokio_util::io::StreamReader` (map
+the body's error into `io::Error`), then the tokio adapter above. Limit the
+body length at the transport as well.
 
 **Scheduling and backpressure.** One read is in flight, issued only when the
 session asks for bytes its window lacks. A positive `quantum` makes the
@@ -474,7 +531,12 @@ futures are `Send` when the source, the blob and its read future are.
 `code()` for stable codes matching JS: unprefixed CBOR faults, `schema/...`
 schema-decode faults, compiler codes, Program codes and source codes. Fixed
 Rust API-misuse codes (`options`, `unknown_rule`, etc.) cover boundaries for
-which JS uses TypeError. Display contains only a code; Debug retains safe
+which JS uses TypeError. `Failure.reason` and `Error::code()` spell the same
+failure differently: a profile failure is `Failure.reason == "cbor/truncated"`
+but `Error::code() == "truncated"`, and a schema failure is `"type"` versus
+`"schema/type"` (the JS `ValidationResult.reason` and `SnugFault.code`
+spellings). `Failure.code` is the VM's numeric code, for diagnostics only;
+compare `reason`. Display contains only a code; Debug retains safe
 schema locations/paths. Library failures never contain input bytes, received
 values or unnamed data keys. Transport implementations must sanitize their
 own errors. Allocator exhaustion retains standard Rust allocator behavior.

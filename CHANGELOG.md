@@ -20,13 +20,15 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
 
 - CDDL (RFC 8610, with RFC 9165 controls and RFC 9682 grammar) compiled to
   a verified Program; `compile(text, options)` with compiler profiles
-  `full`, `bindle` and `bus`, compile-time resource limits and warnings.
+  `full`, `bindle` and `bus`, and compile-time resource limits. (The
+  compiler also produces warnings, but no public API returns them yet.)
 - Validation directly over CBOR bytes in one pass, with no decoded value
   tree; `schema.validate`, `schema.decode`, `validateAt`. Refusals carry a
   code, an offset and a schema-named path, never payload values (SPEC §4).
 - PEG semantics for groups in arrays and maps (D270), with the RFC's
   literal cut as the default and `cuts: 'branch'` as an option (D301);
-  warning W8 flags discriminated unions that the RFC cut makes fail.
+  the compiler's warning W8 flags discriminated unions that the RFC cut
+  makes fail (not yet returned by a public API).
 - CBOR codec `encode` / `decode` with exact integers, bignums, decimal
   fractions, typed arrays and ndarrays; encoders always write RFC 8949
   §4.2.1 deterministic bytes.

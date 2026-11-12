@@ -42,7 +42,7 @@ untrusted schemas, within its supported subset. See [profiles](profiles.md).
 
 ## Discriminated unions under the RFC cut
 
-> **Format 2.0 (PEG groups, branch `p85-peg`), D301.** snug follows RFC 8610's
+> **Read this before writing a tagged union (D301).** snug follows RFC 8610's
 > cut literally by default. One common way of writing a tagged union does
 > **not** work under it.
 
@@ -68,8 +68,8 @@ under every cut mode:
 
 ```cddl
 ; 1. A type choice of maps: each map is its own type, so a cut failure fails
-;    only that map, and the next map is tried (the cut's scope is the map
-;    type, architecture §20.3 R19).
+;    only that map, and the next map is tried (§3.5.4: "the entire map
+;    fails to match"; the type choice around it is not part of that map).
 shape = { kind: "a", x: int } / { kind: "b", y: tstr }
 
 ; 2. One map, with a cut-free discriminator: `=>` without `^` has no cut, so
@@ -84,6 +84,10 @@ shape = { "kind" => "a", x: int // "kind" => "b", y: tstr }
 | `{"kind": "a", "x": "z"}` | invalid | invalid | invalid |
 | `{"kind": "c"}` | invalid | invalid | invalid |
 
+The same trap appears without other fields: `{ (kind: "a" // kind: "b") }`
+rejects `{"kind": "b"}`. Put the choice in the value instead:
+`{ kind: "a" / "b" }`.
+
 The fields after the discriminator can keep their `:` keys: once the right
 alternative is chosen, a wrong value for `x` should fail the map anyway.
 With form 2, keep the discriminator first in each alternative, so no other
@@ -93,8 +97,13 @@ with `a-map = { a-fields }` is form 1).
 
 The compiler warns about the idiom with **W8** ("choice alternative starts
 with the same cut key as an earlier one") when two alternatives of a map's
-group choice start with a cut member on the same literal key. The warning is
-in the compile result's `warnings` (JS) / `Compiled::warnings` (Rust).
+group choice start with a cut member on the same literal key. **No public
+API returns compile warnings yet:** the JS `compile` and Rust
+`Schema::compile` results have no `warnings` (only the internal
+`snug::compile` module's `Compiled::warnings` carries them), so rely on the
+forms above rather than on the warning. When the idiom fails, the result is
+`reason: 'value'` at the discriminator's path (`['kind']`), even though the
+data is a valid second alternative.
 
 If a schema you do not control relies on the idiom, compile it with
 `cuts: 'branch'`: rule A, the reading of the Ruby and Rust reference tools
@@ -105,6 +114,26 @@ accepts `{"a": 1}` (the wildcard takes `a` after the optional group fails),
 while the RFC default rejects it (the group's `a:` already claimed the key).
 `cuts` is part of the Program's source key. There is no `'reference'`
 spelling (the pre-release name of `branch`).
+
+## Group matching pitfalls (PEG)
+
+Groups in arrays and maps follow RFC 8610 Appendix A, which is normative:
+a group choice `//` locks in the first alternative that succeeds, and
+occurrence indicators are greedy and never give anything back. Nothing is
+retried, so matching is linear, but some schemas that read naturally match
+less than they seem to. Tools that evaluate groups as sets (the Ruby and
+Rust `cddl` tools, and snug before format 2.0) accept some of these.
+
+| Schema | Rejects | Write instead |
+| --- | --- | --- |
+| `[* uint, uint]` | every array (Appendix A: "never can match anything") | `[+ uint]` |
+| `[? uint, uint]` | `[1]` | `[uint, ? uint]` |
+| `[uint // uint, uint]` | `[1, 2]` (the first alternative wins) | `[uint, uint // uint]` (longer first) |
+| `{ * tstr => any, a: uint }` | `{"a": 1}` (the wildcard runs first) | `{ a: uint, * tstr => any }` (wildcards last) |
+| `{ (? a: int) // (b: int) }` | `{"b": 1}` (the empty alternative wins) | `{ b: int // ? a: int }` (the alternative that can be empty last) |
+| `{ kind: "a", x: int // kind: "b", y: tstr }` | `{"kind": "b", "y": "z"}` (the cut, above) | a type choice of maps |
+
+See [CDDL support](cddl-support.md#arrays-and-repetition) for the rules.
 
 ## Regexp dialects
 
@@ -242,7 +271,7 @@ identically and a run that would pass the budget stops in the middle.
 
 **Errors and caching.** An unregistered `.name` is the `SchemaError`
 `unknown_control`, and its message names the control. A Program that uses a
-control is format 1.1 (others stay 1.0); its source key includes the whole
+control has the same format (2.0) as any other; its source key includes the whole
 registry — names and `maxBytes` — so a cache keyed by `program.sourceKey`
 never mixes registries. Loading needs the predicates again:
 `fromSerialized(bytes, { controls })` (or `fromProgram(P, B, { controls })`);
@@ -266,7 +295,7 @@ if (!result.ok) console.log(result.reason, result.path, result.offset);
 tree. The validator checks the wire profile (the valid preset by default:
 any well-formed valid CBOR; `wire: 'deterministic'` to require RFC 8949
 §4.2.1 deterministic encoding, `wire: 'bindle'` for the Bindle profile) while
-matching all live CDDL alternatives; one compiled Program validates under
+matching the schema (RFC 8610 Appendix A PEG for groups); one compiled Program validates under
 each. Under `valid`, literals, keys and duplicates compare by value, and
 non-deterministic input is validated through its canonical copy with the same
 reasons, offsets and budget ([profiles](profiles.md#valid-cbor-p84-d260d268)). On schema failure it continues checking the
@@ -304,7 +333,7 @@ import { encode, decode } from 'snug';
 const bytes = encode({ id: 7, body: new Uint8Array([1, 2]) }, { maxBytes: 2048 });
 const message = schema.decode(bytes, 'message');
 const profileOnly = decode(bytes);
-const array = decode(encode([1, 2]), { top: 'any' });
+const array = decode(encode([1, 2])); // any root by default; top: 'map' (Bindle's default) refuses it
 ```
 
 Schema decode validates, then materialises; codec decode checks the profile,
@@ -346,7 +375,7 @@ bignums, while `int` includes only major 0/1. Numeric value is preserved,
 not JS number/bigint identity. Use bigint before arithmetic exceeds Number's
 safe domain: snug cannot recover precision already lost in a Number.
 
-| Host map representation | Deterministic preset (default) | `wire: 'bindle'` |
+| Host map representation | Valid and deterministic presets (valid is the default) | `wire: 'bindle'` |
 | --- | --- | --- |
 | Plain or null-prototype object | Text keys at any depth; decodes to a null-prototype object | the same |
 | `Map` with any admitted keys, at any depth | Encodes, keys sorted by encoding; maps with a non-text key decode to `Map` | Refused, except a root `Map` of safe integer/text keys with `cose: true` |
@@ -596,8 +625,11 @@ so buffering is bounded by the declared length rather than a fixed chunk size.
 
 Each validation has exclusive session state across every await. Immutable
 Programs can be shared, and independent sessions can interleave; never resume
-one session concurrently. There is no live-session quota or pool, so bound
-concurrency in the application. Advanced custom drivers can call
+one session concurrently. At most `sessionLimits().maxLive` sessions (default
+1024) are live at once; one more throws `SnugFault('sessions/limit')`, and an
+abandoned, unclosed session holds its slot until it is garbage-collected, so
+`close()` sessions you give up on ([live sessions](api.md#sources-snugsources)).
+Bound request concurrency in the application below that limit. Advanced custom drivers can call
 `openSession(schema, rule, length, options?, { quantum? }?)` from `snug/sources`
 for a `VmSession` with `step(window, base)`, `length` and `bytesHeld`; its need/yield/keep protocol
 is in the [API reference](api.md#sources-snugsources). Scratch
@@ -779,8 +811,8 @@ scheduling yields inside long messages.
 Rust has the same reader: `snug::read_sequence(reader, &SequenceOptions)` /
 `Schema::read_sequence(reader, rule, &options)` iterate owned messages over
 any `Read`, and `Schema::sequence` / `Sequence::new` give a push reader whose
-`feed(&chunk)` answers messages borrowing the chunk (`Cow::Borrowed`) or
-owning their assembly ([Rust guide](rust.md#cbor-sequences)).
+`feed(&chunk)` answers messages that borrow the chunk (`Message::is_borrowed`)
+or own their assembly (`Message::into_owned`) ([Rust guide](rust.md#cbor-sequences)).
 
 ## Limits
 
@@ -847,7 +879,7 @@ wire presets belong on validation/codec/view/Writer/source calls.
 | Parser nesting | 64 | 256 |
 | AST nodes | 65,536 | 1,048,576 |
 | Generic instantiations | 1,024 | 16,384 |
-| Map alternatives per sequence | 64 | 1,024 |
+| PEG nodes per group (`pegNodes`) | 1,024 | 16,384 |
 | Array positions | 256 | 4,096 |
 | Regexp positions | 256 | 512 |
 | Reachable leaves per depth | 256 | 4,096 |
@@ -909,6 +941,14 @@ try {
 }
 ```
 
+**Looking a cache entry up before compiling.** `sourceKey` exists only after
+a compile, which is the step a cache is meant to skip, and no function
+computes it from text alone. Key the cache on your own digest of the CDDL
+text, the compile options and the pinned snug revision; store the serialized
+bytes with their `sourceKey` beside them; after `fromSerialized`, compare
+`schema.program.sourceKey` with the stored value and evict on a mismatch. In
+a browser, IndexedDB stores the `Uint8Array` directly.
+
 Every public Program verifies before use and owns copies of its arrays.
 `program.P` and `program.B` return copies for advanced interchange;
 `fromProgram(P, B)` also verifies. They are not generated-module imports.
@@ -916,7 +956,7 @@ The cache key already includes the snug version; effective defaults are
 normalised by kin (D039). The frozen source-key list does not include the
 leaf limit: a successful compile's Program is the same under either leaf cap.
 
-The 96-byte header carries `snugprog`, container version 1, format 1.0,
+The 96-byte header carries `snugprog`, container version 1, format 2.0 (word value `2`, D318),
 word/pool lengths, a NUL-padded ASCII producer version, SHA-256 content digest
 and zero reserved bytes. Words are written/read little endian with DataView.
 The digest covers the whole container except its own 32 bytes. See
@@ -924,8 +964,9 @@ The digest covers the whole container except its own 32 bytes. See
 
 The current [D084 rule](../DEVLOG.md#d084--a-stable-versioned-serialised-program-with-a-compatibility-rule) is: format major
 must equal the loader's, minor must be no greater than the loader's. In the
-32-bit format word, low 16 bits are major and high 16 bits are minor; 1.0
-therefore retains word value 1. Current loader 1.0 refuses every newer minor.
+32-bit format word, low 16 bits are major and high 16 bits are minor; 2.0
+therefore has word value 2. The current loader (2.0) refuses every 1.x
+Program and every newer minor; evict and recompile such a cache entry.
 The producer snug version is retained as provenance and may differ. Every
 load checks framing/digest and runs kin's structural verifier. Deterministic
 bytes round-trip, including accepted producer metadata.
@@ -1129,6 +1170,36 @@ const config :Workerd.Config = (
 
 Run an existing native binary with
 `"$SNUG_WORKERD" serve worker-dist/config.capnp`; no deployment is required.
+**Browser dedicated Worker.** The same compiler-free Program works in a
+module Worker created by a page. The Worker holds the Schema; the page
+sends bytes and receives plain results:
+
+```js
+// validator-worker.mjs — bundled like worker.mjs above
+import stored from './program.json';
+import { fromSerialized } from 'snug/schema';
+const ready = fromSerialized(Uint8Array.from(stored));
+self.onmessage = async ({ data }) => {
+  const schema = await ready;
+  // A ValidationResult is a plain object, so it posts back unchanged.
+  self.postMessage({ id: data.id, result: schema.validate(data.bytes, 'message') });
+};
+```
+
+```js
+// page.mjs
+const worker = new Worker(new URL('./validator-worker.js', import.meta.url), { type: 'module' });
+worker.onmessage = ({ data }) => console.log(data.id, data.result);
+const bytes = new Uint8Array([0xa1, 0x62, 0x69, 0x64, 0x07]); // {"id": 7}
+worker.postMessage({ id: 1, bytes }, [bytes.buffer]); // transfer, do not share
+```
+
+`Schema` and `Program` objects cannot cross a thread boundary:
+`postMessage(schema)` does not throw, but the copy is a plain object without
+methods. Send `schema.program.serialize()` bytes and call `fromSerialized`
+on the other side, or compile there. A worker that compiles at runtime needs
+`{ type: 'module' }` and the split build, so the compiler chunk loads.
+
 To reproduce the fuller local browser/workerd checks, from the repository:
 
 ```sh
@@ -1153,6 +1224,9 @@ Recorded evidence, **2026-11-03**, staged revision **f275938** (esbuild 0.28.2):
 The old source arm checks profile scanning, not the later CDDL source API.
 The full compiler-free public runtime artifact was **56,226 bytes gzip-9**
 in that record, covering codec/schema/view/writer/sources, not just a VM core.
+Format 2.0's PEG engine has grown it since: on 2026-11-12 the whole compiler-free
+runtime (`all-runtime` in `tools/size`) was 99,905 bytes gzip-9, and a Worker
+importing only `fromSerialized` from `snug/schema` about 54 KB.
 See the [evidence index](../bench/README.md#current-evidence-index--2026-11-03)
 for size boundaries and older snapshots.
 

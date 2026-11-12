@@ -20,28 +20,29 @@ export interface Limits {
   maxItems?: number;
 }
 /** Wire profile options (D120): `wire` picks a preset, any other option overrides it. (`profile` is the compiler's
- * separate restriction set.) Every value only removes
- * acceptance relative to RFC 8949 §4.2.1 core deterministic encoding. */
+ * separate restriction set.) 'valid' (the default, D260) accepts any valid RFC 8949 CBOR; 'deterministic' also
+ * requires RFC 8949 §4.2.1 core deterministic encoding; 'bindle' restricts further. */
 export interface ProfileOptions {
-  /** Default 'deterministic'. */
-  wire?: 'deterministic' | 'bindle';
-  /** Map key kinds: text only, text and integers (major 0/1), or any item. deterministic: 'any'; bindle: 'text'. */
+  /** Default 'valid'. */
+  wire?: 'valid' | 'deterministic' | 'bindle';
+  /** Map key kinds: text only, text and integers (major 0/1), or any item. valid/deterministic: 'any'; bindle: 'text'. */
   keys?: 'text' | 'integer' | 'any';
   /** The Bindle tag set; the standard set adding 0, 1, 21-24, 32, 55799; or any tag number (D180), the known tags
-   * keeping their content rules. deterministic: 'any'. */
+   * keeping their content rules. valid/deterministic: 'any'. */
   tags?: 'bindle' | 'standard' | 'any';
-  /** Bindle refuses NaN, ±∞, −0 and safe-range integral floats; deterministic is RFC 8949 (canonical NaN f97e00). */
+  /** Bindle refuses NaN, ±∞, −0 and safe-range integral floats; 'deterministic' (the value under both the valid
+   *  and deterministic presets) is RFC 8949: any NaN under valid, canonical NaN f97e00 under deterministic. */
   floats?: 'bindle' | 'deterministic';
   /** The simple values other than false/true/null: undefined (f7) and the unassigned ones (Simple, D284).
    * valid/deterministic: true; bindle: false. */
   undefinedValue?: boolean;
-  /** Unicode noncharacters in text. deterministic: true; bindle: false. */
+  /** Unicode noncharacters in text. valid/deterministic: true; bindle: false. */
   noncharacters?: boolean;
 }
 export interface DecodeOptions extends Limits, ProfileOptions {
   /** Accepted for preset spreading; ignored while reading/checking. */
   strictArrays?: boolean;
-  /** Codec, view and profile-source default: the preset's ('any' for deterministic, 'map' for bindle). Schema default: 'any'. */
+  /** Codec, view and profile-source default: the preset's ('any' for valid/deterministic, 'map' for bindle). Schema default: 'any'. */
   top?: 'map' | 'any';
   /** Under keys 'text': safe integer labels in the top-level map; materialises that map as Map. */
   cose?: boolean;
@@ -54,7 +55,7 @@ export interface EncodeOptions extends Limits, ProfileOptions {
   objects?: 'null' | 'plain';
   cose?: boolean;
   omitUndefined?: boolean;
-  /** Default: the preset's (deterministic false: ignore extra array own properties; bindle true: the strict own-key
+  /** Default: the preset's (valid/deterministic false: ignore extra array own properties; bindle true: the strict own-key
    * count check). Holes are refused in both modes. */
   strictArrays?: boolean;
 }
@@ -65,7 +66,7 @@ export type ProfileCode = 'truncated' | 'non_shortest' | 'indefinite' | 'malform
 export type SchemaReason = 'type' | 'missing' | 'unexpected' | 'value' | 'size' |
   'range' | 'pattern' | 'tag' | 'bits' | 'embedded' | 'control' | 'control_size' | 'group_limit' | 'budget';
 export type Reason = SchemaReason | `cbor/${ProfileCode}`;
-export type FaultCode = ProfileCode | 'unsupported' | 'grammar' | 'writer_failed' | `schema/${SchemaReason}`;
+export type FaultCode = ProfileCode | 'unsupported' | 'grammar' | 'writer_failed' | `schema/${SchemaReason}` | 'sessions/limit';
 export declare class SnugFault extends Error {
   constructor(code?: string, message?: string);
   code: string;
@@ -78,8 +79,10 @@ export declare const LIMITS: Readonly<{
   maxBytes: 1500000; maxDepth: 32; maxEntries: 65536; maxItems: 131072;
   maxBignumBytes: 128; minDecimalExponent: -1024; maxDimensions: 8;
 }>;
-/** The two presets spelled out as frozen option objects (D120). */
+/** The three presets spelled out as frozen option objects (D120, D260). */
 export declare const profiles: Readonly<{
+  valid: Readonly<{ wire: 'valid'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
+    floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
   deterministic: Readonly<{ wire: 'deterministic'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
     floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
   bindle: Readonly<{ wire: 'bindle'; top: 'map'; cose: false; keys: 'text'; tags: 'bindle'; floats: 'bindle';

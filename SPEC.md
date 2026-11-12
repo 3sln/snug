@@ -62,8 +62,8 @@ the release process are in [docs/release-policy.md](docs/release-policy.md)
 * Not a code generator for CDDL types.
 * Not a complete RFC 8610 implementation: `.pcre` and unsupported regexp
   constructs are refused (D013, D242–D243); `.abnf` / `.abnfb` (RFC 9165 §3)
-  need the optional ABNF module (D334) and are refused without it; maps the
-  determinism rule cannot decide are refused (D011). Every refusal is a schema
+  need the optional ABNF module (D334) and are refused without it; left
+  recursion in groups is refused (D272). Every refusal is a schema
   error at compile time, never a different meaning. `.feature` is a no-op
   annotation (D013 amended). The precise current subset and reasons for
   refusals are in [CDDL support](docs/cddl-support.md).
@@ -73,17 +73,24 @@ the release process are in [docs/release-policy.md](docs/release-policy.md)
 CDDL as RFC 8610 with RFC 9165 controls and RFC 9682 grammar updates, with
 these precise choices (each with a decision):
 
-1. Matching is exact: type choices, group choices and array occurrences are
-   evaluated as sets, without backtracking or greedy shortcuts (D010).
-2. Maps are closed. Map matching follows RFC 8610's existential semantics,
-   computed by a greedy priority assignment that the compiler proves
-   equivalent or refuses (D011).
+1. Type choices `/` are evaluated as sets (D010); for a single item this
+   equals Appendix A's prioritised choice. Groups in arrays and maps follow
+   RFC 8610 Appendix A's PEG semantics: `//` locks in the first alternative
+   that succeeds, occurrences are greedy, and nothing is retried (D270,
+   D272; architecture §20). This supersedes format 1's set semantics.
+2. Maps are closed. Members pick pairs from the whole map in a value-defined
+   order (RFC 8610 §3.5.3); a cut (`name:`, `"lit":`, `^=>`) follows §3.5.4
+   literally by default, so a cut key whose value fails fails the entire map
+   (`cuts: 'rfc'`, D301); `cuts: 'branch'` is the reference tools' reading.
 3. `.regexp` defaults to XSD Appendix F, with RFC 9485 I-Regexp as a compile
    option; both match the whole text. Unicode categories require explicit
    compile-time tables; block escapes are refused pending pinned block data
    (D242–D243).
-4. `float16`/`float32`/`float64` mean the encoded width; under the profile's
-   shortest-form rule this is narrower than it looks (architecture §4.8).
+4. `float16`/`float32`/`float64` are sets of values, as RFC 8610 §3.3 says,
+   not encoded widths: a float matches when its value is exactly
+   representable at that width, whatever width carried it (`float32`
+   matches a shortest-form 1.5 encoded as binary16; `float64` matches every
+   float) (D328, superseding architecture §4.8's encoded-width rule).
 5. `uint` is major type 0 only; `integer` and `unsigned` include bignums.
 6. `.size` on text counts UTF-8 bytes.
 7. A **compiler profile** (`full`, `bindle`, `bus`) restricts the accepted CDDL; it

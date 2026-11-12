@@ -50,7 +50,7 @@ The crate root exports:
 | API | Contract |
 | --- | --- |
 | `Value`, `Integer`, `TypedArray` | Exact integers; owned byte, text, array and map values; dedicated decimal, typed-array and ndarray variants; explicit tags |
-| `decode`, `DecodeOptions`, `Top`, `Limits` | The generated scanner checks the bytes first, then a trusted builder makes owned values. The root must be a map by default |
+| `decode`, `DecodeOptions`, `Top`, `Limits` | The generated scanner checks the bytes first, then a trusted builder makes owned values. Any root by default (`Top::Map` or the Bindle preset requires a map) |
 | `encode`, `EncodeOptions`, `Writer` | Heads, integers, float widths and map order are decided by the generated code. Any root; output growth is bounded, and the output is checked by the scanner at the end |
 | `Schema`, `CompileOptions`, `CompileLimits`, `CompilerProfile` | Compile synchronously or load a verified Program. Validate with a reusable, caller-owned `Scratch`. A schema accepts any root by default |
 | `ValidationOptions`, `Failure`, `Segment` | Runtime caps can only lower the compiled limits. Refusals give a deterministic, safe witness: reason, path, offset and embedded subcode |
@@ -65,8 +65,11 @@ Some enums are `#[non_exhaustive]`, so a `match` on them needs a fallback
 arm. The Rust guide lists which ones, and why.
 
 The older `compile`, `schema`, `sha256`, `unicode_tables` and generated
-`snug` modules are public only for snug's own test hosts. Use the crate-root
-API instead.
+`snug` modules are public mainly for snug's own test hosts. Use the
+crate-root API, plus the few items public signatures need that are not
+re-exported yet: `compile::SchemaError`, `compile::{Cuts, Regexp}`,
+`schema::SourceError`, `controls::Controls` and `unicode_tables::tables()`
+(see the Rust guide, `docs/rust.md`).
 
 The Rust guide, `docs/rust.md` in the snug repository, covers ownership,
 errors, sessions, sequences, extension controls and the exact numeric

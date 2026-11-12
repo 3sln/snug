@@ -488,7 +488,8 @@ items are for the release commit or for earlier items:
 > `ci/gate-map.edn` with `bb gates` and `bb identity`. Still open, waiting
 > for owner decisions: the version number (O1, O2), `engines` and
 > `rust-version` (O7), the SDK staging (O3), the Unicode notice (O6), the
-> registry names (O4) and the repository URL. The text below is the
+> registry names (O4) and the repository URL. The stale statements listed
+> at the end were corrected by P9.10 (2026-11-12). The text below is the
 > P9.11 record.
 
 - **Version sites**:

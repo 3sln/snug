@@ -1,5 +1,23 @@
 # snug spec-conformance audit — 2026-11-04
 
+> **Read this first: this is a dated audit, not a statement of current behaviour (status 2026-11-12, P9.10).** It audited the format 1 engine. Since then format 2.0 (D270, D272) matches groups by RFC 8610 Appendix A's PEG semantics and applies the §3.5.4 cut literally by default (D301), and many defects found here are fixed. The current behaviour is in [CDDL support](cddl-support.md) and [profiles](profiles.md); where they disagree with this audit, they win. Checked on the 2026-11-12 package:
+>
+> | Audit statement | Current behaviour | Deciding change |
+> | --- | --- | --- |
+> | The default reads deterministic CBOR only | the `valid` preset reads any valid CBOR | D260 |
+> | Arrays are existential: `[* uint, uint]` accepts `[1]`, `[? uint, 2*3 uint, tstr]` accepts `[1,2,"x"]` (S28 non-conformant) | PEG: both rejected, as Appendix A says | D270, D272 |
+> | Map refusals `map_overlap`, `map_cut`, `map_group_occurrence` | withdrawn; those schemas compile | D270, D275, D294 |
+> | `{kind:"a", x:uint // kind:"b", y:tstr}` matches `{kind:"b",…}` (cut table) | rejected by default; `cuts: 'branch'` keeps the old reading | D301 |
+> | `float .lt 0.0` / `.ne 0.0` admit −0; `float .ne 1.5` refuses NaN; `float .lt 1` does not compile | fixed: signed zeros are one number, NaN passes `.ne`, mixed int/float comparisons compile | D250, D329 |
+> | An unplugged `$$x` matches empty (`[$$x]` accepts `[]`) | the empty group choice: matches nothing | D251 |
+> | `#7.32` does not compile; unassigned simple values refused | compiles; unassigned simple values are `Simple` | D284 |
+> | Tag 32 `http://[x` and tag 0 `…T00:00:60Z` accepted | both refused (`cbor/tag`) | D252 |
+> | 55799 only at depth 0 | any depth (Bindle refuses the tag) | D252 |
+> | Prelude float widths are encoded widths | sets of values | D328 |
+> | wasm SDK sequences deferred | `snug-wasm-sdk/sequence` exists (P7.13w) | — |
+>
+> The inventory totals below are the audit's and are not recomputed. `.default` (S46) is unchanged: snug still ignores the implied `.ne` (a documented deviation, see cddl-support).
+
 > **Superseded on the wire default, 2026-11-11 (P8.4).** The audited tree read deterministic CBOR only. Since P8.4 the default `valid` preset accepts any well-formed valid CBOR (RFC 8949 §5.3) on every public path, sequences included, refusing duplicates by value; deterministic checking is `wire: 'deterministic'` ([profiles](profiles.md#valid-cbor-p84-d260d268), D260–D268, D283–D286). The rows below that classify D081/D120/D126/D230 and the "cannot validate valid non-deterministic CBOR" findings describe that earlier tree; they are kept as the audit's record, not current behaviour.
 
 > **Quotation check, 2026-11-04 (later the same day).** The RFC texts were fetched from rfc-editor.org into `corpus/rfc/` (see its README). Every quotation and paraphrase in the "RFC basis" Q-table, and the inline RFC statements in the sections below, were checked against those texts. The full results are in `docs/reviews/2026-11-04-rfc-quotation-check.md`. The offline-quotation caveat in "Scope, evidence and quotation limits" is superseded for those statements. Quotations now verified verbatim: Q1, Q2, Q3, Q4 ("shortest form that preserves the value", in §4.2.1), Q7 ("Appendix F"), Q8 (the full clause is "the entire map fails to match") and Q10. Corrected in place: Q5 (the three all-ones tag numbers are in RFC 8949 §3.4, not §9.2; RFC 8949 does not call them permanently invalid but says implementations "MAY flag such an occurrence as an error"; reserved simple values 24..31 are in §3.3 Table 4). Q6 (RFC 8610 Appendix A, which is normative, makes array matching PEG: greedy occurrences and prioritised choice). Q7 ("implicitly anchored at both ends" is not RFC 8610 text; I-Regexp syntax is RFC 9485 §3, not §2). Q8 (the cut paraphrase). Q11 (`.default` implies `.ne`). Q12 (`.pcre` is in §3.8.3.2). Q13 (RFC 9682 changes neither the prelude nor sockets). Q14 (tag 40 extents must be nonzero). Also corrected: the RFC 9485 section numbers in D014/D083/D110/D111/S37–S40, D180/S08, S07, S24, S32, and passages in (b), (h), (i) and (j).
@@ -238,7 +256,7 @@ Each row has exactly one of the requested classifications. The **142 D rows** co
 | S11 | Decimal fractions | Only exponent −1024..−1, nonzero mantissa without factor 10. This is a local normalisation policy. | 8949 §3.4.4, §4.2.2 | **deliberate deviation** | E1 tag4positive/trailingZero/zero→decimal; not required by §4.2.1 |
 | S12 | Scalar NaNs | Only f97e00, not signed/payload/signaling NaNs; extra NaN profile rule. | 8949 §§4.1,4.2.1–4.2.2; Q4 | **deliberate deviation** | E1 canonical accepted, sign/payload/signaling refused; wider canonical non_shortest |
 | S13 | Bindle floats | Reject infinities, zeros, safe integral floats, NaN. | 8949 §§3.3,4.2.2; local application policy | **deliberate deviation** | E1 wire comparison; E0 reason retained from Bindle |
-| S14 | Float widths | Prelude float16/32/64 select encoded widths; shortest-wire rule reduces each domain. | 8610 §3.1, Appendix D; 8949 §4.2.1 | **conformant** | E1 float-width32: f93e00 rejected type, fa3f800001 accepted |
+| S14 | Float widths | *(Corrected 2026-11-11, D328.)* Prelude float16/32/64 are sets of values (RFC 8610 §3.3), whatever width encodes them; the original audit recorded encoded-width semantics. | 8610 §3.3, Appendix D; 8949 §4.2.1 | **conformant** (since D328) | Original E1 float-width32: f93e00 rejected; after D328 f93e00 (1.5) matches `float32`; see the corrected notes below |
 | S15 | Float zero comparisons | float .lt 0.0, float .gt -0.0, float .ne ±0.0 wrongly admit zero. | 8610 §3.8.6 numeric comparisons | **non-conformant** | E2 float-ne-zero; E9 numeric-lt-0p0,ne-0p0; zero-extra.log |
 | S16 | Float inequality/NaN | float .ne 1.5 rejects NaN although the exclusion is of 1.5; lowering to ordered intervals loses NaN. | 8610 §3.8.6 .ne; IEEE NaN inequality | **non-conformant** | E9 float-ne-ordinary: canonical NaN fails; Ruby accepts; Rust also fails (shared bug, not authority) |
 | S17 | Numeric literals | 0.0 matches both signed zeros in actual runtime; 1 and 1.0 retain distinct CBOR numeric kinds. | 8610 §3.1; 8949 generic numeric data model | **conformant** | E1 float-zero-literal accepts both; E2 int-literal-one/float-literal-one; Ruby differs on int/float kind |
