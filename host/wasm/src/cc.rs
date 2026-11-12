@@ -99,7 +99,8 @@ pub extern "C" fn cc_pool() -> *const u8 {
 }
 /// The error: a buffer holding the code name, the rule name, then the detail
 /// (D141: an unknown control's name). INFO: code length, line, column, rule
-/// length (-1 none), detail length (-1 none), 1 when Unicode tables were needed.
+/// length (-1 none), detail length (-1 none), 1 when Unicode tables were needed
+/// (2 block data, 3 the ABNF controls, D334).
 #[no_mangle]
 pub extern "C" fn cc_error() -> *const u8 {
     let s = st();
@@ -117,7 +118,8 @@ pub extern "C" fn cc_error() -> *const u8 {
             Some(d) => { buf.extend_from_slice(d.as_bytes()); s.info[4] = d.len() as i32; }
             None => s.info[4] = -1,
         }
-        s.info[5] = if e.message.contains("block data") { 2 } else { e.message.contains("unicode_tables") as i32 };
+        s.info[5] = if e.message.contains("block data") { 2 } else if e.message.contains("ABNF controls") { 3 }
+            else { e.message.contains("unicode_tables") as i32 };
     }
     s.text.clear();
     s.text.extend_from_slice(&buf);

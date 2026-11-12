@@ -42,6 +42,7 @@ pub const ERR_ARRAY_KEY: i32 = 53;
 pub const ERR_NEED_UNICODE: i32 = 54;
 pub const ERR_CONTROL_REGISTRY: i32 = 55;
 pub const ERR_REGEXP_BLOCK: i32 = 56;
+pub const ERR_NEED_ABNF: i32 = 57;
 pub const H_TOP: i32 = 0;
 pub const H_ERR: i32 = 1;
 pub const H_ERR_POS: i32 = 2;

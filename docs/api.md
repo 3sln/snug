@@ -194,7 +194,7 @@ metadata. The public error message uses the code and position.
 ```ts
 type Control = ((argument: Uint8Array, item: Uint8Array) => boolean) |
   { check(argument: Uint8Array, item: Uint8Array): boolean; maxBytes?: number;
-    argument?(argument: Uint8Array): boolean; cost?(itemBytes: number): number };
+    argument?(argument: Uint8Array): boolean | string; cost?(itemBytes: number): number };
 type Controls = Record<string, Control>;
 export const chars: Control, unique: Control, samelen: Control;
 export const controls: { chars, unique, samelen };
@@ -220,7 +220,45 @@ are format 1.1 and need the registry to load
 `new Program(P, B, { controls })`); a missing name is
 `ProgramError('missing_control')` naming it; `program.controls` lists the
 names used. Name rule: `[A-Za-z_][A-Za-z0-9_-]*`, at most 64 bytes, not a
-built-in control.
+built-in control. `argument(bytes)` is asked once per use at compile time:
+anything but `true` refuses the schema (`control_value`), and a string answer
+is the refusal's detail in the message.
+
+## ABNF: `snug/abnf`
+
+```ts
+export const abnf: Readonly<{ abnf: Control; abnfb: Control }>;
+export function abnfWith(o?: { maxBytes?: number; maxWords?: number }): typeof abnf;
+export function checkAbnf(text: string | Uint8Array): true | string;
+```
+
+RFC 9165 §3's `.abnf` (Unicode scalars) and `.abnfb` (bytes), an optional
+module (D334): spread it into the registry of `compile` and of the loaders.
+
+```js
+compile(text, { controls: { ...abnf } })        // with others: { ...controls, ...abnf }
+fromSerialized(bytes, { controls: { ...abnf } })
+```
+
+They are the only entries that may use these two built-in names. Without the
+module, `.abnf`/`.abnfb` are `unsupported_control`, and the message names
+`snug/abnf`. A stored Program that uses them fails to load with
+`ProgramError('missing_control')`.
+
+The controller is checked at compile time. Prose-val, syntax errors and
+undefined rules are `control_value`, with a detail like `(.abnf argument:
+prose-val (<...>) is not supported at ABNF line 2, column 11)`. The
+controller is prepared once per Program. The match is metered in kin against
+the budget left, so every host charges the same units. Past the budget, or
+past the matcher's scratch cap, validation stops with `budget`.
+`abnfWith({ maxBytes, maxWords })` gives both controls other bounds:
+`maxBytes` is the item bound (default 65,536); `maxWords` is the scratch cap
+in words (default 4,194,304 = 16 MiB, the PEG group arena's default, D281;
+65,536 to 16,777,216, otherwise `TypeError`).
+
+`checkAbnf(text)` answers `true`, or the reason the compiler would refuse.
+Semantics, leniencies and costs:
+[CDDL support](cddl-support.md#abnf-abnf-abnfb).
 
 ## Unicode tables: `snug/unicode`
 

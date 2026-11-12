@@ -28,7 +28,7 @@
                                         mix ht-init ht-start ht-id ht-next ht-put
                                         INF ERR_INTERNAL ERR_UNDEFINED ERR_KIND ERR_GENERIC
                                         ERR_NONPRODUCTIVE ERR_GROUP_RECURSION ERR_UNWRAP ERR_ENUM
-                                        ERR_RANGE ERR_CONTROL_VALUE ERR_UNSUPPORTED_CONTROL
+                                        ERR_RANGE ERR_CONTROL_VALUE ERR_UNSUPPORTED_CONTROL ERR_NEED_ABNF
                                         ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_SYNTAX ERR_TAG ERR_MAJOR
                                         ERR_PROFILE ERR_LIM_INST ERR_LIM_NESTING
                                         H_R0 H_R1 H_R2 H_R3 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
@@ -459,12 +459,16 @@
   (let [tok (nc h node)
         code (ctl-code h tok)
         pos (npos h node)]
-    (if (== code 0)
+    (comment "A registered control, or .abnf / .abnfb (codes 20, 21): EXT leaves of the"
+             "ABNF module's controls `abnf` / `abnfb` when it is in the registry (D334).")
+    (if (or (== code 0) (>= code 20))
       (do (let [nt (tk-a h tok)
                 id (ext-lookup h nt (- (tk-end h tok) nt))]
-            (if (< id 0) (return (fail h ERR_UNKNOWN_CONTROL pos)))
+            (if (< id 0)
+              (do (if (== code 0) (return (fail h ERR_UNKNOWN_CONTROL pos)))
+                  (return (fail h ERR_NEED_ABNF pos))))
             (return (lower-ext h node env id pos)))))
-    (comment ".pcre, .abnf, .abnfb: refused before anything is lowered (D013).")
+    (comment ".pcre: refused before anything is lowered (D013).")
     (if (>= code 19) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
     (let [^I32 target (lower-type h (na h node) env)]
       (if (< target 0) (return (neg 1)))

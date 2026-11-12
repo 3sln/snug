@@ -87,6 +87,7 @@ export async function compile(text, options = {}) {
       const name = inf[4] >= 0 ? td.decode(m.subarray(p + inf[0] + rl, p + inf[0] + rl + inf[4])) : undefined;
       const detail = inf[5] === 1 ? '; Unicode categories require tables from snug/unicode'
         : inf[5] === 2 ? '; XSD block escapes require unavailable pinned Unicode block data'
+        : inf[5] === 3 ? '; .abnf and .abnfb require the ABNF controls from snug/abnf'
         : code === 'unknown_control' && name !== undefined ? ` (.${name} is not a registered control)` : '';
       c.cc_release();
       throw refused(code, inf[1], inf[2], rule, detail);
@@ -105,9 +106,9 @@ export async function compile(text, options = {}) {
   if (P[30] !== 0) {
     const names = programControls(P, B), byName = new Map(entries.map(e => [e.name, e]));
     for (const { id, argument } of programArguments(P, B)) {
-      const entry = byName.get(names[id]);
-      if (entry.argument && entry.argument(Uint8Array.from(argument)) !== true)
-        throw refused('control_value', 0, 0, undefined, ` (.${entry.name} argument)`);
+      const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument)) : true;
+      if (r !== true)
+        throw refused('control_value', 0, 0, undefined, ` (.${entry.name} argument${typeof r === 'string' ? ': ' + r : ''})`);
     }
   }
   return new Schema(new Program(P, B, controls === undefined ? {} : { controls }));

@@ -1234,3 +1234,41 @@ rows are where D253 left them. `embedded` rose (1.57 → 2.15 JS, 1.35 →
 1.65 Rust); the cause is not analysed here. It is the dearest row and the
 first candidate for a price if the band is tightened. Rows not listed moved by less than the load noise
 (see the raw record).
+
+## ABNF calibration — 2026-11-12 (P9.14, D334)
+
+**Method**: `node bench/abnf-calib.mjs` (CPU time from `process.cpuUsage`,
+best of 7 rounds; short calls are repeated until a round takes ≥ 20 ms). Each
+row calls kin's `abnfRun` directly under the default 2.25 M budget, and its
+units are the run's own. The VM's EXT charge (1 + 16 per call) comes on top in
+real validation. The VM's reference row (the six-way choice of maps, generic
+dispatch, as in `vm-calib.mjs`) is measured in the same process. D191's rule
+is that each kind of metered work costs no more CPU per unit than that row.
+"cold" is a run from a fresh first scratch (`abnfScratchWords`), with any
+growth reruns and allocations, as the hosts run it after giving a large
+scratch back.
+
+**Environment**: Apple M1 Pro, macOS (Darwin 23.6.0), Node v24.6.0. The
+machine was shared: load average 56.7 / 35.7 / 22.8 at the start.
+
+| Row | Verdict | Units | CPU ms | ns/unit | × VM | cold ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| VM reference (six-way choice of maps, 24k msgs) | — | 216,006 | 2.3 | 10.7 | 1 | — |
+| ambiguous `a = a a / "x"`, 200 x | budget | 2,250,000 | 16.7 | 7.4 | 0.69 | 18.4 |
+| ambiguous with `""`, 200 x | budget | 2,250,000 | 18.0 | 8.0 | 0.75 | 17.9 |
+| right recursion, 3,000 x | budget | 2,250,000 | 17.1 | 7.6 | 0.71 | 23.1 |
+| left recursion, 60,000 x | match | 1,770,026 | 16.2 | 9.2 | 0.86 | 16.4 |
+| nested nullable stars, 20,000 x | budget | 2,250,000 | 17.8 | 7.9 | 0.74 | 18.4 |
+| `1000*2000("x" / "x" "x")`, 1,500 x | budget | 2,250,000 | 17.8 | 7.9 | 0.74 | 18.6 |
+| 300 alternatives, 3,000 `~` | refused | 2,236 | 0.02 | 10.9 | 1.02 | 0.1 |
+| RFC 3339 date-time list, 4,000 dates | budget | 2,250,000 | 22.5 | 10.0 | 0.94 | 22.5 |
+| long literal choice | match | 2,163,759 | 21.0 | 9.7 | 0.91 | 34.1 |
+| 256 nested groups, 2,000 a | match | 38,757 | 0.4 | 9.2 | 0.86 | 0.4 |
+
+The weights are in kin/abnf.kin and in program.md §14. They were raised
+about 5× from the first draft, which measured 3–10× the VM per unit before
+calibration. The worst row is at the reference's cost per unit. The
+300-alternatives row is a 20 µs call, and its 1.02 is within the timer's
+grain: an earlier run under heavier load measured 0.91. Every row stops
+within about 23 ms of CPU (34 ms cold), under the ~50 ms the default budget
+targets. A single 27-character date-time costs about 760 units.

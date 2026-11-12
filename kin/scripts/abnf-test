@@ -1,0 +1,23 @@
+#!/bin/sh
+# P9.14 (D334): `.abnf` / `.abnfb` -- the ABNF engine (kin/abnf.kin) against the
+# independent oracle (corpus/tools/abnf-oracle.mjs), the hand and RFC 9165 vectors,
+# budget exhaustion at every room, the memory cap, scratch growth, and JS == Rust on
+# a debug build (every status, line, column and verdict word compared whole).
+#     kin/scripts/abnf-test [grammars] [seed]        (defaults 600 1)
+#
+# The Rust crate holds the generated abnf module and the abnf test binary only, so a
+# sibling's unfinished module cannot break it.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" abnf-test -- "$0" "$@"   # P9.1 caps
+set -e
+cd "$(dirname "$0")/../.."
+host=.cache/abnf-host
+mkdir -p "$host/bin"
+printf '//! ABNF test crate: the generated abnf module.\npub mod snug;\n' > "$host/lib.rs.new"
+cmp -s "$host/lib.rs.new" "$host/lib.rs" 2>/dev/null || mv "$host/lib.rs.new" "$host/lib.rs"; rm -f "$host/lib.rs.new"
+cmp -s host/rust/src/bin/abnf.rs "$host/bin/abnf.rs" 2>/dev/null || cp host/rust/src/bin/abnf.rs "$host/bin/abnf.rs"
+crate=.cache/snug-abnf
+SNUG_RS_ONLY="abnf.rs" ./kin/scripts/rust-crate "$crate" "$host"
+if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --offline --quiet --bin abnf 2>&1); then
+  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
+fi
+node kin/scripts/abnf-test.mjs "$crate/target/debug/abnf" "$@"

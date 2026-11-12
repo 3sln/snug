@@ -605,15 +605,20 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
     let tok: i32 = nc(h, node);
     let code: i32 = ctl_code(h, tok);
     let pos: i32 = npos(h, node);
-    if code == 0 {
+    // A registered control, or .abnf / .abnfb (codes 20, 21): EXT leaves of the
+    // ABNF module's controls `abnf` / `abnfb` when it is in the registry (D334).
+    if (code == 0) || (code >= 20) {
         let nt: i32 = tk_a(h, tok);
         let id: i32 = ext_lookup(h, nt, tk_end(h, tok) - nt);
         if id < 0 {
-            return fail(h, ERR_UNKNOWN_CONTROL, pos);
+            if code == 0 {
+                return fail(h, ERR_UNKNOWN_CONTROL, pos);
+            }
+            return fail(h, ERR_NEED_ABNF, pos);
         }
         return lower_ext(h, node, env, id, pos);
     }
-    // .pcre, .abnf, .abnfb: refused before anything is lowered (D013).
+    // .pcre: refused before anything is lowered (D013).
     if code >= 19 {
         return fail(h, ERR_UNSUPPORTED_CONTROL, pos);
     }

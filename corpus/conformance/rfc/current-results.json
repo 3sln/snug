@@ -8,8 +8,8 @@
         "fail": 0
       },
       "baseline": {
-        "pass": 748,
-        "fail": 12
+        "pass": 757,
+        "fail": 3
       },
       "D270": {
         "pass": 14,
@@ -21,15 +21,15 @@
       }
     },
     "checks": 999,
-    "pass": 987,
-    "fail": 12,
-    "classified": 12,
+    "pass": 996,
+    "fail": 3,
+    "classified": 3,
     "unexplained": 0,
     "stale": 0,
     "compilation": {
       "extracted": 108,
-      "rawFailures": 36,
-      "effectiveFailures": 6
+      "rawFailures": 33,
+      "effectiveFailures": 3
     },
     "ruby": {
       "checked": 320,
@@ -38,43 +38,46 @@
     }
   },
   "runtimeStart": {
+    "../../host/js/src/abnf.mjs": "2d9a7470228d4daa748d4748c2d0331a0c6ebb18df0b7fb191ae8b1fe92f4cea",
     "../../host/js/src/any-program.mjs": "63d8d2e58641bb5a85af4b0cd1d5db56545ad179178ae1ae323da97642efd7e8",
     "../../host/js/src/build.mjs": "5304f32ab52503a1f8155a59eb68dcccb7b8cdf33f20c95ddf46ce1c09bd5772",
     "../../host/js/src/compile-runtime.mjs": "f6a33a637d6fa060dd052109287292abb430c0db71b610b75b0c23a72b372a9a",
-    "../../host/js/src/compile.mjs": "11bbf6a1b6ddfdfcbcf6e6e44a1772d217ca1aa9a382a426edb6faf4f74e89d5",
+    "../../host/js/src/compile.mjs": "9cc272a02518bc33cea318a1db292c6996c1f67228ade3a1878a07d710a008b2",
     "../../host/js/src/controls.mjs": "90b249708ccda75be548a0216ba8b8d091c9c6f6c341e6a69c00f15d741d4dc1",
     "../../host/js/src/encode.mjs": "e6476ae65e133ca6b1f582d40ea4c128d7a574a36ba3ac45e118671b46685dd9",
-    "../../host/js/src/ext.mjs": "d27fbaf8d6561b3ac289c0d1d6636bf2228e7166b9585be797f00cca26a3efd4",
+    "../../host/js/src/ext.mjs": "f4704f10857cf545a15f81b796e4e11d30e882eae3a9603bcfa4a288852f56ed",
     "../../host/js/src/fault.mjs": "68b45f0c56b26044d97bc6239ab61d3aab998039dcc3edc56f77544eca27ff71",
     "../../host/js/src/index.mjs": "47e49541958ea1124b27452383c3cb090f1483929d417e8a75a798f28e5949e2",
     "../../host/js/src/limits.mjs": "74b4ac02678d836fea5fdb3493dc08cb512a19181e0d0d945b29f282c57760f8",
-    "../../host/js/src/open-session.mjs": "ec66130f35dcc6bb2e07fde6e910fa2af4394c5eedc33ed2c1c0352ba7fc5ebc",
+    "../../host/js/src/open-session.mjs": "e35c8252c77e0d82f5eca9db8d2aa2b54955c2236aaa87b1503a14d41063b753",
     "../../host/js/src/options.mjs": "6b13703add81fd157f98415b553564a116fd1fb508c58367f5eb227a8c5d01fc",
     "../../host/js/src/package-build.mjs": "f7eeb7844e01d10b0391ca5a065ea99de5beeaa0405faff3ff82724375181c53",
     "../../host/js/src/profiles.mjs": "affc3169b232405d82ae09a9c2d24bf6b32b74cd4e4b8497e8610e83734ce3c7",
     "../../host/js/src/public-compile.mjs": "1249f5bc050c61d489eaa248d87f1c612baf653bd7bb12ab37ca069921b52b09",
     "../../host/js/src/public-errors.mjs": "abfab9f256308351c5465cbaa6235d2faba163eedd5a2f10d069429dc387a759",
     "../../host/js/src/public-schema.mjs": "98ce8fd10bafc344a573628e2f39dfb104105706060c5f17f919b6d111b5d36e",
-    "../../host/js/src/public-sequence.mjs": "ac03b48cd444d5fb5a8bb2de114c00fc4262de8e91ca66f7d41309d4b6a74f11",
-    "../../host/js/src/public-sources.mjs": "53d2df7184e18f57f815a2e632873bca4e9519c86d2602aa5c1e45a83c5fabdb",
+    "../../host/js/src/public-sequence.mjs": "c55fd6d83ddf6e88cf5b681969e9b52d6988669fb8e685cc1a686f5e6c08d935",
+    "../../host/js/src/public-sources.mjs": "21cb9e220a6a188e9dfc2b4f665cb73b86dbbe643d08c059eca021e464300377",
     "../../host/js/src/public-view.mjs": "74b1ec70c365b29c2dfcd2d4944661aca9fff4a18c9ba663955e795b1301803e",
     "../../host/js/src/public-writer.mjs": "4872df6b78611f06d7253cd36b992d8d0c3037fc57b8409b7b4b670eea081b9f",
     "../../host/js/src/scan.mjs": "194567f5f96fb1366264fd1f3ed8a5bc71897f44971fc5d04e1447db04be40b3",
     "../../host/js/src/schema-core.mjs": "dea4105a3f502ed58685cbb514be1ff234a182ddca9872cf0392aaf2e56113cd",
     "../../host/js/src/schema-state.mjs": "d56d0961643d4b1e782110a73a18f5f4c011652ad4eb0f64a066b0f20e50b6b7",
     "../../host/js/src/schema.mjs": "a322f793ee046942a363e4700535e522a4a8af812e69d0f9928e87ff61704c96",
-    "../../host/js/src/sequence-core.mjs": "830d2d52f1e1695b77f6e141817b6dabf773fc380b01eae17262c539a0a43406",
-    "../../host/js/src/sequence.mjs": "622e4470a79bfca234d9432a28b080caa3e227bd1035c686200e87da72649254",
+    "../../host/js/src/sequence-core.mjs": "530cd0ef72b398786e55de99e3d1d746df20b3ccfd09f66265d9a53b449801cf",
+    "../../host/js/src/sequence.mjs": "22c177b1ca5199a283672736253b26c8127bcf41ce80623dbe88c95083aa4e72",
     "../../host/js/src/serialized.mjs": "ed0346f317a47bc65ae169bae87807ac99ce37a37f844cddc4e4141f27286353",
+    "../../host/js/src/session-pool.mjs": "f9b87d64f52afb6d3e42f5ad8fb474860a00d387a128acb3ccfae168020da864",
     "../../host/js/src/sha256.mjs": "880d53c17b324728092c034ff4db78c463ae48994c34b4d05b6cfd9b5744d9c2",
-    "../../host/js/src/sources.mjs": "2e379f82977c702ad66e9c53befbd87672e00e882cf832be8db8ecea0dc2d14e",
+    "../../host/js/src/sources.mjs": "41ec1496c406f24b14e07a005d4be283e7db53fccc14cf28ba626cbaff321156",
     "../../host/js/src/typed-bytes.mjs": "8adcd17285e898d9ce467b21c97935e05fcc962944c5086ca52ee5ae56139d80",
     "../../host/js/src/unicode-tables.mjs": "a8d79e9af79e6f79cceee79071c56e616a1a1929b50aa8660271c16a56b34ffc",
     "../../host/js/src/values.mjs": "05e3f1197f845211b1511cb0aa9487cc37214b2606cf8961125521977600f623",
     "../../host/js/src/version.mjs": "3daac7bc0c4faff23b7b25688da1d0bf164210ecc30d2a66ec6d5af169e37581",
     "../../host/js/src/view.mjs": "36c3b87ee969831450ff72877473db2e2ea6d92026cce7e303a9400e0a16c302",
-    "../../host/js/src/vm-session.mjs": "c5b095cfebf76ff2e83366352c4820516973b689222f14ee5d5d0d4672187831",
+    "../../host/js/src/vm-session.mjs": "221dd6e2429a9c457ead7850bbdb8bca020b8f45336a6b6d4cdd40cae6b8ce8d",
     "../../host/js/src/writer.mjs": "19676f4fc93a83f3409af59f965e6db04f723cd2a70f296458015c962757ea04",
+    "../../gen/js/snug/abnf.mjs": "7beee8b99c8f0d5136266e6ea2dab8df72d8fb1bb14f86ad8bb5addf421e3f6b",
     "../../gen/js/snug/cbor/canon.mjs": "5882ec48a76ea9d2ba78c4178371e39b5f35b8800ec4561df9733c1d81af0238",
     "../../gen/js/snug/cbor/codes.mjs": "7daf82c6f788b6c14a3ecc5de8a4569e9004b02fab6877b8b98ab193f5f7fc7a",
     "../../gen/js/snug/cbor/float.mjs": "bfa1bde6295e71ef0d2ae24e07a6dca25fd72519dfe1dc77a03dfa5b33783f36",
@@ -86,16 +89,16 @@
     "../../gen/js/snug/cbor/tags.mjs": "5cf9e4feb5e7714e4328a244cc9091de6d67dd2d0e3e4f3cf3bafe02f962b6a4",
     "../../gen/js/snug/cbor/text.mjs": "1f4238df16edef0124f9d944332ffb4aaa8f7243dcc93f86f2da021227ed4dbf",
     "../../gen/js/snug/cbor/vcopy.mjs": "dbcc5348ce2959e2f30986866f084c1cef3da61221aea2d446ee6d0705dbcca4",
-    "../../gen/js/snug/compile/arena.mjs": "b95e033780427d3030563bd550feb363ea23eaaa0c444fbb674b250a24581c46",
+    "../../gen/js/snug/compile/arena.mjs": "6e59533ab6a0fdd317ef4e974dc97679d3917e3c1a3bd52c059328f2006e1392",
     "../../gen/js/snug/compile/bytes.mjs": "4f43004446b4cc5e9ed28aa7d10ff119d398de0812230a26abb70edf860d5749",
-    "../../gen/js/snug/compile/ctl.mjs": "1c887a4fd0a6db5c3a12ed26b751dd297c268daec0bf2312611ee611927befa0",
+    "../../gen/js/snug/compile/ctl.mjs": "41c9ae2db2296e6a1b896f894240d64753f19ebea580089d5cbd8c490c9187f1",
     "../../gen/js/snug/compile/emit.mjs": "863f35b2b176e8c548838db8baa88151fea689511b40a27356c3068d9f639d8c",
-    "../../gen/js/snug/compile/ext.mjs": "c86e31f3024ce9164cf607246a0513a6954769f7975b6d94254b4ccbf15208c9",
+    "../../gen/js/snug/compile/ext.mjs": "d37739b61940a9fbad956ae688535b6310a948a93eb52227e8442090939f6b0d",
     "../../gen/js/snug/compile/glush.mjs": "941463d9f49c82b9b24fa1265309d00f3f63d3e0695fa0e1e493a945c8b2cf8d",
     "../../gen/js/snug/compile/leaf.mjs": "ebb05c0771ddb6098239e513dfcb05e2ce3266a86c33ab66d7ac1bccefbfc8b5",
     "../../gen/js/snug/compile/lex.mjs": "dde6510489430666a6d306e52defc42539179ceb03508d89a5cfae49ded0e7bd",
-    "../../gen/js/snug/compile/lower.mjs": "f34d5625b272f217cbbdc1a4b8ab947c5347777bb9524c81e278c676c8c98329",
-    "../../gen/js/snug/compile/main.mjs": "00f366950f31601ea7b18f8aa3b82cd551e227203d9f14b9f7ccb00c6b08f3bf",
+    "../../gen/js/snug/compile/lower.mjs": "8235423e384072bb8f323b1cb14d84d876047f66e6a100e68d871048216729f1",
+    "../../gen/js/snug/compile/main.mjs": "80aab0932d86837418ace5e93b163e82d23e756586cf54785e2cdd1750c5a87a",
     "../../gen/js/snug/compile/parse.mjs": "72cebc958773b4310c99194f39392b7154d41387f95caaa7be99f81270fa601a",
     "../../gen/js/snug/compile/peg.mjs": "0bf3a90fa128644d63513433f9b6236dfc9f4f35f827c9e30768a00b326e96dd",
     "../../gen/js/snug/compile/prelude.mjs": "06147c95fe040db2e6fe714cde73ead93db898d7cf7113c62cbdabd24207124f",
@@ -106,7 +109,7 @@
     "../../gen/js/snug/nav/walk.mjs": "20901d64d4c8f7e0f7d4b1f5ecda8492f3963b3902763b2f6fdad72a691cfd73",
     "../../gen/js/snug/program/verify.mjs": "0c140bfcd92b8bd5fb5df7d89def62907a56cb7227f44213ff1a32464283335a",
     "../../gen/js/snug/vm/api.mjs": "f96530c3966a38e1b140f196682bddad5314e08caf48a64dadba97c2303718ba",
-    "../../gen/js/snug/vm/arena.mjs": "67daeca371449d19e457d0031a73d2cadb4b4d88e3cc7867a465b7feef4e3b64",
+    "../../gen/js/snug/vm/arena.mjs": "1faebc2c524faff2d2e32268b4d4a278e0099035cb8806c35bd8c207c150aa9f",
     "../../gen/js/snug/vm/array.mjs": "a761100a55189e8124bb0e180b0f033c26b1c09caabd19340f281ba197b4a94d",
     "../../gen/js/snug/vm/base.mjs": "65b51355871831f946a61fdcd1d639a464bf66cfc92a89fc56d00026790eda74",
     "../../gen/js/snug/vm/controls.mjs": "b6a4a8c9f4fcf47a32a153a1a0aac1acb202cb9551b19dabea0dc2fa5bf41c54",
@@ -115,9 +118,9 @@
     "../../gen/js/snug/vm/layout.mjs": "152866b1b16cb58d75b86426bf501e3985403f92fb403e491c014b8fe200db14",
     "../../gen/js/snug/vm/leaf.mjs": "f7755a1157f234b8b36b2b6fd4f35555b7ebcd58807eec95658d0b78810d793f",
     "../../gen/js/snug/vm/map.mjs": "35eeca58887c2579ee84cf9055a92814779deab332ca42bc0d949f281b0a0e82",
-    "../../gen/js/snug/vm/sbase.mjs": "4dec40abce32eb3c9909874be228f2f5d99b9cf9517b722d2e60df2a3ace3c02",
-    "../../gen/js/snug/vm/scont.mjs": "4aabca85b671028a716cb296f68160062657d9a81b60ffe4180b9d12aa7f5cab",
-    "../../gen/js/snug/vm/session.mjs": "e42d37dbe4e321f03b7e9b5f32431ffa7db7a4456ef86943d22f1ffdef51e19c",
+    "../../gen/js/snug/vm/sbase.mjs": "796565554ff442b302a0171ee8a8e656d987650e5c33e43062114191ffc455e5",
+    "../../gen/js/snug/vm/scont.mjs": "faac70e9745f3173bb6f0fbfad777c4046dc7af68050be2a609951d9856a37ea",
+    "../../gen/js/snug/vm/session.mjs": "ba689f82fd4cec55a88b20f88069684c0f0a23cdccb852785dd8cfd7dad7e0af",
     "../../gen/js/snug/vm/sstr.mjs": "3fd75757c3c63174a6490ac2cac6ab11cf9d5107e0c2bf874475eaf78ef4730b",
     "../../gen/js/snug/vm/svalid.mjs": "825982cf8cd7bc3c0cd4487f1ea7f7cdf66597e4e4444c0736889774485a9940",
     "../../gen/js/snug/write/float.mjs": "5e787498ecf8b9e4b2c6514fe755ae7f9398f99c8fe0429e8b7aa873b7fe5d24",
@@ -126,43 +129,46 @@
     "../../gen/js/snug/write/out.mjs": "f9efcce80102e428d705e05b86ec27328d4e619d04dfd075c25539acce164e4a"
   },
   "runtimeEnd": {
+    "../../host/js/src/abnf.mjs": "2d9a7470228d4daa748d4748c2d0331a0c6ebb18df0b7fb191ae8b1fe92f4cea",
     "../../host/js/src/any-program.mjs": "63d8d2e58641bb5a85af4b0cd1d5db56545ad179178ae1ae323da97642efd7e8",
     "../../host/js/src/build.mjs": "5304f32ab52503a1f8155a59eb68dcccb7b8cdf33f20c95ddf46ce1c09bd5772",
     "../../host/js/src/compile-runtime.mjs": "f6a33a637d6fa060dd052109287292abb430c0db71b610b75b0c23a72b372a9a",
-    "../../host/js/src/compile.mjs": "11bbf6a1b6ddfdfcbcf6e6e44a1772d217ca1aa9a382a426edb6faf4f74e89d5",
+    "../../host/js/src/compile.mjs": "9cc272a02518bc33cea318a1db292c6996c1f67228ade3a1878a07d710a008b2",
     "../../host/js/src/controls.mjs": "90b249708ccda75be548a0216ba8b8d091c9c6f6c341e6a69c00f15d741d4dc1",
     "../../host/js/src/encode.mjs": "e6476ae65e133ca6b1f582d40ea4c128d7a574a36ba3ac45e118671b46685dd9",
-    "../../host/js/src/ext.mjs": "d27fbaf8d6561b3ac289c0d1d6636bf2228e7166b9585be797f00cca26a3efd4",
+    "../../host/js/src/ext.mjs": "f4704f10857cf545a15f81b796e4e11d30e882eae3a9603bcfa4a288852f56ed",
     "../../host/js/src/fault.mjs": "68b45f0c56b26044d97bc6239ab61d3aab998039dcc3edc56f77544eca27ff71",
     "../../host/js/src/index.mjs": "47e49541958ea1124b27452383c3cb090f1483929d417e8a75a798f28e5949e2",
     "../../host/js/src/limits.mjs": "74b4ac02678d836fea5fdb3493dc08cb512a19181e0d0d945b29f282c57760f8",
-    "../../host/js/src/open-session.mjs": "ec66130f35dcc6bb2e07fde6e910fa2af4394c5eedc33ed2c1c0352ba7fc5ebc",
+    "../../host/js/src/open-session.mjs": "e35c8252c77e0d82f5eca9db8d2aa2b54955c2236aaa87b1503a14d41063b753",
     "../../host/js/src/options.mjs": "6b13703add81fd157f98415b553564a116fd1fb508c58367f5eb227a8c5d01fc",
     "../../host/js/src/package-build.mjs": "f7eeb7844e01d10b0391ca5a065ea99de5beeaa0405faff3ff82724375181c53",
     "../../host/js/src/profiles.mjs": "affc3169b232405d82ae09a9c2d24bf6b32b74cd4e4b8497e8610e83734ce3c7",
     "../../host/js/src/public-compile.mjs": "1249f5bc050c61d489eaa248d87f1c612baf653bd7bb12ab37ca069921b52b09",
     "../../host/js/src/public-errors.mjs": "abfab9f256308351c5465cbaa6235d2faba163eedd5a2f10d069429dc387a759",
     "../../host/js/src/public-schema.mjs": "98ce8fd10bafc344a573628e2f39dfb104105706060c5f17f919b6d111b5d36e",
-    "../../host/js/src/public-sequence.mjs": "ac03b48cd444d5fb5a8bb2de114c00fc4262de8e91ca66f7d41309d4b6a74f11",
-    "../../host/js/src/public-sources.mjs": "53d2df7184e18f57f815a2e632873bca4e9519c86d2602aa5c1e45a83c5fabdb",
+    "../../host/js/src/public-sequence.mjs": "c55fd6d83ddf6e88cf5b681969e9b52d6988669fb8e685cc1a686f5e6c08d935",
+    "../../host/js/src/public-sources.mjs": "21cb9e220a6a188e9dfc2b4f665cb73b86dbbe643d08c059eca021e464300377",
     "../../host/js/src/public-view.mjs": "74b1ec70c365b29c2dfcd2d4944661aca9fff4a18c9ba663955e795b1301803e",
     "../../host/js/src/public-writer.mjs": "4872df6b78611f06d7253cd36b992d8d0c3037fc57b8409b7b4b670eea081b9f",
     "../../host/js/src/scan.mjs": "194567f5f96fb1366264fd1f3ed8a5bc71897f44971fc5d04e1447db04be40b3",
     "../../host/js/src/schema-core.mjs": "dea4105a3f502ed58685cbb514be1ff234a182ddca9872cf0392aaf2e56113cd",
     "../../host/js/src/schema-state.mjs": "d56d0961643d4b1e782110a73a18f5f4c011652ad4eb0f64a066b0f20e50b6b7",
     "../../host/js/src/schema.mjs": "a322f793ee046942a363e4700535e522a4a8af812e69d0f9928e87ff61704c96",
-    "../../host/js/src/sequence-core.mjs": "830d2d52f1e1695b77f6e141817b6dabf773fc380b01eae17262c539a0a43406",
-    "../../host/js/src/sequence.mjs": "622e4470a79bfca234d9432a28b080caa3e227bd1035c686200e87da72649254",
+    "../../host/js/src/sequence-core.mjs": "530cd0ef72b398786e55de99e3d1d746df20b3ccfd09f66265d9a53b449801cf",
+    "../../host/js/src/sequence.mjs": "22c177b1ca5199a283672736253b26c8127bcf41ce80623dbe88c95083aa4e72",
     "../../host/js/src/serialized.mjs": "ed0346f317a47bc65ae169bae87807ac99ce37a37f844cddc4e4141f27286353",
+    "../../host/js/src/session-pool.mjs": "f9b87d64f52afb6d3e42f5ad8fb474860a00d387a128acb3ccfae168020da864",
     "../../host/js/src/sha256.mjs": "880d53c17b324728092c034ff4db78c463ae48994c34b4d05b6cfd9b5744d9c2",
-    "../../host/js/src/sources.mjs": "2e379f82977c702ad66e9c53befbd87672e00e882cf832be8db8ecea0dc2d14e",
+    "../../host/js/src/sources.mjs": "41ec1496c406f24b14e07a005d4be283e7db53fccc14cf28ba626cbaff321156",
     "../../host/js/src/typed-bytes.mjs": "8adcd17285e898d9ce467b21c97935e05fcc962944c5086ca52ee5ae56139d80",
     "../../host/js/src/unicode-tables.mjs": "a8d79e9af79e6f79cceee79071c56e616a1a1929b50aa8660271c16a56b34ffc",
     "../../host/js/src/values.mjs": "05e3f1197f845211b1511cb0aa9487cc37214b2606cf8961125521977600f623",
     "../../host/js/src/version.mjs": "3daac7bc0c4faff23b7b25688da1d0bf164210ecc30d2a66ec6d5af169e37581",
     "../../host/js/src/view.mjs": "36c3b87ee969831450ff72877473db2e2ea6d92026cce7e303a9400e0a16c302",
-    "../../host/js/src/vm-session.mjs": "c5b095cfebf76ff2e83366352c4820516973b689222f14ee5d5d0d4672187831",
+    "../../host/js/src/vm-session.mjs": "221dd6e2429a9c457ead7850bbdb8bca020b8f45336a6b6d4cdd40cae6b8ce8d",
     "../../host/js/src/writer.mjs": "19676f4fc93a83f3409af59f965e6db04f723cd2a70f296458015c962757ea04",
+    "../../gen/js/snug/abnf.mjs": "7beee8b99c8f0d5136266e6ea2dab8df72d8fb1bb14f86ad8bb5addf421e3f6b",
     "../../gen/js/snug/cbor/canon.mjs": "5882ec48a76ea9d2ba78c4178371e39b5f35b8800ec4561df9733c1d81af0238",
     "../../gen/js/snug/cbor/codes.mjs": "7daf82c6f788b6c14a3ecc5de8a4569e9004b02fab6877b8b98ab193f5f7fc7a",
     "../../gen/js/snug/cbor/float.mjs": "bfa1bde6295e71ef0d2ae24e07a6dca25fd72519dfe1dc77a03dfa5b33783f36",
@@ -174,16 +180,16 @@
     "../../gen/js/snug/cbor/tags.mjs": "5cf9e4feb5e7714e4328a244cc9091de6d67dd2d0e3e4f3cf3bafe02f962b6a4",
     "../../gen/js/snug/cbor/text.mjs": "1f4238df16edef0124f9d944332ffb4aaa8f7243dcc93f86f2da021227ed4dbf",
     "../../gen/js/snug/cbor/vcopy.mjs": "dbcc5348ce2959e2f30986866f084c1cef3da61221aea2d446ee6d0705dbcca4",
-    "../../gen/js/snug/compile/arena.mjs": "b95e033780427d3030563bd550feb363ea23eaaa0c444fbb674b250a24581c46",
+    "../../gen/js/snug/compile/arena.mjs": "6e59533ab6a0fdd317ef4e974dc97679d3917e3c1a3bd52c059328f2006e1392",
     "../../gen/js/snug/compile/bytes.mjs": "4f43004446b4cc5e9ed28aa7d10ff119d398de0812230a26abb70edf860d5749",
-    "../../gen/js/snug/compile/ctl.mjs": "1c887a4fd0a6db5c3a12ed26b751dd297c268daec0bf2312611ee611927befa0",
+    "../../gen/js/snug/compile/ctl.mjs": "41c9ae2db2296e6a1b896f894240d64753f19ebea580089d5cbd8c490c9187f1",
     "../../gen/js/snug/compile/emit.mjs": "863f35b2b176e8c548838db8baa88151fea689511b40a27356c3068d9f639d8c",
-    "../../gen/js/snug/compile/ext.mjs": "c86e31f3024ce9164cf607246a0513a6954769f7975b6d94254b4ccbf15208c9",
+    "../../gen/js/snug/compile/ext.mjs": "d37739b61940a9fbad956ae688535b6310a948a93eb52227e8442090939f6b0d",
     "../../gen/js/snug/compile/glush.mjs": "941463d9f49c82b9b24fa1265309d00f3f63d3e0695fa0e1e493a945c8b2cf8d",
     "../../gen/js/snug/compile/leaf.mjs": "ebb05c0771ddb6098239e513dfcb05e2ce3266a86c33ab66d7ac1bccefbfc8b5",
     "../../gen/js/snug/compile/lex.mjs": "dde6510489430666a6d306e52defc42539179ceb03508d89a5cfae49ded0e7bd",
-    "../../gen/js/snug/compile/lower.mjs": "f34d5625b272f217cbbdc1a4b8ab947c5347777bb9524c81e278c676c8c98329",
-    "../../gen/js/snug/compile/main.mjs": "00f366950f31601ea7b18f8aa3b82cd551e227203d9f14b9f7ccb00c6b08f3bf",
+    "../../gen/js/snug/compile/lower.mjs": "8235423e384072bb8f323b1cb14d84d876047f66e6a100e68d871048216729f1",
+    "../../gen/js/snug/compile/main.mjs": "80aab0932d86837418ace5e93b163e82d23e756586cf54785e2cdd1750c5a87a",
     "../../gen/js/snug/compile/parse.mjs": "72cebc958773b4310c99194f39392b7154d41387f95caaa7be99f81270fa601a",
     "../../gen/js/snug/compile/peg.mjs": "0bf3a90fa128644d63513433f9b6236dfc9f4f35f827c9e30768a00b326e96dd",
     "../../gen/js/snug/compile/prelude.mjs": "06147c95fe040db2e6fe714cde73ead93db898d7cf7113c62cbdabd24207124f",
@@ -194,7 +200,7 @@
     "../../gen/js/snug/nav/walk.mjs": "20901d64d4c8f7e0f7d4b1f5ecda8492f3963b3902763b2f6fdad72a691cfd73",
     "../../gen/js/snug/program/verify.mjs": "0c140bfcd92b8bd5fb5df7d89def62907a56cb7227f44213ff1a32464283335a",
     "../../gen/js/snug/vm/api.mjs": "f96530c3966a38e1b140f196682bddad5314e08caf48a64dadba97c2303718ba",
-    "../../gen/js/snug/vm/arena.mjs": "67daeca371449d19e457d0031a73d2cadb4b4d88e3cc7867a465b7feef4e3b64",
+    "../../gen/js/snug/vm/arena.mjs": "1faebc2c524faff2d2e32268b4d4a278e0099035cb8806c35bd8c207c150aa9f",
     "../../gen/js/snug/vm/array.mjs": "a761100a55189e8124bb0e180b0f033c26b1c09caabd19340f281ba197b4a94d",
     "../../gen/js/snug/vm/base.mjs": "65b51355871831f946a61fdcd1d639a464bf66cfc92a89fc56d00026790eda74",
     "../../gen/js/snug/vm/controls.mjs": "b6a4a8c9f4fcf47a32a153a1a0aac1acb202cb9551b19dabea0dc2fa5bf41c54",
@@ -203,9 +209,9 @@
     "../../gen/js/snug/vm/layout.mjs": "152866b1b16cb58d75b86426bf501e3985403f92fb403e491c014b8fe200db14",
     "../../gen/js/snug/vm/leaf.mjs": "f7755a1157f234b8b36b2b6fd4f35555b7ebcd58807eec95658d0b78810d793f",
     "../../gen/js/snug/vm/map.mjs": "35eeca58887c2579ee84cf9055a92814779deab332ca42bc0d949f281b0a0e82",
-    "../../gen/js/snug/vm/sbase.mjs": "4dec40abce32eb3c9909874be228f2f5d99b9cf9517b722d2e60df2a3ace3c02",
-    "../../gen/js/snug/vm/scont.mjs": "4aabca85b671028a716cb296f68160062657d9a81b60ffe4180b9d12aa7f5cab",
-    "../../gen/js/snug/vm/session.mjs": "e42d37dbe4e321f03b7e9b5f32431ffa7db7a4456ef86943d22f1ffdef51e19c",
+    "../../gen/js/snug/vm/sbase.mjs": "796565554ff442b302a0171ee8a8e656d987650e5c33e43062114191ffc455e5",
+    "../../gen/js/snug/vm/scont.mjs": "faac70e9745f3173bb6f0fbfad777c4046dc7af68050be2a609951d9856a37ea",
+    "../../gen/js/snug/vm/session.mjs": "ba689f82fd4cec55a88b20f88069684c0f0a23cdccb852785dd8cfd7dad7e0af",
     "../../gen/js/snug/vm/sstr.mjs": "3fd75757c3c63174a6490ac2cac6ab11cf9d5107e0c2bf874475eaf78ef4730b",
     "../../gen/js/snug/vm/svalid.mjs": "825982cf8cd7bc3c0cd4487f1ea7f7cdf66597e4e4444c0736889774485a9940",
     "../../gen/js/snug/write/float.mjs": "5e787498ecf8b9e4b2c6514fe755ae7f9398f99c8fe0429e8b7aa873b7fe5d24",
@@ -1273,50 +1279,32 @@
     {
       "suite": "RFC 9165 figure-3",
       "kind": "extracted",
-      "ok": false,
-      "code": "unsupported_control",
-      "line": 1,
-      "column": 13
+      "ok": true
     },
     {
       "suite": "RFC 9165 figure-3",
       "kind": "effective",
-      "ok": false,
-      "code": "unsupported_control",
-      "line": 1,
-      "column": 13
+      "ok": true
     },
     {
       "suite": "RFC 9165 figure-4",
       "kind": "extracted",
-      "ok": false,
-      "code": "unsupported_control",
-      "line": 1,
-      "column": 13
+      "ok": true
     },
     {
       "suite": "RFC 9165 figure-4",
       "kind": "effective",
-      "ok": false,
-      "code": "unsupported_control",
-      "line": 1,
-      "column": 13
+      "ok": true
     },
     {
       "suite": "RFC 9165 figure-5",
       "kind": "extracted",
-      "ok": false,
-      "code": "unsupported_control",
-      "line": 2,
-      "column": 24
+      "ok": true
     },
     {
       "suite": "RFC 9165 figure-5",
       "kind": "effective",
-      "ok": false,
-      "code": "unsupported_control",
-      "line": 2,
-      "column": 24
+      "ok": true
     },
     {
       "suite": "RFC 9165 figure-6-ellipsis",
@@ -14927,22 +14915,16 @@
       "id": 0,
       "group": "baseline",
       "expect": true,
-      "observed": null,
-      "pass": false,
+      "observed": true,
+      "pass": true,
       "rule": "oid",
-      "code": "compile-failure",
       "ruby": {
         "status": "checked",
         "exitCode": 0,
         "verdict": true,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-3",
@@ -14950,22 +14932,17 @@
       "id": 1,
       "group": "baseline",
       "expect": false,
-      "observed": null,
-      "pass": false,
+      "observed": false,
+      "pass": true,
       "rule": "oid",
-      "code": "compile-failure",
+      "code": "control",
       "ruby": {
         "status": "checked",
         "exitCode": 1,
         "verdict": false,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-3",
@@ -14973,22 +14950,17 @@
       "id": 2,
       "group": "baseline",
       "expect": false,
-      "observed": null,
-      "pass": false,
+      "observed": false,
+      "pass": true,
       "rule": "oid",
-      "code": "compile-failure",
+      "code": "control",
       "ruby": {
         "status": "checked",
         "exitCode": 1,
         "verdict": false,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-4",
@@ -14996,22 +14968,16 @@
       "id": 0,
       "group": "baseline",
       "expect": true,
-      "observed": null,
-      "pass": false,
+      "observed": true,
+      "pass": true,
       "rule": "oid",
-      "code": "compile-failure",
       "ruby": {
         "status": "checked",
         "exitCode": 0,
         "verdict": true,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-4",
@@ -15019,22 +14985,17 @@
       "id": 1,
       "group": "baseline",
       "expect": false,
-      "observed": null,
-      "pass": false,
+      "observed": false,
+      "pass": true,
       "rule": "oid",
-      "code": "compile-failure",
+      "code": "control",
       "ruby": {
         "status": "checked",
         "exitCode": 1,
         "verdict": false,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-4",
@@ -15042,22 +15003,17 @@
       "id": 2,
       "group": "baseline",
       "expect": false,
-      "observed": null,
-      "pass": false,
+      "observed": false,
+      "pass": true,
       "rule": "oid",
-      "code": "compile-failure",
+      "code": "control",
       "ruby": {
         "status": "checked",
         "exitCode": 1,
         "verdict": false,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-5",
@@ -15065,22 +15021,16 @@
       "id": 0,
       "group": "baseline",
       "expect": true,
-      "observed": null,
-      "pass": false,
+      "observed": true,
+      "pass": true,
       "rule": "Tag1004",
-      "code": "compile-failure",
       "ruby": {
         "status": "checked",
         "exitCode": 0,
         "verdict": true,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-5",
@@ -15088,22 +15038,17 @@
       "id": 1,
       "group": "baseline",
       "expect": false,
-      "observed": null,
-      "pass": false,
+      "observed": false,
+      "pass": true,
       "rule": "Tag1004",
-      "code": "compile-failure",
+      "code": "control",
       "ruby": {
         "status": "checked",
         "exitCode": 1,
         "verdict": false,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-5",
@@ -15111,22 +15056,16 @@
       "id": 2,
       "group": "baseline",
       "expect": true,
-      "observed": null,
-      "pass": false,
+      "observed": true,
+      "pass": true,
       "rule": "Tag0",
-      "code": "compile-failure",
       "ruby": {
         "status": "checked",
         "exitCode": 0,
         "verdict": true,
         "agrees": true
       },
-      "classification": {
-        "kind": "pending",
-        "decision": "P9.14",
-        "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
-      },
-      "status": "classified"
+      "status": "pass"
     },
     {
       "suite": "RFC 9165 figure-7",

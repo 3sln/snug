@@ -117,6 +117,8 @@ hand-written TypeScript declarations:
 | `snug/writer` | `Writer` |
 | `snug/sources` | Sessions via `openSession(schema, rule, length, options?, scheduling?)` (replaces `Schema.session`); CDDL handle/push/stream validation, profile scanners, in-memory handles, `SourceError` |
 | `snug/unicode` | optional Unicode 16.0 regexp category `tables` and provenance metadata; compile-time only |
+| `snug/controls` | the generic extension controls `.chars`, `.unique`, `.samelen` |
+| `snug/abnf` | optional `.abnf` / `.abnfb` controls (RFC 9165 §3, D334), `checkAbnf`; spread into `controls` at compile and load |
 
 In a checkout, host code imports the committed `gen/js` tree by relative
 path. To produce a **self-contained private package**, run `npm run build`
@@ -190,6 +192,7 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
 | Wire profiles | Deterministic preset (default) and Bindle preset with per-option overrides, P7.1 (D120–D127); JS and Rust |
 | Extension controls | Implemented (P7.2, D140–D143): registered `.name` controls decided by pure host predicates; generic `.chars`, `.unique`, `.samelen` in `snug/controls` / `snug::controls`; [guide](docs/guide.md#custom-controls) |
+| `.abnf` / `.abnfb` (RFC 9165 §3) | Implemented (P9.14, D334) as an optional module: `snug/abnf`, `snug::abnf` / `Controls::with_abnf()`, wasm SDK `snug-wasm-sdk/abnf`; RFC 5234 + RFC 7405, language membership by a metered Earley recognizer in kin; [CDDL support](docs/cddl-support.md#abnf-abnf-abnfb) |
 | Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
 | Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
 | Bundle size | Gated per entry by `bb size` at the measured sizes (codec ≈ 14.6 KB gzip, codec + schema ≈ 41.9 KB gzip; owner decision D200, 2026-11-04) |

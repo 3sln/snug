@@ -397,4 +397,7 @@ impl crate::compile::Registry for crate::controls::Controls {
     fn argument_ok(&self, name: &str, argument: &[u8]) -> bool {
         self.get(name).is_none_or(|c| c.argument(argument))
     }
+    fn argument_detail(&self, name: &str, argument: &[u8]) -> Option<String> {
+        self.get(name).and_then(|c| c.argument_detail(argument))
+    }
 }

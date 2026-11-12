@@ -1224,6 +1224,36 @@ Program and the item, so hosts agree on the exhaustion point:
   when the host binds the Program, and are not charged per item. An item that
   is not of the control's kind is refused after the units spent so far.
 
+* **The ABNF controls** `.abnf` / `.abnfb` (the optional module, D334;
+  `snug.abnf`) meter their Earley recognizer the same way, in ticks, 8 to a
+  unit, each charged before its work:
+
+| ABNF work | Ticks |
+| --- | --- |
+| a run's node heads set up | 1 per grammar node, + 1 |
+| a symbol read (a scalar decoded, or a byte), and the set it opens | 16 |
+| an item offered to the current set | 8 |
+| a step along the set's chain of one node's items (the duplicate check) | 5 |
+| an item written | 16 |
+| an item processed | 10 |
+| a waiter record written (an item waiting on a prediction) | 10 |
+| a waiter visited by a completion | 4 |
+| a terminal tested against the symbol | 10, + 4 per range |
+
+  The weights (D334) were set so that each kind of ABNF work costs no more CPU
+  per unit than the VM's reference walk measured alongside it
+  (`bench/abnf-calib.mjs`, bench/VM.md "ABNF calibration"). The grammar is
+  parsed and prepared once, when the host binds the Program, and is not charged
+  per item. A run also stops with −1 when its items and waiter records would
+  pass the run's scratch cap, whatever `room` is left. The cap is a host option,
+  by default `ABNF_DEFAULT_WORDS` = 2²² words (16 MiB, the D281 group-arena
+  default), within 2¹⁶..2²⁴ words. A host whose scratch is smaller than needed
+  is told a size to use, at least double and within the cap, and runs again,
+  so it reruns at most log₂(cap / first) + 1 times. The reruns are not charged;
+  the verdict and units never depend on the host's sizes, only on the cap. A string item whose content is not one the control reads (a
+  byte string that is not UTF-8 for `.abnf`), or an item that is not a string,
+  is refused after the units spent so far.
+
 **Schedule 2 (D045; the default).** Three exceptions to the table, everything
 else unchanged. They make the bookkeeping of the simplest shapes cost what it
 costs in CPU; a validator implementing them must apply them exactly, since

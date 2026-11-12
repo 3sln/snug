@@ -55,6 +55,7 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). |
 | `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2, D330); `.det` dedents each literal first. |
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
+| `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `snug/abnf` / `Controls::with_abnf()` (D334); without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
 | registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
 The numeric controls compare values exactly across integers and floats
@@ -83,6 +84,89 @@ depth still bounds embedding. A schema querying both `.cbor` and `.cborseq`
 on the same bytes can cause separate inner walks; the work budget bounds it
 (D040). The one-pass claim does not promise one visit across independent
 embedded interpretations.
+
+## ABNF: `.abnf`, `.abnfb`
+
+RFC 9165 §3's controls need the optional ABNF module, loaded like the Unicode
+tables: `compile(text, { controls: { ...abnf } })` with `abnf` from
+`snug/abnf` (Rust `Controls::new().with_abnf()`, the wasm SDK's `snug/abnf`),
+and the same registry when a stored Program is loaded. No core bundle carries
+the engine. Without the module a schema using either control is refused
+(`unsupported_control`, the message naming `snug/abnf`), and loading a
+Program that uses them is `missing_control`. They are extension controls
+under the hood (D140–D143), so the `bus` profile refuses them unless
+`controlsInBus`, and an item longer than the control's `maxBytes` (65,536 by
+default; `{ ...abnf, abnf: { ...abnf.abnf, maxBytes } }`) fails with
+`control_size`.
+
+**The controller** is a text string, or a byte string that is UTF-8. Both
+can be built with `.cat` / `.det` (RFC 9165 Figures 3–5). It holds the start,
+then optionally a newline and a list of rules (RFC 9165 §3): `"date-time"
+.cat rfc3339` starts at `date-time`. The grammar is RFC 5234 §4 with RFC 7405:
+
+* rules, `=` and `=/` (incremental alternatives, in any order);
+  continuation lines (a line starting with a space or a tab); comments;
+* alternation `/`, concatenation, repetition `n`, `n*m`, `*`, `n*`, `*m`;
+  groups `( )` and options `[ ]`;
+* char-vals `"…"` (case-insensitive, as `%i"…"`), case-sensitive `%s"…"`
+  (RFC 7405), and num-vals `%b` `%d` `%x`: a value, a range `%x30-39` or a
+  concatenation `%x0D.0A`;
+* rule names are case-insensitive; newlines are LF or CR LF (RFC 9165 §3).
+
+Exactly as RFC 9165 §3 says, **core rules are not imported**: `DIGIT`,
+`ALPHA` and the rest must be defined in the controller (`.cat` a shared
+block). Five leniencies, each only widening what is accepted:
+
+1. The start may be any alternation (`1*DIGIT`), not only one element.
+2. **A snug extension beyond RFC 9165:** a controller that begins with a rule
+   (`s = 1*DIGIT`, no start before it) starts at that first rule. The Rust
+   cddl crate reads it the same way. It applies only where the RFC's
+   element-first reading fails to parse. An element-first controller can
+   never begin with `name =`, so no RFC-valid controller changes meaning; the
+   gate's oracle tries element-first first and agrees with kin on every
+   generated and mutated grammar.
+3. The end of the text ends the last line.
+4. A comment may hold any character but CR and LF.
+5. Whitespace may precede the start.
+
+Refused at compile time with `control_value`, and the message gives the place
+as ABNF line and column (`(.abnf argument: prose-val (<...>) is not supported
+at ABNF line 2, column 11)`):
+
+* **prose-val `<…>`**;
+* a syntax error;
+* an undefined rule;
+* a rule defined twice with `=`, or `=/` with no `=`;
+* `n*m` with m < n;
+* a num-val range with its first value above its last;
+* groups nested deeper than 256;
+* a controller that is not a string, or is not UTF-8.
+
+**The match** is ABNF's meaning: the whole string must be in the language of
+the start, with alternation as union (not first-match), repetition as a union
+over counts, left recursion and empty matches allowed. `.abnf` reads Unicode
+scalars, so a byte-string target that is not UTF-8 does not match; `.abnfb`
+reads bytes, so a num-val above `%xFF` never matches there. Case folding of
+char-vals is ASCII-only. Any non-string item fails the control.
+
+**Cost.** kin runs an Earley recognizer (D334). The grammar is prepared once,
+when the Program is bound. Every step is charged to the validation budget
+before it is done: a symbol, an item, a duplicate check, a terminal test and
+a completion. Each kind of step is calibrated to cost no more CPU per unit
+than the VM's reference walk (`bench/abnf-calib.mjs`). Typical grammars cost
+a few tens of units per character. Ambiguous or right-recursive grammars cost
+more, up to O(n³). Every grammar is bounded: past the budget, or past the
+matcher's scratch cap, validation stops with `budget`. The cap is a host
+option: `abnfWith({ maxWords })`, Rust `Abnf::with_max_words`. It defaults to
+4,194,304 words (16 MiB), the PEG group arena's default (D281), and ranges
+from 65,536 words up to the arena's hard cap of 16,777,216. A host whose first
+scratch is too small reruns the match with the size kin suggests. That size
+is at least double and within the cap, so a match reruns at most
+log₂(cap / first) + 1 times; the reruns cost at most twice the work and are
+not charged. One
+27-character RFC 3339 `date-time` costs about 760 units, about 28 per
+character. At that rate the default budget covers a whole item of the default
+65,536-byte bound.
 
 ## Unicode regexp categories
 
@@ -334,7 +418,9 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 
 | Construct | Current refusal / reason |
 | --- | --- |
-| `.pcre`, `.abnf`, `.abnfb` | `unsupported_control`; portable, bounded engines required (D013). |
+| `.pcre` | `unsupported_control`; a proposed alternate dialect, not a portable bounded engine (D013). |
+| `.abnf`, `.abnfb` without `snug/abnf` | `unsupported_control`, naming the module; with it they are supported ([ABNF](#abnf-abnf-abnfb), D334). |
+| ABNF prose-val `<…>`, undefined (core) rules | `control_value` with the ABNF line and column; prose has no matchable meaning, core rules are not imported (RFC 9165 §3). |
 | Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time (D082, D140–D143), e.g. `.chars`, `.unique`, `.samelen` from `snug/controls`. |
 | Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `snug/unicode` and pass `unicode: tables` (D083). |
 | Regexp XSD shorthands/subtraction in `iregexp` mode; `\x..`, lookarounds, backreferences in either mode | `regexp`; no host regex engine/ReDoS path. |

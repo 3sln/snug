@@ -56,7 +56,13 @@ pub trait Control: Send + Sync {
     fn cost(&self, item_bytes: u32) -> u64 {
         u64::from(item_bytes)
     }
-    /// Metered in kin (snug's generic controls only; not a public contract):
+    /// Why `argument` is refused, when `argument` answers false (shown in the
+    /// schema error; snug's ABNF controls only, D334).
+    #[doc(hidden)]
+    fn argument_detail(&self, _argument: &[u8]) -> Option<String> {
+        None
+    }
+    /// Metered in kin (snug's generic and ABNF controls only; not a public contract):
     /// the argument prepared once per EXT leaf, or None for a host predicate.
     #[doc(hidden)]
     fn prepare(&self, _pool: &[u8], _ao: i32, _al: i32) -> Option<Vec<i32>> {

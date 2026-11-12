@@ -99,8 +99,10 @@
             (for [^I32 j 0 len]
               (let [c (ia opt (+ c0 j))]
                 (if (not (name-byte-ok c (== j 0))) (do (bad-registry h) (return false)))))
-            (if (!= (builtin-ctl len (pack-opt opt c0 len 0) (pack-opt opt c0 len 4)) 0)
-              (do (bad-registry h) (return false)))
+            (comment "D334: `abnf` and `abnfb` (codes 20, 21) are the ABNF module's to bind")
+            (let [bc (builtin-ctl len (pack-opt opt c0 len 0) (pack-opt opt c0 len 4))]
+              (if (and (!= bc 0) (< bc 20))
+                (do (bad-registry h) (return false))))
             (comment "strictly ascending after the previous name")
             (if (> k 0)
               (do (let [pk (- k 1)

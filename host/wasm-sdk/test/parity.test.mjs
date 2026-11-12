@@ -47,6 +47,8 @@ import * as WSEQ from '../src/sequence.mjs';
 import { View as WView, Cursor as WCursor } from '../src/view.mjs';
 import { chunkEnds } from '../../../kin/scripts/sequence-run.mjs';
 import { controls as wgeneric } from '../src/controls.mjs';
+import { abnf as wabnf } from '../src/abnf.mjs';
+import { abnf as nabnf } from '../../js/src/abnf.mjs';
 import { Writer as WWriter } from '../src/writer.mjs';
 import { buildVmCases } from '../../../kin/scripts/vm-allcases.mjs';
 import { testControls, EXT_SCHEMAS } from '../../../kin/scripts/ext-cases.mjs';
@@ -611,6 +613,34 @@ test('extension controls: binding, missing controls, host predicates, throws and
   wc.validate(N.encode(['ab', 'abcde']), 'r');
   assert.deepEqual(Array.from(WS.innerOf(wc.program).kinds), [1, 0], 'chars in wasm, even through the import');
   assert.ok(calls > 0, 'the host predicate was asked through the import');
+  t.done();
+});
+
+test('.abnf / .abnfb (D334): the hand vectors, budgets and sessions == native; kin JS through the import', async () => {
+  const t = tally('abnf');
+  const vectors = json('corpus/conformance/abnf.json');
+  const hexOf = s => Buffer.from(new TextEncoder().encode(s)).toString('hex');
+  t.same('without the module', await outcomeAsync(() => wcompile('r = text .abnf "x"')), await outcomeAsync(() => ncompile('r = text .abnf "x"')));
+  for (const g of vectors.grammars) {
+    const text = `r = (text / bytes) .abnf h'${hexOf(g.abnf)}'\nb = (text / bytes) .abnfb h'${hexOf(g.abnf)}'`;
+    const wo = await outcomeAsync(() => wcompile(text, { controls: { ...wabnf } }));
+    const no = await outcomeAsync(() => ncompile(text, { controls: { ...nabnf } }));
+    if (g.error) { t.same(`${g.name}: refused`, wo, no); continue; }
+    const w = wo.ok, n = no.ok;
+    t.same(`${g.name}: Program`, programBytes(w), programBytes(n));
+    for (const c of g.cases) {
+      const content = c.input !== undefined ? new TextEncoder().encode(c.input) : hexb(c.inputHex);
+      const doc = N.encode(c.major === 'text' ? new TextDecoder().decode(content) : content), rule = c.mode === 'abnfb' ? 'b' : 'r';
+      t.same(`${g.name} ${show(c)}`, outcome(() => w.validate(doc, rule)), outcome(() => n.validate(doc, rule)));
+      for (const budget of [0, 20, 40, 80, 160])
+        t.same(`${g.name} ${show(c)} budget ${budget}`, outcome(() => w.validate(doc, rule, { budget })), outcome(() => n.validate(doc, rule, { budget })));
+      t.same(`${g.name} ${show(c)} 1-byte push`, push(() => WSRC.pushValidator(w, doc.length, rule), doc, 1), push(() => NSRC.pushValidator(n, doc.length, rule), doc, 1));
+    }
+    const ser = n.program.serialize();
+    t.same(`${g.name}: fromSerialized without the module`, await outcomeAsync(() => WS.fromSerialized(ser)), await outcomeAsync(() => NS.fromSerialized(ser)));
+  }
+  const w = await wcompile('r = text .abnf "%x78"', { controls: { ...wabnf } });
+  assert.deepEqual(Array.from(WS.innerOf(w.program).kinds), [0], '.abnf runs through the import (kin JS)');
   t.done();
 });
 

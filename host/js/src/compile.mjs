@@ -12,7 +12,7 @@ import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, error
   keyPreimageLen, snugVersion, OPT_WORDS, OPT_REGEXP, OPT_CUTS, OPT_GROUP_WORDS, warningCount, warningCode,
   warningLine, warningColumn, warningRuleStart, warningRuleLen, warningName, warningMessage }
   from '../../../gen/js/snug/compile/main.mjs';
-import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
+import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK, ERR_NEED_ABNF, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
 import { sha256 } from './sha256.mjs';
 import { validateCompileOptions } from './options.mjs';
 import { controlEntries, registryWords, programControls, programArguments } from './ext.mjs';
@@ -107,6 +107,7 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
       throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule,
         code === ERR_NEED_UNICODE ? '; Unicode categories require tables from snug/unicode'
           : code === ERR_REGEXP_BLOCK ? '; XSD block escapes require unavailable pinned Unicode block data'
+          : code === ERR_NEED_ABNF ? '; .abnf and .abnfb require the ABNF controls from snug/abnf'
           : errorName(code) === 'unknown_control' ? controlNamed(bytes, errorOffset(h)) : '');
     }
     const p = outProgramAt(h), b = outPoolAt(h);
@@ -141,14 +142,15 @@ function controlNamed(bytes, at) {
   return ` (.${decoder.decode(bytes.subarray(at + 1, e))} is not a registered control)`;
 }
 
-// A registered control may check its argument once, at compile time (D142).
+// A registered control may check its argument once, at compile time (D142); a string
+// answer is the refusal's detail (D334: the ABNF module's messages).
 function checkArguments(program, pool, entries) {
   if (program[30] === 0) return;
   const names = programControls(program, pool), byName = new Map(entries.map(e => [e.name, e]));
   for (const { id, argument } of programArguments(program, pool)) {
-    const entry = byName.get(names[id]);
-    if (entry.argument && entry.argument(Uint8Array.from(argument)) !== true)
-      throw new SchemaError('control_value', 0, 0, undefined, ` (.${entry.name} argument)`);
+    const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument)) : true;
+    if (r !== true)
+      throw new SchemaError('control_value', 0, 0, undefined, ` (.${entry.name} argument${typeof r === 'string' ? ': ' + r : ''})`);
   }
 }
 

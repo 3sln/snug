@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { compile } from '../../host/js/src/public-compile.mjs';
+import { abnf } from '../../host/js/src/abnf.mjs';
 import { decode } from '../../host/js/src/index.mjs';
 import { selections, dataFor8610, dataFor9165, example as e, bytes, tag, raw, map, head, cbor } from './rfc-fixtures.mjs';
 
@@ -98,7 +99,7 @@ function disagreement(cddl,test) {
   return `RFC-derived expectation retained: ${test.note}. Inspect this schema/case; Ruby is evidence, not the authority.`;
 }
 async function compilation(cddl) {
-  try { await compile(cddl); return { ok:true }; }
+  try { await compile(cddl, { controls: { ...abnf } }); return { ok:true }; }   // .abnf: the optional module (P9.14)
   catch(error) { return { ok:false, code:error.code || error.name, line:error.line, column:error.column }; }
 }
 function wire(hex, policy) {
@@ -317,8 +318,6 @@ allSuites.get(9682).push({name:'RFC 9682 simple head numbers',id:'simple-heads',
 // a failing classified check as explained, an unclassified one as unexplained).
 for(const test of byId(8610,'default-timer').cases)if(test.expect===false)test.classification={kind:'contested',decision:'S46',
   reason:'RFC 8610 §3.8.6 gives .default an "implied .ne control"; snug treats .default as an annotation only, as Erratum 9229 (status Reported) proposes and the Ruby reference does (docs/conformance.md S46).'};
-for(const id of ['figure-3','figure-4','figure-5'])for(const test of byId(9165,id).cases)test.classification={kind:'pending',decision:'P9.14',
-  reason:'.abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control.'};
 
 // An auditable census of every displayed rule-like line, including all ABNF
 // figures that must not be misrepresented as CDDL schemas.

@@ -13,6 +13,7 @@ import './unicode.test.mjs';
 import './profiles.test.mjs';
 import './options.test.mjs';
 import './controls.test.mjs';
+import './abnf.test.mjs';
 import './stream.test.mjs';
 import './xsd-regexp.test.mjs';
 import './sessions.test.mjs';

@@ -1449,6 +1449,9 @@ the position limit, else the schema is refused.
 ### D013 — Refused controls: `.pcre`, `.abnf`, `.abnfb` (`.feature` amended)
 *Amended 2026-10-29 (review A12):* `.feature` is accepted as a no-op
 annotation (RFC 9165: it always matches).
+*Amended 2026-11-11 (P9.14, D334):* `.abnf`/`.abnfb` are supported with the
+optional ABNF module (a bounded, metered engine in kin); only `.pcre` stays
+refused.
 **Why**: non-portable or unbounded engines; the study found `.abnf` wrong in
 the crate and the profile excludes them.
 - [ ] **Signed off** (owner)
@@ -6108,6 +6111,111 @@ reopen this.
   closed. `Step` stays exhaustive because a new step must break the
   drivers. The gate map and `bb gates` / `bb identity` are accepted as
   manager decisions too.
+
+### D334 — `.abnf` / `.abnfb`: an optional module, a metered Earley recognizer in kin, bound as extension controls (P9.14; D230; amends D013)
+**Decision** (P9.14 engineer, provisional):
+* **What is matched.**
+  - RFC 9165 §3: the controller is a text string, or a byte string that is
+    UTF-8. It holds the start, then optionally a newline and RFC 5234 rules,
+    with RFC 7405's `%s`/`%i` strings and RFC 9165's LF-or-CRLF newline.
+  - The start is the controller's leading element. The brief said "the first
+    rule", but RFC 9165 §3 and Figures 3–5 lead with an element.
+  - Five leniencies, each only widening what is accepted: the start may be
+    any alternation; the text's end ends a line; a comment may hold any
+    character but CR and LF; whitespace may precede the start.
+  - The fifth is a **snug extension beyond RFC 9165**: a controller that
+    begins with a rule starts at that rule. This was the brief's reading;
+    the Rust cddl crate does the same and Ruby refuses.
+    - It applies only where the element-first reading fails. kin detects
+      the extension by lookahead (`name *c-wsp "="`). No element-first
+      controller can begin that way: the element-first parse of such text
+      always stops at the `=`. So no RFC-valid controller changes meaning.
+    - The oracle literally tries element-first, then rule-first; the
+      differential on random and mutated grammars checks that the two
+      orders agree. Hand vectors show element-first texts with rule-like
+      comments, and a rule named like the start, keeping the RFC reading.
+  - Core rules are not imported (RFC 9165 §3).
+  - Refused at compile time as `control_value`, with the ABNF line and
+    column in the message: prose-val `<…>`, syntax errors, undefined rules,
+    a duplicate `=`, `=/` with no `=`, `n*m` with m < n, a reversed num-val
+    range, nesting past 256, a non-string or non-UTF-8 controller.
+  - The verdict is language membership. Alternation is union, not
+    first-match; left recursion and ε are allowed.
+  - `.abnf` reads Unicode scalars: a byte-string target that is not UTF-8
+    does not match, and noncharacters are scalars. `.abnfb` reads bytes,
+    from a text or byte string target. Any other item does not match.
+* **Engine** (`kin/abnf.kin`, `snug.abnf`).
+  - At bind (D192), the grammar is parsed into a node table: TERM ranges,
+    SEQ, ALT, REP, REF. Bind-time work is linear apart from an n log n sort:
+    rules are sorted and resolved, a linear worklist finds the nullable
+    nodes, REF chains are compressed, and a repetition of a nullable element
+    gets minimum 0.
+  - Matching is an Earley recognizer with the Aycock–Horspool fix (a REP
+    never takes the ε-advance; with min 0 it is dominated).
+  - Repetition counts live in the item; an unbounded maximum saturates.
+  - Each prediction carries its waiter list, and a completion walks it once
+    per (prediction, set).
+  - Duplicates are found along a per-node chain of the current set, with no
+    hash, so the work is a function of the grammar and the input only.
+* **Metering.** D191's protocol: ticks, 8 to a unit, each charged before its
+  work (program.md §14 has the table). Per tick: symbol 16, item offered 8,
+  chain step 5, item written 16, processed 10, waiter 10, walk 4, terminal
+  test 10 + 4 per range, setup 1 per node.
+  - Calibrated with `bench/abnf-calib.mjs`: the worst row costs ≤ 0.95× the
+    VM's reference ns/unit, measured alongside.
+  - Memory is capped by a host option: JS `abnfWith({ maxWords })`, Rust
+    `Abnf::with_max_words`. The default is `ABNF_DEFAULT_WORDS` = 2²² words
+    (16 MiB), which is D281's group-arena default. The cap is clamped to
+    2¹⁶..2²⁴ words; the upper bound is D281's hard cap. Past the cap the run
+    answers −1 (`budget`), the same on every host for the same cap. The cap
+    is not in the source key: it is a runtime bound, like the budget.
+  - A host whose scratch is too small gets a suggested size (`abnf-more`),
+    scaled from the words used per byte read, and reruns, uncharged. The
+    suggestion is at least double and at most the cap, so a host reruns at
+    most log₂(cap / first) + 1 times, which costs at most 2× the work. The
+    hosts also refuse a non-doubling suggestion or more than 24 reruns, as an
+    internal error. The gate checks the bound on every run; the most reruns
+    seen was 3. The verdict and units never depend on host sizes.
+* **Binding.** The compiler admits the built-in names `abnf`/`abnfb` into the
+  D141 registry. `.abnf`/`.abnfb` lower to EXT leaves of those controls
+  (D140). Without them in the registry the compiler answers internal code 57,
+  `unsupported_control`, with a message naming the module (the Unicode
+  precedent). The Program format, the VM and the verifier are unchanged.
+  - Loading a Program without the module is `missing_control`.
+  - The `bus` profile refuses them unless `controlsInBus`.
+  - The item bound is the EXT maximum, 65,536 by default.
+* **Hosts.**
+  - JS: `snug/abnf` exports `abnf` and `checkAbnf`. `ext.mjs` admits the two
+    names only for entries carrying the module's marker symbol.
+    `argument()` may answer a string, which becomes the refusal's detail.
+  - Rust: `snug::abnf` provides `Controls::with_abnf()`, `insert_abnf`,
+    `Abnf::text()/bytes()/with_max_bytes()`, `check_abnf`, and
+    `Registry::argument_detail`.
+  - wasm SDK: `snug-wasm-sdk/abnf` re-exports the native objects. They run
+    through the import in kin's JS, so the wasm binary is unchanged in
+    size. The import gains the argument's pool offset, and the bound object
+    exposes its pool, so prepared arguments are found as on the native host.
+* **Size.**
+  - `snug/abnf` gets its own cap; it is excluded from `all-runtime`, like
+    `snug/unicode`.
+  - No existing cap changed: schema/runtime +51 B min (the `ext.mjs` hook),
+    compile full +233 B min.
+**Why**: D230 names `.abnf`/`.abnfb`. Membership, not first-match, is
+RFC 5234's meaning. Earley handles every CFG (left recursion, ε, ambiguity)
+without a grammar transform that would blow up counted repetition. It is
+incremental per symbol, so the budget can stop it anywhere. The EXT route
+reuses the proven binding, budget and session machinery, and needs no
+Program change.
+**Alternatives**:
+* Memoized backtracking: needs a left-recursion fixpoint, and its ambiguity
+  bounds are worse.
+* CYK: requires CNF, which multiplies counted repetitions.
+* Lowering to the regexp automata: ABNF is not regular.
+* Running the engine inside wasm: the SDK binary would grow for everyone.
+* A hash set for duplicates: probe counts would depend on table size.
+* Parsing the ABNF in the compiler: it would grow `snug/compile`, and the
+  argument hook already runs at compile time.
+- [ ] **Signed off** (owner)
 
 ## Findings
 

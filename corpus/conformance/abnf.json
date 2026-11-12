@@ -1,0 +1,1239 @@
+{
+ "description": "P9.14 (D334): hand vectors for .abnf / .abnfb -- controllers (ABNF text), the match verdict per target, and the compile-time refusals (codes: syntax, prose, undefined, duplicate, incremental, repeat, range, nesting, utf8). Checked by bb abnf-test against kin and the independent oracle (corpus/tools/abnf-oracle.mjs), and by host/js/test/abnf.test.mjs.",
+ "grammars": [
+  {
+   "name": "RFC 9165 Figure 4: oid (bytes)",
+   "abnf": "oid\noid = 1*arc\nroid = *arc\narc = [nlsb] %x00-7f\nnlsb = %x81-ff *%x80-ff\n",
+   "cases": [
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "00",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "",
+     "expect": false
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "81",
+     "expect": false
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "8100",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "2b0601",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "ff8000",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "80",
+     "expect": false
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "7f7f",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "RFC 9165 Figure 4: roid start",
+   "abnf": "roid\noid = 1*arc\nroid = *arc\narc = [nlsb] %x00-7f\nnlsb = %x81-ff *%x80-ff\n",
+   "cases": [
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "00",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "81",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "RFC 9165 Figure 5: full-date",
+   "abnf": "full-date\ndate-fullyear   = 4DIGIT\ndate-month      = 2DIGIT  ; 01-12\ndate-mday       = 2DIGIT  ; 01-28, 01-29, 01-30, 01-31 based on\n                          ; month/year\ntime-hour       = 2DIGIT  ; 00-23\ntime-minute     = 2DIGIT  ; 00-59\ntime-second     = 2DIGIT  ; 00-58, 00-59, 00-60 based on leap sec\n                          ; rules\ntime-secfrac    = \".\" 1*DIGIT\ntime-numoffset  = (\"+\" / \"-\") time-hour \":\" time-minute\ntime-offset     = \"Z\" / time-numoffset\n\npartial-time    = time-hour \":\" time-minute \":\" time-second\n                  [time-secfrac]\nfull-date       = date-fullyear \"-\" date-month \"-\" date-mday\nfull-time       = partial-time time-offset\n\ndate-time       = full-date \"T\" full-time\nDIGIT          =  %x30-39 ; 0-9\n; abbreviated here\n",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2024-01-01",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "not-a-date",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2024-1-01",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "20240-01-01",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "RFC 9165 Figure 5: date-time",
+   "abnf": "date-time\ndate-fullyear   = 4DIGIT\ndate-month      = 2DIGIT  ; 01-12\ndate-mday       = 2DIGIT  ; 01-28, 01-29, 01-30, 01-31 based on\n                          ; month/year\ntime-hour       = 2DIGIT  ; 00-23\ntime-minute     = 2DIGIT  ; 00-59\ntime-second     = 2DIGIT  ; 00-58, 00-59, 00-60 based on leap sec\n                          ; rules\ntime-secfrac    = \".\" 1*DIGIT\ntime-numoffset  = (\"+\" / \"-\") time-hour \":\" time-minute\ntime-offset     = \"Z\" / time-numoffset\n\npartial-time    = time-hour \":\" time-minute \":\" time-second\n                  [time-secfrac]\nfull-date       = date-fullyear \"-\" date-month \"-\" date-mday\nfull-time       = partial-time time-offset\n\ndate-time       = full-date \"T\" full-time\nDIGIT          =  %x30-39 ; 0-9\n; abbreviated here\n",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2013-03-21T20:04:00Z",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2013-03-21T20:04:00.5+01:00",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2013-03-21T20:04:00",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2013-03-21t20:04:00Z",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2013-03-21T20:04:00z",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "2013-03-21T20:04:00.Z",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "char-val is case-insensitive",
+   "abnf": "\"ab\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "AB",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aB",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab ",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "%i is case-insensitive (RFC 7405)",
+   "abnf": "%i\"aB\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "AB",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "%s is case-sensitive (RFC 7405)",
+   "abnf": "%s\"aB\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aB",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "AB",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "%S and %I are the same as %s and %i",
+   "abnf": "%S\"a\" %I\"b\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aB",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "Ab",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a b",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "case folding is ASCII only",
+   "abnf": "\"-_1\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "-_1",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "-_!",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "num-val range edges",
+   "abnf": "%x30-39",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "/",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "0",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "9",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": ":",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "00",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "num-val concatenation (decimal)",
+   "abnf": "%d48.49.50",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "012",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "01",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "0123",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "num-val binary and hex case",
+   "abnf": "%b1000001 / %X6a / %x6B",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "A",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "j",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "k",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "K",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "num-val above 0xFF never matches bytes",
+   "abnf": "%x20AC",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "€",
+     "expect": true
+    },
+    {
+     "mode": "abnfb",
+     "major": "text",
+     "input": "€",
+     "expect": false
+    },
+    {
+     "mode": "abnfb",
+     "major": "bytes",
+     "inputHex": "e282ac",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "e282ac",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "astral scalars are one symbol",
+   "abnf": "%x1F600 / %x10FFFF",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "😀",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "􏿿",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "f09f9880",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "f09f98",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "beyond U+10FFFF never matches",
+   "abnf": "%x110000-7FFFFFFF",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "􏿿",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": ".abnfb over the UTF-8 bytes of text",
+   "abnf": "%xC3.A9",
+   "cases": [
+    {
+     "mode": "abnfb",
+     "major": "text",
+     "input": "é",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "é",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": ".abnf on a byte string that is not UTF-8",
+   "abnf": "*%x00-10FFFF",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "ff",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "c0af",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "eda080",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "61e282ac",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "bytes",
+     "inputHex": "efbfbf",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "exact repetition",
+   "abnf": "3\"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaa",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aa",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaaa",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "bounded repetition",
+   "abnf": "2*3\"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aa",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaa",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaaa",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "at most",
+   "abnf": "*2\"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aa",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaa",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "at least",
+   "abnf": "2*\"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aa",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "0*0 matches only the empty string",
+   "abnf": "0*0\"a\" \"b\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "b",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "1*1 is the element",
+   "abnf": "1*1\"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "empty char-val",
+   "abnf": "\"\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "empty matches: option and star",
+   "abnf": "[x] *y\nx = \"x\"\ny = \"y\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "x",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "yy",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "xyy",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "yx",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "nullable rule chain",
+   "abnf": "a\na = b c\nb = [ \"b\" ]\nc = *\"c\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "b",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "bcc",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "cb",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "left recursion",
+   "abnf": "a\na = a \"x\" / \"y\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "y",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "yxxx",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "x",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "yxy",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "right recursion",
+   "abnf": "a\na = \"x\" a / \"\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "xxxx",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "xxy",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "mutual recursion (balanced)",
+   "abnf": "s\ns = *p\np = \"(\" s \")\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "()",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "(())()",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "(()",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": ")(",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "ambiguous grammar",
+   "abnf": "a\na = a a / \"x\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "x",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "xxxxxxx",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "xxy",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "nullable left recursion",
+   "abnf": "a\na = a \"x\" / \"\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "xxx",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "a rule that never terminates is empty",
+   "abnf": "a\na = a",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "nested repetition of a nullable",
+   "abnf": "*(*\"a\")",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "aaa",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "b",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "deep nesting (256 groups)",
+   "abnf": "x\nx = ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((\"a\"))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "A",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "incremental alternatives",
+   "abnf": "r\nr = \"a\"\nr =/ \"b\"\nr =/ \"c\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "b",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "c",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "d",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "incremental alternative before its rule",
+   "abnf": "r\nr =/ \"b\"\nr = \"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "b",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "rule names are case-insensitive",
+   "abnf": "Rule\nRULE = \"a\"\nrule =/ \"b\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "b",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "CRLF newlines and continuation lines",
+   "abnf": "r\r\nr = \"a\"\r\n    \"b\" ; comment\r\n  / \"c\"\r\n",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "ab",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "c",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "comments may hold any scalar",
+   "abnf": "r ; café ☃\nr = \"a\" ; 😀",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "the last rule needs no newline",
+   "abnf": "r\nr = \"a\"",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "the start may be an alternation (leniency)",
+   "abnf": "1*DIGIT / \"x\"\nDIGIT = %x30-39",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "123",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "x",
+     "expect": true
+    },
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "blank and comment lines between rules",
+   "abnf": "a\n\n; c\n\na = \"a\"\n   \n",
+   "cases": [
+    {
+     "mode": "abnf",
+     "major": "text",
+     "input": "a",
+     "expect": true
+    }
+   ]
+  },
+  {
+   "name": "element-first is the RFC reading, tried first: a rule-like comment or a rule named like the start change nothing",
+   "abnf": "s ; s = \"y\"\ns = \"x\" / t\nt = \"z\"\n",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "x", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "z", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "y", "expect": false }
+   ]
+  },
+  {
+   "name": "element-first with a start other than the first rule",
+   "abnf": "t\ns = \"x\"\nt = \"z\"\n",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "z", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "x", "expect": false }
+   ]
+  },
+  {
+   "name": "a controller that begins with a rule starts at it (leniency)",
+   "abnf": "s = 1*DIGIT\r\nDIGIT = %x30-39\r\n",
+   "cases": [
+    { "mode": "abnf", "major": "text", "input": "123", "expect": true },
+    { "mode": "abnf", "major": "text", "input": "", "expect": false },
+    { "mode": "abnf", "major": "text", "input": "12a", "expect": false }
+   ]
+  },
+  {
+   "name": "prose-val is refused",
+   "abnf": "<a prose description>",
+   "error": "prose"
+  },
+  {
+   "name": "prose-val in a rule is refused",
+   "abnf": "a\na = \"x\" / <y>",
+   "error": "prose"
+  },
+  {
+   "name": "core rules are not imported",
+   "abnf": "1*DIGIT",
+   "error": "undefined"
+  },
+  {
+   "name": "undefined rule",
+   "abnf": "a\na = b",
+   "error": "undefined"
+  },
+  {
+   "name": "duplicate rule",
+   "abnf": "a\na = \"x\"\nA = \"y\"",
+   "error": "duplicate"
+  },
+  {
+   "name": "=/ without =",
+   "abnf": "a\na =/ \"x\"",
+   "error": "incremental"
+  },
+  {
+   "name": "repetition max below min",
+   "abnf": "3*2\"a\"",
+   "error": "repeat"
+  },
+  {
+   "name": "num-val range reversed",
+   "abnf": "%x39-30",
+   "error": "range"
+  },
+  {
+   "name": "nesting deeper than 256",
+   "abnf": "x\nx = (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((\"a\")))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n",
+   "error": "nesting"
+  },
+  {
+   "name": "unterminated char-val",
+   "abnf": "\"abc",
+   "error": "syntax"
+  },
+  {
+   "name": "repeat separated from its element",
+   "abnf": "3 \"a\"",
+   "error": "syntax"
+  },
+  {
+   "name": "concatenation needs whitespace",
+   "abnf": "\"a\"\"b\"",
+   "error": "syntax"
+  },
+  {
+   "name": "element glued to a group",
+   "abnf": "a(\"b\")\na = \"a\"",
+   "error": "syntax"
+  },
+  {
+   "name": "trailing garbage",
+   "abnf": "\"a\" )",
+   "error": "syntax"
+  },
+  {
+   "name": "a lone CR is not a newline",
+   "abnf": "a\ra = \"x\"",
+   "error": "syntax"
+  },
+  {
+   "name": "an indented rule is a continuation",
+   "abnf": "a\n a = \"x\"",
+   "error": "syntax"
+  },
+  {
+   "name": "empty controller",
+   "abnf": "",
+   "error": "syntax"
+  },
+  {
+   "name": "tab in a char-val",
+   "abnf": "\"a\tb\"",
+   "error": "syntax"
+  },
+  {
+   "name": "non-ASCII outside comments",
+   "abnf": "\"é\"",
+   "error": "syntax"
+  },
+  {
+   "name": "empty group",
+   "abnf": "()",
+   "error": "syntax"
+  },
+  {
+   "name": "num-val without digits",
+   "abnf": "%x",
+   "error": "syntax"
+  },
+  {
+   "name": "a rule without =",
+   "abnf": "a\na \"x\"",
+   "error": "syntax"
+  }
+ ]
+}

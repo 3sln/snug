@@ -3,7 +3,8 @@
 //! limits, the compile budget, the Program's bytes -- is kin's; this file owns
 //! only the arena, the decimal float-literal port (D020: `str::parse::<f64>`,
 //! at most 17 significant digits, checked by kin) and the result's shape.
-use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK};
+use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_ABNF, ERR_NEED_FLOATS, ERR_NEED_UNICODE,
+    ERR_REGEXP_BLOCK};
 use crate::snug::compile::main as kc;
 use std::cell::RefCell;
 
@@ -110,6 +111,10 @@ pub trait Registry {
     fn words(&self) -> Vec<i32>;
     /// Whether control `name` accepts `argument` (an encoding), at compile time.
     fn argument_ok(&self, name: &str, argument: &[u8]) -> bool;
+    /// Why control `name` refuses `argument`, when it says (D334: the ABNF controls).
+    fn argument_detail(&self, _name: &str, _argument: &[u8]) -> Option<String> {
+        None
+    }
 }
 
 pub fn compile_with_options(text: &str, options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
@@ -170,6 +175,8 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                         "Unicode categories require snug::unicode_tables (snug/unicode)"
                     } else if code == ERR_REGEXP_BLOCK {
                         "XSD block escapes require unavailable pinned Unicode block data"
+                    } else if code == ERR_NEED_ABNF {
+                        ".abnf and .abnfb require the ABNF controls (Controls::with_abnf, snug/abnf)"
                     } else { "CDDL schema refused" },
                     detail,
                 });
@@ -248,8 +255,12 @@ fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry) -> Res
         let name = &names[program[o + 2] as usize];
         let (ao, al) = (program[o + 3] as usize, program[o + 4] as usize);
         if !controls.argument_ok(name, &pool[ao..ao + al]) {
+            let detail = match controls.argument_detail(name, &pool[ao..ao + al]) {
+                Some(d) => format!("{name} argument: {d}"),
+                None => name.clone(),
+            };
             return Err(SchemaError { code: "control_value", line: 0, column: 0, rule: None,
-                message: "CDDL schema refused", detail: Some(name.clone()) });
+                message: "CDDL schema refused", detail: Some(detail) });
         }
     }
     Ok(())

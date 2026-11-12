@@ -120,6 +120,19 @@
         "brotli": 2203
       }
     },
+    "snug/abnf": {
+      "static": {
+        "min": 14790,
+        "gzip": 6077,
+        "brotli": 5423
+      },
+      "full": {
+        "min": 14790,
+        "gzip": 6077,
+        "brotli": 5423
+      },
+      "justification": "P9.14 D334: the optional .abnf/.abnfb module (kin/abnf.kin: ABNF parser, resolver and metered Earley recognizer with its configurable scratch cap; host/js/src/abnf.mjs with abnfWith), a new entry outside every runtime aggregate (all-runtime excludes it, like snug/unicode). Ceil(measurement * 1.02) of 14,500 / 5,957 / 5,316; measured on p914-abnf over main 2c3c8f1, esbuild 0.28.2. No existing cap changed: snug/schema and runtime +51 min (ext.mjs binding hook), snug/compile full +233 min (code 57, name admission, message)."
+    },
     "runtime": {
       "static": {
         "min": 175571,

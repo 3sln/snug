@@ -20,6 +20,8 @@
                 :task (apply shell "kin/scripts/compile-test" *command-line-args*)}
   compile2-test {:doc "P8.5 phase 1: the format 2.0 compiler and verifier (PEG groups, D270) on JS and Rust -- corpus compiles, withdrawn refusals, JS == Rust (Programs and warnings), vm-verify, corruptions, SOURCE_KEY, tier census."
                  :task (apply shell "kin/scripts/compile2-test" *command-line-args*)}
+  abnf-test {:doc "P9.14 (D334): .abnf/.abnfb -- the ABNF engine (kin/abnf.kin) vs the independent oracle (corpus/tools/abnf-oracle.mjs) on hand, RFC 9165 and seeded random/mutated grammars; budget at every room, the memory cap, scratch growth; JS == Rust.   bb abnf-test [grammars] [seed]"
+             :task (apply shell "kin/scripts/abnf-test" *command-line-args*)}
   unicode-test {:doc "P7.3: offline Unicode tables, JS/Rust Program identity, category samples through the VM."
                 :task (shell "kin/scripts/unicode-test")}
   rust-api-test {:doc "P7.11: public Rust API, JS codec/schema/Program parity, doctests and offline clippy; P9.6's async differential on a seeded slice (`full`: at full scale)."

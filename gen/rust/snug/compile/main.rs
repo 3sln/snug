@@ -437,6 +437,7 @@ pub fn error_name(code: i32) -> &'static str {
         54 => "regexp",
         55 => "control_registry",
         56 => "regexp",
+        57 => "unsupported_control",
         45 => "map_key",
         49 => "tag",
         50 => "major",
