@@ -13,6 +13,14 @@ non-shortest heads/floats, keys in any order; duplicates compared by value),
 validating non-deterministic input through its canonical copy;
 `wire: 'deterministic'` refuses it ([profiles](profiles.md#valid-cbor-p84-d260d268)).
 
+> **Tagged (discriminated) unions.** Map cuts follow RFC 8610 §3.5.4
+> literally by default (D301), so `{ kind: "a", x: int // kind: "b", y: tstr }`
+> rejects `{"kind": "b", "y": "z"}`. Write a type choice of maps,
+> `{ kind: "a", x: int } / { kind: "b", y: tstr }`, or put a cut-free `=>`
+> discriminator first: `{ "kind" => "a", x: int // "kind" => "b", y: tstr }`.
+> Compile warning W8 flags the first spelling. See [cuts](#map-determinism-and-cuts) and the
+> [guide](guide.md#discriminated-unions-under-the-rfc-cut).
+
 The compiler and matcher are kin, shared by JS and Rust. This document
 describes the current implementation, informed by D010–D014, D020–D025,
 D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validation-semantics).
@@ -22,7 +30,7 @@ D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validati
 | Construct | Supported behaviour |
 | --- | --- |
 | Type/group rules, references, `/=`, `//=` | Supported; duplicate `=` definitions refused. User rules may shadow prelude names (D031). |
-| Type choices `/`, group choices `//`, nested groups | Supported; all alternatives evaluated as sets. |
+| Type choices `/`, group choices `//`, nested groups | Supported. A type choice over one item is a set test; a group choice `//` is prioritised and locks in its first successful alternative (RFC 8610 Appendix A, D270; see [arrays](#arrays-and-repetition)). |
 | Maps `{}`, arrays `[]`, labelled members | Supported; array member names are labels, not matching constraints. |
 | Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. |
 | Generic type/group rules and instantiation | Supported, memoised with limits; unresolved/wrong-arity uses refused. |
@@ -30,7 +38,7 @@ D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validati
 | Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
 | Productive recursive types | Supported when recursion passes through a container/tag; depth bounded. |
 | Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`; see D036. |
-| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison, encoded-width floats; hexadecimal/decimal floats and h'/b64'/byte literals supported. |
+| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values (D328); hexadecimal/decimal floats and h'/b64'/byte literals supported. |
 | Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value, D328); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing (D336). Runtime profile still restricts actual tags/simple values. |
 | Appendix D prelude | Compiled from CDDL text; includes exact bignum integer types. Some names have no value under the current wire profile. |
 | UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
@@ -52,7 +60,7 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.regexp` | Whole-string XSD Appendix F by default; `regexp: 'iregexp'` selects strict RFC 9485. Both compile to the same bounded code-point automata; details below. |
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
 | `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only (D040). |
-| `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). |
+| `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). **`.default` is a deliberate deviation:** RFC 8610 §3.8.6 gives it an implied `.ne`; snug follows the annotation-only reading of Erratum 9229 (reported, not verified). Write `(T .ne v) .default v` for the RFC meaning. |
 | `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2, D330); `.det` dedents each literal first. |
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
 | `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `snug/abnf` / `Controls::with_abnf()` (D334); without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
@@ -193,8 +201,8 @@ C Cc Cf Co Cn Cs
 `Cs` is empty: surrogate code points never occur in Unicode text. `C` also
 excludes surrogates; `\P{Cs}` matches any single scalar allowed by the wire
 profile. The Bindle profile (`wire: 'bindle'`) rejects noncharacters with
-`cbor/text`, even when a category would otherwise match; the deterministic
-preset admits them, and they match their categories (Cn). Category aliases,
+`cbor/text`, even when a category would otherwise match; the valid (default)
+and deterministic presets admit them, and they match their categories (Cn). Category aliases,
 scripts, `gc=…` spellings in CDDL and host-engine extensions are refused.
 XSD block escapes `\p{IsBasicLatin}` / `\P{Is…}` are also refused with a
 message explaining unavailable pinned Unicode block data: the pinned Node
@@ -288,71 +296,77 @@ saturation behaviour for extreme bounds on zero-position expressions
 
 ## Map determinism and cuts
 
-Maps are **closed** unless an explicit entry covers remaining pairs. Every
-pair must be assigned, including under optional groups and choices.
-Top-level map `//` choices are separate map candidates. Within one
-alternative, literal-key entries have priority, followed by key-typeset
-entries in source order. An entry accepts only when both key and value
-match and its occurrence capacity remains.
+Since format 2.0 (D270, D272) groups follow RFC 8610 Appendix A's PEG
+semantics in maps as in arrays. The format 1 rules (priority assignment,
+compile-time proofs of exactness, the `map_overlap`, `map_cut` and
+`map_group_occurrence` refusals) are retired; schemas that format 1 refused
+for those reasons now compile.
 
-To prove greedy priority assignment equivalent to existential CDDL matching,
-overlapping key domains require the lower-priority entry to be **absorbing**
-(minimum 0, unbounded maximum). Overlap is conservative; a schema can be
-refused even if a more expensive proof could establish disjointness (D011).
-For example, `{ a: uint, * tstr => any }` is admitted, whereas overlapping
-constrained domains such as `{ 1*2 tstr => uint, 1*2 tstr => uint }` are
-refused with `map_overlap`.
+- Maps are **closed**: after the group runs, every pair must have been
+  consumed (§2.1). Nothing is retried to make that happen.
+- Entries run in **source order**. A member picks pairs from the whole map
+  (§3.5.3) in a value-defined order: ascending deterministic encoding of the
+  key, so the result never depends on the wire order.
+- A member takes **every** remaining pair whose key and value match, up to
+  its maximum (greedy). A pair whose key matches but whose value does not is
+  skipped and left for later entries, unless the member is a cut.
+- There is no literal-key priority: `{ * tstr => any, a: uint }` rejects
+  `{"a": 1}`, because the wildcard runs first and takes `a`. Put wildcards
+  last: `{ a: uint, * tstr => any }`.
+- A group choice `//` is prioritised: the first alternative that succeeds is
+  locked in, even if closedness later fails. `{ (? a: int) // (b: int) }`
+  rejects `{"b": 1}` (the empty first alternative succeeds).
+- A failed repetition iteration is undone: `{ * (a: int, b: int) }` rejects
+  `{"a": 1}`.
 
-`name:` and literal colon keys imply cuts; `^ =>` makes the cut explicit.
-
-*Format 2.0 (PEG groups; D270, D294, D301; the VM since P8.5 phase 2, D310), 2026-11-10:*
-the cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`). Once
-a cut member finds its key, that pick is locked in: if the value fails,
+**Cuts.** `name:` and literal colon keys imply cuts; `^ =>` makes the cut explicit.
+The cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`, D301).
+Once a cut member finds its key, that pick is locked in: if the value fails,
 "the entire map fails to match", whatever `//` alternatives or later
 entries remain; a cut that succeeds inside an alternative or an optional
-group that later fails also fails the map (commitment epochs, architecture
-§20.2). Its scope is the map type, so a type choice of maps is outside it.
+group that later fails also fails the map (commitment epochs). Its scope is
+the map: "the entire map" of §3.5.4, so a type choice of maps
+(`{…} / {…}`) is outside it.
 Consequently the discriminated-union idiom
 `{ kind: "a", x: uint // kind: "b", y: tstr }` rejects `{kind: "b", y: "z"}`;
 write `{ kind: "a", x: uint } / { kind: "b", y: tstr }` or
 `{ "kind" => "a", x: uint // "kind" => "b", y: tstr }` (see the
 [guide](guide.md#discriminated-unions-under-the-rfc-cut); compile warning W8
-flags the idiom). The previous behaviour, where a failed cut kills only its
+flags the idiom). The alternative reading, where a failed cut kills only its
 own alternative (D021, rule A, the reference tools' reading), is the
 non-default option `cuts: 'branch'`. Cuts on key typesets (`tstr ^=> uint`)
 and byte-string, float and beyond-64-bit colon keys (`h'00': T`) are
-supported in format 2.0 (D294); `map_cut` is withdrawn.
+supported (D294). A cut never reaches back to entries that already ran:
+`{ * tstr => any, ? a: int }` accepts `{"a": "x"}`.
 
-*Format 1 (before P8.5; retired):* a matching cut key whose value fails kills **that
-alternative**, not all other alternatives (D021), so the idiom above
-works there. Cuts on key typesets and cut literals after an overlapping
-wildcard are refused (`map_cut`), because the priority transformation
-would otherwise change the source-order cut meaning. A literal colon key
-that is a byte string, a float or an integer beyond 64 bits (`h'00': T`,
-`1.5: T`) is a cut on a key that only a key typeset can hold, also refused
-with `map_cut` (D125); write `h'00' => T`. (Before P7.1 such a member
-silently compiled as never present.)
-
-Optional groups are expanded exactly. Repeated literal-only groups combine
-key-disjoint alternatives, including empty ones; duplicate literal keys
-make an alternative unsatisfiable and it is dropped. Repeated key-typeset
-groups are multiplied only if each entry is absorbing or the repetition
-count is fixed. Mixed literal/typeset groups repeated more than once, or
-non-interval count combinations such as `{ 0*2 (2*2 tstr => uint) }`, are
-refused (`map_group_occurrence`). Independent factors are retained only
-when disjointness or a shared absorbing predicate proves exactness;
-otherwise expansion must fit the alternatives limit.
+*Format 1 (before P8.5; retired):* a failed cut killed only its own
+alternative (D021), maps were matched existentially by a proven priority
+assignment, and schemas outside that proof were refused with `map_overlap`,
+`map_cut` or `map_group_occurrence`. None of these codes is produced now.
 
 ## Arrays and repetition
 
-Arrays match Glushkov automata, retaining every matching position. There is
-no first-match or greedy occurrence shortcut. Ambiguous repetitions such as
-`[? uint, 2*3 uint, tstr]` unroll within the position limit. A bounded
-single-entry occurrence can use one counter only when its domain is disjoint
-from every other predecessor that could enter it and an enclosing loop
-cannot re-enter it without reset (D012/D036). Otherwise it is unrolled and
-rechecked until stable, or refused at the position limit. Non-tail group
-recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
+Arrays follow Appendix A directly. Entries match elements left to right; a
+group choice `//` locks in its first successful alternative, and an
+occurrence takes as many iterations as succeed and never gives any back.
+The array matches when the group consumes every element. Consequences
+that surprise readers of the set-based tools (the Ruby and Rust `cddl`
+tools accept some of these):
+
+| Schema | Data | Result | Why |
+| --- | --- | --- | --- |
+| `[* uint, uint]` | `[1, 2]` | invalid | `*` takes both; Appendix A: "`*a a` … never can match anything" |
+| `[? uint, uint]` | `[1]` | invalid | `?` takes `1`, nothing is left for the second entry |
+| `[uint // uint, uint]` | `[1, 2]` | invalid | the first alternative succeeds and is locked in; `2` is left over |
+| `[2*3 uint, uint]` | `[1, 2, 3]` | invalid | greedy: the repetition takes all three |
+
+Write the specific alternative first (`[uint, uint // uint]`) and keep a
+repetition from swallowing what a later entry needs (`[* uint, tstr]`, or
+`[uint, * uint]` for "one or more"). An iteration that succeeds without
+consuming anything ends its repetition. The `arrayPositions` and
+`pegNodes` compile limits bound the compiled groups. Left recursion is
+refused with `group_recursion`; recursion that consumes nothing is
+`nonproductive`.
 
 ## Semantic notes
 
@@ -392,10 +406,10 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
   floats by their binary64 value), never rounded JS values. Non-float
   literal comparisons rely on the unique admitted wire encoding.
 - The wire profile, not the schema, decides which data reach the schema:
-  under the deterministic preset (the default, `tags: 'any'`, D180) integer
-  and other non-text map keys, every prelude name and every tag number
-  except the invalid 65535, 2³²−1 and 2⁶⁴−1 (RFC 8949 §9.2) match valid
-  data. `tags: 'standard'` restores the former set, under which `bigfloat`,
+  under the valid (default) and deterministic presets (`tags: 'any'`, D180)
+  integer and other non-text map keys, every prelude name and every tag
+  number except 65535, 2³²−1 and 2⁶⁴−1 match valid data (those three are
+  refused; RFC 8949 §3.4 permits flagging them as errors). `tags: 'standard'` restores the former set, under which `bigfloat`,
   `b64url`, `b64legacy`, `regexp` and `mime-message` have no values. Under
   `wire: 'bindle'` the Bindle restrictions apply. Compiler `profile: 'full'`
   never disables strict CBOR, and a compiled Program validates under either
@@ -403,13 +417,16 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 - **Validated versus opaque tags.** The profile checks the content of the
   tags it knows, whatever the schema says (D252): tag 0 must be an RFC 3339
   `date-time` refined by RFC 4287 §3.3 (upper-case `T`/`Z`; second 60 only
-  as 23:59:60 UTC on the last day of a month); tag 1 an integer or any float
+  when the time, converted to UTC by its offset, is 23:59:60 on the last day
+  of a month); tag 1 an integer or any float
   (non-finite floats are discouraged by RFC 8949 §3.4.2, not invalid); tag
   24 one valid item; tag 32 an RFC 3986 `URI-reference` (scheme, authority
   with IPv6/IPvFuture literals, path, query, fragment; no RFC 6874 zone
-  identifiers); tags 2/3 (minimal bignums), 4 (normalised decimals, a local
-  rule), 40 and the RFC 8746 typed arrays (whole elements); 55799 only at
-  the top. Every other tag, including 5 (bigfloat), 21–23, 33–36, 1040
+  identifiers); tags 2/3 (byte-string content; minimal, with no leading
+  zero byte and not below 2⁶⁴, under the deterministic and Bindle presets),
+  4 (normalised decimals, a local rule, under Bindle only), 40 and the RFC
+  8746 typed arrays (whole elements); 55799 anywhere, except only at the top
+  under Bindle. Every other tag, including 5 (bigfloat), 21–23, 33–36, 1040
   (column-major arrays) and unassigned numbers, is **opaque**: its content
   is any valid item and a match proves nothing about its registered
   meaning. A schema (`bigfloat`, `#6.1040([...])`) can still constrain it.
@@ -434,9 +451,7 @@ recursion is `group_recursion`; nonproductive recursion is `nonproductive`.
 | Regexp XSD shorthands/subtraction in `iregexp` mode; `\x..`, lookarounds, backreferences in either mode | `regexp`; no host regex engine/ReDoS path. |
 | Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable (D243), even with category tables. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
-| Unprovable map overlap / unsupported cut placement | `map_overlap` / `map_cut`; exact existential meaning must be provable. |
-| Non-exact repeated map groups | `map_group_occurrence`; cannot represent coupled/non-interval counts as independent counters. |
-| Non-regular group recursion / recursion without progress | `group_recursion` / `nonproductive`; finite automata/productivity required. |
+| Left-recursive groups / recursion without progress | `group_recursion` / `nonproductive`; PEG matching needs progress to terminate (D272). |
 | Composite `.ne`, nonliteral `.plus`/`.cat`/`.det`, float `.plus` | `control_value` or `unsupported_control`; currently exact supported folds only (D038). |
 | JSON validation, generated host types from CDDL | Outside current scope; handwritten API declarations describe the library, not schema output types. |
 

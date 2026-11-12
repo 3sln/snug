@@ -1,12 +1,15 @@
 # JavaScript API
 
 This reference describes the package facades and is maintained with the
-seven [declaration files](../host/js/types/). `npm test` checks declarations
+[declaration files](../host/js/types/) (one per entry point). `npm test` checks declarations
 with Node's TypeScript parser, checks exported names against runtime exports,
 and uses offline TypeScript for semantic checks if it exists in the permitted
 neighbouring checkout. The original package gate had no offline TypeScript;
 the [onboarding example](guide.md#typescript-onboarding) was separately
-checked with offline TypeScript 5.8.3 on 2026-11-03. No installs are
+checked with offline TypeScript 5.8.3 on 2026-11-03. Declarations changed
+since then (the `valid` preset, format 2.0 compile options) have been checked
+against the runtime by `npm test` and by review, not by a semantic TypeScript
+run. No installs are
 required. Internal `src/schema.mjs`/`src/compile.mjs` are host interfaces;
 their signatures and error classes are not the package contract.
 
@@ -43,7 +46,7 @@ The following named sets are the complete option-key lists used below:
 | `decode` | DecodeOptions | none |
 | `encode` | EncodeOptions | none |
 | `new Writer` | EncodeOptions + `keysSorted`, `limits` | nested `limits`: Limits only |
-| `compile` | `profile`, `limits`, `unicode` | nested `limits`: [CompileLimits](#compilation) only |
+| `compile` | `profile`, `regexp`, `cuts`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus` | nested `limits`: [CompileLimits](#compilation) only |
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
@@ -151,12 +154,24 @@ compile(text: string | Uint8Array, options?: CompileOptions): Promise<Schema>
 ```
 
 Importing this entry point does not load the generated compiler; calling it
-does. After loading, the compile is synchronous. `CompileOptions` is
-`{ profile?: 'full' | 'bindle' | 'bus', limits?: CompileLimits, unicode?: Int32Array, controls?: Controls, controlsInBus?: boolean }`.
+does. After loading, the compile is synchronous. `CompileOptions` is:
+
+```ts
+interface CompileOptions {
+  profile?: 'full' | 'bindle' | 'bus';   // compiler restriction set; default 'full'
+  regexp?: 'xsd' | 'iregexp';            // .regexp dialect; default 'xsd'
+  cuts?: 'rfc' | 'branch';               // map cut semantics; default 'rfc'
+  groupWords?: number;                   // PEG group arena cap in words; default 4,194,304, at most 2^24
+  limits?: CompileLimits;
+  unicode?: Int32Array;                  // tables from snug/unicode
+  controls?: Controls;                   // extension controls (snug/controls, snug/abnf)
+  controlsInBus?: boolean;               // admit extension controls under 'bus'
+}
+```
+
 `profile` defaults to `full` and restricts accepted CDDL, not wire policy.
 Schema refusals reject with `SchemaError`; invalid API options with TypeError.
-Format 2.0 adds `cuts?: 'rfc' | 'branch'` and
-`groupWords?: number`: `cuts` defaults to `'rfc'`, the literal RFC 8610 cut
+`cuts` defaults to `'rfc'`, the literal RFC 8610 cut
 (D301); `'branch'` is rule A, where a failed cut fails only its `//` branch
 (see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
 Any other value, including the pre-release name `'reference'`, is a TypeError.
@@ -166,7 +181,7 @@ The effective cut mode is part of the source key.
 
 | Compile resources | Compiled runtime resources |
 | --- | --- |
-| `schemaBytes`, `nesting`, `astNodes`, `instantiations`, `alternatives`, `arrayPositions`, `regexpPositions`, `width`, `poolBytes`, `totalBytes`, `compileBudget`, `leaves` | `depth`, `inputBytes`, `entries`, `items`, `bignumBytes`, `budget` |
+| `schemaBytes`, `nesting`, `astNodes`, `instantiations`, `pegNodes`, `arrayPositions`, `regexpPositions`, `width`, `poolBytes`, `totalBytes`, `compileBudget`, `leaves` | `depth`, `inputBytes`, `entries`, `items`, `bignumBytes`, `budget` |
 
 All are non-negative safe integers; defaults and ceilings are in the
 [guide](guide.md#limits). kin applies effective defaults and ceilings before
@@ -215,7 +230,7 @@ default). The generic controls meter their work in kin (program.md §14), with
 arguments prepared once per Program, so they cost the same on every host. A throwing
 predicate makes the validation call throw (`cause` set). New reasons:
 `control` (the predicate refused) and `control_size`. Programs using a control
-are format 1.1 and need the registry to load
+are ordinary format 2.0 Programs but need the registry to load
 (`fromSerialized(bytes, { controls })`, `fromProgram(P, B, { controls })`,
 `new Program(P, B, { controls })`); a missing name is
 `ProgramError('missing_control')` naming it; `program.controls` lists the
@@ -289,11 +304,16 @@ type ValidationResult = { ok: true } | {
 `ValidationOptions` extends DecodeOptions with `maxBignumBytes` and `budget`.
 Per-call schema limits only lower compiled limits. SpanOptions adds
 `depth?: number` and `items?: number`, both defaulting to 0.
-A failure is one deterministic witness across live alternatives, not a full
+A failure is one deterministic witness, not a full
 error list or necessarily the application's intended branch explanation.
 For `{ ok: true, id: uint } / { ok: false, error: tstr .size (1..120) }`,
 `{ ok: false, id: 7 }` reports `value` at `['ok']`, offset 8, even though
 false is valid in the second branch. The message as a whole fits neither.
+The offset is where the witness was decided, which is not always the item
+the path names: a failure decided at the map level (a cut that locked in, a
+`missing` member) reports the map's own offset, so the same data can report
+offset 0 under one spelling of a schema and the member's offset under
+another. Use the path to explain, and the offset only to locate.
 
 | API | Result / behaviour |
 | --- | --- |
@@ -301,7 +321,7 @@ false is valid in the second branch. The message as a whole fits neither.
 | `program.P`, `program.B` | Fresh copies of verified words/pool; mutations do not affect the Program. |
 | `program.sourceKey` | Lowercase 64-character SHA-256 hex cache key. |
 | `program.rules` | Frozen array of sorted validatable rule names. |
-| `program.controls` | Frozen array of the extension controls the Program uses (empty for format 1.0). |
+| `program.controls` | Frozen array of the extension controls the Program uses (empty when it uses none). |
 | `program.serialize(): Uint8Array` | Deterministic §13.3 container, synchronously hashed. |
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
@@ -309,7 +329,7 @@ false is valid in the second branch. The message as a whole fits neither.
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
 | `fromProgram(P, B, { controls? }?): Promise<Schema>` | Copies and verifies, without loading the compiler. |
-| `fromSerialized(bytes: Uint8Array, { controls? }?): Promise<Schema>` | Checks container integrity/compatibility (format 1.0 or 1.1) and verifies; without the compiler. A Program using extension controls needs the registry it was compiled with. |
+| `fromSerialized(bytes: Uint8Array, { controls? }?): Promise<Schema>` | Checks container integrity/compatibility (format 2.0; 1.x is refused as `format_version`) and verifies; without the compiler. A Program using extension controls needs the registry it was compiled with. |
 
 The entry also exports schema-first helpers:
 
@@ -322,7 +342,7 @@ validateAt(schema: Schema, bytes: Uint8Array, start: number, end: number,
 
 `ProgramError` extends Error with `code`; constructor `(code)`.
 Load compatibility is equal format major and minor ≤ loader minor (D084),
-currently 1.1 (D141; format 1.0 Programs load unchanged). Container version is 1. Producer snug version is informational,
+currently 2.0 (D279, D318); every format 1.x Program is refused with `format_version`, so recompile it from CDDL. Container version is 1. Producer snug version is informational,
 retained on reserialisation. The four-byte format word stores major in low
 16 bits, minor in high 16 bits. P and B must remain semantically trustworthy;
 SHA-256 is a corruption check, not authentication. See [caching](guide.md#programs-caching-and-compatibility).
@@ -667,6 +687,7 @@ indexes and the markers `*`, `#tag`, `cbor` appear in paths.
 | Validation reason | `cbor/` plus a profile code; or `type`, `missing`, `unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `control`, `control_size`, `group_limit`, `budget` |
 | Schema decode/checked-view SnugFault | Profile codes unchanged; schema reason prefixed `schema/`, e.g. `schema/type`, `schema/budget`; also carries reason/path/offset/subcode |
 | Host encode / Writer | Profile codes where applicable; `unsupported`, `grammar`, `writer_failed` |
+| Sessions (`snug/sources`, `snug/sequence`) | `sessions/limit` |
 | ProgramError | `magic`, `container_version`, `format_version`, `length`, `version` (malformed producer metadata), `reserved`, `digest`, `verify`, `too_large`, `missing_control` |
 | SourceError | `bad_chunk`, `short_read`, `length_mismatch` |
 
@@ -676,10 +697,11 @@ SchemaError codes:
   `type_group_mismatch`, `generic_arity`, `nonproductive`, `group_recursion`,
   `unwrap`, `enum`, `range`, `float_literal`, `empty_schema`.
 - Controls/matching: `control_target`, `control_value`, `unsupported_control`,
-  `unknown_control`, `regexp`, `map_key`, `map_group_occurrence`, `map_cut`,
-  `map_overlap`, `tag`, `major`, `profile`.
+  `unknown_control`, `control_registry`, `regexp`, `map_key`, `tag`, `major`,
+  `profile`. (`map_group_occurrence`, `map_cut` and `map_overlap` were
+  format 1 refusals; format 2.0 never produces them.)
 - Resources: `limit_schema_bytes`, `limit_nesting`, `limit_ast_nodes`,
-  `limit_instantiations`, `limit_alternatives`, `limit_array_positions`,
+  `limit_instantiations`, `limit_peg_nodes`, `limit_array_positions`,
   `limit_regexp_positions`, `limit_width`, `limit_pool_bytes`,
   `limit_total_bytes`, `limit_compile_budget`, `limit_leaves`, `limit_memory`.
 - `internal` identifies an implementation problem; it is not a supported
@@ -730,7 +752,7 @@ Recovery by CBOR/profile code (also applies to `cbor/<code>` reasons):
 | `too_many_entries` | Per-container pair/element cap exceeded; reduce that container or review its cap |
 | `too_many_items` | Total item accounting exhausted; reduce document complexity or review its cap |
 | `too_large` | Input/output byte acceptance cap exceeded; reduce size or review cap; encoding checks only at finish |
-| `not_map` | Codec/view/profile scanner defaults to map root; use top: 'any' if the protocol permits other roots |
+| `not_map` | The root is not a map under `top: 'map'` (the Bindle preset's default; valid and deterministic default to any root); drop `top: 'map'` if the protocol permits other roots |
 
 The last five resource/root codes need not mean malformed CBOR. For schema
 limits a larger per-call value cannot lift the compiled cap; recompile with
@@ -759,9 +781,10 @@ help. Never raise caps automatically in response to an untrusted message.
 | SnugFault `unsupported` | Host value or typed Writer argument not admitted; use documented representations; replace failed Writer |
 | SnugFault `grammar` | Writer root/count/key/end sequence invalid; fix call sequence and replace Writer |
 | SnugFault `writer_failed` | Writer already poisoned; inspect failure for first code and replace Writer |
+| SnugFault `sessions/limit` | `openSession` (or a source/sequence that opens one) found `sessionLimits().maxLive` sessions live; finish, `close()` or dispose sessions, or raise the limit deliberately |
 | ProgramError `magic` | Wrong artifact type; load a snug Program container |
 | ProgramError `container_version` | Unsupported framing version; regenerate with compatible toolchain |
-| ProgramError `format_version` | Major mismatch/newer minor; use compatible loader or regenerate trusted schema |
+| ProgramError `format_version` | Not format 2.0 (for example a cached 1.x Program) or a newer minor; evict and recompile from trusted CDDL |
 | ProgramError `length` | Claimed/actual framing sizes disagree; evict and regenerate trusted artifact |
 | ProgramError `version` | Malformed producer metadata, not producer-version inequality; regenerate artifact |
 | ProgramError `reserved` | Nonzero reserved bytes; reject and regenerate artifact |
@@ -796,11 +819,9 @@ SchemaError recovery (line/column locate schema text, not payload):
 | `control_value` | Unsupported controller/value conversion; use documented exact controller forms |
 | `unsupported_control` | Recognised control deliberately unsupported; rewrite with supported constraints |
 | `unknown_control` | Unknown control/extensions pending; correct spelling or enforce application constraint separately |
+| `control_registry` | The extension-control registry reached the compiler malformed (the facade usually refuses a bad registry earlier with TypeError); fix the registry |
 | `regexp` | Unsupported I-Regexp/escaping or missing tables; use cookbook replacements for JS shorthands, pass snug/unicode for categories |
 | `map_key` | Unsupported map-key schema; use allowed literal/key domain |
-| `map_group_occurrence` | Repeated map group cannot be represented exactly; rewrite disjoint/absorbing entries or explicit alternatives |
-| `map_cut` | Unsupported cut placement; use documented literal-key cuts |
-| `map_overlap` | Cannot prove priority matching exact; make domains disjoint or lower-priority entry absorbing |
 | `tag` | Invalid/unsupported schema tag constraint; correct syntax/content type |
 | `major` | Invalid major/simple constraint; use supported major syntax |
 | `profile` | Compiler restriction set disallows construct; simplify or deliberately choose another compiler profile, without relaxing wire policy |
@@ -808,7 +829,7 @@ SchemaError recovery (line/column locate schema text, not payload):
 | `limit_nesting` | Parser/lowering nesting cap; simplify or review nesting |
 | `limit_ast_nodes` | AST cap; simplify or review astNodes |
 | `limit_instantiations` | Generic expansion cap; bound expansion or review instantiations |
-| `limit_alternatives` | Map alternative expansion cap; simplify/disjoint factors or review alternatives |
+| `limit_peg_nodes` | PEG nodes in one group after inlining; simplify the group or review pegNodes |
 | `limit_array_positions` | Array automaton cap; simplify repetition or review arrayPositions |
 | `limit_regexp_positions` | Regexp automaton cap; simplify pattern/repetition or review regexpPositions |
 | `limit_width` | Reachable leaf width cap; simplify choices or review width |

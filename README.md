@@ -11,9 +11,11 @@ built from Rust. Host code supplies the API, memory and value representation.
 
 Why snug:
 
-- **Sound matching:** type and group alternatives remain live together.
-  There is no greedy array matching or backtracking. Map schemas that cannot
-  be proved exact under snug's assignment procedure fail at compile time.
+- **RFC 8610 matching:** groups in arrays and maps follow the normative PEG
+  reading of Appendix A: `//` is a prioritised choice that locks in its first
+  match, occurrences are greedy, and map cuts apply as §3.5.4 says. Nothing
+  is retried, so work stays linear; `[* uint, uint]` matches nothing, as
+  Appendix A states ([pitfalls](docs/guide.md#group-matching-pitfalls-peg)).
 - **One validation walk:** strict CBOR checks and CDDL predicates run together.
   `validate` builds no decoded value tree. Materialising decode checks first,
   then builds values in a second pass.
@@ -81,7 +83,7 @@ if (!result.ok) throw new Error(result.reason);
 const message = schema.decode(bytes, 'message'); // validated, then materialised
 console.log(message.id, decode(bytes).text);
 console.log(view(bytes, { schema, rule: 'message' }).get('id').number());
-console.log(decode(encode([1, 2]), { top: 'any' })); // non-map codec round trip
+console.log(decode(encode([1, 2]))); // any root by default (Bindle requires a map)
 ```
 
 Compile once and reuse the schema. Compilation is asynchronous at the public
@@ -101,7 +103,33 @@ node examples/view.mjs
 node examples/program-cache.mjs
 node examples/async-handle.mjs
 node examples/validate-handle.mjs
+node examples/session.mjs
+node examples/sequence-sse.mjs
 ```
+
+### Tagged unions: write a type choice of maps
+
+snug applies RFC 8610's map cut literally (§3.5.4, D301). A `name:` key
+implies a cut, so the common "one map, group choice" spelling of a tagged
+union **rejects every alternative after the first**:
+
+```cddl
+; WRONG under the default: {"kind": "b", "y": "z"} is rejected
+shape = { kind: "a", x: int // kind: "b", y: tstr }
+
+; RIGHT: a type choice of maps (each map is its own cut scope)
+shape = { kind: "a", x: int } / { kind: "b", y: tstr }
+
+; RIGHT: one map with a cut-free `=>` discriminator, kept first
+shape = { "kind" => "a", x: int // "kind" => "b", y: tstr }
+```
+
+The compiler flags the wrong spelling with warning W8 internally, but no
+public API returns it yet (JS `compile` and Rust `Schema::compile` drop
+it), so use the right forms rather than wait for a warning. For a schema
+you do not control, `cuts: 'branch'` restores the reading of the Ruby and
+Rust reference tools. Details:
+[guide](docs/guide.md#discriminated-unions-under-the-rfc-cut).
 
 ## Package layout and reproducibility
 
@@ -110,12 +138,13 @@ hand-written TypeScript declarations:
 
 | Entry | Exports |
 | --- | --- |
-| `snug` | `decode`, `encode`, `Decimal`, `NDArray`, `Float16Bytes`, `Tagged`, `SnugFault`, `LIMITS`, `profiles` |
+| `snug` | `decode`, `encode`, `Decimal`, `NDArray`, `Float16Bytes`, `Tagged`, `Simple`, `SnugFault`, `LIMITS`, `profiles` |
 | `snug/schema` | `Schema`, `Program`, `ProgramError`, `validate`, `decode`, `validateAt`, `fromProgram`, `fromSerialized` |
 | `snug/compile` | lazy asynchronous `compile`, `SchemaError` |
 | `snug/view` | `view`, `View`, `Cursor` |
 | `snug/writer` | `Writer` |
 | `snug/sources` | Sessions via `openSession(schema, rule, length, options?, scheduling?)` (replaces `Schema.session`); CDDL handle/push/stream validation, profile scanners, in-memory handles, `SourceError` |
+| `snug/sequence` | CBOR sequences (RFC 8742): `readSequence`, `sequenceReader`, `sessionLimits`, `releasePool` |
 | `snug/unicode` | optional Unicode 16.0 regexp category `tables` and provenance metadata; compile-time only |
 | `snug/controls` | the generic extension controls `.chars`, `.unique`, `.samelen` |
 | `snug/abnf` | optional `.abnf` / `.abnfb` controls (RFC 9165 §3, D334), `checkAbnf`; spread into `controls` at compile and load |
@@ -156,6 +185,7 @@ using the network. Use fresh `staged` and `consumer` paths on a repeat run:
 mkdir -p .cache/docfix
 SNUG_DOCFIX="$(pwd)/.cache/docfix"
 git rev-parse HEAD > "$SNUG_DOCFIX/producing-revision.txt"
+git status --porcelain >> "$SNUG_DOCFIX/producing-revision.txt" # empty when clean
 (cd host/js && TMPDIR="$SNUG_DOCFIX" npm run build -- "$SNUG_DOCFIX/staged")
 mkdir -p "$SNUG_DOCFIX/consumer/node_modules"
 cp -R "$SNUG_DOCFIX/staged" "$SNUG_DOCFIX/consumer/node_modules/snug"
@@ -176,8 +206,9 @@ The `file:` dependency records the local source for a package manager; the
 copy above supplies it immediately. Retain the complete staged directory
 (including `generated/`), and adjust the relative `file:` path if relocating
 the project. Copying `host/js` alone is insufficient. Version `0.0.0` does
-not identify the producing revision; keep `snug-revision.txt` and record
-uncommitted package changes separately. No registry installation is promised.
+not identify the producing revision; keep `snug-revision.txt`. The build
+does not check for uncommitted changes; the `git status` lines in that file
+list any, so build from a clean tree when provenance matters. No registry installation is promised.
 See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 [browser/Worker bundling](docs/guide.md#browser-and-worker-recipes).
 
@@ -188,19 +219,19 @@ See [TypeScript onboarding](docs/guide.md#typescript-onboarding) and
 | CDDL rules, choices, groups, occurrences, generics, productive recursion | Implemented; exact supported subset in [CDDL support](docs/cddl-support.md) |
 | Prelude float widths (**changed 2026-11-11**) | `float16`/`float32`/`float64` are sets of values, as RFC 8610 §3.3 says, not encoded widths: `float32` matches a shortest-form 1.5 (encoded as float16), and `float64` matches every float (D328). Numeric controls compare across int and float exactly (`number .ge 0` compiles, D329) |
 | Direct schema validation of CBOR buffers | Implemented; strict profile fused with matching |
-| Codec, exact integers, decimals, typed arrays, ndarrays | Implemented in JS under the current restrictive wire policy |
+| Codec, exact integers, decimals, typed arrays, ndarrays | Implemented in JS and Rust under the selected wire profile ([values](docs/profiles.md#javascript-values-d123)) |
 | Checked views, cursor, detached subtree validation | Implemented; owned by default, borrowing is an explicit lifetime contract |
-| Typed Writer, deterministic map ordering | Implemented in JS; failures are sticky |
-| Serialised Programs and runtime-only loading | Implemented; format 1.0 (1.1 for a Program using extension controls), digest plus structural verification |
-| Handles, push sources and streams | CDDL validation over known-length handles and push sources; streams of unknown length in drain mode (results equal the buffer's) with opt-in fail-fast (D085, D144–D147); JS, minimal Rust |
+| Typed Writer, deterministic map ordering | Implemented in JS and Rust; failures are sticky |
+| Serialised Programs and runtime-only loading | Implemented; Program format 2.0 (D318; format 1.x Programs are refused, recompile them), digest plus structural verification |
+| Handles, push sources and streams | CDDL validation over known-length handles and push sources; streams of unknown length in drain mode (results equal the buffer's) with opt-in fail-fast (D085, D144–D147); JS, and Rust with sync and async drivers ([Rust guide](docs/rust.md#async-sources)) |
 | CBOR sequences (RFC 8742) | Implemented (P7.13, D210–D219): `readSequence` / `sequenceReader` in `snug/sequence`, `snug::read_sequence` / `Sequence` in Rust; one fused check per message (profile + optional schema rule), lazy Views without a re-scan, borrowed or assembled bytes, stop/skip policy; [guide](docs/guide.md#cbor-sequences-and-sse); wasm SDK `snug-wasm-sdk/sequence` (P7.13w) |
 | Unicode regexp categories | Implemented with explicit `snug/unicode` tables; no runtime table dependency |
-| Wire profiles | Deterministic preset (default) and Bindle preset with per-option overrides, P7.1 (D120–D127); JS and Rust |
+| Wire profiles | Valid preset (default, D260), deterministic preset (RFC 8949 §4.2.1) and Bindle preset, each with per-option overrides (P7.1, D120–D127); JS and Rust |
 | Extension controls | Implemented (P7.2, D140–D143): registered `.name` controls decided by pure host predicates; generic `.chars`, `.unique`, `.samelen` in `snug/controls` / `snug::controls`; [guide](docs/guide.md#custom-controls) |
 | `.abnf` / `.abnfb` (RFC 9165 §3) | Implemented (P9.14, D334) as an optional module: `snug/abnf`, `snug::abnf` / `Controls::with_abnf()`, wasm SDK `snug-wasm-sdk/abnf`; RFC 5234 + RFC 7405, language membership by a metered Earley recognizer in kin; [CDDL support](docs/cddl-support.md#abnf-abnf-abnfb) |
-| Rust and wasm | Generated core and test hosts exist; public host APIs are less complete than JS |
+| Rust and wasm | Rust crate: compile, validate, codec, Writer, views, sync and async blob/stream/sequence drivers ([Rust guide](docs/rust.md), [crate README](host/rust/README.md)). wasm SDK (`snug-wasm-sdk`): experimental; no user documentation or build script yet (P9.15) |
 | Real browser and Worker package evidence | P7.7 tested revision `f275938` on 2026-11-03; later Unicode/schema sources not covered; [matrix](docs/guide.md#browser-and-worker-recipes) |
-| Bundle size | Gated per entry by `bb size` at the measured sizes (codec ≈ 14.6 KB gzip, codec + schema ≈ 41.9 KB gzip; owner decision D200, 2026-11-04) |
+| Bundle size | Gated per entry by `bb size` (owner decision D200; caps raised for PEG groups by D319). Whole entries, gzip-9, measured 2026-11-12 with esbuild 0.28.2: `snug` 21.4 KB, `snug/schema` 53.9 KB, `snug/sources` 67.3 KB, `snug/compile` 1.3 KB static plus a 97.8 KB compiler chunk loaded on first call. Tree-shaking lowers these (a `decode`-only bundle is ≈ 15 KB) |
 
 Documentation gate on **2026-11-03**, Node v24.6.0, revision `c15a722`
 plus the documentation worktree: `cd host/js && npm test` recorded
@@ -237,7 +268,7 @@ only lower compiled limits. Encoding enforces `maxBytes` **only when supplied,
 at finish**; it is not an allocation cap while writing. See the
 [guide](docs/guide.md#limits) for compile bounds and the remaining caveats.
 
-Read the [guide](docs/guide.md), [API reference](docs/api.md),
+Read the [guide](docs/guide.md), [API reference](docs/api.md), [Rust guide](docs/rust.md),
 [CDDL support](docs/cddl-support.md), [profiles](docs/profiles.md),
 [specification](SPEC.md), [architecture](docs/architecture.md) and
 [Program format](docs/program.md). Licence: [MIT](LICENSE);

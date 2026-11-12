@@ -61,7 +61,7 @@ What `valid` reads, and how:
 | Indefinite-length arrays, maps, byte and text strings | accepted (chunks of the string's own major type, definite) | `indefinite` |
 | Non-shortest integer, length or tag heads; floats wider than needed | accepted | `non_shortest` |
 | Map keys out of bytewise order | accepted, read in wire order | `key_order` |
-| Duplicate keys, compared by value: their canonical (EC) encodings, so `1` / `1801`, `0.0` / `-0.0`, two NaNs | `duplicate_key` | `duplicate_key` (or `key_order`, whichever comes first) |
+| Duplicate keys, compared by value: their canonical (EC) encodings, so `1` / `1801`, `0.0` / `-0.0`, two NaNs with the same payload in different widths (RFC 8949 §5.6.1; NaNs with different payloads are distinct keys). A bignum key is compared as a tagged item: `1` and `2(h'01')` are distinct keys here, although decode materialises both as the integer 1 and so refuses that map with `unsupported` | `duplicate_key` | `duplicate_key` (or `key_order`, whichever comes first) |
 | NaN with a payload or sign, any width | accepted | `float` |
 | Bignums with leading zeros or below 2⁶⁴ (tags 2/3) | accepted (the integer) | `bignum` |
 | `f8` with a value below 24 | `malformed` (RFC 8949 Appendix F) | `non_shortest` |
@@ -75,7 +75,9 @@ refusal met before a well-formedness error is the answer. For example, RFC
 break as a map value) are `duplicate_key` at offset 3 under `valid`, not
 `truncated` / `malformed` ([scanner.md](scanner.md#under-pf_valid-p84-d260d264),
 "Precedence across classes"). Only `truncated` and `malformed` are
-well-formedness verdicts.
+well-formedness verdicts, with one exception: under `deterministic` and
+Bindle, `f8` followed by a value below 24 (not well-formed, RFC 8949 §3.3)
+is reported `non_shortest`, because the shortest-form check sees it first.
 
 Values: a decoded map keeps its keys in wire order (D267); a bignum with
 leading zeros decodes to its integer; JavaScript numbers (and Rust's
@@ -106,7 +108,7 @@ and sequences take such items whole (D283). Costs: bench/README.md
 | Integers | Major 0/1 for −2⁶⁴..2⁶⁴−1; beyond that a bignum (tags 2/3) of 9..128 content bytes, no leading zero (RFC 8949 §3.4.3 preferred serialization; `valid`: any bignum of at most 128 content bytes) |
 | Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64; `valid`: any width). In schemas the prelude names `float16`/`float32`/`float64` are sets of values, not widths (D328): `float32` admits any float binary32 represents exactly, in any encoding, and `float64` every float |
 | Text | Well-formed UTF-8: no overlong, no surrogate, nothing above U+10FFFF |
-| Simple values | `false`, `true`, `null`; `deterministic` (and `valid`) also `undefined` and the unassigned values 0–19 and 32–255 (`undefinedValue`, D284), Bindle refuses them (`simple`); `f8` with a value below 32 is not well-formed (`malformed`; Bindle: `simple`, or `non_shortest` below 24) |
+| Simple values | `false`, `true`, `null`; `deterministic` (and `valid`) also `undefined` and the unassigned values 0–19 and 32–255 (`undefinedValue`, D284), Bindle refuses them (`simple`); `f8` with a value below 32 is not well-formed: `valid` says `malformed`; `deterministic` and Bindle say `non_shortest` below 24, and for 24–31 `malformed` (Bindle: `simple`) |
 | Limits | `maxBytes` 1,500,000; `maxDepth` 32; `maxEntries` 65,536; `maxItems` 131,072; bignum content 128 bytes |
 
 Map ordering compares complete deterministic key encodings byte by byte.
@@ -128,7 +130,10 @@ and mixed keys show the difference: `{10, 100, -1}` is ordered `0a`, `1864`,
 | `cose` | boolean: safe-integer labels in the top-level map under `keys: 'text'` | false | false | false |
 | `strictArrays` (encode, Writer) | boolean | false | false | true |
 
-`wire` picks the preset; any other option given explicitly overrides the
+`floats: 'deterministic'` under the valid preset does not require
+shortest floats: the preset itself (Rust: `Profile { valid: true, .. }`)
+relaxes every encoding rule of the table above, and `floats` then only
+decides which float values are admitted. `wire` picks the preset; any other option given explicitly overrides the
 preset's value (`{ keys: 'text' }` is the valid preset with text keys). An
 unknown value is a `TypeError`. Schema methods default to `top: 'any'` under
 every preset, as before. `profiles.valid`, `profiles.deterministic` and
@@ -154,26 +159,26 @@ the top-level map only, which must be safe integers (−(2⁵³−1)..2⁵³−1
 
 | Tags | Content rule | Set |
 | --- | --- | --- |
-| 2, 3 | Canonical bignum: a byte string of 9..128 bytes, no leading zero | both |
-| 4 | Normalised decimal fraction `[exponent, mantissa]`: exponent −1024..−1, mantissa an integer or bignum, nonzero, not divisible by 10 | both |
+| 2, 3 | A byte string of at most 128 bytes. Under `deterministic` and Bindle it must be canonical (RFC 8949 §3.4.3 preferred serialization): 9..128 bytes, no leading zero; `valid` accepts any and reads the integer | both |
+| 4 | Decimal fraction `[exponent, mantissa]`: an integer exponent and an integer or bignum mantissa (RFC 8949 §3.4.4). Bindle also requires the normalised form (a local rule): exponent −1024..−1, mantissa nonzero and not divisible by 10 | both |
 | 40 | Row-major ndarray `[shape, data]`: 1..8 positive dimensions whose product is the element count | both |
 | 69–72, 77–79, 84–86 | Little-endian typed arrays; float arrays refuse NaN (−0 and ±∞ allowed) | both |
-| 0 | Text in RFC 3339 `date-time` form: `YYYY-MM-DDThh:mm:ss`, optional `.` fraction, `Z` or `±hh:mm`; T and Z either case; month, day within its month (leap years), hour, minute, second 00..60 and offset ranges checked | standard |
-| 1 | An integer (major 0/1) or a finite float | standard |
+| 0 | Text in RFC 3339 `date-time` form: `YYYY-MM-DDThh:mm:ss`, optional `.` fraction, `Z` or `±hh:mm`; upper-case `T` and `Z` (RFC 4287 §3.3); month, day within its month (leap years), hour, minute and offset ranges checked; second 60 only when the time, converted to UTC by its offset, is 23:59:60 on the last day of a month | standard |
+| 1 | An integer (major 0/1) or any float (non-finite floats are discouraged by RFC 8949 §3.4.2, not invalid) | standard |
 | 21, 22, 23 | Any item (expected base64url / base64 / base16 conversion hints) | standard |
 | 24 | A byte string whose content is exactly one item, itself valid under the same profile | standard |
-| 32 | Text that is an RFC 3986 `URI`, checked at the character level: a scheme and `:`, then only unreserved, gen-delims and sub-delims characters or `%HH` escapes, at most one `#`, `[` `]` only before the query and fragment (the authority, IP-literal and path structure is not parsed) | standard |
-| 55799 | Any item; only at the top level of the document | standard |
+| 32 | Text that is an RFC 3986 `URI-reference` (relative references included), parsed: scheme, authority with IPv6/IPvFuture literals, path, query, fragment; no RFC 6874 zone identifiers | standard |
+| 55799 | Any item, at any depth | standard |
 | 64–68, 73–75, 80–83, 87 | RFC 8746 typed arrays outside the Bindle set (uint8, big-endian forms, clamped, float128): a byte string holding whole elements (1, 2, 4, 8 or 16 bytes); no NaN rule | any |
-| 65535, 2³²−1, 2⁶⁴−1 | Refused: RFC 8949 §9.2's invalid tag numbers | any |
+| 65535, 2³²−1, 2⁶⁴−1 | Refused (RFC 8949 §3.4: "not intended to occur in actual CBOR data items"; implementations may flag them) | any |
 | every other number, up to 2⁶⁴−2 | Any item (COSE 16–18 and 96–98, CWT 61, 5 bigfloat, 33–36, 76, 256, ...) | any |
 
 `tags: 'standard'` refuses every tag outside the first two groups, and every
 tag number ≥ 2³², with `tag`; `tags: 'bindle'` refuses the standard
-additions as well. Under `tags: 'any'` (the deterministic preset, D180) a
+additions as well. Under `tags: 'any'` (the valid and deterministic presets, D180) a
 tag of any number is accepted with any well-formed content, except where the
 table gives a rule: the known tags keep their rules, so `tag` still refuses
-a malformed date, a nested 55799 or an RFC 8949 invalid number, and
+a malformed date or one of the three numbers above, and
 `bignum`/`decimal`/`ndarray`/`typed_array` keep their codes for 2, 3, 4, 40
 and the little-endian typed arrays. A tag number of more than 32 bits never
 follows a 32-bit tag's rule (tag 2³²+2 is not a bignum: the whole number is
@@ -241,8 +246,9 @@ fills only the older words, runs the Bindle profile unchanged.
   the Program and its container are unchanged and one Program validates under
   either preset. The profile is a run-time option of each call, like `top` and
   the limits. (Before P7.1 the compiler silently treated a `:` member with a
-  byte-string, float or beyond-64-bit integer value key as never present; it
-  now refuses it with `map_cut`, D125, since such keys reach the VM.)
+  byte-string, float or beyond-64-bit integer value key as never present;
+  format 1 refused it with `map_cut` (D125); format 2.0 matches it as a cut,
+  D294.)
 * **The writer.** `put-float-rfc` writes deterministic floats (any NaN as
   `f97e00`, ±∞ and ±0 as float16, integral values in their shortest width)
   where `put-float` refuses; a `Tagged` value's tag and content are checked by
@@ -296,16 +302,16 @@ errors win, D023). Under the valid and deterministic presets the prelude's `tdat
 (`#6.0(tstr)`), `time` (`#6.1(number)`), `eb64url`/`eb64legacy`/`eb16`,
 `encoded-cbor` (`#6.24(bstr)`), `uri` (`#6.32(tstr)`), `cbor-any`
 (`#6.55799(any)`) and `undefined` (`#7.23`) match valid data, as do `#7.n`
-for the unassigned simple values (n 0–19, and 32–255 per RFC 9682 §3.2; `#7.24`–`#7.31`
-match nothing yet, and RFC 9682's `#7.<type>` head numbers are not parsed), and so does
+for the unassigned simple values (n 0–19 and 32–255) and RFC 9682 §3.2's
+`#7.<type>` head-number forms (`#7.24` is a simple value 32..255), and so does
 `#6.n(T)` for any tag number `n` (COSE_Sign1 `#6.18([...])`, `#6.61(...)`,
 64-bit numbers compared whole) and bare `#6`, as do map key
 types such as `{ * int => tstr }` nested anywhere and `bstr => T` entries.
 Float ranges compare as IEEE 754 does: −0.0 is inside `0.0..1.0`, a NaN is
-inside no range, +∞ is inside `float .ge 1.5`. Float literals still compare
-encodings: `0.0` does not equal −0.0. A `:` member whose key is a byte
-string or a float (`h'00': T`, `1.5: T`) is a `map_cut` schema error; write
-`h'00' => T`. Under `wire: 'bindle'` all of those data are refused by the
+inside no range, +∞ is inside `float .ge 1.5`. Float literals compare
+numerically (D250): `0.0` matches −0.0 and +0.0. A `:` member whose key is a
+byte string or a float (`h'00': T`, `1.5: T`) is a cut on that key, like any
+other `:` member (D294). Under `wire: 'bindle'` all of those data are refused by the
 profile before the schema sees them. Under `valid`, schema literals, keys and
 duplicate checks compare values by their canonical forms (D261), so
 `{ 1: int }` matches a key `1801`, and a non-deterministic `.cbor` payload is

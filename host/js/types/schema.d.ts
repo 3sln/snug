@@ -26,7 +26,7 @@ export declare class Program {
   readonly B: Uint8Array;
   readonly sourceKey: string;
   readonly rules: readonly string[];
-  /** The extension controls this Program uses, by name (format 1.1). */
+  /** The extension controls this Program uses, by name (empty when it uses none). */
   readonly controls: readonly string[];
   serialize(): Uint8Array;
 }
