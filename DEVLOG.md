@@ -8625,8 +8625,64 @@ review.
     wasm and native).
 
 **Long runs on the final code**
-- [ ] **P9.8 — crate-diff re-run** against the rebuilt cddl crate oracle
+- [x] **P9.8 — crate-diff re-run** against the rebuilt cddl crate oracle
   (`corpus/tools/ORACLES.md`). Every difference is explained.
+  *Done 2026-11-12 on main `b452c9d`* (a clean worktree, first run on
+  `ac08ec2`; the rebase only added P9.14's 20 verification vectors to
+  `abnf.json`; oracle binary `1fdf32e3…`, unchanged; seed `0x5eed8610`,
+  6,000 generated; 52–69 s wall under the watchdog's `crate-diff` caps).
+  Details, witnesses and RFC citations: the P9.8 section of
+  `corpus/conformance/crate-diff-findings.md`.
+  - **The unchanged harness failed: 47 "snug bugs", all a stale oracle.**
+    Its independent check was `oracle.mjs`, the P4.1 set-semantics
+    interpreter, which predates D270 (PEG) and D301 (literal cuts). In all 47
+    rows snug equals the migrated corpus expectation, and `peg-oracle.mjs`
+    agrees with snug on all 7,111 cases. `crate-diff.mjs` now checks snug
+    against `peg-oracle.mjs` (`cuts: 'rfc'`, also recording `'branch'`),
+    keeps `oracle.mjs` only to label D270 cases, and adds `numbers.json`,
+    `heads.json`, `audit-2026-11-04.json` and the `.abnf` vectors
+    `abnf.json` (checked with `abnf-oracle.mjs`). Snug's wire refusals
+    (`cbor/*`, D252/D260) are checked against the corpus verdict (31, all
+    equal), since the PEG oracle does not check known-tag validity.
+  - **`bb crate-diff`, exit 0:** 7,689 cases, 7,582 compared, **7,147 agree,
+    435 disagree**, 75 crate schema errors, 32 crate panics, 0 timeouts;
+    **snug ≠ independent oracle 0**, corpus errors 0, oracle unknowns 0,
+    unclassified 0, sources unchanged. Two full runs on each commit gave
+    identical verdicts. On the P4.1 sources alone: 7,111 / 7,039 / 6,749 / 290, schema
+    errors 70, panics 2 (2026-11-11: 6,987 / 6,915 / 6,614 / 301 / 70 / 2).
+  - **Every difference against 2026-11-11 is explained** (row by row; none
+    disappeared, 49 changed, 702 new): 29 now agree because snug follows
+    D270 (`optional-map-group` 60 → 37, `array-occurrence` 6 → 0); 15 new
+    disagreements: 14 D301 (literal cut; the crate implements rule A) and 1
+    D270 (prioritised choice, Appendix A); 4 now agree by D328 (float
+    widths by value); 1 cborseq case changed verdict under D270 (still a
+    crate schema error); 124 cases from 26 suites that D270 stopped refusing
+    (117 agree, 7 disagree); 578 cases from the four added corpora.
+  - **Classification of the 542 non-agreements:** 14 are the documented
+    divergence D301 (neither side is a defect against its own reading).
+    The other 528 are crate defects against cited RFC text (RFC 8610 §§3.2,
+    3.3, 3.5.4, 3.8.6, Appendices A, C, D; RFC 8949 §§3.4, 5.3.2; RFC 9165
+    §§2.2, 3; RFC 9682 §3.2; RFC 5234), several of them also documented in
+    D250, D252, D270, D328, D329, D330 and D336. They fall in 49 classes:
+    30 kept from 2026-11-11 (`array-occurrence` retired) and 19 new, 8 of
+    them for the crate's `.abnf` (one-line controllers are never checked,
+    prefix matching, the wrong target types, `=/`, RFC 7405 `%s`/`%i`,
+    `.abnfb` read as UTF-8, panics on left recursion and on any start that
+    is not a bare rule name). **Snug bugs: 0.**
+  - **Ruby gem:** the `peg-oracle.test.mjs` Ruby differential (PEG oracle vs
+    Ruby cddl 0.12.14, 300 pairs) passes with the 2026-11-11 counts exactly
+    (agreement 116, new/unknown/timeout 0). `run-rfc-corpus.mjs --gate`: 999
+    checks, 0 unexplained, 0 stale.
+  - **Learnt:** a differential's independent oracle has to follow the
+    semantic decisions, or its "snug bug" count measures the oracle. The
+    crate is not a reference for `.abnf`. D334 says the Rust crate also
+    starts a controller at a leading rule, but the 0.10.7 CLI panics
+    ("undefined rule s = 1*DIGIT"). That is reported to the coordinator;
+    the D-entry is not edited here.
+  - **Not covered:** `xsd-regexp.json` and the RFC corpus (which has its
+    own runner).
+  - Gates on the rebased tree: `bb crate-diff` (above), `bb check`, `bb
+    drift` ok. No snug source changed; no D-entry.
 - [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
   chunks that fit under the P9.1 caps, with the seeds and chunking
   recorded so anyone can reproduce them. Includes `rust-api-test` in its

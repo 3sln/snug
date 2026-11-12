@@ -45,6 +45,15 @@ cargo install cddl --version 0.10.7 --root .cache/oracles/cddl-rs --locked \
   `crate-diff.mjs` therefore moves the requested rule first, strips SGR codes
   and reads the explicit `Validation of ... is successful` / `failed` lines
   rather than the exit status.
+- `.abnf` / `.abnfb` (feature `additional-controls`) are not a usable
+  reference: a one-line controller is never checked, a match is a prefix
+  match, the first line must be a bare pest rule name (anything else
+  panics), left recursion panics, and RFC 7405 `%s`/`%i` strings are not parsed. Reductions: the P9.8 section of
+  `corpus/conformance/crate-diff-findings.md`.
+- Runs (all recorded in `corpus/conformance/crate-diff-findings.md`): P4.1
+  (2026-10-29), the rebuild check on `3c10a83` (2026-11-11), and P9.8 on
+  `b452c9d` (2026-11-12, PEG oracle as the independent check, plus the
+  numbers/heads/audit/abnf corpora).
 
 Smoke check:
 

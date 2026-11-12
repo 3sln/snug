@@ -3,16 +3,22 @@
  * Oracle: --oracle=/absolute/path, else $CDDL_NATIVE, else .cache/oracles/cddl-rs/bin/cddl
  * (rebuild per corpus/tools/ORACLES.md; this script never builds or installs).
  * All transient inputs and machine-readable evidence live in .cache/p41/.
+ * P9.8: the independent check is the PEG oracle (peg-oracle.mjs, D270; cuts
+ * 'rfc' as snug's default, D301), with abnf-oracle.mjs for the .abnf vectors;
+ * sources add numbers.json, heads.json, audit-2026-11-04.json and abnf.json.
  */
 import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { compile } from '../../host/js/src/schema.mjs';
+import { abnf as abnfControls } from '../../host/js/src/abnf.mjs';
 import { encode } from '../../host/js/src/encode.mjs';
 import { Decimal, NDArray } from '../../host/js/src/values.mjs';
 import { decode as baselineDecode, encode as baselineEncode } from '../../bench/baseline/cbor-3sln.mjs';
-import { compile as oracleCompile, check as oracleCheck } from './oracle.mjs';
+import { compile as oracleCompile, check as oracleCheck, decode as oracleDecode } from './peg-oracle.mjs';
+import { parseAbnf, matchAbnf, symbolsOf } from './abnf-oracle.mjs';
+import { compile as setCompile, check as setCheck } from './oracle.mjs';
 import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('crate-diff', import.meta.url);   // P9.1 caps
 
@@ -28,7 +34,9 @@ const cache = root + '.cache/p41/'; mkdirSync(cache, { recursive: true });
 const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
 const hex = b => Buffer.from(b).toString('hex');
 const hash = x => createHash('sha256').update(x).digest('hex');
-const sourceFiles = ['gen/js', 'host/js/src', 'corpus/cddl-study/contracts'].flatMap(dir => readdirSync(root+dir,{recursive:true}).filter(p=>/\.(mjs|cddl)$/.test(p)).map(p=>dir+'/'+p)).concat(['corpus/tools/oracle.mjs','corpus/conformance/study.json','corpus/conformance/adversarial.json','bench/baseline/cbor-3sln.mjs']).sort();
+const CORPORA = ['study', 'adversarial', 'numbers', 'heads', 'audit-2026-11-04'];
+const ROUND_TRIP = new Set(['study', 'adversarial', 'generated']);
+const sourceFiles = ['gen/js', 'host/js/src', 'corpus/cddl-study/contracts'].flatMap(dir => readdirSync(root+dir,{recursive:true}).filter(p=>/\.(mjs|cddl)$/.test(p)).map(p=>dir+'/'+p)).concat(['corpus/tools/peg-oracle.mjs','corpus/tools/oracle.mjs','corpus/tools/abnf-oracle.mjs',...CORPORA.map(f=>`corpus/conformance/${f}.json`),'corpus/conformance/abnf.json','bench/baseline/cbor-3sln.mjs']).sort();
 const fingerprint = () => hash(sourceFiles.map(p=>p+':'+hash(readFileSync(root+p))).join('\n'));
 const sourceFingerprint = fingerprint();
 
@@ -108,12 +116,15 @@ function generated(i) {
 // Cause routing is deliberately closed: a new unexplained mismatch fails the
 // run instead of being hidden in an "other" bucket. See the findings for the
 // reduced witnesses and RFC arguments that establish these causes.
+// Classes that are documented snug decisions rather than crate defects.
+const INTENTIONAL = { 'd301-literal-cut': 'neither (D301)' };
 function classify(r) {
   if(r.snugBug) return 'BUG-snug';
   if(r.crate.kind==='timeout') return 'crate-timeout';
-  if(r.crate.kind==='panic') return 'byte-literal-panic';
+  if(r.crate.kind==='panic') return r.source!=='abnf'?'byte-literal-panic':/control\.rs:801:/.test(r.crate.site)?'abnf-left-recursion-panic':/pest_vm/.test(r.crate.site)?'abnf-start-element-panic':'UNCLASSIFIED';
   const n=r.name;
   if(r.crate.kind==='schema-error') {
+    if(r.source==='abnf') return r.rule==='b'?'abnfb-bytes-as-utf8':'UNCLASSIFIED';
     if(r.cddl.includes('.cborseq')) return 'unsupported-cborseq';
     if(n==='three byte literal spellings') return 'base64-literal-parse';
     if(n==='unqualified bytes with escaped quote and newline') return 'byte-escape-parse';
@@ -122,6 +133,35 @@ function classify(r) {
     return 'UNCLASSIFIED';
   }
   if(r.crate.ok===r.snug) return null;
+  if(r.oracle==='wire') return 'd252-known-tag-validity';
+  // D301: snug's default is the literal RFC cut; the crate implements rule A
+  // (cuts: 'branch'). The PEG oracle in branch mode gives the crate's verdict.
+  if(r.oracleBranch===r.crate.ok&&r.oracle!==r.oracleBranch) return 'd301-literal-cut';
+  // D270: the pre-PEG set-semantics interpreter (oracle.mjs, P4.1's oracle)
+  // gives the crate's verdict and the PEG oracle does not: RFC 8610 Appendix A
+  // (prioritised choice, greedy occurrence) is what decides the case.
+  if(r.oracleSet===r.crate.ok&&r.oracle!==r.crate.ok) return 'd270-peg-groups';
+  // P9.8 sources (crate behaviour reduced in crate-diff-findings.md, 2026-11-12).
+  if(r.source==='abnf') {
+    if((r.rule==='tb'||r.rule==='bt')&&!r.crate.ok) return 'abnf-target-major';
+    if(r.family==='abnf-element-only'&&r.crate.ok) return 'abnf-element-only-unchecked';
+    if(/%[sSiI]\\"/.test(r.cddl)&&!r.crate.ok) return 'abnf-rfc7405-strings';
+    if(r.cddl.includes('=/')&&!r.crate.ok) return 'abnf-incremental-alternative';
+    if(r.family==='abnf-rules'&&r.crate.ok) return 'abnf-unanchored';
+    return 'UNCLASSIFIED';
+  }
+  if(r.source==='numbers') return /float widths by value/.test(n)?'float-width-erased':/numeric controls across int and float/.test(n)?'numeric-control-across-kinds':/\.cat of a text and a byte string/.test(n)?'cat-text-bytes':'UNCLASSIFIED';
+  if(r.source==='heads') return /RFC 9682 #7 head numbers/.test(n)&&r.snug&&!r.crate.ok?'rfc9682-simple-head-numbers':'UNCLASSIFIED';
+  if(r.source==='audit-2026-11-04') {
+    if(/^(ne0|nen0|ne15|f16ne|ne-lit-choice):/.test(n)&&r.hex.startsWith('f97e')) return 'nan-ne-control';
+    if(/^bnd-(ne0|lt0):/.test(n)) return 'float-range-control-target';
+    if(/^and0:/.test(n)) return 'float-zero-equality';
+    if(/^tag1: r = time$/.test(n)&&r.snug) return 'prelude-time-nonfinite';
+    return 'UNCLASSIFIED';
+  }
+  if(/^(C1|A2): attainable group counts|^C1\/A2: coupled/.test(n)) return 'map-group-repetition';
+  if(/^C5: value-disjoint/.test(n)) return 'noncut-map-fallthrough';
+  if(/^A6b: wildcard before cut/.test(n)) return 'map-member-source-order';
   if(r.source==='generated') return r.family==='nested-generics'?'nested-generic-scope':r.family==='bits'?'bits-zero':'UNCLASSIFIED';
   if(n!=='Appendix D: regexp'&&(/regexp|\.regexp/.test(n)||/^contract: (object-storage|item-classification)/.test(n))) return 'regexp-unanchored';
   if(/optional group|optional factor|named optional|preferences-v2/.test(n)||/^seeded-\d+$/.test(n)&&Number(n.slice(7))%4===0) return 'optional-map-group';
@@ -157,34 +197,45 @@ let digest = createHash('sha256');
 function record(row) { const s=JSON.stringify(row)+'\n'; appendFileSync(cache+'results.jsonl',s); digest.update(s); }
 async function suite(su, source, limit=Infinity) {
   let schema;
-  try { schema=await compile(su.cddl); }
+  try { schema=await compile(su.cddl, su.compileOptions); }
   catch(e) { summary.skipped.push({source,name:su.name,cases:su.cases.length,code:e.code??e.name,expected:!!(su.schemaError||su.snugSchemaError)}); if(source==='generated') throw e; return; }
   summary.compiledSuites++;
-  // The reference interpreter predates RFC 9165 .cat/.plus. These two corpus
-  // expressions fold to literals; record their independent checks separately,
-  // never silently turn an unknown into a verdict.
-  const folded=({'r = "a" .cat "b"':'r = "ab"','r = 1 .plus 2':'r = 3'})[su.cddl];
-  const independent=oracleCompile(folded??su.cddl);
+  // P9.8: the PEG oracle (D270) decodes the wire itself (any well-formed head,
+  // NaN, -0, integral floats), so only the P4.1 sources keep the deterministic
+  // round-trip check; the P8.4/P9.x corpora hold 'valid'-wire fixtures. It runs in
+  // both cut modes: 'rfc' is snug's default (D301) and the verdict checked;
+  // 'branch' (rule A) only labels the differences that D301 explains.
+  const independent=su.check?null:oracleCompile(su.cddl);
+  const opts={top:'any',...su.options};
   for(const [i,k] of su.cases.slice(0,limit).entries()) {
-    const input=unhex(k.hex), value=baselineDecode(input,{top:'any',...su.options});
-    if(hex(baselineEncode(value,{top:'any',...su.options}))!==k.hex) throw Error('Profile round-trip differs');
-    const snug=schema.validate(input,k.rule,{top:'any',...su.options});
-    const expected=independent.error?'unknown':oracleCheck(independent,k.rule,value);
+    const input=unhex(k.hex);
+    if(ROUND_TRIP.has(source)) { const value=baselineDecode(input,opts); if(hex(baselineEncode(value,opts))!==k.hex) throw Error('Profile round-trip differs'); }
+    const snug=schema.validate(input,k.rule,opts);
+    let expected, branch;
+    // A wire refusal (reason cbor/*: D252 known-tag content, D260's 'valid'
+    // checks) is below CDDL and outside the PEG oracle, which does not check
+    // known-tag validity; there the corpus's reasoned verdict is the check.
+    if(/^cbor\//.test(snug.reason??'')&&k.expect!==undefined) expected=branch='wire';
+    else if(su.check) expected=branch=su.check(k);
+    else if(independent.error) expected=branch='unknown';
+    else { const v=oracleDecode(input); expected=oracleCheck(independent,k.rule,v); branch=oracleCheck(independent,k.rule,v,{cuts:'branch'}); }
     if(expected==='unknown') summary.oracleUnknown++;
-    if(folded) summary.foldedControlChecks++;
     const crate=native(su.cddl,k.rule,input);
     summary.cases++; summary.sources[source]=(summary.sources[source]??0)+1;
     if(su.family) summary.families[su.family]=(summary.families[su.family]??0)+1;
-    const row={source,name:su.name,family:su.family,index:i,cddl:su.cddl,rule:k.rule,hex:k.hex,snug:snug.ok,reason:snug.reason,oracle:expected,...(folded?{oracleFolded:folded}:{}),expect:k.expect,crate};
+    const row={source,name:su.name,family:su.family,index:i,cddl:su.cddl,rule:k.rule,hex:k.hex,snug:snug.ok,reason:snug.reason,oracle:expected,oracleBranch:branch,expect:k.expect,crate};
+    // Labelling only, never a check: the set-semantics verdict on P4.1-source disagreements.
+    if(crate.kind==='verdict'&&crate.ok!==snug.ok&&ROUND_TRIP.has(source)) { const o=setCompile(su.cddl); row.oracleSet=o.error?'unknown':setCheck(o,k.rule,baselineDecode(input,opts)); }
     if(crate.kind==='panic') summary.panics++;
     else if(crate.kind==='timeout') summary.timeouts++;
     else if(crate.kind==='schema-error') summary.schemaErrors++;
     else { summary.compared++; if(crate.ok===snug.ok) summary.agreement++; else summary.disagreements++; }
-    if(typeof expected==='boolean'&&snug.ok!==expected) { summary.snugBugs++; row.snugBug=true; }
+    if(typeof expected==='boolean'&&snug.ok!==expected||expected==='wire'&&snug.ok!==k.expect) { summary.snugBugs++; row.snugBug=true; }
+    if(expected==='wire') summary.wireChecks=(summary.wireChecks??0)+1;
     if(typeof expected==='boolean'&&k.expect!==undefined&&expected!==k.expect) { summary.corpusErrors++; row.corpusError=true; }
     row.class=classify(row);
     if(row.class) {
-      const c=summary.classes[row.class]??={count:0,verdicts:0,schemaErrors:0,panics:0,timeouts:0,wrong:row.snugBug?'snug':'crate',sources:{}};
+      const c=summary.classes[row.class]??={count:0,verdicts:0,schemaErrors:0,panics:0,timeouts:0,wrong:row.snugBug?'snug':INTENTIONAL[row.class]??'crate',sources:{}};
       c.count++; c.sources[source]=(c.sources[source]??0)+1;
       c[crate.kind==='verdict'?'verdicts':crate.kind==='schema-error'?'schemaErrors':crate.kind==='panic'?'panics':'timeouts']++;
     }
@@ -196,9 +247,27 @@ async function suite(su, source, limit=Infinity) {
   }
 }
 
-for(const file of ['study','adversarial']) {
+for(const file of CORPORA) {
   const j=JSON.parse(readFileSync(root+`corpus/conformance/${file}.json`));
   for(const su of j.suites) await suite({...su,cddl:su.cddl??readFileSync(root+'corpus/'+su.cddlFile,'utf8')},file);
+}
+// P9.8 (D334): the .abnf/.abnfb hand vectors. The controller is a text literal
+// with RFC 9682 escapes (the crate cannot parse it as h''); the independent
+// verdict is abnf-oracle.mjs. Grammars that snug refuses (g.error) are skipped.
+{
+  const esc = t => '"' + [...t].map(ch => ch === '\\' ? '\\\\' : ch === '"' ? '\\"' : ch === '\n' ? '\\n' : ch === '\r' ? '\\r' : ch === '\t' ? '\\t' : ch.codePointAt(0) < 0x20 || ch.codePointAt(0) === 0x7f ? '\\u' + ch.codePointAt(0).toString(16).padStart(4, '0') : ch).join('') + '"';
+  const rules = { 'abnf/text': 't', 'abnf/bytes': 'tb', 'abnfb/bytes': 'b', 'abnfb/text': 'bt' };
+  for(const g of JSON.parse(readFileSync(root+'corpus/conformance/abnf.json')).grammars) {
+    if(g.error) continue;
+    const G = esc(g.abnf), parsed = parseAbnf(g.abnf);
+    const cddl = `t = tstr .abnf ${G}\ntb = bstr .abnf ${G}\nb = bstr .abnfb ${G}\nbt = tstr .abnfb ${G}\n`;
+    const cases = g.cases.map(c => {
+      const content = c.input !== undefined ? new TextEncoder().encode(c.input) : unhex(c.inputHex);
+      return { rule: rules[c.mode + '/' + c.major], hex: hex(encode(c.major === 'text' ? new TextDecoder().decode(content) : content, { top: 'any' })), expect: c.expect, content, mode: c.mode };
+    });
+    const check = k => { if(!parsed.ok) return 'unknown'; const sym = symbolsOf(k.content, k.mode === 'abnfb' ? 'bytes' : 'text'); return !!sym && matchAbnf(parsed, sym); };
+    await suite({ name: 'abnf: ' + g.name, family: g.abnf.trim().includes('\n') ? 'abnf-rules' : 'abnf-element-only', cddl, cases, check, compileOptions: { controls: { ...abnfControls } } }, 'abnf');
+  }
 }
 for(let i=0, left=count;left>0;i++,left-=3) await suite(generated(i),'generated',Math.min(3,left));
 summary.evidenceSha256=digest.digest('hex');

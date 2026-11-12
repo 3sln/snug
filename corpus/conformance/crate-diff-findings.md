@@ -480,3 +480,237 @@ would need non-deterministic encodings, float-width/NaN/zero literals, tag
 0/1/32 payloads and XSD-only regexp syntax; that is a harness extension, not
 done here.
 
+
+## 2026-11-12 P9.8 re-run on main `b452c9d`
+
+Run in a clean worktree of main (`.cache/p98`; first on `ac08ec2`, then on
+`b452c9d` after rebasing, which only adds P9.14's 20 verification vectors to
+`abnf.json`; the counts below are `b452c9d`'s), with the
+same rebuilt oracle (binary sha256 `1fdf32e3…2428`, `corpus/tools/ORACLES.md`),
+seed `0x5eed8610`, 6,000 generated cases, 2,000 ms timeout; Apple arm64,
+macOS 14.6.1, Node v24.6.0; under the watchdog's `crate-diff` caps (3,600 s
+wall / 7,200 s CPU; not approached; 52–69 s wall). Two full runs on each
+commit gave identical verdicts (7,669 and 7,689 cases).
+
+### The harness had to change first
+
+The unchanged harness exits 1 on main: it reports **47 "snug bugs"**. All 47
+are the old independent oracle being out of date, not snug. `oracle.mjs` is
+the P4.1 set-semantics interpreter; since D270 snug matches groups as RFC 8610
+Appendix A's PEG ("This appendix is normative"), and since D301 a cut is the
+literal RFC cut. In all 47 rows snug equals the corpus's (D270/D301-migrated)
+expectation, and the PEG oracle (`peg-oracle.mjs`, written from the RFC text
+for D270) agrees with snug on all 7,111 cases of that run. So
+`crate-diff.mjs` now:
+
+- checks snug against **`peg-oracle.mjs`** with `cuts: 'rfc'` (snug's
+  default, D301), and also records its `cuts: 'branch'` verdict (rule A);
+- keeps `oracle.mjs` only as a label: on P4.1-source disagreements it
+  records the set-semantics verdict, never as a check;
+- adds the corpora behind the decisions the previous re-run could not reach:
+  `numbers.json` (D328–D330), `heads.json` (D336, D284), `audit-2026-11-04.json`
+  (D250, D252) and the `.abnf` hand vectors `abnf.json` (D334; independent
+  check `abnf-oracle.mjs`; the controller is a text literal with RFC 9682
+  escapes, as the crate cannot read it as `h''`). Only the P4.1 sources keep
+  the deterministic round-trip check; the new corpora hold `valid`-wire
+  fixtures, which the PEG oracle decodes itself;
+- treats a snug **wire** refusal (reason `cbor/*`: D252 known-tag content
+  under the D260 presets) as outside the PEG oracle, which does not check
+  known-tag validity; there snug must equal the corpus's reasoned verdict
+  (31 such checks, all equal);
+- routes a disagreement to `d301-literal-cut` when the branch-mode verdict
+  is the crate's, and to `d270-peg-groups` when the set-semantics verdict is
+  the crate's and the PEG verdict is not.
+
+### Results
+
+| Input | Attempted | Boolean comparisons | Agree | Disagree | Crate schema error | Panic | Timeout |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| study | 201 | 198 | 181 | 17 | 3 | 0 | 0 |
+| adversarial | 910 | 841 | 722 | 119 | 67 | 2 | 0 |
+| generated | 6000 | 6000 | 5846 | 154 | 0 | 0 | 0 |
+| *P4.1 sources* | *7111* | *7039* | *6749* | *290* | *70* | *2* | *0* |
+| numbers | 52 | 52 | 33 | 19 | 0 | 0 | 0 |
+| heads | 57 | 57 | 25 | 32 | 0 | 0 | 0 |
+| audit-2026-11-04 | 300 | 300 | 260 | 40 | 0 | 0 | 0 |
+| abnf | 169 | 134 | 80 | 54 | 5 | 30 | 0 |
+| **Total** | **7689** | **7582** | **7147** | **435** | **75** | **32** | **0** |
+
+Exit status 0: **snug ≠ independent oracle: 0**; corpus errors 0; oracle
+unknowns 0; unclassified 0; sources unchanged during the run (fingerprint
+`54889138c7c554da1360b501bb84b51029cb024800c14e60c20d273a9aa21f7d`, evidence
+SHA-256 `d41f16643bb892f1c21f21905a22b58717c80232a988ed759943df8c563fc0b5`).
+Snug refused 7 suites / 12 cases at compile time, all expected (two `.abnf`
+study probes compiled without the optional module, `.pcre`, two
+non-XSD regexps, two D336 refusal suites); the other 2,386 suites
+(2,000 of them generated) compiled.
+
+Every one of the 542 non-agreements (435 verdicts, 75 schema errors, 32
+panics) is in a class below. Outside `d301-literal-cut` and `d270-peg-groups`,
+every crate verdict differs from the PEG oracle in **both** cut modes and,
+on the P4.1 sources, from the set-semantics interpreter too, so no reading of
+the cut or of group matching makes the crate right.
+
+### Changes against the 2026-11-11 run, row by row
+
+Keyed on suite, case, rule and bytes against `3c10a83`'s evidence: no row
+disappeared, 702 are new and 49 changed.
+
+| Change | Rows | Cause |
+| --- | ---: | --- |
+| snug accept→refuse, crate refuse: disagreement gone | 29 | D270 (PEG): 23 left `optional-map-group`, all 6 of `array-occurrence` (the crate is greedy like Appendix A) |
+| snug accept→refuse, crate accept: new disagreement | 15 | D301 literal cut 14 (`d301-literal-cut`); D270 prioritised choice 1 (`d270-peg-groups`) |
+| snug refuse→accept, crate accept: disagreement gone | 4 | D328 (float widths by value): Appendix D `float32`/`float64`/`float32-64` on `f93e00`, `fa3f8ccccd` |
+| snug accept→refuse, crate schema error | 1 | D270: `bstr .cborseq [? uint, 2*3 uint, tstr]` on 1, 2, "x"; still `unsupported-cborseq` |
+| new: 26 adversarial suites snug used to refuse | 124 | D270 withdrew `map_overlap` (21 suites), `map_group_occurrence` (3), `map_cut` (2); 117 agree, 7 disagree (new classes below) |
+| new: the four added corpora | 578 | numbers 52, heads 57, audit 300, abnf 169 |
+
+So on the P4.1 sources: disagreements 301 − 29 − 4 + 15 + 7 = **290**;
+agreements 6,614 + 29 + 4 − 15 + 117 = **6,749**; schema errors (70) and
+panics (2) unchanged. The 6,000 generated verdicts are unchanged.
+Class counts that moved: `optional-map-group` 60 → 37, `array-occurrence`
+6 → 0 (class retired), `float-width-erased` 9 → 5 (+ 7 from numbers = 12),
+`noncut-map-fallthrough` 1 → 3.
+
+### Classes
+
+Unchanged from the table above (same RFC arguments; each surviving row was
+rechecked against the PEG oracle): map-choice-coverage 4, regexp-unanchored
+13, unsupported-cborseq 9, map-unwrap 2, prelude-bignum 5,
+native-integer-literal-limit 48, prelude-tag-dispatch 17, member-rule-collision
+2, repeated-map-choice 2, composite-ne-target 5, socket-group-extension 2,
+byte-literal-panic 2, byte-literal-text-confusion 1, variable-tag-unchecked 1,
+bare-major6 1, base64-literal-parse 5, hex-subnormal-parse 5,
+byte-escape-parse 3, named-group-extension 2, prelude-signedness 2,
+uint-size-range 5, bits-zero 44, bits-high 1, bignum-comparison 2,
+nested-control-target 1, embedded-trailing 1, nested-generic-scope 112.
+Changed: optional-map-group 37, float-width-erased 12 (D328: the crate
+accepts every float for every width; the 12 values are not representable in
+the narrower format, so the crate is wrong by value and by encoded width),
+noncut-map-fallthrough 3.
+
+New. "Wrong" says who departs from the cited text. Every reduced witness
+below was run through snug, the PEG oracle and the crate on 2026-11-12, and
+all reproduce (a = accept, r = refuse).
+
+| Class | Count | Wrong | Witness (rule `r`) | CBOR | snug / PEG / crate |
+| --- | ---: | --- | --- | --- | --- |
+| d301-literal-cut | 14 | neither: snug follows the RFC text (owner decision D301), the crate rule A | `{ kind: "a", x: int // kind: "b", y: tstr }` | `a261796173646b696e646162` | r / r / a |
+| d270-peg-groups | 1 | crate (Appendix A; D270) | `{ ? (a: int, b: int), ((* tstr => int) // (* tstr => tstr)) }` | `a361610161620261636178` | r / r / a |
+| map-group-repetition | 4 | crate (§3.2) | `{ 0*2 (2*2 tstr => int) }` | `a0` | a / a / r |
+| | | | `{ 1*2 (tstr => uint, uint => uint) }` | `a30100616100616200` | r / r / a |
+| map-member-source-order | 1 | crate (Appendix A) | `{ * tstr => any, ? "a": int }` | `a161616178` | a / a / r |
+| noncut-map-fallthrough (+2) | 3 | crate (§3.5.4, Appendix C) | `{ tstr => 0, tstr => 1 }` | `a2616100616201` | a / a / r |
+| numeric-control-across-kinds | 11 | crate (§3.8.6; D329) | `int .gt 0.5` | `01` | a / a / r |
+| cat-text-bytes | 1 | crate (RFC 9165 §2.2; D330) | `h'01' .cat "x"` | `420178` | a / a / r |
+| rfc9682-simple-head-numbers | 32 | crate (RFC 9682 §3.2; D336) | `#7.24` | `f820` | a / a / r |
+| nan-ne-control | 5 | crate (§3.8.6; D250) | `float .ne 1.5` | `f97e00` | a / a / r |
+| float-range-control-target | 5 | crate (§3.8.6; D250) | `(-1.0..1.0) .lt 0.0` | `f9bc00` | a / a / r |
+| float-zero-equality | 2 | crate (§3.8.6; D250) | `0.0 .and (-1.0..-0.0)` | `f98000` | a / a / r |
+| prelude-time-nonfinite | 2 | crate (Appendix D; D252.2) | `time` | `c1f97c00` | a / a / r |
+| d252-known-tag-validity | 26 | crate (RFC 8949 §§3.4.1, 3.4.5.3, 5.3.2; D252, D260) | `uri` | `d8206a687474703a2f2f5b5d2f` | r / (wire) / a |
+| abnf-element-only-unchecked | 37 | crate (RFC 9165 §3) | `tstr .abnf "%x30-39"` | `612f` | r / – / a |
+| abnf-target-major | 6 | crate (RFC 9165 §3) | `bstr .abnf "*%x00-10FFFF"` | `40` | a / – / r |
+| abnf-unanchored | 4 | crate (RFC 9165 §3, RFC 5234) | `tstr .abnf "a\na = \"x\" a / \"\""` | `63787879` | r / – / a |
+| abnf-incremental-alternative | 4 | crate (RFC 5234 §3.3) | `tstr .abnf "r\nr = \"a\"\nr =/ \"b\""` | `6161` | a / – / r |
+| abnf-rfc7405-strings | 3 | crate (RFC 9165 §3, RFC 7405) | `tstr .abnf "x\nx = %s\"aBc\""` | `63614263` | a / – / r |
+| abnfb-bytes-as-utf8 (schema error) | 5 | crate (RFC 9165 §3) | `bstr .abnfb "oid\noid = 1*arc\narc = [nlsb] %x00-7f\nnlsb = %x81-ff *%x80-ff"` | `428100` | a / – / error |
+| abnf-left-recursion-panic | 13 | crate (RFC 5234) | `tstr .abnf "a\na = a \"x\" / \"y\""` | `6179` | a / – / panic |
+| abnf-start-element-panic | 17 | crate (RFC 9165 §3, RFC 5234 §2.1) | `tstr .abnf "Rule\nRULE = \"a\""` | `6161` | a / – / panic |
+
+For the abnf rows the independent check is `abnf-oracle.mjs` (snug equals it
+on all 169), shown as "–" in the PEG column.
+
+- **d301-literal-cut.** `kind: "a"` has the colon's cut (§3.5.4: "the ':'
+  shortcut is actually defined to include the cut semantics"). Under the
+  literal text, once `kind` matches with a wrong value "the entire map fails
+  to match"; the crate lets the `//` alternative take it (rule A, snug's
+  `cuts: 'branch'`). This is the one class where both readings are
+  documented and snug's default is an owner decision, not a crate defect.
+- **d270-peg-groups.** Appendix A: alternatives "are to be tested in
+  left-to-right order, locking in the first successful match". After the
+  optional group takes `a`, `b`, the first alternative `* tstr => int`
+  succeeds with zero pairs and is locked; `c: "x"` is left over, so the map
+  fails. The crate retries the second alternative (set semantics, which the
+  old oracle shared).
+- **map-group-repetition.** §3.2 applies an occurrence to the whole group.
+  `0*2 (2*2 …)` admits zero repetitions (the empty map) and two (four pairs);
+  the crate refuses both. In `1*2 (tstr => uint, uint => uint)` each repetition
+  needs one pair of each kind; one integer key and two text keys cannot be
+  covered, and the crate accepts.
+- **map-member-source-order.** Appendix A matches the group in source order:
+  `* tstr => any` takes `"a": "x"` before `? "a": int` is reached, so the
+  cut never sees it. The crate applies the cut member to the key regardless
+  of order.
+- **noncut-map-fallthrough** (+2, C5). No cut: a pair whose key matches but
+  whose value does not stays available to later members. `tstr => 0` takes
+  `"a": 0`, `tstr => 1` takes `"b": 1`; the crate checks every text-keyed pair
+  against the first member's value.
+- **numeric-control-across-kinds, cat-text-bytes, rfc9682-simple-head-numbers,
+  nan-ne-control, float-range-control-target, float-zero-equality.** D329,
+  D330, D336 and D250 each quote the RFC text and record the crate's
+  behaviour, and this run is consistent with what they record (D329: the
+  crate refuses all 11 cross-kind cases; D330: `h'01' .cat "x"`; D336: the
+  crate refuses `#7.<T>` and `#7.25` on `f93e00`, here 32 head-number cases;
+  D250: NaN `.ne` and bounded float ranges; the audit notes name each case). §3.8.6's own example is
+  `speed = number .ge 0`, which the crate refuses for `0.0`.
+- **prelude-time-nonfinite.** Appendix D: `time = #6.1(number)`, `number = int
+  / float`; ±∞ are floats. RFC 8949 §3.4.2 only discourages them (D252 item 2).
+- **d252-known-tag-validity.** Tag 0 content must be an RFC 3339 date-time
+  (RFC 8949 §3.4.1), tag 32 an RFC 3986 URI-reference (§3.4.5.3), tag 1 a
+  number (§3.4.2); §5.3.2 makes other content invalid. Snug's default presets
+  check known-tag validity (D252, D260); the crate checks only CDDL. The
+  audit corpus already recorded each crate disagreement in its notes.
+- **abnf-element-only-unchecked.** RFC 9165 §3 allows "one valid element,
+  followed by zero or more valid rules". The crate's `validate_abnf`
+  (`validator/control.rs:783`) only validates when the controller contains a
+  newline; a one-line controller accepts every string.
+- **abnf-target-major.** RFC 9165 §3: "Both control operators can be applied
+  to targets of either string type". The crate refuses `.abnf` on a byte
+  string and `.abnfb` on a text string.
+- **abnf-unanchored.** The crate translates the ABNF to pest and accepts
+  when a prefix matches (`s\ns = 1*DIGIT…` accepts `"12a3"`); RFC 5234 defines
+  a language, so membership is of the whole string.
+- **abnf-incremental-alternative.** RFC 5234 §3.3's `=/` adds alternatives;
+  the crate loses the rule (`r` refuses `"a"`, also when `=` and `=/` are
+  followed by continuation lines, which the crate handles on their own).
+- **abnf-rfc7405-strings.** RFC 9165 §3 brings in ABNF as "[RFC5234]
+  [RFC7405]"; RFC 7405 adds `%s"…"` and `%i"…"`. The crate's ABNF parser
+  fails on them ("in CrLf") and the control then refuses every input, so the
+  RFC 5234 §2.3 / RFC 7405 §2.1 example `%s"aBc" / %d97.98.99 / %x41.42.43`
+  refuses `"aBc"`, `"abc"` and `"ABC"`. (One-line controllers using `%s` are
+  in `abnf-element-only-unchecked`, which the crate never parses.)
+- **abnfb-bytes-as-utf8.** `.abnfb` reads bytes (RFC 9165 §3); the crate
+  decodes the target as UTF-8 and fails with "error parsing utf8" on `81 00`
+  (counted as a schema error because of that message).
+- **abnf-left-recursion-panic.** pest refuses left recursion and the crate
+  `unwrap`s the result (`control.rs:801:55`). RFC 5234 permits left recursion.
+- **abnf-start-element-panic.** The crate passes the controller's first line
+  to pest as a rule name, so any start that is not exactly a pest rule name
+  panics (`pest_vm lib.rs:178`, "undefined rule"): `Rule` against `RULE` (RFC
+  5234 §2.1: rule names are case-insensitive), a start with a trailing
+  comment, a concatenation or alternation start, and D334's rule-first
+  leniency (`s = 1*DIGIT…`: "undefined rule s = 1*DIGIT"). Some of these
+  starts are snug leniencies (D334), but a panic is not a verdict, so there
+  is no verdict to disagree with. D334's remark that the Rust crate also
+  starts at a leading rule does not hold for the 0.10.7 CLI.
+
+**Not covered here:** `xsd-regexp.json` (pattern vectors with no CDDL
+wrapper; regexp dialect differences stay in `regexp-unanchored`) and the RFC
+corpus (it has its own runner and Ruby cross-check). PEG semantics, D301,
+D328–D330, D334, D336, D250 and D252 are now all exercised. D284 (simple
+values) is exercised through `heads.json`; no disagreement is about it
+alone. D260 (`valid` wire) is exercised through the `valid`-wire fixtures in
+`numbers.json` and `heads.json`; no disagreement comes from it. Snug bugs
+found: **0**.
+
+### Ruby gem
+
+`RUBY_CDDL=… node --test --test-name-pattern="Ruby differential"
+corpus/tools/peg-oracle.test.mjs` (PEG oracle vs the Ruby cddl 0.12.14 gem,
+300 seeded pairs) passes with the 2026-11-11 counts exactly: agreement 116,
+RC 14, RL 42, RK 30, RI 15, RZ 30, RR 27, RO 11, RX 15, new/unknown/timeout 0
+(41 s). That test compares the PEG oracle with Ruby, not snug; snug equals
+the PEG oracle on every crate-diff case. `node corpus/tools/run-rfc-corpus.mjs --gate`: 999
+checks, 996 pass, 3 classified, 0 unexplained, 0 stale; its Ruby column is the
+checked-in evidence (320 checked, 7 known disagreements), not re-run.
