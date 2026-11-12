@@ -340,8 +340,12 @@ go. Delegations such as D303 cover size caps only, not releases.
      then `npm pack --dry-run` there to review the file list;
    - crate: `kin/scripts/rust-crate`, then `cargo package --list` and
      `cargo package --no-verify`, offline, in the assembled crate;
-   - SDK: `kin/scripts/wasm-build sdk` and `cc` with the pinned toolchain,
-     plus the SDK staging that does not exist yet (§8).
+   - SDK: `kin/scripts/wasm-build sdk` and `cc` with the pinned toolchain
+     and the pinned `wasm-opt` (binaryen in `bench/compare`, D341). The
+     shipped modules are `.cache/snug-wasm-sdk/snug.wasm` (opt-level 3, then
+     `wasm-opt -O3`) and `.cache/snug-wasm-cc/snug.wasm` (opt-level "z",
+     then `wasm-opt -Oz`). `bb wasm-size` gates their sizes. The SDK staging
+     does not exist yet (§8).
 
    Record each artefact's SHA-256 and the producing commit in DEVLOG.
 6. **Licence and notice check:**

@@ -9,7 +9,7 @@ cd "$(dirname "$0")/../../.."
 for mode in sdk cc; do
   kin/scripts/wasm-build "$mode" > /dev/null
   status=$?
-  if [ "$status" -eq 3 ]; then echo "SKIP bb wasm-sdk-test -- the wasm toolchain is missing (kin/scripts/wasm-build $mode); parity NOT run"; exit 0; fi
+  if [ "$status" -eq 3 ]; then echo "SKIP bb wasm-sdk-test -- the wasm toolchain or wasm-opt is missing (kin/scripts/wasm-build $mode); parity NOT run"; exit 0; fi
   if [ "$status" -ne 0 ]; then echo "FAIL kin/scripts/wasm-build $mode exited $status"; exit "$status"; fi
 done
 SNUG_PARITY_MUTATIONS="${1:-20000}" SNUG_PARITY_SEED="${2:-1}" SNUG_PARITY_SCHEMAS="${3:-400}" \

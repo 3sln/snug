@@ -104,7 +104,7 @@ async function cold(build) {
     const lib = await import('../host/wasm-sdk/src/index.mjs');
     const S = await import('../host/wasm-sdk/src/schema.mjs');
     r.importMs = ms(); r.importCpu = cpu();
-    const bytes = readFileSync(new URL('.cache/snug-wasm-sdk/target/wasm32-unknown-unknown/release/snug_wasm.wasm', root));
+    const bytes = readFileSync(new URL('.cache/snug-wasm-sdk/snug.wasm', root));
     const a = performance.now(); const mod = await WebAssembly.compile(bytes); r.compileMs = performance.now() - a;
     const b = performance.now(); lib.initSync(mod); r.instantiateMs = performance.now() - b;
     const s = S.fromSerializedSync(prog); r.loadMs = ms(); r.loadCpu = cpu();

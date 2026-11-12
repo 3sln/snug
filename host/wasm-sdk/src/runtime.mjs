@@ -101,7 +101,7 @@ export function ready() {
   if (x === null) throw new Error('snug wasm: call init() first');
 }
 
-const DEFAULT = '../../../.cache/snug-wasm-sdk/target/wasm32-unknown-unknown/release/snug_wasm.wasm';
+const DEFAULT = '../../../.cache/snug-wasm-sdk/snug.wasm';
 
 async function compileFrom(source) {
   if (source instanceof WebAssembly.Module) return source;

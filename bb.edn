@@ -45,6 +45,7 @@
               :task (apply shell "kin/scripts/write-test" *command-line-args*)}
   proptest   {:doc "P4.2: the property-based campaign (schema x value vs the oracle, codec, views, serialised Programs, robustness, Rust-parity gates); findings in tools/proptest/findings/."
               :task (apply shell "node" "tools/proptest/campaign.mjs" *command-line-args*)}
+  wasm-size  {:doc "D341: the wasm SDK modules (kin/scripts/wasm-build sdk | cc) under their bytes and gzip caps (tools/size/budget.json \"wasm\"); SKIP without the nightly or wasm-opt." :task (apply shell "node" "tools/size/wasm-size.mjs" *command-line-args*)}
   wasm-sdk-test {:doc "P7.9 follow-up: build the wasm SDK modules (SKIP without the nightly toolchain); the SDK == native JS on vm-test's case set (validate, decode, encode, views, sessions, compile) + instance loss." :task (apply shell "sh" "host/wasm-sdk/test/run" *command-line-args*)}
   watchdog-test {:doc "P9.1: the gate watchdog (kin/scripts/watchdog.mjs) -- CPU and wall caps trip, name the gate, its arguments and the cap, kill the gate's whole process group; pass-through otherwise; a real sh gate (scan-test 300 1) and a node gate (size) trip."
                  :task (shell "node" "kin/scripts/watchdog-test.mjs")}
