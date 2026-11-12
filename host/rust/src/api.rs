@@ -9,8 +9,9 @@
 pub use crate::schema::{Blob, Failure, Scratch, Segment};
 use crate::{schema, Error, Program, Top, Value};
 
-/// CDDL restriction set, independent of the CBOR wire policy.
+/// CDDL restriction set, independent of the CBOR wire policy. Not exhaustive (D339).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompilerProfile {
     /// Complete supported CDDL subset.
     #[default]

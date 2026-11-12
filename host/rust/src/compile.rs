@@ -67,7 +67,9 @@ pub fn compile(text: &str, profile: i32, limits: &[i32]) -> Result<Compiled, Sch
 }
 
 /// Compile-time regexp dialect (D242); both lower to the existing portable automaton.
+/// Not exhaustive (D339).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Regexp {
     #[default]
     Xsd,
@@ -76,7 +78,9 @@ pub enum Regexp {
 
 /// Cut semantics (D301): the literal RFC 8610 cut (`Rfc`, the default; commitment
 /// epochs, D273) or rule A (`Branch`: a failed cut fails only its choice branch).
+/// Not exhaustive (D339).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Cuts {
     #[default]
     Rfc,

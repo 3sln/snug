@@ -78,6 +78,8 @@ fn path_json(path: &[Segment]) -> String {
                 parts.push(string("cbor"));
                 parts.push(i.to_string());
             }
+            // D339: `Segment` is non_exhaustive; a consumer renders an unknown kind
+            other => panic!("a segment kind this test does not know: {other:?}"),
         }
     }
     format!("[{}]", parts.join(","))

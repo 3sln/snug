@@ -50,8 +50,9 @@ pub fn limits() -> SessionLimits {
     SessionLimits { max_live: MAX_LIVE.load(SeqCst), max_pooled_bytes: MAX_POOLED.load(SeqCst) }
 }
 
-/// Why a session could not start, or limits were refused.
+/// Why a session could not start, or limits were refused. Not exhaustive (D339).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionError {
     /// `max_live` sessions are live: drop (or finish) one to release its slot.
     Limit,

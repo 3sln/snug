@@ -57,8 +57,9 @@ fn any_program() -> &'static schema::Program {
     ANY.get_or_init(|| schema::Program::new(&ANY_P, &ANY_B).expect("snug: the built-in any Program verifies"))
 }
 
-/// D214: what a refused message does to the sequence.
+/// D214: what a refused message does to the sequence. Not exhaustive (D339).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OnInvalid {
     /// End the sequence at the first refused message (the default).
     #[default]

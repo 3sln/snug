@@ -364,6 +364,7 @@ fn main() {
                                 Segment::Tag => "#tag".to_string(),
                                 Segment::Embedded => "cbor".to_string(),
                                 Segment::EmbeddedItem(i) => format!("cbor/{}", i),
+                                other => panic!("vmsession: a segment kind this host does not know: {other:?}"), // D339
                             }).collect();
                             format!("{}|{}|{}|{}", e.reason, e.subcode.unwrap_or(""), e.offset, path.join("/"))
                         }

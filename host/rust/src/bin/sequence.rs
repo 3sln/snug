@@ -325,6 +325,7 @@ fn path(segs: &[Segment]) -> String {
         Segment::Tag => "#tag".to_string(),
         Segment::Embedded => "cbor".to_string(),
         Segment::EmbeddedItem(i) => format!("cbor/{}", i),
+        other => panic!("sequence: a segment kind this host does not know: {other:?}"), // D339
     }).collect::<Vec<_>>().join("/")
 }
 

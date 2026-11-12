@@ -11,8 +11,10 @@ use crate::snug::cbor::codes::{CODE_SCRATCH, VC_NONDET, VC_UNSORTED};
 use crate::{Error, Integer, TypedArray, Value};
 
 /// Permitted root shape. [`DecodeOptions::default`] (the valid preset)
-/// permits any item; [`DecodeOptions::bindle`] requires a map.
+/// permits any item; [`DecodeOptions::bindle`] requires a map. Not exhaustive
+/// (D339), like the other option enums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Top {
     /// Require a map at the codec boundary.
     #[default]
@@ -22,6 +24,7 @@ pub enum Top {
 }
 /// Map key kinds a profile admits (D120).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Keys {
     /// Text keys only (plus top-level safe integer labels with `cose`).
     Text,
@@ -32,6 +35,7 @@ pub enum Keys {
 }
 /// Tag sets (D121).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Tags {
     /// 2, 3, 4, 40 and the little-endian typed arrays.
     Bindle,
@@ -43,6 +47,7 @@ pub enum Tags {
 }
 /// Scalar float rules (D122).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Floats {
     /// NaN, infinities, -0 and integral floats within ±(2^53-1) refused.
     Bindle,

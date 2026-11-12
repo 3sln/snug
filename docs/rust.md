@@ -450,3 +450,25 @@ which JS uses TypeError. Display contains only a code; Debug retains safe
 schema locations/paths. Library failures never contain input bytes, received
 values or unnamed data keys. Transport implementations must sanitize their
 own errors. Allocator exhaustion retains standard Rust allocator behavior.
+
+## Enums that may grow
+
+Some public enums are `#[non_exhaustive]` (D339): a later release may add a
+variant to them without a breaking release, so a `match` on one outside the
+crate needs a fallback arm (`_ => …`). Treat an unknown error or source
+variant as a refusal, and render an unknown path segment generically.
+
+| `#[non_exhaustive]` | Why |
+| --- | --- |
+| `Error`, `schema::SourceError`, `sessions::SessionError` | error families: new codes are additive (release-policy §1.3) |
+| `Segment` | diagnostic paths; a new construct may need a new segment kind |
+| `Top`, `Keys`, `Tags`, `Floats` (in `Profile`), `Cuts`, `Regexp`, `CompilerProfile`, `OnInvalid` | options: a new mode or preset is a minor change |
+
+These stay exhaustive, so a `match` can cover every case without a fallback:
+
+- `Value`, `Integer`, `TypedArray` and `TypedElement`: the decoded CBOR data
+  model. Code that walks a value tree needs every case. A new tag gets no
+  new variant (it decodes as `Value::Tag`). A new dedicated variant would
+  change what `decode` returns for existing input, so it is breaking anyway.
+- `schema::Step`: the session protocol. A driver that ignored a new step
+  would be wrong, so adding one is deliberately a breaking change.

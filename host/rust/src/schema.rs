@@ -248,8 +248,10 @@ impl Options {
     }
 }
 
-/// One path segment (program.md §9.3).
+/// One path segment (program.md §9.3). Not exhaustive (D339): a later release
+/// may add a segment kind, so a `match` needs a fallback arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Segment {
     Index(i32),
     Key(String),
@@ -515,7 +517,10 @@ pub trait Blob {
 }
 
 /// A source broke its contract: a transport outcome, never a CBOR verdict (W13).
+/// Not exhaustive (D339): a later release may add a variant, as P9.7 added
+/// `SessionLimit`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SourceError {
     ShortRead { offset: usize, wanted: usize, got: usize },
     Read,
