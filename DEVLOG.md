@@ -6132,7 +6132,12 @@ reopen this.
     - rule-first controllers, below.
   - The last is a **snug extension beyond RFC 9165**: a controller that
     begins with a rule starts at that rule. This was the brief's reading;
-    the Rust cddl crate does the same and Ruby refuses.
+    Ruby refuses it. *Corrected 2026-11-12 (P9.8):* an earlier version said
+    the Rust cddl crate does the same. It does not: crate 0.10.7 never
+    checks `.abnf` controllers. Its CLI accepted non-matching text for both
+    controller forms in a manager check, and crate-diff classes
+    `abnf-element-only-unchecked` and `abnf-start-element-panic` show the
+    same. So no other implementation backs this extension.
     - It applies only where the element-first reading fails. kin detects
       the extension by lookahead (`name *c-wsp "="`). No element-first
       controller can begin that way: the element-first parse of such text

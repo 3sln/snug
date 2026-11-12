@@ -122,8 +122,9 @@ block). Six leniencies, each only widening what is accepted:
 
 1. The start may be any alternation (`1*DIGIT`), not only one element.
 2. **A snug extension beyond RFC 9165:** a controller that begins with a rule
-   (`s = 1*DIGIT`, no start before it) starts at that first rule. The Rust
-   cddl crate reads it the same way. It applies only where the RFC's
+   (`s = 1*DIGIT`, no start before it) starts at that first rule. No other
+   implementation is a reference here: the Rust cddl crate 0.10.7 does not
+   check `.abnf` controllers at all (P9.8). It applies only where the RFC's
    element-first reading fails to parse. An element-first controller can
    never begin with `name =`, so no RFC-valid controller changes meaning; the
    gate's oracle tries element-first first and agrees with kin on every
