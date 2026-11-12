@@ -6659,6 +6659,162 @@ Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
   against snug's pinned version, every test file is imported, and the stale
   sequence test is corrected with RFC citations.
 
+### D345 — The wasm SDK ships as `@3sln/snug-wasm`: release modules with a manifest, a self-contained package, a loader for every source, an inline entry, Workers module bindings (P9.17; O3, D338; D130, D341)
+**Decision** (P9.17 engineer, proposed). docs/wasm-sdk.md is the user page.
+* **Release artefacts: `bb wasm-release`** (`kin/scripts/wasm-release.mjs`).
+  It runs `kin/scripts/wasm-build sdk` and `cc`, then stages a fresh
+  `.cache/release/wasm` (or a new DEST under `.cache/`) with:
+  * `snug.wasm` (runtime) and `snug-compiler.wasm` (compiler);
+  * `SHA256SUMS`;
+  * `MANIFEST.json`: the version (the version site
+    `host/wasm-sdk/package.json`, so the placeholder unless the tree was
+    stamped), the commit, any build input with uncommitted changes, the
+    toolchain (pinned and used, `rustc -vV`), the `wasm-opt` version, and
+    per module the build, bytes, gzip -9, SHA-256 and the wasm features it
+    cannot validate without.
+  The features are found by dropping each of wasm-build's `--enable-*`
+  features in turn under `wasm-opt --mvp-features`. Both modules need
+  exactly bulk-memory and sign-ext, which closes release-policy §2's "not
+  done yet". Without the nightly or `wasm-opt` it answers SKIP (exit 3).
+  The pinned toolchain stays `nightly-2026-09-16` in `kin/scripts/wasm-build`
+  (confirmed; `SNUG_WASM_TOOLCHAIN` overrides it, and the manifest records
+  both). Release-policy §4 step 5 now names it.
+* **The npm package: `host/wasm-sdk/package-build.mjs`** stages into a new
+  directory under `.cache/` (default `.cache/release/npm/snug-wasm`). The
+  modules come from a `bb wasm-release` directory, checked against its
+  SHA256SUMS, so the package holds the release artefacts' exact bytes. It
+  has an explicit allowlist (`PACKAGE_FILES`):
+  * the root: package.json, LICENSE, THIRD_PARTY_NOTICES.md, SECURITY.md
+    (when the repository has it), the SDK's own README
+    (host/wasm-sdk/README.md) and CHANGELOG.md;
+  * `docs/`: wasm-sdk.md plus the native package's doc list, since the API
+    is the same (D172);
+  * `src/`: the SDK, as the import closure of the exported entries;
+  * `native/` and `generated/`: the host/js/src and gen/js files that
+    closure reaches, with imports rewritten by resolving each specifier;
+  * `types/`: the SDK's declarations over the native ones, which are copied
+    into `types/native/`;
+  * `wasm/`: the two modules and MANIFEST.json.
+  Markdown links to files that do not ship become text, as in the native
+  build. The **version** is the one in host/wasm-sdk/package.json, copied
+  as is, the same way the native build copies host/js/package.json. The
+  package build never stamps (P9.15's `bb stamp` does), and the package
+  test requires it to equal the native package's and `SNUG_VERSION`.
+  `engines` comes from host/js/package.json when the SDK manifest has
+  none, so it is declared once (P9.18). `private` stays true: removing it
+  is the release commit's job, on the owner's go.
+* **No native compiler in the package.** The SDK imported `SchemaError`
+  from host/js/src/public-compile.mjs. That module's lazy
+  `import('./compile-runtime.mjs')` dragged the whole generated compiler
+  into the closure, so a bundler would have shipped it into a Worker. The
+  class now lives in `host/js/src/schema-error.mjs`, and public-compile
+  re-exports it, so the class is the same in both packages. The native
+  sizes barely move, and no cap changes (`bb size`, against main):
+  `snug/compile` static brotli 1,230 → 1,218, full gzip 97,820 → 97,824,
+  full brotli 83,527 → 83,429. The package test fails if any compiler
+  file ships.
+* **The public surface.** The package exports wrapper entries
+  (src/public-index.mjs, public-schema.mjs and public-sources.mjs). They
+  keep out internals that the checkout's modules export for each other:
+  `scan`, `innerOf`, `limitArgs` and `pickYield`. The surface is then:
+  * the native package's;
+  * plus the SDK's own: `init`, `initSync`, `reset`, `trim`,
+    `memoryBytes`, `InstanceLost`, `fromSerializedSync`,
+    `compilerSource`, `releaseCompiler` and `compilerMemoryBytes`;
+  * plus `./unicode`, a re-export of the native tables. Without it, an SDK
+    user needed `@3sln/snug` for `compile({ unicode })`;
+  * plus `./inline`, and the two `.wasm` files for module bindings.
+  Hand-written `.d.ts` files declare exactly these. The test checks every
+  entry's declared names against its runtime exports, following
+  `export *`.
+* **Loaders** (host/wasm-sdk/src/load.mjs). Both `init(source)` and
+  `initSync(source)` also take `{ runtime, compiler }`. A source is one of:
+  * a `WebAssembly.Module`;
+  * bytes (ArrayBuffer or any view);
+  * a `Response`, or a promise of one. It is compiled streaming when served
+    as `application/wasm`, and from its bytes otherwise;
+  * a `URL`, or a string with a scheme. `file:` is read with node:fs,
+    anything else is fetched;
+  * any other string: a file path in Node, a page-relative URL elsewhere.
+  `initSync` takes only a Module or bytes. A compiler given to either is
+  compiled there and then, because a Worker cannot compile it later, in a
+  request. Otherwise `compile()` loads the default module lazily, as
+  before. The default for each module is a literal
+  `new URL('…', import.meta.url)` next to the SDK, which bundlers can see;
+  the package build rewrites the checkout's `.cache` paths to `../wasm/`.
+  node:fs is reached through `process.getBuiltinModule`, or a non-literal
+  `import()`, so that wrangler's bundler does not warn about a node:
+  import. `init()` with no argument does nothing once initialised; with a
+  source it replaces the instance, as before.
+* **The inline entry** (`@3sln/snug-wasm/inline`) carries both modules as
+  base64, in a module the package build generates. It exports the root's
+  surface, with an `init()` and an `initSync()` that take no argument and
+  compile both modules. It is one entry with both modules, so that
+  `compile()` works after `initSync()` even in a Worker. The cost is
+  documented: 635,209 B / 256,887 gzip for the generated module, against
+  476,271 / 199,918 for the two `.wasm` files (+28% gzip).
+* **Where synchronous compile works** (tested 2026-11-12, and kept in the
+  gate):
+  * Node 24.6.0;
+  * Chrome 157 on the main thread and in dedicated workers, under
+    `script-src 'self' 'wasm-unsafe-eval'`, with the 325 KB module;
+  * workerd 2025-12-17 **at module scope**.
+  workerd refuses both sync and async compiles from bytes **inside a
+  request** ("Wasm code generation disallowed by embedder"). This refines
+  D130/D005's "workerd refuses to compile wasm at run time": module-scope
+  compiles are allowed. The docs still tell main-thread browser code to
+  use `await init()`, because the main thread blocks and older Chrome
+  versions refused synchronous compiles over 4 KB.
+* **The Workers recipe** binds both modules as `.wasm` imports
+  (`@3sln/snug-wasm/wasm/snug.wasm`, `…/snug-compiler.wasm`). It calls
+  `initSync({ runtime, compiler })` at module scope and compiles lazily in
+  `fetch`. The gate copies the recipe out of docs/wasm-sdk.md and bundles
+  it twice:
+  * by esbuild, with `.wasm` imports kept as modules, as wrangler does;
+  * by `wrangler deploy --dry-run` (wrangler 4.56.0), when wrangler is on
+    the PATH.
+  Each bundle is served in a local workerd. The wrangler upload is
+  532.25 KiB, 215.87 KiB gzip.
+* **Gate: `bb wasm-package-test`** (host/wasm-sdk/test/package-run). It
+  runs `bb wasm-release`, then host/wasm-sdk/test/package.test.mjs (files,
+  metadata, wasm bytes, types, every entry from a consumer directory), then
+  host/wasm-sdk/test/consumer.mjs. The consumer test does `npm pack
+  --dry-run` and `npm pack`, installs the tarball offline into a scratch
+  project with a private npm cache, runs 14 loaders plus the error cases,
+  one fresh Node process each, then the workerd arms and the Chrome arm.
+  It is in the release set, with watchdog caps 3600 s wall and 7200 s CPU.
+  Without the nightly, workerd or Chrome it prints SKIP, so the set fails
+  (policy §2). Without wrangler it prints a note, because the esbuild
+  bundle stands in for wrangler's. Nothing is published, and the scratch
+  directory is removed.
+
+**Why:**
+* O3 ships the SDK. D130 makes speed its purpose, so the shipped modules
+  are D341's, unchanged. The release modules and the package carry the same
+  bytes, with a hash and a manifest, so a consumer can check a module
+  against the release.
+* Copying the native code into the package, rather than depending on
+  `@3sln/snug`, matches release-policy §4 step 6: neither npm package has
+  dependencies. It also keeps lockstep versions (O2) without a peer range.
+  The cost is about 40 shared JS files (the closure, not the native
+  package).
+* One loader for every host. Workers need a Module, browsers a URL or a
+  `Response`, Node a path, and bundlers an asset URL.
+
+**Alternatives:**
+* `@3sln/snug-wasm` depending on `@3sln/snug` for the shared JS. Rejected:
+  a dependency, plus two versions that must match exactly.
+* A single esbuild bundle as the package. Rejected: the source layout
+  matches the native package, and stays readable and diffable.
+* An inline entry with only the runtime module, or two inline entries.
+  Rejected: either a Worker cannot `compile()` (the compile from bytes
+  would happen in a request), or there is more surface. Runtime-only users
+  have the root entry with their own source.
+* Generating the `.d.ts` files. Rejected: there is no offline TypeScript.
+  The hand-written files re-export the native declarations, so they cannot
+  drift from them.
+- [ ] **Signed off**
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -9613,7 +9769,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - **Metadata:** repository `https://github.com/3sln/snug` (confirmed by
     the owner 2026-11-12, no longer an assumption). SECURITY.md with `contact+security@3sln.com`. The Unicode
     License v3 notice in THIRD_PARTY_NOTICES.md.
-- [ ] **P9.17 — The wasm SDK ships** (O3), as `@3sln/snug-wasm`.
+- [x] **P9.17 — The wasm SDK ships** (O3), as `@3sln/snug-wasm`.
   - Artefacts:
     - the raw `.wasm` as a release artefact;
     - an npm package with the `.wasm` and a JS SDK that loads it from a
@@ -9625,6 +9781,41 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - Build, pack and dry-run locally. Nothing is published.
   - SDK user docs (deferred in P9.10).
   - Starts after P9.12's wasm build settings land.
+  *Done 2026-11-12 (P9.17 engineer, D345, branch `p917`).* What was built:
+  - `bb wasm-release` stages the raw modules with SHA256SUMS and
+    MANIFEST.json;
+  - `host/wasm-sdk/package-build.mjs` stages the npm package;
+  - `bb wasm-package-test` runs the package test and the consumer smoke
+    test, and is in the release set;
+  - docs/wasm-sdk.md, linked from the guide and README, and the package's
+    own README.
+
+  The release modules at `605ae67` + this item (unchanged by it), built
+  with nightly-2026-09-16 (rustc 1.100.0-nightly 215a8af4b) and binaryen
+  132:
+
+  | module | bytes | gzip -9 | SHA-256 | features |
+  | --- | ---: | ---: | --- | --- |
+  | `snug.wasm` | 325,264 | 131,831 | `e381459c06f531ee7ff299db3790ddf6c9f8bbb082c389032f35b3a88f1e0dbe` | bulk-memory, sign-ext |
+  | `snug-compiler.wasm` | 151,007 | 68,697 | `67827de9a1ea87daeac2b599a1bb1976c809eb820cb30c642bdd8a07b84db35e` | bulk-memory, sign-ext |
+
+  The `npm pack` of the placeholder package `@3sln/snug-wasm@0.0.0` has 92
+  files: 735,767 B packed, 1,979,990 B unpacked (after the rebase on
+  `0fb36d9`, with P9.18's `engines`). Not a release artefact:
+  the version is the placeholder.
+
+  Learnt:
+  - **The SDK's closure held the whole native compiler.** The cause was the
+    lazy import behind `SchemaError`, and it was invisible in the checkout.
+    Any bundler would have shipped it into a Worker. Fixed by giving the
+    class a module of its own.
+  - **workerd compiles wasm from bytes at module scope.** It refuses only
+    inside a request. **Chrome 157 compiles the 325 KB module
+    synchronously on the main thread.** Both are kept in the gate, so the
+    docs' table is re-checked on every run.
+  - **wrangler 4.56's `deploy --dry-run` bundles offline.** It needs no
+    login and keeps `.wasm` imports from a package's `exports` as
+    module bindings, so its output can be served by a bare workerd.
 - [x] **P9.18 — Minimum supported toolchains** (O7). Find the oldest Node
   (try 18, 20 and 22) and the oldest stable Rust (bisect) that pass the
   gates today. Add gates on exactly those toolchains and set `engines` and
