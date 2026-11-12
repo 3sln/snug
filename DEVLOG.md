@@ -9643,6 +9643,20 @@ can run alongside them; its build work is post-RC unless it is cheap.
   layer, gates and parity with JS and Rust would take. D006 deferred
   Go/Java/C#. Recommendation to the coordinator; the build is post-RC
   unless cheap. Nothing is pushed.
+  *Owner clarification (2026-11-12):* babashka means a **babashka pod**, not
+  a Clojure kin target. It is a thin Rust binary over the snug crate,
+  speaking the pod protocol (bencode over stdin/stdout: describe, invoke,
+  optional shutdown).
+  - It exposes namespaced vars: compile, validate, decode, encode, and the
+    view/path accessors.
+  - Builds for linux, macos and windows, on x86_64 and aarch64.
+  - A pod-registry `manifest.edn` with per-platform artefact URLs and SHAs.
+  - Distributed as GitHub Releases assets.
+  - The boundary should prefer schema handles held in the pod, so each
+    schema compiles once per pod process.
+  The assessment estimates the pod (binary, protocol, manifest,
+  cross-builds, and a gate running real `bb`) and Go separately. It says
+  whether the cross-builds need CI runners.
   *Owner rule (2026-11-12):* "Stamped versions in the project files are
   never checked in."
   - main and every working branch hold placeholders only (D343, with a
