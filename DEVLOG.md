@@ -9163,6 +9163,47 @@ review.
     compile-test). `npm test`: 1,459 pass. The size budgets are unchanged.
   - The fresh-worktree esbuild trap was fixed by P9.6a (d4b9abf), so it
     was not touched here.
+- [ ] **P9.16 — API and behaviour fixes from the P9.10 stranger pass**
+  (manager, 2026-11-12). The reviews are in
+  docs/reviews/2026-11-12-stranger-*.md. These are pre-release API changes,
+  so they are allowed now (D338 policy: 0.x and nothing released). Decided
+  by the manager:
+  - **Bugs:**
+    - Rust `chunk = usize::MAX` panics; values above 2³¹−1 must return
+      `Error::Usage("options")`.
+    - Each idle Rust stream session holds about 1.4 MiB, scaled to
+      `max_bytes`. Grow the arena with the input, as D337 does; measure JS
+      too.
+    - **Spec: `f8 00..1f` is not well-formed** (RFC 8949 §3.3: "Such
+      sequences are not well-formed"). It must be `malformed` under every
+      preset, not `non_shortest` under deterministic/bindle (amends D284).
+  - **Behaviour to settle with an RFC citation:** a bignum key `2(h'01')`
+    against int `1`. They are distinct keys in the duplicate check but
+    collide when decoded. Decide by RFC 8949 §3.4.3 / §5.6 and make the
+    check and the decoder agree.
+  - **API additions:**
+    - compile warnings (`schema.warnings`, `Schema::warnings()`);
+    - a `cut` subcode;
+    - the original `io::Error` reachable through `source()`;
+    - root re-exports (`SchemaError`, `SourceError`, `Cuts`, `Regexp`,
+      `Controls`);
+    - a `compile_error!` when the generated tree is missing;
+    - Schema and Program branded so `postMessage` throws;
+    - `npm run build` warns on a dirty tree.
+  - **API reshapes (breaking, pre-release):**
+    - one `unknown_rule` reporting path in Rust;
+    - Rust driver options in a struct, with `quantum` one integer type.
+  - **Deferred, with reasons:**
+    - a single-message push validator for unknown length (a feature, after
+      the RC);
+    - `sourceKeyOf` (optional);
+    - the wasm SDK docs (wait for O3);
+    - a semantic TypeScript gate (no offline `tsc`).
+  - **Rustdoc hygiene** in host/rust/src, unblocked now that P9.6b has
+    landed.
+  *Gate:* `bb gates land` plus vmsession-test, sequence-test, valid-test
+  and the scan gates for the f8 change. One D-entry for the behaviour
+  changes (D342).
 
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
