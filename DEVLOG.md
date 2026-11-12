@@ -8345,7 +8345,8 @@ review.
   - The classified checks:
     - NaN payloads under `deterministic`: D122, quoting §4.2.2.
     - default-timer: contested, on S46.
-    - The 9 RFC 9165 figure 3–5 checks: pending P9.14.
+    - The 9 RFC 9165 figure 3–5 checks: pending P9.14. *(Passing since
+      P9.14, D334; the classification is removed.)*
     - The 3 "RFC 9682 simple head numbers" checks: pending P9.3, which
       removes that classification.
   - Fixed:
@@ -8659,6 +8660,65 @@ review.
   It needs its own engineer, after P9.1–P9.4 or sooner if a slot opens
   within the four-engineer cap. Until it lands, the 8 RFC 9165 figure 3–5
   corpus cases are marked "pending P9.14", not "outside scope".
+
+  *Built (2026-11-12, branch `p914-abnf`; D334, amends D013):*
+  - **Engine.** `kin/abnf.kin` (`snug.abnf`): an RFC 5234 + RFC 7405 parser
+    for RFC 9165 §3's controller (the start, then rules) and an Earley
+    recognizer for language membership. Every step is metered (program.md
+    §14). The scratch cap is a host option (default 16 MiB, the D281
+    default); a host that grows its scratch reruns a bounded number of times.
+  - **Binding.** `abnf`/`abnfb` are extension controls. Without the module,
+    the compiler refuses with internal code 57 (`unsupported_control`).
+  - **Hosts.** `snug/abnf` (`abnf`, `abnfWith`, `checkAbnf`); Rust
+    `snug::abnf` / `Controls::with_abnf()`; `snug-wasm-sdk/abnf`, which
+    runs through the import, now carrying the argument's pool offset.
+  - **Corpus.** RFC 9165 Figures 3–5 (9 checks) pass: the classification
+    is removed and `current-results.json` is regenerated.
+  - **Docs.** cddl-support (a new ABNF section), api, rust, program.md §14,
+    architecture §4.6, conformance notes, SPEC, README, and bench/VM.md
+    "ABNF calibration".
+  - **Size.** A new `snug/abnf` entry: 14,500 min / 5,957 gzip / 5,316
+    brotli, capped at +2%, outside `all-runtime`. No existing cap changed:
+    schema and runtime grew +51 B min, and compile full +233 B.
+  - **Gate `bb abnf-test`** (default 600 grammars, seed 1). Each item was
+    checked against kin and the independent oracle
+    (`corpus/tools/abnf-oracle.mjs`: line-based parser, least-fixpoint
+    "ends" matcher):
+    - 67 hand grammars, 149 cases;
+    - 600 random grammars, 44,532 runs, with no budget skips;
+    - 306 rule-first variants;
+    - 2,400 mutated texts (477 accepted by both, 1,923 refused by both);
+    - 6,510 budget sweeps (room u − 1 stops; room u answers);
+    - the memory cap under three caps;
+    - pathological grammars under the default budget, each ≤ 24 ms;
+    - JS == Rust on 67,612 answers, rerun counts included.
+  - **All gates on this tree** (0e11762 on main ff888ac, watchdog on, Node
+    v24.6.0, rustc 1.92), all exit 0:
+    - check, drift, abnf-test, compile-test, unicode-test, nav-test,
+      write-test, scan-test, rscan-test, vm-test (JS == wasm 78,578),
+      vmsession-test, sequence-test;
+    - valid-test (cbor2 differential SKIP: not installed);
+    - npm test 1,469/1,469;
+    - the RFC runner `--gate` (996/999, 3 classified, 0 unexplained,
+      0 stale);
+    - size (the esbuild symlink was added and removed);
+    - wasm-sdk-test 17/17 (abnf parity 1,156/1,156);
+    - rust-api-test (Clippy clean).
+  - **Learnt.**
+    - The first tick weights were 3–10× too cheap; only measuring against
+      the VM's reference row in the same process (CPU time) showed it.
+    - A per-node duplicate chain makes a nullable counted repetition
+      quadratic. Setting min to 0 and skipping the ε-advance for REPs
+      removes it, and the language is unchanged.
+    - Growth reruns needed a size suggestion from kin, at least double, to
+      be bounded and cheap.
+  - **Open.**
+    - The cap is not in the source key, by design: it is a runtime bound.
+    - RFC 5234 and RFC 7405 are not in corpus/rfc/. Their grammar was
+      written from RFC 9165's references and knowledge; quotations
+      unverified.
+    - The matcher runs in JS inside the wasm SDK. In-wasm execution would
+      grow the binary.
 
 **Documentation and API**
 - [ ] **P9.10 — Stranger-pass re-review of docs and API.** Independent
