@@ -25,8 +25,10 @@ pub fn vms_words(p: &[i32]) -> i32 {
     return vms_session_words(p);
 }
 pub fn vms_arena(p: &[i32], limits: &[i32], total: i32) -> i32 {
-    // Bytes of the key arena (BytesW) for a message of `total` bytes.
-    return vms_arena_bytes(p, limits, total);
+    // Bytes of the key arena (BytesW) a session on a message of `total` bytes
+    // starts with: at most 256 (D342). vms-step asks for more (VMS_GROW,
+    // vms-grow-arena) as the input it reads grows, up to vms-arena-bytes.
+    return imin(vms_arena_bytes(p, limits, total), 256);
 }
 pub fn vms_init(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32], ss: &mut [i32], ka: &mut [u8], total: i32, quantum: i32) -> i32 {
     // Start a session on rule over a message of exactly `total` bytes: s is a
@@ -54,7 +56,7 @@ pub fn vms_init(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32]
     if (ss.len() as i32) < vms_session_words(p) {
         return -2;
     }
-    if (ka.len() as i32) < vms_arena_bytes(p, limits, total) {
+    if (ka.len() as i32) < vms_arena(p, limits, total) {
         return -2;
     }
     let nf: i32 = nframes(p);
@@ -72,7 +74,8 @@ pub fn vms_init(p: &[i32], pool: &[u8], rule: i32, limits: &[i32], s: &mut [i32]
     ss[(SS_PEND) as usize] = (SS_HDR + (nf * FW)) + (3 * nf);
     ss[(SS_CHN) as usize] = -1;
     ss[(SS_ATOP) as usize] = 0;
-    ss[(SS_ABYTES) as usize] = ka.len() as i32;
+    // the key arena's bound (D342: ka itself may start smaller)
+    ss[(SS_ABYTES) as usize] = vms_arena_bytes(p, limits, total);
     ss[(SS_PROF) as usize] = s[(O_PROFILE) as usize];
     return 0;
 }
@@ -829,6 +832,23 @@ pub(crate) fn vms_run(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &mut 
     }
     if base < 0 {
         return -1;
+    }
+    // D342: the key arena grows with the input read. Every key it holds is a
+    // disjoint span of the message read so far, and a copy is made only of
+    // bytes in a window, so the window's end bounds what this step can write
+    // (the valid machinery's keys ask for themselves, vgrow). Nothing has
+    // changed yet: the host grows ka and steps again.
+    let an: i32 = imin(ss[(SS_ABYTES) as usize], base + (b.len() as i32));
+    if an > (ka.len() as i32) {
+        let mut g: i32 = imin(ss[(SS_ABYTES) as usize], 2 * (ka.len() as i32));
+        if g < an {
+            g = an;
+        }
+        ss[(SS_GW) as usize] = 0;
+        ss[(SS_GB) as usize] = 0;
+        ss[(SS_GS) as usize] = 0;
+        ss[(SS_GA) as usize] = g;
+        return VMS_GROW;
     }
     if ss[(SS_UNK) as usize] == 1 {
         pend_drop(ss, base + (b.len() as i32));

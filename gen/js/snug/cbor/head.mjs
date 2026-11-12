@@ -61,6 +61,10 @@ export function readArg(b, o, pos, ai, end) {
         short = ((v >>> 16) | 0) === 0;
     }
     if (short) {
+        // f8 below 32 is not well-formed (RFC 8949 §3.3, D342)
+        if (b[pos] === 248) {
+            return fail(o, pos, CODE_MALFORMED);
+        }
         return fail(o, pos, CODE_NON_SHORTEST);
     }
     o[O_HI] = 0;

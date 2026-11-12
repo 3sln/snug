@@ -61,14 +61,14 @@
       "static": {
         "min": 59490,
         "gzip": 20376,
-        "brotli": 17467
+        "brotli": 17896
       },
       "full": {
         "min": 59490,
         "gzip": 20376,
-        "brotli": 17467
+        "brotli": 17896
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2. Min and gzip: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min); measured on main 51eb54c + D."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2. Min and gzip: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min); measured on main 51eb54c + D. Brotli: D342 (P9.16, under 1 KB with a measured gain) -- f8 below 32 malformed in read-arg (kin/head.kin) and a non-preferred bignum kept a Tagged and written as its integer (host/js/src/values.mjs bignumOf, writer.mjs), +83 B brotli; measured on p916-fixes over main d1f2da9."
     },
     "snug/unicode": {
       "static": {
@@ -86,14 +86,14 @@
       "static": {
         "min": 183997,
         "gzip": 67658,
-        "brotli": 57468
+        "brotli": 58724
       },
       "full": {
         "min": 183997,
         "gzip": 67658,
-        "brotli": 57468
+        "brotli": 58724
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D325 (D286 A3, a session's scratch sized from the Program's high-water mark; +57 B brotli, minified -3), measured on main 8ffa72e + A3. Gzip: D333 (P9.2, coordinator under D303) -- float widths by value (kin/vm-eval.kin float-cls, D328); measured on p92-rfc over main 5a1bb84. Min: D337 (P9.4, D303 rule of thumb) -- a recursive Program's session arena grown with the input read (kin/vm-session-base.kin arena-prefix and arena-gate's upto, kin/vm-arena.kin arena-in-use and arena-want-cut), +283 B; measured on p94-arena over p93-heads."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D325 (D286 A3, a session's scratch sized from the Program's high-water mark; +57 B brotli, minified -3), measured on main 8ffa72e + A3. Gzip: D333 (P9.2, coordinator under D303) -- float widths by value (kin/vm-eval.kin float-cls, D328); measured on p92-rfc over main 5a1bb84. Min: D337 (P9.4, D303 rule of thumb) -- a recursive Program's session arena grown with the input read (kin/vm-session-base.kin arena-prefix and arena-gate's upto, kin/vm-arena.kin arena-in-use and arena-want-cut), +283 B; measured on p94-arena over p93-heads. Brotli: D342 (P9.16, under 1 KB with a measured gain: an idle stream session 1.4 MiB -> 19 KiB) -- the key arena grown with the input read (kin/vm-session.kin vms-run's gate), f8 below 32 malformed (kin/head.kin, kin/scan.kin, kin/vcopy.kin), the non-preferred bignum Tagged (host/js/src/build.mjs), +135 B brotli; measured on p916-fixes over main d1f2da9."
     },
     "snug/sequence": {
       "static": {

@@ -377,6 +377,14 @@ bignums, while `int` includes only major 0/1. Numeric value is preserved,
 not JS number/bigint identity. Use bigint before arithmetic exceeds Number's
 safe domain: snug cannot recover precision already lost in a Number.
 
+Under the default `valid` preset a sender may write a bignum that is not in
+preferred serialization, such as `2(h'01')` for 1 or a bignum with leading
+zeroes. RFC 8949 §5.6.1 makes it a data item distinct from the integer 1, and
+snug reads it that way everywhere: it is a different map key from `1`, `r = 1`
+does not match it, and decode gives `Tagged { tag: 2, value: Uint8Array }` of
+its exact bytes rather than a number (D342). Encode writes such a `Tagged` as
+its integer. The deterministic preset refuses these bignums (`bignum`).
+
 | Host map representation | Valid and deterministic presets (valid is the default) | `wire: 'bindle'` |
 | --- | --- | --- |
 | Plain or null-prototype object | Text keys at any depth; decodes to a null-prototype object | the same |
@@ -683,9 +691,10 @@ the buffer reports that first. Acceptance always waits for the end.
 
 Memory stays bounded: the driver holds only what the session asks for (a
 head, a key, a bounded piece, an extension control's item) plus a chunk; a
-long byte string is dropped as it streams. The session's own key arena is
-sized for the input limit (`maxBytes`, default 1,500,000 bytes) because the
-length is unknown — lower `maxBytes` for many concurrent streams. A raw
+long byte string is dropped as it streams. The session's own key arena grows
+with the input read (D342): an idle stream that has received a few bytes holds
+about 50 KiB, whatever `maxBytes` is (measured 2026-11-12; before D342 the
+arena was sized for `maxBytes`, about 1.5 MiB at the default). A raw
 `openSession(schema, rule, undefined)` from `snug/sources` exposes the
 protocol: `step` may answer
 `{state: 'held', result}`, and `end(n)` settles the verdict (or answers a
@@ -761,9 +770,8 @@ schema's compiled input limit) bounds each message: one that does not end
 within it is `cbor/too_large`, decided without buffering it. `maxDepth`,
 `maxEntries`, `maxItems`, `maxBignumBytes` and `budget` start from zero for
 every message. `maxBytes` is refused (it would be ambiguous). There is no
-total cap: stop by leaving the loop, which cancels the stream. Each reader
-holds a key arena of `maxMessageBytes` bytes, so lower it for many concurrent
-readers.
+total cap: stop by leaving the loop, which cancels the stream. Each reader's
+key arena grows with the message in progress, up to `maxMessageBytes` (D342).
 
 **Refusals.** By default (`onInvalid: 'stop'`) the first refused message ends
 the sequence: every earlier message has been yielded, then the loop throws a

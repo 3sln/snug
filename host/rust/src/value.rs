@@ -59,7 +59,12 @@ pub enum Value {
     Uint(u64),
     /// Negative integer **−1 − n**.
     Nint(u64),
-    /// Exact integer beyond the major 0/1 range.
+    /// A bignum (tag 2 or 3) with its content bytes exactly as decoded. In
+    /// preferred serialization it is beyond the major 0/1 range; under the
+    /// `valid` preset it may have leading zeroes or a small value, and is still
+    /// a data item distinct from the integer of the same value (RFC 8949
+    /// §5.6.1), as the duplicate-key check and CDDL matching treat it. Encoding
+    /// writes its integer in preferred serialization.
     BigInt {
         /// Tag 3 rather than tag 2.
         negative: bool,

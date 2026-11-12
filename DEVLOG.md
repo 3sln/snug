@@ -4655,6 +4655,9 @@ RFC runner, which had expected this all along); the cbor2 differential drops
 schema lists the 244 `#7.n`. **Learnt**: `scan-simple`'s answer is the item's
 end, so the two-byte form needed `pos + 2` (every walker returns it); RFC 9682's
 `#7.<32..255>` suite still fails on the unparsed `#7.<type>` syntax.
+*Amended 2026-11-12 by D342:* `f8` with a value below 32 is `malformed`
+under every preset, Bindle and `deterministic` included (no `non_shortest`
+below 24, no Bindle `simple` for 24..31).
 - [ ] **Signed off** (owner)
 
 ### D285 — Bundle growth for valid CBOR, attributed and cut; caps at measured + 2% (P8.4; R9 per D200, owner sign-off)
@@ -6819,6 +6822,149 @@ Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
   size ok. Nothing published. Follow-ups:
   - run node-oldest against the SDK package (P9.9);
   - test sync init in Firefox and Safari (noted in docs).
+
+### D342 — P9.16: `f8` below 32 is `malformed` under every preset; a bignum is a generic data item everywhere; a stream session's key arena grows with the input read (amends D284)
+**Decision** (P9.16 engineer, provisional; the manager's P9.16 triage):
+
+1. **`f8` followed by a byte below `0x20` is `malformed` under every
+   preset.** RFC 8949 §3.3: "An encoder MUST NOT issue two-byte sequences
+   that start with 0xf8 (major type 7, additional information 24) and
+   continue with a byte less than 0x20 (32 decimal). Such sequences are not
+   well-formed." D284 had kept `non_shortest` below 24 under `deterministic`
+   and Bindle (the shortest-form head check saw it first) and `simple` for
+   24..31 under Bindle; this amends it.
+   - kin: `read-arg` (kin/head.kin), which every deterministic walk shares
+     (scanner, rscan, VM attempt and dead walk, session), answers `malformed`
+     for a short `f8` head, on its failure path only; `scan-simple` drops its
+     profile condition (24..31 under Bindle); the canonical copy's walk
+     (kin/vcopy.kin) drops its `PF_VALID` condition. The valid walks already
+     answered `malformed`.
+   - The Bindle arbiter, cbor.mjs, says `non_shortest` / `simple` there. It
+     stays read-only: `bb scan-test` reads its code as `malformed` when it
+     refused at such a head (the one documented departure, docs/scanner.md),
+     and the hand-written yardstick (bench/scan-hand.mjs) answers
+     `malformed`. Vectors: corpus/cbor-vectors/deterministic.json
+     (re-exported by corpus/tools/export-deterministic.mjs: `f800`, `f817`,
+     `f814`, `f805` as a map value, `f818`, `f81f`, Bindle column too) and
+     the two cbor-profile.json entries.
+2. **A bignum is the data item it is, in every component.** The RFC leaves
+   equivalence to the data model in use:
+   - §2: "Note that integer and floating-point values are distinct in this
+     model, even if they have the same numeric value."
+   - §3.4.3: "In the basic generic data model, bignum values are not equal
+     to integers from the same model, but the extended generic data model
+     created by this tag definition defines equivalence based on numeric
+     value, and preferred serialization (Section 4.1) never makes use of
+     bignums that also can be expressed as basic integers".
+   - §5.6.1: "The specific data model that applies to a CBOR data item is
+     used to determine whether keys occurring in maps are duplicates or
+     distinct. At the generic data model level, numerically equivalent
+     integer and floating-point values are distinct from each other, as they
+     are from the various big numbers (Tags 2 to 5)." And: "Tagged values
+     are equal if both the tag number and the tag content are equal. (Note
+     that a generic decoder that provides processing for a specific tag may
+     not be able to distinguish some semantically equivalent values, e.g.,
+     if leading zeroes occur in the content of tag 2 or tag 3 (Section
+     3.4.3).)"
+   - §4.2.2: a protocol's deterministic encoding "needs to specify whether
+     smaller integers are also expressed using these tags or using major
+     types 0 and 1. Preferred serialization uses the latter choice, which
+     is therefore recommended."
+
+   snug is a generic validator with no specific data model of its own, so
+   it takes the generic reading, which its duplicate check (`1` / `2(h'01')`
+   and `2(h'01')` / `2(h'0001')` distinct) and CDDL matching (`r = 1`
+   refuses `2(h'01')`; RFC 8610's `int` excludes `biguint`) already used.
+   Only the JS decoder collapsed: it gave both the number 1, so such a map
+   threw `unsupported`. Now a bignum outside preferred serialization (a
+   leading zero, or fewer than 9 content bytes; reachable under `valid`
+   only, `deterministic` refuses it with `bignum`) decodes to `Tagged { tag,
+   value: Uint8Array }` of its exact bytes, as D265/D267 keep tag-4/40
+   content outside Decimal/NDArray's invariants. Rust's `Value::BigInt`
+   already kept the exact bytes and never became `Uint`; its decimal check
+   now takes only a preferred bignum mantissa, as JS. Encoders write either
+   form as its integer in preferred serialization (an encoder's freedom; a
+   deterministic encoder cannot write the other). Not a large API change: no
+   new type, and only `valid` input with a non-preferred bignum decodes
+   differently.
+3. **A stream session's key arena grows with the input read** (as D337 did
+   for the group arena). Every key the arena holds is a disjoint span of
+   the message read so far, and a copy is made only of bytes in a window, so
+   the window's end bounds what a step can write. `vms-run` (kin/vm-session.kin)
+   asks for `min(bound, base + window length)` bytes, doubling, with
+   `VMS_GROW` before any work (nothing has changed; the hosts grow the arena
+   and step again, as they already did for the valid machinery's keys);
+   `vms-arena` answers at most 256 to start; `SS_ABYTES` keeps the old bound
+   (`vms-arena-bytes`). Verdicts, codes, offsets, paths, items and budget are
+   unchanged: the arena's size is not charged.
+4. **`[rust]` A driver `chunk` above 2³¹ − 1 is `Error::Usage("options")`**
+   (`usize::MAX` panicked with `capacity overflow`; `1 << 33` reserved 8 GiB),
+   on every blob, reader and sequence driver, sync and async.
+
+**Evidence**:
+- f8: `bb scan-test`, `rscan-test`, `valid-test`, `vm-test`,
+  `vmsession-test`, `sequence-test` (results under *Done* below);
+  host/js/test/profiles.test.mjs and host/rust/tests/public_api.rs check
+  `f800`/`f805`/`f817`/`f818`/`f81f` under all three presets.
+- Bignums: the same tests decode `a20100c2410101` to two keys on both
+  hosts, check the Tagged / BigInt bytes, the encode back to preferred form
+  and that the duplicate check agrees.
+- Key arena, a differential of the previous generated JS (snapshot of gen/js
+  before the change) against the new one, side by side as D337's: every
+  vm-test case (3,000 mutations, 150 oracle schemas, seed 7) and the session
+  stress set (60), under whole, 1-byte, random 1..7 (quantum 2) and random
+  1..300 windows, known and unknown length: 214,085 runs, 0 differences in
+  the whole out array. Key arena at the end, summed: known length
+  68,161,735 → 53,622,642 bytes; unknown length 156,571,547,618 →
+  67,481,411 (it was the input limit for every run); smaller in 106,297
+  runs, larger in 78 (the valid machinery's doubling from a smaller start,
+  at most about 2× the bytes read). `vmsession-test` gains "key arena
+  growth (D342)": a 2,582-byte map of 60 42-byte keys under 7-byte windows,
+  known and unknown length, gives the buffer's out array with an arena of
+  at most twice the message.
+- Idle per-session memory: N sessions that have each received 9 bytes
+  (`{"events": [_`) of an unknown-length stream and then stall, RSS delta per
+  session (Apple M1 Pro, macOS 14.6.1, rustc 1.92.0 release, Node 24.6.0,
+  N = 500; method in bench/README.md "Idle stream session memory"):
+
+  | compiled `input_bytes` | Rust before | Rust after | JS before (RSS / ArrayBuffers) | JS after |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 100,000 | 146.3 KiB | 18.6 KiB | 160.8 / 113.8 KiB | 35.1 / 16.3 KiB |
+  | 1,500,000 (default) | 1,463.1 KiB | 18.7 KiB | 1,485.3 / 1,480.9 KiB | 50.5 / 16.3 KiB |
+  | 4,000,000 | 3,109.2 KiB | 18.8 KiB | 3,144.9 / 3,922.3 KiB | 50.9 / 16.3 KiB |
+
+  Rust: `validate_reader_async` with a 4096-byte chunk, each future polled
+  three times. JS: `pushValidator(schema, undefined, rule)` fed the 9 bytes.
+  At the default 1024-session cap, idle peers now hold about 19 MiB (Rust)
+  instead of about 1.4 GiB.
+- Chunk: host/rust/tests/async_sources.rs, `usize::MAX` and 2³¹ on all eight
+  driver entry points.
+
+**Alternatives**:
+- f8: keep `non_shortest` under `deterministic` (D284's reading). Rejected:
+  the RFC says not well-formed, and P9.10's protocol review found the two
+  rows of profiles.md disagreeing over it.
+- Bignums, the extended model (numeric equivalence): `1` and `2(h'01')`
+  duplicates, which needs bignums in the EC canonical form (kin's duplicate
+  check changes verdicts) and CDDL literals matching bignums by value,
+  against RFC 8610's `int` / `biguint` split. Or keep the JS collapse and
+  document it: the decoder and the check would still disagree.
+- Key arena: a lower default input limit or `max_live` (moves the cost to
+  users); grow at each write site (several sites cannot suspend there; the
+  window bound covers them all at the step's start).
+
+**Size** (D303's rule of thumb: under 1 KB with a measured gain), on main
+d1f2da9, minified / gzip / brotli bytes, esbuild 0.28.2:
+- `snug/writer` +168 / +46 / +83 (bignumOf, the writer's Tagged-bignum
+  branch, read-arg's `f8` test); `snug/sources` +120 / +39 / +135 (the arena
+  gate, the `f8` tests, the builder's Tagged bignum); `snug/sequence`
+  +177 / +48 / +85; `snug` +63 / +16 / +9; `runtime` +46 / +8 / +73;
+  `all-runtime` +177 / +66 / +55; `snug/schema` −36 / −29 / −9;
+  `snug/compile` full −39 / −11 / −135.
+- Over their caps: `snug/writer` brotli (17,545 > 17,467) and `snug/sources`
+  brotli (57,572 > 57,468), raised to ceil(measurement × 1.02): 17,896 and
+  58,724 (tools/size/budget.json).
+- [ ] **Signed off** (manager)
 
 ## Findings
 

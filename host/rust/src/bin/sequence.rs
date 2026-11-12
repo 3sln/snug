@@ -320,6 +320,9 @@ fn run_sequence(p: &[i32], pool: &[u8], rule: i32, lim: &[i32], input: &[u8], ki
 fn path(segs: &[Segment]) -> String {
     segs.iter().map(|s| match s {
         Segment::Index(i) => i.to_string(),
+        // an integer key's name is its decimal text here, a number in JS (pathText prints it bare);
+        // P9.16: a seeded host run reached one once the corpus grew
+        Segment::Key(k) if k.parse::<i128>().is_ok() => k.clone(),
         Segment::Key(k) => format!("{:?}", k),
         Segment::AnyKey => "*".to_string(),
         Segment::Tag => "#tag".to_string(),

@@ -586,7 +586,7 @@ impl Schema {
     }
     /// Read a CBOR sequence from `reader` until EOF, each message validated against `rule`.
     pub fn read_sequence<R: Read>(&self, reader: R, rule: &str, options: &SequenceOptions) -> Result<SequenceReader<'_, R>, Error> {
-        if options.chunk == 0 {
+        if options.chunk == 0 || options.chunk > crate::api::MAX_CHUNK {
             return Err(Error::Usage("options"));
         }
         Ok(SequenceReader::new(self.sequence(rule, options)?, reader, options.chunk))
@@ -598,6 +598,9 @@ impl Schema {
 /// `Error::Source("read")` (also the last item). `Err(Error::SessionLimit)` when
 /// the live-session bound is reached (P9.7, D327).
 pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> Result<SequenceReader<'static, R>, Error> {
+    if options.chunk > crate::api::MAX_CHUNK {
+        return Err(Error::Usage("options"));
+    }
     Ok(SequenceReader::new(Sequence::new(options)?, reader, options.chunk.max(1)))
 }
 

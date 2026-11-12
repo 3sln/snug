@@ -458,7 +458,7 @@ pub fn pw(cb: &mut [u8], o: &mut [i32], x: i32, y: i32, depth: i32) -> i32 {
         return pw_bad(cb, o, y, CODE_NON_SHORTEST, x);
     }
     if major == 7 {
-        if ((ai == 24) && ((cb[(x + 1) as usize] as i32) < 32)) && ((o[(O_PROFILE) as usize] & PF_VALID) != 0) {
+        if (ai == 24) && ((cb[(x + 1) as usize] as i32) < 32) {
             return pw_bad(cb, o, y, CODE_MALFORMED, x);
         }
         return pw_leaf(cb, o, x, y);

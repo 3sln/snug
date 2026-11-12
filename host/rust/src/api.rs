@@ -165,6 +165,9 @@ impl ValidationOptions {
         }
     }
 }
+/// The largest driver read size (`chunk`): 2³¹ − 1 bytes. A larger one, or 0, is
+/// `Error::Usage("options")` (P9.16: it used to panic or reserve that much).
+pub(crate) const MAX_CHUNK: usize = i32::MAX as usize;
 fn failure(code: i32, reason: &'static str) -> Failure {
     Failure {
         code,
@@ -323,7 +326,7 @@ impl Schema {
         quantum: u32,
     ) -> Result<Result<(), Failure>, Error> {
         let r = self.rule(rule).map_err(Error::Validation)?;
-        if chunk == 0 || quantum > i32::MAX as u32 {
+        if chunk == 0 || chunk > MAX_CHUNK || quantum > i32::MAX as u32 {
             return Err(Error::Usage("options"));
         }
         schema::validate_blob(
@@ -358,7 +361,7 @@ impl Schema {
         fail_fast: bool,
     ) -> Result<Result<(), Failure>, Error> {
         let r = self.rule(rule).map_err(Error::Validation)?;
-        if chunk == 0 {
+        if chunk == 0 || chunk > MAX_CHUNK {
             return Err(Error::Usage("options"));
         }
         schema::validate_reader(self.program.host(), r, reader, &options.host(), chunk, 0, fail_fast)

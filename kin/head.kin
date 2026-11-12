@@ -58,7 +58,10 @@
       (if (== w 4)
         (do (set v (be32 b p))
             (set short (== (ushr v 16) 0))))
-      (if short (return (fail o pos CODE_NON_SHORTEST)))
+      (if short
+        (do (comment "f8 below 32 is not well-formed (RFC 8949 §3.3, D342)")
+            (if (== (u8 b pos) 248) (return (fail o pos CODE_MALFORMED)))
+            (return (fail o pos CODE_NON_SHORTEST))))
       (iset o O_HI 0)
       (iset o O_LO v)
       (return (+ p w)))))

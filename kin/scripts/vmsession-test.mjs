@@ -332,9 +332,27 @@ let growOk = false, growText = '';
   growText = `S ${s0} words after the first step (known length ${a.firstS}, unknown ${u.firstS}), ${a.sWords} / ${u.sWords} at the end; out == the buffer's`;
   if (!growOk) fail(`recursive arena growth (D337): ${growText}; ${a.error ?? ''} ${u.error ?? ''} want ${want} got ${a.out} | ${u.out}`);
 }
+// D342: the key arena grows with the input read too. It used to be sized for the whole message at the start: for an
+// unknown length the input limit's, 1,500,000 bytes, however little arrived.
+let kaOk = false, kaText = '';
+{
+  const k = compile('r = { * tstr => uint }', { limits: { items: 1 << 20, entries: 1 << 20 } });
+  programs.push({ P: k.program, B: k.pool, label: 'D342 long keys' });
+  const msg = [0xb8, 60];
+  for (let i = 0; i < 60; i++) { msg.push(0x78, 40); for (let j = 0; j < 40; j++) msg.push(j === 0 ? 0x61 + (i >> 4) : j === 1 ? 0x61 + (i & 15) : 0x7a); msg.push(i & 15); }
+  const c = { prog: programs.length - 1, rule: k.rules.indexOf('r'), bytes: Uint8Array.from(msg) };
+  const lim = Int32Array.from([1, 0, -1, -1, -1, -1, -1, -1, 0, 0, -1]);
+  const want = buffer(c, lim), n = c.bytes.length;
+  const pol = { kind: 2, w: 7, q: 0, seed: 11, k: 0 };
+  const a = runSession(k.program, k.pool, c.rule, lim, c.bytes, pol), u = runUnknown(k.program, k.pool, c.rule, lim, c.bytes, pol);
+  kaOk = !a.error && !u.error && want.startsWith('0 ') && a.out === want && u.out === want && a.kaBytes <= 2 * n && u.kaBytes <= 2 * n;
+  kaText = `${n}-byte map of 60 42-byte keys: key arena ${a.kaBytes} bytes (known length) / ${u.kaBytes} (unknown) at the end; out == the buffer's`;
+  if (!kaOk) fail(`key arena growth (D342): ${kaText}; ${a.error ?? ''} ${u.error ?? ''} want ${want} got ${a.out} | ${u.out}`);
+}
 
 const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
 line(growOk, `recursive arena growth (D337): a 202-item recursive-group array under 7-byte windows: ${growText}`);
+line(kaOk, `key arena growth (D342): under 7-byte windows, a ${kaText}`);
 const nStress = cases.filter(c => c.stress).length;
 line(agree === runs.length, `session == buffer driver: ${agree}/${runs.length} runs give vm-validate's whole out array, over ${cases.length - nStress} vm-test cases (${MUTATIONS} mutations, ${SCHEMAS} oracle schemas, seed ${SEED}; ${nSpan} span cases are not sessions) and ${nStress} stress cases`);
 console.log(`  info runs: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}`);

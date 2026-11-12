@@ -181,7 +181,7 @@ impl Schema {
         quantum: u32,
     ) -> Result<Result<(), Failure>, Error> {
         let r = self.rule(rule).map_err(Error::Validation)?;
-        if chunk == 0 || quantum > i32::MAX as u32 {
+        if chunk == 0 || chunk > crate::api::MAX_CHUNK || quantum > i32::MAX as u32 {
             return Err(Error::Usage("options"));
         }
         validate_blob(self.program().host(), r, blob, &options.host(), chunk, quantum as i32)
@@ -205,7 +205,7 @@ impl Schema {
         fail_fast: bool,
     ) -> Result<Result<(), Failure>, Error> {
         let r = self.rule(rule).map_err(Error::Validation)?;
-        if chunk == 0 || quantum > i32::MAX as u32 {
+        if chunk == 0 || chunk > crate::api::MAX_CHUNK || quantum > i32::MAX as u32 {
             return Err(Error::Usage("options"));
         }
         validate_reader(self.program().host(), r, source, &options.host(), chunk, quantum as i32, fail_fast)
@@ -224,7 +224,7 @@ impl Schema {
         rule: &str,
         options: &SequenceOptions,
     ) -> Result<AsyncSequenceReader<'_, S>, Error> {
-        if options.chunk == 0 {
+        if options.chunk == 0 || options.chunk > crate::api::MAX_CHUNK {
             return Err(Error::Usage("options"));
         }
         Ok(AsyncSequenceReader::new(self.sequence(rule, options)?, source, options.chunk))
@@ -235,6 +235,9 @@ impl Schema {
 /// CBOR sequence read until EOF.
 /// `Err(Error::SessionLimit)` when the live-session bound is reached (P9.7, D327).
 pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &SequenceOptions) -> Result<AsyncSequenceReader<'static, S>, Error> {
+    if options.chunk > crate::api::MAX_CHUNK {
+        return Err(Error::Usage("options"));
+    }
     Ok(AsyncSequenceReader::new(Sequence::new(options)?, source, options.chunk.max(1)))
 }
 

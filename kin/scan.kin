@@ -185,9 +185,9 @@
            "argument passed the head check (O_LO is the value).")
   (if (and (>= ai 20) (<= ai 22)) (return (+ pos 1)))
   (let [pf (ia o O_PROFILE)]
-    (comment "RFC 8949 §3.3 / Appendix F: f8 with a value below 32 is not well-formed")
-    (if (and (== ai 24) (and (!= (bit-and pf (bit-or PF_UNDEFINED (bit-or PF_VALID PF_VREL))) 0) (< (ia o O_LO) 32)))
-      (return (fail o pos CODE_MALFORMED)))
+    (comment "RFC 8949 §3.3 / Appendix F: f8 with a value below 32 is not well-formed,"
+             "under every profile (D342; read-arg answers the same below 24)")
+    (if (and (== ai 24) (< (ia o O_LO) 32)) (return (fail o pos CODE_MALFORMED)))
     (if (and (< ai 24) (!= (bit-and pf PF_UNDEFINED) 0)) (return (+ pos 1)))
     (if (and (== ai 24) (!= (bit-and pf PF_UNDEFINED) 0)) (return (+ pos 2)))
     (return (fail o pos CODE_SIMPLE))))

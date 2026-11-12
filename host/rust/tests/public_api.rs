@@ -693,3 +693,33 @@ fn group_arena_grows_and_group_limit_at_explicit_cap() {
         "group_limit"
     );
 }
+
+#[test]
+fn d342_f8_malformed_and_bignum_keys_distinct() {
+    // RFC 8949 §3.3: f8 below 32 is not well-formed under every preset
+    for h in ["f800", "f805", "f817", "f818", "f81f"] {
+        for o in [DecodeOptions::default(), DecodeOptions::deterministic(), DecodeOptions { top: Top::Any, ..DecodeOptions::bindle() }] {
+            assert_eq!(decode(&unhex(h), &o).unwrap_err().code(), "malformed", "{h}");
+        }
+    }
+    // RFC 8949 §5.6.1: 1 and 2(h'01') are distinct keys; decode keeps the bignum's bytes
+    let m = decode(&unhex("a20100c2410101"), &DecodeOptions::default()).unwrap();
+    assert_eq!(
+        m,
+        Value::Map(vec![
+            (Value::Uint(1), Value::Uint(0)),
+            (Value::BigInt { negative: false, magnitude: vec![1] }, Value::Uint(1)),
+        ])
+    );
+    // and encodes it as its integer in preferred serialization
+    let one = Value::BigInt { negative: false, magnitude: vec![0, 1] };
+    assert_eq!(encode(&one, &EncodeOptions::default()).unwrap(), vec![1]);
+    // the duplicate check agrees
+    let s = Schema::compile("r = { * any => any }", &CompileOptions::default()).unwrap();
+    let mut scratch = Scratch::new();
+    s.validate(&unhex("a20100c2410101"), "r", &mut scratch).unwrap();
+    assert_eq!(
+        s.validate(&unhex("a2c2410100c2410101"), "r", &mut scratch).unwrap_err().reason,
+        "cbor/duplicate_key"
+    );
+}

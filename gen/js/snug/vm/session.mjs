@@ -27,8 +27,10 @@ export function vmsWords(p) {
 }
 
 export function vmsArena(p, limits, total) {
-    // Bytes of the key arena (BytesW) for a message of `total` bytes.
-    return vmsArenaBytes(p, limits, total);
+    // Bytes of the key arena (BytesW) a session on a message of `total` bytes
+    // starts with: at most 256 (D342). vms-step asks for more (VMS_GROW,
+    // vms-grow-arena) as the input it reads grows, up to vms-arena-bytes.
+    return imin(vmsArenaBytes(p, limits, total), 256);
 }
 
 export function vmsInit(p, pool, rule, limits, s, ss, ka, total, quantum) {
@@ -57,7 +59,7 @@ export function vmsInit(p, pool, rule, limits, s, ss, ka, total, quantum) {
     if (ss.length < vmsSessionWords(p)) {
         return -2;
     }
-    if (ka.length < vmsArenaBytes(p, limits, total)) {
+    if (ka.length < vmsArena(p, limits, total)) {
         return -2;
     }
     const nf = nframes(p);
@@ -75,7 +77,8 @@ export function vmsInit(p, pool, rule, limits, s, ss, ka, total, quantum) {
     ss[SS_PEND] = (SS_HDR + (nf * FW)) + (3 * nf);
     ss[SS_CHN] = -1;
     ss[SS_ATOP] = 0;
-    ss[SS_ABYTES] = ka.length;
+    // the key arena's bound (D342: ka itself may start smaller)
+    ss[SS_ABYTES] = vmsArenaBytes(p, limits, total);
     ss[SS_PROF] = s[O_PROFILE];
     return 0;
 }
@@ -861,6 +864,23 @@ export function vmsRun(p, pool, b, s, ss, ka, out, base, ext, vs, cb) {
     }
     if (base < 0) {
         return -1;
+    }
+    // D342: the key arena grows with the input read. Every key it holds is a
+    // disjoint span of the message read so far, and a copy is made only of
+    // bytes in a window, so the window's end bounds what this step can write
+    // (the valid machinery's keys ask for themselves, vgrow). Nothing has
+    // changed yet: the host grows ka and steps again.
+    const an = imin(ss[SS_ABYTES], base + b.length);
+    if (an > ka.length) {
+        let g = imin(ss[SS_ABYTES], 2 * ka.length);
+        if (g < an) {
+            g = an;
+        }
+        ss[SS_GW] = 0;
+        ss[SS_GB] = 0;
+        ss[SS_GS] = 0;
+        ss[SS_GA] = g;
+        return VMS_GROW;
     }
     if (ss[SS_UNK] === 1) {
         pendDrop(ss, base + b.length);

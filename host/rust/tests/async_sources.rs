@@ -560,6 +560,22 @@ fn public_async_forms_match_the_sync_ones() {
     assert!(matches!(schema.read_sequence_async(&[][..], "nope", &SequenceOptions::default()), Err(Error::Usage("unknown_rule"))));
     let zero = SequenceOptions { chunk: 0, ..SequenceOptions::default() };
     assert!(matches!(schema.read_sequence_async(&[][..], "m", &zero), Err(Error::Usage("options"))));
+    // P9.16: a chunk above 2^31 - 1 is misuse, never a panic or a huge reservation
+    for chunk in [usize::MAX, (i32::MAX as usize) + 1] {
+        let mut empty: &[u8] = &[];
+        let (e, _) = block_on(schema.validate_reader_async(&mut empty, "m", &v, chunk, 0, false));
+        assert_eq!(e.unwrap_err(), Error::Usage("options"));
+        let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "m", &v, chunk, 0));
+        assert_eq!(e.unwrap_err(), Error::Usage("options"));
+        let mut empty: &[u8] = &[];
+        assert_eq!(schema.validate_reader(&mut empty, "m", &v, chunk, false).unwrap_err(), Error::Usage("options"));
+        assert_eq!(schema.validate_blob(&BytesBlob(&[]), "m", &v, chunk, 0).unwrap_err(), Error::Usage("options"));
+        let big = SequenceOptions { chunk, ..SequenceOptions::default() };
+        assert!(matches!(schema.read_sequence_async(&[][..], "m", &big), Err(Error::Usage("options"))));
+        assert!(matches!(snug::read_sequence_async(&[][..], &big), Err(Error::Usage("options"))));
+        assert!(matches!(schema.read_sequence(&[][..], "m", &big), Err(Error::Usage("options"))));
+        assert!(matches!(snug::read_sequence(&[][..], &big), Err(Error::Usage("options"))));
+    }
 
     struct Short;
     impl AsyncBlob for Short {

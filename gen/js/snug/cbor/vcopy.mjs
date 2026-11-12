@@ -479,7 +479,7 @@ export function pw(cb, o, x, y, depth) {
         return pwBad(cb, o, y, CODE_NON_SHORTEST, x);
     }
     if (major === 7) {
-        if (((ai === 24) && (cb[x + 1] < 32)) && ((o[O_PROFILE] & PF_VALID) !== 0)) {
+        if ((ai === 24) && (cb[x + 1] < 32)) {
             return pwBad(cb, o, y, CODE_MALFORMED, x);
         }
         return pwLeaf(cb, o, x, y);

@@ -194,8 +194,9 @@ pub fn scan_simple(o: &mut [i32], pos: i32, ai: i32) -> i32 {
         return pos + 1;
     }
     let pf: i32 = o[(O_PROFILE) as usize];
-    // RFC 8949 §3.3 / Appendix F: f8 with a value below 32 is not well-formed
-    if (ai == 24) && (((pf & (PF_UNDEFINED | (PF_VALID | PF_VREL))) != 0) && (o[(O_LO) as usize] < 32)) {
+    // RFC 8949 §3.3 / Appendix F: f8 with a value below 32 is not well-formed,
+    // under every profile (D342; read-arg answers the same below 24)
+    if (ai == 24) && (o[(O_LO) as usize] < 32) {
         return fail(o, pos, CODE_MALFORMED);
     }
     if (ai < 24) && ((pf & PF_UNDEFINED) != 0) {

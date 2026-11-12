@@ -99,6 +99,18 @@ These matter only to users of pre-release builds from this repository.
   `Result<Session, sessions::SessionError>`; `read_sequence` and
   `read_sequence_async` return `Result<_, Error>`; `Error` and
   `SourceError` gain `SessionLimit` (D327).
+- `f8` followed by a byte below `0x20` is `malformed` under every preset,
+  as RFC 8949 §3.3 says ("Such sequences are not well-formed"). The
+  `deterministic` and `bindle` presets used to answer `non_shortest` (below
+  24) or, under `bindle`, `simple` (D342, amends D284).
+- `[js]` `[wasm-sdk]` A bignum outside preferred serialization (leading
+  zeroes, or a value major type 0/1 can hold; accepted under `valid` only)
+  decodes to `Tagged { tag: 2 | 3, value: Uint8Array }` of its exact bytes,
+  not to a number or bigint: RFC 8949 §5.6.1 makes it a data item distinct
+  from the integer, as the duplicate-key check and CDDL matching already
+  treated it. A map with keys `1` and `2(h'01')` now decodes instead of
+  throwing `unsupported`. Encode writes such a `Tagged` as its integer
+  (D342).
 
 ### Changed
 
@@ -130,3 +142,11 @@ These matter only to users of pre-release builds from this repository.
   reserving the whole message's bound up front (D337).
 - `[rust]` The unknown-length reader no longer panics when a positive
   quantum yields after the end (D331).
+- A stream session's key arena grows with the input read instead of being
+  sized for the input limit: an idle unknown-length session holds about
+  19 KiB (Rust) / 50 KiB (JS) instead of about 1.4 MiB at the default
+  1,500,000-byte limit (D342).
+- `[rust]` A driver `chunk` above 2³¹ − 1 is `Error::Usage("options")`; it
+  used to panic (`capacity overflow`) or reserve that much (P9.16).
+- `[rust]` A decoded decimal fraction whose mantissa is a bignum outside
+  preferred serialization stays a `Value::Tag`, as in JS (D342).
