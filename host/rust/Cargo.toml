@@ -26,8 +26,8 @@ include = [
 
 # Assembled by kin/scripts/rust-crate into .cache/snug-rs/: this manifest,
 # host/rust/src/*, gen/rust/snug/** under src/snug/ with generated `mod`
-# files, and the repository's README, LICENSE, THIRD_PARTY_NOTICES and
-# CHANGELOG. Nothing here is built in place.
+# files, host/rust/README.md as README.md (`readme`), and the repository's
+# LICENSE, THIRD_PARTY_NOTICES and CHANGELOG. Nothing here is built in place.
 
 [lib]
 path = "src/lib.rs"
