@@ -407,9 +407,8 @@ pub(crate) fn num_val(a: &[u8], p: i32, e: i32, t: &mut [i32], base: i32) -> i32
         if ra == (q + 1) {
             return fail(t, E_SYNTAX, ra);
         }
-        if v1 > v2 {
-            return fail(t, E_RANGE, p - 2);
-        }
+        // v1 > v2 is valid ABNF (RFC 5234 §4) and an empty range: it matches
+        // nothing, as the TERM test does by itself
         let xr: i32 = new_term(t, v1, v2, -1, -1);
         if xr < 0 {
             return -1;
@@ -564,8 +563,16 @@ pub(crate) fn repetition(a: &[u8], p: i32, e: i32, t: &mut [i32], depth: i32) ->
         if hi == BIG {
             hi = -1;
         }
+        // m < n is valid ABNF (RFC 5234 §4): no count is both, so it matches
+        // nothing -- an empty TERM, never a REP (whose nullable-element
+        // minimum would otherwise drop to 0, `rep-mins`)
         if (hi >= 0) && (hi < lo) {
-            return fail(t, E_REPEAT, p);
+            let z: i32 = new_term(t, 1, 0, -1, -1);
+            if z < 0 {
+                return -1;
+            }
+            t[(H_RET) as usize] = z;
+            return r;
         }
         if !((lo == 1) && (hi == 1)) {
             let x: i32 = new_node(t, K_REP, t[(H_RET) as usize], lo, hi);

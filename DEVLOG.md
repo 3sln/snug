@@ -6120,10 +6120,17 @@ reopen this.
     with RFC 7405's `%s`/`%i` strings and RFC 9165's LF-or-CRLF newline.
   - The start is the controller's leading element. The brief said "the first
     rule", but RFC 9165 §3 and Figures 3–5 lead with an element.
-  - Five leniencies, each only widening what is accepted: the start may be
-    any alternation; the text's end ends a line; a comment may hold any
-    character but CR and LF; whitespace may precede the start.
-  - The fifth is a **snug extension beyond RFC 9165**: a controller that
+  - Six leniencies, each only widening what is accepted:
+    - the start may be any alternation;
+    - the text's end ends a line;
+    - a comment may hold any character but CR and LF (RFC 5234 §4:
+      `comment = ";" *(WSP / VCHAR) CRLF`);
+    - whitespace may precede the start;
+    - an `=/` may come before its rule's `=` (RFC 5234 §3.3 speaks of
+      "later rule definitions adding to the set of alternatives"; the set
+      is the same in any order);
+    - rule-first controllers, below.
+  - The last is a **snug extension beyond RFC 9165**: a controller that
     begins with a rule starts at that rule. This was the brief's reading;
     the Rust cddl crate does the same and Ruby refuses.
     - It applies only where the element-first reading fails. kin detects
@@ -6137,8 +6144,26 @@ reopen this.
   - Core rules are not imported (RFC 9165 §3).
   - Refused at compile time as `control_value`, with the ABNF line and
     column in the message: prose-val `<…>`, syntax errors, undefined rules,
-    a duplicate `=`, `=/` with no `=`, `n*m` with m < n, a reversed num-val
-    range, nesting past 256, a non-string or non-UTF-8 controller.
+    a duplicate `=` (RFC 5234 gives it no meaning; §3.3's `=/` is how a
+    rule gains alternatives), `=/` with no `=` (§3.3: `oldrule =/
+    additional-alternatives`), nesting past 256 (a resource limit), a
+    non-string or non-UTF-8 controller.
+  - *Verification pass against RFC 5234 and RFC 7405, 2026-11-12* (the texts
+    were added in dd202f7). Two refusals were stricter than RFC 5234 §4,
+    whose grammar admits both, and are now accepted:
+    - `n*m` with m < n matches nothing (§3.6: "at least <a> and at most
+      <b> occurrences"). It compiles to an empty terminal, never to a REP,
+      whose nullable-element minimum would otherwise drop to 0.
+    - A num-val range whose first value is above its last is an empty range.
+    Everything else matched the texts: §4's rulelist, rule, defined-as,
+    c-wsp, c-nl, comment, repeat, element, char-val, num-val (b, d and x
+    case-insensitive, as char-vals in the ABNF of ABNF, HEXDIG too) and
+    prose-val; §3.6's defaults of 0 and infinity; §2.1's case-insensitive
+    rule names; §2.3's US-ASCII-only case folding; and RFC 7405 §2.1/§2.2,
+    where no prefix is the same as `%i` and `%s` is case-sensitive.
+    Hand vectors were added in kin and the oracle: the two forms, a
+    nullable m < n, the RFC 7405 `aBc` examples, §3.5's precedence example,
+    c-wsp around `=`/`=/`, and an indented comment line.
   - The verdict is language membership. Alternation is union, not
     first-match; left recursion and ε are allowed.
   - `.abnf` reads Unicode scalars: a byte-string target that is not UTF-8
@@ -8723,9 +8748,12 @@ review.
       be bounded and cheap.
   - **Open.**
     - The cap is not in the source key, by design: it is a runtime bound.
-    - RFC 5234 and RFC 7405 are not in corpus/rfc/. Their grammar was
+    - ~~RFC 5234 and RFC 7405 are not in corpus/rfc/. Their grammar was
       written from RFC 9165's references and knowledge; quotations
-      unverified.
+      unverified.~~ *Closed 2026-11-12:* the texts were added (dd202f7),
+      and the grammar, quotations and claims were verified against them
+      (D334, "Verification pass"). Two over-strict refusals were fixed:
+      `n*m` with m < n, and a reversed num-val range.
     - The matcher runs in JS inside the wasm SDK. In-wasm execution would
       grow the binary.
 

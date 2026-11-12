@@ -18,7 +18,7 @@
 //   symbolsOf(bytes, mode) -> number[] | null   (mode 'text': scalars, null if not UTF-8;
 //                                                mode 'bytes': bytes)
 
-export const CODES = ['syntax', 'prose', 'undefined', 'duplicate', 'incremental', 'repeat', 'range', 'nesting', 'utf8'];
+export const CODES = ['syntax', 'prose', 'undefined', 'duplicate', 'incremental', 'nesting', 'utf8'];
 
 class Refusal extends Error { constructor(code) { super(code); this.code = code; } }
 const refuse = code => { throw new Refusal(code); };
@@ -117,7 +117,8 @@ function parseRepetition(toks, pos, depth) {
       max = b === '' ? Infinity : num(b, 10);
     } else min = max = num(tok.text, 10);
     if (max === BIG) max = Infinity;
-    if (max < min) refuse('repeat');
+    // m < n is valid ABNF (RFC 5234 §4's repeat); no count satisfies both, so it is
+    // an empty language (the rep case below)
     const [item, p] = parseElement(toks, pos + 1, depth);
     if (min === 1 && max === 1) return [item, p];
     return [{ t: 'rep', min, max, item }, p];
@@ -147,7 +148,7 @@ function parseElement(toks, pos, depth) {
     const body = tok.text.slice(2);
     if (body.includes('-')) {
       const [a, b] = body.split('-').map(s => num(s, base));
-      if (a > b) refuse('range');
+      // a > b is valid ABNF and an empty range: the term test matches nothing
       return [{ t: 'term', ranges: [[a, b]] }, pos + 1];
     }
     const items = body.split('.').map(s => ({ t: 'term', ranges: [[num(s, base), num(s, base)]] }));
@@ -233,6 +234,7 @@ export function matchAbnf(g, sym) {
       case 'alt': { const out = new Set(); for (const x of node.items) for (const j of ends(x, i)) out.add(j); return out; }
       case 'seq': { let s = new Set([i]); for (const x of node.items) s = step(x, s); return s; }
       case 'rep': {
+        if (node.max < node.min) return new Set();   // no count is both at least min and at most max
         // S_k: the ends after exactly k repetitions; the answer is the union of S_min..S_max
         let s = new Set([i]);
         for (let k = 0; k < node.min; k++) {

@@ -104,18 +104,21 @@ can be built with `.cat` / `.det` (RFC 9165 Figures 3–5). It holds the start,
 then optionally a newline and a list of rules (RFC 9165 §3): `"date-time"
 .cat rfc3339` starts at `date-time`. The grammar is RFC 5234 §4 with RFC 7405:
 
-* rules, `=` and `=/` (incremental alternatives, in any order);
-  continuation lines (a line starting with a space or a tab); comments;
-* alternation `/`, concatenation, repetition `n`, `n*m`, `*`, `n*`, `*m`;
-  groups `( )` and options `[ ]`;
-* char-vals `"…"` (case-insensitive, as `%i"…"`), case-sensitive `%s"…"`
-  (RFC 7405), and num-vals `%b` `%d` `%x`: a value, a range `%x30-39` or a
-  concatenation `%x0D.0A`;
+* rules, `=` and `=/` (incremental alternatives); continuation lines (a line
+  starting with a space or a tab); comments;
+* alternation `/`, concatenation, repetition `n`, `n*m`, `*`, `n*`, `*m`
+  (defaults 0 and infinity, RFC 5234 §3.6); groups `( )` and options `[ ]`.
+  `n*m` with m < n is valid ABNF and matches nothing;
+* char-vals `"…"` are case-insensitive, the same as `%i"…"` (RFC 7405 §2.1:
+  "having no prefix means that the string is case insensitive"); `%s"…"` is
+  case-sensitive; and num-vals are `%b` `%d` `%x`, each a value, a range
+  `%x30-39` or a concatenation `%x0D.0A`. A range whose first value is above
+  its last is valid and matches nothing;
 * rule names are case-insensitive; newlines are LF or CR LF (RFC 9165 §3).
 
 Exactly as RFC 9165 §3 says, **core rules are not imported**: `DIGIT`,
 `ALPHA` and the rest must be defined in the controller (`.cat` a shared
-block). Five leniencies, each only widening what is accepted:
+block). Six leniencies, each only widening what is accepted:
 
 1. The start may be any alternation (`1*DIGIT`), not only one element.
 2. **A snug extension beyond RFC 9165:** a controller that begins with a rule
@@ -126,8 +129,12 @@ block). Five leniencies, each only widening what is accepted:
    gate's oracle tries element-first first and agrees with kin on every
    generated and mutated grammar.
 3. The end of the text ends the last line.
-4. A comment may hold any character but CR and LF.
+4. A comment may hold any character but CR and LF. RFC 5234 §4 allows only
+   `*(WSP / VCHAR)` in a comment.
 5. Whitespace may precede the start.
+6. An `=/` may come before its rule's `=`. RFC 5234 §3.3 describes "later
+   rule definitions adding to the set of alternatives", and the set is the
+   same either way.
 
 Refused at compile time with `control_value`, and the message gives the place
 as ABNF line and column (`(.abnf argument: prose-val (<...>) is not supported
@@ -136,10 +143,10 @@ at ABNF line 2, column 11)`):
 * **prose-val `<…>`**;
 * a syntax error;
 * an undefined rule;
-* a rule defined twice with `=`, or `=/` with no `=`;
-* `n*m` with m < n;
-* a num-val range with its first value above its last;
-* groups nested deeper than 256;
+* a rule defined twice with `=` (RFC 5234 gives a second `=` no meaning;
+  §3.3's `=/` is how a rule gains alternatives), or `=/` with no `=` (§3.3:
+  `oldrule =/ additional-alternatives`);
+* groups nested deeper than 256 (a resource limit);
 * a controller that is not a string, or is not UTF-8.
 
 **The match** is ABNF's meaning: the whole string must be in the language of

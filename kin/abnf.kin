@@ -20,8 +20,10 @@
 ;; no newline; a comment may hold any scalar but CR and LF; leading c-wsp before
 ;; the start. Refused (a status
 ;; code, at an offset): a syntax error, prose-val, an undefined rule (no core
-;; rules are imported -- RFC 9165 §3), a duplicate `=`, `=/` without `=`,
-;; `n*m` with m < n, a num-val range lo > hi, groups nested past MAX_NEST.
+;; rules are imported -- RFC 9165 §3), a duplicate `=`, `=/` without `=`
+;; (RFC 5234 §3.3: `oldrule =/ ...`), groups nested past MAX_NEST (a limit).
+;; `n*m` with m < n and a num-val range lo > hi are valid ABNF that match
+;; nothing (E_REPEAT, E_RANGE are no longer answered).
 ;;
 ;; THE MATCH is language membership (RFC 5234 is a CFG, not a PEG): an Earley
 ;; recognizer with the Aycock-Horspool fix for nullable symbols, over the
@@ -356,7 +358,8 @@
       (do (let [ra (digits a (+ q 1) e t base)
                 v2 (ia t H_VAL)]
             (if (== ra (+ q 1)) (return (fail t E_SYNTAX ra)))
-            (if (> v1 v2) (return (fail t E_RANGE (- p 2))))
+            (comment "v1 > v2 is valid ABNF (RFC 5234 §4) and an empty range: it matches"
+                     "nothing, as the TERM test does by itself")
             (let [xr (new-term t v1 v2 (neg 1) (neg 1))]
               (if (< xr 0) (return (neg 1)))
               (iset t H_RET xr)
@@ -448,7 +451,14 @@
       (if (< r 0) (return (neg 1)))
       (if rep
         (do (if (== hi BIG) (set hi (neg 1)))
-            (if (and (>= hi 0) (< hi lo)) (return (fail t E_REPEAT p)))
+            (comment "m < n is valid ABNF (RFC 5234 §4): no count is both, so it matches"
+                     "nothing -- an empty TERM, never a REP (whose nullable-element"
+                     "minimum would otherwise drop to 0, `rep-mins`)")
+            (if (and (>= hi 0) (< hi lo))
+              (do (let [z (new-term t 1 0 (neg 1) (neg 1))]
+                    (if (< z 0) (return (neg 1)))
+                    (iset t H_RET z)
+                    (return r))))
             (if (not (and (== lo 1) (== hi 1)))
               (do (let [x (new-node t K_REP (ia t H_RET) lo hi)]
                     (if (< x 0) (return (neg 1)))
