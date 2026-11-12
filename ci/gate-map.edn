@@ -25,7 +25,8 @@
 ;; Setup: size, watchdog-test, valid-test's cbor2 arm and runtime need
 ;; bench/compare/node_modules (AGENTS.md "Worktrees"); wasm-sdk-test and
 ;; wasm-size need the pinned nightly and wasm-opt from bench/compare
-;; (kin/scripts/wasm-build); runtime needs Chrome and workerd
+;; (kin/scripts/wasm-build); wasm-package-test needs those plus workerd and
+;; Chrome (as runtime); runtime needs Chrome and workerd
 ;; (tools/runtime/README.md); node-oldest needs the engines Node via nvm and msrv
 ;; the rust-version toolchain via rustup (P9.18).
 {:gates
@@ -55,10 +56,12 @@
   rust-api-test-full {:cmd ["bb" "rust-api-test" "full"] :watchdog "rust-api-test-full" :caps [3600 7200]
                       :mode "full: the async differential at full scale (the release set)"}
   wasm-sdk-test    {:cmd ["bb" "wasm-sdk-test"] :caps [5400 10800]
-                    :doc "SKIPs without the pinned nightly: NOT RUN. In the release set only if O3 ships the SDK."}
+                    :doc "SKIPs without the pinned nightly: NOT RUN. In the release set: O3 ships the SDK (D338, D345)."}
   size             {:cmd ["bb" "size"] :caps [900 1800]}
   wasm-size        {:cmd ["bb" "wasm-size"] :caps [3600 7200]
                     :doc "the wasm SDK modules' bytes and gzip caps (D341); SKIPs without the pinned nightly or wasm-opt: NOT RUN"}
+  wasm-package-test {:cmd ["bb" "wasm-package-test"] :caps [3600 7200]
+                    :doc "@3sln/snug-wasm (D345): release modules, staged package, npm pack, consumer install, every loader, Workers recipe in workerd, Chrome; SKIPs without the pinned nightly, workerd or Chrome: NOT RUN"}
   watchdog-test    {:cmd ["bb" "watchdog-test"] :caps [300 600]}
   npm-test         {:cmd ["npm" "test"] :dir "host/js" :caps [1800 3600]
                     :doc "host/js's node --test suite, including the version-site test (P9.15)"}
@@ -78,7 +81,7 @@
                     :doc "cargo build, test and doctests of the assembled crate on rust-version (rustup); SKIPs without it: NOT RUN (P9.18)"}}
 
  ;; bb.edn tasks that are not gates
- :not-gates [gen emit bench-scan gates identity]
+ :not-gates [gen emit bench-scan gates identity wasm-release]
 
  :sets
  {;; docs/release-policy.md §4 step 4, in that order. A SKIP or a :blocked gate fails it.
@@ -87,7 +90,7 @@
              compile-test compile-fuzz
              nav-test write-test unicode-test abnf-test
              rust-api-test rust-api-test-full
-             wasm-sdk-test
+             wasm-sdk-test wasm-package-test
              size wasm-size watchdog-test
              npm-test rfc-corpus proptest
              node-oldest msrv runtime]

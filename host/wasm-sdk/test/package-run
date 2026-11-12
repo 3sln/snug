@@ -1,0 +1,20 @@
+#!/bin/sh
+# bb wasm-package-test (P9.17, D345): the @3sln/snug-wasm package.
+#   1. kin/scripts/wasm-release.mjs stages the release modules (.cache/release/wasm:
+#      snug.wasm, snug-compiler.wasm, SHA256SUMS, MANIFEST.json) with the pinned
+#      nightly and wasm-opt; without them it answers SKIP (exit 3) and so does this,
+#      loudly, exiting 0 and never claiming a pass
+#   2. host/wasm-sdk/test/package.test.mjs: the staged package (allowlist, links,
+#      metadata, the wasm bytes, types, every entry imported from a consumer dir)
+#   3. host/wasm-sdk/test/consumer.mjs: npm pack --dry-run and npm pack, the tarball
+#      installed into a scratch project, every loader, the Workers recipe in workerd
+#      (and wrangler's bundle when wrangler is on the PATH), Chrome
+# Nothing is published. Scratch: .cache/wasm-package-test/, removed after.
+[ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/../../../kin/scripts/watchdog.mjs" wasm-package-test -- sh "$0" "$@"   # P9.1 caps
+cd "$(dirname "$0")/../../.."
+node kin/scripts/wasm-release.mjs
+status=$?
+if [ "$status" -eq 3 ]; then echo "SKIP bb wasm-package-test -- the wasm toolchain or wasm-opt is missing; the package was NOT built or tested"; exit 0; fi
+if [ "$status" -ne 0 ]; then echo "FAIL kin/scripts/wasm-release.mjs exited $status"; exit "$status"; fi
+node --test --test-reporter=spec host/wasm-sdk/test/package.test.mjs || exit 1
+exec node host/wasm-sdk/test/consumer.mjs
