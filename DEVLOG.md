@@ -8786,11 +8786,15 @@ review.
   Before the P9.7 rebase the whole set passed on `74b903f` + this
   (vmsession, sequence, wasm-sdk, npm test included). No semantic change; no
   D-entry.
-- [ ] **P9.6b — One shared sans-IO core for the sync and async Rust
+- [x] **P9.6b — One shared sans-IO core for the sync and async Rust
   drivers** (coordinator, 2026-11-11), D335. It starts after P9.7 lands and
   must be done before P9.13, so the final review sees the deduplicated
   code. The full differential (async == sync == buffer) stays as the
   reference. Assigned to the P9.6 engineer.
+  *Done 2026-11-12, merged at `1ae0ad4`.* **Gate on main** (`1ae0ad4`, a
+  detached worktree; `bb gates check rust-api-test rust-api-test-full
+  vm-test`): all 4 ok (rust-api-test 31 s, full 257 s with the counts below,
+  vm-test 103 s; vm-test compiles `schema.rs` alone).
   *Built (2026-11-12, branch `p96-core`, on main with P9.7; D335):*
   `BlobCore`, `StreamCore` and `SeqPump`. The sync and async drivers are
   loops over them. Net 34 fewer lines in the drivers (three files, +310/−276,
