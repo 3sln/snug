@@ -6404,6 +6404,109 @@ an RFC-strict tool, and rule-first had no second implementation behind it.
   rule (spec is the default; other forms are options). The four
   RFC-sanctioned forms that stay on in both modes are each cited.
 
+### D341 — Binary-size audit before release: what was measured, what is cut, what needs a decision (P9.12 = P8.7; D303)
+**Decision** (P9.12 engineer, provisional): the audit covered every JS
+entry, the Rust crate (consumer binaries) and both wasm modules. The
+measurements and method are in
+[bench/size-audit.md](bench/size-audit.md), taken on main `b0c6d6b`. The
+audit found **no cut that is both free of behaviour change and worth
+landing in the JS bundles or the Rust crate**. The material reductions all
+trade something: public API, a safety net or speed. They are listed below
+for a decision, and no code or cap changes with this entry. The threshold
+for "worth landing" this late before the RC was at least about 1 KB min or
+0.5% of an entry's gzip, with no risk to the identity gates.
+
+Candidates, ranked by the bytes at stake:
+
+1. **wasm SDK runtime module at opt-level "s"** (needs a decision; it
+   reverses P7.9's opt-level 3 default). 350,573 → 262,030 B (−25%), gzip
+   135,876 → 106,372 (−22%). The cost is 1.06× geomean over d005's 58 rows
+   (validate 1.07×, view 1.12×, worst row 1.46×). At "z" it is −31% / −26%
+   gzip for 1.07× geomean, but validate is 1.18×. Behaviour is identical
+   (same source, same tests). *Recommendation:* "s".
+2. **wasm compiler module at opt-level "z"** (needs a decision). 348,920 →
+   174,005 B (−50%), gzip 111,314 → 70,554 (−37%). Compiling is 1.62×
+   slower warm (0.245 → 0.396 ms for each corpus contract). It is a
+   one-off per schema, and the fetch saved is larger than the time lost.
+   *Recommendation:* "z".
+3. **The verifier outside the bundles that never load a foreign Program**
+   (D319's largest item; needs an API decision). It is 27,079 B min / 9,311
+   gzip / 7,666 brotli in every entry holding `snug/schema` (17% of its
+   gzip), 48 KB of text in a Rust load-and-validate binary, and 46 KB of
+   wasm code. A synchronous `new Program(P, B)` / `fromSerialized` must
+   verify, so `snug/schema` keeps it whatever is done. The one design that
+   keeps the synchronous API and still saves bytes is a compile-only path:
+   Programs made by `compile()` in the same process are trusted and loaded
+   without `program/verify` (`snug/compile` full −27,420 min / −8,853 gzip
+   when the application does not also import `snug/schema`'s loaders). That
+   needs a new entry or class split. It also removes the check that catches
+   a compiler bug at load (compile-test still verifies every corpus
+   Program). *Recommendation:* defer past the RC. A table-driven rewrite of
+   the verifier (estimated 15–30% of it) is also deferred: every
+   corruption must keep its first refusal (word, check) for the
+   compile2-test gate, so the risk is high this late.
+4. **The full `snug/compile` entry (97.8 KB gzip).** About half of it is
+   `snug/schema` (the compiled Program is loaded and verified). The
+   compiler proper is about 143 KB min, roughly 44 KB gzip over an
+   application that already holds the runtime. No single compiler module
+   is removable. Loading `.regexp`/`.pcre` (`compile/regexp` + `glush`,
+   15.3 KB min) as a further lazy chunk would cut transfer only for schemas
+   without them. The `full` gate would not move, and kin's static imports
+   would need a host hook. *Deferred* (transfer-only, invasive).
+5. **D285's rejected cuts, re-checked after P8.5.** They are still
+   rejected for the same reasons. A lazy or separate `vcopy` would need an
+   await, and synchronous `validate` cannot have one. The refusal replay is
+   D280. A deterministic-only scanner duplicates the walk. Dropping the
+   VM's deterministic attempt costs 2.3–6.9× (D286). P8.5 changed the
+   group machines, not the canonical path.
+6. **Forced-tier support** (D319's question): a handful of `forced` tests
+   in `vm-array`, `vm-map`, `vm-eval`, `vm-session-*`, under 100 B min in
+   all. The forced-tier gate (C8, vm-test) needs it. Not cut. The legacy
+   budget schedule 1 is likewise still the forced generic path's (D254).
+7. **Duplicated code across kin units and host modules.** 14 alpha-
+   equivalent groups, 1.4 KB min in `all-runtime` (0.5%), and 31 groups /
+   2.7 KB min over everything including the compiler. Examples: twelve
+   one-line state accessors, `bytesInput` in two host modules (235 B), three
+   unsigned 64-bit compares (207 B), a second merge sort in the compiler
+   (386 B). gzip and brotli already fold most of this. *Not done*: below the
+   threshold, and each merge touches generated JS and Rust during the RC
+   landings.
+8. **Error-message strings.** 4.3 KB (2.9%) of `snug/schema`. They are
+   public behaviour (messages, option names). Not cut.
+9. **Generated-code patterns.** There are no large constant tables in any
+   runtime entry. kin's `x >>> n | 0` on an already-small int costs about
+   370 B min in `all-runtime`. That is kin's emitter, outside this
+   repository ("Found in kin" below).
+10. **Rust crate.** No monomorphization bloat: one closure appears twice,
+    and the generated code is not generic. Per-binary costs are in
+    bench/size-audit.md §2. Nothing to cut.
+11. **The reference-map-choice gap** (about 1.34× slower than before PEG) is
+    speed, not size. Noted only; it is left to the performance work
+    (discriminator-first dispatch, parked).
+12. **No gate on the wasm modules.** The SDK runtime module grew from
+    83,419 gzip (P7.9) to 135,876 (+63%) with nothing watching it. *Proposal*
+    (needs a decision, since the gate needs the nightly toolchain): give
+    `bb size` or `wasm-sdk-test` a wasm cap at measured + 2%, with a loud
+    SKIP when the toolchain is missing.
+13. **Dead code, by coverage.** The gates were run under
+    `NODE_V8_COVERAGE`. 116 of 1,954 functions were never called, but every
+    one that a bundle keeps has a call site, so none is dead. They are
+    paths the gates do not reach. The list (bench/size-audit.md §4) goes to
+    P9.13's reviewer as a coverage observation.
+
+**Caps:** unchanged. No entry shrank: on `b0c6d6b` every entry's gzip
+headroom was 0.0–2.1%, as the D-entries set it. D340 later re-set the
+`snug/abnf` caps.
+**Why**: the JS entries are close to the floor for what they do. What
+remains is either behaviour, a public-API shape, a gate's test mode, or
+compression-neutral repetition. The real byte wins are the wasm build
+profiles and the verifier's placement, and those are trade-offs for the
+manager and the owner.
+**Alternatives**: landing the micro-merges of item 7 anyway (−0.5% min,
+less in gzip, for generated-code churn during the RC); landing items 1–2
+without a decision (each reverses a recorded default and costs speed).
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -6528,6 +6631,10 @@ an RFC-strict tool, and rule-first had no second implementation behind it.
 - `kin.vfs/disk-vfs` lists one directory level, so sources are flat in `kin/`
   (the brief's `kin/cbor/*.kin` was not possible without a custom vfs) — known
   and documented in kin; ours to live with.
+- The JS target emits `(x >>> n) | 0` for an unsigned shift even when `x`
+  is a byte or other small non-negative int, so the `| 0` is redundant
+  (184 places, about 370 B min in `all-runtime`; D341 item 9) — REAL, minor
+  — size only. Suggest dropping the `| 0` when the operand's range is known.
 
 ## Open questions for the owner
 
@@ -9334,6 +9441,15 @@ review.
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
   after the code above is settled.
+  *Phase 1 done 2026-11-12 (D341; measurements in bench/size-audit.md):*
+  every JS entry, Rust consumer binaries and both wasm modules were
+  measured and attributed. No behaviour-free JS or Rust cut cleared the
+  threshold, so no code and no cap changed. The candidates needing a
+  decision went to the manager: the wasm runtime module at opt-level "s"
+  (−22% gzip, 1.06× slower), the wasm compiler module at "z" (−37% gzip,
+  1.62× slower compile), the verifier's placement (17% of `snug/schema`
+  gzip; needs an API change) and a wasm size gate. Not ticked until those
+  are decided or deferred.
 - [ ] **P9.13 — Final independent whole-library review** of the code,
   spec, docs and gates by a reviewer who did not build it. Blocking
   findings are fixed before the RC is declared.
