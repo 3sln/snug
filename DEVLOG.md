@@ -8065,8 +8065,34 @@ review.
     runner, the PEG oracle tests, `watchdog-test`, `check` and `drift`.
   - `proptest`, 2 min, P1–P5: 108,530 cases, no failure.
   - `size`: ok after the compile full min cap raise (D336).
-- [ ] **P9.4 — PEG open problem 1.** A recursive Program's session should
+- [x] **P9.4 — PEG open problem 1.** A recursive Program's session should
   not reserve the whole-message arena bound when a message starts.
+  *Done 2026-11-12 (D337):* a recursive Program's session arena now grows
+  to §9.4's bound for the bytes read so far. Every arena gate takes the
+  furthest offset its work reads, and growth requests are capped at the
+  whole message's bound.
+  - The differential against D314's code covers every recursive-Program
+    vm-test case plus deep generated messages, under 6 window policies
+    including unknown length: 1050 runs, 0 differences in the whole out
+    array.
+  - Peak S summed over those runs went from 789,139,954 words to
+    12,814,776. It was never larger.
+  - With an unknown length, S after the first step went from 4,194,456
+    words to 4,248.
+  - A new `vmsession-test` check is "recursive arena growth (D337)".
+
+  Gates on `58f0475` (the same tree as main plus this DEVLOG text), all
+  ok:
+  - `vm-test`: as P9.3's.
+  - `vmsession-test 2000 1 100 60`: 307,751 runs, plus the D337 check.
+  - `sequence-test 300 1`: 447,786 runs, and the Rust host 21,809/21,809.
+  - `wasm-sdk-test` 15/15 and `npm test` 1450/1450.
+  - `rust-api-test`, `compile-test`, `valid-test`, `scan-test`,
+    `rscan-test`, `nav-test`, `write-test`, `unicode-test`,
+    `compile-fuzz`, the RFC runner, the PEG oracle tests, `watchdog-test`,
+    `check` and `drift`.
+  - `proptest`, 2 min, P1–P5: 105,201 cases, no failure.
+  - `size`: ok after the sources min cap raise (D337).
 - [ ] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
   framer written independently of snug's own sequence code, used as the
   oracle in `sequence-test`.
