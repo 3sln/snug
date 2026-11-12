@@ -8477,11 +8477,29 @@ review.
   - SPEC §1.1 lists `.abnf` as refused (P9.14);
   - SPEC §7 names a `bb identity` gate and §9 a `ci/gate-map.edn`, and
     neither exists.
-- [ ] **P9.11 — Release and version policy.** A written policy covering
+- [x] **P9.11 — Release and version policy.** A written policy covering
   versioning (semver and what counts as breaking, including the Program
   format, error codes and the budget-unit prices), the supported runtimes,
   the changelog, and how a release is cut. Writing this policy publishes
   nothing.
+  *Done 2026-11-12 (D338):*
+  - `docs/release-policy.md` is the policy. `CHANGELOG.md` has an
+    Unreleased summary that includes P9.7 / D327, checked against main's
+    code. README and SPEC point to both.
+  - Docs only: no manifest, code or gen change.
+  - `bb check` and `bb drift` are ok on the tree rebased onto `b5e9dd2`.
+  - **Awaiting owner decisions** O1–O8 (policy §7):
+    - O1: 0.1.0 or 1.0.0;
+    - O2: lockstep versions;
+    - O3: which artefacts ship;
+    - O4: registry names;
+    - O5: security contact;
+    - O6: Unicode data notice;
+    - O7: Node and MSRV statements;
+    - O8: the budget-price rule.
+  - The manager forwarded O1–O8 to the coordinator.
+  - D338's own sign-off is open. The repository changes the policy needs
+    are tracked as P9.15.
 - [ ] **P9.15 — Release-readiness fixes** (manager, 2026-11-12, from
   docs/release-policy.md §8; D338). Each item names its gate. None of them
   publishes anything.
