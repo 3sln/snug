@@ -3,10 +3,12 @@
 All notable changes to snug are recorded here. The format follows
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), with a
 **Breaking** group listed first and a **Budget and limits** group. Versions
-follow [docs/release-policy.md](docs/release-policy.md) (semantic versioning;
-one version for every artefact). Lines name an artefact — `[js]`, `[rust]`,
-`[wasm-sdk]` — when they do not apply to all; `(D###)` cites the decision in
-[DEVLOG](DEVLOG.md).
+follow the release policy, `docs/release-policy.md` in the snug repository
+(semantic versioning; one version for every artefact). Lines name an
+artefact — `[js]`, `[rust]`, `[wasm-sdk]` — when they do not apply to all;
+`(D###)` cites the decision in the repository's `DEVLOG.md`. These are plain
+paths, not links, because this file ships in the npm package and the crate,
+and neither contains those files.
 
 Nothing has been released. Every manifest is `private` at `0.0.0`.
 

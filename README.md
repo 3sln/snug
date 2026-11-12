@@ -121,7 +121,12 @@ hand-written TypeScript declarations:
 In a checkout, host code imports the committed `gen/js` tree by relative
 path. To produce a **self-contained private package**, run `npm run build`
 from `host/js`. It prints a new scratch directory containing package metadata,
-host sources, declarations, generated JS, licence/provenance and docs/examples.
+host sources, declarations, generated JS, the licence, notices, README and
+changelog, the user docs (guide, API, profiles, CDDL support, conformance,
+release policy) and the examples. Nothing else ships: no DEVLOG, SPEC,
+design documents or bench records (`PACKAGE_FILES` in
+`host/js/src/package-build.mjs`). In the staged docs, a link to one of those
+becomes plain text naming its path in the repository.
 An explicit destination is also supported:
 
 ```sh

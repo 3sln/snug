@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { createRequire, stripTypeScriptTypes } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { buildPackage } from '../src/package-build.mjs';
+import { buildPackage, PACKAGE_FILES, packageAllows } from '../src/package-build.mjs';
 import { SNUG_VERSION } from '../src/version.mjs';
 import { SNUG_VERSION as compilerVersion } from '../src/compile.mjs';
 import { compile, SchemaError } from 'snug/compile';
@@ -112,6 +112,17 @@ test('self-contained staged package works away from the repository through all e
     // release-policy §3 / §4 step 6: the licence, notices and changelog ship
     for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md'])
       assert.ok(existsSync(join(target, name)), name);
+    // P9.15: nothing outside PACKAGE_FILES ships (no DEVLOG, SPEC, reviews, bench
+    // records, corpus or tools), every listed doc ships, and no staged Markdown
+    // link points at a file the package does not contain
+    const shipped = readdirSync(target, { recursive: true, withFileTypes: true }).filter(e => e.isFile())
+      .map(e => join(e.parentPath ?? e.path, e.name).slice(target.length + 1).split(sep).join('/'));
+    assert.deepEqual(shipped.filter(p => !packageAllows(p)), [], 'files outside the package allowlist');
+    for (const d of PACKAGE_FILES.docs) assert.ok(shipped.includes('docs/' + d), d);
+    assert.ok(!shipped.some(p => /(^|\/)(DEVLOG|SPEC)\.md$|^bench\/|^docs\/reviews\//.test(p)));
+    for (const md of shipped.filter(p => p.endsWith('.md')))
+      for (const [, href] of readFileSync(join(target, md), 'utf8').matchAll(/\]\(([^)\s#]+)(?:#[^)\s]*)?\)/g))
+        if (!/^[a-z]+:/i.test(href)) assert.ok(existsSync(join(target, dirname(md), href)), `${md} links to ${href}`);
     const smoke = `
       import assert from 'node:assert/strict';
       import {encode,decode,Decimal,NDArray,Float16Bytes,Tagged,profiles} from 'snug';
@@ -155,6 +166,15 @@ test('self-contained staged package works away from the repository through all e
     await assert.rejects(buildPackage(target), { code: 'EEXIST' });
     assert.ok(readdirSync(join(target, 'generated', 'snug')).includes('vm'));
   } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test('the crate\'s documents (kin/scripts/rust-crate copies them) have no relative links', () => {
+  // P9.15: host/rust/README.md is the crate README; the crate ships only these
+  for (const path of ['host/rust/README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md']) {
+    const text = readFileSync(new URL('../../../' + path, import.meta.url), 'utf8');
+    const relative = [...text.matchAll(/\]\(([^)\s]+)\)/g)].map(m => m[1]).filter(h => !/^(https?:|#)/.test(h));
+    assert.deepEqual(relative, [], path);
+  }
 });
 
 test('schema static graph excludes session drivers; sources excludes verifier and compiler loaders', () => {
