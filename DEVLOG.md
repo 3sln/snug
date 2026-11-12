@@ -5656,7 +5656,9 @@ already left room for the rest); they rise to ceil(measurement × 1.02):
 SS shape per Program, so reuse would mostly miss); no bound and pooling
 only (a leaked session would grow memory silently, as the leak above shows);
 no zero-fill (cheaper, but leaks one message's data into the next).
-- [ ] **Design signed off** (manager).
+- [x] **Design signed off** (manager, 2026-11-12). Verified on main at
+  `b5e9dd2`: drift ok, size ok, and the gates were run on the final tree
+  (`a32c313`).
 - [x] **Cap raise signed off** (coordinator, 2026-11-11, under owner
   delegation D303: session/stream entries only (+0.7–0.9 KB gzip), pooling,
   the live-session bound and releasePool (P9.7); measured −14% small-session
