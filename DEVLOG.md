@@ -7729,9 +7729,14 @@ review.
 - [ ] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
   framer written independently of snug's own sequence code, used as the
   oracle in `sequence-test`.
-- [ ] **P9.6 — Rust async source driver.** The async counterpart to the JS
+- [x] **P9.6 — Rust async source driver.** The async counterpart to the JS
   stream sources (D027), over the existing session, with the same gates as
   the sync Rust driver.
+  *Done 2026-11-11 (merged to main at `ac24e08`).* **Gate on main:** `bb
+  rust-api-test` on `ac24e08` (a detached worktree of main): exit 0 in 608 s;
+  every Cargo test, doctest and guide/README example passed (`async_sources`
+  7/7: the same counts as below, blob 89 s, reader 146 s, sequences 564 s);
+  Clippy clean with the generated-code allowance.
   *Built (2026-11-11, branch `p96-async`; D331):* `host/rust/src/async_source.rs`
   -- `AsyncSource` (futures-io's `poll_read` shape), `AsyncBlob` (`read ->
   impl Future`), `Schema::validate_blob_async`, `validate_reader_async`
