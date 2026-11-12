@@ -59,11 +59,11 @@ fn read_sequence_yields_owned_messages_and_ends_cleanly() {
     let (bytes, offsets) = body();
     for chunk in [1usize, 4, 1000] {
         let opts = SequenceOptions { chunk, ..SequenceOptions::default() };
-        let got: Vec<_> = read_sequence(&bytes[..], &opts).map(Result::unwrap).collect();
+        let got: Vec<_> = read_sequence(&bytes[..], &opts).unwrap().map(Result::unwrap).collect();
         assert_eq!(got.iter().map(|m| m.offset as usize).collect::<Vec<_>>(), offsets[..3].to_vec());
         assert_eq!(got[2].view().get("type").and_then(|v| v.text()), Some("c"));
     }
-    assert_eq!(read_sequence(&[][..], &SequenceOptions::default()).count(), 0);
+    assert_eq!(read_sequence(&[][..], &SequenceOptions::default()).unwrap().count(), 0);
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn refusals_carry_index_and_absolute_offsets() {
     let schema = event_schema();
     let (bytes, offsets) = body();
     // a truncated tail
-    let got: Vec<_> = read_sequence(&bytes[..offsets[2] + 2], &SequenceOptions::default()).collect();
+    let got: Vec<_> = read_sequence(&bytes[..offsets[2] + 2], &SequenceOptions::default()).unwrap().collect();
     assert_eq!(got.len(), 3);
     match &got[2] {
         Err(Error::Sequence(f)) => {
@@ -81,7 +81,7 @@ fn refusals_carry_index_and_absolute_offsets() {
     }
     // oversize
     let small = SequenceOptions { max_message_bytes: Some(10), ..SequenceOptions::default() };
-    let e = read_sequence(&bytes[..], &small).find_map(Result::err).unwrap();
+    let e = read_sequence(&bytes[..], &small).unwrap().find_map(Result::err).unwrap();
     assert_eq!(e.code(), "too_large");
     // a schema refusal: stop, or skip and go on
     let mut bad = bytes.clone();

@@ -5598,7 +5598,17 @@ readers count once for their life.
   drops sessions should `close()` them; documented in docs/api.md.
 * **Breaking (Rust)**: `schema::Session::new` and `new_unknown` now return
   `Result<Session, sessions::SessionError>`, and `Error`/`SourceError` gain a
-  `SessionLimit` variant. Record this for P9.11's release notes.
+  `SessionLimit` variant. The free `snug::read_sequence` and (P9.6's)
+  `read_sequence_async` now return `Result<_, Error>`: they `expect`ed
+  `Sequence::new` to succeed and would have panicked at the bound. Record
+  these for P9.11's release notes.
+* **Rebase onto P9.6 (D331)**: the async drivers take the same bound
+  (`async_source::validate_blob` / `validate_reader` answer
+  `SourceError::SessionLimit`; the public async forms `Error::SessionLimit`).
+  `Schema::validate_reader`, sync and async, had mapped every source error to
+  `Error::Source("read")`, the limit included; both now answer
+  `Error::SessionLimit`. `host/rust/tests/sessions.rs` checks every sync and
+  async driver at the bound.
 
 **Pool size** (`node --single-threaded-gc --expose-gc bench/sessions-bench.mjs
 <tree> <arm>`: 100,000 small sessions through `openSession`, then 2,000 64 KiB

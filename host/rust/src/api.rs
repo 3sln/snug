@@ -357,7 +357,10 @@ impl Schema {
             return Err(Error::Usage("options"));
         }
         schema::validate_reader(self.program.host(), r, reader, &options.host(), chunk, 0, fail_fast)
-            .map_err(|_| Error::Source("read"))
+            .map_err(|e| match e {
+                schema::SourceError::SessionLimit => Error::SessionLimit,
+                _ => Error::Source("read"),
+            })
     }
 }
 pub fn validate_blob(

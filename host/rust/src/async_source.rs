@@ -127,6 +127,7 @@ fn source_error(e: SourceError) -> Error {
         SourceError::ShortRead { .. } => Error::Source("short_read"),
         SourceError::Read => Error::Source("read"),
         SourceError::TooLarge => Error::Source("too_large"),
+        SourceError::SessionLimit => Error::SessionLimit,
     }
 }
 
@@ -139,7 +140,7 @@ pub async fn validate_blob<B: AsyncBlob + ?Sized>(prog: &schema::Program, rule: 
     if size > 0x7fff_ffff {
         return Err(SourceError::TooLarge);
     }
-    let mut session = Session::new(prog, rule, size as i32, opts, quantum);
+    let mut session = Session::new(prog, rule, size as i32, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
     let (mut base, mut window): (usize, Vec<u8>) = (0, Vec::new());
     let (mut at, mut need) = (0usize, chunk.min(size));
     loop {
@@ -174,7 +175,7 @@ pub async fn validate_blob<B: AsyncBlob + ?Sized>(prog: &schema::Program, rule: 
 pub async fn validate_reader<S: AsyncSource + Unpin + ?Sized>(prog: &schema::Program, rule: i32, src: &mut S,
                                                               opts: &schema::Options, chunk: usize, quantum: i32,
                                                               fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
-    let mut session = Session::new_unknown(prog, rule, opts, quantum);
+    let mut session = Session::new_unknown(prog, rule, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
     let limit = session.limit();
     let mut st = Held { tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0, delivered: 0, eof: false };
     let mut step = session.step(&st.buf, 0);
@@ -308,7 +309,10 @@ impl Schema {
         }
         validate_reader(self.program().host(), r, source, &options.host(), chunk, quantum as i32, fail_fast)
             .await
-            .map_err(|_| Error::Source("read"))
+            .map_err(|e| match e {
+                SourceError::SessionLimit => Error::SessionLimit,
+                _ => Error::Source("read"),
+            })
     }
 
     /// [`Schema::read_sequence`] over an [`AsyncSource`]: each message validated
@@ -328,9 +332,9 @@ impl Schema {
 
 /// [`read_sequence`](crate::read_sequence) over an [`AsyncSource`]: a profile-checked
 /// CBOR sequence read until EOF.
-pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &SequenceOptions) -> AsyncSequenceReader<'static, S> {
-    let seq = Sequence::new(options).expect("snug: a profile-only sequence always starts");
-    AsyncSequenceReader::new(seq, source, options.chunk.max(1))
+/// `Err(Error::SessionLimit)` when the live-session bound is reached (P9.7, D327).
+pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &SequenceOptions) -> Result<AsyncSequenceReader<'static, S>, Error> {
+    Ok(AsyncSequenceReader::new(Sequence::new(options)?, source, options.chunk.max(1)))
 }
 
 /// The async reader of [`read_sequence_async`] / [`Schema::read_sequence_async`]:

@@ -474,8 +474,8 @@ fn async_sequence_reader_equals_the_sync_reader() {
             let sync: Vec<_> = schema.read_sequence(Trickle { data: &body, split: Splitter::new(split) }, &name, &o).unwrap().collect();
             let (got, pend) = drain(schema.read_sequence_async(AsyncTrickle::new(&body, split, rng.next(), 3), &name, &o).unwrap());
             assert_eq!(got, sync, "sequence of cases {i}..{j} {split:?} chunk {chunk}");
-            let sync2: Vec<_> = read_sequence(Trickle { data: &body, split: Splitter::new(split) }, &o).collect();
-            let (got2, pend2) = drain(read_sequence_async(AsyncTrickle::new(&body, split, rng.next(), 3), &o));
+            let sync2: Vec<_> = read_sequence(Trickle { data: &body, split: Splitter::new(split) }, &o).unwrap().collect();
+            let (got2, pend2) = drain(read_sequence_async(AsyncTrickle::new(&body, split, rng.next(), 3), &o).unwrap());
             assert_eq!(got2, sync2, "profile-only sequence of cases {i}..{j} {split:?} chunk {chunk}");
             c.sequence_items += got.len() + got2.len();
             c.sequence_runs += 2;
@@ -570,7 +570,7 @@ fn public_async_forms_match_the_sync_ones() {
     }
     let (e, _) = block_on(schema.validate_reader_async(&mut Broken(2), "m", &v, 4, 0, false));
     assert_eq!(e.unwrap_err(), Error::Source("read"));
-    let mut r = read_sequence_async(Broken(3), &SequenceOptions::default());
+    let mut r = read_sequence_async(Broken(3), &SequenceOptions::default()).unwrap();
     let (items, _) = block_on(async {
         let mut v = Vec::new();
         while let Some(m) = r.next().await {

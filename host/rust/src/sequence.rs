@@ -8,7 +8,7 @@
 //! use snug::{read_sequence, SequenceOptions};
 //! let body: &[u8] = &[0xa1, 0x61, b'a', 1, 0xa1, 0x61, b'a', 2];   // two messages
 //! let mut sum = 0;
-//! for message in read_sequence(body, &SequenceOptions::default()) {
+//! for message in read_sequence(body, &SequenceOptions::default())? {
 //!     sum += message?.view().get("a").and_then(|v| v.uint()).unwrap_or(0);
 //! }
 //! assert_eq!(sum, 3);
@@ -594,10 +594,10 @@ impl Schema {
 
 /// Read a profile-checked CBOR sequence from `reader` until EOF: an iterator of
 /// owned messages; a stopping refusal is the last item; a read error is
-/// `Error::Source("read")` (also the last item).
-pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> SequenceReader<'static, R> {
-    let seq = Sequence::new(options).expect("snug: a profile-only sequence always starts");
-    SequenceReader::new(seq, reader, options.chunk.max(1))
+/// `Error::Source("read")` (also the last item). `Err(Error::SessionLimit)` when
+/// the live-session bound is reached (P9.7, D327).
+pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> Result<SequenceReader<'static, R>, Error> {
+    Ok(SequenceReader::new(Sequence::new(options)?, reader, options.chunk.max(1)))
 }
 
 /// The iterator of [`read_sequence`] / [`Schema::read_sequence`].

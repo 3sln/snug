@@ -4,6 +4,17 @@ use snug::schema::{Session, Step};
 use snug::sessions::{self, SessionLimits};
 use snug::{BytesBlob, CompileOptions, Error, Schema, Sequence, SequenceOptions, ValidationOptions};
 
+/// Poll a future to completion (the drivers here never wait on I/O).
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
 fn msg(i: u32) -> Vec<u8> {
     // {"body": "hello", "id": i}  (i < 24)
     let mut v = vec![0xa2, 0x64, b'b', b'o', b'd', b'y', 0x65, b'h', b'e', b'l', b'l', b'o', 0x62, b'i', b'd'];
@@ -36,7 +47,16 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     assert_eq!(Error::from(e).code(), "sessions/limit");
     assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, 4, 0).unwrap_err().code(), "sessions/limit");
     assert_eq!(Sequence::new(&SequenceOptions::default()).err().unwrap().code(), "sessions/limit");
+    // every driver reports the bound as sessions/limit (sync and async, P9.6), never a panic or a read error
+    assert_eq!(schema.validate_reader(&mut &b[..], "r", &opts, 4, false).unwrap_err(), Error::SessionLimit);
+    assert_eq!(snug::read_sequence(&b[..], &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
+    assert_eq!(schema.read_sequence(&b[..], "r", &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
+    assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, 4, 0)).unwrap_err(), Error::SessionLimit);
+    assert_eq!(block_on(schema.validate_reader_async(&mut &b[..], "r", &opts, 4, 0, false)).unwrap_err(), Error::SessionLimit);
+    assert_eq!(snug::read_sequence_async(&b[..], &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
+    assert_eq!(schema.read_sequence_async(&b[..], "r", &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
     drop(held);
+    assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, 4, 0)).unwrap(), Ok(()));
     assert_eq!(sessions::counts().live, 0);
 
     // a finished session releases at its verdict, before it is dropped

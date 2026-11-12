@@ -223,8 +223,8 @@ protocol.
 
 ## Live sessions and pooling
 
-A session (`validate_blob`, `validate_reader`, `schema::Session`, a `Sequence` or
-`SequenceReader`) takes its arrays from its Program's pool. It gives them back
+A session (`validate_blob`, `validate_reader`, their async forms,
+`schema::Session`, a `Sequence`, `SequenceReader` or `AsyncSequenceReader`) takes its arrays from its Program's pool. It gives them back
 at its verdict, or when it is dropped. Dropping is deterministic in Rust, so an
 abandoned session releases its slot as soon as it goes out of scope. Each array
 is zero-filled before reuse, so nothing of one session is visible to another.
@@ -233,10 +233,14 @@ While `max_live` sessions are live in the process, creating one more fails with
 `Error::SessionLimit`, whose code is `sessions/limit`. The low-level
 `schema::Session::new` and `Session::new_unknown` return
 `Result<Session, sessions::SessionError>`, with `SessionError::Limit`, which
-converts into `Error::SessionLimit`. This changed in P9.7: it is a breaking
-change, made before the first release and noted for P9.11's version policy.
-`validate_blob` and `validate_reader` report the limit as
-`schema::SourceError::SessionLimit`.
+converts into `Error::SessionLimit`. The free `snug::read_sequence` and
+`read_sequence_async` now return `Result<_, Error>` (they answered the reader
+directly), as `Schema::read_sequence` already did. These changed in P9.7: they
+are breaking changes, made before the first release and noted for P9.11's
+version policy. The low-level `schema::validate_blob` / `validate_reader` and
+`async_source::validate_blob` / `validate_reader` report the limit as
+`schema::SourceError::SessionLimit`; every public driver answers
+`Error::SessionLimit`.
 
 Idle arrays are kept up to `max_pooled_bytes` in all. One entry above 1 MiB, or
 above a quarter of that, is dropped instead. `release_pool()` drops every idle
@@ -327,7 +331,8 @@ messages), `fail_fast` and the read `chunk`. A refusal is
 skippable })` with absolute offsets; EOF inside a message is
 `cbor/truncated`, a message not ending within `max_message_bytes` is
 `cbor/too_large`. `snug::read_sequence` / `Sequence::new` check the profile
-only. The `Read` iterator copies each message out of its read buffer; the push
+only; they return `Err(Error::SessionLimit)` at the live-session bound
+([Live sessions and pooling](#live-sessions-and-pooling)). The `Read` iterator copies each message out of its read buffer; the push
 API borrows the caller's chunk instead.
 
 ## Async sources
