@@ -1,8 +1,10 @@
 {
   "name": "snug-wasm-sdk",
   "version": "0.0.0",
-  "description": "P7.9 experiment: snug's public JS API over the Rust->wasm build (D005 re-take; level with the native API, D170-D179)",
+  "description": "Experimental: snug's public JS API over the WebAssembly build of its Rust core (opt-in; the native snug package is the default)",
+  "keywords": ["cddl", "cbor", "validation", "wasm"],
   "license": "MIT",
+  "repository": { "type": "git", "url": "[REPOSITORY URL - OWNER TO FILL IN]", "directory": "host/wasm-sdk" },
   "private": true,
   "type": "module",
   "exports": {

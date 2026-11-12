@@ -30,7 +30,7 @@ export async function buildPackage(destination) {
   // This is a consumer artifact; development scripts require the checkout.
   delete pkg.scripts;
   await writeFile(join(target, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
-  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'SPEC.md', 'DEVLOG.md'])
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md', 'SPEC.md', 'DEVLOG.md'])
     await cp(resolve(root, '../..', name), join(target, name));
   await cp(resolve(root, '../../docs'), join(target, 'docs'), { recursive: true });
   await cp(resolve(root, '../../examples'), join(target, 'examples'), { recursive: true });

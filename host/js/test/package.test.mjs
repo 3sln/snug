@@ -109,6 +109,9 @@ test('self-contained staged package works away from the repository through all e
   const temp = await mkdtemp(join(tmpdir(), 'snug-package-test-'));
   try {
     const target = await buildPackage(join(temp, 'package'));
+    // release-policy §3 / §4 step 6: the licence, notices and changelog ship
+    for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md'])
+      assert.ok(existsSync(join(target, name)), name);
     const smoke = `
       import assert from 'node:assert/strict';
       import {encode,decode,Decimal,NDArray,Float16Bytes,Tagged,profiles} from 'snug';

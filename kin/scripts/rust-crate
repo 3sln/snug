@@ -6,6 +6,9 @@
 #   DIR/src/snug/...      gen/rust/snug/** (kin's modules)
 #   DIR/src/snug.rs, DIR/src/snug/<d>.rs   `pub mod` lines, generated from the
 #                         tree, so a new module is compiled the day it is emitted.
+#   DIR/README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md   the repository's
+#                         (P9.15): the manifest's `readme` and `include` name them,
+#                         so `cargo package --list` in DIR is the crate to publish.
 #
 # Copies only what changed (cargo's incremental build keys on mtimes).
 #
@@ -25,6 +28,7 @@ mkdir -p "$dir/src"
 put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
 puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
 put "$manifest" "$dir/Cargo.toml"
+for f in README.md LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md; do put "$f" "$dir/$f"; done
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done
 # Public API integration tests accompany the default host only.
 if [ "$host" = host/rust/src ] && [ -d host/rust/tests ]; then

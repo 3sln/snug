@@ -1,13 +1,33 @@
 [package]
 name = "snug"
 version = "0.0.0"
+description = "CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding and checked views"
 license = "MIT"
 edition = "2021"
 publish = false
+readme = "README.md"
+keywords = ["cddl", "cbor", "validation", "rfc8610", "rfc8949"]
+categories = ["encoding", "parser-implementations"]
+# repository = "[REPOSITORY URL - OWNER TO FILL IN]"   (none exists yet; release-policy §8)
+# rust-version = "?"   (owner decision O7: 1.87 with a gate on it, or 1.92; release-policy §2)
+# The published crate: the library, its generated modules and the notices. The
+# test-host binaries (src/bin) and the integration tests (tests/, which need
+# Node and the repository) stay out. A pattern with no `/` inside matches at
+# any depth, so every path here is anchored.
+include = [
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE",
+    "/THIRD_PARTY_NOTICES.md",
+    "/CHANGELOG.md",
+    "/src/*.rs",
+    "/src/snug/**/*.rs",
+]
 
 # Assembled by kin/scripts/rust-crate into .cache/snug-rs/: this manifest,
-# host/rust/src/*, and gen/rust/snug/** under src/snug/ with generated `mod`
-# files. Nothing here is built in place.
+# host/rust/src/*, gen/rust/snug/** under src/snug/ with generated `mod`
+# files, and the repository's README, LICENSE, THIRD_PARTY_NOTICES and
+# CHANGELOG. Nothing here is built in place.
 
 [lib]
 path = "src/lib.rs"
