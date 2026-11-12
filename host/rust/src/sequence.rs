@@ -603,47 +603,89 @@ pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> Result<Se
 
 /// The iterator of [`read_sequence`] / [`Schema::read_sequence`].
 pub struct SequenceReader<'p, R: Read> {
-    seq: Sequence<'p>,
+    pump: SeqPump<'p>,
     reader: R,
-    buf: Vec<u8>,
-    queue: VecDeque<Result<Message<'static>, Error>>,
-    finished: bool,
 }
 impl<'p, R: Read> SequenceReader<'p, R> {
     fn new(seq: Sequence<'p>, reader: R, chunk: usize) -> Self {
-        SequenceReader { seq, reader, buf: vec![0u8; chunk], queue: VecDeque::new(), finished: false }
+        SequenceReader { pump: SeqPump::new(seq, chunk), reader }
     }
 }
 impl<R: Read> Iterator for SequenceReader<'_, R> {
     type Item = Result<Message<'static>, Error>;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(x) = self.queue.pop_front() {
-                return Some(x);
-            }
-            if self.finished {
-                return None;
-            }
-            match self.reader.read(&mut self.buf) {
-                Ok(0) => {
-                    self.finished = true;
-                    let items = self.seq.finish();
-                    self.queue.extend(items);
-                }
-                Ok(n) => {
-                    let items = self.seq.feed(&self.buf[..n]);
-                    self.queue.extend(items.into_iter().map(|x| x.map(Message::into_owned)));
-                    if self.seq.is_done() {
-                        self.finished = true;
+            match self.pump.next() {
+                Pump::Item(x) => return x,
+                Pump::Read => {
+                    let r = self.reader.read(self.pump.buf());
+                    if let Some(e) = self.pump.filled(r) {
+                        return Some(e);
                     }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(_) => {
-                    self.finished = true;
-                    return Some(Err(Error::Source("read")));
                 }
             }
         }
+    }
+}
+
+/// What the sequence readers' core asks of its I/O loop (P9.6b, D335).
+pub(crate) enum Pump {
+    /// The next item (`None`: the sequence is over).
+    Item(Option<Result<Message<'static>, Error>>),
+    /// Read into `SeqPump::buf` and give the outcome to `SeqPump::filled`.
+    Read,
+}
+
+/// The sans-IO core of [`SequenceReader`] and the async reader
+/// (`crate::async_source::AsyncSequenceReader`): the sequence, the read buffer and
+/// the messages decided but not yet taken. A read that completes is fed at once, so a
+/// caller that stops between items loses nothing.
+pub(crate) struct SeqPump<'p> {
+    seq: Sequence<'p>,
+    buf: Vec<u8>,
+    queue: VecDeque<Result<Message<'static>, Error>>,
+    finished: bool,
+}
+impl<'p> SeqPump<'p> {
+    pub(crate) fn new(seq: Sequence<'p>, chunk: usize) -> Self {
+        SeqPump { seq, buf: vec![0u8; chunk], queue: VecDeque::new(), finished: false }
+    }
+    pub(crate) fn next(&mut self) -> Pump {
+        if let Some(x) = self.queue.pop_front() {
+            return Pump::Item(Some(x));
+        }
+        if self.finished { Pump::Item(None) } else { Pump::Read }
+    }
+    pub(crate) fn buf(&mut self) -> &mut [u8] {
+        &mut self.buf
+    }
+    /// The outcome of the read `next` asked for: `Ok(0)` is the end; `Interrupted` is
+    /// retried; any other error ends the sequence with `Error::Source("read")`, answered
+    /// here as the last item.
+    pub(crate) fn filled(&mut self, read: std::io::Result<usize>) -> Option<Result<Message<'static>, Error>> {
+        match read {
+            Ok(0) => {
+                self.finished = true;
+                let items = self.seq.finish();
+                self.queue.extend(items);
+            }
+            Ok(n) => {
+                let items = self.seq.feed(&self.buf[..n]);
+                self.queue.extend(items.into_iter().map(|x| x.map(Message::into_owned)));
+                if self.seq.is_done() {
+                    self.finished = true;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => {
+                self.finished = true;
+                return Some(Err(Error::Source("read")));
+            }
+        }
+        None
+    }
+    pub(crate) fn bytes_held(&self) -> usize {
+        self.seq.bytes_held()
     }
 }
 

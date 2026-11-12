@@ -6252,6 +6252,33 @@ Program change.
   `dd202f7`). The six widening leniencies and the two refusals that keep
   their RFC reasons are accepted.
 
+### D335 — One sans-IO core per source kind; the sync and async Rust drivers are thin I/O loops over it (P9.6b; amends D331)
+**Decision** (P9.6 engineer, provisional; the coordinator's direction): the
+drivers' logic moves out of the I/O loops into three crate-private step
+machines. `schema::BlobCore` (known length: the window policy,
+`max(need, chunk)` reads, `ShortRead`), `schema::StreamCore` (unknown length:
+keep/drop, drain, fail-fast, the end given once, D085/D144–D147, D331's fix)
+and `sequence::SeqPump` (the sequence readers' buffer and queue of decided
+messages). Each answers `next()` with one request: `Io::Read`, `Io::Yield`
+(only with a positive quantum) or `Io::Done`, or for sequences `Pump::Read` or
+`Pump::Item`. The caller does that read and hands back the bytes (`fill`,
+`filled`). `schema::validate_blob` / `validate_reader`, `SequenceReader`,
+`async_source::validate_blob` / `validate_reader` and `AsyncSequenceReader`
+are now loops of a few lines over them. The async loop awaits the read and
+yields on `Io::Yield`; the sync loop ignores the yield. The cores live in
+`schema.rs` and `sequence.rs` because the vm-test and vmsession-test crates
+compile `schema.rs` alone. They are `pub(crate)`: no public API changes, no
+semantic change.
+**Why**: two copies of each loop could drift. D331 kept them separate only
+while P9.7 changed Session/Sequence. With one core, "async == sync" holds by
+construction; the differential still checks async == sync == buffer at full
+scale, and the buffer is the independent reference.
+**Alternatives**: public sans-IO cores (more API before P9.10's review; a
+custom runtime can already use `Session` directly); generic code over a
+sync/async read trait (async closures and trait objects make it heavier than
+three small state machines); keeping the copies (the reason for this item).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -8739,6 +8766,23 @@ review.
   must be done before P9.13, so the final review sees the deduplicated
   code. The full differential (async == sync == buffer) stays as the
   reference. Assigned to the P9.6 engineer.
+  *Built (2026-11-12, branch `p96-core`, on main with P9.7; D335):*
+  `BlobCore`, `StreamCore` and `SeqPump`. The sync and async drivers are
+  loops over them. Net 34 fewer lines in the drivers (three files, +310/−276,
+  with the cores' docs). **`bb rust-api-test full` (actual): exit 0, 228 s;
+  20,819 cases, 191,682 blob runs, 62,405 + 62,405 reader runs, 62,550
+  sequence runs / 35,328,681 items, async == sync == buffer.** Every count
+  equals the pre-refactor run on main, including the Pending polls (841,198 /
+  9,734,792 / 9,201,868) and the yielding runs (66,275 / 54,450), so the reads
+  and yields happen at the same points. A mutant in the shared core (one byte
+  misplaced in `StreamCore::filled`) makes sync differ from the buffer, and
+  the default mode catches it in 9 s. Clippy: no new diagnostics.
+  **Gates on the final tree** (`b191827` + this; `bb gates` with
+  bench/compare/node_modules symlinked; actual): check, drift, scan-test,
+  rscan-test, vm-test, vmsession-test, sequence-test, valid-test,
+  compile-test, nav-test, write-test, unicode-test, abnf-test,
+  rust-api-test, rust-api-test-full (the same counts again), wasm-sdk-test,
+  size, watchdog-test and npm-test (1,470/1,470): "all 19 gate(s)" ok.
 - [x] **P9.14 — `.abnf` / `.abnfb` (RFC 9165 §3).** Added 2026-11-11 by
   the coordinator. The owner direction D230 names these controls explicitly,
   so leaving them out is not an option. Requirements:
