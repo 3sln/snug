@@ -8676,14 +8676,34 @@ review.
         `src/snug/**`.
       - `cargo package --allow-dirty` packaged and verified the crate
         (347,621 bytes) with the expected "ignoring binary/test" warnings.
-    - Observations for O3 / P9.13:
-      - The npm package ships DEVLOG.md (600 kB), `docs/reviews/`,
-        `docs/release-policy.md` and `bench/*.md`. Policy §4 step 6 says
-        nothing under `bench/` ships, so that rule and the staging
-        disagree.
-      - The crate README is the repository README, which is written for
-        JS users, and its relative links break. A Rust-facing README is a
-        P9.10 question.
+    - Two observations raised here were fixed in the follow-up the
+      manager asked for (b87c671, 94ed763):
+      - **npm allowlist.** The package used to ship DEVLOG.md (600 kB),
+        SPEC, `docs/reviews/`, the design documents and `bench/*.md`,
+        against policy §4 step 6. `package-build.mjs` now stages only
+        `PACKAGE_FILES`:
+        - code: `src` (without `package-build.mjs`), `types`,
+          `generated` (without `hello.mjs`) and `examples`;
+        - LICENSE, the notices, README and CHANGELOG;
+        - the user docs: guide, api, profiles, bindle, cddl-support,
+          conformance and release-policy.
+
+        In a staged doc, a link to a file the package does not ship
+        becomes its text plus the repository path. The package test
+        fails on any file outside the list and on any dangling relative
+        link. `npm pack --dry-run` before and after:
+
+        | | packed (bytes) | unpacked (bytes) | files |
+        | --- | ---: | ---: | ---: |
+        | before | 1,058,236 | 3,310,157 | 145 |
+        | after | 488,652 | 1,814,622 | 115 |
+      - **Crate README.** `host/rust/README.md` was rewritten user-first:
+        what the crate does, an example, the API table, then limits, with
+        building from the repository last. It has no relative links (a
+        test checks this). `rust-crate` copies it as the crate's
+        README.md. CHANGELOG's links to repository files are now plain
+        paths, because it ships in both artefacts.
+      - `bb gates land` was all ok on that tree (npm test: 1,460 pass).
     - **Waits for O3:** SDK staging. It is not trivial: it needs the
       pinned-nightly build and the module checksum.
     - **Waits for O6:** the Unicode notice.
