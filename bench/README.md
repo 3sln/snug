@@ -560,3 +560,37 @@ walks (D283), the buffer driver after. (4) Non-deterministic input is 1.2–8×
 (codec, VM) and up to 23× for sessions over many small reordered maps (whole
 items: the scanner pass, the copy and the deferred duplicate checks); recorded,
 not optimised in P8.4.
+
+## Session pooling (P9.7, D327) — 2026-11-11
+
+**Question:** what do pooling a session's arrays per Program and the
+live-session bound save, and how large must the idle pool be?
+**Machine:** Apple M1 Pro (10 cores, 32 GiB), macOS 14.6.1, **shared** (other
+agents' builds and gates). **Runtime:** Node v24.6.0. **Trees:** `main` =
+`0b302fc`, P9.7 = `.cache/p97r`. **Method:**
+`node --single-threaded-gc --expose-gc bench/sessions-bench.mjs <tree> <arm>`,
+one arm per process: 100,000 small sessions (one RPC-sized message through
+`openSession`, whole window), then 2,000 sessions over a 64 KiB text through
+`validateHandleSync` in 4 KiB chunks. Thread CPU µs per session; peak RSS and
+heap sampled during the run. `fresh` sets `maxPooledBytes: 0` (every session
+allocates its arrays); `pool=N` sets an N MiB pool.
+
+| arm | small session µs | 64 KiB session µs | peak RSS | peak heap |
+| --- | ---: | ---: | ---: | ---: |
+| main | 11.46 | 386 | 356 MiB | 13.1 MiB |
+| fresh | 14.1 | 379 | 401 MiB | — |
+| pool=1 | 10.25 | 350 | 264 MiB | 26.7 MiB |
+| **pool=2 (default)** | **9.89** | **348** | **283 MiB** | **26.6 MiB** |
+| pool=4 | 9.66 | 345 | — | — |
+| pool=8 | 9.60 | 332 | — | — |
+
+**Reading.** (1) The 2 MiB default keeps most of the gain: −14% CPU per small
+session and −10% per 64 KiB session against `main`, and peak RSS 356 → 283
+MiB. A larger pool adds 1–5%. (2) Without the pool (`fresh`) the P9.7 tree is
+slower than `main` on small sessions (the lease, release and registry
+bookkeeping), so the pool pays for that bookkeeping. (3) The higher peak heap is
+transient garbage (lease objects and finalization-registry records between
+collections); the pool's arrays are typed-array backing stores outside the V8
+heap, and the heap at the end of the run is 8.3 MiB on every arm. (4) One
+entry is about 75 KB; entries over 1 MiB or over a quarter of the pool are not
+pooled.

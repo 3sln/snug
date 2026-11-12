@@ -5563,6 +5563,95 @@ no CPU cap, and it kills only its child).
   `scan-test 300 1` tripping its cap. (The P9.7 pooling entry, approved
   earlier as "D326", is renumbered D327 because this entry landed first.)
 
+### D327 — Session arrays pooled per Program; a bound on live sessions; `releasePool` (P9.7)
+**Decision** (D286 engineer): every host pools a session's arrays per Program
+and bounds the sessions live at once. A session is *live* from its creation
+until its verdict, `close()`, dispose or (Rust) drop; `Sequence`/sequence
+readers count once for their life.
+* **Bound**: `maxLive`, default 1024 per isolate (JS, and per wasm instance
+  in the SDK) or per process (Rust). The session past it is refused with
+  error code `sessions/limit` and the message `snug: N sessions are live
+  (sessionLimits); finish, close() or dispose sessions to release them`.
+  Validation calls (`validate_blob`, `validate_reader`, `validateHandle*`)
+  open and release their own session, so they count only while they run.
+* **Pool**: on release a session's arrays go to its Program's idle list
+  while the total idle bytes stay under `maxPooledBytes` (default 2 MiB per
+  isolate/process); the next session of that Program takes one whose S is
+  large enough and whose SS matches. One entry is dropped instead of pooled
+  if it is over 1 MiB or over a quarter of `maxPooledBytes`, so one huge item
+  cannot pin memory or crowd out the small sessions. `maxPooledBytes: 0`
+  turns pooling off.
+* **Zero-fill on reuse** is a security property: reused arrays are
+  zero-filled before the new session sees them, so nothing of an earlier
+  message survives into a later one. The differential gates prove it by
+  scribbling released arrays (a test hook) and comparing with fresh arrays.
+* **APIs**:
+  - JS (`snug/sources`, `snug/sequence`) and the wasm SDK:
+    `sessionLimits({ maxLive, maxPooledBytes })` sets and reads the limits
+    and counts; `releasePool()` drops every idle entry; `close()` and
+    `[Symbol.dispose]` on sessions, push drivers and sequence readers.
+  - Rust: `snug::sessions::{limits, set_limits, counts, release_pool}`,
+    with process-wide atomics and a `Mutex` pool per Program (thread-safe;
+    a dropped Program uncounts its idle entries).
+* **JS GC**: a JS session abandoned before its verdict holds its slot until
+  garbage collection (a `FinalizationRegistry` releases it), so code that
+  drops sessions should `close()` them; documented in docs/api.md.
+* **Breaking (Rust)**: `schema::Session::new` and `new_unknown` now return
+  `Result<Session, sessions::SessionError>`, and `Error`/`SourceError` gain a
+  `SessionLimit` variant. Record this for P9.11's release notes.
+
+**Pool size** (`node --single-threaded-gc --expose-gc bench/sessions-bench.mjs
+<tree> <arm>`: 100,000 small sessions through `openSession`, then 2,000 64 KiB
+sessions through `validateHandleSync` in 4 KiB chunks; thread CPU µs per
+session; one arm per process, on a shared machine):
+
+| pool | small session | 64 KiB session | peak RSS | peak heap |
+| --- | ---: | ---: | ---: | ---: |
+| main (`0b302fc`) | 11.46 | 386 | 356 MiB | 13.1 MiB |
+| fresh (`maxPooledBytes: 0`) | 14.1 | 379 | 401 MiB | — |
+| 1 MiB | 10.25 | 350 | 264 MiB | 26.7 MiB |
+| **2 MiB (default)** | **9.89** | **348** | **283 MiB** | **26.6 MiB** |
+| 4 MiB | 9.66 | 345 | — | — |
+| 8 MiB | 9.60 | 332 | — | — |
+
+2 MiB is the smallest pool that keeps most of the gain: against `main`,
+−14% CPU per small session and −10% per 64 KiB session, and peak RSS
+356 → 283 MiB. 1 MiB loses about a quarter of the small-session gain; 4
+and 8 MiB add only 1–5% more. An entry is about 75 KB, so 2 MiB holds about
+28.
+**Heap**: the higher peak heap (26.6 against 13.1 MiB) is transient
+garbage (the lease objects and the finalization registry's records between
+collections), not the pool: the pool lives in typed-array backing stores,
+outside the V8 heap. Heap at the end of the run is 8.3 MiB on every arm.
+**Leak found by the wasm parity test**: the wasm SDK's parity test
+(`host/wasm-sdk/test/parity.test.mjs`, running the native JS package against
+the SDK) failed 14,041 runs with native `sessions/limit`. A push driver whose
+`feed`, `resume` or `finalize` threw (a bad chunk, a fault) never released
+its session, so the bound filled up. Fixed in `host/js/src/sources.mjs`:
+`guarded()` wraps a push session's API so a throw releases it;
+`driveSession` and the sync/async runners close in a `finally`. The SDK frees
+on its own `length_mismatch` path. Without the bound this leak would have
+held memory silently.
+**Size**: `snug/sources` 179,510 / 66,050 / 56,341 → 181,681 / 66,906 /
+57,131 (+2,171 / +856 / +790 min / gzip / brotli), `snug/sequence`
+209,038 / 74,349 / 64,513 → 210,595 / 75,063 / 65,091 (+1,557 / +714 /
++578), `all-runtime` 274,115 / 98,612 / 83,014 → 276,376 / 99,535 / 83,788
+(+2,261 / +923 / +774). Only the session/stream entries grow, by
+`host/js/src/session-pool.mjs` and the close/release paths. The failing caps
+(`snug/sources` min and gzip, `snug/sequence` min, `all-runtime` all three)
+rise to ceil(measurement × 1.02) (esbuild 0.28.2, Node 24.6.0; on `0b302fc` +
+P9.7).
+**Alternatives**: one global pool rather than per Program (arrays differ in
+SS shape per Program, so reuse would mostly miss); no bound and pooling
+only (a leaked session would grow memory silently, as the leak above shows);
+no zero-fill (cheaper, but leaks one message's data into the next).
+- [ ] **Design signed off** (manager).
+- [x] **Cap raise signed off** (coordinator, 2026-11-11, under owner
+  delegation D303: session/stream entries only (+0.7–0.9 KB gzip), pooling,
+  the live-session bound and releasePool (P9.7); measured −14% small-session
+  and −10% 64 KiB-session CPU, peak RSS 356→283 MiB at the 2 MiB default
+  pool)
+
 ### D331 — The Rust async source drivers: dependency-free, runtime-agnostic, ports of the sync loops (P9.6, D027)
 **Decision** (P9.6 engineer, provisional): the Rust host gets async forms of its
 three source drivers over the same `schema::Session` / `Sequence`, in a new
