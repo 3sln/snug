@@ -126,7 +126,30 @@ then optionally a newline and a list of rules (RFC 9165 §3): `"date-time"
 
 Exactly as RFC 9165 §3 says, **core rules are not imported**: `DIGIT`,
 `ALPHA` and the rest must be defined in the controller (`.cat` a shared
-block). Six leniencies, each only widening what is accepted:
+block).
+
+**Strict by default (D340).** The controller is parsed as RFC 9165 §3 frames
+RFC 5234 + RFC 7405, and nothing more: one element, then (optionally) a
+newline and RFC 5234's rule list, every line ending with a newline. A wider
+start is written as a group: `"(1*DIGIT)\nDIGIT = %x30-39\n"`. Four
+allowances are in the RFC texts themselves, so both modes accept them:
+
+1. **A newline is LF or CR LF.** RFC 9165 §3: "the syntax of ABNF itself
+   (_not_ the syntax expressed in ABNF!) is relaxed to allow a single line
+   feed as a newline: CRLF = %x0A / %x0D.0A".
+2. **No rules, or an element alone.** RFC 9165 §3: "one valid "element",
+   followed by zero or more valid "rules" separated from the element by a
+   newline".
+3. **Blank and comment-only lines** among the rules. RFC 5234 §4:
+   `rulelist = 1*( rule / (*c-wsp c-nl) )`.
+4. **A start that runs over continuation lines** inside its group or option.
+   RFC 5234 §4: `group = "(" *c-wsp alternation *c-wsp ")"` and
+   `c-wsp = WSP / (c-nl WSP)`.
+
+**The compile option `abnf: 'lenient'`** (Rust `CompileOptions { abnf:
+AbnfMode::Lenient, .. }`; the wasm SDK's `compile` takes the same option)
+also admits snug's non-RFC forms. Each only widens what is accepted, and a
+controller that strict mode accepts means the same in lenient mode:
 
 1. The start may be any alternation (`1*DIGIT`), not only one element.
 2. **A snug extension beyond RFC 9165:** a controller that begins with a rule
@@ -137,13 +160,24 @@ block). Six leniencies, each only widening what is accepted:
    never begin with `name =`, so no RFC-valid controller changes meaning; the
    gate's oracle tries element-first first and agrees with kin on every
    generated and mutated grammar.
-3. The end of the text ends the last line.
+3. The end of the text ends the last line. RFC 5234 §4 ends every rule and
+   comment with a newline (`c-nl`).
 4. A comment may hold any character but CR and LF. RFC 5234 §4 allows only
    `*(WSP / VCHAR)` in a comment.
-5. Whitespace may precede the start.
+5. Whitespace may precede the start, and spaces or a comment may follow it
+   on its line. RFC 9165 §3 puts a newline directly after the element.
 6. An `=/` may come before its rule's `=`. RFC 5234 §3.3 describes "later
-   rule definitions adding to the set of alternatives", and the set is the
-   same either way.
+   rule definitions adding to the set of alternatives". The set is the same
+   either way.
+
+Under the strict default each is refused with `control_value`, naming the
+form and the option, e.g. `(.abnf argument: the start is wider than one
+element (RFC 9165 section 3) at ABNF line 1, column 1; it needs the compile
+option abnf: 'lenient')`. The option changes which schemas compile, so it
+is in the Program's source key, as `cuts` and `controlsInBus` are (it rides
+in the registry's flags word beside `controlsInBus`, D141), so a strict and a
+lenient compile of the same text have different keys. A loaded Program is never
+re-checked: its controllers were checked when it was compiled.
 
 Refused at compile time with `control_value`, and the message gives the place
 as ABNF line and column (`(.abnf argument: prose-val (<...>) is not supported

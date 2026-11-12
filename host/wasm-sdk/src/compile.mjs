@@ -54,11 +54,12 @@ function refused(code, line, column, rule, detail) {
 
 export async function compile(text, options = {}) {
   validateCompileOptions(options);
-  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd' } = options;
+  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd', abnf = 'strict' } = options;
   const entries = controlEntries(controls);
   const bytes = typeof text === 'string' ? te.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
-  const registry = registryWords(entries, controlsInBus);
+  // D340: the ABNF parse mode rides in the registry flags (the source key binds it)
+  const registry = registryWords(entries, controlsInBus, abnf === 'lenient');
   // format 2.0: options 20 (cuts) and 21 (groupWords) precede the registry
   const opt = new Int32Array(22 + registry.length).fill(-1);
   opt.set(registry, 22);
@@ -106,7 +107,7 @@ export async function compile(text, options = {}) {
   if (P[30] !== 0) {
     const names = programControls(P, B), byName = new Map(entries.map(e => [e.name, e]));
     for (const { id, argument } of programArguments(P, B)) {
-      const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument)) : true;
+      const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument), { abnf }) : true;
       if (r !== true)
         throw refused('control_value', 0, 0, undefined, ` (.${entry.name} argument${typeof r === 'string' ? ': ' + r : ''})`);
     }

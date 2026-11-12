@@ -69,9 +69,10 @@ function compareBytes(a, b) {
 
 /** The registry words that follow the compile options (snug.compile.ext): n, flags, then per
  *  control its name length, maximum item bytes and name bytes. */
-export function registryWords(entries, inBus) {
+export function registryWords(entries, inBus, abnfLenient = false) {
   if (entries.length === 0) return [];
-  const w = [entries.length, inBus ? 1 : 0];
+  // flags: bit 0 admits them under `bus`; bit 1 the ABNF parse mode (D340), keyed with them
+  const w = [entries.length, (inBus ? 1 : 0) | (abnfLenient ? 2 : 0)];
   for (const { name, maxBytes } of entries) {
     const b = encoder.encode(name);
     w.push(b.length, maxBytes, ...b);

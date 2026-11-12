@@ -433,7 +433,7 @@
   (comment "`target .name argument` for registered control id: one EXT leaf (id,"
            "the argument's encoding, the control's maximum item bytes) and, for each"
            "target leaf, AND(target leaf, EXT) -- the EXT never answers alone (D141).")
-  (if (and (== (hg h H_PROFILE) 2) (== (hg h H_EXT_FLAGS) 0)) (return (fail h ERR_PROFILE pos)))
+  (if (and (== (hg h H_PROFILE) 2) (== (bit-and (hg h H_EXT_FLAGS) 1) 0)) (return (fail h ERR_PROFILE pos)))
   (let [^I32 target (lower-type h (na h node) env)]
     (if (< target 0) (return (neg 1)))
     (vtrunc h T_EXTARG 0)

@@ -21,6 +21,10 @@ export interface CompileOptions {
   controls?: Controls;
   /** Admit extension controls under the `bus` profile (refused there by default). */
   controlsInBus?: boolean;
+  /** `.abnf`/`.abnfb` controllers (snug/abnf): 'strict' (default) parses RFC 5234 + RFC 7405
+   *  as RFC 9165 §3 frames them; 'lenient' also admits snug's non-RFC forms (D340). Bound
+   *  into the source key. */
+  abnf?: 'strict' | 'lenient';
 }
 export type SchemaErrorCode = 'syntax' | 'undefined_name' | 'duplicate_rule' | 'type_group_mismatch' |
   'generic_arity' | 'nonproductive' | 'group_recursion' | 'unwrap' | 'enum' | 'range' |

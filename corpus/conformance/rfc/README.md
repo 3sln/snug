@@ -50,7 +50,9 @@ item). As of 2026-11-11:
 | --- | --- | --- |
 | rfc8949-additional `f97e01`, `faffc00001` under `deterministic` | deviation, D122 | The `deterministic` preset is RFC 8949 §4.2.1 plus §4.2.2's single NaN ("the protocol needs to pick a single representation, typically 0xf97e00"); the default `valid` preset accepts both |
 | RFC 8610 default-timer #1 | contested, S46 | §3.8.6's "implied .ne control" for `.default`; snug, like the Ruby reference, follows Erratum 9229 (Reported): `.default` is an annotation |
-| RFC 9165 figures 3–5 (9 checks) | pending, P9.14 | `.abnf`/`.abnfb` arrive with the optional ABNF module |
+
+RFC 9165 figures 3–5 (9 checks) were pending P9.14. They now pass with the
+optional ABNF module, under its strict default parse (D334, D340).
 
 The runner prints a suite whose failures are all classified as `CLASSIFIED`,
 and counts `classified`, `unexplained` and `stale` in its summary.

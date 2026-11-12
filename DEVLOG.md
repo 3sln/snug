@@ -6120,6 +6120,8 @@ reopen this.
     with RFC 7405's `%s`/`%i` strings and RFC 9165's LF-or-CRLF newline.
   - The start is the controller's leading element. The brief said "the first
     rule", but RFC 9165 §3 and Figures 3–5 lead with an element.
+  - *Amended by D340 (2026-11-12):* strict RFC parsing is now the default.
+    The six leniencies below need the compile option `abnf: 'lenient'`.
   - Six leniencies, each only widening what is accepted:
     - the start may be any alternation;
     - the text's end ends a line;
@@ -6282,6 +6284,122 @@ three small state machines); keeping the copies (the reason for this item).
   needed. Verified on main at `c4ce3c7`: no conflict markers. The full
   differential counts, including Pending polls and yields, equal the run
   before the refactor.
+
+### D340 — `.abnf` / `.abnfb` parse strict RFC 5234 + RFC 7405 + RFC 9165 §3 by default; snug's other forms need `abnf: 'lenient'` (P9.14; amends D334; D230, D301)
+**Decision** (P9.14 engineer, at the coordinator's direction):
+* **Strict is the default.** A controller is RFC 9165 §3's form and nothing
+  more: one element, then optionally a newline and RFC 5234 §4's rulelist,
+  every line ending with a newline. A wider start is written as a group:
+  `(1*DIGIT)`.
+* **What the RFC texts sanction stays on in both modes.** Each is quoted
+  from `corpus/rfc/`:
+  - LF or CR LF as the newline. RFC 9165 §3: "the syntax of ABNF itself
+    (_not_ the syntax expressed in ABNF!) is relaxed to allow a single line
+    feed as a newline: CRLF = %x0A / %x0D.0A".
+  - No rules after the element, or an element alone. RFC 9165 §3:
+    "requiring the controller string to be one valid "element", followed by
+    zero or more valid "rules" separated from the element by a newline".
+  - Blank and comment-only lines among the rules. RFC 5234 §4:
+    `rulelist = 1*( rule / (*c-wsp c-nl) )`.
+  - A start running over continuation lines inside its group or option.
+    RFC 5234 §4: `group = "(" *c-wsp alternation *c-wsp ")"`, `option =
+    "[" *c-wsp alternation *c-wsp "]"`, `c-wsp = WSP / (c-nl WSP)`.
+* **Everything else from D334 needs the compile option `abnf: 'lenient'`**
+  (JS and wasm SDK `compile` options; Rust `CompileOptions::abnf`,
+  `AbnfMode::Lenient`, `#[non_exhaustive]` per D339). No RFC text was found
+  for any of them. Under the default each is `control_value`, with its own
+  kin code, the ABNF place, and the hint "; it needs the compile option
+  abnf: 'lenient'":
+  - a start wider than one element (`start_wide`, 13);
+  - a rule-first controller (`rule_first`, 14). D334's extension, which no
+    other implementation backs: the cddl crate does not check `.abnf`
+    (79480e1);
+  - a last line without a newline (`no_eol`, 15). RFC 5234 §4 ends `rule`
+    and `comment` with `c-nl` / `CRLF`;
+  - a comment character outside WSP / VCHAR (`comment`, 16). RFC 5234 §4:
+    `comment = ";" *(WSP / VCHAR) CRLF`;
+  - whitespace before the start (`leading`, 17);
+  - spaces or a comment after the start on its line (`after_start`, 19).
+    RFC 9165 §3 puts the newline directly after the element. `c-nl` is
+    "comment or newline", and a comment is not a newline;
+  - `=/` before its rule's `=` (`order`, 18). RFC 5234 §3.3 says "later rule
+    definitions adding to the set of alternatives".
+  Lenient mode is exactly D334's dialect. Every controller strict mode
+  accepts, lenient accepts with the same prepared table (the gate checks
+  this). So hosts prepare at bind in lenient mode, and the compile-time
+  check applies the schema's mode.
+* **Keyed.** The mode changes which schemas compile, so it is in the source
+  key. `cuts` is its own element of the limits array in the preimage. The
+  ABNF mode instead rides in bit 1 of the D141 registry flags word, beside
+  bit 0 (`controlsInBus`), so the preimage format is unchanged. Keys move
+  only for lenient compiles, and `.abnf` cannot compile without a registry.
+  program.md §13.3 names the bit. A strict and a lenient compile of the
+  same text have different keys (JS and Rust tests).
+* **Hosts.**
+  - JS: `compile(…, { abnf })`, validated as an enumeration. The registry
+    hook `argument(bytes, { abnf })` gains a context argument.
+    `checkAbnf(text, { abnf })`.
+  - Rust: `AbnfMode`; `check_abnf` (strict) and `check_abnf_in`. Hidden
+    `Control::argument_in` / `argument_detail_in` defaults, so custom
+    controls are unaffected.
+  - wasm SDK: passes the option through.
+  - The ABNF test binary's `P` line carries the parse mode.
+* **Gate** (`bb abnf-test`). Both modes, each against the oracle's own
+  switch (`parseAbnf(text, { lenient })`):
+  - hand vectors (73 grammars, 171 cases): 17 are marked `"parse":
+    "lenient"`, each refused by strict in kin and in the oracle. Seven of
+    them name their `strictError`, one per strict-only code. The other ten
+    are syntax-error vectors whose codes are lenient-mode codes. The rest
+    were made strict-valid (a grouped start, a final newline) with
+    unchanged meaning;
+  - strict-valid vectors: the same table in both modes;
+  - random grammars (600, seed 1; 51,511 runs): half are generated in the
+    strict shape, and every one runs in both modes. 328 are accepted by
+    strict, and their runs are compared with the oracle; 272 are refused
+    by strict in both. 562 strict-valid texts gave the same table in
+    lenient mode;
+  - rule-first variants: 316 run in lenient mode; strict refuses them as
+    `rule_first`;
+  - mutants (2,400): lenient 462 accepted by both; strict 234 accepted by
+    both and 2,166 refused by both;
+  - JS == Rust on 81,065 answers.
+  Seeds 2–4 at 1,500 grammars each also passed.
+  Writing this found an oracle bug: a char-val or prose-val left open at a
+  line's end was joined across the line. RFC 5234 §4's char-val holds no
+  line break. Fixed: refused as a syntax error, as kin does.
+* **Corpus.**
+  - E8 (`"s = 1*%x30-39\r\n"`) is **reclassified**, not edited. Under the
+    strict default it is refused (`control_value`, `rule_first`): an
+    RFC-invalid controller, which is the correct verdict. With `abnf:
+    'lenient'` it is accepted as in D334. The RFC form `"s\r\ns =
+    1*%x30-39\r\n"` is accepted by default (docs/conformance.md S41 and the
+    missing-controls table).
+  - RFC 9165 figures 3–5 pass under strict (the RFC runner `--gate`:
+    996/999, 3 classified, 0 unexplained, 0 stale).
+* **Size.**
+  - `snug/abnf`: 14,506 → 15,788 min, 5,951 → 6,405 gzip, 5,302 → 5,693
+    brotli, from the strict parse paths and messages. The messages share
+    one hint string from kin (`abnf-error-hint`), not seven copies.
+  - `snug/compile` static: 2,609 → 2,636 min, 1,347 → 1,361 gzip, 1,202 →
+    1,230 brotli. This is the option's validation, and its brotli cap of
+    1,227 is exceeded by 3 B.
+  - `snug/compile` full: +94 min / +142 brotli, within its cap.
+  - Both caps were reported to the manager before landing. Only those caps
+    were raised, to the measurement + 2% (D303), with the approval below.
+**Why**: The coordinator's direction (D230, D301's precedent: the RFC
+reading is the default, a deviation is opt-in and keyed). D334 shipped the
+non-RFC forms by default, so a schema that snug accepted could be refused by
+an RFC-strict tool, and rule-first had no second implementation behind it.
+**Alternatives**:
+* Keep lenient by default and add a strict option: rejected. The RFC
+  reading is the default everywhere else (D301).
+* Drop the leniencies entirely: rejected. Existing grammars that were
+  written for D334's dialect keep a path.
+* A separate preimage element for the mode, like `cuts`: this would change
+  the preimage for every compile. The registry flags word is already keyed
+  and already carries a per-registry option.
+- [x] **Size caps:** coordinator, 2026-11-12, under owner delegation D303: snug/abnf +0.45 KB gzip (optional module) and compile-static +3 B brotli, for strict RFC 5234/7405/9165 parsing by default with abnf: 'lenient' as an option (D340)
+- [ ] **Sign-off** (manager).
 
 ## Findings
 
@@ -8899,6 +9017,11 @@ review.
       `n*m` with m < n, and a reversed num-val range.
     - The matcher runs in JS inside the wasm SDK. In-wasm execution would
       grow the binary.
+  - *Amended 2026-11-12 (D340, branch `p914-strict`):* strict RFC 5234 +
+    RFC 7405 + RFC 9165 §3 parsing is the default. D334's leniencies need
+    the compile option `abnf: 'lenient'`, which is in the source key. The
+    gate, the oracle and the hand vectors cover both modes. E8 is
+    reclassified (refused under strict; accepted with the option).
 
 **Documentation and API**
 - [x] **P9.10 — Stranger-pass re-review of docs and API.** Independent

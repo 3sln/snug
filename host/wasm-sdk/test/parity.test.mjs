@@ -623,8 +623,13 @@ test('.abnf / .abnfb (D334): the hand vectors, budgets and sessions == native; k
   t.same('without the module', await outcomeAsync(() => wcompile('r = text .abnf "x"')), await outcomeAsync(() => ncompile('r = text .abnf "x"')));
   for (const g of vectors.grammars) {
     const text = `r = (text / bytes) .abnf h'${hexOf(g.abnf)}'\nb = (text / bytes) .abnfb h'${hexOf(g.abnf)}'`;
-    const wo = await outcomeAsync(() => wcompile(text, { controls: { ...wabnf } }));
-    const no = await outcomeAsync(() => ncompile(text, { controls: { ...nabnf } }));
+    // D340: "parse": "lenient" vectors are refused by the strict default and run with abnf: 'lenient'
+    const mode = g.parse === 'lenient' ? { abnf: 'lenient' } : {};
+    if (g.parse === 'lenient')
+      t.same(`${g.name}: strict refusal`, await outcomeAsync(() => wcompile(text, { controls: { ...wabnf } })),
+        await outcomeAsync(() => ncompile(text, { controls: { ...nabnf } })));
+    const wo = await outcomeAsync(() => wcompile(text, { controls: { ...wabnf }, ...mode }));
+    const no = await outcomeAsync(() => ncompile(text, { controls: { ...nabnf }, ...mode }));
     if (g.error) { t.same(`${g.name}: refused`, wo, no); continue; }
     const w = wo.ok, n = no.ok;
     t.same(`${g.name}: Program`, programBytes(w), programBytes(n));

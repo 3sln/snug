@@ -69,9 +69,9 @@ function floats(h, bytes) {
 export function compile(text, opts = {}) {
   validateCompileOptions(opts);
   const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd',
-    cuts = 'rfc', groupWords } = opts;
+    cuts = 'rfc', groupWords, abnf = 'strict' } = opts;
   const entries = controlEntries(controls);
-  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp, cuts, groupWords); }
+  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp, cuts, groupWords, abnf); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
     if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
@@ -79,10 +79,11 @@ export function compile(text, opts = {}) {
 }
 const RETAIN_WORDS = 1 << 22;
 
-function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cuts, groupWords) {
+function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cuts, groupWords, abnf) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
-  const opt = options(profile, limits, registryWords(entries, inBus));
+  // D340: the ABNF parse mode rides in the registry flags, so the source key binds it
+  const opt = options(profile, limits, registryWords(entries, inBus, abnf === 'lenient'));
   opt[OPT_REGEXP] = regexp === 'iregexp' ? 1 : 0;
   // D301: the literal RFC 8610 cut (`rfc`, the default: commitment epochs, D273) is 0, rule A (`branch`) 1;
   // D276/D281: the arena cap.
@@ -118,7 +119,7 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
     const k = keyPreimageAt(h);
     const key = sha256(Uint8Array.from(h.subarray(k, k + keyPreimageLen(h))));
     for (let i = 0; i < 8; i++) program[7 + i] = (key[4 * i] << 24) | (key[4 * i + 1] << 16) | (key[4 * i + 2] << 8) | key[4 * i + 3];
-    checkArguments(program, pool, entries);
+    checkArguments(program, pool, entries, { abnf });
     return { program, pool, rules: ruleNames(program, pool), controls: entries, warnings: warnings(h, bytes) };
   }
 }
@@ -143,12 +144,13 @@ function controlNamed(bytes, at) {
 }
 
 // A registered control may check its argument once, at compile time (D142); a string
-// answer is the refusal's detail (D334: the ABNF module's messages).
-function checkArguments(program, pool, entries) {
+// answer is the refusal's detail (D334: the ABNF module's messages). The second argument
+// carries compile options a control may depend on: { abnf } (D340).
+function checkArguments(program, pool, entries, context) {
   if (program[30] === 0) return;
   const names = programControls(program, pool), byName = new Map(entries.map(e => [e.name, e]));
   for (const { id, argument } of programArguments(program, pool)) {
-    const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument)) : true;
+    const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument), context) : true;
     if (r !== true)
       throw new SchemaError('control_value', 0, 0, undefined, ` (.${entry.name} argument${typeof r === 'string' ? ': ' + r : ''})`);
   }

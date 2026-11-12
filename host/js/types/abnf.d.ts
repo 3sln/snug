@@ -20,4 +20,4 @@ export declare const abnf: Readonly<{ abnf: Control; abnfb: Control }>;
 export declare function abnfWith(options?: { maxBytes?: number; maxWords?: number }): Readonly<{ abnf: Control; abnfb: Control }>;
 /** A controller on its own (ABNF text, or the CBOR encoding of a text or byte string):
  *  true, or why the compiler would refuse it (with its ABNF line and column). */
-export declare function checkAbnf(text: string | Uint8Array): true | string;
+export declare function checkAbnf(text: string | Uint8Array, options?: { abnf?: 'strict' | 'lenient' }): true | string;

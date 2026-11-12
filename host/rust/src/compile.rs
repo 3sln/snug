@@ -88,12 +88,27 @@ pub enum Cuts {
     Branch,
 }
 
+/// How `.abnf` / `.abnfb` controllers parse (D340): `Strict`, RFC 5234 + RFC 7405 as RFC
+/// 9165 §3 frames them (the default), or `Lenient`, which also admits snug's non-RFC
+/// forms (a start wider than one element, whitespace before it or text after it on its
+/// line, rule-first controllers, an unterminated last line, non-ASCII comments, `=/`
+/// before `=`). Bound into the source key. Not exhaustive (D339).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AbnfMode {
+    #[default]
+    Strict,
+    Lenient,
+}
+
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
 /// and extension controls (D141; none by default).
 #[derive(Default)]
 pub struct CompileOptions<'a> {
     pub profile: i32,
     pub regexp: Regexp,
+    /// D340: the `.abnf` / `.abnfb` parse mode.
+    pub abnf: AbnfMode,
     /// Format 2.0: the cut mode (D301: `Rfc` by default, `Branch` = rule A, D273).
     pub cuts: Cuts,
     /// Format 2.0: the PEG group arena cap in words (D276, D281); None = the default.
@@ -115,6 +130,14 @@ pub trait Registry {
     fn argument_detail(&self, _name: &str, _argument: &[u8]) -> Option<String> {
         None
     }
+    /// `argument_ok` under the compile's ABNF parse mode (D340); by default the mode is ignored.
+    fn argument_ok_in(&self, name: &str, argument: &[u8], _abnf: AbnfMode) -> bool {
+        self.argument_ok(name, argument)
+    }
+    /// `argument_detail` under the compile's ABNF parse mode (D340).
+    fn argument_detail_in(&self, name: &str, argument: &[u8], _abnf: AbnfMode) -> Option<String> {
+        self.argument_detail(name, argument)
+    }
 }
 
 pub fn compile_with_options(text: &str, options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
@@ -126,7 +149,7 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
 }
 
 pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
-    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, group_words } = options;
+    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, group_words, abnf } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
     opt[0] = *profile;
     for (i, v) in limits.iter().enumerate().take(COMPILE_OPTIONS.len()) {
@@ -138,6 +161,11 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
     // D141: the extension-control registry rides after the OPT_WORDS options
     if let Some(c) = controls {
         opt.extend(c.words());
+        // D340: the ABNF parse mode is registry flag bit 1, so the source key binds it
+        let flags = kc::OPT_WORDS as usize + 1;
+        if *abnf == AbnfMode::Lenient && opt.len() > flags {
+            opt[flags] |= 2;
+        }
     }
     let mut fl: Vec<i32> = Vec::new();
     let r = ARENA.with(|cell| {
@@ -197,7 +225,7 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                 program[7 + i] = i32::from_be_bytes([key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]]);
             }
             if let Some(c) = controls {
-                check_arguments(&program, &pool, *c)?;
+                check_arguments(&program, &pool, *c, *abnf)?;
             }
             let rules = rule_names(&program, &pool);
             let warnings = (0..kc::warning_count(&h))
@@ -241,7 +269,7 @@ fn control_named(bytes: &[u8], at: i32) -> Option<String> {
 }
 
 /// D142: a registered control may check its argument once, at compile time.
-fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry) -> Result<(), SchemaError> {
+fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry, abnf: AbnfMode) -> Result<(), SchemaError> {
     if program[30] == 0 {
         return Ok(());
     }
@@ -254,8 +282,8 @@ fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry) -> Res
         }
         let name = &names[program[o + 2] as usize];
         let (ao, al) = (program[o + 3] as usize, program[o + 4] as usize);
-        if !controls.argument_ok(name, &pool[ao..ao + al]) {
-            let detail = match controls.argument_detail(name, &pool[ao..ao + al]) {
+        if !controls.argument_ok_in(name, &pool[ao..ao + al], abnf) {
+            let detail = match controls.argument_detail_in(name, &pool[ao..ao + al], abnf) {
                 Some(d) => format!("{name} argument: {d}"),
                 None => name.clone(),
             };

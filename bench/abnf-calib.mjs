@@ -34,7 +34,7 @@ const vmUnits = out[3];
 let m = new Int32Array(1 << 12);
 function abnf(grammar, input, room, mode = 0) {
   const a = item(grammar), t = new Int32Array(K.abnfWords(a.length));
-  if (K.abnfPrep(a, 0, a.length, t) !== 0) throw new Error(grammar);
+  if (K.abnfPrep(a, 0, a.length, t, K.MODE_LENIENT) !== 0) throw new Error(grammar);   // some rows start wider (D340)
   const b = item(input);
   const go = () => {
     for (;;) {

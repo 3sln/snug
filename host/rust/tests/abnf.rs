@@ -2,7 +2,8 @@
 //! and charges are compared with JS whole by `bb abnf-test`; this checks the binding:
 //! the optional registry entries, compile-time refusals, the item bound, budget and
 //! serialised Programs.
-use snug::abnf::{check_abnf, Abnf};
+use snug::abnf::{check_abnf, check_abnf_in, Abnf};
+use snug::compile::AbnfMode;
 use snug::controls::Controls;
 use snug::{CompileOptions, Program, Schema, Scratch, ValidationOptions};
 
@@ -34,7 +35,7 @@ fn without_the_module_and_with_it() {
     let controls = Controls::generic().with_abnf();
     let opts = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
     let schema = Schema::compile(
-        "date = text .abnf \"4DIGIT \\\"-\\\" 2DIGIT \\\"-\\\" 2DIGIT\\nDIGIT = %x30-39\"\n\
+        "date = text .abnf \"(4DIGIT \\\"-\\\" 2DIGIT \\\"-\\\" 2DIGIT)\\nDIGIT = %x30-39\\n\"\n\
          oid = bytes .abnfb 'oid\noid = 1*arc\nroid = *arc\narc = [nlsb] %x00-7f\nnlsb = %x81-ff *%x80-ff\n'",
         &opts,
     )
@@ -59,40 +60,72 @@ fn refusals_name_the_abnf_place() {
             Some("abnf argument: prose-val (<...>) is not supported at ABNF line 2, column 11")),
         other => panic!("{:?}", other),
     }
-    assert!(check_abnf("1*DIGIT").unwrap_err().starts_with("undefined rule"));
-    assert_eq!(check_abnf("a\na = a \"x\" / \"\""), Ok(()));
+    assert!(check_abnf("(1*DIGIT)").unwrap_err().starts_with("undefined rule"));
+    assert_eq!(check_abnf("a\na = a \"x\" / \"\"\n"), Ok(()));
     // valid ABNF that matches nothing (RFC 5234 §4 admits both; D334)
-    assert_eq!(check_abnf("3*2\"a\""), Ok(()));
+    assert_eq!(check_abnf("(3*2\"a\")"), Ok(()));
     assert_eq!(check_abnf("%x39-30"), Ok(()));
-    assert!(check_abnf("a\na = \"x\"\nA = \"y\"").unwrap_err().starts_with("rule defined twice"));
+    assert!(check_abnf("a\na = \"x\"\nA = \"y\"\n").unwrap_err().starts_with("rule defined twice"));
+}
+
+#[test]
+fn strict_by_default_lenient_on_request_and_keyed() {
+    // D340: RFC 5234 + RFC 7405 + RFC 9165 §3 unless CompileOptions::abnf is Lenient
+    let controls = Controls::new().with_abnf();
+    let strict = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
+    let lenient = CompileOptions { controls: Some(&controls), abnf: AbnfMode::Lenient, ..CompileOptions::default() };
+    let mut s = Scratch::new();
+    for (src, why) in [("r = text .abnf \"1*DIGIT\\nDIGIT = %x30-39\\n\"", "one element"),
+                       ("r = text .abnf \"s = 1*DIGIT\\nDIGIT = %x30-39\\n\"", "begins with a rule")] {
+        let err = Schema::compile(src, &strict).unwrap_err();
+        assert_eq!(err.code(), "control_value");
+        match err {
+            snug::Error::Compile(c) => {
+                let d = c.detail.unwrap_or_default();
+                assert!(d.contains(why) && d.contains("abnf: 'lenient'"), "{}", d);
+            }
+            other => panic!("{:?}", other),
+        }
+        let schema = Schema::compile(src, &lenient).unwrap();
+        assert!(schema.validate(&text("42"), "r", &mut s).is_ok());
+        assert_eq!(schema.validate(&text("4x"), "r", &mut s).unwrap_err().reason, "control");
+    }
+    assert!(check_abnf("1*DIGIT\nDIGIT = %x30-39\n").unwrap_err().contains("abnf: 'lenient'"));
+    assert_eq!(check_abnf_in("1*DIGIT\nDIGIT = %x30-39\n", AbnfMode::Lenient), Ok(()));
+    // a strict-valid schema: the same verdicts in both modes, different source keys
+    let ok = "r = text .abnf \"(1*DIGIT)\\nDIGIT = %x30-39\\n\"";
+    let (a, b) = (Schema::compile(ok, &strict).unwrap(), Schema::compile(ok, &lenient).unwrap());
+    assert_ne!(a.program().source_key(), b.program().source_key());
+    assert_eq!(a.program().source_key(), Schema::compile(ok, &strict).unwrap().program().source_key());
+    assert!(a.validate(&text("42"), "r", &mut s).is_ok() && b.validate(&text("42"), "r", &mut s).is_ok());
 }
 
 #[test]
 fn budget_item_bound_and_serialised_programs() {
     let controls = Controls::new().with_abnf();
     let opts = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
-    let schema = Schema::compile("r = text .abnf \"a\\na = a a / \\\"x\\\" / \\\"\\\"\"", &opts).unwrap();
+    let schema = Schema::compile("r = text .abnf \"a\\na = a a / \\\"x\\\" / \\\"\\\"\\n\"", &opts).unwrap();
     let mut s = Scratch::new();
     assert_eq!(schema.validate(&text(&"x".repeat(300)), "r", &mut s).unwrap_err().reason, "budget");
     assert!(schema.validate(&text("xxxx"), "r", &mut s).is_ok());
     let small = ValidationOptions { budget: Some(20), ..ValidationOptions::default() };
     assert_eq!(schema.validate_with_options(&text("xxxx"), "r", &small, &mut s).unwrap_err().reason, "budget");
 
-    let star = Schema::compile("r = text .abnf \"*%x61\"", &opts).unwrap();
+    let star = Schema::compile("r = text .abnf \"(*%x61)\"", &opts).unwrap();
     let long = text(&"a".repeat(70000));
     let roomy = ValidationOptions { budget: Some(100_000_000), ..ValidationOptions::default() };
     assert_eq!(star.validate_with_options(&long, "r", &roomy, &mut s).unwrap_err().reason, "control_size");
     let mut wide = Controls::new();
     wide.insert_abnf(Abnf::text().with_max_bytes(1 << 20));
     let wopts = CompileOptions { controls: Some(&wide), ..CompileOptions::default() };
-    let big = Schema::compile("r = text .abnf \"*%x61\"", &wopts).unwrap();
+    let big = Schema::compile("r = text .abnf \"(*%x61)\"", &wopts).unwrap();
     assert!(big.validate_with_options(&long, "r", &roomy, &mut s).is_ok());
 
     // the matcher scratch cap is the host's: past it, budget
     let mut tight = Controls::new();
     tight.insert_abnf(Abnf::text().with_max_words(65536));
     let topts = CompileOptions { controls: Some(&tight), ..CompileOptions::default() };
-    let amb = "r = text .abnf \"*(%x61 / %x61 %x61)\"";
+    let amb = "r = text .abnf \"(*(%x61 / %x61 %x61))\"";
     let doc = text(&"a".repeat(3000));
     assert_eq!(Schema::compile(amb, &topts).unwrap().validate_with_options(&doc, "r", &roomy, &mut s).unwrap_err().reason, "budget");
     assert!(Schema::compile(amb, &opts).unwrap().validate_with_options(&doc, "r", &roomy, &mut s).is_ok());

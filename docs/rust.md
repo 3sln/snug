@@ -340,12 +340,18 @@ admits them under the `bus` profile.
 ### `.abnf` / `.abnfb` (RFC 9165 §3)
 
 ```rust
-use snug::{Schema, CompileOptions, Scratch, controls::Controls, abnf::{Abnf, check_abnf}};
+use snug::{Schema, CompileOptions, Scratch, controls::Controls, compile::AbnfMode,
+           abnf::{Abnf, check_abnf, check_abnf_in}};
 let controls = Controls::new().with_abnf();                // the optional ABNF controls (D334)
 let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
-let schema = Schema::compile(r#"id = text .abnf "1*DIGIT\nDIGIT = %x30-39""#, &options)?;
+let schema = Schema::compile(r#"id = text .abnf "(1*DIGIT)\nDIGIT = %x30-39\n""#, &options)?;
 assert!(schema.validate(&[0x62, b'4', b'2'], "id", &mut Scratch::new()).is_ok());
 assert!(check_abnf("a\na = <prose>").unwrap_err().starts_with("prose-val"));
+// strict RFC parsing by default; AbnfMode::Lenient admits snug's other forms (D340)
+assert!(check_abnf("1*DIGIT\nDIGIT = %x30-39").is_err());
+assert_eq!(check_abnf_in("1*DIGIT\nDIGIT = %x30-39", AbnfMode::Lenient), Ok(()));
+let lenient = CompileOptions { controls: Some(&controls), abnf: AbnfMode::Lenient, ..CompileOptions::default() };
+Schema::compile(r#"id = text .abnf "1*DIGIT\nDIGIT = %x30-39""#, &lenient)?;
 let mut wide = Controls::new();
 wide.insert_abnf(Abnf::text().with_max_bytes(1 << 20).with_max_words(1 << 24)); // .abnf only, larger bounds
 # let _ = wide;
@@ -358,7 +364,11 @@ schema using the controls is `unsupported_control` (the `message` names
 `Controls::with_abnf`), and a stored Program using them is
 `Error::MissingControls`. Compile-time refusals (prose-val, syntax,
 undefined rules) are `control_value`, with `detail` such as `abnf argument:
-prose-val (<...>) is not supported at ABNF line 1, column 5`. Verdicts and
+prose-val (<...>) is not supported at ABNF line 1, column 5`. Parsing is
+strict RFC 5234 + RFC 7405 + RFC 9165 §3 unless `CompileOptions::abnf` is
+`AbnfMode::Lenient` (D340; non-exhaustive, in the source key); under the
+default, snug's non-RFC forms are `control_value` with a detail naming the
+option, and `check_abnf_in(text, mode)` checks under either mode. Verdicts and
 budget units are kin's (`snug::snug::abnf`), the same as JS and the wasm SDK.
 `with_max_bytes` sets the item bound (default 65,536). `with_max_words` sets
 the matcher's scratch cap, clamped to 65,536..=16,777,216 words (default

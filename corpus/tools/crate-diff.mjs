@@ -259,14 +259,15 @@ for(const file of CORPORA) {
   const rules = { 'abnf/text': 't', 'abnf/bytes': 'tb', 'abnfb/bytes': 'b', 'abnfb/text': 'bt' };
   for(const g of JSON.parse(readFileSync(root+'corpus/conformance/abnf.json')).grammars) {
     if(g.error) continue;
-    const G = esc(g.abnf), parsed = parseAbnf(g.abnf);
+    // D340: "parse": "lenient" vectors compile with abnf: 'lenient' (the oracle likewise)
+    const lenient = g.parse === 'lenient', G = esc(g.abnf), parsed = parseAbnf(g.abnf, { lenient });
     const cddl = `t = tstr .abnf ${G}\ntb = bstr .abnf ${G}\nb = bstr .abnfb ${G}\nbt = tstr .abnfb ${G}\n`;
     const cases = g.cases.map(c => {
       const content = c.input !== undefined ? new TextEncoder().encode(c.input) : unhex(c.inputHex);
       return { rule: rules[c.mode + '/' + c.major], hex: hex(encode(c.major === 'text' ? new TextDecoder().decode(content) : content, { top: 'any' })), expect: c.expect, content, mode: c.mode };
     });
     const check = k => { if(!parsed.ok) return 'unknown'; const sym = symbolsOf(k.content, k.mode === 'abnfb' ? 'bytes' : 'text'); return !!sym && matchAbnf(parsed, sym); };
-    await suite({ name: 'abnf: ' + g.name, family: g.abnf.trim().includes('\n') ? 'abnf-rules' : 'abnf-element-only', cddl, cases, check, compileOptions: { controls: { ...abnfControls } } }, 'abnf');
+    await suite({ name: 'abnf: ' + g.name, family: g.abnf.trim().includes('\n') ? 'abnf-rules' : 'abnf-element-only', cddl, cases, check, compileOptions: { controls: { ...abnfControls }, ...(lenient ? { abnf: 'lenient' } : {}) } }, 'abnf');
   }
 }
 for(let i=0, left=count;left>0;i++,left-=3) await suite(generated(i),'generated',Math.min(3,left));

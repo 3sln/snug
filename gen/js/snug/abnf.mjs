@@ -27,9 +27,42 @@ export const E_TOO_LARGE = 11;
 
 export const E_INTERNAL = 12;
 
+export const E_START_WIDE = 13;
+
+export const E_RULE_FIRST = 14;
+
+export const E_NO_EOL = 15;
+
+export const E_COMMENT = 16;
+
+export const E_LEADING = 17;
+
+export const E_ORDER = 18;
+
+export const E_AFTER_START = 19;
+
+export const MODE_STRICT = 0;
+
+export const MODE_LENIENT = 1;
+
 export function abnfErrorName(code) {
-    // The message for a status code (hosts put it in the schema error).
+    // The message for a status code (hosts put it in the schema error, then
+    // abnf-error-hint's).
     switch (code) {
+        case 13:
+            return "the start is wider than one element (RFC 9165 section 3)";
+        case 14:
+            return "the controller begins with a rule, not a start element (RFC 9165 section 3)";
+        case 15:
+            return "the last line has no newline (RFC 5234 section 4)";
+        case 16:
+            return "a comment holds a character other than WSP or VCHAR (RFC 5234 section 4)";
+        case 17:
+            return "whitespace before the start element (RFC 9165 section 3)";
+        case 18:
+            return "=/ before its rule's = (RFC 5234 section 3.3)";
+        case 19:
+            return "text after the start element on its line (RFC 9165 section 3)";
         case 1:
             return "the controller is not a text or byte string";
         case 2:
@@ -55,6 +88,15 @@ export function abnfErrorName(code) {
         default:
             return "internal error";
     }
+}
+
+export function abnfErrorHint(code) {
+    // What hosts append to a refusal's detail: for the strict-only codes (D340),
+    // the option that admits the form.
+    if ((code >= E_START_WIDE) && (code <= E_AFTER_START)) {
+        return "; it needs the compile option abnf: 'lenient'";
+    }
+    return "";
 }
 
 export const H_STATUS = 0;
@@ -100,6 +142,8 @@ export const H_VAL = 19;
 export const H_S = 20;
 
 export const H_E = 21;
+
+export const H_LENIENT = 22;
 
 export const HDR = 24;
 
@@ -782,16 +826,26 @@ export function rule(a, p, e, t) {
 }
 
 export function controller(a, s, e, t) {
-    // controller = *c-wsp alternation *c-wsp [ c-nl rulelist0 ]; the start node in
-    // t[H_START]. A controller that begins with a rule (`s = ...`, no start in
-    // front of it) starts at that rule (a leniency). 0 or -1.
+    // Strict (the default, D340), RFC 9165 §3: controller = element [ newline
+    // rulelist0 ], newline = %x0A / %x0D.0A, rulelist0 = *( rule / (*c-wsp c-nl) )
+    // (RFC 5234 §4), every line ending with a newline. Lenient (`abnf: 'lenient'`):
+    // controller = *c-wsp alternation *c-wsp [ c-nl rulelist0 ], the text's end
+    // may end a line, and a controller that begins with a rule (`s = ...`) starts
+    // at that rule. The start node in t[H_START]. 0 or -1.
+    const lenient = t[H_LENIENT] === MODE_LENIENT;
     const p0 = skipCwsp(a, s, e);
     let q = p0;
     let firstRule = false;
+    if ((!lenient) && (p0 > s)) {
+        return fail(t, E_LEADING, s);
+    }
     if ((p0 < e) && alpha(a[p0])) {
         const ne = nameEnd(a, p0, e);
         const d = skipCwsp(a, ne, e);
         if ((d < e) && (a[d] === 61)) {
+            if (!lenient) {
+                return fail(t, E_RULE_FIRST, p0);
+            }
             const sn = newNode(t, K_REF, p0, ne - p0, -1);
             if (sn < 0) {
                 return -1;
@@ -800,7 +854,7 @@ export function controller(a, s, e, t) {
             firstRule = true;
         }
     }
-    if (!firstRule) {
+    if ((!firstRule) && lenient) {
         const p = alternation(a, p0, e, t, 0);
         if (p < 0) {
             return -1;
@@ -815,6 +869,30 @@ export function controller(a, s, e, t) {
             q += n;
         }
     }
+    if (!lenient) {
+        if ((p0 < e) && (digit(a[p0]) || (a[p0] === 42))) {
+            return fail(t, E_START_WIDE, p0);
+        }
+        const ps = element(a, p0, e, t, 0);
+        if (ps < 0) {
+            return -1;
+        }
+        t[H_START] = t[H_RET];
+        q = ps;
+        if (q < e) {
+            const nl = nlen(a, q, e);
+            if (nl > 0) {
+                q += nl;
+            } else {
+                const rq = skipCwsp(a, q, e);
+                if ((rq >= e) || (cnl(a, rq, e) > 0)) {
+                    return fail(t, E_AFTER_START, q);
+                }
+                return fail(t, E_START_WIDE, q);
+            }
+        }
+    }
+    const rulesAt = q;
     while (q < e) {
         if (alpha(a[q])) {
             q = rule(a, q, e, t);
@@ -833,6 +911,41 @@ export function controller(a, s, e, t) {
                 q = e;
             }
         }
+    }
+    // strict: once a newline follows the start, every line (rule, comment or
+    // blank) ends with a newline, i.e. the text ends with LF
+    if ((!lenient) && ((rulesAt < e) && (a[e - 1] !== 10))) {
+        return fail(t, E_NO_EOL, e);
+    }
+    return 0;
+}
+
+export function strictComments(a, s, e, t) {
+    // Strict (D340): every comment holds only WSP and VCHAR (RFC 5234 §4:
+    // comment = ";" *(WSP / VCHAR) CRLF). A `;` outside a char-val starts one
+    // (char-vals never span lines; prose-val is refused). 0 or -1.
+    let inq = false;
+    let i = s;
+    while (i < e) {
+        const c = a[i];
+        if (c === 10) {
+            inq = false;
+        }
+        if (c === 34) {
+            inq = !inq;
+        }
+        if ((c === 59) && (!inq)) {
+            i += 1;
+            while ((i < e) && ((a[i] !== 10) && (a[i] !== 13))) {
+                const d = a[i];
+                if (!((d === 9) || ((d >= 32) && (d <= 126)))) {
+                    return fail(t, E_COMMENT, i);
+                }
+                i += 1;
+            }
+            i -= 1;
+        }
+        i += 1;
     }
     return 0;
 }
@@ -962,6 +1075,11 @@ export function resolve(a, t) {
         }
         if (dup >= 0) {
             return fail(t, E_DUPLICATE, dup);
+        }
+        // strict (D340): the `=` comes first in the text, `=/` only after it
+        // (the group is in text order; og is its first definition)
+        if ((t[H_LENIENT] !== MODE_LENIENT) && (t[og + 3] !== 0)) {
+            return fail(t, E_ORDER, t[og]);
         }
         let body = t[og + 2];
         if ((h - g) > 1) {
@@ -1205,12 +1323,17 @@ export function headArg(a, i) {
     return -1;
 }
 
-export function abnfPrep(a, ao, al, t) {
+export function abnfPrep(a, ao, al, t, mode) {
     // Check and compile the controller encoded at a[ao, +al) (a CBOR text or
-    // byte string) into t (abnf-words(al) words). The status: 0, or a code
-    // (abnf-error-name) with its line and column. Bind-time work over the
-    // schema's own literal: linear but for the n log n sort, not charged (D192).
+    // byte string) into t (abnf-words(al) words), in parse mode MODE_STRICT (RFC
+    // 5234 + RFC 7405 + RFC 9165 §3, the default) or MODE_LENIENT (D340). The
+    // status: 0, or a code (abnf-error-name) with its line and column. Every
+    // controller strict mode admits, lenient mode admits with the same meaning,
+    // so hosts prepare at bind in lenient mode; the compile-time check uses the
+    // schema's mode. Bind-time work over the schema's own literal: linear but
+    // for the n log n sort, not charged (D192).
     t[H_STATUS] = 0;
+    t[H_LENIENT] = mode;
     t[H_EPOS] = 0;
     t[H_ELINE] = 0;
     t[H_ECOL] = 0;
@@ -1260,10 +1383,11 @@ export function abnfPrep(a, ao, al, t) {
         }
         i += (c >>> 24) | 0;
     }
-    if ((controller(a, s, e, t) < 0) || (resolve(a, t) < 0)) {
+    if ((controller(a, s, e, t) < 0) || (((mode !== MODE_LENIENT) && (strictComments(a, s, e, t) < 0)) || (resolve(a, t) < 0))) {
         locate(a, t);
         return t[H_STATUS];
     }
+    t[H_LENIENT] = 0;
     nullability(t);
     refTargets(t);
     repMins(t);

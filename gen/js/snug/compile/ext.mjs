@@ -150,7 +150,7 @@ export function extInit(h, opt) {
         return false;
     }
     const fl = opt[EXT_OPT_AT + 1];
-    if ((fl < 0) || (fl > 1)) {
+    if ((fl < 0) || (fl > 3)) {
         badRegistry(h);
         return false;
     }

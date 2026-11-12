@@ -11,20 +11,24 @@
 //
 // The controller (a text string, or a byte string holding UTF-8) is ABNF (RFC 5234 with
 // RFC 7405's %s/%i strings): one element -- the start -- then optionally a newline and
-// rules. It is checked when the schema compiles (prose-val, syntax errors, undefined
+// rules, exactly as RFC 9165 §3 says by default; `compile(text, { abnf: 'lenient' })`
+// also admits snug's non-RFC forms (D340). It is checked when the schema compiles (prose-val, syntax errors, undefined
 // rules: `control_value`, with the ABNF line and column) and prepared once when a
 // Program is bound. The match is language membership over the target string's Unicode
 // scalars (`.abnf`) or bytes (`.abnfb`), metered in kin against the budget that remains
 // (snug.abnf): verdicts and charges are kin's on every host.
-import { abnfWords, abnfPrep, abnfErrorName, abnfErrorLine, abnfErrorColumn, abnfTableWords,
-  abnfScratchWords, abnfRun, abnfMore, ABNF_DEFAULT_WORDS, ABNF_MIN_WORDS, ABNF_MAX_WORDS } from '../../../gen/js/snug/abnf.mjs';
+import { abnfWords, abnfPrep, abnfErrorName, abnfErrorHint, abnfErrorLine, abnfErrorColumn, abnfTableWords,
+  abnfScratchWords, abnfRun, abnfMore, ABNF_DEFAULT_WORDS, ABNF_MIN_WORDS, ABNF_MAX_WORDS, MODE_STRICT, MODE_LENIENT }
+  from '../../../gen/js/snug/abnf.mjs';
 const METERED = Symbol.for('snug.metered'), ABNF = Symbol.for('snug.abnf');   // ext.mjs's keys
 const NONE = new Int32Array(0);
 
-/** The prepared table of an argument (its encoding at pool[ao, +al)), or an empty one when refused. */
+/** The prepared table of an argument (its encoding at pool[ao, +al)), or an empty one when
+ *  refused. Lenient: every controller the strict default admits means the same there, and
+ *  the compile-time check already applied the schema's mode (D340). */
 function prepare(pool, ao, al) {
   const t = new Int32Array(abnfWords(al));
-  return abnfPrep(pool, ao, al, t) === 0 ? t.slice(0, abnfTableWords(t)) : NONE;
+  return abnfPrep(pool, ao, al, t, MODE_LENIENT) === 0 ? t.slice(0, abnfTableWords(t)) : NONE;
 }
 
 // One scratch, reused (kin never re-enters a run), first sized by abnfScratchWords. When kin
@@ -52,12 +56,15 @@ function run(mode, cap) {
   };
 }
 
-/** true, or the refusal's detail: "<message> at ABNF line L, column C". */
-function argument(bytes) {
-  const t = new Int32Array(abnfWords(bytes.length)), code = abnfPrep(bytes, 0, bytes.length, t);
+/** true, or the refusal's detail: "<message> at ABNF line L, column C<hint>" (the hint names
+ *  the option for a strict-only refusal). The compile options give the parse mode: strict
+ *  RFC 5234 + 7405 + 9165 §3 unless { abnf: 'lenient' } (D340). */
+function argument(bytes, options) {
+  const mode = options?.abnf === 'lenient' ? MODE_LENIENT : MODE_STRICT;
+  const t = new Int32Array(abnfWords(bytes.length)), code = abnfPrep(bytes, 0, bytes.length, t, mode);
   if (code === 0) return true;
-  return abnfErrorLine(t) > 0 ? `${abnfErrorName(code)} at ABNF line ${abnfErrorLine(t)}, column ${abnfErrorColumn(t)}`
-    : abnfErrorName(code);
+  return abnfErrorName(code) + (abnfErrorLine(t) > 0 ? ` at ABNF line ${abnfErrorLine(t)}, column ${abnfErrorColumn(t)}` : '')
+    + abnfErrorHint(code);
 }
 
 function control(name, mode, maxBytes, cap) {
@@ -87,11 +94,11 @@ export function abnfWith({ maxBytes = 65536, maxWords = ABNF_DEFAULT_WORDS } = {
 export const abnf = abnfWith();
 
 /** A controller on its own (ABNF text, or a CBOR text/byte string's encoding): true, or
- *  why the compiler would refuse it. */
-export function checkAbnf(text) {
-  if (typeof text !== 'string') return argument(text);
+ *  why the compiler would refuse it under the same options ({ abnf: 'strict' | 'lenient' }). */
+export function checkAbnf(text, options = {}) {
+  if (typeof text !== 'string') return argument(text, options);
   const b = new TextEncoder().encode(text), n = b.length;
   const h = n < 24 ? [0x60 | n] : n < 256 ? [0x78, n] : n < 65536 ? [0x79, n >> 8, n & 255]
     : [0x7a, n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255];
-  return argument(Uint8Array.from([...h, ...b]));
+  return argument(Uint8Array.from([...h, ...b]), options);
 }

@@ -80,7 +80,9 @@ export function validateCompileOptions(options) {
     limits: value => checked(value, compileLimits, 'limits'),
     unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
     // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`
-    controls: controlsShape, controlsInBus: boolean };
+    controls: controlsShape, controlsInBus: boolean,
+    // D340: .abnf/.abnfb controllers parse as RFC 5234 + 7405 + 9165 §3 ('strict', the default) or 'lenient'
+    abnf: enumeration('strict', 'lenient') };
   checked(options, shape, 'options');
   return options;
 }

@@ -53,7 +53,12 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
   `Controls::with_abnf()`, wasm SDK `snug-wasm-sdk/abnf`. It checks
   RFC 5234 + RFC 7405 grammar membership with a bounded, budget-metered
   Earley recognizer. Without the module these controls are
-  `unsupported_control` (D334).
+  `unsupported_control` (D334). Controllers parse as strict RFC 5234 +
+  RFC 7405 + RFC 9165 §3 by default. The compile option `abnf: 'lenient'`
+  (Rust `CompileOptions::abnf`, `AbnfMode::Lenient`) admits snug's wider
+  forms, such as a wider start or a controller that begins with a rule. The
+  option is in the source key; `checkAbnf(text, { abnf })` and Rust
+  `check_abnf_in` check under either mode (D340).
 - RFC 9682 head numbers `#7.<T>` (D336).
 - Serialised Programs, format 2.0: `program.serialize()`,
   `fromSerialized` (verified, no compiler needed), `sourceKey` for caches

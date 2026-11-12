@@ -14,9 +14,26 @@ pub const E_RANGE: i32 = 9;
 pub const E_NESTING: i32 = 10;
 pub const E_TOO_LARGE: i32 = 11;
 pub const E_INTERNAL: i32 = 12;
+pub const E_START_WIDE: i32 = 13;
+pub const E_RULE_FIRST: i32 = 14;
+pub const E_NO_EOL: i32 = 15;
+pub const E_COMMENT: i32 = 16;
+pub const E_LEADING: i32 = 17;
+pub const E_ORDER: i32 = 18;
+pub const E_AFTER_START: i32 = 19;
+pub const MODE_STRICT: i32 = 0;
+pub const MODE_LENIENT: i32 = 1;
 pub fn abnf_error_name(code: i32) -> &'static str {
-    // The message for a status code (hosts put it in the schema error).
+    // The message for a status code (hosts put it in the schema error, then
+    // abnf-error-hint's).
     return match code {
+        13 => "the start is wider than one element (RFC 9165 section 3)",
+        14 => "the controller begins with a rule, not a start element (RFC 9165 section 3)",
+        15 => "the last line has no newline (RFC 5234 section 4)",
+        16 => "a comment holds a character other than WSP or VCHAR (RFC 5234 section 4)",
+        17 => "whitespace before the start element (RFC 9165 section 3)",
+        18 => "=/ before its rule's = (RFC 5234 section 3.3)",
+        19 => "text after the start element on its line (RFC 9165 section 3)",
         1 => "the controller is not a text or byte string",
         2 => "the controller is not valid UTF-8",
         3 => "ABNF syntax error",
@@ -30,6 +47,14 @@ pub fn abnf_error_name(code: i32) -> &'static str {
         11 => "controller longer than 16 MiB",
         _ => "internal error",
     };
+}
+pub fn abnf_error_hint(code: i32) -> &'static str {
+    // What hosts append to a refusal's detail: for the strict-only codes (D340),
+    // the option that admits the form.
+    if (code >= E_START_WIDE) && (code <= E_AFTER_START) {
+        return "; it needs the compile option abnf: 'lenient'";
+    }
+    return "";
 }
 pub(crate) const H_STATUS: i32 = 0;
 pub(crate) const H_EPOS: i32 = 1;
@@ -53,6 +78,7 @@ pub(crate) const H_RET: i32 = 18;
 pub(crate) const H_VAL: i32 = 19;
 pub(crate) const H_S: i32 = 20;
 pub(crate) const H_E: i32 = 21;
+pub(crate) const H_LENIENT: i32 = 22;
 pub(crate) const HDR: i32 = 24;
 pub(crate) const NW: i32 = 4;
 pub const K_TERM: i32 = 1;
@@ -687,16 +713,26 @@ pub(crate) fn rule(a: &[u8], p: i32, e: i32, t: &mut [i32]) -> i32 {
     return r3;
 }
 pub(crate) fn controller(a: &[u8], s: i32, e: i32, t: &mut [i32]) -> i32 {
-    // controller = *c-wsp alternation *c-wsp [ c-nl rulelist0 ]; the start node in
-    // t[H_START]. A controller that begins with a rule (`s = ...`, no start in
-    // front of it) starts at that rule (a leniency). 0 or -1.
+    // Strict (the default, D340), RFC 9165 §3: controller = element [ newline
+    // rulelist0 ], newline = %x0A / %x0D.0A, rulelist0 = *( rule / (*c-wsp c-nl) )
+    // (RFC 5234 §4), every line ending with a newline. Lenient (`abnf: 'lenient'`):
+    // controller = *c-wsp alternation *c-wsp [ c-nl rulelist0 ], the text's end
+    // may end a line, and a controller that begins with a rule (`s = ...`) starts
+    // at that rule. The start node in t[H_START]. 0 or -1.
+    let lenient: bool = t[(H_LENIENT) as usize] == MODE_LENIENT;
     let p0: i32 = skip_cwsp(a, s, e);
     let mut q: i32 = p0;
     let mut first_rule: bool = false;
+    if (!lenient) && (p0 > s) {
+        return fail(t, E_LEADING, s);
+    }
     if (p0 < e) && alpha(a[(p0) as usize] as i32) {
         let ne: i32 = name_end(a, p0, e);
         let d: i32 = skip_cwsp(a, ne, e);
         if (d < e) && ((a[(d) as usize] as i32) == 61) {
+            if !lenient {
+                return fail(t, E_RULE_FIRST, p0);
+            }
             let sn: i32 = new_node(t, K_REF, p0, ne - p0, -1);
             if sn < 0 {
                 return -1;
@@ -705,7 +741,7 @@ pub(crate) fn controller(a: &[u8], s: i32, e: i32, t: &mut [i32]) -> i32 {
             first_rule = true;
         }
     }
-    if !first_rule {
+    if (!first_rule) && lenient {
         let p: i32 = alternation(a, p0, e, t, 0);
         if p < 0 {
             return -1;
@@ -720,6 +756,30 @@ pub(crate) fn controller(a: &[u8], s: i32, e: i32, t: &mut [i32]) -> i32 {
             q += n;
         }
     }
+    if !lenient {
+        if (p0 < e) && (digit(a[(p0) as usize] as i32) || ((a[(p0) as usize] as i32) == 42)) {
+            return fail(t, E_START_WIDE, p0);
+        }
+        let ps: i32 = element(a, p0, e, t, 0);
+        if ps < 0 {
+            return -1;
+        }
+        t[(H_START) as usize] = t[(H_RET) as usize];
+        q = ps;
+        if q < e {
+            let nl: i32 = nlen(a, q, e);
+            if nl > 0 {
+                q += nl;
+            } else {
+                let rq: i32 = skip_cwsp(a, q, e);
+                if (rq >= e) || (cnl(a, rq, e) > 0) {
+                    return fail(t, E_AFTER_START, q);
+                }
+                return fail(t, E_START_WIDE, q);
+            }
+        }
+    }
+    let rules_at: i32 = q;
     while q < e {
         if alpha(a[(q) as usize] as i32) {
             q = rule(a, q, e, t);
@@ -738,6 +798,40 @@ pub(crate) fn controller(a: &[u8], s: i32, e: i32, t: &mut [i32]) -> i32 {
                 q = e;
             }
         }
+    }
+    // strict: once a newline follows the start, every line (rule, comment or
+    // blank) ends with a newline, i.e. the text ends with LF
+    if (!lenient) && ((rules_at < e) && ((a[(e - 1) as usize] as i32) != 10)) {
+        return fail(t, E_NO_EOL, e);
+    }
+    return 0;
+}
+pub(crate) fn strict_comments(a: &[u8], s: i32, e: i32, t: &mut [i32]) -> i32 {
+    // Strict (D340): every comment holds only WSP and VCHAR (RFC 5234 §4:
+    // comment = ";" *(WSP / VCHAR) CRLF). A `;` outside a char-val starts one
+    // (char-vals never span lines; prose-val is refused). 0 or -1.
+    let mut inq: bool = false;
+    let mut i: i32 = s;
+    while i < e {
+        let c: i32 = a[(i) as usize] as i32;
+        if c == 10 {
+            inq = false;
+        }
+        if c == 34 {
+            inq = !inq;
+        }
+        if (c == 59) && (!inq) {
+            i += 1;
+            while (i < e) && (((a[(i) as usize] as i32) != 10) && ((a[(i) as usize] as i32) != 13)) {
+                let d: i32 = a[(i) as usize] as i32;
+                if !((d == 9) || ((d >= 32) && (d <= 126))) {
+                    return fail(t, E_COMMENT, i);
+                }
+                i += 1;
+            }
+            i -= 1;
+        }
+        i += 1;
     }
     return 0;
 }
@@ -861,6 +955,11 @@ pub(crate) fn resolve(a: &[u8], t: &mut [i32]) -> i32 {
         }
         if dup >= 0 {
             return fail(t, E_DUPLICATE, dup);
+        }
+        // strict (D340): the `=` comes first in the text, `=/` only after it
+        // (the group is in text order; og is its first definition)
+        if (t[(H_LENIENT) as usize] != MODE_LENIENT) && (t[(og + 3) as usize] != 0) {
+            return fail(t, E_ORDER, t[(og) as usize]);
         }
         let mut body: i32 = t[(og + 2) as usize];
         if (h - g) > 1 {
@@ -1096,12 +1195,17 @@ pub(crate) fn head_arg(a: &[u8], i: i32) -> i32 {
     }
     return -1;
 }
-pub fn abnf_prep(a: &[u8], ao: i32, al: i32, t: &mut [i32]) -> i32 {
+pub fn abnf_prep(a: &[u8], ao: i32, al: i32, t: &mut [i32], mode: i32) -> i32 {
     // Check and compile the controller encoded at a[ao, +al) (a CBOR text or
-    // byte string) into t (abnf-words(al) words). The status: 0, or a code
-    // (abnf-error-name) with its line and column. Bind-time work over the
-    // schema's own literal: linear but for the n log n sort, not charged (D192).
+    // byte string) into t (abnf-words(al) words), in parse mode MODE_STRICT (RFC
+    // 5234 + RFC 7405 + RFC 9165 §3, the default) or MODE_LENIENT (D340). The
+    // status: 0, or a code (abnf-error-name) with its line and column. Every
+    // controller strict mode admits, lenient mode admits with the same meaning,
+    // so hosts prepare at bind in lenient mode; the compile-time check uses the
+    // schema's mode. Bind-time work over the schema's own literal: linear but
+    // for the n log n sort, not charged (D192).
     t[(H_STATUS) as usize] = 0;
+    t[(H_LENIENT) as usize] = mode;
     t[(H_EPOS) as usize] = 0;
     t[(H_ELINE) as usize] = 0;
     t[(H_ECOL) as usize] = 0;
@@ -1151,10 +1255,11 @@ pub fn abnf_prep(a: &[u8], ao: i32, al: i32, t: &mut [i32]) -> i32 {
         }
         i += (i32::cast_unsigned(c) >> 24).cast_signed();
     }
-    if (controller(a, s, e, t) < 0) || (resolve(a, t) < 0) {
+    if (controller(a, s, e, t) < 0) || (((mode != MODE_LENIENT) && (strict_comments(a, s, e, t) < 0)) || (resolve(a, t) < 0)) {
         locate(a, t);
         return t[(H_STATUS) as usize];
     }
+    t[(H_LENIENT) as usize] = 0;
     nullability(t);
     ref_targets(t);
     rep_mins(t);

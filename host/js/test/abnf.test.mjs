@@ -29,14 +29,23 @@ test('without the module: unsupported_control naming it; the module names only b
 test('the hand vectors through compile and validate (text and byte string controllers and targets)', async () => {
   let cases = 0;
   for (const g of vectors.grammars) {
-    if (g.error) {
+    // "parse": "lenient" vectors need the abnf: 'lenient' option (D340); the strict default
+    // refuses them
+    const lenient = g.parse === 'lenient', mode = { abnf: lenient ? 'lenient' : 'strict' };
+    if (lenient) {
       await assert.rejects(compile(schemaFor(g.abnf, 'abnf'), { controls: { ...abnf } }),
-        e => e.code === 'control_value' && /\.abnf argument: /.test(e.message), g.name);
+        e => e.code === 'control_value' && (!!g.error || /abnf: 'lenient'/.test(e.message)), g.name);
       assert.equal(typeof checkAbnf(g.abnf), 'string', g.name);
+    }
+    if (g.error) {
+      await assert.rejects(compile(schemaFor(g.abnf, 'abnf'), { controls: { ...abnf }, ...mode }),
+        e => e.code === 'control_value' && /\.abnf argument: /.test(e.message), g.name);
+      assert.equal(typeof checkAbnf(g.abnf, mode), 'string', g.name);
       continue;
     }
-    assert.equal(checkAbnf(g.abnf), true, g.name);
-    const s = await compile(`${schemaFor(g.abnf, 'abnf')}\nb = (text / bytes) .abnfb h'${hexOf(g.abnf)}'`, { controls: { ...abnf } });
+    assert.equal(checkAbnf(g.abnf, mode), true, g.name);
+    if (!lenient) assert.equal(checkAbnf(g.abnf, { abnf: 'lenient' }), true, g.name);
+    const s = await compile(`${schemaFor(g.abnf, 'abnf')}\nb = (text / bytes) .abnfb h'${hexOf(g.abnf)}'`, { controls: { ...abnf }, ...mode });
     for (const c of g.cases) {
       const content = c.input !== undefined ? te.encode(c.input) : Uint8Array.from(Buffer.from(c.inputHex, 'hex'));
       // a text target must be valid UTF-8 for the wire profile; send those as bytes otherwise
@@ -54,11 +63,34 @@ test('the hand vectors through compile and validate (text and byte string contro
 test('prose-val and syntax errors are refused at compile time with the ABNF place', async () => {
   await assert.rejects(compile('r = text .abnf "a\\na = \\"x\\" / <later>"', { controls: { ...abnf } }),
     e => e.code === 'control_value' && /prose-val \(<\.\.\.>\) is not supported at ABNF line 2, column 11/.test(e.message));
-  await assert.rejects(compile('r = text .abnf "1*DIGIT"', { controls: { ...abnf } }),
-    e => /undefined rule .* at ABNF line 1, column 3/.test(e.message));
+  await assert.rejects(compile('r = text .abnf "(1*DIGIT)"', { controls: { ...abnf } }),
+    e => /undefined rule .* at ABNF line 1, column 4/.test(e.message));
   await assert.rejects(compile('r = text .abnf 5', { controls: { ...abnf } }), e => e.code === 'control_value');
   await assert.rejects(compile('r = text .abnf h\'ff\'', { controls: { ...abnf } }), e => /not valid UTF-8/.test(e.message));
-  assert.match(checkAbnf('a\na = b'), /undefined rule/);
+  assert.match(checkAbnf('a\na = b\n'), /undefined rule/);
+});
+
+test('strict RFC parsing by default; abnf: \'lenient\' admits snug\'s other forms and is in the source key (D340)', async () => {
+  const wide = 'r = text .abnf "1*DIGIT\\nDIGIT = %x30-39\\n"', ruleFirst = 'r = text .abnf "s = 1*DIGIT\\nDIGIT = %x30-39\\n"';
+  for (const [src, why] of [[wide, /one element/], [ruleFirst, /begins with a rule/]])
+    await assert.rejects(compile(src, { controls: { ...abnf } }),
+      e => e.code === 'control_value' && why.test(e.message) && /abnf: 'lenient'/.test(e.message));
+  await assert.rejects(compile(wide, { controls: { ...abnf }, abnf: 'loose' }), TypeError);
+  const lw = await compile(wide, { controls: { ...abnf }, abnf: 'lenient' });
+  const lr = await compile(ruleFirst, { controls: { ...abnf }, abnf: 'lenient' });
+  for (const s of [lw, lr]) {
+    assert.deepEqual(s.validate(encode('42'), 'r'), { ok: true });
+    assert.equal(s.validate(encode('4x'), 'r').reason, 'control');
+  }
+  // the same strict-valid schema in both modes: the same verdicts, different source keys
+  const ok = 'r = text .abnf "(1*DIGIT)\\nDIGIT = %x30-39\\n"';
+  const strict = await compile(ok, { controls: { ...abnf } }), strict2 = await compile(ok, { controls: { ...abnf }, abnf: 'strict' });
+  const lenient = await compile(ok, { controls: { ...abnf }, abnf: 'lenient' });
+  assert.equal(strict.program.sourceKey, strict2.program.sourceKey);
+  assert.notEqual(strict.program.sourceKey, lenient.program.sourceKey);
+  assert.deepEqual(lenient.validate(encode('42'), 'r'), strict.validate(encode('42'), 'r'));
+  assert.equal(checkAbnf('1*DIGIT\nDIGIT = %x30-39\n', { abnf: 'lenient' }), true);
+  assert.match(checkAbnf('1*DIGIT\nDIGIT = %x30-39\n'), /abnf: 'lenient'/);
 });
 
 test('RFC 9165 Figure 4 verbatim', async () => {
@@ -71,8 +103,8 @@ test('RFC 9165 Figure 4 verbatim', async () => {
 
 test('exact under choices, map keys and embedded documents', async () => {
   const s = await compile(`
-    choice = (text .abnf "2DIGIT\\nDIGIT = %x30-39") / (text .size 5)
-    keyed = { * (text .abnf "%x61-7A *%x30-39") => int }
+    choice = (text .abnf "(2DIGIT)\\nDIGIT = %x30-39\\n") / (text .size 5)
+    keyed = { * (text .abnf "(%x61-7A *%x30-39)") => int }
     inner = bytes .cbor (text .abnf "\\"ok\\"")`, { controls: { ...abnf } });
   assert.deepEqual(s.validate(encode('42'), 'choice'), { ok: true });
   assert.deepEqual(s.validate(encode('hello'), 'choice'), { ok: true });
@@ -84,7 +116,7 @@ test('exact under choices, map keys and embedded documents', async () => {
 });
 
 test('sessions over every split give the buffer verdict; budget is charged and exhausts cleanly', async () => {
-  const s = await compile('r = [* (text .abnf "a\\na = a a / \\"x\\"")]', { controls: { ...abnf } });
+  const s = await compile('r = [* (text .abnf "a\\na = a a / \\"x\\"\\n")]', { controls: { ...abnf } });
   const bytes = encode(['xxxx', 'x'.repeat(30), 'xy']);
   const want = s.validate(bytes, 'r');
   assert.equal(want.reason, 'control');
@@ -100,22 +132,22 @@ test('sessions over every split give the buffer verdict; budget is charged and e
   }
   assert.ok(budgetSeen);
   // a pathological grammar under the default budget stops with budget, quickly
-  const p = await compile('r = text .abnf "a\\na = a a / \\"x\\" / \\"\\""', { controls: { ...abnf } });
+  const p = await compile('r = text .abnf "a\\na = a a / \\"x\\" / \\"\\"\\n"', { controls: { ...abnf } });
   const t0 = performance.now();
   assert.equal(p.validate(encode('x'.repeat(300)), 'r').reason, 'budget');
   assert.ok(performance.now() - t0 < 5000);
 });
 
 test('maxBytes: the item bound (65,536 by default) and an override', async () => {
-  const s = await compile('r = text .abnf "*%x61"', { controls: { ...abnf } });
+  const s = await compile('r = text .abnf "(*%x61)"', { controls: { ...abnf } });
   assert.deepEqual(s.validate(encode('a'.repeat(1000)), 'r'), { ok: true });
   assert.equal(s.validate(encode('a'.repeat(70000)), 'r', { budget: 1e8 }).reason, 'control_size');
-  const big = await compile('r = text .abnf "*%x61"', { controls: { ...abnf, abnf: { ...abnf.abnf, maxBytes: 1 << 20 } } });
+  const big = await compile('r = text .abnf "(*%x61)"', { controls: { ...abnf, abnf: { ...abnf.abnf, maxBytes: 1 << 20 } } });
   assert.deepEqual(big.validate(encode('a'.repeat(70000)), 'r', { budget: 1e8 }), { ok: true });
 });
 
 test('abnfWith: the matcher scratch cap (maxWords) is the host\'s; past it, budget', async () => {
-  const text = 'r = text .abnf "*(%x61 / %x61 %x61)"', doc = encode('a'.repeat(3000)), opts = { budget: 1e8 };
+  const text = 'r = text .abnf "(*(%x61 / %x61 %x61))"', doc = encode('a'.repeat(3000)), opts = { budget: 1e8 };
   const small = await compile(text, { controls: { ...abnfWith({ maxWords: 65536 }) } });
   assert.equal(small.validate(doc, 'r', opts).reason, 'budget');
   const usual = await compile(text, { controls: { ...abnf } });
