@@ -72,7 +72,13 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
   dependency (`validate_blob_async`, `validate_reader_async`,
   `read_sequence_async`; D331).
 - `[wasm-sdk]` Experimental: the same JS API over the Rust build as
-  WebAssembly, opt-in (D130).
+  WebAssembly, opt-in (D130), as the npm package `@3sln/snug-wasm` (D345).
+  `init` loads the runtime module from a path, URL, `Response`, bytes or a
+  `WebAssembly.Module`, and `init({ runtime, compiler })` sets both
+  modules; `@3sln/snug-wasm/inline` carries both modules as base64 for
+  `initSync()` with no files; `/unicode` re-exports the Unicode tables; the
+  `.wasm` files are exported for Workers module bindings. The raw modules
+  are release artefacts too, with their SHA-256 and a build manifest.
 
 ### Breaking
 

@@ -25,7 +25,7 @@ These artefacts could be published:
 | --- | --- | --- |
 | npm package (native JS, the default per D130) | `host/js`, staged by `npm run build` | `host/js/package.json`: `"name": "snug"`, `"version": "0.0.0"`, `"private": true`, `"engines": { "node": ">=20" }` (§2) |
 | Rust crate | `host/rust` + `gen/rust`, assembled by `kin/scripts/rust-crate` into `.cache/snug-rs/` | `host/rust/Cargo.toml`: `name = "snug"`, `version = "0.0.0"`, `publish = false`, edition 2021, `rust-version = "1.87"` (§2), no dependencies |
-| wasm SDK (opt-in per D130; experimental) | `host/wasm-sdk` over the module built by `kin/scripts/wasm-build sdk` / `cc` | `host/wasm-sdk/package.json`: `"name": "snug-wasm-sdk"`, `"version": "0.0.0"`, `"private": true`, no build or staging script |
+| wasm SDK (opt-in per D130; experimental) | `host/wasm-sdk` over the modules built by `kin/scripts/wasm-build sdk` / `cc` and staged by `bb wasm-release`; packaged by `host/wasm-sdk/package-build.mjs` (P9.17) | `host/wasm-sdk/package.json`: `"name": "@3sln/snug-wasm"`, `"version": "0.0.0"`, `"private": true` |
 
 **Proposed: one version number for all artefacts, released in lockstep.**
 The artefacts share one core: the same kin sources generate the compiler,
@@ -270,7 +270,7 @@ floors were tested; the Node and Rust rows are superseded by the above.
 | Browsers | ES2022, which the guide's esbuild recipe targets (`--target=es2022`), plus `String.prototype.isWellFormed` (ES2024): Chrome/Edge 111+, Firefox 119+, Safari 16.4+ | Chrome 156 headless under a strict CSP, at revision `f275938` (2026-11-03) only (guide "Browser and Worker recipes") | **Proposed:** state the feature floor as "expected to work". Claim only evergreen Chrome as tested, and only after `tools/runtime/run.mjs` passes on the release commit (§4). Firefox and Safari are untested, and the release notes say so. |
 | Workers | Same as browsers. The native package needs no wasm and no `eval`. | workerd 1.20261102.1, compatibility date 2025-12-01, no `nodejs_compat`, at `f275938` only | **Proposed:** as for browsers, re-run on the release commit. |
 | Rust | MSRV ≥ **1.87**: generated code uses `cast_signed` / `cast_unsigned` (1.87). Also `Option::is_none_or` (1.82) and return-position `impl Trait` in traits (1.75, D331). Edition 2021. | rustc 1.92.0 (Homebrew stable) only: `rust-api-test`, `check` and every Rust gate | **Proposed, needs confirmation:** `rust-version = "1.87"`, but only after a `cargo +1.87 test` run on the assembled crate becomes a release gate. Until then declare `rust-version = "1.92"`, the only tested toolchain. MSRV policy: raised only in a minor release, with notice. |
-| wasm SDK (build) | `wasm32-unknown-unknown`, nightly-only flags (`-Zbuild-std`, `panic=immediate-abort`), toolchain pinned to `nightly-2026-09-16` (`kin/scripts/wasm-build`, override `SNUG_WASM_TOOLCHAIN`) | `bb wasm-sdk-test` under Node 24.6.0; the D005 / D130 benches in Node, Chrome and workerd at `93f8718` | **Proposed:** consumers never need Rust, because the SDK ships prebuilt `.wasm`. The pinned nightly is a build requirement only, and the release records it with the module's SHA-256. Runtime: any engine with WebAssembly 1.0 plus the features rustc enables by default for that target at the pinned toolchain. The release must list those features after inspecting the module. Not done yet. Hosts need `'wasm-unsafe-eval'` under a CSP, and workerd needs a `.wasm` module binding (D130). |
+| wasm SDK (build) | `wasm32-unknown-unknown`, nightly-only flags (`-Zbuild-std`, `panic=immediate-abort`), toolchain pinned to `nightly-2026-09-16` (`kin/scripts/wasm-build`, override `SNUG_WASM_TOOLCHAIN`) | `bb wasm-sdk-test` under Node 24.6.0; the D005 / D130 benches in Node, Chrome and workerd at `93f8718` | **Proposed:** consumers never need Rust, because the SDK ships prebuilt `.wasm`. The pinned nightly is a build requirement only, and the release records it with the module's SHA-256. Runtime: any engine with WebAssembly 1.0 plus the features rustc enables by default for that target at the pinned toolchain. The release lists them: `bb wasm-release` checks each module with `wasm-opt` and records the features it needs in `MANIFEST.json` (bulk-memory and sign-ext, 2026-11-12, P9.17). Hosts need `'wasm-unsafe-eval'` under a CSP, and workerd needs a `.wasm` module binding (D130). |
 | TypeScript | The declarations are hand-written. The guide's tsconfig uses ES2022 with NodeNext. | TypeScript 5.8.3, consumer check on 2026-11-03 | **Proposed:** "tested with 5.8". Declarations change with the API rules of §1.3. |
 
 **How support is tested (proposed):** a runtime or toolchain counts as
@@ -354,7 +354,7 @@ go. Delegations such as D303 cover size caps only, not releases.
    - `bb nav-test`, `bb write-test`, `bb unicode-test`, `bb abnf-test`;
    - `bb rust-api-test` (default mode, and the `full` mode once P9.6a
      lands);
-   - `bb wasm-sdk-test`, if the SDK ships;
+   - `bb wasm-sdk-test` and `bb wasm-package-test` (the SDK ships, O3);
    - `bb size`, `bb watchdog-test`;
    - `npm test` in `host/js`;
    - `node corpus/tools/run-rfc-corpus.mjs --gate` (no unexplained or
@@ -371,11 +371,22 @@ go. Delegations such as D303 cover size caps only, not releases.
    - crate: `kin/scripts/rust-crate`, then `cargo package --list` and
      `cargo package --no-verify`, offline, in the assembled crate;
    - SDK: `kin/scripts/wasm-build sdk` and `cc` with the pinned toolchain
-     and the pinned `wasm-opt` (binaryen in `bench/compare`, D341). The
+     (`nightly-2026-09-16` with `wasm32-unknown-unknown` and `rust-src`,
+     which `-Zbuild-std` needs; the default in `kin/scripts/wasm-build`,
+     overridden only by `SNUG_WASM_TOOLCHAIN`, and the manifest records
+     which was used) and the pinned `wasm-opt` (binaryen in `bench/compare`, D341). The
      shipped modules are `.cache/snug-wasm-sdk/snug.wasm` (opt-level 3, then
      `wasm-opt -O3`) and `.cache/snug-wasm-cc/snug.wasm` (opt-level "z",
-     then `wasm-opt -Oz`). `bb wasm-size` gates their sizes. The SDK staging
-     does not exist yet (§8).
+     then `wasm-opt -Oz`). `bb wasm-size` gates their sizes.
+     `bb wasm-release` runs both builds and stages the release artefacts in
+     `.cache/release/wasm`: `snug.wasm`, `snug-compiler.wasm`, `SHA256SUMS`
+     and `MANIFEST.json` (version, commit, toolchain, `wasm-opt` version,
+     sizes, SHA-256, required wasm features). Then
+     `node host/wasm-sdk/package-build.mjs` stages `@3sln/snug-wasm` from
+     those exact bytes into `.cache/release/npm/snug-wasm`, and
+     `npm pack --dry-run` there lists its files. `bb wasm-package-test` does
+     all of this and installs the packed tarball into a scratch project
+     (docs/wasm-sdk.md).
 
    Record each artefact's SHA-256 and the producing commit in DEVLOG.
 6. **Licence and notice check:**
@@ -558,7 +569,8 @@ items are for the release commit or for earlier items:
     experiment".
 - **Packaging**:
   - Add `CHANGELOG.md` to `package-build.mjs`'s copied files.
-  - The SDK has no staging or build script.
+  - The SDK has no staging or build script. *Done in P9.17 (D345):
+    `bb wasm-release` and `host/wasm-sdk/package-build.mjs`.*
   - The crate is assembled into `.cache/snug-rs/` and has no
     publish-ready layout.
 - **Rust API**: `SourceError`, `Value`, `OnInvalid` and the option enums
