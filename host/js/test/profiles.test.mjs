@@ -129,7 +129,7 @@ test('encode: Maps, Tagged and undefined under each preset; the profile decides 
   assert.equal(toHex(encode(new Tagged(1, NaN))), 'c1f97e00');
   assert.equal(toHex(encode(new Tagged(32, '/relative'))), 'd820692f72656c6174697665');
   for (const [v, code, opts] of [[new Tagged(0, 'yesterday'), 'tag'], [new Tagged(1, 'x'), 'tag'], [new Tagged(0, '2024-01-01T00:00:60Z'), 'tag'],
-    [new Tagged(32, 'http://[x'), 'tag'], [new Tagged(0, '2013-03-21t20:04:00z'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, new Uint8Array(9)), 'tag'],
+    [new Tagged(32, 'http://[x'), 'tag'], [new Tagged(0, '2013-03-21t20:04:00z'), 'tag'], [new Tagged(5, [1, 2]), 'tag', { tags: 'standard' }], [new Tagged(2, 'x'), 'tag'],
     [new Tagged(24, Uint8Array.of(1, 2)), 'trailing'], [new Tagged(24, Uint8Array.of(0x18, 1)), 'non_shortest', { wire: 'deterministic' }],
     [new Tagged(24, 'text'), 'tag'], [new Map([[1, 0], [1n, 1]]), 'duplicate_key']])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code}`);
@@ -251,9 +251,12 @@ test('any tag (D180): decode, encode, Writer, views and schemas over tags of any
   assert.equal(toHex(encode(new Tagged(2 ** 32 - 2, 1))), 'dafffffffe01');
   assert.equal(toHex(encode(new Tagged(4294967298, Uint8Array.of(0)))), 'db00000001000000024100');  // not a bignum
   assert.equal(toHex(encode(new Tagged(65, Uint8Array.of(0, 1)))), 'd841420001');
+  // D342: a Tagged bignum of bytes (what decode gives a non-preferred one) is written as its integer, preferred
+  assert.equal(toHex(encode(new Tagged(2, Uint8Array.of(1, 2)))), '190102');
+  assert.throws(() => encode(new Tagged(2, 'x')), { name: 'SnugFault', code: 'tag' });
   for (const [v, code, opts] of [[new Tagged(65535, 0), 'tag'], [new Tagged(2 ** 32 - 1, 0), 'tag'], [new Tagged(2n ** 64n - 1n, 0), 'tag'],
     [new Tagged(65, Uint8Array.of(0)), 'tag'], [new Tagged(87, Uint8Array.of(0)), 'tag'], [new Tagged(64, 'text'), 'tag'],
-    [new Tagged(2, Uint8Array.of(1, 2)), 'tag'], [new Tagged(70, Uint8Array.of(0, 0, 0, 0)), 'tag'],
+    [new Tagged(70, Uint8Array.of(0, 0, 0, 0)), 'tag'],
     [new Tagged(4, [-1, 15]), 'tag', { tags: 'bindle' }], [new Tagged(4, [-1, 1.5]), 'decimal'], [new Tagged(18, []), 'tag', { tags: 'standard' }], [new Tagged(2 ** 32, 0), 'tag', { tags: 'standard' }],
     [new Tagged(1000, new Tagged(0, 'x')), 'tag'], [new Tagged(18, new Tagged(18, [])), 'depth', { maxDepth: 1 }]])
     assert.throws(() => encode(v, opts), { name: 'SnugFault', code }, `${code} ${String(v.tag ?? v[0]?.tag)}`);
@@ -334,4 +337,32 @@ test('Simple values: class, codec, Writer, views and #7.n', async () => {
   assert.equal(s.validate(fromHex('82f0f8ff'), 'r', { wire: 'bindle' }).reason, 'cbor/simple');
   assert.equal(s.validate(fromHex('f818'), 'u').reason, 'cbor/malformed');
   await assert.rejects(compile('r = #7.256'));
+});
+
+test('D342: f8 below 32 is malformed under every preset; non-preferred bignums stay distinct data items', async () => {
+  // RFC 8949 §3.3: "Such sequences are not well-formed" -- never non_shortest or simple
+  for (const h of ['f800', 'f805', 'f817', 'f818', 'f81f']) for (const w of ['valid', 'deterministic', 'bindle'])
+    assert.throws(() => decode(fromHex(h), { wire: w, top: 'any' }), { name: 'SnugFault', code: 'malformed' });
+  // RFC 8949 §5.6.1: an integer and a bignum are distinct keys; decode keeps them apart (a Tagged of the bytes)
+  const m = decode(fromHex('a20100c2410101'));
+  assert.equal(m.size, 2);
+  assert.equal(m.get(1), 0);
+  const [[k2, v2]] = [...m].filter(([k]) => k instanceof Tagged);
+  assert.equal(k2.tag, 2); assert.deepEqual([...k2.value], [1]); assert.equal(v2, 1);
+  for (const [h, tag, bytes] of [['c24101', 2, [1]], ['c34100', 3, [0]], ['c2420001', 2, [0, 1]], ['c240', 2, []],
+    ['c24a00010000000000000000', 2, [0, 1, 0, 0, 0, 0, 0, 0, 0, 0]]]) {
+    const v = decode(fromHex(h));
+    assert.ok(v instanceof Tagged); assert.equal(v.tag, tag); assert.deepEqual([...v.value], bytes);
+  }
+  // preferred serialization (beyond 64 bits, no leading zero) is a bigint, as before
+  assert.equal(decode(fromHex('c249010000000000000000')), 1n << 64n);
+  assert.equal(decode(fromHex('c349010000000000000000')), -1n - (1n << 64n));
+  // encode writes such a Tagged as its integer in preferred serialization (as Rust's Value::BigInt)
+  assert.equal(toHex(encode(decode(fromHex('c24101')))), '01');
+  assert.equal(toHex(encode(decode(fromHex('c34100')))), '20');
+  assert.equal(toHex(encode(decode(fromHex('c24a00010000000000000000')))), 'c249010000000000000000');
+  // the duplicate check agrees: 1 and 2(h'01') are distinct, 2(h'01') twice is a duplicate
+  const s = await compile('r = { * any => any }');
+  assert.deepEqual(s.validate(fromHex('a20100c2410101'), 'r'), { ok: true });
+  assert.equal(s.validate(fromHex('a2c2410100c2410101'), 'r').reason, 'cbor/duplicate_key');
 });

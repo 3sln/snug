@@ -7,7 +7,8 @@
 // error offset is written by hand from docs/profiles.md and docs/scanner.md, then held by the gates (bb scan-test,
 // rscan-test, vm-test, vmsession-test, host/js npm test) against the scanner, the resumable scanner, the VM and the
 // session, JS and Rust. RFC 8949 Appendix A examples are marked `rfc`. The Bindle column (`bindle`) is the code
-// cbor.mjs's profile gives the same bytes (bb scan-test checks it against bench/baseline/cbor-3sln.mjs too).
+// cbor.mjs's profile gives the same bytes (bb scan-test checks it against bench/baseline/cbor-3sln.mjs too), except
+// that f8 below 32 is malformed (RFC 8949 §3.3, D342) where cbor.mjs says non_shortest or simple.
 import { writeFileSync } from 'node:fs';
 
 // ------------------------------------------------------------------ a head writer (hex)
@@ -142,18 +143,22 @@ ref('a float truncated', 'fa7f80', 'truncated', 0, { bindle: 'truncated' });
 
 // Simple values.
 acc('undefined in an array and as a map value', arr('f7', map([tstr('u'), 'f7'])), [U, { u: U }], { bindle: 'simple' });
-ref('f8 17: non-shortest simple', 'f817', 'non_shortest', 0, { bindle: 'non_shortest' });
 
 // Simple values (RFC 8949 §3.3, D284): 0..19 in one byte, 32..255 as f8 xx; f8 with a value below 32 is not
-// well-formed; Bindle refuses every one but false/true/null (simple).
+// well-formed, malformed under every preset, Bindle too (D342; cbor.mjs says non_shortest or simple there); Bindle
+// refuses every other one but false/true/null (simple).
+ref('f8 00: not well-formed', 'f800', 'malformed', 0, { bindle: 'malformed' });
+ref('f8 17: not well-formed (not non-shortest)', 'f817', 'malformed', 0, { bindle: 'malformed' });
+ref('f8 14: false in two bytes is not well-formed', 'f814', 'malformed', 0, { bindle: 'malformed' });
+ref('f8 05 as a map value', map([tstr('s'), 'f805']), 'malformed', 3, { bindle: 'malformed' });
 acc('simple(0)', 'e0', S(0), { bindle: 'simple' });
 acc('simple(19)', 'f3', S(19), { bindle: 'simple' });
 acc('simple(32): the smallest two-byte simple value', 'f820', S(32), { bindle: 'simple' });
 acc('simple values in an array', arr('f0', 'f8ff'), [S(16), S(255)], { bindle: 'simple' });
 acc('simple values as map keys', map(['f0', '01'], ['f8ff', '02']), M([S(16), 1], [S(255), 2]), { bindle: 'key_type' });
 acc('a simple value as a map value', map([tstr('s'), 'f820']), { s: S(32) }, { bindle: 'simple' });
-ref('f8 18: simple(24) is not well-formed', 'f818', 'malformed', 0, { bindle: 'simple' });
-ref('f8 1f: simple(31) is not well-formed', 'f81f', 'malformed', 0, { bindle: 'simple' });
+ref('f8 18: simple(24) is not well-formed', 'f818', 'malformed', 0, { bindle: 'malformed' });
+ref('f8 1f: simple(31) is not well-formed', 'f81f', 'malformed', 0, { bindle: 'malformed' });
 ref('f8 18 in an array', arr('f0', 'f818'), 'malformed', 2, { bindle: 'simple' });
 ref('f8 truncated', 'f8', 'truncated', 0, { bindle: 'truncated' });
 ref('simple keys out of order', map(['f8ff', '01'], ['f0', '02']), 'key_order', 4, { bindle: 'key_type' });
@@ -325,7 +330,7 @@ const doc = {
     + 'cbor-profile.json\'s, plus {"$map": [[key, value], ...]} a Map, {"$tag": n, "value": v} a Tagged, {"$float": '
     + '"NaN" | "Infinity" | "-Infinity" | "-0"}, {"$undefined": true} and {"$simple": n} a Simple (D284); a missing value is not checked. Refuse '
     + 'vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of '
-    + 'the same bytes under { profile: "bindle", top: "any" } (cbor.mjs\'s). standard, when given, is the code of '
+    + 'the same bytes under { profile: "bindle", top: "any" } (cbor.mjs\'s, except malformed for f8 below 32, D342). standard, when given, is the code of '
     + 'the same bytes under { tags: "standard" } (D180; else the vector\'s own verdict). A $tag number beyond 2^53 - 1 '
     + 'is a decimal string.',
   generator: 'corpus/tools/export-deterministic.mjs',

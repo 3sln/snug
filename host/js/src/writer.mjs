@@ -9,7 +9,7 @@ import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { validateOptions, selectOptions } from './options.mjs';
 import { profileFlags, strictArraysOf, keysOf, standardTags, anyTags, rfcFloats, undefinedOk, noncharactersOk } from './profiles.mjs';
-import { Decimal, NDArray, Float16Bytes, Tagged, Simple, simpleOk, typedInfo } from './values.mjs';
+import { Decimal, NDArray, Float16Bytes, Tagged, Simple, simpleOk, typedInfo, bignumOf } from './values.mjs';
 import { copyTypedBytes } from './typed-bytes.mjs';
 import { scan } from './scan.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
@@ -341,6 +341,12 @@ export class Writer {
    * scanner under this profile). */
   #tagged(v, depth) {
     const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;
+    if ((t === 2 || t === 3) && v.value instanceof Uint8Array) {
+      // a bignum outside preferred serialization decodes to a Tagged of its bytes (D342): written as its integer, in
+      // preferred serialization (as Rust's Value::BigInt)
+      this.#bigint(bignumOf(t, v.value), depth);
+      return;
+    }
     if ((t === 4 || t === 40) && (this.#flags & 12) !== 0) {
       // above the Bindle tag set a decimal fraction or ndarray outside Decimal's / NDArray's invariants decodes to a
       // Tagged (D265, D267): written as given, its content held to the RFC rules by the scanner

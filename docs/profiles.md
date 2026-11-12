@@ -61,11 +61,10 @@ What `valid` reads, and how:
 | Indefinite-length arrays, maps, byte and text strings | accepted (chunks of the string's own major type, definite) | `indefinite` |
 | Non-shortest integer, length or tag heads; floats wider than needed | accepted | `non_shortest` |
 | Map keys out of bytewise order | accepted, read in wire order | `key_order` |
-| Duplicate keys, compared by value: their canonical (EC) encodings, so `1` / `1801`, `0.0` / `-0.0`, two NaNs with the same payload in different widths (RFC 8949 §5.6.1; NaNs with different payloads are distinct keys). A bignum key is compared as a tagged item: `1` and `2(h'01')` are distinct keys here, although decode materialises both as the integer 1 and so refuses that map with `unsupported` | `duplicate_key` | `duplicate_key` (or `key_order`, whichever comes first) |
+| Duplicate keys, compared by value: their canonical (EC) encodings, so `1` / `1801`, `0.0` / `-0.0`, two NaNs with the same significand in different widths (RFC 8949 §5.6.1; NaNs with different significands are distinct keys). A bignum key is compared as a tagged item, in the generic data model (§5.6.1: integers are "distinct … from the various big numbers (Tags 2 to 5)"): `1` and `2(h'01')` are distinct keys, and so are `2(h'01')` and `2(h'0001')` (D342) | `duplicate_key` | `duplicate_key` (or `key_order`, whichever comes first) |
 | NaN with a payload or sign, any width | accepted | `float` |
-| Bignums with leading zeros or below 2⁶⁴ (tags 2/3) | accepted (the integer) | `bignum` |
-| `f8` with a value below 24 | `malformed` (RFC 8949 Appendix F) | `non_shortest` |
-| `f8 18`–`f8 1f` (simple values 24–31, RFC 8949 §3.3) | `malformed` | `malformed` (Bindle: `simple`) |
+| Bignums with leading zeros or below 2⁶⁴ (tags 2/3) | accepted: a data item distinct from the integer of the same value (D342); JS decode gives a `Tagged` of the content bytes, Rust a `Value::BigInt` of them | `bignum` |
+| `f8` with a value below 32 (RFC 8949 §3.3: "Such sequences are not well-formed"; Appendix F) | `malformed` | `malformed` (Bindle too; D342) |
 | Unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) | accepted (`Simple`, D284) | accepted (Bindle: `simple`) |
 | Invalid UTF-8, a refused known tag's content, a lone break, truncation | refused with its code | refused with its code |
 
@@ -75,12 +74,17 @@ refusal met before a well-formedness error is the answer. For example, RFC
 break as a map value) are `duplicate_key` at offset 3 under `valid`, not
 `truncated` / `malformed` ([scanner.md](scanner.md#under-pf_valid-p84-d260d264),
 "Precedence across classes"). Only `truncated` and `malformed` are
-well-formedness verdicts, with one exception: under `deterministic` and
-Bindle, `f8` followed by a value below 24 (not well-formed, RFC 8949 §3.3)
-is reported `non_shortest`, because the shortest-form check sees it first.
+well-formedness verdicts, under every preset: `f8` followed by a value below
+32 is `malformed` under `deterministic` and Bindle too, not `non_shortest`
+or `simple` (D342).
 
-Values: a decoded map keeps its keys in wire order (D267); a bignum with
-leading zeros decodes to its integer; JavaScript numbers (and Rust's
+Values: a decoded map keeps its keys in wire order (D267); a bignum outside
+preferred serialization (leading zeros, or a value major 0/1 can hold) is
+kept as the distinct data item it is (D342): JS decode gives `Tagged { tag:
+2 | 3, value: Uint8Array }` of its exact content bytes, Rust `Value::BigInt`
+of them, and encode writes either as its integer in preferred serialization.
+CDDL matching and the duplicate-key check read it the same way (`r = 1` does
+not match `2(h'01')`). JavaScript numbers (and Rust's
 `Value::Float(f64)`) do not keep a NaN payload — a View's `raw()` keeps the
 bytes. `encode(decode(x))` is the deterministic encoding of `x`'s value.
 
@@ -108,7 +112,7 @@ and sequences take such items whole (D283). Costs: bench/README.md
 | Integers | Major 0/1 for −2⁶⁴..2⁶⁴−1; beyond that a bignum (tags 2/3) of 9..128 content bytes, no leading zero (RFC 8949 §3.4.3 preferred serialization; `valid`: any bignum of at most 128 content bytes) |
 | Floats | Shortest exact width (float16 ⊂ float32 ⊂ float64; `valid`: any width). In schemas the prelude names `float16`/`float32`/`float64` are sets of values, not widths (D328): `float32` admits any float binary32 represents exactly, in any encoding, and `float64` every float |
 | Text | Well-formed UTF-8: no overlong, no surrogate, nothing above U+10FFFF |
-| Simple values | `false`, `true`, `null`; `deterministic` (and `valid`) also `undefined` and the unassigned values 0–19 and 32–255 (`undefinedValue`, D284), Bindle refuses them (`simple`); `f8` with a value below 32 is not well-formed: `valid` says `malformed`; `deterministic` and Bindle say `non_shortest` below 24, and for 24–31 `malformed` (Bindle: `simple`) |
+| Simple values | `false`, `true`, `null`; `deterministic` (and `valid`) also `undefined` and the unassigned values 0–19 and 32–255 (`undefinedValue`, D284), Bindle refuses them (`simple`); `f8` with a value below 32 is not well-formed: `malformed` under every preset (D342) |
 | Limits | `maxBytes` 1,500,000; `maxDepth` 32; `maxEntries` 65,536; `maxItems` 131,072; bignum content 128 bytes |
 
 Map ordering compares complete deterministic key encodings byte by byte.
@@ -218,7 +222,7 @@ The options are one integer of **profile flags**, decided in kin
 | 0–1 | `PF_KEYS` | text (+ `cose` labels) | 1 text + integer; 2 or 3 any |
 | 2–3 | `PF_TAGS` | the Bindle set | 1 the standard set; 2 or 3 any tag (D180) |
 | 4 | `PF_FLOATS` | Bindle float refusals | RFC 8949 deterministic floats |
-| 5 | `PF_UNDEFINED` | simple values but `f4`–`f6` refused (`simple`) | `f7` and the unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) accepted; `f8 18`–`f8 1f` `malformed` (D284) |
+| 5 | `PF_UNDEFINED` | simple values but `f4`–`f6` refused (`simple`) | `f7` and the unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) accepted (D284); `f8` below 32 is `malformed` either way (D342) |
 | 6 | `PF_NONCHAR` | noncharacters refused | noncharacters accepted |
 | 7 | `PF_SUB` | (internal, never from a host) | the walk's root is not the document's top |
 | 8 | `PF_VALID` | deterministic CBOR only | any valid CBOR (D260) |
@@ -278,6 +282,8 @@ bump.
 | CBOR | Decoded | Encoded from |
 | --- | --- | --- |
 | Map with only text keys | null-prototype object (`objects: 'plain'`: ordinary object) | plain/null-prototype object |
+| Bignum (tags 2/3) in preferred serialization: beyond 64 bits, no leading zero | bigint | bigint (a major 0/1 integer when it fits) |
+| Any other bignum (`valid` only; D342) | `Tagged { tag: 2 \| 3, value: Uint8Array }`, the exact content bytes: a data item distinct from the integer of the same value (RFC 8949 §5.6.1) | that `Tagged`, written as its integer in preferred serialization |
 | Map with any non-text key | `Map`, keys decoded as values (integers as number when safe, else bigint), in encoded order | `Map` (keys the profile admits) |
 | Top-level map under `cose` | `Map` (as before) | top-level `Map` with `cose` |
 | Every tag but 2, 3, 4, 40 and the little-endian typed arrays | `Tagged { tag, value }` (tag 24: the payload `Uint8Array`; `decode(t.value)` reads it); `tag` a number, a bigint beyond 2⁵³−1 | `new Tagged(tag, value)` (a number or a bigint below 2⁶⁴) |

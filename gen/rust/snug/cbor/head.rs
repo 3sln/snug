@@ -58,6 +58,10 @@ pub fn read_arg(b: &[u8], o: &mut [i32], pos: i32, ai: i32, end: i32) -> i32 {
         short = (i32::cast_unsigned(v) >> 16).cast_signed() == 0;
     }
     if short {
+        // f8 below 32 is not well-formed (RFC 8949 §3.3, D342)
+        if (b[(pos) as usize] as i32) == 248 {
+            return fail(o, pos, CODE_MALFORMED);
+        }
         return fail(o, pos, CODE_NON_SHORTEST);
     }
     o[(O_HI) as usize] = 0;

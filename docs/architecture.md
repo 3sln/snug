@@ -1060,7 +1060,7 @@ A sequence is a series of roots, each validated by the resumable session
 * Offsets inside a session are relative to the message start; the host adds
   o, so a sequence may run past 2^31 bytes (a message may not).
 * Per-message reset is a re-initialisation of the same arrays (scratch,
-  session array, key arena sized for P): items, depth, budget and the
+  session array, key arena grown with the input read up to P, D342): items, depth, budget and the
   witness start fresh for every message; nothing is allocated per message.
 * Profile-only sequences run the same session against the built-in
   `r = any` Program (largest limits), as unknown-length scanning already does
@@ -1080,8 +1080,8 @@ a schema), `maxDepth`, `maxEntries`, `maxItems`, `maxBignumBytes`, `budget`
 in sequence options (its meaning — message or stream? — would be a guess).
 Per sequence: nothing in this slice. A consumer bounds a sequence by leaving
 the loop (which cancels the source); total CPU is bounded per message by the
-budget, so per byte of input. The key arena is sized for P, so many
-concurrent readers should lower `maxMessageBytes`.
+budget, so per byte of input. The key arena grows with the message read, up
+to P (D342; it used to be sized for P at the start).
 
 ### 18.4 Invalid messages: stop or skip (D214)
 

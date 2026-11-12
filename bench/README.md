@@ -594,3 +594,31 @@ collections); the pool's arrays are typed-array backing stores outside the V8
 heap, and the heap at the end of the run is 8.3 MiB on every arm. (4) One
 entry is about 75 KB; entries over 1 MiB or over a quarter of the pool are not
 pooled.
+
+## Idle stream session memory (P9.16, D342) — 2026-11-12
+
+**Question:** how much does an idle unknown-length stream session hold, before
+and after its key arena grows with the input read? **Machine:** Apple M1 Pro
+(10 cores, 32 GiB), macOS 14.6.1, **shared** (other agents' builds and gates).
+**Runtimes:** rustc 1.92.0 (release build), Node v24.6.0. **Trees:** before =
+`main` `d1f2da9`, after = `p916-fixes` (the D342 change). **Method:** 500
+sessions on `batch = { events: [* event] }` (a three-way union of event maps),
+the compiled `input_bytes` set per row; each session has received the 9 bytes
+`a1 66 "events" 9f` and then waits. Rust: `Schema::validate_reader_async` with
+a 4096-byte chunk over a source that answers those bytes once and then
+`Pending` forever, each future polled three times; RSS from `ps` before and
+after creating them. JS: `pushValidator(schema, undefined, 'batch')` fed the
+bytes once; `process.memoryUsage()` after `gc()`. Per session:
+
+| `input_bytes` | Rust RSS before | Rust RSS after | JS RSS before | JS RSS after | JS ArrayBuffers before | after |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100,000 | 146.3 KiB | 18.6 KiB | 160.8 KiB | 35.1 KiB | 113.8 KiB | 16.3 KiB |
+| 1,500,000 (default) | 1,463.1 KiB | 18.7 KiB | 1,485.3 KiB | 50.5 KiB | 1,480.9 KiB | 16.3 KiB |
+| 4,000,000 | 3,109.2 KiB | 18.8 KiB | 3,144.9 KiB | 50.9 KiB | 3,922.3 KiB | 16.3 KiB |
+
+**Reading.** Before, the arena was the input limit's size (about 0.93 ×
+`input_bytes` resident); after, it is at most 256 bytes until input arrives and
+then at most about twice the bytes read, so the idle cost no longer depends on
+the limit. At the default cap of 1024 live sessions, idle peers hold about
+19 MiB in Rust instead of about 1.4 GiB. The rest of a Rust session is the
+4096-byte read buffer, the VM scratch and the session array.

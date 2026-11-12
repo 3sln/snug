@@ -139,6 +139,12 @@ export function taggedValue(tag, value) {
   out.tag = tag; out.value = value;
   return Object.freeze(out);
 }
+/** The integer of a bignum's content bytes, tag 2 or 3 (RFC 8949 §3.4.3). */
+export function bignumOf(tag, bytes) {
+  let m = 0n;
+  for (const x of bytes) m = (m << 8n) | BigInt(x);
+  return tag === 2 ? m : -1n - m;
+}
 export const simpleValue = n => SIMPLES[n] ?? new Simple(n);
 export function float16Value(bytes) {
   const out = Object.create(Float16Bytes.prototype);

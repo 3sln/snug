@@ -71,8 +71,9 @@ export function* sessionSteps(P, B, rule, lim, bytes, policy, { guard = null, ma
     steps++;
     if (steps === 1) firstS = st.s.length;
     yield r;
-    // sWords: the scratch S's length at the end; firstS: after the first step (P9.4, D337)
-    if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields, sWords: st.s.length, firstS };
+    // sWords: the scratch S's length at the end; firstS: after the first step (P9.4, D337); kaBytes: the key
+    // arena's length at the end (D342: grown with the input read)
+    if (r >= 0) return { out: Array.from(out.slice(0, 8 + 2 * out[6])).join(' '), steps, needs, yields, sWords: st.s.length, firstS, kaBytes: st.ka.length };
     if (r === VMS_NEED) {
       needs++;
       const no = vmsNeedOffset(ss), nl = vmsNeedLength(ss);
@@ -147,7 +148,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
       r = eof();
       if (r < 0) return { error: `vms-eof ${r} after held` };
     }
-    if (r >= 0) return { out: words(), steps, sWords: st.s.length, firstS };
+    if (r >= 0) return { out: words(), steps, sWords: st.s.length, firstS, kaBytes: st.ka.length };
     if (r === VMS_NEED) {
       const no = vmsNeedOffset(ss), nl = vmsNeedLength(ss);
       const keep = vmsKeep(ss);
@@ -156,7 +157,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
       if (no + nl > Math.min(n, total) || n > total && no + nl >= total) {
         if (eofed) return { error: `NEED(${no}, ${nl}) past the end ${n} after vms-eof` };
         const r2 = eof();
-        if (r2 >= 0) return { out: words(), steps, sWords: st.s.length, firstS };
+        if (r2 >= 0) return { out: words(), steps, sWords: st.s.length, firstS, kaBytes: st.ka.length };
         if (r2 !== VMS_RESUME) return { error: `vms-eof ${r2}` };
       }
       off = no; len = nl;
@@ -167,7 +168,7 @@ export function runUnknown(P, B, rule, lim, bytes, policy, { failFast = false, g
       if (off > n) {
         if (eofed) return { error: `YIELD at ${off} past the end ${n} after vms-eof` };
         const r3 = eof();
-        if (r3 >= 0) return { out: words(), steps, sWords: st.s.length, firstS };
+        if (r3 >= 0) return { out: words(), steps, sWords: st.s.length, firstS, kaBytes: st.ka.length };
         if (r3 !== VMS_RESUME) return { error: `vms-eof ${r3}` };
         off = vmsPosition(ss);
       }

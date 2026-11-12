@@ -36,6 +36,12 @@ function baseline(bytes, opt) {
   try { decode(bytes, opt); return 'ok'; }
   catch (e) { if (e instanceof CBORFault) return e.code; throw e; }
 }
+// The one documented departure from cbor.mjs (D342): it answers non_shortest (below 24) or simple (24..31) for f8
+// with a value below 32, which RFC 8949 §3.3 makes not well-formed, so snug answers malformed under every profile.
+// cbor.mjs reports no offset: its code is read as malformed when the generated scanner refused at such a head (the
+// walks are the same up to there, so cbor.mjs refused at that head too).
+const f8Low = (bytes, at) => at >= 0 && bytes[at] === 0xf8 && at + 1 < bytes.length && bytes[at + 1] < 32;
+const arbiter = (want, bytes, at) => ((want === 'non_shortest' || want === 'simple') && f8Low(bytes, at) ? 'malformed' : want);
 const o = new Int32Array(16);
 const clamp = n => Math.min(n, 0x7fffffff);
 function generated(bytes, opt) {
@@ -52,11 +58,11 @@ const fail = (msg) => { if (fails < 40) console.log('  FAIL ' + msg); fails++; }
 const js = [];
 const t0 = performance.now();
 for (const c of cases) {
-  const want = baseline(c.bytes, c.opt);
-  if (c.want !== undefined && c.want !== want) fail(`${c.label}: the vector says ${c.want}, cbor.mjs says ${want}`);
-  c.want = want;
   const g = generated(c.bytes, c.opt);
   js.push(g);
+  const want = arbiter(baseline(c.bytes, c.opt), c.bytes, g.offset);
+  if (c.want !== undefined && c.want !== want) fail(`${c.label}: the vector says ${c.want}, cbor.mjs says ${want}`);
+  c.want = want;
   if (g.name !== want) fail(`${c.label} [${hex(c.bytes).slice(0, 80)}] ${JSON.stringify(c.opt)}: JS ${g.name}, cbor.mjs ${want}`);
   if ((g.code === 0) !== (g.offset === -1)) fail(`${c.label}: JS offset ${g.offset} with code ${g.code}`);
 }

@@ -104,7 +104,8 @@ export declare class Decimal {
 }
 /** A standard-set tag (D121): 0, 1, 21, 22, 23, 24 (value: the payload bytes), 32 or 55799. Frozen. */
 export declare class Tagged {
-  /** tag: 0..2^64-1, a bigint beyond 2^53 - 1 (normalised to a number within it). */
+  /** tag: 0..2^64-1, a bigint beyond 2^53 - 1 (normalised to a number within it). A tag 2/3 Tagged
+   * holding a Uint8Array is a bignum outside preferred serialization (what decode gives one, D342). */
   constructor(tag: number | bigint, value: Value);
   readonly tag: number | bigint;
   readonly value: Value;

@@ -68,8 +68,10 @@
   (return (vms-session-words p)))
 
 (defn ^:pub ^I32 vms-arena [^IntsR p ^IntsR limits ^I32 total]
-  (comment "Bytes of the key arena (BytesW) for a message of `total` bytes.")
-  (return (vms-arena-bytes p limits total)))
+  (comment "Bytes of the key arena (BytesW) a session on a message of `total` bytes"
+           "starts with: at most 256 (D342). vms-step asks for more (VMS_GROW,"
+           "vms-grow-arena) as the input it reads grows, up to vms-arena-bytes.")
+  (return (imin (vms-arena-bytes p limits total) 256)))
 
 (defn ^:pub ^I32 vms-init [^IntsR p ^Bytes pool ^I32 rule ^IntsR limits ^Ints s ^Ints ss ^BytesW ka
                            ^I32 total ^I32 quantum]
@@ -88,7 +90,7 @@
   (comment "the session's arena starts at the lease and grows on demand (arena-fit)")
   (arena-fit s (arena-lease p))
   (if (< (ilen ss) (vms-session-words p)) (return (neg 2)))
-  (if (< (blen ka) (vms-arena-bytes p limits total)) (return (neg 2)))
+  (if (< (blen ka) (vms-arena p limits total)) (return (neg 2)))
   (let [nf (nframes p)]
     (for [^I32 k 0 SS_HDR] (iset ss k 0))
     (iset ss SS_PH PH_START)
@@ -102,7 +104,8 @@
     (iset ss SS_PEND (+ (+ SS_HDR (* nf FW)) (* 3 nf)))
     (iset ss SS_CHN (neg 1))
     (iset ss SS_ATOP 0)
-    (iset ss SS_ABYTES (blen ka))
+    (comment "the key arena's bound (D342: ka itself may start smaller)")
+    (iset ss SS_ABYTES (vms-arena-bytes p limits total))
     (iset ss SS_PROF (ia s O_PROFILE)))
   (return 0))
 
@@ -651,6 +654,20 @@
               (return (ia ss SS_CODE))))))
   (if (== (ia ss SS_PH) PH_HELD) (return VMS_HELD))
   (if (< base 0) (return (neg 1)))
+  (comment "D342: the key arena grows with the input read. Every key it holds is a"
+           "disjoint span of the message read so far, and a copy is made only of"
+           "bytes in a window, so the window's end bounds what this step can write"
+           "(the valid machinery's keys ask for themselves, vgrow). Nothing has"
+           "changed yet: the host grows ka and steps again.")
+  (let [an (imin (ia ss SS_ABYTES) (+ base (blen b)))]
+    (if (> an (blen ka))
+      (do (let [^:mut g (imin (ia ss SS_ABYTES) (* 2 (blen ka)))]
+            (if (< g an) (set g an))
+            (iset ss SS_GW 0)
+            (iset ss SS_GB 0)
+            (iset ss SS_GS 0)
+            (iset ss SS_GA g))
+          (return VMS_GROW))))
   (if (== (ia ss SS_UNK) 1) (pend-drop ss (+ base (blen b))))
   (let [wend (blen b)
         q (ia ss SS_QUANTUM)

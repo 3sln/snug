@@ -107,7 +107,11 @@ accepts pairs in any order, sorts through kin and refuses duplicate keys.
 | `Float(f64)` | a float, even when integral; kin chooses shortest width or refuses |
 
 BigInt encoding strips leading zeroes and uses major 0/1 when possible;
-decoding bignums produces their canonical bytes. There is no decimal string
+decoding a bignum keeps its exact content bytes. Under the `valid` preset a
+bignum with leading zeroes or a small value (`2(h'01')`) is a data item
+distinct from the integer of the same value (RFC 8949 §5.6.1; D342), so it
+decodes to `Value::BigInt`, never `Value::Uint`, as the duplicate-key check
+and CDDL matching read it. There is no decimal string
 parser/normalizer yet: supply normalized parts. Decimal values do not retain
 presentation scale. `Float(1.0)` encodes as the float `f93c00` under the
 valid and deterministic presets and is refused under `Profile::BINDLE`; choose
@@ -261,13 +265,13 @@ assert_eq!(truncated.unwrap_err().reason, "cbor/truncated");
 The last argument is fail-fast: a certain refusal is answered at once (its
 code may then be another than the buffer's `cbor/truncated` / `cbor/too_large`;
 accept and refuse never differ). Only what the session asks for is held, plus a
-chunk; but the session's key arena is sized for the input limit, so **each
-live stream session holds memory proportional to `max_bytes`** even when few
-bytes have arrived: about 1.4 MiB at the default 1,500,000-byte limit
-(measured 2026-11-12), so `max_live` (1024) idle peers can hold about
-1.4 GiB. For network streams pass a per-call `max_bytes` sized to the
-protocol (4 KiB gave about 26 KiB per session) and bound concurrent streams
-below `max_live`. For an untrusted peer prefer fail-fast: drain mode reads up
+chunk. The session's key arena grows with the input read (D342), so an idle
+stream session holds about 19 KiB whatever `max_bytes` is (measured
+2026-11-12 with a 4096-byte chunk and 9 bytes received; before D342 the arena
+was sized for the input limit, about 1.4 MiB at the default 1,500,000 bytes).
+A stream that has delivered n bytes can hold up to about 2n for its key arena.
+Bound concurrent streams below `max_live` and size `max_bytes` to the
+protocol. For an untrusted peer prefer fail-fast: drain mode reads up
 to `max_bytes` from the peer after a refusal is already certain. The low-level
 `schema::Session::new_unknown`, `Step::Held` and `Session::end(n)` expose the
 protocol.
@@ -523,8 +527,8 @@ session yield after about that many work units; the async driver then answers
 `Pending` once, having woken itself, so a long validation shares its executor
 thread (JS's `nextTurn`). Quantum 0 never yields. Neither changes a verdict or
 the budget. A blob holds one window of `max(need, chunk)` bytes; a stream holds
-what the session keeps plus one `chunk` (the key arena is sized for the input
-limit, as sync); a sequence holds the message in progress (its
+what the session keeps plus one `chunk` (the key arena grows with the input
+read, as sync); a sequence holds the message in progress (its
 `max_message_bytes` bounds it) plus a `chunk` read buffer
 (`AsyncSequenceReader::bytes_held`). A sequence feeds each read synchronously,
 so its work per poll is bounded by `chunk`.

@@ -415,7 +415,7 @@
                                                                (not (head-short cb x))))
         (return (pw-bad cb o y CODE_NON_SHORTEST x)))
       (if (== major 7)
-        (do (if (and (and (== ai 24) (< (u8 cb (+ x 1)) 32)) (!= (bit-and (ia o O_PROFILE) PF_VALID) 0))
+        (do (if (and (== ai 24) (< (u8 cb (+ x 1)) 32))
               (return (pw-bad cb o y CODE_MALFORMED x)))
             (return (pw-leaf cb o x y))))
       (if (<= major 1) (return (pw-leaf cb o x y)))

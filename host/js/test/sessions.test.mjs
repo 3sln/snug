@@ -97,6 +97,8 @@ test('pooled arrays are zeroed before reuse: no byte crosses from one session to
 
 test('an entry larger than 1 MiB (or a quarter of the pool) is not kept', () => {
   const program = {};
+  // D342: earlier tests' sessions now pool (their key arenas start small), so start from an empty pool
+  releasePool();
   const before = sessionLimits().pooledBytes;
   const big = acquire(program, (1 << 20) / 4 + 1, 8, 8);
   release(big);

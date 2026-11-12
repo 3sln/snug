@@ -1,6 +1,6 @@
 {
  "profile": "snug deterministic preset (D081, D120-D125, D180): docs/profiles.md",
- "format": "hex is the full input, decoded with { profile: \"deterministic\" } (top any). Accept vectors give the decoded value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: cbor-profile.json's, plus {\"$map\": [[key, value], ...]} a Map, {\"$tag\": n, \"value\": v} a Tagged, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\" | \"-0\"}, {\"$undefined\": true} and {\"$simple\": n} a Simple (D284); a missing value is not checked. Refuse vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of the same bytes under { profile: \"bindle\", top: \"any\" } (cbor.mjs's). standard, when given, is the code of the same bytes under { tags: \"standard\" } (D180; else the vector's own verdict). A $tag number beyond 2^53 - 1 is a decimal string.",
+ "format": "hex is the full input, decoded with { profile: \"deterministic\" } (top any). Accept vectors give the decoded value and, unless reencode is given (the bytes encode() writes for that value), re-encode to hex. Value notation: cbor-profile.json's, plus {\"$map\": [[key, value], ...]} a Map, {\"$tag\": n, \"value\": v} a Tagged, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\" | \"-0\"}, {\"$undefined\": true} and {\"$simple\": n} a Simple (D284); a missing value is not checked. Refuse vectors name the code and the error offset. rfc marks RFC 8949 Appendix A examples. bindle is the code of the same bytes under { profile: \"bindle\", top: \"any\" } (cbor.mjs's, except malformed for f8 below 32, D342). standard, when given, is the code of the same bytes under { tags: \"standard\" } (D180; else the vector's own verdict). A $tag number beyond 2^53 - 1 is a decimal string.",
  "generator": "corpus/tools/export-deterministic.mjs",
  "accept": [
   {
@@ -1688,25 +1688,46 @@
    "bindle": "truncated"
   },
   {
-   "name": "f8 17: non-shortest simple",
-   "hex": "f817",
-   "code": "non_shortest",
+   "name": "f8 00: not well-formed",
+   "hex": "f800",
+   "code": "malformed",
    "offset": 0,
-   "bindle": "non_shortest"
+   "bindle": "malformed"
+  },
+  {
+   "name": "f8 17: not well-formed (not non-shortest)",
+   "hex": "f817",
+   "code": "malformed",
+   "offset": 0,
+   "bindle": "malformed"
+  },
+  {
+   "name": "f8 14: false in two bytes is not well-formed",
+   "hex": "f814",
+   "code": "malformed",
+   "offset": 0,
+   "bindle": "malformed"
+  },
+  {
+   "name": "f8 05 as a map value",
+   "hex": "a16173f805",
+   "code": "malformed",
+   "offset": 3,
+   "bindle": "malformed"
   },
   {
    "name": "f8 18: simple(24) is not well-formed",
    "hex": "f818",
    "code": "malformed",
    "offset": 0,
-   "bindle": "simple"
+   "bindle": "malformed"
   },
   {
    "name": "f8 1f: simple(31) is not well-formed",
    "hex": "f81f",
    "code": "malformed",
    "offset": 0,
-   "bindle": "simple"
+   "bindle": "malformed"
   },
   {
    "name": "f8 18 in an array",

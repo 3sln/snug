@@ -27,7 +27,7 @@ import { SnugFault } from '../../js/src/fault.mjs';
 import { resolveLimits } from '../../js/src/limits.mjs';
 import { validateOptions } from '../../js/src/options.mjs';
 import { profileFlags, strictArraysOf, keysOf, standardTags, undefinedOk, noncharactersOk } from '../../js/src/profiles.mjs';
-import { Decimal, NDArray, Float16Bytes, Tagged, Simple, simpleOk, typedInfo } from '../../js/src/values.mjs';
+import { Decimal, NDArray, Float16Bytes, Tagged, Simple, simpleOk, typedInfo, bignumOf } from '../../js/src/values.mjs';
 import { copyTypedBytes } from '../../js/src/typed-bytes.mjs';
 import { stdAllowed } from '../../../gen/js/snug/cbor/stdtags.mjs';
 import { typedSize } from '../../../gen/js/snug/cbor/tags.mjs';
@@ -157,6 +157,8 @@ function walk(v, depth) {
   if (v instanceof Tagged) {
     // the rule tag (D180): the number; beyond 32 bits -2, or -1 for 2^64 - 1
     const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;
+    // a decoded non-preferred bignum (D342): its integer, in preferred serialization, as the native encoder
+    if ((t === 2 || t === 3) && v.value instanceof Uint8Array) { bigint(bignumOf(t, v.value), depth); return; }
     // above the Bindle tag set a decimal fraction or ndarray outside Decimal's / NDArray's invariants (D265, D267):
     // written as given, its content held to the RFC rules by the final check, as the native encoder
     if ((t === 4 || t === 40) && (flags & 12) !== 0) { headN(6, t); walk(v.value, depth + 1); return; }

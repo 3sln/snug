@@ -28,7 +28,7 @@ const be32 = (b, p) => (b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p +
 function readArg(b, pos, ai) {
   const left = b.length - pos - 1;
   switch (ai) {
-    case 24: if (left < 1) return -TRUNCATED; lo = b[pos + 1]; if (lo < 24) return -NON_SHORTEST; hi = 0; return pos + 2;
+    case 24: if (left < 1) return -TRUNCATED; lo = b[pos + 1]; if (lo < 24) return b[pos] === 0xf8 ? -MALFORMED : -NON_SHORTEST; hi = 0; return pos + 2;
     case 25: if (left < 2) return -TRUNCATED; lo = be16(b, pos + 1); if (lo < 256) return -NON_SHORTEST; hi = 0; return pos + 3;
     case 26: if (left < 4) return -TRUNCATED; lo = be32(b, pos + 1); if ((lo >>> 16) === 0) return -NON_SHORTEST; hi = 0; return pos + 5;
     case 27: if (left < 8) return -TRUNCATED; hi = be32(b, pos + 1); lo = be32(b, pos + 5); if (hi === 0) return -NON_SHORTEST; return pos + 9;
@@ -290,7 +290,7 @@ function item(b, pos, depth) {
     case 4: return array(b, p, depth);
     case 5: return map(b, p, depth);
     case 6: return tag(b, p, depth);
-    default: return ai >= 20 && ai <= 22 ? p : -SIMPLE;
+    default: return ai >= 20 && ai <= 22 ? p : ai === 24 && lo < 32 ? -MALFORMED : -SIMPLE;
   }
 }
 

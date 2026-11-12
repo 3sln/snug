@@ -133,7 +133,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
 | `profiles` | Frozen `{ valid, deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
-| `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes); encode checks the tag number and content with kin under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 2/3/4/40/typed arrays have their own value types). |
+| `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes), and so does a bignum outside preferred serialization (`valid` only: `value` its content `Uint8Array`, a data item distinct from the integer, D342); encode checks the tag number and content with kin under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 4/40/typed arrays have their own value types; a tag 2/3 `Tagged` of a `Uint8Array` is written as its integer in preferred serialization). |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
 Float16 where available, Float32/64. `Uint8Array` is a byte string.
@@ -589,8 +589,8 @@ earlier is held while the rest is read and dropped, and the end (stream end,
 bytes (code, offset, path, budget, items). More bytes than `maxBytes` answer
 `cbor/too_large` at once. `failFast` answers a certain refusal at once (its
 code may be another than the buffer's `cbor/truncated` / `cbor/too_large`);
-acceptance waits for the end. Unknown-length sessions allocate their key arena
-for the input limit (`maxBytes`). Source decoding is unavailable. Default helper reads alone do not give the
+acceptance waits for the end. A session's key arena grows with the input it
+has read (D342): an idle session holds tens of KiB, not `maxBytes`. Source decoding is unavailable. Default helper reads alone do not give the
 event loop a turn per read; positive quantum enables cooperative scheduling.
 Start with the [minimal schema-handle recipe](guide.md#validating-remote-objects-and-streams)
 and known-length AsyncIterable adapter before implementing custom sessions.

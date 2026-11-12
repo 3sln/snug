@@ -455,9 +455,11 @@ fn decimal_ok(a: &[Value]) -> bool {
     match a.get(1) {
         Some(Value::Uint(m)) => *m != 0 && m % 10 != 0,
         Some(Value::Nint(m)) => (m % 10 + 1) % 10 != 0,
-        Some(Value::BigInt { negative, magnitude }) => {
+        // a bignum mantissa in preferred serialization only (beyond 64 bits, no leading
+        // zero), as the JS builder (D342)
+        Some(Value::BigInt { negative, magnitude }) if magnitude.len() >= 9 && magnitude[0] != 0 => {
             let r = m10(magnitude);
-            if *negative { (r + 1) % 10 != 0 } else { magnitude.iter().any(|&x| x != 0) && r != 0 }
+            if *negative { (r + 1) % 10 != 0 } else { r != 0 }
         }
         _ => false,
     }

@@ -2,14 +2,13 @@
 // input is outside this module's contract; all profile decisions belong to the
 // scanner. Maps with only text keys become objects, maps with any other key a Map
 // (a cose top-level map always); every tag outside the Bindle set becomes Tagged (D180); f7 undefined; other simple values Simple (D284).
-import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue, simpleValue, typedInfo } from './values.mjs';
+import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue, simpleValue, typedInfo, bignumOf } from './values.mjs';
 import { LIMITS } from './limits.mjs';
 import { fail } from './fault.mjs';
 
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
-const MAX_SAFE_N = BigInt(Number.MAX_SAFE_INTEGER);
 
 class Builder {
   constructor(bytes, options) {
@@ -130,12 +129,11 @@ class Builder {
     }
     const n = this.argument(this.b[this.pos++] & 31);
     if (tag === 2 || tag === 3) {
-      let value = 0n;
-      const end = this.pos + n;
-      while (this.pos < end) value = (value << 8n) | BigInt(this.b[this.pos++]);
-      const v = tag === 2 ? value : -1n - value;
-      // a valid-CBOR bignum (P8.4, D267) may hold a small integer: integers are numbers when safe (D123)
-      return v >= -MAX_SAFE_N && v <= MAX_SAFE_N ? Number(v) : v;
+      // D342: a bignum is a bigint only in preferred serialization (no leading zero, beyond 64 bits, RFC 8949
+      // §3.4.3). Any other valid-CBOR bignum (P8.4) is a distinct data item in the generic data model (§5.6.1),
+      // as the duplicate-key check and CDDL matching read it, so it stays a Tagged of its exact bytes.
+      const bytes = this.bytes(n);
+      return n < 9 || bytes[0] === 0 ? taggedValue(tag, bytes) : bignumOf(tag, bytes);
     }
     const info = TYPED_BY_TAG.get(tag), bytes = this.bytes(n);
     if (tag === 84 && !info.ctor) return float16Value(bytes);

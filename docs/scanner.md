@@ -6,7 +6,9 @@ Normative for `kin/scan.kin` and its helpers (`kin/head.kin`, `text.kin`,
 deterministic encoding under the **profile flags** in `o[11]` (D120,
 [profiles](profiles.md#the-option-model-d120)). With the flags at 0 — the
 Bindle profile — it accepts exactly what 3sln.me's `packages/core/cbor.mjs`
-`decode` accepts and refuses everything it refuses **with the same code**;
+`decode` accepts and refuses everything it refuses **with the same code**,
+with one exception: `f8` followed by a value below 32 is **malformed** (RFC
+8949 §3.3, D342), where cbor.mjs says non_shortest (below 24) or simple;
 where an input breaks several rules, the first check below that fails
 decides. The Bindle arbiter is cbor.mjs itself (`bench/baseline/cbor-3sln.mjs`):
 `bb scan-test` compares codes on every vector, on fixed edge cases and on
@@ -73,7 +75,8 @@ same offset (gated).
    * `m = 7` and `ai` 25..27: a float — go to *Floats* (no argument check here).
    * `ai` 24/25/26/27: 1/2/4/8 argument bytes must remain, else **truncated**;
      the value must need that width (≥ 24, ≥ 2^8, ≥ 2^16, ≥ 2^32), else
-     **non_shortest**. This applies to `f8 xx` too: xx < 24 is non_shortest.
+     **non_shortest** — except `f8 xx` with xx < 24, which is **malformed**
+     (RFC 8949 §3.3: not well-formed; D342).
    * `ai` 28..30 → **malformed**; `ai` 31 → **indefinite** (so a stray
      `ff` break is indefinite).
 4. by major type:
@@ -105,10 +108,10 @@ same offset (gated).
      number); t ≥ 2^32 → **tag** unless `PF_TAGS` is 2/3 **[flag]** (then
      its *rule tag*: −2, or −1 for 2^64 − 1, D180); then by t (below); any
      other t → **tag** unless `PF_TAGS` is 2/3.
-   * 7 (after the head: `f8 xx` with xx < 24 is **non_shortest** first, as
-     every head): `ai` 20, 21, 22 (false, true, null) accepted; then, under
-     `PF_UNDEFINED` (or `PF_VALID`) **[flag]**, `f8 xx` with xx < 32 →
-     **malformed** (RFC 8949 §3.3, Appendix F); under `PF_UNDEFINED`
+   * 7 (after the head: `f8 xx` with xx < 24 is already **malformed**):
+     `ai` 20, 21, 22 (false, true, null) accepted; then `f8 xx` with xx < 32
+     → **malformed** under every profile (RFC 8949 §3.3, Appendix F; D342);
+     under `PF_UNDEFINED`
      **[flag]** every other simple value is accepted — `f7` undefined and the
      unassigned `e0`–`f3` and `f8 20`–`f8 ff` (D284); anything else → **simple**
      (Bindle: every simple value but false, true and null).
