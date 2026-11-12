@@ -3,7 +3,9 @@
 //! (`tests/async-cases.mjs`), under many chunkings, with reads that answer `Pending`
 //! at random and positive quanta that yield. Every verdict (code, reason, subcode,
 //! offset, path, budget) must be identical. Counts go to `async-sources-*.txt` in the
-//! assembled crate. `SNUG_ASYNC_CASES="mutations seed schemas stress"` changes the slice.
+//! assembled crate. `SNUG_ASYNC_CASES="mutations seed schemas stress"` changes the export.
+//! By default (`bb rust-api-test`) the differential runs a seeded slice: every 8th case
+//! and every 16th sequence body of at most 64 KiB; `bb rust-api-test full` (`SNUG_ASYNC_FULL=1`) runs all.
 use snug::async_source;
 use snug::controls::{Chars, Control, Controls};
 use snug::schema::{self, BytesBlob as RawBlob, Failure, Options, SourceError};
@@ -327,13 +329,28 @@ fn cases() -> &'static (Vec<Prog>, Vec<Case>) {
     })
 }
 
-/// Run `f` on every case with its buffer verdict, chunkings and quanta (tiny quanta on
-/// small inputs; on large ones a quantum that still yields often).
+/// The gate's mode: `bb rust-api-test full` (SNUG_ASYNC_FULL=1) runs every case;
+/// the default runs a seeded slice -- every `stride()`-th case and every
+/// `2 * stride()`-th sequence body -- for routine gating.
+fn stride() -> usize {
+    if std::env::var("SNUG_ASYNC_FULL").is_ok_and(|v| v == "1") { 1 } else { 8 }
+}
+fn mode() -> &'static str {
+    if stride() == 1 { "full" } else { "default slice" }
+}
+
+/// Run `f` on the cases of this mode with their buffer verdict, chunkings and quanta
+/// (tiny quanta on small inputs; on large ones a quantum that still yields often).
 fn each_case(seed: u32, mut f: impl FnMut(&Ctx<'_>, &mut Rng)) -> usize {
     let (progs, cases) = cases();
     let mut scratch = schema::Scratch::new();
     let mut rng = Rng(seed);
+    let mut ran = 0;
     for (i, k) in cases.iter().enumerate() {
+        if i % stride() != 0 {
+            continue;
+        }
+        ran += 1;
         let p = &progs[k.prog].raw;
         let buffer = schema::validate(p, k.rule, &k.bytes, &k.opts, &mut scratch);
         let (chunks, splits) = chunkings(k.bytes.len(), &mut rng);
@@ -341,7 +358,7 @@ fn each_case(seed: u32, mut f: impl FnMut(&Ctx<'_>, &mut Rng)) -> usize {
         let quanta = [0, if n <= 64 { 1 + rng.below(3) } else if n <= 4096 { 1 + rng.below(64) } else { 1024 + rng.below(4096) } as i32];
         f(&Ctx { i, p, k, buffer, chunks, splits, quanta }, &mut rng);
     }
-    cases.len()
+    ran
 }
 struct Ctx<'a> {
     i: usize,
@@ -358,7 +375,8 @@ impl Ctx<'_> {
     }
 }
 fn report(name: &str, text: String) {
-    std::fs::write(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("async-sources-{name}.txt")), text + "\n").unwrap();
+    std::fs::write(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("async-sources-{name}.txt")),
+                   format!("[{}] {text}\n", mode())).unwrap();
 }
 
 #[test]
@@ -449,6 +467,7 @@ fn async_sequence_reader_equals_the_sync_reader() {
     // runs of consecutive cases on one Program and rule, schema-validated and profile-only
     let profiles = [Profile::VALID, Profile::DETERMINISTIC, Profile::BINDLE];
     let mut i = 0;
+    let mut nth = 0;
     while i < cases.len() {
         let pi = cases[i].prog;
         let rule = cases[i].rule;
@@ -457,6 +476,14 @@ fn async_sequence_reader_equals_the_sync_reader() {
         while j < cases.len() && j < i + 6 && cases[j].prog == pi && cases[j].rule == rule && body.len() < 512 {
             body.extend_from_slice(&cases[j].bytes);
             j += 1;
+        }
+        nth += 1;
+        // the default slice also leaves out the few very large bodies (their many small
+        // messages are most of the full run's sequence time)
+        let every = if stride() == 1 { 1 } else { 2 * stride() };
+        if (nth - 1) % every != 0 || (stride() > 1 && body.len() > 65536) {
+            i = j;
+            continue;
         }
         let p = &progs[pi];
         let schema = Schema::from_program(Program::from_parts_with(&p.words, &p.pool, &test_controls()).unwrap());

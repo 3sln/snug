@@ -8438,11 +8438,45 @@ review.
   chunks that fit under the P9.1 caps, with the seeds and chunking
   recorded so anyone can reproduce them. Includes `rust-api-test` in its
   `full` mode (the P9.6 async differential at full scale; see P9.6a), which
-  also runs again before the RC is declared.
+  also runs again before the RC is declared. Run it as `bb rust-api-test
+  full` (sets `SNUG_ASYNC_FULL=1` for Cargo; watchdog gate
+  `rust-api-test-full`, 3,600 s wall / 7,200 s CPU). The case export is
+  seeded and fixed: `tests/async-cases.mjs` defaults 1500 mutations, seed
+  1, 40 schemas, 30 stress (`SNUG_ASYNC_CASES="m s sch st"` changes it);
+  the counts depend on the corpus at the commit (P9.6 at `61a090e`: 20,492
+  cases; on `641f970`: 20,819 cases, 191,682 blob runs, 62,405 + 62,405
+  reader runs, 62,550 sequence runs / 35,328,681 items).
 - [ ] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
   2026-11-11). The default mode takes a few minutes and is for routine
   gating. A `full` mode runs the async differential at the scale it ran at
   when P9.6 landed. Assigned to the P9.6 engineer.
+  *Built (2026-11-12, branch `p96-modes`):* `bb rust-api-test [full]`
+  (`host/rust/tests/run` takes the mode, refuses anything else, and runs
+  under the watchdog as `rust-api-test` or `rust-api-test-full`; bb.edn
+  passes the arguments). Watchdog caps: `rust-api-test` lowered from 2,400 /
+  4,800 s to **1,200 s wall / 2,400 s CPU**; new `rust-api-test-full`
+  **3,600 / 7,200 s**. The default runs every Cargo test, doctest, example
+  and Clippy, with all the async contract tests, and the async differential
+  on a seeded slice: every 8th case and every 16th sequence body of at most
+  64 KiB (two very large bodies held 9 M of the sequence items). The gate
+  prints the three count lines, tagged `[default slice]` or `[full]`.
+  Before P9.7 (on `61a090e`'s corpus): default 2,562 cases, 80 s quiet / 122
+  s loaded; full the P9.6 counts exactly, 1,088 s loaded. **Rebased on main
+  `641f970` (P9.7 in; actual):** default **2,603 cases, 24,010 blob runs,
+  7,803 + 7,803 reader runs, 3,900 sequence runs / 5,625 items, all async ==
+  sync (== buffer); `bb rust-api-test` 30 s**; full **20,819 cases, 191,682
+  blob, 62,405 + 62,405 reader, 62,550 sequence runs / 35,328,681 items; `bb
+  rust-api-test full` 199 s**. The mutant (one byte misplaced in the async
+  reader's buffer) turns the **default** red in 28 s.
+  Fresh worktrees (manager's addition): `bb size` and `bb watchdog-test` now
+  stop with "esbuild is missing" and the setup step (`npm ci` in
+  bench/compare, or a symlink), documented in AGENTS.md "Worktrees", instead of
+  an `ERR_MODULE_NOT_FOUND` stack.
+  Gates on the final tree (`641f970` + this; actual): check, drift,
+  watchdog-test 7/7, size, rust-api-test and rust-api-test full all pass.
+  Before the P9.7 rebase the whole set passed on `74b903f` + this
+  (vmsession, sequence, wasm-sdk, npm test included). No semantic change; no
+  D-entry.
 - [ ] **P9.6b — One shared sans-IO core for the sync and async Rust
   drivers** (coordinator, 2026-11-11), D335. It starts after P9.7 lands and
   must be done before P9.13, so the final review sees the deduplicated

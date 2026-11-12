@@ -28,7 +28,7 @@ export const DEFAULTS = {
   'unicode-test': [1800, 3600], 'vm-test': [3600, 7200], 'vmsession-test': [7200, 14400], 'sequence-test': [7200, 14400],
   'valid-test': [2400, 4800], 'compile-fuzz': [2400, 4800], 'nav-test': [1800, 3600], 'write-test': [1800, 3600],
   'drift': [900, 1800], 'check': [900, 1800], 'size': [900, 1800], 'proptest': [10800, 43200], 'crate-diff': [3600, 7200],
-  'rust-api-test': [2400, 4800], 'wasm-sdk-test': [5400, 10800], 'rfc-corpus': [2400, 4800], 'watchdog-test': [300, 600],
+  'rust-api-test': [1200, 2400], 'rust-api-test-full': [3600, 7200], 'wasm-sdk-test': [5400, 10800], 'rfc-corpus': [2400, 4800], 'watchdog-test': [300, 600],
   'js-target-test': [900, 1800], 'regexp-test': [1800, 3600], 'runtime': [2400, 4800],
 };
 const FALLBACK = [3600, 7200];

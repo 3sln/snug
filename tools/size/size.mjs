@@ -1,13 +1,22 @@
 // Offline public-entry size gate. Uses the existing benchmark esbuild read-only.
-import esbuild from '../../bench/compare/node_modules/esbuild/lib/main.js';
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { resolve, relative, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cpus, platform, release, arch } from 'node:os';
 import { createHash } from 'node:crypto';
 import { gzipSync, brotliCompressSync, constants } from 'node:zlib';
+import { existsSync } from 'node:fs';
 import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('size', import.meta.url);   // P9.1 caps
+
+// bench/compare/node_modules is not tracked, so a fresh git worktree has no esbuild.
+const esbuildPath = fileURLToPath(new URL('../../bench/compare/node_modules/esbuild/lib/main.js', import.meta.url));
+if (!existsSync(esbuildPath)) {
+  console.error(`size: esbuild is missing (${esbuildPath}). In a fresh checkout or worktree run \`npm ci\` in ` +
+    'bench/compare (network), or symlink bench/compare/node_modules to an existing checkout\'s (AGENTS.md "Worktrees").');
+  process.exit(2);
+}
+const { default: esbuild } = await import(pathToFileURL(esbuildPath).href);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const argument = name => process.argv.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3);
