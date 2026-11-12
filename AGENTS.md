@@ -33,6 +33,8 @@ Rules for every contributor, human or agent:
 
 `bench/compare/node_modules` (esbuild and the comparison libraries) is not
 tracked, so a fresh `git worktree` lacks it and `bb size` and `bb
-watchdog-test` stop with "esbuild is missing". Run `npm ci` in `bench/compare`
+watchdog-test` stop with "esbuild is missing" (and `kin/scripts/wasm-build sdk|cc`,
+hence `bb wasm-sdk-test` and `bb wasm-size`, answer SKIP without its binaryen
+`wasm-opt`, D341). Run `npm ci` in `bench/compare`
 (network), or symlink it to an existing checkout's and remove the link before
 committing: `ln -s <checkout>/bench/compare/node_modules bench/compare/node_modules`.

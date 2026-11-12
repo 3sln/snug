@@ -23,8 +23,9 @@
 ;; :mode says what a gate covers when it has more than one way to run.
 ;;
 ;; Setup: size, watchdog-test, valid-test's cbor2 arm and runtime need
-;; bench/compare/node_modules (AGENTS.md "Worktrees"); wasm-sdk-test needs the
-;; pinned nightly (kin/scripts/wasm-build); runtime needs Chrome and workerd
+;; bench/compare/node_modules (AGENTS.md "Worktrees"); wasm-sdk-test and
+;; wasm-size need the pinned nightly and wasm-opt from bench/compare
+;; (kin/scripts/wasm-build); runtime needs Chrome and workerd
 ;; (tools/runtime/README.md).
 {:gates
  {check            {:cmd ["bb" "check"] :caps [900 1800]
@@ -55,6 +56,8 @@
   wasm-sdk-test    {:cmd ["bb" "wasm-sdk-test"] :caps [5400 10800]
                     :doc "SKIPs without the pinned nightly: NOT RUN. In the release set only if O3 ships the SDK."}
   size             {:cmd ["bb" "size"] :caps [900 1800]}
+  wasm-size        {:cmd ["bb" "wasm-size"] :caps [3600 7200]
+                    :doc "the wasm SDK modules' bytes and gzip caps (D341); SKIPs without the pinned nightly or wasm-opt: NOT RUN"}
   watchdog-test    {:cmd ["bb" "watchdog-test"] :caps [300 600]}
   npm-test         {:cmd ["npm" "test"] :dir "host/js" :caps [1800 3600]
                     :doc "host/js's node --test suite, including the version-site test (P9.15)"}
@@ -82,7 +85,7 @@
              nav-test write-test unicode-test abnf-test
              rust-api-test rust-api-test-full
              wasm-sdk-test
-             size watchdog-test
+             size wasm-size watchdog-test
              npm-test rfc-corpus proptest
              node-oldest msrv runtime]
   ;; SPEC §7: the same Program bytes, verdict, reason, path and budget point on

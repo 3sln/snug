@@ -23,7 +23,7 @@ const PROFILES = { full: 0, bindle: 1, bus: 2 };
 const COMPILE_OPTIONS = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives',
   'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget', 'depth', 'inputBytes',
   'entries', 'items', 'bignumBytes', 'budget', 'leaves'];
-const DEFAULT = '../../../.cache/snug-wasm-cc/target/wasm32-unknown-unknown/release/snug_wasm.wasm';
+const DEFAULT = '../../../.cache/snug-wasm-cc/snug.wasm';
 const te = new TextEncoder(), td = new TextDecoder();
 
 let source, mod = null, x = null;

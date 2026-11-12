@@ -2,15 +2,24 @@
 # Build the generated scanner as wasm32-unknown-unknown (P1.4); print the path.
 #
 #     kin/scripts/wasm-build [speed|size]     (default speed)
-#     kin/scripts/wasm-build sdk|sdk-size|sdk-s|cc|cc-size|cc-s   (P7.9)
+#     kin/scripts/wasm-build sdk|cc           the modules the wasm SDK ships (D341)
+#     kin/scripts/wasm-build sdk-3|sdk-size|sdk-s|cc-3|cc-size|cc-s   (P7.9 comparisons)
 #
 #   speed  profile release: opt-level 3, LTO, one codegen unit, stripped
 #   size   profile size:    the same at opt-level "z"
-#   sdk*   P7.9's SDK runtime module (feature sdk: host/wasm/src/sdk.rs, growable
-#          memory) at opt-level 3 / "z" / "s", crate .cache/snug-wasm-sdk
-#   cc*    P7.9's compiler module (feature compiler: host/wasm/src/cc.rs over
-#          host/rust/src/compile.rs), crate .cache/snug-wasm-cc
+#   sdk    P7.9's SDK runtime module (feature sdk: host/wasm/src/sdk.rs, growable
+#          memory), crate .cache/snug-wasm-sdk: opt-level 3, then wasm-opt -O3
+#          --strip-debug --strip-producers (D341: 7% smaller, speed unchanged);
+#          written to .cache/snug-wasm-sdk/snug.wasm
+#   cc     P7.9's compiler module (feature compiler: host/wasm/src/cc.rs over
+#          host/rust/src/compile.rs), crate .cache/snug-wasm-cc: opt-level "z"
+#          (D341: compiling is a one-off per schema), then wasm-opt -Oz;
+#          written to .cache/snug-wasm-cc/snug.wasm
+#   sdk-3|sdk-size|sdk-s, cc-3|cc-size|cc-s   cargo's output at opt-level 3 /
+#          "z" / "s", without wasm-opt (for comparisons only)
 #
+# wasm-opt is binaryen's (the npm package pinned in bench/compare, run by
+# Node: AGENTS.md "Worktrees"). Without it sdk and cc answer SKIP, exit 3.
 # Both build std from source with panic=immediate-abort (`-Zbuild-std`): the
 # scanner never panics, so the module needs no panic machinery, and this is
 # what a size-conscious wasm consumer ships. That needs a nightly with the
@@ -24,10 +33,19 @@ mode="${1:-speed}"
 crate=.cache/snug-wasm; features=""; only="cbor vm"
 case "$mode" in
   speed) profile=release ;; size) profile=size ;;
-  sdk) profile=release ;; sdk-size) profile=size ;; sdk-s) profile=size-s ;;
-  cc) profile=release ;; cc-size) profile=size ;; cc-s) profile=size-s ;;
-  *) echo "usage: wasm-build [speed|size|sdk|sdk-size|sdk-s|cc|cc-size|cc-s]" >&2; exit 2 ;;
+  sdk|sdk-3) profile=release ;; sdk-size) profile=size ;; sdk-s) profile=size-s ;;
+  cc|cc-size) profile=size ;; cc-3) profile=release ;; cc-s) profile=size-s ;;
+  *) echo "usage: wasm-build [speed|size|sdk|cc|sdk-3|sdk-size|sdk-s|cc-3|cc-size|cc-s]" >&2; exit 2 ;;
 esac
+# D341: the shipped modules go through wasm-opt; its flags enable what rustc's
+# wasm32 target emits by default (wasm-opt refuses an instruction it was not told about).
+wasmopt=bench/compare/node_modules/binaryen/bin/wasm-opt
+case "$mode" in
+  sdk) optflags="-O3" ;; cc) optflags="-Oz" ;; *) optflags="" ;;
+esac
+if [ -n "$optflags" ] && [ ! -f "$wasmopt" ]; then
+  echo "SKIP wasm -- wasm-opt is missing ($wasmopt): npm ci in bench/compare, or symlink its node_modules (AGENTS.md \"Worktrees\")" >&2; exit 3
+fi
 case "$mode" in
   sdk*) crate=.cache/snug-wasm-sdk; features="--features sdk"; only="cbor vm nav write program" ;;
   cc*) crate=.cache/snug-wasm-cc; features="--features compiler"; only="compile" ;;
@@ -50,4 +68,18 @@ cmp -s "$wrap.new" "$wrap" 2>/dev/null || { mv "$wrap.new" "$wrap"; chmod +x "$w
   RUSTFLAGS="-D warnings -Zunstable-options -Cpanic=immediate-abort" \
   "$cargo" build --quiet --profile "$profile" --target wasm32-unknown-unknown \
     -Zbuild-std=std,panic_abort $features >&2)
-echo "$crate/target/wasm32-unknown-unknown/$profile/snug_wasm.wasm"
+out="$crate/target/wasm32-unknown-unknown/$profile/snug_wasm.wasm"
+if [ -n "$optflags" ]; then
+  shipped="$crate/snug.wasm"
+  # rerun only when cargo's output or the flags changed
+  stamp="$crate/snug.wasm.flags"; want="$optflags $(cksum < "$out")"
+  if [ ! -f "$shipped" ] || [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
+    node "$wasmopt" $optflags --strip-debug --strip-producers \
+      --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+      --enable-nontrapping-float-to-int --enable-multivalue --enable-reference-types \
+      "$out" -o "$shipped.new" >&2
+    mv "$shipped.new" "$shipped"; printf '%s' "$want" > "$stamp"
+  fi
+  out="$shipped"
+fi
+echo "$out"

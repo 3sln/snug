@@ -159,5 +159,18 @@
       },
       "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Brotli: D333 (P9.2, coordinator under D303) -- float widths by value (kin/vm-eval.kin float-cls, D328); measured on p92-rfc over main 5a1bb84. Min and gzip: D327 (P9.7, coordinator under D303) -- session arrays pooled per Program, the live-session bound, close() and releasePool (host/js/src/session-pool.mjs); ceil(measurement * 1.02), measured on main 424763e + P9.7."
     }
+  },
+  "wasm": {
+    "description": "D341 (P9.12): the wasm modules the SDK loads, built by kin/scripts/wasm-build sdk | cc (nightly-2026-09-16, wasm-opt from binaryen 132.0.0); ceil(measurement * 1.02) of bytes and gzip (Node zlib level 9, as bb size), measured with bb wasm-size on p912-size over main 9d98f72. Checked by tools/size/wasm-size.mjs, not size.mjs.",
+    "sdk-runtime": {
+      "bytes": 331770,
+      "gzip": 134468,
+      "justification": "SDK runtime: opt-level 3 + wasm-opt -O3 (325,264 B / 131,831 gzip, Node zlib level 9)."
+    },
+    "compiler": {
+      "bytes": 154028,
+      "gzip": 70071,
+      "justification": "Compiler: opt-level \"z\" + wasm-opt -Oz (151,007 B / 68,697 gzip, Node zlib level 9)."
+    }
   }
 }
