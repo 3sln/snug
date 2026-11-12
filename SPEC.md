@@ -49,7 +49,9 @@ JS package entry points, declarations, errors, ownership and examples are in
 `program.serialize()` and `fromSerialized(bytes)` provide runtime-only Program
 loading through a versioned, hashed and structurally verified container
 (D084, D100–D102); caches must have trusted origins. The package remains
-`private: true`; no publication is implied.
+`private: true`; no publication is implied. Versioning, compatibility and
+the release process are in [docs/release-policy.md](docs/release-policy.md)
+(D338); user-facing changes in [CHANGELOG.md](CHANGELOG.md).
 
 ### 1.1 What snug is not
 

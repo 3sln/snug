@@ -234,3 +234,9 @@ Read the [guide](docs/guide.md), [API reference](docs/api.md),
 [specification](SPEC.md), [architecture](docs/architecture.md) and
 [Program format](docs/program.md). Licence: [MIT](LICENSE);
 [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Versioning, what counts as a breaking change (APIs, error codes, the
+Program format, budget prices, defaults, CDDL semantics), supported
+runtimes and how a release is cut: [release policy](docs/release-policy.md)
+(proposed, D338). User-facing changes: [CHANGELOG](CHANGELOG.md). Nothing
+has been released.

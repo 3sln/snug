@@ -5987,6 +5987,74 @@ arena's size is not charged.
 - Measured on `p94-arena` over `p93-heads`.
 - [ ] **Signed off** (owner)
 
+### D338 — Release and version policy: lockstep semver, what is breaking, release only on the owner's go (P9.11)
+**Decision** (P9.11 engineer, proposed): `docs/release-policy.md`, with
+`CHANGELOG.md` (Keep a Changelog, plus Breaking and Budget-and-limits
+groups).
+- **Versions.** The npm package, the crate and the wasm SDK share one semver
+  number. The snug version is in every Program's SOURCE_KEY and container,
+  and cross-host identity is a gate. While the major is 0, a `0.y` bump is
+  the only place a breaking change may go. Patches are compatible, as
+  Cargo's and npm's caret rules read 0.x.
+- **What is breaking:**
+  - the public JS, Rust and SDK API;
+  - removing or renaming an error code (adding one is minor);
+  - a change to the witness rule (code, offset or path), except a
+    documented fix;
+  - a Program format major bump. Within a line, earlier Programs must still
+    load;
+  - **raising a unit price, or lowering a default budget or limit**. Either
+    can flip an accept to `budget` on unchanged code, and a stored Program
+    keeps its compiled budget. Price cuts and default raises are minor,
+    with notice. Unit counts are not stable across releases;
+  - a change to any default (wire `valid`, `cuts: 'rfc'`, `xsd`, limits);
+  - any change to the Bindle preset;
+  - a CDDL verdict flip under defaults, i.e. a corpus expectation change
+    (D328 is the model).
+  Size caps and performance are not API.
+- **Runtimes**, derived from the code; nothing is declared today:
+  - Node: floor 20 (`isWellFormed`); tested on 24.6 only.
+  - Browsers: ES2022 + `isWellFormed`; tested on Chrome and workerd at
+    `f275938` only.
+  - Rust: MSRV floor 1.87 (`cast_signed`); tested on 1.92 only.
+  - wasm: nightly-2026-09-16 for the build only.
+  Proposed rule: supported means gated on the release commit, and a SKIP
+  is not a pass.
+- **Release.**
+  - The Phase 9 RC must be complete (P9.8, P9.9's full runs, P9.12,
+    P9.13), and the §4 gate set green on the release commit.
+  - Artefacts are built and listed locally, and licence and notices are
+    checked.
+  - **Publishing, tagging and pushing happen only on the owner's explicit
+    go** for a named commit and version.
+- **Security.** The contact is a placeholder for the owner. Only the
+  latest `0.y` line gets fixes before 1.0. A fix may break the rules only
+  as far as it needs to.
+**Why:** P9.11 asks for a written policy before the RC. The snug-specific
+surfaces (Programs, codes, prices, defaults, verdicts) need rules of their
+own, because plain semver says nothing about a budget that can turn a pass
+into a refusal.
+**Alternatives:**
+- independent versions per artefact (a compatibility matrix for Program
+  and verdict identity);
+- prices as non-API (a silent verdict change);
+- every verdict fix as minor (hides D328-sized changes).
+**Owner decisions open** (docs/release-policy.md §7):
+- O1: 0.1.0 (recommended) or 1.0.0;
+- O2: lockstep;
+- O3: which artefacts (recommended: npm and the crate; the SDK later);
+- O4: registry names (recommended `@3sln/snug`; crate `snug` or
+  `snug-cddl`);
+- O5: security contact;
+- O6: Unicode data notice;
+- O7: Node `>=22` and MSRV 1.87, each with a gate;
+- O8: the budget rule.
+Repository items for the release commit are listed in §8: the
+version sites (kin's `version-byte` spells only `0.0.0`), the manifest
+fields, CHANGELOG in the npm staging, `#[non_exhaustive]` enums, no CI,
+and stale format 1.x and float-width text for P9.10.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
