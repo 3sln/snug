@@ -22,3 +22,11 @@ Rules for every contributor, human or agent:
   finished. Never claim a check passed that you did not run.
 * Measurements go in `bench/README.md` with machine, OS, runtime versions and
   method.
+
+## Worktrees
+
+`bench/compare/node_modules` (esbuild and the comparison libraries) is not
+tracked, so a fresh `git worktree` lacks it and `bb size` and `bb
+watchdog-test` stop with "esbuild is missing". Run `npm ci` in `bench/compare`
+(network), or symlink it to an existing checkout's and remove the link before
+committing: `ln -s <checkout>/bench/compare/node_modules bench/compare/node_modules`.

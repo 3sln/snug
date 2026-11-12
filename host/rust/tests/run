@@ -1,10 +1,34 @@
 #!/bin/sh
 # Assemble and test the public Rust API offline; Node supplies the JS oracle.
-[ -n "${SNUG_WATCHDOG:-}" ] || exec node "$(dirname "$0")/../../../kin/scripts/watchdog.mjs" rust-api-test -- sh "$0" "$@"   # P9.1 caps
+#
+#     bb rust-api-test          routine gating (a few minutes): every Cargo test, doctest,
+#                               guide/README example and Clippy, with the P9.6 async
+#                               differential (tests/async_sources.rs) on a seeded slice
+#                               (every 8th case, every 16th sequence body of <= 64 KiB)
+#     bb rust-api-test full     the same with the async differential at full scale (all
+#                               ~20,500 cases and ~10,000 sequence bodies; tens of minutes)
+#
+# Watchdog caps (P9.1): `rust-api-test` 1200 s wall / 2400 s CPU, `rust-api-test-full`
+# 3600 s / 7200 s (kin/scripts/watchdog.mjs DEFAULTS; SNUG_GATE_RUST_API_TEST[_FULL]_WALL
+# / _CPU or --gate-wall= / --gate-cpu= override them).
+mode=
+for a in "$@"; do
+  case "$a" in
+    full) mode=full ;;
+    --gate-wall=*|--gate-cpu=*) ;;   # the watchdog's, removed before the re-run
+    *) echo "usage: rust-api-test [full] [--gate-wall=S] [--gate-cpu=S]" >&2; exit 2 ;;
+  esac
+done
+gate=rust-api-test; [ "$mode" = full ] && gate=rust-api-test-full
+[ -n "${SNUG_WATCHDOG:-}" ] || exec node "$(dirname "$0")/../../../kin/scripts/watchdog.mjs" "$gate" -- sh "$0" "$@"   # P9.1 caps
 set -eu
 cd "$(dirname "$0")/../../.."
+if [ "$mode" = full ]; then SNUG_ASYNC_FULL=1; else SNUG_ASYNC_FULL=0; fi
+export SNUG_ASYNC_FULL
+echo "rust-api-test: async differential $( [ "$mode" = full ] && echo 'at full scale' || echo 'on the default slice (full: bb rust-api-test full)')"
 kin/scripts/rust-crate .cache/snug-rs
 cargo test --offline --manifest-path .cache/snug-rs/Cargo.toml
+cat .cache/snug-rs/async-sources-blob.txt .cache/snug-rs/async-sources-reader.txt .cache/snug-rs/async-sources-sequence.txt
 cargo build --offline --manifest-path .cache/snug-rs/Cargo.toml --lib
 rustdoc --test --edition 2021 docs/rust.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps
 rustdoc --test --edition 2021 host/rust/README.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps

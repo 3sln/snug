@@ -2,7 +2,7 @@
 // kills the gate's whole process group (and nothing else), and otherwise passes the
 // gate's status and arguments through.      node kin/scripts/watchdog-test.mjs  (bb watchdog-test)
 import { spawnSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caps } from './watchdog.mjs';
@@ -64,9 +64,15 @@ const alive = pid => { try { process.kill(pid, 0); return true; } catch { return
   const out = r.stdout + r.stderr;
   line(r.status === 124 && /WATCHDOG FAIL scan-test exceeded its wall-clock cap/.test(out) && /command: \S*scan-test 300 1\n/.test(out),
     'bb scan-test 300 1 under a 3 s wall cap fails with 124, naming scan-test, "300 1" and the cap');
-  const s = spawnSync(process.execPath, [join(root, 'tools/size/size.mjs'), '--gate-wall=1'], { cwd: root, env: env0, encoding: 'utf8', timeout: 600000 });
-  const so = s.stdout + s.stderr;
-  line(s.status === 124 && /WATCHDOG FAIL size exceeded its wall-clock cap/.test(so), 'a node gate (tools/size/size.mjs, selfWatch) under --gate-wall=1 fails with 124');
+  // the size gate needs bench/compare's esbuild, which a fresh git worktree lacks
+  if (!existsSync(join(root, 'bench/compare/node_modules/esbuild/lib/main.js'))) {
+    line(false, 'a node gate (size) under --gate-wall=1: esbuild is missing -- run `npm ci` in bench/compare, or symlink ' +
+      'bench/compare/node_modules to an existing checkout\'s (AGENTS.md "Worktrees")');
+  } else {
+    const s = spawnSync(process.execPath, [join(root, 'tools/size/size.mjs'), '--gate-wall=1'], { cwd: root, env: env0, encoding: 'utf8', timeout: 600000 });
+    const so = s.stdout + s.stderr;
+    line(s.status === 124 && /WATCHDOG FAIL size exceeded its wall-clock cap/.test(so), 'a node gate (tools/size/size.mjs, selfWatch) under --gate-wall=1 fails with 124');
+  }
 }
 console.log(fails ? `  FAIL ${fails} failure(s)` : '  ok   watchdog-test');
 process.exit(fails ? 1 : 0);
