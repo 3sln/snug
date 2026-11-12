@@ -6652,7 +6652,12 @@ needs no oracle exception. It was not chosen because the rule is "what
 works today". Pinning `node-oldest` to a 22.x patch with Unicode 16 was
 also rejected: ICU is a detail that moves under a patch release. For
 Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-12). Implements owner decision O7.
+  Verified on main at `baf481c`: drift ok, gate map ok. Node 20 is the
+  floor under the "works today" rule, with its upstream EOL stated. The
+  test-harness gaps were fixed as directed: the Unicode check now compares
+  against snug's pinned version, every test file is imported, and the stale
+  sequence test is corrected with RFC citations.
 
 ## Findings
 
