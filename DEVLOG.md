@@ -7219,7 +7219,15 @@ Results are in the P9.15 (rework) item.
    - It needs `version.edn` to refuse the placeholder.
    - It skips that check on a tree without `version.edn`.
 4. Whether the Go assessment is filed under D006's deferral as it stands.
-- [ ] **Signed off** (coordinator / owner).
+- [x] **1–3 decided** (coordinator, 2026-11-12):
+  - **Tags:** `vX.Y.Z` on the dist commit, `src/vX.Y.Z` on the source
+    commit, and `go/vX.Y.Z` if a Go module exists. The release attaches a
+    `git archive` of `src/vX.Y.Z`.
+  - **Pushing:** the dist commit and its tags go out under the same owner
+    release go as everything else.
+  - **Landing:** `bb dist` merges right after the P9.15 rework lands.
+- [ ] **4 (Go)**: with the owner, awaiting the answer the coordinator
+  relays.
 
 ## Findings
 
