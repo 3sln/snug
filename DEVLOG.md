@@ -6573,7 +6573,12 @@ DEFAULTS (3600 s wall / 7200 s CPU).
   pinned beside esbuild, offline once installed);
 * a wasm cap inside `bb size` (it would make every `bb size` need the
   nightly).
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-12). Verified on main at `71a8e0b`:
+  drift ok, size ok, no conflict markers. On the coordinator's call, the SDK
+  runtime stays at opt-level 3; wasm-opt -O3 with stripping is speed-neutral
+  (geomean 0.987×). The compiler is at "z" with -Oz, and the `wasm-size`
+  gate is in the release set. Verifier changes are deferred past the RC.
+  The +63% growth since P7.9 is attributed by phase.
 
 ## Findings
 
