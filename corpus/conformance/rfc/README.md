@@ -122,6 +122,12 @@ the bytes are copied rather than re-encoded. Appendix F lists are split at
 commas and spaces removed. All 94 F.1 items are **not well-formed**; that
 appendix supplies no merely-invalid-but-well-formed example. Additional
 UTF-8, duplicate-key and tag-content cases distinguish **invalid** data.
+snug reports the first refusal in stream order, so a not-well-formed example
+can still get a validity code. Under `valid`, F.1's `bf01020102` and
+`bf000000ff` repeat a key before their well-formedness error and are
+`duplicate_key` at offset 3; this is not a well-formedness bug
+(docs/scanner.md, "Precedence across classes"). The other 92 are
+`truncated` or `malformed`, as their Appendix F kind says (`bb sequence-test`).
 For RFC 8746, annotated hex comments are removed and `<Tag N>` is expanded
 to its preferred CBOR tag head. RFC 9052 EDN conversion preserves printed
 map order, including embedded protected-map byte strings; it does not sort

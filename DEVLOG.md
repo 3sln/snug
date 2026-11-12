@@ -8142,7 +8142,10 @@ review.
     fillers. The RFC 8742 and F.1 vectors run as sequences under the bindle,
     deterministic and valid presets, with expected outcomes (F.1 under
     `valid`: exactly `truncated`/`malformed`, except `bf01020102` and
-    `bf000000ff`, whose repeated key comes first: `duplicate_key`). No snug
+    `bf000000ff`, whose repeated key comes first: `duplicate_key`). That
+    precedence rule (the first refusal in stream order decides, whatever its
+    class) is now stated in scanner.md ("Precedence across classes"),
+    profiles.md and the RFC corpus README, with these two examples. No snug
     core bug. `navSkip`'s -1 on indefinite items is its contract: architecture
     §16.4 now says so plainly.
   - **Gate (4cf52c5, defaults; machine load 40–100):** framer unit vectors

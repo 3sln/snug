@@ -69,6 +69,14 @@ What `valid` reads, and how:
 | Unassigned simple values (`e0`–`f3`, `f8 20`–`f8 ff`) | accepted (`Simple`, D284) | accepted (Bindle: `simple`) |
 | Invalid UTF-8, a refused known tag's content, a lone break, truncation | refused with its code | refused with its code |
 
+The first refusal in stream order decides, whatever its class: a validity
+refusal met before a well-formedness error is the answer. For example, RFC
+8949 Appendix F.1's `bf 01 02 01 02` (not closed) and `bf 00 00 00 ff` (a
+break as a map value) are `duplicate_key` at offset 3 under `valid`, not
+`truncated` / `malformed` ([scanner.md](scanner.md#under-pf_valid-p84-d260d264),
+"Precedence across classes"). Only `truncated` and `malformed` are
+well-formedness verdicts.
+
 Values: a decoded map keeps its keys in wire order (D267); a bignum with
 leading zeros decodes to its integer; JavaScript numbers (and Rust's
 `Value::Float(f64)`) do not keep a NaN payload — a View's `raw()` keeps the

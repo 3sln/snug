@@ -118,6 +118,20 @@ same offset (gated).
 
 The same walk, the same order, with these differences **[flag]**:
 
+**Precedence across classes.** The first refusal in stream order wins, also when it
+is a validity refusal and the input is, further on, not well-formed. Only
+**truncated** and **malformed** speak to RFC 8949 Appendix F; any other code
+says that the walk stopped before reaching a well-formedness error, not that
+the input has none. Two RFC 8949 Appendix F.1 examples show it:
+`bf 01 02 01 02` (an indefinite map not closed by a break) is **duplicate_key**
+at offset 3, the second key `01`, before the end of input; `bf 00 00 00 ff` (a
+break in a value position) is **duplicate_key** at offset 3, the second key
+`00`, before the break. Under `deterministic` / `bindle` the same holds with
+**indefinite** at offset 0. `bb sequence-test` holds these two to
+`duplicate_key` and the other 92 F.1 examples to exactly **truncated** or
+**malformed**, and the independent RFC 8742 framer (P9.5) accepts a refusal
+only where it lies no later than the framer's own stop.
+
 * Heads: any width is accepted (no **non_shortest**); `ai` 31 opens an
   indefinite-length item: a string of definite chunks of its own major type
   (each a definite head, **malformed** otherwise; text chunks each valid
