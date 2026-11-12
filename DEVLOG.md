@@ -8467,11 +8467,55 @@ review.
   public APIs (JS, Rust, wasm SDK). Every finding is addressed or
   explicitly deferred. This includes making the D301 idiom for
   discriminated unions prominent.
+  *Input from P9.11 (docs/release-policy.md §8):* these statements are
+  stale and belong to P9.10:
+  - README, api.md and guide.md still describe Program format 1.0/1.1
+    (it is 2.0, D318);
+  - SPEC §2 item 4 still says float widths are encoded widths (D328);
+  - the README features table still calls `deterministic` the default
+    preset (D260);
+  - SPEC §1.1 lists `.abnf` as refused (P9.14);
+  - SPEC §7 names a `bb identity` gate and §9 a `ci/gate-map.edn`, and
+    neither exists.
 - [ ] **P9.11 — Release and version policy.** A written policy covering
   versioning (semver and what counts as breaking, including the Program
   format, error codes and the budget-unit prices), the supported runtimes,
   the changelog, and how a release is cut. Writing this policy publishes
   nothing.
+- [ ] **P9.15 — Release-readiness fixes** (manager, 2026-11-12, from
+  docs/release-policy.md §8; D338). Each item names its gate. None of them
+  publishes anything.
+  - **Version sites.**
+    - `kin/compile/main.kin` (`snug-version`, `SNUG_VERSION_LEN`,
+      `version-byte`, which spells only `0.0.0`) must accept any version.
+    - A test must tie both `package.json` files, both `Cargo.toml` files,
+      `host/js/src/version.mjs` and kin's version together.
+    - *Gate:* `bb drift`, `bb check`, `npm test`, and a test that fails on
+      a mismatched version. The version number itself waits for owner
+      decisions O1 and O2.
+  - **Manifests.**
+    - Add `engines` and `rust-version`.
+    - Add repository, description and readme metadata, and the crate's
+      `include` list.
+    - Correct the SDK's "P7.9 experiment" description.
+    - `private` / `publish = false` stay until the owner's go.
+    - *Gate:* owner decisions O4 (names) and O7 (runtimes); `npm test`;
+      the oldest declared Node line and the declared MSRV run as gates.
+  - **Packaging.**
+    - Add `CHANGELOG.md` to `package-build.mjs`'s copied files.
+    - An SDK staging and build script, if O3 ships the SDK.
+    - A publish-ready crate layout from `kin/scripts/rust-crate`.
+    - *Gate:* `npm run build` plus `npm pack --dry-run`, and `cargo
+      package --list`, reviewed; no publishing. Owner decisions O3 and O6
+      (the Unicode notice).
+  - **`#[non_exhaustive]` decision.** Decide which public Rust enums to
+    mark (`SourceError`, `Value`, `OnInvalid`, the option enums); today
+    only `Error` is marked. *Gate:* `bb rust-api-test`, plus manager
+    sign-off, because marking them is itself an API change before the
+    first release.
+  - **CI / gate map.** Either create the gate map SPEC §9 describes, with
+    the release gate set of policy §4 (SKIP is a failure), or correct
+    SPEC. *Gate:* manager sign-off. Adding hosted CI is the owner's call.
 
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
