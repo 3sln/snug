@@ -4798,7 +4798,7 @@ on the canonical copy (`pw-indef` tested the copied keys, always canonical),
 so the buffer driver charged no deferred-check units where the session's
 frames did (`bf 7f6161ff 01 ff`: budget 9 vs 10); 4 vectors added to
 valid-test's fixed regressions. The copy and its events equal `920a3e1` plus
-that fix on 200,000 random items (`.cache/d286d/bench/d286/units-diff.mjs`).
+that fix on 200,000 random items (`bench/d286/units-diff.mjs`).
 Buffer driver, `920a3e1` -> B+C: integers indefinite / non-shortest 1.6-1.7x,
 maps and map-heavy indefinite / non-shortest / indefinite strings 1.2-1.4x,
 reordered keys 1.15-1.2x, deterministic unchanged; `runtime` +529 min / +206

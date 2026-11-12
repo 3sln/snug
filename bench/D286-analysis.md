@@ -30,8 +30,8 @@ processes per arm with arms rotated per round, the table giving the median over
 rounds. Trees (detached worktrees under `.cache/`; the prototype diff is
 `.cache/d286wt/.prof/proto-BC.diff`, not committed): **base** = `main`
 `3c10a83`; **B** and **C** = base plus the prototypes below (kin edited,
-`bb emit`, generated JS measured). Driver: `bench/d286/variants.mjs` and
-`ab.sh` in `.cache/d286wt` (not committed): the workloads of
+`bb emit`, generated JS measured). Driver: `bench/d286/variants.mjs`, rotated by
+`bench/d286/ab.sh` (each takes the tree to measure): the workloads of
 `bench/valid-vm-bench.mjs` with each kind of non-determinism separated —
 
 | variant | encoding |
@@ -266,7 +266,7 @@ extension predicate gets fresh ones); Rust sessions and sequences from one pair
 per thread (`session_step`, `host/rust/src/schema.rs`); the wasm SDK from one
 pair in its state (`svs`/`scb`, `host/wasm/src/sdk.rs`). S and the key arena
 stay per session. Measured through the real host (`new VmSession(...)` and one
-whole-window `step` per call, `.cache/d286impl/bench/d286/host-sess.mjs`, three
+whole-window `step` per call, `bench/d286/host-sess.mjs`, three
 rotated rounds, median µs, same machine, load ~20–30):
 
 | | base (`47a5f06`) | A1 | |
@@ -330,7 +330,7 @@ from the next record, or the identity copy emits them all; the units pass and
 its second sort per marked map are skipped. An item with a tag 24 (its payload
 maps are the scanner's too) falls back to the units pass. On 240,000 random
 items the events and copy are equal to those without D
-(`.cache/d286d/bench/d286/units-diff.mjs`, six seeds). Buffer driver, five
+(`bench/d286/units-diff.mjs`, six seeds). Buffer driver, five
 rotated rounds, median µs, load ~28 (baseline: `920a3e1` + B+C + the tag-4
 fix):
 
@@ -383,7 +383,7 @@ A3 alone measured the same gain as A2 + A3 (maps `rev` 26.7 vs 26.8 ms on
 `b25a0fe`), so A2 was dropped.
 
 **A3 (a per-Program high-water mark for S).** Fresh `VmSession` per call
-(`.cache/d286impl/bench/d286/host-sess.mjs`, three rotated rounds, median µs):
+(`bench/d286/host-sess.mjs`, three rotated rounds, median µs):
 
 | | `3715bdd` | A3 | |
 | --- | ---: | ---: | ---: |
