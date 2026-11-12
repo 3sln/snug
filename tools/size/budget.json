@@ -35,14 +35,14 @@
       "static": {
         "min": 2662,
         "gzip": 1374,
-        "brotli": 1227
+        "brotli": 1255
       },
       "full": {
         "min": 290426,
         "gzip": 99313,
         "brotli": 84682
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Full gzip and brotli: D333 (P9.2, coordinator under D303) -- numeric controls across int and float and .cat/.det text with bytes (kin/compile/ctl.kin, D329/D330), float widths by value (kin/vm-eval.kin, D328); measured on p92-rfc over main 5a1bb84. Full min: D336 (P9.3, D303 rule of thumb) -- RFC 9682 #7 head numbers (kin/compile/lower.kin head7, lower-head7; kin/compile/parse.kin), +632 B; measured on p93-heads over main 74b903f."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Full gzip and brotli: D333 (P9.2, coordinator under D303) -- numeric controls across int and float and .cat/.det text with bytes (kin/compile/ctl.kin, D329/D330), float widths by value (kin/vm-eval.kin, D328); measured on p92-rfc over main 5a1bb84. Full min: D336 (P9.3, D303 rule of thumb) -- RFC 9682 #7 head numbers (kin/compile/lower.kin head7, lower-head7; kin/compile/parse.kin), +632 B; measured on p93-heads over main 74b903f. Static brotli: D340 (P9.14, coordinator under D303) -- the `abnf: 'strict' | 'lenient'` compile option's validation (host/js/src/options.mjs), 1,202 -> 1,230; ceil(1,230 * 1.02); measured on p914-strict over main bd10ce0."
     },
     "snug/view": {
       "static": {
@@ -122,16 +122,16 @@
     },
     "snug/abnf": {
       "static": {
-        "min": 14790,
-        "gzip": 6077,
-        "brotli": 5423
+        "min": 16104,
+        "gzip": 6534,
+        "brotli": 5807
       },
       "full": {
-        "min": 14790,
-        "gzip": 6077,
-        "brotli": 5423
+        "min": 16104,
+        "gzip": 6534,
+        "brotli": 5807
       },
-      "justification": "P9.14 D334: the optional .abnf/.abnfb module (kin/abnf.kin: ABNF parser, resolver and metered Earley recognizer with its configurable scratch cap; host/js/src/abnf.mjs with abnfWith), a new entry outside every runtime aggregate (all-runtime excludes it, like snug/unicode). Ceil(measurement * 1.02) of 14,500 / 5,957 / 5,316; measured on p914-abnf over main 2c3c8f1, esbuild 0.28.2. No existing cap changed: snug/schema and runtime +51 min (ext.mjs binding hook), snug/compile full +233 min (code 57, name admission, message)."
+      "justification": "P9.14 D334: the optional .abnf/.abnfb module (kin/abnf.kin: ABNF parser, resolver and metered Earley recognizer with its configurable scratch cap; host/js/src/abnf.mjs with abnfWith), a new entry outside every runtime aggregate (all-runtime excludes it, like snug/unicode). Ceil(measurement * 1.02) of 14,500 / 5,957 / 5,316; measured on p914-abnf over main 2c3c8f1, esbuild 0.28.2. No existing cap changed: snug/schema and runtime +51 min (ext.mjs binding hook), snug/compile full +233 min (code 57, name admission, message). D340 (P9.14, coordinator under D303): strict RFC parsing by default with abnf: 'lenient' as an option -- the strict parse paths and messages (kin/abnf.kin), 14,506 / 5,951 / 5,302 -> 15,788 / 6,405 / 5,693; ceil(measurement * 1.02); measured on p914-strict over main bd10ce0."
     },
     "runtime": {
       "static": {
