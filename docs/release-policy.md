@@ -434,46 +434,52 @@ go. Delegations such as D303 cover size caps only, not releases.
 
 ## 7. Owner decisions
 
-None of these is decided. Each has a recommendation.
+All eight were decided by the owner on 2026-11-12, in session, through the
+coordinator. The owner's answers are recorded below; the original options
+and recommendations are in git history. Implementation is tracked in
+DEVLOG under P9.15 and P9.17–P9.19.
 
-- [ ] **O1 — First version: 0.1.0 or 1.0.0.**
-  *Recommendation: 0.1.0.* The Rust API has just broken (D327), the async
-  drivers are about to be refactored (P9.6b), P9.10's stranger pass and
-  P9.13's review are still open, and the wasm SDK is experimental. 1.0
-  would freeze all of that. Plan 1.0 after one release cycle with no
-  breaking change.
-- [ ] **O2 — Lockstep versions or independent versions.**
-  *Recommendation: lockstep* (§1.1). Independent versions would need a
-  matrix saying which crate version matches which npm version for Program
-  and verdict identity.
-- [ ] **O3 — Which artefacts the first release contains.** Options:
-  (a) npm only; (b) npm and the crate; (c) npm, the crate and the wasm SDK
-  marked experimental.
-  *Recommendation: (b).* The crate is gated (`rust-api-test`) and has no
-  dependencies. The SDK has no staging or build-for-publish path yet and
-  depends on a pinned nightly, and D130 says it ships "if at all, marked
-  experimental".
-- [ ] **O4 — Registry names.** npm `snug` and crates.io `snug` are what the
-  manifests and docs use today, and their availability has not been
-  checked (offline). Options: an unscoped `snug`, if free; a scoped
-  `@3sln/snug` (and `@3sln/snug-wasm-sdk`); a crate named `snug`, or e.g.
-  `snug-cddl` if `snug` is taken.
-  *Recommendation:* use `@3sln/snug` on npm, because it needs no name
-  dispute and matches the owner's scope. The import specifiers in every
-  doc and example then change from `'snug'` to `'@3sln/snug'`. For the
-  crate, use `snug` if free, otherwise `snug-cddl`.
-- [ ] **O5 — Security contact**, and whether to use a hosted private
-  reporting channel. *Recommendation:* a dedicated address or the forge's
-  private advisory feature, named in `SECURITY.md`.
-- [ ] **O6 — Unicode data notice** for the `snug/unicode` tables (§4 step
-  6). *Recommendation:* add the Unicode License v3 text to
-  `THIRD_PARTY_NOTICES.md` under a "Unicode data (snug/unicode)" heading.
-  It is cheap and removes the doubt.
-- [ ] **O7 — Supported runtime statements** (§2): Node `>=22` or `>=24`,
-  and MSRV 1.87 (after a gate on that toolchain) or 1.92.
-  *Recommendation:* Node `>=22` and MSRV 1.87, each with its gate added.
-- [ ] **O8 — The budget rule of §1.3** (price raises are breaking; price
-  cuts are minor with notice). *Recommendation: adopt as written.*
+- [x] **O1 — First version: 0.1.0.** Owner: the first version is 0.1.0,
+  "because it is a pre-release and no stable SDK/API is claimed yet".
+- [x] **O2 — One version for every artefact, from one source.** Owner: all
+  artefacts share one version.
+  - The single source is `version.edn` at the repository root.
+  - The release process stamps it onto every version site: package.json
+    files, Cargo.toml, kin's version literal, the SDK and so on.
+  - The versions checked into project files are placeholders.
+- [x] **O3 — What ships: JS, wasm and Rust; the wasm SDK ships.** Owner:
+  JS, wasm and Rust are the priority, and the wasm SDK does ship.
+  - Planned wasm artefacts:
+    - the raw `.wasm` binary as a release artefact;
+    - `@3sln/snug-wasm` on npm, holding the raw `.wasm` and a JS SDK
+      that loads it from a path, URL, bytes or a `WebAssembly.Module` the
+      user supplies;
+    - an "easy" entry with the wasm inlined as base64, with synchronous
+      init where the host allows and its size cost documented;
+    - a Workers recipe using the module-binding entry.
+  - Consumers that install from git source (Go modules, deps.edn and
+    babashka git deps, and similar) get an orphan distribution branch of
+    stamped trees with tags. This waits on a target assessment
+    (DEVLOG P9.19).
+- [x] **O4 — Names.** Owner: `@3sln/snug` (JS) and `@3sln/snug-wasm`
+  (wasm SDK). Other targets get similar names that don't conflict. The
+  Rust crate name is proposed in P9.15 (crates.io `snug` is likely
+  taken).
+  - Repository URL: **assumed `https://github.com/3sln/snug`, pending the
+    owner's confirmation.**
+- [x] **O5 — Security contact:** `contact+security@3sln.com` (owner),
+  named in `SECURITY.md`.
+- [x] **O6 — Unicode data notice:** yes (owner). The Unicode License v3
+  text goes in `THIRD_PARTY_NOTICES.md`.
+- [x] **O7 — Minimum supported versions: whatever works today, tested
+  and pinned.** Owner: test which versions work today and pin those.
+  - Find the oldest Node and the oldest stable Rust that pass the gates.
+  - Add gates on exactly those toolchains.
+  - State them in the manifests (`engines`, `rust-version`).
+- [x] **O8 — Budget pricing rule of §1.3:** adopted as recommended (owner).
+  Raising a price is breaking; cutting one is minor, with notice.
+
+Publishing, pushing and tagging a remote remain the owner's call (§4).
 
 ## 8. What in the repository has to change before a release
 

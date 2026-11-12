@@ -6056,7 +6056,30 @@ Repository items for the release commit are listed in §8: the
 version sites (kin's `version-byte` spells only `0.0.0`), the manifest
 fields, CHANGELOG in the npm staging, `#[non_exhaustive]` enums, no CI,
 and stale format 1.x and float-width text for P9.10.
-- [ ] **Signed off** (owner)
+**Owner answers (2026-11-12, in session, via the coordinator).**
+docs/release-policy.md §7 has the full text.
+- O1: first version 0.1.0, "because it is a pre-release and no stable
+  SDK/API is claimed yet".
+- O2: one version for all artefacts. The single source is `version.edn`
+  at the repo root, and the release stamps it onto every version site.
+  Checked-in versions are placeholders (P9.15 reworks the mechanism).
+- O3: JS, wasm and Rust; the wasm SDK ships (P9.17):
+  - the raw `.wasm`;
+  - `@3sln/snug-wasm` with a loader plus an inlined-base64 "easy" entry;
+  - a Workers recipe.
+  Git-source consumers get an orphan distribution branch, assessed in
+  P9.19.
+- O4: `@3sln/snug` and `@3sln/snug-wasm`; other targets get similar
+  names. The crate name is to be proposed. The repository URL is assumed
+  to be `https://github.com/3sln/snug` until the owner confirms it.
+- O5: `contact+security@3sln.com`, in SECURITY.md.
+- O6: add the Unicode License v3 notice.
+- O7: pin the oldest Node and Rust that pass today, gated on exactly
+  those (P9.18).
+- O8: adopted as recommended. Raising a price is breaking; cutting one is
+  minor, with notice.
+- [x] **Signed off** (owner, 2026-11-12, via coordinator: the answers to
+  O1–O8 above; the policy as amended by them).
 
 ### D339 — `#[non_exhaustive]` on the Rust error, path and option enums; the data model and the session protocol stay exhaustive (P9.15)
 **Decision** (P9.15 engineer, proposed): before the first release, these
@@ -9437,6 +9460,57 @@ review.
   *Gate:* `bb gates land` plus vmsession-test, sequence-test, valid-test
   and the scan gates for the f8 change. One D-entry for the behaviour
   changes (D342).
+
+**Release packaging (owner answers O1–O8, 2026-11-12; see D338).**
+Sequence: P9.15 (rework), P9.17 and P9.18 run in parallel. All three land
+before P9.9's long runs and P9.13's review. P9.19 is an assessment that
+can run alongside them; its build work is post-RC unless it is cheap.
+- [ ] **P9.15 (rework) — the version comes from `version.edn`** (O2), plus
+  names and metadata (O4–O6).
+  - **Version source:** `version.edn` at the repo root is the single
+    source. `bb stamp <version>` (or part of the release task) writes every
+    version site: both package.json files, the SDK package, both
+    Cargo.toml files, `version.mjs` and kin's version literal.
+  - **Placeholders:** checked-in sites hold a placeholder. The consistency
+    test checks the placeholder everywhere, and that stamping produces a
+    coherent tree.
+  - **Identity:** placeholder and stamped builds both pass the identity
+    gates. kin's version string is in every source key, so the gates must
+    hold whatever its length. A stamped release is reproducible: same
+    version.edn and commit, byte-identical artefacts.
+  - **Names:** `@3sln/snug`, which rewrites the import specifiers in docs
+    and examples. A proposed crates.io name, with availability checked if
+    network access is available (otherwise say so).
+  - **Metadata:** repository `https://github.com/3sln/snug`, marked as an
+    assumption. SECURITY.md with `contact+security@3sln.com`. The Unicode
+    License v3 notice in THIRD_PARTY_NOTICES.md.
+- [ ] **P9.17 — The wasm SDK ships** (O3), as `@3sln/snug-wasm`.
+  - Artefacts:
+    - the raw `.wasm` as a release artefact;
+    - an npm package with the `.wasm` and a JS SDK that loads it from a
+      path, URL, bytes or a `WebAssembly.Module`;
+    - an "easy" entry with the wasm inlined as base64 (synchronous init
+      where the host allows; size cost documented);
+    - a Workers recipe with the module-binding entry.
+  - The release build pins the nightly that `-Zbuild-std` needs.
+  - Build, pack and dry-run locally. Nothing is published.
+  - SDK user docs (deferred in P9.10).
+  - Starts after P9.12's wasm build settings land.
+- [ ] **P9.18 — Minimum supported toolchains** (O7). Find the oldest Node
+  (try 18, 20 and 22) and the oldest stable Rust (bisect) that pass the
+  gates today. Add gates on exactly those toolchains and set `engines` and
+  `rust-version`. Toolchains are installed locally (nvm, rustup), never in
+  the repo.
+- [ ] **P9.19 — Git-source consumers** (O3). Design and validate locally:
+  - an orphan `dist` branch of stamped, built trees, one commit per
+    release;
+  - tags on those commits, plus Go-style subdirectory tags where needed;
+  - `:git/tag` + `:git/sha` for deps.edn.
+  Also assess which kin targets exist today and how mature they are. For
+  each candidate (Go, Clojure/babashka, others), estimate what a host
+  layer, gates and parity with JS and Rust would take. D006 deferred
+  Go/Java/C#. Recommendation to the coordinator; the build is post-RC
+  unless cheap. Nothing is pushed.
 
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
