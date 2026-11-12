@@ -14,6 +14,9 @@
 //      cap) within a bounded time, the CPU per unit is printed;
 //   6. JS == Rust: every prepare (status, line, column, table words) and run (the verdict
 //      word) above replayed through a debug Rust build of the same kin source.
+// Sections 1-3 run both parse modes (D340): the strict default and abnf: 'lenient', kin
+// against the oracle's own switch in each; a strict-valid text prepares the same table in
+// lenient mode; half the random grammars have the strict shape.
 //
 //     node kin/scripts/abnf-test.mjs <rust abnf binary> [grammars] [seed]
 import assert from 'node:assert/strict';
@@ -28,7 +31,9 @@ const [bin, grammarsArg = '600', seedArg = '1'] = process.argv.slice(2);
 const GRAMMARS = Number(grammarsArg), SEED = Number(seedArg);
 const BIG = 0x7fffffff, DEFAULT_BUDGET = 2250000;
 const NAMES = { 1: 'not_string', 2: 'utf8', 3: 'syntax', 4: 'prose', 5: 'undefined', 6: 'duplicate', 7: 'incremental',
-  8: 'repeat', 9: 'range', 10: 'nesting', 11: 'too_large', 12: 'internal' };
+  8: 'repeat', 9: 'range', 10: 'nesting', 11: 'too_large', 12: 'internal',
+  // strict only (D340)
+  13: 'start_wide', 14: 'rule_first', 15: 'no_eol', 16: 'comment', 17: 'leading', 18: 'order', 19: 'after_start' };
 const te = new TextEncoder();
 const hex = b => Buffer.from(b).toString('hex');
 
@@ -41,11 +46,11 @@ function strItem(bytes, major) {          // major 3 text, 2 bytes: a definite C
 
 // ---------------------------------------------------------------- kin (JS), recorded for Rust
 const rustIn = [], rustWant = [];
-function prep(text) {
-  const a = strItem(typeof text === 'string' ? te.encode(text) : text, 3);
-  const t = new Int32Array(K.abnfWords(a.length)), st = K.abnfPrep(a, 0, a.length, t);
+function prep(text, lenient = false) {
+  const a = strItem(typeof text === 'string' ? te.encode(text) : text, 3), pm = lenient ? K.MODE_LENIENT : K.MODE_STRICT;
+  const t = new Int32Array(K.abnfWords(a.length)), st = K.abnfPrep(a, 0, a.length, t, pm);
   const used = st === 0 ? K.abnfTableWords(t) : 0;
-  rustIn.push(`P ${hex(a)}`);
+  rustIn.push(`P ${pm} ${hex(a)}`);
   rustWant.push(`P ${st} ${K.abnfErrorLine(t)} ${K.abnfErrorColumn(t)} ${used}`);
   return { st, code: NAMES[st], t: st === 0 ? t.slice(0, used) : null, line: K.abnfErrorLine(t), column: K.abnfErrorColumn(t) };
 }
@@ -84,7 +89,8 @@ let lastScratch = null;
 const units = r => (r >= 0 ? r : -2 - r);
 
 const stats = { grown: 0, maxReruns: 0, hand: 0, handCases: 0, grammars: 0, runs: 0, matched: 0, refused: 0, budgetSkipped: 0, sweeps: 0,
-  growth: 0, mutants: 0, mutantsBothOk: 0, mutantsBothRefused: 0, mutantRuns: 0 };
+  growth: 0, mutants: 0, mutantsBothOk: 0, mutantsBothRefused: 0, mutantRuns: 0, strictRefusals: 0,
+  strictGrammars: 0, strictRefused: 0, strictSame: 0, mutantsStrictOk: 0, mutantsStrictRefused: 0 };
 
 /** Budget sweep on one answered run: room u - 1 stops, room u answers the same; a scratch
  *  grown from 16 words answers the same. */
@@ -99,8 +105,31 @@ function sweep(p, mode, item, r) {
 
 // ---------------------------------------------------------------- 1. hand vectors
 const vectors = JSON.parse(readFileSync(new URL('../../corpus/conformance/abnf.json', import.meta.url)));
+// A grammar marked "parse": "lenient" needs the abnf: 'lenient' option (D340): its cases
+// run in lenient mode, and strict mode must refuse it with "strictError" (kin and oracle).
+// Every other grammar is strict-valid and must mean the same in lenient mode: the same
+// prepared table, so the same verdicts and units.
 for (const g of vectors.grammars) {
-  const p = prep(g.abnf), o = parseAbnf(g.abnf);
+  const lenient = g.parse === 'lenient';
+  if (lenient) {
+    // an error vector run in lenient mode (its code there is the point) is refused by
+    // strict mode too, perhaps with another code; every other lenient vector names its
+    // strict refusal
+    assert.ok(g.strictError || g.error, `${g.name}: a lenient vector names its strict refusal`);
+    const ps = prep(g.abnf), os = parseAbnf(g.abnf);
+    assert.ok(ps.st !== 0 && !os.ok, `${g.name}: strict mode refuses it (kin ${ps.code}, oracle ${os.code})`);
+    if (g.strictError) {
+      assert.equal(ps.code, g.strictError, `${g.name}: kin strict`);
+      assert.equal(os.code, g.strictError, `${g.name}: oracle strict`);
+    }
+    assert.ok(ps.line >= 1 && ps.column >= 1, `${g.name}: a strict refusal has a place`);
+    stats.strictRefusals++;
+  }
+  const p = prep(g.abnf, lenient), o = parseAbnf(g.abnf, { lenient });
+  if (!lenient && !g.error) {
+    const pl = prep(g.abnf, true);
+    assert.deepEqual(pl.t, p.t, `${g.name}: strict and lenient prepare the same table`);
+  }
   if (g.error) {
     assert.equal(p.code, g.error, `${g.name}: kin`);
     assert.equal(o.ok ? 'ok' : o.code, g.error, `${g.name}: oracle`);
@@ -185,11 +214,14 @@ function text(n, names) {
   }
   throw new Error(n.t);
 }
-function grammar() {
+// strict: a controller of the strict default's shape (D340) -- the start one element
+// (grouped when it is not), alone on its line, the text ending in a newline; otherwise the
+// lenient shapes too (a wide start, text after it, no final newline)
+function grammar(strict) {
   const nrules = int(0, 4), names = Array.from({ length: nrules }, (_, i) => pick(['r', 'rule', 'X', 'a-b']) + i);
   const bodies = names.map(() => expr(0, nrules)), start = expr(0, nrules);
   const nl = rnd() < 0.2 ? '\r\n' : '\n';
-  const lines = [text(start, names) + pick(['', ' ', ' ; start'])];
+  const lines = [strict ? (isElement(start) ? text(start, names) : `(${text(start, names)})`) : text(start, names) + pick(['', ' ', ' ; start'])];
   names.forEach((name, i) => {
     const b = bodies[i];
     if (rnd() < 0.15) lines.push(pick(['', '; comment', '  ']));
@@ -198,7 +230,7 @@ function grammar() {
       for (const x of b.items.slice(1)) lines.push(`${caseMix(name)} =/ ${text(x, names)}`);
     } else lines.push(`${caseMix(name)}${pick([' = ', '=', ' =  '])}${text(b, names)}`);
   });
-  return { text: lines.join(nl) + pick(['', nl]), start, bodies, names };
+  return { text: lines.join(nl) + (strict ? nl : pick(['', nl])), start, bodies, names, strict };
 }
 function sample(n, g, depth) {
   if (depth > 12) return null;
@@ -262,29 +294,49 @@ function differential(p, o, sym, where) {
     if (stats.runs % 7 === 0) sweep(p, mode, item, r);
   }
 }
+/** Both parse modes on one text (D340): kin and the oracle agree on accept/refuse in each;
+ *  what strict accepts, lenient accepts with the same table. Returns the two preparations. */
+function bothModes(t, where) {
+  const ps = prep(t), os = parseAbnf(t), pl = prep(t, true), ol = parseAbnf(t, { lenient: true });
+  if ((ps.st === 0) !== os.ok) assert.fail(`${where} strict: kin ${ps.st === 0 ? 'accepts' : ps.code} oracle ${os.ok ? 'accepts' : os.code}`);
+  if ((pl.st === 0) !== ol.ok) assert.fail(`${where} lenient: kin ${pl.st === 0 ? 'accepts' : pl.code} oracle ${ol.ok ? 'accepts' : ol.code}`);
+  if (ps.st === 0) {
+    assert.equal(pl.st, 0, `${where}: strict accepts, lenient must`);
+    assert.deepEqual(pl.t, ps.t, `${where}: strict and lenient prepare the same table`);
+    stats.strictSame++;
+  }
+  return { ps, os, pl, ol };
+}
 const texts = [];
 for (let i = 0; i < GRAMMARS; i++) {
-  const g = grammar(), p = prep(g.text), o = parseAbnf(g.text);
-  const where = `grammar ${i} ${JSON.stringify(g.text)}`;
+  const g = grammar(i % 2 === 0), where = `grammar ${i} ${JSON.stringify(g.text)}`;
+  const { ps, os, pl: p, ol: o } = bothModes(g.text, where);
   assert.equal(p.st, 0, `${where}: kin refused (${p.code} at ${p.line}:${p.column})`);
   assert.ok(o.ok, `${where}: the oracle refused (${o.code})`);
+  if (g.strict) assert.equal(ps.st, 0, `${where}: kin strict refused (${ps.code} at ${ps.line}:${ps.column})`);
   const inputs = inputsFor(g);
   for (const sym of inputs) differential(p, o, sym, where);
+  if (ps.st === 0) { stats.strictGrammars++; for (const sym of inputs.slice(0, 4)) differential(ps, os, sym, `${where} strict`); }
+  else stats.strictRefused++;
   texts.push({ text: g.text, inputs });
   stats.grammars++;
 }
 
-// The rule-first extension (D334): each generated grammar without its start line begins
-// with a rule; kin's lookahead and the oracle's element-first-then-rule-first must agree.
+// The rule-first extension (D334, lenient only since D340): each generated grammar without
+// its start line begins with a rule; kin's lookahead and the oracle's
+// element-first-then-rule-first must agree, and strict mode refuses it as rule_first.
 stats.ruleFirst = 0;
 for (const { text: src, inputs } of texts) {
   const rest = src.split(/\r?\n/).slice(1).join('\n');
   if (!/^[A-Za-z]/.test(rest)) continue;
-  const p = prep(rest), o = parseAbnf(rest);
-  if ((p.st === 0) !== o.ok) assert.fail(`rule-first ${JSON.stringify(rest)}: kin ${p.code ?? 'accepts'} oracle ${o.code ?? 'accepts'}`);
+  const where = `rule-first ${JSON.stringify(rest)}`, { ps, os, pl: p, ol: o } = bothModes(rest, where);
+  if (/^[A-Za-z][A-Za-z0-9-]*[ \t]*=/.test(rest)) {
+    assert.equal(ps.code, 'rule_first', `${where}: kin strict`);
+    assert.equal(os.code, 'rule_first', `${where}: oracle strict`);
+  }
   if (!o.ok) continue;
   stats.ruleFirst++;
-  for (const sym of inputs.slice(0, 4)) differential(p, o, sym, `rule-first ${JSON.stringify(rest)}`);
+  for (const sym of inputs.slice(0, 4)) differential(p, o, sym, where);
 }
 
 // ---------------------------------------------------------------- 3. mutated grammar texts
@@ -299,27 +351,29 @@ for (const { text: src, inputs } of texts) {
       else if (op === 1) t = t.slice(0, at) + pick(NOISE) + t.slice(at);
       else if (t.length) { const b = int(0, t.length); t = t.slice(0, Math.min(at, b)) + t.slice(Math.max(at, b)) + t.slice(Math.min(at, b), Math.max(at, b)); }
     }
-    const p = prep(t), o = parseAbnf(t);
+    const where = `mutant ${JSON.stringify(t)}`, { ps, os, pl: p, ol: o } = bothModes(t, where);
     stats.mutants++;
-    if ((p.st === 0) !== o.ok)
-      assert.fail(`mutant ${JSON.stringify(t)}: kin ${p.st === 0 ? 'accepts' : p.code} oracle ${o.ok ? 'accepts' : o.code}`);
+    if (ps.st === 0) {
+      stats.mutantsStrictOk++;
+      for (const sym of inputs.slice(0, 2)) { differential(ps, os, sym, `${where} strict`); stats.mutantRuns++; }
+    } else stats.mutantsStrictRefused++;
     if (!o.ok) { stats.mutantsBothRefused++; continue; }
     stats.mutantsBothOk++;
-    for (const sym of inputs.slice(0, 4)) { differential(p, o, sym, `mutant ${JSON.stringify(t)}`); stats.mutantRuns++; }
+    for (const sym of inputs.slice(0, 4)) { differential(p, o, sym, where); stats.mutantRuns++; }
   }
 }
 
 // ---------------------------------------------------------------- 5. pathological grammars
 const patho = [
-  ['ambiguous a = a a / "x"', 'a\na = a a / "x"', 'x'.repeat(400)],
-  ['ambiguous with the empty string', 'a\na = a a / "x" / ""', 'x'.repeat(400)],
-  ['nested nullable stars', '*(*(*(*"x")))', 'x'.repeat(3000)],
-  ['counted repetition of an ambiguous pair', '1000*2000("x" / "x" "x")', 'x'.repeat(1500)],
-  ['right recursion over a long input', 'a\na = "x" a / ""', 'x'.repeat(4000)],
-  ['left recursion over a long input', 'a\na = a "x" / ""', 'x'.repeat(60000)],
-  ['a counted nullable repetition', '2147483647*""', ''],
-  ['many alternatives', 'a\na = ' + Array.from({ length: 300 }, (_, i) => `%x${(i % 64 + 32).toString(16)}`).join(' / ') + ' a / ""', '~'.repeat(2000)],
-  ['deep nesting at the cap', 'x\nx = ' + '('.repeat(256) + '*"a"' + ')'.repeat(256), 'a'.repeat(2000)],
+  ['ambiguous a = a a / "x"', 'a\na = a a / "x"\n', 'x'.repeat(400)],
+  ['ambiguous with the empty string', 'a\na = a a / "x" / ""\n', 'x'.repeat(400)],
+  ['nested nullable stars', '(*(*(*(*"x"))))', 'x'.repeat(3000)],
+  ['counted repetition of an ambiguous pair', '(1000*2000("x" / "x" "x"))', 'x'.repeat(1500)],
+  ['right recursion over a long input', 'a\na = "x" a / ""\n', 'x'.repeat(4000)],
+  ['left recursion over a long input', 'a\na = a "x" / ""\n', 'x'.repeat(60000)],
+  ['a counted nullable repetition', '(2147483647*"")', ''],
+  ['many alternatives', 'a\na = ' + Array.from({ length: 300 }, (_, i) => `%x${(i % 64 + 32).toString(16)}`).join(' / ') + ' a / ""\n', '~'.repeat(2000)],
+  ['deep nesting at the cap', 'x\nx = ' + '('.repeat(256) + '*"a"' + ')'.repeat(256) + '\n', 'a'.repeat(2000)],
 ];
 const timing = [];
 for (const [name, g, input] of patho) {
@@ -345,7 +399,7 @@ for (const [name, g, input] of patho) {
 // maximum this input runs out of the 2^30-tick run allowance first.)
 {
   const alts = Array.from({ length: 1500 }, (_, i) => `%x${(0x100 + i).toString(16)}`).join(' / ');
-  const p = prep(`a\na = (${alts}) a / ""`), item = strItem(te.encode('Ā'.repeat(2000)), 3);
+  const p = prep(`a\na = (${alts}) a / ""\n`), item = strItem(te.encode('Ā'.repeat(2000)), 3);
   const spent = [];
   assert.deepEqual([K.abnfCap(-1), K.abnfCap(5), K.abnfCap(1 << 30), K.abnfCap(1 << 20)],
     [K.ABNF_DEFAULT_WORDS, K.ABNF_MIN_WORDS, K.ABNF_MAX_WORDS, 1 << 20]);
@@ -358,7 +412,7 @@ for (const [name, g, input] of patho) {
     spent.push(`${K.abnfCap(cap)} words: ${m[0] / 8 | 0} units`);
   }
   // a valid match whose scratch needs more than a small cap: refused by the cap, answered under the default
-  const q = prep('*(%x61 / %x61 %x61)'), long = strItem(te.encode('a'.repeat(3000)), 3);
+  const q = prep('(*(%x61 / %x61 %x61))'), long = strItem(te.encode('a'.repeat(3000)), 3);
   assert.equal(run(q, 0, long, 50000000, 0, true, K.ABNF_MIN_WORDS), -1, 'the minimum cap stops it');
   assert.ok(run(q, 0, long, 50000000) >= 0, 'the default cap answers');
   stats.memoryCap = `stopped at the cap with budget to spare (of 200 M): ${spent.join('; ')}; max reruns of any run ${stats.maxReruns}`;
@@ -373,8 +427,9 @@ for (let i = 0; i < got.length; i++) if (got[i] !== rustWant[i]) assert.fail(`JS
 
 console.log(`  ok hand vectors: ${stats.hand} grammars, ${stats.handCases} cases (kin == oracle == expected)`);
 console.log(`  ok oracle differential: ${stats.grammars} random grammars, ${stats.runs} runs (${stats.matched} matched, ${stats.refused} refused, ${stats.budgetSkipped} out of budget/memory, not compared)`);
-console.log(`  ok rule-first controllers (the D334 extension): ${stats.ruleFirst} accepted by both and run`);
-console.log(`  ok mutated grammars: ${stats.mutants} (${stats.mutantsBothOk} accepted by both, ${stats.mutantsBothRefused} refused by both), ${stats.mutantRuns} inputs run on them`);
+console.log(`  ok strict parse mode (D340): ${stats.strictRefusals} lenient hand vectors refused by strict (kin == oracle); random grammars ${stats.strictGrammars} accepted by strict and run, ${stats.strictRefused} refused by both; ${stats.strictSame} strict-valid texts prepare the same table in lenient`);
+console.log(`  ok rule-first controllers (the D334 extension, lenient mode): ${stats.ruleFirst} accepted by both and run`);
+console.log(`  ok mutated grammars, lenient: ${stats.mutants} (${stats.mutantsBothOk} accepted by both, ${stats.mutantsBothRefused} refused by both); strict: ${stats.mutantsStrictOk} accepted by both, ${stats.mutantsStrictRefused} refused by both; ${stats.mutantRuns} inputs run on them`);
 console.log(`  ok budget sweeps: ${stats.sweeps} (room u - 1 stops, room u answers; a scratch grown from 16 words == default; ${stats.grown} growths in all)`);
 console.log(`  ok memory cap: ${stats.memoryCap}`);
 for (const t of timing) console.log(`  ok pathological ${t.name}: ${t.r === -1 ? 'budget' : t.r >= 0 ? 'match' : 'refused'} in ${t.ms} ms (${t.units} units, ${t.nsPerUnit} ns/unit); budget 50 M: ${t.unbounded === -1 ? 'stopped (budget/memory cap)' : t.unbounded >= 0 ? 'match' : 'refused'} in ${t.msUnbounded} ms`);

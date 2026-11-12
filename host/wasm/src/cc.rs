@@ -79,6 +79,8 @@ pub extern "C" fn cc_compile(n: usize) -> i32 {
         limits: &s.opt[1..19],
         unicode: if s.unicode.is_empty() { None } else { Some(&s.unicode) },
         controls: if s.opt.len() > 22 { Some(&registry) } else { None },
+        // D340: the SDK's registry words already carry the ABNF parse mode (flags bit 1)
+        abnf: if s.opt.get(23).map_or(false, |f| f & 2 != 0) { crate::compile::AbnfMode::Lenient } else { crate::compile::AbnfMode::Strict },
     };
     let r = compile_bytes_with_options(&s.text[..n], &options);
     let code = if r.is_ok() { 0 } else { 1 };

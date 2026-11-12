@@ -587,7 +587,7 @@ export function lowerExt(h, node, env, id, pos) {
     // `target .name argument` for registered control id: one EXT leaf (id,
     // the argument's encoding, the control's maximum item bytes) and, for each
     // target leaf, AND(target leaf, EXT) -- the EXT never answers alone (D141).
-    if ((hg(h, H_PROFILE) === 2) && (hg(h, H_EXT_FLAGS) === 0)) {
+    if ((hg(h, H_PROFILE) === 2) && ((hg(h, H_EXT_FLAGS) & 1) === 0)) {
         return fail(h, ERR_PROFILE, pos);
     }
     const target = lowerType(h, na(h, node), env);

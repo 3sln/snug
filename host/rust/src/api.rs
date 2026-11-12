@@ -108,6 +108,9 @@ pub struct CompileOptions<'a> {
     /// The PEG group arena's cap in words (program-2 §9.4; D276, D281): `None` is the
     /// default 4,194,304; a run that needs more refuses with `group_limit`.
     pub group_words: Option<i32>,
+    /// How `.abnf` / `.abnfb` controllers parse (D340): strict RFC 5234 + RFC 7405 +
+    /// RFC 9165 §3 by default, or `AbnfMode::Lenient`. Bound into the source key.
+    pub abnf: crate::compile::AbnfMode,
 }
 /// Runtime overrides only lower the caps compiled into the Program.
 #[derive(Debug, Clone)]
@@ -197,6 +200,7 @@ impl Schema {
                 regexp: options.regexp,
                 cuts: options.cuts,
                 group_words: options.group_words,
+                abnf: options.abnf,
                 limits: &limits,
                 unicode: options.unicode,
                 controls: options.controls.map(|c| c as &dyn crate::compile::Registry),
@@ -399,5 +403,13 @@ impl crate::compile::Registry for crate::controls::Controls {
     }
     fn argument_detail(&self, name: &str, argument: &[u8]) -> Option<String> {
         self.get(name).and_then(|c| c.argument_detail(argument))
+    }
+    fn argument_ok_in(&self, name: &str, argument: &[u8], abnf: crate::compile::AbnfMode) -> bool {
+        let lenient = abnf == crate::compile::AbnfMode::Lenient;
+        self.get(name).is_none_or(|c| c.argument_in(argument, lenient))
+    }
+    fn argument_detail_in(&self, name: &str, argument: &[u8], abnf: crate::compile::AbnfMode) -> Option<String> {
+        let lenient = abnf == crate::compile::AbnfMode::Lenient;
+        self.get(name).and_then(|c| c.argument_detail_in(argument, lenient))
     }
 }

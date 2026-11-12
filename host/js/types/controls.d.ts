@@ -12,7 +12,7 @@ export type Control = ((argument: Uint8Array, item: Uint8Array) => boolean) | {
   maxBytes?: number;
   /** Checked once per use at compile time; anything but `true` refuses the schema
    *  (`control_value`), and a string answer is the refusal's detail. */
-  argument?(argument: Uint8Array): boolean | string;
+  argument?(argument: Uint8Array, options?: { abnf?: 'strict' | 'lenient' }): boolean | string;
   /** Budget units charged before each call, beyond the fixed 17: a non-negative safe integer.
    *  Default: `itemBytes`. */
   cost?(itemBytes: number): number;

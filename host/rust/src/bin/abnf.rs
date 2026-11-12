@@ -2,7 +2,8 @@
 //! a debug Rust build, for `bb abnf-test`: the gate compares every answer with the
 //! generated JS. Lines on stdin:
 //!
-//!   P <controller hex>                 prepare (the CBOR encoding of a text/byte string)
+//!   P <parse mode> <controller hex>    prepare (the CBOR encoding of a text/byte string;
+//!                                      parse mode 0 strict, 1 lenient, D340)
 //!                                      -> "P <status> <line> <column> <table words>"
 //!   R <mode> <item hex> <room> <first> <cap>
 //!                                      run the last prepared table over the item, with a
@@ -29,9 +30,10 @@ fn main() {
         let f: Vec<&str> = line.split(' ').collect();
         match f[0] {
             "P" => {
-                let a = unhex(f[1]);
+                let pmode: i32 = f[1].parse().unwrap();
+                let a = unhex(f[2]);
                 let mut tt = vec![0; abnf_words(a.len() as i32) as usize];
-                let st = abnf_prep(&a, 0, a.len() as i32, &mut tt);
+                let st = abnf_prep(&a, 0, a.len() as i32, &mut tt, pmode);
                 let used = abnf_table_words(&tt);
                 writeln!(out, "P {} {} {} {}", st, abnf_error_line(&tt), abnf_error_column(&tt), if st == 0 { used } else { 0 }).unwrap();
                 tt.truncate(used as usize);

@@ -138,7 +138,7 @@ pub fn ext_init(h: &mut [i32], opt: &[i32]) -> bool {
         return false;
     }
     let fl: i32 = opt[(EXT_OPT_AT + 1) as usize];
-    if (fl < 0) || (fl > 1) {
+    if (fl < 0) || (fl > 3) {
         bad_registry(h);
         return false;
     }

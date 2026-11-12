@@ -5,7 +5,10 @@
 ;; The registry rides after the OPT_WORDS compile options (snug.compile.main):
 ;;
 ;;     opt[22]      n, the number of registered controls (0..256)
-;;     opt[23]      flags: bit 0 admits them under the `bus` profile
+;;     opt[23]      flags: bit 0 admits them under the `bus` profile; bit 1 is the
+;;                  ABNF parse mode `abnf: 'lenient'` (D340), which the host's
+;;                  argument check applies -- carried here so the source key
+;;                  (the registry's [flags, ...]) binds it
 ;;     then n records: name length (1..64), max item bytes (>= 0), the name's
 ;;     bytes one per word -- names strictly ascending bytewise, each
 ;;     [A-Za-z_][A-Za-z0-9_-]*, none a built-in control's name.
@@ -85,7 +88,7 @@
       (if (== n 0) (return true))
       (if (< m (+ EXT_OPT_AT 2)) (do (bad-registry h) (return false)))
       (let [fl (ia opt (+ EXT_OPT_AT 1))]
-        (if (or (< fl 0) (> fl 1)) (do (bad-registry h) (return false)))
+        (if (or (< fl 0) (> fl 3)) (do (bad-registry h) (return false)))
         (hs h H_EXT_FLAGS fl))
       (let [^:mut at (+ EXT_OPT_AT 2)]
         (for [^I32 k 0 n]

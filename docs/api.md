@@ -176,6 +176,10 @@ Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 (see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
 Any other value, including the pre-release name `'reference'`, is a TypeError.
 The effective cut mode is part of the source key.
+`abnf?: 'strict' | 'lenient'` (D340) is how `.abnf`/`.abnfb` controllers
+parse: `'strict'` (the default) is RFC 5234 + RFC 7405 + RFC 9165 §3;
+`'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-snugabnf)). Any
+other value is a TypeError. It is part of the source key.
 
 `CompileLimits` names:
 
@@ -244,7 +248,7 @@ is the refusal's detail in the message.
 ```ts
 export const abnf: Readonly<{ abnf: Control; abnfb: Control }>;
 export function abnfWith(o?: { maxBytes?: number; maxWords?: number }): typeof abnf;
-export function checkAbnf(text: string | Uint8Array): true | string;
+export function checkAbnf(text: string | Uint8Array, options?: { abnf?: 'strict' | 'lenient' }): true | string;
 ```
 
 RFC 9165 §3's `.abnf` (Unicode scalars) and `.abnfb` (bytes), an optional
@@ -262,7 +266,13 @@ module, `.abnf`/`.abnfb` are `unsupported_control`, and the message names
 
 The controller is checked at compile time. Prose-val, syntax errors and
 undefined rules are `control_value`, with a detail like `(.abnf argument:
-prose-val (<...>) is not supported at ABNF line 2, column 11)`. The
+prose-val (<...>) is not supported at ABNF line 2, column 11)`. Parsing is
+strict RFC 5234 + RFC 7405 + RFC 9165 §3 by default (D340). The compile
+option `abnf: 'lenient'` (`compile(text, { controls: { ...abnf }, abnf:
+'lenient' })`; any other value is a `TypeError`) also admits snug's non-RFC
+forms: a wider start, a rule-first controller, and the others listed in CDDL
+support. Under the default each is `control_value`, and the detail names the
+option. The option is in the Program's source key. The
 controller is prepared once per Program. The match is metered in kin against
 the budget left, so every host charges the same units. Past the budget, or
 past the matcher's scratch cap, validation stops with `budget`.
@@ -271,7 +281,8 @@ past the matcher's scratch cap, validation stops with `budget`.
 in words (default 4,194,304 = 16 MiB, the PEG group arena's default, D281;
 65,536 to 16,777,216, otherwise `TypeError`).
 
-`checkAbnf(text)` answers `true`, or the reason the compiler would refuse.
+`checkAbnf(text, { abnf })` answers `true`, or the reason the compiler would
+refuse under that parse mode (strict by default).
 Semantics, leniencies and costs:
 [CDDL support](cddl-support.md#abnf-abnf-abnfb).
 

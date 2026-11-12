@@ -6,19 +6,22 @@
 // handles left recursion and empty matches without an Earley chart. It is slow and
 // small inputs only; it is a reference, not an engine.
 //
-// The dialect is snug's (docs/cddl-support.md, D334): RFC 5234 + RFC 7405 strings,
-// RFC 9165 §3's controller (the start, then rules), LF or CRLF newlines, and snug's
-// leniencies -- the start may be an alternation, the text's end ends a line, a
-// comment may hold any scalar but CR and LF, the start may be preceded by
-// whitespace, and a controller that begins with a rule starts at that rule. No
-// core rules.
+// The dialect is snug's (docs/cddl-support.md, D334, D340). By default it is strict:
+// RFC 5234 + RFC 7405 strings, RFC 9165 §3's controller (one element, then a newline and
+// rules), LF or CRLF newlines (RFC 9165 §3), every line ending with a newline, comments
+// of WSP / VCHAR. With { lenient: true }, snug's non-RFC forms are admitted too: the start
+// may be an alternation, the text's end ends a line, a comment may hold any scalar but
+// CR and LF, the start may be preceded by whitespace, an `=/` may precede its `=`, and a
+// controller that begins with a rule starts at that rule. No core rules in either mode.
 //
-//   parseAbnf(text) -> { ok: true, start, rules } | { ok: false, code }
+//   parseAbnf(text, { lenient }) -> { ok: true, start, rules } | { ok: false, code }
 //   matchAbnf(grammar, symbols: number[]) -> boolean
 //   symbolsOf(bytes, mode) -> number[] | null   (mode 'text': scalars, null if not UTF-8;
 //                                                mode 'bytes': bytes)
 
-export const CODES = ['syntax', 'prose', 'undefined', 'duplicate', 'incremental', 'nesting', 'utf8'];
+export const CODES = ['syntax', 'prose', 'undefined', 'duplicate', 'incremental', 'nesting', 'utf8',
+  // strict only (D340)
+  'start_wide', 'rule_first', 'no_eol', 'comment', 'leading', 'order', 'after_start'];
 
 class Refusal extends Error { constructor(code) { super(code); this.code = code; } }
 const refuse = code => { throw new Refusal(code); };
@@ -38,6 +41,8 @@ function logicalLines(text) {
       else if (c === ';') break;                            // the rest is a comment
       line += c;
     }
+    // char-val and prose-val hold no line break (RFC 5234 §4)
+    if (quote) refuse('syntax');
     // what remains must be ASCII printable or whitespace (comments may hold anything)
     if (/[^\x20-\x7e\t]/.test(line)) refuse('syntax');
     if (index > 0 && /^[ \t]/.test(raw)) {
@@ -171,9 +176,77 @@ function refsOf(node, out) {
   return out;
 }
 
-/** Parse an ABNF controller (a JS string). */
-export function parseAbnf(text) {
+/** A physical line without its comment (quote-aware); strict: the comment holds only
+ *  WSP / VCHAR (RFC 5234 §4). */
+function stripLine(raw, strict) {
+  let line = '', quote = null;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (quote) { line += c; if (c === quote) quote = null; continue; }
+    if (c === '"') quote = '"';
+    else if (c === '<') quote = '>';
+    else if (c === ';') { if (strict && /[^\t\x20-\x7e]/.test(raw.slice(i + 1))) refuse('comment'); break; }
+    line += c;
+  }
+  if (quote) refuse('syntax');   // char-val and prose-val hold no line break (RFC 5234 §4)
+  if (/[^\x20-\x7e\t]/.test(line)) refuse('syntax');
+  return line;
+}
+
+/** Strict (D340): the start is one element that ends a physical line, directly followed by
+ *  a newline or the end. An element may run over continuation lines (inside a group or
+ *  option, RFC 5234's c-wsp), so the shortest run of lines 0..k that is exactly one element,
+ *  ending without whitespace or a comment, is the start. Then RFC 5234's rulelist, every
+ *  line ending with a newline. Answers [start, rule logical lines]. */
+function strictStart(text) {
+  if (/\r(?!\n)/.test(text)) refuse('syntax');
+  const physical = text.split(/\r?\n/);
+  const stripped = physical.map(raw => stripLine(raw, false));
+  let start = null, k = 0;
+  for (let n = 1; n <= physical.length && !start; n++) {
+    if (n > 1 && !/^[ \t]/.test(physical[n - 1])) break;
+    const last = physical[n - 1];
+    if (/[ \t]$/.test(last) || stripped[n - 1] !== last) continue;
+    try {
+      const toks = tokens(stripped.slice(0, n).join(' '));
+      if (toks.length === 0) continue;
+      const [s, p] = parseElement(toks, 0, 0);
+      if (p === toks.length) { start = s; k = n; }
+    } catch (e) {
+      if (!(e instanceof Refusal) || e.code === 'prose' || e.code === 'nesting') throw e;
+    }
+  }
+  if (!start) {
+    const first = (() => { try { return tokens(stripped[0]); } catch { return []; } })();
+    if (first[0]?.type === 'name' && first[1]?.type === 'defas') refuse('rule_first');
+    let element = false;
+    try { const t = tokens(stripped[0].trimEnd()); element = t.length > 0 && parseElement(t, 0, 0)[1] === t.length; } catch {}
+    refuse(element ? 'after_start' : 'start_wide');
+  }
+  const out = [];
+  for (let i = k; i < physical.length; i++) {
+    if (/^[ \t]/.test(physical[i])) {
+      if (out.length === 0) { if (stripped[i].trim() !== '') refuse('syntax'); continue; }   // a blank or comment line
+      out[out.length - 1] += ' ' + stripped[i];
+    } else out.push(stripped[i]);
+  }
+  // checked after the rules parse, in kin's order: the final newline, then the comments
+  const after = () => {
+    if (k < physical.length && !text.endsWith('\n')) refuse('no_eol');
+    physical.forEach(raw => stripLine(raw, true));
+  };
+  return [start, out, after];
+}
+
+/** Parse an ABNF controller (a JS string): strict RFC 5234 + RFC 7405 + RFC 9165 §3 by
+ *  default, or snug's lenient dialect ({ lenient: true }, D340). */
+export function parseAbnf(text, { lenient = false } = {}) {
   try {
+    if (!lenient) {
+      if (/^([ \t]|(;[^\r\n]*)?\r?\n[ \t])/.test(text)) refuse('leading');
+      const [s, ruleLines, after] = strictStart(text);
+      return finish(s, ruleLines, false, after);
+    }
     const lines = logicalLines(text);
     const first = tokens(lines[0]);
     if (first.length === 0) refuse('syntax');
@@ -192,30 +265,37 @@ export function parseAbnf(text) {
       ruleFirst = true;
       start = { t: 'ref', name: first[0].text.toLowerCase() };
     }
-    const defs = new Map();   // name -> { eq: count, alts: [] }
-    for (const line of ruleFirst ? lines : lines.slice(1)) {
-      const toks = tokens(line);
-      if (toks.length === 0) continue;
-      if (toks[0].type !== 'name') refuse('syntax');
-      if (!toks[1] || toks[1].type !== 'defas') refuse('syntax');
-      const [body, p] = parseAlternation(toks, 2, 0);
-      if (p !== toks.length) refuse('syntax');
-      const name = toks[0].text.toLowerCase();
-      const d = defs.get(name) ?? { eq: 0, alts: [] };
-      if (toks[1].text === '=') d.eq++;
-      d.alts.push(body);
-      defs.set(name, d);
-    }
-    for (const d of defs.values()) if (d.eq === 0) refuse('incremental');
-    for (const d of defs.values()) if (d.eq > 1) refuse('duplicate');
-    const rules = new Map([...defs].map(([n, d]) => [n, d.alts.length === 1 ? d.alts[0] : { t: 'alt', items: d.alts }]));
-    for (const body of [start, ...rules.values()])
-      for (const r of refsOf(body, [])) if (!rules.has(r)) refuse('undefined');
-    return { ok: true, start, rules };
+    return finish(start, ruleFirst ? lines : lines.slice(1), true);
   } catch (e) {
     if (e instanceof Refusal) return { ok: false, code: e.code };
     throw e;
   }
+}
+
+/** The rule list, merged and checked: one `=` per rule (strict: before any `=/`). */
+function finish(start, ruleLines, lenient, afterParse = () => {}) {
+  const defs = new Map();   // name -> { eq: count, alts: [], early: an =/ before the = }
+  for (const line of ruleLines) {
+    const toks = tokens(line);
+    if (toks.length === 0) continue;
+    if (toks[0].type !== 'name') refuse('syntax');
+    if (!toks[1] || toks[1].type !== 'defas') refuse('syntax');
+    const [body, p] = parseAlternation(toks, 2, 0);
+    if (p !== toks.length) refuse('syntax');
+    const name = toks[0].text.toLowerCase();
+    const d = defs.get(name) ?? { eq: 0, alts: [], early: false };
+    if (toks[1].text === '=') d.eq++; else if (d.eq === 0) d.early = true;
+    d.alts.push(body);
+    defs.set(name, d);
+  }
+  afterParse();
+  for (const d of defs.values()) if (d.eq === 0) refuse('incremental');
+  for (const d of defs.values()) if (d.eq > 1) refuse('duplicate');
+  if (!lenient) for (const d of defs.values()) if (d.early) refuse('order');
+  const rules = new Map([...defs].map(([n, d]) => [n, d.alts.length === 1 ? d.alts[0] : { t: 'alt', items: d.alts }]));
+  for (const body of [start, ...rules.values()])
+    for (const r of refsOf(body, [])) if (!rules.has(r)) refuse('undefined');
+  return { ok: true, start, rules };
 }
 
 /** Is symbols (numbers) in the language of the grammar's start? */

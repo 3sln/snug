@@ -562,7 +562,7 @@ pub(crate) fn lower_ext(h: &mut [i32], node: i32, env: i32, id: i32, pos: i32) -
     // `target .name argument` for registered control id: one EXT leaf (id,
     // the argument's encoding, the control's maximum item bytes) and, for each
     // target leaf, AND(target leaf, EXT) -- the EXT never answers alone (D141).
-    if (hg(h, H_PROFILE) == 2) && (hg(h, H_EXT_FLAGS) == 0) {
+    if (hg(h, H_PROFILE) == 2) && ((hg(h, H_EXT_FLAGS) & 1) == 0) {
         return fail(h, ERR_PROFILE, pos);
     }
     let target: i32 = lower_type(h, na(h, node), env);

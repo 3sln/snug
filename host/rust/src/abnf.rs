@@ -7,9 +7,13 @@
 //! (`Error::MissingControls`).
 //!
 //! The controller (a text string, or a byte string holding UTF-8) is one
-//! element, the start, then optionally a newline and rules. Core rules are not
-//! imported. It is checked at compile time: prose-val `<...>`, syntax errors and
-//! undefined rules are `control_value`, with the ABNF line and column. It is
+//! element, the start, then optionally a newline and rules, each line ending with a
+//! newline (LF or CRLF). Core rules are not imported. It is checked at compile time:
+//! prose-val `<...>`, syntax errors and undefined rules are `control_value`, with the
+//! ABNF line and column. Parsing is strict RFC 5234 + RFC 7405 + RFC 9165 §3 unless
+//! [`CompileOptions::abnf`](crate::CompileOptions::abnf) is
+//! [`AbnfMode::Lenient`](crate::compile::AbnfMode), which also admits snug's
+//! non-RFC forms (D340); the mode is in the source key. It is
 //! prepared once when a Program is bound. The match is language membership (an
 //! Earley recognizer in kin, `snug.abnf`), metered against the budget that
 //! remains, so JS, Rust and the wasm SDK give the same verdicts and charges.
@@ -18,7 +22,7 @@
 //! use snug::{Schema, CompileOptions, Scratch, controls::Controls};
 //! let controls = Controls::new().with_abnf();
 //! let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
-//! let schema = Schema::compile(r#"id = text .abnf "1*DIGIT\nDIGIT = %x30-39""#, &options)?;
+//! let schema = Schema::compile(r#"id = text .abnf "(1*DIGIT)\nDIGIT = %x30-39\n""#, &options)?;
 //! assert!(schema.validate(&[0x62, b'4', b'2'], "id", &mut Scratch::new()).is_ok());
 //! assert!(schema.validate(&[0x62, b'4', b'x'], "id", &mut Scratch::new()).is_err());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -64,8 +68,14 @@ impl Abnf {
     }
 }
 
-/// A controller on its own (ABNF text): Ok, or why the compiler would refuse it.
+/// A controller on its own (ABNF text): Ok, or why the compiler would refuse it under
+/// the default strict parse mode (D340).
 pub fn check_abnf(text: &str) -> Result<(), String> {
+    check_abnf_in(text, crate::compile::AbnfMode::Strict)
+}
+
+/// `check_abnf` under a given parse mode (D340).
+pub fn check_abnf_in(text: &str, mode: crate::compile::AbnfMode) -> Result<(), String> {
     let b = text.as_bytes();
     let n = b.len();
     let mut a = Vec::with_capacity(n + 5);
@@ -80,23 +90,24 @@ pub fn check_abnf(text: &str) -> Result<(), String> {
         a.extend((n as u32).to_be_bytes());
     }
     a.extend_from_slice(b);
-    match detail(&a) {
+    match detail(&a, mode == crate::compile::AbnfMode::Lenient) {
         None => Ok(()),
         Some(d) => Err(d),
     }
 }
 
-fn detail(a: &[u8]) -> Option<String> {
+fn detail(a: &[u8], lenient: bool) -> Option<String> {
     let mut t = vec![0; ka::abnf_words(a.len() as i32) as usize];
-    let code = ka::abnf_prep(a, 0, a.len() as i32, &mut t);
+    let code = ka::abnf_prep(a, 0, a.len() as i32, &mut t, if lenient { ka::MODE_LENIENT } else { ka::MODE_STRICT });
     if code == 0 {
         return None;
     }
     let line = ka::abnf_error_line(&t);
+    // the hint names the option for a strict-only refusal (D340)
     Some(if line > 0 {
-        format!("{} at ABNF line {}, column {}", ka::abnf_error_name(code), line, ka::abnf_error_column(&t))
+        format!("{} at ABNF line {}, column {}{}", ka::abnf_error_name(code), line, ka::abnf_error_column(&t), ka::abnf_error_hint(code))
     } else {
-        ka::abnf_error_name(code).to_owned()
+        format!("{}{}", ka::abnf_error_name(code), ka::abnf_error_hint(code))
     })
 }
 
@@ -149,14 +160,22 @@ impl Control for Abnf {
         self.max_bytes
     }
     fn argument(&self, a: &[u8]) -> bool {
-        detail(a).is_none()
+        detail(a, false).is_none()
     }
     fn argument_detail(&self, a: &[u8]) -> Option<String> {
-        detail(a)
+        detail(a, false)
+    }
+    fn argument_in(&self, a: &[u8], lenient: bool) -> bool {
+        detail(a, lenient).is_none()
+    }
+    fn argument_detail_in(&self, a: &[u8], lenient: bool) -> Option<String> {
+        detail(a, lenient)
     }
     fn prepare(&self, pool: &[u8], ao: i32, al: i32) -> Option<Vec<i32>> {
+        // lenient: what the strict default admits means the same there, and the compile
+        // already checked the schema's mode (D340)
         let mut t = vec![0; ka::abnf_words(al) as usize];
-        if ka::abnf_prep(pool, ao, al, &mut t) != 0 {
+        if ka::abnf_prep(pool, ao, al, &mut t, ka::MODE_LENIENT) != 0 {
             return Some(Vec::new());
         }
         t.truncate(ka::abnf_table_words(&t) as usize);

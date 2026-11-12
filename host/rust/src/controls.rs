@@ -62,6 +62,17 @@ pub trait Control: Send + Sync {
     fn argument_detail(&self, _argument: &[u8]) -> Option<String> {
         None
     }
+    /// `argument` under the compile's ABNF parse mode, `abnf_lenient` (D340); other
+    /// controls ignore the mode.
+    #[doc(hidden)]
+    fn argument_in(&self, argument: &[u8], _abnf_lenient: bool) -> bool {
+        self.argument(argument)
+    }
+    /// `argument_detail` under the compile's ABNF parse mode (D340).
+    #[doc(hidden)]
+    fn argument_detail_in(&self, argument: &[u8], _abnf_lenient: bool) -> Option<String> {
+        self.argument_detail(argument)
+    }
     /// Metered in kin (snug's generic and ABNF controls only; not a public contract):
     /// the argument prepared once per EXT leaf, or None for a host predicate.
     #[doc(hidden)]

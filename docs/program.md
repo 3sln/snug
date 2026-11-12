@@ -1126,7 +1126,8 @@ opted-in compilation only, not the Program/container format.
 the preimage has eight elements: the seventh is the Unicode element above or
 an empty array, the eighth `[<flags: uint>, [[<name: tstr>, <max item bytes:
 uint>], …]]` over the WHOLE registry in name order (flags bit 0: admitted
-under `bus`). A cached Program is therefore never reused under another
+under `bus`; bit 1, D340: `.abnf`/`.abnfb` controllers parsed in the lenient
+mode, `abnf: 'lenient'`). A cached Program is therefore never reused under another
 registry, nor under the same names with another maximum. Hosts pass the
 registry after the compile options (`opt` words 20.., snug.compile.ext; D242 adds the dialect word).
 
