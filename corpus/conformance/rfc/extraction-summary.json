@@ -59,8 +59,8 @@
       "rfc": 9165,
       "suites": 9,
       "cases": 20,
-      "rawCompileFailures": 4,
-      "effectiveCompileFailures": 4,
+      "rawCompileFailures": 1,
+      "effectiveCompileFailures": 1,
       "rubyDisagreements": 0,
       "rubyUnavailable": 0,
       "rubyNotRun": 0

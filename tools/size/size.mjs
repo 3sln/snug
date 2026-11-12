@@ -48,8 +48,10 @@ const entries = Object.entries(pkg.exports).map(([name, spec]) => [
 const entry = name => entries.find(([n]) => n === name)[1];
 const reexports = names => names.map((name, i) => `export * as entry${i} from ${JSON.stringify(entry(name))};`).join('\n');
 const workloads = entries.map(([name, path]) => [name, { entryPoints: [path] }]);
+// all-runtime: every entry a validating application loads, not the compiler or the optional
+// modules loaded only where a schema needs them (unicode tables, the ABNF engine, D334)
 workloads.push(['runtime', { stdin: { contents: reexports(['snug', 'snug/schema']), resolveDir: root } }],
-  ['all-runtime', { stdin: { contents: reexports(entries.map(([n]) => n).filter(n => !['snug/compile', 'snug/unicode'].includes(n))), resolveDir: root } }]);
+  ['all-runtime', { stdin: { contents: reexports(entries.map(([n]) => n).filter(n => !['snug/compile', 'snug/unicode', 'snug/abnf'].includes(n))), resolveDir: root } }]);
 const common = { absWorkingDir: root, bundle: true, minify: true, format: 'esm', platform: 'browser',
   target: 'es2022', charset: 'ascii', legalComments: 'none', treeShaking: true, write: false,
   metafile: true, logLevel: 'silent', plugins: [frozenSources] };

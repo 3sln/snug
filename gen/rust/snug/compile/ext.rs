@@ -170,7 +170,9 @@ pub fn ext_init(h: &mut [i32], opt: &[i32]) -> bool {
                 return false;
             }
         }
-        if builtin_ctl(len, pack_opt(opt, c0, len, 0), pack_opt(opt, c0, len, 4)) != 0 {
+        // D334: `abnf` and `abnfb` (codes 20, 21) are the ABNF module's to bind
+        let bc: i32 = builtin_ctl(len, pack_opt(opt, c0, len, 0), pack_opt(opt, c0, len, 4));
+        if (bc != 0) && (bc < 20) {
             bad_registry(h);
             return false;
         }

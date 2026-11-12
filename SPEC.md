@@ -60,8 +60,9 @@ the release process are in [docs/release-policy.md](docs/release-policy.md)
   CBOR (duplicate keys by value, malformed UTF-8 or items, invalid content of
   known tags), §3.
 * Not a code generator for CDDL types.
-* Not a complete RFC 8610 implementation: `.pcre`, `.abnf`, `.abnfb`,
-  and unsupported regexp constructs are refused (D013, D242–D243), and maps the
+* Not a complete RFC 8610 implementation: `.pcre` and unsupported regexp
+  constructs are refused (D013, D242–D243); `.abnf` / `.abnfb` (RFC 9165 §3)
+  need the optional ABNF module (D334) and are refused without it; maps the
   determinism rule cannot decide are refused (D011). Every refusal is a schema
   error at compile time, never a different meaning. `.feature` is a no-op
   annotation (D013 amended). The precise current subset and reasons for

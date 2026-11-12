@@ -21,8 +21,9 @@ cd "$(dirname "$0")/../.."
 dir="$1"; host="${2:-host/rust/src}"; manifest="${3:-host/rust/Cargo.toml}"
 # The full host now exposes navigation and encoding alongside the legacy APIs.
 # Preserve the older scanner/check subset callers without changing their hosts.
+# (abnf.rs: the host's snug::abnf, D334.)
 if [ "$host" = host/rust/src ] && [ -n "$SNUG_RS_ONLY" ]; then
-  SNUG_RS_ONLY="$SNUG_RS_ONLY nav write"
+  SNUG_RS_ONLY="$SNUG_RS_ONLY nav write abnf.rs"
 fi
 [ -n "$dir" ] || { echo "usage: rust-crate DIR [HOST_SRC]" >&2; exit 2; }
 mkdir -p "$dir/src"

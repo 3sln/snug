@@ -69,6 +69,8 @@
 ;; D141: the extension-control registry the host passed is malformed
 (defconst ^:pub ^I32 ERR_CONTROL_REGISTRY 55)
 (defconst ^:pub ^I32 ERR_REGEXP_BLOCK 56)
+;; D334: `.abnf` / `.abnfb` used, the ABNF module not in the registry (`unsupported_control`)
+(defconst ^:pub ^I32 ERR_NEED_ABNF 57)
 
 ;; ------------------------------------------------------------ the header
 (defconst ^:pub ^I32 H_TOP 0)

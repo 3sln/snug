@@ -1,0 +1,1145 @@
+;; `.abnf` / `.abnfb` (RFC 9165 §3; D334): a bounded, metered ABNF engine.
+;; Only the optional module imports this namespace (JS `snug/abnf`, Rust
+;; `snug::abnf`), so no core bundle carries it. The VM reaches it the way it
+;; reaches the generic controls (D140-D143, D190-D194): through an EXT leaf
+;; whose control is named `abnf` or `abnfb`, decided at the item's end over
+;; its whole (canonical, so definite) encoding.
+;;
+;; THE CONTROLLER (RFC 9165 §3): a text string, or a byte string that is valid
+;; UTF-8, holding ONE element, then optionally a newline and a rule list
+;; (RFC 5234 §4 with RFC 7405's %s / %i strings). The element is the start.
+;;
+;;     controller = *c-wsp alternation *c-wsp [ c-nl rulelist0 ]
+;;     rulelist0  = *( rule / (*c-wsp c-nl) )
+;;     CRLF       = %x0A / %x0D.0A                     ; RFC 9165 §3
+;;
+;; Leniencies (each only widens what is accepted): the start may be any
+;; alternation, as a rule's right-hand side (`1*DIGIT`, `a / b`), not only an
+;; element; a controller that begins with a rule starts at that rule; the end
+;; of the text ends a line, so the last rule or comment needs
+;; no newline; a comment may hold any scalar but CR and LF; leading c-wsp before
+;; the start. Refused (a status
+;; code, at an offset): a syntax error, prose-val, an undefined rule (no core
+;; rules are imported -- RFC 9165 §3), a duplicate `=`, `=/` without `=`,
+;; `n*m` with m < n, a num-val range lo > hi, groups nested past MAX_NEST.
+;;
+;; THE MATCH is language membership (RFC 5234 is a CFG, not a PEG): an Earley
+;; recognizer with the Aycock-Horspool fix for nullable symbols, over the
+;; scalars (`.abnf`) or bytes (`.abnfb`) of the target string's content.
+;;
+;; THE TABLE `abnf-prep` writes (once per argument, at bind, D192): a header,
+;; then the nodes (NW words: kind | nullable << 8, a, b, c), the child lists
+;; and the ranges.
+;;
+;;     TERM  a = first range (pair index), b = ranges   (a symbol in a range)
+;;     SEQ   a = first child, b = count                  (concatenation)
+;;     ALT   a = first child, b = count                  (alternation)
+;;     REP   a = child, b = min, c = max (-1: no max)    (repetition)
+;;     REF   a = the rule's body node                    (a rule name)
+;;
+;; METERING (program.md §14, D191's protocol): a run gets m[1] ticks (TPU per
+;; budget unit, at most 2^30) and charges every step BEFORE doing it; past
+;; the allowance it answers -1. Otherwise a verdict word: u >= 0 matched
+;; after u units, -2 - u refused after u units, u = ceil(ticks / TPU). Items
+;; and waiter records live in the scratch m: more than the run's cap in all (a
+;; host option, by default ABNF_DEFAULT_WORDS = D281's 16 MiB) is -1
+;; (`budget`) on every host; more than the host gave, but within the cap, is -1
+;; with m[M_MORE] > 0, a size to run again with (scaled from the words used so
+;; far over the bytes read, at least double, at most the cap) -- the host grows
+;; m and runs again (the verdict and units never depend on the host's sizes).
+(ns snug.abnf
+  (:require [kin.lang :refer [defn let local return set if while for do comment defconst forever break declarefn case]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - * neg quot shl ushr bit-and bit-or
+                               < > <= >= == != and or not u8 ia iset ilen]]))
+
+(defconst ^I32 BIG 2147483647)
+
+;; ------------------------------------------------------------ status codes
+
+(defconst ^:pub ^I32 E_NOT_STRING 1)
+(defconst ^:pub ^I32 E_UTF8 2)
+(defconst ^:pub ^I32 E_SYNTAX 3)
+(defconst ^:pub ^I32 E_PROSE 4)
+(defconst ^:pub ^I32 E_UNDEFINED 5)
+(defconst ^:pub ^I32 E_DUPLICATE 6)
+(defconst ^:pub ^I32 E_INCREMENTAL 7)
+(defconst ^:pub ^I32 E_REPEAT 8)
+(defconst ^:pub ^I32 E_RANGE 9)
+(defconst ^:pub ^I32 E_NESTING 10)
+(defconst ^:pub ^I32 E_TOO_LARGE 11)
+(defconst ^:pub ^I32 E_INTERNAL 12)
+
+(defn ^:pub ^Str abnf-error-name [^I32 code]
+  (comment "The message for a status code (hosts put it in the schema error).")
+  (case code
+    [1] "the controller is not a text or byte string"
+    [2] "the controller is not valid UTF-8"
+    [3] "ABNF syntax error"
+    [4] "prose-val (<...>) is not supported"
+    [5] "undefined rule (core rules are not imported, RFC 9165 section 3)"
+    [6] "rule defined twice with ="
+    [7] "=/ for a rule that has no = definition"
+    [8] "repetition maximum below its minimum"
+    [9] "num-val range with its first value above its last"
+    [10] "groups and options nested deeper than 256"
+    [11] "controller longer than 16 MiB"
+    :else "internal error"))
+
+;; ------------------------------------------------------------ the table
+
+(defconst ^I32 H_STATUS 0)
+(defconst ^I32 H_EPOS 1)
+(defconst ^I32 H_N 2)
+(defconst ^I32 H_START 3)
+(defconst ^I32 H_NODE 4)
+(defconst ^I32 H_CHILD 5)
+(defconst ^I32 H_RANGE 6)
+(defconst ^I32 H_ELINE 7)
+(defconst ^I32 H_ECOL 8)
+(defconst ^I32 H_USED 9)
+(defconst ^I32 H_CTOP 10)
+(defconst ^I32 H_RTOP 11)
+(defconst ^I32 H_STACK 12)
+(defconst ^I32 H_STOP 13)
+(defconst ^I32 H_DEF 14)
+(defconst ^I32 H_DTOP 15)
+(defconst ^I32 H_TMP 16)
+(defconst ^I32 H_CAP 17)
+(defconst ^I32 H_RET 18)
+(defconst ^I32 H_VAL 19)
+(defconst ^I32 H_S 20)
+(defconst ^I32 H_E 21)
+(defconst ^I32 HDR 24)
+
+(defconst ^I32 NW 4)
+(defconst ^:pub ^I32 K_TERM 1)
+(defconst ^:pub ^I32 K_SEQ 2)
+(defconst ^:pub ^I32 K_ALT 3)
+(defconst ^:pub ^I32 K_REP 4)
+(defconst ^:pub ^I32 K_REF 5)
+(defconst ^I32 NULLABLE 256)
+
+(defconst ^:pub ^I32 MAX_NEST 256)
+(defconst ^:pub ^I32 MAX_TEXT 16777216)
+
+(defn ^:pub ^I32 abnf-words [^I32 al]
+  (comment "Words `abnf-prep` needs for an argument of al bytes: the header, then"
+           "regions sized from cap = al + 8 nodes (every node owns a distinct byte of"
+           "the text): nodes 4, children 1, ranges 4, stack 1, definitions 4 and"
+           "resolution scratch 8 words per node.")
+  (if (or (< al 0) (> al MAX_TEXT)) (return HDR))
+  (return (+ (+ HDR (* 22 (+ al 8))) 1)))
+
+(defn ^:pub ^I32 abnf-status [^IntsR t] (return (ia t H_STATUS)))
+(defn ^:pub ^I32 abnf-error-line [^IntsR t] (return (ia t H_ELINE)))
+(defn ^:pub ^I32 abnf-error-column [^IntsR t] (return (ia t H_ECOL)))
+(defn ^:pub ^I32 abnf-table-words [^IntsR t]
+  (comment "Words of t a run reads (the header, nodes, children and ranges): a host"
+           "may keep only these.")
+  (if (!= (ia t H_STATUS) 0) (return HDR))
+  (return (ia t H_USED)))
+(defn ^:pub ^I32 abnf-nodes [^IntsR t] (return (ia t H_N)))
+
+(defn ^I32 fail [^Ints t ^I32 code ^I32 pos]
+  (comment "Record the first failure (code at byte offset pos); -1.")
+  (if (== (ia t H_STATUS) 0)
+    (do (iset t H_STATUS code)
+        (iset t H_EPOS pos)))
+  (return (neg 1)))
+
+(defn ^I32 nat [^IntsR t ^I32 x] (return (+ (ia t H_NODE) (* NW x))))
+(defn ^I32 nkind [^IntsR t ^I32 x] (return (bit-and (ia t (nat t x)) 255)))
+(defn ^I32 nfa [^IntsR t ^I32 x] (return (ia t (+ (nat t x) 1))))
+(defn ^I32 nfb [^IntsR t ^I32 x] (return (ia t (+ (nat t x) 2))))
+(defn ^I32 nfc [^IntsR t ^I32 x] (return (ia t (+ (nat t x) 3))))
+(defn ^Bool nullable [^IntsR t ^I32 x] (return (!= (bit-and (ia t (nat t x)) NULLABLE) 0)))
+(defn ^I32 child [^IntsR t ^I32 x ^I32 i] (return (ia t (+ (ia t H_CHILD) (+ (nfa t x) i)))))
+
+(defn ^I32 new-node [^Ints t ^I32 kind ^I32 a ^I32 b ^I32 c]
+  (comment "A new node; its index, or -1 (internal: the cap is a proven bound).")
+  (let [n (ia t H_N)]
+    (if (>= n (ia t H_CAP)) (return (fail t E_INTERNAL (ia t H_S))))
+    (let [o (+ (ia t H_NODE) (* NW n))]
+      (iset t o kind)
+      (iset t (+ o 1) a)
+      (iset t (+ o 2) b)
+      (iset t (+ o 3) c)
+      (iset t H_N (+ n 1))
+      (return n))))
+
+(defn ^I32 push [^Ints t ^I32 v]
+  (comment "Push a node on the parse stack; 0 or -1.")
+  (let [sp (ia t H_STOP)]
+    (if (>= sp (ia t H_CAP)) (return (fail t E_INTERNAL (ia t H_S))))
+    (iset t (+ (ia t H_STACK) sp) v)
+    (iset t H_STOP (+ sp 1))
+    (return 0)))
+
+(defn ^I32 make-list [^Ints t ^I32 kind ^I32 from]
+  (comment "The SEQ or ALT of the stack's nodes from `from` (popped): one node"
+           "stands for itself; none is the empty SEQ. The node, or -1.")
+  (let [sp (ia t H_STOP)
+        n (- sp from)]
+    (if (== n 1)
+      (do (iset t H_STOP from)
+          (return (ia t (+ (ia t H_STACK) from)))))
+    (let [ct (ia t H_CTOP)]
+      (if (> (+ ct n) (ia t H_CAP)) (return (fail t E_INTERNAL (ia t H_S))))
+      (for [^I32 i 0 n]
+        (let [v (ia t (+ (ia t H_STACK) (+ from i)))]
+          (iset t (+ (ia t H_CHILD) (+ ct i)) v)))
+      (iset t H_CTOP (+ ct n))
+      (iset t H_STOP from)
+      (return (new-node t kind ct n 0)))))
+
+(defn ^I32 new-term [^Ints t ^I32 lo ^I32 hi ^I32 lo2 ^I32 hi2]
+  (comment "A TERM of the range lo..hi, and lo2..hi2 when lo2 >= 0. The node, or -1.")
+  (let [rt (ia t H_RTOP)
+        ^:mut n 1]
+    (if (>= lo2 0) (set n 2))
+    (if (> (+ rt n) (* 2 (ia t H_CAP))) (return (fail t E_INTERNAL (ia t H_S))))
+    (let [o (+ (ia t H_RANGE) (* 2 rt))]
+      (iset t o lo)
+      (iset t (+ o 1) hi)
+      (if (== n 2)
+        (do (iset t (+ o 2) lo2)
+            (iset t (+ o 3) hi2))))
+    (iset t H_RTOP (+ rt n))
+    (return (new-node t K_TERM rt n 0))))
+
+;; ------------------------------------------------------------ characters
+
+(defn ^Bool wsp [^I32 c] (return (or (== c 32) (== c 9))))
+(defn ^Bool alpha [^I32 c] (return (or (and (>= c 65) (<= c 90)) (and (>= c 97) (<= c 122)))))
+(defn ^Bool digit [^I32 c] (return (and (>= c 48) (<= c 57))))
+(defn ^I32 lower [^I32 c]
+  (if (and (>= c 65) (<= c 90)) (return (+ c 32)))
+  (return c))
+
+(defn ^Bool rep-start [^I32 c]
+  (comment "Can a repetition start with c? DIGIT, *, ALPHA, ( [ \" % <")
+  (return (or (or (digit c) (alpha c))
+              (or (or (== c 42) (== c 40)) (or (or (== c 91) (== c 34)) (or (== c 37) (== c 60)))))))
+
+(defn ^:pub ^I32 cp-at [^Bytes b ^I32 i ^I32 e]
+  (comment "The Unicode scalar whose UTF-8 encoding starts at i < e, as (length << 24)"
+           "| code point, or -1 (no overlong, surrogate or value past U+10FFFF;"
+           "noncharacters are scalars). Never reads at or past e.")
+  (let [c (u8 b i)]
+    (if (< c 128) (return (bit-or (shl 1 24) c)))
+    (if (< c 194) (return (neg 1)))
+    (if (< c 224)
+      (do (if (>= (+ i 1) e) (return (neg 1)))
+          (let [b1 (u8 b (+ i 1))]
+            (if (!= (bit-and b1 192) 128) (return (neg 1)))
+            (return (bit-or (shl 2 24) (bit-or (shl (bit-and c 31) 6) (bit-and b1 63)))))))
+    (if (< c 240)
+      (do (if (>= (+ i 2) e) (return (neg 1)))
+          (let [c1 (u8 b (+ i 1))
+                c2 (u8 b (+ i 2))]
+            (if (and (== c 224) (< c1 160)) (return (neg 1)))
+            (if (and (== c 237) (> c1 159)) (return (neg 1)))
+            (if (or (!= (bit-and c1 192) 128) (!= (bit-and c2 192) 128)) (return (neg 1)))
+            (return (bit-or (shl 3 24) (bit-or (bit-or (shl (bit-and c 15) 12) (shl (bit-and c1 63) 6))
+                                               (bit-and c2 63)))))))
+    (if (< c 245)
+      (do (if (>= (+ i 3) e) (return (neg 1)))
+          (let [d1 (u8 b (+ i 1))
+                d2 (u8 b (+ i 2))
+                d3 (u8 b (+ i 3))]
+            (if (and (== c 240) (< d1 144)) (return (neg 1)))
+            (if (and (== c 244) (> d1 143)) (return (neg 1)))
+            (if (or (!= (bit-and d1 192) 128) (or (!= (bit-and d2 192) 128) (!= (bit-and d3 192) 128)))
+              (return (neg 1)))
+            (return (bit-or (shl 4 24) (bit-or (bit-or (shl (bit-and c 7) 18) (shl (bit-and d1 63) 12))
+                                               (bit-or (shl (bit-and d2 63) 6) (bit-and d3 63))))))))
+    (return (neg 1))))
+
+(defn ^I32 nlen [^Bytes a ^I32 p ^I32 e]
+  (comment "The length of a newline at p (LF, or CR LF: RFC 9165 §3), or 0.")
+  (if (>= p e) (return 0))
+  (if (== (u8 a p) 10) (return 1))
+  (if (and (== (u8 a p) 13) (and (< (+ p 1) e) (== (u8 a (+ p 1)) 10))) (return 2))
+  (return 0))
+
+(defn ^I32 cnl [^Bytes a ^I32 p ^I32 e]
+  (comment "The length of a c-nl at p: a comment through its newline (a comment the"
+           "text's end cuts off counts), or a newline; 0 if none.")
+  (if (>= p e) (return 0))
+  (if (== (u8 a p) 59)
+    (do (let [^:mut q (+ p 1)]
+          (while (and (< q e) (and (!= (u8 a q) 10) (!= (u8 a q) 13)))
+            (set q (+ q 1)))
+          (if (== q e) (return (- q p)))
+          (let [n (nlen a q e)]
+            (if (== n 0) (return 0))
+            (return (- (+ q n) p))))))
+  (return (nlen a p e)))
+
+(defn ^I32 skip-cwsp [^Bytes a ^I32 p0 ^I32 e]
+  (comment "*c-wsp: WSP, or a c-nl followed by WSP (a continuation line).")
+  (let [^:mut p p0]
+    (forever
+     (if (and (< p e) (wsp (u8 a p)))
+       (set p (+ p 1))
+       (do (let [n (cnl a p e)]
+             (if (and (> n 0) (and (< (+ p n) e) (wsp (u8 a (+ p n)))))
+               (set p (+ (+ p n) 1))
+               (break))))))
+    (return p)))
+
+(defn ^I32 name-end [^Bytes a ^I32 p ^I32 e]
+  (comment "The end of the rulename at p (ALPHA there): ALPHA *(ALPHA / DIGIT / -).")
+  (let [^:mut q (+ p 1)]
+    (while (and (< q e) (or (or (alpha (u8 a q)) (digit (u8 a q))) (== (u8 a q) 45)))
+      (set q (+ q 1)))
+    (return q)))
+
+(defn ^I32 digit-of [^I32 c ^I32 base]
+  (comment "c's value as a digit of base 2, 10 or 16 (either case), or -1.")
+  (let [^:mut v (neg 1)]
+    (if (digit c) (set v (- c 48)))
+    (if (and (>= c 97) (<= c 102)) (set v (- c 87)))
+    (if (and (>= c 65) (<= c 70)) (set v (- c 55)))
+    (if (>= v base) (return (neg 1)))
+    (return v)))
+
+(defn ^I32 digits [^Bytes a ^I32 p ^I32 e ^Ints t ^I32 base]
+  (comment "1*digit of base at p: the end (p when there is none), the value in"
+           "t[H_VAL], saturated at 2^31 - 1.")
+  (let [^:mut q p
+        ^:mut v 0]
+    (while (and (< q e) (>= (digit-of (u8 a q) base) 0))
+      (let [d (digit-of (u8 a q) base)]
+        (if (> v (quot (- BIG d) base))
+          (set v BIG)
+          (set v (+ (* v base) d))))
+      (set q (+ q 1)))
+    (iset t H_VAL v)
+    (return q)))
+
+;; ------------------------------------------------------------ the parser
+;; Each production answers the cursor after it (or -1, the failure recorded),
+;; its node in t[H_RET].
+
+(declarefn ^I32 alternation)
+
+(defn ^I32 char-val [^Bytes a ^I32 p ^I32 e ^Ints t ^Bool sensitive]
+  (comment "A quoted string at p (the opening quote): %x20-21 / %x23-7E, one TERM a"
+           "character; case-insensitive letters match either case (RFC 5234 §2.3,"
+           "RFC 7405).")
+  (let [from (ia t H_STOP)
+        ^:mut q (+ p 1)]
+    (while (and (< q e) (!= (u8 a q) 34))
+      (let [c (u8 a q)]
+        (local ^I32 x)
+        (if (or (< c 32) (> c 126)) (return (fail t E_SYNTAX q)))
+        (if (and (not sensitive) (alpha c))
+          (set x (new-term t (- (lower c) 32) (- (lower c) 32) (lower c) (lower c)))
+          (set x (new-term t c c (neg 1) (neg 1))))
+        (if (< x 0) (return (neg 1)))
+        (if (< (push t x) 0) (return (neg 1))))
+      (set q (+ q 1)))
+    (if (>= q e) (return (fail t E_SYNTAX p)))
+    (let [n (make-list t K_SEQ from)]
+      (if (< n 0) (return (neg 1)))
+      (iset t H_RET n)
+      (return (+ q 1)))))
+
+(defn ^I32 num-val [^Bytes a ^I32 p ^I32 e ^Ints t ^I32 base]
+  (comment "The digits after `%b` / `%d` / `%x` (p after the base letter): a value, a"
+           "range v1-v2, or a concatenation v1.v2...")
+  (let [q (digits a p e t base)
+        v1 (ia t H_VAL)]
+    (if (== q p) (return (fail t E_SYNTAX p)))
+    (if (and (< q e) (== (u8 a q) 45))
+      (do (let [ra (digits a (+ q 1) e t base)
+                v2 (ia t H_VAL)]
+            (if (== ra (+ q 1)) (return (fail t E_SYNTAX ra)))
+            (if (> v1 v2) (return (fail t E_RANGE (- p 2))))
+            (let [xr (new-term t v1 v2 (neg 1) (neg 1))]
+              (if (< xr 0) (return (neg 1)))
+              (iset t H_RET xr)
+              (return ra)))))
+    (if (and (< q e) (== (u8 a q) 46))
+      (do (let [from (ia t H_STOP)
+                x0 (new-term t v1 v1 (neg 1) (neg 1))
+                ^:mut r q]
+            (if (< x0 0) (return (neg 1)))
+            (if (< (push t x0) 0) (return (neg 1)))
+            (while (and (< r e) (== (u8 a r) 46))
+              (let [r2 (digits a (+ r 1) e t base)
+                    v (ia t H_VAL)]
+                (if (== r2 (+ r 1)) (return (fail t E_SYNTAX r2)))
+                (let [x (new-term t v v (neg 1) (neg 1))]
+                  (if (< x 0) (return (neg 1)))
+                  (if (< (push t x) 0) (return (neg 1))))
+                (set r r2)))
+            (let [n (make-list t K_SEQ from)]
+              (if (< n 0) (return (neg 1)))
+              (iset t H_RET n)
+              (return r)))))
+    (let [x1 (new-term t v1 v1 (neg 1) (neg 1))]
+      (if (< x1 0) (return (neg 1)))
+      (iset t H_RET x1)
+      (return q))))
+
+(defn ^I32 element [^Bytes a ^I32 p ^I32 e ^Ints t ^I32 depth]
+  (comment "element = rulename / group / option / char-val / num-val / prose-val"
+           "(refused).")
+  (if (>= p e) (return (fail t E_SYNTAX p)))
+  (let [c (u8 a p)]
+    (if (alpha c)
+      (do (let [qn (name-end a p e)
+                n (new-node t K_REF p (- qn p) (neg 1))]
+            (if (< n 0) (return (neg 1)))
+            (iset t H_RET n)
+            (return qn))))
+    (if (or (== c 40) (== c 91))
+      (do (if (>= depth MAX_NEST) (return (fail t E_NESTING p)))
+          (let [qg (skip-cwsp a (+ p 1) e)
+                ^I32 r (alternation a qg e t (+ depth 1))]
+            (if (< r 0) (return (neg 1)))
+            (let [body (ia t H_RET)
+                  r2 (skip-cwsp a r e)
+                  ^:mut close 41]
+              (if (== c 91) (set close 93))
+              (if (or (>= r2 e) (!= (u8 a r2) close)) (return (fail t E_SYNTAX r2)))
+              (if (== c 91)
+                (do (let [x (new-node t K_REP body 0 1)]
+                      (if (< x 0) (return (neg 1)))
+                      (iset t H_RET x)))
+                (iset t H_RET body))
+              (return (+ r2 1))))))
+    (if (== c 34) (return (char-val a p e t false)))
+    (if (== c 60) (return (fail t E_PROSE p)))
+    (if (== c 37)
+      (do (if (>= (+ p 1) e) (return (fail t E_SYNTAX (+ p 1))))
+          (let [k (lower (u8 a (+ p 1)))]
+            (if (or (== k 115) (== k 105))
+              (do (if (or (>= (+ p 2) e) (!= (u8 a (+ p 2)) 34)) (return (fail t E_SYNTAX (+ p 2))))
+                  (return (char-val a (+ p 2) e t (== k 115)))))
+            (if (== k 98) (return (num-val a (+ p 2) e t 2)))
+            (if (== k 100) (return (num-val a (+ p 2) e t 10)))
+            (if (== k 120) (return (num-val a (+ p 2) e t 16)))
+            (return (fail t E_SYNTAX (+ p 1))))))
+    (return (fail t E_SYNTAX p))))
+
+(defn ^I32 repetition [^Bytes a ^I32 p ^I32 e ^Ints t ^I32 depth]
+  (comment "repetition = [repeat] element; repeat = 1*DIGIT / (*DIGIT \"*\" *DIGIT)."
+           "1*1 is the element itself; a maximum of 2^31 - 1 or more is no maximum.")
+  (let [^:mut q p
+        ^:mut lo (neg 1)
+        ^:mut hi (neg 1)
+        ^:mut rep false]
+    (if (and (< q e) (digit (u8 a q)))
+      (do (set q (digits a q e t 10))
+          (set lo (ia t H_VAL))
+          (set rep true)))
+    (if (and (< q e) (== (u8 a q) 42))
+      (do (set rep true)
+          (set q (+ q 1))
+          (if (< lo 0) (set lo 0))
+          (if (and (< q e) (digit (u8 a q)))
+            (do (set q (digits a q e t 10))
+                (set hi (ia t H_VAL)))))
+      (if rep (set hi lo)))
+    (let [r (element a q e t depth)]
+      (if (< r 0) (return (neg 1)))
+      (if rep
+        (do (if (== hi BIG) (set hi (neg 1)))
+            (if (and (>= hi 0) (< hi lo)) (return (fail t E_REPEAT p)))
+            (if (not (and (== lo 1) (== hi 1)))
+              (do (let [x (new-node t K_REP (ia t H_RET) lo hi)]
+                    (if (< x 0) (return (neg 1)))
+                    (iset t H_RET x))))))
+      (return r))))
+
+(defn ^I32 concatenation [^Bytes a ^I32 p ^I32 e ^Ints t ^I32 depth]
+  (comment "concatenation = repetition *(1*c-wsp repetition)")
+  (let [from (ia t H_STOP)
+        ^:mut q (repetition a p e t depth)]
+    (if (< q 0) (return (neg 1)))
+    (if (< (push t (ia t H_RET)) 0) (return (neg 1)))
+    (forever
+     (let [r (skip-cwsp a q e)]
+       (if (and (> r q) (and (< r e) (rep-start (u8 a r))))
+         (do (set q (repetition a r e t depth))
+             (if (< q 0) (return (neg 1)))
+             (if (< (push t (ia t H_RET)) 0) (return (neg 1))))
+         (break))))
+    (let [n (make-list t K_SEQ from)]
+      (if (< n 0) (return (neg 1)))
+      (iset t H_RET n)
+      (return q))))
+
+(defn ^I32 alternation [^Bytes a ^I32 p ^I32 e ^Ints t ^I32 depth]
+  (comment "alternation = concatenation *(*c-wsp \"/\" *c-wsp concatenation)")
+  (let [from (ia t H_STOP)
+        ^:mut q (concatenation a p e t depth)]
+    (if (< q 0) (return (neg 1)))
+    (if (< (push t (ia t H_RET)) 0) (return (neg 1)))
+    (forever
+     (let [r (skip-cwsp a q e)]
+       (if (and (< r e) (== (u8 a r) 47))
+         (do (set q (concatenation a (skip-cwsp a (+ r 1) e) e t depth))
+             (if (< q 0) (return (neg 1)))
+             (if (< (push t (ia t H_RET)) 0) (return (neg 1))))
+         (break))))
+    (let [n (make-list t K_ALT from)]
+      (if (< n 0) (return (neg 1)))
+      (iset t H_RET n)
+      (return q))))
+
+(defn ^I32 rule [^Bytes a ^I32 p ^I32 e ^Ints t]
+  (comment "rule = rulename defined-as elements c-nl (or the text's end), recorded as"
+           "a definition (name span, body, 1 for =/). The cursor after it, or -1.")
+  (let [ne (name-end a p e)
+        q (skip-cwsp a ne e)
+        ^:mut incr 0
+        ^:mut r (+ q 1)]
+    (if (or (>= q e) (!= (u8 a q) 61)) (return (fail t E_SYNTAX q)))
+    (if (and (< r e) (== (u8 a r) 47))
+      (do (set incr 1) (set r (+ r 1))))
+    (let [^I32 r1 (alternation a (skip-cwsp a r e) e t 0)]
+      (if (< r1 0) (return (neg 1)))
+      (let [body (ia t H_RET)
+            r2 (skip-cwsp a r1 e)
+            ^:mut r3 r2]
+        (if (< r2 e)
+          (do (let [n (cnl a r2 e)]
+                (if (== n 0) (return (fail t E_SYNTAX r2)))
+                (set r3 (+ r2 n)))))
+        (let [d (ia t H_DTOP)]
+          (if (>= d (ia t H_CAP)) (return (fail t E_INTERNAL p)))
+          (let [o (+ (ia t H_DEF) (* 4 d))]
+            (iset t o p)
+            (iset t (+ o 1) (- ne p))
+            (iset t (+ o 2) body)
+            (iset t (+ o 3) incr))
+          (iset t H_DTOP (+ d 1)))
+        (return r3)))))
+
+(defn ^I32 controller [^Bytes a ^I32 s ^I32 e ^Ints t]
+  (comment "controller = *c-wsp alternation *c-wsp [ c-nl rulelist0 ]; the start node in"
+           "t[H_START]. A controller that begins with a rule (`s = ...`, no start in"
+           "front of it) starts at that rule (a leniency). 0 or -1.")
+  (let [p0 (skip-cwsp a s e)
+        ^:mut q p0
+        ^:mut first-rule false]
+    (if (and (< p0 e) (alpha (u8 a p0)))
+      (do (let [ne (name-end a p0 e)
+                d (skip-cwsp a ne e)]
+            (if (and (< d e) (== (u8 a d) 61))
+              (do (let [sn (new-node t K_REF p0 (- ne p0) (neg 1))]
+                    (if (< sn 0) (return (neg 1)))
+                    (iset t H_START sn)
+                    (set first-rule true)))))))
+    (if (not first-rule)
+      (do (let [^I32 p (alternation a p0 e t 0)]
+            (if (< p 0) (return (neg 1)))
+            (iset t H_START (ia t H_RET))
+            (set q (skip-cwsp a p e))
+            (if (< q e)
+              (do (let [n (cnl a q e)]
+                    (if (== n 0) (return (fail t E_SYNTAX q)))
+                    (set q (+ q n))))))))
+    (do
+      (while (< q e)
+        (if (alpha (u8 a q))
+          (do (set q (rule a q e t))
+              (if (< q 0) (return (neg 1))))
+          (do (let [r (skip-cwsp a q e)]
+                (if (< r e)
+                  (do (let [n2 (cnl a r e)]
+                        (if (== n2 0) (return (fail t E_SYNTAX r)))
+                        (set q (+ r n2))))
+                  (set q e))))))
+      (return 0))))
+
+;; ------------------------------------------------------------ resolution
+
+(defn ^I32 name-cmp [^Bytes a ^I32 x ^I32 xl ^I32 y ^I32 yl]
+  (comment "Order of rule names a[x, +xl) and a[y, +yl), ASCII case-insensitive.")
+  (let [^:mut n xl]
+    (if (< yl n) (set n yl))
+    (for [^I32 i 0 n]
+      (let [c (lower (u8 a (+ x i)))
+            d (lower (u8 a (+ y i)))]
+        (if (!= c d) (return (- c d)))))
+    (return (- xl yl))))
+
+(defn ^I32 def-at [^IntsR t ^I32 d] (return (+ (ia t H_DEF) (* 4 d))))
+
+(defn ^I32 def-cmp [^Bytes a ^IntsR t ^I32 x ^I32 y]
+  (comment "Definitions by name, then by position in the text.")
+  (let [ox (def-at t x)
+        oy (def-at t y)
+        c (name-cmp a (ia t ox) (ia t (+ ox 1)) (ia t oy) (ia t (+ oy 1)))]
+    (if (!= c 0) (return c))
+    (return (- (ia t ox) (ia t oy)))))
+
+(defn def-sift [^Bytes a ^Ints t ^I32 ix ^I32 root0 ^I32 n]
+  (let [^:mut root root0]
+    (while (< (+ (* 2 root) 1) n)
+      (let [^:mut c (+ (* 2 root) 1)]
+        (if (and (< (+ c 1) n) (< (def-cmp a t (ia t (+ ix c)) (ia t (+ ix (+ c 1)))) 0)) (set c (+ c 1)))
+        (if (< (def-cmp a t (ia t (+ ix root)) (ia t (+ ix c))) 0)
+          (do (let [v (ia t (+ ix root))]
+                (iset t (+ ix root) (ia t (+ ix c)))
+                (iset t (+ ix c) v))
+              (set root c))
+          (set root n))))))
+
+(defn ^I32 rule-find [^Bytes a ^IntsR t ^I32 rules ^I32 nr ^I32 s ^I32 l]
+  (comment "The body of the rule named a[s, +l) (binary search), or -1.")
+  (let [^:mut lo 0
+        ^:mut hi nr]
+    (while (< lo hi)
+      (let [mid (ushr (+ lo hi) 1)
+            o (+ rules (* 3 mid))
+            c (name-cmp a (ia t o) (ia t (+ o 1)) s l)]
+        (if (== c 0) (return (ia t (+ o 2))))
+        (if (< c 0) (set lo (+ mid 1)) (set hi mid))))
+    (return (neg 1))))
+
+(defn ^I32 resolve [^Bytes a ^Ints t]
+  (comment "Sort the definitions, merge each rule's (one `=`, any `=/`: an ALT of"
+           "their bodies), bind every REF to its rule's body and chain the REFs of"
+           "each body (for nullability). 0 or -1.")
+  (let [nd (ia t H_DTOP)
+        cap (ia t H_CAP)
+        ix (ia t H_TMP)
+        rules (+ ix cap)
+        refhead (+ rules (* 3 cap))
+        ^:mut nr 0]
+    (for [^I32 i0 0 nd] (iset t (+ ix i0) i0))
+    (let [^:mut i (- (quot nd 2) 1)]
+      (while (>= i 0)
+        (def-sift a t ix i nd)
+        (set i (- i 1))))
+    (let [^:mut j (- nd 1)]
+      (while (> j 0)
+        (let [v (ia t ix)]
+          (iset t ix (ia t (+ ix j)))
+          (iset t (+ ix j) v))
+        (def-sift a t ix 0 j)
+        (set j (- j 1))))
+    (let [^:mut g 0]
+      (while (< g nd)
+        (let [og (def-at t (ia t (+ ix g)))
+              ^:mut h (+ g 1)
+              ^:mut eqs 0
+              ^:mut dup (neg 1)]
+          (forever
+           (if (>= h nd) (break))
+           (let [oh (def-at t (ia t (+ ix h)))]
+             (if (!= (name-cmp a (ia t og) (ia t (+ og 1)) (ia t oh) (ia t (+ oh 1))) 0) (break)))
+           (set h (+ h 1)))
+          (for [^I32 k g h]
+            (let [ok (def-at t (ia t (+ ix k)))]
+              (if (== (ia t (+ ok 3)) 0)
+                (do (set eqs (+ eqs 1))
+                    (if (and (== eqs 2) (< dup 0)) (set dup (ia t ok)))))))
+          (if (== eqs 0) (return (fail t E_INCREMENTAL (ia t og))))
+          (if (>= dup 0) (return (fail t E_DUPLICATE dup)))
+          (let [^:mut body (ia t (+ og 2))]
+            (if (> (- h g) 1)
+              (do (let [from (ia t H_STOP)]
+                    (for [^I32 k2 g h]
+                      (let [ok2 (def-at t (ia t (+ ix k2)))]
+                        (if (< (push t (ia t (+ ok2 2))) 0) (return (neg 1)))))
+                    (set body (make-list t K_ALT from))
+                    (if (< body 0) (return (neg 1))))))
+            (let [orr (+ rules (* 3 nr))]
+              (iset t orr (ia t og))
+              (iset t (+ orr 1) (ia t (+ og 1)))
+              (iset t (+ orr 2) body))
+            (set nr (+ nr 1)))
+          (set g h))))
+    (let [n (ia t H_N)]
+      (for [^I32 x 0 n] (iset t (+ refhead x) (neg 1)))
+      (for [^I32 y 0 n]
+        (if (== (nkind t y) K_REF)
+          (do (let [o (nat t y)
+                    rb (rule-find a t rules nr (ia t (+ o 1)) (ia t (+ o 2)))]
+                (if (< rb 0) (return (fail t E_UNDEFINED (ia t (+ o 1)))))
+                (iset t (+ o 1) rb)
+                (iset t (+ o 2) 0)
+                (iset t (+ o 3) (ia t (+ refhead rb)))
+                (iset t (+ refhead rb) y))))))
+    (return 0)))
+
+(defn mark [^Ints t ^I32 q ^I32 x]
+  (comment "Mark node x nullable and queue it (q[0] the queue's length, at q + 1).")
+  (let [o (nat t x)
+        n (ia t q)]
+    (iset t o (bit-or (ia t o) NULLABLE))
+    (iset t (+ q (+ 1 n)) x)
+    (iset t q (+ n 1))))
+
+(defn nullability [^Ints t]
+  (comment "Which nodes derive the empty string: a linear worklist. A node waits on a"
+           "count -- SEQ all its children, ALT one, REP (min > 0) and REF one -- and"
+           "each node that becomes nullable tells its tree parent and, as a rule's"
+           "body, every REF to it (the chain resolve built).")
+  (let [n (ia t H_N)
+        cap (ia t H_CAP)
+        refhead (+ (ia t H_TMP) (* 4 cap))
+        parent (+ refhead cap)
+        cnt (+ parent cap)
+        q (+ cnt cap)]
+    (iset t q 0)
+    (for [^I32 x0 0 n] (iset t (+ parent x0) (neg 1)))
+    (for [^I32 y 0 n]
+      (let [k (nkind t y)]
+        (if (or (== k K_SEQ) (== k K_ALT))
+          (for [^I32 i 0 (nfb t y)]
+            (iset t (+ parent (child t y i)) y)))
+        (if (== k K_REP) (iset t (+ parent (nfa t y)) y))
+        (if (== k K_TERM) (iset t (+ cnt y) BIG))
+        (if (== k K_SEQ) (iset t (+ cnt y) (nfb t y)))
+        (if (or (== k K_ALT) (== k K_REF)) (iset t (+ cnt y) 1))
+        (if (== k K_REP)
+          (do (iset t (+ cnt y) 1)
+              (if (== (nfb t y) 0) (iset t (+ cnt y) 0))))))
+    (for [^I32 z 0 n]
+      (if (== (ia t (+ cnt z)) 0) (mark t q z)))
+    (let [^:mut h 0]
+      (while (< h (ia t q))
+        (let [x (ia t (+ q (+ 1 h)))
+              p (ia t (+ parent x))]
+          (if (and (>= p 0) (not (nullable t p)))
+            (do (iset t (+ cnt p) (- (ia t (+ cnt p)) 1))
+                (if (== (ia t (+ cnt p)) 0) (mark t q p))))
+          (let [^:mut r (ia t (+ refhead x))]
+            (while (>= r 0)
+              (if (not (nullable t r)) (mark t q r))
+              (set r (nfc t r)))))
+        (set h (+ h 1))))))
+
+(defn ref-targets [^Ints t]
+  (comment "Field c of each REF (after nullability, which used it): the first node"
+           "along its chain of rule bodies that is not a REF, or the REF itself on a"
+           "cycle of REFs (an empty language). Linear: a walk stops at a node"
+           "already resolved, and a second pass writes the answer along its path.")
+  (let [n (ia t H_N)
+        tgt (ia t H_TMP)
+        mark (+ tgt (ia t H_CAP))]
+    (for [^I32 x 0 n]
+      (iset t (+ tgt x) (neg 1))
+      (iset t (+ mark x) (neg 1)))
+    (for [^I32 y 0 n]
+      (if (and (== (nkind t y) K_REF) (< (ia t (+ tgt y)) 0))
+        (do (let [^:mut z y]
+              (local ^I32 fin)
+              (forever
+               (if (!= (nkind t z) K_REF) (do (set fin z) (break)))
+               (if (>= (ia t (+ tgt z)) 0) (do (set fin (ia t (+ tgt z))) (break)))
+               (if (== (ia t (+ mark z)) y) (do (set fin (neg 2)) (break)))
+               (iset t (+ mark z) y)
+               (set z (nfa t z)))
+              (let [^:mut w y]
+                (forever
+                 (if (or (!= (nkind t w) K_REF) (>= (ia t (+ tgt w)) 0)) (break))
+                 (if (== fin (neg 2)) (iset t (+ tgt w) w) (iset t (+ tgt w) fin))
+                 (set w (nfa t w))))))))
+    (for [^I32 r 0 n]
+      (if (== (nkind t r) K_REF) (iset t (+ (nat t r) 3) (ia t (+ tgt r)))))))
+
+(defn rep-mins [^Ints t]
+  (comment "A repetition of a nullable element has minimum 0: C^n..m = C^0..m when the"
+           "empty string is in C (pad with empty repetitions). The match relies on it:"
+           "such a REP never advances on an empty completion (`wait-on`), so counted"
+           "repetitions of nullables cost no item per count.")
+  (for [^I32 x 0 (ia t H_N)]
+    (if (and (== (nkind t x) K_REP) (nullable t (nfa t x)))
+      (iset t (+ (nat t x) 2) 0))))
+
+(defn locate [^Bytes a ^Ints t]
+  (comment "The failure's 1-based line and column (in code points) in the ABNF text.")
+  (let [s (ia t H_S)
+        ^:mut pos (ia t H_EPOS)
+        ^:mut line 1
+        ^:mut col 1]
+    (if (< pos s) (set pos s))
+    (if (> pos (ia t H_E)) (set pos (ia t H_E)))
+    (for [^I32 i s pos]
+      (let [c (u8 a i)]
+        (if (== c 10)
+          (do (set line (+ line 1)) (set col 1))
+          (if (!= (bit-and c 192) 128) (set col (+ col 1))))))
+    (iset t H_ELINE line)
+    (iset t H_ECOL col)))
+
+(defn ^I32 head-len [^Bytes a ^I32 i]
+  (let [ai (bit-and (u8 a i) 31)]
+    (if (< ai 24) (return 1))
+    (if (== ai 24) (return 2))
+    (if (== ai 25) (return 3))
+    (if (== ai 26) (return 5))
+    (return 9)))
+
+(defn ^I32 head-arg [^Bytes a ^I32 i]
+  (comment "The head argument at i, or -1 when it does not fit in 31 bits.")
+  (let [ai (bit-and (u8 a i) 31)]
+    (if (< ai 24) (return ai))
+    (if (== ai 24) (return (u8 a (+ i 1))))
+    (if (== ai 25) (return (bit-or (shl (u8 a (+ i 1)) 8) (u8 a (+ i 2)))))
+    (if (and (== ai 26) (< (u8 a (+ i 1)) 128))
+      (return (bit-or (bit-or (shl (u8 a (+ i 1)) 24) (shl (u8 a (+ i 2)) 16))
+                      (bit-or (shl (u8 a (+ i 3)) 8) (u8 a (+ i 4))))))
+    (return (neg 1))))
+
+(defn ^:pub ^I32 abnf-prep [^Bytes a ^I32 ao ^I32 al ^Ints t]
+  (comment "Check and compile the controller encoded at a[ao, +al) (a CBOR text or"
+           "byte string) into t (abnf-words(al) words). The status: 0, or a code"
+           "(abnf-error-name) with its line and column. Bind-time work over the"
+           "schema's own literal: linear but for the n log n sort, not charged (D192).")
+  (iset t H_STATUS 0)
+  (iset t H_EPOS 0)
+  (iset t H_ELINE 0)
+  (iset t H_ECOL 0)
+  (iset t H_N 0)
+  (iset t H_USED HDR)
+  (if (or (> al MAX_TEXT) (< al 1)) (do (iset t H_STATUS E_TOO_LARGE) (return E_TOO_LARGE)))
+  (let [major (ushr (u8 a ao) 5)
+        ai (bit-and (u8 a ao) 31)
+        cap (+ al 8)]
+    (if (and (!= major 2) (!= major 3)) (do (iset t H_STATUS E_NOT_STRING) (return E_NOT_STRING)))
+    (if (or (> ai 26) (> (head-len a ao) al)) (do (iset t H_STATUS E_NOT_STRING) (return E_NOT_STRING)))
+    (let [s (+ ao (head-len a ao))
+          e (+ ao al)]
+      (if (!= (head-arg a ao) (- e s)) (do (iset t H_STATUS E_NOT_STRING) (return E_NOT_STRING)))
+      (iset t H_S s)
+      (iset t H_E e)
+      (iset t H_CAP cap)
+      (iset t H_NODE HDR)
+      (iset t H_CHILD (+ HDR (* NW cap)))
+      (iset t H_RANGE (+ (ia t H_CHILD) cap))
+      (iset t H_STACK (+ (ia t H_RANGE) (* 4 cap)))
+      (iset t H_DEF (+ (ia t H_STACK) cap))
+      (iset t H_TMP (+ (ia t H_DEF) (* 4 cap)))
+      (iset t H_CTOP 0)
+      (iset t H_RTOP 0)
+      (iset t H_STOP 0)
+      (iset t H_DTOP 0)
+      (let [^:mut i s]
+        (while (< i e)
+          (let [c (cp-at a i e)]
+            (if (< c 0)
+              (do (fail t E_UTF8 i) (locate a t) (return E_UTF8)))
+            (set i (+ i (ushr c 24))))))
+      (if (or (< (controller a s e t) 0) (< (resolve a t) 0))
+        (do (locate a t) (return (ia t H_STATUS))))
+      (nullability t)
+      (ref-targets t)
+      (rep-mins t)
+      (iset t H_USED (+ (ia t H_RANGE) (* 2 (ia t H_RTOP))))
+      (return 0))))
+
+;; ------------------------------------------------------------ the match
+
+(defconst ^:pub ^I32 TPU 8)          ;; ticks per budget unit (as snug.vm.controls)
+;; Weights (bench/abnf-calib.mjs, D334): each kind of step costs no more CPU per unit
+;; than the VM's reference walk measured alongside it (D191's rule).
+(defconst ^:pub ^I32 T_SYM 16)       ;; a symbol read (and a set opened)
+(defconst ^:pub ^I32 T_ADD 8)        ;; an item offered to the current set
+(defconst ^:pub ^I32 T_PROBE 5)      ;; a step along the set's chain of one node's items
+(defconst ^:pub ^I32 T_NEW 16)       ;; an item written
+(defconst ^:pub ^I32 T_PROC 10)      ;; an item processed
+(defconst ^:pub ^I32 T_WAIT 10)      ;; a waiter record written
+(defconst ^:pub ^I32 T_WALK 4)       ;; a waiter visited by a completion
+(defconst ^:pub ^I32 T_TEST 10)      ;; a terminal tested, + T_RANGE per range
+(defconst ^:pub ^I32 T_RANGE 4)
+(defconst ^:pub ^I32 T_INIT 1)       ;; per node, the node heads set up
+(defconst ^I32 TICK_CAP 1073741824)
+;; The matcher scratch cap (`cap` of abnf-run, a host option): by default 2^22 words
+;; (16 MiB), the PEG group arena's default (D281); at most 2^24 words, its hard cap.
+(defconst ^:pub ^I32 ABNF_DEFAULT_WORDS 4194304)
+(defconst ^:pub ^I32 ABNF_MAX_WORDS 16777216)
+(defconst ^:pub ^I32 ABNF_MIN_WORDS 65536)
+
+(defn ^:pub ^I32 abnf-cap [^I32 cap]
+  (comment "A scratch cap as a run uses it: ABNF_DEFAULT_WORDS when negative, else"
+           "clamped to [ABNF_MIN_WORDS, ABNF_MAX_WORDS].")
+  (if (< cap 0) (return ABNF_DEFAULT_WORDS))
+  (if (< cap ABNF_MIN_WORDS) (return ABNF_MIN_WORDS))
+  (if (> cap ABNF_MAX_WORDS) (return ABNF_MAX_WORDS))
+  (return cap))
+
+;; The scratch m: MW words of state, the per-node heads (the newest item of
+;; the node in the current set), the pending scans, then the arena: items (IW
+;; words: node, k, pred, link, waiters, done) from the bottom, waiter records
+;; (item, next) from the top.
+(defconst ^I32 M_TICKS 0)
+(defconst ^I32 M_ALLOW 1)
+(defconst ^:pub ^I32 M_MORE 2)
+(defconst ^I32 M_NI 3)
+(defconst ^I32 M_NWR 4)
+(defconst ^I32 M_BASE 5)
+(defconst ^I32 M_SET 6)
+(defconst ^I32 M_NPEND 7)
+(defconst ^I32 M_LAST 8)
+(defconst ^I32 M_SYM 9)
+(defconst ^I32 M_ARENA 10)
+(defconst ^I32 M_N 11)
+(defconst ^I32 M_C0 12)
+(defconst ^I32 M_END 13)
+(defconst ^I32 M_CUR 14)
+(defconst ^I32 M_CAP 15)
+(defconst ^I32 MW 16)
+(defconst ^I32 IW 6)
+
+(defn ^:pub ^I32 abnf-scratch-words [^IntsR t ^I32 n ^I32 cap0]
+  (comment "A first scratch size for a run over table t and an item of n bytes under"
+           "scratch cap cap0: 32 words a byte (typical grammars need fewer, so most runs"
+           "never grow), within the cap. Hosts grow it on M_MORE; the answer never"
+           "depends on it.")
+  (let [cap (abnf-cap cap0)
+        base (+ (+ MW (* 2 (ia t H_N))) 4096)]
+    (if (> n (quot (- cap base) 32)) (return cap))
+    (return (+ base (* 32 n)))))
+
+(defn ^:pub ^I32 abnf-more [^IntsR m]
+  (comment "After a run answered -1: 0 when it ran out of budget (or the cap); else it"
+           "needs a larger scratch, and this is the size to run again with -- at least"
+           "twice the scratch it had, at most the cap. A host that reruns with it"
+           "therefore reruns at most log2(cap / first scratch) + 1 times.")
+  (return (ia m M_MORE)))
+
+(defn ^I32 suggest [^IntsR m ^I32 used]
+  (comment "A scratch size for the rerun: the words used so far, scaled from the bytes"
+           "read to the whole content, at least twice the scratch given, within the cap.")
+  (let [cap (ia m M_CAP)
+        c0 (ia m M_C0)
+        done (+ (- (ia m M_CUR) c0) 1)
+        total (+ (- (ia m M_END) c0) 1)
+        per (+ (quot used done) 1)
+        ^:mut ^I32 w cap]
+    (if (<= per (quot cap total)) (set w (* per total)))
+    (if (< w (* 2 (ilen m))) (set w (* 2 (ilen m))))
+    (if (> w cap) (set w cap))
+    (return w)))
+
+(defn ^Bool spend [^Ints m ^I32 k]
+  (comment "Charge k ticks before their work; false (nothing charged) past the allowance.")
+  (let [u (ia m M_TICKS)]
+    (if (> k (- (ia m M_ALLOW) u)) (return false))
+    (iset m M_TICKS (+ u k))
+    (return true)))
+
+(defn ^I32 verdict [^IntsR m ^Bool ok]
+  (let [u (quot (+ (ia m M_TICKS) (- TPU 1)) TPU)]
+    (if ok (return u))
+    (return (- (neg 2) u))))
+
+(defn ^I32 io [^IntsR m ^I32 i] (return (+ (ia m M_ARENA) (* IW i))))
+(defn ^I32 wo [^IntsR m ^I32 r] (return (- (ilen m) (* 2 (+ r 1)))))
+
+(defn ^Bool room-for [^Ints m ^I32 items ^I32 recs]
+  (comment "Is there room for `items` more items and `recs` more waiter records?"
+           "Past the cap: no (budget). Past what the host gave: no, and M_MORE.")
+  (let [ni (+ (ia m M_NI) items)
+        nr (+ (ia m M_NWR) recs)
+        a (ia m M_ARENA)
+        cap (ia m M_CAP)]
+    (if (or (> ni (quot (- cap a) IW))
+            (> (* 2 nr) (- (- cap a) (* IW ni))))
+      (return false))
+    (if (> (+ (+ a (* IW ni)) (* 2 nr)) (ilen m))
+      (do (iset m M_MORE (suggest m (+ (+ a (* IW ni)) (* 2 nr)))) (return false)))
+    (return true)))
+
+(defn ^I32 add-item [^Ints m ^I32 x ^I32 k ^I32 pred]
+  (comment "The item (x, k, pred) of the current set -- found along x's chain, or"
+           "written; pred < 0: a prediction, its own pred. Its index, or -1 (stop).")
+  (if (not (spend m T_ADD)) (return (neg 1)))
+  (let [base (ia m M_BASE)
+        hs (+ MW x)
+        h0 (ia m hs)
+        ^:mut h h0]
+    (while (>= h base)
+      (if (not (spend m T_PROBE)) (return (neg 1)))
+      (let [o (io m h)]
+        (if (and (== (ia m (+ o 1)) k)
+                 (or (== (ia m (+ o 2)) pred) (and (< pred 0) (== (ia m (+ o 2)) h))))
+          (return h))
+        (set h (ia m (+ o 3)))))
+    (if (not (spend m T_NEW)) (return (neg 1)))
+    (if (not (room-for m 1 0)) (return (neg 1)))
+    (let [n (ia m M_NI)
+          o2 (io m n)
+          ^:mut pr pred
+          ^:mut link (neg 1)]
+      (if (< pred 0) (set pr n))
+      (if (>= h0 base) (set link h0))
+      (iset m o2 x)
+      (iset m (+ o2 1) k)
+      (iset m (+ o2 2) pr)
+      (iset m (+ o2 3) link)
+      (iset m (+ o2 4) (neg 1))
+      (iset m (+ o2 5) (ia m M_SET))
+      (iset m hs n)
+      (iset m M_NI (+ n 1))
+      (return n))))
+
+(defn ^I32 advance [^IntsR t ^Ints m ^I32 i]
+  (comment "Item i with its dot moved over one symbol: SEQ and REP count on (a REP"
+           "with no maximum saturates at its minimum), ALT and REF complete.")
+  (let [o (io m i)
+        x (ia m o)
+        k (ia m (+ o 1))
+        pred (ia m (+ o 2))
+        kind (nkind t x)
+        ^:mut k2 1]
+    (if (== kind K_SEQ) (set k2 (+ k 1)))
+    (if (== kind K_REP)
+      (do (set k2 (+ k 1))
+          (if (and (< (nfc t x) 0) (> k2 (nfb t x))) (set k2 (nfb t x)))))
+    (return (add-item m x k2 pred))))
+
+(defn ^I32 skip-refs [^IntsR t ^I32 y]
+  (comment "A REF stands for its rule's body: the node a REF chain ends at (prepared"
+           "in field c), so no item is spent on a REF but one of a cycle of REFs.")
+  (if (== (nkind t y) K_REF) (return (nfc t y)))
+  (return y))
+
+(defn ^I32 wait-on [^IntsR t ^Ints m ^I32 i ^I32 y0]
+  (comment "Item i waits on node y: predict y (the prediction holds i in its waiter"
+           "list) and, y nullable, advance i at once (Aycock-Horspool) -- but not a REP:"
+           "its child nullable, its minimum is 0 (`rep-mins`), so (R, k) is complete and"
+           "dominates (R, k + 1) at the same position. 0 or -1.")
+  (let [y (skip-refs t y0)
+        p (add-item m y 0 (neg 1))]
+    (if (< p 0) (return (neg 1)))
+    (if (not (spend m T_WAIT)) (return (neg 1)))
+    (if (not (room-for m 0 1)) (return (neg 1)))
+    (let [r (ia m M_NWR)
+          ro (wo m r)
+          po (io m p)]
+      (iset m ro i)
+      (iset m (+ ro 1) (ia m (+ po 4)))
+      (iset m (+ po 4) r)
+      (iset m M_NWR (+ r 1)))
+    (if (and (nullable t y) (!= (nkind t (ia m (io m i))) K_REP))
+      (if (< (advance t m i) 0) (return (neg 1))))
+    (return 0)))
+
+(defn ^I32 complete [^IntsR t ^Ints m ^I32 i]
+  (comment "Item i is complete: the start's prediction completing in the last set is"
+           "a match (1); else each item waiting on i's prediction advances, once per"
+           "(prediction, set) -- never in the prediction's own set, where its waiters"
+           "advanced when they waited (it is nullable). 0, 1 or -1.")
+  (let [p (ia m (+ (io m i) 2))
+        po (io m p)
+        j (ia m M_SET)]
+    (if (and (== p 0) (== (ia m M_LAST) 1)) (return 1))
+    (if (== (ia m (+ po 5)) j) (return 0))
+    (iset m (+ po 5) j)
+    (let [^:mut r (ia m (+ po 4))]
+      (while (>= r 0)
+        (if (not (spend m T_WALK)) (return (neg 1)))
+        (let [ro (wo m r)]
+          (if (< (advance t m (ia m ro)) 0) (return (neg 1)))
+          (set r (ia m (+ ro 1))))))
+    (return 0)))
+
+(defn ^I32 process [^IntsR t ^Ints m ^I32 i]
+  (comment "One item of the current set. 0, 1 (a match) or -1.")
+  (if (not (spend m T_PROC)) (return (neg 1)))
+  (let [o (io m i)
+        x (ia m o)
+        k (ia m (+ o 1))
+        kind (nkind t x)]
+    (if (== kind K_TERM)
+      (do (if (== k 1) (return (complete t m i)))
+          (if (== (ia m M_LAST) 1) (return 0))
+          (let [nr (nfb t x)
+                sym (ia m M_SYM)
+                ^:mut hit false]
+            (if (not (spend m (+ T_TEST (* T_RANGE nr)))) (return (neg 1)))
+            (for [^I32 q 0 nr]
+              (let [ro (+ (ia t H_RANGE) (* 2 (+ (nfa t x) q)))]
+                (if (and (>= sym (ia t ro)) (<= sym (ia t (+ ro 1)))) (set hit true))))
+            (if hit
+              (do (let [np (ia m M_NPEND)]
+                    (iset m (+ (+ MW (ia m M_N)) np) i)
+                    (iset m M_NPEND (+ np 1)))))
+            (return 0))))
+    (if (== kind K_SEQ)
+      (do (if (< k (nfb t x)) (return (wait-on t m i (child t x k))))
+          (return (complete t m i))))
+    (if (or (== kind K_ALT) (== kind K_REF))
+      (do (if (== k 1) (return (complete t m i)))
+          (if (== kind K_REF) (return (wait-on t m i (nfa t x))))
+          (for [^I32 c 0 (nfb t x)]
+            (if (< (wait-on t m i (child t x c)) 0) (return (neg 1))))
+          (return 0)))
+    (if (>= k (nfb t x))
+      (do (let [r (complete t m i)]
+            (if (!= r 0) (return r)))))
+    (if (or (< (nfc t x) 0) (< k (nfc t x)))
+      (return (wait-on t m i (nfa t x))))
+    (return 0)))
+
+(defn ^:pub ^I32 abnf-run [^IntsR t ^I32 mode ^Bytes b ^I32 s ^I32 e ^Ints m ^I32 room ^I32 cap0]
+  (comment "Is the content of the string item b[s, e) in the language of table t's"
+           "start element? mode 0 (`.abnf`): its Unicode scalars (a byte string that"
+           "is not UTF-8 is not); mode 1 (`.abnfb`): its bytes. Any other item is"
+           "refused. m: scratch of at least MW words (abnf-scratch-words(t, e - s, cap0)"
+           "to start with; on -1 with abnf-more(m) > 0, run again with that many);"
+           "cap0: the scratch cap (abnf-cap: negative for the default). The verdict"
+           "word (see the namespace doc), after at most `room` units.")
+  (for [^I32 z 0 MW] (iset m z 0))
+  (iset m M_CAP (abnf-cap cap0))
+  (if (>= room (quot TICK_CAP TPU)) (iset m M_ALLOW TICK_CAP) (iset m M_ALLOW (* room TPU)))
+  (if (or (!= (ia t H_STATUS) 0) (>= s e)) (return (verdict m false)))
+  (let [major (ushr (u8 b s) 5)
+        n (ia t H_N)
+        cap (ia m M_CAP)]
+    (if (and (!= major 2) (!= major 3)) (return (verdict m false)))
+    (if (> (+ MW (* 2 n)) (- cap 64)) (return (neg 1)))
+    (if (> (+ MW (* 2 n)) (ilen m))
+      (do (let [^:mut ^I32 w0 (+ (+ MW (* 2 n)) 4096)]
+            (if (< w0 (* 2 (ilen m))) (set w0 (* 2 (ilen m))))
+            (if (> w0 cap) (set w0 cap))
+            (iset m M_MORE w0))
+          (return (neg 1))))
+    (iset m M_N n)
+    (iset m M_ARENA (+ MW (* 2 n)))
+    (iset m M_C0 (+ s (head-len b s)))
+    (iset m M_END e)
+    (iset m M_CUR (ia m M_C0))
+    (if (not (spend m (* T_INIT (+ n 1)))) (return (neg 1)))
+    (for [^I32 x 0 n] (iset m (+ MW x) (neg 1)))
+    (if (< (add-item m (skip-refs t (ia t H_START)) 0 (neg 1)) 0) (return (neg 1)))
+    (let [^:mut cur (ia m M_C0)]
+      (forever
+       (if (not (spend m T_SYM)) (return (neg 1)))
+       (iset m M_NPEND 0)
+       (let [^:mut w 0]
+         (if (>= cur e)
+           (iset m M_LAST 1)
+           (do (if (== mode 1)
+                 (do (iset m M_SYM (u8 b cur)) (set w 1))
+                 (do (let [c (cp-at b cur e)]
+                       (if (< c 0) (return (verdict m false)))
+                       (iset m M_SYM (bit-and c 2097151))
+                       (set w (ushr c 24)))))))
+         (let [^:mut i (ia m M_BASE)]
+           (while (< i (ia m M_NI))
+             (let [r (process t m i)]
+               (if (< r 0) (return (neg 1)))
+               (if (== r 1) (return (verdict m true))))
+             (set i (+ i 1))))
+         (if (== (ia m M_LAST) 1) (return (verdict m false)))
+         (if (== (ia m M_NPEND) 0) (return (verdict m false)))
+         (iset m M_BASE (ia m M_NI))
+         (iset m M_SET (+ (ia m M_SET) 1))
+         (set cur (+ cur w))
+         (iset m M_CUR cur)
+         (for [^I32 q 0 (ia m M_NPEND)]
+           (let [pi (ia m (+ (+ MW n) q))
+                 px (ia m (io m pi))]
+             (if (< (add-item m px 1 pi) 0) (return (neg 1))))))))))

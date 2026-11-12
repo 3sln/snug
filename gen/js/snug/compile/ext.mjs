@@ -182,7 +182,9 @@ export function extInit(h, opt) {
                 return false;
             }
         }
-        if (builtinCtl(len, packOpt(opt, c0, len, 0), packOpt(opt, c0, len, 4)) !== 0) {
+        // D334: `abnf` and `abnfb` (codes 20, 21) are the ABNF module's to bind
+        const bc = builtinCtl(len, packOpt(opt, c0, len, 0), packOpt(opt, c0, len, 4));
+        if ((bc !== 0) && (bc < 20)) {
             badRegistry(h);
             return false;
         }

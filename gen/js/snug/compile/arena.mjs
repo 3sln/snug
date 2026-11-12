@@ -83,6 +83,8 @@ export const ERR_CONTROL_REGISTRY = 55;
 
 export const ERR_REGEXP_BLOCK = 56;
 
+export const ERR_NEED_ABNF = 57;
+
 export const H_TOP = 0;
 
 export const H_ERR = 1;

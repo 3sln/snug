@@ -6,10 +6,13 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { compile } from '../../host/js/src/public-compile.mjs';
+import { abnf } from '../../host/js/src/abnf.mjs';
 import { decode } from '../../host/js/src/index.mjs';
 import { readSequence } from '../../host/js/src/public-sequence.mjs';
 import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('rfc-corpus', import.meta.url);   // P9.1 caps
+// RFC 9165 §3's .abnf/.abnfb need the optional ABNF module (P9.14, D334); it binds nothing else
+const withAbnf={controls:{...abnf}};
 
 const location = new URL('../conformance/rfc/', import.meta.url);
 function fingerprint() {
@@ -71,9 +74,9 @@ for(const file of readdirSync(location).filter(x=>/^rfc\d+.*\.json$/.test(x)).so
   for(const suite of doc.suites||[]) {
     let schema;
     const cddl=typeof suite.context==='string'?suite.context+'\n'+suite.cddl:suite.context?.cddl||suite.cddl;
-    try {await compile(suite.cddl);compilation.push({suite:suite.name,kind:'extracted',ok:true});}
+    try {await compile(suite.cddl,withAbnf);compilation.push({suite:suite.name,kind:'extracted',ok:true});}
     catch(error){compilation.push({suite:suite.name,kind:'extracted',ok:false,code:fault(error),line:error.line,column:error.column});}
-    try{schema=await compile(cddl);}
+    try{schema=await compile(cddl,withAbnf);}
     catch(error){compilation.push({suite:suite.name,kind:'effective',ok:false,code:fault(error),line:error.line,column:error.column});}
     if(schema)compilation.push({suite:suite.name,kind:'effective',ok:true});
     const extracted=compilation.findLast(c=>c.suite===suite.name&&c.kind==='extracted');

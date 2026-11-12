@@ -27,6 +27,7 @@ import { ProgramError } from './serialized.mjs';
 /** Registry entries carrying this key are metered in kin (snug/controls only):
  *  { prepare(pool, ao, al): Int32Array, run(pool, ao, prepared, b, s, e, room): verdict }. */
 export const METERED = Symbol.for('snug.metered');
+const ABNF = Symbol.for('snug.abnf');   // the ABNF module's entries name themselves (snug/abnf)
 const MAX_UNITS = 0x7ffffffd;
 
 export const DEFAULT_MAX_BYTES = 65536;
@@ -42,9 +43,10 @@ export function controlEntries(controls) {
     throw new TypeError('controls must be an object of named predicates.');
   const entries = [];
   for (const name of Object.keys(controls).sort((a, b) => compareBytes(encoder.encode(a), encoder.encode(b)))) {
-    if (!NAME.test(name) || BUILTIN.has(name))
-      throw new TypeError(`Invalid control name ${JSON.stringify(name)} (an identifier that is not a built-in control).`);
     const c = controls[name];
+    // D334: `abnf` / `abnfb` are built-in names that only the ABNF module (snug/abnf) binds
+    if (!NAME.test(name) || (BUILTIN.has(name) && c?.[ABNF] !== name))
+      throw new TypeError(`Invalid control name ${JSON.stringify(name)} (an identifier that is not a built-in control).`);
     const entry = typeof c === 'function' ? { check: c } : c;
     if (entry === null || typeof entry !== 'object' || typeof entry.check !== 'function')
       throw new TypeError(`Control .${name} must be a function or an object with a check function.`);
@@ -127,7 +129,7 @@ export function bindControls(P, B, entries) {
     preps[id].set(P[o + 3], metered[id].prepare(B, P[o + 3], P[o + 4]));
   }
   const bound = {
-    names, failure: null,
+    names, failure: null, pool: B,
     call(id, pool, ao, al, b, s, e, room) {
       const m = metered[id];
       if (m !== null) return m.run(pool, ao, preps[id].get(ao), b, s, e, room);

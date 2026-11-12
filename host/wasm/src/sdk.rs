@@ -67,8 +67,10 @@ extern "C" {
     /// the argument's encoding at [ap, ap+al), the item's at [ip, ip+il), both
     /// in linear memory and valid only during the call; `room` the budget left.
     /// Answers kin's verdict word (D190): u >= 0 matched after u units, -2 - u
-    /// refused after u units, -1 more than `room`.
-    fn snug_ext(id: i32, ap: *const u8, al: i32, ip: *const u8, il: i32, room: i32) -> i32;
+    /// refused after u units, -1 more than `room`. `ao` is the argument's offset
+    /// in the Program's pool (D334: the host's metered controls, `.abnf`, keep
+    /// their arguments prepared by it).
+    fn snug_ext(id: i32, ap: *const u8, al: i32, ip: *const u8, il: i32, room: i32, ao: i32) -> i32;
 }
 
 struct Uniq(UnsafeCell<Vec<i32>>);
@@ -82,7 +84,7 @@ fn ext_call(pr: &Prog, id: i32, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32,
     let kind = pr.ext.get(id as usize).copied().unwrap_or(0);
     if kind == 0 {
         // SAFETY: the pointers are in bounds of live slices for the call's duration.
-        return unsafe { snug_ext(id, pool.as_ptr().add(ao as usize), al, b.as_ptr().add(s as usize), e - s, room) };
+        return unsafe { snug_ext(id, pool.as_ptr().add(ao as usize), al, b.as_ptr().add(s as usize), e - s, room, ao) };
     }
     let t: &[i32] = match pr.preps.get(&(id, ao)) { Some(t) => t, None => &[] };
     if kind == 3 && t.is_empty() { return -2; }

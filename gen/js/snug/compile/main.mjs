@@ -512,6 +512,8 @@ export function errorName(code) {
             return "control_registry";
         case 56:
             return "regexp";
+        case 57:
+            return "unsupported_control";
         case 45:
             return "map_key";
         case 49:

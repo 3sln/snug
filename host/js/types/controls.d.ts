@@ -9,8 +9,9 @@
 export type Control = ((argument: Uint8Array, item: Uint8Array) => boolean) | {
   check(argument: Uint8Array, item: Uint8Array): boolean;
   maxBytes?: number;
-  /** Checked once per use at compile time; false refuses the schema (`control_value`). */
-  argument?(argument: Uint8Array): boolean;
+  /** Checked once per use at compile time; anything but `true` refuses the schema
+   *  (`control_value`), and a string answer is the refusal's detail. */
+  argument?(argument: Uint8Array): boolean | string;
 };
 /** Names: identifiers ([A-Za-z_][A-Za-z0-9_-]*, at most 64 bytes), not built-in controls. */
 export type Controls = Record<string, Control>;

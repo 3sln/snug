@@ -321,7 +321,7 @@ go. Delegations such as D303 cover size caps only, not releases.
    - `bb scan-test`, `bb rscan-test`, `bb vm-test`, `bb vmsession-test`,
      `bb sequence-test`, `bb valid-test` (with the cbor2 arm present);
    - `bb compile-test`, `bb compile-fuzz`;
-   - `bb nav-test`, `bb write-test`, `bb unicode-test`;
+   - `bb nav-test`, `bb write-test`, `bb unicode-test`, `bb abnf-test`;
    - `bb rust-api-test` (default mode, and the `full` mode once P9.6a
      lands);
    - `bb wasm-sdk-test`, if the SDK ships;

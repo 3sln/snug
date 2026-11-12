@@ -289,6 +289,34 @@ An unregistered `.name` is `Error::Compile` with code `unknown_control` and
 `Error::MissingControls(names)` (code `missing_control`); `Controls::in_bus`
 admits them under the `bus` profile.
 
+### `.abnf` / `.abnfb` (RFC 9165 §3)
+
+```rust
+use snug::{Schema, CompileOptions, Scratch, controls::Controls, abnf::{Abnf, check_abnf}};
+let controls = Controls::new().with_abnf();                // the optional ABNF controls (D334)
+let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
+let schema = Schema::compile(r#"id = text .abnf "1*DIGIT\nDIGIT = %x30-39""#, &options)?;
+assert!(schema.validate(&[0x62, b'4', b'2'], "id", &mut Scratch::new()).is_ok());
+assert!(check_abnf("a\na = <prose>").unwrap_err().starts_with("prose-val"));
+let mut wide = Controls::new();
+wide.insert_abnf(Abnf::text().with_max_bytes(1 << 20).with_max_words(1 << 24)); // .abnf only, larger bounds
+# let _ = wide;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`Controls::with_abnf()` adds `.abnf` (Unicode scalars) and `.abnfb` (bytes).
+They are the only entries that may use these built-in names. Without them a
+schema using the controls is `unsupported_control` (the `message` names
+`Controls::with_abnf`), and a stored Program using them is
+`Error::MissingControls`. Compile-time refusals (prose-val, syntax,
+undefined rules) are `control_value`, with `detail` such as `abnf argument:
+prose-val (<...>) is not supported at ABNF line 1, column 5`. Verdicts and
+budget units are kin's (`snug::snug::abnf`), the same as JS and the wasm SDK.
+`with_max_bytes` sets the item bound (default 65,536). `with_max_words` sets
+the matcher's scratch cap, clamped to 65,536..=16,777,216 words (default
+4,194,304, the PEG group arena's default); past it, validation stops with
+`budget`. Semantics: [CDDL support](cddl-support.md#abnf-abnf-abnfb).
+
 ## CBOR sequences
 
 A CBOR sequence (RFC 8742) is messages written back to back, for example a

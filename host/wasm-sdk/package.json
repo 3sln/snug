@@ -15,6 +15,7 @@
     "./sources": "./src/sources.mjs",
     "./sequence": "./src/sequence.mjs",
     "./controls": "./src/controls.mjs",
+    "./abnf": "./src/abnf.mjs",
     "./writer": "./src/writer.mjs"
   },
   "scripts": {
