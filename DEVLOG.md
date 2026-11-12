@@ -8093,7 +8093,7 @@ review.
     `check` and `drift`.
   - `proptest`, 2 min, P1–P5: 105,201 cases, no failure.
   - `size`: ok after the sources min cap raise (D337).
-- [ ] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
+- [x] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
   framer written independently of snug's own sequence code, used as the
   oracle in `sequence-test`.
   - **Framer:** `corpus/tools/rfc8742-framer.mjs`, from RFC 8949 Appendix C
@@ -8136,8 +8136,9 @@ review.
     session (JS and Rust), the hosts and the framer all find a boundary there.
     `oracleSequence` now asks the framer when `navSkip` cannot walk the root.
     The Rust host runner's view check compared `raw()` with the message length,
-    but a non-deterministic message's View reads its canonical copy (§19.3); it
-    now compares with a `Document` opened on the message's bytes. The case set
+    but a non-deterministic message's View reads its canonical copy (§19.3).
+    P9.2 fixed the same check independently (`0df5d39`, a `Document`'s view);
+    P9.5 takes main's version. The case set
     never held this combination. Valid-wire groups now get indefinite-root
     fillers. The RFC 8742 and F.1 vectors run as sequences under the bindle,
     deterministic and valid presets, with expected outcomes (F.1 under
@@ -8148,23 +8149,34 @@ review.
     profiles.md and the RFC corpus README, with these two examples. No snug
     core bug. `navSkip`'s -1 on indefinite items is its contract: architecture
     §16.4 now says so plainly.
-  - **Gate (4cf52c5, defaults; machine load 40–100):** framer unit vectors
-    9/9; framer == oracle on 175,373/175,373 oracle answers. Classes:
-    - accepted 4,649,012; skipped 43,810; clean ends 48,584;
-    - `truncated`: same head 13,462; enclosing claim 5,166; claim before a
-      syntax error 256; embedded 96;
-    - `malformed`: same head 3,514 (reserved ai 3,332, bad simple 127, chunk
-      24, break 22, ai 31 on 0/1/6 7, break as value 2);
-    - `too_large`: 12,720 (longer than P 10,545, cut short 1,677, malformed
-      past P 431, claim past P before a syntax error 59, embedded 8);
-    - other refusals: 91,575 in 95 code × position classes.
+  - **Gate on the landed code (a82cab0, on main's 2c3c8f1 after P9.3 and
+    P9.4; main differs from it only in this DEVLOG entry):** `bb
+    sequence-test` with defaults under the P9.1 watchdog, exit 0 in 534 s
+    (the same counts on 871ad08, on P9.3 alone, in 815 s). Framer unit vectors
+    9/9; framer == oracle on 176,869/176,869 oracle answers. Classes:
+    - accepted 3,150,171; skipped 41,111; clean ends 49,423;
+    - `truncated`: same head 13,571; enclosing claim 5,188; claim before a
+      syntax error 258; embedded 96;
+    - `malformed`: same head 3,509 (reserved ai 3,329, bad simple 124, chunk
+      24, break 22, ai 31 on 0/1/6 7, break as value 3);
+    - `too_large`: 12,781 (longer than P 10,604, cut short 1,671, malformed
+      past P 434, claim past P before a syntax error 64, embedded 8);
+    - other refusals: 92,043 in 94 code × position classes.
 
-    RFC vector sequences 294/294 as expected. kin == oracle 739,566/739,566;
-    JS == Rust 183,242/183,242; JS hosts and Rust `Sequence` == oracle on
-    36,013 host runs. **Timing:** the framer comparison takes 25.0 s of a
-    2,361 s run, plus about 1 s of unit vectors (about 1%). Before it, main
-    ran 1,754 s under similar load, so run-to-run load noise is larger than
-    the framer's cost.
+    RFC vector sequences 294/294 as expected. kin == oracle 745,589/745,589;
+    JS == Rust 184,870/184,870, 0 panics; JS hosts and Rust `Sequence` ==
+    oracle on 36,345 host runs; check and drift exit 0 on the same tree. The
+    full set ran before P9.3 landed, on b65f5a3 (on 74b903f), all exit 0:
+    sequence-test (176,093/176,093 framer agreements), check, drift,
+    scan-test, rscan-test, vm-test, vmsession-test, valid-test, compile-test,
+    nav-test, write-test, unicode-test, rust-api-test, wasm-sdk-test, size
+    (unchanged), and `npm test` in host/js. P9.3 (compiler, VM leaf,
+    vm-allcases) and P9.4 (session arena) touch what feeds sequence-test,
+    which is why it was re-run after each. **Timing:** the framer comparison
+    takes 8.5 s of a 523 s run, plus about 1 s of unit vectors (about 1.8%);
+    12.7 s of 801 s on 871ad08. Under heavier load:
+    23.8 s of 2,677 s and 25.0 s of 2,361 s. Main before P9.5 ran 1,754 s under
+    load, and run-to-run load noise is larger than the framer's cost.
 - [x] **P9.6 — Rust async source driver.** The async counterpart to the JS
   stream sources (D027), over the existing session, with the same gates as
   the sync Rust driver.
