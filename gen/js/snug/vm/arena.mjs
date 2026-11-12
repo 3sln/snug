@@ -87,6 +87,12 @@ export function arenaSetUp(s, mark) {
     s[a + AR_UP] = mark;
 }
 
+export function arenaInUse(s) {
+    // Words in use: the upward stack and the chunks carved.
+    const a = s[VM_ARENA];
+    return s[a + AR_UP] + (CHUNK * s[a + AR_CTOP]);
+}
+
 export function arenaFreeWords(s) {
     // Words between the upward top and the chunk heap.
     const a = s[VM_ARENA];
@@ -188,6 +194,24 @@ export function arenaWant(s) {
     // After R_AGROW: the S length the grown arena needs.
     const a = s[VM_ARENA];
     return (a + AR_HDR) + s[a + AR_WANT];
+}
+
+export function arenaWantCut(s, most, least) {
+    // After R_AGROW: ask for at most `most` body words (doubling past what can
+    // ever be needed is waste), never fewer than `least` (what the work needs).
+    const a = s[VM_ARENA];
+    const was = s[a + AR_WANT];
+    let w = was;
+    if (w > most) {
+        w = most;
+    }
+    if ((w < least) && (least <= was)) {
+        w = least;
+    }
+    if (least > was) {
+        w = was;
+    }
+    s[a + AR_WANT] = w;
 }
 
 export function arenaAdopt(s, newend) {

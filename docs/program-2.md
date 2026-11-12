@@ -605,8 +605,8 @@ for; the body follows the header. The arena sits after the fixed scratch
 words (`vm-scratch-words` = fixed + 8 + the lease). Word 35 `VM_PBASE` is the
 absolute input offset of the window (0 on the buffer route), so events record
 absolute offsets on every route. No global item counter is kept: growth
-follows demand, and the bound below is only W7's (and a recursive session's
-up-front growth, D314).
+follows demand, and the bound below is only W7's (and, for a recursive
+session, its value for the bytes read so far, D337).
 
 ### 9.2 Frames
 
@@ -702,11 +702,16 @@ Program/pool/scratch cap, which is unchanged. A miss at the cap is
     (D140), so the outcome is unchanged.
 * **Session route.** The session suspends with `VMS_GROW` *before* any
   charged work that could miss (as built, D314): an item that will open
-  A2/T blocks first checks headroom for its records, a T map's end for its
-  permutation and trail (2·pairs), and a recursive Program grows once at the
-  message's start to the bound below (items ≤ bytes, at most the cap), since
-  one machine run can rebuild an activation chain. A machine therefore never
-  yields mid-run. The host allocates a scratch array with the arena doubled
+  A2/T blocks first checks headroom for its records, and a T map's end for its
+  permutation and trail (2·pairs). For a recursive Program, every such gate
+  also checks that the arena holds the bound below for the message's first
+  `upto` bytes (items ≤ bytes, at most the cap), where `upto` is the furthest
+  offset the gated work can read. One machine run can rebuild an activation
+  chain, but only from items already read. The arena therefore grows with the
+  input read (D337, P9.4). It used to grow to the whole message's bound at the
+  message's start (D314); for an unknown length that was the bound for the
+  input limit, at most the cap. A machine
+  therefore never yields mid-run. The host allocates a scratch array with the arena doubled
   (at most to the cap) and relocates (the VM adopts it at the next step):
   1. copy the words below `VM_ARENA_UP` to the same offsets;
   2. copy the chunk heap so that each chunk keeps its index counted from the

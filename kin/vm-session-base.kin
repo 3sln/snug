@@ -26,7 +26,7 @@
                                     K_LIT K_LITSET K_BYTES K_EMBED VM_BUDGET VM_POS VM_W_OFFSET
                                     VM_BIGNUM_MAX R_BUDGET INF VM_BUDGET_START FL_ARENA H_R_ITEM_MAX
                                     H_ACT_SUM H_RECLEAF_MAX H_S_ARRAY_INDEX H_S_MAP_INDEX]]
-            [snug.vm.arena :refer [arena-room arena-want]]
+            [snug.vm.arena :refer [arena-room arena-want arena-in-use arena-want-cut]]
             [snug.vm.array :refer [forced]]
             [snug.vm.map :refer [t-recw]]
             [snug.vm.base :refer [charge c64min]]
@@ -396,39 +396,50 @@
            "suspension point (program-2 §9.4's bound, applied to the work at hand): a"
            "record for the item at hand and for each item of a child of up to len"
            "bytes, and one end-run's permutation and trail per child entry."
-           "Recursive programs' frames are covered once, at the document's start"
-           "(arena-doc).")
+           "Recursive programs' frames are covered by arena-prefix.")
   (let [^:mut l len]
     (if (< l 0) (set l 0))
     (return (sat-add (sat-mul (sat-add l 1) (r-item p s)) (sat-mul 2 l)))))
 
-(defn ^:pub ^I32 arena-gate [^IntsR p ^Ints s ^Ints ss ^I32 words]
-  (comment "A session's suspension point before work that may push `words` on the"
-           "group arena: GO when they fit (or the arena is at its cap, where a miss is"
-           "the work's own group_limit); else VMS_GROW, the host growing S to"
-           "vms-grow-scratch words (the arena takes them at the next step, arena-adopt)."
-           "Nothing is charged before it, so the step that re-runs the phase is the"
-           "same.")
-  (if (not (arena-used p s)) (return GO))
-  (let [r (arena-room s words)]
-    (if (== r 0) (return GO))
-    (let [want (arena-want s)]
-      (if (> want (ia ss SS_GS)) (iset ss SS_GS want)))
-    (return VMS_GROW)))
-
-(defn ^:pub ^I32 arena-doc [^IntsR p ^Ints s ^Ints ss ^I32 total]
-  (comment "At a session's start: a recursive Program's chunk heap can grow by more"
-           "than any one step's records foresee (an activation chain rebuilt in one"
-           "machine run), so its arena is grown once to program-2 §9.4's bound for the"
-           "whole message (items <= bytes), at most to the cap. GO or VMS_GROW.")
+(defn ^:pub ^I32 arena-prefix [^IntsR p ^IntsR s ^I32 upto]
+  (comment "P9.4: a recursive Program's chunk heap can grow by more than any one"
+           "step's records foresee (an activation chain rebuilt in one machine run),"
+           "so its arena must hold program-2 §9.4's bound for the message's first"
+           "`upto` bytes (items <= bytes): what any work reading no further can have"
+           "pushed in all. 0 for a Program without recursive groups. It used to be"
+           "the bound for the whole message, reserved at its start (D314).")
   (let [act (ia p H_ACT_SUM)
-        rl (ia p H_RECLEAF_MAX)]
-    (if (and (<= act 0) (<= rl 0)) (return GO))
+        rl (ia p H_RECLEAF_MAX)
+        ^:mut n upto]
+    (if (and (<= act 0) (<= rl 0)) (return 0))
+    (if (< n 0) (set n 0))
     (let [dd (ia p H_LIM_DEPTH)
           per (sat-add (r-item p s) act)
-          fixed (sat-mul (+ dd 1) (sat-add act (sat-mul 64 rl)))
-          need (sat-add (sat-add (sat-mul total per) fixed) (sat-mul 2 total))]
-      (return (arena-gate p s ss need)))))
+          fixed (sat-mul (+ dd 1) (sat-add act (sat-mul 64 rl)))]
+      (return (sat-add (sat-add (sat-mul n per) fixed) (sat-mul 2 n))))))
+
+(defn ^:pub ^I32 arena-gate [^IntsR p ^Ints s ^Ints ss ^I32 words ^I32 upto]
+  (comment "A session's suspension point before work that may push `words` on the"
+           "group arena and reads the message no further than offset `upto`: GO when"
+           "they fit and the arena holds arena-prefix(upto) (or it is at its cap, where"
+           "a miss is the work's own group_limit); else VMS_GROW, the host growing S"
+           "to vms-grow-scratch words (the arena takes them at the next step,"
+           "arena-adopt). Nothing is charged before it, so the step that re-runs the"
+           "phase is the same.")
+  (if (not (arena-used p s)) (return GO))
+  (let [^:mut w words
+        used (arena-in-use s)
+        short (- (arena-prefix p s upto) used)]
+    (if (> short w) (set w short))
+    (let [r (arena-room s w)]
+      (if (== r 0) (return GO))
+      (comment "a recursive Program never asks for more than the whole message's bound"
+               "(what D314 reserved at the start), so growing by doubling ends no larger")
+      (if (> (arena-prefix p s 0) 0)
+        (arena-want-cut s (arena-prefix p s (ia ss SS_TOTAL)) (sat-add used w)))
+      (let [want (arena-want s)]
+        (if (> want (ia ss SS_GS)) (iset ss SS_GS want)))
+      (return VMS_GROW))))
 
 (defn ^:pub ^I32 imin [^I32 a ^I32 b]
   (if (< a b) (return a))

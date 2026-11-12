@@ -398,49 +398,65 @@ pub fn arena_items(p: &[i32], s: &[i32], len: i32) -> i32 {
     // suspension point (program-2 §9.4's bound, applied to the work at hand): a
     // record for the item at hand and for each item of a child of up to len
     // bytes, and one end-run's permutation and trail per child entry.
-    // Recursive programs' frames are covered once, at the document's start
-    // (arena-doc).
+    // Recursive programs' frames are covered by arena-prefix.
     let mut l: i32 = len;
     if l < 0 {
         l = 0;
     }
     return sat_add(sat_mul(sat_add(l, 1), r_item(p, s)), sat_mul(2, l));
 }
-pub fn arena_gate(p: &[i32], s: &mut [i32], ss: &mut [i32], words: i32) -> i32 {
+pub fn arena_prefix(p: &[i32], s: &[i32], upto: i32) -> i32 {
+    // P9.4: a recursive Program's chunk heap can grow by more than any one
+    // step's records foresee (an activation chain rebuilt in one machine run),
+    // so its arena must hold program-2 §9.4's bound for the message's first
+    // `upto` bytes (items <= bytes): what any work reading no further can have
+    // pushed in all. 0 for a Program without recursive groups. It used to be
+    // the bound for the whole message, reserved at its start (D314).
+    let act: i32 = p[(H_ACT_SUM) as usize];
+    let rl: i32 = p[(H_RECLEAF_MAX) as usize];
+    let mut n: i32 = upto;
+    if (act <= 0) && (rl <= 0) {
+        return 0;
+    }
+    if n < 0 {
+        n = 0;
+    }
+    let dd: i32 = p[(H_LIM_DEPTH) as usize];
+    let per: i32 = sat_add(r_item(p, s), act);
+    let fixed: i32 = sat_mul(dd + 1, sat_add(act, sat_mul(64, rl)));
+    return sat_add(sat_add(sat_mul(n, per), fixed), sat_mul(2, n));
+}
+pub fn arena_gate(p: &[i32], s: &mut [i32], ss: &mut [i32], words: i32, upto: i32) -> i32 {
     // A session's suspension point before work that may push `words` on the
-    // group arena: GO when they fit (or the arena is at its cap, where a miss is
-    // the work's own group_limit); else VMS_GROW, the host growing S to
-    // vms-grow-scratch words (the arena takes them at the next step, arena-adopt).
-    // Nothing is charged before it, so the step that re-runs the phase is the
-    // same.
+    // group arena and reads the message no further than offset `upto`: GO when
+    // they fit and the arena holds arena-prefix(upto) (or it is at its cap, where
+    // a miss is the work's own group_limit); else VMS_GROW, the host growing S
+    // to vms-grow-scratch words (the arena takes them at the next step,
+    // arena-adopt). Nothing is charged before it, so the step that re-runs the
+    // phase is the same.
     if !arena_used(p, s) {
         return GO;
     }
-    let r: i32 = arena_room(s, words);
+    let mut w: i32 = words;
+    let used: i32 = arena_in_use(s);
+    let short: i32 = arena_prefix(p, s, upto) - used;
+    if short > w {
+        w = short;
+    }
+    let r: i32 = arena_room(s, w);
     if r == 0 {
         return GO;
+    }
+    // a recursive Program never asks for more than the whole message's bound
+    // (what D314 reserved at the start), so growing by doubling ends no larger
+    if arena_prefix(p, s, 0) > 0 {
+        arena_want_cut(s, arena_prefix(p, s, ss[(SS_TOTAL) as usize]), sat_add(used, w));
     }
     let want: i32 = arena_want(s);
     if want > ss[(SS_GS) as usize] {
         ss[(SS_GS) as usize] = want;
     }
     return VMS_GROW;
-}
-pub fn arena_doc(p: &[i32], s: &mut [i32], ss: &mut [i32], total: i32) -> i32 {
-    // At a session's start: a recursive Program's chunk heap can grow by more
-    // than any one step's records foresee (an activation chain rebuilt in one
-    // machine run), so its arena is grown once to program-2 §9.4's bound for the
-    // whole message (items <= bytes), at most to the cap. GO or VMS_GROW.
-    let act: i32 = p[(H_ACT_SUM) as usize];
-    let rl: i32 = p[(H_RECLEAF_MAX) as usize];
-    if (act <= 0) && (rl <= 0) {
-        return GO;
-    }
-    let dd: i32 = p[(H_LIM_DEPTH) as usize];
-    let per: i32 = sat_add(r_item(p, s), act);
-    let fixed: i32 = sat_mul(dd + 1, sat_add(act, sat_mul(64, rl)));
-    let need: i32 = sat_add(sat_add(sat_mul(total, per), fixed), sat_mul(2, total));
-    return arena_gate(p, s, ss, need);
 }
 pub fn imin(a: i32, b: i32) -> i32 {
     if a < b {

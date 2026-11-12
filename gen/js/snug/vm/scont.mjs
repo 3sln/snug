@@ -225,7 +225,7 @@ export function arrRet(p, s, ss, base, f, r, gated) {
     const el = ss[f + F_EL];
     if (ss[f + F_PH] === A_LIVE) {
         if (gated === 0) {
-            const g = arenaGate(p, s, ss, arenaItems(p, s, 0));
+            const g = arenaGate(p, s, ss, arenaItems(p, s, 0), r);
             if (g === VMS_GROW) {
                 return g;
             }
@@ -374,7 +374,7 @@ export function arrRun(p, pool, b, s, ss, vs, cb, base, f, ext) {
     }
     // a live element: room in the group arena for its record and a child the
     // window holds (a suspension point), then its query from the live blocks
-    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - q));
+    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - q), imin(end, b.length) + base);
     if (g === VMS_GROW) {
         return g;
     }
@@ -658,7 +658,7 @@ export function mapEnd(p, pool, b, s, ss, vs, cb, ka, base, f, ext) {
     // point), the deferred duplicate check (D277), then map-close; a T block's
     // records keep their keys in the key arena (the session's kept DC forms,
     // D283) or, without the valid machinery, nothing to sort.
-    const g = arenaGate(p, s, ss, 2 * ss[f + F_EL]);
+    const g = arenaGate(p, s, ss, 2 * ss[f + F_EL], ss[f + F_Q] + 1);
     if (g === VMS_GROW) {
         return g;
     }
@@ -716,7 +716,7 @@ export function mapRet(p, s, ss, base, f, r, gated) {
     // caller already made room (gated 1), the group arena is made room in first.
     if (ss[f + F_PH] === M_LVAL) {
         if (gated === 0) {
-            const g = arenaGate(p, s, ss, arenaItems(p, s, 0));
+            const g = arenaGate(p, s, ss, arenaItems(p, s, 0), r);
             if (g === VMS_GROW) {
                 return g;
             }
@@ -779,7 +779,7 @@ export function mapPair(p, pool, b, s, ss, ka, vs, cb, base, f, inka, ext) {
     let kks = start;
     let kend = end;
     let delta = 0;
-    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - start));
+    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - start), imin(end, b.length) + base);
     if (g === VMS_GROW) {
         return g;
     }
@@ -1010,7 +1010,7 @@ export function vkeyPair(p, pool, b, kb, s, ss, ka, vs, cb, base, f, ks, kend, k
         vgrow(ss, 0, 0, 0, (2 * ka.length) + (KH + klen));
         return VMS_GROW;
     }
-    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - start));
+    const g = arenaGate(p, s, ss, arenaItems(p, s, imin(end, b.length) - start), imin(end, b.length) + base);
     if (g === VMS_GROW) {
         s[VM_VTAB] = 0;
         return g;

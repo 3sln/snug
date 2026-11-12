@@ -70,6 +70,11 @@ pub fn arena_set_up(s: &mut [i32], mark: i32) {
     let a: i32 = s[(VM_ARENA) as usize];
     s[(a + AR_UP) as usize] = mark;
 }
+pub fn arena_in_use(s: &[i32]) -> i32 {
+    // Words in use: the upward stack and the chunks carved.
+    let a: i32 = s[(VM_ARENA) as usize];
+    return s[(a + AR_UP) as usize] + (CHUNK * s[(a + AR_CTOP) as usize]);
+}
 pub fn arena_free_words(s: &[i32]) -> i32 {
     // Words between the upward top and the chunk heap.
     let a: i32 = s[(VM_ARENA) as usize];
@@ -164,6 +169,23 @@ pub fn arena_want(s: &[i32]) -> i32 {
     // After R_AGROW: the S length the grown arena needs.
     let a: i32 = s[(VM_ARENA) as usize];
     return (a + AR_HDR) + s[(a + AR_WANT) as usize];
+}
+pub fn arena_want_cut(s: &mut [i32], most: i32, least: i32) {
+    // After R_AGROW: ask for at most `most` body words (doubling past what can
+    // ever be needed is waste), never fewer than `least` (what the work needs).
+    let a: i32 = s[(VM_ARENA) as usize];
+    let was: i32 = s[(a + AR_WANT) as usize];
+    let mut w: i32 = was;
+    if w > most {
+        w = most;
+    }
+    if (w < least) && (least <= was) {
+        w = least;
+    }
+    if least > was {
+        w = was;
+    }
+    s[(a + AR_WANT) as usize] = w;
 }
 pub fn arena_adopt(s: &mut [i32], newend: i32) {
     // S was grown (contents kept, same offsets): the body becomes newend words

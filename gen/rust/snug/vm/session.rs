@@ -189,11 +189,6 @@ pub(crate) fn doc_start(p: &[i32], b: &[u8], s: &mut [i32], ss: &mut [i32], out:
     // query; then the root item.
     let n: i32 = ss[(SS_TOTAL) as usize];
     let at: i32 = 0 - base;
-    // a recursive Program's group arena, grown once for the message (arena-doc)
-    let ga: i32 = arena_doc(p, s, ss, n);
-    if ga == VMS_GROW {
-        return ga;
-    }
     if n > s[(O_MAX_BYTES) as usize] {
         fail(s, at, CODE_TOO_LARGE);
         return fin(s, ss, out, base, CODE_TOO_LARGE, 0, at);
@@ -667,7 +662,7 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
     // P8.5: an item taken whole may push on the group arena up to its bytes'
     // bound: room first (a suspension point, nothing charged yet)
     if direct == 1 {
-        let g7: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, wend) - pos));
+        let g7: i32 = arena_gate(p, s, ss, arena_items(p, s, imin(end, wend) - pos), imin(end, wend) + base);
         if g7 == VMS_GROW {
             return g7;
         }

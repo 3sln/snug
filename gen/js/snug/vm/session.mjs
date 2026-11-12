@@ -13,7 +13,7 @@ import { csetRec, csetWidth, newEpoch, qAdd, qStamp, tsTest, witEmpty, witSet } 
 import { deadItem } from './dead.mjs';
 import { evalItem } from './eval.mjs';
 import { FL_EMBED, FL_EXT, HEADER_WORDS, H_FLAGS, H_LIM_INPUT, H_POOL_BYTES, H_S_LEAVES, H_S_RULES, K_EXT, R_AGROW, R_BUDGET, R_GROUP_LIMIT, R_INCONSISTENT, R_TYPE, VM_BUDGET, VM_BUDGET_START, VM_FRAMES, VM_PBASE, VM_POS, VM_RULE } from './layout.mjs';
-import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_EL, F_END, F_IND, F_KE, F_KIND, F_N, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_HELD, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_GA, SS_GB, SS_GS, SS_GW, SS_HDR, SS_KEEP, SS_MAXF, SS_MLEN, SS_NEED_LEN, SS_NEED_OFF, SS_NPEND, SS_PCAP, SS_PEND, SS_PH, SS_POS, SS_PROF, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SEQ, SS_SP, SS_STEPS, SS_TOTAL, SS_UNK, SS_VNEED, SS_VOK, SS_WB0, SS_WORK, VMS_GROW, VMS_HELD, VMS_RESUME, arenaDoc, arenaGate, arenaItems, bigReq, bstrReads, crossKnown, cutYield, ensure, fbase, fitsKnown, fpop, ftop, imin, keysSave, litsNeed, need, nframes, notePut, noteReq, pendDrop, pendRaw, prescan, prescanRun, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
+import { FK_ARR, FK_BSTR, FK_DARR, FK_DMAP, FK_DSEQ, FK_DTEXT, FK_MAP, FK_TAG, FK_TEXT, FW, F_EL, F_END, F_IND, F_KE, F_KIND, F_N, F_PH, F_PIN, GO, IT_CK, IT_CTX, IT_D, IT_END, IT_FB, IT_MODE, IT_NOTE, IT_NQ, IT_PAIR, IT_POS, MODE_DSEQ, MODE_FRAME, MODE_ITEM, MODE_VSEQ, PH_DONE, PH_FRAME, PH_HELD, PH_ITEM, PH_RET, PH_START, SS_ABYTES, SS_ATOP, SS_CHAIN, SS_CHN, SS_CODE, SS_CUT, SS_FRAMES, SS_GA, SS_GB, SS_GS, SS_GW, SS_HDR, SS_KEEP, SS_MAXF, SS_MLEN, SS_NEED_LEN, SS_NEED_OFF, SS_NPEND, SS_PCAP, SS_PEND, SS_PH, SS_POS, SS_PROF, SS_PROG, SS_PSTK, SS_QUANTUM, SS_RET, SS_RNQ, SS_RTS, SS_SEQ, SS_SP, SS_STEPS, SS_TOTAL, SS_UNK, SS_VNEED, SS_VOK, SS_WB0, SS_WORK, VMS_GROW, VMS_HELD, VMS_RESUME, arenaGate, arenaItems, bigReq, bstrReads, crossKnown, cutYield, ensure, fbase, fitsKnown, fpop, ftop, imin, keysSave, litsNeed, need, nframes, notePut, noteReq, pendDrop, pendRaw, prescan, prescanRun, progress, rebase, ret, strStop, suspended, vmsArenaBytes, vmsSessionWords, yld } from './sbase.mjs';
 import { M_KEY, arrRet, arrRun, arrStart, darrRet, darrRun, mapKey, mapNext, mapRet, openArr, openDarr, openDmap, openDseq, openMap, openTag, tagRet, tagRun } from './scont.mjs';
 import { S_EMBRUN, bstrRun, embedRet, openBstr, openText, textRun } from './sstr.mjs';
 import { VI_GROW, VI_NEED, vitem, vsess } from './svalid.mjs';
@@ -207,11 +207,6 @@ export function docStart(p, b, s, ss, out, base, wend) {
     // query; then the root item.
     const n = ss[SS_TOTAL];
     const at = 0 - base;
-    // a recursive Program's group arena, grown once for the message (arena-doc)
-    const ga = arenaDoc(p, s, ss, n);
-    if (ga === VMS_GROW) {
-        return ga;
-    }
     if (n > s[O_MAX_BYTES]) {
         fail(s, at, CODE_TOO_LARGE);
         return fin(s, ss, out, base, CODE_TOO_LARGE, 0, at);
@@ -693,7 +688,7 @@ export function itemBegin(p, pool, b, s, ss, ka, vs, cb, base, wend, ext) {
     // P8.5: an item taken whole may push on the group arena up to its bytes'
     // bound: room first (a suspension point, nothing charged yet)
     if (direct === 1) {
-        const g7 = arenaGate(p, s, ss, arenaItems(p, s, imin(end, wend) - pos));
+        const g7 = arenaGate(p, s, ss, arenaItems(p, s, imin(end, wend) - pos), imin(end, wend) + base);
         if (g7 === VMS_GROW) {
             return g7;
         }

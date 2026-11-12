@@ -6,7 +6,7 @@ import { be16, be32, enterContainer, fail, headSize, smallArg } from '../cbor/he
 import { anyTags, ruleTag, stdAllowed } from '../cbor/stdtags.mjs';
 import { exponentOk, mantissaOk, typedSize } from '../cbor/tags.mjs';
 import { lim } from './api.mjs';
-import { arenaRoom, arenaWant } from './arena.mjs';
+import { arenaInUse, arenaRoom, arenaWant, arenaWantCut } from './arena.mjs';
 import { forced } from './array.mjs';
 import { c64min, charge } from './base.mjs';
 import { FL_ARENA, FL_EMBED, H_ACT_SUM, H_FLAGS, H_LIM_DEPTH, H_LIM_INPUT, H_RECLEAF_MAX, H_R_ITEM_MAX, H_S_ARRAY_INDEX, H_S_LEAVES, H_S_LITREFS, H_S_MAP_INDEX, INF, K_BYTES, K_EMBED, K_LIT, K_LITSET, R_BUDGET, VM_BIGNUM_MAX, VM_BUDGET, VM_BUDGET_START, VM_POS, VM_W_OFFSET } from './layout.mjs';
@@ -573,8 +573,7 @@ export function arenaItems(p, s, len) {
     // suspension point (program-2 §9.4's bound, applied to the work at hand): a
     // record for the item at hand and for each item of a child of up to len
     // bytes, and one end-run's permutation and trail per child entry.
-    // Recursive programs' frames are covered once, at the document's start
-    // (arena-doc).
+    // Recursive programs' frames are covered by arena-prefix.
     let l = len;
     if (l < 0) {
         l = 0;
@@ -582,42 +581,59 @@ export function arenaItems(p, s, len) {
     return satAdd(satMul(satAdd(l, 1), rItem(p, s)), satMul(2, l));
 }
 
-export function arenaGate(p, s, ss, words) {
+export function arenaPrefix(p, s, upto) {
+    // P9.4: a recursive Program's chunk heap can grow by more than any one
+    // step's records foresee (an activation chain rebuilt in one machine run),
+    // so its arena must hold program-2 §9.4's bound for the message's first
+    // `upto` bytes (items <= bytes): what any work reading no further can have
+    // pushed in all. 0 for a Program without recursive groups. It used to be
+    // the bound for the whole message, reserved at its start (D314).
+    const act = p[H_ACT_SUM];
+    const rl = p[H_RECLEAF_MAX];
+    let n = upto;
+    if ((act <= 0) && (rl <= 0)) {
+        return 0;
+    }
+    if (n < 0) {
+        n = 0;
+    }
+    const dd = p[H_LIM_DEPTH];
+    const per = satAdd(rItem(p, s), act);
+    const fixed = satMul(dd + 1, satAdd(act, satMul(64, rl)));
+    return satAdd(satAdd(satMul(n, per), fixed), satMul(2, n));
+}
+
+export function arenaGate(p, s, ss, words, upto) {
     // A session's suspension point before work that may push `words` on the
-    // group arena: GO when they fit (or the arena is at its cap, where a miss is
-    // the work's own group_limit); else VMS_GROW, the host growing S to
-    // vms-grow-scratch words (the arena takes them at the next step, arena-adopt).
-    // Nothing is charged before it, so the step that re-runs the phase is the
-    // same.
+    // group arena and reads the message no further than offset `upto`: GO when
+    // they fit and the arena holds arena-prefix(upto) (or it is at its cap, where
+    // a miss is the work's own group_limit); else VMS_GROW, the host growing S
+    // to vms-grow-scratch words (the arena takes them at the next step,
+    // arena-adopt). Nothing is charged before it, so the step that re-runs the
+    // phase is the same.
     if (!arenaUsed(p, s)) {
         return GO;
     }
-    const r = arenaRoom(s, words);
+    let w = words;
+    const used = arenaInUse(s);
+    const short = arenaPrefix(p, s, upto) - used;
+    if (short > w) {
+        w = short;
+    }
+    const r = arenaRoom(s, w);
     if (r === 0) {
         return GO;
+    }
+    // a recursive Program never asks for more than the whole message's bound
+    // (what D314 reserved at the start), so growing by doubling ends no larger
+    if (arenaPrefix(p, s, 0) > 0) {
+        arenaWantCut(s, arenaPrefix(p, s, ss[SS_TOTAL]), satAdd(used, w));
     }
     const want = arenaWant(s);
     if (want > ss[SS_GS]) {
         ss[SS_GS] = want;
     }
     return VMS_GROW;
-}
-
-export function arenaDoc(p, s, ss, total) {
-    // At a session's start: a recursive Program's chunk heap can grow by more
-    // than any one step's records foresee (an activation chain rebuilt in one
-    // machine run), so its arena is grown once to program-2 §9.4's bound for the
-    // whole message (items <= bytes), at most to the cap. GO or VMS_GROW.
-    const act = p[H_ACT_SUM];
-    const rl = p[H_RECLEAF_MAX];
-    if ((act <= 0) && (rl <= 0)) {
-        return GO;
-    }
-    const dd = p[H_LIM_DEPTH];
-    const per = satAdd(rItem(p, s), act);
-    const fixed = satMul(dd + 1, satAdd(act, satMul(64, rl)));
-    const need = satAdd(satAdd(satMul(total, per), fixed), satMul(2, total));
-    return arenaGate(p, s, ss, need);
 }
 
 export function imin(a, b) {
