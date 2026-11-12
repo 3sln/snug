@@ -146,7 +146,7 @@ impl Default for ValidationOptions {
     }
 }
 impl ValidationOptions {
-    fn host(&self) -> schema::Options {
+    pub(crate) fn host(&self) -> schema::Options {
         let opt = |n: Option<u32>| if n.is_some() { Some(limit(n)) } else { None };
         schema::Options {
             top_map: self.top == Top::Map,
@@ -223,7 +223,7 @@ impl Schema {
     pub fn program(&self) -> &Program {
         &self.program
     }
-    fn rule(&self, rule: &str) -> Result<i32, Failure> {
+    pub(crate) fn rule(&self, rule: &str) -> Result<i32, Failure> {
         self.program
             .rules()
             .iter()

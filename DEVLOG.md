@@ -5563,6 +5563,44 @@ no CPU cap, and it kills only its child).
   `scan-test 300 1` tripping its cap. (The P9.7 pooling entry, approved
   earlier as "D326", is renumbered D327 because this entry landed first.)
 
+### D331 — The Rust async source drivers: dependency-free, runtime-agnostic, ports of the sync loops (P9.6, D027)
+**Decision** (P9.6 engineer, provisional): the Rust host gets async forms of its
+three source drivers over the same `schema::Session` / `Sequence`, in a new
+module `async_source`: `Schema::validate_blob_async` (an `AsyncBlob`: `size()`
+and `read(offset, len) -> impl Future`), `Schema::validate_reader_async` (an
+`AsyncSource`, unknown length, drain mode / fail-fast, D085, D144–D147) and
+`read_sequence_async` / `Schema::read_sequence_async` (an
+`AsyncSequenceReader` with `next().await` and `poll_next`), plus the low-level
+`async_source::validate_blob` / `validate_reader` beside `schema::`'s. No
+dependency and no cargo feature: `AsyncSource::poll_read` has
+`futures_io::AsyncRead::poll_read`'s signature, so a futures-io or tokio
+adapter is a user newtype (docs/rust.md shows both); THIRD_PARTY_NOTICES is
+unchanged. A positive quantum yields to the executor by waking itself and
+answering `Pending` once (JS's `nextTurn`). Each async driver is the sync
+loop with the read awaited: the same window policy, keep/drop bookkeeping,
+argument checks, error mapping and result types. The sync drivers are not
+refactored (P9.7 is changing Session/Sequence), so they stay an independent
+reference for the differential. `AsyncSequenceReader::next` is cancel-safe;
+dropping a validation future drops its session and nothing else.
+The differential found one bug in the SYNC unknown-length driver, fixed here
+in both: after `Session::end` resumed the walk (`VMS_RESUME`), a positive
+quantum could yield at the end, and the driver called `vms-eof` again, which
+answers -1 (the session already had its end): `schema::validate_reader`
+panicked ("vms-eof answered -1"). The public `Schema::validate_reader` passes
+quantum 0 and never reached it. After the end, the drivers now step again over
+what they hold (a yield at the end needs no byte), as JS's `settleEnd` does.
+**Why**: the owner's direction (D027) is one resumable VM for every source with
+the host doing the I/O; ports of the sync loops make "identical to the sync
+driver" a property one differential can hold. Dependency-free keeps the crate's
+stated contract and its offline gates; one trait shape serves every runtime.
+**Alternatives**: a `futures-io` feature (a blanket impl collides with the std
+impls, so it still needs a wrapper type, plus a vendored dependency, a licence
+notice and a second build in every gate); tokio (pins the runtime); one sans-IO
+core shared by the sync and async drivers (less code, but rewrites the sync
+drivers while P9.7 changes them, and loses the independent reference); a
+`Stream` impl for sequences (needs futures-core; `poll_next` is the hook).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -7694,6 +7732,62 @@ review.
 - [ ] **P9.6 — Rust async source driver.** The async counterpart to the JS
   stream sources (D027), over the existing session, with the same gates as
   the sync Rust driver.
+  *Built (2026-11-11, branch `p96-async`; D331):* `host/rust/src/async_source.rs`
+  -- `AsyncSource` (futures-io's `poll_read` shape), `AsyncBlob` (`read ->
+  impl Future`), `Schema::validate_blob_async`, `validate_reader_async`
+  (drain / fail-fast), `read_sequence_async` + `AsyncSequenceReader`
+  (`next().await`, `poll_next`, cancel-safe), low-level
+  `async_source::validate_blob` / `validate_reader`. No dependency, no
+  feature, THIRD_PARTY_NOTICES unchanged, no kin/gen/JS change (bundles
+  unchanged). Docs: docs/rust.md "Async sources" (doctested, with futures-io
+  and tokio adapter sketches), docs/api.md Sources (Rust counterparts),
+  host/rust/README.md. The differential found a SYNC driver bug, fixed in both
+  (D331): `schema::validate_reader` with a positive quantum called `vms-eof`
+  twice after the end resumed the walk and panicked.
+  **Gate** (in `bb rust-api-test`): `tests/async_sources.rs` with
+  `tests/async-cases.mjs`, which exports a seeded slice of vmsession-test's
+  case set (vm-test's cases, the session stress set, extension controls;
+  defaults 1500 / 1 / 40 / 30, `SNUG_ASYNC_CASES` to change). Every verdict
+  (code, reason, subcode, offset, path, budget) compared whole, with reads
+  that answer `Pending` at random, `Interrupted` retried, and quanta that
+  yield. Run on this tree (actual, 2026-11-11, Node v24.6.0, rustc 1.92, debug):
+  **20,492 cases on 1,016 Programs**; blob **188,412 runs async == sync ==
+  buffer** (chunks 1/2/7/random/whole by size × quantum 0 and 1–3 / 1–64 /
+  1024–5119), 65,744 that yielded; reader **61,424 drain runs async == sync ==
+  buffer + 61,424 fail-fast runs async == sync** (accept iff the buffer,
+  equal out when it accepts) under 1-byte, random 1..7 / 1..300 / 1..4096 and
+  whole reads, 53,920 that yielded; sequences **10,164 bodies, 60,984 runs,
+  35,329,590 items async == sync** (schema and profile-only, the three
+  presets, Stop/Skip, fail-fast, read chunks 1/5/64/65536); ~19.6 M `Pending`
+  polls in all. Plus: argument and source errors identical to the sync forms
+  (`options`, `unknown_rule`, `short_read`, `too_large`, `read`); a 200 KB
+  byte string streamed; fail-fast stops reading early; a sequence holds one
+  message; validation futures dropped at every await point; `next()`
+  dropped while Pending loses no message; the futures are `Send`. A mutant
+  (one byte misplaced in the async reader's buffer) turns it red in 6 s.
+  **All gates on this tree** (the branch at `6f791f6`, on main `5a1bb84`;
+  rebasing onto `0b302fc` changed only DEVLOG; watchdog on): check, drift,
+  scan-test, rscan-test, vm-test, vmsession-test (session == buffer
+  1,059,298; drain 523,615; JS == Rust unknown length 109,950; hosts
+  10,140), sequence-test, valid-test (cbor2 differential SKIP: not
+  installed), compile-test, nav-test, write-test, unicode-test,
+  rust-api-test (all Cargo tests, doctests incl. the new ones, Clippy clean
+  with the generated-code allowance; no diagnostics in the new files),
+  wasm-sdk-test 15/15, size (budgets passed; esbuild through a temporary
+  symlink to the main checkout's bench/compare/node_modules), npm test
+  1,450/1,450.
+  **Learnt:** (1) a differential against the sync driver needs the sync
+  driver's own corners exercised -- a positive quantum on the unknown-length
+  path had never run in Rust (the public form passes 0), and it panicked; (2)
+  a `Pending` that consumed nothing keeps the read sizes identical, so one
+  split sequence drives both sides; (3) RPITIT (`read -> impl Future`) lets
+  implementors write `async fn` and keeps `Send` inferred for concrete types.
+  **Open:** the async test costs ~11–19 min of rust-api-test wall time
+  (three parallel tests; 19 min on a loaded machine, within the
+  watchdog's 2,400 s) -- the sequence half dominates (the sync reader's
+  per-message cost in debug); no `Stream` / futures-io impls (newtype
+  adapters documented); a dropped validation future leaves its source at an
+  unspecified position.
 - [ ] **P9.7 — Arena pooling and a live-session bound.** Hosts pool session
   arenas and enforce a documented, configurable bound on live sessions.
   This item was left open in P6.

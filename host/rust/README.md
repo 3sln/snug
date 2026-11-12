@@ -68,6 +68,7 @@ The crate root exports:
 | `Program` | Immutable shared ownership, source key, rule names, raw read-only words/pool and D084 serialization/deserialization |
 | `View`, `Cursor`, `TypedView`, `TypedElement` | Fully checked shared borrows; zero-copy byte/text access and portable unaligned typed reads |
 | `Blob`, `BytesBlob`, `validate_blob` | Known-length immutable sources through the existing session driver |
+| `AsyncBlob`, `AsyncSource`, `read_sequence_async`, `AsyncSequenceReader` | Async blob, unknown-length stream and sequence drivers over the same session (`Schema::validate_blob_async`, `validate_reader_async`, `read_sequence_async`); runtime-agnostic, no dependency |
 | `Error` | CBOR, schema-decode, compile, Program, source, misuse and internal families; fixed codes and safe Display |
 
 The older `compile`, `schema`, `sha256`, `unicode_tables` and generated `snug`
@@ -75,9 +76,9 @@ modules remain available for the existing test hosts. New consumers should use
 the crate-root facade. See [the guide](../../docs/rust.md) and the rustdoc
 examples for ownership, error handling and exact numeric conventions.
 
-Current limits: no async source adapters, unknown-length
-sources, unchecked view opener, view directories or `keys_sorted` Writer mode.
-The public source driver is synchronous; yields resume immediately. Rust
+Current limits: no unchecked view opener, view directories or `keys_sorted`
+Writer mode. The sync source drivers resume yields immediately; the async ones
+(P9.6) yield to the executor. Rust
 profile refusals for text/tag/decimal/typed content can surface at Writer
 finish, after earlier builder calls succeed. Allocation failure follows the
 standard library allocator contract; no application memory quota or recovery

@@ -424,6 +424,22 @@ with top defaulting to any and limits only lowering the compiled values.
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
 
+The Rust host has the same drivers, sync and async (P9.6), over the same
+session, with the same verdicts for every chunking: `validateHandle` is
+`Schema::validate_blob_async` (an `AsyncBlob`: `size()` and an async
+`read(offset, len)`), `validateStream` is `Schema::validate_reader_async` (an
+`AsyncSource`, a `poll_read` byte stream; drain mode and fail-fast as here) and
+`readSequence` is `Schema::read_sequence_async` / `read_sequence_async`. A
+positive quantum yields to the executor as `nextTurn` does here. See
+[Rust: async sources](rust.md#async-sources):
+
+```rust
+let verdict = schema.validate_reader_async(&mut body, "event", &ValidationOptions::default(),
+                                           65536, 0, false).await?;      // validateStream
+let mut messages = schema.read_sequence_async(body, "event", &SequenceOptions::default())?;
+while let Some(m) = messages.next().await { /* m?.view() */ }           // readSequence
+```
+
 `VmSession` is a public interface obtained through `openSession` from
 `snug/sources`, with no public constructor. It exposes readonly `length`
 (undefined for unknown length), `limit` (the unknown-length input limit),
