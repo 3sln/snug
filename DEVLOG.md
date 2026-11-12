@@ -6102,7 +6102,12 @@ reopen this.
 - mark nothing until 1.0 (every addition is breaking, so it would ship in
   a `0.y` bump).
 **Gate:** `bb rust-api-test` (default mode), with Clippy, ok.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-12). Verified on main at `8fdd2a2`:
+  drift ok, and `bb gates --check` ok. The marked and kept-exhaustive split
+  is accepted. `Value` stays exhaustive because the CBOR data model is
+  closed. `Step` stays exhaustive because a new step must break the
+  drivers. The gate map and `bb gates` / `bb identity` are accepted as
+  manager decisions too.
 
 ## Findings
 
