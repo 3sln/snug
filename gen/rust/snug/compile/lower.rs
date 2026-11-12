@@ -936,7 +936,7 @@ pub(crate) fn lower_major(h: &mut [i32], node: i32, env: i32) -> i32 {
         return ts_of1(h, lm);
     }
     if mode == 1 {
-        let nts:  = lower_type(h, ne(h, node), env);
+        let nts: i32 = lower_type(h, ne(h, node), env);
         if nts < 0 {
             return -1;
         }

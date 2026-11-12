@@ -660,7 +660,7 @@
           (if (== m 3) (do (let [l3 (mk-text h 0 INF (neg 1))] (return (ts-of1 h l3)))))
           (let [lm (mk-major h m)] (return (ts-of1 h lm)))))
     (if (== mode 1)
-      (do (let [nts (lower-type h (ne h node) env)]
+      (do (let [^I32 nts (lower-type h (ne h node) env)]
             (if (< nts 0) (return (neg 1)))
             (return (lower-head7 h nts pos)))))
     (if (or (or (!= m 7) (!= hi 0)) (or (< lo 0) (> lo 255))) (return (fail h ERR_MAJOR pos)))
