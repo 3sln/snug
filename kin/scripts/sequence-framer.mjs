@@ -41,6 +41,10 @@
 //                 messages: F is well-formed within w. `indefinite` is at a
 //                 head whose additional information is 31; `not_map` at o;
 //                 `trailing` (a root's end is a boundary) only in a byte string.
+// One overlap is by construction: for an indefinite-length root the D211 oracle
+// takes the root end from this framer (sequence-run.mjs rootEnd: snug.nav.walk
+// walks definite items only), so there the session, the Rust build and the hosts
+// -- held equal to the oracle -- are what check the boundary independently.
 // After a stop, the framer may read further items of S: snug ends the
 // sequence at its first refusal (D214), so they have nothing to compare with;
 // they are counted, not checked.

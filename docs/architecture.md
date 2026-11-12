@@ -801,7 +801,12 @@ constraints) are not visible from the child. **Withdrawn.** Instead:
 **First slice.** kin primitives over checked bytes: read a head, the span of
 an item (structural skip with progress and bounds checks, charged), the n-th
 child by sequential skip, key search in a map by linear scan with early exit
-on sort order. The host exposes a `View` (offset + owner) and a mutable
+on sort order. These primitives walk **definite-length (deterministic-form)
+bytes only**: a head with additional information 28–31 answers `NAV_BAD`, so
+an indefinite-length item is never walked or skipped. Input that is not its
+own deterministic form (`wire: 'valid'`) is navigated through its canonical
+copy (§19.3); code that must find the end of arbitrary valid CBOR cannot use
+`nav-skip` for it. The host exposes a `View` (offset + owner) and a mutable
 `Cursor` (`enter`, `next`, `up`, `key`) for allocation-free loops, exact scalar
 accessors, raw spans and `value()` (materialise a subtree via the builder).
 

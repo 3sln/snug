@@ -22,6 +22,7 @@ import { vmsWords, vmsArena, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
 import { extFor } from './ext-cases.mjs';
 import { navInit, navSkip, NAV_WORDS } from '../../gen/js/snug/nav/walk.mjs';
 import { xorshift, stepV } from './vmsession-run.mjs';
+import { frameItem } from '../../corpus/tools/rfc8742-framer.mjs';
 
 export const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68;
 const CODE_TRUNCATED = 1, CODE_TOO_LARGE = 20;
@@ -193,8 +194,17 @@ function buffer(P, B, rule, lim, bytes) {
 }
 
 const navo = new Int32Array(NAV_WORDS);
-/** The end of the item at 0 by heads and lengths alone (snug.nav.walk, total on any bytes), or -1. */
-function rootEnd(b) { navInit(navo, 0x7fffffff); const e = navSkip(b, navo, 0, b.length); return e < 0 ? -1 : e; }
+/** The end of the item at 0 by heads and lengths alone, or -1: snug.nav.walk (total on any bytes),
+ *  which walks definite-length items only (architecture §16.4); for an indefinite-length item
+ *  (wire 'valid'), the independent RFC 8742 framer (P9.5: navSkip answered -1 there, so a valid
+ *  indefinite root followed by another message read as `trailing`, not as a boundary). */
+function rootEnd(b) {
+  navInit(navo, 0x7fffffff);
+  const e = navSkip(b, navo, 0, b.length);
+  if (e >= 0) return e;
+  const f = frameItem(b, 0);
+  return f.kind === 'ok' ? f.end : -1;
+}
 
 /** The lines D211 defines: per message, the buffer driver over its window
  *  W = S[o, o + min(R, P)) with trailing as the boundary. */

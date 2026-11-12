@@ -50,6 +50,12 @@ const rnd = xorshift((SEED * 2654435761) >>> 0 || 1);
 const pick = a => a[rnd() % a.length];
 // small valid items any Program may meet (profile-valid under every flag set; a map root for top = map)
 const FILLERS = [[0xa0], [0xa1, 0x61, 0x61, 0x01], [0x00], [0x80], [0x60], [0x18, 0x64]].map(a => Uint8Array.from(a));
+// P9.5: under a valid-CBOR wire, also indefinite-length roots (maps among them for top = map) and
+// non-preferred heads -- a boundary right after a break, which the gate never met before
+const PF_VALID = 256;
+const INDEFINITE_FILLERS = [[0xbf, 0xff], [0xbf, 0x61, 0x61, 0x01, 0xff], [0xbf, 0x61, 0x61, 0x9f, 0xff, 0xff], [0x9f, 0xff],
+  [0x9f, 0x01, 0x9f, 0x02, 0xff, 0xff], [0x5f, 0x41, 0x00, 0x42, 0x01, 0x02, 0xff], [0x7f, 0x61, 0x61, 0xff], [0x18, 0x17]].map(a => Uint8Array.from(a));
+const VALID_FILLERS = [...FILLERS, ...INDEFINITE_FILLERS];
 const cat = parts => { const t = new Uint8Array(parts.reduce((s, x) => s + x.length, 0)); let o = 0; for (const x of parts) { t.set(x, o); o += x.length; } return t; };
 const limOf = c => Int32Array.from([...c.lim.slice(0, 8), c.lim[8] ?? 0, c.lim[9] ?? 0]);
 
@@ -57,7 +63,8 @@ const seqs = [];   // {prog, rule, lim, S, label, c}
 const seenEmpty = new Set();
 cases.forEach((c, ci) => {
   const g = groups.get(limKey(c)), lim = limOf(c);
-  const member = () => (rnd() % 4 === 0 || g.length === 0 ? pick(FILLERS) : pick(g).bytes);
+  const fillers = lim[9] & PF_VALID ? VALID_FILLERS : FILLERS;
+  const member = () => (rnd() % 4 === 0 || g.length === 0 ? pick(fillers) : pick(g).bytes);
   seqs.push({ prog: c.prog, rule: c.rule, lim, S: c.bytes, label: `${c.label} alone`, c, single: true });
   const before = rnd() % 4, after = rnd() % 4, parts = [];
   for (let i = 0; i < before; i++) parts.push(member());
@@ -87,23 +94,44 @@ cases.forEach((c, ci) => {
   }
 }
 
-// P9.5: every not-well-formed example of RFC 8949 Appendix F.1, each after a well-formed message and
-// before another, under the deterministic, valid and valid + bindle-flag wires: the vm-test cases
-// rarely reach the framer's syntax-error classes (a break out of place, a bad chunk, ai 31 on major
-// type 0/1/6) under the valid wire, where snug calls them malformed. The RFC 8742 vectors run under
-// the deterministic wire only: under the valid wire `01 9fff 1817` found that this gate's own D211
-// oracle (oracleSequence's root end comes from snug.nav.walk, which walks no indefinite item) answers
-// `trailing` after an indefinite root where the session, both hosts and the framer find a boundary
-// (DEVLOG P9.5; held back until the oracle is fixed, not skipped silently).
+// P9.5: the RFC vectors as sequences under the three presets (profile flags: bindle 0,
+// deterministic 122, valid 378; root any, as corpus/conformance/rfc records them), each with its
+// expected outcome (q.expect, checked below against the oracle, which the runs must equal):
+//  * RFC 8742's sequences after a well-formed message (and before another when they end at a
+//    boundary): every item accepted where the vector's `expect` says so for that preset, else the
+//    sequence stops inside them;
+//  * every not-well-formed example of RFC 8949 Appendix F.1 after a well-formed message (and before
+//    another unless it is a "too little data" example, which must stay at the end): message 1 is
+//    refused; under `valid` with exactly `truncated` or `malformed` as Appendix F classes it (or
+//    `duplicate_key` for the two examples whose repeated key precedes the error). The
+//    vm-test cases rarely reach the framer's syntax-error classes (a break out of place, a bad chunk,
+//    ai 31 on major type 0/1/6) under the valid wire;
+//  * indefinite-length roots followed by more messages under `valid` (a boundary right after a
+//    break): `01 9fff 1817` found the gate's own oracle reading `trailing` there (DEVLOG P9.5).
+const PRESETS = [['bindle', 0], ['deterministic', 122], ['valid', 378]];
 {
   const anyIndex = programs.findIndex(p => p.label === 'any');
   const rfc = name => JSON.parse(readFileSync(new URL(`../../corpus/conformance/rfc/${name}.json`, import.meta.url))).vectors;
-  const vectors = flags => [...rfc('rfc8949-well-formedness'), ...(flags === 0 ? rfc('rfc8742') : [])].map(v => Uint8Array.from(Buffer.from(v.hex, 'hex')));
-  for (const flags of [0, 256, 378])
-    for (const v of vectors(flags)) {
-      const S = cat([FILLERS[1], v, FILLERS[2]]);
-      seqs.push({ prog: anyIndex, rule: 0, lim: Int32Array.of(1, 0, 1500000, 32, 65536, 131072, -1, -1, 0, flags), S, label: `RFC vector ${hex(v)} in 3 (flags ${flags})`, c: { label: 'rfc' } });
+  const bytes = h => Uint8Array.from(Buffer.from(h.replace(/ /g, ''), 'hex'));
+  const DUPLICATE_FIRST = new Set(['bf01020102', 'bf000000ff']);
+  const TOO_LITTLE = /^(End of input in a head|Definite-length strings with short data|Definite-length maps and arrays not closed|Tag number not followed|Indefinite-length (strings|maps and arrays) not closed)/;
+  const push = (S, flags, label, expect) => seqs.push({ prog: anyIndex, rule: 0, lim: Int32Array.of(1, 0, 1500000, 32, 65536, 131072, -1, -1, 0, flags), S, label, c: { label }, expect });
+  for (const [preset, flags] of PRESETS) {
+    for (const v of rfc('rfc8742')) {
+      const ok = v.expect[preset], whole = v.hex !== '010218';   // RFC 8742 §2's truncated example
+      push(cat([FILLERS[1], bytes(v.hex), ...(whole ? [FILLERS[2]] : [])]), flags, `RFC 8742 ${v.hex || '(empty)'} in a sequence (${preset})`,
+        ok ? { accept: v.itemCount + 1 + (whole ? 1 : 0) } : { stopAfter: 1 });
     }
+    for (const v of rfc('rfc8949-well-formedness')) {
+      const little = TOO_LITTLE.test(v.note);
+      // two examples repeat a key before their well-formedness error: duplicate_key comes first
+      const code = preset !== 'valid' ? null : DUPLICATE_FIRST.has(v.hex) ? 7 : little ? 1 : 4;
+      push(cat([FILLERS[1], bytes(v.hex), ...(little ? [] : [FILLERS[2]])]), flags, `RFC 8949 F.1 ${v.hex} (${v.note}) in a sequence (${preset})`,
+        { stopAt: 1, code });
+    }
+  }
+  for (const h of ['9fff 00', 'bf ff a0', 'bf6161 01 ff bf ff', '9f 9f ff ff 9f ff', '5f 4100 ff 7f 6161 ff 00', '9f 01 ff 9f', '1817 9f ff 1817'])
+    for (const flags of [256, 378]) push(bytes(h), flags, `indefinite roots ${h} (flags ${flags})`, null);
 }
 
 // A sequence of more than MAX_MESSAGES messages (the 1,500,001 zero bytes vector is 1.5 M
@@ -202,6 +230,20 @@ runs.forEach((r, i) => {
 });
 const outcome = { m: 0, s: 0, x: 0, end: 0 };
 for (const [, v] of oracleCache) for (const l of v.split(' | ')) outcome[l.split(' ')[0]]++;
+
+// P9.5: the RFC vector sequences' expected outcomes per preset (the runs equal the oracle above)
+let expectN = 0, expectBad = 0;
+seqs.forEach((q, si) => {
+  if (!q.expect) return;
+  expectN++;
+  const lines = oracle(si, false).split(' | '), last = lines[lines.length - 1].split(' ');
+  const ms = lines.slice(0, -1).every(l => l.startsWith('m '));
+  const e = q.expect;
+  const ok = e.accept !== undefined ? ms && last[0] === 'end' && lines.length === e.accept + 1
+    : e.stopAfter !== undefined ? ms && last[0] === 'x' && Number(last[1]) >= e.stopAfter
+    : ms && last[0] === 'x' && Number(last[1]) === e.stopAt && (e.code === null || Number(last[3]) === e.code);
+  if (!ok) { expectBad++; fail(`expected outcome ${JSON.stringify(e)}: ${q.label}\n      oracle ${lines.join(' | ')}`); }
+});
 
 // P9.5: every oracle answer the gate holds the runs to, against the independent RFC 8742 framer
 // (corpus/tools/rfc8742-framer.mjs; the mapping is in sequence-framer.mjs)
@@ -434,7 +476,8 @@ line(late === 0, `release latency (D212 liveness): ${late} of ${lateMsgs} accept
 line(hostFails === 0, `JS hosts: readSequence (spanning) and sequenceReader (always) == the oracle on ${hostRuns.length} host runs; ${hostMsgs} messages (${borrowedMsgs} borrowed, ${assembledMsgs} assembled), ${walks} view walks equal to a View on the bytes (${(tHost / 1000).toFixed(1)} s)`);
 console.log(rustLine);
 console.log(rustHostLine);
-line(framerBad === 0, `independent RFC 8742 framer (P9.5): ${framerChecked - framerBad}/${framerChecked} oracle answers agree with it on every boundary, clean end and stop (${(tFramer / 1000).toFixed(1)} s)`);
+line(expectBad === 0, `RFC vectors as sequences (P9.5): ${expectN - expectBad}/${expectN} give their expected outcome under the bindle, deterministic and valid presets (RFC 8742 per its expect; RFC 8949 F.1 refused at message 1, truncated vs malformed exactly under valid)`);
+line(framerBad === 0, `independent RFC 8742 framer (P9.5):${framerChecked - framerBad}/${framerChecked} oracle answers agree with it on every boundary, clean end and stop (${(tFramer / 1000).toFixed(1)} s)`);
 {
   const rows = [...framerTally].filter(([k]) => !k.startsWith('#')).sort((a, b) => b[1] - a[1]);
   console.log(`  info framer classes: ${rows.map(([k, v]) => `${k} ${v}`).join('; ')}; ${framerTally.get(PAST_STOP) ?? 0} items the framer reads past snug's stops (not compared: a sequence ends at its first refusal, D214)`);
