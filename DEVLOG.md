@@ -5599,7 +5599,13 @@ notice and a second build in every gate); tokio (pins the runtime); one sans-IO
 core shared by the sync and async drivers (less code, but rewrites the sync
 drivers while P9.7 changes them, and loses the independent reference); a
 `Stream` impl for sequences (needs futures-core; `poll_next` is the hook).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-11). This is an engineering and API
+  decision, so no owner decision is needed. Verified on main at `aa93229`
+  (drift ok); the engineer ran the full gates and `rust-api-test` on main.
+  Follow-up: the async and sync loops are duplicates. After P9.7 settles the
+  sync drivers, consider one shared sans-IO core, keeping the differential
+  as the reference. This goes to P9.13 review and does not block the
+  release candidate.
 
 ## Findings
 
