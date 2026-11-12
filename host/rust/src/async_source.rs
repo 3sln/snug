@@ -1,9 +1,12 @@
 //! Async sources (P9.6, D027): the async counterparts of [`Schema::validate_blob`],
 //! [`Schema::validate_reader`] and [`read_sequence`](crate::read_sequence), over the
 //! same resumable session (NEED / YIELD, D030) and sequence reader. The VM never does
-//! I/O and never awaits: each driver asks the session what it needs, awaits that read,
-//! and steps again — so verdicts, codes, offsets, paths and budget are the sync
-//! driver's for every chunking (gated by `tests/async_sources.rs`).
+//! I/O and never awaits. Since P9.6b (D335) each driver, sync or async, is a thin I/O
+//! loop over one sans-IO core (`schema::BlobCore`, `schema::StreamCore`,
+//! `sequence::SeqPump`) that decides every window, keep, end and verdict; the loop
+//! only does the read it is asked for (awaited here) or yields — so verdicts, codes,
+//! offsets, paths and budget are the sync driver's for every chunking (gated by
+//! `tests/async_sources.rs`).
 //!
 //! Runtime-agnostic and dependency-free: [`AsyncSource`] has the signature of
 //! `futures_io::AsyncRead::poll_read`, [`AsyncBlob`] returns any `Future`, and a
@@ -26,10 +29,9 @@
 //! assert!(verdict.is_ok());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
-use crate::schema::{self, Failure, Session, SourceError, Step};
-use crate::sequence::{Message, Sequence, SequenceOptions};
+use crate::schema::{self, BlobCore, Failure, Io, SourceError, StreamCore};
+use crate::sequence::{Message, Pump, SeqPump, Sequence, SequenceOptions};
 use crate::{BytesBlob, Error, Schema, ValidationOptions};
-use std::collections::VecDeque;
 use std::future::{poll_fn, Future};
 use std::io;
 use std::ops::DerefMut;
@@ -132,137 +134,36 @@ fn source_error(e: SourceError) -> Error {
 }
 
 /// The async [`schema::validate_blob`] (the low-level host API, as that one): the same
-/// window policy — a read of `max(need, chunk)` bytes at the asked offset, only when
-/// the window lacks them. [`Schema::validate_blob_async`] is the public form.
+/// `BlobCore` — a read of `max(need, chunk)` bytes at the asked offset, only when the
+/// window lacks them. [`Schema::validate_blob_async`] is the public form.
 pub async fn validate_blob<B: AsyncBlob + ?Sized>(prog: &schema::Program, rule: i32, blob: &B, opts: &schema::Options,
                                                   chunk: usize, quantum: i32) -> Result<Result<(), Failure>, SourceError> {
-    let size = blob.size();
-    if size > 0x7fff_ffff {
-        return Err(SourceError::TooLarge);
-    }
-    let mut session = Session::new(prog, rule, size as i32, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
-    let (mut base, mut window): (usize, Vec<u8>) = (0, Vec::new());
-    let (mut at, mut need) = (0usize, chunk.min(size));
+    let mut core = BlobCore::new(prog, rule, blob.size(), opts, chunk, quantum)?;
     loop {
-        let end = base + window.len();
-        if !(at >= base && at + need.min(size - at) <= end && (at < end || at == size)) {
-            let len = need.max(chunk).min(size - at);
-            let got = blob.read(at, len).await?;
-            if got.len() != len {
-                return Err(SourceError::ShortRead { offset: at, wanted: len, got: got.len() });
-            }
-            base = at;
-            window = got;
-        }
-        match session.step(&window, base as i32) {
-            Step::Done(d) | Step::Held(d) => return Ok(d),
-            Step::Need { offset, len, .. } => {
-                at = offset as usize;
-                need = len as usize;
-            }
-            Step::Yield { position, .. } => {
-                yield_now().await;
-                at = position as usize;
-                need = 1;
-            }
+        match core.next() {
+            Io::Read { offset, len } => core.fill(blob.read(offset, len).await?)?,
+            Io::Yield => yield_now().await,
+            Io::Done(d) => return Ok(d),
         }
     }
 }
 
 /// The async [`schema::validate_reader`] (D085 drain mode, D145 fail-fast, D147; the
-/// low-level host API, as that one): the same bookkeeping as its reader, with the read
-/// awaited. [`Schema::validate_reader_async`] is the public form.
+/// low-level host API, as that one): the same `StreamCore`, with the read awaited.
+/// [`Schema::validate_reader_async`] is the public form.
 pub async fn validate_reader<S: AsyncSource + Unpin + ?Sized>(prog: &schema::Program, rule: i32, src: &mut S,
                                                               opts: &schema::Options, chunk: usize, quantum: i32,
                                                               fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
-    let mut session = Session::new_unknown(prog, rule, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
-    let limit = session.limit();
-    let mut st = Held { tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0, delivered: 0, eof: false };
-    let mut step = session.step(&st.buf, 0);
-    // the session was given the end and resumed: it goes on over what is held, never
-    // asking past the end (a yield at the end needs no byte); vms-eof is called once
-    let mut ended = false;
+    let mut core = StreamCore::new(prog, rule, opts, chunk, quantum, fail_fast)?;
     loop {
-        // what the session wants: [at, at + len)
-        let (at, len) = match step {
-            Step::Done(d) => return Ok(d),
-            Step::Held(d) => {
-                if fail_fast && d.is_err() {
-                    return Ok(d);
-                }
-                // drain: the verdict waits for the end (or the input limit)
-                while !st.eof && st.delivered <= limit {
-                    let d = st.delivered;
-                    st.drop_to(d);
-                    st.read(src).await?;
-                }
-                step = session.end(st.delivered);
-                ended = true;
-                continue;
+        match core.next() {
+            Io::Read { .. } => {
+                let got = read_some(src, core.buf()).await?;
+                core.filled(got);
             }
-            Step::Need { offset, len, keep } => {
-                st.drop_to(keep as usize);
-                (offset as usize, len as usize)
-            }
-            Step::Yield { position, keep } => {
-                st.drop_to(keep as usize);
-                if quantum > 0 {
-                    yield_now().await;
-                }
-                (position as usize, if ended { 0 } else { 1 })
-            }
-        };
-        while !st.eof && st.delivered <= limit && st.base + st.buf.len() < at + len {
-            st.read(src).await?;
+            Io::Yield => yield_now().await,
+            Io::Done(d) => return Ok(d),
         }
-        if ended {
-            assert!(st.base + st.buf.len() >= at + len, "snug: the session asked past the end");
-            step = session.step(&st.buf, st.base as i32);
-        } else if st.delivered > limit || st.base + st.buf.len() < at + len {
-            ended = true;
-            // past the input limit (too_large), or the message ended before what is asked
-            step = session.end(st.delivered);
-            if let Step::Yield { .. } = step {
-                step = session.step(&st.buf, st.base as i32);
-            }
-        } else {
-            step = session.step(&st.buf, st.base as i32);
-        }
-    }
-}
-
-/// The bytes of a forward-only source from `base` on (what the session keeps).
-struct Held {
-    tmp: Vec<u8>,
-    buf: Vec<u8>,
-    base: usize,
-    delivered: usize,
-    eof: bool,
-}
-impl Held {
-    /// Drop what precedes `keep` (it may lie ahead of what arrived: a skipped byte string).
-    fn drop_to(&mut self, keep: usize) {
-        let keep = keep.max(self.base);
-        let k = (keep - self.base).min(self.buf.len());
-        self.buf.drain(..k);
-        self.base += k;
-        if keep > self.base {
-            self.base = keep;
-        }
-    }
-    async fn read<S: AsyncSource + Unpin + ?Sized>(&mut self, src: &mut S) -> Result<(), SourceError> {
-        let got = read_some(src, &mut self.tmp).await?;
-        if got == 0 {
-            self.eof = true;
-            return Ok(());
-        }
-        let start = self.delivered;
-        self.delivered += got;
-        if self.delivered > self.base {
-            let from = self.base.saturating_sub(start);
-            self.buf.extend_from_slice(&self.tmp[from..got]);
-        }
-        Ok(())
     }
 }
 
@@ -345,16 +246,13 @@ pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &Sequence
 /// Cancel-safe: dropping a `next()` future loses no message (a read that completes
 /// is fed before `next` returns; a `Pending` read consumed nothing).
 pub struct AsyncSequenceReader<'p, S> {
-    seq: Sequence<'p>,
+    pump: SeqPump<'p>,
     source: S,
-    buf: Vec<u8>,
-    queue: VecDeque<Result<Message<'static>, Error>>,
-    finished: bool,
 }
 
 impl<'p, S: AsyncSource + Unpin> AsyncSequenceReader<'p, S> {
     fn new(seq: Sequence<'p>, source: S, chunk: usize) -> Self {
-        AsyncSequenceReader { seq, source, buf: vec![0u8; chunk], queue: VecDeque::new(), finished: false }
+        AsyncSequenceReader { pump: SeqPump::new(seq, chunk), source }
     }
 
     /// The next item, or `None` after the last.
@@ -365,30 +263,15 @@ impl<'p, S: AsyncSource + Unpin> AsyncSequenceReader<'p, S> {
     /// The poll form of [`next`](AsyncSequenceReader::next) (for a `Stream` adapter).
     pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<Message<'static>, Error>>> {
         loop {
-            if let Some(x) = self.queue.pop_front() {
-                return Poll::Ready(Some(x));
-            }
-            if self.finished {
-                return Poll::Ready(None);
-            }
-            match Pin::new(&mut self.source).poll_read(cx, &mut self.buf) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Ok(0)) => {
-                    self.finished = true;
-                    let items = self.seq.finish();
-                    self.queue.extend(items);
-                }
-                Poll::Ready(Ok(n)) => {
-                    let items = self.seq.feed(&self.buf[..n]);
-                    self.queue.extend(items.into_iter().map(|x| x.map(Message::into_owned)));
-                    if self.seq.is_done() {
-                        self.finished = true;
+            match self.pump.next() {
+                Pump::Item(x) => return Poll::Ready(x),
+                Pump::Read => {
+                    let Poll::Ready(r) = Pin::new(&mut self.source).poll_read(cx, self.pump.buf()) else {
+                        return Poll::Pending;
+                    };
+                    if let Some(e) = self.pump.filled(r) {
+                        return Poll::Ready(Some(e));
                     }
-                }
-                Poll::Ready(Err(e)) if e.kind() == io::ErrorKind::Interrupted => {}
-                Poll::Ready(Err(_)) => {
-                    self.finished = true;
-                    return Poll::Ready(Some(Err(Error::Source("read"))));
                 }
             }
         }
@@ -397,7 +280,7 @@ impl<'p, S: AsyncSource + Unpin> AsyncSequenceReader<'p, S> {
     /// Bytes held for the message in progress (the sequence's assembly; the read
     /// buffer of `chunk` bytes is extra).
     pub fn bytes_held(&self) -> usize {
-        self.seq.bytes_held()
+        self.pump.bytes_held()
     }
 
     /// The source, returned once reading is over (or abandoned).

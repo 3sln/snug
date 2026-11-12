@@ -541,113 +541,118 @@ impl Blob for BytesBlob<'_> {
     }
 }
 
-/// Validate a blob against `rule` through a session, reading `chunk`-byte windows
-/// only when the session asks for bytes it does not have.
-pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options, chunk: usize, quantum: i32)
-                     -> Result<Result<(), Failure>, SourceError> {
-    let size = blob.size();
-    if size > 0x7fff_ffff {
-        return Err(SourceError::TooLarge);
-    }
-    let mut session = Session::new(prog, rule, size as i32, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
-    let (mut base, mut window): (usize, Vec<u8>) = (0, Vec::new());
-    let (mut at, mut need) = (0usize, chunk.min(size));
-    loop {
-        let end = base + window.len();
-        if !(at >= base && at + need.min(size - at) <= end && (at < end || at == size)) {
-            let len = need.max(chunk).min(size - at);
-            let got = blob.read(at, len)?;
-            if got.len() != len {
-                return Err(SourceError::ShortRead { offset: at, wanted: len, got: got.len() });
-            }
-            base = at;
-            window = got;
-        }
-        match session.step(&window, base as i32) {
-            Step::Done(d) => return Ok(d),
-            Step::Need { offset, len, .. } => {
-                at = offset as usize;
-                need = len as usize;
-            }
-            Step::Yield { position, .. } => {
-                at = position as usize;
-                need = 1;
-            }
-            Step::Held(d) => return Ok(d),
-        }
-    }
+// ---------------------------------------------------------------- the drivers' sans-IO cores (P9.6b, D335)
+//
+// One step machine per source kind; the sync drivers below and the async ones
+// (`crate::async_source`) are thin I/O loops over them: ask `next()` what to do, do
+// that one read (or yield), hand the bytes back, repeat. The cores decide every
+// window, keep, drop, end and verdict, so the two drivers cannot diverge.
+
+/// What a driver core asks of its I/O loop.
+#[derive(Debug)]
+pub(crate) enum Io {
+    /// Blob: read exactly `len` bytes at `offset` and give them to `BlobCore::fill`.
+    /// Stream: read up to `StreamCore::buf().len()` bytes into it and call `filled`.
+    Read { offset: usize, len: usize },
+    /// The quantum is spent (only with a positive quantum): an async loop yields to
+    /// its executor, a sync one goes on.
+    Yield,
+    /// The verdict.
+    Done(Result<(), Failure>),
 }
 
-/// D085: validate a message of unknown length read from `reader` until EOF,
-/// holding at most what the session asks for (plus `chunk`). Drain mode: the
-/// verdict equals the buffer's of the same bytes; with `fail_fast` a certain
-/// refusal is answered at once (its code may then differ: the buffer might say
-/// `cbor/truncated` or `cbor/too_large`). Transport errors are `SourceError::Read`.
-pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read, opts: &Options, chunk: usize,
-                       quantum: i32, fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
-    let mut session = Session::new_unknown(prog, rule, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
-    let limit = session.limit();
-    let mut src = Stream { reader, tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0, delivered: 0, eof: false };
-    let mut step = session.step(&src.buf, 0);
-    // the session was given the end and resumed: it goes on over what is held, never
-    // asking past the end (a yield at the end needs no byte); vms-eof is called once
-    let mut ended = false;
-    loop {
-        // what the session wants: [at, at + len)
-        let (at, len) = match step {
-            Step::Done(d) => return Ok(d),
-            Step::Held(d) => {
-                if fail_fast && d.is_err() {
-                    return Ok(d);
-                }
-                // drain: the verdict waits for the end (or the input limit)
-                while !src.eof && src.delivered <= limit {
-                    let d = src.delivered;
-                    src.drop_to(d);
-                    src.read()?;
-                }
-                step = session.end(src.delivered);
-                ended = true;
+/// A known-length blob's core: reads `max(need, chunk)` bytes at the asked offset,
+/// only when the window lacks what the session asks for.
+pub(crate) struct BlobCore<'p> {
+    session: Session<'p>,
+    size: usize,
+    chunk: usize,
+    quantum: i32,
+    base: usize,
+    window: Vec<u8>,
+    at: usize,
+    need: usize,
+    reading: Option<(usize, usize)>,
+}
+
+impl<'p> BlobCore<'p> {
+    pub(crate) fn new(prog: &'p Program, rule: i32, size: usize, opts: &Options, chunk: usize, quantum: i32)
+                      -> Result<BlobCore<'p>, SourceError> {
+        if size > 0x7fff_ffff {
+            return Err(SourceError::TooLarge);
+        }
+        let session = Session::new(prog, rule, size as i32, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
+        Ok(BlobCore { session, size, chunk, quantum, base: 0, window: Vec::new(), at: 0, need: chunk.min(size), reading: None })
+    }
+    pub(crate) fn next(&mut self) -> Io {
+        loop {
+            if let Some((offset, len)) = self.reading {
+                return Io::Read { offset, len };
+            }
+            let (size, at, end) = (self.size, self.at, self.base + self.window.len());
+            if !(at >= self.base && at + self.need.min(size - at) <= end && (at < end || at == size)) {
+                let len = self.need.max(self.chunk).min(size - at);
+                self.reading = Some((at, len));
                 continue;
             }
-            Step::Need { offset, len, keep } => {
-                src.drop_to(keep as usize);
-                (offset as usize, len as usize)
+            match self.session.step(&self.window, self.base as i32) {
+                Step::Done(d) | Step::Held(d) => return Io::Done(d),
+                Step::Need { offset, len, .. } => {
+                    self.at = offset as usize;
+                    self.need = len as usize;
+                }
+                Step::Yield { position, .. } => {
+                    self.at = position as usize;
+                    self.need = 1;
+                    if self.quantum > 0 {
+                        return Io::Yield;
+                    }
+                }
             }
-            Step::Yield { position, keep } => {
-                src.drop_to(keep as usize);
-                (position as usize, if ended { 0 } else { 1 })
-            }
-        };
-        while !src.eof && src.delivered <= limit && src.base + src.buf.len() < at + len {
-            src.read()?;
         }
-        if ended {
-            assert!(src.base + src.buf.len() >= at + len, "snug: the session asked past the end");
-            step = session.step(&src.buf, src.base as i32);
-        } else if src.delivered > limit || src.base + src.buf.len() < at + len {
-            ended = true;
-            // past the input limit (too_large), or the message ended before what is asked
-            step = session.end(src.delivered);
-            if let Step::Yield { .. } = step {
-                step = session.step(&src.buf, src.base as i32);
-            }
-        } else {
-            step = session.step(&src.buf, src.base as i32);
+    }
+    /// The bytes of the read `next` asked for (exactly its length, else `ShortRead`).
+    pub(crate) fn fill(&mut self, got: Vec<u8>) -> Result<(), SourceError> {
+        let (offset, len) = self.reading.take().expect("snug: BlobCore::fill without a read");
+        if got.len() != len {
+            return Err(SourceError::ShortRead { offset, wanted: len, got: got.len() });
         }
+        self.base = offset;
+        self.window = got;
+        Ok(())
     }
 }
 
-/// A forward-only byte source for [`validate_reader`]: the bytes from `base` on.
-struct Stream<'r> {
-    reader: &'r mut dyn std::io::Read,
+/// An unknown-length stream's core (D085 drain mode, D145 fail-fast, D147): holds the
+/// bytes from the session's `keep` on plus one read buffer of `chunk` bytes.
+pub(crate) struct StreamCore<'p> {
+    session: Session<'p>,
+    quantum: i32,
+    fail_fast: bool,
+    limit: usize,
     tmp: Vec<u8>,
     buf: Vec<u8>,
     base: usize,
     delivered: usize,
     eof: bool,
+    step: Option<Step>,
+    // what the session wants: [at, at + len), awaiting bytes
+    want: Option<(usize, usize)>,
+    draining: bool,
+    // the session was given the end and resumed: it goes on over what is held, never
+    // asking past the end (a yield at the end needs no byte); vms-eof is called once
+    ended: bool,
 }
-impl Stream<'_> {
+
+impl<'p> StreamCore<'p> {
+    pub(crate) fn new(prog: &'p Program, rule: i32, opts: &Options, chunk: usize, quantum: i32, fail_fast: bool)
+                      -> Result<StreamCore<'p>, SourceError> {
+        let mut session = Session::new_unknown(prog, rule, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
+        let limit = session.limit();
+        let step = session.step(&[], 0);
+        Ok(StreamCore { session, quantum, fail_fast, limit, tmp: vec![0u8; chunk.max(1)], buf: Vec::new(), base: 0,
+                        delivered: 0, eof: false, step: Some(step), want: None, draining: false, ended: false })
+    }
     /// Drop what precedes `keep` (it may lie ahead of what arrived: a skipped byte string).
     fn drop_to(&mut self, keep: usize) {
         let keep = keep.max(self.base);
@@ -658,17 +663,81 @@ impl Stream<'_> {
             self.base = keep;
         }
     }
-    fn read(&mut self) -> Result<(), SourceError> {
-        let got = loop {
-            match self.reader.read(&mut self.tmp) {
-                Ok(n) => break n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => return Err(SourceError::Read),
+    fn step_held(&mut self) -> Step {
+        self.session.step(&self.buf, self.base as i32)
+    }
+    pub(crate) fn next(&mut self) -> Io {
+        loop {
+            let read = Io::Read { offset: self.delivered, len: self.tmp.len() };
+            if self.draining {
+                // drain: the verdict waits for the end (or the input limit)
+                if !self.eof && self.delivered <= self.limit {
+                    let d = self.delivered;
+                    self.drop_to(d);
+                    return read;
+                }
+                self.draining = false;
+                self.step = Some(self.session.end(self.delivered));
+                self.ended = true;
+                continue;
             }
-        };
+            if let Some((at, len)) = self.want {
+                let have = self.base + self.buf.len();
+                if !self.eof && self.delivered <= self.limit && have < at + len {
+                    return read;
+                }
+                self.want = None;
+                let step = if self.ended {
+                    assert!(have >= at + len, "snug: the session asked past the end");
+                    self.step_held()
+                } else if self.delivered > self.limit || have < at + len {
+                    // past the input limit (too_large), or the message ended before what is asked
+                    self.ended = true;
+                    match self.session.end(self.delivered) {
+                        Step::Yield { .. } => self.step_held(),
+                        s => s,
+                    }
+                } else {
+                    self.step_held()
+                };
+                self.step = Some(step);
+                continue;
+            }
+            match self.step.take().expect("snug: StreamCore has no step") {
+                Step::Done(d) => {
+                    self.step = Some(Step::Done(d.clone()));
+                    return Io::Done(d);
+                }
+                Step::Held(d) => {
+                    if self.fail_fast && d.is_err() {
+                        self.step = Some(Step::Done(d.clone()));
+                        return Io::Done(d);
+                    }
+                    self.draining = true;
+                }
+                Step::Need { offset, len, keep } => {
+                    self.drop_to(keep as usize);
+                    self.want = Some((offset as usize, len as usize));
+                }
+                Step::Yield { position, keep } => {
+                    self.drop_to(keep as usize);
+                    self.want = Some((position as usize, if self.ended { 0 } else { 1 }));
+                    if self.quantum > 0 {
+                        return Io::Yield;
+                    }
+                }
+            }
+        }
+    }
+    /// The read buffer an `Io::Read` fills (`chunk` bytes).
+    pub(crate) fn buf(&mut self) -> &mut [u8] {
+        &mut self.tmp
+    }
+    /// `got` bytes of `buf()` arrived; 0 is the end of the source.
+    pub(crate) fn filled(&mut self, got: usize) {
         if got == 0 {
             self.eof = true;
-            return Ok(());
+            return;
         }
         let start = self.delivered;
         self.delivered += got;
@@ -676,6 +745,46 @@ impl Stream<'_> {
             let from = self.base.saturating_sub(start);
             self.buf.extend_from_slice(&self.tmp[from..got]);
         }
-        Ok(())
+    }
+}
+
+/// Validate a blob against `rule` through a session, reading `chunk`-byte windows
+/// only when the session asks for bytes it does not have (an I/O loop over `BlobCore`).
+pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options, chunk: usize, quantum: i32)
+                     -> Result<Result<(), Failure>, SourceError> {
+    let mut core = BlobCore::new(prog, rule, blob.size(), opts, chunk, quantum)?;
+    loop {
+        match core.next() {
+            Io::Read { offset, len } => core.fill(blob.read(offset, len)?)?,
+            Io::Yield => {}
+            Io::Done(d) => return Ok(d),
+        }
+    }
+}
+
+/// D085: validate a message of unknown length read from `reader` until EOF,
+/// holding at most what the session asks for (plus `chunk`). Drain mode: the
+/// verdict equals the buffer's of the same bytes; with `fail_fast` a certain
+/// refusal is answered at once (its code may then differ: the buffer might say
+/// `cbor/truncated` or `cbor/too_large`). Transport errors are `SourceError::Read`.
+/// An I/O loop over `StreamCore`.
+pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read, opts: &Options, chunk: usize,
+                       quantum: i32, fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
+    let mut core = StreamCore::new(prog, rule, opts, chunk, quantum, fail_fast)?;
+    loop {
+        match core.next() {
+            Io::Read { .. } => {
+                let got = loop {
+                    match reader.read(core.buf()) {
+                        Ok(n) => break n,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => return Err(SourceError::Read),
+                    }
+                };
+                core.filled(got);
+            }
+            Io::Yield => {}
+            Io::Done(d) => return Ok(d),
+        }
     }
 }
