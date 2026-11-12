@@ -7808,7 +7808,18 @@ review.
   (`corpus/tools/ORACLES.md`). Every difference is explained.
 - [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
   chunks that fit under the P9.1 caps, with the seeds and chunking
-  recorded so anyone can reproduce them.
+  recorded so anyone can reproduce them. Includes `rust-api-test` in its
+  `full` mode (the P9.6 async differential at full scale; see P9.6a), which
+  also runs again before the RC is declared.
+- [ ] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
+  2026-11-11). The default mode takes a few minutes and is for routine
+  gating. A `full` mode runs the async differential at the scale it ran at
+  when P9.6 landed. Assigned to the P9.6 engineer.
+- [ ] **P9.6b — One shared sans-IO core for the sync and async Rust
+  drivers** (coordinator, 2026-11-11), D335. It starts after P9.7 lands and
+  must be done before P9.13, so the final review sees the deduplicated
+  code. The full differential (async == sync == buffer) stays as the
+  reference. Assigned to the P9.6 engineer.
 - [ ] **P9.14 — `.abnf` / `.abnfb` (RFC 9165 §3).** Added 2026-11-11 by
   the coordinator. The owner direction D230 names these controls explicitly,
   so leaving them out is not an option. Requirements:
