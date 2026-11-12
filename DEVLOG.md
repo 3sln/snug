@@ -8341,9 +8341,24 @@ review.
   per-message cost in debug); no `Stream` / futures-io impls (newtype
   adapters documented); a dropped validation future leaves its source at an
   unspecified position.
-- [ ] **P9.7 — Arena pooling and a live-session bound.** Hosts pool session
+- [x] **P9.7 — Arena pooling and a live-session bound.** Hosts pool session
   arenas and enforce a documented, configurable bound on live sessions.
   This item was left open in P6.
+  *Done 2026-11-12 (D327):* session arrays pooled per Program (2 MiB idle
+  default, zero-filled on reuse), `maxLive` 1024 with `sessions/limit`,
+  `close()`/dispose, `releasePool()` / `snug::sessions::release_pool()`, in
+  JS, Rust (thread-safe; the P9.6 async drivers included) and the wasm SDK.
+  Gates on the final tree (`ecac876` on main `74b903f`; default watchdog
+  caps, none tripped):
+  * `drift` ok; `size` ok (the D327 caps); `valid-test` ok (RFC vectors
+    561/561); `npm test` 1459/1459; `rust-api-test` ok (20 suites incl.
+    doctests, `tests/sessions.rs` with 8 threads, clippy).
+  * `scan-test`, `rscan-test` ok. `vm-test`: PEG oracle 8704/8704, JS == Rust
+    80,701, JS == wasm 78,407.
+  * `vmsession-test 2000 1 100 60`: 306,479 sessions, JS == Rust 195,386,
+    session pool 10140/10140 pooled (scribbled) == fresh, 0 live after.
+  * `sequence-test 300 1`: 453,834 runs, JS == Rust 110,390, 0 readers live
+    after. `wasm-sdk-test` 16/16 (sessions: wasm and native).
 
 **Long runs on the final code**
 - [ ] **P9.8 — crate-diff re-run** against the rebuilt cddl crate oracle
