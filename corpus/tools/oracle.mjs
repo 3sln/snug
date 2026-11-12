@@ -388,6 +388,14 @@ const intValue = n => {
   return null;
 };
 const numeric = n => intValue(n) ?? (n.major === 7 && n.width ? n.value : null);
+// Is x exactly representable in IEEE binary16 (ai 25) / binary32 (26) / binary64 (27)?
+function fitsWidth(x, ai) {
+  if (ai === 27 || !Number.isFinite(x) || x === 0) return true;
+  if (ai === 26) return Math.fround(x) === x;
+  const a = Math.abs(x); if (a > 65504) return false;
+  const q = a * 2 ** 24; if (!Number.isInteger(q)) return false; // multiples of 2^-24
+  let m = q; while (m > 2047 && m % 2 === 0) m /= 2; return m <= 2047; // 11 significant bits
+}
 const eqBytes = (a, b, budget) => { budget.tick(Math.max(a.length, b.length)); return a.length === b.length && a.every((v, i) => v === b[i]); };
 
 export function check(schema, rule, value, { steps = STEP_LIMIT } = {}) {
@@ -433,7 +441,9 @@ export function check(schema, rule, value, { steps = STEP_LIMIT } = {}) {
         case 'choice': return x.xs.some(y => test(y, n, env));
         case 'major': {
           if (n.major !== x.major) return false;
-          if (x.major === 7 && x.arg) { const wanted = scalar(x.arg, env); return wanted === BigInt(n.width ? ({ 2: 25, 4: 26, 8: 27 })[n.width] : Number(n.arg)); }
+          // RFC 8610 §3.3 (D328): #7.25/26/27 are sets of values -- a float of any
+          // encoded width matches each width whose IEEE format holds its value.
+          if (x.major === 7 && x.arg) { const wanted = scalar(x.arg, env); return n.width ? [25n, 26n, 27n].includes(wanted) && fitsWidth(n.value, Number(wanted)) : wanted === n.arg; }
           if (x.arg && !test(x.arg, { major: 0, arg: n.arg, value: n.arg }, env)) return false;
           return !x.content || test(x.content, n.content, env);
         }

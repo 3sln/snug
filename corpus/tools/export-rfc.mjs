@@ -157,6 +157,11 @@ for(const [hex,d,det,note] of [
   ['c24101',"2(h'01')",false,'§3.4.3 preferred serialization uses basic integer'],
   ['c482001864','4([0,100])',true,'§4.2.2 decimal normalization requires an additional protocol rule'],
 ])extraVectors.push(vector(8949,note.split(' ')[0],hex,d,det,{note,origin:'hand-made from RFC rule',dependsOn:['P8.4']}));
+// P9.2: a NaN with a payload is core-deterministic (§4.1, §4.2.1); snug's `deterministic`
+// preset adds §4.2.2's single NaN representation on purpose (D122). The default `valid`
+// preset accepts both vectors.
+for(const v of extraVectors)if(v.hex==='f97e01'||v.hex==='faffc00001')v.classification={deterministic:{kind:'deviation',decision:'D122',
+  reason:'snug\'s deterministic preset is RFC 8949 §4.2.1 plus §4.2.2\'s choice of one NaN: "If NaN is an allowed value, and there is no intent to support NaN payloads or signaling NaNs, the protocol needs to pick a single representation, typically 0xf97e00." §4.2.1 alone is not offered as a preset; the default valid preset accepts this NaN.'}};
 write(new URL('rfc8949-additional.json',destination),{format:'snug RFC CBOR vectors v1; §4.2.2 restrictions are not core deterministic',vectors:extraVectors});
 
 const typed=[];
@@ -307,6 +312,15 @@ allSuites.get(8610).push(
   {name:'RFC 8610 byte representation invariance',id:'wire-invariance',cddl:'r = {a: 1}\ns = float16\n',source:{rfc:8610,section:'§§2.2.3, 3.2, 3.8.1'},origin:'derived',cases:[{rule:'r',hex:'bf61611801ff',expect:true,note:'indefinite map and nonpreferred integer still same value',dependsOn:['P8.4']},{rule:'s',hex:'fa3fc00000',expect:true,note:'1.5 representable as half even when serialized single',dependsOn:['P8.4']}]},
 );
 allSuites.get(9682).push({name:'RFC 9682 simple head numbers',id:'simple-heads',cddl:'r = #7.<32..255>\ns = #7.24\n',source:{rfc:9682,section:'§3.2'},origin:'derived from updated grammar',cases:[{rule:'r',hex:'f820',expect:true,note:'simple value32',dependsOn:['P8.4']},{rule:'r',hex:'f4',expect:false,note:'false is value20'},{rule:'s',hex:'f8ff',expect:true,note:'AI24 admits simple values32..255',dependsOn:['P8.4']}]});
+
+// P9.2: every expectation snug does not meet carries its classification (the runner counts
+// a failing classified check as explained, an unclassified one as unexplained).
+for(const test of byId(8610,'default-timer').cases)if(test.expect===false)test.classification={kind:'contested',decision:'S46',
+  reason:'RFC 8610 §3.8.6 gives .default an "implied .ne control"; snug treats .default as an annotation only, as Erratum 9229 (status Reported) proposes and the Ruby reference does (docs/conformance.md S46).'};
+for(const id of ['figure-3','figure-4','figure-5'])for(const test of byId(9165,id).cases)test.classification={kind:'pending',decision:'P9.14',
+  reason:'.abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control.'};
+for(const test of byId(9682,'simple-heads').cases)test.classification={kind:'pending',decision:'P9.3',
+  reason:'RFC 9682 §3.2 head numbers (#7.<type>, #7.24) are checklist item P9.3; until then the schema is refused with a syntax error.'};
 
 // An auditable census of every displayed rule-like line, including all ABNF
 // figures that must not be misrepresented as CDDL schemas.

@@ -374,8 +374,18 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
                     let good = o + len <= input.len() && m.bytes() == &input[o..o + len];
                     let inside = o >= chunk_from && o + len <= chunk_to;
                     let borrowed = m.is_borrowed();
-                    // the view walks the same bytes as a View opened on them
-                    let vw = m.view().raw().len() == len;
+                    // the view walks the same bytes as a View opened on them: under a valid-CBOR
+                    // profile, a Document's view, which reads a message that is not its own
+                    // deterministic form through its canonical copy (D262; e.g. 1.5 sent as a
+                    // float32 is viewed as f9 3e 00)
+                    let vw = if opts.profile.valid {
+                        let big = (i32::MAX - 1) as u32;
+                        let d = snug::DecodeOptions { top: Top::Any, cose: opts.cose, profile: opts.profile,
+                            limits: snug::Limits { max_bytes: big, max_depth: 256, max_entries: big, max_items: big } };
+                        snug::Document::open(m.bytes(), &d).is_ok_and(|doc| doc.view().raw() == m.view().raw())
+                    } else {
+                        m.view().raw().len() == len
+                    };
                     // D215: borrowed iff inside the chunk this feed was given (a message completed in a
                     // later feed owns its assembly)
                     lines.push(format!("m {} {} {}{}{}", m.index, o, len, if good && vw { "" } else { " BAD" },

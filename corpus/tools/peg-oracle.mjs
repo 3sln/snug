@@ -26,6 +26,18 @@ function head(major, n) {
   for (let i = size; i > 0; i--, n >>= 8n) out[i] = Number(n & 255n);
   return out;
 }
+// Is the float value x exact in binary16 (ai 25), binary32 (26) or binary64 (27)? NaN, the
+// infinities and the zeros are in every width (RFC 8610 §3.3: a set of values, D328).
+function fitsWidth(x, ai) {
+  if (Number.isNaN(x) || !Number.isFinite(x) || x === 0 || ai === 27) return true;
+  if (ai === 26) return Math.fround(x) === x;
+  const a = Math.abs(x);
+  if (a > 65504) return false;
+  let e = Math.floor(Math.log2(a));
+  while (2 ** e > a) e--;
+  while (2 ** (e + 1) <= a) e++;
+  return Number.isInteger(a / 2 ** (Math.max(e, -14) - 10));
+}
 function halfValue(bits) {
   const sign = bits & 0x8000 ? -1 : 1, exp = bits >> 10 & 31, frac = bits & 1023;
   return exp === 31 ? frac ? NaN : sign * Infinity : sign * (exp ? (1024 + frac) * 2 ** (exp - 25) : frac * 2 ** -24);
@@ -614,6 +626,9 @@ export function check(schema, rule, value, { cuts = 'rfc', steps = 100000 } = {}
       const major = { int: v.value < 0n ? 1 : 0, bytes: 2, text: 3, array: 4, map: 5, tag: 6, float: 7, simple: 7 }[v.kind];
       if (major !== t.major) return false;
       if (!t.arg) return true;
+      // RFC 8610 §3.3 (D328): #7.25/26/27 are the floats whose VALUE binary16/32/64
+      // represents exactly, whatever width encodes them
+      if (v.kind === 'float') return [25, 26, 27].some(w => fitsWidth(v.value, w) && type(t.arg, I(w)));
       const arg = v.kind === 'float' ? v.width === 16 ? 25 : v.width === 32 ? 26 : 27 : v.kind === 'simple' ? v.value : v.kind === 'tag' ? v.tag : v.kind === 'int' ? v.value < 0n ? -1n - v.value : v.value : v.kind === 'text' ? utf8.encode(v.value).length : v.kind === 'bytes' ? v.value.length : v.kind === 'array' ? v.items.length : v.pairs.length;
       if (t.major < 6) {
         // For majors 0–5 the suffix is AI, unlike tag/simple head numbers.

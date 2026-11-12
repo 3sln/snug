@@ -2406,7 +2406,8 @@
     {
      "rule": "r",
      "hex": "f93e00",
-     "expect": false
+     "expect": true,
+     "note": "D328: 1.5 is a binary32 value whatever width encodes it"
     },
     {
      "rule": "r",
@@ -2428,12 +2429,14 @@
     {
      "rule": "r",
      "hex": "f93e00",
-     "expect": false
+     "expect": true,
+     "note": "D328: every float is a binary64 value"
     },
     {
      "rule": "r",
      "hex": "fa3f8ccccd",
-     "expect": false
+     "expect": true,
+     "note": "D328: every float is a binary64 value"
     }
    ]
   },
@@ -2477,7 +2480,8 @@
     {
      "rule": "r",
      "hex": "f93e00",
-     "expect": false
+     "expect": true,
+     "note": "D328: 1.5 is a binary32 value whatever width encodes it"
     }
    ]
   },

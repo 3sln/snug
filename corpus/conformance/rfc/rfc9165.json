@@ -95,10 +95,7 @@
       ],
       "id": "figure-2",
       "compileObservation": {
-        "ok": false,
-        "code": "control_value",
-        "line": 1,
-        "column": 11
+        "ok": true
       }
     },
     {
@@ -123,6 +120,11 @@
           "hex": "4100",
           "expect": true,
           "note": "§2.3 one terminating arc",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 0,
@@ -135,6 +137,11 @@
           "hex": "40",
           "expect": false,
           "note": "oid requires 1*arc",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 1,
@@ -147,6 +154,11 @@
           "hex": "4181",
           "expect": false,
           "note": "unterminated arc",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 1,
@@ -185,6 +197,11 @@
           "hex": "4100",
           "expect": true,
           "note": "§2.3 one terminating arc",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 0,
@@ -197,6 +214,11 @@
           "hex": "40",
           "expect": false,
           "note": "oid requires 1*arc",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 1,
@@ -209,6 +231,11 @@
           "hex": "4181",
           "expect": false,
           "note": "unterminated arc",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 1,
@@ -247,6 +274,11 @@
           "hex": "d903ec6a323032342d30312d3031",
           "expect": true,
           "note": "§3 full-date ABNF",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 0,
@@ -259,6 +291,11 @@
           "hex": "d903ec6a6e6f742d612d64617465",
           "expect": false,
           "note": "ABNF shape fails",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 1,
@@ -271,6 +308,11 @@
           "hex": "c074323031332d30332d32315432303a30343a30305a",
           "expect": true,
           "note": "§3 date-time ABNF",
+          "classification": {
+            "kind": "pending",
+            "decision": "P9.14",
+            "reason": ".abnf/.abnfb (RFC 9165 §3) come with the optional, metered ABNF module, checklist item P9.14; until then the schema is refused with unsupported_control."
+          },
           "ruby": {
             "status": "checked",
             "exitCode": 0,
