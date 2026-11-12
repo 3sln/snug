@@ -14,7 +14,9 @@
 // after compilation, as the native host does. SchemaError is the native public
 // class, with the native message.
 import { Program, Schema } from './schema.mjs';
-import { SchemaError } from '../../js/src/public-compile.mjs';
+import * as rt from './runtime.mjs';
+import { toModule, compiler as slot } from './load.mjs';
+import { SchemaError } from '../../js/src/schema-error.mjs';
 import { validateCompileOptions } from '../../js/src/options.mjs';
 import { controlEntries, registryWords, programControls, programArguments } from '../../js/src/ext.mjs';
 
@@ -23,25 +25,21 @@ const PROFILES = { full: 0, bindle: 1, bus: 2 };
 const COMPILE_OPTIONS = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives',
   'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget', 'depth', 'inputBytes',
   'entries', 'items', 'bignumBytes', 'budget', 'leaves'];
-const DEFAULT = '../../../.cache/snug-wasm-cc/snug.wasm';
 const te = new TextEncoder(), td = new TextDecoder();
 
-let source, mod = null, x = null;
-/** Where the compiler module comes from (a WebAssembly.Module, bytes or URL); default: the checkout's build. */
-export function compilerSource(s) { source = s; mod = null; x = null; }
+// The module is load.mjs's slot, which init({ compiler }) can fill too (P9.17);
+// `x` is this instance's exports, `xMod` the module they came from.
+let x = null, xMod = null;
+/** Where the compiler module comes from (a WebAssembly.Module, bytes, a Response, a URL or a path; load.mjs);
+ *  undefined: the module next to the SDK. Compiled on the next compile(). */
+export function compilerSource(s) { slot.source = s; slot.module = null; x = null; xMod = null; }
 /** Drop the compiler instance (its memory, grown by a large schema, goes with it). */
-export function releaseCompiler() { x = null; }
+export function releaseCompiler() { x = null; xMod = null; }
 
 async function compiler() {
-  if (x) return x;
-  if (!mod) {
-    const s = source ?? new URL(DEFAULT, import.meta.url);
-    if (s instanceof WebAssembly.Module) mod = s;
-    else if (s instanceof Uint8Array || s instanceof ArrayBuffer) mod = await WebAssembly.compile(s);
-    else if (String(s).startsWith('file:')) { const { readFile } = await import('node:fs/promises'); mod = await WebAssembly.compile(await readFile(s)); }
-    else mod = await WebAssembly.compileStreaming(fetch(s));
-  }
-  x = new WebAssembly.Instance(mod, {}).exports;
+  if (!slot.module) slot.module = await toModule(slot.source ?? rt.defaultCompiler());
+  if (x && xMod === slot.module) return x;
+  x = new WebAssembly.Instance(slot.module, {}).exports; xMod = slot.module;
   return x;
 }
 export const compilerMemoryBytes = () => (x ? x.memory.buffer.byteLength : 0);
@@ -100,7 +98,7 @@ export async function compile(text, options = {}) {
     B = new Uint8Array(c.memory.buffer, bp, nb).slice();
     c.cc_release();
   } catch (e) {
-    if (e instanceof WebAssembly.RuntimeError || e instanceof RangeError) { x = null; throw new Error('snug wasm: the compiler instance trapped and was dropped', { cause: e }); }
+    if (e instanceof WebAssembly.RuntimeError || e instanceof RangeError) { x = null; xMod = null; throw new Error('snug wasm: the compiler instance trapped and was dropped', { cause: e }); }
     throw e;
   }
   // D142: a registered control may check its argument once, at compile time

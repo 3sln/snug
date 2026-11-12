@@ -533,10 +533,10 @@ test('sequences: API behaviours and privacy (read-only messages, private View/Cu
   assert.throws(() => Reflect.construct(WView, [undefined, 0, 0]), TypeError);
   assert.equal(v.get('a').at(2).number(), 3);
   // the package entries: ./view is view/View/Cursor only; ./sequence the reader pair; the internals are not exported
-  const pv = await import('snug-wasm-sdk/view'), ps = await import('snug-wasm-sdk/sequence');
+  const pv = await import('@3sln/snug-wasm/view'), ps = await import('@3sln/snug-wasm/sequence');
   assert.deepEqual(Object.keys(pv).sort(), ['Cursor', 'View', 'view']);
   assert.deepEqual(Object.keys(ps).sort(), ['readSequence', 'releasePool', 'sequenceReader', 'sessionLimits']);
-  await assert.rejects(import('snug-wasm-sdk/src/view-core.mjs'), e => e.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED');
+  await assert.rejects(import('@3sln/snug-wasm/src/view-core.mjs'), e => e.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED');
   console.log('  ok   sequence messages read-only; View/Cursor state private; mintView not exported');
 });
 

@@ -6,9 +6,13 @@
 // and instance loss.
 //
 //   await init(source?)   source: a WebAssembly.Module (workerd imports .wasm
-//                         modules), bytes, a Response, a URL; in Node with no
-//                         argument the build output in the checkout is read
-//   initSync(source)      a WebAssembly.Module or bytes (sync compile)
+//                         modules), bytes, a Response, a URL or a path
+//                         (load.mjs); with no argument the module next to the
+//                         SDK (the package's wasm/snug.wasm; in a checkout, the
+//                         build output). Or init({ runtime, compiler }): either
+//                         source, the compiler module for snug/compile (P9.17)
+//   initSync(source)      a WebAssembly.Module or bytes (sync compile); also
+//                         initSync({ runtime, compiler })
 //   memoryBytes()         linear memory size now (it only ever grows)
 //   reset()               drop the instance and its memory; Programs reload
 //                         lazily, open views and sessions become unusable
@@ -21,6 +25,8 @@
 // start a fresh one from the same module; the failing call throws
 // InstanceLost (never a verdict). Callers wrap only wasm calls and memory
 // copies, so a RangeError there is the engine's, not argument checking.
+import { toModule, toModuleSync, isOptions, compiler } from './load.mjs';
+
 let mod = null, inst = null;
 export let x = null;            // the exports
 export let u8 = null, i32 = null;
@@ -101,28 +107,38 @@ export function ready() {
   if (x === null) throw new Error('snug wasm: call init() first');
 }
 
-const DEFAULT = '../../../.cache/snug-wasm-sdk/snug.wasm';
+// The defaults: the module next to the SDK (in a checkout, the build output; the
+// package build rewrites both paths to the package's wasm/ directory). Literal
+// `new URL(..., import.meta.url)` so that bundlers can see the asset.
+const defaultRuntime = () => new URL('../../../.cache/snug-wasm-sdk/snug.wasm', import.meta.url);
+/** The default compiler source (snug/compile reads it when init was given none). */
+export const defaultCompiler = () => new URL('../../../.cache/snug-wasm-cc/snug.wasm', import.meta.url);
 
-async function compileFrom(source) {
-  if (source instanceof WebAssembly.Module) return source;
-  if (source instanceof Uint8Array || source instanceof ArrayBuffer) return WebAssembly.compile(source);
-  if (typeof Response === 'function' && source instanceof Response) return WebAssembly.compileStreaming ? WebAssembly.compileStreaming(source) : WebAssembly.compile(await source.arrayBuffer());
-  const url = source ?? new URL(DEFAULT, import.meta.url);
-  if (String(url).startsWith('file:')) {
-    const { readFile } = await import('node:fs/promises');
-    return WebAssembly.compile(await readFile(url));
-  }
-  return compileFrom(await fetch(url));
+function split(source) {
+  if (!isOptions(source)) return { runtime: source, compiler: undefined };
+  for (const k of Object.keys(source))
+    if (k !== 'runtime' && k !== 'compiler') throw new TypeError(`snug wasm: unknown init option ${JSON.stringify(k)} (runtime, compiler)`);
+  return source;
 }
 
 export async function init(source) {
   if (x !== null && source === undefined) return;
-  mod = await compileFrom(source);
-  start();
+  const s = split(source);
+  // both compiled before either is installed: a failure leaves the SDK as it was
+  const [m, c] = await Promise.all([
+    s.runtime !== undefined ? toModule(s.runtime) : mod ?? toModule(defaultRuntime()),
+    s.compiler === undefined ? null : toModule(s.compiler)]);
+  if (c !== null) { compiler.module = c; compiler.source = undefined; }
+  if (s.runtime !== undefined || x === null) { mod = m; start(); }
 }
 export function initSync(source) {
-  mod = source instanceof WebAssembly.Module ? source : new WebAssembly.Module(source);
-  start();
+  const s = split(source);
+  if (s.runtime === undefined && mod === null)
+    throw new TypeError('snug wasm: initSync needs the runtime module (a WebAssembly.Module or bytes); the inline entry carries one');
+  const m = s.runtime === undefined ? mod : toModuleSync(s.runtime);
+  const c = s.compiler === undefined ? null : toModuleSync(s.compiler);
+  if (c !== null) { compiler.module = c; compiler.source = undefined; }
+  if (s.runtime !== undefined || x === null) { mod = m; start(); }
 }
 export const memoryBytes = () => x.memory.buffer.byteLength;
 export function reset() { ready(); start(); }

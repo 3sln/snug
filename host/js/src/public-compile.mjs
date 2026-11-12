@@ -1,13 +1,9 @@
 // Importing snug/compile does not load the compiler; the first call does.
 import { validateCompileOptions } from './options.mjs';
+import { SchemaError } from './schema-error.mjs';
 
-/** A stable public class without eagerly importing the generated compiler. */
-export class SchemaError extends Error {
-  constructor(code, line = 0, column = 0, rule) {
-    super(`CDDL schema refused: ${code}` + (line > 0 ? ` at ${line}:${column}` : ''));
-    this.name = 'SchemaError'; this.code = code; this.line = line; this.column = column; this.rule = rule;
-  }
-}
+export { SchemaError };
+
 export async function compile(text, options = {}) {
   validateCompileOptions(options);
   const compiler = await import('./compile-runtime.mjs');

@@ -1,5 +1,5 @@
 {
-  "name": "snug-wasm-sdk",
+  "name": "@3sln/snug-wasm",
   "version": "0.0.0",
   "description": "Experimental: snug's public JS API over the WebAssembly build of its Rust core (opt-in; the native snug package is the default)",
   "keywords": ["cddl", "cbor", "validation", "wasm"],
@@ -7,18 +7,26 @@
   "repository": { "type": "git", "url": "[REPOSITORY URL - OWNER TO FILL IN]", "directory": "host/wasm-sdk" },
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "exports": {
-    ".": "./src/index.mjs",
-    "./schema": "./src/schema.mjs",
-    "./compile": "./src/compile.mjs",
-    "./view": "./src/view.mjs",
-    "./sources": "./src/sources.mjs",
-    "./sequence": "./src/sequence.mjs",
-    "./controls": "./src/controls.mjs",
-    "./abnf": "./src/abnf.mjs",
-    "./writer": "./src/writer.mjs"
+    ".": { "types": "./types/index.d.ts", "default": "./src/public-index.mjs" },
+    "./inline": { "types": "./types/inline.d.ts", "default": "./src/inline.mjs" },
+    "./schema": { "types": "./types/schema.d.ts", "default": "./src/public-schema.mjs" },
+    "./compile": { "types": "./types/compile.d.ts", "default": "./src/compile.mjs" },
+    "./view": { "types": "./types/view.d.ts", "default": "./src/view.mjs" },
+    "./writer": { "types": "./types/writer.d.ts", "default": "./src/writer.mjs" },
+    "./unicode": { "types": "./types/unicode.d.ts", "default": "./src/unicode.mjs" },
+    "./sources": { "types": "./types/sources.d.ts", "default": "./src/public-sources.mjs" },
+    "./sequence": { "types": "./types/sequence.d.ts", "default": "./src/sequence.mjs" },
+    "./controls": { "types": "./types/controls.d.ts", "default": "./src/controls.mjs" },
+    "./abnf": { "types": "./types/abnf.d.ts", "default": "./src/abnf.mjs" },
+    "./wasm/snug.wasm": "./wasm/snug.wasm",
+    "./wasm/snug-compiler.wasm": "./wasm/snug-compiler.wasm",
+    "./package.json": "./package.json"
   },
+  "types": "./types/index.d.ts",
   "scripts": {
-    "test": "node --test test/parity.test.mjs"
+    "test": "node --test test/parity.test.mjs",
+    "build": "node package-build.mjs"
   }
 }
