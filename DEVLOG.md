@@ -7971,9 +7971,32 @@ review.
     oracle tests, `watchdog-test`, `check` and `drift`: all ok.
   - `proptest`, 2 min, P1–P5: 73,353 cases, no failure.
   - `size`: ok with D333's caps.
-- [ ] **P9.3 — RFC 9682 head numbers.** Parse the `#7.<type>` syntax, and
+- [x] **P9.3 — RFC 9682 head numbers.** Parse the `#7.<type>` syntax, and
   match `#7.24`–`#7.31` as RFC 9682 §3.2 reads them, so the "RFC 9682
   simple head numbers" suite compiles and passes.
+  *Done 2026-11-12 (D336):*
+  - `#7.<T>` parses.
+  - `#7.24` is the simple values 32..255, `#7.25`–`#7.27` are the float
+    widths by value, and `#7.28`–`#7.31` match nothing.
+  - SIMPLE leaves are ranges.
+  - The suite passes, and its P9.3 classification is removed. The RFC
+    runner gives 999 checks: 987 pass, 12 classified, 0 unexplained and 0
+    stale.
+  - The new `corpus/conformance/heads.json` has 57 cases and 2 refusal
+    suites, all agreeing with the PEG oracle.
+  - Ruby and crate differences are recorded in D336.
+
+  Gates on `07ad4d7`, all ok:
+  - `vm-test`: conformance 1516/1516, PEG oracle 8818/8818, JS == Rust
+    80,872, JS == wasm 78,578.
+  - `vmsession-test 2000 1 100 60`: 307,751 runs.
+  - `sequence-test 300 1`: 447,786 runs, and the Rust host 21,809/21,809.
+  - `wasm-sdk-test` 15/15 and `npm test` 1450/1450.
+  - `compile-test`, `valid-test`, `scan-test`, `rscan-test`, `nav-test`,
+    `write-test`, `unicode-test`, `rust-api-test`, `compile-fuzz`, the RFC
+    runner, the PEG oracle tests, `watchdog-test`, `check` and `drift`.
+  - `proptest`, 2 min, P1–P5: 108,530 cases, no failure.
+  - `size`: ok after the compile full min cap raise (D336).
 - [ ] **P9.4 — PEG open problem 1.** A recursive Program's session should
   not reserve the whole-message arena bound when a message starts.
 - [ ] **P9.5 — Independent RFC framer in the sequence gate.** An RFC 8742
