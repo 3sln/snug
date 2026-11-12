@@ -9511,6 +9511,17 @@ can run alongside them; its build work is post-RC unless it is cheap.
   layer, gates and parity with JS and Rust would take. D006 deferred
   Go/Java/C#. Recommendation to the coordinator; the build is post-RC
   unless cheap. Nothing is pushed.
+  *Owner rule (2026-11-12):* "Stamped versions in the project files are
+  never checked in."
+  - main and every working branch hold placeholders only (D343, with a
+    guard). A stamped tree exists only as build output: release
+    artefacts, npm and crate tarballs, and possibly the `dist` commits.
+  - The design must state that reading explicitly: `dist` commits are
+    generated release output, not source history.
+  - It must also give an alternative in case the owner wants no stamped
+    tree on any branch, e.g. dist trees in a separate repository, or Go
+    module proxies or archives fed from the release artefacts.
+  - The choice goes to the coordinator and the owner.
 
 **Last**
 - [ ] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done

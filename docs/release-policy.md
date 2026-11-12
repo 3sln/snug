@@ -447,6 +447,14 @@ DEVLOG under P9.15 and P9.17–P9.19.
   - The release process stamps it onto every version site: package.json
     files, Cargo.toml, kin's version literal, the SDK and so on.
   - The versions checked into project files are placeholders.
+  - Owner clarification (2026-11-12): "Stamped versions in the project
+    files are never checked in."
+    - main and every working branch hold placeholders, and a guard test
+      enforces it (D343).
+    - Stamping happens only in a release build directory or worktree.
+    - A stamped tree exists only as build output: release artefacts, npm
+      and crate tarballs, and generated `dist` commits if O3's git-source
+      route uses them (P9.19).
 - [x] **O3 — What ships: JS, wasm and Rust; the wasm SDK ships.** Owner:
   JS, wasm and Rust are the priority, and the wasm SDK does ship.
   - Planned wasm artefacts:
