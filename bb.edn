@@ -44,5 +44,9 @@
   wasm-sdk-test {:doc "P7.9 follow-up: build the wasm SDK modules (SKIP without the nightly toolchain); the SDK == native JS on vm-test's case set (validate, decode, encode, views, sessions, compile) + instance loss." :task (apply shell "sh" "host/wasm-sdk/test/run" *command-line-args*)}
   watchdog-test {:doc "P9.1: the gate watchdog (kin/scripts/watchdog.mjs) -- CPU and wall caps trip, name the gate, its arguments and the cap, kill the gate's whole process group; pass-through otherwise; a real sh gate (scan-test 300 1) and a node gate (size) trip."
                  :task (shell "node" "kin/scripts/watchdog-test.mjs")}
+  gates      {:doc "P9.15: run gate sets or gates from ci/gate-map.edn in order, each under the watchdog; SKIP or blocked = not ok.   bb gates release | land | identity | <gate>... | --list | --check"
+              :task (apply shell "kin/scripts/gates" *command-line-args*)}
+  identity   {:doc "SPEC §7: the cross-host identity gates (bb gates identity): Programs, verdicts, reasons, paths and budget points, JS == Rust."
+              :task (shell "kin/scripts/gates" "identity")}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

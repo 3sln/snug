@@ -39,11 +39,11 @@ one artefact has no changes still bumps it, and its changelog entry says
 
 The version appears in several places, and all of them must agree: both
 `package.json` files, `Cargo.toml` (and `host/wasm/Cargo.toml`),
-`host/js/src/version.mjs`, and `snug-version` / `SNUG_VERSION_LEN` /
-`version-byte` in `kin/compile/main.kin`, followed by a re-emit of `gen/`.
-`host/js/test/package.test.mjs` already checks that package.json, the
-runtime mirror and the compiler agree. Nothing checks the Rust manifests
-(see §8).
+`host/js/src/version.mjs`, and the literal `snug-version` returns in
+`kin/compile/main.kin`, followed by a re-emit of `gen/`. That literal is
+the source of truth. Since P9.15 the source key reads its length and bytes
+from it, so any semver string works. `host/js/test/version.test.mjs` fails
+if any of these sites disagrees with it, or if it is not a semver string.
 
 ### 1.2 Semantic versioning, and what 0.x means
 
@@ -479,6 +479,17 @@ None of these is decided. Each has a recommendation.
 
 Nothing below was changed by P9.11. The manifests are untouched. These
 items are for the release commit or for earlier items:
+
+> **Status (P9.15, 2026-11-12).** Done: the version sites and their test;
+> the description, keywords, readme and `include` metadata, with the
+> repository URL left as a marked placeholder; the SDK description;
+> `CHANGELOG.md` in the npm staging and the crate; a crate layout that
+> `cargo package` accepts; `#[non_exhaustive]` (D339); and
+> `ci/gate-map.edn` with `bb gates` and `bb identity`. Still open, waiting
+> for owner decisions: the version number (O1, O2), `engines` and
+> `rust-version` (O7), the SDK staging (O3), the Unicode notice (O6), the
+> registry names (O4) and the repository URL. The text below is the
+> P9.11 record.
 
 - **Version sites**:
   - `kin/compile/main.kin` hard-codes `"0.0.0"`, and `version-byte`

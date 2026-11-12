@@ -1,0 +1,122 @@
+#!/usr/bin/env bb
+;; Run gates from ci/gate-map.edn, each under the P9.1 watchdog (P9.15).
+;;
+;;     kin/scripts/gates <set|gate>...    run them in order (bb gates release)
+;;     kin/scripts/gates --list           the gates and sets
+;;     kin/scripts/gates --check          the map against bb.edn and the watchdog's caps
+;;     --fail-fast                        stop at the first gate that is not ok
+;;
+;; A gate is ok only if it exits 0 and prints no `SKIP` line; a SKIP is NOT RUN
+;; and a :blocked gate is never run, and either fails the run (policy §2, §4).
+;; The summary names every gate's result and wall time. Exit 0 only if all ok.
+(require '[babashka.fs :as fs]
+         '[babashka.process :as p]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
+         '[clojure.string :as str]
+         '[cheshire.core :as json])
+
+(def root (str (fs/canonicalize (fs/path (fs/parent *file*) "../.."))))
+(def gate-map (edn/read-string (slurp (str root "/ci/gate-map.edn"))))
+(def gates (:gates gate-map))
+
+(def defaults-once
+  (delay (-> (p/shell {:dir root :out :string}
+                      "node" "--input-type=module" "-e"
+                      "import {DEFAULTS} from './kin/scripts/watchdog.mjs'; console.log(JSON.stringify(DEFAULTS))")
+             :out json/parse-string)))
+(defn watchdog-defaults [] @defaults-once)
+
+(defn problems
+  "The map's disagreements with bb.edn and the watchdog: [errors warnings]."
+  []
+  (let [defaults (watchdog-defaults)
+        tasks (set (map str (keys (:tasks (edn/read-string (slurp (str root "/bb.edn")))))))
+        named (set (map str (concat (keys gates) (:not-gates gate-map))))
+        errors (concat
+                (for [[g {:keys [caps watchdog blocked]}] gates
+                      :let [w (or watchdog (str g)) d (get defaults w)]
+                      :when (and (not blocked) d (not= (vec d) caps))]
+                  (str g ": caps " caps " but kin/scripts/watchdog.mjs DEFAULTS has " (vec d) " for " w))
+                (for [[g {:keys [cmd blocked caps]}] gates
+                      :when (and (not blocked) (not (and (seq cmd) (= 2 (count caps)))))]
+                  (str g ": needs :cmd and :caps [wall cpu] (or :blocked)"))
+                (for [[s members] (:sets gate-map) m members :when (not (contains? gates m))]
+                  (str "set " (name s) " names " m ", which is not a gate")))
+        warnings (for [t (sort tasks) :when (not (contains? named t))]
+                   (str "bb task " t " is in neither :gates nor :not-gates"))]
+    [(vec errors) (vec warnings)]))
+
+(defn run-gate [g]
+  (let [{:keys [cmd dir watchdog caps blocked]} (get gates g)
+        w (or watchdog (str g))
+        t0 (System/currentTimeMillis)]
+    (println (str "\n==== gate " g (when blocked " (blocked)")))
+    (if blocked
+      (do (println (str "  BLOCKED: " blocked)) {:gate g :result "BLOCKED" :why blocked :secs 0})
+      (let [known (contains? (watchdog-defaults) w)
+            argv (concat ["node" (str root "/kin/scripts/watchdog.mjs") w "--"] cmd
+                         (when-not known [(str "--gate-wall=" (first caps)) (str "--gate-cpu=" (second caps))]))
+            proc (apply p/process {:dir (str root "/" (or dir ".")) :in :inherit :err :inherit} argv)
+            skip (atom nil)]
+        (with-open [r (io/reader (:out proc))]
+          (doseq [line (line-seq r)]
+            (println line)
+            (when (and (nil? @skip) (re-find #"^\s*SKIP\b" line)) (reset! skip line))))
+        (let [exit (:exit @proc)
+              secs (quot (- (System/currentTimeMillis) t0) 1000)]
+          (cond (not (zero? exit)) {:gate g :result (if (= exit 124) "WATCHDOG" "FAIL") :why (str "exit " exit) :secs secs}
+                @skip {:gate g :result "NOT RUN" :why (str/trim @skip) :secs secs}
+                :else {:gate g :result "ok" :secs secs}))))))
+
+(defn expand [args]
+  (mapcat (fn [a]
+            (let [s (get (:sets gate-map) (keyword a))]
+              (cond s s
+                    (contains? gates (symbol a)) [(symbol a)]
+                    :else (do (binding [*out* *err*] (println "gates: no set or gate named" a)) (System/exit 2)))))
+          args))
+
+(let [args *command-line-args*
+      flags (set (filter #(str/starts-with? % "--") args))
+      names (remove #(str/starts-with? % "--") args)]
+  (cond
+    (flags "--list")
+    (do (doseq [[g {:keys [caps mode doc blocked]}] (sort-by key gates)]
+          (println (format "  %-19s %s" g (if blocked (str "BLOCKED: " blocked)
+                                              (str "caps " (first caps) "/" (second caps) " s"
+                                                   (when mode (str "; " mode)) (when doc (str "; " doc)))))))
+        (doseq [[s members] (:sets gate-map)]
+          (println (str "  set " (name s) ": " (str/join " " members)))))
+
+    (or (flags "--check") (empty? names))
+    (let [[errors warnings] (problems)]
+      (doseq [w warnings] (println "  warn" w))
+      (doseq [e errors] (println "  FAIL" e))
+      (when-not (flags "--check") (println "usage: bb gates <set|gate>... | --list | --check"))
+      (println (if (seq errors) (str "  FAIL gate map: " (count errors) " problem(s)") "  ok   gate map"))
+      (System/exit (if (or (seq errors) (not (flags "--check"))) 1 0)))
+
+    :else
+    (let [[errors warnings] (problems)]
+      (doseq [w warnings] (println "  warn" w))
+      (when (seq errors)
+        (doseq [e errors] (println "  FAIL" e))
+        (System/exit 1))
+      (let [todo (expand names)
+            results (reduce (fn [acc g]
+                              (let [r (run-gate g)]
+                                (if (and (flags "--fail-fast") (not= "ok" (:result r)))
+                                  (reduced (conj acc r))
+                                  (conj acc r))))
+                            [] todo)
+            bad (remove #(= "ok" (:result %)) results)]
+        (println (str "\n==== gates: " (str/join " " names)))
+        (doseq [{:keys [gate result why secs]} results]
+          (println (format "  %-8s %-19s %6d s%s" result gate secs (if why (str "  (" why ")") ""))))
+        (when (< (count results) (count todo))
+          (println (format "  %-8s %s" "NOT RUN" (str/join " " (drop (count results) todo)))))
+        (println (if (or (seq bad) (< (count results) (count todo)))
+                   (str "  FAIL " (count bad) " of " (count todo) " gate(s) not ok")
+                   (str "  ok   all " (count todo) " gate(s)")))
+        (System/exit (if (or (seq bad) (< (count results) (count todo))) 1 0))))))

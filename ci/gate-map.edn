@@ -1,0 +1,89 @@
+;; snug's gate map (SPEC §9, P9.15): every gate, how it runs, its watchdog caps,
+;; and the named gate SETS. Local only: there is no hosted CI (adding one is the
+;; owner's call, docs/release-policy.md §4).
+;;
+;;     bb gates release          the release gate set (policy §4 step 4), in order
+;;     bb gates land             what an engineer runs before landing
+;;     bb identity               = bb gates identity (SPEC §7's cross-host identity)
+;;     bb gates vm-test drift    named gates, in the order given
+;;     bb gates --list | --check
+;;
+;; kin/scripts/gates runs each gate under kin/scripts/watchdog.mjs with the gate's
+;; :watchdog name (default: the gate's own). A gate is ok only if it exits 0 AND
+;; prints no `SKIP` line: a SKIP is recorded as NOT RUN and fails the set
+;; (policy §2, §4). A :blocked gate is never run and also fails any set that
+;; holds it, naming what it waits for.
+;;
+;; :caps [wall cpu] in seconds. For a gate kin/scripts/watchdog.mjs DEFAULTS
+;; knows, the caps here must EQUAL those defaults (`bb gates --check`, run
+;; before every set, refuses a mismatch); the watchdog applies them, so the
+;; SNUG_GATE_* overrides still work. For any other gate the runner passes these
+;; caps on the gate's command line (--gate-wall= / --gate-cpu=).
+;;
+;; :mode says what a gate covers when it has more than one way to run.
+;;
+;; Setup: size, watchdog-test, valid-test's cbor2 arm and runtime need
+;; bench/compare/node_modules (AGENTS.md "Worktrees"); wasm-sdk-test needs the
+;; pinned nightly (kin/scripts/wasm-build); runtime needs Chrome and workerd
+;; (tools/runtime/README.md).
+{:gates
+ {check            {:cmd ["bb" "check"] :caps [900 1800]
+                    :doc "generate, run JS and Rust, require identical output"}
+  drift            {:cmd ["bb" "drift"] :caps [900 1800]
+                    :doc "committed gen/ is what the kin sources produce"}
+  scan-test        {:cmd ["bb" "scan-test"] :caps [2400 4800] :mode "default seeds and scale"}
+  rscan-test       {:cmd ["bb" "rscan-test"] :caps [2400 4800]}
+  vm-test          {:cmd ["bb" "vm-test"] :caps [3600 7200]}
+  vmsession-test   {:cmd ["bb" "vmsession-test"] :caps [7200 14400]}
+  sequence-test    {:cmd ["bb" "sequence-test"] :caps [7200 14400]}
+  valid-test       {:cmd ["bb" "valid-test"] :caps [2400 4800]
+                    :doc "SKIPs its cbor2 arm without bench/compare/node_modules: NOT RUN"}
+  compile-test     {:cmd ["bb" "compile-test"] :caps [2400 4800]
+                    :doc "compile2-test (format 2.0, JS == Rust Programs, SOURCE_KEY) then regexp-test"}
+  compile2-test    {:cmd ["bb" "compile2-test"] :caps [2400 4800]
+                    :doc "the first half of compile-test, alone"}
+  compile-fuzz     {:cmd ["bb" "compile-fuzz"] :caps [2400 4800]}
+  nav-test         {:cmd ["bb" "nav-test"] :caps [1800 3600]}
+  write-test       {:cmd ["bb" "write-test"] :caps [1800 3600]}
+  unicode-test     {:cmd ["bb" "unicode-test"] :caps [1800 3600]}
+  rust-api-test    {:cmd ["bb" "rust-api-test"] :caps [1200 2400]
+                    :mode "default: the async differential on a seeded slice (routine runs)"}
+  rust-api-test-full {:cmd ["bb" "rust-api-test" "full"] :watchdog "rust-api-test-full" :caps [3600 7200]
+                      :mode "full: the async differential at full scale (the release set)"}
+  wasm-sdk-test    {:cmd ["bb" "wasm-sdk-test"] :caps [5400 10800]
+                    :doc "SKIPs without the pinned nightly: NOT RUN. In the release set only if O3 ships the SDK."}
+  size             {:cmd ["bb" "size"] :caps [900 1800]}
+  watchdog-test    {:cmd ["bb" "watchdog-test"] :caps [300 600]}
+  npm-test         {:cmd ["npm" "test"] :dir "host/js" :caps [1800 3600]
+                    :doc "host/js's node --test suite, including the version-site test (P9.15)"}
+  rfc-corpus       {:cmd ["node" "corpus/tools/run-rfc-corpus.mjs" "--gate"] :caps [2400 4800]
+                    :doc "no unexplained or stale RFC corpus checks"}
+  proptest         {:cmd ["bb" "proptest" "--minutes=2" "--props=1,2,3,4,5"] :caps [10800 43200]
+                    :mode "the 2-minute P1-P5 campaign on HEAD (policy §4's minimum)"}
+  crate-diff       {:cmd ["bb" "crate-diff"] :caps [3600 7200]
+                    :doc "differential vs the cddl crate; needs its native build (P9.8 re-runs it)"}
+  runtime          {:cmd ["node" "tools/runtime/run.mjs"] :caps [2400 4800]
+                    :doc "the staged package in Node, headless Chrome and workerd (P7.7)"}
+  node-oldest      {:blocked "owner decision O7: the oldest declared Node line, then npm test on it"}
+  msrv             {:blocked "owner decision O7: the declared MSRV, then cargo +MSRV test on the assembled crate"}}
+
+ ;; bb.edn tasks that are not gates
+ :not-gates [gen emit bench-scan gates identity]
+
+ :sets
+ {;; docs/release-policy.md §4 step 4, in that order. A SKIP or a :blocked gate fails it.
+  :release  [check drift
+             scan-test rscan-test vm-test vmsession-test sequence-test valid-test
+             compile-test compile-fuzz
+             nav-test write-test unicode-test
+             rust-api-test rust-api-test-full
+             wasm-sdk-test
+             size watchdog-test
+             npm-test rfc-corpus proptest
+             node-oldest msrv runtime]
+  ;; SPEC §7: the same Program bytes, verdict, reason, path and budget point on
+  ;; every host. Each of these compares JS with Rust (and the oracle) on its layer.
+  :identity [check scan-test compile-test vm-test vmsession-test sequence-test
+             nav-test write-test unicode-test rust-api-test]
+  ;; the routine set before landing a change that touches kin or a host
+  :land     [check drift size npm-test rust-api-test wasm-sdk-test vm-test compile-test]}}

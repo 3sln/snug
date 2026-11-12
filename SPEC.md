@@ -174,7 +174,10 @@ while the schema VM also exposes its step budget.
 
 For the same schema text, options and input bytes, every host produces the
 same compiled Program bytes, the same verdict, the same reason, the same path
-and the same budget exhaustion point. This is a gate (`bb identity`). The
+and the same budget exhaustion point. This is a gate: `bb identity` runs the
+`identity` set of `ci/gate-map.edn`, the gates that compare JS with Rust
+layer by layer (compiler, scanner, VM, sessions, sequences, navigation,
+writer, Unicode tables and the public Rust API). The
 public serialisation uses explicit little-endian words and a host SHA-256
 digest; format major must equal the loader's and minor be no newer (D084).
 The producer snug version is provenance, not an equality gate (D100).
@@ -205,7 +208,8 @@ host/rust/                 Rust crate host; host/wasm/ wasm exports
 corpus/                    conformance corpus, CBOR vectors, study material
 bench/                     benchmarks and recorded results
 docs/                      architecture.md, program.md, profiles
-ci/gate-map.edn            which gates run
+ci/gate-map.edn            every gate, its watchdog caps and the gate sets
+                           (release, land, identity); run by `bb gates`
 ```
 
 ## 10. Open questions
