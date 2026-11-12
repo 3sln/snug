@@ -6277,7 +6277,11 @@ scale, and the buffer is the independent reference.
 custom runtime can already use `Session` directly); generic code over a
 sync/async read trait (async closures and trait objects make it heavier than
 three small state machines); keeping the copies (the reason for this item).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-12). This is an internal refactor:
+  no public API change and no change to verdicts, so no owner decision is
+  needed. Verified on main at `c4ce3c7`: no conflict markers. The full
+  differential counts, including Pending polls and yields, equal the run
+  before the refactor.
 
 ## Findings
 
