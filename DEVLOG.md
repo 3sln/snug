@@ -5714,6 +5714,52 @@ same type as the target"); accepting ill-formed UTF-8 text literals
 (contradicts the MUST, and they could never match a valid text item).
 - [ ] **Signed off** (owner)
 
+### D333 — Bundle growth for P9.2 (D328–D330); the grown caps at measured + 2% (D303)
+**Decision** (P8.5 VM engineer; signed off under D303 below): the caps that
+P9.2 pushes over are raised to ceil(measured × 1.02). These are the
+`snug/compile` full gzip and brotli caps, the `snug/sources` gzip caps,
+the `snug/sequence` min caps and the `all-runtime` brotli caps. Every other
+cap is unchanged.
+
+Growth against main `5a1bb84`, measured on `p92-rfc` (esbuild 0.28.2):
+
+| Entry | min | gzip | brotli | Cause |
+| --- | ---: | ---: | ---: | --- |
+| `snug/compile` full | +2,149 | +771 | +736 | the compiler's controls (`kin/compile/ctl.kin`), plus the VM |
+| `snug/schema` | +597 | +265 | +257 | the VM (`kin/vm-eval.kin`) |
+| `snug/sources` | +597 | +281 | +192 | the VM |
+| `snug/sequence` | +597 | +277 | +105 | the VM |
+| `runtime` | +597 | +277 | +283 | the VM |
+| `all-runtime` | +597 | +255 | +215 | the VM |
+
+What grew:
+* **VM** (D328): `float-cls`, `fits` and `low-zero`, the float's width
+  classes by value.
+* **Compiler** (D329): `int-fkey` and `dbl-key`, which make the exact
+  float key of an integer controller; `float-to-int` covering every
+  finite float; and `ctl-eq`'s cross-kind points.
+* **Compiler** (D330): `vec-utf8` and `vcont`, for the text result's UTF-8
+  check, which RFC 9165 §2.2 requires: "If the target is a text string,
+  the result of that concatenation MUST be valid UTF-8".
+
+**Cuts**:
+* Done: `int-fkey` rewritten as one normalisation loop, about 330 B min
+  smaller than the shift-case version.
+* Considered and kept: dropping the UTF-8 check (about 470 B min) would
+  break the RFC's MUST.
+
+New caps:
+* `snug/compile` full: gzip 99,313, brotli 84,682.
+* `snug/sources` static and full: gzip 67,658.
+* `snug/sequence` static and full: min 213,828.
+* `all-runtime` static and full: brotli 84,894.
+
+**Gain**:
+* The RFC runner is at 984 pass and 0 unexplained.
+* The `numbers.json` corpus passes, with 52 cases.
+* `float32` matches the shortest-form 1.5.
+- [x] **Signed off** (coordinator, 2026-11-11, under owner delegation D303: compile +0.77 KB gzip, VM entries +0.27 KB gzip, for RFC 8610 §3.3 float widths by value, numeric controls on `number` and RFC 9165 `.cat` text/bytes (P9.2); RFC corpus 984 pass, 0 unexplained)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -7828,12 +7874,46 @@ review.
     failure), `check` and `drift`: all ok.
   * Interrupting a running gate's watchdog with SIGTERM left no process of
     its group behind.
-- [ ] **P9.2 — RFC corpus all passing or classified.** Regenerate
+- [x] **P9.2 — RFC corpus all passing or classified.** Regenerate
   `corpus/conformance/rfc/current-results.json` (it predates P8.4). Then
   work through each remaining failure (27 at `920a3e1`), fixing it or
   classifying it with a written reason (outside scope, an RFC erratum, a
   documented deviation with its D-entry). Done when there are no
   unexplained failures.
+  *Done 2026-11-11 (D328, D329, D330; size D333):*
+  - The runner now gives 999 checks: 984 pass, 15 classified, 0
+    unexplained and 0 stale. `--gate` fails on an unexplained or stale
+    check.
+  - `current-results.json` is regenerated.
+  - The classified checks:
+    - NaN payloads under `deterministic`: D122, quoting §4.2.2.
+    - default-timer: contested, on S46.
+    - The 9 RFC 9165 figure 3–5 checks: pending P9.14.
+    - The 3 "RFC 9682 simple head numbers" checks: pending P9.3, which
+      removes that classification.
+  - Fixed:
+    - float widths by value (D328, a visible change);
+    - exact numeric controls across int and float (D329);
+    - `.cat`/`.det` of text with bytes (D330).
+
+  Quotations were checked against `corpus/rfc`. The default `valid`
+  preset accepts `f97e01` and `faffc00001` (the rfc8949-additional
+  vectors).
+
+  Gates on the final tree (`54a6468`; after the rebase onto `dd54b6d`:
+  drift, `size` and `rust-api-test` again):
+  - `vm-test`: conformance 1459/1459, PEG oracle 8704/8704, JS == Rust
+    80,701, JS == wasm 78,407.
+  - `vmsession-test 2000 1 100 60`: 306,479 runs.
+  - `sequence-test 300 1`: 444,110 runs, and the Rust host 21,636/21,636.
+    That needed a fix to the Rust host check: under a valid-CBOR profile a
+    message's view is its canonical copy (D262).
+  - `wasm-sdk-test` 15/15 and `npm test` 1450/1450.
+  - `compile-test`, `valid-test`, `scan-test`, `rscan-test`, `nav-test`,
+    `write-test`, `unicode-test`, `compile-fuzz`, the RFC runner, the PEG
+    oracle tests, `watchdog-test`, `check` and `drift`: all ok.
+  - `proptest`, 2 min, P1–P5: 73,353 cases, no failure.
+  - `size`: ok with D333's caps.
 - [ ] **P9.3 — RFC 9682 head numbers.** Parse the `#7.<type>` syntax, and
   match `#7.24`–`#7.31` as RFC 9682 §3.2 reads them, so the "RFC 9682
   simple head numbers" suite compiles and passes.
