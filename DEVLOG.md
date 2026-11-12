@@ -6813,7 +6813,12 @@ Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
 * Generating the `.d.ts` files. Rejected: there is no offline TypeScript.
   The hand-written files re-export the native declarations, so they cannot
   drift from them.
-- [ ] **Signed off**
+- [x] **Signed off** (manager, 2026-11-12). This implements owner
+  decision O3. It was merged at `2642189` onto the tree it was gated on,
+  10/10 land gates plus wasm-package-test. On main: drift ok, gate map ok,
+  size ok. Nothing published. Follow-ups:
+  - run node-oldest against the SDK package (P9.9);
+  - test sync init in Firefox and Safari (noted in docs).
 
 ## Findings
 
