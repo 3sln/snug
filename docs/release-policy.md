@@ -428,6 +428,9 @@ go. Delegations such as D303 cover size caps only, not releases.
      all of this and installs the packed tarball into a scratch project
      (docs/wasm-sdk.md).
 
+   Then build the `dist` commit and its tags from those artefacts, in the
+   local repository (`kin/scripts/dist.mjs`, §9). Nothing is pushed.
+
    Record each artefact's SHA-256 and the producing commit in DEVLOG. The
    same commit and `version.edn` give byte-identical artefacts
    (`bb stamp-test` checks this for the npm tarball and the `.crate`).
@@ -446,10 +449,11 @@ go. Delegations such as D303 cover size caps only, not releases.
    - the changelog;
    - the artefact listings and checksums.
 
-   Then the owner gives (or withholds) the go. Publishing, tagging (for
-   example `vX.Y.Z` on the release commit) and pushing are done by the
-   owner or on the owner's instruction, never by an engineer on their own
-   initiative.
+   Then the owner gives (or withholds) the go. Publishing, tagging and
+   pushing are done by the owner or on the owner's instruction, never by
+   an engineer on their own initiative. The tags (proposed in §9, D346):
+   `src/vX.Y.Z` on the release commit, and `vX.Y.Z` on the generated
+   `dist` commit.
 8. **After the release:** open a new `[Unreleased]` section, and record
    the release (version, commit, artefact checksums) in DEVLOG.
 
@@ -557,6 +561,9 @@ DEVLOG under P9.15 and P9.17–P9.19.
     babashka git deps, and similar) get an orphan distribution branch of
     stamped trees with tags. This waits on a target assessment
     (DEVLOG P9.19).
+  - Owner (2026-11-12): "dist branch with release build is the intent"
+    (designed in §9). Babashka pod / Clojure: dropped by the owner on
+    2026-11-12; there is no Clojure or babashka distribution for now.
 - [x] **O4 — Names.** Owner: `@3sln/snug` (JS) and `@3sln/snug-wasm`
   (wasm SDK). Other targets get similar names that don't conflict. The
   Rust crate name is proposed in P9.15 (crates.io `snug` is likely
@@ -642,3 +649,108 @@ items are for the release commit or for earlier items:
   - The README features table still calls `deterministic` the default
     preset (D260 made `valid` the default).
   - SPEC §1.1 lists `.abnf` as refused (P9.14 pending).
+
+## 9. Git-source consumers: the `dist` branch (proposed, P9.19, D346)
+
+Owner (2026-11-12): "dist branch with release build is the intent." The
+`dist` branch is **generated release output, not source history**. It is
+an orphan branch that is never merged into main or any working branch. It
+holds stamped versions, and nothing else in the repository does (O2: main
+and every working branch hold the placeholder).
+
+**One commit per release.** `kin/scripts/dist.mjs` builds the commit from
+the release artefacts of §4 step 5, which are built from a stamped tree. The
+commit is those artefacts unpacked, so a git consumer gets exactly the files
+the registries ship:
+
+| Path | Contents | Consumer |
+| --- | --- | --- |
+| `/` | the `@3sln/snug` npm tarball's `package/` | npm (git dependencies cannot name a subdirectory) |
+| `/rust/` | the `snug-cddl` `.crate` | cargo, which finds the crate by package name |
+| `/wasm-sdk/` | the `@3sln/snug-wasm` tarball's `package/` (once P9.17 builds it) | pnpm `#vX.Y.Z&path:/wasm-sdk`; npm cannot install it from git |
+| `/go/` | a Go module, only if a Go host is ever built (`--overlay`) | Go, through the `go/vX.Y.Z` tag |
+| `/DIST.json` | the version, the source commit, and the SHA-256 of each input artefact | provenance |
+| `/.npmignore` | keeps the other trees out of an npm git install | npm |
+
+- **History.** Each commit's parent is the previous `dist` commit, and the
+  first is an orphan root. The diff between two releases is the change
+  in the shipped files.
+- **Reproducible.** The author, committer and dates are taken from the
+  source commit. The same artefacts on the same parent give the same
+  commit and tag hashes.
+- **Refusals.** The script refuses the placeholder version, artefacts that
+  disagree on the version, an existing tag, and a version the branch
+  already ends at. It writes refs only in the `--repo` it is given, and it
+  never pushes. Pushing the branch and its tags is part of the owner's go
+  (§4 step 7).
+
+**Tags.** These are never moved or deleted once pushed: the Go module proxy,
+`Cargo.lock` and `package-lock.json` pin the commit.
+
+| Tag | On | Why |
+| --- | --- | --- |
+| `vX.Y.Z` | the `dist` commit | the tag consumers name is the installable tree, as with GitHub Actions' built release tags |
+| `src/vX.Y.Z` | the release commit on main | source provenance; `git describe --match 'src/v*'` |
+| `go/vX.Y.Z` | the `dist` commit, only when `/go/go.mod` exists | Go's rule for a module in a subdirectory |
+
+The alternative, `vX.Y.Z` on the source and `dist/vX.Y.Z` on the dist
+commit, breaks npm's `#semver:` range. npm reads a version out of every tag
+ending in one, and the last tag in ref order wins. It resolved to the source
+commit, and the install failed (tested). With the scheme above, `v…` sorts
+last, and `#semver:` installs the dist commit (tested).
+
+The cost of this scheme is that GitHub's automatic "Source code" archives
+for release `vX.Y.Z` hold the built tree. The release should therefore
+attach a `git archive` of `src/vX.Y.Z` as well.
+
+**Consumer forms:**
+- npm: `"@3sln/snug": "github:3sln/snug#v0.1.0"`. A full
+  `git+https://github.com/3sln/snug.git#v0.1.0` also works.
+- cargo: `snug-cddl = { git = "https://github.com/3sln/snug", tag =
+  "v0.1.0" }`. crates.io refuses git dependencies in published crates, so
+  this form is for applications.
+- Go: `require github.com/3sln/snug/go v0.1.0`. This applies only if a
+  Go host exists. Go would have to use the dist tree: on main, generated
+  code holds the placeholder version, and a Go module cannot import files
+  from outside its own directory.
+
+**Validation.** `node kin/scripts/dist-test.mjs --release <dir> --source
+<commit>` runs offline in `.cache/dist-test/`. It is not a gate, because it
+needs a stamped build. It checks:
+- reproducibility;
+- the refusals;
+- that an npm `git+file://…#v0.1.0` install equals the tarball's file list
+  and validates;
+- that `#semver:` resolves to the dist commit;
+- that a cargo `git` + `tag` dependency builds and validates;
+- that a probe Go module resolves through `go/v0.1.0`.
+
+Some things cannot be checked offline:
+- fetches from github.com;
+- `github:` shorthand installs, which npm downloads as codeload tarballs;
+- proxy.golang.org, which needs a public repository and a detected licence;
+- GitHub's release archives.
+
+npm also needs the remote's HEAD branch to exist, which is always true on
+GitHub.
+
+**Channels per artefact:**
+
+| Artefact | Primary | Also |
+| --- | --- | --- |
+| `@3sln/snug` | npmjs.com | `dist` root (git installs) |
+| `@3sln/snug-wasm` | npmjs.com | `dist` `/wasm-sdk/` (pnpm, yarn) |
+| raw `.wasm` (SDK and compiler modules) | GitHub Releases asset | inside `@3sln/snug-wasm` |
+| `snug-cddl` crate | crates.io | `dist` `/rust/` (git dependencies) |
+| npm tarballs, `.crate`, `SHA256SUMS`, source archive | GitHub Releases assets | none |
+| Go module (if ever) | `dist` + `go/` tags, through proxy.golang.org | none |
+
+GitHub Packages is not recommended for any artefact:
+- its npm registry needs a personal access token to install even a public
+  package, plus an `.npmrc` scope line;
+- it has no Cargo or Go registry.
+
+Release assets have the following limits: under 2 GiB per file, up to 1000
+per release, and no total-size or bandwidth limit. The sources, checked
+2026-11-12, are in
+[reviews/2026-11-12-targets.md](reviews/2026-11-12-targets.md).
