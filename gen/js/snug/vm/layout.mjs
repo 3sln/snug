@@ -261,6 +261,8 @@ export const R_GROUP_LIMIT = 44;
 
 export const R_AGROW = 45;
 
+export const R_CUT = 46;
+
 export const R_BUDGET = 48;
 
 export const R_NONDET = 49;

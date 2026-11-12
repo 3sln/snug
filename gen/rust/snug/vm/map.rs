@@ -1533,7 +1533,9 @@ pub(crate) fn mwit(s: &mut [i32], bo: i32, reason: i32, xk: i32, xv: i32) {
 pub(crate) fn ev_wit(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32) -> i32 {
     // The root's failure event as the block's witness (program-2 §8 rule 4'):
     // `missing` with KEY id / ANYKEY (none for an unplugged socket's FAIL); a cut
-    // `value` at its diagnostic pair, whose key gives the segment.
+    // `value` at its diagnostic pair, whose key gives the segment, with the
+    // subcode `cut` (D342: R_CUT in the reason word's second byte, which the
+    // map's witness hands to wit-set).
     let a: i32 = s[(bo + MB_E1) as usize];
     let pair: i32 = s[(bo + MB_E2) as usize];
     let kind: i32 = a >> 16;
@@ -1569,14 +1571,15 @@ pub(crate) fn ev_wit(p: &[i32], s: &mut [i32], bo: i32, mt: i32, tier: i32) -> i
             }
         }
     }
+    let cv: i32 = R_VALUE | (R_CUT << 8);
     if pk < 0 {
-        mwit(s, bo, R_VALUE, P_ANYKEY, 0);
+        mwit(s, bo, cv, P_ANYKEY, 0);
     } else {
         let sg: i32 = seg_of(p, mt, pk);
         if sg == P_KEY {
-            mwit(s, bo, R_VALUE, P_KEY, pk);
+            mwit(s, bo, cv, P_KEY, pk);
         } else {
-            mwit(s, bo, R_VALUE, P_ANYKEY, 0);
+            mwit(s, bo, cv, P_ANYKEY, 0);
         }
     }
     return 0;

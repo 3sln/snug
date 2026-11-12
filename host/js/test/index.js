@@ -25,6 +25,7 @@ import './xsd-regexp.test.mjs';
 import './sessions.test.mjs';
 import './sequence.test.mjs';
 import './version.test.mjs';
+import './schema-api.test.mjs';
 
 test('test/index.js imports every test/*.test.mjs', () => {
   const dir = new URL('./', import.meta.url), self = readFileSync(new URL('index.js', dir), 'utf8');

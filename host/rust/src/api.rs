@@ -166,8 +166,48 @@ impl ValidationOptions {
     }
 }
 /// The largest driver read size (`chunk`): 2³¹ − 1 bytes. A larger one, or 0, is
-/// `Error::Usage("options")` (P9.16: it used to panic or reserve that much).
+/// `Error::Usage("options")` (it used to panic or reserve that much).
 pub(crate) const MAX_CHUNK: usize = i32::MAX as usize;
+/// How a source driver reads (JS's `SourceOptions`): the
+/// [`Schema::validate_blob`] and [`Schema::validate_reader`] families and their
+/// async forms. [`SequenceOptions`](crate::SequenceOptions) carries its own
+/// `chunk` and `fail_fast`.
+///
+/// ```
+/// use snug::SourceOptions;
+/// let network = SourceOptions { chunk: 4096, fail_fast: true, ..SourceOptions::default() };
+/// assert_eq!((network.quantum, SourceOptions::default().chunk), (0, 65536));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceOptions {
+    /// Bytes per read: 1..=2³¹ − 1 (default 65,536). A blob read is
+    /// `max(need, chunk)` bytes; a stream holds what the session keeps plus one
+    /// chunk.
+    pub chunk: usize,
+    /// About this many work units between yields to the caller or executor;
+    /// 0 (the default) never yields. At most 2³¹ − 1.
+    pub quantum: u32,
+    /// An unknown-length stream answers a certain refusal at once and stops
+    /// reading; its code may then be `cbor/truncated` or `cbor/too_large` where
+    /// the buffer's differs, its accept/refuse never does. Prefer it for
+    /// untrusted peers: drain mode (the default, `false`) reads on to the end or
+    /// to `max_bytes`. A blob is read whole either way.
+    pub fail_fast: bool,
+}
+impl Default for SourceOptions {
+    fn default() -> Self {
+        Self { chunk: 65536, quantum: 0, fail_fast: false }
+    }
+}
+impl SourceOptions {
+    /// The checked chunk and quantum, or `Error::Usage("options")`.
+    pub(crate) fn checked(&self) -> Result<(usize, i32), Error> {
+        if self.chunk == 0 || self.chunk > MAX_CHUNK || self.quantum > i32::MAX as u32 {
+            return Err(Error::Usage("options"));
+        }
+        Ok((self.chunk, self.quantum as i32))
+    }
+}
 fn failure(code: i32, reason: &'static str) -> Failure {
     Failure {
         code,
@@ -183,9 +223,11 @@ fn failure(code: i32, reason: &'static str) -> Failure {
 #[derive(Debug, Clone)]
 pub struct Schema {
     program: Program,
+    warnings: Vec<crate::compile::Warning>,
 }
 impl Schema {
-    /// Compile CDDL synchronously and verify the resulting Program.
+    /// Compile CDDL synchronously and verify the resulting Program. The
+    /// compiler's warnings (never refusals) are [`Schema::warnings`].
     pub fn compile(text: &str, options: &CompileOptions<'_>) -> Result<Self, Error> {
         if text.len() >= i32::MAX as usize {
             return Err(Error::Usage("schema_size"));
@@ -210,13 +252,26 @@ impl Schema {
             },
         )?;
         let none = crate::controls::Controls::default();
-        Ok(Self::from_program(Program::from_parts_with(
-            &c.program, &c.pool, options.controls.unwrap_or(&none),
-        )?))
+        let program = Program::from_parts_with(&c.program, &c.pool, options.controls.unwrap_or(&none))?;
+        Ok(Self { program, warnings: c.warnings })
     }
-    /// Create a schema without invoking the compiler.
+    /// Create a schema without invoking the compiler (no warnings).
     pub fn from_program(program: Program) -> Self {
-        Self { program }
+        Self { program, warnings: Vec::new() }
+    }
+    /// The compile warnings, in a deterministic order (empty for a schema not
+    /// compiled here: a loaded Program carries none). W8, for example, flags a
+    /// choice of map groups that the RFC 8610 cut makes fail; see the guide's
+    /// "Discriminated unions under the RFC cut".
+    ///
+    /// ```
+    /// use snug::{CompileOptions, Schema};
+    /// let s = Schema::compile("r = { kind: \"a\", x: int // kind: \"b\", y: tstr }", &CompileOptions::default())?;
+    /// assert_eq!(s.warnings()[0].code, "W8");
+    /// # Ok::<(), snug::Error>(())
+    /// ```
+    pub fn warnings(&self) -> &[crate::compile::Warning] {
+        &self.warnings
     }
     /// Load a trusted persisted Program without invoking the compiler.
     pub fn from_serialized(bytes: &[u8]) -> Result<Self, Error> {
@@ -239,9 +294,16 @@ impl Schema {
             .and_then(|i| i32::try_from(i).ok())
             .ok_or_else(|| failure(-1, "unknown_rule"))
     }
+    /// The rule's index, or `Error::Usage("unknown_rule")` (every
+    /// `Result<_, Error>` API reports an unknown rule this way).
+    fn rule_id(&self, rule: &str) -> Result<i32, Error> {
+        self.rule(rule).map_err(Error::from)
+    }
     /// Validate without building values, using any root and compiled limits.
     /// Unknown rule is an API failure (`code: -1, reason: unknown_rule`), never
-    /// a fabricated CDDL verdict; JavaScript instead throws TypeError.
+    /// a fabricated CDDL verdict; `?` into [`Error`] turns it into
+    /// `Error::Usage("unknown_rule")`, as every other API reports it.
+    /// JavaScript instead throws TypeError.
     pub fn validate(&self, bytes: &[u8], rule: &str, scratch: &mut Scratch) -> Result<(), Failure> {
         self.validate_with_options(bytes, rule, &ValidationOptions::default(), scratch)
     }
@@ -314,72 +376,43 @@ impl Schema {
         let c = self.validate_checked(bytes, rule, options, scratch)?;
         Ok(crate::view::Document::from_checked(c.copy.unwrap_or_else(|| bytes.to_vec()), c.unsorted))
     }
-    /// Validate an immutable known-length Blob through the existing session
-    /// driver. `chunk` must be positive; quantum 0 disables scheduling yields.
-    /// Source failures are Error; CBOR/CDDL verdicts remain the inner Result.
+    /// Validate an immutable known-length [`Blob`] through the session driver,
+    /// reading `source.chunk` bytes (or what the session needs) at a time.
+    /// Source and API failures are the outer `Error` (an unknown rule is
+    /// `Error::Usage("unknown_rule")`, bad options `Error::Usage("options")`, a
+    /// backend's `io::Error` [`Error::Io`]); CBOR/CDDL verdicts are the inner
+    /// `Result`, the buffer's for the same bytes.
     pub fn validate_blob(
         &self,
         blob: &dyn Blob,
         rule: &str,
         options: &ValidationOptions,
-        chunk: usize,
-        quantum: u32,
+        source: &SourceOptions,
     ) -> Result<Result<(), Failure>, Error> {
-        let r = self.rule(rule).map_err(Error::Validation)?;
-        if chunk == 0 || chunk > MAX_CHUNK || quantum > i32::MAX as u32 {
-            return Err(Error::Usage("options"));
-        }
-        schema::validate_blob(
-            self.program.host(),
-            r,
-            blob,
-            &options.host(),
-            chunk,
-            quantum as i32,
-        )
-        .map_err(|e| match e {
-            schema::SourceError::ShortRead { .. } => Error::Source("short_read"),
-            schema::SourceError::Read => Error::Source("read"),
-            schema::SourceError::TooLarge => Error::Source("too_large"),
-            schema::SourceError::SessionLimit => Error::SessionLimit,
-        })
+        let r = self.rule_id(rule)?;
+        let (chunk, quantum) = source.checked()?;
+        schema::validate_blob(self.program.host(), r, blob, &options.host(), chunk, quantum).map_err(Error::from)
     }
-}
-/// Validate a known-length snapshot through a Schema's session driver.
-impl Schema {
     /// D085: validate a message of UNKNOWN length read from `reader` until EOF
     /// (drain mode: the verdict equals the buffer's of the same bytes, holding at
-    /// most what the session asks for plus `chunk`). `fail_fast` answers a certain
-    /// refusal at once; its code may then differ from the buffer's
-    /// (`cbor/truncated` or `cbor/too_large`), its accept/refuse never does.
+    /// most what the session asks for plus one `source.chunk`). With
+    /// `source.fail_fast` a certain refusal is answered at once; its code may
+    /// then differ from the buffer's (`cbor/truncated` or `cbor/too_large`), its
+    /// accept/refuse never does. A sync reader never yields: `source.quantum`
+    /// only bounds the work per step. A read error is [`Error::Io`], the reader's
+    /// own error.
     pub fn validate_reader(
         &self,
         reader: &mut dyn std::io::Read,
         rule: &str,
         options: &ValidationOptions,
-        chunk: usize,
-        fail_fast: bool,
+        source: &SourceOptions,
     ) -> Result<Result<(), Failure>, Error> {
-        let r = self.rule(rule).map_err(Error::Validation)?;
-        if chunk == 0 || chunk > MAX_CHUNK {
-            return Err(Error::Usage("options"));
-        }
-        schema::validate_reader(self.program.host(), r, reader, &options.host(), chunk, 0, fail_fast)
-            .map_err(|e| match e {
-                schema::SourceError::SessionLimit => Error::SessionLimit,
-                _ => Error::Source("read"),
-            })
+        let r = self.rule_id(rule)?;
+        let (chunk, quantum) = source.checked()?;
+        schema::validate_reader(self.program.host(), r, reader, &options.host(), chunk, quantum, source.fail_fast)
+            .map_err(Error::from)
     }
-}
-pub fn validate_blob(
-    schema: &Schema,
-    blob: &dyn Blob,
-    rule: &str,
-    options: &ValidationOptions,
-    chunk: usize,
-    quantum: u32,
-) -> Result<Result<(), Failure>, Error> {
-    schema.validate_blob(blob, rule, options, chunk, quantum)
 }
 /// In-memory borrowed Blob. Range arithmetic is checked for every read.
 pub struct BytesBlob<'a>(pub &'a [u8]);

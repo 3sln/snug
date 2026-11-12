@@ -1,15 +1,16 @@
-//! P9.14 (D334): the ABNF engine (`snug::snug::abnf`, generated from kin/abnf.kin) on
-//! a debug Rust build, for `bb abnf-test`: the gate compares every answer with the
-//! generated JS. Lines on stdin:
-//!
-//!   P <parse mode> <controller hex>    prepare (the CBOR encoding of a text/byte string;
-//!                                      parse mode 0 strict, 1 lenient, D340)
-//!                                      -> "P <status> <line> <column> <table words>"
-//!   R <mode> <item hex> <room> <first> <cap>
-//!                                      run the last prepared table over the item, with a
-//!                                      first scratch of <first> words (0: the default) and
-//!                                      scratch cap <cap> (-1: the default), grown to
-//!                                      `abnf_more` -> "R <verdict word> <reruns>"
+// P9.14 (D334): the ABNF engine (`snug::snug::abnf`, generated from kin/abnf.kin) on
+// a debug Rust build, for `bb abnf-test`: the gate compares every answer with the
+// generated JS. A test host, not documented as a crate (P9.16: plain comments, as the
+// other test-host binaries, so `cargo doc` stays quiet). Lines on stdin:
+//
+//   P <parse mode> <controller hex>    prepare (the CBOR encoding of a text/byte string;
+//                                      parse mode 0 strict, 1 lenient, D340)
+//                                      -> "P <status> <line> <column> <table words>"
+//   R <mode> <item hex> <room> <first> <cap>
+//                                      run the last prepared table over the item, with a
+//                                      first scratch of <first> words (0: the default) and
+//                                      scratch cap <cap> (-1: the default), grown to
+//                                      `abnf_more` -> "R <verdict word> <reruns>"
 use snug::snug::abnf::{abnf_error_column, abnf_error_line, abnf_more, abnf_prep, abnf_run, abnf_scratch_words,
                        abnf_table_words, abnf_words, ABNF_MAX_WORDS};
 use std::io::{BufRead, Write};

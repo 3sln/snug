@@ -595,7 +595,7 @@ impl Schema {
 
 /// Read a profile-checked CBOR sequence from `reader` until EOF: an iterator of
 /// owned messages; a stopping refusal is the last item; a read error is
-/// `Error::Source("read")` (also the last item). `Err(Error::SessionLimit)` when
+/// [`Error::Io`] with the reader's error (also the last item). `Err(Error::SessionLimit)` when
 /// the live-session bound is reached (P9.7, D327).
 pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> Result<SequenceReader<'static, R>, Error> {
     if options.chunk > crate::api::MAX_CHUNK {
@@ -663,8 +663,8 @@ impl<'p> SeqPump<'p> {
         &mut self.buf
     }
     /// The outcome of the read `next` asked for: `Ok(0)` is the end; `Interrupted` is
-    /// retried; any other error ends the sequence with `Error::Source("read")`, answered
-    /// here as the last item.
+    /// retried; any other error ends the sequence with `Error::Io` (the error itself,
+    /// P9.16), answered here as the last item.
     pub(crate) fn filled(&mut self, read: std::io::Result<usize>) -> Option<Result<Message<'static>, Error>> {
         match read {
             Ok(0) => {
@@ -680,9 +680,9 @@ impl<'p> SeqPump<'p> {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => {
+            Err(e) => {
                 self.finished = true;
-                return Some(Err(Error::Source("read")));
+                return Some(Err(Error::Io(e.into())));
             }
         }
         None

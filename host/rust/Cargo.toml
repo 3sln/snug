@@ -16,6 +16,7 @@ rust-version = "1.87"   # the oldest stable that builds and tests it; `bb gates 
 # any depth, so every path here is anchored.
 include = [
     "/Cargo.toml",
+    "/build.rs",
     "/README.md",
     "/LICENSE",
     "/THIRD_PARTY_NOTICES.md",

@@ -1340,7 +1340,8 @@
           (do (let [wr (ia s (+ bestbo MB_E0))
                     wk (ia s (+ bestbo MB_E1))
                     wv (ia s (+ bestbo MB_E2))]
-                (wit-set s wr 0 d wk wv pos)))
+                (comment "the reason, and a subcode in its second byte (D342: cut)")
+                (wit-set s (bit-and wr 255) (sar wr 8) d wk wv pos)))
           (do (let [r1 (rule1 s fb w nq d pos)]
                 (if (< r1 0) (return r1)))))))
     (return 0)))

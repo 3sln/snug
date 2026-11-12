@@ -66,6 +66,8 @@ export type ProfileCode = 'truncated' | 'non_shortest' | 'indefinite' | 'malform
 export type SchemaReason = 'type' | 'missing' | 'unexpected' | 'value' | 'size' |
   'range' | 'pattern' | 'tag' | 'bits' | 'embedded' | 'control' | 'control_size' | 'group_limit' | 'budget';
 export type Reason = SchemaReason | `cbor/${ProfileCode}`;
+/** A refusal's subcode: an `embedded` refusal's own reason, or `cut` on a `value` a cut decided (D342). */
+export type Subcode = Reason | 'cut';
 export type FaultCode = ProfileCode | 'unsupported' | 'grammar' | 'writer_failed' | `schema/${SchemaReason}` | 'sessions/limit';
 export declare class SnugFault extends Error {
   constructor(code?: string, message?: string);
@@ -73,7 +75,7 @@ export declare class SnugFault extends Error {
   reason?: Reason;
   path?: (string | number)[];
   offset?: number;
-  subcode?: Reason;
+  subcode?: Subcode;
 }
 export declare const LIMITS: Readonly<{
   maxBytes: 1500000; maxDepth: 32; maxEntries: 65536; maxItems: 131072;

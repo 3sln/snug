@@ -135,6 +135,48 @@ pub extern "C" fn cc_release() {
     s.text = Vec::new();
     s.unicode = Vec::new();
 }
+/// P9.16: the last successful compile's warnings as JSON text, `[{"code", "rule"
+/// (null for none), "line", "column", "message"}]` in the native order; its length
+/// in INFO[0]. Read before cc_release (it reuses the text buffer, as cc_error).
+#[no_mangle]
+pub extern "C" fn cc_warnings() -> *const u8 {
+    fn js(out: &mut String, s: &str) {
+        out.push('"');
+        for ch in s.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    let s = st();
+    let mut j = String::from("[");
+    if let Some(Ok(c)) = &s.result {
+        for (i, w) in c.warnings.iter().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            j.push_str("{\"code\":");
+            js(&mut j, w.code);
+            j.push_str(",\"rule\":");
+            match &w.rule {
+                Some(r) => js(&mut j, r),
+                None => j.push_str("null"),
+            }
+            j.push_str(&format!(",\"line\":{},\"column\":{},\"message\":", w.line, w.column));
+            js(&mut j, w.message);
+            j.push('}');
+        }
+    }
+    j.push(']');
+    s.text.clear();
+    s.text.extend_from_slice(j.as_bytes());
+    s.info[0] = s.text.len() as i32;
+    s.text.as_ptr()
+}
 /// kin's snug version string; its length in INFO[0].
 #[no_mangle]
 pub extern "C" fn cc_version() -> *const u8 {

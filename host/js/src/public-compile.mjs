@@ -7,7 +7,6 @@ export { SchemaError };
 export async function compile(text, options = {}) {
   validateCompileOptions(options);
   const compiler = await import('./compile-runtime.mjs');
-  const { Program, Schema } = compiler;
   let compiled;
   try { compiled = compiler.compile(text, options); }
   catch (e) {
@@ -18,6 +17,5 @@ export async function compile(text, options = {}) {
     }
     throw e;
   }
-  return new Schema(new Program(compiled.program, compiled.pool,
-    options.controls === undefined ? {} : { controls: options.controls }));
+  return compiler.schemaOf(compiled, options.controls);
 }

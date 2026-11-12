@@ -114,6 +114,8 @@ shape = { kind: "a", x: int } / { kind: "b", y: tstr }
 shape = { "kind" => "a", x: int // "kind" => "b", y: tstr }
 ```
 
+The compiler warns about the first spelling (`schema.warnings` in JS, `Schema::warnings()` in Rust).
+
 If you need to accept schemas written for other CDDL tools, compile with
 `cuts: 'branch'` to get their behaviour. The
 [guide](docs/guide.md#discriminated-unions-under-the-rfc-cut) explains why.

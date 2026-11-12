@@ -2,7 +2,9 @@
 # Assemble and test the public Rust API offline; Node supplies the JS oracle.
 #
 #     bb rust-api-test          routine gating (a few minutes): every Cargo test, doctest,
-#                               guide/README example and Clippy, with the P9.6 async
+#                               guide/README example, rustdoc with warnings denied (P9.16:
+#                               broken intra-doc links, the test-host binaries too) and
+#                               Clippy, with the P9.6 async
 #                               differential (tests/async_sources.rs) on a seeded slice
 #                               (every 8th case, every 16th sequence body of <= 64 KiB)
 #     bb rust-api-test full     the same with the async differential at full scale (all
@@ -32,6 +34,8 @@ cat .cache/snug-rs/async-sources-blob.txt .cache/snug-rs/async-sources-reader.tx
 cargo build --offline --manifest-path .cache/snug-rs/Cargo.toml --lib
 rustdoc --test --edition 2021 docs/rust.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps
 rustdoc --test --edition 2021 host/rust/README.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps
+RUSTDOCFLAGS="-D warnings" cargo doc --offline --no-deps --manifest-path .cache/snug-rs/Cargo.toml
+echo "rustdoc passed with warnings denied (lib and test-host binaries)"
 if cargo clippy --version >/dev/null 2>&1; then
   # Existing generated compile/ctl.rs compares an i32 against INF == i32::MAX.
   # Allow that one generated-code deny lint; leave all other lint levels intact.

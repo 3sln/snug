@@ -2,6 +2,7 @@
 // checkouts keep their generated imports; only staged copies are rewritten.
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,5 +96,22 @@ export async function buildPackage(destination) {
   return target;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+/** P9.16: the paths a staged package is built from that differ from the checkout's HEAD (modified,
+ *  staged or untracked), or null when git cannot tell (no git, not a checkout). */
+export function dirtyPaths(repo = resolve(fileURLToPath(new URL('../', import.meta.url)), '../..')) {
+  const sources = ['host/js', 'gen/js', 'examples', 'docs', ...PACKAGE_FILES.root.filter(f => f !== 'package.json')];
+  const r = spawnSync('git', ['status', '--porcelain', '--', ...sources], { cwd: repo, encoding: 'utf8' });
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.split('\n').filter(Boolean).map(line => line.slice(3));
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const dirty = dirtyPaths();
+  if (dirty === null) console.warn('snug: warning: git could not report the checkout state; the staged package may not match a commit');
+  else if (dirty.length) {
+    console.warn(`snug: warning: the checkout has ${dirty.length} uncommitted change(s) in the package's sources; the staged package does not match HEAD:`);
+    for (const p of dirty.slice(0, 20)) console.warn(`  ${p}`);
+    if (dirty.length > 20) console.warn(`  ... and ${dirty.length - 20} more`);
+  }
   console.log(await buildPackage(process.argv[2]));
+}

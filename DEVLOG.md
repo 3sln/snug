@@ -6823,7 +6823,7 @@ Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
   - run node-oldest against the SDK package (P9.9);
   - test sync init in Firefox and Safari (noted in docs).
 
-### D342 — P9.16: `f8` below 32 is `malformed` under every preset; a bignum is a generic data item everywhere; a stream session's key arena grows with the input read (amends D284)
+### D342 — P9.16: `f8` below 32 is `malformed` under every preset; a bignum is a generic data item everywhere; a stream session's key arena grows with the input read (amends D284); the stranger-pass API fixes
 **Decision** (P9.16 engineer, provisional; the manager's P9.16 triage):
 
 1. **`f8` followed by a byte below `0x20` is `malformed` under every
@@ -6900,6 +6900,67 @@ Rust, `rust-version = "1.92"`, the only toolchain the gates ran before.
 4. **`[rust]` A driver `chunk` above 2³¹ − 1 is `Error::Usage("options")`**
    (`usize::MAX` panicked with `capacity overflow`; `1 << 33` reserved 8 GiB),
    on every blob, reader and sequence driver, sync and async.
+5. **API additions and reshapes** (the manager's P9.16 list, on every host
+   where the surface exists):
+   - Compile warnings: `schema.warnings` (JS, wasm SDK; frozen `{ code, rule,
+     line, column, message }`, empty for a Schema not made by `compile`) and
+     `Schema::warnings() -> &[Warning]` (Rust). The wasm compiler module
+     exports them as JSON (`cc_warnings`); the SDK parity test compares them
+     with native on every compiled text.
+   - The `cut` subcode: kin's map witness carries `R_CUT` (46, never a
+     reason) in the second byte of the block's reason word, only on the
+     `value` witness of a cut event (`ev-wit`, kin/vm-map.kin), and the
+     map's witness hands it to `wit-set` (kin/vm-eval.kin). It marks exactly
+     the confusing case (a later alternative would have taken the value; a
+     cut stopped it); an ordinary wrong value has no subcode. The JS, wasm
+     SDK and Rust renderers add `subcode: 'cut'`. One hand-reasoned vm-test
+     expectation (rule A, `{? (a: int, b: int), * tstr => any}` on
+     `{"a": "x"}`) now expects it. Not a Program format change.
+   - `[rust]` `Error::Io(IoError)` and `SourceError::Io(IoError)`: the
+     transport's `io::Error` behind `source()`. `IoError` is shared, clones
+     cheaply and compares by kind, so `Error` keeps `Clone + Eq`; it lives
+     beside `SourceError` in `schema` (the test hosts build that module
+     alone). `code()` stays `read`, Display stays the code.
+   - `[rust]` Root re-exports: `SchemaError`, `SourceError`, `IoError`,
+     `Cuts`, `Regexp`, `AbnfMode`, `Controls`, `Control`, `Warning`,
+     `SourceOptions`; the crate README and the Rust guide now say the inner
+     modules are the test hosts'.
+   - `[rust]` `host/rust/build.rs` answers `cfg(snug_unassembled)` when
+     `src/snug.rs` is missing, and lib.rs then compiles to one
+     `compile_error!` naming `kin/scripts/rust-crate` (every module is behind
+     the cfg, so no other error follows); `kin/scripts/rust-crate` copies it
+     with the library's manifest, whose `include` lists it.
+   - Schema and Program carry an own enumerable `brand` Symbol, so
+     `structuredClone` / `postMessage` throws `DataCloneError` (V8 names the
+     Symbol: "snug.Schema cannot be cloned or posted: send program.serialize()
+     bytes") instead of making a plain object without methods. A private
+     field would not do it: structured clone ignores private state.
+   - `[js]` `npm run build` warns on stderr, listing them, when `git status`
+     shows changes in the package's sources (host/js, gen/js, examples,
+     docs, the copied root files), and when git cannot tell.
+   - `[rust]` One `unknown_rule` path: every `Result<_, Error>` API answers
+     `Error::Usage("unknown_rule")`, and `From<Failure>` maps the code −1
+     API failure to it, so `?` from `validate` agrees.
+   - `[rust]` `SourceOptions { chunk, quantum: u32, fail_fast }` (JS's
+     `SourceOptions`; default 65,536 / 0 / false) replaces the positional
+     `chunk, quantum, fail_fast` of `validate_blob`, `validate_reader` and
+     their async forms. The free `snug::validate_blob` duplicate is removed;
+     `async_source::validate_blob` / `validate_reader` (the test hosts'
+     low-level `i32` forms) are `#[doc(hidden)]`, so `quantum` is `u32` on
+     every documented surface.
+   - Rustdoc hygiene: `Program::serialize` says format 2.0; the crate root
+     has a usage overview and says what `D###` citations are; the two broken
+     intra-doc links in the generated vcopy docs are code spans
+     (kin/vcopy.kin); the `abnf` test host's header is a plain comment (15
+     rustdoc warnings); `Failure`, `Blob` and `SourceError` fields and
+     methods are documented. `bb rust-api-test` now runs `cargo doc` with
+     `-D warnings` (broken intra-doc links included) on the library and the
+     test-host binaries.
+6. **Deferred, with the manager's reasons:** a single-message push validator
+   for an unknown length (a feature, after the RC); `sourceKeyOf` (optional);
+   a semantic TypeScript gate (no offline `tsc`). The wasm SDK docs, deferred
+   to O3, have since landed with P9.17 (docs/wasm-sdk.md); the SDK's
+   warnings, brand and subcode behave as native, so they need no SDK note.
 
 **Evidence**:
 - f8: `bb scan-test`, `rscan-test`, `valid-test`, `vm-test`,
@@ -6964,6 +7025,24 @@ d1f2da9, minified / gzip / brotli bytes, esbuild 0.28.2:
 - Over their caps: `snug/writer` brotli (17,545 > 17,467) and `snug/sources`
   brotli (57,572 > 57,468), raised to ceil(measurement × 1.02): 17,896 and
   58,724 (tools/size/budget.json).
+- The API part (5), on main fd63a81 (part 1 landed): `snug/schema`
+  +300 / +127 / +146 (warnings getter, brands); `snug/compile` static
+  −74 / −32 / −47 (the Schema is now built in the compiler chunk,
+  `schemaOf`), full +411 / +219 / +255; `runtime` +300 / +164 / +46;
+  `all-runtime` +300 / +140 / +124; `snug/sources` +37 / +18 / −139;
+  `snug/sequence` +37 / +22 / −29. Every entry is within its cap.
+
+*Done 2026-11-12* (the P9.16 engineer). Part 1 (items 1–4) is `b06cbc5`,
+merged as `fd63a81`. Its gates, on that commit: `bb gates land` all 8 ok;
+`vmsession-test` (2,732 s), `sequence-test` (2,188 s), `valid-test`,
+`scan-test`, `rscan-test`, `rust-api-test-full` (788 s) all ok. **Learnt**:
+- the gate set moved twice under the work (sequence-test's seeded host runs
+  reached an integer map key once the vector set grew, and the Rust test
+  host rendered its name as a string; the session-pool test assumed an
+  empty pool, which the small key arenas now fill): both were harness
+  assumptions, fixed in the harness;
+- the test hosts' `vm-host` / `vmsession-host` crates build `schema.rs`
+  without `error.rs`, so a type `SourceError` names must live in `schema`.
 - [ ] **Signed off** (manager)
 
 ## Findings

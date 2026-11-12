@@ -308,9 +308,14 @@ type ValidationResult = { ok: true } | {
   reason: Reason;
   path: (string | number)[];
   offset: number;
-  subcode?: Reason;
+  subcode?: Reason | 'cut';
 };
 ```
+
+`subcode` is the embedded item's own reason for `embedded`, and `'cut'` for
+a `value` refusal a cut decided: a key matched a cut member (`name:` or
+`^=>`) whose value failed, and the cut stopped the alternatives after it
+(D342; [discriminated unions](guide.md#discriminated-unions-under-the-rfc-cut)).
 
 `ValidationOptions` extends DecodeOptions with `maxBignumBytes` and `budget`.
 Per-call schema limits only lower compiled limits. SpanOptions adds
@@ -336,6 +341,8 @@ another. Use the path to explain, and the offset only to locate.
 | `program.serialize(): Uint8Array` | Deterministic §13.3 container, synchronously hashed. |
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
+| `schema.warnings` | Frozen array of the compile warnings, `{ code, rule, line, column, message }` (code `W1`..`W8`; `rule` null for a schema-wide one), in a deterministic order; empty for a Schema not made by `compile` (D342). |
+| `schema.brand`, `program.brand` | A Symbol, so `structuredClone` / `postMessage` of a Schema or Program throws `DataCloneError` instead of producing a plain object without methods. Send `program.serialize()` bytes (D342). |
 | `schema.validate(bytes, rule, options?)` | ValidationResult; default top any. |
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
@@ -500,13 +507,14 @@ session, with the same verdicts for every chunking: `validateHandle` is
 `Schema::validate_blob_async` (an `AsyncBlob`: `size()` and an async
 `read(offset, len)`), `validateStream` is `Schema::validate_reader_async` (an
 `AsyncSource`, a `poll_read` byte stream; drain mode and fail-fast as here) and
-`readSequence` is `Schema::read_sequence_async` / `read_sequence_async`. A
+`readSequence` is `Schema::read_sequence_async` / `read_sequence_async`. Rust's
+`SourceOptions { chunk, quantum, fail_fast }` is this `SourceOptions`. A
 positive quantum yields to the executor as `nextTurn` does here. See
 [Rust: async sources](rust.md#async-sources):
 
 ```rust
 let verdict = schema.validate_reader_async(&mut body, "event", &ValidationOptions::default(),
-                                           65536, 0, false).await?;      // validateStream
+                                           &SourceOptions::default()).await?;   // validateStream
 let mut messages = schema.read_sequence_async(body, "event", &SequenceOptions::default())?;
 while let Some(m) = messages.next().await { /* m?.view() */ }           // readSequence
 ```
@@ -688,8 +696,9 @@ once); a reader whose instance was reset (`InstanceLost`) ends with an error.
 ## Errors
 
 No library-produced refusal contains received values, bytes or unnamed data
-keys. A validation failure has a safe path and absolute offset; embedded
-failure adds its innermost reason as subcode. Only schema-named live keys,
+keys. A validation failure has a safe path and absolute offset; an embedded
+failure adds its innermost reason as subcode, and a `value` a cut decided
+adds `cut`. Only schema-named live keys,
 indexes and the markers `*`, `#tag`, `cbor` appear in paths.
 
 | Family | Codes |
@@ -775,7 +784,7 @@ help. Never raise caps automatically in response to an untrusted message.
 | `type` | Wrong CBOR kind; check numeric and host-value representations against the rule |
 | `missing` | Required member/position absent; supply required structure |
 | `unexpected` | Extra member/position in a closed structure; remove it or revise the schema |
-| `value` | Literal/choice predicate failed; check the whole alternative, not only the witness field |
+| `value` | Literal/choice predicate failed; check the whole alternative, not only the witness field. With subcode `cut`, a cut locked in an earlier alternative whose value failed: see the guide's discriminated unions |
 | `size` | Byte length/count predicate failed; text size is UTF-8 bytes |
 | `range` | Numeric bounds failed; fix value or reviewed schema bounds |
 | `pattern` | Whole-string I-Regexp failed; fix text or intended pattern |

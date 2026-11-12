@@ -210,8 +210,7 @@ fn study_contract_verdicts_witnesses_and_sessions_match_js() {
                         &BytesBlob(&bytes),
                         &row[2],
                         &ValidationOptions::default(),
-                        chunk,
-                        7
+                        &snug::SourceOptions { chunk, quantum: 7, ..Default::default() }
                     )
                     .unwrap(),
                 result,
@@ -612,14 +611,14 @@ fn shared_schemas_independent_scratch_and_source_errors() {
     }
     assert_eq!(
         schema
-            .validate_blob(&Short, "r", &ValidationOptions::default(), 1, 0)
+            .validate_blob(&Short, "r", &ValidationOptions::default(), &snug::SourceOptions { chunk: 1, ..Default::default() })
             .unwrap_err()
             .code(),
         "short_read"
     );
     assert!(BytesBlob(&[0]).read(usize::MAX, 1).is_err());
     assert!(matches!(
-        schema.validate_blob(&BytesBlob(&[0]), "r", &ValidationOptions::default(), 0, 0),
+        schema.validate_blob(&BytesBlob(&[0]), "r", &ValidationOptions::default(), &snug::SourceOptions { chunk: 0, ..Default::default() }),
         Err(Error::Usage(_))
     ));
 }
@@ -722,4 +721,41 @@ fn d342_f8_malformed_and_bignum_keys_distinct() {
         s.validate(&unhex("a2c2410100c2410101"), "r", &mut scratch).unwrap_err().reason,
         "cbor/duplicate_key"
     );
+}
+
+#[test]
+fn p916_warnings_cut_subcode_and_root_reexports() {
+    // compile warnings reach the public Schema; a loaded Program has none
+    let text = "r = { kind: \"a\", x: int // kind: \"b\", y: tstr }";
+    let s = Schema::compile(text, &CompileOptions::default()).unwrap();
+    let w: &[snug::Warning] = s.warnings();
+    assert_eq!(w.len(), 1);
+    assert_eq!((w[0].code, w[0].rule.as_deref(), w[0].line), ("W8", Some("r"), 1));
+    assert!(Schema::compile("r = uint", &CompileOptions::default()).unwrap().warnings().is_empty());
+    assert!(Schema::from_serialized(&s.program().serialize().unwrap()).unwrap().warnings().is_empty());
+    // the cut subcode: a key matched a cut member whose value failed, and the cut
+    // stopped the alternative that would have matched
+    let mut scratch = Scratch::new();
+    let kind_b = unhex("a2646b696e6461626179617a"); // {"kind": "b", "y": "z"}
+    let e = s.validate(&kind_b, "r", &mut scratch).unwrap_err();
+    assert_eq!((e.reason, e.subcode), ("value", Some("cut")));
+    let branch = Schema::compile(text, &CompileOptions { cuts: snug::Cuts::Branch, ..Default::default() }).unwrap();
+    branch.validate(&kind_b, "r", &mut scratch).unwrap();
+    // an ordinary wrong value has no subcode
+    let plain = Schema::compile("r = { a: \"x\" }", &CompileOptions::default()).unwrap();
+    let e = plain.validate(&unhex("a161616179"), "r", &mut scratch).unwrap_err();
+    assert_eq!((e.reason, e.subcode), ("value", None));
+    // every type a public signature names is at the crate root
+    let _: Option<snug::SchemaError> = None;
+    let _: Option<snug::SourceError> = None;
+    let _: Option<snug::IoError> = None;
+    let _ = (snug::Regexp::Xsd, snug::Cuts::Rfc, snug::AbnfMode::default(), snug::Controls::default());
+    let _ = snug::SourceOptions::default();
+    match Schema::compile("r = ", &CompileOptions::default()) {
+        Err(Error::Compile(e)) => {
+            let e: snug::SchemaError = e;
+            assert_eq!(e.code, "syntax");
+        }
+        other => panic!("{other:?}"),
+    }
 }

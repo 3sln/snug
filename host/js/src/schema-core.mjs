@@ -15,7 +15,7 @@ import { validateOptions } from './options.mjs';
 import { schemaPrograms } from './schema-state.mjs';
 
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
-  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 48: 'budget' };
+  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 46: 'cut', 48: 'budget' };
 export function reasonName(code) {
   if (code >= 1 && code <= 21) return 'cbor/' + codeName(code);
   return REASONS[code] ?? 'unknown';
@@ -131,7 +131,8 @@ export class Program {
       else { path.push('cbor'); path.push(v); }
     }
     const r = { ok: false, reason: reasonName(o[0]), path, offset: o[2] };
-    if (o[0] === 41) r.subcode = reasonName(o[1]);
+    // subcodes: an embedded failure's own reason; `cut` on a value a cut decided (D342)
+    if (o[0] === 41 || o[1] === 46) r.subcode = reasonName(o[1]);
     return r;
   }
 }

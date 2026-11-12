@@ -1155,8 +1155,8 @@ export function buildRegion(b, o, cb, start, n, same) {
 /**
  * The canonical copy (D264) of the CHECKED item b[start, end) under the
  * scanner's verdict `refused` (0 accepted; else its duplicate refusal, if it is
- * one, in o[O_S_DUP*]): the input copied to cb[0, n), the copy written from
- * cb[n] (o[O_S_CBASE]), then for embeds 1 (tag-24 payloads) or 2 (every byte
+ * one, in `o[O_S_DUP*]`): the input copied to cb[0, n), the copy written from
+ * `cb[n]` (o[O_S_CBASE]), then for embeds 1 (tag-24 payloads) or 2 (every byte
  * string: the Program has `.cbor` controls) the embedded copies, then the units,
  * the events sorted. Answers the copy region's end (also o[O_VLEN]; padding
  * included), or -CODE_SCRATCH with o[O_VNEEDW] / o[O_VNEEDB] raised.

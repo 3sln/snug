@@ -2,6 +2,7 @@
 # Assemble the Rust crate: kin/scripts/rust-crate DIR [HOST_SRC [MANIFEST]]
 #
 #   DIR/Cargo.toml        host/rust/Cargo.toml
+#   DIR/build.rs          host/rust/build.rs, with that manifest only (P9.16)
 #   DIR/src/              HOST_SRC/* (default host/rust/src)
 #   DIR/src/snug/...      gen/rust/snug/** (kin's modules)
 #   DIR/src/snug.rs, DIR/src/snug/<d>.rs   `pub mod` lines, generated from the
@@ -30,6 +31,7 @@ mkdir -p "$dir/src"
 put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
 puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
 put "$manifest" "$dir/Cargo.toml"
+if [ "$manifest" = host/rust/Cargo.toml ]; then put host/rust/build.rs "$dir/build.rs"; fi
 put host/rust/README.md "$dir/README.md"
 for f in LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md; do put "$f" "$dir/$f"; done
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done

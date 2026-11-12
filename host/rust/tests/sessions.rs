@@ -2,7 +2,12 @@
 //! process. One test function: the limits and counts are process-wide.
 use snug::schema::{Session, Step};
 use snug::sessions::{self, SessionLimits};
-use snug::{BytesBlob, CompileOptions, Error, Schema, Sequence, SequenceOptions, ValidationOptions};
+use snug::{BytesBlob, CompileOptions, Error, Schema, Sequence, SequenceOptions, SourceOptions, ValidationOptions};
+
+/// Driver options reading `chunk` bytes at a time.
+fn c(chunk: usize) -> SourceOptions {
+    SourceOptions { chunk, ..SourceOptions::default() }
+}
 
 /// Poll a future to completion (the drivers here never wait on I/O).
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
@@ -45,18 +50,18 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     assert_eq!(e.code(), "sessions/limit");
     assert_eq!(Error::from(e), Error::SessionLimit);
     assert_eq!(Error::from(e).code(), "sessions/limit");
-    assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, 4, 0).unwrap_err().code(), "sessions/limit");
+    assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, &c(4)).unwrap_err().code(), "sessions/limit");
     assert_eq!(Sequence::new(&SequenceOptions::default()).err().unwrap().code(), "sessions/limit");
     // every driver reports the bound as sessions/limit (sync and async, P9.6), never a panic or a read error
-    assert_eq!(schema.validate_reader(&mut &b[..], "r", &opts, 4, false).unwrap_err(), Error::SessionLimit);
+    assert_eq!(schema.validate_reader(&mut &b[..], "r", &opts, &c(4)).unwrap_err(), Error::SessionLimit);
     assert_eq!(snug::read_sequence(&b[..], &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
     assert_eq!(schema.read_sequence(&b[..], "r", &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
-    assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, 4, 0)).unwrap_err(), Error::SessionLimit);
-    assert_eq!(block_on(schema.validate_reader_async(&mut &b[..], "r", &opts, 4, 0, false)).unwrap_err(), Error::SessionLimit);
+    assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, &c(4))).unwrap_err(), Error::SessionLimit);
+    assert_eq!(block_on(schema.validate_reader_async(&mut &b[..], "r", &opts, &c(4))).unwrap_err(), Error::SessionLimit);
     assert_eq!(snug::read_sequence_async(&b[..], &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
     assert_eq!(schema.read_sequence_async(&b[..], "r", &SequenceOptions::default()).err().unwrap(), Error::SessionLimit);
     drop(held);
-    assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, 4, 0)).unwrap(), Ok(()));
+    assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, &c(4))).unwrap(), Ok(()));
     assert_eq!(sessions::counts().live, 0);
 
     // a finished session releases at its verdict, before it is dropped
@@ -71,7 +76,7 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     // 100,000 sessions that finish never come near the bound
     for i in 0..100_000u32 {
         let b = msg(i);
-        assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, 3, 0).unwrap(), Ok(()));
+        assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, &c(3)).unwrap(), Ok(()));
     }
     assert_eq!(sessions::counts().live, 0);
     assert!(sessions::counts().pooled_bytes > 0);
@@ -81,7 +86,7 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     let inputs: Vec<Vec<u8>> = vec![msg(1), vec![0xa1, 0x62, b'i', b'd', 0x01], vec![0xa2, 0x62, b'i', b'd', 0x01, 0x62, b'i', b'd', 0x02],
                                     vec![0xbf, 0x62, b'i', b'd', 0x01, 0x64, b'b', b'o', b'd', b'y', 0x60, 0xff], vec![0xa2, 0x62]];
     let run = || -> Vec<String> {
-        inputs.iter().flat_map(|b| [1usize, 3, 4096].map(|c| format!("{:?}", schema.validate_blob(&BytesBlob(b), "r", &opts, c, 0)))).collect()
+        inputs.iter().flat_map(|b| [1usize, 3, 4096].map(|n| format!("{:?}", schema.validate_blob(&BytesBlob(b), "r", &opts, &c(n))))).collect()
     };
     sessions::scribble_for_tests(true);
     let pooled = (run(), run());
@@ -100,9 +105,9 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
             let opts = ValidationOptions::default();
             for i in 0..2_000u32 {
                 let b = msg(i + t);
-                assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, 1 + (i as usize % 5), 0).unwrap(), Ok(()));
+                assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, &c(1 + (i as usize % 5))).unwrap(), Ok(()));
                 let bad = vec![0xa1, 0x62, b'i', b'd', 0x01];
-                assert!(schema.validate_blob(&BytesBlob(&bad), "r", &opts, 2, 0).unwrap().is_err());
+                assert!(schema.validate_blob(&BytesBlob(&bad), "r", &opts, &c(2)).unwrap().is_err());
             }
         })
     }).collect();
@@ -113,7 +118,7 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
 
     // release_pool drops every idle entry; later sessions behave the same
     let run2 = || -> Vec<String> {
-        inputs.iter().flat_map(|b| [1usize, 3, 4096].map(|c| format!("{:?}", schema.validate_blob(&BytesBlob(b), "r", &opts, c, 0)))).collect()
+        inputs.iter().flat_map(|b| [1usize, 3, 4096].map(|n| format!("{:?}", schema.validate_blob(&BytesBlob(b), "r", &opts, &c(n))))).collect()
     };
     assert!(sessions::counts().pooled_bytes > 0);
     sessions::release_pool();
@@ -124,7 +129,7 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     {
         let other = Schema::compile("r = [* uint]", &CompileOptions::default()).unwrap();
         let before = sessions::counts().pooled_bytes;
-        assert_eq!(other.validate_blob(&BytesBlob(&[0x82, 1, 2]), "r", &opts, 1, 0).unwrap(), Ok(()));
+        assert_eq!(other.validate_blob(&BytesBlob(&[0x82, 1, 2]), "r", &opts, &c(1)).unwrap(), Ok(()));
         assert!(sessions::counts().pooled_bytes > before);
         drop(other);
         assert_eq!(sessions::counts().pooled_bytes, before);

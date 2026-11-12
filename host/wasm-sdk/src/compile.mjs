@@ -17,6 +17,7 @@ import { Program, Schema } from './schema.mjs';
 import * as rt from './runtime.mjs';
 import { toModule, compiler as slot } from './load.mjs';
 import { SchemaError } from '../../js/src/schema-error.mjs';
+import { schemaWarnings } from '../../js/src/schema-state.mjs';
 import { validateCompileOptions } from '../../js/src/options.mjs';
 import { controlEntries, registryWords, programControls, programArguments } from '../../js/src/ext.mjs';
 
@@ -67,7 +68,7 @@ export async function compile(text, options = {}) {
   opt[19] = regexp === 'iregexp' ? 1 : 0;
   for (const [i, k] of COMPILE_OPTIONS.entries()) if (limits[k] !== undefined) opt[i + 1] = Math.min(limits[k], 0x7fffffff);
   const c = await compiler();
-  let P, B;
+  let P, B, warnings;
   try {
     const tp = c.cc_text(bytes.length);
     new Uint8Array(c.memory.buffer, tp, bytes.length).set(bytes);
@@ -96,6 +97,9 @@ export async function compile(text, options = {}) {
     const words = info[0], nb = info[1];
     P = new Int32Array(c.memory.buffer, pp, words).slice();
     B = new Uint8Array(c.memory.buffer, bp, nb).slice();
+    // P9.16: the warnings, as the native compile's (cc_warnings: JSON text, its length in INFO[0])
+    const wp = c.cc_warnings();
+    warnings = JSON.parse(td.decode(new Uint8Array(c.memory.buffer, wp, new Int32Array(c.memory.buffer, c.cc_info(), 8)[0])));
     c.cc_release();
   } catch (e) {
     if (e instanceof WebAssembly.RuntimeError || e instanceof RangeError) { x = null; xMod = null; throw new Error('snug wasm: the compiler instance trapped and was dropped', { cause: e }); }
@@ -110,5 +114,7 @@ export async function compile(text, options = {}) {
         throw refused('control_value', 0, 0, undefined, ` (.${entry.name} argument${typeof r === 'string' ? ': ' + r : ''})`);
     }
   }
-  return new Schema(new Program(P, B, controls === undefined ? {} : { controls }));
+  const schema = new Schema(new Program(P, B, controls === undefined ? {} : { controls }));
+  schemaWarnings.set(schema, Object.freeze(warnings.map(w => Object.freeze(w))));
+  return schema;
 }

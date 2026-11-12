@@ -6,10 +6,10 @@ import { validationFault } from './public-errors.mjs';
 import { SNUG_VERSION } from './version.mjs';
 import { controlEntries, programControls } from './ext.mjs';
 import { validateOptions } from './options.mjs';
-import { schemaPrograms } from './schema-state.mjs';
+import { schemaPrograms, schemaWarnings, brand } from './schema-state.mjs';
 
 export { ProgramError };
-const internals = new WeakMap(), versions = new WeakMap();
+const internals = new WeakMap(), versions = new WeakMap(), NO_WARNINGS = Object.freeze([]);
 
 /** Verified, owned Program. Array accessors return copies (D102). */
 export class Program {
@@ -27,6 +27,7 @@ export class Program {
     try { inner = new HostProgram(P, B, { verify: vmVerify, verifyWords: vmVerifyWords, controls }); }
     catch (e) { if (e instanceof ProgramError) throw e; throw new ProgramError('verify'); }
     internals.set(this, inner); versions.set(this, SNUG_VERSION);
+    brand(this, 'Program');
     Object.freeze(this);
   }
   get P() { return internals.get(this).P.slice(); }
@@ -63,11 +64,14 @@ export class Schema {
   #host;
   constructor(program) {
     if (!internals.has(program)) throw new TypeError('snug: Schema needs a verified Program');
+    brand(this, 'Schema');
     this.program = program;
     this.#host = new HostSchema(internals.get(program));
     schemaPrograms.set(this, internals.get(program));
     Object.freeze(this);
   }
+  /** The compile warnings (P9.16), frozen, in a deterministic order; empty for a Schema not made by compile. */
+  get warnings() { return schemaWarnings.get(this) ?? NO_WARNINGS; }
   #rule(rule) {
     if (typeof rule !== 'string') throw new TypeError('snug: rule must be a string');
     if (internals.get(this.program).ruleIndex(rule) < 0) throw new TypeError('snug: unknown rule');
