@@ -2,7 +2,7 @@
   "name": "snug-bench-compare",
   "private": true,
   "type": "module",
-  "description": "P7.8: snug vs existing CBOR and CDDL libraries. Benchmark and build-tool dependencies (esbuild for bb size, binaryen's wasm-opt for kin/scripts/wasm-build sdk|cc, D341); nothing here is imported by snug's sources.",
+  "description": "P7.8: snug vs existing CBOR and CDDL libraries. Benchmark and build-tool dependencies (esbuild for bb size, binaryen's wasm-opt for kin/scripts/wasm-build sdk|cc, D341; typescript for bb types-test); nothing here is imported by snug's sources.",
   "license": "MIT",
   "dependencies": {
     "@cbortech/cbor": "0.27.3",
@@ -15,6 +15,7 @@
     "cborg": "6.2.1",
     "cddl": "0.23.0",
     "cddl.js": "1.0.10",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
   }
 }

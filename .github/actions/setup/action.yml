@@ -10,7 +10,7 @@
 #                  or `msrv`: host/rust/Cargo.toml's rust-version;
 #                  wasm adds kin/scripts/wasm-build's default nightly with
 #                  rust-src and wasm32-unknown-unknown (-Zbuild-std)
-#   bench/compare  `npm ci` (lockfile): esbuild and binaryen's wasm-opt
+#   bench/compare  `npm ci` (lockfile): esbuild, binaryen's wasm-opt and TypeScript (SNUG_TYPESCRIPT)
 #   ci/tools       `npm ci` (lockfile): workerd, as SNUG_WORKERD
 #   Chrome         the runner image's Google Chrome, as SNUG_CHROME
 # A tool asked for and missing fails this action, so a gate never meets a
@@ -35,7 +35,7 @@ inputs:
     description: "'true': the pinned wasm nightly with rust-src and the wasm32 target"
     default: 'false'
   compare:
-    description: "'true': npm ci in bench/compare (esbuild, wasm-opt, cbor2)"
+    description: "'true': npm ci in bench/compare (esbuild, wasm-opt, cbor2, TypeScript as SNUG_TYPESCRIPT)"
     default: 'false'
   browsers:
     description: "'true': workerd (ci/tools) and Chrome, as SNUG_WORKERD and SNUG_CHROME"
@@ -161,6 +161,10 @@ runs:
         # esbuild's install replaces bin/esbuild with the platform's native binary
         node_modules/.bin/esbuild --version
         node node_modules/binaryen/bin/wasm-opt --version
+        # types-test's pinned TypeScript, named explicitly (a missing one is a SKIP, which fails the set)
+        t="$PWD/node_modules/typescript/bin/tsc"
+        node "$t" --version
+        echo "SNUG_TYPESCRIPT=$t" >> "$GITHUB_ENV"
 
     - name: workerd (ci/tools, npm ci) and Chrome
       if: inputs.browsers == 'true'

@@ -15,7 +15,7 @@ import { validate, decode as schemaDecode, validateAt } from '@3sln/snug/schema'
 import { encode, decode, profiles, SnugFault } from '@3sln/snug';
 import { view } from '@3sln/snug/view';
 
-const { createRequire } = nodeModule, { stripTypeScriptTypes } = nodeModule;
+const { stripTypeScriptTypes } = nodeModule;
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
 
@@ -85,10 +85,8 @@ test('runtime entry points have no eager compiler dependency or Node builtins', 
 
 test('every declaration parses with Node and matches the entry point exports', async t => {
   const strip = stripTypeScriptTypes ?? oracleMissing(t, 'node:module stripTypeScriptTypes (Node 22.13+)', 'declarations are not parsed with Node');
-  const roots = [];
   for (const [key, entry] of Object.entries(pkg.exports)) {
     const url = new URL('../' + entry.types, import.meta.url), source = readFileSync(url, 'utf8');
-    roots.push(url.pathname);
     if (strip) assert.doesNotThrow(() => strip(source));
     const declared = [...source.matchAll(/export declare (?:class|function|const) (\w+)/g)].map(m => m[1]).sort();
     const module = await import(key === '.' ? '@3sln/snug' : '@3sln/snug/' + key.slice(2));
@@ -96,18 +94,7 @@ test('every declaration parses with Node and matches the entry point exports', a
     for (const [, path] of source.matchAll(/from '([^']+)'/g))
       assert.ok(existsSync(new URL(path.replace(/\.js$/, '.d.ts'), url)));
   }
-  // an offline TypeScript, when SNUG_TYPESCRIPT names its lib/typescript.js (none is installed by default)
-  const offline = process.env.SNUG_TYPESCRIPT;
-  if (offline && existsSync(offline)) {
-    const ts = createRequire(import.meta.url)(offline);
-    const program = ts.createProgram(roots, { noEmit: true, strict: true, target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext });
-    const diagnostics = ts.getPreEmitDiagnostics(program);
-    assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-      getCanonicalFileName: x => x, getCurrentDirectory: () => process.cwd(), getNewLine: () => '\n',
-    }));
-    t.diagnostic(`offline TypeScript ${ts.version}: declaration semantic check passed`);
-  } else t.diagnostic('Node declaration syntax/export/import checks only; offline TypeScript unavailable');
+  // semantic checks under a pinned TypeScript: bb types-test (kin/scripts/types-test.mjs), a land gate
 });
 
 test('self-contained staged package works away from the repository through all exports', async () => {

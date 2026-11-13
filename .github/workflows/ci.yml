@@ -43,8 +43,8 @@
 # or on a SKIP line on stdout. The macOS gate sets stay the only full runs.
 #
 # timeout-minutes: above the sum of the job's gates' watchdog wall caps (the
-# caps still apply per gate), and at most GitHub's 360. Sums: land 286 min;
-# release shards core 281, vm 300, rust 280, wasm 310, long 220 (`bb gates
+# caps still apply per gate), and at most GitHub's 360. Sums: land 296 min;
+# release shards core 291, vm 300, rust 280, wasm 310, long 220 (`bb gates
 # --check` refuses a shard past 330); npm-test 30; rust-api-test 20 (both
 # platforms).
 name: CI
@@ -89,7 +89,7 @@ jobs:
       - uses: ./snug/.github/actions/setup
         with:
           wasm: 'true'      # wasm-sdk-test, vm-test's wasm arm
-          compare: 'true'   # size, wasm-opt
+          compare: 'true'   # size, wasm-opt, types-test's TypeScript
       - run: bb gates land
 
   release:

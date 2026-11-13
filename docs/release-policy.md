@@ -505,7 +505,8 @@ locally or in CI.
   - Node through `actions/setup-node`;
   - Rust through rustup: 1.92.0, stable, `rust-version`, and the pinned wasm
     nightly with `rust-src`;
-  - `npm ci` in `bench/compare` (esbuild, `wasm-opt`) and in `ci/tools`
+  - `npm ci` in `bench/compare` (esbuild, `wasm-opt`, TypeScript for
+    `types-test`) and in `ci/tools`
     (workerd);
   - the runner's Chrome.
 

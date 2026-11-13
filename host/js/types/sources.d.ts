@@ -9,8 +9,15 @@ export type VmStep = { state: 'need'; offset: number; length: number; keep: numb
   { state: 'yield'; position: number; keep: number } |
   { state: 'held'; result: ValidationResult } |
   { state: 'done'; result: ValidationResult };
+/** The key of `[Symbol.dispose]` when the consumer's lib declares `Symbol.dispose`
+ *  (`lib: esnext.disposable` or ES2025+, or @types/node), else never. The declarations
+ *  target ES2022, whose lib has no Symbol.dispose, so the member is typed only where
+ *  the symbol is (docs/api.md, "Disposal"). */
+type DisposeKey = SymbolConstructor extends { readonly dispose: infer K extends symbol } ? K : never;
+/** `{ [Symbol.dispose](): void }` (Disposable, so `using` works) where the lib has it; `{}` on ES2022. */
+type DisposeMember = { [K in DisposeKey]: () => void };
 /** Advanced exclusive window session, obtained only from openSession(). */
-export interface VmSession {
+interface VmSessionCore {
   /** undefined for a session of unknown length (D085). */
   readonly length: number | undefined;
   /** An unknown-length session's input limit: more bytes than this is too_large. */
@@ -24,8 +31,9 @@ export interface VmSession {
   /** P9.7: release the session's arrays and its live-session slot now (a finished session has
    *  released them already); step/end then throw TypeError. */
   close(): void;
-  [Symbol.dispose](): void;
 }
+/** The session, with `[Symbol.dispose]()` (= close()) wherever the lib declares Symbol.dispose. */
+export type VmSession = VmSessionCore & DisposeMember;
 /** P9.7: the isolate's session policy. Every session (openSession, handles, push sources,
  *  streams, a sequence reader) counts as live until it finishes, errors or is closed; an
  *  abandoned one holds its slot until it is garbage-collected. Creating one more than

@@ -14,6 +14,7 @@ const table = src.split('\n').filter(l => /^(const (hex|B|raw|P)=|probe\()/.test
 const P = new Function('encode', 'BindleDecimal', 'NDArray', table.replace('const P=[];', 'const P=[];') + '\nreturn P;')(encode, BindleDecimal, NDArray);
 
 // snug-specific expectations that differ from the study's (each with a reason). Key: feature name.
+const P85_CUT = 'P8.5 migration (D301, architecture §20.13): true -> false; the default literal RFC cut -- a cut that matched inside a failed `?(...)` group or `//` alternative still commits, so the map fails';
 const SNUG = {
   '.abnf rejects non-match': { schemaError: 'unsupported_control', why: 'D013: .abnf refused' },
   '.abnf (RFC 9165)': { schemaError: 'unsupported_control', why: 'D013: .abnf refused' },
@@ -23,12 +24,18 @@ const SNUG = {
   '.cat / .det (RFC 9165)': { phase: 'later', why: 'RFC 9165 constant folding is a later phase' },
   '.plus (RFC 9165)': { phase: 'later', why: 'RFC 9165 constant folding is a later phase' },
   'non-text map keys (CBOR int keys)': { options: { cose: true }, why: 'default profile refuses int keys (key_type); cose allows them at top level' },
+  // per-case verdicts snug changed on purpose (cases: hex -> { expect, note })
+  'group choice in map //': { cases: { a261796173646b696e646162: { expect: false, note: P85_CUT } } },
+  'dependent members: group choice //': { cases: { a16269646161: { expect: false, note: P85_CUT } } },
 };
 
 const out = { format: 'snug conformance corpus v1. Each suite: cddl text, profile (full unless stated), cases [{rule, hex, expect: true|false, reason?, note?}]. A suite with schemaError expects compile to fail with that code. phase:"later" suites are not yet gated.', source: 'corpus/cddl-study (3sln.me CDDL study, 2026-10-29)', suites: [] };
 for (const p of P) {
   const s = SNUG[p.feature] ?? {};
   const cases = p.cases.map(([v, expect]) => ({ rule: p.rule, hex: hexOf(v instanceof Uint8Array && v.__raw ? v : encode(v)), expect }));
+  for (const hex of Object.keys(s.cases ?? {}))
+    if (!cases.some(c => c.hex === hex)) throw new Error(`export-study: ${p.feature} has no case ${hex} to override`);
+  for (const c of cases) if (s.cases?.[c.hex]) Object.assign(c, s.cases[c.hex]);
   out.suites.push({ name: 'probe: ' + p.feature, cddl: p.cddl, ...(s.schemaError ? { schemaError: s.schemaError } : {}), ...(s.phase ? { phase: s.phase } : {}), ...(s.options ? { options: s.options } : {}), cases, ...(p.note || s.why ? { note: [p.note, s.why].filter(Boolean).join(' | ') } : {}) });
 }
 // raw-hex probes: keep the raw bytes (probes.mjs marks them with __raw)

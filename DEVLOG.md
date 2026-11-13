@@ -8012,6 +8012,43 @@ Babashka 1.3.190, nvm Node, `env -i`):
     triggers one `workflow_dispatch` release run to prove the five shards
     on hosted runners, before any tag. The release shards have not yet
     run on a hosted runner.
+- *Follow-up (manager-approved, 2026-11-13): the side findings of the path
+  cleanup (70b54ff).*
+  - **Types.** `host/js/types/sources.d.ts` did not compile on ES2022, the
+    declared target: `[Symbol.dispose]` needs a lib that declares
+    `Symbol.dispose` (TS2550). `VmSession` is now `VmSessionCore &
+    DisposeMember`. `DisposeMember` has `[Symbol.dispose](): void` exactly
+    when the consumer's `SymbolConstructor` declares `dispose` (ESNext,
+    `esnext.disposable`, ES2025+, `@types/node`), and is `{}` on ES2022.
+    - Rejected: requiring `lib: esnext.disposable`, which breaks every
+      ES2022 consumer, including docs/guide.md's own onboarding config.
+    - Rejected: augmenting the global `SymbolConstructor`, which would
+      assert a symbol the engine may lack. docs/api.md, "Disposal".
+  - **Gate `types-test`** (`kin/scripts/types-test.mjs`, in the land and
+    release sets, shard release-core; caps 600/1200 s).
+    - It compiles every exports-map entry of `@3sln/snug` and
+      `@3sln/snug-wasm` as a consumer imports them (bare specifiers,
+      strict, NodeNext, skipLibCheck off). Two libs: ES2022's default and
+      ESNext + DOM. Under ESNext, VmSession must be `Disposable` and work
+      with `using`.
+    - TypeScript is pinned at 6.0.3 in bench/compare's lockfile. That is
+      the last JS release: one package, no per-platform binaries. Hosted
+      CI's setup exports it as `SNUG_TYPESCRIPT`. Without it the gate
+      prints SKIP, so the set fails.
+    - The optional TypeScript block in host/js's package.test.mjs moved
+      into the gate.
+    - On the old sources.d.ts, both ES2022 configurations fail with
+      TS2550. On the new one, all four pass on TypeScript 6.0.3, and by
+      hand on 7.0.2 and 5.8.3.
+    - With the dispose member forced off, the ESNext configuration fails
+      (TS2741, TS2850).
+  - **bench/d005-runtimes.mjs** uses the shipped modules,
+    `.cache/snug-wasm-{sdk,cc}/snug.wasm`, as `wasm-build` writes them. A
+    full run (`--samples 1`) completes: sizes, Chrome, workerd, cold start.
+  - **corpus/tools/export-study.mjs** now carries the two P8.5 (D301)
+    verdict changes as per-case overrides, so a re-run reproduces
+    corpus/conformance/study.json byte for byte. An override whose case
+    is gone throws.
 - [ ] **Signed off** (manager)
 
 ## Findings

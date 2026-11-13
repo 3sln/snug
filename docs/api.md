@@ -2,14 +2,15 @@
 
 This reference describes the package facades and is maintained with the
 [declaration files](../host/js/types/) (one per entry point). `npm test` checks declarations
-with Node's TypeScript parser, checks exported names against runtime exports,
-and uses offline TypeScript for semantic checks when `SNUG_TYPESCRIPT` names an
-installed `lib/typescript.js`. The original package gate had no offline TypeScript;
-the [onboarding example](guide.md#typescript-onboarding) was separately
-checked with offline TypeScript 5.8.3 on 2026-11-03. Declarations changed
-since then (the `valid` preset, format 2.0 compile options) have been checked
-against the runtime by `npm test` and by review, not by a semantic TypeScript
-run. No installs are
+with Node's TypeScript parser and checks exported names against runtime exports.
+`bb types-test`, a land and release gate, compiles every entry point of
+`@3sln/snug` and `@3sln/snug-wasm` as a consumer imports it (bare specifiers,
+`strict`, `NodeNext`) under a TypeScript pinned in `bench/compare`'s lockfile,
+with target ES2022 and two libs: ES2022's default (ES2022 + DOM) and ESNext +
+DOM. TypeScript 5.8, 6.0 and 7.0 were also checked by hand. The declarations
+name web-platform globals (`ReadableStream`, `WebAssembly`, `Response`, `URL`),
+so a consumer needs the DOM lib or `@types/node`.
+No installs are
 required. Internal `src/schema.mjs`/`src/compile.mjs` are host interfaces;
 their signatures and error classes are not the package contract.
 
@@ -534,7 +535,18 @@ while let Some(m) = messages.next().await { /* m?.view() */ }           // readS
 `bytesHeld` (exclusive VM array bytes, excluding the shared Program and
 supplied windows),
 `step(window: Uint8Array, base: number): VmStep`, and `close()` /
-`[Symbol.dispose]()`. Scratch and Program storage remain private. Each session
+`[Symbol.dispose]()`. Scratch and Program storage remain private.
+
+**Disposal.** The declarations compile on ES2022, whose lib has no
+`Symbol.dispose`. `VmSession`'s `[Symbol.dispose]()` (which calls `close()`) is
+therefore typed only when the consumer's lib declares `Symbol.dispose`
+(`lib: ["ESNext"]`, `esnext.disposable`, ES2025 or later, or `@types/node`).
+There a session is `Disposable` and `using session = openSession(...)` works;
+on plain ES2022 it is typed without that member, and `close()` is the way to
+release it. The method exists at runtime wherever the engine has
+`Symbol.dispose`. Requiring a newer lib instead would break every ES2022
+consumer, and augmenting the global `SymbolConstructor` would assert a symbol
+the engine may lack. Each session
 owns exclusive state across suspensions; share Programs, use separate sessions
 for independent validations, and never resume one session concurrently.
 

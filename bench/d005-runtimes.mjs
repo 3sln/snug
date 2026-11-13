@@ -7,7 +7,8 @@
 //
 //     node bench/d005-runtimes.mjs [--out DIR] [--samples 15] [--skip browser,workerd,cold,sizes]
 //
-// Needs the wasm builds (kin/scripts/wasm-build sdk, cc; sdk-size, sdk-s, cc-size, cc-s for sizes).
+// Needs the shipped wasm modules (kin/scripts/wasm-build sdk, cc: .cache/snug-wasm-{sdk,cc}/snug.wasm);
+// the raw cargo outputs of sdk-size, sdk-s, cc-3 and cc-s add size rows.
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
@@ -42,7 +43,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise(r => { const s = netServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => r(port)); }); });
 const T = 'target/wasm32-unknown-unknown';
 const wasmPath = (crate, profile) => join(repo, `.cache/${crate}/${T}/${profile}/snug_wasm.wasm`);
-const SDK = wasmPath('snug-wasm-sdk', 'release'), CC = wasmPath('snug-wasm-cc', 'release');
+// the shipped modules (kin/scripts/wasm-build sdk | cc: cargo's output after wasm-opt, D341)
+const SDK = join(repo, '.cache/snug-wasm-sdk/snug.wasm'), CC = join(repo, '.cache/snug-wasm-cc/snug.wasm');
+for (const p of [SDK, CC]) if (!existsSync(p)) { console.error(`d005: ${p} is missing; run kin/scripts/wasm-build sdk and cc`); process.exit(2); }
 
 const results = { date: new Date().toISOString(), out, env: {
   node: process.version, esbuild: sh(esbuild, ['--version']), chrome: chrome ? sh(chrome, ['--version']) : null,
