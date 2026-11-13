@@ -8012,6 +8012,16 @@ Babashka 1.3.190, nvm Node, `env -i`):
     triggers one `workflow_dispatch` release run to prove the five shards
     on hosted runners, before any tag. The release shards have not yet
     run on a hosted runner.
+  - Run 43484578330 on cefd61e (D357 in) was fully green, `ci` included.
+    The Linux and macOS stable cells pass. One `rerun --failed` was
+    needed for the macOS stable cell: it was the 6th concurrent macOS job,
+    against the free plan's cap of 5 and GitHub's arm64 shortage, so it
+    was never given a runner. Not a snug failure.
+  - Release `workflow_dispatch` run 43488412255 has started (10 macOS
+    jobs). The result will be recorded here.
+  - Open question for the coordinator: release runs might skip the macOS
+    compat cells, since the shards already cover those gates on the
+    primary toolchain.
 - *Follow-up (manager-approved, 2026-11-13): the side findings of the path
   cleanup (70b54ff).*
   - **Types.** `host/js/types/sources.d.ts` did not compile on ES2022, the
