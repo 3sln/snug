@@ -229,7 +229,8 @@ if (process.env.SNUG_VM_WASM) {
     const got = code < 0 ? `ERR ${code}` : Array.from(o.slice(0, 8 + 2 * o[6])).join(' ');
     if (got === js[i]) agree++; else fail(`${c.label}: JS ${js[i]} | wasm ${got}`);
   });
-  wasmLine = `  ${agree === tried ? 'ok  ' : 'FAIL'} JS == wasm (release, Rust -> wasm32): ${agree}/${tried} cases, whole out array`;
+  if (tried === 0) fail('wasm: 0 cases tried');   // P9.13 WP3 (N4): an arm that compared nothing is not ok
+  wasmLine = `  ${agree === tried && tried > 0 ? 'ok  ' : 'FAIL'} JS == wasm (release, Rust -> wasm32): ${agree}/${tried} cases, whole out array`;
 }
 
 const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);

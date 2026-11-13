@@ -130,7 +130,8 @@ if (process.env.SNUG_SCAN_WASM) {
     else if (code !== js[i].code || off !== js[i].offset) fail(`${c.label}: JS ${js[i].code}@${js[i].offset}, wasm ${code}@${off}`);
     else agree++;
   });
-  wasmLine = `  ${agree === tried ? 'ok  ' : 'FAIL'} wasm (release, Rust -> wasm32): ${agree}/${tried} cases with cbor.mjs's code and JS's offset`;
+  if (tried === 0) fail('wasm: 0 cases tried');   // P9.13 WP3 (N4): an arm that compared nothing is not ok
+  wasmLine = `  ${agree === tried && tried > 0 ? 'ok  ' : 'FAIL'} wasm (release, Rust -> wasm32): ${agree}/${tried} cases with cbor.mjs's code and JS's offset`;
 }
 console.log(`  cases: ${nVectors} vectors (${profile.accept.length} accept + ${profile.refuse.length} refuse profile, ${oracle.cases.length} cborg oracle), ${nFixed} fixed edge cases, ${MUTATIONS} seeded mutations (seed ${SEED})`);
 console.log(`  expected codes: ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);

@@ -117,6 +117,10 @@ const t0 = performance.now();
 cases.forEach((c, ci) => {
   if (c.bytes.length > 4096 && ci % 8) return;  // the big edge cases: a sample of policies
   const want = recursive(c.bytes, c.opt);
+  // P9.13 WP3 (S6): a case with a written-down verdict (det-cases' vectors and depth boundaries)
+  // holds the recursive scan to it too, so a wrong rule shared by both scanners still fails here
+  if (c.want && typeof c.want === 'object' && want.code !== 22 && (codeName(want.code) !== c.want.code || (c.want.offset !== undefined && want.offset !== c.want.offset)))
+    fail(`${c.label}: recursive ${show(want)}, the vector says ${c.want.code}@${c.want.offset}`);
   POLICIES.forEach(([mc, q], pi) => {
     if (c.bytes.length > 4096 && mc === 1) return;  // 1-byte windows over 1.5 MB: covered by smaller cases
     const seed = (ci * 31 + pi * 7 + SEED) >>> 0;
@@ -140,7 +144,9 @@ console.log(`  ${fails ? 'FAIL' : 'ok  '} JS resumable == recursive (code, offse
 if (rustBin) {
   const p = spawnSync(rustBin, [], { input: rustLines.join('\n') + '\n', maxBuffer: 1 << 30, encoding: 'utf8' });
   if (p.status !== 0) fail(`the Rust binary exited ${p.status}: ${p.stderr}`);
-  const lines = p.stdout.trim().split('\n');
+  const lines = p.stdout.trim() === '' ? [] : p.stdout.trim().split('\n');
+  // P9.13 WP3 (B2): one answer per run, no more and no fewer (a short answer used to pass)
+  if (lines.length !== rustLines.length) fail(`the Rust binary answered ${lines.length} line(s) for ${rustLines.length} runs`);
   let agree = 0;
   lines.forEach((line, i) => {
     const w = rustWant[i];
@@ -150,6 +156,7 @@ if (rustBin) {
       fail(`${w.label} policy ${w.mc}/${w.q}: JS ${show(w)} in ${w.steps} steps, Rust ${code}@${offset} items ${items} in ${steps} steps`);
     else agree++;
   });
+  if (agree !== rustLines.length) fail(`Rust resumable: ${agree}/${rustLines.length} runs identical to JS`);
   console.log(`  ${agree === rustLines.length ? 'ok  ' : 'FAIL'} Rust resumable (debug, overflow checks on): ${agree}/${rustLines.length} runs identical to JS (code, offset, items, steps), no panic`);
 } else console.log('  SKIP Rust (no binary given)');
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }

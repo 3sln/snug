@@ -81,7 +81,8 @@ function tally(name) {
     return false;
   };
   t.done = () => {
-    console.log(`  ${t.bad === 0 ? 'ok  ' : 'FAIL'} ${name}: ${t.n - t.bad}/${t.n} wasm == native`);
+    console.log(`  ${t.bad === 0 && t.n > 0 ? 'ok  ' : 'FAIL'} ${name}: ${t.n - t.bad}/${t.n} wasm == native`);
+    assert.ok(t.n > 0, `${name}: 0 comparisons (P9.13 WP3 N4: a tally that compared nothing is not ok)`);
     assert.equal(t.bad, 0, `${name}: ${t.bad} of ${t.n} differ:\n  ${t.first.join('\n  ')}`);
   };
   return t;

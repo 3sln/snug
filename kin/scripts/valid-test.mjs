@@ -388,6 +388,29 @@ function shifted(outStr, at, k) {
   line(ok === n, `fixed regressions (tag-24 payloads past the depth bound, deferred-check items, tag 4/40 under valid with the Bindle tags): ${ok}/${n} buffer == scanner (any: code, offset, items) and sessions (declared and untold length) == buffer`);
 }
 
+// ---------------------------------------------------------------- 3d. depth boundaries (P9.13 WP3, S6)
+// N nested containers around 0x00 under maxDepth D, N = D-1, D, D+1; definite and indefinite arrays and maps; the
+// valid preset (378), valid with the Bindle tags (256), deterministic (122) and Bindle (0). The verdict is written
+// down here: N <= D is ok, N = D+1 is depth at the (D+1)-th container's head; without flag 256 an indefinite
+// container is refused as indefinite at 0. The scanner and the buffer VM (against `any`) must both give it.
+{
+  let n = 0, ok = 0;
+  for (const D of [32, 4]) for (const flags of [PF_VALID, 256, PF_DET, 0]) {
+    const valid = (flags & 256) !== 0;
+    for (const [name, open, close, width, indef] of [['array', '81', '', 1, false], ['map', 'a16161', '', 3, false],
+      ['indefinite array', '9f', 'ff', 1, true], ['indefinite map', 'bf6161', 'ff', 3, true]]) for (const N of [D - 1, D, D + 1]) {
+      const want = indef && !valid ? ['indefinite', 0] : N <= D ? ['ok', -1] : ['depth', D * width];
+      const bytes = unhex(open.repeat(N) + '00' + close.repeat(N)), extra = { maxDepth: D };
+      const sc = scanOpt(bytes, flags, extra), w = buffer(anyC, bytes, LIM(flags, -1, extra)).split(' ');
+      n++;
+      const vmOk = codeName(Number(w[0])) === want[0] && (want[0] === 'ok' || Number(w[2]) === want[1]);
+      if (codeName(sc.code) === want[0] && (want[0] === 'ok' || sc.offset === want[1]) && vmOk) ok++;
+      else fail(`depth ${name} ${N}/${D} flags ${flags}: want ${want.join('@')}, scanner ${codeName(sc.code)}@${sc.offset}, VM ${codeName(Number(w[0]))}@${w[2]}`);
+    }
+  }
+  line(ok === n, `depth boundaries (D-1, D, D+1; definite and indefinite arrays and maps; 4 presets; D 32 and 4): ${ok}/${n} scanner and VM give the written-down verdict`);
+}
+
 // ---------------------------------------------------------------- 3c. budget before the first non-deterministic encoding (D321)
 // The buffer's deterministic attempt can run out of budget before it reaches the input's first non-deterministic
 // encoding; the canonical path then decides, as the session's whole-item check does: buffer == sessions on every
@@ -422,6 +445,20 @@ function shifted(outStr, at, k) {
       for (const v of JSON.parse(readFileSync(new URL('../../' + f, import.meta.url))).vectors) inputs.push(unhex(v.hex));
     const classes = {}, note = k => { classes[k] = (classes[k] ?? 0) + 1; };
     let compared = 0, agreeN = 0, unexplained = 0;
+    // P9.13 WP3 (S7): a class is accepted only after its cause is re-checked on that input:
+    //   limits: the scanner accepts it (or refuses it for another reason) once the limits are lifted;
+    //   duplicates: two keys of one map have the same deterministic (CDE) encoding by cbor2's encoder;
+    //   cbor2 tag decoders: cbor2 accepts it with ignoreGlobalTags (its tag decoders turned off).
+    const LIFTED = { maxBytes: 0x7fffffff, maxDepth: 0x7fffffff, maxEntries: 0x7fffffff, maxItems: 0x7fffffff };
+    const cdeHex = v => hex(cbor2.encode(v, cbor2.cdeEncodeOptions));
+    const hasDupByValue = v => {
+      if (v instanceof Map) { const seen = new Set(); for (const [k, x] of v) { const e = cdeHex(k); if (seen.has(e) || hasDupByValue(x) || hasDupByValue(k)) return true; seen.add(e); } return false; }
+      if (Array.isArray(v)) return v.some(hasDupByValue);
+      if (v instanceof cbor2.Tag) return hasDupByValue(v.contents);
+      return false;
+    };
+    const dupByValue = bytes => { try { return hasDupByValue(cbor2.decode(bytes, { preferMap: true, rejectDuplicateKeys: false, ignoreGlobalTags: true })); } catch { return false; } };
+    const tagsOff = bytes => verdict(bytes, { rejectDuplicateKeys: true, ignoreGlobalTags: true }) === null;
     for (const bytes of inputs) {
       const s = scanOpt(bytes, PF_VALID);
       const a = verdict(bytes, { rejectDuplicateKeys: true });
@@ -430,23 +467,34 @@ function shifted(outStr, at, k) {
       const sc = codeName(s.code);
       if (s.code !== 0) {
         if (['tag', 'bignum', 'decimal', 'typed_array', 'ndarray'].includes(sc)) { note('tag rules (snug checks known tags\' contents, D121/D180/D265)'); continue; }
-        if (['depth', 'too_many_items', 'too_many_entries', 'too_large'].includes(sc)) { note('limits'); continue; }
+        if (['depth', 'too_many_items', 'too_many_entries', 'too_large'].includes(sc)) {
+          const lifted = codeName(scanOpt(bytes, PF_VALID, LIFTED).code);
+          if (!['depth', 'too_many_items', 'too_many_entries', 'too_large'].includes(lifted)) { note('limits'); continue; }
+          fail(`cbor2 class limits: ${hex(bytes).slice(0, 80)} is still ${lifted} with the limits lifted`);
+        }
         if (sc === 'text') { note('text (noncharacters, or UTF-8 cbor2 does not check)'); continue; }
         if (sc === 'float') { note('floats (deterministic float rules kept by the valid preset)'); continue; }
-        if (sc === 'duplicate_key') { note('duplicates by value (RFC 8949 §5.6.1; cbor2 compares decoded JS keys)'); continue; }
-        if (sc === 'malformed' || sc === 'truncated' || sc === 'trailing') {
-          if (/tag|Tag/.test(String(a)) || verdict(bytes, { rejectDuplicateKeys: true, ignoreGlobalTags: true }) === null) { note('cbor2 tag decoders'); continue; }
-        }
+        if (sc === 'duplicate_key' && dupByValue(bytes)) { note('duplicates by value (RFC 8949 §5.6.1; cbor2 compares decoded JS keys)'); continue; }
+        if ((sc === 'malformed' || sc === 'truncated' || sc === 'trailing') && tagsOff(bytes)) { note('cbor2 tag decoders'); continue; }
         if (sc === 'key_type') { note('key types (the preset\'s key policy)'); continue; }
       } else {
-        if (verdict(bytes, { ignoreGlobalTags: true, rejectDuplicateKeys: true }) === null) { note('cbor2 tag decoders (content snug does not check)'); continue; }
+        if (tagsOff(bytes)) { note('cbor2 tag decoders (content snug does not check)'); continue; }
         if (/[Dd]uplicate/.test(a)) { note('duplicates cbor2 sees in decoded JS keys (distinct CBOR keys)'); continue; }
         if (/Expected number|integer|BigInt/.test(a)) { note('cbor2 number conversions'); continue; }
       }
       unexplained++;
       fail(`cbor2: ${hex(bytes).slice(0, 80)}: snug valid ${sc}@${s.offset}, cbor2 ${a ?? 'accepts'}`);
     }
-    line(unexplained === 0, `valid preset vs cbor2 2.4.1 default decode (+ rejectDuplicateKeys): ${agreeN}/${compared} same verdict; the rest by class: ${Object.entries(classes).map(([k, v]) => `${k} ${v}`).join('; ')}; ${unexplained} unexplained`);
+    line(unexplained === 0, `valid preset vs cbor2 2.4.1 default decode (+ rejectDuplicateKeys): ${agreeN}/${compared} same verdict; the rest by class, each cause re-checked: ${Object.entries(classes).map(([k, v]) => `${k} ${v}`).join('; ')}; ${unexplained} unexplained`);
+    // P9.13 WP3 (S7): the gate's own run (default mutations and seed) has these exact class counts; a change
+    // in any of them (a new difference, or one that went away) is a finding to look at, then record here
+    const EXPECTED = { 'cbor2 tag decoders (content snug does not check)': 3, "tag rules (snug checks known tags' contents, D121/D180/D265)": 65, 'cbor2 tag decoders': 11, limits: 27 };
+    if (MUTATIONS === 300 && SEED === 1) {
+      const got = JSON.stringify(Object.fromEntries(Object.entries(classes).sort())), want = JSON.stringify(Object.fromEntries(Object.entries(EXPECTED).sort()));
+      if (got !== want) fail(`cbor2 differential class counts ${got}, recorded ${want}`);
+      if (agreeN !== 1396 || compared !== 1502) fail(`cbor2 differential: ${agreeN}/${compared} same verdict, recorded 1396/1502`);
+      line(got === want && agreeN === 1396 && compared === 1502, 'cbor2 differential: the class counts and agreement are the recorded ones (default mutations and seed)');
+    } else console.log(`  info cbor2 differential: class counts not compared (mutations ${MUTATIONS}, seed ${SEED}; recorded for 300 and 1)`);
   }
 }
 

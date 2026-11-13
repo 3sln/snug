@@ -13,4 +13,9 @@ crate=.cache/snug-compile-gate
 if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin compile-test 2>&1); then
   echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
 fi
-node kin/scripts/regexp-test.mjs "$crate/target/debug/compile-test"
+# regexp-test's Rust VM arm (kin/scripts/vm-bin) and wasm compiler arm (wasm-build cc) run here
+# too (P9.13 WP3 S5); without the wasm toolchain regexp-test prints SKIP for that arm.
+if ! vm=$(kin/scripts/vm-bin); then printf '%s\n' "$vm"; exit 1; fi
+set +e; cc=$(./kin/scripts/wasm-build cc); st=$?; set -e
+case $st in 0) ;; 3) cc= ;; *) echo "  FAIL kin/scripts/wasm-build cc exited $st"; exit 1 ;; esac
+node kin/scripts/regexp-test.mjs "$crate/target/debug/compile-test" "$vm" "$cc"
