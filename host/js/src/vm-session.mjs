@@ -64,7 +64,9 @@ export class VmSession {
   /** Release the session's arrays now (it cannot be stepped afterwards); a finished session has already. */
   close() {
     if (!this.verdict) this.closed = true;
-    release(this.lease);
+    // D347: closed from inside its own step (an extension predicate), the session keeps its arrays until
+    // the step has left them: released now, the next session would take them while this step still writes
+    if (!this.busy) release(this.lease);
   }
   [Symbol.dispose]() { this.close(); }
   #settle(v) { this.verdict = v; release(this.lease); return v; }
@@ -109,6 +111,8 @@ export class VmSession {
     } finally { this.busy = false; }
     // a predicate that threw voids the session (its walk went on with a false verdict)
     try { rethrow(x); } catch (e) { this.dead = e; release(this.lease); throw e; }
+    // D347: closed during the step: the arrays go back now, and the step has no answer
+    if (this.closed) { release(this.lease); throw new TypeError('snug: the session was closed during its step'); }
     if (r === VMS_NEED) return { state: 'need', offset: vmsNeedOffset(this.ss), length: vmsNeedLength(this.ss), keep: vmsKeep(this.ss) };
     if (r === VMS_YIELD) return { state: 'yield', position: vmsPosition(this.ss), keep: vmsKeep(this.ss) };
     // D085: a verdict waiting for the end of an unknown-length message (end(n) settles it)

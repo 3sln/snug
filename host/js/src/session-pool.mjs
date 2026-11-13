@@ -17,8 +17,9 @@ const programFinals = new FinalizationRegistry(pool => { drop(pool); all.delete(
 
 /** Drop every idle entry now (a long-lived process trimming memory); later sessions allocate afresh. */
 export function releasePool() { for (const pool of all) drop(pool); }
-/** Gates only (not a public entry): scribble pooled arrays, so reuse that skipped the zero-fill shows. */
-export const testing = { scribble: false };
+/** Gates only (not a public entry): scribble pooled arrays, so reuse that skipped the zero-fill shows;
+ *  handout(e, reused), when set, sees every entry as acquire hands it out (before the session writes it). */
+export const testing = { scribble: false, handout: null };
 
 /** The isolate's session policy: { maxLive, maxPooledBytes } to set (either may be omitted); answers the
  *  limits with the current counts { live, pooledBytes }. */
@@ -46,6 +47,7 @@ export function acquire(program, sw, ssw, kab, owner) {
     if (e.ka.length < kab) e.ka = new Uint8Array(kab); else e.ka.fill(0);
   }
   live++;
+  if (testing.handout) testing.handout(e, i >= 0);
   const lease = { program, e };
   if (owner) own(lease, owner);
   return lease;

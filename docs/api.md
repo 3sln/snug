@@ -542,6 +542,10 @@ with code `sessions/limit` before anything is validated. To release a session:
 - call `close()` on it, or on a push validator/scanner or sequence reader;
 - dispose of it (`using s = openSession(...)`).
 
+A session or reader closed while its own step runs (from an extension
+predicate, which must not call back into snug) keeps its arrays until that
+step ends; the step then throws `TypeError` (D347).
+
 **A session abandoned mid-message holds its slot until it is
 garbage-collected**, which in JavaScript can be much later. Close sessions you
 stop driving.
