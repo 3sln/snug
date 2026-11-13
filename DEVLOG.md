@@ -10520,7 +10520,7 @@ review.
     Appendix F, which D242 follows rather than XSD 1.1) in the
     `crate-diff-findings.md` section "P9.8 follow-up". No snug bug, no
     decision, no D-entry.
-- [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
+- [x] **P9.9 — Full-length proptest and vmsession-test runs**, split into
   chunks that fit under the P9.1 caps, with the seeds and chunking
   recorded so anyone can reproduce them.
   *Found 2026-11-12 (P9.9 engineer):*
@@ -10641,6 +10641,60 @@ review.
     - Get each case's bytes with `.cache/p99-logs/find-detmut.mjs` (`VALID=0`,
       30000, the seed).
     - Not yet minimised further; it needs the sequence or D211 owner.
+    - Both were later fixed as D353 (tag-24 float duplicate key) and D355
+      (sequence truncation identity). The wasm-size overrun was resolved by
+      D354.
+  *Done 2026-11-13 (P9.9 engineer): sign-off runs, all green.*
+  - **Commits.** Library code at `cc09911`: D347–D355 are all in, and nothing
+    under kin/, gen/ or host/ changed after it except test and gate
+    scripts. The proptest harness is at `14e16fe`:
+    - `a2a3e18`: the campaign fails on findings, with the harness
+      corrections;
+    - `1ae48e4`: slow-compile;
+    - `14e16fe`: slow-validate.
+
+    The Node 20 SDK package-test harness is `dd21439`. The two items held
+    earlier, the proptest harness patch and the Node 20 SDK package test,
+    are resolved by `a2a3e18` and `dd21439`, both owner-approved.
+  - **Setup.** Fresh detached worktrees: three lanes, each sequential, at
+    most three heavy jobs at once. Other sessions kept the load average at
+    7–27. Same machine and method as above; no `SNUG_GATE_*` override.
+
+  | Run | Commit | Command | Seed(s) | Scale | Wall s | User CPU s | Result |
+  | --- | --- | --- | --- | --- | ---: | ---: | --- |
+  | release set | `cc09911` | `bb gates release` | gates' own | release | 4,683 | 6,225 | ok, all 29 gates (incl. wasm-size, node-oldest, msrv, wasm-package-test, rust-api-test-full, abnf-test, runtime) |
+  | rust-api full | `cc09911` | in the release set | fixed | full | 512 | — | ok: 21,967 cases, 203,154 blob, 65,849 + 65,849 reader, 68,940 sequence runs / 35,339,241 items |
+  | vmsession 10× | `cc09911` | `kin/scripts/vmsession-test 20000 <s> 400 60` | 1001–1010 | 10 × 1× | 1,335–2,799 each | 2,064–2,929 each | ok ×10: 10,988,993/10,988,993 session == buffer; JS == Rust 7,226,278/7,226,278 |
+  | sequence | `cc09911` | `kin/scripts/sequence-test 30000 1001` | 1001 | 30000 / 200 | 1,731 | 3,008 | ok: oracle 2,251,971/2,251,971; JS == Rust 555,745; framer 544,969/544,969 |
+  | sequence | `cc09911` | `kin/scripts/sequence-test 30000 1002` | 1002 | 30000 / 200 | 1,677 | 2,803 | ok: oracle 2,245,838/2,245,838; JS == Rust 552,950; framer 544,965/544,965 |
+  | scan | `cc09911` | `kin/scripts/scan-test 300000 <s>` | 2001, 2002 | 10× | 133, 59 | 97, 40 | ok: 301,360/301,360 JS, hand, Rust (each) |
+  | rscan | `cc09911` | `kin/scripts/rscan-test 200000 <s>` | 2001, 2002 | 10× | 152, 125 | 200, 198 | ok: 2,426,549 and 2,426,635 policy runs plus 2.58 M and 2.59 M splits; Rust == JS |
+  | proptest P6 | `cc09911` | `bb proptest --minutes=1 --props=6 --gate-scale=10 --seeds=3..3 --gates=<all but vmsession>` | 3001 | 10× | 783 | 753 | ok: 8/8 gate exits 0 in summary.json (incl. vm-test 200000/3001/4000), no signature |
+  | proptest P1–P5 | `cc09911` + harness `a2a3e18` | `bb proptest --minutes=60 --props=1,2,3,4,5 --seeds=5000001..6000000 --timeout=30000` | 5000001.. | 60 min | 3,601 | 16,513 | exit 0: P1 1,434,258, P2 1,680,242, P3 748,278, P4 631,275, P5 597,393 cases, no signature |
+  | proptest P1–P5 | `cc09911` + harness `a2a3e18` | the same, `--seeds=6000001..7000000` | 6000001.. | 60 min | 3,602 | 12,752 | exit 1: P5/slow-compile ×4 on the wall-clock rule, 2,293–2,799 ms at load 18–25; 3,396,004 cases. All 4 replay with 0 slow-compile and 0 slow-compile-wall on `14e16fe`'s CPU rule: environment |
+  | proptest gate | `a2a3e18` | `bb gates proptest` | default | 2 min | 123 | 326 | exit 1 at load 19–24: P5/slow-compile ×1 (seed 1, index 140, 2,348 ms wall); the case replays in 1.5 s with slowCompile 0. That led to `1ae48e4` and `14e16fe` |
+  | proptest gate | `14e16fe` | `bb gates proptest` | default | 2 min | 124 | 322 | **ok** at load 17–20: P1 16,338, P2 19,878, P3 9,021, P4 7,444, P5 6,979 cases; no signature; 1 non-failing warning (P5/slow-compile-wall) |
+  | node-oldest | `a2a3e18` (with `dd21439`) | `bb gates node-oldest` | — | Node 20.20.2 | 323 | 55 | ok: npm test, and now the SDK package test and the consumer smoke (every loader, workerd recipe, `wrangler deploy --dry-run`, Chrome) |
+  | Node 20 SDK | `cc09911` | `sh host/wasm-sdk/test/run` on Node 20.20.2 | 1 | default | 327 | 418 | ok 19/19 |
+  | Node 20 consumer | `cc09911` | `node host/wasm-sdk/test/consumer.mjs` on Node 20.20.2 | — | — | 49 | 41 | ok |
+
+  - **Totals on `cc09911`.**
+    - vmsession at 10× the defaults (200,000 mutations / 4,000 schemas /
+      600 stress over seeds 1001–1010): 10,988,993 session runs == buffer
+      and 7,226,278 JS == Rust.
+    - proptest P1–P5: 8,487,450 cases over two hours.
+  - **The release set's own `proptest` gate at `cc09911`** ran on the old
+    harness. It said ok while its summary held P2 code-vs-code ×914 and
+    valid-roundtrip ×1,985, stale D342 expectations that `a2a3e18` fixed.
+    It is replaced by the `14e16fe` gate row above.
+  - **Learnt.**
+    - A gate that cannot fail is not a gate. Before P9.9 the proptest gate
+      exited 0 on any finding.
+    - Wall-clock thresholds misread load as a bug. At load 25, a 2.2 s busy
+      wait got 1.07 s of thread CPU, which is why slow-compile and
+      slow-validate now fail on CPU time.
+    - Chunk sizes need headroom under the caps at the loads seen here
+      (15–40): a 2× vmsession chunk used 97% of its 7,200 s wall cap.
 - [x] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
   2026-11-11). The default mode takes a few minutes and is for routine
   gating. A `full` mode runs the async differential at the scale it ran at
