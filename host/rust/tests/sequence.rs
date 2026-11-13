@@ -103,7 +103,7 @@ fn refusals_carry_index_and_absolute_offsets() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[1].as_ref().unwrap_err().code(), "malformed");  // a lone break (valid default)
     assert!(seq.is_done());
-    let det_skip = SequenceOptions { profile: snug::Profile::DETERMINISTIC, ..skip };
+    let det_skip = SequenceOptions { wire: snug::Profile::DETERMINISTIC, ..skip };
     let mut seq = Sequence::new(&det_skip).unwrap();
     assert_eq!(seq.feed(&broken)[1].as_ref().unwrap_err().code(), "indefinite");
     assert!(schema.sequence("nope", &skip).is_err());
@@ -148,7 +148,7 @@ fn valid_messages_with_indefinite_items_read_through_their_canonical_copy() {
     assert_eq!(got[1].0.view().get("b").and_then(|v| v.uint()), Some(2));
     assert_eq!(got[2].0.view().get("t").and_then(|v| v.text()), Some("abc"));
     // the deterministic preset refuses the first message
-    let mut det = Sequence::new(&SequenceOptions { profile: snug::Profile::DETERMINISTIC, ..SequenceOptions::default() }).unwrap();
+    let mut det = Sequence::new(&SequenceOptions { wire: snug::Profile::DETERMINISTIC, ..SequenceOptions::default() }).unwrap();
     assert_eq!(det.feed(&bytes)[0].as_ref().unwrap_err().code(), "indefinite");
 }
 
@@ -183,7 +183,7 @@ fn regression_d355_a_count_claim_inside_a_tag_4_outranks_a_later_key_type() {
     // past the input, then an integer key under text keys: truncated at the map's head (D211)
     let s = [0xa0u8, 0xc4, 0x82, 0x00, 0xb3, 0x18, 0x64, 0x1c];
     let profile = snug::Profile { keys: snug::Keys::Text, ..snug::Profile::DETERMINISTIC };
-    let opts = SequenceOptions { profile, ..SequenceOptions::default() };
+    let opts = SequenceOptions { wire: profile, ..SequenceOptions::default() };
     for cuts in [vec![8], vec![1, 8], vec![3, 5, 8], (1..=8).collect::<Vec<usize>>()] {
         let mut seq = Sequence::new(&opts).unwrap();
         let mut items: Vec<Result<snug::Message<'static>, Error>> = Vec::new();
@@ -201,4 +201,44 @@ fn regression_d355_a_count_claim_inside_a_tag_4_outranks_a_later_key_type() {
         }).collect();
         assert_eq!(got, ["m0+1", "x1 cbor/truncated @4"], "{:?}", cuts);
     }
+}
+
+/// P9.13 (CODE-S6): a predicate that panics inside `feed` leaves the sequence
+/// half-updated; a caller that catches the panic gets `Error::Usage("poisoned")` from
+/// every later call instead of a corrupted run. (N2) A reader that reports more bytes
+/// than the buffer holds is an error, never a slice panic.
+#[test]
+fn a_predicate_panic_poisons_the_sequence_and_an_over_reporting_reader_is_an_error() {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    struct Boom;
+    impl snug::Control for Boom {
+        fn check(&self, _argument: &[u8], _item: &[u8]) -> bool {
+            panic!("predicate panic")
+        }
+    }
+    let controls = snug::Controls::new().with("boom", Boom);
+    let schema = Schema::compile("r = [ uint .boom 0, tstr ]", &CompileOptions { controls: Some(&controls), ..CompileOptions::default() }).unwrap();
+    let b = [0x82u8, 1, 0x61, b'x'];
+    let mut seq = schema.sequence("r", &SequenceOptions::default()).unwrap();
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    assert!(catch_unwind(AssertUnwindSafe(|| seq.feed(&b).len())).is_err());
+    std::panic::set_hook(hook);
+    assert!(seq.is_done());
+    let again = seq.feed(&b);
+    assert!(matches!(again.as_slice(), [Err(snug::Error::Usage("poisoned"))]));
+    assert!(matches!(seq.finish().as_slice(), [Err(snug::Error::Usage("poisoned"))]));
+    drop(seq);
+
+    struct OverRead;
+    impl std::io::Read for OverRead {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            Ok(b.len() + 5)
+        }
+    }
+    let plain = Schema::compile("r = [ uint, tstr ]", &CompileOptions::default()).unwrap();
+    let opts = snug::ValidationOptions::default();
+    assert!(plain.validate_reader(&mut OverRead, "r", &opts, &snug::SourceOptions::default()).is_err());
+    let first = snug::read_sequence(OverRead, &SequenceOptions::default()).unwrap().next();
+    assert!(matches!(first, Some(Err(snug::Error::Io(_)))));
 }

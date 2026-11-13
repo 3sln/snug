@@ -19,7 +19,7 @@
 // (overflow checks on). One scratch per program, grown by the host protocol of
 // program.md §13.1 (`&mut` scratch, D040).
 use snug::schema::{validate, Options, Program, Segment};
-use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
+use snug::generated::vm::api::{vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
 use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::sync::Arc;
 

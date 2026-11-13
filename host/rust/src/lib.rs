@@ -16,9 +16,9 @@
 //! [`encode()`] / [`Writer`] / [`View`] for the codec, and
 //! [`Schema::validate_reader`], [`read_sequence`] and their async forms for
 //! sources. Everything a public signature names is re-exported here, at the
-//! crate root; use these paths. The modules `compile`, `schema`, `sha256`,
-//! `unicode_tables` and the generated `snug` are public for snug's own test
-//! hosts and may change in any release.
+//! crate root; use these paths (`use snug::*;` brings them all in). The modules
+//! `compile`, `schema`, `sha256` and `unicode_tables` are public for snug's own
+//! test hosts and may change in any release.
 //!
 //! Refusals carry a code, an offset and a schema-named path, never payload
 //! values. The README of the crate and the Rust guide (`docs/rust.md` in the
@@ -39,7 +39,14 @@ macro_rules! assembled {
 }
 
 assembled! {
-pub mod snug;
+// The generated kin modules. Private under their own name, so `use snug::*;` does not meet a
+// module `snug` beside the crate `snug` (E0659); snug's own test hosts reach them as
+// `snug::generated`, which is not part of the API.
+mod snug;
+#[doc(hidden)]
+pub mod generated {
+    pub use crate::snug::*;
+}
 pub mod compile;
 pub mod schema;
 pub mod sha256;
@@ -59,7 +66,7 @@ pub mod async_source;
 pub mod sessions;
 pub use value::{Value, Integer, TypedArray};
 pub use error::{Error, IoError};
-pub use decode::{decode, DecodeOptions, Floats, Keys, Limits, Profile, Tags, Top};
+pub use decode::{decode, DecodeOptions, Floats, Keys, Profile, Tags, Top};
 pub use encode::{encode, EncodeOptions};
 pub use writer::Writer;
 pub use program::Program;

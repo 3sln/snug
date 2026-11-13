@@ -2,7 +2,10 @@
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const boolean = value => typeof value === 'boolean';
 const enumeration = (...values) => value => typeof value === 'string' && values.includes(value);
-const limits = { maxBytes: integer, maxDepth: integer, maxEntries: integer, maxItems: integer };
+// maxDepth at most 256, as Rust's Limits (P9.13): deeper bounds would let input exhaust the JS stack or the wasm
+// instance's before the bound is met
+const MAX_DEPTH = 256;
+const limits = { maxBytes: integer, maxDepth: value => integer(value) && value <= MAX_DEPTH, maxEntries: integer, maxItems: integer };
 const preset = {
   wire: enumeration('valid', 'deterministic', 'bindle'), keys: enumeration('text', 'integer', 'any'),
   tags: enumeration('bindle', 'standard', 'any'), floats: enumeration('bindle', 'deterministic'),

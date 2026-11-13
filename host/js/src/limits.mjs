@@ -11,7 +11,7 @@ export const LIMITS = Object.freeze({
 
 export const resolveLimits = options => {
   const limits = { ...LIMITS };
-  for (const name of ['maxBytes', 'maxDepth', 'maxEntries', 'maxItems']) if (options[name] !== undefined) { if (!Number.isSafeInteger(options[name]) || options[name] < 0) throw new TypeError(`${name} must be a non-negative integer.`); limits[name] = options[name]; }
+  for (const name of ['maxBytes', 'maxDepth', 'maxEntries', 'maxItems']) if (options[name] !== undefined) { if (!Number.isSafeInteger(options[name]) || options[name] < 0) throw new TypeError(`${name} must be a non-negative integer.`); if (name === 'maxDepth' && options[name] > 256) throw new TypeError('maxDepth must be at most 256.'); limits[name] = options[name]; }
   return limits;
 };
 

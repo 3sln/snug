@@ -32,9 +32,9 @@ schema.validate(&[0xa1, 0x62, b'i', b'd', 7], "message", &mut scratch)?;
 ```
 
 Compilation is synchronous. `CompilerProfile::{Full, Bindle, Bus}` restricts
-CDDL; it is independent of wire policy. The wire profile is `snug::Profile`
-in `DecodeOptions`, `EncodeOptions`, `ValidationOptions` and
-`SequenceOptions`: `Profile::VALID` (any valid CBOR)
+CDDL; it is independent of wire policy. The wire profile is the `wire` field
+(a `snug::Profile`) of `DecodeOptions`, `EncodeOptions`, `ValidationOptions`
+and `SequenceOptions`: `Profile::VALID` (any valid CBOR)
 by default, `Profile::DETERMINISTIC` to require RFC 8949 §4.2.1 encoding,
 `Profile::BINDLE` for the Bindle restrictions (root `cose` integer labels an
 option there), or the fields `keys`, `tags`, `floats`, `undefined_value`,
@@ -146,8 +146,23 @@ and signed zero retain their bits. Byte strings use `Bytes`, not typed U8.
 
 `DecodeOptions::default()` (also `any()` and `valid()`) is the valid preset
 with any root; `DecodeOptions::deterministic()` the deterministic preset with
-any root; `DecodeOptions::bindle()` is the Bindle preset with a map root, and `EncodeOptions::bindle()` its encoder. `Top`,
-`cose`, `Limits` and `profile` remain separate settings.
+any root; `DecodeOptions::bindle()` is the Bindle preset with a map root, and `EncodeOptions::bindle()` its encoder. `top`,
+`cose`, `wire` and the limits remain separate settings.
+
+**Options shape.** Every runtime options struct (`DecodeOptions`,
+`EncodeOptions`, `ValidationOptions`, `SequenceOptions`) has the same flat
+limit fields as its JS options bag: `max_bytes` (`max_message_bytes` for a
+sequence), `max_depth`, `max_entries`, `max_items` (and for schema validation
+`max_bignum_bytes`, `budget`), each an `Option<u32>` whose `None` is the
+default: the codec defaults below, or the Program's compiled caps (which a
+value only lowers). Compile-time caps stay grouped in `CompileOptions::limits`
+(`CompileLimits`), as JS's `compile(text, { limits })`.
+
+```rust
+use snug::{decode, DecodeOptions, Profile};
+let strict = DecodeOptions { wire: Profile::DETERMINISTIC, max_depth: Some(8), ..DecodeOptions::default() };
+assert!(decode(&[0x81, 0x01], &strict).is_ok());
+```
 
 ## Encode with typed Writer calls
 
@@ -174,7 +189,7 @@ the allocation; a second finish returns `grammar`. Some content refusals occur
 at finish, unlike JS's eager typed calls. No partial output escapes. There is
 no transport streaming or unchecked byte-insertion API.
 
-`EncodeOptions` permits any root and caps output growth at `limits.max_bytes`
+`EncodeOptions` permits any root and caps output growth at `max_bytes`
 (default 1,500,000). This is an intentional Rust difference from JS's optional
 finish-only byte cap. Map sorting and final checking use additional scratch;
 the byte cap is not a total heap quota. Default depth/entry/item caps are
@@ -333,23 +348,19 @@ chunk and 9 bytes received).
 A stream that has delivered n bytes can hold up to about 2n for its key arena.
 Bound concurrent streams below `max_live` and size `max_bytes` to the
 protocol. For an untrusted peer prefer fail-fast: drain mode reads up
-to `max_bytes` from the peer after a refusal is already certain. The low-level
-`schema::Session::new_unknown`, `Step::Held` and `Session::end(n)` expose the
-protocol.
+to `max_bytes` from the peer after a refusal is already certain.
 
 ## Live sessions and pooling
 
-A session (`validate_blob`, `validate_reader`, their async forms,
-`schema::Session`, a `Sequence`, `SequenceReader` or `AsyncSequenceReader`) takes its arrays from its Program's pool. It gives them back
+A session (`validate_blob`, `validate_reader`, their async forms, a
+`Sequence`, `SequenceReader` or `AsyncSequenceReader`) takes its arrays from its Program's pool. It gives them back
 at its verdict, or when it is dropped. Dropping is deterministic in Rust, so an
 abandoned session releases its slot as soon as it goes out of scope. Each array
 is zero-filled before reuse, so nothing of one session is visible to another.
 
 While `max_live` sessions are live in the process, creating one more fails with
-`Error::SessionLimit`, whose code is `sessions/limit`. The low-level
-`schema::Session::new` and `Session::new_unknown` return
-`Result<Session, sessions::SessionError>`, with `SessionError::Limit`, which
-converts into `Error::SessionLimit`. The free `snug::read_sequence` and
+`Error::SessionLimit`, whose code is `sessions/limit` (`sessions::SessionError::Limit`
+converts into it). The free `snug::read_sequence` and
 `read_sequence_async` now return `Result<_, Error>` (they answered the reader
 directly), as `Schema::read_sequence` already did (changed before the first
 release; see the [CHANGELOG](../CHANGELOG.md)). The test hosts' low-level
@@ -477,7 +488,7 @@ assert!(seq.is_done());
 ```
 
 `SequenceOptions` carries the per-message limits (`max_message_bytes`, depth,
-entries, items, bignum bytes, budget), the profile, `top`, `cose`,
+entries, items, bignum bytes, budget), the wire profile (`wire`), `top`, `cose`,
 `on_invalid` (`Stop` by default; `Skip` skips only schema refusals of complete
 messages), `fail_fast` and the read `chunk`. A refusal is
 `Error::Sequence(MessageFailure { index, message_offset, offset, failure,
@@ -486,7 +497,10 @@ skippable })` with absolute offsets; EOF inside a message is
 `cbor/too_large`. `snug::read_sequence` / `Sequence::new` check the profile
 only; they return `Err(Error::SessionLimit)` at the live-session bound
 ([Live sessions and pooling](#live-sessions-and-pooling)). The `Read` iterator copies each message out of its read buffer; the push
-API borrows the caller's chunk instead.
+API borrows the caller's chunk instead. If an extension predicate panics
+inside `feed` or `finish` and the caller catches the panic, the `Sequence`
+is poisoned: every later call answers `Error::Usage("poisoned")`. The read
+`chunk` must be positive (`chunk: 0` is `Error::Usage("options")`).
 
 ## Async sources
 
@@ -639,8 +653,6 @@ These stay exhaustive, so a `match` can cover every case without a fallback:
   model. Code that walks a value tree needs every case. A new tag gets no
   new variant (it decodes as `Value::Tag`). A new dedicated variant would
   change what `decode` returns for existing input, so it is breaking anyway.
-- `schema::Step`: the session protocol. A driver that ignored a new step
-  would be wrong, so adding one is deliberately a breaking change.
 
 ## Building from a checkout
 

@@ -76,7 +76,10 @@ export const VmSession = /* @__PURE__ */ disposable(class VmSession {
    *  `position` to n (step again; it never asks past n). */
   end(n) {
     if (this.verdict) return this.verdict;
+    // P9.13: a voided session's arrays are back in the pool (another session may hold them)
+    if (this.dead) throw this.dead;
     if (this.closed) throw new TypeError('snug: the session is closed');
+    if (this.busy) throw new Error('snug: a session cannot be resumed concurrently');
     if (this.length !== undefined) throw new TypeError('snug: end() is for a session of unknown length');
     if (!Number.isSafeInteger(n) || n < 0) throw new TypeError('snug: end(n) takes the byte count');
     const r = vmsEof(this.ss, this.out, Math.min(n, 0x7fffffff));

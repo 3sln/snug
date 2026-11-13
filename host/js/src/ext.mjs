@@ -143,7 +143,9 @@ export function bindControls(P, B, entries) {
             throw new TypeError(`Control .${names[id]} cost must answer a non-negative integer.`);
         }
         if (units > room || units > MAX_UNITS) return -1;
-        return checks[id](pool.subarray(ao, ao + al), b.subarray(s, e)) === true ? units : -2 - units;
+        // P9.13: copies -- b may be the isolate's shared canonical buffer (other requests' bytes) and pool
+        // the Program's; a predicate sees exactly its argument and item, and cannot change either
+        return checks[id](pool.slice(ao, ao + al), b.slice(s, e)) === true ? units : -2 - units;
       } catch (error) { bound.failure = { name: names[id], error }; return -2; }
     },
   };

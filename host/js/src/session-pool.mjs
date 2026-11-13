@@ -26,8 +26,8 @@ export const testing = { scribble: false, handout: null };
 export function sessionLimits(set) {
   if (set !== undefined) {
     if (!set || typeof set !== 'object') throw new TypeError('snug: sessionLimits takes { maxLive, maxPooledBytes }');
-    // maxLive at least 1, maxPooledBytes at least 0
-    for (const k in set) if (!Object.hasOwn(L, k) || !Number.isSafeInteger(set[k]) || set[k] < (k === 'maxLive')) throw new TypeError(`snug: bad session limit ${k}`);
+    // maxLive at least 1, maxPooledBytes at least 0, both at most 2^31 - 1 (the wasm SDK's bounds; P9.13)
+    for (const k in set) if (!Object.hasOwn(L, k) || !Number.isSafeInteger(set[k]) || set[k] < (k === 'maxLive') || set[k] > 0x7fffffff) throw new TypeError(`snug: bad session limit ${k}`);
     Object.assign(L, set);
   }
   return { ...L, live, pooledBytes: pooled };

@@ -154,6 +154,30 @@ repository.
   type alias, not an interface, so declaration merging into it no longer
   works (D356).
 
+- `[rust]` The wire profile field is `wire`, not `profile`, in
+  `DecodeOptions`, `EncodeOptions`, `ValidationOptions` and
+  `SequenceOptions` (`CompileOptions::profile` stays the CDDL restriction
+  set). The runtime limits are flat `Option<u32>` fields in every runtime
+  options struct, as in the JS options bags: `DecodeOptions` and
+  `EncodeOptions` lose `limits: Limits` for `max_bytes`, `max_depth`,
+  `max_entries` and `max_items` (`None` is the default), and the `Limits`
+  type is gone. Write `DecodeOptions { max_depth: Some(8), ..Default::default() }`
+  (D360).
+- `[rust]` The generated kin modules are no longer the public module
+  `snug::snug` (now an undocumented `snug::generated` for the test hosts), so
+  `use snug::*;` compiles. `schema::Session` and `schema::Step` are internal;
+  the drivers (`Schema::validate_blob`, `validate_reader`, their async forms)
+  and `Sequence` are the session API (D361).
+- `maxDepth` above 256 is refused with `TypeError` on every JS and wasm SDK
+  entry point (decode, encode, views, schemas, sessions, sequences), as
+  Rust's options already were; a deeper bound let input exhaust the stack or
+  the wasm instance instead of answering `depth`.
+- `[rust]` A `Sequence` whose `feed` or `finish` did not return (an
+  extension predicate panicked) answers `Error::Usage("poisoned")` from every
+  later call instead of running on half-updated state. The free
+  `read_sequence` / `read_sequence_async` refuse `chunk: 0` with
+  `Error::Usage("options")`, as `Schema::read_sequence` does.
+
 ### Changed
 
 - Encoding a map whose keys are one key once a non-preferred bignum (a
@@ -221,6 +245,18 @@ repository.
   prototype no longer gets a method named `undefined`; `[Symbol.dispose]()`
   is defined only where the symbol exists. `close()` is unchanged (D356).
 
+- `[wasm-sdk]` After `trim()`, rule and key lookups (view `get`, a new rule
+  name) trapped and the instance was lost on every later call: `trim()` now
+  forgets the key scratch it frees.
+- `[wasm-sdk]` A failed push source, a session refused with an internal
+  error, and every View/Cursor navigation call now free their session or
+  reset the instance (`InstanceLost`) like every other entry point.
+- `[js]` `[wasm-sdk]` `sessionLimits` refuses limits above 2³¹ − 1 on both
+  builds; validateAt clamps the enclosing `depth` and `items` instead of
+  wrapping them to 32 bits.
+- `[rust]` A reader or async source that reports more bytes than the buffer
+  holds is an error (`read`), never a slice panic.
+
 ### Security
 
 - `[js]` A session or sequence reader closed from inside its own step (by
@@ -231,3 +267,23 @@ repository.
   and that step throws `TypeError` instead of answering. Predicates are
   documented as never calling back into snug; the Rust API and the wasm
   SDK already prevented this (D347).
+- `[js]` `[wasm-sdk]` A stream that failed (its source threw, or yielded a
+  non-`Uint8Array`) held its session's live slot until garbage collection
+  (the wasm SDK: until the reader was collected), so a peer that
+  disconnected mid-message repeatedly could exhaust `sessions/limit`.
+  `validateStream`, `scanStream` and the push sources now release the
+  session when they fail.
+- `[js]` `end()` on an unknown-length session after an extension predicate
+  threw wrote into the session's arrays, which were already back in the
+  pool and possibly another session's. It now answers the predicate's
+  error, as `step()` does, and is refused inside the session's own step.
+- `[js]` An extension control received a view of an isolate-shared buffer
+  (the canonical copy of valid input), through which it could read other
+  requests' bytes, and a view of the Program's pool. It now receives copies
+  holding exactly its argument and its item.
+- `[wasm-sdk]` Input longer than `maxBytes` (or the Program's compiled
+  input limit) is refused with `too_large` before it is copied into linear
+  memory, which never shrinks; it used to grow the instance by the whole
+  input first.
+- `[wasm-sdk]` Loading a Program sizes the verifier's scratch from its
+  words, not from an unverified count in them (also `[js]` `[rust]`).

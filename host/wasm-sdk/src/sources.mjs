@@ -153,7 +153,7 @@ class VmSession extends WasmSession {
     if (r === VMS_NEED) return { state: 'need', offset: this.info(0), length: this.info(1), keep: this.info(3) };
     if (r === VMS_YIELD) return { state: 'yield', position: this.info(2), keep: this.info(3) };
     if (r === VMS_HELD) return { state: 'held', result: this.inner.result() };
-    if (r < 0) throw new Error(`snug wasm: vms-step answered ${r}`);
+    if (r < 0) { this.free(); throw new Error(`snug wasm: vms-step answered ${r}`); }
     this.verdict = { state: 'done', result: this.inner.result() };
     this.free();
     return this.verdict;
@@ -161,6 +161,8 @@ class VmSession extends WasmSession {
   /** The end of an unknown-length message after n bytes. */
   end(n) {
     if (this.verdict) return this.verdict;
+    // as the native session: a voided session answers its predicate's error (P9.13)
+    if (this.dead) throw this.dead;
     if (this.closed) throw new TypeError('snug: the session is closed');
     if (this.length !== undefined) throw new TypeError('snug: end() is for a session of unknown length');
     if (!Number.isSafeInteger(n) || n < 0) throw new TypeError('snug: end(n) takes the byte count');
@@ -169,7 +171,7 @@ class VmSession extends WasmSession {
     try { r = rt.x.sdk_ses_eof(this.h, Math.min(n, I32_MAX)); } catch (e) { this.h = -1; rt.lost(e); }
     rt.refresh();
     if (r === VMS_RESUME) return { state: 'yield', position: this.info(2), keep: this.info(3) };
-    if (r < 0) throw new Error(`snug wasm: vms-eof answered ${r}`);
+    if (r < 0) { this.free(); throw new Error(`snug wasm: vms-eof answered ${r}`); }
     this.verdict = { state: 'done', result: this.inner.result() };
     this.free();
     return this.verdict;
@@ -387,6 +389,16 @@ function scanResult(r) {
   throw new SnugFault(r.reason.startsWith('cbor/') ? r.reason.slice(5) : r.reason);
 }
 
+/** P9.7, P9.13 (as the native package): an exception out of a push source ends it, its session freed now --
+ *  else it would hold its live slot (and its linear memory) until collected. */
+function guarded(session, api) {
+  for (const k of ['feed', 'resume', 'finalize']) {
+    const f = api[k];
+    api[k] = function (...a) { try { return f.apply(this, a); } catch (e) { session.free(); throw e; } };
+  }
+  return api;
+}
+
 /** The native unknown-length push protocol, its buffer being the session's window in linear memory. */
 function pushUnknown(session, scheduling, settle) {
   const failFast = scheduling.failFast === true, limit = session.limit;
@@ -426,7 +438,7 @@ function pushUnknown(session, scheduling, settle) {
     if (r.state !== 'done') { session.free(); throw new SourceError('length_mismatch', 'The session asked for bytes past the end.'); }
     return final(r);
   };
-  return {
+  return guarded(session, {
     feed(chunk) {
       if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
       if (result) return { state: 'done', result };
@@ -452,7 +464,7 @@ function pushUnknown(session, scheduling, settle) {
     },
     end() { return this.finalize(); },
     get bytesHeld() { return bufLen; },
-  };
+  });
 }
 
 /** An unknown-length source: a ReadableStream, an AsyncIterable or an Iterable of Uint8Array chunks. */
@@ -472,13 +484,16 @@ async function drainSource(push, source) {
   const src = source && typeof source.getReader === 'function' ? streamSource(source) : source;
   if (!src || typeof src[Symbol.asyncIterator] !== 'function' && typeof src[Symbol.iterator] !== 'function')
     throw new TypeError('a source is a streamSource(), a ReadableStream or an (Async)Iterable of Uint8Array.');
-  for await (const chunk of src) {
-    if (!(chunk instanceof Uint8Array)) throw new SourceError('bad_chunk', 'A stream chunk must be a Uint8Array.');
-    let r = push.feed(chunk);
-    while (r.state === 'yield') { await nextTurn(); r = push.resume(); }
-    if (r.state === 'done') return r.result;
-  }
-  return push.finalize();
+  // a source that throws or yields a non-chunk ends the push source: its session is freed now (P9.13)
+  try {
+    for await (const chunk of src) {
+      if (!(chunk instanceof Uint8Array)) throw new SourceError('bad_chunk', 'A stream chunk must be a Uint8Array.');
+      let r = push.feed(chunk);
+      while (r.state === 'yield') { await nextTurn(); r = push.resume(); }
+      if (r.state === 'done') return r.result;
+    }
+    return push.finalize();
+  } catch (e) { push.close(); throw e; }
 }
 /** Validate a message of unknown length from a stream against schema's rule. opts: { quantum, failFast }. */
 export async function validateStream(schema, source, rule, options = {}, opts = {}) {
@@ -517,7 +532,7 @@ function pushSession(session, length, keepOf) {
       if (want.state === 'yield') return { state: 'yield' };
     }
   };
-  return {
+  return guarded(session, {
     feed(chunk) {
       if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
       if (delivered + chunk.length > length) { session.free(); throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.'); }
@@ -544,5 +559,5 @@ function pushSession(session, length, keepOf) {
       }
       return want.result ?? true;
     },
-  };
+  });
 }

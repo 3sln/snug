@@ -154,6 +154,10 @@ pub async fn validate_reader<S: AsyncSource + Unpin + ?Sized>(prog: &schema::Pro
         match core.next() {
             Io::Read { .. } => {
                 let got = read_some(src, core.buf()).await?;
+                // a source that reports more than the buffer holds breaks its contract (P9.13)
+                if got > core.buf().len() {
+                    return Err(SourceError::Read);
+                }
                 core.filled(got);
             }
             Io::Yield => yield_now().await,
@@ -219,10 +223,11 @@ impl Schema {
 /// CBOR sequence read until EOF.
 /// `Err(Error::SessionLimit)` when the live-session bound is reached.
 pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &SequenceOptions) -> Result<AsyncSequenceReader<'static, S>, Error> {
-    if options.chunk > crate::api::MAX_CHUNK {
+    // chunk 0 is refused, as Schema::read_sequence_async refuses it (P9.13)
+    if options.chunk == 0 || options.chunk > crate::api::MAX_CHUNK {
         return Err(Error::Usage("options"));
     }
-    Ok(AsyncSequenceReader::new(Sequence::new(options)?, source, options.chunk.max(1)))
+    Ok(AsyncSequenceReader::new(Sequence::new(options)?, source, options.chunk))
 }
 
 /// The async reader of [`read_sequence_async`] / [`Schema::read_sequence_async`]:

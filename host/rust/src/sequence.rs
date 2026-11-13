@@ -24,7 +24,7 @@
 use crate::schema::{self, Failure};
 use crate::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_message_length, vms_need_length,
                                vms_need_offset, vms_position, vms_unknown_total};
-use crate::{DecodeOptions, Error, Limits, Profile, Schema, Top, View};
+use crate::{decode::Limits, DecodeOptions, Error, Profile, Schema, Top, View};
 use std::cell::OnceCell;
 use std::borrow::Cow;
 use std::collections::VecDeque;
@@ -71,7 +71,7 @@ pub enum OnInvalid {
 
 /// Options of a sequence reader. Every limit applies to each message from zero;
 /// `None` is the compiled limit with a schema, the decode default
-/// ([`Limits::default`]) without one.
+/// (as [`DecodeOptions`]'s) without one.
 #[derive(Debug, Clone)]
 pub struct SequenceOptions {
     /// Required root shape of every message.
@@ -79,7 +79,7 @@ pub struct SequenceOptions {
     /// Permit safe integer labels in each message's top-level map.
     pub cose: bool,
     /// The wire profile (default: the valid preset).
-    pub profile: Profile,
+    pub wire: Profile,
     /// The largest message, in bytes (P): a message that does not end within it is `too_large`.
     pub max_message_bytes: Option<u32>,
     /// Depth cap per message.
@@ -104,7 +104,7 @@ impl Default for SequenceOptions {
         Self {
             top: Top::Any,
             cose: false,
-            profile: Profile::VALID,
+            wire: Profile::VALID,
             max_message_bytes: None,
             max_depth: None,
             max_entries: None,
@@ -121,15 +121,15 @@ impl SequenceOptions {
     /// limits words 0..7, word 8 (0), word 9 the profile flags (as schema::Options::words).
     fn words(&self, profile_only: bool) -> [i32; 10] {
         let l = |v: Option<u32>| v.map_or(-1, |x| x.min(i32::MAX as u32) as i32);
-        let d = Limits::default();
+        let d = Limits::DEFAULT;
         let (mb, md, me, mi) = if profile_only {
-            (Some(self.max_message_bytes.unwrap_or(d.max_bytes)), Some(self.max_depth.unwrap_or(u32::from(d.max_depth))),
+            (Some(self.max_message_bytes.unwrap_or(d.max_bytes)), Some(self.max_depth.unwrap_or(d.max_depth)),
              Some(self.max_entries.unwrap_or(d.max_entries)), Some(self.max_items.unwrap_or(d.max_items)))
         } else {
             (self.max_message_bytes, self.max_depth, self.max_entries, self.max_items)
         };
         [if self.top == Top::Map { 0 } else { 1 }, self.cose as i32, l(mb), l(md), l(me), l(mi),
-         l(self.max_bignum_bytes), l(self.budget), 0, self.profile.flags()]
+         l(self.max_bignum_bytes), l(self.budget), 0, self.wire.flags()]
     }
 }
 
@@ -175,8 +175,11 @@ impl<'c> Message<'c> {
                 let o = DecodeOptions {
                     top: Top::Any,
                     cose,
-                    profile,
-                    limits: Limits { max_bytes: big, max_depth: 256, max_entries: big, max_items: big },
+                    wire: profile,
+                    max_bytes: Some(big),
+                    max_depth: Some(256),
+                    max_entries: Some(big),
+                    max_items: Some(big),
                 };
                 // the message was accepted under this profile: never refused here
                 match crate::decode::check(&self.bytes, &o) {
@@ -231,6 +234,9 @@ pub struct Sequence<'p> {
     next: u64,
     index: u64,
     done: bool,
+    // a feed or finish did not return (a predicate panicked inside it): the state is
+    // half-updated, so every later call answers `Error::Usage("poisoned")`
+    poisoned: bool,
     // bytes after a message that ended inside its assembly: the assembly and where they start
     left: Option<(Vec<u8>, usize)>,
     // the message in progress
@@ -292,6 +298,7 @@ impl<'p> Sequence<'p> {
             next: 0,
             index: 0,
             done: false,
+            poisoned: false,
             left: None,
             msg: None,
             mb: Vec::new(),
@@ -303,13 +310,13 @@ impl<'p> Sequence<'p> {
             held: false,
             r: 0,
             asserted: 0,
-            vprof: if options.profile.valid { Some((options.profile, options.cose)) } else { None },
+            vprof: if options.wire.valid { Some((options.wire, options.cose)) } else { None },
         })
     }
 
     /// Has the sequence ended (a stopping refusal, or [`Sequence::finish`])?
     pub fn is_done(&self) -> bool {
-        self.done
+        self.done || self.poisoned
     }
 
     /// Bytes held for the message in progress (its assembly so far).
@@ -319,14 +326,22 @@ impl<'p> Sequence<'p> {
 
     /// The messages this chunk completes (an empty chunk is not the end). After the
     /// sequence has ended it answers nothing.
+    /// After a panic out of an extension predicate inside a call the sequence is
+    /// poisoned: every later call answers one `Error::Usage("poisoned")`.
     pub fn feed<'c>(&mut self, chunk: &'c [u8]) -> Vec<Result<Message<'c>, Error>> {
         let mut out = Vec::new();
+        if self.poisoned {
+            out.push(Err(Error::Usage("poisoned")));
+            return out;
+        }
         if self.done || chunk.is_empty() {
             return out;
         }
         let c = Chunk { bytes: chunk, base: self.delivered };
+        self.poisoned = true;
         self.delivered += chunk.len() as u64;
         self.run(Some(c), false, &mut out);
+        self.poisoned = false;
         out
     }
 
@@ -334,8 +349,14 @@ impl<'p> Sequence<'p> {
     /// `cbor/truncated`); the sequence is then done.
     pub fn finish(&mut self) -> Vec<Result<Message<'static>, Error>> {
         let mut out = Vec::new();
+        if self.poisoned {
+            out.push(Err(Error::Usage("poisoned")));
+            return out;
+        }
         if !self.done {
+            self.poisoned = true;
             self.run(None, true, &mut out);
+            self.poisoned = false;
             self.done = true;
         }
         out
@@ -598,10 +619,11 @@ impl Schema {
 /// [`Error::Io`] with the reader's error (also the last item). `Err(Error::SessionLimit)` when
 /// the live-session bound is reached.
 pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> Result<SequenceReader<'static, R>, Error> {
-    if options.chunk > crate::api::MAX_CHUNK {
+    // chunk 0 is refused, as Schema::read_sequence refuses it (P9.13)
+    if options.chunk == 0 || options.chunk > crate::api::MAX_CHUNK {
         return Err(Error::Usage("options"));
     }
-    Ok(SequenceReader::new(Sequence::new(options)?, reader, options.chunk.max(1)))
+    Ok(SequenceReader::new(Sequence::new(options)?, reader, options.chunk))
 }
 
 /// The iterator of [`read_sequence`] / [`Schema::read_sequence`].
@@ -666,6 +688,11 @@ impl<'p> SeqPump<'p> {
     /// retried; any other error ends the sequence with `Error::Io` (the error itself),
     /// answered here as the last item.
     pub(crate) fn filled(&mut self, read: std::io::Result<usize>) -> Option<Result<Message<'static>, Error>> {
+        // a reader that reports more than the buffer holds breaks `Read`'s contract (P9.13)
+        let read = match read {
+            Ok(n) if n > self.buf.len() => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "the reader reported more bytes than the buffer holds")),
+            r => r,
+        };
         match read {
             Ok(0) => {
                 self.finished = true;

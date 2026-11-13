@@ -421,13 +421,16 @@ async function drainSource(push, source) {
   const src = source && typeof source.getReader === 'function' ? streamSource(source) : source;
   if (!src || typeof src[Symbol.asyncIterator] !== 'function' && typeof src[Symbol.iterator] !== 'function')
     throw new TypeError('a source is a streamSource(), a ReadableStream or an (Async)Iterable of Uint8Array.');
-  for await (const chunk of src) {
-    if (!(chunk instanceof Uint8Array)) throw new SourceError('bad_chunk', 'A stream chunk must be a Uint8Array.');
-    let r = push.feed(chunk);
-    while (r.state === 'yield') { await nextTurn(); r = push.resume(); }
-    if (r.state === 'done') return r.result;   // early: the rest is not read (the stream is cancelled)
-  }
-  return push.finalize();
+  // a source that throws or yields a non-chunk ends the push source: its session is released now (P9.13)
+  try {
+    for await (const chunk of src) {
+      if (!(chunk instanceof Uint8Array)) throw new SourceError('bad_chunk', 'A stream chunk must be a Uint8Array.');
+      let r = push.feed(chunk);
+      while (r.state === 'yield') { await nextTurn(); r = push.resume(); }
+      if (r.state === 'done') return r.result;   // early: the rest is not read (the stream is cancelled)
+    }
+    return push.finalize();
+  } catch (e) { push.close(); throw e; }
 }
 
 /** Validate a message of unknown length from a stream against schema's rule.

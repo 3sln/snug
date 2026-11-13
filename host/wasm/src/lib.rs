@@ -165,6 +165,8 @@ pub extern "C" fn snug_vm_load(words: usize, bytes: usize) -> i32 {
 #[no_mangle]
 pub extern "C" fn snug_vm_validate(len: usize, rule: i32) -> i32 {
     if len > CAP { return -1; }
+    // no Program loaded yet (snug_vm_load answered nothing): -1, not a panic on empty words (P9.13)
+    if PLEN.load(Ordering::Relaxed) <= 0 { return -1; }
     // SAFETY: single-threaded; the host only writes the buffers between calls.
     let input: &[u8] = unsafe { std::slice::from_raw_parts(BUF.0.get() as *const u8, len) };
     let p: &[i32] = unsafe { std::slice::from_raw_parts(PROG.0.get() as *const i32, PLEN.load(Ordering::Relaxed) as usize) };

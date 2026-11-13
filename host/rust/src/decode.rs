@@ -62,7 +62,7 @@ pub enum Floats {
 /// use snug::{decode, DecodeOptions, Profile, Keys, Value};
 /// let int_keys = [0xa1, 0x01, 0x02];
 /// assert_eq!(decode(&int_keys, &DecodeOptions::default())?, Value::Map(vec![(Value::Uint(1), Value::Uint(2))]));
-/// let text_only = DecodeOptions { profile: Profile { keys: Keys::Text, ..Profile::DETERMINISTIC }, ..DecodeOptions::default() };
+/// let text_only = DecodeOptions { wire: Profile { keys: Keys::Text, ..Profile::DETERMINISTIC }, ..DecodeOptions::default() };
 /// assert_eq!(decode(&int_keys, &text_only).unwrap_err().code(), "key_type");
 /// # Ok::<(), snug::Error>(())
 /// ```
@@ -135,29 +135,18 @@ impl Default for Profile {
         Self::VALID
     }
 }
-/// Resource limits. Depth is capped at 256, all counts/lengths at i32::MAX−1.
+/// The resolved resource limits of a decode or encode (the options' `None`s filled with the
+/// defaults). Depth is capped at 256, all counts/lengths at i32::MAX−1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Limits {
-    /// Maximum input/output bytes.
-    pub max_bytes: u32,
-    /// Maximum nesting depth.
-    pub max_depth: u16,
-    /// Maximum entries in a container.
-    pub max_entries: u32,
-    /// Maximum items in one document.
-    pub max_items: u32,
-}
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_bytes: 1_500_000,
-            max_depth: 32,
-            max_entries: 65_536,
-            max_items: 131_072,
-        }
-    }
+pub(crate) struct Limits {
+    pub(crate) max_bytes: u32,
+    pub(crate) max_depth: u32,
+    pub(crate) max_entries: u32,
+    pub(crate) max_items: u32,
 }
 impl Limits {
+    /// The default limits: 1,500,000 bytes, depth 32, 65,536 entries, 131,072 items.
+    pub(crate) const DEFAULT: Limits = Limits { max_bytes: 1_500_000, max_depth: 32, max_entries: 65_536, max_items: 131_072 };
     pub(crate) fn check(&self) -> Result<(), Error> {
         if self.max_depth > 256
             || [self.max_bytes, self.max_entries, self.max_items]
@@ -173,25 +162,37 @@ impl Limits {
 /// any well-formed valid CBOR; [`DecodeOptions::deterministic`]
 /// checks RFC 8949 §4.2.1; [`DecodeOptions::bindle`] is the Bindle profile with
 /// a map root.
-/// Root shape, COSE labels and limits stay independent settings.
+/// Root shape, COSE labels and limits stay independent settings. The limits are
+/// flat fields, as in every runtime options struct (and the JS options bags):
+/// `None` is the default (1,500,000 bytes, depth 32, 65,536 entries, 131,072
+/// items); a depth above 256 or a count of 2³¹ − 1 or more is `Error::Usage("options")`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeOptions {
     /// Required root shape.
     pub top: Top,
     /// Under `Keys::Text`: permit safe integer labels in the top-level map.
     pub cose: bool,
-    /// Bounded scan resources.
-    pub limits: Limits,
-    /// The wire profile.
-    pub profile: Profile,
+    /// The wire profile (default: the valid preset).
+    pub wire: Profile,
+    /// Input byte cap (default 1,500,000).
+    pub max_bytes: Option<u32>,
+    /// Nesting depth cap (default 32, at most 256).
+    pub max_depth: Option<u32>,
+    /// Per-container entry cap (default 65,536).
+    pub max_entries: Option<u32>,
+    /// Item cap per document (default 131,072).
+    pub max_items: Option<u32>,
 }
 impl Default for DecodeOptions {
     fn default() -> Self {
         Self {
             top: Top::Any,
             cose: false,
-            limits: Limits::default(),
-            profile: Profile::VALID,
+            wire: Profile::VALID,
+            max_bytes: None,
+            max_depth: None,
+            max_entries: None,
+            max_items: None,
         }
     }
 }
@@ -200,7 +201,7 @@ impl DecodeOptions {
     pub fn bindle() -> Self {
         Self {
             top: Top::Map,
-            profile: Profile::BINDLE,
+            wire: Profile::BINDLE,
             ..Self::default()
         }
     }
@@ -211,13 +212,23 @@ impl DecodeOptions {
     /// The deterministic preset (RFC 8949 §4.2.1 checking; any root shape).
     pub fn deterministic() -> Self {
         Self {
-            profile: Profile::DETERMINISTIC,
+            wire: Profile::DETERMINISTIC,
             ..Self::default()
         }
     }
     /// The default (the valid preset) with any root shape.
     pub fn any() -> Self {
         Self::default()
+    }
+    /// The limits with the defaults filled in.
+    pub(crate) fn limits(&self) -> Limits {
+        let d = Limits::DEFAULT;
+        Limits {
+            max_bytes: self.max_bytes.unwrap_or(d.max_bytes),
+            max_depth: self.max_depth.unwrap_or(d.max_depth),
+            max_entries: self.max_entries.unwrap_or(d.max_entries),
+            max_items: self.max_items.unwrap_or(d.max_items),
+        }
     }
 }
 /// What a successful check found: the canonical copy when valid input is
@@ -228,11 +239,11 @@ pub(crate) struct Checked {
     pub(crate) unsorted: bool,
 }
 pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<Checked, Error> {
-    options.limits.check()?;
+    let l = options.limits();
+    l.check()?;
     if bytes.len() >= i32::MAX as usize {
         return Err(Error::cbor("too_large"));
     }
-    let l = options.limits;
     // The options array's scratch past its 16 frozen words and the canonical
     // buffer (D264), grown on CODE_SCRATCH to the sizes kin asks for.
     let (mut o, mut cb) = (vec![0i32; 16 + 512], vec![0u8; 1024]);
@@ -256,7 +267,7 @@ pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<Checked, Er
             l.max_entries as i32,
             l.max_items as i32,
         );
-        scan_profile(&mut o, options.profile.flags());
+        scan_profile(&mut o, options.wire.flags());
         let code = scan_cb(bytes, &mut o, &mut cb);
         if code == CODE_SCRATCH {
             grow(&mut o, &mut cb);

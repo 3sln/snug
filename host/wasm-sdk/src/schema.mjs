@@ -22,6 +22,7 @@ import { controls as generic } from '../../js/src/controls.mjs';
 import { schemaWarnings, brand } from '../../js/src/schema-state.mjs';
 
 export { ProgramError };
+const I32_MAX = 0x7fffffff;
 const NO_WARNINGS = Object.freeze([]);
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
   38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 46: 'cut', 48: 'budget' };
@@ -66,7 +67,9 @@ class Inner {
     rt.refresh();
     if (h < 0) throw new ProgramError('verify');
     this.h = h; this.gen = rt.generation; this.rules.clear();
-    programs.register(this, { h, gen: this.gen });
+    // one registration per Inner: a reload (after an instance reset) replaces the earlier one (P9.13)
+    programs.unregister(this);
+    programs.register(this, { h, gen: this.gen }, this);
     if (this.kinds) this.bind();
   }
   bind() {
@@ -134,7 +137,15 @@ class Inner {
     if (c < 0) throw new Error(`snug wasm: vm-validate answered ${c}`);
     return this.result();
   }
+  /** P9.13: a document longer than its effective maxBytes (the compiled input limit, lowered by the call's) is
+   *  too_large before anything is copied into linear memory (which never shrinks): the VM's own answer. */
+  oversize(n, opts) {
+    const m = Number.isSafeInteger(opts.maxBytes) && opts.maxBytes < this.P[33] ? opts.maxBytes : this.P[33];
+    return n > m ? { ok: false, reason: 'cbor/too_large', path: [], offset: 0 } : null;
+  }
   run(rule, bytes, opts, span) {
+    const big = span ? null : this.oversize(bytes.length, opts);
+    if (big) return big;
     try { return this.runAt(rule, rt.input(bytes), bytes.length, opts, span); }
     catch (e) { rt.lost(e); }
   }
@@ -202,7 +213,8 @@ export class Schema {
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > bytes.length)
       throw new TypeError('snug: invalid span');
     validateOptions(options, 'span');
-    return this.#inner.run(r, bytes, { top: 'any', ...options }, { start, end, depth: options.depth ?? 0, items: options.items ?? 0 });
+    // the enclosing counts are 32-bit words in the VM: clamp, never wrap (P9.13)
+    return this.#inner.run(r, bytes, { top: 'any', ...options }, { start, end, depth: Math.min(options.depth ?? 0, I32_MAX), items: Math.min(options.items ?? 0, I32_MAX) });
   }
   decode(bytes, rule, options = {}) {
     bytesInput(bytes);

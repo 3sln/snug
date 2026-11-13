@@ -5,7 +5,7 @@
 //! fails rather than passing on a lucky toolchain.
 use snug::{
     decode, encode, CompileLimits, CompileOptions, Cursor, DecodeOptions, Document, EncodeOptions,
-    Limits, Schema, Scratch, ValidationOptions, Value, View,
+    Schema, Scratch, ValidationOptions, Value, View,
 };
 
 const STACK: usize = 2 * 1024 * 1024;
@@ -55,12 +55,6 @@ fn nested_value(n: usize) -> Value {
     }
     v
 }
-fn limits(depth: usize) -> Limits {
-    Limits {
-        max_depth: depth as u16,
-        ..Default::default()
-    }
-}
 fn schema(text: &str, depth: usize, nesting: u32) -> Schema {
     let options = CompileOptions {
         limits: CompileLimits {
@@ -74,7 +68,7 @@ fn schema(text: &str, depth: usize, nesting: u32) -> Schema {
 }
 fn input_paths(depth: usize) {
     let options = DecodeOptions {
-        limits: limits(depth),
+        max_depth: Some(depth as u32),
         ..DecodeOptions::any()
     };
     for bytes in [nested_array(depth), nested_map(depth), nested_tag(depth)] {
@@ -83,7 +77,7 @@ fn input_paths(depth: usize) {
         let again = encode(
             &value,
             &EncodeOptions {
-                limits: options.limits,
+                max_depth: options.max_depth,
                 ..Default::default()
             },
         )
@@ -131,7 +125,7 @@ fn input_paths(depth: usize) {
     encode(
         &value,
         &EncodeOptions {
-            limits: limits(depth),
+            max_depth: Some(depth as u32),
             ..Default::default()
         },
     )

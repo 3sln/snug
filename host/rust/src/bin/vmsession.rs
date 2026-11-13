@@ -15,8 +15,8 @@
 // debug, overflow checks on). Every session owns fresh scratch, session array
 // and key arena.
 use snug::schema::{validate_blob, BytesBlob, Options, Program, Segment};
-use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
-use snug::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_unknown, vms_keep, vms_need_length,
+use snug::generated::vm::api::{vm_scratch_init, vm_scratch_words};
+use snug::generated::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init, vms_init_unknown, vms_keep, vms_need_length,
                                vms_need_offset, vms_position, vms_step_v, vms_unknown_total, vms_words,
                                vms_grow_arena, vms_grow_bytes, vms_grow_scratch, vms_grow_words};
 use snug::controls::{port, prepare_all, program_controls, Control, Controls};
