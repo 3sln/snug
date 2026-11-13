@@ -7226,8 +7226,10 @@ Results are in the P9.15 (rework) item.
   - **Pushing:** the dist commit and its tags go out under the same owner
     release go as everything else.
   - **Landing:** `bb dist` merges right after the P9.15 rework lands.
-- [ ] **4 (Go)**: with the owner, awaiting the answer the coordinator
-  relays.
+- [x] **4 (Go)**: deferred under D006 (owner, 2026-11-12, via
+  coordinator). Go comes after 0.1.0, in 0.2.0 at the earliest. The
+  assessment above (18–28 engineer-days, no kin change) stands for when it
+  is picked up.
 
 ## Findings
 
