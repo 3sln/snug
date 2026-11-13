@@ -54,7 +54,15 @@ fn compile_validate_serialise_and_refuse() {
         snug::Error::Compile(c) => assert_eq!(c.detail.as_deref(), Some("nope")),
         other => panic!("{:?}", other),
     }
-    assert_eq!(Schema::compile("r = tstr .chars \"x\"", &opts).unwrap_err().code(), "control_value");
+    // D354: the refusal's detail (compile.rs check_arguments) is the control's name when it
+    // gives no detail, and "{name} argument: {detail}" when it does (abnf.rs), byte for byte
+    match Schema::compile("r = tstr .chars \"x\"", &opts).unwrap_err() {
+        snug::Error::Compile(c) => {
+            assert_eq!(c.code, "control_value");
+            assert_eq!(c.detail.as_deref(), Some("chars"));
+        }
+        other => panic!("{:?}", other),
+    }
 
     // serialised Programs need the registry again
     let bytes = schema.program().serialize().unwrap();

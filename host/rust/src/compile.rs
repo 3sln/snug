@@ -284,7 +284,12 @@ fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry, abnf: 
         let (ao, al) = (program[o + 3] as usize, program[o + 4] as usize);
         if !controls.argument_ok_in(name, &pool[ao..ao + al], abnf) {
             let detail = match controls.argument_detail_in(name, &pool[ao..ao + al], abnf) {
-                Some(d) => format!("{name} argument: {d}"),
+                Some(d) => {
+                    let mut s = name.clone();
+                    s.push_str(" argument: ");
+                    s.push_str(&d);
+                    s
+                }
                 None => name.clone(),
             };
             return Err(SchemaError { code: "control_value", line: 0, column: 0, rule: None,

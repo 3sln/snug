@@ -601,12 +601,18 @@ test('compile: every schema text of the case set gives the same Program bytes or
     ['r = [* int] .unique true', { controls: wgeneric, profile: 'bus', controlsInBus: true }], ['r = tstr .chars (1..3)', { controls: { ...wgeneric, size: () => true } }],
     ['r = tstr .x 1', { controls: { x: { check: () => true, maxBytes: -1 } } }], ['r = tstr .x 1', { controls: { x: { check: () => true, argument: a => a.length === 2 } } }],
     ['r = h\'00\' .x 1', { controls: { x: () => true } }], ['r = { a: 1 }', { limits: { schemaBytes: 3 } }], ['r = [* r]', { limits: { compileBudget: 10 } }],
+    // D354: a control_value refusal with the control's detail ("{name} argument: {detail}")
+    ['r = text .abnf "a\\na = \\"x\\" / <later>"', { controls: wabnf }],
   ];
   for (const [text, opts] of extra) {
     const a = await outcomeAsync(async () => programBytes(await wcompile(text, opts)));
     const b = await outcomeAsync(async () => programBytes(await ncompile(text, opts)));
     t.same(`${text} ${show(Object.keys(opts))}`, a, b);
   }
+  // D354: the detail text is the Rust crate's byte for byte (host/rust/tests/abnf.rs asserts the same string)
+  const prose = await outcomeAsync(() => wcompile('r = text .abnf "a\\na = \\"x\\" / <later>"', { controls: wabnf }));
+  t.same('control_value detail == the Rust crate\'s', prose.code === 'control_value'
+    && prose.message.endsWith('(.abnf argument: prose-val (<...>) is not supported at ABNF line 2, column 11)'), true);
   t.done();
 });
 
