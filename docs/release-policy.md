@@ -666,8 +666,8 @@ the registries ship:
 | Path | Contents | Consumer |
 | --- | --- | --- |
 | `/` | the `@3sln/snug` npm tarball's `package/` | npm (git dependencies cannot name a subdirectory) |
-| `/rust/` | the `snug-cddl` `.crate` | cargo, which finds the crate by package name |
-| `/wasm-sdk/` | the `@3sln/snug-wasm` tarball's `package/` (once P9.17 builds it) | pnpm `#vX.Y.Z&path:/wasm-sdk`; npm cannot install it from git |
+| `/rust/` | the `snug-cbor` `.crate` | cargo, which finds the crate by package name |
+| `/wasm-sdk/` | the `@3sln/snug-wasm` tarball's `package/` | pnpm `#vX.Y.Z&path:/wasm-sdk`; npm cannot install it from git |
 | `/go/` | a Go module, only if a Go host is ever built (`--overlay`) | Go, through the `go/vX.Y.Z` tag |
 | `/DIST.json` | the version, the source commit, and the SHA-256 of each input artefact | provenance |
 | `/.npmignore` | keeps the other trees out of an npm git install | npm |
@@ -706,11 +706,11 @@ attach a `git archive` of `src/vX.Y.Z` as well.
 **Consumer forms:**
 - npm: `"@3sln/snug": "github:3sln/snug#v0.1.0"`. A full
   `git+https://github.com/3sln/snug.git#v0.1.0` also works.
-- cargo: `snug-cddl = { git = "https://github.com/3sln/snug", tag =
-  "v0.1.0" }`. crates.io refuses git dependencies in published crates, so
+- cargo: `snug-cbor = { git = "https://github.com/3sln/snug", tag =
+  "v0.1.0" }`. The library name is `snug`, so code says `use snug::…`. crates.io refuses git dependencies in published crates, so
   this form is for applications.
-- Go: `require github.com/3sln/snug/go v0.1.0`. This applies only if a
-  Go host exists. Go would have to use the dist tree: on main, generated
+- Go: `require github.com/3sln/snug/go vX.Y.Z`. This applies only if a
+  Go host exists; Go is deferred past 0.1.0 (D346, owner). Go would have to use the dist tree: on main, generated
   code holds the placeholder version, and a Go module cannot import files
   from outside its own directory.
 
@@ -741,7 +741,7 @@ GitHub.
 | `@3sln/snug` | npmjs.com | `dist` root (git installs) |
 | `@3sln/snug-wasm` | npmjs.com | `dist` `/wasm-sdk/` (pnpm, yarn) |
 | raw `.wasm` (SDK and compiler modules) | GitHub Releases asset | inside `@3sln/snug-wasm` |
-| `snug-cddl` crate | crates.io | `dist` `/rust/` (git dependencies) |
+| `snug-cbor` crate | crates.io | `dist` `/rust/` (git dependencies) |
 | npm tarballs, `.crate`, `SHA256SUMS`, source archive | GitHub Releases assets | none |
 | Go module (if ever) | `dist` + `go/` tags, through proxy.golang.org | none |
 

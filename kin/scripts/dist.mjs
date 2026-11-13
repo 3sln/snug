@@ -8,15 +8,15 @@
 // one version, so a git-source consumer gets exactly what the registries ship:
 //
 //     /                 the @3sln/snug npm tarball's `package/` (npm git installs need the root)
-//     /rust/            the snug-cddl .crate's contents (cargo finds it by package name)
+//     /rust/            the snug-cbor .crate's contents (cargo finds it by package name)
 //     /wasm-sdk/        the @3sln/snug-wasm tarball's `package/`, when the release has one
-//     /<overlay>/...    further release trees (a Go module in go/, a deps.edn root in clj/)
+//     /<overlay>/...    further release trees (e.g. a Go module in go/, post-0.1.0)
 //     /DIST.json        version, source commit, and the SHA-256 of every input artefact
 //     /.npmignore       keeps the sibling trees out of an npm git install
 //
 // --release holds the artefacts a release build produced from a stamped tree
 // (`bb stamp` in a detached worktree, then npm pack and cargo package):
-// 3sln-snug-<v>.tgz and snug-cddl-<v>.crate, optionally 3sln-snug-wasm-<v>.tgz.
+// 3sln-snug-<v>.tgz and snug-cbor-<v>.crate, optionally 3sln-snug-wasm-<v>.tgz.
 // Every artefact must carry the same version, and not version.edn's placeholder.
 //
 // Commits are linear (the previous dist tip is the parent; the first is an orphan
@@ -80,7 +80,7 @@ function main(o) {
     return hits[0];
   };
   const js = pick(/^3sln-snug-\d.*\.tgz$/, '@3sln/snug tarball (3sln-snug-<v>.tgz)');
-  const crate = pick(/^snug-cddl-\d.*\.crate$/, 'snug-cddl .crate');
+  const crate = pick(/^snug-cbor-\d.*\.crate$/, 'snug-cbor .crate');
   const wasm = pick(/^3sln-snug-wasm-\d.*\.tgz$/, '@3sln/snug-wasm tarball', true);
   const version = js.slice('3sln-snug-'.length, -'.tgz'.length);
 
@@ -104,7 +104,7 @@ function main(o) {
     }
   }
   const versions = { '@3sln/snug': JSON.parse(readFileSync(join(stage, 'package.json'), 'utf8')).version,
-    'snug-cddl': readFileSync(join(stage, 'rust/Cargo.toml'), 'utf8').match(/^version = "([^"]+)"/m)?.[1] };
+    'snug-cbor': readFileSync(join(stage, 'rust/Cargo.toml'), 'utf8').match(/^version = "([^"]+)"/m)?.[1] };
   if (wasm) versions['@3sln/snug-wasm'] = JSON.parse(readFileSync(join(stage, 'wasm-sdk/package.json'), 'utf8')).version;
   for (const [pkg, v] of Object.entries(versions))
     if (v !== version) fail(`${pkg} is at ${v}, the release is ${version}: one version for every artefact (O2)`);
@@ -118,7 +118,7 @@ function main(o) {
   const artefacts = Object.fromEntries([js, crate, wasm].filter(Boolean).map(n => [n, sha256(join(o.release, n))]));
   writeFileSync(join(stage, 'DIST.json'), JSON.stringify({
     note: 'Generated release output (docs/release-policy.md §9), not source history.',
-    version, source: src, artefacts, trees: { '/': '@3sln/snug', rust: 'snug-cddl', ...(wasm ? { 'wasm-sdk': '@3sln/snug-wasm' } : {}),
+    version, source: src, artefacts, trees: { '/': '@3sln/snug', rust: 'snug-cbor', ...(wasm ? { 'wasm-sdk': '@3sln/snug-wasm' } : {}),
       ...Object.fromEntries(goDirs.map(d => [d, 'Go module'])) },
   }, null, 2) + '\n');
 

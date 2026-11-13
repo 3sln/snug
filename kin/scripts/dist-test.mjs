@@ -104,7 +104,7 @@ if (!has('cargo')) skip('cargo', 'no cargo');
 else {
   const dir = join(work, 'cargo');
   write(join(dir, 'Cargo.toml'), `[package]\nname = "consumer"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n` +
-    `[dependencies]\nsnug-cddl = { git = "${url}", tag = "${tag}" }\n`);
+    `[dependencies]\nsnug-cbor = { git = "${url}", tag = "${tag}" }\n`);
   write(join(dir, 'src/main.rs'), 'use snug::{CompileOptions, EncodeOptions, Schema, Scratch, Value, encode};\nfn main() {\n' +
     '    let s = Schema::compile("message = { id: uint }", &CompileOptions::default()).unwrap();\n' +
     '    let b = encode(&Value::Map(vec![(Value::Text("id".into()), Value::Uint(7))]), &EncodeOptions::default()).unwrap();\n' +

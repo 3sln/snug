@@ -7151,7 +7151,8 @@ Results are in the P9.15 (rework) item.
 - **The branch** (release-policy §9). An orphan `dist` branch holds one
   commit per release. The commit is the release artefacts unpacked:
   - the `@3sln/snug` tarball at the root;
-  - the `snug-cddl` `.crate` in `rust/`;
+  - the `snug-cbor` `.crate` in `rust/` (crate name per the owner,
+    2026-11-12; it was `snug-cddl` in the first draft);
   - `@3sln/snug-wasm` in `wasm-sdk/`;
   - an optional `go/` module;
   - `DIST.json` and `.npmignore`.
