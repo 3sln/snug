@@ -2718,7 +2718,10 @@ and testable by bit tests. Integral floats are distinct CBOR values in RFC
 **Alternatives**: accept any shortest NaN (non-unique encodings of "NaN");
 refuse integral floats (dCBOR's rule, not §4.2.1's); keep Bindle's
 refusals as the default (contrary to D081).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (coordinator, 2026-11-13, under the owner's standing
+  rule, P9.13 decision 3; signed off as is, with no new option).
+  `deterministic` is an opt-in, dCBOR-style preset; the default `valid`
+  preserves NaN payloads. profiles.md documents this (WP4).
 
 ### D123 — JavaScript values for the deterministic data (P7.1)
 **Decision** (profile engineer, provisional): a map with only text keys
