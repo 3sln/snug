@@ -7667,6 +7667,51 @@ ceil(measured × 1.02): bytes 154,028 → **153,564**, gzip 70,071 →
   cut in place of a raise. Merged at `d33a16b`; drift ok on main;
   budget.json is unchanged.
 
+### D353 — A tag-24 payload's deferred duplicate checks run after a refused walk too: an earlier float-equivalent duplicate key wins over a later refusal (scanner == VM identity; P9.9 finding)
+**Decision** (P8.5 VM engineer, provisional):
+* **The rule.** The first refusal in stream order wins (scanner.md
+  precedence). A duplicate key that needs equivalence forms is decided at
+  its map's end (D263, D277), and so is earlier than any refusal after
+  that end. The scanner's own run (`scan-run`) follows this: it runs the
+  deferred checks after the walk even when the walk was refused, and a
+  deferred refusal (always from a map that ended earlier) replaces the
+  walk's. That is why the scanner reports `duplicate_key` at 9 for
+  `d8 18 4b 82 a2 f9 00 00 f6 f9 80 00 f6 ff`, the -0.0 key of
+  24(<<[{0.0: null, -0.0: null}, <break>]>>).
+* **The bug.** On the canonical path (the VM's valid-CBOR replay, D262),
+  `scan-seq` (`kin/vcopy.kin`) checks a byte string's content (a tag-24
+  payload, or `.cbor` content) for that content's own copy. It ran its
+  deferred checks only after a CLEAN walk. When the payload's walk was
+  refused later (the break at 13, a `66(h'0000')` tag rule, and so on), the
+  duplicate was never found. The copy got no duplicate event, and the VM's
+  replay reached the later refusal instead: `malformed` or `tag` at 13.
+  Each route agreed with the others (buffer, whole and chunked sessions),
+  and all disagreed with the scanner. Integer and text duplicates are
+  bytewise and refused at the key, so they were not affected. Neither was
+  the same data outside tag 24, where the main walk's `scan-run` defers
+  correctly.
+* **The fix.** `scan-seq` runs the deferred checks after a refused walk as
+  `scan-run` does. A deferred refusal replaces the walk's. Otherwise the
+  walk's refusal and its offset stand. The duplicate's event is then
+  written into the payload's copy (`dup-event`) as for a clean payload.
+  Rust, the sessions and the wasm SDK run the same generated vcopy code.
+
+**Evidence and regressions**:
+* The manager's repro: all 10 rows now agree. Of the 7 shapes I added
+  (including `detmut 25427`, an array wrapper and a NaN pair), 5 differed
+  on main, and buffer, whole-window and 1-, 3- and 7-byte chunked sessions
+  now all equal the scanner.
+* det-cases (used by `vm-test`'s det identity and by the scan, rscan and
+  valid gates): a valid-preset fixed shape set.
+  - Float-equivalent key pairs (0.0/-0.0 across widths, NaN encodings) in a
+    map inside a tag-24 payload.
+  - Followed by a later refusal (break, tag-66 size, reserved ai, cut head,
+    indefinite string, `f818`) inside the payload, after it, or after the
+    map. Both valid presets, at top level and inside an array.
+  - 499 cases with the PF_VALID bit, of which 426 differed from the scanner
+    on main. 0 differ now.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

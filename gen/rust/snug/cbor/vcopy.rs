@@ -713,8 +713,17 @@ pub fn scan_seq(b: &[u8], o: &mut [i32], cb: &mut [u8], cs: i32, ce: i32) -> i32
             q = r;
         }
     }
-    if (r >= 0) && (o[(O_S_NDEF) as usize] > 0) {
-        r = run_defer(b, o, cb, 0, o[(O_S_NDEF) as usize]);
+    // D353: the deferred checks run after a refused walk too, as scan-run's do:
+    // each was recorded at a map that ended before the walk's refusal, so its
+    // refusal comes first in stream order and wins (scanner.md precedence)
+    if (r != (-CODE_SCRATCH)) && (o[(O_S_NDEF) as usize] > 0) {
+        let epos: i32 = o[(O_ERR_POS) as usize];
+        let d: i32 = run_defer(b, o, cb, 0, o[(O_S_NDEF) as usize]);
+        if d < 0 {
+            r = d;
+        } else if r < 0 {
+            o[(O_ERR_POS) as usize] = epos;
+        }
     }
     o[(O_S_NDEF) as usize] = 0;
     o[(O_S_DLOW) as usize] = o.len() as i32;

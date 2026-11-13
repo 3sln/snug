@@ -737,8 +737,17 @@ export function scanSeq(b, o, cb, cs, ce) {
             q = r;
         }
     }
-    if ((r >= 0) && (o[O_S_NDEF] > 0)) {
-        r = runDefer(b, o, cb, 0, o[O_S_NDEF]);
+    // D353: the deferred checks run after a refused walk too, as scan-run's do:
+    // each was recorded at a map that ended before the walk's refusal, so its
+    // refusal comes first in stream order and wins (scanner.md precedence)
+    if ((r !== (-CODE_SCRATCH)) && (o[O_S_NDEF] > 0)) {
+        const epos = o[O_ERR_POS];
+        const d = runDefer(b, o, cb, 0, o[O_S_NDEF]);
+        if (d < 0) {
+            r = d;
+        } else if (r < 0) {
+            o[O_ERR_POS] = epos;
+        }
     }
     o[O_S_NDEF] = 0;
     o[O_S_DLOW] = o.length;
