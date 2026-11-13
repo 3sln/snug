@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { compile, SchemaError } from 'snug/compile';
-import { tables, categories, unicodeVersion } from 'snug/unicode';
-import { fromSerialized } from 'snug/schema';
+import { compile, SchemaError } from '@3sln/snug/compile';
+import { tables, categories, unicodeVersion } from '@3sln/snug/unicode';
+import { fromSerialized } from '@3sln/snug/schema';
 import { compile as compileRaw, lastBudgetUsed } from '../src/compile.mjs';
 
 const schemaText = pattern => `r = tstr .regexp ${JSON.stringify(pattern)}`;

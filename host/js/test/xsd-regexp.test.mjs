@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { compile, SchemaError } from 'snug/compile';
-import { encode } from 'snug';
-import { tables } from 'snug/unicode';
+import { compile, SchemaError } from '@3sln/snug/compile';
+import { encode } from '@3sln/snug';
+import { tables } from '@3sln/snug/unicode';
 import { compile as raw, lastBudgetUsed } from '../src/compile.mjs';
 const vectors = JSON.parse(readFileSync(new URL('../../../corpus/conformance/xsd-regexp.json', import.meta.url)));
 const schema = pattern => `r = tstr .regexp ${JSON.stringify(pattern).replaceAll(String.fromCodePoint(0x10ffff), '\\u{10ffff}')}`;

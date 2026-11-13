@@ -1,5 +1,9 @@
 # Using snug from Rust
 
+The crate is `snug-cbor` on crates.io (once published: `cargo add snug-cbor`,
+or `snug-cbor = "0.1"` under `[dependencies]`). Its library is `snug`, so code
+says `use snug::…`.
+
 Assemble the crate with `kin/scripts/rust-crate .cache/snug-rs`; run the full
 offline gate with `bb rust-api-test`. The [Rust host README](../host/rust/README.md)
 explains local dependencies and the assembled layout. The crate has no external

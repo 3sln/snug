@@ -10,29 +10,29 @@ import { spawnSync } from 'node:child_process';
 import { buildPackage, PACKAGE_FILES, packageAllows } from '../src/package-build.mjs';
 import { SNUG_VERSION } from '../src/version.mjs';
 import { SNUG_VERSION as compilerVersion } from '../src/compile.mjs';
-import { compile, SchemaError } from 'snug/compile';
-import { validate, decode as schemaDecode, validateAt } from 'snug/schema';
-import { encode, decode, profiles, SnugFault } from 'snug';
-import { view } from 'snug/view';
+import { compile, SchemaError } from '@3sln/snug/compile';
+import { validate, decode as schemaDecode, validateAt } from '@3sln/snug/schema';
+import { encode, decode, profiles, SnugFault } from '@3sln/snug';
+import { view } from '@3sln/snug/view';
 
 const { createRequire } = nodeModule, { stripTypeScriptTypes } = nodeModule;
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
 
 test('public package metadata, entry points, profile status and blocked deep imports', async () => {
-  assert.equal(pkg.name, 'snug'); assert.equal(pkg.private, true); assert.equal(pkg.license, 'MIT');
+  assert.equal(pkg.name, '@3sln/snug'); assert.equal(pkg.private, true); assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.version, compilerVersion); assert.equal(SNUG_VERSION, compilerVersion);
   assert.deepEqual(Object.keys(profiles), ['valid', 'deterministic', 'bindle']);
   assert.ok(Object.isFrozen(profiles) && Object.isFrozen(profiles.bindle) && Object.isFrozen(profiles.deterministic) && Object.isFrozen(profiles.valid));
   assert.equal(profiles.valid.wire, 'valid'); assert.equal(profiles.deterministic.wire, 'deterministic'); assert.equal(profiles.bindle.wire, 'bindle');
   for (const key of Object.keys(pkg.exports)) {
-    const specifier = key === '.' ? 'snug' : 'snug/' + key.slice(2);
+    const specifier = key === '.' ? '@3sln/snug' : '@3sln/snug/' + key.slice(2);
     const module = await import(specifier);
     assert.ok(Object.keys(module).length);
     assert.ok(existsSync(new URL('../' + pkg.exports[key].types, import.meta.url)));
   }
-  await assert.rejects(import('snug/src/schema.mjs'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
-  await assert.rejects(import('snug/generated/snug/vm/api.mjs'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+  await assert.rejects(import('@3sln/snug/src/schema.mjs'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+  await assert.rejects(import('@3sln/snug/generated/snug/vm/api.mjs'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
 });
 
 test('public error contract: safe compile failures, results, codec/schema/view faults', async () => {
@@ -91,7 +91,7 @@ test('every declaration parses with Node and matches the entry point exports', a
     roots.push(url.pathname);
     if (strip) assert.doesNotThrow(() => strip(source));
     const declared = [...source.matchAll(/export declare (?:class|function|const) (\w+)/g)].map(m => m[1]).sort();
-    const module = await import(key === '.' ? 'snug' : 'snug/' + key.slice(2));
+    const module = await import(key === '.' ? '@3sln/snug' : '@3sln/snug/' + key.slice(2));
     assert.deepEqual(declared, Object.keys(module).sort(), key);
     for (const [, path] of source.matchAll(/from '([^']+)'/g))
       assert.ok(existsSync(new URL(path.replace(/\.js$/, '.d.ts'), url)));
@@ -113,8 +113,8 @@ test('self-contained staged package works away from the repository through all e
   const temp = await mkdtemp(join(tmpdir(), 'snug-package-test-'));
   try {
     const target = await buildPackage(join(temp, 'package'));
-    // release-policy §3 / §4 step 6: the licence, notices and changelog ship
-    for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md'])
+    // release-policy §3 / §4 step 6: the licence, notices, security policy and changelog ship
+    for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'README.md', 'CHANGELOG.md'])
       assert.ok(existsSync(join(target, name)), name);
     // P9.15: nothing outside PACKAGE_FILES ships (no DEVLOG, SPEC, reviews, bench
     // records, corpus or tools), every listed doc ships, and no staged Markdown
@@ -129,12 +129,12 @@ test('self-contained staged package works away from the repository through all e
         if (!/^[a-z]+:/i.test(href)) assert.ok(existsSync(join(target, dirname(md), href)), `${md} links to ${href}`);
     const smoke = `
       import assert from 'node:assert/strict';
-      import {encode,decode,Decimal,NDArray,Float16Bytes,Tagged,profiles} from 'snug';
-      import {compile} from 'snug/compile';
-      import {fromSerialized,validate,decode as schemaDecode,validateAt} from 'snug/schema';
-      import {view,View,Cursor} from 'snug/view';
-      import {Writer} from 'snug/writer';
-      import {asyncHandle,bufferHandle,scanHandle,validateHandle,validateHandleSync,pushValidator,openSession} from 'snug/sources';
+      import {encode,decode,Decimal,NDArray,Float16Bytes,Tagged,profiles} from '@3sln/snug';
+      import {compile} from '@3sln/snug/compile';
+      import {fromSerialized,validate,decode as schemaDecode,validateAt} from '@3sln/snug/schema';
+      import {view,View,Cursor} from '@3sln/snug/view';
+      import {Writer} from '@3sln/snug/writer';
+      import {asyncHandle,bufferHandle,scanHandle,validateHandle,validateHandleSync,pushValidator,openSession} from '@3sln/snug/sources';
       const s = await compile('r = { id: uint }');
       const b = encode({id:7});
       assert.deepEqual(validate(s,b,'r'),{ok:true});
@@ -156,7 +156,7 @@ test('self-contained staged package works away from the repository through all e
       assert.ok(new NDArray([1],[7]) && new Float16Bytes(new Uint8Array(2)) && profiles.bindle && profiles.deterministic);
       assert.equal(decode(encode(new Tagged(1, 7))).value, 7);
       assert.throws(() => decode(Uint8Array.of(0x01), {wire:'bindle'}), {code:'not_map'});
-      await assert.rejects(import('snug/generated/snug/vm/api.mjs'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
+      await assert.rejects(import('@3sln/snug/generated/snug/vm/api.mjs'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
     `;
     await writeFile(join(target, 'smoke.mjs'), smoke);
     const child = spawnSync(process.execPath, ['smoke.mjs'], { cwd: target, encoding: 'utf8', timeout: 30000 });
@@ -174,7 +174,7 @@ test('self-contained staged package works away from the repository through all e
 
 test('the crate\'s documents (kin/scripts/rust-crate copies them) have no relative links', () => {
   // P9.15: host/rust/README.md is the crate README; the crate ships only these
-  for (const path of ['host/rust/README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md']) {
+  for (const path of ['host/rust/README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'CHANGELOG.md']) {
     const text = readFileSync(new URL('../../../' + path, import.meta.url), 'utf8');
     const relative = [...text.matchAll(/\]\(([^)\s]+)\)/g)].map(m => m[1]).filter(h => !/^(https?:|#)/.test(h));
     assert.deepEqual(relative, [], path);

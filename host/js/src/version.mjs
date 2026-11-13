@@ -1,3 +1,4 @@
-// Runtime metadata, kept out of the compiler dependency graph. The package
-// test checks this against kin's snugVersion() and package.json (D101).
-export const SNUG_VERSION = '0.0.0';
+// Runtime metadata, kept out of the compiler dependency graph. A version site
+// (version.edn, D343): it holds the placeholder, and `bb stamp` writes the
+// release version in a release build. version.test.mjs checks it.
+export const SNUG_VERSION = '0.0.0-unreleased';

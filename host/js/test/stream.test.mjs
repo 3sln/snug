@@ -2,10 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { compile } from 'snug/compile';
-import { encode } from 'snug';
-import { scanBuffer } from 'snug/sources';
-import { pushValidator, pushScanner, streamSource, validateStream, scanStream } from 'snug/sources';
+import { compile } from '@3sln/snug/compile';
+import { encode } from '@3sln/snug';
+import { scanBuffer } from '@3sln/snug/sources';
+import { pushValidator, pushScanner, streamSource, validateStream, scanStream } from '@3sln/snug/sources';
 import { ANY_P, ANY_B, ANY_LIMITS } from '../src/any-program.mjs';
 import { compile as compileRaw } from '../src/compile.mjs';
 
@@ -99,7 +99,11 @@ test('memory: a long byte string is dropped as it streams; only asked-for bytes 
 
 test('unknown-length scanning (the VM against any) gives the scanner verdict', async () => {
   const c = compileRaw('r = any', { limits: ANY_LIMITS });
-  assert.deepEqual(Array.from(c.program), Array.from(ANY_P));
+  // every word but the source key (7..14): the key hashes the snug version, which is
+  // the placeholder or a stamped release (D343); the built-in Program's key is never
+  // shown, so ANY_P keeps one fixed key (as host/rust/tests/sequence.rs also skips it)
+  const unkeyed = p => Array.from(p, (w, i) => i >= 7 && i <= 14 ? 0 : w);
+  assert.deepEqual(unkeyed(c.program), unkeyed(ANY_P));
   assert.deepEqual(Array.from(c.pool), Array.from(ANY_B));
   for (const bytes of inputs()) {
     for (const options of [{}, { wire: 'bindle' }, { maxDepth: 2 }, { top: 'map' }]) {

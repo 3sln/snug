@@ -1,0 +1,19 @@
+;; snug's version: the single source for every artefact (owner decision O2;
+;; docs/release-policy.md §1.1, D343).
+;;
+;; :version      the version a release build stamps. `bb stamp` writes it onto
+;;               every version site (both package.json files, both Cargo.toml
+;;               files, host/js/src/version.mjs, kin's snug-version literal) and
+;;               re-emits gen/. Changing it is part of a release commit.
+;; :placeholder  what every version site holds in the tracked tree. Stamped
+;;               versions are never checked in (owner, 2026-11-12): `bb stamp`
+;;               runs only in a detached release worktree or an exported copy,
+;;               and `bb versions` (a land and release gate) fails if any site
+;;               holds anything else. It is valid semver, so the unstamped tree
+;;               builds, tests and packs, and a Program it compiles says
+;;               "0.0.0-unreleased" in its producer field.
+;;
+;; Both must be semver strings of at most 32 bytes (the Program container's
+;; producer field). kin/scripts/version-sites.mjs reads this file.
+{:version     "0.1.0"
+ :placeholder "0.0.0-unreleased"}

@@ -2,11 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { compile, SchemaError } from 'snug/compile';
-import { ProgramError, fromSerialized, fromProgram } from 'snug/schema';
-import { controls, chars, unique, samelen } from 'snug/controls';
-import { encode, decode } from 'snug';
-import { validateHandleSync, bufferHandle, pushValidator } from 'snug/sources';
+import { compile, SchemaError } from '@3sln/snug/compile';
+import { ProgramError, fromSerialized, fromProgram } from '@3sln/snug/schema';
+import { controls, chars, unique, samelen } from '@3sln/snug/controls';
+import { encode, decode } from '@3sln/snug';
+import { validateHandleSync, bufferHandle, pushValidator } from '@3sln/snug/sources';
 
 const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
 // The table both hosts check (host/rust/tests/controls.rs reads the same file).

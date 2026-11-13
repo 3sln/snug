@@ -137,7 +137,7 @@ export function buildPackage(destination = DEFAULT_DEST, { wasm } = {}) {
     if (name === 'package.json') continue;
     const from = name === 'README.md' ? join(SDK, 'README.md') : join(ROOT, name);
     if (existsSync(from)) cpSync(from, join(target, name));
-    else if (name !== 'SECURITY.md') throw new Error(`snug-wasm package: ${from} is missing`);
+    else throw new Error(`snug-wasm package: ${from} is missing`);
   }
   for (const name of PACKAGE_FILES.docs) {
     mkdirSync(dirname(join(target, 'docs', name)), { recursive: true });

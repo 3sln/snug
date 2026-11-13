@@ -4,7 +4,8 @@ Status: **proposed, 2026-11-12 (P9.11, D338).** Nothing has been released.
 Writing this policy publishes nothing. No package is published, no tag is
 pushed and no registry is touched until the owner gives an explicit go for
 a named commit (§4). Every manifest is still `private: true` /
-`publish = false` at version `0.0.0`.
+`publish = false`, and every version site holds the placeholder
+`0.0.0-unreleased` (§1.1).
 
 Each item below is one of three kinds:
 
@@ -23,9 +24,14 @@ These artefacts could be published:
 
 | Artefact | Source | Manifest today (stated) |
 | --- | --- | --- |
-| npm package (native JS, the default per D130) | `host/js`, staged by `npm run build` | `host/js/package.json`: `"name": "snug"`, `"version": "0.0.0"`, `"private": true`, `"engines": { "node": ">=20" }` (§2) |
-| Rust crate | `host/rust` + `gen/rust`, assembled by `kin/scripts/rust-crate` into `.cache/snug-rs/` | `host/rust/Cargo.toml`: `name = "snug"`, `version = "0.0.0"`, `publish = false`, edition 2021, `rust-version = "1.87"` (§2), no dependencies |
-| wasm SDK (opt-in per D130; experimental) | `host/wasm-sdk` over the modules built by `kin/scripts/wasm-build sdk` / `cc` and staged by `bb wasm-release`; packaged by `host/wasm-sdk/package-build.mjs` (P9.17) | `host/wasm-sdk/package.json`: `"name": "@3sln/snug-wasm"`, `"version": "0.0.0"`, `"private": true` |
+| npm package (native JS, the default per D130) | `host/js`, staged by `npm run build` | `host/js/package.json`: `"name": "@3sln/snug"`, `"version": "0.0.0-unreleased"`, `"private": true`, `"engines": { "node": ">=20" }` (§2) |
+| Rust crate | `host/rust` + `gen/rust`, assembled by `kin/scripts/rust-crate` into `.cache/snug-rs/` | `host/rust/Cargo.toml`: `name = "snug-cbor"` (library `snug`), `version = "0.0.0-unreleased"`, `publish = false`, edition 2021, `rust-version = "1.87"` (§2), no dependencies |
+| wasm SDK (opt-in per D130; experimental) | `host/wasm-sdk` over the modules built by `kin/scripts/wasm-build sdk` / `cc` and staged by `bb wasm-release`; packaged by `host/wasm-sdk/package-build.mjs` (P9.17) | `host/wasm-sdk/package.json`: `"name": "@3sln/snug-wasm"`, `"version": "0.0.0-unreleased"`, `"private": true` |
+
+Names (O4, owner 2026-11-12; D343): crates.io's `snug` belongs to an
+unrelated project, so the crate is `snug-cbor`; `[lib] name = "snug"` keeps
+`use snug::…`. Every
+manifest's repository is `https://github.com/3sln/snug`.
 
 **Proposed: one version number for all artefacts, released in lockstep.**
 The artefacts share one core: the same kin sources generate the compiler,
@@ -37,13 +43,41 @@ A single number lets "snug x.y.z" name one semantics. A release in which
 one artefact has no changes still bumps it, and its changelog entry says
 "no changes in this artefact".
 
-The version appears in several places, and all of them must agree: both
-`package.json` files, `Cargo.toml` (and `host/wasm/Cargo.toml`),
-`host/js/src/version.mjs`, and the literal `snug-version` returns in
-`kin/compile/main.kin`, followed by a re-emit of `gen/`. That literal is
-the source of truth. Since P9.15 the source key reads its length and bytes
-from it, so any semver string works. `host/js/test/version.test.mjs` fails
-if any of these sites disagrees with it, or if it is not a semver string.
+**Stated (D343, O2): `version.edn` at the repository root is the single
+source.** It holds two semver strings:
+
+- `:version`, the version a release build stamps (0.1.0, O1);
+- `:placeholder`, `0.0.0-unreleased`, which every version site holds in
+  the tracked tree.
+
+The version sites are both `package.json` files, both `Cargo.toml` files
+(`host/rust`, `host/wasm`), `host/js/src/version.mjs`, and the literal
+`snug-version` returns in `kin/compile/main.kin`, plus the two modules
+`bb emit` generates from it. `kin/scripts/version-sites.mjs` lists them.
+
+**Stamped versions are never checked in** (owner, 2026-11-12: "Stamped
+versions in the project files are never checked in."):
+
+- main and every working branch hold the placeholder at every site.
+  `bb versions` fails otherwise; it is the first gate of the `land` and
+  `release` sets. `kin/scripts/pre-commit` is the same check on the index,
+  as an optional git hook (not installed by anything).
+- `bb stamp [version]` writes `:version` (or the given version) onto every
+  site and re-emits `gen/`. It refuses a checkout with a branch checked
+  out, so it runs only in a detached release worktree or an exported copy.
+  It rewrites only the version text, so it is deterministic and
+  idempotent.
+- The only stamped trees are build output: the release artefacts, the npm
+  and crate tarballs, and the generated commits of the `dist` branch
+  (P9.19).
+
+Because the source key reads its length and bytes from the literal, any
+semver string works, up to 32 bytes: the Program container's producer field
+holds 32 printable ASCII bytes, and `bb stamp` refuses a longer version.
+`bb stamp-test` stamps two scratch copies and checks that every site
+agrees, that the stamped tree passes the version, serialised-Program and
+package tests, that a second stamp changes nothing, and that the two
+copies give byte-identical trees, npm tarballs and `.crate` files.
 
 ### 1.2 Semantic versioning, and what 0.x means
 
@@ -339,15 +373,15 @@ go. Delegations such as D303 cover size caps only, not releases.
 2. **Owner decisions.** Every box in §7 is decided. Package names and
    registries must be settled before any manifest changes.
 3. **Release commit** on main, landed like any change:
-   - set the version at every site listed in §1.1;
-   - re-emit `gen/` and check that `bb drift` is clean;
+   - set `:version` in `version.edn` (the version sites keep the
+     placeholder: stamped versions are never checked in, §1.1);
    - fill in the manifest fields from §8 (`private`/`publish`, `engines`,
      `rust-version`, repository and licence metadata);
    - move `[Unreleased]` to `[x.y.z] — date`.
 4. **Gates on that exact commit.** All must be green, and a SKIP counts
    as a failure. Each runs under the watchdog (D326), with the result
    recorded in DEVLOG:
-   - `bb check`, `bb drift`;
+   - `bb versions`, `bb check`, `bb drift`, `bb stamp-test`;
    - `bb scan-test`, `bb rscan-test`, `bb vm-test`, `bb vmsession-test`,
      `bb sequence-test`, `bb valid-test` (with the cbor2 arm present);
    - `bb compile-test`, `bb compile-fuzz`;
@@ -365,7 +399,13 @@ go. Delegations such as D303 cover size caps only, not releases.
 
    If the code changed after P9.9's full runs, the owner decides whether
    those runs are repeated, and the decision is recorded.
-5. **Build the artefacts, locally, without publishing:**
+
+   The identity gates (`bb identity`) also run on the stamped tree of
+   step 5, because the version is in every source key.
+5. **Build the artefacts, locally, without publishing,** from a stamped
+   tree that is never committed: `git worktree add --detach .cache/release
+   <commit>`, then `bb stamp` there (it stamps `version.edn`'s
+   `:version` and re-emits `gen/`). In that tree:
    - npm: `npm run build` in `host/js` into a fresh scratch directory,
      then `npm pack --dry-run` there to review the file list;
    - crate: `kin/scripts/rust-crate`, then `cargo package --list` and
@@ -388,19 +428,19 @@ go. Delegations such as D303 cover size caps only, not releases.
      all of this and installs the packed tarball into a scratch project
      (docs/wasm-sdk.md).
 
-   Record each artefact's SHA-256 and the producing commit in DEVLOG.
+   Record each artefact's SHA-256 and the producing commit in DEVLOG. The
+   same commit and `version.edn` give byte-identical artefacts
+   (`bb stamp-test` checks this for the npm tarball and the `.crate`).
 6. **Licence and notice check:**
-   - every artefact contains `LICENSE` (MIT, "Copyright (c) 2026 3sln")
-     and `THIRD_PARTY_NOTICES.md`;
-   - the crate has no dependencies (`cargo tree` shows only `snug`);
+   - every artefact contains `LICENSE` (MIT, "Copyright (c) 2026 3sln"),
+     `THIRD_PARTY_NOTICES.md` and `SECURITY.md`;
+   - the crate has no dependencies (`cargo tree` shows only `snug-cbor`);
    - neither npm package has `dependencies`;
    - nothing under `corpus/`, `bench/` or `tools/` is inside an artefact,
      because the notices call that material "not shipped";
-   - the `snug/unicode` tables (generated from Node's Unicode 16.0
+   - the `@3sln/snug/unicode` tables (generated from Node's Unicode 16.0
      property data, `tools/unicode/gen-tables.mjs`) are covered by the
-     notices. **Open item:** whether the Unicode License v3 notice must
-     ship with derived category ranges is for the owner to settle (§7,
-     O6). This document does not decide it.
+     Unicode License v3 text in `THIRD_PARTY_NOTICES.md` (O6).
 7. **Owner go.** The owner reviews:
    - the gate record;
    - the changelog;
@@ -440,10 +480,10 @@ go. Delegations such as D303 cover size caps only, not releases.
 
 ### 5.2 Security fixes (proposed)
 
-- **Reports:** privately to **`[SECURITY CONTACT — OWNER TO FILL IN]`**.
-  No contact address exists in the repository, and none is invented here.
-  A `SECURITY.md` pointing to that contact should be added at release
-  (§7, O5). Reports are not filed as public issues.
+- **Reports:** privately to **contact+security@3sln.com** (O5).
+  `SECURITY.md` at the repository root says how to report and what to
+  include; it ships in the npm package and the crate. Reports are not
+  filed as public issues.
 - **In scope** (snug's own guarantees, from SPEC §4 and §5 and D327):
   - a panic, trap or unbounded loop on any input or any verified Program;
   - work or memory beyond the documented budget and limits;
@@ -500,6 +540,9 @@ DEVLOG under P9.15 and P9.17–P9.19.
     - A stamped tree exists only as build output: release artefacts, npm
       and crate tarballs, and generated `dist` commits if O3's git-source
       route uses them (P9.19).
+  - Implemented in P9.15 (D343): `version.edn`, `bb stamp`, the
+    `bb versions` gate, `kin/scripts/pre-commit` and `bb stamp-test`
+    (§1.1).
 - [x] **O3 — What ships: JS, wasm and Rust; the wasm SDK ships.** Owner:
   JS, wasm and Rust are the priority, and the wasm SDK does ship.
   - Planned wasm artefacts:
@@ -518,13 +561,21 @@ DEVLOG under P9.15 and P9.17–P9.19.
   (wasm SDK). Other targets get similar names that don't conflict. The
   Rust crate name is proposed in P9.15 (crates.io `snug` is likely
   taken).
+  - Owner decision (2026-11-12): the crate is **`snug-cbor`**, with
+    `[lib] name = "snug"` so users still write `use snug::…`. crates.io
+    `snug` is taken by an unrelated 0.0.0 crate; `snug-cbor` was free
+    (checked 2026-11-12). `@3sln/snug` and `@3sln/snug-wasm` were
+    unclaimed on npm. Set in `host/rust/Cargo.toml` by P9.15 (D343).
   - Repository URL: `https://github.com/3sln/snug`, confirmed by the owner
     on 2026-11-12. The repository exists and is private for now;
-    visibility is the owner's choice.
+    visibility is the owner's choice. Every manifest's repository field
+    holds it (P9.15).
 - [x] **O5 — Security contact:** `contact+security@3sln.com` (owner),
-  named in `SECURITY.md`.
+  named in `SECURITY.md` (P9.15; it ships in the npm package and the
+  crate).
 - [x] **O6 — Unicode data notice:** yes (owner). The Unicode License v3
-  text goes in `THIRD_PARTY_NOTICES.md`.
+  text goes in `THIRD_PARTY_NOTICES.md` (P9.15: under "Unicode data
+  (snug/unicode)", the text of unicode.org/license.txt).
 - [x] **O7 — Minimum supported versions: whatever works today, tested
   and pinned.** Owner: test which versions work today and pin those.
   - Find the oldest Node and the oldest stable Rust that pass the gates.
@@ -543,15 +594,18 @@ Nothing below was changed by P9.11. The manifests are untouched. These
 items are for the release commit or for earlier items:
 
 > **Status (P9.15, 2026-11-12).** Done: the version sites and their test;
-> the description, keywords, readme and `include` metadata, with the
-> repository URL left as a marked placeholder; the SDK description;
-> `CHANGELOG.md` in the npm staging and the crate; a crate layout that
-> `cargo package` accepts; `#[non_exhaustive]` (D339); and
-> `ci/gate-map.edn` with `bb gates` and `bb identity`. Still open, waiting
-> for owner decisions: the version number (O1, O2), the SDK staging (O3), the Unicode notice (O6), the
-> registry names (O4) and the repository URL. The stale statements listed
-> at the end were corrected by P9.10 (2026-11-12). The text below is the
-> P9.11 record. `engines` and `rust-version` (O7) were set by P9.18 (D344).
+> the description, keywords, readme and `include` metadata; the SDK
+> description; `CHANGELOG.md` in the npm staging and the crate; a crate
+> layout that `cargo package` accepts; `#[non_exhaustive]` (D339); and
+> `ci/gate-map.edn` with `bb gates` and `bb identity`. `engines` and
+> `rust-version` (O7) were set by P9.18 (D344), and the SDK staging (O3)
+> by P9.17 (D345). The P9.15 rework (D343) added `version.edn` with
+> `bb stamp`, `bb versions` and `bb stamp-test` (O1, O2); the names
+> `@3sln/snug`, `@3sln/snug-wasm` and the crate `snug-cbor` (O4);
+> the repository URL in every manifest; `SECURITY.md` (O5); and the
+> Unicode notice (O6). Still open: `private` / `publish` (only with the
+> owner's go). The stale statements listed at the end were corrected by
+> P9.10 (2026-11-12). The text below is the P9.11 record.
 
 - **Version sites**:
   - `kin/compile/main.kin` hard-codes `"0.0.0"`, and `version-byte`

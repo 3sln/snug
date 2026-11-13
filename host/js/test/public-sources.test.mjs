@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compile } from 'snug/compile';
-import { Schema } from 'snug/schema';
-import { encode } from 'snug';
-import * as sources from 'snug/sources';
+import { compile } from '@3sln/snug/compile';
+import { Schema } from '@3sln/snug/schema';
+import { encode } from '@3sln/snug';
+import * as sources from '@3sln/snug/sources';
 
 test('public entry points expose schema source validation and advanced sessions', () => {
   for (const name of ['openSession', 'validateHandle', 'validateHandleSync', 'pushValidator'])
@@ -99,8 +99,8 @@ test('public advanced sessions drive windows without exposing verified Program o
 });
 
 test('openSession uses the owned verified Program after loading, without trusting lookalikes', async () => {
-  const { fromSerialized } = await import('snug/schema');
-  const { chars } = await import('snug/controls');
+  const { fromSerialized } = await import('@3sln/snug/schema');
+  const { chars } = await import('@3sln/snug/controls');
   const compiled = await compile('r = tstr .chars 2', { controls: { chars } });
   const schema = await fromSerialized(compiled.program.serialize(), { controls: { chars } });
   const copy = schema.program.P; copy.fill(0);

@@ -72,7 +72,7 @@ export interface SequenceReader {
   close(): void;
 }
 export declare function sequenceReader(options?: SequenceOptions): SequenceReader;
-/** P9.7: the isolate's session policy (see snug/sources); a reader counts as one live session. */
+/** P9.7: the isolate's session policy (see @3sln/snug/sources); a reader counts as one live session. */
 export declare function sessionLimits(set?: Partial<SessionLimits>): SessionLimits & { live: number; pooledBytes: number };
-/** P9.7: drop every idle pooled array now (see snug/sources). */
+/** P9.7: drop every idle pooled array now (see @3sln/snug/sources). */
 export declare function releasePool(): void;

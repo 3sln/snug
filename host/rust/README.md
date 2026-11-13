@@ -6,8 +6,11 @@ zero-copy views for reading selected fields, and it encodes deterministic
 bytes from owned values or typed `Writer` calls. The crate has no
 dependencies.
 
-**Experimental, version 0.0.0, not published.** The API may still change
-before the first release.
+**Experimental, not yet published.** The API may still change before the
+first release. The package is `snug-cbor` (crates.io's `snug` is another
+project); its library is `snug`, so code says `use snug::…`. Once
+published: `cargo add snug-cbor`, or `snug-cbor = "0.1"` under
+`[dependencies]`.
 
 The compiler, the validator and the byte-level decisions are written in kin
 and generated into Rust, and the same sources generate snug's JavaScript
@@ -101,8 +104,8 @@ bb rust-api-test
 ```
 
 `kin/scripts/rust-crate` copies `host/rust/src`, `host/rust/tests`, the
-committed `gen/rust/snug`, this README and the licence, notices and
-changelog into `.cache/snug-rs`. The integration tests need Node and the
+committed `gen/rust/snug`, this README and the licence, notices, security
+policy and changelog into `.cache/snug-rs`. The integration tests need Node and the
 repository's JS host. They build their expected results in memory from the
 checkout, without downloading anything.
 
@@ -126,9 +129,9 @@ A local consumer can depend on the assembled crate:
 
 ```toml
 [dependencies]
-snug = { path = "../snug/.cache/snug-rs" }
+snug-cbor = { path = "../snug/.cache/snug-rs" }   # used as `snug`
 ```
 
 Adjust the path for your consumer directory, and pin the repository
-revision that produced the crate: version `0.0.0` alone does not identify
-it.
+revision that produced the crate: a crate built from the repository carries
+the placeholder version `0.0.0-unreleased`, which does not identify it.

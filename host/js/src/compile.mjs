@@ -91,7 +91,7 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
   opt[OPT_GROUP_WORDS] = groupWords === undefined ? -1 : Math.min(groupWords, 0x7fffffff);
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
-    throw new TypeError('unicode must be the Int32Array tables from snug/unicode');
+    throw new TypeError('unicode must be the Int32Array tables from @3sln/snug/unicode');
   let fl = new Int32Array(0);
   for (;;) {
     const h = arena;
@@ -106,9 +106,9 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
       const rs = errorRuleStart(h);
       const rule = rs >= 0 ? decoder.decode(bytes.subarray(rs, rs + errorRuleLen(h))) : undefined;
       throw new SchemaError(errorName(code), errorLine(h), errorColumn(h), rule,
-        code === ERR_NEED_UNICODE ? '; Unicode categories require tables from snug/unicode'
+        code === ERR_NEED_UNICODE ? '; Unicode categories require tables from @3sln/snug/unicode'
           : code === ERR_REGEXP_BLOCK ? '; XSD block escapes require unavailable pinned Unicode block data'
-          : code === ERR_NEED_ABNF ? '; .abnf and .abnfb require the ABNF controls from snug/abnf'
+          : code === ERR_NEED_ABNF ? '; .abnf and .abnfb require the ABNF controls from @3sln/snug/abnf'
           : errorName(code) === 'unknown_control' ? controlNamed(bytes, errorOffset(h)) : '');
     }
     const p = outProgramAt(h), b = outPoolAt(h);

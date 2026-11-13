@@ -2,10 +2,10 @@
 // timers are frozen, so run.mjs reads the workerd process's CPU time around
 // batches of requests instead). One object-storage `put` request from the
 // study contract's accepted case, its Program, and the contract's CDDL text.
-import { decode, encode } from 'snug';
-import { fromSerialized } from 'snug/schema';
-import { view } from 'snug/view';
-import { bufferHandle, pushScanner, scanHandle } from 'snug/sources';
+import { decode, encode } from '@3sln/snug';
+import { fromSerialized } from '@3sln/snug/schema';
+import { view } from '@3sln/snug/view';
+import { bufferHandle, pushScanner, scanHandle } from '@3sln/snug/sources';
 import { fromHex } from './suite.mjs';
 
 export async function prepareOps(fx, { compiler = true } = {}) {
@@ -34,7 +34,7 @@ export async function prepareOps(fx, { compiler = true } = {}) {
   ops.scanNoYield = () => scanHandle(bufferHandle(doc), {}, { chunk: doc.length });
   ops.scanYield = () => scanHandle(bufferHandle(doc), {}, { chunk: doc.length, quantum: QUANTUM });
   if (compiler) {
-    const { compile } = await import('snug/compile');
+    const { compile } = await import('@3sln/snug/compile');
     ops.compile = () => compile(suite.cddl);
   }
   // Calls per timed batch.

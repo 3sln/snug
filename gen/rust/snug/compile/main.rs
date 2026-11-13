@@ -249,12 +249,12 @@ pub fn compile_schema(text: &[u8], opt: &[i32], fl: &[i32], unicode: &[i32], h: 
 }
 pub fn snug_version() -> &'static str {
     // The snug version: in the source key (program.md §13.3) and the
-    // serialisation container. One place, so both hosts agree. THE source
-    // of truth for the version (P9.15): its length and bytes below are read
-    // from this literal, and host/js/test/version.test.mjs requires every
-    // manifest and host/js/src/version.mjs to equal it. A semver string,
-    // so ASCII (str-len / str-u8 need that).
-    return "0.0.0";
+    // serialisation container. One place, so both hosts agree. A version
+    // site (version.edn, D343): it holds the placeholder, and `bb stamp`
+    // writes the release version here in a release build, then re-emits.
+    // Its length and bytes below are read from this literal, so any semver
+    // string works; semver is ASCII, which str-len / str-u8 need.
+    return "0.0.0-unreleased";
 }
 pub(crate) fn snug_version_len() -> i32 {
     // The version text's length in bytes.

@@ -10,7 +10,7 @@ the release gates ([release policy §2](release-policy.md#2-supported-runtimes-a
 ## Compile once
 
 ```js
-import { compile, SchemaError } from 'snug/compile';
+import { compile, SchemaError } from '@3sln/snug/compile';
 
 const schema = await compile(`
   message = { id: uint, body: bstr .size (0..1024), ? labels: [0*8 tstr] }
@@ -174,7 +174,7 @@ are unchanged. The source key includes the effective dialect; explicit
 ## Optional Unicode regexp tables
 
 ```js
-import { tables, unicodeVersion } from 'snug/unicode';
+import { tables, unicodeVersion } from '@3sln/snug/unicode';
 const words = await compile(String.raw`word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"`, {
   unicode: tables,
 });
@@ -192,7 +192,7 @@ Treat `tables` as immutable compile-time data.
 Both `\p{X}` and `\P{X}` accept the RFC 9485 general-category names, inside
 or outside character classes. `String.raw` preserves CDDL's doubled backslashes
 in the example. Without the option, these escapes raise a `SchemaError`
-with code `regexp` and a message naming `snug/unicode`. `Cs` matches nothing;
+with code `regexp` and a message naming `@3sln/snug/unicode`. `Cs` matches nothing;
 surrogates cannot occur in text. The Bindle wire profile refuses
 noncharacters before regexp matching; the valid (default) and deterministic
 presets admit them. [Category details](cddl-support.md#unicode-regexp-categories).
@@ -214,9 +214,9 @@ CDDL cannot say "at most 3 characters", "no duplicates" or "these columns have
 the same length". Register a control and the schema can, without forking snug:
 
 ```js
-import { compile } from 'snug/compile';
-import { controls } from 'snug/controls';            // .chars, .unique, .samelen
-import { encode } from 'snug';
+import { compile } from '@3sln/snug/compile';
+import { controls } from '@3sln/snug/controls';            // .chars, .unique, .samelen
+import { encode } from '@3sln/snug';
 
 const schema = await compile(`
   user  = { name: tstr .chars (1..32), tags: [* tstr] .unique true }
@@ -338,7 +338,7 @@ mutable data first. No logging step needs to include received bytes.
 ## Decode after checking
 
 ```js
-import { encode, decode } from 'snug';
+import { encode, decode } from '@3sln/snug';
 const bytes = encode({ id: 7, body: new Uint8Array([1, 2]) }, { maxBytes: 2048 });
 const message = schema.decode(bytes, 'message');
 const profileOnly = decode(bytes);
@@ -417,8 +417,8 @@ encode({ labels: textMapObject(new Map([['name', 'sample']])) });
 ## Encode and write deterministic bytes
 
 ```js
-import { Decimal } from 'snug';
-import { Writer } from 'snug/writer';
+import { Decimal } from '@3sln/snug';
+import { Writer } from '@3sln/snug/writer';
 const price = Decimal.from('1.50');
 const encodedPrice = encode({ price, id: 7 }, { maxBytes: 256 });
 const writer = new Writer({ maxBytes: 256 });
@@ -464,7 +464,7 @@ including non-enumerable and symbol properties, are ignored without reading
 their values, as with JSON.stringify. `strictArrays: true` retains the old
 own-key count check and refuses extra properties with `unsupported`.
 `encode(value, profiles.bindle)` and `new Writer(profiles.bindle)` select this
-strict behavior (`profiles` is exported by `snug`). Both modes require genuine
+strict behavior (`profiles` is exported by `@3sln/snug`). Both modes require genuine
 arrays with exactly the local `Array.prototype`; subclassed, foreign-realm
 and null-prototype arrays remain refused. Holes are refused in both modes;
 a present undefined element encodes as `f7` under the valid and deterministic
@@ -482,7 +482,7 @@ or other executable objects at this boundary.
 ## Read selected fields through a view
 
 ```js
-import { view } from 'snug/view';
+import { view } from '@3sln/snug/view';
 const root = view(bytes, { schema, rule: 'message' });
 const id = root.get('id');
 if (id) console.log(id.number(), id.offset);
@@ -556,13 +556,13 @@ start at the detached item. Span `end` is exclusive. Supply a schema to
 ## Validating remote objects and streams
 
 ```js
-import { asyncHandle, validateHandle, pushValidator } from 'snug/sources';
+import { asyncHandle, validateHandle, pushValidator } from '@3sln/snug/sources';
 const result = await validateHandle(schema, asyncHandle(bytes), 'message');
 // Same ValidationResult as schema.validate(bytes, 'message'); no decoded tree.
 ```
 
 ```js
-import { SourceError } from 'snug/sources';
+import { SourceError } from '@3sln/snug/sources';
 try {
   const checked = await validateHandle(schema, asyncHandle(bytes),
     'message', {}, { chunk: 16384, quantum: 4096 });
@@ -645,11 +645,11 @@ Programs can be shared, and independent sessions can interleave; never resume
 one session concurrently. At most `sessionLimits().maxLive` sessions (default
 1024) are live at once; one more throws `SnugFault('sessions/limit')`, and an
 abandoned, unclosed session holds its slot until it is garbage-collected, so
-`close()` sessions you give up on ([live sessions](api.md#sources-snugsources)).
+`close()` sessions you give up on ([live sessions](api.md#sources-3slnsnugsources)).
 Bound request concurrency in the application below that limit. Advanced custom drivers can call
-`openSession(schema, rule, length, options?, { quantum? }?)` from `snug/sources`
+`openSession(schema, rule, length, options?, { quantum? }?)` from `@3sln/snug/sources`
 for a `VmSession` with `step(window, base)`, `length` and `bytesHeld`; its need/yield/keep protocol
-is in the [API reference](api.md#sources-snugsources). Scratch
+is in the [API reference](api.md#sources-3slnsnugsources). Scratch
 and verified Program arrays stay private. Discard sessions after completion
 or failure.
 
@@ -665,7 +665,7 @@ undefined, and handle scanning / push finalize return true.
 ### Streams of unknown length
 
 ```js
-import { streamSource, validateStream, scanStream, pushValidator } from 'snug/sources';
+import { streamSource, validateStream, scanStream, pushValidator } from '@3sln/snug/sources';
 const res = await fetch(url);                       // no Content-Length needed
 const result = await validateStream(schema, streamSource(res.body), 'message');
 // the same ValidationResult as schema.validate(allTheBytes, 'message')
@@ -702,7 +702,7 @@ long byte string is dropped as it streams. The session's own key arena grows
 with the input read (D342): an idle stream that has received a few bytes holds
 about 50 KiB, whatever `maxBytes` is (measured 2026-11-12; before D342 the
 arena was sized for `maxBytes`, about 1.5 MiB at the default). A raw
-`openSession(schema, rule, undefined)` from `snug/sources` exposes the
+`openSession(schema, rule, undefined)` from `@3sln/snug/sources` exposes the
 protocol: `step` may answer
 `{state: 'held', result}`, and `end(n)` settles the verdict (or answers a
 `yield` to step on over the bytes it still holds).
@@ -718,7 +718,7 @@ each message as soon as its last byte has arrived, already checked, as a lazy
 View:
 
 ```js
-import { readSequence } from 'snug/sequence';
+import { readSequence } from '@3sln/snug/sequence';
 const schema = await compile('event = { type: tstr, seq: uint, ? text: tstr }');
 
 const abort = new AbortController();           // abort() cancels even while waiting for bytes
@@ -945,7 +945,7 @@ timer; isolate especially hostile work in a worker/process when necessary.
 ## Programs, caching and compatibility
 
 ```js
-import { fromSerialized, ProgramError } from 'snug/schema';
+import { fromSerialized, ProgramError } from '@3sln/snug/schema';
 const cacheKey = schema.program.sourceKey; // SHA-256 hex, source + effective options
 const stored = schema.program.serialize(); // synchronous Uint8Array
 let cached;
@@ -997,7 +997,8 @@ application policy. Share immutable public Programs; synchronous validation
 uses a shared per-isolate scratch lease. Async source sessions own their
 state. There is no supported re-entrant internal VM API.
 
-Because the package is still 0.0.0, namespace application caches by the pinned
+Because the package is unreleased (every checkout says `0.0.0-unreleased`),
+namespace application caches by the pinned
 repository/package revision as well as sourceKey. This is conservative cache
 management, not a producer-version equality requirement.
 
@@ -1015,7 +1016,7 @@ consumer project keep compilation off the parent event loop:
 ```js
 // compile-worker.mjs
 import { parentPort, workerData } from 'node:worker_threads';
-import { compile, SchemaError } from 'snug/compile';
+import { compile, SchemaError } from '@3sln/snug/compile';
 try {
   const schema = await compile(workerData, { profile: 'bus',
     limits: { schemaBytes: 16384, compileBudget: 1000000 } });
@@ -1029,7 +1030,7 @@ try {
 ```js
 // isolated-compile.mjs (Node; bound input and concurrent workers in the caller)
 import { Worker } from 'node:worker_threads';
-import { fromSerialized } from 'snug/schema';
+import { fromSerialized } from '@3sln/snug/schema';
 export async function isolatedCompile(text, timeoutMs = 30000) {
   const worker = new Worker(new URL('./compile-worker.mjs', import.meta.url), { workerData: text });
   try {
@@ -1065,9 +1066,9 @@ wrapper. There is no inferred `decode<T>()` contract.
 In the ESM consumer from the README, save this as `main.ts`:
 
 ```ts
-import { encode } from 'snug';
-import { compile } from 'snug/compile';
-import type { ValidationResult } from 'snug/schema';
+import { encode } from '@3sln/snug';
+import { compile } from '@3sln/snug/compile';
+import type { ValidationResult } from '@3sln/snug/schema';
 
 const schema = await compile('message = { id: uint }');
 const bytes = encode({ id: 7n });
@@ -1126,8 +1127,8 @@ application import map). With an already available esbuild, from the consumer
 directory create `browser.mjs`:
 
 ```js
-import { encode } from 'snug';
-import { compile } from 'snug/compile';
+import { encode } from '@3sln/snug';
+import { compile } from '@3sln/snug/compile';
 const schema = await compile('message = { id: uint }');
 document.body.textContent = JSON.stringify(schema.validate(encode({ id: 7 }), 'message'));
 ```
@@ -1151,15 +1152,15 @@ For a compiler-free module Worker, generate a trusted Program before bundling:
 ```js
 // prepare.mjs — run with Node, once at build time
 import { writeFile } from 'node:fs/promises';
-import { compile } from 'snug/compile';
+import { compile } from '@3sln/snug/compile';
 const schema = await compile('message = { id: uint }');
 await writeFile('program.json', JSON.stringify(Array.from(schema.program.serialize())));
 ```
 
 ```js
-// worker.mjs — no snug/compile or snug/unicode import
+// worker.mjs — no @3sln/snug/compile or @3sln/snug/unicode import
 import stored from './program.json'; // bundled by esbuild's JSON loader
-import { fromSerialized } from 'snug/schema';
+import { fromSerialized } from '@3sln/snug/schema';
 const ready = fromSerialized(Uint8Array.from(stored)); // one startup verification
 export default {
   async fetch(request) {
@@ -1205,7 +1206,7 @@ sends bytes and receives plain results:
 ```js
 // validator-worker.mjs — bundled like worker.mjs above
 import stored from './program.json';
-import { fromSerialized } from 'snug/schema';
+import { fromSerialized } from '@3sln/snug/schema';
 const ready = fromSerialized(Uint8Array.from(stored));
 self.onmessage = async ({ data }) => {
   const schema = await ready;
@@ -1254,7 +1255,7 @@ The full compiler-free public runtime artifact was **56,226 bytes gzip-9**
 in that record, covering codec/schema/view/writer/sources, not just a VM core.
 Format 2.0's PEG engine has grown it since: on 2026-11-12 the whole compiler-free
 runtime (`all-runtime` in `tools/size`) was 99,905 bytes gzip-9, and a Worker
-importing only `fromSerialized` from `snug/schema` about 54 KB.
+importing only `fromSerialized` from `@3sln/snug/schema` about 54 KB.
 See the [evidence index](../bench/README.md#current-evidence-index--2026-11-03)
 for size boundaries and older snapshots.
 

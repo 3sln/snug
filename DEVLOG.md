@@ -7064,6 +7064,80 @@ merged as `fd63a81`. Its gates, on that commit: `bb gates land` all 8 ok;
   - `f8` below 0x20 is malformed everywhere (RFC 8949 §3.3);
   - bignums stay distinct data items.
 
+### D343 — The version comes from `version.edn`; tracked trees hold a placeholder, and only release builds are stamped (P9.15 rework; O2, O4–O6; D338)
+**Decision** (P9.15 engineer, proposed):
+- **One source.** `version.edn` at the repository root holds `:version`
+  (`"0.1.0"`, O1), the version a release build stamps, and
+  `:placeholder` (`"0.0.0-unreleased"`), which every version site holds
+  in the tracked tree. Both must be semver of at most 32 bytes: the
+  Program container's producer field holds 32 printable ASCII bytes (the
+  Rust host refuses more; the JS host would silently truncate).
+- **The sites** (`kin/scripts/version-sites.mjs`, one regular expression
+  each, matched exactly once): both `package.json` files, both
+  `Cargo.toml` files, `host/js/src/version.mjs`, kin's `snug-version`
+  literal, and the two modules `bb emit` generates from it.
+- **Owner rule (2026-11-12): "Stamped versions in the project files are
+  never checked in."**
+  - `bb versions` fails if any site holds anything but the placeholder.
+    It is the first gate of the `land` and `release` sets.
+  - `kin/scripts/pre-commit` runs the same check on the index. It is an
+    optional hook; nothing installs it.
+  - `bb stamp [version]` writes `:version` (or the given version) onto
+    every site, re-emits `gen/` and checks the result. It refuses a
+    checkout with a branch checked out, so it runs only in a detached
+    release worktree or an exported copy. It rewrites only the version
+    text, so it is deterministic and idempotent.
+  - The only stamped trees are build output: the artefacts, the npm and
+    crate tarballs, and P9.19's `dist` commits.
+- **`bb stamp-test`** (a `release`-set gate) copies the tree twice into
+  `.cache/stamp-test/`, stamps both, and checks:
+  - the copies are byte-identical, and a second stamp changes nothing;
+  - every site holds the version, and the version, serialised-Program and
+    package tests pass stamped (`--full`: all of `npm test`);
+  - a compiled Program carries the version in its producer field, and
+    its source key differs from the placeholder tree's;
+  - `npm pack` and `cargo package` give byte-identical artefacts from the
+    two copies, and both ship SECURITY.md;
+  - a 32-byte prerelease stamps and passes; 33 bytes is refused;
+  - a checkout with a branch is refused.
+- **The built-in `any` Program** (`ANY_P`, JS and Rust) keeps one fixed
+  source key. The key hashes the version, so it cannot match every
+  stamped build, and it is never shown. stream.test.mjs now compares
+  every word but 7..14, as the Rust test already did.
+- **Names (O4).** npm `@3sln/snug`, wasm SDK `@3sln/snug-wasm`.
+  crates.io `snug` is taken: an unrelated crate ("Make every item in your
+  Rust workspace as private as it can be", owner `gnufood`, 0.0.0,
+  created 2026-09-30). The engineer proposed `snug-cddl` (free, checked
+  read-only on crates.io). **Owner decision (2026-11-12, via the
+  manager): the crate is `snug-cbor`**, with `[lib] name = "snug"`, so
+  `use snug::…` is unchanged. The coordinator found `snug-cbor`,
+  `snug-cddl` and `cbor-snug` free. npm `@3sln/snug` and
+  `@3sln/snug-wasm` were unclaimed.
+- **Metadata.** Every manifest's repository is
+  `https://github.com/3sln/snug` (confirmed by the owner). SECURITY.md
+  names `contact+security@3sln.com` (O5) and ships in both artefacts.
+  THIRD_PARTY_NOTICES.md carries the Unicode License v3 text (O6).
+**Why:** O2 wants one source and placeholders in project files. The
+owner's rule wants a stamped tree to be impossible to land by accident,
+so there is a gate, an optional hook, and a tool that refuses branches.
+A two-key file keeps both the release version and the placeholder in one
+reviewed place. The placeholder is a prerelease, so a Program compiled
+from a checkout says "0.0.0-unreleased" rather than looking like a
+release.
+**Alternatives:**
+- keep `0.0.0` as the placeholder (no source-key change, but a dev build
+  is indistinguishable from a version);
+- a version argument only, with no `:version` key (then "same commit and
+  version.edn gives the same artefacts" does not hold);
+- regenerate `ANY_P` when stamping (one more generated site, for a key
+  that nobody reads);
+- crate `snug-cddl` (the engineer's proposal; the owner chose
+  `snug-cbor`).
+**Gate:** `bb versions`, `bb stamp-test`, `bb gates land` and
+`bb identity` on the placeholder tree; `bb identity` on a stamped tree.
+Results are in the P9.15 (rework) item.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -10001,7 +10075,7 @@ review.
 Sequence: P9.15 (rework), P9.17 and P9.18 run in parallel. All three land
 before P9.9's long runs and P9.13's review. P9.19 is an assessment that
 can run alongside them; its build work is post-RC unless it is cheap.
-- [ ] **P9.15 (rework) — the version comes from `version.edn`** (O2), plus
+- [x] **P9.15 (rework) — the version comes from `version.edn`** (O2), plus
   names and metadata (O4–O6).
   - **Version source:** `version.edn` at the repo root is the single
     source. `bb stamp <version>` (or part of the release task) writes every
@@ -10020,6 +10094,76 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - **Metadata:** repository `https://github.com/3sln/snug` (confirmed by
     the owner 2026-11-12, no longer an assumption). SECURITY.md with `contact+security@3sln.com`. The Unicode
     License v3 notice in THIRD_PARTY_NOTICES.md.
+  *Done 2026-11-12 (P9.15 engineer, D343, branch `p915r`).*
+  - **Mechanism:**
+    - `version.edn` holds `:version "0.1.0"` and `:placeholder
+      "0.0.0-unreleased"`.
+    - `kin/scripts/version-sites.mjs` lists the 8 sites, 2 of them
+      generated.
+    - `bb stamp [version]` refuses a branch checkout and any version over
+      32 bytes.
+    - `bb versions` is the first gate of `land` and `release`.
+    - `kin/scripts/pre-commit` (`--staged`) is optional and installed by
+      nothing.
+    - `bb stamp-test` is in the `release` set.
+    - version.test.mjs checks the placeholder, or `SNUG_STAMPED_VERSION`
+      in a stamped copy.
+    - The SDK package takes its version from
+      `host/wasm-sdk/package.json`, which is a site, so it is covered.
+  - **Found on the way:**
+    - the container's producer field is 32 bytes. The JS host would
+      silently truncate a longer version, so `bb stamp` refuses one;
+    - `ANY_P` (the built-in `any` Program, JS and Rust) carries a source
+      key that depends on the version. stream.test.mjs now skips words
+      7..14, as the Rust test already did;
+    - serialized.test.mjs hard-coded `'0.0.0'` at bytes 24..29.
+  - **Reproducibility.** `bb stamp-test` at `2730f3a` stamped two copies
+    with 0.1.0:
+    - the trees are byte-identical (644 files);
+    - `3sln-snug-0.1.0.tgz` has sha256 `8975f794…8936` from both;
+    - `snug-cbor-0.1.0.crate` has sha256 `6ff0eea5…08a7` from both, and
+      `cargo package --list` gives 84 files.
+
+    Earlier runs reproduced their own hashes across separate runs, so the
+    hashes depend only on the tree and the version.
+  - **Identity.** `bb identity` was all ok (11/11) on two trees:
+    - the placeholder tree;
+    - a detached worktree stamped `0.1.0-rc.1.long-prerelease.abcde`.
+      At 32 bytes its CBOR text head takes an extra length byte, unlike
+      the 16-byte placeholder or `0.1.0`.
+
+    Both held on the bases `5698c68` and `7b0e700`, and on the final
+    `2730f3a`. Source keys differ between placeholder and stamped builds,
+    as they must, because the version is in the preimage. JS == Rust holds
+    in both.
+  - **Names:**
+    - `@3sln/snug` is in every specifier: tests, docs, examples, types,
+      the runtime tool and package-build. The api.md anchors were
+      updated.
+    - The SDK is `@3sln/snug-wasm`.
+    - The crate is `snug-cbor` (the owner's choice; the engineer proposed
+      `snug-cddl`), with library `snug`. The bench crate's manifest and
+      lock follow (`cargo metadata --locked` ok).
+    - Compile error messages now name `@3sln/snug/unicode` and
+      `@3sln/snug/abnf` (JS, SDK and Rust).
+  - **Metadata:**
+    - the repository URL is in all four manifests;
+    - SECURITY.md ships in the npm package, the crate and the SDK package
+      (where it is now required, no longer optional);
+    - THIRD_PARTY_NOTICES.md carries unicode.org/license.txt, fetched
+      2026-11-12 (sha256 `e7a93b00…3d96`).
+  - **Size:** `snug/schema` +11 min / +8 gzip (the longer version string);
+    `snug/compile` full +40 / +21 (the messages). No cap changed.
+  - **Gates at `2730f3a`** (on main `c240c6f`):
+    - placeholder tree, all 20 ok: versions, check, drift, size, npm-test
+      (1,500 pass), rust-api-test, wasm-sdk-test, vm-test, compile-test,
+      scan-test, vmsession-test, sequence-test, nav-test, write-test,
+      unicode-test, abnf-test, stamp-test, wasm-package-test, msrv and
+      node-oldest;
+    - stamped tree: identity 11/11 ok.
+
+    Nothing was published or pushed, and the stamped worktree was never
+    committed.
 - [x] **P9.17 — The wasm SDK ships** (O3), as `@3sln/snug-wasm`.
   - Artefacts:
     - the raw `.wasm` as a release artefact;

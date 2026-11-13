@@ -1,0 +1,12 @@
+#!/bin/sh
+# Optional git pre-commit hook (P9.15 rework, D343): refuse a commit whose
+# staged tree has a version site holding anything but version.edn's
+# :placeholder. Stamped versions are never checked in (owner, 2026-11-12);
+# `bb versions` is the same check on the working tree, and a land gate.
+#
+# Not installed by anything. To use it in a checkout or worktree:
+#
+#     ln -s ../../kin/scripts/pre-commit "$(git rev-parse --git-path hooks)/pre-commit"
+#
+# (or copy it there). Worktrees share the main checkout's hooks directory.
+exec node "$(git rev-parse --show-toplevel)/kin/scripts/version-sites.mjs" --staged

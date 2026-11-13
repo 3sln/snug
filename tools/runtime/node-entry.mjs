@@ -1,5 +1,5 @@
 // Node arm: copied by run.mjs into a fresh temporary directory next to
-// suite.mjs, fixtures.json and node_modules/snug (a copy of the staged
+// suite.mjs, fixtures.json and node_modules/@3sln/snug (a copy of the staged
 // package), so every snug import resolves through the package exports and
 // nothing reaches back into the repository.
 import { readFileSync } from 'node:fs';

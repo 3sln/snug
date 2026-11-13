@@ -8,7 +8,7 @@
 #   DIR/src/snug.rs, DIR/src/snug/<d>.rs   `pub mod` lines, generated from the
 #                         tree, so a new module is compiled the day it is emitted.
 #   DIR/README.md         host/rust/README.md, the crate's own (P9.15)
-#   DIR/LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md   the repository's (P9.15)
+#   DIR/LICENSE, THIRD_PARTY_NOTICES.md, SECURITY.md, CHANGELOG.md   the repository's (P9.15)
 #                         The manifest's `readme` and `include` name these, so
 #                         `cargo package --list` in DIR is the crate to publish.
 #
@@ -33,7 +33,7 @@ puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$t
 put "$manifest" "$dir/Cargo.toml"
 if [ "$manifest" = host/rust/Cargo.toml ]; then put host/rust/build.rs "$dir/build.rs"; fi
 put host/rust/README.md "$dir/README.md"
-for f in LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md; do put "$f" "$dir/$f"; done
+for f in LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CHANGELOG.md; do put "$f" "$dir/$f"; done
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done
 # Public API integration tests accompany the default host only.
 if [ "$host" = host/rust/src ] && [ -d host/rust/tests ]; then

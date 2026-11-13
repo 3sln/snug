@@ -3,7 +3,7 @@
 `run.mjs` runs one conformance subset (`suite.mjs`) against the **staged
 package**, unchanged, in three runtimes:
 
-- **Node**, from a fresh consumer directory. `node_modules/snug` there is a
+- **Node**, from a fresh consumer directory. `node_modules/@3sln/snug` there is a
   copy of the staged package, so every import goes through the package
   `exports` and nothing resolves into the repository.
 - **Headless Chrome**, as an esbuild bundle served from loopback under
@@ -34,8 +34,9 @@ raw cold-start samples. It prints the tables below to stdout.
 
 ## What the suite checks
 
-All six entry points are imported by bare specifier (`snug`, `snug/schema`,
-`snug/compile`, `snug/view`, `snug/writer`, `snug/sources`). The suite uses no
+All six entry points are imported by bare specifier (`@3sln/snug`,
+`@3sln/snug/schema`, `/compile`, `/view`, `/writer`, `/sources`; the tables
+below name them without the scope). The suite uses no
 Node APIs. `fixtures.mjs` builds the fixtures in Node from the checkout's
 corpus. They are served as a JSON file to the browser and as a JSON module to
 workerd, so they are not part of any bundle.
