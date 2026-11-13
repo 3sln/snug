@@ -156,7 +156,8 @@ runs:
       run: |
         set -euo pipefail
         npm ci --no-audit --no-fund
-        node node_modules/esbuild/bin/esbuild --version
+        # esbuild's install replaces bin/esbuild with the platform's native binary
+        node_modules/.bin/esbuild --version
         node node_modules/binaryen/bin/wasm-opt --version
 
     - name: workerd (ci/tools, npm ci) and Chrome
