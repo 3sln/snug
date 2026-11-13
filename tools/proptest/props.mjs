@@ -32,23 +32,42 @@ export const hex = b => Buffer.from(b).toString('hex');
 export const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
 const MAX_SAFE_N = BigInt(Number.MAX_SAFE_INTEGER);
 
-// P9.9 (coordinator): a slow compile fails on CPU time, not wall time. The property workers share the machine with
-// each other, the gates and whatever else runs, so wall time over the threshold is load as often as a blowup: it is
-// a non-failing warning (with the load average, campaign.mjs). The CPU clock is this worker thread's own
-// (process.threadCpuUsage, Node 23.9+); without it the overrun can only be a warning.
+// P9.9 (coordinator): a slow compile or validate fails on CPU time, not wall time. The property workers share the
+// machine with each other, the gates and whatever else runs, so wall time over the threshold is load as often as a
+// blowup: it is a non-failing warning (with the load average, campaign.mjs). The CPU clock is this worker thread's
+// own (process.threadCpuUsage, Node 23.9+); without it the overrun can only be a warning.
 export const SLOW_MS = 2000;
 const threadCpuMs = typeof process.threadCpuUsage === 'function' ? () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; } : () => null;
 let slowInjection = null;
-/** Self-check hook (campaign --inject-slow=wall|cpu): the next compile takes SLOW_MS + 200 ms more, asleep or busy. */
-export function injectSlow(kind) { slowInjection = kind; }
-function burnInjected() {
-  if (!slowInjection) return;
-  const kind = slowInjection, ms = SLOW_MS + 200; slowInjection = null;
+/** Self-check hook (campaign --inject-slow=wall|cpu|validate-wall|validate-cpu): the next compile (wall, cpu) or
+ * validate (validate-*) takes SLOW_MS + 200 ms more, asleep (wall) or busy (cpu). */
+export function injectSlow(spec) {
+  const m = /^(?:(validate)-)?(wall|cpu)$/.exec(spec ?? '');
+  if (!m) throw new Error(`--inject-slow is wall, cpu, validate-wall or validate-cpu, not ${JSON.stringify(spec)}`);
+  slowInjection = { what: m[1] ?? 'compile', kind: m[2] };
+}
+function burnInjected(what) {
+  if (slowInjection?.what !== what) return;
+  const { kind } = slowInjection, ms = SLOW_MS + 200; slowInjection = null;
   if (kind === 'wall') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   else {   // busy until this thread has spent ms of CPU (by the wall clock, a loaded machine would give it less)
     const c = threadCpuMs(), t = performance.now(); let x = 0;
     while (c === null ? performance.now() - t < ms : threadCpuMs() - c < ms) x = (x + 1) | 0;
   }
+}
+/** Runs f (a compile or a validate) on the wall and thread CPU clocks: {res, ms, cpu} (cpu null without the clock). */
+function timed(what, f) {
+  const t0 = performance.now(), c0 = threadCpuMs();
+  const res = attempt(f);
+  burnInjected(what);
+  const ms = performance.now() - t0, c1 = threadCpuMs();
+  return { res, ms, cpu: c0 === null || c1 === null ? null : c1 - c0 };
+}
+/** Over SLOW_MS of CPU: the failing slow-<what>; over SLOW_MS of wall time only: the warning slow-<what>-wall. */
+function slowCheck(F, W, st, what, { ms, cpu }, repro) {
+  const stat = what === 'compile' ? 'slowCompile' : 'slowValidate';
+  if (cpu !== null && cpu > SLOW_MS) { st[stat]++; F.push({ cls: `slow-${what}`, detail: `${cpu.toFixed(0)} ms CPU (${ms.toFixed(0)} ms wall)`, repro }); }
+  else if (ms > SLOW_MS) { st[stat + 'Wall']++; W.push({ cls: `slow-${what}-wall`, detail: `${ms.toFixed(0)} ms wall, ${cpu === null ? 'no thread CPU clock' : `${cpu.toFixed(0)} ms CPU`}`, repro }); }
 }
 const errInfo = e => e == null ? null : { name: e.name ?? typeof e, code: e.code, reason: e.reason, message: String(e.message ?? e).split('\n')[0].slice(0, 300) };
 const short = s => (typeof s === 'string' ? s : hex(s)).slice(0, 4000);
@@ -748,7 +767,7 @@ const P5 = {
     return { blobs, opts: blobs.map(() => G.randomOptions(r)), texts, climits, profiles: texts.map(() => r.pick(['full', 'full', 'bindle', 'bus'])), unicode: texts.map(() => r.chance(0.4)), seed2: r.int(0x7fffffff) + 1, publicCompile: r.chance(0.1) };
   },
   async check(inp) {
-    const F = [], W = [], st = { cases: 1, blobs: 0, texts: 0, compiled: 0, refused: 0, pushes: 0, misuse: 0, slowCompile: 0, slowCompileWall: 0, slowValidate: 0 };
+    const F = [], W = [], st = { cases: 1, blobs: 0, texts: 0, compiled: 0, refused: 0, pushes: 0, misuse: 0, slowCompile: 0, slowCompileWall: 0, slowValidate: 0, slowValidateWall: 0 };
     const r = G.createRandom(inp.seed2);
     for (let i = 0; i < inp.blobs.length; i++) {
       const b = inp.blobs[i], o = inp.opts[i];
@@ -768,12 +787,10 @@ const P5 = {
         shrink: { kind: 'bytes', input: b, pred: x => { const a = codeOf(attempt(() => decode(x, o))); const hh = attempt(() => scanHandleSync(bufferHandle(x), o, { chunk, quantum })), pp = attempt(() => pushRun(x, o, quantum, sizes));
           return (hh.ok ? 'ok' : codeOf(hh)) !== a || (pp.ok ? 'ok' : codeOf(pp)) !== a || codeOf(attempt(() => scanBuffer(x, o))) !== a; } } });
       for (const sch of ROBUST_SCHEMAS) {
-        const t0 = performance.now();
-        const val = attempt(() => sch.validate(b, 'r', o));
-        const ms = performance.now() - t0;
+        const tv = timed('validate', () => sch.validate(b, 'r', o)), val = tv.res;
         if (!val.ok) F.push({ cls: 'bad-error-type', sub: 'validate', actual: errInfo(val.error), repro: rp });
         else if (!validShape(val.value)) F.push({ cls: 'validate-shape', actual: val.value, repro: rp });
-        if (ms > 2000) { st.slowValidate++; F.push({ cls: 'slow-validate', detail: `${ms.toFixed(0)} ms`, repro: rp }); }
+        slowCheck(F, W, st, 'validate', tv, rp);
         const dec = attempt(() => sch.decode(b, 'r', o)); bad('schema.decode', dec, [SnugFault]);
         if (r.chance(0.3)) {
           st.sessions = (st.sessions ?? 0) + 1;
@@ -790,13 +807,8 @@ const P5 = {
       const opts = { profile, limits, ...(inp.unicode[i] ? { unicode: unicodeTables } : {}) };
       const rp = { text: short(text), limits, profile, unicode: inp.unicode[i] };
       st.texts++;
-      const t0 = performance.now(), c0 = threadCpuMs();
-      let res;
-      try { res = { ok: true, value: hostCompile(text, opts) }; } catch (e) { res = { ok: false, error: e }; }
-      burnInjected();
-      const ms = performance.now() - t0, c1 = threadCpuMs(), cpu = c0 === null || c1 === null ? null : c1 - c0;
-      if (cpu !== null && cpu > SLOW_MS) { st.slowCompile++; F.push({ cls: 'slow-compile', detail: `${cpu.toFixed(0)} ms CPU (${ms.toFixed(0)} ms wall)`, repro: rp }); }
-      else if (ms > SLOW_MS) { st.slowCompileWall++; W.push({ cls: 'slow-compile-wall', detail: `${ms.toFixed(0)} ms wall, ${cpu === null ? 'no thread CPU clock' : `${cpu.toFixed(0)} ms CPU`}`, repro: rp }); }
+      const tc = timed('compile', () => hostCompile(text, opts)), res = tc.res;
+      slowCheck(F, W, st, 'compile', tc, rp);
       if (!res.ok) {
         if (!(res.error instanceof HostSchemaError)) F.push({ cls: 'bad-error-type', sub: 'compile', actual: errInfo(res.error), repro: rp,
           shrink: { kind: 'text', input: text, pred: t => { try { hostCompile(t, opts); return false; } catch (e) { return !(e instanceof HostSchemaError); } } } });
@@ -813,11 +825,9 @@ const P5 = {
       try { sch = new Schema(new Program(res.value.program, res.value.pool)); }
       catch (e) { F.push({ cls: 'compiled-program-refused', detail: 'a compiled Program failed Program/vm-verify', actual: errInfo(e), repro: rp }); continue; }
       for (const b of inp.blobs.slice(0, 3)) for (const rule of sch.program.rules.slice(0, 2)) {
-        const t1 = performance.now();
-        const v = attempt(() => sch.validate(b, rule));
-        const vms = performance.now() - t1;
+        const tv = timed('validate', () => sch.validate(b, rule)), v = tv.res;
         if (!v.ok) F.push({ cls: 'bad-error-type', sub: 'validate', actual: errInfo(v.error), repro: { ...rp, bytes: hex(b), rule } });
-        if (vms > 2000) { st.slowValidate++; F.push({ cls: 'slow-validate', detail: `${vms.toFixed(0)} ms`, repro: { ...rp, bytes: hex(b), rule } }); }
+        slowCheck(F, W, st, 'validate', tv, { ...rp, bytes: hex(b), rule });
         if (v.ok) { const bud = attempt(() => budgetCheck(sch, rule, b, r.pick([3, 50, 5000]), v.value)); if (!bud.ok || bud.value) F.push({ cls: 'budget', detail: bud.ok ? bud.value : errInfo(bud.error), repro: { ...rp, bytes: hex(b), rule } }); }
       }
     }

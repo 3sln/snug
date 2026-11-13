@@ -8,7 +8,7 @@ import { PROPERTIES, doShrink, describe, injectSlow } from './props.mjs';
 import { createRandom, caseSeed } from './gen.mjs';
 
 const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig, inject, injectSlow: slowKind } = workerData;
-if (slowKind) injectSlow(slowKind);   // --inject-slow: this worker's next compile is slow (self-check)
+if (slowKind) injectSlow(slowKind);   // --inject-slow: this worker's next compile or validate is slow (self-check)
 let injected = false;
 const P = PROPERTIES[prop];
 const beat = new Int32Array(hb);

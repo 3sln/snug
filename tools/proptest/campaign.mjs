@@ -20,11 +20,12 @@
 //   --inject=P          self-check: property P reports one seeded known-bad result (signature P<P>/injected),
 //                       so the campaign must exit 1 (tools/proptest/campaign.test.mjs)
 //
-//   --inject-slow=wall|cpu  self-check: each P5 worker's first compile takes 2.2 s more, asleep (wall: a warning
-//                       only) or busy (cpu: the P5/slow-compile signature)
+//   --inject-slow=wall|cpu|validate-wall|validate-cpu  self-check: each P5 worker's first compile (wall, cpu) or
+//                       validate (validate-*) takes 2.2 s more, asleep (wall: a warning only) or busy (cpu: the
+//                       P5/slow-compile or P5/slow-validate signature)
 //
-// Slow compiles (P9.9): over SLOW_MS of the worker thread's CPU time is the failing P5/slow-compile signature; over
-// SLOW_MS of wall time alone is a warning (summary.json "warnings", warnings.jsonl, the log) with the load average.
+// Slow compiles and validates (P9.9): over SLOW_MS of the worker thread's CPU time is the failing P5/slow-compile or
+// P5/slow-validate signature; over SLOW_MS of wall time alone is a warning (summary.json "warnings", warnings.jsonl, the log) with the load average.
 //
 // Exit status: 0 only when the campaign recorded no failure signature; 1 otherwise (every signature, a hang, a
 // worker crash or a failed gate round, whatever findings/triage.json says of it), so `bb gates` sees findings.
@@ -48,6 +49,7 @@ selfWatch('proptest', import.meta.url);   // P9.1 caps (a long campaign: --gate-
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a); if (!m) throw new Error(`bad argument ${a}`); return [m[1], m[2] ?? 'true']; }));
 const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject', 'inject-slow'];
 for (const k of Object.keys(args)) if (!known.includes(k)) throw new Error(`unknown option --${k}`);
+if (args['inject-slow'] !== undefined && !/^(?:validate-)?(?:wall|cpu)$/.test(args['inject-slow'])) throw new Error(`--inject-slow is wall, cpu, validate-wall or validate-cpu, not ${JSON.stringify(args['inject-slow'])}`);
 const minutes = Number(args.minutes ?? 10);
 if (args.tree && !['head', 'working'].includes(args.tree)) throw new Error('--tree is head or working');
 const [seedLo, seedHi] = (args.seeds ?? '1..1000000').split('..').map(Number);
