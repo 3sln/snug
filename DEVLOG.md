@@ -9612,7 +9612,20 @@ review.
     decision, no D-entry.
 - [ ] **P9.9 — Full-length proptest and vmsession-test runs**, split into
   chunks that fit under the P9.1 caps, with the seeds and chunking
-  recorded so anyone can reproduce them. Includes `rust-api-test` in its
+  recorded so anyone can reproduce them.
+  *Found 2026-11-12 (P9.9 engineer):*
+  - The proptest release gate always exited 0, whatever it found.
+  - After D342, P2 fails on stale harness expectations: f8 below 0x20,
+    and the round trip of a non-preferred bignum.
+  - Earlier "proptest: 0 failures" claims rested on reading the output,
+    not on the gate's exit status.
+  The coordinator widened P9.9 to fix tools/proptest. The fixes:
+  - the D342 exception;
+  - a corrected round-trip property;
+  - the replay crash on Decimal;
+  - a non-zero exit on findings, with a self-test.
+  The release proptest must be re-run after that fix. GitHub Actions CI
+  is held until the owner answers. Includes `rust-api-test` in its
   `full` mode (the P9.6 async differential at full scale; see P9.6a), which
   also runs again before the RC is declared. Run it as `bb rust-api-test
   full` (sets `SNUG_ASYNC_FULL=1` for Cargo; watchdog gate
