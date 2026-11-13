@@ -44,7 +44,7 @@ const W12 = [
   ['r = [* uint, uint]', {}, '8101', o => o.startsWith('33 0 0 ') && o.endsWith(' 1 1 0 0 1') ? null : `want missing [1], got ${o}`],
   ['r = {? (a: int, b: int), * tstr => any}', { cuts: 'branch' }, 'a1616101', o => o.startsWith('0 ') ? null : `want valid (rule A), got ${o}`],
   ['r = {? (a: int, b: int), * tstr => any}', {}, 'a1616101', o => /^33 0 0 \d+ \d+ 1 1 0 1 \d+$/.test(o) ? null : `want missing b (rfc), got ${o}`],
-  ['r = {? (a: int, b: int), * tstr => any}', { cuts: 'branch' }, 'a161616178', o => /^35 0 0 \d+ \d+ 1 1 0 1 \d+$/.test(o) ? null : `want value at a (rule A), got ${o}`],
+  ['r = {? (a: int, b: int), * tstr => any}', { cuts: 'branch' }, 'a161616178', o => /^35 46 0 \d+ \d+ 1 1 0 1 \d+$/.test(o) ? null : `want value (subcode cut, D342) at a (rule A), got ${o}`],
   ['r = {kind: "a", x: int // kind: "b", y: tstr}', {}, 'a26179617a646b696e646162', o => o.startsWith('35 ') ? null : `want the RFC cut's value at kind, got ${o}`],
   ['r = {kind: "a", x: int // kind: "b", y: tstr}', { cuts: 'branch' }, 'a26179617a646b696e646162', o => o.startsWith('0 ') ? null : `want valid (rule A), got ${o}`],
 ];

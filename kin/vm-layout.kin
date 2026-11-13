@@ -178,6 +178,9 @@
 ;; `budget`, never skippable); R_AGROW (internal) the arena must grow below its cap
 (defconst ^:pub ^I32 R_GROUP_LIMIT 44)
 (defconst ^:pub ^I32 R_AGROW 45)
+;; D342: the subcode of a `value` refusal a cut decided -- a key matched a cut member
+;; whose value failed, and the cut stopped the alternatives after it (never a reason)
+(defconst ^:pub ^I32 R_CUT 46)
 (defconst ^:pub ^I32 R_BUDGET 48)
 ;; internal only (P8.4, D262): the deterministic attempt of a valid-CBOR run met an
 ;; encoding only valid CBOR has inside embedded content; the run takes the canonical path

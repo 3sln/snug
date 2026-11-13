@@ -1902,7 +1902,8 @@ pub fn map_close(p: &[i32], pool: &[u8], b: &[u8], kb: &[u8], s: &mut [i32], fb:
             let wr: i32 = s[(bestbo + MB_E0) as usize];
             let wk: i32 = s[(bestbo + MB_E1) as usize];
             let wv: i32 = s[(bestbo + MB_E2) as usize];
-            wit_set(s, wr, 0, d, wk, wv, pos);
+            // the reason, and a subcode in its second byte (D342: cut)
+            wit_set(s, wr & 255, wr >> 8, d, wk, wv, pos);
         } else {
             let r1: i32 = rule1(s, fb, w, nq, d, pos);
             if r1 < 0 {

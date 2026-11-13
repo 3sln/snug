@@ -131,6 +131,7 @@ pub const R_CONTROL: i32 = 42;
 pub const R_CONTROL_SIZE: i32 = 43;
 pub const R_GROUP_LIMIT: i32 = 44;
 pub const R_AGROW: i32 = 45;
+pub const R_CUT: i32 = 46;
 pub const R_BUDGET: i32 = 48;
 pub const R_NONDET: i32 = 49;
 pub const R_INCONSISTENT: i32 = 100;

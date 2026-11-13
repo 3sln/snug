@@ -20,15 +20,30 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
 
 - CDDL (RFC 8610, with RFC 9165 controls and RFC 9682 grammar) compiled to
   a verified Program; `compile(text, options)` with compiler profiles
-  `full`, `bindle` and `bus`, and compile-time resource limits. (The
-  compiler also produces warnings, but no public API returns them yet.)
+  `full`, `bindle` and `bus`, and compile-time resource limits. Compile
+  warnings are `schema.warnings` (JS, wasm SDK) and `Schema::warnings()`
+  (Rust) (D342).
 - Validation directly over CBOR bytes in one pass, with no decoded value
   tree; `schema.validate`, `schema.decode`, `validateAt`. Refusals carry a
   code, an offset and a schema-named path, never payload values (SPEC §4).
 - PEG semantics for groups in arrays and maps (D270), with the RFC's
   literal cut as the default and `cuts: 'branch'` as an option (D301);
   the compiler's warning W8 flags discriminated unions that the RFC cut
-  makes fail (not yet returned by a public API).
+  makes fail, and such a refusal is `value` with the subcode `cut` (D342).
+- `Schema` and `Program` refuse structured cloning: `postMessage` and
+  `structuredClone` throw `DataCloneError` (a `brand` Symbol) instead of
+  silently making a plain object without methods; send
+  `program.serialize()` bytes (D342). `[js]` `[wasm-sdk]`
+- `[js]` `npm run build` warns on stderr, listing the paths, when the
+  package's sources have uncommitted or untracked changes.
+- `[rust]` Every type a public signature names is re-exported at the crate
+  root: `SchemaError`, `SourceError`, `Cuts`, `Regexp`, `AbnfMode`,
+  `Controls`, `Control`, `Warning`, `IoError`, `SourceOptions` (D342).
+- `[rust]` `Error::Io(IoError)` and `SourceError::Io` keep a transport's
+  own `io::Error`, reachable through `std::error::Error::source()`;
+  `code()` is still `read` (D342).
+- `[rust]` Depending on `host/rust` without assembling the crate fails with
+  one `compile_error!` naming `kin/scripts/rust-crate`.
 - CBOR codec `encode` / `decode` with exact integers, bignums, decimal
   fractions, typed arrays and ndarrays; encoders always write RFC 8949
   §4.2.1 deterministic bytes.
@@ -111,6 +126,21 @@ These matter only to users of pre-release builds from this repository.
   treated it. A map with keys `1` and `2(h'01')` now decodes instead of
   throwing `unsupported`. Encode writes such a `Tagged` as its integer
   (D342).
+- `[rust]` The source drivers take their read settings in one struct:
+  `Schema::validate_blob(blob, rule, options, &SourceOptions)` and
+  `validate_reader(reader, rule, options, &SourceOptions)`, and the async
+  forms the same, instead of positional `chunk`, `quantum: u32` and
+  `fail_fast` (D342). `SourceOptions { chunk, quantum, fail_fast }`
+  defaults to 65,536 / 0 / false; `quantum` is `u32` everywhere public.
+  The free `snug::validate_blob` (a duplicate of the method) is removed;
+  `async_source::validate_blob` / `validate_reader` (the test hosts'
+  low-level forms) are hidden from the docs.
+- `[rust]` An unknown rule is `Error::Usage("unknown_rule")` from every API
+  that returns `Error` (the blob and reader drivers, `decode`, `view` and
+  `document` returned `Error::Validation` with reason `unknown_rule`), and
+  `Error::from` a `Failure` with code −1 gives the same (D342).
+- `[rust]` A transport error is `Error::Io` with the original error, not
+  `Error::Source("read")`; `code()` stays `read` (D342).
 
 ### Changed
 

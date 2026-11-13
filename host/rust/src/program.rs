@@ -129,7 +129,8 @@ impl Program {
             .collect()
     }
     /// Emit docs/program.md's container, byte-identical to JavaScript. Current
-    /// format major/minor is 1.0; producer version is provenance only.
+    /// format major/minor is 2.0 (a Program using extension controls too); the
+    /// producer version is provenance only.
     pub fn serialize(&self) -> Result<Vec<u8>, Error> {
         let size = body_len(self.words().len(), self.pool().len())?;
         let mut out = vec![0u8; HEADER];

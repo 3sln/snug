@@ -542,8 +542,12 @@ test('sequences: API behaviours and privacy (read-only messages, private View/Cu
 
 // ---------------------------------------------------------------- compile
 const STRESS = ['r = [* int]', 'r = [* (0..100)]', 'r = [* tstr .size (0..3)]', 'r = { v: [* uint], w: [* tstr] }', 'r = [* { * tstr => int }]',
-  'r = { * tstr => any }', 'r = { * tstr => [* int] }', 'r = [* { a: uint, ? b: tstr, c: bool }]', 'r = { id: uint, ? m: { x: int, y: int }, tags: [* tstr] }'];
-const programBytes = s => ({ serialized: hex(s.program.serialize()), sourceKey: s.program.sourceKey, rules: s.program.rules, controls: s.program.controls });
+  'r = { * tstr => any }', 'r = { * tstr => [* int] }', 'r = [* { a: uint, ? b: tstr, c: bool }]', 'r = { id: uint, ? m: { x: int, y: int }, tags: [* tstr] }',
+  'r = { kind: "a", x: int // kind: "b", y: tstr }'];
+// P9.16: the compile warnings and the clone brands too
+const cloneThrows = x => { try { structuredClone(x); return false; } catch (e) { return e.name === 'DataCloneError'; } };
+const programBytes = s => ({ serialized: hex(s.program.serialize()), sourceKey: s.program.sourceKey, rules: s.program.rules, controls: s.program.controls,
+  warnings: s.warnings.map(w => ({ ...w })), cloneThrows: [cloneThrows(s), cloneThrows(s.program)] });
 test('compile: every schema text of the case set gives the same Program bytes or SchemaError', async () => {
   const t = tally('compile (Program bytes / SchemaError)');
   const texts = [];

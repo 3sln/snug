@@ -45,7 +45,7 @@
             [snug.cbor.head :refer [be16 be32]]
             [snug.cbor.canon :refer [targ tskip kclass float-ecs]]
             [snug.vm.layout :refer [H_S_LEAVES H_S_MAP_INDEX H_S_KEYS H_N_KEYS H_FLAGS FL_CUTS_BRANCH
-                                    INF R_BUDGET R_INCONSISTENT R_MISSING R_VALUE R_UNEXPECTED P_KEY P_ANYKEY
+                                    INF R_BUDGET R_INCONSISTENT R_MISSING R_VALUE R_CUT R_UNEXPECTED P_KEY P_ANYKEY
                                     PEG_HDR P_EMPTY P_FAIL P_MEMBER P_SEQ P_CHOICE P_REP P_CALL
                                     TIER_F TIER_S TIER_T]]
             [snug.vm.base :refer [charge c16 c64min ts-test q-add]]
@@ -1158,7 +1158,9 @@
 (defn ^I32 ev-wit [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 tier]
   (comment "The root's failure event as the block's witness (program-2 §8 rule 4'):"
            "`missing` with KEY id / ANYKEY (none for an unplugged socket's FAIL); a cut"
-           "`value` at its diagnostic pair, whose key gives the segment.")
+           "`value` at its diagnostic pair, whose key gives the segment, with the"
+           "subcode `cut` (D342: R_CUT in the reason word's second byte, which the"
+           "map's witness hands to wit-set).")
   (let [a (ia s (+ bo MB_E1))
         pair (ia s (+ bo MB_E2))
         kind (sar a 16)
@@ -1182,10 +1184,11 @@
                 nb (m-named p mt)]
             (for [^I32 j 0 (ia p (+ mt 2))]
               (if (== (ia s (+ sl (* sw j))) pair) (set pk (ia p (+ nb (* 3 j)))))))))
-    (if (< pk 0)
-      (mwit s bo R_VALUE P_ANYKEY 0)
-      (do (let [sg (seg-of p mt pk)]
-            (if (== sg P_KEY) (mwit s bo R_VALUE P_KEY pk) (mwit s bo R_VALUE P_ANYKEY 0)))))
+    (let [cv (bit-or R_VALUE (shl R_CUT 8))]
+      (if (< pk 0)
+        (mwit s bo cv P_ANYKEY 0)
+        (do (let [sg (seg-of p mt pk)]
+              (if (== sg P_KEY) (mwit s bo cv P_KEY pk) (mwit s bo cv P_ANYKEY 0))))))
     (return 0)))
 
 (defn ^:pub ^I32 map-end-block [^IntsR p ^Ints s ^I32 bo ^I32 mt ^Bytes kb ^I32 at]

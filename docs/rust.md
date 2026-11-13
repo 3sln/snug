@@ -50,33 +50,46 @@ Schema between threads, and use one reusable `Scratch` per concurrent caller.
 limits. Schema methods, the codec and views all default to any root under
 the valid preset; `Top::Map` (or the Bindle preset) requires a map.
 
-`Failure` preserves the generated VM's code, reason, offset, path, embedded
-subcode and budget usage. It describes one deterministic witness, not all
-failed alternatives. Only schema-named keys appear in paths. The requested
+`Failure` preserves the generated VM's code, reason, offset, path, subcode
+and budget usage. It describes one deterministic witness, not all failed
+alternatives. Only schema-named keys appear in paths. The subcode is the
+embedded item's own reason for `embedded`, and `cut` for a `value` refusal a
+cut decided: a key matched a cut member (`name:` or `^=>`) whose value failed,
+and the cut stopped the alternatives after it (D342). The requested
 `Result<(), Failure>` signature also carries a missing-rule API failure as
 `code == -1, reason == "unknown_rule"`; check rule names against
 `schema.program().rules()` when configuring an application. JS instead throws
-TypeError for this misuse. The other forms report the same misuse
-differently: `validate_blob` / `validate_reader` and `decode` / `view` as
-`Error::Validation` with reason `unknown_rule`, and the sequence forms as
-`Error::Usage("unknown_rule")`; check the rule once at startup.
+TypeError for this misuse. Every API that returns `Error` reports it as
+`Error::Usage("unknown_rule")`, and `?` from `validate` into an `Error`
+converts the `Failure` to the same (D342).
 
 **Tagged unions.** Map cuts follow RFC 8610 §3.5.4 literally, so
-`{ type: "a", x: int // type: "b", y: tstr }` rejects every `"b"` message.
-Write a type choice of maps (`{ type: "a", x: int } / { type: "b", y: tstr }`)
-or a cut-free `"type" =>` discriminator; see the
-[guide](guide.md#discriminated-unions-under-the-rfc-cut) and its
-[PEG pitfalls](guide.md#group-matching-pitfalls-peg). `Schema::compile` does
-not return compile warnings (the W8 warning for this idiom is only in the
-internal `snug::compile::Compiled::warnings`).
+`{ type: "a", x: int // type: "b", y: tstr }` rejects every `"b"` message
+(`value` with subcode `cut`). Write a type choice of maps
+(`{ type: "a", x: int } / { type: "b", y: tstr }`) or a cut-free `"type" =>`
+discriminator; see the [guide](guide.md#discriminated-unions-under-the-rfc-cut)
+and its [PEG pitfalls](guide.md#group-matching-pitfalls-peg).
+`Schema::warnings()` returns the compile warnings; W8 flags this idiom:
 
-**Types from inner modules.** A few types that public signatures use are not
-re-exported at the crate root; name them by module: `snug::compile::SchemaError`
-(inside `Error::Compile`), `snug::schema::SourceError` (returned by an
-`AsyncBlob` / `Blob` read), `snug::compile::{Cuts, Regexp}` (fields of
-`CompileOptions`), `snug::controls::Controls` and
-`snug::unicode_tables::tables()`. Use those items, not the rest of those
-modules, which serve snug's own test hosts.
+```rust
+use snug::{CompileOptions, Schema};
+let s = Schema::compile("e = { type: \"a\", x: int // type: \"b\", y: tstr }", &CompileOptions::default())?;
+for w in s.warnings() {
+    eprintln!("{} at {}:{} in {:?}: {}", w.code, w.line, w.column, w.rule, w.message);
+}
+assert_eq!(s.warnings()[0].code, "W8");
+# Ok::<(), snug::Error>(())
+```
+
+A Schema loaded from a serialized Program has no warnings.
+
+**Crate-root paths.** Every type a public signature names is re-exported at
+the crate root: `SchemaError` (inside `Error::Compile`), `SourceError`
+(returned by an `AsyncBlob` / `Blob` read), `IoError`, `Cuts`, `Regexp` and
+`AbnfMode` (fields of `CompileOptions`), `Controls`, `Warning` and
+`SourceOptions`. The modules `compile`, `schema`, `sha256`, `unicode_tables`
+and the generated `snug` serve snug's own test hosts; of them, use only
+`snug::unicode_tables::tables()` (the optional Unicode data).
 
 ## Decode and exact values
 
@@ -196,11 +209,11 @@ heads, without building sibling values or allocating per step.
 ## Cache Programs and validate blobs
 
 ```rust
-use snug::{Schema, CompileOptions, Program, BytesBlob, ValidationOptions};
+use snug::{Schema, CompileOptions, Program, BytesBlob, SourceOptions, ValidationOptions};
 let schema = Schema::compile("r = uint", &CompileOptions::default())?;
 let bytes = schema.program().serialize()?;
 let loaded = Schema::from_program(Program::deserialize(&bytes)?);
-loaded.validate_blob(&BytesBlob(&[7]), "r", &ValidationOptions::default(), 4096, 0)??;
+loaded.validate_blob(&BytesBlob(&[7]), "r", &ValidationOptions::default(), &SourceOptions::default())??;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -239,9 +252,14 @@ match Schema::compile("message = { id: }", &CompileOptions::default()) {
 `Blob` is the existing host's synchronous size/read snapshot contract.
 `validate_blob` folds in its session driver; it returns
 `Result<Result<(), Failure>, Error>`, distinguishing source/API errors from
-validation verdicts. Use a positive chunk size; needs may exceed that size.
-A positive quantum creates VM yields, which this synchronous driver resumes
-immediately. The driver does not buffer the entire document as an API shortcut.
+validation verdicts. `SourceOptions` sets how a driver reads: `chunk` (bytes
+per read, 1..=2³¹ − 1, default 65,536; a need may exceed it), `quantum` (work
+units between yields; 0, the default, never yields; at most 2³¹ − 1) and
+`fail_fast` (streams only). Out-of-range values are
+`Error::Usage("options")`. A positive quantum creates VM yields, which a
+synchronous driver resumes immediately. A blob backend's `io::Error` is best
+returned as `SourceError::Io(err.into())`; the driver answers `Error::Io`
+with it. The driver does not buffer the entire document as an API shortcut.
 Pin a remote object's version in the Blob implementation and return exactly
 the requested bytes on every read. The async forms are under
 [Async sources](#async-sources); source decode, view directories and Writer
@@ -251,18 +269,21 @@ A message of **unknown length** (D085) is read from any `std::io::Read` until
 EOF in drain mode -- the verdict equals the buffer's of the same bytes:
 
 ```rust
-use snug::{Schema, CompileOptions, ValidationOptions};
+use snug::{Schema, CompileOptions, SourceOptions, ValidationOptions};
 let schema = Schema::compile("r = [* uint]", &CompileOptions::default())?;
+let reading = SourceOptions { chunk: 4096, ..SourceOptions::default() };
 let mut stream: &[u8] = &[0x83, 1, 2, 3];               // any std::io::Read
-let verdict = schema.validate_reader(&mut stream, "r", &ValidationOptions::default(), 4096, false)?;
+let verdict = schema.validate_reader(&mut stream, "r", &ValidationOptions::default(), &reading)?;
 assert!(verdict.is_ok());
 let mut cut: &[u8] = &[0x83, 1, 2];                       // ends inside the array
-let truncated = schema.validate_reader(&mut cut, "r", &ValidationOptions::default(), 4096, false)?;
+let truncated = schema.validate_reader(&mut cut, "r", &ValidationOptions::default(), &reading)?;
 assert_eq!(truncated.unwrap_err().reason, "cbor/truncated");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The last argument is fail-fast: a certain refusal is answered at once (its
+A read error is `Error::Io` with the reader's own `io::Error`
+(`std::error::Error::source()` answers it; `code()` is `read`), so a server
+can tell a reset from a timeout. With `SourceOptions::fail_fast` a certain refusal is answered at once (its
 code may then be another than the buffer's `cbor/truncated` / `cbor/too_large`;
 accept and refuse never differ). Only what the session asks for is held, plus a
 chunk. The session's key arena grows with the input read (D342), so an idle
@@ -291,9 +312,9 @@ While `max_live` sessions are live in the process, creating one more fails with
 converts into `Error::SessionLimit`. The free `snug::read_sequence` and
 `read_sequence_async` now return `Result<_, Error>` (they answered the reader
 directly), as `Schema::read_sequence` already did (changed before the first
-release; see the [CHANGELOG](../CHANGELOG.md)). The low-level `schema::validate_blob` / `validate_reader` and
-`async_source::validate_blob` / `validate_reader` report the limit as
-`schema::SourceError::SessionLimit`; every public driver answers
+release; see the [CHANGELOG](../CHANGELOG.md)). The test hosts' low-level
+`schema::validate_blob` / `validate_reader` report the limit as
+`SourceError::SessionLimit`; every public driver answers
 `Error::SessionLimit`.
 
 Idle arrays are kept up to `max_pooled_bytes` in all. One entry above 1 MiB, or
@@ -316,7 +337,7 @@ sessions::set_limits(before)?;
 ## Extension controls
 
 ```rust
-use snug::{Schema, CompileOptions, Scratch, controls::Controls};
+use snug::{Schema, CompileOptions, Scratch, Controls};
 let controls = Controls::generic()                         // .chars .unique .samelen
     .with("even", |_arg: &[u8], item: &[u8]| item.len() % 2 == 0);
 let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
@@ -346,7 +367,7 @@ admits them under the `bus` profile.
 ### `.abnf` / `.abnfb` (RFC 9165 §3)
 
 ```rust
-use snug::{Schema, CompileOptions, Scratch, controls::Controls, compile::AbnfMode,
+use snug::{Schema, CompileOptions, Scratch, Controls, AbnfMode,
            abnf::{Abnf, check_abnf, check_abnf_in}};
 let controls = Controls::new().with_abnf();                // the optional ABNF controls (D334)
 let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
@@ -438,7 +459,7 @@ runtime-agnostic: any executor drives the futures (tokio, async-std, smol, or
 the few lines of `block_on` hidden in this example).
 
 ```rust
-use snug::{AsyncSource, CompileOptions, Schema, SequenceOptions, ValidationOptions};
+use snug::{AsyncSource, CompileOptions, Schema, SequenceOptions, SourceOptions, ValidationOptions};
 # fn block_on<F: std::future::Future>(f: F) -> F::Output {
 #     struct W; impl std::task::Wake for W { fn wake(self: std::sync::Arc<Self>) {} }
 #     let waker = std::task::Waker::from(std::sync::Arc::new(W));
@@ -450,8 +471,9 @@ let schema = Schema::compile("event = { type: tstr }", &CompileOptions::default(
 block_on(async {
     // a message of unknown length (drain mode); `&[u8]` is an AsyncSource
     let mut body: &[u8] = &[0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'a'];
+    let reading = SourceOptions { chunk: 4096, quantum: 1024, fail_fast: true };
     let verdict = schema.validate_reader_async(&mut body, "event", &ValidationOptions::default(),
-                                               4096, 1024, false).await?;
+                                               &reading).await?;
     assert!(verdict.is_ok());
 
     // a CBOR sequence: next() answers what the sync iterator yields
@@ -470,23 +492,22 @@ block_on(async {
 
 | Sync | Async | JS |
 | --- | --- | --- |
-| `Schema::validate_blob(&dyn Blob, rule, options, chunk, quantum)` | `Schema::validate_blob_async(&impl AsyncBlob, rule, options, chunk, quantum).await` | `validateHandle` |
-| `Schema::validate_reader(&mut dyn Read, rule, options, chunk, fail_fast)` | `Schema::validate_reader_async(&mut impl AsyncSource, rule, options, chunk, quantum, fail_fast).await` | `validateStream` |
+| `Schema::validate_blob(&dyn Blob, rule, options, &SourceOptions)` | `Schema::validate_blob_async(&impl AsyncBlob, rule, options, &SourceOptions).await` | `validateHandle` |
+| `Schema::validate_reader(&mut dyn Read, rule, options, &SourceOptions)` | `Schema::validate_reader_async(&mut impl AsyncSource, rule, options, &SourceOptions).await` | `validateStream` |
 | `read_sequence(impl Read, options)`, `Schema::read_sequence` | `read_sequence_async(impl AsyncSource, options)`, `Schema::read_sequence_async` → `AsyncSequenceReader::next().await` | `readSequence` |
-| `schema::validate_blob`, `schema::validate_reader` (low level) | `async_source::validate_blob`, `async_source::validate_reader` | — |
 
-The results are the sync forms': `Result<Result<(), Failure>, Error>` (source
-and API errors outside, verdicts inside) and `Option<Result<Message<'static>,
-Error>>` per sequence item, with the same argument checks (`chunk` 0 or a
-quantum above 2^31−1 is `Error::Usage("options")`) and source errors
-(`short_read`, `read`, `too_large`).
+`SourceOptions { chunk, quantum, fail_fast }` is JS's `SourceOptions`
+(`chunk`, `quantum`, `failFast`). The results are the sync forms':
+`Result<Result<(), Failure>, Error>` (source and API errors outside, verdicts
+inside) and `Option<Result<Message<'static>, Error>>` per sequence item, with
+the same argument checks (`chunk` 0 or above 2³¹ − 1, or a quantum above
+2³¹ − 1, is `Error::Usage("options")`) and source errors (`short_read`,
+`too_large`, and `Error::Io` for a transport error).
 
 **Sources.** `AsyncSource` is a forward-only stream with the signature of
 `futures_io::AsyncRead::poll_read` (`Ready(Ok(0))` is the end; `Interrupted`
-is retried; any other error is `Error::Source("read")`, and the original
-`io::Error` is dropped: `source()` is `None`, so record the kind in your
-adapter (for example in a field of the newtype) before returning it if you
-need to tell a reset from a timeout). It is implemented for
+is retried; any other error ends the validation with `Error::Io`, which keeps
+the original `io::Error` behind `source()`). It is implemented for
 `&[u8]`, `&mut S`, `Box<S>` and `Pin<P>`; the drivers take `S: Unpin` (pin a
 `!Unpin` source in a `Box`). `AsyncBlob` is the async `Blob`: `size()` and
 `read(offset, len)` returning any future (write `async fn read`), exactly
@@ -554,8 +575,10 @@ but `Error::code() == "truncated"`, and a schema failure is `"type"` versus
 spellings). `Failure.code` is the VM's numeric code, for diagnostics only;
 compare `reason`. Display contains only a code; Debug retains safe
 schema locations/paths. Library failures never contain input bytes, received
-values or unnamed data keys. Transport implementations must sanitize their
-own errors. Allocator exhaustion retains standard Rust allocator behavior.
+values or unnamed data keys. `Error::Io` carries the transport's own error
+(`IoError::kind()`, `get_ref()`, and `source()`); its Display stays the code,
+and transport implementations must sanitize their own messages before
+logging them. Allocator exhaustion retains standard Rust allocator behavior.
 
 ## Enums that may grow
 
@@ -566,7 +589,7 @@ variant as a refusal, and render an unknown path segment generically.
 
 | `#[non_exhaustive]` | Why |
 | --- | --- |
-| `Error`, `schema::SourceError`, `sessions::SessionError` | error families: new codes are additive (release-policy §1.3) |
+| `Error`, `SourceError`, `sessions::SessionError` | error families: new codes are additive (release-policy §1.3) |
 | `Segment` | diagnostic paths; a new construct may need a new segment kind |
 | `Top`, `Keys`, `Tags`, `Floats` (in `Profile`), `Cuts`, `Regexp`, `CompilerProfile`, `OnInvalid` | options: a new mode or preset is a minor change |
 

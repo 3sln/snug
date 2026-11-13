@@ -20,10 +20,12 @@ import { validateOptions } from '../../js/src/options.mjs';
 import { profileFlags } from '../../js/src/profiles.mjs';
 import { controlEntries, bindControls, programControls, rethrow } from '../../js/src/ext.mjs';
 import { controls as generic } from '../../js/src/controls.mjs';
+import { schemaWarnings, brand } from '../../js/src/schema-state.mjs';
 
 export { ProgramError };
+const NO_WARNINGS = Object.freeze([]);
 const REASONS = { 32: 'type', 33: 'missing', 34: 'unexpected', 35: 'value', 36: 'size', 37: 'range',
-  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 48: 'budget' };
+  38: 'pattern', 39: 'tag', 40: 'bits', 41: 'embedded', 42: 'control', 43: 'control_size', 44: 'group_limit', 46: 'cut', 48: 'budget' };
 const reasonName = code => (code >= 1 && code <= 21 ? 'cbor/' + rt.codeName(code) : REASONS[code] ?? 'unknown');
 const lim = v => (v === undefined || v === null ? -1 : Math.max(0, Math.min(Number(v), 0x7fffffff)) | 0);
 const internals = new WeakMap(), versions = new WeakMap();
@@ -111,7 +113,7 @@ class Inner {
       else { path.push('cbor'); path.push(v); }
     }
     const r = { ok: false, reason: reasonName(code), path, offset: o[at + 2] };
-    if (code === 41) r.subcode = reasonName(o[at + 1]);
+    if (code === 41 || o[at + 1] === 46) r.subcode = reasonName(o[at + 1]);
     return r;
   }
   /** Validate [ptr, ptr+n) already in linear memory (views open on their own copy). */
@@ -149,6 +151,7 @@ export class Program {
     if (P.byteLength + B.length > 64 * 1024 * 1024) throw new ProgramError('too_large');
     if (P.length < 64) throw new ProgramError('verify');
     internals.set(this, new Inner(P, B, controls)); versions.set(this, SNUG_VERSION);
+    brand(this, 'Program');
     Object.freeze(this);
   }
   get P() { return internals.get(this).P.slice(); }
@@ -176,9 +179,12 @@ export class Schema {
   #inner;
   constructor(program) {
     if (!internals.has(program)) throw new TypeError('snug: Schema needs a verified Program');
+    brand(this, 'Schema');
     this.program = program; this.#inner = internals.get(program);
     Object.freeze(this);
   }
+  /** The compile warnings (P9.16), as the native Schema's. */
+  get warnings() { return schemaWarnings.get(this) ?? NO_WARNINGS; }
   #rule(rule) {
     if (typeof rule !== 'string') throw new TypeError('snug: rule must be a string');
     const i = this.#inner.ruleIndex(rule);

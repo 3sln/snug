@@ -11,7 +11,7 @@ use snug::controls::{Chars, Control, Controls};
 use snug::schema::{self, BytesBlob as RawBlob, Failure, Options, SourceError};
 use snug::{
     read_sequence, read_sequence_async, AsyncBlob, AsyncSource, BytesBlob, CompileOptions, Error, Message, OnInvalid,
-    Profile, Program, Schema, SequenceOptions, ValidationOptions,
+    Profile, Program, Schema, SequenceOptions, SourceOptions, ValidationOptions,
 };
 use std::future::Future;
 use std::io;
@@ -520,6 +520,11 @@ fn async_sequence_reader_equals_the_sync_reader() {
 
 // ---------------------------------------------------------------- the public contract
 
+/// Driver options (P9.16: one struct for chunk, quantum and fail-fast).
+fn so(chunk: usize, quantum: u32, fail_fast: bool) -> SourceOptions {
+    SourceOptions { chunk, quantum, fail_fast }
+}
+
 fn schema() -> Schema {
     Schema::compile("m = { id: uint, ? name: tstr, ? blob: bstr, tags: [* tstr] }", &CompileOptions::default()).unwrap()
 }
@@ -537,39 +542,40 @@ fn public_async_forms_match_the_sync_ones() {
     ];
     for bytes in &inputs {
         for chunk in [1usize, 3, 4096] {
-            let sync = schema.validate_blob(&BytesBlob(bytes), "m", &v, chunk, 2).unwrap();
-            let (got, _) = block_on(schema.validate_blob_async(&BytesBlob(bytes), "m", &v, chunk, 2));
+            let sync = schema.validate_blob(&BytesBlob(bytes), "m", &v, &so(chunk, 2, false)).unwrap();
+            let (got, _) = block_on(schema.validate_blob_async(&BytesBlob(bytes), "m", &v, &so(chunk, 2, false)));
             assert_eq!(got.unwrap(), sync);
             for fail_fast in [false, true] {
                 let mut r: &[u8] = bytes;
-                let sync = schema.validate_reader(&mut r, "m", &v, chunk, fail_fast).unwrap();
+                let sync = schema.validate_reader(&mut r, "m", &v, &so(chunk, 0, fail_fast)).unwrap();
                 let mut src: &[u8] = bytes;
-                let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &v, chunk, 0, fail_fast));
+                let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &v, &so(chunk, 0, fail_fast)));
                 assert_eq!(got.unwrap(), sync);
             }
         }
     }
     // the same misuse and source errors as the sync forms
     let mut empty: &[u8] = &[];
-    let (e, _) = block_on(schema.validate_reader_async(&mut empty, "m", &v, 0, 0, false));
+    let (e, _) = block_on(schema.validate_reader_async(&mut empty, "m", &v, &so(0, 0, false)));
     assert_eq!(e.unwrap_err(), Error::Usage("options"));
-    let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "m", &v, 1, u32::MAX));
+    let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "m", &v, &so(1, u32::MAX, false)));
     assert_eq!(e.unwrap_err(), Error::Usage("options"));
-    let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "nope", &v, 1, 0));
-    assert_eq!(e.unwrap_err(), schema.validate_blob(&BytesBlob(&[]), "nope", &v, 1, 0).unwrap_err());
+    let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "nope", &v, &so(1, 0, false)));
+    assert_eq!(e.unwrap_err(), Error::Usage("unknown_rule"));
+    assert_eq!(schema.validate_blob(&BytesBlob(&[]), "nope", &v, &so(1, 0, false)).unwrap_err(), Error::Usage("unknown_rule"));
     assert!(matches!(schema.read_sequence_async(&[][..], "nope", &SequenceOptions::default()), Err(Error::Usage("unknown_rule"))));
     let zero = SequenceOptions { chunk: 0, ..SequenceOptions::default() };
     assert!(matches!(schema.read_sequence_async(&[][..], "m", &zero), Err(Error::Usage("options"))));
     // P9.16: a chunk above 2^31 - 1 is misuse, never a panic or a huge reservation
     for chunk in [usize::MAX, (i32::MAX as usize) + 1] {
         let mut empty: &[u8] = &[];
-        let (e, _) = block_on(schema.validate_reader_async(&mut empty, "m", &v, chunk, 0, false));
+        let (e, _) = block_on(schema.validate_reader_async(&mut empty, "m", &v, &so(chunk, 0, false)));
         assert_eq!(e.unwrap_err(), Error::Usage("options"));
-        let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "m", &v, chunk, 0));
+        let (e, _) = block_on(schema.validate_blob_async(&BytesBlob(&[]), "m", &v, &so(chunk, 0, false)));
         assert_eq!(e.unwrap_err(), Error::Usage("options"));
         let mut empty: &[u8] = &[];
-        assert_eq!(schema.validate_reader(&mut empty, "m", &v, chunk, false).unwrap_err(), Error::Usage("options"));
-        assert_eq!(schema.validate_blob(&BytesBlob(&[]), "m", &v, chunk, 0).unwrap_err(), Error::Usage("options"));
+        assert_eq!(schema.validate_reader(&mut empty, "m", &v, &so(chunk, 0, false)).unwrap_err(), Error::Usage("options"));
+        assert_eq!(schema.validate_blob(&BytesBlob(&[]), "m", &v, &so(chunk, 0, false)).unwrap_err(), Error::Usage("options"));
         let big = SequenceOptions { chunk, ..SequenceOptions::default() };
         assert!(matches!(schema.read_sequence_async(&[][..], "m", &big), Err(Error::Usage("options"))));
         assert!(matches!(snug::read_sequence_async(&[][..], &big), Err(Error::Usage("options"))));
@@ -586,7 +592,7 @@ fn public_async_forms_match_the_sync_ones() {
             Ok(vec![0x80; len - 1])
         }
     }
-    let (e, _) = block_on(schema.validate_blob_async(&Short, "m", &v, 4, 0));
+    let (e, _) = block_on(schema.validate_blob_async(&Short, "m", &v, &so(4, 0, false)));
     assert_eq!(e.unwrap_err(), Error::Source("short_read"));
     struct Huge;
     impl AsyncBlob for Huge {
@@ -597,7 +603,7 @@ fn public_async_forms_match_the_sync_ones() {
             unreachable!()
         }
     }
-    let (e, _) = block_on(schema.validate_blob_async(&Huge, "m", &v, 4, 0));
+    let (e, _) = block_on(schema.validate_blob_async(&Huge, "m", &v, &so(4, 0, false)));
     assert_eq!(e.unwrap_err(), Error::Source("too_large"));
 
     struct Broken(usize);
@@ -611,8 +617,24 @@ fn public_async_forms_match_the_sync_ones() {
             Poll::Ready(Ok(1))
         }
     }
-    let (e, _) = block_on(schema.validate_reader_async(&mut Broken(2), "m", &v, 4, 0, false));
-    assert_eq!(e.unwrap_err(), Error::Source("read"));
+    let (e, _) = block_on(schema.validate_reader_async(&mut Broken(2), "m", &v, &so(4, 0, false)));
+    // P9.16: the transport's own error is kept, behind source()
+    let e = e.unwrap_err();
+    assert_eq!(e.code(), "read");
+    assert!(matches!(&e, Error::Io(io) if io.kind() == io::ErrorKind::Other && io.get_ref().to_string() == "transport"));
+    assert_eq!(std::error::Error::source(&e).unwrap().to_string(), "transport");
+    // a blob backend's io::Error the same way
+    struct Failing;
+    impl AsyncBlob for Failing {
+        fn size(&self) -> usize {
+            8
+        }
+        async fn read(&self, _offset: usize, _len: usize) -> Result<Vec<u8>, SourceError> {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "slow").into())
+        }
+    }
+    let (e, _) = block_on(schema.validate_blob_async(&Failing, "m", &v, &so(4, 0, false)));
+    assert!(matches!(e.unwrap_err(), Error::Io(io) if io.kind() == io::ErrorKind::TimedOut));
     let mut r = read_sequence_async(Broken(3), &SequenceOptions::default()).unwrap();
     let (items, _) = block_on(async {
         let mut v = Vec::new();
@@ -621,7 +643,7 @@ fn public_async_forms_match_the_sync_ones() {
         }
         v
     });
-    assert_eq!(items, vec![Err(Error::Source("read"))]);
+    assert!(matches!(&items[..], [Err(Error::Io(io))] if io.kind() == io::ErrorKind::Other));
 }
 
 #[test]
@@ -641,17 +663,17 @@ fn async_sources_hold_bounded_bytes_and_stop_early() {
         }
     }
     let mut src = Counting(&body, 0);
-    let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &ValidationOptions::default(), 1024, 0, false));
+    let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &ValidationOptions::default(), &so(1024, 0, false)));
     assert!(got.unwrap().is_ok());
     assert_eq!(src.1, body.len());
     // fail-fast stops reading at a certain refusal; drain reads to the end
     let bad = [&[0xa1u8, 0x64, b'b', b'l', b'o', b'b', 0x01][..], &[0u8; 10_000][..]].concat();
     let mut src = Counting(&bad, 0);
-    let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &ValidationOptions::default(), 64, 0, true));
+    let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &ValidationOptions::default(), &so(64, 0, true)));
     assert!(got.unwrap().is_err());
     assert!(src.1 < 1000, "fail-fast read {} bytes", src.1);
     let mut src = Counting(&bad, 0);
-    let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &ValidationOptions::default(), 64, 0, false));
+    let (got, _) = block_on(schema.validate_reader_async(&mut src, "m", &ValidationOptions::default(), &so(64, 0, false)));
     assert_eq!(got.unwrap(), schema.validate(&bad, "m", &mut snug::Scratch::new()));
     assert_eq!(src.1, bad.len());
     // a sequence holds the message in progress only
@@ -682,7 +704,8 @@ fn dropped_futures_are_safe_and_next_is_cancel_safe() {
             let waker = Waker::from(flag);
             let mut cx = Context::from_waker(&waker);
             let v = ValidationOptions::default();
-            let mut f = pin!(schema.validate_reader_async(&mut src, "m", &v, 4, 1, false));
+            let o = so(4, 1, false);
+            let mut f = pin!(schema.validate_reader_async(&mut src, "m", &v, &o));
             for _ in 0..polls {
                 if f.as_mut().poll(&mut cx).is_ready() {
                     break;
@@ -690,7 +713,7 @@ fn dropped_futures_are_safe_and_next_is_cancel_safe() {
             }
         }
         let blob = SlowBlob { data: &body[..11], seed: std::cell::Cell::new(polls + 1), reads: Default::default() };
-        let (got, _) = block_on(schema.validate_blob_async(&blob, "m", &ValidationOptions::default(), 2, 1));
+        let (got, _) = block_on(schema.validate_blob_async(&blob, "m", &ValidationOptions::default(), &so(2, 1, false)));
         assert!(got.unwrap().is_ok());
     }
     // next(): a future dropped while its read is Pending loses no message
@@ -722,10 +745,11 @@ fn async_futures_are_send_when_their_sources_are() {
     let schema = schema();
     let v = ValidationOptions::default();
     let blob = BytesBlob(&[0x80]);
-    let f = schema.validate_blob_async(&blob, "m", &v, 4, 0);
+    let o = so(4, 0, false);
+    let f = schema.validate_blob_async(&blob, "m", &v, &o);
     send(&f);
     let mut src: &[u8] = &[0x80];
-    let f = schema.validate_reader_async(&mut src, "m", &v, 4, 0, false);
+    let f = schema.validate_reader_async(&mut src, "m", &v, &o);
     send(&f);
     let mut r = schema.read_sequence_async(&[0x80u8][..], "m", &SequenceOptions::default()).unwrap();
     let f = r.next();

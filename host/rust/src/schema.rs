@@ -12,7 +12,7 @@ use crate::controls::{port, prepare_all, program_controls, Control, Controls};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// A verified Program (docs/program.md format 1) from a store the host trusts.
+/// A verified Program (format 2.0) from a store the host trusts.
 #[derive(Debug, Clone)]
 pub struct Program {
     p: Vec<i32>,
@@ -189,7 +189,8 @@ fn valid_put(vs: Vec<i32>, cb: Vec<u8>) {
 }
 
 /// The VM's scratch: one per validating thread or context, reused across
-/// calls and Programs, grown by program.md §13.1's protocol.
+/// calls and Programs, grown on demand. Not shared: each concurrent
+/// validation brings its own (`&mut`).
 #[derive(Debug, Default)]
 pub struct Scratch {
     s: Vec<i32>,
@@ -261,14 +262,26 @@ pub enum Segment {
     EmbeddedItem(i32),
 }
 
-/// A refusal: reason code and name, embedded subcode, byte offset, path.
+/// A refusal: reason code and name, subcode, byte offset, path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Failure {
+    /// The numeric reason: 1–21 a CBOR refusal (`reason` is `cbor/<code>`),
+    /// 32 and up a schema refusal, −1 an unknown rule (an API failure, not a
+    /// verdict). `reason` is the stable form; prefer it.
     pub code: i32,
+    /// The stable reason name: `cbor/truncated`, `type`, `value`, …
+    /// [`Error::code`](crate::Error::code) maps it to the JS code family
+    /// (`truncated`, `schema/type`, …).
     pub reason: &'static str,
+    /// For `embedded`, the embedded item's own reason; for `value`, `cut`
+    /// when a cut decided it: a key matched a cut member (`name:` or `^=>`)
+    /// whose value failed, and the cut stopped the alternatives after it.
     pub subcode: Option<&'static str>,
+    /// The byte offset the refusal was decided at.
     pub offset: i32,
+    /// Schema-named path segments, never data keys the schema does not name.
     pub path: Vec<Segment>,
+    /// Work units used.
     pub budget_used: i32,
 }
 
@@ -282,7 +295,7 @@ pub fn reason_name(code: i32) -> &'static str {
         18 => "cbor/too_many_entries", 19 => "cbor/too_many_items", 20 => "cbor/too_large", 21 => "cbor/not_map",
         32 => "type", 33 => "missing", 34 => "unexpected", 35 => "value", 36 => "size", 37 => "range",
         38 => "pattern", 39 => "tag", 40 => "bits", 41 => "embedded", 42 => "control", 43 => "control_size",
-        44 => "group_limit", 48 => "budget",
+        44 => "group_limit", 46 => "cut", 48 => "budget",
         _ => if code > 0 && code < 32 { code_name(code) } else { "unknown" },
     }
 }
@@ -306,7 +319,8 @@ pub(crate) fn result(prog: &Program, out: &[i32]) -> Result<(), Failure> {
     Err(Failure {
         code: out[0],
         reason: reason_name(out[0]),
-        subcode: if out[0] == 41 { Some(reason_name(out[1])) } else { None },
+        // an embedded failure's own reason; `cut` on a value a cut decided (D342)
+        subcode: if out[0] == 41 || out[1] == 46 { Some(reason_name(out[1])) } else { None },
         offset: out[2],
         path,
         budget_used: out[3],
@@ -510,9 +524,12 @@ impl Drop for Session<'_> {
 }
 
 /// A random-access source of a known size whose contents do not change while it
-/// is read (an immutable snapshot: architecture §17.3, W12).
+/// is read (an immutable snapshot: pin the object's version).
 pub trait Blob {
+    /// The size in bytes.
     fn size(&self) -> usize;
+    /// Exactly the `len` bytes at `offset` (fewer is `short_read`). A backend
+    /// failure is best returned as [`SourceError::Io`], which the drivers keep.
     fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>, SourceError>;
 }
 
@@ -522,11 +539,71 @@ pub trait Blob {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SourceError {
-    ShortRead { offset: usize, wanted: usize, got: usize },
+    /// A blob read answered fewer bytes than asked for (`short_read`).
+    ShortRead {
+        /// Where the read started.
+        offset: usize,
+        /// The bytes asked for.
+        wanted: usize,
+        /// The bytes answered.
+        got: usize,
+    },
+    /// The source failed with no error to keep (`read`); prefer
+    /// [`SourceError::Io`] when there is one.
     Read,
+    /// The blob is larger than the session can address (`too_large`).
     TooLarge,
     /// P9.7: the process has its maximum of live sessions ([`crate::sessions`]).
     SessionLimit,
+    /// The transport's own error, kept whole for
+    /// [`std::error::Error::source`] (`read`). A blob backend returns it with
+    /// `SourceError::Io(err.into())`.
+    Io(IoError),
+}
+
+/// A transport's own error, kept whole: what an `AsyncSource`, a [`std::io::Read`]
+/// or a blob's backend failed with. It is reachable through `Error::Io` and
+/// [`std::error::Error::source`], so a server can tell a reset from a timeout;
+/// snug's own Display never prints it (transport messages are the transport's to
+/// sanitise). Cheap to clone (shared); two compare equal when their
+/// [`std::io::ErrorKind`]s do.
+#[derive(Debug, Clone)]
+pub struct IoError(Arc<std::io::Error>);
+impl IoError {
+    /// The error's kind.
+    pub fn kind(&self) -> std::io::ErrorKind {
+        self.0.kind()
+    }
+    /// The original error.
+    pub fn get_ref(&self) -> &std::io::Error {
+        &self.0
+    }
+}
+impl From<std::io::Error> for IoError {
+    fn from(e: std::io::Error) -> Self {
+        Self(Arc::new(e))
+    }
+}
+impl PartialEq for IoError {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind() == other.kind()
+    }
+}
+impl Eq for IoError {}
+impl std::fmt::Display for IoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "snug: source read failed ({:?})", self.kind())
+    }
+}
+impl std::error::Error for IoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.0)
+    }
+}
+impl From<std::io::Error> for SourceError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e.into())
+    }
 }
 
 /// An in-memory blob (a borrowed buffer), for tests and as the simplest source.
@@ -766,8 +843,8 @@ pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options,
 /// holding at most what the session asks for (plus `chunk`). Drain mode: the
 /// verdict equals the buffer's of the same bytes; with `fail_fast` a certain
 /// refusal is answered at once (its code may then differ: the buffer might say
-/// `cbor/truncated` or `cbor/too_large`). Transport errors are `SourceError::Read`.
-/// An I/O loop over `StreamCore`.
+/// `cbor/truncated` or `cbor/too_large`). Transport errors are `SourceError::Io`
+/// (the reader's own error). An I/O loop over `StreamCore`.
 pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read, opts: &Options, chunk: usize,
                        quantum: i32, fail_fast: bool) -> Result<Result<(), Failure>, SourceError> {
     let mut core = StreamCore::new(prog, rule, opts, chunk, quantum, fail_fast)?;
@@ -778,7 +855,7 @@ pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read
                     match reader.read(core.buf()) {
                         Ok(n) => break n,
                         Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                        Err(_) => return Err(SourceError::Read),
+                        Err(e) => return Err(e.into()),
                     }
                 };
                 core.filled(got);

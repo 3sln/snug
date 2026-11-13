@@ -7,7 +7,7 @@ import { be16, be32 } from '../cbor/head.mjs';
 import { arenaBody, arenaSetUp, arenaUp, arenaUpTop, fsDrop, fsPop, fsPush, fsTop } from './arena.mjs';
 import { forced, ifAct, pegOf, pegRec } from './array.mjs';
 import { c16, c64min, charge, qAdd, tsTest } from './base.mjs';
-import { FL_CUTS_BRANCH, H_FLAGS, H_N_KEYS, H_S_KEYS, H_S_LEAVES, H_S_MAP_INDEX, PEG_HDR, P_ANYKEY, P_CALL, P_CHOICE, P_EMPTY, P_FAIL, P_KEY, P_MEMBER, P_REP, P_SEQ, R_BUDGET, R_INCONSISTENT, R_MISSING, R_UNEXPECTED, R_VALUE, TIER_F, TIER_S, TIER_T } from './layout.mjs';
+import { FL_CUTS_BRANCH, H_FLAGS, H_N_KEYS, H_S_KEYS, H_S_LEAVES, H_S_MAP_INDEX, PEG_HDR, P_ANYKEY, P_CALL, P_CHOICE, P_EMPTY, P_FAIL, P_KEY, P_MEMBER, P_REP, P_SEQ, R_BUDGET, R_CUT, R_INCONSISTENT, R_MISSING, R_UNEXPECTED, R_VALUE, TIER_F, TIER_S, TIER_T } from './layout.mjs';
 import { cmpBytes } from './leaf.mjs';
 
 export const MB_Q = 0;
@@ -1623,7 +1623,9 @@ export function mwit(s, bo, reason, xk, xv) {
 export function evWit(p, s, bo, mt, tier) {
     // The root's failure event as the block's witness (program-2 §8 rule 4'):
     // `missing` with KEY id / ANYKEY (none for an unplugged socket's FAIL); a cut
-    // `value` at its diagnostic pair, whose key gives the segment.
+    // `value` at its diagnostic pair, whose key gives the segment, with the
+    // subcode `cut` (D342: R_CUT in the reason word's second byte, which the
+    // map's witness hands to wit-set).
     const a = s[bo + MB_E1];
     const pair = s[bo + MB_E2];
     const kind = a >> 16;
@@ -1659,14 +1661,15 @@ export function evWit(p, s, bo, mt, tier) {
             }
         }
     }
+    const cv = R_VALUE | (R_CUT << 8);
     if (pk < 0) {
-        mwit(s, bo, R_VALUE, P_ANYKEY, 0);
+        mwit(s, bo, cv, P_ANYKEY, 0);
     } else {
         const sg = segOf(p, mt, pk);
         if (sg === P_KEY) {
-            mwit(s, bo, R_VALUE, P_KEY, pk);
+            mwit(s, bo, cv, P_KEY, pk);
         } else {
-            mwit(s, bo, R_VALUE, P_ANYKEY, 0);
+            mwit(s, bo, cv, P_ANYKEY, 0);
         }
     }
     return 0;

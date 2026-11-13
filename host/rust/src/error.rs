@@ -9,6 +9,9 @@
 //! ```
 use crate::{compile::SchemaError, schema::Failure};
 use std::fmt;
+use std::io;
+/// Defined beside `SourceError` (the test hosts build `schema` without this module).
+pub use crate::schema::IoError;
 
 /// All public API error families. Validation itself returns [`Failure`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,8 +32,12 @@ pub enum Error {
     Program(&'static str),
     /// API misuse; fixed codes never contain caller-provided strings.
     Usage(&'static str),
-    /// Source protocol failure, using JS SourceError codes.
+    /// Source protocol failure, using JS SourceError codes (`short_read`,
+    /// `too_large`).
     Source(&'static str),
+    /// The source's transport failed: its own error, whole. `code()` is
+    /// `read`; [`std::error::Error::source`] answers the [`io::Error`].
+    Io(IoError),
     /// A Program uses extension controls the registry lacks (D141); their
     /// names, from the Program (schema text, never payload).
     MissingControls(Vec<String>),
@@ -71,6 +78,7 @@ impl Error {
                 "budget" => "schema/budget",
                 r => r.strip_prefix("cbor/").unwrap_or(r),
             },
+            Self::Io(_) => "read",
             Self::SessionLimit => "sessions/limit",
             Self::Internal => "internal",
         }
@@ -90,13 +98,37 @@ impl std::error::Error for Error {
             Self::Validation(e) => Some(e),
             Self::Sequence(e) => Some(&e.failure),
             Self::Compile(e) => Some(e),
+            Self::Io(e) => Some(e.get_ref()),
             _ => None,
         }
     }
 }
+/// A verdict as an error. The one API failure a [`Failure`] can carry, an unknown
+/// rule (`code` −1), becomes `Error::Usage("unknown_rule")`, as every
+/// `Result<_, Error>` API reports it.
 impl From<Failure> for Error {
     fn from(e: Failure) -> Self {
+        if e.code == -1 {
+            return Self::Usage("unknown_rule");
+        }
         Self::Validation(e)
+    }
+}
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e.into())
+    }
+}
+impl From<crate::schema::SourceError> for Error {
+    fn from(e: crate::schema::SourceError) -> Self {
+        use crate::schema::SourceError as S;
+        match e {
+            S::ShortRead { .. } => Self::Source("short_read"),
+            S::Read => Self::Source("read"),
+            S::TooLarge => Self::Source("too_large"),
+            S::SessionLimit => Self::SessionLimit,
+            S::Io(e) => Self::Io(e),
+        }
     }
 }
 impl From<SchemaError> for Error {

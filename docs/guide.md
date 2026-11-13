@@ -99,13 +99,20 @@ with `a-map = { a-fields }` is form 1).
 
 The compiler warns about the idiom with **W8** ("choice alternative starts
 with the same cut key as an earlier one") when two alternatives of a map's
-group choice start with a cut member on the same literal key. **No public
-API returns compile warnings yet:** the JS `compile` and Rust
-`Schema::compile` results have no `warnings` (only the internal
-`snug::compile` module's `Compiled::warnings` carries them), so rely on the
-forms above rather than on the warning. When the idiom fails, the result is
-`reason: 'value'` at the discriminator's path (`['kind']`), even though the
-data is a valid second alternative.
+group choice start with a cut member on the same literal key. The warnings
+are `schema.warnings` in JS (and the wasm SDK) and `Schema::warnings()` in
+Rust: frozen `{ code, rule, line, column, message }` records, empty for a
+Schema loaded from serialized bytes (D342):
+
+```js
+const shape = await compile('shape = { kind: "a", x: int // kind: "b", y: tstr }');
+for (const w of shape.warnings) console.warn(`${w.code} at ${w.line}:${w.column} in ${w.rule}: ${w.message}`);
+```
+
+When the idiom fails, the result is `reason: 'value'` with `subcode: 'cut'`
+at the discriminator's path (`['kind']`), at the map's offset, even though
+the data is a valid second alternative: the subcode tells this apart from an
+ordinary wrong value (D342).
 
 If a schema you do not control relies on the idiom, compile it with
 `cuts: 'branch'`: rule A, the reading of the Ruby and Rust reference tools
@@ -1107,6 +1114,13 @@ These recipes use the native package. The opt-in WebAssembly build,
 `@3sln/snug-wasm`, has its own page, [The wasm SDK](wasm-sdk.md): init
 options, the inline entry, and a Workers recipe with `.wasm` module bindings.
 
+The staged package comes from `npm run build` in `host/js` (see the
+README). When the checkout has uncommitted or untracked changes in the
+package's sources (`host/js`, `gen/js`, `examples`, `docs` and the root files
+it copies), the build warns on stderr and lists them: the staged package then
+does not match the commit you would pin. It also warns when git cannot report
+the state (no checkout).
+
 Use the staged consumer package; bare specifiers need a bundler (or an
 application import map). With an already available esbuild, from the consumer
 directory create `browser.mjs`:
@@ -1209,8 +1223,8 @@ worker.postMessage({ id: 1, bytes }, [bytes.buffer]); // transfer, do not share
 ```
 
 `Schema` and `Program` objects cannot cross a thread boundary:
-`postMessage(schema)` does not throw, but the copy is a plain object without
-methods. Send `schema.program.serialize()` bytes and call `fromSerialized`
+`postMessage(schema)` and `structuredClone(schema)` throw `DataCloneError`
+(each carries a Symbol `brand` for this; D342). Send `schema.program.serialize()` bytes and call `fromSerialized`
 on the other side, or compile there. A worker that compiles at runtime needs
 `{ type: 'module' }` and the split build, so the compiler chunk loads.
 

@@ -1957,7 +1957,8 @@ export function mapClose(p, pool, b, kb, s, fb, w, area, nb, d, n, pos, q0, q, n
             const wr = s[bestbo + MB_E0];
             const wk = s[bestbo + MB_E1];
             const wv = s[bestbo + MB_E2];
-            witSet(s, wr, 0, d, wk, wv, pos);
+            // the reason, and a subcode in its second byte (D342: cut)
+            witSet(s, wr & 255, wr >> 8, d, wk, wv, pos);
         } else {
             const r1 = rule1(s, fb, w, nq, d, pos);
             if (r1 < 0) {
