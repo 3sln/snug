@@ -7902,7 +7902,12 @@ Babashka 1.3.190, nvm Node, `env -i`):
   - wasm-size, 37 s;
   - node-oldest, 108 s;
   - runtime, 85 s.
-* `release-long` (valid-test, proptest) was not run locally.
+* `release-long` (valid-test, proptest) was not run locally. *Update
+  after the merge:* it ran on 1.92.0 and passed, with valid-test in 1 s
+  and proptest in 121 s.
+  - proptest's 121 s is far below its 3-hour cap. This looks like the
+    gate's short default run, not a full campaign.
+  - The shard's hosted runtime is unknown until the first hosted run.
 * **Linux cells, local replay.** No Linux machine or container was
   available (Docker's daemon is not running). The workflow's own gate-step
   block, extracted from ci.yml, ran under `bash -e` with `sh` resolving to
