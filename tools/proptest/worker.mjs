@@ -6,7 +6,8 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { PROPERTIES, doShrink, describe } from './props.mjs';
 import { createRandom, caseSeed } from './gen.mjs';
 
-const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig } = workerData;
+const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig, inject } = workerData;
+let injected = false;
 const P = PROPERTIES[prop];
 const beat = new Int32Array(hb);
 const stats = { cases: 0 };
@@ -25,6 +26,9 @@ while (Date.now() < deadline) {
   catch (e) {
     out = { failures: [{ cls: 'harness-throw', detail: 'the property check itself threw (harness or API bug)', actual: { name: e?.name, message: String(e?.message ?? e).slice(0, 300), stack: String(e?.stack ?? '').split('\n').slice(0, 6).join('\n') } }], stats: { cases: 1 } };
   }
+  // --inject=P: one seeded known-bad result on this worker's first case, so a self-check can see the failure path
+  // (worker -> record -> findings -> exit status) end to end
+  if (inject === prop && !injected) { injected = true; out = { ...out, failures: [...out.failures, { cls: 'injected', detail: '--inject: a seeded known-bad result (self-check of the failure path)' }] }; }
   const ms = performance.now() - t0;
   Atomics.store(beat, 2, 0);
   add(out.stats);

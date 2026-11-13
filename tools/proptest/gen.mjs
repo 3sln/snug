@@ -286,7 +286,8 @@ export function unicodeEvaluator(shape, pat) {
   const js = new RegExp('^(?:' + pat.replace(/(^|[^\\])\./g, '$1[^\\n\\r]') + ')$', 'u');
   const matches = v => typeof v === 'string' && js.test(v);
   const isMap = v => v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === null;
-  const isUint = x => typeof x === 'number' && Number.isSafeInteger(x) && x >= 0;
+  // a uint above 2^53 - 1 decodes as a bigint (P9.9: the oracle had called it not a uint)
+  const isUint = x => (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0) || (typeof x === 'bigint' && x >= 0n && x < 1n << 64n);
   return [matches, v => Array.isArray(v) && v.every(matches),
     v => isMap(v) && Object.entries(v).every(([k, x]) => matches(k) && isUint(x)),
     v => isMap(v) && Object.keys(v).every(k => k === 'a' || k === 'b') && 'b' in v && isUint(v.b) && (!('a' in v) || matches(v.a))][shape];

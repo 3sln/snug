@@ -17,6 +17,11 @@
 //   --gates=a,b         only these gates
 //   --out=DIR           findings directory (default tools/proptest/findings)
 //   --replay=P:SEED:IDX re-run one case and print its inputs and failures
+//   --inject=P          self-check: property P reports one seeded known-bad result (signature P<P>/injected),
+//                       so the campaign must exit 1 (tools/proptest/campaign.test.mjs)
+//
+// Exit status: 0 only when the campaign recorded no failure signature; 1 otherwise (every signature, a hang, a
+// worker crash or a failed gate round, whatever findings/triage.json says of it), so `bb gates` sees findings.
 //
 // Properties (props.mjs): 1 schema x value (oracle, decode, validateAt, budget),
 // 2 codec (encode == Writer == cbor.mjs, round trip, mutations), 3 views,
@@ -35,7 +40,7 @@ import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('proptest', import.meta.url);   // P9.1 caps (a long campaign: --gate-wall= / --gate-cpu=)
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a); if (!m) throw new Error(`bad argument ${a}`); return [m[1], m[2] ?? 'true']; }));
-const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of'];
+const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject'];
 for (const k of Object.keys(args)) if (!known.includes(k)) throw new Error(`unknown option --${k}`);
 const minutes = Number(args.minutes ?? 10);
 if (args.tree && !['head', 'working'].includes(args.tree)) throw new Error('--tree is head or working');
@@ -59,12 +64,17 @@ if (args.replay) {
   console.log(JSON.stringify(out.stats));
   process.exit(0);
 }
+// A walk, not a JSON.stringify replacer: stringify calls a value's toJSON before the replacer sees it, and
+// Decimal's (like any value type that has no JSON form) throws.
 function describeInputs(inputs, describe) {
-  return JSON.parse(JSON.stringify(inputs, (k, v) => {
+  const walk = v => {
     if (v instanceof Uint8Array && v.constructor === Uint8Array) return { $hex: Buffer.from(v).toString('hex') };
     if (typeof v === 'bigint' || (v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) !== Object.prototype)) return describe(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
     return v;
-  }));
+  };
+  return walk(inputs);
 }
 
 // ------------------------------------------------------------------ snapshot
@@ -121,7 +131,7 @@ async function startProp(p) {
       let cur = { seed: lo, index: 0 };
       const spawnWorker = () => {
         const hb = new SharedArrayBuffer(12), beat = new Int32Array(hb);
-        const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { prop: p, seeds: [lo, hi], seed: cur.seed, index: cur.index, casesPerSeed, deadline, hb, maxShrinkPerSig: 2 }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
+        const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { prop: p, seeds: [lo, hi], seed: cur.seed, index: cur.index, casesPerSeed, deadline, hb, maxShrinkPerSig: 2, inject: args.inject === undefined ? undefined : Number(args.inject) }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
         let finished = false, seen = '', since = Date.now();
         const watch = setInterval(() => {
           const s = Atomics.load(beat, 0), i = Atomics.load(beat, 1), on = Atomics.load(beat, 2);
@@ -193,4 +203,8 @@ const summary = {
 writeFileSync(join(outDir, 'summary.json'), JSON.stringify(summary, null, 1) + '\n');
 log(`done in ${(wallMs / 60000).toFixed(1)} min: ${Object.entries(perProp).map(([p, x]) => `P${p} ${x.stats.cases ?? 0} cases`).join(', ')}; ${gateResults.length} gate runs (${gateResults.filter(r => r.exit !== 0).length} failed); ${findings.length} failure signatures`);
 for (const f of findings) log(`  ${f.sig}: ${f.count} (${f.triage})`);
+if (findings.length) {
+  console.log(`  FAIL proptest: ${findings.length} failure signature${findings.length === 1 ? '' : 's'} (${findings.map(f => f.sig).join(', ')}); findings in ${outDir}`);
+  process.exit(1);
+}
 process.exit(0);

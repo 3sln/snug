@@ -29,5 +29,9 @@
  "P6/vmsession-test": {
   "class": "environment",
   "analysis": "vmsession-test 200000 1001 4000 600 was ended after 873 s by another agent’s pkill -f vmsession-test.mjs (manager confirmed); not counted. Standalone at 3551d7a: vmsession-test 60000 1001 1200 180 ok in 1,488 s (1,841,136 session runs == vm-validate, 1,205,083 JS == Rust runs, 0 panics)."
+ },
+ "P2/valid-roundtrip/reencode": {
+  "class": "snug bug (fixed, D348)",
+  "analysis": "A map whose keys collide once a non-preferred bignum is its integer (a200f6c240f6) decoded under valid but encode threw a bare duplicate_key. D348 (main 3e0b613) keeps the refusal and names it: duplicate_key, subcode normalized; the property accepts exactly that refusal for a value holding a non-preferred bignum. Any other re-encode refusal is still this signature."
  }
 }

@@ -8,12 +8,15 @@ import { compile as publicCompile, SchemaError as PublicSchemaError } from '../.
 import { Program, Schema, ProgramError, fromSerialized, fromProgram } from '../../host/js/src/public-schema.mjs';
 import { Program as HostProgram, Schema as HostSchema } from '../../host/js/src/schema.mjs';
 import { serializeProgram } from '../../host/js/src/serialized.mjs';
-import { encode, decode, SnugFault, Decimal, NDArray, Float16Bytes } from '../../host/js/src/index.mjs';
+import { encode, decode, SnugFault, Decimal, NDArray, Float16Bytes, Tagged } from '../../host/js/src/index.mjs';
 import { build } from '../../host/js/src/build.mjs';
 import { Writer } from '../../host/js/src/writer.mjs';
 import { typedInfo } from '../../host/js/src/values.mjs';
 import { view } from '../../host/js/src/view.mjs';
-import { codecTop } from '../../host/js/src/profiles.mjs';
+import { codecTop, profileFlags } from '../../host/js/src/profiles.mjs';
+import { resolveLimits } from '../../host/js/src/limits.mjs';
+import { scanCb, scanOptions, scanProfile, errorOffset } from '../../gen/js/snug/cbor/scan.mjs';
+import { CODE_SCRATCH } from '../../gen/js/snug/cbor/codes.mjs';
 import { scanBuffer, scanHandleSync, bufferHandle, pushScanner, SourceError, validateHandleSync, pushValidator } from '../../host/js/src/sources.mjs';
 import { tables as unicodeTables } from '../../host/js/src/unicode-tables.mjs';
 import * as baseline from '../../bench/baseline/cbor-3sln.mjs';
@@ -65,6 +68,33 @@ function normalise(v) {
     return o;
   }
   return v;
+}
+
+/** D342: v with each bignum outside preferred serialization (decoded as Tagged 2/3 of its exact bytes) replaced by
+ * its integer, and whether there was one. */
+function integerBignums(v) {
+  let changed = false;
+  const f = x => {
+    if (x instanceof Tagged) {
+      if ((x.tag === 2 || x.tag === 3) && x.value instanceof Uint8Array) {
+        changed = true;
+        const n = x.value.length ? BigInt('0x' + Buffer.from(x.value).toString('hex')) : 0n;
+        return x.tag === 2 ? n : -1n - n;
+      }
+      return new Tagged(x.tag, f(x.value));
+    }
+    if (Array.isArray(x)) return x.map(f);
+    if (x instanceof Map) return new Map([...x].map(([k, y]) => [f(k), f(y)]));
+    if (x instanceof NDArray) return Array.isArray(x.data) ? new NDArray([...x.shape], x.data.map(f)) : x;
+    if (x && typeof x === 'object' && !ArrayBuffer.isView(x) && (Object.getPrototypeOf(x) === Object.prototype || Object.getPrototypeOf(x) === null)) {
+      const o = Object.create(Object.getPrototypeOf(x));
+      for (const k of Object.keys(x)) Object.defineProperty(o, k, { value: f(x[k]), enumerable: true, writable: true, configurable: true });
+      return o;
+    }
+    return x;
+  };
+  const value = f(v);
+  return { value, changed };
 }
 
 /** The Writer's typed calls (writer.test.mjs's drive). */
@@ -349,7 +379,34 @@ const bindleOf = dopts => ({ ...dopts, wire: 'bindle' });
 export function mutationVerdicts(m, dopts) {
   const sn = attempt(() => decode(m, bindleOf(dopts)));
   const bs = attempt(() => baseline.decode(m, dopts));
-  return { sn, bs, csn: codeOf(sn), cbs: codeOf(bs) };
+  const csn = codeOf(sn);
+  return { sn, bs, csn, cbs: arbiter(codeOf(bs), csn, m, dopts) };
+}
+// The one documented departure from cbor.mjs (D342, as kin/scripts/scan-test.mjs reads it): cbor.mjs answers
+// non_shortest (below 24) or simple (24..31) for f8 followed by a byte below 32, which RFC 8949 §3.3 makes not
+// well-formed, so snug answers malformed under every profile. cbor.mjs reports no offset: its code is read as
+// malformed when snug's generated scanner, under the same Bindle options, refused at such a head (the walks are
+// the same up to there, so cbor.mjs refused at that head too).
+function arbiter(want, got, m, dopts) {
+  if (got !== 'malformed' || (want !== 'non_shortest' && want !== 'simple')) return want;
+  const at = bindleRefusalOffset(m, dopts);
+  return at >= 0 && m[at] === 0xf8 && at + 1 < m.length && m[at + 1] < 32 ? 'malformed' : want;
+}
+function bindleRefusalOffset(m, dopts) {
+  const opts = bindleOf(dopts), top = codecTop(opts), lim = resolveLimits(opts), cl = n => Math.min(n, 0x7fffffff);
+  let o = new Int32Array(16 + 512), cb = new Uint8Array(1024);
+  for (;;) {
+    scanOptions(o, top === 'any' ? 1 : 0, opts.cose === true ? 1 : 0, cl(lim.maxBytes), cl(lim.maxDepth), cl(lim.maxEntries), cl(lim.maxItems));
+    scanProfile(o, profileFlags(opts));
+    const c = scanCb(m, o, cb);
+    if (c === CODE_SCRATCH) {
+      const keep = o.subarray(0, 16).slice();
+      if (o[13] > o.length) { o = new Int32Array(Math.max(o[13], 2 * o.length)); o.set(keep); }
+      if (o[14] > cb.length) cb = new Uint8Array(Math.max(o[14], 2 * cb.length));
+      continue;
+    }
+    return c === 0 ? -1 : errorOffset(o);
+  }
 }
 function mutationCheck(m, dopts, kind, repro, st) {
   const F = [];
@@ -375,10 +432,30 @@ function mutationCheck(m, dopts, kind, repro, st) {
   if (sn.ok && (!dv.ok || !isDeepStrictEqual(dv.value, sn.value)))
     F.push({ cls: 'valid-superset', detail: 'the default refuses, or reads differently, what the Bindle profile accepts', actual: dv.ok ? describe(dv.value) : codeOf(dv), repro: rp });
   if (dv.ok) {
-    const re2 = attempt(() => encode(dv.value, { cose: dopts.cose === true }));
-    const back = re2.ok ? attempt(() => decode(re2.value, dopts)) : re2;
-    if (!back.ok || !isDeepStrictEqual(back.value, dv.value))
-      F.push({ cls: 'valid-roundtrip', detail: 'a default-accepted value does not re-encode and decode to itself', actual: back.ok ? describe(back.value) : codeOf(back), repro: rp });
+    // D342: a value the default decodes re-encodes, and that encoding is a fixed point (encode(decode(e)) == e).
+    // The value itself comes back unchanged unless it holds a bignum outside preferred serialization (a Tagged 2/3
+    // of its exact bytes, reachable under `valid` only), which encoders write as its integer: then the encoding
+    // must be that of the value with each such bignum replaced by its integer.
+    const eo = { cose: dopts.cose === true };
+    const re2 = attempt(() => encode(dv.value, eo));
+    // read back without maxBytes: the encoding may be longer than the input (an integral float reads as a JS number
+    // and is written as an integer, D123), which says nothing about the value
+    const { maxBytes: _mb, ...dback } = dopts;
+    const back = re2.ok ? attempt(() => decode(re2.value, dback)) : re2;
+    const re3 = back.ok ? attempt(() => encode(back.value, eo)) : back;
+    const nb = integerBignums(dv.value);
+    const asInt = nb.changed && re2.ok ? attempt(() => encode(nb.value, eo)) : null;
+    // D348: a map whose keys collide once a non-preferred bignum is its integer refuses to encode with
+    // duplicate_key, subcode normalized (deterministic CBOR cannot write it); any other refusal is a finding
+    const normalizedRefusal = !re2.ok && nb.changed && re2.error?.code === 'duplicate_key' && re2.error?.subcode === 'normalized';
+    if (normalizedRefusal) st.normalizedRefused = (st.normalizedRefused ?? 0) + 1;
+    const [sub, why] = normalizedRefusal ? [] : !re2.ok ? ['reencode', 'does not re-encode'] : !back.ok ? ['redecode', 'its encoding does not decode']
+      : !re3.ok || hex(re3.value) !== hex(re2.value) ? ['fixed-point', 'its encoding is not a fixed point of decode and encode']
+      : nb.changed ? (!asInt.ok || hex(asInt.value) !== hex(re2.value) ? ['bignum-integer', 'a non-preferred bignum is not written as its integer (D342)'] : [])
+      : !isDeepStrictEqual(back.value, dv.value) ? ['identity', 'does not decode back to itself'] : [];
+    if (why) F.push({ cls: 'valid-roundtrip', sub, detail: `a default-accepted value: ${why}`, repro: rp,
+      actual: { decoded: back.ok ? describe(back.value) : codeOf(back), reencoded: re2.ok ? hex(re2.value) : codeOf(re2), again: re3.ok ? hex(re3.value) : codeOf(re3) } });
+    else if (nb.changed) st.bignumNormalised = (st.bignumNormalised ?? 0) + 1;
   }
   // the other entry points agree with decode under the default (decode alone refuses two keys one JS key: unsupported)
   const csnD = codeOf(dv) === 'unsupported' ? 'ok' : codeOf(dv);
