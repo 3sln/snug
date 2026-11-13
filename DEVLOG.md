@@ -7585,7 +7585,10 @@ unchanged: a region that does not fit asks for more as before (-5).
 **Alternatives**: tracking in the witness which copy region a walk was in
 (it would touch every embedded walk and the session's saved positions); an
 offset rule other than §9.2 rule 7 (the bug was the mapping, not the rule).
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-13). This is a bug fix that
+  restores D030 identity under the existing §9.2 rule 7, so no owner
+  decision is needed. Merged at `e792757`. On main: drift ok, no conflict
+  markers.
 
 ## Findings
 
