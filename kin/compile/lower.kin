@@ -661,6 +661,36 @@
             (set f (bit-or f (head7 h a b (* pass (+ 1 (bit-and f 1))))))))))
     (return (head7-end h f from))))
 
+(defn ^I32 lower-major-ai [^Ints h ^I32 m ^I32 ai]
+  (comment "#0.n .. #3.n (RFC 8610 §2.2.3; RFC 9682 §3.2 note 2: n is the additional"
+           "information) by value, as D328 reads #7.25: the items a head with that"
+           "additional information can represent. ai < 24: the argument ai itself;"
+           "24..27: an argument of 1, 2, 4 or 8 bytes (0..256^w - 1); 31: an"
+           "indefinite length (any byte or text string; no integer); 28..30: nothing."
+           "#4.n and #5.n stay refused (major).")
+  (let [from (vlen h T_STK)
+        ahi 0 ^:mut alo ai ^:mut bhi 0 ^:mut blo ai
+        ^:mut none false]
+    (if (== ai 24) (do (set alo 0) (set blo 255)))
+    (if (== ai 25) (do (set alo 0) (set blo 65535)))
+    (if (== ai 26) (do (set alo 0) (set blo (neg 1))))
+    (if (== ai 27) (do (set alo 0) (set bhi (neg 1)) (set blo (neg 1))))
+    (if (and (>= ai 28) (<= ai 30)) (set none true))
+    (if (and (== ai 31) (<= m 1)) (set none true))
+    (if (and (== ai 31) (>= m 2)) (do (set alo 0) (set bhi (neg 1)) (set blo (neg 1))))
+    (if none (return (ts-make h from)))
+    (if (== m 0)
+      (do (let [l0 (mk-int-range h R_POS ahi alo R_POS bhi blo)] (return (ts-of1 h l0)))))
+    (if (== m 1)
+      (do (comment "-1 - n for n in [a, b]: NEG bounds hold n, the larger n lower")
+          (let [l1 (mk-int-range h R_NEG bhi blo R_NEG ahi alo)] (return (ts-of1 h l1)))))
+    (let [slo alo
+          ^:mut shi blo]
+      (comment "string lengths: a 4- or 8-byte argument reaches past INF, the cap")
+      (if (or (!= bhi 0) (< blo 0)) (set shi INF))
+      (if (== m 2) (do (let [l2 (mk-bytes h slo shi (neg 1))] (return (ts-of1 h l2)))))
+      (let [l3 (mk-text h slo shi (neg 1))] (return (ts-of1 h l3))))))
+
 (defn ^I32 lower-major [^Ints h ^I32 node ^I32 env]
   (let [m (na h node)
         mode (nb h node)
@@ -679,6 +709,8 @@
       (do (let [^I32 nts (lower-type h (ne h node) env)]
             (if (< nts 0) (return (neg 1)))
             (return (lower-head7 h nts pos)))))
+    (if (and (<= m 3) (and (== hi 0) (and (>= lo 0) (<= lo 31))))
+      (return (lower-major-ai h m lo)))
     (if (or (or (!= m 7) (!= hi 0)) (or (< lo 0) (> lo 255))) (return (fail h ERR_MAJOR pos)))
     (let [from (vlen h T_STK)
           f (head7 h lo lo 0)]

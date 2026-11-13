@@ -596,7 +596,8 @@ export function check(schema, rule, value, { cuts = 'rfc', steps = 100000, defau
           const bytes = v => v.kind === 'text' ? utf8.encode(v.value) : v.kind === 'bytes' ? v.value : (() => { throw UNKNOWN; })();
           const dedent = v => {
             const s = textDecoder.decode(bytes(v)), lines = s.split('\n');
-            const nonblank = lines.filter(x => /[^ ]/.test(x));
+            // RFC 9165 §2.3: a line is blank when it holds only spaces; a CR before the LF ends the line (P9.13)
+            const nonblank = lines.filter(x => /[^ ]/.test(x.endsWith('\r') ? x.slice(0, -1) : x));
             const n = nonblank.length ? Math.min(...nonblank.map(x => /^ */.exec(x)[0].length)) : Infinity;
             return utf8.encode(lines.map(x => x.slice(Math.min(n, /^ */.exec(x)[0].length))).join('\n'));
           };

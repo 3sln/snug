@@ -38,8 +38,8 @@ current implementation.
 | Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
 | Productive recursive types | Supported when recursion passes through a container/tag; depth bounded. |
 | Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`. |
-| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values; hexadecimal/decimal floats and h'/b64'/byte literals supported. |
-| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing. Runtime profile still restricts actual tags/simple values. |
+| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values; hexadecimal/decimal floats and h'/b64'/byte literals supported. The integer literal `-0` (or `-0x0`) is 0; the float `-0.0` stays negative zero. |
+| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing. `#0.n` to `#3.n` read `n` as the head's additional information (RFC 8610 §2.2.3), by value: below 24 the argument `n` itself (`#0.5` is 5, `#1.0` is −1, `#2.3` a 3-byte byte string); 24, 25, 26 and 27 an argument of 1, 2, 4 or 8 bytes (`#0.24` is 0..255, `#3.25` a text of at most 65,535 bytes); 31 an indefinite length (any byte or text string, no integer); 28..30 nothing. `#4.n` and `#5.n` are refused. Runtime profile still restricts actual tags/simple values. |
 | Appendix D prelude | Compiled from CDDL text. `biguint`, `bignint` and `bigint` match every tag 2/3 bignum, non-preferred ones included under `valid` (leading zeroes, small values; RFC 8949 §3.4.3); ranges and numeric controls compare bignums by value. Some names have no value under the current wire profile. |
 | UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
 
@@ -51,7 +51,7 @@ ever-growing generic expansion is refused rather than exhausting resources.
 
 | Controls | Meaning and limits |
 | --- | --- |
-| `.size` | Text/bytes count UTF-8/content bytes. `uint .size n` admits 0..256ⁿ−1; a range controller uses the minimal byte-length interval (lower length 0 includes zero). |
+| `.size` | Text/bytes count UTF-8/content bytes. `uint .size n` admits 0..256ⁿ−1; a range controller uses the minimal byte-length interval (lower length 0 includes zero). A negative controller value is no size: `tstr .size -1` matches nothing, and `(-2..1)` means `0..1`. On an integer type that admits negative values it is a `control_target` error. |
 | `.bits` | Permitted bit positions on uint or bstr; bstr bit n is byte n>>3, bit n&7, least significant first. Zero/all-zero masks still constrain. |
 | `.lt`, `.le`, `.gt`, `.ge` | Intersect numeric intervals; exact any-size integers; floats compare numerically (−0.0 = +0.0, so `float .lt 0.0` excludes both zeros) and NaN satisfies no ordered comparison. |
 | `.eq` | Target intersected with controller, not replacement of target; `(tstr .size 1) .eq "aa"` is empty. Composite controllers lower to AND. |
@@ -61,7 +61,7 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
 | `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only. |
 | `.default`, `.feature` | `.feature` is an annotation, no effect on matching. `.default` carries RFC 8610 §3.8.6's implied `.ne`: a value equal to the default is left out, so present it does not match (`uint .default 1` refuses `1`). A default `.ne` cannot compare (an array, a map, a range, or a target such as `any`) is refused as that `.ne` would be. The compile option `defaultControl: 'annotation'` (Rust `DefaultControl::Annotation`) makes `.default` an annotation with no effect, as RFC 8610 Erratum 9229 proposes; that erratum's status is Reported, not verified. |
-| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2); `.det` dedents each literal first. |
+| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2); `.det` dedents each literal first (RFC 9165 §2.3: lines end at LF or CR LF, so a line of spaces before CR LF is blank). |
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused. |
 | `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()`; without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
 | registered `.name` | An **extension control**: `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
@@ -492,7 +492,9 @@ refused with `group_recursion`; recursion that consumes nothing is
 | Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable, even with category tables. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
 | Left-recursive groups / recursion without progress | `group_recursion` / `nonproductive`; PEG matching needs progress to terminate. |
-| Composite `.ne`, nonliteral `.plus`/`.cat`/`.det`, float `.plus` | `control_value` or `unsupported_control`; currently exact supported folds only. |
+| Composite `.ne`, nonliteral `.plus`/`.cat`/`.det`, float `.plus` | `control_value` or `unsupported_control`; currently exact supported folds only. A `.default` whose implied `.ne` is composite (an array, a map or a range as the default, or a target such as `any`) is refused the same way unless `defaultControl: 'annotation'`. |
+| `#4.n`, `#5.n` (an array or map head's additional information) | `major`; counting entries by head is not lowered. `#0.n` to `#3.n` are supported (see [Grammar and types](#grammar-and-types)). |
+| `.size` or `.bits` on an integer type that admits negative values (`int .size 1`, `nint .bits 3`) | `control_target`; RFC 8610 defines them on `uint` only, and snug does not narrow the target silently. |
 | JSON validation, generated host types from CDDL | Outside current scope; handwritten API declarations describe the library, not schema output types. |
 
 The compiler restriction sets `bindle` and `bus` refuse additional otherwise

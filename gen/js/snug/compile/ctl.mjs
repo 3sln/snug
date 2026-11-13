@@ -226,6 +226,12 @@ export function intController(h, ts) {
     return m;
 }
 
+export function intHasNeg(h, t) {
+    // Does INT leaf t admit a negative value? Its intervals are sorted, so the
+    // first one's lower bound decides.
+    return vget(h, T_IV, 6 * ld(h, t, 0)) < R_POS;
+}
+
 export function ctlSize(h, target, ctl, ranged, pos) {
     // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
     // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
@@ -242,49 +248,58 @@ export function ctlSize(h, target, ctl, ranged, pos) {
             const o = 6 * (ld(h, cl, 0) + j);
             const lo = smallOf(vget(h, T_IV, o), vget(h, T_IV, o + 1), vget(h, T_IV, o + 2));
             const hi = smallOf(vget(h, T_IV, o + 3), vget(h, T_IV, o + 4), vget(h, T_IV, o + 5));
-            if ((k === K_TEXT) || (k === K_BYTES)) {
-                let nlo = ld(h, t, 0);
-                let nhi = ld(h, t, 1);
-                if (lo > nlo) {
-                    nlo = lo;
-                }
-                if (hi < nhi) {
-                    nhi = hi;
-                }
-                if (nlo <= nhi) {
-                    if (k === K_TEXT) {
-                        const nlt = mkText(h, nlo, nhi, ld(h, t, 2));
-                        vpush1(h, T_STK, nlt);
-                    } else {
-                        const nlb = mkBytes(h, nlo, nhi, ld(h, t, 2));
-                        vpush1(h, T_STK, nlb);
+            // P9.13: .size of an integer that may be negative is undefined (RFC 8610
+            // §3.8.1 sizes uint): a control_target error, not a silent narrowing to uint
+            if ((k === K_INT) && intHasNeg(h, t)) {
+                return targetError(h, pos);
+            }
+            // P9.13: a controller interval wholly below zero is no size: it matches
+            // nothing (small-of would clamp it to 0)
+            if (vget(h, T_IV, o + 3) >= R_POS) {
+                if ((k === K_TEXT) || (k === K_BYTES)) {
+                    let nlo = ld(h, t, 0);
+                    let nhi = ld(h, t, 1);
+                    if (lo > nlo) {
+                        nlo = lo;
                     }
-                }
-            } else if (k === K_INT) {
-                if ((lo <= 8) || (ranged === 0)) {
-                    let hk = hi;
-                    let llo = 0;
-                    let lhi = 0;
-                    if (hk > 8) {
-                        hk = 8;
+                    if (hi < nhi) {
+                        nhi = hi;
                     }
-                    if ((lo > 0) && (ranged !== 0)) {
-                        lhi = pow256Word(lo - 1, 0, 1);
-                        llo = pow256Word(lo - 1, 0, 0);
+                    if (nlo <= nhi) {
+                        if (k === K_TEXT) {
+                            const nlt = mkText(h, nlo, nhi, ld(h, t, 2));
+                            vpush1(h, T_STK, nlt);
+                        } else {
+                            const nlb = mkBytes(h, nlo, nhi, ld(h, t, 2));
+                            vpush1(h, T_STK, nlb);
+                        }
                     }
-                    const nl2 = intWith(h, t, R_POS, lhi, llo, R_POS, pow256Word(hk, 1, 1), pow256Word(hk, 1, 0));
-                    if (nl2 === (-1)) {
-                        return -1;
+                } else if (k === K_INT) {
+                    if ((lo <= 8) || (ranged === 0)) {
+                        let hk = hi;
+                        let llo = 0;
+                        let lhi = 0;
+                        if (hk > 8) {
+                            hk = 8;
+                        }
+                        if ((lo > 0) && (ranged !== 0)) {
+                            lhi = pow256Word(lo - 1, 0, 1);
+                            llo = pow256Word(lo - 1, 0, 0);
+                        }
+                        const nl2 = intWith(h, t, R_POS, lhi, llo, R_POS, pow256Word(hk, 1, 1), pow256Word(hk, 1, 0));
+                        if (nl2 === (-1)) {
+                            return -1;
+                        }
+                        vpush1(h, T_STK, nl2);
                     }
-                    vpush1(h, T_STK, nl2);
-                }
-            } else if ((k === K_LIT) || (k === K_LITSET)) {
-                if ((leafMask(h, t) & 12) === 0) {
+                } else if ((k === K_LIT) || (k === K_LITSET)) {
+                    if ((leafMask(h, t) & 12) === 0) {
+                        return targetError(h, pos);
+                    }
+                    filterLits(h, t, 0, lo, hi);
+                } else {
                     return targetError(h, pos);
                 }
-                filterLits(h, t, 0, lo, hi);
-            } else {
-                return targetError(h, pos);
             }
         }
     }
@@ -373,7 +388,12 @@ export function ctlBits(h, target, ctl, pos) {
         const t2 = tsLeaf(h, target, i2);
         const k2 = lk(h, t2);
         if (k2 === K_INT) {
-            // uint .bits: UINTX over the target's non-negative values
+            // uint .bits: UINTX over the target's non-negative values; a target
+            // that may be negative is a control_target error (P9.13: RFC 8610
+            // §3.8.2 defines .bits on uint), not a silent narrowing
+            if (intHasNeg(h, t2)) {
+                return targetError(h, pos);
+            }
             const nl = intWith(h, t2, R_POS, 0, 0, R_POS, -1, -1);
             if (nl === (-1)) {
                 return -1;
@@ -1410,7 +1430,8 @@ export function ifNegRegion(r) {
 export function dedentInto(h, bid, dst) {
     // RFC 9165 .det: the literal's content with the longest run of leading
     // spaces common to its non-blank lines removed from every line (lines end
-    // at LF), appended to vector dst.
+    // at LF; a CR just before the LF ends the line too, so a CRLF line of
+    // spaces is blank), appended to vector dst.
     const hl = encHeadLen(h, bid);
     const n = bidLen(h, bid);
     let prefix = INF;
@@ -1422,7 +1443,7 @@ export function dedentInto(h, bid, dst) {
             sp += 1;
             j += 1;
         }
-        if ((j < n) && (bidByte(h, bid, j) !== 10)) {
+        if ((j < n) && ((bidByte(h, bid, j) !== 10) && (!((bidByte(h, bid, j) === 13) && (((j + 1) === n) || (bidByte(h, bid, j + 1) === 10)))))) {
             if (sp < prefix) {
                 prefix = sp;
             }

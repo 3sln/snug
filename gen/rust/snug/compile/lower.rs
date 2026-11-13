@@ -929,6 +929,72 @@ pub(crate) fn lower_head7(h: &mut [i32], nts: i32, pos: i32) -> i32 {
     }
     return head7_end(h, f, from);
 }
+pub(crate) fn lower_major_ai(h: &mut [i32], m: i32, ai: i32) -> i32 {
+    // #0.n .. #3.n (RFC 8610 §2.2.3; RFC 9682 §3.2 note 2: n is the additional
+    // information) by value, as D328 reads #7.25: the items a head with that
+    // additional information can represent. ai < 24: the argument ai itself;
+    // 24..27: an argument of 1, 2, 4 or 8 bytes (0..256^w - 1); 31: an
+    // indefinite length (any byte or text string; no integer); 28..30: nothing.
+    // #4.n and #5.n stay refused (major).
+    let from: i32 = vlen(h, T_STK);
+    let ahi: i32 = 0;
+    let mut alo: i32 = ai;
+    let mut bhi: i32 = 0;
+    let mut blo: i32 = ai;
+    let mut none: bool = false;
+    if ai == 24 {
+        alo = 0;
+        blo = 255;
+    }
+    if ai == 25 {
+        alo = 0;
+        blo = 65535;
+    }
+    if ai == 26 {
+        alo = 0;
+        blo = -1;
+    }
+    if ai == 27 {
+        alo = 0;
+        bhi = -1;
+        blo = -1;
+    }
+    if (ai >= 28) && (ai <= 30) {
+        none = true;
+    }
+    if (ai == 31) && (m <= 1) {
+        none = true;
+    }
+    if (ai == 31) && (m >= 2) {
+        alo = 0;
+        bhi = -1;
+        blo = -1;
+    }
+    if none {
+        return ts_make(h, from);
+    }
+    if m == 0 {
+        let l0: i32 = mk_int_range(h, R_POS, ahi, alo, R_POS, bhi, blo);
+        return ts_of1(h, l0);
+    }
+    if m == 1 {
+        // -1 - n for n in [a, b]: NEG bounds hold n, the larger n lower
+        let l1: i32 = mk_int_range(h, R_NEG, bhi, blo, R_NEG, ahi, alo);
+        return ts_of1(h, l1);
+    }
+    let slo: i32 = alo;
+    let mut shi: i32 = blo;
+    // string lengths: a 4- or 8-byte argument reaches past INF, the cap
+    if (bhi != 0) || (blo < 0) {
+        shi = INF;
+    }
+    if m == 2 {
+        let l2: i32 = mk_bytes(h, slo, shi, -1);
+        return ts_of1(h, l2);
+    }
+    let l3: i32 = mk_text(h, slo, shi, -1);
+    return ts_of1(h, l3);
+}
 pub(crate) fn lower_major(h: &mut [i32], node: i32, env: i32) -> i32 {
     let m: i32 = na(h, node);
     let mode: i32 = nb(h, node);
@@ -961,6 +1027,9 @@ pub(crate) fn lower_major(h: &mut [i32], node: i32, env: i32) -> i32 {
             return -1;
         }
         return lower_head7(h, nts, pos);
+    }
+    if (m <= 3) && ((hi == 0) && ((lo >= 0) && (lo <= 31))) {
+        return lower_major_ai(h, m, lo);
     }
     if ((m != 7) || (hi != 0)) || ((lo < 0) || (lo > 255)) {
         return fail(h, ERR_MAJOR, pos);

@@ -173,6 +173,11 @@
       (if (< m 0) (return (neg 1)))
       (return m))))
 
+(defn ^Bool int-has-neg [^IntsR h ^I32 t]
+  (comment "Does INT leaf t admit a negative value? Its intervals are sorted, so the"
+           "first one's lower bound decides.")
+  (return (< (vget h T_IV (* 6 (ld h t 0))) R_POS)))
+
 ;; ------------------------------------------------------------ .size
 
 (defn ^:pub ^I32 ctl-size [^Ints h ^I32 target ^I32 ctl ^I32 ranged ^I32 pos]
@@ -189,6 +194,12 @@
           (let [o (* 6 (+ (ld h cl 0) j))
                 lo (small-of (vget h T_IV o) (vget h T_IV (+ o 1)) (vget h T_IV (+ o 2)))
                 hi (small-of (vget h T_IV (+ o 3)) (vget h T_IV (+ o 4)) (vget h T_IV (+ o 5)))]
+            (comment "P9.13: .size of an integer that may be negative is undefined (RFC 8610"
+                     "§3.8.1 sizes uint): a control_target error, not a silent narrowing to uint")
+            (if (and (== k K_INT) (int-has-neg h t)) (return (target-error h pos)))
+            (comment "P9.13: a controller interval wholly below zero is no size: it matches"
+                     "nothing (small-of would clamp it to 0)")
+            (if (>= (vget h T_IV (+ o 3)) R_POS)
             (if (or (== k K_TEXT) (== k K_BYTES))
               (do (let [^:mut nlo (ld h t 0)
                         ^:mut nhi (ld h t 1)]
@@ -214,7 +225,7 @@
                 (if (or (== k K_LIT) (== k K_LITSET))
                   (do (if (== (bit-and (leaf-mask h t) 12) 0) (return (target-error h pos)))
                       (filter-lits h t 0 lo hi))
-                  (return (target-error h pos)))))))))
+                  (return (target-error h pos))))))))))
     (if (erred h) (return (neg 1)))
     (return (ts-make h from))))
 
@@ -271,7 +282,10 @@
         (let [t2 (ts-leaf h target i2)
               k2 (lk h t2)]
           (if (== k2 K_INT)
-            (do (comment "uint .bits: UINTX over the target's non-negative values")
+            (do (comment "uint .bits: UINTX over the target's non-negative values; a target"
+                         "that may be negative is a control_target error (P9.13: RFC 8610"
+                         "§3.8.2 defines .bits on uint), not a silent narrowing")
+                (if (int-has-neg h t2) (return (target-error h pos)))
                 (let [nl (int-with h t2 R_POS 0 0 R_POS (neg 1) (neg 1))]
                   (if (== nl (neg 1)) (return (neg 1)))
                   (if (>= nl 0)
@@ -879,7 +893,8 @@
 (defn dedent-into [^Ints h ^I32 bid ^I32 dst]
   (comment "RFC 9165 .det: the literal's content with the longest run of leading"
            "spaces common to its non-blank lines removed from every line (lines end"
-           "at LF), appended to vector dst.")
+           "at LF; a CR just before the LF ends the line too, so a CRLF line of"
+           "spaces is blank), appended to vector dst.")
   (let [hl (enc-head-len h bid)
         n (bid-len h bid)
         ^:mut ^I32 prefix INF
@@ -888,7 +903,10 @@
       (let [^:mut sp 0
             ^:mut j i]
         (while (and (< j n) (== (bid-byte h bid j) 32)) (set sp (+ sp 1)) (set j (+ j 1)))
-        (if (and (< j n) (!= (bid-byte h bid j) 10))
+        (if (and (< j n)
+                 (and (!= (bid-byte h bid j) 10)
+                      (not (and (== (bid-byte h bid j) 13)
+                                (or (== (+ j 1) n) (== (bid-byte h bid (+ j 1)) 10))))))
           (if (< sp prefix) (set prefix sp)))
         (while (and (< j n) (!= (bid-byte h bid j) 10)) (set j (+ j 1)))
         (set i (+ j 1))))

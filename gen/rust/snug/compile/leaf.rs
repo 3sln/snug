@@ -403,8 +403,9 @@ pub fn mag_pow(h: &mut [i32]) -> i32 {
     return mag_add1(h, m, 1);
 }
 pub fn point_of(h: &mut [i32], negative: i32, mag: i32) {
-    // The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2].
-    if negative == 0 {
+    // The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2]. A
+    // negative zero (`-0`, `-0x0`) is the integer 0 (P9.13).
+    if (negative == 0) || ((bid_len(h, mag) <= 8) && ((mag_hi(h, mag) == 0) && (mag_lo(h, mag) == 0))) {
         if bid_len(h, mag) <= 8 {
             put3(h, R_POS, mag_hi(h, mag), mag_lo(h, mag));
         } else {

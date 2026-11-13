@@ -141,6 +141,54 @@
       ]
     },
     {
+      "category": "regression", "name": "P9.13 should-fixes: .det over CR LF lines, a negative .size, -0, #0.n to #3.n by value", "options": {"wire": "valid"},
+      "cddl": "det = '' .det '  a\r\n\r\n  b'\nneg = tstr .size -1\nnr = bstr .size (-2..1)\nz = -0\nzk = { -0 => int }\nm0 = #0.24\nm0s = #0.5\nm1 = #1.0\nm2 = #2.3\nm3 = #3.31\nm8 = #0.28\n",
+      "cases": [
+        {"rule": "det", "hex": "46610d0a0d0a62", "expect": true, "note": "RFC 9165 2.3: the CR LF line of no spaces is blank, so the common indent is 2; was 0"},
+        {"rule": "det", "hex": "4a2020610d0a0d0a202062", "expect": false},
+        {"rule": "neg", "hex": "60", "expect": false, "note": "a negative size matches nothing; was clamped to 0"},
+        {"rule": "nr", "hex": "40", "expect": true},
+        {"rule": "nr", "hex": "4101", "expect": true},
+        {"rule": "nr", "hex": "420101", "expect": false},
+        {"rule": "z", "hex": "00", "expect": true, "note": "the integer literal -0 is 0; it matched nothing"},
+        {"rule": "z", "hex": "20", "expect": false},
+        {"rule": "zk", "hex": "a10001", "expect": true},
+        {"rule": "m0", "hex": "18ff", "expect": true, "note": "RFC 8610 2.2.3: #0.24 by value, an argument of one byte"},
+        {"rule": "m0", "hex": "00", "expect": true},
+        {"rule": "m0", "hex": "190100", "expect": false},
+        {"rule": "m0s", "hex": "05", "expect": true},
+        {"rule": "m0s", "hex": "1805", "expect": true},
+        {"rule": "m0s", "hex": "06", "expect": false},
+        {"rule": "m1", "hex": "20", "expect": true},
+        {"rule": "m1", "hex": "21", "expect": false},
+        {"rule": "m2", "hex": "43010203", "expect": true},
+        {"rule": "m2", "hex": "420102", "expect": false},
+        {"rule": "m3", "hex": "7f6161ff", "expect": true},
+        {"rule": "m3", "hex": "6161", "expect": true},
+        {"rule": "m8", "hex": "00", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "P9.13: .size on an integer that may be negative is refused", "cddl": "r = int .size 1\n", "snugSchemaError": "control_target", "cases": []
+    },
+    {
+      "category": "regression", "name": "P9.13: .bits on an integer that may be negative is refused", "cddl": "r = nint .bits 3\n", "snugSchemaError": "control_target", "cases": []
+    },
+    {
+      "category": "regression", "name": "P9.13: #4.n stays refused", "cddl": "r = #4.1\n", "snugSchemaError": "major", "cases": []
+    },
+    {
+      "category": "regression", "name": "D359: .default carries the implied .ne", "options": {"wire": "valid"},
+      "cddl": "r = { ? n: uint .default 5, ? b: bool .default false }\n",
+      "cases": [
+        {"rule": "r", "hex": "a0", "expect": true},
+        {"rule": "r", "hex": "a1616e05", "expect": false, "note": "RFC 8610 3.8.6: implied .ne"},
+        {"rule": "r", "hex": "a1616e06", "expect": true},
+        {"rule": "r", "hex": "a16162f4", "expect": false},
+        {"rule": "r", "hex": "a16162f5", "expect": true}
+      ]
+    },
+    {
       "category": "regression", "name": "tag-24 payloads under valid: well-formed only (D358, P9.13 decision 1)", "options": {"wire": "valid"},
       "cddl": "a = any\ne = #6.24(bstr .cbor any)\n",
       "cases": [

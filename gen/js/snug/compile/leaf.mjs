@@ -461,8 +461,9 @@ export function magPow(h) {
 }
 
 export function pointOf(h, negative, mag) {
-    // The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2].
-    if (negative === 0) {
+    // The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2]. A
+    // negative zero (`-0`, `-0x0`) is the integer 0 (P9.13).
+    if ((negative === 0) || ((bidLen(h, mag) <= 8) && ((magHi(h, mag) === 0) && (magLo(h, mag) === 0)))) {
         if (bidLen(h, mag) <= 8) {
             put3(h, R_POS, magHi(h, mag), magLo(h, mag));
         } else {

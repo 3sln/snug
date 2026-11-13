@@ -323,8 +323,10 @@
     (return (mag-add1 h m 1))))
 
 (defn ^:pub point-of [^Ints h ^I32 negative ^I32 mag]
-  (comment "The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2].")
-  (if (== negative 0)
+  (comment "The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2]. A"
+           "negative zero (`-0`, `-0x0`) is the integer 0 (P9.13).")
+  (if (or (== negative 0)
+          (and (<= (bid-len h mag) 8) (and (== (mag-hi h mag) 0) (== (mag-lo h mag) 0))))
     (do (if (<= (bid-len h mag) 8)
           (put3 h R_POS (mag-hi h mag) (mag-lo h mag))
           (put3 h R_POS_BIG mag (bid-len h mag)))
