@@ -110,8 +110,8 @@ repository.
   `any`) is refused with `unsupported_control`.
 - Under `valid`, a tag-24 payload need only be well-formed, as RFC 8949
   §3.4.5.1 asks: a duplicate key or invalid UTF-8 inside it is no longer
-  refused (D358). Pass `tag24: 'valid'` (`[rust]` `Profile { tag24:
-  Tag24::Valid, .. }`) to require a valid item. `.cbor T` still requires
+  refused (D358). Pass `tag24: 'valid'` (`[rust]` `wire: Profile { tag24:
+  Tag24::Valid, ..Profile::VALID }`) to require a valid item. `.cbor T` still requires
   one, and so do `deterministic` and Bindle.
 - Bignums under `valid` follow one rule (D363). `biguint`, `bignint`,
   `bigint` and `#6.2/3(bstr)` match every tag 2/3 bignum, leading zeroes

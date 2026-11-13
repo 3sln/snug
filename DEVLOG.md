@@ -8775,7 +8775,11 @@ engineer).
     `profiles`).
   - Rust: `snug::Tag24 { WellFormed, Valid }` (`#[non_exhaustive]`) and the
     field `Profile::tag24` (host/rust/src/decode.rs). `Profile::flags()`
-    adds 2048 when `valid && tag24 == Valid`.
+    adds 2048 when `valid && tag24 == Valid`. After D360 it is set through
+    the `wire` field: `DecodeOptions { wire: Profile { tag24: Tag24::Valid,
+    ..Profile::VALID }, .. }`, and the same for Encode, Validation and
+    SequenceOptions. `default_control` (D359) sits on `CompileOptions`,
+    which D360 left as it was.
   - The core reads only profile bit 11.
 * **Size (P9.13 WP1, with D362/D363).** Bytes are min/gzip/brotli, the
   static closure equal to the full one (esbuild 0.28.2).

@@ -627,7 +627,7 @@ fn tag24_payload_well_formed_under_valid_d358() {
     // a duplicate key inside the payload: well-formed is enough under valid
     let dup = unhex("d81845a201000100");
     assert!(matches!(decode(&dup, &DecodeOptions::default()).unwrap(), Value::Tag(24, _)));
-    let opts = DecodeOptions { profile: strict, ..DecodeOptions::default() };
+    let opts = DecodeOptions { wire: strict, ..DecodeOptions::default() };
     assert_eq!(decode(&dup, &opts).unwrap_err().code(), "duplicate_key");
     assert_eq!(decode(&unhex("d81842f800"), &DecodeOptions::default()).unwrap_err().code(), "malformed");
 }
