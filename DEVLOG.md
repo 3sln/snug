@@ -7397,7 +7397,11 @@ measurement); they rise to ceil(measurement × 1.02), 26,564 and 23,297
 deferred close grows `snug/sequence` too, its gzip and brotli caps were
 exceeded as well (75,854 > 75,810; 65,780 > 65,731) and rise to 77,372 and
 67,096. Under 1 KB, for a refusal that names its reason.
-- [ ] **Cap raise signed off** (coordinator, under D303)
+- [x] **Cap raise signed off** (coordinator, under D303). D303: approved by
+  coordinator 2026-11-13. New caps:
+  - `snug/view`: gzip 26,564, brotli 23,297;
+  - `snug/sequence`: gzip 77,372, brotli 67,096.
+  About +223 B gzip, under 1 KB, paying for a correctness fix.
 - [x] **Signed off** (manager, 2026-11-13). Implements the coordinator's
   decision. Merged at `3e0b613`. On main: drift ok, size ok (with the
   raised caps), no conflict markers.
@@ -9495,6 +9499,10 @@ authorised), the existing gate set, and conformance-corpus vectors.
   - Review the full `snug/compile` entry first: about 97 KB gzip after
     D333. It loads lazily, but it is the largest single target for the
     audit (coordinator, 2026-11-11).
+  - *Added 2026-11-13 (coordinator, for the owner's final size audit):*
+    the Writer's private field names, which esbuild keeps unminified. They
+    cost much of D348's +575 B min on every entry that holds the Writer;
+    candidates are mangled private names or a property-mangling pass.
   Lowered caps follow the measurement. Any cap raise still follows D303.
 
 ## Phase 9 — Release candidate (checklist, 2026-11-11)
