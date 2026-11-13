@@ -8362,7 +8362,16 @@ result is the fix's.
 all 31 gates ok, including runtime 976/0 in every arm, valid-test's
 recorded cbor2 counts, compile-test's two new regexp arms, and proptest
 with its self-test first. `bb gates --check` and `bb docs-test` ok.
-- [ ] **Signed off** (manager)
+Manager re-run on the merged main 9870afc: `bb gates land runtime`, all 12
+ok (runtime now judged by verdict.mjs).
+- [x] **Signed off** (manager, 2026-11-13).
+  - GATES-B1 and B2 are closed. Each fix is proven by a mutation that main
+    passed and the fixed gate failed.
+  - The regexp arm's 10-vs-11 limit-word harness bug is fixed. It was in
+    the harness only; the library was unaffected.
+  - Post-RC nits list: N2, N3, N5, N7, N8, the rest of N9 (Chrome and
+    workerd outside the watchdog's process group), and proptest rewriting
+    `tools/proptest/findings/` in the checkout during a gate run.
 
 ### D366 — The user docs describe the released library, and `bb docs-test` refuses a release whose shipped text says otherwise; maintainer records leave the npm package; fresh output buffers are `Uint8Array<ArrayBuffer>` (P9.13 WP4: API-B1, S3–S6, N1–N11; coordinator decisions 3 and 5)
 **Decision** (WP4 docs engineer, provisional):
