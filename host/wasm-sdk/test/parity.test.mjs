@@ -46,6 +46,7 @@ import * as NSEQ from '../../js/src/public-sequence.mjs';
 import * as WSEQ from '../src/sequence.mjs';
 import { View as WView, Cursor as WCursor } from '../src/view.mjs';
 import { chunkEnds } from '../../../kin/scripts/sequence-run.mjs';
+import { checkDispose } from '../../js/test/dispose-check.mjs';
 import { controls as wgeneric } from '../src/controls.mjs';
 import { abnf as wabnf } from '../src/abnf.mjs';
 import { abnf as nabnf } from '../../js/src/abnf.mjs';
@@ -804,4 +805,9 @@ test('sessions (P9.7, D327): the live bound and release, as the native package',
     } finally { lib.sessionLimits({ maxLive: base.maxLive }); }
   }
   console.log('  ok   sessions: the live bound, close(), release at the verdict, pooled reuse (wasm and native)');
+});
+
+test('[Symbol.dispose] only where the engine has Symbol.dispose (wasm, fresh processes)', () => {
+  const using = checkDispose('wasm');
+  console.log(`  ok   dispose: no member named "undefined" without Symbol.dispose, close() works; [Symbol.dispose] and \`using\` (${using}) with it (wasm)`);
 });

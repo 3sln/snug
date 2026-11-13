@@ -23,6 +23,7 @@ import './abnf.test.mjs';
 import './stream.test.mjs';
 import './xsd-regexp.test.mjs';
 import './sessions.test.mjs';
+import './dispose.test.mjs';
 import './sequence.test.mjs';
 import './version.test.mjs';
 import './schema-api.test.mjs';

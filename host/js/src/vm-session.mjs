@@ -5,6 +5,7 @@ import { vmsWords, vmsArena, vmsInit, vmsStepV, vmsNeedOffset, vmsNeedLength, vm
 import { rethrow } from './ext.mjs';
 import { limitWords } from './schema-core.mjs';
 import { acquire, release } from './session-pool.mjs';
+import { disposable } from './dispose.mjs';
 
 // ---------------------------------------------------------------- sessions
 const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68, VMS_GROW = -69;
@@ -36,7 +37,7 @@ export function growValid(v, ss) {
  *  shared. step(window, base) answers {state: 'need', offset, length, keep},
  *  {state: 'yield', position, keep} or {state: 'done', result} (result as
  *  Schema.validate's). `keep`: no byte before it will be asked for again. */
-export class VmSession {
+export const VmSession = /* @__PURE__ */ disposable(class VmSession {
   constructor(program, rule, length, opts = {}, quantum = 0) {
     // D085: no length (undefined) is an unknown-length session (drain mode)
     const unknown = length === undefined;
@@ -68,7 +69,6 @@ export class VmSession {
     // the step has left them: released now, the next session would take them while this step still writes
     if (!this.busy) release(this.lease);
   }
-  [Symbol.dispose]() { this.close(); }
   #settle(v) { this.verdict = v; release(this.lease); return v; }
   /** D085, an unknown-length session: the message ended after `n` bytes (or passed the
    *  input limit `limit`: any n above it). Answers {state: 'done', result}, or
@@ -120,5 +120,5 @@ export class VmSession {
     if (r < 0) { this.close(); throw new Error(`snug: vms-step answered ${r}`); }
     return this.#settle({ state: 'done', result: this.program.result(this.out.slice(0, 8 + 2 * this.out[6])) });
   }
-}
+});
 

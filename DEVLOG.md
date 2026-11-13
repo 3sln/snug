@@ -8062,6 +8062,30 @@ Babashka 1.3.190, nvm Node, `env -i`):
     verdict changes as per-case overrides, so a re-run reproduces
     corpus/conformance/study.json byte for byte. An override whose case
     is gone throws.
+  - **Runtime dispose** (manager, same day). The class-body
+    `[Symbol.dispose]()` of three classes (js `VmSession` in open-session
+    and vm-session, and the SDK's `PublicSession`) became a method named
+    "undefined" on an engine without `Symbol.dispose`.
+    - `host/js/src/dispose.mjs` `disposable(Class)` now defines it,
+      aliasing `close`, only where the symbol exists. It is used as
+      `const C = /* @__PURE__ */ disposable(class C { ... })`.
+    - A bare top-level `disposable(C)` call first kept vm-session's class
+      in bundles that never use it: `snug/sequence` grew 3,166 B and went
+      past its size cap. The pure-annotated form leaves `snug/sequence`
+      byte-identical to main. `snug/sources` and `all-runtime` grow
+      102 B min / 60 B gzip, within every cap.
+      Nothing else in the tree uses `Symbol.dispose` or
+      `Symbol.asyncDispose`.
+    - The test (`host/js/test/dispose-child.mjs`) runs in fresh processes,
+      in npm test and in the SDK's parity run. Node's `Symbol.dispose` is
+      non-configurable, so the child replaces the global `Symbol` with a
+      copy that lacks both symbols before importing every public entry.
+    - Each prototype must have the same members as in a run with the
+      symbol present: `Writer.undefined()` is a real CBOR method. Either
+      way `close()` must still close the session. With the symbol present,
+      `[Symbol.dispose]()` and `using` (Node 24) must also close it.
+    - On the old sources the test fails: the session has a member named
+      "undefined".
 - [ ] **Signed off** (manager)
 
 ### D357 — Rust value trees are built and written iteratively: every depth path fits a 2 MiB thread at the ceilings, debug and release, Rust ≥ 1.87; limits unchanged (CI finding)

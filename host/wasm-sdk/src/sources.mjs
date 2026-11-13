@@ -20,6 +20,7 @@ import { resolveLimits } from '../../js/src/limits.mjs';
 import { validateOptions } from '../../js/src/options.mjs';
 import { profileFlags, codecTop } from '../../js/src/profiles.mjs';
 import { rethrow } from '../../js/src/ext.mjs';
+import { disposable } from '../../js/src/dispose.mjs';
 import { ANY_P, ANY_B } from '../../js/src/any-program.mjs';
 import { innerOf, limitArgs, Program } from './schema.mjs';
 import { sessionLimitFault } from './session-limits.mjs';
@@ -177,7 +178,7 @@ class VmSession extends WasmSession {
 }
 
 /** The advanced window protocol (D160): a frozen facade, as the native openSession's. */
-class PublicSession {
+const PublicSession = /* @__PURE__ */ disposable(class PublicSession {
   #host;
   constructor(host) { this.#host = host; Object.freeze(this); }
   get length() { return this.#host.length; }
@@ -194,10 +195,9 @@ class PublicSession {
   end(n) { return this.#host.end(n); }
   /** P9.7: release the session's arrays now (a finished session has); it cannot be stepped after. */
   close() { this.#host.close(); }
-  [Symbol.dispose]() { this.#host.close(); }
   /** Internal (the push drivers): the host session, stepping over its own window. */
   static host(s) { return s.#host; }
-}
+});
 function bytesInput(bytes) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug: bytes must be a Uint8Array');
   if (typeof SharedArrayBuffer === 'function' && bytes.buffer instanceof SharedArrayBuffer) throw new TypeError('snug: copy SharedArrayBuffer input first');

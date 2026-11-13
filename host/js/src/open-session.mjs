@@ -1,6 +1,7 @@
 import { VmSession as HostSession } from './vm-session.mjs';
 import { schemaPrograms } from './schema-state.mjs';
 import { validateOptions } from './options.mjs';
+import { disposable } from './dispose.mjs';
 
 function bytesInput(bytes) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug: bytes must be a Uint8Array');
@@ -10,7 +11,7 @@ function bytesInput(bytes) {
 
 // Advanced window protocol without exposing the host session's Program/scratch.
 // Obtain sessions through openSession(); there is no public constructor.
-class VmSession {
+const VmSession = /* @__PURE__ */ disposable(class VmSession {
   #host;
   constructor(host) { this.#host = host; Object.freeze(this); }
   get length() { return this.#host.length; }
@@ -28,8 +29,7 @@ class VmSession {
   end(n) { return this.#host.end(n); }
   /** P9.7: release the session's arrays now (a finished session has); it cannot be stepped after. */
   close() { this.#host.close(); }
-  [Symbol.dispose]() { this.#host.close(); }
-}
+});
 
 /** Advanced synchronous session over a verified schema (D160). */
 export function openSession(schema, rule, length, options = {}, scheduling = {}) {

@@ -152,6 +152,9 @@ These matter only to users of pre-release builds from this repository.
 - `[rust]` `Error::Cbor` gains `subcode: Option<&'static str>` (read it with
   `Error::subcode()`); code building or matching the variant needs the new
   field or `..` (D348).
+- `[js]` `[wasm-sdk]` `VmSession` (the type `openSession` returns) is now a
+  type alias, not an interface, so declaration merging into it no longer
+  works (D356).
 
 ### Changed
 
@@ -212,6 +215,13 @@ These matter only to users of pre-release builds from this repository.
   ceiling (about 8.8 KB per level). Every depth path now fits a 2 MiB thread
   at the ceilings, in debug and release, on Rust 1.87 and later; the limits
   are unchanged (D357).
+- `[js]` `[wasm-sdk]` The type declarations failed to compile under ES2022
+  (TS2550 on `[Symbol.dispose]`). The dispose member is now conditional: a
+  session is `Disposable` where the consumer's lib declares
+  `Symbol.dispose`, and plain ES2022 types it with `close()` only (D356).
+- `[js]` `[wasm-sdk]` On an engine without `Symbol.dispose`, a session's
+  prototype no longer gets a method named `undefined`; `[Symbol.dispose]()`
+  is defined only where the symbol exists. `close()` is unchanged (D356).
 
 ### Security
 
