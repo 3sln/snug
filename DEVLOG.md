@@ -9683,6 +9683,38 @@ authorised), the existing gate set, and conformance-corpus vectors.
     the Writer's private field names, which esbuild keeps unminified. They
     cost much of D348's +575 B min on every entry that holds the Writer;
     candidates are mangled private names or a property-mangling pass.
+    *Closed 2026-11-13, nothing to cut; no code, build or cap change.*
+    Measured on main `e94575c` with esbuild 0.28.2, using `bb size` and
+    the minified static bundles:
+    - **The premise does not hold.** esbuild's `minify` already renames
+      `#private` names, and the Writer's 539 private references are all
+      `#t`, `#e` and the like. They take 1,110 B of `snug/writer`. Only
+      32 B of that is past a 1-letter name. The other hand-written classes
+      (View, Cursor, SequenceMessage, the sessions) are the same.
+    - **D348's +575 B min is code, not names.** Comparing the bundles
+      before and after `90c0d43`, private-name tokens grew by 58 B. The rest
+      is the new `normalized` message (66 B) and the `#mapFail`/`#nkey`
+      logic.
+    - **Long internal public-style properties** (`this.x` that is not
+      public API) are left only in SequenceCore, plus a few in View's
+      Message and in sources. They add up to ≤ 42 B in the Writer bundle.
+      An over-broad `mangleProps` ablation, which is unsafe and was only
+      used to bound the saving, gave −31 min / −12 gzip / +2 brotli on
+      `snug/writer`. Its largest result was `snug/sequence` at −759 / −166 /
+      −101. Real source edits to SequenceCore (`snug/sequence`, baseline
+      212,612 / 75,872 / 65,771) all grew brotli:
+
+      | edit to SequenceCore | min | gzip | brotli |
+      | --- | ---: | ---: | ---: |
+      | 34 members made `#private` | −441 | −63 | **+20** |
+      | 8 to 12 members made `#private` (4 variants) | −187 to −249 | −30 to −55 | **+17 to +80** |
+      | 6 fields renamed to 2 letters | −226 | −31 | **+61** |
+
+      Every other entry was unchanged. Following the rule for this pass
+      (stop if anything grows), none of these edits landed. A build-time
+      `mangleProps` was rejected: consumers bundle the shipped source, so
+      a mangle in our build would not reach their bundles.
+    - Caps are unchanged: no entry shrank on main.
   Lowered caps follow the measurement. Any cap raise still follows D303.
 
 ## Phase 9 — Release candidate (checklist, 2026-11-11)
