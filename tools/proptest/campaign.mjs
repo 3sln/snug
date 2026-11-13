@@ -20,6 +20,12 @@
 //   --inject=P          self-check: property P reports one seeded known-bad result (signature P<P>/injected),
 //                       so the campaign must exit 1 (tools/proptest/campaign.test.mjs)
 //
+//   --inject-slow=wall|cpu  self-check: each P5 worker's first compile takes 2.2 s more, asleep (wall: a warning
+//                       only) or busy (cpu: the P5/slow-compile signature)
+//
+// Slow compiles (P9.9): over SLOW_MS of the worker thread's CPU time is the failing P5/slow-compile signature; over
+// SLOW_MS of wall time alone is a warning (summary.json "warnings", warnings.jsonl, the log) with the load average.
+//
 // Exit status: 0 only when the campaign recorded no failure signature; 1 otherwise (every signature, a hang, a
 // worker crash or a failed gate round, whatever findings/triage.json says of it), so `bb gates` sees findings.
 //
@@ -40,7 +46,7 @@ import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('proptest', import.meta.url);   // P9.1 caps (a long campaign: --gate-wall= / --gate-cpu=)
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a); if (!m) throw new Error(`bad argument ${a}`); return [m[1], m[2] ?? 'true']; }));
-const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject'];
+const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject', 'inject-slow'];
 for (const k of Object.keys(args)) if (!known.includes(k)) throw new Error(`unknown option --${k}`);
 const minutes = Number(args.minutes ?? 10);
 if (args.tree && !['head', 'working'].includes(args.tree)) throw new Error('--tree is head or working');
@@ -61,6 +67,7 @@ if (args.replay) {
   console.log(JSON.stringify({ inputs: describeInputs(inputs, describe) }, null, 1).slice(0, 20000));
   const out = await PROPERTIES[p].check(inputs);
   for (const f of out.failures) console.log(JSON.stringify({ cls: f.cls, sub: f.sub, detail: f.detail, expected: describe(f.expected), actual: describe(f.actual), repro: f.repro, minimized: doShrink(f) }, null, 1));
+  for (const w of out.warnings ?? []) console.log(JSON.stringify({ warning: w.cls, detail: w.detail }));
   console.log(JSON.stringify(out.stats));
   process.exit(0);
 }
@@ -107,6 +114,15 @@ log(`tree under test: ${treeDescription}`);
 log(`P4.2 campaign: ${minutes} min, seeds ${seedLo}..${seedHi}, ${casesPerSeed} cases/seed, properties ${props.join(',')}, timeout ${timeoutMs} ms; HEAD ${head}${dirty.length ? `; uncommitted under kin/gen/host/corpus: ${dirty.length} paths (--tree=working: they are under test)` : ''}`);
 
 const sigs = new Map();   // sig -> {count, examples: []}
+const warns = new Map();  // sig -> {count, examples: []}: non-failing (wall-clock overruns, with the load average)
+function warn(w) {
+  let s = warns.get(w.sig);
+  if (!s) { s = { count: 0, examples: [] }; warns.set(w.sig, s); }
+  s.count++;
+  if (s.examples.length < 3) s.examples.push(w);
+  log(`warning ${w.sig} (seed ${w.seed} index ${w.index}): ${w.detail}; load average ${w.loadavg.join(' ')}`);
+  try { writeFileSync(join(logDir, 'warnings.jsonl'), JSON.stringify(w) + '\n', { flag: 'a' }); } catch { /* ignore */ }
+}
 const perProp = {};
 for (const p of props.filter(p => p <= 5)) perProp[p] = { stats: {}, failures: 0, hangs: 0, crashes: 0, workers: workersPer[p] ?? 1 };
 function record(f) {
@@ -131,7 +147,7 @@ async function startProp(p) {
       let cur = { seed: lo, index: 0 };
       const spawnWorker = () => {
         const hb = new SharedArrayBuffer(12), beat = new Int32Array(hb);
-        const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { prop: p, seeds: [lo, hi], seed: cur.seed, index: cur.index, casesPerSeed, deadline, hb, maxShrinkPerSig: 2, inject: args.inject === undefined ? undefined : Number(args.inject) }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
+        const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { prop: p, seeds: [lo, hi], seed: cur.seed, index: cur.index, casesPerSeed, deadline, hb, maxShrinkPerSig: 2, inject: args.inject === undefined ? undefined : Number(args.inject), injectSlow: p === 5 ? args['inject-slow'] : undefined }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
         let finished = false, seen = '', since = Date.now();
         const watch = setInterval(() => {
           const s = Atomics.load(beat, 0), i = Atomics.load(beat, 1), on = Atomics.load(beat, 2);
@@ -149,6 +165,7 @@ async function startProp(p) {
         worker.on('message', m => {
           if (m.type === 'stats') for (const [k, v] of Object.entries(m.stats)) perProp[p].stats[k] = (perProp[p].stats[k] ?? 0) + v;
           else if (m.type === 'failure') record(m.failure);
+          else if (m.type === 'warning') warn(m.warning);
           else if (m.type === 'done') { finished = true; clearInterval(watch); resolve(); }
         });
         worker.on('error', e => {
@@ -199,10 +216,12 @@ const summary = {
   gates: gateResults.map(r => ({ gate: r.gate, round: r.round, seed: r.seed, args: r.args, exit: r.exit, signal: r.signal, seconds: Math.round(r.ms / 1000), fails: r.fails, summary: r.summary })),
   tree: treeDescription, gateTree: tree?.describe, logDir,
   findings,
+  warnings: [...warns].sort().map(([sig, w]) => ({ sig, count: w.count, examples: w.examples })),
 };
 writeFileSync(join(outDir, 'summary.json'), JSON.stringify(summary, null, 1) + '\n');
 log(`done in ${(wallMs / 60000).toFixed(1)} min: ${Object.entries(perProp).map(([p, x]) => `P${p} ${x.stats.cases ?? 0} cases`).join(', ')}; ${gateResults.length} gate runs (${gateResults.filter(r => r.exit !== 0).length} failed); ${findings.length} failure signatures`);
 for (const f of findings) log(`  ${f.sig}: ${f.count} (${f.triage})`);
+for (const [sig, w] of [...warns].sort()) log(`  warning (does not fail): ${sig}: ${w.count}; load averages ${w.examples.map(x => x.loadavg[0]).join(', ')}`);
 if (findings.length) {
   console.log(`  FAIL proptest: ${findings.length} failure signature${findings.length === 1 ? '' : 's'} (${findings.map(f => f.sig).join(', ')}); findings in ${outDir}`);
   process.exit(1);

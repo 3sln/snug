@@ -3,10 +3,12 @@
 // watchdog spot a case that does not finish; the campaign then terminates this
 // worker, records the hang and starts a new worker at the next case.
 import { parentPort, workerData } from 'node:worker_threads';
-import { PROPERTIES, doShrink, describe } from './props.mjs';
+import { loadavg } from 'node:os';
+import { PROPERTIES, doShrink, describe, injectSlow } from './props.mjs';
 import { createRandom, caseSeed } from './gen.mjs';
 
-const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig, inject } = workerData;
+const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig, inject, injectSlow: slowKind } = workerData;
+if (slowKind) injectSlow(slowKind);   // --inject-slow: this worker's next compile is slow (self-check)
 let injected = false;
 const P = PROPERTIES[prop];
 const beat = new Int32Array(hb);
@@ -32,6 +34,9 @@ while (Date.now() < deadline) {
   const ms = performance.now() - t0;
   Atomics.store(beat, 2, 0);
   add(out.stats);
+  // non-failing warnings (wall-clock overruns): recorded with the load average at the time
+  for (const w of out.warnings ?? [])
+    parentPort.postMessage({ type: 'warning', warning: { sig: `P${prop}/${w.cls}`, prop, seed, index, cls: w.cls, detail: w.detail, repro: w.repro, loadavg: loadavg().map(x => Math.round(x * 100) / 100), caseMs: Math.round(ms) } });
   for (const f of out.failures) {
     const sig = `P${prop}/${f.cls}${f.sub ? '/' + f.sub : ''}`;
     const n = shrunk.get(sig) ?? 0;

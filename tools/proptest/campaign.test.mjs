@@ -35,3 +35,21 @@ test('--inject names a property by number; another property is not touched by it
   // exit 0 unless the short P4 run itself found something (then it names it)
   if (r.status !== 0) assert.match(r.stdout, /FAIL proptest: /);
 });
+
+// P9.9 (coordinator): a slow compile fails on the worker thread's CPU time; wall time alone is a warning.
+const cpuClock = typeof process.threadCpuUsage === 'function';
+test('a compile that is slow on the wall clock only (asleep) is a warning, not a failure', () => {
+  const r = run(['--minutes=0.05', '--props=5', '--inject-slow=wall', '--workers=5:1']);
+  assert.ok(!r.summary.findings.some(f => f.sig === 'P5/slow-compile'), JSON.stringify(r.summary.findings));
+  assert.ok(r.summary.warnings.some(w => w.sig === 'P5/slow-compile-wall' && w.examples[0].loadavg.length === 3), JSON.stringify(r.summary.warnings));
+  assert.match(r.stdout, /warning \(does not fail\): P5\/slow-compile-wall/);
+  // exit 0 unless the short P5 run itself found something else (then it names it)
+  if (r.status !== 0) assert.match(r.stdout, /FAIL proptest: /);
+});
+
+test('a compile that is slow in CPU time (busy) fails the campaign as P5/slow-compile', { skip: cpuClock ? false : 'no process.threadCpuUsage (Node 23.9+)' }, () => {
+  const r = run(['--minutes=0.05', '--props=5', '--inject-slow=cpu', '--workers=5:1']);
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(r.summary.findings.some(f => f.sig === 'P5/slow-compile'), JSON.stringify(r.summary.findings));
+  assert.match(r.stdout, /FAIL proptest: .*P5\/slow-compile/);
+});

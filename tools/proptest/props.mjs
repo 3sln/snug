@@ -31,6 +31,25 @@ import { minimize, byteCandidates, textCandidates, valueCandidates } from './shr
 export const hex = b => Buffer.from(b).toString('hex');
 export const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
 const MAX_SAFE_N = BigInt(Number.MAX_SAFE_INTEGER);
+
+// P9.9 (coordinator): a slow compile fails on CPU time, not wall time. The property workers share the machine with
+// each other, the gates and whatever else runs, so wall time over the threshold is load as often as a blowup: it is
+// a non-failing warning (with the load average, campaign.mjs). The CPU clock is this worker thread's own
+// (process.threadCpuUsage, Node 23.9+); without it the overrun can only be a warning.
+export const SLOW_MS = 2000;
+const threadCpuMs = typeof process.threadCpuUsage === 'function' ? () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; } : () => null;
+let slowInjection = null;
+/** Self-check hook (campaign --inject-slow=wall|cpu): the next compile takes SLOW_MS + 200 ms more, asleep or busy. */
+export function injectSlow(kind) { slowInjection = kind; }
+function burnInjected() {
+  if (!slowInjection) return;
+  const kind = slowInjection, ms = SLOW_MS + 200; slowInjection = null;
+  if (kind === 'wall') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  else {   // busy until this thread has spent ms of CPU (by the wall clock, a loaded machine would give it less)
+    const c = threadCpuMs(), t = performance.now(); let x = 0;
+    while (c === null ? performance.now() - t < ms : threadCpuMs() - c < ms) x = (x + 1) | 0;
+  }
+}
 const errInfo = e => e == null ? null : { name: e.name ?? typeof e, code: e.code, reason: e.reason, message: String(e.message ?? e).split('\n')[0].slice(0, 300) };
 const short = s => (typeof s === 'string' ? s : hex(s)).slice(0, 4000);
 
@@ -729,7 +748,7 @@ const P5 = {
     return { blobs, opts: blobs.map(() => G.randomOptions(r)), texts, climits, profiles: texts.map(() => r.pick(['full', 'full', 'bindle', 'bus'])), unicode: texts.map(() => r.chance(0.4)), seed2: r.int(0x7fffffff) + 1, publicCompile: r.chance(0.1) };
   },
   async check(inp) {
-    const F = [], st = { cases: 1, blobs: 0, texts: 0, compiled: 0, refused: 0, pushes: 0, misuse: 0, slowCompile: 0, slowValidate: 0 };
+    const F = [], W = [], st = { cases: 1, blobs: 0, texts: 0, compiled: 0, refused: 0, pushes: 0, misuse: 0, slowCompile: 0, slowCompileWall: 0, slowValidate: 0 };
     const r = G.createRandom(inp.seed2);
     for (let i = 0; i < inp.blobs.length; i++) {
       const b = inp.blobs[i], o = inp.opts[i];
@@ -771,11 +790,13 @@ const P5 = {
       const opts = { profile, limits, ...(inp.unicode[i] ? { unicode: unicodeTables } : {}) };
       const rp = { text: short(text), limits, profile, unicode: inp.unicode[i] };
       st.texts++;
-      const t0 = performance.now();
+      const t0 = performance.now(), c0 = threadCpuMs();
       let res;
       try { res = { ok: true, value: hostCompile(text, opts) }; } catch (e) { res = { ok: false, error: e }; }
-      const ms = performance.now() - t0;
-      if (ms > 2000) { st.slowCompile++; F.push({ cls: 'slow-compile', detail: `${ms.toFixed(0)} ms`, repro: rp }); }
+      burnInjected();
+      const ms = performance.now() - t0, c1 = threadCpuMs(), cpu = c0 === null || c1 === null ? null : c1 - c0;
+      if (cpu !== null && cpu > SLOW_MS) { st.slowCompile++; F.push({ cls: 'slow-compile', detail: `${cpu.toFixed(0)} ms CPU (${ms.toFixed(0)} ms wall)`, repro: rp }); }
+      else if (ms > SLOW_MS) { st.slowCompileWall++; W.push({ cls: 'slow-compile-wall', detail: `${ms.toFixed(0)} ms wall, ${cpu === null ? 'no thread CPU clock' : `${cpu.toFixed(0)} ms CPU`}`, repro: rp }); }
       if (!res.ok) {
         if (!(res.error instanceof HostSchemaError)) F.push({ cls: 'bad-error-type', sub: 'compile', actual: errInfo(res.error), repro: rp,
           shrink: { kind: 'text', input: text, pred: t => { try { hostCompile(t, opts); return false; } catch (e) { return !(e instanceof HostSchemaError); } } } });
@@ -817,7 +838,7 @@ const P5 = {
       if (!got.ok && ![TypeError, SnugFault, RangeError, ProgramError, HostSchemaError, SourceError].some(C => got.error instanceof C))
         F.push({ cls: 'misuse-error-type', detail: f.toString().slice(0, 120), actual: errInfo(got.error) });
     }
-    return { failures: F, stats: st };
+    return { failures: F, warnings: W, stats: st };
   },
 };
 function feedAll(p, bytes, sizes) {
