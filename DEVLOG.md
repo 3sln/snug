@@ -7398,7 +7398,13 @@ deferred close grows `snug/sequence` too, its gzip and brotli caps were
 exceeded as well (75,854 > 75,810; 65,780 > 65,731) and rise to 77,372 and
 67,096. Under 1 KB, for a refusal that names its reason.
 - [ ] **Cap raise signed off** (coordinator, under D303)
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). Implements the coordinator's
+  decision. Merged at `3e0b613`. On main: drift ok, size ok (with the
+  raised caps), no conflict markers.
+  - vmsession-test and sequence-test were not re-run after the rebase onto
+    D347; P9.9's run on the final main covers them.
+  - Rust's `Error::Cbor` gains a field, a breaking pre-release change in
+    the CHANGELOG.
 
 ## Findings
 
