@@ -8023,11 +8023,13 @@ Babashka 1.3.190, nvm Node, `env -i`):
 * **What overflowed.** Per-level stack, the slope between depth 128 and
   256 (scratch `stackprobe`, each path on a thread of a set stack size):
   - The host's recursive value builder (`decode.rs` `Builder::value`) used
-    6,912 B per level in debug on 1.87 and 1.92, and 8,832 on 1.98.1. At
-    256 levels that is about 1.77 MB, then 2.25 MB, over 2 MiB.
+    6,912 B per level in debug on 1.87 and 1.92, and 8,832 on 1.98.1 and
+    1.100.0. At 256 levels that is about 1.77 MB, then 2.25 MB, over 2 MiB.
   - The recursive writer (`encode.rs` `Output::value`) used 4,992 B, then
     6,272 B, per level in debug.
-  - In release builds they used 640–768 B and 384 B per level.
+  - In release builds they used 640–896 B and 384 B per level.
+  - CI later reproduced the overflow on Linux x86_64 (ubuntu-24.04) as well
+    as macOS arm64; 1.87 passed on both.
 
   The newer toolchain's debug frames are larger, so a margin that was
   already thin became an overflow. The verifier is not input-depth
@@ -8085,8 +8087,17 @@ Babashka 1.3.190, nvm Node, `env -i`):
   maps, `[*`, parentheses and double brackets, each at the deepest that
   compiles (the next level is `limit_nesting`), validated.
 
-The test overflows on the old code (stable, debug). It passes on 1.87, 1.92
-and 1.98.1, in debug and release.
+The test overflows on the old code (1.98.1, debug). It passes on 1.87, 1.92,
+1.98.1 and 1.100.0, in debug and release; the per-level table holds on
+1.100.0.
+
+Gates on `e39dbfc`, all ok:
+- `bb gates land` (9) and `msrv` (1.87).
+- `rust-api-test` on 1.87, 1.92, 1.98.1 and 1.100.0, each with the stack test
+  in debug and release.
+- `rust-api-test-full`, `vm-test`, `vmsession-test`, `sequence-test`,
+  `compile-fuzz`, `valid-test`, `write-test` and `nav-test`.
+Only x86_64 Linux is left to CI's cells.
 - [ ] **Signed off** (owner)
 
 ## Findings

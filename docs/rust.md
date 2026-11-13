@@ -195,7 +195,7 @@ later. The `stack` test checks this on every gate run.
   and the compiler's parser recurse, bounded by these limits.
 
 Measured stack per level, the slope between depth 128 and 256 (bytes, 4 KiB
-resolution; Rust 1.87, 1.92 and 1.98.1 on aarch64-apple-darwin):
+resolution; Rust 1.87, 1.92, 1.98.1 and 1.100.0 on aarch64-apple-darwin):
 
 | Path | Debug | Release |
 | --- | ---: | ---: |
