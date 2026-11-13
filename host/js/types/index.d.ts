@@ -66,8 +66,9 @@ export type ProfileCode = 'truncated' | 'non_shortest' | 'indefinite' | 'malform
 export type SchemaReason = 'type' | 'missing' | 'unexpected' | 'value' | 'size' |
   'range' | 'pattern' | 'tag' | 'bits' | 'embedded' | 'control' | 'control_size' | 'group_limit' | 'budget';
 export type Reason = SchemaReason | `cbor/${ProfileCode}`;
-/** A refusal's subcode: an `embedded` refusal's own reason, or `cut` on a `value` a cut decided (D342). */
-export type Subcode = Reason | 'cut';
+/** A refusal's subcode: an `embedded` refusal's own reason, `cut` on a `value` a cut decided (D342), or (encode, on
+ * `duplicate_key`) `normalized`: two keys are one key once a non-preferred bignum is written as its integer (D348). */
+export type Subcode = Reason | 'cut' | 'normalized';
 export type FaultCode = ProfileCode | 'unsupported' | 'grammar' | 'writer_failed' | `schema/${SchemaReason}` | 'sessions/limit';
 export declare class SnugFault extends Error {
   constructor(code?: string, message?: string);

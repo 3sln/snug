@@ -366,3 +366,22 @@ test('D342: f8 below 32 is malformed under every preset; non-preferred bignums s
   assert.deepEqual(s.validate(fromHex('a20100c2410101'), 'r'), { ok: true });
   assert.equal(s.validate(fromHex('a2c2410100c2410101'), 'r').reason, 'cbor/duplicate_key');
 });
+
+test('D348: keys that are one key once a non-preferred bignum is its integer refuse to encode (duplicate_key/normalized)', () => {
+  const normalized = { name: 'SnugFault', code: 'duplicate_key', subcode: 'normalized' };
+  // {0: null, 2(h''): null}; {-1: null, 3(h''): null}; the first nested in a map value; array keys [0] / [2(h'')]
+  for (const h of ['a200f6c240f6', 'a220f6c340f6', 'a16178a200f6c240f6', 'a28100f681c240f6']) {
+    const v = decode(fromHex(h));               // the valid preset reads distinct data items (D342)
+    assert.throws(() => encode(v), normalized, h);
+    assert.throws(() => new Writer().value(v).finish(), normalized, h);
+    assert.throws(() => decode(fromHex(h), { wire: 'deterministic' }), { code: 'bignum' }); // never decoded there
+  }
+  // the streaming Writer, keys supplied one by one
+  assert.throws(() => new Writer().beginMap(2).key(0).value(null).key(new Tagged(2, new Uint8Array())).value(null).end().finish(), normalized);
+  // the message names no key
+  try { encode(decode(fromHex('a200f6c240f6'))); } catch (e) { assert.doesNotMatch(e.message, /\b0\b|c240/); }
+  // a non-preferred bignum key on its own re-encodes as its integer
+  assert.equal(toHex(encode(decode(fromHex('a1c240f6')))), 'a100f6');
+  // an ordinary duplicate keeps no subcode
+  assert.throws(() => encode(new Map([[Uint8Array.of(1), 1], [Uint8Array.of(1), 2]])), e => e.code === 'duplicate_key' && e.subcode === undefined);
+});

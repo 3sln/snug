@@ -172,8 +172,15 @@ test('encode: the decoded case values and the profile value set', () => {
     t.same(cases[i].label, outcome(() => W.encode(value, o)), outcome(() => N.encode(value, o)));
   }
   const det = json('corpus/cbor-vectors/deterministic.json');
-  const values = [...encodeValues, ...det.accept.map(x => outcome(() => N.decode(hexb(x.hex), { top: 'any' }))).filter(x => 'ok' in x).map(x => x.ok)];
+  // D348: decoded maps whose keys are one key once a non-preferred bignum is its integer (duplicate_key/normalized)
+  const normalizedMaps = ['a200f6c240f6', 'a220f6c340f6', 'a16178a200f6c240f6', 'a28100f681c240f6', 'a1c240f6']
+    .map(h => N.decode(hexb(h)));
+  const values = [...encodeValues,
+    ...det.accept.map(x => outcome(() => N.decode(hexb(x.hex), { top: 'any' }))).filter(x => 'ok' in x).map(x => x.ok)];
   values.forEach((value, k) => { for (const opts of encodeOptions) u.same(`value #${k} ${show(value).slice(0, 60)} ${show(opts)}`, outcome(() => W.encode(value, opts)), outcome(() => N.encode(value, opts))); });
+  // under a tiny item bound these maps hold two faults, where the tape may report another (the header's note)
+  normalizedMaps.forEach((value, k) => { for (const opts of encodeOptions.filter(o => !(o.maxItems < 16)))
+    u.same(`normalized #${k} ${show(opts)}`, outcome(() => W.encode(value, opts)), outcome(() => N.encode(value, opts))); });
   v.same('Writer', WWriter, NWriter);
   t.done(); u.done(); v.done();
 });

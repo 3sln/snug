@@ -15,6 +15,8 @@ struct Frame {
     map: bool,
     left: usize,
     pairs: Vec<i32>,
+    /// Per pair: the key holds a bignum written as its integer (D348).
+    normalized: Vec<bool>,
 }
 /// One deterministic document builder. It writes bytes immediately; map closes
 /// may allocate temporary permutation storage. No bytes are returned until
@@ -183,6 +185,7 @@ impl Writer {
             map,
             left,
             pairs: Vec::new(),
+            normalized: Vec::new(),
         });
         Ok(self)
     }
@@ -203,14 +206,19 @@ impl Writer {
     pub fn key_value(&mut self, key: &Value) -> Result<&mut Self, Error> {
         self.slot(true)?;
         let start = self.output.bytes.len() as i32;
+        let n0 = self.output.norms;
         let r = self.output.value(key, self.frames.len());
         self.record(r)?;
         let end = self.output.bytes.len() as i32;
+        let norm = self.output.norms != n0;
         let r = self
             .frames
             .last_mut()
             .ok_or(Error::Internal)
-            .map(|f| f.pairs.extend([start, end]));
+            .map(|f| {
+                f.pairs.extend([start, end]);
+                f.normalized.push(norm);
+            });
         self.record(r)?;
         Ok(self)
     }
@@ -223,7 +231,7 @@ impl Writer {
         let r = self.frames.pop().ok_or(Error::Internal);
         let f = self.record(r)?;
         if f.map {
-            let r = self.output.map_end(&f.pairs);
+            let r = self.output.map_end(&f.pairs, &f.normalized);
             self.record(r)?;
         }
         Ok(self)

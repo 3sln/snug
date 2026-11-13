@@ -128,7 +128,13 @@ decoding a bignum keeps its exact content bytes. Under the `valid` preset a
 bignum with leading zeroes or a small value (`2(h'01')`) is a data item
 distinct from the integer of the same value (RFC 8949 §5.6.1; D342), so it
 decodes to `Value::BigInt`, never `Value::Uint`, as the duplicate-key check
-and CDDL matching read it. There is no decimal string
+and CDDL matching read it. The one decoded value that does not re-encode
+(D348): a map whose keys are one key once such a bignum is written as its
+integer has no deterministic encoding, so `encode` and the `Writer` answer
+`Error::Cbor { code: "duplicate_key", subcode: Some("normalized"), .. }`
+(`Error::subcode()`), naming no key. `a200f6c240f6` ({0: null,
+2(h''): null}) decodes under `valid` but does not re-encode; `a1c240f6`
+re-encodes as `a100f6`. There is no decimal string
 parser/normalizer yet: supply normalized parts. Decimal values do not retain
 presentation scale. `Float(1.0)` encodes as the float `f93c00` under the
 valid and deterministic presets and is refused under `Profile::BINDLE`; choose

@@ -37,6 +37,7 @@ const MESSAGES = {
   malformed: 'The writer reached an inconsistent state.', key_order: 'Map keys were not supplied in order.',
   duplicate_key: 'A map has duplicate keys.', float: 'NaN, infinities, -0 and integral floats within the safe range are not encodable as floats.',
   bignum: 'Integer exceeds the bignum bound.',
+  normalized: 'Two map keys are one key once a bignum is written as its integer.',
 };
 const MAX_BUDGET = 0x7fffffff;
 
@@ -75,6 +76,7 @@ export class Writer {
   #kbuf = null; #kpos = 0; #xtop = 0;       // the walk's key scratch and order stack
   #mag = null;                              // bignum magnitude scratch (lazy)
   #items = 0; #code = '';
+  #norms = 0; #nkey = [];                   // D348: bignums written as integers so far; per pair word, a key holding one
   #cose; #sorted; #maxDepth; #maxEntries; #maxItems; #maxBytes; #omitUndefined; #strictArrays;
   #options; #flags; #keys; #std; #anyTags; #rfc; #undef; #nonch;
 
@@ -96,10 +98,27 @@ export class Writer {
 
   // ------------------------------------------------------------------ failure and grammar
 
-  #fail(code, message) {
+  #fail(code, message, subcode) {
     if (this.#kind !== FAILED) { this.#code = code; this.#kind = FAILED; this.#left = 0; }
-    throw new SnugFault(code, message);
+    const e = new SnugFault(code, message);
+    if (subcode) e.subcode = subcode;
+    throw e;
   }
+  /** D348: a map's kin refusal r over its n keys (pair table from base, key bytes in buf). duplicate_key gets the
+   *  subcode `normalized` when a colliding key holds a bignum outside preferred serialization, written as its
+   *  integer: such keys are one key in deterministic CBOR. Only on the failure path; no key data in the message. */
+  #mapFail(r, buf, base, n) {
+    if (-r === 7) {
+      const groups = new Map(), t = this.#pairs;
+      for (let i = 0; i < n; i++) {
+        const w = base + 2 * i, k = '' + buf.subarray(t[w], t[w + 1]), g = groups.get(k), f = this.#nkey[w];
+        if (g !== undefined && (g || f)) this.#normalized();
+        groups.set(k, g || f);
+      }
+    }
+    this.#kinCode(r);
+  }
+  #normalized() { this.#fail('duplicate_key', MESSAGES.normalized, 'normalized'); }
   #misuse(what) {
     if (this.#kind === FAILED) throw new SnugFault('writer_failed', 'The writer failed earlier and cannot be used.');
     if (this.#kind === DONE) this.#fail('grammar', 'The writer has finished.');
@@ -295,9 +314,10 @@ export class Writer {
     this.#buf = this.#kbuf; this.#pos = kb0;
     try {
       for (let i = 0; i < n; i++) {
-        const ks = this.#pos;
+        const ks = this.#pos, n0 = this.#norms;
         this.#key(keys[i], depth);
         this.#pairs[base + 2 * i] = ks; this.#pairs[base + 2 * i + 1] = this.#pos;
+        this.#nkey[base + 2 * i] = this.#norms !== n0;
       }
     } finally { this.#kbuf = this.#buf; this.#kpos = this.#pos; this.#buf = buf; this.#pos = pos; }
     this.#np = base + 2 * n;
@@ -305,7 +325,7 @@ export class Writer {
     if (this.#s === null) this.#s = new Int32Array(4);
     this.#s[0] = 0; this.#s[S_BUDGET] = MAX_BUDGET;
     const r = sortKeys(this.#kbuf, this.#pairs, base, n, this.#x, xb, this.#s);
-    if (r !== 0) this.#kinCode(r);
+    if (r !== 0) this.#mapFail(r, this.#kbuf, base, n);
     this.#xtop = xb + n;
     for (let i = 0; i < n; i++) {
       const j = this.#x[xb + i], t = this.#pairs, ks = t[base + 2 * j], len = t[base + 2 * j + 1] - ks;
@@ -332,6 +352,7 @@ export class Writer {
   #subValue(v, depth) {
     const sub = new Writer(this.#options);
     sub.#walk(v, depth);
+    this.#norms += sub.#norms;
     this.#items += sub.#items - 1;
     if (this.#items > this.#maxItems) this.#fail('too_many_items', 'The message exceeds the item bound.');
     return sub.#buf.subarray(0, sub.#pos);
@@ -343,7 +364,8 @@ export class Writer {
     const t = v.tag, rule = typeof t === 'bigint' || t > 0xffffffff ? (t === 0xffffffffffffffffn ? -1 : -2) : t | 0;
     if ((t === 2 || t === 3) && v.value instanceof Uint8Array) {
       // a bignum outside preferred serialization decodes to a Tagged of its bytes (D342): written as its integer, in
-      // preferred serialization (as Rust's Value::BigInt)
+      // preferred serialization (as Rust's Value::BigInt). D348: counted, for a key collision this makes.
+      if (v.value.length < 9 || v.value[0] === 0) this.#norms++;
       this.#bigint(bignumOf(t, v.value), depth);
       return;
     }
@@ -391,7 +413,7 @@ export class Writer {
       const r = closeMap(this.#buf, this.#pairs, base, n, this.#pos, this.#tmp, this.#x, this.#s);
       if (r === 0) return;
       const need = -r - WR_NEED;
-      if (need < 0) this.#kinCode(r);
+      if (need < 0) this.#mapFail(r, this.#buf, base, n);
       if (2 * n > this.#x.length) this.#x = new Int32Array(Math.max(2 * n, 2 * this.#x.length));
       if (need > this.#tmp.length) this.#tmp = new Uint8Array(Math.max(need, 2 * this.#tmp.length));
     }
@@ -492,10 +514,12 @@ export class Writer {
     }
     this.#left = left - 1;
     this.#count();
-    const t = this.#pairs, at = this.#np, ks = this.#pos;
+    const t = this.#pairs, at = this.#np, ks = this.#pos, n0 = this.#norms;
     this.#key(k, this.#depth - 1);
+    this.#nkey[at] = this.#norms !== n0;
     if (this.#sorted && at > this.#base) {
       const r = keyAfter(this.#buf, t[at - 2], t[at - 1], ks, this.#pos);
+      if (r === -7 && (this.#nkey[at] || this.#nkey[at - 2])) this.#normalized();
       if (r < 0) this.#kinCode(r);
     }
     t[at] = ks; t[at + 1] = this.#pos; this.#np = at + 2;

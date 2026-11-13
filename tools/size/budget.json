@@ -47,15 +47,15 @@
     "snug/view": {
       "static": {
         "min": 77675,
-        "gzip": 25820,
-        "brotli": 22672
+        "gzip": 26564,
+        "brotli": 23297
       },
       "full": {
         "min": 77675,
-        "gzip": 25820,
-        "brotli": 22672
+        "gzip": 26564,
+        "brotli": 23297
       },
-      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2. Min: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min); measured on main 51eb54c + D."
+      "justification": "P8.4 D285: valid CBOR -- the valid scanner walk with duplicate-by-value and EC-sensitive key detection (kin/scan.kin, kin/canon.kin), the VM canonical copy and refusal replay (kin/vcopy.kin, D264/D280) in entries holding the VM, the session valid machinery (kin/vm-session-valid.kin, D283) in session entries; attributed per module and cut first (DEVLOG D285). Ceil(measurement * 1.02) for each grown cap; measured in a main+P8.4 worktree, esbuild 0.28.2. Min: D322 (provisional, owner sign-off pending), D286 D -- the scanner's unit records (kin/scan.kin, +222 min); measured on main 51eb54c + D. Gzip and brotli: D348 (under 1 KB, for a refusal that names its reason) -- the Writer's normalized-bignum key collision report (host/js/src/writer.mjs #mapFail, the per-key flags), +223 B gzip / +221 B brotli; measured on p916-norm over main f63a106."
     },
     "snug/writer": {
       "static": {
@@ -98,15 +98,15 @@
     "snug/sequence": {
       "static": {
         "min": 213828,
-        "gzip": 75810,
-        "brotli": 65731
+        "gzip": 77372,
+        "brotli": 67096
       },
       "full": {
         "min": 213828,
-        "gzip": 75810,
-        "brotli": 65731
+        "gzip": 77372,
+        "brotli": 67096
       },
-      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Gzip and brotli: D323/D324 (provisional, owner sign-off pending) -- the T maps' non-literal member cursors and the map streak's `any` arm, the session arena's lease start; measured on main eea15a9 + p85-tlin. Min: D333 (P9.2, coordinator under D303) -- float widths by value (kin/vm-eval.kin float-cls, D328); measured on p92-rfc over main 5a1bb84."
+      "justification": "P8.5 phase 2 D319: format 2.0 PEG groups -- the VM's array and map machines (kin/vm-array.kin, kin/vm-map.kin), the group arena (kin/vm-arena.kin) and the format 2.0 verifier's PEG, array and map table checks (kin/program/verify.kin) in entries holding the VM; the compiler's PEG lowering in snug/compile; attributed per module, cuts considered (DEVLOG D319). Ceil(measurement * 1.02) for each grown cap; measured on branch p85-peg, esbuild 0.28.2. Gzip and brotli: D323/D324 (provisional, owner sign-off pending) -- the T maps' non-literal member cursors and the map streak's `any` arm, the session arena's lease start; measured on main eea15a9 + p85-tlin. Min: D333 (P9.2, coordinator under D303) -- float widths by value (kin/vm-eval.kin float-cls, D328); measured on p92-rfc over main 5a1bb84. Gzip and brotli: D348 (under 1 KB) -- the Writer's normalized-bignum key collision report (host/js/src/writer.mjs), +240 B gzip / +253 B brotli over main f63a106, on top of D347's deferred close (+107 / +139); measured on p916-norm over main e562ae9."
     },
     "snug/controls": {
       "static": {

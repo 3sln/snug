@@ -86,7 +86,15 @@ of them, and encode writes either as its integer in preferred serialization.
 CDDL matching and the duplicate-key check read it the same way (`r = 1` does
 not match `2(h'01')`). JavaScript numbers (and Rust's
 `Value::Float(f64)`) do not keep a NaN payload — a View's `raw()` keeps the
-bytes. `encode(decode(x))` is the deterministic encoding of `x`'s value.
+bytes. `encode(decode(x))` is the deterministic encoding of `x`'s value, with
+one exception (D348): a map whose keys are one key once a non-preferred
+bignum is written as its integer has no deterministic encoding, and encode
+refuses it with `duplicate_key`, subcode `normalized`. `a200f6c240f6`
+({0: null, 2(h''): null}) decodes under `valid` (two distinct keys) but does
+not re-encode; so does its negative twin `a220f6c340f6` ({-1: null,
+3(h''): null}). `a1c240f6` ({2(h''): null}) re-encodes as `a100f6`. The
+`deterministic` and Bindle presets refuse these bignums on decode
+(`bignum`), so for them every decoded value re-encodes.
 
 How: the scanner walks valid CBOR in one pass and records the keys of maps
 whose duplicates it cannot decide bytewise (keys out of order, not in their

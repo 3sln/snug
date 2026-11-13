@@ -390,7 +390,9 @@ zeroes. RFC 8949 §5.6.1 makes it a data item distinct from the integer 1, and
 snug reads it that way everywhere: it is a different map key from `1`, `r = 1`
 does not match it, and decode gives `Tagged { tag: 2, value: Uint8Array }` of
 its exact bytes rather than a number (D342). Encode writes such a `Tagged` as
-its integer. The deterministic preset refuses these bignums (`bignum`).
+its integer, in preferred serialization; a map whose keys then coincide
+(`{0: null, 2(h''): null}`) has no deterministic encoding and is refused with
+`duplicate_key`, `subcode: 'normalized'` (D348). The deterministic preset refuses these bignums (`bignum`).
 
 | Host map representation | Valid and deterministic presets (valid is the default) | `wire: 'bindle'` |
 | --- | --- | --- |

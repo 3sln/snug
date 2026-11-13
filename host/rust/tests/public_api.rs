@@ -759,3 +759,26 @@ fn p916_warnings_cut_subcode_and_root_reexports() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn d348_normalized_bignum_key_collisions_refuse_to_encode() {
+    let normalized = |e: Error| (e.code().to_string(), e.subcode());
+    // {0: null, 2(h''): null}, {-1: null, 3(h''): null}, and the first nested in a map value
+    for h in ["a200f6c240f6", "a220f6c340f6", "a16178a200f6c240f6", "a28100f681c240f6"] {
+        let v = decode(&unhex(h), &DecodeOptions::default()).unwrap();
+        let e = encode(&v, &EncodeOptions::default()).unwrap_err();
+        assert_eq!(normalized(e), ("duplicate_key".into(), Some("normalized")), "{h}");
+        // the streaming Writer says the same
+        let mut w = Writer::new(&EncodeOptions::default()).unwrap();
+        let r = w.value(&v).and_then(|w| w.finish().map(|_| ()));
+        assert_eq!(r.map_err(normalized), Err(("duplicate_key".into(), Some("normalized"))), "{h}");
+    }
+    // a non-preferred bignum key on its own re-encodes as its integer
+    let v = decode(&unhex("a1c240f6"), &DecodeOptions::default()).unwrap();
+    assert_eq!(encode(&v, &EncodeOptions::default()).unwrap(), unhex("a100f6"));
+    // an ordinary duplicate has no subcode
+    let dup = Value::Map(vec![(Value::Uint(1), Value::Null), (Value::Uint(1), Value::Null)]);
+    assert_eq!(normalized(encode(&dup, &EncodeOptions::default()).unwrap_err()), ("duplicate_key".into(), None));
+    // the deterministic preset refuses the non-preferred bignum on decode already
+    assert_eq!(decode(&unhex("a200f6c240f6"), &DecodeOptions::deterministic()).unwrap_err().code(), "bignum");
+}

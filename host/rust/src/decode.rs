@@ -266,6 +266,7 @@ pub(crate) fn check(bytes: &[u8], options: &DecodeOptions) -> Result<Checked, Er
             return Err(Error::Cbor {
                 code: code_name(code),
                 offset: usize::try_from(error_offset(&mut o)).ok(),
+                subcode: None,
             });
         }
         break;
