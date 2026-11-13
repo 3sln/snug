@@ -7043,7 +7043,26 @@ merged as `fd63a81`. Its gates, on that commit: `bb gates land` all 8 ok;
   assumptions, fixed in the harness;
 - the test hosts' `vm-host` / `vmsession-host` crates build `schema.rs`
   without `error.rs`, so a type `SourceError` names must live in `schema`.
-- [ ] **Signed off** (manager)
+
+**Done (2026-11-12).**
+- Part 1 (the bugs): merged at `fd63a81`.
+- Part 2 (the API): `21d8829`, merged at `1396531` onto exactly the tree
+  it was gated on (`fd63a81`).
+- Part 2 gates (logs in .cache/p916-scratch/):
+  - `bb gates land`: 8/8 ok (check, drift, size, npm-test, rust-api-test,
+    wasm-sdk-test, vm-test, compile-test);
+  - vmsession-test (1,956 s), sequence-test (1,273 s), valid-test,
+    scan-test, rscan-test and rust-api-test-full (696 s, with rustdoc
+    warnings denied): all ok.
+- On main after the merge: drift ok, size ok, no conflict markers.
+- [x] **Cap raises signed off** (coordinator, 2026-11-12, under owner
+  delegation D303): `snug/writer` brotli to 17,896 and `snug/sources`
+  brotli to 58,724. Both are under 1 KB and pay for a measured
+  correctness gain (D303's rule of thumb).
+- [x] **Signed off** (manager, 2026-11-12). Two pre-release API and
+  behaviour changes are in the CHANGELOG:
+  - `f8` below 0x20 is malformed everywhere (RFC 8949 §3.3);
+  - bignums stay distinct data items.
 
 ## Findings
 
@@ -9934,7 +9953,9 @@ review.
     compile-test). `npm test`: 1,459 pass. The size budgets are unchanged.
   - The fresh-worktree esbuild trap was fixed by P9.6a (d4b9abf), so it
     was not touched here.
-- [ ] **P9.16 — API and behaviour fixes from the P9.10 stranger pass**
+- [x] **P9.16 — API and behaviour fixes from the P9.10 stranger pass**
+  *Done 2026-11-12:* part 1 at `fd63a81`, part 2 at `1396531`; gates are
+  under D342 Done.
   (manager, 2026-11-12). The reviews are in
   docs/reviews/2026-11-12-stranger-*.md. These are pre-release API changes,
   so they are allowed now (D338 policy: 0.x and nothing released). Decided
