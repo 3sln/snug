@@ -31,6 +31,8 @@ export function scan(bytes, options = {}) {
   const top = codecTop(options), flags = profileFlags(options);
   const limits = resolveLimits(options);
   rt.ready();
+  // P9.13: refused before the copy into linear memory (which never shrinks)
+  if (bytes.length > limits.maxBytes) throw new SnugFault('too_large');
   let code;
   try {
     const p = rt.input(bytes);

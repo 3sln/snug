@@ -8,9 +8,9 @@
 // one window; otherwise each window starts at the requested offset and is
 // max(need, 1 + xorshift32 % max_chunk) bytes), and prints
 // `<code> <error offset> <items> <steps>`, or `PANIC`.
-use snug::snug::cbor::rscan::{rscan_init, rscan_need_length, rscan_need_offset, rscan_position,
+use snug::generated::cbor::rscan::{rscan_init, rscan_need_length, rscan_need_offset, rscan_position,
                               rscan_scratch_len, rscan_step, RS_NEED, RS_YIELD};
-use snug::snug::cbor::scan::{error_offset, items_scanned, scan_options, scan_profile};
+use snug::generated::cbor::scan::{error_offset, items_scanned, scan_options, scan_profile};
 use std::io::{BufRead, Write};
 
 fn unhex(s: &str) -> Vec<u8> {

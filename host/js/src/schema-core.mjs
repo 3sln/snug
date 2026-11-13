@@ -64,7 +64,9 @@ export class Program {
       // the verifier's scratch: epoch, marks and (format 2.0) the PEG working area
       // (program.md §11, §12.1; vm-verify-words); a corrupt Program's words never
       // size more than 2^20 marks or the PEG hard maxima
-      const m = Math.min(Math.max(0, this.P[16] | 0), 1 << 20);
+      // P9.13: and never more than the leaf table could hold (8 words a leaf): an unverified count does not
+      // size the scratch past what the words themselves are
+      const m = Math.min(Math.max(0, this.P[16] | 0), 1 << 20, this.P.length >> 3);
       const S = new Int32Array(Math.max(64 + 2 * m, verifyWords ? verifyWords(this.P, m) + 16 : 0));
       S[16] = 1; S[17] = m;
       const r = verify(this.P, this.B, S);
@@ -139,6 +141,8 @@ export class Program {
 
 function asBytes(bytes) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug: bytes must be a Uint8Array');
+  // as the public Schema (P9.13): shared memory could change between the check and its use
+  if (typeof SharedArrayBuffer === 'function' && bytes.buffer instanceof SharedArrayBuffer) throw new TypeError('snug: copy SharedArrayBuffer input first');
   return bytes;
 }
 
@@ -147,7 +151,8 @@ export class Schema {
   constructor(program) { this.program = program; schemaPrograms.set(this, program); }
   rule(name) {
     const i = this.program.ruleIndex(name);
-    if (i < 0) throw new Error(`snug: no rule ${JSON.stringify(name)}`);
+    // as the public Schema (P9.13): a TypeError that does not echo the name
+    if (i < 0) throw new TypeError('snug: unknown rule');
     return i;
   }
   /** validate(bytes, rule, opts) -> {ok: true} | {ok: false, reason, path, offset[, subcode]} */
@@ -159,7 +164,8 @@ export class Schema {
   validateAt(bytes, start, end, rule, opts = {}) {
     validateOptions(opts, 'span');
     return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), { top: 'any', ...opts },
-      { start, end, depth: opts.depth ?? 0, items: opts.items ?? 0 }));
+      // P9.13: the enclosing counts are 32-bit words in the VM: clamp, never wrap
+      { start, end, depth: Math.min(opts.depth ?? 0, 0x7fffffff), items: Math.min(opts.items ?? 0, 0x7fffffff) }));
   }
   /** decode(bytes, rule, opts): validate, then the trusted builder. */
   decode(bytes, rule, opts = {}) {

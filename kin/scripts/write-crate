@@ -20,6 +20,7 @@ puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$t
 put host/rust/Cargo.toml "$dir/Cargo.toml"
 puttext "//! snug writer crate (dev subset): the writer primitives and a minimal Rust Writer.
 pub mod snug;
+#[doc(hidden)] pub mod generated { pub use crate::snug::*; }
 pub mod writer;
 " "$dir/src/lib.rs"
 put host/rust/write/writer.rs "$dir/src/writer.rs"

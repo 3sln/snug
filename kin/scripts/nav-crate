@@ -21,6 +21,7 @@ puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$t
 put host/rust/Cargo.toml "$dir/Cargo.toml"
 puttext "//! snug navigation crate (dev subset): the scanner, the nav modules, a minimal view.
 pub mod snug;
+#[doc(hidden)] pub mod generated { pub use crate::snug::*; }
 pub mod view;
 " "$dir/src/lib.rs"
 put host/rust/nav/view.rs "$dir/src/view.rs"

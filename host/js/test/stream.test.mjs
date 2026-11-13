@@ -120,9 +120,12 @@ test('unknown-length scanning (the VM against any) gives the scanner verdict', a
   }
 });
 
-test('failFast is only for an unknown length; malformed streams are refused', async () => {
+test('failFast changes only an unknown length (accepted, without effect, with a declared one); malformed streams are refused', async () => {
   const schema = await compile('r = uint');
-  assert.throws(() => pushValidator(schema, 3, 'r', {}, { failFast: true }), TypeError);
+  // P9.13 (API-N1): as pushScanner, the handle drivers and Rust's SourceOptions, a declared length is read whole
+  const p = pushValidator(schema, 1, 'r', {}, { failFast: true });
+  p.feed(Uint8Array.of(1));
+  assert.equal(p.finalize().ok, true);
   assert.throws(() => pushValidator(schema, undefined, 'r', {}, { failFast: 1 }), TypeError);
   assert.throws(() => streamSource(5), TypeError);
   await assert.rejects(validateStream(schema, [Uint8Array.of(1), 'x'], 'r'), e => e.code === 'bad_chunk');

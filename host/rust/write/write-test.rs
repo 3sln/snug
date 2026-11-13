@@ -15,10 +15,10 @@
 // b<hex> bytes, p<hexmag> / q<hexmag> integer (argument magnitude; q negative),
 // f<hi>,<lo> float bits, T true, F false, N null, S (keysSorted, first op only).
 // A panic prints PANIC.
-use snug::snug::write::float::{float_width, float_width_rfc, put_float, put_float_rfc};
-use snug::snug::write::int::{int_len, put_int};
-use snug::snug::write::map::{close_map, sort_keys, S_BUDGET, S_COMPARES};
-use snug::snug::write::out::{key_after, put_head};
+use snug::generated::write::float::{float_width, float_width_rfc, put_float, put_float_rfc};
+use snug::generated::write::int::{int_len, put_int};
+use snug::generated::write::map::{close_map, sort_keys, S_BUDGET, S_COMPARES};
+use snug::generated::write::out::{key_after, put_head};
 use snug::writer::{Fault, Writer};
 use std::io::{BufRead, Write};
 

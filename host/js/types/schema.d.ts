@@ -60,3 +60,5 @@ export declare function validateAt(schema: Schema, bytes: Uint8Array, start: num
 export declare function decode(schema: Schema, bytes: Uint8Array, rule: string, options?: ValidationOptions): Value;
 export declare function fromProgram(P: Int32Array, B: Uint8Array, options?: ProgramOptions): Promise<Schema>;
 export declare function fromSerialized(bytes: Uint8Array, options?: ProgramOptions): Promise<Schema>;
+/** fromSerialized without the promise: load a stored Program synchronously (at module scope, say). */
+export declare function fromSerializedSync(bytes: Uint8Array, options?: ProgramOptions): Schema;

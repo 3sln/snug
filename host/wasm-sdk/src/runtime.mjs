@@ -156,8 +156,9 @@ export function input(bytes) {
   return inPtr;
 }
 /** Drop the reusable buffers (memory pages stay; the allocator reuses them). */
-export function trim() { x.sdk_trim(); inCap = 0; refresh(); }
+export function trim() { x.sdk_trim(); inCap = 0; inGen = -1; kCap = 0; kGen = -1; refresh(); }
 
+// the key scratch; trim() forgets it (sdk_trim frees it: a kept pointer would dangle)
 let kPtr = 0, kCap = 0, kGen = -1;
 /** The key scratch, at least n bytes: its pointer. */
 export function kbuf(n) {

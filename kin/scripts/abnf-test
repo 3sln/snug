@@ -12,7 +12,7 @@ set -e
 cd "$(dirname "$0")/../.."
 host=.cache/abnf-host
 mkdir -p "$host/bin"
-printf '//! ABNF test crate: the generated abnf module.\npub mod snug;\n' > "$host/lib.rs.new"
+printf '//! ABNF test crate: the generated abnf module.\npub mod snug;\n#[doc(hidden)] pub mod generated { pub use crate::snug::*; }\n' > "$host/lib.rs.new"
 cmp -s "$host/lib.rs.new" "$host/lib.rs" 2>/dev/null || mv "$host/lib.rs.new" "$host/lib.rs"; rm -f "$host/lib.rs.new"
 cmp -s host/rust/src/bin/abnf.rs "$host/bin/abnf.rs" 2>/dev/null || cp host/rust/src/bin/abnf.rs "$host/bin/abnf.rs"
 crate=.cache/snug-abnf

@@ -496,7 +496,7 @@ fn async_sequence_reader_equals_the_sync_reader() {
                       Split::Fixed(n.max(1))];
         for split in splits {
             let chunk = [1usize, 5, 64, 65536][rng.below(4) as usize];
-            let o = SequenceOptions { profile, on_invalid, fail_fast, chunk, ..SequenceOptions::default() };
+            let o = SequenceOptions { wire: profile, on_invalid, fail_fast, chunk, ..SequenceOptions::default() };
             // schema-validated, and profile-only (the VM against `any`)
             let sync: Vec<_> = schema.read_sequence(Trickle { data: &body, split: Splitter::new(split) }, &name, &o).unwrap().collect();
             let (got, pend) = drain(schema.read_sequence_async(AsyncTrickle::new(&body, split, rng.next(), 3), &name, &o).unwrap());
@@ -566,6 +566,10 @@ fn public_async_forms_match_the_sync_ones() {
     assert!(matches!(schema.read_sequence_async(&[][..], "nope", &SequenceOptions::default()), Err(Error::Usage("unknown_rule"))));
     let zero = SequenceOptions { chunk: 0, ..SequenceOptions::default() };
     assert!(matches!(schema.read_sequence_async(&[][..], "m", &zero), Err(Error::Usage("options"))));
+    // P9.13: the free readers refuse chunk 0 as the schema readers do
+    assert!(matches!(snug::read_sequence(&[][..], &zero), Err(Error::Usage("options"))));
+    assert!(matches!(snug::read_sequence_async(&[][..], &zero), Err(Error::Usage("options"))));
+    assert!(matches!(schema.read_sequence(&[][..], "m", &zero), Err(Error::Usage("options"))));
     // P9.16: a chunk above 2^31 - 1 is misuse, never a panic or a huge reservation
     for chunk in [usize::MAX, (i32::MAX as usize) + 1] {
         let mut empty: &[u8] = &[];

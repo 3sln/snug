@@ -38,6 +38,7 @@ import * as NSRC from '../../js/src/public-sources.mjs';
 import { Writer as NWriter } from '../../js/src/public-writer.mjs';
 import { tables as unicodeTables } from '../../js/src/unicode-tables.mjs';
 import * as W from '../src/index.mjs';
+import * as rt from '../src/runtime.mjs';
 import * as WS from '../src/schema.mjs';
 import { compile as wcompile } from '../src/compile.mjs';
 import { view as wview } from '../src/view.mjs';
@@ -722,13 +723,13 @@ test('instance loss: a trap resets the instance; Programs and sessions recover; 
   const pending = WSRC.pushValidator(w, 10, 'r');
   const pendingSeq = WSEQ.sequenceReader({ schema: w, rule: 'r' });
   pendingSeq.feed(N.encode([1]).subarray(0, 1));   // a message in progress
-  // 1,000,000 nested arrays under a raised depth limit: the recursive scanner exhausts the wasm stack.
+  // P9.13 (SEC-F2): a depth limit above 256, which used to exhaust the wasm stack, is a TypeError on both builds
   const deep = new Uint8Array(1_000_001).fill(0x81); deep[deep.length - 1] = 0;
   const g = W.memoryBytes();
-  const e = outcome(() => W.decode(deep, { top: 'any', maxDepth: 2_000_000, maxBytes: 2_000_000 }));
-  const native = outcome(() => N.decode(deep, { top: 'any', maxDepth: 2_000_000, maxBytes: 2_000_000 }));
+  for (const d of [W.decode, N.decode]) assert.equal(outcome(() => d(deep, { top: 'any', maxDepth: 2_000_000, maxBytes: 2_000_000 })).err, 'TypeError');
+  // a trap: an allocation the layout refuses (CODE-S7: sdk_alloc aborts, never answers a null pointer)
+  const e = outcome(() => { try { rt.x.sdk_alloc(0xffffffff); } catch (x) { rt.lost(x); } });
   assert.equal(e.err, 'InstanceLost', show(e));
-  assert.equal(native.err, 'RangeError', `native gives ${show(native)}`);   // neither build reaches a verdict
   for (const v of [[1, 2], ['ab'], ['abcd']]) assert.deepEqual(w.validate(N.encode(v), 'r'), n.validate(N.encode(v), 'r'));
   assert.deepEqual(W.decode(N.encode({ a: 1 })), N.decode(N.encode({ a: 1 })));
   assert.equal(outcome(() => pending.feed(new Uint8Array(10))).err, 'Error', 'a session from the lost instance is unusable');
@@ -811,4 +812,74 @@ test('sessions (P9.7, D327): the live bound and release, as the native package',
 test('[Symbol.dispose] only where the engine has Symbol.dispose (wasm, fresh processes)', () => {
   const using = checkDispose('wasm');
   console.log(`  ok   dispose: no member named "undefined" without Symbol.dispose, close() works; [Symbol.dispose] and \`using\` (${using}) with it (wasm)`);
+});
+
+// P9.13 WP2: SDK resource and lifetime fixes -- each fails without its fix.
+test('P9.13: trim() keeps rule and key lookups working (CODE-B1)', async () => {
+  const s = await wcompile('r = { alpha: uint, beta: tstr }\nq = uint');
+  const b = N.encode({ alpha: 1, beta: 'two' });
+  assert.equal(wview(b).get('beta').text(), 'two');
+  W.trim();
+  // the key scratch was freed by trim: lookups and new rule names must allocate it again
+  assert.equal(wview(b).get('beta').text(), 'two');
+  assert.equal(s.validate(N.encode(7), 'q').ok, true);
+  W.trim();
+  assert.equal(wview(b, { schema: s, rule: 'r' }).get('alpha').int(), 1);
+});
+
+test('P9.13: failed streams and push sources free their sessions (CODE-S3); a voided session\'s end() (CODE-S1)', async () => {
+  const s = await wcompile('r = [ uint, tstr ]');
+  const b = N.encode([1, 'x']);
+  const base = WSRC.sessionLimits().live;
+  async function* reset() { yield b.subarray(0, 1); throw new Error('network reset'); }
+  async function* notBytes() { yield b.subarray(0, 1); yield 'not bytes'; }
+  for (let i = 0; i < 20; i++) {
+    await assert.rejects(WSRC.validateStream(s, reset(), 'r'), /network reset/);
+    await assert.rejects(WSRC.validateStream(s, notBytes(), 'r'), e => e.code === 'bad_chunk');
+    await assert.rejects(WSRC.scanStream(reset(), { wire: 'valid' }), /network reset/);
+  }
+  for (const p of [WSRC.pushValidator(s, undefined, 'r'), WSRC.pushValidator(s, b.length, 'r'), WSRC.pushScanner(undefined, { wire: 'valid' })])
+    assert.throws(() => p.feed('not bytes'), TypeError);
+  assert.equal(WSRC.sessionLimits().live, base, 'no failed stream or push source holds a session');
+  // end() of a session a predicate voided answers that predicate's error, as natively
+  let boom = true;
+  const opts = { controls: { ok: () => { if (boom) throw new Error('predicate failed'); return true; } } };
+  for (const [lib, c] of [[WSRC, wcompile], [NSRC, ncompile]]) {
+    const ps = await c('r = [ uint .ok 0, tstr ]', opts);
+    boom = true;
+    const v = lib.openSession(ps, 'r');
+    assert.throws(() => v.step(b, 0), /extension control .ok threw/);
+    assert.throws(() => v.end(b.length), e => e.cause?.message === 'predicate failed');
+  }
+  assert.equal(WSRC.sessionLimits().live, base);
+});
+
+test('P9.13: an oversized input is refused before it is copied into linear memory (SEC-F3); maxDepth above 256 is a TypeError (SEC-F2)', async () => {
+  const s = await wcompile('r = bstr');
+  const big = new Uint8Array(32 << 20); big[0] = 0x5a;
+  W.trim();
+  const before = W.memoryBytes();
+  assert.throws(() => W.decode(big), e => e.code === 'too_large');
+  assert.deepEqual(s.validate(big, 'r'), { ok: false, reason: 'cbor/too_large', path: [], offset: 0 });
+  assert.deepEqual(s.validate(big, 'r', { maxBytes: 10 }), NS.validate(await ncompile('r = bstr'), big, 'r', { maxBytes: 10 }));
+  assert.throws(() => s.decode(big, 'r'), e => e.code === 'schema/too_large' || /too_large/.test(e.code));
+  assert.throws(() => wview(big), e => e.code === 'too_large');
+  assert.throws(() => wview(big, { schema: s, rule: 'r' }), /too_large/);
+  assert.ok(W.memoryBytes() - before < (8 << 20), `linear memory grew ${W.memoryBytes() - before} bytes`);
+  const deep = new Uint8Array(301).fill(0x81); deep[300] = 0;
+  assert.throws(() => W.decode(deep, { maxDepth: 257 }), TypeError);
+  assert.throws(() => wview(deep, { maxDepth: 100000 }), TypeError);
+  assert.equal(s.validate(deep, 'r', { maxDepth: 999 }).reason, 'cbor/depth');   // a schema's only lowers its compiled depth
+  assert.throws(() => W.decode(deep, { maxDepth: 256 }), e => e.code === 'depth');
+});
+
+test('P9.13: every View/Cursor call into the instance goes through rt.lost (CODE-S5)', () => {
+  // a trap inside navigation must reset the instance (InstanceLost), as every other entry point's does
+  const src = readFileSync(new URL('../src/view-core.mjs', import.meta.url), 'utf8');
+  const nav = [...src.matchAll(/rt\.x\.sdk_(nav_\w+|steps)\(/g)];
+  assert.ok(nav.length >= 8);
+  for (const m of nav) {
+    const line = src.slice(src.lastIndexOf('\n', m.index) + 1, src.indexOf('\n', m.index));
+    assert.match(line, /wasm\(\(\) =>/, `unguarded: ${line.trim()}`);
+  }
 });

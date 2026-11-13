@@ -9,7 +9,7 @@ use crate::snug::{
     cbor::scan::code_name,
     write::{float::{put_float, put_float_rfc}, int::put_int, map::close_map, out::put_head},
 };
-use crate::{DecodeOptions, Error, Floats, Integer, Limits, Profile, Top, TypedArray, Value};
+use crate::{decode::Limits, DecodeOptions, Error, Floats, Integer, Profile, Top, TypedArray, Value};
 
 /// Encoder options. Encoding permits any root. Output bytes are bounded during
 /// growth, unlike JS's finish-only maxBytes check; the core checks the final result
@@ -19,17 +19,26 @@ use crate::{DecodeOptions, Error, Floats, Integer, Limits, Profile, Top, TypedAr
 pub struct EncodeOptions {
     /// Under `Keys::Text`: permit safe integer labels in the top-level map.
     pub cose: bool,
-    /// Output, nesting, entry and item bounds.
-    pub limits: Limits,
     /// The wire profile: it decides float forms and what the final check admits.
-    pub profile: Profile,
+    pub wire: Profile,
+    /// Output byte cap (default 1,500,000).
+    pub max_bytes: Option<u32>,
+    /// Nesting depth cap (default 32, at most 256).
+    pub max_depth: Option<u32>,
+    /// Per-container entry cap (default 65,536).
+    pub max_entries: Option<u32>,
+    /// Item cap (default 131,072).
+    pub max_items: Option<u32>,
 }
 impl Default for EncodeOptions {
     fn default() -> Self {
         Self {
             cose: false,
-            limits: Limits::default(),
-            profile: Profile::VALID,
+            wire: Profile::VALID,
+            max_bytes: None,
+            max_depth: None,
+            max_entries: None,
+            max_items: None,
         }
     }
 }
@@ -37,7 +46,7 @@ impl EncodeOptions {
     /// The Bindle profile.
     pub fn bindle() -> Self {
         Self {
-            profile: Profile::BINDLE,
+            wire: Profile::BINDLE,
             ..Self::default()
         }
     }
@@ -45,9 +54,16 @@ impl EncodeOptions {
         DecodeOptions {
             top: Top::Any,
             cose: self.cose,
-            limits: self.limits,
-            profile: self.profile,
+            wire: self.wire,
+            max_bytes: self.max_bytes,
+            max_depth: self.max_depth,
+            max_entries: self.max_entries,
+            max_items: self.max_items,
         }
+    }
+    /// The limits with the defaults filled in.
+    pub(crate) fn limits(&self) -> Limits {
+        self.decode_options().limits()
     }
 }
 /// Encode a complete value, sorting maps through the core and checking the complete
@@ -76,15 +92,19 @@ enum Walk<'v> {
 pub(crate) struct Output {
     pub(crate) bytes: Vec<u8>,
     pub(crate) options: EncodeOptions,
+    /// The resolved limits.
+    pub(crate) limits: Limits,
     /// Bignums outside preferred serialization written as their integer so far.
     pub(crate) norms: usize,
 }
 impl Output {
     pub(crate) fn new(options: EncodeOptions) -> Result<Self, Error> {
-        options.limits.check()?;
+        let limits = options.limits();
+        limits.check()?;
         Ok(Self {
             bytes: Vec::new(),
             options,
+            limits,
             norms: 0,
         })
     }
@@ -101,7 +121,7 @@ impl Output {
             .len()
             .checked_add(b.len())
             .ok_or(Error::cbor("too_large"))?;
-        if end > self.options.limits.max_bytes as usize {
+        if end > self.limits.max_bytes as usize {
             return Err(Error::cbor("too_large"));
         }
         self.bytes.extend_from_slice(b);
@@ -146,10 +166,10 @@ impl Output {
         }
     }
     pub(crate) fn container(&mut self, major: i32, n: usize, depth: usize) -> Result<(), Error> {
-        if depth >= self.options.limits.max_depth as usize {
+        if depth >= self.limits.max_depth as usize {
             return Err(Error::cbor("depth"));
         }
-        if n > self.options.limits.max_entries as usize {
+        if n > self.limits.max_entries as usize {
             return Err(Error::cbor("too_many_entries"));
         }
         self.head(major, n as u64)
@@ -207,7 +227,7 @@ impl Output {
         let mut next = Some((v, depth));
         loop {
             if let Some((v, depth)) = next.take() {
-                if depth > self.options.limits.max_depth as usize {
+                if depth > self.limits.max_depth as usize {
                     return Err(Error::cbor("depth"));
                 }
                 match v {
@@ -322,7 +342,7 @@ impl Output {
             Value::Float(n) => {
                 let bits = n.to_bits();
                 let mut b = [0; 9];
-                let r = if self.options.profile.floats == Floats::Deterministic {
+                let r = if self.options.wire.floats == Floats::Deterministic {
                     put_float_rfc(&mut b, 0, (bits >> 32) as i32, bits as i32)
                 } else {
                     put_float(&mut b, 0, (bits >> 32) as i32, bits as i32)

@@ -1,6 +1,6 @@
 use snug::{
     decode, encode, Blob, BytesBlob, CompileOptions, DecodeOptions, EncodeOptions, Error, Integer,
-    Limits, Program, Schema, Scratch, Segment, Top, TypedArray, TypedElement, ValidationOptions,
+    Program, Schema, Scratch, Segment, Top, TypedArray, TypedElement, ValidationOptions,
     Value, View, Writer,
 };
 use std::{
@@ -404,23 +404,19 @@ fn checked_views_cursors_and_unaligned_typed_access() {
 #[test]
 fn limits_and_safe_refusals() {
     let mut options = DecodeOptions::any();
-    options.limits.max_depth = 257;
+    options.max_depth = Some(257);
     assert_eq!(decode(&[], &options).unwrap_err().code(), "options");
     options = DecodeOptions::any();
-    options.limits.max_bytes = 0;
+    options.max_bytes = Some(0);
     assert_eq!(decode(&[0], &options).unwrap_err().code(), "too_large");
     options = DecodeOptions::any();
-    options.limits.max_depth = 0;
+    options.max_depth = Some(0);
     assert_eq!(decode(&[0x80], &options).unwrap_err().code(), "depth");
-    let limits = Limits {
-        max_bytes: 1,
-        ..Limits::default()
-    };
     assert_eq!(
         encode(
             &Value::Text("secret".into()),
             &EncodeOptions {
-                limits,
+                max_bytes: Some(1),
                 cose: false,
                 ..Default::default()
             }
@@ -492,10 +488,7 @@ fn named_compile_limits_runtime_caps_and_depth_ceiling() {
     let mut deep = vec![0x81; 256];
     deep.push(0);
     let options = DecodeOptions {
-        limits: Limits {
-            max_depth: 256,
-            ..Default::default()
-        },
+        max_depth: Some(256),
         ..DecodeOptions::any()
     };
     let value = decode(&deep, &options).unwrap();
@@ -503,7 +496,7 @@ fn named_compile_limits_runtime_caps_and_depth_ceiling() {
         encode(
             &value,
             &EncodeOptions {
-                limits: options.limits,
+                max_depth: options.max_depth,
                 ..Default::default()
             }
         )
@@ -639,7 +632,7 @@ fn any_tag_level_d180() {
     assert!(matches!(&v, Value::Tag(18, _)));
     assert_eq!(encode(&v, &EncodeOptions::default()).unwrap(), sign1);
     let std_opts = DecodeOptions {
-        profile: standard,
+        wire: standard,
         ..DecodeOptions::default()
     };
     assert_eq!(decode(&sign1, &std_opts).unwrap_err().code(), "tag");
@@ -796,7 +789,9 @@ fn regression_d351_embedded_content_keeps_the_items_copy_and_order() {
         let schema = Schema::compile(src, &CompileOptions::default()).unwrap();
         let doc = schema.document(&indef, "r", &v, &mut s).unwrap();
         assert_eq!(doc.view().raw(), &[0x43, 0x00, 0x01, 0x02], "{src}");
-        assert!(schema.view(&indef, "r", &mut s).is_err(), "{src}: not borrowable");
+        let e = schema.view(&indef, "r", &mut s).unwrap_err();
+        assert_eq!(e.code(), "owned_view", "{src}: not borrowable");
+        assert!(e.to_string().contains("Schema::document"), "the message names the owned form");
     }
     // [ {"b": 1, "a": 2}, h'01' ]: keys out of order, then embedded content in order
     let b = [0x82, 0xa2, 0x61, 0x62, 0x01, 0x61, 0x61, 0x02, 0x41, 0x01];

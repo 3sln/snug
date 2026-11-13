@@ -7,7 +7,7 @@
 // printed as `PANIC` -- the scanner must never panic on any input, and this
 // binary is built in debug (overflow checks on) so a broken arithmetic
 // guarantee is a panic here rather than a silent wrap.
-use snug::snug::cbor::scan::{error_offset, scan_cb, scan_options, scan_profile};
+use snug::generated::cbor::scan::{error_offset, scan_cb, scan_options, scan_profile};
 use std::io::{BufRead, Write};
 
 fn unhex(s: &str) -> Vec<u8> {

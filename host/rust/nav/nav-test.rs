@@ -7,7 +7,7 @@
 // and prints `t <n> <words...>` / `v <hex|none|refused code>`. Any bytes are
 // allowed on T lines (the fuzz arm passes unchecked bytes): the primitives must
 // never panic; a panic prints PANIC.
-use snug::snug::nav::trace::nav_trace;
+use snug::generated::nav::trace::nav_trace;
 use snug::view::View;
 use std::io::{BufRead, Write};
 

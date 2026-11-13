@@ -196,13 +196,21 @@ fn grow<T: Copy + Default>(v: &mut Vec<T>, n: usize) -> *mut T {
 /// A region the host fills (its own pointer and length must come back to `sdk_free`).
 #[no_mangle]
 pub extern "C" fn sdk_alloc(n: usize) -> *mut u8 {
-    // SAFETY: a nonzero size, align 8; failure aborts (a trap the SDK recovers from).
-    unsafe { alloc_zeroed(Layout::from_size_align_unchecked(n.max(1), 8)) }
+    // A size the layout refuses (above isize::MAX) or memory that cannot grow traps (the SDK resets the
+    // instance, InstanceLost): never a null pointer the host would write through (P9.13).
+    let Ok(layout) = Layout::from_size_align(n.max(1), 8) else { std::process::abort() };
+    // SAFETY: a nonzero size, align 8.
+    let p = unsafe { alloc_zeroed(layout) };
+    if p.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+    p
 }
 #[no_mangle]
 pub extern "C" fn sdk_free(p: *mut u8, n: usize) {
-    // SAFETY: p came from sdk_alloc(n).
-    unsafe { dealloc(p, Layout::from_size_align_unchecked(n.max(1), 8)) }
+    let Ok(layout) = Layout::from_size_align(n.max(1), 8) else { return };
+    // SAFETY: p came from sdk_alloc(n) (whose layout this is).
+    unsafe { dealloc(p, layout) }
 }
 /// The reusable input buffer, at least n bytes (grown, never shrunk here).
 #[no_mangle]
@@ -320,7 +328,8 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
     }
     let p: Vec<i32> = unsafe { std::slice::from_raw_parts(pp, words) }.to_vec();
     let b: Vec<u8> = unsafe { bytes(bp, nb) }.to_vec();
-    let m = p[16].clamp(0, 1 << 20) as usize;
+    // never more marks than the leaf table could hold (8 words a leaf)
+    let m = p[16].clamp(0, (p.len() >> 3).min(1 << 20) as i32) as usize;
     // format 2.0 (P8.5, D300): the verifier's marks and its PEG working area (vm-verify-words,
     // clamped by the hard maxima), as the native hosts size it
     let mut s = vec![0i32; (64 + 2 * m).max(vm_verify_words(&p, m as i32).max(0) as usize + 16)];

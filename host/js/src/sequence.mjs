@@ -24,7 +24,8 @@ function openBackend(options, quantum) {
   const total = vmsUnknownTotal(P, words);
   // P9.7 (D327): one session for the whole reader, its arrays from the Program's pool under the live bound,
   // released when the sequence ends (close) or the reader is collected
-  const lease = acquire(program, vmScratchWords(P, rule, cap), vmsWords(P), vmsArena(P, words, total));
+  // D286 A3, as VmSession (P9.13): S as large as earlier sessions on this Program needed
+  const lease = acquire(program, Math.max(vmScratchWords(P, rule, cap), program.sw || 0), vmsWords(P), vmsArena(P, words, total));
   let { s, ka } = lease.e, stepping = false, closing = false;
   const { ss } = lease.e, out = new Int32Array(8 + 2 * 257);
   // D347: once released the arrays are the pool's (another session may hold them): nothing writes them again
@@ -39,7 +40,7 @@ function openBackend(options, quantum) {
         if (c !== -69) return c;
         growValid(v, ss);
         const gs = vmsGrowScratch(ss), ga = vmsGrowArena(ss);
-        if (gs > s.length) { const g = new Int32Array(gs); g.set(s); lease.e.s = s = g; }
+        if (gs > s.length) { const g = new Int32Array(gs); g.set(s); lease.e.s = s = g; if (gs < 262144) program.sw = Math.max(program.sw || 0, gs); }
         if (ga > ka.length) { const g = new Uint8Array(ga); g.set(ka); lease.e.ka = ka = g; }
       }
     });

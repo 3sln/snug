@@ -2,7 +2,11 @@
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const boolean = value => typeof value === 'boolean';
 const enumeration = (...values) => value => typeof value === 'string' && values.includes(value);
-const limits = { maxBytes: integer, maxDepth: integer, maxEntries: integer, maxItems: integer };
+// A codec's maxDepth is at most 256, as Rust's (P9.13): a deeper bound would let input exhaust the JS stack or the
+// wasm instance's before the bound is met. A schema's per-call maxDepth only lowers the Program's compiled one
+// (itself at most 256), so validation keeps any non-negative integer.
+const MAX_DEPTH = 256;
+const limits = { maxBytes: integer, maxDepth: value => integer(value) && value <= MAX_DEPTH, maxEntries: integer, maxItems: integer };
 const preset = {
   wire: enumeration('valid', 'deterministic', 'bindle'), keys: enumeration('text', 'integer', 'any'),
   tags: enumeration('bindle', 'standard', 'any'), floats: enumeration('bindle', 'deterministic'),
@@ -11,7 +15,7 @@ const preset = {
   strictArrays: boolean,
 };
 const decode = { ...preset, ...limits, objects: enumeration('null', 'plain') };
-const validation = { ...decode, maxBignumBytes: integer, budget: integer };
+const validation = { ...decode, maxDepth: integer, maxBignumBytes: integer, budget: integer };
 const encode = { ...preset, ...limits, objects: decode.objects, omitUndefined: boolean };
 // failFast (D085): answer an unknown-length message's certain refusal at once
 const scheduling = { quantum: value => integer(value) && value <= 0x7fffffff, failFast: boolean };

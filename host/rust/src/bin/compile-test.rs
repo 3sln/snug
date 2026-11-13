@@ -15,7 +15,7 @@
 // verifier must never panic on any input, and this binary is built in debug
 // (overflow checks on).
 use snug::compile::{compile_bytes_with_options, CompileOptions};
-use snug::snug::program::verify::{vm_verify, vm_verify_words};
+use snug::generated::program::verify::{vm_verify, vm_verify_words};
 use std::fmt::Write as _;
 use std::io::{BufRead, Write};
 

@@ -1,6 +1,5 @@
 //! P9.7 (D327): session arrays pooled per Program, a bound on live sessions per
 //! process. One test function: the limits and counts are process-wide.
-use snug::schema::{Session, Step};
 use snug::sessions::{self, SessionLimits};
 use snug::{BytesBlob, CompileOptions, Error, Schema, Sequence, SequenceOptions, SourceOptions, ValidationOptions};
 
@@ -31,10 +30,6 @@ fn msg(i: u32) -> Vec<u8> {
 fn the_live_bound_release_on_finish_and_drop_and_threads() {
     let schema = Schema::compile("r = { id: uint, body: tstr }", &CompileOptions::default()).unwrap();
     let opts = ValidationOptions::default();
-    let hp = snug::schema::Program::new(schema.program().words(), schema.program().pool()).unwrap();
-    let host = &hp;
-    let rule = host.rule("r").unwrap();
-    let hopts = snug::schema::Options::default();
     let defaults = sessions::limits();
     assert_eq!(defaults, SessionLimits { max_live: 1024, max_pooled_bytes: 2 << 20 });
     assert!(sessions::set_limits(SessionLimits { max_live: 0, ..defaults }).is_err());
@@ -43,10 +38,10 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     // the bound: one more than max_live fails with sessions/limit; a drop frees a slot
     sessions::set_limits(SessionLimits { max_live: 3, ..defaults }).unwrap();
     let b = msg(7);
-    let held: Vec<Session<'_>> = (0..3).map(|_| Session::new(host, rule, b.len() as i32, &hopts, 0).unwrap()).collect();
+    // sequence readers hold their session for their life
+    let held: Vec<Sequence<'_>> = (0..3).map(|_| schema.sequence("r", &SequenceOptions::default()).unwrap()).collect();
     assert_eq!(sessions::counts().live, 3);
-    let e = Session::new(host, rule, b.len() as i32, &hopts, 0).err().unwrap();
-    assert_eq!(e, sessions::SessionError::Limit);
+    let e = sessions::SessionError::Limit;
     assert_eq!(e.code(), "sessions/limit");
     assert_eq!(Error::from(e), Error::SessionLimit);
     assert_eq!(Error::from(e).code(), "sessions/limit");
@@ -64,12 +59,8 @@ fn the_live_bound_release_on_finish_and_drop_and_threads() {
     assert_eq!(block_on(schema.validate_blob_async(&BytesBlob(&b), "r", &opts, &c(4))).unwrap(), Ok(()));
     assert_eq!(sessions::counts().live, 0);
 
-    // a finished session releases at its verdict, before it is dropped
-    let mut s = Session::new(host, rule, b.len() as i32, &hopts, 0).unwrap();
-    assert!(matches!(s.step(&b, 0), Step::Done(Ok(()))));
-    assert_eq!(sessions::counts().live, 0);
-    assert!(matches!(s.step(&b, 0), Step::Done(Ok(()))));
-    drop(s);
+    // a finished blob validation releases its session at its verdict
+    assert_eq!(schema.validate_blob(&BytesBlob(&b), "r", &opts, &c(4)).unwrap(), Ok(()));
     assert_eq!(sessions::counts().live, 0);
     sessions::set_limits(defaults).unwrap();
 

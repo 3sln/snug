@@ -568,7 +568,8 @@ export function mintView(b, opts, borrowed) {
   let unsorted = false;
   if (validOk(profileFlags(opts))) {
     const big = 0x7fffffff;
-    const c = scanInfo(b, { ...profileOptions(opts), top: 'any', maxBytes: b.length, maxDepth: big, maxEntries: big, maxItems: big });
+    // depth 256: the ceiling every check runs under (no accepted message is deeper)
+    const c = scanInfo(b, { ...profileOptions(opts), top: 'any', maxBytes: b.length, maxDepth: 256, maxEntries: big, maxItems: big });
     if (c.bytes !== b) { b = c.bytes; borrowed = false; }
     unsorted = c.unsorted;
   }

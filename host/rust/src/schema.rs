@@ -51,7 +51,9 @@ impl Program {
     /// Verify and keep a private copy (P and B must not change
     /// between verification and validation).
     pub fn new(p: &[i32], b: &[u8]) -> Result<Program, Refused> {
-        let nl = if p.len() > 16 { p[16].clamp(0, 1 << 20) } else { 0 };
+        // never more marks than the leaf table could hold (8 words a leaf): an unverified count does not
+        // size the scratch past the words themselves
+        let nl = if p.len() > 16 { p[16].clamp(0, (p.len() >> 3).min(1 << 20) as i32) } else { 0 };
         // format 2.0: marks plus the PEG working area (vm-verify-words, clamped by the hard maxima)
         let mut s = vec![0i32; (48 + 2 * nl as usize + 64).max(vm_verify_words(p, nl).max(0) as usize + 16)];
         s[16] = 1;
@@ -409,7 +411,7 @@ const VMS_GROW: i32 = -69;
 
 /// What one [`Session::step`] answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Step {
+pub(crate) enum Step {
     /// Give a window holding `[offset, offset + len)`; no byte before `keep` is asked for again.
     Need { offset: i32, len: i32, keep: i32 },
     /// The work quantum is spent: give a window holding `position`.
@@ -425,8 +427,9 @@ pub enum Step {
 /// A resumable validation of one message of a declared
 /// length over windows of it. It owns its scratch, session array and key arena
 /// (never shared between sessions; taken from the Program's pool, zeroed, and
-/// given back when it finishes or is dropped); the Program is borrowed.
-pub struct Session<'p> {
+/// given back when it finishes or is dropped); the Program is borrowed. Internal: the
+/// drivers (`Schema::validate_blob`, `validate_reader` and their async forms) run it.
+pub(crate) struct Session<'p> {
     prog: &'p Program,
     s: Vec<i32>,
     ss: Vec<i32>,
@@ -857,6 +860,10 @@ pub fn validate_reader(prog: &Program, rule: i32, reader: &mut dyn std::io::Read
                         Err(e) => return Err(e.into()),
                     }
                 };
+                // a reader that reports more than the buffer holds breaks `Read`'s contract (P9.13)
+                if got > core.buf().len() {
+                    return Err(SourceError::Read);
+                }
                 core.filled(got);
             }
             Io::Yield => {}

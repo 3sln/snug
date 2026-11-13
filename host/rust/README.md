@@ -60,7 +60,7 @@ The crate root exports:
 | API | Contract |
 | --- | --- |
 | `Value`, `Integer`, `TypedArray` | Exact integers; owned byte, text, array and map values; dedicated decimal, typed-array and ndarray variants; explicit tags |
-| `decode`, `DecodeOptions`, `Top`, `Limits` | The generated scanner checks the bytes first, then a trusted builder makes owned values. Any root by default (`Top::Map` or the Bindle preset requires a map) |
+| `decode`, `DecodeOptions`, `Profile`, `Top` | The generated scanner checks the bytes first, then a trusted builder makes owned values. Any root by default (`Top::Map` or the Bindle preset requires a map) |
 | `encode`, `EncodeOptions`, `Writer` | Heads, integers, float widths and map order are decided by the generated code. Any root; output growth is bounded, and the output is checked by the scanner at the end |
 | `Schema`, `CompileOptions`, `CompileLimits`, `CompilerProfile`, `Cuts`, `Regexp`, `AbnfMode`, `Controls`, `Control`, `Warning`, `SchemaError` | Compile synchronously or load a verified Program; `Schema::warnings()` returns the compile warnings. Validate with a reusable, caller-owned `Scratch`. A schema accepts any root by default |
 | `ValidationOptions`, `Failure`, `Segment` | Runtime caps can only lower the compiled limits. Refusals give a deterministic, safe witness: reason, path, offset and subcode (`embedded`'s inner reason, or `cut`) |

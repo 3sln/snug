@@ -8542,6 +8542,69 @@ host/wasm-sdk/README.md ship with install lines, so they get the same block.
   - Left to WP2: N1, N7 and N8, and rust.md's `profile`/`snug::snug`
     mentions.
 
+### D360 — Rust runtime options: the wire profile is `wire`; limits are flat `Option<u32>` fields everywhere, as the JS options bags (P9.13 API-S7; coordinator decision 4)
+**Decision** (coordinator decision 4, 2026-11-13; implemented by the WP2
+engineer).
+
+**Rename.** The wire profile field is now `wire: Profile` in
+`DecodeOptions`, `EncodeOptions`, `ValidationOptions` and
+`SequenceOptions`. `profile` used to name two things: the CDDL restriction
+set (`CompileOptions::profile: CompilerProfile`, which is unchanged) and the
+wire preset. The `Profile` type keeps its name, because it is the whole
+profile (wire, keys, tags, floats, …), not only the wire preset.
+
+**Limits shape: flat everywhere.** The engineer chose this, and the reasons
+are:
+- **It mirrors JS exactly.** Every runtime options bag in the JS host and
+  the SDK is flat (`maxBytes`, `maxDepth`, …), and compile-time caps are
+  the only grouped ones (`compile(text, { limits })`). Rust now follows the
+  same rule: runtime limits are flat, compile-time limits stay grouped in
+  `CompileOptions::limits: CompileLimits`.
+- **It needs one field type, not two Limits types.** Validation limits are
+  optional (`None` means the Program's compiled cap, which a value only
+  lowers). A nested `limits: Limits` for codecs would have needed concrete
+  values, or a second `ValidationLimits` type. Flat `Option<u32>` fields
+  with `None` meaning "the default" (the codec's 1,500,000 / 32 / 65,536 /
+  131,072, or the compiled cap) carry the same meaning in every struct, as
+  `undefined` does in JS.
+- **Most structs were already flat.** `ValidationOptions` and
+  `SequenceOptions` were flat. Only `DecodeOptions` and `EncodeOptions`
+  change.
+
+The public `Limits` type is removed; its resolved form is crate-internal.
+Depth stays capped at 256, and counts below 2³¹ − 1, as
+`Error::Usage("options")`.
+
+**Breaking (pre-release):** it is recorded in CHANGELOG → Breaking.
+docs/rust.md and the crate README show the new shape. Every test host and
+example is updated.
+- [ ] **Signed off** (manager)
+
+### D361 — The generated modules leave the Rust API (`snug::generated`, hidden); `schema::Session` is internal (P9.13 API-S1/S2, CODE-S8; coordinator decision 6)
+**Decision** (coordinator decision 6, 2026-11-13; implemented by the WP2
+engineer).
+- **The generated module.**
+  - **Problem:** `pub mod snug` made `use snug::*;` ambiguous with the crate
+    itself (E0659).
+  - **Change:** the kin modules are now a private `mod snug`, so the
+    crate's own `crate::snug::…` paths are unchanged. They are re-exported
+    as `#[doc(hidden)] pub mod generated` for snug's test-host binaries
+    (`snug::generated::…`). The private module is not glob-imported.
+  - **Test:** `host/rust/tests/glob.rs` compiles `use snug::*;` and uses
+    root items and `snug::decode`.
+- **`schema::Session` and `schema::Step` are `pub(crate)`.**
+  - The drivers (`validate_blob`, `validate_reader` and their async forms)
+    and `Sequence` are the session API.
+  - CODE-S8 (`Session` panics on misuse) is no longer reachable by users.
+  - `tests/sessions.rs` holds its live slots with sequence readers instead.
+  - The references are removed from docs/rust.md: the low-level protocol
+    sentence, the `SessionError` paragraph and the `Step` exhaustiveness
+    bullet.
+  - `sessions.rs`'s module doc no longer names it.
+
+**Breaking (pre-release):** recorded in CHANGELOG.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -12010,6 +12073,86 @@ can run alongside them; its build work is post-RC unless it is cheap.
 - [ ] **P9.13 — Final independent whole-library review** of the code,
   spec, docs and gates by a reviewer who did not build it. Blocking
   findings are fixed before the RC is declared.
+  *WP2 — host resource and lifetime fixes (2026-11-13, the D347 engineer;
+  branch `p913-wp2`):* each blocking item has a regression that fails
+  without its fix (`host/js/test/host-lifetimes.test.mjs`, the wasm SDK
+  parity test's "P9.13" tests, `host/rust/tests/sequence.rs`).
+  - **Blocking items:**
+    - **CODE-B1:** `trim()` forgets the key scratch that `sdk_trim` frees.
+      Before, the next lookup used the freed buffer and trapped on every
+      later call.
+    - **CODE-S3:** `drainSource` closes the push source and rethrows (JS and
+      SDK). `guarded()` is ported to the SDK's push sources, and the SDK's
+      `vms-step`/`vms-eof` `r < 0` paths free the session. 80 failed
+      streams leave `live` unchanged.
+    - **CODE-S1/S2:** a voided session's `end()` throws its predicate's
+      error (native and SDK), and native `end()` refuses re-entry while
+      `busy`.
+    - **SEC-F4:** predicates get `slice`s of their argument and item.
+    - **CODE-S5:** every SDK View/Cursor call into the instance goes through
+      `rt.lost` (`wasm()`). A source-level test checks each one.
+    - **SEC-F2:** a codec `maxDepth` above 256 is a `TypeError` in the
+      shared options check and `resolveLimits` (JS and SDK). A schema's
+      per-call value still only lowers the compiled depth, which the
+      compiler caps at 256, so validation keeps any integer. sequence-test's
+      "per-call depth 999" case needs this. The sequence reader's view mint now uses
+      depth 256, as Rust's does. The SDK instance-loss test now traps
+      through an allocation the layout refuses.
+    - **SEC-F3:** the SDK answers `too_large` before copying the input
+      (`Inner.oversize`: the compiled input limit lowered by the call's;
+      `scan`; views).
+  - **Should-fixes:**
+    - CODE-S6: a Rust `Sequence` is poisoned after a predicate panic
+      (`Error::Usage("poisoned")`).
+    - CODE-S7: `sdk_alloc` uses a checked `Layout`; a null allocation goes
+      to `handle_alloc_error`.
+    - CODE-S8: covered by D361.
+    - SEC-F5: `validateAt` clamps `depth` and `items` (JS and SDK).
+    - SEC-F8: verifier marks are sized at most to `P.length / 8` (JS, Rust
+      and the SDK).
+  - **API nits (left by WP4):**
+    - API-N1: `failFast` with a declared length is accepted without effect
+      by `pushValidator` too (native and SDK), as by `pushScanner`, the
+      handle drivers and Rust's `SourceOptions`. It used to throw.
+    - API-N7: `Error::Usage("owned_view")`'s message names
+      `Schema::document`, and `"poisoned"` says why.
+    - API-N8: JS gains `fromSerializedSync` (the SDK's), and docs/rust.md
+      gains a JS ↔ Rust table of source names. The names themselves stay.
+  - **Code nits done:**
+    - N1: sequence readers record S as VmSession does.
+    - N2: an over-reporting reader is an error, not a slice panic.
+    - N3: the free readers refuse `chunk: 0`.
+    - N7: native `sessionLimits` is bounded at 2³¹ − 1, as the SDK's.
+    - N9: `snug_vm_validate` before a load answers −1.
+    - N10: `Inner.load` keeps one finalizer registration.
+    - N11: the internal Schema's `rule()` throws a `TypeError` that does
+      not echo the name, and refuses SharedArrayBuffer input.
+  - **Left for later:**
+    - N4: a Rust `Sequence` after its end, and a `quantum` for it, would be
+      an API addition.
+    - N5: the error answer for blobs over 2³¹ differs between hosts. Both
+      answers are refusals.
+    - N6: `close()` from inside a predicate is deferred in JS (D347) and
+      refused by the SDK's guard. Both are documented as not allowed.
+    - N8: `st()`'s `&'static mut` aliasing in the wasm crates. It is sound
+      single-threaded, and its refactor touches every export.
+    - S4 (duck-typed schemas in `view()`) was not assigned.
+  - **Gates** on the final tree (`p913-wp2` on main `cf5dc51`):
+    - `bb gates land`: 11/11, with docs-test and the new npm-test guard.
+    - `sequence-test`, `vmsession-test`, `runtime`, `rust-api-test-full`,
+      `msrv`, `wasm-package-test`, `wasm-size`, `node-oldest`,
+      `abnf-test`, `nav-test` and `write-test`: all ok.
+    - `bb gates --check`: ok.
+    - The tree before the codec-only `maxDepth` change failed
+      `sequence-test` on vm-cases' "per-call depth 999" case, which led to
+      that change.
+  - **Test crates:** kin/scripts' crates (vm-test, vmsession-test,
+    abnf-test, compile-crate, nav-crate, write-crate) re-export their
+    generated modules as `generated` for the renamed bin paths (D361).
+  - **Coordinator decision 5:** `{ name: undefined }` against `? name: tstr`
+    answers `{ ok: false, reason: 'type', path: ['name'], offset: 10 }`, and
+    `decode` and views answer `schema/type` at `name`. A test checks this;
+    the docs are D366's.
 - [ ] **RC declared** (manager, recorded with the main commit). The release
   itself is the owner's decision.
 

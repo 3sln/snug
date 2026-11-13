@@ -74,17 +74,17 @@ class Message {
   }
   live() { if (this.gen !== rt.generation || this.allocs === null) throw new Error('snug wasm view: released, or the instance was reset'); }
   /** nav-head: content start; the head words are at rt.i32[rt.NAV + ...]. */
-  head(p) { this.live(); return rt.x.sdk_nav_head(this.ptr, this.end, p); }
-  skip(p) { this.live(); return ok(rt.x.sdk_nav_skip(this.ptr, this.end, p)); }
+  head(p) { this.live(); return wasm(() => rt.x.sdk_nav_head(this.ptr, this.end, p)); }
+  skip(p) { this.live(); return ok(wasm(() => rt.x.sdk_nav_skip(this.ptr, this.end, p))); }
   byte(i) { return rt.u8[this.ptr + i]; }
   sub(s, e) { return rt.u8.subarray(this.ptr + s, this.ptr + e); }
   dir(p, n) {
     if (this.dirs === null || n < DIRECTORY_MIN) return null;
     let d = this.dirs.get(p);
     if (d === undefined) {
-      d = rt.x.sdk_alloc(4 * n) >>> 0; rt.refresh();
+      d = wasm(() => rt.x.sdk_alloc(4 * n)) >>> 0; rt.refresh();
       this.allocs.push([d, 4 * n]);
-      if (rt.x.sdk_nav_dir(this.ptr, this.end, p, d, n) !== n) throw new Error('snug: view directory inconsistent');
+      if (wasm(() => rt.x.sdk_nav_dir(this.ptr, this.end, p, d, n)) !== n) throw new Error('snug: view directory inconsistent');
       this.dirs.set(p, d); this.dirWords += n;
     }
     return d;
@@ -234,27 +234,31 @@ function findIn(m, p, n, key, cose) {
   const span = encodeKey(key, cose, 0, m);
   if (span === null) { badKey(key, m); return -1; }
   // keys out of canonical order (valid CBOR, P8.4): every key compared, no directory search
-  if (m.unsorted) return ok(rt.x.sdk_nav_find_any(m.ptr, m.end, p, span[0], span[1]));
+  if (m.unsorted) return ok(wasm(() => rt.x.sdk_nav_find_any(m.ptr, m.end, p, span[0], span[1])));
   const d = m.dir(p, n);
-  return ok(d !== null ? rt.x.sdk_nav_dir_find(m.ptr, m.end, d, n, span[0], span[1]) : rt.x.sdk_nav_find(m.ptr, m.end, p, span[0], span[1]));
+  return ok(wasm(() => d !== null ? rt.x.sdk_nav_dir_find(m.ptr, m.end, d, n, span[0], span[1]) : rt.x.sdk_nav_find(m.ptr, m.end, p, span[0], span[1])));
 }
 function elementIn(m, p, n, i) {
   if (!Number.isInteger(i)) throw new TypeError('snug view: an index is an integer');
   if (i < 0 || i >= n) return -1;
   const d = m.dir(p, n);
   if (d !== null) return rt.i32[(d >>> 2) + i];
-  return ok(rt.x.sdk_nav_child(m.ptr, m.end, p, i));
+  return ok(wasm(() => rt.x.sdk_nav_child(m.ptr, m.end, p, i)));
 }
 function valueAt(m, p, depth) {
   const e = m.skip(p);
   return build(m.sub(p, e), { cose: m.cose && depth === 0, objects: m.objects });
 }
 
+/** P9.13: every navigation call into the instance goes through rt.lost, as every other entry point's: a trap
+ *  resets the instance (InstanceLost) instead of leaving it half-used. */
+function wasm(f) { try { return f(); } catch (e) { rt.lost(e); } }
+
 let entPtr = 0, entCap = 0, entGen = -1;
 function entryWords(n) {
   if (n > entCap || entGen !== rt.generation) {
-    if (entCap > 0 && entGen === rt.generation) rt.x.sdk_free(entPtr, 8 * entCap);
-    entCap = Math.max(n, 64, 2 * entCap); entPtr = rt.x.sdk_alloc(8 * entCap) >>> 0; entGen = rt.generation; rt.refresh();
+    if (entCap > 0 && entGen === rt.generation) wasm(() => rt.x.sdk_free(entPtr, 8 * entCap));
+    entCap = Math.max(n, 64, 2 * entCap); entPtr = wasm(() => rt.x.sdk_alloc(8 * entCap)) >>> 0; entGen = rt.generation; rt.refresh();
   }
   return entPtr;
 }
@@ -287,7 +291,7 @@ export class View {
    * wasm call; a View, or undefined when a step misses or meets the wrong kind. */
   path(...steps) {
     const m = this.#m; m.live();
-    const n = steps.length, sp = rt.x.sdk_steps(3 * n) >>> 0; rt.refresh();
+    const n = steps.length, sp = wasm(() => rt.x.sdk_steps(3 * n)) >>> 0; rt.refresh();
     let at = 0;
     for (let k = 0; k < n; k++) {
       const s = steps[k], w = (sp >>> 2) + 3 * k;
@@ -300,7 +304,7 @@ export class View {
         rt.i32[w] = 1; rt.i32[w + 1] = span[0]; rt.i32[w + 2] = span[1]; at = span[1];
       }
     }
-    const r = rt.x.sdk_nav_path(m.ptr, m.end, this.#p, n);
+    const r = wasm(() => rt.x.sdk_nav_path(m.ptr, m.end, this.#p, n));
     if (r === NAV_NOT_FOUND) return undefined;
     return new View(m, ok(r), this.#d + n);
   }
@@ -312,7 +316,7 @@ export class View {
       let q = c;
       for (let i = 0; i < n;) {
         const k = Math.min(PAGE, n - i), w = entryWords(k);
-        q = ok(rt.x.sdk_nav_page(m.ptr, m.end, q, k, major === 5 ? 1 : 0, w));
+        q = ok(wasm(() => rt.x.sdk_nav_page(m.ptr, m.end, q, k, major === 5 ? 1 : 0, w)));
         const pos = rt.i32.slice(w >>> 2, (w >>> 2) + 2 * k);   // copied: a later call may grow memory
         for (let j = 0; j < k; j++, i++) yield [major === 4 ? i : keyAt(m, pos[2 * j]), new View(m, pos[2 * j + 1], d)];
       }
@@ -491,6 +495,12 @@ export function view(bytes, opts = {}) {
   if (isShared(bytes)) throw new TypeError('snug view: SharedArrayBuffer-backed input is refused (architecture §16.2)');
   rt.ready();
   const n = bytes.length;
+  // P9.13: an oversized document is refused before its copy into linear memory (which never shrinks)
+  if (opts.schema) {
+    if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
+    const big = innerOf(opts.schema.program).oversize(n, selectOptions(opts, 'validation'));
+    if (big) throw validationFault(big);
+  } else if (n > resolveLimits(validateOptions(selectOptions(opts, 'decode'), 'decode')).maxBytes) throw new SnugFault('too_large');
   let ptr, r;
   try {
     ptr = rt.x.sdk_alloc(Math.max(n, 1)) >>> 0; rt.refresh();

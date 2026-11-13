@@ -97,7 +97,9 @@ export const validate = (schema, bytes, rule, options) => schema.validate(bytes,
 export const validateAt = (schema, bytes, start, end, rule, options) => schema.validateAt(bytes, start, end, rule, options);
 export const decode = (schema, bytes, rule, options) => schema.decode(bytes, rule, options);
 export async function fromProgram(P, B, options = {}) { return new Schema(new Program(P, B, options)); }
-export async function fromSerialized(bytes, options = {}) {
+export async function fromSerialized(bytes, options = {}) { return fromSerializedSync(bytes, options); }
+/** fromSerialized without the promise (as the wasm SDK's): load a stored Program at module scope. */
+export function fromSerializedSync(bytes, options = {}) {
   validateOptions(options, 'program');
   const { P, B, version } = parseSerialized(bytes);
   const program = new Program(P, B, options);

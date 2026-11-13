@@ -12,8 +12,8 @@
 // `PANIC` (caught per line; the crate is built in debug, overflow checks on).
 use snug::controls::{port, prepare_all, program_controls, Control, Controls};
 use snug::schema::Segment;
-use snug::snug::vm::api::{vm_scratch_init, vm_scratch_words};
-use snug::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_keep, vms_message_length,
+use snug::generated::vm::api::{vm_scratch_init, vm_scratch_words};
+use snug::generated::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_keep, vms_message_length,
                                vms_need_length, vms_need_offset, vms_position, vms_step_v, vms_unknown_total,
                                vms_grow_arena, vms_grow_bytes, vms_grow_scratch, vms_grow_words,
                                vms_words};
@@ -382,10 +382,10 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
                     // profile, a Document's view, which reads a message that is not its own
                     // deterministic form through its canonical copy (D262; e.g. 1.5 sent as a
                     // float32 is viewed as f9 3e 00)
-                    let vw = if opts.profile.valid {
+                    let vw = if opts.wire.valid {
                         let big = (i32::MAX - 1) as u32;
-                        let d = snug::DecodeOptions { top: Top::Any, cose: opts.cose, profile: opts.profile,
-                            limits: snug::Limits { max_bytes: big, max_depth: 256, max_entries: big, max_items: big } };
+                        let d = snug::DecodeOptions { top: Top::Any, cose: opts.cose, wire: opts.wire,
+                            max_bytes: Some(big), max_depth: Some(256), max_entries: Some(big), max_items: Some(big) };
                         snug::Document::open(m.bytes(), &d).is_ok_and(|doc| doc.view().raw() == m.view().raw())
                     } else {
                         m.view().raw().len() == len
@@ -461,7 +461,7 @@ fn main() {
                     max_items: o(8),
                     max_bignum_bytes: o(9),
                     budget: o(10),
-                    profile: profile_of(n(11)),
+                    wire: profile_of(n(11)),
                     on_invalid: if n(16) == 1 { OnInvalid::Skip } else { OnInvalid::Stop },
                     fail_fast: n(17) == 1,
                     ..SequenceOptions::default()

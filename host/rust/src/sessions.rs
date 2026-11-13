@@ -1,7 +1,7 @@
 //! Sessions' arrays pooled per Program, and a bound on live sessions
 //! per process.
 //!
-//! A session ([`crate::schema::Session`], a [`crate::Sequence`] reader) takes its VM
+//! A session (a validation driver's, a [`crate::Sequence`] reader) takes its VM
 //! scratch, session array and key arena from its Program's pool and gives them back
 //! when it is dropped. Every array is zero-filled before reuse: a pooled session starts
 //! from exactly the bytes a fresh one does, so no byte crosses from one session to

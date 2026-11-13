@@ -132,14 +132,14 @@ pub struct ValidationOptions {
     /// VM work budget.
     pub budget: Option<u32>,
     /// The wire profile (default: the valid preset).
-    pub profile: crate::Profile,
+    pub wire: crate::Profile,
 }
 impl Default for ValidationOptions {
     fn default() -> Self {
         Self {
             top: Top::Any,
             cose: false,
-            profile: crate::Profile::VALID,
+            wire: crate::Profile::VALID,
             max_bytes: None,
             max_depth: None,
             max_entries: None,
@@ -155,7 +155,7 @@ impl ValidationOptions {
         schema::Options {
             top_map: self.top == Top::Map,
             cose: self.cose,
-            profile: self.profile.flags(),
+            profile: self.wire.flags(),
             max_bytes: opt(self.max_bytes),
             max_depth: opt(self.max_depth),
             max_entries: opt(self.max_entries),
