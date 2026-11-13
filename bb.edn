@@ -51,7 +51,7 @@
   wasm-package-test {:doc "P9.17 (D345): @3sln/snug-wasm -- wasm-release, the staged package (allowlist, links, metadata, wasm bytes, types, every entry), then npm pack and a consumer install: every loader in Node, the Workers recipe in workerd (and wrangler's bundle), Chrome; SKIP without the nightly." :task (apply shell "sh" "host/wasm-sdk/test/package-run" *command-line-args*)}
   watchdog-test {:doc "P9.1: the gate watchdog (kin/scripts/watchdog.mjs) -- CPU and wall caps trip, name the gate, its arguments and the cap, kill the gate's whole process group; pass-through otherwise; a real sh gate (scan-test 300 1) and a node gate (size) trip."
                  :task (shell "node" "kin/scripts/watchdog-test.mjs")}
-  node-oldest {:doc "P9.18 (D344): host/js's npm test on the oldest supported Node (engines.node), via nvm; SKIP without it."
+  node-oldest {:doc "P9.18 (D344): host/js's npm test, then the @3sln/snug-wasm package gate (D345), on the oldest supported Node (engines.node), via nvm; SKIP without it."
                :task (shell "kin/scripts/node-oldest")}
   msrv       {:doc "P9.18 (D344): the assembled crate's build, tests and doctests on its rust-version, via rustup; SKIP without it."
               :task (shell "kin/scripts/msrv")}

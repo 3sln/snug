@@ -17,11 +17,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
-import { stripTypeScriptTypes } from 'node:module';
+import * as nodeModule from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildPackage, PACKAGE_FILES, packageAllows } from '../package-build.mjs';
 import { readRelease } from '../../../kin/scripts/wasm-release.mjs';
+import { oracleMissing } from '../../js/test/oracle.mjs';
+
+// Node 22.13+ (P9.18, D344): on the oldest supported Node the parse check is left out, only under SNUG_NODE_OLDEST=1
+const { stripTypeScriptTypes } = nodeModule;
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const RELEASE = process.env.SNUG_WASM_RELEASE ?? join(ROOT, '.cache/release/wasm');
@@ -87,22 +91,23 @@ test('wasm: the release artefacts byte for byte, and the inline entry\'s copies'
 });
 
 /** The value names a declaration file exports, following `export *` and `export { .. } from`. */
-function declared(path, seen = new Set()) {
+function declared(path, strip, seen = new Set()) {
   if (seen.has(path)) return new Set();
   seen.add(path);
   const source = readFileSync(path, 'utf8'), names = new Set();
-  assert.doesNotThrow(() => stripTypeScriptTypes(source), path);
+  if (strip) assert.doesNotThrow(() => strip(source), path);
   for (const [, n] of source.matchAll(/export declare (?:class|function|const) (\w+)/g)) names.add(n);
   for (const [, spec] of source.matchAll(/export \* from '([^']+)'/g))
-    for (const n of declared(join(dirname(path), spec.replace(/\.js$/, '.d.ts')), seen)) names.add(n);
+    for (const n of declared(join(dirname(path), spec.replace(/\.js$/, '.d.ts')), strip, seen)) names.add(n);
   for (const [, list] of source.matchAll(/export \{([^}]*)\} from/g))
     for (const n of list.split(',').map(s => s.trim().split(/\s+as\s+/).pop()).filter(Boolean)) names.add(n);
   return names;
 }
 
-test('types: every declaration parses and declares exactly its entry\'s runtime exports', async () => {
+test('types: every declaration parses and declares exactly its entry\'s runtime exports', async t => {
+  const strip = stripTypeScriptTypes ?? oracleMissing(t, 'node:module stripTypeScriptTypes (Node 22.13+)', 'declarations are not parsed with Node');
   for (const [key, entry] of codeEntries) {
-    const names = [...declared(join(target, entry.types))].sort();
+    const names = [...declared(join(target, entry.types), strip)].sort();
     const module = await import(join(target, entry.default));
     assert.deepEqual(names, Object.keys(module).sort(), key);
   }

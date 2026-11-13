@@ -1,13 +1,16 @@
 #!/bin/sh
 # P9.18 (D344): host/js's npm test on the oldest supported Node line, the major in
-# host/js/package.json's `engines.node` (">=NN"). The newest installed vNN.* under nvm
+# host/js/package.json's `engines.node` (">=NN"), then (D345) the @3sln/snug-wasm
+# package gate on that Node: host/wasm-sdk/test/package-run (the release modules,
+# the package test and the consumer smoke: npm pack, install, every loader, workerd,
+# Chrome). Its SKIP (no pinned nightly or wasm-opt) passes through as SKIP. The newest installed vNN.* under nvm
 # ($NVM_DIR, default ~/.nvm) runs it, or SNUG_NODE_OLDEST_NODE=/path/to/node (fnm,
 # volta, a system build). Without that Node the gate prints SKIP: NOT RUN, which
 # fails the release set by design (release-policy §2).
 #
 # SNUG_NODE_OLDEST=1 lets the suite leave out comparisons with test-only oracles that
 # this Node lacks (host/js/test/oracle.mjs), each with a logged note; library code
-# never depends on them. Watchdog caps (P9.1): 1800 s wall / 3600 s CPU.
+# never depends on them. Watchdog caps (P9.1): 3600 s wall / 7200 s CPU (the wasm build).
 [ -n "${SNUG_WATCHDOG:-}" ] || exec node "$(dirname "$0")/watchdog.mjs" node-oldest -- "$0" "$@"
 set -eu
 cd "$(dirname "$0")/../.."
@@ -30,5 +33,7 @@ fi
 got=$("$bin/node" -p 'process.versions.node')
 [ "${got%%.*}" = "$major" ] || { echo "node-oldest: $bin/node is Node $got, not Node $major (engines.node >=$major)" >&2; exit 1; }
 echo "node-oldest: npm test on Node $got ($bin/node), the engines floor >=$major"
-cd host/js
-PATH="$bin:$PATH" SNUG_NODE_OLDEST=1 "$bin/npm" test
+(cd host/js && PATH="$bin:$PATH" SNUG_NODE_OLDEST=1 "$bin/npm" test)
+echo "node-oldest: the @3sln/snug-wasm package gate on Node $got"
+# the inner gate's own watchdog is this one (SNUG_WATCHDOG is set)
+PATH="$bin:$PATH" SNUG_NODE_OLDEST=1 sh host/wasm-sdk/test/package-run
