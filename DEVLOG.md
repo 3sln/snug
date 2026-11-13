@@ -8313,6 +8313,53 @@ Gate record (tree of `c3ff28a` rebased on main `96b07c9`, plus this entry):
   (TS2345 BodyInit, TS2322 BlobPart; TS2339 release).
 - Manager re-run on the merged main 8a37612: `bb gates land`, all 11 ok.
 
+**Follow-up 2026-11-13 (coordinator: the README pre-release block).** The
+repository README is the GitHub front page, and nothing is published yet, so
+it now carries a pre-release block, `<!-- prerelease -->` …
+`<!-- /prerelease -->`, above the install section: "Not yet on npm or
+crates.io … build from a checkout", plus the Design line (SPEC, architecture,
+Program format; absolute GitHub links). host/rust/README.md and
+host/wasm-sdk/README.md ship with install lines, so they get the same block.
+- One helper, `kin/scripts/prerelease.mjs`, finds, checks and strips the
+  block. The npm build, the SDK build and `kin/scripts/rust-crate` (now run
+  through node) ship every README without it, and `bb dist` unpacks those
+  artefacts. Malformed markers make the strip throw, so a broken block can't
+  ship half-stripped.
+- `bb dist` refuses to build when the source commit's README still has a
+  block (any dist is a release: it already refuses the placeholder). The
+  error names the README, the commit and release-policy §4 step 3, which
+  now says to remove the block in the release commit. `dist-test` therefore
+  needs a release commit as `--source`.
+- docs-test, repo side: at most one well-formed block in each README. Zero
+  is accepted after the release commit. Unbalanced, duplicated, nested,
+  inline or misspelled markers fail. The stale-text and internal-reference
+  exemption covers only the block's lines.
+- docs-test, shipped side: each README is checked as it ships (stripped),
+  and every shipped file is checked for any marker. Stale text, internal
+  references and markers all fail. Version placeholders could not tell a
+  release apart, because project files always hold the placeholder.
+- Package tests: npm-test checks that the packed README carries no marker
+  and equals the stripped repository copy, and does the same for the
+  README assembled by `rust-crate`. The SDK's package test checks the same
+  (it runs in wasm-package-test; run here directly: 6/6 ok). The README's
+  links to unshipped docs are now absolute; before, the npm copy turned
+  them into plain text.
+- Mutation proofs (docs-test exits 1 on each):
+  - a stray closer;
+  - a duplicated block;
+  - a nested opener;
+  - stale text outside the block;
+  - the markers removed with the block text left (the Design links then
+    ship).
+
+  With zero blocks it passes. A package build with the strip removed fails
+  npm-test ("the packed README carries a pre-release marker"), and so does a
+  `rust-crate` with the strip removed. `dist.mjs --dry-run` with release
+  0.1.0 on a source commit that has the block refuses with the message
+  above. On a stand-in release commit without the block it passes the check
+  and goes on to unpack. The self-test covers the same mutations.
+- Gates: `bb gates land`, all 11 ok (docs-test, npm-test 29 s, rust-api-test
+  155 s, wasm-sdk-test 640 s, ...); `bb gates --check` ok.
 - [x] **Signed off** (manager, 2026-11-13). WP4 is accepted.
   - Packaging: `docs/conformance.md` and `docs/release-policy.md` leave
     the npm package. They are maintainer records, linked on GitHub.

@@ -31,6 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { OPEN, READMES, prereleaseBlocks } from './prerelease.mjs';
 
 function fail(message, status = 1) { console.error(`dist: ${message}`); process.exit(status); }
 
@@ -93,6 +94,16 @@ function main(o) {
   const placeholder = edn.replace(/;.*$/gm, '').match(/:placeholder\s+"([^"]+)"/)?.[1];
   if (!placeholder) fail(`${src}:version.edn has no :placeholder "…"`);
   if (version === placeholder) fail(`${version} is version.edn's placeholder: build from a stamped tree (bb stamp)`);
+  // A release's source commit has no README pre-release block (D366; release-policy §4 step 3):
+  // the repository's front pages must not tell visitors the release they can install is unreleased.
+  for (const readme of READMES) {
+    const text = run('git', ['-C', o.sourceRepo, 'show', `${src}:${readme}`], { allowFail: true });
+    if (text === null) continue;
+    const { blocks, problems } = prereleaseBlocks(text);
+    if (blocks.length || problems.length)
+      fail(`${src.slice(0, 12)}:${readme} still has its ${OPEN} block: remove it in the release commit ` +
+        `(docs/release-policy.md §4 step 3) before building the dist for ${version}`);
+  }
 
   // The tree.
   const stage = join(o.release, 'dist-tree');

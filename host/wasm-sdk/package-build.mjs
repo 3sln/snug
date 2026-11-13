@@ -15,6 +15,7 @@ import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PACKAGE_FILES as NATIVE_FILES } from '../js/src/package-build.mjs';
 import { readRelease } from '../../kin/scripts/wasm-release.mjs';
+import { stripPrerelease } from '../../kin/scripts/prerelease.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SDK = join(ROOT, 'host/wasm-sdk');
@@ -140,8 +141,10 @@ export function buildPackage(destination = DEFAULT_DEST, { wasm } = {}) {
   for (const name of PACKAGE_FILES.root) {
     if (name === 'package.json') continue;
     const from = name === 'README.md' ? join(SDK, 'README.md') : join(ROOT, name);
-    if (existsSync(from)) cpSync(from, join(target, name));
-    else throw new Error(`snug-wasm package: ${from} is missing`);
+    if (!existsSync(from)) throw new Error(`snug-wasm package: ${from} is missing`);
+    // the README's pre-release block is for GitHub visitors only (kin/scripts/prerelease.mjs)
+    if (name === 'README.md') writeFileSync(join(target, name), stripPrerelease(readFileSync(from, 'utf8'), 'host/wasm-sdk/README.md'));
+    else cpSync(from, join(target, name));
   }
   for (const name of PACKAGE_FILES.docs) {
     mkdirSync(dirname(join(target, 'docs', name)), { recursive: true });

@@ -377,7 +377,14 @@ go. Delegations such as D303 cover size caps only, not releases.
      placeholder: stamped versions are never checked in, §1.1);
    - fill in the manifest fields from §8 (`private`/`publish`, `engines`,
      `rust-version`, repository and licence metadata);
-   - move `[Unreleased]` to `[x.y.z] — date`.
+   - move `[Unreleased]` to `[x.y.z] — date`;
+   - remove the pre-release block from the repo README in the release
+     commit: the `<!-- prerelease -->` … `<!-- /prerelease -->` block of
+     `README.md`, `host/rust/README.md` and `host/wasm-sdk/README.md` (D366;
+     it tells GitHub visitors to build from a checkout, and no shipped copy
+     carries it). `bb dist` refuses to build a release from a source commit
+     that still has one, and `bb docs-test` accepts zero or one well-formed
+     block.
 4. **Gates on that exact commit.** All must be green, and a SKIP counts
    as a failure. Each runs under the watchdog (D326), with the result
    recorded in DEVLOG:
@@ -744,8 +751,9 @@ the registries ship:
 - **Reproducible.** The author, committer and dates are taken from the
   source commit. The same artefacts on the same parent give the same
   commit and tag hashes.
-- **Refusals.** The script refuses the placeholder version, artefacts that
-  disagree on the version, an existing tag, and a version the branch
+- **Refusals.** The script refuses the placeholder version, a source
+  commit whose READMEs still carry the pre-release block (§4 step 3),
+  artefacts that disagree on the version, an existing tag, and a version the branch
   already ends at. It writes refs only in the `--repo` it is given, and it
   never pushes. Pushing the branch and its tags is part of the owner's go
   (§4 step 7).

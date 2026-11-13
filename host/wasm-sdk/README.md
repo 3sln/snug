@@ -10,6 +10,12 @@ fast, but it needs an `init` step and a host that runs wasm, and its memory
 grows and never shrinks. See
 [when to choose it](docs/wasm-sdk.md#when-to-choose-it).
 
+<!-- prerelease -->
+> **Not yet on npm.** `npm install @3sln/snug-wasm` works from the first
+> release on. Until then,
+> [build it from a checkout](https://github.com/3sln/snug/blob/main/docs/guide.md#building-from-a-checkout).
+<!-- /prerelease -->
+
 ```sh
 npm install @3sln/snug-wasm
 ```
