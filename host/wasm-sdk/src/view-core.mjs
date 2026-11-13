@@ -500,7 +500,7 @@ export function view(bytes, opts = {}) {
     if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
     const big = innerOf(opts.schema.program).oversize(n, selectOptions(opts, 'validation'));
     if (big) throw validationFault(big);
-  } else if (n > resolveLimits(selectOptions(opts, 'decode')).maxBytes) throw new SnugFault('too_large');
+  } else if (n > resolveLimits(validateOptions(selectOptions(opts, 'decode'), 'decode')).maxBytes) throw new SnugFault('too_large');
   let ptr, r;
   try {
     ptr = rt.x.sdk_alloc(Math.max(n, 1)) >>> 0; rt.refresh();
