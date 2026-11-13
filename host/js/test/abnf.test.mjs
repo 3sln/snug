@@ -4,12 +4,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { compile, SchemaError } from 'snug/compile';
-import { ProgramError, fromSerialized } from 'snug/schema';
-import { abnf, abnfWith, checkAbnf } from 'snug/abnf';
-import { controls } from 'snug/controls';
-import { encode } from 'snug';
-import { validateHandleSync, bufferHandle } from 'snug/sources';
+import { compile, SchemaError } from '@3sln/snug/compile';
+import { ProgramError, fromSerialized } from '@3sln/snug/schema';
+import { abnf, abnfWith, checkAbnf } from '@3sln/snug/abnf';
+import { controls } from '@3sln/snug/controls';
+import { encode } from '@3sln/snug';
+import { validateHandleSync, bufferHandle } from '@3sln/snug/sources';
 
 const vectors = JSON.parse(readFileSync(new URL('../../../corpus/conformance/abnf.json', import.meta.url)));
 const te = new TextEncoder();

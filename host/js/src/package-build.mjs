@@ -8,11 +8,12 @@ import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // What the package contains (release-policy §4 step 6, P9.15): the code, its
-// types, the licence and notices, the README, the changelog and the user docs.
-// Nothing else: no DEVLOG, SPEC, design or review documents, bench records,
-// corpus or tools. package.test.mjs fails on any staged file outside this list.
+// types, the licence and notices, the security policy, the README, the
+// changelog and the user docs. Nothing else: no DEVLOG, SPEC, design or review
+// documents, bench records, corpus or tools. package.test.mjs fails on any
+// staged file outside this list.
 export const PACKAGE_FILES = Object.freeze({
-  root: ['package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md'],
+  root: ['package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'README.md', 'CHANGELOG.md'],
   docs: ['guide.md', 'api.md', 'profiles.md', 'profiles/bindle.md', 'cddl-support.md', 'conformance.md',
     'release-policy.md'],
   // whole directories, less the named development-only files
@@ -73,10 +74,10 @@ export async function buildPackage(destination) {
     await mkdir(dirname(join(target, 'docs', name)), { recursive: true });
     await cp(join(repo, 'docs', name), join(target, 'docs', name));
   }
-  const entries = { 'index.mjs': 'snug', 'public-compile.mjs': 'snug/compile',
-    'public-schema.mjs': 'snug/schema', 'public-view.mjs': 'snug/view',
-    'public-writer.mjs': 'snug/writer', 'public-sources.mjs': 'snug/sources', 'public-sequence.mjs': 'snug/sequence',
-    'controls.mjs': 'snug/controls' };
+  const entries = { 'index.mjs': '@3sln/snug', 'public-compile.mjs': '@3sln/snug/compile',
+    'public-schema.mjs': '@3sln/snug/schema', 'public-view.mjs': '@3sln/snug/view',
+    'public-writer.mjs': '@3sln/snug/writer', 'public-sources.mjs': '@3sln/snug/sources',
+    'public-sequence.mjs': '@3sln/snug/sequence', 'controls.mjs': '@3sln/snug/controls' };
   for (const name of await readdir(join(target, 'examples'))) {
     if (!name.endsWith('.mjs')) continue;
     const path = join(target, 'examples', name);

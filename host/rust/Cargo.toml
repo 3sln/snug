@@ -1,14 +1,18 @@
 [package]
-name = "snug"
-version = "0.0.0"
+# crates.io `snug` belongs to an unrelated project, so the package is
+# `snug-cbor` (owner decision O4, 2026-11-12; D343). The library keeps the
+# name `snug` ([lib] below), so code says `use snug::…`.
+name = "snug-cbor"
+# A version site (version.edn, D343): the placeholder; `bb stamp` writes the release version.
+version = "0.0.0-unreleased"
 description = "CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding and checked views"
 license = "MIT"
+repository = "https://github.com/3sln/snug"
 edition = "2021"
 publish = false
 readme = "README.md"
 keywords = ["cddl", "cbor", "validation", "rfc8610", "rfc8949"]
 categories = ["encoding", "parser-implementations"]
-# repository = "[REPOSITORY URL - OWNER TO FILL IN]"   (none exists yet; release-policy §8)
 rust-version = "1.87"   # the oldest stable that builds and tests it; `bb gates msrv` (release-policy §2)
 # The published crate: the library, its generated modules and the notices. The
 # test-host binaries (src/bin) and the integration tests (tests/, which need
@@ -20,6 +24,7 @@ include = [
     "/README.md",
     "/LICENSE",
     "/THIRD_PARTY_NOTICES.md",
+    "/SECURITY.md",
     "/CHANGELOG.md",
     "/src/*.rs",
     "/src/snug/**/*.rs",
@@ -28,9 +33,11 @@ include = [
 # Assembled by kin/scripts/rust-crate into .cache/snug-rs/: this manifest,
 # host/rust/src/*, gen/rust/snug/** under src/snug/ with generated `mod`
 # files, host/rust/README.md as README.md (`readme`), and the repository's
-# LICENSE, THIRD_PARTY_NOTICES and CHANGELOG. Nothing here is built in place.
+# LICENSE, THIRD_PARTY_NOTICES, SECURITY and CHANGELOG. Nothing here is built
+# in place.
 
 [lib]
+name = "snug"
 path = "src/lib.rs"
 
 [profile.dev]

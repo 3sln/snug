@@ -63,8 +63,8 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). **`.default` is a deliberate deviation:** RFC 8610 §3.8.6 gives it an implied `.ne`; snug follows the annotation-only reading of Erratum 9229 (reported, not verified). Write `(T .ne v) .default v` for the RFC meaning. |
 | `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2, D330); `.det` dedents each literal first. |
 | `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
-| `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `snug/abnf` / `Controls::with_abnf()` (D334); without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
-| registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
+| `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()` (D334); without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
+| registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
 The numeric controls compare values exactly across integers and floats
 (D329): an integer target with a float controller takes the nearest integer
@@ -97,10 +97,10 @@ embedded interpretations.
 
 RFC 9165 §3's controls need the optional ABNF module, loaded like the Unicode
 tables: `compile(text, { controls: { ...abnf } })` with `abnf` from
-`snug/abnf` (Rust `Controls::new().with_abnf()`, the wasm SDK's `snug/abnf`),
+`@3sln/snug/abnf` (Rust `Controls::new().with_abnf()`, the wasm SDK's `@3sln/snug-wasm/abnf`),
 and the same registry when a stored Program is loaded. No core bundle carries
 the engine. Without the module a schema using either control is refused
-(`unsupported_control`, the message naming `snug/abnf`), and loading a
+(`unsupported_control`, the message naming `@3sln/snug/abnf`), and loading a
 Program that uses them is `missing_control`. They are extension controls
 under the hood (D140–D143), so the `bus` profile refuses them unless
 `controlsInBus`, and an item longer than the control's `maxBytes` (65,536 by
@@ -222,7 +222,7 @@ character. At that rate the default budget covers a whole item of the default
 
 `.regexp` matches the whole text in either dialect (D242–D243). Opt in to Unicode
 General_Category escapes with `compile(text, { unicode: tables })`, importing
-`tables` from `snug/unicode`. `\p{X}` selects category X and `\P{X}` its
+`tables` from `@3sln/snug/unicode`. `\p{X}` selects category X and `\P{X}` its
 complement; both work inside classes, including `[\p{L}\p{Nd}_-]` and
 negated classes. Escapes are case-sensitive. Supported names are:
 
@@ -248,7 +248,7 @@ v24.6.0 / ICU 77.1**, and checked in for JS and Rust. The separate JS module
 is **19,377 bytes minified / 9,287 bytes gzip-9** (complete exported module;
 [method](../bench/README.md#unicode-table-module-p73)). It is never imported
 implicitly by the compiler or runtime. Without tables, category escapes
-remain a `regexp` schema error whose message names `snug/unicode`.
+remain a `regexp` schema error whose message names `@3sln/snug/unicode`.
 
 Kin checks the sorted scalar-range data and charges table ingestion, lookup,
 class normalisation and atom construction against the compile budget.
@@ -281,9 +281,9 @@ text. Neither dialect supports backreferences, lookaround or `\x..` escapes.
 | `\s` / `\S` | TAB, LF, CR, SPACE / complement | Refused | No |
 | `\i` / `\I` | XML NameStartChar / complement | Refused | No |
 | `\c` / `\C` | XML NameChar / complement | Refused | No |
-| `\d` / `\D` | Nd / complement | Refused | `snug/unicode` |
-| `\w` / `\W` | Complement of P/Z/C / P/Z/C | Refused | `snug/unicode` |
-| `\p{L}` / `\P{L}` and other categories | Yes | Yes | `snug/unicode` |
+| `\d` / `\D` | Nd / complement | Refused | `@3sln/snug/unicode` |
+| `\w` / `\W` | Complement of P/Z/C / P/Z/C | Refused | `@3sln/snug/unicode` |
+| `\p{L}` / `\P{L}` and other categories | Yes | Yes | `@3sln/snug/unicode` |
 | `\p{IsBlock}` / `\P{IsBlock}` | Explicit data-unavailable error | Refused | Pinned block data unavailable |
 
 XSD `\w` includes letters, marks, numbers and symbols (including emoji),
@@ -303,7 +303,7 @@ const identifier = 'identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"';
 const identifierRaw = String.raw`identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"`;
 const word = 'word = tstr .regexp "[\\\\p{L}\\\\p{Nd}_-]+"';
 const wordRaw = String.raw`word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"`;
-// Compile word/wordRaw with { unicode: tables } from snug/unicode.
+// Compile word/wordRaw with { unicode: tables } from @3sln/snug/unicode.
 ```
 
 Actual CDDL text (the CDDL string parser consumes each doubled backslash):
@@ -435,7 +435,7 @@ refused with `group_recursion`; recursion that consumes nothing is
   before the schema sees them.
 - Text `.size` is UTF-8 byte length, not code-point or grapheme length.
   Regexps operate on code points; for a code-point length use the `.chars`
-  extension control from `snug/controls` (D082, D140–D142).
+  extension control from `@3sln/snug/controls` (D082, D140–D142).
 - CDDL numeric bounds are exact (integers compare as integers of any size,
   floats by their binary64 value), never rounded JS values. Non-float
   literal comparisons rely on the unique admitted wire encoding.
@@ -478,10 +478,10 @@ refused with `group_recursion`; recursion that consumes nothing is
 | Construct | Current refusal / reason |
 | --- | --- |
 | `.pcre` | `unsupported_control`; a proposed alternate dialect, not a portable bounded engine (D013). |
-| `.abnf`, `.abnfb` without `snug/abnf` | `unsupported_control`, naming the module; with it they are supported ([ABNF](#abnf-abnf-abnfb), D334). |
+| `.abnf`, `.abnfb` without `@3sln/snug/abnf` | `unsupported_control`, naming the module; with it they are supported ([ABNF](#abnf-abnf-abnfb), D334). |
 | ABNF prose-val `<…>`, undefined (core) rules | `control_value` with the ABNF line and column; prose has no matchable meaning, core rules are not imported (RFC 9165 §3). |
-| Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time (D082, D140–D143), e.g. `.chars`, `.unique`, `.samelen` from `snug/controls`. |
-| Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `snug/unicode` and pass `unicode: tables` (D083). |
+| Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time (D082, D140–D143), e.g. `.chars`, `.unique`, `.samelen` from `@3sln/snug/controls`. |
+| Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `@3sln/snug/unicode` and pass `unicode: tables` (D083). |
 | Regexp XSD shorthands/subtraction in `iregexp` mode; `\x..`, lookarounds, backreferences in either mode | `regexp`; no host regex engine/ReDoS path. |
 | Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable (D243), even with category tables. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |

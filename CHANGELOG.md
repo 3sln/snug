@@ -10,7 +10,9 @@ artefact — `[js]`, `[rust]`, `[wasm-sdk]` — when they do not apply to all;
 paths, not links, because this file ships in the npm package and the crate,
 and neither contains those files.
 
-Nothing has been released. Every manifest is `private` at `0.0.0`.
+Nothing has been released. Every manifest is `private`, and the
+repository's version sites hold the placeholder `0.0.0-unreleased`; a
+release build stamps the real version from `version.edn` (D343).
 
 ## [Unreleased]
 
@@ -50,22 +52,22 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
 - Wire presets: `valid` (the default: any valid CBOR, duplicate keys
   refused by value; D260), `deterministic` (RFC 8949 §4.2.1 checked on
   read) and the optional `bindle` preset (D080), with per-option overrides.
-- Checked views and a cursor (`snug/view`) and a typed `Writer`
-  (`snug/writer`).
-- Sources (`snug/sources`): handles, push sources and unknown-length
+- Checked views and a cursor (`@3sln/snug/view`) and a typed `Writer`
+  (`@3sln/snug/writer`).
+- Sources (`@3sln/snug/sources`): handles, push sources and unknown-length
   streams validated by the resumable session VM, with verdicts identical
   to the buffer's (drain mode by default, opt-in fail-fast; D085).
-- CBOR sequences (RFC 8742) in `snug/sequence` and Rust `read_sequence` /
+- CBOR sequences (RFC 8742) in `@3sln/snug/sequence` and Rust `read_sequence` /
   `Sequence` (D210–D219).
 - Extension controls: registered `.name` controls decided by host
   predicates, with generic `.chars`, `.unique` and `.samelen` in
-  `snug/controls` (D082, D140–D143).
+  `@3sln/snug/controls` (D082, D140–D143).
 - `.regexp` in the XSD dialect by default, RFC 9485 I-Regexp as an option
-  (D242); Unicode categories through the optional `snug/unicode` tables
+  (D242); Unicode categories through the optional `@3sln/snug/unicode` tables
   (Unicode 16.0; D083).
 - `.abnf` / `.abnfb` (RFC 9165 §3) through the optional ABNF module:
-  `snug/abnf` (`abnf`, `abnfWith`, `checkAbnf`), Rust
-  `Controls::with_abnf()`, wasm SDK `snug-wasm-sdk/abnf`. It checks
+  `@3sln/snug/abnf` (`abnf`, `abnfWith`, `checkAbnf`), Rust
+  `Controls::with_abnf()`, wasm SDK `@3sln/snug-wasm/abnf`. It checks
   RFC 5234 + RFC 7405 grammar membership with a bounded, budget-metered
   Earley recognizer. Without the module these controls are
   `unsupported_control` (D334). Controllers parse as strict RFC 5234 +
@@ -94,11 +96,17 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
   `initSync()` with no files; `/unicode` re-exports the Unicode tables; the
   `.wasm` files are exported for Workers module bindings. The raw modules
   are release artefacts too, with their SHA-256 and a build manifest.
+- `SECURITY.md`: how to report a vulnerability (contact+security@3sln.com)
+  and what counts; it ships in both npm packages and the crate.
 
 ### Breaking
 
 These matter only to users of pre-release builds from this repository.
 
+- Package names (D343): the npm package is `@3sln/snug`, so imports read
+  `@3sln/snug`, `@3sln/snug/compile` and so on, not `snug`. The wasm SDK
+  is `@3sln/snug-wasm` (was `snug-wasm-sdk`). `[rust]` The crate is
+  `snug-cbor`; its library is still `snug`, so `use snug::…` is unchanged.
 - Prelude `float16` / `float32` / `float64` now match floats **by value**,
   not by encoded width. `float32` accepts a 1.5 encoded as float16, and
   `float64` accepts every float (D328; RFC 8610 §3.3). Use a wire preset

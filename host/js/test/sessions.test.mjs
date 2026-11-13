@@ -1,10 +1,10 @@
 // P9.7 (D327): session arrays pooled per Program, a bound on live sessions per isolate.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compile } from 'snug/compile';
-import { encode, SnugFault } from 'snug';
-import { openSession, sessionLimits, releasePool, pushValidator, validateHandleSync, bufferHandle } from 'snug/sources';
-import { sequenceReader, sessionLimits as seqLimits, releasePool as releasePoolSeq } from 'snug/sequence';
+import { compile } from '@3sln/snug/compile';
+import { encode, SnugFault } from '@3sln/snug';
+import { openSession, sessionLimits, releasePool, pushValidator, validateHandleSync, bufferHandle } from '@3sln/snug/sources';
+import { sequenceReader, sessionLimits as seqLimits, releasePool as releasePoolSeq } from '@3sln/snug/sequence';
 import { acquire, release, testing } from '../src/session-pool.mjs';
 
 const schemaP = compile('r = { id: uint, body: tstr }');

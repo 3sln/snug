@@ -1,8 +1,8 @@
-// snug/abnf: RFC 9165 §3's `.abnf` and `.abnfb` controls (D334), an optional module so
+// @3sln/snug/abnf: RFC 9165 §3's `.abnf` and `.abnfb` controls (D334), an optional module so
 // that no core bundle carries the ABNF engine. Give its registry to the compiler and to
 // a Program's loader:
 //
-//   import { abnf } from 'snug/abnf';
+//   import { abnf } from '@3sln/snug/abnf';
 //   const schema = compile(text, { controls: { ...abnf } });          // with others: { ...controls, ...abnf }
 //   fromSerialized(bytes, { controls: { ...abnf } });
 //

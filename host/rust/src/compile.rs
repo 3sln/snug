@@ -200,11 +200,11 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                     column: kc::error_column(&h),
                     rule,
                     message: if code == ERR_NEED_UNICODE {
-                        "Unicode categories require snug::unicode_tables (snug/unicode)"
+                        "Unicode categories require snug::unicode_tables (JS: @3sln/snug/unicode)"
                     } else if code == ERR_REGEXP_BLOCK {
                         "XSD block escapes require unavailable pinned Unicode block data"
                     } else if code == ERR_NEED_ABNF {
-                        ".abnf and .abnfb require the ABNF controls (Controls::with_abnf, snug/abnf)"
+                        ".abnf and .abnfb require the ABNF controls (Controls::with_abnf; JS: @3sln/snug/abnf)"
                     } else { "CDDL schema refused" },
                     detail,
                 });

@@ -75,17 +75,21 @@
                     :doc ".regexp (XSD) vs xsd-regexp.json, the Ruby gem and the cddl crate; needs both oracles (corpus/tools/ORACLES.md)"}
   runtime          {:cmd ["node" "tools/runtime/run.mjs"] :caps [2400 4800]
                     :doc "the staged package in Node, headless Chrome and workerd (P7.7)"}
+  versions         {:cmd ["bb" "versions"] :caps [60 120]
+                    :doc "every version site holds version.edn's placeholder: stamped versions are never checked in (D343)"}
+  stamp-test       {:cmd ["bb" "stamp-test"] :caps [1800 3600]
+                    :doc "bb stamp on scratch copies: coherent sites, idempotent, byte-identical trees, npm tarballs and .crate files (D343)"}
   node-oldest      {:cmd ["bb" "node-oldest"] :caps [1800 3600]
                     :doc "npm test on the newest installed Node of engines.node's major (nvm); SKIPs without it: NOT RUN (P9.18)"}
   msrv             {:cmd ["bb" "msrv"] :caps [2400 4800]
                     :doc "cargo build, test and doctests of the assembled crate on rust-version (rustup); SKIPs without it: NOT RUN (P9.18)"}}
 
  ;; bb.edn tasks that are not gates
- :not-gates [gen emit bench-scan gates identity wasm-release]
+ :not-gates [gen emit bench-scan gates identity wasm-release stamp]
 
  :sets
  {;; docs/release-policy.md §4 step 4, in that order. A SKIP or a :blocked gate fails it.
-  :release  [check drift
+  :release  [versions check drift stamp-test
              scan-test rscan-test vm-test vmsession-test sequence-test valid-test
              compile-test compile-fuzz
              nav-test write-test unicode-test abnf-test
@@ -99,4 +103,4 @@
   :identity [check scan-test compile-test vm-test vmsession-test sequence-test
              nav-test write-test unicode-test abnf-test rust-api-test]
   ;; the routine set before landing a change that touches kin or a host
-  :land     [check drift size npm-test rust-api-test wasm-sdk-test vm-test compile-test]}}
+  :land     [versions check drift size npm-test rust-api-test wasm-sdk-test vm-test compile-test]}}

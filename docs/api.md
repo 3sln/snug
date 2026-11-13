@@ -50,7 +50,7 @@ The following named sets are the complete option-key lists used below:
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
-| `openSession` (`snug/sources`) | ValidationOptions | scheduling: `quantum` |
+| `openSession` (`@3sln/snug/sources`) | ValidationOptions | scheduling: `quantum` |
 | `view` | ValidationOptions + `schema`, `rule`, `borrow`, `directories` | none |
 | `View.validateAt` | `schema` | none |
 | `scanBuffer` | DecodeOptions | none |
@@ -71,7 +71,7 @@ CDDL restrictions; `wire` selects a runtime wire preset. For example,
 `maxByets` at any runtime boundary, top-level `compile({ maxBytes })`, and
 unknown keys inside either grouped limits object are rejected.
 
-## Codec: `snug`
+## Codec: `@3sln/snug`
 
 ```ts
 decode(bytes: Uint8Array, options?: DecodeOptions): Value
@@ -147,7 +147,7 @@ must be retained.
 
 ## Compilation
 
-From `snug/compile`:
+From `@3sln/snug/compile`:
 
 ```ts
 compile(text: string | Uint8Array, options?: CompileOptions): Promise<Schema>
@@ -163,8 +163,8 @@ interface CompileOptions {
   cuts?: 'rfc' | 'branch';               // map cut semantics; default 'rfc'
   groupWords?: number;                   // PEG group arena cap in words; default 4,194,304, at most 2^24
   limits?: CompileLimits;
-  unicode?: Int32Array;                  // tables from snug/unicode
-  controls?: Controls;                   // extension controls (snug/controls, snug/abnf)
+  unicode?: Int32Array;                  // tables from @3sln/snug/unicode
+  controls?: Controls;                   // extension controls (@3sln/snug/controls, /abnf)
   controlsInBus?: boolean;               // admit extension controls under 'bus'
 }
 ```
@@ -178,7 +178,7 @@ Any other value, including the pre-release name `'reference'`, is a TypeError.
 The effective cut mode is part of the source key.
 `abnf?: 'strict' | 'lenient'` (D340) is how `.abnf`/`.abnfb` controllers
 parse: `'strict'` (the default) is RFC 5234 + RFC 7405 + RFC 9165 §3;
-`'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-snugabnf)). Any
+`'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-3slnsnugabnf)). Any
 other value is a TypeError. It is part of the source key.
 
 `CompileLimits` names:
@@ -190,7 +190,7 @@ other value is a TypeError. It is part of the source key.
 All are non-negative safe integers; defaults and ceilings are in the
 [guide](guide.md#limits). kin applies effective defaults and ceilings before
 computing the source key. `controls` registers extension controls
-(D082/D140–D142, [Custom controls](guide.md#custom-controls), `snug/controls`
+(D082/D140–D142, [Custom controls](guide.md#custom-controls), `@3sln/snug/controls`
 below): a name → `Control` object (malformed names or entries are TypeErrors;
 built-in control names are refused). The whole registry is part of the source
 key; `controlsInBus` admits controls under `bus`. Unicode tables are an
@@ -208,7 +208,7 @@ unknown options reject with TypeError before compilation.
 `rule`. The compiler supplies positions in code points and safe schema
 metadata. The public error message uses the code and position.
 
-## Extension controls: `snug/controls`
+## Extension controls: `@3sln/snug/controls`
 
 ```ts
 type Control = ((argument: Uint8Array, item: Uint8Array) => boolean) |
@@ -243,7 +243,7 @@ built-in control. `argument(bytes)` is asked once per use at compile time:
 anything but `true` refuses the schema (`control_value`), and a string answer
 is the refusal's detail in the message.
 
-## ABNF: `snug/abnf`
+## ABNF: `@3sln/snug/abnf`
 
 ```ts
 export const abnf: Readonly<{ abnf: Control; abnfb: Control }>;
@@ -261,7 +261,7 @@ fromSerialized(bytes, { controls: { ...abnf } })
 
 They are the only entries that may use these two built-in names. Without the
 module, `.abnf`/`.abnfb` are `unsupported_control`, and the message names
-`snug/abnf`. A stored Program that uses them fails to load with
+`@3sln/snug/abnf`. A stored Program that uses them fails to load with
 `ProgramError('missing_control')`.
 
 The controller is checked at compile time. Prose-val, syntax errors and
@@ -286,21 +286,21 @@ refuse under that parse mode (strict by default).
 Semantics, leniencies and costs:
 [CDDL support](cddl-support.md#abnf-abnf-abnfb).
 
-## Unicode tables: `snug/unicode`
+## Unicode tables: `@3sln/snug/unicode`
 
 Exports `tables: Int32Array`, `categories: readonly string[]`,
 `unicodeVersion: string` and `nodeVersion: string`. Tables are pinned to
 Unicode 16.0 (Node v24.6.0 / ICU 77.1); treat them as immutable.
 Pass `compile(text, { unicode: tables })` to enable RFC 9485
 General_Category `\\p{…}` / `\\P{…}` escapes. Without tables those escapes
-reject with SchemaError `regexp` naming `snug/unicode`. Categories are
+reject with SchemaError `regexp` naming `@3sln/snug/unicode`. Categories are
 case-sensitive; scripts, blocks and aliases are refused.
 Table contents bind sourceKey. Neither validation nor Program loading needs
 the module: Programs contain the compiled automata, with unchanged format.
 See [category reference](cddl-support.md#unicode-regexp-categories) and the
 [escaping cookbook](cddl-support.md#regexp-cookbook).
 
-## Schemas and Programs: `snug/schema`
+## Schemas and Programs: `@3sln/snug/schema`
 
 ```ts
 type ValidationResult = { ok: true } | {
@@ -370,7 +370,7 @@ guarantee. `new Program` verifies and throws synchronously. Compile trusted
 schemas ahead of time and load once at startup; isolate hostile compilation
 in a worker/process. See the [worked isolation recipe](guide.md#programs-caching-and-compatibility).
 
-## Views: `snug/view`
+## Views: `@3sln/snug/view`
 
 `view(bytes: Uint8Array, options?: ViewOptions): View` checks before opening.
 ViewOptions extends ValidationOptions with `schema?`, `rule?`, `borrow?`
@@ -422,7 +422,7 @@ Detached validation says
 nothing about enclosing constraints. No unchecked opener, raw VM state or
 directory instrumentation is part of this entry point.
 
-## Writer: `snug/writer`
+## Writer: `@3sln/snug/writer`
 
 `new Writer(options?: WriterOptions)` accepts EncodeOptions plus
 `keysSorted?: boolean` (false) and `limits?: Limits`. The grouped limits
@@ -457,7 +457,7 @@ Wrong-type typed calls such as `new Writer().text(7)`, `.uint('7')` or
 The first failure poisons the Writer; discard it and construct a new one.
 Map comparison budget is currently internal (D073).
 
-## Sources: `snug/sources`
+## Sources: `@3sln/snug/sources`
 
 Schema validators and profile-only scanners support known-length handles,
 declared-length push sources and (D085) streams of unknown length in drain
@@ -499,8 +499,8 @@ with top defaulting to any and limits only lowering the compiled values.
 | `pushScanner(length, options?, { quantum?, failFast? }?)` | `{ feed(chunk), resume(), finalize() }`; `length` undefined: unknown length (drain mode, `end()`) |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
-| `sessionLimits(set?)` | The isolate's session policy (P9.7, D327): `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `snug/sequence` |
-| `releasePool()` | Drops every idle pooled session array now (P9.7), e.g. in a long-lived process trimming memory. Also exported by `snug/sequence` |
+| `sessionLimits(set?)` | The isolate's session policy (P9.7, D327): `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `@3sln/snug/sequence` |
+| `releasePool()` | Drops every idle pooled session array now (P9.7), e.g. in a long-lived process trimming memory. Also exported by `@3sln/snug/sequence` |
 
 The Rust host has the same drivers, sync and async (P9.6), over the same
 session, with the same verdicts for every chunking: `validateHandle` is
@@ -520,7 +520,7 @@ while let Some(m) = messages.next().await { /* m?.view() */ }           // readS
 ```
 
 `VmSession` is a public interface obtained through `openSession` from
-`snug/sources`, with no public constructor. It exposes readonly `length`
+`@3sln/snug/sources`, with no public constructor. It exposes readonly `length`
 (undefined for unknown length), `limit` (the unknown-length input limit),
 `bytesHeld` (exclusive VM array bytes, excluding the shared Program and
 supplied windows),
@@ -552,7 +552,7 @@ results are those of fresh arrays. Idle arrays are kept up to `maxPooledBytes`
 in all (default 2 MiB, about 25 small sessions' worth); an entry above 1 MiB,
 or above a quarter of `maxPooledBytes`, is dropped instead. `releasePool()`
 drops them all at once, and a collected Program's go with it. The wasm SDK
-(`snug-wasm-sdk/sources`, `/sequence`) has the same `sessionLimits`,
+(`@3sln/snug-wasm/sources`, `/sequence`) has the same `sessionLimits`,
 `releasePool` and `close()`, counted per instance.
 
 `sessionLimits()` reports `live` and `pooledBytes` for monitoring. The limits
@@ -626,12 +626,12 @@ identifies adapter protocol failures (`bad_chunk`, `short_read`,
 propagate unchanged; sanitise them before logging. Wrong arguments/unknown
 rules use TypeError. Session reuse after completion/failure is unsupported.
 
-## CBOR sequences: `snug/sequence`
+## CBOR sequences: `@3sln/snug/sequence`
 
 `readSequence(source, options?)` and `sequenceReader(options?)` read an RFC 8742
 sequence (D210–D217, [guide](guide.md#cbor-sequences-and-sse)). Each message is
 one root, checked in the pass that finds its end: the profile, plus the schema
-rule when `schema` and `rule` are given. A separate entry from `snug/sources`
+rule when `schema` and `rule` are given. A separate entry from `@3sln/snug/sources`
 because it carries the View.
 
 | Function | Result |
@@ -686,7 +686,7 @@ the earlier messages (readSequence yields them, then throws; the push result
 carries it as `error`). Transport exceptions (a rejected source read) pass
 through unchanged; cancel a pending read with the fetch's AbortController.
 
-The wasm SDK (`snug-wasm-sdk/sequence`, P7.13w) has the same API, options and
+The wasm SDK (`@3sln/snug-wasm/sequence`, P7.13w) has the same API, options and
 answers (`bb wasm-sdk-test` holds it to the native package per feed). Its
 differences are the SDK's view contract (D132): `message.bytes` is borrowed or
 assembled exactly as natively, but `message.view` copies the bytes into linear
@@ -707,7 +707,7 @@ indexes and the markers `*`, `#tag`, `cbor` appear in paths.
 | Validation reason | `cbor/` plus a profile code; or `type`, `missing`, `unexpected`, `value`, `size`, `range`, `pattern`, `tag`, `bits`, `embedded`, `control`, `control_size`, `group_limit`, `budget` |
 | Schema decode/checked-view SnugFault | Profile codes unchanged; schema reason prefixed `schema/`, e.g. `schema/type`, `schema/budget`; also carries reason/path/offset/subcode |
 | Host encode / Writer | Profile codes where applicable; `unsupported`, `grammar`, `writer_failed` |
-| Sessions (`snug/sources`, `snug/sequence`) | `sessions/limit` |
+| Sessions (`@3sln/snug/sources`, `@3sln/snug/sequence`) | `sessions/limit` |
 | ProgramError | `magic`, `container_version`, `format_version`, `length`, `version` (malformed producer metadata), `reserved`, `digest`, `verify`, `too_large`, `missing_control` |
 | SourceError | `bad_chunk`, `short_read`, `length_mismatch` |
 
@@ -840,7 +840,7 @@ SchemaError recovery (line/column locate schema text, not payload):
 | `unsupported_control` | Recognised control deliberately unsupported; rewrite with supported constraints |
 | `unknown_control` | Unknown control/extensions pending; correct spelling or enforce application constraint separately |
 | `control_registry` | The extension-control registry reached the compiler malformed (the facade usually refuses a bad registry earlier with TypeError); fix the registry |
-| `regexp` | Unsupported I-Regexp/escaping or missing tables; use cookbook replacements for JS shorthands, pass snug/unicode for categories |
+| `regexp` | Unsupported I-Regexp/escaping or missing tables; use cookbook replacements for JS shorthands, pass @3sln/snug/unicode for categories |
 | `map_key` | Unsupported map-key schema; use allowed literal/key domain |
 | `tag` | Invalid/unsupported schema tag constraint; correct syntax/content type |
 | `major` | Invalid major/simple constraint; use supported major syntax |

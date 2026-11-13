@@ -1,10 +1,10 @@
 {
-  "name": "snug",
-  "version": "0.0.0",
+  "name": "@3sln/snug",
+  "version": "0.0.0-unreleased",
   "description": "CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding and checked views",
   "keywords": ["cddl", "cbor", "validation", "rfc8610", "rfc8949"],
   "license": "MIT",
-  "repository": { "type": "git", "url": "[REPOSITORY URL - OWNER TO FILL IN]", "directory": "host/js" },
+  "repository": { "type": "git", "url": "git+https://github.com/3sln/snug.git", "directory": "host/js" },
   "private": true,
   "type": "module",
   "sideEffects": false,

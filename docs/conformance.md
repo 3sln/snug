@@ -14,7 +14,7 @@
 > | Tag 32 `http://[x` and tag 0 `…T00:00:60Z` accepted | both refused (`cbor/tag`) | D252 |
 > | 55799 only at depth 0 | any depth (Bindle refuses the tag) | D252 |
 > | Prelude float widths are encoded widths | sets of values | D328 |
-> | wasm SDK sequences deferred | `snug-wasm-sdk/sequence` exists (P7.13w) | — |
+> | wasm SDK sequences deferred | `@3sln/snug-wasm/sequence` exists (P7.13w) | — |
 >
 > The inventory totals below are the audit's and are not recomputed. `.default` (S46) is unchanged: snug still ignores the implied `.ne` (a documented deviation, see cddl-support).
 

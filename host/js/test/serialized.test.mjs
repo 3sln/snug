@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { compile, SchemaError } from 'snug/compile';
-import { Program, ProgramError, Schema, fromProgram, fromSerialized } from 'snug/schema';
-import { encode } from 'snug';
+import { SNUG_VERSION } from '../src/version.mjs';
+import { compile, SchemaError } from '@3sln/snug/compile';
+import { Program, ProgramError, Schema, fromProgram, fromSerialized } from '@3sln/snug/schema';
+import { encode } from '@3sln/snug';
 
 const resign = bytes => {
   bytes.set(createHash('sha256').update(bytes.subarray(0, 56)).update(bytes.subarray(88)).digest(), 56);
@@ -54,8 +55,10 @@ test('container matches §13.3, explicit little endian and independent host SHA-
   assert.equal(d.getUint32(12, true), 2);   // format 2.0 (D279, D318: major in the low 16 bits)
   assert.equal(d.getUint32(16, true), P.length);
   assert.equal(d.getUint32(20, true), B.length);
-  assert.equal(new TextDecoder().decode(bytes.subarray(24, 29)), '0.0.0');
-  assert.ok(bytes.subarray(29, 56).every(x => x === 0));
+  // the producer field: the version (version.edn's placeholder, or the stamped one), NUL padded
+  const v = SNUG_VERSION.length;
+  assert.equal(new TextDecoder().decode(bytes.subarray(24, 24 + v)), SNUG_VERSION);
+  assert.ok(bytes.subarray(24 + v, 56).every(x => x === 0));
   assert.ok(bytes.subarray(88, 96).every(x => x === 0));
   assert.equal(bytes.length, 96 + P.length * 4 + B.length);
   for (let i = 0; i < P.length; i++) assert.equal(d.getInt32(96 + 4 * i, true), P[i]);

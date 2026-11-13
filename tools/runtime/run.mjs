@@ -87,11 +87,11 @@ results.fixtures = { profileAccept: fx.profile.accept.length, profileRefuse: fx.
   contracts: fx.contracts.length, contractCases: fx.contracts.reduce((n, s) => n + s.cases.length, 0), probes: fx.probes.length,
   fixtureBytes: statSync(join(out, 'fixtures.json')).size };
 
-// A fresh consumer directory: node_modules/snug is a copy of the staged package;
+// A fresh consumer directory: node_modules/@3sln/snug is a copy of the staged package;
 // suite/ops/entries are copied beside it, so no import can reach the repository.
 const consumer = join(out, 'consumer');
-mkdirSync(join(consumer, 'node_modules'), { recursive: true });
-cpSync(pkg, join(consumer, 'node_modules/snug'), { recursive: true });
+mkdirSync(join(consumer, 'node_modules', '@3sln'), { recursive: true });
+cpSync(pkg, join(consumer, 'node_modules/@3sln/snug'), { recursive: true });
 for (const f of ['suite.mjs', 'ops.mjs', 'node-entry.mjs']) cpSync(join(here, f), join(consumer, f));
 cpSync(join(here, 'browser'), join(consumer, 'browser'), { recursive: true });
 cpSync(join(here, 'worker'), join(consumer, 'worker'), { recursive: true });
@@ -132,15 +132,15 @@ const sumSizes = files => files.map(sizeOf).reduce((a, b) => ({ raw: a.raw + b.r
 const jsFiles = dir => readdirSync(dir).filter(f => f.endsWith('.js')).map(f => join(dir, f));
 
 // Library-only entries (what a consumer's bundle pays for snug), minified.
-const RUNTIME = "export * from 'snug'; export * as schema from 'snug/schema'; export * as view from 'snug/view'; export * as writer from 'snug/writer'; export * as sources from 'snug/sources';";
+const RUNTIME = "export * from '@3sln/snug'; export * as schema from '@3sln/snug/schema'; export * as view from '@3sln/snug/view'; export * as writer from '@3sln/snug/writer'; export * as sources from '@3sln/snug/sources';";
 const libEntries = [
-  ['snug (codec: decode, encode, values)', "export * from 'snug';"],
-  ['snug/schema (Program, Schema, fromSerialized; no compiler)', "export * from 'snug/schema';"],
-  ['snug/view', "export * from 'snug/view';"],
-  ['snug/writer', "export * from 'snug/writer';"],
-  ['snug/sources', "export * from 'snug/sources';"],
+  ['snug (codec: decode, encode, values)', "export * from '@3sln/snug';"],
+  ['snug/schema (Program, Schema, fromSerialized; no compiler)', "export * from '@3sln/snug/schema';"],
+  ['snug/view', "export * from '@3sln/snug/view';"],
+  ['snug/writer', "export * from '@3sln/snug/writer';"],
+  ['snug/sources', "export * from '@3sln/snug/sources';"],
   ['runtime: snug + schema + view + writer + sources (no compiler)', RUNTIME],
-  ['runtime + snug/compile, one file (compiler inlined by esbuild)', RUNTIME + " export * as compile from 'snug/compile';"],
+  ['runtime + snug/compile, one file (compiler inlined by esbuild)', RUNTIME + " export * as compile from '@3sln/snug/compile';"],
 ];
 results.sizes = [];
 for (const [i, [label, code]] of libEntries.entries()) {
@@ -162,7 +162,7 @@ const builds = {
   browser: { dir: join(bundleDir, 'browser'), args: ['browser/entry.mjs', '--splitting', '--platform=browser', '--minify', '--entry-names=entry', '--chunk-names=chunk-[hash]'] },
   'worker-split': { dir: join(bundleDir, 'worker-split'), args: ['worker/entry.mjs', '--splitting', '--minify', '--external:./fixtures.json', '--entry-names=worker', '--chunk-names=chunk-[hash]'] },
   'worker-eager': { dir: join(bundleDir, 'worker-eager'), args: ['worker/entry.mjs', '--minify', '--external:./fixtures.json', '--entry-names=worker'] },
-  'worker-precompiled': { dir: join(bundleDir, 'worker-precompiled'), args: ['worker/entry.mjs', '--minify', '--external:./fixtures.json', '--entry-names=worker', '--alias:snug/compile=./compile-absent.mjs'] },
+  'worker-precompiled': { dir: join(bundleDir, 'worker-precompiled'), args: ['worker/entry.mjs', '--minify', '--external:./fixtures.json', '--entry-names=worker', '--alias:@3sln/snug/compile=./compile-absent.mjs'] },
   'unminified-all': { dir: join(bundleDir, 'unminified'), args: ['browser/entry.mjs', 'worker/entry.mjs', '--splitting', '--external:./fixtures.json', '--chunk-names=chunk-[hash]'] },
 };
 for (const [name, b] of Object.entries(builds)) { esb([...b.args, `--outdir=${b.dir}`]); b.files = jsFiles(b.dir); }
@@ -313,10 +313,10 @@ if (!skip.has('cold') && workerd) {
   const input = `const hex = h => Uint8Array.from(h.match(/../g), x => parseInt(x, 16));\nconst input = hex('${c.hex}');\n`;
   const entries = {
     empty: `${input}export default { async fetch() { return new Response(String(input.length)); } };`,
-    import: `import * as schema from 'snug/schema';\n${input}globalThis.keep = schema;\nexport default { async fetch() { return new Response(String(input.length)); } };`,
-    runtime: `import { fromSerialized } from 'snug/schema';\n${input}const program = hex('${fx.programs[suite.name]}');\n` +
+    import: `import * as schema from '@3sln/snug/schema';\n${input}globalThis.keep = schema;\nexport default { async fetch() { return new Response(String(input.length)); } };`,
+    runtime: `import { fromSerialized } from '@3sln/snug/schema';\n${input}const program = hex('${fx.programs[suite.name]}');\n` +
       `export default { async fetch() { const s = await fromSerialized(program); const r = s.validate(input, '${c.rule}', { top: 'any' }); return new Response(r.ok ? String(input.length) : 'refused'); } };`,
-    compile: `import { compile } from 'snug/compile';\n${input}const cddl = ${JSON.stringify(suite.cddl)};\n` +
+    compile: `import { compile } from '@3sln/snug/compile';\n${input}const cddl = ${JSON.stringify(suite.cddl)};\n` +
       `export default { async fetch() { const s = await compile(cddl); const r = s.validate(input, '${c.rule}', { top: 'any' }); return new Response(r.ok ? String(input.length) : 'refused'); } };`,
   };
   const port = await freePort(), configs = {};

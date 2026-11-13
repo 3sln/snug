@@ -59,5 +59,11 @@
               :task (apply shell "kin/scripts/gates" *command-line-args*)}
   identity   {:doc "SPEC §7: the cross-host identity gates (bb gates identity): Programs, verdicts, reasons, paths and budget points, JS == Rust."
               :task (shell "kin/scripts/gates" "identity")}
+  versions   {:doc "D343: every version site (manifests, version.mjs, kin's literal, gen/) holds version.edn's :placeholder; stamped versions are never checked in.   bb versions [--list]"
+              :task (apply shell "node" "kin/scripts/version-sites.mjs" *command-line-args*)}
+  stamp      {:doc "D343: write a release version onto every version site and re-emit gen/. Only in a detached release worktree or an exported copy.   bb stamp [version]  (default version.edn :version)"
+              :task (apply shell "node" "kin/scripts/stamp.mjs" *command-line-args*)}
+  stamp-test {:doc "D343: stamp scratch copies of this tree (0.1.0, a 32-byte prerelease): every site coherent, npm test passes stamped, stamping is idempotent, and two stamps give byte-identical trees, npm tarballs and .crate files."
+              :task (apply shell "node" "kin/scripts/stamp-test.mjs" *command-line-args*)}
   bench-scan {:doc "P1.4: generated JS vs hand-written JS vs wasm vs cbor.mjs (bench/SCAN.md)."
               :task (apply shell "kin/scripts/bench-scan" *command-line-args*)}}}

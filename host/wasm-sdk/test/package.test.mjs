@@ -39,8 +39,7 @@ const codeEntries = Object.entries(pkg.exports).filter(([, v]) => typeof v === '
 
 test('files: the allowlist, every listed document, no dangling link, nothing from the checkout', () => {
   assert.deepEqual(shipped.filter(p => !packageAllows(p)), [], 'files outside the package allowlist');
-  for (const name of PACKAGE_FILES.root)
-    if (name !== 'SECURITY.md' || existsSync(join(ROOT, 'SECURITY.md'))) assert.ok(shipped.includes(name), name);
+  for (const name of PACKAGE_FILES.root) assert.ok(shipped.includes(name), name);
   for (const d of PACKAGE_FILES.docs) assert.ok(shipped.includes('docs/' + d), d);
   for (const w of PACKAGE_FILES.wasm) assert.ok(shipped.includes('wasm/' + w), w);
   assert.ok(!shipped.some(p => /(^|\/)(DEVLOG|SPEC)\.md$|^bench\/|^corpus\/|^tools\/|^docs\/reviews\/|package-build|\.test\.mjs$/.test(p)));

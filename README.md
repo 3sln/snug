@@ -46,9 +46,9 @@ node --input-type=module
 ```
 
 ```js
-import { encode } from 'snug';
-import { compile } from 'snug/compile';
-import { view } from 'snug/view';
+import { encode } from '@3sln/snug';
+import { compile } from '@3sln/snug/compile';
+import { view } from '@3sln/snug/view';
 
 const schema = await compile('message = { id: uint, text: tstr .size (0..80) }');
 const bytes = encode({ id: 7, text: 'hello' });
@@ -81,7 +81,8 @@ node examples/program-cache.mjs      # compile once, ship the compiled schema
 
 ## Quick start: Rust
 
-The crate has no dependencies.
+The crate is `snug-cbor` (`cargo add snug-cbor` once published); its
+library is `snug`. It has no dependencies.
 
 ```rust
 use snug::{CompileOptions, EncodeOptions, Schema, Scratch, Value, encode};
@@ -146,16 +147,16 @@ can be lowered per call.
 
 | Entry | For |
 | --- | --- |
-| `snug` | `encode`, `decode` and the value types |
-| `snug/compile` | `compile`; loads the compiler on first use |
-| `snug/schema` | validating and decoding with a compiled schema; loading precompiled schemas |
-| `snug/view` | lazy, checked `View` and `Cursor` |
-| `snug/writer` | the typed `Writer` |
-| `snug/sources` | blobs, push sources and streams |
-| `snug/sequence` | CBOR sequences (RFC 8742) |
-| `snug/controls` | `.chars`, `.unique`, `.samelen`, and your own controls |
-| `snug/abnf` | optional `.abnf` / `.abnfb` support |
-| `snug/unicode` | optional Unicode tables for `\p{…}` in regular expressions |
+| `@3sln/snug` | `encode`, `decode` and the value types |
+| `@3sln/snug/compile` | `compile`; loads the compiler on first use |
+| `@3sln/snug/schema` | validating and decoding with a compiled schema; loading precompiled schemas |
+| `@3sln/snug/view` | lazy, checked `View` and `Cursor` |
+| `@3sln/snug/writer` | the typed `Writer` |
+| `@3sln/snug/sources` | blobs, push sources and streams |
+| `@3sln/snug/sequence` | CBOR sequences (RFC 8742) |
+| `@3sln/snug/controls` | `.chars`, `.unique`, `.samelen`, and your own controls |
+| `@3sln/snug/abnf` | optional `.abnf` / `.abnfb` support |
+| `@3sln/snug/unicode` | optional Unicode tables for `\p{…}` in regular expressions |
 
 Gzipped, the codec alone is about 21 KB and validation about 54 KB. The
 compiler is a separate chunk of about 98 KB that loads only when you
@@ -182,7 +183,8 @@ Design: [specification](SPEC.md), [architecture](docs/architecture.md),
 
 ## Security
 
-Report vulnerabilities privately to contact+security@3sln.com.
+Report vulnerabilities privately to contact+security@3sln.com. See
+[SECURITY.md](SECURITY.md) for what to include and what counts.
 
 ## License
 

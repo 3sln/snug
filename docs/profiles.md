@@ -41,7 +41,7 @@ relative to RFC 8949 §4.2.1; neither admits a non-deterministic form. Under
 `valid` the same options remove acceptance relative to RFC 8949 §5.3.
 
 ```js
-import { decode, encode, profiles } from 'snug';
+import { decode, encode, profiles } from '@3sln/snug';
 decode(bytes);                                     // valid preset, any root
 decode(bytes, { wire: 'deterministic' });          // RFC 8949 §4.2.1 checked
 decode(bytes, { wire: 'bindle' });                 // the Bindle profile, map root
@@ -377,7 +377,8 @@ CBOR mode. Colon-implied cuts remain ordinary struct syntax in `bindle`.
 
 ## Version policy
 
-The package remains private at 0.0.0. Pin a repository revision and
+The package is unreleased and private; a checkout's version is the
+placeholder `0.0.0-unreleased`. Pin a repository revision and
 regenerate the staged package when updating it. **P8.4 changed the default
 wire policy to `valid`** (D260): input the deterministic preset refused for an
 encoding reason only (indefinite lengths, non-shortest forms, key order, NaN

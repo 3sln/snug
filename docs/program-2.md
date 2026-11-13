@@ -52,7 +52,7 @@ merged into program.md and this file is deleted.
   existential map tables and counter automata. The old engine is removed
   too. A 1.2 that added new ARRAY/MAP kinds beside the old ones is possible,
   but it keeps both engines and their compatibility cost. The reason for the
-  bump is the deliberate support policy (snug is 0.0.0, and no external store
+  bump is the deliberate support policy (snug is unreleased, and no external store
   holds Programs). It is not that recompiling the same text would give a
   different result (X Q13).
 * A later 2.x minor may give the reserved memo fields a meaning, but only

@@ -371,7 +371,7 @@ as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
 | `.feature` | accepted as a no-op annotation (RFC 9165: it always matches) (A12) |
 | `.cat`, `.det`, `.plus` | compile-time folding (P3, not gated in revision 2) |
 | `.pcre` | refused (D013) |
-| `.abnf`, `.abnfb` | with the optional module `snug/abnf` / `Controls::with_abnf()` (D334): extension controls named `abnf`/`abnfb` (the EXT row below). The controller is RFC 5234 + RFC 7405 ABNF (the start, then rules), checked at compile time (strict RFC parsing by default; the compile option `abnf: 'lenient'`, in the source key's registry flags, admits snug's non-RFC forms, D340) and prepared at bind. The match is kin's metered Earley recognizer over scalars or bytes (language membership), with scratch capped by a host option (default 2²² words = 16 MiB, the D281 arena default; at most 2²⁴). Without the module, `unsupported_control`. |
+| `.abnf`, `.abnfb` | with the optional module `@3sln/snug/abnf` / `Controls::with_abnf()` (D334): extension controls named `abnf`/`abnfb` (the EXT row below). The controller is RFC 5234 + RFC 7405 ABNF (the start, then rules), checked at compile time (strict RFC parsing by default; the compile option `abnf: 'lenient'`, in the source key's registry flags, admits snug's non-RFC forms, D340) and prepared at bind. The match is kin's metered Earley recognizer over scalars or bytes (language membership), with scratch capped by a host option (default 2²² words = 16 MiB, the D281 arena default; at most 2²⁴). Without the module, `unsupported_control`. |
 | a registered `.name` | extension control (D082, D140–D142): `AND(target leaf, EXT)` per target leaf; the EXT is decided by a host predicate over the item's encoding, only when the AND needs it, after the item's profile walk, charged before it runs (a fixed call charge plus the predicate's declared cost, by default one unit per item byte; the generic controls meter their own work in kin, D190–D193), bounded by the control's maximum item size (program.md §4.2, §14, format 1.1). Unregistered: `unknown_control` naming it. |
 
 ### 4.7 Regular expressions
@@ -386,7 +386,7 @@ whose class contains the code point. Cost per code point is
 the worst case is `P × ⌈P/32⌉` = 2 048 word operations at P = 256. A class
 lookup is a binary search over the regexp's range table. Counted repetition
 unrolls within the position limit. D083/P7.3 adds `\\p{…}` and `\\P{…}` via
-an explicitly supplied, compile-time-only `snug/unicode` module (Unicode 16.0,
+an explicitly supplied, compile-time-only `@3sln/snug/unicode` module (Unicode 16.0,
 D110–D111); without it these remain schema errors naming the module. Kin
 resolves categories into the existing classes, including class unions and
 complements; Cs is empty because text has no surrogates. Table ingestion,
@@ -1166,7 +1166,7 @@ never released before its bytes are complete.
 
 ### 18.8 API
 
-JS (`snug/sequence`, its own entry so that `snug/sources` does not carry the View):
+JS (`@3sln/snug/sequence`, its own entry so that `@3sln/snug/sources` does not carry the View):
 
 ```js
 for await (const m of readSequence(source, { schema, rule: 'event', maxMessageBytes: 65536 }))

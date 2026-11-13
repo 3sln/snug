@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encode, decode, profiles, Tagged, SnugFault } from 'snug';
-import { compile } from 'snug/compile';
-import { validate, decode as schemaDecode, validateAt } from 'snug/schema';
-import { Writer } from 'snug/writer';
-import { view } from 'snug/view';
-import * as sources from 'snug/sources';
+import { encode, decode, profiles, Tagged, SnugFault } from '@3sln/snug';
+import { compile } from '@3sln/snug/compile';
+import { validate, decode as schemaDecode, validateAt } from '@3sln/snug/schema';
+import { Writer } from '@3sln/snug/writer';
+import { view } from '@3sln/snug/view';
+import * as sources from '@3sln/snug/sources';
 
 const schema = await compile('r = { id: uint }\nid = uint', {
   limits: { inputBytes: 32, depth: 3, entries: 4, items: 12, budget: 1000 },

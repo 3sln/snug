@@ -85,9 +85,9 @@ export async function compile(text, options = {}) {
       const rl = Math.max(inf[3], 0);
       const rule = inf[3] >= 0 ? td.decode(m.subarray(p + inf[0], p + inf[0] + rl)) : undefined;
       const name = inf[4] >= 0 ? td.decode(m.subarray(p + inf[0] + rl, p + inf[0] + rl + inf[4])) : undefined;
-      const detail = inf[5] === 1 ? '; Unicode categories require tables from snug/unicode'
+      const detail = inf[5] === 1 ? '; Unicode categories require tables from @3sln/snug/unicode'
         : inf[5] === 2 ? '; XSD block escapes require unavailable pinned Unicode block data'
-        : inf[5] === 3 ? '; .abnf and .abnfb require the ABNF controls from snug/abnf'
+        : inf[5] === 3 ? '; .abnf and .abnfb require the ABNF controls from @3sln/snug/abnf'
         : code === 'unknown_control' && name !== undefined ? ` (.${name} is not a registered control)` : '';
       c.cc_release();
       throw refused(code, inf[1], inf[2], rule, detail);

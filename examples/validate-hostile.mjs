@@ -1,5 +1,5 @@
 // Run: node examples/validate-hostile.mjs. Repository-relative public entry;
-// a staged/installed package spells this import 'snug/compile'.
+// a staged/installed package spells this import '@3sln/snug/compile'.
 import assert from 'node:assert/strict';
 import { compile } from '../host/js/src/public-compile.mjs';
 

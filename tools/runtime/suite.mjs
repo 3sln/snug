@@ -1,18 +1,18 @@
 // P7.7 runtime evidence: one conformance subset, run unchanged in Node, a
 // browser and a workerd isolate. Platform-neutral: no Node APIs, no eval, only
-// the six public package entry points (bare `snug/...` specifiers, resolved by
-// Node from a fresh node_modules/snug or by esbuild when bundling).
+// the six public package entry points (bare `@3sln/snug/...` specifiers, resolved
+// by Node from a fresh node_modules/@3sln/snug or by esbuild when bundling).
 //
 // runSuite(fixtures, { now, compiler }) -> { groups: { name: {pass, fail, ms,
 // failures[]} }, totals: {pass, fail}, env }
 //   compiler: true  compile every CDDL text here (lazy `snug/compile` import)
 //             false use the Programs serialised by tools/runtime/fixtures.mjs
 //                   (fromSerialized only; the compiler is never imported)
-import { decode, encode, Decimal, NDArray, Float16Bytes, SnugFault } from 'snug';
-import { Program, Schema, ProgramError, fromSerialized, fromProgram, validateAt } from 'snug/schema';
-import { view } from 'snug/view';
-import { Writer } from 'snug/writer';
-import { asyncHandle, bufferHandle, scanHandle, scanHandleSync } from 'snug/sources';
+import { decode, encode, Decimal, NDArray, Float16Bytes, SnugFault } from '@3sln/snug';
+import { Program, Schema, ProgramError, fromSerialized, fromProgram, validateAt } from '@3sln/snug/schema';
+import { view } from '@3sln/snug/view';
+import { Writer } from '@3sln/snug/writer';
+import { asyncHandle, bufferHandle, scanHandle, scanHandleSync } from '@3sln/snug/sources';
 
 export const fromHex = h => { const b = new Uint8Array(h.length >> 1); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.substr(i * 2, 2), 16); return b; };
 export const toHex = b => { let s = ''; for (const x of b) s += x.toString(16).padStart(2, '0'); return s; };
@@ -109,7 +109,7 @@ export async function runSuite(fx, { now = () => Date.now(), compiler = true } =
   const schemas = new Map();
   const load = async suite => {
     if (compiler) {
-      const { compile } = await import('snug/compile');
+      const { compile } = await import('@3sln/snug/compile');
       return compile(suite.cddl, { profile: suite.profile ?? 'full' });
     }
     return fromSerialized(fromHex(fx.programs[suite.name]));
@@ -135,7 +135,7 @@ export async function runSuite(fx, { now = () => Date.now(), compiler = true } =
     for (const s of fx.probes) await check(s.name, async () => {
       if (s.schemaError) {
         if (!compiler) return;
-        const { compile, SchemaError } = await import('snug/compile');
+        const { compile, SchemaError } = await import('@3sln/snug/compile');
         try { await compile(s.cddl, { profile: s.profile ?? 'full' }); } catch (e) {
           ok(e instanceof SchemaError && e.code === s.schemaError, `wanted SchemaError ${s.schemaError}, got ${e?.name} ${e?.code}`);
           return;
