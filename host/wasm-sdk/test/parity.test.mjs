@@ -869,7 +869,7 @@ test('P9.13: an oversized input is refused before it is copied into linear memor
   const deep = new Uint8Array(301).fill(0x81); deep[300] = 0;
   assert.throws(() => W.decode(deep, { maxDepth: 257 }), TypeError);
   assert.throws(() => wview(deep, { maxDepth: 100000 }), TypeError);
-  assert.throws(() => s.validate(deep, 'r', { maxDepth: 257 }), TypeError);
+  assert.equal(s.validate(deep, 'r', { maxDepth: 999 }).reason, 'cbor/depth');   // a schema's only lowers its compiled depth
   assert.throws(() => W.decode(deep, { maxDepth: 256 }), e => e.code === 'depth');
 });
 

@@ -80,17 +80,18 @@ test('SEC-F4: an extension control gets copies holding exactly its argument and 
   for (const [ab, al, ib, il] of seen) { assert.equal(ab, al); assert.equal(ib, il); }
 });
 
-test('SEC-F2: maxDepth above 256 is a TypeError everywhere (as Rust\'s Limits)', async () => {
+test('SEC-F2: a codec maxDepth above 256 is a TypeError (as Rust\'s Limits); a schema\'s only lowers its compiled one', async () => {
   const schema = await compile('r = any');
   const deep = new Uint8Array(301).fill(0x81); deep[300] = 0;
   const o = { maxDepth: 257 };
   assert.throws(() => decode(deep, o), TypeError);
   assert.throws(() => view(deep, o), TypeError);
   assert.throws(() => encode([1], o), TypeError);
-  assert.throws(() => schema.validate(deep, 'r', o), TypeError);
-  assert.throws(() => openSession(schema, 'r', deep.length, o), TypeError);
-  assert.throws(() => sequenceReader(o), TypeError);
-  await assert.rejects(validateStream(schema, [deep], 'r', o), TypeError);
+  assert.throws(() => sequenceReader(o), TypeError);              // profile only: the codec's limits
+  await assert.rejects(scanStream([deep], o), TypeError);
+  // under a schema a per-call value only lowers the compiled depth (at most 256): no deeper walk is possible
+  assert.equal(schema.validate(deep, 'r', { maxDepth: 999 }).reason, 'cbor/depth');
+  assert.equal((await validateStream(schema, [deep], 'r', { maxDepth: 999 })).reason, 'cbor/depth');
   // 256 is the ceiling, and deep input under it is a refusal, never a stack overflow
   assert.throws(() => decode(deep, { maxDepth: 256 }), e => e.code === 'depth');
   assert.equal(schema.validate(deep, 'r', { maxDepth: 256 }).reason, 'cbor/depth');

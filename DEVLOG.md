@@ -12091,8 +12091,11 @@ can run alongside them; its build work is post-RC unless it is cheap.
     - **SEC-F4:** predicates get `slice`s of their argument and item.
     - **CODE-S5:** every SDK View/Cursor call into the instance goes through
       `rt.lost` (`wasm()`). A source-level test checks each one.
-    - **SEC-F2:** `maxDepth` above 256 is a `TypeError` in the shared
-      options check (JS and SDK). The sequence reader's view mint now uses
+    - **SEC-F2:** a codec `maxDepth` above 256 is a `TypeError` in the
+      shared options check and `resolveLimits` (JS and SDK). A schema's
+      per-call value still only lowers the compiled depth, which the
+      compiler caps at 256, so validation keeps any integer. sequence-test's
+      "per-call depth 999" case needs this. The sequence reader's view mint now uses
       depth 256, as Rust's does. The SDK instance-loss test now traps
       through an allocation the layout refuses.
     - **SEC-F3:** the SDK answers `too_large` before copying the input

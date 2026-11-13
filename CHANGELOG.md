@@ -168,10 +168,12 @@ repository.
   `use snug::*;` compiles. `schema::Session` and `schema::Step` are internal;
   the drivers (`Schema::validate_blob`, `validate_reader`, their async forms)
   and `Sequence` are the session API (D361).
-- `maxDepth` above 256 is refused with `TypeError` on every JS and wasm SDK
-  entry point (decode, encode, views, schemas, sessions, sequences), as
-  Rust's options already were; a deeper bound let input exhaust the stack or
-  the wasm instance instead of answering `depth`.
+- A codec `maxDepth` above 256 is refused with `TypeError` in JS and the
+  wasm SDK (decode, encode, the Writer, schema-less views, scans and
+  profile-only sequences), as Rust's codec options already were; a deeper
+  bound let input exhaust the stack or the wasm instance instead of
+  answering `depth`. A schema's per-call `maxDepth` still only lowers the
+  Program's compiled depth (at most 256).
 - `[rust]` A `Sequence` whose `feed` or `finish` did not return (an
   extension predicate panicked) answers `Error::Usage("poisoned")` from every
   later call instead of running on half-updated state. The free
