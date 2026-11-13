@@ -497,18 +497,21 @@ locally or in CI.
   `npm-test` on Node 20, 22 and 24, and `rust-api-test` on Rust 1.87 and
   stable. These two gates are plain POSIX `sh` and Node, so each cell runs
   the gate's command under the watchdog with its caps, as `bb gates` does,
-  and fails on a non-zero exit or a SKIP line. The full gate sets run only
+  and fails on a non-zero exit or a NOT RUN line (stdout or stderr), as
+  `bb gates` does. The rust-version cells set `SNUG_CLIPPY_OPTIONAL=1`:
+  that toolchain has no Clippy (D344). The full gate sets run only
   on macOS, because the gate scripts use macOS tools.
 - **Required:** one `ci` job sums up the run. It fails unless every compat
   and Linux cell passed, and `land` passed (or, on a release run, every
-  release shard passed). The stable-Rust cells are required too, so they
-  stay red until D357 fixes a stack overflow on Rust 1.98.1.
+  release shard passed). The latest-stable Rust cells are required too
+  (D357 made them pass on Rust 1.98.1).
 - **Release shards:** the release set's wall caps add up to about 23
   hours, and a hosted job stops at 6. CI runs the set as five parallel
   shards, the sets `release-core`, `-vm`, `-rust`, `-wasm` and `-long`.
   `:partitions` in `ci/gate-map.edn` names them. `bb gates --check` fails
   unless the shards hold exactly the release set's gates, each once, and
-  each fits one job. Every job's `timeout-minutes` is above the sum of its
+  each fits one job, and unless ci.yml's release matrix runs exactly those
+  shards with a `timeout-minutes` above each one's caps (D365). Every job's `timeout-minutes` is above the sum of its
   gates' wall caps.
 - **Tools:** each job installs only what its gates need. All of it is
   pinned or read from the repository:

@@ -17,7 +17,7 @@ function run(args) {
   mkdirSync(join(repo, '.cache'), { recursive: true });
   const out = mkdtempSync(join(repo, '.cache', 'proptest-selftest-'));
   try {
-    const r = spawnSync(process.execPath, [campaign, '--tree=working', `--out=${out}`, `--log-dir=${join(out, 'log')}`, ...args], { encoding: 'utf8', env: { ...process.env, SNUG_WATCHDOG: '1' } });
+    const r = spawnSync(process.execPath, [campaign, '--tree=working', `--out=${out}`, `--log-dir=${join(out, 'log')}`, ...args], { encoding: 'utf8', env: { ...process.env, SNUG_WATCHDOG: '1', SNUG_PROPTEST_SELFTEST: '0' } });
     return { status: r.status, stdout: r.stdout + r.stderr, summary: JSON.parse(readFileSync(join(out, 'summary.json'), 'utf8')) };
   } finally { rmSync(out, { recursive: true, force: true }); }
 }
@@ -61,4 +61,21 @@ test('--inject-slow refuses an unknown kind', () => {
   const r = spawnSync(process.execPath, [campaign, '--tree=working', '--minutes=0.05', '--props=5', '--inject-slow=nap', '--workers=5:1', `--out=${join(repo, '.cache', 'proptest-selftest-refused')}`], { encoding: 'utf8', env: { ...process.env, SNUG_WATCHDOG: '1' } });
   rmSync(join(repo, '.cache', 'proptest-selftest-refused'), { recursive: true, force: true });
   assert.match(r.stdout + r.stderr, /--inject-slow is wall, cpu, validate-wall or validate-cpu/);
+});
+
+// P9.13 WP3 (S1): a worker that exits without reporting 'done', and a requested property that ran no case, fail
+test('a property whose workers exit is recorded as P<n>/worker-exit and P<n>/no-cases, and fails the campaign', () => {
+  const r = run(['--minutes=0.05', '--props=4', '--inject-exit=4', '--workers=4:1']);
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(r.summary.findings.some(f => f.sig === 'P4/worker-exit'), JSON.stringify(r.summary.findings));
+  assert.ok(r.summary.findings.some(f => f.sig === 'P4/no-cases'), JSON.stringify(r.summary.findings));
+});
+
+// P9.13 WP3 (S9): the start in the seed range moves with HEAD and the date, is logged, and replays
+test('the seed offset is logged with the flags that replay it; --seed-offset sets it', () => {
+  const r = run(['--minutes=0.02', '--props=4', '--workers=4:1', '--seeds=1..1000', '--seed-offset=17']);
+  assert.match(r.stdout, /seed offset 17; replay this run with --seeds=1\.\.1000 --seed-offset=17/);
+  assert.equal(r.summary.seedOffset, 17);
+  const d = run(['--minutes=0.02', '--props=4', '--workers=4:1']);
+  assert.match(d.stdout, /seed offset \d+ \(from HEAD [0-9a-f]{12} and \d{4}-\d\d-\d\d\); replay this run with --seeds=1\.\.1000000 --seed-offset=\d+/);
 });

@@ -63,7 +63,7 @@ for (let i = 0; i < cases.length; i++) {
     const bytes = encodeText(text);
     if (ref) { assert.equal(ref.exec(text)?.[0] === text, want, `Node v: ${c.name}`); references++; }
     for (const flags of [0, 1, 2, 3]) for (const budget of [-1, 0, 1, 16, 64, 256]) {
-      const lim = Int32Array.from([1, 0, -1, -1, -1, -1, -1, budget, flags, 122]);
+      const lim = Int32Array.from([1, 0, -1, -1, -1, -1, -1, budget, flags, 122, -1]);   // word 10: the group arena's limit (default), as vm.rs reads 11 words
       assert.ok(vmValidate(p, b, 0, bytes, lim, s, out) >= 0);
       if (budget === -1) assert.equal(out[0] === 0, want, `${c.regexp} ${c.name}: ${JSON.stringify(text)}`);
       vmInput.push(`case ${pi} 0 ${Array.from(lim).join(' ')} ${hex(bytes) || '-'}`);
@@ -91,7 +91,7 @@ if (process.argv[3]) {
   assert.equal(r.status, 0, r.stderr || r.error?.message);
   assert.deepEqual(r.stdout.trimEnd().split('\n'), vmExpected);
   console.log(`ok regexp: ${samples} complete JS == Rust VM outputs (fixed verdicts, fast/generic, both schedules, partial budgets)`);
-} else console.log(`ok regexp: ${samples} JS VM samples; Rust VM arm runs when its binary is supplied`);
+} else console.log(`SKIP regexp: Rust VM arm (no binary given; kin/scripts/compile-test supplies it): NOT RUN`);
 
 if (process.argv[4]) {
   const { instance } = await WebAssembly.instantiate(readFileSync(process.argv[4]), {});
@@ -120,4 +120,4 @@ if (process.argv[4]) {
     x.cc_release();
   }
   console.log(`ok regexp: ${cases.length} JS == Rust == wasm compiler outcomes (complete Program bytes and errors)`);
-}
+} else console.log('SKIP regexp: wasm compiler arm (no module given: the wasm toolchain is missing, or the caller gave none): NOT RUN');

@@ -10,20 +10,11 @@
 [ -n "$SNUG_WATCHDOG" ] || exec node "$(dirname "$0")/watchdog.mjs" vm-test -- "$0" "$@"   # P9.1 caps
 set -e
 cd "$(dirname "$0")/../.."
-bb -cp kin/src:../kin/src kin/scripts/vm-emit > /dev/null
-host=.cache/vm-host
-mkdir -p "$host/bin"
-printf '//! VM test crate: the generated cbor, vm and program modules and the Rust schema host.\npub mod snug;\npub mod schema;\npub mod controls;\npub mod sessions;\n' > "$host/lib.rs.new"
-cmp -s "$host/lib.rs.new" "$host/lib.rs" 2>/dev/null || mv "$host/lib.rs.new" "$host/lib.rs"; rm -f "$host/lib.rs.new"
-cmp -s host/rust/src/bin/vm.rs "$host/bin/vm.rs" 2>/dev/null || cp host/rust/src/bin/vm.rs "$host/bin/vm.rs"
-cmp -s host/rust/src/schema.rs "$host/schema.rs" 2>/dev/null || cp host/rust/src/schema.rs "$host/schema.rs"
-cmp -s host/rust/src/sessions.rs "$host/sessions.rs" 2>/dev/null || cp host/rust/src/sessions.rs "$host/sessions.rs"
-cmp -s host/rust/src/controls.rs "$host/controls.rs" 2>/dev/null || cp host/rust/src/controls.rs "$host/controls.rs"
-crate=.cache/snug-vm
-SNUG_RS_ONLY="cbor vm program" ./kin/scripts/rust-crate "$crate" "$host"
-if ! build=$(cd "$crate" && RUSTFLAGS="-D warnings" cargo build --quiet --bin vm 2>&1); then
-  echo "  FAIL cargo refused the generated code:"; printf '%s\n' "$build" | sed 's/^/    /'; exit 1
-fi
-# and the wasm build, when its toolchain is present (otherwise SKIP, loudly)
-if wasm=$(./kin/scripts/wasm-build speed 2>/dev/null); then export SNUG_VM_WASM="$wasm"; fi
-node kin/scripts/vm-test.mjs "$crate/target/debug/vm" "$@"
+if ! vm=$(kin/scripts/vm-bin); then printf '%s\n' "$vm"; exit 1; fi
+# and the wasm build when its toolchain is present (otherwise vm-test.mjs prints SKIP). Any other
+# wasm-build failure fails the gate, and a stale SNUG_VM_WASM from the caller is never used
+# (P9.13 WP3 N1).
+unset SNUG_VM_WASM
+set +e; wasm=$(./kin/scripts/wasm-build speed); st=$?; set -e
+case $st in 0) export SNUG_VM_WASM="$wasm" ;; 3) ;; *) echo "  FAIL kin/scripts/wasm-build speed exited $st"; exit 1 ;; esac
+node kin/scripts/vm-test.mjs "$vm" "$@"

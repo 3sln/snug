@@ -15,6 +15,8 @@ import { Writer } from '@3sln/snug/writer';
 import { asyncHandle, bufferHandle, scanHandle, scanHandleSync } from '@3sln/snug/sources';
 
 export const fromHex = h => { const b = new Uint8Array(h.length >> 1); for (let i = 0; i < b.length; i++) b[i] = parseInt(h.substr(i * 2, 2), 16); return b; };
+/** The Bindle wire profile, any root: the profile vectors' profile. */
+const BINDLE = { wire: 'bindle', top: 'any' };
 export const toHex = b => { let s = ''; for (const x of b) s += x.toString(16).padStart(2, '0'); return s; };
 
 // The value notation of corpus/cbor-vectors/cbor-profile.json (see its format field).
@@ -85,23 +87,25 @@ export async function runSuite(fx, { now = () => Date.now(), compiler = true } =
   };
 
   // 1. Codec: the profile vectors (decode -> value, encode -> exact bytes; refusals by code).
+  // They are the Bindle profile's (corpus/cbor-vectors), so they run under it; the default
+  // `valid` preset accepts much of what Bindle refuses.
   await group('codec: profile accept', async check => {
     for (const v of fx.profile.accept) await check(v.name, () => {
-      const bytes = fromHex(v.hex), want = expected(v.value), got = decode(bytes, { top: 'any' });
+      const bytes = fromHex(v.hex), want = expected(v.value), got = decode(bytes, BINDLE);
       ok(same(got, want), 'decoded value differs');
       ok(toHex(encode(want)) === v.hex, 'encode(expected) differs');
       ok(toHex(encode(got)) === v.hex, 'encode(decoded) differs');
     });
   });
   await group('codec: profile refuse', async check => {
-    for (const v of fx.profile.refuse) await check(v.name, () => throwsFault(() => decode(fromHex(v.hex), { top: 'any' }), v.code, 'decode'));
+    for (const v of fx.profile.refuse) await check(v.name, () => throwsFault(() => decode(fromHex(v.hex), BINDLE), v.code, 'decode'));
   });
   // cborg-oracle inputs cborg accepts: refused with the labelled profile code, or exactly re-encoded.
   await group('codec: cborg oracle', async check => {
     for (const [i, v] of fx.oracle.entries()) await check(`oracle ${i}`, () => {
       const bytes = fromHex(v.hex);
-      if (v.refuse) return throwsFault(() => decode(bytes, { top: 'any' }), v.refuse, 'decode');
-      ok(toHex(encode(decode(bytes, { top: 'any' }))) === v.hex, 'round trip differs');
+      if (v.refuse) return throwsFault(() => decode(bytes, BINDLE), v.refuse, 'decode');
+      ok(toHex(encode(decode(bytes, BINDLE))) === v.hex, 'round trip differs');
     });
   });
 
@@ -238,12 +242,12 @@ export async function runSuite(fx, { now = () => Date.now(), compiler = true } =
   await group('sources: asyncHandle', async check => {
     for (const v of fx.profile.accept) await check(v.name, async () => {
       const bytes = fromHex(v.hex);
-      ok(await scanHandle(asyncHandle(bytes), { top: 'any' }, { chunk: 64, quantum: 2 }) === true, 'async scan');
-      ok(scanHandleSync(bufferHandle(bytes), { top: 'any' }, { chunk: 3 }) === true, 'sync scan');
+      ok(await scanHandle(asyncHandle(bytes), BINDLE, { chunk: 64, quantum: 2 }) === true, 'async scan');
+      ok(scanHandleSync(bufferHandle(bytes), BINDLE, { chunk: 3 }) === true, 'sync scan');
     });
     for (const v of fx.profile.refuse) await check(v.name, async () => {
       const bytes = fromHex(v.hex);
-      try { await scanHandle(asyncHandle(bytes), { top: 'any' }, { chunk: 64, quantum: 2 }); }
+      try { await scanHandle(asyncHandle(bytes), BINDLE, { chunk: 64, quantum: 2 }); }
       catch (e) { ok(e instanceof SnugFault && e.code === v.code, `got ${e?.name} ${e?.code}`); return; }
       throw new Check('accepted');
     });

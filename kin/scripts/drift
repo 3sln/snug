@@ -35,9 +35,11 @@ else
   echo "  ok   re-emitting changed nothing -- no hand edits"
 fi
 
-if ! git diff --quiet -- gen/; then
+# P9.13 WP3 (N6): against HEAD, not the index: a stale gen/ that is committed but has fresh output
+# staged is still stale
+if ! git diff --quiet HEAD -- gen/; then
   echo "  FAIL the committed output is not what the sources say:"
-  git diff --stat -- gen/ | sed 's/^/    /'
+  git diff --stat HEAD -- gen/ | sed 's/^/    /'
   echo "       (run bb emit and commit gen/ with its source)"
   fails=$((fails+1))
 else

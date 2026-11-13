@@ -51,9 +51,7 @@ async function wireCase(name,vector,index,sequence=false) {
   const buffer=Buffer.from(vector.hex,'hex');
   for(const policy of ['valid','deterministic','bindle']) {
     const options={wire:policy,top:'any'};
-    // Before P8.4 lands, default behaviour is the measured current behaviour
-    // for valid expectations. Never silently label it as wire:'valid' support.
-    if(policy==='valid'&&!validSupported)delete options.wire;
+    // P9.13 WP3 (S8): wire 'valid' is always asked for; a build without it fails (no fallback)
     let observed=true,code,count=0;
     try {
       if(sequence)for await(const message of readSequence([buffer],options))count++;
@@ -61,7 +59,6 @@ async function wireCase(name,vector,index,sequence=false) {
     } catch(error) {observed=false;code=fault(error);}
     const dependsOn=policy==='valid'?['P8.4']:[];
     record(name,sequence?'sequence':'wire',`${index}:${policy}`,vector.expect[policy],observed,dependsOn,{code,
-      ...(policy==='valid'&&!validSupported?{mode:'current default (wire:valid unavailable)'}:{}),
       ...(sequence?{itemCount:count}:{}),expectedClass:vector.expectedClass,observedClass:observedClass(code)},vector.classification?.[policy]);
     if(sequence && (vector.expect[policy] || vector.expectedClass))record(name,'item-count',`${index}:${policy}`,vector.itemCount,count,dependsOn);
   }
@@ -86,7 +83,7 @@ for(const file of readdirSync(location).filter(x=>/^rfc\d+.*\.json$/.test(x)).so
     for(let i=0;i<suite.cases.length;i++) {
       const test=suite.cases[i];let observed=null,code;
       if(schema)try {
-        const result=schema.validate(Buffer.from(test.hex,'hex'),test.rule,validSupported?{wire:'valid'}:{});
+        const result=schema.validate(Buffer.from(test.hex,'hex'),test.rule,{wire:'valid'});
         observed=result.ok;code=result.reason;
       }catch(error){code=fault(error);}
       record(suite.name,'cddl',i,test.expect,observed,test.dependsOn,{rule:test.rule,code:code||(!schema?'compile-failure':undefined),ruby:test.ruby},test.classification);
@@ -111,5 +108,11 @@ const summary={validSupported,runtimeStable:JSON.stringify(runtimeStart)===JSON.
 console.log('SUMMARY '+JSON.stringify(summary));
 const output=process.argv.find(x=>x.startsWith('--json='))?.slice(7);
 if(output)writeFileSync(output,JSON.stringify({summary,runtimeStart,runtimeEnd,compilation,results:rows},null,2)+'\n');
-// --gate: every failure must be classified (P9.2), and no classification may be stale
-if(process.argv.includes('--gate')&&(summary.unexplained||summary.stale))process.exitCode=1;
+// --gate: every failure must be classified (P9.2), and no classification may be stale; wire 'valid' must be
+// supported and the runtime unchanged from start to end (P9.13 WP3, S8)
+if(process.argv.includes('--gate')){
+  const why=[...(summary.unexplained||summary.stale?[`${summary.unexplained} unexplained, ${summary.stale} stale`]:[]),
+    ...(!validSupported?["wire 'valid' is not supported by this build"]:[]),...(!summary.runtimeStable?['the runtime fingerprint changed during the run']:[])];
+  console.log(why.length?`FAIL rfc-corpus: ${why.join('; ')}`:'ok rfc-corpus');
+  if(why.length)process.exitCode=1;
+}

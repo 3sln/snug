@@ -134,8 +134,7 @@ jobs:
           - { gate: npm-test,      label: Node 22,   node: '22',     rust: none, oldest-env: '',  timeout: 45 }
           - { gate: npm-test,      label: Node 24,   node: '24',     rust: none, oldest-env: '',  timeout: 45 }
           - { gate: rust-api-test, label: Rust 1.87, node: '24.6.0', rust: msrv, oldest-env: '',  timeout: 35 }
-          # required, not allowed to fail: red until D357 (Rust 1.98.1 overflows the test-thread
-          # stack in public_api's named_compile_limits_runtime_caps_and_depth_ceiling) lands
+          # the latest stable, required (D357 made every depth path fit a 2 MiB test thread)
           - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '', timeout: 35 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -150,6 +149,8 @@ jobs:
         env:
           # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
           SNUG_NODE_OLDEST: ${{ matrix.oldest-env }}
+          # the rust-version toolchain has no clippy (D344); anywhere else a missing clippy is a SKIP
+          SNUG_CLIPPY_OPTIONAL: ${{ matrix.rust == 'msrv' && '1' || '' }}
 
   # npm-test and rust-api-test on Linux (see the header): the gate's command under the
   # watchdog, as kin/scripts/gates runs it, with its ci/gate-map.edn caps
@@ -165,7 +166,7 @@ jobs:
           - { gate: npm-test,      label: Node 22,     node: '22',     rust: none,   oldest-env: '',  dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
           - { gate: npm-test,      label: Node 24,     node: '24',     rust: none,   oldest-env: '',  dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
           - { gate: rust-api-test, label: Rust 1.87,   node: '24.6.0', rust: msrv,   oldest-env: '',  dir: .,       cmd: 'sh host/rust/tests/run',                    timeout: 35 }
-          # required, as on macOS: red until D357 lands
+          # the latest stable, required, as on macOS
           - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '',  dir: .,       cmd: 'sh host/rust/tests/run',                    timeout: 35 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -199,15 +200,18 @@ jobs:
           CMD: ${{ matrix.cmd }}
           # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
           SNUG_NODE_OLDEST: ${{ matrix.oldest-env }}
+          # the rust-version toolchain has no clippy (D344); anywhere else a missing clippy is a SKIP
+          SNUG_CLIPPY_OPTIONAL: ${{ matrix.rust == 'msrv' && '1' || '' }}
         run: |
           set +e -uo pipefail   # the gate's status is read below (the default shell is bash -e)
           echo "Node $(node --version) on $(uname -sm)"
-          # stdout is read for SKIP, as run-gate reads it; stderr passes through
+          # stdout and stderr are read for a NOT RUN line, as kin/scripts/gates' not-run? reads them
           # shellcheck disable=SC2086 # CMD is the gate map's argv, split on spaces
-          node "$GITHUB_WORKSPACE/snug/kin/scripts/watchdog.mjs" "$GATE" -- $CMD | tee "$RUNNER_TEMP/gate.out"
+          node "$GITHUB_WORKSPACE/snug/kin/scripts/watchdog.mjs" "$GATE" -- $CMD 2>&1 | tee "$RUNNER_TEMP/gate.out"
           status=${PIPESTATUS[0]}
           [ "$status" = 0 ] || { echo "::error::$GATE exited $status"; exit 1; }
-          if skip=$(grep -E -m1 '^[[:space:]]*SKIP\b' "$RUNNER_TEMP/gate.out"); then
+          if skip=$(grep -E -m1 -e '^[[:space:]]*SKIP\b' -e '^[[:space:]]*ℹ (skipped|todo) [1-9]' -e '^# (skip|todo) [1-9]' "$RUNNER_TEMP/gate.out" \
+                    || grep -E -i -m1 '\b(unavailable|missing|not installed|not found)\b.*\bskipped\b' "$RUNNER_TEMP/gate.out"); then
             echo "::error::$GATE NOT RUN: $skip"; exit 1
           fi
           echo "ok $GATE"

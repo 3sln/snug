@@ -80,6 +80,22 @@ export function buildDetCases(MUTATIONS, SEED, { valid = false } = {}) {
     for (const z of [...ZEROS, ...NANS]) fixed.push([t24('82a2' + z + 'f6' + z + 'f6ff'), { ...DDEF, flags: 378 }]);
   }
   for (const [h, opt] of fixed) add(`detfixed ${h.slice(0, 40)}${h.length > 40 ? '…' : ''} f${opt.flags}`, unhex(h), opt, undefined);
+  // P9.13 WP3 (S6): depth boundaries with their expected code and offset, written down here (not
+  // taken from the scanner, so a wrong bound in kin fails every route): N nested containers around
+  // 0x00 under maxDepth D, for N = D-1, D, D+1, definite and indefinite arrays and maps, under every
+  // preset. N <= D is ok; N = D+1 is depth at the (D+1)-th container's head. Indefinite containers
+  // exist only under valid (flag 256); every other preset refuses them as indefinite at offset 0.
+  for (const D of [32, 4]) for (const flags of [0, PF_DET, PF_STD, PF_DET | 256, PF_STD | 256]) {
+    const valid = (flags & 256) !== 0;
+    const shapes = [
+      ['array', '81', '', 1, false], ['map', 'a16161', '', 3, false],
+      ['indefinite array', '9f', 'ff', 1, true], ['indefinite map', 'bf6161', 'ff', 3, true],
+    ];
+    for (const [name, open, close, width, indef] of shapes) for (const N of [D - 1, D, D + 1]) {
+      const want = indef && !valid ? { code: 'indefinite', offset: 0 } : N <= D ? { code: 'ok', offset: -1 } : { code: 'depth', offset: D * width };
+      add(`depth ${name} ${N}/${D} f${flags}`, unhex(open.repeat(N) + '00' + close.repeat(N)), { ...DDEF, maxDepth: D, flags }, want);
+    }
+  }
   const nFixed = cases.length - nVectors;
 
   // ---------------------------------------------------------------- seeded cases

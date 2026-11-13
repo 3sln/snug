@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync, brotliCompressSync, constants as Z } from 'node:zlib';
 import { buildFixtures } from './fixtures.mjs';
 import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+import { verdict, selfTest } from './verdict.mjs';
 selfWatch('runtime', import.meta.url);   // P9.1 caps
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -59,6 +60,11 @@ if (!esbuild) throw new Error('esbuild not found; set SNUG_ESBUILD');
 // `bb gates` fails a set on a SKIP line on stdout (release-policy §2, P9.20).
 if (!skip.has('browser') && !chrome) console.log('SKIP runtime browser arm -- no Chrome (SNUG_CHROME): NOT RUN');
 if (!skip.has('workerd') && !workerd) console.log('SKIP runtime workerd arm -- no workerd (SNUG_WORKERD): NOT RUN');
+for (const a of ['browser', 'workerd']) if (skip.has(a)) console.log(`SKIP runtime ${a} arm -- --skip ${a}: NOT RUN`);
+// P9.13 WP3 (B1): the verdict must catch each kind of failure before it judges this run.
+console.error(`[runtime] verdict self-test: ${selfTest()} injected failures caught`);
+// --inject-fail: one fixture every arm must fail (proves the gate fails end to end)
+const INJECT = process.argv.includes('--inject-fail');
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', ...opts }).trim();
 const log = (...a) => console.error('[runtime]', ...a);
 const results = { date: new Date().toISOString(), out };
@@ -86,6 +92,7 @@ if (!pkg) {
 pkg = resolve(pkg);
 results.env.package = pkg;
 const fx = await buildFixtures(checkout, pkg);
+if (INJECT) fx.profile.refuse.push({ name: 'injected failure (--inject-fail): 0x00 is accepted', hex: '00', code: 'malformed' });
 writeFileSync(join(out, 'fixtures.json'), JSON.stringify(fx));
 results.fixtures = { profileAccept: fx.profile.accept.length, profileRefuse: fx.profile.refuse.length, oracle: fx.oracle.length,
   contracts: fx.contracts.length, contractCases: fx.contracts.reduce((n, s) => n + s.cases.length, 0), probes: fx.probes.length,
@@ -406,4 +413,8 @@ if (results.cold) {
 }
 console.log(md.join('\n'));
 log('results:', join(out, 'results.json'));
-process.exit(0);
+// P9.13 WP3 (B1): exit 1 on any failing case, fatal, missing arm or totals, scan hit, CSP violation or page error
+const problems = verdict(results, { browser: !skip.has('browser'), workerd: !skip.has('workerd') });
+for (const q of problems) console.log(`  FAIL ${q}`);
+console.log(problems.length ? `  FAIL runtime: ${problems.length} problem(s)` : '  ok   runtime');
+process.exit(problems.length ? 1 : 0);
