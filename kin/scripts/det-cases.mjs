@@ -36,6 +36,12 @@ export function buildDetCases(MUTATIONS, SEED, { valid = false } = {}) {
     [nest(31, 'c100'), DDEF], [nest(32, 'c100'), DDEF], [nest(30, t24('00')), DDEF], [nest(31, t24('00')), DDEF],
     [nest(29, t24('8100')), DDEF], [nest(30, t24('8100')), DDEF], [nest(28, t24(t24('00'))), DDEF],
     [t24(t24(t24('00'))), { ...DDEF, maxDepth: 5 }], [t24(t24(t24('00'))), { ...DDEF, maxDepth: 6 }],
+    // D358: the well-formed payload walk (valid preset, no PF_T24V) keeps the depth, item and entry bounds
+    [nest(29, t24('8100')), { ...DDEF, flags: 378 }], [nest(30, t24('8100')), { ...DDEF, flags: 378 }],
+    [t24('818181818100'), { ...DDEF, maxDepth: 6, flags: 378 }], [t24('818181818100'), { ...DDEF, maxDepth: 7, flags: 378 }],
+    [t24(t24(t24('a2000000'))), { ...DDEF, maxDepth: 3, flags: 378 }],
+    [t24('820102'), { ...DDEF, maxItems: 4, flags: 378 }], [t24('9f010203ff'), { ...DDEF, maxEntries: 2, flags: 378 }],
+    ['82' + t24('a2000000') + '61ff', { ...DDEF, flags: 378 }], ['82' + t24('61ff') + 'a2000000', { ...DDEF, flags: 378 }],
     ['d9d9f7d9d9f700', DDEF], ['d9d9f700', { ...DDEF, top: 'map' }], ['d9d9f7a0', { ...DDEF, top: 'map' }],
     // items: the tag, its content, a tag-24 payload's items all count
     [t24('820102'), { ...DDEF, maxItems: 4 }], [t24('820102'), { ...DDEF, maxItems: 5 }],

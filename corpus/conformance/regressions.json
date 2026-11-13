@@ -201,6 +201,12 @@
         {"rule": "a", "hex": "d8184201ff", "expect": false, "note": "trailing bytes after the payload's item"},
         {"rule": "a", "hex": "d81841a1", "expect": false, "note": "truncated payload"},
         {"rule": "a", "hex": "d81841ff", "expect": false, "note": "a lone break"},
+        {"rule": "a", "hex": "82d8184261ff61ff", "expect": false, "note": "the profile word comes back after the payload: invalid UTF-8 at the top level is still text"},
+        {"rule": "a", "hex": "82d81845a201000100a201000100", "expect": false, "note": "a duplicate key after an accepted payload is still refused"},
+        {"rule": "a", "hex": "82d8185f4261ffff61ff", "expect": false, "note": "the same after a payload gathered from chunks"},
+        {"rule": "a", "hex": "82d81841ff61ff", "expect": false, "note": "a refused payload, then invalid text"},
+        {"rule": "a", "hex": "82d81848d81845a20100010063f09f80", "expect": false, "note": "an accepted payload holding a nested tag 24, then invalid text"},
+        {"rule": "a", "hex": "d81848d81845a201000100", "expect": true, "note": "a tag 24 inside a payload is an ordinary tag there: its own payload is not walked"},
         {"rule": "e", "hex": "d81845a201000100", "expect": false, "note": ".cbor T still requires a valid item matching T"},
         {"rule": "e", "hex": "d8184261ff", "expect": false},
         {"rule": "e", "hex": "d81843a10000", "expect": true}
