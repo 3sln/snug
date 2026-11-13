@@ -10,6 +10,16 @@ source into JavaScript and Rust, and a WebAssembly build comes from the Rust
 side. All three give the same verdicts, error codes and step counts for the
 same input, and the test suite checks that they do.
 
+<!-- prerelease -->
+> **Not yet on npm or crates.io.** The install commands below work from the
+> first release on. Until then,
+> [build from a checkout](https://github.com/3sln/snug/blob/main/docs/guide.md#building-from-a-checkout).
+>
+> Design: [specification](https://github.com/3sln/snug/blob/main/SPEC.md),
+> [architecture](https://github.com/3sln/snug/blob/main/docs/architecture.md),
+> [Program format](https://github.com/3sln/snug/blob/main/docs/program.md).
+<!-- /prerelease -->
+
 ## Install
 
 ```sh
@@ -31,7 +41,7 @@ Before 1.0, a minor release (0.y) may change the API; see the
   choice, greedy repetition, no backtracking), cuts follow §3.5.4, and
   `.regexp` uses XSD regular expressions as §3.8.3 specifies. RFC 9165
   controls (including `.abnf` and `.abnfb`) and RFC 9682 syntax are
-  supported. [Conformance](docs/conformance.md) lists every known deviation.
+  supported. [Conformance](https://github.com/3sln/snug/blob/main/docs/conformance.md) lists every known deviation.
 - **Bounds the work.** Input size, depth, entries, items and a step budget
   are all capped, and the budget counts operations, not time. Hostile schemas
   and hostile data both stop at the limit instead of eating CPU or memory.
@@ -96,7 +106,7 @@ schema.validate(&bytes, "message", &mut Scratch::new())?;
 ```
 
 Async drivers for blobs, readers and sequences work with any runtime. See
-the [Rust guide](docs/rust.md) and the [crate README](host/rust/README.md).
+the [Rust guide](https://github.com/3sln/snug/blob/main/docs/rust.md) and the [crate README](https://github.com/3sln/snug/blob/main/host/rust/README.md).
 
 ## Watch out for tagged unions
 
@@ -168,8 +178,8 @@ The [guide](docs/guide.md) covers TypeScript, browser and Workers setup.
 
 - [Guide](docs/guide.md): how to use it
 - [API reference](docs/api.md)
-- [Rust guide](docs/rust.md)
-- [wasm SDK](docs/wasm-sdk.md): the opt-in WebAssembly build, `@3sln/snug-wasm`
+- [Rust guide](https://github.com/3sln/snug/blob/main/docs/rust.md)
+- [wasm SDK](https://github.com/3sln/snug/blob/main/docs/wasm-sdk.md): the opt-in WebAssembly build, `@3sln/snug-wasm`
 - [CDDL support](docs/cddl-support.md): what's supported and how it's read
 - [Profiles](docs/profiles.md): wire options and value mapping
 - [Conformance](https://github.com/3sln/snug/blob/main/docs/conformance.md): how snug lines up with each RFC

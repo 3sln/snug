@@ -2,8 +2,9 @@
 //
 //     node kin/scripts/dist-test.mjs --release <dir> --source <commit> [--source-repo <checkout>]
 //
-// --release is a stamped release build's artefact directory (see dist.mjs). Not a
-// gate: it needs a stamped build. Everything happens
+// --release is a stamped release build's artefact directory (see dist.mjs). --source
+// must be a release commit: dist.mjs refuses one whose READMEs still carry the
+// pre-release block (D366). Not a gate: it needs a stamped build. Everything happens
 // in scratch repositories under .cache/dist-test/ (each with a stand-in `main`
 // commit tagged src/v<version>); nothing touches this checkout's refs or any remote.
 //   determinism  two builds give the same commit and tag objects; a rebuild is refused

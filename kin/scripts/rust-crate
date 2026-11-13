@@ -7,7 +7,7 @@
 #   DIR/src/snug/...      gen/rust/snug/** (kin's modules)
 #   DIR/src/snug.rs, DIR/src/snug/<d>.rs   `pub mod` lines, generated from the
 #                         tree, so a new module is compiled the day it is emitted.
-#   DIR/README.md         host/rust/README.md, the crate's own (P9.15)
+#   DIR/README.md         host/rust/README.md, the crate's own, less its pre-release block (P9.15, D366)
 #   DIR/LICENSE, THIRD_PARTY_NOTICES.md, SECURITY.md, CHANGELOG.md   the repository's (P9.15)
 #                         The manifest's `readme` and `include` name these, so
 #                         `cargo package --list` in DIR is the crate to publish.
@@ -32,7 +32,8 @@ put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"
 puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
 put "$manifest" "$dir/Cargo.toml"
 if [ "$manifest" = host/rust/Cargo.toml ]; then put host/rust/build.rs "$dir/build.rs"; fi
-put host/rust/README.md "$dir/README.md"
+# The README without its pre-release block (GitHub only; kin/scripts/prerelease.mjs, D366)
+readme=$(mktemp); node kin/scripts/prerelease.mjs strip host/rust/README.md "$readme"; put "$readme" "$dir/README.md"; rm -f "$readme"
 for f in LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CHANGELOG.md; do put "$f" "$dir/$f"; done
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done
 # Public API integration tests accompany the default host only.

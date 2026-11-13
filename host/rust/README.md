@@ -6,6 +6,12 @@ zero-copy views for reading selected fields, and it encodes deterministic
 bytes from owned values or typed `Writer` calls. The crate has no
 dependencies.
 
+<!-- prerelease -->
+> **Not yet on crates.io.** `cargo add snug-cbor` works from the first
+> release on. Until then,
+> [build the crate from a checkout](https://github.com/3sln/snug/blob/main/docs/rust.md#building-from-a-checkout).
+<!-- /prerelease -->
+
 ```sh
 cargo add snug-cbor
 ```
