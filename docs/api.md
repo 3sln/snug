@@ -1,17 +1,16 @@
 # JavaScript API
 
 This reference describes the package facades and is maintained with the
-[declaration files](../host/js/types/) (one per entry point). `npm test` checks declarations
-with Node's TypeScript parser and checks exported names against runtime exports.
-`bb types-test`, a land and release gate, compiles every entry point of
-`@3sln/snug` and `@3sln/snug-wasm` as a consumer imports it (bare specifiers,
-`strict`, `NodeNext`) under a TypeScript pinned in `bench/compare`'s lockfile,
-with target ES2022 and two libs: ES2022's default (ES2022 + DOM) and ESNext +
-DOM. TypeScript 5.8, 6.0 and 7.0 were also checked by hand. The declarations
+[declaration files](../host/js/types/) (one per entry point). The test suite
+compiles every entry point of `@3sln/snug` and `@3sln/snug-wasm` as a
+consumer imports it (bare specifiers, `strict`, `NodeNext`) under a pinned
+TypeScript, with target ES2022 and two libs: ES2022's default (ES2022 + DOM)
+and ESNext + DOM. The declarations
 name web-platform globals (`ReadableStream`, `WebAssembly`, `Response`, `URL`),
-so a consumer needs the DOM lib or `@types/node`.
-No installs are
-required. Internal `src/schema.mjs`/`src/compile.mjs` are host interfaces;
+so a consumer needs the DOM lib or `@types/node`. They need TypeScript 5.7 or
+later: the functions that return fresh bytes (`encode`, `Writer.finish`,
+`program.serialize`, `View.copyBytes`) return `Uint8Array<ArrayBuffer>`, which
+`Response` and `Blob` accept as they are. Internal `src/schema.mjs`/`src/compile.mjs` are host interfaces;
 their signatures and error classes are not the package contract.
 
 ## Option admission
@@ -47,7 +46,7 @@ The following named sets are the complete option-key lists used below:
 | `decode` | DecodeOptions | none |
 | `encode` | EncodeOptions | none |
 | `new Writer` | EncodeOptions + `keysSorted`, `limits` | nested `limits`: Limits only |
-| `compile` | `profile`, `regexp`, `cuts`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus` | nested `limits`: [CompileLimits](#compilation) only |
+| `compile` | `profile`, `regexp`, `cuts`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
@@ -81,14 +80,14 @@ encode(value: unknown, options?: EncodeOptions): Uint8Array
 
 `Value` is the decoded union: null, undefined, boolean, number, bigint,
 string, Uint8Array, admitted native typed arrays, Decimal, Float16Bytes,
-NDArray, Tagged, Simple (an unassigned simple value, D284), arrays, string-keyed objects (maps with only text keys), or
+NDArray, Tagged, Simple (an unassigned simple value), arrays, string-keyed objects (maps with only text keys), or
 `Map` (maps with any other key, and a top-level map with `cose`).
 The recursive union cannot express every root-only admission restriction;
 see the [host compatibility and integer tables](guide.md#decode-after-checking).
 CDDL validation does not infer a narrower TS type.
 
 `encode` writes deterministic CBOR in preferred serialization, so
-`encode(decode(x))` re-encodes every decoded value but one class (D348): a
+`encode(decode(x))` re-encodes every decoded value but one class: a
 map whose keys are one key once a non-preferred bignum (a `Tagged` 2/3 of
 bytes, which `valid` decodes) is written as its integer. Such a map has no
 deterministic encoding; encode (and the `Writer`) refuses it with SnugFault
@@ -100,17 +99,27 @@ as `a100f6`.
 | --- | --- | --- |
 | `wire: 'valid' \| 'deterministic' \| 'bindle'` | `'valid'` | The wire preset ([profiles](profiles.md#options)): any valid CBOR (RFC 8949 §5.3), RFC 8949 §4.2.1 deterministic CBOR, or the Bindle profile; the five options below override it |
 | `keys: 'text' \| 'integer' \| 'any'` | preset (`'any'`; bindle `'text'`) | Map key kinds |
-| `tags: 'bindle' \| 'standard' \| 'any'` | preset (`'any'`) | Tag level: the Bindle set, the standard set, or any tag number with the known tags' content rules (D180) |
+| `tags: 'bindle' \| 'standard' \| 'any'` | preset (`'any'`) | Tag level: the Bindle set, the standard set, or any tag number with the known tags' content rules |
 | `floats: 'bindle' \| 'deterministic'` | preset (`'deterministic'`) | Scalar float rules |
-| `undefinedValue: boolean` | preset (true) | `f7` and the unassigned simple values (`Simple`, D284) |
+| `undefinedValue: boolean` | preset (true) | `f7` and the unassigned simple values (`Simple`) |
 | `noncharacters: boolean` | preset (true) | Unicode noncharacters in text |
 | `top: 'map' \| 'any'` | codec/view/source: the preset's (`'any'`; bindle `'map'`); schema: `'any'` | Decode/check root policy |
 | `cose: boolean` | false | Under `keys: 'text'`: safe integer labels as well as text, top-level map only |
 | `objects: 'null' \| 'plain'` | `'null'` | Decode ordinary maps into null/ordinary-prototype objects |
 | `maxBytes` | decode: `LIMITS.maxBytes`; encode: unset | Input byte cap; encode/Writer check only when supplied, at finish: output acceptance, not peak allocation |
 | `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Nesting, per-container entries and total item bounds; see operational accounting in the guide |
-| `omitUndefined: boolean` | false | Encode object-member omission; see guide |
+| `omitUndefined: boolean` | false | Encode: leave out object members whose value is `undefined` (and symbol/non-enumerable members). **Off by default**: `undefined` is written as CBOR undefined (`f7`); see below |
 | `strictArrays: boolean` | preset (false; bindle true) | Encode: refuse extra array own properties with `unsupported` |
+
+**`undefined` members are encoded, not dropped.** JavaScript `undefined`
+maps faithfully to CBOR undefined (`f7`), so `omitUndefined` defaults to
+false: `encode({ id: 1, name: undefined })` writes a `name` member whose
+value is `f7`. A schema with an optional `? name: tstr` then refuses it, at
+that key: `schema.validate(bytes, 'user')` answers `{ ok: false, reason:
+'type', path: ['name'], offset: 10 }`, and `schema.decode` throws
+`SnugFault` `schema/type` with `path: ['name']`. Pass `omitUndefined: true`
+to leave such members out (`encode(value, { omitUndefined: true })`, also a
+`Writer` option), or delete them first. Array elements are never omitted.
 
 The complete allowed lists are in [option admission](#option-admission).
 Unknown keys and malformed values throw TypeError. `encode`
@@ -143,7 +152,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
 | `profiles` | Frozen `{ valid, deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
-| `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes), and so does a bignum outside preferred serialization (`valid` only: `value` its content `Uint8Array`, a data item distinct from the integer, D342); encode checks the tag number and content with kin under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 4/40/typed arrays have their own value types; a tag 2/3 `Tagged` of a `Uint8Array` is written as its integer in preferred serialization). |
+| `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes), and so does a bignum outside preferred serialization (`valid` only: `value` its content `Uint8Array`, a data item distinct from the integer); encode checks the tag number and content with the decoder's rules under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 4/40/typed arrays have their own value types; a tag 2/3 `Tagged` of a `Uint8Array` is written as its integer in preferred serialization). |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
 Float16 where available, Float32/64. `Uint8Array` is a byte string.
@@ -176,17 +185,18 @@ interface CompileOptions {
   unicode?: Int32Array;                  // tables from @3sln/snug/unicode
   controls?: Controls;                   // extension controls (@3sln/snug/controls, /abnf)
   controlsInBus?: boolean;               // admit extension controls under 'bus'
+  abnf?: 'strict' | 'lenient';           // .abnf/.abnfb controller syntax; default 'strict'
 }
 ```
 
 `profile` defaults to `full` and restricts accepted CDDL, not wire policy.
 Schema refusals reject with `SchemaError`; invalid API options with TypeError.
-`cuts` defaults to `'rfc'`, the literal RFC 8610 cut
-(D301); `'branch'` is rule A, where a failed cut fails only its `//` branch
+`cuts` defaults to `'rfc'`, the literal RFC 8610 cut;
+`'branch'` is rule A, where a failed cut fails only its `//` branch
 (see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
-Any other value, including the pre-release name `'reference'`, is a TypeError.
+Any other value is a TypeError.
 The effective cut mode is part of the source key.
-`abnf?: 'strict' | 'lenient'` (D340) is how `.abnf`/`.abnfb` controllers
+`abnf?: 'strict' | 'lenient'` is how `.abnf`/`.abnfb` controllers
 parse: `'strict'` (the default) is RFC 5234 + RFC 7405 + RFC 9165 §3;
 `'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-3slnsnugabnf)). Any
 other value is a TypeError. It is part of the source key.
@@ -198,13 +208,13 @@ other value is a TypeError. It is part of the source key.
 | `schemaBytes`, `nesting`, `astNodes`, `instantiations`, `pegNodes`, `arrayPositions`, `regexpPositions`, `width`, `poolBytes`, `totalBytes`, `compileBudget`, `leaves` | `depth`, `inputBytes`, `entries`, `items`, `bignumBytes`, `budget` |
 
 All are non-negative safe integers; defaults and ceilings are in the
-[guide](guide.md#limits). kin applies effective defaults and ceilings before
+[guide](guide.md#limits). snug applies effective defaults and ceilings before
 computing the source key. `controls` registers extension controls
-(D082/D140–D142, [Custom controls](guide.md#custom-controls), `@3sln/snug/controls`
+([Custom controls](guide.md#custom-controls), `@3sln/snug/controls`
 below): a name → `Control` object (malformed names or entries are TypeErrors;
 built-in control names are refused). The whole registry is part of the source
 key; `controlsInBus` admits controls under `bus`. Unicode tables are an
-explicit option described below (D083/D110).
+explicit option described below.
 
 Omitted limits use defaults, zero means zero (not unlimited), valid requests
 above compiler ceilings clamp, and per-call runtime limits can only lower
@@ -232,7 +242,7 @@ export const controls: { chars, unique, samelen };
 `.chars n | lo..hi` (code points of a text string), `.unique <any>` (pairwise
 distinct element encodings of an array), `.samelen "a" | [names]` (equal
 element counts of the named array/typed-array members of a map). Their
-verdicts are kin's (`snug.vm.controls`), identical on every host. A predicate
+verdicts are computed by snug's shared core, identical on every host. A predicate
 must be pure; it is asked only for a queried, whole, profile-checked item;
 an item longer than `maxBytes` (default 65,536, at most 2³¹−1) fails with
 `control_size` unasked (1 unit). Otherwise the call costs 17 units, then the
@@ -240,7 +250,7 @@ predicate's `cost(itemBytes)` (a non-negative safe integer; default
 `itemBytes`), charged **before** it runs: a cost above the budget left stops
 validation with `budget` without calling. A predicate's own CPU is the host's
 responsibility; `cost` is how it stays inside the budget (~20 ns per unit by
-default). The generic controls meter their work in kin (program.md §14), with
+default). The generic controls meter their own work step by step, with
 arguments prepared once per Program, so they cost the same on every host. A throwing
 predicate makes the validation call throw (`cause` set). New reasons:
 `control` (the predicate refused) and `control_size`. Programs using a control
@@ -262,7 +272,7 @@ export function checkAbnf(text: string | Uint8Array, options?: { abnf?: 'strict'
 ```
 
 RFC 9165 §3's `.abnf` (Unicode scalars) and `.abnfb` (bytes), an optional
-module (D334): spread it into the registry of `compile` and of the loaders.
+module: spread it into the registry of `compile` and of the loaders.
 
 ```js
 compile(text, { controls: { ...abnf } })        // with others: { ...controls, ...abnf }
@@ -277,18 +287,18 @@ module, `.abnf`/`.abnfb` are `unsupported_control`, and the message names
 The controller is checked at compile time. Prose-val, syntax errors and
 undefined rules are `control_value`, with a detail like `(.abnf argument:
 prose-val (<...>) is not supported at ABNF line 2, column 11)`. Parsing is
-strict RFC 5234 + RFC 7405 + RFC 9165 §3 by default (D340). The compile
+strict RFC 5234 + RFC 7405 + RFC 9165 §3 by default. The compile
 option `abnf: 'lenient'` (`compile(text, { controls: { ...abnf }, abnf:
 'lenient' })`; any other value is a `TypeError`) also admits snug's non-RFC
 forms: a wider start, a rule-first controller, and the others listed in CDDL
 support. Under the default each is `control_value`, and the detail names the
 option. The option is in the Program's source key. The
-controller is prepared once per Program. The match is metered in kin against
+controller is prepared once per Program. The match is metered against
 the budget left, so every host charges the same units. Past the budget, or
 past the matcher's scratch cap, validation stops with `budget`.
 `abnfWith({ maxBytes, maxWords })` gives both controls other bounds:
 `maxBytes` is the item bound (default 65,536); `maxWords` is the scratch cap
-in words (default 4,194,304 = 16 MiB, the PEG group arena's default, D281;
+in words (default 4,194,304 = 16 MiB, the PEG group arena's default;
 65,536 to 16,777,216, otherwise `TypeError`).
 
 `checkAbnf(text, { abnf })` answers `true`, or the reason the compiler would
@@ -325,7 +335,7 @@ type ValidationResult = { ok: true } | {
 `subcode` is the embedded item's own reason for `embedded`, and `'cut'` for
 a `value` refusal a cut decided: a key matched a cut member (`name:` or
 `^=>`) whose value failed, and the cut stopped the alternatives after it
-(D342; [discriminated unions](guide.md#discriminated-unions-under-the-rfc-cut)).
+([discriminated unions](guide.md#discriminated-unions-under-the-rfc-cut)).
 
 `ValidationOptions` extends DecodeOptions with `maxBignumBytes` and `budget`.
 Per-call schema limits only lower compiled limits. SpanOptions adds
@@ -351,8 +361,8 @@ another. Use the path to explain, and the offset only to locate.
 | `program.serialize(): Uint8Array` | Deterministic §13.3 container, synchronously hashed. |
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
-| `schema.warnings` | Frozen array of the compile warnings, `{ code, rule, line, column, message }` (code `W1`..`W8`; `rule` null for a schema-wide one), in a deterministic order; empty for a Schema not made by `compile` (D342). |
-| `schema.brand`, `program.brand` | A Symbol, so `structuredClone` / `postMessage` of a Schema or Program throws `DataCloneError` instead of producing a plain object without methods. Send `program.serialize()` bytes (D342). |
+| `schema.warnings` | Frozen array of the compile warnings, `{ code, rule, line, column, message }` (code `W1`..`W8`; `rule` null for a schema-wide one), in a deterministic order; empty for a Schema not made by `compile`. |
+| `schema.brand`, `program.brand` | A Symbol, so `structuredClone` / `postMessage` of a Schema or Program throws `DataCloneError` instead of producing a plain object without methods. Send `program.serialize()` bytes. |
 | `schema.validate(bytes, rule, options?)` | ValidationResult; default top any. |
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
@@ -369,8 +379,8 @@ validateAt(schema: Schema, bytes: Uint8Array, start: number, end: number,
 ```
 
 `ProgramError` extends Error with `code`; constructor `(code)`.
-Load compatibility is equal format major and minor ≤ loader minor (D084),
-currently 2.0 (D279, D318); every format 1.x Program is refused with `format_version`, so recompile it from CDDL. Container version is 1. Producer snug version is informational,
+Load compatibility is equal format major and minor ≤ loader minor,
+currently 2.0; every format 1.x Program is refused with `format_version`, so recompile it from CDDL. Container version is 1. Producer snug version is informational,
 retained on reserialisation. The four-byte format word stores major in low
 16 bits, minor in high 16 bits. P and B must remain semantically trustworthy;
 SHA-256 is a corruption check, not authentication. See [caching](guide.md#programs-caching-and-compatibility).
@@ -465,12 +475,12 @@ not capped in advance: maxBytes bounds output acceptance, not peak allocation.
 Wrong-type typed calls such as `new Writer().text(7)`, `.uint('7')` or
 `.beginArray('2')` throw sticky SnugFault `unsupported`, not TypeError.
 The first failure poisons the Writer; discard it and construct a new one.
-Map comparison budget is currently internal (D073).
+Map comparison budget is currently internal.
 
 ## Sources: `@3sln/snug/sources`
 
 Schema validators and profile-only scanners support known-length handles,
-declared-length push sources and (D085) streams of unknown length in drain
+declared-length push sources and streams of unknown length in drain
 mode. Validation builds no decoded value tree. The
 adapters read on demand; push retention follows the session's replay needs
 and can grow with the document, bounded by its declared length.
@@ -494,25 +504,25 @@ with top defaulting to any and limits only lowering the compiled values.
 
 | Function / class | Result |
 | --- | --- |
-| `openSession(schema, rule, length, options?, { quantum? }?)` | Synchronous advanced `VmSession`; length undefined selects drain mode; replaces Schema.session (D160) |
+| `openSession(schema, rule, length, options?, { quantum? }?)` | Synchronous advanced `VmSession`; length undefined selects drain mode; replaces Schema.session |
 | `scanBuffer(bytes, options?)` | void, or SnugFault; specialised contiguous-buffer path |
 | `scanHandle(handle, options?, sourceOptions?)` | Promise resolving true; demand-driven, one read in flight |
 | `scanHandleSync(handle, options?, sourceOptions?)` | true; Promise reads refused |
 | `validateHandle(schema, handle, rule, options?, sourceOptions?)` | Promise resolving ValidationResult; sync or async reads, one in flight |
 | `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` | ValidationResult; Promise reads refused |
 | `pushValidator(schema, length, rule, options?, { quantum?, failFast? }?)` | PushValidator with `feed`, `resume`, `finalize`; `length` undefined: unknown length (drain mode; `end()` = finalize; `failFast` allowed only then; `bytesHeld`) |
-| `streamSource(input)` | AsyncIterable over a ReadableStream, AsyncIterable or Iterable of Uint8Array (D085) |
+| `streamSource(input)` | AsyncIterable over a ReadableStream, AsyncIterable or Iterable of Uint8Array |
 | `validateStream(schema, source, rule, options?, { quantum?, failFast? }?)` | Promise resolving ValidationResult for a message of unknown length: the buffer's result (drain), or with failFast a certain refusal at once (accept/refuse equal, code may differ) |
-| `scanStream(source, options?, { quantum?, failFast? }?)` | Promise resolving true / rejecting SnugFault, unknown length (the VM against `any`, D146) |
+| `scanStream(source, options?, { quantum?, failFast? }?)` | Promise resolving true / rejecting SnugFault, unknown length (the VM against `any`) |
 | `bufferHandle(bytes)` | SyncHandle; owns a copy of Uint8Array or Node Buffer input; each read returns an independent copy |
 | `asyncHandle(bytes, { delay? }?)` | Handle; same snapshot ownership as bufferHandle; delay is a non-negative safe integer in milliseconds, default 0 (Promise microtask), positive delay uses a timer |
 | `pushScanner(length, options?, { quantum?, failFast? }?)` | `{ feed(chunk), resume(), finalize() }`; `length` undefined: unknown length (drain mode, `end()`) |
 | `new ScanSession(length, options?, { quantum? }?)` | Low-level profile session with `step(window, base)`, `length`, `done` |
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
-| `sessionLimits(set?)` | The isolate's session policy (P9.7, D327): `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `@3sln/snug/sequence` |
-| `releasePool()` | Drops every idle pooled session array now (P9.7), e.g. in a long-lived process trimming memory. Also exported by `@3sln/snug/sequence` |
+| `sessionLimits(set?)` | The isolate's session policy: `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `@3sln/snug/sequence` |
+| `releasePool()` | Drops every idle pooled session array now, e.g. in a long-lived process trimming memory. Also exported by `@3sln/snug/sequence` |
 
-The Rust host has the same drivers, sync and async (P9.6), over the same
+The Rust host has the same drivers, sync and async, over the same
 session, with the same verdicts for every chunking: `validateHandle` is
 `Schema::validate_blob_async` (an `AsyncBlob`: `size()` and an async
 `read(offset, len)`), `validateStream` is `Schema::validate_reader_async` (an
@@ -535,7 +545,7 @@ while let Some(m) = messages.next().await { /* m?.view() */ }           // readS
 `bytesHeld` (exclusive VM array bytes, excluding the shared Program and
 supplied windows),
 `step(window: Uint8Array, base: number): VmStep`, and `close()` /
-`[Symbol.dispose]()`. Scratch and Program storage remain private.
+`[Symbol.dispose]()`. Scratch and Program storage are not exposed.
 
 **Disposal.** The declarations compile on ES2022, whose lib has no
 `Symbol.dispose`. `VmSession`'s `[Symbol.dispose]()` (which calls `close()`) is
@@ -550,7 +560,7 @@ the engine may lack. Each session
 owns exclusive state across suspensions; share Programs, use separate sessions
 for independent validations, and never resume one session concurrently.
 
-**Live sessions and pooling (P9.7, D327).** A session counts as *live* from
+**Live sessions and pooling.** A session counts as *live* from
 its creation until it finishes (a `done` step or `end`), fails (an extension
 predicate that threw, an internal error), or is closed. This covers
 `openSession`, handles, push sources, streams and sequence readers; a sequence
@@ -565,7 +575,7 @@ with code `sessions/limit` before anything is validated. To release a session:
 
 A session or reader closed while its own step runs (from an extension
 predicate, which must not call back into snug) keeps its arrays until that
-step ends; the step then throws `TypeError` (D347).
+step ends; the step then throws `TypeError`.
 
 **A session abandoned mid-message holds its slot until it is
 garbage-collected**, which in JavaScript can be much later. Close sessions you
@@ -615,7 +625,7 @@ in-memory helpers own independent copies, including for Node Buffer subranges;
 mutating the input or a returned read cannot change subsequent reads. Their
 handles are frozen and SharedArrayBuffer input is refused. Each custom read
 must return exactly the requested range as a Uint8Array, stable while used.
-**Unknown length (D085):** every check that depends on the end (a length or
+**Unknown length:** every check that depends on the end (a length or
 count past the bytes seen, trailing bytes, `too_large`) is held, a verdict found
 earlier is held while the rest is read and dropped, and the end (stream end,
 `end()` / `finalize()`) settles them: results equal the buffer's of the same
@@ -623,7 +633,7 @@ bytes (code, offset, path, budget, items). More bytes than `maxBytes` answer
 `cbor/too_large` at once. `failFast` answers a certain refusal at once (its
 code may be another than the buffer's `cbor/truncated` / `cbor/too_large`);
 acceptance waits for the end. A session's key arena grows with the input it
-has read (D342): an idle session holds tens of KiB, not `maxBytes`. Source decoding is unavailable. Default helper reads alone do not give the
+has read: an idle session holds tens of KiB, not `maxBytes`. Source decoding is unavailable. Default helper reads alone do not give the
 event loop a turn per read; positive quantum enables cooperative scheduling.
 Start with the [minimal schema-handle recipe](guide.md#validating-remote-objects-and-streams)
 and known-length AsyncIterable adapter before implementing custom sessions.
@@ -654,7 +664,7 @@ rules use TypeError. Session reuse after completion/failure is unsupported.
 ## CBOR sequences: `@3sln/snug/sequence`
 
 `readSequence(source, options?)` and `sequenceReader(options?)` read an RFC 8742
-sequence (D210–D217, [guide](guide.md#cbor-sequences-and-sse)). Each message is
+sequence ([guide](guide.md#cbor-sequences-and-sse)). Each message is
 one root, checked in the pass that finds its end: the profile, plus the schema
 rule when `schema` and `rule` are given. A separate entry from `@3sln/snug/sources`
 because it carries the View.
@@ -663,6 +673,18 @@ because it carries the View.
 | --- | --- |
 | `readSequence(source, options?)` | `SequenceIterator`: an async generator of `SequenceMessage`, with `stats` `{ messages, skipped, bytes, lastSkipped }`; `source` is a ReadableStream, AsyncIterable or Iterable of Uint8Array; leaving the loop cancels it |
 | `sequenceReader(options?)` | `{ feed(chunk), end(), done, bytesHeld }`; `feed`/`end` answer `{ messages, skipped, error }`; after `error` (or `end`) the reader is done and `feed` throws TypeError |
+
+**Sequences borrow chunks by default; `view()` copies by default.** With the
+default `copy: 'spanning'`, a message lying wholly inside one chunk is a
+subarray of that chunk (`message.borrowed` is true) and its `view` aliases it;
+only a message spanning chunks gets a buffer of its own. This is the opposite
+of `view(bytes)`, which copies its input unless you pass `borrow: true`. Use
+`copy: 'always'` (every message a fresh copy) whenever the producer may
+mutate, recycle or transfer a chunk's buffer after handing it over: an
+arbitrary `ReadableStream` (its default reader hands over whatever object
+was enqueued), pooled-buffer or custom Node streams, a BYOB adapter that
+reuses its view, or a `sequenceReader` caller that reuses its chunk after
+`feed`. A `fetch` body's byte stream is safe to borrow.
 
 `SequenceOptions`: the ValidationOptions (profile, `top`, `cose`, `maxDepth`,
 `maxEntries`, `maxItems`, `maxBignumBytes`, `budget`, `objects`) with
@@ -679,7 +701,7 @@ it lay in when `borrowed` (one chunk held it and `copy` is `'spanning'`), else
 a fresh buffer (a plain Uint8Array copy under `copy: 'always'`, Node
 `Buffer` chunks included); `view` is a checked `View` minted from the bytes
 the reader checked (message fields are read-only getters; View and Cursor
-keep their state private and refuse construction outside `view()`).
+keep their state internal and refuse construction outside `view()`).
 Borrowing is safe only when the producer never mutates, recycles or
 transfers a chunk's buffer after handing it over (a `fetch` body's byte
 stream; not guaranteed by an arbitrary default `ReadableStream` reader);
@@ -695,7 +717,7 @@ assembled bytes, not buffer capacity, chunks or the session arena (sized for
 
 A message's verdict equals the buffer validation of its window — the bytes
 from its start, at most `maxMessageBytes` — with the root's end as the
-boundary (architecture §18.1): exactly `schema.validate` / the codec check of
+boundary: exactly `schema.validate` / the codec check of
 the message's own bytes when it is accepted (and for a schema refusal of a
 complete message); a message that does not complete is judged over that
 window, so its code can differ from the same bytes checked alone. Refusals are `SnugFault`s with
@@ -704,16 +726,16 @@ window, so its code can differ from the same bytes checked alone. Refusals are `
 reasons of a complete message. Not skippable: `cbor/*` codes (incl.
 `truncated` at EOF inside a message and `too_large` for a message not ending
 within `maxMessageBytes`) and `budget`. `failFast` answers a held refusal at
-once (D145's contract). An empty source is an empty sequence. Non-Uint8Array
+once. An empty source is an empty sequence. Non-Uint8Array
 chunks reject with SourceError `bad_chunk`; SharedArrayBuffer chunks with
 TypeError. An exception from an extension predicate ends the sequence after
 the earlier messages (readSequence yields them, then throws; the push result
 carries it as `error`). Transport exceptions (a rejected source read) pass
 through unchanged; cancel a pending read with the fetch's AbortController.
 
-The wasm SDK (`@3sln/snug-wasm/sequence`, P7.13w) has the same API, options and
-answers (`bb wasm-sdk-test` holds it to the native package per feed). Its
-differences are the SDK's view contract (D132): `message.bytes` is borrowed or
+The wasm SDK (`@3sln/snug-wasm/sequence`) has the same API, options and
+answers (tested against the native package feed by feed). Its
+differences are the SDK's view contract: `message.bytes` is borrowed or
 assembled exactly as natively, but `message.view` copies the bytes into linear
 memory on first use (so `view.borrowed` is false; `view.release()` frees it at
 once); a reader whose instance was reset (`InstanceLost`) ends with an error.
@@ -743,8 +765,7 @@ SchemaError codes:
   `unwrap`, `enum`, `range`, `float_literal`, `empty_schema`.
 - Controls/matching: `control_target`, `control_value`, `unsupported_control`,
   `unknown_control`, `control_registry`, `regexp`, `map_key`, `tag`, `major`,
-  `profile`. (`map_group_occurrence`, `map_cut` and `map_overlap` were
-  format 1 refusals; format 2.0 never produces them.)
+  `profile`.
 - Resources: `limit_schema_bytes`, `limit_nesting`, `limit_ast_nodes`,
   `limit_instantiations`, `limit_peg_nodes`, `limit_array_positions`,
   `limit_regexp_positions`, `limit_width`, `limit_pool_bytes`,
@@ -783,7 +804,7 @@ Recovery by CBOR/profile code (also applies to `cbor/<code>` reasons):
 | `malformed` | Invalid CBOR head/structure; reject and fix the producer |
 | `key_type` | Key kind/label outside current policy; use text or permitted root COSE labels; check protocol compatibility |
 | `key_order` | Encoded keys out of lexicographic order (`wire: 'deterministic'`/`'bindle'`); fix producer sorting |
-| `duplicate_key` | Duplicate map key, compared by value (two encodings of one value are one key); reject, resolve duplicate at the producer. From encode with subcode `normalized` (D348): two keys are one key once a non-preferred bignum is written as its integer, so the map has no deterministic encoding; keep the decoded bytes, or merge those keys |
+| `duplicate_key` | Duplicate map key, compared by value (two encodings of one value are one key); reject, resolve duplicate at the producer. From encode with subcode `normalized`: two keys are one key once a non-preferred bignum is written as its integer, so the map has no deterministic encoding; keep the decoded bytes, or merge those keys |
 | `text` | Invalid UTF-8 scalar text or forbidden noncharacter; fix text at the producer |
 | `float` | Scalar width/value violates current policy; use shortest width, integers for safe integral values, and supported finite scalars |
 | `simple` | Unsupported simple value, including undefined; use admitted false/true/null or revise the protocol |
@@ -818,7 +839,7 @@ help. Never raise caps automatically in response to an untrusted message.
 | `embedded` | Inner CBOR/sequence predicate failed; inspect safe subcode and fix embedded producer/schema |
 | `control` | A registered extension control's predicate refused the item |
 | `control_size` | The item is longer than the extension control's `maxBytes`; the predicate was not asked |
-| `group_limit` | The PEG group arena (A2 array records, T map records, recursive group frames) reached its cap: compile option `groupWords`, else the default 4,194,304 words (D276, D281); a memory policy, not proof of invalid data |
+| `group_limit` | The PEG group arena (A2 array records, T map records, recursive group frames) reached its cap: compile option `groupWords`, else the default 4,194,304 words; a memory policy, not proof of invalid data |
 | `budget` | VM work policy exhausted, not proof of invalid data; reduce complexity or review compiled/per-call budget and concurrency |
 
 | Other code / class | Meaning / next action |

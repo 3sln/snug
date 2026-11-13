@@ -1,4 +1,4 @@
-// Extension controls on the JS host (D082, D140-D142, D190-D193). kin decides
+// Extension controls on the JS host. The generated core decides
 // where an EXT leaf is queried and charges it; this module only turns a
 // registry ({name: predicate}) into the compiler's registry words, reads a
 // Program's control table, and binds it to the predicate port the VM calls.
@@ -13,18 +13,18 @@
 // fails the control with the reason `control_size` without asking, under
 // every source, so the session driver never buffers more than that for it.
 //
-// BUDGET (D193). The VM charges every call EXT_CALL units, then the
+// BUDGET. The VM charges every call EXT_CALL units, then the
 // predicate's COST, before it runs: `cost(itemBytes)` budget units (a
 // non-negative safe integer), by default `itemBytes`. A cost above what the
 // budget has left stops validation with `budget` without calling. The VM
 // cannot interrupt or measure host code: what a predicate does with its CPU is
 // the host's responsibility, and `cost` is how a host keeps a slow predicate
 // inside the budget (~20 ns of CPU per unit is what the default budget assumes).
-// The generic controls (snug/controls) instead meter their own work in kin
+// The generic controls (snug/controls) instead meter their own work in the core
 // (the METERED protocol below, not a public contract).
 import { ProgramError } from './serialized.mjs';
 
-/** Registry entries carrying this key are metered in kin (snug/controls only):
+/** Registry entries carrying this key are metered in the core (snug/controls only):
  *  { prepare(pool, ao, al): Int32Array, run(pool, ao, prepared, b, s, e, room): verdict }. */
 export const METERED = Symbol.for('snug.metered');
 const ABNF = Symbol.for('snug.abnf');   // the ABNF module's entries name themselves (snug/abnf)
@@ -80,7 +80,7 @@ export function registryWords(entries, inBus, abnfLenient = false) {
   return w;
 }
 
-/** The names of a Program's extension controls, in id order (format 1.1, D141). */
+/** The names of a Program's extension controls, in id order (format 1.1). */
 export function programControls(P, B) {
   const names = [], n = P[30];
   let i = P[31];

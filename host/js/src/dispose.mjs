@@ -1,4 +1,4 @@
-// P9.20 follow-up: `[Symbol.dispose]` (= close()) only where the engine has Symbol.dispose.
+// `[Symbol.dispose]` (= close()) only where the engine has Symbol.dispose.
 // A class body's `[Symbol.dispose]() {}` on an engine without it defines a method named
 // "undefined"; this defines nothing there. close() stays the primary API.
 // Use it as `const C = /* @__PURE__ */ disposable(class C { ... });` so a bundle that never

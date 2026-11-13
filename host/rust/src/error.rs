@@ -23,7 +23,7 @@ pub enum Error {
         code: &'static str,
         /// Byte offset, when the operation has one.
         offset: Option<usize>,
-        /// Why, when the code alone does not say (D348): `normalized` on an
+        /// Why, when the code alone does not say: `normalized` on an
         /// encoder's `duplicate_key` when two keys are one key once a bignum
         /// outside preferred serialization is written as its integer.
         subcode: Option<&'static str>,
@@ -42,13 +42,13 @@ pub enum Error {
     /// The source's transport failed: its own error, whole. `code()` is
     /// `read`; [`std::error::Error::source`] answers the [`io::Error`].
     Io(IoError),
-    /// A Program uses extension controls the registry lacks (D141); their
+    /// A Program uses extension controls the registry lacks; their
     /// names, from the Program (schema text, never payload).
     MissingControls(Vec<String>),
-    /// A message of a CBOR sequence was refused (D216): its index, absolute
+    /// A message of a CBOR sequence was refused: its index, absolute
     /// offsets and verdict (`code()` as for [`Error::Validation`]).
     Sequence(crate::sequence::MessageFailure),
-    /// P9.7: [`crate::sessions::SessionLimits::max_live`] sessions are live; drop (or
+    /// [`crate::sessions::SessionLimits::max_live`] sessions are live; drop (or
     /// finish) one to release its slot. `code()` is `sessions/limit`.
     SessionLimit,
     /// A host/generated invariant failed, never a fabricated CBOR verdict.
@@ -87,7 +87,7 @@ impl Error {
             Self::Internal => "internal",
         }
     }
-    /// The refusal's subcode, when it has one: `Error::Cbor`'s (D348: `normalized`)
+    /// The refusal's subcode, when it has one: `Error::Cbor`'s (`normalized`)
     /// or a validation failure's (`cut`, an embedded item's reason).
     pub fn subcode(&self) -> Option<&'static str> {
         match self {

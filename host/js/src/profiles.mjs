@@ -1,7 +1,7 @@
-// Wire profiles (D081, D120): every option only removes acceptance relative to
+// Wire profiles: every option only removes acceptance relative to
 // RFC 8949 §4.2.1 core deterministic encoding. A preset names a full set of
-// options; any option given explicitly overrides the preset's value. kin
-// decides every byte (snug.cbor.codes PF_* flags); this module only resolves
+// options; any option given explicitly overrides the preset's value. The
+// generated core decides every byte (snug.cbor.codes PF_* flags); this module only resolves
 // option objects to those flags.
 import { PF_DETERMINISTIC, PF_VALID, PF_VALID_PRESET } from '../../../gen/js/snug/cbor/codes.mjs';
 
@@ -44,7 +44,7 @@ function bool(value, name) {
   return value;
 }
 
-/** The kin profile flags (snug.cbor.codes PF_*) for these options. */
+/** The core's profile flags (snug.cbor.codes PF_*) for these options. */
 export function profileFlags(options) {
   const preset = presetOf(options);
   const { keys, tags, floats, undefinedValue, noncharacters } = options;

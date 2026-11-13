@@ -22,9 +22,7 @@
 //!
 //! Refusals carry a code, an offset and a schema-named path, never payload
 //! values. The README of the crate and the Rust guide (`docs/rust.md` in the
-//! repository) cover the options, limits and error codes. Item docs cite design
-//! decisions as `D###`; they are recorded in `DEVLOG.md` in the snug repository
-//! and are not needed to use the crate.
+//! repository) cover the options, limits and error codes.
 
 // The generated modules (src/snug/) exist only in the crate kin/scripts/rust-crate
 // assembles (build.rs answers `snug_unassembled` without them): one clear error

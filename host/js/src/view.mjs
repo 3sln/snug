@@ -1,12 +1,11 @@
-// Views and a cursor over CHECKED CBOR (architecture §16, owner decision D026;
-// first slice, DEVLOG P5.2, D050-D054), under any profile (D120).
+// Views and a cursor over CHECKED CBOR, under any profile.
 //
 //   view(bytes, { schema, rule, borrow, directories, ...decodeOptions }) -> View
 //
 // Opening a view runs the full check first: the profile scanner, or, when a
 // schema is given, the schema VM (one fused pass: profile + schema). Nothing
 // is read before the check accepts, and nothing is ever re-checked: every
-// navigation step is a kin primitive (snug.nav.walk) whose early exits and
+// navigation step is a generated-core primitive (snug.nav.walk) whose early exits and
 // binary searches are sound only because the check proved the key order.
 //
 // Ownership (§16.2). By default the view OWNS its bytes: they are copied at
@@ -19,7 +18,7 @@
 // buffer when borrowed, into the view's private copy when owned -- read-only
 // by contract (JS has no read-only Uint8Array); `copyBytes()` always copies.
 //
-// Index (§16.4, private until measured; D053). `directories: true` lets the
+// Index (private until measured). `directories: true` lets the
 // view build, on first use of an array or map with at least 8 children, a
 // directory of child offsets (one word per child) held by the view's message
 // state (never the VM scratch); map lookups then binary-search it and array
@@ -296,8 +295,8 @@ export class View {
     this.#m = m; this.#p = p; this.#d = depth;
   }
   static { viewParts = v => (#m in v ? [v.#m, v.#p, v.#d] : null); }
-  /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'simple' (any other simple value, D284) |
-   * 'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged' (any other tag the profile admits, D121, D180) */
+  /** 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'simple' (any other simple value) |
+   * 'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged' (any other tag the profile admits) */
   get kind() { return kindAt(this.#m, this.#p); }
   /** Entries of an array or map, bytes of a bytes/text item, elements of a typed array; else undefined. */
   get length() { return lengthAt(this.#m, this.#p); }
@@ -556,7 +555,7 @@ export function view(bytes, opts = {}) {
   return new View(m, 0, 0);
 }
 
-/** INTERNAL (D215): the View of bytes the caller has just CHECKED under `opts` -- the sequence
+/** INTERNAL: the View of bytes the caller has just CHECKED under `opts` -- the sequence
  * reader, from its session's verdict. No package entry exports this: it is a capability of
  * the modules that ran the check, never a public trusted opener (§16.2, V1/V2). */
 /** The profile options of a checked message's options (the sequence reader's: no schema, no limits). */

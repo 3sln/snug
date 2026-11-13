@@ -347,7 +347,7 @@ must be safe integers, else `key_type`.
 scanner block's word 11, read by every walk: zero is the Bindle profile above
 (cbor.mjs's order and codes, bit for bit) and each set bit admits more — any
 key kind, the standard tags with content checks or any tag (D180), RFC 8949 floats, `undefined`,
-noncharacters ([profiles](profiles.md#the-option-model-d120)). The extended
+noncharacters ([profiles](profiles.md#the-option-model)). The extended
 order of checks is in `docs/scanner.md`. Programs never depend on the flags.
 
 **Profile item counting is separate from predicate visits** (C15): typed

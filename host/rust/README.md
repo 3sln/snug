@@ -6,15 +6,16 @@ zero-copy views for reading selected fields, and it encodes deterministic
 bytes from owned values or typed `Writer` calls. The crate has no
 dependencies.
 
-**Experimental, not yet published.** The API may still change before the
-first release. The package is `snug-cbor` (crates.io's `snug` is another
-project); its library is `snug`, so code says `use snug::…`. Once
-published: `cargo add snug-cbor`, or `snug-cbor = "0.1"` under
-`[dependencies]`.
+```sh
+cargo add snug-cbor
+```
 
-The compiler, the validator and the byte-level decisions are written in kin
-and generated into Rust, and the same sources generate snug's JavaScript
-package. Both hosts give the same Programs, verdicts, reasons, paths and
+The package is `snug-cbor` (crates.io's `snug` is another project); its
+library is `snug`, so code says `use snug::…`. It needs Rust 1.87 or later.
+Before 1.0, a minor release (0.y) may change the API; the changelog says how.
+
+The compiler, the validator and the byte-level decisions are generated into
+Rust from one source, which also generates snug's JavaScript package. Both hosts give the same Programs, verdicts, reasons, paths and
 budget use for the same input.
 
 The wire policy is `snug::Profile`:
@@ -73,7 +74,7 @@ paths. The `compile`, `schema`, `sha256`, `unicode_tables` and generated
 release; of them, only `unicode_tables::tables()` (the optional Unicode data)
 is meant for users (see the Rust guide, `docs/rust.md`).
 
-The Rust guide, `docs/rust.md` in the snug repository, covers ownership,
+The [Rust guide](https://github.com/3sln/snug/blob/main/docs/rust.md) covers ownership,
 errors, sessions, sequences, extension controls and the exact numeric
 conventions. The rustdoc examples are compiled and run as tests.
 
@@ -117,7 +118,7 @@ checkout, without downloading anything.
   the library and the test-host binaries;
 - Clippy, when it is installed.
 
-Clippy's output goes to `.cache/snug-rs/clippy.log`. The gate allows one
+Clippy's output goes to `.cache/snug-rs/clippy.log`. The check allows one
 lint, `clippy::absurd_extreme_comparisons`, for a generated comparison
 against the int32 maximum; every other lint keeps its level.
 
@@ -132,6 +133,6 @@ A local consumer can depend on the assembled crate:
 snug-cbor = { path = "../snug/.cache/snug-rs" }   # used as `snug`
 ```
 
-Adjust the path for your consumer directory, and pin the repository
-revision that produced the crate: a crate built from the repository carries
-the placeholder version `0.0.0-unreleased`, which does not identify it.
+Adjust the path for your consumer directory, and record the commit that
+produced the crate: a crate built from the repository carries a placeholder
+version, not a release number, so the version does not identify it.

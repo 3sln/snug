@@ -1,6 +1,6 @@
-// P7.9 (D005 re-take): the wasm instance behind the SDK. snug's Rust build
+// The wasm instance behind the SDK. snug's Rust build
 // (host/wasm/src/sdk.rs, `kin/scripts/wasm-build sdk`) exports a plain integer
-// ABI: no wasm-bindgen, one import (D170): `env.snug_ext`, which asks the
+// ABI: no wasm-bindgen, one import: `env.snug_ext`, which asks the
 // extension-control predicate of the Program in the current call (`withExt`).
 // This module owns the one instance per isolate, the views over its memory,
 // and instance loss.
@@ -10,7 +10,7 @@
 //                         (load.mjs); with no argument the module next to the
 //                         SDK (the package's wasm/snug.wasm; in a checkout, the
 //                         build output). Or init({ runtime, compiler }): either
-//                         source, the compiler module for snug/compile (P9.17)
+//                         source, the compiler module for snug/compile
 //   initSync(source)      a WebAssembly.Module or bytes (sync compile); also
 //                         initSync({ runtime, compiler })
 //   memoryBytes()         linear memory size now (it only ever grows)
@@ -33,7 +33,7 @@ export let u8 = null, i32 = null;
 let buf = null;
 export let generation = 0;      // bumped by every new instance
 export let OUT = 0, INFO = 0, NAV = 0;   // word indexes of the static areas
-/** P8.4 (D262): after sdk_scan or sdk_validate accepted, the canonical copy to build from (a fresh Uint8Array) when
+/** After sdk_scan or sdk_validate accepted, the canonical copy to build from (a fresh Uint8Array) when
  *  the input is valid but not its own deterministic form, else null; and whether some map's keys may be out of
  *  canonical order (INFO[1] bit VC_UNSORTED). */
 export function lastCopy() {
@@ -167,7 +167,7 @@ export function kbuf(n) {
 
 const names = new Map();
 const td = new TextDecoder();
-/** The scanner's code name (from kin, through wasm). */
+/** The scanner's code name (from the core, through wasm). */
 export function codeName(code) {
   let s = names.get(code);
   if (s === undefined) { const p = x.sdk_code_name(code) >>> 0; s = td.decode(u8.subarray(p, p + i32[INFO])); names.set(code, s); }

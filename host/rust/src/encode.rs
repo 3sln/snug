@@ -1,4 +1,4 @@
-//! Deterministic encoding through generated kin writer primitives.
+//! Deterministic encoding through the generated writer primitives.
 //!
 //! ```
 //! use snug::{encode, EncodeOptions, Value};
@@ -12,8 +12,8 @@ use crate::snug::{
 use crate::{DecodeOptions, Error, Floats, Integer, Limits, Profile, Top, TypedArray, Value};
 
 /// Encoder options. Encoding permits any root. Output bytes are bounded during
-/// growth, unlike JS's finish-only maxBytes check; kin checks the final result
-/// against the profile (the valid preset by default, D267; the bytes are
+/// growth, unlike JS's finish-only maxBytes check; the core checks the final result
+/// against the profile (the valid preset by default; the bytes are
 /// deterministic under every preset).
 #[derive(Debug, Clone, Copy)]
 pub struct EncodeOptions {
@@ -50,7 +50,7 @@ impl EncodeOptions {
         }
     }
 }
-/// Encode a complete value, sorting maps through kin and checking the complete
+/// Encode a complete value, sorting maps through the core and checking the complete
 /// result with the generated scanner before returning bytes.
 pub fn encode(value: &Value, options: &EncodeOptions) -> Result<Vec<u8>, Error> {
     let mut writer = crate::Writer::new(options)?;
@@ -58,7 +58,7 @@ pub fn encode(value: &Value, options: &EncodeOptions) -> Result<Vec<u8>, Error> 
     writer.finish()
 }
 
-/// An open container of the iterative writer (D357): the entries left, its depth,
+/// An open container of the iterative writer: the entries left, its depth,
 /// and for a map the pairs' byte offsets, their bignum notes, the value to write
 /// after the key in flight and the bignum count before that key.
 enum Walk<'v> {
@@ -76,7 +76,7 @@ enum Walk<'v> {
 pub(crate) struct Output {
     pub(crate) bytes: Vec<u8>,
     pub(crate) options: EncodeOptions,
-    /// D348: bignums outside preferred serialization written as their integer so far.
+    /// Bignums outside preferred serialization written as their integer so far.
     pub(crate) norms: usize,
 }
 impl Output {
@@ -154,8 +154,8 @@ impl Output {
         }
         self.head(major, n as u64)
     }
-    /// Sort a map's pairs through kin. `normalized[i]`: pair i's key holds a bignum
-    /// written as its integer (D348: a duplicate among such keys is `duplicate_key`
+    /// Sort a map's pairs through the core. `normalized[i]`: pair i's key holds a bignum
+    /// written as its integer (a duplicate among such keys is `duplicate_key`
     /// with the subcode `normalized`).
     pub(crate) fn map_end(&mut self, pairs: &[i32], normalized: &[bool]) -> Result<(), Error> {
         let n = pairs.len() / 2;
@@ -198,7 +198,7 @@ impl Output {
         }
         Ok(())
     }
-    /// D357: the tree is walked ITERATIVELY -- the open arrays and maps on a heap
+    /// The tree is walked ITERATIVELY -- the open arrays and maps on a heap
     /// stack, a tag's or ndarray's content taken next -- so the native stack does
     /// not grow with the value's depth (the recursive writer needed about 6.3 KB
     /// per level in a debug build on Rust 1.98). The depth bound is unchanged.

@@ -1,4 +1,4 @@
-//! RFC 9165 §3's `.abnf` and `.abnfb` controls (D334): ABNF (RFC 5234 with
+//! RFC 9165 §3's `.abnf` and `.abnfb` controls: ABNF (RFC 5234 with
 //! RFC 7405's case-sensitive strings) over a string's Unicode scalars (`.abnf`)
 //! or bytes (`.abnfb`). They are not in a registry unless asked for:
 //! [`Controls::with_abnf`] adds both, to the registry given to the compiler and
@@ -13,9 +13,9 @@
 //! ABNF line and column. Parsing is strict RFC 5234 + RFC 7405 + RFC 9165 §3 unless
 //! [`CompileOptions::abnf`](crate::CompileOptions::abnf) is
 //! [`AbnfMode::Lenient`](crate::compile::AbnfMode), which also admits snug's
-//! non-RFC forms (D340); the mode is in the source key. It is
+//! non-RFC forms; the mode is in the source key. It is
 //! prepared once when a Program is bound. The match is language membership (an
-//! Earley recognizer in kin, `snug.abnf`), metered against the budget that
+//! Earley recognizer in the generated core, `snug.abnf`), metered against the budget that
 //! remains, so JS, Rust and the wasm SDK give the same verdicts and charges.
 //!
 //! ```
@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 /// `.abnf` (scalars) or `.abnfb` (bytes); the item bound defaults to 65,536 bytes
 /// and the matcher's scratch cap to 4,194,304 words (16 MiB, the PEG group arena's
-/// default, D281).
+/// default).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Abnf {
     bytes: bool,
@@ -69,12 +69,12 @@ impl Abnf {
 }
 
 /// A controller on its own (ABNF text): Ok, or why the compiler would refuse it under
-/// the default strict parse mode (D340).
+/// the default strict parse mode.
 pub fn check_abnf(text: &str) -> Result<(), String> {
     check_abnf_in(text, crate::compile::AbnfMode::Strict)
 }
 
-/// `check_abnf` under a given parse mode (D340).
+/// `check_abnf` under a given parse mode.
 pub fn check_abnf_in(text: &str, mode: crate::compile::AbnfMode) -> Result<(), String> {
     let b = text.as_bytes();
     let n = b.len();
@@ -112,8 +112,8 @@ fn detail(a: &[u8], lenient: bool) -> Option<String> {
 }
 
 thread_local! {
-    /// One scratch per thread, reused (kin never re-enters a run), first sized
-    /// by `abnf_scratch_words`. When kin needs more (`abnf_more`: the size it
+    /// One scratch per thread, reused (the core never re-enters a run), first sized
+    /// by `abnf_scratch_words`. When the core needs more (`abnf_more`: the size it
     /// suggests, within `ABNF_MAX_WORDS`) the run is repeated with that (not
     /// charged), so verdicts and units never depend on its size. Given back
     /// after a run past 2^20 words.
@@ -187,7 +187,7 @@ impl Control for Abnf {
 }
 
 impl Controls {
-    /// Add `.abnf` and `.abnfb` (D334; the built-in names only this module binds).
+    /// Add `.abnf` and `.abnfb` (the built-in names only this module binds).
     pub fn with_abnf(mut self) -> Self {
         self.insert_abnf(Abnf::text());
         self.insert_abnf(Abnf::bytes());

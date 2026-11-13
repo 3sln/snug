@@ -1,15 +1,16 @@
 # Using snug from Rust
 
-The crate is `snug-cbor` on crates.io (once published: `cargo add snug-cbor`,
-or `snug-cbor = "0.1"` under `[dependencies]`). Its library is `snug`, so code
-says `use snug::…`.
+```sh
+cargo add snug-cbor
+```
 
-Assemble the crate with `kin/scripts/rust-crate .cache/snug-rs`; run the full
-offline gate with `bb rust-api-test`. The [Rust host README](../host/rust/README.md)
-explains local dependencies and the assembled layout. The crate has no external
-Rust dependencies. Its examples are checked by Cargo doctests. The minimum
-supported Rust is 1.87 (`rust-version`); the release gates build and test the
-crate on exactly 1.87 ([release policy §2](release-policy.md#2-supported-runtimes-and-toolchains)).
+The crate is `snug-cbor` on crates.io (or `snug-cbor = "0.1"` under
+`[dependencies]`). Its library is `snug`, so code says `use snug::…`. It has no
+dependencies, and its examples run as doctests. The minimum supported Rust is
+1.87 (`rust-version`), and every release is built and tested on exactly 1.87
+([release policy §2](https://github.com/3sln/snug/blob/main/docs/release-policy.md#2-supported-runtimes-and-toolchains)).
+To build the crate from a clone instead, see
+[Building from a checkout](#building-from-a-checkout).
 
 ## Compile once, validate bytes
 
@@ -33,7 +34,7 @@ schema.validate(&[0xa1, 0x62, b'i', b'd', 7], "message", &mut scratch)?;
 Compilation is synchronous. `CompilerProfile::{Full, Bindle, Bus}` restricts
 CDDL; it is independent of wire policy. The wire profile is `snug::Profile`
 in `DecodeOptions`, `EncodeOptions`, `ValidationOptions` and
-`SequenceOptions` (P7.1, D120, D126, D260): `Profile::VALID` (any valid CBOR)
+`SequenceOptions`: `Profile::VALID` (any valid CBOR)
 by default, `Profile::DETERMINISTIC` to require RFC 8949 §4.2.1 encoding,
 `Profile::BINDLE` for the Bindle restrictions (root `cose` integer labels an
 option there), or the fields `keys`, `tags`, `floats`, `undefined_value`,
@@ -43,7 +44,7 @@ accepts `Some(&tables)` from `snug::unicode_tables::tables()` for pinned
 Unicode 16.0 category regexps. Programs contain the compiled automata and do
 not need the category tables at validation time. `CompileOptions::cuts`
 selects the cut semantics (`Cuts::Rfc`, the literal RFC 8610 cut, by default;
-`Cuts::Branch`, rule A; D301), and `CompileOptions::group_words` caps the PEG
+`Cuts::Branch`, rule A), and `CompileOptions::group_words` caps the PEG
 group arena in words (default 4,194,304; a run that needs more refuses with
 `group_limit`), as JS's `cuts` and `groupWords`.
 
@@ -59,13 +60,13 @@ and budget usage. It describes one deterministic witness, not all failed
 alternatives. Only schema-named keys appear in paths. The subcode is the
 embedded item's own reason for `embedded`, and `cut` for a `value` refusal a
 cut decided: a key matched a cut member (`name:` or `^=>`) whose value failed,
-and the cut stopped the alternatives after it (D342). The requested
+and the cut stopped the alternatives after it. The requested
 `Result<(), Failure>` signature also carries a missing-rule API failure as
 `code == -1, reason == "unknown_rule"`; check rule names against
 `schema.program().rules()` when configuring an application. JS instead throws
 TypeError for this misuse. Every API that returns `Error` reports it as
 `Error::Usage("unknown_rule")`, and `?` from `validate` into an `Error`
-converts the `Failure` to the same (D342).
+converts the `Failure` to the same.
 
 **Tagged unions.** Map cuts follow RFC 8610 §3.5.4 literally, so
 `{ type: "a", x: int // type: "b", y: tstr }` rejects every `"b"` message
@@ -106,11 +107,11 @@ assert_eq!(decode(&bytes, &DecodeOptions::any())?,
 # Ok::<(), snug::Error>(())
 ```
 
-`decode` scans the whole document with kin before materializing anything.
+`decode` scans the whole document with the generated scanner before materializing anything.
 `schema.decode(bytes, rule, scratch)` validates first, then runs the same
 trusted builder without another profile scan. Values own byte/text content,
 typed elements and descendants. Map pairs retain canonical wire order; encode
-accepts pairs in any order, sorts through kin and refuses duplicate keys.
+accepts pairs in any order, sorts them by encoding and refuses duplicate keys.
 
 | Value | Exact meaning |
 | --- | --- |
@@ -120,16 +121,15 @@ accepts pairs in any order, sorts through kin and refuses duplicate keys.
 | `Decimal { mantissa: Integer, exponent: i64 }` | normalized nonzero coefficient × 10^exponent; current exponent −1024..−1 |
 | `TypedArray` | vectors of exact integer/native float elements; `F16(Vec<u16>)` stores raw binary16 bits |
 | `NDArray { shape, data }` | tag 40, row-major shape and array/typed storage |
-| `Tag(number, content)` | explicit wire tag; cannot bypass kin's allowed-tag/content checks |
-| `Float(f64)` | a float, even when integral; kin chooses shortest width or refuses |
+| `Tag(number, content)` | explicit wire tag; cannot bypass the profile's allowed-tag/content checks |
+| `Float(f64)` | a float, even when integral; the encoder chooses the shortest width or refuses |
 
 BigInt encoding strips leading zeroes and uses major 0/1 when possible;
 decoding a bignum keeps its exact content bytes. Under the `valid` preset a
 bignum with leading zeroes or a small value (`2(h'01')`) is a data item
-distinct from the integer of the same value (RFC 8949 §5.6.1; D342), so it
+distinct from the integer of the same value (RFC 8949 §5.6.1), so it
 decodes to `Value::BigInt`, never `Value::Uint`, as the duplicate-key check
-and CDDL matching read it. The one decoded value that does not re-encode
-(D348): a map whose keys are one key once such a bignum is written as its
+and CDDL matching read it. The one decoded value that does not re-encode: a map whose keys are one key once such a bignum is written as its
 integer has no deterministic encoding, so `encode` and the `Writer` answer
 `Error::Cbor { code: "duplicate_key", subcode: Some("normalized"), .. }`
 (`Error::subcode()`), naming no key. `a200f6c240f6` ({0: null,
@@ -139,9 +139,9 @@ parser/normalizer yet: supply normalized parts. Decimal values do not retain
 presentation scale. `Float(1.0)` encodes as the float `f93c00` under the
 valid and deterministic presets and is refused under `Profile::BINDLE`; choose
 `Uint(1)` for the integer. `Value::Undefined` is `f7`; `Value::Simple(n)` is
-any other simple value (D284), n in 0..=19 or 32..=255 (20..=31 are refused,
+any other simple value, n in 0..=19 or 32..=255 (20..=31 are refused,
 `simple`), written in its shortest form (`f0`, `f8ff`) and admitted under
-`undefined_value` (`View::simple` reads it). NaN is refused in typed arrays under the Bindle tag set (D265); typed infinities
+`undefined_value` (`View::simple` reads it). NaN is refused in typed arrays under the Bindle tag set; typed infinities
 and signed zero retain their bits. Byte strings use `Bytes`, not typed U8.
 
 `DecodeOptions::default()` (also `any()` and `valid()`) is the valid preset
@@ -162,7 +162,7 @@ let bytes = writer.finish()?;
 
 The Writer writes bytes immediately. `begin_array(n)` owes exactly n values;
 `begin_map(n)` owes n key/value pairs. Supply `key` or `key_value` before each
-map value, and `end` each complete container. Maps sort at end through kin.
+map value, and `end` each complete container. Maps sort at `end`.
 `value` walks a borrowed `Value` without cloning the tree. `int(i128)` supports
 the entire signed range; `nint` accepts the CBOR argument convention above.
 `bigint`, `decimal`, `typed`, `ndarray`, `bytes`, `text`, `float`, `bool` and
@@ -180,18 +180,18 @@ finish-only byte cap. Map sorting and final checking use additional scratch;
 the byte cap is not a total heap quota. Default depth/entry/item caps are
 32 / 65,536 / 131,072. Zero means zero. Codec option ceilings are depth 256
 and int32-range lengths/counts; invalid ceilings return `Error::Usage`.
-Bignum/decimal/dimension restrictions still belong to kin.
+The profile's bignum, decimal and dimension rules apply to Writer output too.
 
-### Thread stacks (D357)
+### Thread stacks
 
 Every path whose native stack grows with input or schema depth fits a 2 MiB
 thread (`std::thread::Builder`'s default) at the depth ceiling (256) and the
 parser-nesting ceiling (256), in debug and release builds, on Rust 1.87 and
-later. The `stack` test checks this on every gate run.
+later. The test suite's `stack` test checks this.
 
 - `decode`, `Schema::decode`, `View::value`, `encode` and `Writer` build and
   walk value trees iteratively (heap stacks).
-- The kin scanner, the VM (one native frame per nested item it validates)
+- The scanner, the VM (one native frame per nested item it validates)
   and the compiler's parser recurse, bounded by these limits.
 
 Measured stack per level, the slope between depth 128 and 256 (bytes, 4 KiB
@@ -237,7 +237,7 @@ input that is not its own deterministic form (indefinite lengths, longer
 heads, unsorted keys) is read through its canonical copy, which a borrowing
 view cannot alias: `View::open` and `Schema::view` answer
 `Error::Usage("owned_view")` for it, and `snug::Document::open(&bytes,
-&options)?.view()` owns the copy (D267). Sequence messages' `view()` reads the
+&options)?.view()` owns the copy. Sequence messages' `view()` reads the
 copy the same way.
 
 `get`, `get_key`, `at` and `entry` return optional checked views. Scalar
@@ -262,10 +262,9 @@ loaded.validate_blob(&BytesBlob(&[7]), "r", &ValidationOptions::default(), &Sour
 Programs use the same 96-byte-header container as JS: little-endian words,
 SHA-256 integrity, format 2.0 (format word `2`; a Program using extension
 controls has the same format). Loading requires major 2, a
-minor no newer than the loader (1.x Programs are refused; recompile them), valid framing/digest and kin vm-verify.
+minor no newer than the loader (1.x Programs are refused; recompile them), valid framing/digest and the structural verifier.
 Producer version is provenance and survives reserialization. `source_key()`
-is the source/options SHA-256 hex cache key; namespace caches by the producing
-revision while the library is experimental. **Use trusted Program origins**:
+is the source/options SHA-256 hex cache key, and it includes the snug version. **Use trusted Program origins**:
 the hash is not authentication and structural verification does not establish
 compiler semantic invariants. Raw words/pool accessors are shared read-only
 slices; `Program::from_parts` copies and verifies them.
@@ -307,7 +306,7 @@ the requested bytes on every read. The async forms are under
 [Async sources](#async-sources); source decode, view directories and Writer
 sorted-key mode remain unavailable.
 
-A message of **unknown length** (D085) is read from any `std::io::Read` until
+A message of **unknown length** is read from any `std::io::Read` until
 EOF in drain mode -- the verdict equals the buffer's of the same bytes:
 
 ```rust
@@ -328,10 +327,9 @@ A read error is `Error::Io` with the reader's own `io::Error`
 can tell a reset from a timeout. With `SourceOptions::fail_fast` a certain refusal is answered at once (its
 code may then be another than the buffer's `cbor/truncated` / `cbor/too_large`;
 accept and refuse never differ). Only what the session asks for is held, plus a
-chunk. The session's key arena grows with the input read (D342), so an idle
-stream session holds about 19 KiB whatever `max_bytes` is (measured
-2026-11-12 with a 4096-byte chunk and 9 bytes received; before D342 the arena
-was sized for the input limit, about 1.4 MiB at the default 1,500,000 bytes).
+chunk. The session's key arena grows with the input read, so an idle
+stream session holds about 19 KiB whatever `max_bytes` is (with a 4096-byte
+chunk and 9 bytes received).
 A stream that has delivered n bytes can hold up to about 2n for its key arena.
 Bound concurrent streams below `max_live` and size `max_bytes` to the
 protocol. For an untrusted peer prefer fail-fast: drain mode reads up
@@ -399,7 +397,7 @@ over the encodings, optional `max_bytes()` (default 65,536; a longer item
 fails with `control_size` unasked), `argument()` (checked at compile time) and
 `cost(item_bytes) -> u64`, the budget units charged before `check` runs
 (default: one per byte; more than the budget left stops with `budget`
-unasked; a predicate's own CPU is the host's responsibility, D193).
+unasked; a predicate's own CPU is the host's responsibility).
 Semantics, charging and caching are the JS host's ([guide](guide.md#custom-controls)).
 An unregistered `.name` is `Error::Compile` with code `unknown_control` and
 `detail` naming it; loading a Program without its controls is
@@ -411,12 +409,12 @@ admits them under the `bus` profile.
 ```rust
 use snug::{Schema, CompileOptions, Scratch, Controls, AbnfMode,
            abnf::{Abnf, check_abnf, check_abnf_in}};
-let controls = Controls::new().with_abnf();                // the optional ABNF controls (D334)
+let controls = Controls::new().with_abnf();                // the optional ABNF controls
 let options = CompileOptions { controls: Some(&controls), ..CompileOptions::default() };
 let schema = Schema::compile(r#"id = text .abnf "(1*DIGIT)\nDIGIT = %x30-39\n""#, &options)?;
 assert!(schema.validate(&[0x62, b'4', b'2'], "id", &mut Scratch::new()).is_ok());
 assert!(check_abnf("a\na = <prose>").unwrap_err().starts_with("prose-val"));
-// strict RFC parsing by default; AbnfMode::Lenient admits snug's other forms (D340)
+// strict RFC parsing by default; AbnfMode::Lenient admits snug's other forms
 assert!(check_abnf("1*DIGIT\nDIGIT = %x30-39").is_err());
 assert_eq!(check_abnf_in("1*DIGIT\nDIGIT = %x30-39", AbnfMode::Lenient), Ok(()));
 let lenient = CompileOptions { controls: Some(&controls), abnf: AbnfMode::Lenient, ..CompileOptions::default() };
@@ -435,10 +433,10 @@ schema using the controls is `unsupported_control` (the `message` names
 undefined rules) are `control_value`, with `detail` such as `abnf argument:
 prose-val (<...>) is not supported at ABNF line 1, column 5`. Parsing is
 strict RFC 5234 + RFC 7405 + RFC 9165 §3 unless `CompileOptions::abnf` is
-`AbnfMode::Lenient` (D340; non-exhaustive, in the source key); under the
+`AbnfMode::Lenient` (non-exhaustive, in the source key); under the
 default, snug's non-RFC forms are `control_value` with a detail naming the
 option, and `check_abnf_in(text, mode)` checks under either mode. Verdicts and
-budget units are kin's (`snug::snug::abnf`), the same as JS and the wasm SDK.
+budget units come from the generated core (`snug::snug::abnf`), the same as JS and the wasm SDK.
 `with_max_bytes` sets the item bound (default 65,536). `with_max_words` sets
 the matcher's scratch cap, clamped to 65,536..=16,777,216 words (default
 4,194,304, the PEG group arena's default); past it, validation stops with
@@ -492,11 +490,11 @@ API borrows the caller's chunk instead.
 
 ## Async sources
 
-The blob, stream and sequence drivers have async forms (P9.6, D027) over the
+The blob, stream and sequence drivers have async forms over the
 same resumable session: the VM never awaits; each driver asks the session what
 it needs, awaits that one read and steps again. Verdicts, codes, offsets,
-paths and budget are the sync forms' for every chunking (gated in `bb
-rust-api-test`, `tests/async_sources.rs`). The crate stays dependency-free and
+paths and budget are the sync forms' for every chunking (tested in
+`tests/async_sources.rs`). The crate stays dependency-free and
 runtime-agnostic: any executor drives the futures (tokio, async-std, smol, or
 the few lines of `block_on` hidden in this example).
 
@@ -624,14 +622,14 @@ logging them. Allocator exhaustion retains standard Rust allocator behavior.
 
 ## Enums that may grow
 
-Some public enums are `#[non_exhaustive]` (D339): a later release may add a
+Some public enums are `#[non_exhaustive]`: a later release may add a
 variant to them without a breaking release, so a `match` on one outside the
 crate needs a fallback arm (`_ => …`). Treat an unknown error or source
 variant as a refusal, and render an unknown path segment generically.
 
 | `#[non_exhaustive]` | Why |
 | --- | --- |
-| `Error`, `SourceError`, `sessions::SessionError` | error families: new codes are additive (release-policy §1.3) |
+| `Error`, `SourceError`, `sessions::SessionError` | error families: new codes are additive (release policy §1.3) |
 | `Segment` | diagnostic paths; a new construct may need a new segment kind |
 | `Top`, `Keys`, `Tags`, `Floats` (in `Profile`), `Cuts`, `Regexp`, `CompilerProfile`, `OnInvalid` | options: a new mode or preset is a minor change |
 
@@ -643,3 +641,26 @@ These stay exhaustive, so a `match` can cover every case without a fallback:
   change what `decode` returns for existing input, so it is breaking anyway.
 - `schema::Step`: the session protocol. A driver that ignored a new step
   would be wrong, so adding one is deliberately a breaking change.
+
+## Building from a checkout
+
+To use a build of a repository commit instead of the crates.io release,
+assemble the crate. The generated modules are not in `host/rust`, so
+depending on that directory directly fails with a `compile_error!` naming
+`kin/scripts/rust-crate`. From the repository root, with no network:
+
+```sh
+kin/scripts/rust-crate .cache/snug-rs
+cargo test --offline --manifest-path .cache/snug-rs/Cargo.toml
+```
+
+Then depend on the assembled crate by path, and record the commit it came
+from (a build carries a placeholder version, not a release number):
+
+```toml
+[dependencies]
+snug-cbor = { path = "../snug/.cache/snug-rs" }   # used as `snug`
+```
+
+The [crate README](https://github.com/3sln/snug/blob/main/host/rust/README.md#building-from-the-repository)
+lists what the assembly copies and what the repository's own tests run.

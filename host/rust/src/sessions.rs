@@ -1,4 +1,4 @@
-//! P9.7 (D327): sessions' arrays pooled per Program, and a bound on live sessions
+//! Sessions' arrays pooled per Program, and a bound on live sessions
 //! per process.
 //!
 //! A session ([`crate::schema::Session`], a [`crate::Sequence`] reader) takes its VM
@@ -50,7 +50,7 @@ pub fn limits() -> SessionLimits {
     SessionLimits { max_live: MAX_LIVE.load(SeqCst), max_pooled_bytes: MAX_POOLED.load(SeqCst) }
 }
 
-/// Why a session could not start, or limits were refused. Not exhaustive (D339).
+/// Why a session could not start, or limits were refused. Not exhaustive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionError {
@@ -97,7 +97,7 @@ pub fn counts() -> SessionCounts {
     SessionCounts { live: LIVE.load(SeqCst), pooled_bytes: POOLED.load(SeqCst) }
 }
 
-/// Gates only: scribble released arrays, so a reuse that skipped the zero-fill shows.
+/// Tests only: scribble released arrays, so a reuse that skipped the zero-fill shows.
 #[doc(hidden)]
 pub fn scribble_for_tests(on: bool) {
     SCRIBBLE.store(on, SeqCst);

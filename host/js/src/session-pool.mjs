@@ -1,4 +1,4 @@
-// P9.7 (D327): the sessions' arrays pooled per Program, and a bound on live sessions per isolate.
+// The sessions' arrays pooled per Program, and a bound on live sessions per isolate.
 // A session (VmSession, a sequence reader's backend) takes its scratch S, session array SS and key arena
 // from its Program's pool and gives them back when it ends -- finished, refused, errored, closed -- or, if
 // abandoned mid-message, when it is garbage-collected. Every array is zero-filled before reuse, so a

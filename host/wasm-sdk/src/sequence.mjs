@@ -1,11 +1,10 @@
-// P7.13w: `snug/sequence` over wasm -- CBOR sequences (RFC 8742; architecture §18,
-// D210-D219) with the native package's API and driver (host/js/src/sequence-core.mjs):
+// `snug/sequence` over wasm -- CBOR sequences (RFC 8742) with the native package's API and driver (host/js/src/sequence-core.mjs):
 // readSequence(source, options) and sequenceReader(options); messages
 // { index, offset, length, bytes, borrowed, view }. The backend is one sequence session in
 // linear memory (sdk_vs_new with total -2: vms-init-seq; sdk_vs_reseq per message), so the
-// verdicts are kin's, as natively.
+// verdicts are the generated core's, as natively.
 //
-// Differences forced by linear memory (D219): a window is copied into the session's
+// Differences forced by linear memory: a window is copied into the session's
 // window buffer. The session gets exactly the native windows (so even fail-fast timing is
 // the native one), but the backend keeps its copy of a chunk while the chunk is read:
 // a later window inside the copied range steps at an offset in it (sdk_ses_step_at), one

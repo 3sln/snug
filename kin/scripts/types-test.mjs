@@ -56,6 +56,18 @@ for (const [dir, name] of packages) {
     // VmSession: close() everywhere; Disposable exactly where the lib declares Symbol.dispose
     lines.push(`import type { VmSession } from '${name}/sources';`, 'export function use(s: VmSession): void { s.close(); }');
     if (config === 'esnext') lines.push('export function dispose(s: VmSession): void { const d: Disposable = s; d[Symbol.dispose](); using u = s; void u; }');
+    // Fresh output buffers are Uint8Array<ArrayBuffer>: BodyInit and BlobPart accept them under TS 5.7+ with lib DOM
+    lines.push(`import { encode as enc } from '${name}';`, `import { Writer as W } from '${name}/writer';`,
+      `import type { Schema as S } from '${name}/schema';`, `import type { View as V } from '${name}/view';`,
+      `import type { SequenceMessage as M } from '${name}/sequence';`,
+      'export const response = new Response(enc({ id: 7 }));',
+      'export const blob = new Blob([enc({ id: 7 })]);',
+      'export const written = new Response(new W().value(1).finish());',
+      'export function stored(s: S): Blob { return new Blob([s.program.serialize()]); }',
+      'export function copied(v: V): Response { return new Response(v.copyBytes()); }');
+    // View.release() is the wasm SDK's alone, on views from view() and from sequences
+    if (name === '@3sln/snug-wasm') lines.push('export function release(v: V, m: M): void { v.release(); m.view.release(); }');
+    else lines.push('export function noRelease(v: V): void {', '  // @ts-expect-error the native View has no release()', '  v.release();', '}');
     writeFileSync(join(at, 'check.mts'), lines.join('\n') + '\n');
     writeFileSync(join(at, 'tsconfig.json'), JSON.stringify({
       compilerOptions: { ...options, strict: true, noEmit: true, module: 'NodeNext', moduleResolution: 'NodeNext',

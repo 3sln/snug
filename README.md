@@ -5,14 +5,22 @@ snug reads, writes and validates CBOR (RFC 8949) against CDDL schemas
 limits, errors never echo the data, and validation runs directly over the
 bytes without building a value tree.
 
-The core (scanner, CDDL compiler, validator, encoder) is written once in kin
-and generated into JavaScript and Rust. A WebAssembly build comes from the
-Rust side. All three give the same verdicts, error codes and step counts for
-the same input, and the test suite checks that they do.
+The core (scanner, CDDL compiler, validator, encoder) is generated from one
+source into JavaScript and Rust, and a WebAssembly build comes from the Rust
+side. All three give the same verdicts, error codes and step counts for the
+same input, and the test suite checks that they do.
 
-> **Status:** pre-release. Nothing is published to npm or crates.io yet, and
-> the API may change before 0.1.0. You can build and use it from this
-> repository today. Requires Node ≥ 20 and Rust ≥ 1.87.
+## Install
+
+```sh
+npm install @3sln/snug        # JavaScript: Node ≥ 20, browsers, Workers; no dependencies
+npm install @3sln/snug-wasm   # optional: the same API on the WebAssembly build
+cargo add snug-cbor           # Rust ≥ 1.87; the library is `snug`; no dependencies
+```
+
+Before 1.0, a minor release (0.y) may change the API; see the
+[changelog](CHANGELOG.md). To build any of them from a clone instead, see
+[Building from a checkout](docs/guide.md#building-from-a-checkout).
 
 ## What it does
 
@@ -38,13 +46,6 @@ the same input, and the test suite checks that they do.
 
 ## Quick start: JavaScript
 
-No install step and no dependencies. From a checkout:
-
-```sh
-cd host/js
-node --input-type=module
-```
-
 ```js
 import { encode } from '@3sln/snug';
 import { compile } from '@3sln/snug/compile';
@@ -55,7 +56,7 @@ const bytes = encode({ id: 7, text: 'hello' });
 
 schema.validate(bytes, 'message');   // { ok: true }, nothing decoded
 schema.decode(bytes, 'message');     // validated, then decoded
-view(bytes, { schema, rule: 'message' }).get('id').number();   // 7, read lazily
+view(bytes, { schema, rule: 'message' }).get('id')?.number();  // 7, read lazily
 ```
 
 Compile a schema once and reuse it. `compile` is async only because the
@@ -68,7 +69,7 @@ schema.validate(encode({ id: -1, text: 'hi' }), 'message');
 // { ok: false, reason: 'type', path: ['id'], offset: 4 }
 ```
 
-More examples, runnable from the repository root:
+More examples, in `examples/` (in the repository, run them from its root):
 
 ```sh
 node examples/validate-hostile.mjs   # untrusted bytes, limits, safe errors
@@ -81,8 +82,7 @@ node examples/program-cache.mjs      # compile once, ship the compiled schema
 
 ## Quick start: Rust
 
-The crate is `snug-cbor` (`cargo add snug-cbor` once published); its
-library is `snug`. It has no dependencies.
+The crate is `snug-cbor`; its library is `snug`, so code says `use snug::…`.
 
 ```rust
 use snug::{CompileOptions, EncodeOptions, Schema, Scratch, Value, encode};
@@ -162,9 +162,7 @@ Gzipped, the codec alone is about 21 KB and validation about 54 KB. The
 compiler is a separate chunk of about 98 KB that loads only when you
 compile; if you ship precompiled schemas, it never loads.
 
-Until snug is on npm, `npm run build` in `host/js` produces a self-contained
-package you can depend on from another project. The [guide](docs/guide.md)
-has the recipe, plus TypeScript, browser and Workers setup.
+The [guide](docs/guide.md) covers TypeScript, browser and Workers setup.
 
 ## Documentation
 
@@ -174,12 +172,9 @@ has the recipe, plus TypeScript, browser and Workers setup.
 - [wasm SDK](docs/wasm-sdk.md): the opt-in WebAssembly build, `@3sln/snug-wasm`
 - [CDDL support](docs/cddl-support.md): what's supported and how it's read
 - [Profiles](docs/profiles.md): wire options and value mapping
-- [Conformance](docs/conformance.md): how snug lines up with each RFC
-- [Release policy](docs/release-policy.md): versioning and what counts as breaking
+- [Conformance](https://github.com/3sln/snug/blob/main/docs/conformance.md): how snug lines up with each RFC
+- [Release policy](https://github.com/3sln/snug/blob/main/docs/release-policy.md): versioning and what counts as breaking
 - [Changelog](CHANGELOG.md)
-
-Design: [specification](SPEC.md), [architecture](docs/architecture.md),
-[Program format](docs/program.md).
 
 ## Security
 

@@ -1,4 +1,4 @@
-//! Versioned, SHA-256 checked Program containers (D084/D100).
+//! Versioned, SHA-256 checked Program containers.
 //!
 //! ```
 //! use snug::{Schema, CompileOptions, Program};
@@ -15,7 +15,7 @@ const HEADER: usize = 96;
 const MAX_BODY: usize = 64 * 1024 * 1024;
 /// Immutable, verified Program. Clones share owned storage; no mutable words or
 /// pool escape. A digest detects corruption, **not** malicious Programs. Load
-/// only from trusted compiler/cache origins, as required by D084.
+/// only from trusted compiler/cache origins.
 #[derive(Debug, Clone)]
 pub struct Program(Arc<Inner>);
 #[derive(Debug)]
@@ -52,12 +52,12 @@ fn body_len(words: usize, pool: usize) -> Result<usize, Error> {
     Ok(n)
 }
 impl Program {
-    /// Copy and run kin's structural verifier on raw Program words and pool.
+    /// Copy and run the structural verifier on raw Program words and pool.
     /// Prefer deserialization for a persisted JS or Rust Program.
     pub fn from_parts(words: &[i32], pool: &[u8]) -> Result<Self, Error> {
         Self::from_parts_with(words, pool, &Controls::default())
     }
-    /// [`Program::from_parts`] for a Program using extension controls (D141): each
+    /// [`Program::from_parts`] for a Program using extension controls: each
     /// it names must be in `controls`, else [`Error::MissingControls`].
     pub fn from_parts_with(words: &[i32], pool: &[u8], controls: &Controls) -> Result<Self, Error> {
         Self::with_version(words, pool, crate::compile::snug_version().to_owned(), controls)
@@ -111,7 +111,7 @@ impl Program {
     pub fn rules(&self) -> &[String] {
         &self.0.rules
     }
-    /// The extension controls this Program uses (D141), by name.
+    /// The extension controls this Program uses, by name.
     pub fn controls(&self) -> Vec<String> {
         self.0.host.controls()
     }
@@ -128,7 +128,7 @@ impl Program {
             .map(|&w| format!("{:08x}", w as u32))
             .collect()
     }
-    /// Emit docs/program.md's container, byte-identical to JavaScript. Current
+    /// Emit the serialised Program container, byte-identical to JavaScript. Current
     /// format major/minor is 2.0 (a Program using extension controls too); the
     /// producer version is provenance only.
     pub fn serialize(&self) -> Result<Vec<u8>, Error> {
@@ -167,11 +167,11 @@ impl Program {
         Ok(out)
     }
     /// Check framing, format compatibility, canonical version padding, reserved
-    /// bytes, SHA-256 and finally kin vm-verify before owning a Program.
+    /// bytes, SHA-256 and finally the structural verifier before owning a Program.
     pub fn deserialize(bytes: &[u8]) -> Result<Self, Error> {
         Self::deserialize_with(bytes, &Controls::default())
     }
-    /// [`Program::deserialize`] for a Program using extension controls (D141): the
+    /// [`Program::deserialize`] for a Program using extension controls: the
     /// same registry it was compiled with, else [`Error::MissingControls`].
     pub fn deserialize_with(bytes: &[u8], controls: &Controls) -> Result<Self, Error> {
         if bytes.len() < HEADER {

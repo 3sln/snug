@@ -1,4 +1,4 @@
-// CBOR sequences (RFC 8742; P7.13, architecture §18, D210-D219) on the native host:
+// CBOR sequences (RFC 8742) on the native host:
 // the generated JS session VM as the backend of the shared driver (sequence-core.mjs).
 // One session's arrays (scratch, session array, key arena sized for maxMessageBytes)
 // serve every message of a reader: vms-init-seq re-initialises them per message.

@@ -1,23 +1,23 @@
-//! Extension controls (D082, D140-D142): custom CDDL control operators whose
+//! Extension controls: custom CDDL control operators whose
 //! verdict is a host predicate over the item's encoded bytes.
 //!
 //! A registry ([`Controls`]) is given to the compiler (an unregistered
 //! `.name` is a schema error naming it) and again when a serialised Program
 //! that uses controls is loaded (a missing one is
-//! `Error::MissingControls`). kin decides when a control is asked: only for an
+//! `Error::MissingControls`). The core decides when a control is asked: only for an
 //! item its leaf is queried for, whole, after the profile walk. A predicate
 //! must be a pure function of its two inputs; `max_bytes` bounds the item it is
 //! asked about (a longer item fails the control with the reason
 //! `control_size`, under every source).
 //!
-//! **Budget (D193).** Every call is charged a fixed number of units, then the
+//! **Budget.** Every call is charged a fixed number of units, then the
 //! predicate's [`Control::cost`] (by default one unit per item byte), BEFORE it
 //! runs; a cost above what the budget has left stops validation with `budget`
 //! without calling. The VM cannot interrupt or measure host code: what a
 //! predicate does with its CPU is the host's responsibility, and `cost` is how
 //! a host keeps a slow predicate inside the budget (the default budget assumes
 //! roughly 20 ns of CPU per unit). The generic controls ([`Chars`],
-//! [`Unique`], [`Samelen`]) instead meter their own work in kin, against the
+//! [`Unique`], [`Samelen`]) instead meter their own work in the core, against the
 //! budget that remains, so JS and Rust charge them identically.
 //!
 //! ```
@@ -57,23 +57,23 @@ pub trait Control: Send + Sync {
         u64::from(item_bytes)
     }
     /// Why `argument` is refused, when `argument` answers false (shown in the
-    /// schema error; snug's ABNF controls only, D334).
+    /// schema error; snug's ABNF controls only).
     #[doc(hidden)]
     fn argument_detail(&self, _argument: &[u8]) -> Option<String> {
         None
     }
-    /// `argument` under the compile's ABNF parse mode, `abnf_lenient` (D340); other
+    /// `argument` under the compile's ABNF parse mode, `abnf_lenient`; other
     /// controls ignore the mode.
     #[doc(hidden)]
     fn argument_in(&self, argument: &[u8], _abnf_lenient: bool) -> bool {
         self.argument(argument)
     }
-    /// `argument_detail` under the compile's ABNF parse mode (D340).
+    /// `argument_detail` under the compile's ABNF parse mode.
     #[doc(hidden)]
     fn argument_detail_in(&self, argument: &[u8], _abnf_lenient: bool) -> Option<String> {
         self.argument_detail(argument)
     }
-    /// Metered in kin (snug's generic and ABNF controls only; not a public contract):
+    /// Metered in the core (snug's generic and ABNF controls only; not a public contract):
     /// the argument prepared once per EXT leaf, or None for a host predicate.
     #[doc(hidden)]
     fn prepare(&self, _pool: &[u8], _ao: i32, _al: i32) -> Option<Vec<i32>> {
@@ -86,7 +86,7 @@ pub trait Control: Send + Sync {
     }
 }
 
-/// The verdict word of one port call (D190): a metered control's run, else
+/// The verdict word of one port call: a metered control's run, else
 /// `cost` checked against `room`, then `check`.
 #[doc(hidden)]
 pub fn port(c: &dyn Control, prepared: Option<&[i32]>, pool: &[u8], ao: i32, al: i32, b: &[u8], s: i32, e: i32,
@@ -129,7 +129,7 @@ pub fn prepare_all(p: &[i32], b: &[u8], bound: &[Arc<dyn Control>]) -> BTreeMap<
 }
 
 thread_local! {
-    /// One meter + `.unique` scratch per thread, reused (kin never re-enters a
+    /// One meter + `.unique` scratch per thread, reused (the core never re-enters a
     /// run); three words per element of the largest array asked about (the
     /// profile walk bounds elements by the entries limit), given back past 2^20.
     static SCRATCH: RefCell<Vec<i32>> = RefCell::new(vec![0; 64]);
@@ -211,7 +211,7 @@ impl Controls {
         self.map.keys().map(String::as_str)
     }
     /// The registry words after the compile options (snug.compile.ext): BTreeMap order
-    /// is bytewise name order, as kin requires.
+    /// is bytewise name order, as the core requires.
     #[doc(hidden)]
     pub fn words(&self) -> Vec<i32> {
         if self.map.is_empty() {
@@ -227,7 +227,7 @@ impl Controls {
     }
 }
 
-/// The names of a Program's extension controls, in id order (format 1.1, D141).
+/// The names of a Program's extension controls, in id order.
 pub fn program_controls(p: &[i32], b: &[u8]) -> Vec<String> {
     let mut names = Vec::new();
     if p.len() < 64 {

@@ -1,5 +1,5 @@
 /**
- * An extension control (D082, D140-D142): `target .name argument` in CDDL, decided by a
+ * An extension control: `target .name argument` in CDDL, decided by a
  * predicate over the encoded argument and the item's whole encoding. It must be pure
  * (no I/O, clock, state or call back into snug); only a strict `true` matches. It is
  * asked only for an item its leaf is queried for, after the profile checks. Each call costs

@@ -1,6 +1,6 @@
 import type { Control } from './controls.js';
 /**
- * RFC 9165 §3's `.abnf` and `.abnfb` (D334), an optional module: spread `abnf` into the
+ * RFC 9165 §3's `.abnf` and `.abnfb`, an optional module: spread `abnf` into the
  * `controls` registry of `compile` and of a Program's loader (`fromSerialized`,
  * `new Program`). Without it, a schema using them is refused (`unsupported_control`)
  * and a stored Program using them fails to load (`missing_control`).

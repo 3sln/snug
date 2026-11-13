@@ -389,7 +389,13 @@ go. Delegations such as D303 cover size caps only, not releases.
    - `bb rust-api-test` (default mode, and the `full` mode once P9.6a
      lands);
    - `bb wasm-sdk-test` and `bb wasm-package-test` (the SDK ships, O3);
-   - `bb size`, `bb watchdog-test`;
+   - `bb size`, `bb types-test`, `bb watchdog-test`;
+   - `bb docs-test` (D366): the shipped documents, declarations, examples
+     and rustdoc carry no pre-release text ("not yet published", "private",
+     the version placeholder), no internal process references and no broken
+     links. The user docs are therefore written for the released state
+     before the release commit; this gate refuses a release whose text says
+     otherwise;
    - `npm test` in `host/js`;
    - `node corpus/tools/run-rfc-corpus.mjs --gate` (no unexplained or
      stale checks);

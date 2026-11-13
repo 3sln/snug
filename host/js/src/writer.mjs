@@ -1,10 +1,10 @@
-// The Writer (architecture §16.5, P5.4): typed calls straight to deterministic
-// CBOR, with a grammar state machine. Every byte-level choice is a kin
+// The Writer: typed calls straight to deterministic
+// CBOR, with a grammar state machine. Every byte-level choice is a generated-core
 // primitive (gen/js/snug/write: shortest heads, float widths by bit tests,
 // integers and bignums from magnitude bytes, encoded-key comparison and the
 // map-closing permutation); this host owns memory, host-value admissibility
-// (D003 as amended: lone surrogates, NaN, non-integers, classes) and the
-// grammar. Semantics of value(v) are encode()'s (D113 array policy).
+// (lone surrogates, NaN, non-integers, classes) and the
+// grammar. Semantics of value(v) are encode()'s (including its array policy).
 import { SnugFault } from './fault.mjs';
 import { resolveLimits } from './limits.mjs';
 import { validateOptions, selectOptions } from './options.mjs';
@@ -63,7 +63,7 @@ function typedPayload(v, info, fail, nanOk = false) {
  * value (any host value, encode's rules); containers: beginArray(n), beginMap(n), key(k), end(); finish() returns the
  * bytes once exactly one complete root has been written. Map keys may come in any order (sorted at end() by encoded
  * bytes) or, with keysSorted, must come in strictly increasing encoded order (checked at each key). Key kinds and
- * every other wire choice follow the profile options (D120): `wire`, `keys`, `tags`, `floats`, `undefinedValue`,
+ * every other wire choice follow the profile options: `wire`, `keys`, `tags`, `floats`, `undefinedValue`,
  * `noncharacters`; integer labels in the top-level map with cose under keys 'text'. value() ignores extra array own properties unless strictArrays is true;
  * holes are refused in both modes; present undefined follows the wire profile. Malformed constructor options throw
  * TypeError; writing errors throw SnugFault and leave the writer failed for good. */
@@ -104,7 +104,7 @@ export class Writer {
     if (subcode) e.subcode = subcode;
     throw e;
   }
-  /** D348: a map's kin refusal r over its n keys (pair table from base, key bytes in buf). duplicate_key gets the
+  /** A map's core refusal r over its n keys (pair table from base, key bytes in buf). duplicate_key gets the
    *  subcode `normalized` when a colliding key holds a bignum outside preferred serialization, written as its
    *  integer: such keys are one key in deterministic CBOR. Only on the failure path; no key data in the message. */
   #mapFail(r, buf, base, n) {
@@ -157,7 +157,7 @@ export class Writer {
     const size = Math.max(this.#buf.length * 2, want);
     const next = new Uint8Array(size); next.set(this.#buf.subarray(0, this.#pos)); this.#buf = next;
   }
-  /** After a kin write answered r < 0: grow for a short answer, else fail with its refusal. */
+  /** After a core write answered r < 0: grow for a short answer, else fail with its refusal. */
   #short(r) {
     const need = -r - WR_NEED;
     if (need <= 0) this.#kinCode(r);
@@ -357,7 +357,7 @@ export class Writer {
     if (this.#items > this.#maxItems) this.#fail('too_many_items', 'The message exceeds the item bound.');
     return sub.#buf.subarray(0, sub.#pos);
   }
-  /** A tag outside the Bindle set (D121, D180): the tag number and its content are checked by kin after the content
+  /** A tag outside the Bindle set: the tag number and its content are checked by the core after the content
    * is written (snug.cbor.stdtags, by the rule tag: the number; beyond 32 bits -2, or -1 for 2^64 - 1; a tag-24 payload by the
    * scanner under this profile). */
   #tagged(v, depth) {
@@ -402,7 +402,7 @@ export class Writer {
     if (this.#pairs === null) this.#pairs = new Int32Array(Math.max(64, words));
     else if (words > this.#pairs.length) { const t = new Int32Array(Math.max(words, 2 * this.#pairs.length)); t.set(this.#pairs.subarray(0, this.#np)); this.#pairs = t; }
   }
-  /** Sort one map's n pairs (table from base, content ending here) through kin. */
+  /** Sort one map's n pairs (table from base, content ending here) through the core. */
   #close(base, n) {
     if (n < 2) return;
     if (this.#s === null) this.#s = new Int32Array(4);
@@ -445,7 +445,7 @@ export class Writer {
     return this;
   }
   /** A float in the shortest exact width. Under the Bindle float rules NaN, ±∞, ±0 and integral values within
-   * ±(2^53-1) are refused (code float; use int() or value() for integers); under the deterministic rules (D122)
+   * ±(2^53-1) are refused (code float; use int() or value() for integers); under the deterministic rules
    * nothing is refused: NaN is written as f97e00, ±∞ and ±0 as float16, 1 as f93c00. */
   float(v) {
     if (typeof v !== 'number') this.#badArgument('float expects a number.');
@@ -459,7 +459,7 @@ export class Writer {
     if (!this.#undef) this.#badArgument('undefined needs the profile option undefinedValue.');
     this.#slot(); this.#count(); this.#head(7, 0, 23); return this;
   }
-  /** A simple value other than false/true/null/undefined (D284): n in 0..19 or 32..255, or a Simple; written in its
+  /** A simple value other than false/true/null/undefined: n in 0..19 or 32..255, or a Simple; written in its
    * shortest form (one byte below 24, else f8 n). Needs the profile's undefinedValue (code simple otherwise). */
   simple(n) {
     const v = n instanceof Simple ? n : new Simple(n);

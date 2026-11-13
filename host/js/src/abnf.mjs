@@ -1,4 +1,4 @@
-// @3sln/snug/abnf: RFC 9165 §3's `.abnf` and `.abnfb` controls (D334), an optional module so
+// @3sln/snug/abnf: RFC 9165 §3's `.abnf` and `.abnfb` controls, an optional module so
 // that no core bundle carries the ABNF engine. Give its registry to the compiler and to
 // a Program's loader:
 //
@@ -12,11 +12,11 @@
 // The controller (a text string, or a byte string holding UTF-8) is ABNF (RFC 5234 with
 // RFC 7405's %s/%i strings): one element -- the start -- then optionally a newline and
 // rules, exactly as RFC 9165 §3 says by default; `compile(text, { abnf: 'lenient' })`
-// also admits snug's non-RFC forms (D340). It is checked when the schema compiles (prose-val, syntax errors, undefined
+// also admits snug's non-RFC forms. It is checked when the schema compiles (prose-val, syntax errors, undefined
 // rules: `control_value`, with the ABNF line and column) and prepared once when a
 // Program is bound. The match is language membership over the target string's Unicode
-// scalars (`.abnf`) or bytes (`.abnfb`), metered in kin against the budget that remains
-// (snug.abnf): verdicts and charges are kin's on every host.
+// scalars (`.abnf`) or bytes (`.abnfb`), metered in the generated core against the budget that remains
+// (snug.abnf): verdicts and charges are the same on every host.
 import { abnfWords, abnfPrep, abnfErrorName, abnfErrorHint, abnfErrorLine, abnfErrorColumn, abnfTableWords,
   abnfScratchWords, abnfRun, abnfMore, ABNF_DEFAULT_WORDS, ABNF_MIN_WORDS, ABNF_MAX_WORDS, MODE_STRICT, MODE_LENIENT }
   from '../../../gen/js/snug/abnf.mjs';
@@ -25,7 +25,7 @@ const NONE = new Int32Array(0);
 
 /** The prepared table of an argument (its encoding at pool[ao, +al)), or an empty one when
  *  refused. Lenient: every controller the strict default admits means the same there, and
- *  the compile-time check already applied the schema's mode (D340). */
+ *  the compile-time check already applied the schema's mode. */
 function prepare(pool, ao, al) {
   const t = new Int32Array(abnfWords(al));
   return abnfPrep(pool, ao, al, t, MODE_LENIENT) === 0 ? t.slice(0, abnfTableWords(t)) : NONE;
@@ -58,7 +58,7 @@ function run(mode, cap) {
 
 /** true, or the refusal's detail: "<message> at ABNF line L, column C<hint>" (the hint names
  *  the option for a strict-only refusal). The compile options give the parse mode: strict
- *  RFC 5234 + 7405 + 9165 §3 unless { abnf: 'lenient' } (D340). */
+ *  RFC 5234 + 7405 + 9165 §3 unless { abnf: 'lenient' }. */
 function argument(bytes, options) {
   const mode = options?.abnf === 'lenient' ? MODE_LENIENT : MODE_STRICT;
   const t = new Int32Array(abnfWords(bytes.length)), code = abnfPrep(bytes, 0, bytes.length, t, mode);
@@ -80,7 +80,7 @@ function control(name, mode, maxBytes, cap) {
 
 /** The two controls with other bounds: `maxBytes`, the item a control is asked about
  *  (default 65,536; a longer one fails with `control_size`), and `maxWords`, the
- *  matcher's scratch cap (default 4,194,304 words = 16 MiB, D281's group arena default;
+ *  matcher's scratch cap (default 4,194,304 words = 16 MiB, the group arena default;
  *  65,536 to 16,777,216): a match that needs more stops with `budget`. */
 export function abnfWith({ maxBytes = 65536, maxWords = ABNF_DEFAULT_WORDS } = {}) {
   if (!Number.isSafeInteger(maxWords) || maxWords < ABNF_MIN_WORDS || maxWords > ABNF_MAX_WORDS)

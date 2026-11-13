@@ -4,8 +4,8 @@
 snug's Rust core. It is **experimental** and **opt-in**: the native package,
 `@3sln/snug`, is the default and needs no wasm at all. The two packages have
 the same functions, options, verdicts, error codes and Program bytes, and a
-parity gate holds the SDK to the native package on the whole validator case
-set. Everything in the [guide](guide.md) and the [API reference](api.md)
+parity test suite holds the SDK to the native package on the whole validator
+case set. Everything in the [guide](guide.md) and the [API reference](api.md)
 applies to both. This page covers only what differs: loading the wasm, the
 inline entry, Workers, size and speed.
 
@@ -37,7 +37,8 @@ Ratio is the SDK's time over the native package's, so below 1 is faster.
 Node rows are thread-CPU medians measured **2026-11-04** at `898434f`
 (Node 24.6.0, Apple M1 Pro, macOS 14.6.1). Chrome and workerd rows were
 measured **2026-11-03** at `93f8718` (Chrome 156, workerd 2025-12-17). The
-full tables and the method are in [bench/D005.md](../bench/D005.md).
+full tables and the method are in the repository's
+[benchmark records](https://github.com/3sln/snug/tree/main/bench).
 
 | operation | native | wasm | ratio |
 | --- | ---: | ---: | ---: |
@@ -161,22 +162,23 @@ the main thread, and a synchronous compile blocks the page while it runs.
 altogether.
 
 **Size cost.** Base64 is 4/3 of the bytes, and it compresses worse than the
-wasm. Bytes, gzip -9 and brotli 11 (2026-11-12):
+wasm. Bytes, gzip -9 and brotli 11 (2026-11-13; "both" compresses the two
+modules together):
 
 | | raw | gzip | brotli |
 | --- | ---: | ---: | ---: |
-| runtime module, `.wasm` | 325,264 | 131,831 | 108,824 |
-| runtime module, base64 | 433,688 | 173,442 | 142,272 |
-| compiler module, `.wasm` | 151,007 | 68,697 | 60,645 |
-| compiler module, base64 | 201,344 | 83,778 | 73,873 |
-| both modules, `.wasm` | 476,271 | 199,918 | 168,135 |
-| both modules, inline (the generated JS module) | 635,209 | 256,887 | 213,451 |
+| runtime module, `.wasm` | 325,567 | 132,002 | 108,920 |
+| runtime module, base64 | 434,092 | 173,590 | 142,655 |
+| compiler module, `.wasm` | 150,552 | 68,481 | 60,407 |
+| compiler module, base64 | 200,736 | 83,477 | 73,513 |
+| both modules, `.wasm` | 476,119 | 199,875 | 168,276 |
+| both modules, inline (the generated JS module) | 635,005 | 256,733 | 213,369 |
 
 So the inline entry costs about 28% more over the wire than the two `.wasm`
 files, and it always includes both modules. The JS glue comes on top: the
-root and `/schema` bundle to 42,794 B minified (16,502 B gzip), and every
-entry except `/unicode` and `/abnf` to 138,376 B (47,584 B gzip). Measured
-with esbuild 0.28.2.
+root and `/schema` bundle to 43,935 B minified (16,910 B gzip), and every
+entry except `/unicode`, `/abnf` and `/inline` to 140,485 B (48,398 B gzip).
+Measured with esbuild 0.28.2.
 
 ## Cloudflare Workers
 
@@ -213,6 +215,17 @@ compatibility_date = "2025-12-01"
 
 This Worker buffers the whole request. Enforce a body size limit before you
 use it with untrusted traffic.
+
+**TypeScript.** Wrangler hands a `.wasm` import over as a compiled
+`WebAssembly.Module`, but TypeScript does not know that. Declare it once, for
+example in `src/wasm.d.ts`:
+
+```ts
+declare module '*.wasm' {
+  const module: WebAssembly.Module;
+  export default module;
+}
+```
 
 **Without the compiler.** If you compile your schemas at build time, drop the
 compiler import and load the Program at module scope with
@@ -259,3 +272,10 @@ in `wasm/`, along with the manifest.
   `wasm32-unknown-unknown` target and `rust-src` (for `-Zbuild-std`), and
   binaryen 132's `wasm-opt`. In the repository, run `bb wasm-release`.
   Consumers never need Rust.
+
+## Building from a checkout
+
+To use a build of a repository commit instead of the npm release, build the
+modules with `bb wasm-release`, then stage and pack the package. The guide's
+[Building from a checkout](guide.md#building-from-a-checkout) has the
+commands and the toolchain they need.

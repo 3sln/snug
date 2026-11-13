@@ -1,4 +1,4 @@
-// Host configuration admission only; kin still decides every byte/schema verdict.
+// Host configuration admission only; the generated core still decides every byte/schema verdict.
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const boolean = value => typeof value === 'boolean';
 const enumeration = (...values) => value => typeof value === 'string' && values.includes(value);
@@ -56,7 +56,7 @@ export function selectOptions(options, kind) {
     .map(key => [key, options[key]]));
 }
 
-/** D213: a CBOR sequence's options (snug/sequence). Its limits are per message, so maxBytes
+/** A CBOR sequence's options (snug/sequence). Its limits are per message, so maxBytes
  *  (ambiguous there) is refused in favour of maxMessageBytes. Built here, lazily, so the
  *  other entries' option tables do not carry it. */
 export function validateSequenceOptions(options, stream) {

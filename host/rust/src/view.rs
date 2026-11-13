@@ -41,7 +41,7 @@ pub struct View<'a> {
 pub(crate) fn checked(bytes: &[u8]) -> View<'_> {
     checked_keys(bytes, false)
 }
-/// A checked document whose maps may hold keys out of canonical order (valid CBOR, P8.4).
+/// A checked document whose maps may hold keys out of canonical order (valid CBOR).
 pub(crate) fn checked_keys(bytes: &[u8], unsorted: bool) -> View<'_> {
     View {
         bytes,
@@ -51,7 +51,7 @@ pub(crate) fn checked_keys(bytes: &[u8], unsorted: bool) -> View<'_> {
         unsorted,
     }
 }
-/// A checked document that owns its bytes (P8.4, D267): the input, or -- for
+/// A checked document that owns its bytes: the input, or -- for
 /// valid input that is not its own deterministic form -- its canonical copy
 /// (wire order kept), which a borrowing [`View`] cannot alias.
 #[derive(Clone, Debug)]
@@ -183,7 +183,7 @@ impl<'a> View<'a> {
         let key = self.item(p as usize)?;
         Some((key, self.item(key.end)?))
     }
-    /// Map lookup by text key. Search uses kin's checked canonical order.
+    /// Map lookup by text key. Search uses the checked canonical order.
     pub fn get(&self, key: &str) -> Option<Self> {
         self.get_key(&Value::Text(key.to_owned()))
     }
@@ -260,7 +260,7 @@ impl<'a> View<'a> {
             _ => None,
         }
     }
-    /// A simple value other than false/true/null/undefined (D284): 0..=19 or
+    /// A simple value other than false/true/null/undefined: 0..=19 or
     /// 32..=255; every other kind answers None.
     pub fn simple(&self) -> Option<u8> {
         let (_, m, ai, n) = self.head()?;
@@ -366,7 +366,7 @@ impl<'a> TypedView<'a> {
     }
 }
 /// Mutable traversal position. Moving to siblings skips structural heads with
-/// kin; scalar content is never materialized. The stack grows only on enter.
+/// the core; scalar content is never materialized. The stack grows only on enter.
 pub struct Cursor<'a> {
     current: View<'a>,
     key: Option<View<'a>>,

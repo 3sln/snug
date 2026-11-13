@@ -1,8 +1,8 @@
-//! The CDDL compiler's Rust entry point: a thin loop around the generated kin
+//! The CDDL compiler's Rust entry point: a thin loop around the generated
 //! compiler (`snug::compile::main`). Every decision -- syntax, semantics,
-//! limits, the compile budget, the Program's bytes -- is kin's; this file owns
-//! only the arena, the decimal float-literal port (D020: `str::parse::<f64>`,
-//! at most 17 significant digits, checked by kin) and the result's shape.
+//! limits, the compile budget, the Program's bytes -- is the generated core's; this file owns
+//! only the arena, the decimal float-literal port (`str::parse::<f64>`,
+//! at most 17 significant digits, checked by the core) and the result's shape.
 use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_ABNF, ERR_NEED_FLOATS, ERR_NEED_UNICODE,
     ERR_REGEXP_BLOCK};
 use crate::snug::compile::main as kc;
@@ -18,13 +18,12 @@ pub struct SchemaError {
     pub rule: Option<String>,
     pub message: &'static str,
     /// Schema-text detail (never payload): at `unknown_control` the control's name,
-    /// at a refused control argument the control's name (D141, D142).
+    /// at a refused control argument the control's name.
     pub detail: Option<String>,
 }
 
-/// A compiled schema: the Program words and pool (docs/program.md with the
-/// format 2.0 delta of docs/program-2.md), the rule names in RULES order and
-/// the compile warnings (architecture §20.11; they never refuse).
+/// A compiled schema: the Program words and pool (Program format 2.0), the rule names in RULES order and
+/// the compile warnings (they never refuse).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Compiled {
     pub program: Vec<i32>,
@@ -45,12 +44,12 @@ pub struct Warning {
     pub message: &'static str,
 }
 
-/// The snug version (kin's, so both hosts agree).
+/// The snug version (the generated core's, so both hosts agree).
 pub fn snug_version() -> &'static str {
     kc::snug_version()
 }
 
-/// Option order: program.md §13.3's source key, then the leaf limit.
+/// Option order: the source key's, then the leaf limit.
 pub const COMPILE_OPTIONS: [&str; 18] = [
     "schemaBytes", "nesting", "astNodes", "instantiations", "pegNodes", "arrayPositions",
     "regexpPositions", "width", "poolBytes", "totalBytes", "compileBudget", "depth", "inputBytes",
@@ -67,8 +66,8 @@ pub fn compile(text: &str, profile: i32, limits: &[i32]) -> Result<Compiled, Sch
     compile_bytes(text.as_bytes(), profile, limits)
 }
 
-/// Compile-time regexp dialect (D242); both lower to the existing portable automaton.
-/// Not exhaustive (D339).
+/// Compile-time regexp dialect; both lower to the existing portable automaton.
+/// Not exhaustive.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Regexp {
@@ -77,9 +76,9 @@ pub enum Regexp {
     IRegexp,
 }
 
-/// Cut semantics (D301): the literal RFC 8610 cut (`Rfc`, the default; commitment
-/// epochs, D273) or rule A (`Branch`: a failed cut fails only its choice branch).
-/// Not exhaustive (D339).
+/// Cut semantics: the literal RFC 8610 cut (`Rfc`, the default; commitment
+/// epochs) or rule A (`Branch`: a failed cut fails only its choice branch).
+/// Not exhaustive.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Cuts {
@@ -88,11 +87,11 @@ pub enum Cuts {
     Branch,
 }
 
-/// How `.abnf` / `.abnfb` controllers parse (D340): `Strict`, RFC 5234 + RFC 7405 as RFC
+/// How `.abnf` / `.abnfb` controllers parse: `Strict`, RFC 5234 + RFC 7405 as RFC
 /// 9165 §3 frames them (the default), or `Lenient`, which also admits snug's non-RFC
 /// forms (a start wider than one element, whitespace before it or text after it on its
 /// line, rule-first controllers, an unterminated last line, non-ASCII comments, `=/`
-/// before `=`). Bound into the source key. Not exhaustive (D339).
+/// before `=`). Bound into the source key. Not exhaustive.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AbnfMode {
@@ -102,23 +101,23 @@ pub enum AbnfMode {
 }
 
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
-/// and extension controls (D141; none by default).
+/// and extension controls (none by default).
 #[derive(Default)]
 pub struct CompileOptions<'a> {
     pub profile: i32,
     pub regexp: Regexp,
-    /// D340: the `.abnf` / `.abnfb` parse mode.
+    /// The `.abnf` / `.abnfb` parse mode.
     pub abnf: AbnfMode,
-    /// Format 2.0: the cut mode (D301: `Rfc` by default, `Branch` = rule A, D273).
+    /// Format 2.0: the cut mode (`Rfc` by default, `Branch` = rule A).
     pub cuts: Cuts,
-    /// Format 2.0: the PEG group arena cap in words (D276, D281); None = the default.
+    /// Format 2.0: the PEG group arena cap in words; None = the default.
     pub group_words: Option<i32>,
     pub limits: &'a [i32],
     pub unicode: Option<&'a [i32]>,
     pub controls: Option<&'a dyn Registry>,
 }
 
-/// What the compiler needs of an extension-control registry (D141):
+/// What the compiler needs of an extension-control registry:
 /// `snug::controls::Controls` is one. A trait here, so the compiler builds
 /// without the VM's modules.
 pub trait Registry {
@@ -126,15 +125,15 @@ pub trait Registry {
     fn words(&self) -> Vec<i32>;
     /// Whether control `name` accepts `argument` (an encoding), at compile time.
     fn argument_ok(&self, name: &str, argument: &[u8]) -> bool;
-    /// Why control `name` refuses `argument`, when it says (D334: the ABNF controls).
+    /// Why control `name` refuses `argument`, when it says (the ABNF controls).
     fn argument_detail(&self, _name: &str, _argument: &[u8]) -> Option<String> {
         None
     }
-    /// `argument_ok` under the compile's ABNF parse mode (D340); by default the mode is ignored.
+    /// `argument_ok` under the compile's ABNF parse mode; by default the mode is ignored.
     fn argument_ok_in(&self, name: &str, argument: &[u8], _abnf: AbnfMode) -> bool {
         self.argument_ok(name, argument)
     }
-    /// `argument_detail` under the compile's ABNF parse mode (D340).
+    /// `argument_detail` under the compile's ABNF parse mode.
     fn argument_detail_in(&self, name: &str, argument: &[u8], _abnf: AbnfMode) -> Option<String> {
         self.argument_detail(name, argument)
     }
@@ -257,7 +256,7 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
 
 const RETAIN_WORDS: usize = 1 << 22;
 
-/// D141: the name of a control the schema uses but the registry lacks (schema text).
+/// The name of a control the schema uses but the registry lacks (schema text).
 fn control_named(bytes: &[u8], at: i32) -> Option<String> {
     let at = usize::try_from(at).ok()?;
     if bytes.get(at) != Some(&b'.') {
@@ -268,7 +267,7 @@ fn control_named(bytes: &[u8], at: i32) -> Option<String> {
     Some(String::from_utf8_lossy(&rest[..n]).into_owned())
 }
 
-/// D142: a registered control may check its argument once, at compile time.
+/// A registered control may check its argument once, at compile time.
 fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry, abnf: AbnfMode) -> Result<(), SchemaError> {
     if program[30] == 0 {
         return Ok(());
@@ -299,7 +298,7 @@ fn check_arguments(program: &[i32], pool: &[u8], controls: &dyn Registry, abnf: 
     Ok(())
 }
 
-/// The names of a compiled Program's extension controls (format 1.1's table, D141).
+/// The names of a compiled Program's extension controls.
 fn ext_names(p: &[i32], b: &[u8]) -> Vec<String> {
     let (n, mut i) = (p[30].max(0) as usize, p[31].max(0) as usize);
     let end = i + p[39].max(0) as usize;

@@ -4,42 +4,42 @@ snug implements a bounded, explicit subset of RFC 8610 with RFC 9165 controls
 and RFC 9682 grammar updates. Unsupported or unprovable constructs fail at
 compile time; an accepted construct keeps its documented meaning. This is
 not a claim of complete RFC coverage. The wire profile decides which CBOR
-reaches the schema: the default valid preset (any tag, D180) gives
+reaches the schema: the default valid preset (any tag) gives
 every prelude name values, while `wire: 'bindle'` makes 14 of them
 uninhabited (`undefined`, for example, is parsed from the prelude but its
-simple value is refused by the scanner; [conformance §f](conformance.md)).
-Since P8.4 the default byte check accepts any valid CBOR (indefinite lengths,
+simple value is refused by the scanner; [conformance §f](https://github.com/3sln/snug/blob/main/docs/conformance.md)).
+The default byte check accepts any valid CBOR (indefinite lengths,
 non-shortest heads/floats, keys in any order; duplicates compared by value),
 validating non-deterministic input through its canonical copy;
-`wire: 'deterministic'` refuses it ([profiles](profiles.md#valid-cbor-p84-d260d268)).
+`wire: 'deterministic'` refuses it ([profiles](profiles.md#valid-cbor)).
 
 > **Tagged (discriminated) unions.** Map cuts follow RFC 8610 §3.5.4
-> literally by default (D301), so `{ kind: "a", x: int // kind: "b", y: tstr }`
+> literally by default, so `{ kind: "a", x: int // kind: "b", y: tstr }`
 > rejects `{"kind": "b", "y": "z"}`. Write a type choice of maps,
 > `{ kind: "a", x: int } / { kind: "b", y: tstr }`, or put a cut-free `=>`
 > discriminator first: `{ "kind" => "a", x: int // "kind" => "b", y: tstr }`.
 > Compile warning W8 flags the first spelling. See [cuts](#map-determinism-and-cuts) and the
 > [guide](guide.md#discriminated-unions-under-the-rfc-cut).
 
-The compiler and matcher are kin, shared by JS and Rust. This document
-describes the current implementation, informed by D010–D014, D020–D025,
-D031–D043, D083/D110–D111, and the [architecture](architecture.md#4-validation-semantics).
+The compiler and matcher are generated from one source for JS and Rust, so
+both hosts compile and match identically. This document describes the
+current implementation.
 
 ## Grammar and types
 
 | Construct | Supported behaviour |
 | --- | --- |
-| Type/group rules, references, `/=`, `//=` | Supported; duplicate `=` definitions refused. User rules may shadow prelude names (D031). |
-| Type choices `/`, group choices `//`, nested groups | Supported. A type choice over one item is a set test; a group choice `//` is prioritised and locks in its first successful alternative (RFC 8610 Appendix A, D270; see [arrays](#arrays-and-repetition)). |
+| Type/group rules, references, `/=`, `//=` | Supported; duplicate `=` definitions refused. User rules may shadow prelude names. |
+| Type choices `/`, group choices `//`, nested groups | Supported. A type choice over one item is a set test; a group choice `//` is prioritised and locks in its first successful alternative (RFC 8610 Appendix A; see [arrays](#arrays-and-repetition)). |
 | Maps `{}`, arrays `[]`, labelled members | Supported; array member names are labels, not matching constraints. |
 | Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. |
 | Generic type/group rules and instantiation | Supported, memoised with limits; unresolved/wrong-arity uses refused. |
-| Sockets `$name`, `$$name` and extensions | Supported in `full`; an unplugged `$x` is the empty type choice and an unplugged `$$x` the empty group choice (RFC 8610 §3.9): nothing matches through them, so `{ a: int, $$x }` matches nothing until plugged, while `? $$x` matches by absence (D251). |
+| Sockets `$name`, `$$name` and extensions | Supported in `full`; an unplugged `$x` is the empty type choice and an unplugged `$$x` the empty group choice (RFC 8610 §3.9): nothing matches through them, so `{ a: int, $$x }` matches nothing until plugged, while `? $$x` matches by absence. |
 | Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
 | Productive recursive types | Supported when recursion passes through a container/tag; depth bounded. |
-| Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`; see D036. |
-| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values (D328); hexadecimal/decimal floats and h'/b64'/byte literals supported. |
-| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value, D328); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing (D336). Runtime profile still restricts actual tags/simple values. |
+| Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`. |
+| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values; hexadecimal/decimal floats and h'/b64'/byte literals supported. |
+| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing. Runtime profile still restricts actual tags/simple values. |
 | Appendix D prelude | Compiled from CDDL text; includes exact bignum integer types. Some names have no value under the current wire profile. |
 | UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
 
@@ -53,21 +53,21 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | --- | --- |
 | `.size` | Text/bytes count UTF-8/content bytes. `uint .size n` admits 0..256ⁿ−1; a range controller uses the minimal byte-length interval (lower length 0 includes zero). |
 | `.bits` | Permitted bit positions on uint or bstr; bstr bit n is byte n>>3, bit n&7, least significant first. Zero/all-zero masks still constrain. |
-| `.lt`, `.le`, `.gt`, `.ge` | Intersect numeric intervals; exact any-size integers; floats compare numerically (−0.0 = +0.0, so `float .lt 0.0` excludes both zeros) and NaN satisfies no ordered comparison (D250). |
-| `.eq` | Target intersected with controller, not replacement of target; `(tstr .size 1) .eq "aa"` is empty. Composite controllers lower to AND (D038). |
-| `.ne` | Numeric exclusion splits intervals: `float .ne 0.0` excludes both zeros and `float .ne 1.5` keeps NaN (NaN equals no number, D250); other targets exclude a literal while retaining target constraints. Composite nonliteral controllers refused. |
+| `.lt`, `.le`, `.gt`, `.ge` | Intersect numeric intervals; exact any-size integers; floats compare numerically (−0.0 = +0.0, so `float .lt 0.0` excludes both zeros) and NaN satisfies no ordered comparison. |
+| `.eq` | Target intersected with controller, not replacement of target; `(tstr .size 1) .eq "aa"` is empty. Composite controllers lower to AND. |
+| `.ne` | Numeric exclusion splits intervals: `float .ne 0.0` excludes both zeros and `float .ne 1.5` keeps NaN (NaN equals no number); other targets exclude a literal while retaining target constraints. Composite nonliteral controllers refused. |
 | `.and`, `.within` | Intersections, with operands evaluated as same-item dependencies; they do not create extra accepting alternatives. |
 | `.regexp` | Whole-string XSD Appendix F by default; `regexp: 'iregexp'` selects strict RFC 9485. Both compile to the same bounded code-point automata; details below. |
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
-| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only (D040). |
-| `.default`, `.feature` | Accepted annotations, no effect on matching (D013, D038). **`.default` is a deliberate deviation:** RFC 8610 §3.8.6 gives it an implied `.ne`; snug follows the annotation-only reading of Erratum 9229 (reported, not verified). Write `(T .ne v) .default v` for the RFC meaning. |
-| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2, D330); `.det` dedents each literal first. |
-| `.plus` | Compile-time addition of two integer literals, any size; float operands refused (D038). |
-| `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()` (D334); without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
-| registered `.name` | An **extension control** (D082, D140–D142): `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
+| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only. |
+| `.default`, `.feature` | Accepted annotations, no effect on matching. **`.default` is a deliberate deviation:** RFC 8610 §3.8.6 gives it an implied `.ne`; snug follows the annotation-only reading of Erratum 9229 (reported, not verified). Write `(T .ne v) .default v` for the RFC meaning. |
+| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2); `.det` dedents each literal first. |
+| `.plus` | Compile-time addition of two integer literals, any size; float operands refused. |
+| `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()`; without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
+| registered `.name` | An **extension control**: `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
-The numeric controls compare values exactly across integers and floats
-(D329): an integer target with a float controller takes the nearest integer
+The numeric controls compare values exactly across integers and floats:
+an integer target with a float controller takes the nearest integer
 inside the half-line (|x| ≥ 2⁶⁴ admits every integer or none); a float target
 with an integer controller takes the controller's binary64 value, or, when no
 binary64 holds it, the nearest binary64 inside the half-line. So `number .ge
@@ -75,7 +75,7 @@ binary64 holds it, the nearest binary64 inside the half-line. So `number .ge
 only an exactly equal value.
 Decimal schema float literals have
 at most 17 significant digits, must be finite, and a nonzero value may not
-round to zero. Hex floats are rounded by kin (D020/D032). Unsupported
+round to zero. Hex floats are rounded exactly, identically on every host. Unsupported
 control targets/controllers are errors rather than ignored controls.
 
 An unregistered `.name` is the schema error `unknown_control`, and the message
@@ -89,8 +89,8 @@ can accept bytes that fail the embedded branch. An embedded failure is
 reported as `embedded` with its subcode only when it makes the outer rule
 fail. Embedded item accounting restarts; budget is shared. Physical scratch
 depth still bounds embedding. A schema querying both `.cbor` and `.cborseq`
-on the same bytes can cause separate inner walks; the work budget bounds it
-(D040). The one-pass claim does not promise one visit across independent
+on the same bytes can cause separate inner walks; the work budget bounds it.
+The one-pass claim does not promise one visit across independent
 embedded interpretations.
 
 ## ABNF: `.abnf`, `.abnfb`
@@ -102,7 +102,7 @@ and the same registry when a stored Program is loaded. No core bundle carries
 the engine. Without the module a schema using either control is refused
 (`unsupported_control`, the message naming `@3sln/snug/abnf`), and loading a
 Program that uses them is `missing_control`. They are extension controls
-under the hood (D140–D143), so the `bus` profile refuses them unless
+under the hood, so the `bus` profile refuses them unless
 `controlsInBus`, and an item longer than the control's `maxBytes` (65,536 by
 default; `{ ...abnf, abnf: { ...abnf.abnf, maxBytes } }`) fails with
 `control_size`.
@@ -128,7 +128,7 @@ Exactly as RFC 9165 §3 says, **core rules are not imported**: `DIGIT`,
 `ALPHA` and the rest must be defined in the controller (`.cat` a shared
 block).
 
-**Strict by default (D340).** The controller is parsed as RFC 9165 §3 frames
+**Strict by default.** The controller is parsed as RFC 9165 §3 frames
 RFC 5234 + RFC 7405, and nothing more: one element, then (optionally) a
 newline and RFC 5234's rule list, every line ending with a newline. A wider
 start is written as a group: `"(1*DIGIT)\nDIGIT = %x30-39\n"`. Four
@@ -155,10 +155,10 @@ controller that strict mode accepts means the same in lenient mode:
 2. **A snug extension beyond RFC 9165:** a controller that begins with a rule
    (`s = 1*DIGIT`, no start before it) starts at that first rule. No other
    implementation is a reference here: the Rust cddl crate 0.10.7 does not
-   check `.abnf` controllers at all (P9.8). It applies only where the RFC's
+   check `.abnf` controllers at all. It applies only where the RFC's
    element-first reading fails to parse. An element-first controller can
-   never begin with `name =`, so no RFC-valid controller changes meaning; the
-   gate's oracle tries element-first first and agrees with kin on every
+   never begin with `name =`, so no RFC-valid controller changes meaning; snug's
+   test oracle tries element-first first and agrees with snug on every
    generated and mutated grammar.
 3. The end of the text ends the last line. RFC 5234 §4 ends every rule and
    comment with a newline (`c-nl`).
@@ -175,7 +175,7 @@ form and the option, e.g. `(.abnf argument: the start is wider than one
 element (RFC 9165 section 3) at ABNF line 1, column 1; it needs the compile
 option abnf: 'lenient')`. The option changes which schemas compile, so it
 is in the Program's source key, as `cuts` and `controlsInBus` are (it rides
-in the registry's flags word beside `controlsInBus`, D141), so a strict and a
+in the registry's flags word beside `controlsInBus`), so a strict and a
 lenient compile of the same text have different keys. A loaded Program is never
 re-checked: its controllers were checked when it was compiled.
 
@@ -199,18 +199,18 @@ scalars, so a byte-string target that is not UTF-8 does not match; `.abnfb`
 reads bytes, so a num-val above `%xFF` never matches there. Case folding of
 char-vals is ASCII-only. Any non-string item fails the control.
 
-**Cost.** kin runs an Earley recognizer (D334). The grammar is prepared once,
+**Cost.** snug runs an Earley recognizer. The grammar is prepared once,
 when the Program is bound. Every step is charged to the validation budget
 before it is done: a symbol, an item, a duplicate check, a terminal test and
 a completion. Each kind of step is calibrated to cost no more CPU per unit
-than the VM's reference walk (`bench/abnf-calib.mjs`). Typical grammars cost
+than the VM's reference walk ([calibration](https://github.com/3sln/snug/blob/main/bench/abnf-calib.mjs)). Typical grammars cost
 a few tens of units per character. Ambiguous or right-recursive grammars cost
 more, up to O(n³). Every grammar is bounded: past the budget, or past the
 matcher's scratch cap, validation stops with `budget`. The cap is a host
 option: `abnfWith({ maxWords })`, Rust `Abnf::with_max_words`. It defaults to
-4,194,304 words (16 MiB), the PEG group arena's default (D281), and ranges
+4,194,304 words (16 MiB), the PEG group arena's default, and ranges
 from 65,536 words up to the arena's hard cap of 16,777,216. A host whose first
-scratch is too small reruns the match with the size kin suggests. That size
+scratch is too small reruns the match with the size the matcher suggests. That size
 is at least double and within the cap, so a match reruns at most
 log₂(cap / first) + 1 times; the reruns cost at most twice the work and are
 not charged. One
@@ -220,7 +220,7 @@ character. At that rate the default budget covers a whole item of the default
 
 ## Unicode regexp categories
 
-`.regexp` matches the whole text in either dialect (D242–D243). Opt in to Unicode
+`.regexp` matches the whole text in either dialect. Opt in to Unicode
 General_Category escapes with `compile(text, { unicode: tables })`, importing
 `tables` from `@3sln/snug/unicode`. `\p{X}` selects category X and `\P{X}` its
 complement; both work inside classes, including `[\p{L}\p{Nd}_-]` and
@@ -241,12 +241,12 @@ scripts, `gc=…` spellings in CDDL and host-engine extensions are refused.
 XSD block escapes `\p{IsBasicLatin}` / `\P{Is…}` are also refused with a
 message explaining unavailable pinned Unicode block data: the pinned Node
 ICU API exposes no Block property, and the repository has no authoritative
-block-name/range input. Category tables do not supply blocks (D243).
+block-name/range input. Category tables do not supply blocks.
 
 Tables are pinned to **Unicode 16.0**, generated offline from **Node
 v24.6.0 / ICU 77.1**, and checked in for JS and Rust. The separate JS module
 is **19,377 bytes minified / 9,287 bytes gzip-9** (complete exported module;
-[method](../bench/README.md#unicode-table-module-p73)). It is never imported
+[method](https://github.com/3sln/snug/blob/main/bench/README.md#unicode-table-module-p73)). It is never imported
 implicitly by the compiler or runtime. Without tables, category escapes
 remain a `regexp` schema error whose message names `@3sln/snug/unicode`.
 
@@ -256,7 +256,7 @@ A category consumes one regexp position regardless of its range count;
 quantifiers still obey the position limit. Compiled Programs contain only
 the resulting automata and use the existing format. Unicode tables and
 version metadata are unnecessary for validation or loading stored Programs.
-The source key includes supplied table contents (D110), so regenerating with
+The source key includes supplied table contents, so regenerating with
 another Unicode version cannot reuse a key for different category semantics.
 See the [loading example](guide.md#optional-unicode-regexp-tables).
 
@@ -325,16 +325,15 @@ positions. Complex alternatives/classes also consume compile work/pool
 space. Exceeding the limit is `limit_regexp_positions`, never truncation.
 XSD compares decimal quantifier bounds before saturating expansion counts,
 including bounds on empty expressions. I-Regexp retains its historical
-saturation behaviour for extreme bounds on zero-position expressions
-([P8.3 finding](../DEVLOG.md#findings)); ordinary bounded patterns are unchanged.
+saturation behaviour for extreme bounds on zero-position expressions;
+ordinary bounded patterns are unchanged.
 
 ## Map determinism and cuts
 
-Since format 2.0 (D270, D272) groups follow RFC 8610 Appendix A's PEG
-semantics in maps as in arrays. The format 1 rules (priority assignment,
-compile-time proofs of exactness, the `map_overlap`, `map_cut` and
-`map_group_occurrence` refusals) are retired; schemas that format 1 refused
-for those reasons now compile.
+Groups follow RFC 8610 Appendix A's PEG
+semantics in maps as in arrays. There is no compile-time proof of map
+exactness: overlapping keys, cuts and group occurrences in maps compile, and
+matching decides them.
 
 - Maps are **closed**: after the group runs, every pair must have been
   consumed (§2.1). Nothing is retried to make that happen.
@@ -354,7 +353,7 @@ for those reasons now compile.
   `{"a": 1}`.
 
 **Cuts.** `name:` and literal colon keys imply cuts; `^ =>` makes the cut explicit.
-The cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`, D301).
+The cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`).
 Once a cut member finds its key, that pick is locked in: if the value fails,
 "the entire map fails to match", whatever `//` alternatives or later
 entries remain; a cut that succeeds inside an alternative or an optional
@@ -367,16 +366,11 @@ write `{ kind: "a", x: uint } / { kind: "b", y: tstr }` or
 `{ "kind" => "a", x: uint // "kind" => "b", y: tstr }` (see the
 [guide](guide.md#discriminated-unions-under-the-rfc-cut); compile warning W8
 flags the idiom). The alternative reading, where a failed cut kills only its
-own alternative (D021, rule A, the reference tools' reading), is the
+own alternative (rule A, the reference tools' reading), is the
 non-default option `cuts: 'branch'`. Cuts on key typesets (`tstr ^=> uint`)
 and byte-string, float and beyond-64-bit colon keys (`h'00': T`) are
-supported (D294). A cut never reaches back to entries that already ran:
+supported. A cut never reaches back to entries that already ran:
 `{ * tstr => any, ? a: int }` accepts `{"a": "x"}`.
-
-*Format 1 (before P8.5; retired):* a failed cut killed only its own
-alternative (D021), maps were matched existentially by a proven priority
-assignment, and schemas outside that proof were refused with `map_overlap`,
-`map_cut` or `map_group_occurrence`. None of these codes is produced now.
 
 ## Arrays and repetition
 
@@ -407,40 +401,38 @@ refused with `group_recursion`; recursion that consumes nothing is
 - `uint` is CBOR major type 0 only. `int` is major 0/1. `unsigned` includes
   tag-2 bignums and `integer` includes tag-2/3 bignums. `number` is `int / float`,
   so it does not include decimal fractions or arbitrary bignums.
-- **`float16`, `float32`, `float64` are sets of values (changed 2026-11-11,
-  D328).** As RFC 8610 §3.3 says, “"#7.25" specifies the set of values that
+- **`float16`, `float32`, `float64` are sets of values.** As RFC 8610 §3.3 says, “"#7.25" specifies the set of values that
   can be represented as half-precision floats; it does not mandate that these
   values also do have to be serialized as half-precision floats”. So a float
   matches `float16` when binary16 represents its value exactly, and `float32`
   when binary32 does, whatever width encodes it. `float64` admits every
   float. NaN, ±∞ and ±0 are in every width. 1.5 encoded as float16 (the
   shortest form) now matches `float32`, and 1.5 encoded as float64 matches
-  `float16`; 1 + 2⁻²³ matches `float32` but not `float16`. Before D328 these
-  names constrained the encoded width, so `float32` refused a shortest-form
-  1.5. (The Ruby cddl gem reads them as "needs at least this width"; the cddl
+  `float16`; 1 + 2⁻²³ matches `float32` but not `float16`. They do not
+  constrain the encoded width. (The Ruby cddl gem reads them as "needs at least this width"; the cddl
   crate ignores the width.) Under the deterministic
   preset NaN (only `f97e00`), ±∞, −0 and integral floats are valid floats.
   Float literals, ranges and controls compare numerically, as RFC 8610
-  §3.8.6 asks (D250): −0.0 and +0.0 are one number (`0.0` and `-0.0` each
+  §3.8.6 asks: −0.0 and +0.0 are one number (`0.0` and `-0.0` each
   match both zeros; −0.0 is in `0.0..1.0`; `-1.0...0.0` excludes both), NaN
   is in no range and fails `.lt .le .gt .ge .eq` but passes `.ne` of any
   number, and +∞ is in `float .ge 1.5`. An integer literal and a float
   literal stay distinct CBOR kinds (`1` does not match `1.0`), but the
-  numeric controls compare values across the kinds exactly (D329): `number
+  numeric controls compare values across the kinds exactly: `number
   .ge 0` admits `0`, `0.0` and `-0.0`; `int .gt 0.5` admits `1`; `float .ge
   9007199254740993` (2⁵³ + 1, which no binary64 holds) admits 2⁵³ + 2 and
   refuses 2⁵³; `int .eq 1.0` admits `1`. `.cat` and `.det` join a text and a
-  byte string, the result taking the target's type (RFC 9165 §2.2, D330). The Bindle
+  byte string, the result taking the target's type (RFC 9165 §2.2). The Bindle
   profile refuses NaN, ±∞, −0 and integral floats within the safe range
   before the schema sees them.
 - Text `.size` is UTF-8 byte length, not code-point or grapheme length.
   Regexps operate on code points; for a code-point length use the `.chars`
-  extension control from `@3sln/snug/controls` (D082, D140–D142).
+  extension control from `@3sln/snug/controls`.
 - CDDL numeric bounds are exact (integers compare as integers of any size,
   floats by their binary64 value), never rounded JS values. Non-float
   literal comparisons rely on the unique admitted wire encoding.
 - The wire profile, not the schema, decides which data reach the schema:
-  under the valid (default) and deterministic presets (`tags: 'any'`, D180)
+  under the valid (default) and deterministic presets (`tags: 'any'`)
   integer and other non-text map keys, every prelude name and every tag
   number except 65535, 2³²−1 and 2⁶⁴−1 match valid data (those three are
   refused; RFC 8949 §3.4 permits flagging them as errors). `tags: 'standard'` restores the former set, under which `bigfloat`,
@@ -449,7 +441,7 @@ refused with `group_recursion`; recursion that consumes nothing is
   never disables strict CBOR, and a compiled Program validates under either
   preset ([profiles](profiles.md#cddl-and-schemas)).
 - **Validated versus opaque tags.** The profile checks the content of the
-  tags it knows, whatever the schema says (D252): tag 0 must be an RFC 3339
+  tags it knows, whatever the schema says: tag 0 must be an RFC 3339
   `date-time` refined by RFC 4287 §3.3 (upper-case `T`/`Z`; second 60 only
   when the time, converted to UTC by its offset, is 23:59:60 on the last day
   of a month); tag 1 an integer or any float
@@ -465,7 +457,7 @@ refused with `group_recursion`; recursion that consumes nothing is
   is any valid item and a match proves nothing about its registered
   meaning. A schema (`bigfloat`, `#6.1040([...])`) can still constrain it.
 - Profile errors outrank schema errors, except that budget exhaustion stops
-  the walk immediately (D023/D025). Errors never echo a data value or unnamed
+  the walk immediately. Errors never echo a data value or unnamed
   map key. See [errors](api.md#errors).
 - A schema-choice refusal is one deterministic witness, not a preferred
   application branch explanation. In `{ ok: true, id: uint } /
@@ -477,16 +469,16 @@ refused with `group_recursion`; recursion that consumes nothing is
 
 | Construct | Current refusal / reason |
 | --- | --- |
-| `.pcre` | `unsupported_control`; a proposed alternate dialect, not a portable bounded engine (D013). |
-| `.abnf`, `.abnfb` without `@3sln/snug/abnf` | `unsupported_control`, naming the module; with it they are supported ([ABNF](#abnf-abnf-abnfb), D334). |
+| `.pcre` | `unsupported_control`; a proposed alternate dialect, not a portable bounded engine. |
+| `.abnf`, `.abnfb` without `@3sln/snug/abnf` | `unsupported_control`, naming the module; with it they are supported ([ABNF](#abnf-abnf-abnfb)). |
 | ABNF prose-val `<…>`, undefined (core) rules | `control_value` with the ABNF line and column; prose has no matchable meaning, core rules are not imported (RFC 9165 §3). |
-| Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time (D082, D140–D143), e.g. `.chars`, `.unique`, `.samelen` from `@3sln/snug/controls`. |
-| Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `@3sln/snug/unicode` and pass `unicode: tables` (D083). |
+| Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time, e.g. `.chars`, `.unique`, `.samelen` from `@3sln/snug/controls`. |
+| Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `@3sln/snug/unicode` and pass `unicode: tables`. |
 | Regexp XSD shorthands/subtraction in `iregexp` mode; `\x..`, lookarounds, backreferences in either mode | `regexp`; no host regex engine/ReDoS path. |
-| Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable (D243), even with category tables. |
+| Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable, even with category tables. |
 | Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
-| Left-recursive groups / recursion without progress | `group_recursion` / `nonproductive`; PEG matching needs progress to terminate (D272). |
-| Composite `.ne`, nonliteral `.plus`/`.cat`/`.det`, float `.plus` | `control_value` or `unsupported_control`; currently exact supported folds only (D038). |
+| Left-recursive groups / recursion without progress | `group_recursion` / `nonproductive`; PEG matching needs progress to terminate. |
+| Composite `.ne`, nonliteral `.plus`/`.cat`/`.det`, float `.plus` | `control_value` or `unsupported_control`; currently exact supported folds only. |
 | JSON validation, generated host types from CDDL | Outside current scope; handwritten API declarations describe the library, not schema output types. |
 
 The compiler restriction sets `bindle` and `bus` refuse additional otherwise

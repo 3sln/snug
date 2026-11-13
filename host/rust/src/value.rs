@@ -50,7 +50,7 @@ pub enum TypedArray {
     F64(Vec<f64>),
 }
 
-/// An owned value. Encoding sorts maps through kin and refuses duplicate keys.
+/// An owned value. Encoding sorts maps through the core and refuses duplicate keys.
 /// Specialized tags decode to their dedicated variants. `Tag` supplies a wire
 /// representation for allowed tags; it cannot bypass profile checks.
 #[derive(Debug, Clone, PartialEq)]
@@ -79,7 +79,7 @@ pub enum Value {
     Array(Vec<Value>),
     /// Ordered pairs; decoded keys are in canonical encoded-byte order.
     Map(Vec<(Value, Value)>),
-    /// Tag number (any the profile admits, D180) and its content; kin checks
+    /// Tag number (any the profile admits) and its content; the core checks
     /// the number and the content.
     Tag(u64, Box<Value>),
     /// Normalized tag 4 decimal, mantissa × 10^exponent.
@@ -93,7 +93,7 @@ pub enum Value {
     TypedArray(TypedArray),
     /// Tag 40 row-major multidimensional array.
     NDArray {
-        /// Dimension sizes; kin checks product and dimension bounds.
+        /// Dimension sizes; the core checks product and dimension bounds.
         shape: Vec<u64>,
         /// Plain array or typed array storage.
         data: Box<Value>,
@@ -104,11 +104,11 @@ pub enum Value {
     Null,
     /// The simple value undefined (f7; profiles with `undefined_value`).
     Undefined,
-    /// Any other simple value (RFC 8949 §3.3, D284): 0..=19 or 32..=255
+    /// Any other simple value (RFC 8949 §3.3): 0..=19 or 32..=255
     /// (20..=23 are `Bool`/`Null`/`Undefined`, 24..=31 are reserved and refused
     /// on encode, code `simple`). Written in its shortest form; admitted by
     /// profiles with `undefined_value` (the valid and deterministic presets).
     Simple(u8),
-    /// Binary64 host value; kin selects the shortest exact wire width.
+    /// Binary64 host value; the core selects the shortest exact wire width.
     Float(f64),
 }

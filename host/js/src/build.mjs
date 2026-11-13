@@ -1,7 +1,7 @@
-// Trusted second pass over scanner-approved CBOR (any profile, D123). Invalid
+// Trusted second pass over scanner-approved CBOR (any profile). Invalid
 // input is outside this module's contract; all profile decisions belong to the
 // scanner. Maps with only text keys become objects, maps with any other key a Map
-// (a cose top-level map always); every tag outside the Bindle set becomes Tagged (D180); f7 undefined; other simple values Simple (D284).
+// (a cose top-level map always); every tag outside the Bindle set becomes Tagged; f7 undefined; other simple values Simple.
 import { TYPED_BY_TAG, decimalValue, ndarrayValue, float16Value, taggedValue, simpleValue, typedInfo, bignumOf } from './values.mjs';
 import { LIMITS } from './limits.mjs';
 import { fail } from './fault.mjs';

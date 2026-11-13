@@ -1,4 +1,4 @@
-// P9.17 (D345): where the SDK's two wasm modules come from. A source is one of
+// Where the SDK's two wasm modules come from. A source is one of
 //
 //   WebAssembly.Module      used as is (a Workers / wrangler `.wasm` import is one)
 //   ArrayBuffer, a view     bytes (Uint8Array, Node Buffer, ...), compiled here

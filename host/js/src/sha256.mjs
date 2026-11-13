@@ -1,5 +1,5 @@
 // SHA-256 (FIPS 180-4), synchronous and dependency-free, for the Program's
-// source key (program.md §13.3; the hash is the host's, D003) and the
+// source key (the hash is the host's) and the
 // serialisation container's digest. Not a security boundary (C18).
 const K = Uint32Array.of(
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

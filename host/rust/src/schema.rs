@@ -1,9 +1,9 @@
-//! Validation against a compiled schema (P3.4): the Rust host of the kin VM
-//! (`snug::vm`). Every accept/refuse decision is kin's; this module owns the
+//! Validation against a compiled schema: the Rust host of the generated VM
+//! (`snug::vm`). Every accept/refuse decision is the core's; this module owns the
 //! Program (copied on load and verified by `vm-verify`), a caller-owned
-//! scratch (`&mut Scratch`: the JS single-isolate argument is not assumed here,
-//! architecture §8), the limit words and the shape of the result. Paths are
-//! rendered from the Program's key table only (program.md §9.3).
+//! scratch (`&mut Scratch`: the JS single-isolate argument is not assumed
+//! here), the limit words and the shape of the result. Paths are
+//! rendered from the Program's key table only.
 use crate::snug::cbor::scan::code_name;
 use crate::snug::program::verify::{vm_verify, vm_verify_words};
 use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
@@ -18,15 +18,15 @@ pub struct Program {
     p: Vec<i32>,
     b: Vec<u8>,
     ext: Option<Bound>,
-    /// D286 A3: the largest VM scratch a session on this Program grew to (its room past
+    /// The largest VM scratch a session on this Program grew to (its room past
     /// the arena holds a canonical item's events): later sessions start that large.
     session_words: Arc<std::sync::atomic::AtomicUsize>,
-    /// P9.7 (D327): idle session arrays, shared by the Program's clones.
+    /// Idle session arrays, shared by the Program's clones.
     pool: Arc<crate::sessions::Pool>,
 }
 
-/// A Program's extension controls bound to predicates, in id order (D141), and
-/// the metered ones' prepared arguments per (id, argument offset) (D192).
+/// A Program's extension controls bound to predicates, in id order, and
+/// the metered ones' prepared arguments per (id, argument offset).
 #[derive(Clone)]
 struct Bound(Vec<Arc<dyn Control>>, Arc<BTreeMap<(i32, i32), Vec<i32>>>);
 impl std::fmt::Debug for Bound {
@@ -48,7 +48,7 @@ pub struct Refused {
 }
 
 impl Program {
-    /// Verify and keep a private copy (program.md §11: P and B must not change
+    /// Verify and keep a private copy (P and B must not change
     /// between verification and validation).
     pub fn new(p: &[i32], b: &[u8]) -> Result<Program, Refused> {
         let nl = if p.len() > 16 { p[16].clamp(0, 1 << 20) } else { 0 };
@@ -61,7 +61,7 @@ impl Program {
         }
         Ok(Program { p: p.to_vec(), b: b.to_vec(), ext: None, session_words: Arc::default(), pool: crate::sessions::Pool::new() })
     }
-    /// The extension controls this Program uses (format 1.1, D141), by name.
+    /// The extension controls this Program uses, by name.
     pub fn controls(&self) -> Vec<String> {
         program_controls(&self.p, &self.b)
     }
@@ -81,7 +81,7 @@ impl Program {
         self.ext = Some(Bound(bound, Arc::new(preps)));
         Ok(())
     }
-    /// The Program's words and pool (the sequence reader drives sessions itself, D212).
+    /// The Program's words and pool (the sequence reader drives sessions itself).
     pub fn words(&self) -> &[i32] {
         &self.p
     }
@@ -89,7 +89,7 @@ impl Program {
         &self.b
     }
     /// One `vms-step` of a session on this Program, through its bound extension controls.
-    /// P8.4 (D266): with the valid machinery's buffers, which are the thread's (D286: step-local, so one pair
+    /// With the valid machinery's buffers, which are the thread's (step-local, so one pair
     /// serves every session; grown here on VMS_GROW and kept), `s` and `ka` grown keeping their contents.
     pub fn session_step(&self, w: &[u8], s: &mut Vec<i32>, ss: &mut [i32], ka: &mut Vec<u8>, out: &mut [i32], base: i32) -> i32 {
         let (mut vs, mut cb) = valid_take();
@@ -125,9 +125,9 @@ impl Program {
             if ga as usize > ka.len() { ka.resize(ga as usize, 0); }
         }
     }
-    /// P9.7 (D327): a new session's arrays from the pool, zeroed, under the live bound: S
-    /// at least `rule`'s scratch words and (D286 A3) as large as earlier sessions needed
-    /// (a session's arena starts at the lease, D324), the key arena `kab` bytes.
+    /// A new session's arrays from the pool, zeroed, under the live bound: S
+    /// at least `rule`'s scratch words and as large as earlier sessions needed
+    /// (a session's arena starts at the lease), the key arena `kab` bytes.
     pub(crate) fn session_arrays(&self, rule: i32, kab: i32) -> Result<crate::sessions::Arrays, crate::sessions::SessionError> {
         let cap = self.p[16].max(1);
         let sw = (vm_scratch_words(&self.p, rule, cap).max(0) as usize)
@@ -218,8 +218,8 @@ impl Scratch {
 }
 
 /// Per-call options; a limit only lowers the compiled one (None = compiled).
-/// `profile` is the kin profile flags (snug.cbor.codes PF_*, D120): the
-/// valid preset by default (D267), 0 the Bindle profile.
+/// `profile` is the core's profile flags (snug.cbor.codes PF_*): the
+/// valid preset by default, 0 the Bindle profile.
 #[derive(Debug, Clone)]
 pub struct Options {
     pub top_map: bool,
@@ -241,7 +241,7 @@ impl Default for Options {
 }
 
 impl Options {
-    /// limits words 0..7 (program.md §12.3), word 8 (generic/schedule bits, 0), word 9 the profile flags.
+    /// limits words 0..7, word 8 (generic/schedule bits, 0), word 9 the profile flags.
     fn words(&self) -> [i32; 10] {
         let l = |v: Option<i32>| v.map(|x| x.max(0)).unwrap_or(-1);
         [if self.top_map { 0 } else { 1 }, self.cose as i32, l(self.max_bytes), l(self.max_depth),
@@ -249,7 +249,7 @@ impl Options {
     }
 }
 
-/// One path segment (program.md §9.3). Not exhaustive (D339): a later release
+/// One path segment. Not exhaustive: a later release
 /// may add a segment kind, so a `match` needs a fallback arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -327,7 +327,7 @@ pub(crate) fn result(prog: &Program, out: &[i32]) -> Result<(), Failure> {
     })
 }
 
-/// What a successful validation found (P8.4): the canonical copy the VM validated
+/// What a successful validation found: the canonical copy the VM validated
 /// when valid input is not its own deterministic form, and whether some map's keys
 /// may be out of canonical order.
 #[derive(Debug, Default)]
@@ -386,7 +386,7 @@ pub fn validate_checked(prog: &Program, rule: i32, bytes: &[u8], opts: &Options,
     run(prog, rule, bytes, None, &opts.words(), scratch)
 }
 
-/// `validateAt` (architecture §16.3): the item spanning `bytes[start..end]` as its
+/// `validateAt`: the item spanning `bytes[start..end]` as its
 /// own document, depth and item accounting continuing from `depth`, `items`.
 pub fn validate_at(prog: &Program, rule: i32, bytes: &[u8], start: i32, end: i32, depth: i32, items: i32,
                    opts: &Options, scratch: &mut Scratch) -> Result<(), Failure> {
@@ -416,15 +416,15 @@ pub enum Step {
     Yield { position: i32, keep: i32 },
     /// The verdict, as [`validate`]'s.
     Done(Result<(), Failure>),
-    /// D085, an unknown-length session: this verdict waits for the end
+    /// An unknown-length session: this verdict waits for the end
     /// ([`Session::end`]); an `Err` is certainly a refusal (the final code may be
     /// `cbor/truncated` or `cbor/too_large` instead), an `Ok` may still become one.
     Held(Result<(), Failure>),
 }
 
-/// A resumable validation (architecture §17, P6.2) of one message of a declared
+/// A resumable validation of one message of a declared
 /// length over windows of it. It owns its scratch, session array and key arena
-/// (never shared between sessions; P9.7: taken from the Program's pool, zeroed, and
+/// (never shared between sessions; taken from the Program's pool, zeroed, and
 /// given back when it finishes or is dropped); the Program is borrowed.
 pub struct Session<'p> {
     prog: &'p Program,
@@ -441,7 +441,7 @@ impl<'p> Session<'p> {
     /// A session on `rule` over a message of exactly `total` bytes; `quantum` > 0
     /// yields after about that many work units per step. Fails with
     /// `SessionError::Limit` (`sessions/limit`) while the process has its maximum of
-    /// live sessions (`crate::sessions`; P9.7: a `Result` since then).
+    /// live sessions (`crate::sessions`).
     pub fn new(prog: &'p Program, rule: i32, total: i32, opts: &Options, quantum: i32) -> Result<Session<'p>, crate::sessions::SessionError> {
         let lim = opts.words();
         let a = prog.session_arrays(rule, vms_arena(&prog.p, &lim, total))?;
@@ -451,7 +451,7 @@ impl<'p> Session<'p> {
         session.limit = session.ss[1].max(0) as usize;
         Ok(session)
     }
-    /// D085: a session over a message of UNKNOWN length (drain mode). Step it as a
+    /// A session over a message of UNKNOWN length (drain mode). Step it as a
     /// known-length one; [`Step::Held`] is a verdict waiting for the end; call
     /// [`Session::end`] with the byte count once the source is exhausted (or as soon
     /// as it passes the input limit). Verdicts equal a buffer's of the same bytes.
@@ -469,7 +469,7 @@ impl<'p> Session<'p> {
     pub fn limit(&self) -> usize {
         self.limit
     }
-    /// P9.7: the arrays back to the Program's pool (once): at the verdict, or on drop.
+    /// The arrays back to the Program's pool (once): at the verdict, or on drop.
     fn release(&mut self) {
         if self.live {
             self.live = false;
@@ -477,7 +477,7 @@ impl<'p> Session<'p> {
             self.prog.session_release(a);
         }
     }
-    /// D085: the message ended after `n` bytes (any `n` above [`Session::limit`]
+    /// The message ended after `n` bytes (any `n` above [`Session::limit`]
     /// once it passed it). Answers the verdict, or a [`Step::Yield`] when the walk
     /// must go on over the bytes from `position` to `n` (step again).
     pub fn end(&mut self, n: usize) -> Step {
@@ -533,9 +533,8 @@ pub trait Blob {
     fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>, SourceError>;
 }
 
-/// A source broke its contract: a transport outcome, never a CBOR verdict (W13).
-/// Not exhaustive (D339): a later release may add a variant, as P9.7 added
-/// `SessionLimit`.
+/// A source broke its contract: a transport outcome, never a CBOR verdict.
+/// Not exhaustive: a later release may add a variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SourceError {
@@ -553,7 +552,7 @@ pub enum SourceError {
     Read,
     /// The blob is larger than the session can address (`too_large`).
     TooLarge,
-    /// P9.7: the process has its maximum of live sessions ([`crate::sessions`]).
+    /// The process has its maximum of live sessions ([`crate::sessions`]).
     SessionLimit,
     /// The transport's own error, kept whole for
     /// [`std::error::Error::source`] (`read`). A blob backend returns it with
@@ -700,7 +699,7 @@ impl<'p> BlobCore<'p> {
     }
 }
 
-/// An unknown-length stream's core (D085 drain mode, D145 fail-fast, D147): holds the
+/// An unknown-length stream's core (drain mode, or fail-fast): holds the
 /// bytes from the session's `keep` on plus one read buffer of `chunk` bytes.
 pub(crate) struct StreamCore<'p> {
     session: Session<'p>,
@@ -839,7 +838,7 @@ pub fn validate_blob(prog: &Program, rule: i32, blob: &dyn Blob, opts: &Options,
     }
 }
 
-/// D085: validate a message of unknown length read from `reader` until EOF,
+/// Validate a message of unknown length read from `reader` until EOF,
 /// holding at most what the session asks for (plus `chunk`). Drain mode: the
 /// verdict equals the buffer's of the same bytes; with `fail_fast` a certain
 /// refusal is answered at once (its code may then differ: the buffer might say

@@ -17,4 +17,4 @@ for (;;) {
   } else await new Promise(resolve => setImmediate(resolve));
 }
 assert.deepEqual(step.result, schema.validate(bytes, 'message'));
-console.log('validated through openSession from snug/sources');
+console.log('validated through openSession from @3sln/snug/sources');

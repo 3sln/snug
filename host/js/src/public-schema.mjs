@@ -11,7 +11,7 @@ import { schemaPrograms, schemaWarnings, brand } from './schema-state.mjs';
 export { ProgramError };
 const internals = new WeakMap(), versions = new WeakMap(), NO_WARNINGS = Object.freeze([]);
 
-/** Verified, owned Program. Array accessors return copies (D102). */
+/** Verified, owned Program. Array accessors return copies. */
 export class Program {
   constructor(P, B, options = {}) {
     validateOptions(options, 'program');
@@ -43,7 +43,7 @@ export class Program {
     }
     return Object.freeze(names);
   }
-  /** The extension controls this Program uses (D141), by name. */
+  /** The extension controls this Program uses, by name. */
   get controls() {
     const { P, B } = internals.get(this);
     return Object.freeze(programControls(P, B));
@@ -70,7 +70,7 @@ export class Schema {
     schemaPrograms.set(this, internals.get(program));
     Object.freeze(this);
   }
-  /** The compile warnings (P9.16), frozen, in a deterministic order; empty for a Schema not made by compile. */
+  /** The compile warnings, frozen, in a deterministic order; empty for a Schema not made by compile. */
   get warnings() { return schemaWarnings.get(this) ?? NO_WARNINGS; }
   #rule(rule) {
     if (typeof rule !== 'string') throw new TypeError('snug: rule must be a string');

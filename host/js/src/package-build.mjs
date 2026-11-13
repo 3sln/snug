@@ -10,12 +10,12 @@ import { fileURLToPath } from 'node:url';
 // What the package contains (release-policy §4 step 6, P9.15): the code, its
 // types, the licence and notices, the security policy, the README, the
 // changelog and the user docs. Nothing else: no DEVLOG, SPEC, design or review
-// documents, bench records, corpus or tools. package.test.mjs fails on any
-// staged file outside this list.
+// documents, maintainer records (conformance.md and release-policy.md are linked
+// on GitHub instead, D366), bench records, corpus or tools. package.test.mjs fails
+// on any staged file outside this list; bb docs-test checks the shipped text.
 export const PACKAGE_FILES = Object.freeze({
   root: ['package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'README.md', 'CHANGELOG.md'],
-  docs: ['guide.md', 'api.md', 'profiles.md', 'profiles/bindle.md', 'cddl-support.md', 'conformance.md',
-    'release-policy.md'],
+  docs: ['guide.md', 'api.md', 'profiles.md', 'profiles/bindle.md', 'cddl-support.md'],
   // whole directories, less the named development-only files
   dirs: ['src', 'types', 'generated', 'examples'],
   exclude: ['src/package-build.mjs', 'generated/snug/hello.mjs'],
@@ -97,7 +97,7 @@ export async function buildPackage(destination) {
   return target;
 }
 
-/** P9.16: the paths a staged package is built from that differ from the checkout's HEAD (modified,
+/** The paths a staged package is built from that differ from the checkout's HEAD (modified,
  *  staged or untracked), or null when git cannot tell (no git, not a checkout). */
 export function dirtyPaths(repo = resolve(fileURLToPath(new URL('../', import.meta.url)), '../..')) {
   const sources = ['host/js', 'gen/js', 'examples', 'docs', ...PACKAGE_FILES.root.filter(f => f !== 'package.json')];

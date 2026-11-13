@@ -15,7 +15,7 @@ struct Frame {
     map: bool,
     left: usize,
     pairs: Vec<i32>,
-    /// Per pair: the key holds a bignum written as its integer (D348).
+    /// Per pair: the key holds a bignum written as its integer.
     normalized: Vec<bool>,
 }
 /// One deterministic document builder. It writes bytes immediately; map closes
@@ -111,7 +111,7 @@ impl Writer {
         self.record(r)?;
         Ok(self)
     }
-    /// Write a binary64 host value; kin chooses the width (and, under the Bindle
+    /// Write a binary64 host value; the core chooses the width (and, under the Bindle
     /// float rules, refuses NaN, infinities, -0 and safe-range integers: `float`).
     pub fn float(&mut self, n: f64) -> Result<&mut Self, Error> {
         self.value(&Value::Float(n))
@@ -128,12 +128,12 @@ impl Writer {
     pub fn undefined(&mut self) -> Result<&mut Self, Error> {
         self.value(&Value::Undefined)
     }
-    /// Write a simple value 0..=19 or 32..=255 (D284) in its shortest form;
+    /// Write a simple value 0..=19 or 32..=255 in its shortest form;
     /// 20..=31 answer `simple`, and the profile's `undefined_value` decides at finish.
     pub fn simple(&mut self, n: u8) -> Result<&mut Self, Error> {
         self.value(&Value::Simple(n))
     }
-    /// Write UTF-8 text. Noncharacters are refused by kin at finish.
+    /// Write UTF-8 text. Noncharacters are refused by the core at finish.
     pub fn text(&mut self, v: &str) -> Result<&mut Self, Error> {
         self.slot(false)?;
         let r = self
@@ -153,7 +153,7 @@ impl Writer {
         self.record(r)?;
         Ok(self)
     }
-    /// Write a normalized decimal (kin checks normalization at finish).
+    /// Write a normalized decimal (the core checks normalization at finish).
     pub fn decimal(&mut self, mantissa: Integer, exponent: i64) -> Result<&mut Self, Error> {
         self.value(&Value::Decimal { mantissa, exponent })
     }
@@ -165,7 +165,7 @@ impl Writer {
         Ok(self)
     }
     /// Write row-major multidimensional storage, checking shape and content
-    /// through kin at finish. The supplied value tree is borrowed, not cloned.
+    /// through the core at finish. The supplied value tree is borrowed, not cloned.
     pub fn ndarray(&mut self, shape: &[u64], data: &Value) -> Result<&mut Self, Error> {
         self.slot(false)?;
         let r = self.output.ndarray(shape, data, self.frames.len());
@@ -222,7 +222,7 @@ impl Writer {
         self.record(r)?;
         Ok(self)
     }
-    /// Close a complete container, sorting maps through kin.
+    /// Close a complete container, sorting maps through the core.
     pub fn end(&mut self) -> Result<&mut Self, Error> {
         self.ready()?;
         if self.frames.last().is_none_or(|f| f.left != 0) {

@@ -1,19 +1,18 @@
-// P7.9: `snug/sources` over wasm: the native module's surface (D108, D146,
-// D160) with every session's state in linear memory. Each session (rscan
+// `snug/sources` over wasm: the native module's surface, with every session's state in linear memory. Each session (rscan
 // scratch, or the vms scratch/session/key arena) has a window buffer of its own:
 //
 //   handles  each read is copied once into the session's window; re-asked
 //            bytes inside it are not copied again
 //   push     chunks are appended to the session's window in linear memory and
 //            the kept tail compacted there (no JS-side buffer at all), for a
-//            declared length and (D085, D173) for an unknown one: drain mode,
+//            declared length and for an unknown one: drain mode,
 //            held verdicts settled at end(n), failFast
 //
 // Unknown-length profile scanning runs the VM's drain session against the
-// built-in `r = any` Program (D146), loaded into wasm like any other. Sessions
+// built-in `r = any` Program, loaded into wasm like any other. Sessions
 // are freed at their verdict, or by a FinalizationRegistry when abandoned. The
 // drivers are the native ones (same yield primitive choice, same contracts and
-// option validation); `openSession` is the advanced window protocol (D160).
+// option validation); `openSession` is the advanced window protocol.
 import * as rt from './runtime.mjs';
 import { SnugFault } from '../../js/src/fault.mjs';
 import { resolveLimits } from '../../js/src/limits.mjs';
@@ -118,7 +117,7 @@ export class ScanSession extends WasmSession {
 }
 
 /** The host session over a Program's inner state (native vm-session.mjs's contract): a declared length, or
- *  (length undefined, D085) an unknown one in drain mode. */
+ *  (length undefined) an unknown one in drain mode. */
 class VmSession extends WasmSession {
   constructor(inner, rule, length, opts = {}, quantum = 0) {
     const unknown = length === undefined;
@@ -133,9 +132,9 @@ class VmSession extends WasmSession {
     this.limit = unknown ? this.info(0) : undefined;
     this.inner = inner; this.ext = inner.ext; this.length = length; this.verdict = null; this.dead = null;
   }
-  /** Linear-memory bytes this session holds (its window; the kin arrays are not observable from JS). */
+  /** Linear-memory bytes this session holds (its window; the core's arrays are not observable from JS). */
   get bytesHeld() { return this.wcap; }
-  /** P9.7: release the session now (its arrays and live slot); step/end then throw TypeError. */
+  /** Release the session now (its arrays and live slot); step/end then throw TypeError. */
   close() { if (!this.verdict) this.closed = true; this.free(); }
   step(window, base) {
     if (this.verdict) return this.verdict;
@@ -159,7 +158,7 @@ class VmSession extends WasmSession {
     this.free();
     return this.verdict;
   }
-  /** D085: the end of an unknown-length message after n bytes. */
+  /** The end of an unknown-length message after n bytes. */
   end(n) {
     if (this.verdict) return this.verdict;
     if (this.closed) throw new TypeError('snug: the session is closed');
@@ -177,7 +176,7 @@ class VmSession extends WasmSession {
   }
 }
 
-/** The advanced window protocol (D160): a frozen facade, as the native openSession's. */
+/** The advanced window protocol: a frozen facade, as the native openSession's. */
 const PublicSession = /* @__PURE__ */ disposable(class PublicSession {
   #host;
   constructor(host) { this.#host = host; Object.freeze(this); }
@@ -191,9 +190,9 @@ const PublicSession = /* @__PURE__ */ disposable(class PublicSession {
     if (!Number.isSafeInteger(base) || base < 0 || base + window.length > bound) throw new TypeError('snug: invalid window span');
     return this.#host.step(window, base);
   }
-  /** D085: the end of an unknown-length message (n bytes). */
+  /** The end of an unknown-length message (n bytes). */
   end(n) { return this.#host.end(n); }
-  /** P9.7: release the session's arrays now (a finished session has); it cannot be stepped after. */
+  /** Release the session's arrays now (a finished session has); it cannot be stepped after. */
   close() { this.#host.close(); }
   /** Internal (the push drivers): the host session, stepping over its own window. */
   static host(s) { return s.#host; }
@@ -203,7 +202,7 @@ function bytesInput(bytes) {
   if (typeof SharedArrayBuffer === 'function' && bytes.buffer instanceof SharedArrayBuffer) throw new TypeError('snug: copy SharedArrayBuffer input first');
 }
 
-/** Advanced synchronous session over a verified schema (D160). */
+/** Advanced synchronous session over a verified schema. */
 export function openSession(schema, rule, length, options = {}, scheduling = {}) {
   const inner = schema && schema.program ? innerOf(schema.program) : undefined;
   if (!inner) throw new TypeError('snug: openSession needs a verified Schema');
@@ -217,7 +216,7 @@ export function openSession(schema, rule, length, options = {}, scheduling = {})
 }
 
 export const scanBuffer = scan;
-/** An immutable in-memory handle (a private snapshot, with independent copied reads; D151). */
+/** An immutable in-memory handle (a private snapshot, with independent copied reads). */
 export function bufferHandle(bytes) {
   const copy = snapshot(bytes);
   return Object.freeze({ size: copy.length, read: (offset, length) => copy.slice(offset, offset + length) });
@@ -291,7 +290,7 @@ function runSync(it, what) {
   }
   return next.value;
 }
-/** P8.4 (D266): valid CBOR, and keys of any kind (EC-sensitive keys' duplicates are not bytewise), are the VM
+/** Valid CBOR, and keys of any kind (EC-sensitive keys' duplicates are not bytewise), are the VM
  *  session's against `any` (it gives the scanner's code on every input), as in the native package; the resumable
  *  scanner walks the rest. */
 function scanSession(length, options, scheduling) {
@@ -370,7 +369,7 @@ export function pushValidator(schema, length, rule, options = {}, scheduling = {
 // ---------------------------------------------------------------- unknown length (D085, D173)
 
 let anyProgram = null;
-/** The VM against `any` (largest limits), standing in for the scanner on an unknown-length message (D146). */
+/** The VM against `any` (largest limits), standing in for the scanner on an unknown-length message. */
 function scanUnknown(options, scheduling) {
   validateOptions(options, 'decode');
   validateOptions(scheduling, 'scheduling');
@@ -444,7 +443,7 @@ function pushUnknown(session, scheduling, settle) {
       return run();
     },
     resume() { return result ? { state: 'done', result } : run(); },
-    /** P9.7: abandon the message, releasing its session now. */
+    /** Abandon the message, releasing its session now. */
     close() { session.close?.() ?? session.free(); },
     finalize() {
       if (result) return result;
@@ -481,13 +480,13 @@ async function drainSource(push, source) {
   }
   return push.finalize();
 }
-/** Validate a message of unknown length from a stream against schema's rule (D085). opts: { quantum, failFast }. */
+/** Validate a message of unknown length from a stream against schema's rule. opts: { quantum, failFast }. */
 export async function validateStream(schema, source, rule, options = {}, opts = {}) {
   validateOptions(options, 'validation');
   validateOptions(opts, 'scheduling');
   return drainSource(pushValidator(schema, undefined, rule, options, opts), source);
 }
-/** Profile-check a message of unknown length from a stream (D085). */
+/** Profile-check a message of unknown length from a stream. */
 export async function scanStream(source, options = {}, opts = {}) {
   validateOptions(options, 'decode');
   validateOptions(opts, 'scheduling');
@@ -535,7 +534,7 @@ function pushSession(session, length, keepOf) {
       return run();
     },
     resume() { return finished ? want : run(); },
-    /** P9.7: abandon the message, releasing its session now. */
+    /** Abandon the message, releasing its session now. */
     close() { session.close?.() ?? session.free(); },
     finalize() {
       if (delivered !== length) { session.free(); throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`); }

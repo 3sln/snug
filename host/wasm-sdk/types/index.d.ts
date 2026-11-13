@@ -1,6 +1,7 @@
-// @3sln/snug-wasm: the native package's root declarations (the same API, D172)
-// plus the wasm instance's own functions (P9.17). In the package, '../../js/types/'
+// @3sln/snug-wasm: the native package's root declarations (the same API)
+// plus the wasm instance's own functions. In the package, '../../js/types/'
 // reads './native/' (host/wasm-sdk/package-build.mjs).
+import './view.js'; // View.release()
 export * from '../../js/types/index.js';
 
 /** Where a wasm module comes from. A string with a scheme is a URL; any other string is a file path in Node and a
