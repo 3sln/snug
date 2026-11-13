@@ -1015,8 +1015,24 @@
     (for [^I32 i 0 nb]
       (paset h i 0 i)
       (paset h i 4 (neg 1)))
-    (for [^I32 j 0 nb]
-      (if (== (pbw h j 0) P_CALL) (paset h (pbw h j 1) 1 1)))
+    (comment "D349: mark the targets of the CALLs REACHABLE from root only. A `0*0 g`"
+             "builds its CALL, then pb-rep drops it for EMPTY; a target still marked by"
+             "that orphan CALL would block the map fold table (program-2 §3.3), and the"
+             "verifier refuses the unfolded REP of a MEMBER(1, 1).")
+    (vtrunc h T_PSTACK 0)
+    (vpush1 h T_PSTACK root)
+    (while (> (vlen h T_PSTACK) 0)
+      (if (not (charge h 1)) (return (neg 1)))
+      (let [u (vget h T_PSTACK (- (vlen h T_PSTACK) 1))
+            uop (pbw h u 0)]
+        (vtrunc h T_PSTACK (- (vlen h T_PSTACK) 1))
+        (if (== uop P_CALL) (paset h (pbw h u 1) 1 1))
+        (if (== uop P_REP) (vpush1 h T_PSTACK (pbw h u 1)))
+        (if (or (== uop P_SEQ) (== uop P_CHOICE))
+          (do (let [^:mut kk (pbw h u 1)]
+                (while (>= kk 0)
+                  (vpush1 h T_PSTACK kk)
+                  (set kk (pbw h kk 4))))))))
     (let [r0 (simplify-tree h root mode)]
       (if (< r0 0) (return (neg 1)))
       (let [n (number-tree h r0 mode)]

@@ -1,0 +1,24 @@
+{
+  "format": "snug conformance corpus v1",
+  "source": "P9.9 regressions (2026-11-12): shapes the fixed property campaign found. Expectations are hand-reasoned; vm-test also checks each against corpus/tools/peg-oracle.mjs.",
+  "notes": [
+    "D349: a dead self-reference (`0*0 g`) after a member in a map group; the compiler's Program must verify and mean the group without it."
+  ],
+  "suites": [
+    {
+      "category": "regression", "name": "dead self-reference in a map group (D349)",
+      "cddl": "r = { ? g }\ng = (\"k\" => true, 0*0 g)\ns = { * h }\nh = (\"k\" => true, 0*0 h)\nt = { ? u }\nu = (* \"k\" => true, 0*0 (1 => int, u))\n",
+      "cases": [
+        {"rule": "r", "hex": "a0", "expect": true},
+        {"rule": "r", "hex": "a1616bf5", "expect": true},
+        {"rule": "r", "hex": "a1616bf4", "expect": false},
+        {"rule": "r", "hex": "a2616bf5617801", "expect": false, "note": "the dead g adds no entry"},
+        {"rule": "s", "hex": "a0", "expect": true},
+        {"rule": "s", "hex": "a1616bf5", "expect": true},
+        {"rule": "s", "hex": "a1616bf6", "expect": false},
+        {"rule": "t", "hex": "a1616bf5", "expect": true},
+        {"rule": "t", "hex": "a1010a", "expect": false, "note": "1 => int is inside the dead 0*0"}
+      ]
+    }
+  ]
+}
