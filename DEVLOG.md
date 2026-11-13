@@ -8777,6 +8777,34 @@ engineer).
     field `Profile::tag24` (host/rust/src/decode.rs). `Profile::flags()`
     adds 2048 when `valid && tag24 == Valid`.
   - The core reads only profile bit 11.
+* **Size (P9.13 WP1, with D362/D363).** Bytes are min/gzip/brotli, the
+  static closure equal to the full one (esbuild 0.28.2).
+
+  | Entry | main cf5dc51 | before cuts | after cuts | new cap |
+  | --- | --- | --- | --- | --- |
+  | snug | 62967/21638/18951 | 64613/22059/19325 | 63428/21807/19144 | br 19083 → 19527 |
+  | snug/schema | 150669/54069/46874 | 152455/54471/47280 | 151278/54271/47147 | br 47137 → 48090 |
+  | snug/writer | 59066/20245/17731 | 60703/20684/18111 | 59527/20399/17904 | 59490/20376/17896 → 60718/20807/18263 |
+  | snug/sources | 183149/67462/57670 | 184948/67923/57996 | 183771/67673/57799 | gz 67658 → 69027 |
+  | all-runtime | 279180/100639/84826 | 280997/101073/85198 | 279820/100849/85049 | br 84894 → 86750 |
+  | snug/view, snug/sequence, runtime, snug/compile | | | | within caps |
+
+  - **The cut pass.** A first cut had a separate well-formed walker in
+    head.kin (+1,498 B minified). It was replaced by the scanner's own walk
+    under `PF_WF`, and the option plumbing was trimmed: `tag24` uses a pick
+    table, is in the valid preset only, and has no new import or check.
+  - **Attribution after cuts** (standalone esbuild per module, minified,
+    vs main):
+    - scan.kin +406: the `PF_WF` branches, `wf-on`/`wf-payload`/`wf-scan-one`,
+      and `payload-one`;
+    - vm/dead +120; codes +68; profiles.mjs +121; options.mjs +67;
+    - vm/leaf +25, vm/map +20 and verify +4 (D362/D363); vcopy +24;
+      vm/eval +4.
+
+    The writer carries the whole scanner, which it uses to check tag-24
+    and raw items, so it grows by the scanner's bytes; there is no import
+    leak.
+  - D303: approved by coordinator; the budget.json edit applied by the coordinator with the owner's explicit approval after a permission refusal, 2026-11-13
 
 ### D359 — `.default` carries RFC 8610 §3.8.6's implied `.ne` by default; `defaultControl: 'annotation'` keeps the annotation-only reading of erratum 9229 (status Reported) and is bound into the source key (P9.13 WP1 decision 2)
 **Decision** (coordinator-decided, P9.13 decision 2; implemented by the P8.5 VM engineer):
