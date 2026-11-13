@@ -4,6 +4,7 @@
 ;;     kin/scripts/gates <set|gate>...    run them in order (bb gates release)
 ;;     kin/scripts/gates --list           the gates and sets
 ;;     kin/scripts/gates --check          the map against bb.edn and the watchdog's caps
+;;                                        (and each :partitions entry against its set)
 ;;     --fail-fast                        stop at the first gate that is not ok
 ;;
 ;; A gate is ok only if it exits 0 and prints no `SKIP` line; a SKIP is NOT RUN
@@ -27,6 +28,35 @@
              :out json/parse-string)))
 (defn watchdog-defaults [] @defaults-once)
 
+;; A CI shard's wall caps may sum to at most this: each hosted job's
+;; timeout-minutes sits above its shard's sum and at most 360 (P9.20).
+(def shard-wall-max (* 330 60))
+
+(defn partition-problems
+  "Each :partitions entry's shards hold exactly its set's gates, each once,
+  and each shard's wall caps fit one hosted CI job."
+  []
+  (let [sets (:sets gate-map)]
+    (concat
+     (for [[s shards] (:partitions gate-map)
+           :let [whole (get sets s)
+                 parts (map #(get sets (keyword %)) shards)
+                 all (apply concat parts)]
+           e (cond (nil? whole) [(str "partition " (name s) ": no set " (name s))]
+                   (some nil? parts) [(str "partition " (name s) ": not a set: "
+                                           (str/join " " (remove #(get sets (keyword %)) shards)))]
+                   (not= (frequencies whole) (frequencies all))
+                   [(str "partition " (name s) ": its shards must hold exactly the set's gates, each once; missing "
+                         (vec (remove (set all) whole)) ", extra or repeated "
+                         (vec (for [[g n] (frequencies all) :when (or (> n 1) (not (some #{g} whole)))] g)))]
+                   :else [])]
+       e)
+     (for [[_ shards] (:partitions gate-map) sh shards
+           :let [members (get (:sets gate-map) (keyword sh))
+                 wall (reduce + (map #(or (first (:caps (get gates %))) 0) members))]
+           :when (> wall shard-wall-max)]
+       (str "shard " sh ": wall caps sum to " wall " s, past " shard-wall-max " s (one CI job)")))))
+
 (defn problems
   "The map's disagreements with bb.edn and the watchdog: [errors warnings]."
   []
@@ -42,7 +72,8 @@
                       :when (and (not blocked) (not (and (seq cmd) (= 2 (count caps)))))]
                   (str g ": needs :cmd and :caps [wall cpu] (or :blocked)"))
                 (for [[s members] (:sets gate-map) m members :when (not (contains? gates m))]
-                  (str "set " (name s) " names " m ", which is not a gate")))
+                  (str "set " (name s) " names " m ", which is not a gate"))
+                (partition-problems))
         warnings (for [t (sort tasks) :when (not (contains? named t))]
                    (str "bb task " t " is in neither :gates nor :not-gates"))]
     [(vec errors) (vec warnings)]))
