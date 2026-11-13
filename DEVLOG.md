@@ -8135,7 +8135,16 @@ Gates on `e39dbfc`, all ok:
 - `rust-api-test-full`, `vm-test`, `vmsession-test`, `sequence-test`,
   `compile-fuzz`, `valid-test`, `write-test` and `nav-test`.
 Only x86_64 Linux is left to CI's cells.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-13). This bug fix meets the
+  coordinator's guarantee: under default limits there is no overflow on a
+  2 MiB thread, in debug and release, on every toolchain from 1.87.
+  - No default or limit changed and no dependency was added, so no owner
+    decision is needed.
+  - Merged at `b0d9a51`. On main: drift ok, no conflict markers.
+  - Scope: only the Rust host's decode builder and encoder changed
+    (host/rust/src); kin, gen and host/js core are unchanged. The P9.9 run
+    on cc09911 therefore stands for the shared core. D357's own gate record
+    above is the P9.9 addendum for the Rust host.
 
 ## Findings
 
