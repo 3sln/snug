@@ -86,10 +86,10 @@ export class NDArray {
 Object.freeze(NDArray.prototype);
 
 
-/** A tagged item outside the Bindle set (D121, D123, D180): a standard-set tag -- 0 (RFC 3339 date/time text), 1
- * (epoch number), 21-23 (expected base64url / base64 / base16 conversions), 24 (an encoded CBOR data item: `value` is
- * its bytes), 32 (URI text), 55799 (self-described CBOR, top level only) -- or, under the any-tag level, any other tag
- * number (COSE 16-18 and 96-98, CWT 61, ...). `tag` is a non-negative integer: a number up to 2^53 - 1, a bigint
+/** A tagged item without a value type of its own: any tag number the profile admits (by default any, e.g. 0 RFC
+ * 3339 date/time text, 1 epoch number, 21-23 conversion hints, 24 an encoded CBOR data item whose `value` is its
+ * bytes, 32 URI text, 55799 self-described CBOR, COSE 16-18 and 96-98, CWT 61; `tags: 'standard'` narrows it to
+ * 0, 1, 21-24, 32 and 55799). `tag` is a non-negative integer: a number up to 2^53 - 1, a bigint
  * beyond (below 2^64). `value` is the decoded content. Immutable (shallowly: a byte string value is a Uint8Array).
  * The tag number and the content are checked against the profile when encoded. */
 export class Tagged {
@@ -103,7 +103,7 @@ export class Tagged {
 }
 Object.freeze(Tagged.prototype);
 
-/** A CBOR simple value other than false, true, null and undefined (RFC 8949 §3.3, D284): `value` is 0..19 or
+/** A CBOR simple value other than false, true, null and undefined (RFC 8949 §3.3): `value` is 0..19 or
  * 32..255 (20..23 are false/true/null/undefined, 24..31 are reserved and never well-formed). Interned: `new Simple(n)`
  * answers the one frozen instance for n, so `===` and Map keys compare by value. Encoded in its shortest form (one
  * byte below 24, else f8 n) under profiles with undefinedValue (the valid and deterministic presets); Bindle refuses it

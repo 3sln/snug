@@ -1,6 +1,6 @@
 import type { DecodeOptions, Value, Reason, Subcode } from './index.js';
 import type { Controls } from './controls.js';
-/** Loading a Program that uses extension controls needs their registry (D141). */
+/** Loading a Program that uses extension controls needs their registry. */
 export interface ProgramOptions { controls?: Controls }
 /** Invalid/unknown options throw TypeError, never a ValidationResult. Limits only lower compiled caps. */
 export interface ValidationOptions extends DecodeOptions {
@@ -12,7 +12,7 @@ export interface SpanOptions extends ValidationOptions { depth?: number; items?:
 export type ValidationResult = { ok: true } | {
   ok: false; reason: Reason; path: (string | number)[]; offset: number;
   /** `embedded`: the embedded item's own reason. `value`: `'cut'` when a key matched a cut member (`name:` or
-   * `^=>`) whose value failed and the cut stopped the alternatives after it (D342). */
+   * `^=>`) whose value failed and the cut stopped the alternatives after it. */
   subcode?: Subcode;
 };
 /** A compile warning (never a refusal): its stable code (`W1`..`W8`), the rule it is in (null for a schema-wide
@@ -31,7 +31,7 @@ export declare class ProgramError extends Error {
  * `structuredClone` throw DataCloneError (send `serialize()` bytes and load them with `fromSerialized`). */
 export declare class Program {
   constructor(P: Int32Array, B: Uint8Array, options?: ProgramOptions);
-  /** The clone brand (P9.16): a Symbol, so a structured clone throws instead of silently losing the methods. */
+  /** The clone brand: a Symbol, so a structured clone throws instead of silently losing the methods. */
   readonly brand: symbol;
   /** Copies, never aliases of the verified storage. */
   readonly P: Int32Array;
@@ -40,12 +40,12 @@ export declare class Program {
   readonly rules: readonly string[];
   /** The extension controls this Program uses, by name (empty when it uses none). */
   readonly controls: readonly string[];
-  serialize(): Uint8Array;
+  serialize(): Uint8Array<ArrayBuffer>;
 }
 /** Not structured-cloneable, as Program. */
 export declare class Schema {
   constructor(program: Program);
-  /** The clone brand (P9.16), as Program's. */
+  /** The clone brand, as Program's. */
   readonly brand: symbol;
   readonly program: Program;
   /** The compile warnings, frozen, in a deterministic order (W8: a choice of map groups the RFC cut makes fail);

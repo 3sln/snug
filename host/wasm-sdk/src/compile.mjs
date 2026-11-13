@@ -1,11 +1,11 @@
-// P7.9: `snug/compile` over wasm. The compiler is its own module
+// `snug/compile` over wasm. The compiler is its own module
 // (host/wasm/src/cc.rs, `kin/scripts/wasm-build cc`), compiled and
 // instantiated on the first call, as the native package loads its compiler
 // chunk on the first call. The Program's words and pool are copied out (the
 // public Program keeps them for its accessors) and loaded into the runtime
 // instance, where vm-verify checks them.
 //
-// Since P7.9 (D171, D172): the options are the native ones, checked by the
+// The options are the native ones, checked by the
 // native validator (`profile`, `limits`, `unicode` tables from snug/unicode,
 // `controls` and `controlsInBus`); the extension-control registry rides after
 // the option words exactly as native compile.mjs builds it (ext.mjs

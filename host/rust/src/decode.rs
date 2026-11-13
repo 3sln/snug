@@ -11,8 +11,8 @@ use crate::snug::cbor::codes::{CODE_SCRATCH, VC_NONDET, VC_UNSORTED};
 use crate::{Error, Integer, TypedArray, Value};
 
 /// Permitted root shape. [`DecodeOptions::default`] (the valid preset)
-/// permits any item; [`DecodeOptions::bindle`] requires a map. Not exhaustive
-/// (D339), like the other option enums.
+/// permits any item; [`DecodeOptions::bindle`] requires a map. Not exhaustive,
+/// like the other option enums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Top {
@@ -22,7 +22,7 @@ pub enum Top {
     /// Permit any profile-valid item.
     Any,
 }
-/// Map key kinds a profile admits (D120).
+/// Map key kinds a profile admits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Keys {
@@ -33,7 +33,7 @@ pub enum Keys {
     /// Any item as a key, ordered by its complete encoding.
     Any,
 }
-/// Tag sets (D121).
+/// Tag sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Tags {
@@ -41,11 +41,11 @@ pub enum Tags {
     Bindle,
     /// The Bindle set plus 0, 1, 21-24, 32 and 55799 with RFC 8949 content checks.
     Standard,
-    /// Any tag number (D180; 64-bit ones too, but not the invalid 65535,
+    /// Any tag number (64-bit ones too, but not the invalid 65535,
     /// 2^32-1 and 2^64-1), the known tags keeping their content rules.
     Any,
 }
-/// Scalar float rules (D122).
+/// Scalar float rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Floats {
@@ -54,9 +54,9 @@ pub enum Floats {
     /// RFC 8949 §4.2.1: shortest form only; the canonical NaN 0x7e00.
     Deterministic,
 }
-/// Wire profile options (D120, D260). The `valid` flag admits any valid CBOR
+/// Wire profile options. The `valid` flag admits any valid CBOR
 /// (RFC 8949 §5.3); without it every value only removes acceptance relative to
-/// RFC 8949 §4.2.1 core deterministic encoding. kin decides every byte.
+/// RFC 8949 §4.2.1 core deterministic encoding. The generated core decides every byte.
 ///
 /// ```
 /// use snug::{decode, DecodeOptions, Profile, Keys, Value};
@@ -78,12 +78,12 @@ pub struct Profile {
     pub undefined_value: bool,
     /// Unicode noncharacters in text.
     pub noncharacters: bool,
-    /// Valid, non-deterministic CBOR (P8.4, D260): indefinite lengths, longer
+    /// Valid, non-deterministic CBOR: indefinite lengths, longer
     /// heads and floats than needed, NaN payloads, keys in any order.
     pub valid: bool,
 }
 impl Profile {
-    /// The valid preset (D260): the deterministic preset's options, admitting
+    /// The valid preset: the deterministic preset's options, admitting
     /// every valid encoding (RFC 8949 §5.3).
     pub const VALID: Profile = Profile {
         keys: Keys::Any,
@@ -102,7 +102,7 @@ impl Profile {
         noncharacters: true,
         valid: false,
     };
-    /// The Bindle profile, bit for bit as before P7.1.
+    /// The Bindle profile.
     pub const BINDLE: Profile = Profile {
         keys: Keys::Text,
         tags: Tags::Bindle,
@@ -111,7 +111,7 @@ impl Profile {
         noncharacters: false,
         valid: false,
     };
-    /// The kin profile flags (snug.cbor.codes PF_*).
+    /// The core's profile flags (snug.cbor.codes PF_*).
     pub fn flags(&self) -> i32 {
         let keys = match self.keys {
             Keys::Text => 0,
@@ -169,8 +169,8 @@ impl Limits {
         Ok(())
     }
 }
-/// Decode/profile options. The default is the valid preset with any root
-/// (D260, D267): any well-formed valid CBOR; [`DecodeOptions::deterministic`]
+/// Decode/profile options. The default is the valid preset with any root:
+/// any well-formed valid CBOR; [`DecodeOptions::deterministic`]
 /// checks RFC 8949 §4.2.1; [`DecodeOptions::bindle`] is the Bindle profile with
 /// a map root.
 /// Root shape, COSE labels and limits stay independent settings.
@@ -220,7 +220,7 @@ impl DecodeOptions {
         Self::default()
     }
 }
-/// What a successful check found (P8.4): the canonical copy when valid input is
+/// What a successful check found: the canonical copy when valid input is
 /// not its own deterministic form (wire order kept), and whether some map's
 /// keys may be out of canonical order.
 pub(crate) struct Checked {
@@ -352,7 +352,7 @@ impl<'a> Builder<'a> {
             _ => Err(Error::Internal),
         }
     }
-    /// D357: the value tree is built ITERATIVELY, with the open containers and tags
+    /// The value tree is built ITERATIVELY, with the open containers and tags
     /// on a heap stack, so the native stack does not grow with the input's depth
     /// (the recursive builder needed about 8.8 KB per level in a debug build on
     /// Rust 1.98, and overflowed a 2 MiB thread at the 256-level ceiling).

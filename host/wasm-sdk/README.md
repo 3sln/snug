@@ -41,6 +41,8 @@ initSync({ runtime, compiler });
   synchronous init works, the Workers recipe, size and speed.
 - [Guide](docs/guide.md) and [API reference](docs/api.md): the API is the
   same as `@3sln/snug`'s.
+- [Building from a checkout](docs/guide.md#building-from-a-checkout): a
+  build of a repository commit instead of the npm release.
 
 ## Licence
 

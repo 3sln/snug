@@ -1,4 +1,4 @@
-//! CBOR sequences (RFC 8742; P7.13, architecture §18, D210–D217): a series of
+//! CBOR sequences (RFC 8742): a series of
 //! messages, each one root, read from chunks as they arrive. Each message is
 //! checked in ONE pass — the profile, and the schema rule when one is given — by
 //! the session VM's sequence mode (`vms-init-seq`), which also finds where it
@@ -20,7 +20,7 @@
 //! assembly otherwise; [`Sequence::finish`] settles the end. A refusal that
 //! stops the sequence is an `Err(Error::Sequence(..))` after every earlier
 //! message; with [`OnInvalid::Skip`] a schema refusal of a complete message is
-//! an `Err` item too, and reading goes on (D214).
+//! an `Err` item too, and reading goes on.
 use crate::schema::{self, Failure};
 use crate::snug::vm::session::{vms_arena, vms_eof, vms_held_code, vms_init_seq, vms_message_length, vms_need_length,
                                vms_need_offset, vms_position, vms_unknown_total};
@@ -38,7 +38,7 @@ const VMS_RESUME: i32 = -68;
 
 /// `r = any` compiled with the largest limits — host/js/src/any-program.mjs's words
 /// (checked against the compiler by the Rust API tests): the VM against it gives
-/// the scanner's code on every input, so profile-only sequences run it (D146, D210).
+/// the scanner's code on every input, so profile-only sequences run it.
 #[doc(hidden)]
 pub const ANY_P: [i32; 90] = [
     1735749235, 2, 64, 90, 1, 0, 0, -1153793131, -1965254075, -798592316, 844469009, -714685243, 702268175,
@@ -57,7 +57,7 @@ fn any_program() -> &'static schema::Program {
     ANY.get_or_init(|| schema::Program::new(&ANY_P, &ANY_B).expect("snug: the built-in any Program verifies"))
 }
 
-/// D214: what a refused message does to the sequence. Not exhaustive (D339).
+/// What a refused message does to the sequence. Not exhaustive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OnInvalid {
@@ -69,8 +69,8 @@ pub enum OnInvalid {
     Skip,
 }
 
-/// Options of a sequence reader. Every limit applies to each message from zero
-/// (D213); `None` is the compiled limit with a schema, the decode default
+/// Options of a sequence reader. Every limit applies to each message from zero;
+/// `None` is the compiled limit with a schema, the decode default
 /// ([`Limits::default`]) without one.
 #[derive(Debug, Clone)]
 pub struct SequenceOptions {
@@ -78,7 +78,7 @@ pub struct SequenceOptions {
     pub top: Top,
     /// Permit safe integer labels in each message's top-level map.
     pub cose: bool,
-    /// The wire profile (default: the valid preset, D267).
+    /// The wire profile (default: the valid preset).
     pub profile: Profile,
     /// The largest message, in bytes (P): a message that does not end within it is `too_large`.
     pub max_message_bytes: Option<u32>,
@@ -94,7 +94,7 @@ pub struct SequenceOptions {
     pub budget: Option<u32>,
     /// Stop (default) or skip schema refusals of complete messages.
     pub on_invalid: OnInvalid,
-    /// Report a refusal as soon as it is certain (D145; its code may differ).
+    /// Report a refusal as soon as it is certain (its code may differ).
     pub fail_fast: bool,
     /// Read size of [`read_sequence`] (positive; default 65536).
     pub chunk: usize,
@@ -133,7 +133,7 @@ impl SequenceOptions {
     }
 }
 
-/// One message of a sequence (D215): its index, absolute offset and bytes —
+/// One message of a sequence: its index, absolute offset and bytes —
 /// borrowed from the chunk it lay in, or an owned assembly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message<'c> {
@@ -166,7 +166,7 @@ impl<'c> Message<'c> {
     }
     /// A View of the checked message (minted from the reader's verdict, no re-scan).
     /// Under a valid-CBOR profile a message that is not its own deterministic form is
-    /// read through its canonical copy (P8.4, D262), made once, on the first call, by
+    /// read through its canonical copy, made once, on the first call, by
     /// the profile scanner (the check's limits are not re-applied).
     pub fn view(&self) -> View<'_> {
         if let Some((profile, cose)) = self.vprof {
@@ -194,7 +194,7 @@ impl<'c> Message<'c> {
     }
 }
 
-/// A refused message (D216): its index, absolute offsets and the per-message
+/// A refused message: its index, absolute offsets and the per-message
 /// verdict (whose `offset` is relative to the message), never payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageFailure {
@@ -210,7 +210,7 @@ pub struct MessageFailure {
     pub skippable: bool,
 }
 
-/// D214: schema reasons of a complete message are skippable; cbor/* and budget never.
+/// Schema reasons of a complete message are skippable; cbor/* and budget never.
 fn skippable_code(code: i32) -> bool {
     (32..=43).contains(&code)
 }
@@ -255,7 +255,7 @@ struct Chunk<'c> {
     base: u64,
 }
 
-/// P9.7: a reader's arrays go back to its Program's pool, and its live slot is freed,
+/// A reader's arrays go back to its Program's pool, and its live slot is freed,
 /// when it is dropped.
 impl Drop for Sequence<'_> {
     fn drop(&mut self) {
@@ -265,7 +265,7 @@ impl Drop for Sequence<'_> {
 }
 
 impl Sequence<'static> {
-    /// A profile-only sequence reader (the VM against `any`, D210).
+    /// A profile-only sequence reader (the VM against `any`).
     pub fn new(options: &SequenceOptions) -> Result<Self, Error> {
         Sequence::start(any_program(), 0, options.words(true), options)
     }
@@ -578,7 +578,7 @@ impl<'p> Sequence<'p> {
 }
 
 impl Schema {
-    /// A push reader of a CBOR sequence whose messages are validated against `rule` (D210).
+    /// A push reader of a CBOR sequence whose messages are validated against `rule`.
     pub fn sequence(&self, rule: &str, options: &SequenceOptions) -> Result<Sequence<'_>, Error> {
         let host = self.program().host();
         let r = host.rule(rule).ok_or(Error::Usage("unknown_rule"))?;
@@ -596,7 +596,7 @@ impl Schema {
 /// Read a profile-checked CBOR sequence from `reader` until EOF: an iterator of
 /// owned messages; a stopping refusal is the last item; a read error is
 /// [`Error::Io`] with the reader's error (also the last item). `Err(Error::SessionLimit)` when
-/// the live-session bound is reached (P9.7, D327).
+/// the live-session bound is reached.
 pub fn read_sequence<R: Read>(reader: R, options: &SequenceOptions) -> Result<SequenceReader<'static, R>, Error> {
     if options.chunk > crate::api::MAX_CHUNK {
         return Err(Error::Usage("options"));
@@ -631,7 +631,7 @@ impl<R: Read> Iterator for SequenceReader<'_, R> {
     }
 }
 
-/// What the sequence readers' core asks of its I/O loop (P9.6b, D335).
+/// What the sequence readers' core asks of its I/O loop.
 pub(crate) enum Pump {
     /// The next item (`None`: the sequence is over).
     Item(Option<Result<Message<'static>, Error>>),
@@ -663,8 +663,8 @@ impl<'p> SeqPump<'p> {
         &mut self.buf
     }
     /// The outcome of the read `next` asked for: `Ok(0)` is the end; `Interrupted` is
-    /// retried; any other error ends the sequence with `Error::Io` (the error itself,
-    /// P9.16), answered here as the last item.
+    /// retried; any other error ends the sequence with `Error::Io` (the error itself),
+    /// answered here as the last item.
     pub(crate) fn filled(&mut self, read: std::io::Result<usize>) -> Option<Result<Message<'static>, Error>> {
         match read {
             Ok(0) => {

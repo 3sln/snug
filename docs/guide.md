@@ -1,11 +1,14 @@
 # Using snug
 
-The public JS package is private and experimental. Follow the repository
-[quick start and staging instructions](../README.md#package-layout-and-reproducibility).
-All imports below use public entry points. The [runnable examples](../examples/)
-use repository-relative paths to those same facades so Node needs no install.
-The package needs Node 20 or later (`engines`); `npm test` runs on Node 20 in
-the release gates ([release policy §2](release-policy.md#2-supported-runtimes-and-toolchains)).
+```sh
+npm install @3sln/snug
+```
+
+The package needs Node 20 or later, or a current browser or Worker runtime,
+and has no dependencies. Every import below is a public entry point. The
+[runnable examples](../examples/) in the repository use the same entry
+points; [Building from a checkout](#building-from-a-checkout) explains how to
+use a build of the repository instead of the npm release.
 
 ## Compile once
 
@@ -28,7 +31,7 @@ columns count code points, and 0 means the error has no source position.
 by UTF-8 name. Groups, generic definitions and prelude rules are not
 validation roots. [Supported CDDL](cddl-support.md) is an explicit subset.
 
-> **Changed 2026-11-11 (D328):** the prelude's `float16`, `float32` and
+> **Float types are sets of values.** The prelude's `float16`, `float32` and
 > `float64` are sets of values, as RFC 8610 §3.3 defines them, not encoded
 > widths. `float32` matches 1.5 however it is encoded (a deterministic
 > encoder writes it as float16), `float16` matches 1.5 written as float64,
@@ -44,7 +47,7 @@ untrusted schemas, within its supported subset. See [profiles](profiles.md).
 
 ## Discriminated unions under the RFC cut
 
-> **Read this before writing a tagged union (D301).** snug follows RFC 8610's
+> **Read this before writing a tagged union.** snug follows RFC 8610's
 > cut literally by default. One common way of writing a tagged union does
 > **not** work under it.
 
@@ -102,7 +105,7 @@ with the same cut key as an earlier one") when two alternatives of a map's
 group choice start with a cut member on the same literal key. The warnings
 are `schema.warnings` in JS (and the wasm SDK) and `Schema::warnings()` in
 Rust: frozen `{ code, rule, line, column, message }` records, empty for a
-Schema loaded from serialized bytes (D342):
+Schema loaded from serialized bytes:
 
 ```js
 const shape = await compile('shape = { kind: "a", x: int // kind: "b", y: tstr }');
@@ -112,7 +115,7 @@ for (const w of shape.warnings) console.warn(`${w.code} at ${w.line}:${w.column}
 When the idiom fails, the result is `reason: 'value'` with `subcode: 'cut'`
 at the discriminator's path (`['kind']`), at the map's offset, even though
 the data is a valid second alternative: the subcode tells this apart from an
-ordinary wrong value (D342).
+ordinary wrong value.
 
 If a schema you do not control relies on the idiom, compile it with
 `cuts: 'branch'`: rule A, the reading of the Ruby and Rust reference tools
@@ -121,8 +124,7 @@ default because it departs from the RFC text; the difference is not
 limited to unions: under `branch`, `{ ? (a: int, b: int), * tstr => any }`
 accepts `{"a": 1}` (the wildcard takes `a` after the optional group fails),
 while the RFC default rejects it (the group's `a:` already claimed the key).
-`cuts` is part of the Program's source key. There is no `'reference'`
-spelling (the pre-release name of `branch`).
+`cuts` is part of the Program's source key.
 
 ## Group matching pitfalls (PEG)
 
@@ -131,7 +133,7 @@ a group choice `//` locks in the first alternative that succeeds, and
 occurrence indicators are greedy and never give anything back. Nothing is
 retried, so matching is linear, but some schemas that read naturally match
 less than they seem to. Tools that evaluate groups as sets (the Ruby and
-Rust `cddl` tools, and snug before format 2.0) accept some of these.
+Rust `cddl` tools) accept some of these.
 
 | Schema | Rejects | Write instead |
 | --- | --- | --- |
@@ -144,11 +146,15 @@ Rust `cddl` tools, and snug before format 2.0) accept some of these.
 
 See [CDDL support](cddl-support.md#arrays-and-repetition) for the rules.
 
+A related trap is on the encoding side: an object member set to `undefined`
+is **present** in the encoded map, so `? name: tstr` refuses it. See
+[`undefined` members and optional keys](#undefined-members-and-optional-keys).
+
 ## Regexp dialects
 
 `compile(text, { regexp: 'xsd' })` is the default, following RFC 8610's
 XSD Appendix F reference. Use `{ regexp: 'iregexp' }` for strict RFC 9485
-interoperability and the previous compiler's regexp behaviour. Both match
+interoperability. Both match
 the entire text; dot excludes CR/LF, and `^`/`$` are literal characters.
 
 ```js
@@ -165,11 +171,9 @@ Block escapes such as `\p{IsBasicLatin}` explicitly fail with `regexp`:
 the pinned Node ICU API exposes no block ranges. See the
 [construct table](cddl-support.md#regexp-cookbook) for coverage and escaping.
 
-All syntax lowers at compile time into existing bounded automata. Subtraction
-and table operations spend compile budget; repetitions obey the existing
-256-position default / 512-position hard cap. The Program format and runtime
-are unchanged. The source key includes the effective dialect; explicit
-`iregexp` preserves the previous preimage.
+Both dialects compile into the same bounded automata. Subtraction and table
+operations spend compile budget; repetitions obey the 256-position default /
+512-position hard cap. The source key includes the effective dialect.
 
 ## Optional Unicode regexp tables
 
@@ -182,8 +186,7 @@ const words = await compile(String.raw`word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"`
 ```
 
 The extra JavaScript module is 19,377 bytes minified, 9,287 bytes gzip-9,
-with 77,028 bytes of decoded Int32 ranges; see the
-[measurement method](../bench/README.md#unicode-table-module-p73).
+with 77,028 bytes of decoded Int32 ranges.
 It is pinned to Unicode 16.0, generated from Node v24.6.0 / ICU 77.1 without
 network access. Exported `nodeVersion` and `unicodeVersion` identify its
 inputs. A newer runtime does not silently update these checked-in tables.
@@ -201,12 +204,9 @@ Compile where the tables are available, then serialize the Program for a
 validation-only bundle. The runtime and Program loader need no Unicode
 module. Table contents are included in the source key; even schemas without
 category escapes get a different key when compiled with supplied tables.
-There is no change to the Program format.
 
 For basic ASCII patterns and both JS/CDDL escaping layers, see the
-[regexp cookbook](cddl-support.md#regexp-cookbook). Cross-host generation
-and maintenance evidence is recorded in [P7.3](../DEVLOG.md#phase-7--standalone-library-d080-2026-11-03)
-and the [table measurement](../bench/README.md#unicode-table-module-p73).
+[regexp cookbook](cddl-support.md#regexp-cookbook).
 
 ## Custom controls
 
@@ -273,9 +273,9 @@ budget suggests.
 const registry = { ...controls, sig: { check: verifySignature, cost: n => 64 + 50 * n } };
 ```
 
-The generic controls meter their own work in kin instead (a linear pass for
-`.chars` and `.samelen`, hashing plus an O(n log n) sort for `.unique`, each
-step charged as it happens, program.md §14), so JS and Rust charge them
+The generic controls are part of snug's core and meter their own work instead
+(a linear pass for `.chars` and `.samelen`, hashing plus an O(n log n) sort
+for `.unique`, each step charged as it happens), so JS and Rust charge them
 identically and a run that would pass the budget stops in the middle.
 
 **Errors and caching.** An unregistered `.name` is the `SchemaError`
@@ -307,7 +307,7 @@ any well-formed valid CBOR; `wire: 'deterministic'` to require RFC 8949
 matching the schema (RFC 8610 Appendix A PEG for groups); one compiled Program validates under
 each. Under `valid`, literals, keys and duplicates compare by value, and
 non-deterministic input is validated through its canonical copy with the same
-reasons, offsets and budget ([profiles](profiles.md#valid-cbor-p84-d260d268)). On schema failure it continues checking the
+reasons, offsets and budget ([profiles](profiles.md#valid-cbor)). On schema failure it continues checking the
 profile; a profile error wins, unless the global step budget runs out first.
 Missing rules, wrong argument types and SharedArrayBuffer input are API
 misuse (`TypeError`), not validation results.
@@ -354,8 +354,8 @@ keys, at any depth; under `wire: 'bindle'`, `cose: true` makes a top-level
 map a `Map` with safe integer and text keys. Codec decode accepts any root
 under the default valid preset; `wire: 'bindle'` requires a map
 unless `top: 'any'` is given. Tags outside the Bindle set (the standard
-ones, COSE/CWT and any other number, D180) decode to `Tagged`, `f7` to
-`undefined` ([profiles](profiles.md#javascript-values-d123)).
+ones, COSE/CWT and any other number) decode to `Tagged`, `f7` to
+`undefined` ([profiles](profiles.md#javascript-values)).
 
 Major-0/1 integers become numbers when safe and bigints otherwise. Tags 2/3
 become bigints; byte strings are copied `Uint8Array`s; typed arrays are copied
@@ -389,10 +389,10 @@ preferred serialization, such as `2(h'01')` for 1 or a bignum with leading
 zeroes. RFC 8949 §5.6.1 makes it a data item distinct from the integer 1, and
 snug reads it that way everywhere: it is a different map key from `1`, `r = 1`
 does not match it, and decode gives `Tagged { tag: 2, value: Uint8Array }` of
-its exact bytes rather than a number (D342). Encode writes such a `Tagged` as
+its exact bytes rather than a number. Encode writes such a `Tagged` as
 its integer, in preferred serialization; a map whose keys then coincide
 (`{0: null, 2(h''): null}`) has no deterministic encoding and is refused with
-`duplicate_key`, `subcode: 'normalized'` (D348). The deterministic preset refuses these bignums (`bignum`).
+`duplicate_key`, `subcode: 'normalized'`. The deterministic preset refuses these bignums (`bignum`).
 
 | Host map representation | Valid and deterministic presets (valid is the default) | `wire: 'bindle'` |
 | --- | --- | --- |
@@ -455,16 +455,16 @@ encoded key order; otherwise `end()` sorts the map. A Writer error is sticky:
 the first code is available as `failure`; later calls throw `writer_failed`.
 `float(1)` writes the float `f93c00` under the valid and deterministic presets and is
 refused under `wire: 'bindle'` (use `int(1)` or `value(1)` for the integer).
-`undefined()` writes `f7`, `tagged(tag, content)` a standard-set tag, and
-`key(k)` takes any key the profile admits. There is no raw unchecked CBOR
+`undefined()` writes `f7`, `tagged(tag, content)` any tag the profile's tag
+set admits, and `key(k)` takes any key the profile admits. There is no raw unchecked CBOR
 insertion API.
 Wrong-type calls such as `.text(7)`, `.uint('7')` and `.beginArray('2')`
 also throw sticky `SnugFault('unsupported')`; discard the failed Writer.
 
 Arrays encode elements at indexes 0..length−1. Extra named own properties,
 including non-enumerable and symbol properties, are ignored without reading
-their values, as with JSON.stringify. `strictArrays: true` retains the old
-own-key count check and refuses extra properties with `unsupported`.
+their values, as with JSON.stringify. `strictArrays: true` adds an own-key
+count check and refuses extra properties with `unsupported`.
 `encode(value, profiles.bindle)` and `new Writer(profiles.bindle)` select this
 strict behavior (`profiles` is exported by `@3sln/snug`). Both modes require genuine
 arrays with exactly the local `Array.prototype`; subclassed, foreign-realm
@@ -480,6 +480,29 @@ undefined object members and symbol/non-enumerable object members; array
 holes/undefined and enumerable object accessors remain refused. Writer.value
 uses the same options and array behavior at every nesting level. Avoid proxies
 or other executable objects at this boundary.
+
+### `undefined` members and optional keys
+
+`encode` and the Writer write JavaScript `undefined` as CBOR `undefined`
+(`f7`), so a decoded value encodes back to the same CBOR. The default is
+deliberate: `omitUndefined` is **false**. An object member whose value is
+`undefined` is therefore *in* the encoded map, and a schema's optional member
+does not match it: `?` lets the key be absent, not hold `undefined`.
+
+```js
+const user = await compile('user = { id: uint, ? name: tstr }');
+user.validate(encode({ id: 1, name: undefined }), 'user');
+// { ok: false, reason: 'type', path: ['name'], offset: 10 }
+user.validate(encode({ id: 1, name: undefined }, { omitUndefined: true }), 'user');
+// { ok: true }: the member is left out
+```
+
+`schema.decode` and a checked `view` of the first message throw `SnugFault`
+with code `schema/type` at path `['name']`. Pass `omitUndefined: true`
+(to `encode`, or to the `Writer` for `value()`) when you encode objects whose
+optional fields may be `undefined`, such as objects typed with optional
+TypeScript properties. Under `wire: 'bindle'`, `undefined` is refused
+outright unless omitted.
 
 ## Read selected fields through a view
 
@@ -680,13 +703,13 @@ const push = pushValidator(schema, undefined, 'message');   // feed(chunk) ... e
 
 Pass `undefined` as the length (or use `validateStream` / `scanStream` with a
 `streamSource` of a ReadableStream, an AsyncIterable or an Iterable of
-Uint8Array). snug then validates in **drain mode** (D085): it walks the bytes
+Uint8Array). snug then validates in **drain mode**: it walks the bytes
 as they come, exactly as with a known length, but every check that depends on
 where the message ends — a length or count reaching past the bytes seen,
 trailing bytes after the root, `too_large` — is held until the stream ends.
 A verdict found earlier is held too, and the rest of the stream is read and
 dropped (never kept). So the result is **identical to a buffer of the same
-bytes**: code, offset, path, budget and items (gated on every corpus and
+bytes**: code, offset, path, budget and items (tested on every corpus and
 mutation input under random chunking). More bytes than `maxBytes` end the
 stream at once with `cbor/too_large`, and a stream ending inside an item is
 `cbor/truncated` where the buffer would say so. EOF is the stream's end (or
@@ -701,9 +724,8 @@ the buffer reports that first. Acceptance always waits for the end.
 Memory stays bounded: the driver holds only what the session asks for (a
 head, a key, a bounded piece, an extension control's item) plus a chunk; a
 long byte string is dropped as it streams. The session's own key arena grows
-with the input read (D342): an idle stream that has received a few bytes holds
-about 50 KiB, whatever `maxBytes` is (measured 2026-11-12; before D342 the
-arena was sized for `maxBytes`, about 1.5 MiB at the default). A raw
+with the input read: an idle stream that has received a few bytes holds
+about 50 KiB, whatever `maxBytes` is. A raw
 `openSession(schema, rule, undefined)` from `@3sln/snug/sources` exposes the
 protocol: `step` may answer
 `{state: 'held', result}`, and `end(n)` settles the verdict (or answers a
@@ -717,7 +739,16 @@ A CBOR sequence (RFC 8742, media type `application/cbor-seq`) is messages
 written back to back with no framing: the natural body for a long-lived,
 server-sent-events-like HTTP response. `readSequence` reads one and hands you
 each message as soon as its last byte has arrived, already checked, as a lazy
-View:
+View.
+
+> **Messages borrow their chunks by default.** Unlike `view()`, which copies
+> its input unless you pass `borrow: true`, `readSequence` and
+> `sequenceReader` default to `copy: 'spanning'`: a message that lies inside
+> one chunk is a subarray of that chunk, with no copy. That is safe for a
+> `fetch` body. If the producer may reuse, mutate or transfer a chunk's buffer
+> after handing it over (pooled buffers, custom streams, a push caller that
+> reuses its chunk), pass `copy: 'always'`. "Borrowed bytes" below has the
+> details.
 
 ```js
 import { readSequence } from '@3sln/snug/sequence';
@@ -762,11 +793,11 @@ message that does not complete has no bytes of its own: its refusal is the
 buffer check's over the bytes from its start up to `maxMessageBytes` (the
 following messages' bytes included), so a truncation inside a tag-24 payload
 can be `cbor/too_large` when more than `maxMessageBytes` bytes follow while
-the same bytes alone say `cbor/truncated` (architecture §18.1). All of this is
-gated by `bb sequence-test` under every chunking.
+the same bytes alone say `cbor/truncated`. All of this is tested under every
+chunking.
 
 **Delivery.** A message is yielded as soon as its own last byte has arrived:
-the walk never waits for bytes past the message's end (gated: every accepted
+the walk never waits for bytes past the message's end (tested: every accepted
 message, with one-byte chunks, is released by the feed that completes it).
 `readSequence` checks one message ahead of your loop, so `break` stops the
 work at the next boundary; the push reader returns all the messages a chunk
@@ -780,7 +811,7 @@ within it is `cbor/too_large`, decided without buffering it. `maxDepth`,
 `maxEntries`, `maxItems`, `maxBignumBytes` and `budget` start from zero for
 every message. `maxBytes` is refused (it would be ambiguous). There is no
 total cap: stop by leaving the loop, which cancels the stream. Each reader's
-key arena grows with the message in progress, up to `maxMessageBytes` (D342).
+key arena grows with the message in progress, up to `maxMessageBytes`.
 
 **Refusals.** By default (`onInvalid: 'stop'`) the first refused message ends
 the sequence: every earlier message has been yielded, then the loop throws a
@@ -972,22 +1003,21 @@ Every public Program verifies before use and owns copies of its arrays.
 `program.P` and `program.B` return copies for advanced interchange;
 `fromProgram(P, B)` also verifies. They are not generated-module imports.
 The cache key already includes the snug version; effective defaults are
-normalised by kin (D039). The frozen source-key list does not include the
+normalised before hashing. The frozen source-key list does not include the
 leaf limit: a successful compile's Program is the same under either leaf cap.
 
-The 96-byte header carries `snugprog`, container version 1, format 2.0 (word value `2`, D318),
+The 96-byte header carries `snugprog`, container version 1, format 2.0 (word value `2`),
 word/pool lengths, a NUL-padded ASCII producer version, SHA-256 content digest
 and zero reserved bytes. Words are written/read little endian with DataView.
-The digest covers the whole container except its own 32 bytes. See
-[program.md §13.3](program.md#133-serialisation-container).
+The digest covers the whole container except its own 32 bytes.
 
-The current [D084 rule](../DEVLOG.md#d084--a-stable-versioned-serialised-program-with-a-compatibility-rule) is: format major
+The compatibility rule is: format major
 must equal the loader's, minor must be no greater than the loader's. In the
 32-bit format word, low 16 bits are major and high 16 bits are minor; 2.0
 therefore has word value 2. The current loader (2.0) refuses every 1.x
 Program and every newer minor; evict and recompile such a cache entry.
 The producer snug version is retained as provenance and may differ. Every
-load checks framing/digest and runs kin's structural verifier. Deterministic
+load checks framing/digest and runs the structural verifier. Deterministic
 bytes round-trip, including accepted producer metadata.
 
 **Use trusted caches.** Neither the digest nor structural verification
@@ -999,10 +1029,9 @@ application policy. Share immutable public Programs; synchronous validation
 uses a shared per-isolate scratch lease. Async source sessions own their
 state. There is no supported re-entrant internal VM API.
 
-Because the package is unreleased (every checkout says `0.0.0-unreleased`),
-namespace application caches by the pinned
-repository/package revision as well as sourceKey. This is conservative cache
-management, not a producer-version equality requirement.
+Because `sourceKey` includes the snug version, upgrading snug changes every
+key: entries from the old version are simply never hit again. Evict them by
+your cache's own policy.
 
 At build time, compile trusted CDDL and save `schema.program.serialize()`
 as a trusted artifact. At startup, load it once with `fromSerialized`, retain
@@ -1065,7 +1094,7 @@ CDDL validation does not infer a TypeScript interface. `schema.decode`
 returns the recursive `Value` union; narrow it or implement a checked domain
 wrapper. There is no inferred `decode<T>()` contract.
 
-In the ESM consumer from the README, save this as `main.ts`:
+In an ESM project that depends on `@3sln/snug`, save this as `main.ts`:
 
 ```ts
 import { encode } from '@3sln/snug';
@@ -1105,11 +1134,19 @@ Use `package.json` with `"type": "module"` and this `tsconfig.json`:
 ES2022 includes bigint and modern typed arrays; DOM supplies console in this
 small example without installing Node declarations. A `.mts` file is also
 ESM (adjust `include`); a `.ts` file needs the package's ESM setting above.
-Run an already available `tsc -p tsconfig.json`; no compiler install is needed
-for the JS package. Consumer evidence on 2026-11-03: TypeScript **5.8.3**
-from an existing offline language-server dependency checked this example
-against the staged package with these options. `bench/compare/node_modules/.bin/tsc`
-was absent. This is the tested compiler version, not a claim for every TS release.
+Check it with `tsc -p tsconfig.json`.
+
+The declarations need **TypeScript 5.7 or later**, and they are tested with
+TypeScript 6.0 under both `ES2022` + `DOM` and `ESNext` + `DOM`. A consumer
+needs the DOM lib or `@types/node`, since they name web-platform types such
+as `ReadableStream` and `Response`. `encode`, `Writer.finish`,
+`program.serialize` and `View.copyBytes` return `Uint8Array<ArrayBuffer>`, so
+their bytes go straight into web APIs:
+
+```ts
+const body = new Response(encode({ id: 7 }), { headers: { 'content-type': 'application/cbor' } });
+const file = new Blob([schema.program.serialize()]);
+```
 
 ## Browser and Worker recipes
 
@@ -1117,16 +1154,8 @@ These recipes use the native package. The opt-in WebAssembly build,
 `@3sln/snug-wasm`, has its own page, [The wasm SDK](wasm-sdk.md): init
 options, the inline entry, and a Workers recipe with `.wasm` module bindings.
 
-The staged package comes from `npm run build` in `host/js` (see the
-README). When the checkout has uncommitted or untracked changes in the
-package's sources (`host/js`, `gen/js`, `examples`, `docs` and the root files
-it copies), the build warns on stderr and lists them: the staged package then
-does not match the commit you would pin. It also warns when git cannot report
-the state (no checkout).
-
-Use the staged consumer package; bare specifiers need a bundler (or an
-application import map). With an already available esbuild, from the consumer
-directory create `browser.mjs`:
+Bare specifiers need a bundler (or an application import map). With esbuild,
+from your project directory, create `browser.mjs`:
 
 ```js
 import { encode } from '@3sln/snug';
@@ -1136,8 +1165,7 @@ document.body.textContent = JSON.stringify(schema.validate(encode({ id: 7 }), 'm
 ```
 
 ```sh
-# Set SNUG_ESBUILD to an absolute existing binary; do not use npx/downloads.
-"$SNUG_ESBUILD" browser.mjs --bundle --format=esm --platform=browser \
+npx esbuild browser.mjs --bundle --format=esm --platform=browser \
   --target=es2022 --splitting --outdir=browser-dist
 ```
 
@@ -1146,8 +1174,8 @@ from a locally served HTML file. Retain all emitted chunks and their relative
 paths. `--splitting --format=esm --outdir` preserves the compiler's dynamic
 import. A one-file bundle ships compiler bytes even if initialisation waits
 until the first call. For CSP, use same-origin external scripts/chunks and
-`default-src 'self'; script-src 'self'`; no `unsafe-eval` is needed in the
-recorded evidence. CSP and a local HTTP origin must permit chunk loading.
+`default-src 'self'; script-src 'self'`; no `unsafe-eval` is needed. CSP and
+a local HTTP origin must permit chunk loading.
 
 For a compiler-free module Worker, generate a trusted Program before bundling:
 
@@ -1175,14 +1203,14 @@ export default {
 
 ```sh
 node prepare.mjs
-"$SNUG_ESBUILD" worker.mjs --bundle --format=esm --platform=browser \
+npx esbuild worker.mjs --bundle --format=esm --platform=browser \
   --target=es2022 --outfile=worker-dist/worker.js
 ```
 
 This minimal Worker buffers the request: enforce transport size/deadline and
 concurrency policy before using it with untrusted traffic. Retain the trusted
-Program provenance. Startup verification still costs CPU; moving it to module
-scope was suggested, not measured, in P7.7. For a Worker that compiles at
+Program provenance. Startup verification still costs CPU at module scope.
+For a Worker that compiles at
 runtime, use the browser recipe's split flags and register **every** emitted
 chunk as an `esModule` in workerd's config. For the compiler-free bundle a
 minimal local `worker-dist/config.capnp` is:
@@ -1199,8 +1227,8 @@ const config :Workerd.Config = (
 );
 ```
 
-Run an existing native binary with
-`"$SNUG_WORKERD" serve worker-dist/config.capnp`; no deployment is required.
+Run it locally with `workerd serve worker-dist/config.capnp`; no deployment
+is required.
 **Browser dedicated Worker.** The same compiler-free Program works in a
 module Worker created by a page. The Worker holds the Schema; the page
 sends bytes and receives plain results:
@@ -1227,39 +1255,14 @@ worker.postMessage({ id: 1, bytes }, [bytes.buffer]); // transfer, do not share
 
 `Schema` and `Program` objects cannot cross a thread boundary:
 `postMessage(schema)` and `structuredClone(schema)` throw `DataCloneError`
-(each carries a Symbol `brand` for this; D342). Send `schema.program.serialize()` bytes and call `fromSerialized`
+(each carries a Symbol `brand` for this). Send `schema.program.serialize()` bytes and call `fromSerialized`
 on the other side, or compile there. A worker that compiles at runtime needs
 `{ type: 'module' }` and the split build, so the compiler chunk loads.
 
-To reproduce the fuller local browser/workerd checks, from the repository:
-
-```sh
-SNUG_ESBUILD=/absolute/path/to/esbuild SNUG_WORKERD=/absolute/path/to/workerd \
-  node tools/runtime/run.mjs --package .cache/docfix/staged --out .cache/docfix/runtime
-```
-
-The harness serves loopback only, runs Chrome and local workerd, and writes
-`results.json`. It needs those existing tools (Chrome may be set with
-`SNUG_CHROME`); it does not install them. See [method and fixtures](../tools/runtime/README.md).
-These recipe commands are not a claim of a new browser/runtime gate run.
-
-Recorded evidence, **2026-11-03**, staged revision **f275938** (esbuild 0.28.2):
-
-| Runtime actually checked | Entry points / scope | Outcome |
-| --- | --- | --- |
-| Node v24.6.0, fresh consumer | `snug`, `/schema`, `/compile`, `/view`, `/writer`, `/sources`; compile and stored-Program arms | 976 checks per arm, 0 failures |
-| Chrome 156.0.8078.80 headless, strict CSP | Same six entries, split ESM bundle, both arms | 976 per arm, 0 failures; eval/Function blocked by control probes |
-| workerd 2026-11-02 (1.20261102.1), repeat 2025-12-17; compatibility date 2025-12-01, no nodejs_compat | Same six entries; split and one-file compile arms, compiler-free stored-Program arm | 976 per tested arm, 0 failures |
-| Current Unicode and schema handle/push APIs, later scheduler changes | Absent from that revision's suite | No browser/Worker evidence claimed here |
-
-The old source arm checks profile scanning, not the later CDDL source API.
-The full compiler-free public runtime artifact was **56,226 bytes gzip-9**
-in that record, covering codec/schema/view/writer/sources, not just a VM core.
-Format 2.0's PEG engine has grown it since: on 2026-11-12 the whole compiler-free
-runtime (`all-runtime` in `tools/size`) was 99,905 bytes gzip-9, and a Worker
-importing only `fromSerialized` from `@3sln/snug/schema` about 54 KB.
-See the [evidence index](../bench/README.md#current-evidence-index--2026-11-03)
-for size boundaries and older snapshots.
+These recipes are tested in Node, headless Chrome under a strict CSP, and
+workerd without `nodejs_compat`. Gzipped, the whole compiler-free runtime
+(codec, schema, view, Writer and sources) is about 100 KB, and a Worker that
+imports only `fromSerialized` from `@3sln/snug/schema` about 54 KB.
 
 ## Errors and security
 
@@ -1291,3 +1294,45 @@ Offsets and array indexes are structural metadata. Treat schema names as
 untrusted metadata too, even though schema errors may identify a rule.
 Snug checks data shape and wire encoding; applications still enforce
 authentication, authorisation, freshness, quotas and field projection.
+
+## Building from a checkout
+
+The npm packages and the crate are built from the
+[repository](https://github.com/3sln/snug). To use a build of a commit instead
+of a release, you need Node 20 or later and [babashka](https://babashka.org)
+(`bb`). A build carries a placeholder version, not a release number, so
+record the commit you built it from.
+
+**`@3sln/snug`.** `npm run build` stages the self-contained package in a new
+temporary directory and prints its path; `npm pack` turns that into a
+tarball your project can install:
+
+```sh
+git clone https://github.com/3sln/snug && cd snug
+staged=$(cd host/js && npm run --silent build)   # e.g. /tmp/snug-package-Ab12Cd
+npm pack "$staged" --pack-destination ..         # writes ../3sln-snug-<version>.tgz
+cd ../my-app && npm install ../3sln-snug-*.tgz
+```
+
+The build warns on stderr, listing the paths, when the checkout has
+uncommitted or untracked changes in the package's sources: the package then
+does not match any commit.
+
+**`@3sln/snug-wasm`.** The SDK package carries the WebAssembly modules, so
+build those first with `bb wasm-release`. It needs Rust `nightly-2026-09-16`
+with the `wasm32-unknown-unknown` target and `rust-src`, and binaryen's
+`wasm-opt` from `npm ci` in `bench/compare`. Then stage and pack the package:
+
+```sh
+(cd bench/compare && npm ci)                     # esbuild, binaryen's wasm-opt
+rustup toolchain install nightly-2026-09-16 --target wasm32-unknown-unknown --component rust-src
+bb wasm-release                                  # .cache/release/wasm: the modules, SHA256SUMS, MANIFEST.json
+(cd host/wasm-sdk && npm run build)              # stages .cache/release/npm/snug-wasm
+npm pack .cache/release/npm/snug-wasm --pack-destination ..
+```
+
+Without `bb wasm-release` the SDK build stops and says so.
+
+**`snug-cbor`.** The crate is assembled from the generated sources by
+`kin/scripts/rust-crate`; the [Rust guide](rust.md#building-from-a-checkout)
+shows how to depend on the result.

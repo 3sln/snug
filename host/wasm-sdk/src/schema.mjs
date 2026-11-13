@@ -1,16 +1,15 @@
-// P7.9: `snug/schema` over wasm. A Program lives in linear memory (copied in
+// `snug/schema` over wasm. A Program lives in linear memory (copied in
 // and checked by vm-verify there); the JS object keeps its own copy of P and B
-// for the public accessors, serialisation and path rendering (program.md
-// §9.3), and reloads itself into a fresh instance after instance loss.
+// for the public accessors, serialisation and path rendering, and reloads itself into a fresh instance after instance loss.
 // validate copies the input into the reusable input buffer and makes one call;
 // the out words are read in place.
 //
-// Since P7.9 (D170-D173): limits word 9 carries the profile flags (D120); a
+// Limits word 9 carries the profile flags; a
 // format 1.1 Program binds its extension controls at load exactly as the native
 // host does (ext.mjs: a missing one is ProgramError('missing_control')), the
 // generic controls run inside wasm and any other predicate is asked through the
 // module's one import (runtime.mjs withExt); options go through the native
-// validator (D150). Sessions are opened by `openSession` in sources.mjs (D160).
+// validator. Sessions are opened by `openSession` in sources.mjs.
 import * as rt from './runtime.mjs';
 import { build } from '../../js/src/build.mjs';
 import { parseSerialized, serializeProgram, ProgramError } from '../../js/src/serialized.mjs';
@@ -164,7 +163,7 @@ export class Program {
     for (let i = 0; i < P[15]; i++) { const at = P[42] + 5 * i; names.push(d.decode(B.subarray(P[at], P[at] + P[at + 1]))); }
     return Object.freeze(names);
   }
-  /** The extension controls this Program uses (D141), by name. */
+  /** The extension controls this Program uses, by name. */
   get controls() { const { P, B } = internals.get(this); return Object.freeze(programControls(P, B)); }
   serialize() { const { P, B } = internals.get(this); return serializeProgram(P, B, versions.get(this)); }
 }
@@ -183,7 +182,7 @@ export class Schema {
     this.program = program; this.#inner = internals.get(program);
     Object.freeze(this);
   }
-  /** The compile warnings (P9.16), as the native Schema's. */
+  /** The compile warnings, as the native Schema's. */
   get warnings() { return schemaWarnings.get(this) ?? NO_WARNINGS; }
   #rule(rule) {
     if (typeof rule !== 'string') throw new TypeError('snug: rule must be a string');

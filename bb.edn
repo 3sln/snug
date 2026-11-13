@@ -3,7 +3,8 @@
 ;; form of the same thing.
 {:paths ["kin/src" "../kin/src"]
  :tasks
- {types-test {:doc "P9.20 follow-up: every declaration of @3sln/snug and @3sln/snug-wasm compiles, as a consumer imports it, under the pinned TypeScript (bench/compare; SNUG_TYPESCRIPT overrides) on ES2022 and ESNext libs; SKIP without TypeScript." :task (apply shell "node" "kin/scripts/types-test.mjs" *command-line-args*)}
+ {docs-test {:doc "D366: the shipped text (npm packages' docs, declarations and examples; the crate's docs and rustdoc; docs/rust.md) has no stale release state (\"not yet published\", \"private\", the version placeholder), no internal process references (D###, phase IDs, kin, gate, design documents) and no broken links or anchors.   bb docs-test [--self-test]" :task (apply shell "node" "kin/scripts/docs-test.mjs" *command-line-args*)}
+  types-test {:doc "P9.20 follow-up: every declaration of @3sln/snug and @3sln/snug-wasm compiles, as a consumer imports it, under the pinned TypeScript (bench/compare; SNUG_TYPESCRIPT overrides) on ES2022 and ESNext libs; SKIP without TypeScript." :task (apply shell "node" "kin/scripts/types-test.mjs" *command-line-args*)}
   size       {:doc "Public entry min/gzip/brotli regression budgets (offline esbuild)." :task (apply shell "node" "tools/size/size.mjs" *command-line-args*)}
   gen        {:doc "Print what one source generates.   bb gen kin/hello.kin"
               :task (apply shell "kin/scripts/gen" *command-line-args*)}

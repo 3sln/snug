@@ -25,13 +25,13 @@ const VmSession = /* @__PURE__ */ disposable(class VmSession {
       throw new TypeError('snug: invalid window span');
     return this.#host.step(window, base);
   }
-  /** D085: the end of an unknown-length message (n bytes). */
+  /** The end of an unknown-length message (n bytes). */
   end(n) { return this.#host.end(n); }
-  /** P9.7: release the session's arrays now (a finished session has); it cannot be stepped after. */
+  /** Release the session's arrays now (a finished session has); it cannot be stepped after. */
   close() { this.#host.close(); }
 });
 
-/** Advanced synchronous session over a verified schema (D160). */
+/** Advanced synchronous session over a verified schema. */
 export function openSession(schema, rule, length, options = {}, scheduling = {}) {
   const program = schemaPrograms.get(schema);
   if (!program) throw new TypeError('snug: openSession needs a verified Schema');

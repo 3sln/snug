@@ -1,11 +1,11 @@
-// P7.9: the codec entry over wasm (`snug` in the native package). decode =
+// The codec entry over wasm (`snug` in the native package). decode =
 // the wasm profile scan (input copied into linear memory) + the same trusted
-// JS builder the native package uses, over the caller's bytes (D004: hosts own
+// JS builder the native package uses, over the caller's bytes (hosts own
 // the value model; the bytes are already in JS, so nothing is read back).
 // encode = the JS walk writing a tape + one wasm call (encode.mjs).
-// Options are checked by the native package's validator (options.mjs, D150)
-// and resolved to kin's profile flags by its profiles.mjs (D120, D126), so a
-// malformed or unknown option is the same TypeError in both packages (D172).
+// Options are checked by the native package's validator (options.mjs)
+// and resolved to the core's profile flags by its profiles.mjs, so a
+// malformed or unknown option is the same TypeError in both packages.
 import * as rt from './runtime.mjs';
 import { SnugFault } from '../../js/src/fault.mjs';
 import { resolveLimits } from '../../js/src/limits.mjs';

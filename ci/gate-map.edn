@@ -67,6 +67,8 @@
   wasm-sdk-test    {:cmd ["bb" "wasm-sdk-test"] :caps [5400 10800]
                     :doc "SKIPs without the pinned nightly: NOT RUN. In the release set: O3 ships the SDK (D338, D345)."}
   size             {:cmd ["bb" "size"] :caps [900 1800]}
+  docs-test        {:cmd ["bb" "docs-test"] :caps [120 240]
+                    :doc "the shipped text: no stale release state, internal process references or broken links (D366)"}
   types-test       {:cmd ["bb" "types-test"] :caps [600 1200]
                     :doc "the published declarations under the pinned TypeScript (bench/compare)"}
   wasm-size        {:cmd ["bb" "wasm-size"] :caps [3600 7200]
@@ -106,7 +108,7 @@
              nav-test write-test unicode-test abnf-test
              rust-api-test rust-api-test-full
              wasm-sdk-test wasm-package-test
-             size types-test wasm-size watchdog-test
+             size types-test docs-test wasm-size watchdog-test
              npm-test rfc-corpus proptest
              node-oldest msrv runtime]
   ;; SPEC §7: the same Program bytes, verdict, reason, path and budget point on
@@ -114,7 +116,7 @@
   :identity [check scan-test compile-test vm-test vmsession-test sequence-test
              nav-test write-test unicode-test abnf-test rust-api-test]
   ;; the routine set before landing a change that touches kin or a host
-  :land     [versions check drift size types-test npm-test rust-api-test wasm-sdk-test vm-test compile-test]
+  :land     [versions check drift size types-test docs-test npm-test rust-api-test wasm-sdk-test vm-test compile-test]
   ;; the release set's CI shards (:partitions). Tools: every shard needs Node
   ;; and Rust 1.92.0; core also the pinned wasm nightly (scan-test's wasm arm)
   ;; and bench/compare (its cbor2 differential, types-test's TypeScript); vm also the nightly (vm-test's
@@ -122,7 +124,7 @@
   ;; bench/compare, Node 20, workerd and Chrome; long also bench/compare
   ;; (valid-test's cbor2 arm).
   :release-core [versions check drift stamp-test scan-test rscan-test
-                 compile-test compile-fuzz nav-test write-test types-test]
+                 compile-test compile-fuzz nav-test write-test types-test docs-test]
   :release-vm   [vm-test vmsession-test sequence-test]
   :release-rust [unicode-test abnf-test rust-api-test rust-api-test-full msrv
                  size watchdog-test npm-test rfc-corpus]

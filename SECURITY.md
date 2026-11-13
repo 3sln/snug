@@ -37,5 +37,5 @@ ships as a patch release. It may change behaviour that is otherwise stable (for
 example, refusing a Program the verifier used to accept) only as far as the fix
 needs, and the changelog's **Security** section says so.
 
-The full policy is §5.2 of the
+How a fix is released is in section 5.2 of the
 [release policy](https://github.com/3sln/snug/blob/main/docs/release-policy.md).

@@ -1,4 +1,4 @@
-// `@3sln/snug-wasm/inline` (P9.17, D345): the package root with both wasm
+// `@3sln/snug-wasm/inline`: the package root with both wasm
 // modules inlined as base64, so no file, URL or bundler rule is needed.
 //
 //   initSync()   compiles both modules synchronously (Node, web workers, a

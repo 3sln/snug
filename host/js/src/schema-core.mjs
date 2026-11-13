@@ -1,6 +1,6 @@
-// snug's buffer core (SPEC §1): validate CBOR bytes against a Program's rule,
+// snug's buffer core: validate CBOR bytes against a Program's rule,
 // decode after validating. Everything that decides accept or
-// refuse is kin (gen/js/snug/vm, gen/js/snug/compile); this module owns the
+// refuse is the generated core (gen/js/snug/vm, gen/js/snug/compile); this module owns the
 // Program objects, the per-isolate scratch lease (architecture §8, §17.1:
 // synchronous validation holds one shared scratch for the duration of a call)
 // and the rendering of results (reason names, paths rendered from the
@@ -91,8 +91,8 @@ export class Program {
     return major === 0 ? arg : -1 - arg;
   }
   /** Low level: run the VM; answers the out words (code first) as a fresh array. With `copy`, also sets
-   * copy.bytes to the canonical copy the VM validated when the input is valid but not its own deterministic form
-   * (P8.4, D262), else leaves it undefined. */
+   * copy.bytes to the canonical copy the VM validated when the input is valid but not its own deterministic form,
+   * else leaves it undefined. */
   run(rule, bytes, opts, span, copy) {
     let S = lease(this.P, rule);
     const x = this.ext, call = x ? x.call : noExt, lw = limitWords(opts);
@@ -161,7 +161,7 @@ export class Schema {
     return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), { top: 'any', ...opts },
       { start, end, depth: opts.depth ?? 0, items: opts.items ?? 0 }));
   }
-  /** decode(bytes, rule, opts): validate, then the trusted builder (D017). */
+  /** decode(bytes, rule, opts): validate, then the trusted builder. */
   decode(bytes, rule, opts = {}) {
     validateOptions(opts, 'validation');
     asBytes(bytes);
@@ -173,7 +173,7 @@ export class Schema {
     return build(copy.bytes ?? bytes, opts);
   }
   /** INTERNAL: validate, setting copy.bytes to the canonical copy when the input is valid but not its own
-   * deterministic form (P8.4): decode and views build from it. */
+   * deterministic form: decode and views build from it. */
   check(bytes, rule, opts, copy) {
     validateOptions(opts, 'validation');
     return this.program.result(this.program.run(this.rule(rule), asBytes(bytes), opts, undefined, copy));

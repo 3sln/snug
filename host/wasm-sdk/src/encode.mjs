@@ -1,23 +1,23 @@
-// P7.9: encode over wasm. The JS walk keeps every host-value admission rule of
-// the native Writer#walk (host/js/src/writer.mjs, D113, D123) and the items/
+// Encode over wasm. The JS walk keeps every host-value admission rule of
+// the native Writer#walk (host/js/src/writer.mjs) and the items/
 // depth/entries bounds, and writes a TAPE of ops into linear memory (texts and
 // byte payloads into a byte area there). One wasm call (sdk_enc_run) then turns
-// the tape into deterministic CBOR with kin's writer primitives under the
-// profile flags (D120): shortest heads, float widths (Bindle or deterministic
-// rules, D122), bignums, map key order (kin sorts each map's keys before any
+// the tape into deterministic CBOR with the core's writer primitives under the
+// profile flags: shortest heads, float widths (Bindle or deterministic
+// rules), bignums, map key order (the core sorts each map's keys before any
 // value is written, as the native walk does), and the standard tags' content
-// rules (D121; a tag-24 payload by the scanner). Per-head wasm calls were
-// measured as the alternative (bench/D005.md, boundary probe) and lose.
+// rules (a tag-24 payload by the scanner). Per-head wasm calls were
+// measured as the alternative (boundary probe) and lose.
 //
 // Profile options as the native Writer: Map keys by the `keys` kind (any value
 // with 'any', its encoding written by the same walk), Tagged values the profile
-// admits (the standard set, or any tag, D180: membership checked here by kin's
+// admits (the standard set, or any tag: membership checked here by the core's
 // std-allowed on the rule tag, content in wasm), undefined under
 // `undefinedValue`, noncharacters under `noncharacters`, strictArrays from the
 // preset.
 //
-// Differences from the native walk (D132): map members are walked in host order
-// (native: kin order), duplicate keys and tag contents are found when the tape
+// Differences from the native walk: map members are walked in host order
+// (native: core order), duplicate keys and tag contents are found when the tape
 // runs (native: as the map or tag is written), and a key's items count against
 // the one message bound as they are walked; so when one message holds several
 // faults the one reported can differ. Every single fault has the native code,
@@ -50,7 +50,7 @@ const MESSAGES = {
   normalized: 'Two map keys are one key once a bignum is written as its integer.',
 };
 const fail = (code, message, subcode) => { const e = new SnugFault(code, message); if (subcode) e.subcode = subcode; throw e; };
-/** D348: a key's integer identity after bignum normalisation (integers, Tagged 2/3 of bytes, text, arrays of these),
+/** A key's integer identity after bignum normalisation (integers, Tagged 2/3 of bytes, text, arrays of these),
  *  or null for any other key (the tape's own duplicate check then stands, without a subcode). */
 function canon(k) {
   if ((typeof k === 'number' && Number.isSafeInteger(k)) || typeof k === 'bigint') return 'i' + k;

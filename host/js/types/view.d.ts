@@ -5,7 +5,7 @@ export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undef
 /** Unknown keys/malformed values throw TypeError before bytes are checked or copied. */
 export interface ViewOptions extends ValidationOptions {
   schema?: Schema; rule?: string; borrow?: boolean;
-  /** Experimental, opt-in per-container offset directories (D053). */
+  /** Experimental, opt-in per-container offset directories. */
   directories?: boolean;
 }
 export declare function view(bytes: Uint8Array, options?: ViewOptions): View;
@@ -38,7 +38,7 @@ export declare class View {
   /** Read-only aliases by contract; JS cannot enforce that contract. */
   bytes(): Uint8Array;
   raw(): Uint8Array;
-  copyBytes(): Uint8Array;
+  copyBytes(): Uint8Array<ArrayBuffer>;
   typedView(): Readonly<{ tag: number; length: number; get(index: number): number | bigint }>;
   typed(): TypedArray | Float16Bytes;
   decimal(): Decimal;

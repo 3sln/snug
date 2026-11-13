@@ -10,13 +10,10 @@ artefact — `[js]`, `[rust]`, `[wasm-sdk]` — when they do not apply to all;
 paths, not links, because this file ships in the npm package and the crate,
 and neither contains those files.
 
-Nothing has been released. Every manifest is `private`, and the
-repository's version sites hold the placeholder `0.0.0-unreleased`; a
-release build stamps the real version from `version.edn` (D343).
-
 ## [Unreleased]
 
-What a first release would contain, summarised from DEVLOG Phases 7–9.
+The first release. The **Breaking**, **Fixed** and **Security** entries
+compare it with development builds from the repository.
 
 ### Added
 
@@ -83,7 +80,7 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
 - Session pooling and a bound on live sessions: `sessionLimits({ maxLive,
   maxPooledBytes })`, `releasePool()`, `close()` / `[Symbol.dispose]` on
   sessions, and the `sessions/limit` error; Rust
-  `snug::sessions::{limits, set_limits, counts, release_pool}` (D327, P9.7).
+  `snug::sessions::{limits, set_limits, counts, release_pool}` (D327).
 - `[rust]` The crate: compile, validate, decode, Writer, views, blob and
   reader sources, sequences, and async source drivers with no runtime
   dependency (`validate_blob_async`, `validate_reader_async`,
@@ -101,7 +98,8 @@ What a first release would contain, summarised from DEVLOG Phases 7–9.
 
 ### Breaking
 
-These matter only to users of pre-release builds from this repository.
+These matter only to code written against development builds from the
+repository.
 
 - Package names (D343): the npm package is `@3sln/snug`, so imports read
   `@3sln/snug`, `@3sln/snug/compile` and so on, not `snug`. The wasm SDK
@@ -197,7 +195,7 @@ These matter only to users of pre-release builds from this repository.
   19 KiB (Rust) / 50 KiB (JS) instead of about 1.4 MiB at the default
   1,500,000-byte limit (D342).
 - `[rust]` A driver `chunk` above 2³¹ − 1 is `Error::Usage("options")`; it
-  used to panic (`capacity overflow`) or reserve that much (P9.16).
+  used to panic (`capacity overflow`) or reserve that much.
 - `[rust]` A decoded decimal fraction whose mantissa is a bignum outside
   preferred serialization stays a `Value::Tag`, as in JS (D342).
 - A view under a schema of valid input that is not its own deterministic
@@ -206,8 +204,8 @@ These matter only to users of pre-release builds from this repository.
   walk the raw bytes and throw `navigation failed` (`[rust]`
   `Schema::view` borrowed them). A map out of canonical order in such an
   item was searched as if sorted, so lookups could miss keys (D351).
-- `[js]` `view(bytes, { schema, rule })` with a Schema from `snug/compile`
-  or `snug/schema` reads valid, non-deterministic input through its
+- `[js]` `view(bytes, { schema, rule })` with a Schema from `@3sln/snug/compile`
+  or `@3sln/snug/schema` reads valid, non-deterministic input through its
   canonical copy; it threw `navigation failed` (D351).
 - `[rust]` `decode`, `Schema::decode`, `View::value` and `encode`/`Writer`
   build and walk value trees iteratively. In a debug build on Rust 1.98, the

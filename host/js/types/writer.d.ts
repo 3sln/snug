@@ -15,9 +15,9 @@ export declare class Writer {
   null(): this;
   /** f7; needs the profile's undefinedValue. */
   undefined(): this;
-  /** A simple value 0..19 or 32..255 (or a Simple), shortest form; needs undefinedValue (D284). */
+  /** A simple value 0..19 or 32..255 (or a Simple), shortest form; needs undefinedValue. */
   simple(value: number | Simple): this;
-  /** A standard-set tag and its content: value(new Tagged(tag, content)). */
+  /** A tag and its content, any tag number the profile admits: value(new Tagged(tag, content)). */
   tagged(tag: number | bigint, content: unknown): this;
   text(value: string): this;
   bytes(value: Uint8Array): this;
@@ -29,5 +29,5 @@ export declare class Writer {
   /** A string; an integer with keys 'integer' / 'any' (or a cose label under keys 'text'); any value with keys 'any'. */
   key(key: unknown): this;
   end(): this;
-  finish(): Uint8Array;
+  finish(): Uint8Array<ArrayBuffer>;
 }

@@ -9,7 +9,7 @@
 pub use crate::schema::{Blob, Failure, Scratch, Segment};
 use crate::{schema, Error, Program, Top, Value};
 
-/// CDDL restriction set, independent of the CBOR wire policy. Not exhaustive (D339).
+/// CDDL restriction set, independent of the CBOR wire policy. Not exhaustive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CompilerProfile {
@@ -21,8 +21,8 @@ pub enum CompilerProfile {
     /// Bounded bus subset for untrusted schemas.
     Bus,
 }
-/// Named compiler limits; omitted values use kin defaults, zero means zero,
-/// and requests above hard ceilings clamp in kin.
+/// Named compiler limits; omitted values use the defaults, zero means zero,
+/// and requests above hard ceilings are clamped.
 #[derive(Debug, Clone, Default)]
 pub struct CompileLimits {
     /// UTF-8 schema bytes.
@@ -55,7 +55,7 @@ pub struct CompileLimits {
     pub entries: Option<u32>,
     /// Compiled item cap.
     pub items: Option<u32>,
-    /// Requested bignum cap (currently fixed at 128 by kin).
+    /// Requested bignum cap (currently fixed at 128).
     pub bignum_bytes: Option<u32>,
     /// Compiled validation work budget.
     pub budget: Option<u32>,
@@ -101,14 +101,14 @@ pub struct CompileOptions<'a> {
     pub limits: CompileLimits,
     /// Canonical category triples from `unicode_tables::tables()`.
     pub unicode: Option<&'a [i32]>,
-    /// Extension controls (D141): the `.name` operators the schema may use.
+    /// Extension controls: the `.name` operators the schema may use.
     pub controls: Option<&'a crate::controls::Controls>,
-    /// Cut semantics (D301): the literal RFC 8610 cut (default) or rule A.
+    /// Cut semantics: the literal RFC 8610 cut (default) or rule A.
     pub cuts: crate::compile::Cuts,
-    /// The PEG group arena's cap in words (program-2 §9.4; D276, D281): `None` is the
+    /// The PEG group arena's cap in words: `None` is the
     /// default 4,194,304; a run that needs more refuses with `group_limit`.
     pub group_words: Option<i32>,
-    /// How `.abnf` / `.abnfb` controllers parse (D340): strict RFC 5234 + RFC 7405 +
+    /// How `.abnf` / `.abnfb` controllers parse: strict RFC 5234 + RFC 7405 +
     /// RFC 9165 §3 by default, or `AbnfMode::Lenient`. Bound into the source key.
     pub abnf: crate::compile::AbnfMode,
 }
@@ -131,7 +131,7 @@ pub struct ValidationOptions {
     pub max_bignum_bytes: Option<u32>,
     /// VM work budget.
     pub budget: Option<u32>,
-    /// The wire profile (default: the valid preset, D267).
+    /// The wire profile (default: the valid preset).
     pub profile: crate::Profile,
 }
 impl Default for ValidationOptions {
@@ -166,7 +166,7 @@ impl ValidationOptions {
     }
 }
 /// The largest driver read size (`chunk`): 2³¹ − 1 bytes. A larger one, or 0, is
-/// `Error::Usage("options")` (it used to panic or reserve that much).
+/// `Error::Usage("options")`.
 pub(crate) const MAX_CHUNK: usize = i32::MAX as usize;
 /// How a source driver reads (JS's `SourceOptions`): the
 /// [`Schema::validate_blob`] and [`Schema::validate_reader`] families and their
@@ -277,7 +277,7 @@ impl Schema {
     pub fn from_serialized(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self::from_program(Program::deserialize(bytes)?))
     }
-    /// [`Schema::from_serialized`] for a Program using extension controls (D141):
+    /// [`Schema::from_serialized`] for a Program using extension controls:
     /// the registry it was compiled with, else `Error::MissingControls`.
     pub fn from_serialized_with(bytes: &[u8], controls: &crate::controls::Controls) -> Result<Self, Error> {
         Ok(Self::from_program(Program::deserialize_with(bytes, controls)?))
@@ -365,7 +365,7 @@ impl Schema {
         }
         Ok(crate::view::checked_keys(bytes, c.unsorted))
     }
-    /// Validate, then keep the document (or its canonical copy, P8.4) for viewing.
+    /// Validate, then keep the document (or its canonical copy) for viewing.
     pub fn document(
         &self,
         bytes: &[u8],
@@ -393,7 +393,7 @@ impl Schema {
         let (chunk, quantum) = source.checked()?;
         schema::validate_blob(self.program.host(), r, blob, &options.host(), chunk, quantum).map_err(Error::from)
     }
-    /// D085: validate a message of UNKNOWN length read from `reader` until EOF
+    /// Validate a message of UNKNOWN length read from `reader` until EOF
     /// (drain mode: the verdict equals the buffer's of the same bytes, holding at
     /// most what the session asks for plus one `source.chunk`). With
     /// `source.fail_fast` a certain refusal is answered at once; its code may

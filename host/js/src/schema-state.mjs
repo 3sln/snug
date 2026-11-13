@@ -1,4 +1,4 @@
-// Private bridge between the buffer facade and source sessions (D160).
+// Private bridge between the buffer facade and source sessions.
 // No session imports or factories; package exports block direct access.
 export const schemaPrograms = new WeakMap();
 // P9.16: a compiled Schema's warnings, set by compile (snug/compile) once, read by `schema.warnings`.

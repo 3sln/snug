@@ -1,4 +1,4 @@
-// CBOR sequences (RFC 8742; P7.13, architecture §18, D210-D219): the driver shared by
+// CBOR sequences (RFC 8742): the driver shared by
 // the native package (sequence.mjs, the gen JS session) and the wasm SDK (its session in
 // linear memory): a series of
 // messages, each one root, read from chunks as they arrive. Every message is
@@ -15,9 +15,9 @@
 // subarray of the chunk it lay in (borrowed: true) or a fresh buffer it was
 // assembled into across chunks (borrowed: false); `copy: 'always'` copies every
 // message. Refusals are SnugFault with index, messageOffset and an absolute
-// offset (D216); `onInvalid: 'skip'` drops only schema refusals of complete
-// messages (D214). Per-message verdicts are the buffer driver's over the
-// message's window (D211): bb sequence-test holds both hosts to it.
+// offset; `onInvalid: 'skip'` drops only schema refusals of complete
+// messages. Per-message verdicts are the buffer driver's over the
+// message's window: bb sequence-test holds both hosts to it.
 import { validateSequenceOptions, selectOptions } from './options.mjs';
 import { validationFault } from './public-errors.mjs';
 import { resolveLimits } from './limits.mjs';
@@ -27,12 +27,12 @@ const VMS_NEED = -64, VMS_YIELD = -65, VMS_HELD = -67, VMS_RESUME = -68;
 const STEP = -1000;   // host: step again (after a scheduling yield)
 const EMPTY = new Uint8Array(0);
 const isShared = b => typeof SharedArrayBuffer === 'function' && b.buffer instanceof SharedArrayBuffer;
-/** D214: schema reasons of a complete message are skippable; cbor/* and budget never. */
+/** Schema reasons of a complete message are skippable; cbor/* and budget never. */
 const skippableCode = code => code >= 32 && code <= 43;
 
-/** One message of a sequence (D215). Its fields are read-only and `view` is minted on first
+/** One message of a sequence. Its fields are read-only and `view` is minted on first
  *  use from the bytes the check ran over (a private reference, not the public `bytes` getter
- *  a caller could shadow; review 2026-11-04 #3). */
+ *  a caller could shadow). */
 class SequenceMessage {
   #index; #offset; #bytes; #borrowed; #opts; #mint; #view = null;
   constructor(index, offset, bytes, borrowed, opts, mint) {
@@ -48,10 +48,10 @@ class SequenceMessage {
   toJSON() { return { index: this.#index, offset: this.#offset, length: this.#bytes.length, borrowed: this.#borrowed }; }
 }
 
-/** The Program, rule and validation options a sequence's options select (D213): a schema's
- *  rule, or (profile only) the built-in `any` under the decode defaults (D146, D210).
+/** The Program, rule and validation options a sequence's options select: a schema's
+ *  rule, or (profile only) the built-in `any` under the decode defaults.
  *  programOf(schema) -> the host's program state for a Schema of that host (or undefined);
- *  anyOf() -> the host's `any` program. Shared by both hosts (P7.13w). */
+ *  anyOf() -> the host's `any` program. Shared by both hosts. */
 export function sequenceTarget(options, programOf, anyOf) {
   const { schema, rule, maxMessageBytes } = options;
   if (schema !== undefined) {
@@ -117,7 +117,7 @@ class SequenceCore {
   }
   /** An exception (an extension predicate that threw, or an internal invariant) ends the
    *  sequence; the messages and skips found before it are kept and it is reported as the
-   *  result's error (review 2026-11-04 #6). */
+   *  result's error. */
   thrown(res, e) {
     this.close(); this.msg = -1; this.mb = null; this.chunk = null;
     res.error = e; res.state = 'done';
@@ -289,7 +289,7 @@ class SequenceCore {
     return res;
   }
 
-  /** The SnugFault of the verdict in `out` for the message at o (D216). */
+  /** The SnugFault of the verdict in `out` for the message at o. */
   fault(o) {
     const ml = this.b.messageLength(), code = this.b.code();
     const r = this.b.result();
@@ -318,7 +318,7 @@ function chunksOf(source) {
  *  (the host's internal view capability), SourceError and nextTurn (its scheduling yield). */
 export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
   const open = (options, quantum, batch) => { const { backend, viewOpts } = openBackend(options, quantum); return new SequenceCore(backend, options, mint, viewOpts, batch); };
-  /** A push reader of a CBOR sequence (D210): feed(chunk) and end() answer
+  /** A push reader of a CBOR sequence: feed(chunk) and end() answer
    *  { messages, skipped, error }; after an error (onInvalid 'stop', or a refusal that
    *  cannot be skipped) the reader is done. */
   function sequenceReader(options = {}) {
@@ -329,14 +329,14 @@ export function sequenceApi({ openBackend, mint, SourceError, nextTurn }) {
       feed(chunk) { return shape(core.feed(chunk)); },
       end() { return shape(core.finish()); },
       get done() { return core.done; },
-      /** P9.7: abandon the sequence, releasing its session now (feed and end then throw). */
+      /** Abandon the sequence, releasing its session now (feed and end then throw). */
       close() { if (!core.done) core.close(); },
       /** Bytes held for the message in progress (its assembly so far). */
       get bytesHeld() { return core.mbLen + (core.left ? core.left.length : 0); },
     });
   }
 
-  /** Read a CBOR sequence from a stream (D210): an async iterator of messages
+  /** Read a CBOR sequence from a stream: an async iterator of messages
    *  ({ index, offset, length, bytes, borrowed, view }). A refusal that stops the
    *  sequence is thrown after every earlier message was yielded; leaving the loop
    *  cancels the source. `stats`: { messages, skipped, bytes, lastSkipped }. */

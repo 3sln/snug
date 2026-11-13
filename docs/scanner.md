@@ -4,7 +4,7 @@ Normative for `kin/scan.kin` and its helpers (`kin/head.kin`, `text.kin`,
 `float.kin`, `keys.kin`, `tags.kin`, `stdtags.kin`), generated to
 `gen/{js,rust}/snug/cbor/*`. The scanner checks RFC 8949 §4.2.1 core
 deterministic encoding under the **profile flags** in `o[11]` (D120,
-[profiles](profiles.md#the-option-model-d120)). With the flags at 0 — the
+[profiles](profiles.md#the-option-model)). With the flags at 0 — the
 Bindle profile — it accepts exactly what 3sln.me's `packages/core/cbor.mjs`
 `decode` accepts and refuses everything it refuses **with the same code**,
 with one exception: `f8` followed by a value below 32 is **malformed** (RFC

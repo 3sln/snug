@@ -1,4 +1,4 @@
-// Session-only host state. Keep the kin window/EOF protocol unchanged (D144–D147).
+// Session-only host state. Keep the core's window/EOF protocol unchanged.
 import { vmScratchWords, vmScratchInit } from '../../../gen/js/snug/vm/api.mjs';
 import { vmsWords, vmsArena, vmsInit, vmsStepV, vmsNeedOffset, vmsNeedLength, vmsPosition, vmsKeep,
   vmsInitUnknown, vmsUnknownTotal, vmsEof, vmsGrowWords, vmsGrowBytes, vmsGrowScratch, vmsGrowArena } from '../../../gen/js/snug/vm/session.mjs';
@@ -31,7 +31,7 @@ export function growValid(v, ss) {
   if (nb > v.cb.length) v.cb = new Uint8Array(Math.max(nb, 2 * v.cb.length));
 }
 
-/** One resumable validation (P6.2, D027): the kin session over windows of a message of
+/** One resumable validation: the generated session over windows of a message of
  *  a declared length. It owns its scratch, session array and key arena from start to
  *  verdict (§17.1 W9: interleaved async sessions never share state); the Program is
  *  shared. step(window, base) answers {state: 'need', offset, length, keep},
@@ -70,7 +70,7 @@ export const VmSession = /* @__PURE__ */ disposable(class VmSession {
     if (!this.busy) release(this.lease);
   }
   #settle(v) { this.verdict = v; release(this.lease); return v; }
-  /** D085, an unknown-length session: the message ended after `n` bytes (or passed the
+  /** An unknown-length session: the message ended after `n` bytes (or passed the
    *  input limit `limit`: any n above it). Answers {state: 'done', result}, or
    *  {state: 'yield', position, keep} when the walk must go on over the bytes from
    *  `position` to n (step again; it never asks past n). */

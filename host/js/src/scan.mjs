@@ -22,7 +22,7 @@ function grow() {
 }
 
 /** Throws SnugFault(code) unless bytes are valid under the profile with these options. Answers the bytes to build
- * from: `bytes` itself, or -- for valid input that is not its own deterministic form (P8.4, D262) -- a fresh
+ * from: `bytes` itself, or -- for valid input that is not its own deterministic form -- a fresh
  * Uint8Array holding its canonical copy (wire order kept). */
 export function scan(bytes, options = {}) { return scanInfo(bytes, options).bytes; }
 

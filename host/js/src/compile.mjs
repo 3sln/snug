@@ -1,11 +1,11 @@
-// The CDDL compiler's JS entry point: a thin loop around the generated kin
+// The CDDL compiler's JS entry point: a thin loop around the generated
 // compiler (snug.compile.main). Every decision -- syntax, semantics, limits,
-// the compile budget, the Program's bytes -- is kin's; this file owns only the
-// arena, the decimal float-literal port (D020: Number(), at most 17
-// significant digits, checked by kin) and the shape of the result.
+// the compile budget, the Program's bytes -- is the generated core's; this file owns only the
+// arena, the decimal float-literal port (Number(), at most 17
+// significant digits, checked by the core) and the shape of the result.
 //
 //   compile(text, { profile, limits, cuts, groupWords }) -> { program: Int32Array, pool: Uint8Array, rules: string[],
-//     warnings: [{ code, rule, line, column, message }] }   (format 2.0, docs/program-2.md)
+//     warnings: [{ code, rule, line, column, message }] }   (format 2.0)
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
 import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn, errorOffset,
   errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
@@ -17,7 +17,7 @@ import { sha256 } from './sha256.mjs';
 import { validateCompileOptions } from './options.mjs';
 import { controlEntries, registryWords, programControls, programArguments } from './ext.mjs';
 
-/** The snug version (kin's, so both hosts agree): in the source key and the serialisation container. */
+/** The snug version (the core's, so both hosts agree): in the source key and the serialisation container. */
 export const SNUG_VERSION = snugVersion();
 
 /** A schema the compiler refuses. `code` is a stable name (e.g. `map_overlap`); line and column are 1-based (column in code points), 0 when not about a place in the text. */
@@ -65,7 +65,7 @@ function floats(h, bytes) {
   return out;
 }
 
-/** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (docs/program.md + docs/program-2.md, format 2.0). */
+/** Compile CDDL text (a string, or its UTF-8 bytes) to a Program (format 2.0). */
 export function compile(text, opts = {}) {
   validateCompileOptions(opts);
   const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd',
@@ -156,7 +156,7 @@ function checkArguments(program, pool, entries, context) {
   }
 }
 
-/** Compile budget units the last compile() spent (benchmarks, the fuzz gate). */
+/** Compile budget units the last compile() spent (benchmarks, fuzz tests). */
 export function lastBudgetUsed() { return budgetUsed(arena); }
 
 /** The rule names of a Program, in RULES order (a rule's index is its position). */

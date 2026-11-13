@@ -1,7 +1,7 @@
-// P7.9: `snug/view` over wasm (the public entry is view.mjs; this module is internal:
-// it also mints the Views of the sequence reader's checked messages, P7.13w). The view owns a copy of the message in linear
+// `snug/view` over wasm (the public entry is view.mjs; this module is internal:
+// it also mints the Views of the sequence reader's checked messages). The view owns a copy of the message in linear
 // memory (an allocation per open view; the native default also copies) and
-// the check runs there. Every navigation step is a call into wasm (the kin
+// the check runs there. Every navigation step is a call into wasm (the core's
 // nav primitives, snug.nav.walk): kind/length/get/at/skip are fine-grained
 // calls, and scalars are read from linear memory (TextDecoder over a
 // subarray of it). Two batched calls are offered as well:
@@ -17,13 +17,13 @@
 // FinalizationRegistry, so it is held until the JS objects are collected, or
 // at once by view.release() (SDK extra).
 //
-// Profiles (D120, D123): the check runs under the view's profile flags; kinds
+// Profiles: the check runs under the view's profile flags; kinds
 // 'tagged' and 'undefined', keys of any kind (decoded by the native builder;
 // lookups encode the key with the native Writer under the view's profile, as
 // the native view does), tag/content()/isUndefined(); options through the
-// native validator (D150).
+// native validator.
 //
-// D215 / review 2026-11-04 #3 (P7.13w): View and Cursor keep their state in private
+// View and Cursor keep their state in private
 // fields and refuse construction outside this module (a brand on its private Message
 // class), so no public field or constructor reaches unchecked bytes.
 import * as rt from './runtime.mjs';
@@ -522,7 +522,7 @@ export function view(bytes, opts = {}) {
   m.unsorted = c.unsorted;
   return new View(m, 0, 0);
 }
-/** INTERNAL (D215, P7.13w): the View of message bytes the caller has just CHECKED under
+/** INTERNAL: the View of message bytes the caller has just CHECKED under
  *  `opts` -- the sequence reader, from its session's verdict -- copied into linear memory
  *  like any view's (`borrowed` is ignored: linear memory cannot borrow a JS chunk). No
  *  package entry exports this: never a public trusted opener (§16.2, V1/V2). */

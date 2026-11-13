@@ -1,4 +1,5 @@
-// @3sln/snug-wasm/compile: the native declarations plus the compiler module's controls (P9.17).
+// @3sln/snug-wasm/compile: the native declarations plus the compiler module's controls.
+import './view.js'; // View.release()
 import type { WasmSource } from './index.js';
 export * from '../../js/types/compile.js';
 /** Where the compiler module comes from (default: wasm/snug-compiler.wasm next to the SDK, or what

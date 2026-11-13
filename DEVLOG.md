@@ -8198,6 +8198,122 @@ Only x86_64 Linux is left to CI's cells.
     on cc09911 therefore stands for the shared core. D357's own gate record
     above is the P9.9 addendum for the Rust host.
 
+### D366 — The user docs describe the released library, and `bb docs-test` refuses a release whose shipped text says otherwise; maintainer records leave the npm package; fresh output buffers are `Uint8Array<ArrayBuffer>` (P9.13 WP4: API-B1, S3–S6, N1–N11; coordinator decisions 3 and 5)
+**Decision** (WP4 docs engineer, provisional):
+* **Post-release text now, and a gate.** README, guide, profiles, rust.md,
+  wasm-sdk.md, the crate README, the SDK README and CHANGELOG said "nothing
+  is published", "private", "experimental … from a checkout"; wasm-sdk.md
+  said `npm install` works. No release step rewrote them, so the release
+  would have shipped one lie or the other. They now read for the released
+  state: install commands first (`npm install @3sln/snug`,
+  `npm install @3sln/snug-wasm`, `cargo add snug-cbor`), and a building-from
+  a-checkout section second. A new gate, `docs-test`
+  (`kin/scripts/docs-test.mjs`; land and release sets, release-core shard,
+  watchdog caps 120 s / 240 s), reads the text that ships, from the
+  packages' own lists (the npm `PACKAGE_FILES` of both packages, the crate's
+  `include`, plus `docs/rust.md`), and fails on:
+  - stale release state ("not yet published", "nothing is published",
+    "until snug is on npm", "once published", "unreleased" (the placeholder
+    included), "pre-release", "package is private", `"private": true`,
+    "from a checkout only"; the changelog's `## [Unreleased]` heading is
+    allowed);
+  - internal process references in user docs, declarations and rustdoc:
+    D###, phase IDs, "kin" (not as a path), "gate", DEVLOG / SPEC /
+    architecture / program-format links (CHANGELOG keeps its documented
+    `(D###)` citations; THIRD_PARTY_NOTICES names kin as a credit);
+  - relative links to missing files and `#anchors` with no heading
+    (GitHub's slugs), which found guide.md:4's broken anchor class.
+  It self-tests its patterns on every run (stale, not stale, internal, not
+  internal, anchors).
+* **Maintainer records leave the npm package.** `docs/conformance.md` and
+  `docs/release-policy.md` are records full of decision numbers and gate
+  history, not user docs. Rewriting them would lose the record; shipping
+  them would ship the internals. They stay in the repository (now public)
+  and the user docs link them on GitHub. `PACKAGE_FILES.docs` is now guide,
+  api, profiles, profiles/bindle, cddl-support (the SDK adds wasm-sdk).
+* **Internal references stripped** from the user docs, every `.d.ts`
+  comment, the JSDoc and file headers in host/js/src and host/wasm-sdk/src,
+  and the rustdoc of host/rust/src (comment-only diffs; `//` comments
+  inside function bodies keep theirs: they never reach a user). README
+  explains the core once: "generated from one source into JavaScript and
+  Rust". Never-released history ("changed in P8.4", "before D342", "the
+  pre-release name") is gone; only current behaviour is described.
+* **From a checkout (S5).** One recipe in guide.md "Building from a
+  checkout": `npm run build` → `npm pack <dir>` → install the tarball; the
+  SDK the same after `bb wasm-release` (toolchain named); the crate via
+  `kin/scripts/rust-crate` and a path dependency (rust.md). README → guide
+  only (no circular reference). The SDK package build now stops with
+  "no wasm release modules in .cache/release/wasm; run `bb wasm-release`
+  first" instead of a raw ENOENT (and a `--wasm=DIR` variant).
+* **Types (S3, S4).**
+  - `View.release()` is declared for the wasm SDK by module augmentation
+    of the native `View` in `host/wasm-sdk/types/view.d.ts`; every SDK
+    entry's declarations import it, so a View from `/sequence` has it too.
+    The native View still has none.
+  - `encode`, `Writer.finish`, `Program.serialize` and `View.copyBytes`
+    return `Uint8Array<ArrayBuffer>` (each always returns a fresh,
+    non-shared buffer), so `new Response(encode(x))` and
+    `new Blob([encode(x)])` compile under TS 5.7+ strict with lib DOM. The
+    declared TypeScript floor is therefore 5.7 (guide, api.md).
+  - types-test adds, per package and lib config: Response/Blob from all four
+    returns; `v.release()` and `m.view.release()` on the SDK; a
+    `@ts-expect-error` that the native View has none. On the old
+    declarations it fails all four configurations (TS2345/TS2322 BodyInit /
+    BlobPart, TS2339 release).
+* **Coordinator decision 5 (docs).** `omitUndefined` stays false: guide
+  "`undefined` members and optional keys" (linked from the PEG pitfalls
+  table) and api.md show `encode({ id: 1, name: undefined })` refused by
+  `? name: tstr` as `{ ok: false, reason: 'type', path: ['name'], offset: 10 }`
+  (run on the current tree) and `omitUndefined: true` as the fix. Both say
+  prominently that `readSequence` / `sequenceReader` borrow chunks by default
+  (`copy: 'spanning'`) while `view()` copies.
+* **Coordinator decision 3 (docs) and spec F13.** profiles.md calls
+  `deterministic` an opt-in, dCBOR-style preset that refuses NaN payloads,
+  says `valid` preserves them, and says tags 5 and 33/34 are not
+  content-checked.
+* **Nits.** N2 `abnf` in api.md's option tables; N3 "standard-set tag"
+  wording (any tag the profile admits); N4 the stale TS 5.8.3 paragraph
+  (now: TS ≥ 5.7, tested on 6.0.3, both libs); N5 old package names
+  (CHANGELOG, examples/session.mjs); N6 SECURITY.md points at release
+  policy §5.2 as "how a fix is released", not as "the full policy" of a
+  proposed section; N9 the SDK size tables re-measured on this tree's
+  `bb wasm-release` modules (2026-11-13; esbuild 0.28.2 for the JS glue);
+  N10 the Workers TypeScript `declare module '*.wasm'`; N11 README's
+  `.get('id')?.number()`. N1, N7 and N8 are API changes, not docs: left
+  to the host-API owners.
+
+**Why**: a release cannot be allowed to ship text that is false either way,
+and only a check can keep the text true; internal process vocabulary is
+noise to users and dangles outside the repository.
+
+**Alternatives**: a release step that rewrites the docs at stamp time
+(text that is wrong on main until then, and untested); keeping
+conformance/release-policy shipped and exempting them (the gate would then
+pass on the most stale document); `Uint8Array` with a documented cast
+(every Workers user would write it).
+
+**Checks** (run on the rebased tree): docs-test ok, and fails on an injected
+stale phrase (record below); types-test ok, and fails on the old
+declarations; every changed example run (README JS and Rust quick starts as
+a consumer of the packed tarballs, the SDK release(), the guide's
+TypeScript, Response/Blob and Workers `*.wasm` snippets under tsc 6.0.3,
+the browser and Worker esbuild recipes, the from-checkout recipe end to end,
+a Rust path-dependency consumer); `bb gates land`; `bb gates --check`.
+
+Gate record (tree of `c3ff28a` rebased on main `96b07c9`, plus this entry):
+- `bb gates --check`: ok (gate map).
+- `bb gates land`, all 11 ok: versions, check 34 s, drift 21 s, size 11 s,
+  types-test 4 s, docs-test 0 s, npm-test 18 s (incl. the package allowlist
+  and dangling-link tests), rust-api-test 142 s, wasm-sdk-test 276 s,
+  vm-test 164 s, compile-test 48 s.
+- docs-test proof: README with "> **Status:** Nothing is published to npm
+  yet." and three CHANGELOG cites as "(D327, P9.7)" → FAIL, 4 problems
+  (exit 1); restored → ok.
+- types-test proof: on the old declarations, FAIL in all 4 configurations
+  (TS2345 BodyInit, TS2322 BlobPart; TS2339 release).
+
+- [ ] Signed off
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

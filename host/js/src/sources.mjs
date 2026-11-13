@@ -1,5 +1,5 @@
-// Sources for profile validation (P6.1 spike, D027, architecture §17): known-length
-// sessions, and (D085, at the end of this file) messages of unknown length in drain
+// Sources for profile validation: known-length
+// sessions, and (at the end of this file) messages of unknown length in drain
 // mode -- pushScanner/pushValidator with no length, streamSource, validateStream,
 // scanStream.
 //
@@ -15,7 +15,7 @@
 //   bufferHandle(bytes), asyncHandle(bytes, {delay})   an immutable in-memory handle, sync
 //                                         or genuinely async (each read resolves later)
 //
-// Schema validation over the same sources (P6.2): the resumable kin VM session
+// Schema validation over the same sources: the resumable VM session
 // (openSession, host/js/src/vm-session.mjs VmSession) driven by the same loops:
 //
 //   validateHandle(schema, handle, rule, options, opts)      handle reads may be Promises
@@ -63,7 +63,7 @@ const clamp = n => (n > I32_MAX ? I32_MAX : n);
 /** How an async driver gives the event loop back after a YIELD: scheduler.yield()
  *  where it exists (browsers), then setImmediate (Node), then a shared MessageChannel
  *  (workers, workerd), setTimeout(0) last -- browsers clamp chained timeouts to >= 4 ms
- *  (P7.7 runtime evidence: Chrome 4.77 ms a yield by setTimeout, 0.010 ms by
+ *  (measured in Chrome: 4.77 ms a yield by setTimeout, 0.010 ms by
  *  MessageChannel). Answers {kind, turn, dispose}. */
 export function pickYield(env = globalThis) {
   if (env.scheduler && typeof env.scheduler.yield === 'function') {
@@ -131,7 +131,7 @@ export class ScanSession {
     if (r !== 0) throw new SnugFault(codeName(r));
     return { state: 'done' };
   }
-  /** Release a VM-backed session's arrays now (P9.7); the resumable scanner's need no release. */
+  /** Release a VM-backed session's arrays now; the resumable scanner's need no release. */
   close() { this.vm?.close(); }
 }
 
@@ -242,8 +242,8 @@ export function scanHandleSync(handle, options = {}, opts = {}) {
   return runSync(drive(handle, options, opts), 'scanHandleSync');
 }
 
-/** Validate against schema's rule through a handle whose read may return a Promise
- *  (P6.2). Resolves Schema.validate's result, or rejects with SourceError. */
+/** Validate against schema's rule through a handle whose read may return a Promise.
+ * Resolves Schema.validate's result, or rejects with SourceError. */
 export async function validateHandle(schema, handle, rule, options = {}, opts = {}) {
   validateOptions(options, 'validation');
   validateOptions(opts, 'source');
@@ -271,7 +271,7 @@ export function pushScanner(length, options = {}, scheduling = {}) {
   return pushSession(session, length, want => session.vm ? want.keep : Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
 }
 
-/** Bytes pushed in order for schema validation of a message of a DECLARED length (P6.2):
+/** Bytes pushed in order for schema validation of a message of a DECLARED length:
  *  feed / resume as pushScanner's; finalize() answers Schema.validate's result. It holds
  *  only the bytes from the session's `keep` on. */
 export function pushValidator(schema, length, rule, options = {}, scheduling = {}) {
@@ -378,7 +378,7 @@ function pushUnknown(session, scheduling, settle) {
       return run();
     },
     resume() { return result ? { state: 'done', result } : run(); },
-    /** Abandon the message: release its session now (P9.7); feeding it afterwards throws. */
+    /** Abandon the message: release its session now; feeding it afterwards throws. */
     close() { session.close?.(); },
     /** The end of the message (EOF): settles every pending check; answers the result. */
     finalize() {
@@ -392,7 +392,7 @@ function pushUnknown(session, scheduling, settle) {
   });
 }
 
-/** P9.7: an exception out of a push source ends it: its session is released (else it would hold its
+/** An exception out of a push source ends it: its session is released (else it would hold its
  *  live slot until collected). */
 function guarded(session, api) {
   for (const k of ['feed', 'resume', 'finalize']) {
@@ -430,7 +430,7 @@ async function drainSource(push, source) {
   return push.finalize();
 }
 
-/** Validate a message of unknown length from a stream against schema's rule (D085).
+/** Validate a message of unknown length from a stream against schema's rule.
  *  opts: { quantum, failFast }. Resolves Schema.validate's result. */
 export async function validateStream(schema, source, rule, options = {}, opts = {}) {
   validateOptions(options, 'validation');
@@ -438,7 +438,7 @@ export async function validateStream(schema, source, rule, options = {}, opts = 
   return drainSource(pushValidator(schema, undefined, rule, options, opts), source);
 }
 
-/** Profile-check a message of unknown length from a stream (D085). Resolves true or
+/** Profile-check a message of unknown length from a stream. Resolves true or
  *  rejects with SnugFault (the scanner's code) / SourceError. */
 export async function scanStream(source, options = {}, opts = {}) {
   validateOptions(options, 'decode');
@@ -493,7 +493,7 @@ function pushSession(session, length, keepOf) {
       return run();
     },
     resume() { return finished ? want : run(); },
-    /** Abandon the message: release its session now (P9.7); feeding it afterwards throws. */
+    /** Abandon the message: release its session now; feeding it afterwards throws. */
     close() { session.close?.(); },
     finalize() {
       if (delivered !== length) throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`);

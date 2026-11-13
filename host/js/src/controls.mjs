@@ -1,6 +1,6 @@
-// snug/controls: the generic extension controls (D142) as registry entries for
+// snug/controls: the generic extension controls as registry entries for
 // compile({ controls }) and fromSerialized(bytes, { controls }). Their verdicts
-// AND their budget charges are kin's (snug.vm.controls, D190-D192), so every
+// AND their budget charges are the generated core's (snug.vm.controls), so every
 // host agrees: each run meters its own work against the budget that remains
 // and stops with `budget` before passing it. Arguments are prepared once per
 // EXT leaf when a Program is bound, never per item.

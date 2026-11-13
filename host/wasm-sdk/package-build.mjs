@@ -82,10 +82,14 @@ function replaceOnce(text, from, to, where) {
 export function buildPackage(destination = DEFAULT_DEST, { wasm } = {}) {
   const target = resolve(destination);
   if (!target.startsWith(join(ROOT, '.cache') + '/')) throw new Error('snug-wasm package: the destination must be under the repository\'s .cache/');
+  const releaseDir = resolve(wasm ?? join(ROOT, '.cache/release/wasm'));
+  if (!existsSync(join(releaseDir, 'MANIFEST.json')))
+    throw new Error(`snug-wasm package: no wasm release modules in ${relative(ROOT, releaseDir) || releaseDir}; ` +
+      (wasm ? 'stage them with `bb wasm-release <dir>` and pass that directory' : 'run `bb wasm-release` first (it needs the pinned nightly toolchain and wasm-opt)'));
   if (target === DEFAULT_DEST) rmSync(target, { recursive: true, force: true });
   mkdirSync(dirname(target), { recursive: true });
   mkdirSync(target);   // EEXIST for an existing non-default destination: never overwritten
-  const release = readRelease(wasm ?? join(ROOT, '.cache/release/wasm'));
+  const release = readRelease(releaseDir);
   const pkg = JSON.parse(readFileSync(join(SDK, 'package.json'), 'utf8'));
 
   // code: the closure of every exported module, rewritten to the staged layout

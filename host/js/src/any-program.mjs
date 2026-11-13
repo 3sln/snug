@@ -1,7 +1,7 @@
 // `r = any` compiled with the largest limits (depth 256, input 2^31-1, 2^24 entries
 // and items, budget 2^31-1): the VM against it gives the scanner's code, offset and
 // items on every input (bb vm-test's profile identity), so an unknown-length
-// pushScanner/scanStream (D085) runs it as a drain-mode session. Checked against the
+// pushScanner/scanStream runs it as a drain-mode session. Checked against the
 // compiler by host/js/test/stream.test.mjs.
 export const ANY_P = Int32Array.of(1735749235, 2, 64, 90, 1, 0, 0, -1153793131, -1965254075, -798592316, 844469009, -714685243, 702268175, 1552891410,
   1286639795, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
