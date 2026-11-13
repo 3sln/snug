@@ -122,6 +122,8 @@ jobs:
           - { gate: npm-test,      label: Node 22,   node: '22',     rust: none, oldest-env: '',  timeout: 45 }
           - { gate: npm-test,      label: Node 24,   node: '24',     rust: none, oldest-env: '',  timeout: 45 }
           - { gate: rust-api-test, label: Rust 1.87, node: '24.6.0', rust: msrv, oldest-env: '',  timeout: 35 }
+          # required, not allowed to fail: red until D357 (Rust 1.98.1 overflows the test-thread
+          # stack in public_api's named_compile_limits_runtime_caps_and_depth_ceiling) lands
           - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '', timeout: 35 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
