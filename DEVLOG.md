@@ -8578,7 +8578,9 @@ Depth stays capped at 256, and counts below 2³¹ − 1, as
 **Breaking (pre-release):** it is recorded in CHANGELOG → Breaking.
 docs/rust.md and the crate README show the new shape. Every test host and
 example is updated.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). WP2 is merged at 3f8f65c, and
+  my re-run on the merged main gave `bb gates land runtime`, all 12 ok.
+  WP1's new Rust fields move onto this shape when WP1 rebases.
 
 ### D361 — The generated modules leave the Rust API (`snug::generated`, hidden); `schema::Session` is internal (P9.13 API-S1/S2, CODE-S8; coordinator decision 6)
 **Decision** (coordinator decision 6, 2026-11-13; implemented by the WP2
@@ -8603,7 +8605,13 @@ engineer).
   - `sessions.rs`'s module doc no longer names it.
 
 **Breaking (pre-release):** recorded in CHANGELOG.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). WP2 is merged at 3f8f65c, and
+  `bb gates land runtime` passed on the merged main.
+  - Accepted deviation from the brief: the SEC-F2 `maxDepth > 256`
+    TypeError applies to codec options only. A schema's per-call depth can
+    only lower its compiled depth, which the compiler already caps at 256,
+    so a blanket cap broke an existing sequence-test case. Rust matches.
+  - Post-RC nits list: CODE N4, N5, N6, N8 and S4.
 
 ## Findings
 
