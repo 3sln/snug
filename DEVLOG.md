@@ -7590,6 +7590,55 @@ offset rule other than §9.2 rule 7 (the bug was the mapping, not the rule).
   decision is needed. Merged at `e792757`. On main: drift ok, no conflict
   markers.
 
+### D354 — The wasm compiler module back under its D341 caps by a fmt cut in `cc_warnings`; no cap raise (P9.17 follow-up; D341, D342)
+**Decision** (P9.17 engineer, at the manager's request; the coordinator
+approved the cut, not a raise). On main `e94575c`, `bb wasm-size` failed:
+the compiler module (`kin/scripts/wasm-build cc`) was 153,725 B / 70,170
+gzip, 99 B over D341's 70,071 gzip cap. `cc_warnings` (host/wasm/src/cc.rs,
+P9.16) used `format!` for a `\u00XX` escape and for line and column. That
+pulled `core::fmt`'s integer and hex formatting into the module. Both calls
+are replaced with a hex table and a hand-written decimal writer. The JSON
+output is unchanged. `tools/size/budget.json` is unchanged.
+
+| compiler module | bytes | gzip (zlib 9) |
+| --- | ---: | ---: |
+| D341 baseline `605ae67` | 151,007 | 68,697 |
+| main `e94575c`, before the cut | 153,725 | 70,170 (cap 70,071) |
+| after the cut | 152,505 | 69,458 |
+
+* The cut saves 1,220 B / 712 gzip. Growth since the D341 baseline is now
+  +1,498 B / +761 gzip, under the 1 KB rule of thumb. The module is within
+  both D341 caps (152,505 of 154,028; 69,458 of 70,071). The SDK runtime
+  module is untouched (325,406 / 132,056).
+* **`core::fmt` symbols** (an unstripped build, `CARGO_PROFILE_SIZE_STRIP=false`,
+  read with `wasm-opt --print-function-map`): 12 before, 5 after (414 → 407
+  functions). The 7 that go include `alloc::fmt::format`, `LowerHex`, the
+  integer `Display`, `Formatter::padding` and `PostPadding::write`. The 5
+  that remain are `String`'s `Display` and `fmt::Write` impls. They are
+  probably reached from host/rust/src/compile.rs's
+  `format!("{name} argument: {d}")`, which predates the baseline.
+* **Where the growth since D341 came from**, measured at each first-parent
+  merge (bytes / gzip):
+
+| merge | change | module | growth |
+| --- | --- | ---: | ---: |
+| `605ae67` | D341 baseline | 151,007 / 68,697 | |
+| `fd63a81` | P9.16 bugs (D342) | 151,007 / 68,697 | 0 |
+| `1396531` | **P9.16 API (D342)**: the `cc_warnings` export | 153,493 / 70,097 | **+2,486 / +1,400** |
+| `c299fab` | P9.15 rework (D343): the version from `version.edn` | 153,525 / 70,115 | +32 / +18 |
+| `3e0b613`, `f596d2d` | D348, D351 | 153,525 / 70,115 | 0 |
+| `4d5d200` | D349: only reachable CALLs mark targets (gen/rust/snug/compile/peg.rs) | 153,725 / 70,170 | +200 / +55 |
+| `e792757` | D350 | 153,725 / 70,170 | 0 |
+
+  D333, D336 and D340 predate the baseline.
+
+**Why:** the growth was mostly formatting machinery, not behaviour. Cutting
+it keeps D341's caps, which was the gate's purpose.
+**Alternatives:** raising the gzip cap to ceil(70,170 × 1.02) = 71,574 was
+the first draft. It was superseded by this cut and never landed (the
+patch is kept as `.cache/p917-b-d354-budget-devlog.patch.superseded`).
+- [ ] **Signed off**
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -10817,6 +10866,15 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - **wrangler 4.56's `deploy --dry-run` bundles offline.** It needs no
     login and keeps `.wasm` imports from a package's `exports` as
     module bindings, so its output can be served by a bare workerd.
+  *Follow-up 2026-11-13 (P9.9 findings, manager):*
+  - The compiler module had gone over its gzip cap. It is back under by
+    D354's fmt cut in `cc_warnings`, with no cap raise.
+  - The Node 20 harness is held for the owner, with the patch at
+    `.cache/p917-a-node20-harness.patch`. In it, the SDK package test's
+    declaration parse falls back on host/js/test/oracle.mjs, and
+    `bb node-oldest` also runs host/wasm-sdk/test/package-run on Node 20.
+    Run from a scratch worktree, `bb gates node-oldest` passed on Node
+    20.20.2, including the consumer smoke.
 - [x] **P9.18 — Minimum supported toolchains** (O7). Find the oldest Node
   (try 18, 20 and 22) and the oldest stable Rust (bisect) that pass the
   gates today. Add gates on exactly those toolchains and set `engines` and
