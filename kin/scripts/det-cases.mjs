@@ -63,6 +63,22 @@ export function buildDetCases(MUTATIONS, SEED, { valid = false } = {}) {
     ...['a:', 'a+b-c.d:', '1a:b', 'a:b%4', 'a:b%41%42', 'a:%7e', 'a:\u00e9', 'a:b c', 'A:B', 'a:b?#', 'a:b?c#d?e', 'a:[b]', 'a:b#[', 'a:"']
       .map(s => ['d820' + tstrHex(s), DDEF]),
   ];
+  // D353 (P9.9): float-equivalent keys (0.0 / -0.0 in every width, NaN encodings) inside a tag-24 payload,
+  // followed by a later refusal in the payload or after it, under the valid presets: the payload's deferred
+  // duplicate check comes first in stream order on every route (its copy's check ran only after a clean walk)
+  if (valid) {
+    const ZEROS = ['f90000', 'f98000', 'fa00000000', 'fa80000000', 'fb0000000000000000', 'fb8000000000000000'];
+    const NANS = ['f97e00', 'fa7fc00000', 'fb7ff8000000000000'];
+    const pairs = [['f90000', 'f98000'], ['f98000', 'fb0000000000000000'], ['fa80000000', 'f90000'], ['f97e00', 'fb7ff8000000000000'], ['fa7fc00000', 'f97e00']];
+    const LATER = ['ff', 'd842420000', 'd84243000000', '1c', '18', '5f41', 'f818'];
+    for (const [k1, k2] of pairs) for (const later of LATER) for (const flags of [PF_DET | 256, PF_STD | 256]) {
+      const map = 'a2' + k1 + 'f6' + k2 + 'f6';
+      for (const payload of ['82' + map + later, '83' + map + '01' + later, 'a1' + '6161' + map + later])
+        fixed.push([t24(payload), { ...DDEF, flags }], ['82' + t24(payload) + '00', { ...DDEF, flags }]);
+      fixed.push(['82' + t24(map) + later, { ...DDEF, flags }]);
+    }
+    for (const z of [...ZEROS, ...NANS]) fixed.push([t24('82a2' + z + 'f6' + z + 'f6ff'), { ...DDEF, flags: 378 }]);
+  }
   for (const [h, opt] of fixed) add(`detfixed ${h.slice(0, 40)}${h.length > 40 ? '…' : ''} f${opt.flags}`, unhex(h), opt, undefined);
   const nFixed = cases.length - nVectors;
 
