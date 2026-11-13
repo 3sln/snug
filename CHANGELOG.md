@@ -206,6 +206,12 @@ These matter only to users of pre-release builds from this repository.
 - `[js]` `view(bytes, { schema, rule })` with a Schema from `snug/compile`
   or `snug/schema` reads valid, non-deterministic input through its
   canonical copy; it threw `navigation failed` (D351).
+- `[rust]` `decode`, `Schema::decode`, `View::value` and `encode`/`Writer`
+  build and walk value trees iteratively. In a debug build on Rust 1.98, the
+  recursive versions overflowed a 2 MiB thread at the 256-level depth
+  ceiling (about 8.8 KB per level). Every depth path now fits a 2 MiB thread
+  at the ceilings, in debug and release, on Rust 1.87 and later; the limits
+  are unchanged (D357).
 
 ### Security
 

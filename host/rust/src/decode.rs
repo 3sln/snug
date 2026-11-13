@@ -302,7 +302,7 @@ pub fn decode(bytes: &[u8], options: &DecodeOptions) -> Result<Value, Error> {
 
 pub(crate) fn build(bytes: &[u8]) -> Result<Value, Error> {
     let mut b = Builder { bytes, at: 0 };
-    let v = b.value(0)?;
+    let v = b.value()?;
     if b.at != bytes.len() {
         return Err(Error::Internal);
     }
@@ -352,11 +352,68 @@ impl<'a> Builder<'a> {
             _ => Err(Error::Internal),
         }
     }
-    fn value(&mut self, depth: usize) -> Result<Value, Error> {
-        if depth > 258 {
-            return Err(Error::Internal);
+    /// D357: the value tree is built ITERATIVELY, with the open containers and tags
+    /// on a heap stack, so the native stack does not grow with the input's depth
+    /// (the recursive builder needed about 8.8 KB per level in a debug build on
+    /// Rust 1.98, and overflowed a 2 MiB thread at the 256-level ceiling).
+    fn value(&mut self) -> Result<Value, Error> {
+        let mut stack: Vec<Open> = Vec::new();
+        loop {
+            // the checked input's depth is at most 256 (+ tag/embedded slack)
+            if stack.len() > 258 {
+                return Err(Error::Internal);
+            }
+            let (major, ai, n) = self.head()?;
+            let mut done = match major {
+                4 if n > 0 => {
+                    stack.push(Open::Array(Vec::new(), n));
+                    None
+                }
+                5 if n > 0 => {
+                    stack.push(Open::Map(Vec::new(), None, n));
+                    None
+                }
+                6 => {
+                    stack.push(Open::Tag(n));
+                    None
+                }
+                _ => Some(self.leaf(major, ai, n)?),
+            };
+            while let Some(v) = done.take() {
+                match stack.last_mut() {
+                    None => return Ok(v),
+                    Some(Open::Array(a, left)) => {
+                        a.push(v);
+                        *left -= 1;
+                        if *left == 0 {
+                            if let Some(Open::Array(a, _)) = stack.pop() {
+                                done = Some(Value::Array(a));
+                            }
+                        }
+                    }
+                    Some(Open::Map(a, key, left)) => match key.take() {
+                        None => *key = Some(v),
+                        Some(k) => {
+                            a.push((k, v));
+                            *left -= 1;
+                            if *left == 0 {
+                                if let Some(Open::Map(a, _, _)) = stack.pop() {
+                                    done = Some(Value::Map(a));
+                                }
+                            }
+                        }
+                    },
+                    Some(Open::Tag(n)) => {
+                        let n = *n;
+                        stack.pop();
+                        done = Some(Self::tagged(n, v)?);
+                    }
+                }
+            }
         }
-        let (major, ai, n) = self.head()?;
+    }
+    /// A scalar, or an empty array or map (major 4/5 with no entries).
+    fn leaf(&mut self, major: u8, ai: u8, n: u64) -> Result<Value, Error> {
         Ok(match major {
             0 => Value::Uint(n),
             1 => Value::Nint(n),
@@ -373,22 +430,25 @@ impl<'a> Builder<'a> {
                     )
                 }
             }
-            4 => {
-                let mut a = Vec::new();
-                for _ in 0..n {
-                    a.push(self.value(depth + 1)?);
-                }
-                Value::Array(a)
-            }
-            5 => {
-                let mut a = Vec::new();
-                for _ in 0..n {
-                    a.push((self.value(depth + 1)?, self.value(depth + 1)?));
-                }
-                Value::Map(a)
-            }
-            6 => {
-                let v = self.value(depth + 1)?;
+            4 => Value::Array(Vec::new()),
+            5 => Value::Map(Vec::new()),
+            7 => match ai {
+                20 => Value::Bool(false),
+                21 => Value::Bool(true),
+                22 => Value::Null,
+                23 => Value::Undefined,
+                0..=19 | 24 => Value::Simple(n as u8),
+                25 => Value::Float(half(n as u16)),
+                26 => Value::Float(f32::from_bits(n as u32) as f64),
+                27 => Value::Float(f64::from_bits(n)),
+                _ => return Err(Error::Internal),
+            },
+            _ => return Err(Error::Internal),
+        })
+    }
+    /// A tag's value from its number and its built content.
+    fn tagged(n: u64, v: Value) -> Result<Value, Error> {
+        Ok(
                 match (n, v) {
                     (2 | 3, Value::Bytes(magnitude)) => Value::BigInt {
                         negative: n == 3,
@@ -428,22 +488,16 @@ impl<'a> Builder<'a> {
                         Value::TypedArray(typed(n, &b)?)
                     }
                     (_, v) => Value::Tag(n, Box::new(v)),
-                }
-            }
-            7 => match ai {
-                20 => Value::Bool(false),
-                21 => Value::Bool(true),
-                22 => Value::Null,
-                23 => Value::Undefined,
-                0..=19 | 24 => Value::Simple(n as u8),
-                25 => Value::Float(half(n as u16)),
-                26 => Value::Float(f32::from_bits(n as u32) as f64),
-                27 => Value::Float(f64::from_bits(n)),
-                _ => return Err(Error::Internal),
-            },
-            _ => return Err(Error::Internal),
-        })
+                },
+        )
     }
+}
+/// An open container or tag of the iterative builder: its entries so far and
+/// how many are left (a map's pending key), or the tag number.
+enum Open {
+    Array(Vec<Value>, u64),
+    Map(Vec<(Value, Value)>, Option<Value>, u64),
+    Tag(u64),
 }
 fn decimal_ok(a: &[Value]) -> bool {
     // exponent -1024..-1; mantissa an integer or bignum, non-zero, not divisible by 10

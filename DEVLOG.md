@@ -8014,6 +8014,81 @@ Babashka 1.3.190, nvm Node, `env -i`):
     run on a hosted runner.
 - [ ] **Signed off** (manager)
 
+### D357 — Rust value trees are built and written iteratively: every depth path fits a 2 MiB thread at the ceilings, debug and release, Rust ≥ 1.87; limits unchanged (CI finding)
+**Decision** (P8.5 VM engineer, provisional; the coordinator's guarantee):
+* **The finding.** On Rust 1.98.1, `rust-api-test`'s
+  `named_compile_limits_runtime_caps_and_depth_ceiling` overflowed its
+  thread in the debug build. That thread is the test harness's, at 2 MiB.
+  The test decodes and encodes 256 nested arrays, the depth ceiling.
+* **What overflowed.** Per-level stack, the slope between depth 128 and
+  256 (scratch `stackprobe`, each path on a thread of a set stack size):
+  - The host's recursive value builder (`decode.rs` `Builder::value`) used
+    6,912 B per level in debug on 1.87 and 1.92, and 8,832 on 1.98.1. At
+    256 levels that is about 1.77 MB, then 2.25 MB, over 2 MiB.
+  - The recursive writer (`encode.rs` `Output::value`) used 4,992 B, then
+    6,272 B, per level in debug.
+  - In release builds they used 640–768 B and 384 B per level.
+
+  The newer toolchain's debug frames are larger, so a margin that was
+  already thin became an overflow. The verifier is not input-depth
+  recursive, so it is not on this list.
+* **The fix: iteration, not a lower ceiling, a thread or a budget.**
+  - `Builder::value` keeps its open arrays, maps and tags on a heap stack.
+    A tag's post-processing (bignum, decimal, ndarray, typed array) runs
+    when its content completes.
+  - `Output::value`, which `encode` and the `Writer` share, walks with a
+    heap stack of slice iterators. A map keeps its pair offsets and bignum
+    notes in its frame and sorts at its end, as before. A tag's or
+    ndarray's content is taken next.
+
+  The output bytes, the errors, the depth checks and every limit are
+  unchanged: the full gates and the codec differentials pass. No documented
+  default or ceiling changes. Iteration removes both the toolchain
+  dependence and the frame-size cliff. It needs no dependency (no stacker)
+  and no thread spawn per call, which would cost every call and need a
+  thread to run borrowed input on. A lower ceiling would be a documented-limit change
+  for a host-side defect.
+* **What still recurses, bounded by the limits.**
+  - The generated kin scanner: 384 B per level in debug.
+  - The VM, live at every level: about 1.4–1.5 KB in debug, 640 B in
+    release.
+  - The compiler's parser: 512 B per bracket in debug.
+
+  At the ceilings the worst case is about 380 KB, the VM in debug at depth
+  256, well under 2 MiB on every toolchain measured.
+* **`Value`'s Drop stays derived.** Measured at 256 B per level in debug,
+  and below resolution in release. Decoded trees are bounded by the 256
+  ceiling (about 64 KB). An explicit `Drop` impl on the public enum would
+  stop callers destructuring a `Value` by move (E0509), an API break for no
+  gain within the limits. `docs/rust.md` documents that trees a caller builds
+  deeper than the ceiling (which `encode` refuses) drop, clone, compare and
+  print recursively, with the bytes per level.
+* **JS and the wasm SDK.**
+  - JS at the ceilings (decode, encode, view, validation live at every
+    level, compile at nesting 256) passes under node's default stack.
+  - Under a constrained `--stack-size`, the JS host throws a catchable
+    `RangeError` and keeps working afterwards. It does not crash.
+  - The wasm SDK (release modules) passes the same paths at depth 256 and
+    nesting 256, and the next level is a clean refusal.
+
+**Tests**: a new `host/rust/tests/stack.rs`, run in debug and (new in
+`rust-api-test`) release. Each case runs on a 2 MiB thread.
+- **Input depth**, at the default (32) and the ceiling (256):
+  - nested arrays, maps and tags;
+  - decode, then encode back to the same bytes;
+  - the next level refused;
+  - Document and View open, a cursor walk and `View::value`;
+  - validate against `any` and against a schema live at every level;
+  - `Schema::decode` and the `max_depth` refusal;
+  - a caller-built tree encoded and dropped.
+- **Schema nesting**, at the default (64) and the ceiling (256): brackets,
+  maps, `[*`, parentheses and double brackets, each at the deepest that
+  compiles (the next level is `limit_nesting`), validated.
+
+The test overflows on the old code (stable, debug). It passes on 1.87, 1.92
+and 1.98.1, in debug and release.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

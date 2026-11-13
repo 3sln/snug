@@ -30,6 +30,8 @@ export SNUG_ASYNC_FULL
 echo "rust-api-test: async differential $( [ "$mode" = full ] && echo 'at full scale' || echo 'on the default slice (full: bb rust-api-test full)')"
 kin/scripts/rust-crate .cache/snug-rs
 cargo test --offline --manifest-path .cache/snug-rs/Cargo.toml
+# D357: the 2 MiB-thread depth tests in a release build too (debug ran above)
+cargo test --offline --release --manifest-path .cache/snug-rs/Cargo.toml --test stack
 cat .cache/snug-rs/async-sources-blob.txt .cache/snug-rs/async-sources-reader.txt .cache/snug-rs/async-sources-sequence.txt
 cargo build --offline --manifest-path .cache/snug-rs/Cargo.toml --lib
 rustdoc --test --edition 2021 docs/rust.md --extern snug=.cache/snug-rs/target/debug/libsnug.rlib -L dependency=.cache/snug-rs/target/debug/deps
