@@ -17,6 +17,10 @@
 //   --gates=a,b         only these gates
 //   --out=DIR           findings directory (default tools/proptest/findings)
 //   --replay=P:SEED:IDX re-run one case and print its inputs and failures
+//   --seed-offset=N     where each worker starts in its share of --seeds (default: from HEAD and the UTC
+//                       date, or 0 with an explicit --seeds); logged with the flags that replay the run
+//   --inject-exit=P     self-check: property P's workers exit at once, so the campaign must record P<P>/worker-exit
+//                       (and P<P>/no-cases) and exit 1
 //   --inject=P          self-check: property P reports one seeded known-bad result (signature P<P>/injected),
 //                       so the campaign must exit 1 (tools/proptest/campaign.test.mjs)
 //
@@ -47,12 +51,13 @@ import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('proptest', import.meta.url);   // P9.1 caps (a long campaign: --gate-wall= / --gate-cpu=)
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a); if (!m) throw new Error(`bad argument ${a}`); return [m[1], m[2] ?? 'true']; }));
-const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject', 'inject-slow'];
+const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject', 'inject-slow', 'inject-exit', 'seed-offset'];
 for (const k of Object.keys(args)) if (!known.includes(k)) throw new Error(`unknown option --${k}`);
 if (args['inject-slow'] !== undefined && !/^(?:validate-)?(?:wall|cpu)$/.test(args['inject-slow'])) throw new Error(`--inject-slow is wall, cpu, validate-wall or validate-cpu, not ${JSON.stringify(args['inject-slow'])}`);
 const minutes = Number(args.minutes ?? 10);
 if (args.tree && !['head', 'working'].includes(args.tree)) throw new Error('--tree is head or working');
 const [seedLo, seedHi] = (args.seeds ?? '1..1000000').split('..').map(Number);
+if (!(Number.isSafeInteger(seedLo) && Number.isSafeInteger(seedHi) && seedLo <= seedHi)) throw new Error('--seeds is A..B with A <= B');
 const casesPerSeed = Number(args['cases-per-seed'] ?? 250);
 const props = (args.props ?? '1,2,3,4,5,6').split(',').map(Number);
 const workersPer = { 1: 2, 2: 1, 3: 1, 4: 1, 5: 2, ...Object.fromEntries((args.workers ?? '').split(',').filter(Boolean).map(x => x.split(':').map(Number))) };
@@ -86,6 +91,18 @@ function describeInputs(inputs, describe) {
   return walk(inputs);
 }
 
+// ------------------------------------------------------------------ self-test
+// P9.13 WP3 (S9): the gate first proves its own failure paths (campaign.test.mjs: an injected
+// finding, a worker that exits, a property that ran no case, slow compiles); the self-test's own
+// campaign runs set SNUG_PROPTEST_SELFTEST=0. A replay or a self-check run skips it.
+if (!args['in-snapshot'] && !args.replay && args.inject === undefined && args['inject-slow'] === undefined && args['inject-exit'] === undefined
+    && process.env.SNUG_PROPTEST_SELFTEST !== '0') {
+  const { spawnSync } = await import('node:child_process');
+  const t = spawnSync(process.execPath, ['--test', join(repo, 'tools/proptest/campaign.test.mjs')], { stdio: 'inherit', env: { ...process.env, SNUG_PROPTEST_SELFTEST: '0' } });
+  if (t.status !== 0) { console.log('  FAIL proptest: its self-test (tools/proptest/campaign.test.mjs) failed'); process.exit(1); }
+  console.log('  ok   proptest self-test (tools/proptest/campaign.test.mjs)');
+}
+
 // ------------------------------------------------------------------ snapshot
 if ((args.tree ?? 'head') === 'head' && !args['in-snapshot']) {
   const { spawnSync } = await import('node:child_process');
@@ -107,6 +124,14 @@ const head = args['snapshot-of'] ?? execFileSync('git', ['-C', repo, 'rev-parse'
 const dirty = args['in-snapshot'] ? [] : execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'kin', 'gen', 'host', 'corpus', 'bench/baseline']).toString().trim().split('\n').filter(Boolean);
 // recorded paths are repository-relative (.cache/proptest/...), never this machine's absolute ones
 const shown = p => p && p.replace(/^.*?(?=\.cache\/proptest\/)/, '');
+// P9.13 WP3 (S9): the campaign starts at a different place in the seed range each day and
+// commit (an offset from HEAD and the UTC date), logged with the flags that replay it; an
+// explicit --seeds starts at its start unless --seed-offset is given too.
+const today = started.toISOString().slice(0, 10);
+const seedOffset = args['seed-offset'] !== undefined ? Number(args['seed-offset'])
+  : args.seeds !== undefined ? 0
+  : parseInt((await import('node:crypto')).createHash('sha256').update(`${head} ${today}`).digest('hex').slice(0, 12), 16) % (seedHi - seedLo + 1);
+if (!Number.isSafeInteger(seedOffset) || seedOffset < 0) throw new Error('--seed-offset is a non-negative integer');
 const treeDescription = args['in-snapshot'] ? `git archive of HEAD ${head} (+ working tools/proptest) in a scratch snapshot` : 'the working checkout';
 mkdirSync(outDir, { recursive: true });
 for (const f of readdirSync(outDir)) if (/^P\d.*\.json$|^summary\.json$/.test(f)) rmSync(join(outDir, f));
@@ -115,6 +140,7 @@ mkdirSync(logDir, { recursive: true });
 const triage = existsSync(join(outDir, 'triage.json')) ? JSON.parse(readFileSync(join(outDir, 'triage.json'), 'utf8')) : {};
 const log = m => { const line = `[${((Date.now() - started) / 1000).toFixed(0)}s] ${m}`; console.log(line); try { writeFileSync(join(logDir, 'campaign.log'), line + '\n', { flag: 'a' }); } catch { /* ignore */ } };
 log(`tree under test: ${treeDescription}`);
+log(`seed offset ${seedOffset}${args['seed-offset'] === undefined && args.seeds === undefined ? ` (from HEAD ${head.slice(0, 12)} and ${today})` : ''}; replay this run with --seeds=${seedLo}..${seedHi} --seed-offset=${seedOffset}`);
 log(`P4.2 campaign: ${minutes} min, seeds ${seedLo}..${seedHi}, ${casesPerSeed} cases/seed, properties ${props.join(',')}, timeout ${timeoutMs} ms; HEAD ${head}${dirty.length ? `; uncommitted under kin/gen/host/corpus: ${dirty.length} paths (--tree=working: they are under test)` : ''}`);
 
 const sigs = new Map();   // sig -> {count, examples: []}
@@ -148,10 +174,10 @@ async function startProp(p) {
   for (let w = 0; w < n; w++) {
     const lo = seedLo + w * span, hi = w === n - 1 ? seedHi : lo + span - 1;
     jobs.push(new Promise(resolve => {
-      let cur = { seed: lo, index: 0 };
+      let cur = { seed: lo + (seedOffset % (hi - lo + 1)), index: 0 };
       const spawnWorker = () => {
         const hb = new SharedArrayBuffer(12), beat = new Int32Array(hb);
-        const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { prop: p, seeds: [lo, hi], seed: cur.seed, index: cur.index, casesPerSeed, deadline, hb, maxShrinkPerSig: 2, inject: args.inject === undefined ? undefined : Number(args.inject), injectSlow: p === 5 ? args['inject-slow'] : undefined }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
+        const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { prop: p, seeds: [lo, hi], seed: cur.seed, index: cur.index, casesPerSeed, deadline, hb, maxShrinkPerSig: 2, inject: args.inject === undefined ? undefined : Number(args.inject), injectSlow: p === 5 ? args['inject-slow'] : undefined, injectExit: args['inject-exit'] === undefined ? undefined : Number(args['inject-exit']) }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
         let finished = false, seen = '', since = Date.now();
         const watch = setInterval(() => {
           const s = Atomics.load(beat, 0), i = Atomics.load(beat, 1), on = Atomics.load(beat, 2);
@@ -181,7 +207,12 @@ async function startProp(p) {
           cur = next(s, i, lo, hi);
           if (Date.now() < deadline) spawnWorker(); else resolve();
         });
-        worker.on('exit', () => { if (!finished) { finished = true; clearInterval(watch); if (Date.now() < deadline) { cur = next(Atomics.load(beat, 0), Atomics.load(beat, 1), lo, hi); spawnWorker(); } else resolve(); } });
+        // P9.13 WP3 (S1): a worker that exits without reporting 'done' is a finding, then replaced
+        worker.on('exit', code => { if (!finished) { finished = true; clearInterval(watch);
+          const s = Atomics.load(beat, 0), i = Atomics.load(beat, 1);
+          perProp[p].crashes++;
+          record({ sig: `P${p}/worker-exit`, prop: p, seed: s, index: i, cls: 'worker-exit', detail: `the worker exited (code ${code}) before reporting done` });
+          if (Date.now() < deadline) { cur = next(Atomics.load(beat, 0), Atomics.load(beat, 1), lo, hi); spawnWorker(); } else resolve(); } });
       };
       spawnWorker();
     }));
@@ -196,13 +227,16 @@ if (props.includes(6)) {
   running.push((async () => {
     tree = prepareTree('working');
     log(`gates in ${tree.describe}`);
-    gateResults = await runGates({ tree, scale: Number(args['gate-scale'] ?? 10), seedBase: seedLo * 1000 + 1, budgetMs, logDir: join(logDir, 'gates'),
+    gateResults = await runGates({ tree, scale: Number(args['gate-scale'] ?? 10), seedBase: (seedLo + seedOffset) * 1000 + 1, budgetMs, logDir: join(logDir, 'gates'),
       only: args.gates?.split(','), onResult: r => (gateCount++, r.exit !== 0 && record({ sig: `P6/${r.gate}`, prop: 6, seed: r.seed, index: r.round, cls: 'gate-failed', detail: `${r.gate} ${r.args.join(' ')} exited ${r.exit}${r.signal ? ' ' + r.signal : ''}`, actual: { fails: r.fails, context: r.context }, repro: { gate: r.gate, args: r.args, log: shown(r.log) } }), log(`gate ${r.gate} round ${r.round} seed ${r.seed} args [${r.args.join(' ')}]: exit ${r.exit} in ${(r.ms / 1000).toFixed(0)} s${r.fails.length ? ' -- ' + r.fails[0].trim() : ''}`)) });
   })());
 }
 const progress = setInterval(() => log(Object.entries(perProp).map(([p, x]) => `P${p} ${x.stats.cases ?? 0} cases/${x.failures} failures`).join(', ') + ` | ${sigs.size} signatures | gate runs ${gateCount}`), 60_000);
 await Promise.all(running);
 clearInterval(progress);
+// P9.13 WP3 (S1): a requested property that ran no case did not test anything
+for (const p of props.filter(p => p <= 5)) if (!(perProp[p].stats.cases > 0))
+  record({ sig: `P${p}/no-cases`, prop: p, cls: 'no-cases', detail: `property ${p} was requested and ran 0 cases in ${minutes} min` });
 tree?.cleanup?.();
 
 // ------------------------------------------------------------------ write findings
@@ -214,7 +248,7 @@ for (const [sig, s] of [...sigs].sort()) {
   findings.push({ sig, count: s.count, triage: triage[sig]?.class ?? 'untriaged', files });
 }
 const summary = {
-  campaign: 'P4.2', started: started.toISOString(), wallMs, minutes, seeds: [seedLo, seedHi], casesPerSeed, timeoutMs, head, uncommittedPaths: dirty.length,
+  campaign: 'P4.2', started: started.toISOString(), wallMs, minutes, seeds: [seedLo, seedHi], seedOffset, casesPerSeed, timeoutMs, head, uncommittedPaths: dirty.length,
   machine: { node: process.version, platform: `${process.platform} ${process.arch}`, cpus: cpus().length, cpu: cpus()[0]?.model, memGB: Math.round(totalmem() / 2 ** 30) },
   properties: Object.fromEntries(Object.entries(perProp).map(([p, x]) => [p, { workers: x.workers, cases: x.stats.cases ?? 0, stats: x.stats, failures: x.failures, hangs: x.hangs, workerCrashes: x.crashes }])),
   gates: gateResults.map(r => ({ gate: r.gate, round: r.round, seed: r.seed, args: r.args, exit: r.exit, signal: r.signal, seconds: Math.round(r.ms / 1000), fails: r.fails, summary: r.summary })),

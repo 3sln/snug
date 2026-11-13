@@ -7,7 +7,8 @@ import { loadavg } from 'node:os';
 import { PROPERTIES, doShrink, describe, injectSlow } from './props.mjs';
 import { createRandom, caseSeed } from './gen.mjs';
 
-const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig, inject, injectSlow: slowKind } = workerData;
+const { prop, seeds: [lo, hi], seed: startSeed, index: startIndex, casesPerSeed, deadline, hb, maxShrinkPerSig, inject, injectSlow: slowKind, injectExit } = workerData;
+if (injectExit === prop) process.exit(7);   // --inject-exit=P: this worker exits at once without 'done' (self-check)
 if (slowKind) injectSlow(slowKind);   // --inject-slow: this worker's next compile or validate is slow (self-check)
 let injected = false;
 const P = PROPERTIES[prop];
