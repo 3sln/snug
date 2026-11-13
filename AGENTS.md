@@ -19,6 +19,9 @@ Rules for every contributor, human or agent:
   public remote (`origin`, github.com/3sln/snug): never push, fetch-reset
   or change remotes; only the coordinator pushes, on the owner's say-so.
   Commit only when your task says so, by explicit path.
+* Never put the user's email or any personal identifier in a network
+  request, User-Agent headers included. Use a generic UA such as
+  `snug-dev-check`.
 * `README.md` is user-facing: keep it short, with no D-numbers, phase IDs,
   dated gate runs or internal process. Put detail in `docs/`.
 * Version sites in project files hold the placeholder from `version.edn`.
