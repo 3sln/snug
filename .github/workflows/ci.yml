@@ -1,0 +1,235 @@
+# snug's hosted CI (P9.20, D356): the gate sets of ci/gate-map.edn, run with
+# `bb gates`, so every gate runs under the kin/scripts/watchdog.mjs caps and a
+# SKIP fails the job (release-policy §2, §4). Read-only: no secrets, no
+# publish, deploy, tag or upload step, and no pull_request_target.
+#
+#   pull requests, pushes to main   land     `bb gates land`, plus compat
+#   tags v* and src/v*, manual run  release  `bb gates release-<shard>` for each
+#                                            shard of :partitions :release
+#                                            (`bb gates --check` proves the
+#                                            shards are exactly the release set),
+#                                            plus compat
+#
+# Matrix choice. The primary toolchain is macOS arm64, Node 24.6.0 (the exact
+# Node that tools/unicode/gen-tables.mjs pins, which unicode-test's --check
+# needs) and Rust 1.92.0 (pinned in .github/actions/setup: the toolchain
+# release-policy §2 records every Rust gate on, so a new Rust release cannot
+# turn a land run red by itself): every gate of both sets runs on it, once, including
+# the heavy identity, fuzz and proptest gates, whose subject is JS == Rust on
+# one machine, not a toolchain. The `compat` matrix adds only the cells a
+# toolchain can change: npm-test (host/js) on the latest Node 20, 22 and 24 (20
+# is engines.node's floor, with SNUG_NODE_OLDEST=1 as node-oldest runs it), and
+# rust-api-test on Rust 1.87 (rust-version) and on the latest stable, where a
+# new Rust release shows up first. The release set holds node-oldest
+# and msrv too, which test the floors on the primary job's runner.
+#
+# proptest (release-long) runs on the primary Node 24 by design: its failing
+# slow-compile / slow-validate checks read the worker thread's CPU clock,
+# process.threadCpuUsage(), which needs Node >= 23.9; on Node 20 they can only
+# warn. No job here runs proptest on Node 20 (one that did would be
+# warning-only for slow-compile/slow-validate and must say so).
+#
+# Why macOS arm64: the gates were written and recorded there (tools/runtime/run.mjs
+# reads sysctl and sw_vers, the Chrome default path is macOS's, wasm-build wraps
+# rust-lld with DYLD_LIBRARY_PATH).
+#
+# Linux. The `linux` matrix (ubuntu-24.04, x86_64) runs the two gates whose
+# commands are portable, on every run: npm-test on Node 20, 22 and 24, and
+# rust-api-test (kin/scripts/rust-crate's assembled crate: cargo test, doctests,
+# rustdoc, and Clippy where the toolchain has it) on Rust 1.87 and stable. Both
+# are POSIX sh and Node, with no kin checkout and no Babashka, so each cell runs
+# its gate the way `bb gates` does (kin/scripts/gates run-gate): under
+# kin/scripts/watchdog.mjs with the gate map's caps, failing on a non-zero exit
+# or on a SKIP line on stdout. The macOS gate sets stay the only full runs.
+#
+# timeout-minutes: above the sum of the job's gates' watchdog wall caps (the
+# caps still apply per gate), and at most GitHub's 360. Sums: land 286 min;
+# release shards core 281, vm 300, rust 280, wasm 310, long 220 (`bb gates
+# --check` refuses a shard past 330); npm-test 30; rust-api-test 20 (both
+# platforms).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    # release-policy §4 step 7 / §9: src/vX.Y.Z tags the release commit; vX.Y.Z tags the
+    # generated dist commit, which has no workflow, so it starts no run of its own
+    tags: ['v*', 'src/v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # kin, which bb.edn reads as ../kin/src: the commit snug's gates last passed against.
+  # Move it deliberately, with a land run.
+  KIN_REF: 21e8ab9c3d14d438c31916a7e052cf5929b75ca3
+  npm_config_update_notifier: 'false'
+
+defaults:
+  run:
+    working-directory: snug
+
+jobs:
+  land:
+    name: land (bb gates land)
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: macos-15
+    timeout-minutes: 305
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: ./snug/.github/actions/setup
+        with:
+          wasm: 'true'      # wasm-sdk-test, vm-test's wasm arm
+          compare: 'true'   # size, wasm-opt
+      - run: bb gates land
+
+  release:
+    name: release (bb gates ${{ matrix.shard }})
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-15
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # scan-test and vm-test build their wasm arm (wasm-build speed) and SKIP without the
+          # nightly; scan-test's cbor2 differential SKIPs without bench/compare
+          - { shard: release-core, timeout: 300, msrv: 'false', wasm: 'true',  compare: 'true',  browsers: 'false', oldest: 'false' }
+          - { shard: release-vm,   timeout: 320, msrv: 'false', wasm: 'true',  compare: 'false', browsers: 'false', oldest: 'false' }
+          - { shard: release-rust, timeout: 300, msrv: 'true',  wasm: 'false', compare: 'true',  browsers: 'false', oldest: 'false' }
+          - { shard: release-wasm, timeout: 330, msrv: 'false', wasm: 'true',  compare: 'true',  browsers: 'true',  oldest: 'true' }
+          - { shard: release-long, timeout: 240, msrv: 'false', wasm: 'false', compare: 'true',  browsers: 'false', oldest: 'false' }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: ./snug/.github/actions/setup
+        with:
+          node-oldest: ${{ matrix.oldest }}
+          msrv: ${{ matrix.msrv }}
+          wasm: ${{ matrix.wasm }}
+          compare: ${{ matrix.compare }}
+          browsers: ${{ matrix.browsers }}
+      - run: bb gates ${{ matrix.shard }}
+
+  compat:
+    name: compat (${{ matrix.gate }}, ${{ matrix.label }})
+    runs-on: macos-15
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { gate: npm-test,      label: Node 20,   node: '20',     rust: none, oldest-env: '1', timeout: 45 }
+          - { gate: npm-test,      label: Node 22,   node: '22',     rust: none, oldest-env: '',  timeout: 45 }
+          - { gate: npm-test,      label: Node 24,   node: '24',     rust: none, oldest-env: '',  timeout: 45 }
+          - { gate: rust-api-test, label: Rust 1.87, node: '24.6.0', rust: msrv, oldest-env: '',  timeout: 35 }
+          # required, not allowed to fail: red until D357 (Rust 1.98.1 overflows the test-thread
+          # stack in public_api's named_compile_limits_runtime_caps_and_depth_ceiling) lands
+          - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '', timeout: 35 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: ./snug/.github/actions/setup
+        with:
+          node-version: ${{ matrix.node }}
+          rust: ${{ matrix.rust }}
+      - run: bb gates ${{ matrix.gate }}
+        env:
+          # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
+          SNUG_NODE_OLDEST: ${{ matrix.oldest-env }}
+
+  # npm-test and rust-api-test on Linux (see the header): the gate's command under the
+  # watchdog, as kin/scripts/gates runs it, with its ci/gate-map.edn caps
+  linux:
+    name: linux (${{ matrix.gate }}, ${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { gate: npm-test,      label: Node 20,     node: '20',     rust: none,   oldest-env: '1', dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
+          - { gate: npm-test,      label: Node 22,     node: '22',     rust: none,   oldest-env: '',  dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
+          - { gate: npm-test,      label: Node 24,     node: '24',     rust: none,   oldest-env: '',  dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
+          - { gate: rust-api-test, label: Rust 1.87,   node: '24.6.0', rust: msrv,   oldest-env: '',  dir: .,       cmd: 'sh host/rust/tests/run',                    timeout: 35 }
+          # required, as on macOS: red until D357 lands
+          - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '',  dir: .,       cmd: 'sh host/rust/tests/run',                    timeout: 35 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Rust
+        if: matrix.rust != 'none'
+        env:
+          RUST: ${{ matrix.rust }}
+        run: |
+          set -euo pipefail
+          command -v rustup >/dev/null || { echo "::error::rustup is not on the runner"; exit 1; }
+          # msrv: host/rust/Cargo.toml's rust-version, without Clippy (D344), as on macOS
+          case "$RUST" in
+            msrv) v=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' host/rust/Cargo.toml)
+                  [ -n "$v" ] || { echo "::error::no rust-version in host/rust/Cargo.toml"; exit 1; }
+                  rustup toolchain install "$v" --profile minimal --no-self-update; rustup default "$v" ;;
+            *)    rustup toolchain install "$RUST" --profile minimal --component clippy --no-self-update; rustup default "$RUST" ;;
+          esac
+          want=$(rustup run "$(rustup default | cut -d' ' -f1)" rustc --version)
+          [ "$(rustc --version)" = "$want" ] || { echo "::error::rustc on PATH is '$(rustc --version)', not '$want'"; exit 1; }
+          rustc --version; cargo --version
+      - name: ${{ matrix.gate }}
+        working-directory: snug/${{ matrix.dir }}
+        env:
+          GATE: ${{ matrix.gate }}
+          CMD: ${{ matrix.cmd }}
+          # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
+          SNUG_NODE_OLDEST: ${{ matrix.oldest-env }}
+        run: |
+          set +e -uo pipefail   # the gate's status is read below (the default shell is bash -e)
+          echo "Node $(node --version) on $(uname -sm)"
+          # stdout is read for SKIP, as run-gate reads it; stderr passes through
+          # shellcheck disable=SC2086 # CMD is the gate map's argv, split on spaces
+          node "$GITHUB_WORKSPACE/snug/kin/scripts/watchdog.mjs" "$GATE" -- $CMD | tee "$RUNNER_TEMP/gate.out"
+          status=${PIPESTATUS[0]}
+          [ "$status" = 0 ] || { echo "::error::$GATE exited $status"; exit 1; }
+          if skip=$(grep -E -m1 '^[[:space:]]*SKIP\b' "$RUNNER_TEMP/gate.out"); then
+            echo "::error::$GATE NOT RUN: $skip"; exit 1
+          fi
+          echo "ok $GATE"
+
+  # one status to require: every job that ran passed, and on a release run every shard ran
+  ci:
+    name: ci
+    if: always()
+    needs: [land, release, compat, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - env:
+          LAND: ${{ needs.land.result }}
+          RELEASE: ${{ needs.release.result }}
+          COMPAT: ${{ needs.compat.result }}
+          LINUX: ${{ needs.linux.result }}
+          IS_RELEASE: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          echo "land: $LAND  release: $RELEASE  compat: $COMPAT  linux: $LINUX  (release run: $IS_RELEASE)"
+          [ "$COMPAT" = success ] && [ "$LINUX" = success ] || exit 1
+          if [ "$IS_RELEASE" = true ]; then [ "$RELEASE" = success ]; else [ "$LAND" = success ]; fi

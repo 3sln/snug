@@ -55,6 +55,10 @@ const nativeWorkerd = p => {
 const workerd = nativeWorkerd(workerdPath);
 const chrome = firstExisting(process.env.SNUG_CHROME, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 if (!esbuild) throw new Error('esbuild not found; set SNUG_ESBUILD');
+// A runtime that is missing (and not --skip'd) is NOT RUN, never a quiet pass:
+// `bb gates` fails a set on a SKIP line on stdout (release-policy §2, P9.20).
+if (!skip.has('browser') && !chrome) console.log('SKIP runtime browser arm -- no Chrome (SNUG_CHROME): NOT RUN');
+if (!skip.has('workerd') && !workerd) console.log('SKIP runtime workerd arm -- no workerd (SNUG_WORKERD): NOT RUN');
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', ...opts }).trim();
 const log = (...a) => console.error('[runtime]', ...a);
 const results = { date: new Date().toISOString(), out };

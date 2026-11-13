@@ -1,0 +1,175 @@
+# P9.20: the toolchain a CI job's gates need, and nothing more. Every version
+# is pinned or read from the repository (the same sources the gates read):
+#   kin            env KIN_REF (the workflow), checked out next to snug as ../kin
+#   Babashka       BB_VERSION below, the release tarball checked against BB_SHA256
+#   Node           node-version (the primary is the exact 24.6.0 that
+#                  tools/unicode/gen-tables.mjs pins); node-oldest adds the
+#                  engines.node major from host/js/package.json
+#   Rust           the primary 1.92.0 (pinned: the toolchain release-policy §2
+#                  records every Rust gate on), `stable` (the moving latest),
+#                  or `msrv`: host/rust/Cargo.toml's rust-version;
+#                  wasm adds kin/scripts/wasm-build's default nightly with
+#                  rust-src and wasm32-unknown-unknown (-Zbuild-std)
+#   bench/compare  `npm ci` (lockfile): esbuild and binaryen's wasm-opt
+#   ci/tools       `npm ci` (lockfile): workerd, as SNUG_WORKERD
+#   Chrome         the runner image's Google Chrome, as SNUG_CHROME
+# A tool asked for and missing fails this action, so a gate never meets a
+# missing tool here. (Had it, the gate would print SKIP, and `bb gates` fails
+# a set on a SKIP: release-policy §2.)
+name: snug gate toolchain
+description: Install exactly the tools a CI job's snug gates need.
+inputs:
+  node-version:
+    description: Node for the gates (PATH's node)
+    default: '24.6.0'
+  node-oldest:
+    description: "'true': also the engines.node major, as SNUG_NODE_OLDEST_NODE (node-oldest)"
+    default: 'false'
+  rust:
+    description: "a version such as '1.92.0', 'stable', 'msrv' (rust-version) or 'none': the default toolchain"
+    default: '1.92.0'
+  msrv:
+    description: "'true': also the rust-version toolchain (msrv)"
+    default: 'false'
+  wasm:
+    description: "'true': the pinned wasm nightly with rust-src and the wasm32 target"
+    default: 'false'
+  compare:
+    description: "'true': npm ci in bench/compare (esbuild, wasm-opt, cbor2)"
+    default: 'false'
+  browsers:
+    description: "'true': workerd (ci/tools) and Chrome, as SNUG_WORKERD and SNUG_CHROME"
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Runner and pins
+      id: pins
+      shell: bash
+      working-directory: snug
+      run: |
+        set -euo pipefail
+        # the gate scripts were written and recorded on macOS arm64 (sysctl, sw_vers, the
+        # Chrome path); the Babashka tarball below is that platform's
+        [ "$RUNNER_OS" = macOS ] && [ "$RUNNER_ARCH" = ARM64 ] || { echo "::error::snug's CI expects a macOS arm64 runner, not $RUNNER_OS $RUNNER_ARCH"; exit 1; }
+        [ -n "${KIN_REF:-}" ] || { echo "::error::KIN_REF is not set (the workflow's env)"; exit 1; }
+        msrv=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' host/rust/Cargo.toml)
+        nightly=$(sed -n 's/.*SNUG_WASM_TOOLCHAIN:-\(nightly-[0-9-]*\)}.*/\1/p' kin/scripts/wasm-build | head -1)
+        oldest=$(sed -n 's/.*"node": *">=\([0-9]*\)".*/\1/p' host/js/package.json)   # node-oldest's own rule: ">=NN"
+        [ -n "$msrv" ] && [ -n "$nightly" ] && [ -n "$oldest" ] || { echo "::error::could not read rust-version, the wasm nightly or engines.node"; exit 1; }
+        echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
+        echo "nightly=$nightly" >> "$GITHUB_OUTPUT"
+        echo "oldest=$oldest" >> "$GITHUB_OUTPUT"
+        echo "pins: kin $KIN_REF, rust-version $msrv, wasm $nightly, engines.node >=$oldest"
+
+    - name: kin (../kin)
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: 3sln/kin
+        ref: ${{ env.KIN_REF }}
+        path: kin
+        persist-credentials: false
+
+    - name: Babashka
+      shell: bash
+      env:
+        BB_VERSION: '1.3.190'
+        BB_SHA256: 1a01b043796d34200c1e854f52e81da94206952354ea1aa242a1bf625829669d
+      run: |
+        set -euo pipefail
+        d="$RUNNER_TEMP/babashka"; mkdir -p "$d"
+        curl -fsSL -o "$d/bb.tgz" "https://github.com/babashka/babashka/releases/download/v$BB_VERSION/babashka-$BB_VERSION-macos-aarch64.tar.gz"
+        echo "$BB_SHA256  $d/bb.tgz" | shasum -a 256 -c -
+        tar -xzf "$d/bb.tgz" -C "$d"
+        echo "$d" >> "$GITHUB_PATH"
+        "$d/bb" --version
+
+    - name: Node ${{ steps.pins.outputs.oldest }} (node-oldest)
+      if: inputs.node-oldest == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.oldest }}
+    - name: SNUG_NODE_OLDEST_NODE
+      if: inputs.node-oldest == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        n=$(command -v node); v=$("$n" -p 'process.versions.node')
+        [ "${v%%.*}" = "${{ steps.pins.outputs.oldest }}" ] || { echo "::error::$n is Node $v"; exit 1; }
+        echo "SNUG_NODE_OLDEST_NODE=$n" >> "$GITHUB_ENV"
+        echo "node-oldest: Node $v at $n"
+
+    - name: Node ${{ inputs.node-version }}
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        # only ~/.npm, and only where a lockfile install runs (npm ci re-checks integrity)
+        cache: ${{ (inputs.compare == 'true' || inputs.browsers == 'true') && 'npm' || '' }}
+        cache-dependency-path: |
+          snug/bench/compare/package-lock.json
+          snug/ci/tools/package-lock.json
+
+    - name: Rust
+      if: inputs.rust != 'none' || inputs.msrv == 'true' || inputs.wasm == 'true'
+      shell: bash
+      working-directory: snug
+      env:
+        RUST: ${{ inputs.rust }}
+        MSRV: ${{ inputs.msrv }}
+        WASM: ${{ inputs.wasm }}
+        V: ${{ steps.pins.outputs.msrv }}
+        NIGHTLY: ${{ steps.pins.outputs.nightly }}
+      run: |
+        set -euo pipefail
+        command -v rustup >/dev/null || { echo "::error::rustup is not on the runner"; exit 1; }
+        # a named toolchain keeps clippy (rust-api-test); the MSRV toolchain does not (D344:
+        # clippy's lints change between releases, so clippy stays on the current toolchain)
+        case "$RUST" in
+          msrv) rustup toolchain install "$V" --profile minimal --no-self-update; rustup default "$V" ;;
+          none) ;;
+          stable|[0-9]*.[0-9]*) rustup toolchain install "$RUST" --profile minimal --component clippy --no-self-update; rustup default "$RUST" ;;
+          *) echo "::error::rust must be a version, stable, msrv or none, not $RUST"; exit 1 ;;
+        esac
+        [ "$MSRV" != true ] || rustup toolchain install "$V" --profile minimal --no-self-update
+        [ "$WASM" != true ] || rustup toolchain install "$NIGHTLY" --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
+        rustup toolchain list
+        if [ "$RUST" != none ]; then
+          # PATH's rustc must be rustup's default (msrv's own check, for every gate)
+          want=$(rustup run "$(rustup default | cut -d' ' -f1)" rustc --version)
+          [ "$(rustc --version)" = "$want" ] || { echo "::error::rustc on PATH is '$(rustc --version)', not '$want'"; exit 1; }
+          rustc --version; cargo --version
+        fi
+
+    - name: Cargo registry cache (-Zbuild-std's std dependencies)
+      if: inputs.wasm == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+        key: cargo-registry-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.nightly }}
+
+    - name: bench/compare (npm ci)
+      if: inputs.compare == 'true'
+      shell: bash
+      working-directory: snug/bench/compare
+      run: |
+        set -euo pipefail
+        npm ci --no-audit --no-fund
+        node node_modules/esbuild/bin/esbuild --version
+        node node_modules/binaryen/bin/wasm-opt --version
+
+    - name: workerd (ci/tools, npm ci) and Chrome
+      if: inputs.browsers == 'true'
+      shell: bash
+      working-directory: snug
+      run: |
+        set -euo pipefail
+        (cd ci/tools && npm ci --no-audit --no-fund)
+        w="$PWD/ci/tools/node_modules/.bin/workerd"
+        "$w" --version
+        c="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        [ -x "$c" ] || { echo "::error::no Google Chrome on this runner ($c): wasm-package-test and runtime cannot run, so the release set fails"; exit 1; }
+        "$c" --version
+        echo "SNUG_WORKERD=$w" >> "$GITHUB_ENV"
+        echo "SNUG_CHROME=$c" >> "$GITHUB_ENV"

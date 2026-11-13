@@ -270,8 +270,8 @@ release set holds a gate on exactly each: `node-oldest` runs `npm test` on
 the newest installed Node 20.x (nvm), and `msrv` builds and tests the
 assembled crate, doctests included, on Rust 1.87 (rustup). Both read the
 floor from the manifest. Without the toolchain they answer SKIP, which
-fails the release set. There is still no hosted CI. Gates are the `bb`
-tasks in `bb.edn`, run by engineers on one macOS machine.
+fails the release set. Gates are the `bb` tasks in `bb.edn`, run by
+engineers on one macOS machine and by hosted CI (§4.1).
 
 **Node 20 has been past upstream end of life since 2026-04-30.** It is the
 floor because the library works on it today, which is the owner's rule.
@@ -456,6 +456,65 @@ go. Delegations such as D303 cover size caps only, not releases.
    `dist` commit.
 8. **After the release:** open a new `[Unreleased]` section, and record
    the release (version, commit, artefact checksums) in DEVLOG.
+
+### 4.1 Hosted CI (P9.20, D356)
+
+`.github/workflows/ci.yml` runs the gate sets of `ci/gate-map.edn` on
+GitHub Actions, with `bb gates`. Each gate runs under the watchdog with its
+caps, and a SKIP fails the job, as locally. CI only reads: it has no
+secrets, and it never publishes, deploys, tags or uploads anything. It does
+not replace step 4. The release record names the commit whose gates ran,
+locally or in CI.
+
+| Trigger | What runs |
+| --- | --- |
+| a pull request, a push to `main` | `bb gates land`, the compat matrix and the Linux matrix |
+| a `v*` or `src/v*` tag, a manual run | the `release` set, the compat matrix and the Linux matrix |
+
+- **Primary toolchain:** macOS arm64 (`macos-15`), Node 24.6.0 (the Node
+  that the Unicode tables pin) and Rust 1.92.0 (pinned). Every gate of both sets
+  runs on it once. That includes the identity, fuzz and proptest gates.
+  `proptest` must run on Node ≥ 23.9 (its slow-compile check reads the
+  worker thread's CPU clock), so it runs on this toolchain.
+- **Compat matrix:** `npm-test` on the latest Node 20, 22 and 24, and
+  `rust-api-test` on Rust 1.87 (without Clippy, as in `msrv`) and on the
+  latest stable Rust. The release
+  set's `node-oldest` and `msrv` gates test the declared floors.
+- **Linux matrix:** the same five cells on Linux x86_64 (`ubuntu-24.04`):
+  `npm-test` on Node 20, 22 and 24, and `rust-api-test` on Rust 1.87 and
+  stable. These two gates are plain POSIX `sh` and Node, so each cell runs
+  the gate's command under the watchdog with its caps, as `bb gates` does,
+  and fails on a non-zero exit or a SKIP line. The full gate sets run only
+  on macOS, because the gate scripts use macOS tools.
+- **Required:** one `ci` job sums up the run. It fails unless every compat
+  and Linux cell passed, and `land` passed (or, on a release run, every
+  release shard passed). The stable-Rust cells are required too, so they
+  stay red until D357 fixes a stack overflow on Rust 1.98.1.
+- **Release shards:** the release set's wall caps add up to about 23
+  hours, and a hosted job stops at 6. CI runs the set as five parallel
+  shards, the sets `release-core`, `-vm`, `-rust`, `-wasm` and `-long`.
+  `:partitions` in `ci/gate-map.edn` names them. `bb gates --check` fails
+  unless the shards hold exactly the release set's gates, each once, and
+  each fits one job. Every job's `timeout-minutes` is above the sum of its
+  gates' wall caps.
+- **Tools:** each job installs only what its gates need. All of it is
+  pinned or read from the repository:
+  - kin at a pinned commit (`KIN_REF`), checked out as `../kin`;
+  - Babashka 1.3.190 (checksum-verified). The Clojure CLI is not needed:
+    no gate runs a JVM;
+  - Node through `actions/setup-node`;
+  - Rust through rustup: 1.92.0, stable, `rust-version`, and the pinned wasm
+    nightly with `rust-src`;
+  - `npm ci` in `bench/compare` (esbuild, `wasm-opt`) and in `ci/tools`
+    (workerd);
+  - the runner's Chrome.
+
+  A tool that a job needs and that is missing fails the job's setup.
+- **Actions** are pinned by commit SHA. The workflow's permissions are
+  `contents: read`, and it has no `pull_request_target` trigger.
+- **The `vX.Y.Z` tag** marks the generated `dist` commit (§9). That commit
+  has no workflow, so the tag starts no run. The gates run for
+  `src/vX.Y.Z`, the release commit.
 
 ## 5. Deprecation and security fixes
 

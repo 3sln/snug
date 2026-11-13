@@ -1,0 +1,9 @@
+{
+  "name": "snug-ci-tools",
+  "private": true,
+  "description": "Hosted CI only (P9.20): the workerd that bb wasm-package-test and tools/runtime/run.mjs run as SNUG_WORKERD, pinned. Nothing here is imported by snug's sources.",
+  "license": "MIT",
+  "dependencies": {
+    "workerd": "1.20251217.0"
+  }
+}
