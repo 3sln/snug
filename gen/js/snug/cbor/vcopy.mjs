@@ -810,7 +810,16 @@ export function embedCheckIn(b, o, cb, cs, ce, top) {
         o[O_S_DUPP] = -1;
         o[O_S_DUPO] = -1;
     }
-    const z = region(cb, o, cs, ce, top, 1, (ce - cs) + 64);
+    // D350: one gap byte before the region, so no position is both the end
+    // of the region before it (the end of a truncated or empty content walked
+    // there) and this region's start: vmap-x reads a walk position at a
+    // region's start as inside the region.
+    if (top >= cb.length) {
+        o[O_VNEEDB] = (2 * cb.length) + 256;
+        return -CODE_SCRATCH;
+    }
+    cb[top] = 0;
+    const z = region(cb, o, cs, ce, top + 1, 1, (ce - cs) + 64);
     const stp = o[O_S_STOPP];
     const pst = o[O_S_PSTOP];
     o[O_S_DUPP] = -1;
@@ -825,7 +834,7 @@ export function embedCheckIn(b, o, cb, cs, ce, top) {
             return w;
         }
     }
-    const w2 = evAdd(o, cs, EV_EMB, ce, top, z);
+    const w2 = evAdd(o, cs, EV_EMB, ce, top + 1, z);
     if (w2 < 0) {
         return w2;
     }

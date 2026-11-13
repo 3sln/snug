@@ -2,7 +2,8 @@
   "format": "snug conformance corpus v1",
   "source": "P9.9 regressions (2026-11-12): shapes the fixed property campaign found. Expectations are hand-reasoned; vm-test also checks each against corpus/tools/peg-oracle.mjs.",
   "notes": [
-    "D349: a dead self-reference (`0*0 g`) after a member in a map group; the compiler's Program must verify and mean the group without it."
+    "D349: a dead self-reference (`0*0 g`) after a member in a map group; the compiler's Program must verify and mean the group without it.",
+    "D350: an embedded refusal after a byte string whose content is a malformed head, under the valid preset; its offset is where the inner walk stopped (program.md §9.2 rule 7), on every route (vm-test's buffer route here; vmsession-test's shapes 14-16 for sessions)."
   ],
   "suites": [
     {
@@ -18,6 +19,17 @@
         {"rule": "s", "hex": "a1616bf6", "expect": false},
         {"rule": "t", "hex": "a1616bf5", "expect": true},
         {"rule": "t", "hex": "a1010a", "expect": false, "note": "1 => int is inside the dead 0*0"}
+      ]
+    },
+    {
+      "category": "regression", "name": "embedded refusal after a malformed byte-string content (D350)", "options": {"wire": "valid"},
+      "cddl": "r = [ bstr, bstr .cbor uint ]\ns = [ bstr .size 1 / bstr .cbor uint, bstr .cbor uint ]\nt = { a: bstr, b: bstr .cbor uint }\n",
+      "cases": [
+        {"rule": "r", "hex": "82411f40", "expect": false, "note": "embedded cbor/truncated at 4 (it was 2 on the whole-window session)"},
+        {"rule": "s", "hex": "82411f40", "expect": false, "note": "embedded cbor/truncated at 4 (it was 2 on every route)"},
+        {"rule": "s", "hex": "82411f4101", "expect": true},
+        {"rule": "t", "hex": "a26161411f616240", "expect": false},
+        {"rule": "t", "hex": "a26161411f61624101", "expect": true}
       ]
     }
   ]

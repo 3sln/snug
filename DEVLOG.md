@@ -7538,6 +7538,55 @@ and keep a compiler bug.
   D351. On main: drift ok, no conflict markers. The verifier was right
   and stays strict.
 
+### D350 — An embedded refusal at the end of the main copy maps to the input: a gap byte before every embedded copy region (D030 offset identity; P9.9 finding)
+**Decision** (P8.5 VM engineer, provisional):
+* **The correct offset.** For `r = [ bstr, bstr .cbor uint ]` on `82 41 1f
+  40` it is 4. program.md §9.2 rule 7: an embedded failure keeps the inner
+  witness (here the inner profile refusal, `cbor/truncated`). Its offset is
+  where the sub-validation of the second byte string's content, b[4, 4),
+  stopped: the item at 4 that is not there. `r = bstr .cbor uint` on `40`
+  says 1 by the same rule.
+* **The stale offset.** Under the default `valid` preset, a refused run is
+  replayed on the canonical path (D262, D280). There, content the VM may
+  walk as CBOR that is not its own DC form, or is refused, gets its own copy
+  region with an EV_EMB event (`embed-check-in`, `kin/vcopy.kin`). The
+  first content, `1f`, is `malformed`, so it gets such a region. That
+  region began exactly at the main copy's end.
+  - The second content is empty and walked in place, so its truncation is
+    reported at the main copy's end. That is the same position as the
+    embedded region's start.
+  - `vmap-x` reads a walk position at a region's start as inside that region
+    (its first byte). It therefore mapped the offset into the first byte
+    string's content, giving 2.
+  - Whether a route hit it depended on where its copy put that boundary.
+    The buffer route copies the whole input, while a session copies what
+    its windows hold. So the routes disagreed, and some schemas flipped
+    which one said 2. In `[ bstr .size 1 / bstr .cbor uint, bstr .cbor uint ]`
+    both routes said 2.
+* **The fix.** Every embedded copy region now starts one zero byte after the
+  previous region's end, and its EV_EMB copy start says so. No position is
+  then both a region's end and the next region's start, and `vmap-x` is
+  unchanged. The buffer and session paths share `vcopy`, so one change fixes
+  both. Rust and the SDK run the same generated code.
+
+The fix grows the copy by one byte per embedded region. Its size checks are
+unchanged: a region that does not fit asks for more as before (-5).
+**Regressions**:
+* `vmsession-test` generates the shape. Stress shapes 14–16, under the valid
+  preset, are an array of `bstr .size 1 / bstr .cbor uint`, a map of `bstr /
+  bstr .cbor uint` values, and `[bstr, * bstr .cbor uint]`. Their contents
+  are malformed heads (`1f`, `ff`, `1c`, `5f`), cut heads (`18`), empty, or
+  valid.
+* Against the buffer route, 1800 session runs of these shapes (whole, 1-byte
+  and 7-byte windows) give 25 differences on the old code and 0 now.
+* `vm-test`: corpus/conformance/regressions.json "embedded refusal after a
+  malformed byte-string content (D350)".
+
+**Alternatives**: tracking in the witness which copy region a walk was in
+(it would touch every embedded walk and the session's saved positions); an
+offset rule other than §9.2 rule 7 (the bug was the mapping, not the rule).
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

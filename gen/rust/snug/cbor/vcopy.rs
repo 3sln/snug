@@ -783,7 +783,16 @@ pub(crate) fn embed_check_in(b: &[u8], o: &mut [i32], cb: &mut [u8], cs: i32, ce
         o[(O_S_DUPP) as usize] = -1;
         o[(O_S_DUPO) as usize] = -1;
     }
-    let z: i32 = region(cb, o, cs, ce, top, 1, (ce - cs) + 64);
+    // D350: one gap byte before the region, so no position is both the end
+    // of the region before it (the end of a truncated or empty content walked
+    // there) and this region's start: vmap-x reads a walk position at a
+    // region's start as inside the region.
+    if top >= (cb.len() as i32) {
+        o[(O_VNEEDB) as usize] = (2 * (cb.len() as i32)) + 256;
+        return -CODE_SCRATCH;
+    }
+    cb[(top) as usize] = (0) as u8;
+    let z: i32 = region(cb, o, cs, ce, top + 1, 1, (ce - cs) + 64);
     let stp: i32 = o[(O_S_STOPP) as usize];
     let pst: i32 = o[(O_S_PSTOP) as usize];
     o[(O_S_DUPP) as usize] = -1;
@@ -798,7 +807,7 @@ pub(crate) fn embed_check_in(b: &[u8], o: &mut [i32], cb: &mut [u8], cs: i32, ce
             return w;
         }
     }
-    let w2: i32 = ev_add(o, cs, EV_EMB, ce, top, z);
+    let w2: i32 = ev_add(o, cs, EV_EMB, ce, top + 1, z);
     if w2 < 0 {
         return w2;
     }
