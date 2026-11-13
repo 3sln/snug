@@ -168,12 +168,18 @@
 ;;   bit 11   PF_T24V     (D358) only with PF_VALID (or PF_VREL): a tag-24 payload
 ;;                        must be a valid item under the profile, as without
 ;;                        PF_VALID. Clear, PF_VALID asks only that it be one
-;;                        well-formed item (RFC 8949 §3.4.5.1): head.kin wf-one.
+;;                        well-formed item (RFC 8949 §3.4.5.1): scan.kin wf-scan-one.
+;;   bit 12   PF_WF       internal: the scanner's own walk, well-formedness only (a
+;;                        tag-24 payload under PF_VALID without PF_T24V): no UTF-8,
+;;                        no key order or duplicates, every tag's content an item.
+;;                        PF_WF_WALK is the whole profile word of that walk.
 (defconst ^:pub ^I32 PF_VALID 256)
 (defconst ^:pub ^I32 PF_VALID_PRESET 378)
 (defconst ^:pub ^I32 PF_CANON 512)
 (defconst ^:pub ^I32 PF_VREL 1024)
 (defconst ^:pub ^I32 PF_T24V 2048)
+(defconst ^:pub ^I32 PF_WF 4096)
+(defconst ^:pub ^I32 PF_WF_WALK 4475)
 
 ;; Profile bounds that are not options (cbor.mjs LIMITS).
 (defconst ^:pub ^I32 MAX_BIGNUM_BYTES 128)

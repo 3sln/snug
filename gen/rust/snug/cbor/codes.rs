@@ -94,5 +94,7 @@ pub const PF_VALID_PRESET: i32 = 378;
 pub const PF_CANON: i32 = 512;
 pub const PF_VREL: i32 = 1024;
 pub const PF_T24V: i32 = 2048;
+pub const PF_WF: i32 = 4096;
+pub const PF_WF_WALK: i32 = 4475;
 pub const MAX_BIGNUM_BYTES: i32 = 128;
 pub const MAX_DIMENSIONS: i32 = 8;

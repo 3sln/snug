@@ -8731,8 +8731,20 @@ engineer).
     guarantee (one encoding per value, no duplicate keys, valid text)
     then holds for the embedded CBOR that a signature or hash also covers.
     profiles.md says so.
-* **How.** `head.kin` has the well-formed walk (`wf-item`, `wf-one`;
-  `wf-payload` decides when it applies). These share it:
+* **How.** No second walker: the scanner's own walk runs in a
+  well-formedness mode. `scan.kin wf-scan-one` runs `scan-one` under the
+  profile word `PF_WF_WALK`:
+  - `PF_VALID`, any key, any tag, RFC floats, every simple value,
+    noncharacters;
+  - the internal bit `PF_WF` (4096), which skips the UTF-8 refusal in
+    `scan-text`, the key-order and duplicate step in `scan-map` and
+    `scan-imap` (so nothing is deferred), and every tag's rule in
+    `scan-tag` (the content is an ordinary item).
+
+  It then restores the profile word, and `wf-payload` decides when it
+  applies. (A first cut had a separate walker in head.kin, +1,498 B
+  minified on the `snug` entry; the manager's cut pass replaced it with
+  this mode.) These share it:
   - the scanner, for a payload in a definite string and for a deferred
     payload gathered from chunks;
   - the VM's `dead-std-check` (the buffer walk, the live walk and the

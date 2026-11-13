@@ -2,9 +2,9 @@
 // source: snug.cbor.scan
 
 import { chunkPos, dupFinish, dupForms, dupFormsWithin, dupInput, dupPairs, fits16, fits32, gather, gatherWithin, headShort, kclass, targ, tlength } from './canon.mjs';
-import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_FLOAT, CODE_INDEFINITE, CODE_KEY_ORDER, CODE_KEY_TYPE, CODE_MALFORMED, CODE_NDARRAY, CODE_NON_SHORTEST, CODE_NOT_MAP, CODE_SCRATCH, CODE_SIMPLE, CODE_TAG, CODE_TEXT, CODE_TOO_LARGE, CODE_TOO_MANY_ENTRIES, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TRUNCATED, CODE_TYPED_ARRAY, MAX_BIGNUM_BYTES, O_COSE, O_CSTART, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_BYTES, O_MAX_DEPTH, O_MAX_ENTRIES, O_MAX_ITEMS, O_PROFILE, O_S_CBTOP, O_S_DLOW, O_S_DUPK, O_S_DUPO, O_S_DUPP, O_S_EXTRA, O_S_FIRST, O_S_NDEF, O_S_RTOP, O_S_SRC, O_S_UNITS, O_TOP, O_VCTL, O_VLEN, O_VNEEDB, O_VNEEDW, PF_FLOATS, PF_HOST, PF_KEYS, PF_NONCHAR, PF_TAGS, PF_UNDEFINED, PF_VALID, PF_VREL, VC_ECS, VC_NONDET, VC_UNSORTED } from './codes.mjs';
+import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_FLOAT, CODE_INDEFINITE, CODE_KEY_ORDER, CODE_KEY_TYPE, CODE_MALFORMED, CODE_NDARRAY, CODE_NON_SHORTEST, CODE_NOT_MAP, CODE_SCRATCH, CODE_SIMPLE, CODE_TAG, CODE_TEXT, CODE_TOO_LARGE, CODE_TOO_MANY_ENTRIES, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TRUNCATED, CODE_TYPED_ARRAY, MAX_BIGNUM_BYTES, O_COSE, O_CSTART, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_BYTES, O_MAX_DEPTH, O_MAX_ENTRIES, O_MAX_ITEMS, O_PROFILE, O_S_CBTOP, O_S_DLOW, O_S_DUPK, O_S_DUPO, O_S_DUPP, O_S_EXTRA, O_S_FIRST, O_S_NDEF, O_S_RTOP, O_S_SRC, O_S_UNITS, O_TOP, O_VCTL, O_VLEN, O_VNEEDB, O_VNEEDW, PF_FLOATS, PF_HOST, PF_KEYS, PF_NONCHAR, PF_T24V, PF_TAGS, PF_UNDEFINED, PF_VALID, PF_VREL, PF_WF, PF_WF_WALK, VC_ECS, VC_NONDET, VC_UNSORTED } from './codes.mjs';
 import { checkF16, checkF32, checkF64, rfcF16, rfcF32, rfcF64 } from './float.mjs';
-import { be16, be32, bytesContent, countItem, enterContainer, fail, readArg, readArgV, takeLen, wfOne, wfPayload } from './head.mjs';
+import { be16, be32, bytesContent, countItem, enterContainer, fail, readArg, readArgV, takeLen } from './head.mjs';
 import { compareSpans } from './keys.mjs';
 import { dateTimeOk, ruleTag, stdAllowed, stdContentOk, stdInner, typedAnySize, uriOk } from './stdtags.mjs';
 import { dataCount, decimalV, exponentOk, mantissaOk, ndarrayV, shapeOk, typedSize, vcount } from './tags.mjs';
@@ -13,6 +13,32 @@ import { utf8InvalidAt, utf8InvalidAtNc } from './text.mjs';
 export function validOn(o) {
     // Does the profile admit valid, non-deterministic CBOR (PF_VALID, D260)?
     return (o[O_PROFILE] & PF_VALID) !== 0;
+}
+
+export function wfOn(o) {
+    // Is this walk well-formedness only (PF_WF, D358)?
+    return (o[O_PROFILE] & PF_WF) !== 0;
+}
+
+export function wfPayload(o) {
+    // Is a tag-24 payload walked as well-formed only (D358): a valid-CBOR run
+    // (PF_VALID, or PF_VREL in the VM) without PF_T24V?
+    const pf = o[O_PROFILE];
+    return ((pf & (PF_VALID | PF_VREL)) !== 0) && ((pf & PF_T24V) === 0);
+}
+
+export function wfScanOne(b, o, cs, depth, ce) {
+    // D358: a tag-24 payload as one well-formed item (RFC 8949 §3.4.5.1): this
+    // scanner's own walk (scan-one) under PF_WF_WALK -- valid CBOR, any key,
+    // any tag, every simple value and float, plus PF_WF: no UTF-8 check, no key
+    // order or duplicate check (nothing is recorded for after the walk), every
+    // tag's content an ordinary item -- then the profile word back. The limits
+    // are the walk's. Shared with the VM, whose first words are this o.
+    const pf = o[O_PROFILE];
+    o[O_PROFILE] = PF_WF_WALK;
+    const r = scanOne(b, o, cs, depth, ce);
+    o[O_PROFILE] = pf;
+    return r;
 }
 
 export function nondet(o) {
@@ -222,7 +248,8 @@ export function scanText(b, o, pos, p, hi, lo, end) {
         return stop;
     }
     const bad = utf8InvalidAt(b, p, stop);
-    if (bad >= 0) {
+    // D358: a well-formedness walk does not ask for valid UTF-8
+    if ((bad >= 0) && (!wfOn(o))) {
         return textBad(b, o, bad, stop);
     }
     return stop;
@@ -455,7 +482,7 @@ export function scanMap(b, o, pos, p, hi, lo, depth, end) {
                 }
             }
             pc = 1;
-        } else {
+        } else if (!wfOn(o)) {
             const ks = keyStep(b, o, prevStart, prevEnd, pc, start, q, km);
             if (ks < 0) {
                 return ks;
@@ -592,13 +619,15 @@ export function scanImap(b, o, pos, depth, end) {
                 return fail(o, start, CODE_KEY_TYPE);
             }
         }
-        const ks = keyStep(b, o, prevStart, prevEnd, pc, start, q, km);
-        if (ks < 0) {
-            return ks;
-        }
-        pc = ks & 1;
-        if ((ks & 2) !== 0) {
-            mark = true;
+        if (!wfOn(o)) {
+            const ks = keyStep(b, o, prevStart, prevEnd, pc, start, q, km);
+            if (ks < 0) {
+                return ks;
+            }
+            pc = ks & 1;
+            if ((ks & 2) !== 0) {
+                mark = true;
+            }
         }
         prevStart = start;
         prevEnd = q;
@@ -989,16 +1018,9 @@ export function scanStd(b, o, pos, p, tag, depth, end) {
         return fail(o, pos, CODE_TAG);
     }
     if (tag === 24) {
-        if (wfPayload(o)) {
-            const rw = wfOne(b, o, stdInner(b, p), depth + 2, q);
-            if (rw < 0) {
-                return rw;
-            }
-        } else {
-            const r = scanOne(b, o, stdInner(b, p), depth + 2, q);
-            if (r < 0) {
-                return r;
-            }
+        const r = payloadOne(b, o, stdInner(b, p), depth + 2, q);
+        if (r < 0) {
+            return r;
         }
     }
     return q;
@@ -1049,6 +1071,10 @@ export function scanTag(b, o, pos, p, hi, lo, depth, end) {
     // under the any-tag level, 2^64 - 1 never.
     if (depth >= o[O_MAX_DEPTH]) {
         return fail(o, pos, CODE_DEPTH);
+    }
+    // D358: in a well-formedness walk every tag's content is an ordinary item
+    if (wfOn(o)) {
+        return item(b, o, p, depth + 1, end);
     }
     if (hi !== 0) {
         const rw = ruleTag(hi, lo);
@@ -1341,10 +1367,10 @@ export function deferText(b, o, cb, src, tag, tpos, cpos) {
 }
 
 export function payloadOne(b, o, cs, depth, ce) {
-    // A gathered tag-24 payload as one item: well-formed only under PF_VALID
-    // without PF_T24V (D358; records nothing), else scan-one.
+    // A tag-24 payload as one item: well-formed only under PF_VALID without
+    // PF_T24V (D358; records nothing), else scan-one.
     if (wfPayload(o)) {
-        return wfOne(b, o, cs, depth, ce);
+        return wfScanOne(b, o, cs, depth, ce);
     }
     return scanOne(b, o, cs, depth, ce);
 }

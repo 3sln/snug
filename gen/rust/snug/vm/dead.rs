@@ -533,9 +533,10 @@ pub fn dead_std_check(b: &[u8], s: &mut [i32], pos: i32, tag: i32, q: i32, stop:
     if (tag == 24) && wf_payload(s) {
         // D358: a valid-CBOR run without PF_T24V: the payload's bytes (a byte
         // string's content is the same in a canonical copy) walked as one
-        // well-formed item, the scanner's wf-one; 1 unit per item it counted
+        // well-formed item by the scanner's own walk (wf-scan-one; s begins
+        // with the scanner's o); 1 unit per item it counted
         let i0: i32 = s[(O_ITEMS) as usize];
-        let rw: i32 = wf_one(b, s, std_inner(b, q), depth + 2, stop);
+        let rw: i32 = wf_scan_one(b, s, std_inner(b, q), depth + 2, stop);
         if !charge(s, s[(O_ITEMS) as usize] - i0, pos) {
             return -R_BUDGET;
         }

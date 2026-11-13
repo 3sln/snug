@@ -85,7 +85,7 @@ test('option resolution: presets, overrides, refusals of unknown values', () => 
   assert.equal(profileFlags({ tag24: 'valid' }), 378 | 2048);
   assert.equal(profileFlags({ wire: 'deterministic', tag24: 'well-formed' }), 122);
   assert.equal(profileFlags({ wire: 'bindle', tag24: 'valid' }), 0);
-  assert.equal(profiles.valid.tag24, 'well-formed'); assert.equal(profiles.deterministic.tag24, 'valid');
+  assert.equal(profiles.valid.tag24, 'well-formed'); assert.equal(profiles.deterministic.tag24, undefined);
   assert.equal(codecTop({}), 'any'); assert.equal(codecTop(B), 'map'); assert.equal(codecTop({ wire: 'bindle', top: 'any' }), 'any');
   for (const bad of [{ wire: 'cde' }, { keys: 'int' }, { tags: 'all' }, { floats: 'rfc' }, { undefinedValue: 1 }, { noncharacters: 'yes' }, { keys: 'toString' }, { tag24: 'wf' }])
     assert.throws(() => decode(Uint8Array.of(0), bad), TypeError);

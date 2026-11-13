@@ -60,12 +60,12 @@
                                      O_S_DUPK O_S_DUPP O_S_DUPO O_S_DUPC O_S_PLANT O_S_PMAJ O_S_PLEN
                                      O_S_STOPX O_S_CBASE O_S_PSTOP O_S_NSORT O_S_DUPCO O_S_PBAD O_S_EDEPTH O_S_FIRST
                                      EV_HEAD EV_END EV_KEY EV_WMARK EV_EMB EV_UNITS EV_WORDS VC_NONDET VC_UNSORTED VC_ECS]]
-            [snug.cbor.head :refer [head-size wf-payload]]
+            [snug.cbor.head :refer [head-size]]
             [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.canon :refer [targ tskip cw put-head move-within kclass chunk-pos head-short
                                      dup-forms-within dup-finish]]
-            [snug.cbor.scan :refer [scan-item run-defer scan-float]]
+            [snug.cbor.scan :refer [scan-item run-defer scan-float wf-payload]]
             [snug.cbor.stdtags :refer [std-allowed]]))
 
 (declarefn pw uvisit tskip-l map-back-p embed-check-in vmap-x ev-add)

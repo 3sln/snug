@@ -91,9 +91,9 @@ export declare const profiles: Readonly<{
   valid: Readonly<{ wire: 'valid'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
     floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false; tag24: 'well-formed' }>;
   deterministic: Readonly<{ wire: 'deterministic'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
-    floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false; tag24: 'valid' }>;
+    floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
   bindle: Readonly<{ wire: 'bindle'; top: 'map'; cose: false; keys: 'text'; tags: 'bindle'; floats: 'bindle';
-    undefinedValue: false; noncharacters: false; strictArrays: true; tag24: 'valid' }>;
+    undefinedValue: false; noncharacters: false; strictArrays: true }>;
 }>;
 export declare function decode(bytes: Uint8Array, options?: DecodeOptions): Value;
 /** maxBytes bounds output acceptance at finish when supplied, not peak allocation. Unknown/malformed options throw TypeError. */

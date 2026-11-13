@@ -159,16 +159,18 @@ only where it lies no later than the framer's own stop.
   in walk order); tags 2/3 accept any bignum of at most 128 content bytes;
   tags 4/40 take any array head (D265).
 * Tag-24 payloads (D358): without `PF_T24V` (bit 11; the valid preset leaves it
-  clear) a payload is walked by `head.kin wf-one`: one **well-formed** item
-  (RFC 8949 §3.4.5.1) — heads of any width, indefinite strings of definite
-  chunks, indefinite containers to a break; **malformed** for ai 28–30, a
-  misplaced break, a wrong chunk and `f8` below 32; **truncated**,
-  **trailing**; the depth, entry and item limits as the walk's (the same
-  order and offsets); nothing else (no key kinds, duplicates, UTF-8, tag or
-  float rules). It records nothing for after the walk. With `PF_T24V` the
-  payload is walked as before, a valid item under the profile. The VM
-  (buffer, live and resumable) uses the same `wf-one`, charging 1 unit per
-  item it counted; the canonical copy does not embed such payloads.
+  clear) a payload is one **well-formed** item (RFC 8949 §3.4.5.1), walked
+  by this scanner's own walk (`wf-scan-one`: `scan-one` under the profile word
+  `PF_WF_WALK` = PF_VALID, any key, any tag, RFC floats, every simple value,
+  noncharacters, plus the internal `PF_WF`, bit 12). `PF_WF` turns off the
+  UTF-8 refusal, the key order and duplicate checks (so nothing is recorded
+  for after the walk) and every tag's rule (its content is an ordinary
+  item). What remains is well-formedness — **malformed**, **truncated**,
+  **trailing** — and the depth, entry and item limits, with the walk's codes
+  and offsets. With `PF_T24V` the payload is walked as before, a valid item
+  under the profile. The VM (buffer, live and resumable) calls the same
+  `wf-scan-one` on its scratch (whose first words are this `o`), charging 1
+  unit per item it counted; the canonical copy does not embed such payloads.
 * The scanner notes in `o[O_VCTL]` whether the input is its own deterministic
   form (`VC_NONDET`), whether some map's keys may be out of canonical order
   (`VC_UNSORTED`) and whether an EC-sensitive key occurred (`VC_ECS`); the

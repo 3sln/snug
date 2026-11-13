@@ -3,9 +3,9 @@
 
 import { chunkPos, cw, dupFinish, dupFormsWithin, headShort, kclass, moveWithin, putHead, targ, tskip } from './canon.mjs';
 import { CODE_DEPTH, CODE_INDEFINITE, CODE_MALFORMED, CODE_NON_SHORTEST, CODE_SCRATCH, CODE_TEXT, CODE_TOO_MANY_ENTRIES, CODE_TRUNCATED, EV_EMB, EV_END, EV_HEAD, EV_KEY, EV_UNITS, EV_WMARK, EV_WORDS, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ENTRIES, O_MAX_ITEMS, O_PROFILE, O_S_CBASE, O_S_CBTOP, O_S_DLOW, O_S_DUPC, O_S_DUPCO, O_S_DUPK, O_S_DUPO, O_S_DUPP, O_S_EDEPTH, O_S_EXTRA, O_S_FIRST, O_S_NDEF, O_S_NEV, O_S_NSORT, O_S_PBAD, O_S_PLANT, O_S_PLEN, O_S_PMAJ, O_S_PSTOP, O_S_RTOP, O_S_SBASE, O_S_SEND, O_S_SRC, O_S_STOPC, O_S_STOPK, O_S_STOPO, O_S_STOPP, O_S_STOPX, O_S_UNITS, O_VCTL, O_VLEN, O_VNEEDB, O_VNEEDW, PF_NONCHAR, PF_VALID, VC_ECS, VC_NONDET, VC_UNSORTED } from './codes.mjs';
-import { headSize, wfPayload } from './head.mjs';
+import { headSize } from './head.mjs';
 import { compareSpans } from './keys.mjs';
-import { runDefer, scanFloat, scanItem } from './scan.mjs';
+import { runDefer, scanFloat, scanItem, wfPayload } from './scan.mjs';
 import { stdAllowed } from './stdtags.mjs';
 import { utf8InvalidAt, utf8InvalidAtNc } from './text.mjs';
 

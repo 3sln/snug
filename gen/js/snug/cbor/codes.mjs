@@ -187,6 +187,10 @@ export const PF_VREL = 1024;
 
 export const PF_T24V = 2048;
 
+export const PF_WF = 4096;
+
+export const PF_WF_WALK = 4475;
+
 export const MAX_BIGNUM_BYTES = 128;
 
 export const MAX_DIMENSIONS = 8;
