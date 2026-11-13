@@ -86,6 +86,15 @@ The recursive union cannot express every root-only admission restriction;
 see the [host compatibility and integer tables](guide.md#decode-after-checking).
 CDDL validation does not infer a narrower TS type.
 
+`encode` writes deterministic CBOR in preferred serialization, so
+`encode(decode(x))` re-encodes every decoded value but one class (D348): a
+map whose keys are one key once a non-preferred bignum (a `Tagged` 2/3 of
+bytes, which `valid` decodes) is written as its integer. Such a map has no
+deterministic encoding; encode (and the `Writer`) refuses it with SnugFault
+`duplicate_key`, `subcode: 'normalized'`, naming no key. `a200f6c240f6`
+({0: null, 2(h''): null}) decodes but does not re-encode; `a1c240f6` re-encodes
+as `a100f6`.
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `wire: 'valid' \| 'deterministic' \| 'bindle'` | `'valid'` | The wire preset ([profiles](profiles.md#options)): any valid CBOR (RFC 8949 §5.3), RFC 8949 §4.2.1 deterministic CBOR, or the Bindle profile; the five options below override it |
@@ -762,7 +771,7 @@ Recovery by CBOR/profile code (also applies to `cbor/<code>` reasons):
 | `malformed` | Invalid CBOR head/structure; reject and fix the producer |
 | `key_type` | Key kind/label outside current policy; use text or permitted root COSE labels; check protocol compatibility |
 | `key_order` | Encoded keys out of lexicographic order (`wire: 'deterministic'`/`'bindle'`); fix producer sorting |
-| `duplicate_key` | Duplicate map key, compared by value (two encodings of one value are one key); reject, resolve duplicate at the producer |
+| `duplicate_key` | Duplicate map key, compared by value (two encodings of one value are one key); reject, resolve duplicate at the producer. From encode with subcode `normalized` (D348): two keys are one key once a non-preferred bignum is written as its integer, so the map has no deterministic encoding; keep the decoded bytes, or merge those keys |
 | `text` | Invalid UTF-8 scalar text or forbidden noncharacter; fix text at the producer |
 | `float` | Scalar width/value violates current policy; use shortest width, integers for safe integral values, and supported finite scalars |
 | `simple` | Unsupported simple value, including undefined; use admitted false/true/null or revise the protocol |

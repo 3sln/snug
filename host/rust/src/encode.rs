@@ -61,6 +61,8 @@ pub fn encode(value: &Value, options: &EncodeOptions) -> Result<Vec<u8>, Error> 
 pub(crate) struct Output {
     pub(crate) bytes: Vec<u8>,
     pub(crate) options: EncodeOptions,
+    /// D348: bignums outside preferred serialization written as their integer so far.
+    pub(crate) norms: usize,
 }
 impl Output {
     pub(crate) fn new(options: EncodeOptions) -> Result<Self, Error> {
@@ -68,7 +70,15 @@ impl Output {
         Ok(Self {
             bytes: Vec::new(),
             options,
+            norms: 0,
         })
+    }
+    /// A bignum's magnitude outside preferred serialization (a leading zero, or a
+    /// value major type 0/1 holds) is about to be written as its integer.
+    fn note_bignum(&mut self, magnitude: &[u8]) {
+        if magnitude.len() < 9 || magnitude[0] == 0 {
+            self.norms += 1;
+        }
     }
     pub(crate) fn raw(&mut self, b: &[u8]) -> Result<(), Error> {
         let end = self
@@ -114,7 +124,10 @@ impl Output {
             Integer::BigInt {
                 negative,
                 magnitude,
-            } => self.integer(*negative, magnitude),
+            } => {
+                self.note_bignum(magnitude);
+                self.integer(*negative, magnitude)
+            }
         }
     }
     pub(crate) fn container(&mut self, major: i32, n: usize, depth: usize) -> Result<(), Error> {
@@ -126,7 +139,10 @@ impl Output {
         }
         self.head(major, n as u64)
     }
-    pub(crate) fn map_end(&mut self, pairs: &[i32]) -> Result<(), Error> {
+    /// Sort a map's pairs through kin. `normalized[i]`: pair i's key holds a bignum
+    /// written as its integer (D348: a duplicate among such keys is `duplicate_key`
+    /// with the subcode `normalized`).
+    pub(crate) fn map_end(&mut self, pairs: &[i32], normalized: &[bool]) -> Result<(), Error> {
         let n = pairs.len() / 2;
         if n < 2 {
             return Ok(());
@@ -145,6 +161,19 @@ impl Output {
             &mut order,
             &mut s,
         );
+        if r == -7 && normalized.iter().any(|&x| x) {
+            // close-map moves nothing on a refusal: the keys are still where `pairs` says
+            let key = |i: usize| &self.bytes[pairs[2 * i] as usize..pairs[2 * i + 1] as usize];
+            let mut seen: std::collections::HashMap<&[u8], bool> = std::collections::HashMap::new();
+            for i in 0..n {
+                let norm = normalized.get(i).copied().unwrap_or(false);
+                let g = seen.get(key(i)).copied();
+                if g.is_some_and(|g| g || norm) {
+                    return Err(Error::Cbor { code: "duplicate_key", offset: None, subcode: Some("normalized") });
+                }
+                seen.insert(key(i), g.unwrap_or(false) || norm);
+            }
+        }
         if r != 0 {
             return Err(if r == -40 {
                 Error::cbor("budget")
@@ -165,7 +194,10 @@ impl Output {
             Value::BigInt {
                 negative,
                 magnitude,
-            } => self.integer(*negative, magnitude),
+            } => {
+                self.note_bignum(magnitude);
+                self.integer(*negative, magnitude)
+            }
             Value::Bytes(b) => {
                 self.head(2, b.len() as u64)?;
                 self.raw(b)
@@ -184,13 +216,16 @@ impl Output {
             Value::Map(a) => {
                 self.container(5, a.len(), depth)?;
                 let mut pairs = Vec::new();
+                let mut normalized = Vec::new();
                 for (k, v) in a {
                     pairs.push(self.bytes.len() as i32);
+                    let n0 = self.norms;
                     self.value(k, depth + 1)?;
+                    normalized.push(self.norms != n0);
                     pairs.push(self.bytes.len() as i32);
                     self.value(v, depth + 1)?;
                 }
-                self.map_end(&pairs)
+                self.map_end(&pairs, &normalized)
             }
             Value::Tag(n, v) => {
                 self.head(6, *n)?;

@@ -23,6 +23,10 @@ pub enum Error {
         code: &'static str,
         /// Byte offset, when the operation has one.
         offset: Option<usize>,
+        /// Why, when the code alone does not say (D348): `normalized` on an
+        /// encoder's `duplicate_key` when two keys are one key once a bignum
+        /// outside preferred serialization is written as its integer.
+        subcode: Option<&'static str>,
     },
     /// Schema validation refusal (`code()` uses JS's `schema/` prefix).
     Validation(Failure),
@@ -83,8 +87,17 @@ impl Error {
             Self::Internal => "internal",
         }
     }
+    /// The refusal's subcode, when it has one: `Error::Cbor`'s (D348: `normalized`)
+    /// or a validation failure's (`cut`, an embedded item's reason).
+    pub fn subcode(&self) -> Option<&'static str> {
+        match self {
+            Self::Cbor { subcode, .. } => *subcode,
+            Self::Validation(e) | Self::Sequence(crate::sequence::MessageFailure { failure: e, .. }) => e.subcode,
+            _ => None,
+        }
+    }
     pub(crate) fn cbor(code: &'static str) -> Self {
-        Self::Cbor { code, offset: None }
+        Self::Cbor { code, offset: None, subcode: None }
     }
 }
 impl fmt::Display for Error {

@@ -7104,6 +7104,11 @@ merged as `fd63a81`. Its gates, on that commit: `bb gates land` all 8 ok;
   - `f8` below 0x20 is malformed everywhere (RFC 8949 §3.3);
   - bignums stay distinct data items.
 
+*Follow-up, 2026-11-12:* decoded values and encode disagree on one class
+(P9.9's proptest: `a200f6c240f6` decodes, its re-encode is `duplicate_key`).
+The coordinator kept the encoder's preferred serialization; the refusal gets
+the subcode `normalized`. See D348.
+
 ### D343 — The version comes from `version.edn`; tracked trees hold a placeholder, and only release builds are stamped (P9.15 rework; O2, O4–O6; D338)
 **Decision** (P9.15 engineer, proposed):
 - **One source.** `version.edn` at the repository root holds `:version`
@@ -7327,6 +7332,73 @@ shared machine):
     (JS only, needs host code that breaks the predicate rule), is fixed,
     with deterministic regressions and a randomized handout property test.
   - Rust and the wasm SDK are not affected.
+
+### D348 — A map whose keys are one key once a non-preferred bignum is written as its integer refuses to encode: `duplicate_key`, subcode `normalized` (follow-up to D342; P9.9 proptest)
+**Decision** (coordinator; implemented by the P9.16 engineer, provisional):
+the encoder keeps writing deterministic CBOR in preferred serialization, so
+a `Tagged` 2/3 bignum of bytes (what the `valid` decoder gives a
+non-preferred bignum, D342) and Rust's `Value::BigInt` are written as their
+integer. RFC 8949 §3.4.3: "preferred serialization (Section 4.1) never makes
+use of bignums that also can be expressed as basic integers", and "The
+preferred serialization of an integer that can be represented using major
+type 0 or 1 is to encode it this way instead of as a bignum ... Note that
+this means the non-preferred choice of a bignum representation instead of a
+basic integer for encoding a number is not intended to have application
+semantics". §4.2.2: a deterministic encoding "needs to specify whether
+smaller integers are also expressed using these tags or using major types 0
+and 1. Preferred serialization uses the latter choice, which is therefore
+recommended." A map whose keys coincide after that (`a200f6c240f6`,
+{0: null, 2(h''): null}, which `valid` decodes to two distinct keys) cannot
+be written in deterministic CBOR, so refusing it is correct. The refusal
+names its reason: `duplicate_key` with the subcode `normalized`, never key
+data.
+- JS (`encode`, `Writer#value`, the streaming `Writer#key`, `keysSorted` too):
+  the Writer counts the bignums it writes as integers; each map records which
+  keys held one; on kin's `duplicate_key` (nothing moved yet) it groups the
+  keys by their bytes and gives `normalized` when a colliding group holds such
+  a key. An ordinary duplicate (two equal byte strings) keeps no subcode.
+- Rust (`encode`, `Writer`): the same, per map (`Output::norms`, the
+  frame's `normalized` flags); `Error::Cbor` gains `subcode:
+  Option<&'static str>` and `Error::subcode()` reads it (also a validation
+  failure's subcode).
+- wasm SDK: its tape encoder flags the same keys; on kin's duplicate it
+  compares the keys' integer identities (integers, Tagged 2/3, text and arrays
+  of these) in JS. Its `Writer` is the native one.
+- Per preset: `deterministic` and Bindle refuse a non-preferred bignum on
+  decode (`bignum`), so their decoded values always re-encode; the exception
+  is `valid`'s alone.
+**Evidence**: host/js/test/profiles.test.mjs and host/rust/tests/public_api.rs
+(`a200f6c240f6`, `a220f6c340f6` = {-1: null, 3(h''): null}, the first nested
+as a map value, array keys `[0]` / `[2(h'')]`: `duplicate_key` /
+`normalized` from encode and the Writer; `a1c240f6` re-encodes as `a100f6`;
+an ordinary duplicate has no subcode; `deterministic` refuses on decode);
+the wasm SDK parity test encodes the same values under every option set and
+compares code, subcode and message with native; under its 3-item bound these
+maps hold two faults (too_many_items as well), where the SDK's tape may report
+the other one first (its documented multi-fault difference), so that option is
+left out for them.
+**Alternatives**: keep a non-preferred bignum as written so the map
+round-trips (the first brief; withdrawn by the coordinator: the encoder's
+output would stop being deterministic); a new code instead of a subcode (it
+is a duplicate key, by the deterministic data model).
+**Note for P9.9**: the proptest round-trip property (tools/proptest, not
+edited here; its patch waits for the owner) must expect `duplicate_key` with
+subcode `normalized` for exactly this class: a decoded map with two keys
+whose preferred-serialization encodings are equal and one of which holds a
+non-preferred bignum.
+**Size** (on main f63a106, min / gzip / brotli): every entry with the Writer
+grows by about +575 / +223 / +221 (the per-key flags, the collision report,
+the subcode on SnugFault; esbuild keeps private names): `snug` 62,392 →
+62,967 / 21,413 → 21,638; `snug/writer` 58,491 → 59,066 / 20,022 → 20,245;
+`snug/view` 76,214 → 76,789 / 25,820 → 26,043 / 22,619 → 22,840. Only
+`snug/view`'s gzip and brotli caps were exceeded (its gzip cap equalled the
+measurement); they rise to ceil(measurement × 1.02), 26,564 and 23,297
+(tools/size/budget.json). After rebasing onto D347 (main e562ae9), whose
+deferred close grows `snug/sequence` too, its gzip and brotli caps were
+exceeded as well (75,854 > 75,810; 65,780 > 65,731) and rise to 77,372 and
+67,096. Under 1 KB, for a refusal that names its reason.
+- [ ] **Cap raise signed off** (coordinator, under D303)
+- [ ] **Signed off** (manager)
 
 ## Findings
 
@@ -9221,6 +9293,11 @@ authorised), the existing gate set, and conformance-corpus vectors.
     outside `Decimal`/`NDArray`'s invariants) above the Bindle tag set, their
     content checked by the scanner, and typed float arrays with NaN above the
     Bindle tag set (D265), so every value the default decodes re-encodes.
+    *Corrected 2026-11-12:* since D342 a non-preferred bignum decodes to a
+    `Tagged` of its bytes, not a number; and one class of decoded value does
+    not re-encode (D348): a map whose keys are one key once such a bignum is
+    written as its integer (`a200f6c240f6`, {0: null, 2(h''): null}) is
+    refused with `duplicate_key`, subcode `normalized`.
     Engine fix: a replayed refusal's source position at a region's end is the
     region's, not the embedded copy starting there (`vmap-x`; an embedded
     map cut short at a key reported the content's start; valid-test

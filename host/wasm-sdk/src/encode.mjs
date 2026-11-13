@@ -47,8 +47,21 @@ const MESSAGES = {
   malformed: 'The writer reached an inconsistent state.', key_order: 'Map keys were not supplied in order.',
   duplicate_key: 'A map has duplicate keys.', float: 'NaN, infinities, -0 and integral floats within the safe range are not encodable as floats.',
   bignum: 'Integer exceeds the bignum bound.',
+  normalized: 'Two map keys are one key once a bignum is written as its integer.',
 };
-const fail = (code, message) => { throw new SnugFault(code, message); };
+const fail = (code, message, subcode) => { const e = new SnugFault(code, message); if (subcode) e.subcode = subcode; throw e; };
+/** D348: a key's integer identity after bignum normalisation (integers, Tagged 2/3 of bytes, text, arrays of these),
+ *  or null for any other key (the tape's own duplicate check then stands, without a subcode). */
+function canon(k) {
+  if ((typeof k === 'number' && Number.isSafeInteger(k)) || typeof k === 'bigint') return 'i' + k;
+  if (typeof k === 'string') return 's' + JSON.stringify(k);
+  if (k instanceof Tagged && (k.tag === 2 || k.tag === 3) && k.value instanceof Uint8Array) return 'i' + bignumOf(k.tag, k.value);
+  if (Array.isArray(k)) { const p = k.map(canon); return p.includes(null) ? null : '[' + p.join(',') + ']'; }
+  return null;
+}
+/** Does the key hold a bignum outside preferred serialization (written as its integer)? */
+const normalizes = k => (k instanceof Tagged ? (k.tag === 2 || k.tag === 3) && k.value instanceof Uint8Array && (k.value.length < 9 || k.value[0] === 0)
+  : Array.isArray(k) && k.some(normalizes));
 
 // tape (words) and byte area: pointers into linear memory, capacities, fill
 let tp = 0, tcap = 0, tn = 0, bp = 0, bcap = 0, bn = 0, gen = -1;
@@ -213,6 +226,17 @@ function walk(v, depth) {
     let r;
     try { r = rt.x.sdk_enc_keys(k0, n, ...scanArgs); } catch (e) { rt.lost(e); }
     rt.refresh();
+    if (r === -7 && keys.some(normalizes)) {
+      // D348, as the native Writer: a collision involving a normalised bignum key gets the subcode `normalized`
+      const seen = new Map();
+      for (const k of keys) {
+        const c = canon(k);
+        if (c === null) continue;
+        const norm = normalizes(k), g = seen.get(c);
+        if (g !== undefined && (g || norm)) fail('duplicate_key', MESSAGES.normalized, 'normalized');
+        seen.set(c, g === true || norm);
+      }
+    }
     if (r < 0) refusal(r);
   }
   words(n);

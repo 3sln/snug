@@ -149,9 +149,18 @@ These matter only to users of pre-release builds from this repository.
   `Error::from` a `Failure` with code −1 gives the same (D342).
 - `[rust]` A transport error is `Error::Io` with the original error, not
   `Error::Source("read")`; `code()` stays `read` (D342).
+- `[rust]` `Error::Cbor` gains `subcode: Option<&'static str>` (read it with
+  `Error::subcode()`); code building or matching the variant needs the new
+  field or `..` (D348).
 
 ### Changed
 
+- Encoding a map whose keys are one key once a non-preferred bignum (a
+  decoded `Tagged` 2/3 of bytes, or Rust's `Value::BigInt`) is written as
+  its integer fails with `duplicate_key` and the subcode `normalized`: such
+  a map has no deterministic encoding. `a200f6c240f6` ({0: null,
+  2(h''): null}) decodes under `valid` but does not re-encode; this is the
+  one decoded value that does not (D348).
 - Minimum supported toolchains: `[js]` Node 20 (`engines`), `[rust]` Rust
   1.87 (`rust-version`). Each is tested on exactly that version before a
   release. Node 20 is past upstream end of life, so its floor may rise in
