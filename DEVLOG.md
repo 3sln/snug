@@ -7710,7 +7710,14 @@ ceil(measured × 1.02): bytes 154,028 → **153,564**, gzip 70,071 →
     map. Both valid presets, at top level and inside an array.
   - 499 cases with the PF_VALID bit, of which 426 differed from the scanner
     on main. 0 differ now.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-13). This bug fix restores
+  scanner == VM identity under the existing first-error rule, so no owner
+  decision is needed. Merged at `c7a7c57`. On main: drift ok, no conflict
+  markers.
+  - Process note: it was merged after main moved, without a second rebase.
+    The engineer re-ran size, wasm-sdk-test and wasm-size on the merged
+    main, all ok.
+  - P9.9's final-main run covers the rest.
 
 ## Findings
 
