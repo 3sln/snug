@@ -7996,6 +7996,22 @@ Babashka 1.3.190, nvm Node, `env -i`):
     them. Tested with two matches and with `^20`.
   - Not covered locally: the hosted runner's own tool cache and its
     rustup version, and how `actions/cache` behaves on a hosted runner.
+- *Hosted proof, 2026-11-13 (coordinator):*
+  - Run 43468291319 on 1d037b9 failed in setup: esbuild was invoked through
+    node. Fixed in 5304d36.
+  - Run 43470665707 on 5304d36: `land` passed on macos-15, 9/9 gates in
+    8m48s, with no SKIP (wasm-sdk-test 274 s, vm-test 99 s, rust-api-test
+    40 s). Every compat and linux cell passed except stable.
+    - Linux stable failed with the D357 overflow.
+    - macOS stable was cancelled: the job was never picked up by a runner
+      (GitHub's arm64 capacity).
+    - `ci` failed, as it should while D357 is open.
+  - Hosted `land` took about 9 minutes against 286 minutes of caps. The
+    timeouts are very generous, which is fine.
+  - Remaining step before ticking: once D357 lands, the coordinator
+    triggers one `workflow_dispatch` release run to prove the five shards
+    on hosted runners, before any tag. The release shards have not yet
+    run on a hosted runner.
 - [ ] **Signed off** (manager)
 
 ## Findings
@@ -11369,6 +11385,11 @@ can run alongside them; its build work is post-RC unless it is cheap.
   Landed (D356, see there); nothing is pushed by engineers. It closes when
   the coordinator's first hosted run is green, which needs D357 first (the
   stable-Rust cells are required and red until then).
+  *Status 2026-11-13:* hosted `land` passed in run 43470665707 (5304d36).
+  Remaining:
+  1. D357 lands, so the stable cells go green.
+  2. One `workflow_dispatch` release run, to prove the five shards on
+     hosted runners before any tag.
   - `.github/workflows/ci.yml`: `land` on pull requests and pushes to
     main; the release set as five shards on `v*` / `src/v*` tags and a
     manual run; a macOS compat matrix; a Linux matrix; one `ci` status.
