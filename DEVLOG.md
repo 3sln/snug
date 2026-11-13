@@ -8311,8 +8311,14 @@ Gate record (tree of `c3ff28a` rebased on main `96b07c9`, plus this entry):
   (exit 1); restored → ok.
 - types-test proof: on the old declarations, FAIL in all 4 configurations
   (TS2345 BodyInit, TS2322 BlobPart; TS2339 release).
+- Manager re-run on the merged main 8a37612: `bb gates land`, all 11 ok.
 
-- [ ] Signed off
+- [x] **Signed off** (manager, 2026-11-13). WP4 is accepted.
+  - Packaging: `docs/conformance.md` and `docs/release-policy.md` leave
+    the npm package. They are maintainer records, linked on GitHub.
+  - Types: the TypeScript floor moves to 5.7.
+  - Left to WP2: N1, N7 and N8, and rust.md's `profile`/`snug::snug`
+    mentions.
 
 ## Findings
 
