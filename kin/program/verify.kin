@@ -610,9 +610,11 @@
             lr (pw p o)
             hr (pw p (+ o 3))]
         (if (and (<= lr 3) (>= hr 3)) (set m (bit-or m 1)))
-        (if (and (<= lr 2) (>= hr 2)) (set m (bit-or m 2)))
-        (if (!= bigok 0)
-          (if (or (and (<= lr 1) (>= hr 1)) (and (<= lr 4) (>= hr 4))) (set m (bit-or m 2048))))))
+        (if (and (<= lr 2) (>= hr 2)) (set m (bit-or m 2)))))
+    (comment "D363: flags bit 0 BIGOK admits any bignum (by value), bit 1 BIGONLY nothing"
+             "else")
+    (if (!= (bit-and bigok 1) 0) (set m (bit-or m 2048)))
+    (if (!= (bit-and bigok 2) 0) (set m 2048))
     (return m)))
 
 (defn ^Bool zero-from [^IntsR p ^I32 o ^I32 k]
@@ -677,7 +679,8 @@
     (if (== k 2) (return (want s (and (and (>= d0 0) (<= d0 7)) (zero-from p o 1)) o C_LEAF)))
     (if (== k 3)
       (do (let [run-ok (iv-run-ok p b s d0 d1)]
-            (return (want s (and (and (<= fl 1) (>= d1 1)) (and run-ok (zero-from p o 2))) o C_LEAF)))))
+            (comment "flags: 0, 1 BIGOK, or 3 BIGOK + BIGONLY (D363)")
+            (return (want s (and (and (and (<= fl 3) (!= fl 2)) (>= d1 1)) (and run-ok (zero-from p o 2))) o C_LEAF)))))
     (if (== k 4)
       (do (if (or (< fl 1) (> fl 7)) (return (want s false o C_LEAF)))
           (if (== d1 0) (return (want s (zero-from p o 0) o C_LEAF)))

@@ -966,11 +966,14 @@ pub(crate) fn iv_mask(p: &[i32], first: i32, n: i32, bigok: i32) -> i32 {
         if (lr <= 2) && (hr >= 2) {
             m |= 2;
         }
-        if bigok != 0 {
-            if ((lr <= 1) && (hr >= 1)) || ((lr <= 4) && (hr >= 4)) {
-                m |= 2048;
-            }
-        }
+    }
+    // D363: flags bit 0 BIGOK admits any bignum (by value), bit 1 BIGONLY nothing
+    // else
+    if (bigok & 1) != 0 {
+        m |= 2048;
+    }
+    if (bigok & 2) != 0 {
+        m = 2048;
     }
     return m;
 }
@@ -1090,7 +1093,8 @@ pub(crate) fn check_leaf(p: &[i32], b: &[u8], s: &mut [i32], l: i32) -> bool {
     }
     if k == 3 {
         let run_ok: bool = iv_run_ok(p, b, s, d0, d1);
-        return want(s, ((fl <= 1) && (d1 >= 1)) && (run_ok && zero_from(p, o, 2)), o, C_LEAF);
+        // flags: 0, 1 BIGOK, or 3 BIGOK + BIGONLY (D363)
+        return want(s, (((fl <= 3) && (fl != 2)) && (d1 >= 1)) && (run_ok && zero_from(p, o, 2)), o, C_LEAF);
     }
     if k == 4 {
         if (fl < 1) || (fl > 7) {

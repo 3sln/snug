@@ -117,7 +117,11 @@ export function check(P, B, rule, item, { cuts = 'rfc', steps = 2000000 } = {}) 
         const m = it.kind === 'int' ? (it.value < 0n ? 1 : 0) : { bytes: 2, text: 3, array: 4, map: 5, tag: 6, simple: 7, float: 7 }[it.kind];
         return m === d(0);
       }
-      case 3: { const v = intValue(it, fl & 1); return v !== null && inIntervals(d(0), d(1), v); }
+      case 3: {
+        // D363: bit 0 BIGOK admits bignums by value; bit 1 BIGONLY admits nothing else
+        if ((fl & 2) && it.kind === 'int') return false;
+        const v = intValue(it, fl & 1); return v !== null && inIntervals(d(0), d(1), v);
+      }
       case 4: {
         if (it.kind !== 'float') return false;
         // D328: the widths that represent the value exactly, whatever width encodes it

@@ -47,7 +47,7 @@
             [snug.compile.bytes :refer [intern enc-string enc-int-key mag-of bid-byte bid-len head-push]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd leaf-new ts-make ts-of1 ts-push-leaves
                                        ts-n ts-leaf leaf-mask mk-any mk-major mk-simple-range mk-lit mk-text
-                                       mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow u64-cmp
+                                       mk-bytes mk-int-range mk-int-span point-of fkey-hi fkey-lo mk-float-from bound-pred u64-cmp
                                        stage stage-d stage-intern mk-and
                                        K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
                                        K_SIMPLE K_EXT
@@ -306,7 +306,9 @@
               (if (== incl 0)
                 (do (bound-pred h hr ha hb)
                     (set hr (hg h H_R0)) (set ha (hg h H_R1)) (set hb (hg h H_R2))))
-              (let [l (mk-int-range h lr la lb hr ha hb)]
+              (comment "D363: a range compares numeric values, so it admits a bignum"
+                       "whose value lies in it (BIGOK), small ones included")
+              (let [l (mk-int-span h lr la lb hr ha hb 1)]
                 (return (ts-of1 h l)))))))
     (if (float-point h lo)
       (do (let [lkh (hg h H_R0) lkl (hg h H_R1)]
@@ -542,9 +544,12 @@
       (if (>= memo 0) (return memo))
       (if (== mode 0)
         (do (if (and (== hi 0) (and (or (== lo 2) (== lo 3)) (bstr-content h content env)))
-              (do (let [two64 (mag-pow h)
-                        lp (mk-int-range h R_POS_BIG two64 9 R_POS_INF 0 0)
-                        ln (mk-int-range h R_NEG_INF 0 0 R_NEG_BIG two64 9)
+              (do (comment "D363: every tag 2/3 bignum, whatever its value or leading"
+                           "zeroes (the valid preset admits non-preferred ones, RFC 8949"
+                           "§3.4.3): BIGONLY INT leaves over all non-negative / negative values,"
+                           "so ranges and numeric controls compare the bignum's value")
+                  (let [lp (mk-int-span h R_POS 0 0 R_POS_INF 0 0 2)
+                        ln (mk-int-span h R_NEG_INF 0 0 R_NEG 0 0 2)
                         ^:mut l lp]
                     (if (== lo 3) (set l ln))
                     (let [ts (ts-of1 h l)]
@@ -717,8 +722,8 @@
           (do (let [cts (content-ts h (lw h l 12) (lw h l 13))]
                 (if (< cts 0) (return (neg 1)))
                 (ts-push-leaves h cts)))
-          (if (and (== k K_INT) (!= (lflags h l) 0))
-            (do (comment "an unconstrained bignum tag: its content is a byte string")
+          (if (and (== k K_INT) (!= (bit-and (lflags h l) 2) 0))
+            (do (comment "a bignum-only leaf (D363): its content is a byte string")
                 (let [bl (mk-bytes h 0 INF (neg 1))] (vpush1 h T_STK bl)))
             (return (fail h ERR_UNWRAP pos))))))
     (return (ts-make h from))))
@@ -953,9 +958,9 @@
                 (let [cts (content-ts h (lw h l 12) (lw h l 13))]
                   (if (< cts 0) (return (neg 1)))
                   (set child (pb-node h P_ENTRY cts 0 0 pos)))))
-          (if (and (== k K_INT) (!= (lflags h l) 0))
+          (if (and (== k K_INT) (!= (bit-and (lflags h l) 2) 0))
             (do (if (== mode 1) (return (fail h ERR_MAP_KEY pos)))
-                (comment "an unconstrained bignum tag: its content is a byte string")
+                (comment "a bignum-only leaf (D363): its content is a byte string")
                 (let [bl (mk-bytes h 0 INF (neg 1))
                       bts (ts-of1 h bl)]
                   (set child (pb-node h P_ENTRY bts 0 0 pos)))))

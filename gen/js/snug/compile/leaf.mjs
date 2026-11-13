@@ -689,17 +689,23 @@ export function ivLoad(h, t, first, n) {
     }
 }
 
-export function mkIntFrom(h, t, _bigok) {
-    // An INT leaf from the normalised records in temp vector t (-2 if empty).
-    // Canonical: BIGOK exactly when an interval reaches a bignum region (the
-    // argument is ignored), since a value beyond 64 bits IS a bignum.
+export function mkIntFrom(h, t, flags) {
+    // An INT leaf from the normalised records in temp vector t (-2 if empty),
+    // with flags (D363): bit 0 BIGOK -- a bignum is admitted and compared by its
+    // numeric value (a range, a numeric control's result), always set when an
+    // interval reaches a bignum region, since a value beyond 64 bits IS a
+    // bignum; bit 1 BIGONLY -- only bignums are admitted (#6.2/3(bstr), the
+    // prelude's biguint and bignint), and it implies BIGOK.
     const n = (vlen(h, t) / 6) | 0;
-    let big = 0;
+    let big = flags & 3;
     if (n === 0) {
         return -2;
     }
+    if ((big & 2) !== 0) {
+        big = 3;
+    }
     if ((vget(h, t, 0) <= R_NEG_BIG) || (vget(h, t, (6 * n) - 3) >= R_POS_BIG)) {
-        big = 1;
+        big |= 1;
     }
     const first = ivCommit(h, t);
     stage(h, K_INT, big);
@@ -708,18 +714,20 @@ export function mkIntFrom(h, t, _bigok) {
     return stageIntern(h);
 }
 
-export function mkIntRange(h, lr, la, lb, hr, ha, hb) {
-    // An INT leaf for one interval; BIGOK when it reaches a bignum region.
+export function mkIntSpan(h, lr, la, lb, hr, ha, hb, flags) {
+    // An INT leaf for one interval with mk-int-from's flags.
     vtrunc(h, T_IVS, 0);
     ivPush(h, T_IVS, lr, la, lb, hr, ha, hb);
     if (boundCmp(h, lr, la, lb, hr, ha, hb) > 0) {
         return -2;
     }
-    let big = 0;
-    if ((lr <= R_NEG_BIG) || (hr >= R_POS_BIG)) {
-        big = 1;
-    }
-    return mkIntFrom(h, T_IVS, big);
+    return mkIntFrom(h, T_IVS, flags);
+}
+
+export function mkIntRange(h, lr, la, lb, hr, ha, hb) {
+    // An INT leaf for one interval of plain integers (major 0/1); BIGOK when it
+    // reaches a bignum region.
+    return mkIntSpan(h, lr, la, lb, hr, ha, hb, 0);
 }
 
 export function ivContains(h, first, n, r, a, b) {
@@ -1019,16 +1027,13 @@ export function leafMask(h, l) {
         if (ivMeets(h, f, n, R_NEG, -1, -1, R_NEG, 0, 0)) {
             msk |= 2;
         }
-        // A bignum region is met when an interval spans into it (by region:
-        // big bounds compare by magnitude, so no fixed bound stands for them).
+        // D363: BIGOK admits any bignum (compared by its value, which may be
+        // small under the valid preset); BIGONLY admits nothing else.
         if ((lflags(h, l) & 1) !== 0) {
-            for (let i = 0; i < n; i++) {
-                const lr = vget(h, T_IV, 6 * (f + i));
-                const hr = vget(h, T_IV, (6 * (f + i)) + 3);
-                if (((lr <= R_NEG_BIG) && (hr >= R_NEG_BIG)) || ((lr <= R_POS_BIG) && (hr >= R_POS_BIG))) {
-                    msk |= 2048;
-                }
-            }
+            msk |= 2048;
+        }
+        if ((lflags(h, l) & 2) !== 0) {
+            msk = 2048;
         }
         return msk;
     }
@@ -1362,38 +1367,39 @@ export function nextEpoch(h) {
 }
 
 export function mergeInts(h, from) {
-    // Replace every INT leaf in T_STK[from..] by one merged INT leaf at the
-    // position of the first (BIGOK if any was). Answers -1 on error.
-    const n = vlen(h, T_STK);
-    let first = -1;
-    let count = 0;
-    let big = 0;
-    vtrunc(h, T_IVA, 0);
-    for (let i = from; i < n; i++) {
-        const l = vget(h, T_STK, i);
-        if (lk(h, l) === K_INT) {
-            if (first < 0) {
-                first = i;
+    // Replace the INT leaves in T_STK[from..] of each flags value (D363: plain,
+    // BIGOK, BIGONLY admit different items, so only equal flags merge) by one
+    // merged INT leaf at the position of the first. Answers -1 on error.
+    for (let fl = 0; fl < 4; fl++) {
+        const n = vlen(h, T_STK);
+        let first = -1;
+        let count = 0;
+        vtrunc(h, T_IVA, 0);
+        for (let i = from; i < n; i++) {
+            const l = vget(h, T_STK, i);
+            if ((l >= 0) && ((lk(h, l) === K_INT) && ((lflags(h, l) & 3) === fl))) {
+                if (first < 0) {
+                    first = i;
+                }
+                count += 1;
+                ivLoad(h, T_IVA, ld(h, l, 0), ld(h, l, 1));
             }
-            count += 1;
-            big |= lflags(h, l) & 1;
-            ivLoad(h, T_IVA, ld(h, l, 0), ld(h, l, 1));
         }
-    }
-    if (count < 2) {
-        return 0;
-    }
-    if (ivNormalize(h, T_IVA, T_IVB) < 0) {
-        return -1;
-    }
-    const m = mkIntFrom(h, T_IVB, big);
-    if (m < 0) {
-        return -1;
-    }
-    vset(h, T_STK, first, m);
-    for (let j = first + 1; j < n; j++) {
-        if (lk(h, vget(h, T_STK, j)) === K_INT) {
-            vset(h, T_STK, j, -1);
+        if (count >= 2) {
+            if (ivNormalize(h, T_IVA, T_IVB) < 0) {
+                return -1;
+            }
+            const m = mkIntFrom(h, T_IVB, fl);
+            if (m < 0) {
+                return -1;
+            }
+            vset(h, T_STK, first, m);
+            for (let j = first + 1; j < n; j++) {
+                const lj = vget(h, T_STK, j);
+                if ((lj >= 0) && ((lk(h, lj) === K_INT) && ((lflags(h, lj) & 3) === fl))) {
+                    vset(h, T_STK, j, -1);
+                }
+            }
         }
     }
     return 0;

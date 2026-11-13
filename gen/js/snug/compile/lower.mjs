@@ -5,7 +5,7 @@ import { ERR_CONTROL_VALUE, ERR_ENUM, ERR_GENERIC, ERR_GROUP_RECURSION, ERR_INTE
 import { bidByte, bidLen, encIntKey, encString, headPush, intern, magOf } from './bytes.mjs';
 import { ctlAnd, ctlBits, ctlCat, ctlCbor, ctlCompare, ctlDet, ctlEq, ctlPlus, ctlRegexp, ctlSize, floatPoint, intPoint, singleLeaf } from './ctl.mjs';
 import { builtinCtl, extLookup, extMax } from './ext.mjs';
-import { K_ARRAY, K_EMBED, K_EXT, K_INT, K_LIT, K_MAP, K_SIMPLE, K_TAG, K_TAGSET, R_NEG, R_NEG_BIG, R_NEG_INF, R_POS, R_POS_BIG, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, magPow, mkAnd, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkLit, mkMajor, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
+import { K_ARRAY, K_EMBED, K_EXT, K_INT, K_LIT, K_MAP, K_SIMPLE, K_TAG, K_TAGSET, R_NEG, R_NEG_INF, R_POS, R_POS_INF, boundPred, fkeyHi, fkeyLo, ld, leafMask, leafNew, lflags, lk, lset, lsetd, lw, mkAnd, mkAny, mkBytes, mkFloatFrom, mkIntRange, mkIntSpan, mkLit, mkMajor, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1, tsPushLeaves, u64Cmp } from './leaf.mjs';
 import { TK_BYTES, TK_FLOAT, TK_INT, TK_TEXT, tkA, tkB, tkC, tkEnd, tkKind, tkStart } from './lex.mjs';
 import { KEY_BARE, KEY_TYPE, KEY_VALUE, N_ANY, N_ARRAY, N_CTL, N_ENT, N_ENUM, N_MAJOR, N_MAP, N_MEMBER, N_NAME, N_RANGE, N_SUBGRP, N_TAG, N_TYPE, N_UNWRAP, N_VALUE, na, nb, nc, nd, ne, nk, nnext, npos, ntok } from './parse.mjs';
 import { P_CALL, P_CHOICE, P_ENTRY, P_FAIL, P_MEMBER, P_SEQ, pbAdd, pbList, pbNode, pbRep, pegBegin, pegFinish, pegInit, pgsFind, pgsPop, pgsPush, pmNew } from './peg.mjs';
@@ -392,7 +392,9 @@ export function lowerRange(h, node, env) {
             ha = hg(h, H_R1);
             hb = hg(h, H_R2);
         }
-        const l = mkIntRange(h, lr, la, lb, hr, ha, hb);
+        // D363: a range compares numeric values, so it admits a bignum
+        // whose value lies in it (BIGOK), small ones included
+        const l = mkIntSpan(h, lr, la, lb, hr, ha, hb, 1);
         return tsOf1(h, l);
     }
     if (floatPoint(h, lo)) {
@@ -775,9 +777,12 @@ export function lowerTag(h, node, env) {
     }
     if (mode === 0) {
         if ((hi === 0) && (((lo === 2) || (lo === 3)) && bstrContent(h, content, env))) {
-            const two64 = magPow(h);
-            const lp = mkIntRange(h, R_POS_BIG, two64, 9, R_POS_INF, 0, 0);
-            const ln = mkIntRange(h, R_NEG_INF, 0, 0, R_NEG_BIG, two64, 9);
+            // D363: every tag 2/3 bignum, whatever its value or leading
+            // zeroes (the valid preset admits non-preferred ones, RFC 8949
+            // §3.4.3): BIGONLY INT leaves over all non-negative / negative values,
+            // so ranges and numeric controls compare the bignum's value
+            const lp = mkIntSpan(h, R_POS, 0, 0, R_POS_INF, 0, 0, 2);
+            const ln = mkIntSpan(h, R_NEG_INF, 0, 0, R_NEG, 0, 0, 2);
             let l = lp;
             if (lo === 3) {
                 l = ln;
@@ -1049,8 +1054,8 @@ export function lowerUnwrap(h, node, env) {
                 return -1;
             }
             tsPushLeaves(h, cts);
-        } else if ((k === K_INT) && (lflags(h, l) !== 0)) {
-            // an unconstrained bignum tag: its content is a byte string
+        } else if ((k === K_INT) && ((lflags(h, l) & 2) !== 0)) {
+            // a bignum-only leaf (D363): its content is a byte string
             const bl = mkBytes(h, 0, INF, -1);
             vpush1(h, T_STK, bl);
         } else {
@@ -1435,11 +1440,11 @@ export function pUnwrap(h, un, env) {
             }
             child = pbNode(h, P_ENTRY, cts, 0, 0, pos);
         }
-        if ((k === K_INT) && (lflags(h, l) !== 0)) {
+        if ((k === K_INT) && ((lflags(h, l) & 2) !== 0)) {
             if (mode === 1) {
                 return fail(h, ERR_MAP_KEY, pos);
             }
-            // an unconstrained bignum tag: its content is a byte string
+            // a bignum-only leaf (D363): its content is a byte string
             const bl = mkBytes(h, 0, INF, -1);
             const bts = tsOf1(h, bl);
             child = pbNode(h, P_ENTRY, bts, 0, 0, pos);

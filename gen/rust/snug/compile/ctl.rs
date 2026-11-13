@@ -85,7 +85,8 @@ pub(crate) fn int_with(h: &mut [i32], l: i32, lr: i32, la: i32, lb: i32, hr: i32
     if iv_intersect(h, T_IVA, T_IVB, T_IVC) < 0 {
         return -1;
     }
-    return mk_int_from(h, T_IVC, 0);
+    // D363: the target's flags (which data items it admits) carry over.
+    return mk_int_from(h, T_IVC, lflags(h, l));
 }
 pub(crate) fn pow256_word(k: i32, minus1: i32, high: i32) -> i32 {
     // Word high (1) or low (0) of 256^k, or of 256^k - 1 when minus1; k 0..8
@@ -834,7 +835,7 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
                 let sb: i32 = hg(h, H_R2);
                 iv_push(h, T_IVB, sr, sa, sb, R_POS_INF, 0, 0);
                 iv_intersect(h, T_IVA, T_IVB, T_IVC);
-                let nl2: i32 = mk_int_from(h, T_IVC, 0);
+                let nl2: i32 = mk_int_from(h, T_IVC, lflags(h, t));
                 vpush1(h, T_STK, nl2);
             }
         } else if (isflt || fexact) && (k == K_FLOAT) {
@@ -968,7 +969,15 @@ pub(crate) fn meet(h: &mut [i32], a: i32, b: i32) -> i32 {
         vtrunc(h, T_IVB, 0);
         iv_load(h, T_IVB, ld(h, b, 0), ld(h, b, 1));
         iv_intersect(h, T_IVA, T_IVB, T_IVC);
-        let ni: i32 = mk_int_from(h, T_IVC, 0);
+        // D363: bignums pass both only if both admit them; bignums-only if either is.
+        let fa: i32 = lflags(h, a);
+        let fb: i32 = lflags(h, b);
+        let bok: i32 = (fa & fb) & 1;
+        let bonly: i32 = (fa | fb) & 2;
+        if (bonly != 0) && (bok == 0) {
+            return 0;
+        }
+        let ni: i32 = mk_int_from(h, T_IVC, bok | bonly);
         vpush1(h, T_STK, ni);
         return 0;
     }

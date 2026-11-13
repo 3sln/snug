@@ -90,7 +90,8 @@ export function intWith(h, l, lr, la, lb, hr, ha, hb) {
     if (ivIntersect(h, T_IVA, T_IVB, T_IVC) < 0) {
         return -1;
     }
-    return mkIntFrom(h, T_IVC, 0);
+    // D363: the target's flags (which data items it admits) carry over.
+    return mkIntFrom(h, T_IVC, lflags(h, l));
 }
 
 export function pow256Word(k, minus1, high) {
@@ -851,7 +852,7 @@ export function ctlEq(h, target, ctl, ne, pos) {
                 const sb = hg(h, H_R2);
                 ivPush(h, T_IVB, sr, sa, sb, R_POS_INF, 0, 0);
                 ivIntersect(h, T_IVA, T_IVB, T_IVC);
-                const nl2 = mkIntFrom(h, T_IVC, 0);
+                const nl2 = mkIntFrom(h, T_IVC, lflags(h, t));
                 vpush1(h, T_STK, nl2);
             }
         } else if ((isflt || fexact) && (k === K_FLOAT)) {
@@ -986,7 +987,15 @@ export function meet(h, a, b) {
         vtrunc(h, T_IVB, 0);
         ivLoad(h, T_IVB, ld(h, b, 0), ld(h, b, 1));
         ivIntersect(h, T_IVA, T_IVB, T_IVC);
-        const ni = mkIntFrom(h, T_IVC, 0);
+        // D363: bignums pass both only if both admit them; bignums-only if either is.
+        const fa = lflags(h, a);
+        const fb = lflags(h, b);
+        const bok = (fa & fb) & 1;
+        const bonly = (fa | fb) & 2;
+        if ((bonly !== 0) && (bok === 0)) {
+            return 0;
+        }
+        const ni = mkIntFrom(h, T_IVC, bok | bonly);
         vpush1(h, T_STK, ni);
         return 0;
     }

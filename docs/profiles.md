@@ -88,7 +88,17 @@ kept as the distinct data item it is: JS decode gives `Tagged { tag:
 2 | 3, value: Uint8Array }` of its exact content bytes, Rust `Value::BigInt`
 of them, and encode writes either as its integer in preferred serialization.
 CDDL matching and the duplicate-key check read it the same way (`r = 1` does
-not match `2(h'01')`). JavaScript numbers (and Rust's
+not match `2(h'01')`). One rule for CDDL: type names and literals
+select data items, so `uint`, `nint`, `int` and integer literals never match
+a bignum, while `biguint`, `bignint`, `bigint` and `#6.2/3(bstr)` match every
+tag 2/3 bignum, leading zeroes and small values included (RFC 8949 §3.4.3:
+decoders MUST accept leading zeroes). Ranges and numeric controls compare
+numeric values (§3.4.3's extended generic data model), so `0..5`,
+`unsigned .le 5`, `integer .le 5` and `integer .eq 1` all match `2(h'01')`
+and `2(h'0001')`; `uint .le 5` and `int .le 5` do not, as their target is
+major type 0/1 only. Map literal keys match by identity, so
+`{1 => int}` does not accept the key `2(h'01')` but `{0..5 => int}` does.
+JavaScript numbers (and Rust's
 `Value::Float(f64)`) do not keep a NaN payload — a View's `raw()` keeps the
 bytes. `encode(decode(x))` is the deterministic encoding of `x`'s value, with
 one exception: a map whose keys are one key once a non-preferred

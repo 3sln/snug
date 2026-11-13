@@ -340,13 +340,15 @@ pub fn leaf_int(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], lb: i32, pos: i
     // INT: major 0 is the point POS(v), major 1 NEG(n), a bignum (only with
     // BIGOK) POS_BIG / NEG_BIG over its content bytes, read in place (§4.3).
     let bigok: bool = (p[(lb) as usize] & 256) != 0;
+    let bigonly: bool = (p[(lb) as usize] & 512) != 0;
     let mut rg: i32 = 0;
     let mut a: i32 = hi;
     let mut c: i32 = lo;
-    if cls == 1 {
+    // BIGONLY (D363): biguint / bignint / bigint match tag 2/3 items only.
+    if (cls == 1) && (!bigonly) {
         rg = 3;
     }
-    if cls == 2 {
+    if (cls == 2) && (!bigonly) {
         rg = 2;
     }
     if (cls == 2048) && bigok {

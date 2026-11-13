@@ -40,7 +40,7 @@ current implementation.
 | Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`. |
 | Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values; hexadecimal/decimal floats and h'/b64'/byte literals supported. |
 | Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing. Runtime profile still restricts actual tags/simple values. |
-| Appendix D prelude | Compiled from CDDL text; includes exact bignum integer types. Some names have no value under the current wire profile. |
+| Appendix D prelude | Compiled from CDDL text. `biguint`, `bignint` and `bigint` match every tag 2/3 bignum, non-preferred ones included under `valid` (leading zeroes, small values; RFC 8949 §3.4.3); ranges and numeric controls compare bignums by value. Some names have no value under the current wire profile. |
 | UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
 
 Only user non-generic **type** rules become validation roots. Productive
@@ -401,6 +401,18 @@ refused with `group_recursion`; recursion that consumes nothing is
 - `uint` is CBOR major type 0 only. `int` is major 0/1. `unsigned` includes
   tag-2 bignums and `integer` includes tag-2/3 bignums. `number` is `int / float`,
   so it does not include decimal fractions or arbitrary bignums.
+- **Bignums: one rule.** Type names and literals select data items:
+  `uint`, `nint`, `int`, `#0`, `#1` and integer literals never match a tag 2/3
+  bignum, and `biguint`, `bignint`, `bigint` and `#6.2/3(bstr)` (however the
+  `bstr` is spelled) match every bignum, whatever its value or leading zeroes
+  (RFC 8949 §3.4.3: decoders MUST accept leading zeroes). Ranges and numeric
+  controls (`.lt` … `.ne`) compare numeric values, as §3.4.3's extended
+  generic data model does: under `valid`, `0..5`, `unsigned .le 5`,
+  `integer .le 5` and `integer .eq 1` match `2(h'01')` and `2(h'0001')`;
+  `uint .le 5` and `int .le 5` do not, because a control keeps its target's
+  data items. Map literal keys match by identity. The
+  `deterministic` and Bindle presets refuse non-preferred bignums before the
+  schema runs, so there the rule changes nothing.
 - **`float16`, `float32`, `float64` are sets of values.** As RFC 8610 §3.3 says, “"#7.25" specifies the set of values that
   can be represented as half-precision floats; it does not mandate that these
   values also do have to be serialized as half-precision floats”. So a float

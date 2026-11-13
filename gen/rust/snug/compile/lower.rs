@@ -374,7 +374,9 @@ pub(crate) fn lower_range(h: &mut [i32], node: i32, env: i32) -> i32 {
             ha = hg(h, H_R1);
             hb = hg(h, H_R2);
         }
-        let l: i32 = mk_int_range(h, lr, la, lb, hr, ha, hb);
+        // D363: a range compares numeric values, so it admits a bignum
+        // whose value lies in it (BIGOK), small ones included
+        let l: i32 = mk_int_span(h, lr, la, lb, hr, ha, hb, 1);
         return ts_of1(h, l);
     }
     if float_point(h, lo) {
@@ -747,9 +749,12 @@ pub(crate) fn lower_tag(h: &mut [i32], node: i32, env: i32) -> i32 {
     }
     if mode == 0 {
         if (hi == 0) && (((lo == 2) || (lo == 3)) && bstr_content(h, content, env)) {
-            let two64: i32 = mag_pow(h);
-            let lp: i32 = mk_int_range(h, R_POS_BIG, two64, 9, R_POS_INF, 0, 0);
-            let ln: i32 = mk_int_range(h, R_NEG_INF, 0, 0, R_NEG_BIG, two64, 9);
+            // D363: every tag 2/3 bignum, whatever its value or leading
+            // zeroes (the valid preset admits non-preferred ones, RFC 8949
+            // §3.4.3): BIGONLY INT leaves over all non-negative / negative values,
+            // so ranges and numeric controls compare the bignum's value
+            let lp: i32 = mk_int_span(h, R_POS, 0, 0, R_POS_INF, 0, 0, 2);
+            let ln: i32 = mk_int_span(h, R_NEG_INF, 0, 0, R_NEG, 0, 0, 2);
             let mut l: i32 = lp;
             if lo == 3 {
                 l = ln;
@@ -1013,8 +1018,8 @@ pub(crate) fn lower_unwrap(h: &mut [i32], node: i32, env: i32) -> i32 {
                 return -1;
             }
             ts_push_leaves(h, cts);
-        } else if (k == K_INT) && (lflags(h, l) != 0) {
-            // an unconstrained bignum tag: its content is a byte string
+        } else if (k == K_INT) && ((lflags(h, l) & 2) != 0) {
+            // a bignum-only leaf (D363): its content is a byte string
             let bl: i32 = mk_bytes(h, 0, INF, -1);
             vpush1(h, T_STK, bl);
         } else {
@@ -1385,11 +1390,11 @@ pub(crate) fn p_unwrap(h: &mut [i32], un: i32, env: i32) -> i32 {
             }
             child = pb_node(h, P_ENTRY, cts, 0, 0, pos);
         }
-        if (k == K_INT) && (lflags(h, l) != 0) {
+        if (k == K_INT) && ((lflags(h, l) & 2) != 0) {
             if mode == 1 {
                 return fail(h, ERR_MAP_KEY, pos);
             }
-            // an unconstrained bignum tag: its content is a byte string
+            // a bignum-only leaf (D363): its content is a byte string
             let bl: i32 = mk_bytes(h, 0, INF, -1);
             let bts: i32 = ts_of1(h, bl);
             child = pb_node(h, P_ENTRY, bts, 0, 0, pos);
