@@ -8020,8 +8020,19 @@ Babashka 1.3.190, nvm Node, `env -i`):
     needed for the macOS stable cell: it was the 6th concurrent macOS job,
     against the free plan's cap of 5 and GitHub's arm64 shortage, so it
     was never given a runner. Not a snug failure.
-  - Release `workflow_dispatch` run 43488412255 has started (10 macOS
-    jobs). The result will be recorded here.
+  - Release `workflow_dispatch` run 43488412255 on cefd61e was all green,
+    `ci` success. Every job got a runner, so no reruns were needed.
+    - Shards: core 3.5 min; rust 8.5 min; wasm 7 min (wasm-sdk-test
+      227 s, wasm-package-test 38 s, wasm-size 18 s, node-oldest 57 s,
+      runtime 42 s); vm 25.5 min (vmsession-test 898 s, sequence-test
+      509 s); long 2.5 min (proptest 120 s).
+    - Every compat and Linux cell passed.
+    - Caveat: P9.13 (GATES-B1) found that the `runtime` gate always
+      exits 0. Its "ok" in this run is not evidence until WP3's fix
+      lands.
+    - Planned: one more release dispatch run after the P9.13 work
+      packages land. It doubles as the hosted proof for the P9.9
+      addendum.
   - Open question for the coordinator: release runs might skip the macOS
     compat cells, since the shards already cover those gates on the
     primary toolchain.
@@ -8086,7 +8097,11 @@ Babashka 1.3.190, nvm Node, `env -i`):
       `[Symbol.dispose]()` and `using` (Node 24) must also close it.
     - On the old sources the test fails: the session has a member named
       "undefined".
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). Hosted land, CI run 43484578330
+  and release dispatch run 43488412255 are all green. Exception: the
+  `runtime` gate's result isn't evidence until P9.13 WP3's fix lands
+  (GATES-B1). Before the RC, one more release dispatch run follows the
+  P9.13 work packages.
 
 ### D357 — Rust value trees are built and written iteratively: every depth path fits a 2 MiB thread at the ceilings, debug and release, Rust ≥ 1.87; limits unchanged (CI finding)
 **Decision** (P8.5 VM engineer, provisional; the coordinator's guarantee):
@@ -11603,7 +11618,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
       - kin also has Go, Java and C#.
       - Go would be 18–28 engineer-days and needs no new kin emitter.
       - Recommendation: no new target before the RC; Go post-RC on demand.
-- [ ] **P9.20 — CI (GitHub Actions)** (owner decision, 2026-11-13). Hosted
+- [x] **P9.20 — CI (GitHub Actions)** (owner decision, 2026-11-13). Hosted
   CI runs the gate sets of `ci/gate-map.edn` with `bb gates`, read-only.
   Landed (D356, see there); nothing is pushed by engineers. It closes when
   the coordinator's first hosted run is green, which needs D357 first (the
@@ -11613,6 +11628,11 @@ can run alongside them; its build work is post-RC unless it is cheap.
   1. D357 lands, so the stable cells go green.
   2. One `workflow_dispatch` release run, to prove the five shards on
      hosted runners before any tag.
+  *Closed 2026-11-13 (manager):*
+  - Both items are done. D357 landed and run 43484578330 was fully green.
+    Release dispatch run 43488412255 on cefd61e was all green.
+  - Caveat: the `runtime` gate isn't evidence until P9.13 WP3's fix lands.
+  - One more release dispatch run follows the P9.13 work packages (D356).
   - `.github/workflows/ci.yml`: `land` on pull requests and pushes to
     main; the release set as five shards on `v*` / `src/v*` tags and a
     manual run; a macOS compat matrix; a Linux matrix; one `ci` status.
