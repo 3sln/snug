@@ -7501,6 +7501,40 @@ onto `7037508`, which only changes DEVLOG):
   - It follows that P9.9's sign-off run must be on main at or after this
     commit.
 
+### D349 — A dead `0*0` self-reference leaves no CALL target behind: only reachable CALLs mark targets, so the map fold applies (P9.9 finding)
+**Decision** (P8.5 VM engineer, provisional): the compiler was wrong, not the
+verifier. `peg-finish` (`kin/compile/peg.kin`) marked as a CALL target every
+builder node named by ANY CALL node in the builder. A `0*0 g` inside g's own
+expansion builds its CALL, then `pb-rep` replaces the occurrence with
+EMPTY, so the CALL is orphaned: nothing reaches it. Its target mark
+survived. Simplification never folds or splices away a CALL target, so in
+`r = { ? g }`, `g = ("k" => true, 0*0 g)` the group collapsed to
+REP(0..1, MEMBER(1, 1)) without program-2 §3.3's fold to MEMBER(0, 1). The
+verifier rightly refuses that REP: the map normal form requires the fold
+(check C_PEG). It is not over-strict, because the unfolded form is what
+the fold table exists to remove.
+
+The fix: targets are now marked by a walk from the group's root, through
+SEQ/CHOICE kids and REP children, so only reachable CALLs count. A dead
+self-reference now compiles to exactly the Program of the group without it.
+The words are equal apart from the source-key hash, for `{ ? g }`, `{ * g }`,
+`(* "k" => true, 0*0 g)` and `0*0 (1 => int, g)`. Arrays were not affected,
+because they have no fold table.
+**Regressions**:
+* `compile-test` (compile2-test's withdrawn list): 4 shapes compile and
+  verify on JS and Rust.
+* `compile-fuzz`: 96 fixed shapes after the random ones. They combine
+  occurrence `?`, `*`, none or `+`; a lead of none, `*`, `?` or `+`; three
+  dead forms; and the full and bindle profiles.
+* `vm-test`: `corpus/conformance/regressions.json`, 9 cases checked
+  against the PEG oracle.
+* The SDK compiles with the same generated Rust compiler (wasm-sdk-test).
+
+**Alternatives**: loosening the verifier to accept an unfolded REP of
+MEMBER(1, 1). That would admit Programs outside program-2 §3.3's normal form,
+and keep a compiler bug.
+- [ ] **Signed off** (owner)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

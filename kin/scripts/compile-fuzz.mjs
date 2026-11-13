@@ -225,6 +225,14 @@ for (let i = 0; i < N; i++) {
   if (chance(0.1)) limits.compileBudget = pick([100, 1000, 10000, 100000]);
   cases.push({ text, limits, profile: pick(['full', 'full', 'full', 'bindle', 'bus']), regexp: pick(['xsd', 'iregexp']) });
 }
+// D349 (P9.9): a dead self-reference (`0*0 g`) after a member in a map group left its
+// orphan CALL marking g as a CALL target, which blocked the fold table; vm-verify then
+// refused the compiler's own Program. Fixed shapes, two profiles, after the random ones.
+for (const occ of ['?', '*', '', '+'])
+  for (const lead of ['', '* ', '? ', '+ '])
+    for (const dead of ['0*0 g', '0*0 (1 => int, g)', '0*0 g, 0*0 g'])
+      for (const profile of ['full', 'bindle'])
+        cases.push({ text: `r = { ${occ} g }\ng = (${lead}"k" => true, ${dead})`, limits: {}, profile, regexp: 'xsd' });
 const PROF = { full: 0, bindle: 1, bus: 2 };
 const hex = b => Buffer.from(b).toString('hex');
 const wordsHex = P => Array.from(P, w => (w >>> 0).toString(16).padStart(8, '0')).join('');

@@ -95,6 +95,9 @@ const NOW_COMPILE = [
   'r = {h\'01\': int}', 'r = {1.5: int}', 'r = {18446744073709551616: int}', 'r = [g]\ng = (0, ? g, 1)',
   'r = {rater-value, ? conf-value, * ext-value}\nrater-value = (rater: text)\nconf-value = (confidence: uint)\next-value = (text => any)',
   'r = {2*2 (+ tstr => int)}', 'r = [int, ~r]', 'r = {a: int, ? ~r}', 'r = [* ~t]\nt = #6.1(int)',
+  // D349: a dead self-reference after a member in a map group (its Program must verify)
+  'r = { ? g }\ng = ("k" => true, 0*0 g)', 'r = { * g }\ng = ("k" => true, 0*0 g)', 'r = { ? g }\ng = (* "k" => true, 0*0 g)',
+  'r = { ? g }\ng = ("k" => true, 0*0 (1 => int, g))',
 ];
 
 // ---------------------------------------------------------------- JS and Rust runners
@@ -248,7 +251,7 @@ console.log(`  ${tally.refused === tally.expectRefuse ? 'ok  ' : 'FAIL'} ${tally
   });
   console.log(`  ${pgood === 2 * probes.length ? 'ok  ' : 'FAIL'} ${pgood}/${2 * probes.length} architecture §20.15 probe schemas compile (both cut modes)`);
   console.log(`  ${rgood === REFUSALS.length ? 'ok  ' : 'FAIL'} ${rgood}/${REFUSALS.length} remaining refusals (left recursion, n*m with m < n, keyless map entries, PEG node and position limits)`);
-  console.log(`  ${ngood === NOW_COMPILE.length ? 'ok  ' : 'FAIL'} ${ngood}/${NOW_COMPILE.length} formerly refused schemas compile (overlap, cuts on typesets and non-text keys, group occurrence, centre recursion, recursive unwrap)`);
+  console.log(`  ${ngood === NOW_COMPILE.length ? 'ok  ' : 'FAIL'} ${ngood}/${NOW_COMPILE.length} formerly refused schemas compile and verify on both hosts (overlap, cuts on typesets and non-text keys, group occurrence, centre recursion, recursive unwrap, dead self-references D349)`);
 }
 console.log(`  ${identical === total ? 'ok  ' : 'FAIL'} ${identical}/${total} identical across hosts (Programs, pools and warnings byte for byte; errors field for field)`);
 console.log(`  ${verified === nverify ? 'ok  ' : 'FAIL'} ${verified}/${nverify} Programs accepted by vm-verify (format 2.0) on JS and Rust`);

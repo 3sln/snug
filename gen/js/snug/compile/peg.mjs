@@ -1477,9 +1477,31 @@ export function pegFinish(h, root, pos) {
         paset(h, i, 0, i);
         paset(h, i, 4, -1);
     }
-    for (let j = 0; j < nb; j++) {
-        if (pbw(h, j, 0) === P_CALL) {
-            paset(h, pbw(h, j, 1), 1, 1);
+    // D349: mark the targets of the CALLs REACHABLE from root only. A `0*0 g`
+    // builds its CALL, then pb-rep drops it for EMPTY; a target still marked by
+    // that orphan CALL would block the map fold table (program-2 §3.3), and the
+    // verifier refuses the unfolded REP of a MEMBER(1, 1).
+    vtrunc(h, T_PSTACK, 0);
+    vpush1(h, T_PSTACK, root);
+    while (vlen(h, T_PSTACK) > 0) {
+        if (!charge(h, 1)) {
+            return -1;
+        }
+        const u = vget(h, T_PSTACK, vlen(h, T_PSTACK) - 1);
+        const uop = pbw(h, u, 0);
+        vtrunc(h, T_PSTACK, vlen(h, T_PSTACK) - 1);
+        if (uop === P_CALL) {
+            paset(h, pbw(h, u, 1), 1, 1);
+        }
+        if (uop === P_REP) {
+            vpush1(h, T_PSTACK, pbw(h, u, 1));
+        }
+        if ((uop === P_SEQ) || (uop === P_CHOICE)) {
+            let kk = pbw(h, u, 1);
+            while (kk >= 0) {
+                vpush1(h, T_PSTACK, kk);
+                kk = pbw(h, kk, 4);
+            }
         }
     }
     const r0 = simplifyTree(h, root, mode);
