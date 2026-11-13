@@ -7637,7 +7637,9 @@ it keeps D341's caps, which was the gate's purpose.
 **Alternatives:** raising the gzip cap to ceil(70,170 × 1.02) = 71,574 was
 the first draft. It was superseded by this cut and never landed (the
 patch is kept as `.cache/p917-b-d354-budget-devlog.patch.superseded`).
-- [ ] **Signed off**
+- [x] **Signed off** (manager, 2026-11-13). The coordinator approved the
+  cut in place of a raise. Merged at `d33a16b`; drift ok on main;
+  budget.json is unchanged.
 
 ## Findings
 
