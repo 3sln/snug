@@ -7896,6 +7896,12 @@ Babashka 1.3.190, nvm Node, `env -i`):
   fix): wasm-sdk-test, wasm-package-test (workerd recipes, Chrome
   157.0.8103.78) and wasm-size ran with no FAIL or SKIP line; node-oldest
   and runtime were still running at merge, so the shard is not claimed.
+  *Update after the merge:* the shard finished with all 5 gates ok:
+  - wasm-sdk-test, 684 s;
+  - wasm-package-test, 61 s;
+  - wasm-size, 37 s;
+  - node-oldest, 108 s;
+  - runtime, 85 s.
 * `release-long` (valid-test, proptest) was not run locally.
 * **Linux cells, local replay.** No Linux machine or container was
   available (Docker's daemon is not running). The workflow's own gate-step
