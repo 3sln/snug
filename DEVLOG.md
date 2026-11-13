@@ -7533,7 +7533,10 @@ because they have no fold table.
 **Alternatives**: loosening the verifier to accept an unfolded REP of
 MEMBER(1, 1). That would admit Programs outside program-2 §3.3's normal form,
 and keep a compiler bug.
-- [ ] **Signed off** (owner)
+- [x] **Signed off** (manager, 2026-11-13). This is a compiler bug fix:
+  no semantic change and no owner decision. Merged at `4d5d200` onto
+  D351. On main: drift ok, no conflict markers. The verifier was right
+  and stays strict.
 
 ## Findings
 
