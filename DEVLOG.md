@@ -7489,7 +7489,17 @@ onto `7037508`, which only changes DEVLOG):
 - `sequence-test`: ok (761,112 JS runs).
 - `rust-api-test full`: ok.
 - `node-oldest`: ok on Node 20, 1506/1506.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). Merged at `f596d2d`. On main:
+  drift ok, no conflict markers.
+  - Not a lifetime bug. It was two real defects: kin's `canon-build` lost
+    the item's outcome bits after visiting `.cbor` contents (all hosts),
+    and JS `view()` never requested the canonical copy for a public
+    Schema.
+  - User-visible effects: views of valid non-deterministic input read raw
+    bytes, and lookups in an out-of-order map silently missed keys.
+    Verdicts were never wrong.
+  - It follows that P9.9's sign-off run must be on main at or after this
+    commit.
 
 ## Findings
 
