@@ -25,30 +25,42 @@ function openBackend(options, quantum) {
   // P9.7 (D327): one session for the whole reader, its arrays from the Program's pool under the live bound,
   // released when the sequence ends (close) or the reader is collected
   const lease = acquire(program, vmScratchWords(P, rule, cap), vmsWords(P), vmsArena(P, words, total));
-  let { s, ka } = lease.e;
+  let { s, ka } = lease.e, stepping = false, closing = false;
   const { ss } = lease.e, out = new Int32Array(8 + 2 * 257);
+  // D347: once released the arrays are the pool's (another session may hold them): nothing writes them again
+  const live = () => { if (lease.e === null) throw new TypeError('snug: the sequence has ended'); };
   vmScratchInit(s, cap);
   const noExt = () => -2;
+  // P8.4 (D266): the valid machinery's buffers are the isolate's (D286); S and the arena grow and keep their contents
+  const stepIn = (w, base) => {
+    const r = withValidBuffers(v => {
+      for (;;) {
+        const c = vmsStepV(P, B, w, s, ss, ka, out, base, ext ? ext.call : noExt, v.vs, v.cb);
+        if (c !== -69) return c;
+        growValid(v, ss);
+        const gs = vmsGrowScratch(ss), ga = vmsGrowArena(ss);
+        if (gs > s.length) { const g = new Int32Array(gs); g.set(s); lease.e.s = s = g; }
+        if (ga > ka.length) { const g = new Uint8Array(ga); g.set(ka); lease.e.ka = ka = g; }
+      }
+    });
+    if (ext) rethrow(ext);
+    return r;
+  };
   const backend = {
     total, quantum,
-    close() { release(lease); },
-    begin() { const c = vmsInitSeq(P, B, rule, words, s, ss, ka, quantum); if (c < 0) throw new Error(`snug: vms-init-seq answered ${c}`); },
+    // D347: closed from inside its own step (an extension predicate), the reader keeps its arrays until the
+    // step has left them
+    close() { if (stepping) closing = true; else release(lease); },
+    begin() { live(); const c = vmsInitSeq(P, B, rule, words, s, ss, ka, quantum); if (c < 0) throw new Error(`snug: vms-init-seq answered ${c}`); },
     step(w, base) {
-      // P8.4 (D266): the valid machinery's buffers are the isolate's (D286); S and the arena grow and keep their contents
-      const r = withValidBuffers(v => {
-        for (;;) {
-          const c = vmsStepV(P, B, w, s, ss, ka, out, base, ext ? ext.call : noExt, v.vs, v.cb);
-          if (c !== -69) return c;
-          growValid(v, ss);
-          const gs = vmsGrowScratch(ss), ga = vmsGrowArena(ss);
-          if (gs > s.length) { const g = new Int32Array(gs); g.set(s); lease.e.s = s = g; }
-          if (ga > ka.length) { const g = new Uint8Array(ga); g.set(ka); lease.e.ka = ka = g; }
-        }
-      });
-      if (ext) rethrow(ext);
-      return r;
+      live();
+      stepping = true;
+      try { return stepIn(w, base); } finally {
+        stepping = false;
+        if (closing) { release(lease); throw new TypeError('snug: the sequence was closed during its step'); }
+      }
     },
-    eof: n => vmsEof(ss, out, n),
+    eof: n => { live(); return vmsEof(ss, out, n); },
     needOffset: () => vmsNeedOffset(ss), needLength: () => vmsNeedLength(ss), position: () => vmsPosition(ss),
     heldCode: () => vmsHeldCode(ss), messageLength: () => vmsMessageLength(ss),
     code: () => out[0],

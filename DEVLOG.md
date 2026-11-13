@@ -5671,6 +5671,46 @@ no zero-fill (cheaper, but leaks one message's data into the next).
   and −10% 64 KiB-session CPU, peak RSS 356→283 MiB at the 2 MiB default
   pool)
 
+**Note: the zero-fill test's one-off failure (2026-11-12)** (D347 engineer).
+`npm test` on main (`48809e7`/`f63a106`) failed once at `the pooled entry
+is reused` in "pooled arrays are zeroed before reuse", then passed. The
+zero-fill was not skipped: the test's observation was racy.
+- **Cause:** `npm test` runs every test file in one isolate, so the pool is
+  shared with every earlier file. By `sessions.test.mjs` it is all but full.
+  A probe just before the test read the room left in 94 full runs: 270 B to
+  50 KB in most, and more when a collection had dropped a dead Program's
+  idle arrays. The test's entry is 352 B. With less room than that,
+  `release(a)` drops it instead of pooling it, `b` is fresh, and the
+  identity assertion fails. `b` is still all zero. Forcing the pool to
+  within 100 B of the cap gives exactly that failure every time.
+- **Reproduced** once in 94 full suites run in parallel under load (load
+  average about 34). Node 24.6: 52 runs, Node 22.23.5: 10, Node 20.20.2: 9,
+  and 23 earlier probe runs. That one failure (Node 22) had 270 B of room
+  and failed with the same message. All 9 Node 20 runs also failed, but only
+  on the known `stripTypeScriptTypes` oracle (D344). 242 runs of
+  `sessions.test.mjs` alone (Node 24, with `--expose-gc`) never failed,
+  because the file starts with an empty pool.
+- **Fix (test only):** the test, and the scribble differential after it,
+  call `releasePool()` first. Nothing can run between that call and the
+  test's assertions (the test is synchronous and finalizers run as tasks),
+  so reuse is deterministic.
+- **Audit of the pool for real leaks:**
+  - JS: zero-fill happens in `acquire`, synchronously, before the lease
+    exists. No finalizer, release or `releasePool` can interleave with it.
+  - A release counts once (`lease.e` is nulled and the registry
+    unregistered), and pool entries never share buffers.
+  - The registry's owner (a `VmSession`, a sequence backend) is what a
+    handle or push driver holds, so a reachable session is never finalized.
+  - Rust and wasm move owned `Vec`s through the pool (`take`/`swap_remove`
+    under the Mutex or the instance), so double insertion or sharing cannot
+    happen.
+  - One real case of sharing was found: a session closed from inside its
+    own step (D347).
+- **Property test added:** 3,000 seeded sessions and sequence readers that
+  finish, close or are abandoned in random order, with forced GC. A new
+  `testing.handout` hook asserts that every entry the pool hands out is all
+  zero and that no session the test holds live owns it.
+
 ### D331 — The Rust async source drivers: dependency-free, runtime-agnostic, ports of the sync loops (P9.6, D027)
 **Decision** (P9.6 engineer, provisional): the Rust host gets async forms of its
 three source drivers over the same `schema::Session` / `Sequence`, in a new
@@ -7231,6 +7271,54 @@ Results are in the P9.15 (rework) item.
   coordinator). Go comes after 0.1.0, in 0.2.0 at the earliest. The
   assessment above (18–28 engineer-days, no kin change) stands for when it
   is picked up.
+
+### D347 — A session closed inside its own step keeps its arrays until the step ends (P9.7 security fix; D327)
+**Decision** (engineer, 2026-11-12, found while auditing the pool for the
+zero-fill flake; see the note under D327).
+
+**The bug (`[js]`):** `VmSession.close()` and a sequence reader's
+`close()` released the lease immediately, even when called from an
+extension predicate during that session's own `vms-step-v`. The step went on
+writing S, SS and the key arena after they were back in the Program's pool.
+The next session on that Program, for example one the predicate opened, was
+handed the same arrays. They were zero-filled correctly, but two live
+sessions now shared them, so each could read and corrupt the other's state.
+`test/sessions.test.mjs` "regression D347" reproduces it deterministically
+(no GC): without the fix the inner session's entry is the outer's.
+- **Reach:** only host code that breaks the documented predicate contract
+  ("no call back into snug"); untrusted CBOR alone cannot cause it.
+- **Rust:** the borrow checker rules it out, since `step` holds
+  `&mut Session`.
+- **wasm SDK:** predicates run with the instance behind a guard, so
+  `free()`/`close()` from a predicate throws before anything changes.
+
+**Fix:**
+- `VmSession.close()` while `busy` only marks the session closed. The step
+  releases the lease after it leaves the VM, then throws `TypeError('snug:
+  the session was closed during its step')`.
+- The sequence backend defers `close()` the same way (`stepping`/`closing`).
+  Once released, its `begin`, `step` and `eof` throw instead of writing
+  arrays the pool owns. The reader reports the `TypeError` as its result's
+  error and is done.
+
+**Tests:**
+- Two regression tests (session, sequence reader), which fail without the
+  fix.
+- The pool property test from the D327 note.
+- The pool's `testing.handout(e, reused)` hook (gates only).
+
+Recorded in CHANGELOG (Unreleased, Security) and docs/api.md.
+
+**Gates** (on `f63a106` plus this change, in a clean worktree, on a loaded
+shared machine):
+- `bb gates land`: all 9 ok, including `npm-test` 1503/1503 and
+  `wasm-sdk-test`.
+- `vmsession-test`: ok. The session pool had 10140/10140 pooled
+  (scribbled) == fresh, 0 live after.
+- `sequence-test`: ok, with 761,112 JS runs and JS == Rust 184,556.
+- `rust-api-test full`: ok.
+- `node-oldest`: ok on Node 20, 1503/1503.
+- [ ] **Signed off** (manager)
 
 ## Findings
 

@@ -75,6 +75,10 @@ test('push sources, handles and sequence readers release their session when they
 });
 
 test('pooled arrays are zeroed before reuse: no byte crosses from one session to the next', () => {
+  // D327 note (2026-11-12): in `npm test` every file shares one isolate, and earlier files leave the 2 MiB
+  // pool all but full (within ~1 KiB, by how much depending on when GC drops collected Programs' pools);
+  // under 352 bytes of room `a` was dropped instead of pooled and the reuse assertion failed. Start empty.
+  releasePool();
   const program = {};
   const a = acquire(program, 64, 16, 32);
   a.e.s.fill(7); a.e.ss.fill(7); a.e.ka.fill(7);
@@ -115,6 +119,7 @@ test('pooled (scribbled on release) and fresh arrays give the same results', asy
     Uint8Array.of(0x81, 0xa1, 0x61), encode([{ x: 'y'.repeat(300) }])];
   const run = () => inputs.flatMap(b => [1, 3, 4096].map(chunk => JSON.stringify(validateHandleSync(schema, bufferHandle(b), 'r', {}, { chunk }))));
   const pooled = sessionLimits().maxPooledBytes;
+  releasePool();   // room in the pool, so the scribbled arrays are kept and reused (not dropped)
   testing.scribble = true;
   const a = run(), a2 = run();
   testing.scribble = false;
@@ -147,4 +152,108 @@ test('an abandoned session is released when it is collected', { skip: typeof glo
   assert.equal(sessionLimits().live, base + 1);
   await settle();
   assert.equal(sessionLimits().live, base);
+});
+
+// D347: a session (or sequence reader) closed by an extension predicate from inside its own step kept
+// writing its arrays after giving them back, so the next session (opened in the same predicate) shared them
+test('regression D347: a session closed inside its own step keeps its arrays until the step ends', async () => {
+  const handed = [];
+  let outer = null, inner = null, outerE = null;
+  const schema = await compile('r = [ uint .ok 0, tstr ]', { controls: { ok: () => {
+    if (outer && !inner) {
+      outer.close();
+      const from = handed.length;
+      inner = openSession(schema, 'r', b.length);
+      assert.equal(handed.length, from + 1);
+      assert.notEqual(handed[from], outerE, 'the closed session\'s arrays are not handed out while its step runs');
+    }
+    return true;
+  } } });
+  const b = encode([1, 'x']);
+  testing.handout = e => handed.push(e);
+  try {
+    releasePool();
+    openSession(schema, 'r', b.length).step(b, 0);         // one entry in the Program's pool
+    const base = sessionLimits().live;
+    outer = openSession(schema, 'r', b.length); outerE = handed.at(-1);
+    assert.throws(() => outer.step(b, 0), /closed during its step/);
+    assert.equal(sessionLimits().live, base + 1);           // outer released at the step's end; inner live
+    assert.equal(inner.step(b, 0).result.ok, true);
+    assert.equal(sessionLimits().live, base);
+    assert.throws(() => outer.step(b, 0), /closed/);
+  } finally { testing.handout = null; }
+});
+
+test('regression D347: a sequence reader closed inside its own step keeps its arrays until the step ends', async () => {
+  const handed = [];
+  let reader = null, inner = null, readerE = null;
+  const schema = await compile('r = [ uint .ok 0, tstr ]', { controls: { ok: () => {
+    if (reader && !inner) {
+      reader.close();
+      const from = handed.length;
+      inner = openSession(schema, 'r', b.length);
+      assert.notEqual(handed[from], readerE, 'the closed reader\'s arrays are not handed out while its step runs');
+    }
+    return true;
+  } } });
+  const b = encode([1, 'x']);
+  testing.handout = e => handed.push(e);
+  try {
+    releasePool();
+    const warm = sequenceReader({ schema, rule: 'r' }); warm.feed(b); warm.close();   // one pooled entry
+    const base = sessionLimits().live;
+    reader = sequenceReader({ schema, rule: 'r' }); readerE = handed.at(-1);
+    const res = reader.feed(Uint8Array.of(...b, ...b));
+    assert.deepEqual([res.messages.length, /closed during its step/.test(res.error?.message), reader.done], [0, true, true]);
+    assert.equal(sessionLimits().live, base + 1);           // the reader released; inner live
+    assert.equal(inner.step(b, 0).result.ok, true);
+    assert.equal(sessionLimits().live, base);
+  } finally { testing.handout = null; }
+});
+
+// D327/D347 property: whatever order sessions finish, close, err or are abandoned (and collected), every
+// array the pool hands out is all zero, and none is held by a session still live
+test('property: pooled arrays handed out are all zero and never held by a live session', { skip: typeof globalThis.gc !== 'function' && 'needs --expose-gc' }, async () => {
+  const schemas = [await schemaP, await compile('r = [* { * tstr => any }]'),
+    await compile('r = [ uint .ok 0, tstr ]', { controls: { ok: () => true } })];
+  const inputs = [[encode({ id: 7, body: 'hello' }), encode({ id: 1, body: 'x'.repeat(200) })],
+    [encode([{ a: 1, b: 2 }]), encode([{ x: 'y'.repeat(300) }, { k: 1 }])], [encode([1, 'x']), encode([2, 'yz'])]];
+  let seed = 0x9e3779b9;
+  const rnd = n => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) % n; };
+  const held = new Set();       // arrays of the sessions this test still holds live
+  let handouts = 0, reused = 0;
+  let last = null;
+  testing.handout = (e, r) => {
+    handouts++; if (r) reused++; last = e;
+    for (const a of [e.s, e.ss, e.ka]) {
+      assert.ok(a.every(x => x === 0), 'a handed-out array is all zero');
+      assert.ok(!held.has(a), 'a handed-out array is not held by a live session');
+    }
+  };
+  testing.scribble = true;
+  try {
+    releasePool();
+    const open = [];
+    const end = (o, how) => {
+      if (how === 0 && o.r) { if (o.fed < o.b.length) o.r.feed(o.b.subarray(o.fed)); o.r.end(); }
+      else if (how === 0) { const b = o.b; for (let at = 0; at < b.length && !o.s.verdict;) { const r = o.s.step(b.subarray(at, at + 1 + rnd(8)), at); if (r.state === 'need') at = r.offset; else break; } }
+      else if (how === 1) (o.r ?? o.s).close();
+      // how 2: abandoned (left to the FinalizationRegistry)
+      for (const a of o.arrays) held.delete(a);
+    };
+    for (let i = 0; i < 3000; i++) {
+      const k = rnd(3), b = inputs[k][rnd(2)];
+      // a session or (one in four) a sequence reader; part of the message, or none of it
+      const o = rnd(4) ? { s: openSession(schemas[k], 'r', b.length), b } : { r: sequenceReader({ schema: schemas[k], rule: 'r' }), b, fed: 0 };
+      o.arrays = [last.s, last.ss, last.ka];
+      for (const a of o.arrays) held.add(a);
+      if (rnd(2)) { const part = b.subarray(0, rnd(b.length)); if (o.r) { if (part.length) o.r.feed(part); o.fed = part.length; } else o.s.step(part, 0); }
+      if (o.s?.verdict || o.r?.done) { for (const a of o.arrays) held.delete(a); continue; }   // ended already
+      open.push(o);
+      while (open.length > rnd(12)) end(open.splice(rnd(open.length), 1)[0], rnd(3));
+      if (rnd(200) === 0) { globalThis.gc(); await new Promise(r => setImmediate(r)); }
+    }
+    for (const o of open.splice(0)) end(o, 1);
+    assert.ok(reused > 100 && handouts >= 3000, `reused ${reused} of ${handouts}`);
+  } finally { testing.scribble = false; testing.handout = null; }
 });

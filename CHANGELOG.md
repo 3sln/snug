@@ -188,3 +188,14 @@ These matter only to users of pre-release builds from this repository.
   used to panic (`capacity overflow`) or reserve that much (P9.16).
 - `[rust]` A decoded decimal fraction whose mantissa is a bignum outside
   preferred serialization stays a `Value::Tag`, as in JS (D342).
+
+### Security
+
+- `[js]` A session or sequence reader closed from inside its own step (by
+  an extension predicate) gave its arrays back to the pool while the step
+  was still writing them, so a session opened next on the same Program,
+  for example in the same predicate, shared them with it: each could see
+  and change the other's state. The arrays now go back when the step ends,
+  and that step throws `TypeError` instead of answering. Predicates are
+  documented as never calling back into snug; the Rust API and the wasm
+  SDK already prevented this (D347).
