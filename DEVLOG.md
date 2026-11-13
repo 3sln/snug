@@ -10121,6 +10121,102 @@ review.
   the counts depend on the corpus at the commit (P9.6 at `61a090e`: 20,492
   cases; on `641f970`: 20,819 cases, 191,682 blob runs, 62,405 + 62,405
   reader runs, 62,550 sequence runs / 35,328,681 items).
+  *Runs on `a004cbc` (P9.9 engineer, 2026-11-12/13; not ticked: red).*
+  - **Setup.** Detached worktrees of `a004cbc` (`.cache/p99`, `p99b`,
+    `p99c`), plus `p99fix` for the held harness patch. Each had
+    bench/compare/node_modules symlinked (AGENTS.md "Worktrees").
+  - **Machine.** Apple M1 Pro, 10 cores, macOS 14.6.1, Node 24.6.0 (Node
+    20.20.2 for the oldest-Node runs).
+  - **Load.** Three lanes ran at once, each lane sequential. Other sessions
+    kept the load average at 5–44, mostly 15–35.
+  - **Times.** Wall and user CPU come from `/usr/bin/time -p` around each
+    command.
+  - **Logs.** Logs, `results.tsv` and the runner `lane.sh` are in
+    `.cache/p99-logs/` (not tracked).
+  - **Chunking.** Every chunk ran under its default watchdog caps; no
+    `SNUG_GATE_*` override was used. The 2× vmsession chunk
+    (`40000 1001 800 120`) took 6,982 s of its 7,200 s wall cap at load
+    25–39. The rest of the 10× total therefore ran as 1× chunks.
+
+  | Run | Command | Seed(s) | Scale | Wall s | User CPU s | Result |
+  | --- | --- | --- | --- | ---: | ---: | --- |
+  | release set | `bb gates release` | gates' own | release | 10,240 | 6,088 | **FAIL** 28/29 ok: `wasm-size` compiler gzip 70,115 > 70,071 |
+  | vmsession 2× | `kin/scripts/vmsession-test 40000 1001 800 120` | 1001 | 2× | 6,982 | 6,449 | ok: 1,945,043/1,945,043 session == buffer; JS == Rust 1,277,831 |
+  | vmsession 1× ×8 | `kin/scripts/vmsession-test 20000 <s> 400 60` | 1002–1009 | 8 × 1× | 1,242–3,110 each | 2,140–2,461 each | 7 ok; **1006 FAIL** 1,063,824/1,063,825 |
+  | sequence | `kin/scripts/sequence-test 30000 1001` | 1001 | 30000 / 200 | 3,448 | 3,419 | **FAIL** 27 lines: oracle 2,241,831/2,241,848; framer; JS == Rust 552,897/552,897 |
+  | sequence | `kin/scripts/sequence-test 30000 1002` | 1002 | 30000 / 200 | 1,435 | 2,590 | **FAIL** 9 lines: framer only; oracle 2,236,136/2,236,136; JS == Rust 550,197 |
+  | scan | `kin/scripts/scan-test 300000 <s>` | 2001, 2002 | 10× | 174, 148 | 52, 44 | ok: 301,360/301,360 JS, hand, Rust (each) |
+  | rscan | `kin/scripts/rscan-test 200000 <s>` | 2001, 2002 | 10× | 294, 279 | 211, 215 | ok: 2,422,557 and 2,422,643 policy runs plus 2.57 M and 2.58 M splits; Rust == JS |
+  | rust-api full | in the release set (`rust-api-test-full`) | fixed | full | 1,278 | — | ok: 20,837 cases, 191,854 blob, 62,459 + 62,459 reader, 62,658 sequence runs / 35,328,339 items |
+  | proptest C1 | `bb proptest --minutes=60 --props=1,2,3,4,5 --seeds=3000001..4000000 --timeout=30000` | 3000001.. | 60 min | 3,602 | 7,575 | exit 1 (fixed harness): P1 588,670, P2 681,394, P3 304,834, P4 266,506, P5 252,089 cases |
+  | proptest C2 | the same, `--seeds=4000001..5000000` | 4000001.. | 60 min | 3,602 | 7,593 | exit 1: P1 559,554, P2 663,056, P3 295,959, P4 256,843, P5 242,457 cases |
+  | proptest P6 | `bb proptest --minutes=1 --props=6 --gate-scale=10 --seeds=3..3 --gates=<all but vmsession>` | 3001 | 10× | 1,451 | 816 | exit 1: 7/8 gates ok; **vm-test 200000/3001/4000 FAIL** |
+  | proptest gate | `bb gates proptest` (fixed harness) | default | 2 min | 122 | 611 | exit 1: P2/valid-roundtrip/reencode ×1 |
+  | Node 20 SDK | `sh host/wasm-sdk/test/run` on Node 20.20.2 | 1 | default | 1,257 | 509 | ok 17/17 |
+  | Node 20 package | `sh host/wasm-sdk/test/package-run` on Node 20.20.2 | — | — | 146 | 40 | **FAIL** at import (harness, below) |
+
+  **Totals.**
+  - vmsession, 10× of the defaults (200,000 mutations / 4,000 schemas /
+    600 stress over seeds 1001–1009): 10,470,614 session runs == buffer,
+    with one exception (seed 1006), and JS == Rust 6,854,356/6,854,356.
+  - proptest on the fixed harness: 4,111,362 property cases plus one P6
+    round of 8 gates.
+
+  **The release set's own `proptest` gate** said "ok" on the old harness
+  while it recorded P2 code-vs-code ×312, valid-roundtrip ×709 and
+  slow-compile ×1. That is the exit-0 defect.
+
+  **Classification.** Every failing seed was replayed on main `e94575c`.
+  The proptest cases were replayed with the held harness patch, which is
+  not committed. The same cases still fail on `a004cbc`, which shows the
+  replay catches them.
+  - **Fixed by D348:** P2/valid-roundtrip/reencode (33 cases), a map with
+    keys 0 and 2(h''). The held patch now accepts exactly `duplicate_key` /
+    `normalized` for such a value.
+  - **Fixed by D349:** P5/compiled-program-refused (5).
+  - **Fixed by D350:** P1/session-verdict (1).
+  - **Fixed by D350 (vmsession 1006):** `r = { + (a: bstr .cborseq [* bstr]
+    // b: …) }` on `a2616144414741cb616240` under 7-byte windows, offset 5 vs
+    11. The 1006 chunk is ok on `e94575c` (1,995 s).
+  - **Harness (tools/proptest; fixed in the held patch):**
+    - f8 below 0x20 (D342);
+    - the round-trip property;
+    - `--replay` on a Decimal;
+    - exit 0 on findings;
+    - P1/unicode-mismatch: the oracle called a uint above 2^53 (a bigint)
+      not a uint.
+  - **Harness (wasm SDK package test):** `host/wasm-sdk/test/package.test.mjs`
+    imports `stripTypeScriptTypes` (Node 22.13+) without the
+    `SNUG_NODE_OLDEST` fallback that host/js's package test has.
+    `host/wasm-sdk/test/consumer.mjs` run directly on Node 20.20.2 at
+    `e94575c` is all ok: every loader, workerd (the recipe, the inline
+    entry, the refusal, `wrangler deploy --dry-run`) and Chrome.
+  - **Environment:** P5/slow-compile ×99 and P5/hang ×1 (load 25–40). All
+    of them replay clean, at 2.2 s or less of process time.
+  - **Open on `e94575c`: wasm-size.** The compiler module's gzip is 70,170
+    against the 70,071 cap (D341), 99 B over. A cap or size decision.
+  - **NEW on `e94575c` (and `a004cbc`): scanner != VM.**
+    - Bytes `d8184b82a2f90000f6f98000f6ff`, 24(<<[{0.0: null, -0.0: null},
+      break]>>), under `valid`.
+    - The scanner and decode answer duplicate_key at 9. Schema.validate on
+      `r = any` answers malformed at 13, the later refusal; with 66(h'0000')
+      instead of the break it answers tag at 13.
+    - Without tag 24, or with integer or text keys, the two agree. Found by
+      vm-test 200000/3001/4000 (`det identity detmut 25427`).
+    - Repro: `.cache/p99-logs/repro-dupfloat2.mjs`.
+  - **NEW on `e94575c` (and `a004cbc`): sequence mode vs the D211 oracle and
+    the P9.5 framer.** Both seeds fail the same way on `e94575c` (2,357 s
+    and 2,403 s). Each failing message is a truncated item that, in a
+    sequence, runs into the following messages' bytes.
+    - `det live identity detmut 11445`: message `c482d8211919b3b3`, flags 60,
+      sequence of 4. The oracle answers truncated at 7, kin sequence mode
+      key_type at 8.
+    - framer (P9.5) disagreements: `85` (detmut 1488 at seed 1002), and
+      detmut 7961 / 10381 (seed 1002) and 9068 / 11153 (seed 1001). Kin
+      reports `truncated` at the open item, the framer at a later position.
+    - Get each case's bytes with `.cache/p99-logs/find-detmut.mjs` (`VALID=0`,
+      30000, the seed).
+    - Not yet minimised further; it needs the sequence or D211 owner.
 - [x] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
   2026-11-11). The default mode takes a few minutes and is for routine
   gating. A `full` mode runs the async differential at the scale it ran at
