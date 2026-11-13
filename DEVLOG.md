@@ -12137,6 +12137,15 @@ can run alongside them; its build work is post-RC unless it is cheap.
     - N8: `st()`'s `&'static mut` aliasing in the wasm crates. It is sound
       single-threaded, and its refactor touches every export.
     - S4 (duck-typed schemas in `view()`) was not assigned.
+  - **Gates** on the final tree (`p913-wp2` on main `cf5dc51`):
+    - `bb gates land`: 11/11, with docs-test and the new npm-test guard.
+    - `sequence-test`, `vmsession-test`, `runtime`, `rust-api-test-full`,
+      `msrv`, `wasm-package-test`, `wasm-size`, `node-oldest`,
+      `abnf-test`, `nav-test` and `write-test`: all ok.
+    - `bb gates --check`: ok.
+    - The tree before the codec-only `maxDepth` change failed
+      `sequence-test` on vm-cases' "per-call depth 999" case, which led to
+      that change.
   - **Test crates:** kin/scripts' crates (vm-test, vmsession-test,
     abnf-test, compile-crate, nav-crate, write-crate) re-export their
     generated modules as `generated` for the renamed bin paths (D361).
