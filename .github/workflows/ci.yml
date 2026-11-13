@@ -88,7 +88,7 @@ jobs:
           persist-credentials: false
       - uses: ./snug/.github/actions/setup
         with:
-          wasm: 'true'      # wasm-sdk-test
+          wasm: 'true'      # wasm-sdk-test, vm-test's wasm arm
           compare: 'true'   # size, wasm-opt
       - run: bb gates land
 
@@ -101,8 +101,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { shard: release-core, timeout: 300, msrv: 'false', wasm: 'false', compare: 'false', browsers: 'false', oldest: 'false' }
-          - { shard: release-vm,   timeout: 320, msrv: 'false', wasm: 'false', compare: 'false', browsers: 'false', oldest: 'false' }
+          # scan-test and vm-test build their wasm arm (wasm-build speed) and SKIP without the
+          # nightly; scan-test's cbor2 differential SKIPs without bench/compare
+          - { shard: release-core, timeout: 300, msrv: 'false', wasm: 'true',  compare: 'true',  browsers: 'false', oldest: 'false' }
+          - { shard: release-vm,   timeout: 320, msrv: 'false', wasm: 'true',  compare: 'false', browsers: 'false', oldest: 'false' }
           - { shard: release-rust, timeout: 300, msrv: 'true',  wasm: 'false', compare: 'true',  browsers: 'false', oldest: 'false' }
           - { shard: release-wasm, timeout: 330, msrv: 'false', wasm: 'true',  compare: 'true',  browsers: 'true',  oldest: 'true' }
           - { shard: release-long, timeout: 240, msrv: 'false', wasm: 'false', compare: 'true',  browsers: 'false', oldest: 'false' }

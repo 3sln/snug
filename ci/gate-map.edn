@@ -113,10 +113,12 @@
              nav-test write-test unicode-test abnf-test rust-api-test]
   ;; the routine set before landing a change that touches kin or a host
   :land     [versions check drift size npm-test rust-api-test wasm-sdk-test vm-test compile-test]
-  ;; the release set's CI shards (:partitions). Tools: core and vm need Node and
-  ;; Rust 1.92.0; rust also Rust 1.87 and bench/compare; wasm also the pinned
-  ;; nightly, Node 20, workerd and Chrome; long also bench/compare (valid-test's
-  ;; cbor2 arm).
+  ;; the release set's CI shards (:partitions). Tools: every shard needs Node
+  ;; and Rust 1.92.0; core also the pinned wasm nightly (scan-test's wasm arm)
+  ;; and bench/compare (its cbor2 differential); vm also the nightly (vm-test's
+  ;; wasm arm); rust also Rust 1.87 and bench/compare; wasm also the nightly,
+  ;; bench/compare, Node 20, workerd and Chrome; long also bench/compare
+  ;; (valid-test's cbor2 arm).
   :release-core [versions check drift stamp-test scan-test rscan-test
                  compile-test compile-fuzz nav-test write-test]
   :release-vm   [vm-test vmsession-test sequence-test]
