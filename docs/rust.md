@@ -182,6 +182,38 @@ the byte cap is not a total heap quota. Default depth/entry/item caps are
 and int32-range lengths/counts; invalid ceilings return `Error::Usage`.
 Bignum/decimal/dimension restrictions still belong to kin.
 
+### Thread stacks (D357)
+
+Every path whose native stack grows with input or schema depth fits a 2 MiB
+thread (`std::thread::Builder`'s default) at the depth ceiling (256) and the
+parser-nesting ceiling (256), in debug and release builds, on Rust 1.87 and
+later. The `stack` test checks this on every gate run.
+
+- `decode`, `Schema::decode`, `View::value`, `encode` and `Writer` build and
+  walk value trees iteratively (heap stacks).
+- The kin scanner, the VM (one native frame per nested item it validates)
+  and the compiler's parser recurse, bounded by these limits.
+
+Measured stack per level, the slope between depth 128 and 256 (bytes, 4 KiB
+resolution; Rust 1.87, 1.92, 1.98.1 and 1.100.0 on aarch64-apple-darwin):
+
+| Path | Debug | Release |
+| --- | ---: | ---: |
+| `decode` / `View::open` + walk / `View::value` (the scanner) | 384 | below resolution |
+| `encode` / `Writer::value` | 384 | below resolution |
+| `Schema::validate` against `any` | 384 | 256 |
+| `Schema::validate` / `decode` with a schema live at every level (the VM) | 1,408–1,536 | 640 |
+| Compiling nested schema text (the parser, per bracket) | 512 | below resolution |
+| Dropping a `Value` | 256 | below resolution |
+| `Value::clone` | 1,280 | 256 |
+| `Value` `==` / `{:?}` | 768–896 | up to 384 |
+
+At the ceilings the worst case is about 380 KB, for the VM in a debug build
+at depth 256. Limits never exceed the ceilings, so no larger stack is needed.
+`Value`'s derived `Clone`, `PartialEq`, `Debug` and `Drop` recurse. A tree a
+caller builds deeper than the 256 ceiling, which `encode` refuses, needs
+about these bytes per level of its own stack.
+
 ## Borrow checked bytes
 
 ```rust

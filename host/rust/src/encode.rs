@@ -58,6 +58,21 @@ pub fn encode(value: &Value, options: &EncodeOptions) -> Result<Vec<u8>, Error> 
     writer.finish()
 }
 
+/// An open container of the iterative writer (D357): the entries left, its depth,
+/// and for a map the pairs' byte offsets, their bignum notes, the value to write
+/// after the key in flight and the bignum count before that key.
+enum Walk<'v> {
+    Array(std::slice::Iter<'v, Value>, usize),
+    Map {
+        it: std::slice::Iter<'v, (Value, Value)>,
+        depth: usize,
+        pairs: Vec<i32>,
+        normalized: Vec<bool>,
+        value: Option<&'v Value>,
+        norms: usize,
+    },
+}
+
 pub(crate) struct Output {
     pub(crate) bytes: Vec<u8>,
     pub(crate) options: EncodeOptions,
@@ -183,11 +198,84 @@ impl Output {
         }
         Ok(())
     }
+    /// D357: the tree is walked ITERATIVELY -- the open arrays and maps on a heap
+    /// stack, a tag's or ndarray's content taken next -- so the native stack does
+    /// not grow with the value's depth (the recursive writer needed about 6.3 KB
+    /// per level in a debug build on Rust 1.98). The depth bound is unchanged.
     pub(crate) fn value(&mut self, v: &Value, depth: usize) -> Result<(), Error> {
-        // The host recursion is bounded before descending into caller-built trees.
-        if depth > self.options.limits.max_depth as usize {
-            return Err(Error::cbor("depth"));
+        let mut stack: Vec<Walk<'_>> = Vec::new();
+        let mut next = Some((v, depth));
+        loop {
+            if let Some((v, depth)) = next.take() {
+                if depth > self.options.limits.max_depth as usize {
+                    return Err(Error::cbor("depth"));
+                }
+                match v {
+                    Value::Array(a) => {
+                        self.container(4, a.len(), depth)?;
+                        stack.push(Walk::Array(a.iter(), depth));
+                    }
+                    Value::Map(a) => {
+                        self.container(5, a.len(), depth)?;
+                        stack.push(Walk::Map {
+                            it: a.iter(),
+                            depth,
+                            pairs: Vec::new(),
+                            normalized: Vec::new(),
+                            value: None,
+                            norms: 0,
+                        });
+                    }
+                    Value::Tag(n, c) => {
+                        self.head(6, *n)?;
+                        next = Some((c, depth + 1));
+                        continue;
+                    }
+                    Value::NDArray { shape, data } => {
+                        self.ndarray_head(shape)?;
+                        next = Some((data, depth + 2));
+                        continue;
+                    }
+                    _ => self.scalar(v)?,
+                }
+            }
+            match stack.last_mut() {
+                None => return Ok(()),
+                Some(Walk::Array(it, depth)) => match it.next() {
+                    Some(c) => next = Some((c, *depth + 1)),
+                    None => {
+                        stack.pop();
+                    }
+                },
+                Some(Walk::Map {
+                    it,
+                    depth,
+                    pairs,
+                    normalized,
+                    value,
+                    norms,
+                }) => {
+                    if let Some(val) = value.take() {
+                        // the key just written: its bignum note, then the value
+                        normalized.push(self.norms != *norms);
+                        pairs.push(self.bytes.len() as i32);
+                        next = Some((val, *depth + 1));
+                    } else if let Some((k, val)) = it.next() {
+                        pairs.push(self.bytes.len() as i32);
+                        *norms = self.norms;
+                        *value = Some(val);
+                        next = Some((k, *depth + 1));
+                    } else if let Some(Walk::Map {
+                        pairs, normalized, ..
+                    }) = stack.pop()
+                    {
+                        self.map_end(&pairs, &normalized)?;
+                    }
+                }
+            }
         }
+    }
+    fn scalar(&mut self, v: &Value) -> Result<(), Error> {
         match v {
             Value::Uint(n) => self.integer(false, &n.to_be_bytes()),
             Value::Nint(n) => self.integer(true, &n.to_be_bytes()),
@@ -206,31 +294,8 @@ impl Output {
                 self.head(3, s.len() as u64)?;
                 self.raw(s.as_bytes())
             }
-            Value::Array(a) => {
-                self.container(4, a.len(), depth)?;
-                for v in a {
-                    self.value(v, depth + 1)?;
-                }
-                Ok(())
-            }
-            Value::Map(a) => {
-                self.container(5, a.len(), depth)?;
-                let mut pairs = Vec::new();
-                let mut normalized = Vec::new();
-                for (k, v) in a {
-                    pairs.push(self.bytes.len() as i32);
-                    let n0 = self.norms;
-                    self.value(k, depth + 1)?;
-                    normalized.push(self.norms != n0);
-                    pairs.push(self.bytes.len() as i32);
-                    self.value(v, depth + 1)?;
-                }
-                self.map_end(&pairs, &normalized)
-            }
-            Value::Tag(n, v) => {
-                self.head(6, *n)?;
-                self.value(v, depth + 1)
-            }
+            // containers and tags are value()'s, never a scalar's
+            Value::Array(_) | Value::Map(_) | Value::Tag(..) | Value::NDArray { .. } => Err(Error::Internal),
             Value::Decimal { mantissa, exponent } => {
                 self.head(6, 4)?;
                 self.head(4, 2)?;
@@ -245,7 +310,6 @@ impl Output {
                 self.exact(mantissa)
             }
             Value::TypedArray(a) => self.typed(a),
-            Value::NDArray { shape, data } => self.ndarray(shape, data, depth),
             Value::Bool(v) => self.head(7, if *v { 21 } else { 20 }),
             Value::Null => self.head(7, 22),
             Value::Undefined => self.head(7, 23),
@@ -273,13 +337,18 @@ impl Output {
         data: &Value,
         depth: usize,
     ) -> Result<(), Error> {
+        self.ndarray_head(shape)?;
+        self.value(data, depth + 2)
+    }
+    /// Tag 40, its two-element array's head and the shape array.
+    fn ndarray_head(&mut self, shape: &[u64]) -> Result<(), Error> {
         self.head(6, 40)?;
         self.head(4, 2)?;
         self.head(4, shape.len() as u64)?;
         for &n in shape {
             self.integer(false, &n.to_be_bytes())?;
         }
-        self.value(data, depth + 2)
+        Ok(())
     }
     pub(crate) fn typed(&mut self, a: &TypedArray) -> Result<(), Error> {
         macro_rules! put {
