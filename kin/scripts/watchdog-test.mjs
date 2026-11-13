@@ -2,7 +2,7 @@
 // kills the gate's whole process group (and nothing else), and otherwise passes the
 // gate's status and arguments through.      node kin/scripts/watchdog-test.mjs  (bb watchdog-test)
 import { spawnSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caps } from './watchdog.mjs';
@@ -49,6 +49,25 @@ const alive = pid => { try { process.kill(pid, 0); return true; } catch { return
   const r1 = watch('ok-gate', '/bin/sh', ['-c', 'exit 3']);
   const r2 = watch('args-gate', process.execPath, ['-e', 'console.log(JSON.stringify(process.argv.slice(1)))', 'a', '--gate-cpu=50', 'b c']);
   line(r1.status === 3 && r2.status === 0 && r2.out.includes('["a","b c"]'), 'pass-through: the gate\'s exit status (3) and its arguments (the --gate-* ones removed) reach the caller unchanged');
+}
+// 4b. P9.13 WP3 (S2): failure statuses pass through exactly, for run() and for selfWatch():
+// exit 1 stays 1 (a gate's usual failure), and a gate killed by a signal is never 0
+{
+  const e1 = watch('fail-gate', '/bin/sh', ['-c', 'exit 1']);
+  const sig = watch('signal-gate', '/bin/sh', ['-c', 'kill -TERM $$']);
+  const segv = watch('segv-gate', process.execPath, ['-e', 'process.kill(process.pid, "SIGSEGV")']);
+  line(e1.status === 1 && sig.status !== 0 && sig.status !== null && segv.status !== 0 && segv.status !== null,
+    `run(): exit 1 -> ${e1.status}; killed by SIGTERM -> ${sig.status}; killed by SIGSEGV -> ${segv.status} (never 0)`);
+  mkdirSync(join(root, '.cache'), { recursive: true });
+  const dir = mkdtempSync(join(root, '.cache', 'watchdog-test-'));
+  const gate = join(dir, 'self-gate.mjs');
+  writeFileSync(gate, `import { selfWatch } from ${JSON.stringify(wd)};\nselfWatch('self-gate', import.meta.url);\n` +
+    `const how = process.argv[2];\nif (how === 'signal') process.kill(process.pid, 'SIGTERM'); else process.exit(Number(how));\n`);
+  const self = how => spawnSync(process.execPath, [gate, how], { cwd: root, env: env0, encoding: 'utf8', timeout: 600000 }).status;
+  const s0 = self('0'), s1 = self('1'), s3 = self('3'), ss = self('signal');
+  rmSync(dir, { recursive: true, force: true });
+  line(s0 === 0 && s1 === 1 && s3 === 3 && ss !== 0 && ss !== null,
+    `selfWatch(): exit 0 -> ${s0}, exit 1 -> ${s1}, exit 3 -> ${s3}, killed by SIGTERM -> ${ss} (never 0)`);
 }
 // 5. defaults and overrides
 {

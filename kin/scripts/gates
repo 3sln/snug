@@ -4,18 +4,22 @@
 ;;     kin/scripts/gates <set|gate>...    run them in order (bb gates release)
 ;;     kin/scripts/gates --list           the gates and sets
 ;;     kin/scripts/gates --check          the map against bb.edn and the watchdog's caps
-;;                                        (and each :partitions entry against its set)
+;;                                        (and each :partitions entry against its set, and
+;;                                        the CI release matrix against :partitions :release)
 ;;     --fail-fast                        stop at the first gate that is not ok
 ;;
-;; A gate is ok only if it exits 0 and prints no `SKIP` line; a SKIP is NOT RUN
-;; and a :blocked gate is never run, and either fails the run (policy §2, §4).
+;; A gate is ok only if it exits 0 and prints no NOT RUN line (not-run?, on stdout or
+;; stderr): a `SKIP` line, "<tool> unavailable/missing/not installed/not found ...
+;; skipped", or node:test reporting a skipped or todo test. A NOT RUN, or a :blocked
+;; gate (never run), fails the run (policy §2, §4).
 ;; The summary names every gate's result and wall time. Exit 0 only if all ok.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
          '[clojure.string :as str]
-         '[cheshire.core :as json])
+         '[cheshire.core :as json]
+         '[clj-yaml.core :as yaml])
 
 (def root (str (fs/canonicalize (fs/path (fs/parent *file*) "../.."))))
 (def gate-map (edn/read-string (slurp (str root "/ci/gate-map.edn"))))
@@ -57,6 +61,27 @@
            :when (> wall shard-wall-max)]
        (str "shard " sh ": wall caps sum to " wall " s, past " shard-wall-max " s (one CI job)")))))
 
+(defn ci-matrix-problems
+  "P9.13 WP3 (S10): hosted CI's release jobs (.github/workflows/ci.yml, jobs.release's matrix)
+  run exactly the shards of :partitions :release, each once, and each job's timeout-minutes
+  is above its shard's wall caps and at most 360."
+  []
+  (let [f (str root "/.github/workflows/ci.yml")]
+    (if-not (fs/exists? f)
+      ["ci.yml: .github/workflows/ci.yml is missing"]
+      (let [rows (get-in (yaml/parse-string (slurp f)) [:jobs :release :strategy :matrix :include])
+            shards (map :shard rows)
+            want (map name (get-in gate-map [:partitions :release]))]
+        (concat
+         (when (not= (frequencies shards) (frequencies want))
+           [(str "ci.yml: the release matrix runs " (vec shards) ", :partitions :release is " (vec want))])
+         (for [{:keys [shard timeout]} rows
+               :let [members (get (:sets gate-map) (keyword shard))
+                     wall (reduce + (map #(or (first (:caps (get gates %))) 0) members))]
+               :when (and members (or (not (number? timeout)) (<= (* 60 timeout) wall) (> timeout 360)))]
+           (str "ci.yml: release job " shard " has timeout-minutes " timeout ", its gates' wall caps sum to "
+                (quot wall 60) " min (it must be above that and at most 360)")))))))
+
 (defn problems
   "The map's disagreements with bb.edn and the watchdog: [errors warnings]."
   []
@@ -73,10 +98,19 @@
                   (str g ": needs :cmd and :caps [wall cpu] (or :blocked)"))
                 (for [[s members] (:sets gate-map) m members :when (not (contains? gates m))]
                   (str "set " (name s) " names " m ", which is not a gate"))
-                (partition-problems))
+                (partition-problems)
+                (ci-matrix-problems))
         warnings (for [t (sort tasks) :when (not (contains? named t))]
                    (str "bb task " t " is in neither :gates nor :not-gates"))]
     [(vec errors) (vec warnings)]))
+
+(def not-run-patterns
+  "P9.13 WP3 (S4): lines that mean part of a gate did not run. Each one fails its gate."
+  [#"^\s*SKIP\b"
+   #"(?i)\b(unavailable|missing|not installed|not found)\b.*\bskipped\b"
+   #"^\s*ℹ (skipped|todo) [1-9]"
+   #"^# (skip|todo) [1-9]"])
+(defn not-run? [line] (some #(re-find % line) not-run-patterns))
 
 (defn run-gate [g]
   (let [{:keys [cmd dir watchdog caps blocked]} (get gates g)
@@ -88,12 +122,19 @@
       (let [known (contains? (watchdog-defaults) w)
             argv (concat ["node" (str root "/kin/scripts/watchdog.mjs") w "--"] cmd
                          (when-not known [(str "--gate-wall=" (first caps)) (str "--gate-cpu=" (second caps))]))
-            proc (apply p/process {:dir (str root "/" (or dir ".")) :in :inherit :err :inherit} argv)
-            skip (atom nil)]
+            proc (apply p/process {:dir (str root "/" (or dir ".")) :in :inherit} argv)
+            skip (atom nil)
+            seen (fn [line] (when (not-run? line) (swap! skip #(or % line))))
+            ;; stderr is read too (S4): echoed to stderr, checked like stdout
+            err (future (with-open [r (io/reader (:err proc))]
+                          (doseq [line (line-seq r)]
+                            (binding [*out* *err*] (println line))
+                            (seen line))))]
         (with-open [r (io/reader (:out proc))]
           (doseq [line (line-seq r)]
             (println line)
-            (when (and (nil? @skip) (re-find #"^\s*SKIP\b" line)) (reset! skip line))))
+            (seen line)))
+        @err
         (let [exit (:exit @proc)
               secs (quot (- (System/currentTimeMillis) t0) 1000)]
           (cond (not (zero? exit)) {:gate g :result (if (= exit 124) "WATCHDOG" "FAIL") :why (str "exit " exit) :secs secs}

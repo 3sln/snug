@@ -35,3 +35,12 @@ test('test/index.js imports every test/*.test.mjs', () => {
   assert.deepEqual(files.filter(f => !imported.has(f)), [], 'add these to test/index.js');
   assert.deepEqual([...imported].filter(f => !files.includes(f)), [], 'test/index.js imports missing files');
 });
+
+// P9.13 WP3 (S3): a run that stops early (a process.exit(0) mid-suite, a crash the runner
+// counts as a pass) must not pass. Tests run in registration order, so this one runs last;
+// if the process exits before it ran, the exit status becomes 1.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) { console.log('FAIL test/index.js: the suite stopped before its last test'); process.exit(1); }
+});
+test('the suite ran to its last test', () => { finished = true; });

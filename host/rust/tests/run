@@ -43,6 +43,10 @@ if cargo clippy --version >/dev/null 2>&1; then
   # Allow that one generated-code deny lint; leave all other lint levels intact.
   cargo clippy --offline --manifest-path .cache/snug-rs/Cargo.toml --lib --tests -- -A clippy::absurd_extreme_comparisons > .cache/snug-rs/clippy.log 2>&1 || { cat .cache/snug-rs/clippy.log; exit 1; }
   echo "clippy passed with generated comparison allowance (diagnostics: .cache/snug-rs/clippy.log)"
+elif [ "${SNUG_CLIPPY_OPTIONAL:-}" = 1 ]; then
+  # the rust-version cells (D344: clippy's lints are the current toolchain's), which opt in
+  echo "clippy: not on $(rustc --version); not run (SNUG_CLIPPY_OPTIONAL=1)"
 else
-  echo "clippy unavailable; skipped"
+  # P9.13 WP3 (S4): a toolchain without clippy did not run the lint gate
+  echo "SKIP clippy -- not installed on $(rustc --version) (rustup component add clippy): NOT RUN"
 fi

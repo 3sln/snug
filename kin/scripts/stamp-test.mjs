@@ -19,10 +19,16 @@
 //     repeats the checks of 3; a 33-byte version is refused, tree unchanged;
 //  6. turns b into a checkout with a branch: `bb stamp` refuses it.
 //
+// Copy b is stamped and built in another place and time (P9.13 WP3, S11): its files'
+// mtimes are 400 days ahead, its Node processes see a clock 400 days ahead (a preloaded
+// Date), and it runs under TZ=Pacific/Kiritimati (UTC+14) and LC_ALL=tr_TR.UTF-8, where
+// copy a runs under TZ=UTC and LC_ALL=C. Time-, zone- or locale-dependent output breaks
+// the byte-identity checks of 1 and 4.
+//
 // Nothing is published; the scratch directory is removed unless --keep.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selfWatch } from './watchdog.mjs';
@@ -73,7 +79,18 @@ function copyTree(to) {
   return files.length;
 }
 
-const stamp = (tree, ...args) => run('node', ['kin/scripts/stamp.mjs', ...args], { cwd: tree });
+// S11: copy a here and now; copy b 400 days ahead, at UTC+14, in a Turkish locale
+const SHIFT_MS = 400 * 86400e3, shiftClock = join(dir, 'shift-clock.mjs');
+const ENV = {
+  a: { TZ: 'UTC', LC_ALL: 'C', LANG: 'C' },
+  b: { TZ: 'Pacific/Kiritimati', LC_ALL: 'tr_TR.UTF-8', LANG: 'tr_TR.UTF-8', NODE_OPTIONS: `--import=${pathToFileURL(shiftClock).href}` },
+};
+const envOf = tree => ENV[tree.endsWith('/b') || tree.endsWith('-b') ? 'b' : 'a'];
+function shiftTree(root) {   // every file's mtime SHIFT_MS ahead
+  const t = new Date(Date.now() + SHIFT_MS);
+  (function walk(d) { for (const name of readdirSync(d)) { const p = join(d, name), st = lstatSync(p); if (st.isSymbolicLink()) continue; if (st.isDirectory()) walk(p); utimesSync(p, t, t); } })(root);
+}
+const stamp = (tree, ...args) => run('node', ['kin/scripts/stamp.mjs', ...args], { cwd: tree, env: envOf(tree) });
 
 /** Every site, the test file, and a compiled Program, for `version` in `tree`. */
 function coherent(tree, version, label) {
@@ -97,17 +114,17 @@ function coherent(tree, version, label) {
 
 function npmTarball(tree, tag) {
   const staged = join(dir, `npm-${tag}`), out = join(dir, `tgz-${tag}`);
-  must(run('node', ['host/js/src/package-build.mjs', staged], { cwd: tree, env: { TMPDIR: dir } }), `package-build (${tag})`);
+  must(run('node', ['host/js/src/package-build.mjs', staged], { cwd: tree, env: { TMPDIR: dir, ...ENV[tag] } }), `package-build (${tag})`);
   mkdirSync(out);
-  must(run('npm', ['pack', '--silent', '--pack-destination', out, '--cache', join(dir, 'npm-cache'), '--offline'], { cwd: staged }), `npm pack (${tag})`);
+  must(run('npm', ['pack', '--silent', '--pack-destination', out, '--cache', join(dir, 'npm-cache'), '--offline'], { cwd: staged, env: ENV[tag] }), `npm pack (${tag})`);
   const [name] = readdirSync(out);
   return { name, path: join(out, name), staged };
 }
 
 function crate(tree, tag) {
   const assembled = join(dir, `crate-${tag}`), target = join(dir, `target-${tag}`);
-  must(run('sh', ['kin/scripts/rust-crate', assembled], { cwd: tree }), `rust-crate (${tag})`);
-  const env = { CARGO_TARGET_DIR: target };
+  must(run('sh', ['kin/scripts/rust-crate', assembled], { cwd: tree, env: ENV[tag] }), `rust-crate (${tag})`);
+  const env = { CARGO_TARGET_DIR: target, ...ENV[tag] };
   const list = must(run('cargo', ['package', '--list', '--offline', '--allow-dirty', '--quiet'], { cwd: assembled, env }), `cargo package --list (${tag})`);
   must(run('cargo', ['package', '--no-verify', '--offline', '--allow-dirty', '--quiet'], { cwd: assembled, env }), `cargo package (${tag})`);
   const pkgDir = join(target, 'package');
@@ -122,7 +139,10 @@ try {
   symlinkSync(realpathSync(join(ROOT, '..', 'kin')), join(dir, 'kin'));
   const a = join(dir, 'a'), b = join(dir, 'b');
   const n = copyTree(a); copyTree(b);
-  ok(`copied ${n} files twice into ${relative(ROOT, dir)}/ (a, b)`);
+  writeFileSync(shiftClock, `const D = Date, off = ${SHIFT_MS};\nglobalThis.Date = class extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } };\n`);
+  shiftTree(b);
+  const seen = run('node', ['-e', 'console.log(new Date().getUTCFullYear(), Intl.DateTimeFormat().resolvedOptions().timeZone)'], { env: ENV.b }).out.trim();
+  ok(`copied ${n} files twice into ${relative(ROOT, dir)}/ (a, b); b's files and Node clock 400 days ahead, TZ and locale shifted (b sees ${seen})`);
 
   // 1. two stamps, one by default from version.edn, one explicit
   must(stamp(a), 'bb stamp (a)');
