@@ -316,8 +316,9 @@ allSuites.get(9682).push({name:'RFC 9682 simple head numbers',id:'simple-heads',
 
 // P9.2: every expectation snug does not meet carries its classification (the runner counts
 // a failing classified check as explained, an unclassified one as unexplained).
-for(const test of byId(8610,'default-timer').cases)if(test.expect===false)test.classification={kind:'contested',decision:'S46',
-  reason:'RFC 8610 §3.8.6 gives .default an "implied .ne control"; snug treats .default as an annotation only, as Erratum 9229 (status Reported) proposes and the Ruby reference does (docs/conformance.md S46).'};
+// D359: snug's default reading of .default is the published implied .ne, so default-timer needs no classification
+// (annotation-only, erratum 9229, status Reported, is the defaultControl: 'annotation' compile option).
+for(const test of byId(8610,'default-timer').cases)if(test.expect===false)test.note='published §3.8.6 implied .ne, snug\'s default reading (D359); erratum 9229 (Reported) proposes annotation-only, snug\'s defaultControl: \'annotation\'';
 
 // An auditable census of every displayed rule-like line, including all ABNF
 // figures that must not be misrepresented as CDDL schemas.

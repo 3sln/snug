@@ -534,10 +534,12 @@ function equal(a, b, topNumeric = false, tick = () => {}) {
   }
 }
 
-/** check(schema, rule, decodedValue, {cuts, steps}) -> true | false | 'unknown'.
- *  cuts (D301): 'rfc' (default; the literal RFC 8610 cut as commitment epochs) or 'branch' (rule A). */
-export function check(schema, rule, value, { cuts = 'rfc', steps = 100000 } = {}) {
+/** check(schema, rule, decodedValue, {cuts, steps, defaultControl}) -> true | false | 'unknown'.
+ *  cuts (D301): 'rfc' (default; the literal RFC 8610 cut as commitment epochs) or 'branch' (rule A).
+ *  defaultControl (D359): 'ne' (default; RFC 8610 §3.8.6's implied .ne) or 'annotation'. */
+export function check(schema, rule, value, { cuts = 'rfc', steps = 100000, defaultControl = 'ne' } = {}) {
   if (!['rfc', 'branch'].includes(cuts)) throw new TypeError(`cuts: 'rfc' or 'branch' (D301), not ${String(cuts)}`);
+  if (!['ne', 'annotation'].includes(defaultControl)) throw new TypeError(`defaultControl: 'ne' or 'annotation' (D359), not ${String(defaultControl)}`);
   if (!schema?.rules || !schema.rules.has(rule)) return 'unknown';
   let remaining = steps;
   const tick = () => { if (--remaining < 0) throw UNKNOWN; };
@@ -662,7 +664,9 @@ export function check(schema, rule, value, { cuts = 'rfc', steps = 100000 } = {}
       const op = t.op;
       if (['plus', 'cat', 'det'].includes(op)) return constants(t).some(x => equal(x, v, false, tick));
       if (!type(t.a, v)) return false;
-      if (op === 'default' || op === 'feature') return true;
+      if (op === 'feature') return true;
+      // D359: RFC 8610 §3.8.6 -- .default carries an implied .ne, unless defaultControl is 'annotation'
+      if (op === 'default') return defaultControl === 'annotation' || equal(v, singleton(t.b), true, tick) === false;
       if (op === 'and' || op === 'within') return type(t.b, v);
       if (op === 'size') {
         if (v.kind === 'text' || v.kind === 'bytes') return type(t.b, I(v.kind === 'text' ? utf8.encode(v.value).length : v.value.length));

@@ -104,6 +104,7 @@ pub const H_CUTS: i32 = 449;
 pub const H_LIM_GROUP: i32 = 450;
 pub const H_GROUP_GIVEN: i32 = 451;
 pub const H_PMODE: i32 = 452;
+pub const H_DEFAULT: i32 = 453;
 pub const H_EXT_FLAGS: i32 = 62;
 pub const H_EXT_BID: i32 = 63;
 pub const H_TAB: i32 = 64;

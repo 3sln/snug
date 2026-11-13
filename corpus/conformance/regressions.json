@@ -126,6 +126,21 @@
       ]
     },
     {
+      "category": "regression", "name": "a controller of a literal and a range (D363: RFC 8610 figure 10)", "options": {"wire": "valid"},
+      "cddl": "fb = bstr .bits (0 / 4..7)\nub = uint .bits (0 / 4..7)\nus = uint .size (1 / 3..4)\n",
+      "cases": [
+        {"rule": "fb", "hex": "4101", "expect": true, "note": "the literal and the range are two INT leaves (the range admits bignums by value); as a controller only the numbers count"},
+        {"rule": "fb", "hex": "4110", "expect": true},
+        {"rule": "fb", "hex": "4102", "expect": false},
+        {"rule": "ub", "hex": "01", "expect": true},
+        {"rule": "ub", "hex": "02", "expect": false},
+        {"rule": "ub", "hex": "1880", "expect": true},
+        {"rule": "us", "hex": "18ff", "expect": true},
+        {"rule": "us", "hex": "1a00010000", "expect": true},
+        {"rule": "us", "hex": "1b0000000100000000", "expect": false}
+      ]
+    },
+    {
       "category": "regression", "name": "tag-24 payloads under valid: well-formed only (D358, P9.13 decision 1)", "options": {"wire": "valid"},
       "cddl": "a = any\ne = #6.24(bstr .cbor any)\n",
       "cases": [

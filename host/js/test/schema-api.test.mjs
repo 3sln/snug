@@ -31,6 +31,19 @@ test('a value a cut decided carries the subcode cut; an ordinary wrong value non
   assert.equal(plain.validate(encode({ a: 'y' }), 'r').subcode, undefined);
 });
 
+test('D359: .default carries the implied .ne; defaultControl: annotation drops it and changes the source key', async () => {
+  const text = 'r = { ? n: uint .default 5 }';
+  const ne = await compile(text), ann = await compile(text, { defaultControl: 'annotation' });
+  assert.equal(ne.validate(encode({ n: 5 }), 'r').ok, false);
+  assert.equal(ne.validate(encode({ n: 4 }), 'r').ok, true);
+  assert.equal(ne.validate(encode({}), 'r').ok, true);
+  assert.equal(ann.validate(encode({ n: 5 }), 'r').ok, true);
+  assert.equal((await compile(text, { defaultControl: 'ne' })).program.sourceKey, ne.program.sourceKey);
+  assert.notEqual(ann.program.sourceKey, ne.program.sourceKey);
+  assert.equal((await compile('r = bool .default false')).validate(encode(false), 'r').ok, false);
+  await assert.rejects(async () => compile(text, { defaultControl: 'none' }), TypeError);
+});
+
 test('Schema and Program refuse structured clone (postMessage) with DataCloneError', async () => {
   const s = await compile('r = uint');
   for (const x of [s, s.program]) {

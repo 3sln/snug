@@ -2749,12 +2749,7 @@
           "rule": "timer",
           "hex": "a26474696d65006e646973706c617965642d7374657001",
           "expect": false,
-          "note": "published §3.8.6 implied .ne; erratum 9229 contested",
-          "classification": {
-            "kind": "contested",
-            "decision": "S46",
-            "reason": "RFC 8610 §3.8.6 gives .default an \"implied .ne control\"; snug treats .default as an annotation only, as Erratum 9229 (status Reported) proposes and the Ruby reference does (docs/conformance.md S46)."
-          },
+          "note": "published §3.8.6 implied .ne, snug's default reading (D359); erratum 9229 (Reported) proposes annotation-only, snug's defaultControl: 'annotation'",
           "ruby": {
             "status": "checked",
             "exitCode": 0,

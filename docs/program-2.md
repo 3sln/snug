@@ -63,6 +63,9 @@ merged into program.md and this file is deleted.
   element becomes 2. The option list gains `cuts` (the effective mode,
   always present: 0 `rfc`, the default; 1 `branch`, rule A — D301) and
   `groupWords` (−1 when not given). Old cache entries therefore never match.
+  D359: a 20th element, `1`, follows when the compile option
+  `defaultControl` is `'annotation'` (`.default` without its implied `.ne`);
+  the default reading adds no element, so its preimage keeps 19.
 
 ## 2. Header changes
 

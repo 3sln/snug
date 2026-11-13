@@ -47,7 +47,9 @@ not need the category tables at validation time. `CompileOptions::cuts`
 selects the cut semantics (`Cuts::Rfc`, the literal RFC 8610 cut, by default;
 `Cuts::Branch`, rule A), and `CompileOptions::group_words` caps the PEG
 group arena in words (default 4,194,304; a run that needs more refuses with
-`group_limit`), as JS's `cuts` and `groupWords`.
+`group_limit`), as JS's `cuts` and `groupWords`. `CompileOptions::default_control`
+is JS's `defaultControl`: `DefaultControl::Ne` (the default, RFC 8610
+§3.8.6's implied `.ne`) or `DefaultControl::Annotation`.
 
 Schemas and Programs clone cheaply through immutable shared storage. Share a
 Schema between threads, and use one reusable `Scratch` per concurrent caller.

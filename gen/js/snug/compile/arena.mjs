@@ -207,6 +207,8 @@ export const H_GROUP_GIVEN = 451;
 
 export const H_PMODE = 452;
 
+export const H_DEFAULT = 453;
+
 export const H_EXT_FLAGS = 62;
 
 export const H_EXT_BID = 63;

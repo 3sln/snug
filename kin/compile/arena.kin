@@ -141,6 +141,9 @@
 (defconst ^:pub ^I32 H_GROUP_GIVEN 451)
 ;; the container being lowered: 0 array, 1 map (snug.compile.peg)
 (defconst ^:pub ^I32 H_PMODE 452)
+;; D359: `.default` -- 0 the published RFC 8610 §3.8.6 reading, an implied `.ne`
+;; (the default); 1 annotation only (`defaultControl: 'annotation'`, erratum 9229)
+(defconst ^:pub ^I32 H_DEFAULT 453)
 ;; D141: extension registry flags (bit 0: admitted under the `bus` profile)
 (defconst ^:pub ^I32 H_EXT_FLAGS 62)
 ;; D141: the bid of the used controls' names blob (-1: none used)

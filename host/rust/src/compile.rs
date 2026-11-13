@@ -100,6 +100,19 @@ pub enum AbnfMode {
     Lenient,
 }
 
+/// What `.default` means: RFC 8610 §3.8.6's implied `.ne` (`Ne`, the default:
+/// a present value equal to the default does not match), or an annotation
+/// that changes no verdict (`Annotation`, as RFC 8610 erratum 9229 proposes;
+/// that erratum's status is Reported, not verified). Bound into the source
+/// key. Not exhaustive.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DefaultControl {
+    #[default]
+    Ne,
+    Annotation,
+}
+
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
 /// and extension controls (none by default).
 #[derive(Default)]
@@ -110,6 +123,8 @@ pub struct CompileOptions<'a> {
     pub abnf: AbnfMode,
     /// Format 2.0: the cut mode (`Rfc` by default, `Branch` = rule A).
     pub cuts: Cuts,
+    /// What `.default` means (`Ne` by default).
+    pub default_control: DefaultControl,
     /// Format 2.0: the PEG group arena cap in words; None = the default.
     pub group_words: Option<i32>,
     pub limits: &'a [i32],
@@ -148,7 +163,7 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
 }
 
 pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
-    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, group_words, abnf } = options;
+    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, default_control, group_words, abnf } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
     opt[0] = *profile;
     for (i, v) in limits.iter().enumerate().take(COMPILE_OPTIONS.len()) {
@@ -157,6 +172,8 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
     opt[kc::OPT_REGEXP as usize] = if *regexp == Regexp::IRegexp { 1 } else { 0 };
     opt[kc::OPT_CUTS as usize] = if *cuts == Cuts::Branch { 1 } else { 0 };
     opt[kc::OPT_GROUP_WORDS as usize] = group_words.unwrap_or(-1);
+    // D359: 0 the implied .ne (default), 1 annotation only
+    opt[kc::OPT_DEFAULT as usize] = if *default_control == DefaultControl::Annotation { 1 } else { 0 };
     // D141: the extension-control registry rides after the OPT_WORDS options
     if let Some(c) = controls {
         opt.extend(c.words());

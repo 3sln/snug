@@ -46,7 +46,7 @@ The following named sets are the complete option-key lists used below:
 | `decode` | DecodeOptions | none |
 | `encode` | EncodeOptions | none |
 | `new Writer` | EncodeOptions + `keysSorted`, `limits` | nested `limits`: Limits only |
-| `compile` | `profile`, `regexp`, `cuts`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
+| `compile` | `profile`, `regexp`, `cuts`, `defaultControl`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
@@ -181,6 +181,7 @@ interface CompileOptions {
   profile?: 'full' | 'bindle' | 'bus';   // compiler restriction set; default 'full'
   regexp?: 'xsd' | 'iregexp';            // .regexp dialect; default 'xsd'
   cuts?: 'rfc' | 'branch';               // map cut semantics; default 'rfc'
+  defaultControl?: 'ne' | 'annotation';  // .default: implied .ne (default) or annotation only
   groupWords?: number;                   // PEG group arena cap in words; default 4,194,304, at most 2^24
   limits?: CompileLimits;
   unicode?: Int32Array;                  // tables from @3sln/snug/unicode
@@ -197,6 +198,11 @@ Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 (see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
 Any other value is a TypeError.
 The effective cut mode is part of the source key.
+`defaultControl` defaults to `'ne'`: `.default` carries RFC 8610 §3.8.6's
+implied `.ne`, so a present value equal to the default does not match.
+`'annotation'` makes `.default` change no verdict, as RFC 8610 Erratum 9229
+proposes (its status is Reported, not verified). The annotation reading is
+part of the source key.
 `abnf?: 'strict' | 'lenient'` is how `.abnf`/`.abnfb` controllers
 parse: `'strict'` (the default) is RFC 5234 + RFC 7405 + RFC 9165 §3;
 `'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-3slnsnugabnf)). Any

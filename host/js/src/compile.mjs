@@ -9,7 +9,7 @@
 //   throws SchemaError { code, line, column, rule } (schema text may be quoted; there is no payload)
 import { compileSchema, floatRequests, floatRequestStart, floatRequestEnd, errorName, errorLine, errorColumn, errorOffset,
   errorRuleStart, errorRuleLen, outProgramAt, outProgramWords, outPoolAt, outPoolBytes, budgetUsed, keyPreimageAt,
-  keyPreimageLen, snugVersion, OPT_WORDS, OPT_REGEXP, OPT_CUTS, OPT_GROUP_WORDS, warningCount, warningCode,
+  keyPreimageLen, snugVersion, OPT_WORDS, OPT_REGEXP, OPT_CUTS, OPT_GROUP_WORDS, OPT_DEFAULT, warningCount, warningCode,
   warningLine, warningColumn, warningRuleStart, warningRuleLen, warningName, warningMessage }
   from '../../../gen/js/snug/compile/main.mjs';
 import { ERR_ARENA, ERR_NEED_FLOATS, ERR_NEED_UNICODE, ERR_REGEXP_BLOCK, ERR_NEED_ABNF, ARENA_MIN_WORDS, ARENA_MAX_WORDS } from '../../../gen/js/snug/compile/arena.mjs';
@@ -69,9 +69,9 @@ function floats(h, bytes) {
 export function compile(text, opts = {}) {
   validateCompileOptions(opts);
   const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd',
-    cuts = 'rfc', groupWords, abnf = 'strict' } = opts;
+    cuts = 'rfc', groupWords, abnf = 'strict', defaultControl = 'ne' } = opts;
   const entries = controlEntries(controls);
-  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp, cuts, groupWords, abnf); }
+  try { return compileOnce(text, profile, limits, unicode, entries, controlsInBus, regexp, cuts, groupWords, abnf, defaultControl); }
   finally {
     // A hostile schema may have grown the arena to tens of megabytes: do not keep that for the isolate's life.
     if (arena.length > RETAIN_WORDS) arena = new Int32Array(ARENA_MIN_WORDS);
@@ -79,7 +79,7 @@ export function compile(text, opts = {}) {
 }
 const RETAIN_WORDS = 1 << 22;
 
-function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cuts, groupWords, abnf) {
+function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cuts, groupWords, abnf, defaultControl) {
   const bytes = typeof text === 'string' ? encoder.encode(text) : text;
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   // D340: the ABNF parse mode rides in the registry flags, so the source key binds it
@@ -89,6 +89,8 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
   // D276/D281: the arena cap.
   opt[OPT_CUTS] = cuts === 'branch' ? 1 : 0;
   opt[OPT_GROUP_WORDS] = groupWords === undefined ? -1 : Math.min(groupWords, 0x7fffffff);
+  // D359: `.default` is RFC 8610 §3.8.6's implied .ne (0, the default) or an annotation (1)
+  opt[OPT_DEFAULT] = defaultControl === 'annotation' ? 1 : 0;
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
     throw new TypeError('unicode must be the Int32Array tables from @3sln/snug/unicode');

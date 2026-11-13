@@ -3,7 +3,7 @@
 
 import { ERR_CONTROL_TARGET, ERR_CONTROL_VALUE, ERR_LIM_POOL, ERR_UNSUPPORTED_CONTROL, H_LIM_POOL, H_R0, H_R1, H_R2, H_R3, INF, T_FIV, T_IV, T_IVA, T_IVB, T_IVC, T_LST, T_STK, T_TMP2, charge, erred, fail, hg, hs, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
 import { bidByte, bidLen, encString, intern, magAdd, magAdd1, magCmp, magFrom64, magSub } from './bytes.mjs';
-import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
+import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivNormalize, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
 import { rxCompile } from './regexp.mjs';
 
 export function singleLeaf(h, ts) {
@@ -196,11 +196,41 @@ export function targetError(h, pos) {
     return fail(h, ERR_CONTROL_TARGET, pos);
 }
 
+export function intController(h, ts) {
+    // A .size / .bits controller as one INT leaf: its single INT leaf, or the
+    // union of its INT leaves' intervals (D363: a range admits bignums by value
+    // and a literal does not, so `0 / 4..7` is two leaves; as a controller only the
+    // numbers count). -1 when ts holds anything else.
+    const l = singleLeaf(h, ts);
+    if (l >= 0) {
+        return l;
+    }
+    if (tsN(h, ts) <= 1) {
+        return -1;
+    }
+    vtrunc(h, T_IVA, 0);
+    for (let i = 0; i < tsN(h, ts); i++) {
+        const li = tsLeaf(h, ts, i);
+        if (lk(h, li) !== K_INT) {
+            return -1;
+        }
+        ivLoad(h, T_IVA, ld(h, li, 0), ld(h, li, 1));
+    }
+    if (ivNormalize(h, T_IVA, T_IVB) < 0) {
+        return -1;
+    }
+    const m = mkIntFrom(h, T_IVB, 0);
+    if (m < 0) {
+        return -1;
+    }
+    return m;
+}
+
 export function ctlSize(h, target, ctl, ranged, pos) {
     // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
     // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
     // `uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.
-    const cl = singleLeaf(h, ctl);
+    const cl = intController(h, ctl);
     const from = vlen(h, T_STK);
     if ((cl < 0) || (lk(h, cl) !== K_INT)) {
         return fail(h, ERR_CONTROL_VALUE, pos);
@@ -265,7 +295,7 @@ export function ctlSize(h, target, ctl, ranged, pos) {
 }
 
 export function ctlBits(h, target, ctl, pos) {
-    const cl = singleLeaf(h, ctl);
+    const cl = intController(h, ctl);
     const from = vlen(h, T_STK);
     let bhi = 0;
     let blo = 0;
@@ -780,6 +810,39 @@ export function ctlCompare(h, target, ctl, op, pos) {
     return tsMake(h, from);
 }
 
+export function simpleEq(h, t, v, ne) {
+    // D359: one simple value v (`false`, `null`, ...) as the controller of .eq
+    // (ne 0) / .ne (ne 1) on target leaf t, a SIMPLE range or a leaf that admits
+    // no simple value: the matching SIMPLE ranges, or t itself, pushed on T_STK.
+    if (lk(h, t) !== K_SIMPLE) {
+        if (ne === 1) {
+            vpush1(h, T_STK, t);
+        }
+        return;
+    }
+    const lo = ld(h, t, 0);
+    const hi = ld(h, t, 1);
+    if (ne === 0) {
+        if ((lo <= v) && (v <= hi)) {
+            const s0 = mkSimpleRange(h, v, v);
+            vpush1(h, T_STK, s0);
+        }
+        return;
+    }
+    if ((v < lo) || (v > hi)) {
+        vpush1(h, T_STK, t);
+        return;
+    }
+    if (lo < v) {
+        const s1 = mkSimpleRange(h, lo, v - 1);
+        vpush1(h, T_STK, s1);
+    }
+    if (v < hi) {
+        const s2 = mkSimpleRange(h, v + 1, hi);
+        vpush1(h, T_STK, s2);
+    }
+}
+
 export function ctlEq(h, target, ctl, ne, pos) {
     // ne 0: .eq; ne 1: .ne.
     const from = vlen(h, T_STK);
@@ -926,6 +989,8 @@ export function ctlEq(h, target, ctl, ne, pos) {
             if (ne === 1) {
                 vpush1(h, T_STK, t);
             }
+        } else if (((lk(h, cl) === K_SIMPLE) && (ld(h, cl, 0) === ld(h, cl, 1))) && ((lk(h, t) === K_SIMPLE) || ((leafMask(h, t) & 128) === 0))) {
+            simpleEq(h, t, ld(h, cl, 0), ne);
         } else {
             // A composite controller: .eq is an AND; .ne has no lowering.
             if (ne === 1) {

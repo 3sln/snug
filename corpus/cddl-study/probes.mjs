@@ -43,7 +43,7 @@ probe('.regexp counted unicode class','r = tstr .regexp "[^\\\\x00-\\\\x1f]{1,4}
 probe('.pcre','r = tstr .pcre "^[a-z]+$"','r',[['abc',true],['A',false]]);
 probe('.cbor embedded','inner = { a: int }\nr = bstr .cbor inner','r',[[encode({a:1}),true],[encode({a:'x'}),false],[new Uint8Array([0xff]),false]]);
 probe('.cborseq','s = [* int]\nr = bstr .cborseq s','r',[[new Uint8Array([1,2,3]),true],[new Uint8Array([0x61,0x61]),false]],'cborseq of items matched against array');
-probe('.default (annotation)','r = { ? n: uint .default 5 }','r',[[{},true],[{n:3},true],[{n:'x'},false]]);
+probe('.default (implied .ne, D359)','r = { ? n: uint .default 5 }','r',[[{},true],[{n:3},true],[{n:5},false],[{n:'x'},false]]);
 probe('.cat / .det (RFC 9165)','r = "a" .cat "b"','r',[['ab',true],['a',false]]);
 probe('.plus (RFC 9165)','r = 1 .plus 2','r',[[3,true],[2,false]]);
 probe('.abnf (RFC 9165)','r = tstr .abnf ("x" .det rules)\nrules = \'x = 1*3DIGIT\'','r',[['12',true],['1234',false]]);

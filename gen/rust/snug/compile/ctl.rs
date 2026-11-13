@@ -185,11 +185,40 @@ pub(crate) fn bits_pass(h: &[i32], bid: i32, mask: i32) -> bool {
 pub(crate) fn target_error(h: &mut [i32], pos: i32) -> i32 {
     return fail(h, ERR_CONTROL_TARGET, pos);
 }
+pub(crate) fn int_controller(h: &mut [i32], ts: i32) -> i32 {
+    // A .size / .bits controller as one INT leaf: its single INT leaf, or the
+    // union of its INT leaves' intervals (D363: a range admits bignums by value
+    // and a literal does not, so `0 / 4..7` is two leaves; as a controller only the
+    // numbers count). -1 when ts holds anything else.
+    let l: i32 = single_leaf(h, ts);
+    if l >= 0 {
+        return l;
+    }
+    if ts_n(h, ts) <= 1 {
+        return -1;
+    }
+    vtrunc(h, T_IVA, 0);
+    for i in 0..ts_n(h, ts) {
+        let li: i32 = ts_leaf(h, ts, i);
+        if lk(h, li) != K_INT {
+            return -1;
+        }
+        iv_load(h, T_IVA, ld(h, li, 0), ld(h, li, 1));
+    }
+    if iv_normalize(h, T_IVA, T_IVB) < 0 {
+        return -1;
+    }
+    let m: i32 = mk_int_from(h, T_IVB, 0);
+    if m < 0 {
+        return -1;
+    }
+    return m;
+}
 pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, ranged: i32, pos: i32) -> i32 {
     // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
     // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
     // `uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.
-    let cl: i32 = single_leaf(h, ctl);
+    let cl: i32 = int_controller(h, ctl);
     let from: i32 = vlen(h, T_STK);
     if (cl < 0) || (lk(h, cl) != K_INT) {
         return fail(h, ERR_CONTROL_VALUE, pos);
@@ -253,7 +282,7 @@ pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, ranged: i32, pos: i32) -> 
     return ts_make(h, from);
 }
 pub fn ctl_bits(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
-    let cl: i32 = single_leaf(h, ctl);
+    let cl: i32 = int_controller(h, ctl);
     let from: i32 = vlen(h, T_STK);
     let mut bhi: i32 = 0;
     let mut blo: i32 = 0;
@@ -763,6 +792,38 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
     }
     return ts_make(h, from);
 }
+pub(crate) fn simple_eq(h: &mut [i32], t: i32, v: i32, ne: i32) {
+    // D359: one simple value v (`false`, `null`, ...) as the controller of .eq
+    // (ne 0) / .ne (ne 1) on target leaf t, a SIMPLE range or a leaf that admits
+    // no simple value: the matching SIMPLE ranges, or t itself, pushed on T_STK.
+    if lk(h, t) != K_SIMPLE {
+        if ne == 1 {
+            vpush1(h, T_STK, t);
+        }
+        return;
+    }
+    let lo: i32 = ld(h, t, 0);
+    let hi: i32 = ld(h, t, 1);
+    if ne == 0 {
+        if (lo <= v) && (v <= hi) {
+            let s0: i32 = mk_simple_range(h, v, v);
+            vpush1(h, T_STK, s0);
+        }
+        return;
+    }
+    if (v < lo) || (v > hi) {
+        vpush1(h, T_STK, t);
+        return;
+    }
+    if lo < v {
+        let s1: i32 = mk_simple_range(h, lo, v - 1);
+        vpush1(h, T_STK, s1);
+    }
+    if v < hi {
+        let s2: i32 = mk_simple_range(h, v + 1, hi);
+        vpush1(h, T_STK, s2);
+    }
+}
 pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
     // ne 0: .eq; ne 1: .ne.
     let from: i32 = vlen(h, T_STK);
@@ -909,6 +970,8 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
             if ne == 1 {
                 vpush1(h, T_STK, t);
             }
+        } else if ((lk(h, cl) == K_SIMPLE) && (ld(h, cl, 0) == ld(h, cl, 1))) && ((lk(h, t) == K_SIMPLE) || ((leaf_mask(h, t) & 128) == 0)) {
+            simple_eq(h, t, ld(h, cl, 0), ne);
         } else {
             // A composite controller: .eq is an AND; .ne has no lowering.
             if ne == 1 {

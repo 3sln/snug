@@ -32,7 +32,7 @@
                                         ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_SYNTAX ERR_TAG ERR_MAJOR
                                         ERR_PROFILE ERR_LIM_INST ERR_LIM_NESTING
                                         H_R0 H_R1 H_R2 H_R3 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
-                                        H_N_INST H_PROFILE H_WORK_AT H_PMODE
+                                        H_N_INST H_PROFILE H_WORK_AT H_PMODE H_DEFAULT
                                         T_ENV T_HENV T_MEMO T_HMEMO T_CON T_HCON T_WORK T_ASTK T_STK
                                         T_LITB T_SRC T_PSTK T_GSTACK T_LSTK T_MAP T_ARR T_TMP2 T_IV
                                         T_EXTARG H_EXT_FLAGS]]
@@ -474,7 +474,14 @@
     (if (>= code 19) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
     (let [^I32 target (lower-type h (na h node) env)]
       (if (< target 0) (return (neg 1)))
-      (if (or (== code 14) (== code 15)) (return target))
+      (comment "D359: .default carries RFC 8610 §3.8.6's implied .ne (a value equal to the"
+               "default is not written out, so it does not match) unless the compile option"
+               "makes it an annotation; .feature is an annotation.")
+      (if (or (== code 15) (and (== code 14) (!= (hg h H_DEFAULT) 0))) (return target))
+      (if (== code 14)
+        (do (let [^I32 dctl (lower-type h (nb h node) env)]
+              (if (< dctl 0) (return (neg 1)))
+              (return (ctl-eq h target dctl 1 pos)))))
       (if (or (== code 12) (== code 13))
         (do (if (and (== code 13) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
             (comment "RFC 8610 §3.8.4: a .cborseq controller is an array type describing"

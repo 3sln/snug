@@ -628,8 +628,18 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
     if target < 0 {
         return -1;
     }
-    if (code == 14) || (code == 15) {
+    // D359: .default carries RFC 8610 §3.8.6's implied .ne (a value equal to the
+    // default is not written out, so it does not match) unless the compile option
+    // makes it an annotation; .feature is an annotation.
+    if (code == 15) || ((code == 14) && (hg(h, H_DEFAULT) != 0)) {
         return target;
+    }
+    if code == 14 {
+        let dctl: i32 = lower_type(h, nb(h, node), env);
+        if dctl < 0 {
+            return -1;
+        }
+        return ctl_eq(h, target, dctl, 1, pos);
     }
     if (code == 12) || (code == 13) {
         if (code == 13) && (hg(h, H_PROFILE) > 0) {

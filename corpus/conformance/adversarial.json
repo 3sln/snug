@@ -3341,7 +3341,7 @@
   },
   {
    "category": "controls",
-   "name": "feature and default are annotations",
+   "name": "feature is an annotation; default implies .ne (D359)",
    "cddl": "r = (uint .default 3) .feature \"test-feature\"",
    "cases": [
     {
@@ -3352,7 +3352,8 @@
     {
      "rule": "r",
      "hex": "03",
-     "expect": true
+     "expect": false,
+     "note": "RFC 8610 3.8.6: .default's implied .ne"
     },
     {
      "rule": "r",

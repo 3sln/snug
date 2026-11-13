@@ -750,6 +750,15 @@ fn p916_warnings_cut_subcode_and_root_reexports() {
     assert_eq!((e.reason, e.subcode), ("value", Some("cut")));
     let branch = Schema::compile(text, &CompileOptions { cuts: snug::Cuts::Branch, ..Default::default() }).unwrap();
     branch.validate(&kind_b, "r", &mut scratch).unwrap();
+    // D359: .default carries the implied .ne unless DefaultControl::Annotation
+    let dtext = "r = { ? n: uint .default 5 }";
+    let n5 = unhex("a1616e05");
+    let ne = Schema::compile(dtext, &CompileOptions::default()).unwrap();
+    assert_eq!(ne.validate(&n5, "r", &mut scratch).unwrap_err().reason, "range");
+    ne.validate(&unhex("a1616e04"), "r", &mut scratch).unwrap();
+    let ann = Schema::compile(dtext, &CompileOptions { default_control: snug::DefaultControl::Annotation, ..Default::default() }).unwrap();
+    ann.validate(&n5, "r", &mut scratch).unwrap();
+    assert_ne!(ne.program().source_key(), ann.program().source_key());
     // an ordinary wrong value has no subcode
     let plain = Schema::compile("r = { a: \"x\" }", &CompileOptions::default()).unwrap();
     let e = plain.validate(&unhex("a161616179"), "r", &mut scratch).unwrap_err();
