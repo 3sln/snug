@@ -7318,7 +7318,15 @@ shared machine):
 - `sequence-test`: ok, with 761,112 JS runs and JS == Rust 184,556.
 - `rust-api-test full`: ok.
 - `node-oldest`: ok on Node 20, 1503/1503.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). Merged at `804acdb` onto the
+  tree it was gated on (`f63a106`). On main: drift ok, size ok, no
+  conflict markers.
+  - The 2026-11-12 failure was a racy test: the pool budget is shared
+    across test files. The zero-fill itself is synchronous in `acquire()`.
+  - The one real sharing path, closing a session from inside its own step
+    (JS only, needs host code that breaks the predicate rule), is fixed,
+    with deterministic regressions and a randomized handout property test.
+  - Rust and the wasm SDK are not affected.
 
 ## Findings
 
