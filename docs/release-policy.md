@@ -722,6 +722,9 @@ needs a stamped build. It checks:
 - that an npm `git+file://…#v0.1.0` install equals the tarball's file list
   and validates;
 - that `#semver:` resolves to the dist commit;
+- that the `wasm-sdk/` tree equals the `@3sln/snug-wasm` tarball, and
+  that it packs, installs and validates (the pnpm subdirectory install
+  itself is not run);
 - that a cargo `git` + `tag` dependency builds and validates;
 - that a probe Go module resolves through `go/v0.1.0`.
 

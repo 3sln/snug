@@ -10330,7 +10330,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - Done (D344): Node ≥ 20 and Rust ≥ 1.87. `bb gates node-oldest msrv`,
     both in the release set. The npm suite now runs every test file, and
     the Unicode tests tolerate a newer Node ICU.
-- [ ] **P9.19 — Git-source consumers** (O3). Design and validate locally:
+- [x] **P9.19 — Git-source consumers** (O3). Design and validate locally:
   - an orphan `dist` branch of stamped, built trees, one commit per
     release;
   - tags on those commits, plus Go-style subdirectory tags where needed;
@@ -10388,7 +10388,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - The remote exists now (`origin`, private). Nothing is pushed by
     engineers or the manager; the `dist` branch is built and validated
     locally only.
-  - **Results (2026-11-12): awaiting decisions, D346.**
+  - **Results (2026-11-12; D346 decided, see there).**
     - **Design:** release-policy §9.
     - **Tool:** `bb dist`, which runs `kin/scripts/dist.mjs`.
       - It builds the commit from the release artefacts: npm tarball at
@@ -10411,6 +10411,30 @@ can run alongside them; its build work is post-RC unless it is cheap.
       - a cargo `git` + `tag` dependency builds and validates;
       - a probe Go module resolves through `go/v0.1.0`.
       - Done by hand: 0.1.1 chained as a child, and a pin on v0.1.0 holds.
+      - **Landing run** (2026-11-12, on a stamped build of main
+        `a004cbc` at 0.1.0, made by the §4 step 5 route in a detached
+        worktree and never committed). The build gave the npm tarball, the
+        `snug-cbor-0.1.0.crate`, and `bb wasm-release` with the P9.17 package
+        build for `@3sln/snug-wasm`. `bb dist-test` passed every check:
+        - reproducible commit `3332e7e46184`;
+        - npm `#v0.1.0` gives the tarball's 120 files and validates;
+        - `#semver:` reaches the dist commit;
+        - the dist `wasm-sdk/` matches the SDK tarball's 94 files, and
+          it packs, installs, runs `init()` and validates;
+        - cargo `git` + `tag` builds and validates;
+        - the Go probe resolves through `go/v0.1.0`.
+      - Not run: the pnpm `#v0.1.0&path:/wasm-sdk` install itself. pnpm is
+        only a corepack shim here, and it would download.
+      - `dist.mjs` now requires `version.edn` and its `:placeholder`, with
+        comments stripped before matching. It refuses a source commit
+        without the file (checked on `b4fb762`) and a placeholder-version
+        tarball (checked).
+      - Gates on the rebased branch: drift, check and `bb gates --check`
+        ok. `npm test` passed 1500/1500 on the second run. On the first run,
+        one test failed: sessions.test.mjs "pooled arrays are zeroed before
+        reuse", with "the pooled entry is reused". It passed 3/3 alone and in
+        the full rerun. The branch does not touch host/js. This is a
+        flake for the P9.13 review.
     - **Learnt:** `dist/vX.Y.Z` beside a source `vX.Y.Z` sends npm's
       `#semver:` to the source commit, and the install fails. npm also
       needs the remote HEAD to exist. Neither can be checked offline:

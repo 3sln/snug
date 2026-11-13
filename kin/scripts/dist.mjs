@@ -87,8 +87,11 @@ function main(o) {
   // The source commit, and the placeholder it declares.
   const src = run('git', ['-C', o.sourceRepo, 'rev-parse', '--verify', `${o.source}^{commit}`]);
   const [name, email, date] = run('git', ['-C', o.sourceRepo, 'show', '-s', '--format=%cn%x00%ce%x00%cI', src]).split('\0');
+  // version.edn (D343) is `{:version "…" :placeholder "…"}` under `;;` comments.
   const edn = run('git', ['-C', o.sourceRepo, 'show', `${src}:version.edn`], { allowFail: true });
-  const placeholder = edn?.match(/:placeholder\s+"([^"]+)"/)?.[1];
+  if (edn === null) fail(`${src} has no version.edn: a release commit declares its placeholder there (D343)`);
+  const placeholder = edn.replace(/;.*$/gm, '').match(/:placeholder\s+"([^"]+)"/)?.[1];
+  if (!placeholder) fail(`${src}:version.edn has no :placeholder "…"`);
   if (version === placeholder) fail(`${version} is version.edn's placeholder: build from a stamped tree (bb stamp)`);
 
   // The tree.

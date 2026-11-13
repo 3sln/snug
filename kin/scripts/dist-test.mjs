@@ -9,6 +9,10 @@
 //   determinism  two builds give the same commit and tag objects; a rebuild is refused
 //   npm          git+file://…#v<version> installs exactly the npm tarball's files and
 //                validates; #semver:<version> resolves to the dist commit
+//   wasm-sdk     (when the release has the @3sln/snug-wasm tarball) the dist tag's wasm-sdk/
+//                equals the tarball, and that tree packs, installs and validates. The
+//                git-subdirectory install itself (pnpm `#v<version>&path:/wasm-sdk`) is not run:
+//                npm cannot do it, and pnpm is not assumed installed (corepack would download it).
 //   cargo        git = "file://…", tag = "v<version>" builds and validates
 //   go           github.com/3sln/snug/go@v<version> via the go/v<version> tag (a probe module;
 //                git's url.insteadOf maps the GitHub URL to the scratch repository)
@@ -97,6 +101,30 @@ else bad('go/ tag', 'missing or elsewhere');
   const s = sh('npm', ['install', '--no-audit', '--no-fund', '--cache', cache, `git+${url}#semver:${version}`], { cwd: dir2 });
   const lock = s.status === 0 ? sh('grep', ['-o', `#[0-9a-f]\\{40\\}`, join(dir2, 'package-lock.json')]).out : '';
   if (lock === `#${pcommit}`) ok('npm #semver', 'resolves to the dist commit'); else bad('npm #semver', s.err || lock);
+}
+
+// wasm-sdk
+const wasmTgz = `3sln-snug-wasm-${version}.tgz`;
+if (!readdirSync(release).includes(wasmTgz)) skip('wasm-sdk', `no ${wasmTgz} in the release`);
+else {
+  const clone = join(work, 'clone');
+  sh('git', ['clone', '-q', '--branch', tag, url, clone]);
+  const tree = sh('find', ['.', '-type', 'f'], { cwd: join(clone, 'wasm-sdk') }).out.split('\n').map(f => f.slice(2)).sort();
+  const packed = sh('tar', ['-tzf', join(release, wasmTgz)]).out.split('\n').map(f => f.slice(8)).sort();
+  if (JSON.stringify(tree) !== JSON.stringify(packed)) bad('wasm-sdk tree', 'dist wasm-sdk/ != the @3sln/snug-wasm tarball');
+  else ok('wasm-sdk tree', `${tree.length} files == the @3sln/snug-wasm tarball`);
+  const dir = join(work, 'npm-wasm'), cache = join(work, 'npm-cache');
+  write(join(dir, 'package.json'), '{"name":"consumer3","private":true,"type":"module"}\n');
+  const pack = sh('npm', ['pack', '--cache', cache, '--pack-destination', dir, join(clone, 'wasm-sdk')], { cwd: dir });
+  const i = pack.status === 0 && sh('npm', ['install', '--offline', '--no-audit', '--no-fund', '--cache', cache, `./${pack.out.split('\n').pop()}`], { cwd: dir });
+  if (!i || i.status !== 0) bad('wasm-sdk install', (i && i.err) || pack.err);
+  else {
+    write(join(dir, 'check.mjs'), "import { init, encode } from '@3sln/snug-wasm';\nimport { compile } from '@3sln/snug-wasm/compile';\n" +
+      "await init();\nconst s = await compile('message = { id: uint }');\nconst r = s.validate(encode(new Map([['id', 7]])), 'message');\n" +
+      "if (!r.ok) throw new Error(JSON.stringify(r));\nconsole.log('ok');\n");
+    const run = sh('node', ['check.mjs'], { cwd: dir });
+    if (run.out === 'ok') ok('wasm-sdk consumer validates', 'packed from the dist tree'); else bad('wasm-sdk consumer validates', run.err || run.out);
+  }
 }
 
 // cargo
